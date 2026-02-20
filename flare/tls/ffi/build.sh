@@ -33,6 +33,9 @@ _needs_rebuild() {
 
 if ! _needs_rebuild; then
     export FLARE_LIB="$TARGET"
+    if [[ "$(uname)" != "Darwin" ]]; then
+        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
+    fi
     return 0 2>/dev/null || true
 fi
 
@@ -85,3 +88,13 @@ fi
 # any `pixi run …` child process. This avoids the need for `pathlib.Path.exists()`
 # in Mojo (which caused a runtime crash on Linux x86_64).
 export FLARE_LIB="$TARGET"
+
+# ── Preload on Linux so Mojo's JIT can call into the library ──────────────────
+# Mojo's LLVM JIT crashes on Linux when calling functions obtained via
+# OwnedDLHandle.get_function() into a freshly-dlopen'd shared library.
+# Pre-mapping the library at process startup (via LD_PRELOAD) avoids this:
+# the code pages are already present before the JIT runs, so indirect calls
+# through function pointers work correctly.  macOS does not have this issue.
+if [[ "$(uname)" != "Darwin" ]]; then
+    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
+fi

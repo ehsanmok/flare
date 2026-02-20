@@ -300,11 +300,14 @@ struct RawSocket(Movable):
     fn set_nonblocking(self, enabled: Bool) raises:
         """Toggle non-blocking mode on the socket.
 
-        Delegates to ``flare_set_nonblocking`` in ``libflare_tls.so``, which
-        calls ``fcntl(F_GETFL)`` / ``fcntl(F_SETFL)`` from C.  The C helper
-        avoids a Mojo ABI bug where ``external_call`` silently corrupts the
-        third argument of variadic C functions (like ``fcntl``) when called
-        across a Mojo function boundary.
+        On macOS/arm64 delegates to ``flare_set_nonblocking`` in
+        ``libflare_tls.so`` to avoid a Mojo ABI bug where ``external_call``
+        silently corrupts the third argument of variadic C functions (like
+        ``fcntl``) on that platform.
+
+        On Linux, calls ``fcntl`` directly via ``external_call``.
+        ``OwnedDLHandle.get_function`` crashes on Linux when calling into a
+        freshly-loaded shared library.
 
         Args:
             enabled: ``True`` to enable non-blocking I/O; ``False`` to restore
@@ -313,14 +316,27 @@ struct RawSocket(Movable):
         Raises:
             NetworkError: If the underlying ``fcntl(F_SETFL)`` call fails.
         """
-        var lib = OwnedDLHandle(_find_flare_lib())
-        var fn_nb = lib.get_function[fn(c_int, c_int) -> c_int](
-            "flare_set_nonblocking"
-        )
-        var rc = fn_nb(self.fd, c_int(1) if enabled else c_int(0))
-        if rc < c_int(0):
-            var e = get_errno()
-            raise NetworkError(_os_error("fcntl F_SETFL"), Int(e.value))
+
+        @parameter
+        if CompilationTarget.is_macos():
+            var lib = OwnedDLHandle(_find_flare_lib())
+            var fn_nb = lib.get_function[fn(c_int, c_int) -> c_int](
+                "flare_set_nonblocking"
+            )
+            var rc = fn_nb(self.fd, c_int(1) if enabled else c_int(0))
+            if rc < c_int(0):
+                var e = get_errno()
+                raise NetworkError(_os_error("fcntl F_SETFL"), Int(e.value))
+        else:
+            var flags = _fcntl2(self.fd, F_GETFL, c_int(0))
+            if flags < c_int(0):
+                var e = get_errno()
+                raise NetworkError(_os_error("fcntl F_GETFL"), Int(e.value))
+            var new_flags = flags | O_NONBLOCK if enabled else flags & ~O_NONBLOCK
+            var rc = _fcntl2(self.fd, F_SETFL, new_flags)
+            if rc < c_int(0):
+                var e = get_errno()
+                raise NetworkError(_os_error("fcntl F_SETFL"), Int(e.value))
 
     # ── Local / peer address ──────────────────────────────────────────────────
 

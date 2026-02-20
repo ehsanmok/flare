@@ -9,10 +9,12 @@ Design rules enforced here:
 - ``write`` retries transparently on ``EINTR``.
 - ``write_all`` loops until every byte is sent.
 - ``read`` returning 0 means EOF — it is never converted to an error.
-- ``connect_timeout`` delegates to ``flare_connect_timeout`` in
-  ``libflare_tls.so``, which does non-blocking connect + ``poll(POLLOUT)``
-  + ``getsockopt(SO_ERROR)`` entirely in C, sidestepping a Mojo ABI bug
-  with variadic functions on macOS/arm64.
+- ``connect_timeout`` on macOS/arm64 delegates to ``flare_connect_timeout``
+  in ``libflare_tls.so`` to sidestep a Mojo ABI bug with variadic functions
+  (e.g. ``fcntl``) on that platform.  On Linux, ``connect_timeout`` calls
+  ``fcntl`` / ``connect`` / ``poll`` / ``getsockopt`` directly via
+  ``external_call`` — ``OwnedDLHandle.get_function`` crashes on Linux when
+  calling into a freshly-loaded shared library.
 """
 
 from ffi import (
@@ -24,7 +26,8 @@ from ffi import (
     get_errno,
     ErrNo,
 )
-from memory import alloc
+from memory import alloc, stack_allocation
+from sys.info import CompilationTarget
 
 from ..net import (
     SocketAddr,
@@ -50,9 +53,19 @@ from ..net._libc import (
     _send,
     _shutdown,
     _strerror,
+    _fcntl2,
+    _poll,
+    _getsockopt,
     MSG_NOSIGNAL,
     SHUT_RD,
     SHUT_WR,
+    F_GETFL,
+    F_SETFL,
+    O_NONBLOCK,
+    SOL_SOCKET,
+    SO_ERROR,
+    POLLOUT,
+    POLLFD_SIZE,
 )
 
 
@@ -158,18 +171,16 @@ struct TcpStream(Movable):
     fn connect_timeout(addr: SocketAddr, timeout_ms: Int) raises -> TcpStream:
         """Open a TCP connection, failing if it takes longer than ``timeout_ms``.
 
-        Delegates the non-blocking connect + ``poll(POLLOUT)`` +
-        ``getsockopt(SO_ERROR)`` sequence to ``flare_connect_timeout`` in
-        ``libflare_tls.so``.  Using a C helper avoids a Mojo ABI bug where
-        ``external_call`` silently corrupts variadic-function arguments (like
-        the third argument of ``fcntl``) when they cross a Mojo function
-        boundary on macOS/arm64.
+        On macOS/arm64 this delegates to ``flare_connect_timeout`` in
+        ``libflare_tls.so`` to avoid a Mojo ABI bug where ``external_call``
+        silently corrupts variadic-function arguments (e.g. the third argument
+        of ``fcntl``) on that platform.
 
-        ``flare_connect_timeout`` returns:
-        - ``0``  on success,
-        - ``-1`` if ``fcntl`` or ``getsockopt`` failed (errno set),
-        - ``-2`` if the poll deadline expired (timeout),
-        - positive errno value on connect failure.
+        On Linux, the non-blocking connect + ``poll(POLLOUT)`` +
+        ``getsockopt(SO_ERROR)`` sequence is implemented directly via
+        ``external_call``.  ``OwnedDLHandle.get_function`` crashes on Linux
+        when calling into a freshly-loaded shared library, so the C helper
+        cannot be used there.
 
         Args:
             addr:       The remote socket address.
@@ -191,28 +202,102 @@ struct TcpStream(Movable):
         var sock = RawSocket(AF_INET, SOCK_STREAM)
         var sa = _build_sockaddr_in(addr)
 
-        var lib = OwnedDLHandle(_find_flare_lib())
-        var fn_ct = lib.get_function[fn(c_int, Int, c_uint, c_int) -> c_int](
-            "flare_connect_timeout"
-        )
-        var rc = fn_ct(sock.fd, Int(sa[0]), sa[1], c_int(timeout_ms))
-        sa[0].free()
+        @parameter
+        if CompilationTarget.is_macos():
+            # macOS/arm64: use C helper to avoid Mojo variadic fcntl ABI bug.
+            var lib = OwnedDLHandle(_find_flare_lib())
+            var fn_ct = lib.get_function[fn(c_int, Int, c_uint, c_int) -> c_int](
+                "flare_connect_timeout"
+            )
+            var rc = fn_ct(sock.fd, Int(sa[0]), sa[1], c_int(timeout_ms))
+            sa[0].free()
 
-        if rc == c_int(-2):
-            raise ConnectionTimeout(String(addr), timeout_ms)
-        if rc != c_int(0):
+            if rc == c_int(-2):
+                raise ConnectionTimeout(String(addr), timeout_ms)
+            if rc != c_int(0):
+                var s = String(addr)
+                var rc_int = Int(rc)
+                if rc_int == Int(ErrNo.ECONNREFUSED.value):
+                    raise ConnectionRefused(s, rc_int)
+                if rc_int == Int(ErrNo.ETIMEDOUT.value):
+                    raise ConnectionTimeout(s, rc_int)
+                if rc_int == -1:
+                    var e = get_errno()
+                    raise NetworkError(
+                        _strerror(e.value) + " (connect " + s + ")", Int(e.value)
+                    )
+                raise NetworkError(_strerror(rc) + " (connect " + s + ")", rc_int)
+        else:
+            # Linux: implement directly — OwnedDLHandle.get_function crashes
+            # on Linux when calling into a freshly dlopen'd shared library.
             var s = String(addr)
-            var rc_int = Int(rc)
-            if rc_int == Int(ErrNo.ECONNREFUSED.value):
-                raise ConnectionRefused(s, rc_int)
-            if rc_int == Int(ErrNo.ETIMEDOUT.value):
-                raise ConnectionTimeout(s, rc_int)
-            if rc_int == -1:
+
+            # 1. Save current socket flags and enable non-blocking mode.
+            var flags = _fcntl2(sock.fd, F_GETFL, c_int(0))
+            if flags < c_int(0):
+                sa[0].free()
                 var e = get_errno()
                 raise NetworkError(
-                    _strerror(e.value) + " (connect " + s + ")", Int(e.value)
+                    _strerror(e.value) + " (fcntl F_GETFL)", Int(e.value)
                 )
-            raise NetworkError(_strerror(rc) + " (connect " + s + ")", rc_int)
+            _ = _fcntl2(sock.fd, F_SETFL, flags | O_NONBLOCK)
+
+            # 2. Initiate the non-blocking connect.
+            var rc = _connect(sock.fd, sa[0], sa[1])
+            var connect_errno = get_errno()  # capture before free() touches errno
+            sa[0].free()
+
+            if rc == c_int(0):
+                # Immediate success (common on loopback).
+                _ = _fcntl2(sock.fd, F_SETFL, flags)
+            elif connect_errno != ErrNo.EINPROGRESS:
+                # Hard error before the connection even started.
+                _ = _fcntl2(sock.fd, F_SETFL, flags)
+                if connect_errno == ErrNo.ECONNREFUSED:
+                    raise ConnectionRefused(s, Int(connect_errno.value))
+                if connect_errno == ErrNo.ETIMEDOUT:
+                    raise ConnectionTimeout(s, Int(connect_errno.value))
+                raise NetworkError(
+                    _strerror(connect_errno.value) + " (connect " + s + ")",
+                    Int(connect_errno.value),
+                )
+            else:
+                # 3. EINPROGRESS: wait for the socket to become writable.
+                var pfd = stack_allocation[Int(POLLFD_SIZE), UInt8]()
+                for i in range(Int(POLLFD_SIZE)):
+                    (pfd + i).init_pointee_copy(0)
+                pfd.bitcast[c_int]().init_pointee_copy(sock.fd)
+                (pfd + 4).bitcast[Int16]().init_pointee_copy(Int16(POLLOUT))
+
+                var nready = _poll(pfd, c_uint(1), c_int(timeout_ms))
+                if nready == c_int(0):
+                    _ = _fcntl2(sock.fd, F_SETFL, flags)
+                    raise ConnectionTimeout(s, timeout_ms)
+                if nready < c_int(0):
+                    var e = get_errno()
+                    _ = _fcntl2(sock.fd, F_SETFL, flags)
+                    raise NetworkError(_strerror(e.value) + " (poll)", Int(e.value))
+
+                # 4. Check SO_ERROR for deferred connection errors.
+                var so_err = stack_allocation[1, c_int]()
+                so_err.init_pointee_copy(c_int(0))
+                var so_len = stack_allocation[1, c_uint]()
+                so_len.init_pointee_copy(c_uint(4))
+                _ = _getsockopt(
+                    sock.fd, SOL_SOCKET, SO_ERROR,
+                    so_err.bitcast[UInt8](), so_len,
+                )
+                _ = _fcntl2(sock.fd, F_SETFL, flags)
+                var err_val = Int(so_err.load())
+                if err_val != 0:
+                    if err_val == Int(ErrNo.ECONNREFUSED.value):
+                        raise ConnectionRefused(s, err_val)
+                    if err_val == Int(ErrNo.ETIMEDOUT.value):
+                        raise ConnectionTimeout(s, err_val)
+                    raise NetworkError(
+                        _strerror(c_int(err_val)) + " (connect " + s + ")",
+                        err_val,
+                    )
 
         sock.set_tcp_nodelay(True)
         return TcpStream(sock^, addr)
