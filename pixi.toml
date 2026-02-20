@@ -1,0 +1,74 @@
+[workspace]
+authors = ["ehsanmok <ehsanmok@users.noreply.github.com>"]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "flare"
+platforms = ["osx-arm64", "linux-aarch64", "linux-64"]
+version = "0.0.1"
+preview = ["pixi-build"]
+
+[activation]
+# Auto-build TLS FFI wrapper on environment activation (idempotent).
+# Requires OpenSSL from conda-forge (declared in [dependencies]).
+scripts = ["flare/tls/ffi/build.sh"]
+
+[dependencies]
+mojo             = "<1.0.0"
+openssl          = ">=3.6.1,<4"    # TLS: libssl + libcrypto (SHA-1 for WS handshake)
+ca-certificates  = ">=2025.1.31"   # TLS default CA bundle → $CONDA_PREFIX/ssl/cacert.pem
+zlib             = ">=1.3.1,<2"    # HTTP: Content-Encoding gzip/deflate decompression
+mojson           = { git = "https://github.com/ehsanmok/mojson.git", branch = "main" }
+
+[feature.dev.dependencies]
+gxx      = ">=13"    # g++ for Linux (macOS uses system clang++ from Xcode CLT)
+mojodoc  = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
+
+[environments]
+default = { features = ["dev"], solve-group = "default" }
+
+[tasks]
+# ── Tests (mojson-style flat files) ───────────────────────────────────────────
+# Each task runs a single test file; use 'pixi run tests' to run all.
+test-net         = "mojo -I . tests/test_net.mojo"          # Phase 1 — 57 tests
+test-dns         = "mojo -I . tests/test_dns.mojo"          # Phase 2 — 17 tests
+test-tcp         = "mojo -I . tests/test_tcp.mojo"          # Phase 3 — 19 tests
+test-udp         = "mojo -I . tests/test_udp.mojo"          # Phase 4 — 10 tests
+test-tls         = "mojo -I . tests/test_tls.mojo"          # Phase 5 — 16 tests
+test-http        = "mojo -I . tests/test_http.mojo"         # Phase 6 — 36 tests
+test-ws          = "mojo -I . tests/test_ws.mojo"           # Phase 7 — 30 tests
+test-ergonomics  = "mojo -I . tests/test_ergonomics.mojo"   # Phase 8 — ergonomics
+
+tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo" }
+
+# ── Examples (mojson-style: runnable + tested as part of 'pixi run tests') ────
+example-addresses  = "mojo -I . examples/01_addresses.mojo"
+example-dns        = "mojo -I . examples/02_dns_resolution.mojo"
+example-errors     = "mojo -I . examples/03_error_handling.mojo"
+example-tcp        = "mojo -I . examples/04_tcp_echo.mojo"
+example-http       = "mojo -I . examples/05_http_get.mojo"
+example-ws         = "mojo -I . examples/06_websocket_echo.mojo"
+example-ergonomics = "mojo -I . examples/07_ergonomics.mojo"    # Phase 8 high-level API
+
+examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo" }
+
+# ── Benchmarks ────────────────────────────────────────────────────────────────
+# bench-parse:   IP parsing + DNS resolution throughput (confirms SIMD NOT useful here)
+# bench-ws-mask: WebSocket XOR masking scalar vs SIMD (confirms SIMD IS useful here)
+# bench-http:    HTTP request throughput (stub — requires HttpClient impl)
+# bench-tcp:     TCP throughput (stub — requires socket FFI impl)
+bench-parse   = "mojo -I . benchmark/bench_parse.mojo"
+bench-ws-mask = "mojo -I . benchmark/bench_ws_mask.mojo"
+bench-http    = "mojo -I . benchmark/bench_http.mojo"
+bench-tcp     = "mojo -I . benchmark/bench_tcp.mojo"
+
+# Run all available benchmarks
+bench = { cmd = "mojo -I . benchmark/bench_parse.mojo && mojo -I . benchmark/bench_ws_mask.mojo && mojo -I . benchmark/bench_http.mojo" }
+
+# ── Docs (powered by mojodoc) ─────────────────────────────────────────────────
+# docs:       build + serve at http://localhost:3000/flare/ (blocks terminal)
+# docs-build: build static HTML → target/doc/ (for CI / GitHub Pages)
+docs       = "mojodoc ./flare --open"
+docs-build = "mojodoc ./flare --out-dir target/doc --base-url /flare/"
+
+# ── Format ────────────────────────────────────────────────────────────────────
+format       = "mojo format flare tests benchmark examples"
+format-check = "bash -c 'mojo format flare tests benchmark examples && git diff --exit-code || (echo \"Run pixi run format to fix.\" && exit 1)'"

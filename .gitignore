@@ -1,0 +1,22 @@
+# Pixi
+.pixi/
+*.lock
+
+# Mojo build artifacts
+__pycache__/
+*.pyc
+.mojo_cache/
+.mogg_cache/
+
+# FFI build output (produced by activation script → build/)
+build/
+# Docs
+target/
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.cursor/
+.agents/
