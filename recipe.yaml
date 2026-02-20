@@ -1,0 +1,77 @@
+# rattler-build recipe for flare
+# Builds the flare Mojo package and its OpenSSL TLS FFI wrapper for distribution.
+#
+# mojson is not yet published to any conda channel, so its source is pulled
+# directly from GitHub and built inline (simdjson FFI + mojopkg) before
+# flare itself is packaged. Once mojson is published to a channel, replace
+# the inline build with a proper host/run dependency.
+
+context:
+  name: flare
+  version: "0.0.1"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  # flare source
+  - path: .
+  # mojson source (inlined because mojson is not yet in any conda channel)
+  - git: https://github.com/ehsanmok/mojson.git
+    target_directory: mojson-src
+    branch: main
+
+build:
+  script:
+    - mojo --version
+    # ── mojson: simdjson FFI wrapper ──────────────────────────────────────────
+    - $CXX -O3 -std=c++17 -fPIC -DNDEBUG -shared
+        -o $PREFIX/lib/libsimdjson_wrapper.so
+        mojson-src/mojson/cpu/simdjson_ffi/simdjson_wrapper.cpp
+        -I$PREFIX/include
+        -L$PREFIX/lib
+        -lsimdjson
+    # ── mojson: package (needed before flare can compile) ────────────────────
+    - mojo package mojson-src/mojson -o $PREFIX/lib/mojo/mojson.mojopkg
+    # ── flare: OpenSSL TLS FFI wrapper ───────────────────────────────────────
+    - mkdir -p $PREFIX/lib
+    - $CXX -O2 -std=c++17 -fPIC -DNDEBUG -shared
+        -o $PREFIX/lib/libflare_tls.so
+        flare/tls/ffi/openssl_wrapper.cpp
+        -I$PREFIX/include
+        -L$PREFIX/lib
+        -lssl -lcrypto
+        -Wl,-rpath,$PREFIX/lib
+    # ── flare: package (resolves `from mojson import ...` via -I) ────────────
+    - mojo package flare -o $PREFIX/lib/mojo/flare.mojopkg -I $PREFIX/lib/mojo
+
+requirements:
+  build:
+    - mojo-compiler
+    - ${{ compiler('cxx') }}
+    - git   # needed to clone mojson source
+  host:
+    - mojo-compiler
+    - openssl >=3.0,<4
+    - ca-certificates
+    - simdjson >=4.2.4,<5   # mojson's simdjson FFI wrapper
+  run:
+    - openssl >=3.0,<4
+    - ca-certificates
+    - simdjson >=4.2.4,<5   # libsimdjson_wrapper.so is loaded at runtime by mojson
+
+about:
+  homepage: https://github.com/ehsanmok/flare
+  license: MIT
+  summary: Async-ready networking library for Mojo — TCP, UDP, TLS, HTTP and WebSocket
+  description: |
+    flare is a networking library for Mojo providing:
+    - IP/socket address types (IPv4, IPv6, dual-stack)
+    - DNS resolution (A/AAAA records via getaddrinfo)
+    - TCP streams with connect-timeout support
+    - UDP sockets (unicast and broadcast)
+    - TLS 1.2+ streams via OpenSSL FFI (forward-secret AEAD ciphers only)
+    - HTTP/1.1 client (GET, POST, PUT, DELETE) with gzip/deflate decompression
+    - WebSocket client (RFC 6455) with TLS support
+    - Ergonomic high-level API (http.get, http.post, http.ws_connect)

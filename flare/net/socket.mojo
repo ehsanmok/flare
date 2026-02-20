@@ -14,6 +14,7 @@ Safety contracts for this module:
 
 from ffi import external_call, OwnedDLHandle, c_int, c_uint, get_errno, ErrNo
 from memory import UnsafePointer, stack_allocation, alloc
+from os import getenv
 from sys.info import CompilationTarget
 
 from .address import SocketAddr, IpAddr
@@ -63,6 +64,26 @@ from ._libc import (
     _htons,
     _ntohs,
 )
+
+
+fn _find_flare_lib() -> String:
+    """Return the path to ``libflare_tls.so``.
+
+    Search order:
+    1. ``build/libflare_tls.so`` — local development build (activation script).
+    2. ``$CONDA_PREFIX/lib/libflare_tls.so`` — installed via conda/pixi package.
+
+    The local path is tried first so that development iteration (edit → rebuild →
+    test) never accidentally picks up a stale installed copy.
+    """
+    from pathlib import Path
+
+    if Path("build/libflare_tls.so").exists():
+        return "build/libflare_tls.so"
+    var prefix = getenv("CONDA_PREFIX", "")
+    if prefix:
+        return prefix + "/lib/libflare_tls.so"
+    return "build/libflare_tls.so"
 
 
 struct RawSocket(Movable):
@@ -294,7 +315,7 @@ struct RawSocket(Movable):
         Raises:
             NetworkError: If the underlying ``fcntl(F_SETFL)`` call fails.
         """
-        var lib = OwnedDLHandle("build/libflare_tls.so")
+        var lib = OwnedDLHandle(_find_flare_lib())
         var fn_nb = lib.get_function[fn(c_int, c_int) -> c_int](
             "flare_set_nonblocking"
         )

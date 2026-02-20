@@ -42,6 +42,7 @@ from ..net.socket import (
     SOCK_STREAM,
     _build_sockaddr_in,
     _sockaddr_to_socket_addr,
+    _find_flare_lib,
 )
 from ..net._libc import (
     _connect,
@@ -190,7 +191,7 @@ struct TcpStream(Movable):
         var sock = RawSocket(AF_INET, SOCK_STREAM)
         var sa = _build_sockaddr_in(addr)
 
-        var lib = OwnedDLHandle("build/libflare_tls.so")
+        var lib = OwnedDLHandle(_find_flare_lib())
         var fn_ct = lib.get_function[fn(c_int, Int, c_uint, c_int) -> c_int](
             "flare_connect_timeout"
         )

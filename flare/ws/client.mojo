@@ -23,7 +23,7 @@ from .frame import (
 from ..http.url import Url
 from ..tls import TlsStream, TlsConfig
 from ..tcp import TcpStream
-from ..net import SocketAddr, NetworkError
+from ..net import SocketAddr, NetworkError, _find_flare_lib
 from ..net.socket import RawSocket, AF_INET, SOCK_STREAM
 from ..net.address import IpAddr
 from ..net._libc import INVALID_FD
@@ -34,9 +34,6 @@ comptime _WS_GUID: String = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 # OpenSSL SHA-1 digest length (20 bytes)
 comptime _SHA1_LEN: Int = 20
-
-# Path to libcrypto shared library (part of the pixi openssl dependency)
-comptime _CRYPTO_LIB: String = "build/libflare_tls.so"
 
 
 struct WsHandshakeError(Copyable, Movable, Stringable, Writable):
@@ -114,7 +111,7 @@ fn _sha1(data: String) raises -> List[UInt8]:
     Raises:
         NetworkError: If the SHA-1 function cannot be loaded.
     """
-    var lib = OwnedDLHandle(_CRYPTO_LIB)
+    var lib = OwnedDLHandle(_find_flare_lib())
     # SHA1(const unsigned char *d, size_t n, unsigned char *md) -> unsigned char*
     var fn_sha1 = lib.get_function[fn(Int, Int, Int) -> Int]("SHA1")
     var digest_buf = List[UInt8](capacity=_SHA1_LEN)

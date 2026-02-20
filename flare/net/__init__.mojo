@@ -33,7 +33,7 @@ fn main() raises:
 """
 
 from .address import IpAddr, SocketAddr
-from .socket import RawSocket
+from .socket import RawSocket, _find_flare_lib
 from .error import (
     NetworkError,
     ConnectionRefused,

@@ -6,6 +6,15 @@ platforms = ["osx-arm64", "linux-aarch64", "linux-64"]
 version = "0.0.1"
 preview = ["pixi-build"]
 
+[package]
+name = "flare"
+version = "0.0.1"
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# Binary dependencies are specified in recipe.yaml for rattler-build backend
+
 [activation]
 # Auto-build TLS FFI wrapper on environment activation (idempotent).
 # Requires OpenSSL from conda-forge (declared in [dependencies]).
@@ -19,8 +28,9 @@ zlib             = ">=1.3.1,<2"    # HTTP: Content-Encoding gzip/deflate decompr
 mojson           = { git = "https://github.com/ehsanmok/mojson.git", branch = "main" }
 
 [feature.dev.dependencies]
-gxx      = ">=13"    # g++ for Linux (macOS uses system clang++ from Xcode CLT)
-mojodoc  = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
+gxx        = ">=13"           # g++ for Linux (macOS uses system clang++ from Xcode CLT)
+pre-commit = ">=4.2.0,<5"
+mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
 
 [environments]
 default = { features = ["dev"], solve-group = "default" }
@@ -70,5 +80,6 @@ docs       = "mojodoc ./flare --open"
 docs-build = "mojodoc ./flare --out-dir target/doc --base-url /flare/"
 
 # ── Format ────────────────────────────────────────────────────────────────────
-format       = "mojo format flare tests benchmark examples"
-format-check = "bash -c 'mojo format flare tests benchmark examples && git diff --exit-code || (echo \"Run pixi run format to fix.\" && exit 1)'"
+install-pre-commit = "pre-commit install"
+format       = { cmd = "mojo format flare tests benchmark examples", depends-on = ["install-pre-commit"] }
+format-check = "bash -c 'mojo format flare tests benchmark examples && git diff --exit-code flare tests benchmark examples || (echo \"Error: Code is not formatted. Run \\\"pixi run format\\\" to fix.\" && exit 1)'"

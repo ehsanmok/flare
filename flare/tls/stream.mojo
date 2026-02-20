@@ -1,7 +1,8 @@
 """TLS stream: encrypts a TcpStream via OpenSSL FFI.
 
-The shared library ``build/libflare_tls.so`` is built automatically on pixi
-activation via ``flare/tls/ffi/build.sh``.
+The shared library ``libflare_tls.so`` is built automatically on pixi
+activation via ``flare/tls/ffi/build.sh`` and installed to
+``$CONDA_PREFIX/lib/`` when using the packaged distribution.
 
 Opaque C pointers (SSL_CTX*, SSL*) are held as ``Int`` values since Mojo
 nightly requires all ``UnsafePointer`` type parameters to have an explicit
@@ -30,7 +31,7 @@ from sys import stderr
 from ffi import OwnedDLHandle, c_int
 from memory import UnsafePointer, stack_allocation
 from ..dns import resolve_v4
-from ..net import SocketAddr, NetworkError
+from ..net import SocketAddr, NetworkError, _find_flare_lib
 from ..tcp import TcpStream
 from ..io import Readable
 from .config import TlsConfig, TlsVerify
@@ -41,8 +42,7 @@ from .error import (
     CertificateUntrusted,
 )
 
-# Path to the TLS shared library built by flare/tls/ffi/build.sh
-comptime _TLS_LIB: String = "build/libflare_tls.so"
+# Subject DN buffer size (matches X509_NAME_oneline output limit)
 
 # Subject DN buffer size (matches X509_NAME_oneline output limit)
 comptime _CERT_SUBJ_LEN: Int = 512
@@ -171,7 +171,7 @@ struct TlsStream(Movable, Readable):
         """Send ``close_notify`` and free OpenSSL objects (best-effort)."""
         if self._ssl != 0:
             try:
-                var lib = OwnedDLHandle(_TLS_LIB)
+                var lib = OwnedDLHandle(_find_flare_lib())
                 var fn_shutdown = lib.get_function[fn(Int) -> c_int](
                     "flare_ssl_shutdown"
                 )
@@ -246,7 +246,7 @@ struct TlsStream(Movable, Readable):
         var tcp = TcpStream.connect(SocketAddr(addrs[0], port))
 
         # ── 2. Load OpenSSL wrapper library ───────────────────────────────────
-        var lib = OwnedDLHandle(_TLS_LIB)
+        var lib = OwnedDLHandle(_find_flare_lib())
 
         # Load function pointers (type annotations use Int for void* handles)
         var fn_ctx_new = lib.get_function[fn() -> Int]("flare_ssl_ctx_new")
@@ -366,7 +366,7 @@ struct TlsStream(Movable, Readable):
             SocketAddr(addrs[0], port), timeout_ms
         )
 
-        var lib = OwnedDLHandle(_TLS_LIB)
+        var lib = OwnedDLHandle(_find_flare_lib())
         var fn_ctx_new = lib.get_function[fn() -> Int]("flare_ssl_ctx_new")
         var fn_ctx_free = lib.get_function[fn(Int) -> None](
             "flare_ssl_ctx_free"
@@ -435,7 +435,7 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: On I/O or decryption error.
         """
-        var lib = OwnedDLHandle(_TLS_LIB)
+        var lib = OwnedDLHandle(_find_flare_lib())
         var fn_read = lib.get_function[fn(Int, Int, c_int) -> c_int](
             "flare_ssl_read"
         )
@@ -473,7 +473,7 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: On I/O or encryption error.
         """
-        var lib = OwnedDLHandle(_TLS_LIB)
+        var lib = OwnedDLHandle(_find_flare_lib())
         var fn_write = lib.get_function[fn(Int, Int, c_int) -> c_int](
             "flare_ssl_write"
         )
@@ -510,7 +510,7 @@ struct TlsStream(Movable, Readable):
             called before the handshake or if the library cannot be loaded.
         """
         try:
-            var lib = OwnedDLHandle(_TLS_LIB)
+            var lib = OwnedDLHandle(_find_flare_lib())
             var fn_ver = lib.get_function[
                 fn(Int) -> UnsafePointer[UInt8, MutExternalOrigin]
             ]("flare_ssl_get_version")
@@ -526,7 +526,7 @@ struct TlsStream(Movable, Readable):
             E.g. ``"TLS_AES_256_GCM_SHA384"`` or ``"unknown"``.
         """
         try:
-            var lib = OwnedDLHandle(_TLS_LIB)
+            var lib = OwnedDLHandle(_find_flare_lib())
             var fn_cipher = lib.get_function[
                 fn(Int) -> UnsafePointer[UInt8, MutExternalOrigin]
             ]("flare_ssl_get_cipher")
@@ -547,7 +547,7 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: If no peer certificate is available.
         """
-        var lib = OwnedDLHandle(_TLS_LIB)
+        var lib = OwnedDLHandle(_find_flare_lib())
         var fn_subj = lib.get_function[fn(Int, Int, c_int) -> c_int](
             "flare_ssl_get_peer_cert_subject"
         )
@@ -570,7 +570,7 @@ struct TlsStream(Movable, Readable):
         """
         if self._ssl != 0:
             try:
-                var lib = OwnedDLHandle(_TLS_LIB)
+                var lib = OwnedDLHandle(_find_flare_lib())
                 var fn_shutdown = lib.get_function[fn(Int) -> c_int](
                     "flare_ssl_shutdown"
                 )
