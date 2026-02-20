@@ -32,6 +32,7 @@ _needs_rebuild() {
 }
 
 if ! _needs_rebuild; then
+    export FLARE_LIB="$TARGET"
     return 0 2>/dev/null || true
 fi
 
@@ -78,3 +79,9 @@ else
     echo "Build failed!"
     return 1 2>/dev/null || true
 fi
+
+# ── Export path so _find_flare_lib() resolves it without pathlib ──────────────
+# `build.sh` is *sourced* by pixi's activation script, so `export` persists into
+# any `pixi run …` child process. This avoids the need for `pathlib.Path.exists()`
+# in Mojo (which caused a runtime crash on Linux x86_64).
+export FLARE_LIB="$TARGET"

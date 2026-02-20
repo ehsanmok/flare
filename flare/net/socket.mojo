@@ -70,16 +70,14 @@ fn _find_flare_lib() -> String:
     """Return the path to ``libflare_tls.so``.
 
     Search order:
-    1. ``build/libflare_tls.so`` — local development build (activation script).
-    2. ``$CONDA_PREFIX/lib/libflare_tls.so`` — installed via conda/pixi package.
-
-    The local path is tried first so that development iteration (edit → rebuild →
-    test) never accidentally picks up a stale installed copy.
+    1. ``$FLARE_LIB`` — set by the pixi activation script; always points to the
+       freshly-built ``build/libflare_tls.so`` and avoids any path ambiguity.
+    2. ``$CONDA_PREFIX/lib/libflare_tls.so`` — installed via a conda/pixi package.
+    3. ``build/libflare_tls.so`` — bare checkout without a conda environment.
     """
-    from pathlib import Path
-
-    if Path("build/libflare_tls.so").exists():
-        return "build/libflare_tls.so"
+    var explicit = getenv("FLARE_LIB", "")
+    if explicit:
+        return explicit
     var prefix = getenv("CONDA_PREFIX", "")
     if prefix:
         return prefix + "/lib/libflare_tls.so"
