@@ -1,5 +1,8 @@
 # flare 🔥
 
+[![CI](https://github.com/ehsanmok/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/ehsanmok/flare/actions/workflows/ci.yml)
+[![Docs](https://github.com/ehsanmok/flare/actions/workflows/docs.yaml/badge.svg)](https://github.com/ehsanmok/flare/actions/workflows/docs.yaml)
+
 > [!WARNING]
 > **Under development** — APIs may change.
 
