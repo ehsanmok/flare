@@ -12,8 +12,9 @@ Memory safety contract:
     return path.
 """
 
-from ffi import c_int, c_uint, c_char, get_errno
+from ffi import c_int, c_uint, c_char, get_errno, external_call
 from memory import stack_allocation
+from sys.info import CompilationTarget, platform_map
 
 from ..net._libc import (
     AF_INET,
@@ -220,8 +221,6 @@ fn _ipv4_from_sockaddr(sa_ptr: Int) -> String:
         Dotted-decimal string (e.g. ``"127.0.0.1"``), or empty string on
         ``inet_ntop`` failure.
     """
-    from ffi import external_call
-
     var sa = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=sa_ptr)
     var ntop = stack_allocation[64, UInt8]()
     for i in range(64):
@@ -249,9 +248,6 @@ fn _ipv6_from_sockaddr(sa_ptr: Int) -> String:
     Returns:
         Colon-hex string (e.g. ``"::1"``), or empty string on failure.
     """
-    from ffi import external_call
-    from sys.info import CompilationTarget, platform_map
-
     comptime _pm = platform_map[T=Int, ...]
     comptime AF_INET6_VAL: c_int = c_int(_pm["AF_INET6", linux=10, macos=30]())
 

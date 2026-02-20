@@ -25,6 +25,7 @@ from .error import (
     ConnectionReset,
     AddressInUse,
     BrokenPipe,
+    AddressParseError,
 )
 from ._libc import (
     AF_INET,
@@ -460,8 +461,6 @@ fn _build_sockaddr_in(
         AddressParseError: If the IP string is not a valid IPv4 address.
         NetworkError:      If ``inet_pton`` returns an unexpected error.
     """
-    from .error import AddressParseError
-
     var ip_buf = alloc[UInt8](4)
     for i in range(4):
         (ip_buf + i).init_pointee_copy(0)
