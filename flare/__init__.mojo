@@ -1,213 +1,213 @@
 """flare: A foundational networking library for Mojo🔥.
 
-> **Under development** — APIs may change.
+> **Under development.** APIs may change.
 
-A complete, layered networking stack from raw POSIX socket primitives up to
-HTTP/1.1 and WebSockets. Written entirely in Mojo with a minimal FFI surface
-(only libc + OpenSSL).
+A foundational networking library for Mojo🔥, from raw socket primitives up
+to HTTP/1.1 and WebSockets. Written entirely in Mojo with minimal FFI surface.
 
 ## Principles
 
-- **Correctness above all** — typed errors at every layer; no silent failures
-- **Security by default** — TLS 1.2+, injection-safe header/address parsing
-- **Zero unnecessary C deps** — only libc (always present) and OpenSSL for TLS
-- **Layered architecture** — each layer imports only from the layer below it
+- **Correctness above all**: typed errors everywhere; no silent failures
+- **Security by default**: TLS 1.2+, injection-safe parsing, DoS limits baked in
+- **Zero unnecessary C deps**: only libc (always present) and OpenSSL for TLS
+- **Layered architecture**: each layer imports only from layers below it
 
 ## Layer Architecture
 
 ```
-flare.ws    — WebSocket client + server (RFC 6455)
-flare.http  — HTTP/1.1 client + server
-    │
-flare.tls   — TLS 1.2/1.3 via OpenSSL FFI
-    │
-flare.tcp   — TcpStream + TcpListener
-flare.udp   — UdpSocket
-    │
-flare.dns   — getaddrinfo(3) FFI
-    │
-flare.net   — IpAddr, SocketAddr, errors, RawSocket
+flare.io    - BufReader (Readable trait)
+    |
+flare.ws    - WebSocket client (RFC 6455)
+flare.http  - HTTP/1.1 client + HeaderMap + URL
+    |
+flare.tls   - TLS 1.2/1.3 via OpenSSL FFI
+    |
+flare.tcp   - TcpStream + TcpListener
+flare.udp   - UdpSocket
+    |
+flare.dns   - getaddrinfo(3) FFI
+    |
+flare.net   - IpAddr, SocketAddr, RawSocket, errors
 ```
 
-## Installation
+## Quick Start: High-Level API
 
-Add to your `pixi.toml`:
+### One-shot HTTP helpers
 
-```toml
-[workspace]
-channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
-preview  = ["pixi-build"]
-
-[dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
-```
-
-Then run `pixi install` — OpenSSL is automatically installed as a dependency.
-
-## Quick Start
-
-### Addresses and errors
+No client object needed for simple requests. `post` with a `String` body sets
+`Content-Type: application/json` automatically, no format parameter needed:
 
 ```mojo
-from flare.net import IpAddr, SocketAddr, NetworkError
+from flare.http import get, post
 
 fn main() raises:
-    var ip   = IpAddr.parse("192.168.1.1")
-    print(ip.is_private())           # True
-    var addr = SocketAddr.parse("127.0.0.1:8080")
-    print(addr.port)                  # 8080
+    var resp = get("https://httpbin.org/get")
+    print(resp.status, resp.ok())          # 200 True
+    print(resp.text()[:80])
+
+    # String body sets Content-Type: application/json automatically
+    var r = post("https://httpbin.org/post", '{"hello": "flare"}')
+    r.raise_for_status()
+    print(r.json()["json"]["hello"].string_value())
 ```
 
-### DNS resolution
+### HttpClient: base URL, authentication, JSON
+
+`HttpClient` takes base URL and auth as positional arguments, the most
+natural call-site syntax:
 
 ```mojo
-from flare.dns import resolve, resolve_v4
+from flare.http import HttpClient, BasicAuth, BearerAuth, HttpError
 
 fn main() raises:
-    var addrs = resolve("example.com")
-    for a in addrs:
-        print(a)                      # 93.184.216.34
+    # Base URL as first positional arg, relative paths resolved automatically
+    var client = HttpClient("https://api.example.com")
+    client.post("/items", '{"name": "flare"}').raise_for_status()
+
+    # HTTP Basic authentication (RFC 7617), auth as first positional
+    var auth_client = HttpClient(BasicAuth("alice", "s3cr3t"))
+    auth_client.get("https://httpbin.org/basic-auth/alice/s3cr3t").raise_for_status()
+
+    # Base URL + Bearer token, both positional
+    with HttpClient("https://api.example.com", BearerAuth("tok_abc123")) as c:
+        c.post("/items", '{"name": "new"}').raise_for_status()
 ```
 
-### TCP echo client
+### Context managers
+
+All connection types implement `__enter__` / `__exit__` for automatic cleanup:
 
 ```mojo
-from flare.tcp import TcpStream
-from flare.net import SocketAddr
+from flare.http import HttpClient
+from flare.tcp  import TcpStream
+from flare.tls  import TlsStream, TlsConfig
+from flare.ws   import WsClient
 
 fn main() raises:
-    var conn = TcpStream.connect(SocketAddr.localhost(9000))
-    _ = conn.write("hello\\n".as_bytes())
-    var buf = List[UInt8](capacity=1024)
-    buf.resize(1024, 0)
-    var n = conn.read(buf.unsafe_ptr(), len(buf))
-    conn.close()
+    with HttpClient() as c:
+        print(c.get("https://httpbin.org/get").status)
+
+    with TcpStream.connect("localhost", 9000) as stream:
+        _ = stream.write("hello\n".as_bytes())
+
+    with WsClient.connect("ws://echo.websocket.events") as ws:
+        ws.send_text("hello!")
+        print(ws.recv().text_payload())
 ```
 
-### TLS client
+### WebSocket with WsMessage
+
+`recv_message()` returns a typed `WsMessage` wrapper, no raw opcode checks:
 
 ```mojo
-from flare.tls import TlsStream, TlsConfig
-
-fn main() raises:
-    var stream = TlsStream.connect("example.com", 443, TlsConfig())
-    _ = stream.write("GET / HTTP/1.1\\r\\nHost: example.com\\r\\n\\r\\n".as_bytes())
-    stream.close()
-```
-
-### HTTP client
-
-```mojo
-from flare.http import HttpClient, Status
-
-fn main() raises:
-    var client = HttpClient()
-    var resp   = client.get("https://example.com/")
-    if resp.status == Status.OK:
-        print(resp.text())
-
-    # POST JSON — String body sets Content-Type: application/json automatically
-    var resp2 = client.post("https://httpbin.org/post", '{"key": "value"}')
-    resp2.raise_for_status()
-    var data = resp2.json()  # returns mojson.Value
-    print(data["json"]["key"].string_value())
-```
-
-### HTTP authentication
-
-```mojo
-from flare.http import HttpClient, BasicAuth, BearerAuth
-
-fn main() raises:
-    var client = HttpClient(BasicAuth("alice", "s3cr3t"))
-    var resp = client.get("https://httpbin.org/basic-auth/alice/s3cr3t")
-    resp.raise_for_status()
-    var data = resp.json()             # mojson.Value
-    print(data["authenticated"].bool_value())
-```
-
-### WebSocket client
-
-```mojo
-from flare.ws import WsClient, WsFrame, WsOpcode, WsMessage
+from flare.ws import WsClient, WsMessage
 
 fn main() raises:
     with WsClient.connect("ws://echo.websocket.events") as ws:
-        ws.send_text("hello!")
+        ws.send_text("hello, flare!")
         var msg = ws.recv_message()
         if msg.is_text:
             print(msg.as_text())
 ```
 
-## Public API
+### Buffered I/O: BufReader
 
-### flare.net
+`BufReader[S: Readable]` wraps any readable stream for efficient line reads:
 
 ```mojo
-from flare.net import (
-    IpAddr, SocketAddr, RawSocket,
-    NetworkError, ConnectionRefused, ConnectionTimeout, ConnectionReset,
-    AddressInUse, AddressParseError, BrokenPipe, DnsError, Timeout,
-)
+from flare.tls import TlsStream, TlsConfig
+from flare.io  import BufReader
+
+fn main() raises:
+    var stream = TlsStream.connect("example.com", 443, TlsConfig())
+    _ = stream.write(
+        "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"
+        .as_bytes()
+    )
+    var reader = BufReader[TlsStream](stream^, capacity=4096)
+    while True:
+        var line = reader.readline()
+        if line == "" or line == "\r\n":
+            break
+        print(line, end="")
 ```
 
-### flare.dns
+## Quick Start: Low-Level API
+
+### IP addresses and DNS
 
 ```mojo
-from flare.dns import resolve, resolve_v4, resolve_v6
+from flare.net import IpAddr, SocketAddr
+from flare.dns import resolve_v4
+
+fn main() raises:
+    var ip = IpAddr.parse("192.168.1.100")
+    print(ip.is_private())                 # True
+
+    var addr = SocketAddr.parse("127.0.0.1:8080")
+    print(addr.port)                       # 8080
+
+    var addrs = resolve_v4("example.com")
+    print(addrs[0])                        # 93.184.216.34
 ```
 
-### flare.tcp
+### TCP
 
 ```mojo
-from flare.tcp import TcpStream, TcpListener
+from flare.tcp import TcpStream
+
+fn main() raises:
+    var conn = TcpStream.connect("localhost", 8080)
+    _ = conn.write("Hello\n".as_bytes())
+
+    var buf = List[UInt8](capacity=4096)
+    buf.resize(4096, 0)
+    var n = conn.read(buf.unsafe_ptr(), len(buf))
+    conn.close()
 ```
 
-### flare.udp
+### TLS
 
 ```mojo
-from flare.udp import UdpSocket, DatagramTooLarge
+from flare.tls import TlsStream, TlsConfig
+
+fn main() raises:
+    # TLS 1.2/1.3, cert verified against pixi CA bundle by default
+    var tls = TlsStream.connect("example.com", 443, TlsConfig())
+    _ = tls.write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n".as_bytes())
+    tls.close()
+
+    # Skip cert verification (testing only)
+    var insecure = TlsStream.connect("localhost", 8443, TlsConfig.insecure())
 ```
 
-### flare.tls
+### HTTP/1.1: response details
 
 ```mojo
-from flare.tls import (
-    TlsConfig, TlsVerify, TlsStream,
-    TlsHandshakeError, CertificateExpired,
-    CertificateHostnameMismatch, CertificateUntrusted,
-)
+from flare.http import HttpClient, Status, Url
+
+fn main() raises:
+    var client = HttpClient()
+    var resp = client.get("http://httpbin.org/get")
+    if resp.status == Status.OK:
+        print(resp.text()[:80])
+    var ct = resp.headers.get("content-type")  # case-insensitive lookup
+
+    var u = Url.parse("https://api.example.com:8443/v1/users?page=2")
+    print(u.host, u.port, u.path)
 ```
 
-### flare.http
+### WebSocket: raw frame API
 
 ```mojo
-from flare.http import (
-    HttpClient, HttpServer,
-    Request, Response, HeaderMap, Url,
-    Method, Status, Encoding,
-    HeaderInjectionError, UrlParseError,
-    HttpError, TooManyRedirects,
-    BasicAuth, BearerAuth,
-    get, post, put, delete, head,
-)
-```
+from flare.ws import WsClient, WsFrame
 
-### flare.ws
-
-```mojo
-from flare.ws import (
-    WsClient, WsServer,
-    WsFrame, WsOpcode, WsCloseCode,
-    WsProtocolError, WsHandshakeError,
-    WsMessage,
-)
-```
-
-### flare.io
-
-```mojo
-from flare.io import Readable, BufReader
+fn main() raises:
+    var ws = WsClient.connect("ws://echo.websocket.events")
+    ws.send_text("Hello, flare WebSocket!")
+    var frame = ws.recv()
+    print(frame.text_payload())
+    ws.close()
 ```
 """
 
