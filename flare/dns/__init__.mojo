@@ -35,4 +35,4 @@ fn main() raises:
 ```
 """
 
-from .resolve import resolve, resolve_v4, resolve_v6
+from .resolver import resolve, resolve_v4, resolve_v6

@@ -227,7 +227,7 @@ from .net.error import (
 )
 
 # flare.dns
-from .dns.resolve import resolve, resolve_v4, resolve_v6
+from .dns.resolver import resolve, resolve_v4, resolve_v6
 
 # flare.tcp
 from .tcp.stream import TcpStream
