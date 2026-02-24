@@ -4,15 +4,15 @@
 [![Docs](https://github.com/ehsanmok/flare/actions/workflows/docs.yaml/badge.svg)](https://github.com/ehsanmok/flare/actions/workflows/docs.yaml)
 
 > [!WARNING]
-> **Under development** — APIs may change.
+> **Under development.** APIs may change.
 
-A **foundational networking library for Mojo🔥** — from raw socket primitives up
+A **foundational networking library for Mojo🔥**, from raw socket primitives up
 to HTTP/1.1 and WebSockets, written entirely in Mojo with minimal FFI surface.
 
-- **Correctness above all** — typed errors everywhere; no silent failures
-- **Security by default** — TLS 1.2+, injection-safe parsing, DoS limits baked in
-- **Zero unnecessary C deps** — only libc (always present) and OpenSSL for TLS
-- **Layered architecture** — each layer imports only from layers below it
+- **Correctness above all**: typed errors everywhere; no silent failures
+- **Security by default**: TLS 1.2+, injection-safe parsing, DoS limits baked in
+- **Zero unnecessary C deps**: only libc (always present) and OpenSSL for TLS
+- **Layered architecture**: each layer imports only from layers below it
 
 ## Requirements
 
@@ -33,7 +33,7 @@ flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 
 ---
 
-## Quick Start — High-Level API
+## Quick Start: High-Level API
 
 The high-level API mirrors the ergonomics of Python's `requests`/`httpx`
 and the `websockets` library. It builds on the low-level primitives and adds:
@@ -43,7 +43,7 @@ managers, typed `WsMessage`, and buffered I/O.
 ### One-shot HTTP helpers
 
 No client object needed for simple requests. `post` with a `String` body sets
-`Content-Type: application/json` automatically — no format parameter needed:
+`Content-Type: application/json` automatically, no format parameter needed:
 
 ```mojo
 from flare.http import get, post
@@ -60,26 +60,26 @@ fn main() raises:
     print(data["json"]["hello"].string_value())
 ```
 
-### HttpClient — base URL, authentication, JSON
+### HttpClient: base URL, authentication, JSON
 
-`HttpClient` takes base URL and auth as positional arguments — the most
+`HttpClient` takes base URL and auth as positional arguments, the most
 natural call-site syntax:
 
 ```mojo
 from flare.http import HttpClient, BasicAuth, BearerAuth, HttpError
 
 fn main() raises:
-    # Base URL as first positional arg — relative paths resolved automatically
+    # Base URL as first positional arg, relative paths resolved automatically
     var client = HttpClient("https://api.example.com")
     client.post("/items", '{"name": "flare"}').raise_for_status()
 
-    # HTTP Basic authentication (RFC 7617) — auth as first positional
+    # HTTP Basic authentication (RFC 7617), auth as first positional
     var auth_client = HttpClient(BasicAuth("alice", "s3cr3t"))
     var r = auth_client.get("https://httpbin.org/basic-auth/alice/s3cr3t")
     r.raise_for_status()                   # HttpError on 401 / 403
     print(r.json()["authenticated"].bool_value())
 
-    # Base URL + Bearer token — both positional
+    # Base URL + Bearer token, both positional
     with HttpClient("https://api.example.com", BearerAuth("tok_abc123")) as c:
         var items = c.get("/items").json()  # mojson.Value
         c.post("/items", '{"name": "new"}').raise_for_status()
@@ -112,7 +112,7 @@ fn main() raises:
 
 ### WebSocket with WsMessage
 
-`recv_message()` returns a typed `WsMessage` wrapper — no raw opcode checks:
+`recv_message()` returns a typed `WsMessage` wrapper, no raw opcode checks:
 
 ```mojo
 from flare.ws import WsClient, WsMessage
@@ -138,7 +138,7 @@ fn main() raises:
     print("downloaded", total, "bytes")
 ```
 
-### Buffered I/O — BufReader
+### Buffered I/O: BufReader
 
 `BufReader[S: Readable]` wraps any readable stream with an internal buffer,
 enabling efficient line-by-line or arbitrary-sized reads:
@@ -166,7 +166,7 @@ fn main() raises:
 
 ---
 
-## Quick Start — Low-Level API
+## Quick Start: Low-Level API
 
 Use the low-level API when you need direct control over socket options,
 custom framing, or protocols beyond HTTP and WebSocket.
@@ -211,7 +211,7 @@ fn main() raises:
 from flare.tls import TlsStream, TlsConfig
 
 fn main() raises:
-    # TLS 1.2/1.3 — cert verified against pixi CA bundle by default
+    # TLS 1.2/1.3, cert verified against pixi CA bundle by default
     var tls = TlsStream.connect("example.com", 443, TlsConfig())
     _ = tls.write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n".as_bytes())
 
@@ -224,7 +224,7 @@ fn main() raises:
     var insecure = TlsStream.connect("localhost", 8443, TlsConfig.insecure())
 ```
 
-### HTTP/1.1 — response details
+### HTTP/1.1: response details
 
 ```mojo
 from flare.http import HttpClient, Status, Url
@@ -248,7 +248,7 @@ fn main() raises:
     print(u.host, u.port, u.path)             # api.example.com 8443 /v1/users
 ```
 
-### WebSocket — raw frame API
+### WebSocket: raw frame API
 
 ```mojo
 from flare.ws import WsClient, WsFrame, WsOpcode
@@ -279,7 +279,7 @@ pixi install        # installs Mojo nightly + OpenSSL + builds TLS FFI wrapper
 ### Tests
 
 ```bash
-pixi run tests             # full CI suite — all tests + all 7 examples
+pixi run tests             # full CI suite: all tests + all 7 examples
 
 # Individual layers
 pixi run test-net          # IpAddr, SocketAddr, error types
@@ -371,8 +371,8 @@ SIMD provides a **14–35× speedup** for production-sized payloads:
 
 | Payload | Scalar | SIMD-32 | Speedup |
 |---------|--------|---------|---------|
-|  32 B   | 3.2 GB/s | >100 GB/s† | — |
-| 128 B   | 2.7 GB/s | >100 GB/s† | — |
+|  32 B   | 3.2 GB/s | >100 GB/s† | N/A |
+| 128 B   | 2.7 GB/s | >100 GB/s† | N/A |
 |   1 KB  | 3.2 GB/s | 112.6 GB/s | **35×** |
 |  64 KB  | 3.4 GB/s |  47.8 GB/s | **14×** |
 |   1 MB  | 3.4 GB/s |  54.8 GB/s | **16×** |
@@ -395,7 +395,7 @@ SIMD provides a **14–35× speedup** for production-sized payloads:
 | `IpAddr.parse` (IPv4) | 0.20 µs/call (5 Mops/s) |
 | `IpAddr.parse` (IPv6) | 0.22 µs/call |
 | `SocketAddr.parse` | 0.22 µs/call |
-| `resolve("localhost")` | 0.17 ms/call — syscall + resolver cache |
+| `resolve("localhost")` | 0.17 ms/call (syscall + resolver cache) |
 
 ## API Documentation
 
