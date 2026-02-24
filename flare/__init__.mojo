@@ -211,11 +211,10 @@ from flare.io import Readable, BufReader
 ```
 """
 
-# ── flare.net ──────────────────────────────────────────────────────────────
-from .net import (
-    IpAddr,
-    SocketAddr,
-    RawSocket,
+# flare.net
+from .net.address import IpAddr, SocketAddr
+from .net.socket import RawSocket
+from .net.error import (
     NetworkError,
     ConnectionRefused,
     ConnectionTimeout,
@@ -227,61 +226,41 @@ from .net import (
     Timeout,
 )
 
-# ── flare.dns ──────────────────────────────────────────────────────────────
-from .dns import resolve, resolve_v4, resolve_v6
+# flare.dns
+from .dns.resolve import resolve, resolve_v4, resolve_v6
 
-# ── flare.tcp ──────────────────────────────────────────────────────────────
-from .tcp import TcpStream, TcpListener
+# flare.tcp
+from .tcp.stream import TcpStream
+from .tcp.listener import TcpListener
 
-# ── flare.udp ──────────────────────────────────────────────────────────────
-from .udp import UdpSocket, DatagramTooLarge
+# flare.udp
+from .udp.socket import UdpSocket, DatagramTooLarge
 
-# ── flare.tls ──────────────────────────────────────────────────────────────
-from .tls import (
-    TlsConfig,
-    TlsVerify,
-    TlsStream,
+# flare.tls
+from .tls.config import TlsConfig, TlsVerify
+from .tls.stream import TlsStream
+from .tls.error import (
     TlsHandshakeError,
     CertificateExpired,
     CertificateHostnameMismatch,
     CertificateUntrusted,
 )
 
-# ── flare.http ─────────────────────────────────────────────────────────────
-from .http import (
-    HttpClient,
-    HttpServer,
-    Request,
-    Response,
-    HeaderMap,
-    HeaderInjectionError,
-    Url,
-    UrlParseError,
-    Method,
-    Status,
-    Encoding,
-    HttpError,
-    TooManyRedirects,
-    BasicAuth,
-    BearerAuth,
-    get,
-    post,
-    put,
-    delete,
-    head,
-)
+# flare.http
+from .http.headers import HeaderMap, HeaderInjectionError
+from .http.url import Url, UrlParseError
+from .http.request import Request, Method
+from .http.response import Response, Status
+from .http.encoding import Encoding
+from .http.error import HttpError, TooManyRedirects
+from .http.auth import BasicAuth, BearerAuth
+from .http.client import HttpClient, get, post, put, delete, head
+from .http.server import HttpServer
 
-# ── flare.ws ───────────────────────────────────────────────────────────────
-from .ws import (
-    WsClient,
-    WsServer,
-    WsFrame,
-    WsOpcode,
-    WsCloseCode,
-    WsProtocolError,
-    WsHandshakeError,
-    WsMessage,
-)
+# flare.ws
+from .ws.frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
+from .ws.client import WsClient, WsHandshakeError, WsMessage
+from .ws.server import WsServer
 
-# ── flare.io ───────────────────────────────────────────────────────────────
-from .io import Readable, BufReader
+# flare.io
+from .io.buf_reader import Readable, BufReader

@@ -206,9 +206,9 @@ struct TcpStream(Movable):
         if CompilationTarget.is_macos():
             # macOS/arm64: use C helper to avoid Mojo variadic fcntl ABI bug.
             var lib = OwnedDLHandle(_find_flare_lib())
-            var fn_ct = lib.get_function[fn(c_int, Int, c_uint, c_int) -> c_int](
-                "flare_connect_timeout"
-            )
+            var fn_ct = lib.get_function[
+                fn(c_int, Int, c_uint, c_int) -> c_int
+            ]("flare_connect_timeout")
             var rc = fn_ct(sock.fd, Int(sa[0]), sa[1], c_int(timeout_ms))
             sa[0].free()
 
@@ -224,9 +224,12 @@ struct TcpStream(Movable):
                 if rc_int == -1:
                     var e = get_errno()
                     raise NetworkError(
-                        _strerror(e.value) + " (connect " + s + ")", Int(e.value)
+                        _strerror(e.value) + " (connect " + s + ")",
+                        Int(e.value),
                     )
-                raise NetworkError(_strerror(rc) + " (connect " + s + ")", rc_int)
+                raise NetworkError(
+                    _strerror(rc) + " (connect " + s + ")", rc_int
+                )
         else:
             # Linux: implement directly — OwnedDLHandle.get_function crashes
             # on Linux when calling into a freshly dlopen'd shared library.
@@ -244,7 +247,9 @@ struct TcpStream(Movable):
 
             # 2. Initiate the non-blocking connect.
             var rc = _connect(sock.fd, sa[0], sa[1])
-            var connect_errno = get_errno()  # capture before free() touches errno
+            var connect_errno = (
+                get_errno()
+            )  # capture before free() touches errno
             sa[0].free()
 
             if rc == c_int(0):
@@ -276,7 +281,9 @@ struct TcpStream(Movable):
                 if nready < c_int(0):
                     var e = get_errno()
                     _ = _fcntl2(sock.fd, F_SETFL, flags)
-                    raise NetworkError(_strerror(e.value) + " (poll)", Int(e.value))
+                    raise NetworkError(
+                        _strerror(e.value) + " (poll)", Int(e.value)
+                    )
 
                 # 4. Check SO_ERROR for deferred connection errors.
                 var so_err = stack_allocation[1, c_int]()
@@ -284,8 +291,11 @@ struct TcpStream(Movable):
                 var so_len = stack_allocation[1, c_uint]()
                 so_len.init_pointee_copy(c_uint(4))
                 _ = _getsockopt(
-                    sock.fd, SOL_SOCKET, SO_ERROR,
-                    so_err.bitcast[UInt8](), so_len,
+                    sock.fd,
+                    SOL_SOCKET,
+                    SO_ERROR,
+                    so_err.bitcast[UInt8](),
+                    so_len,
                 )
                 _ = _fcntl2(sock.fd, F_SETFL, flags)
                 var err_val = Int(so_err.load())

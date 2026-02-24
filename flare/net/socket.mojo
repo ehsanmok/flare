@@ -333,7 +333,9 @@ struct RawSocket(Movable):
             if flags < c_int(0):
                 var e = get_errno()
                 raise NetworkError(_os_error("fcntl F_GETFL"), Int(e.value))
-            var new_flags = flags | O_NONBLOCK if enabled else flags & ~O_NONBLOCK
+            var new_flags = (
+                flags | O_NONBLOCK if enabled else flags & ~O_NONBLOCK
+            )
             var rc = _fcntl2(self.fd, F_SETFL, new_flags)
             if rc < c_int(0):
                 var e = get_errno()
