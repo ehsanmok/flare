@@ -64,4 +64,4 @@ fn main() raises:
 
 from .frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 from .client import WsClient, WsHandshakeError, WsMessage
-from .server import WsServer
+from .server import WsServer, WsConnection
