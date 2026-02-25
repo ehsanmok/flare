@@ -21,3 +21,7 @@ target/
 .cursor/
 .agents/
 *.conda
+
+# fuzz artifacts
+.mozz_crashes/
+fuzz/corpus/

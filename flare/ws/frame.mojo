@@ -396,13 +396,29 @@ struct WsFrame(Movable, Stringable, Writable):
         else:  # plen7 == 127
             if n < pos + 8:
                 raise Error("WsFrame.decode_one: truncated 64-bit length")
-            var lo = (
+            # RFC 6455 §5.2: MSB of the 64-bit length MUST be 0.
+            if (data[pos] & 0x80) != 0:
+                raise WsProtocolError(
+                    "64-bit frame length MSB must be zero (RFC 6455 §5.2)"
+                )
+            # We don't support payloads > 4 GiB: reject non-zero upper 32 bits
+            # rather than silently discarding them (which would miscount consumed
+            # bytes and break framing of subsequent frames in the stream).
+            if (
+                Int(data[pos])
+                | Int(data[pos + 1])
+                | Int(data[pos + 2])
+                | Int(data[pos + 3])
+            ) != 0:
+                raise WsProtocolError(
+                    "64-bit payload length exceeds 32-bit range; not supported"
+                )
+            plen = (
                 (Int(data[pos + 4]) << 24)
                 | (Int(data[pos + 5]) << 16)
                 | (Int(data[pos + 6]) << 8)
                 | Int(data[pos + 7])
             )
-            plen = lo  # restrict to lower 32 bits for safety
             pos += 8
 
         # ── Parse masking key ─────────────────────────────────────────────────

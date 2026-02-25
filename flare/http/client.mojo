@@ -705,10 +705,21 @@ fn _find_crlf2(data: List[UInt8]) -> Int:
 
 
 fn _bytes_to_str(data: List[UInt8]) -> String:
-    """Convert a byte list to a String (best-effort UTF-8)."""
+    """Convert a byte list to a String, replacing non-ASCII bytes with ``?``.
+
+    HTTP/1.1 headers must be ASCII (RFC 7230 §3.2.6).  Non-ASCII bytes are
+    replaced with ``?`` so that every input byte maps to exactly one output
+    character, keeping byte-position arithmetic in ``_split_lines`` safe.
+    Without this, ``chr(b)`` for b ≥ 128 produces multi-byte UTF-8 sequences
+    that cause ``String[start:end]`` to panic on non-codepoint boundaries.
+    """
     var s = String(capacity=len(data) + 1)
     for b in data:
-        s += chr(Int(b))
+        var c = Int(b)
+        if c < 128:
+            s += chr(c)
+        else:
+            s += "?"
     return s^
 
 
@@ -910,9 +921,16 @@ fn _find_crlf(data: List[UInt8], start: Int) -> Int:
 
 
 fn _parse_int(s: String) -> Int:
-    """Parse a decimal integer string; returns 0 on failure."""
-    var result = 0
+    """Parse a decimal integer string; returns 0 on failure.
+
+    Rejects strings longer than 18 digits to prevent ``Int`` overflow on
+    64-bit systems (max safe decimal: 999_999_999_999_999_999 < 2^63-1).
+    A valid ``Content-Length`` will never be 19+ digits in practice.
+    """
     var trimmed = s.strip()
+    if len(trimmed) > 18:
+        return 0  # overflow guard
+    var result = 0
     for i in range(len(trimmed)):
         var c = Int(trimmed.unsafe_ptr()[i])
         if c < 48 or c > 57:
@@ -935,6 +953,10 @@ fn _parse_hex(s: String) raises -> Int:
     """
     if len(s) == 0:
         raise NetworkError("empty chunk-size in chunked encoding")
+    # A 16-digit hex chunk size already exceeds 64 PiB; reject longer strings
+    # to prevent Int overflow before the digit accumulation below.
+    if len(s) > 16:
+        raise NetworkError("chunk-size too large in chunked encoding: " + s)
     var result = 0
     for i in range(len(s)):
         var c = Int(s.unsafe_ptr()[i])

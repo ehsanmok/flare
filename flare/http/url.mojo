@@ -253,6 +253,10 @@ fn _parse_port(s: String, raw: String) raises -> Int:
     """
     if len(s) == 0:
         raise UrlParseError("empty port in URL: " + raw)
+    # Port 1–65535 has at most 5 digits.  Reject longer strings to prevent
+    # integer overflow in the accumulation loop below.
+    if len(s) > 5:
+        raise UrlParseError("port too long in URL: " + raw)
     var result = 0
     for i in range(len(s)):
         var c = Int(s.unsafe_ptr()[i])

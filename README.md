@@ -317,6 +317,37 @@ pixi run bench-http          # HeaderMap, Url.parse, Response construction throu
 pixi run bench-tcp           # TCP loopback throughput (requires network)
 ```
 
+### Fuzzing
+
+Fuzz and property-based tests are powered by [mozz](https://github.com/ehsanmok/mozz),
+a pure-Mojo fuzzing library. The `fuzz/` directory contains two kinds of harnesses:
+
+| Kind | Purpose |
+|------|---------|
+| **Fuzz harness** (`fuzz_*.mojo`) | Feed arbitrary bytes/strings into a parser; any crash or unexpected panic is a bug. Expected typed errors (e.g. `UrlParseError`, `WsProtocolError`) are not reported. |
+| **Property test** (`prop_*.mojo`) | Assert invariants (round-trips, injection resistance, charset correctness) hold for all generated inputs. |
+
+**Prerequisites** — mozz must be available on the Mojo import path. With the
+default pixi environment it is installed as a git dependency. For a local
+mozz checkout, export the path first:
+
+**Run fuzz harnesses:**
+
+```bash
+pixi run fuzz-ws            # WsFrame.decode_one() — arbitrary byte inputs
+pixi run fuzz-url           # Url.parse() — arbitrary string inputs
+pixi run fuzz-headers       # HeaderMap.set()/append() — injection detection
+pixi run fuzz-http-response # _parse_http_response() — full HTTP/1.1 parser
+```
+
+**Run property tests:**
+
+```bash
+pixi run prop-ws            # encode → decode round-trip for all valid frames
+pixi run prop-headers       # injection resistance + key case-folding consistency
+pixi run prop-auth          # b64 charset, Basic/Bearer header structure
+```
+
 ### Code Formatting
 
 ```bash
