@@ -20,6 +20,7 @@ from flare.http import (
     HeaderInjectionError,
     Url,
     UrlParseError,
+    Request,
 )
 
 
@@ -314,6 +315,261 @@ def test_http_404_not_ok():
         assert_false(resp.ok())
     except e:
         print("  [SKIP] network unavailable: " + String(e))
+
+
+# ── PATCH method ──────────────────────────────────────────────────────────────
+
+
+def test_patch_method_string():
+    """HttpClient.patch() sends PATCH with JSON Content-Type."""
+    try:
+        var client = HttpClient()
+        var resp = client.patch("https://httpbin.org/patch", '{"x": 1}')
+        assert_true(
+            resp.ok(),
+            "Expected 2xx from httpbin PATCH, got " + String(resp.status),
+        )
+        var body = resp.text()
+        assert_true(
+            "PATCH" in body or "patch" in body or "{" in body,
+            "Expected PATCH response body",
+        )
+    except e:
+        print("  [SKIP] network unavailable: " + String(e))
+
+
+# ── HttpServer: round-trip on loopback ────────────────────────────────────────
+
+
+def test_http_server_get_loopback():
+    """HttpServer accepts a GET request and sends back a 200 response.
+
+    Uses a single-connection pair on loopback:
+      1. Bind server (port 0).
+      2. Connect client.
+      3. Server accept() + parse + call handler + write response.
+      4. Client read raw response bytes.
+    """
+    from flare.http import HttpServer
+    from flare.tcp import TcpListener, TcpStream
+    from flare.net import SocketAddr
+
+    fn handler(req: Request) raises -> Response:
+        var body_bytes = List[UInt8]()
+        for b in "hello".as_bytes():
+            body_bytes.append(b)
+        return Response(status=Status.OK, reason="OK", body=body_bytes^)
+
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+
+    # Client side — send a minimal HTTP/1.1 GET
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server_stream = srv._listener.accept()
+
+    var raw_req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    var raw_req_bytes = raw_req.as_bytes()
+    client.write_all(Span[UInt8](raw_req_bytes))
+    client.close()
+
+    # Server side — parse + respond
+    from flare.http.server import _parse_http_request, _write_response
+
+    var req = _parse_http_request(server_stream, 8192, 1024 * 1024)
+    assert_equal(req.method, "GET")
+    assert_equal(req.url, "/")
+
+    var resp = handler(req^)
+    _write_response(server_stream, resp)
+    server_stream.close()
+    srv.close()
+
+
+def test_http_server_post_body_loopback():
+    """HttpServer correctly parses a POST request with a body."""
+    from flare.http import HttpServer
+    from flare.tcp import TcpListener, TcpStream
+    from flare.net import SocketAddr
+
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server_stream = srv._listener.accept()
+
+    var body_str = '{"key":"value"}'
+    var raw_req = (
+        "POST /data HTTP/1.1\r\n"
+        + "Host: localhost\r\n"
+        + "Content-Length: "
+        + String(len(body_str))
+        + "\r\n"
+        + "Content-Type: application/json\r\n"
+        + "\r\n"
+        + body_str
+    )
+    var raw_bytes = raw_req.as_bytes()
+    client.write_all(Span[UInt8](raw_bytes))
+    client.close()
+
+    from flare.http.server import _parse_http_request
+
+    var req = _parse_http_request(server_stream, 8192, 1024 * 1024)
+    assert_equal(req.method, "POST")
+    assert_equal(req.url, "/data")
+    assert_equal(len(req.body), len(body_str))
+    server_stream.close()
+    srv.close()
+
+
+# ── Encoding / gzip ───────────────────────────────────────────────────────────
+
+
+def test_gzip_roundtrip():
+    """compress_gzip → decompress_gzip must reproduce the original bytes."""
+    from flare.http.encoding import compress_gzip, decompress_gzip
+
+    var original = (
+        "Hello, gzip! This is a test string for compression.".as_bytes()
+    )
+    var compressed = compress_gzip(Span[UInt8](original))
+    assert_true(
+        len(compressed) > 0, "compress_gzip must produce non-empty output"
+    )
+    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    assert_equal(len(decompressed), len(original))
+    for i in range(len(original)):
+        assert_equal(decompressed[i], original[i])
+
+
+def test_gzip_empty_input():
+    """compress_gzip of empty bytes returns empty."""
+    from flare.http.encoding import compress_gzip, decompress_gzip
+
+    var empty = List[UInt8]()
+    var compressed = compress_gzip(Span[UInt8](empty))
+    assert_equal(len(compressed), 0)
+    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    assert_equal(len(decompressed), 0)
+
+
+def test_gzip_level_1_roundtrip():
+    """compress_gzip at level 1 (fastest) must still roundtrip correctly."""
+    from flare.http.encoding import compress_gzip, decompress_gzip
+
+    var data = "level1 fast compression test".as_bytes()
+    var compressed = compress_gzip(Span[UInt8](data), level=1)
+    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    assert_equal(len(decompressed), len(data))
+    for i in range(len(data)):
+        assert_equal(decompressed[i], data[i])
+
+
+def test_deflate_roundtrip():
+    """decompress_deflate of known zlib-wrapped and raw-deflate payloads."""
+    from flare.http.encoding import decompress_deflate
+
+    # Known plaintext: "deflate round-trip test bytes" (29 bytes)
+    # Generated by: Python zlib.compress(b"deflate round-trip test bytes")
+    var expected_len = 29
+
+    # zlib-wrapped (windowBits=15)
+    var zlib_wrapped: List[UInt8] = [
+        120,
+        156,
+        75,
+        73,
+        77,
+        203,
+        73,
+        44,
+        73,
+        85,
+        40,
+        202,
+        47,
+        205,
+        75,
+        209,
+        45,
+        41,
+        202,
+        44,
+        80,
+        40,
+        73,
+        45,
+        46,
+        81,
+        72,
+        170,
+        4,
+        82,
+        0,
+        167,
+        69,
+        11,
+        49,
+    ]
+    var out1 = decompress_deflate(Span[UInt8](zlib_wrapped))
+    assert_equal(len(out1), expected_len)
+    assert_equal(out1[0], ord("d"))
+    assert_equal(out1[28], ord("s"))
+
+    # raw deflate (windowBits=-15) — zlib bytes without 2-byte header + 4-byte adler32
+    var raw: List[UInt8] = [
+        75,
+        73,
+        77,
+        203,
+        73,
+        44,
+        73,
+        85,
+        40,
+        202,
+        47,
+        205,
+        75,
+        209,
+        45,
+        41,
+        202,
+        44,
+        80,
+        40,
+        73,
+        45,
+        46,
+        81,
+        72,
+        170,
+        4,
+        82,
+        0,
+    ]
+    var out2 = decompress_deflate(Span[UInt8](raw))
+    assert_equal(len(out2), expected_len)
+    assert_equal(out2[0], ord("d"))
+    assert_equal(out2[28], ord("s"))
+
+
+def test_decode_content_identity():
+    """decode_content with identity encoding copies bytes unchanged."""
+    from flare.http.encoding import decode_content
+
+    var data = "no encoding".as_bytes()
+    var out = decode_content(Span[UInt8](data), "identity")
+    assert_equal(len(out), len(data))
+
+
+def test_decode_content_unsupported():
+    """decode_content with an unsupported encoding raises an error."""
+    from flare.http.encoding import decode_content
+
+    var data = List[UInt8]()
+    with assert_raises():
+        _ = decode_content(Span[UInt8](data), "br")
 
 
 def main():

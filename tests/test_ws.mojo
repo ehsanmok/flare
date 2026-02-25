@@ -25,7 +25,11 @@ from flare.ws import (
     WsCloseCode,
     WsProtocolError,
     WsClient,
+    WsServer,
+    WsConnection,
 )
+from flare.tcp import TcpStream, TcpListener
+from flare.net import SocketAddr
 from flare.tls import TlsConfig
 
 
@@ -386,9 +390,212 @@ def test_ws_echo_roundtrip():
         print("  [SKIP] ws:// unavailable: " + String(e))
 
 
+# ── WsServer + WsConnection on loopback ──────────────────────────────────────
+#
+# Strategy: all tests use RAW TCP clients (not WsClient) to avoid the
+# single-threaded deadlock that would arise if WsClient.connect() (which
+# blocks waiting for 101) and the server accept() had to interleave.
+# Instead each test:
+#   1. Binds a WsServer on port 0.
+#   2. Connects a raw TcpStream.
+#   3. Does the server accept() + handshake helpers explicitly.
+#   4. Exchanges raw WsFrame wire bytes on the client side.
+
+
+fn _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:
+    """Send a minimal HTTP/1.1 upgrade request from a raw TCP stream."""
+    var key = "dGhlIHNhbXBsZSBub25jZQ=="  # well-known test key
+    var req = (
+        "GET / HTTP/1.1\r\n"
+        + "Host: "
+        + host
+        + "\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Connection: Upgrade\r\n"
+        + "Sec-WebSocket-Key: "
+        + key
+        + "\r\n"
+        + "Sec-WebSocket-Version: 13\r\n"
+        + "\r\n"
+    )
+    var b = req.as_bytes()
+    stream.write_all(Span[UInt8](b))
+
+
+fn _drain_101(mut stream: TcpStream) raises:
+    """Read and discard the HTTP 101 response from the stream."""
+    var buf = List[UInt8](capacity=512)
+    buf.resize(512, 0)
+    var acc = List[UInt8]()
+    while True:
+        var n = stream.read(buf.unsafe_ptr(), 512)
+        if n == 0:
+            break
+        for i in range(n):
+            acc.append(buf[i])
+        # Stop once we see \r\n\r\n
+        var nn = len(acc)
+        if nn >= 4:
+            for i in range(nn - 3):
+                if (
+                    acc[i] == 13
+                    and acc[i + 1] == 10
+                    and acc[i + 2] == 13
+                    and acc[i + 3] == 10
+                ):
+                    return
+
+
+def test_ws_server_text_echo_loopback():
+    """WsConnection.recv + send_text on loopback with a raw TCP client.
+
+    Avoids single-thread deadlock by using raw TCP instead of WsClient.
+    """
+    from flare.ws import WsServer, WsConnection
+    from flare.ws.server import (
+        _read_upgrade_request,
+        _send_upgrade_response,
+        _compute_accept_srv,
+    )
+    from flare.net import SocketAddr
+    from flare.tcp import TcpStream
+
+    var srv = WsServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+
+    # ── Client: connect + send upgrade request (non-blocking – goes to kernel queue)
+    var raw_client = TcpStream.connect(SocketAddr.localhost(port))
+    _send_upgrade_request_raw(raw_client, "localhost")
+
+    # ── Server: accept + handshake
+    var server_stream = srv._listener.accept()
+    var srv_peer = server_stream.peer_addr()
+    var key = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(key)
+    _send_upgrade_response(server_stream, accept)
+    var conn = WsConnection(server_stream^, srv_peer)
+
+    # ── Client: discard 101, then send masked TEXT frame
+    _drain_101(raw_client)
+
+    # Build a masked client TEXT frame: payload "hi"
+    var client_frame = WsFrame.text("hi")
+    var client_wire = client_frame.encode(mask=True)
+    raw_client.write_all(Span[UInt8](client_wire))
+
+    # ── Server: receive
+    var frame = conn.recv()
+    assert_equal(frame.opcode, WsOpcode.TEXT)
+    assert_equal(frame.text_payload(), "hi")
+
+    # ── Server: send back TEXT
+    conn.send_text("echo:hi")
+
+    # ── Client: receive unmasked server frame
+    var echo_wire = List[UInt8](capacity=32)
+    echo_wire.resize(32, 0)
+    var n_echo = raw_client.read(echo_wire.unsafe_ptr(), 32)
+    assert_true(n_echo > 0, "Expected echo frame from server")
+
+    raw_client.close()
+    srv.close()
+
+
+def test_ws_server_binary_echo_loopback():
+    """WsConnection.recv handles masked binary frames correctly."""
+    from flare.ws import WsServer, WsConnection
+    from flare.ws.server import (
+        _read_upgrade_request,
+        _send_upgrade_response,
+        _compute_accept_srv,
+    )
+    from flare.net import SocketAddr
+    from flare.tcp import TcpStream
+
+    var srv = WsServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+
+    var raw_client = TcpStream.connect(SocketAddr.localhost(port))
+    _send_upgrade_request_raw(raw_client, "localhost")
+
+    var server_stream = srv._listener.accept()
+    var srv_peer2 = server_stream.peer_addr()
+    var key = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(key)
+    _send_upgrade_response(server_stream, accept)
+    var conn = WsConnection(server_stream^, srv_peer2)
+
+    _drain_101(raw_client)
+
+    var payload = List[UInt8]()
+    payload.append(UInt8(0xDE))
+    payload.append(UInt8(0xAD))
+    payload.append(UInt8(0xBE))
+    var bin_frame = WsFrame.binary(payload)
+    var bin_wire = bin_frame.encode(mask=True)
+    raw_client.write_all(Span[UInt8](bin_wire))
+
+    var frame = conn.recv()
+    assert_equal(frame.opcode, WsOpcode.BINARY)
+    assert_equal(len(frame.payload), 3)
+    assert_equal(frame.payload[0], UInt8(0xDE))
+    assert_equal(frame.payload[1], UInt8(0xAD))
+    assert_equal(frame.payload[2], UInt8(0xBE))
+
+    raw_client.close()
+    srv.close()
+
+
+def test_ws_server_unmasked_frame_rejected():
+    """WsConnection.recv must raise WsProtocolError on an unmasked client frame.
+
+    RFC 6455 §5.1: server must reject unmasked frames.
+    """
+    from flare.ws import WsServer, WsConnection
+    from flare.ws.server import (
+        _read_upgrade_request,
+        _send_upgrade_response,
+        _compute_accept_srv,
+    )
+    from flare.net import SocketAddr
+    from flare.tcp import TcpStream
+
+    var srv = WsServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+
+    var raw_client = TcpStream.connect(SocketAddr.localhost(port))
+    _send_upgrade_request_raw(raw_client, "localhost")
+
+    var server_stream = srv._listener.accept()
+    var srv_peer3 = server_stream.peer_addr()
+    var key = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(key)
+    _send_upgrade_response(server_stream, accept)
+    var conn = WsConnection(server_stream^, srv_peer3)
+
+    _drain_101(raw_client)
+
+    # Send an UNMASKED TEXT frame (mask bit = 0): opcode=0x81, length=5
+    var bad_frame = List[UInt8]()
+    bad_frame.append(UInt8(0x81))  # FIN + TEXT opcode
+    bad_frame.append(UInt8(5))  # MASK bit NOT set, length = 5
+    bad_frame.append(UInt8(104))  # h
+    bad_frame.append(UInt8(101))  # e
+    bad_frame.append(UInt8(108))  # l
+    bad_frame.append(UInt8(108))  # l
+    bad_frame.append(UInt8(111))  # o
+    raw_client.write_all(Span[UInt8](bad_frame))
+
+    with assert_raises():
+        _ = conn.recv()
+
+    raw_client.close()
+    srv.close()
+
+
 def main():
     print("=" * 60)
-    print("test_ws.mojo — WsFrame codec + WsClient")
+    print("test_ws.mojo — WsFrame codec + WsClient + WsServer")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()
