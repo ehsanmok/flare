@@ -1,19 +1,28 @@
 """HTTP content-encoding helpers: gzip and deflate via zlib FFI.
 
-Uses the top-level ``ffi`` stdlib module (nightly):
-    https://docs.modular.com/mojo/std/ffi/
+Uses ``external_call`` from the stdlib ``ffi`` module (nightly) to invoke
+zlib symbols directly — no wrapper shared library needed.
 
-zlib is declared in pixi.toml so ``$CONDA_PREFIX/lib/libz.so.1`` is always
-available at runtime regardless of host OS.
+z_stream layout (LP64: Linux/macOS 64-bit):
 
-Key zlib symbols used:
-    inflateInit2  — initialise decompressor (windowBits controls format)
-    inflate       — feed compressed chunks and receive plaintext output
-    inflateEnd    — release decompressor state
-    deflateInit2  — initialise compressor
-    deflate       — compress
-    deflateEnd    — release compressor state
+    offset  size  field
+        0     8   next_in   (pointer)
+        8     4   avail_in  (unsigned int)
+       12     4   (padding)
+       16     8   total_in  (unsigned long)
+       24     8   next_out  (pointer)
+       32     4   avail_out (unsigned int)
+       36     4   (padding)
+       40     8   total_out (unsigned long)
+       ...
+    = 112 bytes total
+
+All pointer arguments to zlib are passed as ``Int`` (pointer-sized on
+64-bit) to avoid Mojo's origin/mutability inference issues with FFI.
 """
+
+from ffi import external_call
+from memory import UnsafePointer, stack_allocation
 
 
 struct Encoding:
@@ -32,10 +41,116 @@ struct Encoding:
     """Brotli encoding (future; requires libbrotlidec)."""
 
 
+# z_stream offsets (LP64)
+comptime _Z_STREAM_SIZE: Int = 112
+comptime _Z_NEXT_IN_OFF: Int = 0  # pointer (Int)
+comptime _Z_AVAIL_IN_OFF: Int = 8  # UInt32
+comptime _Z_NEXT_OUT_OFF: Int = 24  # pointer (Int)
+comptime _Z_AVAIL_OUT_OFF: Int = 32  # UInt32
+
+comptime _Z_OK: Int32 = 0
+comptime _Z_STREAM_END: Int32 = 1
+comptime _Z_BUF_ERROR: Int32 = -5
+comptime _Z_NO_FLUSH: Int32 = 0
+comptime _Z_FINISH: Int32 = 4
+comptime _Z_CHUNK: Int = 65536
+
+# ABI version prefix — zlib only checks first char ('1')
+comptime _ZLIB_VER: String = "1.2.11"
+
+
+fn _inflate_impl(data: Span[UInt8], window_bits: Int32) raises -> List[UInt8]:
+    """Core inflate loop for any zlib ``windowBits`` setting.
+
+    Args:
+        data:        Compressed input bytes.
+        window_bits: zlib windowBits (47=gzip auto, 15=zlib, -15=raw deflate).
+
+    Returns:
+        Decompressed bytes.
+
+    Raises:
+        Error: If zlib initialisation or decompression fails.
+    """
+    if len(data) == 0:
+        return List[UInt8]()
+
+    # Allocate and zero-initialise z_stream on the stack
+    var strm = stack_allocation[_Z_STREAM_SIZE, UInt8]()
+    for i in range(_Z_STREAM_SIZE):
+        (strm + i).init_pointee_copy(UInt8(0))
+
+    # next_in = data pointer, avail_in = len(data)
+    (strm + _Z_NEXT_IN_OFF).bitcast[Int]().init_pointee_copy(
+        Int(data.unsafe_ptr())
+    )
+    (strm + _Z_AVAIL_IN_OFF).bitcast[UInt32]().init_pointee_copy(
+        UInt32(len(data))
+    )
+
+    var ver = _ZLIB_VER
+
+    # inflateInit2_(strm, windowBits, version, stream_size)
+    var init_rc = external_call["inflateInit2_", Int32, Int, Int32, Int, Int32](
+        Int(strm),
+        window_bits,
+        Int(ver.unsafe_ptr()),
+        Int32(_Z_STREAM_SIZE),
+    )
+    if init_rc != _Z_OK:
+        raise Error("inflateInit2_ failed with code " + String(Int(init_rc)))
+
+    var out = List[UInt8](capacity=len(data) * 3)
+    var chunk = List[UInt8](capacity=_Z_CHUNK)
+    chunk.resize(_Z_CHUNK, 0)
+    var done = False
+
+    while not done:
+        # Set next_out and avail_out each iteration
+        (strm + _Z_NEXT_OUT_OFF).bitcast[Int]().init_pointee_copy(
+            Int(chunk.unsafe_ptr())
+        )
+        (strm + _Z_AVAIL_OUT_OFF).bitcast[UInt32]().init_pointee_copy(
+            UInt32(_Z_CHUNK)
+        )
+
+        var ret = external_call["inflate", Int32, Int, Int32](
+            Int(strm), _Z_NO_FLUSH
+        )
+
+        var avail_out_remaining = Int(
+            (strm + _Z_AVAIL_OUT_OFF).bitcast[UInt32]()[]
+        )
+        var have = _Z_CHUNK - avail_out_remaining
+        for i in range(have):
+            out.append(chunk[i])
+
+        if ret == _Z_STREAM_END:
+            done = True
+        elif ret == _Z_BUF_ERROR:
+            var avail_in_rem = (strm + _Z_AVAIL_IN_OFF).bitcast[UInt32]()[]
+            if avail_in_rem == 0:
+                done = True
+            else:
+                _ = external_call["inflateEnd", Int32, Int](Int(strm))
+                raise Error("inflate Z_BUF_ERROR with remaining input")
+        elif ret != _Z_OK:
+            _ = external_call["inflateEnd", Int32, Int](Int(strm))
+            raise Error("inflate failed with code " + String(Int(ret)))
+        else:
+            var avail_in_rem = (strm + _Z_AVAIL_IN_OFF).bitcast[UInt32]()[]
+            if avail_in_rem == 0:
+                done = True
+
+    _ = external_call["inflateEnd", Int32, Int](Int(strm))
+    return out^
+
+
 fn decompress_gzip(data: Span[UInt8]) raises -> List[UInt8]:
     """Decompress a gzip-encoded buffer using zlib.
 
-    Uses ``inflateInit2`` with ``windowBits = 47`` (gzip auto-detect).
+    Uses ``inflateInit2_`` with ``windowBits = 47`` (auto-detect gzip or
+    zlib-wrapped deflate).
 
     Args:
         data: The compressed bytes to decompress.
@@ -44,14 +159,9 @@ fn decompress_gzip(data: Span[UInt8]) raises -> List[UInt8]:
         The decompressed bytes.
 
     Raises:
-        HttpError: If the input is not valid gzip data or decompression fails.
+        Error: If the input is not valid gzip data or decompression fails.
     """
-    # TODO:
-    # from ffi import external_call
-    # z_stream_init → inflateInit2(stream, 47)    # 47 = 15 | 32 gzip/zlib auto
-    # while inflate returns Z_OK or Z_BUF_ERROR: collect output chunks
-    # inflateEnd
-    raise Error("decompress_gzip: not yet implemented")
+    return _inflate_impl(data, Int32(47))
 
 
 fn decompress_deflate(data: Span[UInt8]) raises -> List[UInt8]:
@@ -68,9 +178,12 @@ fn decompress_deflate(data: Span[UInt8]) raises -> List[UInt8]:
         The decompressed bytes.
 
     Raises:
-        HttpError: If the input is not valid deflate data.
+        Error: If neither zlib-wrapped nor raw deflate succeeds.
     """
-    raise Error("decompress_deflate: not yet implemented")
+    try:
+        return _inflate_impl(data, Int32(15))
+    except:
+        return _inflate_impl(data, Int32(-15))
 
 
 fn compress_gzip(data: Span[UInt8], level: Int = 6) raises -> List[UInt8]:
@@ -84,9 +197,86 @@ fn compress_gzip(data: Span[UInt8], level: Int = 6) raises -> List[UInt8]:
         The gzip-compressed bytes.
 
     Raises:
-        HttpError: If compression fails.
+        Error: If compression fails.
     """
-    raise Error("compress_gzip: not yet implemented")
+    if len(data) == 0:
+        return List[UInt8]()
+
+    var strm = stack_allocation[_Z_STREAM_SIZE, UInt8]()
+    for i in range(_Z_STREAM_SIZE):
+        (strm + i).init_pointee_copy(UInt8(0))
+
+    (strm + _Z_NEXT_IN_OFF).bitcast[Int]().init_pointee_copy(
+        Int(data.unsafe_ptr())
+    )
+    (strm + _Z_AVAIL_IN_OFF).bitcast[UInt32]().init_pointee_copy(
+        UInt32(len(data))
+    )
+
+    var ver = _ZLIB_VER
+
+    # deflateInit2_(strm, level, method=8, windowBits=31, memLevel=8,
+    #               strategy=0, version, stream_size)
+    # windowBits = 15 | 16 = 31 → gzip container
+    var init_rc = external_call[
+        "deflateInit2_",
+        Int32,
+        Int,
+        Int32,
+        Int32,
+        Int32,
+        Int32,
+        Int32,
+        Int,
+        Int32,
+    ](
+        Int(strm),
+        Int32(level),
+        Int32(8),  # Z_DEFLATED
+        Int32(31),  # gzip container (15 | 16)
+        Int32(8),  # memLevel default
+        Int32(0),  # Z_DEFAULT_STRATEGY
+        Int(ver.unsafe_ptr()),
+        Int32(_Z_STREAM_SIZE),
+    )
+
+    if init_rc != _Z_OK:
+        raise Error("deflateInit2_ failed with code " + String(Int(init_rc)))
+
+    var out = List[UInt8](capacity=len(data) + (len(data) >> 10) + 32)
+    var chunk = List[UInt8](capacity=_Z_CHUNK)
+    chunk.resize(_Z_CHUNK, 0)
+    var done = False
+
+    while not done:
+        (strm + _Z_NEXT_OUT_OFF).bitcast[Int]().init_pointee_copy(
+            Int(chunk.unsafe_ptr())
+        )
+        (strm + _Z_AVAIL_OUT_OFF).bitcast[UInt32]().init_pointee_copy(
+            UInt32(_Z_CHUNK)
+        )
+
+        var ret = external_call["deflate", Int32, Int, Int32](
+            Int(strm), _Z_FINISH
+        )
+
+        var avail_out_rem = Int((strm + _Z_AVAIL_OUT_OFF).bitcast[UInt32]()[])
+        var have = _Z_CHUNK - avail_out_rem
+        for i in range(have):
+            out.append(chunk[i])
+
+        if ret == _Z_STREAM_END:
+            done = True
+        elif ret != _Z_OK and ret != _Z_BUF_ERROR:
+            _ = external_call["deflateEnd", Int32, Int](Int(strm))
+            raise Error("deflate failed with code " + String(Int(ret)))
+        else:
+            var avail_in_rem = (strm + _Z_AVAIL_IN_OFF).bitcast[UInt32]()[]
+            if avail_in_rem == 0:
+                done = True
+
+    _ = external_call["deflateEnd", Int32, Int](Int(strm))
+    return out^
 
 
 fn decode_content(data: Span[UInt8], encoding: String) raises -> List[UInt8]:
@@ -97,18 +287,17 @@ fn decode_content(data: Span[UInt8], encoding: String) raises -> List[UInt8]:
         encoding: The value of the HTTP ``Content-Encoding`` header.
 
     Returns:
-        The decoded (plain) bytes. If ``encoding`` is ``"identity"`` or
-        ``""`` the original bytes are returned without copying.
+        Decoded bytes. If ``encoding`` is ``"identity"`` or ``""``
+        the original bytes are copied and returned.
 
     Raises:
-        HttpError: If the encoding is not supported or decompression fails.
+        Error: If the encoding is not supported or decompression fails.
     """
     if encoding == Encoding.GZIP:
         return decompress_gzip(data)
     elif encoding == Encoding.DEFLATE:
         return decompress_deflate(data)
     elif encoding == Encoding.IDENTITY or encoding == "":
-        # No copy — caller should take ownership if desired
         var out = List[UInt8](capacity=len(data))
         for b in data:
             out.append(b)
