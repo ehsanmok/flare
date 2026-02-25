@@ -83,11 +83,10 @@ fi
 export FLARE_ZLIB_LIB="$TARGET"
 
 # ── Preload on Linux so Mojo's JIT can call into the library ──────────────────
-# Mojo's LLVM JIT crashes on Linux when calling functions obtained via
-# OwnedDLHandle.get_function() into a freshly-dlopen'd shared library.
-# Pre-mapping the library at process startup (via LD_PRELOAD) avoids this:
-# the code pages are already present before the JIT runs, so indirect calls
-# through function pointers work correctly.  macOS does not have this issue.
+# On Linux, Mojo's LLVM JIT crashes when calling functions obtained via
+# OwnedDLHandle.get_function() into a freshly-dlopen'd library (code pages not
+# yet present in the JIT's address space).  Pre-mapping at process startup via
+# LD_PRELOAD ensures pages are resident before the JIT runs.
 if [[ "$(uname)" != "Darwin" ]]; then
     export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
 fi

@@ -7,9 +7,13 @@
  * were modified by a foreign call, leading to incorrect "have = 0" reads.
  *
  * All functions take pointer arguments as void* (mapped to Mojo Int) and
- * integer parameters as int (mapped to Mojo c_int / Int32).  Mixed 32/64-bit
- * argument packing in Mojo's JIT kgen-pack does not arise because no Mojo
- * code needs to re-read zlib's internal state.
+ * integer parameters as int (mapped to Mojo c_int / Int32).
+ *
+ * Mojo callers must keep the OwnedDLHandle for this library alive across every
+ * call by passing it as a 'read' (borrowed) parameter.  Mojo's ASAP destruction
+ * policy otherwise calls dlclose() immediately after get_function() returns --
+ * before the retrieved function pointer is ever invoked -- unmapping the library
+ * and crashing the JIT on both macOS ARM64 and Linux.
  *
  * Build: see build.sh
  */
