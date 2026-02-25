@@ -445,6 +445,69 @@ struct HttpClient(Movable):
         var req = Request(method=Method.HEAD, url=self._resolve_url(url))
         return self.send(req)
 
+    fn patch(self, url: String, body: String) raises -> Response:
+        """Perform a PATCH request with a JSON string body.
+
+        Sets ``Content-Type: application/json`` automatically.
+
+        Args:
+            url:  The target URL (absolute or relative to ``base_url``).
+            body: The JSON request body as a ``String``.
+
+        Returns:
+            The server's ``Response``.
+
+        Raises:
+            NetworkError:     On connection or I/O failure.
+            TooManyRedirects: If the redirect limit is exceeded.
+        """
+        var body_bytes = List[UInt8](body.as_bytes())
+        var req = Request(
+            method=Method.PATCH, url=self._resolve_url(url), body=body_bytes^
+        )
+        req.headers.set("Content-Type", "application/json")
+        return self.send(req)
+
+    fn patch(self, url: String, body: JsonValue) raises -> Response:
+        """Perform a PATCH request with a ``mojson.Value`` body.
+
+        Serialises ``body`` to JSON with ``dumps`` and sets
+        ``Content-Type: application/json`` automatically.
+
+        Args:
+            url:  The target URL (absolute or relative to ``base_url``).
+            body: A ``mojson.Value`` to serialise and send.
+
+        Returns:
+            The server's ``Response``.
+
+        Raises:
+            NetworkError:     On connection or I/O failure.
+            TooManyRedirects: If the redirect limit is exceeded.
+        """
+        return self.patch(url, dumps(body))
+
+    fn patch(self, url: String, body: List[UInt8]) raises -> Response:
+        """Perform a PATCH request with a raw byte body.
+
+        No ``Content-Type`` header is set automatically.
+
+        Args:
+            url:  The target URL (absolute or relative to ``base_url``).
+            body: The raw request body bytes.
+
+        Returns:
+            The server's ``Response``.
+
+        Raises:
+            NetworkError:     On connection or I/O failure.
+            TooManyRedirects: If the redirect limit is exceeded.
+        """
+        var req = Request(
+            method=Method.PATCH, url=self._resolve_url(url), body=body
+        )
+        return self.send(req)
+
     # ── Core ──────────────────────────────────────────────────────────────────
 
     fn send(self, req: Request) raises -> Response:
@@ -559,7 +622,9 @@ struct HttpClient(Movable):
 
         # ── Connect and send ───────────────────────────────────────────────
         if u.is_tls():
-            var stream = TlsStream.connect(u.host, u.port, self._config)
+            var stream = TlsStream.connect_timeout(
+                u.host, u.port, self._config, self._timeout_ms
+            )
             var wire_bytes = wire.as_bytes()
             stream.write_all(Span[UInt8](wire_bytes))
             if len(body) > 0:
@@ -574,7 +639,9 @@ struct HttpClient(Movable):
             var addrs = resolve_v4(u.host)
             if len(addrs) == 0:
                 raise NetworkError("DNS resolution failed for: " + u.host)
-            var stream = TcpStream.connect(SocketAddr(addrs[0], u.port))
+            var stream = TcpStream.connect_timeout(
+                SocketAddr(addrs[0], u.port), self._timeout_ms
+            )
             var wire_bytes = wire.as_bytes()
             stream.write_all(Span[UInt8](wire_bytes))
             if len(body) > 0:
@@ -1166,3 +1233,56 @@ fn head(url: String) raises -> Response:
         NetworkError: On connection or I/O failure.
     """
     return HttpClient().head(url)
+
+
+fn patch(url: String, body: String) raises -> Response:
+    """Perform a one-shot HTTP PATCH with a JSON string body.
+
+    Sets ``Content-Type: application/json`` automatically.
+
+    Args:
+        url:  The target URL.
+        body: The JSON request body as a ``String``.
+
+    Returns:
+        The server's ``Response``.
+
+    Raises:
+        NetworkError: On connection or I/O failure.
+    """
+    return HttpClient().patch(url, body)
+
+
+fn patch(url: String, body: JsonValue) raises -> Response:
+    """Perform a one-shot HTTP PATCH with a ``mojson.Value`` body.
+
+    Serialises ``body`` to JSON with ``dumps`` and sets
+    ``Content-Type: application/json`` automatically.
+
+    Args:
+        url:  The target URL.
+        body: A ``mojson.Value`` to serialise and send.
+
+    Returns:
+        The server's ``Response``.
+
+    Raises:
+        NetworkError: On connection or I/O failure.
+    """
+    return HttpClient().patch(url, body)
+
+
+fn patch(url: String, body: List[UInt8]) raises -> Response:
+    """Perform a one-shot HTTP PATCH with a raw byte body.
+
+    Args:
+        url:  The target URL.
+        body: The raw request body bytes.
+
+    Returns:
+        The server's ``Response``.
+
+    Raises:
+        NetworkError: On connection or I/O failure.
+    """
+    return HttpClient().patch(url, body)

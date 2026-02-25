@@ -70,5 +70,5 @@ from .response import Response, Status
 from .encoding import Encoding, decompress_gzip, decompress_deflate
 from .error import HttpError, TooManyRedirects
 from .auth import Auth, BasicAuth, BearerAuth
-from .client import HttpClient, get, post, put, delete, head
+from .client import HttpClient, get, post, put, patch, delete, head
 from .server import HttpServer
