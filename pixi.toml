@@ -83,20 +83,16 @@ docs       = "mojodoc ./flare --open"
 docs-build = "mojodoc ./flare --out-dir target/doc --base-url /flare/"
 
 # ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
-# MOZZ_PATH: set to local mozz checkout for development; switch to installed
-# path once mozz is published.
-#
-#   export MOZZ_PATH=$HOME/workspace/mozz   (or set in pixi.toml [activation])
-#
-# Each fuzz task includes mozz with -I $MOZZ_PATH so that
-# `from mozz import ...` resolves to the local source.
-fuzz-ws            = "mojo -I . -I $HOME/workspace/mozz fuzz/fuzz_ws_frame.mojo"
-fuzz-url           = "mojo -I . -I $HOME/workspace/mozz fuzz/fuzz_url.mojo"
-fuzz-headers       = "mojo -I . -I $HOME/workspace/mozz fuzz/fuzz_http_headers.mojo"
-fuzz-http-response = "mojo -I . -I $HOME/workspace/mozz fuzz/fuzz_http_response.mojo"
-prop-ws            = "mojo -I . -I $HOME/workspace/mozz fuzz/prop_ws_roundtrip.mojo"
-prop-headers       = "mojo -I . -I $HOME/workspace/mozz fuzz/prop_headers.mojo"
-prop-auth          = "mojo -I . -I $HOME/workspace/mozz fuzz/prop_auth.mojo"
+# mozz is installed as a pixi dependency (feature.fuzz) and packaged as
+# mozz.mojopkg into $PREFIX/lib/mojo/ — no -I flag needed.
+fuzz-ws            = "mojo -I . fuzz/fuzz_ws_frame.mojo"
+fuzz-url           = "mojo -I . fuzz/fuzz_url.mojo"
+fuzz-headers       = "mojo -I . fuzz/fuzz_http_headers.mojo"
+fuzz-http-response = "mojo -I . fuzz/fuzz_http_response.mojo"
+prop-ws            = "mojo -I . fuzz/prop_ws_roundtrip.mojo"
+prop-headers       = "mojo -I . fuzz/prop_headers.mojo"
+prop-auth          = "mojo -I . fuzz/prop_auth.mojo"
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "prop-ws", "prop-headers", "prop-auth"] }
 
 # ── Format ────────────────────────────────────────────────────────────────────
 install-pre-commit = "pre-commit install"
