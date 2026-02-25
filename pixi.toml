@@ -46,8 +46,8 @@ test-dns         = "mojo -I . tests/test_dns.mojo"          # Phase 2 — 17 tes
 test-tcp         = "mojo -I . tests/test_tcp.mojo"          # Phase 3 — 19 tests
 test-udp         = "mojo -I . tests/test_udp.mojo"          # Phase 4 — 10 tests
 test-tls         = "mojo -I . tests/test_tls.mojo"          # Phase 5 — 16 tests
-test-http        = "mojo -I . tests/test_http.mojo"         # Phase 6 — 36 tests
-test-ws          = "mojo -I . tests/test_ws.mojo"           # Phase 7 — 30 tests
+test-http        = "mojo -I . tests/test_http.mojo"         # Phase 6 — 45 tests
+test-ws          = "mojo -I . tests/test_ws.mojo"           # Phase 7 — 33 tests
 test-ergonomics  = "mojo -I . tests/test_ergonomics.mojo"   # Phase 8 — ergonomics
 
 tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo" }
@@ -89,10 +89,13 @@ fuzz-ws            = "mojo -I . fuzz/fuzz_ws_frame.mojo"
 fuzz-url           = "mojo -I . fuzz/fuzz_url.mojo"
 fuzz-headers       = "mojo -I . fuzz/fuzz_http_headers.mojo"
 fuzz-http-response = "mojo -I . fuzz/fuzz_http_response.mojo"
+fuzz-http-server   = "mojo -I . fuzz/fuzz_http_server.mojo"
+fuzz-ws-server     = "mojo -I . fuzz/fuzz_ws_server.mojo"
 prop-ws            = "mojo -I . fuzz/prop_ws_roundtrip.mojo"
 prop-headers       = "mojo -I . fuzz/prop_headers.mojo"
 prop-auth          = "mojo -I . fuzz/prop_auth.mojo"
-fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "prop-ws", "prop-headers", "prop-auth"] }
+fuzz-encoding      = "mojo -I . fuzz/fuzz_encoding.mojo"
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding"] }
 
 # ── Format ────────────────────────────────────────────────────────────────────
 install-pre-commit = "pre-commit install"
