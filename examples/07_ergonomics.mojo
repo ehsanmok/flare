@@ -4,7 +4,7 @@ Demonstrates the high-level, requests-style interface:
 
   High-level HTTP
   ───────────────
-  - Module-level one-shot helpers: get(), post(), put()
+  - Module-level one-shot helpers: get(), post(), put(), patch(), delete(), head()
   - String body → Content-Type: application/json set automatically
   - mojson.Value body → auto-serialised to JSON
   - HttpClient("https://api.example.com", BearerAuth("tok")) — base URL + auth
@@ -46,6 +46,10 @@ from flare.http import (
     Status,
     get,
     post,
+    put,
+    patch,
+    delete,
+    head,
 )
 from flare.ws import WsClient, WsMessage
 from flare.io import BufReader
@@ -61,11 +65,29 @@ def _demo_oneshot():
     print("── 1. Module-level one-shot helpers ──")
     try:
         var resp = get("http://httpbin.org/get")
-        print("  get()   status:", resp.status, "ok:", resp.ok())
+        print("  get()    status:", resp.status, "ok:", resp.ok())
 
         # String body → Content-Type: application/json set automatically
         var resp2 = post("http://httpbin.org/post", '{"library": "flare"}')
-        print("  post()  status:", resp2.status)
+        print("  post()   status:", resp2.status)
+
+        var resp3 = put("http://httpbin.org/put", '{"action": "replace"}')
+        print("  put()    status:", resp3.status)
+
+        var resp4 = patch("http://httpbin.org/patch", '{"field": "patched"}')
+        print("  patch()  status:", resp4.status)
+
+        var resp5 = delete("http://httpbin.org/delete")
+        print("  delete() status:", resp5.status)
+
+        var resp6 = head("http://httpbin.org/get")
+        print(
+            "  head()   status:",
+            resp6.status,
+            "body:",
+            len(resp6.body),
+            "bytes",
+        )
     except e:
         print("  [SKIP] network unavailable:", String(e))
     print()

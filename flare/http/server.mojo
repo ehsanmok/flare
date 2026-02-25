@@ -125,12 +125,14 @@ fn _handle_connection(
             var resp = handler(req^)
             _write_response(stream, resp)
         except e:
+            var msg500 = "500 Internal Server Error: " + String(e)
+            var body500 = List[UInt8](capacity=len(msg500))
+            for b in msg500.as_bytes():
+                body500.append(b)
             var resp500 = Response(
                 Status.INTERNAL_SERVER_ERROR,
                 reason="Internal Server Error",
-                body=String(
-                    "500 Internal Server Error: " + String(e)
-                ).as_bytes(),
+                body=body500^,
             )
             resp500.headers.set("Content-Type", "text/plain")
             try:
@@ -138,13 +140,17 @@ fn _handle_connection(
             except:
                 pass
     except e:
+        var msg400 = "400 Bad Request: " + String(e)
+        var body400 = List[UInt8](capacity=len(msg400))
+        for b in msg400.as_bytes():
+            body400.append(b)
         var resp400 = Response(
             Status.BAD_REQUEST,
             reason="Bad Request",
-            body=String("400 Bad Request: " + String(e)).as_bytes(),
+            body=body400^,
         )
-        resp400.headers.set("Content-Type", "text/plain")
         try:
+            resp400.headers.set("Content-Type", "text/plain")
             _write_response(stream, resp400)
         except:
             pass
@@ -343,8 +349,6 @@ fn _parse_http_request(
         raise Error("empty request line")
 
     # Split on spaces: "METHOD PATH HTTP/1.1"
-    var method = String(capacity=8)
-    var path = String(capacity=256)
     var sp1 = -1
     for i in range(len(req_line)):
         if req_line.unsafe_ptr()[i] == 32:  # space
@@ -352,13 +356,14 @@ fn _parse_http_request(
             break
     if sp1 < 0:
         raise Error("malformed request line: " + req_line)
-    method = String(req_line[:sp1])
+    var method = String(req_line[:sp1])
 
     var sp2 = -1
     for i in range(sp1 + 1, len(req_line)):
         if req_line.unsafe_ptr()[i] == 32:
             sp2 = i
             break
+    var path: String
     if sp2 < 0:
         path = String(req_line[sp1 + 1 :])
     else:

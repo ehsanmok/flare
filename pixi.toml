@@ -50,18 +50,21 @@ test-http        = "mojo -I . tests/test_http.mojo"         # Phase 6 — 45 tes
 test-ws          = "mojo -I . tests/test_ws.mojo"           # Phase 7 — 33 tests
 test-ergonomics  = "mojo -I . tests/test_ergonomics.mojo"   # Phase 8 — ergonomics
 
-tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo" }
+tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
 
 # ── Examples (mojson-style: runnable + tested as part of 'pixi run tests') ────
-example-addresses  = "mojo -I . examples/01_addresses.mojo"
-example-dns        = "mojo -I . examples/02_dns_resolution.mojo"
-example-errors     = "mojo -I . examples/03_error_handling.mojo"
-example-tcp        = "mojo -I . examples/04_tcp_echo.mojo"
-example-http       = "mojo -I . examples/05_http_get.mojo"
-example-ws         = "mojo -I . examples/06_websocket_echo.mojo"
-example-ergonomics = "mojo -I . examples/07_ergonomics.mojo"    # Phase 8 high-level API
+example-addresses   = "mojo -I . examples/01_addresses.mojo"
+example-dns         = "mojo -I . examples/02_dns_resolution.mojo"
+example-errors      = "mojo -I . examples/03_error_handling.mojo"
+example-tcp         = "mojo -I . examples/04_tcp_echo.mojo"
+example-http        = "mojo -I . examples/05_http_get.mojo"
+example-ws          = "mojo -I . examples/06_websocket_echo.mojo"
+example-ergonomics  = "mojo -I . examples/07_ergonomics.mojo"    # Phase 8 high-level API
+example-http-server = "mojo -I . examples/08_http_server.mojo"   # HttpServer loopback
+example-ws-server   = "mojo -I . examples/09_ws_server.mojo"     # WsServer loopback
+example-encoding    = "mojo -I . examples/10_encoding.mojo"      # gzip/deflate encoding
 
-examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo" }
+examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
 
 # ── Benchmarks ────────────────────────────────────────────────────────────────
 # bench-parse:   IP parsing + DNS resolution throughput (confirms SIMD NOT useful here)

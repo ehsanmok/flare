@@ -67,7 +67,13 @@ from .headers import HeaderMap, HeaderInjectionError
 from .url import Url, UrlParseError
 from .request import Request, Method
 from .response import Response, Status
-from .encoding import Encoding, decompress_gzip, decompress_deflate
+from .encoding import (
+    Encoding,
+    compress_gzip,
+    decompress_gzip,
+    decompress_deflate,
+    decode_content,
+)
 from .error import HttpError, TooManyRedirects
 from .auth import Auth, BasicAuth, BearerAuth
 from .client import HttpClient, get, post, put, patch, delete, head
