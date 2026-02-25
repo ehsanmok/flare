@@ -16,9 +16,9 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # Binary dependencies are specified in recipe.yaml for rattler-build backend
 
 [activation]
-# Auto-build TLS FFI wrapper on environment activation (idempotent).
-# Requires OpenSSL from conda-forge (declared in [dependencies]).
-scripts = ["flare/tls/ffi/build.sh"]
+# Auto-build FFI wrapper libraries on environment activation (idempotent).
+# Requires OpenSSL and zlib from conda-forge (declared in [dependencies]).
+scripts = ["flare/tls/ffi/build.sh", "flare/http/ffi/build.sh"]
 
 [dependencies]
 mojo             = "<1.0.0"
