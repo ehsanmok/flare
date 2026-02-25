@@ -370,7 +370,6 @@ def test_http_server_get_loopback():
     var raw_req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
     var raw_req_bytes = raw_req.as_bytes()
     client.write_all(Span[UInt8](raw_req_bytes))
-    client.close()
 
     # Server side — parse + respond
     from flare.http.server import _parse_http_request, _write_response
@@ -382,6 +381,10 @@ def test_http_server_get_loopback():
     var resp = handler(req^)
     _write_response(server_stream, resp)
     server_stream.close()
+
+    # Close client only after server has finished writing — closing before
+    # _write_response tears down the socket and causes BrokenPipe.
+    client.close()
     srv.close()
 
 
