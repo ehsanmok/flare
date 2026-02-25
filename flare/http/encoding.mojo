@@ -3,6 +3,13 @@
 Uses ``external_call`` from the stdlib ``ffi`` module (nightly) to invoke
 zlib symbols directly — no wrapper shared library needed.
 
+On macOS ``libz.dylib`` is always in the system dyld cache, so ``external_call``
+finds its symbols without any extra setup.  On Linux the Mojo JIT does **not**
+auto-load ``libz.so``, causing a "Symbols not found" error.  The fix is to
+call ``OwnedDLHandle(zlib_path)`` before any ``external_call`` into zlib, which
+``dlopen``s the library and registers its symbols with the JIT session.  The
+handle is kept alive on the stack for the duration of each function.
+
 z_stream layout (LP64: Linux/macOS 64-bit):
 
     offset  size  field
@@ -21,8 +28,26 @@ All pointer arguments to zlib are passed as ``Int`` (pointer-sized on
 64-bit) to avoid Mojo's origin/mutability inference issues with FFI.
 """
 
-from ffi import external_call
+from sys import CompilationTarget
+from ffi import external_call, OwnedDLHandle
 from memory import UnsafePointer, stack_allocation
+
+
+fn _zlib_path() -> String:
+    """Return the platform-specific path to the zlib shared library.
+
+    On macOS, ``libz.dylib`` is part of the system dyld cache.
+    On Linux, ``libz.so.1`` is the stable ABI-versioned name.
+
+    Returns:
+        Absolute or linker-searchable path for ``OwnedDLHandle``.
+    """
+
+    @parameter
+    if CompilationTarget.is_macos():
+        return "libz.dylib"
+    else:
+        return "libz.so.1"
 
 
 struct Encoding:
@@ -62,6 +87,10 @@ comptime _ZLIB_VER: String = "1.2.11"
 fn _inflate_impl(data: Span[UInt8], window_bits: Int32) raises -> List[UInt8]:
     """Core inflate loop for any zlib ``windowBits`` setting.
 
+    On Linux the Mojo JIT won't find zlib symbols unless the library has been
+    explicitly ``dlopen``'d.  ``_zlib_handle`` ensures that happens before any
+    ``external_call`` into zlib.
+
     Args:
         data:        Compressed input bytes.
         window_bits: zlib windowBits (47=gzip auto, 15=zlib, -15=raw deflate).
@@ -74,6 +103,9 @@ fn _inflate_impl(data: Span[UInt8], window_bits: Int32) raises -> List[UInt8]:
     """
     if len(data) == 0:
         return List[UInt8]()
+
+    # Load libz so its symbols are visible to external_call on Linux.
+    var _zlib_handle = OwnedDLHandle(_zlib_path())
 
     # Allocate and zero-initialise z_stream on the stack
     var strm = stack_allocation[_Z_STREAM_SIZE, UInt8]()
@@ -201,6 +233,9 @@ fn compress_gzip(data: Span[UInt8], level: Int = 6) raises -> List[UInt8]:
     """
     if len(data) == 0:
         return List[UInt8]()
+
+    # Load libz so its symbols are visible to external_call on Linux.
+    var _zlib_handle = OwnedDLHandle(_zlib_path())
 
     var strm = stack_allocation[_Z_STREAM_SIZE, UInt8]()
     for i in range(_Z_STREAM_SIZE):
