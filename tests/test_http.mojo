@@ -426,7 +426,8 @@ def test_http_server_post_body_loopback():
 
 
 def test_gzip_roundtrip():
-    """compress_gzip → decompress_gzip must reproduce the original bytes."""
+    """Round-trip: compress_gzip → decompress_gzip must reproduce the original bytes.
+    """
     from flare.http.encoding import compress_gzip, decompress_gzip
 
     var original = (
@@ -443,7 +444,7 @@ def test_gzip_roundtrip():
 
 
 def test_gzip_empty_input():
-    """compress_gzip of empty bytes returns empty."""
+    """Empty input to compress_gzip returns empty output."""
     from flare.http.encoding import compress_gzip, decompress_gzip
 
     var empty = List[UInt8]()
@@ -454,7 +455,7 @@ def test_gzip_empty_input():
 
 
 def test_gzip_level_1_roundtrip():
-    """compress_gzip at level 1 (fastest) must still roundtrip correctly."""
+    """Level-1 (fastest) compress_gzip must still roundtrip correctly."""
     from flare.http.encoding import compress_gzip, decompress_gzip
 
     var data = "level1 fast compression test".as_bytes()
@@ -466,7 +467,7 @@ def test_gzip_level_1_roundtrip():
 
 
 def test_deflate_roundtrip():
-    """decompress_deflate of known zlib-wrapped and raw-deflate payloads."""
+    """Known zlib-wrapped and raw-deflate payloads must decompress correctly."""
     from flare.http.encoding import decompress_deflate
 
     # Known plaintext: "deflate round-trip test bytes" (29 bytes)
@@ -513,8 +514,8 @@ def test_deflate_roundtrip():
     ]
     var out1 = decompress_deflate(Span[UInt8](zlib_wrapped))
     assert_equal(len(out1), expected_len)
-    assert_equal(out1[0], ord("d"))
-    assert_equal(out1[28], ord("s"))
+    assert_equal(out1[0], UInt8(ord("d")))
+    assert_equal(out1[28], UInt8(ord("s")))
 
     # raw deflate (windowBits=-15) — zlib bytes without 2-byte header + 4-byte adler32
     var raw: List[UInt8] = [
@@ -550,12 +551,12 @@ def test_deflate_roundtrip():
     ]
     var out2 = decompress_deflate(Span[UInt8](raw))
     assert_equal(len(out2), expected_len)
-    assert_equal(out2[0], ord("d"))
-    assert_equal(out2[28], ord("s"))
+    assert_equal(out2[0], UInt8(ord("d")))
+    assert_equal(out2[28], UInt8(ord("s")))
 
 
 def test_decode_content_identity():
-    """decode_content with identity encoding copies bytes unchanged."""
+    """Identity encoding in decode_content copies bytes unchanged."""
     from flare.http.encoding import decode_content
 
     var data = "no encoding".as_bytes()
@@ -564,7 +565,7 @@ def test_decode_content_identity():
 
 
 def test_decode_content_unsupported():
-    """decode_content with an unsupported encoding raises an error."""
+    """Unsupported encoding in decode_content raises an error."""
     from flare.http.encoding import decode_content
 
     var data = List[UInt8]()
