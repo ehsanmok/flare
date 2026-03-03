@@ -202,8 +202,7 @@ struct TcpStream(Movable):
         var sock = RawSocket(AF_INET, SOCK_STREAM)
         var sa = _build_sockaddr_in(addr)
 
-        @parameter
-        if CompilationTarget.is_macos():
+        comptime if CompilationTarget.is_macos():
             # macOS/arm64: use C helper to avoid Mojo variadic fcntl ABI bug.
             var lib = OwnedDLHandle(_find_flare_lib())
             var fn_ct = lib.get_function[

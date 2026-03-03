@@ -201,8 +201,7 @@ fn _fill_sockaddr_in(
         point to at least 4 valid bytes.
     """
 
-    @parameter
-    if CompilationTarget.is_macos():
+    comptime if CompilationTarget.is_macos():
         # BSD-style: first byte is struct length, second is family
         (buf + 0).init_pointee_copy(UInt8(16))  # sin_len
         (buf + 1).init_pointee_copy(UInt8(2))  # AF_INET

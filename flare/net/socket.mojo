@@ -318,8 +318,7 @@ struct RawSocket(Movable):
             NetworkError: If the underlying ``fcntl(F_SETFL)`` call fails.
         """
 
-        @parameter
-        if CompilationTarget.is_macos():
+        comptime if CompilationTarget.is_macos():
             var lib = OwnedDLHandle(_find_flare_lib())
             var fn_nb = lib.get_function[fn(c_int, c_int) -> c_int](
                 "flare_set_nonblocking"

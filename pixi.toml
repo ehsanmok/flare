@@ -35,8 +35,26 @@ mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" 
 [feature.fuzz.dependencies]
 mozz = { git = "https://github.com/ehsanmok/mozz.git", branch = "main" }
 
+[feature.fuzz.tasks]
+# ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
+# mozz is installed as a pixi dependency (feature.fuzz) and packaged as
+# mozz.mojopkg into $PREFIX/lib/mojo/ — no -I flag needed.
+# Run with: pixi run --environment fuzz <task>
+fuzz-ws            = "mojo -I . fuzz/fuzz_ws_frame.mojo"
+fuzz-url           = "mojo -I . fuzz/fuzz_url.mojo"
+fuzz-headers       = "mojo -I . fuzz/fuzz_http_headers.mojo"
+fuzz-http-response = "mojo -I . fuzz/fuzz_http_response.mojo"
+fuzz-http-server   = "mojo -I . fuzz/fuzz_http_server.mojo"
+fuzz-ws-server     = "mojo -I . fuzz/fuzz_ws_server.mojo"
+prop-ws            = "mojo -I . fuzz/prop_ws_roundtrip.mojo"
+prop-headers       = "mojo -I . fuzz/prop_headers.mojo"
+prop-auth          = "mojo -I . fuzz/prop_auth.mojo"
+fuzz-encoding      = "mojo -I . fuzz/fuzz_encoding.mojo"
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding"] }
+
 [environments]
-default = { features = ["dev", "fuzz"], solve-group = "default" }
+default = { features = ["dev"], solve-group = "default" }
+fuzz    = { features = ["dev", "fuzz"], solve-group = "default" }
 
 [tasks]
 # ── Tests (mojson-style flat files) ───────────────────────────────────────────
@@ -84,21 +102,6 @@ bench = { cmd = "mojo -I . benchmark/bench_parse.mojo && mojo -I . benchmark/ben
 # docs-build: build static HTML → target/doc/ (for CI / GitHub Pages)
 docs       = "mojodoc ./flare --open"
 docs-build = "mojodoc ./flare --out-dir target/doc --base-url /flare/"
-
-# ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
-# mozz is installed as a pixi dependency (feature.fuzz) and packaged as
-# mozz.mojopkg into $PREFIX/lib/mojo/ — no -I flag needed.
-fuzz-ws            = "mojo -I . fuzz/fuzz_ws_frame.mojo"
-fuzz-url           = "mojo -I . fuzz/fuzz_url.mojo"
-fuzz-headers       = "mojo -I . fuzz/fuzz_http_headers.mojo"
-fuzz-http-response = "mojo -I . fuzz/fuzz_http_response.mojo"
-fuzz-http-server   = "mojo -I . fuzz/fuzz_http_server.mojo"
-fuzz-ws-server     = "mojo -I . fuzz/fuzz_ws_server.mojo"
-prop-ws            = "mojo -I . fuzz/prop_ws_roundtrip.mojo"
-prop-headers       = "mojo -I . fuzz/prop_headers.mojo"
-prop-auth          = "mojo -I . fuzz/prop_auth.mojo"
-fuzz-encoding      = "mojo -I . fuzz/fuzz_encoding.mojo"
-fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding"] }
 
 # ── Format ────────────────────────────────────────────────────────────────────
 install-pre-commit = "pre-commit install"
