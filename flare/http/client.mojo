@@ -921,7 +921,8 @@ fn _extract_body(
     var cl_str = headers.get("Content-Length")
     if len(cl_str) > 0:
         var cl = _parse_int(cl_str)
-        var body = List[UInt8](capacity=cl)
+        var available = len(raw) - body_start
+        var body = List[UInt8](capacity=min(cl, available))
         var end = body_start + cl
         if end > len(raw):
             end = len(raw)
