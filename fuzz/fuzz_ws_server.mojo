@@ -103,7 +103,7 @@ fn prop_mask_bit_honoured(data: List[UInt8]) raises -> Bool:
         return True
     try:
         var result = WsFrame.decode_one(Span[UInt8](data))
-        var frame = result.take_frame()
+        var frame = result^.take_frame()
         var expected_masked = (Int(data[1]) & 0x80) != 0
         if frame.masked != expected_masked:
             return False  # bug: mask bit mismatch
@@ -131,7 +131,7 @@ fn prop_close_code_range(data: List[UInt8]) raises -> Bool:
     """
     try:
         var result = WsFrame.decode_one(Span[UInt8](data))
-        var frame = result.take_frame()
+        var frame = result^.take_frame()
         if frame.opcode == WsOpcode.CLOSE:
             # Accessing the payload is fine; no assertion on code value
             _ = len(frame.payload)
@@ -283,7 +283,7 @@ fn main() raises:
         0x51,
         0x58,
     ]
-    frame_seeds.append(masked_hello)
+    frame_seeds.append(masked_hello^)
 
     # Valid masked binary frame (opcode=0x02)
     var masked_binary: List[UInt8] = [
@@ -298,11 +298,11 @@ fn main() raises:
         0xBE,
         0xEF,
     ]
-    frame_seeds.append(masked_binary)
+    frame_seeds.append(masked_binary^)
 
     # Valid masked PING (opcode=0x09)
     var masked_ping: List[UInt8] = [0x89, 0x80, 0x00, 0x00, 0x00, 0x00]
-    frame_seeds.append(masked_ping)
+    frame_seeds.append(masked_ping^)
 
     # Valid masked CLOSE normal (opcode=0x08, code=1000)
     var masked_close: List[UInt8] = [
@@ -315,7 +315,7 @@ fn main() raises:
         0x03,
         0xE8,
     ]
-    frame_seeds.append(masked_close)
+    frame_seeds.append(masked_close^)
 
     # Masked 16-bit length frame (len=126, actual len=200)
     var m16 = List[UInt8](unsafe_uninit_length=8 + 200)
@@ -333,22 +333,22 @@ fn main() raises:
 
     # Unmasked frame (should decode as unmasked, server would then reject)
     var unmasked: List[UInt8] = [0x81, 0x05, 0x68, 0x65, 0x6C, 0x6C, 0x6F]
-    frame_seeds.append(unmasked)
+    frame_seeds.append(unmasked^)
 
     # Empty input
     frame_seeds.append(List[UInt8]())
 
     # Single byte
     var single: List[UInt8] = [0x81]
-    frame_seeds.append(single)
+    frame_seeds.append(single^)
 
     # Truncated header
     var trunc: List[UInt8] = [0x82, 0x85]
-    frame_seeds.append(trunc)
+    frame_seeds.append(trunc^)
 
     # Garbage
     var garbage: List[UInt8] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-    frame_seeds.append(garbage)
+    frame_seeds.append(garbage^)
 
     print(
         "2. Fuzzing WsFrame.decode_one() masked/client frames (500 000 runs)..."

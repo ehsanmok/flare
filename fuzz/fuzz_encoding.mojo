@@ -18,7 +18,7 @@ from flare.http.encoding import compress_gzip, decompress_gzip
 
 
 fn target_decompress(data: List[UInt8]) raises:
-    """Feed arbitrary bytes to decompress_gzip.
+    """This target feeds arbitrary bytes to decompress_gzip.
 
     Structured errors (zlib failures) are expected for random input.
     Crashes (abort, SIGSEGV) are always bugs.
@@ -33,7 +33,7 @@ fn target_decompress(data: List[UInt8]) raises:
 
 
 fn target_roundtrip(data: List[UInt8]) raises:
-    """compress_gzip → decompress_gzip must reproduce original bytes.
+    """This target checks that compress_gzip → decompress_gzip must reproduce original bytes.
 
     Reports a bug message if the roundtrip produces incorrect output.
 

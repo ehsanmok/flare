@@ -25,30 +25,39 @@ jobs:
         uses: prefix-dev/setup-pixi@v0.8.1
         with:
           pixi-version: v0.63.2
-          environments: default   # includes feature.fuzz → installs mozz
+          environments: fuzz   # includes feature.fuzz → installs mozz
           cache: false
           post-cleanup: false
 
       - name: Fuzz WS frame parser
-        run: pixi run fuzz-ws
+        run: pixi run --environment fuzz fuzz-ws
 
       - name: Fuzz URL parser
-        run: pixi run fuzz-url
+        run: pixi run --environment fuzz fuzz-url
 
       - name: Fuzz HTTP headers parser
-        run: pixi run fuzz-headers
+        run: pixi run --environment fuzz fuzz-headers
 
       - name: Fuzz HTTP response parser
-        run: pixi run fuzz-http-response
+        run: pixi run --environment fuzz fuzz-http-response
+
+      - name: Fuzz HTTP server
+        run: pixi run --environment fuzz fuzz-http-server
+
+      - name: Fuzz WS server
+        run: pixi run --environment fuzz fuzz-ws-server
+
+      - name: Fuzz encoding
+        run: pixi run --environment fuzz fuzz-encoding
 
       - name: Property tests — WS roundtrip
-        run: pixi run prop-ws
+        run: pixi run --environment fuzz prop-ws
 
       - name: Property tests — HTTP headers
-        run: pixi run prop-headers
+        run: pixi run --environment fuzz prop-headers
 
       - name: Property tests — Auth
-        run: pixi run prop-auth
+        run: pixi run --environment fuzz prop-auth
 
       - name: Upload crash artifacts
         if: failure()

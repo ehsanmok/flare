@@ -36,7 +36,7 @@ comptime _WS_GUID: String = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 comptime _SHA1_LEN: Int = 20
 
 
-struct WsHandshakeError(Copyable, Movable, Stringable, Writable):
+struct WsHandshakeError(Copyable, Movable, Writable):
     """Raised when the WebSocket opening handshake fails."""
 
     var message: String
@@ -46,9 +46,6 @@ struct WsHandshakeError(Copyable, Movable, Stringable, Writable):
 
     fn write_to[W: Writer, //](self, mut writer: W):
         writer.write("WsHandshakeError: ", self.message)
-
-    fn __str__(self) -> String:
-        return "WsHandshakeError: " + self.message
 
 
 # ── Base64 encoder ────────────────────────────────────────────────────────────

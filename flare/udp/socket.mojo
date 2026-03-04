@@ -45,7 +45,7 @@ from ..net._libc import (
 comptime UDP_MAX_PAYLOAD: Int = 65507
 
 
-struct DatagramTooLarge(Copyable, Movable, Stringable, Writable):
+struct DatagramTooLarge(Copyable, Movable, Writable):
     """Raised when a UDP datagram exceeds the maximum allowed payload size.
 
     Fields:
@@ -83,20 +83,6 @@ struct DatagramTooLarge(Copyable, Movable, Stringable, Writable):
             " bytes (max ",
             self.max_size,
             ")",
-        )
-
-    fn __str__(self) -> String:
-        """Return a human-readable error message.
-
-        Returns:
-            ``"DatagramTooLarge: N bytes (max M)"``.
-        """
-        return (
-            "DatagramTooLarge: "
-            + String(self.size)
-            + " bytes (max "
-            + String(self.max_size)
-            + ")"
         )
 
 

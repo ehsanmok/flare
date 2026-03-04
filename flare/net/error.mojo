@@ -1,6 +1,6 @@
 """Typed network errors for flare.
 
-Every error type implements ``Writable`` and ``Stringable`` so it can be
+Every error type implements ``Writable`` so it can be
 used with ``print()`` and ``String()``. All types also implement ``Copyable``
 and ``Movable`` because errors are often returned from functions, stored in
 Result types, or logged.
@@ -13,7 +13,7 @@ port wherever relevant.
 from format import Writable, Writer
 
 
-struct NetworkError(Copyable, Movable, Stringable, Writable):
+struct NetworkError(Copyable, Movable, Writable):
     """Generic network error — a catch-all for OS errors without a more
     specific typed variant.
 
@@ -51,19 +51,8 @@ struct NetworkError(Copyable, Movable, Stringable, Writable):
             writer.write("(errno ", self.code, ")")
         writer.write(": ", self.message)
 
-    fn __str__(self) -> String:
-        """Return a human-readable one-liner.
 
-        Returns:
-            String of the form ``"NetworkError(errno N): message"``.
-        """
-        var s = String("NetworkError")
-        if self.code != 0:
-            s += "(errno " + String(self.code) + ")"
-        return s + ": " + self.message
-
-
-struct ConnectionRefused(Copyable, Movable, Stringable, Writable):
+struct ConnectionRefused(Copyable, Movable, Writable):
     """Raised when a TCP ``connect()`` fails with ``ECONNREFUSED``.
 
     Fields:
@@ -91,16 +80,8 @@ struct ConnectionRefused(Copyable, Movable, Stringable, Writable):
         """
         writer.write("ConnectionRefused: ", self.addr)
 
-    fn __str__(self) -> String:
-        """Return ``"ConnectionRefused: addr"`` as a string.
 
-        Returns:
-            Human-readable error string.
-        """
-        return "ConnectionRefused: " + self.addr
-
-
-struct ConnectionTimeout(Copyable, Movable, Stringable, Writable):
+struct ConnectionTimeout(Copyable, Movable, Writable):
     """Raised when a TCP ``connect()`` times out (``ETIMEDOUT``).
 
     Fields:
@@ -128,16 +109,8 @@ struct ConnectionTimeout(Copyable, Movable, Stringable, Writable):
         """
         writer.write("ConnectionTimeout: ", self.addr)
 
-    fn __str__(self) -> String:
-        """Return a description string.
 
-        Returns:
-            ``"ConnectionTimeout: addr"``.
-        """
-        return "ConnectionTimeout: " + self.addr
-
-
-struct ConnectionReset(Copyable, Movable, Stringable, Writable):
+struct ConnectionReset(Copyable, Movable, Writable):
     """Raised when the peer forcibly closes a connection (``ECONNRESET``).
 
     Fields:
@@ -160,16 +133,8 @@ struct ConnectionReset(Copyable, Movable, Stringable, Writable):
         """
         writer.write("ConnectionReset: ", self.addr)
 
-    fn __str__(self) -> String:
-        """Return a description string.
 
-        Returns:
-            ``"ConnectionReset: addr"``.
-        """
-        return "ConnectionReset: " + self.addr
-
-
-struct AddressInUse(Copyable, Movable, Stringable, Writable):
+struct AddressInUse(Copyable, Movable, Writable):
     """Raised when ``bind()`` fails because the port is in use (``EADDRINUSE``).
 
     Fields:
@@ -197,16 +162,8 @@ struct AddressInUse(Copyable, Movable, Stringable, Writable):
         """
         writer.write("AddressInUse: ", self.addr)
 
-    fn __str__(self) -> String:
-        """Return ``"AddressInUse: addr"`` as a string.
 
-        Returns:
-            Human-readable error string.
-        """
-        return "AddressInUse: " + self.addr
-
-
-struct AddressParseError(Copyable, Movable, Stringable, Writable):
+struct AddressParseError(Copyable, Movable, Writable):
     """Raised when an address string cannot be parsed.
 
     Fields:
@@ -231,16 +188,8 @@ struct AddressParseError(Copyable, Movable, Stringable, Writable):
         """
         writer.write("AddressParseError: invalid address '", self.input, "'")
 
-    fn __str__(self) -> String:
-        """Return a description string.
 
-        Returns:
-            ``"AddressParseError: invalid address 'input'"``.
-        """
-        return "AddressParseError: invalid address '" + self.input + "'"
-
-
-struct BrokenPipe(Copyable, Movable, Stringable, Writable):
+struct BrokenPipe(Copyable, Movable, Writable):
     """Raised on write to a connection whose read end is closed (``EPIPE``).
 
     Fields:
@@ -265,18 +214,8 @@ struct BrokenPipe(Copyable, Movable, Stringable, Writable):
         if self.addr != "":
             writer.write(": ", self.addr)
 
-    fn __str__(self) -> String:
-        """Return a description string.
 
-        Returns:
-            ``"BrokenPipe"`` or ``"BrokenPipe: addr"``.
-        """
-        if self.addr != "":
-            return "BrokenPipe: " + self.addr
-        return "BrokenPipe"
-
-
-struct Timeout(Copyable, Movable, Stringable, Writable):
+struct Timeout(Copyable, Movable, Writable):
     """Raised when a blocking I/O operation exceeds its timeout.
 
     Fields:
@@ -312,19 +251,8 @@ struct Timeout(Copyable, Movable, Stringable, Writable):
         if self.ms > 0:
             writer.write(" (", self.ms, " ms)")
 
-    fn __str__(self) -> String:
-        """Return ``"Timeout: op"`` as a string.
 
-        Returns:
-            Human-readable timeout description.
-        """
-        var s = "Timeout: " + self.op
-        if self.ms > 0:
-            s += " (" + String(self.ms) + " ms)"
-        return s
-
-
-struct DnsError(Copyable, Movable, Stringable, Writable):
+struct DnsError(Copyable, Movable, Writable):
     """Raised when DNS resolution fails.
 
     Fields:
@@ -354,11 +282,3 @@ struct DnsError(Copyable, Movable, Stringable, Writable):
             writer: Destination writer.
         """
         writer.write("DnsError(", self.host, "): ", self.reason)
-
-    fn __str__(self) -> String:
-        """Return ``"DnsError(host): reason"`` as a string.
-
-        Returns:
-            Human-readable DNS error string.
-        """
-        return "DnsError(" + self.host + "): " + self.reason

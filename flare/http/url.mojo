@@ -20,7 +20,7 @@ Example:
 from format import Writable, Writer
 
 
-struct UrlParseError(Copyable, Movable, Stringable, Writable):
+struct UrlParseError(Copyable, Movable, Writable):
     """Raised when a URL string cannot be parsed."""
 
     var message: String
@@ -30,9 +30,6 @@ struct UrlParseError(Copyable, Movable, Stringable, Writable):
 
     fn write_to[W: Writer](self, mut writer: W):
         writer.write("UrlParseError: ", self.message)
-
-    fn __str__(self) -> String:
-        return "UrlParseError: " + self.message
 
 
 struct Url(Movable):

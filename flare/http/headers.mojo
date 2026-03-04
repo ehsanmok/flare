@@ -20,7 +20,7 @@ fn _lower(s: String) -> String:
     return out
 
 
-struct HeaderInjectionError(Copyable, Movable, Stringable, Writable):
+struct HeaderInjectionError(Copyable, Movable, Writable):
     """Raised when a header key or value contains CR or LF bytes."""
 
     var field: String
@@ -39,15 +39,6 @@ struct HeaderInjectionError(Copyable, Movable, Stringable, Writable):
             "'",
         )
 
-    fn __str__(self) -> String:
-        return (
-            "HeaderInjectionError: field='"
-            + self.field
-            + "' value='"
-            + self.value
-            + "'"
-        )
-
 
 @always_inline
 fn _check_injection(key: String, value: String) raises:
@@ -62,7 +53,7 @@ fn _check_injection(key: String, value: String) raises:
             raise HeaderInjectionError(key, value)
 
 
-struct HeaderMap(Movable, Stringable, Writable):
+struct HeaderMap(Movable, Writable):
     """An ordered, case-insensitive HTTP header collection.
 
     Keys are stored in their original casing but all lookups are
@@ -228,9 +219,3 @@ struct HeaderMap(Movable, Stringable, Writable):
     fn write_to[W: Writer](self, mut writer: W):
         for i in range(len(self._keys)):
             writer.write(self._keys[i], ": ", self._values[i], "\r\n")
-
-    fn __str__(self) -> String:
-        var s = String()
-        for i in range(len(self._keys)):
-            s += self._keys[i] + ": " + self._values[i] + "\r\n"
-        return s

@@ -1,13 +1,13 @@
 """TLS-specific error types for ``flare.tls``.
 
-All error types implement ``Copyable``, ``Movable``, ``Writable``, and
-``Stringable`` so they can be raised, caught, printed, and logged uniformly.
+All error types implement ``Copyable``, ``Movable``, and ``Writable``
+so they can be raised, caught, printed, and logged uniformly.
 """
 
 from format import Writable, Writer
 
 
-struct TlsHandshakeError(Copyable, Movable, Stringable, Writable):
+struct TlsHandshakeError(Copyable, Movable, Writable):
     """The TLS handshake failed (generic failure not covered by cert errors).
 
     Fields:
@@ -32,16 +32,8 @@ struct TlsHandshakeError(Copyable, Movable, Stringable, Writable):
         """
         writer.write("TlsHandshakeError: ", self.message)
 
-    fn __str__(self) -> String:
-        """Return ``"TlsHandshakeError: <message>"``.
 
-        Returns:
-            Human-readable error string.
-        """
-        return "TlsHandshakeError: " + self.message
-
-
-struct CertificateExpired(Copyable, Movable, Stringable, Writable):
+struct CertificateExpired(Copyable, Movable, Writable):
     """The server certificate has passed its ``notAfter`` date.
 
     Fields:
@@ -66,16 +58,8 @@ struct CertificateExpired(Copyable, Movable, Stringable, Writable):
         """
         writer.write("CertificateExpired: subject=", self.subject)
 
-    fn __str__(self) -> String:
-        """Return a human-readable error string.
 
-        Returns:
-            ``"CertificateExpired: subject=<subject>"``.
-        """
-        return "CertificateExpired: subject=" + self.subject
-
-
-struct CertificateHostnameMismatch(Copyable, Movable, Stringable, Writable):
+struct CertificateHostnameMismatch(Copyable, Movable, Writable):
     """The server certificate's CN/SAN does not match the target hostname.
 
     Fields:
@@ -109,21 +93,8 @@ struct CertificateHostnameMismatch(Copyable, Movable, Stringable, Writable):
             self.subject,
         )
 
-    fn __str__(self) -> String:
-        """Return a human-readable error string.
 
-        Returns:
-            ``"CertificateHostnameMismatch: expected=<host> subject=<dn>"``.
-        """
-        return (
-            "CertificateHostnameMismatch: expected="
-            + self.expected
-            + " subject="
-            + self.subject
-        )
-
-
-struct CertificateUntrusted(Copyable, Movable, Stringable, Writable):
+struct CertificateUntrusted(Copyable, Movable, Writable):
     """The server certificate is not trusted by any CA in the bundle.
 
     Raised for self-signed certs, expired CAs, or missing CA chains.
@@ -149,11 +120,3 @@ struct CertificateUntrusted(Copyable, Movable, Stringable, Writable):
             writer: Destination writer.
         """
         writer.write("CertificateUntrusted: ", self.reason)
-
-    fn __str__(self) -> String:
-        """Return a human-readable error string.
-
-        Returns:
-            ``"CertificateUntrusted: <reason>"``.
-        """
-        return "CertificateUntrusted: " + self.reason

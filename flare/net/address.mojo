@@ -14,9 +14,7 @@ from ffi import external_call, c_int, c_uint, c_char
 from ._libc import AF_INET, AF_INET6, _inet_pton
 
 
-struct IpAddr(
-    Copyable, Equatable, ImplicitlyCopyable, Movable, Stringable, Writable
-):
+struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     """An IP address: either IPv4 or IPv6.
 
     The address is stored as a validated string produced by ``inet_ntop``
@@ -260,14 +258,6 @@ struct IpAddr(
         """
         writer.write(self._addr)
 
-    fn __str__(self) -> String:
-        """Return the canonical address string.
-
-        Returns:
-            E.g. ``"127.0.0.1"`` or ``"::1"``.
-        """
-        return self._addr
-
 
 # ── Module-private helpers ────────────────────────────────────────────────────
 
@@ -322,9 +312,7 @@ fn _find_char_from(s: String, ch: UInt8, start: Int) -> Int:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-struct SocketAddr(
-    Copyable, Equatable, ImplicitlyCopyable, Movable, Stringable, Writable
-):
+struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     """A socket address: an IP address combined with a port number.
 
     Fields:
@@ -460,13 +448,3 @@ struct SocketAddr(
             writer.write("[", self.ip, "]:", self.port)
         else:
             writer.write(self.ip, ":", self.port)
-
-    fn __str__(self) -> String:
-        """Return ``"ip:port"`` or ``"[ip]:port"`` as a string.
-
-        Returns:
-            Human-readable socket address string.
-        """
-        if self.ip.is_v6():
-            return "[" + String(self.ip) + "]:" + String(Int(self.port))
-        return String(self.ip) + ":" + String(Int(self.port))

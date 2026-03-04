@@ -77,7 +77,7 @@ struct WsCloseCode:
     """Server encountered an internal error."""
 
 
-struct WsProtocolError(Copyable, Movable, Stringable, Writable):
+struct WsProtocolError(Copyable, Movable, Writable):
     """Raised when an incoming frame violates RFC 6455."""
 
     var message: String
@@ -87,9 +87,6 @@ struct WsProtocolError(Copyable, Movable, Stringable, Writable):
 
     fn write_to[W: Writer](self, mut writer: W):
         writer.write("WsProtocolError: ", self.message)
-
-    fn __str__(self) -> String:
-        return "WsProtocolError: " + self.message
 
 
 struct _DecodeResult(Movable):
@@ -109,7 +106,7 @@ struct _DecodeResult(Movable):
         return self.frame^
 
 
-struct WsFrame(Movable, Stringable, Writable):
+struct WsFrame(Movable, Writable):
     """A single WebSocket frame.
 
     Represents the decoded wire form: header fields extracted and
@@ -502,17 +499,6 @@ struct WsFrame(Movable, Stringable, Writable):
             ")",
         )
 
-    fn __str__(self) -> String:
-        return (
-            "WsFrame(opcode="
-            + String(Int(self.opcode))
-            + ", fin="
-            + String(self.fin)
-            + ", payload_len="
-            + String(len(self.payload))
-            + ")"
-        )
-
 
 # ── SIMD masking helper ───────────────────────────────────────────────────────
 
@@ -537,8 +523,7 @@ fn _append_masked(
     # Pre-tile the 4-byte key into a 32-byte SIMD vector
     var tiled = SIMD[DType.uint8, _SIMD_W]()
 
-    @parameter
-    for i in range(_SIMD_W):
+    comptime for i in range(_SIMD_W):
         tiled[i] = key[i & 3]
 
     # SIMD path for large chunks

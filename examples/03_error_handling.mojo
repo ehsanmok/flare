@@ -3,7 +3,7 @@
 # Demonstrates: flare's typed error hierarchy, how errors carry context,
 # and how callers should handle each error type.
 #
-# All flare errors implement both Writable (print()) and Stringable (String()).
+# All flare errors implement Writable (print() and String()).
 # Every error includes enough context to debug without a stack trace.
 #
 # Phase 1 — flare.net.error (working)

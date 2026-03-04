@@ -20,7 +20,7 @@ Example:
 from format import Writable, Writer
 
 
-struct HttpError(Copyable, Movable, Stringable, Writable):
+struct HttpError(Copyable, Movable, Writable):
     """Raised by ``Response.raise_for_status()`` on non-2xx responses.
 
     Fields:
@@ -60,19 +60,6 @@ struct HttpError(Copyable, Movable, Stringable, Writable):
         self.reason = take.reason^
         self.url = take.url^
 
-    fn __str__(self) -> String:
-        """Return a human-readable description of the error.
-
-        Returns:
-            A string such as ``"HttpError: 404 Not Found (https://example.com)"``.
-        """
-        var s = "HttpError: " + String(self.status)
-        if len(self.reason) > 0:
-            s += " " + self.reason
-        if len(self.url) > 0:
-            s += " (" + self.url + ")"
-        return s^
-
     fn write_to[W: Writer, //](self, mut writer: W):
         """Write the error description to ``writer``.
 
@@ -86,7 +73,7 @@ struct HttpError(Copyable, Movable, Stringable, Writable):
             writer.write(" (", self.url, ")")
 
 
-struct TooManyRedirects(Copyable, Movable, Stringable, Writable):
+struct TooManyRedirects(Copyable, Movable, Writable):
     """Raised when a redirect chain exceeds the configured maximum.
 
     Fields:
@@ -119,19 +106,6 @@ struct TooManyRedirects(Copyable, Movable, Stringable, Writable):
     fn __moveinit__(out self, deinit take: TooManyRedirects):
         self.url = take.url^
         self.count = take.count
-
-    fn __str__(self) -> String:
-        """Return a human-readable description of the error.
-
-        Returns:
-            A string such as ``"TooManyRedirects: 10 redirects at https://..."``
-        """
-        return (
-            "TooManyRedirects: "
-            + String(self.count)
-            + " redirects at "
-            + self.url
-        )
 
     fn write_to[W: Writer, //](self, mut writer: W):
         """Write the error description to ``writer``.
