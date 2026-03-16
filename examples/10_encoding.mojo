@@ -24,7 +24,7 @@ from flare.http import (
 )
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 10: HTTP Content Encoding ===")
     print()
 
@@ -41,11 +41,11 @@ fn main() raises:
     var original = String("Hello, flare! This is a test of gzip compression.")
     var original_bytes = original.as_bytes()
 
-    var compressed = compress_gzip(Span[UInt8](original_bytes))
+    var compressed = compress_gzip(Span[UInt8, _](original_bytes))
     print("  original  :", len(original_bytes), "bytes")
     print("  compressed:", len(compressed), "bytes (gzip)")
 
-    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    var decompressed = decompress_gzip(Span[UInt8, _](compressed))
     var restored = String(unsafe_from_utf8=decompressed)
     print("  restored  :", len(decompressed), "bytes")
     print("  match     :", restored == original)
@@ -60,7 +60,7 @@ fn main() raises:
     )
     var lorem_bytes = lorem.as_bytes()
     for level in range(0, 10):
-        var c = compress_gzip(Span[UInt8](lorem_bytes), level)
+        var c = compress_gzip(Span[UInt8, _](lorem_bytes), level)
         print("  level", level, "→", len(c), "bytes")
     print()
 
@@ -70,7 +70,7 @@ fn main() raises:
     for _ in range(100):
         rep += "AAAA"
     var rep_bytes = rep.as_bytes()
-    var rep_compressed = compress_gzip(Span[UInt8](rep_bytes))
+    var rep_compressed = compress_gzip(Span[UInt8, _](rep_bytes))
     print("  input :", len(rep_bytes), "bytes (400 × 'AAAA')")
     print("  output:", len(rep_compressed), "bytes (gzip)")
     var ratio = Float64(len(rep_bytes)) / Float64(len(rep_compressed))
@@ -83,11 +83,11 @@ fn main() raises:
         '{"users": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]}'
     )
     var json_bytes = json.as_bytes()
-    var json_gz = compress_gzip(Span[UInt8](json_bytes))
+    var json_gz = compress_gzip(Span[UInt8, _](json_bytes))
     print("  JSON original :", len(json_bytes), "bytes")
     print("  JSON gzip     :", len(json_gz), "bytes")
 
-    var json_back = decompress_gzip(Span[UInt8](json_gz))
+    var json_back = decompress_gzip(Span[UInt8, _](json_gz))
     print("  JSON restored :", String(unsafe_from_utf8=json_back) == json)
     print()
 
@@ -108,7 +108,7 @@ fn main() raises:
     )
 
     # gzip: compress first, then decode
-    var gz_bytes = compress_gzip(Span[UInt8](body_bytes))
+    var gz_bytes = compress_gzip(Span[UInt8, _](body_bytes))
     var gz_list = List[UInt8](capacity=len(gz_bytes))
     for b in gz_bytes:
         gz_list.append(b)
@@ -119,8 +119,8 @@ fn main() raises:
     # ── 7. Empty input ────────────────────────────────────────────────────────
     print("── 7. Edge cases ──")
     var empty: List[UInt8] = []
-    var empty_gz = compress_gzip(Span[UInt8](empty))
-    var empty_back = decompress_gzip(Span[UInt8](empty_gz))
+    var empty_gz = compress_gzip(Span[UInt8, _](empty))
+    var empty_back = decompress_gzip(Span[UInt8, _](empty_gz))
     print(
         "  empty → compressed:",
         len(empty_gz),
@@ -131,8 +131,8 @@ fn main() raises:
 
     # Single byte
     var one: List[UInt8] = [42]
-    var one_gz = compress_gzip(Span[UInt8](one))
-    var one_back = decompress_gzip(Span[UInt8](one_gz))
+    var one_gz = compress_gzip(Span[UInt8, _](one))
+    var one_back = decompress_gzip(Span[UInt8, _](one_gz))
     print(
         "  [42]  → compressed:",
         len(one_gz),
@@ -145,10 +145,13 @@ fn main() raises:
     print("── 8. Error handling ──")
     var garbage: List[UInt8] = [1, 2, 3, 4, 5, 6, 7, 8]
     try:
-        _ = decompress_gzip(Span[UInt8](garbage))
+        _ = decompress_gzip(Span[UInt8, _](garbage))
         print("  ERROR: expected an error for invalid gzip data")
     except e:
-        print("  ✓ decompress_gzip raised on garbage input:", String(e)[:40])
+        print(
+            "  ✓ decompress_gzip raised on garbage input:",
+            String(unsafe_from_utf8=String(e).as_bytes()[:40]),
+        )
     print()
 
     print("=== Example 10 complete ===")

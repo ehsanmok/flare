@@ -20,6 +20,8 @@ from flare.net.error import (
     BrokenPipe,
     DnsError,
 )
+from flare.net import IpAddr
+from flare.dns import resolve
 
 
 fn main() raises:
@@ -77,7 +79,6 @@ fn main() raises:
     # Pattern: catch the most specific error first
     fn try_connect(host: String) raises -> String:
         """Simulate a connection attempt that validates the address first."""
-        from flare.net import IpAddr
 
         # This will raise AddressParseError for invalid IPs
         _ = IpAddr.parse(host)
@@ -106,7 +107,6 @@ fn main() raises:
     # ── DNS error from real resolution ───────────────────────────────────────────
 
     print("── DNS error from real resolution ──")
-    from flare.dns import resolve
 
     try:
         _ = resolve("this.definitely.does.not.exist.flare.test")
@@ -120,8 +120,6 @@ fn main() raises:
 
     print("── AddressParseError preserves the bad input safely ──")
     try:
-        from flare.net import IpAddr
-
         _ = IpAddr.parse("127.0.0.1\x00evil")
     except e:
         print("  Caught:", e)

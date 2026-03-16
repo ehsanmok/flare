@@ -10,7 +10,7 @@ Demonstrates:
 
 Real-world usage:
 
-    fn on_connect(conn: WsConnection) raises:
+    def on_connect(conn: WsConnection) raises:
         while True:
             var frame = conn.recv()
             if frame.opcode == WsOpcode.CLOSE:
@@ -48,7 +48,7 @@ comptime TEST_ACCEPT = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 # ── Helper: send HTTP Upgrade request from raw TCP client ─────────────────────
 
 
-fn send_upgrade_request(mut stream: TcpStream) raises:
+def send_upgrade_request(mut stream: TcpStream) raises:
     """Send a minimal WebSocket HTTP Upgrade request.
 
     Args:
@@ -66,13 +66,13 @@ fn send_upgrade_request(mut stream: TcpStream) raises:
         + "\r\n"
     )
     var b = req.as_bytes()
-    stream.write_all(Span[UInt8](b))
+    stream.write_all(Span[UInt8, _](b))
 
 
 # ── Helper: read and return the 101 status line ───────────────────────────────
 
 
-fn drain_101(mut stream: TcpStream) raises -> String:
+def drain_101(mut stream: TcpStream) raises -> String:
     """Consume the 101 Switching Protocols response.
 
     Args:
@@ -113,7 +113,7 @@ fn drain_101(mut stream: TcpStream) raises -> String:
 # ── Helper: read raw bytes from client after upgrade ─────────────────────────
 
 
-fn recv_raw(mut stream: TcpStream, n: Int) raises -> List[UInt8]:
+def recv_raw(mut stream: TcpStream, n: Int) raises -> List[UInt8]:
     """Read exactly n bytes from stream.
 
     Args:
@@ -138,7 +138,7 @@ fn recv_raw(mut stream: TcpStream, n: Int) raises -> List[UInt8]:
 # ── Perform one loopback connection ───────────────────────────────────────────
 
 
-fn accept_and_upgrade(
+def accept_and_upgrade(
     srv: WsServer, mut raw_client: TcpStream
 ) raises -> WsConnection:
     """Accept one TCP connection and perform the WebSocket handshake.
@@ -161,7 +161,7 @@ fn accept_and_upgrade(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 09: WebSocket Server ===")
     print()
 
@@ -185,7 +185,7 @@ fn main() raises:
     print("── 3. Recv masked TEXT frame → echo ──")
     var text_frame = WsFrame.text("hello from client")
     var wire = text_frame.encode(mask=True)  # client frames MUST be masked
-    client1.write_all(Span[UInt8](wire))
+    client1.write_all(Span[UInt8, _](wire))
 
     var received = conn1.recv()
     print("  Server received opcode:", received.opcode, "(expect 1 = TEXT)")
@@ -215,7 +215,7 @@ fn main() raises:
         binary_payload.append(UInt8(i))
     var bin_frame = WsFrame.binary(binary_payload)
     var bin_wire = bin_frame.encode(mask=True)
-    client2.write_all(Span[UInt8](bin_wire))
+    client2.write_all(Span[UInt8, _](bin_wire))
 
     var bin_received = conn2.recv()
     print("  opcode:", bin_received.opcode, "(expect 2 = BINARY)")
@@ -239,11 +239,11 @@ fn main() raises:
 
     # Send PONG from client
     var pong_wire = WsFrame.pong().encode(mask=True)
-    client3.write_all(Span[UInt8](pong_wire))
+    client3.write_all(Span[UInt8, _](pong_wire))
     # Server: recv() swallows PONG and waits; send a text so it returns
     var dummy = WsFrame.text("done")
     var dummy_wire = dummy.encode(mask=True)
-    client3.write_all(Span[UInt8](dummy_wire))
+    client3.write_all(Span[UInt8, _](dummy_wire))
     var done_frame = conn3.recv()
     print("  Received after PONG:", done_frame.text_payload())
     print()

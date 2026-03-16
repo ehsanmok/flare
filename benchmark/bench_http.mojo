@@ -25,12 +25,12 @@ from flare.http import Response, HeaderMap, Url
 # ── Benchmark functions ───────────────────────────────────────────────────────
 
 
-fn _bench_header_set_get(mut b: Bencher) raises capturing:
+def _bench_header_set_get(mut b: Bencher) capturing:
     """Set 10 headers and perform 3 case-insensitive lookups."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var hm = HeaderMap()
         hm.set("Content-Type", "application/json")
         hm.set("Cache-Control", "no-cache")
@@ -50,12 +50,12 @@ fn _bench_header_set_get(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_response_construction(mut b: Bencher) raises capturing:
+def _bench_response_construction(mut b: Bencher) capturing:
     """Build a Response with status and 2 headers."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var r = Response(status=200)
         r.headers.set("Content-Type", "application/json")
         r.headers.set("Content-Length", "42")
@@ -64,24 +64,24 @@ fn _bench_response_construction(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_url_parse_simple(mut b: Bencher) raises capturing:
+def _bench_url_parse_simple(mut b: Bencher) capturing:
     """Parse a simple HTTP URL with a query string."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var u = Url.parse("http://example.com/path/to/resource?foo=bar&baz=1")
         keep(u)
 
     b.iter[call_fn]()
 
 
-fn _bench_url_parse_https(mut b: Bencher) raises capturing:
+def _bench_url_parse_https(mut b: Bencher) capturing:
     """Parse an HTTPS URL with a non-default port and query."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var u = Url.parse(
             "https://api.example.com:8443/v2/users?page=1&limit=50"
         )
@@ -93,7 +93,7 @@ fn _bench_url_parse_https(mut b: Bencher) raises capturing:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     print(
         "════════════════════════════════════════════════════════════════════════"
     )

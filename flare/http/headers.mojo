@@ -41,7 +41,7 @@ struct HeaderInjectionError(Copyable, Movable, Writable):
 
 
 @always_inline
-fn _check_injection(key: String, value: String) raises:
+def _check_injection(key: String, value: String) raises:
     """Raise ``HeaderInjectionError`` if key or value contain CR/LF."""
     for i in range(len(key)):
         var c = key.unsafe_ptr()[i]
@@ -102,7 +102,7 @@ struct HeaderMap(Movable, Writable):
             out._values.append(self._values[i])
         return out^
 
-    fn set(mut self, key: String, value: String) raises:
+    def set(mut self, key: String, value: String) raises:
         """Set a header, replacing any existing value with the same key.
 
         Args:
@@ -123,7 +123,7 @@ struct HeaderMap(Movable, Writable):
         self._lower_keys.append(lk)
         self._values.append(value)
 
-    fn append(mut self, key: String, value: String) raises:
+    def append(mut self, key: String, value: String) raises:
         """Append a header without replacing existing values.
 
         Useful for multi-value headers such as ``Set-Cookie``.

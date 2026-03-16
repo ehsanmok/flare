@@ -107,7 +107,7 @@ struct UdpSocket(Movable):
         var recv = UdpSocket.bind(SocketAddr.localhost(5000))
         var buf  = List[UInt8]()
         buf.resize(1024, 0)
-        var (n, from_addr) = recv.recv_from(Span[UInt8](buf))
+        var (n, from_addr) = recv.recv_from(Span[UInt8, _](buf))
         print("received", n, "bytes from", String(from_addr))
 
         # Sender
@@ -143,7 +143,7 @@ struct UdpSocket(Movable):
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn bind(addr: SocketAddr) raises -> UdpSocket:
+    def bind(addr: SocketAddr) raises -> UdpSocket:
         """Create a UDP socket bound to ``addr``.
 
         After this call, ``recv_from()`` will receive datagrams sent to
@@ -185,7 +185,7 @@ struct UdpSocket(Movable):
         return UdpSocket(sock^, local)
 
     @staticmethod
-    fn unbound() raises -> UdpSocket:
+    def unbound() raises -> UdpSocket:
         """Create a send-only UDP socket without binding to a specific port.
 
         The OS assigns an ephemeral source port on the first ``send_to()``.
@@ -220,7 +220,7 @@ struct UdpSocket(Movable):
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
-    fn send_to(self, data: Span[UInt8], addr: SocketAddr) raises -> Int:
+    def send_to(self, data: Span[UInt8, _], addr: SocketAddr) raises -> Int:
         """Send a datagram to ``addr``.
 
         Args:
@@ -261,7 +261,7 @@ struct UdpSocket(Movable):
             raise NetworkError(_strerror(e.value) + " (sendto)", Int(e.value))
         return Int(sent)
 
-    fn recv_from(
+    def recv_from(
         mut self, buf: Span[UInt8, _]
     ) raises -> Tuple[Int, SocketAddr]:
         """Receive a datagram, returning the byte count and sender address.
@@ -284,7 +284,7 @@ struct UdpSocket(Movable):
             ```mojo
             var buf = List[UInt8]()
             buf.resize(1024, 0)
-            var (n, sender) = s.recv_from(Span[UInt8](buf))
+            var (n, sender) = s.recv_from(Span[UInt8, _](buf))
             print("got", n, "bytes from", String(sender))
             ```
         """
@@ -314,7 +314,7 @@ struct UdpSocket(Movable):
 
     # ── Options ───────────────────────────────────────────────────────────────
 
-    fn set_recv_timeout(self, ms: Int) raises:
+    def set_recv_timeout(self, ms: Int) raises:
         """Set a receive timeout via ``SO_RCVTIMEO``.
 
         After the timeout expires, ``recv_from()`` raises ``Timeout``.
@@ -327,7 +327,7 @@ struct UdpSocket(Movable):
         """
         self._socket.set_recv_timeout(ms)
 
-    fn set_broadcast(self, enabled: Bool) raises:
+    def set_broadcast(self, enabled: Bool) raises:
         """Enable or disable sending to broadcast addresses.
 
         Must be enabled before ``send_to()`` can send to ``255.255.255.255``

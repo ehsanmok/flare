@@ -27,7 +27,7 @@ from flare.ws import (
 ```mojo
 from flare.ws import WsClient, WsFrame, WsOpcode
 
-fn main() raises:
+def main() raises:
     # Connect to a WebSocket echo server
     var ws = WsClient.connect("ws://echo.websocket.events")
 
@@ -53,7 +53,7 @@ fn main() raises:
 from flare.ws import WsClient
 from flare.tls import TlsConfig
 
-fn main() raises:
+def main() raises:
     var ws = WsClient.connect("wss://echo.websocket.events", TlsConfig())
     _ = ws.send(WsFrame.text("secure hello"))
     var frame = ws.recv()

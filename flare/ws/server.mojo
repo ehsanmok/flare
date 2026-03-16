@@ -26,7 +26,7 @@ comptime _SHA1_LEN: Int = 20
 # ── SHA-1 helper (same approach as ws/client.mojo) ───────────────────────────
 
 
-fn _sha1_srv(data: String) raises -> List[UInt8]:
+def _sha1_srv(data: String) raises -> List[UInt8]:
     """Compute SHA-1 via the bundled libflare_tls shared library.
 
     Args:
@@ -56,7 +56,7 @@ fn _sha1_srv(data: String) raises -> List[UInt8]:
 comptime _B64: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
-fn _b64_encode_srv(data: Span[UInt8]) -> String:
+fn _b64_encode_srv(data: Span[UInt8, _]) -> String:
     """Encode bytes to standard RFC 4648 base64.
 
     Args:
@@ -93,7 +93,7 @@ fn _b64_encode_srv(data: Span[UInt8]) -> String:
     return out^
 
 
-fn _compute_accept_srv(key: String) raises -> String:
+def _compute_accept_srv(key: String) raises -> String:
     """Compute ``Sec-WebSocket-Accept`` for ``key``.
 
     Args:
@@ -104,13 +104,13 @@ fn _compute_accept_srv(key: String) raises -> String:
     """
     var combined = key + _WS_GUID
     var digest = _sha1_srv(combined)
-    return _b64_encode_srv(Span[UInt8](digest))
+    return _b64_encode_srv(Span[UInt8, _](digest))
 
 
 # ── Handshake request reader ──────────────────────────────────────────────────
 
 
-fn _read_line_srv(mut stream: TcpStream) raises -> String:
+def _read_line_srv(mut stream: TcpStream) raises -> String:
     """Read one CRLF-terminated line from ``stream``.
 
     Args:
@@ -163,11 +163,11 @@ fn _str_find_srv(s: String, sub: String) -> Int:
     return -1
 
 
-fn _parse_ws_upgrade_bytes(data: Span[UInt8]) raises -> String:
+def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
     """Parse an HTTP WebSocket Upgrade request from a byte buffer.
 
     Identical logic to ``_read_upgrade_request`` but reads from a
-    ``Span[UInt8]`` instead of a ``TcpStream``.  Suitable for fuzz
+    ``Span[UInt8, _]`` instead of a ``TcpStream``.  Suitable for fuzz
     harnesses and unit tests that operate on raw bytes.
 
     Args:
@@ -181,7 +181,7 @@ fn _parse_ws_upgrade_bytes(data: Span[UInt8]) raises -> String:
     """
     var pos = 0
 
-    fn read_line(data: Span[UInt8], mut pos: Int) -> String:
+    fn read_line(data: Span[UInt8, _], mut pos: Int) -> String:
         var line = String(capacity=256)
         while pos < len(data):
             var c = data[pos]
@@ -207,8 +207,16 @@ fn _parse_ws_upgrade_bytes(data: Span[UInt8]) raises -> String:
         var colon = _str_find_srv(line, ":")
         if colon < 0:
             continue
-        var k = _lower_srv(String(String(line[:colon]).strip()))
-        var v = String(String(line[colon + 1 :]).strip())
+        var k = _lower_srv(
+            String(
+                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
+            )
+        )
+        var v = String(
+            String(
+                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
+            ).strip()
+        )
         if k == "sec-websocket-key":
             ws_key = v
         elif k == "upgrade" and _lower_srv(v) == "websocket":
@@ -228,7 +236,7 @@ fn _parse_ws_upgrade_bytes(data: Span[UInt8]) raises -> String:
     return ws_key^
 
 
-fn _read_upgrade_request(mut stream: TcpStream) raises -> String:
+def _read_upgrade_request(mut stream: TcpStream) raises -> String:
     """Read an HTTP upgrade request and return the ``Sec-WebSocket-Key``.
 
     Reads until the blank line terminating HTTP headers.
@@ -256,8 +264,16 @@ fn _read_upgrade_request(mut stream: TcpStream) raises -> String:
         var colon = _str_find_srv(line, ":")
         if colon < 0:
             continue
-        var k = _lower_srv(String(String(line[:colon]).strip()))
-        var v = String(String(line[colon + 1 :]).strip())
+        var k = _lower_srv(
+            String(
+                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
+            )
+        )
+        var v = String(
+            String(
+                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
+            ).strip()
+        )
         if k == "sec-websocket-key":
             ws_key = v
         elif k == "upgrade" and _lower_srv(v) == "websocket":
@@ -277,7 +293,7 @@ fn _read_upgrade_request(mut stream: TcpStream) raises -> String:
     return ws_key^
 
 
-fn _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
+def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
     """Send the 101 Switching Protocols response.
 
     Args:
@@ -294,7 +310,7 @@ fn _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
         + "\r\n"
     )
     var resp_bytes = resp.as_bytes()
-    stream.write_all(Span[UInt8](resp_bytes))
+    stream.write_all(Span[UInt8, _](resp_bytes))
 
 
 # ── WsConnection ──────────────────────────────────────────────────────────────
@@ -314,7 +330,7 @@ struct WsConnection(Movable):
 
     Example:
         ```mojo
-        fn on_connect(conn: WsConnection) raises:
+        def on_connect(conn: WsConnection) raises:
             var frame = conn.recv()
             conn.send_text(frame.text_payload())  # echo back
 
@@ -337,7 +353,7 @@ struct WsConnection(Movable):
     fn __del__(deinit self):
         self._stream.close()
 
-    fn send_text(self, msg: String) raises:
+    def send_text(self, msg: String) raises:
         """Send a UTF-8 text message to the client.
 
         Server-to-client frames are NOT masked (RFC 6455 §5.3).
@@ -350,9 +366,9 @@ struct WsConnection(Movable):
         """
         var frame = WsFrame.text(msg)
         var wire = frame.encode(mask=False)
-        self._stream.write_all(Span[UInt8](wire))
+        self._stream.write_all(Span[UInt8, _](wire))
 
-    fn send_binary(self, data: List[UInt8]) raises:
+    def send_binary(self, data: List[UInt8]) raises:
         """Send a binary message to the client.
 
         Server-to-client frames are NOT masked (RFC 6455 §5.3).
@@ -365,9 +381,9 @@ struct WsConnection(Movable):
         """
         var frame = WsFrame.binary(data)
         var wire = frame.encode(mask=False)
-        self._stream.write_all(Span[UInt8](wire))
+        self._stream.write_all(Span[UInt8, _](wire))
 
-    fn send_frame(self, frame: WsFrame) raises:
+    def send_frame(self, frame: WsFrame) raises:
         """Send an already-constructed frame (server, no masking).
 
         Args:
@@ -377,9 +393,9 @@ struct WsConnection(Movable):
             NetworkError: On I/O failure.
         """
         var wire = frame.encode(mask=False)
-        self._stream.write_all(Span[UInt8](wire))
+        self._stream.write_all(Span[UInt8, _](wire))
 
-    fn recv(mut self) raises -> WsFrame:
+    def recv(mut self) raises -> WsFrame:
         """Receive the next data frame from the client.
 
         Automatically replies to PING frames with an unmasked PONG and
@@ -399,11 +415,11 @@ struct WsConnection(Movable):
                 # RFC 6455 §5.5.3: respond with unmasked PONG
                 var pong = WsFrame.pong(frame.payload)
                 var wire = pong.encode(mask=False)
-                self._stream.write_all(Span[UInt8](wire))
+                self._stream.write_all(Span[UInt8, _](wire))
                 continue
             return frame^
 
-    fn _recv_one(mut self) raises -> WsFrame:
+    def _recv_one(mut self) raises -> WsFrame:
         """Read bytes from stream and decode one complete frame."""
         var buf = List[UInt8](capacity=4096)
         var tmp = List[UInt8](capacity=4096)
@@ -411,7 +427,7 @@ struct WsConnection(Movable):
 
         while True:
             try:
-                var result = WsFrame.decode_one(Span[UInt8](buf))
+                var result = WsFrame.decode_one(Span[UInt8, _](buf))
                 # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
                 if not result.frame.masked:
                     raise WsProtocolError(
@@ -435,7 +451,7 @@ struct WsConnection(Movable):
                 else:
                     raise e^
 
-    fn close(
+    def close(
         mut self,
         code: UInt16 = WsCloseCode.NORMAL,
         reason: String = "",
@@ -449,7 +465,7 @@ struct WsConnection(Movable):
         var close_frame = WsFrame.close(code, reason)
         var wire = close_frame.encode(mask=False)
         try:
-            self._stream.write_all(Span[UInt8](wire))
+            self._stream.write_all(Span[UInt8, _](wire))
         except:
             pass  # best-effort
 
@@ -478,7 +494,7 @@ struct WsServer(Movable):
 
     Example:
         ```mojo
-        fn handle(conn: WsConnection) raises:
+        def handle(conn: WsConnection) raises:
             while True:
                 var frame = conn.recv()
                 if frame.opcode == WsOpcode.CLOSE:
@@ -502,7 +518,7 @@ struct WsServer(Movable):
         self._listener.close()
 
     @staticmethod
-    fn bind(addr: SocketAddr) raises -> WsServer:
+    def bind(addr: SocketAddr) raises -> WsServer:
         """Bind a WebSocket server on ``addr``.
 
         Args:
@@ -518,7 +534,7 @@ struct WsServer(Movable):
         var listener = TcpListener.bind(addr)
         return WsServer(listener^)
 
-    fn serve(self, handler: fn(WsConnection) raises -> None) raises:
+    def serve(self, handler: fn(WsConnection) raises -> None) raises:
         """Accept WebSocket connections in a loop.
 
         For each accepted TCP connection:
@@ -549,12 +565,12 @@ struct WsServer(Movable):
         """
         return self._listener.local_addr()
 
-    fn close(mut self):
+    def close(mut self):
         """Stop accepting connections. Idempotent."""
         self._listener.close()
 
 
-fn _handle_ws_connection(
+def _handle_ws_connection(
     var stream: TcpStream,
     peer: SocketAddr,
     handler: fn(WsConnection) raises -> None,

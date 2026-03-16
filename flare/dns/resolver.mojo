@@ -32,7 +32,7 @@ from ..net import IpAddr
 from ..net.error import DnsError, AddressParseError
 
 
-fn resolve(host: String) raises -> List[IpAddr]:
+def resolve(host: String) raises -> List[IpAddr]:
     """Resolve a hostname to a list of IP addresses.
 
     Calls ``getaddrinfo(3)`` which respects ``/etc/hosts``,
@@ -74,7 +74,9 @@ fn resolve(host: String) raises -> List[IpAddr]:
     var n = len(host_bytes)
     if n > 253:
         raise AddressParseError(
-            "hostname too long (max 253 chars): " + host[:20] + "…"
+            "hostname too long (max 253 chars): "
+            + String(unsafe_from_utf8=host_bytes[:20])
+            + "…"
         )
     var label_len = 0
     for b in host_bytes:
@@ -156,7 +158,7 @@ fn resolve(host: String) raises -> List[IpAddr]:
     return results^
 
 
-fn resolve_v4(host: String) raises -> List[IpAddr]:
+def resolve_v4(host: String) raises -> List[IpAddr]:
     """Resolve a hostname, returning only IPv4 results.
 
     Args:
@@ -185,7 +187,7 @@ fn resolve_v4(host: String) raises -> List[IpAddr]:
     return v4^
 
 
-fn resolve_v6(host: String) raises -> List[IpAddr]:
+def resolve_v6(host: String) raises -> List[IpAddr]:
     """Resolve a hostname, returning only IPv6 results.
 
     Args:

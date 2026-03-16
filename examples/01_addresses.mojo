@@ -11,7 +11,7 @@
 from flare.net import IpAddr, SocketAddr
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 01: Addresses ===")
     print()
 

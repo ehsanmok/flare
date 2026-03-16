@@ -15,7 +15,7 @@ Run:
 from flare.http import HttpClient, Status, get, post, put, patch, delete, head
 
 
-def main():
+def main() raises:
     print("=== flare Example 05: HTTP Methods ===")
     print()
 
@@ -27,7 +27,11 @@ def main():
         var resp = client.get("http://httpbin.org/get")
         print("  status :", resp.status, "ok:", resp.ok())
         print("  Content-Type :", resp.headers.get("content-type"))
-        print("  body snippet :", resp.text()[:80], "...")
+        print(
+            "  body snippet :",
+            String(unsafe_from_utf8=resp.text().as_bytes()[:80]),
+            "...",
+        )
     except e:
         print("  [SKIP] network unavailable:", String(e))
 
@@ -39,7 +43,11 @@ def main():
         var resp = client.get("https://httpbin.org/json")
         print("  status :", resp.status, "ok:", resp.ok())
         print("  Content-Type :", resp.headers.get("content-type"))
-        print("  body snippet :", resp.text()[:80], "...")
+        print(
+            "  body snippet :",
+            String(unsafe_from_utf8=resp.text().as_bytes()[:80]),
+            "...",
+        )
     except e:
         print("  [SKIP] network unavailable:", String(e))
 
@@ -64,7 +72,11 @@ def main():
             '{"hello": "flare"}',
         )
         print("  status :", resp.status, "ok:", resp.ok())
-        print("  body snippet :", resp.text()[:120], "...")
+        print(
+            "  body snippet :",
+            String(unsafe_from_utf8=resp.text().as_bytes()[:120]),
+            "...",
+        )
     except e:
         print("  [SKIP] network unavailable:", String(e))
 
@@ -91,7 +103,11 @@ def main():
             '{"field": "patched"}',
         )
         print("  status :", resp.status, "ok:", resp.ok())
-        print("  body snippet :", resp.text()[:120], "...")
+        print(
+            "  body snippet :",
+            String(unsafe_from_utf8=resp.text().as_bytes()[:120]),
+            "...",
+        )
     except e:
         print("  [SKIP] network unavailable:", String(e))
 

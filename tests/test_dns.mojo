@@ -23,13 +23,13 @@ from flare.net import IpAddr
 # ── Successful resolution ─────────────────────────────────────────────────────
 
 
-def test_resolve_localhost_non_empty():
+def test_resolve_localhost_non_empty() raises:
     """Resolving 'localhost' must return at least one address."""
     var addrs = resolve("localhost")
     assert_true(len(addrs) > 0, "expected at least one address for localhost")
 
 
-def test_resolve_localhost_has_loopback():
+def test_resolve_localhost_has_loopback() raises:
     """Resolving 'localhost' must include 127.0.0.1 or ::1."""
     var addrs = resolve("localhost")
     var found = False
@@ -41,7 +41,7 @@ def test_resolve_localhost_has_loopback():
     )
 
 
-def test_resolve_v4_localhost_non_empty():
+def test_resolve_v4_localhost_non_empty() raises:
     """Calling resolve_v4('localhost') must return at least one address."""
     var addrs = resolve_v4("localhost")
     assert_true(
@@ -49,14 +49,14 @@ def test_resolve_v4_localhost_non_empty():
     )
 
 
-def test_resolve_v4_all_ipv4():
+def test_resolve_v4_all_ipv4() raises:
     """Calling resolve_v4 must return only IPv4 addresses."""
     var addrs = resolve_v4("localhost")
     for a in addrs:
         assert_false(a.is_v6(), "expected IPv4-only but got IPv6")
 
 
-def test_resolve_v4_contains_127():
+def test_resolve_v4_contains_127() raises:
     """127.0.0.1 must appear in resolve_v4('localhost')."""
     var addrs = resolve_v4("localhost")
     var found = False
@@ -69,14 +69,14 @@ def test_resolve_v4_contains_127():
 # ── Numeric IP passthrough ────────────────────────────────────────────────────
 
 
-def test_resolve_numeric_ipv4_passthrough():
+def test_resolve_numeric_ipv4_passthrough() raises:
     """Numeric IPv4 string must resolve to itself (no DNS round-trip)."""
     var addrs = resolve("127.0.0.1")
     assert_true(len(addrs) > 0, "expected 127.0.0.1 to resolve")
     assert_equal(String(addrs[0]), "127.0.0.1")
 
 
-def test_resolve_numeric_ipv6_passthrough():
+def test_resolve_numeric_ipv6_passthrough() raises:
     """Numeric IPv6 string '::1' must resolve to itself."""
     var addrs = resolve("::1")
     assert_true(len(addrs) > 0, "expected ::1 to resolve")
@@ -87,7 +87,7 @@ def test_resolve_numeric_ipv6_passthrough():
     assert_true(found, "::1 not in resolve('::1') results")
 
 
-def test_resolve_numeric_v4_192():
+def test_resolve_numeric_v4_192() raises:
     """Resolving a public numeric IP must return that exact address."""
     var addrs = resolve("192.0.2.1")
     assert_true(len(addrs) > 0)
@@ -101,7 +101,7 @@ def test_resolve_numeric_v4_192():
 # ── IPv6 resolution ───────────────────────────────────────────────────────────
 
 
-def test_resolve_v6_localhost_includes_v6_or_raises():
+def test_resolve_v6_localhost_includes_v6_or_raises() raises:
     """Resolving '::1' via resolve_v6 must succeed or raise (no v6 on platform).
     """
     # This test accepts either result because some CI environments disable IPv6.
@@ -115,7 +115,7 @@ def test_resolve_v6_localhost_includes_v6_or_raises():
 # ── Trailing dot / FQDN ───────────────────────────────────────────────────────
 
 
-def test_resolve_fqdn_trailing_dot():
+def test_resolve_fqdn_trailing_dot() raises:
     """'localhost.' (FQDN with trailing dot) should resolve or raise gracefully.
     """
     # POSIX getaddrinfo accepts trailing dots as FQDNs.
@@ -130,13 +130,13 @@ def test_resolve_fqdn_trailing_dot():
 # ── Error cases ───────────────────────────────────────────────────────────────
 
 
-def test_resolve_empty_host_raises():
+def test_resolve_empty_host_raises() raises:
     """Empty hostname must raise before calling getaddrinfo."""
     with assert_raises():
         _ = resolve("")
 
 
-def test_resolve_nonexistent_raises():
+def test_resolve_nonexistent_raises() raises:
     """Non-existent hostname must raise DnsError with the host in the message.
     """
     with assert_raises():
@@ -146,7 +146,7 @@ def test_resolve_nonexistent_raises():
 # ── Security: injection attacks must raise, not silently corrupt ───────────────
 
 
-def test_resolve_null_byte_injection_raises():
+def test_resolve_null_byte_injection_raises() raises:
     """Hostname with embedded null byte must raise before getaddrinfo.
 
     A C string passed to getaddrinfo would be silently truncated at the null,
@@ -156,7 +156,7 @@ def test_resolve_null_byte_injection_raises():
         _ = resolve("localhost\x00evil.com")
 
 
-def test_resolve_crlf_injection_raises():
+def test_resolve_crlf_injection_raises() raises:
     """Hostname with embedded CRLF must raise.
 
     In some contexts a raw hostname is embedded in HTTP headers (e.g. Host:).
@@ -166,7 +166,7 @@ def test_resolve_crlf_injection_raises():
         _ = resolve("localhost\r\nevil.com")
 
 
-def test_resolve_at_sign_raises():
+def test_resolve_at_sign_raises() raises:
     """Hostname with '@' (user-info delimiter) must raise.
 
     'user@host' is not a valid hostname; accepting it silently could expose
@@ -176,7 +176,7 @@ def test_resolve_at_sign_raises():
         _ = resolve("user@localhost")
 
 
-def test_resolve_hostname_too_long_raises():
+def test_resolve_hostname_too_long_raises() raises:
     """Hostname exceeding 253 characters must raise.
 
     RFC 1035 §2.3.4 limits full domain names to 253 octets.  A hostname
@@ -188,7 +188,7 @@ def test_resolve_hostname_too_long_raises():
         _ = resolve(long_host)
 
 
-def test_resolve_label_too_long_raises():
+def test_resolve_label_too_long_raises() raises:
     """A single DNS label longer than 63 characters must raise.
 
     RFC 1035 §2.3.4: each label (between dots) must not exceed 63 octets.
@@ -198,7 +198,7 @@ def test_resolve_label_too_long_raises():
         _ = resolve(long_label)
 
 
-def main():
+def main() raises:
     print("=" * 60)
     print("test_dns.mojo — DNS resolution")
     print("=" * 60)

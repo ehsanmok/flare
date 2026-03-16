@@ -115,7 +115,7 @@ struct Response(Movable):
             out += chr(Int(b))
         return out^
 
-    fn json(self) raises -> Value:
+    def json(self) raises -> Value:
         """Parse the body as JSON and return a ``mojson.Value``.
 
         Uses the pure-Mojo backend from
@@ -136,7 +136,7 @@ struct Response(Movable):
         """
         return loads(self.text())
 
-    fn raise_for_status(self) raises:
+    def raise_for_status(self) raises:
         """Raise ``HttpError`` if the status code is not 2xx.
 
         A no-op for responses with ``200 <= status < 300``.

@@ -51,7 +51,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     # ── Factories ─────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn parse(s: String) raises -> IpAddr:
+    def parse(s: String) raises -> IpAddr:
         """Parse and validate an IP address string.
 
         Accepts dotted-decimal IPv4 (``"192.168.1.1"``) and colon-separated
@@ -367,7 +367,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         return SocketAddr(IpAddr.unspecified(), port)
 
     @staticmethod
-    fn parse(s: String) raises -> SocketAddr:
+    def parse(s: String) raises -> SocketAddr:
         """Parse a ``"host:port"`` or ``"[ipv6]:port"`` string.
 
         Args:
@@ -409,14 +409,19 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
                 or sbytes[close + 1] != UInt8(ord(":"))
             ):
                 raise AddressParseError(s)
-            var ip = IpAddr.parse(String(s[1:close]))
-            return SocketAddr(ip, UInt16(atol(s[close + 2 :])))
+            var ip = IpAddr.parse(String(unsafe_from_utf8=sbytes[1:close]))
+            return SocketAddr(
+                ip, UInt16(atol(String(unsafe_from_utf8=sbytes[close + 2 :])))
+            )
         else:
             var colon = _find_char(s, UInt8(ord(":")))
             if colon < 0:
                 raise AddressParseError(s)
-            var ip = IpAddr.parse(String(s[:colon]))
-            return SocketAddr(ip, UInt16(atol(s[colon + 1 :])))
+            var sbytes = s.as_bytes()
+            var ip = IpAddr.parse(String(unsafe_from_utf8=sbytes[:colon]))
+            return SocketAddr(
+                ip, UInt16(atol(String(unsafe_from_utf8=sbytes[colon + 1 :])))
+            )
 
     # ── Equality ──────────────────────────────────────────────────────────────
 

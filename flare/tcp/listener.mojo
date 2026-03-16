@@ -83,7 +83,7 @@ struct TcpListener(Movable):
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn bind(addr: SocketAddr) raises -> TcpListener:
+    def bind(addr: SocketAddr) raises -> TcpListener:
         """Bind a TCP listener to ``addr`` with default options.
 
         ``SO_REUSEADDR`` is set before binding. The backlog is 128.
@@ -106,7 +106,7 @@ struct TcpListener(Movable):
         return TcpListener.bind_with_options(addr)
 
     @staticmethod
-    fn bind_with_options(
+    def bind_with_options(
         addr: SocketAddr,
         backlog: Int = 128,
         reuse_port: Bool = False,
@@ -164,7 +164,7 @@ struct TcpListener(Movable):
 
     # ── Accept ────────────────────────────────────────────────────────────────
 
-    fn accept(self) raises -> TcpStream:
+    def accept(self) raises -> TcpStream:
         """Block until an incoming connection arrives and return it.
 
         Sets ``TCP_NODELAY`` on the accepted socket automatically.

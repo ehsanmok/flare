@@ -32,12 +32,12 @@ from flare.dns import resolve, resolve_v4
 # ── IpAddr.parse throughput ───────────────────────────────────────────────────
 
 
-fn bench_ip_parse_v4(mut b: Bencher) raises capturing:
+def bench_ip_parse_v4(mut b: Bencher) capturing:
     """Measure IpAddr.parse() throughput for an IPv4 string."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addr = IpAddr.parse("192.168.100.200")
         # Prevent the compiler from optimising away the result.
         _ = addr.is_v4()
@@ -45,25 +45,25 @@ fn bench_ip_parse_v4(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn bench_ip_parse_v6(mut b: Bencher) raises capturing:
+def bench_ip_parse_v6(mut b: Bencher) capturing:
     """Measure IpAddr.parse() throughput for an IPv6 string."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addr = IpAddr.parse("2001:db8::1")
         _ = addr.is_v6()
 
     b.iter[call_fn]()
 
 
-fn bench_ip_parse_v4_broadcast(mut b: Bencher) raises capturing:
+def bench_ip_parse_v4_broadcast(mut b: Bencher) capturing:
     """Measure IpAddr.parse() for the broadcast address (worst-case dotted-decimal).
     """
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addr = IpAddr.parse("255.255.255.255")
         _ = addr.is_v4()
 
@@ -73,24 +73,24 @@ fn bench_ip_parse_v4_broadcast(mut b: Bencher) raises capturing:
 # ── SocketAddr.parse throughput ───────────────────────────────────────────────
 
 
-fn bench_socket_addr_parse(mut b: Bencher) raises capturing:
+def bench_socket_addr_parse(mut b: Bencher) capturing:
     """Measure SocketAddr.parse() throughput for '1.2.3.4:8080'."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addr = SocketAddr.parse("192.168.1.100:8080")
         _ = addr.port
 
     b.iter[call_fn]()
 
 
-fn bench_socket_addr_parse_ipv6(mut b: Bencher) raises capturing:
+def bench_socket_addr_parse_ipv6(mut b: Bencher) capturing:
     """Measure SocketAddr.parse() throughput for '[::1]:443'."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addr = SocketAddr.parse("[::1]:443")
         _ = addr.port
 
@@ -100,12 +100,12 @@ fn bench_socket_addr_parse_ipv6(mut b: Bencher) raises capturing:
 # ── IpAddr construction (no parsing) ─────────────────────────────────────────
 
 
-fn bench_ip_localhost(mut b: Bencher) raises capturing:
+def bench_ip_localhost(mut b: Bencher) capturing:
     """Measure IpAddr.localhost() construction — pure struct init, no FFI."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addr = IpAddr.localhost()
         _ = addr.is_v4()
 
@@ -115,25 +115,25 @@ fn bench_ip_localhost(mut b: Bencher) raises capturing:
 # ── DNS resolution latency ────────────────────────────────────────────────────
 
 
-fn bench_dns_resolve_localhost(mut b: Bencher) raises capturing:
+def bench_dns_resolve_localhost(mut b: Bencher) capturing:
     """Measure resolve('localhost') round-trip latency including getaddrinfo(3).
     """
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addrs = resolve("localhost")
         _ = len(addrs)
 
     b.iter[call_fn]()
 
 
-fn bench_dns_resolve_v4_localhost(mut b: Bencher) raises capturing:
+def bench_dns_resolve_v4_localhost(mut b: Bencher) capturing:
     """Measure resolve_v4('localhost') latency (IPv4-only filter)."""
 
     @parameter
     @always_inline
-    fn call_fn() raises:
+    def call_fn() raises:
         var addrs = resolve_v4("localhost")
         _ = len(addrs)
 
@@ -143,7 +143,7 @@ fn bench_dns_resolve_v4_localhost(mut b: Bencher) raises capturing:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     print("=" * 70)
     print("flare Phase 1–2 Benchmark: IP parsing + DNS resolution")
     print("=" * 70)

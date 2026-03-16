@@ -120,7 +120,7 @@ struct _TlsTestServer:
             )
             fn_free(self._ptr)
 
-    fn port(self) raises -> Int:
+    def port(self) raises -> Int:
         """Return the actual bound TCP port.
 
         Returns:
@@ -131,7 +131,7 @@ struct _TlsTestServer:
         )
         return Int(fn_port(self._ptr))
 
-    fn echo_once(self) raises:
+    def echo_once(self) raises:
         """Accept one connection, echo all bytes, close (call in child only).
 
         Blocks until a client connects, performs TLS handshake, echoes data,
@@ -165,25 +165,25 @@ fn _spawn_echo_server(server: _TlsTestServer) -> c_int:
 # ── Config unit tests ─────────────────────────────────────────────────────────
 
 
-def test_default_config_verify_required():
+def test_default_config_verify_required() raises:
     """Default TlsConfig must require certificate verification."""
     var cfg = TlsConfig()
     assert_equal(cfg.verify, TlsVerify.REQUIRED)
 
 
-def test_insecure_config_no_verify():
+def test_insecure_config_no_verify() raises:
     """TlsConfig.insecure() must disable verification."""
     var cfg = TlsConfig.insecure()
     assert_equal(cfg.verify, TlsVerify.NONE)
 
 
-def test_custom_ca_bundle():
+def test_custom_ca_bundle() raises:
     """Explicit ca_bundle must be stored verbatim."""
     var cfg = TlsConfig(ca_bundle="/etc/ssl/ca.pem")
     assert_equal(cfg.ca_bundle, "/etc/ssl/ca.pem")
 
 
-def test_custom_server_name():
+def test_custom_server_name() raises:
     """Explicit server_name override must be stored."""
     var cfg = TlsConfig(server_name="override.example.com")
     assert_equal(cfg.server_name, "override.example.com")
@@ -192,7 +192,7 @@ def test_custom_server_name():
 # ── Error type unit tests ─────────────────────────────────────────────────────
 
 
-def test_tls_handshake_error_str():
+def test_tls_handshake_error_str() raises:
     """TlsHandshakeError.__str__ must include the message."""
     var e = TlsHandshakeError("connection reset")
     var s = String(e)
@@ -200,7 +200,7 @@ def test_tls_handshake_error_str():
     assert_true("connection reset" in s)
 
 
-def test_certificate_expired_str():
+def test_certificate_expired_str() raises:
     """CertificateExpired.__str__ must include the subject."""
     var e = CertificateExpired(subject="CN=expired.example.com")
     var s = String(e)
@@ -208,7 +208,7 @@ def test_certificate_expired_str():
     assert_true("expired.example.com" in s)
 
 
-def test_certificate_hostname_mismatch_str():
+def test_certificate_hostname_mismatch_str() raises:
     """CertificateHostnameMismatch.__str__ must include expected + subject."""
     var e = CertificateHostnameMismatch("example.com", "CN=other.example.com")
     var s = String(e)
@@ -216,7 +216,7 @@ def test_certificate_hostname_mismatch_str():
     assert_true("example.com" in s)
 
 
-def test_certificate_untrusted_str():
+def test_certificate_untrusted_str() raises:
     """CertificateUntrusted.__str__ must include the reason."""
     var e = CertificateUntrusted("self signed certificate")
     var s = String(e)
@@ -227,7 +227,7 @@ def test_certificate_untrusted_str():
 # ── TlsStream integration tests ───────────────────────────────────────────────
 
 
-def test_tls_connect_valid_cert_succeeds():
+def test_tls_connect_valid_cert_succeeds() raises:
     """Connect to a loopback TLS server with a valid cert must succeed."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -247,7 +247,7 @@ def test_tls_connect_valid_cert_succeeds():
     _waitpid(pid)
 
 
-def test_tls_connect_insecure_succeeds():
+def test_tls_connect_insecure_succeeds() raises:
     """TlsConfig.insecure() must skip verification and succeed."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -266,7 +266,7 @@ def test_tls_connect_insecure_succeeds():
     _waitpid(pid)
 
 
-def test_tls_connect_wrong_ca_raises():
+def test_tls_connect_wrong_ca_raises() raises:
     """Connecting with the wrong CA must raise a certificate error."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -287,7 +287,7 @@ def test_tls_connect_wrong_ca_raises():
     _waitpid(pid)
 
 
-def test_tls_version_is_12_or_13():
+def test_tls_version_is_12_or_13() raises:
     """Negotiated TLS version must be TLSv1.2 or TLSv1.3."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -310,7 +310,7 @@ def test_tls_version_is_12_or_13():
     _waitpid(pid)
 
 
-def test_tls_cipher_suite_is_forward_secret():
+def test_tls_cipher_suite_is_forward_secret() raises:
     """Cipher suite must be an ECDHE + AEAD cipher or TLS 1.3 cipher."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -336,7 +336,7 @@ def test_tls_cipher_suite_is_forward_secret():
     _waitpid(pid)
 
 
-def test_tls_peer_cert_subject_non_empty():
+def test_tls_peer_cert_subject_non_empty() raises:
     """Peer_cert_subject() must return a non-empty DN after handshake."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -357,7 +357,7 @@ def test_tls_peer_cert_subject_non_empty():
     _waitpid(pid)
 
 
-def test_tls_write_read_echo():
+def test_tls_write_read_echo() raises:
     """Write 32 bytes through TLS and verify they are echoed back."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -373,7 +373,7 @@ def test_tls_write_read_echo():
         for i in range(32):
             msg.append(UInt8(i + 1))
 
-        stream.write_all(Span[UInt8](msg))
+        stream.write_all(Span[UInt8, _](msg))
         # Shutdown write half — server will see EOF and echo
         stream.close()
         assert_true(True)
@@ -383,7 +383,7 @@ def test_tls_write_read_echo():
     _waitpid(pid)
 
 
-def test_tls_close_idempotent():
+def test_tls_close_idempotent() raises:
     """Calling close() twice must not panic."""
     var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
     var port = srv.port()
@@ -403,7 +403,7 @@ def test_tls_close_idempotent():
     _waitpid(pid)
 
 
-def main():
+def main() raises:
     print("=" * 60)
     print("test_tls.mojo — TlsConfig + TlsStream")
     print("=" * 60)

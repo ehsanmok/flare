@@ -82,7 +82,7 @@ fn _c_err(lib: OwnedDLHandle) -> String:
     return String(StringSlice(unsafe_from_utf8_ptr=p))
 
 
-fn _classify_tls_error(err: String, host: String) raises:
+def _classify_tls_error(err: String, host: String) raises:
     """Map an OpenSSL error string to a typed TLS error and raise it.
 
     The C wrapper prefixes certificate verification failures with ``"verify:"``
@@ -99,7 +99,9 @@ fn _classify_tls_error(err: String, host: String) raises:
         TlsHandshakeError:           For all other handshake errors.
     """
     if err.startswith("verify:"):
-        var reason = String(err[7:])  # strip "verify:" prefix
+        var reason = String(
+            unsafe_from_utf8=err.as_bytes()[7:]
+        )  # strip "verify:" prefix
         if (
             "certificate has expired" in reason
             or "certificate is not yet valid" in reason
@@ -200,7 +202,7 @@ struct TlsStream(Movable, Readable):
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn connect(
+    def connect(
         host: String, port: UInt16, config: TlsConfig
     ) raises -> TlsStream:
         """Open a TLS connection to ``host:port``.
@@ -321,7 +323,7 @@ struct TlsStream(Movable, Readable):
         return TlsStream(tcp^, ctx, ssl)
 
     @staticmethod
-    fn connect_timeout(
+    def connect_timeout(
         host: String, port: UInt16, config: TlsConfig, timeout_ms: Int
     ) raises -> TlsStream:
         """Connect with TLS, failing after ``timeout_ms`` milliseconds.
@@ -419,7 +421,7 @@ struct TlsStream(Movable, Readable):
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
-    fn read(mut self, buf: UnsafePointer[UInt8], size: Int) raises -> Int:
+    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
         """Decrypt and read up to ``size`` bytes into ``buf``.
 
         Returns 0 on clean TLS closure (``close_notify`` received).
@@ -444,7 +446,7 @@ struct TlsStream(Movable, Readable):
             raise NetworkError("TLS read error: " + _c_err(lib))
         return Int(n)
 
-    fn read_exact(mut self, buf: UnsafePointer[UInt8], size: Int) raises:
+    def read_exact(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises:
         """Read exactly ``size`` bytes into ``buf``.
 
         Args:
@@ -461,7 +463,7 @@ struct TlsStream(Movable, Readable):
                 raise NetworkError("TLS EOF before buffer full")
             received += n
 
-    fn write(self, data: Span[UInt8]) raises -> Int:
+    def write(self, data: Span[UInt8, _]) raises -> Int:
         """Encrypt and send bytes.
 
         Args:
@@ -482,7 +484,7 @@ struct TlsStream(Movable, Readable):
             raise NetworkError("TLS write error: " + _c_err(lib))
         return Int(n)
 
-    fn write_all(self, data: Span[UInt8]) raises:
+    def write_all(self, data: Span[UInt8, _]) raises:
         """Encrypt and send all of ``data``.
 
         Loops until all bytes are transmitted or an error occurs.
@@ -497,7 +499,7 @@ struct TlsStream(Movable, Readable):
         var sent = 0
         var ptr = data.unsafe_ptr()
         while sent < total:
-            var chunk = Span[UInt8](ptr=ptr + sent, length=total - sent)
+            var chunk = Span[UInt8, _](ptr=ptr + sent, length=total - sent)
             sent += self.write(chunk)
 
     # ── Introspection ─────────────────────────────────────────────────────────
@@ -535,7 +537,7 @@ struct TlsStream(Movable, Readable):
         except:
             return "unknown"
 
-    fn peer_cert_subject(self) raises -> String:
+    def peer_cert_subject(self) raises -> String:
         """Return the subject DN of the server's certificate.
 
         Args are described above. Do NOT use for security decisions —

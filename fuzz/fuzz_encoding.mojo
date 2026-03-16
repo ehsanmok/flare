@@ -17,7 +17,7 @@ from mozz import fuzz, FuzzConfig
 from flare.http.encoding import compress_gzip, decompress_gzip
 
 
-fn target_decompress(data: List[UInt8]) raises:
+def target_decompress(data: List[UInt8]) raises:
     """This target feeds arbitrary bytes to decompress_gzip.
 
     Structured errors (zlib failures) are expected for random input.
@@ -27,12 +27,12 @@ fn target_decompress(data: List[UInt8]) raises:
         data: Arbitrary fuzz input bytes.
     """
     try:
-        _ = decompress_gzip(Span[UInt8](data))
+        _ = decompress_gzip(Span[UInt8, _](data))
     except:
         pass  # structured errors are fine for garbage input
 
 
-fn target_roundtrip(data: List[UInt8]) raises:
+def target_roundtrip(data: List[UInt8]) raises:
     """This target checks that compress_gzip → decompress_gzip must reproduce original bytes.
 
     Reports a bug message if the roundtrip produces incorrect output.
@@ -42,8 +42,8 @@ fn target_roundtrip(data: List[UInt8]) raises:
     """
     if len(data) == 0:
         return
-    var compressed = compress_gzip(Span[UInt8](data))
-    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    var compressed = compress_gzip(Span[UInt8, _](data))
+    var decompressed = decompress_gzip(Span[UInt8, _](compressed))
     if len(decompressed) != len(data):
         print(
             "[BUG] gzip roundtrip length mismatch: input="
@@ -58,7 +58,7 @@ fn target_roundtrip(data: List[UInt8]) raises:
             return
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] fuzzing flare.http.encoding (gzip round-trip)...")
 
     # Seed corpus: real gzip byte sequences

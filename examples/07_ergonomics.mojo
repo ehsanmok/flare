@@ -259,7 +259,7 @@ def _demo_buf_reader():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def main():
+def main() raises:
     print("=== flare Example 07: High-Level Ergonomics API ===")
     print()
     _demo_oneshot()

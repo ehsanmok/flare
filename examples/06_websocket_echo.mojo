@@ -40,7 +40,7 @@ def _show_frame(f: WsFrame):
     )
 
 
-def main():
+def main() raises:
     print("=== flare Example 06: WebSocket Echo Client ===")
     print()
 
@@ -70,7 +70,7 @@ def main():
     print("  encoded size:", len(wire), "bytes")
 
     try:
-        var result = WsFrame.decode_one(Span[UInt8](wire))
+        var result = WsFrame.decode_one(Span[UInt8, _](wire))
         var decoded = result^.take_frame()
         print("  decoded payload:", decoded.text_payload())
         print(

@@ -36,7 +36,7 @@ fn _bytes_to_str(data: List[UInt8]) -> String:
     return s^
 
 
-fn injection_resistance(data: List[UInt8]) raises -> Bool:
+def injection_resistance(data: List[UInt8]) raises -> Bool:
     """Property: set/append must raise when key or value contains CR/LF.
 
     Treats the first half of ``data`` as key bytes, second half as value
@@ -79,7 +79,7 @@ fn injection_resistance(data: List[UInt8]) raises -> Bool:
         return h.get(key) == val
 
 
-fn len_consistency(data: List[UInt8]) raises -> Bool:
+def len_consistency(data: List[UInt8]) raises -> Bool:
     """Property: internal key/value lists must stay in sync after any ops.
 
     Splits ``data`` into up to 4 key–value pairs (4-byte chunks) and
@@ -124,7 +124,7 @@ fn len_consistency(data: List[UInt8]) raises -> Bool:
     return True
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] HeaderMap property tests\n")
 
     print("1. Injection resistance (20 000 trials)...")

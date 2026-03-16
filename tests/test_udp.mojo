@@ -28,20 +28,20 @@ fn str_bytes(s: String) -> List[UInt8]:
 # ── bind / unbound ────────────────────────────────────────────────────────────
 
 
-def test_bind_assigns_port():
+def test_bind_assigns_port() raises:
     """Binding port 0 yields a real OS-assigned non-zero port."""
     var s = UdpSocket.bind(SocketAddr.localhost(0))
     assert_not_equal(s.local_addr().port, UInt16(0))
     s.close()
 
 
-def test_unbound_socket_creates_ok():
+def test_unbound_socket_creates_ok() raises:
     """``UdpSocket.unbound()`` creates a send-only socket without raising."""
     var s = UdpSocket.unbound()
     s.close()
 
 
-def test_close_idempotent():
+def test_close_idempotent() raises:
     """``close()`` called twice must not panic."""
     var s = UdpSocket.bind(SocketAddr.localhost(0))
     s.close()
@@ -51,7 +51,7 @@ def test_close_idempotent():
 # ── send_to / recv_from round-trips ──────────────────────────────────────────
 
 
-def test_round_trip_1_byte():
+def test_round_trip_1_byte() raises:
     """Round-trip a single byte datagram."""
     var rx = UdpSocket.bind(SocketAddr.localhost(0))
     var tx = UdpSocket.unbound()
@@ -59,10 +59,10 @@ def test_round_trip_1_byte():
 
     var data = zero_buf(1)
     data[0] = UInt8(99)
-    var _ = tx.send_to(Span[UInt8](data), SocketAddr.localhost(port))
+    var _ = tx.send_to(Span[UInt8, _](data), SocketAddr.localhost(port))
 
     var buf = zero_buf(64)
-    var (n, _) = rx.recv_from(Span[UInt8](buf))
+    var (n, _) = rx.recv_from(Span[UInt8, _](buf))
     assert_equal(n, 1)
     assert_equal(buf[0], UInt8(99))
 
@@ -70,7 +70,7 @@ def test_round_trip_1_byte():
     rx.close()
 
 
-def test_round_trip_512_bytes():
+def test_round_trip_512_bytes() raises:
     """Round-trip a 512-byte datagram with pattern verification."""
     var rx = UdpSocket.bind(SocketAddr.localhost(0))
     var tx = UdpSocket.unbound()
@@ -79,10 +79,10 @@ def test_round_trip_512_bytes():
     var data = List[UInt8]()
     for i in range(512):
         data.append(UInt8(i & 0xFF))
-    var _ = tx.send_to(Span[UInt8](data), SocketAddr.localhost(port))
+    var _ = tx.send_to(Span[UInt8, _](data), SocketAddr.localhost(port))
 
     var buf = zero_buf(1024)
-    var (n, _) = rx.recv_from(Span[UInt8](buf))
+    var (n, _) = rx.recv_from(Span[UInt8, _](buf))
     assert_equal(n, 512)
     assert_equal(buf[0], UInt8(0))
     assert_equal(buf[255], UInt8(255))
@@ -91,7 +91,7 @@ def test_round_trip_512_bytes():
     rx.close()
 
 
-def test_round_trip_returns_sender_addr():
+def test_round_trip_returns_sender_addr() raises:
     """``recv_from()`` returns the correct sender address."""
     var rx = UdpSocket.bind(SocketAddr.localhost(0))
     var tx = UdpSocket.bind(
@@ -102,10 +102,10 @@ def test_round_trip_returns_sender_addr():
 
     var data = zero_buf(1)
     data[0] = UInt8(7)
-    var _ = tx.send_to(Span[UInt8](data), SocketAddr.localhost(rx_port))
+    var _ = tx.send_to(Span[UInt8, _](data), SocketAddr.localhost(rx_port))
 
     var buf = zero_buf(64)
-    var (n, sender) = rx.recv_from(Span[UInt8](buf))
+    var (n, sender) = rx.recv_from(Span[UInt8, _](buf))
     assert_equal(n, 1)
     assert_equal(sender.port, tx_port)
     assert_equal(String(sender.ip), "127.0.0.1")
@@ -114,7 +114,7 @@ def test_round_trip_returns_sender_addr():
     rx.close()
 
 
-def test_recv_from_multiple_datagrams():
+def test_recv_from_multiple_datagrams() raises:
     """Multiple independent datagrams arrive in send order on loopback."""
     var rx = UdpSocket.bind(SocketAddr.localhost(0))
     var tx = UdpSocket.unbound()
@@ -124,11 +124,11 @@ def test_recv_from_multiple_datagrams():
     for i in range(5):
         var d = zero_buf(1)
         d[0] = UInt8(i * 11)
-        var _ = tx.send_to(Span[UInt8](d), SocketAddr.localhost(port))
+        var _ = tx.send_to(Span[UInt8, _](d), SocketAddr.localhost(port))
 
     var buf = zero_buf(64)
     for i in range(5):
-        var (n, _) = rx.recv_from(Span[UInt8](buf))
+        var (n, _) = rx.recv_from(Span[UInt8, _](buf))
         assert_equal(n, 1)
         assert_equal(buf[0], UInt8(i * 11))
 
@@ -139,13 +139,13 @@ def test_recv_from_multiple_datagrams():
 # ── DatagramTooLarge ──────────────────────────────────────────────────────────
 
 
-def test_datagram_too_large_raises():
+def test_datagram_too_large_raises() raises:
     """``send_to()`` raises ``DatagramTooLarge`` for a 65508-byte payload."""
     var s = UdpSocket.unbound()
     var big = List[UInt8]()
     big.resize(65508, 0)
     try:
-        var _ = s.send_to(Span[UInt8](big), SocketAddr.localhost(9999))
+        var _ = s.send_to(Span[UInt8, _](big), SocketAddr.localhost(9999))
         assert_equal(1, 0, "must have raised DatagramTooLarge")
     except e:
         var msg = String(e)
@@ -153,7 +153,7 @@ def test_datagram_too_large_raises():
     s.close()
 
 
-def test_datagram_large_payload():
+def test_datagram_large_payload() raises:
     """``send_to()`` handles a large 8192-byte datagram reliably over loopback.
 
     Note: 65507-byte datagrams are valid at the IP layer but may be rejected
@@ -169,12 +169,12 @@ def test_datagram_large_payload():
     var data = List[UInt8]()
     for i in range(size):
         data.append(UInt8((i * 3 + 7) & 0xFF))
-    var n_sent = tx.send_to(Span[UInt8](data), SocketAddr.localhost(port))
+    var n_sent = tx.send_to(Span[UInt8, _](data), SocketAddr.localhost(port))
     assert_equal(n_sent, size)
 
     var buf = zero_buf(size)
     rx.set_recv_timeout(2000)  # 2-second safety timeout
-    var (n_recv, _) = rx.recv_from(Span[UInt8](buf))
+    var (n_recv, _) = rx.recv_from(Span[UInt8, _](buf))
     assert_equal(n_recv, size)
     assert_equal(buf[0], UInt8(7))
     assert_equal(buf[1], UInt8(10))  # (3+7) & 0xFF
@@ -186,7 +186,7 @@ def test_datagram_large_payload():
 # ── Timeout ───────────────────────────────────────────────────────────────────
 
 
-def test_recv_timeout_raises():
+def test_recv_timeout_raises() raises:
     """``recv_from()`` raises when no datagram arrives within the timeout."""
     var s = UdpSocket.bind(SocketAddr.localhost(0))
     s.set_recv_timeout(100)  # 100ms
@@ -194,14 +194,14 @@ def test_recv_timeout_raises():
     var buf = zero_buf(64)
     var raised = False
     try:
-        var _ = s.recv_from(Span[UInt8](buf))
+        var _ = s.recv_from(Span[UInt8, _](buf))
     except:
         raised = True
     assert_equal(raised, True, "recv_from must raise on timeout")
     s.close()
 
 
-def main():
+def main() raises:
     print("=" * 60)
     print("test_udp.mojo — UdpSocket")
     print("=" * 60)

@@ -196,7 +196,7 @@ struct RawSocket(Movable):
 
     # ── Socket options ────────────────────────────────────────────────────────
 
-    fn set_reuse_addr(self, enabled: Bool) raises:
+    def set_reuse_addr(self, enabled: Bool) raises:
         """Set ``SO_REUSEADDR`` so the port can be reused immediately after
         the socket is closed.
 
@@ -216,7 +216,7 @@ struct RawSocket(Movable):
         """
         self._set_bool_opt(SOL_SOCKET, SO_REUSEADDR, enabled)
 
-    fn set_reuse_port(self, enabled: Bool) raises:
+    def set_reuse_port(self, enabled: Bool) raises:
         """Set ``SO_REUSEPORT`` for multi-process listener load balancing.
 
         Allows multiple processes or threads to bind the same port. Each
@@ -230,7 +230,7 @@ struct RawSocket(Movable):
         """
         self._set_bool_opt(SOL_SOCKET, SO_REUSEPORT, enabled)
 
-    fn set_keepalive(self, enabled: Bool) raises:
+    def set_keepalive(self, enabled: Bool) raises:
         """Enable or disable ``SO_KEEPALIVE``.
 
         When enabled, the kernel sends TCP keepalive probes on idle
@@ -249,7 +249,7 @@ struct RawSocket(Movable):
         """
         self._set_bool_opt(SOL_SOCKET, SO_KEEPALIVE, enabled)
 
-    fn set_tcp_nodelay(self, enabled: Bool) raises:
+    def set_tcp_nodelay(self, enabled: Bool) raises:
         """Disable Nagle's algorithm via ``TCP_NODELAY``.
 
         Must be called on all TCP sockets in flare. Nagle coalesces small
@@ -269,7 +269,7 @@ struct RawSocket(Movable):
         """
         self._set_bool_opt(IPPROTO_TCP, TCP_NODELAY, enabled)
 
-    fn set_recv_timeout(self, ms: Int) raises:
+    def set_recv_timeout(self, ms: Int) raises:
         """Set a receive timeout via ``SO_RCVTIMEO``.
 
         After the timeout expires, ``recv``/``recvfrom`` returns ``EAGAIN``.
@@ -287,7 +287,7 @@ struct RawSocket(Movable):
         """
         self._set_timeval_opt(SO_RCVTIMEO, ms)
 
-    fn set_send_timeout(self, ms: Int) raises:
+    def set_send_timeout(self, ms: Int) raises:
         """Set a send timeout via ``SO_SNDTIMEO``.
 
         Args:
@@ -298,7 +298,7 @@ struct RawSocket(Movable):
         """
         self._set_timeval_opt(SO_SNDTIMEO, ms)
 
-    fn set_nonblocking(self, enabled: Bool) raises:
+    def set_nonblocking(self, enabled: Bool) raises:
         """Toggle non-blocking mode on the socket.
 
         On macOS/arm64 delegates to ``flare_set_nonblocking`` in
@@ -342,7 +342,7 @@ struct RawSocket(Movable):
 
     # ── Local / peer address ──────────────────────────────────────────────────
 
-    fn local_addr(self) raises -> SocketAddr:
+    def local_addr(self) raises -> SocketAddr:
         """Return the local address assigned by the OS.
 
         Returns:
@@ -369,7 +369,7 @@ struct RawSocket(Movable):
             raise NetworkError(_os_error("getsockname"), Int(e.value))
         return _sockaddr_to_socket_addr(buf)
 
-    fn peer_addr(self) raises -> SocketAddr:
+    def peer_addr(self) raises -> SocketAddr:
         """Return the remote address of the connected peer.
 
         Returns:
@@ -391,7 +391,7 @@ struct RawSocket(Movable):
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    fn _set_bool_opt(self, level: c_int, opt: c_int, value: Bool) raises:
+    def _set_bool_opt(self, level: c_int, opt: c_int, value: Bool) raises:
         """Helper: call ``setsockopt`` with an ``Int32`` boolean value.
 
         Args:
@@ -409,7 +409,7 @@ struct RawSocket(Movable):
             var e = get_errno()
             raise NetworkError(_os_error("setsockopt"), Int(e.value))
 
-    fn _set_timeval_opt(self, opt: c_int, ms: Int) raises:
+    def _set_timeval_opt(self, opt: c_int, ms: Int) raises:
         """Helper: call ``setsockopt`` with a ``timeval`` for timeout options.
 
         ``timeval`` layout (64-bit platforms): 8 bytes ``tv_sec`` +
@@ -443,7 +443,7 @@ struct RawSocket(Movable):
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
 
-fn _build_sockaddr_in(
+def _build_sockaddr_in(
     addr: SocketAddr,
 ) raises -> Tuple[type_of(alloc[UInt8](0)), c_uint]:
     """Allocate and populate a heap ``sockaddr_in`` buffer for ``addr``.
@@ -480,7 +480,7 @@ fn _build_sockaddr_in(
     return Tuple(sa, SOCKADDR_IN_SIZE)
 
 
-fn _sockaddr_to_socket_addr(buf: UnsafePointer[UInt8]) raises -> SocketAddr:
+def _sockaddr_to_socket_addr(buf: UnsafePointer[UInt8, _]) raises -> SocketAddr:
     """Extract a ``SocketAddr`` from a 16-byte ``sockaddr_in`` buffer.
 
     Args:
@@ -497,7 +497,7 @@ fn _sockaddr_to_socket_addr(buf: UnsafePointer[UInt8]) raises -> SocketAddr:
     return SocketAddr(IpAddr(ip_str, is_v6=False), port)
 
 
-fn _raise_net_error(op: String) raises:
+def _raise_net_error(op: String) raises:
     """Read ``errno`` and raise an appropriate typed error.
 
     Maps common socket errno values to typed errors; falls back to

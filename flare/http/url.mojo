@@ -78,7 +78,7 @@ struct Url(Movable):
         self.fragment = take.fragment^
 
     @staticmethod
-    fn parse(raw: String) raises -> Url:
+    def parse(raw: String) raises -> Url:
         """Parse a URL string into a ``Url``.
 
         Args:
@@ -97,19 +97,23 @@ struct Url(Movable):
         var scheme_end = _find(s, "://")
         if scheme_end < 0:
             raise UrlParseError("missing scheme in URL: " + raw)
-        var scheme = String(s[:scheme_end])
+        var scheme = String(String(unsafe_from_utf8=s.as_bytes()[:scheme_end]))
         if scheme != "http" and scheme != "https":
             raise UrlParseError(
                 "unsupported scheme '" + scheme + "' in URL: " + raw
             )
-        s = String(s[scheme_end + 3 :])  # skip "://"
+        s = String(
+            String(unsafe_from_utf8=s.as_bytes()[scheme_end + 3 :])
+        )  # skip "://"
 
         # ── 2. Strip fragment ─────────────────────────────────────────────────
         var fragment = String("")
         var frag_pos = _rfind(s, "#")
         if frag_pos >= 0:
-            fragment = String(s[frag_pos + 1 :])
-            s = String(s[:frag_pos])
+            fragment = String(
+                String(unsafe_from_utf8=s.as_bytes()[frag_pos + 1 :])
+            )
+            s = String(String(unsafe_from_utf8=s.as_bytes()[:frag_pos]))
 
         # ── 3. Authority and path split ────────────────────────────────────────
         var path_start = _find(s, "/")
@@ -119,16 +123,24 @@ struct Url(Movable):
             authority = s
             path_and_query = "/"
         else:
-            authority = String(s[:path_start])
-            path_and_query = String(s[path_start:])
+            authority = String(
+                String(unsafe_from_utf8=s.as_bytes()[:path_start])
+            )
+            path_and_query = String(
+                String(unsafe_from_utf8=s.as_bytes()[path_start:])
+            )
 
         # ── 4. Query split ────────────────────────────────────────────────────
         var query = String("")
         var q_pos = _find(path_and_query, "?")
         var path: String
         if q_pos >= 0:
-            path = String(path_and_query[:q_pos])
-            query = String(path_and_query[q_pos + 1 :])
+            path = String(
+                String(unsafe_from_utf8=path_and_query.as_bytes()[:q_pos])
+            )
+            query = String(
+                String(unsafe_from_utf8=path_and_query.as_bytes()[q_pos + 1 :])
+            )
         else:
             path = path_and_query
 
@@ -139,7 +151,9 @@ struct Url(Movable):
         # Strip optional userinfo (user:pass@) — we don't support auth in v0.1
         var at_pos = _find(authority, "@")
         if at_pos >= 0:
-            authority = String(authority[at_pos + 1 :])
+            authority = String(
+                String(unsafe_from_utf8=authority.as_bytes()[at_pos + 1 :])
+            )
 
         var host: String
         var port: UInt16
@@ -148,17 +162,39 @@ struct Url(Movable):
             var bracket_end = _find(authority, "]")
             if bracket_end < 0:
                 raise UrlParseError("unterminated IPv6 literal in: " + raw)
-            host = String(authority[1:bracket_end])
-            var after = String(authority[bracket_end + 1 :])
+            host = String(
+                String(unsafe_from_utf8=authority.as_bytes()[1:bracket_end])
+            )
+            var after = String(
+                String(unsafe_from_utf8=authority.as_bytes()[bracket_end + 1 :])
+            )
             if after.startswith(":"):
-                port = UInt16(_parse_port(String(after[1:]), raw))
+                port = UInt16(
+                    _parse_port(
+                        String(String(unsafe_from_utf8=after.as_bytes()[1:])),
+                        raw,
+                    )
+                )
             else:
                 port = _default_port(scheme)
         else:
             var colon = _rfind(authority, ":")
             if colon >= 0:
-                host = String(authority[:colon])
-                port = UInt16(_parse_port(String(authority[colon + 1 :]), raw))
+                host = String(
+                    String(unsafe_from_utf8=authority.as_bytes()[:colon])
+                )
+                port = UInt16(
+                    _parse_port(
+                        String(
+                            String(
+                                unsafe_from_utf8=authority.as_bytes()[
+                                    colon + 1 :
+                                ]
+                            )
+                        ),
+                        raw,
+                    )
+                )
             else:
                 host = authority
                 port = _default_port(scheme)
@@ -235,7 +271,7 @@ fn _default_port(scheme: String) -> UInt16:
     return 80
 
 
-fn _parse_port(s: String, raw: String) raises -> Int:
+def _parse_port(s: String, raw: String) raises -> Int:
     """Parse a decimal port string.
 
     Args:

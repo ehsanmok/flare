@@ -27,7 +27,7 @@ from flare.tls import (
 ```mojo
 from flare.tls import TlsStream, TlsConfig
 
-fn main() raises:
+def main() raises:
     # HTTPS request using system CA bundle (default)
     var stream = TlsStream.connect("example.com", 443, TlsConfig())
     _ = stream.write(

@@ -34,7 +34,7 @@ from flare.ws.frame import WsFrame, WsOpcode, WsProtocolError
 # ── Target 1: WebSocket upgrade request parser ────────────────────────────────
 
 
-fn target_upgrade(data: List[UInt8]) raises:
+def target_upgrade(data: List[UInt8]) raises:
     """Fuzz target: parse an HTTP WebSocket Upgrade request from arbitrary bytes.
 
     Args:
@@ -44,13 +44,13 @@ fn target_upgrade(data: List[UInt8]) raises:
         Expected: ``NetworkError``, ``Error`` — classified as rejections.
         Bug:      Crash-marker messages — classified as crashes and saved.
     """
-    _ = _parse_ws_upgrade_bytes(Span[UInt8](data))
+    _ = _parse_ws_upgrade_bytes(Span[UInt8, _](data))
 
 
 # ── Target 2: WebSocket masked frame decoder ──────────────────────────────────
 
 
-fn target_frame(data: List[UInt8]) raises:
+def target_frame(data: List[UInt8]) raises:
     """Fuzz target: decode a WebSocket frame as if from a masked client.
 
     Feeds arbitrary bytes to ``WsFrame.decode_one``.  Any valid frame
@@ -64,7 +64,7 @@ fn target_frame(data: List[UInt8]) raises:
         Bug:      Crash-marker messages — classified as crashes and saved.
     """
     try:
-        var result = WsFrame.decode_one(Span[UInt8](data))
+        var result = WsFrame.decode_one(Span[UInt8, _](data))
         # Invariant: never consume more bytes than were given
         if result.consumed > len(data):
             raise Error(
@@ -87,7 +87,7 @@ fn target_frame(data: List[UInt8]) raises:
 # ── Property: unmasked frames always have masked=False ────────────────────────
 
 
-fn prop_mask_bit_honoured(data: List[UInt8]) raises -> Bool:
+def prop_mask_bit_honoured(data: List[UInt8]) raises -> Bool:
     """Property: MASK bit in byte 1 of decoded frame matches input bit.
 
     RFC 6455 §5.2: byte 1 bit 7 (0x80) is the MASK flag.  The decoder
@@ -102,7 +102,7 @@ fn prop_mask_bit_honoured(data: List[UInt8]) raises -> Bool:
     if len(data) < 2:
         return True
     try:
-        var result = WsFrame.decode_one(Span[UInt8](data))
+        var result = WsFrame.decode_one(Span[UInt8, _](data))
         var frame = result^.take_frame()
         var expected_masked = (Int(data[1]) & 0x80) != 0
         if frame.masked != expected_masked:
@@ -115,7 +115,7 @@ fn prop_mask_bit_honoured(data: List[UInt8]) raises -> Bool:
 # ── Property: CLOSE frames always have code in 1000–4999 or empty ─────────────
 
 
-fn prop_close_code_range(data: List[UInt8]) raises -> Bool:
+def prop_close_code_range(data: List[UInt8]) raises -> Bool:
     """Property: successfully decoded CLOSE frames have valid or absent codes.
 
     RFC 6455 §7.4: valid close codes are 1000–2999 (protocol-defined)
@@ -130,7 +130,7 @@ fn prop_close_code_range(data: List[UInt8]) raises -> Bool:
         Always ``True`` (this is a no-crash property).
     """
     try:
-        var result = WsFrame.decode_one(Span[UInt8](data))
+        var result = WsFrame.decode_one(Span[UInt8, _](data))
         var frame = result^.take_frame()
         if frame.opcode == WsOpcode.CLOSE:
             # Accessing the payload is fine; no assertion on code value
@@ -140,7 +140,7 @@ fn prop_close_code_range(data: List[UInt8]) raises -> Bool:
         return True
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] WebSocket server fuzz harnesses\n")
 
     fn _b(s: StringLiteral) -> List[UInt8]:

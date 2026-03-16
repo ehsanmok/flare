@@ -11,7 +11,7 @@ from flare.net import SocketAddr
 from flare.tcp import TcpStream, TcpListener
 
 
-fn main() raises:
+def main() raises:
     # TODO: spin up a loopback listener in a thread, then benchmark
     # TcpStream.write() throughput across a range of buffer sizes.
     print("TCP benchmark: not yet implemented (requires socket FFI)")

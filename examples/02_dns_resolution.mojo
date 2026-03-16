@@ -12,7 +12,7 @@ from flare.dns import resolve, resolve_v4, resolve_v6
 from flare.net import IpAddr
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 02: DNS Resolution ===")
     print()
 

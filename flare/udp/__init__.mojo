@@ -18,7 +18,7 @@ from flare.udp import UdpSocket, DatagramTooLarge
 from flare.udp import UdpSocket
 from flare.net import SocketAddr
 
-fn main() raises:
+def main() raises:
     # Sender (no bind needed for outbound-only sockets)
     var tx = UdpSocket.unbound()
     tx.send_to("hello".as_bytes(), SocketAddr.localhost(9001))
@@ -28,7 +28,7 @@ fn main() raises:
     var rx = UdpSocket.bind(SocketAddr.localhost(9001))
     var buf = List[UInt8](capacity=65535)
     buf.resize(65535, 0)
-    var (n, from_addr) = rx.recv_from(Span[UInt8](buf))
+    var (n, from_addr) = rx.recv_from(Span[UInt8, _](buf))
     print(String(buf[:n]))           # hello
     rx.close()
 ```

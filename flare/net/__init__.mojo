@@ -18,7 +18,7 @@ from flare.net import (
 ```mojo
 from flare.net import IpAddr, SocketAddr
 
-fn main() raises:
+def main() raises:
     var ip   = IpAddr.parse("93.184.216.34")
     print(ip.is_global())            # True
     print(ip.is_private())           # False

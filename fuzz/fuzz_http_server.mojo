@@ -23,7 +23,7 @@ from mozz import fuzz, FuzzConfig
 from flare.http.server import _parse_http_request_bytes
 
 
-fn target(data: List[UInt8]) raises:
+def target(data: List[UInt8]) raises:
     """Fuzz target: parse an HTTP/1.1 request from arbitrary bytes.
 
     Args:
@@ -33,10 +33,10 @@ fn target(data: List[UInt8]) raises:
         Expected: ``Error``, ``NetworkError`` — classified as rejections.
         Bug:      Crash-marker messages — classified as crashes and saved.
     """
-    _ = _parse_http_request_bytes(Span[UInt8](data))
+    _ = _parse_http_request_bytes(Span[UInt8, _](data))
 
 
-fn prop_header_limit(data: List[UInt8]) raises -> Bool:
+def prop_header_limit(data: List[UInt8]) raises -> Bool:
     """Property: requests with headers exceeding the limit always raise.
 
     Args:
@@ -47,7 +47,7 @@ fn prop_header_limit(data: List[UInt8]) raises -> Bool:
     """
     # Very tight limit — any real headers should trip it
     try:
-        _ = _parse_http_request_bytes(Span[UInt8](data), max_header_size=10)
+        _ = _parse_http_request_bytes(Span[UInt8, _](data), max_header_size=10)
     except e:
         var msg = String(e)
         # Only pass if it raised because of the limit or malformed input
@@ -59,7 +59,7 @@ fn prop_header_limit(data: List[UInt8]) raises -> Bool:
     return True
 
 
-fn prop_body_limit(data: List[UInt8]) raises -> Bool:
+def prop_body_limit(data: List[UInt8]) raises -> Bool:
     """Property: requests with bodies exceeding the limit always raise.
 
     Args:
@@ -69,14 +69,14 @@ fn prop_body_limit(data: List[UInt8]) raises -> Bool:
         ``True`` if the invariant holds.
     """
     try:
-        _ = _parse_http_request_bytes(Span[UInt8](data), max_body_size=0)
+        _ = _parse_http_request_bytes(Span[UInt8, _](data), max_body_size=0)
     except e:
         return True  # any error is fine
     # Parsed without body — must have Content-Length: 0 or no CL header
     return True
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] fuzzing _parse_http_request_bytes()\n")
 
     fn _b(s: StringLiteral) -> List[UInt8]:

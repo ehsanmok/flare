@@ -22,7 +22,7 @@ struct HttpServer(Movable):
 
     Example:
         ```mojo
-        fn handle(req: Request) raises -> Response:
+        def handle(req: Request) raises -> Response:
             return Response(Status.OK, body="hello".as_bytes())
 
         var srv = HttpServer.bind(SocketAddr.localhost(8080))
@@ -53,7 +53,7 @@ struct HttpServer(Movable):
         self._listener.close()
 
     @staticmethod
-    fn bind(addr: SocketAddr) raises -> HttpServer:
+    def bind(addr: SocketAddr) raises -> HttpServer:
         """Bind an HTTP server on ``addr``.
 
         Args:
@@ -69,7 +69,7 @@ struct HttpServer(Movable):
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^)
 
-    fn serve(self, handler: fn(Request) raises -> Response) raises:
+    def serve(self, handler: fn(Request) raises -> Response) raises:
         """Accept connections in a loop, calling ``handler`` for each request.
 
         Blocks indefinitely. Call ``close()`` from another thread (or
@@ -107,7 +107,7 @@ struct HttpServer(Movable):
 # ── Connection handler ────────────────────────────────────────────────────────
 
 
-fn _handle_connection(
+def _handle_connection(
     var stream: TcpStream,
     handler: fn(Request) raises -> Response,
     max_header_size: Int,
@@ -160,7 +160,7 @@ fn _handle_connection(
 # ── Request parsing ───────────────────────────────────────────────────────────
 
 
-fn _read_tcp_line(mut stream: TcpStream) raises -> String:
+def _read_tcp_line(mut stream: TcpStream) raises -> String:
     """Read one CRLF-terminated line from ``stream``.
 
     Reads one byte at a time until ``\\r\\n`` or ``\\n`` is found.
@@ -202,7 +202,7 @@ fn _parse_int_str(s: String) -> Int:
     return result
 
 
-fn _read_line_buf(data: Span[UInt8], mut pos: Int) -> String:
+fn _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:
     """Read one CRLF/LF-terminated line from a byte span, advancing ``pos``.
 
     Args:
@@ -224,15 +224,15 @@ fn _read_line_buf(data: Span[UInt8], mut pos: Int) -> String:
     return line^
 
 
-fn _parse_http_request_bytes(
-    data: Span[UInt8],
+def _parse_http_request_bytes(
+    data: Span[UInt8, _],
     max_header_size: Int = 8_192,
     max_body_size: Int = 10 * 1024 * 1024,
 ) raises -> Request:
     """Parse an HTTP/1.1 request from a byte buffer (for testing/fuzzing).
 
     Identical logic to ``_parse_http_request`` but reads from a
-    ``Span[UInt8]`` instead of a ``TcpStream``.  Suitable for fuzz
+    ``Span[UInt8, _]`` instead of a ``TcpStream``.  Suitable for fuzz
     harnesses and unit tests that operate on raw bytes.
 
     Args:
@@ -260,7 +260,7 @@ fn _parse_http_request_bytes(
             break
     if sp1 < 0:
         raise Error("malformed request line: " + req_line)
-    var method = String(req_line[:sp1])
+    var method = String(String(unsafe_from_utf8=req_line.as_bytes()[:sp1]))
 
     var sp2 = -1
     for i in range(sp1 + 1, len(req_line)):
@@ -269,9 +269,11 @@ fn _parse_http_request_bytes(
             break
     var path: String
     if sp2 < 0:
-        path = String(req_line[sp1 + 1 :])
+        path = String(String(unsafe_from_utf8=req_line.as_bytes()[sp1 + 1 :]))
     else:
-        path = String(req_line[sp1 + 1 : sp2])
+        path = String(
+            String(unsafe_from_utf8=req_line.as_bytes()[sp1 + 1 : sp2])
+        )
 
     # ── 2. Headers ────────────────────────────────────────────────────────────
     var headers = HeaderMap()
@@ -294,8 +296,14 @@ fn _parse_http_request_bytes(
                 colon = i
                 break
         if colon >= 0:
-            var k = String(String(line[:colon]).strip())
-            var v = String(String(line[colon + 1 :]).strip())
+            var k = String(
+                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
+            )
+            var v = String(
+                String(
+                    String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
+                ).strip()
+            )
             headers.set(k, v)
 
     # ── 3. Body (Content-Length only for v0.1.0) ──────────────────────────────
@@ -321,7 +329,7 @@ fn _parse_http_request_bytes(
     return req^
 
 
-fn _parse_http_request(
+def _parse_http_request(
     mut stream: TcpStream,
     max_header_size: Int,
     max_body_size: Int,
@@ -356,7 +364,7 @@ fn _parse_http_request(
             break
     if sp1 < 0:
         raise Error("malformed request line: " + req_line)
-    var method = String(req_line[:sp1])
+    var method = String(String(unsafe_from_utf8=req_line.as_bytes()[:sp1]))
 
     var sp2 = -1
     for i in range(sp1 + 1, len(req_line)):
@@ -365,9 +373,11 @@ fn _parse_http_request(
             break
     var path: String
     if sp2 < 0:
-        path = String(req_line[sp1 + 1 :])
+        path = String(String(unsafe_from_utf8=req_line.as_bytes()[sp1 + 1 :]))
     else:
-        path = String(req_line[sp1 + 1 : sp2])
+        path = String(
+            String(unsafe_from_utf8=req_line.as_bytes()[sp1 + 1 : sp2])
+        )
 
     # ── 2. Headers ────────────────────────────────────────────────────────────
     var headers = HeaderMap()
@@ -390,8 +400,14 @@ fn _parse_http_request(
                 colon = i
                 break
         if colon >= 0:
-            var k = String(String(line[:colon]).strip())
-            var v = String(String(line[colon + 1 :]).strip())
+            var k = String(
+                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
+            )
+            var v = String(
+                String(
+                    String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
+                ).strip()
+            )
             headers.set(k, v)
 
     # ── 3. Body (Content-Length only for v0.1.0) ──────────────────────────────
@@ -475,7 +491,7 @@ fn _status_reason(code: Int) -> String:
     return "Unknown"
 
 
-fn _write_response(mut stream: TcpStream, resp: Response) raises:
+def _write_response(mut stream: TcpStream, resp: Response) raises:
     """Serialise ``resp`` and write it to ``stream``.
 
     Adds ``Content-Length`` and ``Connection: close`` if not already set.
@@ -513,6 +529,6 @@ fn _write_response(mut stream: TcpStream, resp: Response) raises:
     wire += "\r\n"
 
     var wire_bytes = wire.as_bytes()
-    stream.write_all(Span[UInt8](wire_bytes))
+    stream.write_all(Span[UInt8, _](wire_bytes))
     if len(resp.body) > 0:
-        stream.write_all(Span[UInt8](resp.body))
+        stream.write_all(Span[UInt8, _](resp.body))

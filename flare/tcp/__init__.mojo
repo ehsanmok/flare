@@ -20,17 +20,17 @@ All operations raise typed errors from `flare.net` on failure.
 from flare.tcp import TcpStream, TcpListener
 from flare.net import SocketAddr
 
-fn echo_server() raises:
+def echo_server() raises:
     var listener = TcpListener.bind(SocketAddr.localhost(9000))
     var client   = listener.accept()
 
     var buf = List[UInt8](capacity=4096)
     buf.resize(4096, 0)
     var n = client.read(buf.unsafe_ptr(), len(buf))
-    _ = client.write(Span[UInt8](buf)[:n])  # echo back
+    _ = client.write(Span[UInt8, _](buf)[:n])  # echo back
     client.close()
 
-fn echo_client() raises:
+def echo_client() raises:
     var conn = TcpStream.connect(SocketAddr.localhost(9000))
     _ = conn.write("hello\\n".as_bytes())
     var buf = List[UInt8](capacity=4096)

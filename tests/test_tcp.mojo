@@ -20,7 +20,7 @@ from flare.net import SocketAddr, IpAddr
 # ── Test helpers ──────────────────────────────────────────────────────────────
 
 
-fn bytes_of(s: String) raises -> List[UInt8]:
+def bytes_of(s: String) raises -> List[UInt8]:
     """Convert string to owned List[UInt8] via move."""
     var b = s.as_bytes()
     var out = List[UInt8]()
@@ -39,7 +39,7 @@ fn zero_buf(n: Int) -> List[UInt8]:
 # ── TcpListener: bind and introspect ─────────────────────────────────────────
 
 
-def test_listener_bind_port_zero_assigns_port():
+def test_listener_bind_port_zero_assigns_port() raises:
     """Binding port 0 yields a real OS-assigned non-zero port."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var port = l.local_addr().port
@@ -47,14 +47,14 @@ def test_listener_bind_port_zero_assigns_port():
     l.close()
 
 
-def test_listener_local_addr_is_loopback():
+def test_listener_local_addr_is_loopback() raises:
     """Local address after bind is 127.0.0.1."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     assert_equal(String(l.local_addr().ip), "127.0.0.1")
     l.close()
 
 
-def test_listener_close_idempotent():
+def test_listener_close_idempotent() raises:
     """Calling close() twice must not panic."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     l.close()
@@ -64,7 +64,7 @@ def test_listener_close_idempotent():
 # ── TcpStream: connect ────────────────────────────────────────────────────────
 
 
-def test_connect_to_listener_succeeds():
+def test_connect_to_listener_succeeds() raises:
     """TcpStream.connect() to an active listener returns a connected stream."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var port = l.local_addr().port
@@ -75,7 +75,7 @@ def test_connect_to_listener_succeeds():
     l.close()
 
 
-def test_connect_refused_raises_error():
+def test_connect_refused_raises_error() raises:
     """Connecting to a port with no listener raises an error."""
     # Port 19991 is very unlikely to be in use
     try:
@@ -87,7 +87,7 @@ def test_connect_refused_raises_error():
         assert_not_equal(msg, "", "error must have a message")
 
 
-def test_stream_peer_addr_matches_server():
+def test_stream_peer_addr_matches_server() raises:
     """``peer_addr()`` on the client matches the server's bound port."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var port = l.local_addr().port
@@ -99,7 +99,7 @@ def test_stream_peer_addr_matches_server():
     l.close()
 
 
-def test_stream_local_addr_is_nonzero():
+def test_stream_local_addr_is_nonzero() raises:
     """The client's ephemeral port is non-zero."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var port = l.local_addr().port
@@ -111,7 +111,7 @@ def test_stream_local_addr_is_nonzero():
     l.close()
 
 
-def test_stream_close_idempotent():
+def test_stream_close_idempotent() raises:
     """Calling close() twice on a stream must not panic."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var port = l.local_addr().port
@@ -126,7 +126,7 @@ def test_stream_close_idempotent():
 # ── Round-trip: write_all / read_exact ────────────────────────────────────────
 
 
-def test_round_trip_1_byte():
+def test_round_trip_1_byte() raises:
     """Single-byte round-trip: client sends, server receives."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -134,7 +134,7 @@ def test_round_trip_1_byte():
 
     var data = zero_buf(1)
     data[0] = UInt8(42)
-    c.write_all(Span[UInt8](data))
+    c.write_all(Span[UInt8, _](data))
 
     var buf = zero_buf(16)
     var n = s.read(buf.unsafe_ptr(), len(buf))
@@ -146,7 +146,7 @@ def test_round_trip_1_byte():
     l.close()
 
 
-def test_round_trip_1_kb():
+def test_round_trip_1_kb() raises:
     """1 KB round-trip with pattern verification."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -156,7 +156,7 @@ def test_round_trip_1_kb():
     var data = List[UInt8]()
     for i in range(size):
         data.append(UInt8(i & 0xFF))
-    c.write_all(Span[UInt8](data))
+    c.write_all(Span[UInt8, _](data))
 
     var buf = zero_buf(size)
     s.read_exact(buf.unsafe_ptr(), len(buf))
@@ -169,7 +169,7 @@ def test_round_trip_1_kb():
     l.close()
 
 
-def test_round_trip_64_kb():
+def test_round_trip_64_kb() raises:
     """64 KB round-trip — exercises TCP segmentation and reassembly."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -179,7 +179,7 @@ def test_round_trip_64_kb():
     var data = List[UInt8]()
     for i in range(size):
         data.append(UInt8((i * 7 + 13) & 0xFF))
-    c.write_all(Span[UInt8](data))
+    c.write_all(Span[UInt8, _](data))
 
     var buf = zero_buf(size)
     s.read_exact(buf.unsafe_ptr(), len(buf))
@@ -191,7 +191,7 @@ def test_round_trip_64_kb():
     l.close()
 
 
-def test_read_returns_zero_on_eof():
+def test_read_returns_zero_on_eof() raises:
     """``read()`` returns 0 after the peer calls ``shutdown_write()``."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -208,7 +208,7 @@ def test_read_returns_zero_on_eof():
     l.close()
 
 
-def test_bidirectional_ping_pong():
+def test_bidirectional_ping_pong() raises:
     """Client and server can both send and receive in alternation."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -219,7 +219,7 @@ def test_bidirectional_ping_pong():
     ping[1] = UInt8(ord("i"))
     ping[2] = UInt8(ord("n"))
     ping[3] = UInt8(ord("g"))
-    c.write_all(Span[UInt8](ping))
+    c.write_all(Span[UInt8, _](ping))
 
     var sbuf = zero_buf(4)
     s.read_exact(sbuf.unsafe_ptr(), len(sbuf))
@@ -231,7 +231,7 @@ def test_bidirectional_ping_pong():
     pong[1] = UInt8(ord("o"))
     pong[2] = UInt8(ord("n"))
     pong[3] = UInt8(ord("g"))
-    s.write_all(Span[UInt8](pong))
+    s.write_all(Span[UInt8, _](pong))
 
     var cbuf = zero_buf(4)
     c.read_exact(cbuf.unsafe_ptr(), len(cbuf))
@@ -246,7 +246,7 @@ def test_bidirectional_ping_pong():
 # ── Multiple sequential connections ──────────────────────────────────────────
 
 
-def test_sequential_connections():
+def test_sequential_connections() raises:
     """Listener accepts 10 sequential connections each sending one byte."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var port = l.local_addr().port
@@ -256,7 +256,7 @@ def test_sequential_connections():
         var s = l.accept()
         var data = zero_buf(1)
         data[0] = UInt8(i)
-        c.write_all(Span[UInt8](data))
+        c.write_all(Span[UInt8, _](data))
         var buf = zero_buf(1)
         var _ = s.read(buf.unsafe_ptr(), len(buf))
         assert_equal(buf[0], UInt8(i))
@@ -269,7 +269,7 @@ def test_sequential_connections():
 # ── Socket options ────────────────────────────────────────────────────────────
 
 
-def test_tcp_nodelay_toggle():
+def test_tcp_nodelay_toggle() raises:
     """``set_nodelay()`` toggles without raising."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -281,7 +281,7 @@ def test_tcp_nodelay_toggle():
     l.close()
 
 
-def test_keepalive_toggle():
+def test_keepalive_toggle() raises:
     """``set_keepalive()`` toggles without raising."""
     var l = TcpListener.bind(SocketAddr.localhost(0))
     var c = TcpStream.connect(SocketAddr.localhost(l.local_addr().port))
@@ -293,7 +293,7 @@ def test_keepalive_toggle():
     l.close()
 
 
-def test_recv_timeout_causes_timeout_error():
+def test_recv_timeout_causes_timeout_error() raises:
     """Setting a short recv timeout causes read() to raise after that interval.
     """
     var l = TcpListener.bind(SocketAddr.localhost(0))
@@ -315,7 +315,7 @@ def test_recv_timeout_causes_timeout_error():
     l.close()
 
 
-def test_connect_timeout_blackhole():
+def test_connect_timeout_blackhole() raises:
     """``connect_timeout()`` to a blackhole address raises after the deadline.
 
     Uses a 100ms timeout to fail fast. The unrouted 240.0.0.1 causes an
@@ -335,7 +335,7 @@ def test_connect_timeout_blackhole():
 # ── SO_REUSEADDR: rebind after close ──────────────────────────────────────────
 
 
-def test_reuseaddr_allows_rebind():
+def test_reuseaddr_allows_rebind() raises:
     """After listener.close(), a new listener can bind the same port."""
     var l1 = TcpListener.bind(SocketAddr.localhost(0))
     var port = l1.local_addr().port
@@ -346,7 +346,7 @@ def test_reuseaddr_allows_rebind():
     l2.close()
 
 
-def main():
+def main() raises:
     print("=" * 60)
     print("test_tcp.mojo — TcpStream + TcpListener")
     print("=" * 60)

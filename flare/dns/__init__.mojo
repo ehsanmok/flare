@@ -20,7 +20,7 @@ All functions raise `DnsError` (from `flare.net`) on lookup failure.
 ```mojo
 from flare.dns import resolve, resolve_v4, resolve_v6
 
-fn main() raises:
+def main() raises:
     # All addresses
     for addr in resolve("example.com"):
         print(addr)                 # 93.184.216.34

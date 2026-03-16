@@ -19,7 +19,7 @@ from flare.io import Readable, BufReader
 from flare.tcp import TcpStream
 from flare.io import BufReader
 
-fn main() raises:
+def main() raises:
     var s = TcpStream.connect("example.com", 80)
     s.write_all("GET / HTTP/1.0\\r\\nHost: example.com\\r\\n\\r\\n".as_bytes())
     var r = BufReader(s^)

@@ -16,7 +16,7 @@ from flare.http.headers import HeaderMap
 from flare.http.url import Url
 
 
-fn target(data: List[UInt8]) raises:
+def target(data: List[UInt8]) raises:
     """Fuzz target: drive HeaderMap and URL port parsing with arbitrary bytes.
 
     Splits ``data`` in half: first half drives HeaderMap, second half
@@ -64,7 +64,7 @@ fn target(data: List[UInt8]) raises:
         pass  # UrlParseError is expected
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] fuzzing HeaderMap + Url port parsing...")
 
     var seeds = List[List[UInt8]]()

@@ -36,7 +36,7 @@ from flare.tls import TlsConfig
 # ── Factory opcode tests ──────────────────────────────────────────────────────
 
 
-def test_text_frame_opcode():
+def test_text_frame_opcode() raises:
     """WsFrame.text() must have TEXT opcode."""
     var frame = WsFrame.text("hello")
     assert_equal(Int(frame.opcode), Int(WsOpcode.TEXT))
@@ -44,7 +44,7 @@ def test_text_frame_opcode():
     assert_false(frame.rsv1)
 
 
-def test_binary_frame_opcode():
+def test_binary_frame_opcode() raises:
     """WsFrame.binary() must have BINARY opcode."""
     var data = List[UInt8]()
     var frame = WsFrame.binary(data)
@@ -52,28 +52,28 @@ def test_binary_frame_opcode():
     assert_true(frame.fin)
 
 
-def test_ping_frame_opcode():
+def test_ping_frame_opcode() raises:
     """WsFrame.ping() must have PING opcode."""
     var frame = WsFrame.ping()
     assert_equal(Int(frame.opcode), Int(WsOpcode.PING))
     assert_true(frame.is_control())
 
 
-def test_pong_frame_opcode():
+def test_pong_frame_opcode() raises:
     """WsFrame.pong() must have PONG opcode."""
     var frame = WsFrame.pong()
     assert_equal(Int(frame.opcode), Int(WsOpcode.PONG))
     assert_true(frame.is_control())
 
 
-def test_close_frame_opcode():
+def test_close_frame_opcode() raises:
     """WsFrame.close() must have CLOSE opcode."""
     var frame = WsFrame.close()
     assert_equal(Int(frame.opcode), Int(WsOpcode.CLOSE))
     assert_true(frame.is_control())
 
 
-def test_close_frame_payload():
+def test_close_frame_payload() raises:
     """WsFrame.close() must encode code as 2 big-endian bytes."""
     var frame = WsFrame.close(code=WsCloseCode.NORMAL)
     assert_equal(len(frame.payload), 2)
@@ -81,7 +81,7 @@ def test_close_frame_payload():
     assert_equal(code, 1000)
 
 
-def test_close_frame_with_reason():
+def test_close_frame_with_reason() raises:
     """WsFrame.close() with reason must include reason bytes after code."""
     var frame = WsFrame.close(code=WsCloseCode.GOING_AWAY, reason="bye")
     assert_equal(len(frame.payload), 5)  # 2 (code) + 3 (bye)
@@ -90,7 +90,7 @@ def test_close_frame_with_reason():
     assert_equal(chr(Int(frame.payload[4])), "e")
 
 
-def test_is_control_data_frames():
+def test_is_control_data_frames() raises:
     """Data frames (TEXT, BINARY, CONTINUATION) must not be control frames."""
     assert_false(WsFrame.text("x").is_control())
     var empty = List[UInt8]()
@@ -100,7 +100,7 @@ def test_is_control_data_frames():
 # ── WsOpcode / WsCloseCode constants ─────────────────────────────────────────
 
 
-def test_opcode_values():
+def test_opcode_values() raises:
     """WsOpcode constants must match RFC 6455 §5.2."""
     assert_equal(Int(WsOpcode.CONTINUATION), 0)
     assert_equal(Int(WsOpcode.TEXT), 1)
@@ -110,7 +110,7 @@ def test_opcode_values():
     assert_equal(Int(WsOpcode.PONG), 10)
 
 
-def test_close_code_values():
+def test_close_code_values() raises:
     """WsCloseCode constants must match RFC 6455 §7.4.1."""
     assert_equal(Int(WsCloseCode.NORMAL), 1000)
     assert_equal(Int(WsCloseCode.GOING_AWAY), 1001)
@@ -120,7 +120,7 @@ def test_close_code_values():
 # ── WsFrame.encode() ─────────────────────────────────────────────────────────
 
 
-def test_encode_small_frame_header():
+def test_encode_small_frame_header() raises:
     """Encoding a 5-byte text frame must produce a 2-byte header + payload."""
     var frame = WsFrame.text("hello")
     var wire = frame.encode()
@@ -132,7 +132,7 @@ def test_encode_small_frame_header():
     assert_equal(Int(wire[1]), 5)
 
 
-def test_encode_empty_payload():
+def test_encode_empty_payload() raises:
     """Encoding a frame with no payload must produce exactly 2 header bytes."""
     var frame = WsFrame.ping()
     var wire = frame.encode()
@@ -143,7 +143,7 @@ def test_encode_empty_payload():
     assert_equal(Int(wire[1]), 0)
 
 
-def test_encode_126_byte_payload():
+def test_encode_126_byte_payload() raises:
     """Encoding a 126-byte payload must use extended 16-bit length."""
     var payload = List[UInt8](capacity=126)
     for i in range(126):
@@ -159,7 +159,7 @@ def test_encode_126_byte_payload():
     assert_equal(Int(wire[3]), 126)
 
 
-def test_encode_with_zero_mask():
+def test_encode_with_zero_mask() raises:
     """Encoding with mask=True and zero key must set the MASK bit."""
     var frame = WsFrame.text("hi")
     var wire = frame.encode(mask=True)
@@ -169,7 +169,7 @@ def test_encode_with_zero_mask():
     assert_equal(Int(wire[1]), 0x80 | 2)
 
 
-def test_encode_rsv1_raises():
+def test_encode_rsv1_raises() raises:
     """Encoding with rsv1=True must raise WsProtocolError."""
     var frame = WsFrame(
         opcode=WsOpcode.TEXT,
@@ -180,7 +180,7 @@ def test_encode_rsv1_raises():
         _ = frame.encode()
 
 
-def test_encode_control_oversized_raises():
+def test_encode_control_oversized_raises() raises:
     """Control frame with payload > 125 bytes must raise WsProtocolError."""
     var big = List[UInt8](capacity=126)
     for _ in range(126):
@@ -193,7 +193,7 @@ def test_encode_control_oversized_raises():
 # ── WsFrame.decode_one() ──────────────────────────────────────────────────────
 
 
-def test_decode_small_text_frame():
+def test_decode_small_text_frame() raises:
     """Decoding a 2-header + 5-payload wire frame must reproduce the payload."""
     # Wire: FIN | TEXT, len=5, "hello"
     var wire = List[UInt8]()
@@ -202,26 +202,26 @@ def test_decode_small_text_frame():
     for c in "hello".as_bytes():
         wire.append(c)
 
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(Int(result.frame.opcode), Int(WsOpcode.TEXT))
     assert_true(result.frame.fin)
     assert_equal(result.consumed, 7)
     assert_equal(result.frame.text_payload(), "hello")
 
 
-def test_decode_empty_ping():
+def test_decode_empty_ping() raises:
     """Decoding a 2-byte PING frame must produce an empty control frame."""
     var wire = List[UInt8]()
     wire.append(UInt8(0x89))  # FIN | PING
     wire.append(UInt8(0))
 
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(Int(result.frame.opcode), Int(WsOpcode.PING))
     assert_equal(len(result.frame.payload), 0)
     assert_equal(result.consumed, 2)
 
 
-def test_decode_16bit_length():
+def test_decode_16bit_length() raises:
     """Decoding a frame with 16-bit extended length must read full payload."""
     var plen = 200
     var wire = List[UInt8](capacity=4 + plen)
@@ -232,13 +232,13 @@ def test_decode_16bit_length():
     for i in range(plen):
         wire.append(UInt8(i & 0xFF))
 
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(Int(result.frame.opcode), Int(WsOpcode.BINARY))
     assert_equal(len(result.frame.payload), plen)
     assert_equal(result.consumed, 4 + plen)
 
 
-def test_decode_masked_frame():
+def test_decode_masked_frame() raises:
     """Decoding a masked frame must XOR-unmask the payload."""
     # Encode "AB" with key [0x01, 0x02, 0x03, 0x04]
     var wire = List[UInt8]()
@@ -251,12 +251,12 @@ def test_decode_masked_frame():
     wire.append(UInt8(ord("A") ^ 0x01))  # 'A' ^ key[0]
     wire.append(UInt8(ord("B") ^ 0x02))  # 'B' ^ key[1]
 
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(result.frame.text_payload(), "AB")
     assert_true(result.frame.masked)
 
 
-def test_decode_truncated_raises():
+def test_decode_truncated_raises() raises:
     """Decoding fewer bytes than the frame size must raise."""
     var wire = List[UInt8]()
     wire.append(UInt8(0x81))
@@ -264,40 +264,40 @@ def test_decode_truncated_raises():
     wire.append(UInt8(0))  # only 1 byte of payload
 
     with assert_raises():
-        _ = WsFrame.decode_one(Span[UInt8](wire))
+        _ = WsFrame.decode_one(Span[UInt8, _](wire))
 
 
-def test_decode_fragmented_control_raises():
+def test_decode_fragmented_control_raises() raises:
     """A PING frame with FIN=0 must raise WsProtocolError."""
     var wire = List[UInt8]()
     wire.append(UInt8(0x09))  # FIN=0 | PING (0x09 without 0x80)
     wire.append(UInt8(0))
 
     with assert_raises(contains="WsProtocolError"):
-        _ = WsFrame.decode_one(Span[UInt8](wire))
+        _ = WsFrame.decode_one(Span[UInt8, _](wire))
 
 
 # ── Round-trip tests ──────────────────────────────────────────────────────────
 
 
-def test_encode_decode_roundtrip_text():
+def test_encode_decode_roundtrip_text() raises:
     """Encode then decode a text frame must reproduce the original payload."""
     var frame = WsFrame.text("round-trip test payload")
     var wire = frame.encode()
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(result.frame.text_payload(), "round-trip test payload")
     assert_equal(Int(result.frame.opcode), Int(WsOpcode.TEXT))
     assert_equal(result.consumed, len(wire))
 
 
-def test_encode_decode_roundtrip_binary():
+def test_encode_decode_roundtrip_binary() raises:
     """Encode then decode a binary frame must reproduce all bytes."""
     var payload = List[UInt8](capacity=256)
     for i in range(256):
         payload.append(UInt8(i))
     var frame = WsFrame.binary(payload)
     var wire = frame.encode()
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(len(result.frame.payload), 256)
     for i in range(256):
         assert_equal(
@@ -305,16 +305,16 @@ def test_encode_decode_roundtrip_binary():
         )
 
 
-def test_encode_decode_roundtrip_masked():
+def test_encode_decode_roundtrip_masked() raises:
     """Encode with zero-key mask then decode must reproduce payload."""
     var frame = WsFrame.text("masked message")
     var wire = frame.encode(mask=True)
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     # Zero masking key → XOR with 0 → payload unchanged
     assert_equal(result.frame.text_payload(), "masked message")
 
 
-def test_encode_decode_126_bytes():
+def test_encode_decode_126_bytes() raises:
     """Encode then decode a 126-byte payload must use 16-bit length and round-trip.
     """
     var payload = List[UInt8](capacity=126)
@@ -322,7 +322,7 @@ def test_encode_decode_126_bytes():
         payload.append(UInt8((i * 3 + 7) & 0xFF))
     var frame = WsFrame.binary(payload)
     var wire = frame.encode()
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(len(result.frame.payload), 126)
     for i in range(126):
         assert_equal(
@@ -332,7 +332,7 @@ def test_encode_decode_126_bytes():
         )
 
 
-def test_consumed_with_trailing_data():
+def test_consumed_with_trailing_data() raises:
     """Decode_one() must set consumed correctly even with extra bytes after frame.
     """
     var wire = List[UInt8]()
@@ -345,14 +345,14 @@ def test_consumed_with_trailing_data():
     wire.append(UInt8(0xFF))
     wire.append(UInt8(0xFF))
 
-    var result = WsFrame.decode_one(Span[UInt8](wire))
+    var result = WsFrame.decode_one(Span[UInt8, _](wire))
     assert_equal(result.consumed, 5)  # only 2 header + 3 payload consumed
 
 
 # ── WsProtocolError typing ────────────────────────────────────────────────────
 
 
-def test_ws_protocol_error_str():
+def test_ws_protocol_error_str() raises:
     """WsProtocolError.__str__ must include the message."""
     var e = WsProtocolError("bad opcode")
     assert_true("WsProtocolError" in String(e))
@@ -362,7 +362,7 @@ def test_ws_protocol_error_str():
 # ── Integration: connect to echo server (skipped if offline) ─────────────────
 
 
-def test_ws_connect_plain():
+def test_ws_connect_plain() raises:
     """WsClient.connect() to a plain WS echo server must succeed."""
     try:
         var ws = WsClient.connect("ws://echo.websocket.events")
@@ -372,7 +372,7 @@ def test_ws_connect_plain():
         print("  [SKIP] ws:// unavailable: " + String(e))
 
 
-def test_ws_echo_roundtrip():
+def test_ws_echo_roundtrip() raises:
     """Sending a text message and receiving it back must work end-to-end."""
     try:
         var ws = WsClient.connect("ws://echo.websocket.events")
@@ -402,7 +402,7 @@ def test_ws_echo_roundtrip():
 #   4. Exchanges raw WsFrame wire bytes on the client side.
 
 
-fn _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:
+def _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:
     """Send a minimal HTTP/1.1 upgrade request from a raw TCP stream."""
     var key = "dGhlIHNhbXBsZSBub25jZQ=="  # well-known test key
     var req = (
@@ -419,10 +419,10 @@ fn _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:
         + "\r\n"
     )
     var b = req.as_bytes()
-    stream.write_all(Span[UInt8](b))
+    stream.write_all(Span[UInt8, _](b))
 
 
-fn _drain_101(mut stream: TcpStream) raises:
+def _drain_101(mut stream: TcpStream) raises:
     """Read and discard the HTTP 101 response from the stream."""
     var buf = List[UInt8](capacity=512)
     buf.resize(512, 0)
@@ -446,7 +446,7 @@ fn _drain_101(mut stream: TcpStream) raises:
                     return
 
 
-def test_ws_server_text_echo_loopback():
+def test_ws_server_text_echo_loopback() raises:
     """WsConnection.recv + send_text on loopback with a raw TCP client.
 
     Avoids single-thread deadlock by using raw TCP instead of WsClient.
@@ -481,7 +481,7 @@ def test_ws_server_text_echo_loopback():
     # Build a masked client TEXT frame: payload "hi"
     var client_frame = WsFrame.text("hi")
     var client_wire = client_frame.encode(mask=True)
-    raw_client.write_all(Span[UInt8](client_wire))
+    raw_client.write_all(Span[UInt8, _](client_wire))
 
     # ── Server: receive
     var frame = conn.recv()
@@ -501,7 +501,7 @@ def test_ws_server_text_echo_loopback():
     srv.close()
 
 
-def test_ws_server_binary_echo_loopback():
+def test_ws_server_binary_echo_loopback() raises:
     """WsConnection.recv handles masked binary frames correctly."""
     from flare.ws import WsServer, WsConnection
     from flare.ws.server import (
@@ -533,7 +533,7 @@ def test_ws_server_binary_echo_loopback():
     payload.append(UInt8(0xBE))
     var bin_frame = WsFrame.binary(payload)
     var bin_wire = bin_frame.encode(mask=True)
-    raw_client.write_all(Span[UInt8](bin_wire))
+    raw_client.write_all(Span[UInt8, _](bin_wire))
 
     var frame = conn.recv()
     assert_equal(frame.opcode, WsOpcode.BINARY)
@@ -546,7 +546,7 @@ def test_ws_server_binary_echo_loopback():
     srv.close()
 
 
-def test_ws_server_unmasked_frame_rejected():
+def test_ws_server_unmasked_frame_rejected() raises:
     """WsConnection.recv must raise WsProtocolError on an unmasked client frame.
 
     RFC 6455 §5.1: server must reject unmasked frames.
@@ -584,7 +584,7 @@ def test_ws_server_unmasked_frame_rejected():
     bad_frame.append(UInt8(108))  # l
     bad_frame.append(UInt8(108))  # l
     bad_frame.append(UInt8(111))  # o
-    raw_client.write_all(Span[UInt8](bad_frame))
+    raw_client.write_all(Span[UInt8, _](bad_frame))
 
     with assert_raises():
         _ = conn.recv()
@@ -593,7 +593,7 @@ def test_ws_server_unmasked_frame_rejected():
     srv.close()
 
 
-def main():
+def main() raises:
     print("=" * 60)
     print("test_ws.mojo — WsFrame codec + WsClient + WsServer")
     print("=" * 60)

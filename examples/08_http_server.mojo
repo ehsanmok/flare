@@ -9,7 +9,7 @@ Demonstrates:
 
 Real-world usage blocks forever:
 
-    fn handler(req: Request) raises -> Response:
+    def handler(req: Request) raises -> Response:
         return Response(Status.OK, body="hello".as_bytes())
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
@@ -47,7 +47,7 @@ fn send_raw(s: StringLiteral) -> List[UInt8]:
     return out^
 
 
-fn read_response(mut client: TcpStream) raises -> String:
+def read_response(mut client: TcpStream) raises -> String:
     """Read the response from the server and return the first line."""
     var buf = List[UInt8](unsafe_uninit_length=4096)
     var n = client.read(buf.unsafe_ptr(), len(buf))
@@ -66,7 +66,7 @@ fn read_response(mut client: TcpStream) raises -> String:
 # ── Request handler ───────────────────────────────────────────────────────────
 
 
-fn router(req: Request) raises -> Response:
+def router(req: Request) raises -> Response:
     """Simple router used throughout this example.
 
     Routes:
@@ -114,7 +114,7 @@ fn router(req: Request) raises -> Response:
 # ── One loopback round-trip ───────────────────────────────────────────────────
 
 
-fn roundtrip(listener: TcpListener, raw_request: String) raises -> String:
+def roundtrip(listener: TcpListener, raw_request: String) raises -> String:
     """Send a raw HTTP request and return the server's status line.
 
     Args:
@@ -127,7 +127,7 @@ fn roundtrip(listener: TcpListener, raw_request: String) raises -> String:
     var port = listener.local_addr().port
     var client = TcpStream.connect(SocketAddr.localhost(port))
     var req_bytes = raw_request.as_bytes()
-    client.write_all(Span[UInt8](req_bytes))
+    client.write_all(Span[UInt8, _](req_bytes))
 
     var srv_stream = listener.accept()
     _handle_connection(srv_stream^, router, 8192, 1024 * 1024)
@@ -138,7 +138,7 @@ fn roundtrip(listener: TcpListener, raw_request: String) raises -> String:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 08: HTTP Server ===")
     print()
 

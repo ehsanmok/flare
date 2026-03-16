@@ -31,7 +31,7 @@ from .headers import HeaderMap
 comptime _B64_TABLE: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
-fn _b64_encode(data: Span[UInt8]) -> String:
+fn _b64_encode(data: Span[UInt8, _]) -> String:
     """Encode ``data`` to standard RFC 4648 base64.
 
     Args:
@@ -80,12 +80,12 @@ trait Auth:
     Example:
         ```mojo
         struct MyAuth(Auth):
-            fn apply(self, mut headers: HeaderMap) raises:
+            def apply(self, mut headers: HeaderMap) raises:
                 headers.set("Authorization", "MyScheme token")
         ```
     """
 
-    fn apply(self, mut headers: HeaderMap) raises:
+    def apply(self, mut headers: HeaderMap) raises:
         """Apply authentication credentials to ``headers``.
 
         Implementors must set the ``Authorization`` header (and any other
@@ -142,7 +142,7 @@ struct BasicAuth(Auth, Copyable, Movable):
         self.username = take.username^
         self.password = take.password^
 
-    fn apply(self, mut headers: HeaderMap) raises:
+    def apply(self, mut headers: HeaderMap) raises:
         """Set ``Authorization: Basic <credentials>`` on ``headers``.
 
         The credential string ``username:password`` is UTF-8 encoded then
@@ -190,7 +190,7 @@ struct BearerAuth(Auth, Copyable, Movable):
     fn __moveinit__(out self, deinit take: BearerAuth):
         self.token = take.token^
 
-    fn apply(self, mut headers: HeaderMap) raises:
+    def apply(self, mut headers: HeaderMap) raises:
         """Set ``Authorization: Bearer <token>`` on ``headers``.
 
         Args:

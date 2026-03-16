@@ -40,38 +40,38 @@ from flare.net import SocketAddr
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
 
-def test_b64_encode_empty():
+def test_b64_encode_empty() raises:
     """``_b64_encode`` of empty bytes returns empty string."""
-    var result = _b64_encode(Span[UInt8](List[UInt8]()))
+    var result = _b64_encode(Span[UInt8, _](List[UInt8]()))
     assert_equal(result, "")
 
 
-def test_b64_encode_short():
+def test_b64_encode_short() raises:
     """``_b64_encode`` matches known RFC 4648 vectors."""
     # "Man" -> "TWFu"
     var data = List[UInt8]()
     data.append(UInt8(77))  # M
     data.append(UInt8(97))  # a
     data.append(UInt8(110))  # n
-    assert_equal(_b64_encode(Span[UInt8](data)), "TWFu")
+    assert_equal(_b64_encode(Span[UInt8, _](data)), "TWFu")
 
 
-def test_b64_encode_one_byte():
+def test_b64_encode_one_byte() raises:
     """``_b64_encode`` pads a single-byte input correctly."""
     var data = List[UInt8]()
     data.append(UInt8(0))
-    assert_equal(_b64_encode(Span[UInt8](data)), "AA==")
+    assert_equal(_b64_encode(Span[UInt8, _](data)), "AA==")
 
 
-def test_b64_encode_two_bytes():
+def test_b64_encode_two_bytes() raises:
     """``_b64_encode`` pads a two-byte input correctly."""
     var data = List[UInt8]()
     data.append(UInt8(0))
     data.append(UInt8(0))
-    assert_equal(_b64_encode(Span[UInt8](data)), "AAA=")
+    assert_equal(_b64_encode(Span[UInt8, _](data)), "AAA=")
 
 
-def test_basic_auth_apply():
+def test_basic_auth_apply() raises:
     """``BasicAuth.apply`` sets ``Authorization: Basic <base64>``."""
     var auth = BasicAuth("alice", "s3cr3t")
     var h = HeaderMap()
@@ -82,7 +82,7 @@ def test_basic_auth_apply():
     assert_equal(hdr, "Basic YWxpY2U6czNjcjN0")
 
 
-def test_basic_auth_empty_password():
+def test_basic_auth_empty_password() raises:
     """``BasicAuth`` with empty password encodes ``user:``."""
     var auth = BasicAuth("user", "")
     var h = HeaderMap()
@@ -92,7 +92,7 @@ def test_basic_auth_empty_password():
     assert_true(len(hdr) > 6, "encoded value must be non-empty")
 
 
-def test_bearer_auth_apply():
+def test_bearer_auth_apply() raises:
     """``BearerAuth.apply`` sets ``Authorization: Bearer <token>``."""
     var auth = BearerAuth("my-token-xyz")
     var h = HeaderMap()
@@ -100,7 +100,7 @@ def test_bearer_auth_apply():
     assert_equal(h.get("Authorization"), "Bearer my-token-xyz")
 
 
-def test_bearer_auth_empty_token():
+def test_bearer_auth_empty_token() raises:
     """``BearerAuth`` with empty token sets ``Authorization: Bearer ``."""
     var auth = BearerAuth("")
     var h = HeaderMap()
@@ -111,7 +111,7 @@ def test_bearer_auth_empty_token():
 # ── HttpError ────────────────────────────────────────────────────────────────
 
 
-def test_http_error_str_with_reason_and_url():
+def test_http_error_str_with_reason_and_url() raises:
     """``HttpError.__str__`` includes status, reason and url."""
     var err = HttpError(404, "Not Found", "https://example.com/missing")
     var s = String(err)
@@ -120,7 +120,7 @@ def test_http_error_str_with_reason_and_url():
     assert_true("https://example.com" in s, "URL must appear")
 
 
-def test_http_error_str_no_url():
+def test_http_error_str_no_url() raises:
     """``HttpError.__str__`` omits URL when empty."""
     var err = HttpError(500, "Internal Server Error")
     var s = String(err)
@@ -128,14 +128,14 @@ def test_http_error_str_no_url():
     assert_true("(" not in s, "parens must not appear without url")
 
 
-def test_http_error_str_no_reason():
+def test_http_error_str_no_reason() raises:
     """``HttpError`` with no reason or url."""
     var err = HttpError(403)
     var s = String(err)
     assert_true("403" in s, "status code must appear")
 
 
-def test_too_many_redirects_str():
+def test_too_many_redirects_str() raises:
     """``TooManyRedirects.__str__`` includes count and url."""
     var err = TooManyRedirects("https://example.com", 10)
     var s = String(err)
@@ -146,19 +146,19 @@ def test_too_many_redirects_str():
 # ── Response ─────────────────────────────────────────────────────────────────
 
 
-def test_response_raise_for_status_ok():
+def test_response_raise_for_status_ok() raises:
     """``raise_for_status`` is a no-op for 200 responses."""
     var resp = Response(status=200, reason="OK")
     resp.raise_for_status()  # must not raise
 
 
-def test_response_raise_for_status_201():
+def test_response_raise_for_status_201() raises:
     """``raise_for_status`` is a no-op for 201 Created."""
     var resp = Response(status=201, reason="Created")
     resp.raise_for_status()
 
 
-def test_response_raise_for_status_404():
+def test_response_raise_for_status_404() raises:
     """``raise_for_status`` raises ``HttpError`` on 404."""
     var resp = Response(status=404, reason="Not Found")
     var raised = False
@@ -169,7 +169,7 @@ def test_response_raise_for_status_404():
     assert_true(raised, "HttpError must be raised for 404")
 
 
-def test_response_raise_for_status_500():
+def test_response_raise_for_status_500() raises:
     """``raise_for_status`` raises ``HttpError`` on 500."""
     var resp = Response(status=500, reason="Internal Server Error")
     var raised = False
@@ -180,7 +180,7 @@ def test_response_raise_for_status_500():
     assert_true(raised, "HttpError must be raised for 500")
 
 
-def test_response_raise_for_status_301():
+def test_response_raise_for_status_301() raises:
     """``raise_for_status`` raises ``HttpError`` on 3xx (redirect, not OK)."""
     var resp = Response(status=301, reason="Moved Permanently")
     var raised = False
@@ -191,7 +191,7 @@ def test_response_raise_for_status_301():
     assert_true(raised, "HttpError must be raised for 3xx")
 
 
-def test_response_json_parses_value():
+def test_response_json_parses_value() raises:
     """``Response.json()`` parses the body as a ``mojson.Value``."""
     from mojson import Value
 
@@ -203,7 +203,7 @@ def test_response_json_parses_value():
     assert_equal(data["x"].int_value(), 1)
 
 
-def test_response_iter_bytes_whole():
+def test_response_iter_bytes_whole() raises:
     """``iter_bytes`` yields all body bytes when chunk_size >= body length."""
     var body = List[UInt8]()
     for i in range(10):
@@ -218,7 +218,7 @@ def test_response_iter_bytes_whole():
         assert_equal(Int(total[i]), i)
 
 
-def test_response_iter_bytes_chunks():
+def test_response_iter_bytes_chunks() raises:
     """``iter_bytes`` splits body into fixed-size chunks."""
     var body = List[UInt8]()
     for i in range(9):
@@ -234,7 +234,7 @@ def test_response_iter_bytes_chunks():
     assert_equal(chunks[2], 1)
 
 
-def test_response_iter_bytes_empty():
+def test_response_iter_bytes_empty() raises:
     """``iter_bytes`` on empty body yields no chunks."""
     var resp = Response(status=204)
     var count = 0
@@ -246,13 +246,13 @@ def test_response_iter_bytes_empty():
 # ── HttpClient constructor ────────────────────────────────────────────────────
 
 
-def test_http_client_default_no_auth():
+def test_http_client_default_no_auth() raises:
     """Default ``HttpClient()`` has empty auth header."""
     var client = HttpClient()
     assert_equal(client._auth_header, "")
 
 
-def test_http_client_with_basic_auth():
+def test_http_client_with_basic_auth() raises:
     """``HttpClient(BasicAuth(...))`` stores base64 auth header."""
     var client = HttpClient(BasicAuth("alice", "s3cr3t"))
     assert_true(
@@ -261,27 +261,27 @@ def test_http_client_with_basic_auth():
     )
 
 
-def test_http_client_with_bearer_auth():
+def test_http_client_with_bearer_auth() raises:
     """``HttpClient(BearerAuth(...))`` stores Bearer auth header."""
     var client = HttpClient(BearerAuth("tok"))
     assert_equal(client._auth_header, "Bearer tok")
 
 
-def test_http_client_base_url_positional():
+def test_http_client_base_url_positional() raises:
     """``HttpClient("https://...")`` sets base URL via first positional arg."""
     var client = HttpClient("https://httpbin.org")
     var resolved = client._resolve_url("/get")
     assert_equal(resolved, "https://httpbin.org/get")
 
 
-def test_http_client_base_url_and_auth_positional():
+def test_http_client_base_url_and_auth_positional() raises:
     """``HttpClient("url", BearerAuth("tok"))`` sets both base URL and auth."""
     var client = HttpClient("https://httpbin.org", BearerAuth("secret"))
     assert_equal(client._auth_header, "Bearer secret")
     assert_equal(client._resolve_url("/users"), "https://httpbin.org/users")
 
 
-def test_http_client_base_url_prepended():
+def test_http_client_base_url_prepended() raises:
     """``HttpClient`` with ``base_url`` keyword prepends it to relative paths.
     """
     var client = HttpClient(base_url="https://httpbin.org")
@@ -289,21 +289,21 @@ def test_http_client_base_url_prepended():
     assert_equal(resolved, "https://httpbin.org/get")
 
 
-def test_http_client_base_url_ignored_for_absolute():
+def test_http_client_base_url_ignored_for_absolute() raises:
     """``HttpClient`` with ``base_url`` leaves absolute URLs unchanged."""
     var client = HttpClient(base_url="https://httpbin.org")
     var resolved = client._resolve_url("https://other.com/foo")
     assert_equal(resolved, "https://other.com/foo")
 
 
-def test_http_client_no_base_url():
+def test_http_client_no_base_url() raises:
     """``HttpClient`` without ``base_url`` returns the URL unchanged."""
     var client = HttpClient()
     var resolved = client._resolve_url("/get")
     assert_equal(resolved, "/get")
 
 
-def test_http_client_context_manager():
+def test_http_client_context_manager() raises:
     """``HttpClient`` supports the ``with`` context manager protocol."""
     # Consuming __enter__ transfers ownership; just verify it compiles and runs.
     # Consuming __enter__ transfers ownership; verify the block runs.
@@ -318,7 +318,7 @@ def test_http_client_context_manager():
 # basic error paths here to avoid network dependencies in unit tests.
 
 
-def test_tcp_connect_host_port_dns_fail():
+def test_tcp_connect_host_port_dns_fail() raises:
     """``TcpStream.connect(host, port)`` raises on unresolvable host."""
     from flare.tcp import TcpStream
 
@@ -330,7 +330,7 @@ def test_tcp_connect_host_port_dns_fail():
     assert_true(raised, "connection to invalid host must raise")
 
 
-def test_tcp_connect_host_port_timeout_dns_fail():
+def test_tcp_connect_host_port_timeout_dns_fail() raises:
     """``TcpStream.connect(host, port, timeout_ms)`` raises on unresolvable host.
     """
     from flare.tcp import TcpStream
@@ -346,7 +346,7 @@ def test_tcp_connect_host_port_timeout_dns_fail():
 # ── UdpSocket context manager ─────────────────────────────────────────────────
 
 
-def test_udp_socket_context_manager():
+def test_udp_socket_context_manager() raises:
     """``UdpSocket`` supports the ``with`` context manager protocol."""
     from flare.udp import UdpSocket
     from flare.net import SocketAddr
@@ -360,7 +360,7 @@ def test_udp_socket_context_manager():
 # ── WsMessage ─────────────────────────────────────────────────────────────────
 
 
-def test_ws_message_text():
+def test_ws_message_text() raises:
     """``WsMessage(text=...)`` has ``is_text=True`` and returns the text."""
     var msg = WsMessage("hello")
     assert_true(msg.is_text)
@@ -368,7 +368,7 @@ def test_ws_message_text():
     assert_equal(len(msg.as_binary()), 0)
 
 
-def test_ws_message_binary():
+def test_ws_message_binary() raises:
     """``WsMessage(binary=...)`` has ``is_text=False`` and returns the bytes."""
     var data = List[UInt8]()
     data.append(UInt8(1))
@@ -380,7 +380,7 @@ def test_ws_message_binary():
     assert_equal(len(msg.as_binary()), 3)
 
 
-def test_ws_message_text_empty():
+def test_ws_message_text_empty() raises:
     """``WsMessage`` with empty text is valid."""
     var msg = WsMessage("")
     assert_true(msg.is_text)
@@ -404,7 +404,7 @@ struct _FakeStream(Readable):
         self._data = take._data^
         self._pos = take._pos
 
-    fn read(mut self, buf: UnsafePointer[UInt8], size: Int) raises -> Int:
+    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
         """Satisfy the ``Readable`` trait by copying data into ``buf``."""
         var available = len(self._data) - self._pos
         if available <= 0:
@@ -419,7 +419,7 @@ struct _FakeStream(Readable):
         return n
 
 
-def test_buf_reader_readline_simple():
+def test_buf_reader_readline_simple() raises:
     """``BufReader.readline`` reads a single LF-terminated line."""
     var data = List[UInt8]()
     for b in String("hello\nworld\n").as_bytes():
@@ -432,7 +432,7 @@ def test_buf_reader_readline_simple():
     assert_equal(line2, "world")
 
 
-def test_buf_reader_readline_crlf():
+def test_buf_reader_readline_crlf() raises:
     """``BufReader.readline`` strips ``\\r\\n`` correctly."""
     var data = List[UInt8]()
     for b in String("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").as_bytes():
@@ -447,7 +447,7 @@ def test_buf_reader_readline_crlf():
     assert_equal(line3, "")  # blank line separating headers from body
 
 
-def test_buf_reader_readline_eof():
+def test_buf_reader_readline_eof() raises:
     """``BufReader.readline`` returns empty string on EOF."""
     var data = List[UInt8]()
     var stream = _FakeStream(data)
@@ -456,7 +456,7 @@ def test_buf_reader_readline_eof():
     assert_equal(line, "")
 
 
-def test_buf_reader_read_until():
+def test_buf_reader_read_until() raises:
     """``BufReader.read_until`` stops at the delimiter byte."""
     var data = List[UInt8]()
     for b in String("key:value,next").as_bytes():
@@ -469,7 +469,7 @@ def test_buf_reader_read_until():
     assert_equal(rest, "value")
 
 
-def test_buf_reader_read_exact():
+def test_buf_reader_read_exact() raises:
     """``BufReader.read_exact`` returns exactly ``n`` bytes."""
     var data = List[UInt8]()
     for b in String("hello world").as_bytes():
@@ -482,7 +482,7 @@ def test_buf_reader_read_exact():
     assert_equal(chr(Int(five[4])), "o")
 
 
-def test_buf_reader_read_exact_eof_raises():
+def test_buf_reader_read_exact_eof_raises() raises:
     """``BufReader.read_exact`` raises ``NetworkError`` on premature EOF."""
     var data = List[UInt8]()
     for b in String("hi").as_bytes():
@@ -497,7 +497,7 @@ def test_buf_reader_read_exact_eof_raises():
     assert_true(raised, "must raise NetworkError on premature EOF")
 
 
-def test_buf_reader_read_until_eof():
+def test_buf_reader_read_until_eof() raises:
     """``BufReader.read_until`` returns partial data on EOF before delimiter."""
     var data = List[UInt8]()
     for b in String("hello").as_bytes():
@@ -508,7 +508,7 @@ def test_buf_reader_read_until_eof():
     assert_equal(result, "hello")
 
 
-def main():
+def main() raises:
     # Auth tests
     test_b64_encode_empty()
     test_b64_encode_short()

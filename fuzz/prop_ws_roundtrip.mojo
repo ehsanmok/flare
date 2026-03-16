@@ -17,7 +17,7 @@ from mozz import forall_bytes
 from flare.ws.frame import WsFrame
 
 
-fn roundtrip_safe(data: List[UInt8]) raises -> Bool:
+def roundtrip_safe(data: List[UInt8]) raises -> Bool:
     """Property: encode→decode preserves the payload for any valid frame.
 
     Args:
@@ -28,7 +28,7 @@ fn roundtrip_safe(data: List[UInt8]) raises -> Bool:
         ``False`` only if the payload is corrupted after a successful
         round-trip.
     """
-    var span = Span[UInt8](data)
+    var span = Span[UInt8, _](data)
 
     # Try to decode an incoming frame
     var original_payload: List[UInt8]
@@ -49,7 +49,7 @@ fn roundtrip_safe(data: List[UInt8]) raises -> Bool:
     # Decode again
     var frame2_payload: List[UInt8]
     try:
-        var f2 = WsFrame.decode_one(Span[UInt8](re_encoded)).take_frame()
+        var f2 = WsFrame.decode_one(Span[UInt8, _](re_encoded)).take_frame()
         frame2_payload = f2.payload.copy()
     except:
         # If re-encoding produced invalid bytes that's a bug
@@ -65,7 +65,7 @@ fn roundtrip_safe(data: List[UInt8]) raises -> Bool:
     return True
 
 
-fn no_over_read(data: List[UInt8]) raises -> Bool:
+def no_over_read(data: List[UInt8]) raises -> Bool:
     """Property: consumed bytes must not exceed input length.
 
     Args:
@@ -75,13 +75,13 @@ fn no_over_read(data: List[UInt8]) raises -> Bool:
         ``True`` if consumed ≤ len(data) or input was rejected.
     """
     try:
-        var dr = WsFrame.decode_one(Span[UInt8](data))
+        var dr = WsFrame.decode_one(Span[UInt8, _](data))
         return dr.consumed <= len(data)
     except:
         return True  # rejection is fine
 
 
-fn control_frame_payload_limit(data: List[UInt8]) raises -> Bool:
+def control_frame_payload_limit(data: List[UInt8]) raises -> Bool:
     """Property: control frames with payload > 125 bytes always raise.
 
     Args:
@@ -92,7 +92,7 @@ fn control_frame_payload_limit(data: List[UInt8]) raises -> Bool:
         or parsing raised an error).
     """
     try:
-        var frame = WsFrame.decode_one(Span[UInt8](data)).take_frame()
+        var frame = WsFrame.decode_one(Span[UInt8, _](data)).take_frame()
         var is_ctrl = frame.is_control()
         var plen = len(frame.payload)
         if is_ctrl:
@@ -102,7 +102,7 @@ fn control_frame_payload_limit(data: List[UInt8]) raises -> Bool:
         return True  # error is fine
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] WebSocket frame round-trip property tests\n")
 
     print("1. encode→decode round-trip (10 000 trials)...")

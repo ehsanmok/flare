@@ -27,37 +27,37 @@ from flare.http import (
 # ── Response.ok() ─────────────────────────────────────────────────────────────
 
 
-def test_ok_200():
+def test_ok_200() raises:
     """HTTP status 200 must be ok."""
     var r = Response(status=200)
     assert_true(r.ok())
 
 
-def test_ok_201():
+def test_ok_201() raises:
     """HTTP status 201 must be ok."""
     var r = Response(status=201)
     assert_true(r.ok())
 
 
-def test_ok_299():
+def test_ok_299() raises:
     """HTTP status 299 must be ok."""
     var r = Response(status=299)
     assert_true(r.ok())
 
 
-def test_not_ok_400():
+def test_not_ok_400() raises:
     """HTTP status 400 must not be ok."""
     var r = Response(status=400)
     assert_false(r.ok())
 
 
-def test_not_ok_404():
+def test_not_ok_404() raises:
     """HTTP status 404 must not be ok."""
     var r = Response(status=404)
     assert_false(r.ok())
 
 
-def test_not_ok_500():
+def test_not_ok_500() raises:
     """HTTP status 500 must not be ok."""
     var r = Response(status=500)
     assert_false(r.ok())
@@ -66,13 +66,13 @@ def test_not_ok_500():
 # ── Response.text() ───────────────────────────────────────────────────────────
 
 
-def test_response_text_empty():
+def test_response_text_empty() raises:
     """Response with empty body must return empty text."""
     var r = Response(status=200)
     assert_equal(r.text(), "")
 
 
-def test_response_text_ascii():
+def test_response_text_ascii() raises:
     """Response with ASCII body must decode correctly."""
     var body = List[UInt8]()
     body.append(UInt8(72))  # H
@@ -87,27 +87,27 @@ def test_response_text_ascii():
 # ── Status constants ───────────────────────────────────────────────────────────
 
 
-def test_status_ok():
+def test_status_ok() raises:
     """Status.OK must equal 200."""
     assert_equal(Status.OK, 200)
 
 
-def test_status_not_found():
+def test_status_not_found() raises:
     """Status.NOT_FOUND must equal 404."""
     assert_equal(Status.NOT_FOUND, 404)
 
 
-def test_status_internal_server_error():
+def test_status_internal_server_error() raises:
     """Status.INTERNAL_SERVER_ERROR must equal 500."""
     assert_equal(Status.INTERNAL_SERVER_ERROR, 500)
 
 
-def test_status_created():
+def test_status_created() raises:
     """Status.CREATED must equal 201."""
     assert_equal(Status.CREATED, 201)
 
 
-def test_status_bad_request():
+def test_status_bad_request() raises:
     """Status.BAD_REQUEST must equal 400."""
     assert_equal(Status.BAD_REQUEST, 400)
 
@@ -115,14 +115,14 @@ def test_status_bad_request():
 # ── HeaderMap ─────────────────────────────────────────────────────────────────
 
 
-def test_header_set_and_get():
+def test_header_set_and_get() raises:
     """HeaderMap.set() then get() must return the stored value."""
     var h = HeaderMap()
     h.set("Content-Type", "application/json")
     assert_equal(h.get("Content-Type"), "application/json")
 
 
-def test_header_get_case_insensitive():
+def test_header_get_case_insensitive() raises:
     """HeaderMap.get() must be case-insensitive per RFC 7230."""
     var h = HeaderMap()
     h.set("Content-Type", "text/html")
@@ -130,7 +130,7 @@ def test_header_get_case_insensitive():
     assert_equal(h.get("CONTENT-TYPE"), "text/html")
 
 
-def test_header_set_replaces():
+def test_header_set_replaces() raises:
     """HeaderMap.set() with an existing key must replace the value."""
     var h = HeaderMap()
     h.set("X-Custom", "first")
@@ -139,7 +139,7 @@ def test_header_set_replaces():
     assert_equal(h.len(), 1)
 
 
-def test_header_contains():
+def test_header_contains() raises:
     """HeaderMap.contains() must return True for present headers."""
     var h = HeaderMap()
     h.set("Authorization", "Bearer token")
@@ -148,7 +148,7 @@ def test_header_contains():
     assert_false(h.contains("X-Missing"))
 
 
-def test_header_remove():
+def test_header_remove() raises:
     """HeaderMap.remove() must delete the header and return True."""
     var h = HeaderMap()
     h.set("X-Remove-Me", "value")
@@ -158,14 +158,14 @@ def test_header_remove():
     assert_equal(h.len(), 0)
 
 
-def test_header_remove_missing():
+def test_header_remove_missing() raises:
     """HeaderMap.remove() on an absent key must return False."""
     var h = HeaderMap()
     var removed = h.remove("X-Not-Here")
     assert_false(removed)
 
 
-def test_header_len():
+def test_header_len() raises:
     """HeaderMap.len() must count all headers including duplicates."""
     var h = HeaderMap()
     h.set("A", "1")
@@ -174,27 +174,27 @@ def test_header_len():
     assert_equal(h.len(), 3)
 
 
-def test_header_get_absent():
+def test_header_get_absent() raises:
     """HeaderMap.get() on an absent key must return empty string."""
     var h = HeaderMap()
     assert_equal(h.get("X-Missing"), "")
 
 
-def test_header_injection_cr():
+def test_header_injection_cr() raises:
     """HeaderMap.set() with CR in value must raise HeaderInjectionError."""
     var h = HeaderMap()
     with assert_raises(contains="HeaderInjectionError"):
         h.set("X-Bad", "value\rinjected")
 
 
-def test_header_injection_lf():
+def test_header_injection_lf() raises:
     """HeaderMap.set() with LF in key must raise HeaderInjectionError."""
     var h = HeaderMap()
     with assert_raises(contains="HeaderInjectionError"):
         h.set("X-Bad\nField", "value")
 
 
-def test_header_copy():
+def test_header_copy() raises:
     """HeaderMap.copy() must produce an independent deep copy."""
     var h = HeaderMap()
     h.set("X-Test", "original")
@@ -207,7 +207,7 @@ def test_header_copy():
 # ── Url parser ────────────────────────────────────────────────────────────────
 
 
-def test_url_http_defaults():
+def test_url_http_defaults() raises:
     """Url.parse() for plain HTTP must default to port 80."""
     var u = Url.parse("http://example.com/path")
     assert_equal(u.scheme, "http")
@@ -217,7 +217,7 @@ def test_url_http_defaults():
     assert_false(u.is_tls())
 
 
-def test_url_https_defaults():
+def test_url_https_defaults() raises:
     """Url.parse() for HTTPS must default to port 443."""
     var u = Url.parse("https://example.com")
     assert_equal(u.scheme, "https")
@@ -225,7 +225,7 @@ def test_url_https_defaults():
     assert_true(u.is_tls())
 
 
-def test_url_explicit_port():
+def test_url_explicit_port() raises:
     """Url.parse() must honour an explicit port number."""
     var u = Url.parse("https://api.example.com:8443/v1")
     assert_equal(Int(u.port), 8443)
@@ -233,7 +233,7 @@ def test_url_explicit_port():
     assert_equal(u.path, "/v1")
 
 
-def test_url_query_string():
+def test_url_query_string() raises:
     """Url.parse() must split query from path."""
     var u = Url.parse("http://example.com/search?q=hello&lang=en")
     assert_equal(u.path, "/search")
@@ -241,13 +241,13 @@ def test_url_query_string():
     assert_equal(u.request_target(), "/search?q=hello&lang=en")
 
 
-def test_url_empty_path():
+def test_url_empty_path() raises:
     """Url.parse() with no path component must use '/'."""
     var u = Url.parse("http://example.com")
     assert_equal(u.path, "/")
 
 
-def test_url_fragment_stripped():
+def test_url_fragment_stripped() raises:
     """Url.parse() must parse fragment but request_target() omits it."""
     var u = Url.parse("http://example.com/page#section")
     assert_equal(u.path, "/page")
@@ -255,19 +255,19 @@ def test_url_fragment_stripped():
     assert_equal(u.request_target(), "/page")
 
 
-def test_url_no_scheme_raises():
+def test_url_no_scheme_raises() raises:
     """Url.parse() without a scheme must raise UrlParseError."""
     with assert_raises(contains="UrlParseError"):
         _ = Url.parse("example.com/path")
 
 
-def test_url_unsupported_scheme_raises():
+def test_url_unsupported_scheme_raises() raises:
     """Url.parse() with ftp:// scheme must raise UrlParseError."""
     with assert_raises(contains="UrlParseError"):
         _ = Url.parse("ftp://example.com/file")
 
 
-def test_url_missing_host_raises():
+def test_url_missing_host_raises() raises:
     """Url.parse() with empty host must raise UrlParseError."""
     with assert_raises(contains="UrlParseError"):
         _ = Url.parse("http:///path")
@@ -278,7 +278,7 @@ def test_url_missing_host_raises():
 # unavailable (wrapped in try/except).
 
 
-def test_http_get_plaintext():
+def test_http_get_plaintext() raises:
     """HttpClient.get() to httpbin.org must return a 200 response."""
     try:
         var client = HttpClient()
@@ -290,7 +290,7 @@ def test_http_get_plaintext():
         print("  [SKIP] network unavailable: " + String(e))
 
 
-def test_https_get_json():
+def test_https_get_json() raises:
     """HttpClient.get() over HTTPS must return JSON from httpbin."""
     try:
         var client = HttpClient()
@@ -306,7 +306,7 @@ def test_https_get_json():
         print("  [SKIP] network unavailable: " + String(e))
 
 
-def test_http_404_not_ok():
+def test_http_404_not_ok() raises:
     """HttpClient.get() to a 404 endpoint must return resp.ok() == False."""
     try:
         var client = HttpClient()
@@ -320,7 +320,7 @@ def test_http_404_not_ok():
 # ── PATCH method ──────────────────────────────────────────────────────────────
 
 
-def test_patch_method_string():
+def test_patch_method_string() raises:
     """HttpClient.patch() sends PATCH with JSON Content-Type."""
     try:
         var client = HttpClient()
@@ -341,7 +341,7 @@ def test_patch_method_string():
 # ── HttpServer: round-trip on loopback ────────────────────────────────────────
 
 
-def test_http_server_get_loopback():
+def test_http_server_get_loopback() raises:
     """HttpServer accepts a GET request and sends back a 200 response.
 
     Uses a single-connection pair on loopback:
@@ -354,7 +354,7 @@ def test_http_server_get_loopback():
     from flare.tcp import TcpListener, TcpStream
     from flare.net import SocketAddr
 
-    fn handler(req: Request) raises -> Response:
+    def handler(req: Request) raises -> Response:
         var body_bytes = List[UInt8]()
         for b in "hello".as_bytes():
             body_bytes.append(b)
@@ -369,7 +369,7 @@ def test_http_server_get_loopback():
 
     var raw_req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
     var raw_req_bytes = raw_req.as_bytes()
-    client.write_all(Span[UInt8](raw_req_bytes))
+    client.write_all(Span[UInt8, _](raw_req_bytes))
 
     # Server side — parse + respond
     from flare.http.server import _parse_http_request, _write_response
@@ -388,7 +388,7 @@ def test_http_server_get_loopback():
     srv.close()
 
 
-def test_http_server_post_body_loopback():
+def test_http_server_post_body_loopback() raises:
     """HttpServer correctly parses a POST request with a body."""
     from flare.http import HttpServer
     from flare.tcp import TcpListener, TcpStream
@@ -412,7 +412,7 @@ def test_http_server_post_body_loopback():
         + body_str
     )
     var raw_bytes = raw_req.as_bytes()
-    client.write_all(Span[UInt8](raw_bytes))
+    client.write_all(Span[UInt8, _](raw_bytes))
     client.close()
 
     from flare.http.server import _parse_http_request
@@ -428,7 +428,7 @@ def test_http_server_post_body_loopback():
 # ── Encoding / gzip ───────────────────────────────────────────────────────────
 
 
-def test_gzip_roundtrip():
+def test_gzip_roundtrip() raises:
     """Round-trip: compress_gzip → decompress_gzip must reproduce the original bytes.
     """
     from flare.http.encoding import compress_gzip, decompress_gzip
@@ -436,40 +436,40 @@ def test_gzip_roundtrip():
     var original = (
         "Hello, gzip! This is a test string for compression.".as_bytes()
     )
-    var compressed = compress_gzip(Span[UInt8](original))
+    var compressed = compress_gzip(Span[UInt8, _](original))
     assert_true(
         len(compressed) > 0, "compress_gzip must produce non-empty output"
     )
-    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    var decompressed = decompress_gzip(Span[UInt8, _](compressed))
     assert_equal(len(decompressed), len(original))
     for i in range(len(original)):
         assert_equal(decompressed[i], original[i])
 
 
-def test_gzip_empty_input():
+def test_gzip_empty_input() raises:
     """Empty input to compress_gzip returns empty output."""
     from flare.http.encoding import compress_gzip, decompress_gzip
 
     var empty = List[UInt8]()
-    var compressed = compress_gzip(Span[UInt8](empty))
+    var compressed = compress_gzip(Span[UInt8, _](empty))
     assert_equal(len(compressed), 0)
-    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    var decompressed = decompress_gzip(Span[UInt8, _](compressed))
     assert_equal(len(decompressed), 0)
 
 
-def test_gzip_level_1_roundtrip():
+def test_gzip_level_1_roundtrip() raises:
     """Level-1 (fastest) compress_gzip must still roundtrip correctly."""
     from flare.http.encoding import compress_gzip, decompress_gzip
 
     var data = "level1 fast compression test".as_bytes()
-    var compressed = compress_gzip(Span[UInt8](data), level=1)
-    var decompressed = decompress_gzip(Span[UInt8](compressed))
+    var compressed = compress_gzip(Span[UInt8, _](data), level=1)
+    var decompressed = decompress_gzip(Span[UInt8, _](compressed))
     assert_equal(len(decompressed), len(data))
     for i in range(len(data)):
         assert_equal(decompressed[i], data[i])
 
 
-def test_deflate_roundtrip():
+def test_deflate_roundtrip() raises:
     """Known zlib-wrapped and raw-deflate payloads must decompress correctly."""
     from flare.http.encoding import decompress_deflate
 
@@ -515,7 +515,7 @@ def test_deflate_roundtrip():
         11,
         49,
     ]
-    var out1 = decompress_deflate(Span[UInt8](zlib_wrapped))
+    var out1 = decompress_deflate(Span[UInt8, _](zlib_wrapped))
     assert_equal(len(out1), expected_len)
     assert_equal(out1[0], UInt8(ord("d")))
     assert_equal(out1[28], UInt8(ord("s")))
@@ -552,31 +552,31 @@ def test_deflate_roundtrip():
         82,
         0,
     ]
-    var out2 = decompress_deflate(Span[UInt8](raw))
+    var out2 = decompress_deflate(Span[UInt8, _](raw))
     assert_equal(len(out2), expected_len)
     assert_equal(out2[0], UInt8(ord("d")))
     assert_equal(out2[28], UInt8(ord("s")))
 
 
-def test_decode_content_identity():
+def test_decode_content_identity() raises:
     """Identity encoding in decode_content copies bytes unchanged."""
     from flare.http.encoding import decode_content
 
     var data = "no encoding".as_bytes()
-    var out = decode_content(Span[UInt8](data), "identity")
+    var out = decode_content(Span[UInt8, _](data), "identity")
     assert_equal(len(out), len(data))
 
 
-def test_decode_content_unsupported():
+def test_decode_content_unsupported() raises:
     """Unsupported encoding in decode_content raises an error."""
     from flare.http.encoding import decode_content
 
     var data = List[UInt8]()
     with assert_raises():
-        _ = decode_content(Span[UInt8](data), "br")
+        _ = decode_content(Span[UInt8, _](data), "br")
 
 
-def main():
+def main() raises:
     print("=" * 60)
     print("test_http.mojo — HeaderMap, Url, Response, Status, HttpClient")
     print("=" * 60)

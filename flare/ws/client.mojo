@@ -53,7 +53,7 @@ struct WsHandshakeError(Copyable, Movable, Writable):
 comptime _B64_TABLE: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
-fn _base64_encode(data: Span[UInt8]) -> String:
+fn _base64_encode(data: Span[UInt8, _]) -> String:
     """Encode ``data`` to standard RFC 4648 base64.
 
     Args:
@@ -93,7 +93,7 @@ fn _base64_encode(data: Span[UInt8]) -> String:
 # ── SHA-1 via libcrypto FFI ───────────────────────────────────────────────────
 
 
-fn _sha1(data: String) raises -> List[UInt8]:
+def _sha1(data: String) raises -> List[UInt8]:
     """Compute SHA-1 of ``data`` using OpenSSL via the TLS shared library.
 
     Uses the ``SHA1`` function from libcrypto (available via the bundled
@@ -138,10 +138,10 @@ fn _generate_ws_key() -> String:
     var nonce = List[UInt8](capacity=16)
     for i in range(16):
         nonce.append(UInt8((i * 37 + 0x42) & 0xFF))
-    return _base64_encode(Span[UInt8](nonce))
+    return _base64_encode(Span[UInt8, _](nonce))
 
 
-fn _compute_accept(key: String) raises -> String:
+def _compute_accept(key: String) raises -> String:
     """Compute the expected ``Sec-WebSocket-Accept`` header value.
 
     Per RFC 6455 §4.2.2: base64(SHA-1(key + GUID)).
@@ -154,10 +154,10 @@ fn _compute_accept(key: String) raises -> String:
     """
     var combined = key + _WS_GUID
     var digest = _sha1(combined)
-    return _base64_encode(Span[UInt8](digest))
+    return _base64_encode(Span[UInt8, _](digest))
 
 
-fn _ws_url_to_http(url: String) raises -> String:
+def _ws_url_to_http(url: String) raises -> String:
     """Convert ``ws://`` or ``wss://`` URL to ``http://`` or ``https://``.
 
     Args:
@@ -170,13 +170,15 @@ fn _ws_url_to_http(url: String) raises -> String:
         WsHandshakeError: If the scheme is not ``ws`` or ``wss``.
     """
     if url.startswith("ws://"):
-        return "http://" + String(url[5:])
+        return "http://" + String(String(unsafe_from_utf8=url.as_bytes()[5:]))
     elif url.startswith("wss://"):
-        return "https://" + String(url[6:])
+        return "https://" + String(String(unsafe_from_utf8=url.as_bytes()[6:]))
     raise WsHandshakeError("URL must start with ws:// or wss://: " + url)
 
 
-fn _read_line_tls(mut stream: TlsStream, mut buf: List[UInt8]) raises -> String:
+def _read_line_tls(
+    mut stream: TlsStream, mut buf: List[UInt8]
+) raises -> String:
     """Read one ``\\r\\n``-terminated line from a TLS stream.
 
     Args:
@@ -205,7 +207,9 @@ fn _read_line_tls(mut stream: TlsStream, mut buf: List[UInt8]) raises -> String:
     return line^
 
 
-fn _read_line_tcp(mut stream: TcpStream, mut buf: List[UInt8]) raises -> String:
+def _read_line_tcp(
+    mut stream: TcpStream, mut buf: List[UInt8]
+) raises -> String:
     """Read one ``\\r\\n``-terminated line from a TCP stream.
 
     Args:
@@ -289,7 +293,7 @@ struct _WsStream(Movable):
         self._tls = take._tls^
         self._tcp = take._tcp^
 
-    fn write_all(self, data: Span[UInt8]) raises:
+    def write_all(self, data: Span[UInt8, _]) raises:
         """Write all bytes to the underlying stream.
 
         Args:
@@ -303,7 +307,7 @@ struct _WsStream(Movable):
         else:
             self._tcp.write_all(data)
 
-    fn read(mut self, buf: UnsafePointer[UInt8], size: Int) raises -> Int:
+    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
         """Read up to ``size`` bytes from the underlying stream.
 
         Args:
@@ -458,7 +462,7 @@ struct WsClient(Movable):
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn connect(url: String) raises -> WsClient:
+    def connect(url: String) raises -> WsClient:
         """Connect to a WebSocket server using default TLS configuration.
 
         Equivalent to ``WsClient.connect(url, TlsConfig())``.
@@ -476,7 +480,7 @@ struct WsClient(Movable):
         return WsClient._connect_impl(url, TlsConfig())
 
     @staticmethod
-    fn connect(url: String, config: TlsConfig) raises -> WsClient:
+    def connect(url: String, config: TlsConfig) raises -> WsClient:
         """Connect to a WebSocket server with custom TLS configuration.
 
         For ``wss://`` URLs, wraps the connection in TLS using ``config``.
@@ -496,7 +500,7 @@ struct WsClient(Movable):
         return WsClient._connect_impl(url, config)
 
     @staticmethod
-    fn _connect_impl(url: String, config: TlsConfig) raises -> WsClient:
+    def _connect_impl(url: String, config: TlsConfig) raises -> WsClient:
         """Internal implementation shared by both ``connect`` overloads."""
         var http_url = _ws_url_to_http(url)
         var u = Url.parse(http_url)
@@ -533,7 +537,7 @@ struct WsClient(Movable):
         if u.is_tls():
             var tls = TlsStream.connect(u.host, u.port, config)
             var req_bytes = req.as_bytes()
-            tls.write_all(Span[UInt8](req_bytes))
+            tls.write_all(Span[UInt8, _](req_bytes))
 
             # ── 3. Read response headers ──────────────────────────────────────
             var status_line = _read_line_tls(tls, scratch)
@@ -549,8 +553,20 @@ struct WsClient(Movable):
                     break
                 var colon = _str_find_local(line, ":")
                 if colon >= 0:
-                    var hk = _lower_local(String(String(line[:colon]).strip()))
-                    var hv = String(String(line[colon + 1 :]).strip())
+                    var hk = _lower_local(
+                        String(
+                            String(
+                                String(unsafe_from_utf8=line.as_bytes()[:colon])
+                            ).strip()
+                        )
+                    )
+                    var hv = String(
+                        String(
+                            String(
+                                unsafe_from_utf8=line.as_bytes()[colon + 1 :]
+                            )
+                        ).strip()
+                    )
                     if hk == "sec-websocket-accept":
                         accept_header = hv
 
@@ -572,7 +588,7 @@ struct WsClient(Movable):
                 raise NetworkError("DNS resolution failed for: " + u.host)
             var tcp = TcpStream.connect(SocketAddr(addrs[0], u.port))
             var req_bytes = req.as_bytes()
-            tcp.write_all(Span[UInt8](req_bytes))
+            tcp.write_all(Span[UInt8, _](req_bytes))
 
             var status_line = _read_line_tcp(tcp, scratch)
             if not status_line.startswith("HTTP/1.1 101"):
@@ -587,8 +603,20 @@ struct WsClient(Movable):
                     break
                 var colon = _str_find_local(line, ":")
                 if colon >= 0:
-                    var hk = _lower_local(String(String(line[:colon]).strip()))
-                    var hv = String(String(line[colon + 1 :]).strip())
+                    var hk = _lower_local(
+                        String(
+                            String(
+                                String(unsafe_from_utf8=line.as_bytes()[:colon])
+                            ).strip()
+                        )
+                    )
+                    var hv = String(
+                        String(
+                            String(
+                                unsafe_from_utf8=line.as_bytes()[colon + 1 :]
+                            )
+                        ).strip()
+                    )
                     if hk == "sec-websocket-accept":
                         accept_header = hv
 
@@ -606,7 +634,7 @@ struct WsClient(Movable):
 
     # ── Sending ───────────────────────────────────────────────────────────────
 
-    fn send_text(self, msg: String) raises:
+    def send_text(self, msg: String) raises:
         """Send a UTF-8 text message (client→server, masked).
 
         Args:
@@ -617,9 +645,9 @@ struct WsClient(Movable):
         """
         var frame = WsFrame.text(msg)
         var wire = frame.encode(mask=True)
-        self._stream.write_all(Span[UInt8](wire))
+        self._stream.write_all(Span[UInt8, _](wire))
 
-    fn send_binary(self, data: List[UInt8]) raises:
+    def send_binary(self, data: List[UInt8]) raises:
         """Send a binary message (client→server, masked).
 
         Args:
@@ -630,9 +658,9 @@ struct WsClient(Movable):
         """
         var frame = WsFrame.binary(data)
         var wire = frame.encode(mask=True)
-        self._stream.write_all(Span[UInt8](wire))
+        self._stream.write_all(Span[UInt8, _](wire))
 
-    fn send_frame(self, frame: WsFrame) raises:
+    def send_frame(self, frame: WsFrame) raises:
         """Send an already-constructed frame.
 
         Args:
@@ -642,11 +670,11 @@ struct WsClient(Movable):
             NetworkError: On I/O failure.
         """
         var wire = frame.encode(mask=True)
-        self._stream.write_all(Span[UInt8](wire))
+        self._stream.write_all(Span[UInt8, _](wire))
 
     # ── Receiving ─────────────────────────────────────────────────────────────
 
-    fn recv(mut self) raises -> WsFrame:
+    def recv(mut self) raises -> WsFrame:
         """Receive the next data frame, handling PING transparently.
 
         Automatically replies to PING frames with a PONG and continues
@@ -666,11 +694,11 @@ struct WsClient(Movable):
                 # RFC 6455 §5.5.3: respond with PONG carrying same payload
                 var pong = WsFrame.pong(frame.payload)
                 var wire = pong.encode(mask=True)
-                self._stream.write_all(Span[UInt8](wire))
+                self._stream.write_all(Span[UInt8, _](wire))
                 continue
             return frame^
 
-    fn _recv_one(mut self) raises -> WsFrame:
+    def _recv_one(mut self) raises -> WsFrame:
         """Read raw bytes from the stream and decode one frame."""
         # Read bytes incrementally until we have a full frame
         var buf = List[UInt8](capacity=4096)
@@ -679,7 +707,7 @@ struct WsClient(Movable):
 
         while True:
             try:
-                var result = WsFrame.decode_one(Span[UInt8](buf))
+                var result = WsFrame.decode_one(Span[UInt8, _](buf))
                 return result^.take_frame()
             except e:
                 var msg = String(e)
@@ -699,7 +727,7 @@ struct WsClient(Movable):
                 else:
                     raise e^
 
-    fn recv_message(mut self) raises -> WsMessage:
+    def recv_message(mut self) raises -> WsMessage:
         """Receive the next complete message as a ``WsMessage``.
 
         A higher-level alternative to ``recv()`` that returns a
@@ -750,7 +778,7 @@ struct WsClient(Movable):
         try:
             var close_frame = WsFrame.close()
             var wire = close_frame.encode(mask=True)
-            self._stream.write_all(Span[UInt8](wire))
+            self._stream.write_all(Span[UInt8, _](wire))
         except:
             pass  # best-effort
         self._stream.close()

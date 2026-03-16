@@ -126,7 +126,7 @@ struct TcpStream(Movable):
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn connect(addr: SocketAddr) raises -> TcpStream:
+    def connect(addr: SocketAddr) raises -> TcpStream:
         """Open a blocking TCP connection to ``addr``.
 
         Sets ``TCP_NODELAY`` automatically.
@@ -168,7 +168,7 @@ struct TcpStream(Movable):
         return TcpStream(sock^, addr)
 
     @staticmethod
-    fn connect_timeout(addr: SocketAddr, timeout_ms: Int) raises -> TcpStream:
+    def connect_timeout(addr: SocketAddr, timeout_ms: Int) raises -> TcpStream:
         """Open a TCP connection, failing if it takes longer than ``timeout_ms``.
 
         On macOS/arm64 this delegates to ``flare_connect_timeout`` in
@@ -312,7 +312,7 @@ struct TcpStream(Movable):
         return TcpStream(sock^, addr)
 
     @staticmethod
-    fn connect(host: String, port: UInt16) raises -> TcpStream:
+    def connect(host: String, port: UInt16) raises -> TcpStream:
         """Resolve ``host`` via DNS and open a blocking TCP connection.
 
         Convenience overload that performs DNS resolution then calls
@@ -344,7 +344,9 @@ struct TcpStream(Movable):
         return TcpStream.connect(SocketAddr(addrs[0], port))
 
     @staticmethod
-    fn connect(host: String, port: UInt16, timeout_ms: Int) raises -> TcpStream:
+    def connect(
+        host: String, port: UInt16, timeout_ms: Int
+    ) raises -> TcpStream:
         """Resolve ``host`` via DNS and connect with a timeout.
 
         Convenience overload that performs DNS resolution then calls
@@ -388,7 +390,7 @@ struct TcpStream(Movable):
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
-    fn read(mut self, buf: UnsafePointer[UInt8], size: Int) raises -> Int:
+    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
         """Read up to ``size`` bytes from the stream into ``buf``.
 
         Retries transparently on ``EINTR``. Returns 0 on EOF (the peer
@@ -433,7 +435,7 @@ struct TcpStream(Movable):
                 raise ConnectionReset(String(self._peer), Int(e.value))
             raise NetworkError(_strerror(e.value) + " (recv)", Int(e.value))
 
-    fn read_exact(mut self, buf: UnsafePointer[UInt8], size: Int) raises:
+    def read_exact(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises:
         """Read exactly ``size`` bytes into ``buf``.
 
         Loops over ``read()`` until ``size`` bytes have been received.
@@ -466,7 +468,7 @@ struct TcpStream(Movable):
                 )
             received += n
 
-    fn write(self, data: Span[UInt8]) raises -> Int:
+    def write(self, data: Span[UInt8, _]) raises -> Int:
         """Write up to ``len(data)`` bytes to the stream.
 
         A single call may write fewer bytes than requested (partial write).
@@ -510,7 +512,7 @@ struct TcpStream(Movable):
                 raise ConnectionReset(String(self._peer), Int(e.value))
             raise NetworkError(_strerror(e.value) + " (send)", Int(e.value))
 
-    fn write_all(self, data: Span[UInt8]) raises:
+    def write_all(self, data: Span[UInt8, _]) raises:
         """Write all of ``data``, looping until every byte is sent.
 
         Args:
@@ -529,7 +531,7 @@ struct TcpStream(Movable):
         var ptr = data.unsafe_ptr()
         var sent = 0
         while sent < total:
-            var chunk = Span[UInt8](ptr=ptr + sent, length=total - sent)
+            var chunk = Span[UInt8, _](ptr=ptr + sent, length=total - sent)
             var n = self.write(chunk)
             sent += n
 
@@ -543,7 +545,7 @@ struct TcpStream(Movable):
         """
         return self._peer
 
-    fn local_addr(self) raises -> SocketAddr:
+    def local_addr(self) raises -> SocketAddr:
         """Return the local socket address assigned by the OS.
 
         Returns:
@@ -556,7 +558,7 @@ struct TcpStream(Movable):
 
     # ── Control ───────────────────────────────────────────────────────────────
 
-    fn shutdown_read(self) raises:
+    def shutdown_read(self) raises:
         """Shut down the read half of the connection.
 
         After this call, any subsequent ``read()`` returns 0 (EOF). The
@@ -572,7 +574,7 @@ struct TcpStream(Movable):
                 _strerror(e.value) + " (shutdown_read)", Int(e.value)
             )
 
-    fn shutdown_write(self) raises:
+    def shutdown_write(self) raises:
         """Shut down the write half of the connection.
 
         Sends a FIN to the peer, signalling that no more data will be
@@ -594,7 +596,7 @@ struct TcpStream(Movable):
 
     # ── Options ───────────────────────────────────────────────────────────────
 
-    fn set_nodelay(self, enabled: Bool) raises:
+    def set_nodelay(self, enabled: Bool) raises:
         """Toggle ``TCP_NODELAY`` (Nagle's algorithm).
 
         Args:
@@ -602,7 +604,7 @@ struct TcpStream(Movable):
         """
         self._socket.set_tcp_nodelay(enabled)
 
-    fn set_keepalive(self, enabled: Bool) raises:
+    def set_keepalive(self, enabled: Bool) raises:
         """Toggle ``SO_KEEPALIVE``.
 
         Args:
@@ -610,7 +612,7 @@ struct TcpStream(Movable):
         """
         self._socket.set_keepalive(enabled)
 
-    fn set_recv_timeout(self, ms: Int) raises:
+    def set_recv_timeout(self, ms: Int) raises:
         """Set a per-read timeout.
 
         After the timeout expires, ``read()`` raises ``Timeout``.
@@ -620,7 +622,7 @@ struct TcpStream(Movable):
         """
         self._socket.set_recv_timeout(ms)
 
-    fn set_send_timeout(self, ms: Int) raises:
+    def set_send_timeout(self, ms: Int) raises:
         """Set a per-write timeout.
 
         After the timeout expires, ``write()`` raises ``Timeout``.

@@ -16,7 +16,7 @@ from mozz import fuzz, FuzzConfig
 from flare.ws.frame import WsFrame
 
 
-fn target(data: List[UInt8]) raises:
+def target(data: List[UInt8]) raises:
     """Fuzz target: parse one WebSocket frame.
 
     Args:
@@ -27,10 +27,10 @@ fn target(data: List[UInt8]) raises:
         classified as valid rejection (not a crash) unless the message
         contains a crash marker.
     """
-    _ = WsFrame.decode_one(Span[UInt8](data))
+    _ = WsFrame.decode_one(Span[UInt8, _](data))
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] fuzzing WsFrame.decode_one()...")
 
     # Seed corpus with real-world WS frames:

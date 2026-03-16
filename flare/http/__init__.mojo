@@ -43,7 +43,7 @@ from flare.http import (
 ```mojo
 from flare.http import HttpClient, BasicAuth, BearerAuth, get, post
 
-fn main() raises:
+def main() raises:
     # One-shot GET
     var resp = get("https://httpbin.org/get")
     print(resp.status)                            # 200

@@ -11,7 +11,7 @@ from mozz import fuzz, FuzzConfig
 from flare.http.url import Url
 
 
-fn target(data: List[UInt8]) raises:
+def target(data: List[UInt8]) raises:
     """Fuzz target: parse a URL from arbitrary bytes.
 
     Args:
@@ -25,7 +25,7 @@ fn target(data: List[UInt8]) raises:
     _ = Url.parse(s)
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] fuzzing Url.parse()...")
 
     var seeds = List[List[UInt8]]()

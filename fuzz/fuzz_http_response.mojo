@@ -25,7 +25,7 @@ from mozz import fuzz, FuzzConfig
 from flare.http.client import _parse_http_response
 
 
-fn target(data: List[UInt8]) raises:
+def target(data: List[UInt8]) raises:
     """Fuzz target: parse a raw HTTP/1.1 response from arbitrary bytes.
 
     Args:
@@ -38,7 +38,7 @@ fn target(data: List[UInt8]) raises:
     _ = _parse_http_response(data)
 
 
-fn main() raises:
+def main() raises:
     print("[mozz] fuzzing _parse_http_response()...")
 
     fn _b(s: StringLiteral) -> List[UInt8]:

@@ -71,9 +71,9 @@ struct Encoding:
     """Brotli encoding (future; requires libbrotlidec)."""
 
 
-fn _do_decompress(
+def _do_decompress(
     read lib: OwnedDLHandle,
-    data: Span[UInt8],
+    data: Span[UInt8, _],
     window_bits: c_int,
 ) raises -> List[UInt8]:
     """Decompress using ``flare_decompress``, growing the output buffer on overflow.
@@ -121,8 +121,8 @@ fn _do_decompress(
         cap *= 2
 
 
-fn _decompress_impl(
-    data: Span[UInt8], window_bits: c_int
+def _decompress_impl(
+    data: Span[UInt8, _], window_bits: c_int
 ) raises -> List[UInt8]:
     """Entry point for gzip/zlib decompression.
 
@@ -142,9 +142,9 @@ fn _decompress_impl(
     return _do_decompress(lib, data, window_bits)
 
 
-fn _do_decompress_deflate(
+def _do_decompress_deflate(
     read lib: OwnedDLHandle,
-    data: Span[UInt8],
+    data: Span[UInt8, _],
 ) raises -> List[UInt8]:
     """Decompress using ``flare_decompress_deflate``, growing on overflow.
 
@@ -187,7 +187,7 @@ fn _do_decompress_deflate(
         cap *= 2
 
 
-fn _decompress_deflate_impl(data: Span[UInt8]) raises -> List[UInt8]:
+def _decompress_deflate_impl(data: Span[UInt8, _]) raises -> List[UInt8]:
     """Entry point for deflate decompression (zlib-wrapped with raw fallback).
 
     Args:
@@ -205,9 +205,9 @@ fn _decompress_deflate_impl(data: Span[UInt8]) raises -> List[UInt8]:
     return _do_decompress_deflate(lib, data)
 
 
-fn _do_compress(
+def _do_compress(
     read lib: OwnedDLHandle,
-    data: Span[UInt8],
+    data: Span[UInt8, _],
     level: c_int,
 ) raises -> List[UInt8]:
     """Compress using ``flare_compress_gzip``.
@@ -250,7 +250,7 @@ fn _do_compress(
     return out^
 
 
-fn decompress_gzip(data: Span[UInt8]) raises -> List[UInt8]:
+def decompress_gzip(data: Span[UInt8, _]) raises -> List[UInt8]:
     """Decompress a gzip-encoded buffer using zlib.
 
     Uses ``flare_decompress`` with ``windowBits = 47`` (auto-detect gzip or
@@ -268,7 +268,7 @@ fn decompress_gzip(data: Span[UInt8]) raises -> List[UInt8]:
     return _decompress_impl(data, c_int(47))
 
 
-fn decompress_deflate(data: Span[UInt8]) raises -> List[UInt8]:
+def decompress_deflate(data: Span[UInt8, _]) raises -> List[UInt8]:
     """Decompress a deflate-encoded buffer using zlib.
 
     Tries zlib-wrapped deflate first; falls back to raw deflate, matching
@@ -286,7 +286,7 @@ fn decompress_deflate(data: Span[UInt8]) raises -> List[UInt8]:
     return _decompress_deflate_impl(data)
 
 
-fn compress_gzip(data: Span[UInt8], level: Int = 6) raises -> List[UInt8]:
+def compress_gzip(data: Span[UInt8, _], level: Int = 6) raises -> List[UInt8]:
     """Compress bytes using gzip via zlib.
 
     Args:
@@ -305,7 +305,9 @@ fn compress_gzip(data: Span[UInt8], level: Int = 6) raises -> List[UInt8]:
     return _do_compress(lib, data, c_int(level))
 
 
-fn decode_content(data: Span[UInt8], encoding: String) raises -> List[UInt8]:
+def decode_content(
+    data: Span[UInt8, _], encoding: String
+) raises -> List[UInt8]:
     """Decode ``data`` according to the ``Content-Encoding`` header value.
 
     Args:

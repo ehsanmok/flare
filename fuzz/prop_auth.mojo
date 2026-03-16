@@ -45,7 +45,7 @@ fn _is_b64_char(c: UInt8) -> Bool:
 
 def b64_charset(data: List[UInt8]) -> Bool:
     """Every byte in the base64 output must be a valid RFC 4648 character."""
-    var encoded = _b64_encode(Span[UInt8](data))
+    var encoded = _b64_encode(Span[UInt8, _](data))
     var ebytes = encoded.as_bytes()
     for b in ebytes:
         if not _is_b64_char(b):
@@ -57,7 +57,7 @@ def b64_length(data: List[UInt8]) -> Bool:
     """Encoded length must be exactly ``ceil(n/3)*4``."""
     var n = len(data)
     var expected = ((n + 2) // 3) * 4
-    var encoded = _b64_encode(Span[UInt8](data))
+    var encoded = _b64_encode(Span[UInt8, _](data))
     return len(encoded) == expected
 
 
@@ -118,7 +118,7 @@ def basic_no_crlf_in_header(data: List[UInt8]) -> Bool:
     return "\r" not in val and "\n" not in val
 
 
-fn main() raises:
+def main() raises:
     print("=" * 60)
     print("prop_auth.mojo")
     print("=" * 60)

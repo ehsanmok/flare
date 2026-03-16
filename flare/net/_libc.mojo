@@ -185,7 +185,9 @@ fn _htonl(x: UInt32) -> UInt32:
 
 @always_inline
 fn _fill_sockaddr_in(
-    buf: UnsafePointer[UInt8], port: UInt16, ip_bytes: UnsafePointer[UInt8]
+    buf: UnsafePointer[UInt8, _],
+    port: UInt16,
+    ip_bytes: UnsafePointer[UInt8, _],
 ) where type_of(buf).mut:
     """Populate a 16-byte IPv4 ``sockaddr_in`` buffer in-place.
 
@@ -223,7 +225,7 @@ fn _fill_sockaddr_in(
 
 
 @always_inline
-fn _read_port_from_sockaddr(buf: UnsafePointer[UInt8]) -> UInt16:
+fn _read_port_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> UInt16:
     """Extract and byte-swap the port from a ``sockaddr_in`` buffer.
 
     Args:
@@ -242,7 +244,7 @@ fn _read_port_from_sockaddr(buf: UnsafePointer[UInt8]) -> UInt16:
 
 
 @always_inline
-fn _read_ip_from_sockaddr(buf: UnsafePointer[UInt8]) raises -> String:
+def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
     """Extract the IPv4 address string from a ``sockaddr_in`` buffer.
 
     Args:
@@ -332,7 +334,7 @@ fn _close(fd: c_int) -> c_int:
 
 
 @always_inline
-fn _bind(fd: c_int, addr: UnsafePointer[UInt8], addrlen: c_uint) -> c_int:
+fn _bind(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
     """Wrapper around ``bind(2)``."""
     return external_call["bind", c_int](fd, addr.bitcast[NoneType](), addrlen)
 
@@ -346,15 +348,15 @@ fn _listen(fd: c_int, backlog: c_int) -> c_int:
 @always_inline
 fn _accept(
     fd: c_int,
-    addr: UnsafePointer[UInt8],
-    addrlen: UnsafePointer[c_uint],
+    addr: UnsafePointer[UInt8, _],
+    addrlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``accept(2)``."""
     return external_call["accept", c_int](fd, addr.bitcast[NoneType](), addrlen)
 
 
 @always_inline
-fn _connect(fd: c_int, addr: UnsafePointer[UInt8], addrlen: c_uint) -> c_int:
+fn _connect(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
     """Wrapper around ``connect(2)``."""
     return external_call["connect", c_int](
         fd, addr.bitcast[NoneType](), addrlen
@@ -364,8 +366,8 @@ fn _connect(fd: c_int, addr: UnsafePointer[UInt8], addrlen: c_uint) -> c_int:
 @always_inline
 fn _getsockname(
     fd: c_int,
-    addr: UnsafePointer[UInt8],
-    addrlen: UnsafePointer[c_uint],
+    addr: UnsafePointer[UInt8, _],
+    addrlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getsockname(2)``."""
     return external_call["getsockname", c_int](
@@ -376,8 +378,8 @@ fn _getsockname(
 @always_inline
 fn _getpeername(
     fd: c_int,
-    addr: UnsafePointer[UInt8],
-    addrlen: UnsafePointer[c_uint],
+    addr: UnsafePointer[UInt8, _],
+    addrlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getpeername(2)``."""
     return external_call["getpeername", c_int](
@@ -387,7 +389,7 @@ fn _getpeername(
 
 @always_inline
 fn _send(
-    fd: c_int, buf: UnsafePointer[UInt8], n: c_size_t, flags: c_int
+    fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``send(2)``."""
     return external_call["send", c_ssize_t](
@@ -397,7 +399,7 @@ fn _send(
 
 @always_inline
 fn _recv(
-    fd: c_int, buf: UnsafePointer[UInt8], n: c_size_t, flags: c_int
+    fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``recv(2)``."""
     return external_call["recv", c_ssize_t](
@@ -408,10 +410,10 @@ fn _recv(
 @always_inline
 fn _sendto(
     fd: c_int,
-    buf: UnsafePointer[UInt8],
+    buf: UnsafePointer[UInt8, _],
     n: c_size_t,
     flags: c_int,
-    addr: UnsafePointer[UInt8],
+    addr: UnsafePointer[UInt8, _],
     addrlen: c_uint,
 ) -> c_ssize_t:
     """Wrapper around ``sendto(2)``."""
@@ -428,11 +430,11 @@ fn _sendto(
 @always_inline
 fn _recvfrom(
     fd: c_int,
-    buf: UnsafePointer[UInt8],
+    buf: UnsafePointer[UInt8, _],
     n: c_size_t,
     flags: c_int,
-    addr: UnsafePointer[UInt8],
-    addrlen: UnsafePointer[c_uint],
+    addr: UnsafePointer[UInt8, _],
+    addrlen: UnsafePointer[c_uint, _],
 ) -> c_ssize_t:
     """Wrapper around ``recvfrom(2)``."""
     return external_call["recvfrom", c_ssize_t](
@@ -450,7 +452,7 @@ fn _setsockopt(
     fd: c_int,
     level: c_int,
     optname: c_int,
-    optval: UnsafePointer[UInt8],
+    optval: UnsafePointer[UInt8, _],
     optlen: c_uint,
 ) -> c_int:
     """Wrapper around ``setsockopt(2)``."""
@@ -476,8 +478,8 @@ fn _getsockopt(
     fd: c_int,
     level: c_int,
     optname: c_int,
-    optval: UnsafePointer[UInt8],
-    optlen: UnsafePointer[c_uint],
+    optval: UnsafePointer[UInt8, _],
+    optlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getsockopt(2)``."""
     return external_call["getsockopt", c_int](
@@ -486,7 +488,9 @@ fn _getsockopt(
 
 
 @always_inline
-fn _poll(fds: UnsafePointer[UInt8], nfds: c_uint, timeout_ms: c_int) -> c_int:
+fn _poll(
+    fds: UnsafePointer[UInt8, _], nfds: c_uint, timeout_ms: c_int
+) -> c_int:
     """Wrapper around ``poll(2)``.
 
     Args:
@@ -505,8 +509,8 @@ fn _poll(fds: UnsafePointer[UInt8], nfds: c_uint, timeout_ms: c_int) -> c_int:
 @always_inline
 fn _getaddrinfo(
     host: String,
-    hints: UnsafePointer[UInt8],
-    res_slot: UnsafePointer[UInt8],
+    hints: UnsafePointer[UInt8, _],
+    res_slot: UnsafePointer[UInt8, _],
 ) -> c_int:
     """Wrapper around ``getaddrinfo(3)``.
 
@@ -567,7 +571,9 @@ fn _gai_strerror(code: c_int) -> String:
 
 
 @always_inline
-fn _inet_pton(family: c_int, src: String, dst: UnsafePointer[UInt8]) -> c_int:
+fn _inet_pton(
+    family: c_int, src: String, dst: UnsafePointer[UInt8, _]
+) -> c_int:
     """Convert a text IP address to its binary form.
 
     Args:

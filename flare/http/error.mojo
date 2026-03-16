@@ -8,7 +8,7 @@ Example:
     ```mojo
     from flare.http import HttpClient, HttpError
 
-    fn main() raises:
+    def main() raises:
         var client = HttpClient()
         try:
             client.get("https://httpbin.org/status/404").raise_for_status()

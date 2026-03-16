@@ -32,12 +32,12 @@ trait Readable(ImplicitlyDestructible, Movable):
     Example:
         ```mojo
         struct MyStream(Readable):
-            fn read(mut self, buf: UnsafePointer[UInt8], size: Int) raises -> Int:
+            def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
                 ...
         ```
     """
 
-    fn read(mut self, buf: UnsafePointer[UInt8], size: Int) raises -> Int:
+    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
         """Read up to ``size`` bytes into the buffer at ``buf``.
 
         Args:
@@ -120,7 +120,7 @@ struct BufReader[S: Readable](Movable):
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    fn _fill(mut self) raises -> Bool:
+    def _fill(mut self) raises -> Bool:
         """Refill the internal buffer from the stream.
 
         Resets the ring buffer to the beginning before reading.
@@ -138,7 +138,7 @@ struct BufReader[S: Readable](Movable):
         self._len = n
         return n > 0
 
-    fn _peek_byte(mut self) raises -> Optional[UInt8]:
+    def _peek_byte(mut self) raises -> Optional[UInt8]:
         """Return the next byte without consuming it, filling buffer as needed.
 
         Returns:
@@ -152,7 +152,7 @@ struct BufReader[S: Readable](Movable):
                 return None
         return Optional[UInt8](self._buf[self._pos])
 
-    fn _consume_byte(mut self) raises -> Optional[UInt8]:
+    def _consume_byte(mut self) raises -> Optional[UInt8]:
         """Read and return the next byte, filling buffer as needed.
 
         Returns:
@@ -171,7 +171,7 @@ struct BufReader[S: Readable](Movable):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    fn readline(mut self) raises -> String:
+    def readline(mut self) raises -> String:
         """Read one line terminated by ``\\n`` (LF) from the stream.
 
         The newline character is stripped from the returned string.
@@ -205,7 +205,7 @@ struct BufReader[S: Readable](Movable):
             out += chr(Int(b))
         return out^
 
-    fn read_until(mut self, delimiter: UInt8) raises -> String:
+    def read_until(mut self, delimiter: UInt8) raises -> String:
         """Read bytes until ``delimiter`` is encountered.
 
         The delimiter itself is consumed but not included in the result.
@@ -236,7 +236,7 @@ struct BufReader[S: Readable](Movable):
             out += chr(Int(b))
         return out^
 
-    fn read_exact(mut self, n: Int) raises -> List[UInt8]:
+    def read_exact(mut self, n: Int) raises -> List[UInt8]:
         """Read exactly ``n`` bytes from the stream.
 
         Loops until ``n`` bytes have been accumulated or EOF/error.

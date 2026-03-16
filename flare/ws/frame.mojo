@@ -227,7 +227,7 @@ struct WsFrame(Movable, Writable):
 
     # ── Wire encoding ─────────────────────────────────────────────────────────
 
-    fn encode(self, mask: Bool = False) raises -> List[UInt8]:
+    def encode(self, mask: Bool = False) raises -> List[UInt8]:
         """Encode this frame to its RFC 6455 wire representation.
 
         Masking is applied with a deterministic all-zero key when ``mask=True``
@@ -259,7 +259,7 @@ struct WsFrame(Movable, Writable):
         var key = SIMD[DType.uint8, 4](0, 0, 0, 0)
         return self.encode_with_key(mask, key)
 
-    fn encode_with_key(
+    def encode_with_key(
         self, mask: Bool, key: SIMD[DType.uint8, 4]
     ) raises -> List[UInt8]:
         """Encode this frame with an explicit 4-byte masking key.
@@ -346,7 +346,7 @@ struct WsFrame(Movable, Writable):
     # ── Wire decoding ─────────────────────────────────────────────────────────
 
     @staticmethod
-    fn decode_one(data: Span[UInt8]) raises -> _DecodeResult:
+    def decode_one(data: Span[UInt8, _]) raises -> _DecodeResult:
         """Parse one frame from ``data``.
 
         Args:

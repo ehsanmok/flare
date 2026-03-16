@@ -78,7 +78,7 @@ fn _alloc_zeroed(n: Int) -> List[UInt8]:
 # that the output pointer comes from a `var` List (mutable).
 
 
-fn _bench_scalar_32(mut b: Bencher) raises capturing:
+def _bench_scalar_32(mut b: Bencher) capturing:
     """Scalar mask, 32-byte payload — below one SIMD chunk."""
     var payload = _alloc_payload(32)
     var output = _alloc_zeroed(32)
@@ -96,7 +96,7 @@ fn _bench_scalar_32(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_simd_32(mut b: Bencher) raises capturing:
+def _bench_simd_32(mut b: Bencher) capturing:
     """SIMD mask, 32-byte payload — exactly one SIMD chunk."""
     var payload = _alloc_payload(32)
     var output = _alloc_zeroed(32)
@@ -121,7 +121,7 @@ fn _bench_simd_32(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_scalar_128(mut b: Bencher) raises capturing:
+def _bench_scalar_128(mut b: Bencher) capturing:
     """Scalar mask, 128-byte payload — 4 SIMD chunks."""
     var payload = _alloc_payload(128)
     var output = _alloc_zeroed(128)
@@ -139,7 +139,7 @@ fn _bench_scalar_128(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_simd_128(mut b: Bencher) raises capturing:
+def _bench_simd_128(mut b: Bencher) capturing:
     """SIMD mask, 128-byte payload — 4 SIMD chunks."""
     var payload = _alloc_payload(128)
     var output = _alloc_zeroed(128)
@@ -165,7 +165,7 @@ fn _bench_simd_128(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_scalar_1k(mut b: Bencher) raises capturing:
+def _bench_scalar_1k(mut b: Bencher) capturing:
     """Scalar mask, 1 KB payload."""
     var payload = _alloc_payload(1024)
     var output = _alloc_zeroed(1024)
@@ -183,7 +183,7 @@ fn _bench_scalar_1k(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_simd_1k(mut b: Bencher) raises capturing:
+def _bench_simd_1k(mut b: Bencher) capturing:
     """SIMD mask, 1 KB payload."""
     var payload = _alloc_payload(1024)
     var output = _alloc_zeroed(1024)
@@ -209,7 +209,7 @@ fn _bench_simd_1k(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_scalar_64k(mut b: Bencher) raises capturing:
+def _bench_scalar_64k(mut b: Bencher) capturing:
     """Scalar mask, 64 KB payload."""
     var payload = _alloc_payload(65536)
     var output = _alloc_zeroed(65536)
@@ -227,7 +227,7 @@ fn _bench_scalar_64k(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_simd_64k(mut b: Bencher) raises capturing:
+def _bench_simd_64k(mut b: Bencher) capturing:
     """SIMD mask, 64 KB payload."""
     var payload = _alloc_payload(65536)
     var output = _alloc_zeroed(65536)
@@ -253,7 +253,7 @@ fn _bench_simd_64k(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_scalar_1m(mut b: Bencher) raises capturing:
+def _bench_scalar_1m(mut b: Bencher) capturing:
     """Scalar mask, 1 MB payload."""
     var payload = _alloc_payload(1048576)
     var output = _alloc_zeroed(1048576)
@@ -271,7 +271,7 @@ fn _bench_scalar_1m(mut b: Bencher) raises capturing:
     b.iter[call_fn]()
 
 
-fn _bench_simd_1m(mut b: Bencher) raises capturing:
+def _bench_simd_1m(mut b: Bencher) capturing:
     """SIMD mask, 1 MB payload."""
     var payload = _alloc_payload(1048576)
     var output = _alloc_zeroed(1048576)
@@ -300,7 +300,7 @@ fn _bench_simd_1m(mut b: Bencher) raises capturing:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     print("=" * 70)
     print("flare WebSocket XOR Masking Benchmark: Scalar vs SIMD")
     print("=" * 70)

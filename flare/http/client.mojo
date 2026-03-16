@@ -46,6 +46,8 @@ from ..tcp import TcpStream
 from ..tls import TlsStream, TlsConfig
 from ..net import NetworkError
 from mojson import dumps, Value as JsonValue
+from ..net import SocketAddr
+from ..dns import resolve_v4
 
 
 struct HttpClient(Movable):
@@ -129,7 +131,7 @@ struct HttpClient(Movable):
         self._base_url = base_url
         self._auth_header = ""
 
-    fn __init__[
+    def __init__[
         A: Auth
     ](
         out self,
@@ -169,7 +171,7 @@ struct HttpClient(Movable):
         auth.apply(auth_headers)
         self._auth_header = auth_headers.get("Authorization")
 
-    fn __init__[
+    def __init__[
         A: Auth
     ](
         out self,
@@ -258,7 +260,7 @@ struct HttpClient(Movable):
 
     # ── High-level helpers ────────────────────────────────────────────────────
 
-    fn get(self, url: String) raises -> Response:
+    def get(self, url: String) raises -> Response:
         """Perform a GET request.
 
         Args:
@@ -275,7 +277,7 @@ struct HttpClient(Movable):
         var req = Request(method=Method.GET, url=self._resolve_url(url))
         return self.send(req)
 
-    fn post(self, url: String, body: String) raises -> Response:
+    def post(self, url: String, body: String) raises -> Response:
         """Perform a POST request with a JSON string body.
 
         Sets ``Content-Type: application/json`` automatically.  This is the
@@ -306,7 +308,7 @@ struct HttpClient(Movable):
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
 
-    fn post(self, url: String, body: JsonValue) raises -> Response:
+    def post(self, url: String, body: JsonValue) raises -> Response:
         """Perform a POST request with a ``mojson.Value`` body.
 
         Serialises ``body`` to JSON with ``dumps`` and sets
@@ -325,7 +327,7 @@ struct HttpClient(Movable):
         """
         return self.post(url, dumps(body))
 
-    fn post(self, url: String, body: List[UInt8]) raises -> Response:
+    def post(self, url: String, body: List[UInt8]) raises -> Response:
         """Perform a POST request with a raw byte body.
 
         No ``Content-Type`` header is set automatically; the caller is
@@ -347,7 +349,7 @@ struct HttpClient(Movable):
         )
         return self.send(req)
 
-    fn put(self, url: String, body: String) raises -> Response:
+    def put(self, url: String, body: String) raises -> Response:
         """Perform a PUT request with a JSON string body.
 
         Sets ``Content-Type: application/json`` automatically.
@@ -370,7 +372,7 @@ struct HttpClient(Movable):
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
 
-    fn put(self, url: String, body: JsonValue) raises -> Response:
+    def put(self, url: String, body: JsonValue) raises -> Response:
         """Perform a PUT request with a ``mojson.Value`` body.
 
         Serialises ``body`` to JSON with ``dumps`` and sets
@@ -389,7 +391,7 @@ struct HttpClient(Movable):
         """
         return self.put(url, dumps(body))
 
-    fn put(self, url: String, body: List[UInt8]) raises -> Response:
+    def put(self, url: String, body: List[UInt8]) raises -> Response:
         """Perform a PUT request with a raw byte body.
 
         No ``Content-Type`` header is set automatically.
@@ -410,7 +412,7 @@ struct HttpClient(Movable):
         )
         return self.send(req)
 
-    fn delete(self, url: String) raises -> Response:
+    def delete(self, url: String) raises -> Response:
         """Perform a DELETE request.
 
         Args:
@@ -426,7 +428,7 @@ struct HttpClient(Movable):
         var req = Request(method=Method.DELETE, url=self._resolve_url(url))
         return self.send(req)
 
-    fn head(self, url: String) raises -> Response:
+    def head(self, url: String) raises -> Response:
         """Perform a HEAD request.
 
         Identical to ``GET`` but the server MUST NOT include a message body
@@ -445,7 +447,7 @@ struct HttpClient(Movable):
         var req = Request(method=Method.HEAD, url=self._resolve_url(url))
         return self.send(req)
 
-    fn patch(self, url: String, body: String) raises -> Response:
+    def patch(self, url: String, body: String) raises -> Response:
         """Perform a PATCH request with a JSON string body.
 
         Sets ``Content-Type: application/json`` automatically.
@@ -468,7 +470,7 @@ struct HttpClient(Movable):
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
 
-    fn patch(self, url: String, body: JsonValue) raises -> Response:
+    def patch(self, url: String, body: JsonValue) raises -> Response:
         """Perform a PATCH request with a ``mojson.Value`` body.
 
         Serialises ``body`` to JSON with ``dumps`` and sets
@@ -487,7 +489,7 @@ struct HttpClient(Movable):
         """
         return self.patch(url, dumps(body))
 
-    fn patch(self, url: String, body: List[UInt8]) raises -> Response:
+    def patch(self, url: String, body: List[UInt8]) raises -> Response:
         """Perform a PATCH request with a raw byte body.
 
         No ``Content-Type`` header is set automatically.
@@ -510,7 +512,7 @@ struct HttpClient(Movable):
 
     # ── Core ──────────────────────────────────────────────────────────────────
 
-    fn send(self, req: Request) raises -> Response:
+    def send(self, req: Request) raises -> Response:
         """Send an HTTP/1.1 request and return the response.
 
         Handles redirect chains up to ``_max_redirects``.
@@ -569,7 +571,7 @@ struct HttpClient(Movable):
 
             return resp^
 
-    fn _do_request(
+    def _do_request(
         self,
         method: String,
         url: String,
@@ -626,16 +628,13 @@ struct HttpClient(Movable):
                 u.host, u.port, self._config, self._timeout_ms
             )
             var wire_bytes = wire.as_bytes()
-            stream.write_all(Span[UInt8](wire_bytes))
+            stream.write_all(Span[UInt8, _](wire_bytes))
             if len(body) > 0:
-                stream.write_all(Span[UInt8](body))
+                stream.write_all(Span[UInt8, _](body))
             var resp = _read_http_response_tls(stream)
             stream.close()
             return resp^
         else:
-            from ..net import SocketAddr
-            from ..dns import resolve_v4
-
             var addrs = resolve_v4(u.host)
             if len(addrs) == 0:
                 raise NetworkError("DNS resolution failed for: " + u.host)
@@ -643,9 +642,9 @@ struct HttpClient(Movable):
                 SocketAddr(addrs[0], u.port), self._timeout_ms
             )
             var wire_bytes = wire.as_bytes()
-            stream.write_all(Span[UInt8](wire_bytes))
+            stream.write_all(Span[UInt8, _](wire_bytes))
             if len(body) > 0:
-                stream.write_all(Span[UInt8](body))
+                stream.write_all(Span[UInt8, _](body))
             var resp = _read_http_response_tcp(stream)
             stream.close()
             return resp^
@@ -656,7 +655,7 @@ struct HttpClient(Movable):
 comptime _READ_BUF_SIZE: Int = 16384  # 16 KiB per read chunk
 
 
-fn _read_all_tls(mut stream: TlsStream) raises -> List[UInt8]:
+def _read_all_tls(mut stream: TlsStream) raises -> List[UInt8]:
     """Read all available bytes from a TLS stream until EOF.
 
     Args:
@@ -677,7 +676,7 @@ fn _read_all_tls(mut stream: TlsStream) raises -> List[UInt8]:
     return out^
 
 
-fn _read_all_tcp(mut stream: TcpStream) raises -> List[UInt8]:
+def _read_all_tcp(mut stream: TcpStream) raises -> List[UInt8]:
     """Read all available bytes from a TCP stream until EOF.
 
     Args:
@@ -698,7 +697,7 @@ fn _read_all_tcp(mut stream: TcpStream) raises -> List[UInt8]:
     return out^
 
 
-fn _parse_http_response(raw: List[UInt8]) raises -> Response:
+def _parse_http_response(raw: List[UInt8]) raises -> Response:
     """Parse a raw HTTP/1.1 response byte buffer.
 
     Supports:
@@ -743,8 +742,14 @@ fn _parse_http_response(raw: List[UInt8]) raises -> Response:
         var colon = _str_find(line, ":")
         if colon < 0:
             continue
-        var k = String(String(line[:colon]).strip())
-        var v = String(String(line[colon + 1 :]).strip())
+        var k = String(
+            String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
+        )
+        var v = String(
+            String(
+                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
+            ).strip()
+        )
         headers.append(k, v)
 
     # Extract body (everything after \r\n\r\n)
@@ -802,17 +807,17 @@ fn _split_lines(s: String) -> List[String]:
             and i + 1 < n
             and s.unsafe_ptr()[i + 1] == 10
         ):
-            lines.append(String(s[start:i]))
+            lines.append(String(String(unsafe_from_utf8=s.as_bytes()[start:i])))
             start = i + 2
             i += 2
         elif s.unsafe_ptr()[i] == 10:
-            lines.append(String(s[start:i]))
+            lines.append(String(String(unsafe_from_utf8=s.as_bytes()[start:i])))
             start = i + 1
             i += 1
         else:
             i += 1
     if start < n:
-        lines.append(String(s[start:n]))
+        lines.append(String(String(unsafe_from_utf8=s.as_bytes()[start:n])))
     return lines^
 
 
@@ -829,7 +834,7 @@ struct _StatusLine:
         self.reason = take.reason^
 
 
-fn _parse_status_line(line: String) raises -> _StatusLine:
+def _parse_status_line(line: String) raises -> _StatusLine:
     """Parse ``HTTP/1.1 200 OK`` into a ``_StatusLine``.
 
     Args:
@@ -848,7 +853,9 @@ fn _parse_status_line(line: String) raises -> _StatusLine:
     var sp1 = _str_find(line, " ")
     if sp1 < 0:
         raise NetworkError("malformed HTTP status line: " + line)
-    var rest = String(String(line[sp1 + 1 :]).lstrip())
+    var rest = String(
+        String(String(unsafe_from_utf8=line.as_bytes()[sp1 + 1 :])).lstrip()
+    )
     if len(rest) < 3:
         raise NetworkError("HTTP status code too short: " + line)
     # Parse 3-digit code
@@ -860,7 +867,7 @@ fn _parse_status_line(line: String) raises -> _StatusLine:
         code = code * 10 + (c - 48)
     var reason = String("")
     if len(rest) > 4:
-        reason = String(rest[4:])
+        reason = String(String(unsafe_from_utf8=rest.as_bytes()[4:]))
     return _StatusLine(code, reason^)
 
 
@@ -893,7 +900,7 @@ fn _lower_str(s: String) -> String:
     return out^
 
 
-fn _extract_body(
+def _extract_body(
     raw: List[UInt8], body_start: Int, headers: HeaderMap
 ) raises -> List[UInt8]:
     """Extract the response body from the raw byte buffer.
@@ -937,7 +944,7 @@ fn _extract_body(
     return body^
 
 
-fn _decode_chunked(raw: List[UInt8], start: Int) raises -> List[UInt8]:
+def _decode_chunked(raw: List[UInt8], start: Int) raises -> List[UInt8]:
     """Decode a ``Transfer-Encoding: chunked`` body.
 
     Args:
@@ -965,7 +972,9 @@ fn _decode_chunked(raw: List[UInt8], start: Int) raises -> List[UInt8]:
         # Strip extensions (;...)
         var semi = _str_find(size_hex, ";")
         if semi >= 0:
-            size_hex = String(size_hex[:semi])
+            size_hex = String(
+                String(unsafe_from_utf8=size_hex.as_bytes()[:semi])
+            )
         var chunk_size = _parse_hex(String(size_hex.strip()))
         pos = line_end + 2  # skip \r\n
         if chunk_size == 0:
@@ -1007,7 +1016,7 @@ fn _parse_int(s: String) -> Int:
     return result
 
 
-fn _parse_hex(s: String) raises -> Int:
+def _parse_hex(s: String) raises -> Int:
     """Parse a hexadecimal integer string.
 
     Args:
@@ -1041,7 +1050,7 @@ fn _parse_hex(s: String) raises -> Int:
     return result
 
 
-fn _read_http_response_tls(mut stream: TlsStream) raises -> Response:
+def _read_http_response_tls(mut stream: TlsStream) raises -> Response:
     """Read and parse a full HTTP response from a TLS stream.
 
     Args:
@@ -1057,7 +1066,7 @@ fn _read_http_response_tls(mut stream: TlsStream) raises -> Response:
     return _parse_http_response(raw)
 
 
-fn _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
+def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
     """Read and parse a full HTTP response from a TCP stream.
 
     Args:
@@ -1076,7 +1085,7 @@ fn _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
 # ── Module-level convenience functions ────────────────────────────────────────
 
 
-fn get(url: String) raises -> Response:
+def get(url: String) raises -> Response:
     """Perform a one-shot HTTP GET request.
 
     Creates a temporary ``HttpClient`` for this single request.  For multiple
@@ -1094,7 +1103,7 @@ fn get(url: String) raises -> Response:
     return HttpClient().get(url)
 
 
-fn post(url: String, body: String) raises -> Response:
+def post(url: String, body: String) raises -> Response:
     """Perform a one-shot HTTP POST with a JSON string body.
 
     Sets ``Content-Type: application/json`` automatically.
@@ -1118,7 +1127,7 @@ fn post(url: String, body: String) raises -> Response:
     return HttpClient().post(url, body)
 
 
-fn post(url: String, body: JsonValue) raises -> Response:
+def post(url: String, body: JsonValue) raises -> Response:
     """Perform a one-shot HTTP POST with a ``mojson.Value`` body.
 
     Serialises ``body`` to JSON with ``dumps`` and sets
@@ -1137,7 +1146,7 @@ fn post(url: String, body: JsonValue) raises -> Response:
     return HttpClient().post(url, body)
 
 
-fn post(url: String, body: List[UInt8]) raises -> Response:
+def post(url: String, body: List[UInt8]) raises -> Response:
     """Perform a one-shot HTTP POST with a raw byte body.
 
     Args:
@@ -1153,7 +1162,7 @@ fn post(url: String, body: List[UInt8]) raises -> Response:
     return HttpClient().post(url, body)
 
 
-fn put(url: String, body: String) raises -> Response:
+def put(url: String, body: String) raises -> Response:
     """Perform a one-shot HTTP PUT with a JSON string body.
 
     Sets ``Content-Type: application/json`` automatically.
@@ -1171,7 +1180,7 @@ fn put(url: String, body: String) raises -> Response:
     return HttpClient().put(url, body)
 
 
-fn put(url: String, body: JsonValue) raises -> Response:
+def put(url: String, body: JsonValue) raises -> Response:
     """Perform a one-shot HTTP PUT with a ``mojson.Value`` body.
 
     Serialises ``body`` to JSON with ``dumps`` and sets
@@ -1190,7 +1199,7 @@ fn put(url: String, body: JsonValue) raises -> Response:
     return HttpClient().put(url, body)
 
 
-fn put(url: String, body: List[UInt8]) raises -> Response:
+def put(url: String, body: List[UInt8]) raises -> Response:
     """Perform a one-shot HTTP PUT with a raw byte body.
 
     Args:
@@ -1206,7 +1215,7 @@ fn put(url: String, body: List[UInt8]) raises -> Response:
     return HttpClient().put(url, body)
 
 
-fn delete(url: String) raises -> Response:
+def delete(url: String) raises -> Response:
     """Perform a one-shot HTTP DELETE request.
 
     Args:
@@ -1221,7 +1230,7 @@ fn delete(url: String) raises -> Response:
     return HttpClient().delete(url)
 
 
-fn head(url: String) raises -> Response:
+def head(url: String) raises -> Response:
     """Perform a one-shot HTTP HEAD request.
 
     Args:
@@ -1236,7 +1245,7 @@ fn head(url: String) raises -> Response:
     return HttpClient().head(url)
 
 
-fn patch(url: String, body: String) raises -> Response:
+def patch(url: String, body: String) raises -> Response:
     """Perform a one-shot HTTP PATCH with a JSON string body.
 
     Sets ``Content-Type: application/json`` automatically.
@@ -1254,7 +1263,7 @@ fn patch(url: String, body: String) raises -> Response:
     return HttpClient().patch(url, body)
 
 
-fn patch(url: String, body: JsonValue) raises -> Response:
+def patch(url: String, body: JsonValue) raises -> Response:
     """Perform a one-shot HTTP PATCH with a ``mojson.Value`` body.
 
     Serialises ``body`` to JSON with ``dumps`` and sets
@@ -1273,7 +1282,7 @@ fn patch(url: String, body: JsonValue) raises -> Response:
     return HttpClient().patch(url, body)
 
 
-fn patch(url: String, body: List[UInt8]) raises -> Response:
+def patch(url: String, body: List[UInt8]) raises -> Response:
     """Perform a one-shot HTTP PATCH with a raw byte body.
 
     Args:
