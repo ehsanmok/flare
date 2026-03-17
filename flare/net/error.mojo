@@ -10,7 +10,7 @@ the failure without a stack trace. Include the peer address, hostname, or
 port wherever relevant.
 """
 
-from format import Writable, Writer
+from std.format import Writable, Writer
 
 
 struct NetworkError(Copyable, Movable, Writable):

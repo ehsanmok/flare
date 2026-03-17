@@ -9,7 +9,7 @@ Design rules enforced here:
 - ``accept()`` sets ``TCP_NODELAY`` on the client socket automatically.
 """
 
-from ffi import c_int, c_uint, get_errno, ErrNo
+from std.ffi import c_int, c_uint, get_errno, ErrNo
 from std.memory import stack_allocation
 
 from ..net import (

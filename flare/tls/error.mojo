@@ -4,7 +4,7 @@ All error types implement ``Copyable``, ``Movable``, and ``Writable``
 so they can be raised, caught, printed, and logged uniformly.
 """
 
-from format import Writable, Writer
+from std.format import Writable, Writer
 
 
 struct TlsHandshakeError(Copyable, Movable, Writable):

@@ -13,7 +13,7 @@ Test certificates (tests/certs/):
 """
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
-from ffi import OwnedDLHandle, c_int, external_call
+from std.ffi import OwnedDLHandle, c_int, external_call
 from std.memory import UnsafePointer, stack_allocation
 from flare.tls import (
     TlsConfig,

@@ -28,7 +28,7 @@ Example:
 """
 
 from std.sys import stderr
-from ffi import OwnedDLHandle, c_int
+from std.ffi import OwnedDLHandle, c_int
 from std.memory import UnsafePointer, stack_allocation
 from ..dns import resolve_v4
 from ..net import SocketAddr, NetworkError, _find_flare_lib

@@ -12,7 +12,14 @@ Safety contracts for this module:
    transport-agnostic and does not know whether it carries TCP or UDP.
 """
 
-from ffi import external_call, OwnedDLHandle, c_int, c_uint, get_errno, ErrNo
+from std.ffi import (
+    external_call,
+    OwnedDLHandle,
+    c_int,
+    c_uint,
+    get_errno,
+    ErrNo,
+)
 from std.memory import UnsafePointer, stack_allocation, alloc
 from std.os import getenv
 from std.sys.info import CompilationTarget

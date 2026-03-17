@@ -11,10 +11,10 @@ Platform notes:
   addresses (e.g. ``255.255.255.255``).
 """
 
-from ffi import c_int, c_uint, c_size_t, c_ssize_t, get_errno, ErrNo
+from std.ffi import c_int, c_uint, c_size_t, c_ssize_t, get_errno, ErrNo
 from std.memory import stack_allocation
 
-from format import Writable, Writer
+from std.format import Writable, Writer
 from ..net import (
     SocketAddr,
     NetworkError,

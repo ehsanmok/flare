@@ -4,7 +4,7 @@ All keys are normalised to lowercase for comparison (RFC 7230 §3.2).
 The original casing is preserved in the ``_keys`` list for serialisation.
 """
 
-from format import Writable, Writer
+from std.format import Writable, Writer
 
 
 @always_inline

@@ -17,7 +17,7 @@ Design rules enforced here:
   calling into a freshly-loaded shared library.
 """
 
-from ffi import (
+from std.ffi import (
     OwnedDLHandle,
     c_int,
     c_uint,

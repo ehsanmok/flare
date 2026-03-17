@@ -107,8 +107,7 @@ def _bench_simd_32(mut b: Bencher) capturing:
     # Pre-compute tiled key outside the timed loop.
     var tiled = SIMD[DType.uint8, SIMD_WIDTH]()
 
-    @parameter
-    for i in range(SIMD_WIDTH):
+    comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
     @parameter
@@ -148,8 +147,7 @@ def _bench_simd_128(mut b: Bencher) capturing:
     var dst = output.unsafe_ptr()
     var tiled = SIMD[DType.uint8, SIMD_WIDTH]()
 
-    @parameter
-    for i in range(SIMD_WIDTH):
+    comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
     @parameter
@@ -192,8 +190,7 @@ def _bench_simd_1k(mut b: Bencher) capturing:
     var dst = output.unsafe_ptr()
     var tiled = SIMD[DType.uint8, SIMD_WIDTH]()
 
-    @parameter
-    for i in range(SIMD_WIDTH):
+    comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
     @parameter
@@ -236,8 +233,7 @@ def _bench_simd_64k(mut b: Bencher) capturing:
     var dst = output.unsafe_ptr()
     var tiled = SIMD[DType.uint8, SIMD_WIDTH]()
 
-    @parameter
-    for i in range(SIMD_WIDTH):
+    comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
     @parameter
@@ -280,8 +276,7 @@ def _bench_simd_1m(mut b: Bencher) capturing:
     var dst = output.unsafe_ptr()
     var tiled = SIMD[DType.uint8, SIMD_WIDTH]()
 
-    @parameter
-    for i in range(SIMD_WIDTH):
+    comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
     @parameter

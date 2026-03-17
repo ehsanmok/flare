@@ -25,7 +25,7 @@ Masking (§5.3):
     This implementation uses SIMD-32 masking for payloads ≥ 64 bytes.
 """
 
-from format import Writable, Writer
+from std.format import Writable, Writer
 from std.memory import UnsafePointer
 
 # SIMD chunk width for XOR masking (matches bench_ws_mask.mojo)

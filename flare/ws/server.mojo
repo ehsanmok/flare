@@ -12,7 +12,7 @@ The upgrade handshake (§4.2):
     5. Hand off to ``WsConnection``.
 """
 
-from ffi import OwnedDLHandle
+from std.ffi import OwnedDLHandle
 from .frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream

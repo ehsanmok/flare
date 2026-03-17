@@ -17,7 +17,7 @@ Tests for higher-level API features:
 """
 
 from std.testing import assert_true, assert_false, assert_equal, assert_raises
-from ffi import external_call
+from std.ffi import external_call
 
 from flare.http import (
     HttpClient,

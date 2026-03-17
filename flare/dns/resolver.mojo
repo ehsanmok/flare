@@ -12,7 +12,7 @@ Memory safety contract:
     return path.
 """
 
-from ffi import c_int, c_uint, c_char, get_errno, external_call
+from std.ffi import c_int, c_uint, c_char, get_errno, external_call
 from std.memory import stack_allocation
 from std.sys.info import CompilationTarget, platform_map
 

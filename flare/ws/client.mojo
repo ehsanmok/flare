@@ -12,7 +12,7 @@ SHA-1 is computed via libcrypto (OpenSSL) FFI — the same library already
 bundled by the TLS FFI build step.  Base64 is a pure Mojo implementation.
 """
 
-from ffi import OwnedDLHandle, c_int
+from std.ffi import OwnedDLHandle, c_int
 from .frame import (
     WsFrame,
     WsOpcode,

@@ -32,7 +32,7 @@ Public API surface:
 """
 
 from std.os import getenv
-from ffi import OwnedDLHandle, c_int
+from std.ffi import OwnedDLHandle, c_int
 
 
 fn _find_flare_zlib_lib() -> String:

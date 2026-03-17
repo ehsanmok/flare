@@ -16,7 +16,7 @@ Safety contract:
     other libc function that could clobber errno.
 """
 
-from ffi import (
+from std.ffi import (
     external_call,
     c_int,
     c_uint,

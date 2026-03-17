@@ -17,7 +17,7 @@ Example:
     ```
 """
 
-from format import Writable, Writer
+from std.format import Writable, Writer
 
 
 struct UrlParseError(Copyable, Movable, Writable):
