@@ -143,7 +143,7 @@ def prop_close_code_range(data: List[UInt8]) raises -> Bool:
 def main() raises:
     print("[mozz] WebSocket server fuzz harnesses\n")
 
-    fn _b(s: StringLiteral) -> List[UInt8]:
+    def _b(s: StringLiteral) -> List[UInt8]:
         var b = s.as_bytes()
         var out = List[UInt8](capacity=len(b))
         for i in range(len(b)):

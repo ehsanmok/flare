@@ -39,7 +39,7 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
         NetworkError: If the SHA-1 function cannot be loaded.
     """
     var lib = OwnedDLHandle(_find_flare_lib())
-    var fn_sha1 = lib.get_function[fn(Int, Int, Int) -> Int]("SHA1")
+    var fn_sha1 = lib.get_function[def(Int, Int, Int) -> Int]("SHA1")
     var digest = List[UInt8](capacity=_SHA1_LEN)
     digest.resize(_SHA1_LEN, 0)
     var data_bytes = data.as_bytes()
@@ -53,10 +53,12 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
 
 # ── Base64 encoder (same implementation as ws/client.mojo) ───────────────────
 
-comptime _B64: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+comptime _B64: String = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
 
 
-fn _b64_encode_srv(data: Span[UInt8, _]) -> String:
+def _b64_encode_srv(data: Span[UInt8, _]) -> String:
     """Encode bytes to standard RFC 4648 base64.
 
     Args:
@@ -134,7 +136,7 @@ def _read_line_srv(mut stream: TcpStream) raises -> String:
         line += chr(Int(c))
 
 
-fn _lower_srv(s: String) -> String:
+def _lower_srv(s: String) -> String:
     """Return ASCII-lowercase of ``s``."""
     var out = String(capacity=len(s))
     for i in range(len(s)):
@@ -146,7 +148,7 @@ fn _lower_srv(s: String) -> String:
     return out^
 
 
-fn _str_find_srv(s: String, sub: String) -> Int:
+def _str_find_srv(s: String, sub: String) -> Int:
     """Return the index of the first ``sub`` in ``s``, or -1."""
     var n = len(s)
     var m = len(sub)
@@ -181,7 +183,7 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
     """
     var pos = 0
 
-    fn read_line(data: Span[UInt8, _], mut pos: Int) -> String:
+    def read_line(data: Span[UInt8, _], mut pos: Int) -> String:
         var line = String(capacity=256)
         while pos < len(data):
             var c = data[pos]
@@ -342,15 +344,11 @@ struct WsConnection(Movable):
     var _stream: TcpStream
     var _peer: SocketAddr
 
-    fn __init__(out self, var stream: TcpStream, peer: SocketAddr):
+    def __init__(out self, var stream: TcpStream, peer: SocketAddr):
         self._stream = stream^
         self._peer = peer
 
-    fn __moveinit__(out self, deinit take: WsConnection):
-        self._stream = take._stream^
-        self._peer = take._peer
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._stream.close()
 
     def send_text(self, msg: String) raises:
@@ -469,7 +467,7 @@ struct WsConnection(Movable):
         except:
             pass  # best-effort
 
-    fn peer_addr(self) -> SocketAddr:
+    def peer_addr(self) -> SocketAddr:
         """Return the remote socket address.
 
         Returns:
@@ -508,13 +506,10 @@ struct WsServer(Movable):
 
     var _listener: TcpListener
 
-    fn __init__(out self, var listener: TcpListener):
+    def __init__(out self, var listener: TcpListener):
         self._listener = listener^
 
-    fn __moveinit__(out self, deinit take: WsServer):
-        self._listener = take._listener^
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._listener.close()
 
     @staticmethod
@@ -534,7 +529,7 @@ struct WsServer(Movable):
         var listener = TcpListener.bind(addr)
         return WsServer(listener^)
 
-    def serve(self, handler: fn(WsConnection) raises -> None) raises:
+    def serve(self, handler: def(WsConnection) raises -> None) raises:
         """Accept WebSocket connections in a loop.
 
         For each accepted TCP connection:
@@ -557,7 +552,7 @@ struct WsServer(Movable):
             var peer = stream.peer_addr()
             _handle_ws_connection(stream^, peer, handler)
 
-    fn local_addr(self) -> SocketAddr:
+    def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to.
 
         Returns:
@@ -573,7 +568,7 @@ struct WsServer(Movable):
 def _handle_ws_connection(
     var stream: TcpStream,
     peer: SocketAddr,
-    handler: fn(WsConnection) raises -> None,
+    handler: def(WsConnection) raises -> None,
 ):
     """Perform the WebSocket handshake and call handler.
 

@@ -35,7 +35,7 @@ from std.os import getenv
 from std.ffi import OwnedDLHandle, c_int
 
 
-fn _find_flare_zlib_lib() -> String:
+def _find_flare_zlib_lib() -> String:
     """Return the path to ``libflare_zlib.so``.
 
     Search order:
@@ -93,7 +93,7 @@ def _do_decompress(
         Error: If zlib reports a non-recoverable error.
     """
     var fn_decomp = lib.get_function[
-        fn(Int, c_int, Int, c_int, c_int) -> c_int
+        def(Int, c_int, Int, c_int, c_int) -> c_int
     ]("flare_decompress")
 
     var cap = max(len(data) * 4, 4096)
@@ -161,7 +161,7 @@ def _do_decompress_deflate(
     Raises:
         Error: If neither zlib-wrapped nor raw deflate succeeds.
     """
-    var fn_decomp = lib.get_function[fn(Int, c_int, Int, c_int) -> c_int](
+    var fn_decomp = lib.get_function[def(Int, c_int, Int, c_int) -> c_int](
         "flare_decompress_deflate"
     )
 
@@ -226,7 +226,7 @@ def _do_compress(
     Raises:
         Error: If compression fails.
     """
-    var fn_comp = lib.get_function[fn(Int, c_int, Int, c_int, c_int) -> c_int](
+    var fn_comp = lib.get_function[def(Int, c_int, Int, c_int, c_int) -> c_int](
         "flare_compress_gzip"
     )
 

@@ -85,7 +85,7 @@ struct HttpClient(Movable):
     var _base_url: String
     var _auth_header: String  # "" = no auth; "Basic ..." or "Bearer ..."
 
-    fn __init__(
+    def __init__(
         out self,
         base_url: String = "",
         max_redirects: Int = 10,
@@ -107,7 +107,7 @@ struct HttpClient(Movable):
         self._base_url = base_url
         self._auth_header = ""
 
-    fn __init__(
+    def __init__(
         out self,
         tls: TlsConfig,
         base_url: String = "",
@@ -212,17 +212,9 @@ struct HttpClient(Movable):
         auth.apply(auth_headers)
         self._auth_header = auth_headers.get("Authorization")
 
-    fn __moveinit__(out self, deinit take: HttpClient):
-        self._config = take._config^
-        self._max_redirects = take._max_redirects
-        self._timeout_ms = take._timeout_ms
-        self._user_agent = take._user_agent^
-        self._base_url = take._base_url^
-        self._auth_header = take._auth_header^
-
     # ── Context manager ───────────────────────────────────────────────────────
 
-    fn __enter__(var self) -> HttpClient:
+    def __enter__(var self) -> HttpClient:
         """Transfer ownership of ``self`` into the ``with`` block.
 
         Returns:
@@ -233,7 +225,7 @@ struct HttpClient(Movable):
     # ── Factory ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    fn default() -> HttpClient:
+    def default() -> HttpClient:
         """Return a client with secure defaults (TLS verification enabled).
 
         Returns:
@@ -243,7 +235,7 @@ struct HttpClient(Movable):
 
     # ── URL resolution ────────────────────────────────────────────────────────
 
-    fn _resolve_url(self, url: String) -> String:
+    def _resolve_url(self, url: String) -> String:
         """Prepend ``_base_url`` if ``url`` is a relative path.
 
         Args:
@@ -762,7 +754,7 @@ def _parse_http_response(raw: List[UInt8]) raises -> Response:
     return resp^
 
 
-fn _find_crlf2(data: List[UInt8]) -> Int:
+def _find_crlf2(data: List[UInt8]) -> Int:
     """Return byte offset of ``\\r\\n\\r\\n`` in ``data``, or -1."""
     var n = len(data)
     for i in range(n - 3):
@@ -776,7 +768,7 @@ fn _find_crlf2(data: List[UInt8]) -> Int:
     return -1
 
 
-fn _bytes_to_str(data: List[UInt8]) -> String:
+def _bytes_to_str(data: List[UInt8]) -> String:
     """Convert a byte list to a String, replacing non-ASCII bytes with ``?``.
 
     HTTP/1.1 headers must be ASCII (RFC 7230 §3.2.6).  Non-ASCII bytes are
@@ -795,7 +787,7 @@ fn _bytes_to_str(data: List[UInt8]) -> String:
     return s^
 
 
-fn _split_lines(s: String) -> List[String]:
+def _split_lines(s: String) -> List[String]:
     """Split ``s`` by ``\\r\\n`` or ``\\n``."""
     var lines = List[String]()
     var start = 0
@@ -825,13 +817,9 @@ struct _StatusLine:
     var code: Int
     var reason: String
 
-    fn __init__(out self, code: Int, reason: String):
+    def __init__(out self, code: Int, reason: String):
         self.code = code
         self.reason = reason
-
-    fn __moveinit__(out self, deinit take: _StatusLine):
-        self.code = take.code
-        self.reason = take.reason^
 
 
 def _parse_status_line(line: String) raises -> _StatusLine:
@@ -871,7 +859,7 @@ def _parse_status_line(line: String) raises -> _StatusLine:
     return _StatusLine(code, reason^)
 
 
-fn _str_find(s: String, sub: String) -> Int:
+def _str_find(s: String, sub: String) -> Int:
     """Return the index of the first ``sub`` in ``s``, or -1."""
     var n = len(s)
     var m = len(sub)
@@ -888,7 +876,7 @@ fn _str_find(s: String, sub: String) -> Int:
     return -1
 
 
-fn _lower_str(s: String) -> String:
+def _lower_str(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
     var out = String(capacity=len(s))
     for i in range(len(s)):
@@ -988,7 +976,7 @@ def _decode_chunked(raw: List[UInt8], start: Int) raises -> List[UInt8]:
     return out^
 
 
-fn _find_crlf(data: List[UInt8], start: Int) -> Int:
+def _find_crlf(data: List[UInt8], start: Int) -> Int:
     """Return position of ``\\r\\n`` at or after ``start``, or -1."""
     var n = len(data)
     for i in range(start, n - 1):
@@ -997,7 +985,7 @@ fn _find_crlf(data: List[UInt8], start: Int) -> Int:
     return -1
 
 
-fn _parse_int(s: String) -> Int:
+def _parse_int(s: String) -> Int:
     """Parse a decimal integer string; returns 0 on failure.
 
     Rejects strings longer than 18 digits to prevent ``Int`` overflow on

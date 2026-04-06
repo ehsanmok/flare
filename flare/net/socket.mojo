@@ -74,7 +74,7 @@ from ._libc import (
 )
 
 
-fn _find_flare_lib() -> String:
+def _find_flare_lib() -> String:
     """Return the path to ``libflare_tls.so``.
 
     Search order:
@@ -123,7 +123,7 @@ struct RawSocket(Movable):
     var family: c_int
     var kind: c_int
 
-    fn __init__(out self, family: c_int, kind: c_int) raises:
+    def __init__(out self, family: c_int, kind: c_int) raises:
         """Create a new socket via ``socket(2)``.
 
         Args:
@@ -148,7 +148,7 @@ struct RawSocket(Movable):
         self.family = family
         self.kind = kind
 
-    fn __init__(out self, fd: c_int, family: c_int, kind: c_int, _wrap: Bool):
+    def __init__(out self, fd: c_int, family: c_int, kind: c_int, _wrap: Bool):
         """Wrap an existing file descriptor without calling ``socket(2)``.
 
         Args:
@@ -167,20 +167,7 @@ struct RawSocket(Movable):
         self.family = family
         self.kind = kind
 
-    fn __moveinit__(out self, deinit take: RawSocket):
-        """Transfer ownership from ``take``.
-
-        After the move, the source fd is set to ``INVALID_FD``, so its
-        destructor will not call ``close()`` again.
-
-        Args:
-            take: The socket to move from (left in a closed/invalid state).
-        """
-        self.fd = take.fd
-        self.family = take.family
-        self.kind = take.kind
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         """Close the file descriptor if it is open.
 
         Safety: safe to call even after a move because ``fd`` is set to
@@ -191,7 +178,7 @@ struct RawSocket(Movable):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    fn close(mut self):
+    def close(mut self):
         """Close the socket explicitly. Idempotent.
 
         Sets ``fd = INVALID_FD`` so subsequent calls and the destructor
@@ -327,7 +314,7 @@ struct RawSocket(Movable):
 
         comptime if CompilationTarget.is_macos():
             var lib = OwnedDLHandle(_find_flare_lib())
-            var fn_nb = lib.get_function[fn(c_int, c_int) -> c_int](
+            var fn_nb = lib.get_function[def(c_int, c_int) -> c_int](
                 "flare_set_nonblocking"
             )
             var rc = fn_nb(self.fd, c_int(1) if enabled else c_int(0))

@@ -151,7 +151,7 @@ comptime ADDRINFO_SIZE: Int = 48
 
 
 @always_inline
-fn _htons(x: UInt16) -> UInt16:
+def _htons(x: UInt16) -> UInt16:
     """Convert a ``UInt16`` from host byte order to network (big-endian) order.
 
     All target platforms (macOS ARM64, Linux x86_64/aarch64) are
@@ -161,13 +161,13 @@ fn _htons(x: UInt16) -> UInt16:
 
 
 @always_inline
-fn _ntohs(x: UInt16) -> UInt16:
+def _ntohs(x: UInt16) -> UInt16:
     """Convert a ``UInt16`` from network byte order to host order."""
     return _htons(x)  # byte-swap is its own inverse
 
 
 @always_inline
-fn _htonl(x: UInt32) -> UInt32:
+def _htonl(x: UInt32) -> UInt32:
     """Convert a ``UInt32`` from host byte order to network (big-endian) order.
     """
     return (
@@ -184,7 +184,7 @@ fn _htonl(x: UInt32) -> UInt32:
 
 
 @always_inline
-fn _fill_sockaddr_in(
+def _fill_sockaddr_in(
     buf: UnsafePointer[UInt8, _],
     port: UInt16,
     ip_bytes: UnsafePointer[UInt8, _],
@@ -225,7 +225,7 @@ fn _fill_sockaddr_in(
 
 
 @always_inline
-fn _read_port_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> UInt16:
+def _read_port_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> UInt16:
     """Extract and byte-swap the port from a ``sockaddr_in`` buffer.
 
     Args:
@@ -281,7 +281,7 @@ def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
 
 
 @always_inline
-fn _strerror(code: c_int) -> String:
+def _strerror(code: c_int) -> String:
     """Call ``strerror(code)`` and return the result as a ``String``.
 
     Args:
@@ -299,7 +299,7 @@ fn _strerror(code: c_int) -> String:
 
 
 @always_inline
-fn _os_error(op: String) -> String:
+def _os_error(op: String) -> String:
     """Return a formatted error string from the current ``errno``.
 
     Args:
@@ -318,7 +318,7 @@ fn _os_error(op: String) -> String:
 
 
 @always_inline
-fn _socket(family: c_int, kind: c_int, protocol: c_int) -> c_int:
+def _socket(family: c_int, kind: c_int, protocol: c_int) -> c_int:
     """Wrapper around ``socket(2)``.
 
     Returns:
@@ -328,25 +328,25 @@ fn _socket(family: c_int, kind: c_int, protocol: c_int) -> c_int:
 
 
 @always_inline
-fn _close(fd: c_int) -> c_int:
+def _close(fd: c_int) -> c_int:
     """Wrapper around ``close(2)``."""
     return external_call["close", c_int](fd)
 
 
 @always_inline
-fn _bind(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
+def _bind(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
     """Wrapper around ``bind(2)``."""
     return external_call["bind", c_int](fd, addr.bitcast[NoneType](), addrlen)
 
 
 @always_inline
-fn _listen(fd: c_int, backlog: c_int) -> c_int:
+def _listen(fd: c_int, backlog: c_int) -> c_int:
     """Wrapper around ``listen(2)``."""
     return external_call["listen", c_int](fd, backlog)
 
 
 @always_inline
-fn _accept(
+def _accept(
     fd: c_int,
     addr: UnsafePointer[UInt8, _],
     addrlen: UnsafePointer[c_uint, _],
@@ -356,7 +356,9 @@ fn _accept(
 
 
 @always_inline
-fn _connect(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
+def _connect(
+    fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint
+) -> c_int:
     """Wrapper around ``connect(2)``."""
     return external_call["connect", c_int](
         fd, addr.bitcast[NoneType](), addrlen
@@ -364,7 +366,7 @@ fn _connect(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
 
 
 @always_inline
-fn _getsockname(
+def _getsockname(
     fd: c_int,
     addr: UnsafePointer[UInt8, _],
     addrlen: UnsafePointer[c_uint, _],
@@ -376,7 +378,7 @@ fn _getsockname(
 
 
 @always_inline
-fn _getpeername(
+def _getpeername(
     fd: c_int,
     addr: UnsafePointer[UInt8, _],
     addrlen: UnsafePointer[c_uint, _],
@@ -388,7 +390,7 @@ fn _getpeername(
 
 
 @always_inline
-fn _send(
+def _send(
     fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``send(2)``."""
@@ -398,7 +400,7 @@ fn _send(
 
 
 @always_inline
-fn _recv(
+def _recv(
     fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``recv(2)``."""
@@ -408,7 +410,7 @@ fn _recv(
 
 
 @always_inline
-fn _sendto(
+def _sendto(
     fd: c_int,
     buf: UnsafePointer[UInt8, _],
     n: c_size_t,
@@ -428,7 +430,7 @@ fn _sendto(
 
 
 @always_inline
-fn _recvfrom(
+def _recvfrom(
     fd: c_int,
     buf: UnsafePointer[UInt8, _],
     n: c_size_t,
@@ -448,7 +450,7 @@ fn _recvfrom(
 
 
 @always_inline
-fn _setsockopt(
+def _setsockopt(
     fd: c_int,
     level: c_int,
     optname: c_int,
@@ -462,19 +464,19 @@ fn _setsockopt(
 
 
 @always_inline
-fn _fcntl2(fd: c_int, cmd: c_int, arg: c_int) -> c_int:
+def _fcntl2(fd: c_int, cmd: c_int, arg: c_int) -> c_int:
     """Wrapper around ``fcntl(fd, cmd, arg)``."""
     return external_call["fcntl", c_int](fd, cmd, arg)
 
 
 @always_inline
-fn _shutdown(fd: c_int, how: c_int) -> c_int:
+def _shutdown(fd: c_int, how: c_int) -> c_int:
     """Wrapper around ``shutdown(2)``."""
     return external_call["shutdown", c_int](fd, how)
 
 
 @always_inline
-fn _getsockopt(
+def _getsockopt(
     fd: c_int,
     level: c_int,
     optname: c_int,
@@ -488,7 +490,7 @@ fn _getsockopt(
 
 
 @always_inline
-fn _poll(
+def _poll(
     fds: UnsafePointer[UInt8, _], nfds: c_uint, timeout_ms: c_int
 ) -> c_int:
     """Wrapper around ``poll(2)``.
@@ -507,7 +509,7 @@ fn _poll(
 
 
 @always_inline
-fn _getaddrinfo(
+def _getaddrinfo(
     host: String,
     hints: UnsafePointer[UInt8, _],
     res_slot: UnsafePointer[UInt8, _],
@@ -538,7 +540,7 @@ fn _getaddrinfo(
 
 
 @always_inline
-fn _freeaddrinfo(head: Int):
+def _freeaddrinfo(head: Int):
     """Wrapper around ``freeaddrinfo(3)``.
 
     Args:
@@ -553,7 +555,7 @@ fn _freeaddrinfo(head: Int):
 
 
 @always_inline
-fn _gai_strerror(code: c_int) -> String:
+def _gai_strerror(code: c_int) -> String:
     """Return the human-readable ``getaddrinfo`` error string.
 
     Args:
@@ -571,7 +573,7 @@ fn _gai_strerror(code: c_int) -> String:
 
 
 @always_inline
-fn _inet_pton(
+def _inet_pton(
     family: c_int, src: String, dst: UnsafePointer[UInt8, _]
 ) -> c_int:
     """Convert a text IP address to its binary form.

@@ -69,7 +69,7 @@ def main() raises:
 
     var seeds = List[List[UInt8]]()
 
-    fn _b(s: StringLiteral) -> List[UInt8]:
+    def _b(s: StringLiteral) -> List[UInt8]:
         var b = s.as_bytes()
         var out = List[UInt8](capacity=len(b))
         for i in range(len(b)):

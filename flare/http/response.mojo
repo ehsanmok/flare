@@ -61,7 +61,7 @@ struct Response(Movable):
     var body: List[UInt8]
     var version: String
 
-    fn __init__(
+    def __init__(
         out self,
         status: Int,
         reason: String = "",
@@ -74,14 +74,7 @@ struct Response(Movable):
         self.body = body.copy()
         self.version = version
 
-    fn __moveinit__(out self, deinit take: Response):
-        self.status = take.status
-        self.reason = take.reason^
-        self.headers = take.headers^
-        self.body = take.body^
-        self.version = take.version^
-
-    fn ok(self) -> Bool:
+    def ok(self) -> Bool:
         """Return True if the status code is 2xx.
 
         Returns:
@@ -89,7 +82,7 @@ struct Response(Movable):
         """
         return self.status >= 200 and self.status < 300
 
-    fn is_redirect(self) -> Bool:
+    def is_redirect(self) -> Bool:
         """Return True if the status code is a redirect (3xx).
 
         Returns:
@@ -97,7 +90,7 @@ struct Response(Movable):
         """
         return self.status >= 300 and self.status < 400
 
-    fn text(self) -> String:
+    def text(self) -> String:
         """Decode the body as a UTF-8 string.
 
         Interprets the body bytes as UTF-8.  Invalid UTF-8 sequences are
@@ -153,7 +146,7 @@ struct Response(Movable):
         if self.status < 200 or self.status >= 300:
             raise HttpError(self.status, self.reason)
 
-    fn iter_bytes(self, chunk_size: Int = 8192) -> _BytesIter:
+    def iter_bytes(self, chunk_size: Int = 8192) -> _BytesIter:
         """Return an iterator that yields the body in chunks.
 
         The entire body is already buffered in memory, so this does not
@@ -185,17 +178,12 @@ struct _BytesIter(Movable):
     var _chunk_size: Int
     var _pos: Int
 
-    fn __init__(out self, body: List[UInt8], chunk_size: Int):
+    def __init__(out self, body: List[UInt8], chunk_size: Int):
         self._body = body.copy()
         self._chunk_size = chunk_size if chunk_size > 0 else 8192
         self._pos = 0
 
-    fn __moveinit__(out self, deinit take: _BytesIter):
-        self._body = take._body^
-        self._chunk_size = take._chunk_size
-        self._pos = take._pos
-
-    fn __iter__(var self) -> _BytesIter:
+    def __iter__(var self) -> _BytesIter:
         """Return ``self`` as the iterator (consumed).
 
         Returns:
@@ -203,7 +191,7 @@ struct _BytesIter(Movable):
         """
         return self^
 
-    fn __next__(mut self) -> List[UInt8]:
+    def __next__(mut self) -> List[UInt8]:
         """Return the next chunk of up to ``chunk_size`` bytes.
 
         Returns:
@@ -220,7 +208,7 @@ struct _BytesIter(Movable):
         self._pos = end
         return chunk^
 
-    fn __has_next__(self) -> Bool:
+    def __has_next__(self) -> Bool:
         """Return ``True`` while there are unread bytes.
 
         Returns:

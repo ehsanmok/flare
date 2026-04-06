@@ -28,10 +28,12 @@ from .headers import HeaderMap
 
 # ── Base64 encoder (RFC 4648) ─────────────────────────────────────────────────
 
-comptime _B64_TABLE: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+comptime _B64_TABLE: String = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
 
 
-fn _b64_encode(data: Span[UInt8, _]) -> String:
+def _b64_encode(data: Span[UInt8, _]) -> String:
     """Encode ``data`` to standard RFC 4648 base64.
 
     Args:
@@ -124,7 +126,7 @@ struct BasicAuth(Auth, Copyable, Movable):
     var username: String
     var password: String
 
-    fn __init__(out self, username: String, password: String):
+    def __init__(out self, username: String, password: String):
         """Initialise ``BasicAuth`` with ``username`` and ``password``.
 
         Args:
@@ -133,14 +135,6 @@ struct BasicAuth(Auth, Copyable, Movable):
         """
         self.username = username
         self.password = password
-
-    fn __copyinit__(out self, copy: BasicAuth):
-        self.username = copy.username
-        self.password = copy.password
-
-    fn __moveinit__(out self, deinit take: BasicAuth):
-        self.username = take.username^
-        self.password = take.password^
 
     def apply(self, mut headers: HeaderMap) raises:
         """Set ``Authorization: Basic <credentials>`` on ``headers``.
@@ -176,19 +170,13 @@ struct BearerAuth(Auth, Copyable, Movable):
 
     var token: String
 
-    fn __init__(out self, token: String):
+    def __init__(out self, token: String):
         """Initialise ``BearerAuth`` with ``token``.
 
         Args:
             token: The bearer token (e.g. a JWT or opaque token).
         """
         self.token = token
-
-    fn __copyinit__(out self, copy: BearerAuth):
-        self.token = copy.token
-
-    fn __moveinit__(out self, deinit take: BearerAuth):
-        self.token = take.token^
 
     def apply(self, mut headers: HeaderMap) raises:
         """Set ``Authorization: Bearer <token>`` on ``headers``.

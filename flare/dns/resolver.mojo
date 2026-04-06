@@ -213,7 +213,7 @@ def resolve_v6(host: String) raises -> List[IpAddr]:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
-fn _ipv4_from_sockaddr(sa_ptr: Int) -> String:
+def _ipv4_from_sockaddr(sa_ptr: Int) -> String:
     """Extract an IPv4 address string from a ``sockaddr_in`` pointer.
 
     Args:
@@ -241,7 +241,7 @@ fn _ipv4_from_sockaddr(sa_ptr: Int) -> String:
     return String(StringSlice(unsafe_from_utf8_ptr=ntop))
 
 
-fn _ipv6_from_sockaddr(sa_ptr: Int) -> String:
+def _ipv6_from_sockaddr(sa_ptr: Int) -> String:
     """Extract an IPv6 address string from a ``sockaddr_in6`` pointer.
 
     Args:

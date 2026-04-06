@@ -82,10 +82,10 @@ struct WsProtocolError(Copyable, Movable, Writable):
 
     var message: String
 
-    fn __init__(out self, message: String):
+    def __init__(out self, message: String):
         self.message = message
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         writer.write("WsProtocolError: ", self.message)
 
 
@@ -93,15 +93,11 @@ struct _DecodeResult(Movable):
     var frame: WsFrame
     var consumed: Int
 
-    fn __init__(out self, var frame: WsFrame, consumed: Int):
+    def __init__(out self, var frame: WsFrame, consumed: Int):
         self.frame = frame^
         self.consumed = consumed
 
-    fn __moveinit__(out self, deinit take: _DecodeResult):
-        self.frame = take.frame^
-        self.consumed = take.consumed
-
-    fn take_frame(deinit self) -> WsFrame:
+    def take_frame(deinit self) -> WsFrame:
         """Consume this result and return the decoded frame."""
         return self.frame^
 
@@ -134,7 +130,7 @@ struct WsFrame(Movable, Writable):
     var masked: Bool
     var payload: List[UInt8]
 
-    fn __init__(
+    def __init__(
         out self,
         opcode: UInt8,
         payload: List[UInt8],
@@ -148,17 +144,10 @@ struct WsFrame(Movable, Writable):
         self.rsv1 = rsv1
         self.masked = masked
 
-    fn __moveinit__(out self, deinit take: WsFrame):
-        self.fin = take.fin
-        self.rsv1 = take.rsv1
-        self.opcode = take.opcode
-        self.masked = take.masked
-        self.payload = take.payload^
-
     # ── Factory helpers ───────────────────────────────────────────────────────
 
     @staticmethod
-    fn text(msg: String) -> WsFrame:
+    def text(msg: String) -> WsFrame:
         """Create a text (UTF-8) frame.
 
         Args:
@@ -172,7 +161,7 @@ struct WsFrame(Movable, Writable):
         )
 
     @staticmethod
-    fn binary(data: List[UInt8]) -> WsFrame:
+    def binary(data: List[UInt8]) -> WsFrame:
         """Create a binary frame.
 
         Args:
@@ -184,7 +173,7 @@ struct WsFrame(Movable, Writable):
         return WsFrame(opcode=WsOpcode.BINARY, payload=data)
 
     @staticmethod
-    fn ping(data: List[UInt8] = List[UInt8]()) -> WsFrame:
+    def ping(data: List[UInt8] = List[UInt8]()) -> WsFrame:
         """Create a PING control frame (max 125 bytes payload).
 
         Args:
@@ -196,7 +185,7 @@ struct WsFrame(Movable, Writable):
         return WsFrame(opcode=WsOpcode.PING, payload=data)
 
     @staticmethod
-    fn pong(data: List[UInt8] = List[UInt8]()) -> WsFrame:
+    def pong(data: List[UInt8] = List[UInt8]()) -> WsFrame:
         """Create a PONG control frame.
 
         Args:
@@ -208,7 +197,9 @@ struct WsFrame(Movable, Writable):
         return WsFrame(opcode=WsOpcode.PONG, payload=data)
 
     @staticmethod
-    fn close(code: UInt16 = WsCloseCode.NORMAL, reason: String = "") -> WsFrame:
+    def close(
+        code: UInt16 = WsCloseCode.NORMAL, reason: String = ""
+    ) -> WsFrame:
         """Create a CLOSE control frame.
 
         Args:
@@ -467,7 +458,7 @@ struct WsFrame(Movable, Writable):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    fn is_control(self) -> Bool:
+    def is_control(self) -> Bool:
         """Return True if this is a control frame (CLOSE, PING, or PONG).
 
         Control frames MUST NOT be fragmented (RFC 6455 §5.5).
@@ -477,7 +468,7 @@ struct WsFrame(Movable, Writable):
         """
         return (self.opcode & 0x8) != 0
 
-    fn text_payload(self) -> String:
+    def text_payload(self) -> String:
         """Decode the payload as a UTF-8 string.
 
         Returns:
@@ -488,7 +479,7 @@ struct WsFrame(Movable, Writable):
             s += chr(Int(b))
         return s^
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         writer.write(
             "WsFrame(opcode=",
             Int(self.opcode),
@@ -503,7 +494,7 @@ struct WsFrame(Movable, Writable):
 # ── SIMD masking helper ───────────────────────────────────────────────────────
 
 
-fn _append_masked(
+def _append_masked(
     mut out: List[UInt8],
     payload: List[UInt8],
     key: SIMD[DType.uint8, 4],

@@ -25,10 +25,10 @@ struct UrlParseError(Copyable, Movable, Writable):
 
     var message: String
 
-    fn __init__(out self, message: String):
+    def __init__(out self, message: String):
         self.message = message
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         writer.write("UrlParseError: ", self.message)
 
 
@@ -53,7 +53,7 @@ struct Url(Movable):
     var query: String
     var fragment: String
 
-    fn __init__(
+    def __init__(
         out self,
         scheme: String,
         host: String,
@@ -68,14 +68,6 @@ struct Url(Movable):
         self.path = path
         self.query = query
         self.fragment = fragment
-
-    fn __moveinit__(out self, deinit take: Url):
-        self.scheme = take.scheme^
-        self.host = take.host^
-        self.port = take.port
-        self.path = take.path^
-        self.query = take.query^
-        self.fragment = take.fragment^
 
     @staticmethod
     def parse(raw: String) raises -> Url:
@@ -204,7 +196,7 @@ struct Url(Movable):
 
         return Url(scheme^, host^, port, path^, query^, fragment^)
 
-    fn request_target(self) -> String:
+    def request_target(self) -> String:
         """Return the request-target for the HTTP request line.
 
         Returns:
@@ -214,7 +206,7 @@ struct Url(Movable):
             return self.path
         return self.path + "?" + self.query
 
-    fn is_tls(self) -> Bool:
+    def is_tls(self) -> Bool:
         """Return True if the scheme is ``https``.
 
         Returns:
@@ -224,7 +216,7 @@ struct Url(Movable):
 
 
 @always_inline
-fn _find(s: String, sub: String) -> Int:
+def _find(s: String, sub: String) -> Int:
     """Return the index of the first occurrence of ``sub`` in ``s``, or -1."""
     var n = len(s)
     var m = len(sub)
@@ -244,7 +236,7 @@ fn _find(s: String, sub: String) -> Int:
 
 
 @always_inline
-fn _rfind(s: String, sub: String) -> Int:
+def _rfind(s: String, sub: String) -> Int:
     """Return the index of the last occurrence of ``sub`` in ``s``, or -1."""
     var n = len(s)
     var m = len(sub)
@@ -264,7 +256,7 @@ fn _rfind(s: String, sub: String) -> Int:
 
 
 @always_inline
-fn _default_port(scheme: String) -> UInt16:
+def _default_port(scheme: String) -> UInt16:
     """Return the default port for ``scheme``."""
     if scheme == "https":
         return 443

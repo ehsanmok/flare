@@ -8,7 +8,7 @@ from std.format import Writable, Writer
 
 
 @always_inline
-fn _lower(s: String) -> String:
+def _lower(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
     var out = String(capacity=len(s))
     for i in range(len(s)):
@@ -26,11 +26,11 @@ struct HeaderInjectionError(Copyable, Movable, Writable):
     var field: String
     var value: String
 
-    fn __init__(out self, field: String, value: String):
+    def __init__(out self, field: String, value: String):
         self.field = field
         self.value = value
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         writer.write(
             "HeaderInjectionError: field='",
             self.field,
@@ -79,17 +79,12 @@ struct HeaderMap(Movable, Writable):
     ]  # lowercase mirror for O(n) case-insensitive lookup
     var _values: List[String]
 
-    fn __init__(out self):
+    def __init__(out self):
         self._keys = List[String]()
         self._lower_keys = List[String]()
         self._values = List[String]()
 
-    fn __moveinit__(out self, deinit take: HeaderMap):
-        self._keys = take._keys^
-        self._lower_keys = take._lower_keys^
-        self._values = take._values^
-
-    fn copy(self) -> HeaderMap:
+    def copy(self) -> HeaderMap:
         """Return a deep copy of this ``HeaderMap``.
 
         Returns:
@@ -140,7 +135,7 @@ struct HeaderMap(Movable, Writable):
         self._lower_keys.append(_lower(key))
         self._values.append(value)
 
-    fn get(self, key: String) -> String:
+    def get(self, key: String) -> String:
         """Return the first value for ``key``, or ``""`` if absent.
 
         Args:
@@ -155,7 +150,7 @@ struct HeaderMap(Movable, Writable):
                 return self._values[i]
         return ""
 
-    fn get_all(self, key: String) -> List[String]:
+    def get_all(self, key: String) -> List[String]:
         """Return all values for ``key`` in insertion order.
 
         Args:
@@ -171,7 +166,7 @@ struct HeaderMap(Movable, Writable):
                 out.append(self._values[i])
         return out^
 
-    fn contains(self, key: String) -> Bool:
+    def contains(self, key: String) -> Bool:
         """Return True if the header is present.
 
         Args:
@@ -186,7 +181,7 @@ struct HeaderMap(Movable, Writable):
                 return True
         return False
 
-    fn remove(mut self, key: String) -> Bool:
+    def remove(mut self, key: String) -> Bool:
         """Remove all entries with the given key.
 
         Args:
@@ -212,10 +207,10 @@ struct HeaderMap(Movable, Writable):
         self._values = new_values^
         return removed
 
-    fn len(self) -> Int:
+    def len(self) -> Int:
         """Return the total number of header entries (including duplicates)."""
         return len(self._keys)
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         for i in range(len(self._keys)):
             writer.write(self._keys[i], ": ", self._values[i], "\r\n")

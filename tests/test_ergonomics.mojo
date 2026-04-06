@@ -396,13 +396,9 @@ struct _FakeStream(Readable):
     var _data: List[UInt8]
     var _pos: Int
 
-    fn __init__(out self, data: List[UInt8]):
+    def __init__(out self, data: List[UInt8]):
         self._data = data.copy()
         self._pos = 0
-
-    fn __moveinit__(out self, deinit take: _FakeStream):
-        self._data = take._data^
-        self._pos = take._pos
 
     def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
         """Satisfy the ``Readable`` trait by copying data into ``buf``."""

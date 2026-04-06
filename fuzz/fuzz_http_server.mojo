@@ -79,7 +79,7 @@ def prop_body_limit(data: List[UInt8]) raises -> Bool:
 def main() raises:
     print("[mozz] fuzzing _parse_http_request_bytes()\n")
 
-    fn _b(s: StringLiteral) -> List[UInt8]:
+    def _b(s: StringLiteral) -> List[UInt8]:
         var b = s.as_bytes()
         var out = List[UInt8](capacity=len(b))
         for i in range(len(b)):

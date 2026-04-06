@@ -31,7 +31,7 @@ from flare.tcp import TcpStream, TcpListener
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-fn to_body(s: String) -> List[UInt8]:
+def to_body(s: String) -> List[UInt8]:
     """Convert a String to a body byte list (Response requires List[UInt8])."""
     var out = List[UInt8](capacity=len(s))
     for b in s.as_bytes():
@@ -39,7 +39,7 @@ fn to_body(s: String) -> List[UInt8]:
     return out^
 
 
-fn send_raw(s: StringLiteral) -> List[UInt8]:
+def send_raw(s: StringLiteral) -> List[UInt8]:
     """Convert a StringLiteral to bytes for writing to a TcpStream."""
     var out = List[UInt8](capacity=len(s))
     for b in s.as_bytes():

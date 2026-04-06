@@ -61,7 +61,7 @@ struct DatagramTooLarge(Copyable, Movable, Writable):
     var size: Int
     var max_size: Int
 
-    fn __init__(out self, size: Int, max_size: Int = UDP_MAX_PAYLOAD):
+    def __init__(out self, size: Int, max_size: Int = UDP_MAX_PAYLOAD):
         """Initialise a DatagramTooLarge error.
 
         Args:
@@ -71,7 +71,7 @@ struct DatagramTooLarge(Copyable, Movable, Writable):
         self.size = size
         self.max_size = max_size
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write the error description to ``writer``.
 
         Args:
@@ -119,7 +119,7 @@ struct UdpSocket(Movable):
     var _socket: RawSocket
     var _local: SocketAddr
 
-    fn __init__(out self, var socket: RawSocket, local: SocketAddr):
+    def __init__(out self, var socket: RawSocket, local: SocketAddr):
         """Wrap an existing ``RawSocket`` (internal use only).
 
         Args:
@@ -133,11 +133,7 @@ struct UdpSocket(Movable):
         self._socket = socket^
         self._local = local
 
-    fn __moveinit__(out self, deinit take: UdpSocket):
-        self._socket = take._socket^
-        self._local = take._local
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._socket.close()
 
     # ── Factory ───────────────────────────────────────────────────────────────
@@ -210,7 +206,7 @@ struct UdpSocket(Movable):
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    fn __enter__(var self) -> UdpSocket:
+    def __enter__(var self) -> UdpSocket:
         """Transfer ownership of ``self`` into the ``with`` block.
 
         Returns:
@@ -341,7 +337,7 @@ struct UdpSocket(Movable):
         """
         self._socket._set_bool_opt(SOL_SOCKET, SO_BROADCAST, enabled)
 
-    fn local_addr(self) -> SocketAddr:
+    def local_addr(self) -> SocketAddr:
         """Return the local address the socket is bound to.
 
         Returns:
@@ -349,6 +345,6 @@ struct UdpSocket(Movable):
         """
         return self._local
 
-    fn close(mut self):
+    def close(mut self):
         """Close the socket. Idempotent."""
         self._socket.close()

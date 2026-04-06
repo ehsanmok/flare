@@ -35,40 +35,40 @@ comptime _TLS_LIB: String = "build/libflare_tls.so"
 
 
 @always_inline
-fn _fork() -> c_int:
+def _fork() -> c_int:
     """Call ``fork(2)``."""
     return external_call["fork", c_int]()
 
 
 @always_inline
-fn _waitpid(pid: c_int):
+def _waitpid(pid: c_int):
     """Wait for child ``pid`` to exit (ignores status)."""
     # Pass 0 for the status pointer (WNOHANG=0 means wait indefinitely)
     _ = external_call["waitpid", c_int](pid, 0, c_int(0))
 
 
 @always_inline
-fn _exit_child():
+def _exit_child():
     """Call ``_exit(0)`` in the child — avoids Mojo atexit hooks."""
     _ = external_call["_exit", c_int](c_int(0))
 
 
 @always_inline
-fn _usleep(us: c_int):
+def _usleep(us: c_int):
     """Sleep for ``us`` microseconds."""
     _ = external_call["usleep", c_int](us)
 
 
 @always_inline
-fn _c_str(s: String) -> Int:
+def _c_str(s: String) -> Int:
     """Return a C char* (as Int) for string ``s``."""
     return Int(s.unsafe_ptr())
 
 
-fn _tls_err(lib: OwnedDLHandle) -> String:
+def _tls_err(lib: OwnedDLHandle) -> String:
     """Return the last error from ``flare_ssl_last_error``."""
     var fn_e = lib.get_function[
-        fn() -> UnsafePointer[UInt8, MutExternalOrigin]
+        def() -> UnsafePointer[UInt8, MutExternalOrigin]
     ]("flare_ssl_last_error")
     var p = fn_e()
     return String(StringSlice(unsafe_from_utf8_ptr=p))
@@ -87,7 +87,7 @@ struct _TlsTestServer:
     var _ptr: Int  # flare_test_server_t as Int (0 = null)
     var _lib: OwnedDLHandle
 
-    fn __init__(out self, cert: String, key: String, ca: String = "") raises:
+    def __init__(out self, cert: String, key: String, ca: String = "") raises:
         """Bind a loopback TLS echo server on an ephemeral port.
 
         Args:
@@ -96,7 +96,7 @@ struct _TlsTestServer:
             ca:   Path to CA bundle for client cert verification, or ``""``.
         """
         self._lib = OwnedDLHandle(_TLS_LIB)
-        var fn_new = self._lib.get_function[fn(Int, Int, Int, c_int) -> Int](
+        var fn_new = self._lib.get_function[def(Int, Int, Int, c_int) -> Int](
             "flare_test_server_new"
         )
         var ca_int = _c_str(ca) if ca != "" else 0
@@ -109,13 +109,9 @@ struct _TlsTestServer:
         if self._ptr == 0:
             raise Error("flare_test_server_new failed: " + _tls_err(self._lib))
 
-    fn __moveinit__(out self, deinit take: _TlsTestServer):
-        self._ptr = take._ptr
-        self._lib = take._lib^
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         if self._ptr != 0:
-            var fn_free = self._lib.get_function[fn(Int) -> None](
+            var fn_free = self._lib.get_function[def(Int) -> None](
                 "flare_test_server_free"
             )
             fn_free(self._ptr)
@@ -126,7 +122,7 @@ struct _TlsTestServer:
         Returns:
             Port number the server is listening on.
         """
-        var fn_port = self._lib.get_function[fn(Int) -> c_int](
+        var fn_port = self._lib.get_function[def(Int) -> c_int](
             "flare_test_server_port"
         )
         return Int(fn_port(self._ptr))
@@ -137,13 +133,13 @@ struct _TlsTestServer:
         Blocks until a client connects, performs TLS handshake, echoes data,
         then returns. Intended to be the only operation in a forked child.
         """
-        var fn_echo = self._lib.get_function[fn(Int) -> c_int](
+        var fn_echo = self._lib.get_function[def(Int) -> c_int](
             "flare_test_server_echo_once"
         )
         _ = fn_echo(self._ptr)
 
 
-fn _spawn_echo_server(server: _TlsTestServer) -> c_int:
+def _spawn_echo_server(server: _TlsTestServer) -> c_int:
     """Fork a child that runs server.echo_once() then _exit(0).
 
     Args:

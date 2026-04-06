@@ -19,7 +19,7 @@ Run:
 
 from mozz import fuzz, FuzzConfig
 
-# _parse_http_response is a module-level fn — import the whole module and
+# _parse_http_response is a module-level def — import the whole module and
 # call it through the public function alias exposed in the test helpers.
 # Since it's not re-exported from __init__, we test it via a thin adapter.
 from flare.http.client import _parse_http_response
@@ -41,7 +41,7 @@ def target(data: List[UInt8]) raises:
 def main() raises:
     print("[mozz] fuzzing _parse_http_response()...")
 
-    fn _b(s: StringLiteral) -> List[UInt8]:
+    def _b(s: StringLiteral) -> List[UInt8]:
         var b = s.as_bytes()
         var out = List[UInt8](capacity=len(b))
         for i in range(len(b)):

@@ -59,7 +59,7 @@ struct TcpListener(Movable):
     var _socket: RawSocket
     var _local: SocketAddr
 
-    fn __init__(out self, var socket: RawSocket, local: SocketAddr):
+    def __init__(out self, var socket: RawSocket, local: SocketAddr):
         """Wrap an already-bound, listening ``RawSocket``.
 
         Args:
@@ -73,11 +73,7 @@ struct TcpListener(Movable):
         self._socket = socket^
         self._local = local
 
-    fn __moveinit__(out self, deinit take: TcpListener):
-        self._socket = take._socket^
-        self._local = take._local
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._socket.close()
 
     # ── Factory ───────────────────────────────────────────────────────────────
@@ -204,7 +200,7 @@ struct TcpListener(Movable):
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
-    fn local_addr(self) -> SocketAddr:
+    def local_addr(self) -> SocketAddr:
         """Return the local address the listener is bound to.
 
         Returns:
@@ -212,6 +208,6 @@ struct TcpListener(Movable):
         """
         return self._local
 
-    fn close(mut self):
+    def close(mut self):
         """Close the listening socket. Idempotent."""
         self._socket.close()

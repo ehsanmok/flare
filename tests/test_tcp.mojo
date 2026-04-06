@@ -29,7 +29,7 @@ def bytes_of(s: String) raises -> List[UInt8]:
     return out^
 
 
-fn zero_buf(n: Int) -> List[UInt8]:
+def zero_buf(n: Int) -> List[UInt8]:
     """Return an n-byte zero-initialised buffer."""
     var b = List[UInt8]()
     b.resize(n, 0)

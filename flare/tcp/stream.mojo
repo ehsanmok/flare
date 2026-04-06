@@ -102,7 +102,7 @@ struct TcpStream(Movable):
     var _socket: RawSocket
     var _peer: SocketAddr
 
-    fn __init__(out self, var socket: RawSocket, peer: SocketAddr):
+    def __init__(out self, var socket: RawSocket, peer: SocketAddr):
         """Wrap an already-connected ``RawSocket``.
 
         Args:
@@ -116,11 +116,7 @@ struct TcpStream(Movable):
         self._socket = socket^
         self._peer = peer
 
-    fn __moveinit__(out self, deinit take: TcpStream):
-        self._socket = take._socket^
-        self._peer = take._peer
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._socket.close()
 
     # ── Factory ───────────────────────────────────────────────────────────────
@@ -206,7 +202,7 @@ struct TcpStream(Movable):
             # macOS/arm64: use C helper to avoid Mojo variadic fcntl ABI bug.
             var lib = OwnedDLHandle(_find_flare_lib())
             var fn_ct = lib.get_function[
-                fn(c_int, Int, c_uint, c_int) -> c_int
+                def(c_int, Int, c_uint, c_int) -> c_int
             ]("flare_connect_timeout")
             var rc = fn_ct(sock.fd, Int(sa[0]), sa[1], c_int(timeout_ms))
             sa[0].free()
@@ -380,7 +376,7 @@ struct TcpStream(Movable):
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    fn __enter__(var self) -> TcpStream:
+    def __enter__(var self) -> TcpStream:
         """Transfer ownership of ``self`` into the ``with`` block.
 
         Returns:
@@ -537,7 +533,7 @@ struct TcpStream(Movable):
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
-    fn peer_addr(self) -> SocketAddr:
+    def peer_addr(self) -> SocketAddr:
         """Return the remote socket address.
 
         Returns:
@@ -590,7 +586,7 @@ struct TcpStream(Movable):
                 _strerror(e.value) + " (shutdown_write)", Int(e.value)
             )
 
-    fn close(mut self):
+    def close(mut self):
         """Close the connection explicitly. Idempotent."""
         self._socket.close()
 

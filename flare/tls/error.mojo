@@ -16,7 +16,7 @@ struct TlsHandshakeError(Copyable, Movable, Writable):
 
     var message: String
 
-    fn __init__(out self, message: String):
+    def __init__(out self, message: String):
         """Create a TlsHandshakeError.
 
         Args:
@@ -24,7 +24,7 @@ struct TlsHandshakeError(Copyable, Movable, Writable):
         """
         self.message = message
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write ``"TlsHandshakeError: <message>"`` to ``writer``.
 
         Args:
@@ -42,7 +42,7 @@ struct CertificateExpired(Copyable, Movable, Writable):
 
     var subject: String
 
-    fn __init__(out self, subject: String = ""):
+    def __init__(out self, subject: String = ""):
         """Create a CertificateExpired error.
 
         Args:
@@ -50,7 +50,7 @@ struct CertificateExpired(Copyable, Movable, Writable):
         """
         self.subject = subject
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write the error to ``writer``.
 
         Args:
@@ -70,7 +70,7 @@ struct CertificateHostnameMismatch(Copyable, Movable, Writable):
     var expected: String
     var subject: String
 
-    fn __init__(out self, expected: String, subject: String = ""):
+    def __init__(out self, expected: String, subject: String = ""):
         """Create a CertificateHostnameMismatch error.
 
         Args:
@@ -80,7 +80,7 @@ struct CertificateHostnameMismatch(Copyable, Movable, Writable):
         self.expected = expected
         self.subject = subject
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write the error to ``writer``.
 
         Args:
@@ -105,7 +105,7 @@ struct CertificateUntrusted(Copyable, Movable, Writable):
 
     var reason: String
 
-    fn __init__(out self, reason: String = ""):
+    def __init__(out self, reason: String = ""):
         """Create a CertificateUntrusted error.
 
         Args:
@@ -113,7 +113,7 @@ struct CertificateUntrusted(Copyable, Movable, Writable):
         """
         self.reason = reason
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write the error to ``writer``.
 
         Args:

@@ -34,7 +34,7 @@ struct HttpServer(Movable):
     var _max_header_size: Int
     var _max_body_size: Int
 
-    fn __init__(
+    def __init__(
         out self,
         var listener: TcpListener,
         max_header_size: Int = 8_192,
@@ -44,12 +44,7 @@ struct HttpServer(Movable):
         self._max_header_size = max_header_size
         self._max_body_size = max_body_size
 
-    fn __moveinit__(out self, deinit take: HttpServer):
-        self._listener = take._listener^
-        self._max_header_size = take._max_header_size
-        self._max_body_size = take._max_body_size
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._listener.close()
 
     @staticmethod
@@ -69,7 +64,7 @@ struct HttpServer(Movable):
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^)
 
-    def serve(self, handler: fn(Request) raises -> Response) raises:
+    def serve(self, handler: def(Request) raises -> Response) raises:
         """Accept connections in a loop, calling ``handler`` for each request.
 
         Blocks indefinitely. Call ``close()`` from another thread (or
@@ -91,7 +86,7 @@ struct HttpServer(Movable):
                 stream^, handler, self._max_header_size, self._max_body_size
             )
 
-    fn local_addr(self) -> SocketAddr:
+    def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to.
 
         Returns:
@@ -99,7 +94,7 @@ struct HttpServer(Movable):
         """
         return self._listener.local_addr()
 
-    fn close(mut self):
+    def close(mut self):
         """Stop accepting new connections. Idempotent."""
         self._listener.close()
 
@@ -109,7 +104,7 @@ struct HttpServer(Movable):
 
 def _handle_connection(
     var stream: TcpStream,
-    handler: fn(Request) raises -> Response,
+    handler: def(Request) raises -> Response,
     max_header_size: Int,
     max_body_size: Int,
 ):
@@ -190,7 +185,7 @@ def _read_tcp_line(mut stream: TcpStream) raises -> String:
         line += chr(Int(c))
 
 
-fn _parse_int_str(s: String) -> Int:
+def _parse_int_str(s: String) -> Int:
     """Parse a non-negative decimal integer string; returns 0 on failure."""
     var result = 0
     var trimmed = s.strip()
@@ -202,7 +197,7 @@ fn _parse_int_str(s: String) -> Int:
     return result
 
 
-fn _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:
+def _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:
     """Read one CRLF/LF-terminated line from a byte span, advancing ``pos``.
 
     Args:
@@ -433,7 +428,7 @@ def _parse_http_request(
 # ── Response writing ──────────────────────────────────────────────────────────
 
 
-fn _status_reason(code: Int) -> String:
+def _status_reason(code: Int) -> String:
     """Return the canonical reason phrase for a known HTTP status code.
 
     Args:

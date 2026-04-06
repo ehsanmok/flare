@@ -12,13 +12,13 @@ from flare.net import SocketAddr
 # ── Test helpers ──────────────────────────────────────────────────────────────
 
 
-fn zero_buf(n: Int) -> List[UInt8]:
+def zero_buf(n: Int) -> List[UInt8]:
     var b = List[UInt8]()
     b.resize(n, 0)
     return b^
 
 
-fn str_bytes(s: String) -> List[UInt8]:
+def str_bytes(s: String) -> List[UInt8]:
     var out = List[UInt8]()
     for i in range(len(s)):
         out.append(s.as_bytes()[i])

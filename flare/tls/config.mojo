@@ -12,7 +12,7 @@ OpenSSL's compiled-in system default (``SSL_CTX_set_default_verify_paths``).
 from std.os import getenv
 
 
-fn _default_ca_bundle() -> String:
+def _default_ca_bundle() -> String:
     """Return the pixi-managed CA bundle path, or empty for OS default.
 
     Returns:
@@ -73,7 +73,7 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
     var key_file: String
     var server_name: String
 
-    fn __init__(
+    def __init__(
         out self,
         verify: Int = TlsVerify.REQUIRED,
         ca_bundle: String = "",
@@ -89,7 +89,7 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
         self.server_name = server_name
 
     @staticmethod
-    fn insecure() -> TlsConfig:
+    def insecure() -> TlsConfig:
         """Return a config that skips certificate verification entirely.
 
         Warning:

@@ -24,7 +24,7 @@ from flare.net import IpAddr
 from flare.dns import resolve
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 03: Error Handling ===")
     print()
 
@@ -77,7 +77,7 @@ fn main() raises:
     print()
 
     # Pattern: catch the most specific error first
-    fn try_connect(host: String) raises -> String:
+    def try_connect(host: String) raises -> String:
         """Simulate a connection attempt that validates the address first."""
 
         # This will raise AddressParseError for invalid IPs

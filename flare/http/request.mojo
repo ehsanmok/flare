@@ -44,7 +44,7 @@ struct Request(Movable):
     var body: List[UInt8]
     var version: String
 
-    fn __init__(
+    def __init__(
         out self,
         method: String,
         url: String,
@@ -64,10 +64,3 @@ struct Request(Movable):
         self.headers = HeaderMap()
         self.body = body.copy()
         self.version = version
-
-    fn __moveinit__(out self, deinit take: Request):
-        self.method = take.method^
-        self.url = take.url^
-        self.headers = take.headers^
-        self.body = take.body^
-        self.version = take.version^

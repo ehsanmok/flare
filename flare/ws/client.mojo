@@ -41,19 +41,21 @@ struct WsHandshakeError(Copyable, Movable, Writable):
 
     var message: String
 
-    fn __init__(out self, message: String):
+    def __init__(out self, message: String):
         self.message = message
 
-    fn write_to[W: Writer, //](self, mut writer: W):
+    def write_to[W: Writer, //](self, mut writer: W):
         writer.write("WsHandshakeError: ", self.message)
 
 
 # ── Base64 encoder ────────────────────────────────────────────────────────────
 
-comptime _B64_TABLE: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+comptime _B64_TABLE: String = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
 
 
-fn _base64_encode(data: Span[UInt8, _]) -> String:
+def _base64_encode(data: Span[UInt8, _]) -> String:
     """Encode ``data`` to standard RFC 4648 base64.
 
     Args:
@@ -110,7 +112,7 @@ def _sha1(data: String) raises -> List[UInt8]:
     """
     var lib = OwnedDLHandle(_find_flare_lib())
     # SHA1(const unsigned char *d, size_t n, unsigned char *md) -> unsigned char*
-    var fn_sha1 = lib.get_function[fn(Int, Int, Int) -> Int]("SHA1")
+    var fn_sha1 = lib.get_function[def(Int, Int, Int) -> Int]("SHA1")
     var digest_buf = List[UInt8](capacity=_SHA1_LEN)
     digest_buf.resize(_SHA1_LEN, 0)
     var data_bytes = data.as_bytes()
@@ -125,7 +127,7 @@ def _sha1(data: String) raises -> List[UInt8]:
 # ── HTTP upgrade helpers ──────────────────────────────────────────────────────
 
 
-fn _generate_ws_key() -> String:
+def _generate_ws_key() -> String:
     """Generate a random 16-byte nonce encoded as base64.
 
     Uses a deterministic seed in v0.1.0 (proper CSPRNG in v0.2.0).
@@ -238,7 +240,7 @@ def _read_line_tcp(
     return line^
 
 
-fn _str_find_local(s: String, sub: String) -> Int:
+def _str_find_local(s: String, sub: String) -> Int:
     """Return the index of the first ``sub`` in ``s``, or -1."""
     var n = len(s)
     var m = len(sub)
@@ -255,7 +257,7 @@ fn _str_find_local(s: String, sub: String) -> Int:
     return -1
 
 
-fn _lower_local(s: String) -> String:
+def _lower_local(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
     var out = String(capacity=len(s))
     for i in range(len(s)):
@@ -278,20 +280,15 @@ struct _WsStream(Movable):
     var _tls: TlsStream
     var _tcp: TcpStream
 
-    fn __init__(out self, var tls: TlsStream):
+    def __init__(out self, var tls: TlsStream):
         self._is_tls = True
         self._tls = tls^
         self._tcp = _dummy_tcp_stream()
 
-    fn __init__(out self, var tcp: TcpStream):
+    def __init__(out self, var tcp: TcpStream):
         self._is_tls = False
         self._tls = _dummy_tls_stream()
         self._tcp = tcp^
-
-    fn __moveinit__(out self, deinit take: _WsStream):
-        self._is_tls = take._is_tls
-        self._tls = take._tls^
-        self._tcp = take._tcp^
 
     def write_all(self, data: Span[UInt8, _]) raises:
         """Write all bytes to the underlying stream.
@@ -325,7 +322,7 @@ struct _WsStream(Movable):
         else:
             return self._tcp.read(buf, size)
 
-    fn close(mut self):
+    def close(mut self):
         """Close the underlying stream."""
         if self._is_tls:
             self._tls.close()
@@ -333,7 +330,7 @@ struct _WsStream(Movable):
             self._tcp.close()
 
 
-fn _dummy_tcp_stream() -> TcpStream:
+def _dummy_tcp_stream() -> TcpStream:
     """Return a TCP stream with a sentinel fd (INVALID_FD = -1).
 
     ``RawSocket.close()`` checks ``fd >= 0`` so this never calls ``close(2)``.
@@ -345,7 +342,7 @@ fn _dummy_tcp_stream() -> TcpStream:
     return TcpStream(sock^, SocketAddr(IpAddr.localhost(), 0))
 
 
-fn _dummy_tls_stream() -> TlsStream:
+def _dummy_tls_stream() -> TlsStream:
     """Return a sentinel TLS stream (for use in the inactive branch).
 
     With ``_ssl=0``, ``TlsStream.__del__`` is a no-op.
@@ -378,7 +375,7 @@ struct WsMessage(Movable):
     var _text: String
     var _binary: List[UInt8]
 
-    fn __init__(out self, text: String):
+    def __init__(out self, text: String):
         """Initialise a text ``WsMessage``.
 
         Args:
@@ -388,7 +385,7 @@ struct WsMessage(Movable):
         self._text = text
         self._binary = List[UInt8]()
 
-    fn __init__(out self, binary: List[UInt8]):
+    def __init__(out self, binary: List[UInt8]):
         """Initialise a binary ``WsMessage``.
 
         Args:
@@ -398,12 +395,7 @@ struct WsMessage(Movable):
         self._text = ""
         self._binary = binary.copy()
 
-    fn __moveinit__(out self, deinit take: WsMessage):
-        self.is_text = take.is_text
-        self._text = take._text^
-        self._binary = take._binary^
-
-    fn as_text(self) -> String:
+    def as_text(self) -> String:
         """Return the message payload as a UTF-8 string.
 
         Returns:
@@ -412,7 +404,7 @@ struct WsMessage(Movable):
         """
         return self._text
 
-    fn as_binary(self) -> List[UInt8]:
+    def as_binary(self) -> List[UInt8]:
         """Return the message payload as raw bytes.
 
         Returns:
@@ -448,15 +440,11 @@ struct WsClient(Movable):
     var _stream: _WsStream
     var _key: String
 
-    fn __init__(out self, var stream: _WsStream, key: String):
+    def __init__(out self, var stream: _WsStream, key: String):
         self._stream = stream^
         self._key = key
 
-    fn __moveinit__(out self, deinit take: WsClient):
-        self._stream = take._stream^
-        self._key = take._key^
-
-    fn __del__(deinit self):
+    def __del__(deinit self):
         self._stream.close()
 
     # ── Factory ───────────────────────────────────────────────────────────────
@@ -760,7 +748,7 @@ struct WsClient(Movable):
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    fn __enter__(var self) -> WsClient:
+    def __enter__(var self) -> WsClient:
         """Transfer ownership of ``self`` into the ``with`` block.
 
         Returns:
@@ -770,7 +758,7 @@ struct WsClient(Movable):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    fn close(mut self):
+    def close(mut self):
         """Send a CLOSE frame and close the underlying transport.
 
         Idempotent — safe to call multiple times.

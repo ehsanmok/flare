@@ -36,7 +36,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     var _addr: String
     var _is_v6: Bool
 
-    fn __init__(out self, addr: String, is_v6: Bool):
+    def __init__(out self, addr: String, is_v6: Bool):
         """Construct an ``IpAddr`` directly from a pre-validated string.
 
         Prefer ``IpAddr.parse`` for user-supplied strings.
@@ -135,7 +135,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         raise AddressParseError(s)
 
     @staticmethod
-    fn localhost() -> IpAddr:
+    def localhost() -> IpAddr:
         """Return the IPv4 loopback address ``127.0.0.1``.
 
         Returns:
@@ -144,7 +144,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         return IpAddr("127.0.0.1", False)
 
     @staticmethod
-    fn localhost_v6() -> IpAddr:
+    def localhost_v6() -> IpAddr:
         """Return the IPv6 loopback address ``::1``.
 
         Returns:
@@ -153,7 +153,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         return IpAddr("::1", True)
 
     @staticmethod
-    fn unspecified() -> IpAddr:
+    def unspecified() -> IpAddr:
         """Return the IPv4 wildcard address ``0.0.0.0`` (all interfaces).
 
         Returns:
@@ -162,7 +162,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         return IpAddr("0.0.0.0", False)
 
     @staticmethod
-    fn unspecified_v6() -> IpAddr:
+    def unspecified_v6() -> IpAddr:
         """Return the IPv6 wildcard address ``::`` (all interfaces).
 
         Returns:
@@ -172,15 +172,15 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 
     # ── Predicates ───────────────────────────────────────────────────────────
 
-    fn is_v4(self) -> Bool:
+    def is_v4(self) -> Bool:
         """Return ``True`` if this is an IPv4 address."""
         return not self._is_v6
 
-    fn is_v6(self) -> Bool:
+    def is_v6(self) -> Bool:
         """Return ``True`` if this is an IPv6 address."""
         return self._is_v6
 
-    fn is_loopback(self) -> Bool:
+    def is_loopback(self) -> Bool:
         """Return ``True`` if this is a loopback address.
 
         IPv4 loopback range is ``127.0.0.0/8``; IPv6 loopback is ``::1``.
@@ -189,7 +189,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
             return self._addr == "::1"
         return self._addr.startswith("127.")
 
-    fn is_unspecified(self) -> Bool:
+    def is_unspecified(self) -> Bool:
         """Return ``True`` if this is the wildcard/unspecified address.
 
         IPv4: ``"0.0.0.0"``; IPv6: ``"::"``.
@@ -198,7 +198,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
             return self._addr == "::"
         return self._addr == "0.0.0.0"
 
-    fn is_private(self) -> Bool:
+    def is_private(self) -> Bool:
         """Return ``True`` if this is an RFC 1918 private address.
 
         Covers ``10.0.0.0/8``, ``172.16.0.0/12``, and ``192.168.0.0/16``.
@@ -212,7 +212,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
             return _is_172_private(self._addr)
         return False
 
-    fn is_multicast(self) -> Bool:
+    def is_multicast(self) -> Bool:
         """Return ``True`` if this is a multicast address.
 
         IPv4 multicast: ``224.0.0.0/4`` (first octet 224–239).
@@ -232,7 +232,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 
     # ── Equality ──────────────────────────────────────────────────────────────
 
-    fn __eq__(self, other: IpAddr) -> Bool:
+    def __eq__(self, other: IpAddr) -> Bool:
         """Return ``True`` if both addresses have the same family and string.
 
         Args:
@@ -240,7 +240,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         """
         return self._is_v6 == other._is_v6 and self._addr == other._addr
 
-    fn __ne__(self, other: IpAddr) -> Bool:
+    def __ne__(self, other: IpAddr) -> Bool:
         """Return ``True`` if the addresses differ.
 
         Args:
@@ -250,7 +250,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 
     # ── Display ───────────────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write the canonical address string to ``writer``.
 
         Args:
@@ -262,7 +262,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 # ── Module-private helpers ────────────────────────────────────────────────────
 
 
-fn _is_172_private(addr: String) -> Bool:
+def _is_172_private(addr: String) -> Bool:
     """Return ``True`` for ``172.16.x.x`` – ``172.31.x.x``.
 
     Args:
@@ -280,7 +280,7 @@ fn _is_172_private(addr: String) -> Bool:
     return octet >= 16 and octet <= 31
 
 
-fn _find_char(s: String, ch: UInt8) -> Int:
+def _find_char(s: String, ch: UInt8) -> Int:
     """Return the index of the first occurrence of byte ``ch`` in ``s``, or -1.
 
     Args:
@@ -294,7 +294,7 @@ fn _find_char(s: String, ch: UInt8) -> Int:
     return -1
 
 
-fn _find_char_from(s: String, ch: UInt8, start: Int) -> Int:
+def _find_char_from(s: String, ch: UInt8, start: Int) -> Int:
     """Return the index of the first ``ch`` byte at or after ``start``, or -1.
 
     Args:
@@ -332,7 +332,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     var ip: IpAddr
     var port: UInt16
 
-    fn __init__(out self, ip: IpAddr, port: UInt16):
+    def __init__(out self, ip: IpAddr, port: UInt16):
         """Initialise a ``SocketAddr``.
 
         Args:
@@ -343,7 +343,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         self.port = port
 
     @staticmethod
-    fn localhost(port: UInt16) -> SocketAddr:
+    def localhost(port: UInt16) -> SocketAddr:
         """Return ``SocketAddr("127.0.0.1", port)``.
 
         Args:
@@ -355,7 +355,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         return SocketAddr(IpAddr.localhost(), port)
 
     @staticmethod
-    fn unspecified(port: UInt16) -> SocketAddr:
+    def unspecified(port: UInt16) -> SocketAddr:
         """Return ``SocketAddr("0.0.0.0", port)`` — bind on all interfaces.
 
         Args:
@@ -425,7 +425,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 
     # ── Equality ──────────────────────────────────────────────────────────────
 
-    fn __eq__(self, other: SocketAddr) -> Bool:
+    def __eq__(self, other: SocketAddr) -> Bool:
         """Return ``True`` if IP and port both match.
 
         Args:
@@ -433,7 +433,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         """
         return self.ip == other.ip and self.port == other.port
 
-    fn __ne__(self, other: SocketAddr) -> Bool:
+    def __ne__(self, other: SocketAddr) -> Bool:
         """Return ``True`` if IP or port differ.
 
         Args:
@@ -443,7 +443,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 
     # ── Display ───────────────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write ``"ip:port"`` or ``"[ip]:port"`` to ``writer``.
 
         Args:

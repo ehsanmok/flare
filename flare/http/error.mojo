@@ -38,7 +38,7 @@ struct HttpError(Copyable, Movable, Writable):
     var reason: String
     var url: String
 
-    fn __init__(out self, status: Int, reason: String = "", url: String = ""):
+    def __init__(out self, status: Int, reason: String = "", url: String = ""):
         """Initialise an ``HttpError``.
 
         Args:
@@ -50,17 +50,7 @@ struct HttpError(Copyable, Movable, Writable):
         self.reason = reason
         self.url = url
 
-    fn __copyinit__(out self, copy: HttpError):
-        self.status = copy.status
-        self.reason = copy.reason
-        self.url = copy.url
-
-    fn __moveinit__(out self, deinit take: HttpError):
-        self.status = take.status
-        self.reason = take.reason^
-        self.url = take.url^
-
-    fn write_to[W: Writer, //](self, mut writer: W):
+    def write_to[W: Writer, //](self, mut writer: W):
         """Write the error description to ``writer``.
 
         Args:
@@ -89,7 +79,7 @@ struct TooManyRedirects(Copyable, Movable, Writable):
     var url: String
     var count: Int
 
-    fn __init__(out self, url: String, count: Int):
+    def __init__(out self, url: String, count: Int):
         """Initialise a ``TooManyRedirects`` error.
 
         Args:
@@ -99,15 +89,7 @@ struct TooManyRedirects(Copyable, Movable, Writable):
         self.url = url
         self.count = count
 
-    fn __copyinit__(out self, copy: TooManyRedirects):
-        self.url = copy.url
-        self.count = copy.count
-
-    fn __moveinit__(out self, deinit take: TooManyRedirects):
-        self.url = take.url^
-        self.count = take.count
-
-    fn write_to[W: Writer, //](self, mut writer: W):
+    def write_to[W: Writer, //](self, mut writer: W):
         """Write the error description to ``writer``.
 
         Args:

@@ -42,7 +42,7 @@ comptime SIMD_WIDTH: Int = 32
 # ── Payload allocation helper ─────────────────────────────────────────────────
 
 
-fn _alloc_payload(n: Int) -> List[UInt8]:
+def _alloc_payload(n: Int) -> List[UInt8]:
     """Allocate n bytes filled with a deterministic pattern.
 
     Args:
@@ -57,7 +57,7 @@ fn _alloc_payload(n: Int) -> List[UInt8]:
     return buf^
 
 
-fn _alloc_zeroed(n: Int) -> List[UInt8]:
+def _alloc_zeroed(n: Int) -> List[UInt8]:
     """Allocate n zero-bytes as output buffer.
 
     Args:
@@ -88,7 +88,7 @@ def _bench_scalar_32(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         for i in range(32):
             (dst + i).store(src[i] ^ key[i & 3])
         keep(dst[0])
@@ -112,7 +112,7 @@ def _bench_simd_32(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         var chunk = src.load[width=SIMD_WIDTH]()
         dst.store[width=SIMD_WIDTH](chunk ^ tiled)
         keep(dst[0])
@@ -130,7 +130,7 @@ def _bench_scalar_128(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         for i in range(128):
             (dst + i).store(src[i] ^ key[i & 3])
         keep(dst[0])
@@ -152,7 +152,7 @@ def _bench_simd_128(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 128:
             var chunk = (src + i).load[width=SIMD_WIDTH]()
@@ -173,7 +173,7 @@ def _bench_scalar_1k(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         for i in range(1024):
             (dst + i).store(src[i] ^ key[i & 3])
         keep(dst[0])
@@ -195,7 +195,7 @@ def _bench_simd_1k(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 1024:
             var chunk = (src + i).load[width=SIMD_WIDTH]()
@@ -216,7 +216,7 @@ def _bench_scalar_64k(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         for i in range(65536):
             (dst + i).store(src[i] ^ key[i & 3])
         keep(dst[0])
@@ -238,7 +238,7 @@ def _bench_simd_64k(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 65536:
             var chunk = (src + i).load[width=SIMD_WIDTH]()
@@ -259,7 +259,7 @@ def _bench_scalar_1m(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         for i in range(1048576):
             (dst + i).store(src[i] ^ key[i & 3])
         keep(dst[0])
@@ -281,7 +281,7 @@ def _bench_simd_1m(mut b: Bencher) capturing:
 
     @parameter
     @always_inline
-    fn call_fn():
+    def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 1048576:
             var chunk = (src + i).load[width=SIMD_WIDTH]()

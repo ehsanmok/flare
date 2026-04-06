@@ -96,7 +96,7 @@ struct BufReader[S: Readable](Movable):
     var _pos: Int
     var _len: Int
 
-    fn __init__(
+    def __init__(
         out self, var stream: Self.S, capacity: Int = _BUF_READER_DEFAULT_SIZE
     ):
         """Wrap ``stream`` with a read buffer of ``capacity`` bytes.
@@ -111,12 +111,6 @@ struct BufReader[S: Readable](Movable):
         self._buf.resize(cap, 0)
         self._pos = 0
         self._len = 0
-
-    fn __moveinit__(out self, deinit take: BufReader[Self.S]):
-        self._stream = take._stream^
-        self._buf = take._buf^
-        self._pos = take._pos
-        self._len = take._len
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

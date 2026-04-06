@@ -30,7 +30,7 @@ struct NetworkError(Copyable, Movable, Writable):
     var message: String
     var code: Int
 
-    fn __init__(out self, message: String, code: Int = 0):
+    def __init__(out self, message: String, code: Int = 0):
         """Initialise a NetworkError.
 
         Args:
@@ -40,7 +40,7 @@ struct NetworkError(Copyable, Movable, Writable):
         self.message = message
         self.code = code
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write a one-line description to ``writer``.
 
         Args:
@@ -68,11 +68,11 @@ struct ConnectionRefused(Copyable, Movable, Writable):
     var addr: String
     var code: Int
 
-    fn __init__(out self, addr: String, code: Int = 0):
+    def __init__(out self, addr: String, code: Int = 0):
         self.addr = addr
         self.code = code
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write ``"ConnectionRefused: addr"`` to ``writer``.
 
         Args:
@@ -97,11 +97,11 @@ struct ConnectionTimeout(Copyable, Movable, Writable):
     var addr: String
     var code: Int
 
-    fn __init__(out self, addr: String, code: Int = 0):
+    def __init__(out self, addr: String, code: Int = 0):
         self.addr = addr
         self.code = code
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write ``"ConnectionTimeout: addr"`` to ``writer``.
 
         Args:
@@ -121,11 +121,11 @@ struct ConnectionReset(Copyable, Movable, Writable):
     var addr: String
     var code: Int
 
-    fn __init__(out self, addr: String, code: Int = 0):
+    def __init__(out self, addr: String, code: Int = 0):
         self.addr = addr
         self.code = code
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write a description to ``writer``.
 
         Args:
@@ -150,11 +150,11 @@ struct AddressInUse(Copyable, Movable, Writable):
     var addr: String
     var code: Int
 
-    fn __init__(out self, addr: String, code: Int = 0):
+    def __init__(out self, addr: String, code: Int = 0):
         self.addr = addr
         self.code = code
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write a description to ``writer``.
 
         Args:
@@ -177,10 +177,10 @@ struct AddressParseError(Copyable, Movable, Writable):
 
     var input: String
 
-    fn __init__(out self, input: String):
+    def __init__(out self, input: String):
         self.input = input
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write a description to ``writer``.
 
         Args:
@@ -200,11 +200,11 @@ struct BrokenPipe(Copyable, Movable, Writable):
     var addr: String
     var code: Int
 
-    fn __init__(out self, addr: String = "", code: Int = 0):
+    def __init__(out self, addr: String = "", code: Int = 0):
         self.addr = addr
         self.code = code
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write a description to ``writer``.
 
         Args:
@@ -231,7 +231,7 @@ struct Timeout(Copyable, Movable, Writable):
     var op: String
     var ms: Int
 
-    fn __init__(out self, op: String, ms: Int = 0):
+    def __init__(out self, op: String, ms: Int = 0):
         """Initialise a Timeout error.
 
         Args:
@@ -241,7 +241,7 @@ struct Timeout(Copyable, Movable, Writable):
         self.op = op
         self.ms = ms
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write ``"Timeout: op"`` to ``writer``.
 
         Args:
@@ -270,12 +270,12 @@ struct DnsError(Copyable, Movable, Writable):
     var code: Int
     var reason: String
 
-    fn __init__(out self, host: String, code: Int = 0, reason: String = ""):
+    def __init__(out self, host: String, code: Int = 0, reason: String = ""):
         self.host = host
         self.code = code
         self.reason = reason
 
-    fn write_to[W: Writer](self, mut writer: W):
+    def write_to[W: Writer](self, mut writer: W):
         """Write ``"DnsError(host): reason"`` to ``writer``.
 
         Args:

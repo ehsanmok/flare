@@ -27,10 +27,12 @@ from mozz import forall_bytes
 from flare.http.auth import BasicAuth, BearerAuth, _b64_encode
 from flare.http.headers import HeaderMap
 
-comptime _B64_CHARS: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+comptime _B64_CHARS: String = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+)
 
 
-fn _is_b64_char(c: UInt8) -> Bool:
+def _is_b64_char(c: UInt8) -> Bool:
     """Return True if ``c`` is in the RFC 4648 base64 alphabet."""
     var ic = Int(c)
     return (
@@ -61,7 +63,7 @@ def b64_length(data: List[UInt8]) -> Bool:
     return len(encoded) == expected
 
 
-fn _bytes_to_ascii(data: List[UInt8], start: Int, end: Int) -> String:
+def _bytes_to_ascii(data: List[UInt8], start: Int, end: Int) -> String:
     """Convert ``data[start:end]`` to a String, masking non-ASCII bytes as '?'.
     """
     var s = String(capacity=end - start + 1)

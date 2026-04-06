@@ -20,7 +20,7 @@ from mozz import forall_bytes
 from flare.http.headers import HeaderMap, HeaderInjectionError
 
 
-fn _contains_crlf(data: List[UInt8]) -> Bool:
+def _contains_crlf(data: List[UInt8]) -> Bool:
     """Return True if any byte in ``data`` is CR (0x0D) or LF (0x0A)."""
     for i in range(len(data)):
         if data[i] == 0x0D or data[i] == 0x0A:
@@ -28,7 +28,7 @@ fn _contains_crlf(data: List[UInt8]) -> Bool:
     return False
 
 
-fn _bytes_to_str(data: List[UInt8]) -> String:
+def _bytes_to_str(data: List[UInt8]) -> String:
     """Convert raw bytes to a ``String`` via chr() (Latin-1 safe)."""
     var s = String(capacity=len(data) + 1)
     for i in range(len(data)):

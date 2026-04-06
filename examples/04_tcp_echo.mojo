@@ -15,13 +15,13 @@ from flare.tcp import TcpStream, TcpListener
 from flare.net import SocketAddr
 
 
-fn zero_buf(n: Int) -> List[UInt8]:
+def zero_buf(n: Int) -> List[UInt8]:
     var b = List[UInt8]()
     b.resize(n, 0)
     return b^
 
 
-fn main() raises:
+def main() raises:
     print("=== flare Example 04: TCP ===")
     print()
 
