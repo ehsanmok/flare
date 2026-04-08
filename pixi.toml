@@ -54,6 +54,7 @@ fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuz
 
 [environments]
 default = { features = ["dev"], solve-group = "default" }
+dev     = { features = ["dev"], solve-group = "default" }
 fuzz    = { features = ["dev", "fuzz"], solve-group = "default" }
 
 [tasks]
