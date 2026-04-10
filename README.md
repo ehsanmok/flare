@@ -50,7 +50,7 @@ No client object needed for simple requests. `post` with a `String` body sets
 ```mojo
 from flare.http import get, post
 
-fn main() raises:
+def main() raises:
     var resp = get("https://httpbin.org/get")
     print(resp.status, resp.ok())          # 200 True
     print(resp.text()[:80])                # raw body
@@ -70,7 +70,7 @@ natural call-site syntax:
 ```mojo
 from flare.http import HttpClient, BasicAuth, BearerAuth, HttpError
 
-fn main() raises:
+def main() raises:
     # Base URL as first positional arg, relative paths resolved automatically
     var client = HttpClient("https://api.example.com")
     client.post("/items", '{"name": "flare"}').raise_for_status()
@@ -97,7 +97,7 @@ from flare.tcp  import TcpStream
 from flare.tls  import TlsStream, TlsConfig
 from flare.ws   import WsClient
 
-fn main() raises:
+def main() raises:
     with HttpClient() as c:
         print(c.get("https://httpbin.org/get").status)
 
@@ -119,7 +119,7 @@ fn main() raises:
 ```mojo
 from flare.ws import WsClient, WsMessage
 
-fn main() raises:
+def main() raises:
     with WsClient.connect("ws://echo.websocket.events") as ws:
         ws.send_text("hello, flare!")
         var msg = ws.recv_message()
@@ -132,7 +132,7 @@ fn main() raises:
 ```mojo
 from flare.http import get
 
-fn main() raises:
+def main() raises:
     var resp = get("https://httpbin.org/bytes/8192")
     var total = 0
     for chunk in resp.iter_bytes(4096):
@@ -149,7 +149,7 @@ enabling efficient line-by-line or arbitrary-sized reads:
 from flare.tls import TlsStream, TlsConfig
 from flare.io  import BufReader
 
-fn main() raises:
+def main() raises:
     var stream = TlsStream.connect("example.com", 443, TlsConfig())
     _ = stream.write(
         "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"
@@ -179,7 +179,7 @@ custom framing, or protocols beyond HTTP and WebSocket.
 from flare.net import IpAddr, SocketAddr
 from flare.dns import resolve_v4
 
-fn main() raises:
+def main() raises:
     var ip = IpAddr.parse("192.168.1.100")
     print(ip.is_private())                 # True
 
@@ -196,7 +196,7 @@ fn main() raises:
 from flare.tcp import TcpStream, TcpListener
 from flare.net import SocketAddr
 
-fn main() raises:
+def main() raises:
     # String-based connect overload
     var conn = TcpStream.connect("localhost", 8080)
     _ = conn.write("Hello\n".as_bytes())
@@ -212,7 +212,7 @@ fn main() raises:
 ```mojo
 from flare.tls import TlsStream, TlsConfig
 
-fn main() raises:
+def main() raises:
     # TLS 1.2/1.3, cert verified against pixi CA bundle by default
     var tls = TlsStream.connect("example.com", 443, TlsConfig())
     _ = tls.write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n".as_bytes())
@@ -232,7 +232,7 @@ fn main() raises:
 from flare.http import HttpClient, Status, Url
 from json import Value
 
-fn main() raises:
+def main() raises:
     var client = HttpClient()
 
     var resp = client.get("http://httpbin.org/get")
@@ -255,7 +255,7 @@ fn main() raises:
 ```mojo
 from flare.ws import WsClient, WsFrame, WsOpcode
 
-fn main() raises:
+def main() raises:
     var ws = WsClient.connect("ws://echo.websocket.events")
 
     ws.send_text("Hello, flare WebSocket!")
