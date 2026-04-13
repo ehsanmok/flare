@@ -136,7 +136,7 @@ struct Url(Movable):
         else:
             path = path_and_query
 
-        if len(path) == 0:
+        if path.byte_length() == 0:
             path = "/"
 
         # ── 5. Host and port ──────────────────────────────────────────────────
@@ -191,7 +191,7 @@ struct Url(Movable):
                 host = authority
                 port = _default_port(scheme)
 
-        if len(host) == 0:
+        if host.byte_length() == 0:
             raise UrlParseError("missing host in URL: " + raw)
 
         return Url(scheme^, host^, port, path^, query^, fragment^)
@@ -202,7 +202,7 @@ struct Url(Movable):
         Returns:
             ``/path?query`` or ``/path`` if query is empty.
         """
-        if len(self.query) == 0:
+        if self.query.byte_length() == 0:
             return self.path
         return self.path + "?" + self.query
 
