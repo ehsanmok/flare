@@ -8,7 +8,7 @@
 
 context:
   name: flare
-  version: "0.0.1"
+  version: "0.1.0"
 
 package:
   name: ${{ name }}
@@ -20,7 +20,7 @@ source:
   # json source (inlined because json is not yet in any conda channel)
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    branch: main
+    tag: v0.1.0
 
 build:
   script:
