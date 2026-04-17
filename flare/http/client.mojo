@@ -47,7 +47,7 @@ from ..tls import TlsStream, TlsConfig
 from ..net import NetworkError
 from json import dumps, Value as JsonValue
 from ..net import SocketAddr
-from ..dns import resolve_v4
+from ..dns import resolve
 
 
 struct HttpClient(Movable):
@@ -627,7 +627,7 @@ struct HttpClient(Movable):
             stream.close()
             return resp^
         else:
-            var addrs = resolve_v4(u.host)
+            var addrs = resolve(u.host)
             if len(addrs) == 0:
                 raise NetworkError("DNS resolution failed for: " + u.host)
             var stream = TcpStream.connect_timeout(
@@ -769,18 +769,20 @@ def _find_crlf2(data: List[UInt8]) -> Int:
 
 
 def _bytes_to_str(data: List[UInt8]) -> String:
-    """Convert a byte list to a String, replacing non-ASCII bytes with ``?``.
+    """Convert a byte list to a String, replacing non-printable and non-ASCII bytes.
 
-    HTTP/1.1 headers must be ASCII (RFC 7230 §3.2.6).  Non-ASCII bytes are
-    replaced with ``?`` so that every input byte maps to exactly one output
-    character, keeping byte-position arithmetic in ``_split_lines`` safe.
-    Without this, ``chr(b)`` for b ≥ 128 produces multi-byte UTF-8 sequences
-    that cause ``String[start:end]`` to panic on non-codepoint boundaries.
+    HTTP/1.1 headers must be ASCII (RFC 7230 §3.2.6).  NUL bytes and non-ASCII
+    bytes are replaced with ``?`` so that every input byte maps to exactly one
+    output character, keeping byte-position arithmetic in ``_split_lines`` safe.
+    NUL (0x00) is replaced because Mojo strings are NUL-terminated internally
+    and embedded NULs can cause panics in string operations.
     """
     var s = String(capacity=len(data) + 1)
     for b in data:
         var c = Int(b)
-        if c < 128:
+        if c == 0:
+            s += "?"
+        elif c < 128:
             s += chr(c)
         else:
             s += "?"
