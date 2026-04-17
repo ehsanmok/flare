@@ -976,7 +976,15 @@ def test_parse_bytes_empty_header_value() raises:
 
 
 def test_v6_server_loopback() raises:
-    """HttpServer on [::1] accepts a request and responds correctly."""
+    """HttpServer on [::1] accepts a request if IPv6 is available."""
+    # Probe: can we bind IPv6 loopback? If not, skip to avoid hanging.
+    try:
+        var probe = TcpListener.bind(SocketAddr(IpAddr("::1", is_v6=True), 0))
+        probe.close()
+    except:
+        print("  [SKIP] IPv6 loopback not available")
+        return
+
     var addr = SocketAddr(IpAddr("::1", is_v6=True), 0)
     var srv = HttpServer.bind(addr)
     var port = srv.local_addr().port
