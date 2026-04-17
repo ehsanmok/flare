@@ -5,7 +5,7 @@ HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI
 What you get:
 
 - TCP, UDP, TLS, HTTP, and WebSocket in one package
-- IPv4 and IPv6 out of the box (dual-stack DNS resolution)
+- IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback)
 - 336 tests and 11 fuzz harnesses, zero known crashes
 - HTTP parsing 7-9x faster than other Mojo HTTP libraries
 - Server handles ~50K req/s on a single thread
