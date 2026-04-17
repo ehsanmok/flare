@@ -279,9 +279,21 @@ pixi run test-ergonomics   # high-level API
 ### Benchmarks
 
 ```bash
-pixi run bench             # all microbenchmarks
+pixi run bench             # all microbenchmarks in sequence
 pixi run bench-compare     # HTTP encode/parse throughput
-pixi run bench-server      # start server, then use wrk against it
+pixi run bench-http        # HeaderMap, Url.parse, Response construction
+pixi run bench-ws-mask     # WebSocket XOR masking: scalar vs SIMD
+pixi run bench-parse       # IP parsing + DNS resolution
+```
+
+To measure server throughput, start the benchmark server and hit it with [wrk](https://github.com/wg/wrk):
+
+```bash
+pixi run bench-server      # starts on localhost:9090, blocks
+
+# in another terminal:
+wrk -t1 -c1 -d10s http://localhost:9090/
+wrk -t4 -c100 -d10s http://localhost:9090/
 ```
 
 ### Fuzzing
