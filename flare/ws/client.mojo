@@ -112,7 +112,9 @@ def _sha1(data: String) raises -> List[UInt8]:
     """
     var lib = OwnedDLHandle(_find_flare_lib())
     # SHA1(const unsigned char *d, size_t n, unsigned char *md) -> unsigned char*
-    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int]("SHA1")
+    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int](
+        "SHA1"
+    )
     var digest_buf = List[UInt8](capacity=_SHA1_LEN)
     digest_buf.resize(_SHA1_LEN, 0)
     var data_bytes = data.as_bytes()

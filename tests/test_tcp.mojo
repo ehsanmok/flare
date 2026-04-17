@@ -12,7 +12,13 @@ Test strategy:
     developer machines, and blackhole IPs for timeout tests.
 """
 
-from std.testing import assert_equal, assert_not_equal, assert_true, assert_raises, TestSuite
+from std.testing import (
+    assert_equal,
+    assert_not_equal,
+    assert_true,
+    assert_raises,
+    TestSuite,
+)
 from flare.tcp import TcpStream, TcpListener
 from flare.net import SocketAddr, IpAddr
 

@@ -86,25 +86,40 @@ def main() raises:
     print()
 
     print("GET /hello")
-    print("  " + send_and_receive(
-        listener, "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    ))
+    print(
+        "  "
+        + send_and_receive(
+            listener, "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        )
+    )
 
     print("GET /json")
-    print("  " + send_and_receive(
-        listener, "GET /json HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    ))
+    print(
+        "  "
+        + send_and_receive(
+            listener, "GET /json HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        )
+    )
 
     print("POST /echo")
-    print("  " + send_and_receive(
-        listener,
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nhello",
-    ))
+    print(
+        "  "
+        + send_and_receive(
+            listener,
+            (
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length:"
+                " 5\r\n\r\nhello"
+            ),
+        )
+    )
 
     print("GET /missing")
-    print("  " + send_and_receive(
-        listener, "GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    ))
+    print(
+        "  "
+        + send_and_receive(
+            listener, "GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        )
+    )
 
     print()
     print("HttpServer.bind() pattern:")

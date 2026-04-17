@@ -255,8 +255,8 @@ def _fill_sockaddr_in6(
     var af6 = Int(AF_INET6)
 
     comptime if CompilationTarget.is_macos():
-        (buf + 0).init_pointee_copy(UInt8(28))       # sin6_len
-        (buf + 1).init_pointee_copy(UInt8(af6))       # AF_INET6
+        (buf + 0).init_pointee_copy(UInt8(28))  # sin6_len
+        (buf + 1).init_pointee_copy(UInt8(af6))  # AF_INET6
     else:
         (buf + 0).init_pointee_copy(UInt8(af6 & 0xFF))
         (buf + 1).init_pointee_copy(UInt8((af6 >> 8) & 0xFF))

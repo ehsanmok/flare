@@ -89,7 +89,11 @@ struct HttpServer(Movable):
     var _listener: TcpListener
     var config: ServerConfig
 
-    def __init__(out self, var listener: TcpListener, var config: ServerConfig = ServerConfig()):
+    def __init__(
+        out self,
+        var listener: TcpListener,
+        var config: ServerConfig = ServerConfig(),
+    ):
         self._listener = listener^
         self.config = config^
 
@@ -97,7 +101,9 @@ struct HttpServer(Movable):
         self._listener.close()
 
     @staticmethod
-    def bind(addr: SocketAddr, var config: ServerConfig = ServerConfig()) raises -> HttpServer:
+    def bind(
+        addr: SocketAddr, var config: ServerConfig = ServerConfig()
+    ) raises -> HttpServer:
         """Bind an HTTP server on ``addr``.
 
         Args:
@@ -114,7 +120,7 @@ struct HttpServer(Movable):
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^, config^)
 
-    def serve(self, handler: def (Request) raises -> Response) raises:
+    def serve(self, handler: def(Request) raises -> Response) raises:
         """Accept connections in a loop, calling ``handler`` for each request.
 
         Blocks indefinitely. Supports HTTP/1.1 keep-alive when configured.
@@ -144,7 +150,7 @@ struct HttpServer(Movable):
 
 def _handle_connection_buffered(
     var stream: TcpStream,
-    handler: def (Request) raises -> Response,
+    handler: def(Request) raises -> Response,
     config: ServerConfig,
 ):
     """Handle an HTTP connection with buffered reads and keep-alive.
@@ -293,7 +299,8 @@ def _read_until_size(
     target: Int,
     config: ServerConfig,
 ) -> Bool:
-    """Keep reading until buf has at least ``target`` bytes. Returns False on EOF/timeout."""
+    """Keep reading until buf has at least ``target`` bytes. Returns False on EOF/timeout.
+    """
     if len(buf) >= target:
         return True
 
@@ -474,9 +481,7 @@ def _parse_http_request_bytes(
 
     if path.byte_length() > max_uri_length:
         raise Error(
-            "request URI exceeds limit of "
-            + String(max_uri_length)
-            + " bytes"
+            "request URI exceeds limit of " + String(max_uri_length) + " bytes"
         )
 
     # 2. Headers with RFC 7230 token validation
@@ -632,7 +637,9 @@ def bad_request(msg: String = "Bad Request") -> Response:
     var body_bytes = List[UInt8](capacity=msg.byte_length())
     for b in msg.as_bytes():
         body_bytes.append(b)
-    var resp = Response(status=Status.BAD_REQUEST, reason="Bad Request", body=body_bytes^)
+    var resp = Response(
+        status=Status.BAD_REQUEST, reason="Bad Request", body=body_bytes^
+    )
     try:
         resp.headers.set("Content-Type", "text/plain")
     except:
@@ -648,7 +655,9 @@ def not_found(path: String = "") -> Response:
     var body_bytes = List[UInt8](capacity=msg.byte_length())
     for b in msg.as_bytes():
         body_bytes.append(b)
-    var resp = Response(status=Status.NOT_FOUND, reason="Not Found", body=body_bytes^)
+    var resp = Response(
+        status=Status.NOT_FOUND, reason="Not Found", body=body_bytes^
+    )
     try:
         resp.headers.set("Content-Type", "text/plain")
     except:
@@ -661,7 +670,11 @@ def internal_error(msg: String = "Internal Server Error") -> Response:
     var body_bytes = List[UInt8](capacity=msg.byte_length())
     for b in msg.as_bytes():
         body_bytes.append(b)
-    var resp = Response(status=Status.INTERNAL_SERVER_ERROR, reason="Internal Server Error", body=body_bytes^)
+    var resp = Response(
+        status=Status.INTERNAL_SERVER_ERROR,
+        reason="Internal Server Error",
+        body=body_bytes^,
+    )
     try:
         resp.headers.set("Content-Type", "text/plain")
     except:
@@ -711,7 +724,11 @@ def _write_response_buffered(
 
     var estimated = 64 + body_len
     for i in range(resp.headers.len()):
-        estimated += resp.headers._keys[i].byte_length() + resp.headers._values[i].byte_length() + 4
+        estimated += (
+            resp.headers._keys[i].byte_length()
+            + resp.headers._values[i].byte_length()
+            + 4
+        )
     var wire = List[UInt8](capacity=estimated)
 
     _append_str(wire, "HTTP/1.1 ")
@@ -882,5 +899,6 @@ def _parse_http_request(
 
 
 def _write_response(mut stream: TcpStream, resp: Response) raises:
-    """Legacy response writer. Delegates to buffered version with Connection: close."""
+    """Legacy response writer. Delegates to buffered version with Connection: close.
+    """
     _write_response_buffered(stream, resp, keep_alive=False)

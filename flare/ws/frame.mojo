@@ -481,9 +481,7 @@ struct WsFrame(Movable, Writable):
             WsProtocolError: If the payload contains invalid UTF-8.
         """
         if not _is_valid_utf8(self.payload):
-            raise WsProtocolError(
-                "TEXT frame payload is not valid UTF-8"
-            )
+            raise WsProtocolError("TEXT frame payload is not valid UTF-8")
         var s = String(capacity=len(self.payload) + 1)
         for b in self.payload:
             s += chr(Int(b))
@@ -541,7 +539,14 @@ def _is_valid_utf8(data: List[UInt8]) -> Bool:
             var b1 = data[i + 1]
             var b2 = data[i + 2]
             var b3 = data[i + 3]
-            if b1 < 0x80 or b1 > 0xBF or b2 < 0x80 or b2 > 0xBF or b3 < 0x80 or b3 > 0xBF:
+            if (
+                b1 < 0x80
+                or b1 > 0xBF
+                or b2 < 0x80
+                or b2 > 0xBF
+                or b3 < 0x80
+                or b3 > 0xBF
+            ):
                 return False
             if b == 0xF0 and b1 < 0x90:
                 return False

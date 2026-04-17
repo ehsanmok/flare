@@ -161,9 +161,9 @@ def _do_decompress_deflate(
     Raises:
         Error: If neither zlib-wrapped nor raw deflate succeeds.
     """
-    var fn_decomp = lib.get_function[def(Int, c_int, Int, c_int) thin abi("C") -> c_int](
-        "flare_decompress_deflate"
-    )
+    var fn_decomp = lib.get_function[
+        def(Int, c_int, Int, c_int) thin abi("C") -> c_int
+    ]("flare_decompress_deflate")
 
     var cap = max(len(data) * 4, 4096)
     while True:
@@ -226,9 +226,9 @@ def _do_compress(
     Raises:
         Error: If compression fails.
     """
-    var fn_comp = lib.get_function[def(Int, c_int, Int, c_int, c_int) thin abi("C") -> c_int](
-        "flare_compress_gzip"
-    )
+    var fn_comp = lib.get_function[
+        def(Int, c_int, Int, c_int, c_int) thin abi("C") -> c_int
+    ]("flare_compress_gzip")
 
     # Worst-case gzip overhead: ~18 bytes header/trailer + 0.1% + 12 bytes.
     var cap = len(data) + (len(data) >> 10) + 32

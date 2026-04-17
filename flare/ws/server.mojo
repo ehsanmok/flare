@@ -47,12 +47,14 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
         NetworkError: If the SHA-1 function cannot be loaded.
     """
     var lib = OwnedDLHandle(_find_flare_lib())
-    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int]("SHA1")
+    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int](
+        "SHA1"
+    )
     return _do_sha1_srv(fn_sha1, data.as_bytes(), lib)
 
 
 def _do_sha1_srv(
-    fn_sha1: def (Int, Int, Int) abi("C") -> Int,
+    fn_sha1: def(Int, Int, Int) abi("C") -> Int,
     data_bytes: Span[UInt8, _],
     read lib: OwnedDLHandle,
 ) -> List[UInt8]:

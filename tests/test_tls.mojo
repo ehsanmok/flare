@@ -96,9 +96,9 @@ struct _TlsTestServer:
             ca:   Path to CA bundle for client cert verification, or ``""``.
         """
         self._lib = OwnedDLHandle(_TLS_LIB)
-        var fn_new = self._lib.get_function[def(Int, Int, Int, c_int) thin abi("C") -> Int](
-            "flare_test_server_new"
-        )
+        var fn_new = self._lib.get_function[
+            def(Int, Int, Int, c_int) thin abi("C") -> Int
+        ]("flare_test_server_new")
         var ca_int = _c_str(ca) if ca != "" else 0
         self._ptr = fn_new(
             _c_str(cert),
@@ -111,9 +111,9 @@ struct _TlsTestServer:
 
     def __del__(deinit self):
         if self._ptr != 0:
-            var fn_free = self._lib.get_function[def(Int) thin abi("C") -> None](
-                "flare_test_server_free"
-            )
+            var fn_free = self._lib.get_function[
+                def(Int) thin abi("C") -> None
+            ]("flare_test_server_free")
             fn_free(self._ptr)
 
     def port(self) raises -> Int:
@@ -344,7 +344,9 @@ def test_tls_peer_cert_subject_non_empty() raises:
         var cfg = TlsConfig(ca_bundle=_CA_CRT)
         var stream = TlsStream.connect("localhost", UInt16(port), cfg)
         var subj = stream.peer_cert_subject()
-        assert_true(subj.byte_length() > 0, "peer_cert_subject() returned empty")
+        assert_true(
+            subj.byte_length() > 0, "peer_cert_subject() returned empty"
+        )
         assert_true("CN" in subj or "O=" in subj, "Unexpected subject: " + subj)
         stream.close()
     except e:

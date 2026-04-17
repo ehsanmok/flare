@@ -132,7 +132,9 @@ def parse_cookie_header(header: String) -> List[Cookie]:
             pos += 1
             continue
 
-        var name = String(String(unsafe_from_utf8=header.as_bytes()[pos:eq]).strip())
+        var name = String(
+            String(unsafe_from_utf8=header.as_bytes()[pos:eq]).strip()
+        )
 
         # Find end of value (';' or end of string)
         var val_start = eq + 1
@@ -140,7 +142,11 @@ def parse_cookie_header(header: String) -> List[Cookie]:
         while val_end < n and ptr[val_end] != 59:
             val_end += 1
 
-        var value = String(String(unsafe_from_utf8=header.as_bytes()[val_start:val_end]).strip())
+        var value = String(
+            String(
+                unsafe_from_utf8=header.as_bytes()[val_start:val_end]
+            ).strip()
+        )
         cookies.append(Cookie(name, value))
 
         pos = val_end + 1
@@ -178,7 +184,7 @@ def parse_set_cookie_header(header: String) -> Cookie:
     var value = String("")
     if eq >= 0:
         name = String(String(unsafe_from_utf8=nv.as_bytes()[:eq]).strip())
-        value = String(String(unsafe_from_utf8=nv.as_bytes()[eq + 1:]).strip())
+        value = String(String(unsafe_from_utf8=nv.as_bytes()[eq + 1 :]).strip())
     else:
         name = nv
 
@@ -194,7 +200,9 @@ def parse_set_cookie_header(header: String) -> Cookie:
         while attr_end < n and ptr[attr_end] != 59:
             attr_end += 1
 
-        var attr = String(String(unsafe_from_utf8=header.as_bytes()[pos:attr_end]).strip())
+        var attr = String(
+            String(unsafe_from_utf8=header.as_bytes()[pos:attr_end]).strip()
+        )
         var attr_lower = String(capacity=attr.byte_length())
         for i in range(attr.byte_length()):
             var c = attr.unsafe_ptr()[i]
@@ -211,8 +219,12 @@ def parse_set_cookie_header(header: String) -> Cookie:
                 break
 
         if attr_eq >= 0:
-            var akey = String(String(unsafe_from_utf8=attr_lower.as_bytes()[:attr_eq]).strip())
-            var aval = String(String(unsafe_from_utf8=attr.as_bytes()[attr_eq + 1:]).strip())
+            var akey = String(
+                String(unsafe_from_utf8=attr_lower.as_bytes()[:attr_eq]).strip()
+            )
+            var aval = String(
+                String(unsafe_from_utf8=attr.as_bytes()[attr_eq + 1 :]).strip()
+            )
 
             if akey == "domain":
                 cookie.domain = aval

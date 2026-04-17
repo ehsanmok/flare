@@ -27,7 +27,11 @@ from flare.http.server import _parse_http_request_bytes, _status_reason
 
 # ── Test data (standard HTTP request/response payloads) ───────────────────────
 
-comptime _HEADERS_RAW = "GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Mozilla/5.0\r\nContent-Type: text/html\r\nContent-Length: 1234\r\nConnection: close\r\nTrailer: end-of-message\r\n\r\n"
+comptime _HEADERS_RAW = (
+    "GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent:"
+    " Mozilla/5.0\r\nContent-Type: text/html\r\nContent-Length:"
+    " 1234\r\nConnection: close\r\nTrailer: end-of-message\r\n\r\n"
+)
 
 comptime _BODY = "I am the body of an HTTP request" * 5
 
@@ -41,7 +45,10 @@ comptime _RESPONSE_RAW = "HTTP/1.1 200 OK\r\nserver: flare\r\ncontent-type: appl
 
 def bench_header_encode(mut b: Bencher) capturing raises:
     # Pre-compute wire bytes as a comptime string for maximum throughput.
-    comptime wire_str = "Content-Type: application/json\r\nContent-Length: 1234\r\nConnection: close\r\nDate: some-datetime\r\nSomeHeader: SomeValue\r\n"
+    comptime wire_str = (
+        "Content-Type: application/json\r\nContent-Length: 1234\r\nConnection:"
+        " close\r\nDate: some-datetime\r\nSomeHeader: SomeValue\r\n"
+    )
 
     @parameter
     @always_inline
@@ -159,7 +166,9 @@ def bench_response_encode(mut b: Bencher) capturing raises:
 
         var reason = _status_reason(resp.status)
         var wire = List[UInt8](capacity=512)
-        var status_line = "HTTP/1.1 " + String(resp.status) + " " + reason + "\r\n"
+        var status_line = (
+            "HTTP/1.1 " + String(resp.status) + " " + reason + "\r\n"
+        )
         for i in range(status_line.byte_length()):
             wire.append(status_line.unsafe_ptr()[i])
         for i in range(resp.headers.len()):
@@ -197,7 +206,12 @@ def bench_response_parse(mut b: Bencher) capturing raises:
 
         var header_end = -1
         for i in range(n - 3):
-            if data[i] == 13 and data[i + 1] == 10 and data[i + 2] == 13 and data[i + 3] == 10:
+            if (
+                data[i] == 13
+                and data[i + 1] == 10
+                and data[i + 2] == 13
+                and data[i + 3] == 10
+            ):
                 header_end = i + 4
                 break
 
@@ -232,8 +246,14 @@ def bench_response_parse(mut b: Bencher) capturing raises:
                     colon_pos = j
                     break
             if colon_pos >= 0:
-                var k = String(String(unsafe_from_utf8=line.as_bytes()[:colon_pos]).strip())
-                var v = String(String(unsafe_from_utf8=line.as_bytes()[colon_pos + 1:]).strip())
+                var k = String(
+                    String(unsafe_from_utf8=line.as_bytes()[:colon_pos]).strip()
+                )
+                var v = String(
+                    String(
+                        unsafe_from_utf8=line.as_bytes()[colon_pos + 1 :]
+                    ).strip()
+                )
                 headers.set(k, v)
 
         var body = List[UInt8](capacity=n - header_end)

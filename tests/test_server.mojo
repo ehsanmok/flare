@@ -173,7 +173,7 @@ def test_is_token_char_special() raises:
 
 
 def test_is_token_char_rejects_control() raises:
-    assert_false(_is_token_char(UInt8(0)))   # NUL
+    assert_false(_is_token_char(UInt8(0)))  # NUL
     assert_false(_is_token_char(UInt8(10)))  # LF
     assert_false(_is_token_char(UInt8(13)))  # CR
     assert_false(_is_token_char(UInt8(32)))  # SP
@@ -188,11 +188,11 @@ def test_is_token_char_rejects_separator() raises:
 
 
 def test_is_field_value_char() raises:
-    assert_true(_is_field_value_char(UInt8(32)))   # SP
-    assert_true(_is_field_value_char(UInt8(9)))    # HTAB
-    assert_true(_is_field_value_char(UInt8(65)))   # A
+    assert_true(_is_field_value_char(UInt8(32)))  # SP
+    assert_true(_is_field_value_char(UInt8(9)))  # HTAB
+    assert_true(_is_field_value_char(UInt8(65)))  # A
     assert_true(_is_field_value_char(UInt8(200)))  # obs-text
-    assert_false(_is_field_value_char(UInt8(0)))   # NUL
+    assert_false(_is_field_value_char(UInt8(0)))  # NUL
     assert_false(_is_field_value_char(UInt8(10)))  # LF
     assert_false(_is_field_value_char(UInt8(13)))  # CR
 
@@ -216,7 +216,9 @@ def test_parse_bytes_post_with_body() raises:
         "POST /api HTTP/1.1\r\n"
         + "Host: api.example.com\r\n"
         + "Content-Type: application/json\r\n"
-        + "Content-Length: " + String(body.byte_length()) + "\r\n"
+        + "Content-Length: "
+        + String(body.byte_length())
+        + "\r\n"
         + "\r\n"
         + body
     )
@@ -265,10 +267,7 @@ def test_parse_bytes_malformed_no_space() raises:
 def test_parse_bytes_body_exceeds_limit() raises:
     var body = "x" * 100
     var raw = (
-        "POST /data HTTP/1.1\r\n"
-        + "Content-Length: 100\r\n"
-        + "\r\n"
-        + body
+        "POST /data HTTP/1.1\r\n" + "Content-Length: 100\r\n" + "\r\n" + body
     )
     var data = raw.as_bytes()
     with assert_raises(contains="body exceeds limit"):
@@ -634,7 +633,9 @@ def test_server_buffered_post_with_body() raises:
     var raw_req = (
         "POST /submit HTTP/1.1\r\n"
         + "Host: localhost\r\n"
-        + "Content-Length: " + String(body_str.byte_length()) + "\r\n"
+        + "Content-Length: "
+        + String(body_str.byte_length())
+        + "\r\n"
         + "\r\n"
         + body_str
     )
@@ -823,12 +824,14 @@ def test_server_empty_body_response() raises:
 def test_eq_icase_same() raises:
     """_eq_icase matches identical strings."""
     from flare.http.headers import _eq_icase
+
     assert_true(_eq_icase("Content-Type", "Content-Type"))
 
 
 def test_eq_icase_different_case() raises:
     """_eq_icase is case-insensitive."""
     from flare.http.headers import _eq_icase
+
     assert_true(_eq_icase("Content-Type", "content-type"))
     assert_true(_eq_icase("CONTENT-TYPE", "content-type"))
     assert_true(_eq_icase("Host", "HOST"))
@@ -837,6 +840,7 @@ def test_eq_icase_different_case() raises:
 def test_eq_icase_different_strings() raises:
     """_eq_icase rejects different strings."""
     from flare.http.headers import _eq_icase
+
     assert_false(_eq_icase("Content-Type", "Content-Length"))
     assert_false(_eq_icase("Host", "Hos"))
     assert_false(_eq_icase("", "x"))
@@ -845,6 +849,7 @@ def test_eq_icase_different_strings() raises:
 def test_eq_icase_empty() raises:
     """_eq_icase matches two empty strings."""
     from flare.http.headers import _eq_icase
+
     assert_true(_eq_icase("", ""))
 
 
