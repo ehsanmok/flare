@@ -1,29 +1,29 @@
-# flare
+<p align="center">
+  <img src="./logo.png" alt="flare" width="280">
+</p>
 
-[![CI](https://github.com/ehsanmok/flare/actions/workflows/ci.yml/badge.svg)](https://github.com/ehsanmok/flare/actions/workflows/ci.yml)
-[![Fuzz](https://github.com/ehsanmok/flare/actions/workflows/fuzz.yml/badge.svg)](https://github.com/ehsanmok/flare/actions/workflows/fuzz.yml)
-[![Docs](https://github.com/ehsanmok/flare/actions/workflows/docs.yaml/badge.svg)](https://ehsanmok.github.io/flare/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<h1 align="center">flare</h1>
 
-A **foundational networking library for Mojo🔥**, from raw socket primitives up
-to HTTP/1.1 and WebSockets, written entirely in Mojo with minimal FFI surface.
+<p align="center">
+  <a href="https://github.com/ehsanmok/flare/actions/workflows/ci.yml"><img src="https://github.com/ehsanmok/flare/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/ehsanmok/flare/actions/workflows/fuzz.yml"><img src="https://github.com/ehsanmok/flare/actions/workflows/fuzz.yml/badge.svg" alt="Fuzz"></a>
+  <a href="https://ehsanmok.github.io/flare/"><img src="https://github.com/ehsanmok/flare/actions/workflows/docs.yaml/badge.svg" alt="Docs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
-- **Correctness above all**: typed errors everywhere; no silent failures
-- **Security by default**: TLS 1.2+, injection-safe parsing, DoS limits baked in
-- **Zero unnecessary C deps**: only libc (always present) and OpenSSL for TLS
-- **Layered architecture**: each layer imports only from layers below it
+A fast networking library for Mojo🔥, covering everything from raw sockets to HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI (just libc and OpenSSL for TLS).
 
-## Quick Start: High-Level API
+**What you get:**
 
-The high-level API mirrors the ergonomics of Python's `requests`/`httpx`
-and the `websockets` library. It builds on the low-level primitives and adds:
-authentication, `raise_for_status`, module-level one-shot helpers, context
-managers, typed `WsMessage`, and buffered I/O.
+- TCP, UDP, TLS, HTTP, and WebSocket in one package
+- IPv4 and IPv6 out of the box (dual-stack DNS resolution)
+- 336 tests and 11 fuzz harnesses, zero known crashes
+- HTTP parsing 7-9x faster than other Mojo HTTP libraries
+- Server handles ~50K req/s on a single thread
 
-### One-shot HTTP helpers
+## Quick start
 
-No client object needed for simple requests. `post` with a `String` body sets
-`Content-Type: application/json` automatically, no format parameter needed:
+### HTTP requests
 
 ```mojo
 from flare.http import get, post
@@ -31,117 +31,72 @@ from flare.http import get, post
 def main() raises:
     var resp = get("https://httpbin.org/get")
     print(resp.status, resp.ok())          # 200 True
-    print(resp.text()[:80])                # raw body
 
-    # String body → Content-Type: application/json automatically
     var r = post("https://httpbin.org/post", '{"hello": "flare"}')
-    r.raise_for_status()                   # raises HttpError on non-2xx
-    var data = r.json()                    # json.Value
+    r.raise_for_status()
+    var data = r.json()
     print(data["json"]["hello"].string_value())
 ```
 
-### HttpClient: base URL, authentication, JSON
+`post` with a String body sets `Content-Type: application/json` automatically.
 
-`HttpClient` takes base URL and auth as positional arguments, the most
-natural call-site syntax:
+### HTTP server
 
 ```mojo
-from flare.http import HttpClient, BasicAuth, BearerAuth, HttpError
+from flare.http import HttpServer, Request, Response, ok, ok_json, not_found
+from flare.net import SocketAddr
+
+def handler(req: Request) raises -> Response:
+    if req.url == "/":
+        return ok("hello")
+    if req.url == "/data":
+        var body = req.json()
+        return ok_json('{"received": true}')
+    return not_found(req.url)
 
 def main() raises:
-    # Base URL as first positional arg, relative paths resolved automatically
-    var client = HttpClient("https://api.example.com")
-    client.post("/items", '{"name": "flare"}').raise_for_status()
-
-    # HTTP Basic authentication (RFC 7617), auth as first positional
-    var auth_client = HttpClient(BasicAuth("alice", "s3cr3t"))
-    var r = auth_client.get("https://httpbin.org/basic-auth/alice/s3cr3t")
-    r.raise_for_status()                   # HttpError on 401 / 403
-    print(r.json()["authenticated"].bool_value())
-
-    # Base URL + Bearer token, both positional
-    with HttpClient("https://api.example.com", BearerAuth("tok_abc123")) as c:
-        var items = c.get("/items").json()  # json.Value
-        c.post("/items", '{"name": "new"}').raise_for_status()
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(handler)
 ```
 
-### Context managers
+The server reads in 8KB chunks, supports HTTP/1.1 keep-alive, validates headers per RFC 7230, and sets recv/send timeouts to prevent stalled clients from blocking other connections.
 
-All connection types implement `__enter__` / `__exit__` for automatic cleanup:
+### HTTP client with auth
 
 ```mojo
-from flare.http import HttpClient
-from flare.tcp  import TcpStream
-from flare.tls  import TlsStream, TlsConfig
-from flare.ws   import WsClient
+from flare.http import HttpClient, BasicAuth, BearerAuth
 
 def main() raises:
-    with HttpClient() as c:
-        print(c.get("https://httpbin.org/get").status)
-
-    with TcpStream.connect("localhost", 9000) as stream:
-        _ = stream.write("hello\n".as_bytes())
-
-    with TlsStream.connect("example.com", 443, TlsConfig()) as tls:
-        _ = tls.write("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n".as_bytes())
-
-    with WsClient.connect("ws://echo.websocket.events") as ws:
-        ws.send_text("hello!")
-        print(ws.recv().text_payload())
+    var client = HttpClient("https://api.example.com", BearerAuth("tok_abc"))
+    var items = client.get("/items").json()
+    client.post("/items", '{"name": "new"}').raise_for_status()
 ```
 
-### WebSocket with WsMessage
-
-`recv_message()` returns a typed `WsMessage` wrapper, no raw opcode checks:
+### WebSocket
 
 ```mojo
-from flare.ws import WsClient, WsMessage
+from flare.ws import WsClient
 
 def main() raises:
     with WsClient.connect("ws://echo.websocket.events") as ws:
-        ws.send_text("hello, flare!")
+        ws.send_text("hello")
         var msg = ws.recv_message()
         if msg.is_text:
-            print(msg.as_text())           # hello, flare!
+            print(msg.as_text())
 ```
 
-### Streaming response body
+### Cookies
 
 ```mojo
-from flare.http import get
+from flare.http import Cookie, CookieJar, parse_set_cookie_header
 
 def main() raises:
-    var resp = get("https://httpbin.org/bytes/8192")
-    var total = 0
-    for chunk in resp.iter_bytes(4096):
-        total += len(chunk)
-    print("downloaded", total, "bytes")
-```
+    var jar = CookieJar()
+    jar.set(Cookie("session", "abc123", secure=True, http_only=True))
+    print(jar.to_request_header())  # session=abc123
 
-### Buffered I/O: BufReader
-
-`BufReader[S: Readable]` wraps any readable stream with an internal buffer,
-enabling efficient line-by-line or arbitrary-sized reads:
-
-```mojo
-from flare.tls import TlsStream, TlsConfig
-from flare.io  import BufReader
-
-def main() raises:
-    var stream = TlsStream.connect("example.com", 443, TlsConfig())
-    _ = stream.write(
-        "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"
-        .as_bytes()
-    )
-    var reader = BufReader[TlsStream](stream^, capacity=4096)
-    # readline() reads up to and including "\n"
-    while True:
-        var line = reader.readline()
-        if line == "":
-            break
-        print(line, end="")
-        if line == "\r\n":
-            break                          # blank line = end of headers
+    var c = parse_set_cookie_header("id=42; Path=/; Max-Age=3600")
+    print(c.name, c.value, c.max_age)  # id 42 3600
 ```
 
 ## Installation
@@ -172,38 +127,53 @@ For the latest development version:
 flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 ```
 
----
+## What's inside
 
-## Low-Level API
+```
+flare.io    ─ BufReader
+    │
+flare.ws    ─ WebSocket client + server (RFC 6455)
+flare.http  ─ HTTP/1.1 client + server + cookies
+    │
+flare.tls   ─ TLS 1.2/1.3 (OpenSSL)
+    │
+flare.tcp   ─ TcpStream + TcpListener (IPv4 + IPv6)
+flare.udp   ─ UdpSocket (IPv4 + IPv6)
+    │
+flare.dns   ─ getaddrinfo (dual-stack)
+    │
+flare.net   ─ IpAddr, SocketAddr, RawSocket
+```
 
-Use the low-level API when you need direct control over socket options,
-custom framing, or protocols beyond HTTP and WebSocket.
+Each layer only imports from layers below it. No circular dependencies.
+
+## Low-level API
+
+For direct socket control, custom framing, or protocols beyond HTTP:
 
 ### IP addresses and DNS
 
 ```mojo
 from flare.net import IpAddr, SocketAddr
-from flare.dns import resolve_v4
+from flare.dns import resolve
 
 def main() raises:
     var ip = IpAddr.parse("192.168.1.100")
     print(ip.is_private())                 # True
 
-    var addr = SocketAddr.parse("127.0.0.1:8080")
-    print(addr.port)                       # 8080
+    var addr = SocketAddr.parse("[::1]:8080")
+    print(addr.ip.is_v6(), addr.port)      # True 8080
 
-    var addrs = resolve_v4("example.com")
-    print(addrs[0])                        # 93.184.216.34
+    var addrs = resolve("example.com")     # returns both IPv4 and IPv6
+    print(addrs[0])
 ```
 
 ### TCP
 
 ```mojo
-from flare.tcp import TcpStream, TcpListener
-from flare.net import SocketAddr
+from flare.tcp import TcpStream
 
 def main() raises:
-    # String-based connect overload
     var conn = TcpStream.connect("localhost", 8080)
     _ = conn.write("Hello\n".as_bytes())
 
@@ -219,216 +189,116 @@ def main() raises:
 from flare.tls import TlsStream, TlsConfig
 
 def main() raises:
-    # TLS 1.2/1.3, cert verified against pixi CA bundle by default
     var tls = TlsStream.connect("example.com", 443, TlsConfig())
     _ = tls.write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n".as_bytes())
-
-    var buf = List[UInt8](capacity=4096)
-    buf.resize(4096, 0)
-    _ = tls.read(buf.unsafe_ptr(), len(buf))
     tls.close()
-
-    # Skip cert verification (testing only)
-    var insecure = TlsStream.connect("localhost", 8443, TlsConfig.insecure())
 ```
 
-### HTTP/1.1: response details
+### WebSocket frames
 
 ```mojo
-from flare.http import HttpClient, Status, Url
-from json import Value
-
-def main() raises:
-    var client = HttpClient()
-
-    var resp = client.get("http://httpbin.org/get")
-    if resp.status == Status.OK:
-        print(resp.text()[:80])               # raw UTF-8 body
-    var ct = resp.headers.get("content-type") # case-insensitive lookup
-
-    # Parse JSON body (returns json.Value)
-    var json_resp = client.get("https://httpbin.org/json")
-    var data: Value = json_resp.json()
-    print(data["slideshow"]["title"].string_value())
-
-    # URL parsing
-    var u = Url.parse("https://api.example.com:8443/v1/users?page=2")
-    print(u.host, u.port, u.path)             # api.example.com 8443 /v1/users
-```
-
-### WebSocket: raw frame API
-
-```mojo
-from flare.ws import WsClient, WsFrame, WsOpcode
+from flare.ws import WsClient, WsFrame
 
 def main() raises:
     var ws = WsClient.connect("ws://echo.websocket.events")
-
-    ws.send_text("Hello, flare WebSocket!")
-    var frame = ws.recv()                       # ping/pong handled automatically
-    print(frame.text_payload())                 # Hello, flare WebSocket!
-
-    # Manual frame construction
-    var f = WsFrame.binary(List[UInt8]([1, 2, 3, 4]))
-    var wire = f.encode(mask=True)              # RFC 6455 masked client→server
-
+    ws.send_text("ping")
+    var frame = ws.recv()
+    print(frame.text_payload())
     ws.close()
 ```
 
----
+## Security
 
-## Layer Architecture
-
-```
-flare.io    ─ BufReader (Readable trait)
-    │
-flare.ws    ─ WebSocket client (RFC 6455)
-flare.http  ─ HTTP/1.1 client + HeaderMap + URL
-    │
-flare.tls   ─ TLS 1.2/1.3 via OpenSSL FFI
-    │
-flare.tcp   ─ TcpStream + TcpListener
-flare.udp   ─ UdpSocket
-    │
-flare.dns   ─ getaddrinfo(3) FFI
-    │
-flare.net   ─ IpAddr, SocketAddr, RawSocket, errors
-```
-
-Each layer imports only from layers below it. No circular dependencies.
-
-## Security Properties
-
-| Layer | Security Guarantee |
-|-------|--------------------|
-| `flare.net` | Null bytes, CRLF, `@` in IP strings raise `AddressParseError` before libc |
-| `flare.dns` | Null/CRLF/`@` injection, >253-char hostnames, >63-char labels all raise |
-| `flare.tls` | TLS ≥ 1.2 only; RC4/NULL/EXPORT/3DES ciphers disabled; SNI always sent |
-| `flare.http` | Header injection prevention (`\r`/`\n` in name/value raises `HeaderInjectionError`) |
-| `flare.http` | DoS limits: max 100 headers, 8 KB values, 64 KB header block, 100 MB body |
-| `flare.ws`  | Client→server frames masked (RFC 6455 §5.3); `Sec-WebSocket-Accept` verified |
+| Layer | What it does |
+|-------|-------------|
+| `flare.net` | Rejects null bytes, CRLF, `@` in IP strings before they reach libc |
+| `flare.dns` | Blocks injection in hostnames (null/CRLF/`@`, length limits) |
+| `flare.tls` | TLS 1.2+ only, weak ciphers disabled, SNI always sent |
+| `flare.http` | Header injection prevention, RFC 7230 token validation |
+| `flare.http` | Configurable limits on headers (8KB), body (10MB), URI (8KB) |
+| `flare.ws` | Client frames masked per RFC 6455, `Sec-WebSocket-Accept` verified |
+| `flare.ws` | CSPRNG nonce for handshake key, UTF-8 validation on TEXT frames |
 
 ## Performance
 
-### WebSocket XOR Masking (Apple M-series, NEON 32-byte SIMD)
+Measured on Apple M-series, Mojo 0.26.3 nightly.
 
-RFC 6455 §5.3 requires XOR-masking every client→server byte.
-SIMD provides a **14–35× speedup** for production-sized payloads:
+### HTTP parsing
 
-| Payload | Scalar | SIMD-32 | Speedup |
-|---------|--------|---------|---------|
-|  32 B   | 3.2 GB/s | >100 GB/s† | N/A |
-| 128 B   | 2.7 GB/s | >100 GB/s† | N/A |
-|   1 KB  | 3.2 GB/s | 112.6 GB/s | **35×** |
-|  64 KB  | 3.4 GB/s |  47.8 GB/s | **14×** |
-|   1 MB  | 3.4 GB/s |  54.8 GB/s | **16×** |
+| Operation | Latency |
+|-----------|---------|
+| Parse HTTP request (headers + body) | 1.7 us |
+| Parse HTTP response | 2.2 us |
+| Encode HTTP request | 0.7 us |
+| Encode HTTP response | 0.9 us |
+| Header serialization | 0.12 us |
 
-†Sub-µs calls exceed benchmark timer resolution.
+### Server throughput
 
-### HTTP Header Processing (Apple M-series)
+| Scenario | Requests/sec | Avg latency |
+|----------|-------------|-------------|
+| 1 thread, 1 connection | 50,035 | 22 us |
+| 4 threads, 100 connections | 50,847 | 49 ms |
 
-| Operation | Latency | Throughput |
-|-----------|---------|------------|
-| `HeaderMap` (10 set + 3 get) | 4.5 µs | ~220K ops/s |
-| `Response` construction | 1.3 µs | ~750K ops/s |
-| `Url.parse` (simple) | 0.5 µs | ~2M ops/s |
-| `Url.parse` (https + port) | 0.9 µs | ~1.1M ops/s |
+Zero socket timeouts under concurrent load.
 
-### IP Parsing + DNS
+### WebSocket SIMD masking
 
-| Operation | Throughput / Latency |
-|-----------|----------------------|
-| `IpAddr.parse` (IPv4) | 0.20 µs/call (5 Mops/s) |
-| `IpAddr.parse` (IPv6) | 0.22 µs/call |
-| `SocketAddr.parse` | 0.22 µs/call |
-| `resolve("localhost")` | 0.17 ms/call (syscall + resolver cache) |
+RFC 6455 requires XOR-masking every client-to-server byte. SIMD gives a 14-35x speedup for payloads above 128 bytes:
 
-Full API reference: [ehsanmok.github.io/flare](https://ehsanmok.github.io/flare/)
+| Payload | Scalar | SIMD-32 |
+|---------|--------|---------|
+| 1 KB | 3.2 GB/s | 112.6 GB/s |
+| 64 KB | 3.4 GB/s | 47.8 GB/s |
+| 1 MB | 3.4 GB/s | 54.8 GB/s |
 
 ## Development
 
 ```bash
 git clone https://github.com/ehsanmok/flare.git && cd flare
-pixi install        # installs Mojo nightly + OpenSSL + builds TLS FFI wrapper
+pixi install
 ```
 
 ### Tests
 
 ```bash
-pixi run tests             # full CI suite: all tests + all 7 examples
+pixi run tests             # 336 tests + 10 examples
 
 # Individual layers
-pixi run test-net          # IpAddr, SocketAddr, error types
+pixi run test-net          # IpAddr, SocketAddr, errors
 pixi run test-dns          # hostname resolution
-pixi run test-tcp          # TcpStream, TcpListener
+pixi run test-tcp          # TcpStream, TcpListener, IPv6 loopback
 pixi run test-udp          # UdpSocket
 pixi run test-tls          # TlsConfig, TlsStream
 pixi run test-http         # HeaderMap, Url, HttpClient, Response
-pixi run test-ws           # WsFrame codec, WsClient
-pixi run test-ergonomics   # high-level API (Auth, BufReader, WsMessage, …)
-```
-
-### Examples
-
-```bash
-pixi run examples            # run all 7 examples in sequence
-
-pixi run example-addresses   # IpAddr / SocketAddr construction
-pixi run example-dns         # DNS resolve with error handling
-pixi run example-errors      # typed error hierarchy
-pixi run example-tcp         # TCP bind/accept/ping-pong/64 KiB payload
-pixi run example-http        # HTTP GET + POST JSON (plain + TLS)
-pixi run example-ws          # WebSocket frame encode/decode + echo
-pixi run example-ergonomics  # high-level API (HttpClient, Auth, iter_bytes, BufReader)
+pixi run test-ws           # WsFrame, WsClient, WsServer
+pixi run test-server       # HTTP server (93 tests)
+pixi run test-ergonomics   # high-level API
 ```
 
 ### Benchmarks
 
 ```bash
-pixi run bench               # all three benchmarks in sequence
-
-pixi run bench-parse         # IP parsing + DNS throughput (SIMD not useful here)
-pixi run bench-ws-mask       # WebSocket XOR masking: scalar vs SIMD (14–35×)
-pixi run bench-http          # HeaderMap, Url.parse, Response construction throughput
-pixi run bench-tcp           # TCP loopback throughput (requires network)
+pixi run bench             # all microbenchmarks
+pixi run bench-compare     # HTTP encode/parse throughput
+pixi run bench-server      # start server, then use wrk against it
 ```
 
 ### Fuzzing
 
-Fuzz and property-based tests are powered by [mozz](https://github.com/ehsanmok/mozz),
-a pure-Mojo fuzzing library. The `fuzz/` directory contains two kinds of harnesses:
-
-| Kind | Purpose |
-|------|---------|
-| **Fuzz harness** (`fuzz_*.mojo`) | Feed arbitrary bytes/strings into a parser; any crash or unexpected panic is a bug. Expected typed errors (e.g. `UrlParseError`, `WsProtocolError`) are not reported. |
-| **Property test** (`prop_*.mojo`) | Assert invariants (round-trips, injection resistance, charset correctness) hold for all generated inputs. |
-
-**Prerequisites:** mozz must be available on the Mojo import path. With the
-default pixi environment it is installed as a git dependency. For a local
-mozz checkout, export the path first:
-
-**Run fuzz harnesses:**
+Powered by [mozz](https://github.com/ehsanmok/mozz). 11 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, and encoding.
 
 ```bash
-pixi run fuzz-ws            # WsFrame.decode_one(), arbitrary byte inputs
-pixi run fuzz-url           # Url.parse(), arbitrary string inputs
-pixi run fuzz-headers       # HeaderMap.set()/append(), injection detection
-pixi run fuzz-http-response # _parse_http_response(), full HTTP/1.1 parser
+pixi run --environment fuzz fuzz-http-server   # 500K runs
+pixi run --environment fuzz fuzz-cookie        # 200K runs
+pixi run --environment fuzz fuzz-all           # everything
 ```
 
-**Run property tests:**
+### Formatting
 
 ```bash
-pixi run prop-ws            # encode → decode round-trip for all valid frames
-pixi run prop-headers       # injection resistance + key case-folding consistency
-pixi run prop-auth          # b64 charset, Basic/Bearer header structure
-```
-
-### Code Formatting
-
-```bash
-pixi run format              # format all source files in-place
-pixi run format-check        # check formatting without modifying (CI)
+pixi run format            # format all source
+pixi run format-check      # CI check (no modifications)
 ```
 
 ## License
