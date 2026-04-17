@@ -17,7 +17,7 @@ echo server is unreachable.
 from flare.ws import WsClient, WsFrame, WsOpcode
 
 
-def _show_frame(f: WsFrame):
+def _show_frame(f: WsFrame) raises:
     """Pretty-print a frame's header and payload."""
     var opname = String("UNKNOWN")
     if f.opcode == WsOpcode.TEXT:
