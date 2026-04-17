@@ -1,5 +1,6 @@
 """HTTP request type."""
 
+from json import loads, Value
 from .headers import HeaderMap
 
 
@@ -22,7 +23,7 @@ struct Request(Movable):
 
     Fields:
         method:  HTTP method string (use ``Method.*`` constants).
-        url:     Full URL string, e.g. ``"https://example.com/path?q=1"``.
+        url:     Request target (path + query), e.g. ``"/items?page=1"``.
         headers: Request headers (owned ``HeaderMap``).
         body:    Request body bytes (empty for GET/HEAD).
         version: HTTP version string (default ``"HTTP/1.1"``).
@@ -55,7 +56,7 @@ struct Request(Movable):
 
         Args:
             method:  HTTP method string.
-            url:     Full URL.
+            url:     Full URL or request target.
             body:    Request body bytes; empty by default.
             version: HTTP version; ``"HTTP/1.1"`` by default.
         """
@@ -64,3 +65,54 @@ struct Request(Movable):
         self.headers = HeaderMap()
         self.body = body.copy()
         self.version = version
+
+    def text(self) -> String:
+        """Decode the request body as a UTF-8 string.
+
+        Returns:
+            The body decoded as a ``String``. Empty string if body is empty.
+        """
+        if len(self.body) == 0:
+            return ""
+        var out = String(capacity=len(self.body) + 1)
+        for b in self.body:
+            out += chr(Int(b))
+        return out^
+
+    def json(self) raises -> Value:
+        """Parse the request body as JSON.
+
+        Returns:
+            A ``json.Value`` representing the parsed JSON document.
+
+        Raises:
+            Error: If the body is not valid JSON.
+        """
+        return loads(self.text())
+
+    def content_length(self) -> Int:
+        """Return the Content-Length header value, or 0 if absent."""
+        var cl = self.headers.get("content-length")
+        if cl.byte_length() == 0:
+            return 0
+        var result = 0
+        for i in range(cl.byte_length()):
+            var c = Int(cl.unsafe_ptr()[i])
+            if c < 48 or c > 57:
+                break
+            result = result * 10 + (c - 48)
+        return result
+
+    def connection_close(self) -> Bool:
+        """Return True if ``Connection: close`` is set."""
+        var conn = self.headers.get("connection")
+        if conn.byte_length() == 0:
+            return False
+        var lower = String(capacity=conn.byte_length())
+        for i in range(conn.byte_length()):
+            var c = conn.unsafe_ptr()[i]
+            if c >= 65 and c <= 90:
+                lower += chr(Int(c) + 32)
+            else:
+                lower += chr(Int(c))
+        return lower == "close"

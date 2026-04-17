@@ -32,6 +32,9 @@ gxx        = ">=13"           # g++ for Linux (macOS uses system clang++ from Xc
 pre-commit = ">=4.2.0,<5"
 mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
 
+[feature.dev.target.linux-64.dependencies]
+wrk = ">=4.2.0"  # HTTP server benchmarking (linux-64 only on conda-forge)
+
 [feature.fuzz.dependencies]
 mozz = { git = "https://github.com/ehsanmok/mozz.git", branch = "main" }
 
@@ -50,7 +53,8 @@ prop-ws            = "mojo -I . fuzz/prop_ws_roundtrip.mojo"
 prop-headers       = "mojo -I . fuzz/prop_headers.mojo"
 prop-auth          = "mojo -I . fuzz/prop_auth.mojo"
 fuzz-encoding      = "mojo -I . fuzz/fuzz_encoding.mojo"
-fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding"] }
+fuzz-cookie        = "mojo -I . fuzz/fuzz_cookie.mojo"
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie"] }
 
 [environments]
 default = { features = ["dev"], solve-group = "default" }
@@ -68,8 +72,9 @@ test-tls         = "mojo -I . tests/test_tls.mojo"          # Phase 5 — 16 tes
 test-http        = "mojo -I . tests/test_http.mojo"         # Phase 6 — 45 tests
 test-ws          = "mojo -I . tests/test_ws.mojo"           # Phase 7 — 33 tests
 test-ergonomics  = "mojo -I . tests/test_ergonomics.mojo"   # Phase 8 — ergonomics
+test-server      = "mojo -I . tests/test_server.mojo"      # Server: buffered reads, keep-alive — 35 tests
 
-tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
+tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
 
 # ── Examples (runnable + tested as part of 'pixi run tests') ─────────────────
 example-addresses   = "mojo -I . examples/01_addresses.mojo"
@@ -94,9 +99,11 @@ bench-parse   = "mojo -I . benchmark/bench_parse.mojo"
 bench-ws-mask = "mojo -I . benchmark/bench_ws_mask.mojo"
 bench-http    = "mojo -I . benchmark/bench_http.mojo"
 bench-tcp     = "mojo -I . benchmark/bench_tcp.mojo"
+bench-compare = "mojo -I . benchmark/bench_compare.mojo"  # HTTP encode/parse throughput
+bench-server  = "mojo -I . benchmark/bench_server.mojo"   # HTTP server (use wrk against it)
 
-# Run all available benchmarks
-bench = { cmd = "mojo -I . benchmark/bench_parse.mojo && mojo -I . benchmark/bench_ws_mask.mojo && mojo -I . benchmark/bench_http.mojo" }
+# Run all available benchmarks (excludes bench-server which blocks)
+bench = { cmd = "mojo -I . benchmark/bench_parse.mojo && mojo -I . benchmark/bench_ws_mask.mojo && mojo -I . benchmark/bench_http.mojo && mojo -I . benchmark/bench_compare.mojo" }
 
 # ── Docs (powered by mojodoc) ─────────────────────────────────────────────────
 # docs:       build + serve at http://localhost:3000/flare/ (blocks terminal)

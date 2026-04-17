@@ -255,7 +255,7 @@ from .http.encoding import Encoding
 from .http.error import HttpError, TooManyRedirects
 from .http.auth import BasicAuth, BearerAuth
 from .http.client import HttpClient, get, post, put, delete, head
-from .http.server import HttpServer
+from .http.server import HttpServer, ServerConfig, ok, ok_json, bad_request, not_found, internal_error, redirect
 
 # flare.ws
 from .ws.frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
