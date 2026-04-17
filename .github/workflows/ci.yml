@@ -37,5 +37,8 @@ jobs:
           cache: false
           post-cleanup: false
 
+      - name: Check formatting
+        run: pixi run format-check
+
       - name: Run tests
         run: pixi run tests
