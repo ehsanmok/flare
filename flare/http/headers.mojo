@@ -29,16 +29,14 @@ def _eq_icase(a: String, b: String) -> Bool:
 @always_inline
 def _lower(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
-    var n = s.byte_length()
-    var src = s.unsafe_ptr()
-    var buf = List[UInt8](capacity=n)
-    for i in range(n):
-        var c = src[i]
+    var out = String(capacity=s.byte_length())
+    for i in range(s.byte_length()):
+        var c = s.unsafe_ptr()[i]
         if c >= 65 and c <= 90:
-            buf.append(c + 32)
+            out += chr(Int(c) + 32)
         else:
-            buf.append(c)
-    return String(String(unsafe_from_utf8=Span[UInt8, _](buf)))
+            out += chr(Int(c))
+    return out
 
 
 struct HeaderInjectionError(Copyable, Movable, Writable):

@@ -556,23 +556,22 @@ def _parse_http_request_bytes(
 def _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:
     """Read one CRLF/LF-terminated line from a byte span, advancing ``pos``.
 
-    Collects ASCII bytes into a buffer, replacing NUL and non-ASCII bytes
-    with '?' (HTTP headers are ASCII per RFC 7230). Builds one String from
-    the sanitized buffer to avoid chr()-per-byte overhead.
+    Replaces NUL and non-ASCII bytes with '?' since HTTP headers are ASCII
+    per RFC 7230.
     """
-    var buf = List[UInt8](capacity=256)
+    var line = String(capacity=256)
     while pos < len(data):
         var c = data[pos]
         pos += 1
         if c == 13:
             continue
         if c == 10:
-            return String(StringSlice(unsafe_from_utf8=Span[UInt8, _](buf)))
+            return line^
         if c == 0 or c >= 128:
-            buf.append(63)  # '?' for NUL and non-ASCII
+            line += "?"
         else:
-            buf.append(c)
-    return String(StringSlice(unsafe_from_utf8=Span[UInt8, _](buf)))
+            line += chr(Int(c))
+    return line^
 
 
 def _parse_int_str(s: String) -> Int:
@@ -794,16 +793,14 @@ def _append_str(mut buf: List[UInt8], s: String):
 @always_inline
 def _ascii_lower(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
-    var n = s.byte_length()
-    var src = s.unsafe_ptr()
-    var buf = List[UInt8](capacity=n)
-    for i in range(n):
-        var c = src[i]
+    var out = String(capacity=s.byte_length())
+    for i in range(s.byte_length()):
+        var c = s.unsafe_ptr()[i]
         if c >= 65 and c <= 90:
-            buf.append(c + 32)
+            out += chr(Int(c) + 32)
         else:
-            buf.append(c)
-    return String(String(unsafe_from_utf8=Span[UInt8, _](buf)))
+            out += chr(Int(c))
+    return out
 
 
 def _status_reason(code: Int) -> String:
