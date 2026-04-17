@@ -54,7 +54,7 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
 
 
 def _do_sha1_srv(
-    fn_sha1: def(Int, Int, Int) abi("C") -> Int,
+    fn_sha1: def(Int, Int, Int) thin abi("C") -> Int,
     data_bytes: Span[UInt8, _],
     read lib: OwnedDLHandle,
 ) -> List[UInt8]:

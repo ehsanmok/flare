@@ -180,13 +180,14 @@ def parse_set_cookie_header(header: String) -> Cookie:
             eq = i
             break
 
-    var name = String("")
-    var value = String("")
+    var name: String
+    var value: String
     if eq >= 0:
         name = String(String(unsafe_from_utf8=nv.as_bytes()[:eq]).strip())
         value = String(String(unsafe_from_utf8=nv.as_bytes()[eq + 1 :]).strip())
     else:
         name = nv
+        value = String("")
 
     var cookie = Cookie(name, value)
 

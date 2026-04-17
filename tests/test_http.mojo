@@ -300,7 +300,7 @@ def test_https_get_json() raises:
             "Expected 200 from httpbin HTTPS, got " + String(resp.status),
         )
         var body = resp.text()
-        assert_true(len(body) > 0, "Expected non-empty body")
+        assert_true(body.byte_length() > 0, "Expected non-empty body")
         assert_true("slideshow" in body or "{" in body, "Expected JSON body")
     except e:
         print("  [SKIP] network unavailable: " + String(e))

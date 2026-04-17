@@ -857,7 +857,7 @@ def test_eq_icase_empty() raises:
 
 
 def test_encode_to_basic() raises:
-    """encode_to serialises headers as wire bytes."""
+    """Encode_to serialises headers as wire bytes."""
     var hm = HeaderMap()
     hm.set("Host", "example.com")
     hm.set("Accept", "text/html")
@@ -869,7 +869,7 @@ def test_encode_to_basic() raises:
 
 
 def test_encode_to_empty() raises:
-    """encode_to on empty HeaderMap produces no bytes."""
+    """Encode_to on empty HeaderMap produces no bytes."""
     var hm = HeaderMap()
     var buf = List[UInt8](capacity=64)
     hm.encode_to(buf)
@@ -880,7 +880,7 @@ def test_encode_to_empty() raises:
 
 
 def test_set_unchecked_basic() raises:
-    """set_unchecked adds headers and get retrieves them case-insensitively."""
+    """Set_unchecked adds headers and get retrieves them case-insensitively."""
     var hm = HeaderMap()
     hm.set_unchecked("Content-Type", "content-type", "application/json")
     assert_equal(hm.get("content-type"), "application/json")
@@ -889,7 +889,7 @@ def test_set_unchecked_basic() raises:
 
 
 def test_set_unchecked_replaces() raises:
-    """set_unchecked replaces existing header."""
+    """Set_unchecked replaces existing header."""
     var hm = HeaderMap()
     hm.set_unchecked("X-Foo", "x-foo", "old")
     hm.set_unchecked("X-Foo", "x-foo", "new")
