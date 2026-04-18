@@ -22,3 +22,4 @@ from .event import (
     WAKEUP_TOKEN,
 )
 from .reactor import Reactor
+from .timer_wheel import TimerWheel
