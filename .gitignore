@@ -27,10 +27,10 @@ target/
 .mozz_crashes/
 fuzz/corpus/
 
-# Benchmark runtime artifacts
-benchmark/results/*/
-benchmark/results/.server.pid
-benchmark/results/integrity/
+# Benchmark runtime artifacts — everything under results/ is per-run
+# output; keep the directory via .gitkeep but don't track contents.
+benchmark/results/*
+!benchmark/results/.gitkeep
 benchmark/baselines/*/server
 benchmark/baselines/*/go.sum
 benchmark/baselines/*/nginx-rendered.conf
