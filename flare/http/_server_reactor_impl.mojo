@@ -457,7 +457,14 @@ struct ConnHandle(Movable):
                 + resp.headers._values[i].byte_length()
                 + 4
             )
-        var wire = List[UInt8](capacity=estimated)
+        # Reuse self.write_buf's allocated capacity across requests —
+        # on_writable already clears the buffer on flush, so its backing
+        # storage is idle. Avoids a per-request List allocation.
+        self.write_buf.clear()
+        self.write_pos = 0
+        if self.write_buf.capacity < estimated:
+            self.write_buf.reserve(estimated)
+        var wire = self.write_buf^
 
         _append_str(wire, "HTTP/1.1 ")
         _append_str(wire, String(resp.status))
