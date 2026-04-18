@@ -41,7 +41,7 @@ mozz = { git = "https://github.com/ehsanmok/mozz.git", branch = "main" }
 [feature.bench.dependencies]
 # Stage 1 / Phase 1.6 — bench harness baselines.
 # Pinned exact so nobody ever benchmarks against a drifting toolchain.
-go    = ">=1.22,<1.25"  # Go stdlib net/http + fasthttp baselines
+go    = ">=1.22,<1.25"  # Go stdlib net/http baseline
 nginx = ">=1.25,<1.29"  # 1-worker plaintext baseline
 
 [feature.bench.target.linux-64.dependencies]
