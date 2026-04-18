@@ -72,7 +72,7 @@ def test_multiple_timers_fire_in_order() raises:
 
 
 def test_immediate_timer_fires_next_advance() raises:
-    """after_ms=0 fires on the next non-zero advance."""
+    """After_ms=0 fires on the next non-zero advance."""
     var tw = TimerWheel(now_ms=UInt64(0))
     _ = tw.schedule(0, UInt64(0x11))
     var fired = List[UInt64]()
@@ -94,7 +94,7 @@ def test_zero_advance_fires_nothing() raises:
 
 
 def test_cancel_returns_true_first_time() raises:
-    """cancel() returns True for an active, never-before-cancelled timer."""
+    """Cancel() returns True for an active, never-before-cancelled timer."""
     var tw = TimerWheel(now_ms=UInt64(0))
     var id = tw.schedule(100, UInt64(1))
     assert_true(tw.cancel(id))
@@ -109,7 +109,7 @@ def test_cancel_returns_false_twice() raises:
 
 
 def test_cancel_unknown_id_returns_false() raises:
-    """cancel() on a never-issued ID returns False."""
+    """Cancel() on a never-issued ID returns False."""
     var tw = TimerWheel(now_ms=UInt64(0))
     assert_false(tw.cancel(UInt64(99999)))
 
@@ -199,7 +199,7 @@ def test_many_cancels_dont_leak() raises:
 
 
 def test_now_ms_reflects_advance() raises:
-    """now_ms() tracks the wheel's current tick."""
+    """Now_ms() tracks the wheel's current tick."""
     var tw = TimerWheel(now_ms=UInt64(100))
     assert_equal(tw.now_ms(), UInt64(100))
     var fired = List[UInt64]()
@@ -208,7 +208,7 @@ def test_now_ms_reflects_advance() raises:
 
 
 def test_next_fire_ms_returns_earliest() raises:
-    """next_fire_ms() returns the absolute time of the earliest pending timer.
+    """Next_fire_ms() returns the absolute time of the earliest pending timer.
     """
     var tw = TimerWheel(now_ms=UInt64(0))
     _ = tw.schedule(500, UInt64(1))

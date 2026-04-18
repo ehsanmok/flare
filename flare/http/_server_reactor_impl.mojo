@@ -194,7 +194,7 @@ struct ConnHandle(Movable):
 
     def on_readable(
         mut self,
-        handler: def(Request) raises -> Response,
+        handler: def(Request) raises thin -> Response,
         config: ServerConfig,
     ) raises -> StepResult:
         """Drive the state machine on a readable event.
@@ -721,7 +721,7 @@ def _accept_loop(
 def run_reactor_loop(
     mut listener: TcpListener,
     config: ServerConfig,
-    handler: def(Request) raises -> Response,
+    handler: def(Request) raises thin -> Response,
     stopping: Bool,
 ) raises:
     """Run the single-threaded event loop until ``stopping`` becomes True.

@@ -79,7 +79,7 @@ def test_register_rejects_wakeup_token() raises:
 
 
 def test_register_rejects_empty_interest() raises:
-    """interest must include at least READ or WRITE."""
+    """Interest must include at least READ or WRITE."""
     var r = Reactor()
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     with assert_raises():
@@ -98,21 +98,21 @@ def test_register_same_fd_twice_raises() raises:
 
 
 def test_unregister_unknown_fd_raises() raises:
-    """unregister() on a never-registered fd raises."""
+    """Unregister() on a never-registered fd raises."""
     var r = Reactor()
     with assert_raises():
         r.unregister(c_int(999))
 
 
 def test_modify_unknown_fd_raises() raises:
-    """modify() on a never-registered fd raises."""
+    """Modify() on a never-registered fd raises."""
     var r = Reactor()
     with assert_raises():
         r.modify(c_int(999), INTEREST_READ)
 
 
 def test_modify_from_read_to_write() raises:
-    """modify() changes the interest without changing the token."""
+    """Modify() changes the interest without changing the token."""
     var r = Reactor()
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     r.register(listener._socket.fd, UInt64(42), INTEREST_READ)
@@ -253,45 +253,51 @@ def test_poll_multiple_fds() raises:
     r.register(s3._socket.fd, UInt64(1003), INTEREST_READ)
     listener.close()
 
-    # Each client writes a byte.
+    # Each client writes a byte. Use ``write_all`` so we don't silently
+    # accept a short write that would make the later poll flaky.
     var m1 = List[UInt8]()
     m1.append(UInt8(ord("A")))
-    _ = c1.write(Span[UInt8](m1))
+    c1.write_all(Span[UInt8](m1))
     var m2 = List[UInt8]()
     m2.append(UInt8(ord("B")))
-    _ = c2.write(Span[UInt8](m2))
+    c2.write_all(Span[UInt8](m2))
     var m3 = List[UInt8]()
     m3.append(UInt8(ord("C")))
-    _ = c3.write(Span[UInt8](m3))
+    c3.write_all(Span[UInt8](m3))
 
-    # poll may return a subset of ready fds per call on some kernels (the
-    # kernel's readiness list can trickle in, especially on macOS kqueue).
-    # Accumulate across up to 20 short polls — in practice kqueue usually
-    # surfaces all three within 2-3 iterations; the extra budget protects
-    # against flaky CI runs under load.
+    # Poll may return a subset of ready fds per call on some kernels.
+    # Accumulate across up to 40 short polls (up to 4 seconds total) and
+    # drain each fd once we see it so we exercise the level-triggered
+    # path rather than relying on repeated delivery. In practice on
+    # loopback all three arrive within the first 1-2 polls.
+    var drain_buf = List[UInt8]()
+    drain_buf.resize(1, UInt8(0))
     var events = List[Event]()
     var seen = List[Bool]()
     seen.resize(3, False)
     var total_seen = 0
     var attempts = 0
-    while total_seen < 3 and attempts < 20:
+    while total_seen < 3 and attempts < 40:
         events.clear()
-        _ = r.poll(200, events, max_events=16)
+        _ = r.poll(100, events, max_events=16)
         for j in range(len(events)):
             var tok = events[j].token
             if tok == UInt64(1001) and not seen[0]:
                 seen[0] = True
                 total_seen += 1
+                _ = s1.read(drain_buf.unsafe_ptr(), 1)
             elif tok == UInt64(1002) and not seen[1]:
                 seen[1] = True
                 total_seen += 1
+                _ = s2.read(drain_buf.unsafe_ptr(), 1)
             elif tok == UInt64(1003) and not seen[2]:
                 seen[2] = True
                 total_seen += 1
+                _ = s3.read(drain_buf.unsafe_ptr(), 1)
         attempts += 1
     assert_true(
         total_seen == 3,
-        "expected all 3 tokens across <=20 polls; got " + String(total_seen),
+        "expected all 3 tokens across <=40 polls; got " + String(total_seen),
     )
 
     r.unregister(s1._socket.fd)

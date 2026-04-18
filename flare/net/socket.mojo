@@ -332,9 +332,9 @@ struct RawSocket(Movable):
 
         comptime if CompilationTarget.is_macos():
             var lib = OwnedDLHandle(_find_flare_lib())
-            var fn_nb = lib.get_function[def(c_int, c_int) -> c_int](
-                "flare_set_nonblocking"
-            )
+            var fn_nb = lib.get_function[
+                def(c_int, c_int) thin abi("C") -> c_int
+            ]("flare_set_nonblocking")
             var rc = fn_nb(self.fd, c_int(1) if enabled else c_int(0))
             if rc < c_int(0):
                 var e = get_errno()

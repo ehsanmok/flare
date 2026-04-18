@@ -58,7 +58,7 @@ def test_server_close_is_idempotent() raises:
 
 
 def test_server_close_sets_stopping_flag() raises:
-    """close() flips ``_stopping`` so a serve loop would see it."""
+    """Close() flips ``_stopping`` so a serve loop would see it."""
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     assert_false(srv._stopping)
     srv.close()

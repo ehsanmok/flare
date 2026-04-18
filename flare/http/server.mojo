@@ -133,7 +133,7 @@ struct HttpServer(Movable):
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^, config^)
 
-    def serve(mut self, handler: def(Request) raises -> Response) raises:
+    def serve(mut self, handler: def(Request) raises thin -> Response) raises:
         """Run the single-threaded reactor loop, calling ``handler`` per request.
 
         Delegates to ``flare.http._server_reactor_impl.run_reactor_loop``;

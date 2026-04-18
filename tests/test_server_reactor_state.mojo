@@ -72,7 +72,7 @@ def _default_config() raises -> ServerConfig:
 def _drive_readable(
     mut ch: ConnHandle,
     mut r: Reactor,
-    handler: def(Request) raises -> Response,
+    handler: def(Request) raises thin -> Response,
     config: ServerConfig,
     timeout_ms: Int = 500,
 ) raises -> StepResult:
@@ -448,7 +448,7 @@ def test_max_keepalive_requests_closes_conn() raises:
 
 
 def test_on_timeout_marks_closing() raises:
-    """on_timeout flips state to CLOSING and returns done=True."""
+    """On_timeout flips state to CLOSING and returns done=True."""
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = listener.local_addr().port
     var client = TcpStream.connect(SocketAddr.localhost(port))
