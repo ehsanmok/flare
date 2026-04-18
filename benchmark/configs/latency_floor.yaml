@@ -1,0 +1,10 @@
+# Latency floor: one connection, minimum achievable per-request latency.
+# Useful for isolating parsing/syscall overhead from concurrency effects.
+name: latency_floor
+wrk_threads: 1
+wrk_connections: 1
+wrk_duration_seconds: 30
+warmup_seconds: 10
+runs: 5
+quiet_seconds: 3
+stdev_pct_gate: 3.0

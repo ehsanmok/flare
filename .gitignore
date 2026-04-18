@@ -26,3 +26,13 @@ target/
 # fuzz artifacts
 .mozz_crashes/
 fuzz/corpus/
+
+# Benchmark runtime artifacts
+benchmark/results/*/
+benchmark/results/.server.pid
+benchmark/results/integrity/
+benchmark/baselines/*/server
+benchmark/baselines/*/go.sum
+benchmark/baselines/*/nginx-rendered.conf
+benchmark/baselines/nginx/nginx.pid
+benchmark/baselines/nginx/logs/

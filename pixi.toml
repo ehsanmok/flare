@@ -38,6 +38,24 @@ wrk = ">=4.2.0"  # HTTP server benchmarking (linux-64 only on conda-forge)
 [feature.fuzz.dependencies]
 mozz = { git = "https://github.com/ehsanmok/mozz.git", branch = "main" }
 
+[feature.bench.dependencies]
+# Stage 1 / Phase 1.6 — bench harness baselines.
+# Pinned exact so nobody ever benchmarks against a drifting toolchain.
+go    = ">=1.22,<1.25"  # Go stdlib net/http + fasthttp baselines
+nginx = ">=1.25,<1.29"  # 1-worker plaintext baseline
+
+[feature.bench.target.linux-64.dependencies]
+wrk = ">=4.2.0"     # conda-forge has wrk on linux-64; macOS uses system wrk
+
+[feature.bench.tasks]
+# ── Benchmark harness (Stage 1 / Phase 1.6) ──────────────────────────────────
+# All baselines are pinned per [feature.bench.dependencies].
+# Run with: pixi run --environment bench <task>
+bench-vs-baseline         = "bash benchmark/scripts/bench_vs_baseline.sh"
+bench-vs-baseline-quick   = "bash benchmark/scripts/bench_vs_baseline.sh --only=flare,go_nethttp --configs=throughput"
+bench-integrity-only      = "bash benchmark/scripts/_integrity_check.sh"
+bench-collect-env         = "bash benchmark/scripts/_collect_env.sh"
+
 [feature.fuzz.tasks]
 # ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
 # mozz is installed as a pixi dependency (feature.fuzz) and packaged as
@@ -63,6 +81,7 @@ fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuz
 default = { features = ["dev"], solve-group = "default" }
 dev     = { features = ["dev"], solve-group = "default" }
 fuzz    = { features = ["dev", "fuzz"], solve-group = "default" }
+bench   = { features = ["dev", "bench"], solve-group = "default" }
 
 [tasks]
 # ── Tests (flat files, one file per test suite) ───────────────────────────────

@@ -1,0 +1,2 @@
+nginx version pinned via [feature.bench.dependencies] of pixi.toml.
+Record actual `nginx -v` in env.json on each run.

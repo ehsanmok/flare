@@ -1,0 +1,2 @@
+fasthttp v1.58.0 (pinned in go.mod). Go compiler version pinned via
+[feature.bench.dependencies] of pixi.toml.

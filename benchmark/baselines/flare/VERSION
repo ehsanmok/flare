@@ -1,0 +1,2 @@
+flare (reactor-backed HttpServer from Phase 1.5). Version recorded in
+env.json as the current git commit sha at bench time.

@@ -1,0 +1,11 @@
+# Throughput configuration: measure peak req/s under realistic keep-alive
+# concurrency. Aligned with TFB-style runs.
+name: throughput
+wrk_threads: 1
+wrk_connections: 64
+wrk_duration_seconds: 30
+warmup_seconds: 15
+runs: 5
+quiet_seconds: 5
+# Variance gate: stdev/mean <= 3% for the run to count as "stable".
+stdev_pct_gate: 3.0

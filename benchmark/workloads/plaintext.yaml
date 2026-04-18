@@ -1,0 +1,20 @@
+# TFB plaintext workload spec.
+# Every baseline MUST produce byte-identical bodies and headers matching
+# this spec (modulo the whitelisted Date/Server/Connection headers).
+
+path: /plaintext
+method: GET
+
+response:
+  status: 200
+  content_type: "text/plain; charset=utf-8"
+  body: "Hello, World!"
+  # 13 bytes, no trailing newline.
+  body_length: 13
+
+# Headers that are allowed to vary across targets (each target's default).
+header_whitelist:
+  - Date
+  - Server
+  - Connection
+  - Keep-Alive

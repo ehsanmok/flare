@@ -1,0 +1,3 @@
+Go stdlib net/http (GOMAXPROCS=1). Go version pinned in
+[feature.bench.dependencies] of pixi.toml; record actual `go version`
+in env.json on each run.
