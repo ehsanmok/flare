@@ -1,12 +1,19 @@
 """Example 08: HTTP/1.1 server with flare.http.HttpServer.
 
 Shows how to build a simple server with routing, JSON responses, cookies,
-and the new response helpers.
+and the response helpers.
 
 Real-world usage blocks forever:
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(handler)
+
+Under the hood ``serve`` runs a single-threaded event loop on kqueue
+(macOS) or epoll (Linux) with per-connection state machines — nginx-style
+architecture, no thread-per-connection. This keeps memory flat under
+C10K-style loads and sustains ~139K req/s on a single core (TFB
+plaintext, Apple M-series) — on par with Go ``net/http`` at the same
+thread count. See ``benchmark/`` for the full harness.
 
 Here we drive the server one request at a time using the internal
 _parse_http_request + _write_response so the example exits cleanly.

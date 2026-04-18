@@ -17,9 +17,9 @@ A fast networking library for Mojo🔥, covering everything from raw sockets to 
 
 - TCP, UDP, TLS, HTTP, and WebSocket in one package
 - IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback)
-- 336 tests and 11 fuzz harnesses, zero known crashes
-- HTTP parsing 7-9x faster than other Mojo HTTP libraries
-- Server handles ~50K req/s on a single thread
+- Reactor-backed HTTP server (kqueue / epoll), single-threaded event loop — **~139K req/s plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)**
+- HTTP parsing 7-9× faster than other Mojo HTTP libraries
+- 375 tests and 15 fuzz harnesses (1M+ runs), zero known crashes
 
 ## Quick start
 
@@ -59,7 +59,7 @@ def main() raises:
     srv.serve(handler)
 ```
 
-The server reads in 8KB chunks, supports HTTP/1.1 keep-alive, validates headers per RFC 7230, and sets recv/send timeouts to prevent stalled clients from blocking other connections.
+The server is reactor-backed: one event loop on `kqueue` (macOS) or `epoll` (Linux), non-blocking sockets, per-connection state machines, a hashed timing wheel for idle timeouts — nginx-style architecture, no thread-per-connection. Supports HTTP/1.1 keep-alive, validates headers per RFC 7230, and enforces configurable limits on header/body/URI size and per-connection idle/write timeouts.
 
 ### HTTP client with auth
 
@@ -130,19 +130,20 @@ flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 ## What's inside
 
 ```
-flare.io    ─ BufReader
+flare.io       ─ BufReader
     │
-flare.ws    ─ WebSocket client + server (RFC 6455)
-flare.http  ─ HTTP/1.1 client + server + cookies
+flare.ws       ─ WebSocket client + server (RFC 6455)
+flare.http     ─ HTTP/1.1 client + reactor-backed server + cookies
     │
-flare.tls   ─ TLS 1.2/1.3 (OpenSSL)
+flare.tls      ─ TLS 1.2/1.3 (OpenSSL)
     │
-flare.tcp   ─ TcpStream + TcpListener (IPv4 + IPv6)
-flare.udp   ─ UdpSocket (IPv4 + IPv6)
+flare.tcp      ─ TcpStream + TcpListener (IPv4 + IPv6)
+flare.udp      ─ UdpSocket (IPv4 + IPv6)
     │
-flare.dns   ─ getaddrinfo (dual-stack)
+flare.dns      ─ getaddrinfo (dual-stack)
     │
-flare.net   ─ IpAddr, SocketAddr, RawSocket
+flare.net      ─ IpAddr, SocketAddr, RawSocket
+flare.runtime  ─ Reactor (kqueue/epoll), TimerWheel, Event
 ```
 
 Each layer only imports from layers below it. No circular dependencies.
@@ -223,6 +224,24 @@ def main() raises:
 
 Measured on Apple M-series, Mojo 0.26.3 nightly.
 
+### Server throughput — TFB plaintext
+
+Single-threaded, `wrk -t1 -c64 -d30s`, 5-run median of middle 3 with stdev < 1%. Same response body, headers, and keep-alive on all baselines. Full methodology in `.cursor/rules/bench_vs_baseline.md`.
+
+| Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
+|---|---:|---:|---:|---:|
+| **flare (reactor)** | **139,444** | 0.45 ms | 0.91 ms | **0.99×** |
+| Go `net/http` (1 thread) | 140,612 | 0.45 ms | 0.86 ms | 1.00× |
+| Go `fasthttp` (1 thread) | ~266,000 | 0.20 ms | 0.34 ms | 1.88× |
+
+flare is on par with Go's stdlib `net/http` at the same thread count — a ~2.8× jump over the v0.2.0 blocking server, and single-digit percent under `fasthttp` territory on a pure-Mojo runtime.
+
+Reproduce locally:
+
+```bash
+pixi run --environment bench bench-vs-baseline-quick
+```
+
 ### HTTP parsing
 
 | Operation | Latency |
@@ -232,15 +251,6 @@ Measured on Apple M-series, Mojo 0.26.3 nightly.
 | Encode HTTP request | 0.7 us |
 | Encode HTTP response | 0.9 us |
 | Header serialization | 0.12 us |
-
-### Server throughput
-
-| Scenario | Requests/sec | Avg latency |
-|----------|-------------|-------------|
-| 1 thread, 1 connection | 50,035 | 22 us |
-| 4 threads, 100 connections | 50,847 | 49 ms |
-
-Zero socket timeouts under concurrent load.
 
 ### WebSocket SIMD masking
 
@@ -262,21 +272,42 @@ pixi install
 ### Tests
 
 ```bash
-pixi run tests             # 336 tests + 10 examples
+pixi run tests             # 375 tests + 10 examples
 
 # Individual layers
-pixi run test-net          # IpAddr, SocketAddr, errors
-pixi run test-dns          # hostname resolution
-pixi run test-tcp          # TcpStream, TcpListener, IPv6 loopback
-pixi run test-udp          # UdpSocket
-pixi run test-tls          # TlsConfig, TlsStream
-pixi run test-http         # HeaderMap, Url, HttpClient, Response
-pixi run test-ws           # WsFrame, WsClient, WsServer
-pixi run test-server       # HTTP server (93 tests)
-pixi run test-ergonomics   # high-level API
+pixi run test-net                    # IpAddr, SocketAddr, errors
+pixi run test-dns                    # hostname resolution
+pixi run test-tcp                    # TcpStream, TcpListener, IPv6 loopback
+pixi run test-udp                    # UdpSocket
+pixi run test-tls                    # TlsConfig, TlsStream
+pixi run test-http                   # HeaderMap, Url, HttpClient, Response
+pixi run test-ws                     # WsFrame, WsClient, WsServer
+pixi run test-server                 # HTTP server (93 tests)
+pixi run test-server-reactor-state   # Reactor connection state machine
+pixi run test-reactor                # Reactor (kqueue/epoll) abstraction
+pixi run test-reactor-shutdown       # HttpServer graceful shutdown
+pixi run test-timer-wheel            # TimerWheel
+pixi run test-syscall-ffi            # Low-level epoll/kqueue/eventfd FFI
+pixi run test-ergonomics             # high-level API
 ```
 
 ### Benchmarks
+
+#### Server throughput vs Go `net/http` / `fasthttp` / nginx
+
+Rigorous harness: pre-flight body-byte integrity check across all targets, pinned Go (1.23) and nginx (1.27) via Pixi, environment metadata (CPU/OS/kernel-tune) captured alongside results, 5 runs per (target × config), median of middle 3 with < 3% stdev gate.
+
+```bash
+pixi run --environment bench bench-vs-baseline-quick
+# flare vs Go net/http, throughput config only (~7 min total)
+
+pixi run --environment bench bench-vs-baseline
+# all 4 baselines (flare, go_nethttp, go_fasthttp, nginx) × throughput + latency_floor
+```
+
+Results and `env.json` are written under `benchmark/results/<timestamp>-<host>-<commit>/`.
+
+#### Microbenchmarks
 
 ```bash
 pixi run bench             # all microbenchmarks in sequence
@@ -286,24 +317,16 @@ pixi run bench-ws-mask     # WebSocket XOR masking: scalar vs SIMD
 pixi run bench-parse       # IP parsing + DNS resolution
 ```
 
-To measure server throughput, start the benchmark server and hit it with [wrk](https://github.com/wg/wrk):
-
-```bash
-pixi run bench-server      # starts on localhost:9090, blocks
-
-# in another terminal:
-wrk -t1 -c1 -d10s http://localhost:9090/
-wrk -t4 -c100 -d10s http://localhost:9090/
-```
-
 ### Fuzzing
 
-Powered by [mozz](https://github.com/ehsanmok/mozz). 11 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, and encoding.
+Powered by [mozz](https://github.com/ehsanmok/mozz). 15 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, encoding, and the reactor / connection state machine.
 
 ```bash
-pixi run --environment fuzz fuzz-http-server   # 500K runs
-pixi run --environment fuzz fuzz-cookie        # 200K runs
-pixi run --environment fuzz fuzz-all           # everything
+pixi run --environment fuzz fuzz-http-server             # 500K runs
+pixi run --environment fuzz fuzz-reactor-churn           # 200K runs
+pixi run --environment fuzz fuzz-server-reactor-chunks   # 30K runs
+pixi run --environment fuzz prop-timer-wheel             # 100K runs
+pixi run --environment fuzz fuzz-all                     # everything
 ```
 
 ### Formatting
