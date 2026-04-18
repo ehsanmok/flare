@@ -17,7 +17,7 @@ A fast networking library for Mojo🔥, covering everything from raw sockets to 
 
 - TCP, UDP, TLS, HTTP, and WebSocket in one package
 - IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback)
-- Reactor-backed HTTP server (kqueue / epoll), single-threaded event loop — **~139K req/s plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)**
+- Reactor-backed HTTP server (kqueue / epoll), single-threaded event loop — **~140K req/s plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)**
 - HTTP parsing 7-9× faster than other Mojo HTTP libraries
 - 375 tests and 15 fuzz harnesses (1M+ runs), zero known crashes
 
