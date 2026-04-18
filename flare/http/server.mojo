@@ -9,6 +9,8 @@ Key performance characteristics:
 - Respects HTTP/1.0 close-by-default semantics.
 """
 
+from std.memory import memcpy
+
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
@@ -362,14 +364,8 @@ def _parse_http_request_bytes(
             if not name_valid:
                 raise Error("invalid character in header name")
 
-            var k = String(
-                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
-            )
-            var v = String(
-                String(
-                    String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
-                ).strip()
-            )
+            var k = _ascii_strip_slice(line.as_bytes()[:colon])
+            var v = _ascii_strip_slice(line.as_bytes()[colon + 1 :])
 
             # Validate header value (no bare CR/LF/NUL)
             for i in range(v.byte_length()):
@@ -393,8 +389,16 @@ def _parse_http_request_bytes(
             var end = pos + content_length
             if end > len(data):
                 end = len(data)
-            for i in range(pos, end):
-                body.append(data[i])
+            # Bulk-copy the body in one resize + memcpy. Per-byte
+            # ``body.append`` was a measurable hot-path cost on POSTs.
+            var n = end - pos
+            if n > 0:
+                body.resize(n, UInt8(0))
+                memcpy(
+                    dest=body.unsafe_ptr(),
+                    src=data.unsafe_ptr() + pos,
+                    count=n,
+                )
 
     var req = Request(method=method, url=path, body=body^, version=version)
     req.headers = headers^
@@ -406,20 +410,55 @@ def _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:
 
     Replaces NUL and non-ASCII bytes with '?' since HTTP headers are ASCII
     per RFC 7230.
+
+    Fast path: scan once for the LF terminator while checking for bad
+    bytes; if none are found, build the line in a single
+    ``String(unsafe_from_utf8=span)`` call. The slow path only runs on
+    malformed / non-ASCII requests and preserves the previous
+    byte-at-a-time sanitisation semantics.
     """
-    var line = String(capacity=256)
-    while pos < len(data):
-        var c = data[pos]
-        pos += 1
-        if c == 13:
-            continue
+    var n = len(data)
+    var start = pos
+    var end = -1
+    var has_bad = False
+    var i = start
+    while i < n:
+        var c = data[i]
         if c == 10:
-            return line^
+            end = i
+            break
         if c == 0 or c >= 128:
-            line += "?"
+            has_bad = True
+        i += 1
+
+    if end < 0:
+        # No terminator — consume everything that was available.
+        end = n
+
+    # Advance the caller's cursor past the LF (or to end-of-buffer).
+    pos = end + 1 if end < n else end
+
+    # Exclude trailing CR.
+    var stop = end
+    if stop > start and data[stop - 1] == 13:
+        stop -= 1
+
+    if stop <= start:
+        return String("")
+
+    if not has_bad:
+        # Fast path — pure ASCII, one-shot construction.
+        return String(unsafe_from_utf8=data[start:stop])
+
+    # Slow path: copy bytes, replacing bad ones with '?'.
+    var out = String(capacity=stop - start)
+    for k in range(start, stop):
+        var c = data[k]
+        if c == 0 or c >= 128:
+            out += "?"
         else:
-            line += chr(Int(c))
-    return line^
+            out += chr(Int(c))
+    return out^
 
 
 def _parse_int_str(s: String) -> Int:
@@ -613,23 +652,82 @@ def _write_response_buffered(
 
 @always_inline
 def _append_str(mut buf: List[UInt8], s: String):
-    """Append all bytes of ``s`` to ``buf``."""
-    var ptr = s.unsafe_ptr()
-    for i in range(s.byte_length()):
-        buf.append(ptr[i])
+    """Append all bytes of ``s`` to ``buf``.
+
+    Bulk extend via resize + pointer copy. The naive per-byte
+    ``buf.append(...)`` loop was called O(100) times per serialized
+    response (status line + each header + body) which added measurable
+    cost at 100K+ req/s.
+    """
+    var n = s.byte_length()
+    if n == 0:
+        return
+    var old_len = len(buf)
+    buf.resize(old_len + n, UInt8(0))
+    memcpy(dest=buf.unsafe_ptr() + old_len, src=s.unsafe_ptr(), count=n)
+
+
+@always_inline
+def _ascii_strip_slice(span: Span[UInt8, _]) -> String:
+    """Return an owned ``String`` equal to ``span`` with ASCII whitespace
+    (SPACE and HTAB) trimmed from both ends.
+
+    Replaces the ``String(String(unsafe_from_utf8=...)).strip()`` triple
+    that previously allocated three ``String`` objects per header
+    half. The fast path does a single pointer-based construction of
+    the final owned ``String`` from the trimmed sub-span.
+    """
+    var n = len(span)
+    var start = 0
+    while start < n:
+        var c = span[start]
+        if c != 32 and c != 9:
+            break
+        start += 1
+    var stop = n
+    while stop > start:
+        var c = span[stop - 1]
+        if c != 32 and c != 9:
+            break
+        stop -= 1
+    if stop <= start:
+        return String("")
+    return String(unsafe_from_utf8=span[start:stop])
 
 
 @always_inline
 def _ascii_lower(s: String) -> String:
-    """Return ASCII-lowercase copy of ``s``."""
-    var out = String(capacity=s.byte_length())
-    for i in range(s.byte_length()):
-        var c = s.unsafe_ptr()[i]
+    """Return ASCII-lowercase copy of ``s``.
+
+    Bulk writes bytes through a pre-sized ``List[UInt8]`` and converts
+    once at the end; the naive ``out += chr(...)`` loop used to allocate
+    per byte which dominated cost on keep-alive request paths that call
+    this on every ``Connection:`` header.
+    """
+    var n = s.byte_length()
+    if n == 0:
+        return String("")
+    # Fast path: if the input has no upper-case ASCII bytes, return a
+    # copy directly without the branch inside the loop.
+    var src = s.unsafe_ptr()
+    var has_upper = False
+    for i in range(n):
+        var c = src[i]
         if c >= 65 and c <= 90:
-            out += chr(Int(c) + 32)
+            has_upper = True
+            break
+    if not has_upper:
+        return String(unsafe_from_utf8=s.as_bytes())
+    var buf = List[UInt8]()
+    buf.resize(n, UInt8(0))
+    var dst = buf.unsafe_ptr()
+    for i in range(n):
+        var c = src[i]
+        if c >= 65 and c <= 90:
+            dst[i] = c + 32
         else:
-            out += chr(Int(c))
-    return out
+            dst[i] = c
+    return String(unsafe_from_utf8=Span[UInt8, _](buf))
 
 
 def _status_reason(code: Int) -> String:

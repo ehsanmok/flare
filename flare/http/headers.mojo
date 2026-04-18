@@ -28,15 +28,26 @@ def _eq_icase(a: String, b: String) -> Bool:
 
 @always_inline
 def _lower(s: String) -> String:
-    """Return ASCII-lowercase copy of ``s``."""
-    var out = String(capacity=s.byte_length())
-    for i in range(s.byte_length()):
-        var c = s.unsafe_ptr()[i]
+    """Return ASCII-lowercase copy of ``s``.
+
+    Bulk-write variant: pre-size a byte buffer, write each byte through
+    raw pointers, then wrap in a String once. Avoids the per-byte
+    allocation of the naive ``out += chr(...)`` loop.
+    """
+    var n = s.byte_length()
+    if n == 0:
+        return String("")
+    var buf = List[UInt8]()
+    buf.resize(n, UInt8(0))
+    var src = s.unsafe_ptr()
+    var dst = buf.unsafe_ptr()
+    for i in range(n):
+        var c = src[i]
         if c >= 65 and c <= 90:
-            out += chr(Int(c) + 32)
+            dst[i] = c + 32
         else:
-            out += chr(Int(c))
-    return out
+            dst[i] = c
+    return String(unsafe_from_utf8=Span[UInt8, _](buf))
 
 
 struct HeaderInjectionError(Copyable, Movable, Writable):

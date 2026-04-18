@@ -30,7 +30,7 @@ It exposes a thin step API so the reactor-backed ``HttpServer`` (Phase
 
 from std.collections import Dict
 from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import UnsafePointer, memcpy, stack_allocation
 from std.sys.info import CompilationTarget, size_of
 
 from flare.http.request import Request
@@ -226,10 +226,13 @@ struct ConnHandle(Movable):
             var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
             if got > 0:
                 var old_len = len(self.read_buf)
-                self.read_buf.resize(old_len + Int(got), UInt8(0))
+                var got_int = Int(got)
+                self.read_buf.resize(old_len + got_int, UInt8(0))
                 var dst = self.read_buf.unsafe_ptr() + old_len
-                for i in range(Int(got)):
-                    (dst + i).init_pointee_copy((chunk + i).load())
+                # memcpy is substantially faster than a per-byte load/store
+                # loop here because ``chunk`` is stack-allocated and
+                # contiguous, and the copy is always <= 8KiB.
+                memcpy(dest=dst, src=chunk, count=got_int)
                 if (
                     len(self.read_buf)
                     > config.max_header_size + config.max_body_size
@@ -474,8 +477,10 @@ struct ConnHandle(Movable):
 
         for i in range(resp.headers.len()):
             var k = resp.headers._keys[i]
-            var kl = _ascii_lower(k)
-            if kl == "content-length" or kl == "connection":
+            # Case-insensitive skip of Content-Length and Connection
+            # without allocating a lowercased copy each header. Compare
+            # only the length-matching candidates.
+            if _is_content_length(k) or _is_connection(k):
                 continue
             _append_str(wire, k)
             _append_str(wire, ": ")
@@ -493,8 +498,16 @@ struct ConnHandle(Movable):
 
         _append_str(wire, "\r\n")
 
-        for i in range(body_len):
-            wire.append(resp.body[i])
+        # Bulk-copy the body. Appending byte-by-byte from ``resp.body``
+        # dominated this function's cost on small-body responses.
+        if body_len > 0:
+            var old = len(wire)
+            wire.resize(old + body_len, UInt8(0))
+            memcpy(
+                dest=wire.unsafe_ptr() + old,
+                src=resp.body.unsafe_ptr(),
+                count=body_len,
+            )
 
         self.write_buf = wire^
         self.write_pos = 0
@@ -524,6 +537,45 @@ def _monotonic_ms() -> Int:
     for i in range(8):
         nsec |= Int64(Int((buf + 8 + i).load())) << Int64(8 * i)
     return Int(sec) * 1000 + Int(nsec) // 1_000_000
+
+
+@always_inline
+def _is_content_length(k: String) -> Bool:
+    """Return True if ``k`` is ``Content-Length`` (ASCII case-insensitive).
+
+    Hot path: called for every response header to decide whether
+    ``_serialize_response`` should emit or skip. Avoids the lowercase
+    allocation that ``_ascii_lower`` + string-compare would cost.
+    """
+    if k.byte_length() != 14:
+        return False
+    var p = k.unsafe_ptr()
+    var target = "content-length"
+    var t = target.unsafe_ptr()
+    for i in range(14):
+        var c = p[i]
+        if c >= 65 and c <= 90:
+            c = c + 32
+        if c != t[i]:
+            return False
+    return True
+
+
+@always_inline
+def _is_connection(k: String) -> Bool:
+    """Return True if ``k`` is ``Connection`` (ASCII case-insensitive)."""
+    if k.byte_length() != 10:
+        return False
+    var p = k.unsafe_ptr()
+    var target = "connection"
+    var t = target.unsafe_ptr()
+    for i in range(10):
+        var c = p[i]
+        if c >= 65 and c <= 90:
+            c = c + 32
+        if c != t[i]:
+            return False
+    return True
 
 
 def _conn_alloc_addr(var stream: TcpStream) raises -> Int:

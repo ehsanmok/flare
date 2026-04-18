@@ -7,6 +7,7 @@ Content-Type ``text/plain; charset=utf-8``. Every other path returns 404.
 Tuned for throughput: idle/write timeouts disabled, no cookies, no logs.
 """
 
+from std.memory import memcpy
 from std.os import getenv
 
 from flare.http import HttpServer, ServerConfig, Response, Status, ok
@@ -16,15 +17,17 @@ from flare.net import SocketAddr
 
 def handler(req: Request) raises -> Response:
     if req.url == "/plaintext":
-        var b = List[UInt8]()
+        # Bulk-copy the 13-byte body. Reserved capacity + memcpy avoids
+        # growth reallocs and the per-byte copy on each request.
         var s = "Hello, World!"
         var sb = s.as_bytes()
-        for i in range(len(sb)):
-            b.append(sb[i])
+        var n = len(sb)
+        var b = List[UInt8]()
+        b.resize(n, UInt8(0))
+        memcpy(dest=b.unsafe_ptr(), src=sb.unsafe_ptr(), count=n)
         var r = Response(status=200, reason="OK", body=b^)
         r.headers.set("Content-Type", "text/plain; charset=utf-8")
         return r^
-    # 404 for anything else.
     var empty = List[UInt8]()
     var nf = Response(status=404, reason="Not Found", body=empty^)
     return nf^
