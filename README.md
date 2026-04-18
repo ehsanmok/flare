@@ -11,13 +11,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-**The fastest networking library for Mojo🔥** — from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI (just libc and OpenSSL for TLS).
+**The fastest networking library for Mojo🔥** from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI (just libc and OpenSSL for TLS).
 
 **What you get:**
 
-- **Fastest HTTP server in Mojo** — reactor-backed (kqueue / epoll), single-threaded event loop at **~140K req/s TFB plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)** and ~3× the previous Mojo ceiling
-- **Fastest HTTP parser in Mojo** — 7-9× faster request/response parse and encode than other Mojo HTTP libraries
-- **Fastest WebSocket masking in Mojo** — SIMD XOR at up to 112 GB/s, 14-35× over scalar
+- **Fastest HTTP server in Mojo:** reactor-backed (kqueue / epoll), single-threaded event loop at **~140K req/s TFB plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)**
+- **Fastest HTTP parser in Mojo:** 7-9x faster request/response parse and encode than other Mojo HTTP libraries
+- **Fastest WebSocket masking in Mojo:** SIMD XOR at up to 112 GB/s, 14-35x over scalar
 - Complete stack in one package: TCP, UDP, TLS, HTTP, WebSocket, DNS
 - IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback)
 - 375 tests and 15 fuzz harnesses (1M+ runs), zero known crashes
@@ -60,7 +60,7 @@ def main() raises:
     srv.serve(handler)
 ```
 
-The server is reactor-backed: one event loop on `kqueue` (macOS) or `epoll` (Linux), non-blocking sockets, per-connection state machines, a hashed timing wheel for idle timeouts — nginx-style architecture, no thread-per-connection. Supports HTTP/1.1 keep-alive, validates headers per RFC 7230, and enforces configurable limits on header/body/URI size and per-connection idle/write timeouts.
+The server is reactor-backed: one event loop on `kqueue` (macOS) or `epoll` (Linux), non-blocking sockets, per-connection state machines, a hashed timing wheel for idle timeouts. Nginx-style architecture, no thread-per-connection. Supports HTTP/1.1 keep-alive, validates headers per RFC 7230, and enforces configurable limits on header/body/URI size and per-connection idle/write timeouts.
 
 ### HTTP client with auth
 
@@ -225,7 +225,7 @@ def main() raises:
 
 Measured on Apple M-series, Mojo 0.26.3 nightly.
 
-### Server throughput — TFB plaintext
+### Server throughput (TFB plaintext)
 
 Single-threaded, `wrk -t1 -c64 -d30s`, 5-run median of middle 3 with stdev < 1%. Same response body, headers, and keep-alive on all baselines. Full methodology in `.cursor/rules/bench_vs_baseline.md`.
 
@@ -235,7 +235,7 @@ Single-threaded, `wrk -t1 -c64 -d30s`, 5-run median of middle 3 with stdev < 1%.
 | Go `net/http` (1 thread) | 140,612 | 0.45 ms | 0.86 ms | 1.00× |
 | Go `fasthttp` (1 thread) | ~266,000 | 0.20 ms | 0.34 ms | 1.88× |
 
-flare is on par with Go's stdlib `net/http` at the same thread count — a ~2.8× jump over the v0.2.0 blocking server, and single-digit percent under `fasthttp` territory on a pure-Mojo runtime.
+flare is on par with Go's stdlib `net/http` at the same thread count. That is a ~2.8× jump over the v0.2.0 blocking server, and within single-digit percent of `fasthttp` territory on a pure-Mojo runtime.
 
 Reproduce locally:
 
