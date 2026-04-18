@@ -55,7 +55,8 @@ prop-auth          = "mojo -I . fuzz/prop_auth.mojo"
 fuzz-encoding      = "mojo -I . fuzz/fuzz_encoding.mojo"
 fuzz-cookie        = "mojo -I . fuzz/fuzz_cookie.mojo"
 fuzz-reactor-churn = "mojo -I . fuzz/fuzz_reactor_churn.mojo"
-fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn"] }
+prop-timer-wheel   = "mojo -I . fuzz/prop_timer_wheel.mojo"
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel"] }
 
 [environments]
 default = { features = ["dev"], solve-group = "default" }
@@ -76,8 +77,9 @@ test-ergonomics  = "mojo -I . tests/test_ergonomics.mojo"   # Phase 8 — ergono
 test-server      = "mojo -I . tests/test_server.mojo"      # Server: buffered reads, keep-alive — 35 tests
 test-syscall-ffi = "mojo -I . tests/test_syscall_ffi.mojo"  # Stage 1/Phase 1.1 — epoll/kqueue/eventfd FFI (~22 tests)
 test-reactor     = "mojo -I . tests/test_reactor.mojo"      # Stage 1/Phase 1.2 — Reactor abstraction (~20 tests)
+test-timer-wheel = "mojo -I . tests/test_timer_wheel.mojo"  # Stage 1/Phase 1.3 — TimerWheel (~18 tests)
 
-tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_syscall_ffi.mojo && mojo -I . tests/test_reactor.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
+tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_syscall_ffi.mojo && mojo -I . tests/test_reactor.mojo && mojo -I . tests/test_timer_wheel.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
 
 # ── Examples (runnable + tested as part of 'pixi run tests') ─────────────────
 example-addresses   = "mojo -I . examples/01_addresses.mojo"
