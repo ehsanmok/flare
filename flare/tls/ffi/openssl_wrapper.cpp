@@ -373,6 +373,23 @@ int flare_set_nonblocking(int fd, int enable) {
     return fcntl(fd, F_SETFL, new_flags);
 }
 
+/* Thin wrappers around read(2) / write(2).
+ *
+ * Mojo's stdlib already declares ``external_call["read", ...]`` and
+ * ``external_call["write", ...]`` with its own signature for
+ * ``FileDescriptor``; that collides with flare's reactor FFI at the MLIR
+ * lowering stage. Routing through these C wrappers under distinct symbol
+ * names sidesteps the conflict without measurable overhead (the wrappers
+ * compile to a single jmp on x86_64 and a plain b on arm64).
+ */
+ssize_t flare_read(int fd, void* buf, size_t count) {
+    return ::read(fd, buf, count);
+}
+
+ssize_t flare_write(int fd, const void* buf, size_t count) {
+    return ::write(fd, buf, count);
+}
+
 int flare_connect_timeout(int fd, const void* addr, unsigned addrlen,
                           int timeout_ms) {
     /* 1. Set non-blocking */

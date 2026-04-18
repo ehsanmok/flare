@@ -11,6 +11,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <sys/types.h>  /* ssize_t, size_t */
 
 #if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER < 0x30000000L
 #error "flare requires OpenSSL 3.x or later"
@@ -106,6 +107,33 @@ void flare_test_server_free(flare_test_server_t srv);
  * @return 0 on success, -1 on failure (errno is set).
  */
 int flare_set_nonblocking(int fd, int enable);
+
+/**
+ * Thin wrapper around read(2). Works on any fd (socket, pipe, eventfd).
+ *
+ * The Mojo stdlib declares ``external_call["read", ...]`` with its own
+ * signature for ``FileDescriptor``; routing through this wrapper lets
+ * flare's reactor use a distinct symbol name.
+ *
+ * @param fd    File descriptor to read from.
+ * @param buf   Destination buffer.
+ * @param count Maximum bytes to read.
+ * @return Number of bytes read on success (0 on EOF), -1 on error
+ *         (errno set; EAGAIN/EWOULDBLOCK for nonblocking fds).
+ */
+ssize_t flare_read(int fd, void* buf, size_t count);
+
+/**
+ * Thin wrapper around write(2). Works on any fd (socket, pipe, eventfd).
+ *
+ * See ``flare_read`` for why the wrapper exists.
+ *
+ * @param fd    File descriptor to write to.
+ * @param buf   Source buffer.
+ * @param count Number of bytes to write.
+ * @return Number of bytes written on success, -1 on error (errno set).
+ */
+ssize_t flare_write(int fd, const void* buf, size_t count);
 
 /**
  * Non-blocking connect + poll — the core of connect_timeout().
