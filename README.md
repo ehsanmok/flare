@@ -11,14 +11,15 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-A fast networking library for Mojo🔥, covering everything from raw sockets to HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI (just libc and OpenSSL for TLS).
+**The fastest networking library for Mojo🔥** — from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI (just libc and OpenSSL for TLS).
 
 **What you get:**
 
-- TCP, UDP, TLS, HTTP, and WebSocket in one package
+- **Fastest HTTP server in Mojo** — reactor-backed (kqueue / epoll), single-threaded event loop at **~140K req/s TFB plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)** and ~3× the previous Mojo ceiling
+- **Fastest HTTP parser in Mojo** — 7-9× faster request/response parse and encode than other Mojo HTTP libraries
+- **Fastest WebSocket masking in Mojo** — SIMD XOR at up to 112 GB/s, 14-35× over scalar
+- Complete stack in one package: TCP, UDP, TLS, HTTP, WebSocket, DNS
 - IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback)
-- Reactor-backed HTTP server (kqueue / epoll), single-threaded event loop — **~140K req/s plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)**
-- HTTP parsing 7-9× faster than other Mojo HTTP libraries
 - 375 tests and 15 fuzz harnesses (1M+ runs), zero known crashes
 
 ## Quick start
