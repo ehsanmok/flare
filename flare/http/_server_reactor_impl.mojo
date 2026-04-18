@@ -28,9 +28,10 @@ It exposes a thin step API so the reactor-backed ``HttpServer`` (Phase
 1.5) owns the lifecycle while this module owns the per-conn logic.
 """
 
-from std.ffi import c_int, c_size_t, get_errno, ErrNo
+from std.collections import Dict
+from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
 from std.memory import UnsafePointer, stack_allocation
-from std.sys.info import CompilationTarget
+from std.sys.info import CompilationTarget, size_of
 
 from flare.http.request import Request
 from flare.http.response import Response
@@ -44,7 +45,15 @@ from flare.http.server import (
     _append_str,
 )
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
-from flare.tcp import TcpStream
+from flare.net.error import NetworkError
+from flare.tcp import TcpStream, TcpListener
+from flare.runtime import (
+    Reactor,
+    Event,
+    TimerWheel,
+    INTEREST_READ,
+    INTEREST_WRITE,
+)
 
 
 # ── State constants ───────────────────────────────────────────────────────────
@@ -472,3 +481,244 @@ struct ConnHandle(Movable):
 
         self.write_buf = wire^
         self.write_pos = 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Reactor loop + helpers (moved here from server.mojo to avoid a circular
+# import: this module already depends on server.mojo's parsing helpers).
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _monotonic_ms() -> Int:
+    """Return the monotonic clock in milliseconds.
+
+    Uses ``clock_gettime(CLOCK_MONOTONIC, ...)``. The constant value 1 for
+    ``CLOCK_MONOTONIC`` is portable between Linux and macOS (macOS has
+    supported it since 10.12).
+    """
+    var buf = stack_allocation[16, UInt8]()
+    for i in range(16):
+        (buf + i).init_pointee_copy(UInt8(0))
+    _ = external_call["clock_gettime", c_int](c_int(1), buf.bitcast[NoneType]())
+    var sec: Int64 = 0
+    var nsec: Int64 = 0
+    for i in range(8):
+        sec |= Int64(Int((buf + i).load())) << Int64(8 * i)
+    for i in range(8):
+        nsec |= Int64(Int((buf + 8 + i).load())) << Int64(8 * i)
+    return Int(sec) * 1000 + Int(nsec) // 1_000_000
+
+
+def _conn_alloc_addr(var stream: TcpStream) raises -> Int:
+    """Heap-allocate a ``ConnHandle`` wrapping ``stream`` and return its address.
+
+    We use libc ``malloc`` via FFI rather than ``UnsafePointer.alloc`` because
+    Mojo's stdlib allocator currently doesn't expose that factory for
+    Movable-only types (``ConnHandle`` owns a ``TcpStream``). ``_conn_free_addr``
+    runs the destructor and frees.
+    """
+    var n = size_of[ConnHandle]()
+    var raw = external_call["malloc", UnsafePointer[UInt8, MutExternalOrigin]](
+        c_size_t(n)
+    )
+    if Int(raw) == 0:
+        raise NetworkError("malloc failed for ConnHandle", 0)
+    var ptr = raw.bitcast[ConnHandle]()
+    ptr.init_pointee_move(ConnHandle(stream^))
+    return Int(ptr)
+
+
+def _conn_free_addr(addr: Int):
+    """Destroy and free a ``ConnHandle`` allocated with ``_conn_alloc_addr``.
+
+    Safe to call on 0 (no-op).
+    """
+    if addr == 0:
+        return
+    var raw = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
+    var ptr = raw.bitcast[ConnHandle]()
+    ptr.destroy_pointee()
+    _ = external_call["free", NoneType](raw.bitcast[NoneType]())
+
+
+def _conn_ptr_from_int(
+    addr: Int,
+) -> UnsafePointer[ConnHandle, MutExternalOrigin]:
+    """Reverse of ``_conn_alloc_addr``: reconstruct a typed pointer."""
+    return UnsafePointer[UInt8, MutExternalOrigin](
+        unsafe_from_address=addr
+    ).bitcast[ConnHandle]()
+
+
+def _apply_step(
+    fd: Int,
+    step: StepResult,
+    mut reactor: Reactor,
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+) raises:
+    """Translate a ``StepResult`` into reactor + timer-wheel operations."""
+    var interest: Int = 0
+    if step.want_read:
+        interest |= INTEREST_READ
+    if step.want_write:
+        interest |= INTEREST_WRITE
+    if interest != 0:
+        try:
+            reactor.modify(c_int(fd), interest)
+        except:
+            pass
+    if step.idle_timeout_ms == 0:
+        if fd in timers:
+            _ = wheel.cancel(timers[fd])
+            _ = timers.pop(fd)
+    elif step.idle_timeout_ms > 0:
+        if fd in timers:
+            _ = wheel.cancel(timers[fd])
+        var tid = wheel.schedule(step.idle_timeout_ms, UInt64(fd))
+        timers[fd] = tid
+
+
+def _cleanup_conn(
+    fd: Int,
+    mut conns: Dict[Int, Int],
+    mut timers: Dict[Int, UInt64],
+    mut reactor: Reactor,
+):
+    """Unregister, cancel timers, and free the ConnHandle for ``fd``."""
+    if fd in timers:
+        try:
+            _ = timers.pop(fd)
+        except:
+            pass
+    try:
+        reactor.unregister(c_int(fd))
+    except:
+        pass
+    if fd in conns:
+        try:
+            var addr = conns.pop(fd)
+            _conn_free_addr(addr)
+        except:
+            pass
+
+
+def _accept_loop(
+    mut listener: TcpListener,
+    mut reactor: Reactor,
+    mut conns: Dict[Int, Int],
+):
+    """Accept every connection available on ``listener`` (until EAGAIN).
+
+    Each accepted socket is switched to non-blocking mode, heap-allocated
+    into a ``ConnHandle``, and registered with the reactor using the
+    client fd as the token.
+    """
+    while True:
+        var stream: TcpStream
+        try:
+            stream = listener.accept()
+        except:
+            break
+        try:
+            stream._socket.set_nonblocking(True)
+        except:
+            pass
+        var client_fd = Int(stream._socket.fd)
+        var addr: Int
+        try:
+            addr = _conn_alloc_addr(stream^)
+        except:
+            continue
+        conns[client_fd] = addr
+        try:
+            reactor.register(c_int(client_fd), UInt64(client_fd), INTEREST_READ)
+        except:
+            _conn_free_addr(addr)
+            try:
+                _ = conns.pop(client_fd)
+            except:
+                pass
+
+
+def run_reactor_loop(
+    mut listener: TcpListener,
+    config: ServerConfig,
+    handler: def(Request) raises -> Response,
+    stopping: Bool,
+) raises:
+    """Run the single-threaded event loop until ``stopping`` becomes True.
+
+    The caller (``HttpServer.serve``) owns the listener and provides the
+    request handler. This function owns the ``Reactor`` and ``TimerWheel``
+    for the duration of the loop.
+
+    Args:
+        listener: Bound and listening ``TcpListener`` (ownership stays
+            with the caller; we only borrow for accept / fd access).
+        config: Server configuration.
+        handler: Per-request callback.
+        stopping: Poll each iteration; when True the loop exits and
+            in-flight connections are closed.
+    """
+    listener._socket.set_nonblocking(True)
+    var listener_fd = listener._socket.fd
+
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    # Token 0 is reserved for the listener accept path.
+    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    while not stopping:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            if fd_tok in conns:
+                _cleanup_conn(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop(listener, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                if evt.is_readable():
+                    var step = ch_ptr[].on_readable(handler, config)
+                    step_done = step.done
+                    if not step_done:
+                        _apply_step(fd, step, reactor, wheel, timers)
+                if (not step_done) and evt.is_writable():
+                    var step = ch_ptr[].on_writable(config)
+                    step_done = step.done
+                    if not step_done:
+                        _apply_step(fd, step, reactor, wheel, timers)
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn(fd, conns, timers, reactor)
+
+    # Graceful shutdown: close all active connections.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn(leftover[i], conns, timers, reactor)

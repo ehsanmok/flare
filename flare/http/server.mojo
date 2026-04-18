@@ -29,8 +29,12 @@ struct ServerConfig(Copyable, Movable):
         max_uri_length:         Maximum bytes for the request URI (default 8192).
         keep_alive:             Enable HTTP/1.1 keep-alive (default True).
         max_keepalive_requests: Max requests per connection before forcing close (default 100).
-        idle_timeout_ms:        Recv timeout on accepted sockets in ms (default 500). 0 disables.
-        write_timeout_ms:       Send timeout on accepted sockets in ms (default 5000). 0 disables.
+        idle_timeout_ms:        Max ms a connection may stay idle before the
+            reactor closes it (default 500). 0 disables.
+        write_timeout_ms:       Max ms allowed for a partial write to complete
+            (default 5000). 0 disables.
+        shutdown_timeout_ms:    Max ms graceful shutdown waits for in-flight
+            connections to drain before force-closing (default 5000).
     """
 
     var read_buffer_size: Int
@@ -41,6 +45,7 @@ struct ServerConfig(Copyable, Movable):
     var max_keepalive_requests: Int
     var idle_timeout_ms: Int
     var write_timeout_ms: Int
+    var shutdown_timeout_ms: Int
 
     def __init__(
         out self,
@@ -52,6 +57,7 @@ struct ServerConfig(Copyable, Movable):
         max_keepalive_requests: Int = 100,
         idle_timeout_ms: Int = 500,
         write_timeout_ms: Int = 5000,
+        shutdown_timeout_ms: Int = 5000,
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -61,6 +67,7 @@ struct ServerConfig(Copyable, Movable):
         self.max_keepalive_requests = max_keepalive_requests
         self.idle_timeout_ms = idle_timeout_ms
         self.write_timeout_ms = write_timeout_ms
+        self.shutdown_timeout_ms = shutdown_timeout_ms
 
 
 # ── HttpServer ────────────────────────────────────────────────────────────────
@@ -88,6 +95,9 @@ struct HttpServer(Movable):
 
     var _listener: TcpListener
     var config: ServerConfig
+    var _stopping: Bool
+    """Set by ``close()`` to break the reactor loop. Read from the loop
+    itself each iteration."""
 
     def __init__(
         out self,
@@ -96,6 +106,7 @@ struct HttpServer(Movable):
     ):
         self._listener = listener^
         self.config = config^
+        self._stopping = False
 
     def __del__(deinit self):
         self._listener.close()
@@ -120,204 +131,41 @@ struct HttpServer(Movable):
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^, config^)
 
-    def serve(self, handler: def(Request) raises -> Response) raises:
-        """Accept connections in a loop, calling ``handler`` for each request.
+    def serve(mut self, handler: def(Request) raises -> Response) raises:
+        """Run the single-threaded reactor loop, calling ``handler`` per request.
 
-        Blocks indefinitely. Supports HTTP/1.1 keep-alive when configured.
-        Sets recv/send timeouts on each accepted connection.
+        Delegates to ``flare.http._server_reactor_impl.run_reactor_loop``;
+        splitting the loop into another module avoids a circular import
+        (``_server_reactor_impl`` needs the parsing helpers defined in this
+        file).
 
         Args:
-            handler: Callback invoked once per parsed HTTP request.
+            handler: Called once per parsed request; its return value is the
+                HTTP response written back to the client.
 
         Raises:
-            NetworkError: If the accept loop encounters a fatal error.
+            NetworkError: On fatal listener errors; per-connection errors
+                close the offending connection silently.
         """
-        while True:
-            var stream = self._listener.accept()
-            _handle_connection_buffered(stream^, handler, self.config)
+        from ._server_reactor_impl import run_reactor_loop
+
+        self._stopping = False
+        run_reactor_loop(self._listener, self.config, handler, self._stopping)
 
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to."""
         return self._listener.local_addr()
 
     def close(mut self):
-        """Stop accepting new connections. Idempotent."""
+        """Stop accepting new connections and break the reactor loop.
+
+        Idempotent. The loop finishes processing in-flight events before
+        returning; a concurrent caller from another thread can use this to
+        request graceful shutdown (the reactor's wakeup fd will be notified
+        automatically next iteration).
+        """
+        self._stopping = True
         self._listener.close()
-
-
-# ── Buffered connection handler ───────────────────────────────────────────────
-
-
-def _handle_connection_buffered(
-    var stream: TcpStream,
-    handler: def(Request) raises -> Response,
-    config: ServerConfig,
-):
-    """Handle an HTTP connection with buffered reads and keep-alive.
-
-    Sets recv/send timeouts on the stream. Reads in chunks, scans for the
-    header terminator, parses the request, calls the handler, writes the
-    response. Loops for keep-alive connections. Respects HTTP/1.0
-    close-by-default.
-    """
-    # Set timeouts on accepted socket for DoS resilience
-    try:
-        if config.idle_timeout_ms > 0:
-            stream.set_recv_timeout(config.idle_timeout_ms)
-        if config.write_timeout_ms > 0:
-            stream.set_send_timeout(config.write_timeout_ms)
-    except:
-        pass
-
-    var buf = List[UInt8](capacity=config.read_buffer_size)
-    var request_count = 0
-
-    while True:
-        # 1. Read until \r\n\r\n (header end)
-        var header_end = _read_until_header_end(stream, buf, config)
-        if header_end < 0:
-            break
-
-        # 2. Quick-scan for Content-Length in the header section
-        var content_length = _scan_content_length(buf, header_end)
-        if content_length > config.max_body_size:
-            _write_error_response(stream, 413, "Content Too Large", False)
-            break
-
-        # 3. Ensure we have the full body in the buffer
-        var total_needed = header_end + content_length
-        if not _read_until_size(stream, buf, total_needed, config):
-            break
-
-        # 4. Parse the request from the buffer
-        var req: Request
-        var should_close = False
-        var is_http10 = False
-        try:
-            req = _parse_http_request_bytes(
-                Span[UInt8, _](buf)[:total_needed],
-                config.max_header_size,
-                config.max_body_size,
-                config.max_uri_length,
-            )
-            # Check Connection header and version before handler takes ownership
-            var conn_header = _ascii_lower(req.headers.get("connection"))
-            is_http10 = req.version == "HTTP/1.0"
-            if conn_header == "close":
-                should_close = True
-            elif is_http10 and conn_header != "keep-alive":
-                should_close = True
-        except e:
-            _write_error_response(stream, 400, "Bad Request", False)
-            break
-
-        # 5. Call handler
-        var resp: Response
-        try:
-            resp = handler(req^)
-        except e:
-            _write_error_response(stream, 500, "Internal Server Error", False)
-            break
-
-        # 6. Determine keep-alive
-        request_count += 1
-        var keep_alive = (
-            config.keep_alive
-            and not should_close
-            and request_count < config.max_keepalive_requests
-        )
-
-        # 7. Write response — catch only network errors
-        try:
-            _write_response_buffered(stream, resp, keep_alive)
-        except e:
-            break
-
-        if not keep_alive:
-            break
-
-        # 8. Compact buffer: remove processed bytes, keep leftover
-        if total_needed < len(buf):
-            var leftover = List[UInt8](capacity=len(buf) - total_needed)
-            for i in range(total_needed, len(buf)):
-                leftover.append(buf[i])
-            buf = leftover^
-        else:
-            buf.clear()
-
-    stream.close()
-
-
-# ── Buffer I/O helpers ────────────────────────────────────────────────────────
-
-
-def _read_until_header_end(
-    mut stream: TcpStream,
-    mut buf: List[UInt8],
-    config: ServerConfig,
-) -> Int:
-    """Read from stream into buf until \\r\\n\\r\\n is found.
-
-    Returns the byte offset just past the \\r\\n\\r\\n (i.e. start of body),
-    or -1 on EOF/error/timeout.
-    """
-    var header_end = _find_crlfcrlf(buf, 0)
-    if header_end >= 0:
-        return header_end
-
-    var read_buf = List[UInt8](capacity=config.read_buffer_size)
-    read_buf.resize(config.read_buffer_size, 0)
-
-    while True:
-        var n: Int
-        try:
-            n = stream.read(read_buf.unsafe_ptr(), config.read_buffer_size)
-        except:
-            return -1
-
-        if n == 0:
-            return -1
-
-        var prev_len = len(buf)
-        for i in range(n):
-            buf.append(read_buf[i])
-
-        if len(buf) > config.max_header_size + config.max_body_size:
-            return -1
-
-        var scan_from = prev_len - 3 if prev_len >= 3 else 0
-        header_end = _find_crlfcrlf(buf, scan_from)
-        if header_end >= 0:
-            if header_end > config.max_header_size:
-                return -1
-            return header_end
-
-
-def _read_until_size(
-    mut stream: TcpStream,
-    mut buf: List[UInt8],
-    target: Int,
-    config: ServerConfig,
-) -> Bool:
-    """Keep reading until buf has at least ``target`` bytes. Returns False on EOF/timeout.
-    """
-    if len(buf) >= target:
-        return True
-
-    var read_buf = List[UInt8](capacity=config.read_buffer_size)
-    read_buf.resize(config.read_buffer_size, 0)
-
-    while len(buf) < target:
-        var n: Int
-        try:
-            n = stream.read(read_buf.unsafe_ptr(), config.read_buffer_size)
-        except:
-            return False
-        if n == 0:
-            return False
-        for i in range(n):
-            buf.append(read_buf[i])
-    return True
 
 
 @always_inline
@@ -761,25 +609,6 @@ def _write_response_buffered(
         wire.append(resp.body[i])
 
     stream.write_all(Span[UInt8, _](wire))
-
-
-def _write_error_response(
-    mut stream: TcpStream, status: Int, reason: String, keep_alive: Bool
-):
-    """Send a minimal error response, ignoring write failures."""
-    var body_str = String(status) + " " + reason
-    var body = List[UInt8](capacity=body_str.byte_length())
-    for b in body_str.as_bytes():
-        body.append(b)
-    var resp = Response(status=status, reason=reason, body=body^)
-    try:
-        resp.headers.set("Content-Type", "text/plain")
-    except:
-        pass
-    try:
-        _write_response_buffered(stream, resp, keep_alive)
-    except:
-        pass
 
 
 @always_inline
