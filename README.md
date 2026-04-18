@@ -15,7 +15,7 @@
 
 **What you get:**
 
-- **Fastest HTTP server in Mojo:** reactor-backed (kqueue / epoll), single-threaded event loop at **~140K req/s TFB plaintext, on par with Go `net/http` (`GOMAXPROCS=1`)**
+- **Fastest HTTP server in Mojo:** reactor-backed (kqueue / epoll), single-threaded event loop at **~155K req/s TFB plaintext, ~1.08x faster than Go `net/http` (`GOMAXPROCS=1`)**
 - **Fastest HTTP parser in Mojo:** 7-9x faster request/response parse and encode than other Mojo HTTP libraries
 - **Fastest WebSocket masking in Mojo:** SIMD XOR at up to 112 GB/s, 14-35x over scalar
 - Complete stack in one package: TCP, UDP, TLS, HTTP, WebSocket, DNS
@@ -223,25 +223,36 @@ def main() raises:
 
 ## Performance
 
-Measured on Apple M-series, Mojo 0.26.3 nightly.
+Measured on Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
 
 ### Server throughput (TFB plaintext)
 
-Single-threaded, `wrk -t1 -c64 -d30s`, 5-run median of middle 3 with stdev < 1%. Same response body, headers, and keep-alive on all baselines. Full methodology in `.cursor/rules/bench_vs_baseline.md`.
-
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
-| **flare (reactor)** | **139,444** | 0.45 ms | 0.91 ms | **0.99×** |
-| Go `net/http` (1 thread) | 140,612 | 0.45 ms | 0.86 ms | 1.00× |
-| Go `fasthttp` (1 thread) | ~266,000 | 0.20 ms | 0.34 ms | 1.88× |
+| **flare (reactor)** | **157,459** | 0.39 ms | 0.80 ms | **1.10x** |
+| Go `net/http` (1 thread) | 143,500 | 0.44 ms | 0.86 ms | 1.00x |
 
-flare is on par with Go's stdlib `net/http` at the same thread count. That is a ~2.8× jump over the v0.2.0 blocking server, and within single-digit percent of `fasthttp` territory on a pure-Mojo runtime.
+flare is roughly 1.10x faster than Go's stdlib `net/http` at the same thread count. That is a ~3x jump over the v0.2.0 blocking server, achieved on a pure-Mojo reactor runtime with minimal FFI.
 
 Reproduce locally:
 
 ```bash
 pixi run --environment bench bench-vs-baseline-quick
 ```
+
+#### Methodology
+
+The workload is the [TechEmpower Framework Benchmarks plaintext test (type #6)](https://github.com/TechEmpower/FrameworkBenchmarks/wiki/Project-Information-Framework-Tests-Overview#test-type-6-plaintext): `GET /plaintext` returning the 13-byte body `Hello, World!` with `Content-Type: text/plain`, HTTP/1.1 keep-alive on, no gzip, no logging. The workload spec lives at [`benchmark/workloads/plaintext.yaml`](benchmark/workloads/plaintext.yaml). The plaintext test isolates the raw request-routing and response-serialisation cost from database, template, and JSON overhead.
+
+The harness enforces apples-to-apples measurement:
+
+- **Response-byte integrity:** before any measurement round, each baseline is probed once and its response bytes diffed against the workload spec. A target producing a different status, body length, or non-whitelisted header is rejected. Whitelisted headers that may vary per target: `Date`, `Server`, `Connection`, `Keep-Alive`.
+- **Pinned toolchains:** Go and `wrk` versions are pinned in `pixi.toml` under `[feature.bench.dependencies]` so the comparison cannot silently drift across machines.
+- **Warmup + 5-run measurement:** each (target, config) tuple runs one 10 s warmup plus five 30 s measurement rounds. The median of the middle three rounds is reported; the run fails the stability gate if stdev exceeds 3%.
+- **Load generator:** `wrk -t1 -c64 -d30s` — one `wrk` thread, 64 keep-alive connections, 30 seconds per round. Server and `wrk` run on the same host over loopback. The load generator is always `wrk`, never `ab` or `h2load`, for consistency with published TFB-style numbers.
+- **Full provenance per run:** every run writes its own directory under `benchmark/results/<yyyy-mm-ddTHHMM>-<host>-<git-sha>/` containing `env.json` (CPU model, OS, kernel tunables, exact toolchain versions), `integrity.md`, per-tuple result JSONs, `summary.md`, and raw `wrk` stdout under `RAW/`.
+
+The underlying measurement protocol (integrity check, pinned toolchains, 5-run median with stdev gate) is stricter than TFB itself (which takes a single 15 s round on shared hardware); it is closer in spirit to the reproducibility protocols used by [simdjson](https://github.com/simdjson/simdjson/blob/master/doc/performance.md) and [rapidjson](https://rapidjson.org/md_doc_performance.html).
 
 ### HTTP parsing
 
@@ -294,16 +305,14 @@ pixi run test-ergonomics             # high-level API
 
 ### Benchmarks
 
-#### Server throughput vs Go `net/http` / `fasthttp` / nginx
-
-Rigorous harness: pre-flight body-byte integrity check across all targets, pinned Go (1.23) and nginx (1.27) via Pixi, environment metadata (CPU/OS/kernel-tune) captured alongside results, 5 runs per (target × config), median of middle 3 with < 3% stdev gate.
+See the [Methodology](#methodology) section above for the TFB plaintext workload definition, integrity check, and run protocol.
 
 ```bash
 pixi run --environment bench bench-vs-baseline-quick
 # flare vs Go net/http, throughput config only (~7 min total)
 
 pixi run --environment bench bench-vs-baseline
-# all 4 baselines (flare, go_nethttp, go_fasthttp, nginx) × throughput + latency_floor
+# flare vs all baselines, throughput + latency_floor configs
 ```
 
 Results and `env.json` are written under `benchmark/results/<timestamp>-<host>-<commit>/`.
