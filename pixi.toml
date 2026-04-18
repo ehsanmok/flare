@@ -73,8 +73,9 @@ test-http        = "mojo -I . tests/test_http.mojo"         # Phase 6 — 45 tes
 test-ws          = "mojo -I . tests/test_ws.mojo"           # Phase 7 — 33 tests
 test-ergonomics  = "mojo -I . tests/test_ergonomics.mojo"   # Phase 8 — ergonomics
 test-server      = "mojo -I . tests/test_server.mojo"      # Server: buffered reads, keep-alive — 35 tests
+test-syscall-ffi = "mojo -I . tests/test_syscall_ffi.mojo"  # Stage 1/Phase 1.1 — epoll/kqueue/eventfd FFI (~22 tests)
 
-tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
+tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_syscall_ffi.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
 
 # ── Examples (runnable + tested as part of 'pixi run tests') ─────────────────
 example-addresses   = "mojo -I . examples/01_addresses.mojo"
