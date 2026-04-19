@@ -83,18 +83,25 @@ def _find_flare_lib() -> String:
     """Return the path to ``libflare_tls.so``.
 
     Search order:
-    1. ``$FLARE_LIB`` — set by the pixi activation script; always points to the
-       freshly-built ``build/libflare_tls.so`` and avoids any path ambiguity.
-    2. ``$CONDA_PREFIX/lib/libflare_tls.so`` — installed via a conda/pixi package.
-    3. ``build/libflare_tls.so`` — bare checkout without a conda environment.
+    1. ``$CONDA_PREFIX/lib/libflare_tls.so`` — the canonical location,
+       populated by ``flare/tls/ffi/build.sh`` on pixi activation.
+    2. ``build/libflare_tls.so`` — bare-checkout fallback when running
+       outside a conda/pixi environment.
+
+    The path is built via ``String("") += prefix += literal`` rather than
+    the ``prefix + literal`` concat operator. See the module docstring
+    of ``flare.tls.config`` for the full rationale (Mojo 0.26's concat
+    can return a String whose buffer aliases another ``getenv`` +
+    literal result, so two sequential ``CONDA_PREFIX + …`` calls can
+    clobber each other's bytes).
     """
-    var explicit = getenv("FLARE_LIB", "")
-    if explicit:
-        return explicit
     var prefix = getenv("CONDA_PREFIX", "")
-    if prefix:
-        return prefix + "/lib/libflare_tls.so"
-    return "build/libflare_tls.so"
+    if prefix == "":
+        return "build/libflare_tls.so"
+    var out = String("")
+    out += prefix
+    out += "/lib/libflare_tls.so"
+    return out^
 
 
 struct RawSocket(Movable):

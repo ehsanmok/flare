@@ -7,10 +7,35 @@
 #
 # NOTE: When used as a pixi activation script, use 'return' not 'exit'
 # so the sourcing shell is not terminated.
+#
+# Install layout (matches ehsanmok/json's libsimdjson_wrapper.so):
+#   1. Build into $BUILD_DIR/libflare_tls.so (source-tree artifact).
+#   2. Copy to $CONDA_PREFIX/lib/libflare_tls.so — the CANONICAL location.
+# Mojo's _find_flare_lib* helpers resolve the library via CONDA_PREFIX, so
+# anything pixi launches finds it automatically without FLARE_LIB-style
+# env-var indirection.
+#
+# Why also LD_PRELOAD on Linux (same .so path as the install)?
+#   Most of flare's FFI entry points (flare/tls/stream.mojo,
+#   flare/net/socket.mojo, flare/ws/*, flare/tcp/stream.mojo) still use a
+#   naive `var lib = OwnedDLHandle(...); var fn = lib.get_function(...);
+#   fn(...)` pattern. Mojo's ASAP destruction will dlclose `lib` between
+#   `get_function` and the actual `fn` invocation, unmapping the library
+#   and crashing the JIT on Linux (see the same warning in
+#   flare/http/encoding.mojo). The fix — passing `lib` as a
+#   `read lib: OwnedDLHandle` borrow to an inner helper — is applied in
+#   flare/net/_libc.mojo for the reactor's hot path, but the TLS stack
+#   would need a ~14-site refactor to follow suit. Until that lands,
+#   LD_PRELOADing $INSTALLED keeps its refcount pinned above zero, so
+#   dlclose becomes a no-op and the existing code paths keep working.
+#   Critically we LD_PRELOAD the *same .so file* Mojo dlopens (both
+#   resolve to $INSTALLED), so there is exactly one mapping in the
+#   process — no "two copies, one unmapped" hazard.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../../../build"
 TARGET="$BUILD_DIR/libflare_tls.so"
+INSTALLED="$CONDA_PREFIX/lib/libflare_tls.so"
 SOURCE="$SCRIPT_DIR/openssl_wrapper.cpp"
 HEADER="$SCRIPT_DIR/openssl_wrapper.h"
 
@@ -23,18 +48,21 @@ fi
 # ── Idempotency check ────────────────────────────────────────────────────────
 _needs_rebuild() {
     [ ! -f "$TARGET" ] && return 0
+    [ ! -f "$INSTALLED" ] && return 0
     [ "$SOURCE" -nt "$TARGET" ] && return 0
     [ "$HEADER" -nt "$TARGET" ] && return 0
     # Rebuild if the pixi-managed OpenSSL library itself was updated
     [ "$CONDA_PREFIX/lib/libssl.so" -nt "$TARGET" ] 2>/dev/null && return 0
     [ "$CONDA_PREFIX/lib/libssl.dylib" -nt "$TARGET" ] 2>/dev/null && return 0
+    # Rebuild if the CONDA_PREFIX copy is stale relative to the build copy
+    # (e.g. pixi recreated the env but kept the source-tree build/).
+    [ "$TARGET" -nt "$INSTALLED" ] 2>/dev/null && return 0
     return 1
 }
 
 if ! _needs_rebuild; then
-    export FLARE_LIB="$TARGET"
     if [[ "$(uname)" != "Darwin" ]]; then
-        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
+        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
     fi
     return 0 2>/dev/null || true
 fi
@@ -83,18 +111,14 @@ else
     return 1 2>/dev/null || true
 fi
 
-# ── Export path so _find_flare_lib() resolves it without pathlib ──────────────
-# `build.sh` is *sourced* by pixi's activation script, so `export` persists into
-# any `pixi run …` child process. This avoids the need for `pathlib.Path.exists()`
-# in Mojo (which caused a runtime crash on Linux x86_64).
-export FLARE_LIB="$TARGET"
+# ── Install to $CONDA_PREFIX/lib (canonical location) ────────────────────────
+mkdir -p "$CONDA_PREFIX/lib"
+cp "$TARGET" "$INSTALLED"
+echo "Installed: $INSTALLED"
 
-# ── Preload on Linux so Mojo's JIT can call into the library ──────────────────
-# Mojo's LLVM JIT crashes on Linux when calling functions obtained via
-# OwnedDLHandle.get_function() into a freshly-dlopen'd shared library.
-# Pre-mapping the library at process startup (via LD_PRELOAD) avoids this:
-# the code pages are already present before the JIT runs, so indirect calls
-# through function pointers work correctly.  macOS does not have this issue.
+# ── Keep the library mapped on Linux so ASAP-destroyed OwnedDLHandles ────────
+# don't tear it down under the JIT's feet (see the long comment at the top
+# of this file). Always LD_PRELOAD the same path Mojo dlopens: $INSTALLED.
 if [[ "$(uname)" != "Darwin" ]]; then
-    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
+    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
 fi

@@ -1,7 +1,13 @@
 """Tests for flare.tls — TlsConfig, TlsStream, and TLS error types.
 
 All integration tests use a loopback TLS echo server created via the
-``flare_test_server_*`` C helpers in ``build/libflare_tls.so``.
+``flare_test_server_*`` C helpers in ``libflare_tls.so``. The library is
+resolved via ``flare.net.socket._find_flare_lib`` so the test hits the
+same mapping (``$CONDA_PREFIX/lib/libflare_tls.so``) that the production
+code uses — keeping the same .so loaded twice from two different paths
+would give us two separate mmaps, and the first ``dlclose`` would
+unmap one of them under the other's feet.
+
 Server and client run in a fork(2)-based arrangement:
   - Parent: runs the Mojo TLS client (test assertions)
   - Child:  calls ``flare_test_server_echo_once`` then ``_exit(0)``
@@ -15,6 +21,7 @@ Test certificates (tests/certs/):
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 from std.ffi import OwnedDLHandle, c_int, external_call
 from std.memory import UnsafePointer, stack_allocation
+from flare.net.socket import _find_flare_lib
 from flare.tls import (
     TlsConfig,
     TlsVerify,
@@ -29,7 +36,6 @@ from flare.tls import (
 comptime _CA_CRT: String = "tests/certs/ca.crt"
 comptime _SERVER_CRT: String = "tests/certs/server.crt"
 comptime _SERVER_KEY: String = "tests/certs/server.key"
-comptime _TLS_LIB: String = "build/libflare_tls.so"
 
 # ── POSIX helpers ─────────────────────────────────────────────────────────────
 
@@ -95,7 +101,7 @@ struct _TlsTestServer:
             key:  Path to PEM server private key.
             ca:   Path to CA bundle for client cert verification, or ``""``.
         """
-        self._lib = OwnedDLHandle(_TLS_LIB)
+        self._lib = OwnedDLHandle(_find_flare_lib())
         var fn_new = self._lib.get_function[
             def(Int, Int, Int, c_int) thin abi("C") -> Int
         ]("flare_test_server_new")

@@ -7,10 +7,21 @@
 #
 # NOTE: When used as a pixi activation script, use 'return' not 'exit'
 # so the sourcing shell is not terminated.
+#
+# Install layout (matches flare/tls/ffi/build.sh and ehsanmok/json):
+#   1. Build into $BUILD_DIR/libflare_zlib.so (source-tree artifact).
+#   2. Copy to $CONDA_PREFIX/lib/libflare_zlib.so — the CANONICAL location.
+# Mojo's _find_flare_zlib_lib resolves via CONDA_PREFIX, so anything pixi
+# launches finds it automatically without env-var indirection.
+#
+# LD_PRELOAD on Linux: keeps libflare_zlib.so mapped so ASAP-destroyed
+# OwnedDLHandles in flare/http/encoding.mojo don't dlclose it under the
+# JIT's feet. See the sibling flare/tls/ffi/build.sh for the full rationale.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../../../build"
 TARGET="$BUILD_DIR/libflare_zlib.so"
+INSTALLED="$CONDA_PREFIX/lib/libflare_zlib.so"
 SOURCE="$SCRIPT_DIR/zlib_wrapper.c"
 
 # Verify CONDA_PREFIX is set (pixi sets this on activation)
@@ -22,16 +33,17 @@ fi
 # ── Idempotency check ────────────────────────────────────────────────────────
 _needs_rebuild() {
     [ ! -f "$TARGET" ] && return 0
+    [ ! -f "$INSTALLED" ] && return 0
     [ "$SOURCE" -nt "$TARGET" ] && return 0
     [ "$CONDA_PREFIX/lib/libz.so" -nt "$TARGET" ] 2>/dev/null && return 0
     [ "$CONDA_PREFIX/lib/libz.dylib" -nt "$TARGET" ] 2>/dev/null && return 0
+    [ "$TARGET" -nt "$INSTALLED" ] 2>/dev/null && return 0
     return 1
 }
 
 if ! _needs_rebuild; then
-    export FLARE_ZLIB_LIB="$TARGET"
     if [[ "$(uname)" != "Darwin" ]]; then
-        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
+        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
     fi
     return 0 2>/dev/null || true
 fi
@@ -80,13 +92,12 @@ else
     return 1 2>/dev/null || true
 fi
 
-export FLARE_ZLIB_LIB="$TARGET"
+# ── Install to $CONDA_PREFIX/lib (canonical location) ────────────────────────
+mkdir -p "$CONDA_PREFIX/lib"
+cp "$TARGET" "$INSTALLED"
+echo "Installed: $INSTALLED"
 
-# ── Preload on Linux so Mojo's JIT can call into the library ──────────────────
-# On Linux, Mojo's LLVM JIT crashes when calling functions obtained via
-# OwnedDLHandle.get_function() into a freshly-dlopen'd library (code pages not
-# yet present in the JIT's address space).  Pre-mapping at process startup via
-# LD_PRELOAD ensures pages are resident before the JIT runs.
+# ── Keep the library mapped on Linux (same reasoning as flare/tls/ffi/build.sh) ──
 if [[ "$(uname)" != "Darwin" ]]; then
-    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${TARGET}"
+    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
 fi
