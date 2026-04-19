@@ -109,7 +109,7 @@ channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 preview = ["pixi-build"]
 
 [dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.2.0" }
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.3.0" }
 ```
 
 Then run:
