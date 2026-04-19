@@ -28,11 +28,11 @@ scripts = ["flare/tls/ffi/build.sh", "flare/http/ffi/build.sh"]
 # as a library picks up. Contributor-only tooling (docs generator, pre-commit
 # hooks) lives under [feature.dev] and is opted into via `pixi install -e dev`.
 [dependencies]
-mojo             = "==0.26.3.0.dev2026041805"
+mojo             = "<1.0"
 openssl          = ">=3.6.1,<4"    # TLS: libssl + libcrypto (SHA-1 for WS handshake)
 ca-certificates  = ">=2025.1.31"   # TLS default CA bundle → $CONDA_PREFIX/ssl/cacert.pem
 zlib             = ">=1.3.1,<2"    # HTTP: Content-Encoding gzip/deflate decompression
-json             = { git = "https://github.com/ehsanmok/json.git", tag = "v0.1.2" }
+json             = { git = "https://github.com/ehsanmok/json.git", branch = "main" }
 
 # g++ is a BUILD-time dep on Linux: the activation scripts
 # (flare/tls/ffi/build.sh, flare/http/ffi/build.sh) invoke g++ to compile

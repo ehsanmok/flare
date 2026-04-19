@@ -18,11 +18,9 @@ source:
   # flare source
   - path: .
   # json source (inlined because json is not yet in any conda channel).
-  # Pinned to v0.1.2 (built against Mojo 0.26.3.0.dev2026041805) so the
-  # flare v0.3.0 release and json v0.1.2 share the exact same compiler.
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    tag: v0.1.2
+    branch: main
 
 build:
   script:
@@ -50,11 +48,11 @@ build:
 
 requirements:
   build:
-    - mojo-compiler ==0.26.3.0.dev2026041805
+    - mojo-compiler
     - ${{ compiler('cxx') }}
     - git   # needed to clone json source
   host:
-    - mojo-compiler ==0.26.3.0.dev2026041805
+    - mojo-compiler
     - openssl >=3.0,<4
     - ca-certificates
     - simdjson >=4.2.4,<5   # json's simdjson FFI wrapper
