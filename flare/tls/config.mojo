@@ -4,25 +4,19 @@ The default CA bundle is sourced from the ``ca-certificates`` pixi dependency,
 which places a portable PEM bundle at ``$CONDA_PREFIX/ssl/cacert.pem``.
 This path works identically on macOS, Linux x86_64, and Linux aarch64.
 
-When ``ca_bundle`` is empty, the TLS implementation reads
-``$CONDA_PREFIX/ssl/cacert.pem`` first; if absent it falls back to
-OpenSSL's compiled-in system default (``SSL_CTX_set_default_verify_paths``).
+When ``ca_bundle`` is the empty string (the factory default), the C
+wrapper routes to ``SSL_CTX_set_default_verify_paths``, which in turn
+picks up OpenSSL's compiled-in ``OPENSSLDIR``. conda-forge's OpenSSL
+sets ``OPENSSLDIR=$PREFIX/ssl``, so the pixi-managed ``cacert.pem`` is
+discovered automatically without flare ever constructing a
+``CONDA_PREFIX + "/ssl/cacert.pem"`` string in Mojo. This sidesteps a
+Mojo 0.26 ``String + String`` aliasing bug where two sequential
+``getenv("CONDA_PREFIX") + literal`` concats can share backing memory,
+clobbering the CA path mid-TLS-handshake (observed under strace as
+``SSL_CTX_load_verify_locations`` being called with
+``cacert.pemls.so``). The ``ca_bundle`` field is still honoured
+verbatim when callers set it explicitly.
 """
-
-from std.os import getenv
-
-
-def _default_ca_bundle() -> String:
-    """Return the pixi-managed CA bundle path, or empty for OS default.
-
-    Returns:
-        ``$CONDA_PREFIX/ssl/cacert.pem`` when running inside a pixi
-        environment, otherwise ``""`` (OpenSSL system default).
-    """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix == "":
-        return ""
-    return prefix + "/ssl/cacert.pem"
 
 
 struct TlsVerify:
@@ -82,8 +76,12 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
         server_name: String = "",
     ):
         self.verify = verify
-        # Use pixi-managed CA bundle when no explicit bundle is specified.
-        self.ca_bundle = ca_bundle if ca_bundle != "" else _default_ca_bundle()
+        # Empty ca_bundle is fine: the C wrapper
+        # (flare_ssl_ctx_load_ca_bundle) routes empty paths to
+        # SSL_CTX_set_default_verify_paths, which discovers
+        # $CONDA_PREFIX/ssl/cacert.pem via OpenSSL's compiled-in
+        # OPENSSLDIR. See the module docstring for the full rationale.
+        self.ca_bundle = ca_bundle
         self.cert_file = cert_file
         self.key_file = key_file
         self.server_name = server_name

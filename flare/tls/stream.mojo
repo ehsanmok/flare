@@ -282,9 +282,18 @@ struct TlsStream(Movable, Readable):
         # ── 4. Certificate verification mode ─────────────────────────────────
         _ = fn_set_verify(ctx, c_int(config.verify))
 
-        if fn_load_ca(ctx, _c_str(config.ca_bundle)) != 0:
-            fn_ctx_free(ctx)
-            raise TlsHandshakeError("CA bundle load failed: " + _c_err(lib))
+        # Only load a CA bundle when verification is actually enabled.
+        # In insecure mode (TlsVerify.NONE) the server cert is never
+        # checked against any trust anchor, so loading the bundle would
+        # just waste a file open and — via a Mojo 0.26 String-concat
+        # aliasing quirk on Linux + a stale entry in OpenSSL's per-
+        # thread error queue — can fail the whole handshake with a
+        # spurious "No such file or directory" on an empty path. See
+        # flare/tls/config.mojo's module docstring.
+        if config.verify != TlsVerify.NONE:
+            if fn_load_ca(ctx, _c_str(config.ca_bundle)) != 0:
+                fn_ctx_free(ctx)
+                raise TlsHandshakeError("CA bundle load failed: " + _c_err(lib))
 
         # ── 5. mTLS: load client cert + key if provided ───────────────────────
         if config.cert_file != "" and config.key_file != "":
@@ -392,9 +401,12 @@ struct TlsStream(Movable, Readable):
 
         _ = fn_set_verify(ctx, c_int(config.verify))
 
-        if fn_load_ca(ctx, _c_str(config.ca_bundle)) != 0:
-            fn_ctx_free(ctx)
-            raise TlsHandshakeError("CA bundle load failed: " + _c_err(lib))
+        # Skip CA bundle load in insecure mode — see the matching
+        # comment in ``connect`` above.
+        if config.verify != TlsVerify.NONE:
+            if fn_load_ca(ctx, _c_str(config.ca_bundle)) != 0:
+                fn_ctx_free(ctx)
+                raise TlsHandshakeError("CA bundle load failed: " + _c_err(lib))
 
         var ssl = fn_ssl_new(ctx, c_int(tcp._socket.fd))
         if ssl == 0:
