@@ -79,8 +79,7 @@ from flare.net._libc import (
     EFD_CLOEXEC,
     _eventfd,
     _pipe,
-    _read_fd,
-    _write_fd,
+    FlareRawIO,
 )
 from flare.net.error import NetworkError
 from flare.runtime.event import (
@@ -175,6 +174,14 @@ struct Reactor(Movable):
     """Bookkeeping: fd -> token. Used for invariant checks and to reject
     duplicate registrations."""
 
+    var _io: FlareRawIO
+    """Cached handle + function pointers for ``flare_read`` /
+    ``flare_write`` in ``libflare_tls.so``. Used by ``poll`` to drain
+    the wakeup fd and by ``wakeup`` to signal it. Keeping a single
+    long-lived handle per reactor avoids a ``dlopen + dlsym + dlclose``
+    round-trip on every wakeup event, which matters once Stage 2+
+    cross-thread wakeup traffic ramps up."""
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def __init__(out self) raises:
@@ -184,6 +191,11 @@ struct Reactor(Movable):
             NetworkError: If any of the underlying syscalls fails (epoll_create1,
                 eventfd, pipe, kqueue, initial registration).
         """
+        # Resolve libflare_tls.so up front so the hot path never pays a
+        # dlopen per wakeup. Construct this before any fd is opened so a
+        # failure here doesn't leak an epoll/kqueue fd.
+        self._io = FlareRawIO()
+
         comptime if CompilationTarget.is_linux():
             var epfd = _epoll_create1(EPOLL_CLOEXEC)
             if epfd < c_int(0):
@@ -408,7 +420,7 @@ struct Reactor(Movable):
                     var drain = stack_allocation[8, UInt8]()
                     for k in range(8):
                         (drain + k).init_pointee_copy(UInt8(0))
-                    _ = _read_fd(self._wake_read, drain, c_size_t(8))
+                    _ = self._io.read(self._wake_read, drain, c_size_t(8))
                 out.append(Event(tok, _epoll_to_event_flags(bits)))
             return Int(n)
         else:
@@ -483,7 +495,7 @@ struct Reactor(Movable):
                     var drain = stack_allocation[64, UInt8]()
                     for k in range(64):
                         (drain + k).init_pointee_copy(UInt8(0))
-                    _ = _read_fd(self._wake_read, drain, c_size_t(64))
+                    _ = self._io.read(self._wake_read, drain, c_size_t(64))
                 out.append(Event(udata, ev_flags))
             return Int(n)
 
@@ -501,11 +513,11 @@ struct Reactor(Movable):
             (one + 0).init_pointee_copy(UInt8(1))
             for k in range(1, 8):
                 (one + k).init_pointee_copy(UInt8(0))
-            _ = _write_fd(self._wake_write, one, c_size_t(8))
+            _ = self._io.write(self._wake_write, one, c_size_t(8))
         else:
             var b = stack_allocation[1, UInt8]()
             b.init_pointee_copy(UInt8(1))
-            _ = _write_fd(self._wake_write, b, c_size_t(1))
+            _ = self._io.write(self._wake_write, b, c_size_t(1))
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
