@@ -11,16 +11,15 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-**The fastest networking library for Mojo🔥** from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with minimal FFI (just libc and OpenSSL for TLS).
+**The fastest networking library for Mojo🔥**, from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with a small FFI footprint (libc, plus OpenSSL for TLS).
 
 **What you get:**
 
-- **Fastest HTTP server in Mojo:** single-threaded reactor (kqueue / epoll) — **on par with single-worker nginx and 1.96× Go `net/http` on Linux (AWS EPYC)**, **1.10× Go `net/http` on Apple M-series** (TFB plaintext, `GOMAXPROCS=1` / `worker_processes 1`)
-- **Fastest HTTP parser in Mojo:** 7-9x faster request/response parse and encode than other Mojo HTTP libraries
-- **Fastest WebSocket masking in Mojo:** SIMD XOR at up to 112 GB/s, 14-35x over scalar
-- Complete stack in one package: TCP, UDP, TLS, HTTP, WebSocket, DNS
-- IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback)
-- 375 tests and 15 fuzz harnesses (1M+ runs), zero known crashes
+- Single-threaded reactor HTTP server (kqueue / epoll). On Linux AWS EPYC: on par with single-worker nginx and ~2x Go's `net/http`. On Apple M-series: ~1.1x Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
+- HTTP request and response parsing is 7 to 9x faster than the next-fastest Mojo HTTP library on the same microbenchmarks.
+- WebSocket XOR masking uses SIMD and reaches 112 GB/s on 1KB payloads, 14 to 35x the scalar path.
+- TCP, UDP, TLS, HTTP, WebSocket, and DNS in one package with IPv4 and IPv6 out of the box, and dual-stack DNS with automatic fallback.
+- 375 tests and 15 fuzz harnesses. Over a million fuzz runs and zero known crashes.
 
 ## Quick start
 
@@ -60,7 +59,7 @@ def main() raises:
     srv.serve(handler)
 ```
 
-The server is reactor-backed: one event loop on `kqueue` (macOS) or `epoll` (Linux), non-blocking sockets, per-connection state machines, a hashed timing wheel for idle timeouts. Nginx-style architecture, no thread-per-connection. Supports HTTP/1.1 keep-alive, validates headers per RFC 7230, and enforces configurable limits on header/body/URI size and per-connection idle/write timeouts.
+Under the hood the server is one event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, and a hashed timing wheel for idle timeouts. This is the nginx-style model, no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable limits on header, body, and URI size plus per-connection idle and write timeouts are all handled for you.
 
 ### HTTP client with auth
 
@@ -227,16 +226,16 @@ Measured on Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
 
 ### Server throughput (TFB plaintext)
 
-**macOS — Apple M-series**, Mojo 0.26.3.0.dev2026041805 nightly.
+macOS, Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
 
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
 | **flare (reactor)** | **157,459** | 0.39 ms | 0.80 ms | **1.10x** |
 | Go `net/http` (1 thread) | 143,500 | 0.44 ms | 0.86 ms | 1.00x |
 
-flare is roughly 1.10x faster than Go's stdlib `net/http` at the same thread count. That is a ~3x jump over the v0.2.0 blocking server, achieved on a pure-Mojo reactor runtime with minimal FFI.
+flare is about 1.10x faster than Go's stdlib `net/http` at the same thread count, a roughly 3x jump over the v0.2.0 blocking server.
 
-**Linux — AWS EPYC 7R32 (64 vCPU)**, Linux 6.8.0-1027-aws, Mojo 0.26.3.0.dev2026041805, Go 1.24.13, nginx 1.25.3, `wrk` d40fce9. Same harness and methodology (5-run median + stdev-≤3% stability gate), but this is **a different machine with a different OS, scheduler, and CPU microarchitecture** — absolute req/s is not directly comparable with the macOS table above, only intra-platform ratios (flare vs Go, flare vs nginx) are. conda-forge ships an `nginx` binary on `linux-64`, so the Linux sweep adds `nginx` as an extra reference point.
+Linux, AWS EPYC 7R32 (64 vCPU), Linux 6.8.0-1027-aws, Mojo 0.26.3.0.dev2026041805, Go 1.24.13, nginx 1.25.3, `wrk` d40fce9. Same harness, same 5-run median with stdev ≤ 3% stability gate, different machine. Absolute req/s is not comparable across the two tables (different OS, scheduler, CPU), only the intra-platform ratios are. conda-forge ships an `nginx` binary on `linux-64`, so the Linux sweep adds nginx as an extra reference point.
 
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
@@ -244,12 +243,12 @@ flare is roughly 1.10x faster than Go's stdlib `net/http` at the same thread cou
 | **flare (reactor)** | **79,965** | 0.78 ms | 1.53 ms | **1.96x** |
 | Go `net/http` (1 thread) | 40,739 | 1.59 ms | 3.10 ms | 1.00x |
 
-On Linux flare sits within ~2% of nginx's single-worker throughput and is ~1.96x faster than Go `net/http` at the same thread count. flare's qualitative positioning — competitive with nginx, ahead of Go `net/http` — holds on both platforms, and the flare-vs-Go ratio is actually wider on Linux (1.96x vs 1.10x) because Go's `net/http` scheduler + `netpoll` overhead is more exposed on the slower EPYC core than on an Apple M-series P-core. Absolute req/s is lower than on the M-series above for reasons independent of flare — see the footnote[^bench-platform] below.
+On Linux flare sits within 2% of nginx's single-worker throughput and is about 1.96x Go `net/http`. The flare-vs-Go ratio is actually wider on Linux (1.96x vs 1.10x) because Go's scheduler and `netpoll` overhead is a bigger share of each request on the slower EPYC core than on an Apple M-series P-core. Absolute req/s is lower on EPYC for reasons independent of flare, see [^bench-platform].
 
-[^bench-platform]: Three things about the Linux column are deliberate-but-conservative choices, not "flare can only hit 77K/s in production":
-    1. **`GOMAXPROCS=1`, `worker_processes 1`, and single-thread flare.** Every baseline runs on one logical core so the comparison is apples-to-apples about *per-core request-processing cost*. This models the "cheapest tier" of hosting (one vCPU) rather than peak-possible throughput on the box. Production deployments on either platform should scale near-linearly with worker count (nginx and Go) or with SO_REUSEPORT sharding (flare, once Stage 2 lands).
-    2. **`wrk` and the server are not CPU-pinned.** On a 64-vCPU AWS instance the Linux scheduler will migrate both processes across cores between slices, causing L1/L2 cache misses and occasional SMT-sibling contention. Pinning `wrk` and the server to two different physical cores on the same NUMA node typically recovers 15–30% for Go on EPYC (a known Go `net/http` behavior on shared-scheduler Linux; see the flare-vs-Go ratio shift between the two platforms). The harness intentionally doesn't pin so the numbers match what an un-tuned deployment would see.
-    3. **c5-class EC2 does not turbo like M-series.** Single-thread throughput on EPYC 7R32 is roughly half of an Apple M-series P-core for HTTP plaintext — not a scheduler or runtime property, just microarchitecture. flare and nginx both drop by ~2× between the two tables; Go drops by ~3.5× because its goroutine + `netpoll` overhead is a bigger percentage of each request on the slower core.
+[^bench-platform]: Three things about the Linux column are deliberate, not "flare can only hit 77K/s in production":
+    1. **`GOMAXPROCS=1`, `worker_processes 1`, and single-thread flare.** Every baseline runs on one logical core so the comparison is apples-to-apples about per-core request-processing cost. This models the cheapest hosting tier (one vCPU) rather than peak throughput on the box. Production deployments on either platform should scale with worker count (nginx, Go) or with `SO_REUSEPORT` sharding.
+    2. **`wrk` and the server are not CPU-pinned.** On a 64-vCPU AWS instance the Linux scheduler migrates both processes across cores between slices, causing L1/L2 misses and occasional SMT-sibling contention. Pinning `wrk` and the server to two different physical cores on the same NUMA node typically recovers 15 to 30% for Go on EPYC (a known `net/http` behaviour on shared-scheduler Linux, which is also where the flare-vs-Go ratio shift between the two platforms comes from). The harness intentionally does not pin so the numbers match an un-tuned deployment.
+    3. **c5-class EC2 does not turbo like M-series.** Single-thread throughput on EPYC 7R32 is roughly half of an Apple M-series P-core for HTTP plaintext. That is microarchitecture, not a scheduler or runtime property. flare and nginx both drop by about 2x between the two tables; Go drops by about 3.5x because its goroutine plus `netpoll` overhead is a bigger percentage of each request on the slower core.
 
 Reproduce locally (on either platform):
 
@@ -260,17 +259,17 @@ pixi run --environment bench bench-vs-baseline         # + nginx + latency_floor
 
 #### Methodology
 
-The workload is the [TechEmpower Framework Benchmarks plaintext test (type #6)](https://github.com/TechEmpower/FrameworkBenchmarks/wiki/Project-Information-Framework-Tests-Overview#test-type-6-plaintext): `GET /plaintext` returning the 13-byte body `Hello, World!` with `Content-Type: text/plain`, HTTP/1.1 keep-alive on, no gzip, no logging. The workload spec lives at [`benchmark/workloads/plaintext.yaml`](benchmark/workloads/plaintext.yaml). The plaintext test isolates the raw request-routing and response-serialisation cost from database, template, and JSON overhead.
+The workload is the [TechEmpower Framework Benchmarks plaintext test (type #6)](https://github.com/TechEmpower/FrameworkBenchmarks/wiki/Project-Information-Framework-Tests-Overview#test-type-6-plaintext): `GET /plaintext` returning the 13-byte body `Hello, World!` with `Content-Type: text/plain`, HTTP/1.1 keep-alive on, no gzip, no logging. The workload spec lives at [`benchmark/workloads/plaintext.yaml`](benchmark/workloads/plaintext.yaml). Plaintext measures the cost of request routing and response serialisation on its own, without any database, template, or JSON work.
 
-The harness enforces apples-to-apples measurement:
+Measurement rules:
 
-- **Response-byte integrity:** before any measurement round, each baseline is probed once and its response bytes diffed against the workload spec. A target producing a different status, body length, or non-whitelisted header is rejected. Whitelisted headers that may vary per target: `Date`, `Server`, `Connection`, `Keep-Alive`.
-- **Pinned toolchains:** Go and `wrk` versions are pinned in `pixi.toml` under `[feature.bench.dependencies]` so the comparison cannot silently drift across machines.
-- **Warmup + 5-run measurement:** each (target, config) tuple runs one 10 s warmup plus five 30 s measurement rounds. The median of the middle three rounds is reported; the run fails the stability gate if stdev exceeds 3%.
-- **Load generator:** `wrk -t1 -c64 -d30s` — one `wrk` thread, 64 keep-alive connections, 30 seconds per round. Server and `wrk` run on the same host over loopback. The load generator is always `wrk`, never `ab` or `h2load`, for consistency with published TFB-style numbers.
-- **Full provenance per run:** every run writes its own directory under `benchmark/results/<yyyy-mm-ddTHHMM>-<host>-<git-sha>/` containing `env.json` (CPU model, OS, kernel tunables, exact toolchain versions), `integrity.md`, per-tuple result JSONs, `summary.md`, and raw `wrk` stdout under `RAW/`.
+- Response-byte integrity: before any measurement round, each baseline is probed once and its response bytes are diffed against the workload spec. A target producing a different status, body length, or non-whitelisted header is rejected. Headers allowed to vary per target: `Date`, `Server`, `Connection`, `Keep-Alive`.
+- Pinned toolchains: Go and `wrk` versions are pinned in `pixi.toml` under `[feature.bench.dependencies]` so the comparison does not silently drift across machines.
+- Warmup and 5-run measurement: each (target, config) tuple runs one 10 s warmup followed by five 30 s measurement rounds. The median of the middle three is reported. The run fails the stability gate if stdev exceeds 3%.
+- Load generator: `wrk -t1 -c64 -d30s`, one `wrk` thread, 64 keep-alive connections, 30 seconds per round. Server and `wrk` run on the same host over loopback. The load generator is always `wrk`, never `ab` or `h2load`, for consistency with published TFB-style numbers.
+- Per-run provenance: every run writes its own directory under `benchmark/results/<yyyy-mm-ddTHHMM>-<host>-<git-sha>/` containing `env.json` (CPU model, OS, kernel tunables, exact toolchain versions), `integrity.md`, per-tuple result JSONs, `summary.md`, and raw `wrk` stdout under `RAW/`.
 
-The underlying measurement protocol (integrity check, pinned toolchains, 5-run median with stdev gate) is stricter than TFB itself (which takes a single 15 s round on shared hardware); it is closer in spirit to the reproducibility protocols used by [simdjson](https://github.com/simdjson/simdjson/blob/master/doc/performance.md) and [rapidjson](https://rapidjson.org/md_doc_performance.html).
+This protocol (integrity check, pinned toolchains, 5-run median with stdev gate) is stricter than TFB's own single 15 s round on shared hardware. It is closer to the reproducibility setups in [simdjson](https://github.com/simdjson/simdjson/blob/master/doc/performance.md) and [rapidjson](https://rapidjson.org/md_doc_performance.html).
 
 ### HTTP parsing
 
@@ -297,13 +296,13 @@ RFC 6455 requires XOR-masking every client-to-server byte. SIMD gives a 14-35x s
 ```bash
 git clone https://github.com/ehsanmok/flare.git && cd flare
 
-# Option A — users and CI (lean): just the runtime deps, tests, examples,
+# Option A, users and CI (lean): runtime deps, tests, examples,
 # microbenchmarks, and format-check.
 pixi install
 
-# Option B — contributors: adds mojodoc + pre-commit for docs and the
-# formatting hook. Also what you want if you plan to run `pixi run format`
-# or `pixi run docs`.
+# Option B, contributors: adds mojodoc and pre-commit for docs and the
+# formatting hook. Use this if you plan to run `pixi run format` or
+# `pixi run docs`.
 pixi install -e dev
 ```
 
@@ -311,7 +310,7 @@ flare uses four pixi environments, layered:
 
 | Environment | Adds on top of `default` | What it unlocks |
 |---|---|---|
-| `default` | — (lean runtime only) | `tests`, `examples`, microbenchmarks (`bench-*`), `format-check` |
+| `default` | nothing (lean runtime only) | `tests`, `examples`, microbenchmarks (`bench-*`), `format-check` |
 | `dev` | `mojodoc`, `pre-commit` | `docs`, `docs-build`, `format` (with pre-commit hook install) |
 | `fuzz` | `dev` + `mozz` | `fuzz-*` / `prop-*` harnesses |
 | `bench` | `dev` + `go`, `nginx`, `wrk` | `bench-vs-baseline*`, TFB-style server benchmarks |

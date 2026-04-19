@@ -4,16 +4,18 @@ and OpenSSL for TLS).
 
 ## What you get
 
-- Fastest HTTP server in Mojo: reactor-backed (kqueue / epoll),
-  single-threaded event loop at ~155K req/s TFB plaintext,
-  ~1.08x faster than Go ``net/http`` (``GOMAXPROCS=1``).
-- Fastest HTTP parser in Mojo: 7-9x faster request/response parse
-  and encode than other Mojo HTTP libraries.
-- Fastest WebSocket masking in Mojo: SIMD XOR at up to 112 GB/s,
-  14-35x over scalar.
-- Complete stack in one package: TCP, UDP, TLS, HTTP, WebSocket, DNS.
-- IPv4 and IPv6 out of the box (dual-stack DNS with automatic fallback).
-- 375 tests and 15 fuzz harnesses (1M+ runs), zero known crashes.
+- Single-threaded reactor HTTP server (kqueue on macOS, epoll on Linux).
+  Within 2% of single-worker nginx and about 1.96x Go ``net/http`` on
+  Linux AWS EPYC. 1.10x Go ``net/http`` on Apple M-series. TFB plaintext,
+  ``GOMAXPROCS=1`` and ``worker_processes 1``.
+- HTTP request and response parsing is 7 to 9x faster than the
+  next-fastest Mojo HTTP library on the same microbenchmarks.
+- WebSocket XOR masking uses SIMD and reaches 112 GB/s on 1KB payloads,
+  14 to 35x the scalar path.
+- TCP, UDP, TLS, HTTP, WebSocket, and DNS in one package with IPv4 and
+  IPv6 out of the box, and dual-stack DNS with automatic fallback.
+- 375 tests and 15 fuzz harnesses. Over a million fuzz runs and zero
+  known crashes.
 
 ## Architecture
 
@@ -68,12 +70,13 @@ def main() raises:
     srv.serve(handler)
 ```
 
-Under the hood ``serve`` runs a single-threaded event loop on ``kqueue``
-(macOS) or ``epoll`` (Linux) with per-connection state machines and a
-hashed timing wheel for idle timeouts. Nginx-style architecture, no
-thread-per-connection. Supports HTTP/1.1 keep-alive, RFC 7230 header
-validation, and configurable limits on header / body / URI size plus
-per-connection idle / write timeouts.
+Under the hood ``serve`` runs a single event loop on ``kqueue`` (macOS)
+or ``epoll`` (Linux) with non-blocking sockets, a per-connection state
+machine, and a hashed timing wheel for idle timeouts. This is the
+nginx-style model, no thread per connection. HTTP/1.1 keep-alive,
+RFC 7230 header validation, and configurable limits on header, body,
+and URI size plus per-connection idle and write timeouts are all
+handled for you.
 
 ## HTTP client with auth
 
