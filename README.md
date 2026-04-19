@@ -240,11 +240,11 @@ flare is roughly 1.10x faster than Go's stdlib `net/http` at the same thread cou
 
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
-| nginx (1 worker) | 81,563 | 0.40 ms | 0.80 ms | 2.03x |
-| **flare (reactor)** | **77,061** | 0.81 ms | 1.50 ms | **1.92x** |
-| Go `net/http` (1 thread) | 40,094 | 1.61 ms | 3.20 ms | 1.00x |
+| nginx (1 worker) | 81,612 | 0.40 ms | 0.79 ms | 2.00x |
+| **flare (reactor)** | **79,965** | 0.78 ms | 1.53 ms | **1.96x** |
+| Go `net/http` (1 thread) | 40,739 | 1.59 ms | 3.10 ms | 1.00x |
 
-On Linux flare sits within ~5.5% of nginx's single-worker throughput and is ~1.92x faster than Go `net/http` at the same thread count. flare's qualitative positioning — competitive with nginx, ahead of Go `net/http` — holds on both platforms, and the flare-vs-Go ratio is actually wider on Linux (1.92x vs 1.10x) because Go's `net/http` scheduler + `netpoll` overhead is more exposed on the slower EPYC core than on an Apple M-series P-core. Absolute req/s is lower than on the M-series above for reasons independent of flare — see the footnote[^bench-platform] below.
+On Linux flare sits within ~2% of nginx's single-worker throughput and is ~1.96x faster than Go `net/http` at the same thread count. flare's qualitative positioning — competitive with nginx, ahead of Go `net/http` — holds on both platforms, and the flare-vs-Go ratio is actually wider on Linux (1.96x vs 1.10x) because Go's `net/http` scheduler + `netpoll` overhead is more exposed on the slower EPYC core than on an Apple M-series P-core. Absolute req/s is lower than on the M-series above for reasons independent of flare — see the footnote[^bench-platform] below.
 
 [^bench-platform]: Three things about the Linux column are deliberate-but-conservative choices, not "flare can only hit 77K/s in production":
     1. **`GOMAXPROCS=1`, `worker_processes 1`, and single-thread flare.** Every baseline runs on one logical core so the comparison is apples-to-apples about *per-core request-processing cost*. This models the "cheapest tier" of hosting (one vCPU) rather than peak-possible throughput on the box. Production deployments on either platform should scale near-linearly with worker count (nginx and Go) or with SO_REUSEPORT sharding (flare, once Stage 2 lands).
