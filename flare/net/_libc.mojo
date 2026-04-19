@@ -1016,10 +1016,19 @@ def _epoll_wait(
 def _kqueue() -> c_int:
     """Wrapper around ``kqueue(2)``.
 
+    macOS only; on Linux the symbol does not exist in libc, so we gate the
+    ``external_call`` behind a ``comptime if`` to keep the JIT's symbol
+    resolver from failing the whole module at link time. Linux callers
+    always take the epoll path and never invoke this function at runtime;
+    the stub return of ``-1`` is just a compile-time placeholder.
+
     Returns:
-        New kqueue fd on success, -1 on error.
+        New kqueue fd on success, -1 on error (always -1 on Linux).
     """
-    return external_call["kqueue", c_int]()
+    comptime if CompilationTarget.is_macos():
+        return external_call["kqueue", c_int]()
+    else:
+        return c_int(-1)
 
 
 @always_inline
@@ -1036,6 +1045,12 @@ def _kevent(
     Registers the ``changelist`` (``nchanges`` events) and waits for events
     on ``eventlist`` (up to ``nevents`` events).
 
+    macOS only: on Linux the ``kevent`` symbol is absent, so the
+    ``external_call`` is guarded by a ``comptime if`` to prevent the JIT
+    from rejecting the whole module at link time. Linux callers take the
+    epoll path; the stub return of ``-1`` is just a compile-time
+    placeholder so the Mojo module still type-checks there.
+
     Args:
         kq:         kqueue fd.
         changelist: Pointer to array of changes (kevent structs). May be
@@ -1048,16 +1063,20 @@ def _kevent(
                     bounded wait.
 
     Returns:
-        Number of events placed in ``eventlist`` (0 on timeout), -1 on error.
+        Number of events placed in ``eventlist`` (0 on timeout), -1 on
+        error (always -1 on Linux).
     """
-    return external_call["kevent", c_int](
-        kq,
-        changelist.bitcast[NoneType](),
-        nchanges,
-        eventlist.bitcast[NoneType](),
-        nevents,
-        timeout.bitcast[NoneType](),
-    )
+    comptime if CompilationTarget.is_macos():
+        return external_call["kevent", c_int](
+            kq,
+            changelist.bitcast[NoneType](),
+            nchanges,
+            eventlist.bitcast[NoneType](),
+            nevents,
+            timeout.bitcast[NoneType](),
+        )
+    else:
+        return c_int(-1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1113,17 +1132,22 @@ def _pipe(fds: UnsafePointer[c_int, _]) -> c_int:
 # with a different signature, and the two collide at the MLIR lowering
 # stage. The C wrappers compile to a single tail-call; no measurable cost.
 #
-# Platform note:
-# - Linux:  ``libflare_tls.so`` is ``LD_PRELOAD``ed by the pixi activation
-#           script, so ``flare_read`` / ``flare_write`` are already in the
-#           process and ``external_call`` resolves them directly.
-# - macOS:  SIP blocks ``DYLD_INSERT_LIBRARIES`` for non-signed binaries, so
-#           we load the library on first use via ``OwnedDLHandle``. The
-#           handle is re-constructed per call (same pattern as
-#           ``flare_set_nonblocking``); since Stage 1 uses these for wakeup
-#           fds and timer fds, call volume is low and latency is
-#           dominated by the ``read`` syscall itself. We can cache the
-#           handle later (Phase 1.2+) if profiling shows it matters.
+# Both platforms load the library on demand via ``OwnedDLHandle``:
+#
+# - macOS:  SIP blocks ``DYLD_INSERT_LIBRARIES`` for non-signed binaries,
+#           so a preload-style injection is impossible.
+# - Linux:  The pixi activation script still ``LD_PRELOAD``s the library
+#           (harmless + keeps ``ldd``-based sanity checks simple), but
+#           Mojo's JIT symbol resolver does **not** look at ``LD_PRELOAD``
+#           ed globals — it only searches the small set of shared objects
+#           it opened itself. So even on Linux we must ``dlopen`` via
+#           ``OwnedDLHandle`` to get a callable pointer.
+#
+# The handle is re-constructed per call (same pattern as
+# ``flare_set_nonblocking``); Stage 1 only uses these for wakeup fds and
+# timer fds, so call volume is low and latency is dominated by the
+# ``read`` syscall itself. We can cache the handle later (Phase 1.2+) if
+# profiling shows it matters.
 
 
 def _find_flare_lib_for_io() -> String:
@@ -1148,19 +1172,14 @@ def _read_fd(
 ) raises -> c_ssize_t:
     """Read from any fd (socket, pipe, eventfd) via ``libflare_tls.so``.
 
-    Raises only on macOS if the library can't be loaded; on Linux the symbol
-    resolves at JIT startup via LD_PRELOAD.
+    Loads the library on demand through ``OwnedDLHandle`` on both macOS
+    and Linux. Raises if the library can't be located or opened.
     """
-    comptime if CompilationTarget.is_macos():
-        var lib = OwnedDLHandle(_find_flare_lib_for_io())
-        var fn_r = lib.get_function[
-            def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t
-        ]("flare_read")
-        return fn_r(fd, Int(buf), n)
-    else:
-        return external_call["flare_read", c_ssize_t](
-            fd, buf.bitcast[NoneType](), n
-        )
+    var lib = OwnedDLHandle(_find_flare_lib_for_io())
+    var fn_r = lib.get_function[
+        def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t
+    ]("flare_read")
+    return fn_r(fd, Int(buf), n)
 
 
 @always_inline
@@ -1169,16 +1188,11 @@ def _write_fd(
 ) raises -> c_ssize_t:
     """Write to any fd (socket, pipe, eventfd) via ``libflare_tls.so``.
 
-    Raises only on macOS if the library can't be loaded; on Linux the symbol
-    resolves at JIT startup via LD_PRELOAD.
+    Loads the library on demand through ``OwnedDLHandle`` on both macOS
+    and Linux. Raises if the library can't be located or opened.
     """
-    comptime if CompilationTarget.is_macos():
-        var lib = OwnedDLHandle(_find_flare_lib_for_io())
-        var fn_w = lib.get_function[
-            def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t
-        ]("flare_write")
-        return fn_w(fd, Int(buf), n)
-    else:
-        return external_call["flare_write", c_ssize_t](
-            fd, buf.bitcast[NoneType](), n
-        )
+    var lib = OwnedDLHandle(_find_flare_lib_for_io())
+    var fn_w = lib.get_function[
+        def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t
+    ]("flare_write")
+    return fn_w(fd, Int(buf), n)
