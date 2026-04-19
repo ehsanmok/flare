@@ -17,9 +17,16 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 
 [activation]
 # Auto-build FFI wrapper libraries on environment activation (idempotent).
-# Requires OpenSSL and zlib from conda-forge (declared in [dependencies]).
+# Requires OpenSSL and zlib from conda-forge (declared in [dependencies])
+# and, on Linux, a g++ toolchain (declared in the per-platform
+# [target.*.dependencies] blocks below — macOS uses system clang++ from
+# the Xcode Command Line Tools, so no conda compiler is required there).
 scripts = ["flare/tls/ffi/build.sh", "flare/http/ffi/build.sh"]
 
+# ── Base runtime dependencies (lean) ──────────────────────────────────────────
+# These are everything flare itself needs at runtime — what a *user* of flare
+# as a library picks up. Contributor-only tooling (docs generator, pre-commit
+# hooks) lives under [feature.dev] and is opted into via `pixi install -e dev`.
 [dependencies]
 mojo             = "<1.0"
 openssl          = ">=3.6.1,<4"    # TLS: libssl + libcrypto (SHA-1 for WS handshake)
@@ -27,13 +34,23 @@ ca-certificates  = ">=2025.1.31"   # TLS default CA bundle → $CONDA_PREFIX/ssl
 zlib             = ">=1.3.1,<2"    # HTTP: Content-Encoding gzip/deflate decompression
 json             = { git = "https://github.com/ehsanmok/json.git", branch = "main" }
 
+# g++ is a BUILD-time dep on Linux: the activation scripts
+# (flare/tls/ffi/build.sh, flare/http/ffi/build.sh) invoke g++ to compile
+# libflare_tls.so + libflare_zlib.so. Without it the default env cannot
+# even activate on Linux. macOS intentionally uses system clang++ (no
+# conda compiler) so this block is Linux-only.
+[target.linux-64.dependencies]
+gxx = ">=13"
+
+[target.linux-aarch64.dependencies]
+gxx = ">=13"
+
+# ── Contributor tooling (docs, formatter hook) ───────────────────────────────
+# Opt in with: pixi install -e dev     (or -e fuzz / -e bench, which include
+# feature.dev automatically).
 [feature.dev.dependencies]
-gxx        = ">=13"           # g++ for Linux (macOS uses system clang++ from Xcode CLT)
 pre-commit = ">=4.2.0,<5"
 mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
-
-[feature.dev.target.linux-64.dependencies]
-wrk = ">=4.2.0"  # HTTP server benchmarking (linux-64 only on conda-forge)
 
 [feature.fuzz.dependencies]
 mozz = { git = "https://github.com/ehsanmok/mozz.git", branch = "main" }
@@ -77,8 +94,28 @@ prop-timer-wheel   = "mojo -I . fuzz/prop_timer_wheel.mojo"
 fuzz-server-reactor-chunks = "mojo -I . fuzz/fuzz_server_reactor_chunks.mojo"
 fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks"] }
 
+[feature.dev.tasks]
+# ── Docs (powered by mojodoc; dev-only because mojodoc is in feature.dev) ────
+# docs:       build + serve at http://localhost:3000/flare/ (blocks terminal)
+# docs-build: build static HTML → target/doc/ (for CI / GitHub Pages)
+# Run with: pixi run -e dev <task>
+docs       = "mojodoc ./flare --open"
+docs-build = "mojodoc ./flare --out-dir target/doc --base-url /flare/"
+
+# ── Format hook (dev-only because it wires pre-commit into .git/hooks) ──────
+# `format` shells out to `mojo format`, which is available in the lean
+# default env too — but we intentionally gate it on dev so every
+# `pixi run -e dev format` also installs the git pre-commit hook for the
+# contributor. Use `pixi run format-check` (below, in [tasks]) for a
+# read-only CI-style check that runs without feature.dev.
+install-pre-commit = "pre-commit install"
+format             = { cmd = "mojo format flare tests benchmark examples fuzz", depends-on = ["install-pre-commit"] }
+
 [environments]
-default = { features = ["dev"], solve-group = "default" }
+# Lean default env — only flare's runtime deps. Ships tests, examples,
+# microbenchmarks, and format-check out of the box. Contributors who
+# need mojodoc / pre-commit should use `-e dev`.
+default = { solve-group = "default" }
 dev     = { features = ["dev"], solve-group = "default" }
 fuzz    = { features = ["dev", "fuzz"], solve-group = "default" }
 bench   = { features = ["dev", "bench"], solve-group = "default" }
@@ -86,6 +123,8 @@ bench   = { features = ["dev", "bench"], solve-group = "default" }
 [tasks]
 # ── Tests (flat files, one file per test suite) ───────────────────────────────
 # Each task runs a single test file; use 'pixi run tests' to run all.
+# All test/example/microbench tasks work under the lean default env —
+# they only need the base `mojo` compiler + runtime deps.
 test-net         = "mojo -I . tests/test_net.mojo"          # Phase 1 — 57 tests
 test-dns         = "mojo -I . tests/test_dns.mojo"          # Phase 2 — 17 tests
 test-tcp         = "mojo -I . tests/test_tcp.mojo"          # Phase 3 — 19 tests
@@ -117,11 +156,13 @@ example-encoding    = "mojo -I . examples/10_encoding.mojo"      # gzip/deflate 
 
 examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
 
-# ── Benchmarks ────────────────────────────────────────────────────────────────
+# ── Microbenchmarks (mojo-only, no external load generators) ─────────────────
 # bench-parse:   IP parsing + DNS resolution throughput (confirms SIMD NOT useful here)
 # bench-ws-mask: WebSocket XOR masking scalar vs SIMD (confirms SIMD IS useful here)
 # bench-http:    HTTP request throughput (stub — requires HttpClient impl)
 # bench-tcp:     TCP throughput (stub — requires socket FFI impl)
+# For the full flare-vs-baseline TFB plaintext harness (Go, nginx, wrk),
+# see the `bench-vs-baseline*` tasks under feature.bench.
 bench-parse   = "mojo -I . benchmark/bench_parse.mojo"
 bench-ws-mask = "mojo -I . benchmark/bench_ws_mask.mojo"
 bench-http    = "mojo -I . benchmark/bench_http.mojo"
@@ -132,13 +173,9 @@ bench-server  = "mojo -I . benchmark/bench_server.mojo"   # HTTP server (use wrk
 # Run all available benchmarks (excludes bench-server which blocks)
 bench = { cmd = "mojo -I . benchmark/bench_parse.mojo && mojo -I . benchmark/bench_ws_mask.mojo && mojo -I . benchmark/bench_http.mojo && mojo -I . benchmark/bench_compare.mojo" }
 
-# ── Docs (powered by mojodoc) ─────────────────────────────────────────────────
-# docs:       build + serve at http://localhost:3000/flare/ (blocks terminal)
-# docs-build: build static HTML → target/doc/ (for CI / GitHub Pages)
-docs       = "mojodoc ./flare --open"
-docs-build = "mojodoc ./flare --out-dir target/doc --base-url /flare/"
-
-# ── Format ────────────────────────────────────────────────────────────────────
-install-pre-commit = "pre-commit install"
-format       = { cmd = "mojo format flare tests benchmark examples fuzz", depends-on = ["install-pre-commit"] }
-format-check = "bash -c 'mojo format flare tests benchmark examples fuzz && git diff --exit-code flare tests benchmark examples fuzz || (echo \"Error: Code is not formatted. Run \\\"pixi run format\\\" to fix.\" && exit 1)'"
+# ── Format check (read-only; runs under lean default env) ───────────────────
+# Uses `mojo format`, which ships with the base mojo compiler — no
+# pre-commit / feature.dev needed. For the write-side formatter (that
+# also installs the git pre-commit hook) see `format` in
+# [feature.dev.tasks] and run it with `pixi run -e dev format`.
+format-check = "bash -c 'mojo format flare tests benchmark examples fuzz && git diff --exit-code flare tests benchmark examples fuzz || (echo \"Error: Code is not formatted. Run \\\"pixi run -e dev format\\\" to fix.\" && exit 1)'"

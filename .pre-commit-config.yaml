@@ -10,6 +10,11 @@ repos:
     hooks:
     -   id: mojo-format
         name: Mojo Format
-        entry: pixi run format
+        # `format` now lives under [feature.dev.tasks], so without the
+        # explicit -e it's ambiguous across dev / fuzz / bench (all of
+        # which include feature.dev). Pinning to dev keeps the hook
+        # fast — the other envs pull in mozz / go / nginx that
+        # `mojo format` doesn't need.
+        entry: pixi run -e dev format
         language: system
         pass_filenames: false

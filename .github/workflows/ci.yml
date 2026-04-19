@@ -34,10 +34,18 @@ jobs:
       - name: Setup Pixi
         uses: prefix-dev/setup-pixi@v0.8.8
         with:
+          # Only solve + install the lean runtime env. Without this,
+          # setup-pixi installs every environment declared in pixi.toml
+          # (dev, fuzz, bench), which would pull in mojodoc, mozz, go,
+          # nginx, wrk, … — hundreds of MB of contributor-only tooling
+          # that the CI test job doesn't touch.
+          environments: default
           cache: false
           post-cleanup: false
 
       - name: Check formatting
+        # Uses `mojo format`, which ships with the base mojo compiler —
+        # no feature.dev (pre-commit) required.
         run: pixi run format-check
 
       - name: Run tests

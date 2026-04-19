@@ -296,8 +296,27 @@ RFC 6455 requires XOR-masking every client-to-server byte. SIMD gives a 14-35x s
 
 ```bash
 git clone https://github.com/ehsanmok/flare.git && cd flare
+
+# Option A — users and CI (lean): just the runtime deps, tests, examples,
+# microbenchmarks, and format-check.
 pixi install
+
+# Option B — contributors: adds mojodoc + pre-commit for docs and the
+# formatting hook. Also what you want if you plan to run `pixi run format`
+# or `pixi run docs`.
+pixi install -e dev
 ```
+
+flare uses four pixi environments, layered:
+
+| Environment | Adds on top of `default` | What it unlocks |
+|---|---|---|
+| `default` | — (lean runtime only) | `tests`, `examples`, microbenchmarks (`bench-*`), `format-check` |
+| `dev` | `mojodoc`, `pre-commit` | `docs`, `docs-build`, `format` (with pre-commit hook install) |
+| `fuzz` | `dev` + `mozz` | `fuzz-*` / `prop-*` harnesses |
+| `bench` | `dev` + `go`, `nginx`, `wrk` | `bench-vs-baseline*`, TFB-style server benchmarks |
+
+Tasks always run under `default` unless you pass `-e <env>`, e.g. `pixi run -e dev docs-build`, `pixi run -e fuzz fuzz-all`, `pixi run -e bench bench-vs-baseline-quick`.
 
 ### Tests
 
@@ -360,9 +379,15 @@ pixi run --environment fuzz fuzz-all                     # everything
 ### Formatting
 
 ```bash
-pixi run format            # format all source
-pixi run format-check      # CI check (no modifications)
+pixi run -e dev format     # format all source (also installs pre-commit hook)
+pixi run format-check      # read-only CI check (runs under lean default env)
 ```
+
+`format` lives in the `dev` feature because it also wires up the git
+`pre-commit` hook, which needs the `pre-commit` package. `format-check`
+shells out to `mojo format` (shipped with the base compiler), so it
+runs under the lean `default` env and doesn't drag in any contributor
+tooling.
 
 ## License
 
