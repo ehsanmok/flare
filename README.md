@@ -227,6 +227,8 @@ Measured on Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
 
 ### Server throughput (TFB plaintext)
 
+**macOS — Apple M-series**, Mojo 0.26.3.0.dev2026041805 nightly.
+
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
 | **flare (reactor)** | **157,459** | 0.39 ms | 0.80 ms | **1.10x** |
@@ -234,10 +236,21 @@ Measured on Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
 
 flare is roughly 1.10x faster than Go's stdlib `net/http` at the same thread count. That is a ~3x jump over the v0.2.0 blocking server, achieved on a pure-Mojo reactor runtime with minimal FFI.
 
-Reproduce locally:
+**Linux — AWS EPYC 7R32 (64 vCPU)**, Linux 6.8.0-1027-aws, Mojo 0.26.3.0.dev2026041805, Go 1.24.13, nginx 1.25.3, `wrk` d40fce9. Same harness (5-run median + stdev-≤3% stability gate). conda-forge ships an `nginx` binary on `linux-64`, so the Linux sweep adds `nginx` as an extra reference point.
+
+| Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
+|---|---:|---:|---:|---:|
+| nginx (1 worker) | 81,563 | 0.40 ms | 0.80 ms | 2.03x |
+| **flare (reactor)** | **77,061** | 0.81 ms | 1.50 ms | **1.92x** |
+| Go `net/http` (1 thread) | 40,094 | 1.61 ms | 3.20 ms | 1.00x |
+
+On Linux flare sits within ~5.5% of nginx's single-worker throughput and is ~1.92x faster than Go `net/http` at the same thread count. Absolute req/s is lower than on the M-series above because single-core plaintext serving on a `c5.*`-class EPYC 7R32 runs at roughly half the per-core rate of Apple M-series; Go takes more of that hit than flare, which is why the flare-vs-Go ratio is actually larger on Linux even though both are slower in absolute terms. flare's qualitative positioning — competitive with nginx, ahead of Go `net/http` — holds on both platforms.
+
+Reproduce locally (on either platform):
 
 ```bash
-pixi run --environment bench bench-vs-baseline-quick
+pixi run --environment bench bench-vs-baseline-quick   # flare vs Go only, ~7 min
+pixi run --environment bench bench-vs-baseline         # + nginx + latency_floor, ~20 min
 ```
 
 #### Methodology
