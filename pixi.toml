@@ -140,7 +140,7 @@ test-timer-wheel = "mojo -I . tests/test_timer_wheel.mojo"  # Stage 1/Phase 1.3 
 test-server-reactor-state = "mojo -I . tests/test_server_reactor_state.mojo"  # Stage 1/Phase 1.4 — state machine (~15 tests)
 test-reactor-shutdown = "mojo -I . tests/test_reactor_shutdown.mojo"  # Stage 1/Phase 1.8 — shutdown + lifecycle (~7 tests)
 
-tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_syscall_ffi.mojo && mojo -I . tests/test_reactor.mojo && mojo -I . tests/test_timer_wheel.mojo && mojo -I . tests/test_server_reactor_state.mojo && mojo -I . tests/test_reactor_shutdown.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
+tests = { cmd = "mojo -I . tests/test_net.mojo && mojo -I . tests/test_dns.mojo && mojo -I . tests/test_tcp.mojo && mojo -I . tests/test_udp.mojo && mojo -I . tests/test_syscall_ffi.mojo && mojo -I . tests/test_reactor.mojo && mojo -I . tests/test_timer_wheel.mojo && mojo -I . tests/test_server_reactor_state.mojo && mojo -I . tests/test_reactor_shutdown.mojo && mojo -I . tests/test_tls.mojo && mojo -I . tests/test_http.mojo && mojo -I . tests/test_ws.mojo && mojo -I . tests/test_ergonomics.mojo && mojo -I . tests/test_server.mojo && mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo && mojo -I . examples/11_udp.mojo && mojo -I . examples/12_tls.mojo && mojo -I . examples/13_cookies.mojo && mojo -I . examples/14_reactor.mojo" }
 
 # ── Examples (runnable + tested as part of 'pixi run tests') ─────────────────
 example-addresses   = "mojo -I . examples/01_addresses.mojo"
@@ -153,8 +153,12 @@ example-ergonomics  = "mojo -I . examples/07_ergonomics.mojo"    # Phase 8 high-
 example-http-server = "mojo -I . examples/08_http_server.mojo"   # HttpServer loopback
 example-ws-server   = "mojo -I . examples/09_ws_server.mojo"     # WsServer loopback
 example-encoding    = "mojo -I . examples/10_encoding.mojo"      # gzip/deflate encoding
+example-udp         = "mojo -I . examples/11_udp.mojo"           # UdpSocket round-trip
+example-tls         = "mojo -I . examples/12_tls.mojo"           # TlsStream client
+example-cookies     = "mojo -I . examples/13_cookies.mojo"       # Cookie, CookieJar, parsers
+example-reactor     = "mojo -I . examples/14_reactor.mojo"       # flare.runtime.Reactor (advanced)
 
-examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo" }
+examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo && mojo -I . examples/11_udp.mojo && mojo -I . examples/12_tls.mojo && mojo -I . examples/13_cookies.mojo && mojo -I . examples/14_reactor.mojo" }
 
 # ── Microbenchmarks (mojo-only, no external load generators) ─────────────────
 # bench-parse:   IP parsing + DNS resolution throughput (confirms SIMD NOT useful here)
