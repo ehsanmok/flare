@@ -320,7 +320,7 @@ Tasks always run under `default` unless you pass `-e <env>`, e.g. `pixi run -e d
 ### Tests
 
 ```bash
-pixi run tests             # 375 tests + 10 examples
+pixi run tests             # 375 tests + 14 examples
 
 # Individual layers
 pixi run test-net                    # IpAddr, SocketAddr, errors
@@ -338,6 +338,29 @@ pixi run test-timer-wheel            # TimerWheel
 pixi run test-syscall-ffi            # Low-level epoll/kqueue/eventfd FFI
 pixi run test-ergonomics             # high-level API
 ```
+
+### Examples
+
+Fourteen runnable examples under [`examples/`](examples/), each an end-to-end walk-through of one slice of the public API. Every example is executed as part of `pixi run tests` and on CI, so they stay green with the code.
+
+| File | What it shows |
+|---|---|
+| [`01_addresses.mojo`](examples/01_addresses.mojo) | `IpAddr`, `SocketAddr`, v4/v6 classification |
+| [`02_dns_resolution.mojo`](examples/02_dns_resolution.mojo) | `resolve()`, `resolve_v4()`, `resolve_v6()`, numeric-IP passthrough |
+| [`03_error_handling.mojo`](examples/03_error_handling.mojo) | typed error hierarchy and the context each error carries |
+| [`04_tcp_echo.mojo`](examples/04_tcp_echo.mojo) | `TcpListener` + `TcpStream` round-trip, TCP options |
+| [`05_http_get.mojo`](examples/05_http_get.mojo) | `HttpClient` GET / POST / PUT / PATCH / DELETE / HEAD |
+| [`06_websocket_echo.mojo`](examples/06_websocket_echo.mojo) | `WsClient` connect, send, receive |
+| [`07_ergonomics.mojo`](examples/07_ergonomics.mojo) | high-level requests-style API (`BufReader`, `WsMessage`, `Auth`) |
+| [`08_http_server.mojo`](examples/08_http_server.mojo) | `HttpServer` with routing, JSON responses, response helpers |
+| [`09_ws_server.mojo`](examples/09_ws_server.mojo) | `WsServer` handshake + frame loop |
+| [`10_encoding.mojo`](examples/10_encoding.mojo) | gzip / deflate compress and decompress |
+| [`11_udp.mojo`](examples/11_udp.mojo) | `UdpSocket.bind`, `send_to`, `recv_from`, `DatagramTooLarge` |
+| [`12_tls.mojo`](examples/12_tls.mojo) | `TlsConfig`, `TlsStream.connect`, raw TLS handshake + GET |
+| [`13_cookies.mojo`](examples/13_cookies.mojo) | `Cookie`, `CookieJar`, `parse_cookie_header`, `parse_set_cookie_header` |
+| [`14_reactor.mojo`](examples/14_reactor.mojo) | direct `flare.runtime.Reactor` usage (kqueue/epoll) for custom protocols |
+
+Run any single example with `pixi run example-<name>` (see the full list in [`pixi.toml`](pixi.toml)).
 
 ### Benchmarks
 
