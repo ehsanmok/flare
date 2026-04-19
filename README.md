@@ -15,7 +15,7 @@
 
 **What you get:**
 
-- **Fastest HTTP server in Mojo:** reactor-backed (kqueue / epoll), single-threaded event loop at **~155K req/s TFB plaintext, ~1.08x faster than Go `net/http` (`GOMAXPROCS=1`)**
+- **Fastest HTTP server in Mojo:** single-threaded reactor (kqueue / epoll) — **on par with single-worker nginx and 1.96× Go `net/http` on Linux (AWS EPYC)**, **1.10× Go `net/http` on Apple M-series** (TFB plaintext, `GOMAXPROCS=1` / `worker_processes 1`)
 - **Fastest HTTP parser in Mojo:** 7-9x faster request/response parse and encode than other Mojo HTTP libraries
 - **Fastest WebSocket masking in Mojo:** SIMD XOR at up to 112 GB/s, 14-35x over scalar
 - Complete stack in one package: TCP, UDP, TLS, HTTP, WebSocket, DNS
