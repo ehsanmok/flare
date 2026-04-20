@@ -73,6 +73,14 @@ struct ServerConfig(Copyable, Movable):
         self.shutdown_timeout_ms = shutdown_timeout_ms
 
 
+# Comptime-friendly default config. Used as the default for
+# ``HttpServer.serve_comptime[handler, config = ...]()``. Any user who
+# wants a non-default comptime config must declare their own
+# ``comptime my_cfg: ServerConfig = ServerConfig(...)`` because Mojo
+# `constrained` checks need comptime-stable values.
+comptime _DEFAULT_SERVER_CONFIG: ServerConfig = ServerConfig()
+
+
 # ── HttpServer ────────────────────────────────────────────────────────────────
 
 
@@ -177,6 +185,89 @@ struct HttpServer(Movable):
 
         self._stopping = False
         run_reactor_loop(self._listener, self.config, handler, self._stopping)
+
+    def serve_comptime[
+        H: Handler,
+        //,
+        handler: H,
+        config: ServerConfig = _DEFAULT_SERVER_CONFIG,
+    ](mut self,) raises:
+        """Comptime-specialised reactor loop.
+
+        ``handler`` is a comptime value (typically a stateless struct
+        or a ``FnHandler`` wrapping a module-level function) and
+        ``config`` is a comptime ``ServerConfig``. The Mojo compiler
+        specialises the reactor loop for this exact ``(handler,
+        config)`` pair so the handler call inlines into
+        ``on_readable`` and invariant checks happen at compile time.
+
+        Invariants enforced at compile time via ``constrained``:
+
+        - ``config.read_buffer_size`` must be > 0.
+        - ``config.max_header_size`` and ``config.max_uri_length`` must
+          be > 0.
+        - ``config.max_body_size`` >= ``config.max_header_size`` so a
+          well-formed request with only headers never triggers the
+          body-limit path.
+        - ``config.max_keepalive_requests`` >= 1.
+        - ``config.idle_timeout_ms`` >= 0 (0 disables).
+        - ``config.write_timeout_ms`` >= 0.
+
+        Misconfigured values produce a compile-time error instead of
+        a runtime crash.
+
+        Raises:
+            NetworkError: On fatal listener errors; per-connection errors
+                close the offending connection silently.
+        """
+        from ._server_reactor_impl import run_reactor_loop
+
+        constrained[
+            config.read_buffer_size > 0,
+            "ServerConfig.read_buffer_size must be > 0",
+        ]()
+        constrained[
+            config.max_header_size > 0,
+            "ServerConfig.max_header_size must be > 0",
+        ]()
+        constrained[
+            config.max_uri_length > 0,
+            "ServerConfig.max_uri_length must be > 0",
+        ]()
+        constrained[
+            config.max_body_size >= config.max_header_size,
+            (
+                "ServerConfig.max_body_size must be >="
+                " ServerConfig.max_header_size"
+            ),
+        ]()
+        constrained[
+            config.max_keepalive_requests >= 1,
+            "ServerConfig.max_keepalive_requests must be >= 1",
+        ]()
+        constrained[
+            config.idle_timeout_ms >= 0,
+            "ServerConfig.idle_timeout_ms must be >= 0",
+        ]()
+        constrained[
+            config.write_timeout_ms >= 0,
+            "ServerConfig.write_timeout_ms must be >= 0",
+        ]()
+
+        self._stopping = False
+        # Materialise the comptime values into runtime copies that the
+        # reactor loop can consume. The Mojo compiler still specialises
+        # ``run_reactor_loop[H]`` per the inferred handler type, so the
+        # handler call inside ``on_readable`` is direct.
+        var runtime_config = materialize[config]()
+        var runtime_handler = materialize[handler]()
+        self.config = runtime_config.copy()
+        run_reactor_loop(
+            self._listener,
+            runtime_config,
+            runtime_handler,
+            self._stopping,
+        )
 
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to."""
