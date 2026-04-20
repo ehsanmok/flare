@@ -23,7 +23,7 @@ has is touched; the run loop re-uses ``run_reactor_loop[H]`` from
 """
 
 from std.ffi import c_int, c_size_t, external_call
-from std.memory import UnsafePointer, memcpy, memset_zero
+from std.memory import UnsafePointer
 from std.sys import size_of
 
 from ..http.handler import Handler
@@ -34,6 +34,28 @@ from ..tcp import TcpListener
 
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .reuseport import bind_reuseport
+
+
+# ── Context cleanup helpers (non-generic; non-generic call sites avoid
+#    a Mojo build conflict with mozz's own ``free`` declaration) ─────────────
+
+
+@always_inline
+def _scheduler_free_raw(raw: _OpaquePtr):
+    """Free a raw malloc'd pointer via libc free. Non-generic: one
+    instantiation per compile unit, which keeps the external_call for
+    ``free`` from being emitted at multiple generic-monomorphised sites.
+    """
+    _ = external_call["free", NoneType](raw.bitcast[NoneType]())
+
+
+def _scheduler_free_ctxs[H: Handler & Copyable](addrs: List[Int]):
+    """Destroy each WorkerCtx[H] at the given address then free it."""
+    for i in range(len(addrs)):
+        var raw = _OpaquePtr(unsafe_from_address=addrs[i])
+        var typed = raw.bitcast[_WorkerCtx[H]]()
+        typed.destroy_pointee()
+        _scheduler_free_raw(raw)
 
 
 # ── Per-worker context ───────────────────────────────────────────────────────
@@ -128,9 +150,12 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     except:
         pass
 
-    # Clean up the heap-allocated context before returning.
-    ctx_ptr.destroy_pointee()
-    _ = external_call["free", NoneType](raw.bitcast[NoneType]())
+    # Ctx ownership: the Scheduler main thread destroys + frees every
+    # ctx AFTER joining the worker, so we don't touch it here. This
+    # keeps all external_call[\"free\"] uses in a single, non-generic
+    # code path (Scheduler.shutdown) which avoids a Mojo build
+    # conflict under the fuzz environment where mozz also declares
+    # ``free`` at module scope.
     return UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=0)
 
 
@@ -161,6 +186,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
 
     var workers: List[ThreadHandle]
     var _listener_fds: List[Int]
+    var _ctx_addrs: List[Int]
     var _stopping: Bool
     var _stopping_ptr: UnsafePointer[Bool, MutExternalOrigin]
 
@@ -168,6 +194,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
         """Build an empty scheduler; use ``Scheduler.start`` instead."""
         self.workers = List[ThreadHandle]()
         self._listener_fds = List[Int]()
+        self._ctx_addrs = List[Int]()
         self._stopping = False
         self._stopping_ptr = UnsafePointer[Bool, MutExternalOrigin](
             unsafe_from_address=0
@@ -234,11 +261,13 @@ struct Scheduler[H: Handler & Copyable](Movable):
             var ctx_ptr = raw.bitcast[_WorkerCtx[Self.H]]()
             ctx_ptr.init_pointee_move(ctx^)
             var arg = raw
+            var ctx_addr = Int(raw)
 
             var spawned = False
             try:
                 var th = ThreadHandle.spawn[_worker_entry[Self.H]](arg)
                 s.workers.append(th^)
+                s._ctx_addrs.append(ctx_addr)
                 spawned = True
             except:
                 pass
@@ -251,8 +280,12 @@ struct Scheduler[H: Handler & Copyable](Movable):
                         s.workers[j].join()
                     except:
                         pass
+                # Destroy + free EVERY ctx (the ones that workers claimed
+                # + this one that never got claimed).
+                _scheduler_free_ctxs[Self.H](s._ctx_addrs)
+                s._ctx_addrs.clear()
                 ctx_ptr.destroy_pointee()
-                _ = external_call["free", NoneType](raw.bitcast[NoneType]())
+                _scheduler_free_raw(raw)
                 raise Error("pthread_create failed in Scheduler.start")
 
         return s^
@@ -262,14 +295,11 @@ struct Scheduler[H: Handler & Copyable](Movable):
 
         Flips the shared stopping flag, closes every worker's
         listener socket (which breaks ``accept()`` and ``poll()`` in
-        every worker immediately), then joins all worker threads.
-        Idempotent — a second call finds both the workers list and the
-        fd list empty and is a no-op.
+        every worker immediately), then joins all worker threads, and
+        finally destroys + frees every worker context.
+        Idempotent — a second call finds the lists empty and is a no-op.
         """
         self._stopping = True
-        # Close each listener fd so the worker's accept()/poll() exits
-        # straight away. Ignore errors (already-closed fds return EBADF
-        # but don't crash).
         for i in range(len(self._listener_fds)):
             var fd = self._listener_fds[i]
             _ = external_call["close", c_int, c_int](c_int(fd))
@@ -280,8 +310,14 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 self.workers[i].join()
             except:
                 pass
-        # Drain the list so a second call is a no-op.
         self.workers.clear()
+
+        # After all workers have joined, it's safe to destroy and free
+        # their per-thread contexts. Doing it here (non-generic call
+        # site: no monomorphisation per H) avoids a Mojo build conflict
+        # with mozz's ``free`` declaration in the fuzz environment.
+        _scheduler_free_ctxs[Self.H](self._ctx_addrs)
+        self._ctx_addrs.clear()
 
     def is_running(self) -> Bool:
         """Return True if any worker has not yet joined.
