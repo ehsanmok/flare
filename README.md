@@ -15,11 +15,13 @@
 
 **What you get:**
 
-- Single-threaded reactor HTTP server (kqueue / epoll). On Linux AWS EPYC: on par with single-worker nginx and ~2x Go's `net/http`. On Apple M-series: ~1.1x Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
+- Single-threaded reactor HTTP server (kqueue / epoll). On Linux AWS EPYC: on par with single-worker nginx and ~2x Go's `net/http`. On Apple M-series: faster than Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
 - HTTP request and response parsing is 7 to 9x faster than the next-fastest Mojo HTTP library on the same microbenchmarks.
 - WebSocket XOR masking uses SIMD and reaches 112 GB/s on 1KB payloads, 14 to 35x the scalar path.
 - TCP, UDP, TLS, HTTP, WebSocket, and DNS in one package with IPv4 and IPv6 out of the box, and dual-stack DNS with automatic fallback.
-- 375 tests and 15 fuzz harnesses. Over a million fuzz runs and zero known crashes.
+- `Handler` trait + `Router` (paths, params, method dispatch) + `App[S]` with typed `State[T]` for composable request handling.
+- Multicore reactor: `HttpServer.serve_multicore` binds N `SO_REUSEPORT` listeners on N pthread workers with optional per-core pinning.
+- 463 tests and 16 fuzz harnesses. Over a million fuzz runs and zero known crashes.
 
 ## Quick start
 
@@ -60,6 +62,72 @@ def main() raises:
 ```
 
 Under the hood the server is one event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, and a hashed timing wheel for idle timeouts. This is the nginx-style model, no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable limits on header, body, and URI size plus per-connection idle and write timeouts are all handled for you.
+
+### Routing with path parameters
+
+```mojo
+from flare.http import Router, Request, Response, ok, HttpServer
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+def get_user(req: Request) raises -> Response:
+    return ok("user " + req.params["id"])
+
+def main() raises:
+    var r = Router()
+    r.get("/",          home)
+    r.get("/users/:id", get_user)
+    r.post("/users",    home)
+
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_with(r^)
+```
+
+Unknown paths return 404; known paths called with the wrong method return 405 with an auto-generated `Allow:` header.
+
+### App with typed state
+
+```mojo
+from flare.http import App, Router, Request, Response, ok, HttpServer
+from flare.net import SocketAddr
+
+@fieldwise_init
+struct Counters(Copyable, Movable):
+    var hits: Int
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+def main() raises:
+    var router = Router()
+    router.get("/", home)
+    var app = App(state=Counters(hits=0), handler=router^)
+
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_with(app^)
+```
+
+Any `Handler` can be composed with middleware wrappers; middleware is just a `Handler` that holds an inner `Handler`. See `examples/16_state.mojo` for a concrete observing-middleware pattern.
+
+### Multicore (thread-per-core)
+
+```mojo
+from flare.http import HttpServer, Router, Request, Response, ok
+from flare.net import SocketAddr
+
+def hello(req: Request) raises -> Response:
+    return ok("hello")
+
+def main() raises:
+    var r = Router()
+    r.get("/", hello)
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_multicore(r^, num_workers=4)
+```
+
+Each worker gets its own `SO_REUSEPORT` listener and its own reactor. The kernel load-balances accepted connections across workers. `pin_cores=True` (default) pins worker N to core `N % num_cpus` on Linux; it is a no-op on macOS.
 
 ### HTTP client with auth
 
@@ -109,7 +177,7 @@ channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 preview = ["pixi-build"]
 
 [dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.3.0" }
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.4.0" }
 ```
 
 Then run:
@@ -359,6 +427,9 @@ Fourteen runnable examples under [`examples/`](examples/), each an end-to-end wa
 | [`12_tls.mojo`](examples/12_tls.mojo) | `TlsConfig`, `TlsStream.connect`, raw TLS handshake + GET |
 | [`13_cookies.mojo`](examples/13_cookies.mojo) | `Cookie`, `CookieJar`, `parse_cookie_header`, `parse_set_cookie_header` |
 | [`14_reactor.mojo`](examples/14_reactor.mojo) | direct `flare.runtime.Reactor` usage (kqueue/epoll) for custom protocols |
+| [`15_router.mojo`](examples/15_router.mojo)   | `Router` with path parameters, method dispatch, 404 / 405                |
+| [`16_state.mojo`](examples/16_state.mojo)     | `App[Counters]` + typed `State[T]` injected into a middleware handler    |
+| [`17_multicore.mojo`](examples/17_multicore.mojo) | multicore primitives: pthread spawn/join, CPU pinning, `SO_REUSEPORT` |
 
 Run any single example with `pixi run example-<name>` (see the full list in [`pixi.toml`](pixi.toml)).
 

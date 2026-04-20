@@ -14,7 +14,11 @@ and OpenSSL for TLS).
   14 to 35x the scalar path.
 - TCP, UDP, TLS, HTTP, WebSocket, and DNS in one package with IPv4 and
   IPv6 out of the box, and dual-stack DNS with automatic fallback.
-- 375 tests and 15 fuzz harnesses. Over a million fuzz runs and zero
+- ``Handler`` trait + ``Router`` + ``App[S]`` with typed ``State[T]``
+  for composable, testable request handling.
+- Multicore reactor via ``HttpServer.serve_multicore`` with
+  ``SO_REUSEPORT`` listeners and pthread-based CPU pinning on Linux.
+- 463 tests and 16 fuzz harnesses. Over a million fuzz runs and zero
   known crashes.
 
 ## Architecture
@@ -68,6 +72,64 @@ def handler(req: Request) raises -> Response:
 def main() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(handler)
+```
+
+## Routing with path parameters and method dispatch
+
+```mojo
+from flare.http import Router, Request, Response, ok, HttpServer
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+def get_user(req: Request) raises -> Response:
+    return ok("user " + req.params["id"])
+
+def main() raises:
+    var r = Router()
+    r.get("/", home)
+    r.get("/users/:id", get_user)
+    r.post("/users", home)
+
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_with(r^)
+```
+
+## App with typed state
+
+```mojo
+from flare.http import App, Router, Request, Response, ok
+
+@fieldwise_init
+struct Counters(Copyable, Movable):
+    var hits: Int
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+def main() raises:
+    var router = Router()
+    router.get("/", home)
+    var app = App(state=Counters(hits=0), handler=router^)
+    # app.state_view() returns a State[Counters] for middleware layers
+    # to read; serve via HttpServer.serve_with(app^).
+```
+
+## Multicore (thread-per-core)
+
+```mojo
+from flare.http import HttpServer, Router, Request, Response, ok
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response:
+    return ok("hello")
+
+def main() raises:
+    var r = Router()
+    r.get("/", home)
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_multicore(r^, num_workers=4)
 ```
 
 Under the hood ``serve`` runs a single event loop on ``kqueue`` (macOS)
@@ -225,6 +287,9 @@ from .http.headers import HeaderMap, HeaderInjectionError
 from .http.url import Url, UrlParseError
 from .http.request import Request, Method
 from .http.response import Response, Status
+from .http.handler import Handler, FnHandler
+from .http.router import Router
+from .http.app import App, State
 from .http.encoding import (
     Encoding,
     compress_gzip,
