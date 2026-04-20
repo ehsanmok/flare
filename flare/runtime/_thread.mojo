@@ -68,7 +68,7 @@ def _null_ptr() -> _OpaquePtr:
 
 
 @fieldwise_init
-struct ThreadHandle(Movable):
+struct ThreadHandle(Copyable, Movable):
     """Owning handle to a live OS thread.
 
     Stores ``pthread_t`` as a ``UInt64`` — on Linux x86_64 it is
@@ -84,7 +84,7 @@ struct ThreadHandle(Movable):
 
     @staticmethod
     def spawn[
-        start: def(_OpaquePtr) -> _OpaquePtr
+        start: def(_OpaquePtr) thin -> _OpaquePtr
     ](arg: _OpaquePtr,) raises -> ThreadHandle:
         """Spawn a thread that runs ``start(arg)``.
 
@@ -117,7 +117,7 @@ struct ThreadHandle(Movable):
             c_int,
             UnsafePointer[UInt64, MutExternalOrigin],  # thread*
             _OpaquePtr,  # attr*
-            def(_OpaquePtr) -> _OpaquePtr,  # start routine
+            def(_OpaquePtr) thin -> _OpaquePtr,  # start routine
             _OpaquePtr,  # arg
         ](tid_ptr, null_attr, start, arg)
 
