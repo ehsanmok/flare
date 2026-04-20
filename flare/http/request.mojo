@@ -1,5 +1,6 @@
 """HTTP request type."""
 
+from std.collections import Dict
 from json import loads, Value
 from .headers import HeaderMap
 
@@ -27,6 +28,9 @@ struct Request(Movable):
         headers: Request headers (owned ``HeaderMap``).
         body:    Request body bytes (empty for GET/HEAD).
         version: HTTP version string (default ``"HTTP/1.1"``).
+        params:  Path parameters extracted by ``Router`` (empty unless a
+                 ``Router`` handled the request). Maps parameter name
+                 (e.g. ``"id"``) to the matched segment value.
 
     This type is ``Movable`` (owns the header map and body) but not
     ``Copyable`` to avoid accidental deep copies.
@@ -44,6 +48,7 @@ struct Request(Movable):
     var headers: HeaderMap
     var body: List[UInt8]
     var version: String
+    var params: Dict[String, String]
 
     def __init__(
         out self,
@@ -65,6 +70,7 @@ struct Request(Movable):
         self.headers = HeaderMap()
         self.body = body.copy()
         self.version = version
+        self.params = Dict[String, String]()
 
     def text(self) -> String:
         """Decode the request body as a UTF-8 string.

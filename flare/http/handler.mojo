@@ -101,7 +101,7 @@ trait Handler(ImplicitlyDestructible, Movable):
 # ── FnHandler: backwards-compatibility shim ───────────────────────────────────
 
 
-struct FnHandler(Handler, Movable):
+struct FnHandler(Copyable, Handler):
     """Adapts a plain ``def(Request) raises -> Response`` into a ``Handler``.
 
     Stores the function as a runtime field (same cost as v0.3.x's
