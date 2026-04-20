@@ -67,6 +67,7 @@ from .headers import HeaderMap, HeaderInjectionError
 from .url import Url, UrlParseError
 from .request import Request, Method
 from .response import Response, Status
+from .handler import Handler, FnHandler
 from .encoding import (
     Encoding,
     compress_gzip,
