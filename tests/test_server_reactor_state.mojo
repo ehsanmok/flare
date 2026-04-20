@@ -84,6 +84,8 @@ def _drive_readable(
     queue. We use the Reactor (which wraps epoll/kqueue) to wait for the
     kernel to signal readiness, exactly like the real server will.
     """
+    from flare.http.handler import FnHandler
+
     var fd = ch.fd()
     r.register(fd, UInt64(1), INTEREST_READ)
     var events = List[Event]()
@@ -103,7 +105,8 @@ def _drive_readable(
     # Whether or not we observed readable, always drive the state
     # machine at least once — kqueue sometimes delivers the event on a
     # later poll but the data is already in the queue.
-    var result = ch.on_readable(handler, config)
+    var h = FnHandler(handler)
+    var result = ch.on_readable(h, config)
     try:
         r.unregister(fd)
     except:

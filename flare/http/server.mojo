@@ -11,6 +11,7 @@ Key performance characteristics:
 
 from std.memory import memcpy
 
+from .handler import Handler
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
@@ -136,14 +137,37 @@ struct HttpServer(Movable):
     def serve(mut self, handler: def(Request) raises thin -> Response) raises:
         """Run the single-threaded reactor loop, calling ``handler`` per request.
 
-        Delegates to ``flare.http._server_reactor_impl.run_reactor_loop``;
-        splitting the loop into another module avoids a circular import
-        (``_server_reactor_impl`` needs the parsing helpers defined in this
-        file).
+        This is the v0.3.x signature kept for backwards compatibility:
+        pass a plain ``def(Request) raises -> Response`` and the server
+        wraps it in a ``FnHandler`` internally.
+
+        For Router / middleware / stateful-struct handlers, use the
+        Handler-typed overload ``serve[H: Handler](mut self, var h: H)``.
 
         Args:
             handler: Called once per parsed request; its return value is the
                 HTTP response written back to the client.
+
+        Raises:
+            NetworkError: On fatal listener errors; per-connection errors
+                close the offending connection silently.
+        """
+        from ._server_reactor_impl import run_reactor_loop
+        from .handler import FnHandler
+
+        self._stopping = False
+        var h = FnHandler(handler)
+        run_reactor_loop(self._listener, self.config, h, self._stopping)
+
+    def serve_with[H: Handler](mut self, var handler: H) raises:
+        """Run the single-threaded reactor loop with a ``Handler``.
+
+        This is the v0.4.0 entry point. Any struct implementing
+        ``Handler`` works: ``Router``, middleware wrappers, stateful
+        user handlers, ``App[S]``, or a bare ``FnHandler``.
+
+        Args:
+            handler: The request handler (ownership transferred).
 
         Raises:
             NetworkError: On fatal listener errors; per-connection errors

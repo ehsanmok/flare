@@ -126,6 +126,7 @@ struct FnHandler(Copyable, Handler):
     var f: def(Request) raises thin -> Response
     """The wrapped function."""
 
+    @always_inline
     def __init__(out self, f: def(Request) raises thin -> Response):
         """Wrap ``f`` as a ``Handler``.
 
@@ -134,6 +135,10 @@ struct FnHandler(Copyable, Handler):
         """
         self.f = f
 
+    @always_inline
     def serve(self, req: Request) raises -> Response:
-        """Call the wrapped function with ``req``."""
+        """Call the wrapped function with ``req``. Inlined so the extra
+        trait dispatch layer is eliminated and the call site reduces to
+        a direct ``self.f(req)`` — matches v0.3.x's hot path.
+        """
         return self.f(req)

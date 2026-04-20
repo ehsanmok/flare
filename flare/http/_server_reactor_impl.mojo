@@ -33,6 +33,7 @@ from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
 from std.memory import UnsafePointer, memcpy, stack_allocation
 from std.sys.info import CompilationTarget, size_of
 
+from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
 from flare.http.server import (
@@ -192,11 +193,9 @@ struct ConnHandle(Movable):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    def on_readable(
-        mut self,
-        handler: def(Request) raises thin -> Response,
-        config: ServerConfig,
-    ) raises -> StepResult:
+    def on_readable[
+        H: Handler
+    ](mut self, ref handler: H, config: ServerConfig,) raises -> StepResult:
         """Drive the state machine on a readable event.
 
         Consumes as much as the non-blocking socket makes available per
@@ -315,7 +314,7 @@ struct ConnHandle(Movable):
         # Call the handler. Exceptions are caught and converted to 500.
         var resp: Response
         try:
-            resp = handler(req^)
+            resp = handler.serve(req^)
         except:
             self._queue_error(500, "Internal Server Error")
             return self._transition_to_writing()
@@ -718,10 +717,12 @@ def _accept_loop(
                 pass
 
 
-def run_reactor_loop(
+def run_reactor_loop[
+    H: Handler
+](
     mut listener: TcpListener,
     config: ServerConfig,
-    handler: def(Request) raises thin -> Response,
+    ref handler: H,
     stopping: Bool,
 ) raises:
     """Run the single-threaded event loop until ``stopping`` becomes True.
