@@ -1,0 +1,15 @@
+# Multicore throughput configuration: saturates an N-worker server
+# with a multi-threaded wrk client. Single-client wrk (throughput.yaml)
+# bottoms out on wrk's single thread before a multicore server can
+# fully spread load, so multicore numbers under throughput.yaml look
+# roughly identical to single-threaded. This config pumps from 8 wrk
+# threads over 256 keep-alive connections, matching the thread-per-core
+# shape of flare_mc (4 workers default).
+name: throughput_mc
+wrk_threads: 8
+wrk_connections: 256
+wrk_duration_seconds: 30
+warmup_seconds: 15
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 5.0

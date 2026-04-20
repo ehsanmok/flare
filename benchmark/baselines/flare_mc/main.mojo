@@ -1,16 +1,14 @@
-"""Flare HTTP server plaintext baseline for the TFB-style bench harness.
+"""Flare multicore HTTP server plaintext baseline.
 
-Listens on 127.0.0.1:$FLARE_BENCH_PORT (default 8080) and responds to
-every request at ``/plaintext`` with exactly ``Hello, World!`` (13 bytes),
-Content-Type ``text/plain; charset=utf-8``. Every other path returns 404.
+Same wire protocol as ``benchmark/baselines/flare/main.mojo`` but
+drives the v0.4.0 ``HttpServer.serve_multicore`` path: N workers on
+N pthreads, each bound to the same port with ``SO_REUSEPORT`` and
+(on Linux) pinned to a specific core.
 
-Uses the v0.4.0 comptime-parametric Handler path: ``FnHandlerCT[handler]``
-is a zero-size struct whose ``serve`` method is a direct call to the
-comptime-bound ``handler``. Combined with ``HttpServer.serve_with[H]``,
-the compiler monomorphises the whole reactor loop for this specific
-handler so the hot-path call site is a direct, statically-known call.
-This is the v0.4.0 design showcase: same machine code as a bare
-fn-pointer, but through the typed ``Handler`` trait.
+Environment:
+    FLARE_BENCH_PORT   : Listen port (default 8080).
+    FLARE_BENCH_WORKERS: Worker count (default 4).
+    FLARE_BENCH_PIN    : "1" pins workers to cores; "0" disables (default 1).
 
 Tuned for throughput: idle/write timeouts disabled, no cookies, no logs.
 """
@@ -32,8 +30,6 @@ from flare.net import SocketAddr
 
 def handler(req: Request) raises -> Response:
     if req.url == "/plaintext":
-        # Bulk-copy the 13-byte body. Reserved capacity + memcpy avoids
-        # growth reallocs and the per-byte copy on each request.
         var s = "Hello, World!"
         var sb = s.as_bytes()
         var n = len(sb)
@@ -48,21 +44,31 @@ def handler(req: Request) raises -> Response:
     return nf^
 
 
-# Comptime-bind the handler into a zero-size Handler struct. ``serve_with``
-# then monomorphises the entire reactor loop against this specific
-# handler so the call site inside ``on_readable`` reduces to a direct
-# statically-known call to ``handler(req^)``.
 alias BenchHandler = FnHandlerCT[handler]
 
 
 def main() raises:
     var port_str = getenv("FLARE_BENCH_PORT", "8080")
     var port = Int(port_str)
+    var workers_str = getenv("FLARE_BENCH_WORKERS", "4")
+    var workers = Int(workers_str)
+    if workers < 1:
+        workers = 1
+    var pin_str = getenv("FLARE_BENCH_PIN", "1")
+    var pin = pin_str == "1"
+
     var cfg = ServerConfig()
     cfg.idle_timeout_ms = 0
     cfg.write_timeout_ms = 0
     cfg.max_keepalive_requests = 100_000
-    print("flare listening on 127.0.0.1:", port)
+    print(
+        "flare multicore listening on 127.0.0.1:",
+        port,
+        " workers=",
+        workers,
+        " pin=",
+        pin,
+    )
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)), cfg^)
     var h = BenchHandler()
-    srv.serve_with(h^)
+    srv.serve_multicore(h^, num_workers=workers, pin_cores=pin)

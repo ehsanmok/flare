@@ -139,6 +139,51 @@ struct FnHandler(Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         """Call the wrapped function with ``req``. Inlined so the extra
         trait dispatch layer is eliminated and the call site reduces to
-        a direct ``self.f(req)`` — matches v0.3.x's hot path.
+        a direct ``self.f(req)`` - matches v0.3.x's hot path.
         """
         return self.f(req)
+
+
+# ── FnHandlerCT: comptime-parametric, zero-size ─────────────────────────────
+
+
+struct FnHandlerCT[F: def(Request) raises thin -> Response](Copyable, Handler):
+    """Comptime-parametric adapter: the wrapped function is a type
+    parameter, not a runtime field.
+
+    Zero-size at runtime (no ``var f``); the compiler monomorphises
+    ``serve`` per ``F`` so the call site reduces to a direct,
+    statically-known ``F(req)``. This is what gives the Handler path
+    the same machine code as a bare function call in the v0.3.x
+    ``HttpServer.serve(def...)`` shape.
+
+    Usage:
+        ```mojo
+        def hello(req: Request) raises -> Response:
+            return ok("hello")
+
+        alias HelloHandler = FnHandlerCT[hello]
+
+        def main() raises:
+            var h = HelloHandler()
+            var srv = HttpServer.bind(SocketAddr.localhost(8080))
+            srv.serve_with(h^)
+        ```
+
+    Prefer ``FnHandlerCT[fn]`` over ``FnHandler(fn)`` in hot paths
+    where the handler identity is known at compile time (benches,
+    single-handler servers, comptime-composed Routers). Use the
+    runtime ``FnHandler`` only when the handler is chosen at runtime
+    (e.g. when a Router needs to store ``def`` handlers in a list
+    indexed at request time).
+    """
+
+    @always_inline
+    def __init__(out self):
+        """Default-construct the zero-size handler."""
+        pass
+
+    @always_inline
+    def serve(self, req: Request) raises -> Response:
+        """Direct call to the comptime-bound function ``F``."""
+        return Self.F(req)

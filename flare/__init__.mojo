@@ -287,7 +287,7 @@ from .http.headers import HeaderMap, HeaderInjectionError
 from .http.url import Url, UrlParseError
 from .http.request import Request, Method
 from .http.response import Response, Status
-from .http.handler import Handler, FnHandler
+from .http.handler import Handler, FnHandler, FnHandlerCT
 from .http.router import Router
 from .http.app import App, State
 from .http.encoding import (
