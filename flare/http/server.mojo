@@ -10,6 +10,7 @@ Key performance characteristics:
 """
 
 from std.memory import memcpy
+from std.ffi import c_int, c_uint, external_call
 
 from .handler import Handler
 from .request import Request, Method
@@ -268,6 +269,70 @@ struct HttpServer(Movable):
             runtime_handler,
             self._stopping,
         )
+
+    def serve_multicore[
+        H: Handler & Copyable
+    ](
+        mut self,
+        var handler: H,
+        num_workers: Int,
+        pin_cores: Bool = True,
+    ) raises:
+        """Run a multicore reactor: N workers on N pthreads.
+
+        Uses ``flare.runtime.scheduler.Scheduler`` internally. The
+        current bound listener is closed before the scheduler binds N
+        ``SO_REUSEPORT`` listeners on the same port (one per worker).
+
+        ``serve_multicore`` intentionally does not add fields to
+        ``ServerConfig``. Keeping ``ServerConfig`` small matters for
+        the single-threaded reactor hot path, where the config is
+        passed by borrow many times per request; every extra byte
+        hurts cache behaviour there.
+
+        This function blocks until either a shutdown signal arrives
+        (``self.close()``) or all workers return.
+
+        Args:
+            handler:     The request handler (ownership transferred).
+                         Must satisfy ``Handler & Copyable`` so each
+                         worker gets its own copy.
+            num_workers: Worker thread count. Values <= 0 are treated as 1.
+            pin_cores:   If ``True`` (default), pin worker N to core
+                         ``N % num_cpus`` on Linux. No-op on macOS.
+
+        Raises:
+            NetworkError: On listener-bind failure.
+            Error: On pthread or scheduler errors.
+        """
+        from ..runtime.scheduler import Scheduler
+
+        var n = num_workers
+        if n <= 0:
+            n = 1
+        var addr = self._listener.local_addr()
+        self._listener.close()
+
+        var scheduler = Scheduler[H].start(
+            addr=addr,
+            config=self.config.copy(),
+            handler=handler^,
+            num_workers=n,
+            pin_cores=pin_cores,
+        )
+
+        # Block until the caller flips _stopping via close() or until
+        # all workers exit (an external close() on each listener via
+        # the scheduler's own shutdown path is the normal exit).
+        while not self._stopping and scheduler.is_running():
+            # Coarse wait: the HttpServer loop on the main thread
+            # doesn't need to be responsive the way the worker reactor
+            # is. Sleep for a short interval, then re-check.
+            _ = external_call["usleep", c_int, c_uint](
+                c_uint(50 * 1000)
+            )  # 50ms
+
+        scheduler.shutdown()
 
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to."""
