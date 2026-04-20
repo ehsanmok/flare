@@ -92,7 +92,8 @@ fuzz-cookie        = "mojo -I . fuzz/fuzz_cookie.mojo"
 fuzz-reactor-churn = "mojo -I . fuzz/fuzz_reactor_churn.mojo"
 prop-timer-wheel   = "mojo -I . fuzz/prop_timer_wheel.mojo"
 fuzz-server-reactor-chunks = "mojo -I . fuzz/fuzz_server_reactor_chunks.mojo"
-fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks"] }
+fuzz-router-paths  = "mojo -I . fuzz/fuzz_router_paths.mojo"      # v0.4.0 — Router path matcher (200K)
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks", "fuzz-router-paths"] }
 
 [feature.dev.tasks]
 # ── Docs (powered by mojodoc; dev-only because mojodoc is in feature.dev) ────
