@@ -5,14 +5,23 @@ each with its own listener bound with ``SO_REUSEPORT``. The kernel
 distributes accepted connections across workers so every worker
 handles roughly 1/N of the total connection load.
 
-Shutdown path: the caller sets ``Scheduler._stopping`` (or calls
-``shutdown()``), each worker observes it on the next poll iteration,
-breaks out of its reactor loop, drains its active connections up to
-``config.shutdown_timeout_ms``, and returns. The main thread joins
-all workers before ``Scheduler.__del__`` returns.
+Shutdown path: ``shutdown()`` flips a heap-allocated ``Bool`` that
+every worker polls on each reactor iteration. A stable heap address
+is used (instead of a field on the ``Scheduler`` struct) so the flag
+survives the NRVO-or-not move from ``Scheduler.start`` back to the
+caller. The main thread then joins all workers before ``shutdown()``
+returns.
+
+Relying on ``close(listener_fd)`` alone to wake the workers is not
+enough on Linux: when the fd is also registered in the worker's
+``epoll`` instance, the kernel holds an extra reference to the
+underlying ``struct file``, so ``close()`` from another thread does
+not trigger an ``EPOLLHUP`` and the workers stay blocked in
+``epoll_wait`` until the 100 ms poll timeout fires. The heap flag is
+what actually breaks the loop.
 
 This module is ``Handler``-generic: every worker runs the same
-``H: Handler`` that the caller passed to ``Scheduler.run``. The
+``H: Handler`` that the caller passed to ``Scheduler.start``. The
 handler value is moved (per-worker copies are made via ``H.copy()``;
 if that's expensive users should wrap their handler's expensive state
 behind an ``UnsafePointer`` or a similar shared-reference holder).
@@ -103,10 +112,9 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     to a CPU, then runs ``run_reactor_loop[H]`` until the shared
     stopping flag is observed.
 
-    The context was allocated on the main thread with
-    ``UnsafePointer[_WorkerCtx[H]].alloc(1)`` plus
-    ``init_pointee_move``; this routine is responsible for destroying
-    and freeing it before returning.
+    The context was allocated on the main thread with libc ``malloc``
+    plus ``init_pointee_move``; the Scheduler main thread destroys and
+    frees it after joining this worker.
     """
     var ctx_addr = Int(arg)
     var raw = UnsafePointer[UInt8, MutExternalOrigin](
@@ -134,13 +142,13 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
             except:
                 pass
 
-        # The stopping flag is read by run_reactor_loop every poll
-        # iteration; we pass it by value here and rely on the Reactor's
-        # wakeup fd + ServerConfig.shutdown_timeout_ms for bounded
-        # drain. A truly shared flag would need an atomic; for v0.4.0
-        # the Scheduler also calls listener.close() on shutdown which
-        # breaks accept() + poll() directly, so the Bool copy staleness
-        # is harmless.
+        # ``stopping_ptr[]`` dereferences to the heap-allocated Bool.
+        # ``run_reactor_loop`` takes ``stopping`` as a ``def`` parameter
+        # (reference semantics in Mojo), so every iteration of
+        # ``while not stopping`` re-reads the live flag from this
+        # stable heap address. That address was captured at
+        # ``Scheduler.start`` time and stays valid until
+        # ``Scheduler.shutdown`` joins every worker.
         run_reactor_loop[H](
             ctx_ptr[].listener,
             ctx_ptr[].config,
@@ -177,8 +185,12 @@ struct Scheduler[H: Handler & Copyable](Movable):
 
     Notes:
         - The scheduler stores the workers' ``ThreadHandle`` values and
-          a shared ``_stopping`` flag. ``shutdown()`` sets the flag and
-          joins all workers.
+          a heap-allocated stopping flag. ``shutdown()`` writes through
+          that heap address and joins all workers.
+        - The stopping flag lives on the heap (not on this struct) so
+          its address survives the move from ``Scheduler.start`` back
+          to the caller; every worker captures that address once at
+          spawn time.
         - Per-worker listener is bound with ``bind_reuseport``, so all
           N workers share the same TCP port via ``SO_REUSEPORT``.
         - Handler is cloned into each worker via ``H.copy()``.
@@ -187,18 +199,18 @@ struct Scheduler[H: Handler & Copyable](Movable):
     var workers: List[ThreadHandle]
     var _listener_fds: List[Int]
     var _ctx_addrs: List[Int]
-    var _stopping: Bool
-    var _stopping_ptr: UnsafePointer[Bool, MutExternalOrigin]
+    # Heap-allocated Bool, owned by this Scheduler. Address is stable
+    # across struct moves; every worker's ``_WorkerCtx.stopping_addr``
+    # points at the same heap cell. A 0 value here means "not yet
+    # allocated" (freshly constructed) or "already freed" (post-shutdown).
+    var _stopping_addr: Int
 
     def __init__(out self):
         """Build an empty scheduler; use ``Scheduler.start`` instead."""
         self.workers = List[ThreadHandle]()
         self._listener_fds = List[Int]()
         self._ctx_addrs = List[Int]()
-        self._stopping = False
-        self._stopping_ptr = UnsafePointer[Bool, MutExternalOrigin](
-            unsafe_from_address=0
-        )
+        self._stopping_addr = 0
 
     @staticmethod
     def start(
@@ -229,18 +241,30 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 joined before re-raising.
         """
         var s = Scheduler[Self.H]()
-        s._stopping = False
-        var stopping_addr = Int(UnsafePointer[Bool, _](to=s._stopping))
-        s._stopping_ptr = UnsafePointer[Bool, MutExternalOrigin](
-            unsafe_from_address=stopping_addr
+
+        # Heap-allocate the stopping flag. Using a struct field would
+        # be unsafe: ``return s^`` moves the Scheduler to the caller
+        # and NRVO is not guaranteed, so any ``&s._stopping`` address
+        # captured here could be dangling by the time ``shutdown()``
+        # writes through it. The heap cell is allocated here and
+        # freed in ``shutdown()`` after every worker joins.
+        var stop_raw = external_call["malloc", _OpaquePtr](
+            c_size_t(size_of[Bool]())
         )
+        if not stop_raw:
+            raise Error("malloc failed for scheduler stopping flag")
+        var stop_ptr = stop_raw.bitcast[Bool]()
+        stop_ptr.init_pointee_copy(False)
+        var stopping_addr = Int(stop_ptr)
+        s._stopping_addr = stopping_addr
 
         for i in range(num_workers):
             var listener = bind_reuseport(addr)
             # Save fd so shutdown can close all listener sockets from
-            # the main thread, which breaks every worker's accept() /
-            # poll() immediately instead of waiting for the stopping
-            # flag to be observed.
+            # the main thread. On Linux close() alone does not wake
+            # a concurrent epoll_wait (the epoll set holds a ref to
+            # the underlying file), but closing still helps on macOS
+            # via kqueue EV_EOF and speeds up the next accept() path.
             s._listener_fds.append(Int(listener._socket.fd))
             var cfg_copy = config.copy()
             var handler_copy = handler.copy()
@@ -257,6 +281,9 @@ struct Scheduler[H: Handler & Copyable](Movable):
             var ctx_size = size_of[_WorkerCtx[Self.H]]()
             var raw = external_call["malloc", _OpaquePtr](c_size_t(ctx_size))
             if not raw:
+                # Free the stopping flag too — no worker referenced it.
+                _scheduler_free_raw(stop_raw)
+                s._stopping_addr = 0
                 raise Error("malloc failed for worker ctx")
             var ctx_ptr = raw.bitcast[_WorkerCtx[Self.H]]()
             ctx_ptr.init_pointee_move(ctx^)
@@ -274,7 +301,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
             if not spawned:
                 # Roll back any workers we already started so the caller
                 # gets a fully-stopped scheduler instead of half-live state.
-                s._stopping = True
+                stop_ptr[] = True
                 for j in range(len(s.workers)):
                     try:
                         s.workers[j].join()
@@ -286,6 +313,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 s._ctx_addrs.clear()
                 ctx_ptr.destroy_pointee()
                 _scheduler_free_raw(raw)
+                # All workers joined, so no one is reading the
+                # stopping flag anymore — safe to free.
+                _scheduler_free_raw(stop_raw)
+                s._stopping_addr = 0
                 raise Error("pthread_create failed in Scheduler.start")
 
         return s^
@@ -293,13 +324,22 @@ struct Scheduler[H: Handler & Copyable](Movable):
     def shutdown(mut self) raises:
         """Signal every worker to stop and wait for them to join.
 
-        Flips the shared stopping flag, closes every worker's
-        listener socket (which breaks ``accept()`` and ``poll()`` in
-        every worker immediately), then joins all worker threads, and
-        finally destroys + frees every worker context.
-        Idempotent — a second call finds the lists empty and is a no-op.
+        Flips the heap-allocated stopping flag, closes every worker's
+        listener socket (useful on macOS kqueue; on Linux the
+        stopping flag is what actually breaks the loop), then joins
+        all worker threads, and finally destroys + frees every worker
+        context and the stopping-flag heap cell. Idempotent — a
+        second call finds the lists empty and is a no-op.
         """
-        self._stopping = True
+        # Flip the shared stopping flag. ``_stopping_addr == 0``
+        # means we were never started (or were already shut down):
+        # leave the no-op path to the worker/fd loops below.
+        if self._stopping_addr != 0:
+            var stop_ptr = UnsafePointer[Bool, MutExternalOrigin](
+                unsafe_from_address=self._stopping_addr
+            )
+            stop_ptr[] = True
+
         for i in range(len(self._listener_fds)):
             var fd = self._listener_fds[i]
             _ = external_call["close", c_int, c_int](c_int(fd))
@@ -318,6 +358,14 @@ struct Scheduler[H: Handler & Copyable](Movable):
         # with mozz's ``free`` declaration in the fuzz environment.
         _scheduler_free_ctxs[Self.H](self._ctx_addrs)
         self._ctx_addrs.clear()
+
+        # Free the heap-allocated stopping flag now that no worker
+        # still references it. Setting the address to 0 keeps
+        # ``shutdown()`` idempotent: a second call is a no-op.
+        if self._stopping_addr != 0:
+            var stop_raw = _OpaquePtr(unsafe_from_address=self._stopping_addr)
+            _scheduler_free_raw(stop_raw)
+            self._stopping_addr = 0
 
     def is_running(self) -> Bool:
         """Return True if any worker has not yet joined.

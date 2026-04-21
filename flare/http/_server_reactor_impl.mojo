@@ -723,7 +723,7 @@ def run_reactor_loop[
     mut listener: TcpListener,
     config: ServerConfig,
     ref handler: H,
-    stopping: Bool,
+    ref stopping: Bool,
 ) raises:
     """Run the single-threaded event loop until ``stopping`` becomes True.
 
@@ -736,8 +736,11 @@ def run_reactor_loop[
             with the caller; we only borrow for accept / fd access).
         config: Server configuration.
         handler: Per-request callback.
-        stopping: Poll each iteration; when True the loop exits and
-            in-flight connections are closed.
+        stopping: Checked on every poll iteration; when True the loop
+            exits and in-flight connections are closed. ``stopping`` is
+            re-read each iteration via a fresh external pointer so the
+            compiler cannot hoist the load out of the loop — the
+            multicore ``Scheduler`` mutates it from another thread.
     """
     listener._socket.set_nonblocking(True)
     var listener_fd = listener._socket.fd
@@ -751,7 +754,16 @@ def run_reactor_loop[
     reactor.register(listener_fd, UInt64(0), INTEREST_READ)
 
     var events = List[Event]()
-    while not stopping:
+    # Take the address of the caller's ``stopping`` Bool once, then
+    # re-materialise a fresh ``UnsafePointer`` with ``MutExternalOrigin``
+    # inside the loop condition on every iteration. This defeats any
+    # LICM / load-forwarding the optimiser might otherwise do: from
+    # Mojo's point of view each iteration sees a brand-new pointer of
+    # externally-mutated origin, which it must re-load.
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
         events.clear()
         try:
             _ = reactor.poll(100, events)
