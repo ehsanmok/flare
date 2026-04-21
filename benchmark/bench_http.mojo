@@ -25,7 +25,7 @@ from flare.http import Response, HeaderMap, Url
 # ── Benchmark functions ───────────────────────────────────────────────────────
 
 
-def _bench_header_set_get(mut b: Bencher) capturing:
+def _bench_header_set_get(mut b: Bencher) capturing raises:
     """Set 10 headers and perform 3 case-insensitive lookups."""
 
     @parameter
@@ -50,7 +50,7 @@ def _bench_header_set_get(mut b: Bencher) capturing:
     b.iter[call_fn]()
 
 
-def _bench_response_construction(mut b: Bencher) capturing:
+def _bench_response_construction(mut b: Bencher) capturing raises:
     """Build a Response with status and 2 headers."""
 
     @parameter
@@ -64,7 +64,7 @@ def _bench_response_construction(mut b: Bencher) capturing:
     b.iter[call_fn]()
 
 
-def _bench_url_parse_simple(mut b: Bencher) capturing:
+def _bench_url_parse_simple(mut b: Bencher) capturing raises:
     """Parse a simple HTTP URL with a query string."""
 
     @parameter
@@ -76,7 +76,7 @@ def _bench_url_parse_simple(mut b: Bencher) capturing:
     b.iter[call_fn]()
 
 
-def _bench_url_parse_https(mut b: Bencher) capturing:
+def _bench_url_parse_https(mut b: Bencher) capturing raises:
     """Parse an HTTPS URL with a non-default port and query."""
 
     @parameter
