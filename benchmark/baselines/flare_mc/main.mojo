@@ -45,6 +45,9 @@ def handler(req: Request) raises -> Response:
 
 
 alias BenchHandler = FnHandlerCT[handler]
+alias BENCH_CONFIG = ServerConfig(
+    idle_timeout_ms=0, write_timeout_ms=0, max_keepalive_requests=100_000
+)
 
 
 def main() raises:
@@ -57,10 +60,6 @@ def main() raises:
     var pin_str = getenv("FLARE_BENCH_PIN", "1")
     var pin = pin_str == "1"
 
-    var cfg = ServerConfig()
-    cfg.idle_timeout_ms = 0
-    cfg.write_timeout_ms = 0
-    cfg.max_keepalive_requests = 100_000
     print(
         "flare multicore listening on 127.0.0.1:",
         port,
@@ -69,6 +68,12 @@ def main() raises:
         " pin=",
         pin,
     )
-    var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)), cfg^)
+    var srv = HttpServer.bind(
+        SocketAddr.localhost(UInt16(port)), materialize[BENCH_CONFIG]()
+    )
+    # ``serve_multicore`` takes a runtime handler value because the
+    # pthread context carries one ``H.copy()`` per worker; ``FnHandlerCT``
+    # is zero-size so the copy is free and the per-worker reactor loop
+    # still monomorphises against the comptime-bound function.
     var h = BenchHandler()
     srv.serve_multicore(h^, num_workers=workers, pin_cores=pin)
