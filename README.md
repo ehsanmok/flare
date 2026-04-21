@@ -17,7 +17,7 @@ The fastest networking library for Mojo🔥, from raw sockets up to HTTP/1.1 ser
 
 - `Handler` trait, `Router` with path params and method dispatch, `App[S]` with typed `State[T]`. Middleware is a `Handler` that wraps another `Handler`.
 - `serve_comptime[handler, config]` validates `ServerConfig` at compile time via `comptime assert`. Misconfigured servers fail the build, not the first request.
-- `HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N pthread workers, with optional per-core pinning on Linux. Shared-nothing per-connection ownership, no locks on the hot path.
+- `HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N `pthread` workers, with optional per-core pinning on Linux. Shared-nothing per-connection ownership, no locks on the hot path. On Linux EPYC with 4 pinned workers: **257K req/s, 4.4x linear scaling over the single-thread reactor, 3.6x nginx (1 worker), 7x Go `net/http`.** See [benchmarks](#multicore-serve_multicore).
 - Single-threaded reactor (kqueue on macOS, epoll on Linux). On Linux AWS EPYC: on par with single-worker nginx and about 2x Go's `net/http`. On Apple M-series: about 1.10x Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
 - HTTP request and response parsing is 7 to 9x faster than the next-fastest Mojo HTTP library on the same microbenchmarks.
 - Dual-stack DNS with automatic fallback between IPv4 and IPv6.
@@ -26,13 +26,20 @@ The fastest networking library for Mojo🔥, from raw sockets up to HTTP/1.1 ser
 
 ## Installation
 
-Add flare to your project's `pixi.toml`:
+Add flare to your project's `pixi.toml`. Pin to the latest tagged release for a stable install:
 
 ```toml
 [workspace]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 preview = ["pixi-build"]
 
+[dependencies]
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.3.0" }
+```
+
+Or track `main` for the latest unreleased work (breaking changes possible between tags):
+
+```toml
 [dependencies]
 flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 ```
@@ -43,7 +50,7 @@ Then run:
 pixi install
 ```
 
-Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Pin to a release tag once one is published.
+Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed under [GitHub Releases](https://github.com/ehsanmok/flare/releases); `main` always targets the next unreleased version.
 
 ## Quick start
 
@@ -311,11 +318,11 @@ def main() raises:
 
 ## Performance
 
-Measured on Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
+Measured on Apple M-series (macOS) and AWS EPYC 7R32 (Linux), Mojo 0.26.3.0.dev2026042005 nightly.
 
 ### Server throughput (TFB plaintext)
 
-macOS, Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
+macOS, Apple M-series, Mojo 0.26.3.0.dev2026042005 nightly.
 
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
@@ -324,7 +331,7 @@ macOS, Apple M-series, Mojo 0.26.3.0.dev2026041805 nightly.
 
 flare is about 1.10x faster than Go's stdlib `net/http` at the same thread count, a roughly 3x jump over the v0.2.0 blocking server.
 
-Linux, AWS EPYC 7R32 (64 vCPU), Linux 6.8.0-1027-aws, Mojo 0.26.3.0.dev2026041805, Go 1.24.13, nginx 1.25.3, `wrk` d40fce9. Same harness, same 5-run median with stdev ≤ 3% stability gate, different machine. Absolute req/s is not comparable across the two tables (different OS, scheduler, CPU), only the intra-platform ratios are. conda-forge ships an `nginx` binary on `linux-64`, so the Linux sweep adds nginx as an extra reference point.
+Linux, AWS EPYC 7R32 (64 vCPU), Linux 6.8.0-1027-aws, Mojo 0.26.3.0.dev2026042005, Go 1.24.13, nginx 1.25.3, `wrk` d40fce9. Same harness, same 5-run median with stdev ≤ 3% stability gate, different machine. Absolute req/s is not comparable across the two tables (different OS, scheduler, CPU), only the intra-platform ratios are. conda-forge ships an `nginx` binary on `linux-64`, so the Linux sweep adds nginx as an extra reference point.
 
 | Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|
@@ -336,9 +343,20 @@ On Linux flare sits within 2% of nginx's single-worker throughput and is about 1
 
 #### Multicore (`serve_multicore`)
 
-`HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N pthread workers. **These numbers show macOS saturating, not scaling** — the loopback + kqueue shared-accept path caps the whole benchmark host at ~140K req/s regardless of worker count, because both `wrk` and the server are competing for loopback + single-client work on one machine. That ceiling is the testbed, not flare. A real Linux deployment with remote clients and multiple NIC queues is where `serve_multicore` actually scales.
+`HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N pthread workers. The load generator here is [`throughput_mc.yaml`](benchmark/configs/throughput_mc.yaml) (`wrk -t8 -c256 -d30s`) — the default single-threaded `throughput` config pins `wrk` to one thread and 64 connections, which cannot drive enough concurrent load to show worker scaling, no matter what the server does.
 
-macOS, Apple M-series, `-t1 -c64 -d30s`, run on commit `87e2f4f`:
+Linux, AWS EPYC 7R32 (64 vCPU), `Linux 6.8.0-1027-aws`, Mojo 0.26.3.0.dev2026042005, Go 1.24.13, nginx 1.25.3, `wrk` d40fce9, `-t8 -c256 -d30s`, 5-run median with stdev ≤ 3% gate, run on commit `6b8e2c9`:
+
+| Server | Req/s (median) | stdev% | p50 | p99 | vs Go | vs 1-thread flare |
+|---|---:|---:|---:|---:|---:|---:|
+| Go `net/http` | 36,613 | 0.99 | 6.98 ms | 13.37 ms | 1.00x | 0.62x |
+| flare (single-threaded) | 58,812 | 2.89 | 4.41 ms | 4.64 ms | 1.61x | 1.00x |
+| nginx (1 worker) | 70,592 | 1.63 | 3.53 ms | 4.23 ms | 1.93x | 1.20x |
+| **`flare_mc` (4 workers, pinned)** | **257,461** | **1.56** | **0.97 ms** | **1.58 ms** | **7.03x** | **4.38x** |
+
+`flare_mc` at 4 pinned workers is **4.38x** the single-threaded flare reactor — near-linear scaling — **3.65x nginx (1 worker)**, and **7.03x Go `net/http`**. Tail latency collapses from 4.64 ms p99 (single-thread flare, saturated on 256 concurrent connections) to 1.58 ms p99 (multicore), because each worker gets its own un-contended reactor. The flare-vs-Go gap widens here (7x vs 2x under single-thread `throughput`) because Go's `net/http` + `netpoll` overhead grows faster than flare's `SO_REUSEPORT` sharding as concurrency climbs on a slower EPYC core.
+
+On macOS loopback (`-t1 -c64 -d30s`) `flare_mc` saturates at ~140K req/s regardless of worker count because `wrk` and the server compete for the same single-client CPU. That ceiling is the testbed, not flare:
 
 | Server | Req/s (median) | stdev% | vs 1-thread flare |
 |---|---:|---:|---:|
@@ -346,7 +364,7 @@ macOS, Apple M-series, `-t1 -c64 -d30s`, run on commit `87e2f4f`:
 | `flare_mc` (4 workers, pinned) | 148,694 | 2.51 | **0.99x** (saturated) |
 | Go `net/http` (`GOMAXPROCS=1`) | 140,560 | 0.64 | 0.94x |
 
-The 4-worker `flare_mc` row is within noise of the 1-worker flare row, which is the whole point: on macOS loopback you cannot drive enough concurrent load from one `wrk` process to show worker scaling, no matter what the server does. `benchmark/baselines/flare_mc/` + `benchmark/configs/throughput_mc.yaml` are the harness; run `pixi run --environment bench -- bash benchmark/scripts/bench_vs_baseline.sh --only=flare_mc --configs=throughput_mc` on a Linux box with multiple physical cores to exercise it there.
+The 4-worker `flare_mc` row is within noise of the 1-worker flare row — which is exactly why the Linux table above exists. Run it yourself with `pixi run --environment bench -- bash benchmark/scripts/bench_vs_baseline.sh --only=flare,flare_mc,go_nethttp,nginx --configs=throughput_mc` on a Linux box with multiple physical cores.
 
 [^bench-platform]: Three things about the Linux column are deliberate, not "flare can only hit 77K/s in production":
     1. **`GOMAXPROCS=1`, `worker_processes 1`, and single-thread flare.** Every baseline runs on one logical core so the comparison is apples-to-apples about per-core request-processing cost. This models the cheapest hosting tier (one vCPU) rather than peak throughput on the box. Production deployments on either platform should scale with worker count (nginx, Go) or with `SO_REUSEPORT` sharding.
@@ -369,12 +387,14 @@ Measurement rules:
 - Response-byte integrity: before any measurement round, each baseline is probed once and its response bytes are diffed against the workload spec. A target producing a different status, body length, or non-whitelisted header is rejected. Headers allowed to vary per target: `Date`, `Server`, `Connection`, `Keep-Alive`.
 - Pinned toolchains: Go and `wrk` versions are pinned in `pixi.toml` under `[feature.bench.dependencies]` so the comparison does not silently drift across machines.
 - Warmup and 5-run measurement: each (target, config) tuple runs one 10 s warmup followed by five 30 s measurement rounds. The median of the middle three is reported. The run fails the stability gate if stdev exceeds 3%.
-- Load generator: `wrk -t1 -c64 -d30s`, one `wrk` thread, 64 keep-alive connections, 30 seconds per round. Server and `wrk` run on the same host over loopback. The load generator is always `wrk`, never `ab` or `h2load`, for consistency with published TFB-style numbers.
+- Load generator: `wrk`, always — never `ab` or `h2load`, for consistency with published TFB-style numbers. Two configs are shipped: [`throughput.yaml`](benchmark/configs/throughput.yaml) (`-t1 -c64 -d30s`, one wrk thread, 64 keep-alive connections) for measuring per-core request-processing cost, and [`throughput_mc.yaml`](benchmark/configs/throughput_mc.yaml) (`-t8 -c256 -d30s`, eight wrk threads, 256 keep-alive connections) for saturating a thread-per-core server. Server and `wrk` run on the same host over loopback.
 - Per-run provenance: every run writes its own directory under `benchmark/results/<yyyy-mm-ddTHHMM>-<host>-<git-sha>/` containing `env.json` (CPU model, OS, kernel tunables, exact toolchain versions), `integrity.md`, per-tuple result JSONs, `summary.md`, and raw `wrk` stdout under `RAW/`.
 
 This protocol (integrity check, pinned toolchains, 5-run median with stdev gate) is stricter than TFB's own single 15 s round on shared hardware. It is closer to the reproducibility setups in [simdjson](https://github.com/simdjson/simdjson/blob/master/doc/performance.md) and [rapidjson](https://rapidjson.org/md_doc_performance.html).
 
 ### HTTP parsing
+
+Apple M-series (`pixi run bench-compare`):
 
 | Operation | Latency |
 |-----------|---------|
@@ -384,15 +404,21 @@ This protocol (integrity check, pinned toolchains, 5-run median with stdev gate)
 | Encode HTTP response | 0.9 us |
 | Header serialization | 0.12 us |
 
+On EPYC 7R32 (Linux, AVX2) the same ops are about 1.4x slower per-op (e.g. request parse 2.35 us, response parse 6.45 us), consistent with the single-core throughput gap in the server-throughput tables above. Run `pixi run bench-compare` on either platform to reproduce.
+
 ### WebSocket SIMD masking
 
-RFC 6455 requires XOR-masking every client-to-server byte. SIMD gives a 14-35x speedup for payloads above 128 bytes:
+RFC 6455 requires XOR-masking every client-to-server byte. SIMD gives a 14-35x speedup for payloads above 128 bytes.
+
+Apple M-series (NEON, SIMD-32):
 
 | Payload | Scalar | SIMD-32 |
 |---------|--------|---------|
 | 1 KB | 3.2 GB/s | 112.6 GB/s |
 | 64 KB | 3.4 GB/s | 47.8 GB/s |
 | 1 MB | 3.4 GB/s | 54.8 GB/s |
+
+EPYC 7R32 (Linux, AVX2, SIMD-32) is in the same regime — peak 90.6 GB/s at 1 KB (58x scalar), 52.8 GB/s at 64 KB, 34.7 GB/s at 1 MB — about 20% under Apple M-series at the L1-resident sizes and within noise at the L2/L3-resident sizes.
 
 ## Development
 
