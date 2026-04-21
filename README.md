@@ -46,7 +46,7 @@ channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 preview = ["pixi-build"]
 
 [dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.3.0" }
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.4.0" }
 ```
 
 Or track `main` for the latest unreleased work (breaking changes possible between tags):
