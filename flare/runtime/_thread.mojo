@@ -55,7 +55,7 @@ comptime _PTHREAD_T_SIZE: Int = 8  # pointer-width on both linux/x86_64 + macOS/
 # is ABI-compatible with what pthread expects. The function must not
 # raise (pthread has no exception channel); convert any error to a
 # sentinel pointer value before returning.
-alias _OpaquePtr = UnsafePointer[UInt8, MutExternalOrigin]
+comptime _OpaquePtr = UnsafePointer[UInt8, MutExternalOrigin]
 
 
 # Shortcut for making a NULL pointer of the flavour we use throughout.
