@@ -27,7 +27,7 @@ def main() raises:
 
     var app = App(state=Counters(hits=0), router=router^)
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve_with(app^)
+    srv.serve(app^)
 ```
 
 For v0.4.0 the ``State[T]`` extractor is runtime; the comptime-reflected
@@ -89,11 +89,11 @@ struct App[S: Copyable & ImplicitlyDestructible, H: Handler](Handler):
         ```mojo
         var app = App(state=my_state, handler=my_router^)
         var srv = HttpServer.bind(addr)
-        srv.serve_with(app^)
+        srv.serve(app^)
         ```
 
     ``App`` itself implements ``Handler`` so it slots into the same
-    ``serve_with[H: Handler]`` entry point as any other handler. On
+    ``serve[H: Handler & Copyable]`` entry point as any other handler. On
     each request it calls into ``handler.serve(req)`` after recording
     the state snapshot; a comptime extractor layer will let handlers
     declare ``State[S]`` parameters directly in v0.4.1.

@@ -1,4 +1,4 @@
-"""Tests for ``HttpServer.serve_with[H: Handler]``.
+"""Tests for ``HttpServer.serve[H: Handler & Copyable]`` (single-worker path).
 
 Spins a server on a loopback port, issues a real TCP request, and
 verifies the handler received it and the response made it back. The
@@ -57,7 +57,7 @@ struct _GreeterHandler(Handler):
 
 
 def test_serve_with_struct_handler() raises:
-    """HttpServer.serve_with accepts a struct implementing Handler
+    """HttpServer.serve accepts a struct implementing Handler
     and produces the handler's response on a real TCP round-trip.
 
     The server only handles one request then exits because we set
@@ -68,7 +68,7 @@ def test_serve_with_struct_handler() raises:
     # v0.3.x `serve(def)` integration tests live in `test_server.mojo`
     # and already exercise the reactor loop end-to-end. Here we assert
     # at the type level that the struct-based Handler composes through
-    # the same Handler trait the server's `serve_with` takes.
+    # the same Handler trait the server's `serve[H]` overload takes.
     var h = _GreeterHandler("hi")
     var fake_req = Request(method=Method.GET, url="/")
     var resp = h.serve(fake_req)
@@ -93,7 +93,7 @@ def h_hello(req: Request) raises -> Response:
 
 
 def test_router_is_accepted_by_serve_with() raises:
-    """Router satisfies the Handler trait; serve_with accepts it
+    """Router satisfies the Handler trait; ``serve[H]`` accepts it
     (type-only check).
     """
     var r = Router()
@@ -152,7 +152,7 @@ def test_nested_middleware_composition() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_server_handler.mojo — HttpServer.serve_with[Handler]")
+    print("test_server_handler.mojo — HttpServer.serve[H: Handler & Copyable]")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

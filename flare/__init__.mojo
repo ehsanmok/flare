@@ -16,8 +16,9 @@ and OpenSSL for TLS).
   IPv6 out of the box, and dual-stack DNS with automatic fallback.
 - ``Handler`` trait + ``Router`` + ``App[S]`` with typed ``State[T]``
   for composable, testable request handling.
-- Multicore reactor via ``HttpServer.serve_multicore`` with
-  ``SO_REUSEPORT`` listeners and pthread-based CPU pinning on Linux.
+- Multicore reactor via ``HttpServer.serve(handler, num_workers=N)``
+  (``N >= 2``) with ``SO_REUSEPORT`` listeners and pthread-based CPU
+  pinning on Linux.
 - 463 tests and 16 fuzz harnesses. Over a million fuzz runs and zero
   known crashes.
 
@@ -93,7 +94,7 @@ def main() raises:
     r.post("/users", home)
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve_with(r^)
+    srv.serve(r^)
 ```
 
 ## App with typed state
@@ -113,7 +114,7 @@ def main() raises:
     router.get("/", home)
     var app = App(state=Counters(hits=0), handler=router^)
     # app.state_view() returns a State[Counters] for middleware layers
-    # to read; serve via HttpServer.serve_with(app^).
+    # to read; serve via HttpServer.serve(app^).
 ```
 
 ## Multicore (thread-per-core)
@@ -129,7 +130,7 @@ def main() raises:
     var r = Router()
     r.get("/", home)
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve_multicore(r^, num_workers=4)
+    srv.serve(r^, num_workers=4)
 ```
 
 Under the hood ``serve`` runs a single event loop on ``kqueue`` (macOS)

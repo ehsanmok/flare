@@ -167,7 +167,7 @@ struct FnHandlerCT[F: def(Request) raises thin -> Response](Copyable, Handler):
         def main() raises:
             var h = HelloHandler()
             var srv = HttpServer.bind(SocketAddr.localhost(8080))
-            srv.serve_with(h^)
+            srv.serve(h^)
         ```
 
     Prefer ``FnHandlerCT[fn]`` over ``FnHandler(fn)`` in hot paths

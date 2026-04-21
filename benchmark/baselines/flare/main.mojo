@@ -6,7 +6,7 @@ Content-Type ``text/plain; charset=utf-8``. Every other path returns 404.
 
 Uses the v0.4.0 comptime-parametric Handler path: ``FnHandlerCT[handler]``
 is a zero-size struct whose ``serve`` method is a direct call to the
-comptime-bound ``handler``. Combined with ``HttpServer.serve_with[H]``,
+comptime-bound ``handler``. Combined with ``HttpServer.serve[H]``,
 the compiler monomorphises the whole reactor loop for this specific
 handler so the hot-path call site is a direct, statically-known call.
 This is the v0.4.0 design showcase: same machine code as a bare
@@ -48,7 +48,7 @@ def handler(req: Request) raises -> Response:
     return nf^
 
 
-# Comptime-bind the handler into a zero-size Handler struct. ``serve_with``
+# Comptime-bind the handler into a zero-size Handler struct. ``serve[H]``
 # then monomorphises the entire reactor loop against this specific
 # handler so the call site inside ``on_readable`` reduces to a direct
 # statically-known call to ``handler(req^)``.
@@ -65,4 +65,4 @@ def main() raises:
     print("flare listening on 127.0.0.1:", port)
     var srv = HttpServer.bind(SocketAddr.localhost(UInt16(port)), cfg^)
     var h = BenchHandler()
-    srv.serve_with(h^)
+    srv.serve(h^)

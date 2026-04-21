@@ -1,4 +1,4 @@
-"""Tests for ``HttpServer.serve_multicore[H]`` lifecycle.
+"""Tests for ``HttpServer.serve(..., num_workers=N)`` lifecycle (multicore path).
 
 End-to-end HTTP round-trip tests across multiple workers require
 threading a client alongside the server loop; flare doesn't ship a
@@ -6,10 +6,9 @@ cross-thread test scaffold yet, so the tests here are lifecycle-only
 (same shape as ``test_scheduler.mojo``):
 
 - An ``HttpServer`` binds and closes cleanly.
-- ``HttpServer.close()`` without ``serve_multicore`` ever being
-  called is a no-op.
-- ``serve_multicore`` is callable at the type level with a Router
-  handler and a trivial struct handler.
+- ``HttpServer.close()`` without ``serve`` ever being called is a no-op.
+- ``serve(..., num_workers>=2)`` is callable at the type level with
+  a Router handler and a trivial struct handler.
 
 Real multicore throughput is measured by the v0.4.0 bench step; no
 wall-clock behaviour is asserted here.
@@ -61,12 +60,12 @@ def test_server_bind_with_short_config() raises:
 
 
 def test_server_close_without_serve_multicore_is_noop() raises:
-    """``close()`` on a server that never ran serve_multicore is clean."""
+    """``close()`` on a server that never ran ``serve`` is clean."""
     var srv = HttpServer.bind(SocketAddr.localhost(0), _mc_config())
     srv.close()
 
 
-# ── serve_multicore type-composition checks ────────────────────────────────
+# ── serve(..., num_workers=N) type-composition checks ──────────────────────
 
 
 def _hello(req: Request) raises -> Response:
@@ -81,10 +80,11 @@ def test_multicore_accepts_router() raises:
     """
     var r = Router()
     r.get("/", _hello)
-    # Just verifying Router is Copyable + Handler so serve_multicore[Router]
-    # compiles. Running the loop is covered by the bench, not the unit
-    # tests, because threading + graceful shutdown timing isn't
-    # reliable in a test-process with no threading helper.
+    # Just verifying Router is Copyable + Handler so
+    # ``serve[Router](..., num_workers=N)`` compiles. Running the loop
+    # is covered by the bench, not the unit tests, because threading
+    # + graceful shutdown timing isn't reliable in a test-process
+    # with no threading helper.
     var resp = r.serve(Request(method=Method.GET, url="/"))
     assert_equal(resp.text(), "hello")
 

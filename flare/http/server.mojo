@@ -143,49 +143,132 @@ struct HttpServer(Movable):
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^, config^)
 
-    def serve(mut self, handler: def(Request) raises thin -> Response) raises:
-        """Run the single-threaded reactor loop, calling ``handler`` per request.
+    def serve(
+        mut self,
+        handler: def(Request) raises thin -> Response,
+        num_workers: Int = 1,
+        pin_cores: Bool = True,
+    ) raises:
+        """Run the reactor loop, calling ``handler`` per request.
 
-        This is the v0.3.x signature kept for backwards compatibility:
-        pass a plain ``def(Request) raises -> Response`` and the server
-        wraps it in a ``FnHandler`` internally.
+        Plain-function overload: pass a ``def(Request) raises -> Response``
+        and the server wraps it in a ``FnHandler`` internally. This is
+        the v0.3.x-compatible shape; the argument list is extended with
+        ``num_workers`` / ``pin_cores`` to match the Handler-typed
+        overload below so every user has one entry point to learn.
+
+        - ``num_workers == 1`` (default): single-threaded reactor
+          (kqueue on macOS, epoll on Linux). Same hot path as the
+          v0.3.x ``serve``.
+        - ``num_workers >= 2``: multicore — N ``SO_REUSEPORT`` listeners
+          on N ``pthread`` workers via
+          ``flare.runtime.scheduler.Scheduler``.
 
         For Router / middleware / stateful-struct handlers, use the
-        Handler-typed overload ``serve[H: Handler](mut self, var h: H)``.
+        Handler-typed overload ``serve[H: Handler & Copyable]``.
 
         Args:
-            handler: Called once per parsed request; its return value is the
-                HTTP response written back to the client.
+            handler:     Called once per parsed request.
+            num_workers: Worker count. ``<= 0`` is coerced to 1.
+                Values > 256 are rejected (see ``Scheduler.start``).
+            pin_cores:   On Linux, pin worker N to core ``N % num_cpus``.
+                Ignored when ``num_workers == 1``. No-op on macOS.
 
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
+            Error:        On ``pthread_create`` failure when
+                ``num_workers >= 2``.
         """
         from ._server_reactor_impl import run_reactor_loop
         from .handler import FnHandler
 
-        self._stopping = False
         var h = FnHandler(handler)
-        run_reactor_loop(self._listener, self.config, h, self._stopping)
+        if num_workers <= 1:
+            self._stopping = False
+            run_reactor_loop(self._listener, self.config, h, self._stopping)
+        else:
+            self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
 
-    def serve_with[H: Handler](mut self, var handler: H) raises:
-        """Run the single-threaded reactor loop with a ``Handler``.
+    def serve[
+        H: Handler & Copyable
+    ](
+        mut self,
+        var handler: H,
+        num_workers: Int = 1,
+        pin_cores: Bool = True,
+    ) raises:
+        """Run the reactor loop with a ``Handler``.
 
-        This is the v0.4.0 entry point. Any struct implementing
-        ``Handler`` works: ``Router``, middleware wrappers, stateful
-        user handlers, ``App[S]``, or a bare ``FnHandler``.
+        This is the unified v0.4.0 entry point. Any struct implementing
+        ``Handler & Copyable`` works: ``Router``, middleware wrappers,
+        stateful user handlers, ``App[S, H]``, or a bare ``FnHandler``.
+
+        - ``num_workers == 1`` (default): single-threaded reactor.
+          ``run_reactor_loop`` runs directly on the current thread, no
+          pthreads, no ``SO_REUSEPORT``.
+        - ``num_workers >= 2``: multicore — N ``SO_REUSEPORT`` listeners
+          on N ``pthread`` workers via
+          ``flare.runtime.scheduler.Scheduler``. ``Copyable`` is
+          required here because each worker gets its own ``H.copy()``.
 
         Args:
-            handler: The request handler (ownership transferred).
+            handler:     The request handler (ownership transferred).
+            num_workers: Worker count. ``<= 0`` is coerced to 1.
+                Values > 256 are rejected (see ``Scheduler.start``).
+            pin_cores:   On Linux, pin worker N to core ``N % num_cpus``.
+                Ignored when ``num_workers == 1``. No-op on macOS.
 
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
+            Error:        On ``pthread_create`` failure when
+                ``num_workers >= 2``.
         """
         from ._server_reactor_impl import run_reactor_loop
 
-        self._stopping = False
-        run_reactor_loop(self._listener, self.config, handler, self._stopping)
+        if num_workers <= 1:
+            self._stopping = False
+            run_reactor_loop(
+                self._listener, self.config, handler, self._stopping
+            )
+        else:
+            self._serve_multicore[H](handler^, num_workers, pin_cores)
+
+    def _serve_multicore[
+        H: Handler & Copyable
+    ](mut self, var handler: H, num_workers: Int, pin_cores: Bool) raises:
+        """Internal: run the multicore (N-worker) path.
+
+        Extracted so both ``serve(def ...)`` and ``serve[H](H ...)``
+        dispatch through the same ``Scheduler.start`` call site. Not
+        part of the public API; callers should go through ``serve``.
+        """
+        from ..runtime.scheduler import Scheduler
+
+        var addr = self._listener.local_addr()
+        self._listener.close()
+
+        var scheduler = Scheduler[H].start(
+            addr=addr,
+            config=self.config.copy(),
+            handler=handler^,
+            num_workers=num_workers,
+            pin_cores=pin_cores,
+        )
+
+        # Block until the caller flips _stopping via close() or until
+        # all workers exit (an external close() on each listener via
+        # the scheduler's own shutdown path is the normal exit).
+        while not self._stopping and scheduler.is_running():
+            # Coarse wait: the HttpServer loop on the main thread
+            # doesn't need to be responsive the way the worker reactor
+            # is. Sleep for a short interval, then re-check.
+            _ = external_call["usleep", c_int, c_uint](
+                c_uint(50 * 1000)
+            )  # 50ms
+
+        scheduler.shutdown()
 
     def serve_comptime[
         H: Handler,
@@ -259,70 +342,6 @@ struct HttpServer(Movable):
             runtime_handler,
             self._stopping,
         )
-
-    def serve_multicore[
-        H: Handler & Copyable
-    ](
-        mut self,
-        var handler: H,
-        num_workers: Int,
-        pin_cores: Bool = True,
-    ) raises:
-        """Run a multicore reactor: N workers on N pthreads.
-
-        Uses ``flare.runtime.scheduler.Scheduler`` internally. The
-        current bound listener is closed before the scheduler binds N
-        ``SO_REUSEPORT`` listeners on the same port (one per worker).
-
-        ``serve_multicore`` intentionally does not add fields to
-        ``ServerConfig``. Keeping ``ServerConfig`` small matters for
-        the single-threaded reactor hot path, where the config is
-        passed by borrow many times per request; every extra byte
-        hurts cache behaviour there.
-
-        This function blocks until either a shutdown signal arrives
-        (``self.close()``) or all workers return.
-
-        Args:
-            handler:     The request handler (ownership transferred).
-                         Must satisfy ``Handler & Copyable`` so each
-                         worker gets its own copy.
-            num_workers: Worker thread count. Values <= 0 are treated as 1.
-            pin_cores:   If ``True`` (default), pin worker N to core
-                         ``N % num_cpus`` on Linux. No-op on macOS.
-
-        Raises:
-            NetworkError: On listener-bind failure.
-            Error: On pthread or scheduler errors.
-        """
-        from ..runtime.scheduler import Scheduler
-
-        var n = num_workers
-        if n <= 0:
-            n = 1
-        var addr = self._listener.local_addr()
-        self._listener.close()
-
-        var scheduler = Scheduler[H].start(
-            addr=addr,
-            config=self.config.copy(),
-            handler=handler^,
-            num_workers=n,
-            pin_cores=pin_cores,
-        )
-
-        # Block until the caller flips _stopping via close() or until
-        # all workers exit (an external close() on each listener via
-        # the scheduler's own shutdown path is the normal exit).
-        while not self._stopping and scheduler.is_running():
-            # Coarse wait: the HttpServer loop on the main thread
-            # doesn't need to be responsive the way the worker reactor
-            # is. Sleep for a short interval, then re-check.
-            _ = external_call["usleep", c_int, c_uint](
-                c_uint(50 * 1000)
-            )  # 50ms
-
-        scheduler.shutdown()
 
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to."""

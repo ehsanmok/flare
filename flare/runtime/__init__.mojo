@@ -10,8 +10,8 @@ API. Use it to build single-threaded servers that handle many concurrent
 connections from one OS thread. See the module docstring on ``Reactor`` for
 an end-to-end example.
 
-For multicore servers, use ``HttpServer.serve_multicore(handler, num_workers=N)``
-and size ``N`` with ``num_cpus()`` (total logical CPUs) or
+For multicore servers, use ``HttpServer.serve(handler, num_workers=N)``
+with ``N >= 2`` and size ``N`` with ``num_cpus()`` (total logical CPUs) or
 ``default_worker_count()`` (sensible default for IO-bound handlers).
 """
 

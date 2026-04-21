@@ -1,5 +1,5 @@
-flare multicore (HttpServer.serve_multicore, v0.4.0). N pthread workers
-each bound to the same port with SO_REUSEPORT. Worker count comes from
-FLARE_BENCH_WORKERS (default 4) and pinning from FLARE_BENCH_PIN
+flare multicore (HttpServer.serve(..., num_workers=N), v0.4.0). N pthread
+workers each bound to the same port with SO_REUSEPORT. Worker count comes
+from FLARE_BENCH_WORKERS (default 4) and pinning from FLARE_BENCH_PIN
 (default 1, pin_to_cpu). Version recorded in env.json as the current
 git commit sha at bench time.

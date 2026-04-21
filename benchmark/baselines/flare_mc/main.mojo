@@ -1,7 +1,7 @@
 """Flare multicore HTTP server plaintext baseline.
 
 Same wire protocol as ``benchmark/baselines/flare/main.mojo`` but
-drives the v0.4.0 ``HttpServer.serve_multicore`` path: N workers on
+drives the v0.4.0 ``HttpServer.serve(..., num_workers=N)`` multicore path: N workers on
 N pthreads, each bound to the same port with ``SO_REUSEPORT`` and
 (on Linux) pinned to a specific core.
 
@@ -71,9 +71,10 @@ def main() raises:
     var srv = HttpServer.bind(
         SocketAddr.localhost(UInt16(port)), materialize[BENCH_CONFIG]()
     )
-    # ``serve_multicore`` takes a runtime handler value because the
-    # pthread context carries one ``H.copy()`` per worker; ``FnHandlerCT``
-    # is zero-size so the copy is free and the per-worker reactor loop
-    # still monomorphises against the comptime-bound function.
+    # ``serve`` with ``num_workers >= 2`` takes a runtime handler
+    # value because the pthread context carries one ``H.copy()`` per
+    # worker; ``FnHandlerCT`` is zero-size so the copy is free and the
+    # per-worker reactor loop still monomorphises against the
+    # comptime-bound function.
     var h = BenchHandler()
-    srv.serve_multicore(h^, num_workers=workers, pin_cores=pin)
+    srv.serve(h^, num_workers=workers, pin_cores=pin)

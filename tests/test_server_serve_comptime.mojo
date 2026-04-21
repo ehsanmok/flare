@@ -7,7 +7,7 @@ compile time rather than runtime.
 
 Runtime behaviour is covered end-to-end by ``test_server.mojo`` (the
 v0.3.x ``serve(def)`` path) and ``test_server_handler.mojo`` (the
-``serve_with[H]`` path). This file covers the comptime surface:
+``serve[H: Handler & Copyable]`` path). This file covers the comptime surface:
 
 - The default config is accepted.
 - A custom valid config is accepted.
