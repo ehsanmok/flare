@@ -8,6 +8,7 @@ __pycache__/
 *.mojopkg
 .mojo_cache/
 .mogg_cache/
+.mojo-issues/
 
 # FFI build output (produced by activation script → build/)
 build/
