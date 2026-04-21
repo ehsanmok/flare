@@ -1,85 +1,120 @@
-"""Example 17 - multicore Scheduler (type + lifecycle walk-through).
+"""Example 17 - Multicore server with `HttpServer.serve_multicore`.
 
-Demonstrates the multicore primitives landed in v0.4.0:
+The user-facing multicore API is a single call:
 
-- ``num_cpus()`` from ``flare.runtime._thread``
-- ``ThreadHandle.spawn`` + ``join``
-- ``bind_reuseport`` (the helper the Scheduler uses internally)
+    srv.serve_multicore(handler, num_workers=N, pin_cores=True)
 
-Running a full ``HttpServer.serve_multicore`` loop blocks until
-shutdown from another thread, which is not something the test
-runner can script without a threading helper. So this example
-walks through the pieces that the Scheduler composes and prints
-them. The end-to-end multicore throughput numbers live in
-``benchmark/`` (``pixi run --environment bench bench-vs-baseline-quick``).
+Under the hood each worker gets its own reactor and its own
+``SO_REUSEPORT`` listener on the same port. The kernel load-balances
+accepted connections across workers — no cross-worker coordination,
+no locks on the hot path. On Linux with ``pin_cores=True`` (the
+default) worker N is pinned to core ``N % num_cpus`` for cache
+locality; on macOS that flag is a no-op because there is no
+``sched_setaffinity``.
+
+``serve_multicore`` blocks until another thread calls ``srv.close()``,
+which is not something the test runner can script without a
+threading helper. So this example:
+
+- Builds the same ``Router`` a real multicore server would use.
+- Drives that router with synthesised requests to prove the
+  routing is wired, exactly the way the multicore workers would.
+- Shows how to size the worker pool with ``num_cpus()`` and
+  ``default_worker_count()``, without ever touching a thread
+  primitive directly.
+- Binds an ``HttpServer`` and closes it cleanly.
+- Prints the production ``main()`` shape in full.
+
+End-to-end multicore throughput lives in ``benchmark/`` (run
+``pixi run --environment bench bench-vs-baseline-quick``).
 
 Run:
     pixi run example-multicore
 """
 
-from flare.runtime._thread import (
-    ThreadHandle,
-    num_cpus,
-    current_thread_id,
-    _OpaquePtr,
+from flare.http import (
+    HttpServer,
+    Router,
+    Request,
+    Response,
+    Method,
+    Status,
+    ok,
+    not_found,
 )
-from flare.runtime.reuseport import bind_reuseport
 from flare.net import SocketAddr
+from flare.runtime import num_cpus, default_worker_count
 
 
-def _print_tid(arg: _OpaquePtr) -> _OpaquePtr:
-    """Thread entry that writes pthread_self into its arg."""
-    if arg:
-        var p = arg.bitcast[UInt64]()
-        p[] = current_thread_id()
-    return _OpaquePtr(unsafe_from_address=0)
+# ── Handlers ────────────────────────────────────────────────────────────────
+
+
+def hello(req: Request) raises -> Response:
+    return ok("hello from flare")
+
+
+def get_user(req: Request) raises -> Response:
+    return ok("user " + req.param("id"))
+
+
+def health(req: Request) raises -> Response:
+    return ok("ok")
+
+
+# ── Main ────────────────────────────────────────────────────────────────────
 
 
 def main() raises:
     print("=" * 60)
-    print("flare example 17 - multicore primitives walk-through")
+    print("flare example 17 - Multicore server (`serve_multicore`)")
     print("=" * 60)
 
+    # 1. Size the worker pool with the public helpers — no thread
+    #    primitives, no ``_OpaquePtr``, no ``ThreadHandle``.
     var cpus = num_cpus()
-    print("  num_cpus        :", cpus)
-    print("  main thread tid :", current_thread_id())
+    var workers = default_worker_count()
+    print("  num_cpus               :", cpus)
+    print("  default_worker_count() :", workers)
 
-    # Spawn 3 workers; each records its pthread_self tid back into
-    # a caller-side slot. The main thread joins them in order.
-    var t1 = UInt64(0)
-    var t2 = UInt64(0)
-    var t3 = UInt64(0)
+    # 2. Build a Router — a real multicore server would pass a
+    #    Copyable Router to ``serve_multicore``; each worker gets
+    #    its own copy, so there is no shared state between workers.
+    var router = Router()
+    router.get("/", hello)
+    router.get("/users/:id", get_user)
+    router.get("/health", health)
 
-    def _ptr(ref v: UInt64) -> _OpaquePtr:
-        var addr = Int(UnsafePointer[UInt64, _](to=v))
-        return _OpaquePtr(unsafe_from_address=addr)
+    # 3. Drive the router with a synthesised request to prove the
+    #    routing graph each worker would run is correctly wired.
+    var r1 = router.serve(Request(method=Method.GET, url="/"))
+    print("  routed GET /           →", r1.status, r1.text())
+    var r2 = router.serve(Request(method=Method.GET, url="/users/42"))
+    print("  routed GET /users/42   →", r2.status, r2.text())
+    var r3 = router.serve(Request(method=Method.GET, url="/health"))
+    print("  routed GET /health     →", r3.status, r3.text())
+    var r4 = router.serve(Request(method=Method.GET, url="/missing"))
+    print("  routed GET /missing    →", r4.status)
 
-    var h1 = ThreadHandle.spawn[_print_tid](_ptr(t1))
-    var h2 = ThreadHandle.spawn[_print_tid](_ptr(t2))
-    var h3 = ThreadHandle.spawn[_print_tid](_ptr(t3))
-    h1.join()
-    h2.join()
-    h3.join()
-    print("  worker 1 tid    :", t1)
-    print("  worker 2 tid    :", t2)
-    print("  worker 3 tid    :", t3)
+    # 4. Bind an HttpServer (port 0 = auto-assign) and close it. A
+    #    production ``main()`` would now call ``srv.serve_multicore``
+    #    (shown below); doing so here would block the test runner
+    #    because graceful shutdown requires another thread to call
+    #    ``srv.close()``.
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    print("  bound on port          :", srv.local_addr().port)
+    srv.close()
+    print("  closed cleanly")
 
-    # Bind three REUSEPORT listeners on the same port. The kernel
-    # would load-balance accepted connections across them; a real
-    # multicore server replaces `HttpServer.serve(handler)` with
-    # `HttpServer.serve_multicore[Handler](handler, num_workers=N)`
-    # and gets this pattern automatically.
-    var l1 = bind_reuseport(SocketAddr.localhost(0))
-    var port = l1.local_addr().port
-    var l2 = bind_reuseport(SocketAddr.localhost(port))
-    var l3 = bind_reuseport(SocketAddr.localhost(port))
-    print("  shared port     :", port)
+    print()
+    print("Production `main()` — what a real multicore server runs:")
+    print("")
+    print("    var router = Router()")
+    print('    router.get("/", hello)')
+    print('    router.get("/users/:id", get_user)')
+    print("")
+    print("    var srv = HttpServer.bind(SocketAddr.localhost(8080))")
     print(
-        "  listeners on port:",
-        l1.local_addr().port,
-        l2.local_addr().port,
-        l3.local_addr().port,
+        "    srv.serve_multicore(router^, num_workers=default_worker_count())"
     )
-
     print()
     print("OK.")
