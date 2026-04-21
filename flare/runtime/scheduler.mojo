@@ -29,6 +29,27 @@ behind an ``UnsafePointer`` or a similar shared-reference holder).
 Only the ``Handler`` and ``ServerConfig`` machinery that v0.4.0 already
 has is touched; the run loop re-uses ``run_reactor_loop[H]`` from
 ``flare.http._server_reactor_impl``.
+
+Known limitations (tracked for v0.4.1):
+
+- The stopping flag is a raw ``Bool`` written from the main thread
+  and read from each worker, not an atomic. Mojo 0.26.3 stdlib has
+  no ``Atomic[Bool]`` / ``Atomic[Int]`` type yet, so we rely on two
+  things: (1) aligned single-byte loads and stores being atomic at
+  the hardware level on x86-64 and ARM64 with no torn reads;
+  (2) the volatile-style ``UnsafePointer[Bool, MutExternalOrigin]``
+  materialisation inside ``run_reactor_loop`` defeating the
+  optimiser's LICM so every iteration re-reads the flag. This is
+  enough in practice on both platforms flare targets, but the
+  flag should be upgraded to an ``Atomic`` with explicit
+  release/acquire ordering once the stdlib stabilises one.
+- Worker panics that escape ``run_reactor_loop`` are caught and
+  discarded in ``_worker_entry`` because pthread has no exception
+  channel. ``is_running()`` still reports ``True`` until the
+  ``ThreadHandle`` is joined, which is a mildly wrong signal for a
+  worker that crashed rather than shut down cleanly. Plumbing a
+  per-worker error cell back to the Scheduler is also scheduled for
+  v0.4.1.
 """
 
 from std.ffi import c_int, c_size_t, external_call
@@ -196,7 +217,20 @@ struct Scheduler[H: Handler & Copyable](Movable):
         - Handler is cloned into each worker via ``H.copy()``.
     """
 
-    var workers: List[ThreadHandle]
+    # Workers are stored in a heap-allocated block of exactly
+    # ``num_workers`` slots rather than a ``List[ThreadHandle]``.
+    # ``List[T]`` in Mojo 0.26.3 still requires ``T: Copyable``, but
+    # ``ThreadHandle`` is *intentionally* move-only: ``pthread_t`` is
+    # a unique OS resource and copying the handle would let the same
+    # thread be ``pthread_join``'d twice, which is UB per POSIX. So
+    # we own the memory directly here instead.
+    #
+    # ``_workers_ptr`` is NULL when no workers have been allocated
+    # (freshly constructed or post-shutdown); ``_workers_len`` tracks
+    # how many slots hold a live ``ThreadHandle`` that still needs
+    # joining + destroying.
+    var _workers_ptr: UnsafePointer[ThreadHandle, MutExternalOrigin]
+    var _workers_len: Int
     var _listener_fds: List[Int]
     var _ctx_addrs: List[Int]
     # Heap-allocated Bool, owned by this Scheduler. Address is stable
@@ -207,7 +241,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
 
     def __init__(out self):
         """Build an empty scheduler; use ``Scheduler.start`` instead."""
-        self.workers = List[ThreadHandle]()
+        self._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+            unsafe_from_address=0
+        )
+        self._workers_len = 0
         self._listener_fds = List[Int]()
         self._ctx_addrs = List[Int]()
         self._stopping_addr = 0
@@ -226,8 +263,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
             addr:        Address all workers bind (with ``SO_REUSEPORT``).
             config:      Shared server config (copied per worker).
             handler:     Shared request handler (copied per worker).
-            num_workers: Number of worker threads (1..=256 enforced by
-                the caller; this function does not re-check).
+            num_workers: Number of worker threads. Must be in
+                ``1..=256``; values outside that range raise. The
+                upper bound is a defensive guard against runaway
+                ``pthread_create`` + heap allocation.
             pin_cores:   If ``True`` (default), pin worker N to core
                 ``N % num_cpus``. No-op on macOS.
 
@@ -236,10 +275,17 @@ struct Scheduler[H: Handler & Copyable](Movable):
             serve until ``shutdown()`` is called.
 
         Raises:
-            Error: If a listener fails to bind or ``pthread_create``
+            Error: If ``num_workers`` is outside ``1..=256``, if a
+                listener fails to bind, or if ``pthread_create``
                 fails; partially-started workers are best-effort
                 joined before re-raising.
         """
+        if num_workers < 1 or num_workers > 256:
+            raise Error(
+                "Scheduler.start: num_workers must be in 1..=256 (got "
+                + String(num_workers)
+                + ")"
+            )
         var s = Scheduler[Self.H]()
 
         # Heap-allocate the stopping flag. Using a struct field would
@@ -257,6 +303,24 @@ struct Scheduler[H: Handler & Copyable](Movable):
         stop_ptr.init_pointee_copy(False)
         var stopping_addr = Int(stop_ptr)
         s._stopping_addr = stopping_addr
+
+        # Preallocate the worker slot array once; grow is not needed
+        # because ``num_workers`` is bounded above (<= 256) and fixed.
+        # Use libc ``malloc`` for the same reason the worker ctxs do:
+        # parametric-origin ``UnsafePointer.alloc`` isn't available
+        # from a generic static method, and keeping the allocator
+        # consistent avoids mixing ``.free()`` vs libc ``free`` on
+        # the shutdown path.
+        var workers_size = size_of[ThreadHandle]() * num_workers
+        var workers_raw = external_call["malloc", _OpaquePtr](
+            c_size_t(workers_size)
+        )
+        if not workers_raw:
+            _scheduler_free_raw(stop_raw)
+            s._stopping_addr = 0
+            raise Error("malloc failed for scheduler workers array")
+        s._workers_ptr = workers_raw.bitcast[ThreadHandle]()
+        s._workers_len = 0
 
         for i in range(num_workers):
             var listener = bind_reuseport(addr)
@@ -281,7 +345,12 @@ struct Scheduler[H: Handler & Copyable](Movable):
             var ctx_size = size_of[_WorkerCtx[Self.H]]()
             var raw = external_call["malloc", _OpaquePtr](c_size_t(ctx_size))
             if not raw:
-                # Free the stopping flag too — no worker referenced it.
+                # Free the stopping flag + the empty worker-slot array
+                # — no worker has referenced either yet.
+                _scheduler_free_raw(s._workers_ptr.bitcast[UInt8]())
+                s._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+                    unsafe_from_address=0
+                )
                 _scheduler_free_raw(stop_raw)
                 s._stopping_addr = 0
                 raise Error("malloc failed for worker ctx")
@@ -293,7 +362,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
             var spawned = False
             try:
                 var th = ThreadHandle.spawn[_worker_entry[Self.H]](arg)
-                s.workers.append(th^)
+                # Move the (non-Copyable) handle into the next slot
+                # of the worker array; bump the live-slot counter.
+                (s._workers_ptr + s._workers_len).init_pointee_move(th^)
+                s._workers_len += 1
                 s._ctx_addrs.append(ctx_addr)
                 spawned = True
             except:
@@ -302,11 +374,17 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 # Roll back any workers we already started so the caller
                 # gets a fully-stopped scheduler instead of half-live state.
                 stop_ptr[] = True
-                for j in range(len(s.workers)):
+                for j in range(s._workers_len):
                     try:
-                        s.workers[j].join()
+                        (s._workers_ptr + j)[].join()
                     except:
                         pass
+                    (s._workers_ptr + j).destroy_pointee()
+                _scheduler_free_raw(s._workers_ptr.bitcast[UInt8]())
+                s._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+                    unsafe_from_address=0
+                )
+                s._workers_len = 0
                 # Destroy + free EVERY ctx (the ones that workers claimed
                 # + this one that never got claimed).
                 _scheduler_free_ctxs[Self.H](s._ctx_addrs)
@@ -345,12 +423,20 @@ struct Scheduler[H: Handler & Copyable](Movable):
             _ = external_call["close", c_int, c_int](c_int(fd))
         self._listener_fds.clear()
 
-        for i in range(len(self.workers)):
+        for i in range(self._workers_len):
             try:
-                self.workers[i].join()
+                (self._workers_ptr + i)[].join()
             except:
                 pass
-        self.workers.clear()
+            # After the (successful or failing) join we still own the
+            # slot, so destroy the pointee before releasing the array.
+            (self._workers_ptr + i).destroy_pointee()
+        if self._workers_len > 0:
+            _scheduler_free_raw(self._workers_ptr.bitcast[UInt8]())
+            self._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+                unsafe_from_address=0
+            )
+            self._workers_len = 0
 
         # After all workers have joined, it's safe to destroy and free
         # their per-thread contexts. Doing it here (non-generic call
@@ -375,7 +461,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
         ``False`` here without distinguishing normal shutdown from
         failure.
         """
-        return len(self.workers) > 0
+        return self._workers_len > 0
 
 
 # ── Convenience ─────────────────────────────────────────────────────────────

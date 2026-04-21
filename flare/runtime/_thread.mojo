@@ -68,19 +68,34 @@ def _null_ptr() -> _OpaquePtr:
 
 
 @fieldwise_init
-struct ThreadHandle(Copyable, Movable):
+struct ThreadHandle(Movable):
     """Owning handle to a live OS thread.
 
     Stores ``pthread_t`` as a ``UInt64`` — on Linux x86_64 it is
-    ``unsigned long`` and on macOS arm64 it is an opaque pointer; both
-    are 64 bits. Do not rely on the concrete bit pattern.
+    ``unsigned long`` and on macOS arm64 it is an opaque pointer;
+    both are 64 bits. Do not rely on the concrete bit pattern.
 
-    Must be joined before being dropped. Calling ``join()`` twice is
-    undefined.
+    ``ThreadHandle`` is ``Movable`` but *not* ``Copyable`` on
+    purpose. A ``pthread_t`` identifies one OS thread and POSIX
+    forbids calling ``pthread_join`` more than once on the same
+    value — that is a property of the underlying resource, not of
+    one Mojo value pointing at it. Making the handle move-only
+    puts the "exactly one owner, exactly one join" invariant in
+    the type system.
+
+    As a defence in depth ``join()`` also zeroes ``_thread_id`` on
+    success, so if the compiler's move-checking is ever bypassed
+    (e.g. a ``memcpy``-style bitwise aliasing) a redundant call on
+    that specific handle short-circuits rather than double-joining.
+
+    Because ``List[T]`` in Mojo 0.26.3 still requires ``T: Copyable``,
+    ``Scheduler`` stores its workers in an ``UnsafePointer[ThreadHandle]``
+    instead of a ``List`` — see ``flare.runtime.scheduler``.
     """
 
     var _thread_id: UInt64
-    """Opaque pthread_t handle; treat as a token."""
+    """Opaque pthread_t handle. Zeroed by ``join()`` on success so
+    a second call on *the same handle* is a no-op."""
 
     @staticmethod
     def spawn[
@@ -128,12 +143,21 @@ struct ThreadHandle(Copyable, Movable):
     def join(mut self) raises:
         """Wait for the thread to finish.
 
-        Discards the thread's return value. Must be called exactly
-        once; calling ``join`` twice is undefined.
+        Discards the thread's return value. Safe to call more than
+        once on the same handle: after the first successful join
+        ``_thread_id`` is zeroed, so subsequent calls short-circuit
+        and return without invoking ``pthread_join`` again (``pthread_join``
+        on a stale thread id is undefined behaviour).
 
         Raises:
-            Error: If ``pthread_join`` returns non-zero.
+            Error: If ``pthread_join`` returns non-zero. The handle
+                is left untouched so the caller can retry or
+                propagate.
         """
+        if self._thread_id == 0:
+            # Already joined (successfully) — redundant call is a
+            # no-op rather than an undefined second pthread_join.
+            return
         var rc = external_call[
             "pthread_join",
             c_int,
@@ -142,6 +166,10 @@ struct ThreadHandle(Copyable, Movable):
         ](self._thread_id, _null_ptr())
         if rc != c_int(0):
             raise Error("pthread_join failed with rc=" + String(Int(rc)))
+        # Zero out so a second join() on this handle is a no-op.
+        # Without this, the handle is in a "joined" state but a
+        # further pthread_join on the stale id is UB per POSIX.
+        self._thread_id = UInt64(0)
 
     def pin_to_cpu(self, cpu: Int) raises:
         """Pin the thread to CPU ``cpu``.
