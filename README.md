@@ -11,17 +11,39 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-**The fastest networking library for Mojo🔥**, from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with a small FFI footprint (libc, plus OpenSSL for TLS).
+The fastest networking library for Mojo🔥, from raw sockets up to HTTP/1.1 servers and WebSocket clients. Written in Mojo with a small FFI footprint (libc, plus OpenSSL for TLS).
 
 **What you get:**
 
-- Single-threaded reactor HTTP server (kqueue / epoll). On Linux AWS EPYC: on par with single-worker nginx and ~2x Go's `net/http`. On Apple M-series: faster than Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
+- `Handler` trait, `Router` with path params and method dispatch, `App[S]` with typed `State[T]`. Middleware is a `Handler` that wraps another `Handler`.
+- `serve_comptime[handler, config]` validates `ServerConfig` at compile time via `constrained[...]`. Misconfigured servers fail the build, not the first request.
+- `HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N pthread workers, with optional per-core pinning on Linux. Shared-nothing per-connection ownership, no locks on the hot path.
+- Single-threaded reactor (kqueue on macOS, epoll on Linux). On Linux AWS EPYC: on par with single-worker nginx and about 2x Go's `net/http`. On Apple M-series: about 1.10x Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
 - HTTP request and response parsing is 7 to 9x faster than the next-fastest Mojo HTTP library on the same microbenchmarks.
-- WebSocket XOR masking uses SIMD and reaches 112 GB/s on 1KB payloads, 14 to 35x the scalar path.
-- TCP, UDP, TLS, HTTP, WebSocket, and DNS in one package with IPv4 and IPv6 out of the box, and dual-stack DNS with automatic fallback.
-- `Handler` trait + `Router` (paths, params, method dispatch) + `App[S]` with typed `State[T]` for composable request handling.
-- Multicore reactor: `HttpServer.serve_multicore` binds N `SO_REUSEPORT` listeners on N pthread workers with optional per-core pinning.
-- 463 tests and 16 fuzz harnesses. Over a million fuzz runs and zero known crashes.
+- Dual-stack DNS with automatic fallback between IPv4 and IPv6.
+- WebSocket XOR masking via SIMD: 112 GB/s on 1KB payloads, 14 to 35x the scalar path.
+- 460 tests, 16 fuzz harnesses, over a million fuzz runs, zero known crashes.
+
+## Installation
+
+Add flare to your project's `pixi.toml`:
+
+```toml
+[workspace]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+preview = ["pixi-build"]
+
+[dependencies]
+flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
+```
+
+Then run:
+
+```bash
+pixi install
+```
+
+Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Pin to a release tag once one is published.
 
 ## Quick start
 
@@ -61,7 +83,7 @@ def main() raises:
     srv.serve(handler)
 ```
 
-Under the hood the server is one event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, and a hashed timing wheel for idle timeouts. This is the nginx-style model, no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable limits on header, body, and URI size plus per-connection idle and write timeouts are all handled for you.
+The server runs one event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, and a hashed timing wheel for idle timeouts. Same model as nginx: no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable limits on header, body, and URI size, plus per-connection idle and write timeouts, are all handled for you.
 
 ### Routing with path parameters
 
@@ -73,7 +95,7 @@ def home(req: Request) raises -> Response:
     return ok("home")
 
 def get_user(req: Request) raises -> Response:
-    return ok("user " + req.params["id"])
+    return ok("user " + req.param("id"))
 
 def main() raises:
     var r = Router()
@@ -109,7 +131,7 @@ def main() raises:
     srv.serve_with(app^)
 ```
 
-Any `Handler` can be composed with middleware wrappers; middleware is just a `Handler` that holds an inner `Handler`. See `examples/16_state.mojo` for a concrete observing-middleware pattern.
+Any `Handler` can be composed with middleware wrappers; middleware is just a `Handler` that holds an inner `Handler`. See [`examples/18_middleware.mojo`](examples/18_middleware.mojo) for a three-layer pipeline (`Logger` wrapping `RequireAuth` wrapping a `Router`) and [`examples/16_state.mojo`](examples/16_state.mojo) for a middleware layer that reads application state via `State[T]`.
 
 ### Multicore (thread-per-core)
 
@@ -128,6 +150,33 @@ def main() raises:
 ```
 
 Each worker gets its own `SO_REUSEPORT` listener and its own reactor. The kernel load-balances accepted connections across workers. `pin_cores=True` (default) pins worker N to core `N % num_cpus` on Linux; it is a no-op on macOS.
+
+### Comptime handler + config
+
+For single-handler servers, `serve_comptime[handler, config]` specialises the reactor loop at compile time and enforces configuration invariants via Mojo `constrained[...]` so misconfigured servers fail the build rather than the first request:
+
+```mojo
+from flare.http import HttpServer, FnHandler, Request, Response, ok
+from flare.http.server import ServerConfig
+from flare.net import SocketAddr
+
+def hello(req: Request) raises -> Response:
+    return ok("hello")
+
+comptime HELLO: FnHandler = FnHandler(hello)
+comptime CONFIG: ServerConfig = ServerConfig(
+    max_header_size=4096,
+    max_body_size=64 * 1024,      # must be >= max_header_size (checked at compile time)
+    max_keepalive_requests=1000,
+    idle_timeout_ms=30_000,
+)
+
+def main() raises:
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_comptime[HELLO, CONFIG]()
+```
+
+Break any invariant (e.g. `max_body_size < max_header_size`) and Mojo rejects the build with a pointed error. No runtime `if cfg.max_body_size < cfg.max_header_size: raise ...` needed — the impossible state doesn't compile.
 
 ### HTTP client with auth
 
@@ -165,34 +214,6 @@ def main() raises:
 
     var c = parse_set_cookie_header("id=42; Path=/; Max-Age=3600")
     print(c.name, c.value, c.max_age)  # id 42 3600
-```
-
-## Installation
-
-Add flare to your project's `pixi.toml`:
-
-```toml
-[workspace]
-channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
-preview = ["pixi-build"]
-
-[dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.4.0" }
-```
-
-Then run:
-
-```bash
-pixi install
-```
-
-Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically).
-
-For the latest development version:
-
-```toml
-[dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 ```
 
 ## What's inside
@@ -313,6 +334,20 @@ Linux, AWS EPYC 7R32 (64 vCPU), Linux 6.8.0-1027-aws, Mojo 0.26.3.0.dev202604180
 
 On Linux flare sits within 2% of nginx's single-worker throughput and is about 1.96x Go `net/http`. The flare-vs-Go ratio is actually wider on Linux (1.96x vs 1.10x) because Go's scheduler and `netpoll` overhead is a bigger share of each request on the slower EPYC core than on an Apple M-series P-core. Absolute req/s is lower on EPYC for reasons independent of flare, see [^bench-platform].
 
+#### Multicore (`serve_multicore`)
+
+`HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N pthread workers. **These numbers show macOS saturating, not scaling** — the loopback + kqueue shared-accept path caps the whole benchmark host at ~140K req/s regardless of worker count, because both `wrk` and the server are competing for loopback + single-client work on one machine. That ceiling is the testbed, not flare. A real Linux deployment with remote clients and multiple NIC queues is where `serve_multicore` actually scales.
+
+macOS, Apple M-series, `-t1 -c64 -d30s`, run on commit `87e2f4f`:
+
+| Server | Req/s (median) | stdev% | vs 1-thread flare |
+|---|---:|---:|---:|
+| flare (single-threaded) | 149,597 | 1.56 | 1.00x |
+| `flare_mc` (4 workers, pinned) | 148,694 | 2.51 | **0.99x** (saturated) |
+| Go `net/http` (`GOMAXPROCS=1`) | 140,560 | 0.64 | 0.94x |
+
+The 4-worker `flare_mc` row is within noise of the 1-worker flare row, which is the whole point: on macOS loopback you cannot drive enough concurrent load from one `wrk` process to show worker scaling, no matter what the server does. `benchmark/baselines/flare_mc/` + `benchmark/configs/throughput_mc.yaml` are the harness; run `pixi run --environment bench -- bash benchmark/scripts/bench_vs_baseline.sh --only=flare_mc --configs=throughput_mc` on a Linux box with multiple physical cores to exercise it there.
+
 [^bench-platform]: Three things about the Linux column are deliberate, not "flare can only hit 77K/s in production":
     1. **`GOMAXPROCS=1`, `worker_processes 1`, and single-thread flare.** Every baseline runs on one logical core so the comparison is apples-to-apples about per-core request-processing cost. This models the cheapest hosting tier (one vCPU) rather than peak throughput on the box. Production deployments on either platform should scale with worker count (nginx, Go) or with `SO_REUSEPORT` sharding.
     2. **`wrk` and the server are not CPU-pinned.** On a 64-vCPU AWS instance the Linux scheduler migrates both processes across cores between slices, causing L1/L2 misses and occasional SMT-sibling contention. Pinning `wrk` and the server to two different physical cores on the same NUMA node typically recovers 15 to 30% for Go on EPYC (a known `net/http` behaviour on shared-scheduler Linux, which is also where the flare-vs-Go ratio shift between the two platforms comes from). The harness intentionally does not pin so the numbers match an un-tuned deployment.
@@ -388,9 +423,9 @@ Tasks always run under `default` unless you pass `-e <env>`, e.g. `pixi run -e d
 ### Tests
 
 ```bash
-pixi run tests             # 375 tests + 14 examples
+pixi run tests             # 460 tests + 18 examples
 
-# Individual layers
+# Individual layers — core
 pixi run test-net                    # IpAddr, SocketAddr, errors
 pixi run test-dns                    # hostname resolution
 pixi run test-tcp                    # TcpStream, TcpListener, IPv6 loopback
@@ -399,17 +434,32 @@ pixi run test-tls                    # TlsConfig, TlsStream
 pixi run test-http                   # HeaderMap, Url, HttpClient, Response
 pixi run test-ws                     # WsFrame, WsClient, WsServer
 pixi run test-server                 # HTTP server (93 tests)
+pixi run test-ergonomics             # high-level API
+
+# Reactor
 pixi run test-server-reactor-state   # Reactor connection state machine
 pixi run test-reactor                # Reactor (kqueue/epoll) abstraction
 pixi run test-reactor-shutdown       # HttpServer graceful shutdown
 pixi run test-timer-wheel            # TimerWheel
 pixi run test-syscall-ffi            # Low-level epoll/kqueue/eventfd FFI
-pixi run test-ergonomics             # high-level API
+
+# Handler ergonomics
+pixi run test-handler                # Handler trait + FnHandler
+pixi run test-router                 # Router: path/method dispatch, 405/404
+pixi run test-server-handler         # HttpServer.serve_with[Handler]
+pixi run test-app-state              # App[S, H] + typed State[T]
+pixi run test-serve-comptime         # serve_comptime[handler, config] + constrained checks
+
+# Multicore
+pixi run test-thread-ffi             # pthread + CPU pinning FFI
+pixi run test-reuseport              # SO_REUSEPORT helper
+pixi run test-scheduler              # Multicore Scheduler lifecycle
+pixi run test-server-multicore       # HttpServer.serve_multicore
 ```
 
 ### Examples
 
-Fourteen runnable examples under [`examples/`](examples/), each an end-to-end walk-through of one slice of the public API. Every example is executed as part of `pixi run tests` and on CI, so they stay green with the code.
+Eighteen runnable examples under [`examples/`](examples/), each an end-to-end walk-through of one slice of the public API. Every example is executed as part of `pixi run tests` and on CI, so they stay green with the code.
 
 | File | What it shows |
 |---|---|
@@ -427,9 +477,10 @@ Fourteen runnable examples under [`examples/`](examples/), each an end-to-end wa
 | [`12_tls.mojo`](examples/12_tls.mojo) | `TlsConfig`, `TlsStream.connect`, raw TLS handshake + GET |
 | [`13_cookies.mojo`](examples/13_cookies.mojo) | `Cookie`, `CookieJar`, `parse_cookie_header`, `parse_set_cookie_header` |
 | [`14_reactor.mojo`](examples/14_reactor.mojo) | direct `flare.runtime.Reactor` usage (kqueue/epoll) for custom protocols |
-| [`15_router.mojo`](examples/15_router.mojo)   | `Router` with path parameters, method dispatch, 404 / 405                |
-| [`16_state.mojo`](examples/16_state.mojo)     | `App[Counters]` + typed `State[T]` injected into a middleware handler    |
-| [`17_multicore.mojo`](examples/17_multicore.mojo) | multicore primitives: pthread spawn/join, CPU pinning, `SO_REUSEPORT` |
+| [`15_router.mojo`](examples/15_router.mojo) | `Router` with path parameters, method dispatch, 404 / 405 |
+| [`16_state.mojo`](examples/16_state.mojo) | `App[Counters]` + typed `State[T]` injected into a middleware handler |
+| [`17_multicore.mojo`](examples/17_multicore.mojo) | `HttpServer.serve_multicore` with `default_worker_count()` |
+| [`18_middleware.mojo`](examples/18_middleware.mojo) | Middleware composition: `Logger` wraps `RequireAuth` wraps `Router` |
 
 Run any single example with `pixi run example-<name>` (see the full list in [`pixi.toml`](pixi.toml)).
 
@@ -459,7 +510,7 @@ pixi run bench-parse       # IP parsing + DNS resolution
 
 ### Fuzzing
 
-Powered by [mozz](https://github.com/ehsanmok/mozz). 15 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, encoding, and the reactor / connection state machine.
+Powered by [mozz](https://github.com/ehsanmok/mozz). 16 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, encoding, the Router, the reactor / connection state machine, and the multicore scheduler.
 
 ```bash
 pixi run --environment fuzz fuzz-http-server             # 500K runs
