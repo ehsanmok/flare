@@ -78,7 +78,7 @@ struct ServerConfig(Copyable, Movable):
 # ``HttpServer.serve_comptime[handler, config = ...]()``. Any user who
 # wants a non-default comptime config must declare their own
 # ``comptime my_cfg: ServerConfig = ServerConfig(...)`` because Mojo
-# `constrained` checks need comptime-stable values.
+# ``comptime assert`` checks need comptime-stable values.
 comptime _DEFAULT_SERVER_CONFIG: ServerConfig = ServerConfig()
 
 
@@ -202,7 +202,7 @@ struct HttpServer(Movable):
         config)`` pair so the handler call inlines into
         ``on_readable`` and invariant checks happen at compile time.
 
-        Invariants enforced at compile time via ``constrained``:
+        Invariants enforced at compile time via ``comptime assert``:
 
         - ``config.read_buffer_size`` must be > 0.
         - ``config.max_header_size`` and ``config.max_uri_length`` must
@@ -223,37 +223,27 @@ struct HttpServer(Movable):
         """
         from ._server_reactor_impl import run_reactor_loop
 
-        constrained[
-            config.read_buffer_size > 0,
-            "ServerConfig.read_buffer_size must be > 0",
-        ]()
-        constrained[
-            config.max_header_size > 0,
-            "ServerConfig.max_header_size must be > 0",
-        ]()
-        constrained[
-            config.max_uri_length > 0,
-            "ServerConfig.max_uri_length must be > 0",
-        ]()
-        constrained[
-            config.max_body_size >= config.max_header_size,
-            (
-                "ServerConfig.max_body_size must be >="
-                " ServerConfig.max_header_size"
-            ),
-        ]()
-        constrained[
-            config.max_keepalive_requests >= 1,
-            "ServerConfig.max_keepalive_requests must be >= 1",
-        ]()
-        constrained[
-            config.idle_timeout_ms >= 0,
-            "ServerConfig.idle_timeout_ms must be >= 0",
-        ]()
-        constrained[
-            config.write_timeout_ms >= 0,
-            "ServerConfig.write_timeout_ms must be >= 0",
-        ]()
+        comptime assert (
+            config.read_buffer_size > 0
+        ), "ServerConfig.read_buffer_size must be > 0"
+        comptime assert (
+            config.max_header_size > 0
+        ), "ServerConfig.max_header_size must be > 0"
+        comptime assert (
+            config.max_uri_length > 0
+        ), "ServerConfig.max_uri_length must be > 0"
+        comptime assert (
+            config.max_body_size >= config.max_header_size
+        ), "ServerConfig.max_body_size must be >= ServerConfig.max_header_size"
+        comptime assert (
+            config.max_keepalive_requests >= 1
+        ), "ServerConfig.max_keepalive_requests must be >= 1"
+        comptime assert (
+            config.idle_timeout_ms >= 0
+        ), "ServerConfig.idle_timeout_ms must be >= 0"
+        comptime assert (
+            config.write_timeout_ms >= 0
+        ), "ServerConfig.write_timeout_ms must be >= 0"
 
         self._stopping = False
         # Materialise the comptime values into runtime copies that the

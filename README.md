@@ -16,7 +16,7 @@ The fastest networking library for Mojo🔥, from raw sockets up to HTTP/1.1 ser
 **What you get:**
 
 - `Handler` trait, `Router` with path params and method dispatch, `App[S]` with typed `State[T]`. Middleware is a `Handler` that wraps another `Handler`.
-- `serve_comptime[handler, config]` validates `ServerConfig` at compile time via `constrained[...]`. Misconfigured servers fail the build, not the first request.
+- `serve_comptime[handler, config]` validates `ServerConfig` at compile time via `comptime assert`. Misconfigured servers fail the build, not the first request.
 - `HttpServer.serve_multicore(handler, num_workers=N)` binds N `SO_REUSEPORT` listeners on N pthread workers, with optional per-core pinning on Linux. Shared-nothing per-connection ownership, no locks on the hot path.
 - Single-threaded reactor (kqueue on macOS, epoll on Linux). On Linux AWS EPYC: on par with single-worker nginx and about 2x Go's `net/http`. On Apple M-series: about 1.10x Go's `net/http`. See [benchmarks](#server-throughput-tfb-plaintext).
 - HTTP request and response parsing is 7 to 9x faster than the next-fastest Mojo HTTP library on the same microbenchmarks.
@@ -153,7 +153,7 @@ Each worker gets its own `SO_REUSEPORT` listener and its own reactor. The kernel
 
 ### Comptime handler + config
 
-For single-handler servers, `serve_comptime[handler, config]` specialises the reactor loop at compile time and enforces configuration invariants via Mojo `constrained[...]` so misconfigured servers fail the build rather than the first request:
+For single-handler servers, `serve_comptime[handler, config]` specialises the reactor loop at compile time and enforces configuration invariants via Mojo `comptime assert` so misconfigured servers fail the build rather than the first request:
 
 ```mojo
 from flare.http import HttpServer, FnHandler, Request, Response, ok
@@ -448,7 +448,7 @@ pixi run test-handler                # Handler trait + FnHandler
 pixi run test-router                 # Router: path/method dispatch, 405/404
 pixi run test-server-handler         # HttpServer.serve_with[Handler]
 pixi run test-app-state              # App[S, H] + typed State[T]
-pixi run test-serve-comptime         # serve_comptime[handler, config] + constrained checks
+pixi run test-serve-comptime         # serve_comptime[handler, config] + comptime assert checks
 
 # Multicore
 pixi run test-thread-ffi             # pthread + CPU pinning FFI

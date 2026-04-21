@@ -2,7 +2,7 @@
 
 The comptime overload takes a comptime ``Handler`` value and a
 comptime ``ServerConfig`` value. It enforces configuration
-invariants via ``constrained[]`` so misconfigured servers fail at
+invariants via ``comptime assert`` so misconfigured servers fail at
 compile time rather than runtime.
 
 Runtime behaviour is covered end-to-end by ``test_server.mojo`` (the
@@ -15,10 +15,10 @@ v0.3.x ``serve(def)`` path) and ``test_server_handler.mojo`` (the
   bind (no runtime server loop is driven; we only type-check the
   overload by binding and closing).
 
-Compile-time rejections are not asserted here because ``constrained``
-errors surface as compile errors, not runtime errors; demonstrating
-them requires a separate build that is intentionally broken, which
-does not belong in a regular test suite.
+Compile-time rejections are not asserted here because ``comptime
+assert`` errors surface as compile errors, not runtime errors;
+demonstrating them requires a separate build that is intentionally
+broken, which does not belong in a regular test suite.
 """
 
 from std.testing import assert_true, assert_equal, TestSuite
@@ -67,14 +67,14 @@ comptime _CT_CONFIG_TIGHT: ServerConfig = ServerConfig(
 
 
 def test_serve_comptime_default_config_types() raises:
-    """The default config satisfies every constrained[] invariant."""
+    """The default config satisfies every ``comptime assert`` invariant."""
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     assert_true(srv.local_addr().port != 0)
     srv.close()
 
 
 def test_serve_comptime_tight_config_types() raises:
-    """A custom valid config satisfies every constrained[] invariant."""
+    """A custom valid config satisfies every ``comptime assert`` invariant."""
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     assert_true(srv.local_addr().port != 0)
     srv.close()
@@ -102,7 +102,7 @@ def test_serve_comptime_bind_close_cycle() raises:
 
 
 # Force the compiler to instantiate ``serve_comptime`` with every
-# comptime config variant so ``constrained[]`` invariants are all
+# comptime config variant so every ``comptime assert`` invariant is
 # checked at build time. The helper is never actually called at
 # runtime (it would block in the reactor loop) but declaring it
 # forces monomorphisation of the generic.
@@ -110,7 +110,7 @@ def _never_called_force_instantiation_default() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     srv.close()
     # The following reference never runs (srv is already closed) but
-    # triggers constrained[] checking.
+    # triggers ``comptime assert`` checking.
     if False:
         srv.serve_comptime[_CT_HANDLER, _CT_CONFIG_DEFAULT]()
 
@@ -131,7 +131,7 @@ def test_config_field_access_at_comptime() raises:
 
 
 def test_config_fields_pass_invariants() raises:
-    """The comptime configs all satisfy the constrained invariants in the overload.
+    """The comptime configs all satisfy the ``comptime assert`` invariants in the overload.
 
     This is a pure compile-time check: if the invariants fail this file
     does not compile. Reaching the body means every constraint held.
