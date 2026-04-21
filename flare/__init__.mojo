@@ -84,7 +84,7 @@ def home(req: Request) raises -> Response:
     return ok("home")
 
 def get_user(req: Request) raises -> Response:
-    return ok("user " + req.params["id"])
+    return ok("user " + req.param("id"))
 
 def main() raises:
     var r = Router()

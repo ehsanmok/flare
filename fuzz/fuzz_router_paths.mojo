@@ -34,11 +34,11 @@ def _ok_create(req: Request) raises -> Response:
 
 
 def _ok_user(req: Request) raises -> Response:
-    return ok("user:" + req.params["id"])
+    return ok("user:" + req.param("id"))
 
 
 def _ok_files(req: Request) raises -> Response:
-    return ok("files:" + req.params["*"])
+    return ok("files:" + req.param("*"))
 
 
 def _build_router() raises -> Router:

@@ -7,7 +7,7 @@ per-(method, path) inner handler. It supports:
 - **Parameter segments**: ``":id"`` matches one segment of any non-empty
   value; the captured value lands in ``req.params[name]``.
 - **Wildcard tail**: a final segment ``"*"`` matches the rest of the
-  path (captured as ``req.params["*"]``, including path separators).
+  path (captured as ``req.param("*")``, including path separators).
 - **Method dispatch**: ``get`` / ``post`` / ``put`` / ``patch`` /
   ``delete`` / ``head`` register one handler per (method, path) pair.
 
@@ -28,7 +28,7 @@ def home(req: Request) raises -> Response:
     return ok("home")
 
 def get_user(req: Request) raises -> Response:
-    return ok("user " + req.params["id"])
+    return ok("user " + req.param("id"))
 
 def main() raises:
     var r = Router()
@@ -269,10 +269,22 @@ struct Router(Handler):
                 version=req.version,
             )
             child.headers = req.headers.copy()
-            for kv in req.params.items():
-                child.params[kv.key] = kv.value
-            for kv in m_result.params.items():
-                child.params[kv.key] = kv.value
+            # Copy any params already on the parent (e.g. nested routers
+            # via ``mount``) into the child. ``req`` is a read-only
+            # borrow here, so we peek at the raw ``_params`` pointer
+            # rather than calling the ``mut self`` accessor. Only
+            # allocates ``child._params`` when there is something to
+            # copy, so the plaintext-bench path (no Router, no params)
+            # stays allocation-free.
+            if req.has_params():
+                for kv in req._params[].items():
+                    child._params_mut()[kv.key] = kv.value
+            # Copy the captures from this match. ``_MatchResult.params``
+            # is always populated (even if empty), so guard on length to
+            # avoid a pointless lazy-allocate for literal-only routes.
+            if len(m_result.params) > 0:
+                for kv in m_result.params.items():
+                    child._params_mut()[kv.key] = kv.value
             return self._handlers[self._routes[i].handler_idx].serve(child^)
 
         if len(allowed) > 0:

@@ -48,15 +48,15 @@ def h_create_user(req: Request) raises -> Response:
 
 
 def h_get_user(req: Request) raises -> Response:
-    return ok("user:" + req.params["id"])
+    return ok("user:" + req.param("id"))
 
 
 def h_get_post(req: Request) raises -> Response:
-    return ok("user=" + req.params["uid"] + " post=" + req.params["pid"])
+    return ok("user=" + req.param("uid") + " post=" + req.param("pid"))
 
 
 def h_files(req: Request) raises -> Response:
-    return ok("files:" + req.params["*"])
+    return ok("files:" + req.param("*"))
 
 
 def h_delete_user(req: Request) raises -> Response:

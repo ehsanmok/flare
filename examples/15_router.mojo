@@ -27,7 +27,7 @@ def home(req: Request) raises -> Response:
 
 
 def get_user(req: Request) raises -> Response:
-    return ok("user id = " + req.params["id"])
+    return ok("user id = " + req.param("id"))
 
 
 def create_user(req: Request) raises -> Response:
