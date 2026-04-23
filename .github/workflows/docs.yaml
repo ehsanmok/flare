@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -40,12 +40,7 @@ jobs:
           post-cleanup: false
 
       - name: Generate docs with mojodoc
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 30
-          command: pixi run -e dev docs-build
+        run: pixi run -e dev docs-build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -58,7 +53,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     environment:
       name: github-pages
