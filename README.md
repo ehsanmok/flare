@@ -34,7 +34,7 @@ def main() raises:
 - **Write** it with the ergonomics of Rust `axum` (trait-based `Handler`, generics with `[H: Handler & Copyable]`, `App[S]` over typed `State[T]`, middleware as a `Handler` wrapping another `Handler`) and the simplicity of Go `net/http` (plain `def` handlers, no `async` / `.await` — the reactor runs under you). Misconfigured servers fail the build via `comptime assert`, not the first request.
 - **Scale** with one parameter. `srv.serve(handler, num_workers=1)` is the single-threaded reactor (kqueue/epoll) — matches single-worker nginx on Linux EPYC and is about 1.10x Go `net/http` on Apple M. `srv.serve(handler, num_workers=N)` with `N >= 2` binds N `SO_REUSEPORT` listeners on N `pthread` workers with optional per-core pinning: **257K req/s at 4 workers, 4.4x linear scaling**. WebSocket XOR masking via SIMD tops **112 GB/s on 1 KB payloads** (14-35x scalar). See [benchmarks](#server-throughput-tfb-plaintext).
 - **Parse** HTTP **7 to 9x faster than the next-fastest Mojo HTTP library** on the same microbenchmarks. Dual-stack DNS with automatic IPv4/IPv6 fallback. RFC 7230 header validation and configurable size limits built in.
-- **Trust** it: **460 tests, 16 fuzz harnesses, over a million fuzz runs, zero known crashes**. Every example in [`examples/`](examples/) runs on every CI build.
+- **Verify** it yourself: **460 tests, 16 fuzz harnesses, over a million fuzz runs, zero known crashes to date**. Every example in [`examples/`](examples/) runs on every CI build. Pre-1.0 — expect rough edges, file them [here](https://github.com/ehsanmok/flare/issues).
 
 ## Installation
 

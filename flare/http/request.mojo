@@ -1,9 +1,7 @@
 """HTTP request type."""
 
 from std.collections import Dict
-from std.ffi import c_size_t, external_call
-from std.memory import UnsafePointer
-from std.sys.info import size_of
+from std.memory import UnsafePointer, alloc
 from json import loads, Value
 from .headers import HeaderMap
 
@@ -93,9 +91,7 @@ struct Request(Movable):
     def __del__(deinit self):
         if self._params:
             self._params.destroy_pointee()
-            _ = external_call["free", NoneType](
-                self._params.bitcast[NoneType]()
-            )
+            self._params.free()
 
     def has_params(self) -> Bool:
         """Return True if a ``Router`` populated this request's path params."""
@@ -109,14 +105,13 @@ struct Request(Movable):
         ``Dict`` is only allocated when a route actually has parameters.
         """
         if not self._params:
-            # libc malloc via FFI (Mojo's stdlib allocators do not
-            # currently expose an ``alloc`` factory for ``Dict`` under
-            # the ``MutExternalOrigin`` instantiation we use on this
-            # field).
-            var raw = external_call[
-                "malloc", UnsafePointer[UInt8, MutExternalOrigin]
-            ](c_size_t(size_of[Dict[String, String]]()))
-            var ptr = raw.bitcast[Dict[String, String]]()
+            # Use Mojo's native allocator (``std.memory.alloc`` returns a
+            # ``MutExternalOrigin``-tagged pointer) rather than libc
+            # ``malloc``/``free`` via FFI: ``external_call["free", ...]``
+            # conflicts with the stdlib's own ``free`` declaration at
+            # MLIR legalization time when this module is pulled into a
+            # fuzz-environment compile (mozz harness).
+            var ptr = alloc[Dict[String, String]](1)
             ptr.init_pointee_move(Dict[String, String]())
             self._params = ptr
         return self._params[]

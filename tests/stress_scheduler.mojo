@@ -1,13 +1,16 @@
 """Stress driver: hammer ``Scheduler.start/shutdown`` with random inputs.
 
-This is a non-mozz replacement for the ``fuzz-scheduler-shutdown``
-harness while the Mojo compiler's conflict between flare's
-``external_call["free", ...]`` call sites and mozz's own ``free``
-declaration remains unfixed. The mozz harness cannot import
-``flare.runtime.scheduler`` at all, so until upstream resolves the
-declaration conflict the full ``Scheduler.start/shutdown`` round-trip
-has zero randomised coverage in the fuzz environment. This file
-fills the gap using plain Mojo, no mozz, no external fuzzer.
+Complements ``fuzz-scheduler-shutdown`` (which exercises the runtime
+primitives individually under the mozz harness) by driving the full
+``Scheduler[H].start`` → ``shutdown`` round-trip with randomised
+``num_workers`` / ``pin_cores`` / ``extra_churn`` tuples. Runs under
+the lean default env (no mozz dependency), so it's cheap to run
+locally and in CI. The historical reason this file exists as a
+non-mozz driver — a Mojo MLIR legalization conflict between
+flare's libc ``free`` FFI and the stdlib's ``free`` declaration that
+blocked ``mozz`` from importing ``flare.runtime.scheduler`` — is
+resolved as of v0.4.1 (flare now uses the native Mojo allocator
+everywhere, see ``_scheduler_free_raw``).
 
 Each iteration:
 

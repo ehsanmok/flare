@@ -1,26 +1,50 @@
-"""The fastest networking library for Mojo, from raw sockets up to HTTP/1.1
-servers and WebSocket clients. Written in Mojo with minimal FFI (just libc
-and OpenSSL for TLS).
+"""The fastest networking library for Mojo🔥, from raw sockets up to HTTP/1.1
+servers and WebSocket clients. Written in Mojo with a small FFI footprint
+(libc, plus OpenSSL for TLS).
+
+Write a typed request handler, plug it into ``serve(..., num_workers=N)``,
+and get a thread-per-core HTTP server that does **257K req/s on 4 cores**
+on Linux EPYC (TFB plaintext — 4.4x linear, 3.6x nginx-1w, 7x Go
+``net/http``). Kqueue on macOS, epoll on Linux, no thread-per-connection,
+no locks on the hot path.
+
+```mojo
+from flare.http import HttpServer, Router, Request, Response, ok
+from flare.net import SocketAddr
+
+def hello(req: Request) raises -> Response:
+    return ok("hello")
+
+def main() raises:
+    var r = Router()
+    r.get("/", hello)
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^, num_workers=4)
+```
 
 ## What you get
 
-- Single-threaded reactor HTTP server (kqueue on macOS, epoll on Linux).
-  Within 2% of single-worker nginx and about 1.96x Go ``net/http`` on
-  Linux AWS EPYC. 1.10x Go ``net/http`` on Apple M-series. TFB plaintext,
-  ``GOMAXPROCS=1`` and ``worker_processes 1``.
-- HTTP request and response parsing is 7 to 9x faster than the
-  next-fastest Mojo HTTP library on the same microbenchmarks.
-- WebSocket XOR masking uses SIMD and reaches 112 GB/s on 1KB payloads,
-  14 to 35x the scalar path.
-- TCP, UDP, TLS, HTTP, WebSocket, and DNS in one package with IPv4 and
-  IPv6 out of the box, and dual-stack DNS with automatic fallback.
-- ``Handler`` trait + ``Router`` + ``App[S]`` with typed ``State[T]``
-  for composable, testable request handling.
-- Multicore reactor via ``HttpServer.serve(handler, num_workers=N)``
-  (``N >= 2``) with ``SO_REUSEPORT`` listeners and pthread-based CPU
-  pinning on Linux.
-- 463 tests and 16 fuzz harnesses. Over a million fuzz runs and zero
-  known crashes.
+- **Write** with the ergonomics of Rust ``axum`` (trait-based ``Handler``,
+  generics with ``[H: Handler & Copyable]``, ``App[S]`` over typed
+  ``State[T]``, middleware as a ``Handler`` wrapping another ``Handler``)
+  and the simplicity of Go ``net/http`` (plain ``def`` handlers, no
+  ``async`` / ``.await`` — the reactor runs under you). Misconfigured
+  servers fail the build via ``comptime assert``, not the first request.
+- **Scale** with one parameter. ``srv.serve(handler, num_workers=1)`` is
+  the single-threaded reactor (kqueue/epoll) — matches single-worker nginx
+  on Linux EPYC and is about 1.10x Go ``net/http`` on Apple M.
+  ``srv.serve(handler, num_workers=N)`` with ``N >= 2`` binds N
+  ``SO_REUSEPORT`` listeners on N ``pthread`` workers with optional
+  per-core pinning: **257K req/s at 4 workers, 4.4x linear scaling**.
+  WebSocket XOR masking via SIMD tops **112 GB/s on 1 KB payloads**
+  (14–35x scalar).
+- **Parse** HTTP **7–9x faster than the next-fastest Mojo HTTP library**
+  on the same microbenchmarks. Dual-stack DNS with automatic IPv4/IPv6
+  fallback. RFC 7230 header validation and configurable size limits
+  built in.
+- **Verify** it yourself: **460 tests, 16 fuzz harnesses, over a million
+  fuzz runs, zero known crashes to date**. Every example in ``examples/``
+  runs on every CI build. Pre-1.0 — expect rough edges.
 
 ## Architecture
 
@@ -100,7 +124,8 @@ def main() raises:
 ## App with typed state
 
 ```mojo
-from flare.http import App, Router, Request, Response, ok
+from flare.http import App, Router, Request, Response, ok, HttpServer
+from flare.net import SocketAddr
 
 @fieldwise_init
 struct Counters(Copyable, Movable):
@@ -113,9 +138,17 @@ def main() raises:
     var router = Router()
     router.get("/", home)
     var app = App(state=Counters(hits=0), handler=router^)
-    # app.state_view() returns a State[Counters] for middleware layers
-    # to read; serve via HttpServer.serve(app^).
+
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(app^)
 ```
+
+Any ``Handler`` can be composed with middleware wrappers; middleware is
+just a ``Handler`` that holds an inner ``Handler``. See
+``examples/18_middleware.mojo`` for a three-layer pipeline
+(``Logger`` wrapping ``RequireAuth`` wrapping a ``Router``) and
+``examples/16_state.mojo`` for a middleware layer that reads application
+state via ``State[T]``.
 
 ## Multicore (thread-per-core)
 
@@ -133,13 +166,44 @@ def main() raises:
     srv.serve(r^, num_workers=4)
 ```
 
-Under the hood ``serve`` runs a single event loop on ``kqueue`` (macOS)
-or ``epoll`` (Linux) with non-blocking sockets, a per-connection state
-machine, and a hashed timing wheel for idle timeouts. This is the
-nginx-style model, no thread per connection. HTTP/1.1 keep-alive,
-RFC 7230 header validation, and configurable limits on header, body,
-and URI size plus per-connection idle and write timeouts are all
-handled for you.
+``num_workers=1`` (the default) is the single-threaded reactor;
+``num_workers >= 2`` binds N ``SO_REUSEPORT`` listeners on N ``pthread``
+workers via ``flare.runtime.scheduler.Scheduler``. Each worker gets its
+own reactor; the kernel load-balances accepted connections across workers.
+``pin_cores=True`` (default) pins worker N to core ``N % num_cpus`` on
+Linux; it is a no-op on macOS. The upper bound on ``num_workers`` is 256.
+
+## Comptime handler + config
+
+For single-handler servers, ``serve_comptime[handler, config]`` specialises
+the reactor loop at compile time and enforces configuration invariants via
+Mojo ``comptime assert`` so misconfigured servers fail the build rather
+than the first request:
+
+```mojo
+from flare.http import HttpServer, FnHandler, Request, Response, ok
+from flare.http.server import ServerConfig
+from flare.net import SocketAddr
+
+def hello(req: Request) raises -> Response:
+    return ok("hello")
+
+comptime HELLO: FnHandler = FnHandler(hello)
+comptime CONFIG: ServerConfig = ServerConfig(
+    max_header_size=4096,
+    max_body_size=64 * 1024,      # must be >= max_header_size (compile time)
+    max_keepalive_requests=1000,
+    idle_timeout_ms=30_000,
+)
+
+def main() raises:
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_comptime[HELLO, CONFIG]()
+```
+
+Break any invariant (e.g. ``max_body_size < max_header_size``) and Mojo
+rejects the build with a pointed error. The impossible state doesn't
+compile, so no runtime guard is needed.
 
 ## HTTP client with auth
 

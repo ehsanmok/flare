@@ -10,16 +10,15 @@ back ``flare.runtime.scheduler.Scheduler`` with random inputs:
 
 Expected behaviour: no crashes, no leaked fds, no panics.
 
-Note on scope: this harness deliberately does NOT import
-``flare.runtime.scheduler``. The scheduler's rollback/shutdown path
-uses ``external_call["free", ...]`` inside a ``Scheduler[H]``-parametric
-method; under the fuzz-environment compile that external_call
-conflicts with mozz's own ``free`` declaration at MLIR lowering
-time. Exercising the primitives directly covers the bulk of the
-scheduler's failure modes (join semantics, pinning edge cases,
-listener bind timing) without triggering the build conflict. A
-full ``Scheduler.shutdown`` fuzz is scheduled for v0.4.1 after the
-Mojo compiler resolves the declaration conflict.
+Note on scope: this harness exercises the runtime primitives
+directly (spawn/join, pinning, SO_REUSEPORT bind). Full-Scheduler
+start/shutdown round-trips are covered by ``tests/stress_scheduler.mojo``
+under the lean default env. Earlier versions of flare (<= v0.4.0) could
+not import ``flare.runtime.scheduler`` from a mozz harness at all
+because the scheduler's libc ``free`` FFI conflicted with the stdlib's
+own ``free`` declaration at MLIR lowering time; v0.4.1 switched every
+flare alloc/free pair to the native ``UnsafePointer.alloc`` / ``.free``
+pair, so that build conflict no longer exists.
 
 Run:
     pixi run --environment fuzz fuzz-scheduler-shutdown

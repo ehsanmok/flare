@@ -52,9 +52,8 @@ Known limitations (tracked for v0.4.1):
   v0.4.1.
 """
 
-from std.ffi import c_int, c_size_t, external_call
-from std.memory import UnsafePointer
-from std.sys import size_of
+from std.ffi import c_int, external_call
+from std.memory import UnsafePointer, alloc
 
 from ..http.handler import Handler
 from ..http.server import ServerConfig
@@ -66,17 +65,22 @@ from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .reuseport import bind_reuseport
 
 
-# ── Context cleanup helpers (non-generic; non-generic call sites avoid
-#    a Mojo build conflict with mozz's own ``free`` declaration) ─────────────
+# ── Context cleanup helpers ──────────────────────────────────────────────────
 
 
 @always_inline
 def _scheduler_free_raw(raw: _OpaquePtr):
-    """Free a raw malloc'd pointer via libc free. Non-generic: one
-    instantiation per compile unit, which keeps the external_call for
-    ``free`` from being emitted at multiple generic-monomorphised sites.
+    """Release a heap cell allocated via ``UnsafePointer[...].alloc``.
+
+    Uses Mojo's native allocator pair (``.alloc`` / ``.free``) rather than
+    libc ``malloc``/``free`` via FFI: ``external_call["free", ...]``
+    conflicts with the stdlib's own ``free`` declaration at MLIR
+    legalization time when this module is pulled into a fuzz-environment
+    compile (mozz harness), which previously blocked the
+    ``fuzz-scheduler-shutdown`` harness from importing
+    ``flare.runtime.scheduler`` at all.
     """
-    _ = external_call["free", NoneType](raw.bitcast[NoneType]())
+    raw.free()
 
 
 def _scheduler_free_ctxs[H: Handler & Copyable](addrs: List[Int]):
@@ -180,11 +184,7 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
         pass
 
     # Ctx ownership: the Scheduler main thread destroys + frees every
-    # ctx AFTER joining the worker, so we don't touch it here. This
-    # keeps all external_call[\"free\"] uses in a single, non-generic
-    # code path (Scheduler.shutdown) which avoids a Mojo build
-    # conflict under the fuzz environment where mozz also declares
-    # ``free`` at module scope.
+    # ctx AFTER joining the worker, so we don't touch it here.
     return UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=0)
 
 
@@ -293,33 +293,23 @@ struct Scheduler[H: Handler & Copyable](Movable):
         # and NRVO is not guaranteed, so any ``&s._stopping`` address
         # captured here could be dangling by the time ``shutdown()``
         # writes through it. The heap cell is allocated here and
-        # freed in ``shutdown()`` after every worker joins.
-        var stop_raw = external_call["malloc", _OpaquePtr](
-            c_size_t(size_of[Bool]())
-        )
-        if not stop_raw:
-            raise Error("malloc failed for scheduler stopping flag")
-        var stop_ptr = stop_raw.bitcast[Bool]()
+        # freed in ``shutdown()`` after every worker joins. Uses the
+        # native Mojo allocator (see ``_scheduler_free_raw``).
+        var stop_ptr = alloc[Bool](1)
+        if not stop_ptr:
+            raise Error("alloc failed for scheduler stopping flag")
         stop_ptr.init_pointee_copy(False)
+        var stop_raw = stop_ptr.bitcast[UInt8]()
         var stopping_addr = Int(stop_ptr)
         s._stopping_addr = stopping_addr
 
         # Preallocate the worker slot array once; grow is not needed
         # because ``num_workers`` is bounded above (<= 256) and fixed.
-        # Use libc ``malloc`` for the same reason the worker ctxs do:
-        # parametric-origin ``UnsafePointer.alloc`` isn't available
-        # from a generic static method, and keeping the allocator
-        # consistent avoids mixing ``.free()`` vs libc ``free`` on
-        # the shutdown path.
-        var workers_size = size_of[ThreadHandle]() * num_workers
-        var workers_raw = external_call["malloc", _OpaquePtr](
-            c_size_t(workers_size)
-        )
-        if not workers_raw:
+        s._workers_ptr = alloc[ThreadHandle](num_workers)
+        if not s._workers_ptr:
             _scheduler_free_raw(stop_raw)
             s._stopping_addr = 0
-            raise Error("malloc failed for scheduler workers array")
-        s._workers_ptr = workers_raw.bitcast[ThreadHandle]()
+            raise Error("alloc failed for scheduler workers array")
         s._workers_len = 0
 
         for i in range(num_workers):
@@ -340,11 +330,9 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 i,
                 pin_cores,
             )
-            # Allocate via libc malloc (parametric-origin alloc on
-            # UnsafePointer is not available); size = size_of[WorkerCtx]
-            var ctx_size = size_of[_WorkerCtx[Self.H]]()
-            var raw = external_call["malloc", _OpaquePtr](c_size_t(ctx_size))
-            if not raw:
+            # Native Mojo allocator (see _scheduler_free_raw for why).
+            var ctx_ptr = alloc[_WorkerCtx[Self.H]](1)
+            if not ctx_ptr:
                 # Free the stopping flag + the empty worker-slot array
                 # — no worker has referenced either yet.
                 _scheduler_free_raw(s._workers_ptr.bitcast[UInt8]())
@@ -353,11 +341,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 )
                 _scheduler_free_raw(stop_raw)
                 s._stopping_addr = 0
-                raise Error("malloc failed for worker ctx")
-            var ctx_ptr = raw.bitcast[_WorkerCtx[Self.H]]()
+                raise Error("alloc failed for worker ctx")
             ctx_ptr.init_pointee_move(ctx^)
-            var arg = raw
-            var ctx_addr = Int(raw)
+            var arg = ctx_ptr.bitcast[UInt8]()
+            var ctx_addr = Int(ctx_ptr)
 
             var spawned = False
             try:
@@ -390,7 +377,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 _scheduler_free_ctxs[Self.H](s._ctx_addrs)
                 s._ctx_addrs.clear()
                 ctx_ptr.destroy_pointee()
-                _scheduler_free_raw(raw)
+                _scheduler_free_raw(ctx_ptr.bitcast[UInt8]())
                 # All workers joined, so no one is reading the
                 # stopping flag anymore — safe to free.
                 _scheduler_free_raw(stop_raw)

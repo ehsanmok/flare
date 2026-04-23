@@ -30,8 +30,8 @@ It exposes a thin step API so the reactor-backed ``HttpServer`` (Phase
 
 from std.collections import Dict
 from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
-from std.memory import UnsafePointer, memcpy, stack_allocation
-from std.sys.info import CompilationTarget, size_of
+from std.memory import UnsafePointer, alloc, memcpy, stack_allocation
+from std.sys.info import CompilationTarget
 
 from flare.http.handler import Handler
 from flare.http.request import Request
@@ -580,18 +580,17 @@ def _is_connection(k: String) -> Bool:
 def _conn_alloc_addr(var stream: TcpStream) raises -> Int:
     """Heap-allocate a ``ConnHandle`` wrapping ``stream`` and return its address.
 
-    We use libc ``malloc`` via FFI rather than ``UnsafePointer.alloc`` because
-    Mojo's stdlib allocator currently doesn't expose that factory for
-    Movable-only types (``ConnHandle`` owns a ``TcpStream``). ``_conn_free_addr``
-    runs the destructor and frees.
+    Uses Mojo's native ``UnsafePointer.alloc`` paired with ``.free()`` rather
+    than libc ``malloc``/``free`` via FFI: ``external_call["free", ...]``
+    conflicts with the stdlib's own ``free`` declaration at MLIR
+    legalization time when this module is pulled into a fuzz-environment
+    compile (mozz harness). The allocator pair is equivalent on every
+    supported platform, and ``_conn_free_addr`` runs the destructor before
+    releasing the memory.
     """
-    var n = size_of[ConnHandle]()
-    var raw = external_call["malloc", UnsafePointer[UInt8, MutExternalOrigin]](
-        c_size_t(n)
-    )
-    if Int(raw) == 0:
-        raise NetworkError("malloc failed for ConnHandle", 0)
-    var ptr = raw.bitcast[ConnHandle]()
+    var ptr = alloc[ConnHandle](1)
+    if Int(ptr) == 0:
+        raise NetworkError("alloc failed for ConnHandle", 0)
     ptr.init_pointee_move(ConnHandle(stream^))
     return Int(ptr)
 
@@ -603,10 +602,11 @@ def _conn_free_addr(addr: Int):
     """
     if addr == 0:
         return
-    var raw = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
-    var ptr = raw.bitcast[ConnHandle]()
+    var ptr = UnsafePointer[UInt8, MutExternalOrigin](
+        unsafe_from_address=addr
+    ).bitcast[ConnHandle]()
     ptr.destroy_pointee()
-    _ = external_call["free", NoneType](raw.bitcast[NoneType]())
+    ptr.free()
 
 
 def _conn_ptr_from_int(

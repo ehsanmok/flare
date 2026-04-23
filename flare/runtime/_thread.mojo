@@ -38,13 +38,8 @@ from std.ffi import (
     OwnedDLHandle,
     get_errno,
 )
-from std.memory import UnsafePointer, memcpy, memset_zero
+from std.memory import UnsafePointer, alloc, memcpy, memset_zero
 from std.sys.info import CompilationTarget
-
-
-# ── pthread_t on both platforms is an 8-byte opaque value ────────────────────
-
-comptime _PTHREAD_T_SIZE: Int = 8  # pointer-width on both linux/x86_64 + macOS/arm64
 
 
 # ── Start routine signature ──────────────────────────────────────────────────
@@ -192,11 +187,15 @@ struct ThreadHandle(Movable):
             # Allocate and zero-fill a 128-byte buffer, then set the bit
             # for the target CPU.
             comptime _CPUSET_SIZE: Int = 128
-            var cpuset_ptr = external_call["malloc", _OpaquePtr](
-                c_size_t(_CPUSET_SIZE)
-            )
+            # Native Mojo allocator (``std.memory.alloc`` / ``.free()``)
+            # instead of libc malloc/free via FFI:
+            # ``external_call["free", ...]`` conflicts with the stdlib's
+            # own ``free`` declaration at MLIR legalization time when
+            # this module is pulled into a fuzz-environment compile
+            # (mozz harness).
+            var cpuset_ptr = alloc[UInt8](_CPUSET_SIZE)
             if not cpuset_ptr:
-                raise Error("malloc failed for cpu_set_t")
+                raise Error("alloc failed for cpu_set_t")
             memset_zero(cpuset_ptr, _CPUSET_SIZE)
             var byte_idx = cpu // 8
             var bit_idx = cpu % 8
@@ -211,7 +210,7 @@ struct ThreadHandle(Movable):
                 c_size_t,
                 _OpaquePtr,  # cpu_set_t *
             ](self._thread_id, c_size_t(_CPUSET_SIZE), cpuset_ptr)
-            _ = external_call["free", NoneType](cpuset_ptr.bitcast[NoneType]())
+            cpuset_ptr.free()
             if rc != c_int(0):
                 raise Error(
                     "pthread_setaffinity_np failed with rc=" + String(Int(rc))
