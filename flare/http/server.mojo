@@ -400,53 +400,26 @@ def _find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
 
     Returns the byte offset just past the sequence (start of body),
     or -1 if not found.
+
+    Thin wrapper over ``flare.http._scan.find_crlfcrlf`` with the
+    default SIMD width (32 lanes) so the public call site keeps the
+    same signature as the v0.3.x scalar implementation. Callers who
+    need a non-default width can import ``find_crlfcrlf`` directly.
     """
-    var n = len(data)
-    if n < 4:
-        return -1
-    var s = start if start >= 0 else 0
-    for i in range(s, n - 3):
-        if (
-            data[i] == 13
-            and data[i + 1] == 10
-            and data[i + 2] == 13
-            and data[i + 3] == 10
-        ):
-            return i + 4
-    return -1
+    from ._scan import find_crlfcrlf as _sc_find
+
+    return _sc_find(data, start)
 
 
 def _scan_content_length(data: List[UInt8], header_end: Int) -> Int:
-    """Quick scan for Content-Length value in the header section.
+    """Scan for ``Content-Length:`` in the header block and parse it.
 
-    Searches for "content-length:" (case-insensitive) and parses the integer.
-    Returns 0 if not found.
+    Thin wrapper over ``flare.http._scan.scan_content_length`` at the
+    default SIMD width. Returns ``0`` when the header is absent.
     """
-    var needle = "content-length:"
-    var needle_len = needle.byte_length()
-    var needle_ptr = needle.unsafe_ptr()
+    from ._scan import scan_content_length as _sc_len
 
-    var i = 0
-    while i < header_end - needle_len:
-        var found = True
-        for j in range(needle_len):
-            var c = data[i + j]
-            if c >= 65 and c <= 90:
-                c = c + 32
-            if c != needle_ptr[j]:
-                found = False
-                break
-        if found:
-            var pos = i + needle_len
-            while pos < header_end and (data[pos] == 32 or data[pos] == 9):
-                pos += 1
-            var result = 0
-            while pos < header_end and data[pos] >= 48 and data[pos] <= 57:
-                result = result * 10 + Int(data[pos]) - 48
-                pos += 1
-            return result
-        i += 1
-    return 0
+    return _sc_len(data, header_end)
 
 
 # ── RFC 7230 token validation ─────────────────────────────────────────────────
