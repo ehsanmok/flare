@@ -45,6 +45,11 @@ from flare.http import (
   — Reflective auto-injection: declare extractor fields on a struct
     and wrap in ``Extracted[H]`` to get a ``Handler`` that pulls each
     field from the request before calling ``handle``.
+- `ComptimeRoute`, `ComptimeRouter`
+  — Comptime-compiled route table: segment parsing runs at compile
+    time and the dispatch loop unrolls per route. Same 404 / 405
+    contract as ``Router``, parametric over a comptime
+    ``List[ComptimeRoute]``.
 - `get`, `post`, `put`, `delete`, `head` — Module-level one-shot helpers.
   `post` and `put` accept a `String` (JSON auto-set), `json.Value`
   (auto-serialised), or `List[UInt8]` (raw bytes).
@@ -80,6 +85,7 @@ from .request import Request, Method
 from .response import Response, Status
 from .handler import Handler, FnHandler, FnHandlerCT
 from .router import Router
+from .routes import ComptimeRoute, ComptimeRouter
 from .app import App, State
 from .extract import (
     ParamParser,
