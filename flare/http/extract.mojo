@@ -26,17 +26,17 @@ def get_user(req: Request) raises -> Response:
 ## Auto-injection
 
 For the axum-style "the handler's signature IS the extractor spec",
-declare the extractor set as the fields of a ``HandlerStruct`` and
+declare the extractor set as the fields of a ``Handler`` struct and
 wrap it in ``Extracted[H]``:
 
 ```mojo
 from flare.http import (
-    Extracted, HandlerStruct, Request, Response, ok,
+    Extracted, Handler, Request, Response, ok,
     Path, QueryOpt, ParamInt,
 )
 
 @fieldwise_init
-struct GetUser(Copyable, Movable, HandlerStruct):
+struct GetUser(Copyable, Defaultable, Handler, Movable):
     var id: Path[ParamInt, "id"]
     var page: QueryOpt[ParamInt, "page"]
 
@@ -44,20 +44,27 @@ struct GetUser(Copyable, Movable, HandlerStruct):
         self.id = Path[ParamInt, "id"]()
         self.page = QueryOpt[ParamInt, "page"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         return ok("user " + String(self.id.value.value))
 
 # Register with any Router / HttpServer that accepts a ``Handler``:
 # r.get("/users/:id", Extracted[GetUser]())
 ```
 
-``Extracted[H]`` implements ``Handler`` and reflects on ``H``'s field
+``Extracted[H]`` is itself a ``Handler`` and reflects on ``H``'s field
 list via ``std.reflection.struct_field_count`` + ``trait_downcast``:
 per request, it default-constructs ``H``, walks each field with a
 ``comptime for`` loop, calls ``field.apply(req)`` through the
-``Extractor`` trait, and invokes ``h.handle(req)``. No per-arity
+``Extractor`` trait, and invokes ``h.serve(req)``. No per-arity
 wrapper types, no runtime dispatch — every field's type is known at
 compile time and monomorphised through.
+
+``H`` is just a regular ``Handler``; wrapping in ``Extracted[H]`` is
+what gives it the field-population step. Passing ``H()`` directly to
+a ``Router`` still compiles and calls ``serve(req)`` on default-
+initialised fields — technically valid, almost never what you want,
+so reach for ``Extracted[H]()`` whenever the struct has extractor
+fields.
 
 ## Parse-failure handling
 
@@ -65,7 +72,7 @@ Each extractor's ``apply`` raises an ``Error`` if the request is
 missing the parameter or the captured value fails to parse. The
 ``Extracted[H]`` adapter catches extractor errors and returns **400
 Bad Request** with the error message in the body; the handler's
-``handle`` is never called on a bad extraction.
+``serve`` is never called on a bad extraction.
 """
 
 from std.reflection import struct_field_count
@@ -423,25 +430,12 @@ struct Json(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
-# ── HandlerStruct + Extracted adapter ───────────────────────────────────────
+# ── Extracted adapter ───────────────────────────────────────────────────────
 
 
-trait HandlerStruct(Copyable, Defaultable, ImplicitlyDestructible, Movable):
-    """A struct whose fields are ``Extractor``s and that knows how to
-    produce a ``Response`` from a ``Request``.
-
-    Wrap in ``Extracted[MyStruct]()`` to turn the declaration into a
-    live ``Handler``. Each field must itself be ``Extractor``; the
-    adapter walks the fields via ``std.reflection`` and calls
-    ``field.apply(req)`` through ``trait_downcast`` in declaration
-    order before invoking ``handle``.
-    """
-
-    def handle(self, req: Request) raises -> Response:
-        ...
-
-
-struct Extracted[H: HandlerStruct](Copyable, Handler, Movable):
+struct Extracted[H: Copyable & Defaultable & Handler & Movable](
+    Copyable, Handler, Movable
+):
     """Reflective auto-injection adapter: ``H``'s fields are its extractor set.
 
     Per request:
@@ -450,11 +444,16 @@ struct Extracted[H: HandlerStruct](Copyable, Handler, Movable):
     2. For each field index ``idx`` in ``0..struct_field_count[H]()``:
        downcast the field reference to ``Extractor`` and call
        ``apply(req)``. Each call raises on extractor failure.
-    3. Call ``h.handle(req)``.
+    3. Call ``h.serve(req)``.
 
     Extractor failures are caught and mapped to **400 Bad Request** with
-    the error message in the body. ``handle`` exceptions are allowed to
+    the error message in the body. ``serve`` exceptions are allowed to
     propagate and the server's top-level catch maps them to 500.
+
+    ``H`` is a regular ``Handler``; nothing about this adapter depends
+    on a separate "handler struct" trait. The only extra bound is
+    ``Defaultable`` (so ``Extracted`` can build ``Self.H()`` before
+    populating fields) — exactly the bound the reflection step needs.
 
     This type is the direct analogue of axum's "the handler's parameter
     list declares the extractor chain" pattern, but implemented via
@@ -479,7 +478,7 @@ struct Extracted[H: HandlerStruct](Copyable, Handler, Movable):
                 field.apply(req)
             except e:
                 return _bad_request_from_error(e)
-        return h.handle(req)
+        return h.serve(req)
 
 
 @always_inline

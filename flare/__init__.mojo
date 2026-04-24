@@ -122,22 +122,22 @@ def main() raises:
 
 ## Typed inputs: ``Extracted[H]``
 
-Declare the handler's extractors as the fields of a struct, wrap it in
-``Extracted[H]``, and the adapter reflects on the struct's field types
-at compile time to pull each one from the request before calling
-``handle``. Parse failures become automatic 400 responses; the handler
-is only reached when every field has a value of the right type.
+Declare the handler's extractors as the fields of a ``Handler`` struct
+and wrap it in ``Extracted[H]``. The adapter reflects on the struct's
+field types at compile time to pull each one from the request before
+calling the inner ``serve``. Parse failures become automatic 400
+responses; ``serve`` is only reached when every field has a value of
+the right type.
 
 ```mojo
 from flare.http import (
-    Router, Request, Response, ok, HttpServer,
-    Extracted, HandlerStruct, Path, QueryOpt, Header,
-    ParamInt, ParamString,
+    Router, Handler, Request, Response, ok, HttpServer,
+    Extracted, Path, QueryOpt, Header, ParamInt, ParamString,
 )
 from flare.net import SocketAddr
 
 @fieldwise_init
-struct GetUser(Copyable, Movable, HandlerStruct):
+struct GetUser(Copyable, Defaultable, Handler, Movable):
     var id:    Path[ParamInt, "id"]
     var page:  QueryOpt[ParamInt, "page"]
     var auth:  Header[ParamString, "Authorization"]
@@ -147,7 +147,7 @@ struct GetUser(Copyable, Movable, HandlerStruct):
         self.page = QueryOpt[ParamInt, "page"]()
         self.auth = Header[ParamString, "Authorization"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         return ok("user=" + String(self.id.value.value))
 
 def main() raises:
@@ -488,7 +488,6 @@ from .http.extract import (
     BodyBytes,
     BodyText,
     Json,
-    HandlerStruct,
     Extracted,
 )
 from .http.encoding import (

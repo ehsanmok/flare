@@ -113,18 +113,17 @@ def main() raises:
 
 ### Typed inputs: `Extracted[H]`
 
-Stringly-typed `req.param("id")` works, but if the handler really needs an `Int`, flare reflects on a handler struct's fields at compile time and fills each one from the request before calling `handle`. Parse failures become automatic 400 responses; the handler only runs when every field has a value of the right type.
+Stringly-typed `req.param("id")` works, but if the handler really needs an `Int`, flare reflects on a `Handler` struct's fields at compile time and fills each one from the request before calling `serve`. Parse failures become automatic 400 responses; the handler only runs when every field has a value of the right type.
 
 ```mojo
 from flare.http import (
-    Router, Request, Response, ok, HttpServer,
-    Extracted, HandlerStruct, Path, QueryOpt, Header,
-    ParamInt, ParamString,
+    Router, Handler, Request, Response, ok, HttpServer,
+    Extracted, Path, QueryOpt, Header, ParamInt, ParamString,
 )
 from flare.net import SocketAddr
 
 @fieldwise_init
-struct GetUser(Copyable, Movable, HandlerStruct):
+struct GetUser(Copyable, Defaultable, Handler, Movable):
     var id:    Path[ParamInt, "id"]
     var page:  QueryOpt[ParamInt, "page"]
     var auth:  Header[ParamString, "Authorization"]
@@ -134,7 +133,7 @@ struct GetUser(Copyable, Movable, HandlerStruct):
         self.page = QueryOpt[ParamInt, "page"]()
         self.auth = Header[ParamString, "Authorization"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         return ok("user=" + String(self.id.value.value))
 
 def main() raises:
@@ -144,7 +143,7 @@ def main() raises:
     srv.serve(r^)
 ```
 
-Value-constructor extractors (`Path[T, name].extract(req)`) are also available for use inside plain `def` handlers when a full struct is overkill. See [`examples/19_extractors.mojo`](examples/19_extractors.mojo).
+`GetUser` is an ordinary `Handler`. Wrapping it in `Extracted[GetUser]` is what adds the field-population step; passing `GetUser()` directly to the router compiles but calls `serve` on default-initialised fields, which is almost never what you want. Value-constructor extractors (`Path[T, name].extract(req)`) are also available for use inside plain `def` handlers when a full struct is overkill. See [`examples/19_extractors.mojo`](examples/19_extractors.mojo).
 
 ### Static route tables: `ComptimeRouter`
 

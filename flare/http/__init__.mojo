@@ -41,10 +41,11 @@ from flare.http import (
   — Typed extractors for path params, query string, headers.
 - `BodyBytes`, `BodyText`, `Json`
   — Extractors that read the request body.
-- `HandlerStruct`, `Extracted`
-  — Reflective auto-injection: declare extractor fields on a struct
-    and wrap in ``Extracted[H]`` to get a ``Handler`` that pulls each
-    field from the request before calling ``handle``.
+- `Extracted`
+  — Reflective auto-injection wrapper: put your extractor set on the
+    fields of any ``Handler`` struct (plus ``Defaultable``) and wrap
+    it in ``Extracted[H]`` to get a ``Handler`` that pulls each field
+    from the request before calling the inner ``serve``.
 - `ComptimeRoute`, `ComptimeRouter`
   — Comptime-compiled route table: segment parsing runs at compile
     time and the dispatch loop unrolls per route. Same 404 / 405
@@ -108,7 +109,6 @@ from .extract import (
     BodyBytes,
     BodyText,
     Json,
-    HandlerStruct,
     Extracted,
 )
 from .encoding import (

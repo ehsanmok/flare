@@ -5,8 +5,9 @@ Demonstrates two ways to use flare's v0.4.1 extractors:
 1. **Value-constructor** — call ``Path[T, name].extract(req)`` inside a
    plain handler. Direct, no struct boilerplate.
 2. **Auto-injection via ``Extracted[H]``** — declare the extractors as
-   the fields of a ``HandlerStruct``; the adapter reflects on the
-   struct, pulls each field from the request, and calls ``handle``.
+   the fields of a ``Handler`` struct; the adapter reflects on the
+   struct, pulls each field from the request, and calls the inner
+   ``serve``.
 
 Both are driven by synthesised ``Request`` values so the example stays
 runnable under ``pixi run tests`` without binding a socket.
@@ -27,7 +28,7 @@ from flare.http import (
     Query,
     QueryOpt,
     Header,
-    HandlerStruct,
+    Handler,
     Extracted,
 )
 
@@ -45,11 +46,11 @@ def list_user_posts(req: Request) raises -> Response:
     return ok("user " + String(user_id) + " posts (page " + String(page) + ")")
 
 
-# ── Shape 2: HandlerStruct + Extracted[H] auto-injection ────────────────────
+# ── Shape 2: Handler struct + Extracted[H] auto-injection ──────────────────
 
 
 @fieldwise_init
-struct GetUser(Copyable, HandlerStruct, Movable):
+struct GetUser(Copyable, Defaultable, Handler, Movable):
     """All the handler's inputs are declared as fields. The adapter
     walks the field list via reflection and populates each one from the
     request before calling ``handle``.
@@ -64,7 +65,7 @@ struct GetUser(Copyable, HandlerStruct, Movable):
         self.trace = Query[ParamString, "trace"]()
         self.auth = Header[ParamString, "Authorization"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         return ok(
             "user="
             + String(self.id.value.value)

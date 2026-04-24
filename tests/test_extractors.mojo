@@ -40,7 +40,7 @@ from flare.http import (
     BodyBytes,
     BodyText,
     Json,
-    HandlerStruct,
+    Handler,
     Extracted,
 )
 
@@ -313,13 +313,13 @@ def test_json_malformed_raises() raises:
 
 
 @fieldwise_init
-struct _OneH(Copyable, HandlerStruct, Movable):
+struct _OneH(Copyable, Defaultable, Handler, Movable):
     var id: Path[ParamInt, "id"]
 
     def __init__(out self):
         self.id = Path[ParamInt, "id"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         return ok("id=" + String(self.id.value.value))
 
 
@@ -343,7 +343,7 @@ def test_extracted_one_field_bad_parse_returns_400() raises:
 
 
 @fieldwise_init
-struct _TwoH(Copyable, HandlerStruct, Movable):
+struct _TwoH(Copyable, Defaultable, Handler, Movable):
     var id: Path[ParamInt, "id"]
     var page: QueryOpt[ParamInt, "page"]
 
@@ -351,7 +351,7 @@ struct _TwoH(Copyable, HandlerStruct, Movable):
         self.id = Path[ParamInt, "id"]()
         self.page = QueryOpt[ParamInt, "page"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         var page_str = "default"
         if self.page.value:
             page_str = String(self.page.value.value().value)

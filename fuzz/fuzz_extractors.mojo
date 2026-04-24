@@ -26,13 +26,13 @@ from flare.http import (
     QueryOpt,
     Header,
     HeaderOpt,
-    HandlerStruct,
+    Handler,
     Extracted,
 )
 
 
 @fieldwise_init
-struct _StressHandler(Copyable, HandlerStruct, Movable):
+struct _StressHandler(Copyable, Defaultable, Handler, Movable):
     """A handler with one of every extractor kind so a single fuzz run
     exercises path + query + header + optional variants at once.
     """
@@ -50,7 +50,7 @@ struct _StressHandler(Copyable, HandlerStruct, Movable):
         self.auth = Header[ParamString, "Authorization"]()
         self.trace = HeaderOpt[ParamString, "X-Trace"]()
 
-    def handle(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> Response:
         return ok("ok")
 
 
