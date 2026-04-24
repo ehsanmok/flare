@@ -26,18 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pin Linux to ``ubuntu-22.04`` rather than ``ubuntu-latest``.
-        # The ``mojo 1.0.0b1.dev2026042405`` runtime
-        # (``libKGENCompilerRTShared.so``) crashes immediately on
-        # GitHub Actions' Ubuntu 24.04 image — the very first test
-        # (``test_net.mojo``) prints its banner and then SIGSEGVs
-        # inside the Mojo runtime, before any user code runs.
-        # The same ``mojo`` build is healthy on Ubuntu 22.04 (matches
-        # the dev box this repo benchmarks on) and on macOS 14, so
-        # 22.04 is the safe target until Mojo upstream re-cuts a
-        # 24.04-clean nightly. Once that lands and a green nightly
-        # CI confirms it, this can move back to ``ubuntu-latest``.
-        os: [ubuntu-22.04, macos-14]
+        os: [ubuntu-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
