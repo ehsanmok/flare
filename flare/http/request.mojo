@@ -133,6 +133,119 @@ struct Request(Movable):
             return False
         return name in self._params[]
 
+    def query_param(self, name: String) -> String:
+        """Return the first query-string value for ``name``, or ``""``.
+
+        Scans the URL's query string (the substring after ``?``, stopping
+        at ``#``) for ``name=value`` pairs separated by ``&``. Case-sensitive
+        key match. Does not percent-decode; callers should decode if they
+        expect encoded bytes. Allocation-free on requests that have no
+        query string (fast path checks for ``?`` in the URL first).
+
+        Args:
+            name: Query parameter name.
+
+        Returns:
+            The first value for ``name``, or an empty string if absent.
+        """
+        var n = self.url.byte_length()
+        var p = self.url.unsafe_ptr()
+        var q = -1
+        for i in range(n):
+            if p[i] == 63:  # '?'
+                q = i + 1
+                break
+        if q < 0:
+            return ""
+        # Strip fragment.
+        var end = n
+        for i in range(q, n):
+            if p[i] == 35:  # '#'
+                end = i
+                break
+        var key_n = name.byte_length()
+        var kp = name.unsafe_ptr()
+        var cursor = q
+        while cursor < end:
+            # Find end of this pair.
+            var pair_end = end
+            for i in range(cursor, end):
+                if p[i] == 38:  # '&'
+                    pair_end = i
+                    break
+            # Find '=' within the pair.
+            var eq = pair_end
+            for i in range(cursor, pair_end):
+                if p[i] == 61:  # '='
+                    eq = i
+                    break
+            var this_key_n = eq - cursor
+            if this_key_n == key_n:
+                var matched = True
+                for j in range(key_n):
+                    if p[cursor + j] != kp[j]:
+                        matched = False
+                        break
+                if matched:
+                    if eq < pair_end:
+                        return String(
+                            unsafe_from_utf8=self.url.as_bytes()[
+                                eq + 1 : pair_end
+                            ]
+                        )
+                    return ""
+            cursor = pair_end + 1
+        return ""
+
+    def has_query_param(self, name: String) -> Bool:
+        """Return True if query parameter ``name`` is present (even if empty).
+
+        Args:
+            name: Query parameter name.
+
+        Returns:
+            True if the key is present in the URL's query string.
+        """
+        var n = self.url.byte_length()
+        var p = self.url.unsafe_ptr()
+        var q = -1
+        for i in range(n):
+            if p[i] == 63:  # '?'
+                q = i + 1
+                break
+        if q < 0:
+            return False
+        var end = n
+        for i in range(q, n):
+            if p[i] == 35:  # '#'
+                end = i
+                break
+        var key_n = name.byte_length()
+        var kp = name.unsafe_ptr()
+        var cursor = q
+        while cursor < end:
+            var pair_end = end
+            for i in range(cursor, end):
+                if p[i] == 38:
+                    pair_end = i
+                    break
+            var eq = pair_end
+            for i in range(cursor, pair_end):
+                if p[i] == 61:
+                    eq = i
+                    break
+            var this_key_n = eq - cursor
+            if this_key_n == key_n:
+                var matched = True
+                for j in range(key_n):
+                    if p[cursor + j] != kp[j]:
+                        matched = False
+                        break
+                if matched:
+                    return True
+            cursor = pair_end + 1
+        return False
+
     def text(self) -> String:
         """Decode the request body as a UTF-8 string.
 

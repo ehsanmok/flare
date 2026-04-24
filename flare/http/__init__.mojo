@@ -34,6 +34,17 @@ from flare.http import (
 - `TooManyRedirects`    — Raised when the redirect limit is exceeded.
 - `BasicAuth`           — HTTP Basic authentication (RFC 7617).
 - `BearerAuth`          — HTTP Bearer token authentication (RFC 6750).
+- `ParamParser`, `ParamInt`, `ParamFloat64`, `ParamBool`, `ParamString`
+  — Typed parsers for URL / header string values.
+- `Extractor`           — Trait implemented by each extractor.
+- `Path`, `Query`, `QueryOpt`, `Header`, `HeaderOpt`
+  — Typed extractors for path params, query string, headers.
+- `BodyBytes`, `BodyText`, `Json`
+  — Extractors that read the request body.
+- `HandlerStruct`, `Extracted`
+  — Reflective auto-injection: declare extractor fields on a struct
+    and wrap in ``Extracted[H]`` to get a ``Handler`` that pulls each
+    field from the request before calling ``handle``.
 - `get`, `post`, `put`, `delete`, `head` — Module-level one-shot helpers.
   `post` and `put` accept a `String` (JSON auto-set), `json.Value`
   (auto-serialised), or `List[UInt8]` (raw bytes).
@@ -70,6 +81,24 @@ from .response import Response, Status
 from .handler import Handler, FnHandler, FnHandlerCT
 from .router import Router
 from .app import App, State
+from .extract import (
+    ParamParser,
+    ParamInt,
+    ParamFloat64,
+    ParamBool,
+    ParamString,
+    Extractor,
+    Path,
+    Query,
+    QueryOpt,
+    Header,
+    HeaderOpt,
+    BodyBytes,
+    BodyText,
+    Json,
+    HandlerStruct,
+    Extracted,
+)
 from .encoding import (
     Encoding,
     compress_gzip,
