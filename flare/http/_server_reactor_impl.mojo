@@ -562,16 +562,33 @@ struct ConnHandle(Movable):
         """
         self.write_buf.clear()
         self.write_pos = 0
-        var src_bytes = resp.keepalive_bytes if keep_alive else resp.close_bytes
-        var n = len(src_bytes)
+        # Pick the keep-alive or close variant by branch rather than via
+        # a conditional expression. ``List[UInt8]`` is no longer
+        # ``ImplicitlyCopyable`` under Mojo 1.0.0b1+, so binding the
+        # selected variant to a single ``var`` would force an implicit
+        # copy that the compiler now rejects. Splitting the branch
+        # keeps both arms in pure borrow + ``unsafe_ptr()`` form and
+        # avoids any copy at all.
+        var n: Int
+        if keep_alive:
+            n = len(resp.keepalive_bytes)
+        else:
+            n = len(resp.close_bytes)
         if self.write_buf.capacity < n:
             self.write_buf.reserve(n)
         self.write_buf.resize(n, UInt8(0))
-        memcpy(
-            dest=self.write_buf.unsafe_ptr(),
-            src=src_bytes.unsafe_ptr(),
-            count=n,
-        )
+        if keep_alive:
+            memcpy(
+                dest=self.write_buf.unsafe_ptr(),
+                src=resp.keepalive_bytes.unsafe_ptr(),
+                count=n,
+            )
+        else:
+            memcpy(
+                dest=self.write_buf.unsafe_ptr(),
+                src=resp.close_bytes.unsafe_ptr(),
+                count=n,
+            )
         self.write_pos = 0
 
     def _serialize_response(mut self, resp: Response, keep_alive: Bool) -> None:
@@ -717,12 +734,12 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
     for i in range(first_eol - hn + 1):
         if i < 0:
             break
-        var match = True
+        var is_match = True
         for j in range(hn):
             if data[i + j] != hp[j]:
-                match = False
+                is_match = False
                 break
-        if match:
+        if is_match:
             version_is_10 = True
             break
     # 2. Connection header. Case-insensitive name match, value compared
