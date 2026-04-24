@@ -24,27 +24,33 @@ def main() raises:
 
 ## What you get
 
-- **Write** with the ergonomics of Rust ``axum`` (trait-based ``Handler``,
-  generics with ``[H: Handler & Copyable]``, ``App[S]`` over typed
-  ``State[T]``, middleware as a ``Handler`` wrapping another ``Handler``)
-  and the simplicity of Go ``net/http`` (plain ``def`` handlers, no
-  ``async`` / ``.await`` — the reactor runs under you). Misconfigured
-  servers fail the build via ``comptime assert``, not the first request.
-- **Scale** with one parameter. ``srv.serve(handler, num_workers=1)`` is
-  the single-threaded reactor (kqueue/epoll) — matches single-worker nginx
-  on Linux EPYC and is about 1.10x Go ``net/http`` on Apple M.
-  ``srv.serve(handler, num_workers=N)`` with ``N >= 2`` binds N
-  ``SO_REUSEPORT`` listeners on N ``pthread`` workers with optional
-  per-core pinning: **257K req/s at 4 workers, 4.4x linear scaling**.
-  WebSocket XOR masking via SIMD tops **112 GB/s on 1 KB payloads**
-  (14–35x scalar).
-- **Parse** HTTP **7–9x faster than the next-fastest Mojo HTTP library**
-  on the same microbenchmarks. Dual-stack DNS with automatic IPv4/IPv6
-  fallback. RFC 7230 header validation and configurable size limits
-  built in.
-- **Verify** it yourself: **460 tests, 16 fuzz harnesses, over a million
-  fuzz runs, zero known crashes to date**. Every example in ``examples/``
-  runs on every CI build. Pre-1.0 — expect rough edges.
+Handlers are plain ``def`` functions you plug into
+``serve(..., num_workers=N)``. Want path parameters and method dispatch?
+Pass a ``Router``. Shared state? Wrap the router in ``App[S]``.
+Middleware is a ``Handler`` that holds another ``Handler``, no callback
+chain threaded through the request. If a handler needs a path parameter
+and a query string, declare those as fields of a struct; flare reflects
+on the field types at compile time and populates each one before
+calling ``handle``. No async, no ``.await``, no per-arity trait dance.
+``ServerConfig`` mistakes fail the build, not the first request.
+
+Scale by changing one integer. ``num_workers=1`` is a single-threaded
+reactor (``kqueue`` on macOS, ``epoll`` on Linux); on Linux EPYC that
+ties single-worker nginx and beats Go ``net/http`` by roughly 2x.
+``num_workers=N`` with N >= 2 opens N ``SO_REUSEPORT`` listeners across
+N pthread workers with optional CPU pinning. Four pinned workers hit
+257K req/s on the TFB plaintext benchmark, close to linear scaling.
+Static endpoints can skip the parser entirely with
+``serve_static(resp)``: the reactor memcpys pre-encoded bytes straight
+into the socket. WebSocket XOR masking peaks at 112 GB/s on 1 KB
+payloads thanks to SIMD.
+
+Parsing runs 7 to 9x faster than the next-fastest Mojo HTTP library on
+the same microbenchmarks. The end-of-headers scan is SIMD (32 lanes by
+default, 64 on AVX-512). Dual-stack DNS, RFC 7230 header validation,
+and configurable size limits are built in. 540+ tests, 19 fuzz
+harnesses, 4M+ fuzz runs, zero known crashes to date. Pre-1.0, so the
+API is still moving.
 
 ## Architecture
 
@@ -172,6 +178,102 @@ workers via ``flare.runtime.scheduler.Scheduler``. Each worker gets its
 own reactor; the kernel load-balances accepted connections across workers.
 ``pin_cores=True`` (default) pins worker N to core ``N % num_cpus`` on
 Linux; it is a no-op on macOS. The upper bound on ``num_workers`` is 256.
+
+## Typed extractors
+
+Declare the handler's extractors as the fields of a struct, wrap it in
+``Extracted[H]``, and the adapter reflects on the struct's field types
+at compile time to pull each one from the request before calling
+``handle``. Parse failures become automatic 400 responses; the handler
+is only reached when every field has a value of the right type.
+
+```mojo
+from flare.http import (
+    Router, Request, Response, ok, HttpServer,
+    Extracted, HandlerStruct, Path, QueryOpt, Header,
+    ParamInt, ParamString,
+)
+from flare.net import SocketAddr
+
+@fieldwise_init
+struct GetUser(Copyable, Movable, HandlerStruct):
+    var id:    Path[ParamInt, "id"]
+    var page:  QueryOpt[ParamInt, "page"]
+    var auth:  Header[ParamString, "Authorization"]
+
+    def __init__(out self):
+        self.id   = Path[ParamInt, "id"]()
+        self.page = QueryOpt[ParamInt, "page"]()
+        self.auth = Header[ParamString, "Authorization"]()
+
+    def handle(self, req: Request) raises -> Response:
+        return ok("user=" + String(self.id.value.value))
+
+def main() raises:
+    var r = Router()
+    r.get("/users/:id", Extracted[GetUser]())
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^)
+```
+
+Value-constructor extractors (``Path[T, name].extract(req)``) are also
+available for use inside plain ``def`` handlers when the struct shape
+is overkill.
+
+## Comptime route trie
+
+``ComptimeRouter[routes]`` takes its route list as a comptime value.
+Segment parsing runs at compile time and the dispatch loop unrolls per
+route, so the runtime does zero string-compares on unknown paths.
+
+```mojo
+from flare.http import (
+    ComptimeRoute, ComptimeRouter, Request, Response, Method, ok, HttpServer,
+)
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response: return ok("home")
+def get_user(req: Request) raises -> Response:
+    return ok("user=" + req.param("id"))
+
+comptime ROUTES: List[ComptimeRoute] = [
+    ComptimeRoute(Method.GET,  "/"),
+    ComptimeRoute(Method.GET,  "/users/:id"),
+]
+
+def main() raises:
+    var r = ComptimeRouter[ROUTES]()
+    r.set_handler(0, home)
+    r.set_handler(1, get_user)
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^)
+```
+
+## Static responses (serve_static)
+
+For endpoints that always return the same bytes (health checks, TFB
+plaintext, single-URL microservices), ``precompute_response`` builds
+the full HTTP wire form at startup and ``HttpServer.serve_static``
+runs a specialised reactor that skips the parser's Request-construction
+and handler-dispatch step entirely.
+
+```mojo
+from flare.http import HttpServer, precompute_response
+from flare.net import SocketAddr
+
+def main() raises:
+    var resp = precompute_response(
+        status=200,
+        content_type="text/plain; charset=utf-8",
+        body="Hello, World!",
+    )
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_static(resp)
+```
+
+Keep-alive and ``Connection: close`` wire forms are both pre-encoded;
+the reactor picks the right one per request from the parsed Connection
+header.
 
 ## Comptime handler + config
 
@@ -354,7 +456,26 @@ from .http.request import Request, Method
 from .http.response import Response, Status
 from .http.handler import Handler, FnHandler, FnHandlerCT
 from .http.router import Router
+from .http.routes import ComptimeRoute, ComptimeRouter
 from .http.app import App, State
+from .http.extract import (
+    ParamParser,
+    ParamInt,
+    ParamFloat64,
+    ParamBool,
+    ParamString,
+    Extractor,
+    Path,
+    Query,
+    QueryOpt,
+    Header,
+    HeaderOpt,
+    BodyBytes,
+    BodyText,
+    Json,
+    HandlerStruct,
+    Extracted,
+)
 from .http.encoding import (
     Encoding,
     compress_gzip,
@@ -375,6 +496,7 @@ from .http.server import (
     internal_error,
     redirect,
 )
+from .http.static_response import StaticResponse, precompute_response
 from .http.cookie import (
     Cookie,
     CookieJar,
