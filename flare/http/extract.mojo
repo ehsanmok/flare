@@ -13,12 +13,12 @@ Value-constructor extractors usable from inside a handler body:
 ```mojo
 from flare.http import (
     Request, Response, ok, bad_request,
-    Path, Query, QueryOpt, Header, ParamInt, ParamString,
+    Path, Query, OptionalQuery, Header, ParamInt, ParamString,
 )
 
 def get_user(req: Request) raises -> Response:
     var id   = Path[ParamInt,    "id"].extract(req).value.value
-    var page = QueryOpt[ParamInt, "page"].extract(req).value
+    var page = OptionalQuery[ParamInt, "page"].extract(req).value
     var auth = Header[ParamString, "Authorization"].extract(req).value.value
     return ok("user " + String(id))
 ```
@@ -32,17 +32,17 @@ wrap it in ``Extracted[H]``:
 ```mojo
 from flare.http import (
     Extracted, Handler, Request, Response, ok,
-    Path, QueryOpt, ParamInt,
+    Path, OptionalQuery, ParamInt,
 )
 
 @fieldwise_init
 struct GetUser(Copyable, Defaultable, Handler, Movable):
     var id: Path[ParamInt, "id"]
-    var page: QueryOpt[ParamInt, "page"]
+    var page: OptionalQuery[ParamInt, "page"]
 
     def __init__(out self):
         self.id = Path[ParamInt, "id"]()
-        self.page = QueryOpt[ParamInt, "page"]()
+        self.page = OptionalQuery[ParamInt, "page"]()
 
     def serve(self, req: Request) raises -> Response:
         return ok("user " + String(self.id.value.value))
@@ -275,7 +275,7 @@ struct Query[T: ParamParser, name: StaticString](
 
 
 @fieldwise_init
-struct QueryOpt[T: ParamParser, name: StaticString](
+struct OptionalQuery[T: ParamParser, name: StaticString](
     Copyable, Defaultable, Extractor, Movable
 ):
     """Optional query-string parameter. ``value`` is ``None`` when absent.
@@ -333,7 +333,7 @@ struct Header[T: ParamParser, name: StaticString](
 
 
 @fieldwise_init
-struct HeaderOpt[T: ParamParser, name: StaticString](
+struct OptionalHeader[T: ParamParser, name: StaticString](
     Copyable, Defaultable, Extractor, Movable
 ):
     """Optional header. ``value`` is ``None`` when absent."""

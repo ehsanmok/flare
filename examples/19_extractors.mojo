@@ -26,7 +26,7 @@ from flare.http import (
     ParamString,
     Path,
     Query,
-    QueryOpt,
+    OptionalQuery,
     Header,
     Handler,
     Extracted,
@@ -39,7 +39,7 @@ from flare.http import (
 def list_user_posts(req: Request) raises -> Response:
     """Extract path and query params explicitly from the request."""
     var user_id = Path[ParamInt, "id"].extract(req).value.value
-    var q = QueryOpt[ParamInt, "page"].extract(req)
+    var q = OptionalQuery[ParamInt, "page"].extract(req)
     var page = Int(1)
     if q.value:
         page = q.value.value().value

@@ -23,9 +23,9 @@ from flare.http import (
     ParamString,
     Path,
     Query,
-    QueryOpt,
+    OptionalQuery,
     Header,
-    HeaderOpt,
+    OptionalHeader,
     Handler,
     Extracted,
 )
@@ -38,17 +38,17 @@ struct _StressHandler(Copyable, Defaultable, Handler, Movable):
     """
 
     var id: Path[ParamInt, "id"]
-    var page: QueryOpt[ParamInt, "page"]
+    var page: OptionalQuery[ParamInt, "page"]
     var name: Query[ParamString, "name"]
     var auth: Header[ParamString, "Authorization"]
-    var trace: HeaderOpt[ParamString, "X-Trace"]
+    var trace: OptionalHeader[ParamString, "X-Trace"]
 
     def __init__(out self):
         self.id = Path[ParamInt, "id"]()
-        self.page = QueryOpt[ParamInt, "page"]()
+        self.page = OptionalQuery[ParamInt, "page"]()
         self.name = Query[ParamString, "name"]()
         self.auth = Header[ParamString, "Authorization"]()
-        self.trace = HeaderOpt[ParamString, "X-Trace"]()
+        self.trace = OptionalHeader[ParamString, "X-Trace"]()
 
     def serve(self, req: Request) raises -> Response:
         return ok("ok")

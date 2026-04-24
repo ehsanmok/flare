@@ -37,7 +37,7 @@ from flare.http import (
 - `ParamParser`, `ParamInt`, `ParamFloat64`, `ParamBool`, `ParamString`
   — Typed parsers for URL / header string values.
 - `Extractor`           — Trait implemented by each extractor.
-- `Path`, `Query`, `QueryOpt`, `Header`, `HeaderOpt`
+- `Path`, `Query`, `OptionalQuery`, `Header`, `OptionalHeader`
   — Typed extractors for path params, query string, headers.
 - `BodyBytes`, `BodyText`, `Json`
   — Extractors that read the request body.
@@ -103,9 +103,9 @@ from .extract import (
     Extractor,
     Path,
     Query,
-    QueryOpt,
+    OptionalQuery,
     Header,
-    HeaderOpt,
+    OptionalHeader,
     BodyBytes,
     BodyText,
     Json,

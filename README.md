@@ -118,19 +118,19 @@ Stringly-typed `req.param("id")` works, but if the handler really needs an `Int`
 ```mojo
 from flare.http import (
     Router, Handler, Request, Response, ok, HttpServer,
-    Extracted, Path, QueryOpt, Header, ParamInt, ParamString,
+    Extracted, Path, OptionalQuery, Header, ParamInt, ParamString,
 )
 from flare.net import SocketAddr
 
 @fieldwise_init
 struct GetUser(Copyable, Defaultable, Handler, Movable):
     var id:    Path[ParamInt, "id"]
-    var page:  QueryOpt[ParamInt, "page"]
+    var page:  OptionalQuery[ParamInt, "page"]
     var auth:  Header[ParamString, "Authorization"]
 
     def __init__(out self):
         self.id   = Path[ParamInt, "id"]()
-        self.page = QueryOpt[ParamInt, "page"]()
+        self.page = OptionalQuery[ParamInt, "page"]()
         self.auth = Header[ParamString, "Authorization"]()
 
     def serve(self, req: Request) raises -> Response:

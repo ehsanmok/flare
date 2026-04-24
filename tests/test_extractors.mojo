@@ -5,9 +5,9 @@ Covers:
 - ``ParamInt`` / ``ParamFloat64`` / ``ParamBool`` / ``ParamString``
   round-trip parsing plus happy / error paths.
 - ``Path[T, name]`` required path parameter extraction.
-- ``Query[T, name]`` + ``QueryOpt[T, name]`` with URL fragments,
+- ``Query[T, name]`` + ``OptionalQuery[T, name]`` with URL fragments,
   percent-unaware raw values, trailing ``?``, repeated ``=``.
-- ``Header[T, name]`` + ``HeaderOpt[T, name]`` case-insensitive lookup.
+- ``Header[T, name]`` + ``OptionalHeader[T, name]`` case-insensitive lookup.
 - ``BodyBytes`` / ``BodyText`` / ``Json`` body extractors.
 - ``Extracted[H]``: zero-field, one-field, two-field handler structs,
   plus adapter-level error paths that map extractor failures to 400.
@@ -34,9 +34,9 @@ from flare.http import (
     ParamString,
     Path,
     Query,
-    QueryOpt,
+    OptionalQuery,
     Header,
-    HeaderOpt,
+    OptionalHeader,
     BodyBytes,
     BodyText,
     Json,
@@ -198,32 +198,32 @@ def test_query_no_query_string_raises() raises:
         _ = Query[ParamInt, "id"].extract(req)
 
 
-# ── QueryOpt[T, name] ───────────────────────────────────────────────────────
+# ── OptionalQuery[T, name] ───────────────────────────────────────────────────────
 
 
 def test_query_opt_present() raises:
     var req = Request(method=Method.GET, url="/items?page=4")
-    var q = QueryOpt[ParamInt, "page"].extract(req)
+    var q = OptionalQuery[ParamInt, "page"].extract(req)
     assert_true(q.value)
     assert_equal(q.value.value().value, 4)
 
 
 def test_query_opt_missing_is_none() raises:
     var req = Request(method=Method.GET, url="/items?other=x")
-    var q = QueryOpt[ParamInt, "page"].extract(req)
+    var q = OptionalQuery[ParamInt, "page"].extract(req)
     assert_false(q.value)
 
 
 def test_query_opt_no_query_string() raises:
     var req = Request(method=Method.GET, url="/items")
-    var q = QueryOpt[ParamInt, "page"].extract(req)
+    var q = OptionalQuery[ParamInt, "page"].extract(req)
     assert_false(q.value)
 
 
 def test_query_opt_bad_parse_still_raises() raises:
     var req = Request(method=Method.GET, url="/items?page=xyz")
     with assert_raises():
-        _ = QueryOpt[ParamInt, "page"].extract(req)
+        _ = OptionalQuery[ParamInt, "page"].extract(req)
 
 
 # ── Header[T, name] ─────────────────────────────────────────────────────────
@@ -252,14 +252,14 @@ def test_header_missing_raises() raises:
 def test_header_opt_present() raises:
     var req = Request(method=Method.GET, url="/")
     req.headers.set("X-Trace", "abc")
-    var h = HeaderOpt[ParamString, "X-Trace"].extract(req)
+    var h = OptionalHeader[ParamString, "X-Trace"].extract(req)
     assert_true(h.value)
     assert_equal(h.value.value().value, "abc")
 
 
 def test_header_opt_missing_is_none() raises:
     var req = Request(method=Method.GET, url="/")
-    var h = HeaderOpt[ParamString, "X-Trace"].extract(req)
+    var h = OptionalHeader[ParamString, "X-Trace"].extract(req)
     assert_false(h.value)
 
 
@@ -345,11 +345,11 @@ def test_extracted_one_field_bad_parse_returns_400() raises:
 @fieldwise_init
 struct _TwoH(Copyable, Defaultable, Handler, Movable):
     var id: Path[ParamInt, "id"]
-    var page: QueryOpt[ParamInt, "page"]
+    var page: OptionalQuery[ParamInt, "page"]
 
     def __init__(out self):
         self.id = Path[ParamInt, "id"]()
-        self.page = QueryOpt[ParamInt, "page"]()
+        self.page = OptionalQuery[ParamInt, "page"]()
 
     def serve(self, req: Request) raises -> Response:
         var page_str = "default"
