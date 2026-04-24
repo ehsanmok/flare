@@ -1,11 +1,11 @@
 """Example 20 — Comptime route dispatch via ``ComptimeRouter``.
 
 ``ComptimeRouter`` has the same request-handling contract as
-``Router`` but the route table is a ``comptime`` value, so segment
-parsing happens at compile time and the dispatch loop unrolls per
-route. Handlers are still bound at runtime because Mojo can't yet
-pack heterogeneous ``def`` types into a comptime list; ``set_handler``
-wires each slot after construction.
+``Router`` but the route table — method, pattern, *and* handler — is
+a single ``comptime`` list, so segment parsing happens at compile
+time and the dispatch loop unrolls per route. No separate handler
+binding step; every ``ComptimeRoute`` triple names its handler
+directly.
 
 Drives the router via synthesised requests so it stays runnable under
 ``pixi run tests`` without binding a socket.
@@ -42,10 +42,10 @@ def files(req: Request) raises -> Response:
 
 
 comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET, "/"),
-    ComptimeRoute(Method.GET, "/users/:id"),
-    ComptimeRoute(Method.POST, "/users"),
-    ComptimeRoute(Method.GET, "/files/*"),
+    ComptimeRoute(Method.GET, "/", home),
+    ComptimeRoute(Method.GET, "/users/:id", get_user),
+    ComptimeRoute(Method.POST, "/users", create_user),
+    ComptimeRoute(Method.GET, "/files/*", files),
 ]
 
 
@@ -55,10 +55,6 @@ def main() raises:
     print("=" * 60)
 
     var r = ComptimeRouter[ROUTES]()
-    r.set_handler(0, home)
-    r.set_handler(1, get_user)
-    r.set_handler(2, create_user)
-    r.set_handler(3, files)
 
     var r1 = r.serve(Request(method=Method.GET, url="/"))
     print("GET /          →", r1.status, r1.text())

@@ -46,22 +46,16 @@ def _ok_files(req: Request) raises -> Response:
 
 
 comptime _ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET, "/"),
-    ComptimeRoute(Method.GET, "/users"),
-    ComptimeRoute(Method.POST, "/users"),
-    ComptimeRoute(Method.GET, "/users/:id"),
-    ComptimeRoute(Method.GET, "/files/*"),
+    ComptimeRoute(Method.GET, "/", _ok_home),
+    ComptimeRoute(Method.GET, "/users", _ok_list),
+    ComptimeRoute(Method.POST, "/users", _ok_create),
+    ComptimeRoute(Method.GET, "/users/:id", _ok_user),
+    ComptimeRoute(Method.GET, "/files/*", _ok_files),
 ]
 
 
 def _build_comptime_router() raises -> ComptimeRouter[_ROUTES]:
-    var r = ComptimeRouter[_ROUTES]()
-    r.set_handler(0, _ok_home)
-    r.set_handler(1, _ok_list)
-    r.set_handler(2, _ok_create)
-    r.set_handler(3, _ok_user)
-    r.set_handler(4, _ok_files)
-    return r^
+    return ComptimeRouter[_ROUTES]()
 
 
 def _build_runtime_router() raises -> Router:

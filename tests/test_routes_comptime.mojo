@@ -8,15 +8,11 @@ the runtime ``Router`` in [`test_router.mojo`](./test_router.mojo):
 - 404 on unknown paths.
 - 405 with synthesised ``Allow:`` header on wrong method.
 - Query-string stripping before match.
-- ``set_handler`` bounds checking.
-- Unbound slot → 500-class ``Error`` raise.
 """
 
 from std.testing import (
     assert_true,
-    assert_false,
     assert_equal,
-    assert_raises,
     TestSuite,
 )
 
@@ -56,25 +52,18 @@ def _delete_user(req: Request) raises -> Response:
 
 
 comptime _BASE_ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET, "/"),
-    ComptimeRoute(Method.GET, "/users"),
-    ComptimeRoute(Method.POST, "/users"),
-    ComptimeRoute(Method.GET, "/users/:id"),
-    ComptimeRoute(Method.DELETE, "/users/:id"),
-    ComptimeRoute(Method.GET, "/files/*"),
+    ComptimeRoute(Method.GET, "/", _home),
+    ComptimeRoute(Method.GET, "/users", _list_users),
+    ComptimeRoute(Method.POST, "/users", _create_user),
+    ComptimeRoute(Method.GET, "/users/:id", _get_user),
+    ComptimeRoute(Method.DELETE, "/users/:id", _delete_user),
+    ComptimeRoute(Method.GET, "/files/*", _get_files),
 ]
 
 
 def _router() raises -> ComptimeRouter[_BASE_ROUTES]:
-    """Build a fresh router bound to all six handlers in `_BASE_ROUTES`."""
-    var r = ComptimeRouter[_BASE_ROUTES]()
-    r.set_handler(0, _home)
-    r.set_handler(1, _list_users)
-    r.set_handler(2, _create_user)
-    r.set_handler(3, _get_user)
-    r.set_handler(4, _delete_user)
-    r.set_handler(5, _get_files)
-    return r^
+    """Build a fresh router wired to all six comptime-bound handlers."""
+    return ComptimeRouter[_BASE_ROUTES]()
 
 
 # ── Literal matches ─────────────────────────────────────────────────────────
@@ -204,32 +193,6 @@ def test_query_stripped_before_match() raises:
     var resp = r.serve(Request(method=Method.GET, url="/users/9?expand=1"))
     assert_equal(resp.status, Status.OK)
     assert_equal(resp.text(), "user=9")
-
-
-# ── set_handler error paths ─────────────────────────────────────────────────
-
-
-def test_set_handler_out_of_range_raises() raises:
-    var r = ComptimeRouter[_BASE_ROUTES]()
-    with assert_raises():
-        r.set_handler(99, _home)
-
-
-def test_set_handler_negative_raises() raises:
-    var r = ComptimeRouter[_BASE_ROUTES]()
-    with assert_raises():
-        r.set_handler(-1, _home)
-
-
-# ── Unbound slot raises on dispatch ─────────────────────────────────────────
-
-
-def test_unbound_slot_raises() raises:
-    var r = ComptimeRouter[_BASE_ROUTES]()
-    # Only bind index 0; hitting /users/42 requires slot 3.
-    r.set_handler(0, _home)
-    with assert_raises():
-        _ = r.serve(Request(method=Method.GET, url="/users/42"))
 
 
 # ── Parity with runtime Router on the match primitive ──────────────────────

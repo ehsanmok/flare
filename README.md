@@ -165,16 +165,13 @@ def create_user(req: Request) raises -> Response:
     return ok("created")
 
 comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET,  "/"),
-    ComptimeRoute(Method.GET,  "/users/:id"),
-    ComptimeRoute(Method.POST, "/users"),
+    ComptimeRoute(Method.GET,  "/",          home),
+    ComptimeRoute(Method.GET,  "/users/:id", get_user),
+    ComptimeRoute(Method.POST, "/users",     create_user),
 ]
 
 def main() raises:
     var r = ComptimeRouter[ROUTES]()
-    r.set_handler(0, home)
-    r.set_handler(1, get_user)
-    r.set_handler(2, create_user)
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(r^)
 ```

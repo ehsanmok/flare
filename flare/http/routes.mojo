@@ -29,22 +29,21 @@ def get_user(req: Request) raises -> Response:
     return ok("user=" + req.param("id"))
 
 comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET, "/"),
-    ComptimeRoute(Method.GET, "/users/:id"),
+    ComptimeRoute(Method.GET, "/",          home),
+    ComptimeRoute(Method.GET, "/users/:id", get_user),
 ]
 
 def main() raises:
     var r = ComptimeRouter[ROUTES]()
-    r.set_handler(0, home)
-    r.set_handler(1, get_user)
     # r is a Handler; pass to HttpServer.serve.
 ```
 
-Handlers still live on a runtime ``List[FnHandler]`` because Mojo cannot
-yet pack heterogeneous ``def`` types into a single comptime list; the
-``ComptimeRoute`` values carry just the method + pattern metadata so
-the segment dispatch can still monomorphise even though the actual
-handler dispatch is a ``FnHandler`` indirect call.
+All three fields of ``ComptimeRoute`` (method, pattern, handler) are
+comptime values, so the dispatch loop monomorphises fully per route.
+Because every handler shares a common ``def(Request) raises ->
+Response`` signature, the list is homogeneous and can live as a
+comptime constant — no separate ``set_handler`` step, no runtime
+handler-index book-keeping.
 
 Same status-code contract as ``Router``: unknown path → 404, known
 path wrong method → 405 with a synthesised ``Allow:`` header. Path
@@ -54,7 +53,7 @@ like the runtime router.
 
 from std.collections import Dict
 
-from .handler import Handler, FnHandler
+from .handler import Handler
 from .headers import HeaderMap
 from .request import Request, Method
 from .response import Response, Status
@@ -65,16 +64,17 @@ from .response import Response, Status
 
 @fieldwise_init
 struct ComptimeRoute(Copyable, Movable):
-    """A comptime-known ``(method, pattern)`` pair.
+    """A comptime-known ``(method, pattern, handler)`` triple.
 
-    Only the strings that are genuinely known at compile time are
-    stored; the handler is bound separately at runtime via
-    ``ComptimeRouter.set_handler(idx, fn)`` so different ``fn`` types
-    can coexist in one table.
+    All three fields share a common function-pointer signature
+    (``def(Request) raises -> Response``), so a homogeneous
+    ``List[ComptimeRoute]`` can live as a comptime value and be
+    unrolled by ``ComptimeRouter.serve`` at compile time.
     """
 
     var method: StaticString
     var pattern: StaticString
+    var handler: def(Request) raises thin -> Response
 
 
 # ── Segment classification (pure comptime) ──────────────────────────────────
@@ -178,51 +178,20 @@ struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler, Movable):
     """A ``Handler`` whose route table is comptime-parametric.
 
     Parameters:
-        routes: Comptime-known list of ``(method, pattern)`` pairs.
-            Segment parsing happens at compile time; dispatch
-            monomorphises per-route via ``comptime for``.
+        routes: Comptime-known list of ``(method, pattern, handler)``
+            triples. Segment parsing happens at compile time; the
+            dispatch loop unrolls via ``comptime for`` so each
+            iteration sees the route's pattern and handler as
+            comptime values and the compiler can inline both.
 
-    The handler list is a runtime ``List[FnHandler]`` aligned by index
-    with ``routes``; users bind each handler with
-    ``set_handler(idx, fn)`` before passing the router to
-    ``HttpServer.serve``. Leaving a slot unset is allowed and surfaces
-    as a 500 at request time (unset slots are caught by ``serve``).
+    ``ComptimeRouter`` carries no runtime handler table — the
+    handlers are part of the comptime ``routes`` parameter — so the
+    struct is zero-size (``__init__`` is a no-op). Pass it to
+    ``HttpServer.serve`` the same way as the runtime ``Router``.
     """
 
-    var _handlers: List[FnHandler]
-    var _bound: List[Bool]
-
     def __init__(out self):
-        """Create a router with no handlers bound yet.
-
-        The handler list is pre-sized to ``len(routes)`` so
-        ``set_handler`` is O(1).
-        """
-        self._handlers = List[FnHandler]()
-        self._bound = List[Bool]()
-        comptime n = len(Self.routes)
-        for _ in range(n):
-            self._handlers.append(FnHandler(_unset_handler))
-            self._bound.append(False)
-
-    def set_handler(
-        mut self,
-        idx: Int,
-        handler: def(Request) raises thin -> Response,
-    ) raises:
-        """Bind ``handler`` to the route at ``idx`` (0-indexed into
-        ``routes``). Raises ``Error`` if ``idx`` is out of range.
-        """
-        if idx < 0 or idx >= len(self._handlers):
-            raise Error(
-                "ComptimeRouter.set_handler: index "
-                + String(idx)
-                + " out of range (have "
-                + String(len(self._handlers))
-                + " routes)"
-            )
-        self._handlers[idx] = FnHandler(handler)
-        self._bound[idx] = True
+        pass
 
     def serve(self, req: Request) raises -> Response:
         """Dispatch ``req`` by walking the comptime routes table.
@@ -234,49 +203,36 @@ struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler, Movable):
         var seg_in = _split_path(url_path)
 
         var allowed = List[String]()
-        var matched_idx = -1
-        var matched_params: Dict[String, String] = Dict[String, String]()
 
         # Walk the comptime route table. ``comptime for`` unrolls the
-        # loop: each iteration's pattern segments are comptime values.
+        # loop: each iteration's pattern segments, method, and handler
+        # are comptime values the compiler can inline directly.
         comptime n_routes = len(Self.routes)
         comptime for i in range(n_routes):
-            if matched_idx < 0:
-                comptime r = Self.routes[i]
-                comptime pat_segs = _split_static(r.pattern)
-                var rt_pat = materialize[pat_segs]()
-                var params = Dict[String, String]()
-                var matched = _match_one(seg_in, rt_pat, params)
-                if matched:
-                    if r.method == req.method:
-                        matched_idx = i
-                        matched_params = params^
-                    else:
-                        var m = String(r.method)
-                        if not _contains(allowed, m):
-                            allowed.append(m)
-
-        if matched_idx >= 0:
-            if not self._bound[matched_idx]:
-                raise Error(
-                    "ComptimeRouter: route index "
-                    + String(matched_idx)
-                    + " has no bound handler"
-                )
-            var child = Request(
-                method=req.method,
-                url=req.url,
-                body=req.body.copy(),
-                version=req.version,
-            )
-            child.headers = req.headers.copy()
-            if req.has_params():
-                for kv in req._params[].items():
-                    child._params_mut()[kv.key] = kv.value
-            if len(matched_params) > 0:
-                for kv in matched_params.items():
-                    child._params_mut()[kv.key] = kv.value
-            return self._handlers[matched_idx].serve(child^)
+            comptime r = Self.routes[i]
+            comptime pat_segs = _split_static(r.pattern)
+            var rt_pat = materialize[pat_segs]()
+            var params = Dict[String, String]()
+            if _match_one(seg_in, rt_pat, params):
+                if r.method == req.method:
+                    var child = Request(
+                        method=req.method,
+                        url=req.url,
+                        body=req.body.copy(),
+                        version=req.version,
+                    )
+                    child.headers = req.headers.copy()
+                    if req.has_params():
+                        for kv in req._params[].items():
+                            child._params_mut()[kv.key] = kv.value
+                    if len(params) > 0:
+                        for kv in params.items():
+                            child._params_mut()[kv.key] = kv.value
+                    return r.handler(child^)
+                else:
+                    var m = String(r.method)
+                    if not _contains(allowed, m):
+                        allowed.append(m)
 
         if len(allowed) > 0:
             return _method_not_allowed(allowed)
@@ -364,13 +320,3 @@ def _contains(xs: List[String], x: String) -> Bool:
         if xs[i] == x:
             return True
     return False
-
-
-@always_inline
-def _unset_handler(req: Request) raises -> Response:
-    """Placeholder for an unbound ``ComptimeRouter`` slot. ``serve``
-    guards against reaching this path, but the list has to be
-    pre-filled with *some* ``FnHandler`` because ``FnHandler`` wraps a
-    runtime ``def`` pointer.
-    """
-    raise Error("ComptimeRouter: handler not bound")
