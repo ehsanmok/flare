@@ -31,10 +31,10 @@ def main() raises:
 
 **What you get:**
 
-- **Write** it with the ergonomics of Rust `axum` (trait-based `Handler`, generics with `[H: Handler & Copyable]`, `App[S]` over typed `State[T]`, middleware as a `Handler` wrapping another `Handler`) and the simplicity of Go `net/http` (plain `def` handlers, no `async` / `.await` — the reactor runs under you). Misconfigured servers fail the build via `comptime assert`, not the first request.
-- **Scale** with one parameter. `srv.serve(handler, num_workers=1)` is the single-threaded reactor (kqueue/epoll) — matches single-worker nginx on Linux EPYC and is about 1.10x Go `net/http` on Apple M. `srv.serve(handler, num_workers=N)` with `N >= 2` binds N `SO_REUSEPORT` listeners on N `pthread` workers with optional per-core pinning: **257K req/s at 4 workers, 4.4x linear scaling**. WebSocket XOR masking via SIMD tops **112 GB/s on 1 KB payloads** (14-35x scalar). See [benchmarks](#server-throughput-tfb-plaintext).
-- **Parse** HTTP **7 to 9x faster than the next-fastest Mojo HTTP library** on the same microbenchmarks. Dual-stack DNS with automatic IPv4/IPv6 fallback. RFC 7230 header validation and configurable size limits built in.
-- **Verify** it yourself: **460 tests, 16 fuzz harnesses, over a million fuzz runs, zero known crashes to date**. Every example in [`examples/`](examples/) runs on every CI build. Pre-1.0 — expect rough edges, file them [here](https://github.com/ehsanmok/flare/issues).
+- **Write** it with the ergonomics of Rust `axum` (trait-based `Handler`, generics with `[H: Handler & Copyable]`, `App[S]` over typed `State[T]`, middleware as a `Handler` wrapping another `Handler`, typed extractors — `Path[T, name]`, `Query[T, name]`, `Header[T, name]`, `Json[T]` — with reflective auto-injection so the handler struct's fields *are* its signature) and the simplicity of Go `net/http` (plain `def` handlers, no `async` / `.await` — the reactor runs under you). Misconfigured servers fail the build via `comptime assert`, not the first request.
+- **Scale** with one parameter. `srv.serve(handler, num_workers=1)` is the single-threaded reactor (kqueue/epoll) — matches single-worker nginx on Linux EPYC and is about 1.10x Go `net/http` on Apple M. `srv.serve(handler, num_workers=N)` with `N >= 2` binds N `SO_REUSEPORT` listeners on N `pthread` workers with optional per-core pinning: **257K req/s at 4 workers, 4.4x linear scaling**. For pure-static endpoints, `serve_static(resp)` pre-encodes the wire bytes at startup and `memcpy`s them per request — no parse, no handler, no serialisation. WebSocket XOR masking via SIMD tops **112 GB/s on 1 KB payloads** (14-35x scalar). See [benchmarks](#server-throughput-tfb-plaintext).
+- **Parse** HTTP **7 to 9x faster than the next-fastest Mojo HTTP library** on the same microbenchmarks. SIMD-width-parametric header scanner (`W=32` default, `W=64` opt-in for AVX-512). Dual-stack DNS with automatic IPv4/IPv6 fallback. RFC 7230 header validation and configurable size limits built in.
+- **Verify** it yourself: **540+ tests, 19 fuzz harnesses, over 4 million fuzz runs, zero known crashes to date**. Every example in [`examples/`](examples/) runs on every CI build. Pre-1.0 — expect rough edges, file them [here](https://github.com/ehsanmok/flare/issues).
 
 ## Installation
 
@@ -169,6 +169,108 @@ def main() raises:
 ```
 
 `num_workers=1` (the default) is the single-threaded reactor; `num_workers >= 2` binds N `SO_REUSEPORT` listeners on N `pthread` workers via `flare.runtime.scheduler.Scheduler`. Each worker gets its own reactor; the kernel load-balances accepted connections across workers. `pin_cores=True` (default) pins worker N to core `N % num_cpus` on Linux; it is a no-op on macOS. The upper bound on `num_workers` is 256 (enforced by `Scheduler.start`).
+
+### Typed extractors (axum-style, reflective auto-injection)
+
+Declare the handler's extractor set as the fields of a struct, wrap
+it in `Extracted[H]`, and the adapter reflects on the struct's field
+types at compile time to pull each one from the request before
+calling `handle`. Parse failures become automatic 400 responses; the
+handler is only reached when every field has a value of the right
+type:
+
+```mojo
+from flare.http import (
+    Router, Request, Response, ok, HttpServer,
+    Extracted, HandlerStruct, Path, Query, QueryOpt, Header,
+    ParamInt, ParamString,
+)
+from flare.net import SocketAddr
+
+@fieldwise_init
+struct GetUser(Copyable, Movable, HandlerStruct):
+    var id:    Path[ParamInt, "id"]
+    var page:  QueryOpt[ParamInt, "page"]
+    var auth:  Header[ParamString, "Authorization"]
+
+    def __init__(out self):
+        self.id   = Path[ParamInt, "id"]()
+        self.page = QueryOpt[ParamInt, "page"]()
+        self.auth = Header[ParamString, "Authorization"]()
+
+    def handle(self, req: Request) raises -> Response:
+        return ok("user=" + String(self.id.value.value))
+
+def main() raises:
+    var r = Router()
+    r.get("/users/:id", Extracted[GetUser]())
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^)
+```
+
+Value-constructor extractors (`Path[T, name].extract(req)`) are also
+available for use inside plain `def` handlers. See
+[`examples/19_extractors.mojo`](examples/19_extractors.mojo).
+
+### Comptime route trie
+
+`ComptimeRouter[routes]` takes its route list as a comptime value, so
+segment parsing runs at compile time and the dispatch loop unrolls
+per route — the runtime does zero string-compares on unknown paths,
+and each matched route's handler is a comptime-known index:
+
+```mojo
+from flare.http import (
+    ComptimeRoute, ComptimeRouter, Request, Response, Method, ok, HttpServer,
+)
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response: return ok("home")
+def get_user(req: Request) raises -> Response:
+    return ok("user=" + req.param("id"))
+
+comptime ROUTES: List[ComptimeRoute] = [
+    ComptimeRoute(Method.GET,  "/"),
+    ComptimeRoute(Method.GET,  "/users/:id"),
+    ComptimeRoute(Method.POST, "/users"),
+]
+
+def main() raises:
+    var r = ComptimeRouter[ROUTES]()
+    r.set_handler(0, home)
+    r.set_handler(1, get_user)
+    r.set_handler(2, home)
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^)
+```
+
+Same 404 / 405 contract as the runtime `Router` (cross-checked by a
+500K-run oracle fuzz harness).
+
+### Static responses (`serve_static`)
+
+For endpoints that return the same bytes every time — health checks,
+TFB plaintext, single-URL microservices — `precompute_response`
+builds the full HTTP wire form at startup and `HttpServer.serve_static`
+runs a specialised reactor that skips the parser's
+request-construction + handler-dispatch step entirely:
+
+```mojo
+from flare.http import HttpServer, precompute_response
+from flare.net import SocketAddr
+
+def main() raises:
+    var resp = precompute_response(
+        status=200,
+        content_type="text/plain; charset=utf-8",
+        body="Hello, World!",
+    )
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_static(resp)
+```
+
+Keep-alive and `Connection: close` wire forms are both pre-encoded;
+the reactor picks per-request based on the parsed Connection header.
 
 ### Comptime handler + config
 
@@ -461,7 +563,7 @@ Tasks always run under `default` unless you pass `-e <env>`, e.g. `pixi run -e d
 ### Tests
 
 ```bash
-pixi run tests             # 460 tests + 18 examples
+pixi run tests             # 540+ tests + 21 examples
 
 # Individual layers — core
 pixi run test-net                    # IpAddr, SocketAddr, errors
@@ -493,11 +595,17 @@ pixi run test-thread-ffi             # pthread + CPU pinning FFI
 pixi run test-reuseport              # SO_REUSEPORT helper
 pixi run test-scheduler              # Multicore Scheduler lifecycle
 pixi run test-server-multicore       # HttpServer.serve(..., num_workers=N>=2)
+
+# v0.4.1 Track 2 — comptime leverage
+pixi run test-extractors             # Typed extractors + Extracted[H] (42 tests)
+pixi run test-routes-comptime        # ComptimeRouter dispatch (19 tests)
+pixi run test-static-response        # Pre-encoded static responses (11 tests)
+pixi run test-header-scan            # SIMD header scanner (19 tests)
 ```
 
 ### Examples
 
-Eighteen runnable examples under [`examples/`](examples/), each an end-to-end walk-through of one slice of the public API. Every example is executed as part of `pixi run tests` and on CI, so they stay green with the code.
+Twenty-one runnable examples under [`examples/`](examples/), each an end-to-end walk-through of one slice of the public API. Every example is executed as part of `pixi run tests` and on CI, so they stay green with the code.
 
 | File | What it shows |
 |---|---|
@@ -519,6 +627,9 @@ Eighteen runnable examples under [`examples/`](examples/), each an end-to-end wa
 | [`16_state.mojo`](examples/16_state.mojo) | `App[Counters]` + typed `State[T]` injected into a middleware handler |
 | [`17_multicore.mojo`](examples/17_multicore.mojo) | `HttpServer.serve(..., num_workers=default_worker_count())` |
 | [`18_middleware.mojo`](examples/18_middleware.mojo) | Middleware composition: `Logger` wraps `RequireAuth` wraps `Router` |
+| [`19_extractors.mojo`](examples/19_extractors.mojo) | Typed extractors: `Path[T, name]`, `Query`, `Header`, `Json`, and reflective `Extracted[H]` auto-injection |
+| [`20_comptime_router.mojo`](examples/20_comptime_router.mojo) | `ComptimeRouter[routes]` with comptime segment parsing and per-route dispatch unroll |
+| [`21_static_response.mojo`](examples/21_static_response.mojo) | Pre-encoded `StaticResponse` + `HttpServer.serve_static` fast path |
 
 Run any single example with `pixi run example-<name>` (see the full list in [`pixi.toml`](pixi.toml)).
 
@@ -548,7 +659,7 @@ pixi run bench-parse       # IP parsing + DNS resolution
 
 ### Fuzzing
 
-Powered by [mozz](https://github.com/ehsanmok/mozz). 16 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, encoding, the Router, the reactor / connection state machine, and the multicore scheduler.
+Powered by [mozz](https://github.com/ehsanmok/mozz). 19 harnesses covering HTTP parsing, WebSocket frames, URL parsing, cookies, headers, auth, encoding, the Router, the reactor / connection state machine, the multicore scheduler, typed extractors, the comptime route trie, and the SIMD header scanner.
 
 ```bash
 pixi run --environment fuzz fuzz-http-server             # 500K runs
