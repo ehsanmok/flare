@@ -82,25 +82,11 @@ def main() raises:
 
 `post` with a String body sets `Content-Type: application/json` automatically.
 
-### HTTP server
+The server side of the Quick Start is a walk-through: each section adds one new concept on top of the last. The headline example up top is the end state.
 
-The simplest server: one function, one port. For anything beyond a single endpoint, skip to the Router section below.
+### Routing: `Router`
 
-```mojo
-from flare.http import HttpServer, Request, Response, ok
-from flare.net import SocketAddr
-
-def hello(req: Request) raises -> Response:
-    return ok("hello")
-
-def main() raises:
-    var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve(hello)
-```
-
-One event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, a hashed timing wheel for idle timeouts. Same model as nginx, no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable size and timeout limits are on by default.
-
-### Routing with path parameters
+One event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, a hashed timing wheel for idle timeouts. Same model as nginx, no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable size and timeout limits are on by default. Routes carry path parameters (`:name`) and methods; unknown paths return 404, known paths called with the wrong method return 405 with an auto-generated `Allow:` header.
 
 ```mojo
 from flare.http import Router, Request, Response, ok, HttpServer
@@ -112,21 +98,93 @@ def home(req: Request) raises -> Response:
 def get_user(req: Request) raises -> Response:
     return ok("user " + req.param("id"))
 
+def create_user(req: Request) raises -> Response:
+    return ok("created")
+
 def main() raises:
     var r = Router()
     r.get("/",          home)
     r.get("/users/:id", get_user)
-    r.post("/users",    home)
+    r.post("/users",    create_user)
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(r^)
 ```
 
-Unknown paths return 404; known paths called with the wrong method return 405 with an auto-generated `Allow:` header.
+### Typed inputs: `Extracted[H]`
 
-### App with typed state
+Stringly-typed `req.param("id")` works, but if the handler really needs an `Int`, flare reflects on a handler struct's fields at compile time and fills each one from the request before calling `handle`. Parse failures become automatic 400 responses; the handler only runs when every field has a value of the right type.
 
-`App[S, H]` bundles request-scoped state onto a handler. A wrapping middleware holds the state snapshot and decorates every response:
+```mojo
+from flare.http import (
+    Router, Request, Response, ok, HttpServer,
+    Extracted, HandlerStruct, Path, QueryOpt, Header,
+    ParamInt, ParamString,
+)
+from flare.net import SocketAddr
+
+@fieldwise_init
+struct GetUser(Copyable, Movable, HandlerStruct):
+    var id:    Path[ParamInt, "id"]
+    var page:  QueryOpt[ParamInt, "page"]
+    var auth:  Header[ParamString, "Authorization"]
+
+    def __init__(out self):
+        self.id   = Path[ParamInt, "id"]()
+        self.page = QueryOpt[ParamInt, "page"]()
+        self.auth = Header[ParamString, "Authorization"]()
+
+    def handle(self, req: Request) raises -> Response:
+        return ok("user=" + String(self.id.value.value))
+
+def main() raises:
+    var r = Router()
+    r.get("/users/:id", Extracted[GetUser]())
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^)
+```
+
+Value-constructor extractors (`Path[T, name].extract(req)`) are also available for use inside plain `def` handlers when a full struct is overkill. See [`examples/19_extractors.mojo`](examples/19_extractors.mojo).
+
+### Static route tables: `ComptimeRouter`
+
+Same routing surface as `Router`, but the route list is a compile-time value. Segment parsing happens at build time and the dispatch loop unrolls per route, so the runtime does zero string-compares on unknown paths.
+
+```mojo
+from flare.http import (
+    ComptimeRoute, ComptimeRouter, Request, Response, Method, ok, HttpServer,
+)
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+def get_user(req: Request) raises -> Response:
+    return ok("user=" + req.param("id"))
+
+def create_user(req: Request) raises -> Response:
+    return ok("created")
+
+comptime ROUTES: List[ComptimeRoute] = [
+    ComptimeRoute(Method.GET,  "/"),
+    ComptimeRoute(Method.GET,  "/users/:id"),
+    ComptimeRoute(Method.POST, "/users"),
+]
+
+def main() raises:
+    var r = ComptimeRouter[ROUTES]()
+    r.set_handler(0, home)
+    r.set_handler(1, get_user)
+    r.set_handler(2, create_user)
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^)
+```
+
+A 500K-run oracle fuzz harness cross-checks that `ComptimeRouter` and `Router` agree on every status code for every path.
+
+### Shared state and middleware: `App[S]`
+
+`App[S, H]` bundles application-scoped state onto a handler. A wrapping middleware holds the state snapshot and decorates every response. Middleware is itself a `Handler` that holds another `Handler`, so you stack layers by nesting constructors, no callback chain to thread through.
 
 ```mojo
 from flare.http import App, Router, Request, Response, Handler, State, ok, HttpServer
@@ -159,13 +217,16 @@ def main() raises:
     srv.serve(WithHits(inner=app^, snapshot=view^))
 ```
 
-Every response now carries `X-Hits: 37`. Because middleware is just a `Handler` holding another `Handler`, you stack layers by nesting constructors. [`examples/18_middleware.mojo`](examples/18_middleware.mojo) shows a five-layer production pipeline (RequestID → Logger → Timing → Recover → RequireAuth → Router); [`examples/16_state.mojo`](examples/16_state.mojo) is this example as a full runnable file.
+Every response now carries `X-Hits: 37`. [`examples/18_middleware.mojo`](examples/18_middleware.mojo) stacks a five-layer pipeline (RequestID → Logger → Timing → Recover → RequireAuth → Router) on the same pattern.
 
-### Multicore (thread-per-core)
+### Scale knob: `num_workers`
+
+Every server snippet above takes an optional `num_workers`. At `1` (the default) it's the single-threaded reactor. Set it to `default_worker_count()` and flare binds `N` `SO_REUSEPORT` listeners across `N` pthread workers with per-core pinning on Linux. The handler type is unchanged; the kernel load-balances accepted connections.
 
 ```mojo
 from flare.http import HttpServer, Router, Request, Response, ok
 from flare.net import SocketAddr
+from flare.runtime import default_worker_count
 
 def hello(req: Request) raises -> Response:
     return ok("hello")
@@ -174,94 +235,12 @@ def main() raises:
     var r = Router()
     r.get("/", hello)
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve(r^, num_workers=4)
+    srv.serve(r^, num_workers=default_worker_count())
 ```
 
-`num_workers=1` (the default) is the single-threaded reactor; `num_workers >= 2` binds N `SO_REUSEPORT` listeners on N `pthread` workers via `flare.runtime.scheduler.Scheduler`. Each worker gets its own reactor; the kernel load-balances accepted connections across workers. `pin_cores=True` (default) pins worker N to core `N % num_cpus` on Linux; it is a no-op on macOS. The upper bound on `num_workers` is 256 (enforced by `Scheduler.start`).
+`pin_cores=True` (default) pins worker N to core `N % num_cpus()` on Linux and is a no-op on macOS. Upper bound on `num_workers` is 256 (enforced by `Scheduler.start`).
 
-### Typed extractors (axum-style, reflective auto-injection)
-
-Declare the handler's extractor set as the fields of a struct, wrap
-it in `Extracted[H]`, and the adapter reflects on the struct's field
-types at compile time to pull each one from the request before
-calling `handle`. Parse failures become automatic 400 responses; the
-handler is only reached when every field has a value of the right
-type:
-
-```mojo
-from flare.http import (
-    Router, Request, Response, ok, HttpServer,
-    Extracted, HandlerStruct, Path, Query, QueryOpt, Header,
-    ParamInt, ParamString,
-)
-from flare.net import SocketAddr
-
-@fieldwise_init
-struct GetUser(Copyable, Movable, HandlerStruct):
-    var id:    Path[ParamInt, "id"]
-    var page:  QueryOpt[ParamInt, "page"]
-    var auth:  Header[ParamString, "Authorization"]
-
-    def __init__(out self):
-        self.id   = Path[ParamInt, "id"]()
-        self.page = QueryOpt[ParamInt, "page"]()
-        self.auth = Header[ParamString, "Authorization"]()
-
-    def handle(self, req: Request) raises -> Response:
-        return ok("user=" + String(self.id.value.value))
-
-def main() raises:
-    var r = Router()
-    r.get("/users/:id", Extracted[GetUser]())
-    var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve(r^)
-```
-
-Value-constructor extractors (`Path[T, name].extract(req)`) are also
-available for use inside plain `def` handlers. See
-[`examples/19_extractors.mojo`](examples/19_extractors.mojo).
-
-### Comptime route trie
-
-`ComptimeRouter[routes]` takes its route list as a comptime value, so
-segment parsing runs at compile time and the dispatch loop unrolls
-per route — the runtime does zero string-compares on unknown paths,
-and each matched route's handler is a comptime-known index:
-
-```mojo
-from flare.http import (
-    ComptimeRoute, ComptimeRouter, Request, Response, Method, ok, HttpServer,
-)
-from flare.net import SocketAddr
-
-def home(req: Request) raises -> Response:
-    return ok("home")
-
-def get_user(req: Request) raises -> Response:
-    return ok("user=" + req.param("id"))
-
-def create_user(req: Request) raises -> Response:
-    return ok("created")
-
-comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET,  "/"),
-    ComptimeRoute(Method.GET,  "/users/:id"),
-    ComptimeRoute(Method.POST, "/users"),
-]
-
-def main() raises:
-    var r = ComptimeRouter[ROUTES]()
-    r.set_handler(0, home)
-    r.set_handler(1, get_user)
-    r.set_handler(2, create_user)
-    var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve(r^)
-```
-
-Same 404 / 405 contract as the runtime `Router` (cross-checked by a
-500K-run oracle fuzz harness).
-
-### Static responses (`serve_static`)
+### Fixed-body endpoints: `serve_static`
 
 For endpoints that return the same bytes every time — health checks,
 TFB plaintext, single-URL microservices — `precompute_response`
