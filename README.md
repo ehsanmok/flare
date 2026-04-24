@@ -84,24 +84,21 @@ def main() raises:
 
 ### HTTP server
 
+The simplest server: one function, one port. For anything beyond a single endpoint, skip to the Router section below.
+
 ```mojo
-from flare.http import HttpServer, Request, Response, ok, ok_json, not_found
+from flare.http import HttpServer, Request, Response, ok
 from flare.net import SocketAddr
 
-def handler(req: Request) raises -> Response:
-    if req.url == "/":
-        return ok("hello")
-    if req.url == "/data":
-        var body = req.json()
-        return ok_json('{"received": true}')
-    return not_found(req.url)
+def hello(req: Request) raises -> Response:
+    return ok("hello")
 
 def main() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve(handler)
+    srv.serve(hello)
 ```
 
-The server runs one event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, and a hashed timing wheel for idle timeouts. Same model as nginx: no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable limits on header, body, and URI size, plus per-connection idle and write timeouts, are all handled for you.
+One event loop (kqueue on macOS, epoll on Linux), non-blocking sockets, a per-connection state machine, a hashed timing wheel for idle timeouts. Same model as nginx, no thread per connection. HTTP/1.1 keep-alive, RFC 7230 header validation, and configurable size and timeout limits are on by default.
 
 ### Routing with path parameters
 
@@ -129,8 +126,10 @@ Unknown paths return 404; known paths called with the wrong method return 405 wi
 
 ### App with typed state
 
+`App[S, H]` bundles request-scoped state onto a handler. A wrapping middleware holds the state snapshot and decorates every response:
+
 ```mojo
-from flare.http import App, Router, Request, Response, ok, HttpServer
+from flare.http import App, Router, Request, Response, Handler, State, ok, HttpServer
 from flare.net import SocketAddr
 
 @fieldwise_init
@@ -140,16 +139,27 @@ struct Counters(Copyable, Movable):
 def home(req: Request) raises -> Response:
     return ok("home")
 
+@fieldwise_init
+struct WithHits[Inner: Handler](Handler):
+    var inner:    Self.Inner
+    var snapshot: State[Counters]
+
+    def serve(self, req: Request) raises -> Response:
+        var resp = self.inner.serve(req)
+        resp.headers.set("X-Hits", String(self.snapshot.get().hits))
+        return resp^
+
 def main() raises:
     var router = Router()
     router.get("/", home)
-    var app = App(state=Counters(hits=0), handler=router^)
+    var app  = App(state=Counters(hits=37), handler=router^)
+    var view = app.state_view()
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve(app^)
+    srv.serve(WithHits(inner=app^, snapshot=view^))
 ```
 
-Any `Handler` can be composed with middleware wrappers; middleware is just a `Handler` that holds an inner `Handler`. See [`examples/18_middleware.mojo`](examples/18_middleware.mojo) for a three-layer pipeline (`Logger` wrapping `RequireAuth` wrapping a `Router`) and [`examples/16_state.mojo`](examples/16_state.mojo) for a middleware layer that reads application state via `State[T]`.
+Every response now carries `X-Hits: 37`. Because middleware is just a `Handler` holding another `Handler`, you stack layers by nesting constructors. [`examples/18_middleware.mojo`](examples/18_middleware.mojo) shows a five-layer production pipeline (RequestID → Logger → Timing → Recover → RequireAuth → Router); [`examples/16_state.mojo`](examples/16_state.mojo) is this example as a full runnable file.
 
 ### Multicore (thread-per-core)
 
@@ -224,9 +234,14 @@ from flare.http import (
 )
 from flare.net import SocketAddr
 
-def home(req: Request) raises -> Response: return ok("home")
+def home(req: Request) raises -> Response:
+    return ok("home")
+
 def get_user(req: Request) raises -> Response:
     return ok("user=" + req.param("id"))
+
+def create_user(req: Request) raises -> Response:
+    return ok("created")
 
 comptime ROUTES: List[ComptimeRoute] = [
     ComptimeRoute(Method.GET,  "/"),
@@ -238,7 +253,7 @@ def main() raises:
     var r = ComptimeRouter[ROUTES]()
     r.set_handler(0, home)
     r.set_handler(1, get_user)
-    r.set_handler(2, home)
+    r.set_handler(2, create_user)
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(r^)
 ```
