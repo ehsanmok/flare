@@ -45,6 +45,7 @@ from flare.http.server import (
     _status_reason,
     _append_str,
 )
+from flare.http.static_response import StaticResponse
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
 from flare.net.error import NetworkError
 from flare.tcp import TcpStream, TcpListener
@@ -335,6 +336,110 @@ struct ConnHandle(Movable):
         self._serialize_response(resp^, not close_after)
         return self._transition_to_writing()
 
+    def on_readable_static(
+        mut self, resp: StaticResponse, config: ServerConfig
+    ) raises -> StepResult:
+        """Static-response variant of ``on_readable``.
+
+        Reads as much as the non-blocking socket makes available per
+        call, scans for the end-of-headers marker, discards the
+        declared body bytes (if any), and queues the pre-encoded
+        ``StaticResponse`` bytes into ``write_buf``. The parser never
+        constructs a ``Request``; no handler is called.
+
+        Everything else (keep-alive book-keeping, HTTP/1.0 close
+        semantics, ``max_keepalive_requests`` cap, Connection header
+        inspection, peer-close / EAGAIN handling, pipelined-request
+        compaction of ``read_buf``) mirrors ``on_readable`` byte-for-byte
+        so state machine invariants remain identical.
+        """
+        if self.state != STATE_READING:
+            return StepResult(
+                want_read=False, want_write=self.state == STATE_WRITING
+            )
+
+        var chunk = stack_allocation[8192, UInt8]()
+        while True:
+            var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
+            if got > 0:
+                var old_len = len(self.read_buf)
+                var got_int = Int(got)
+                self.read_buf.resize(old_len + got_int, UInt8(0))
+                var dst = self.read_buf.unsafe_ptr() + old_len
+                memcpy(dest=dst, src=chunk, count=got_int)
+                if (
+                    len(self.read_buf)
+                    > config.max_header_size + config.max_body_size
+                ):
+                    self._queue_error(413, "Content Too Large")
+                    return self._transition_to_writing()
+            elif got == 0:
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    break
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+
+        # Headers still incomplete?
+        if self.headers_end < 0:
+            var end = _find_crlfcrlf(self.read_buf, 0)
+            if end < 0:
+                if len(self.read_buf) > config.max_header_size:
+                    self._queue_error(431, "Request Header Fields Too Large")
+                    return self._transition_to_writing()
+                return StepResult(
+                    want_read=True,
+                    want_write=False,
+                    idle_timeout_ms=config.idle_timeout_ms,
+                )
+            self.headers_end = end
+            self.content_length = _scan_content_length(
+                self.read_buf, self.headers_end
+            )
+            if self.content_length > config.max_body_size:
+                self._queue_error(413, "Content Too Large")
+                return self._transition_to_writing()
+            self.body_total = self.headers_end + self.content_length
+
+        # Body still incomplete?
+        if len(self.read_buf) < self.body_total:
+            return StepResult(
+                want_read=True,
+                want_write=False,
+                idle_timeout_ms=config.idle_timeout_ms,
+            )
+
+        # Inspect Connection header + HTTP/1.0 semantics on the raw
+        # header bytes without building a Request object. Cheap scan
+        # over the header region only.
+        var close_after = _wants_close(self.read_buf, self.headers_end)
+        self.keepalive_count += 1
+        if self.keepalive_count >= config.max_keepalive_requests:
+            close_after = True
+        if not config.keep_alive:
+            close_after = True
+        self.should_close = close_after
+
+        # Compact read buffer before writing the canned response.
+        if self.body_total > 0 and self.body_total <= len(self.read_buf):
+            var leftover = List[UInt8](
+                capacity=len(self.read_buf) - self.body_total
+            )
+            for i in range(self.body_total, len(self.read_buf)):
+                leftover.append(self.read_buf[i])
+            self.read_buf = leftover^
+        self.headers_end = -1
+        self.content_length = 0
+        self.body_total = -1
+
+        self._serialize_static(resp, not close_after)
+        return self._transition_to_writing()
+
     def on_writable(mut self, config: ServerConfig) raises -> StepResult:
         """Drive the state machine on a writable event.
 
@@ -444,6 +549,30 @@ struct ConnHandle(Movable):
         except:
             pass
         self._serialize_response(resp^, False)
+
+    def _serialize_static(
+        mut self, resp: StaticResponse, keep_alive: Bool
+    ) -> None:
+        """Queue a pre-encoded static response into ``write_buf``.
+
+        Reuses the buffer's existing capacity across requests (same
+        pattern as ``_serialize_response``) and pulls either the
+        keep-alive or close variant of the pre-encoded bytes depending
+        on ``keep_alive``.
+        """
+        self.write_buf.clear()
+        self.write_pos = 0
+        var src_bytes = resp.keepalive_bytes if keep_alive else resp.close_bytes
+        var n = len(src_bytes)
+        if self.write_buf.capacity < n:
+            self.write_buf.reserve(n)
+        self.write_buf.resize(n, UInt8(0))
+        memcpy(
+            dest=self.write_buf.unsafe_ptr(),
+            src=src_bytes.unsafe_ptr(),
+            count=n,
+        )
+        self.write_pos = 0
 
     def _serialize_response(mut self, resp: Response, keep_alive: Bool) -> None:
         """Serialise ``resp`` into ``write_buf`` ready to be sent."""
@@ -558,6 +687,100 @@ def _is_content_length(k: String) -> Bool:
         if c != t[i]:
             return False
     return True
+
+
+def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
+    """Scan the raw header block for HTTP/1.0 + ``Connection:`` signals
+    that mean this connection should close after the response.
+
+    Returns True when the request line declares HTTP/1.0 without a
+    ``Connection: keep-alive`` override, or when any ``Connection:``
+    header value equals ``close`` (case-insensitive).
+
+    Operates directly on bytes so the static fast path doesn't need to
+    construct a ``Request`` / ``HeaderMap``.
+    """
+    var n = header_end
+    var version_is_10 = False
+    # 1. Request line up to the first CRLF.
+    var first_eol = -1
+    for i in range(n):
+        if data[i] == 10:  # LF
+            first_eol = i
+            break
+    if first_eol < 0:
+        first_eol = n
+    # Look for "HTTP/1.0" on the request line.
+    var http_needle = "HTTP/1.0"
+    var hp = http_needle.unsafe_ptr()
+    var hn = http_needle.byte_length()
+    for i in range(first_eol - hn + 1):
+        if i < 0:
+            break
+        var match = True
+        for j in range(hn):
+            if data[i + j] != hp[j]:
+                match = False
+                break
+        if match:
+            version_is_10 = True
+            break
+    # 2. Connection header. Case-insensitive name match, value compared
+    #    against "close" and "keep-alive" (lowercase).
+    var needle = "connection:"
+    var np = needle.unsafe_ptr()
+    var nn = needle.byte_length()
+    var conn_close = False
+    var conn_keepalive = False
+    var i = first_eol + 1
+    while i < n - nn:
+        var found = True
+        for j in range(nn):
+            var c = data[i + j]
+            if c >= 65 and c <= 90:
+                c = c + 32
+            if c != np[j]:
+                found = False
+                break
+        if found:
+            var pos = i + nn
+            while pos < n and (data[pos] == 32 or data[pos] == 9):
+                pos += 1
+            # Compare value until CR, LF, or end-of-header-block.
+            var v_end = pos
+            while v_end < n and data[v_end] != 13 and data[v_end] != 10:
+                v_end += 1
+            # Lowercase slice compare against "close" and "keep-alive".
+            var val_len = v_end - pos
+            if val_len == 5:
+                var ck = True
+                for j in range(5):
+                    var c = data[pos + j]
+                    if c >= 65 and c <= 90:
+                        c = c + 32
+                    if c != UInt8(ord("close"[j])):
+                        ck = False
+                        break
+                if ck:
+                    conn_close = True
+            if val_len == 10:
+                var ck2 = True
+                for j in range(10):
+                    var c = data[pos + j]
+                    if c >= 65 and c <= 90:
+                        c = c + 32
+                    if c != UInt8(ord("keep-alive"[j])):
+                        ck2 = False
+                        break
+                if ck2:
+                    conn_keepalive = True
+            break
+        i += 1
+    if conn_close:
+        return True
+    if version_is_10 and not conn_keepalive:
+        return True
+    return False
 
 
 @always_inline
@@ -834,6 +1057,111 @@ def run_reactor_loop[
                 _cleanup_conn(fd, conns, timers, reactor)
 
     # Graceful shutdown: close all active connections.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn(leftover[i], conns, timers, reactor)
+
+
+def run_reactor_loop_static(
+    mut listener: TcpListener,
+    config: ServerConfig,
+    resp: StaticResponse,
+    ref stopping: Bool,
+) raises:
+    """Reactor loop specialised for a pre-encoded ``StaticResponse``.
+
+    Mirrors ``run_reactor_loop`` but drives each connection through
+    ``ConnHandle.on_readable_static(resp, config)`` instead of the
+    parse-and-dispatch path. The canned bytes are ``memcpy``d into
+    ``write_buf`` per request — no ``Request`` construction, no
+    handler call, no response serialisation.
+
+    Args:
+        listener:  Bound and listening ``TcpListener`` (caller owns it;
+            we borrow for accept / fd access).
+        config:    Server configuration.
+        resp:      Pre-encoded static response.
+        stopping:  Checked on every poll iteration; when True the loop
+            exits and in-flight connections are closed.
+    """
+    listener._socket.set_nonblocking(True)
+    var listener_fd = listener._socket.fd
+
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            if fd_tok in conns:
+                _cleanup_conn(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop(listener, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                var last_step = StepResult()
+                if evt.is_readable():
+                    last_step = ch_ptr[].on_readable_static(resp, config)
+                    step_done = last_step.done
+                    var cycles = 0
+                    while (not step_done) and cycles < 3:
+                        cycles += 1
+                        if (
+                            last_step.want_write
+                            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                        ):
+                            last_step = ch_ptr[].on_writable(config)
+                            step_done = last_step.done
+                        elif (
+                            last_step.want_read
+                            and len(ch_ptr[].read_buf) > 0
+                            and ch_ptr[].state == STATE_READING
+                        ):
+                            last_step = ch_ptr[].on_readable_static(
+                                resp, config
+                            )
+                            step_done = last_step.done
+                        else:
+                            break
+                elif evt.is_writable():
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+                if not step_done:
+                    _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn(fd, conns, timers, reactor)
+
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)

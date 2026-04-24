@@ -16,6 +16,7 @@ from .handler import Handler
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
+from .static_response import StaticResponse
 from ..net import SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 
@@ -341,6 +342,40 @@ struct HttpServer(Movable):
             runtime_config,
             runtime_handler,
             self._stopping,
+        )
+
+    def serve_static(mut self, resp: StaticResponse) raises:
+        """Run the reactor loop in static-response mode.
+
+        Every parsed request — regardless of path, method, or body — is
+        answered with the pre-encoded ``resp`` bytes. The reactor:
+
+        1. Reads until the end of the headers (``\\r\\n\\r\\n``).
+        2. Consumes the declared ``Content-Length`` bytes and discards
+           them (no ``Request`` struct, no handler call).
+        3. Writes ``resp.keepalive_bytes`` or ``resp.close_bytes`` into
+           the write queue in a single ``memcpy``, then returns the
+           socket to readable-interest for the next pipelined request.
+
+        Intended for health-check endpoints, TFB plaintext benchmarks,
+        and any workload where the response body is genuinely static.
+        For heterogeneous routes that happen to share static bodies,
+        combine ``serve_static`` under a reverse-proxy router upstream
+        of the flare process.
+
+        Args:
+            resp: Pre-encoded static response from
+                ``precompute_response(...)``.
+
+        Raises:
+            NetworkError: On fatal listener errors; per-connection
+                errors close the offending connection silently.
+        """
+        from ._server_reactor_impl import run_reactor_loop_static
+
+        self._stopping = False
+        run_reactor_loop_static(
+            self._listener, self.config, resp, self._stopping
         )
 
     def local_addr(self) -> SocketAddr:

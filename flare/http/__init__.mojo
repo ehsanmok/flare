@@ -50,6 +50,12 @@ from flare.http import (
     time and the dispatch loop unrolls per route. Same 404 / 405
     contract as ``Router``, parametric over a comptime
     ``List[ComptimeRoute]``.
+- `StaticResponse`, `precompute_response`
+  — Pre-encoded literal HTTP responses. Pair with
+    ``HttpServer.serve_static(resp)`` for the fastest possible fast
+    path: the reactor parses requests only far enough to find the
+    terminator, then ``memcpy``s the canned bytes into the write
+    queue. No ``Request``, no handler, no response serialisation.
 - `get`, `post`, `put`, `delete`, `head` — Module-level one-shot helpers.
   `post` and `put` accept a `String` (JSON auto-set), `json.Value`
   (auto-serialised), or `List[UInt8]` (raw bytes).
@@ -125,6 +131,7 @@ from .server import (
     internal_error,
     redirect,
 )
+from .static_response import StaticResponse, precompute_response
 from .cookie import (
     Cookie,
     CookieJar,
