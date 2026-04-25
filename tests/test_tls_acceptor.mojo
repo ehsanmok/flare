@@ -20,6 +20,7 @@ from std.testing import (
     assert_equal,
     assert_true,
     assert_false,
+    assert_raises,
     TestSuite,
 )
 
@@ -73,6 +74,64 @@ def test_protocol_constants_distinct() raises:
     assert_true(TLS_PROTOCOL_TLS12 != TLS_PROTOCOL_TLS13)
     # Sanity: TLS 1.2 < TLS 1.3 numerically (matches OpenSSL).
     assert_true(TLS_PROTOCOL_TLS12 < TLS_PROTOCOL_TLS13)
+
+
+# ── mTLS validation (Track 5.4) ────────────────────────────────────────────
+
+
+def test_mtls_requires_ca_bundle() raises:
+    """``require_client_cert=True`` without a ``client_ca_bundle``
+    raises at construction time. mTLS without trust anchors is
+    meaningless — the verify callback would have nothing to
+    check against. Failing at construction time closes the
+    Track 5.4 misconfiguration foot-gun.
+    """
+    with assert_raises():
+        _ = TlsServerConfig(
+            cert_file="/c.pem",
+            key_file="/k.pem",
+            require_client_cert=True,
+            # client_ca_bundle defaults to empty string.
+        )
+
+
+def test_mtls_requires_ca_bundle_explicit_empty() raises:
+    """Explicit empty string for ``client_ca_bundle`` is also a
+    misconfiguration."""
+    with assert_raises():
+        _ = TlsServerConfig(
+            cert_file="/c.pem",
+            key_file="/k.pem",
+            require_client_cert=True,
+            client_ca_bundle="",
+        )
+
+
+def test_mtls_with_ca_bundle_succeeds() raises:
+    var cfg = TlsServerConfig(
+        cert_file="/c.pem",
+        key_file="/k.pem",
+        require_client_cert=True,
+        client_ca_bundle="/etc/ca.pem",
+    )
+    assert_true(cfg.require_client_cert)
+    assert_equal(cfg.client_ca_bundle, "/etc/ca.pem")
+
+
+def test_mtls_off_ignores_ca_bundle() raises:
+    """``require_client_cert=False`` is allowed regardless of
+    whether a client CA bundle was provided — the bundle is
+    just unused."""
+    var cfg1 = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+    assert_false(cfg1.require_client_cert)
+
+    var cfg2 = TlsServerConfig(
+        cert_file="/c.pem",
+        key_file="/k.pem",
+        require_client_cert=False,
+        client_ca_bundle="/etc/ca.pem",
+    )
+    assert_false(cfg2.require_client_cert)
 
 
 # ── TlsInfo ────────────────────────────────────────────────────────────────

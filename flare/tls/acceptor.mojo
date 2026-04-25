@@ -146,7 +146,24 @@ struct TlsServerConfig(Copyable, Movable):
         require_client_cert: Bool = False,
         client_ca_bundle: String = "",
         min_protocol: Int = TLS_PROTOCOL_TLS12,
-    ):
+    ) raises:
+        """Construct the config; validates inter-field invariants.
+
+        Raises:
+            Error: When ``require_client_cert=True`` is set
+                without a ``client_ca_bundle`` (mTLS without trust
+                anchors is meaningless — the verify callback
+                would have nothing to verify against). Closes the
+                Track 5.4 misconfiguration foot-gun by failing at
+                construction time rather than at handshake time.
+        """
+        if require_client_cert and client_ca_bundle == "":
+            raise Error(
+                "TlsServerConfig: require_client_cert=True needs a"
+                " non-empty client_ca_bundle (path to PEM trust"
+                " anchors); mTLS without trust anchors is"
+                " meaningless"
+            )
         self.cert_file = cert_file
         self.key_file = key_file
         self.alpn = alpn^
