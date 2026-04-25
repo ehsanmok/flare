@@ -1,0 +1,22 @@
+# slow_clients — 256 connections each sending 1 byte / 100 ms
+# (v0.5.0 Step 2 / Track 6.2).
+#
+# Exercises the read-body-deadline path that Step 1 wired through
+# the cancel-aware reactor: a body trickle below the idle
+# threshold but above the read_body_timeout_ms threshold should
+# trigger ``Cancel.TIMEOUT`` and free the worker slot. The
+# expectation is "256 connections + slow trickle does not hold
+# 256 worker slots indefinitely" — the body-read deadline
+# enforcement is the v0.4.x slow-body-DoS fix.
+name: slow_clients
+tool: wrk
+wrk_threads: 1
+wrk_connections: 256
+wrk_duration_seconds: 30
+warmup_seconds: 5
+runs: 3
+quiet_seconds: 5
+stdev_pct_gate: 10.0
+# wrk Lua script that sends 1 byte per request every 100ms.
+# Lives at benchmark/scripts/wrk_slow_clients.lua.
+wrk_script: benchmark/scripts/wrk_slow_clients.lua

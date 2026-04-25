@@ -1,0 +1,29 @@
+# downloads — GETs returning streamed bodies of 4KB / 64KB / 1MB /
+# 16MB (v0.5.0 Step 2 / Track 6.2).
+#
+# Exercises the response-body write path. The 1MB and 16MB cases
+# push against the v0.4.x "buffer the whole response before send"
+# behaviour and become the headline regression target for the
+# streaming-body reactor adoption (Track 4 reactor follow-up):
+# the gate is "100MB body without a 100MB allocation per
+# concurrent client."
+#
+# Until the reactor adopts the streaming write loop, the
+# v0.4.x buffered path runs and produces the regression
+# baseline.
+name: downloads
+tool: wrk
+wrk_threads: 1
+wrk_connections: 16
+wrk_duration_seconds: 30
+warmup_seconds: 10
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 5.0
+# Each wrk_script in the list maps to a body size; the
+# orchestrator runs each separately.
+wrk_scripts:
+  - benchmark/scripts/wrk_download_4kb.lua
+  - benchmark/scripts/wrk_download_64kb.lua
+  - benchmark/scripts/wrk_download_1mb.lua
+  - benchmark/scripts/wrk_download_16mb.lua

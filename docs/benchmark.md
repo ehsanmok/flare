@@ -63,18 +63,32 @@ The v0.5 redesign is therefore three changes:
      Catches regressions in flare's keep-alive book-keeping and
      close-after disposition that pure keep-alive loads can't
      exercise.
-   - `uploads` (POSTs of 4 KB / 64 KB / 1 MB / 16 MB) — needs the
-     streaming-body work; **lands in v0.5.0 Step 2**.
-   - `downloads` (GETs returning 4 KB / 64 KB / 1 MB / 16 MB
-     streamed bodies) — needs the streaming-body work; **lands in
-     v0.5.0 Step 2**.
-   - `slow-clients` (256 connections, each sending 1 byte / 100 ms,
-     server holds) — exercises the
+   - `uploads` (POSTs of 4 KB / 64 KB / 1 MB / 16 MB,
+     [`uploads.yaml`](../benchmark/configs/uploads.yaml)) —
+     **YAML + Lua scripts shipped in v0.5.0 Step 2.** The 1 MB
+     and 16 MB cases close the design-0.5 §1.1 "≥ 4x throughput
+     vs the v0.4.x copy path" gate once the reactor adopts the
+     `RequestView` zero-copy parser (follow-up).
+   - `downloads` (GETs returning 4 KB / 64 KB / 1 MB / 16 MB,
+     [`downloads.yaml`](../benchmark/configs/downloads.yaml)) —
+     **YAML + Lua scripts shipped in v0.5.0 Step 2.** Headline
+     target for the streaming-body reactor adoption (Track 4
+     follow-up): "no per-client allocation proportional to
+     body size." The Go `net/http` baseline gains corresponding
+     `/4kb` / `/64kb` / `/1mb` / `/16mb` routes so the
+     comparison is apples-to-apples.
+   - `slow-clients` (256 connections, each trickling 1 byte /
+     100 ms,
+     [`slow_clients.yaml`](../benchmark/configs/slow_clients.yaml))
+     — **YAML + Lua shipped in v0.5.0 Step 2.** Validates the
      `read_body_timeout_ms` deadline that landed in v0.5.0
-     Step 1; the harness version of the workload sits behind the
-     same `wrk2` repin as above.
-   - `churn` (10 K open / send / close cycles per second) — same
-     story; harness lands with the env repin.
+     Step 1 reclaims worker slots from slow-body DoS attempts.
+   - `churn` (10 K open / send / close cycles per second,
+     [`churn.yaml`](../benchmark/configs/churn.yaml)) —
+     **YAML + Lua shipped in v0.5.0 Step 2.** Stresses
+     accept() throughput, the `Pool[ConnHandle]` allocator
+     (Step 2 / S2.4), and the kernel's ephemeral-port +
+     TIME_WAIT bookkeeping.
 
 The Linux throughput table below stays as the v0.4.1 wrk baseline
 so the release-to-release regression check has a stable signal.

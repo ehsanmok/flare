@@ -1,0 +1,26 @@
+# churn — 10K open / send / close cycles per second
+# (v0.5.0 Step 2 / Track 6.2).
+#
+# Each request opens a new TCP connection, sends a single GET,
+# reads the response, closes. No keep-alive. Stresses
+# accept() throughput, the per-connection ``ConnHandle`` pool
+# (Track 1.2 / S2.4), and the kernel's ephemeral port +
+# TIME_WAIT bookkeeping.
+#
+# The 10K/s target is the design-0.5 §6.2 number for a
+# production-shape Linux box; macOS at this rate is bounded by
+# kqueue's per-socket overhead and the ulimit defaults.
+name: churn
+tool: wrk
+wrk_threads: 4
+wrk_connections: 256
+wrk_duration_seconds: 30
+warmup_seconds: 5
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 5.0
+# wrk Lua script that explicitly closes the connection after
+# every request (sets ``Connection: close`` so the server
+# closes; wrk reopens for the next request). Lives at
+# benchmark/scripts/wrk_churn.lua.
+wrk_script: benchmark/scripts/wrk_churn.lua

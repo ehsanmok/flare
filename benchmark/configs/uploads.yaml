@@ -1,0 +1,30 @@
+# uploads — POSTs of varying body sizes (4KB / 64KB / 1MB / 16MB)
+# (v0.5.0 Step 2 / Track 6.2).
+#
+# Drives the cancel-aware reactor's body-read path with realistic
+# upload payloads. The 1MB and 16MB cases stress the
+# zero-copy ``RequestView`` body slice (S2.5) once the reactor
+# adopts ``parse_request_view`` — the design-0.5 §1.1 gate is
+# "≥ 4x throughput vs the v0.4.x copy path on 1MB / 16MB body
+# upload."
+#
+# Until the reactor adopts the view parser, this config still
+# runs against the v0.4.x copy path and serves as the regression
+# baseline that the post-adoption numbers improve against.
+name: uploads
+tool: wrk
+wrk_threads: 1
+wrk_connections: 16
+wrk_duration_seconds: 30
+warmup_seconds: 10
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 5.0
+# wrk Lua scripts that POST a body of each size live at
+# benchmark/scripts/wrk_upload_{4kb,64kb,1mb,16mb}.lua. The
+# orchestrator iterates those when this config is selected.
+wrk_scripts:
+  - benchmark/scripts/wrk_upload_4kb.lua
+  - benchmark/scripts/wrk_upload_64kb.lua
+  - benchmark/scripts/wrk_upload_1mb.lua
+  - benchmark/scripts/wrk_upload_16mb.lua
