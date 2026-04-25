@@ -456,6 +456,7 @@ from .tls.error import (
 # flare.http
 from .http.cancel import Cancel, CancelCell, CancelReason
 from .http.headers import HeaderMap, HeaderInjectionError
+from .http.header_view import HeaderMapView, parse_header_view
 from .http.url import Url, UrlParseError
 from .http.request import Request, Method
 from .http.response import Response, Status
