@@ -34,14 +34,22 @@ def main() raises:
 
     # 1. mTLS-enabled config: require client cert, point to the
     #    trust-anchor bundle. ALPN is independent of mTLS.
+    # Uses the bench-tls-setup self-signed cert (which doubles
+    # as its own CA) so the example runs end-to-end.
     var alpn = List[String]()
     alpn.append("http/1.1")
+    var cert_path = (
+        "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
+    )
+    var key_path = (
+        "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
+    )
     var cfg = TlsServerConfig(
-        cert_file="/etc/myapp/server.pem",
-        key_file="/etc/myapp/server.key",
+        cert_file=cert_path,
+        key_file=key_path,
         alpn=alpn^,
         require_client_cert=True,
-        client_ca_bundle="/etc/myapp/clients-ca.pem",
+        client_ca_bundle=cert_path,
     )
     var acceptor = TlsAcceptor(cfg^)
     print("[1] mTLS acceptor configured")

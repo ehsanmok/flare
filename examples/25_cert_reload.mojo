@@ -48,13 +48,21 @@ def main() raises:
     print()
 
     # 1. Construct an acceptor with the initial cert / key.
+    # We use the bench-tls-setup self-signed cert so the example
+    # runs end-to-end without needing a real Let's Encrypt cert
+    # in the repo. In production, point at your fullchain /
+    # privkey paths.
     var alpn = List[String]()
     alpn.append("h2")
     alpn.append("http/1.1")
+    var cert_path = (
+        "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
+    )
+    var key_path = (
+        "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
+    )
     var cfg = TlsServerConfig(
-        cert_file="/etc/letsencrypt/live/example.com/fullchain.pem",
-        key_file="/etc/letsencrypt/live/example.com/privkey.pem",
-        alpn=alpn^,
+        cert_file=cert_path, key_file=key_path, alpn=alpn^
     )
     var acceptor = TlsAcceptor(cfg^)
     print("[1] Acceptor created against", acceptor.config.cert_file)

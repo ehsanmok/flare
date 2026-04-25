@@ -164,39 +164,83 @@ def test_tls_info_with_values() raises:
 # ── TlsAcceptor ────────────────────────────────────────────────────────────
 
 
+comptime _CERT: String = (
+    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
+)
+comptime _KEY: String = (
+    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
+)
+
+
 def test_acceptor_construct() raises:
-    var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+    """C7: TlsAcceptor now actually loads the cert / key + sets
+    up the SSL_CTX. Construction succeeds with a real cert pair
+    (the bench-tls-setup self-signed cert)."""
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY)
     var acc = TlsAcceptor(cfg^)
-    assert_equal(acc.config.cert_file, "/c.pem")
-    assert_equal(acc.config.key_file, "/k.pem")
+    assert_equal(acc.config.cert_file, _CERT)
+    assert_equal(acc.config.key_file, _KEY)
 
 
-def test_acceptor_reload_is_noop_today() raises:
-    """``reload()`` is a no-op until the reactor-side handshake
-    lands. Tests that the call signature exists and does not
-    raise — production callers can wire SIGHUP / file-watcher
-    triggers today."""
-    var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+def test_acceptor_construct_raises_on_missing_cert() raises:
+    """C7: Construction fails fast if the cert path is bad —
+    deployments learn at server-start that they have a bad
+    cert, not at the first inbound handshake."""
+    var cfg = TlsServerConfig(
+        cert_file="/nonexistent/cert.pem", key_file=_KEY
+    )
+    with assert_raises():
+        _ = TlsAcceptor(cfg^)
+
+
+def test_acceptor_reload_swaps_cert() raises:
+    """``reload()`` re-reads the cert + key files. Calling it
+    repeatedly is safe — SIGHUP / inotify / cron triggers fire
+    regardless of whether the file actually changed."""
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY)
     var acc = TlsAcceptor(cfg^)
     acc.reload()
 
 
 def test_acceptor_reload_repeated_safe() raises:
-    """``reload()`` can be called repeatedly without raising —
-    the same trigger may fire on every SIGHUP delivery, every
-    inotify event, or every cron tick. Cert-rotation deployments
-    rely on this."""
-    var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+    """Cert-rotation deployments call ``reload`` on every
+    event regardless of whether the file changed."""
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY)
     var acc = TlsAcceptor(cfg^)
     for _ in range(10):
         acc.reload()
 
 
 def test_acceptor_info_placeholder_returns_empty() raises:
-    var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY)
     var acc = TlsAcceptor(cfg^)
     var info = acc.info_placeholder()
     assert_equal(info.protocol, "")
+
+
+def test_acceptor_with_alpn_succeeds() raises:
+    """Constructor wires the ALPN list through to the FFI."""
+    var alpn = List[String]()
+    alpn.append("h2")
+    alpn.append("http/1.1")
+    var cfg = TlsServerConfig(
+        cert_file=_CERT, key_file=_KEY, alpn=alpn^
+    )
+    var acc = TlsAcceptor(cfg^)
+    assert_equal(len(acc.config.alpn), 2)
+
+
+def test_acceptor_with_mtls_succeeds() raises:
+    """``require_client_cert=True`` + a real CA bundle wires
+    through to the FFI's verify-peer callback."""
+    var cfg = TlsServerConfig(
+        cert_file=_CERT,
+        key_file=_KEY,
+        require_client_cert=True,
+        client_ca_bundle=_CERT,  # self-signed: cert is its own CA
+    )
+    var acc = TlsAcceptor(cfg^)
+    assert_true(acc.config.require_client_cert)
 
 
 # ── Errors ─────────────────────────────────────────────────────────────────
