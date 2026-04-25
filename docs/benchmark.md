@@ -30,17 +30,23 @@ The v0.5 redesign is therefore three changes:
    [coordinated-omission](https://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html)
    bug and it makes p99.9 / p99.99 unreliable. `wrk2` fixes it.
 
-   *Status (v0.5.0 Step 1):* the `wrk2` switch is staged but not
-   yet on the wire — `conda-forge` does not currently pin a `wrk2`
-   build for `linux-64`, and the `pixi`-pinned bench env is the
-   one place v0.4.x committed to. The harness change lands once
-   the env is repinned (a small standalone commit; the YAML
-   schema and the per-config `wrk_script` field below already
-   accommodate `wrk2` invocation). Until then, bench numbers in
-   this doc stay on `wrk` (the v0.4.1 baseline).
+   *Status (v0.5.0 Step 2):* `wrk2` ships as a build-from-source
+   step (the pinned `44a94c1` 2019 release; conda-forge has no
+   `wrk2` for `linux-64`). Run
+   `pixi run --environment bench bench-install-wrk2` once to
+   produce `build/wrk2/wrk2`, then
+   `pixi run --environment bench bench-tail-quick` drives wrk2
+   `--latency` mode against a flare static server on
+   `127.0.0.1:8080` and prints the full percentile block to
+   stdout. The per-run JSON / stdev-gate / multi-baseline matrix
+   integration with the existing `bench_vs_baseline.sh` harness
+   lands as a follow-up; until then the wrk-based
+   `bench-vs-baseline-quick` keeps the regression signal.
 
-2. **Tail percentiles** — p50, p90, p99, **p99.9, p99.99** —
-   replace the single p50 / p99 row once `wrk2` is on the wire.
+2. **Tail percentiles** — p50, p75, p90, p99, **p99.9, p99.99,
+   p99.999** — `wrk2 --latency` produces the full block.
+   Headline tables update once the wrk2-results-into-harness
+   integration lands.
 
 3. **Multiple workloads**, not one:
    - `micro-static` (the v0.4.x parity gate against
@@ -289,6 +295,10 @@ pixi run --environment bench bench-vs-baseline         # + nginx + latency_floor
 
 # v0.5.0 Step 1 — mixed-keepalive workload (80% keep-alive, 20% close)
 pixi run --environment bench bench-mixed-keepalive
+
+# v0.5.0 Step 2 — wrk2 + tail percentiles
+pixi run --environment bench bench-install-wrk2  # one-time build
+pixi run --environment bench bench-tail-quick    # wrk2 -R10000 --latency
 ```
 
 Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.

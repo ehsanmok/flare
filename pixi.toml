@@ -75,11 +75,26 @@ bench-collect-env         = "bash benchmark/scripts/_collect_env.sh"
 
 # v0.5.0 Step 1 — mixed-keepalive workload (20% Connection: close,
 # 80% HTTP/1.1 keep-alive). Same five-run-median + stdev gate as
-# the rest. ``wrk2`` for tail-latency measurements is staged in
-# the docs/benchmark.md "v0.5 methodology change" section but
-# Linux conda-forge has no pinned wrk2 yet — the wrk2 task lands
-# once the bench env is repinned.
+# the rest.
 bench-mixed-keepalive     = "bash benchmark/scripts/bench_vs_baseline.sh --only=flare,go_nethttp --configs=mixed_keepalive"
+
+# v0.5.0 Step 2 — wrk2 install (build from a pinned commit when
+# the platform doesn't ship a binary). conda-forge has no
+# pinned wrk2 for linux-64; the build-from-source script
+# produces ``build/wrk2/wrk2`` from the pinned 44a94c1 release.
+bench-install-wrk2        = "bash benchmark/scripts/_install_wrk2.sh"
+
+# v0.5.0 Step 2 — tail-percentile measurement via wrk2's
+# --latency mode at a fixed throughput. Run after
+# ``bench-install-wrk2``. Reports p50 / p75 / p90 / p99 / p99.9
+# / p99.99 / p99.999 without coordinated omission. Harness
+# integration (parsing wrk2's --latency output into the per-run
+# JSON files the rest of the harness writes) is a follow-up;
+# this task drives wrk2 directly against a flare server bound on
+# 127.0.0.1:8080 so users can read the tail percentiles from
+# stdout. See benchmark/configs/tail_quick.yaml for the
+# parameters.
+bench-tail-quick          = "bash benchmark/scripts/_run_tail_quick.sh"
 
 [feature.fuzz.tasks]
 # ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
