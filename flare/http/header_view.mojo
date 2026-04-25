@@ -58,6 +58,30 @@ def _is_ascii_space(c: UInt8) -> Bool:
 
 
 @always_inline
+def _is_token_char(c: UInt8) -> Bool:
+    """RFC 7230 §3.2.6 token chars (header field-name).
+
+    Mirrors the predicate in ``flare/http/server.mojo`` but local
+    so this module can be used without pulling in the legacy
+    parser. Range: ALPHA / DIGIT / "!" / "#" / "$" / "%" / "&" /
+    "'" / "*" / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~".
+    """
+    if c >= 65 and c <= 90:
+        return True
+    if c >= 97 and c <= 122:
+        return True
+    if c >= 48 and c <= 57:
+        return True
+    if c == 33 or c == 35 or c == 36 or c == 37 or c == 38:
+        return True
+    if c == 39 or c == 42 or c == 43 or c == 45 or c == 46:
+        return True
+    if c == 94 or c == 95 or c == 96 or c == 124 or c == 126:
+        return True
+    return False
+
+
+@always_inline
 def _eq_icase_bytes(
     a: Span[UInt8, _], b_start: Int, b_len: Int, buf: Span[UInt8, _]
 ) -> Bool:
@@ -249,6 +273,14 @@ def parse_header_view[
         if nlen == 0:
             raise Error("empty header name")
 
+        # RFC 7230 §3.2.6 — the field-name is a token; reject any
+        # non-token byte (CTLs, separators, high-bit, etc.). Catches
+        # smuggling attempts that chain a malformed header into the
+        # next request boundary.
+        for k in range(nstart, nstart + nlen):
+            if not _is_token_char(p[k]):
+                raise Error("invalid character in header name")
+
         # Trim OWS on the value side.
         var vstart = colon + 1
         while vstart < stripped_end and _is_ascii_space(p[vstart]):
@@ -257,6 +289,15 @@ def parse_header_view[
         while vend > vstart and _is_ascii_space(p[vend - 1]):
             vend -= 1
         var vlen = vend - vstart
+
+        # RFC 7230 §3.2.4 — the field-value must NOT contain bare
+        # CR / LF / NUL. CR / LF embedded in the value is the classic
+        # response-splitting / header-injection vector. NUL is an
+        # implementation-defined-behaviour foot-gun.
+        for k in range(vstart, vend):
+            var vc = p[k]
+            if vc == 0 or vc == _LF or vc == _CR:
+                raise Error("invalid byte in header value")
 
         offsets.append(nstart)
         offsets.append(nlen)

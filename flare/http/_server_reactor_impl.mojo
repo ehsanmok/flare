@@ -458,9 +458,20 @@ struct ConnHandle(Movable):
                 idle_timeout_ms=body_timeout,
             )
 
+        # v0.5.0 follow-up (Track 1.1 / C2): scan the request as a
+        # ``RequestView`` borrowed into ``read_buf`` first, then
+        # materialise an owned ``Request`` via ``into_owned()``
+        # for the existing ``Handler.serve(req: Request)`` shape.
+        # Net win: per-header String allocation eliminated during
+        # parse — headers stay as offsets into the shared buffer
+        # until ``into_owned`` copies them out. Body still copies
+        # because today's Handler takes an owned Request; the
+        # zero-copy body path waits for C3 (``ViewHandler``).
+        from .request_view import parse_request_view
+
         var req: Request
         try:
-            req = _parse_http_request_bytes(
+            var view = parse_request_view(
                 Span[UInt8, _](self.read_buf)[: self.body_total],
                 config.max_header_size,
                 config.max_body_size,
@@ -468,6 +479,7 @@ struct ConnHandle(Movable):
                 self.peer,
                 config.expose_error_messages,
             )
+            req = view.into_owned()
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()

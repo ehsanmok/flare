@@ -125,6 +125,60 @@ def test_empty_header_name_raises() raises:
         _ = parse_header_view(Span[UInt8, _](bytes))
 
 
+def test_invalid_token_in_header_name_raises() raises:
+    """RFC 7230 §3.2.6: header name must be a token. Space is
+    not a token char — must be rejected. Catches the
+    request-smuggling vector where a malformed name chains
+    into the next header."""
+    var raw = "Bad Header: value\r\n\r\n"
+    var bytes = raw.as_bytes()
+    with assert_raises():
+        _ = parse_header_view(Span[UInt8, _](bytes))
+
+
+def test_high_bit_in_header_name_raises() raises:
+    """High-bit byte in header name is non-token; reject."""
+    var bytes = List[UInt8]()
+    bytes.append(UInt8(0x80))
+    bytes.append(ord("X"))
+    bytes.append(ord(":"))
+    bytes.append(ord(" "))
+    bytes.append(ord("v"))
+    for b in "\r\n\r\n".as_bytes():
+        bytes.append(b)
+    with assert_raises():
+        _ = parse_header_view(Span[UInt8, _](bytes))
+
+
+def test_bare_cr_in_header_value_raises() raises:
+    """Bare CR (0x0D) embedded mid-value is the response-
+    splitting / header-injection vector — reject."""
+    var bytes = List[UInt8]()
+    for b in "X-A: hello".as_bytes():
+        bytes.append(b)
+    bytes.append(UInt8(0x0D))
+    bytes.append(ord("X"))
+    bytes.append(ord("\n"))
+    for b in "\r\n".as_bytes():
+        bytes.append(b)
+    with assert_raises():
+        _ = parse_header_view(Span[UInt8, _](bytes))
+
+
+def test_nul_in_header_value_raises() raises:
+    """NUL (0x00) in header value is implementation-defined-
+    behaviour foot-gun — reject."""
+    var bytes = List[UInt8]()
+    for b in "X-A: hello".as_bytes():
+        bytes.append(b)
+    bytes.append(UInt8(0))
+    bytes.append(ord("X"))
+    for b in "\r\n\r\n".as_bytes():
+        bytes.append(b)
+    with assert_raises():
+        _ = parse_header_view(Span[UInt8, _](bytes))
+
+
 # ── into_owned() ────────────────────────────────────────────────────────────
 
 
