@@ -512,6 +512,7 @@ struct Extracted[H: Copyable & Defaultable & Handler & Movable](
     def serve(self, req: Request) raises -> Response:
         var h = Self.H()
         comptime n = struct_field_count[Self.H]()
+        var expose = req.expose_errors
         comptime for idx in range(n):
             try:
                 ref field = trait_downcast[Extractor](
@@ -519,20 +520,50 @@ struct Extracted[H: Copyable & Defaultable & Handler & Movable](
                 )
                 field.apply(req)
             except e:
-                return _bad_request_from_error(e)
+                return _bad_request_from_error(e, expose)
         return h.serve(req)
 
 
 @always_inline
-def _bad_request_from_error(e: Error) -> Response:
-    """Build a 400 Bad Request response whose body is the error message.
+def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
+    """Build a 400 Bad Request response from a raised extractor ``Error``.
+
+    Default (production) behaviour, since v0.5.0 Step 1: the response
+    body is the **fixed reason** ``"Bad Request"`` — *not* the raised
+    error message. The full message is logged to stderr with a
+    ``[flare:bad-request]`` prefix so server-side debugging still
+    works. This closes the criticism (§2.7): extractor errors
+    constructed from request bytes (e.g.
+    ``raise Error("expected integer, got '" + s + "'")``) must not
+    echo user input back into a 400 body, since logs that auto-link
+    and terminals that ANSI-interpret can be surprised by attacker-
+    controlled bytes.
+
+    Local-dev override: set
+    ``ServerConfig(expose_error_messages=True)``. The reactor copies
+    the flag onto every parsed ``Request.expose_errors``, which the
+    caller passes here as ``expose=True``.
 
     Kept separate from ``flare.http.server.bad_request`` to avoid the
-    circular import ``extract.mojo`` → ``server.mojo`` → handler code.
+    circular import ``extract.mojo`` -> ``server.mojo`` -> handler
+    code.
+
+    Args:
+        e:      The error raised by an extractor.
+        expose: ``True`` to echo ``String(e)`` into the response body
+                (verbatim user input). ``False`` (default) to send
+                ``"Bad Request"`` and log the full message.
     """
     var msg = String(e)
-    var body = List[UInt8](capacity=msg.byte_length())
-    for b in msg.as_bytes():
+    # Always log the raised message (with the user-controlled bytes)
+    # so production debugging works even when the response body is
+    # sanitised. ``stderr`` is the conventional sink for flare
+    # diagnostics; ``[flare:bad-request]`` is the grep prefix.
+    print("[flare:bad-request] ", msg)
+
+    var body_str = "Bad Request" if not expose else msg
+    var body = List[UInt8](capacity=body_str.byte_length())
+    for b in body_str.as_bytes():
         body.append(b)
     var resp = Response(
         status=Status.BAD_REQUEST, reason="Bad Request", body=body^

@@ -304,6 +304,7 @@ struct ConnHandle(Movable):
                 config.max_body_size,
                 config.max_uri_length,
                 self.peer,
+                config.expose_error_messages,
             )
         except:
             self._queue_error(400, "Bad Request")

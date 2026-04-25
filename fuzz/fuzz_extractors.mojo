@@ -126,6 +126,22 @@ def target(data: List[UInt8]) raises:
             + url
         )
 
+    # v0.5.0 Step 1 sanitised-error property:
+    # When the request did NOT opt into ``expose_errors`` (the
+    # production default), a 400 response body must equal the fixed
+    # reason ``"Bad Request"`` exactly — no extractor message, no
+    # echo of attacker-controlled bytes from the URL or headers.
+    # ``Request(expose_errors=False)`` is the constructor default,
+    # so ``req`` above carries that policy.
+    if resp.status == Status.BAD_REQUEST:
+        if resp.text() != "Bad Request":
+            raise Error(
+                "assertion failed: 400 body is not sanitised; got '"
+                + resp.text()
+                + "' for url="
+                + url
+            )
+
 
 def main() raises:
     print("=" * 60)

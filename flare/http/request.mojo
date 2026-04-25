@@ -38,6 +38,17 @@ struct Request(Movable):
                  reactor populate it." Note: this is the *kernel's* view
                  of the peer; flare does not interpret ``X-Forwarded-For``,
                  ``Forwarded:``, or PROXY-protocol metadata.
+        expose_errors: When ``True``, 4xx / 5xx responses generated from
+                 a raised ``Error`` may include the verbatim message in
+                 their body — useful in local dev. **Default ``False``**
+                 so production servers send a fixed status reason and
+                 log the message (with any user-controlled bytes) to
+                 stderr rather than echoing it back. Carried on the
+                 request because flare is shared-nothing thread-per-core
+                 and the policy is set per-server (per-``ServerConfig``);
+                 the reactor copies ``ServerConfig.expose_error_messages``
+                 onto every parsed ``Request`` and ``_bad_request_from_error``
+                 reads it. Closes criticism §2.7.
 
     Path parameters extracted by ``Router`` live on a private field that
     is lazily allocated on the first ``Router`` match. Handlers that
@@ -64,6 +75,11 @@ struct Request(Movable):
     var version: String
     var peer: SocketAddr
     """Kernel-reported peer ``SocketAddr``. See struct docstring."""
+    var expose_errors: Bool
+    """Whether 4xx / 5xx responses may echo raised ``Error`` messages.
+    Default False; the reactor copies
+    ``ServerConfig.expose_error_messages`` onto every parsed request.
+    See struct docstring."""
     var _params: UnsafePointer[Dict[String, String], MutExternalOrigin]
     """Lazily-allocated path-params table. Null by default; ``Router``
     allocates the underlying ``Dict`` on the first path-parameter
@@ -84,17 +100,24 @@ struct Request(Movable):
         body: List[UInt8] = List[UInt8](),
         version: String = "HTTP/1.1",
         peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
+        expose_errors: Bool = False,
     ):
         """Create a new HTTP request.
 
         Args:
-            method:  HTTP method string.
-            url:     Full URL or request target.
-            body:    Request body bytes; empty by default.
-            version: HTTP version; ``"HTTP/1.1"`` by default.
-            peer:    Peer ``SocketAddr``; defaults to ``127.0.0.1:0`` for
-                     direct constructions. The reactor passes the
-                     kernel-reported peer captured at accept time.
+            method:        HTTP method string.
+            url:           Full URL or request target.
+            body:          Request body bytes; empty by default.
+            version:       HTTP version; ``"HTTP/1.1"`` by default.
+            peer:          Peer ``SocketAddr``; defaults to ``127.0.0.1:0``
+                           for direct constructions. The reactor passes
+                           the kernel-reported peer captured at accept
+                           time.
+            expose_errors: Whether handler / extractor error messages
+                           may flow into the response body. Default
+                           ``False`` (production-safe). The reactor
+                           copies this from
+                           ``ServerConfig.expose_error_messages``.
         """
         self.method = method
         self.url = url
@@ -102,6 +125,7 @@ struct Request(Movable):
         self.body = body.copy()
         self.version = version
         self.peer = peer
+        self.expose_errors = expose_errors
         self._params = UnsafePointer[Dict[String, String], MutExternalOrigin]()
 
     def __del__(deinit self):

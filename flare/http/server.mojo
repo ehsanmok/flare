@@ -40,6 +40,12 @@ struct ServerConfig(Copyable, Movable):
             (default 5000). 0 disables.
         shutdown_timeout_ms:    Max ms graceful shutdown waits for in-flight
             connections to drain before force-closing (default 5000).
+        expose_error_messages:  When ``True``, 400 / 5xx response bodies
+            include the raised ``Error`` message verbatim — useful for
+            local development. **Default ``False``** so production
+            servers send a fixed status reason and log the message
+            (with any user-controlled bytes) to stderr instead of
+            echoing it back. Closes criticism §2.7.
     """
 
     var read_buffer_size: Int
@@ -51,6 +57,7 @@ struct ServerConfig(Copyable, Movable):
     var idle_timeout_ms: Int
     var write_timeout_ms: Int
     var shutdown_timeout_ms: Int
+    var expose_error_messages: Bool
 
     def __init__(
         out self,
@@ -63,6 +70,7 @@ struct ServerConfig(Copyable, Movable):
         idle_timeout_ms: Int = 500,
         write_timeout_ms: Int = 5000,
         shutdown_timeout_ms: Int = 5000,
+        expose_error_messages: Bool = False,
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -73,6 +81,7 @@ struct ServerConfig(Copyable, Movable):
         self.idle_timeout_ms = idle_timeout_ms
         self.write_timeout_ms = write_timeout_ms
         self.shutdown_timeout_ms = shutdown_timeout_ms
+        self.expose_error_messages = expose_error_messages
 
 
 # Comptime-friendly default config. Used as the default for
@@ -475,6 +484,7 @@ def _parse_http_request_bytes(
     max_body_size: Int = 10 * 1024 * 1024,
     max_uri_length: Int = 8_192,
     peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
+    expose_errors: Bool = False,
 ) raises -> Request:
     """Parse an HTTP/1.1 request from a byte buffer.
 
@@ -491,6 +501,11 @@ def _parse_http_request_bytes(
                          handlers can read ``req.peer``. Defaults to
                          ``127.0.0.1:0`` for callers that don't have a
                          live connection (tests, fuzzers).
+        expose_errors:   Whether the parsed request will allow handler /
+                         extractor error messages into its 4xx / 5xx
+                         response body. Threaded onto
+                         ``Request.expose_errors``. Defaults to
+                         ``False`` (production-safe).
 
     Returns:
         A parsed ``Request`` with version set from the request line.
@@ -604,7 +619,12 @@ def _parse_http_request_bytes(
                 )
 
     var req = Request(
-        method=method, url=path, body=body^, version=version, peer=peer
+        method=method,
+        url=path,
+        body=body^,
+        version=version,
+        peer=peer,
+        expose_errors=expose_errors,
     )
     req.headers = headers^
     return req^
