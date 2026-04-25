@@ -20,7 +20,7 @@ source:
   # json source (inlined because json is not yet in any conda channel).
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    branch: main
+    tag: v0.1.3
 
 build:
   script:
@@ -48,11 +48,11 @@ build:
 
 requirements:
   build:
-    - mojo-compiler
+    - mojo-compiler ==0.26.3.0.dev2026042005
     - ${{ compiler('cxx') }}
     - git   # needed to clone json source
   host:
-    - mojo-compiler
+    - mojo-compiler ==0.26.3.0.dev2026042005
     - openssl >=3.0,<4
     - ca-certificates
     - simdjson >=4.2.4,<5   # json's simdjson FFI wrapper
