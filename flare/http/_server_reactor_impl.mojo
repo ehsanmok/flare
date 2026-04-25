@@ -441,10 +441,20 @@ struct ConnHandle(Movable):
             self.body_total = self.headers_end + self.content_length
 
         if len(self.read_buf) < self.body_total:
+            # Body still arriving — arm the read-body deadline if
+            # configured (v0.5.0 Step 1), otherwise fall back to
+            # the idle timer. Closes the slow-body-upload variant
+            # of criticism §2.2: a peer that keeps trickling bytes
+            # below idle_timeout_ms can no longer hold a worker
+            # slot indefinitely.
+            var body_timeout = (
+                config.read_body_timeout_ms if config.read_body_timeout_ms
+                > 0 else config.idle_timeout_ms
+            )
             return StepResult(
                 want_read=True,
                 want_write=False,
-                idle_timeout_ms=config.idle_timeout_ms,
+                idle_timeout_ms=body_timeout,
             )
 
         var req: Request

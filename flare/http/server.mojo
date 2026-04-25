@@ -46,6 +46,24 @@ struct ServerConfig(Copyable, Movable):
             servers send a fixed status reason and log the message
             (with any user-controlled bytes) to stderr instead of
             echoing it back. Closes criticism §2.7.
+        read_body_timeout_ms:   Max ms allowed between headers-end and the
+            last body byte (default 30_000). 0 disables. Closes the
+            slow-body-upload variant of the slow-client DoS surface
+            described in criticism §2.2. Mirrors nginx's
+            ``client_body_timeout``.
+        handler_timeout_ms:     Max ms ``Handler.serve`` (or
+            ``CancelHandler.serve``) is allowed to run before the
+            reactor flips ``Cancel.TIMEOUT`` (default 30_000). 0
+            disables. Cooperative — the handler observes the flip on
+            its next ``cancel.cancelled()`` poll. Closes the
+            handler-watchdog variant of criticism §2.2.
+        request_timeout_ms:     Max ms wall-time from request line in to
+            response bytes out (default 60_000). 0 disables. The
+            reactor enforces this as the outermost deadline; the
+            other two cooperate via ``Cancel``. Must be >=
+            ``handler_timeout_ms`` and >=
+            ``read_body_timeout_ms`` (checked at compile time in
+            ``serve_comptime``).
     """
 
     var read_buffer_size: Int
@@ -58,6 +76,9 @@ struct ServerConfig(Copyable, Movable):
     var write_timeout_ms: Int
     var shutdown_timeout_ms: Int
     var expose_error_messages: Bool
+    var read_body_timeout_ms: Int
+    var handler_timeout_ms: Int
+    var request_timeout_ms: Int
 
     def __init__(
         out self,
@@ -71,6 +92,9 @@ struct ServerConfig(Copyable, Movable):
         write_timeout_ms: Int = 5000,
         shutdown_timeout_ms: Int = 5000,
         expose_error_messages: Bool = False,
+        read_body_timeout_ms: Int = 30_000,
+        handler_timeout_ms: Int = 30_000,
+        request_timeout_ms: Int = 60_000,
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -82,6 +106,9 @@ struct ServerConfig(Copyable, Movable):
         self.write_timeout_ms = write_timeout_ms
         self.shutdown_timeout_ms = shutdown_timeout_ms
         self.expose_error_messages = expose_error_messages
+        self.read_body_timeout_ms = read_body_timeout_ms
+        self.handler_timeout_ms = handler_timeout_ms
+        self.request_timeout_ms = request_timeout_ms
 
 
 # Comptime-friendly default config. Used as the default for
@@ -337,6 +364,39 @@ struct HttpServer(Movable):
         comptime assert (
             config.write_timeout_ms >= 0
         ), "ServerConfig.write_timeout_ms must be >= 0"
+        comptime assert (
+            config.read_body_timeout_ms >= 0
+        ), "ServerConfig.read_body_timeout_ms must be >= 0 (0 disables)"
+        comptime assert (
+            config.handler_timeout_ms >= 0
+        ), "ServerConfig.handler_timeout_ms must be >= 0 (0 disables)"
+        comptime assert (
+            config.request_timeout_ms >= 0
+        ), "ServerConfig.request_timeout_ms must be >= 0 (0 disables)"
+        # When request_timeout_ms is non-zero (enabled), it must
+        # bound the per-handler and per-body deadlines so the
+        # outer-most reactor deadline is the last to fire. A
+        # request_timeout_ms shorter than handler_timeout_ms would
+        # let the handler keep working past the request deadline,
+        # which is the bug we're trying to prevent.
+        comptime assert (
+            config.request_timeout_ms == 0
+            or config.handler_timeout_ms == 0
+            or config.request_timeout_ms >= config.handler_timeout_ms
+        ), (
+            "ServerConfig.request_timeout_ms must be >="
+            " ServerConfig.handler_timeout_ms (or one must be 0 to"
+            " disable)"
+        )
+        comptime assert (
+            config.request_timeout_ms == 0
+            or config.read_body_timeout_ms == 0
+            or config.request_timeout_ms >= config.read_body_timeout_ms
+        ), (
+            "ServerConfig.request_timeout_ms must be >="
+            " ServerConfig.read_body_timeout_ms (or one must be 0 to"
+            " disable)"
+        )
 
         self._stopping = False
         # Materialise the comptime values into runtime copies that the
