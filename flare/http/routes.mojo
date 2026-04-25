@@ -47,7 +47,7 @@ handler-index book-keeping.
 
 Same status-code contract as ``Router``: unknown path → 404, known
 path wrong method → 405 with a synthesised ``Allow:`` header. Path
-parameters captured by a match land in ``req._params_mut()`` just
+parameters captured by a match land in ``req.params_mut()`` just
 like the runtime router.
 """
 
@@ -224,10 +224,10 @@ struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler, Movable):
                     child.headers = req.headers.copy()
                     if req.has_params():
                         for kv in req._params[].items():
-                            child._params_mut()[kv.key] = kv.value
+                            child.params_mut()[kv.key] = kv.value
                     if len(params) > 0:
                         for kv in params.items():
-                            child._params_mut()[kv.key] = kv.value
+                            child.params_mut()[kv.key] = kv.value
                     return r.handler(child^)
                 else:
                     var m = String(r.method)

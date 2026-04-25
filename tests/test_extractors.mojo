@@ -123,7 +123,7 @@ def test_param_defaults() raises:
 def _req_with_param(name: String, value: String) raises -> Request:
     """Build a Request with a single lazy-allocated path param."""
     var req = Request(method=Method.GET, url="/test")
-    req._params_mut()[name] = value
+    req.params_mut()[name] = value
     return req^
 
 
@@ -360,7 +360,7 @@ struct _TwoH(Copyable, Defaultable, Handler, Movable):
 
 def test_extracted_two_fields_all_present() raises:
     var req = Request(method=Method.GET, url="/users/7?page=3")
-    req._params_mut()["id"] = "7"
+    req.params_mut()["id"] = "7"
     var r = Extracted[_TwoH]().serve(req)
     assert_equal(r.status, Status.OK)
     assert_equal(r.text(), "id=7,page=3")
@@ -368,7 +368,7 @@ def test_extracted_two_fields_all_present() raises:
 
 def test_extracted_two_fields_opt_missing_defaults() raises:
     var req = Request(method=Method.GET, url="/users/7")
-    req._params_mut()["id"] = "7"
+    req.params_mut()["id"] = "7"
     var r = Extracted[_TwoH]().serve(req)
     assert_equal(r.status, Status.OK)
     assert_equal(r.text(), "id=7,page=default")

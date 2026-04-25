@@ -97,12 +97,22 @@ struct Request(Movable):
         """Return True if a ``Router`` populated this request's path params."""
         return Bool(self._params)
 
-    def _params_mut(mut self) -> ref[self._params] Dict[String, String]:
-        """Router-internal: lazily allocate and return a mutable ref.
+    def params_mut(mut self) -> ref[self._params] Dict[String, String]:
+        """Lazily allocate and return a mutable reference to the path-params dict.
 
-        Not part of the public API. The ``Router`` calls this when it
-        captures path parameters on a matched route so the underlying
-        ``Dict`` is only allocated when a route actually has parameters.
+        ``Router`` calls this when it captures path parameters on a
+        matched route. Tests and examples can call it to construct a
+        ``Request`` with synthetic path params without going through a
+        Router (e.g. when unit-testing a handler that reads
+        ``req.param("id")``). The underlying ``Dict`` is allocated on
+        first call, so requests that never see a Router pay zero
+        allocation cost.
+
+        Production handlers should not call this — Router owns
+        param-population on the request path, and writing through this
+        accessor mid-request would be surprising. It's public only so
+        the test surface doesn't have to reach for an underscored
+        name.
         """
         if not self._params:
             # Use Mojo's native allocator (``std.memory.alloc`` returns a

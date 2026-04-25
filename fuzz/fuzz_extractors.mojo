@@ -104,7 +104,7 @@ def target(data: List[UInt8]) raises:
 
     # Inject the :id path capture. Router normally owns this; here we
     # drive the extractor directly so we can feed in garbage.
-    req._params_mut()["id"] = path_piece
+    req.params_mut()["id"] = path_piece
 
     # Inject headers. Header extraction fails on injection bytes, so
     # pre-sanitise.

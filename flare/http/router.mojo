@@ -278,13 +278,13 @@ struct Router(Handler):
             # stays allocation-free.
             if req.has_params():
                 for kv in req._params[].items():
-                    child._params_mut()[kv.key] = kv.value
+                    child.params_mut()[kv.key] = kv.value
             # Copy the captures from this match. ``_MatchResult.params``
             # is always populated (even if empty), so guard on length to
             # avoid a pointless lazy-allocate for literal-only routes.
             if len(m_result.params) > 0:
                 for kv in m_result.params.items():
-                    child._params_mut()[kv.key] = kv.value
+                    child.params_mut()[kv.key] = kv.value
             return self._handlers[self._routes[i].handler_idx].serve(child^)
 
         if len(allowed) > 0:
