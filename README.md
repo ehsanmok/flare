@@ -27,31 +27,7 @@ def main() raises:
     srv.serve(r^, num_workers=4)
 ```
 
-flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard to misuse under load and easy to operate*. The v0.5 work is about exactly that. See [`docs/operational-guarantees.md`](docs/operational-guarantees.md) for the concern-by-concern table.
-
-## Operational guarantees (a teaser)
-
-| Concern | flare guarantees | Since |
-|---|---|---|
-| Partial reads / writes | reactor buffers and retries on writable edges | v0.3.0 |
-| Cancellation (peer disconnect, deadlines, shutdown) | `Cancel` token plumbed to handlers via `CancelHandler.serve(req, cancel)` | v0.5.0 Step 1 |
-| Graceful shutdown | `HttpServer.drain(timeout_ms)` + `install_drain_on_sigterm` | v0.5.0 Step 1 |
-| Sanitised 4xx / 5xx error bodies | extractor messages logged with request id, never echoed by default | v0.5.0 Step 1 |
-| Per-request / handler / body-read deadlines | `ServerConfig.{request,handler,read_body}_timeout_ms`, all default non-zero | v0.5.0 Step 1 |
-| Header / URI / body size limits | configurable; defaults: 8 KB / 8 KB / 10 MB | v0.3.0 |
-| RFC 7230 header validation | rejected at parse time | v0.2.0 |
-
-The full table — partial-read semantics, half-open handling, planned items, what version each row targets — lives in [`docs/operational-guarantees.md`](docs/operational-guarantees.md).
-
-## What flare doesn't do yet
-
-Explicit non-goals so you don't ship into a hole:
-
-- **No streaming response bodies** until v0.5.0 Step 2. `Response` materialises before the first `send`. Keep response bodies bounded for now.
-- **No server-side TLS** until v0.5.0 Step 3. Client TLS works. Today's deployment story is "terminate TLS at nginx / Caddy in front of flare." (Don't read more into the README than that.)
-- **No public `async` / `await`** — Mojo doesn't ship async yet. The reactor is the foundation; the public API gains an `async` variant when the language is ready (target v1.0).
-- **No HTTP/2** until v0.6. Requires server TLS first. HPACK lives on the v0.6 roadmap with a 5M-run fuzz gate before tag.
-- **No HTTP/3 / QUIC, no WebTransport, no h2c.** Permanent non-goals for the v0.x line.
+flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard to misuse under load and easy to operate*. The v0.5 work is about exactly that. See [`docs/operational-guarantees.md`](docs/operational-guarantees.md) for the concern-by-concern table of what flare handles for you (partial reads/writes, cancellation, graceful shutdown, sanitised error bodies, per-request deadlines, header/body limits, RFC 7230 validation) versus what's still your job, and what's still missing — streaming response bodies (v0.5.0 Step 2), server-side TLS (v0.5.0 Step 3), HTTP/2 (v0.6), public `async`/`await` (v1.0, gated on Mojo). HTTP/3, WebTransport, and `h2c` are permanent non-goals.
 
 ## Quick start
 
@@ -86,7 +62,56 @@ struct SlowHandler(CancelHandler, Copyable, Movable):
         return ok("done")
 ```
 
-For path params + query + header in one struct (`Extracted[H]`), comptime route tables, app state, middleware composition, multicore knob, static-response fast path, comptime config — see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
+```mojo
+# Shared state + custom middleware. Middleware is a Handler that holds
+# another Handler — stack layers by nesting constructors, no callback
+# chain to thread through.
+from flare.http import App, Router, Request, Response, Handler, State, ok, HttpServer
+from flare.net import SocketAddr
+
+@fieldwise_init
+struct Counters(Copyable, Movable):
+    var hits: Int
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+@fieldwise_init
+struct WithHits[Inner: Handler](Handler):
+    var inner:    Self.Inner
+    var snapshot: State[Counters]
+
+    def serve(self, req: Request) raises -> Response:
+        var resp = self.inner.serve(req)
+        resp.headers.set("X-Hits", String(self.snapshot.get().hits))
+        return resp^
+
+def main() raises:
+    var router = Router()
+    router.get("/", home)
+    var app  = App(state=Counters(hits=0), handler=router^)
+    var view = app.state_view()
+
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(WithHits(inner=app^, snapshot=view^))
+```
+
+For typed extractors (`Extracted[H]` reflects on a struct's field types and pulls each one from the request before calling `serve`), the comptime route table (`ComptimeRouter[ROUTES]`), the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, and the `num_workers` scale knob — see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
+
+## Low-level API
+
+flare ships the primitives the HTTP server is built on, so you can drop down a layer when HTTP isn't the right shape — custom binary protocols, raw TLS, UDP, or running the reactor directly:
+
+```mojo
+from flare.tcp import TcpStream
+from flare.tls import TlsStream, TlsConfig
+from flare.udp import UdpSocket
+from flare.ws  import WsClient
+from flare.dns import resolve
+from flare.runtime import Reactor, INTEREST_READ
+```
+
+Round-trip examples for each — `04_tcp_echo`, `06_websocket_echo`, `11_udp`, `12_tls`, `14_reactor` — live under [`examples/`](examples/) and the rendered package docstring at <https://ehsanmok.github.io/flare/> walks the layered API top-down. Use cases: a custom protocol over TLS, a UDP client / server, a WebSocket client driven from a CLI tool, or a hand-rolled non-HTTP server on top of the same reactor that powers `HttpServer`.
 
 ## Architecture
 
