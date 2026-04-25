@@ -92,6 +92,7 @@ def main() raises:
 from .cancel import Cancel, CancelCell, CancelReason
 from .headers import HeaderMap, HeaderInjectionError
 from .header_view import HeaderMapView, parse_header_view
+from .request_view import RequestView, parse_request_view
 from .url import Url, UrlParseError
 from .request import Request, Method
 from .response import Response, Status
