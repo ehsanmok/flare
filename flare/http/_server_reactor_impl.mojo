@@ -1496,10 +1496,18 @@ def run_reactor_loop_static(
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
 
+    # Graceful shutdown: flip Cancel.SHUTDOWN on every in-flight
+    # conn before closing — same in-thread pattern as
+    # ``run_reactor_loop_cancel`` (C12 / Track 3.2). Cancel-aware
+    # handlers (CancelHandler / ViewHandler) observe the flip
+    # at their next ``cancel.cancelled()`` poll. Plain Handlers
+    # ignore Cancel and run to completion.
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
+        var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
+        ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
         _cleanup_conn(leftover[i], conns, timers, reactor)
 
 
@@ -1609,12 +1617,21 @@ def run_reactor_loop_cancel[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
 
-    # Graceful shutdown: close all active connections. (Drain mode
-    # with a deadline lands in commit 6 of v0.5.0 Step 1.)
+    # Graceful shutdown: walk every active conn and flip its
+    # CancelCell to SHUTDOWN before closing. Cancel-aware
+    # handlers (CancelHandler) observe the flip and short-circuit
+    # at their next ``cancel.cancelled()`` poll. Plain Handlers
+    # (which don't observe Cancel) run to completion as before.
+    # The flip is in-thread (the worker walks its own conns,
+    # not via cross-thread atomics) — closes the design-0.5
+    # Track 3.2 cross-thread cancel-flip without exposing the
+    # per-worker registry across threads.
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
+        var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
+        ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
         _cleanup_conn(leftover[i], conns, timers, reactor)
 
 
@@ -1719,8 +1736,16 @@ def run_reactor_loop_view[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
 
+    # Graceful shutdown: flip Cancel.SHUTDOWN on every in-flight
+    # conn before closing — same in-thread pattern as
+    # ``run_reactor_loop_cancel`` (C12 / Track 3.2). Cancel-aware
+    # handlers (CancelHandler / ViewHandler) observe the flip
+    # at their next ``cancel.cancelled()`` poll. Plain Handlers
+    # ignore Cancel and run to completion.
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
+        var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
+        ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
         _cleanup_conn(leftover[i], conns, timers, reactor)
