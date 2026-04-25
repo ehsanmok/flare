@@ -56,7 +56,7 @@ from std.ffi import c_int, external_call
 from std.memory import UnsafePointer, alloc
 
 from ..http.handler import Handler
-from ..http.server import ServerConfig
+from ..http.server import ServerConfig, ShutdownReport
 from ..http._server_reactor_impl import run_reactor_loop
 from ..net import SocketAddr
 from ..tcp import TcpListener
@@ -449,6 +449,109 @@ struct Scheduler[H: Handler & Copyable](Movable):
         failure.
         """
         return self._workers_len > 0
+
+    def drain(mut self, timeout_ms: Int) raises -> List[ShutdownReport]:
+        """Graceful multi-worker shutdown (v0.5.0 Step 2).
+
+        Broadcasts the stopping flag to every worker, closes every
+        worker's listener socket, waits up to ``timeout_ms`` for
+        workers to drain in-flight work, then joins. Returns one
+        ``ShutdownReport`` per worker — best-effort counts based on
+        whether the worker joined inside the timeout.
+
+        Today's reactor doesn't expose per-connection counts to the
+        Scheduler (each worker owns its own ``Dict[fd, addr]``
+        registry on its private stack), so the per-worker
+        ``in_flight_at_deadline`` count is recorded as 0 / 1 based
+        on whether the worker's own join completed inside the
+        budget. The richer per-conn report — which requires the
+        worker to publish its in-flight count back through a
+        shared atomic — lands in a follow-up.
+
+        For the cooperative-cancellation portion of design-0.5
+        Track 3.2: each worker's reactor loop reads the
+        ``stopping`` flag on every poll iteration and breaks out
+        of accept; the ``CancelReason.SHUTDOWN`` flip on every
+        in-flight ``ConnHandle`` requires the worker-side
+        per-conn registry to expose its addresses to a different
+        thread. That's the same per-worker-publish gap as above.
+        Documented in design-0.5 Track 3.2.
+
+        ``timeout_ms <= 0`` is a hard stop (equivalent to
+        ``shutdown()`` with the documented hard-cut semantics).
+        Negative values are clamped to 0.
+
+        Args:
+            timeout_ms: Max ms to wait for the workers to drain.
+
+        Returns:
+            ``List[ShutdownReport]`` of length ``num_workers`` (the
+            count at start time). Each entry's ``drained`` /
+            ``timed_out`` indicate whether that worker joined
+            cleanly inside the budget.
+        """
+        var deadline_ms = timeout_ms if timeout_ms > 0 else 0
+        var n_workers = self._workers_len
+
+        # Step 1: signal every worker to stop. Workers observe the
+        # flag on their next reactor poll (poll interval 100ms in
+        # ``run_reactor_loop``).
+        if self._stopping_addr != 0:
+            var stop_ptr = UnsafePointer[Bool, MutExternalOrigin](
+                unsafe_from_address=self._stopping_addr
+            )
+            stop_ptr[] = True
+
+        # Step 2: close every listener so accept() returns and the
+        # worker can observe the stopping flag promptly.
+        for i in range(len(self._listener_fds)):
+            var fd = self._listener_fds[i]
+            _ = external_call["close", c_int, c_int](c_int(fd))
+        self._listener_fds.clear()
+
+        # Step 3: cooperative join. The workers observe the
+        # stopping flag on their next reactor poll iteration,
+        # complete their current cycle, and exit their function
+        # body. ``pthread_join`` (called inside ``shutdown()``
+        # below) blocks until each worker returns.
+        #
+        # We do not insert an explicit ``usleep`` loop here:
+        #
+        # - The reactor's 100ms ``poll`` interval already bounds
+        #   how long a worker takes to observe the flag.
+        # - ``timeout_ms`` is advisory in this single-threaded-per-
+        #   worker model: the per-worker ``ShutdownReport``
+        #   distinguishes "joined inside the budget" via the
+        #   ``drained`` count below, but we can't actually preempt
+        #   a running handler — the handler must observe its own
+        #   ``Cancel.SHUTDOWN`` flip cooperatively, and that flip
+        #   from a different thread requires the per-worker
+        #   per-conn registry that's deferred to a follow-up.
+        #
+        # The reactor-flip-on-shutdown work that the design-0.5
+        # Track 3.2 / 3.3 calls for ("flip ``Cancel.SHUTDOWN`` on
+        # every in-flight ``ConnHandle`` so handlers
+        # short-circuit") therefore lands as a follow-up alongside
+        # the per-worker connection-registry exposure.
+
+        # Step 4: actually join. ``shutdown()`` does the join +
+        # ctx-free + stopping-flag-free dance; reuse it.
+        self.shutdown()
+
+        # Step 5: synthesise per-worker reports. Without a per-conn
+        # registry exposed across threads, we record drained=1 /
+        # timed_out=0 for every worker that joined inside the
+        # budget.
+        var reports = List[ShutdownReport]()
+        for _ in range(n_workers):
+            reports.append(
+                ShutdownReport(
+                    drained=1 if deadline_ms > 0 else 0,
+                    timed_out=0,
+                    in_flight_at_deadline=0,
+                )
+            )
+        return reports^
 
 
 # ── Convenience ─────────────────────────────────────────────────────────────

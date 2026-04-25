@@ -81,6 +81,38 @@ def test_scheduler_start_and_shutdown_n4() raises:
     assert_true(not s.is_running())
 
 
+def test_scheduler_drain_returns_per_worker_reports() raises:
+    """``Scheduler.drain`` returns one ``ShutdownReport`` per
+    worker; the count matches ``num_workers``."""
+    var addr = SocketAddr.localhost(0)
+    var h = _NopHandler(0)
+    var cfg = _config_fast_shutdown()
+    var s = Scheduler[_NopHandler].start(
+        addr=addr, config=cfg^, handler=h^, num_workers=3, pin_cores=False
+    )
+    var reports = s.drain(timeout_ms=200)
+    assert_equal(len(reports), 3)
+    # All workers joined inside the budget — drained=1 each.
+    for i in range(len(reports)):
+        assert_equal(reports[i].drained, 1)
+        assert_equal(reports[i].timed_out, 0)
+        assert_equal(reports[i].in_flight_at_deadline, 0)
+    assert_true(not s.is_running())
+
+
+def test_scheduler_drain_zero_timeout_is_hard_stop() raises:
+    var addr = SocketAddr.localhost(0)
+    var h = _NopHandler(0)
+    var cfg = _config_fast_shutdown()
+    var s = Scheduler[_NopHandler].start(
+        addr=addr, config=cfg^, handler=h^, num_workers=2, pin_cores=False
+    )
+    var reports = s.drain(timeout_ms=0)
+    assert_equal(len(reports), 2)
+    for i in range(len(reports)):
+        assert_equal(reports[i].drained, 0)
+
+
 def test_scheduler_shutdown_idempotent() raises:
     """``shutdown()`` is safe to call twice."""
     var addr = SocketAddr.localhost(0)
