@@ -122,6 +122,17 @@ def test_acceptor_reload_is_noop_today() raises:
     acc.reload()
 
 
+def test_acceptor_reload_repeated_safe() raises:
+    """``reload()`` can be called repeatedly without raising —
+    the same trigger may fire on every SIGHUP delivery, every
+    inotify event, or every cron tick. Cert-rotation deployments
+    rely on this."""
+    var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+    var acc = TlsAcceptor(cfg^)
+    for _ in range(10):
+        acc.reload()
+
+
 def test_acceptor_info_placeholder_returns_empty() raises:
     var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
     var acc = TlsAcceptor(cfg^)
