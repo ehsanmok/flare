@@ -95,6 +95,7 @@ from .header_view import HeaderMapView, parse_header_view
 from .request_view import RequestView, parse_request_view
 from .body import Body, ChunkSource, InlineBody, ChunkedBody, drain_body
 from .streaming_response import StreamingResponse
+from .streaming_serialize import serialize_streaming_response
 from .url import Url, UrlParseError
 from .request import Request, Method
 from .response import Response, Status

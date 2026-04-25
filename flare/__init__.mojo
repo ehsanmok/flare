@@ -475,6 +475,7 @@ from .http.body import (
     drain_body,
 )
 from .http.streaming_response import StreamingResponse
+from .http.streaming_serialize import serialize_streaming_response
 from .http.url import Url, UrlParseError
 from .http.request import Request, Method
 from .http.response import Response, Status
