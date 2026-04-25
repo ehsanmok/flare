@@ -27,7 +27,7 @@ def main() raises:
     srv.serve(r^, num_workers=4)
 ```
 
-flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard to misuse under load and easy to operate*. The v0.5 work is about exactly that. See [`docs/operational-guarantees.md`](docs/operational-guarantees.md) for the concern-by-concern table of what flare handles for you (partial reads/writes, cancellation, graceful shutdown, sanitised error bodies, per-request deadlines, header/body limits, RFC 7230 validation) versus what's still your job, and what's still missing — streaming response bodies (v0.5.0 Step 2), server-side TLS (v0.5.0 Step 3), HTTP/2 (v0.6), public `async`/`await` (v1.0, gated on Mojo). HTTP/3, WebTransport, and `h2c` are permanent non-goals.
+flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard to misuse under load and easy to operate*. The v0.5 work is about exactly that. See [`docs/operational-guarantees.md`](docs/operational-guarantees.md) for the concern-by-concern table of what flare handles for you (partial reads/writes, cancellation, graceful shutdown, sanitised error bodies, per-request deadlines, header/body limits, RFC 7230 validation, zero-copy reads via `RequestView[origin]`, `Body` / `ChunkSource` streaming primitives + chunked-framing serializer, server-side TLS via `TlsAcceptor` + OpenSSL FFI) versus what's still your job, and what's still missing — HTTP/2 (v0.6), public `async`/`await` (v1.0, gated on Mojo). HTTP/3, WebTransport, and `h2c` are permanent non-goals.
 
 ## Quick start
 
@@ -127,7 +127,7 @@ Round-trip examples for each — `04_tcp_echo`, `06_websocket_echo`, `11_udp`, `
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455)
 flare.http     HTTP/1.1 client + reactor server + Cancel + Handler / Router / App
-flare.tls      TLS 1.2/1.3 (OpenSSL, client today; server in v0.5.0 Step 3)
+flare.tls      TLS 1.2/1.3 (OpenSSL, both client and server since v0.5.0; reactor-loop integration follow-up)
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.dns      getaddrinfo (dual-stack)
