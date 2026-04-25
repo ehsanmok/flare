@@ -51,6 +51,7 @@ struct Logged[Inner: Handler](Handler):
 ```
 """
 
+from .cancel import Cancel
 from .request import Request
 from .response import Response
 
@@ -187,3 +188,125 @@ struct FnHandlerCT[F: def(Request) raises thin -> Response](Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         """Direct call to the comptime-bound function ``F``."""
         return Self.F(req)
+
+
+# ── CancelHandler trait + WithCancel adapter (v0.5.0 Step 1) ────────────────
+
+
+trait CancelHandler(ImplicitlyDestructible, Movable):
+    """A request-to-response contract that takes a ``Cancel`` token.
+
+    The reactor calls ``serve(req, cancel)`` once per parsed request.
+    The handler reads ``cancel.cancelled()`` between expensive steps
+    and returns early when the cell flips.
+
+    Mojo as of v0.26.3.0.dev2026042205 cannot express "trait B refines
+    trait A by adding an extra parameter to the same method," so
+    ``CancelHandler`` is a sibling trait to ``Handler`` rather than a
+    subtype. Adapter ``WithCancel[H: Handler]`` forwards a plain
+    ``Handler`` to a ``CancelHandler`` shape (ignoring ``cancel``);
+    pass it to ``HttpServer.serve_cancellable`` to plug existing
+    ``Handler`` code into the cancel-aware reactor path.
+
+    Cancellation is cooperative: if the handler never reads
+    ``cancel``, it runs to completion as before. The reactor flips
+    the cell on:
+
+    - ``CancelReason.PEER_CLOSED`` — peer FIN before response queued.
+    - ``CancelReason.TIMEOUT`` — a deadline expired (commit 5).
+    - ``CancelReason.SHUTDOWN`` — drain mode (commit 6).
+
+    Example:
+        ```mojo
+        from flare.http import CancelHandler, Cancel, Request, Response, ok
+
+        @fieldwise_init
+        struct SlowHandler(CancelHandler, Copyable, Movable):
+            fn serve(self, req: Request, cancel: Cancel) raises -> Response:
+                for i in range(100):
+                    if cancel.cancelled():
+                        return ok("partial: " + String(i))
+                    # ... one expensive step ...
+                return ok("done")
+        ```
+    """
+
+    def serve(self, req: Request, cancel: Cancel) raises -> Response:
+        """Produce a ``Response`` for ``req``, observing ``cancel``.
+
+        Args:
+            req:    The incoming request.
+            cancel: Per-request cancel token. Polled by the handler
+                between expensive steps; the reactor flips the cell
+                on peer FIN, deadline, or drain.
+
+        Returns:
+            The response to send back to the client.
+
+        Raises:
+            Error: Any error; the reactor maps this to a 500 response.
+        """
+        ...
+
+
+@fieldwise_init
+struct WithCancel[H: Handler & Copyable & Movable](
+    CancelHandler, Copyable, Movable
+):
+    """Adapter that lets a plain ``Handler`` plug into the
+    cancel-aware reactor path.
+
+    ``WithCancel[H]`` ignores the ``cancel`` argument and forwards
+    every request to ``H.serve(req)``. Use when you have a stateful
+    handler that does not need to observe cancellation but the
+    surrounding code is using ``HttpServer.serve_cancellable``
+    (because a sibling handler does, or because the user wants the
+    consistent type signature).
+
+    This is the design-doc "blanket impl from the existing 1-arg
+    ``Handler.serve``" expressed as an explicit Mojo adapter, since
+    Mojo currently lacks the trait-method-overloading needed to do
+    it implicitly. See the ``CancelHandler`` docstring.
+
+    Wrapping is zero-overhead at runtime: the inner ``H.serve(req)``
+    call is the only generated work, and Mojo monomorphises away the
+    adapter's struct field for stateless ``H``.
+
+    Example:
+        ```mojo
+        from flare.http import (
+            HttpServer, Router, WithCancel, Request, Response, ok,
+        )
+        from flare.net import SocketAddr
+
+        def hello(req: Request) raises -> Response:
+            return ok("hello")
+
+        def main() raises:
+            var r = Router()
+            r.get("/", hello)
+            var srv = HttpServer.bind(SocketAddr.localhost(8080))
+            # Pass through the cancel-aware path even though the
+            # handler doesn't observe cancellation.
+            srv.serve_cancellable(WithCancel[Router](r^))
+        ```
+    """
+
+    var inner: Self.H
+    """Wrapped plain handler; ``serve(req)`` is called from the
+    cancel-aware ``serve(req, cancel)``."""
+
+    @always_inline
+    def serve(self, req: Request, cancel: Cancel) raises -> Response:
+        """Ignore ``cancel`` and forward to ``self.inner.serve(req)``.
+
+        Args:
+            req:    The incoming request.
+            cancel: Per-request cancel token. **Ignored** by the
+                adapter; the wrapped ``Handler`` does not observe
+                cancellation.
+
+        Returns:
+            Whatever ``self.inner.serve(req)`` returns.
+        """
+        return self.inner.serve(req)

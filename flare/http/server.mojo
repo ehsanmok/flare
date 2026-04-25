@@ -12,7 +12,7 @@ Key performance characteristics:
 from std.memory import memcpy
 from std.ffi import c_int, c_uint, external_call
 
-from .handler import Handler
+from .handler import Handler, CancelHandler
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
@@ -351,6 +351,39 @@ struct HttpServer(Movable):
             runtime_config,
             runtime_handler,
             self._stopping,
+        )
+
+    def serve_cancellable[
+        CH: CancelHandler
+    ](mut self, var handler: CH,) raises:
+        """Run the cancel-aware reactor loop with a ``CancelHandler``
+        (v0.5.0 Step 1).
+
+        Single-threaded entry point; the multicore variant lands in a
+        future commit. The reactor allocates one ``CancelCell`` per
+        connection, hands a ``Cancel`` handle bound to it into
+        ``handler.serve(req, cancel)``, and flips the cell on:
+
+        - ``CancelReason.PEER_CLOSED`` — peer FIN observed before the
+          response was queued.
+        - ``CancelReason.TIMEOUT`` — wired in commit 5 of v0.5.0 Step 1.
+        - ``CancelReason.SHUTDOWN`` — wired in commit 6 of v0.5.0 Step 1.
+
+        For plain ``Handler``s that don't observe cancellation, wrap
+        with ``WithCancel[H](inner=h)`` to plug them into this entry
+        point unchanged.
+
+        Args:
+            handler: Cancel-aware request handler (ownership transferred).
+
+        Raises:
+            NetworkError: On fatal listener errors.
+        """
+        from ._server_reactor_impl import run_reactor_loop_cancel
+
+        self._stopping = False
+        run_reactor_loop_cancel(
+            self._listener, self.config, handler, self._stopping
         )
 
     def serve_static(mut self, resp: StaticResponse) raises:

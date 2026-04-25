@@ -33,7 +33,8 @@ from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
 from std.memory import UnsafePointer, alloc, memcpy, stack_allocation
 from std.sys.info import CompilationTarget
 
-from flare.http.handler import Handler
+from flare.http.cancel import Cancel, CancelCell, CancelReason
+from flare.http.handler import Handler, CancelHandler
 from flare.http.request import Request
 from flare.http.response import Response
 from flare.http.server import (
@@ -143,6 +144,14 @@ struct ConnHandle(Movable):
     ``req.peer``. Stored here (not just on each ``Request``) because
     keep-alive connections re-parse multiple requests across a single
     ``ConnHandle`` lifetime, and the peer is identical for all of them."""
+    var cancel_cell: CancelCell
+    """Per-connection cancel cell (v0.5.0 Step 1). The reactor flips
+    its ``Int`` to a non-zero ``CancelReason`` on peer FIN, deadline
+    (commit 5), or drain (commit 6); ``on_readable_cancel`` hands a
+    ``Cancel`` handle bound to this cell into
+    ``CancelHandler.serve(req, cancel)``. Reset between pipelined
+    requests so a cancel reason on one request doesn't leak into
+    the next."""
     var state: Int
     var read_buf: List[UInt8]
     """Incoming request bytes accumulated across partial reads."""
@@ -172,7 +181,9 @@ struct ConnHandle(Movable):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    def __init__(out self, var stream: TcpStream, read_buffer_size: Int = 8192):
+    def __init__(
+        out self, var stream: TcpStream, read_buffer_size: Int = 8192
+    ) raises:
         """Construct a ConnHandle that owns ``stream`` in STATE_READING.
 
         Args:
@@ -186,6 +197,7 @@ struct ConnHandle(Movable):
         # inaccessible once we transfer ownership into ``self._stream``.
         self.peer = stream.peer_addr()
         self._stream = stream^
+        self.cancel_cell = CancelCell()
         self.state = STATE_READING
         self.read_buf = List[UInt8](capacity=read_buffer_size)
         self.headers_end = -1
@@ -336,6 +348,144 @@ struct ConnHandle(Movable):
 
         # Compact the read buffer: drop the processed request, keep the
         # remainder (pipelining or prefetched next request).
+        if self.body_total > 0 and self.body_total <= len(self.read_buf):
+            var leftover = List[UInt8](
+                capacity=len(self.read_buf) - self.body_total
+            )
+            for i in range(self.body_total, len(self.read_buf)):
+                leftover.append(self.read_buf[i])
+            self.read_buf = leftover^
+        self.headers_end = -1
+        self.content_length = 0
+        self.body_total = -1
+
+        self._serialize_response(resp^, not close_after)
+        return self._transition_to_writing()
+
+    def on_readable_cancel[
+        CH: CancelHandler
+    ](mut self, ref handler: CH, config: ServerConfig,) raises -> StepResult:
+        """Cancel-aware variant of ``on_readable`` (v0.5.0 Step 1).
+
+        Identical to ``on_readable`` except the per-connection
+        ``CancelCell`` is reset to ``NONE`` at the top of each
+        request, flipped to ``PEER_CLOSED`` on ``recv == 0``
+        observed before the handler runs, and a ``Cancel`` handle
+        bound to the cell is passed to ``CH.serve(req, cancel)``.
+
+        Future commits in v0.5.0 Step 1 hook deadline (commit 5) and
+        drain (commit 6) flips through the same cell.
+        """
+        if self.state != STATE_READING:
+            return StepResult(
+                want_read=False, want_write=self.state == STATE_WRITING
+            )
+
+        # Reset the cancel cell at the start of each request so a
+        # cancellation observed on a previous pipelined request does
+        # not leak into this one. Idempotent on the first request of
+        # a connection because the cell is already ``NONE`` from
+        # construction.
+        self.cancel_cell.reset()
+
+        var chunk = stack_allocation[8192, UInt8]()
+        while True:
+            var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
+            if got > 0:
+                var old_len = len(self.read_buf)
+                var got_int = Int(got)
+                self.read_buf.resize(old_len + got_int, UInt8(0))
+                var dst = self.read_buf.unsafe_ptr() + old_len
+                memcpy(dest=dst, src=chunk, count=got_int)
+                if (
+                    len(self.read_buf)
+                    > config.max_header_size + config.max_body_size
+                ):
+                    self._queue_error(413, "Content Too Large")
+                    return self._transition_to_writing()
+            elif got == 0:
+                # Peer closed while we were still reading — flip
+                # cancel for any cancel-aware code that runs after
+                # this point in the loop, then mark the connection
+                # for shutdown.
+                self.cancel_cell.flip(CancelReason.PEER_CLOSED)
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    break
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+
+        if self.headers_end < 0:
+            var end = _find_crlfcrlf(self.read_buf, 0)
+            if end < 0:
+                if len(self.read_buf) > config.max_header_size:
+                    self._queue_error(431, "Request Header Fields Too Large")
+                    return self._transition_to_writing()
+                return StepResult(
+                    want_read=True,
+                    want_write=False,
+                    idle_timeout_ms=config.idle_timeout_ms,
+                )
+            self.headers_end = end
+            self.content_length = _scan_content_length(
+                self.read_buf, self.headers_end
+            )
+            if self.content_length > config.max_body_size:
+                self._queue_error(413, "Content Too Large")
+                return self._transition_to_writing()
+            self.body_total = self.headers_end + self.content_length
+
+        if len(self.read_buf) < self.body_total:
+            return StepResult(
+                want_read=True,
+                want_write=False,
+                idle_timeout_ms=config.idle_timeout_ms,
+            )
+
+        var req: Request
+        try:
+            req = _parse_http_request_bytes(
+                Span[UInt8, _](self.read_buf)[: self.body_total],
+                config.max_header_size,
+                config.max_body_size,
+                config.max_uri_length,
+                self.peer,
+                config.expose_error_messages,
+            )
+        except:
+            self._queue_error(400, "Bad Request")
+            return self._transition_to_writing()
+
+        var conn_hdr = _ascii_lower(req.headers.get("connection"))
+        var is_http10 = req.version == "HTTP/1.0"
+        var close_after = False
+        if conn_hdr == "close":
+            close_after = True
+        elif is_http10 and conn_hdr != "keep-alive":
+            close_after = True
+
+        self.keepalive_count += 1
+        if self.keepalive_count >= config.max_keepalive_requests:
+            close_after = True
+        if not config.keep_alive:
+            close_after = True
+        self.should_close = close_after
+
+        var resp: Response
+        try:
+            # Hand the handler a cancel handle bound to this
+            # connection's cancel cell. The cell outlives the handler
+            # call (it's owned by ``self``).
+            resp = handler.serve(req^, self.cancel_cell.handle())
+        except:
+            self._queue_error(500, "Internal Server Error")
+            return self._transition_to_writing()
+
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
             var leftover = List[UInt8](
                 capacity=len(self.read_buf) - self.body_total
@@ -1193,6 +1343,121 @@ def run_reactor_loop_static(
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
 
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn(leftover[i], conns, timers, reactor)
+
+
+def run_reactor_loop_cancel[
+    CH: CancelHandler
+](
+    mut listener: TcpListener,
+    config: ServerConfig,
+    ref handler: CH,
+    ref stopping: Bool,
+) raises:
+    """Cancel-aware variant of ``run_reactor_loop`` (v0.5.0 Step 1).
+
+    Identical control flow to ``run_reactor_loop`` but drives each
+    connection through ``ConnHandle.on_readable_cancel(handler,
+    config)`` instead of ``on_readable``, so the handler receives
+    a ``Cancel`` token bound to the connection's per-request
+    ``CancelCell``.
+
+    The reactor flips that cell on:
+    - ``CancelReason.PEER_CLOSED`` — peer FIN observed before the
+      response was queued.
+    - ``CancelReason.TIMEOUT`` — wired in commit 5 of v0.5.0 Step 1.
+    - ``CancelReason.SHUTDOWN`` — wired in commit 6 of v0.5.0 Step 1.
+
+    Args:
+        listener: Bound and listening ``TcpListener`` (caller-owned;
+            borrowed for accept / fd access).
+        config:   Server configuration.
+        handler:  Per-request cancel-aware callback.
+        stopping: Checked each iteration; flipping it stops the loop
+            and closes in-flight connections.
+    """
+    listener._socket.set_nonblocking(True)
+    var listener_fd = listener._socket.fd
+
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            if fd_tok in conns:
+                _cleanup_conn(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop(listener, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                var last_step = StepResult()
+                if evt.is_readable():
+                    last_step = ch_ptr[].on_readable_cancel(handler, config)
+                    step_done = last_step.done
+                    var cycles = 0
+                    while (not step_done) and cycles < 3:
+                        cycles += 1
+                        if (
+                            last_step.want_write
+                            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                        ):
+                            last_step = ch_ptr[].on_writable(config)
+                            step_done = last_step.done
+                        elif (
+                            last_step.want_read
+                            and len(ch_ptr[].read_buf) > 0
+                            and ch_ptr[].state == STATE_READING
+                        ):
+                            last_step = ch_ptr[].on_readable_cancel(
+                                handler, config
+                            )
+                            step_done = last_step.done
+                        else:
+                            break
+                elif evt.is_writable():
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+                if not step_done:
+                    _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn(fd, conns, timers, reactor)
+
+    # Graceful shutdown: close all active connections. (Drain mode
+    # with a deadline lands in commit 6 of v0.5.0 Step 1.)
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)

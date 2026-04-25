@@ -89,11 +89,12 @@ def main() raises:
 ```
 """
 
+from .cancel import Cancel, CancelCell, CancelReason
 from .headers import HeaderMap, HeaderInjectionError
 from .url import Url, UrlParseError
 from .request import Request, Method
 from .response import Response, Status
-from .handler import Handler, FnHandler, FnHandlerCT
+from .handler import Handler, CancelHandler, WithCancel, FnHandler, FnHandlerCT
 from .router import Router
 from .routes import ComptimeRoute, ComptimeRouter
 from .app import App, State
