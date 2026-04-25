@@ -1,0 +1,60 @@
+# Cookbook
+
+One-line index of `examples/NN_*.mojo`. Each example is run as part
+of `pixi run tests` and on CI, so they stay green with the code.
+Every example is a single self-contained file: clone, run, see what
+changes when you tweak it.
+
+| File | What it shows |
+|---|---|
+| [`01_addresses.mojo`](../examples/01_addresses.mojo) | `IpAddr`, `SocketAddr`, v4 / v6 classification |
+| [`02_dns_resolution.mojo`](../examples/02_dns_resolution.mojo) | `resolve()`, `resolve_v4()`, `resolve_v6()`, numeric-IP passthrough |
+| [`03_error_handling.mojo`](../examples/03_error_handling.mojo) | typed error hierarchy and the context each error carries |
+| [`04_tcp_echo.mojo`](../examples/04_tcp_echo.mojo) | `TcpListener` + `TcpStream` round-trip, TCP options |
+| [`05_http_get.mojo`](../examples/05_http_get.mojo) | `HttpClient` GET / POST / PUT / PATCH / DELETE / HEAD |
+| [`06_websocket_echo.mojo`](../examples/06_websocket_echo.mojo) | `WsClient` connect, send, receive |
+| [`07_ergonomics.mojo`](../examples/07_ergonomics.mojo) | high-level requests-style API (`BufReader`, `WsMessage`, `Auth`) |
+| [`08_http_server.mojo`](../examples/08_http_server.mojo) | `HttpServer` with routing, JSON responses, response helpers |
+| [`09_ws_server.mojo`](../examples/09_ws_server.mojo) | `WsServer` handshake + frame loop |
+| [`10_encoding.mojo`](../examples/10_encoding.mojo) | gzip / deflate compress and decompress |
+| [`11_udp.mojo`](../examples/11_udp.mojo) | `UdpSocket.bind`, `send_to`, `recv_from`, `DatagramTooLarge` |
+| [`12_tls.mojo`](../examples/12_tls.mojo) | `TlsConfig`, `TlsStream.connect`, raw TLS handshake + GET |
+| [`13_cookies.mojo`](../examples/13_cookies.mojo) | `Cookie`, `CookieJar`, `parse_cookie_header`, `parse_set_cookie_header` |
+| [`14_reactor.mojo`](../examples/14_reactor.mojo) | direct `flare.runtime.Reactor` usage for custom protocols |
+| [`15_router.mojo`](../examples/15_router.mojo) | `Router` with path parameters, method dispatch, 404 / 405 |
+| [`16_state.mojo`](../examples/16_state.mojo) | `App[Counters]` + typed `State[T]` injected into a middleware handler |
+| [`17_multicore.mojo`](../examples/17_multicore.mojo) | `HttpServer.serve(..., num_workers=default_worker_count())` |
+| [`18_middleware.mojo`](../examples/18_middleware.mojo) | Middleware composition: `Logger` wraps `RequireAuth` wraps `Router` |
+| [`19_extractors.mojo`](../examples/19_extractors.mojo) | Typed extractors: `Path[T, name]`, `Query`, `Header`, `Json`, and reflective `Extracted[H]` auto-injection |
+| [`20_comptime_router.mojo`](../examples/20_comptime_router.mojo) | `ComptimeRouter[routes]` with comptime segment parsing and per-route dispatch unroll |
+| [`21_static_response.mojo`](../examples/21_static_response.mojo) | Pre-encoded `StaticResponse` + `HttpServer.serve_static` fast path |
+| [`22_cancel.mojo`](../examples/22_cancel.mojo) | (v0.5.0 Step 1) `CancelHandler` polling `cancel.cancelled()` between expensive steps |
+| [`23_drain.mojo`](../examples/23_drain.mojo) | (v0.5.0 Step 1) `HttpServer.drain(timeout_ms)` + `install_drain_on_sigterm` |
+
+Run any single example with `pixi run example-<name>`; see the full
+list in [`pixi.toml`](../pixi.toml).
+
+---
+
+## "I want to..." quick links
+
+| Goal | Start here |
+|---|---|
+| Serve hello-world | [`08_http_server.mojo`](../examples/08_http_server.mojo) |
+| Add a route with a parameter | [`15_router.mojo`](../examples/15_router.mojo) |
+| Pass typed inputs to a handler | [`19_extractors.mojo`](../examples/19_extractors.mojo) |
+| Share state across handlers | [`16_state.mojo`](../examples/16_state.mojo) |
+| Stack middleware | [`18_middleware.mojo`](../examples/18_middleware.mojo) |
+| Scale to all cores | [`17_multicore.mojo`](../examples/17_multicore.mojo) |
+| Skip the parser entirely | [`21_static_response.mojo`](../examples/21_static_response.mojo) |
+| Compile-time route table | [`20_comptime_router.mojo`](../examples/20_comptime_router.mojo) |
+| Detect mid-handler client disconnect | [`22_cancel.mojo`](../examples/22_cancel.mojo) |
+| Drain on SIGTERM | [`23_drain.mojo`](../examples/23_drain.mojo) |
+| Make HTTP requests | [`05_http_get.mojo`](../examples/05_http_get.mojo) |
+| Talk WebSocket | [`06_websocket_echo.mojo`](../examples/06_websocket_echo.mojo) |
+| Manage cookies | [`13_cookies.mojo`](../examples/13_cookies.mojo) |
+| Drive the reactor directly | [`14_reactor.mojo`](../examples/14_reactor.mojo) |
+| Use TLS as a client | [`12_tls.mojo`](../examples/12_tls.mojo) |
+
+For "what does flare guarantee under load?", see
+[`operational-guarantees.md`](operational-guarantees.md).

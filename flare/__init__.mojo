@@ -1,12 +1,6 @@
-"""The fastest networking library for Mojo🔥, from raw sockets up to HTTP/1.1
-servers and WebSocket clients. Written in Mojo with a small FFI footprint
-(libc, plus OpenSSL for TLS).
-
-Write a typed request handler, plug it into ``serve(..., num_workers=N)``,
-and get a thread-per-core HTTP server that does **257K req/s on 4 cores**
-on Linux EPYC (TFB plaintext — 4.4x linear, 3.6x nginx-1w, 7x Go
-``net/http``). Kqueue on macOS, epoll on Linux, no thread-per-connection,
-no locks on the hot path.
+"""flare — a Mojo HTTP/1.1 server you can put in front of users, plus the
+raw TCP, UDP, TLS, DNS, and WebSocket primitives it's built on. Written
+in Mojo with a small FFI footprint (libc, plus OpenSSL for TLS).
 
 ```mojo
 from flare.http import HttpServer, Router, Request, Response, ok
@@ -22,35 +16,33 @@ def main() raises:
     srv.serve(r^, num_workers=4)
 ```
 
-## What you get
+## What flare is
 
-Handlers are plain ``def`` functions you plug into
-``serve(..., num_workers=N)``. Want path parameters and method dispatch?
-Pass a ``Router``. Shared state? Wrap the router in ``App[S]``.
-Middleware is a ``Handler`` that holds another ``Handler``, no callback
-chain threaded through the request. If a handler needs a path parameter
-and a query string, declare those as fields of a struct; flare reflects
-on the field types at compile time and populates each one before
-calling ``handle``. No async, no ``.await``, no per-arity trait dance.
-``ServerConfig`` mistakes fail the build, not the first request.
+One reactor per worker (``kqueue`` on macOS, ``epoll`` on Linux),
+shared-nothing thread-per-core via ``SO_REUSEPORT``, RFC 7230 parser
+with 19 fuzz harnesses, and a ``Handler`` trait that takes plain
+``def`` functions or compiled-down structs. ``num_workers=1`` is a
+single-threaded reactor; ``num_workers=N`` with N >= 2 opens N
+``SO_REUSEPORT`` listeners across N pthread workers with optional
+CPU pinning. Static endpoints can skip the parser entirely with
+``serve_static(resp)``.
 
-Scale by changing one integer. ``num_workers=1`` is a single-threaded
-reactor (``kqueue`` on macOS, ``epoll`` on Linux); on Linux EPYC that
-ties single-worker nginx and beats Go ``net/http`` by roughly 2x.
-``num_workers=N`` with N >= 2 opens N ``SO_REUSEPORT`` listeners across
-N pthread workers with optional CPU pinning. Four pinned workers hit
-257K req/s on the TFB plaintext benchmark, close to linear scaling.
-Static endpoints can skip the parser entirely with
-``serve_static(resp)``: the reactor memcpys pre-encoded bytes straight
-into the socket. WebSocket XOR masking peaks at 112 GB/s on 1 KB
-payloads thanks to SIMD.
+flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard
+to misuse under load and easy to operate*. v0.5.0 Step 1 ships the
+operational core: ``Cancel`` token plumbed to handlers via
+``CancelHandler``, per-request / handler / body-read deadlines,
+``HttpServer.drain(timeout_ms)`` and ``install_drain_on_sigterm``
+for graceful shutdown, sanitised error responses, and ``Request.peer``
+threaded from the accept path. See ``docs/operational-guarantees.md``.
 
-Parsing runs 7 to 9x faster than the next-fastest Mojo HTTP library on
-the same microbenchmarks. The end-of-headers scan is SIMD (32 lanes by
-default, 64 on AVX-512). Dual-stack DNS, RFC 7230 header validation,
-and configurable size limits are built in. 540+ tests, 19 fuzz
-harnesses, 4M+ fuzz runs, zero known crashes to date. Pre-1.0, so the
-API is still moving.
+## What flare doesn't do yet
+
+- **No streaming response bodies** until v0.5.0 Step 2.
+- **No server-side TLS** until v0.5.0 Step 3 (client TLS works).
+- **No public ``async`` / ``await``** — Mojo doesn't ship async yet.
+- **No HTTP/2** until v0.6 (requires server TLS first).
+- **No HTTP/3 / QUIC, no WebTransport, no h2c** — permanent
+  non-goals for the v0.x line.
 
 ## Architecture
 
