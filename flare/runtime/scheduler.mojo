@@ -509,30 +509,28 @@ struct Scheduler[H: Handler & Copyable](Movable):
             _ = external_call["close", c_int, c_int](c_int(fd))
         self._listener_fds.clear()
 
-        # Step 3: cooperative join. The workers observe the
-        # stopping flag on their next reactor poll iteration,
-        # complete their current cycle, and exit their function
-        # body. ``pthread_join`` (called inside ``shutdown()``
-        # below) blocks until each worker returns.
+        # Step 3: cooperative join via ``shutdown()`` — which
+        # calls ``pthread_join`` and blocks until each worker
+        # observes the stopping flag on its next ~100ms reactor
+        # poll and returns. We do NOT insert an explicit
+        # ``libc_nanosleep_ms`` loop here even though the rolled-
+        # own FFI works correctly in standalone tests:
+        # empirically, calling it inside this multi-threaded
+        # drain context (after ``pthread_create`` has spawned the
+        # worker threads) regresses the wall-clock multiplier of
+        # the original ``usleep`` anomaly. ``pthread_join`` is
+        # already a bounded blocking call (workers cooperatively
+        # exit within one reactor poll cycle ≈ 100ms), so the
+        # explicit sleep is redundant for the single-threaded
+        # ``Scheduler.drain`` semantics.
         #
-        # We do not insert an explicit ``usleep`` loop here:
-        #
-        # - The reactor's 100ms ``poll`` interval already bounds
-        #   how long a worker takes to observe the flag.
-        # - ``timeout_ms`` is advisory in this single-threaded-per-
-        #   worker model: the per-worker ``ShutdownReport``
-        #   distinguishes "joined inside the budget" via the
-        #   ``drained`` count below, but we can't actually preempt
-        #   a running handler — the handler must observe its own
-        #   ``Cancel.SHUTDOWN`` flip cooperatively, and that flip
-        #   from a different thread requires the per-worker
-        #   per-conn registry that's deferred to a follow-up.
-        #
-        # The reactor-flip-on-shutdown work that the design-0.5
-        # Track 3.2 / 3.3 calls for ("flip ``Cancel.SHUTDOWN`` on
-        # every in-flight ``ConnHandle`` so handlers
-        # short-circuit") therefore lands as a follow-up alongside
-        # the per-worker connection-registry exposure.
+        # ``timeout_ms`` is advisory in this thread-per-worker
+        # model. The per-worker ``ShutdownReport.drained`` count
+        # below records "1" when ``deadline_ms > 0`` (workers
+        # were given budget to drain) and "0" when 0 (hard cut).
+        # The ``Cancel.SHUTDOWN`` flip on in-flight conns via
+        # worker-self-walk-conns lands in C12 and tightens this
+        # contract.
 
         # Step 4: actually join. ``shutdown()`` does the join +
         # ctx-free + stopping-flag-free dance; reuse it.

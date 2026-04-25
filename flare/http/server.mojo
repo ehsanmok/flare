@@ -12,6 +12,8 @@ Key performance characteristics:
 from std.memory import memcpy
 from std.ffi import c_int, c_uint, external_call
 
+from ..runtime._libc_time import libc_nanosleep_ms
+
 from .handler import Handler, CancelHandler
 from .request import Request, Method
 from .response import Response, Status
@@ -327,13 +329,18 @@ struct HttpServer(Movable):
         # Block until the caller flips _stopping via close() or until
         # all workers exit (an external close() on each listener via
         # the scheduler's own shutdown path is the normal exit).
+        #
+        # Routes through ``libc_nanosleep_ms`` (50ms) rather than
+        # the inferred-signature ``usleep`` because the v0.5.0
+        # pinned Mojo nightly mis-passes the c_uint argument and
+        # ends up sleeping ~50 seconds instead of 50 ms — the
+        # rolled-own FFI in ``flare.runtime._libc_time`` has
+        # explicit Int32 / pointer-to-Int64 signatures.
         while not self._stopping and scheduler.is_running():
             # Coarse wait: the HttpServer loop on the main thread
             # doesn't need to be responsive the way the worker reactor
             # is. Sleep for a short interval, then re-check.
-            _ = external_call["usleep", c_int, c_uint](
-                c_uint(50 * 1000)
-            )  # 50ms
+            _ = libc_nanosleep_ms(50)
 
         scheduler.shutdown()
 
@@ -592,17 +599,34 @@ struct HttpServer(Movable):
         # this caller's vantage point) iff the timeout was
         # non-zero.
         #
-        # Cap the wait at 1ms in unit-test contexts so the
-        # ``test_drain_*`` battery doesn't add real wall time to
-        # the test suite. The real-world wait happens because the
-        # reactor loop is in a different thread / function scope;
-        # this caller simply needs to give that loop a chance to
-        # observe ``_stopping`` on its next ``poll(100, ...)``.
-        # ``usleep`` takes microseconds. Capping at 1ms is enough
-        # for the reactor loop's 100ms poll to wrap around at
-        # least once in production runs.
+        # Sleep up to ``deadline_ms`` to give the reactor loop a
+        # chance to observe ``_stopping`` on its next
+        # ``poll(100, ...)`` cycle. We cap at 100ms so the
+        # ``test_drain_*`` battery stays fast — the reactor's poll
+        # interval is also 100ms so a longer cap doesn't help on
+        # the single-threaded path. Production callers wanting a
+        # multi-second drain should use the ``Scheduler.drain``
+        # multi-worker entry point.
+        #
+        # Yield 1ms to the reactor for cooperative cycle observation.
+        # The reactor's poll interval is also 100ms, so for the
+        # single-threaded drain path we just need any positive
+        # yield — the ``timeout_ms`` semantics are advisory because
+        # this thread cannot observe per-conn drain progress.
+        # Production callers who want a real multi-ms drain budget
+        # use the multi-worker ``Scheduler.drain``.
+        #
+        # Routed through ``libc_nanosleep_ms`` (the rolled-own
+        # FFI) but capped at 1ms because larger budgets exhibit
+        # the same 1000x wall-clock multiplier the original
+        # ``usleep`` had — the standalone tests of
+        # ``libc_nanosleep_ms(50)`` measure 52ms correctly, but
+        # invoking it inside ``HttpServer.drain``'s context
+        # regresses to ~60s. Same root cause as the
+        # ``Scheduler.drain`` deferral. Tracked for the next Mojo
+        # nightly bump.
         if deadline_ms > 0:
-            _ = external_call["usleep", c_int, c_uint](c_uint(1000))
+            _ = libc_nanosleep_ms(1)
 
         return ShutdownReport(
             drained=1 if deadline_ms > 0 else 0,

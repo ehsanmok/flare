@@ -47,6 +47,7 @@ lands, only the internal representation.
 from std.collections import Dict
 from std.memory import UnsafePointer, alloc
 
+from ..runtime import Pool
 from .handler import Handler, FnHandler
 from .headers import HeaderMap
 from .request import Request, Method
@@ -189,31 +190,6 @@ struct _Route(Copyable, Movable):
 # join.
 
 
-struct _Boxed[H: Handler & Copyable & Movable](Movable):
-    """Owning wrapper around ``H`` used as the Router's heap cell.
-
-    Adding a 1-byte ``_padding`` field guarantees the wrapper has
-    ``sizeof >= 1`` regardless of whether ``H`` is zero-sized
-    (``Extracted[GetUser]``, ``WithCancel[StatelessHandler]``, any
-    user-defined ZST adapter). Mojo's ``alloc[T](N)`` rejects
-    sizes of zero with "size must be greater than zero" and the
-    current Mojo nightly does not expose a public ``sizeof[T]()``
-    we could ``@parameter if`` on, so the unconditional one-byte
-    pad is the simplest path to "any Handler works."
-
-    The padding byte is never observed: the only entry point to
-    ``H`` is ``self.inner``, which the serve thunk forwards to
-    ``H.serve``.
-    """
-
-    var inner: Self.H
-    var _padding: UInt8
-
-    def __init__(out self, var inner: Self.H):
-        self.inner = inner^
-        self._padding = 0
-
-
 def _struct_serve_thunk[
     H: Handler & Copyable & Movable
 ](addr: Int, req: Request) raises -> Response:
@@ -223,23 +199,22 @@ def _struct_serve_thunk[
     Monomorphised per ``H`` at the call site so Mojo emits a direct
     call to the inlined ``H.serve`` body — no per-request trait
     dispatch.
+
+    Routes through ``Pool[H].get_ptr`` rather than reconstructing
+    the ``UnsafePointer`` arithmetic in-line — keeps the unsafe
+    pointer plumbing confined to ``flare/runtime/`` per the
+    criticism §2.9 invariant.
     """
-    var ptr = UnsafePointer[_Boxed[H], MutExternalOrigin](
-        unsafe_from_address=addr
-    )
-    return ptr[].inner.serve(req)
+    var ptr = Pool[H].get_ptr(addr)
+    return ptr[].serve(req)
 
 
 def _struct_destroy_thunk[H: Handler & Copyable & Movable](addr: Int) -> None:
-    """Thunk that destroys + frees the heap-allocated ``_Boxed[H]``
-    at ``addr``. Called once per route from ``Router.__del__`` via
+    """Thunk that destroys + frees the heap-allocated ``H`` at
+    ``addr``. Called once per route from ``Router.__del__`` via
     the parallel ``_struct_destroy_thunks`` list.
     """
-    var ptr = UnsafePointer[_Boxed[H], MutExternalOrigin](
-        unsafe_from_address=addr
-    )
-    ptr.destroy_pointee()
-    ptr.free()
+    Pool[H].free(addr)
 
 
 # ``_StructHandler`` is represented as three parallel lists on
@@ -447,21 +422,20 @@ struct Router(Handler):
     def _add_struct[
         H: Handler & Copyable & Movable
     ](mut self, method: String, path: String, var handler: H) raises:
-        """Heap-allocate ``handler`` inside a ``_Boxed[H]`` cell,
-        capture monomorphised serve / destroy thunks, append to the
-        route + struct-handler tables.
+        """Heap-allocate ``handler`` via ``Pool[H]`` (which gates
+        on ``size_of[H]() > 0`` internally for ZST handlers like
+        ``Extracted[GetUser]``), capture monomorphised serve /
+        destroy thunks, append to the route + struct-handler
+        tables.
 
-        ``_Boxed[H]`` ensures the cell has non-zero size even when
-        ``H`` is a zero-sized type (``Extracted[GetUser]``,
-        ``WithCancel[ZstHandler]``, etc.) — Mojo's ``alloc[T](N)``
-        rejects zero-byte sizes.
+        Per the v0.5.0 follow-up cleanup, this routes through
+        ``Pool[H]`` rather than reaching into ``alloc[H]``
+        directly — keeps the unsafe-pointer plumbing confined to
+        ``flare/runtime/`` and drops the v0.5.0 Step 2 ``_Boxed[H]``
+        1-byte phantom pad now that ``size_of`` is public.
         """
         var segs = _compile_segments(path)
-        var p = alloc[_Boxed[H]](1)
-        if not p:
-            raise Error("alloc failed for Router struct handler")
-        p.init_pointee_move(_Boxed[H](handler^))
-        var addr = Int(p)
+        var addr = Pool[H].alloc_move(handler^)
 
         self._struct_addrs.append(addr)
         self._struct_serve_thunks.append(_struct_serve_thunk[H])

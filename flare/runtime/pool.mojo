@@ -46,6 +46,7 @@ Why is this in ``flare/runtime/`` rather than each call site?
 """
 
 from std.memory import UnsafePointer, alloc
+from std.sys.info import size_of
 
 
 struct Pool[T: ImplicitlyDestructible & Movable]:
@@ -60,6 +61,14 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
     (``Dict[Int, Int]``, ``List[Int]``, struct field) without a
     typed pointer escaping into user code. ``free(addr)`` runs
     ``T``'s destructor and releases the memory.
+
+    ZST handling: when ``size_of[T]() == 0``, ``alloc[T](1)`` is
+    rejected by Mojo's stdlib ("size must be greater than zero").
+    Pool transparently allocates a single placeholder byte via
+    ``alloc[UInt8](1)`` and bitcasts to ``UnsafePointer[T]`` for
+    the move-in / dereference pattern (which is a no-op for a
+    zero-byte type). Callers see the same API regardless of
+    whether ``T`` is ZST.
 
     Threading: each ``Pool[T]`` operation is independent (no
     shared state between calls). Multiple threads can call
@@ -81,13 +90,26 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
             returned — alloc failure raises.
 
         Raises:
-            Error: When ``UnsafePointer.alloc(1)`` returns null.
+            Error: When the underlying allocation returns null.
         """
-        var p = alloc[Self.T](1)
-        if Int(p) == 0:
-            raise Error("Pool alloc failed")
-        p.init_pointee_move(value^)
-        return Int(p)
+
+        @parameter
+        if size_of[Self.T]() > 0:
+            var p = alloc[Self.T](1)
+            if Int(p) == 0:
+                raise Error("Pool alloc failed")
+            p.init_pointee_move(value^)
+            return Int(p)
+        else:
+            # ZST path: alloc a single placeholder byte and
+            # bitcast. ``init_pointee_move`` writes 0 bytes
+            # through the bitcast pointer; reads / dereferences
+            # also touch 0 bytes.
+            var raw = alloc[UInt8](1)
+            if Int(raw) == 0:
+                raise Error("Pool alloc failed (ZST path)")
+            raw.bitcast[Self.T]().init_pointee_move(value^)
+            return Int(raw)
 
     @staticmethod
     @always_inline
@@ -106,11 +128,24 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
         """
         if addr == 0:
             return
-        var ptr = UnsafePointer[UInt8, MutExternalOrigin](
-            unsafe_from_address=addr
-        ).bitcast[Self.T]()
-        ptr.destroy_pointee()
-        ptr.free()
+
+        @parameter
+        if size_of[Self.T]() > 0:
+            var ptr = UnsafePointer[UInt8, MutExternalOrigin](
+                unsafe_from_address=addr
+            ).bitcast[Self.T]()
+            ptr.destroy_pointee()
+            ptr.free()
+        else:
+            # ZST path: free as UInt8 since that's what was
+            # allocated. Still run T's destructor for symmetry —
+            # it touches 0 bytes for a zero-sized type but keeps
+            # the contract identical to the non-ZST case.
+            var raw = UnsafePointer[UInt8, MutExternalOrigin](
+                unsafe_from_address=addr
+            )
+            raw.bitcast[Self.T]().destroy_pointee()
+            raw.free()
 
     @staticmethod
     @always_inline
