@@ -1,5 +1,6 @@
 """Blocking-escape hatch: ``block_in_pool`` (v0.5.0 Step 3 /
-Track 2.5).
+Track 2.5, with C11 v0.5.0 follow-up tightening the cooperative-
+cancel contract).
 
 The reactor's hot path is single-threaded per worker; any
 blocking syscall (synchronous DB query, libc ``getaddrinfo``,
@@ -87,6 +88,8 @@ def block_in_pool[
         Error: If ``cancel`` is already flipped at entry, or if
                ``work()`` raises.
     """
+    # Pre-flight cancel check: short-circuit before spawning any
+    # work if the cell is already flipped.
     if cancel.cancelled():
         var reason = cancel.reason()
         if reason == CancelReason.PEER_CLOSED:
@@ -97,4 +100,32 @@ def block_in_pool[
             raise Error("block_in_pool: cancelled (shutdown)")
         else:
             raise Error("block_in_pool: cancelled")
-    return work()
+    # In-thread fallback runs ``work()`` synchronously — the
+    # parallelism-while-blocked benefit lands with the pthread
+    # pool follow-up. The tested contract is identical: handlers
+    # write production-shape code today, pick up the parallelism
+    # automatically when the pool ships.
+    var result = work()
+    # Post-flight cancel check: if the cell flipped while
+    # ``work()`` ran (peer FIN, deadline, drain), surface that
+    # to the caller. Catches the race where work completed but
+    # the request is no longer valuable. Pool-implementation
+    # callers will get the same semantics through the
+    # mid-flight cancel-poll inside the worker thread.
+    if cancel.cancelled():
+        var reason = cancel.reason()
+        if reason == CancelReason.PEER_CLOSED:
+            raise Error(
+                "block_in_pool: cancelled mid-flight (peer closed)"
+            )
+        elif reason == CancelReason.TIMEOUT:
+            raise Error(
+                "block_in_pool: cancelled mid-flight (timeout)"
+            )
+        elif reason == CancelReason.SHUTDOWN:
+            raise Error(
+                "block_in_pool: cancelled mid-flight (shutdown)"
+            )
+        else:
+            raise Error("block_in_pool: cancelled mid-flight")
+    return result^

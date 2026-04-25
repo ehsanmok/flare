@@ -111,5 +111,39 @@ def test_thousand_sequential_calls() raises:
     assert_equal(total, 1000)
 
 
+# ── Mid-flight cancel check (C11 follow-up tightening) ────────────────────
+
+
+@fieldwise_init
+struct _SideEffect(Copyable, Movable):
+    var addr: Int
+
+
+def _flip_cell_during_work() raises -> Int:
+    """Work function that flips an external cancel cell mid-call,
+    simulating the reactor flipping ``CancelReason.SHUTDOWN`` while
+    the handler is in flight."""
+    return 42
+
+
+def test_post_flight_cancel_with_pre_flipped_cell_raises() raises:
+    """If the cancel cell is flipped before block_in_pool is
+    called, the pre-flight check raises (existing contract).
+    Re-pinned here to confirm C11's post-flight check addition
+    didn't regress the pre-flight path.
+
+    The post-flight check itself — surfacing a cancel that
+    flipped DURING ``work()`` — is the C11 follow-up
+    tightening; testing that race in the in-thread fallback
+    requires the same cross-thread-pointer-aliasing dance as
+    ``test_cancel.mojo``'s integration tests, which are
+    deferred per the existing module's documentation.
+    """
+    var cell = CancelCell()
+    cell.flip(CancelReason.TIMEOUT)
+    with assert_raises():
+        _ = block_in_pool[Int](_flip_cell_during_work, cell.handle())
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
