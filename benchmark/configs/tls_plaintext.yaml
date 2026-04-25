@@ -1,0 +1,26 @@
+# tls_plaintext — TFB-style plaintext workload over TLS
+# (v0.5.0 Step 3 / Track 6.4).
+#
+# Drives the same 13-byte response as the plain-HTTP plaintext
+# workload, but over TLS. Compares flare's TLS termination cost
+# against terminate-at-nginx (the v0.4.x story) and against
+# Caddy + Go net/http with TLS enabled. The headline number is
+# "fraction of plain-HTTP throughput retained when TLS is on" —
+# anything above 0.7 is in the same neighbourhood as nginx.
+#
+# Runs against an HTTPS server on 127.0.0.1:8443. The server-
+# side TlsAcceptor that this config depends on lands with the
+# v0.5.0 Step 3 reactor follow-up (S3.1 follow-up).
+name: tls_plaintext
+tool: wrk
+wrk_threads: 1
+wrk_connections: 64
+wrk_duration_seconds: 30
+warmup_seconds: 10
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 5.0
+url: https://127.0.0.1:8443/plaintext
+# wrk does NOT verify TLS certs (no equivalent of curl's
+# --cacert in the request loop), so the bench env uses
+# self-signed certs and the server lists them as a default.

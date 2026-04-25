@@ -1,0 +1,22 @@
+# tls_handshake — full handshake per request (v0.5.0 Step 3 /
+# Track 6.4).
+#
+# Every request opens a fresh TLS connection (no session resumption,
+# no keep-alive) so the per-request cost is dominated by the
+# handshake. Stresses TlsAcceptor's SSL_accept state machine and
+# the cert / key load path.
+#
+# The headline number is handshakes-per-second; pair with
+# tls_plaintext (which keeps the connection open) to read the
+# steady-state cost vs the handshake cost.
+name: tls_handshake
+tool: wrk
+wrk_threads: 4
+wrk_connections: 256
+wrk_duration_seconds: 30
+warmup_seconds: 10
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 5.0
+url: https://127.0.0.1:8443/plaintext
+wrk_script: benchmark/scripts/wrk_tls_handshake.lua

@@ -313,7 +313,19 @@ pixi run --environment bench bench-mixed-keepalive
 # v0.5.0 Step 2 — wrk2 + tail percentiles
 pixi run --environment bench bench-install-wrk2  # one-time build
 pixi run --environment bench bench-tail-quick    # wrk2 -R10000 --latency
+
+# v0.5.0 Step 3 — TLS bench setup (self-signed cert under build/)
+pixi run --environment bench bench-tls-setup
 ```
+
+The TLS bench configs `tls_plaintext.yaml` (steady-state TLS
+throughput, connections kept open) and `tls_handshake.yaml`
+(handshake-per-request, `Connection: close`) are wired into the
+harness; they drive a TLS-terminating flare server on
+`127.0.0.1:8443`. The server-side `TlsAcceptor` that those
+configs depend on lands with the v0.5.0 Step 3 reactor
+follow-up; until then the configs are ready to fire as soon as
+the server-side handshake state machine is in place.
 
 Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.
 

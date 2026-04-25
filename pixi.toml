@@ -96,6 +96,13 @@ bench-install-wrk2        = "bash benchmark/scripts/_install_wrk2.sh"
 # parameters.
 bench-tail-quick          = "bash benchmark/scripts/_run_tail_quick.sh"
 
+# v0.5.0 Step 3 — TLS bench setup. Generates a self-signed cert
+# at build/tls-bench-certs/ for the tls_plaintext / tls_handshake
+# configs to use. The server-side TlsAcceptor that drives these
+# configs end-to-end lands with the v0.5.0 Step 3 reactor
+# follow-up (S3.1 follow-up).
+bench-tls-setup           = "bash benchmark/scripts/_make_self_signed.sh"
+
 [feature.fuzz.tasks]
 # ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
 # mozz is installed as a pixi dependency (feature.fuzz) and packaged as
