@@ -42,7 +42,7 @@ file). Streaming bodies, server-side TLS, and the `RequestView` /
 | Header storage as offsets (no per-header `String` alloc on the read path) | Planned: `HeaderMapView[origin]` borrowed from the connection buffer. | none | planned, v0.5.0 Step 2 |
 | `RequestView[origin]` for borrowed bodies (zero-copy reads) | Planned: handlers gain a borrowed-body variant; `Request.into_owned()` for handlers that need to keep the request beyond one event-loop iteration. | none | planned, v0.5.0 Step 2 |
 | `Pool[ConnHandle]` typed allocator (replaces `UnsafePointer.alloc[ConnHandle]` in the hot path) | Planned: confines `UnsafePointer` to `flare/runtime/`. ASAN-equivalent gate in CI. | none | planned, v0.5.0 Step 2 |
-| `Router` accepts `Handler` structs (not just `def` functions) | Planned: `r.get(path, Extracted[H]())` compiles in addition to today's value-constructor extractor path. | until then, drive `Extracted[H]` directly via `.serve(req)` (see `examples/19_extractors.mojo`) | planned, v0.5.0 Step 2 |
+| `Router` accepts `Handler` structs (not just `def` functions) | `r.get[H](path, h)` accepts any `H: Handler & Copyable & Movable` (including `Extracted[H]()`, `WithCancel[H]`, app-state-bearing handlers). The `def(Request)` overload still works. Boxing uses heap allocation per route plus monomorphised serve / destroy thunks for direct (no trait-table) dispatch. | none | v0.5.0 Step 2 |
 
 ---
 

@@ -1,6 +1,6 @@
 """Example 19 — Typed extractors + reflective auto-injection.
 
-Demonstrates two ways to use flare's v0.4.1 extractors:
+Demonstrates two ways to use flare's typed extractors:
 
 1. **Value-constructor** — call ``Path[T, name].extract(req)`` inside a
    plain handler. Direct, no struct boilerplate.
@@ -9,21 +9,22 @@ Demonstrates two ways to use flare's v0.4.1 extractors:
    struct, pulls each field from the request, and calls the inner
    ``serve``.
 
-Both are driven by synthesised ``Request`` values via the public
-``Request.params_mut()`` setter (the same accessor ``Router`` itself
-uses) so the example exercises every codepath the production
-request-handling path takes — minus the Router → Handler-struct bridge,
-which is a v0.5 item: ``Router.get(...)`` today only accepts plain
-``def`` handlers, so ``Extracted[H]`` is invoked directly here.
+Since v0.5.0 Step 2, ``Router.get(path, handler)`` accepts ``H:
+Handler & Copyable & Movable`` directly (Track 1.4), so the
+production shape is ``r.get("/users/:id", Extracted[GetUser]())``.
+This example demonstrates both the value-constructor shape (driven
+through synthesised requests so it can run without spinning up a
+server) and the Router-registered shape (also driven through
+``Router.serve`` to keep the example self-contained).
 
 A note on ``.value.value``: each extractor (``Path``, ``Query``, ...)
 wraps a ``ParamParser`` (``ParamInt``, ``ParamString``, ...) which in
 turn wraps a primitive (``Int``, ``String``, ...). The wrapper exists
 because Mojo can't yet retrofit the ``ParamParser`` trait onto built-in
-``Int``. Until trait associated types stabilise enough to collapse
-the layers, every example below pulls the primitive into a local
-variable once and uses that local everywhere. Read each
-``.value.value`` chain as "extractor → parser-wrapper → primitive".
+``Int``. The collapse to single-dot ``.value`` access via concrete
+``PathInt[name]``/``PathStr[name]``/etc. lands in S2.2 of v0.5.0
+Step 2; until then every example pulls the primitive into a local
+variable once and uses that local everywhere.
 
 Run:
     pixi run example-extractors
@@ -42,6 +43,7 @@ from flare.http import (
     OptionalQuery,
     Header,
     Handler,
+    Router,
     Extracted,
 )
 
@@ -111,24 +113,27 @@ def main() raises:
     var resp2 = list_user_posts(r2)
     print(resp2.status, resp2.text())
 
-    # Shape 2 — Extracted[GetUser] driven directly. Production code
-    # would route through Router; today's Router only accepts def
-    # handlers, so Extracted[H].serve is invoked here for the
-    # demonstration. The Router → Handler-struct bridge is a v0.5
-    # item.
-    var h = Extracted[GetUser]()
+    # Shape 2 — Extracted[GetUser] registered on a Router (the
+    # production shape since v0.5.0 Step 2). Router.get[H] accepts
+    # any Handler struct; here it's the reflective-extractor
+    # adapter wrapping our GetUser handler. The Router routes the
+    # path, captures :id, and dispatches into Extracted's serve
+    # which fills in each field before invoking GetUser.serve.
+    var router = Router()
+    router.get[Extracted[GetUser]]("/users/:id", Extracted[GetUser]())
 
     var r3 = Request(method=Method.GET, url="/users/42?trace=req-abc")
-    r3.params_mut()["id"] = "42"
     r3.headers.set("Authorization", "Bearer secret")
-    var resp3 = h.serve(r3)
-    print("Extracted[GetUser] ok     →", resp3.status, resp3.text())
+    var resp3 = router.serve(r3)
+    print("router GET /users/42 ok   →", resp3.status, resp3.text())
 
-    # Error path: missing :id → 400 from the adapter.
-    var bad = Request(method=Method.GET, url="/users/?trace=x")
+    # Error path: GET /users/abc → ParamInt rejects "abc" → 400.
+    # ``expose_errors`` defaults False on synthesised requests so
+    # the body is the fixed "Bad Request" string.
+    var bad = Request(method=Method.GET, url="/users/abc?trace=x")
     bad.headers.set("Authorization", "Bearer x")
-    var bad_resp = h.serve(bad)
-    print("Extracted[GetUser] err    →", bad_resp.status, bad_resp.text())
+    var bad_resp = router.serve(bad)
+    print("router GET /users/abc err →", bad_resp.status, bad_resp.text())
 
     print()
     print("OK.")

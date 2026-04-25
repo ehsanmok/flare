@@ -45,6 +45,8 @@ lands, only the internal representation.
 """
 
 from std.collections import Dict
+from std.memory import UnsafePointer, alloc
+
 from .handler import Handler, FnHandler
 from .headers import HeaderMap
 from .request import Request, Method
@@ -131,6 +133,19 @@ def _compile_segments(path: String) raises -> List[_Segment]:
 # ── Route entries ────────────────────────────────────────────────────────────
 
 
+comptime _ROUTE_KIND_FN: Int = 0
+"""Route handler is a plain ``def(Request) raises -> Response``
+wrapped in ``FnHandler``. ``handler_idx`` indexes into
+``Router._handlers``."""
+
+comptime _ROUTE_KIND_STRUCT: Int = 1
+"""Route handler is an arbitrary ``H: Handler`` struct
+(v0.5.0 Step 2). ``handler_idx`` indexes into
+``Router._struct_handlers``; the struct lives behind a
+heap-allocated opaque pointer with monomorphised serve / destroy
+thunks (see ``_StructHandler``)."""
+
+
 struct _Route(Copyable, Movable):
     """Compiled pattern + method + handler index into the router's
     handler storage.
@@ -138,17 +153,102 @@ struct _Route(Copyable, Movable):
 
     var method: String
     var segs: List[_Segment]
+    var handler_kind: Int
+    """One of ``_ROUTE_KIND_FN`` / ``_ROUTE_KIND_STRUCT``."""
     var handler_idx: Int
 
     def __init__(
         out self,
         method: String,
         var segs: List[_Segment],
+        handler_kind: Int,
         handler_idx: Int,
     ):
         self.method = method
         self.segs = segs^
+        self.handler_kind = handler_kind
         self.handler_idx = handler_idx
+
+
+# ── Struct-handler boxing (v0.5.0 Step 2 / Track 1.4) ───────────────────────
+
+# Mojo can't yet store heterogeneous ``H: Handler`` structs in a
+# single ``List``, so we type-erase via a heap-allocated opaque
+# pointer paired with two monomorphised function pointers: a serve
+# thunk that bitcasts the pointer back to the concrete ``H`` and
+# calls ``H.serve``, and a destroy thunk that does the same for
+# ``H``'s destructor + ``free``. Both thunks are monomorphised at
+# the registration site (``Router.get[H](...)``) so the call
+# inside ``Router.serve`` is a direct call through a function
+# pointer with no runtime trait dispatch.
+#
+# This is the same opaque-pointer + typed-thunk idiom the multicore
+# ``Scheduler`` uses for ``_WorkerCtx[H]``. The Router's lifecycle
+# differs only in that the destroy thunk runs on the Router's
+# destructor (when the server stops) rather than after a pthread
+# join.
+
+
+struct _Boxed[H: Handler & Copyable & Movable](Movable):
+    """Owning wrapper around ``H`` used as the Router's heap cell.
+
+    Adding a 1-byte ``_padding`` field guarantees the wrapper has
+    ``sizeof >= 1`` regardless of whether ``H`` is zero-sized
+    (``Extracted[GetUser]``, ``WithCancel[StatelessHandler]``, any
+    user-defined ZST adapter). Mojo's ``alloc[T](N)`` rejects
+    sizes of zero with "size must be greater than zero" and the
+    current Mojo nightly does not expose a public ``sizeof[T]()``
+    we could ``@parameter if`` on, so the unconditional one-byte
+    pad is the simplest path to "any Handler works."
+
+    The padding byte is never observed: the only entry point to
+    ``H`` is ``self.inner``, which the serve thunk forwards to
+    ``H.serve``.
+    """
+
+    var inner: Self.H
+    var _padding: UInt8
+
+    def __init__(out self, var inner: Self.H):
+        self.inner = inner^
+        self._padding = 0
+
+
+def _struct_serve_thunk[
+    H: Handler & Copyable & Movable
+](addr: Int, req: Request) raises -> Response:
+    """Thunk that materialises the boxed ``H`` from its address
+    and forwards to ``H.serve``.
+
+    Monomorphised per ``H`` at the call site so Mojo emits a direct
+    call to the inlined ``H.serve`` body — no per-request trait
+    dispatch.
+    """
+    var ptr = UnsafePointer[_Boxed[H], MutExternalOrigin](
+        unsafe_from_address=addr
+    )
+    return ptr[].inner.serve(req)
+
+
+def _struct_destroy_thunk[H: Handler & Copyable & Movable](addr: Int) -> None:
+    """Thunk that destroys + frees the heap-allocated ``_Boxed[H]``
+    at ``addr``. Called once per route from ``Router.__del__`` via
+    the parallel ``_struct_destroy_thunks`` list.
+    """
+    var ptr = UnsafePointer[_Boxed[H], MutExternalOrigin](
+        unsafe_from_address=addr
+    )
+    ptr.destroy_pointee()
+    ptr.free()
+
+
+# ``_StructHandler`` is represented as three parallel lists on
+# ``Router`` rather than a single ``List[_StructHandler]`` because
+# Mojo's ``List`` requires ``T: Copyable`` and a Copyable wrapper
+# around an owning heap pointer would double-free on copy. The
+# parallel-lists trick stores only ``Int`` and function-pointer
+# values (all Copyable) and Router's destructor walks the
+# ``destroy_thunks`` list once to free every owned allocation.
 
 
 # ── Router ───────────────────────────────────────────────────────────────────
@@ -157,26 +257,66 @@ struct _Route(Copyable, Movable):
 struct Router(Handler):
     """HTTP router with method dispatch, path parameters, and nesting.
 
-    Routes are stored as ``(method, compiled-segments, handler-index)``
-    triples. Handlers live in a parallel ``List[FnHandler]`` so the
-    index is stable across moves.
+    Accepts both plain ``def(Request) raises -> Response`` functions
+    (wrapped internally in ``FnHandler``) **and** arbitrary
+    ``H: Handler & Copyable & Movable`` structs (boxed via
+    ``_StructHandler`` with monomorphised serve / destroy thunks)
+    since v0.5.0 Step 2 (Track 1.4). Use the latter to register
+    ``Extracted[H]()``, app-state-bearing handlers, middleware
+    wrappers, and any other stateful Handler.
 
-    For v0.4.0 the router accepts plain ``def(Request) raises -> Response``
-    functions (wrapped internally in ``FnHandler``). Future versions will
-    accept arbitrary ``Handler`` structs and comptime-compiled
-    signatures; the ``get`` / ``post`` / ``put`` ... entry points stay
-    the same.
+    Routes are stored as ``(method, compiled-segments,
+    handler-kind, handler-index)`` quadruples; ``handler-kind``
+    selects ``_handlers`` (FnHandler list) or ``_struct_handlers``
+    (boxed Handler structs) for the actual call site.
+
+    Example:
+        ```mojo
+        var r = Router()
+        r.get("/", home)                         # def(Request)
+        r.get("/users/:id", Extracted[GetUser]()) # Handler struct
+        ```
     """
 
     var _routes: List[_Route]
     var _handlers: List[FnHandler]
+    var _struct_addrs: List[Int]
+    """Heap addresses of boxed ``H: Handler`` structs, one per
+    struct-handler route. Owned by the Router; freed in ``__del__``
+    via the matching ``_struct_destroy_thunks`` entry."""
+    var _struct_serve_thunks: List[def(Int, Request) raises thin -> Response]
+    """Monomorphised serve thunks; ``_struct_serve_thunks[i]`` is
+    the thunk for ``_struct_addrs[i]``."""
+    var _struct_destroy_thunks: List[def(Int) thin -> None]
+    """Monomorphised destroy thunks; ``_struct_destroy_thunks[i]``
+    is the thunk for ``_struct_addrs[i]``. Called from ``__del__``."""
 
     def __init__(out self):
         """Create an empty router (no routes)."""
         self._routes = List[_Route]()
         self._handlers = List[FnHandler]()
+        self._struct_addrs = List[Int]()
+        self._struct_serve_thunks = List[
+            def(Int, Request) raises thin -> Response
+        ]()
+        self._struct_destroy_thunks = List[def(Int) thin -> None]()
 
-    # ── Registration per method ──────────────────────────────────────────────
+    def __del__(deinit self):
+        """Free every boxed ``H: Handler`` the Router owns.
+
+        Each ``_struct_addrs[i]`` was heap-allocated by
+        ``_add_struct[H]`` and is freed here via the matching
+        ``_struct_destroy_thunks[i]`` (which runs ``H``'s destructor
+        and then ``free``). Indices that already saw a destroy
+        (e.g. via a Router move) carry a zero ``addr`` so the
+        thunk short-circuits.
+        """
+        for i in range(len(self._struct_addrs)):
+            var addr = self._struct_addrs[i]
+            if addr != 0:
+                self._struct_destroy_thunks[i](addr)
+
+    # ── Registration per method (def-function overloads) ────────────────────
 
     def get(
         mut self,
@@ -189,7 +329,7 @@ struct Router(Handler):
             path:    Route pattern (e.g. ``"/users/:id"``).
             handler: The function to call on a match.
         """
-        self._add(Method.GET, path, handler)
+        self._add_fn(Method.GET, path, handler)
 
     def post(
         mut self,
@@ -197,7 +337,7 @@ struct Router(Handler):
         handler: def(Request) raises thin -> Response,
     ) raises:
         """Register ``handler`` for ``POST path``."""
-        self._add(Method.POST, path, handler)
+        self._add_fn(Method.POST, path, handler)
 
     def put(
         mut self,
@@ -205,7 +345,7 @@ struct Router(Handler):
         handler: def(Request) raises thin -> Response,
     ) raises:
         """Register ``handler`` for ``PUT path``."""
-        self._add(Method.PUT, path, handler)
+        self._add_fn(Method.PUT, path, handler)
 
     def patch(
         mut self,
@@ -213,7 +353,7 @@ struct Router(Handler):
         handler: def(Request) raises thin -> Response,
     ) raises:
         """Register ``handler`` for ``PATCH path``."""
-        self._add(Method.PATCH, path, handler)
+        self._add_fn(Method.PATCH, path, handler)
 
     def delete(
         mut self,
@@ -221,7 +361,7 @@ struct Router(Handler):
         handler: def(Request) raises thin -> Response,
     ) raises:
         """Register ``handler`` for ``DELETE path``."""
-        self._add(Method.DELETE, path, handler)
+        self._add_fn(Method.DELETE, path, handler)
 
     def head(
         mut self,
@@ -229,9 +369,9 @@ struct Router(Handler):
         handler: def(Request) raises thin -> Response,
     ) raises:
         """Register ``handler`` for ``HEAD path``."""
-        self._add(Method.HEAD, path, handler)
+        self._add_fn(Method.HEAD, path, handler)
 
-    def _add(
+    def _add_fn(
         mut self,
         method: String,
         path: String,
@@ -239,7 +379,101 @@ struct Router(Handler):
     ) raises:
         var segs = _compile_segments(path)
         self._handlers.append(FnHandler(handler))
-        self._routes.append(_Route(method, segs^, len(self._handlers) - 1))
+        self._routes.append(
+            _Route(method, segs^, _ROUTE_KIND_FN, len(self._handlers) - 1)
+        )
+
+    # ── Registration per method (Handler-struct overloads, v0.5.0 Step 2) ──
+
+    def get[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``GET path``.
+
+        ``H`` is type-erased into ``_StructHandler`` via heap
+        allocation + monomorphised serve / destroy thunks; the
+        per-request dispatch is a direct call through the cached
+        thunk pointer with no trait-table lookup.
+
+        Use this overload to register ``Extracted[H]()``, app-state
+        handlers, middleware-wrapped handlers, and any user-defined
+        Handler struct. The ``def(Request) raises -> Response``
+        overload above continues to work unchanged.
+
+        Args:
+            path:    Route pattern (e.g. ``"/users/:id"``).
+            handler: A ``Handler & Copyable & Movable`` instance;
+                     ownership transfers into the Router (the
+                     Router owns the heap allocation and frees it
+                     in its destructor).
+        """
+        self._add_struct[H](Method.GET, path, handler^)
+
+    def post[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``POST path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.POST, path, handler^)
+
+    def put[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``PUT path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.PUT, path, handler^)
+
+    def patch[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``PATCH path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.PATCH, path, handler^)
+
+    def delete[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``DELETE path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.DELETE, path, handler^)
+
+    def head[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``HEAD path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.HEAD, path, handler^)
+
+    def _add_struct[
+        H: Handler & Copyable & Movable
+    ](mut self, method: String, path: String, var handler: H) raises:
+        """Heap-allocate ``handler`` inside a ``_Boxed[H]`` cell,
+        capture monomorphised serve / destroy thunks, append to the
+        route + struct-handler tables.
+
+        ``_Boxed[H]`` ensures the cell has non-zero size even when
+        ``H`` is a zero-sized type (``Extracted[GetUser]``,
+        ``WithCancel[ZstHandler]``, etc.) — Mojo's ``alloc[T](N)``
+        rejects zero-byte sizes.
+        """
+        var segs = _compile_segments(path)
+        var p = alloc[_Boxed[H]](1)
+        if not p:
+            raise Error("alloc failed for Router struct handler")
+        p.init_pointee_move(_Boxed[H](handler^))
+        var addr = Int(p)
+
+        self._struct_addrs.append(addr)
+        self._struct_serve_thunks.append(_struct_serve_thunk[H])
+        self._struct_destroy_thunks.append(_struct_destroy_thunk[H])
+        self._routes.append(
+            _Route(
+                method,
+                segs^,
+                _ROUTE_KIND_STRUCT,
+                len(self._struct_addrs) - 1,
+            )
+        )
 
     # ── Handler impl ─────────────────────────────────────────────────────────
 
@@ -285,7 +519,19 @@ struct Router(Handler):
             if len(m_result.params) > 0:
                 for kv in m_result.params.items():
                     child.params_mut()[kv.key] = kv.value
-            return self._handlers[self._routes[i].handler_idx].serve(child^)
+            # Dispatch based on handler kind. ``_ROUTE_KIND_FN`` goes
+            # through the FnHandler list (zero-overhead direct call);
+            # ``_ROUTE_KIND_STRUCT`` calls the monomorphised serve thunk
+            # captured at registration time, which bitcasts the boxed
+            # Handler struct back to its concrete type and forwards
+            # to ``H.serve``.
+            if self._routes[i].handler_kind == _ROUTE_KIND_FN:
+                return self._handlers[self._routes[i].handler_idx].serve(child^)
+            else:
+                var sh_idx = self._routes[i].handler_idx
+                var addr = self._struct_addrs[sh_idx]
+                var thunk = self._struct_serve_thunks[sh_idx]
+                return thunk(addr, child^)
 
         if len(allowed) > 0:
             return _method_not_allowed(allowed)

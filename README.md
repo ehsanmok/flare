@@ -34,16 +34,31 @@ flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard to misuse 
 The full walk-through, gradually-disclosed, used to live here. It now lives in the package docstring on [`flare/__init__.mojo`](flare/__init__.mojo) (rendered at <https://ehsanmok.github.io/flare/>) and in the runnable examples under [`examples/`](examples/). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example.
 
 ```mojo
-# Path parameters
-from flare.http import Router, ok, Request, Response, HttpServer
+# Path parameters via def-handler, plus a typed-extractor handler
+# struct registered through Router.get[H] (since v0.5.0 Step 2).
+from flare.http import (
+    Router, ok, Request, Response, HttpServer,
+    Extracted, Path, ParamInt, Handler,
+)
 from flare.net import SocketAddr
 
-def get_user(req: Request) raises -> Response:
-    return ok("user " + req.param("id"))
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+@fieldwise_init
+struct GetUser(Copyable, Defaultable, Handler, Movable):
+    var id: Path[ParamInt, "id"]
+
+    def __init__(out self):
+        self.id = Path[ParamInt, "id"]()
+
+    def serve(self, req: Request) raises -> Response:
+        return ok("user=" + String(self.id.value.value))
 
 def main() raises:
     var r = Router()
-    r.get("/users/:id", get_user)
+    r.get("/", home)
+    r.get[Extracted[GetUser]]("/users/:id", Extracted[GetUser]())
     HttpServer.bind(SocketAddr.localhost(8080)).serve(r^, num_workers=4)
 ```
 
@@ -96,7 +111,7 @@ def main() raises:
     srv.serve(WithHits(inner=app^, snapshot=view^))
 ```
 
-For typed extractors (`Extracted[H]` reflects on a struct's field types and pulls each one from the request before calling `serve`), the comptime route table (`ComptimeRouter[ROUTES]`), the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, and the `num_workers` scale knob — see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
+For the comptime route table (`ComptimeRouter[ROUTES]`), the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, and the `num_workers` scale knob — see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
 
 ## Low-level API
 

@@ -303,6 +303,134 @@ def test_router_is_handler() raises:
     assert_equal(resp.text(), "home")
 
 
+# ── v0.5.0 Step 2 — Router accepts Handler structs (Track 1.4) ─────────────
+
+# Tiny stateful Handler used by the struct-handler tests below.
+# The Router's `get[H]` / `post[H]` / etc. heap-allocate `H`,
+# capture monomorphised serve / destroy thunks, and free in
+# Router.__del__. Each test exercises a different facet of the
+# new dispatch path.
+
+
+@fieldwise_init
+struct _StatefulGreeter(Copyable, Handler, Movable):
+    """Handler with state that shows the boxed value survives
+    registration + dispatch."""
+
+    var greeting: String
+
+    def serve(self, req: Request) raises -> Response:
+        return ok(self.greeting + ":" + req.url)
+
+
+def test_router_get_accepts_handler_struct() raises:
+    """``Router.get[H]`` accepts an ``H: Handler`` struct."""
+    var r = Router()
+    r.get[_StatefulGreeter]("/hi", _StatefulGreeter("hello"))
+    var resp = r.serve(Request(method=Method.GET, url="/hi"))
+    assert_equal(resp.status, Status.OK)
+    assert_equal(resp.text(), "hello:/hi")
+
+
+def test_router_post_accepts_handler_struct() raises:
+    var r = Router()
+    r.post[_StatefulGreeter]("/echo", _StatefulGreeter("posted"))
+    var resp = r.serve(Request(method=Method.POST, url="/echo"))
+    assert_equal(resp.text(), "posted:/echo")
+
+
+def test_router_put_patch_delete_head_accept_handler_structs() raises:
+    """All six method overloads accept ``H: Handler`` structs."""
+    var r = Router()
+    r.put[_StatefulGreeter]("/x", _StatefulGreeter("PUT"))
+    r.patch[_StatefulGreeter]("/x", _StatefulGreeter("PATCH"))
+    r.delete[_StatefulGreeter]("/x", _StatefulGreeter("DEL"))
+    r.head[_StatefulGreeter]("/x", _StatefulGreeter("HEAD"))
+    assert_equal(r.serve(Request(method=Method.PUT, url="/x")).text(), "PUT:/x")
+    assert_equal(
+        r.serve(Request(method=Method.PATCH, url="/x")).text(),
+        "PATCH:/x",
+    )
+    assert_equal(
+        r.serve(Request(method=Method.DELETE, url="/x")).text(),
+        "DEL:/x",
+    )
+    assert_equal(
+        r.serve(Request(method=Method.HEAD, url="/x")).text(),
+        "HEAD:/x",
+    )
+
+
+def test_router_mixes_def_and_struct_handlers() raises:
+    """Same Router holds a ``def(Request) -> Response`` and an
+    ``H: Handler`` struct on parallel paths; dispatch picks the
+    right kind per route."""
+    var r = Router()
+    r.get("/fn", h_home)
+    r.get[_StatefulGreeter]("/struct", _StatefulGreeter("S"))
+    var fn_resp = r.serve(Request(method=Method.GET, url="/fn"))
+    var struct_resp = r.serve(Request(method=Method.GET, url="/struct"))
+    assert_equal(fn_resp.text(), "home")
+    assert_equal(struct_resp.text(), "S:/struct")
+
+
+def test_router_404_with_struct_handler_present() raises:
+    """An unknown path still returns 404 even when struct handlers
+    are registered."""
+    var r = Router()
+    r.get[_StatefulGreeter]("/known", _StatefulGreeter("K"))
+    var resp = r.serve(Request(method=Method.GET, url="/missing"))
+    assert_equal(resp.status, Status.NOT_FOUND)
+
+
+def test_router_405_with_struct_handler_present() raises:
+    """405 Method Not Allowed still includes the Allow header when
+    a struct handler is the registered method."""
+    var r = Router()
+    r.get[_StatefulGreeter]("/users", _StatefulGreeter("G"))
+    var resp = r.serve(Request(method=Method.POST, url="/users"))
+    assert_equal(resp.status, Status.METHOD_NOT_ALLOWED)
+    var allow = resp.headers.get("Allow")
+    assert_true(allow.find("GET") >= 0)
+
+
+struct _IdEcho(Copyable, Defaultable, Handler, Movable):
+    """Stateless Handler used by
+    ``test_router_struct_handler_path_param_capture``. Echoes the
+    captured ``:id`` path param.
+    """
+
+    def __init__(out self):
+        pass
+
+    def serve(self, req: Request) raises -> Response:
+        return ok("id=" + req.param("id"))
+
+
+def test_router_struct_handler_path_param_capture() raises:
+    """``:id``-style path params still populate ``req.params``
+    when the route's handler is a struct."""
+    var r = Router()
+    r.get[_IdEcho]("/users/:id", _IdEcho())
+    var resp = r.serve(Request(method=Method.GET, url="/users/42"))
+    assert_equal(resp.text(), "id=42")
+
+
+def test_router_drops_struct_handlers_cleanly() raises:
+    """Stress: register 100 struct handlers on a Router, then drop
+    it. Each ``H`` must be freed via the matching destroy thunk;
+    no leaks (validated by the test process not crashing on
+    repeated runs).
+    """
+    for _ in range(5):
+        var r = Router()
+        for i in range(100):
+            r.get[_StatefulGreeter](
+                "/p" + String(i), _StatefulGreeter("g" + String(i))
+            )
+        # ``r`` drops here; Router.__del__ runs every destroy_thunk.
+
+
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 
