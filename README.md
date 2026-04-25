@@ -36,9 +36,10 @@ The full walk-through, gradually-disclosed, used to live here. It now lives in t
 ```mojo
 # Path parameters via def-handler, plus a typed-extractor handler
 # struct registered through Router.get[H] (since v0.5.0 Step 2).
+# PathInt[name].value is `Int` directly — no .value.value chain.
 from flare.http import (
     Router, ok, Request, Response, HttpServer,
-    Extracted, Path, ParamInt, Handler,
+    Extracted, PathInt, Handler,
 )
 from flare.net import SocketAddr
 
@@ -47,13 +48,13 @@ def home(req: Request) raises -> Response:
 
 @fieldwise_init
 struct GetUser(Copyable, Defaultable, Handler, Movable):
-    var id: Path[ParamInt, "id"]
+    var id: PathInt["id"]
 
     def __init__(out self):
-        self.id = Path[ParamInt, "id"]()
+        self.id = PathInt["id"]()
 
     def serve(self, req: Request) raises -> Response:
-        return ok("user=" + String(self.id.value.value))
+        return ok("user=" + String(self.id.value))
 
 def main() raises:
     var r = Router()

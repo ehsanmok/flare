@@ -2,29 +2,24 @@
 
 Demonstrates two ways to use flare's typed extractors:
 
-1. **Value-constructor** — call ``Path[T, name].extract(req)`` inside a
-   plain handler. Direct, no struct boilerplate.
-2. **Auto-injection via ``Extracted[H]``** — declare the extractors as
-   the fields of a ``Handler`` struct; the adapter reflects on the
-   struct, pulls each field from the request, and calls the inner
-   ``serve``.
+1. **Value-constructor** — call ``PathInt[name].extract(req).value``
+   inside a plain handler. Direct, no struct boilerplate.
+2. **Auto-injection via ``Extracted[H]``** — declare the extractors
+   as the fields of a ``Handler`` struct; the adapter reflects on
+   the struct, pulls each field from the request, and calls the
+   inner ``serve``.
 
-Since v0.5.0 Step 2, ``Router.get(path, handler)`` accepts ``H:
-Handler & Copyable & Movable`` directly (Track 1.4), so the
-production shape is ``r.get("/users/:id", Extracted[GetUser]())``.
-This example demonstrates both the value-constructor shape (driven
-through synthesised requests so it can run without spinning up a
-server) and the Router-registered shape (also driven through
-``Router.serve`` to keep the example self-contained).
+Since v0.5.0 Step 2:
 
-A note on ``.value.value``: each extractor (``Path``, ``Query``, ...)
-wraps a ``ParamParser`` (``ParamInt``, ``ParamString``, ...) which in
-turn wraps a primitive (``Int``, ``String``, ...). The wrapper exists
-because Mojo can't yet retrofit the ``ParamParser`` trait onto built-in
-``Int``. The collapse to single-dot ``.value`` access via concrete
-``PathInt[name]``/``PathStr[name]``/etc. lands in S2.2 of v0.5.0
-Step 2; until then every example pulls the primitive into a local
-variable once and uses that local everywhere.
+- ``Router.get(path, handler)`` accepts any ``H: Handler & Copyable
+  & Movable`` (Track 1.4), so the production shape is
+  ``r.get("/users/:id", Extracted[GetUser]())``.
+- The concrete ``PathInt`` / ``PathStr`` / ``PathFloat`` /
+  ``PathBool`` / ``QueryInt`` / ``HeaderStr`` / ... extractors
+  expose ``.value`` as the primitive directly (Track 1.3) — no
+  ``.value.value`` chain. The parametric ``Path[T: ParamParser,
+  name]`` etc. stay public for users who want to plug in a custom
+  ``ParamParser``.
 
 Run:
     pixi run example-extractors
@@ -36,12 +31,10 @@ from flare.http import (
     Method,
     Status,
     ok,
-    ParamInt,
-    ParamString,
-    Path,
-    Query,
-    OptionalQuery,
-    Header,
+    PathInt,
+    OptionalQueryInt,
+    QueryStr,
+    HeaderStr,
     Handler,
     Router,
     Extracted,
@@ -52,12 +45,12 @@ from flare.http import (
 
 
 def list_user_posts(req: Request) raises -> Response:
-    """Pull each parameter once, then reuse the unwrapped primitive."""
-    var id = Path[ParamInt, "id"].extract(req).value.value  # → Int
-    var page_param = OptionalQuery[ParamInt, "page"].extract(req)
+    """Single-dot ``.value`` access via the concrete extractors."""
+    var id = PathInt["id"].extract(req).value  # → Int
+    var page_opt = OptionalQueryInt["page"].extract(req).value
     var page = 1
-    if page_param.value:
-        page = page_param.value.value().value  # Optional → ParamInt → Int
+    if page_opt:
+        page = page_opt.value()
     return ok("user " + String(id) + " posts (page " + String(page) + ")")
 
 
@@ -68,30 +61,27 @@ def list_user_posts(req: Request) raises -> Response:
 struct GetUser(Copyable, Defaultable, Handler, Movable):
     """All the handler's inputs are declared as fields. The adapter
     walks the field list via reflection and populates each one from the
-    request before calling ``serve``.
+    request before calling ``serve``. With the concrete extractors,
+    each field's ``.value`` is the primitive directly.
     """
 
-    var id: Path[ParamInt, "id"]
-    var trace: Query[ParamString, "trace"]
-    var auth: Header[ParamString, "Authorization"]
+    var id: PathInt["id"]
+    var trace: QueryStr["trace"]
+    var auth: HeaderStr["Authorization"]
 
     def __init__(out self):
-        self.id = Path[ParamInt, "id"]()
-        self.trace = Query[ParamString, "trace"]()
-        self.auth = Header[ParamString, "Authorization"]()
+        self.id = PathInt["id"]()
+        self.trace = QueryStr["trace"]()
+        self.auth = HeaderStr["Authorization"]()
 
     def serve(self, req: Request) raises -> Response:
-        # One unwrap per field at the top; the rest reads as primitives.
-        var id = self.id.value.value
-        var trace = self.trace.value.value
-        var auth = self.auth.value.value
         return ok(
             "user="
-            + String(id)
+            + String(self.id.value)
             + " trace="
-            + trace
+            + self.trace.value
             + " auth_len="
-            + String(auth.byte_length())
+            + String(self.auth.value.byte_length())
         )
 
 

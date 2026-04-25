@@ -359,6 +359,517 @@ struct OptionalHeader[T: ParamParser, name: StaticString](
         return out^
 
 
+# ── Concrete primitive extractors (v0.5.0 Step 2 / Track 1.3) ──────────────
+#
+# The parametric ``Path[T: ParamParser, name]`` / ``Query[...]`` /
+# ``Header[...]`` / ``OptionalQuery[...]`` / ``OptionalHeader[...]``
+# extractors wrap the parsed value in a ``ParamParser`` (``ParamInt``,
+# ``ParamString``, ...) which itself wraps a primitive. The result
+# is the v0.4.x ``.value.value`` chain that every example apologised
+# for.
+#
+# These concrete types collapse the chain by exposing ``.value`` as
+# the primitive directly. Internally they call the same ``Param*``
+# parsers, so the parsing logic is shared and there's no behaviour
+# drift.
+#
+# Naming convention: ``<extractor><type>``. ``Path`` × {Int, Str,
+# Float, Bool}, ``Query`` × the same, ``Header`` × the same, plus
+# the ``OptionalQuery`` and ``OptionalHeader`` variants for fields
+# whose absence is not an error.
+#
+# Use these in handler structs registered through ``Extracted[H]``
+# or as value-constructors inside plain handlers. The parametric
+# ``Path[T, name]`` etc. stay public for users who want to plug in
+# a custom ``ParamParser``.
+
+
+# ── Path concretes ──────────────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct PathInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required path parameter named ``name``, parsed as ``Int``.
+
+    Equivalent to ``Path[ParamInt, name]`` but with ``.value`` of
+    type ``Int`` directly (no ``.value.value`` chain).
+    """
+
+    var value: Int
+
+    def __init__(out self):
+        self.value = 0
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_param(String(Self.name)):
+            raise Error("missing path parameter: " + String(Self.name))
+        self.value = ParamInt.parse(req.param(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct PathStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required path parameter named ``name``, exposed as ``String``."""
+
+    var value: String
+
+    def __init__(out self):
+        self.value = ""
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_param(String(Self.name)):
+            raise Error("missing path parameter: " + String(Self.name))
+        self.value = req.param(String(Self.name))
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct PathFloat[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required path parameter named ``name``, parsed as ``Float64``."""
+
+    var value: Float64
+
+    def __init__(out self):
+        self.value = Float64(0.0)
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_param(String(Self.name)):
+            raise Error("missing path parameter: " + String(Self.name))
+        self.value = ParamFloat64.parse(req.param(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct PathBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required path parameter named ``name``, parsed as ``Bool``."""
+
+    var value: Bool
+
+    def __init__(out self):
+        self.value = False
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_param(String(Self.name)):
+            raise Error("missing path parameter: " + String(Self.name))
+        self.value = ParamBool.parse(req.param(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+# ── Query concretes ─────────────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct QueryInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required query-string parameter named ``name``, parsed as ``Int``."""
+
+    var value: Int
+
+    def __init__(out self):
+        self.value = 0
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            raise Error("missing query parameter: " + String(Self.name))
+        self.value = ParamInt.parse(req.query_param(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct QueryStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required query-string parameter named ``name``, exposed as ``String``."""
+
+    var value: String
+
+    def __init__(out self):
+        self.value = ""
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            raise Error("missing query parameter: " + String(Self.name))
+        self.value = req.query_param(String(Self.name))
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct QueryFloat[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Required query parameter named ``name``, parsed as ``Float64``."""
+
+    var value: Float64
+
+    def __init__(out self):
+        self.value = Float64(0.0)
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            raise Error("missing query parameter: " + String(Self.name))
+        self.value = ParamFloat64.parse(
+            req.query_param(String(Self.name))
+        ).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct QueryBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required query parameter named ``name``, parsed as ``Bool``."""
+
+    var value: Bool
+
+    def __init__(out self):
+        self.value = False
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            raise Error("missing query parameter: " + String(Self.name))
+        self.value = ParamBool.parse(req.query_param(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+# ── OptionalQuery concretes ─────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct OptionalQueryInt[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional query parameter as ``Optional[Int]``. ``value`` is
+    ``None`` when absent."""
+
+    var value: Optional[Int]
+
+    def __init__(out self):
+        self.value = Optional[Int]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            self.value = Optional[Int]()
+            return
+        self.value = Optional[Int](
+            ParamInt.parse(req.query_param(String(Self.name))).value
+        )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct OptionalQueryStr[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional query parameter as ``Optional[String]``."""
+
+    var value: Optional[String]
+
+    def __init__(out self):
+        self.value = Optional[String]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            self.value = Optional[String]()
+            return
+        self.value = Optional[String](req.query_param(String(Self.name)))
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct OptionalQueryFloat[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional query parameter as ``Optional[Float64]``."""
+
+    var value: Optional[Float64]
+
+    def __init__(out self):
+        self.value = Optional[Float64]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            self.value = Optional[Float64]()
+            return
+        self.value = Optional[Float64](
+            ParamFloat64.parse(req.query_param(String(Self.name))).value
+        )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct OptionalQueryBool[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional query parameter as ``Optional[Bool]``."""
+
+    var value: Optional[Bool]
+
+    def __init__(out self):
+        self.value = Optional[Bool]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.has_query_param(String(Self.name)):
+            self.value = Optional[Bool]()
+            return
+        self.value = Optional[Bool](
+            ParamBool.parse(req.query_param(String(Self.name))).value
+        )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+# ── Header concretes ────────────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct HeaderInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required header named ``name``, parsed as ``Int``."""
+
+    var value: Int
+
+    def __init__(out self):
+        self.value = 0
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            raise Error("missing header: " + String(Self.name))
+        self.value = ParamInt.parse(req.headers.get(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct HeaderStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+    """Required header named ``name``, exposed as ``String``."""
+
+    var value: String
+
+    def __init__(out self):
+        self.value = ""
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            raise Error("missing header: " + String(Self.name))
+        self.value = req.headers.get(String(Self.name))
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct HeaderFloat[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Required header named ``name``, parsed as ``Float64``."""
+
+    var value: Float64
+
+    def __init__(out self):
+        self.value = Float64(0.0)
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            raise Error("missing header: " + String(Self.name))
+        self.value = ParamFloat64.parse(
+            req.headers.get(String(Self.name))
+        ).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct HeaderBool[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Required header named ``name``, parsed as ``Bool``."""
+
+    var value: Bool
+
+    def __init__(out self):
+        self.value = False
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            raise Error("missing header: " + String(Self.name))
+        self.value = ParamBool.parse(req.headers.get(String(Self.name))).value
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+# ── OptionalHeader concretes ────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct OptionalHeaderInt[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional header as ``Optional[Int]``."""
+
+    var value: Optional[Int]
+
+    def __init__(out self):
+        self.value = Optional[Int]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            self.value = Optional[Int]()
+            return
+        self.value = Optional[Int](
+            ParamInt.parse(req.headers.get(String(Self.name))).value
+        )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct OptionalHeaderStr[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional header as ``Optional[String]``."""
+
+    var value: Optional[String]
+
+    def __init__(out self):
+        self.value = Optional[String]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            self.value = Optional[String]()
+            return
+        self.value = Optional[String](req.headers.get(String(Self.name)))
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct OptionalHeaderFloat[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional header as ``Optional[Float64]``."""
+
+    var value: Optional[Float64]
+
+    def __init__(out self):
+        self.value = Optional[Float64]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            self.value = Optional[Float64]()
+            return
+        self.value = Optional[Float64](
+            ParamFloat64.parse(req.headers.get(String(Self.name))).value
+        )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+@fieldwise_init
+struct OptionalHeaderBool[name: StaticString](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """Optional header as ``Optional[Bool]``."""
+
+    var value: Optional[Bool]
+
+    def __init__(out self):
+        self.value = Optional[Bool]()
+
+    def apply(mut self, req: Request) raises:
+        if not req.headers.contains(String(Self.name)):
+            self.value = Optional[Bool]()
+            return
+        self.value = Optional[Bool](
+            ParamBool.parse(req.headers.get(String(Self.name))).value
+        )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
 # ── Peer extractor ──────────────────────────────────────────────────────────
 
 
