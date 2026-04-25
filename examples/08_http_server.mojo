@@ -77,6 +77,14 @@ def router(req: Request) raises -> Response:
     if req.url == "/echo" and req.method == "POST":
         return Response(status=Status.OK, reason="OK", body=req.body)
 
+    if req.url == "/whoami" and req.method == "GET":
+        # ``req.peer`` is populated by the reactor at accept time
+        # (v0.5.0 Step 1). Real services use this for logging,
+        # rate limiting, ACLs. Note that this is the *kernel's* view
+        # of the peer; flare does not interpret X-Forwarded-For for
+        # you.
+        return ok("peer=" + String(req.peer.ip) + ":" + String(req.peer.port))
+
     if req.url == "/hello":
         return bad_request("Only GET is allowed on /hello")
 
@@ -117,6 +125,14 @@ def main() raises:
                 "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length:"
                 " 5\r\n\r\nhello"
             ),
+        )
+    )
+
+    print("GET /whoami")
+    print(
+        "  "
+        + send_and_receive(
+            listener, "GET /whoami HTTP/1.1\r\nHost: localhost\r\n\r\n"
         )
     )
 

@@ -46,6 +46,7 @@ from flare.http.server import (
     _append_str,
 )
 from flare.http.static_response import StaticResponse
+from flare.net import IpAddr, SocketAddr
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
 from flare.net.error import NetworkError
 from flare.tcp import TcpStream, TcpListener
@@ -135,6 +136,13 @@ struct ConnHandle(Movable):
     var _stream: TcpStream
     """Underlying connection; this struct is the sole owner. ``self.fd``
     is a fast accessor for ``self._stream._socket.fd``."""
+    var peer: SocketAddr
+    """Kernel-reported peer address captured from
+    ``TcpStream.peer_addr()`` at construction time. Threaded into every
+    parsed ``Request`` for the connection so handlers can read
+    ``req.peer``. Stored here (not just on each ``Request``) because
+    keep-alive connections re-parse multiple requests across a single
+    ``ConnHandle`` lifetime, and the peer is identical for all of them."""
     var state: Int
     var read_buf: List[UInt8]
     """Incoming request bytes accumulated across partial reads."""
@@ -173,6 +181,10 @@ struct ConnHandle(Movable):
                 ``ConnHandle``.
             read_buffer_size: Initial capacity for the read buffer.
         """
+        # Capture the peer address before moving the stream — ``peer_addr``
+        # reads from the stream's internal field, which becomes
+        # inaccessible once we transfer ownership into ``self._stream``.
+        self.peer = stream.peer_addr()
         self._stream = stream^
         self.state = STATE_READING
         self.read_buf = List[UInt8](capacity=read_buffer_size)
@@ -291,6 +303,7 @@ struct ConnHandle(Movable):
                 config.max_header_size,
                 config.max_body_size,
                 config.max_uri_length,
+                self.peer,
             )
         except:
             self._queue_error(400, "Bad Request")

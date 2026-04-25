@@ -84,6 +84,7 @@ from .handler import Handler
 from .headers import HeaderMap
 from .request import Request
 from .response import Response, Status
+from ..net import IpAddr, SocketAddr
 
 
 # ── ParamParser: scalar text → typed value ──────────────────────────────────
@@ -350,6 +351,47 @@ struct OptionalHeader[T: ParamParser, name: StaticString](
         self.value = Optional[Self.T](
             Self.T.parse(req.headers.get(String(Self.name)))
         )
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+# ── Peer extractor ──────────────────────────────────────────────────────────
+
+
+struct Peer(Copyable, Defaultable, Extractor, Movable):
+    """Kernel-reported peer ``SocketAddr`` of the connection.
+
+    The reactor captures ``TcpStream.peer_addr()`` at accept time and
+    threads it onto every ``Request`` for the connection. ``Peer.value``
+    surfaces it without parsing or any optionality — it always has a
+    value when the request came through ``HttpServer.serve``.
+
+    Note that this is the *kernel's* view of the peer. flare does not
+    interpret ``X-Forwarded-For``, ``Forwarded:``, or PROXY-protocol
+    metadata for you. If you sit behind a reverse proxy and need the
+    upstream client IP, read the relevant header explicitly.
+
+    Example:
+        ```mojo
+        from flare.http import Peer
+
+        def who(req: Request) raises -> Response:
+            var p = Peer.extract(req).value
+            return ok(String(p.ip))
+        ```
+    """
+
+    var value: SocketAddr
+
+    def __init__(out self):
+        self.value = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0))
+
+    def apply(mut self, req: Request) raises:
+        self.value = req.peer
 
     @staticmethod
     def extract(req: Request) raises -> Self:

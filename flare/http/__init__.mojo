@@ -39,6 +39,9 @@ from flare.http import (
 - `Extractor`           — Trait implemented by each extractor.
 - `Path`, `Query`, `OptionalQuery`, `Header`, `OptionalHeader`
   — Typed extractors for path params, query string, headers.
+- `Peer`
+  — Extracts the kernel-reported peer ``SocketAddr`` populated by the
+    reactor at accept time (v0.5.0 Step 1).
 - `BodyBytes`, `BodyText`, `Json`
   — Extractors that read the request body.
 - `Extracted`
@@ -106,6 +109,7 @@ from .extract import (
     OptionalQuery,
     Header,
     OptionalHeader,
+    Peer,
     BodyBytes,
     BodyText,
     Json,

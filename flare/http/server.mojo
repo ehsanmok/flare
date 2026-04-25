@@ -17,7 +17,7 @@ from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
 from .static_response import StaticResponse
-from ..net import SocketAddr, NetworkError, BrokenPipe, Timeout
+from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 
 
@@ -474,6 +474,7 @@ def _parse_http_request_bytes(
     max_header_size: Int = 8_192,
     max_body_size: Int = 10 * 1024 * 1024,
     max_uri_length: Int = 8_192,
+    peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
 ) raises -> Request:
     """Parse an HTTP/1.1 request from a byte buffer.
 
@@ -485,6 +486,11 @@ def _parse_http_request_bytes(
         max_header_size: Maximum bytes for all header lines combined.
         max_body_size:   Maximum bytes for the request body.
         max_uri_length:  Maximum bytes for the request URI.
+        peer:            Kernel-reported peer ``SocketAddr`` captured at
+                         accept; copied into the parsed ``Request`` so
+                         handlers can read ``req.peer``. Defaults to
+                         ``127.0.0.1:0`` for callers that don't have a
+                         live connection (tests, fuzzers).
 
     Returns:
         A parsed ``Request`` with version set from the request line.
@@ -597,7 +603,9 @@ def _parse_http_request_bytes(
                     count=n,
                 )
 
-    var req = Request(method=method, url=path, body=body^, version=version)
+    var req = Request(
+        method=method, url=path, body=body^, version=version, peer=peer
+    )
     req.headers = headers^
     return req^
 
@@ -1013,7 +1021,10 @@ def _parse_http_request(
                 for i in range(n):
                     buf.append(read_buf[i])
             return _parse_http_request_bytes(
-                Span[UInt8, _](buf)[:total], max_header_size, max_body_size
+                Span[UInt8, _](buf)[:total],
+                max_header_size,
+                max_body_size,
+                peer=stream.peer_addr(),
             )
         if len(buf) > max_header_size + max_body_size:
             raise Error("request too large")

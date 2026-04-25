@@ -474,6 +474,7 @@ from .http.extract import (
     OptionalQuery,
     Header,
     OptionalHeader,
+    Peer,
     BodyBytes,
     BodyText,
     Json,

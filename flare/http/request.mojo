@@ -4,6 +4,7 @@ from std.collections import Dict
 from std.memory import UnsafePointer, alloc
 from json import loads, Value
 from .headers import HeaderMap
+from ..net import IpAddr, SocketAddr
 
 
 struct Method:
@@ -29,6 +30,14 @@ struct Request(Movable):
         headers: Request headers (owned ``HeaderMap``).
         body:    Request body bytes (empty for GET/HEAD).
         version: HTTP version string (default ``"HTTP/1.1"``).
+        peer:    Kernel-reported peer address (v0.5.0 Step 1). Populated by
+                 the reactor at accept time from ``TcpStream.peer_addr()``.
+                 Direct ``Request`` constructions (tests, the client side)
+                 default to ``SocketAddr.localhost(0)`` so the field is
+                 always observable without having to special-case "did the
+                 reactor populate it." Note: this is the *kernel's* view
+                 of the peer; flare does not interpret ``X-Forwarded-For``,
+                 ``Forwarded:``, or PROXY-protocol metadata.
 
     Path parameters extracted by ``Router`` live on a private field that
     is lazily allocated on the first ``Router`` match. Handlers that
@@ -53,6 +62,8 @@ struct Request(Movable):
     var headers: HeaderMap
     var body: List[UInt8]
     var version: String
+    var peer: SocketAddr
+    """Kernel-reported peer ``SocketAddr``. See struct docstring."""
     var _params: UnsafePointer[Dict[String, String], MutExternalOrigin]
     """Lazily-allocated path-params table. Null by default; ``Router``
     allocates the underlying ``Dict`` on the first path-parameter
@@ -72,6 +83,7 @@ struct Request(Movable):
         url: String,
         body: List[UInt8] = List[UInt8](),
         version: String = "HTTP/1.1",
+        peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
     ):
         """Create a new HTTP request.
 
@@ -80,12 +92,16 @@ struct Request(Movable):
             url:     Full URL or request target.
             body:    Request body bytes; empty by default.
             version: HTTP version; ``"HTTP/1.1"`` by default.
+            peer:    Peer ``SocketAddr``; defaults to ``127.0.0.1:0`` for
+                     direct constructions. The reactor passes the
+                     kernel-reported peer captured at accept time.
         """
         self.method = method
         self.url = url
         self.headers = HeaderMap()
         self.body = body.copy()
         self.version = version
+        self.peer = peer
         self._params = UnsafePointer[Dict[String, String], MutExternalOrigin]()
 
     def __del__(deinit self):
