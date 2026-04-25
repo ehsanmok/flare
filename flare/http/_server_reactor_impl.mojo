@@ -57,6 +57,7 @@ from flare.runtime import (
     TimerWheel,
     INTEREST_READ,
     INTEREST_WRITE,
+    Pool,
 )
 
 
@@ -992,35 +993,24 @@ def _is_connection(k: String) -> Bool:
 
 
 def _conn_alloc_addr(var stream: TcpStream) raises -> Int:
-    """Heap-allocate a ``ConnHandle`` wrapping ``stream`` and return its address.
+    """Heap-allocate a ``ConnHandle`` wrapping ``stream`` and
+    return its address.
 
-    Uses Mojo's native ``UnsafePointer.alloc`` paired with ``.free()`` rather
-    than libc ``malloc``/``free`` via FFI: ``external_call["free", ...]``
-    conflicts with the stdlib's own ``free`` declaration at MLIR
-    legalization time when this module is pulled into a fuzz-environment
-    compile (mozz harness). The allocator pair is equivalent on every
-    supported platform, and ``_conn_free_addr`` runs the destructor before
-    releasing the memory.
+    Routes through ``Pool[ConnHandle]`` (``flare/runtime/pool.mojo``,
+    v0.5.0 Step 2 / Track 1.2) so the unsafe-pointer plumbing is
+    confined to ``flare/runtime/``. The rest of this file's hot
+    path stays at the typed-Int address layer.
     """
-    var ptr = alloc[ConnHandle](1)
-    if Int(ptr) == 0:
-        raise NetworkError("alloc failed for ConnHandle", 0)
-    ptr.init_pointee_move(ConnHandle(stream^))
-    return Int(ptr)
+    return Pool[ConnHandle].alloc_move(ConnHandle(stream^))
 
 
 def _conn_free_addr(addr: Int):
-    """Destroy and free a ``ConnHandle`` allocated with ``_conn_alloc_addr``.
+    """Destroy and free a ``ConnHandle`` previously allocated via
+    ``_conn_alloc_addr``.
 
-    Safe to call on 0 (no-op).
+    Safe to call on 0 (no-op). Routes through ``Pool[ConnHandle].free``.
     """
-    if addr == 0:
-        return
-    var ptr = UnsafePointer[UInt8, MutExternalOrigin](
-        unsafe_from_address=addr
-    ).bitcast[ConnHandle]()
-    ptr.destroy_pointee()
-    ptr.free()
+    Pool[ConnHandle].free(addr)
 
 
 def _conn_ptr_from_int(
