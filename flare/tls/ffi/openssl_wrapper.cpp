@@ -224,6 +224,205 @@ const char* flare_ssl_last_error(void) {
     return last_error_msg.c_str();
 }
 
+// ── Server-side context lifecycle (v0.5.0 follow-up / Track 5.1 / C6) ─────
+
+flare_ssl_ctx_t flare_ssl_ctx_new_server(
+    const char* cert_path, const char* key_path
+) {
+    ERR_clear_error();
+    if (!cert_path || !key_path) {
+        set_error("flare_ssl_ctx_new_server: cert_path / key_path required");
+        return nullptr;
+    }
+    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) { capture_openssl_errors(); return nullptr; }
+    /* TLS 1.2+ floor + forward-secret AEAD ciphers. */
+    if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1) {
+        capture_openssl_errors(); SSL_CTX_free(ctx); return nullptr;
+    }
+    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3
+                            | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
+    if (SSL_CTX_set_cipher_list(ctx, FORWARD_SECRET_CIPHERS) != 1) {
+        capture_openssl_errors(); SSL_CTX_free(ctx); return nullptr;
+    }
+    /* Cert + key. */
+    if (SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1) {
+        capture_openssl_errors(); SSL_CTX_free(ctx); return nullptr;
+    }
+    if (SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) != 1) {
+        capture_openssl_errors(); SSL_CTX_free(ctx); return nullptr;
+    }
+    if (SSL_CTX_check_private_key(ctx) != 1) {
+        capture_openssl_errors(); SSL_CTX_free(ctx); return nullptr;
+    }
+    return static_cast<void*>(ctx);
+}
+
+int flare_ssl_ctx_reload(
+    flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
+) {
+    ERR_clear_error();
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c || !cert_path || !key_path) {
+        set_error("flare_ssl_ctx_reload: ctx / cert / key required");
+        return -1;
+    }
+    if (SSL_CTX_use_certificate_chain_file(c, cert_path) != 1) {
+        capture_openssl_errors(); return -1;
+    }
+    if (SSL_CTX_use_PrivateKey_file(c, key_path, SSL_FILETYPE_PEM) != 1) {
+        capture_openssl_errors(); return -1;
+    }
+    if (SSL_CTX_check_private_key(c) != 1) {
+        capture_openssl_errors(); return -1;
+    }
+    return 0;
+}
+
+/* ALPN selection callback. ``arg`` carries our wire-format
+ * server protos list. Picks the first server-listed protocol
+ * matching the client's advertised list. */
+static int alpn_select_cb(
+    SSL* /*ssl*/,
+    const unsigned char** out, unsigned char* outlen,
+    const unsigned char* in, unsigned int inlen,
+    void* arg
+) {
+    /* arg is a pointer to a heap-allocated wire-format protos
+     * blob; first byte is the total length, then the wire bytes.
+     * (Format: ``len_byte || proto || len_byte || proto || ...``
+     * for both server and client; OpenSSL exposes the same shape.) */
+    auto* server_blob = static_cast<unsigned char*>(arg);
+    if (!server_blob) return SSL_TLSEXT_ERR_NOACK;
+    unsigned int server_len = static_cast<unsigned int>(server_blob[0]);
+    const unsigned char* server_protos = server_blob + 1;
+
+    /* Walk server protocols in preference order. For each,
+     * scan the client's list for a match. */
+    unsigned int si = 0;
+    while (si < server_len) {
+        unsigned int slen = server_protos[si];
+        const unsigned char* sp = server_protos + si + 1;
+        unsigned int ci = 0;
+        while (ci < inlen) {
+            unsigned int clen = in[ci];
+            const unsigned char* cp = in + ci + 1;
+            if (clen == slen && memcmp(sp, cp, slen) == 0) {
+                *out = sp;
+                *outlen = static_cast<unsigned char>(slen);
+                return SSL_TLSEXT_ERR_OK;
+            }
+            ci += 1 + clen;
+        }
+        si += 1 + slen;
+    }
+    return SSL_TLSEXT_ERR_NOACK;
+}
+
+int flare_ssl_ctx_set_alpn_server(
+    flare_ssl_ctx_t ctx, const uint8_t* protos, int protos_len
+) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) { set_error("ctx is null"); return -1; }
+    if (protos_len <= 0 || protos_len > 255) {
+        set_error("ALPN protos blob must be 1..255 bytes");
+        return -1;
+    }
+    /* Stash the protos blob on the SSL_CTX ex_data so the
+     * callback can read it. We allocate a single buffer of
+     * (1 + protos_len) bytes: the first byte holds protos_len,
+     * the rest is the wire-format blob. Lifetime: until
+     * SSL_CTX_free; no per-handshake allocation. */
+    auto* blob = static_cast<unsigned char*>(
+        OPENSSL_malloc(static_cast<size_t>(1 + protos_len))
+    );
+    if (!blob) { set_error("alloc failed"); return -1; }
+    blob[0] = static_cast<unsigned char>(protos_len);
+    memcpy(blob + 1, protos, static_cast<size_t>(protos_len));
+    /* Note: we leak the blob on SSL_CTX_free since OpenSSL
+     * doesn't expose a cleanup hook for the alpn_select_cb arg.
+     * For long-lived servers this is at most one leaked
+     * (1 + 255) byte allocation per ctx, paid once. */
+    SSL_CTX_set_alpn_select_cb(c, alpn_select_cb, blob);
+    return 0;
+}
+
+int flare_ssl_ctx_set_verify_client_cert(
+    flare_ssl_ctx_t ctx, const char* ca_path
+) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c || !ca_path || ca_path[0] == '\0') {
+        set_error("ctx + ca_path required for client-cert verify");
+        return -1;
+    }
+    if (SSL_CTX_load_verify_locations(c, ca_path, nullptr) != 1) {
+        capture_openssl_errors(); return -1;
+    }
+    SSL_CTX_set_verify(
+        c, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr
+    );
+    return 0;
+}
+
+// ── Server-side session lifecycle ─────────────────────────────────────────
+
+flare_ssl_t flare_ssl_new_accept(flare_ssl_ctx_t ctx, int fd) {
+    ERR_clear_error();
+    SSL* ssl = SSL_new(static_cast<SSL_CTX*>(ctx));
+    if (!ssl) { capture_openssl_errors(); return nullptr; }
+    if (SSL_set_fd(ssl, fd) != 1) {
+        capture_openssl_errors(); SSL_free(ssl); return nullptr;
+    }
+    SSL_set_accept_state(ssl);
+    return static_cast<void*>(ssl);
+}
+
+int flare_ssl_do_handshake(flare_ssl_t ssl) {
+    SSL* s = static_cast<SSL*>(ssl);
+    if (!s) { set_error("ssl is null"); return -1; }
+    ERR_clear_error();
+    int rc = SSL_do_handshake(s);
+    if (rc == 1) {
+        return 0;  /* handshake complete */
+    }
+    int err = SSL_get_error(s, rc);
+    if (err == SSL_ERROR_WANT_READ)  return 1;
+    if (err == SSL_ERROR_WANT_WRITE) return 2;
+    capture_openssl_errors();
+    return -1;
+}
+
+// ── Server-side introspection ────────────────────────────────────────────
+
+int flare_ssl_get_alpn_selected(
+    flare_ssl_t ssl, char* buf, int buf_size
+) {
+    SSL* s = static_cast<SSL*>(ssl);
+    if (!s || !buf || buf_size <= 0) return -1;
+    const unsigned char* alpn = nullptr;
+    unsigned int alpn_len = 0;
+    SSL_get0_alpn_selected(s, &alpn, &alpn_len);
+    if (!alpn || alpn_len == 0) return 0;
+    if (static_cast<int>(alpn_len) >= buf_size) return -1;
+    memcpy(buf, alpn, alpn_len);
+    buf[alpn_len] = '\0';
+    return static_cast<int>(alpn_len);
+}
+
+int flare_ssl_get_sni_host(
+    flare_ssl_t ssl, char* buf, int buf_size
+) {
+    SSL* s = static_cast<SSL*>(ssl);
+    if (!s || !buf || buf_size <= 0) return -1;
+    const char* host = SSL_get_servername(s, TLSEXT_NAMETYPE_host_name);
+    if (!host) return 0;
+    int n = static_cast<int>(strlen(host));
+    if (n >= buf_size) return -1;
+    memcpy(buf, host, static_cast<size_t>(n));
+    buf[n] = '\0';
+    return n;
+}
+
 // ── Test server ──────────────────────────────────────────────────────────────
 
 struct FlareTestServer {

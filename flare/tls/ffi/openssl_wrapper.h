@@ -62,6 +62,116 @@ int         flare_ssl_get_peer_cert_subject(flare_ssl_t ssl, char* buf, int buf_
 
 const char* flare_ssl_last_error(void);
 
+/* ── Server-side context lifecycle (v0.5.0 follow-up / Track 5.1 / C6) ─── */
+
+/**
+ * Create a server-side ``SSL_CTX`` configured with TLS 1.2+,
+ * forward-secret AEAD ciphers, and the supplied certificate
+ * chain + private key. Combines ``SSL_CTX_new(TLS_server_method())``
+ * + min-proto-version + cipher list + ``load_cert_key`` + optional
+ * client-cert verification.
+ *
+ * @param cert_path  PEM full chain (leaf first, then intermediates).
+ * @param key_path   PEM private key matching ``cert_path``.
+ * @return Opaque ctx handle; NULL on failure (use
+ *         ``flare_ssl_last_error()`` for the message).
+ */
+flare_ssl_ctx_t flare_ssl_ctx_new_server(
+    const char* cert_path, const char* key_path
+);
+
+/**
+ * Reload cert + key on an existing server ``SSL_CTX``. In-flight
+ * sessions that already loaded an ``SSL`` from the old ctx see
+ * the previous cert (OpenSSL holds the cert on the SSL via
+ * ``SSL_use_certificate``); new handshakes pick up the reloaded
+ * cert. Used for cert rotation without restart.
+ *
+ * @return 0 on success, -1 on failure.
+ */
+int flare_ssl_ctx_reload(
+    flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
+);
+
+/**
+ * Set ALPN protocols for server-side selection.
+ *
+ * ``protos`` is the wire-format ALPN list:
+ * ``len_byte || protocol_bytes || len_byte || protocol_bytes || ...``.
+ * For example, advertising ``["h2", "http/1.1"]`` produces:
+ * ``\x02h2\x08http/1.1``.
+ *
+ * The selection callback picks the first server-listed protocol
+ * matching the client's advertised list (server preference wins
+ * on ties — RFC 7301 §3.2 SHOULD recommendation).
+ *
+ * @return 0 on success, -1 on failure.
+ */
+int flare_ssl_ctx_set_alpn_server(
+    flare_ssl_ctx_t ctx, const uint8_t* protos, int protos_len
+);
+
+/**
+ * Enable mTLS client-cert verification.
+ *
+ * Sets ``SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT`` and
+ * loads ``ca_path`` as the trust anchor for client certs.
+ *
+ * @return 0 on success, -1 on failure (cert load failure, etc.).
+ */
+int flare_ssl_ctx_set_verify_client_cert(
+    flare_ssl_ctx_t ctx, const char* ca_path
+);
+
+/* ── Server-side session lifecycle ──────────────────────────────────────── */
+
+/**
+ * Create an ``SSL`` for an accepted server-side connection.
+ *
+ * Wraps ``SSL_new`` + ``SSL_set_fd`` + ``SSL_set_accept_state``.
+ * The caller drives the handshake via ``flare_ssl_do_handshake``
+ * on each readable / writable edge.
+ *
+ * @return Opaque handle; NULL on failure.
+ */
+flare_ssl_t flare_ssl_new_accept(flare_ssl_ctx_t ctx, int fd);
+
+/**
+ * Drive ``SSL_accept`` (server side) or ``SSL_connect`` (client
+ * side, equivalent to ``flare_ssl_connect``) one step.
+ *
+ * Reactor-friendly return values:
+ *
+ *   0  — handshake complete (``SSL_is_init_finished`` is true).
+ *   1  — WANT_READ: caller waits for the socket to be readable
+ *        and calls ``flare_ssl_do_handshake`` again.
+ *   2  — WANT_WRITE: caller waits for the socket to be writable
+ *        and calls ``flare_ssl_do_handshake`` again.
+ *  -1  — fatal error (use ``flare_ssl_last_error`` for the
+ *        message; close the connection).
+ */
+int flare_ssl_do_handshake(flare_ssl_t ssl);
+
+/* ── Server-side introspection (v0.5.0 follow-up / Track 5.2) ──────────── */
+
+/**
+ * Copy the negotiated ALPN protocol into ``buf``.
+ *
+ * @return Number of bytes written (excluding NUL), or 0 if no
+ *         ALPN protocol was negotiated, or -1 if ``buf`` was too
+ *         small.
+ */
+int flare_ssl_get_alpn_selected(flare_ssl_t ssl, char* buf, int buf_size);
+
+/**
+ * Copy the SNI hostname the client sent in the Client Hello into
+ * ``buf``.
+ *
+ * @return Number of bytes written (excluding NUL), or 0 if the
+ *         client sent no SNI, or -1 if ``buf`` was too small.
+ */
+int flare_ssl_get_sni_host(flare_ssl_t ssl, char* buf, int buf_size);
+
 /* ── Test server (loopback echo server — for use in test code only) ────────── */
 
 /**
