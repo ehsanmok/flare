@@ -197,6 +197,7 @@ test-streaming-response = "mojo -I . tests/test_streaming_response.mojo"  # v0.5
 test-streaming-serialize = "mojo -I . tests/test_streaming_serialize.mojo"  # v0.5.0 follow-up C5 — serialize_streaming_response RFC 7230 framing (~14 tests)
 test-tls-acceptor    = "mojo -I . tests/test_tls_acceptor.mojo"       # v0.5.0 Step 3 — TlsAcceptor / TlsServerConfig / TlsInfo (~10 tests)
 test-tls-server-ffi  = "mojo -I . tests/test_tls_server_ffi.mojo"     # v0.5.0 follow-up C6 — server-side OpenSSL FFI (~12 tests)
+test-tls-handshake-live = "mojo -I . tests/test_tls_handshake_live.mojo"  # v0.5.0 follow-up C8-C10 — live TlsInfo / ALPN / reload / mTLS
 test-request-tls-info = "mojo -I . tests/test_request_tls_info.mojo"  # v0.5.0 Step 3 — Request.tls_info + ALPN (~7 tests)
 test-routes-comptime = "mojo -I . tests/test_routes_comptime.mojo"    # v0.4.1 Track 2 — ComptimeRouter dispatch (~19 tests)
 test-static-response = "mojo -I . tests/test_static_response.mojo"    # v0.4.1 Track 2 — Pre-encoded literal responses (~11 tests)
