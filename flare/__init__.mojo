@@ -452,6 +452,15 @@ from .tls.error import (
     CertificateHostnameMismatch,
     CertificateUntrusted,
 )
+from .tls.acceptor import (
+    TlsAcceptor,
+    TlsServerConfig,
+    TlsInfo,
+    TlsServerError,
+    TlsServerNotImplemented,
+    TLS_PROTOCOL_TLS12,
+    TLS_PROTOCOL_TLS13,
+)
 
 # flare.http
 from .http.cancel import Cancel, CancelCell, CancelReason

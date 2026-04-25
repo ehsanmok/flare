@@ -50,3 +50,12 @@ from .error import (
     CertificateHostnameMismatch,
     CertificateUntrusted,
 )
+from .acceptor import (
+    TlsAcceptor,
+    TlsServerConfig,
+    TlsInfo,
+    TlsServerError,
+    TlsServerNotImplemented,
+    TLS_PROTOCOL_TLS12,
+    TLS_PROTOCOL_TLS13,
+)
