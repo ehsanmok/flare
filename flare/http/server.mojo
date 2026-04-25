@@ -483,6 +483,43 @@ struct HttpServer(Movable):
             self._listener, self.config, handler, self._stopping
         )
 
+    def serve_view[
+        VH: ViewHandler
+    ](mut self, var handler: VH,) raises:
+        """Run the view-aware reactor loop with a ``ViewHandler``
+        (v0.5.0 follow-up / Track 1.1 part 2 / C3).
+
+        Single-threaded entry point. Per-request the reactor:
+
+        1. Reads bytes into ``ConnHandle.read_buf``.
+        2. Parses the request as a ``RequestView`` borrowing into
+           ``read_buf`` (no per-header String alloc, no body copy).
+        3. Dispatches into ``handler.serve_view(view, cancel)`` —
+           ``view.body()`` returns ``Span[UInt8, origin]`` directly.
+        4. Serialises the response and resets ``read_buf`` for
+           the next pipelined request.
+
+        Use this entry point for handlers that benefit from
+        zero-copy reads — multipart upload parsers, large-body
+        echos, anything that scans the body without re-encoding
+        it. For v0.4.x ``Handler.serve(req: Request)`` plug-in,
+        wrap with ``WithViewCancel[H](inner=h)`` (the adapter
+        does ``view.into_owned()`` and forwards).
+
+        Args:
+            handler: View-aware request handler (ownership
+                transferred).
+
+        Raises:
+            NetworkError: On fatal listener errors.
+        """
+        from ._server_reactor_impl import run_reactor_loop_view
+
+        self._stopping = False
+        run_reactor_loop_view(
+            self._listener, self.config, handler, self._stopping
+        )
+
     def serve_static(mut self, resp: StaticResponse) raises:
         """Run the reactor loop in static-response mode.
 

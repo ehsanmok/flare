@@ -97,7 +97,15 @@ from .body import Body, ChunkSource, InlineBody, ChunkedBody, drain_body
 from .url import Url, UrlParseError
 from .request import Request, Method
 from .response import Response, Status
-from .handler import Handler, CancelHandler, WithCancel, FnHandler, FnHandlerCT
+from .handler import (
+    Handler,
+    CancelHandler,
+    WithCancel,
+    ViewHandler,
+    WithViewCancel,
+    FnHandler,
+    FnHandlerCT,
+)
 from .router import Router
 from .routes import ComptimeRoute, ComptimeRouter
 from .app import App, State

@@ -34,7 +34,7 @@ from std.memory import UnsafePointer, alloc, memcpy, stack_allocation
 from std.sys.info import CompilationTarget
 
 from flare.http.cancel import Cancel, CancelCell, CancelReason
-from flare.http.handler import Handler, CancelHandler
+from flare.http.handler import Handler, CancelHandler, ViewHandler
 from flare.http.request import Request
 from flare.http.response import Response
 from flare.http.server import (
@@ -521,6 +521,147 @@ struct ConnHandle(Movable):
         self.body_total = -1
 
         self._serialize_response(resp^, not close_after)
+        return self._transition_to_writing()
+
+    def on_readable_view[
+        VH: ViewHandler
+    ](mut self, ref handler: VH, config: ServerConfig) raises -> StepResult:
+        """View-aware variant of ``on_readable_cancel`` (v0.5.0
+        follow-up / Track 1.1 part 2 / C3).
+
+        Same control flow as ``on_readable_cancel`` but dispatches
+        the parsed ``RequestView`` directly into
+        ``VH.serve_view(view, cancel)`` — the body slice borrows
+        from ``self.read_buf`` and the handler reads it without
+        a copy. The owned ``Request`` materialisation that the
+        v0.4.x ``Handler.serve`` requires is skipped entirely.
+
+        Net win on this path: handler gets ``Span[UInt8, origin]``
+        body access — the headline zero-copy upload contract from
+        design-0.5 §1.1.
+        """
+        if self.state != STATE_READING:
+            return StepResult(
+                want_read=False, want_write=self.state == STATE_WRITING
+            )
+
+        self.cancel_cell.reset()
+
+        var chunk = stack_allocation[8192, UInt8]()
+        while True:
+            var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
+            if got > 0:
+                var old_len = len(self.read_buf)
+                var got_int = Int(got)
+                self.read_buf.resize(old_len + got_int, UInt8(0))
+                var dst = self.read_buf.unsafe_ptr() + old_len
+                memcpy(dest=dst, src=chunk, count=got_int)
+                if (
+                    len(self.read_buf)
+                    > config.max_header_size + config.max_body_size
+                ):
+                    self._queue_error(413, "Content Too Large")
+                    return self._transition_to_writing()
+            elif got == 0:
+                self.cancel_cell.flip(CancelReason.PEER_CLOSED)
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    break
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+
+        if self.headers_end < 0:
+            var end = _find_crlfcrlf(self.read_buf, 0)
+            if end < 0:
+                if len(self.read_buf) > config.max_header_size:
+                    self._queue_error(431, "Request Header Fields Too Large")
+                    return self._transition_to_writing()
+                return StepResult(
+                    want_read=True,
+                    want_write=False,
+                    idle_timeout_ms=config.idle_timeout_ms,
+                )
+            self.headers_end = end
+            self.content_length = _scan_content_length(
+                self.read_buf, self.headers_end
+            )
+            if self.content_length > config.max_body_size:
+                self._queue_error(413, "Content Too Large")
+                return self._transition_to_writing()
+            self.body_total = self.headers_end + self.content_length
+
+        if len(self.read_buf) < self.body_total:
+            var body_timeout = (
+                config.read_body_timeout_ms if config.read_body_timeout_ms
+                > 0 else config.idle_timeout_ms
+            )
+            return StepResult(
+                want_read=True,
+                want_write=False,
+                idle_timeout_ms=body_timeout,
+            )
+
+        # Parse the request as a borrowed view into ``read_buf``
+        # and dispatch it directly. Body is ``Span[UInt8, origin]``
+        # for the duration of the ``serve_view`` call.
+        from .request_view import parse_request_view
+
+        var resp: Response
+        try:
+            var view = parse_request_view(
+                Span[UInt8, _](self.read_buf)[: self.body_total],
+                config.max_header_size,
+                config.max_body_size,
+                config.max_uri_length,
+                self.peer,
+                config.expose_error_messages,
+            )
+
+            # Connection-disposition from the borrowed header
+            # view — no allocation, just an offsets-based lookup.
+            var hv = view.headers()
+            var conn_hdr = _ascii_lower(String(hv.get("connection")))
+            var is_http10 = view.version == "HTTP/1.0"
+            var close_after = False
+            if conn_hdr == "close":
+                close_after = True
+            elif is_http10 and conn_hdr != "keep-alive":
+                close_after = True
+
+            self.keepalive_count += 1
+            if self.keepalive_count >= config.max_keepalive_requests:
+                close_after = True
+            if not config.keep_alive:
+                close_after = True
+            self.should_close = close_after
+
+            try:
+                resp = handler.serve_view(view, self.cancel_cell.handle())
+            except:
+                self._queue_error(500, "Internal Server Error")
+                return self._transition_to_writing()
+        except:
+            self._queue_error(400, "Bad Request")
+            return self._transition_to_writing()
+
+        if self.body_total > 0 and self.body_total <= len(self.read_buf):
+            var leftover = List[UInt8](
+                capacity=len(self.read_buf) - self.body_total
+            )
+            for i in range(self.body_total, len(self.read_buf)):
+                leftover.append(self.read_buf[i])
+            self.read_buf = leftover^
+        self.headers_end = -1
+        self.content_length = 0
+        self.body_total = -1
+
+        var keepalive = not self.should_close
+        self._serialize_response(resp^, keepalive)
         return self._transition_to_writing()
 
     def on_readable_static(
@@ -1470,6 +1611,114 @@ def run_reactor_loop_cancel[
 
     # Graceful shutdown: close all active connections. (Drain mode
     # with a deadline lands in commit 6 of v0.5.0 Step 1.)
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn(leftover[i], conns, timers, reactor)
+
+
+def run_reactor_loop_view[
+    VH: ViewHandler
+](
+    mut listener: TcpListener,
+    config: ServerConfig,
+    ref handler: VH,
+    ref stopping: Bool,
+) raises:
+    """View-aware variant of ``run_reactor_loop_cancel`` (v0.5.0
+    follow-up / Track 1.1 part 2 / C3).
+
+    Identical control flow but drives each connection through
+    ``ConnHandle.on_readable_view(handler, config)`` instead of
+    ``on_readable_cancel``, so the handler receives a borrowed
+    ``RequestView[origin]`` whose body slice points directly into
+    ``self.read_buf``. Closes the design-0.5 §1.1 zero-copy
+    upload contract for handlers that opt into the
+    ``ViewHandler`` shape.
+
+    Args:
+        listener: Bound and listening ``TcpListener``.
+        config:   Server configuration.
+        handler:  Per-request view-aware handler.
+        stopping: Checked each iteration.
+    """
+    listener._socket.set_nonblocking(True)
+    var listener_fd = listener._socket.fd
+
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            if fd_tok in conns:
+                _cleanup_conn(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop(listener, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                var last_step = StepResult()
+                if evt.is_readable():
+                    last_step = ch_ptr[].on_readable_view(handler, config)
+                    step_done = last_step.done
+                    var cycles = 0
+                    while (not step_done) and cycles < 3:
+                        cycles += 1
+                        if (
+                            last_step.want_write
+                            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                        ):
+                            last_step = ch_ptr[].on_writable(config)
+                            step_done = last_step.done
+                        elif (
+                            last_step.want_read
+                            and len(ch_ptr[].read_buf) > 0
+                            and ch_ptr[].state == STATE_READING
+                        ):
+                            last_step = ch_ptr[].on_readable_view(
+                                handler, config
+                            )
+                            step_done = last_step.done
+                        else:
+                            break
+                elif evt.is_writable():
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+                if not step_done:
+                    _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn(fd, conns, timers, reactor)
+
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)

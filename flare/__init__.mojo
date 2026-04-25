@@ -481,6 +481,8 @@ from .http.handler import (
     Handler,
     CancelHandler,
     WithCancel,
+    ViewHandler,
+    WithViewCancel,
     FnHandler,
     FnHandlerCT,
 )
