@@ -30,3 +30,4 @@ from .timer_wheel import TimerWheel
 from ._thread import num_cpus
 from .scheduler import Scheduler, default_worker_count
 from .pool import Pool
+from .blocking import block_in_pool, MAX_POOL_SIZE
