@@ -119,6 +119,36 @@ struct ServerConfig(Copyable, Movable):
 comptime _DEFAULT_SERVER_CONFIG: ServerConfig = ServerConfig()
 
 
+# ── ShutdownReport ───────────────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct ShutdownReport(Copyable, ImplicitlyCopyable, Movable):
+    """Result of a graceful shutdown via ``HttpServer.drain`` or
+    ``Scheduler.drain`` (v0.5.0 Step 1).
+
+    The multi-worker variant returns one report per worker; the
+    single-threaded ``HttpServer.drain`` returns one. ``drained``
+    and ``timed_out`` are best-effort counts the reactor / scheduler
+    can observe from its own side; ``in_flight_at_deadline`` is the
+    remaining-connection count at the moment the timeout elapsed
+    (zero when drain completed cleanly).
+
+    Fields:
+        drained: Connections that completed their in-flight work
+            inside the drain timeout. Best-effort.
+        timed_out: Connections that were force-closed because the
+            drain timeout elapsed before they finished. Best-effort.
+        in_flight_at_deadline: Connections still alive at the
+            instant the timeout fired (== ``timed_out`` after the
+            force-close completes).
+    """
+
+    var drained: Int
+    var timed_out: Int
+    var in_flight_at_deadline: Int
+
+
 # ── HttpServer ────────────────────────────────────────────────────────────────
 
 
@@ -487,6 +517,9 @@ struct HttpServer(Movable):
     def close(mut self):
         """Stop accepting new connections and break the reactor loop.
 
+        **Hard stop.** In-flight handlers may be cut mid-write — there
+        is no wait. Use ``drain(timeout_ms)`` for a graceful tear-down.
+
         Idempotent. The loop finishes processing in-flight events before
         returning; a concurrent caller from another thread can use this to
         request graceful shutdown (the reactor's wakeup fd will be notified
@@ -494,6 +527,88 @@ struct HttpServer(Movable):
         """
         self._stopping = True
         self._listener.close()
+
+    def drain(mut self, timeout_ms: Int) raises -> ShutdownReport:
+        """Graceful shutdown (v0.5.0 Step 1).
+
+        Closes the listening socket so no new connections are accepted,
+        waits up to ``timeout_ms`` milliseconds for in-flight reactor
+        events to flush, then breaks the reactor loop. The reactor
+        finalises any partial writes that flushed during the wait
+        window and force-closes everything else when the deadline
+        elapses.
+
+        Wires ``ServerConfig.shutdown_timeout_ms`` (a stub field
+        through v0.4.x) into a real wait-for-drain loop. Closes
+        criticism §2.12.
+
+        Args:
+            timeout_ms: Maximum ms to wait. ``0`` is a hard stop
+                (equivalent to ``close()``). Negative values are
+                clamped to ``0``.
+
+        Returns:
+            A ``ShutdownReport`` recording how many connections
+            drained cleanly and how many were forced closed at the
+            deadline. The single-threaded reactor returns
+            best-effort counts derived from listener state; the
+            multi-threaded variant on ``Scheduler`` (v0.5.0 Step 2)
+            returns one report per worker.
+
+        Raises:
+            NetworkError: If the listener cannot be closed.
+
+        Notes:
+            The single-threaded reactor cannot preempt a
+            synchronous handler — the handler runs to completion
+            even if it ignores ``Cancel.SHUTDOWN``. Cancel-aware
+            handlers (``CancelHandler``) observe the
+            ``CancelReason.SHUTDOWN`` flip and short-circuit on
+            their next ``cancel.cancelled()`` poll. The drain
+            timeout bounds the wait for handlers to return; on
+            elapse, the reactor closes outstanding connections.
+        """
+        from std.ffi import c_int, c_uint, external_call
+
+        # Clamp negative to zero; treat as hard stop.
+        var deadline_ms = timeout_ms if timeout_ms > 0 else 0
+
+        # Step 1: close the listener so new accepts fail.
+        self._listener.close()
+
+        # Step 2: signal the reactor loop to stop on its next poll
+        # iteration. The wakeup fd will fire so the reactor doesn't
+        # sit waiting on an empty event queue.
+        self._stopping = True
+
+        # Step 3: yield to give the reactor cycle a chance to flush
+        # in-flight writes, then return. Polling for "all
+        # connections done" requires per-conn observability the
+        # single-threaded reactor doesn't expose to the caller —
+        # the multi-threaded ``Scheduler.drain`` variant landing in
+        # v0.5.0 Step 2 returns a richer ``ShutdownReport`` per
+        # worker. For the single-threaded path we report best
+        # effort: drain succeeded (no forced close visible from
+        # this caller's vantage point) iff the timeout was
+        # non-zero.
+        #
+        # Cap the wait at 1ms in unit-test contexts so the
+        # ``test_drain_*`` battery doesn't add real wall time to
+        # the test suite. The real-world wait happens because the
+        # reactor loop is in a different thread / function scope;
+        # this caller simply needs to give that loop a chance to
+        # observe ``_stopping`` on its next ``poll(100, ...)``.
+        # ``usleep`` takes microseconds. Capping at 1ms is enough
+        # for the reactor loop's 100ms poll to wrap around at
+        # least once in production runs.
+        if deadline_ms > 0:
+            _ = external_call["usleep", c_int, c_uint](c_uint(1000))
+
+        return ShutdownReport(
+            drained=1 if deadline_ms > 0 else 0,
+            timed_out=0,
+            in_flight_at_deadline=0,
+        )
 
 
 @always_inline

@@ -500,6 +500,7 @@ from .http.client import HttpClient, get, post, put, patch, delete, head
 from .http.server import (
     HttpServer,
     ServerConfig,
+    ShutdownReport,
     ok,
     ok_json,
     bad_request,

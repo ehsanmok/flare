@@ -129,6 +129,7 @@ from .client import HttpClient, get, post, put, patch, delete, head
 from .server import (
     HttpServer,
     ServerConfig,
+    ShutdownReport,
     ok,
     ok_json,
     bad_request,
