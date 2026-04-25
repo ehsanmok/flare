@@ -34,9 +34,6 @@ flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard to misuse 
 The full walk-through, gradually-disclosed, used to live here. It now lives in the package docstring on [`flare/__init__.mojo`](flare/__init__.mojo) (rendered at <https://ehsanmok.github.io/flare/>) and in the runnable examples under [`examples/`](examples/). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example.
 
 ```mojo
-# Path parameters via def-handler, plus a typed-extractor handler
-# struct registered through Router.get[H] (since v0.5.0 Step 2).
-# PathInt[name].value is `Int` directly — no .value.value chain.
 from flare.http import (
     Router, ok, Request, Response, HttpServer,
     Extracted, PathInt, Handler,
@@ -64,8 +61,6 @@ def main() raises:
 ```
 
 ```mojo
-# Cancel-aware handler (v0.5.0 Step 1) — short-circuits on peer disconnect,
-# deadline, or drain.
 from flare.http import CancelHandler, Cancel, Request, Response, ok
 
 @fieldwise_init
@@ -79,9 +74,6 @@ struct SlowHandler(CancelHandler, Copyable, Movable):
 ```
 
 ```mojo
-# Shared state + custom middleware. Middleware is a Handler that holds
-# another Handler — stack layers by nesting constructors, no callback
-# chain to thread through.
 from flare.http import App, Router, Request, Response, Handler, State, ok, HttpServer
 from flare.net import SocketAddr
 
