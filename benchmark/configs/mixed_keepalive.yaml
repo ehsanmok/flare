@@ -1,0 +1,35 @@
+# Mixed-keepalive workload (v0.5.0 Step 1).
+#
+# 64 keep-alive connections sustained, but a fraction of every
+# round closes the TCP connection on response-read. This catches
+# regressions in:
+#
+#   - the keep-alive book-keeping in ``ConnHandle`` (counts,
+#     ``max_keepalive_requests`` cap),
+#   - the HTTP/1.0 close-by-default semantics path,
+#   - the close-after disposition computed from the parsed
+#     ``Connection:`` header.
+#
+# Each measurement round runs the same wrk command as
+# ``throughput.yaml`` but reuses the wrk Lua hook to send 20% of
+# requests with ``Connection: close`` (and the matching
+# ``Host:`` rebuild for HTTP/1.1 strictness). The hook lives at
+# ``benchmark/scripts/wrk_mixed_keepalive.lua`` and is referenced
+# by the harness when ``--config=mixed_keepalive`` is selected.
+#
+# Headline numbers from this config land alongside the
+# ``throughput`` baseline in ``docs/benchmark.md`` once the v0.5
+# methodology change (wrk -> wrk2) is fully shipped.
+name: mixed_keepalive
+wrk_threads: 1
+wrk_connections: 64
+wrk_duration_seconds: 30
+warmup_seconds: 15
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 3.0
+
+# wrk Lua script: 1-in-5 requests gets ``Connection: close``.
+# Defined out-of-band of the YAML so the harness loads it via
+# ``--script benchmark/scripts/wrk_mixed_keepalive.lua``.
+wrk_script: benchmark/scripts/wrk_mixed_keepalive.lua

@@ -73,6 +73,14 @@ bench-vs-baseline-quick   = "bash benchmark/scripts/bench_vs_baseline.sh --only=
 bench-integrity-only      = "bash benchmark/scripts/_integrity_check.sh"
 bench-collect-env         = "bash benchmark/scripts/_collect_env.sh"
 
+# v0.5.0 Step 1 — mixed-keepalive workload (20% Connection: close,
+# 80% HTTP/1.1 keep-alive). Same five-run-median + stdev gate as
+# the rest. ``wrk2`` for tail-latency measurements is staged in
+# the docs/benchmark.md "v0.5 methodology change" section but
+# Linux conda-forge has no pinned wrk2 yet — the wrk2 task lands
+# once the bench env is repinned.
+bench-mixed-keepalive     = "bash benchmark/scripts/bench_vs_baseline.sh --only=flare,go_nethttp --configs=mixed_keepalive"
+
 [feature.fuzz.tasks]
 # ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
 # mozz is installed as a pixi dependency (feature.fuzz) and packaged as

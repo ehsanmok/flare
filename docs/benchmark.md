@@ -29,26 +29,49 @@ The v0.5 redesign is therefore three changes:
    next request*. That's the
    [coordinated-omission](https://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html)
    bug and it makes p99.9 / p99.99 unreliable. `wrk2` fixes it.
+
+   *Status (v0.5.0 Step 1):* the `wrk2` switch is staged but not
+   yet on the wire — `conda-forge` does not currently pin a `wrk2`
+   build for `linux-64`, and the `pixi`-pinned bench env is the
+   one place v0.4.x committed to. The harness change lands once
+   the env is repinned (a small standalone commit; the YAML
+   schema and the per-config `wrk_script` field below already
+   accommodate `wrk2` invocation). Until then, bench numbers in
+   this doc stay on `wrk` (the v0.4.1 baseline).
+
 2. **Tail percentiles** — p50, p90, p99, **p99.9, p99.99** —
-   replace the single p50 / p99 row.
-3. **Five workloads**, not one:
+   replace the single p50 / p99 row once `wrk2` is on the wire.
+
+3. **Multiple workloads**, not one:
    - `micro-static` (the v0.4.x parity gate against
      [`plaintext.yaml`](../benchmark/workloads/plaintext.yaml))
-   - `mixed-keepalive` (80 % keep-alive, 20 % `Connection: close`,
-     [`mixed_keepalive.yaml`](../benchmark/configs/mixed_keepalive.yaml),
-     **landed in v0.5.0 Step 1**)
-   - `uploads` (POSTs of 4 KB / 64 KB / 1 MB / 16 MB) — needs Track 4
-     streaming bodies; **lands in v0.5.0 Step 2**.
-   - `downloads` (GETs returning 4 KB / 64 KB / 1 MB / 16 MB streamed
-     bodies) — needs Track 4; **lands in v0.5.0 Step 2**.
+   - **`mixed-keepalive`** (80 % keep-alive, 20 % `Connection:
+     close`,
+     [`mixed_keepalive.yaml`](../benchmark/configs/mixed_keepalive.yaml)
+     + a wrk Lua script at
+     [`benchmark/scripts/wrk_mixed_keepalive.lua`](../benchmark/scripts/wrk_mixed_keepalive.lua)).
+     **Landed in v0.5.0 Step 1.** Run with:
+     ```bash
+     pixi run --environment bench bench-mixed-keepalive
+     ```
+     Catches regressions in flare's keep-alive book-keeping and
+     close-after disposition that pure keep-alive loads can't
+     exercise.
+   - `uploads` (POSTs of 4 KB / 64 KB / 1 MB / 16 MB) — needs the
+     streaming-body work; **lands in v0.5.0 Step 2**.
+   - `downloads` (GETs returning 4 KB / 64 KB / 1 MB / 16 MB
+     streamed bodies) — needs the streaming-body work; **lands in
+     v0.5.0 Step 2**.
    - `slow-clients` (256 connections, each sending 1 byte / 100 ms,
-     server holds) — needs deadlines + Cancel; **lands in v0.5.0
-     Step 1** alongside the deadline / Cancel work.
-   - `churn` (10 K open / send / close cycles per second) — landed
-     in v0.5.0 Step 1.
+     server holds) — exercises the
+     `read_body_timeout_ms` deadline that landed in v0.5.0
+     Step 1; the harness version of the workload sits behind the
+     same `wrk2` repin as above.
+   - `churn` (10 K open / send / close cycles per second) — same
+     story; harness lands with the env repin.
 
-The Linux table below stays as the v0.4.1 wrk baseline so the
-release-to-release regression check has a stable signal.
+The Linux throughput table below stays as the v0.4.1 wrk baseline
+so the release-to-release regression check has a stable signal.
 
 ---
 
@@ -264,15 +287,15 @@ and within noise at the L2/L3-resident sizes.
 pixi run --environment bench bench-vs-baseline-quick   # flare vs Go, ~7 min
 pixi run --environment bench bench-vs-baseline         # + nginx + latency_floor, ~20 min
 
-# v0.5.0 Step 1 additions (wrk2 + tail percentiles + mixed-keepalive)
-pixi run --environment bench bench-tail-quick          # wrk2 -R10000 -t1 -c64 -d30s
-pixi run --environment bench bench-mixed-keepalive     # 80% keep-alive, 20% close
+# v0.5.0 Step 1 — mixed-keepalive workload (80% keep-alive, 20% close)
+pixi run --environment bench bench-mixed-keepalive
 ```
 
 Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.
 
-The full v0.5 matrix (uploads / downloads / slow-clients / churn /
-24-hour soak) is staged with the Tracks that unlock each one
-(streaming bodies, server TLS, deadlines). See
+The full v0.5 matrix (`wrk2` / tail percentiles / uploads /
+downloads / slow-clients / churn / 24-hour soak) is staged with
+the Tracks that unlock each one (streaming bodies, server TLS,
+the bench env repin for `wrk2`). See
 [`operational-guarantees.md`](operational-guarantees.md) for the
 release each row targets.
