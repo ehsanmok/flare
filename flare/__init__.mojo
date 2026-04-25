@@ -474,6 +474,7 @@ from .http.body import (
     ChunkedBody,
     drain_body,
 )
+from .http.streaming_response import StreamingResponse
 from .http.url import Url, UrlParseError
 from .http.request import Request, Method
 from .http.response import Response, Status
