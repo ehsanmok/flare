@@ -37,7 +37,7 @@ from ..net import _find_flare_lib
 # ── FFI handle wrappers ────────────────────────────────────────────────────
 
 
-fn _c_str(s: String) -> Int:
+def _c_str(s: String) -> Int:
     """Return ``s``'s UTF-8 byte pointer as an ``Int`` for FFI
     pass-through. ``s`` must outlive the call."""
     return Int(s.unsafe_ptr())
@@ -72,7 +72,7 @@ struct ServerCtx(Movable):
     def __del__(deinit self):
         if self._addr != 0:
             var fn_ctx_free = self._lib.get_function[
-                def (Int) thin abi("C") -> None
+                def(Int) thin abi("C") -> None
             ]("flare_ssl_ctx_free")
             fn_ctx_free(self._addr)
 
@@ -83,7 +83,7 @@ struct ServerCtx(Movable):
         key. Raises on cert load / key mismatch / null alloc.
         """
         var lib = OwnedDLHandle(_find_flare_lib())
-        var f = lib.get_function[def (Int, Int) thin abi("C") -> Int](
+        var f = lib.get_function[def(Int, Int) thin abi("C") -> Int](
             "flare_ssl_ctx_new_server"
         )
         var addr = f(_c_str(cert_path), _c_str(key_path))
@@ -95,7 +95,7 @@ struct ServerCtx(Movable):
         """Reload cert + key without restarting. Raises on file
         load error / key mismatch."""
         var f = self._lib.get_function[
-            def (Int, Int, Int) thin abi("C") -> c_int
+            def(Int, Int, Int) thin abi("C") -> c_int
         ]("flare_ssl_ctx_reload")
         if Int(f(self._addr, _c_str(cert_path), _c_str(key_path))) != 0:
             raise Error("flare_ssl_ctx_reload failed")
@@ -109,15 +109,18 @@ struct ServerCtx(Movable):
         ``[2, 'h', '2', 8, 'h', 't', 't', 'p', '/', '1', '.', '1']``.
         """
         var f = self._lib.get_function[
-            def (Int, Int, c_int) thin abi("C") -> c_int
+            def(Int, Int, c_int) thin abi("C") -> c_int
         ]("flare_ssl_ctx_set_alpn_server")
-        if Int(f(self._addr, Int(protos.unsafe_ptr()), c_int(len(protos)))) != 0:
+        if (
+            Int(f(self._addr, Int(protos.unsafe_ptr()), c_int(len(protos))))
+            != 0
+        ):
             raise Error("flare_ssl_ctx_set_alpn_server failed")
 
     def set_verify_client_cert(self, ca_path: String) raises:
         """Enable mTLS — clients must present a cert signed by a
         CA in ``ca_path``."""
-        var f = self._lib.get_function[def (Int, Int) thin abi("C") -> c_int](
+        var f = self._lib.get_function[def(Int, Int) thin abi("C") -> c_int](
             "flare_ssl_ctx_set_verify_client_cert"
         )
         if Int(f(self._addr, _c_str(ca_path))) != 0:
@@ -130,8 +133,8 @@ struct ServerCtx(Movable):
 
 def _ssl_get_function_handshake(
     lib: OwnedDLHandle,
-) -> def (Int) thin abi("C") -> c_int:
-    return lib.get_function[def (Int) thin abi("C") -> c_int](
+) -> def(Int) thin abi("C") -> c_int:
+    return lib.get_function[def(Int) thin abi("C") -> c_int](
         "flare_ssl_do_handshake"
     )
 
@@ -141,7 +144,7 @@ def server_ssl_new_accept(ctx: ServerCtx, fd: Int) raises -> Int:
     a single FFI call. Returns the ``SSL*`` as an ``Int`` (or 0
     on failure). The reactor caller is responsible for calling
     ``flare_ssl_free`` to release."""
-    var f = ctx._lib.get_function[def (Int, c_int) thin abi("C") -> Int](
+    var f = ctx._lib.get_function[def(Int, c_int) thin abi("C") -> Int](
         "flare_ssl_new_accept"
     )
     return f(ctx._addr, c_int(fd))
@@ -164,9 +167,9 @@ def server_ssl_get_alpn_selected(
 ) raises -> String:
     """Return the negotiated ALPN protocol, or empty string if
     none was negotiated."""
-    var f = ctx._lib.get_function[
-        def (Int, Int, c_int) thin abi("C") -> c_int
-    ]("flare_ssl_get_alpn_selected")
+    var f = ctx._lib.get_function[def(Int, Int, c_int) thin abi("C") -> c_int](
+        "flare_ssl_get_alpn_selected"
+    )
     var buf = List[UInt8](capacity=64)
     buf.resize(64, UInt8(0))
     var n = Int(f(ssl_addr, Int(buf.unsafe_ptr()), c_int(64)))
@@ -175,14 +178,12 @@ def server_ssl_get_alpn_selected(
     return String(unsafe_from_utf8=Span[UInt8, _](buf[:n]))
 
 
-def server_ssl_get_sni_host(
-    ctx: ServerCtx, ssl_addr: Int
-) raises -> String:
+def server_ssl_get_sni_host(ctx: ServerCtx, ssl_addr: Int) raises -> String:
     """Return the SNI hostname the client sent, or empty string
     if no SNI extension was present."""
-    var f = ctx._lib.get_function[
-        def (Int, Int, c_int) thin abi("C") -> c_int
-    ]("flare_ssl_get_sni_host")
+    var f = ctx._lib.get_function[def(Int, Int, c_int) thin abi("C") -> c_int](
+        "flare_ssl_get_sni_host"
+    )
     var buf = List[UInt8](capacity=256)
     buf.resize(256, UInt8(0))
     var n = Int(f(ssl_addr, Int(buf.unsafe_ptr()), c_int(256)))
@@ -195,7 +196,7 @@ def server_ssl_free(ctx: ServerCtx, ssl_addr: Int) raises:
     """Release an ``SSL*`` allocated via ``server_ssl_new_accept``."""
     if ssl_addr == 0:
         return
-    var f = ctx._lib.get_function[def (Int) thin abi("C") -> None](
+    var f = ctx._lib.get_function[def(Int) thin abi("C") -> None](
         "flare_ssl_free"
     )
     f(ssl_addr)
