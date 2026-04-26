@@ -55,6 +55,3 @@ list in [`pixi.toml`](../pixi.toml).
 | Manage cookies | [`13_cookies.mojo`](../examples/13_cookies.mojo) |
 | Drive the reactor directly | [`14_reactor.mojo`](../examples/14_reactor.mojo) |
 | Use TLS as a client | [`12_tls.mojo`](../examples/12_tls.mojo) |
-
-For "what does flare guarantee under load?", see
-[`operational-guarantees.md`](operational-guarantees.md).

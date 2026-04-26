@@ -117,7 +117,7 @@ bound on `num_workers` is 256, enforced by `Scheduler.start`.
 
 `Scheduler.shutdown` (v0.4.x) and `Scheduler.drain(timeout_ms)`
 (v0.5.0 Step 1) coordinate across workers. Drain returns one
-`ShutdownReport` per worker — see [`operational-guarantees.md`](operational-guarantees.md).
+`ShutdownReport` per worker.
 
 ---
 

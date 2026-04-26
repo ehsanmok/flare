@@ -332,6 +332,4 @@ Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.
 The full v0.5 matrix (`wrk2` / tail percentiles / uploads /
 downloads / slow-clients / churn / 24-hour soak) is staged with
 the Tracks that unlock each one (streaming bodies, server TLS,
-the bench env repin for `wrk2`). See
-[`operational-guarantees.md`](operational-guarantees.md) for the
-release each row targets.
+the bench env repin for `wrk2`).

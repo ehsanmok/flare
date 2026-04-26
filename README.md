@@ -27,7 +27,7 @@ def main() raises:
     srv.serve(r^, num_workers=4)
 ```
 
-flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard to misuse under load and easy to operate*. See [`docs/operational-guarantees.md`](docs/operational-guarantees.md) for the concern-by-concern table of what flare handles for you (partial reads/writes, cancellation, graceful shutdown, sanitised error bodies, per-request deadlines, header/body limits, RFC 7230 validation, zero-copy reads via `RequestView[origin]`, `Body` / `ChunkSource` streaming primitives, server-side TLS via `TlsAcceptor`) versus what's still your job.
+flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard to misuse under load and easy to operate*.
 
 ## Install
 

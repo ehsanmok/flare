@@ -177,11 +177,9 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
     Value-copy semantics: copies share the underlying cell.
 
     A handler that ignores cancellation is correct (the request
-    shape is unchanged), but it forfeits the operational guarantees
-    flare advertises in ``docs/operational-guarantees.md`` for that
-    specific request — the reactor still flips the cell, but the
-    body the handler returns will be the result of work the reactor
-    knew the client had hung up on.
+    shape is unchanged), but the reactor still flips the cell and
+    the body the handler returns will be the result of work the
+    reactor knew the client had hung up on.
 
     Example:
         ```mojo

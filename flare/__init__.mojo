@@ -36,9 +36,7 @@ error responses, and ``Request.peer`` threaded from the accept
 path. v0.5.0 also ships zero-copy reads (``RequestView[origin]``
 + ``ViewHandler``), streaming response primitives (``Body`` /
 ``ChunkSource`` / ``StreamingResponse[B]``), and server-side TLS
-(``TlsAcceptor`` over OpenSSL). See ``docs/operational-guarantees.md``
-for the row-by-row table of what flare guarantees vs what's
-still your job.
+(``TlsAcceptor`` over OpenSSL).
 
 ## Architecture
 
