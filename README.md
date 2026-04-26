@@ -29,9 +29,33 @@ def main() raises:
 
 flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard to misuse under load and easy to operate*. See [`docs/operational-guarantees.md`](docs/operational-guarantees.md) for the concern-by-concern table of what flare handles for you (partial reads/writes, cancellation, graceful shutdown, sanitised error bodies, per-request deadlines, header/body limits, RFC 7230 validation, zero-copy reads via `RequestView[origin]`, `Body` / `ChunkSource` streaming primitives, server-side TLS via `TlsAcceptor`) versus what's still your job.
 
+## Install
+
+```toml
+[workspace]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+preview = ["pixi-build"]
+
+[dependencies]
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.4.1" }
+```
+
+```bash
+pixi install
+```
+
+Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed on [GitHub Releases](https://github.com/ehsanmok/flare/releases); `main` always targets the next unreleased version.
+
+To track unreleased work (breaking changes possible between tags):
+
+```toml
+[dependencies]
+flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
+```
+
 ## Quick start
 
-The full walk-through, gradually-disclosed, used to live here. It now lives in the package docstring on [`flare/__init__.mojo`](flare/__init__.mojo) (rendered at <https://ehsanmok.github.io/flare/>) and in the runnable examples under [`examples/`](examples/). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example.
+The full walk-through, gradually-disclosed, used to live here. It now lives in the package docstring on rendered at <https://ehsanmok.github.io/flare/> and in the runnable examples under [`examples/`](examples/). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example.
 
 ### Typed extractors
 
@@ -197,30 +221,6 @@ Per-layer security posture and the v0.5.0 Step 1 sanitised-error-response policy
 - WebSocket: client frames masked per RFC 6455, CSPRNG handshake nonce, UTF-8 validation on TEXT frames.
 
 For security issues, please open a private security advisory on GitHub or email the maintainer directly.
-
-## Install
-
-```toml
-[workspace]
-channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
-preview = ["pixi-build"]
-
-[dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.4.1" }
-```
-
-```bash
-pixi install
-```
-
-Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed on [GitHub Releases](https://github.com/ehsanmok/flare/releases); `main` always targets the next unreleased version.
-
-To track unreleased work (breaking changes possible between tags):
-
-```toml
-[dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
-```
 
 ## Develop
 
