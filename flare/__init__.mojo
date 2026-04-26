@@ -27,22 +27,18 @@ single-threaded reactor; ``num_workers=N`` with N >= 2 opens N
 CPU pinning. Static endpoints can skip the parser entirely with
 ``serve_static(resp)``.
 
-flare is **pre-1.0**. The bar isn't "is it fast" — it's *is it hard
-to misuse under load and easy to operate*. v0.5.0 Step 1 ships the
-operational core: ``Cancel`` token plumbed to handlers via
-``CancelHandler``, per-request / handler / body-read deadlines,
-``HttpServer.drain(timeout_ms)`` and ``install_drain_on_sigterm``
-for graceful shutdown, sanitised error responses, and ``Request.peer``
-threaded from the accept path. See ``docs/operational-guarantees.md``.
-
-## What flare doesn't do yet
-
-- **No streaming response bodies** until v0.5.0 Step 2.
-- **No server-side TLS** until v0.5.0 Step 3 (client TLS works).
-- **No public ``async`` / ``await``** — Mojo doesn't ship async yet.
-- **No HTTP/2** until v0.6 (requires server TLS first).
-- **No HTTP/3 / QUIC, no WebTransport, no h2c** — permanent
-  non-goals for the v0.x line.
+flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard
+to misuse under load and easy to operate*. The operational core is
+in: ``Cancel`` token plumbed to handlers via ``CancelHandler``,
+per-request / handler / body-read deadlines,
+``HttpServer.drain(timeout_ms)`` for graceful shutdown, sanitised
+error responses, and ``Request.peer`` threaded from the accept
+path. v0.5.0 also ships zero-copy reads (``RequestView[origin]``
++ ``ViewHandler``), streaming response primitives (``Body`` /
+``ChunkSource`` / ``StreamingResponse[B]``), and server-side TLS
+(``TlsAcceptor`` over OpenSSL). See ``docs/operational-guarantees.md``
+for the row-by-row table of what flare guarantees vs what's
+still your job.
 
 ## Architecture
 
@@ -50,12 +46,12 @@ threaded from the accept path. See ``docs/operational-guarantees.md``.
 flare.io       - BufReader
 flare.ws       - WebSocket client + server (RFC 6455)
 flare.http     - HTTP/1.1 client + reactor-backed server + cookies
-flare.tls      - TLS 1.2/1.3 (OpenSSL)
+flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server since v0.5.0)
 flare.tcp      - TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      - UdpSocket (IPv4 + IPv6)
 flare.dns      - getaddrinfo (dual-stack)
 flare.net      - IpAddr, SocketAddr, RawSocket
-flare.runtime  - Reactor (kqueue/epoll), TimerWheel, Event
+flare.runtime  - Reactor (kqueue/epoll), TimerWheel, Scheduler, Pool[T]
 ```
 
 Each layer only imports from layers below it. No circular dependencies.
@@ -124,34 +120,38 @@ the right type.
 ```mojo
 from flare.http import (
     Router, Handler, Request, Response, ok, HttpServer,
-    Extracted, Path, OptionalQuery, Header, ParamInt, ParamString,
+    Extracted, PathInt, OptionalQueryInt, HeaderStr,
 )
 from flare.net import SocketAddr
 
 @fieldwise_init
 struct GetUser(Copyable, Defaultable, Handler, Movable):
-    var id:    Path[ParamInt, "id"]
-    var page:  OptionalQuery[ParamInt, "page"]
-    var auth:  Header[ParamString, "Authorization"]
+    var id:    PathInt["id"]
+    var page:  OptionalQueryInt["page"]
+    var auth:  HeaderStr["Authorization"]
 
     def __init__(out self):
-        self.id   = Path[ParamInt, "id"]()
-        self.page = OptionalQuery[ParamInt, "page"]()
-        self.auth = Header[ParamString, "Authorization"]()
+        self.id   = PathInt["id"]()
+        self.page = OptionalQueryInt["page"]()
+        self.auth = HeaderStr["Authorization"]()
 
     def serve(self, req: Request) raises -> Response:
-        return ok("user=" + String(self.id.value.value))
+        return ok("user=" + String(self.id.value))
 
 def main() raises:
     var r = Router()
-    r.get("/users/:id", Extracted[GetUser]())
+    r.get[Extracted[GetUser]]("/users/:id", Extracted[GetUser]())
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(r^)
 ```
 
-Value-constructor extractors (``Path[T, name].extract(req)``) are also
-available for use inside plain ``def`` handlers when the struct shape
-is overkill.
+The concrete ``PathInt`` / ``PathStr`` / ``QueryInt`` / ``HeaderStr``
+/ etc. extractors expose ``.value`` directly as the parsed primitive.
+The parametric ``Path[T: ParamParser, name]`` form is still public
+for users who want to plug in a custom ``ParamParser``; concrete
+forms cover the common case. Value-constructor extractors
+(``PathInt["id"].extract(req)``) are also available for use inside
+plain ``def`` handlers when the struct shape is overkill.
 
 ## Static route tables: ``ComptimeRouter``
 

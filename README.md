@@ -175,7 +175,7 @@ flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.dns      getaddrinfo (dual-stack)
 flare.net      IpAddr, SocketAddr, RawSocket
-flare.runtime  Reactor (kqueue/epoll), TimerWheel, Scheduler, install_drain_on_sigterm
+flare.runtime  Reactor (kqueue/epoll), TimerWheel, Scheduler, Pool[T]
 ```
 
 Each layer imports only from layers below it. No circular dependencies. The full request lifecycle (with the v0.5 `Cancel` injection point and the per-connection state machine) lives in [`docs/architecture.md`](docs/architecture.md).
