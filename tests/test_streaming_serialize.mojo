@@ -176,9 +176,7 @@ def test_chunked_body_hex_size_line_for_large_chunk() raises:
         resp^, Cancel.never(), keep_alive=True
     )
     var s = _wire(wire)
-    assert_true(
-        s.find("\r\n10\r\nZZZZZZZZZZZZZZZZ\r\n0\r\n\r\n") >= 0
-    )
+    assert_true(s.find("\r\n10\r\nZZZZZZZZZZZZZZZZ\r\n0\r\n\r\n") >= 0)
 
 
 # ── Cancel-aware termination ───────────────────────────────────────────────
@@ -206,9 +204,7 @@ def test_chunked_body_pre_flipped_cancel_emits_zero_only() raises:
 
 def test_user_set_headers_emitted() raises:
     var body = InlineBody(_bytes("ok"))
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     resp.headers.set("X-Trace", "abc-123")
     var wire = serialize_streaming_response(
         resp^, Cancel.never(), keep_alive=True
@@ -221,9 +217,7 @@ def test_user_content_length_dropped_in_favour_of_serializer() raises:
     """If the user set Content-Length manually, the serializer's
     own header wins (and the user's stale value is dropped)."""
     var body = InlineBody(_bytes("hi"))
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     resp.headers.set("Content-Length", "9999")
     var wire = serialize_streaming_response(
         resp^, Cancel.never(), keep_alive=True
@@ -239,9 +233,7 @@ def test_user_content_length_dropped_in_favour_of_serializer() raises:
 
 def test_keep_alive_emits_connection_keep_alive() raises:
     var body = InlineBody(_bytes(""))
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     var wire = serialize_streaming_response(
         resp^, Cancel.never(), keep_alive=True
     )
@@ -251,9 +243,7 @@ def test_keep_alive_emits_connection_keep_alive() raises:
 
 def test_close_emits_connection_close() raises:
     var body = InlineBody(_bytes(""))
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     var wire = serialize_streaming_response(
         resp^, Cancel.never(), keep_alive=False
     )
@@ -291,9 +281,7 @@ def test_default_reason_for_500() raises:
 def test_default_reason_for_unknown_status() raises:
     """Class-level fallback: 4xx unknown -> ``Client Error``."""
     var body = InlineBody(_bytes(""))
-    var resp = StreamingResponse[InlineBody](
-        status=499, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=499, body=body^)
     var wire = serialize_streaming_response(
         resp^, Cancel.never(), keep_alive=True
     )

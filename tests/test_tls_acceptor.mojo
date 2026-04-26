@@ -186,9 +186,7 @@ def test_acceptor_construct_raises_on_missing_cert() raises:
     """C7: Construction fails fast if the cert path is bad —
     deployments learn at server-start that they have a bad
     cert, not at the first inbound handshake."""
-    var cfg = TlsServerConfig(
-        cert_file="/nonexistent/cert.pem", key_file=_KEY
-    )
+    var cfg = TlsServerConfig(cert_file="/nonexistent/cert.pem", key_file=_KEY)
     with assert_raises():
         _ = TlsAcceptor(cfg^)
 
@@ -223,9 +221,7 @@ def test_acceptor_with_alpn_succeeds() raises:
     var alpn = List[String]()
     alpn.append("h2")
     alpn.append("http/1.1")
-    var cfg = TlsServerConfig(
-        cert_file=_CERT, key_file=_KEY, alpn=alpn^
-    )
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY, alpn=alpn^)
     var acc = TlsAcceptor(cfg^)
     assert_equal(len(acc.config.alpn), 2)
 

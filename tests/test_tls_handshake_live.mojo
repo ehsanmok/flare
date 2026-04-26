@@ -80,9 +80,7 @@ def test_acceptor_with_alpn_constructs_clean() raises:
     var alpn = List[String]()
     alpn.append("h2")
     alpn.append("http/1.1")
-    var cfg = TlsServerConfig(
-        cert_file=_CERT, key_file=_KEY, alpn=alpn^
-    )
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY, alpn=alpn^)
     var acc = TlsAcceptor(cfg^)
     assert_equal(len(acc.config.alpn), 2)
     assert_equal(acc.config.alpn[0], "h2")

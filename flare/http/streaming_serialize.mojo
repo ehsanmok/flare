@@ -155,21 +155,12 @@ def _write_status_line(
     var reason_str = reason if reason.byte_length() > 0 else _default_reason(
         status
     )
-    var line = (
-        ver
-        + " "
-        + String(status)
-        + " "
-        + reason_str
-        + "\r\n"
-    )
+    var line = ver + " " + String(status) + " " + reason_str + "\r\n"
     for b in line.as_bytes():
         wire.append(b)
 
 
-def _write_header_line(
-    mut wire: List[UInt8], name: String, value: String
-):
+def _write_header_line(mut wire: List[UInt8], name: String, value: String):
     """Emit ``Name: Value\\r\\n`` into ``wire``."""
     var line = name + ": " + value + "\r\n"
     for b in line.as_bytes():

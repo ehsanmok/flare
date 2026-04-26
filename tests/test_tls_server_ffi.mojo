@@ -184,9 +184,7 @@ def test_sni_host_empty_before_handshake() raises:
 
 def main() raises:
     print("=" * 60)
-    print(
-        "test_tls_server_ffi.mojo — server-side OpenSSL FFI bindings"
-    )
+    print("test_tls_server_ffi.mojo — server-side OpenSSL FFI bindings")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -94,9 +94,7 @@ def test_construct_with_default_reason() raises:
     accepts the empty string."""
     var bytes = List[UInt8]()
     var body = InlineBody(bytes^)
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     assert_equal(resp.reason, "")
 
 
@@ -106,9 +104,7 @@ def test_construct_with_default_reason() raises:
 def test_ok_2xx() raises:
     var bytes = List[UInt8]()
     var body = InlineBody(bytes^)
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     assert_true(resp.ok())
     assert_false(resp.is_redirect())
     assert_false(resp.is_client_error())
@@ -151,9 +147,7 @@ def test_server_error_5xx() raises:
 def test_headers_settable() raises:
     var bytes = List[UInt8]()
     var body = InlineBody(bytes^)
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     resp.headers.set("X-Trace", "abc-123")
     assert_equal(resp.headers.get("X-Trace"), "abc-123")
 
@@ -161,9 +155,7 @@ def test_headers_settable() raises:
 def test_default_version_is_1_1() raises:
     var bytes = List[UInt8]()
     var body = InlineBody(bytes^)
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     assert_equal(resp.version, "HTTP/1.1")
 
 
@@ -194,9 +186,7 @@ def test_inline_body_yields_full_bytes() raises:
     bytes.append(UInt8(ord("b")))
     bytes.append(UInt8(ord("c")))
     var body = InlineBody(bytes^)
-    var resp = StreamingResponse[InlineBody](
-        status=Status.OK, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=Status.OK, body=body^)
     var first = resp.body.next_chunk(Cancel.never())
     assert_true(Bool(first))
     if first:
@@ -213,9 +203,7 @@ def test_re_exports_resolve() raises:
     ``flare.http`` and the root ``flare`` re-export."""
     var bytes = List[UInt8]()
     var body = InlineBody(bytes^)
-    var resp = StreamingResponse[InlineBody](
-        status=200, body=body^
-    )
+    var resp = StreamingResponse[InlineBody](status=200, body=body^)
     assert_equal(resp.status, 200)
 
 

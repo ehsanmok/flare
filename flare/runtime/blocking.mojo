@@ -115,17 +115,11 @@ def block_in_pool[
     if cancel.cancelled():
         var reason = cancel.reason()
         if reason == CancelReason.PEER_CLOSED:
-            raise Error(
-                "block_in_pool: cancelled mid-flight (peer closed)"
-            )
+            raise Error("block_in_pool: cancelled mid-flight (peer closed)")
         elif reason == CancelReason.TIMEOUT:
-            raise Error(
-                "block_in_pool: cancelled mid-flight (timeout)"
-            )
+            raise Error("block_in_pool: cancelled mid-flight (timeout)")
         elif reason == CancelReason.SHUTDOWN:
-            raise Error(
-                "block_in_pool: cancelled mid-flight (shutdown)"
-            )
+            raise Error("block_in_pool: cancelled mid-flight (shutdown)")
         else:
             raise Error("block_in_pool: cancelled mid-flight")
     return result^
