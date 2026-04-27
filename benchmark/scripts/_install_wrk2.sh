@@ -38,9 +38,51 @@ if [ ! -d ".git" ]; then
     git checkout "$WRK2_COMMIT"
 fi
 
-# wrk2 builds with plain make. On macOS the system clang +
-# libssl from Homebrew or the bench env's openssl provide what
-# wrk2 needs.
+# wrk2's vendored LuaJIT emits a ``bytecode.o`` ELF that newer
+# binutils (the gcc-15.2 / binutils-2.45 stack the bench env's
+# conda packages pull in) treats as corrupt and refuse to link.
+# The system gcc on Ubuntu 22.04 (gcc 11.4 + binutils 2.38) builds
+# wrk2 cleanly. Prefer the system toolchain when it can find
+# openssl + zlib headers; fall back to conda-env paths only if
+# the host doesn't ship the dev headers.
+USE_SYSTEM_GCC="no"
+if [ -x /usr/bin/cc ] \
+    && [ -f /usr/include/openssl/ssl.h ] \
+    && [ -f /usr/include/zlib.h ]; then
+    USE_SYSTEM_GCC="yes"
+    echo "[bench] using system gcc + openssl + zlib for wrk2 build"
+    # Make sure the Makefile sees the system compiler even when
+    # this script is invoked through ``pixi run`` (which puts the
+    # conda gcc on PATH first).
+    export CC=/usr/bin/cc
+fi
+
+if [ "$USE_SYSTEM_GCC" = "no" ]; then
+    PREFIX="${CONDA_PREFIX:-}"
+    if [ -n "$PREFIX" ] && [ -d "$PREFIX/include" ]; then
+        if ! grep -q "# flare-bench-env-injected" Makefile; then
+            echo "[bench] patching Makefile for openssl + zlib from CONDA_PREFIX=$PREFIX"
+            python3 - "$PREFIX" <<'PY'
+import sys, pathlib
+prefix = sys.argv[1]
+mk = pathlib.Path("Makefile")
+text = mk.read_text()
+inject = (
+    "# flare-bench-env-injected: pick up openssl + zlib from the\n"
+    "# bench env's CONDA_PREFIX (added by benchmark/scripts/_install_wrk2.sh).\n"
+    f"CFLAGS  += -I{prefix}/include\n"
+    f"LDFLAGS += -L{prefix}/lib -Wl,-rpath,{prefix}/lib\n"
+    "\n"
+)
+needle = "SRC  := wrk.c"
+assert needle in text, "wrk2 Makefile shape changed; update the patch"
+text = text.replace(needle, inject + needle, 1)
+mk.write_text(text)
+PY
+        fi
+    fi
+fi
+
 echo "[bench] building wrk2 (this should take <1 minute)"
 make clean >/dev/null 2>&1 || true
 make -j
