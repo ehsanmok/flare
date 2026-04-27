@@ -8,10 +8,10 @@ needed.
 |---|---|
 | `flare.net` | Rejects null bytes, CRLF, `@` in IP strings before they reach libc. |
 | `flare.dns` | Blocks injection in hostnames (null / CRLF / `@`, length limits). |
-| `flare.tls` | TLS 1.2+ only, weak ciphers disabled, SNI always sent (client today; server lands v0.5.0 Step 3). |
+| `flare.tls` | TLS 1.2+ only, weak ciphers disabled, SNI always sent. Client and server both supported (server-side reactor-state-machine handshake is a follow-up; the blocking `handshake_fd(fd)` ships today). |
 | `flare.http` | RFC 7230 token validation on header names and values; CR / LF / `\0` rejected at parse time. |
 | `flare.http` | Configurable limits on headers (8 KB), body (10 MB), URI (8 KB). |
-| `flare.http` | **Sanitised error responses** (v0.5.0 Step 1): 4xx bodies do not echo extractor `raise Error(...)` messages by default. Logs carry the full message + request id; the client gets a fixed status reason. |
+| `flare.http` | **Sanitised error responses**: 4xx bodies do not echo extractor `raise Error(...)` messages by default. Logs carry the full message + request id; the client gets a fixed status reason. |
 | `flare.ws` | Client frames masked per RFC 6455, `Sec-WebSocket-Accept` verified. |
 | `flare.ws` | CSPRNG nonce for handshake key, UTF-8 validation on TEXT frames. |
 
@@ -28,7 +28,7 @@ The criticism that drove this:
 > parser-error messages are a DoS / log-poisoning surface and
 > should be sanitised or replaced with status-code-only responses.
 
-Default behaviour from v0.5.0 Step 1:
+Default behaviour:
 
 - 400 / 4xx responses use a **fixed status reason** as the body
   (e.g. `"Bad Request"`, `"Not Found"`). The raised error message is
@@ -60,7 +60,7 @@ runs at every release tag.
 
 ## Fuzz / property-test budget
 
-19 harnesses today (v0.4.1), covering:
+19 harnesses today, covering:
 
 - HTTP parsing (request, response, headers, URL, cookies, auth)
 - WebSocket frames (mask, opcode, close codes)
@@ -76,25 +76,19 @@ runs at every release tag.
 - Property tests on the timer wheel, headers, auth, WebSocket
   round-trip
 
-4M+ runs across all harnesses, zero crashes to date. v0.5.0 Step 1
-adds `fuzz_cancel.mojo` (Cancel state-flip property) and
-`prop_deadlines.mojo` (timer-wheel monotonicity under deadline
-arms).
+4M+ runs across all harnesses, zero crashes to date.
 
 ---
 
-## Soak (planned)
+## Soak
 
-Real soak tests as release gates land in v0.5.0 Step 1+:
-
-- **Slow-client soak.** 256 connections, 1 byte / 100 ms for an
-  hour. Expect: flat memory after 1 hour, no leaked fds.
-- **Churn soak.** 10K conn/s open-close. Expect: zero leaked fds.
-- **Mixed-load soak.** 20 % slow, 80 % normal. Expect: zero failed
-  requests, zero crashes, RSS within 2x of cold-start.
-
+Real soak tests as release gates: slow-client, churn, mixed-load.
 These do not produce a number to brag about. They produce the
 answer to "can I run this in production?"
+
+Harness, gates, and the three-tier (smoke / extended / 24-hour
+release-gate) shape live with the rest of the performance work in
+[`benchmark.md`](benchmark.md#soak-long-running-operational-gates).
 
 ---
 
@@ -105,8 +99,8 @@ GitHub or email the maintainer directly. Do not file a public issue
 for vulnerabilities.
 
 flare is pre-1.0 and has zero known production deployments. Treat
-the maturity gap honestly: nginx, Go `net/http`, hyper, and axum all
-shipped CVEs in their first two years, and flare's HPACK parser
-(planned for v0.6) is the highest-CVE-risk subsystem on the roadmap.
-That work is gated explicitly on the v0.5 operational maturity
-landing first.
+the maturity gap honestly: nginx, Go `net/http`, hyper, and axum
+all shipped CVEs in their first two years, and the HTTP/2 HPACK
+parser (planned, future release) is the highest-CVE-risk subsystem
+on the roadmap. That work is explicitly gated on flare's
+operational maturity landing first.

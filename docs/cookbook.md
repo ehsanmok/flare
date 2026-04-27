@@ -28,8 +28,11 @@ changes when you tweak it.
 | [`19_extractors.mojo`](../examples/19_extractors.mojo) | Typed extractors: `Path[T, name]`, `Query`, `Header`, `Json`, and reflective `Extracted[H]` auto-injection |
 | [`20_comptime_router.mojo`](../examples/20_comptime_router.mojo) | `ComptimeRouter[routes]` with comptime segment parsing and per-route dispatch unroll |
 | [`21_static_response.mojo`](../examples/21_static_response.mojo) | Pre-encoded `StaticResponse` + `HttpServer.serve_static` fast path |
-| [`22_cancel.mojo`](../examples/22_cancel.mojo) | (v0.5.0 Step 1) `CancelHandler` polling `cancel.cancelled()` between expensive steps |
-| [`23_drain.mojo`](../examples/23_drain.mojo) | (v0.5.0 Step 1) `HttpServer.drain(timeout_ms)` + `install_drain_on_sigterm` |
+| [`22_cancel.mojo`](../examples/22_cancel.mojo) | `CancelHandler` polling `cancel.cancelled()` between expensive steps |
+| [`23_drain.mojo`](../examples/23_drain.mojo) | `HttpServer.drain(timeout_ms)` + `install_drain_on_sigterm` |
+| [`24_sse.mojo`](../examples/24_sse.mojo) | Streaming response body via `ChunkSource` (Server-Sent Events shape) |
+| [`25_cert_reload.mojo`](../examples/25_cert_reload.mojo) | `TlsAcceptor.reload()` for ACME / Let's Encrypt cert rotation without restart |
+| [`26_mtls.mojo`](../examples/26_mtls.mojo) | mTLS configuration + construction-time validation |
 
 Run any single example with `pixi run example-<name>`; see the full
 list in [`pixi.toml`](../pixi.toml).
@@ -50,6 +53,9 @@ list in [`pixi.toml`](../pixi.toml).
 | Compile-time route table | [`20_comptime_router.mojo`](../examples/20_comptime_router.mojo) |
 | Detect mid-handler client disconnect | [`22_cancel.mojo`](../examples/22_cancel.mojo) |
 | Drain on SIGTERM | [`23_drain.mojo`](../examples/23_drain.mojo) |
+| Stream a response body / SSE | [`24_sse.mojo`](../examples/24_sse.mojo) |
+| Reload a TLS cert without restart | [`25_cert_reload.mojo`](../examples/25_cert_reload.mojo) |
+| Configure mTLS | [`26_mtls.mojo`](../examples/26_mtls.mojo) |
 | Make HTTP requests | [`05_http_get.mojo`](../examples/05_http_get.mojo) |
 | Talk WebSocket | [`06_websocket_echo.mojo`](../examples/06_websocket_echo.mojo) |
 | Manage cookies | [`13_cookies.mojo`](../examples/13_cookies.mojo) |

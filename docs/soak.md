@@ -1,9 +1,7 @@
 # Soak harness — slow-client / churn / mixed-load
 
-The soak harness is flare's S3.7 release-gate piece (per
-[`design-v0.5.mdc` §6.5](../.cursor/rules/design-v0.5.mdc)). It
-runs a flare HTTP server under sustained load and watches the
-three operational signals that microbenchmarks miss:
+The soak harness runs a flare HTTP server under sustained load and
+watches the three operational signals that microbenchmarks miss:
 
 - **RSS over time** — does memory grow linearly, plateau, or
   spike under churn?
@@ -164,12 +162,12 @@ design doc's "1 h smoke on every PR, 24 h nightly only" framing
 
 ## Dev-box smoke + extended results (Ubuntu 22.04, 6 vCPU AWS)
 
-These are NOT the v0.5.0 release-gate numbers. They are smoke
-artefacts captured on the maintainer's AWS Ubuntu 22.04 dev box
-(glibc 2.35, x86_64) at commit
+These are NOT release-gate numbers. They are smoke artefacts
+captured on the maintainer's AWS Ubuntu 22.04 dev box (glibc 2.35,
+x86_64) at commit
 [`9755049`](https://github.com/ehsanmok/flare/commit/9755049).
-The release-gate p99.9 / p99.99 numbers + 24 h flat-RSS proof
-land with S3.8 publication on Linux EPYC.
+The release-gate p99.9 / p99.99 numbers + 24 h flat-RSS proof are
+captured on Linux EPYC and live in the per-tag release notes.
 
 What the tables below DO prove: the soak harness fires cleanly,
 the gates evaluate against real data, and the dev-box server

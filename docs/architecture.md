@@ -6,18 +6,18 @@ below it. No circular dependencies, no global state, no hidden runtime.
 ```
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455)
-flare.h2       HTTP/2 (planned, v0.6 — h2 over TLS only)
+flare.h2       HTTP/2 (planned: h2 over TLS only)
 flare.http     HTTP/1.1 client + reactor server + Handler / Router / App
                + extractors + ComptimeRouter + StaticResponse
-               + Cancel / CancelHandler (v0.5.0 Step 1)
-flare.tls      TLS 1.2/1.3 (OpenSSL); v0.5 adds TlsAcceptor + ALPN
+               + Cancel / CancelHandler
+flare.tls      TLS 1.2/1.3 (OpenSSL); TlsAcceptor + ALPN
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.dns      getaddrinfo (dual-stack)
 flare.net      IpAddr, SocketAddr, RawSocket
 flare.runtime  Reactor (kqueue/epoll), TimerWheel, Scheduler,
                num_cpus / default_worker_count, pthread + pinning,
-               install_drain_on_sigterm (v0.5.0 Step 1)
+               install_drain_on_sigterm
 ```
 
 ---
@@ -115,9 +115,8 @@ on Linux via `pthread_setaffinity_np`. macOS does not expose CPU
 affinity to userspace, so pinning is a no-op there. The upper
 bound on `num_workers` is 256, enforced by `Scheduler.start`.
 
-`Scheduler.shutdown` (v0.4.x) and `Scheduler.drain(timeout_ms)`
-(v0.5.0 Step 1) coordinate across workers. Drain returns one
-`ShutdownReport` per worker.
+`Scheduler.shutdown` and `Scheduler.drain(timeout_ms)` coordinate
+across workers. Drain returns one `ShutdownReport` per worker.
 
 ---
 
@@ -127,8 +126,9 @@ bound on `num_workers` is 256, enforced by `Scheduler.start`.
 is a hashed timing wheel with millisecond resolution and a fixed
 slot count. Inserts and cancels are O(1) amortised; `advance(now_ms)`
 fires every expired entry in slot order. It's the single source of
-truth for `idle_timeout_ms`, `write_timeout_ms`, and (v0.5.0 Step 1)
-`read_body_timeout_ms`, `handler_timeout_ms`, `request_timeout_ms`.
+truth for `idle_timeout_ms`, `write_timeout_ms`,
+`read_body_timeout_ms`, `handler_timeout_ms`, and
+`request_timeout_ms`.
 
 Resolution: 1 ms tick, 1024 slots, fixed memory. Deadlines below
 1 ms round up. This is well below the noise floor of any HTTP
@@ -141,17 +141,20 @@ deadline a real service cares about.
 flare deliberately keeps a few things on the application thread, not
 the reactor thread:
 
-- **TLS handshake** (today, client only). Handled inline by
-  `TlsStream.connect`. v0.5.0 Step 3 adds a non-blocking
-  server-side handshake state machine driven by the same
-  `on_readable` / `on_writable` calls as HTTP.
+- **TLS handshake.** Client handshake is inline on
+  `TlsStream.connect`. The server-side `TlsAcceptor` exposes a
+  blocking `handshake_fd(fd)` today; the non-blocking
+  reactor-state-machine variant (advanced via the same
+  `on_readable` / `on_writable` calls as HTTP) is a follow-up
+  gated on a Mojo nightly improvement.
 - **DNS resolution.** `getaddrinfo` is a blocking call; the
   client uses it pre-connect. The reactor never blocks on it.
-- **Long-running handler work.** The current contract is
-  synchronous: a slow handler blocks its worker's reactor. v0.5.0
-  Step 1 ships a `Cancel` so the *caller* doesn't pay for it; a
-  blocking-pool escape hatch lands once the v0.5 story is
-  complete (see `.cursor/rules/design-0.5.md` §2.5).
+- **Long-running handler work.** The contract is synchronous: a
+  slow handler blocks its worker's reactor. The `Cancel` token
+  ensures the *caller* doesn't pay for it (peer FIN, timeout,
+  drain all flip the cell); the `block_in_pool` escape hatch is
+  the documented way to push work off the reactor thread when a
+  blocking call is unavoidable.
 
 ---
 
@@ -166,8 +169,10 @@ the reactor thread:
 | Multicore scheduler | [`flare/runtime/scheduler.mojo`](../flare/runtime/scheduler.mojo) |
 | HTTP request parsing | [`flare/http/server.mojo`](../flare/http/server.mojo) |
 | HTTP per-conn state machine | [`flare/http/_server_reactor_impl.mojo`](../flare/http/_server_reactor_impl.mojo) |
-| `Cancel` cell + `CancelHandler` | [`flare/http/cancel.mojo`](../flare/http/cancel.mojo) (v0.5.0 Step 1) |
-| SIGTERM helper | [`flare/runtime/_signal.mojo`](../flare/runtime/_signal.mojo) (v0.5.0 Step 1) |
+| `Cancel` cell + `CancelHandler` | [`flare/http/cancel.mojo`](../flare/http/cancel.mojo) |
+| Server-side TLS | [`flare/tls/acceptor.mojo`](../flare/tls/acceptor.mojo) |
+| Streaming response bodies | [`flare/http/streaming.mojo`](../flare/http/streaming.mojo) |
+| SIGTERM helper | [`flare/runtime/_signal.mojo`](../flare/runtime/_signal.mojo) |
 
 If you want a one-page tour of each, the layered docstrings on the
 public types (`HttpServer`, `Router`, `Handler`, `App`) are the place

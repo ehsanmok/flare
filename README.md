@@ -194,7 +194,7 @@ Round-trip examples for each (`04_tcp_echo`, `06_websocket_echo`, `11_udp`, `12_
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455)
 flare.http     HTTP/1.1 client + reactor server + Cancel + Handler / Router / App
-flare.tls      TLS 1.2/1.3 (OpenSSL, both client and server since v0.5.0; reactor-loop integration follow-up)
+flare.tls      TLS 1.2/1.3 (OpenSSL, both client and server; reactor-loop integration follow-up)
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.dns      getaddrinfo (dual-stack)
@@ -202,17 +202,17 @@ flare.net      IpAddr, SocketAddr, RawSocket
 flare.runtime  Reactor (kqueue/epoll), TimerWheel, Scheduler, Pool[T]
 ```
 
-Each layer imports only from layers below it. No circular dependencies. The full request lifecycle (with the v0.5 `Cancel` injection point and the per-connection state machine) lives in [`docs/architecture.md`](docs/architecture.md).
+Each layer imports only from layers below it. No circular dependencies. The full request lifecycle, including the `Cancel` injection point and the per-connection state machine, lives in [`docs/architecture.md`](docs/architecture.md).
 
 ## Performance
 
-Disciplined: pinned toolchains, response-body integrity check before measurement, 5-run median with stdev ≤ 3 % gate. The headline v0.4.1 number on Linux EPYC is **flare_mc at 4 pinned workers ≈ 257K req/s on TFB plaintext, 4.38x single-worker flare and 7.03x Go `net/http`**. v0.5 swaps `wrk` for `wrk2` and adds tail percentiles (p99.9 / p99.99) and a mixed-keepalive workload. Methodology and tables in [`docs/benchmark.md`](docs/benchmark.md).
+Disciplined: pinned toolchains, response-body integrity check before measurement, 5-run median with stdev ≤ 3 % gate. Single-worker flare on Linux EPYC is on par with single-worker nginx and roughly 2x Go `net/http`. Multi-worker comparisons require multi-worker baselines; methodology, single-worker vs multi-worker tables, and the soak-harness operational gates (slow-client / churn / mixed-load) all live in [`docs/benchmark.md`](docs/benchmark.md).
 
-We do not lead on speed. The criticism that drove v0.5 is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job in the next release is to be operationally honest under load. Numbers are a corollary, not the headline.
+We do not lead on speed. The position is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job is to be operationally honest under load. Numbers are a corollary, not the headline.
 
 ## Security
 
-Per-layer security posture and the v0.5.0 Step 1 sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights:
+Per-layer security posture and the sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights:
 
 - RFC 7230 token validation, configurable header / URI / body size limits.
 - 19 fuzz harnesses, 4M+ runs, zero known crashes.
