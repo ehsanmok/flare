@@ -29,6 +29,22 @@ def main() raises:
 
 flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard to misuse under load and easy to operate*.
 
+## Features
+
+- **Full networking stack**: HTTP/1.1 (client + server), WebSocket (RFC 6455), TLS 1.2/1.3 (client + server, OpenSSL), TCP, UDP, DNS — layered, each module importing only from below.
+- **One reactor per worker** (`kqueue` on macOS, `epoll` on Linux) with a per-connection state machine + timer wheel; **thread-per-core** via `SO_REUSEPORT` (`HttpServer.serve(handler, num_workers=N)`).
+- **Composable handlers**: `Handler` trait, `Router` with path params, `App[S]` for shared state, typed extractors (`PathInt` / `QueryInt` / `HeaderStr` / ...), middleware as value composition; `ComptimeRouter[ROUTES]` unrolls dispatch at compile time.
+- **Production hygiene**: per-request `Cancel` token (peer FIN, timeout, drain unified), server-side TLS with cert reload + mTLS + ALPN, streaming bodies with backpressure, sanitised 4xx/5xx, graceful drain with per-worker `ShutdownReport`s, 24 h soak harness, **19 fuzz harnesses (4M+ runs, zero known crashes)**.
+
+## Numbers
+
+TFB plaintext, single-worker except where noted, `wrk2` two-phase (find-peak, then sustain at 90 % of peak). Full methodology + tables in [`docs/benchmark.md`](docs/benchmark.md).
+
+- **Linux EPYC 7R32, single-worker**: ~80K req/s, **on par with nginx (`worker_processes 1`), ~1.96x Go `net/http` (`GOMAXPROCS=1`)**.
+- **Multi-worker scaling**: **4.38x from 1 to 4 workers** (flare's `SO_REUSEPORT` thread-per-core scheduler).
+- **Tail latencies under sustained 90%-of-peak load** (`wrk2 --latency`, coordinated-omission corrected): p50 ≈ 1.2 ms, p99 ≈ 3.1 ms, **p99.99 ≈ 3.8 ms**.
+- **Apple M-series, single-worker**: ~157K req/s, ~1.10× Go `net/http`.
+
 ## Install
 
 ```toml
@@ -206,19 +222,13 @@ Each layer imports only from layers below it. No circular dependencies. The full
 
 ## Performance
 
-Disciplined: pinned toolchains, response-body integrity check before measurement, 5-run median with stdev ≤ 3 % gate. Single-worker flare on Linux EPYC is on par with single-worker nginx and roughly 2x Go `net/http`. Multi-worker comparisons require multi-worker baselines; methodology, single-worker vs multi-worker tables, and the soak-harness operational gates (slow-client / churn / mixed-load) all live in [`docs/benchmark.md`](docs/benchmark.md).
+Headline numbers live in the [Numbers](#numbers) block above; full single/multi-worker tables, tail percentiles, methodology, and the soak harness for long-running operational gates live in [`docs/benchmark.md`](docs/benchmark.md). Multi-worker cross-server ratios are gated on matched-worker baselines (Go `GOMAXPROCS=N`, nginx `worker_processes N`, Rust hyper / axum N-worker); flare publishes its own scaling claim and does not publish a "vs Go" multicore ratio against single-worker baselines.
 
-We do not lead on speed. The position is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job is to be operationally honest under load. Numbers are a corollary, not the headline.
+We do not lead on speed. The position is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job is to be operationally honest under load — numbers are a corollary, not the headline.
 
 ## Security
 
-Per-layer security posture and the sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights:
-
-- RFC 7230 token validation, configurable header / URI / body size limits.
-- 19 fuzz harnesses, 4M+ runs, zero known crashes.
-- Sanitised 4xx / 5xx response bodies by default (extractor messages logged with request id, not echoed). Switch with `ServerConfig.expose_error_messages = True` for local dev only.
-- TLS 1.2+ only, weak ciphers disabled, SNI always sent.
-- WebSocket: client frames masked per RFC 6455, CSPRNG handshake nonce, UTF-8 validation on TEXT frames.
+Per-layer security posture and the sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights: RFC 7230 token validation, configurable size limits, sanitised 4xx/5xx bodies, TLS 1.2+ only, WebSocket frame masking + UTF-8 validation, 19 fuzz harnesses with 4M+ runs and zero known crashes.
 
 For security issues, please open a private security advisory on GitHub or email the maintainer directly.
 
