@@ -1,184 +1,201 @@
 # Benchmarks
 
 Reproducible measurements with pinned toolchains, integrity-gated
-baselines, and a 5-run median with stdev gate. Numbers below are from
-v0.4.1 on the workloads that have stabilised; the v0.5 redesign (wrk2
-+ tail percentiles + mixed workloads) is in progress and called out
-where it lands.
+baselines, and a 5-run median with stdev gate. The
+[single-worker Linux plaintext table](#single-worker-linux-aws-epyc-7r32)
+is the closest single number to a production-shape headline.
 
-If you only want one number, the
-[`Server throughput (TFB plaintext)`](#server-throughput-tfb-plaintext)
-table on Linux is the closest to a production-shape headline.
+> **Read the worker count.** Throughout this page, every
+> comparison is explicitly framed as **single-worker** or
+> **multi-worker**. Multi-worker comparisons require multi-worker
+> baselines: an `N`-worker flare against an `N`-thread Go,
+> `N`-worker nginx, etc. Comparing `N`-worker flare to a 1-thread
+> Go is throughput-per-machine, not throughput-per-core, and we
+> do not publish a "vs `Go net/http`" ratio for it. The
+> [Multi-worker baselines: pending publication](#multi-worker-baselines-pending-publication)
+> section names the gap explicitly.
 
 ---
 
-## v0.5 methodology change (in progress)
+## Workload + harness shape
 
-The v0.4.x harness used `wrk -t1 -c64 -d30s` against a 13-byte
-plaintext body. That measures peak request-processing cost on a
-single core for a trivial response. Real services live somewhere
-else: tail-of-tail latency under contention, body sizes spread across
-multiple orders of magnitude, mixed keep-alive vs. close, slow
-clients, cert handshake handling, churn.
+The harness is `wrk -t1 -c64 -d30s` against a 13-byte plaintext
+body for the headline tables (TFB-style "is the per-core
+request-processing path fast"), plus a configurable matrix on
+top:
 
-The v0.5 redesign is therefore three changes:
-
-1. **`wrk` → `wrk2`**, run in constant-throughput mode (`wrk2 -R`).
-   `wrk` reports latency as time spent waiting for *responses*, not
-   time spent waiting for *the load generator to be ready to send the
-   next request*. That's the
+1. **`wrk` → `wrk2`** (in progress). `wrk` reports latency as
+   time spent waiting for *responses*, not time spent waiting
+   for *the load generator to be ready to send the next
+   request*. That's the
    [coordinated-omission](https://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html)
-   bug and it makes p99.9 / p99.99 unreliable. `wrk2` fixes it.
-
-   *Status (v0.5.0 Step 2):* `wrk2` ships as a build-from-source
-   step (the pinned `44a94c1` 2019 release; conda-forge has no
-   `wrk2` for `linux-64`). Run
-   `pixi run --environment bench bench-install-wrk2` once to
-   produce `build/wrk2/wrk2`, then
-   `pixi run --environment bench bench-tail-quick` drives wrk2
-   `--latency` mode against a flare static server on
-   `127.0.0.1:8080` and prints the full percentile block to
-   stdout. The per-run JSON / stdev-gate / multi-baseline matrix
-   integration with the existing `bench_vs_baseline.sh` harness
-   lands as a follow-up; until then the wrk-based
-   `bench-vs-baseline-quick` keeps the regression signal.
+   bug; it makes p99.9 / p99.99 unreliable. `wrk2` fixes it.
+   `pixi run --environment bench bench-install-wrk2` builds it
+   from a pinned commit (conda-forge has no `wrk2` for
+   `linux-64`); `pixi run --environment bench bench-tail-quick`
+   drives `wrk2 --latency` against a flare static server.
+   Per-run JSON / stdev-gate / multi-baseline matrix integration
+   with `bench_vs_baseline.sh` is a follow-up; until then the
+   `wrk`-based `bench-vs-baseline-quick` is the regression
+   signal.
 
 2. **Tail percentiles** — p50, p75, p90, p99, **p99.9, p99.99,
    p99.999** — `wrk2 --latency` produces the full block.
-   Headline tables update once the wrk2-results-into-harness
-   integration lands.
+   Headline tables update once the wrk2-into-harness integration
+   lands.
 
 3. **Multiple workloads**, not one:
-   - `micro-static` (the v0.4.x parity gate against
-     [`plaintext.yaml`](../benchmark/workloads/plaintext.yaml))
-   - **`mixed-keepalive`** (80 % keep-alive, 20 % `Connection:
-     close`,
-     [`mixed_keepalive.yaml`](../benchmark/configs/mixed_keepalive.yaml)
-     + a wrk Lua script at
-     [`benchmark/scripts/wrk_mixed_keepalive.lua`](../benchmark/scripts/wrk_mixed_keepalive.lua)).
-     **Landed in v0.5.0 Step 1.** Run with:
-     ```bash
-     pixi run --environment bench bench-mixed-keepalive
-     ```
-     Catches regressions in flare's keep-alive book-keeping and
+   - **`micro-static`** ([`throughput.yaml`](../benchmark/configs/throughput.yaml))
+     — the per-core plaintext parity gate. The headline tables
+     below.
+   - **`mixed-keepalive`**
+     ([`mixed_keepalive.yaml`](../benchmark/configs/mixed_keepalive.yaml)
+     + [`wrk_mixed_keepalive.lua`](../benchmark/scripts/wrk_mixed_keepalive.lua))
+     — 80 % keep-alive, 20 % `Connection: close`. Catches
+     regressions in flare's keep-alive book-keeping and
      close-after disposition that pure keep-alive loads can't
-     exercise.
-   - `uploads` (POSTs of 4 KB / 64 KB / 1 MB / 16 MB,
-     [`uploads.yaml`](../benchmark/configs/uploads.yaml)) —
-     **YAML + Lua scripts shipped in v0.5.0 Step 2.** The 1 MB
-     and 16 MB cases close the design-0.5 §1.1 "≥ 4x throughput
-     vs the v0.4.x copy path" gate once the reactor adopts the
-     `RequestView` zero-copy parser (follow-up).
-   - `downloads` (GETs returning 4 KB / 64 KB / 1 MB / 16 MB,
-     [`downloads.yaml`](../benchmark/configs/downloads.yaml)) —
-     **YAML + Lua scripts shipped in v0.5.0 Step 2.** Headline
-     target for the streaming-body reactor adoption (Track 4
-     follow-up): "no per-client allocation proportional to
-     body size." The Go `net/http` baseline gains corresponding
-     `/4kb` / `/64kb` / `/1mb` / `/16mb` routes so the
-     comparison is apples-to-apples.
-   - `slow-clients` (256 connections, each trickling 1 byte /
-     100 ms,
-     [`slow_clients.yaml`](../benchmark/configs/slow_clients.yaml))
-     — **YAML + Lua shipped in v0.5.0 Step 2.** Validates the
-     `read_body_timeout_ms` deadline that landed in v0.5.0
-     Step 1 reclaims worker slots from slow-body DoS attempts.
-   - `churn` (10 K open / send / close cycles per second,
-     [`churn.yaml`](../benchmark/configs/churn.yaml)) —
-     **YAML + Lua shipped in v0.5.0 Step 2.** Stresses
-     accept() throughput, the `Pool[ConnHandle]` allocator
-     (Step 2 / S2.4), and the kernel's ephemeral-port +
-     TIME_WAIT bookkeeping.
-
-The Linux throughput table below stays as the v0.4.1 wrk baseline
-so the release-to-release regression check has a stable signal.
+     exercise. `pixi run --environment bench bench-mixed-keepalive`.
+   - **`uploads`** ([`uploads.yaml`](../benchmark/configs/uploads.yaml))
+     — POSTs of 4 KB / 64 KB / 1 MB / 16 MB. The 1 MB and 16 MB
+     cases drive the zero-copy reactor adoption.
+   - **`downloads`** ([`downloads.yaml`](../benchmark/configs/downloads.yaml))
+     — GETs returning 4 KB / 64 KB / 1 MB / 16 MB streamed
+     bodies. Headline target for the streaming-body reactor
+     adoption: "no per-client allocation proportional to body
+     size." The Go baseline serves matching `/4kb` / `/64kb` /
+     `/1mb` / `/16mb` routes so the comparison is
+     apples-to-apples.
+   - **`slow-clients`** ([`slow_clients.yaml`](../benchmark/configs/slow_clients.yaml))
+     — 256 connections, each trickling 1 byte / 100 ms.
+     Validates that the `read_body_timeout_ms` deadline reclaims
+     worker slots from slow-body DoS attempts.
+   - **`churn`** ([`churn.yaml`](../benchmark/configs/churn.yaml))
+     — 10 K open / send / close cycles per second. Stresses
+     `accept()` throughput, the `Pool[ConnHandle]` allocator,
+     and the kernel's ephemeral-port + TIME_WAIT bookkeeping.
 
 ---
 
 ## Server throughput (TFB plaintext)
 
-Measured on Apple M-series (macOS) and AWS EPYC 7R32 (Linux),
-Mojo `0.26.3.0.dev2026042005` nightly. The workload spec lives at
-[`benchmark/workloads/plaintext.yaml`](../benchmark/workloads/plaintext.yaml).
+Measured on Apple M-series (macOS) and AWS EPYC 7R32 (Linux), Mojo
+nightly pinned per the `[dependencies]` block in
+[`pixi.toml`](../pixi.toml). The workload spec lives at
+[`benchmark/configs/throughput.yaml`](../benchmark/configs/throughput.yaml)
+(`wrk -t1 -c64 -d30s`).
 
-### macOS, Apple M-series
+### Single-worker, macOS Apple M-series
 
-| Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
-|---|---:|---:|---:|---:|
-| **flare (reactor)** | **157,459** | 0.39 ms | 0.80 ms | **1.10x** |
-| Go `net/http` (1 thread) | 143,500 | 0.44 ms | 0.86 ms | 1.00x |
+All three rows below are **single-worker** (`flare` 1 reactor, Go
+`GOMAXPROCS=1`). This is the per-core request-processing
+comparison; multi-worker numbers live in the next section.
 
-flare is roughly 1.10x faster than Go's stdlib `net/http` at the
-same thread count, a roughly 3x jump over the v0.2.0 blocking server.
+| Server | Workers | Req/s (median) | p50 | p99 | vs Go `net/http` |
+|---|---:|---:|---:|---:|---:|
+| **flare (reactor)** | 1 | **157,459** | 0.39 ms | 0.80 ms | **1.10x** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 143,500 | 0.44 ms | 0.86 ms | 1.00x |
 
-### Linux, AWS EPYC 7R32 (64 vCPU)
+flare is ~1.10x Go's stdlib `net/http` at the same worker count.
 
-`Linux 6.8.0-1027-aws`, Mojo `0.26.3.0.dev2026042005`, Go `1.24.13`,
-nginx `1.25.3`, `wrk` `d40fce9`. Same harness, different machine —
-absolute req/s is not comparable across the two tables (different
-OS, scheduler, CPU); only the intra-platform ratios are.
+### Single-worker, Linux AWS EPYC 7R32
 
-| Server | Req/s (median) | p50 | p99 | vs Go `net/http` |
-|---|---:|---:|---:|---:|
-| nginx (1 worker) | 81,612 | 0.40 ms | 0.79 ms | 2.00x |
-| **flare (reactor)** | **79,965** | 0.78 ms | 1.53 ms | **1.96x** |
-| Go `net/http` (1 thread) | 40,739 | 1.59 ms | 3.10 ms | 1.00x |
+`Linux 6.8.0-1027-aws`, Mojo nightly, Go `1.24.13`, nginx `1.25.3`,
+`wrk` `d40fce9`. Different machine — absolute req/s is not
+comparable across the macOS and Linux tables (different OS,
+scheduler, CPU); only the intra-platform ratios are.
 
-On Linux flare sits within 2 % of nginx's single-worker throughput
-and is about 1.96x Go `net/http`. The flare-vs-Go ratio is wider on
-Linux (1.96x vs 1.10x) because Go's scheduler and `netpoll` overhead
-is a larger share of each request on the slower EPYC core than on an
-Apple M-series P-core. Absolute req/s is lower on EPYC for reasons
-independent of flare; see [the platform footnote](#platform-footnote).
+All three rows below are **single-worker** (flare 1 reactor, nginx
+`worker_processes 1`, Go `GOMAXPROCS=1`).
 
-### Multicore on Linux EPYC
+| Server | Workers | Req/s (median) | p50 | p99 | vs Go `net/http` |
+|---|---:|---:|---:|---:|---:|
+| nginx | 1 | 81,612 | 0.40 ms | 0.79 ms | 2.00x |
+| **flare (reactor)** | 1 | **79,965** | 0.78 ms | 1.53 ms | **1.96x** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,739 | 1.59 ms | 3.10 ms | 1.00x |
+
+flare sits within 2 % of nginx's single-worker throughput and is
+about 1.96x Go `net/http` per core. The flare-vs-Go ratio is wider
+on Linux (1.96x vs 1.10x) because Go's scheduler and `netpoll`
+overhead is a larger share of each request on the slower EPYC core
+than on an Apple M-series P-core. Absolute req/s is lower on EPYC
+for reasons independent of flare; see
+[the platform footnote](#platform-footnote).
+
+### Multi-worker scaling, Linux EPYC
+
+**Worker-count discipline:** the table below shows flare scaling
+its **own** worker count from 1 to 4. We do **not** publish a
+"vs Go" or "vs nginx" ratio for the 4-worker `flare_mc` row,
+because the `bench_vs_baseline.sh` Go and nginx baselines pin
+themselves to a single worker:
+[`benchmark/baselines/go_nethttp/run.sh`](../benchmark/baselines/go_nethttp/run.sh)
+exports `GOMAXPROCS=1`, and the nginx config in
+[`benchmark/baselines/nginx/`](../benchmark/baselines/nginx/) sets
+`worker_processes 1`. Comparing 4-worker flare to 1-worker Go is
+throughput-per-machine on flare's side and throughput-per-core on
+Go's — not the same question. The honest cross-server multicore
+table is below in
+[Multi-worker baselines: pending publication](#multi-worker-baselines-pending-publication).
 
 `HttpServer.serve(handler, num_workers=N)` with `N >= 2` binds N
-`SO_REUSEPORT` listeners on N pthread workers. The load generator is
-[`throughput_mc.yaml`](../benchmark/configs/throughput_mc.yaml) (`wrk
--t8 -c256 -d30s`) — the single-threaded `throughput.yaml` config
+`SO_REUSEPORT` listeners on N pthread workers. The load generator
+is
+[`throughput_mc.yaml`](../benchmark/configs/throughput_mc.yaml)
+(`wrk -t8 -c256 -d30s`) — the single-threaded `throughput.yaml`
 pins `wrk` to one thread and 64 connections, which cannot drive
 enough concurrent load to show worker scaling no matter what the
 server does.
 
-| Server | Req/s (median) | stdev% | p50 | p99 | vs Go | vs 1-thread flare |
+| Server | Workers | Req/s (median) | stdev% | p50 | p99 | vs flare 1w |
 |---|---:|---:|---:|---:|---:|---:|
-| Go `net/http` | 36,613 | 0.99 | 6.98 ms | 13.37 ms | 1.00x | 0.62x |
-| flare (single-threaded) | 58,812 | 2.89 | 4.41 ms | 4.64 ms | 1.61x | 1.00x |
-| nginx (1 worker) | 70,592 | 1.63 | 3.53 ms | 4.23 ms | 1.93x | 1.20x |
-| **flare_mc (4 workers, pinned)** | **257,461** | **1.56** | **0.97 ms** | **1.58 ms** | **7.03x** | **4.38x** |
+| flare (single-threaded) | 1 | 58,812 | 2.89 | 4.41 ms | 4.64 ms | 1.00x |
+| **flare_mc (pinned)** | **4** | **257,461** | **1.56** | **0.97 ms** | **1.58 ms** | **4.38x** |
 
-`flare_mc` at 4 pinned workers is **4.38x** the single-threaded flare
-reactor — near-linear scaling — **3.65x nginx (1 worker)**, and
-**7.03x Go `net/http`**. Tail latency collapses from 4.64 ms p99
-(single-thread flare, saturated on 256 concurrent connections) to
-1.58 ms p99 (multicore), because each worker gets its own
-un-contended reactor. The flare-vs-Go gap widens here (7x vs 2x
-under single-thread `throughput`) because Go's `net/http` +
-`netpoll` overhead grows faster than flare's `SO_REUSEPORT` sharding
-as concurrency climbs on a slower EPYC core.
+flare scales **4.38x from 1 to 4 workers** — near-linear, since
+each worker gets its own un-contended reactor. Tail latency
+collapses from 4.64 ms p99 (single-thread flare, saturated on 256
+concurrent connections) to 1.58 ms p99 (4 workers).
 
-On macOS loopback (`-t1 -c64 -d30s`) `flare_mc` saturates at
-~140K req/s regardless of worker count because `wrk` and the server
-compete for the same single-client CPU. That ceiling is the testbed,
-not flare:
+The single-worker flare / nginx / Go comparison from the previous
+section still applies per-core; multiplying by `N` workers is the
+right rough sanity-check for what `flare_mc` at `N` workers looks
+like next to `nginx` at `N` workers or Go with `GOMAXPROCS=N`,
+modulo kernel-side cross-core costs. The published cross-server
+multicore table is gated on actually running the apples-to-apples
+matrix; see below.
 
-| Server | Req/s (median) | stdev% | vs 1-thread flare |
-|---|---:|---:|---:|
-| flare (single-threaded) | 149,597 | 1.56 | 1.00x |
-| flare_mc (4 workers, pinned) | 148,694 | 2.51 | **0.99x** (saturated) |
-| Go `net/http` (`GOMAXPROCS=1`) | 140,560 | 0.64 | 0.94x |
+On macOS loopback `flare_mc` saturates at ~140K req/s regardless
+of worker count because `wrk` and the server compete for the same
+single-client CPU. That ceiling is the testbed, not flare. The
+4-worker `flare_mc` row is within noise of the 1-worker flare row
+on macOS — exactly why the Linux table above is the headline.
 
-The 4-worker `flare_mc` row is within noise of the 1-worker flare row
-— which is exactly why the Linux table above exists. Run it yourself
-with:
+### Multi-worker baselines: pending publication
 
-```
+A real cross-server multicore table needs four matched-worker rows
+on the **same** Linux EPYC machine, same wrk driver, same
+`throughput_mc` config:
+
+| Server | Workers | Status |
+|---|---:|---|
+| flare_mc (pinned) | 4 | numbers above (Linux EPYC) |
+| nginx | 4 (`worker_processes 4`) | not yet published; needs config + harness run |
+| Go `net/http` | 4 (`GOMAXPROCS=4`) | not yet published; needs `run.sh` knob + harness run |
+| Rust hyper (tokio multi-thread, 4 worker threads) | 4 | not yet published; baseline not in `benchmark/baselines/` |
+| Rust axum (4 worker threads) | 4 | not yet published; baseline not in `benchmark/baselines/` |
+
+Until those baselines exist on the same hardware, the doc does
+not assert "flare_mc is `Nx` of nginx multi-worker" or "flare_mc
+is `Nx` of Go GOMAXPROCS=N". The single-worker per-core table is
+the apples-to-apples comparison flare commits to publishing.
+
+Reproduce the flare side of the multi-worker scaling on a Linux
+box with multiple physical cores:
+
+```bash
 pixi run --environment bench -- bash benchmark/scripts/bench_vs_baseline.sh \
-    --only=flare,flare_mc,go_nethttp,nginx --configs=throughput_mc
+    --only=flare,flare_mc --configs=throughput_mc
 ```
-
-on a Linux box with multiple physical cores.
 
 ### Platform footnote
 
@@ -212,6 +229,216 @@ only hit 80K/s in production":
 
 ---
 
+## Soak: long-running operational gates
+
+The throughput tables above answer "is it fast right now". The
+soak harness answers "is it still alive at 4 a.m. on day 2".
+Three operational signals microbenchmarks miss:
+
+- **RSS over time** — does memory grow linearly, plateau, or
+  spike under churn?
+- **File descriptors** — are accept-loop / TLS / connection
+  bookkeeping leaking fds under churn?
+- **Tail-latency drift** — does p99 stay flat at hour 24 or does
+  a slow pathology creep in?
+
+### Three tiers, one harness
+
+The driver lives in
+[`benchmark/scripts/_run_soak.sh`](../benchmark/scripts/_run_soak.sh).
+A single set of scripts runs at three tiers via the
+`SOAK_DURATION_SECS` env knob (defaults to 60 s):
+
+| Tier | Per-workload duration | Total wall time | When to run |
+|---|---|---|---|
+| **smoke** | 60 s | ~3 min | PR / iterative dev (`pixi run --environment bench bench-soak-smoke`) |
+| **extended** | 300 s | ~15 min | Before pushing larger changes (`pixi run --environment bench bench-soak-extended`) |
+| **release gate** | 86 400 s (24 h) | ~24 h per workload, ~3 days serial | Linux EPYC, manual one-shot pre-tag |
+
+Release-gate invocation pattern (one workload per box-day, run
+serially or in parallel on different EPYC boxes):
+
+```bash
+SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-slow-clients
+SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-churn
+SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-mixed
+```
+
+Same `_run_soak.sh` driver, same `summary.json` schema, same gate
+logic — only the duration changes. The 24 h gate is the
+release-blocking one; smoke and extended are catch-loud-failures
+filters.
+
+### Workloads + gates
+
+All three workloads target `/plaintext` on the flare bench server
+boot from
+[`benchmark/baselines/flare/main.mojo`](../benchmark/baselines/flare/main.mojo)
+— the **same** entry point the bench-vs-baseline throughput
+harness uses, so soak numbers are directly comparable to the
+single-worker throughput tables above. The wrk lua scripts live
+in
+[`benchmark/scripts/wrk_soak_*.lua`](../benchmark/scripts/).
+
+#### slow-client
+
+256 concurrent connections, each issuing a short POST request
+every ~100 ms (wrk's `delay()` model is the closest approximation
+to "1 byte / 100 ms" inside wrk's protocol shape). Gate:
+
+- **`pass = errors == 0 && rss_end <= 2 * rss_start`**
+- 24 h release-gate variant additionally requires `rss_end ≈
+  rss_start` after the first hour (RSS-flat).
+
+The lua approximation does not byte-trickle inside a single
+request body the way a true byte-trickle harness would; the
+`read_body_timeout_ms` deadline path is exercised end-to-end in
+[`tests/test_server_deadlines.mojo`](../tests/test_server_deadlines.mojo)
+instead. Soak covers the resource-exhaustion shape (many
+connections held under pressure).
+
+#### churn
+
+64 concurrent connections, every request sets `Connection: close`
+so the server closes after each response. wrk reopens for the
+next request. Effective rate is bounded by ephemeral-port
+turnover. Gate:
+
+- **`pass = errors == 0 && fd_end <= fd_start + 16`**
+- 16-fd slack covers timer / wakeup / log fds beyond the
+  per-connection fds. The `fd_end` measurement happens after a
+  3 s post-wrk drain pause so in-flight connections finish their
+  close handshake before the observer's last sample.
+
+#### mixed
+
+64 concurrent connections, ~20 % tagged with `Connection: close`
+(every 5th request), the remaining 80 % standard HTTP/1.1
+keep-alive. Catches regressions in the connection-disposition
+path that pure keep-alive load doesn't exercise. Gate:
+
+- **`pass = errors == 0 && rss_end <= 2 * rss_start`**
+
+### Output schema
+
+Each per-workload run writes
+`build/soak/<workload>/<timestamp>-<host>-<commit>/summary.json`
+with the following fields. The schema is stable so EPYC release-
+gate runs can be aggregated by per-tag publication tooling without
+script edits:
+
+```json
+{
+  "workload":          "slow_clients",
+  "tier":              "smoke",
+  "duration_secs":     60,
+  "wrk_threads":       2,
+  "wrk_connections":   256,
+  "commit":            "9755049",
+  "host":              "ehsan-dev",
+  "wrk": {
+    "requests_total":           7424,
+    "requests_per_sec":         2461.3,
+    "duration_secs_actual":     3.02,
+    "p50_ms":                   341.0,
+    "p75_ms":                   612.0,
+    "p90_ms":                   970.0,
+    "p99_ms":                   2070.0,
+    "socket_errors_connect":    0,
+    "socket_errors_read":       0,
+    "socket_errors_write":      0,
+    "socket_errors_timeout":    0,
+    "non_2xx_3xx":              0
+  },
+  "rss_kb_start":      193552,
+  "rss_kb_end":        195088,
+  "rss_kb_max":        195088,
+  "fd_count_start":    55,
+  "fd_count_end":      55,
+  "fd_count_max":      311,
+  "observe_samples":   8,
+  "gates": {
+    "rss_within_2x":   true,
+    "fd_end_bounded":  true,
+    "server_alive":    true,
+    "no_non_2xx":      true
+  },
+  "pass":              true
+}
+```
+
+Companion files in the same directory:
+
+- `wrk.txt` — raw wrk stdout including the latency distribution.
+- `observe.jsonl` — per-second (or per-5-s for the 24 h tier)
+  RSS / fd-count samples. One JSON object per line:
+  `{"ts_ms": 12345, "rss_kb": ..., "hwm_kb": ..., "peak_kb":
+  ..., "fd_count": ...}`.
+- `server.{stdout,stderr}` — flare bench server output.
+- `observer.stderr` — observer-side stderr.
+
+### Dev-box smoke + extended results (Ubuntu 22.04, 6 vCPU AWS)
+
+These are NOT release-gate numbers. They are smoke artefacts
+captured on the maintainer's AWS Ubuntu 22.04 dev box (glibc
+2.35, x86_64) at commit
+[`9755049`](https://github.com/ehsanmok/flare/commit/9755049).
+The release-gate p99.9 / p99.99 numbers + 24 h flat-RSS proof are
+captured on Linux EPYC and live in the per-tag release notes.
+
+What the tables prove on this hardware: the harness fires
+cleanly, the gates evaluate against real data, and the dev-box
+server holds steady under all three workloads at the smoke +
+extended durations (no crashes, no fd leaks, RSS within ~1 % of
+cold-start across both tiers).
+
+#### Smoke tier (60 s/workload, ~3 min total)
+
+| Workload | req/s | Total req | p50 (ms) | p99 (ms) | RSS start (KB) | RSS end (KB) | RSS max (KB) | fd start | fd end | fd max | non-2xx | Pass |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| slow-client | 2 546.4 | 152 948 | 0.18 | 1.07 | 192 588 | 194 124 | 194 124 | 55 | 55 | 311 | 0 | yes |
+| churn | 27 805.5 | 1 668 403 | 2.00 | 2.34 | 193 488 | 194 000 | 194 000 | 55 | 55 | 119 | 0 | yes |
+| mixed | 49 544.7 | 2 972 718 | 1.01 | 2.76 | 193 492 | 194 004 | 194 004 | 55 | 55 | 119 | 0 | yes |
+
+#### Extended tier (300 s/workload, ~15 min total)
+
+| Workload | req/s | Total req | p50 (ms) | p99 (ms) | RSS start (KB) | RSS end (KB) | RSS max (KB) | fd start | fd end | fd max | non-2xx | Pass |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| slow-client | 2 547.8 | 764 471 | 0.19 | 0.85 | 193 492 | 195 028 | 195 028 | 55 | 55 | 311 | 0 | yes |
+| churn | 27 805.0 | 8 341 534 | 1.99 | 2.34 | 194 196 | 194 708 | 194 708 | 55 | 55 | 119 | 0 | yes |
+| mixed | 50 072.9 | 15 021 927 | 0.99 | 2.70 | 192 152 | 192 664 | 192 664 | 55 | 55 | 119 | 0 | yes |
+
+Two cross-tier observations:
+
+- **RSS deltas are essentially identical** between smoke (60 s)
+  and extended (300 s): ~0.5–1.5 MB across all three workloads
+  in both tiers. A 5x duration increase did not produce a 5x
+  RSS increase — per-request allocator churn is bounded rather
+  than leaking. The 24 h gate is what pins this assertion
+  long-term.
+- **fd_count returns to baseline** in both tiers across all
+  workloads (`fd_end == fd_start == 55`). The 3 s post-wrk drain
+  pause documented at the top of
+  [`_run_soak.sh`](../benchmark/scripts/_run_soak.sh) is what
+  makes this measurement honest — without it the observer
+  would race wrk-exit and report ~30–250 in-flight fds as a
+  false-positive "leak".
+
+### Limitations
+
+- **Linux only.** `/proc/<pid>/status` is the RSS source; macOS
+  would need `ps -o rss=` fallback. The release gate runs on
+  Linux EPYC anyway.
+- **wrk-driven slow-client is an approximation** — see the
+  slow-client section above. The byte-trickle path is exercised
+  by unit tests instead.
+- **The smoke and extended tiers cannot prove "RSS flat after 1
+  hour"** — that signal lives only in the 24 h release-gate
+  run. Smoke / extended catch only loud failures (server died,
+  RSS doubled, fds leaked beyond a small constant).
+
+---
+
 ## Methodology
 
 The TFB plaintext workload (TechEmpower test #6) is `GET /plaintext`
@@ -226,16 +453,16 @@ Measurement rules:
   length, or non-whitelisted header is **rejected** before the
   measurement starts. Headers allowed to vary per target: `Date`,
   `Server`, `Connection`, `Keep-Alive`.
-- **Pinned toolchains:** Go and `wrk` versions are pinned in
-  `pixi.toml` under `[feature.bench.dependencies]` so the comparison
-  does not silently drift across machines. v0.5 adds `wrk2` to the
-  same pin.
+- **Pinned toolchains:** Go, nginx, `wrk`, and `wrk2` versions are
+  pinned in `pixi.toml` under `[feature.bench.dependencies]` so the
+  comparison does not silently drift across machines.
 - **Warmup + 5-run measurement:** each (target, config) tuple runs
   one 10 s warmup followed by five 30 s measurement rounds. The
   median of the middle three is reported. The run **fails the
   stability gate** if stdev exceeds 3 %.
-- **Load generator:** `wrk` for v0.4.x, transitioning to `wrk2` in
-  v0.5. Never `ab` or `h2load`, for consistency with published
+- **Load generator:** `wrk` for the throughput tables, transitioning
+  to `wrk2` for the tail-latency / coordinated-omission-corrected
+  matrix. Never `ab` or `h2load`, for consistency with published
   TFB-style numbers. Two configs ship today —
   [`throughput.yaml`](../benchmark/configs/throughput.yaml) (`-t1
   -c64 -d30s`) for per-core request-processing cost, and
@@ -303,33 +530,28 @@ and within noise at the L2/L3-resident sizes.
 ## Reproduce locally
 
 ```bash
-# v0.4.1 baseline (wrk, the headline numbers above)
+# Throughput regression check (the single-worker headline numbers above)
 pixi run --environment bench bench-vs-baseline-quick   # flare vs Go, ~7 min
 pixi run --environment bench bench-vs-baseline         # + nginx + latency_floor, ~20 min
 
-# v0.5.0 Step 1 — mixed-keepalive workload (80% keep-alive, 20% close)
+# Mixed-keepalive (80% keep-alive, 20% close)
 pixi run --environment bench bench-mixed-keepalive
 
-# v0.5.0 Step 2 — wrk2 + tail percentiles
+# wrk2 + tail percentiles
 pixi run --environment bench bench-install-wrk2  # one-time build
 pixi run --environment bench bench-tail-quick    # wrk2 -R10000 --latency
 
-# v0.5.0 Step 3 — TLS bench setup (self-signed cert under build/)
+# TLS bench setup (self-signed cert under build/)
 pixi run --environment bench bench-tls-setup
 ```
 
 The TLS bench configs `tls_plaintext.yaml` (steady-state TLS
 throughput, connections kept open) and `tls_handshake.yaml`
 (handshake-per-request, `Connection: close`) are wired into the
-harness; they drive a TLS-terminating flare server on
-`127.0.0.1:8443`. The server-side `TlsAcceptor` that those
-configs depend on lands with the v0.5.0 Step 3 reactor
-follow-up; until then the configs are ready to fire as soon as
-the server-side handshake state machine is in place.
+harness and drive a TLS-terminating flare server on
+`127.0.0.1:8443`. The reactor-state-machine TLS handshake that
+ties these configs into the cancel-aware reactor loop is a
+follow-up; the blocking `handshake_fd(fd)` path the configs use
+today is in place.
 
 Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.
-
-The full v0.5 matrix (`wrk2` / tail percentiles / uploads /
-downloads / slow-clients / churn / 24-hour soak) is staged with
-the Tracks that unlock each one (streaming bodies, server TLS,
-the bench env repin for `wrk2`).
