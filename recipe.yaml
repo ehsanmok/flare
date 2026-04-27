@@ -22,7 +22,7 @@
 # it's easy to update (a one-line bump in this recipe), not embedded in
 # a binary blob.
 #
-# json source is inlined at the v0.1.3 git tag (whose own recipe pins
+# json source is inlined at the v0.1.4 git tag (whose own recipe pins
 # the same Mojo nightly) until json publishes to a public conda channel;
 # at that point the inline ``json`` source step + the ``cp -r json-src/json``
 # can be replaced with a ``host: [json]`` requirement.
@@ -42,7 +42,7 @@ source:
   # same Mojo we ship against — see ``ehsanmok/json@v0.1.3/recipe.yaml``).
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    tag: v0.1.3
+    tag: v0.1.4
 
 build:
   script:
