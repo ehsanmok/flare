@@ -162,6 +162,52 @@ change; the 24 h release gate stays manual on EPYC per the
 design doc's "1 h smoke on every PR, 24 h nightly only" framing
 (simply scaled up for our smaller-team release cadence).
 
+## Dev-box smoke + extended results (Ubuntu 22.04, 6 vCPU AWS)
+
+These are NOT the v0.5.0 release-gate numbers. They are smoke
+artefacts captured on the maintainer's AWS Ubuntu 22.04 dev box
+(glibc 2.35, x86_64) at commit
+[`9755049`](https://github.com/ehsanmok/flare/commit/9755049).
+The release-gate p99.9 / p99.99 numbers + 24 h flat-RSS proof
+land with S3.8 publication on Linux EPYC.
+
+What the tables below DO prove: the soak harness fires cleanly,
+the gates evaluate against real data, and the dev-box server
+holds steady under all three workloads at the smoke + extended
+durations (no crashes, no fd leaks, RSS within ~1 % of cold-start
+across both tiers).
+
+### Smoke tier (60 s/workload, ~3 min total)
+
+| Workload | req/s | Total req | p50 (ms) | p99 (ms) | RSS start (KB) | RSS end (KB) | RSS max (KB) | fd start | fd end | fd max | non-2xx | Pass |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| slow-client | 2 546.4 | 152 948 | 0.18 | 1.07 | 192 588 | 194 124 | 194 124 | 55 | 55 | 311 | 0 | yes |
+| churn | 27 805.5 | 1 668 403 | 2.00 | 2.34 | 193 488 | 194 000 | 194 000 | 55 | 55 | 119 | 0 | yes |
+| mixed | 49 544.7 | 2 972 718 | 1.01 | 2.76 | 193 492 | 194 004 | 194 004 | 55 | 55 | 119 | 0 | yes |
+
+### Extended tier (300 s/workload, ~15 min total)
+
+| Workload | req/s | Total req | p50 (ms) | p99 (ms) | RSS start (KB) | RSS end (KB) | RSS max (KB) | fd start | fd end | fd max | non-2xx | Pass |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| slow-client | 2 547.8 | 764 471 | 0.19 | 0.85 | 193 492 | 195 028 | 195 028 | 55 | 55 | 311 | 0 | yes |
+| churn | 27 805.0 | 8 341 534 | 1.99 | 2.34 | 194 196 | 194 708 | 194 708 | 55 | 55 | 119 | 0 | yes |
+| mixed | 50 072.9 | 15 021 927 | 0.99 | 2.70 | 192 152 | 192 664 | 192 664 | 55 | 55 | 119 | 0 | yes |
+
+Two cross-tier observations worth a note:
+
+- **RSS deltas are essentially identical** between smoke (60 s)
+  and extended (300 s): ~0.5–1.5 MB across all three workloads
+  in both tiers. That's the right shape: a 5x duration increase
+  did not produce a 5x RSS increase, suggesting per-request
+  allocator churn is bounded rather than leaking. The 24 h gate
+  is what pins this assertion long-term.
+- **fd_count returns to baseline** in both tiers across all
+  workloads (`fd_end == fd_start == 55`). The 3 s post-wrk drain
+  pause is what makes this measurement honest — without it, the
+  observer would race wrk-exit and report ~30–250 in-flight fds
+  as a "leak". The drain pause is documented at the top of
+  [`_run_soak.sh`](../benchmark/scripts/_run_soak.sh).
+
 ## Limitations
 
 - **Linux only.** `/proc/<pid>/status` is the RSS source; macOS
