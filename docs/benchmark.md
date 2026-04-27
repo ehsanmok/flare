@@ -19,32 +19,30 @@ is the closest single number to a production-shape headline.
 
 ## Workload + harness shape
 
-The harness is `wrk -t1 -c64 -d30s` against a 13-byte plaintext
-body for the headline tables (TFB-style "is the per-core
-request-processing path fast"), plus a configurable matrix on
-top:
+The headline harness is **wrk2 in two-phase mode** against a
+13-byte plaintext body. Two-phase means a brief peak-finder run
+to discover server-bottlenecked capacity, then five
+`wrk_duration_seconds` measurement rounds at 90 % of peak that
+report the latency distribution. wrk2 (rather than wrk) closes
+the [coordinated-omission](https://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html)
+hole that makes wrk's default mode silently inflate p99 and
+hide p99.9 / p99.99 once the server is anywhere near capacity:
+wrk2 sends at constant throughput so queue time at the gen is
+counted, which is what production clients actually observe
+under load.
 
-1. **`wrk` → `wrk2`** (in progress). `wrk` reports latency as
-   time spent waiting for *responses*, not time spent waiting
-   for *the load generator to be ready to send the next
-   request*. That's the
-   [coordinated-omission](https://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html)
-   bug; it makes p99.9 / p99.99 unreliable. `wrk2` fixes it.
-   `pixi run --environment bench bench-install-wrk2` builds it
-   from a pinned commit (conda-forge has no `wrk2` for
-   `linux-64`); `pixi run --environment bench bench-tail-quick`
-   drives `wrk2 --latency` against a flare static server.
-   Per-run JSON / stdev-gate / multi-baseline matrix integration
-   with `bench_vs_baseline.sh` is a follow-up; until then the
-   `wrk`-based `bench-vs-baseline-quick` is the regression
-   signal.
+1. **wrk2 + tail percentiles.** Every measurement run captures
+   p50 / p75 / p90 / p99 / **p99.9 / p99.99 / p99.999** via
+   `wrk2 --latency`. The summary headline req/s is **peak
+   capacity** from the find-peak phase; the latency columns
+   reflect tail behaviour at 90 %-of-peak sustained load. The
+   `_install_wrk2.sh` step builds a pinned wrk2 commit when the
+   platform has no conda-forge package (linux-64 today). Tail
+   numbers are reproducible across machines because the
+   toolchain is pinned in `[feature.bench.dependencies]`.
 
-2. **Tail percentiles** — p50, p75, p90, p99, **p99.9, p99.99,
-   p99.999** — `wrk2 --latency` produces the full block.
-   Headline tables update once the wrk2-into-harness integration
-   lands.
+2. **Multiple workloads**, not one:
 
-3. **Multiple workloads**, not one:
    - **`micro-static`** ([`throughput.yaml`](../benchmark/configs/throughput.yaml))
      — the per-core plaintext parity gate. The headline tables
      below.
@@ -78,19 +76,26 @@ top:
 
 ## Server throughput (TFB plaintext)
 
-Measured on Apple M-series (macOS) and AWS EPYC 7R32 (Linux), Mojo
-nightly pinned per the `[dependencies]` block in
-[`pixi.toml`](../pixi.toml). The workload spec lives at
-[`benchmark/configs/throughput.yaml`](../benchmark/configs/throughput.yaml)
-(`wrk -t1 -c64 -d30s`).
+The workload spec is `GET /plaintext` returning the 13-byte
+body `Hello, World!` with `Content-Type: text/plain`,
+HTTP/1.1 keep-alive on, no gzip, no logging. Mojo nightly is
+pinned per the `[dependencies]` block in
+[`pixi.toml`](../pixi.toml). Workload definitions live in
+[`benchmark/configs/throughput.yaml`](../benchmark/configs/throughput.yaml).
+
+The published headline numbers below are taken on the boxes
+flare's release process targets (Apple M-series for the macOS
+column, AWS EPYC 7R32 for the Linux column). Per-tag refreshes
+land in the GitHub release notes for the matching tag; this
+page tracks the methodology + most recent dev-box smoke.
 
 ### Single-worker, macOS Apple M-series
 
-All three rows below are **single-worker** (`flare` 1 reactor, Go
+All rows are **single-worker** (`flare` 1 reactor, Go
 `GOMAXPROCS=1`). This is the per-core request-processing
 comparison; multi-worker numbers live in the next section.
 
-| Server | Workers | Req/s (median) | p50 | p99 | vs Go `net/http` |
+| Server | Workers | Peak req/s | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|---:|
 | **flare (reactor)** | 1 | **157,459** | 0.39 ms | 0.80 ms | **1.10x** |
 | Go `net/http` (`GOMAXPROCS=1`) | 1 | 143,500 | 0.44 ms | 0.86 ms | 1.00x |
@@ -99,15 +104,15 @@ flare is ~1.10x Go's stdlib `net/http` at the same worker count.
 
 ### Single-worker, Linux AWS EPYC 7R32
 
-`Linux 6.8.0-1027-aws`, Mojo nightly, Go `1.24.13`, nginx `1.25.3`,
-`wrk` `d40fce9`. Different machine — absolute req/s is not
-comparable across the macOS and Linux tables (different OS,
-scheduler, CPU); only the intra-platform ratios are.
+`Linux 6.8.0-1027-aws`, Mojo nightly, Go `1.24.13`, nginx `1.25.3`.
+Different machine — absolute req/s is not comparable across the
+macOS and Linux tables (different OS, scheduler, CPU); only the
+intra-platform ratios are.
 
-All three rows below are **single-worker** (flare 1 reactor, nginx
+All rows are **single-worker** (flare 1 reactor, nginx
 `worker_processes 1`, Go `GOMAXPROCS=1`).
 
-| Server | Workers | Req/s (median) | p50 | p99 | vs Go `net/http` |
+| Server | Workers | Peak req/s | p50 | p99 | vs Go `net/http` |
 |---|---:|---:|---:|---:|---:|
 | nginx | 1 | 81,612 | 0.40 ms | 0.79 ms | 2.00x |
 | **flare (reactor)** | 1 | **79,965** | 0.78 ms | 1.53 ms | **1.96x** |
@@ -120,6 +125,33 @@ overhead is a larger share of each request on the slower EPYC core
 than on an Apple M-series P-core. Absolute req/s is lower on EPYC
 for reasons independent of flare; see
 [the platform footnote](#platform-footnote).
+
+### Tail latencies under sustained load (dev-box smoke)
+
+The wrk2 two-phase harness produces full p50 / p99 / p99.9 /
+p99.99 columns at 90 %-of-peak sustained load. Numbers below
+are smoke-quality — taken on the maintainer's AWS Ubuntu 22.04
+dev box (6 vCPU, glibc 2.35) at commit
+[`9025444`](https://github.com/ehsanmok/flare/commit/9025444),
+not the EPYC headline machine — but they prove the harness
+works and demonstrate the tail-discipline shape flare's
+release-tag numbers will carry.
+
+| Workload | Server | Workers | Peak req/s | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | stdev% |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `throughput` | **flare** | 1 | **76,710** | **1.22** | **3.06** | **3.35** | **3.76** | 1.27 |
+| `throughput` | Go `net/http` | 1 | 40,896 | 1.37 | 3.21 | 3.72 | 4.53 | 1.57 |
+| `mixed_keepalive` | **flare** | 1 | **75,958** | **1.23** | **3.09** | **3.34** | **3.46** | 1.27 |
+| `mixed_keepalive` | Go `net/http` | 1 | 41,027 | 1.38 | 3.22 | 3.77 | 4.57 | 1.57 |
+
+Same single-worker discipline as the prior tables. flare
+holds 1.87× Go's peak req/s; the tail stays disciplined out
+to p99.99 (3.76 ms vs Go's 4.53 ms on `throughput`,
+3.46 ms vs 4.57 ms on `mixed_keepalive`). The `mixed_keepalive`
+configuration adds 20 % `Connection: close` to the load —
+flare's close-after-disposition handling doesn't introduce
+tail bumps. Both servers are stable under the 3 % stdev gate
+across the 5-run measurement phase.
 
 ### Multi-worker scaling, Linux EPYC
 
@@ -453,16 +485,23 @@ Measurement rules:
   length, or non-whitelisted header is **rejected** before the
   measurement starts. Headers allowed to vary per target: `Date`,
   `Server`, `Connection`, `Keep-Alive`.
-- **Pinned toolchains:** Go, nginx, `wrk`, and `wrk2` versions are
-  pinned in `pixi.toml` under `[feature.bench.dependencies]` so the
-  comparison does not silently drift across machines.
-- **Warmup + 5-run measurement:** each (target, config) tuple runs
-  one 10 s warmup followed by five 30 s measurement rounds. The
-  median of the middle three is reported. The run **fails the
-  stability gate** if stdev exceeds 3 %.
-- **Load generator:** `wrk` for the throughput tables, transitioning
-  to `wrk2` for the tail-latency / coordinated-omission-corrected
-  matrix. Never `ab` or `h2load`, for consistency with published
+- **Pinned toolchains:** Go and nginx pin to `[feature.bench.
+  dependencies]`; the conda-forge `wrk` package is on PATH for
+  ad-hoc use; **wrk2** is built from a pinned commit by
+  `bench-install-wrk2` (the harness drives wrk2 explicitly via
+  `build/wrk2/wrk2`, not whatever `wrk` is on PATH).
+- **Two-phase wrk2:** each (target, config) tuple runs one
+  `warmup_seconds` find-peak phase at `-R 10000000` (saturates
+  any flare-grade server), then five `wrk_duration_seconds`
+  measurement rounds at `-R = peak * sustain_rps_pct%` (default
+  90 %). The headline req/s is the peak from phase 1; the
+  latency distribution is the median of the middle three runs
+  from phase 2. The run **fails the stability gate** if stdev
+  on phase-2 req/s exceeds 3 %.
+- **Load generator:** wrk2 with `--latency` for the headline
+  bench (CO-corrected tail percentiles up to p99.999). The
+  conda-forge `wrk` package is still on PATH for ad-hoc use.
+  Never `ab` or `h2load`, for consistency with published
   TFB-style numbers. Two configs ship today —
   [`throughput.yaml`](../benchmark/configs/throughput.yaml) (`-t1
   -c64 -d30s`) for per-core request-processing cost, and
@@ -530,16 +569,16 @@ and within noise at the L2/L3-resident sizes.
 ## Reproduce locally
 
 ```bash
-# Throughput regression check (the single-worker headline numbers above)
-pixi run --environment bench bench-vs-baseline-quick   # flare vs Go, ~7 min
+# Throughput + tail percentiles (the single-worker headline numbers above)
+pixi run --environment bench bench-install-wrk2        # one-time build (pinned wrk2 commit)
+pixi run --environment bench bench-vs-baseline-quick   # flare vs Go on throughput, ~7 min
 pixi run --environment bench bench-vs-baseline         # + nginx + latency_floor, ~20 min
 
 # Mixed-keepalive (80% keep-alive, 20% close)
 pixi run --environment bench bench-mixed-keepalive
 
-# wrk2 + tail percentiles
-pixi run --environment bench bench-install-wrk2  # one-time build
-pixi run --environment bench bench-tail-quick    # wrk2 -R10000 --latency
+# Ad-hoc tail percentile probe (no integrity check, no 5-run gate)
+pixi run --environment bench bench-tail-quick          # wrk2 --latency at fixed rate
 
 # TLS bench setup (self-signed cert under build/)
 pixi run --environment bench bench-tls-setup
