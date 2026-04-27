@@ -48,5 +48,13 @@ jobs:
         # no feature.dev (pre-commit) required.
         run: pixi run format-check
 
+      - name: Generate self-signed cert for TLS tests
+        # test_tls_acceptor.mojo loads a real cert/key pair to exercise
+        # ServerCtx.new + reload + mTLS callbacks end-to-end. The script
+        # only depends on conda-forge openssl (already in the default
+        # env's [dependencies]); running it through `pixi run` picks up
+        # that openssl on PATH.
+        run: pixi run bash benchmark/scripts/_make_self_signed.sh
+
       - name: Run tests
         run: pixi run tests
