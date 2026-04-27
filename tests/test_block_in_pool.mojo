@@ -1,18 +1,14 @@
-"""Tests for ``block_in_pool`` (v0.5.0 Step 3 / Track 2.5).
+"""Tests for ``block_in_pool``.
 
-The pthread-pool implementation lands in a follow-up; today's
-in-thread fallback runs ``work()`` synchronously. These tests
-cover the API contract that handlers depend on:
-
-- ``work()`` runs and its return value flows back.
-- ``work()`` errors propagate.
-- A pre-flipped ``Cancel`` short-circuits before ``work()`` runs.
-- The per-cancel-reason error message is meaningful.
-
-When the pool lands, the same tests pass unchanged plus a new
-"runs across threads" test joins.
+``block_in_pool`` runs the user-supplied ``work()`` on a fresh
+kernel thread and pthread_joins it; the public contract is the
+same as the previous in-thread fallback (pre-flight cancel
+raises, post-flight cancel raises, errors propagate, return
+value flows back) plus a new "runs on a different kernel thread"
+contract that the ``test_runs_on_different_thread`` test pins.
 """
 
+from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import (
     assert_equal,
@@ -192,6 +188,34 @@ def test_post_flight_cancel_with_pre_flipped_cell_raises() raises:
     cell.flip(CancelReason.TIMEOUT)
     with assert_raises():
         _ = block_in_pool[Int](_flip_cell_during_work, cell.handle())
+
+
+# ── Runs on a different kernel thread ─────────────────────────────────────
+#
+# The defining contract of the pthread implementation: ``work()``
+# does NOT run on the calling thread. Capture ``pthread_self()`` on
+# the main thread, then have the work fn capture it again, then
+# assert they differ.
+
+
+def _capture_pthread_self() raises -> UInt64:
+    return external_call["pthread_self", UInt64]()
+
+
+def test_runs_on_different_thread() raises:
+    """``work()`` runs on a fresh kernel thread, not the caller's.
+
+    Pins the public contract that distinguishes the pthread
+    implementation from the in-thread fallback: kernel-level
+    parallelism. Without this, ``block_in_pool`` would be a
+    no-op wrapper around ``work()``.
+    """
+    var caller_tid = external_call["pthread_self", UInt64]()
+    var work_tid = block_in_pool[UInt64](_capture_pthread_self, Cancel.never())
+    assert_true(
+        caller_tid != work_tid,
+        "block_in_pool ran work on the caller's thread, not a fresh one",
+    )
 
 
 def main() raises:
