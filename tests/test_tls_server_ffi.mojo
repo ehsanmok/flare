@@ -54,12 +54,8 @@ from flare.tls import (
 # ── Cert pair availability ────────────────────────────────────────────────
 
 
-comptime CERT_PATH: String = (
-    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
-)
-comptime KEY_PATH: String = (
-    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
-)
+comptime CERT_PATH: String = "build/tls-bench-certs/server.pem"
+comptime KEY_PATH: String = "build/tls-bench-certs/server.key"
 
 
 # ── ServerCtx lifecycle ───────────────────────────────────────────────────

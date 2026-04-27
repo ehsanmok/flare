@@ -58,12 +58,8 @@ from flare.tls import (
 )
 
 
-comptime _CERT: String = (
-    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
-)
-comptime _KEY: String = (
-    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
-)
+comptime _CERT: String = "build/tls-bench-certs/server.pem"
+comptime _KEY: String = "build/tls-bench-certs/server.key"
 
 
 # ── Track 5.2 + 5.5 — TlsInfo + ALPN ─────────────────────────────────────

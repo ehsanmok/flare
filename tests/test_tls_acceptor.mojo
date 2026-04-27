@@ -164,12 +164,8 @@ def test_tls_info_with_values() raises:
 # ── TlsAcceptor ────────────────────────────────────────────────────────────
 
 
-comptime _CERT: String = (
-    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
-)
-comptime _KEY: String = (
-    "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
-)
+comptime _CERT: String = "build/tls-bench-certs/server.pem"
+comptime _KEY: String = "build/tls-bench-certs/server.key"
 
 
 def test_acceptor_construct() raises:

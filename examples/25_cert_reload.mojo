@@ -55,12 +55,8 @@ def main() raises:
     var alpn = List[String]()
     alpn.append("h2")
     alpn.append("http/1.1")
-    var cert_path = (
-        "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.pem"
-    )
-    var key_path = (
-        "/Users/ehsan/workspace/flare/build/tls-bench-certs/server.key"
-    )
+    var cert_path = String("build/tls-bench-certs/server.pem")
+    var key_path = String("build/tls-bench-certs/server.key")
     var cfg = TlsServerConfig(
         cert_file=cert_path, key_file=key_path, alpn=alpn^
     )
