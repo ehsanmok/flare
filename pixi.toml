@@ -103,6 +103,29 @@ bench-tail-quick          = "bash benchmark/scripts/_run_tail_quick.sh"
 # follow-up (S3.1 follow-up).
 bench-tls-setup           = "bash benchmark/scripts/_make_self_signed.sh"
 
+# ── S3.7 soak harness (slow-client / churn / mixed-load) ─────────────────────
+# Three-tier model. Per-workload tasks honour SOAK_DURATION_SECS so
+# the 24 h release-gate run on EPYC is the same scripts with the
+# env var flipped:
+#
+#   smoke    — 60s/workload   (default; pixi run --environment bench bench-soak-smoke,
+#                              ~3 min total)
+#   extended — 300s/workload  (pixi run --environment bench bench-soak-extended,
+#                              ~15 min total)
+#   release  — 86400s/workload (EPYC, manual one-shot pre-tag):
+#       SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-slow-clients
+#       SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-churn
+#       SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-mixed
+#
+# See docs/soak.md for the gate definitions (RSS within 2x of cold-
+# start, fd_count bounded, zero non-2xx) and the design-v0.5 §6.5
+# release-gate framing.
+bench-soak-slow-clients   = "bash benchmark/scripts/_run_soak.sh --workload=slow_clients --duration-secs=${SOAK_DURATION_SECS:-60}"
+bench-soak-churn          = "bash benchmark/scripts/_run_soak.sh --workload=churn        --duration-secs=${SOAK_DURATION_SECS:-60}"
+bench-soak-mixed          = "bash benchmark/scripts/_run_soak.sh --workload=mixed        --duration-secs=${SOAK_DURATION_SECS:-60}"
+bench-soak-smoke          = "bash benchmark/scripts/_run_soak_smoke.sh"
+bench-soak-extended       = "bash benchmark/scripts/_run_soak_extended.sh"
+
 [feature.fuzz.tasks]
 # ── Fuzzing (mozz) ────────────────────────────────────────────────────────────
 # mozz is installed as a pixi dependency (feature.fuzz) and packaged as
