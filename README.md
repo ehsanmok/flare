@@ -53,7 +53,7 @@ channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 preview = ["pixi-build"]
 
 [dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.4.1" }
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.5.0" }
 ```
 
 ```bash
