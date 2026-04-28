@@ -11,8 +11,6 @@ on:
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
-  schedule:
-    - cron: '0 2 * * *'
   workflow_dispatch:
 
 concurrency:
