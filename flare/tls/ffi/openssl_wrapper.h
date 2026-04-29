@@ -278,6 +278,39 @@ int flare_test_server_port(flare_test_server_t srv);
  */
 int flare_test_server_echo_once(flare_test_server_t srv);
 
+/* ── HMAC-SHA256 (v0.6 Track D — signed cookies / sessions) ────────────────── */
+
+/**
+ * Compute HMAC-SHA256(key, msg) and write the 32-byte tag into out.
+ *
+ * @param key      Secret key bytes (any length; HMAC handles >block_size).
+ * @param key_len  Length of key in bytes.
+ * @param msg      Message bytes.
+ * @param msg_len  Length of message in bytes.
+ * @param out_32   Caller-allocated 32-byte buffer for the digest.
+ * @return 0 on success, -1 on failure.
+ */
+int flare_hmac_sha256(const uint8_t* key, size_t key_len,
+                      const uint8_t* msg, size_t msg_len,
+                      uint8_t* out_32);
+
+/**
+ * Verify HMAC-SHA256(key, msg) == mac_32 in constant time.
+ *
+ * Uses ``CRYPTO_memcmp`` so the comparison time does not leak which byte
+ * differs.
+ *
+ * @param key      Secret key bytes.
+ * @param key_len  Length of key in bytes.
+ * @param msg      Message bytes.
+ * @param msg_len  Length of message in bytes.
+ * @param mac_32   Caller-supplied 32-byte tag to compare against.
+ * @return 1 if MACs match, 0 if they differ, -1 on FFI failure.
+ */
+int flare_hmac_sha256_verify(const uint8_t* key, size_t key_len,
+                              const uint8_t* msg, size_t msg_len,
+                              const uint8_t* mac_32);
+
 #ifdef __cplusplus
 }
 #endif

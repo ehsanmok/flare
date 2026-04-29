@@ -633,3 +633,37 @@ int flare_connect_timeout(int fd, const void* addr, unsigned addrlen,
     flare_set_nonblocking(fd, 0);
     return so_err; /* 0 = success, positive errno = error */
 }
+
+/* ── HMAC-SHA256 (v0.6 Track D) ──────────────────────────────────────────── */
+
+#include <openssl/hmac.h>
+#include <openssl/crypto.h>
+
+extern "C" int flare_hmac_sha256(const uint8_t* key, size_t key_len,
+                                  const uint8_t* msg, size_t msg_len,
+                                  uint8_t* out_32) {
+    if (!out_32) return -1;
+    unsigned int out_len = 32;
+    /* Empty key/msg are valid HMAC inputs (RFC 4231 vectors 1, 2). */
+    const uint8_t* k = (key && key_len > 0) ? key : (const uint8_t*)"";
+    const uint8_t* m = (msg && msg_len > 0) ? msg : (const uint8_t*)"";
+    unsigned char* rc = HMAC(EVP_sha256(), k, (int)key_len, m,
+                              msg_len, out_32, &out_len);
+    if (!rc || out_len != 32) {
+        capture_openssl_errors();
+        return -1;
+    }
+    return 0;
+}
+
+extern "C" int flare_hmac_sha256_verify(const uint8_t* key, size_t key_len,
+                                         const uint8_t* msg, size_t msg_len,
+                                         const uint8_t* mac_32) {
+    if (!mac_32) return -1;
+    uint8_t computed[32];
+    int rc = flare_hmac_sha256(key, key_len, msg, msg_len, computed);
+    if (rc != 0) return -1;
+    /* Constant-time comparison: HMAC verify must not leak prefix length
+     * via early-return on first mismatching byte. */
+    return CRYPTO_memcmp(computed, mac_32, 32) == 0 ? 1 : 0;
+}

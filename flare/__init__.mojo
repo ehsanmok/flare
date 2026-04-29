@@ -541,6 +541,22 @@ from .http.multipart import (
     MultipartForm,
     parse_multipart_form_data,
 )
+from .http.session import (
+    CookieSessionStore,
+    InMemorySessionStore,
+    Session,
+    SessionCodec,
+    StringSessionCodec,
+    signed_cookie_decode,
+    signed_cookie_decode_keys,
+    signed_cookie_encode,
+)
+from .crypto import (
+    base64url_decode,
+    base64url_encode,
+    hmac_sha256,
+    hmac_sha256_verify,
+)
 from .http.encoding import (
     Encoding,
     compress_gzip,
