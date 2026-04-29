@@ -97,8 +97,10 @@ struct Request(Movable):
     so handlers can write production-shape code today against
     the stable shape).
     """
-    var _params: UnsafePointer[Dict[String, String], MutExternalOrigin]
-    """Lazily-allocated path-params table. Null by default; ``Router``
+    var _params: Optional[
+        UnsafePointer[Dict[String, String], MutExternalOrigin]
+    ]
+    """Lazily-allocated path-params table. ``None`` by default; ``Router``
     allocates the underlying ``Dict`` on the first path-parameter
     extraction via ``params_mut()``. The plaintext-bench fast path
     therefore pays zero ``Dict`` allocation / move cost per request,
@@ -108,7 +110,11 @@ struct Request(Movable):
     Owned by this ``Request`` — the destructor frees the ``Dict`` and
     the allocation if present. Users should access params via
     ``params()`` / ``param()`` / ``has_param()``, never through the
-    raw pointer."""
+    raw pointer.
+
+    Modeled as ``Optional[UnsafePointer[...]]`` (Mojo 1.0.0b1: pointers
+    are non-null by design; nullable storage uses ``Optional`` with the
+    null address as the niche value)."""
 
     def __init__(
         out self,
@@ -153,12 +159,13 @@ struct Request(Movable):
         self.peer = peer
         self.expose_errors = expose_errors
         self.tls_info = tls_info.copy()
-        self._params = UnsafePointer[Dict[String, String], MutExternalOrigin]()
+        self._params = None
 
     def __del__(deinit self):
         if self._params:
-            self._params.destroy_pointee()
-            self._params.free()
+            var p = self._params.value()
+            p.destroy_pointee()
+            p.free()
 
     def has_params(self) -> Bool:
         """Return True if a ``Router`` populated this request's path params."""
@@ -191,7 +198,7 @@ struct Request(Movable):
             var ptr = alloc[Dict[String, String]](1)
             ptr.init_pointee_move(Dict[String, String]())
             self._params = ptr
-        return self._params[]
+        return self._params.value()[]
 
     def param(self, name: String) raises -> String:
         """Return path param ``name``. Raises ``Error`` if missing.
@@ -202,13 +209,13 @@ struct Request(Movable):
         """
         if not self._params:
             raise Error("path param not found: " + name)
-        return self._params[][name]
+        return self._params.value()[][name]
 
     def has_param(self, name: String) -> Bool:
         """Return True if path param ``name`` is set (no allocation)."""
         if not self._params:
             return False
-        return name in self._params[]
+        return name in self._params.value()[]
 
     def query_param(self, name: String) -> String:
         """Return the first query-string value for ``name``, or ``""``.

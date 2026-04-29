@@ -485,7 +485,7 @@ struct Router(Handler):
             # copy, so the plaintext-bench path (no Router, no params)
             # stays allocation-free.
             if req.has_params():
-                for kv in req._params[].items():
+                for kv in req._params.value()[].items():
                     child.params_mut()[kv.key] = kv.value
             # Copy the captures from this match. ``_MatchResult.params``
             # is always populated (even if empty), so guard on length to

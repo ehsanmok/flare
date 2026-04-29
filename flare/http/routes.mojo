@@ -223,7 +223,7 @@ struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler, Movable):
                     )
                     child.headers = req.headers.copy()
                     if req.has_params():
-                        for kv in req._params[].items():
+                        for kv in req._params.value()[].items():
                             child.params_mut()[kv.key] = kv.value
                     if len(params) > 0:
                         for kv in params.items():
