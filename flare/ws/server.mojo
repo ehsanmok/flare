@@ -560,7 +560,7 @@ struct WsServer(Movable):
         var listener = TcpListener.bind(addr)
         return WsServer(listener^)
 
-    def serve(self, handler: def(WsConnection) raises -> None) raises:
+    def serve(self, handler: def(WsConnection) raises thin -> None) raises:
         """Accept WebSocket connections in a loop.
 
         For each accepted TCP connection:
@@ -599,7 +599,7 @@ struct WsServer(Movable):
 def _handle_ws_connection(
     var stream: TcpStream,
     peer: SocketAddr,
-    handler: def(WsConnection) raises -> None,
+    handler: def(WsConnection) raises thin -> None,
 ):
     """Perform the WebSocket handshake and call handler.
 
