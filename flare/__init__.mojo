@@ -525,7 +525,21 @@ from .http.extract import (
     BodyBytes,
     BodyText,
     Json,
+    Cookies,
+    Form,
+    Multipart,
     Extracted,
+)
+from .http.form import (
+    FormData,
+    parse_form_urlencoded,
+    urldecode,
+    urlencode,
+)
+from .http.multipart import (
+    MultipartPart,
+    MultipartForm,
+    parse_multipart_form_data,
 )
 from .http.encoding import (
     Encoding,

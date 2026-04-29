@@ -82,6 +82,9 @@ from json import loads, Value, Null
 
 from .handler import Handler
 from .headers import HeaderMap
+from .cookie import CookieJar
+from .form import FormData, parse_form_urlencoded
+from .multipart import MultipartForm, parse_multipart_form_data
 from .request import Request
 from .response import Response, Status
 from ..net import IpAddr, SocketAddr
@@ -951,6 +954,80 @@ struct BodyText(Copyable, Defaultable, Extractor, Movable):
 
     def apply(mut self, req: Request) raises:
         self.value = req.text()
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+struct Cookies(Copyable, Defaultable, Extractor, Movable):
+    """Extracts the request cookies as a ``CookieJar``.
+
+    Equivalent to ``req.cookies()`` but registerable as a field on a
+    ``Handler`` struct via ``Extracted[H]`` for axum-style typed
+    handler signatures.
+    """
+
+    var value: CookieJar
+
+    def __init__(out self):
+        self.value = CookieJar()
+
+    def apply(mut self, req: Request) raises:
+        self.value = req.cookies()
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+struct Form(Copyable, Defaultable, Extractor, Movable):
+    """Extracts the request body as ``application/x-www-form-urlencoded``.
+
+    Raises if the request body is empty or contains a malformed
+    percent-escape. Use with ``Extracted[H]`` to map parse errors to
+    400.
+    """
+
+    var value: FormData
+
+    def __init__(out self):
+        self.value = FormData()
+
+    def apply(mut self, req: Request) raises:
+        if len(req.body) == 0:
+            raise Error("missing form body")
+        self.value = parse_form_urlencoded(req.text())
+
+    @staticmethod
+    def extract(req: Request) raises -> Self:
+        var out = Self()
+        out.apply(req)
+        return out^
+
+
+struct Multipart(Copyable, Defaultable, Extractor, Movable):
+    """Extracts the request body as ``multipart/form-data`` (RFC 7578).
+
+    Reads the boundary parameter from the request's ``Content-Type``
+    header and parses the body into a ``MultipartForm``. Raises on
+    missing or malformed multipart bodies.
+    """
+
+    var value: MultipartForm
+
+    def __init__(out self):
+        self.value = MultipartForm()
+
+    def apply(mut self, req: Request) raises:
+        if len(req.body) == 0:
+            raise Error("missing multipart body")
+        var ct = req.headers.get("content-type")
+        self.value = parse_multipart_form_data(req.body, ct)
 
     @staticmethod
     def extract(req: Request) raises -> Self:

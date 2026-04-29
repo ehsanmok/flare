@@ -2,6 +2,7 @@
 
 from json import loads, Value
 from .headers import HeaderMap
+from .cookie import Cookie, CookieJar, parse_set_cookie_header
 from .error import HttpError
 
 
@@ -145,6 +146,31 @@ struct Response(Movable):
         """
         if self.status < 200 or self.status >= 300:
             raise HttpError(self.status, self.reason)
+
+    def set_cookie(mut self, var cookie: Cookie) raises:
+        """Append a ``Set-Cookie`` response header for ``cookie``.
+
+        Multiple cookies are emitted as separate ``Set-Cookie`` lines
+        per RFC 6265 paragraph 3, never folded into a single header.
+
+        Args:
+            cookie: The cookie to set (ownership taken).
+        """
+        var serialized = cookie.to_set_cookie_header()
+        self.headers.append("Set-Cookie", serialized)
+
+    def cookies(self) -> CookieJar:
+        """Parse all ``Set-Cookie`` headers into a ``CookieJar``.
+
+        Each ``Set-Cookie`` header is parsed independently with
+        ``parse_set_cookie_header`` (attributes preserved). Returns
+        an empty jar when no ``Set-Cookie`` headers are present.
+        """
+        var jar = CookieJar()
+        var values = self.headers.get_all("set-cookie")
+        for v in values:
+            jar.set(parse_set_cookie_header(v))
+        return jar^
 
     def iter_bytes(self, chunk_size: Int = 8192) -> _BytesIter:
         """Return an iterator that yields the body in chunks.

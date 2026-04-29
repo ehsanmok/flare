@@ -42,8 +42,12 @@ from flare.http import (
 - `Peer`
   — Extracts the kernel-reported peer ``SocketAddr`` populated by the
     reactor at accept time (v0.5.0 Step 1).
-- `BodyBytes`, `BodyText`, `Json`
+- `BodyBytes`, `BodyText`, `Json`, `Cookies`, `Form`, `Multipart`
   — Extractors that read the request body.
+- `FormData`, `parse_form_urlencoded`, `urlencode`, `urldecode`
+  — ``application/x-www-form-urlencoded`` parsing helpers (v0.6).
+- `MultipartPart`, `MultipartForm`, `parse_multipart_form_data`
+  — ``multipart/form-data`` parser (RFC 7578) (v0.6).
 - `Extracted`
   — Reflective auto-injection wrapper: put your extractor set on the
     fields of any ``Handler`` struct (plus ``Defaultable``) and wrap
@@ -147,6 +151,9 @@ from .extract import (
     BodyBytes,
     BodyText,
     Json,
+    Cookies,
+    Form,
+    Multipart,
     Extracted,
 )
 from .encoding import (
@@ -177,4 +184,15 @@ from .cookie import (
     SameSite,
     parse_cookie_header,
     parse_set_cookie_header,
+)
+from .form import (
+    FormData,
+    parse_form_urlencoded,
+    urldecode,
+    urlencode,
+)
+from .multipart import (
+    MultipartPart,
+    MultipartForm,
+    parse_multipart_form_data,
 )

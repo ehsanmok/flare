@@ -251,7 +251,7 @@ def parse_set_cookie_header(header: String) -> Cookie:
     return cookie^
 
 
-struct CookieJar(Movable):
+struct CookieJar(Copyable, Defaultable, Movable):
     """A collection of cookies for request/response management.
 
     Stores cookies by name. Supports serialisation to request ``Cookie``

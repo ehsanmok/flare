@@ -4,6 +4,7 @@ from std.collections import Dict, Optional
 from std.memory import UnsafePointer, alloc
 from json import loads, Value
 from .headers import HeaderMap
+from .cookie import Cookie, CookieJar, parse_cookie_header
 from ..net import IpAddr, SocketAddr
 from ..tls.acceptor import TlsInfo
 
@@ -366,6 +367,44 @@ struct Request(Movable):
                 break
             result = result * 10 + (c - 48)
         return result
+
+    def cookies(self) -> CookieJar:
+        """Parse the ``Cookie`` request header(s) into a ``CookieJar``.
+
+        Walks every ``Cookie`` header value (multiple headers are
+        legal under RFC 7230 paragraph 3.2.2) and feeds each to
+        ``parse_cookie_header``. Returns an empty jar if no
+        ``Cookie`` header is present.
+        """
+        var jar = CookieJar()
+        var values = self.headers.get_all("cookie")
+        if len(values) == 0:
+            return jar^
+        for v in values:
+            var parsed = parse_cookie_header(v)
+            for c in parsed:
+                jar.set(c.copy())
+        return jar^
+
+    def cookie(self, name: String) -> String:
+        """Return the value of cookie ``name`` from the ``Cookie`` header."""
+        var values = self.headers.get_all("cookie")
+        for v in values:
+            var parsed = parse_cookie_header(v)
+            for c in parsed:
+                if c.name == name:
+                    return c.value
+        return ""
+
+    def has_cookie(self, name: String) -> Bool:
+        """Return ``True`` if cookie ``name`` is set on this request."""
+        var values = self.headers.get_all("cookie")
+        for v in values:
+            var parsed = parse_cookie_header(v)
+            for c in parsed:
+                if c.name == name:
+                    return True
+        return False
 
     def connection_close(self) -> Bool:
         """Return True if ``Connection: close`` is set."""
