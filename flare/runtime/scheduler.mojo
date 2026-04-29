@@ -296,8 +296,6 @@ struct Scheduler[H: Handler & Copyable](Movable):
         # freed in ``shutdown()`` after every worker joins. Uses the
         # native Mojo allocator (see ``_scheduler_free_raw``).
         var stop_ptr = alloc[Bool](1)
-        if not stop_ptr:
-            raise Error("alloc failed for scheduler stopping flag")
         stop_ptr.init_pointee_copy(False)
         var stop_raw = stop_ptr.bitcast[UInt8]()
         var stopping_addr = Int(stop_ptr)
@@ -306,10 +304,6 @@ struct Scheduler[H: Handler & Copyable](Movable):
         # Preallocate the worker slot array once; grow is not needed
         # because ``num_workers`` is bounded above (<= 256) and fixed.
         s._workers_ptr = alloc[ThreadHandle](num_workers)
-        if not s._workers_ptr:
-            _scheduler_free_raw(stop_raw)
-            s._stopping_addr = 0
-            raise Error("alloc failed for scheduler workers array")
         s._workers_len = 0
 
         for i in range(num_workers):
@@ -332,16 +326,6 @@ struct Scheduler[H: Handler & Copyable](Movable):
             )
             # Native Mojo allocator (see _scheduler_free_raw for why).
             var ctx_ptr = alloc[_WorkerCtx[Self.H]](1)
-            if not ctx_ptr:
-                # Free the stopping flag + the empty worker-slot array
-                # — no worker has referenced either yet.
-                _scheduler_free_raw(s._workers_ptr.bitcast[UInt8]())
-                s._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
-                    unsafe_from_address=0
-                )
-                _scheduler_free_raw(stop_raw)
-                s._stopping_addr = 0
-                raise Error("alloc failed for worker ctx")
             ctx_ptr.init_pointee_move(ctx^)
             var arg = ctx_ptr.bitcast[UInt8]()
             var ctx_addr = Int(ctx_ptr)
