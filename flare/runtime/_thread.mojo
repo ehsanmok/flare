@@ -194,8 +194,6 @@ struct ThreadHandle(Movable):
             # this module is pulled into a fuzz-environment compile
             # (mozz harness).
             var cpuset_ptr = alloc[UInt8](_CPUSET_SIZE)
-            if not cpuset_ptr:
-                raise Error("alloc failed for cpu_set_t")
             memset_zero(cpuset_ptr, _CPUSET_SIZE)
             var byte_idx = cpu // 8
             var bit_idx = cpu % 8

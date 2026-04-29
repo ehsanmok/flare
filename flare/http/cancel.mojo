@@ -131,8 +131,6 @@ struct CancelCell(Movable):
     def __init__(out self) raises:
         """Allocate a fresh cell initialised to ``NONE``."""
         var p = alloc[Int](1)
-        if not p:
-            raise Error("alloc failed for CancelCell")
         p.init_pointee_copy(CancelReason.NONE)
         self._addr = Int(p)
 

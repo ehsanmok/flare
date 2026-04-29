@@ -93,11 +93,8 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
             Error: When the underlying allocation returns null.
         """
 
-        @parameter
-        if size_of[Self.T]() > 0:
+        comptime if size_of[Self.T]() > 0:
             var p = alloc[Self.T](1)
-            if Int(p) == 0:
-                raise Error("Pool alloc failed")
             p.init_pointee_move(value^)
             return Int(p)
         else:
@@ -106,8 +103,6 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
             # through the bitcast pointer; reads / dereferences
             # also touch 0 bytes.
             var raw = alloc[UInt8](1)
-            if Int(raw) == 0:
-                raise Error("Pool alloc failed (ZST path)")
             raw.bitcast[Self.T]().init_pointee_move(value^)
             return Int(raw)
 
@@ -129,8 +124,7 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
         if addr == 0:
             return
 
-        @parameter
-        if size_of[Self.T]() > 0:
+        comptime if size_of[Self.T]() > 0:
             var ptr = UnsafePointer[UInt8, MutExternalOrigin](
                 unsafe_from_address=addr
             ).bitcast[Self.T]()
