@@ -160,19 +160,37 @@ for target_dir in "$BASELINES_DIR"/*/; do
                 continue
             fi
 
-            # Warmup + peak-finder. wrk2 with a very high ``-R``
-            # saturates the server; the reported ``Requests/sec``
-            # is the server-bottlenecked peak. Latency from this
-            # phase is meaningless (every request waits in the
-            # gen's queue), so we discard it. The peak is the
-            # input to the actual measurement phase below.
-            echo "  warmup + peak-find ${WARMUP}s @ -c${WRK_CONNS} -t${WRK_THREADS} …"
+            # ── Calibration phase ──────────────────────────────
+            # 1) Settle the server at a low fixed rate so JIT,
+            #    branch caches, and TCP slow-start are out of the
+            #    way before we measure throughput.
+            # 2) Estimate the overdrive ceiling with a brief
+            #    R=10M probe.
+            # 3) Binary-search for the highest rate where p99 ≤
+            #    SUSTAIN_P99_BUDGET_MS (default 50 ms). wrk2's
+            #    overdrive ceiling over-reports the truly
+            #    sustainable peak by 30–60% on multi-worker
+            #    servers (it counts queued requests as
+            #    throughput); the latency-bounded search is the
+            #    industry-standard way to find an honest peak.
+            # 4) Take the calibrated rate as the "peak" the
+            #    summary reports, and run the fixed-rate
+            #    measurement at SUSTAIN_PCT (default 90%) of it.
+            SETTLE_RPS=$(awk '/^settle_rps:/ {print $2}' "$config_file")
+            SETTLE_RPS=${SETTLE_RPS:-20000}
+            echo "  settle 5s @ -R${SETTLE_RPS} …"
+            settle_raw="$RESULTS_DIR/RAW/$target-$workload-$config-settle.txt"
+            "$WRK2_BIN" -t"$WRK_THREADS" -c"$WRK_CONNS" \
+                -d5s -R"$SETTLE_RPS" \
+                --latency "$URL" > "$settle_raw" 2>&1 || true
+
+            echo "  overdrive probe ${WARMUP}s …"
             peak_raw="$RESULTS_DIR/RAW/$target-$workload-$config-peakfind.txt"
             "$WRK2_BIN" -t"$WRK_THREADS" -c"$WRK_CONNS" \
                 -d"${WARMUP}s" -R10000000 \
                 --latency "$URL" > "$peak_raw" 2>&1 || true
-            PEAK_RPS=$(awk '/^Requests\/sec:/ {print $2}' "$peak_raw")
-            if [ -z "$PEAK_RPS" ] || [ "$(printf '%.0f' "$PEAK_RPS")" -le 0 ]; then
+            OVERDRIVE_RPS=$(awk '/^Requests\/sec:/ {print $2}' "$peak_raw")
+            if [ -z "$OVERDRIVE_RPS" ] || [ "$(printf '%.0f' "$OVERDRIVE_RPS")" -le 0 ]; then
                 echo "  peak-find FAILED (server unresponsive); marking unstable"
                 kill -9 $RUNNER_PID 2>/dev/null || true
                 [[ -f "$FLARE_BENCH_PID_FILE" ]] && kill -9 "$(cat "$FLARE_BENCH_PID_FILE")" 2>/dev/null || true
@@ -180,15 +198,57 @@ for target_dir in "$BASELINES_DIR"/*/; do
                 SUMMARY_ROWS+=("$target|$workload|$config|DOWN|-|-|-|-|-|false")
                 continue
             fi
-            # Run the measurement phase at 90 % of peak — the
-            # design-v0.5 tail-latency-under-sustainable-load
-            # contract. ``SUSTAIN_RPS_PCT`` (default 90) is
-            # tunable per-config when a workload wants headroom
-            # tail rather than at-edge tail.
+
+            P99_BUDGET_MS=$(awk '/^sustain_p99_budget_ms:/ {print $2}' "$config_file")
+            P99_BUDGET_MS=${P99_BUDGET_MS:-50}
+            echo "  overdrive=$(printf '%.0f' "$OVERDRIVE_RPS") req/s; calibrating sustainable peak (p99 ≤ ${P99_BUDGET_MS} ms) …"
+
+            # Binary search between 30% and 100% of overdrive.
+            LO=$(python3 -c "print(int(float('$OVERDRIVE_RPS') * 0.30))")
+            HI=$(python3 -c "print(int(float('$OVERDRIVE_RPS') * 1.00))")
+            SUSTAINABLE_RPS=$LO
+            for _step in 1 2 3 4 5; do
+                MID=$(python3 -c "print(int(($LO + $HI) / 2))")
+                cal_raw="$RESULTS_DIR/RAW/$target-$workload-$config-cal-${MID}.txt"
+                "$WRK2_BIN" -t"$WRK_THREADS" -c"$WRK_CONNS" \
+                    -d10s -R"$MID" --latency "$URL" > "$cal_raw" 2>&1 || true
+                P99_LINE=$(grep -E '^[[:space:]]*99\.000%' "$cal_raw" | head -1)
+                P99_MS=$(python3 -c "
+import re,sys
+s = '''$P99_LINE'''.strip()
+m = re.search(r'([0-9.]+)([umms]+)', s.split()[-1] if s else '0ms')
+if not m:
+    print(99999)
+else:
+    v = float(m.group(1)); u = m.group(2)
+    if u == 'us':   ms = v / 1000
+    elif u == 'ms': ms = v
+    elif u == 's':  ms = v * 1000
+    elif u == 'm':  ms = v * 60000
+    else: ms = 99999
+    print(f'{ms:.2f}')
+")
+                ACHIEVED_RPS=$(awk '/^Requests\/sec:/ {print $2}' "$cal_raw")
+                ACHIEVED_INT=$(python3 -c "print(int(float('$ACHIEVED_RPS' or '0')))")
+                # Reject if the load gen couldn't keep up (achieved < 90% of MID),
+                # which means we've already exceeded the server's true rate.
+                MIN_ACHIEVED=$(python3 -c "print(int($MID * 0.90))")
+                P99_OK=$(python3 -c "print(1 if float('$P99_MS') <= $P99_BUDGET_MS else 0)")
+                ACH_OK=$(python3 -c "print(1 if $ACHIEVED_INT >= $MIN_ACHIEVED else 0)")
+                if [ "$P99_OK" = "1" ] && [ "$ACH_OK" = "1" ]; then
+                    SUSTAINABLE_RPS=$MID
+                    LO=$MID
+                else
+                    HI=$MID
+                fi
+                echo "    probe @ R=${MID}: ach=${ACHIEVED_INT} p99=${P99_MS}ms (budget=${P99_BUDGET_MS}ms) → $([ "$P99_OK" = "1" ] && [ "$ACH_OK" = "1" ] && echo OK || echo TOO_HIGH)"
+            done
+            PEAK_RPS=$SUSTAINABLE_RPS
+
             SUSTAIN_PCT=$(awk '/^sustain_rps_pct:/ {print $2}' "$config_file")
             SUSTAIN_PCT=${SUSTAIN_PCT:-90}
             SUSTAIN_RPS=$(python3 -c "print(int(float('$PEAK_RPS') * $SUSTAIN_PCT / 100))")
-            echo "  peak=$(printf '%.0f' "$PEAK_RPS") req/s; sustaining at $SUSTAIN_PCT%% = ${SUSTAIN_RPS} req/s"
+            echo "  sustainable peak=$(printf '%.0f' "$PEAK_RPS") req/s; sustaining at $SUSTAIN_PCT%% = ${SUSTAIN_RPS} req/s"
 
             # Measurement runs at the sustainable rate. Tail
             # percentiles here reflect actual production-shape

@@ -1,0 +1,3 @@
+target = actix_web
+actix-web = 4.13.0
+rust = 1.94.0

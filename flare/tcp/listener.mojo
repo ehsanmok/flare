@@ -210,6 +210,73 @@ struct TcpListener(Movable):
         """
         return self._local
 
+    def as_raw_fd(self) -> c_int:
+        """Return the underlying file descriptor.
+
+        Intended for the v0.6 shared-listener scheduler: bind once on
+        the main thread, then hand the fd (a small integer) to every
+        worker via the per-worker context struct. Workers call
+        ``flare.tcp.accept_fd`` directly rather than touching the
+        non-thread-safe ``TcpListener`` object.
+
+        The returned fd is borrowed; its lifetime is tied to ``self``.
+        Callers must not ``close(fd)`` themselves; let ``TcpListener``
+        own the close.
+
+        Returns:
+            The kernel file descriptor for the listening socket.
+        """
+        return self._socket.fd
+
     def close(mut self):
         """Close the listening socket. Idempotent."""
         self._socket.close()
+
+
+def accept_fd(listener_fd: c_int) raises -> TcpStream:
+    """Accept one connection on a borrowed listener fd.
+
+    Functionally equivalent to ``TcpListener.accept(self)`` but takes
+    the listener as a raw integer fd, so the caller can share a single
+    listener across multiple workers without giving any one worker
+    ownership of the underlying ``TcpListener`` (v0.6 multi-worker
+    scheduler path; see ``flare.runtime.scheduler``).
+
+    The returned ``TcpStream`` owns the accepted client fd and has
+    ``TCP_NODELAY`` already set, matching ``TcpListener.accept``'s
+    contract. Same error semantics: raises ``NetworkError`` on
+    ``accept(2)`` failure (including ``EAGAIN`` / ``EWOULDBLOCK``,
+    which the multi-worker reactor catches as a normal "no more
+    pending conns" signal).
+
+    Args:
+        listener_fd: Fd of a listener socket. Caller must keep the
+            socket open for the duration of this call; this function
+            does NOT take ownership of the fd.
+
+    Returns:
+        A connected ``TcpStream`` for the new client.
+
+    Raises:
+        NetworkError: If ``accept(2)`` fails. The errno-bearing
+            variant lets the caller distinguish ``EAGAIN`` (drain the
+            accept loop) from a hard failure.
+    """
+    var peer_buf = stack_allocation[Int(SOCKADDR_IN6_SIZE), UInt8]()
+    for i in range(Int(SOCKADDR_IN6_SIZE)):
+        (peer_buf + i).init_pointee_copy(0)
+    var peer_len = stack_allocation[1, c_uint]()
+    peer_len.init_pointee_copy(SOCKADDR_IN6_SIZE)
+
+    var client_fd = _accept(listener_fd, peer_buf, peer_len)
+    if client_fd < 0:
+        var e = get_errno()
+        raise NetworkError(_strerror(e.value) + " (accept)", Int(e.value))
+
+    var peer = _sockaddr_to_socket_addr(peer_buf)
+    var client_family = AF_INET6 if peer.ip.is_v6() else AF_INET
+
+    var client_sock = RawSocket(client_fd, client_family, SOCK_STREAM, True)
+    client_sock.set_tcp_nodelay(True)
+
+    return TcpStream(client_sock^, peer)

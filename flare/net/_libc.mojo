@@ -721,6 +721,7 @@ comptime EPOLLOUT: UInt32 = 0x004
 comptime EPOLLERR: UInt32 = 0x008
 comptime EPOLLHUP: UInt32 = 0x010
 comptime EPOLLRDHUP: UInt32 = 0x2000
+comptime EPOLLEXCLUSIVE: UInt32 = 0x10000000  # 1u << 28; Linux >= 4.5
 comptime EPOLLET: UInt32 = 0x80000000  # edge-triggered
 
 # epoll_ctl() operations.

@@ -59,11 +59,26 @@ mozz = { git = "https://github.com/ehsanmok/mozz.git", tag = "v0.1.2" }
 [feature.bench.dependencies]
 # Stage 1 / Phase 1.6 — bench harness baselines.
 # Pinned exact so nobody ever benchmarks against a drifting toolchain.
-go    = ">=1.22,<1.25"  # Go stdlib net/http baseline
-nginx = ">=1.25,<1.29"  # 1-worker plaintext baseline
+go      = ">=1.22,<1.25"  # Go stdlib net/http baseline
+nginx   = ">=1.25,<1.29"  # 1-worker plaintext baseline
+# v0.6 probe — Rust hyper / axum / actix-web baselines.
+# rust meta-package ships rustc + cargo + std (conda-forge); pinned
+# range matches go's >=,< discipline so pixi update can lift it
+# without surprising ABI drift. h2load (HTTP/2 load generator) is
+# NOT on conda-forge as a binary (only libnghttp2 is); v0.6 Step 3
+# adds a benchmark/scripts/_install_h2load.sh build-from-source
+# script analog to _install_wrk2.sh.
+rust    = ">=1.83,<2"     # hyper / axum / actix-web build (cargo build --release --locked)
 
 [feature.bench.target.linux-64.dependencies]
 wrk = ">=4.2.0"     # conda-forge has wrk on linux-64; macOS uses system wrk
+# Bench-local sysroot pin: conda-forge rust 1.94 transitively pulls
+# sysroot 2.39, but build-script binaries it produces link against
+# host glibc, which on the v0.5.0-pinned ubuntu-22.04 CI runner is
+# 2.35. Forcing the bench sysroot to 2.34 means rustc-emitted build
+# scripts only reference symbols from glibc <= 2.34, which all
+# supported runners + the dev box satisfy.
+sysroot_linux-64 = "2.34.*"
 
 [feature.bench.tasks]
 # ── Benchmark harness (Stage 1 / Phase 1.6) ──────────────────────────────────

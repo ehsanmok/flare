@@ -1,0 +1,85 @@
+{
+  "runs": [
+    {
+      "req_per_sec": 130612.01,
+      "p50_ms": 1.08,
+      "p75_ms": 1.5,
+      "p90_ms": 1.82,
+      "p99_ms": 2.3,
+      "p99_9_ms": 2.73,
+      "p99_99_ms": 3.09,
+      "p99_999_ms": 3.34,
+      "timeouts": 0,
+      "socket_errors": 0,
+      "run": 1
+    },
+    {
+      "req_per_sec": 130319.88,
+      "p50_ms": 1.09,
+      "p75_ms": 1.6,
+      "p90_ms": 14.36,
+      "p99_ms": 139.52,
+      "p99_9_ms": 150.78,
+      "p99_99_ms": 152.83,
+      "p99_999_ms": 153.6,
+      "timeouts": 0,
+      "socket_errors": 0,
+      "run": 2
+    },
+    {
+      "req_per_sec": 131119.51,
+      "p50_ms": 1.05,
+      "p75_ms": 1.47,
+      "p90_ms": 1.79,
+      "p99_ms": 2.26,
+      "p99_9_ms": 2.69,
+      "p99_99_ms": 3.09,
+      "p99_999_ms": 3.44,
+      "timeouts": 0,
+      "socket_errors": 0,
+      "run": 3
+    },
+    {
+      "req_per_sec": 131119.8,
+      "p50_ms": 1.04,
+      "p75_ms": 1.46,
+      "p90_ms": 1.77,
+      "p99_ms": 2.23,
+      "p99_9_ms": 3.63,
+      "p99_99_ms": 69.5,
+      "p99_999_ms": 78.53,
+      "timeouts": 0,
+      "socket_errors": 0,
+      "run": 4
+    },
+    {
+      "req_per_sec": 130105.11,
+      "p50_ms": 1.07,
+      "p75_ms": 1.48,
+      "p90_ms": 1.8,
+      "p99_ms": 2.33,
+      "p99_9_ms": 2.88,
+      "p99_99_ms": 3.3,
+      "p99_999_ms": 3.64,
+      "timeouts": 0,
+      "socket_errors": 0,
+      "run": 5
+    }
+  ],
+  "summary": {
+    "median_req_per_sec": 146068.0,
+    "peak_req_per_sec": 146068.0,
+    "sustain_req_per_sec": 130612.01,
+    "mean_req_per_sec": 130655.262,
+    "stdev": 460.527090267227,
+    "stdev_pct": 0.3524749659659532,
+    "median_p50_ms": 1.07,
+    "median_p99_ms": 2.3,
+    "median_p99_9_ms": 2.88,
+    "median_p99_99_ms": 3.3,
+    "median_p99_999_ms": 3.64,
+    "total_timeouts": 0,
+    "total_socket_errors": 0,
+    "stable": true
+  }
+}

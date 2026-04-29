@@ -1,0 +1,20 @@
+[package]
+name = "flare_bench_axum"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+axum  = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+bytes = "1"
+
+[profile.release]
+opt-level = 3
+lto       = "thin"
+codegen-units = 1
+panic     = "abort"

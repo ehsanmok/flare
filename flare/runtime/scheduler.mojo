@@ -1,16 +1,32 @@
-"""Multicore scheduler: N reactors, N pthread workers.
+"""Multicore scheduler: 1 shared listener, N reactors, N pthread workers.
 
 Runs N single-threaded reactor loops in parallel, one per pthread,
-each with its own listener bound with ``SO_REUSEPORT``. The kernel
-distributes accepted connections across workers so every worker
-handles roughly 1/N of the total connection load.
+all sharing a *single* listener fd. Each worker registers the
+listener fd in its own reactor with ``EPOLLEXCLUSIVE`` (on Linux
+>= 4.5) so the kernel wakes exactly one worker per accept event.
+On macOS / kqueue the flag is unavailable and registration falls
+back to plain ``register`` — the practical behaviour is similar
+because non-blocking ``accept`` returns ``EAGAIN`` on the losers.
+
+This is the v0.6 redesign of the multicore path. v0.4.x — v0.5.x
+used N independent listeners bound with ``SO_REUSEPORT``; the
+kernel then distributed accepted connections across workers by
+hashing each connection's 4-tuple to one of the N listeners. That
+scheme has a known fairness gap under bursty arrival: a
+256-connection storm from a wrk2-style load generator can land
+80+ conns on one worker and 30 on another, producing
+hundreds-of-millisecond head-of-line tail latency on the
+overloaded worker(s). v0.6 ``benchmark/configs/throughput_mc``
+shows the failure mode at p99 ≈ 1.7 s; the
+``EPOLLEXCLUSIVE``-based shared-listener design collapses the
+same workload's p99 to the millisecond range.
 
 Shutdown path: ``shutdown()`` flips a heap-allocated ``Bool`` that
 every worker polls on each reactor iteration. A stable heap address
 is used (instead of a field on the ``Scheduler`` struct) so the flag
 survives the NRVO-or-not move from ``Scheduler.start`` back to the
-caller. The main thread then joins all workers before ``shutdown()``
-returns.
+caller. The main thread then closes the shared listener fd once
+and joins all workers before ``shutdown()`` returns.
 
 Relying on ``close(listener_fd)`` alone to wake the workers is not
 enough on Linux: when the fd is also registered in the worker's
@@ -27,8 +43,9 @@ if that's expensive users should wrap their handler's expensive state
 behind an ``UnsafePointer`` or a similar shared-reference holder).
 
 Only the ``Handler`` and ``ServerConfig`` machinery that v0.4.0 already
-has is touched; the run loop re-uses ``run_reactor_loop[H]`` from
-``flare.http._server_reactor_impl``.
+has is touched; the run loop is ``run_reactor_loop_shared[H]`` from
+``flare.http._server_reactor_impl`` (the v0.6 shared-listener
+variant of the v0.4.x ``run_reactor_loop``).
 
 Known limitations (tracked for v0.4.1):
 
@@ -38,12 +55,12 @@ Known limitations (tracked for v0.4.1):
   things: (1) aligned single-byte loads and stores being atomic at
   the hardware level on x86-64 and ARM64 with no torn reads;
   (2) the volatile-style ``UnsafePointer[Bool, MutExternalOrigin]``
-  materialisation inside ``run_reactor_loop`` defeating the
-  optimiser's LICM so every iteration re-reads the flag. This is
-  enough in practice on both platforms flare targets, but the
-  flag should be upgraded to an ``Atomic`` with explicit
+  materialisation inside ``run_reactor_loop_shared`` defeating
+  the optimiser's LICM so every iteration re-reads the flag.
+  This is enough in practice on both platforms flare targets,
+  but the flag should be upgraded to an ``Atomic`` with explicit
   release/acquire ordering once the stdlib stabilises one.
-- Worker panics that escape ``run_reactor_loop`` are caught and
+- Worker panics that escape ``run_reactor_loop_shared`` are caught and
   discarded in ``_worker_entry`` because pthread has no exception
   channel. ``is_running()`` still reports ``True`` until the
   ``ThreadHandle`` is joined, which is a mildly wrong signal for a
@@ -57,12 +74,12 @@ from std.memory import UnsafePointer, alloc
 
 from ..http.handler import Handler
 from ..http.server import ServerConfig, ShutdownReport
-from ..http._server_reactor_impl import run_reactor_loop
+from ..http._server_reactor_impl import run_reactor_loop_shared
 from ..net import SocketAddr
 from ..tcp import TcpListener
 
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
-from .reuseport import bind_reuseport
+from .reuseport import bind_shared
 
 
 # ── Context cleanup helpers ──────────────────────────────────────────────────
@@ -98,12 +115,14 @@ def _scheduler_free_ctxs[H: Handler & Copyable](addrs: List[Int]):
 struct _WorkerCtx[H: Handler & Copyable](Movable):
     """Heap-allocated context passed to a pthread start routine.
 
-    Holds a listener (bound with ``SO_REUSEPORT``), a copy of the
-    handler + config, the shared stopping flag (as a raw address), and
-    a worker index for pinning + logging.
+    Carries a *borrowed* listener fd (the underlying ``TcpListener``
+    is owned by the parent ``Scheduler``), a copy of the handler +
+    config, the shared stopping flag (as a raw address), and a
+    worker index for pinning + logging. Workers must NOT close
+    ``listener_fd`` — that's the ``Scheduler``'s job on shutdown.
     """
 
-    var listener: TcpListener
+    var listener_fd: Int
     var config: ServerConfig
     var handler: Self.H
     var stopping_addr: Int
@@ -112,14 +131,14 @@ struct _WorkerCtx[H: Handler & Copyable](Movable):
 
     def __init__(
         out self,
-        var listener: TcpListener,
+        listener_fd: Int,
         var config: ServerConfig,
         var handler: Self.H,
         stopping_addr: Int,
         worker_idx: Int,
         pin_cores: Bool,
     ):
-        self.listener = listener^
+        self.listener_fd = listener_fd
         self.config = config^
         self.handler = handler^
         self.stopping_addr = stopping_addr
@@ -134,7 +153,7 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     """Pthread start routine for one reactor worker.
 
     Casts ``arg`` back to a ``_WorkerCtx[H]`` pointer, optionally pins
-    to a CPU, then runs ``run_reactor_loop[H]`` until the shared
+    to a CPU, then runs ``run_reactor_loop_shared[H]`` until the shared
     stopping flag is observed.
 
     The context was allocated on the main thread with libc ``malloc``
@@ -168,14 +187,14 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
                 pass
 
         # ``stopping_ptr[]`` dereferences to the heap-allocated Bool.
-        # ``run_reactor_loop`` takes ``stopping`` as a ``def`` parameter
-        # (reference semantics in Mojo), so every iteration of
-        # ``while not stopping`` re-reads the live flag from this
+        # ``run_reactor_loop_shared`` takes ``stopping`` as a ``def``
+        # parameter (reference semantics in Mojo), so every iteration
+        # of ``while not stopping`` re-reads the live flag from this
         # stable heap address. That address was captured at
         # ``Scheduler.start`` time and stays valid until
         # ``Scheduler.shutdown`` joins every worker.
-        run_reactor_loop[H](
-            ctx_ptr[].listener,
+        run_reactor_loop_shared[H](
+            ctx_ptr[].listener_fd,
             ctx_ptr[].config,
             ctx_ptr[].handler,
             stopping_ptr[],
@@ -212,8 +231,11 @@ struct Scheduler[H: Handler & Copyable](Movable):
           its address survives the move from ``Scheduler.start`` back
           to the caller; every worker captures that address once at
           spawn time.
-        - Per-worker listener is bound with ``bind_reuseport``, so all
-          N workers share the same TCP port via ``SO_REUSEPORT``.
+        - A *single* listener is bound via ``bind_shared`` and its
+          fd is borrowed by every worker. Each worker registers the
+          shared fd with ``Reactor.register_exclusive`` so the
+          kernel wakes one worker per accept event
+          (``EPOLLEXCLUSIVE`` on Linux >= 4.5).
         - Handler is cloned into each worker via ``H.copy()``.
     """
 
@@ -231,7 +253,18 @@ struct Scheduler[H: Handler & Copyable](Movable):
     # joining + destroying.
     var _workers_ptr: UnsafePointer[ThreadHandle, MutExternalOrigin]
     var _workers_len: Int
-    var _listener_fds: List[Int]
+    # Heap-allocated ``TcpListener`` shared by all workers. Address is
+    # stable across struct moves so worker ctxs can carry the fd as a
+    # plain ``Int`` — workers never close it (that's ``shutdown()``'s
+    # job after every worker has joined). A 0 value means "no shared
+    # listener yet" (freshly constructed) or "already destroyed"
+    # (post-shutdown).
+    var _shared_listener_addr: Int
+    # Cached fd for the shared listener. Convenient for the shutdown
+    # path which closes the fd before destroying the heap struct;
+    # closing first ensures any in-flight ``accept(2)`` returns -1
+    # and the worker observes the stop flag promptly.
+    var _shared_listener_fd: Int
     var _ctx_addrs: List[Int]
     # Heap-allocated Bool, owned by this Scheduler. Address is stable
     # across struct moves; every worker's ``_WorkerCtx.stopping_addr``
@@ -245,7 +278,8 @@ struct Scheduler[H: Handler & Copyable](Movable):
             unsafe_from_address=0
         )
         self._workers_len = 0
-        self._listener_fds = List[Int]()
+        self._shared_listener_addr = 0
+        self._shared_listener_fd = -1
         self._ctx_addrs = List[Int]()
         self._stopping_addr = 0
 
@@ -257,10 +291,22 @@ struct Scheduler[H: Handler & Copyable](Movable):
         num_workers: Int,
         pin_cores: Bool = True,
     ) raises -> Scheduler[Self.H]:
-        """Spawn ``num_workers`` threads, each running a reactor.
+        """Spawn ``num_workers`` threads sharing one listener.
+
+        v0.6 redesign: the scheduler binds a single ``TcpListener``
+        (via ``bind_shared``) and hands its fd to every worker. Each
+        worker registers the fd with ``Reactor.register_exclusive``
+        so the kernel wakes only one worker per accept event
+        (``EPOLLEXCLUSIVE`` on Linux >= 4.5). On macOS the flag is
+        unavailable and the fallback is the classic non-blocking
+        accept "wake-all, one-wins" pattern.
+
+        This eliminates the v0.5.x ``SO_REUSEPORT`` 4-tuple-hash
+        distribution variance that caused multi-second tail latency
+        under high-concurrency loads (see design-v0.6).
 
         Args:
-            addr:        Address all workers bind (with ``SO_REUSEPORT``).
+            addr:        Address the shared listener binds.
             config:      Shared server config (copied per worker).
             handler:     Shared request handler (copied per worker).
             num_workers: Number of worker threads. Must be in
@@ -275,10 +321,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
             serve until ``shutdown()`` is called.
 
         Raises:
-            Error: If ``num_workers`` is outside ``1..=256``, if a
-                listener fails to bind, or if ``pthread_create``
-                fails; partially-started workers are best-effort
-                joined before re-raising.
+            Error: If ``num_workers`` is outside ``1..=256``, if the
+                shared listener fails to bind, or if
+                ``pthread_create`` fails; partially-started workers
+                are best-effort joined before re-raising.
         """
         if num_workers < 1 or num_workers > 256:
             raise Error(
@@ -301,23 +347,40 @@ struct Scheduler[H: Handler & Copyable](Movable):
         var stopping_addr = Int(stop_ptr)
         s._stopping_addr = stopping_addr
 
+        # Bind the single shared listener up-front (before any worker
+        # spawns) so an ``AddressInUse`` raise here happens on the
+        # caller's thread, not inside an opaque pthread. The fd is
+        # set non-blocking once here; every worker re-uses the same
+        # mode via ``run_reactor_loop_shared``. Workers borrow the fd
+        # as ``Int`` and never close it.
+        var bound = bind_shared(addr)
+        try:
+            bound._socket.set_nonblocking(True)
+        except e:
+            _scheduler_free_raw(stop_raw)
+            s._stopping_addr = 0
+            raise e^
+        var listener_fd = Int(bound.as_raw_fd())
+        # Heap-store the listener so its destructor doesn't fire when
+        # the local ``bound`` goes out of scope at the end of this
+        # function. ``shutdown()`` destroys+frees this allocation
+        # *after* joining every worker, so the fd stays open for the
+        # whole multi-worker run.
+        var listener_ptr = alloc[TcpListener](1)
+        listener_ptr.init_pointee_move(bound^)
+        s._shared_listener_addr = Int(listener_ptr)
+        s._shared_listener_fd = listener_fd
+
         # Preallocate the worker slot array once; grow is not needed
         # because ``num_workers`` is bounded above (<= 256) and fixed.
         s._workers_ptr = alloc[ThreadHandle](num_workers)
         s._workers_len = 0
 
         for i in range(num_workers):
-            var listener = bind_reuseport(addr)
-            # Save fd so shutdown can close all listener sockets from
-            # the main thread. On Linux close() alone does not wake
-            # a concurrent epoll_wait (the epoll set holds a ref to
-            # the underlying file), but closing still helps on macOS
-            # via kqueue EV_EOF and speeds up the next accept() path.
-            s._listener_fds.append(Int(listener._socket.fd))
             var cfg_copy = config.copy()
             var handler_copy = handler.copy()
             var ctx = _WorkerCtx[Self.H](
-                listener^,
+                listener_fd,
                 cfg_copy^,
                 handler_copy^,
                 stopping_addr,
@@ -363,6 +426,12 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 ctx_ptr.destroy_pointee()
                 _scheduler_free_raw(ctx_ptr.bitcast[UInt8]())
                 # All workers joined, so no one is reading the
+                # shared listener anymore — destroy + free it.
+                listener_ptr.destroy_pointee()
+                _scheduler_free_raw(listener_ptr.bitcast[UInt8]())
+                s._shared_listener_addr = 0
+                s._shared_listener_fd = -1
+                # All workers joined, so no one is reading the
                 # stopping flag anymore — safe to free.
                 _scheduler_free_raw(stop_raw)
                 s._stopping_addr = 0
@@ -373,12 +442,13 @@ struct Scheduler[H: Handler & Copyable](Movable):
     def shutdown(mut self) raises:
         """Signal every worker to stop and wait for them to join.
 
-        Flips the heap-allocated stopping flag, closes every worker's
+        Flips the heap-allocated stopping flag, closes the shared
         listener socket (useful on macOS kqueue; on Linux the
         stopping flag is what actually breaks the loop), then joins
-        all worker threads, and finally destroys + frees every worker
-        context and the stopping-flag heap cell. Idempotent — a
-        second call finds the lists empty and is a no-op.
+        all worker threads, destroys + frees every worker context,
+        the heap-allocated shared listener, and the stopping-flag
+        heap cell. Idempotent — a second call finds the state
+        empty and is a no-op.
         """
         # Flip the shared stopping flag. ``_stopping_addr == 0``
         # means we were never started (or were already shut down):
@@ -389,10 +459,18 @@ struct Scheduler[H: Handler & Copyable](Movable):
             )
             stop_ptr[] = True
 
-        for i in range(len(self._listener_fds)):
-            var fd = self._listener_fds[i]
-            _ = external_call["close", c_int, c_int](c_int(fd))
-        self._listener_fds.clear()
+        # Close the shared listener fd up-front. This is a no-op on
+        # the per-worker epoll registrations (the kernel keeps a
+        # ``struct file`` ref while any epoll holds it), but it
+        # speeds up the macOS kqueue path and is harmless on Linux.
+        # The actual fd-table close happens when ``TcpListener.__del__``
+        # runs below, but doing this early helps the listener
+        # transition to a "no further accepts" state.
+        if self._shared_listener_fd >= 0:
+            _ = external_call["close", c_int, c_int](
+                c_int(self._shared_listener_fd)
+            )
+            self._shared_listener_fd = -1
 
         for i in range(self._workers_len):
             try:
@@ -415,6 +493,18 @@ struct Scheduler[H: Handler & Copyable](Movable):
         # with mozz's ``free`` declaration in the fuzz environment.
         _scheduler_free_ctxs[Self.H](self._ctx_addrs)
         self._ctx_addrs.clear()
+
+        # Drop the shared ``TcpListener`` now that every worker has
+        # joined. ``destroy_pointee`` runs the listener's
+        # ``__del__``, which closes the fd. The early ``close()``
+        # above is idempotent — closing an already-closed fd just
+        # gets ``EBADF`` which we ignore.
+        if self._shared_listener_addr != 0:
+            var raw = _OpaquePtr(unsafe_from_address=self._shared_listener_addr)
+            var typed = raw.bitcast[TcpListener]()
+            typed.destroy_pointee()
+            _scheduler_free_raw(raw)
+            self._shared_listener_addr = 0
 
         # Free the heap-allocated stopping flag now that no worker
         # still references it. Setting the address to 0 keeps
@@ -479,19 +569,21 @@ struct Scheduler[H: Handler & Copyable](Movable):
 
         # Step 1: signal every worker to stop. Workers observe the
         # flag on their next reactor poll (poll interval 100ms in
-        # ``run_reactor_loop``).
+        # ``run_reactor_loop_shared``).
         if self._stopping_addr != 0:
             var stop_ptr = UnsafePointer[Bool, MutExternalOrigin](
                 unsafe_from_address=self._stopping_addr
             )
             stop_ptr[] = True
 
-        # Step 2: close every listener so accept() returns and the
-        # worker can observe the stopping flag promptly.
-        for i in range(len(self._listener_fds)):
-            var fd = self._listener_fds[i]
-            _ = external_call["close", c_int, c_int](c_int(fd))
-        self._listener_fds.clear()
+        # Step 2: close the shared listener so a pending ``accept(2)``
+        # returns and the worker can observe the stopping flag
+        # promptly. Idempotent with ``shutdown()`` below.
+        if self._shared_listener_fd >= 0:
+            _ = external_call["close", c_int, c_int](
+                c_int(self._shared_listener_fd)
+            )
+            self._shared_listener_fd = -1
 
         # Step 3: cooperative join via ``shutdown()`` — which
         # calls ``pthread_join`` and blocks until each worker

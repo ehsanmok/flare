@@ -229,9 +229,13 @@ struct HttpServer(Movable):
         - ``num_workers == 1`` (default): single-threaded reactor
           (kqueue on macOS, epoll on Linux). Same hot path as the
           v0.3.x ``serve``.
-        - ``num_workers >= 2``: multicore — N ``SO_REUSEPORT`` listeners
-          on N ``pthread`` workers via
-          ``flare.runtime.scheduler.Scheduler``.
+        - ``num_workers >= 2``: multicore — N ``pthread`` workers
+          sharing a single listener fd, each registering it with
+          ``EPOLLEXCLUSIVE`` (on Linux >= 4.5) via
+          ``flare.runtime.scheduler.Scheduler`` (v0.6). The kernel
+          wakes one worker per accept event, eliminating the
+          ``SO_REUSEPORT`` 4-tuple-hash distribution variance that
+          drove tail-latency spikes in v0.5.x.
 
         For Router / middleware / stateful-struct handlers, use the
         Handler-typed overload ``serve[H: Handler & Copyable]``.
@@ -274,12 +278,14 @@ struct HttpServer(Movable):
         stateful user handlers, ``App[S, H]``, or a bare ``FnHandler``.
 
         - ``num_workers == 1`` (default): single-threaded reactor.
-          ``run_reactor_loop`` runs directly on the current thread, no
-          pthreads, no ``SO_REUSEPORT``.
-        - ``num_workers >= 2``: multicore — N ``SO_REUSEPORT`` listeners
-          on N ``pthread`` workers via
-          ``flare.runtime.scheduler.Scheduler``. ``Copyable`` is
-          required here because each worker gets its own ``H.copy()``.
+          ``run_reactor_loop`` runs directly on the current thread,
+          no pthreads.
+        - ``num_workers >= 2``: multicore — N ``pthread`` workers
+          sharing a single listener fd via
+          ``flare.runtime.scheduler.Scheduler`` (v0.6 redesign with
+          ``EPOLLEXCLUSIVE``-based fair accept distribution).
+          ``Copyable`` is required here because each worker gets its
+          own ``H.copy()``.
 
         Args:
             handler:     The request handler (ownership transferred).

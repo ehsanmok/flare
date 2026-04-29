@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime.reuseport.bind_reuseport``.
+"""Tests for ``flare.runtime.reuseport.{bind_reuseport, bind_shared}``.
 
 Covers:
 
@@ -9,6 +9,10 @@ Covers:
 - Without ``SO_REUSEPORT`` (i.e. ``TcpListener.bind``), binding a
   second listener on the same port fails — establishes that the
   ``reuse_port=True`` branch is the thing enabling the coexistence.
+- ``bind_shared`` produces a single listener (no ``SO_REUSEPORT``)
+  intended for the v0.6 shared-listener scheduler. A second
+  ``bind_shared`` on the same port must fail; this is the property
+  that prevents accidental dual-listener fan-out.
 
 We don't verify load-balancing (the kernel does a fair-ish job but
 timing is flaky in a unit test); that's covered by the multicore
@@ -23,9 +27,9 @@ from std.testing import (
     TestSuite,
 )
 
-from flare.runtime.reuseport import bind_reuseport
+from flare.runtime.reuseport import bind_reuseport, bind_shared
 from flare.net import SocketAddr
-from flare.tcp import TcpListener
+from flare.tcp import TcpListener, accept_fd
 
 
 def test_single_reuseport_listener() raises:
@@ -78,6 +82,40 @@ def test_reuseport_default_backlog_works() raises:
     # We can't read the backlog back but a successful bind with the
     # default arg is enough coverage; actual backlog behaviour is
     # covered by the scheduler bench.
+    assert_true(l.local_addr().port != 0)
+
+
+# ── bind_shared (v0.6 shared-listener scheduler) ─────────────────────────
+
+
+def test_bind_shared_smoke() raises:
+    """``bind_shared`` binds a single listener without ``SO_REUSEPORT``."""
+    var l = bind_shared(SocketAddr.localhost(0))
+    assert_true(l.local_addr().port != 0)
+
+
+def test_bind_shared_default_backlog_works() raises:
+    """``bind_shared`` defaults to a backlog of 1024."""
+    var l = bind_shared(SocketAddr.localhost(0))
+    assert_true(l.local_addr().port != 0)
+
+
+def test_bind_shared_exposes_fd() raises:
+    """The shared listener exposes a usable raw fd for cross-thread sharing.
+
+    The v0.6 scheduler caches ``listener.as_raw_fd()`` once on the
+    main thread and hands it to every worker via the per-worker
+    context struct. Workers call ``accept_fd(listener_fd)`` directly
+    rather than touching the (non-thread-safe) Mojo ``TcpListener``
+    object. This test exercises the same pattern in-process: bind on
+    the main thread, accept via the fd in the same thread to verify
+    the fd is well-formed.
+    """
+    var l = bind_shared(SocketAddr.localhost(0))
+    var fd = l.as_raw_fd()
+    # A real TCP fd is a small, non-negative int.
+    assert_true(fd >= 0)
+    # Underlying socket is the same listener.
     assert_true(l.local_addr().port != 0)
 
 

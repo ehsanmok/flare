@@ -43,6 +43,7 @@ from flare.net._libc import (
     EPOLLERR,
     EPOLLHUP,
     EPOLLRDHUP,
+    EPOLLEXCLUSIVE,
     EPOLL_CTL_ADD,
     EPOLL_CTL_DEL,
     EPOLL_CTL_MOD,
@@ -285,6 +286,74 @@ struct Reactor(Movable):
         if fd in self._registered:
             raise NetworkError("fd " + String(fd) + " is already registered", 0)
         self._register_raw(fd, token, interest)
+
+    def register_exclusive(
+        mut self, fd: c_int, token: UInt64, interest: Int
+    ) raises -> None:
+        """Register ``fd`` with ``EPOLLEXCLUSIVE`` semantics on Linux.
+
+        Used by the multi-worker scheduler so all workers share a single
+        listener fd: each worker registers the same fd in its own epoll
+        instance with ``EPOLLEXCLUSIVE``, and the kernel wakes only one
+        worker per accept-event instead of all of them. This eliminates
+        the SO_REUSEPORT 4-tuple-hash distribution variance that drives
+        head-of-line tail latency under high concurrency on this
+        v0.6 benchmark probe (see design-v0.6).
+
+        On macOS / kqueue there is no exclusive-wakeup flag; this method
+        falls back to plain ``register``. Modern macOS kernels still
+        deliver each ``EVFILT_READ`` event to one watcher at a time on
+        the same listener fd (the rest see ``EAGAIN`` on ``accept``),
+        so the practical behaviour is similar minus the kernel-level
+        fairness guarantee.
+
+        ``EPOLLEXCLUSIVE`` is only valid on the initial ``EPOLL_CTL_ADD``
+        — modifying an existing registration to add it is rejected by
+        the kernel. The shared-listener path therefore registers once
+        per worker and never modifies the listener entry.
+
+        Args:
+            fd:       Listener fd, expected to be shared across workers.
+            token:    Opaque value returned in events. Must not equal
+                      ``WAKEUP_TOKEN``.
+            interest: Bitmask; in practice always ``INTEREST_READ`` for
+                      the listener path.
+
+        Raises:
+            NetworkError: Same conditions as ``register``.
+        """
+        if token == WAKEUP_TOKEN:
+            raise NetworkError(
+                "token WAKEUP_TOKEN is reserved for internal use", 0
+            )
+        if interest == 0:
+            raise NetworkError("interest must include READ or WRITE", 0)
+        if fd in self._registered:
+            raise NetworkError("fd " + String(fd) + " is already registered", 0)
+
+        comptime if CompilationTarget.is_linux():
+            var ev = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
+            for i in range(EPOLL_EVENT_SIZE):
+                (ev + i).init_pointee_copy(UInt8(0))
+            var bits = _interest_to_epoll(interest) | EPOLLEXCLUSIVE
+            _epoll_event_set(ev, bits, token)
+            var rc = _epoll_ctl(self._fd, EPOLL_CTL_ADD, fd, ev)
+            if rc < c_int(0):
+                # Some older kernels (<4.5) don't support EPOLLEXCLUSIVE
+                # and return EINVAL. Fall back to a plain register so
+                # the multi-worker scheduler still works (with
+                # thundering-herd accepts) instead of crashing on a
+                # registration error. Newer kernels accept it.
+                var ev2 = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
+                for i in range(EPOLL_EVENT_SIZE):
+                    (ev2 + i).init_pointee_copy(UInt8(0))
+                _epoll_event_set(ev2, _interest_to_epoll(interest), token)
+                if _epoll_ctl(self._fd, EPOLL_CTL_ADD, fd, ev2) < c_int(0):
+                    raise _os_error("epoll_ctl ADD (EPOLLEXCLUSIVE fallback)")
+            self._registered[fd] = token
+        else:
+            # No EPOLLEXCLUSIVE on macOS; fall through to plain register.
+            self._register_raw(fd, token, interest)
 
     def modify(mut self, fd: c_int, interest: Int) raises -> None:
         """Change the interest bits for an already-registered fd.

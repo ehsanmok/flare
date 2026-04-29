@@ -50,7 +50,7 @@ from flare.http.static_response import StaticResponse
 from flare.net import IpAddr, SocketAddr
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
 from flare.net.error import NetworkError
-from flare.tcp import TcpStream, TcpListener
+from flare.tcp import TcpStream, TcpListener, accept_fd
 from flare.runtime import (
     Reactor,
     Event,
@@ -1274,6 +1274,52 @@ def _accept_loop(
                 pass
 
 
+def _accept_loop_fd(
+    listener_fd: Int,
+    mut reactor: Reactor,
+    mut conns: Dict[Int, Int],
+):
+    """Accept every available connection on a *borrowed* listener fd.
+
+    Mirrors ``_accept_loop`` but takes the listener as a raw integer
+    fd instead of a ``TcpListener`` so the v0.6 multi-worker scheduler
+    can share a single listener across workers without giving any
+    one worker ownership of the underlying ``TcpListener``. The
+    listener fd is owned by the ``Scheduler`` and stays open for the
+    lifetime of the multi-worker run.
+
+    Stops on the first ``accept(2)`` error (typically ``EAGAIN`` /
+    ``EWOULDBLOCK`` once the kernel's accept queue is drained for
+    this worker) — same shape as ``_accept_loop`` so the caller
+    sees identical "drain until empty" semantics.
+    """
+    while True:
+        var stream: TcpStream
+        try:
+            stream = accept_fd(c_int(listener_fd))
+        except:
+            break
+        try:
+            stream._socket.set_nonblocking(True)
+        except:
+            pass
+        var client_fd = Int(stream._socket.fd)
+        var addr: Int
+        try:
+            addr = _conn_alloc_addr(stream^)
+        except:
+            continue
+        conns[client_fd] = addr
+        try:
+            reactor.register(c_int(client_fd), UInt64(client_fd), INTEREST_READ)
+        except:
+            _conn_free_addr(addr)
+            try:
+                _ = conns.pop(client_fd)
+            except:
+                pass
+
+
 def run_reactor_loop[
     H: Handler
 ](
@@ -1391,6 +1437,136 @@ def run_reactor_loop[
                 _cleanup_conn(fd, conns, timers, reactor)
 
     # Graceful shutdown: close all active connections.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn(leftover[i], conns, timers, reactor)
+
+
+def run_reactor_loop_shared[
+    H: Handler
+](
+    listener_fd: Int,
+    config: ServerConfig,
+    ref handler: H,
+    ref stopping: Bool,
+) raises:
+    """Worker reactor loop sharing a single listener fd across workers.
+
+    v0.6 multi-worker entry point. Functionally identical to
+    ``run_reactor_loop`` but:
+
+    1. ``listener_fd`` is borrowed from the ``Scheduler`` (the
+       ``Scheduler`` owns the underlying ``TcpListener`` and closes
+       it on shutdown). This worker never closes ``listener_fd``.
+    2. The listener is registered with ``Reactor.register_exclusive``
+       so the kernel sets ``EPOLLEXCLUSIVE`` on Linux (>= 4.5),
+       waking only one worker per accept event. On macOS the flag
+       is unavailable and registration falls back to plain
+       ``register`` — the wakeup pattern degrades to "wake-all,
+       one-wins" but practical behaviour is similar because
+       non-blocking ``accept`` returns ``EAGAIN`` on the losers.
+
+    The fairness improvement vs ``bind_reuseport`` is in the
+    accept-time distribution: instead of the kernel hashing each
+    new 4-tuple to one of N listeners (variance: a 256-conn storm
+    can land 80+ on one worker, 30 on another), every new accept
+    is offered to the worker that's currently waiting in
+    ``epoll_wait``. Idle workers absorb spikes; busy workers
+    aren't burdened with extra conns. The
+    ``benchmark/configs/throughput_mc.yaml`` p99 collapses from
+    seconds to milliseconds with this entry point (see
+    ``design-v0.6``).
+
+    Args:
+        listener_fd: Listener fd, owned by the ``Scheduler``. Must
+            be in non-blocking mode before calling (the
+            ``Scheduler`` configures this once at bind time).
+        config:      Per-worker copy of ``ServerConfig``.
+        handler:     Per-worker copy of ``H``.
+        stopping:    Heap-allocated stop flag; ``Scheduler``
+            mutates it from another thread on shutdown. Re-read
+            each iteration via a fresh external pointer so the
+            compiler cannot LICM-hoist the load.
+    """
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    # EPOLLEXCLUSIVE on Linux; plain register on macOS. Token 0 is
+    # reserved for the listener accept path (same convention as
+    # ``run_reactor_loop``).
+    reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            if fd_tok in conns:
+                _cleanup_conn(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop_fd(listener_fd, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                var last_step = StepResult()
+                if evt.is_readable():
+                    last_step = ch_ptr[].on_readable(handler, config)
+                    step_done = last_step.done
+                    var cycles = 0
+                    while (not step_done) and cycles < 3:
+                        cycles += 1
+                        if (
+                            last_step.want_write
+                            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                        ):
+                            last_step = ch_ptr[].on_writable(config)
+                            step_done = last_step.done
+                        elif (
+                            last_step.want_read
+                            and len(ch_ptr[].read_buf) > 0
+                            and ch_ptr[].state == STATE_READING
+                        ):
+                            last_step = ch_ptr[].on_readable(handler, config)
+                            step_done = last_step.done
+                        else:
+                            break
+                elif evt.is_writable():
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+                if not step_done:
+                    _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn(fd, conns, timers, reactor)
+
+    # Graceful shutdown: close all active per-conn fds. The shared
+    # listener fd is owned by ``Scheduler`` and stays open until
+    # ``Scheduler.shutdown`` closes it.
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)

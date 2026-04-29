@@ -1,0 +1,22 @@
+[package]
+name = "flare_bench_hyper"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+hyper      = { version = "1.5", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio      = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+bytes      = "1"
+
+[profile.release]
+opt-level = 3
+lto       = "thin"
+codegen-units = 1
+panic     = "abort"

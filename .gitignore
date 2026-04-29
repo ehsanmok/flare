@@ -1,6 +1,10 @@
 # Pixi
 .pixi/
 *.lock
+# Cargo.lock for the Rust bench baselines is exception-tracked: the
+# bench harness runs `cargo build --release --locked` to reproduce
+# the exact dep graph the published numbers were measured against.
+!benchmark/baselines/*/Cargo.lock
 
 # Mojo build artifacts
 __pycache__/
@@ -30,8 +34,12 @@ fuzz/corpus/
 
 # Benchmark runtime artifacts — everything under results/ is per-run
 # output; keep the directory via .gitkeep but don't track contents.
+# Exception: published v0.6 multi-worker comparison snapshot is
+# tracked so the doc tables can cite a permanent file path.
 benchmark/results/*
 !benchmark/results/.gitkeep
+!benchmark/results/v0.6/
+!benchmark/results/v0.6/**
 benchmark/baselines/*/server
 benchmark/baselines/*/go.sum
 benchmark/baselines/*/nginx-rendered.conf

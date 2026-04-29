@@ -41,4 +41,4 @@ def echo_client() raises:
 """
 
 from .stream import TcpStream
-from .listener import TcpListener
+from .listener import TcpListener, accept_fd
