@@ -159,8 +159,10 @@ from .extract import (
 from .encoding import (
     Encoding,
     compress_gzip,
+    compress_brotli,
     decompress_gzip,
     decompress_deflate,
+    decompress_brotli,
     decode_content,
 )
 from .error import HttpError, TooManyRedirects
@@ -206,3 +208,12 @@ from .session import (
     signed_cookie_decode_keys,
     signed_cookie_encode,
 )
+from .middleware import (
+    CatchPanic,
+    Compress,
+    Logger,
+    RequestId,
+    negotiate_encoding,
+)
+from .cors import Cors, CorsConfig
+from .fs import ByteRange, FileServer, parse_range

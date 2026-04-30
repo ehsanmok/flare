@@ -560,10 +560,21 @@ from .crypto import (
 from .http.encoding import (
     Encoding,
     compress_gzip,
+    compress_brotli,
     decompress_gzip,
     decompress_deflate,
+    decompress_brotli,
     decode_content,
 )
+from .http.middleware import (
+    CatchPanic,
+    Compress,
+    Logger,
+    RequestId,
+    negotiate_encoding,
+)
+from .http.cors import Cors, CorsConfig
+from .http.fs import ByteRange, FileServer, parse_range
 from .http.error import HttpError, TooManyRedirects
 from .http.auth import Auth, BasicAuth, BearerAuth
 from .http.client import HttpClient, get, post, put, patch, delete, head

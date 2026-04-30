@@ -23,6 +23,9 @@ BUILD_DIR="$SCRIPT_DIR/../../../build"
 TARGET="$BUILD_DIR/libflare_zlib.so"
 INSTALLED="$CONDA_PREFIX/lib/libflare_zlib.so"
 SOURCE="$SCRIPT_DIR/zlib_wrapper.c"
+BROTLI_TARGET="$BUILD_DIR/libflare_brotli.so"
+BROTLI_INSTALLED="$CONDA_PREFIX/lib/libflare_brotli.so"
+BROTLI_SOURCE="$SCRIPT_DIR/brotli_wrapper.c"
 
 # Verify CONDA_PREFIX is set (pixi sets this on activation)
 if [ -z "$CONDA_PREFIX" ]; then
@@ -41,10 +44,19 @@ _needs_rebuild() {
     return 1
 }
 
-if ! _needs_rebuild; then
-    if [[ "$(uname)" != "Darwin" ]]; then
-        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
+_install_preloads() {
+    # Add every flare-built FFI shim into LD_PRELOAD on Linux so that
+    # ASAP-destroyed OwnedDLHandles don't dlclose them under the JIT.
+    if [[ "$(uname)" == "Darwin" ]]; then
+        return 0
     fi
+    [ -f "$INSTALLED" ] && export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
+    [ -f "$BROTLI_INSTALLED" ] && export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${BROTLI_INSTALLED}"
+    [ -f "$CONDA_PREFIX/lib/libflare_fs.so" ] && export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${CONDA_PREFIX}/lib/libflare_fs.so"
+}
+
+if ! _needs_rebuild; then
+    _install_preloads
     return 0 2>/dev/null || true
 fi
 
@@ -101,3 +113,67 @@ echo "Installed: $INSTALLED"
 if [[ "$(uname)" != "Darwin" ]]; then
     export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
 fi
+
+# ── flare brotli FFI wrapper (v0.6 Track I) ─────────────────────────────────
+# Build is conditional on libbrotli being present; flare's [dependencies]
+# pull libbrotlicommon/dec/enc from conda-forge so the default env always
+# satisfies it. If the encoder/decoder headers are missing we skip the
+# build so users on bare-checkout environments can still import flare —
+# Encoding.BR will then raise at first use rather than at activation.
+_brotli_needs_rebuild() {
+    [ ! -f "$BROTLI_TARGET" ] && return 0
+    [ ! -f "$BROTLI_INSTALLED" ] && return 0
+    [ "$BROTLI_SOURCE" -nt "$BROTLI_TARGET" ] && return 0
+    [ "$BROTLI_TARGET" -nt "$BROTLI_INSTALLED" ] 2>/dev/null && return 0
+    return 1
+}
+
+if [ -f "$CONDA_PREFIX/lib/libbrotlienc.so" ] \
+    || [ -f "$CONDA_PREFIX/lib/libbrotlienc.dylib" ]; then
+    if _brotli_needs_rebuild; then
+        echo "Building libflare_brotli.so..."
+        if $CC -O2 -fPIC -shared \
+            -o "$BROTLI_TARGET" \
+            "$BROTLI_SOURCE" \
+            -L"$CONDA_PREFIX/lib" \
+            -lbrotlienc -lbrotlidec -lbrotlicommon \
+            -Wl,-rpath,"$CONDA_PREFIX/lib"; then
+            cp "$BROTLI_TARGET" "$BROTLI_INSTALLED"
+            echo "Installed: $BROTLI_INSTALLED"
+        else
+            echo "Brotli build failed (continuing without br codec)"
+        fi
+    fi
+else
+    echo "libbrotli not installed — skipping libflare_brotli.so"
+fi
+
+# ── flare fs FFI wrapper (v0.6 Track H) ─────────────────────────────────
+# Wraps libc open/close/read so flare's FileServer can avoid colliding
+# with Mojo stdlib's internal external_call signatures for those names.
+FS_TARGET="$BUILD_DIR/libflare_fs.so"
+FS_INSTALLED="$CONDA_PREFIX/lib/libflare_fs.so"
+FS_SOURCE="$SCRIPT_DIR/fs_wrapper.c"
+
+_fs_needs_rebuild() {
+    [ ! -f "$FS_TARGET" ] && return 0
+    [ ! -f "$FS_INSTALLED" ] && return 0
+    [ "$FS_SOURCE" -nt "$FS_TARGET" ] && return 0
+    [ "$FS_TARGET" -nt "$FS_INSTALLED" ] 2>/dev/null && return 0
+    return 1
+}
+
+if _fs_needs_rebuild; then
+    echo "Building libflare_fs.so..."
+    if $CC -O2 -fPIC -shared \
+        -o "$FS_TARGET" \
+        "$FS_SOURCE"; then
+        cp "$FS_TARGET" "$FS_INSTALLED"
+        echo "Installed: $FS_INSTALLED"
+    else
+        echo "fs wrapper build failed!"
+        return 1 2>/dev/null || true
+    fi
+fi
+
+_install_preloads

@@ -63,6 +63,22 @@ def _find_flare_zlib_lib() -> String:
     return out^
 
 
+def _find_flare_brotli_lib() -> String:
+    """Return the path to ``libflare_brotli.so`` (v0.6 Track I).
+
+    Same search order as ``_find_flare_zlib_lib`` but for the brotli
+    wrapper installed by the activation script when libbrotli is
+    present in ``$CONDA_PREFIX/lib``.
+    """
+    var prefix = getenv("CONDA_PREFIX", "")
+    if prefix == "":
+        return "build/libflare_brotli.so"
+    var out = String("")
+    out += prefix
+    out += "/lib/libflare_brotli.so"
+    return out^
+
+
 struct Encoding:
     """HTTP ``Content-Encoding`` / ``Accept-Encoding`` token constants."""
 
@@ -76,7 +92,7 @@ struct Encoding:
     """Raw deflate or zlib-wrapped deflate (windowBits = 15 or -15)."""
 
     comptime BR: String = "br"
-    """Brotli encoding (future; requires libbrotlidec)."""
+    """Brotli encoding (libbrotlidec / libbrotlienc via libflare_brotli)."""
 
 
 def _do_decompress(
@@ -333,6 +349,8 @@ def decode_content(
         return decompress_gzip(data)
     elif encoding == Encoding.DEFLATE:
         return decompress_deflate(data)
+    elif encoding == Encoding.BR:
+        return decompress_brotli(data)
     elif encoding == Encoding.IDENTITY or encoding == "":
         var out = List[UInt8](capacity=len(data))
         for b in data:
@@ -340,3 +358,89 @@ def decode_content(
         return out^
     else:
         raise Error("decode_content: unsupported encoding '" + encoding + "'")
+
+
+# ── Brotli (v0.6 Track I) ────────────────────────────────────────────────────
+
+
+def compress_brotli(
+    data: Span[UInt8, _], quality: Int = 5
+) raises -> List[UInt8]:
+    """Compress bytes using brotli via ``libflare_brotli``.
+
+    Args:
+        data:    Plaintext input bytes.
+        quality: Brotli quality level 0-11 (5 = sensible default,
+                 11 = max compression but slow). Out-of-range values
+                 are clamped by the C wrapper.
+
+    Returns:
+        Brotli-compressed bytes.
+
+    Raises:
+        Error: If the FFI call fails or the output buffer cannot be
+               grown enough to hold the result.
+    """
+    if len(data) == 0:
+        return List[UInt8]()
+    var lib = OwnedDLHandle(_find_flare_brotli_lib())
+    var fn_comp = lib.get_function[
+        def(Int, Int, Int, Int, c_int) thin abi("C") -> c_int
+    ]("flare_brotli_compress")
+    var cap = max(len(data) * 2 + 64, 1024)
+    while True:
+        var out = List[UInt8](capacity=cap)
+        out.resize(cap, 0)
+        var written = fn_comp(
+            Int(data.unsafe_ptr()),
+            len(data),
+            Int(out.unsafe_ptr()),
+            cap,
+            c_int(quality),
+        )
+        var w = Int(written)
+        if w == -2:
+            cap *= 2
+            continue
+        if w < 0:
+            raise Error("flare_brotli_compress failed: " + String(written))
+        out.resize(w, 0)
+        return out^
+
+
+def decompress_brotli(data: Span[UInt8, _]) raises -> List[UInt8]:
+    """Decompress brotli-encoded bytes.
+
+    Args:
+        data: Brotli-encoded input.
+
+    Returns:
+        Decoded plaintext.
+
+    Raises:
+        Error: If the FFI call fails or the input is not valid brotli.
+    """
+    if len(data) == 0:
+        return List[UInt8]()
+    var lib = OwnedDLHandle(_find_flare_brotli_lib())
+    var fn_dec = lib.get_function[
+        def(Int, Int, Int, Int) thin abi("C") -> c_int
+    ]("flare_brotli_decompress")
+    var cap = max(len(data) * 8, 4096)
+    while True:
+        var out = List[UInt8](capacity=cap)
+        out.resize(cap, 0)
+        var written = fn_dec(
+            Int(data.unsafe_ptr()),
+            len(data),
+            Int(out.unsafe_ptr()),
+            cap,
+        )
+        var w = Int(written)
+        if w == -2:
+            cap *= 2
+            continue
+        if w < 0:
+            raise Error("flare_brotli_decompress failed: " + String(written))
+        out.resize(w, 0)
+        return out^

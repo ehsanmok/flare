@@ -568,12 +568,17 @@ def test_decode_content_identity() raises:
 
 
 def test_decode_content_unsupported() raises:
-    """Unsupported encoding in decode_content raises an error."""
+    """Unsupported encoding in decode_content raises an error.
+
+    v0.6 Track I added ``br`` (brotli) support, so the previous
+    "br raises" property is gone. ``zstd`` is still unsupported and
+    must raise.
+    """
     from flare.http.encoding import decode_content
 
     var data = List[UInt8]()
     with assert_raises():
-        _ = decode_content(Span[UInt8, _](data), "br")
+        _ = decode_content(Span[UInt8, _](data), "zstd")
 
 
 def main() raises:
