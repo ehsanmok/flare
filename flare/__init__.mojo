@@ -598,6 +598,32 @@ from .http.cookie import (
     parse_set_cookie_header,
 )
 
+# flare.http2 (v0.6 — Track J)
+from .http2 import (
+    Connection as H2NetConnection,
+    Frame as H2Frame,
+    FrameFlags as H2FrameFlags,
+    FrameHeader as H2FrameHeader,
+    FrameType as H2FrameType,
+    H2Connection,
+    H2Error,
+    H2ErrorCode,
+    H2_DEFAULT_FRAME_SIZE,
+    H2_MAX_FRAME_SIZE,
+    H2_PREFACE,
+    HpackDecoder,
+    HpackEncoder,
+    HpackHeader,
+    Stream as H2Stream,
+    StreamState as H2StreamState,
+    decode_integer as h2_decode_integer,
+    detect_h2c_upgrade,
+    encode_frame as h2_encode_frame,
+    encode_integer as h2_encode_integer,
+    is_h2_alpn,
+    parse_frame as h2_parse_frame,
+)
+
 # flare.ws
 from .ws.frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 from .ws.client import WsClient, WsHandshakeError, WsMessage

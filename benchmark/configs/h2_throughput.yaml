@@ -1,0 +1,15 @@
+# HTTP/2 throughput configuration (v0.6 Track J).
+#
+# Drives ``h2load`` against the in-process flare HTTP/2 driver via a
+# tiny adapter binary. Uses a small connection count with high
+# concurrent streams per connection — the hyper / nghttp2 numbers in
+# benchmark/results/v0.6/h2 use the same parameters.
+name: h2_throughput
+h2load_clients: 1
+h2load_streams: 100
+h2load_requests: 100000
+h2load_duration_seconds: 30
+warmup_seconds: 10
+runs: 3
+quiet_seconds: 5
+stdev_pct_gate: 5.0
