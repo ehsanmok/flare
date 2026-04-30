@@ -9,7 +9,7 @@ Key performance characteristics:
 - Respects HTTP/1.0 close-by-default semantics.
 """
 
-from std.memory import memcpy
+from std.memory import memcpy, stack_allocation
 from std.ffi import c_int, c_uint, external_call
 
 from ..runtime._libc_time import libc_nanosleep_ms
@@ -974,6 +974,25 @@ def _parse_int_str(s: String) -> Int:
 # ── Response helpers ──────────────────────────────────────────────────────────
 
 
+@always_inline
+def _string_to_bytes(s: String) -> List[UInt8]:
+    """Bulk-copy a ``String``'s bytes into a freshly-allocated ``List[UInt8]``.
+
+    Replaces the byte-by-byte append loop ``ok`` / ``ok_json`` / ...
+    were doing on the response-building hot path. One allocation, one
+    ``memcpy`` — what every Rust framework's ``Bytes::from(String)``
+    is doing under the hood.
+    """
+    var n = s.byte_length()
+    var body_bytes = List[UInt8]()
+    if n == 0:
+        return body_bytes^
+    body_bytes.resize(n, UInt8(0))
+    var src = s.as_bytes()
+    memcpy(dest=body_bytes.unsafe_ptr(), src=src.unsafe_ptr(), count=n)
+    return body_bytes^
+
+
 def ok(body: String = "") -> Response:
     """Create a 200 OK response with optional text body.
 
@@ -984,10 +1003,9 @@ def ok(body: String = "") -> Response:
         A ``Response`` with status 200. Sets ``Content-Type: text/plain``
         if body is non-empty.
     """
-    var body_bytes = List[UInt8](capacity=body.byte_length())
-    for b in body.as_bytes():
-        body_bytes.append(b)
-    var resp = Response(status=Status.OK, reason="OK", body=body_bytes^)
+    var resp = Response(
+        status=Status.OK, reason="OK", body=_string_to_bytes(body)
+    )
     if body.byte_length() > 0:
         try:
             resp.headers.set("Content-Type", "text/plain; charset=utf-8")
@@ -1005,10 +1023,9 @@ def ok_json(body: String) -> Response:
     Returns:
         A ``Response`` with ``Content-Type: application/json``.
     """
-    var body_bytes = List[UInt8](capacity=body.byte_length())
-    for b in body.as_bytes():
-        body_bytes.append(b)
-    var resp = Response(status=Status.OK, reason="OK", body=body_bytes^)
+    var resp = Response(
+        status=Status.OK, reason="OK", body=_string_to_bytes(body)
+    )
     try:
         resp.headers.set("Content-Type", "application/json")
     except:
@@ -1018,11 +1035,10 @@ def ok_json(body: String) -> Response:
 
 def bad_request(msg: String = "Bad Request") -> Response:
     """Create a 400 Bad Request response."""
-    var body_bytes = List[UInt8](capacity=msg.byte_length())
-    for b in msg.as_bytes():
-        body_bytes.append(b)
     var resp = Response(
-        status=Status.BAD_REQUEST, reason="Bad Request", body=body_bytes^
+        status=Status.BAD_REQUEST,
+        reason="Bad Request",
+        body=_string_to_bytes(msg),
     )
     try:
         resp.headers.set("Content-Type", "text/plain")
@@ -1036,11 +1052,10 @@ def not_found(path: String = "") -> Response:
     var msg = "Not Found"
     if path.byte_length() > 0:
         msg = "Not Found: " + path
-    var body_bytes = List[UInt8](capacity=msg.byte_length())
-    for b in msg.as_bytes():
-        body_bytes.append(b)
     var resp = Response(
-        status=Status.NOT_FOUND, reason="Not Found", body=body_bytes^
+        status=Status.NOT_FOUND,
+        reason="Not Found",
+        body=_string_to_bytes(msg),
     )
     try:
         resp.headers.set("Content-Type", "text/plain")
@@ -1051,13 +1066,10 @@ def not_found(path: String = "") -> Response:
 
 def internal_error(msg: String = "Internal Server Error") -> Response:
     """Create a 500 Internal Server Error response."""
-    var body_bytes = List[UInt8](capacity=msg.byte_length())
-    for b in msg.as_bytes():
-        body_bytes.append(b)
     var resp = Response(
         status=Status.INTERNAL_SERVER_ERROR,
         reason="Internal Server Error",
-        body=body_bytes^,
+        body=_string_to_bytes(msg),
     )
     try:
         resp.headers.set("Content-Type", "text/plain")
@@ -1163,6 +1175,40 @@ def _append_str(mut buf: List[UInt8], s: String):
     var old_len = len(buf)
     buf.resize(old_len + n, UInt8(0))
     memcpy(dest=buf.unsafe_ptr() + old_len, src=s.unsafe_ptr(), count=n)
+
+
+@always_inline
+def _append_int(mut buf: List[UInt8], var n: Int):
+    """Append the ASCII decimal form of ``n`` to ``buf``.
+
+    Hot path on every serialised response (status line + Content-Length).
+    Stack-buffer ``itoa`` keeps it allocation-free; the previous
+    ``String(int)`` path forced a per-call heap allocation just to throw
+    the bytes back into the wire buffer.
+    """
+    if n == 0:
+        buf.append(UInt8(48))  # '0'
+        return
+    var negative = n < 0
+    if negative:
+        n = -n
+    # 20 digits is enough for Int64 (-9223372036854775808 → 19 digits + sign).
+    var tmp = stack_allocation[20, UInt8]()
+    var i = 0
+    while n > 0:
+        tmp[i] = UInt8(48 + (n % 10))
+        n = n // 10
+        i += 1
+    var old_len = len(buf)
+    var sign = 1 if negative else 0
+    buf.resize(old_len + sign + i, UInt8(0))
+    var p = buf.unsafe_ptr() + old_len
+    if negative:
+        p[0] = UInt8(45)  # '-'
+        p += 1
+    # ``tmp`` holds the digits in reverse order; flip them on the way out.
+    for k in range(i):
+        p[k] = tmp[i - 1 - k]
 
 
 @always_inline

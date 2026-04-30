@@ -80,7 +80,7 @@ def test_response_text_ascii() raises:
     body.append(UInt8(108))  # l
     body.append(UInt8(108))  # l
     body.append(UInt8(111))  # o
-    var r = Response(status=200, body=body)
+    var r = Response(status=200, body=body^)
     assert_equal(r.text(), "Hello")
 
 

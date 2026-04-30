@@ -65,15 +65,15 @@ struct Response(Movable):
     def __init__(
         out self,
         status: Int,
-        reason: String = "",
-        body: List[UInt8] = List[UInt8](),
-        version: String = "HTTP/1.1",
+        var reason: String = "",
+        var body: List[UInt8] = List[UInt8](),
+        var version: String = "HTTP/1.1",
     ):
         self.status = status
-        self.reason = reason
+        self.reason = reason^
         self.headers = HeaderMap()
-        self.body = body.copy()
-        self.version = version
+        self.body = body^
+        self.version = version^
 
     def ok(self) -> Bool:
         """Return True if the status code is 2xx.

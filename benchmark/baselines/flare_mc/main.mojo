@@ -1,19 +1,19 @@
 """Flare multicore HTTP server plaintext baseline.
 
-Same wire protocol as ``benchmark/baselines/flare/main.mojo`` but
-drives the v0.4.0 ``HttpServer.serve(..., num_workers=N)`` multicore path: N workers on
-N pthreads, each bound to the same port with ``SO_REUSEPORT`` and
-(on Linux) pinned to a specific core.
+Drives ``HttpServer.serve(handler, num_workers=N)`` so N pthread
+workers share a single listener fd via ``EPOLLEXCLUSIVE`` (Linux)
+or fall back to plain accept (macOS). Apple-to-apple with
+``hyper`` / ``axum`` / ``actix_web`` running their tokio multi-thread
+runtime / four-worker actor system at the same worker count.
 
 Environment:
     FLARE_BENCH_PORT   : Listen port (default 8080).
     FLARE_BENCH_WORKERS: Worker count (default 4).
     FLARE_BENCH_PIN    : "1" pins workers to cores; "0" disables (default 1).
 
-Tuned for throughput: idle/write timeouts disabled, no cookies, no logs.
+Tuned for throughput: idle/write timeouts disabled, no logs.
 """
 
-from std.memory import memcpy
 from std.os import getenv
 
 from flare.http import (
@@ -29,19 +29,16 @@ from flare.net import SocketAddr
 
 
 def handler(req: Request) raises -> Response:
+    # ``ok`` does the bulk-memcpy body alloc and stamps
+    # ``Content-Type: text/plain; charset=utf-8`` once. With the
+    # move-only ``Response.__init__`` the only per-request heap
+    # allocations are the 13-byte body, the two header-list slots,
+    # and the two header String values — comparable to hyper /
+    # axum / actix_web's ``Response::builder().body(Bytes::from(...))``
+    # path.
     if req.url == "/plaintext":
-        var s = "Hello, World!"
-        var sb = s.as_bytes()
-        var n = len(sb)
-        var b = List[UInt8]()
-        b.resize(n, UInt8(0))
-        memcpy(dest=b.unsafe_ptr(), src=sb.unsafe_ptr(), count=n)
-        var r = Response(status=200, reason="OK", body=b^)
-        r.headers.set("Content-Type", "text/plain; charset=utf-8")
-        return r^
-    var empty = List[UInt8]()
-    var nf = Response(status=404, reason="Not Found", body=empty^)
-    return nf^
+        return ok("Hello, World!")
+    return Response(status=404, reason="Not Found")
 
 
 alias BenchHandler = FnHandlerCT[handler]

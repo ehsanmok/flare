@@ -196,7 +196,7 @@ def test_response_json_parses_value() raises:
     var body = List[UInt8]()
     for b in String('{"x": 1}').as_bytes():
         body.append(b)
-    var resp = Response(status=200, body=body)
+    var resp = Response(status=200, body=body^)
     var data = resp.json()
     assert_equal(data["x"].int_value(), 1)
 
@@ -206,7 +206,7 @@ def test_response_iter_bytes_whole() raises:
     var body = List[UInt8]()
     for i in range(10):
         body.append(UInt8(i))
-    var resp = Response(status=200, body=body)
+    var resp = Response(status=200, body=body^)
     var total = List[UInt8]()
     for chunk in resp.iter_bytes(1024):
         for b in chunk:
@@ -221,7 +221,7 @@ def test_response_iter_bytes_chunks() raises:
     var body = List[UInt8]()
     for i in range(9):
         body.append(UInt8(i))
-    var resp = Response(status=200, body=body)
+    var resp = Response(status=200, body=body^)
     var chunks = List[Int]()
     for chunk in resp.iter_bytes(4):
         chunks.append(len(chunk))

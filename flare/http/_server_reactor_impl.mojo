@@ -45,6 +45,7 @@ from flare.http.server import (
     _ascii_lower,
     _status_reason,
     _append_str,
+    _append_int,
 )
 from flare.http.static_response import StaticResponse
 from flare.net import IpAddr, SocketAddr
@@ -942,7 +943,7 @@ struct ConnHandle(Movable):
         var wire = self.write_buf^
 
         _append_str(wire, "HTTP/1.1 ")
-        _append_str(wire, String(resp.status))
+        _append_int(wire, resp.status)
         _append_str(wire, " ")
         _append_str(wire, reason)
         _append_str(wire, "\r\n")
@@ -960,7 +961,7 @@ struct ConnHandle(Movable):
             _append_str(wire, "\r\n")
 
         _append_str(wire, "Content-Length: ")
-        _append_str(wire, String(body_len))
+        _append_int(wire, body_len)
         _append_str(wire, "\r\n")
 
         if keep_alive:

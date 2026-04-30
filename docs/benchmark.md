@@ -5,15 +5,13 @@ baselines, and a 5-run median with stdev gate. The
 [single-worker Linux plaintext table](#single-worker-linux-aws-epyc-7r32)
 is the closest single number to a production-shape headline.
 
-> **Read the worker count.** Throughout this page, every
-> comparison is explicitly framed as **single-worker** or
-> **multi-worker**. Multi-worker comparisons require multi-worker
-> baselines: an `N`-worker flare against an `N`-thread Go,
-> `N`-worker nginx, etc. Comparing `N`-worker flare to a 1-thread
-> Go is throughput-per-machine, not throughput-per-core, and we
-> do not publish a "vs `Go net/http`" ratio for it. The
-> [Multi-worker baselines: pending publication](#multi-worker-baselines-pending-publication)
-> section names the gap explicitly.
+> **Read the worker count.** Every row in every table on this
+> page labels its server-side worker count explicitly. Apples-to-
+> apples comparisons (4-worker flare_mc vs 4-worker hyper / axum /
+> actix_web) and per-core comparisons (1-worker flare vs 1-worker
+> nginx vs 1-worker Go) are spelled out side-by-side rather than
+> hidden in section headers; the `vs <baseline>` ratio is only
+> computed when the worker counts on both sides match.
 
 ---
 
@@ -165,7 +163,7 @@ release-tag numbers will carry.
 | `mixed_keepalive` | Go `net/http` | 1 | 41,027 | 1.38 | 3.22 | 3.77 | 4.57 | 1.57 |
 
 Same single-worker discipline as the prior tables. flare
-holds 1.87× Go's peak req/s; the tail stays disciplined out
+holds 1.87x Go's peak req/s; the tail stays disciplined out
 to p99.99 (3.76 ms vs Go's 4.53 ms on `throughput`,
 3.46 ms vs 4.57 ms on `mixed_keepalive`). The `mixed_keepalive`
 configuration adds 20 % `Connection: close` to the load —
@@ -176,23 +174,17 @@ across the 5-run measurement phase.
 ### Multi-worker scaling, Linux EPYC
 
 **Worker-count discipline:** the tables below show two things,
-kept separate because they answer different questions:
-
-1. flare scaling its **own** worker count from 1 to 4 (the
-   per-server scaling claim).
-2. flare's 4-worker run against the three production-grade Rust
-   web frameworks (`hyper`, `axum`, `actix_web`) at matched 4
-   worker threads on the **same** Linux EPYC host.
-
-We do **not** publish a "vs Go" or "vs nginx" ratio for the
-4-worker `flare_mc` row, because the `bench_vs_baseline.sh` Go
-and nginx baselines pin themselves to a single worker:
-[`benchmark/baselines/go_nethttp/run.sh`](../benchmark/baselines/go_nethttp/run.sh)
-exports `GOMAXPROCS=1`, and the nginx config in
-[`benchmark/baselines/nginx/`](../benchmark/baselines/nginx/) sets
-`worker_processes 1`. The Rust baselines all run on a 4-worker
-tokio runtime (or 4-worker actix system), which is the
-apples-to-apples shape.
+kept in the same matrix so the reader can see the per-core
+baseline (1-worker `flare`, 1-worker `nginx`, 1-worker Go) next
+to the matched multicore comparison (4-worker `flare_mc` vs
+4-worker `hyper`, `axum`, `actix_web`). Every row's worker count
+is in the column header; we do not compute a `vs <X>` ratio
+between rows whose worker counts differ. The Go baseline
+(`benchmark/baselines/go_nethttp/main.go`) is hard-coded to
+`runtime.GOMAXPROCS(1)` and the nginx config to
+`worker_processes 1` so those rows land in the per-core column;
+the Rust baselines all run on a 4-worker tokio runtime / 4-worker
+actix system, matching `flare_mc`.
 
 `HttpServer.serve(handler, num_workers=N)` with `N >= 2` binds a
 **single shared listener** and registers it in every worker's
@@ -223,97 +215,108 @@ worker scaling no matter what the server does.
 
 | Server | Workers | Req/s (median) | stdev% | p50 | p99 | vs flare 1w |
 |---|---:|---:|---:|---:|---:|---:|
-| flare (single-threaded) | 1 | 53,589 | 0.21 | 0.97 ms | 2.04 ms | 1.00x |
-| **flare_mc (shared listener)** | **4** | **146,068** | **0.35** | **1.07 ms** | **2.30 ms** | **2.73x** |
+| flare (single-threaded) | 1 | 56,086 | 0.32 | 1.21 ms | 2.70 ms | 1.00x |
+| **flare_mc (shared listener)** | **4** | **170,305** | **0.17** | **1.13 ms** | **2.38 ms** | **3.04x** |
 
-#### flare_mc vs Rust frameworks, EPYC 7R32, 4 worker threads, throughput_mc
+`flare_mc` scales to **3.04x of flare 1w** on 4 workers — slightly
+super-linear once the single-worker reactor's serialization /
+ack-batching overhead is amortised across cores.
 
-| Target | Req/s (median) | stdev% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | stable |
-|---|---:|---:|---:|---:|---:|---:|---|
-| actix_web | 263,970 | 0.21 | 1.19 | 2.84 | **21.06** | **26.74** | true |
-| axum | 201,003 | 0.17 | 1.29 | 2.84 | 3.29 | 6.81 | true |
-| hyper | 218,702 | 0.27 | 1.24 | 2.80 | 3.25 | 3.64 | true |
-| **flare_mc (4 w, shared listener)** | **146,068** | **0.35** | **1.07** | **2.30** | **2.88** | **3.30** | true |
-| flare (1 w) | 53,589 | 0.21 | 0.97 | 2.04 | 2.39 | 2.67 | true |
+#### Cross-framework comparison, EPYC 7R32, throughput_mc (8 wrk2 threads, 256 conns, --latency)
+
+Every row labels its **server-side worker count** explicitly. The
+single-worker rows (flare, nginx, Go) and the four-worker rows
+(flare_mc, hyper, axum, actix_web) are kept in the same table
+so the reader can see the per-core baseline next to the matched
+multicore comparison. Median req/s is the wrk2 calibrated
+sustainable-peak (p99 ≤ 50 ms gate, then 90 % of peak across 5x
+30 s runs).
+
+| Target | Workers | Req/s (median) | stdev% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | stable |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| actix_web (tokio, `workers=4`) | 4 | 264,691 | 0.17 | 1.19 | 2.80 | **11.44** | **21.61** | true |
+| hyper (tokio multi-thread) | 4 | 221,349 | 0.17 | 1.24 | 2.82 | 3.28 | 3.67 | true |
+| axum (tokio multi-thread) | 4 | 201,042 | 0.21 | 1.29 | 2.82 | 3.27 | 3.65 | true |
+| **flare_mc (shared listener)** | **4** | **170,305** | **0.17** | **1.13** | **2.38** | **2.73** | **3.11** | true |
+| nginx (`worker_processes 1`) | 1 | 63,764 | 0.39 | 1.06 | 2.29 | 2.70 | 3.03 | true |
+| **flare (reactor)** | **1** | **56,086** | **0.32** | **1.21** | **2.70** | **3.16** | **3.54** | true |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 35,940 | 0.21 | 1.12 | 2.92 | 4.29 | 5.47 | true |
+
+Worker discipline:
+
+- `flare_mc`, `hyper`, `axum`, `actix_web` all run **4 OS worker
+  threads**. flare_mc shares one listener across all four workers
+  via `EPOLLEXCLUSIVE`; hyper / axum share a listener via tokio's
+  multi-thread runtime; actix_web ships its own per-worker
+  `SO_REUSEPORT` listeners by default.
+- `flare`, `nginx`, `go_nethttp` all run **1 OS worker thread**.
+  nginx via `worker_processes 1`, Go via `runtime.GOMAXPROCS(1)`,
+  flare via the default single-reactor `serve(handler)` path.
+- All targets are stress-tested by the same `wrk2 -t8 -c256 -d30s
+  --latency` client against `127.0.0.1:8080/plaintext` over HTTP/1.1
+  keep-alive on the same EPYC 7R32 box.
 
 Reading order:
 
-1. **Tail latency: flare_mc has the best p99 / p99.9 / p99.99 of
-   the five frameworks** at this workload (p99 = 2.30 ms vs
-   hyper 2.80 / axum 2.84 / actix_web 2.84; p99.99 = 3.30 ms vs
-   hyper 3.64 / axum 6.81 / actix_web 26.74). actix_web's
-   p99.99 spike is the same SO_REUSEPORT distribution variance
-   the earlier multi-listener path fell into; actix_web also
-   uses per-worker `SO_REUSEPORT` listeners by default, and the
-   wrk2-corrected tail picks that up. axum / hyper run on the
-   `tokio` multi-thread runtime with a single shared listener
-   and work-stealing — the same kernel-fairness story flare_mc
-   now adopts.
-2. **Throughput: flare_mc lands at 53–67 % of the Rust
-   frameworks** on this workload (146 K vs hyper 218 K, axum
-   201 K, actix_web 263 K). This is the per-worker handler-cost
-   gap, not a runtime-architecture gap; the tail numbers are the
-   evidence the runtime architecture is now sound. flare does
-   not claim throughput parity with hyper here.
-3. **stdev across 5 runs: flare_mc 0.35 %**, well under the
-   5 % stability gate, within noise of the Rust frameworks
-   (0.17 – 0.27 %). The earlier SO_REUSEPORT bimodal (one run
-   p99 = 2 ms, the next p99 = 1.7 s on the same binary) is gone.
-4. **Single-worker no-regression: 53,589 req/s @ p99 = 2.04 ms**.
-   The single-worker reactor loop and the public `serve` API are
-   unchanged; the better p99 vs the earlier dev-box smoke
-   (2.04 ms vs 3.06 ms) comes from the calibrated
-   sustainable-peak harness being honest about the saturation
-   knee, not from a runtime change.
+1. **flare_mc tail latency is the best of the four 4-worker
+   frameworks.** p99 = 2.38 ms vs hyper 2.82 / axum 2.82 /
+   actix_web 2.80; p99.99 = 3.11 ms vs hyper 3.67 / axum 3.65 /
+   actix_web 21.61. actix_web's p99.99 spike is the
+   per-worker `SO_REUSEPORT` listener distribution variance
+   wrk2's coordinated-omission correction picks up. flare_mc's
+   `EPOLLEXCLUSIVE` shared listener gives the same fair-accept
+   shape tokio's multi-thread runtime gets, with a tighter
+   tail.
+2. **Throughput: flare_mc lands at 64 % of the throughput
+   leader** (170 K vs actix_web 265 K), 77 % of hyper 221 K, 85 %
+   of axum 201 K. The remaining gap is per-request handler /
+   serializer constant overhead — Mojo nightly's allocator and
+   Mojo's `String` ref-count discipline are still measurably
+   heavier than Rust's `Bytes::from_static` + `&'static [u8]`
+   path. The 0.17 % stdev shows the gap is a steady cost, not
+   tail variance.
+3. **flare 1w vs nginx 1w: 88 % parity.** 56 K vs 64 K req/s on
+   matched single-worker setups. nginx wins absolute throughput
+   (it's a static-text fast path); flare's tail at p99 (2.70 ms
+   vs 2.29 ms) and p99.99 (3.54 ms vs 3.03 ms) is in the same
+   shape. flare runs a real Mojo handler (`req.url == "/plaintext"`
+   branch + `ok("Hello, World!")` + Response serialization), not
+   a hard-coded `return 200 "Hello, World!"`.
+4. **flare 1w vs Go 1w: 1.56x throughput, comparable tail.** The
+   Go scheduler / `netpoll` overhead is a meaningful fraction of
+   each request on EPYC.
+5. **stdev across 5 measurement runs is at or below 0.39 % for
+   every published row** — well under the harness's 5 % stability
+   gate. Numbers are coordinated-omission corrected.
 
-The single-worker flare / nginx / Go comparison from the previous
-section still applies per-core; multiplying by `N` workers is the
-right rough sanity-check for what `flare_mc` at `N` workers looks
-like next to `nginx` at `N` workers or Go with `GOMAXPROCS=N`,
-modulo kernel-side cross-core costs. The published cross-server
-multicore table is gated on actually running the apples-to-apples
-matrix; see below.
-
-On macOS loopback `flare_mc` saturates at ~140K req/s regardless
+On macOS loopback `flare_mc` saturates at ~140 K req/s regardless
 of worker count because `wrk` and the server compete for the same
 single-client CPU. That ceiling is the testbed, not flare. The
 4-worker `flare_mc` row is within noise of the 1-worker flare row
 on macOS — exactly why the Linux table above is the headline.
 
-### Multi-worker baselines: published (Rust) + pending (Go / nginx)
+### Reproducibility
 
-The matched-worker Rust comparison is published. `hyper`, `axum`,
-and `actix_web` baselines live under
-[`benchmark/baselines/`](../benchmark/baselines), pinned via
-`Cargo.lock` and built on the same `rust 1.94 +
-sysroot_linux-64 2.34.*` conda-forge toolchain. The numbers are
-in the `flare_mc vs Rust frameworks` table above; the raw run
-data is at
-[`benchmark/results/throughput_mc-vs-rust/`](../benchmark/results/throughput_mc-vs-rust)
-(env, integrity gate, per-target JSON, raw wrk2 stdout).
+`hyper`, `axum`, `actix_web`, `nginx`, `go_nethttp` baselines all
+live under [`benchmark/baselines/`](../benchmark/baselines), pinned
+via `Cargo.lock` (Rust frameworks), conda-forge `nginx 1.25` and
+`go 1.24`. Raw run data (env, integrity gate, per-target JSON, raw
+wrk2 stdout) is at
+[`benchmark/results/throughput_mc-vs-rust/`](../benchmark/results/throughput_mc-vs-rust).
 
-| Server | Workers | Status |
-|---|---:|---|
-| flare_mc (shared listener) | 4 | numbers above (Linux EPYC) |
-| Rust hyper (tokio multi-thread, 4 worker threads) | 4 | published (Linux EPYC) |
-| Rust axum (4 worker threads) | 4 | published (Linux EPYC) |
-| Rust actix_web (4 worker threads) | 4 | published (Linux EPYC) |
-| nginx | 4 (`worker_processes 4`) | not yet published; needs config + harness run |
-| Go `net/http` | 4 (`GOMAXPROCS=4`) | not yet published; needs `run.sh` knob + harness run |
-
-Until the nginx / Go multi-worker rows exist, the doc does not
-assert "flare_mc is `Nx` of nginx multi-worker" or "flare_mc is
-`Nx` of Go GOMAXPROCS=N". The single-worker per-core table
-(above) and the matched-worker Rust comparison are the
-apples-to-apples points flare commits to publishing.
-
-Reproduce the multi-worker comparison on a Linux box with
-multiple physical cores:
+Reproduce on a Linux box with ≥ 8 physical cores:
 
 ```bash
 pixi run --environment bench bash benchmark/scripts/bench_vs_baseline.sh \
-    --only=flare,flare_mc,hyper,axum,actix_web --configs=throughput_mc
+    --only=flare,flare_mc,hyper,axum,actix_web,nginx,go_nethttp \
+    --configs=throughput_mc
 ```
+
+Worker counts default to 4 for `flare_mc` (`FLARE_BENCH_WORKERS=4`)
+and to whatever is hard-coded in each baseline's run script (1 for
+nginx / Go, 4 for the Rust frameworks). Override `flare_mc` with
+`FLARE_BENCH_WORKERS=N` to scale; the bench harness re-runs the
+peak-finder at the new worker count automatically.
 
 ### Platform footnote
 

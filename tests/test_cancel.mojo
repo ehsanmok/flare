@@ -101,7 +101,12 @@ def test_slow_handler_short_circuits_on_pre_flip() raises:
     cell.flip(CancelReason.SHUTDOWN)
     var h = _SlowHandler(max_steps=5)
     var req = Request(method=Method.GET, url="/")
-    var resp = h.serve(req^, cell.handle())
+    # ``cell.handle()`` returns a ``Cancel`` carrying the cell's
+    # heap address as a plain ``Int``; ``cell`` must outlive the
+    # ``serve`` call so the handler still observes a live cell.
+    var c = cell.handle()
+    var resp = h.serve(req^, c)
+    _ = cell^
     assert_equal(resp.text(), "partial:0")
 
 

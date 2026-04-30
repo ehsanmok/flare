@@ -39,12 +39,22 @@ The bar isn't "is it fast", it's *is it hard to misuse under load and easy to op
 
 ## Numbers
 
-TFB plaintext, single-worker except where noted, `wrk2` two-phase (find-peak, then sustain at 90 % of peak). Full methodology + tables in [`docs/benchmark.md`](docs/benchmark.md).
+TFB plaintext (`GET /plaintext` → 13-byte `Hello, World!`), `wrk2` calibrated-peak harness with `--latency` (coordinated-omission corrected). Linux AWS EPYC 7R32, `wrk2 -t8 -c256 -d30s`, 5x30 s measurement runs at 90 %-of-peak. Worker counts spelled out per row. Full methodology + tables in [`docs/benchmark.md`](docs/benchmark.md).
 
-- **Linux EPYC 7R32, single-worker**: ~80K req/s, **on par with nginx (`worker_processes 1`), ~1.96x Go `net/http` (`GOMAXPROCS=1`)**.
-- **Multi-worker scaling**: **4.38x from 1 to 4 workers** (flare's `SO_REUSEPORT` thread-per-core scheduler).
-- **Tail latencies under sustained 90%-of-peak load** (`wrk2 --latency`, coordinated-omission corrected): p50 ≈ 1.2 ms, p99 ≈ 3.1 ms, **p99.99 ≈ 3.8 ms**.
-- **Apple M-series, single-worker**: ~157K req/s, ~1.10× Go `net/http`.
+| Server | Workers | Req/s (median) | p99 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|
+| actix_web (tokio) | 4 | 264,691 | 2.80 | 21.61 |
+| hyper (tokio multi-thread) | 4 | 221,349 | 2.82 | 3.67 |
+| axum (tokio multi-thread) | 4 | 201,042 | 2.82 | 3.65 |
+| **flare_mc** (shared listener) | **4** | **170,305** | **2.38** | **3.11** |
+| nginx (`worker_processes 1`) | 1 | 63,764 | 2.29 | 3.03 |
+| **flare** (reactor) | **1** | **56,086** | **2.70** | **3.54** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 35,940 | 2.92 | 5.47 |
+
+- **Apples-to-apples 4-worker comparison.** `flare_mc`, `hyper`, `axum`, `actix_web` all run **4 OS worker threads**. flare_mc holds the **best p99 / p99.9 / p99.99** of the four (2.38 / 2.73 / 3.11 ms) and lands at **64 % of the throughput leader** (actix_web).
+- **Per-core baseline.** `flare`, `nginx`, `go_nethttp` all run **1 OS worker thread**. flare 1w is **88 % of nginx 1w** throughput and **1.56x Go 1w**, with comparable tail latency.
+- **Multi-worker scaling.** flare_mc 4w / flare 1w = **3.04x** at the same workload.
+- **Apple M-series, single-worker**: ~157K req/s, ~1.10x Go `net/http`.
 
 ## Install
 

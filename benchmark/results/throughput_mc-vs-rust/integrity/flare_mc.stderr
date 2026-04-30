@@ -1,8 +1,8 @@
-/home/ubuntu/workspace/flare/benchmark/baselines/flare_mc/main.mojo:47:1: warning: 'alias' is deprecated; use 'comptime'
+/home/ubuntu/workspace/flare/benchmark/baselines/flare_mc/main.mojo:44:1: warning: 'alias' is deprecated; use 'comptime'
 alias BenchHandler = FnHandlerCT[handler]
 ^~~~~
 comptime
-/home/ubuntu/workspace/flare/benchmark/baselines/flare_mc/main.mojo:48:1: warning: 'alias' is deprecated; use 'comptime'
+/home/ubuntu/workspace/flare/benchmark/baselines/flare_mc/main.mojo:45:1: warning: 'alias' is deprecated; use 'comptime'
 alias BENCH_CONFIG = ServerConfig(
 ^~~~~
 comptime
