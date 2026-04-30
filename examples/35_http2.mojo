@@ -41,17 +41,17 @@ def main() raises:
 
     # ── ALPN dispatch ────────────────────────────────────────────────────
     print("── 1. ALPN dispatch ──")
-    print("  is_h2_alpn('h2')       :", is_h2_alpn("h2"))
-    print("  is_h2_alpn('http/1.1') :", is_h2_alpn("http/1.1"))
+    print(" is_h2_alpn('h2') :", is_h2_alpn("h2"))
+    print(" is_h2_alpn('http/1.1') :", is_h2_alpn("http/1.1"))
     print()
 
     # ── h2c upgrade detection ────────────────────────────────────────────
     print("── 2. h2c upgrade detection ──")
     var h = HeaderMap()
-    print("  no headers           :", detect_h2c_upgrade(h))
+    print(" no headers :", detect_h2c_upgrade(h))
     h.set("Upgrade", "h2c")
     h.set("HTTP2-Settings", "AAMAAABkAAQAoAAAAAIAAAAA")
-    print("  Upgrade: h2c + ...   :", detect_h2c_upgrade(h))
+    print(" Upgrade: h2c + ... :", detect_h2c_upgrade(h))
     print()
 
     # ── Synchronous round-trip ───────────────────────────────────────────
@@ -59,7 +59,7 @@ def main() raises:
     var c = H2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     var settings_bytes = c.drain()
-    print("  bytes after preface  :", len(settings_bytes), "(SETTINGS frame)")
+    print(" bytes after preface :", len(settings_bytes), "(SETTINGS frame)")
 
     var enc = HpackEncoder()
     var hdrs = List[HpackHeader]()
@@ -76,17 +76,17 @@ def main() raises:
     )
     f.payload = enc.encode(Span[HpackHeader, _](hdrs))
     var hf_bytes = encode_frame(f)
-    print("  HEADERS frame bytes  :", len(hf_bytes))
+    print(" HEADERS frame bytes :", len(hf_bytes))
 
     c.feed(Span[UInt8, _](hf_bytes))
     var ids = c.take_completed_streams()
-    print("  completed streams    :", len(ids))
+    print(" completed streams :", len(ids))
 
     var req = c.take_request(ids[0])
-    print("  request method       :", req.method)
-    print("  request url          :", req.url)
-    print("  request version      :", req.version)
-    print("  Host header          :", req.headers.get("host"))
+    print(" request method :", req.method)
+    print(" request url :", req.url)
+    print(" request version :", req.version)
+    print(" Host header :", req.headers.get("host"))
 
     var resp = Response(status=200)
     resp.headers.set("Content-Type", "application/json")
@@ -94,7 +94,7 @@ def main() raises:
     c.emit_response(ids[0], resp^)
 
     var out_bytes = c.drain()
-    print("  outbound bytes       :", len(out_bytes), "(HEADERS + DATA)")
+    print(" outbound bytes :", len(out_bytes), "(HEADERS + DATA)")
     print()
 
     print("=== Example 35 complete ===")

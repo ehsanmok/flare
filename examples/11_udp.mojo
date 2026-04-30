@@ -30,8 +30,8 @@ def main() raises:
     var client = UdpSocket.bind(SocketAddr.localhost(0))
     var server_port = server.local_addr().port
     var client_port = client.local_addr().port
-    print("  server listening on 127.0.0.1:" + String(server_port))
-    print("  client bound    on 127.0.0.1:" + String(client_port))
+    print(" server listening on 127.0.0.1:" + String(server_port))
+    print(" client bound on 127.0.0.1:" + String(client_port))
     print()
 
     # ── 2. Send + receive a datagram ─────────────────────────────────────────
@@ -41,15 +41,15 @@ def main() raises:
     var sent = client.send_to(
         Span[UInt8](payload), SocketAddr.localhost(server_port)
     )
-    print("  client sent " + String(sent) + " bytes")
+    print(" client sent " + String(sent) + " bytes")
 
     var buf = zero_buf(128)
     var received = server.recv_from(Span[UInt8](buf))
     var n = received[0]
     var sender = received[1]
     var text = String(unsafe_from_utf8=buf[:n])
-    print("  server got  " + String(n) + " bytes: '" + text + "'")
-    print("  sender addr: " + String(sender))
+    print(" server got " + String(n) + " bytes: '" + text + "'")
+    print(" sender addr: " + String(sender))
     print()
 
     # ── 3. Oversized datagram rejected locally before any syscall ───────────
@@ -58,9 +58,9 @@ def main() raises:
     huge.resize(100_000, UInt8(0))  # UDP max payload is ~65 KB
     try:
         _ = client.send_to(Span[UInt8](huge), SocketAddr.localhost(server_port))
-        print("  [UNEXPECTED] oversized send returned OK")
+        print(" [UNEXPECTED] oversized send returned OK")
     except e:
-        print("  raised:", String(e))
+        print(" raised:", String(e))
     print()
 
     server.close()

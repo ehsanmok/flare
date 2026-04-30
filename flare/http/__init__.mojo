@@ -19,35 +19,35 @@ from flare.http import (
 )
 ```
 
-- `HttpClient`          — Send HTTP/HTTPS requests: `get`, `post`, `put`, etc.
-- `HttpServer`          — Accept and dispatch HTTP requests.
-- `Request`             — HTTP request (method, URL, headers, body).
-- `Response`            — HTTP response (status, headers, body, `text()`, `json()`).
-- `HeaderMap`           — Case-insensitive HTTP header collection.
+- `HttpClient` — Send HTTP/HTTPS requests: `get`, `post`, `put`, etc.
+- `HttpServer` — Accept and dispatch HTTP requests.
+- `Request` — HTTP request (method, URL, headers, body).
+- `Response` — HTTP response (status, headers, body, `text()`, `json()`).
+- `HeaderMap` — Case-insensitive HTTP header collection.
 - `HeaderInjectionError` — Raised on CR/LF characters in header names or values.
-- `Url`                 — Parsed HTTP/HTTPS URL (scheme, host, port, path, query).
-- `UrlParseError`       — Raised on invalid URL syntax.
-- `Method`              — HTTP method string constants (`GET`, `POST`, …).
-- `Status`              — HTTP status code integer constants (`OK`, `NOT_FOUND`, …).
-- `Encoding`            — Content-Encoding token constants (`gzip`, `deflate`).
-- `HttpError`           — Raised by `Response.raise_for_status()` on non-2xx responses.
-- `TooManyRedirects`    — Raised when the redirect limit is exceeded.
-- `BasicAuth`           — HTTP Basic authentication (RFC 7617).
-- `BearerAuth`          — HTTP Bearer token authentication (RFC 6750).
+- `Url` — Parsed HTTP/HTTPS URL (scheme, host, port, path, query).
+- `UrlParseError` — Raised on invalid URL syntax.
+- `Method` — HTTP method string constants (`GET`, `POST`, …).
+- `Status` — HTTP status code integer constants (`OK`, `NOT_FOUND`, …).
+- `Encoding` — Content-Encoding token constants (`gzip`, `deflate`).
+- `HttpError` — Raised by `Response.raise_for_status()` on non-2xx responses.
+- `TooManyRedirects` — Raised when the redirect limit is exceeded.
+- `BasicAuth` — HTTP Basic authentication (RFC 7617).
+- `BearerAuth` — HTTP Bearer token authentication (RFC 6750).
 - `ParamParser`, `ParamInt`, `ParamFloat64`, `ParamBool`, `ParamString`
   — Typed parsers for URL / header string values.
-- `Extractor`           — Trait implemented by each extractor.
+- `Extractor` — Trait implemented by each extractor.
 - `Path`, `Query`, `OptionalQuery`, `Header`, `OptionalHeader`
   — Typed extractors for path params, query string, headers.
 - `Peer`
   — Extracts the kernel-reported peer ``SocketAddr`` populated by the
-    reactor at accept time (v0.5.0 Step 1).
+    reactor at accept time.
 - `BodyBytes`, `BodyText`, `Json`, `Cookies`, `Form`, `Multipart`
   — Extractors that read the request body.
 - `FormData`, `parse_form_urlencoded`, `urlencode`, `urldecode`
-  — ``application/x-www-form-urlencoded`` parsing helpers (v0.6).
+  — ``application/x-www-form-urlencoded`` parsing helpers.
 - `MultipartPart`, `MultipartForm`, `parse_multipart_form_data`
-  — ``multipart/form-data`` parser (RFC 7578) (v0.6).
+  — ``multipart/form-data`` parser (RFC 7578).
 - `Extracted`
   — Reflective auto-injection wrapper: put your extractor set on the
     fields of any ``Handler`` struct (plus ``Defaultable``) and wrap
@@ -76,7 +76,7 @@ from flare.http import HttpClient, BasicAuth, BearerAuth, get, post
 def main() raises:
     # One-shot GET
     var resp = get("https://httpbin.org/get")
-    print(resp.status)                            # 200
+    print(resp.status) # 200
 
     # One-shot POST — String body sets Content-Type: application/json automatically
     post("https://httpbin.org/post", '{"k": 1}').raise_for_status()

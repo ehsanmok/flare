@@ -126,7 +126,7 @@ def target(data: List[UInt8]) raises:
             + url
         )
 
-    # v0.5.0 Step 1 sanitised-error property:
+    # sanitised-error property:
     # When the request did NOT opt into ``expose_errors`` (the
     # production default), a 400 response body must equal the fixed
     # reason ``"Bad Request"`` exactly — no extractor message, no
@@ -161,13 +161,13 @@ def main() raises:
     # Well-formed inputs.
     seeds.append(_b("7abAB1Bearer "))
     seeds.append(_b("42aliceBearer token"))
-    seeds.append(_b("0   "))
+    seeds.append(_b("0 "))
     # Corner cases.
     seeds.append(_b(""))
     seeds.append(_b("-1"))
     seeds.append(_b("abc999"))
     seeds.append(_b("-"))
-    seeds.append(_b("   "))
+    seeds.append(_b(" "))
     seeds.append(_b("9" * 20))
 
     fuzz(

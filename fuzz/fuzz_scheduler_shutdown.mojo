@@ -13,10 +13,10 @@ Expected behaviour: no crashes, no leaked fds, no panics.
 Note on scope: this harness exercises the runtime primitives
 directly (spawn/join, pinning, SO_REUSEPORT bind). Full-Scheduler
 start/shutdown round-trips are covered by ``tests/stress_scheduler.mojo``
-under the lean default env. Earlier versions of flare (<= v0.4.0) could
+under the lean default env. Earlier versions of flare (<= ) could
 not import ``flare.runtime.scheduler`` from a mozz harness at all
 because the scheduler's libc ``free`` FFI conflicted with the stdlib's
-own ``free`` declaration at MLIR lowering time; v0.4.1 switched every
+own ``free`` declaration at MLIR lowering time; switched every
 flare alloc/free pair to the native ``UnsafePointer.alloc`` / ``.free``
 pair, so that build conflict no longer exists.
 

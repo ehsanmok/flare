@@ -1,10 +1,10 @@
-"""flare — a Mojo HTTP/1.1 server you can put in front of users, plus the
-raw TCP, UDP, TLS, DNS, and WebSocket primitives it's built on. Written
-in Mojo with a small FFI footprint (libc, plus OpenSSL for TLS).
+"""flare — a Mojo HTTP server you can put in front of users, plus the
+raw TCP, UDP, TLS, DNS, HTTP/2, and WebSocket primitives it's built
+on. Written in Mojo with a small FFI footprint (libc, OpenSSL for
+TLS, zlib + brotli for content encoding).
 
 ```mojo
-from flare.http import HttpServer, Router, Request, Response, ok
-from flare.net import SocketAddr
+from flare import HttpServer, Router, Request, Response, ok, SocketAddr
 
 def hello(req: Request) raises -> Response:
     return ok("hello")
@@ -18,38 +18,49 @@ def main() raises:
 
 ## What flare is
 
-One reactor per worker (``kqueue`` on macOS, ``epoll`` on Linux),
-shared-nothing thread-per-core via ``SO_REUSEPORT``, RFC 7230 parser
-with 19 fuzz harnesses, and a ``Handler`` trait that takes plain
-``def`` functions or compiled-down structs. ``num_workers=1`` is a
-single-threaded reactor; ``num_workers=N`` with N >= 2 opens N
-``SO_REUSEPORT`` listeners across N pthread workers with optional
-CPU pinning. Static endpoints can skip the parser entirely with
-``serve_static(resp)``.
+One reactor per worker (``kqueue`` on macOS, ``epoll`` on Linux,
+shared-listener with ``EPOLLEXCLUSIVE`` for multi-worker), a
+``Handler`` trait that takes plain ``def`` functions or
+compiled-down structs, an RFC 7230 parser with extensive fuzz
+coverage, and a ``Cancel`` token plumbed to handlers via
+``CancelHandler``. ``num_workers=1`` is a single-threaded reactor;
+``num_workers=N`` with ``N >= 2`` runs N pthread workers behind a
+single shared listener with optional CPU pinning. Static endpoints
+can skip the parser entirely with ``serve_static(resp)``.
 
-flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard
-to misuse under load and easy to operate*. The operational core is
-in: ``Cancel`` token plumbed to handlers via ``CancelHandler``,
-per-request / handler / body-read deadlines,
+The operational core: per-request / handler / body-read deadlines,
 ``HttpServer.drain(timeout_ms)`` for graceful shutdown, sanitised
-error responses, and ``Request.peer`` threaded from the accept
-path. v0.5.0 also ships zero-copy reads (``RequestView[origin]``
-+ ``ViewHandler``), streaming response primitives (``Body`` /
-``ChunkSource`` / ``StreamingResponse[B]``), and server-side TLS
-(``TlsAcceptor`` over OpenSSL).
+error responses, ``Request.peer`` threaded from the accept path,
+zero-copy reads (``RequestView[origin]`` + ``ViewHandler``),
+streaming response primitives (``Body`` / ``ChunkSource`` /
+``StreamingResponse[B]``), and server-side TLS (``TlsAcceptor``
+over OpenSSL).
+
+The application layer: ``Router`` with path params, ``App[S]`` for
+shared state, typed extractors (``PathInt`` / ``QueryInt`` /
+``HeaderStr`` / ``Form`` / ``Multipart`` / ``Cookies`` / ...),
+generic middleware (``Logger`` / ``RequestId`` / ``Compress`` /
+``CatchPanic``), ``Cors``, ``FileServer`` with HEAD + Range,
+gzip + brotli content negotiation, RFC 6265 cookie jars,
+HMAC-SHA256 signed cookies, and typed ``Session[T]`` stores.
 
 ## Architecture
 
 ```
 flare.io       - BufReader
 flare.ws       - WebSocket client + server (RFC 6455)
-flare.http     - HTTP/1.1 client + reactor-backed server + cookies
-flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server since v0.5.0)
+flare.http2    - HTTP/2 frame codec + HPACK + h2c upgrade (RFC 9113 / 7541)
+flare.http     - HTTP/1.1 client + reactor server + Router / App /
+                 extractors + middleware + Cors + FileServer +
+                 forms + cookies + sessions + content-encoding
+flare.crypto   - HMAC-SHA256, base64url
+flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server, ALPN)
 flare.tcp      - TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      - UdpSocket (IPv4 + IPv6)
 flare.dns      - getaddrinfo (dual-stack)
 flare.net      - IpAddr, SocketAddr, RawSocket
-flare.runtime  - Reactor (kqueue/epoll), TimerWheel, Scheduler, Pool[T]
+flare.runtime  - Reactor (kqueue/epoll), TimerWheel, Scheduler,
+                 HandoffQueue + WorkerHandoffPool, Pool[T]
 ```
 
 Each layer only imports from layers below it. No circular dependencies.
@@ -61,7 +72,7 @@ from flare.http import get, post
 
 def main() raises:
     var resp = get("https://httpbin.org/get")
-    print(resp.status, resp.ok())          # 200 True
+    print(resp.status, resp.ok()) # 200 True
 
     var r = post("https://httpbin.org/post", '{"hello": "flare"}')
     r.raise_for_status()
@@ -98,9 +109,9 @@ def create_user(req: Request) raises -> Response:
 
 def main() raises:
     var r = Router()
-    r.get("/",          home)
+    r.get("/", home)
     r.get("/users/:id", get_user)
-    r.post("/users",    create_user)
+    r.post("/users", create_user)
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(r^)
@@ -124,12 +135,12 @@ from flare.net import SocketAddr
 
 @fieldwise_init
 struct GetUser(Copyable, Defaultable, Handler, Movable):
-    var id:    PathInt["id"]
-    var page:  OptionalQueryInt["page"]
-    var auth:  HeaderStr["Authorization"]
+    var id: PathInt["id"]
+    var page: OptionalQueryInt["page"]
+    var auth: HeaderStr["Authorization"]
 
     def __init__(out self):
-        self.id   = PathInt["id"]()
+        self.id = PathInt["id"]()
         self.page = OptionalQueryInt["page"]()
         self.auth = HeaderStr["Authorization"]()
 
@@ -174,9 +185,9 @@ def create_user(req: Request) raises -> Response:
     return ok("created")
 
 comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET,  "/",          home),
-    ComptimeRoute(Method.GET,  "/users/:id", get_user),
-    ComptimeRoute(Method.POST, "/users",     create_user),
+    ComptimeRoute(Method.GET, "/", home),
+    ComptimeRoute(Method.GET, "/users/:id", get_user),
+    ComptimeRoute(Method.POST, "/users", create_user),
 ]
 
 def main() raises:
@@ -206,7 +217,7 @@ def home(req: Request) raises -> Response:
 
 @fieldwise_init
 struct WithHits[Inner: Handler](Handler):
-    var inner:    Self.Inner
+    var inner: Self.Inner
     var snapshot: State[Counters]
 
     def serve(self, req: Request) raises -> Response:
@@ -217,7 +228,7 @@ struct WithHits[Inner: Handler](Handler):
 def main() raises:
     var router = Router()
     router.get("/", home)
-    var app  = App(state=Counters(hits=37), handler=router^)
+    var app = App(state=Counters(hits=37), handler=router^)
     var view = app.state_view()
 
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
@@ -295,7 +306,7 @@ def hello(req: Request) raises -> Response:
 comptime HELLO: FnHandler = FnHandler(hello)
 comptime CONFIG: ServerConfig = ServerConfig(
     max_header_size=4096,
-    max_body_size=64 * 1024,      # must be >= max_header_size (compile time)
+    max_body_size=64 * 1024, # must be >= max_header_size (compile time)
     max_keepalive_requests=1000,
     idle_timeout_ms=30_000,
 )
@@ -341,10 +352,10 @@ from flare.http import Cookie, CookieJar, parse_set_cookie_header
 def main() raises:
     var jar = CookieJar()
     jar.set(Cookie("session", "abc123", secure=True, http_only=True))
-    print(jar.to_request_header())  # session=abc123
+    print(jar.to_request_header()) # session=abc123
 
     var c = parse_set_cookie_header("id=42; Path=/; Max-Age=3600")
-    print(c.name, c.value, c.max_age)  # id 42 3600
+    print(c.name, c.value, c.max_age) # id 42 3600
 ```
 
 ## Low-level API
@@ -357,12 +368,12 @@ from flare.dns import resolve
 
 def main() raises:
     var ip = IpAddr.parse("192.168.1.100")
-    print(ip.is_private())                 # True
+    print(ip.is_private()) # True
 
     var addr = SocketAddr.parse("[::1]:8080")
-    print(addr.ip.is_v6(), addr.port)      # True 8080
+    print(addr.ip.is_v6(), addr.port) # True 8080
 
-    var addrs = resolve("example.com")     # returns both IPv4 and IPv6
+    var addrs = resolve("example.com") # returns both IPv4 and IPv6
     print(addrs[0])
 ```
 
@@ -416,8 +427,44 @@ def main() raises:
 ```
 """
 
-# flare.net
+# ─────────────────────────────────────────────────────────────────────────
+# Most-used surface — what the typical user imports.
+# ─────────────────────────────────────────────────────────────────────────
+
 from .net.address import IpAddr, SocketAddr
+from .http.server import (
+    HttpServer,
+    ServerConfig,
+    ShutdownReport,
+    ok,
+    ok_json,
+    bad_request,
+    not_found,
+    internal_error,
+    redirect,
+)
+from .http.request import Request, Method
+from .http.response import Response, Status
+from .http.handler import (
+    Handler,
+    FnHandler,
+    FnHandlerCT,
+    CancelHandler,
+    WithCancel,
+    ViewHandler,
+    WithViewCancel,
+)
+from .http.router import Router
+from .http.app import App, State
+from .http.client import HttpClient, get, post, put, patch, delete, head
+from .http.auth import Auth, BasicAuth, BearerAuth
+from .runtime._thread import num_cpus
+from .runtime.scheduler import default_worker_count
+
+# ─────────────────────────────────────────────────────────────────────────
+# Networking primitives.
+# ─────────────────────────────────────────────────────────────────────────
+
 from .net.socket import RawSocket
 from .net.error import (
     NetworkError,
@@ -460,7 +507,7 @@ from .tls.acceptor import (
     TLS_PROTOCOL_TLS13,
 )
 
-# flare.http
+# flare.http (additional surface beyond the most-used types re-exported above)
 from .http.cancel import Cancel, CancelCell, CancelReason
 from .http.headers import HeaderMap, HeaderInjectionError
 from .http.header_view import HeaderMapView, parse_header_view
@@ -475,20 +522,7 @@ from .http.body import (
 from .http.streaming_response import StreamingResponse
 from .http.streaming_serialize import serialize_streaming_response
 from .http.url import Url, UrlParseError
-from .http.request import Request, Method
-from .http.response import Response, Status
-from .http.handler import (
-    Handler,
-    CancelHandler,
-    WithCancel,
-    ViewHandler,
-    WithViewCancel,
-    FnHandler,
-    FnHandlerCT,
-)
-from .http.router import Router
 from .http.routes import ComptimeRoute, ComptimeRouter
-from .http.app import App, State
 from .http.extract import (
     ParamParser,
     ParamInt,
@@ -576,19 +610,6 @@ from .http.middleware import (
 from .http.cors import Cors, CorsConfig
 from .http.fs import ByteRange, FileServer, parse_range
 from .http.error import HttpError, TooManyRedirects
-from .http.auth import Auth, BasicAuth, BearerAuth
-from .http.client import HttpClient, get, post, put, patch, delete, head
-from .http.server import (
-    HttpServer,
-    ServerConfig,
-    ShutdownReport,
-    ok,
-    ok_json,
-    bad_request,
-    not_found,
-    internal_error,
-    redirect,
-)
 from .http.static_response import StaticResponse, precompute_response
 from .http.cookie import (
     Cookie,
@@ -598,41 +619,43 @@ from .http.cookie import (
     parse_set_cookie_header,
 )
 
-# flare.http2 (v0.6 — Track J)
+# flare.http2
 from .http2 import (
+    H2Connection,
+    H2Error,
+    H2ErrorCode,
+    H2_PREFACE,
+    H2_DEFAULT_FRAME_SIZE,
+    H2_MAX_FRAME_SIZE,
+    HpackEncoder,
+    HpackDecoder,
+    HpackHeader,
     Connection as H2NetConnection,
     Frame as H2Frame,
     FrameFlags as H2FrameFlags,
     FrameHeader as H2FrameHeader,
     FrameType as H2FrameType,
-    H2Connection,
-    H2Error,
-    H2ErrorCode,
-    H2_DEFAULT_FRAME_SIZE,
-    H2_MAX_FRAME_SIZE,
-    H2_PREFACE,
-    HpackDecoder,
-    HpackEncoder,
-    HpackHeader,
     Stream as H2Stream,
     StreamState as H2StreamState,
-    decode_integer as h2_decode_integer,
+    is_h2_alpn,
     detect_h2c_upgrade,
     encode_frame as h2_encode_frame,
-    encode_integer as h2_encode_integer,
-    is_h2_alpn,
     parse_frame as h2_parse_frame,
+    encode_integer as h2_encode_integer,
+    decode_integer as h2_decode_integer,
 )
 
 # flare.ws
-from .ws.frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 from .ws.client import WsClient, WsHandshakeError, WsMessage
 from .ws.server import WsServer
+from .ws.frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 
 # flare.io
 from .io.buf_reader import Readable, BufReader
 
-# flare.runtime
+# flare.runtime (advanced / custom protocols)
+from .runtime.reactor import Reactor
+from .runtime.timer_wheel import TimerWheel
 from .runtime.event import (
     Event,
     INTEREST_READ,
@@ -643,6 +666,4 @@ from .runtime.event import (
     EVENT_HUP,
     WAKEUP_TOKEN,
 )
-from .runtime.reactor import Reactor
-from .runtime.timer_wheel import TimerWheel
 from .runtime.handoff import HandoffPolicy, HandoffQueue, WorkerHandoffPool

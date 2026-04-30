@@ -8,7 +8,7 @@ On macOS / kqueue the flag is unavailable and registration falls
 back to plain ``register`` — the practical behaviour is similar
 because non-blocking ``accept`` returns ``EAGAIN`` on the losers.
 
-This is the v0.6 redesign of the multicore path. v0.4.x — v0.5.x
+This is the redesign of the multicore path. the prior implementation
 used N independent listeners bound with ``SO_REUSEPORT``; the
 kernel then distributed accepted connections across workers by
 hashing each connection's 4-tuple to one of the N listeners. That
@@ -16,7 +16,7 @@ scheme has a known fairness gap under bursty arrival: a
 256-connection storm from a wrk2-style load generator can land
 80+ conns on one worker and 30 on another, producing
 hundreds-of-millisecond head-of-line tail latency on the
-overloaded worker(s). v0.6 ``benchmark/configs/throughput_mc``
+overloaded worker(s). ``benchmark/configs/throughput_mc``
 shows the failure mode at p99 ≈ 1.7 s; the
 ``EPOLLEXCLUSIVE``-based shared-listener design collapses the
 same workload's p99 to the millisecond range.
@@ -42,12 +42,12 @@ handler value is moved (per-worker copies are made via ``H.copy()``;
 if that's expensive users should wrap their handler's expensive state
 behind an ``UnsafePointer`` or a similar shared-reference holder).
 
-Only the ``Handler`` and ``ServerConfig`` machinery that v0.4.0 already
+Only the ``Handler`` and ``ServerConfig`` machinery that already
 has is touched; the run loop is ``run_reactor_loop_shared[H]`` from
-``flare.http._server_reactor_impl`` (the v0.6 shared-listener
-variant of the v0.4.x ``run_reactor_loop``).
+``flare.http._server_reactor_impl`` (the shared-listener
+variant of the prior ``run_reactor_loop``).
 
-Known limitations (tracked for v0.4.1):
+Known limitations:
 
 - The stopping flag is a raw ``Bool`` written from the main thread
   and read from each worker, not an atomic. Mojo 0.26.3 stdlib has
@@ -65,8 +65,8 @@ Known limitations (tracked for v0.4.1):
   channel. ``is_running()`` still reports ``True`` until the
   ``ThreadHandle`` is joined, which is a mildly wrong signal for a
   worker that crashed rather than shut down cleanly. Plumbing a
-  per-worker error cell back to the Scheduler is also scheduled for
-  v0.4.1.
+  per-worker error cell back to the Scheduler is also scheduled for a future release.
+  .
 """
 
 from std.ffi import c_int, external_call
@@ -293,7 +293,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
     ) raises -> Scheduler[Self.H]:
         """Spawn ``num_workers`` threads sharing one listener.
 
-        v0.6 redesign: the scheduler binds a single ``TcpListener``
+        redesign: the scheduler binds a single ``TcpListener``
         (via ``bind_shared``) and hands its fd to every worker. Each
         worker registers the fd with ``Reactor.register_exclusive``
         so the kernel wakes only one worker per accept event
@@ -301,19 +301,19 @@ struct Scheduler[H: Handler & Copyable](Movable):
         unavailable and the fallback is the classic non-blocking
         accept "wake-all, one-wins" pattern.
 
-        This eliminates the v0.5.x ``SO_REUSEPORT`` 4-tuple-hash
+        This eliminates the prior ``SO_REUSEPORT`` 4-tuple-hash
         distribution variance that caused multi-second tail latency
-        under high-concurrency loads (see design-v0.6).
+        under high-concurrency loads.
 
         Args:
-            addr:        Address the shared listener binds.
-            config:      Shared server config (copied per worker).
-            handler:     Shared request handler (copied per worker).
+            addr: Address the shared listener binds.
+            config: Shared server config (copied per worker).
+            handler: Shared request handler (copied per worker).
             num_workers: Number of worker threads. Must be in
                 ``1..=256``; values outside that range raise. The
                 upper bound is a defensive guard against runaway
                 ``pthread_create`` + heap allocation.
-            pin_cores:   If ``True`` (default), pin worker N to core
+            pin_cores: If ``True`` (default), pin worker N to core
                 ``N % num_cpus``. No-op on macOS.
 
         Returns:
@@ -525,7 +525,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
         return self._workers_len > 0
 
     def drain(mut self, timeout_ms: Int) raises -> List[ShutdownReport]:
-        """Graceful multi-worker shutdown (v0.5.0 Step 2).
+        """Graceful multi-worker shutdown.
 
         Broadcasts the stopping flag to every worker, closes every
         worker's listener socket, waits up to ``timeout_ms`` for

@@ -9,9 +9,9 @@ State transitions:
 
 ::
 
-    STATE_READING ─ handler returned ─> STATE_WRITING ─ flushed ─┬─> STATE_READING  (keep-alive)
-                                                                └─> STATE_CLOSING  (should_close)
-    STATE_READING / STATE_WRITING  ─ peer close / error / timeout ─> STATE_CLOSING
+    STATE_READING ─ handler returned ─> STATE_WRITING ─ flushed ─┬─> STATE_READING (keep-alive)
+                                                                └─> STATE_CLOSING (should_close)
+    STATE_READING / STATE_WRITING ─ peer close / error / timeout ─> STATE_CLOSING
 
 At a higher level the flow is:
   1. ``__init__`` — construct with the accepted fd and buffer sizing.
@@ -146,7 +146,7 @@ struct ConnHandle(Movable):
     keep-alive connections re-parse multiple requests across a single
     ``ConnHandle`` lifetime, and the peer is identical for all of them."""
     var cancel_cell: CancelCell
-    """Per-connection cancel cell (v0.5.0 Step 1). The reactor flips
+    """Per-connection cancel cell. The reactor flips
     its ``Int`` to a non-zero ``CancelReason`` on peer FIN, deadline
     (commit 5), or drain (commit 6); ``on_readable_cancel`` hands a
     ``Cancel`` handle bound to this cell into
@@ -366,7 +366,7 @@ struct ConnHandle(Movable):
     def on_readable_cancel[
         CH: CancelHandler
     ](mut self, ref handler: CH, config: ServerConfig,) raises -> StepResult:
-        """Cancel-aware variant of ``on_readable`` (v0.5.0 Step 1).
+        """Cancel-aware variant of ``on_readable``.
 
         Identical to ``on_readable`` except the per-connection
         ``CancelCell`` is reset to ``NONE`` at the top of each
@@ -374,7 +374,7 @@ struct ConnHandle(Movable):
         observed before the handler runs, and a ``Cancel`` handle
         bound to the cell is passed to ``CH.serve(req, cancel)``.
 
-        Future commits in v0.5.0 Step 1 hook deadline (commit 5) and
+        Future commits in hook deadline (commit 5) and
         drain (commit 6) flips through the same cell.
         """
         if self.state != STATE_READING:
@@ -443,7 +443,7 @@ struct ConnHandle(Movable):
 
         if len(self.read_buf) < self.body_total:
             # Body still arriving — arm the read-body deadline if
-            # configured (v0.5.0 Step 1), otherwise fall back to
+            # configured, otherwise fall back to
             # the idle timer. Closes the slow-body-upload variant
             # of criticism §2.2: a peer that keeps trickling bytes
             # below idle_timeout_ms can no longer hold a worker
@@ -458,7 +458,7 @@ struct ConnHandle(Movable):
                 idle_timeout_ms=body_timeout,
             )
 
-        # v0.5.0 follow-up (Track 1.1 / C2): scan the request as a
+        # follow-up (Track 1.1 / C2): scan the request as a
         # ``RequestView`` borrowed into ``read_buf`` first, then
         # materialise an owned ``Request`` via ``into_owned()``
         # for the existing ``Handler.serve(req: Request)`` shape.
@@ -526,15 +526,14 @@ struct ConnHandle(Movable):
     def on_readable_view[
         VH: ViewHandler
     ](mut self, ref handler: VH, config: ServerConfig) raises -> StepResult:
-        """View-aware variant of ``on_readable_cancel`` (v0.5.0
-        follow-up / Track 1.1 part 2 / C3).
+        """View-aware variant of ``on_readable_cancel``.
 
         Same control flow as ``on_readable_cancel`` but dispatches
         the parsed ``RequestView`` directly into
         ``VH.serve_view(view, cancel)`` — the body slice borrows
         from ``self.read_buf`` and the handler reads it without
         a copy. The owned ``Request`` materialisation that the
-        v0.4.x ``Handler.serve`` requires is skipped entirely.
+        ``Handler.serve`` requires is skipped entirely.
 
         Net win on this path: handler gets ``Span[UInt8, origin]``
         body access — the headline zero-copy upload contract from
@@ -1071,7 +1070,7 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
             version_is_10 = True
             break
     # 2. Connection header. Case-insensitive name match, value compared
-    #    against "close" and "keep-alive" (lowercase).
+    # against "close" and "keep-alive" (lowercase).
     var needle = "connection:"
     var np = needle.unsafe_ptr()
     var nn = needle.byte_length()
@@ -1150,7 +1149,7 @@ def _conn_alloc_addr(var stream: TcpStream) raises -> Int:
     return its address.
 
     Routes through ``Pool[ConnHandle]`` (``flare/runtime/pool.mojo``,
-    v0.5.0 Step 2 / Track 1.2) so the unsafe-pointer plumbing is
+    ) so the unsafe-pointer plumbing is
     confined to ``flare/runtime/``. The rest of this file's hot
     path stays at the typed-Int address layer.
     """
@@ -1282,7 +1281,7 @@ def _accept_loop_fd(
     """Accept every available connection on a *borrowed* listener fd.
 
     Mirrors ``_accept_loop`` but takes the listener as a raw integer
-    fd instead of a ``TcpListener`` so the v0.6 multi-worker scheduler
+    fd instead of a ``TcpListener`` so the multi-worker scheduler
     can share a single listener across workers without giving any
     one worker ownership of the underlying ``TcpListener``. The
     listener fd is owned by the ``Scheduler`` and stays open for the
@@ -1454,7 +1453,7 @@ def run_reactor_loop_shared[
 ) raises:
     """Worker reactor loop sharing a single listener fd across workers.
 
-    v0.6 multi-worker entry point. Functionally identical to
+    multi-worker entry point. Functionally identical to
     ``run_reactor_loop`` but:
 
     1. ``listener_fd`` is borrowed from the ``Scheduler`` (the
@@ -1477,15 +1476,15 @@ def run_reactor_loop_shared[
     aren't burdened with extra conns. The
     ``benchmark/configs/throughput_mc.yaml`` p99 collapses from
     seconds to milliseconds with this entry point (see
-    ``design-v0.6``).
+    ``the design notes``).
 
     Args:
         listener_fd: Listener fd, owned by the ``Scheduler``. Must
             be in non-blocking mode before calling (the
             ``Scheduler`` configures this once at bind time).
-        config:      Per-worker copy of ``ServerConfig``.
-        handler:     Per-worker copy of ``H``.
-        stopping:    Heap-allocated stop flag; ``Scheduler``
+        config: Per-worker copy of ``ServerConfig``.
+        handler: Per-worker copy of ``H``.
+        stopping: Heap-allocated stop flag; ``Scheduler``
             mutates it from another thread on shutdown. Re-read
             each iteration via a fresh external pointer so the
             compiler cannot LICM-hoist the load.
@@ -1589,11 +1588,11 @@ def run_reactor_loop_static(
     handler call, no response serialisation.
 
     Args:
-        listener:  Bound and listening ``TcpListener`` (caller owns it;
+        listener: Bound and listening ``TcpListener`` (caller owns it;
             we borrow for accept / fd access).
-        config:    Server configuration.
-        resp:      Pre-encoded static response.
-        stopping:  Checked on every poll iteration; when True the loop
+        config: Server configuration.
+        resp: Pre-encoded static response.
+        stopping: Checked on every poll iteration; when True the loop
             exits and in-flight connections are closed.
     """
     listener._socket.set_nonblocking(True)
@@ -1695,7 +1694,7 @@ def run_reactor_loop_cancel[
     ref handler: CH,
     ref stopping: Bool,
 ) raises:
-    """Cancel-aware variant of ``run_reactor_loop`` (v0.5.0 Step 1).
+    """Cancel-aware variant of ``run_reactor_loop``.
 
     Identical control flow to ``run_reactor_loop`` but drives each
     connection through ``ConnHandle.on_readable_cancel(handler,
@@ -1706,14 +1705,14 @@ def run_reactor_loop_cancel[
     The reactor flips that cell on:
     - ``CancelReason.PEER_CLOSED`` — peer FIN observed before the
       response was queued.
-    - ``CancelReason.TIMEOUT`` — wired in commit 5 of v0.5.0 Step 1.
-    - ``CancelReason.SHUTDOWN`` — wired in commit 6 of v0.5.0 Step 1.
+    - ``CancelReason.TIMEOUT`` — wired in commit 5 of .
+    - ``CancelReason.SHUTDOWN`` — wired in commit 6 of .
 
     Args:
         listener: Bound and listening ``TcpListener`` (caller-owned;
             borrowed for accept / fd access).
-        config:   Server configuration.
-        handler:  Per-request cancel-aware callback.
+        config: Server configuration.
+        handler: Per-request cancel-aware callback.
         stopping: Checked each iteration; flipping it stops the loop
             and closes in-flight connections.
     """
@@ -1819,8 +1818,7 @@ def run_reactor_loop_view[
     ref handler: VH,
     ref stopping: Bool,
 ) raises:
-    """View-aware variant of ``run_reactor_loop_cancel`` (v0.5.0
-    follow-up / Track 1.1 part 2 / C3).
+    """View-aware variant of ``run_reactor_loop_cancel``.
 
     Identical control flow but drives each connection through
     ``ConnHandle.on_readable_view(handler, config)`` instead of
@@ -1832,8 +1830,8 @@ def run_reactor_loop_view[
 
     Args:
         listener: Bound and listening ``TcpListener``.
-        config:   Server configuration.
-        handler:  Per-request view-aware handler.
+        config: Server configuration.
+        handler: Per-request view-aware handler.
         stopping: Checked each iteration.
     """
     listener._socket.set_nonblocking(True)

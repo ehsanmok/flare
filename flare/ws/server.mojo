@@ -31,8 +31,8 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
 
     Opens the library, retrieves the ``SHA1`` function pointer, then
     delegates to ``_do_sha1_srv`` which takes ``lib`` as a ``read``
-    (borrow).  A borrow cannot be ASAP-destroyed, so the library stays
-    mapped for the entire C call.  Without this, Mojo's ASAP policy
+    (borrow). A borrow cannot be ASAP-destroyed, so the library stays
+    mapped for the entire C call. Without this, Mojo's ASAP policy
     calls ``dlclose`` right after ``get_function`` — before the pointer
     is ever invoked — unmapping the library and crashing on macOS ARM64.
     See MSTDL-2334.
@@ -65,9 +65,9 @@ def _do_sha1_srv(
     remains mapped across the FFI call.
 
     Args:
-        fn_sha1:    Function pointer to ``SHA1`` from libflare_tls.
+        fn_sha1: Function pointer to ``SHA1`` from libflare_tls.
         data_bytes: Input bytes to hash.
-        lib:        Borrowed handle to the shared library (keeps it mapped).
+        lib: Borrowed handle to the shared library (keeps it mapped).
 
     Returns:
         20-byte SHA-1 digest as ``List[UInt8]``.
@@ -200,7 +200,7 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
     """Parse an HTTP WebSocket Upgrade request from a byte buffer.
 
     Identical logic to ``_read_upgrade_request`` but reads from a
-    ``Span[UInt8, _]`` instead of a ``TcpStream``.  Suitable for fuzz
+    ``Span[UInt8, _]`` instead of a ``TcpStream``. Suitable for fuzz
     harnesses and unit tests that operate on raw bytes.
 
     Args:
@@ -359,13 +359,13 @@ struct WsConnection(Movable):
 
     Fields:
         _stream: The underlying TCP stream.
-        _peer:   The remote socket address.
+        _peer: The remote socket address.
 
     Example:
         ```mojo
         def on_connect(conn: WsConnection) raises:
             var frame = conn.recv()
-            conn.send_text(frame.text_payload())  # echo back
+            conn.send_text(frame.text_payload()) # echo back
 
         var srv = WsServer.bind(SocketAddr.localhost(9001))
         srv.serve(on_connect)
@@ -436,7 +436,7 @@ struct WsConnection(Movable):
 
         Raises:
             WsProtocolError: If the client sends an unmasked frame.
-            NetworkError:    On I/O failure.
+            NetworkError: On I/O failure.
         """
         while True:
             var frame = self._recv_one()
@@ -488,7 +488,7 @@ struct WsConnection(Movable):
         """Send a CLOSE frame and wait for the client's CLOSE response.
 
         Args:
-            code:   Close status code (see ``WsCloseCode.*``).
+            code: Close status code (see ``WsCloseCode.*``).
             reason: Optional UTF-8 reason phrase (≤123 bytes).
         """
         var close_frame = WsFrame.close(code, reason)

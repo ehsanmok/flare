@@ -4,7 +4,7 @@ Spins a server on a loopback port, issues a real TCP request, and
 verifies the handler received it and the response made it back. The
 server runs in the main thread; we rely on short request/response
 shapes and a single-in-flight client so no background thread is
-needed (the v0.3.x `bench_server.mojo` example uses the same
+needed (the `bench_server.mojo` example uses the same
 pattern).
 
 Coverage:
@@ -65,7 +65,7 @@ def test_serve_with_struct_handler() raises:
     """
 
     # Running a full server in a unit test needs a worker thread; the
-    # v0.3.x `serve(def)` integration tests live in `test_server.mojo`
+    # `serve(def)` integration tests live in `test_server.mojo`
     # and already exercise the reactor loop end-to-end. Here we assert
     # at the type level that the struct-based Handler composes through
     # the same Handler trait the server's `serve[H]` overload takes.
@@ -77,7 +77,7 @@ def test_serve_with_struct_handler() raises:
 
 def test_struct_handler_usable_at_server_bind() raises:
     """HttpServer.bind returns a server with a non-zero port when we
-    ask for port 0; this is the same assertion as the v0.3.x bind
+    ask for port 0; this is the same assertion as the bind
     tests but run with a short-timeout config that our new tests use.
     """
     var srv = HttpServer.bind(SocketAddr.localhost(0), _short_config())
@@ -129,8 +129,8 @@ def test_router_wrapped_by_middleware() raises:
 
 
 def test_fnhandler_can_be_served() raises:
-    """``serve(handler: def...)`` still works (v0.3.x compatibility)."""
-    # Only a type / bind smoke-check; the v0.3.x path already has many
+    """``serve(handler: def...)`` still works (compatibility)."""
+    # Only a type / bind smoke-check; the path already has many
     # integration tests in test_server.mojo.
     var srv = HttpServer.bind(SocketAddr.localhost(0), _short_config())
     srv.close()

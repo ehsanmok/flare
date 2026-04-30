@@ -96,11 +96,11 @@ def _is_macos() -> Bool:
 #
 # Tests that need a connected pair of sockets build it inline using::
 #
-#     var listener = TcpListener.bind(SocketAddr.localhost(0))
-#     var port = listener.local_addr().port
-#     var a = TcpStream.connect(SocketAddr.localhost(port))
-#     var b = listener.accept()
-#     listener.close()
+# var listener = TcpListener.bind(SocketAddr.localhost(0))
+# var port = listener.local_addr().port
+# var a = TcpStream.connect(SocketAddr.localhost(port))
+# var b = listener.accept()
+# listener.close()
 #
 # Mojo has no tuple destructuring, so a shared helper that returns two
 # sockets cannot be called ergonomically; the inline pattern is fine.
@@ -157,7 +157,7 @@ def test_epoll_event_set_and_read_back() raises:
 def test_epoll_create1_and_close() raises:
     """``epoll_create1(0)`` returns a valid fd that ``close(2)`` accepts."""
     if not _is_linux():
-        print("  [SKIP] Linux-only")
+        print(" [SKIP] Linux-only")
         return
     var epfd = _epoll_create1(c_int(0))
     assert_true(epfd >= 0, "epoll_create1 must return non-negative fd")
@@ -167,7 +167,7 @@ def test_epoll_create1_and_close() raises:
 def test_epoll_create1_with_cloexec() raises:
     """``EPOLL_CLOEXEC`` is accepted (no EINVAL)."""
     if not _is_linux():
-        print("  [SKIP] Linux-only")
+        print(" [SKIP] Linux-only")
         return
     var epfd = _epoll_create1(EPOLL_CLOEXEC)
     assert_true(epfd >= 0, "EPOLL_CLOEXEC must be accepted")
@@ -177,7 +177,7 @@ def test_epoll_create1_with_cloexec() raises:
 def test_epoll_ctl_add_then_del_ok() raises:
     """Registering then removing an fd via epoll_ctl returns 0 both times."""
     if not _is_linux():
-        print("  [SKIP] Linux-only")
+        print(" [SKIP] Linux-only")
         return
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = listener.local_addr().port
@@ -202,7 +202,7 @@ def test_epoll_ctl_add_then_del_ok() raises:
 def test_epoll_wait_timeout_zero_returns_empty() raises:
     """``epoll_wait`` with timeout 0 on empty set returns 0 immediately."""
     if not _is_linux():
-        print("  [SKIP] Linux-only")
+        print(" [SKIP] Linux-only")
         return
     var epfd = _epoll_create1(c_int(0))
     assert_true(epfd >= 0)
@@ -215,7 +215,7 @@ def test_epoll_wait_timeout_zero_returns_empty() raises:
 def test_epoll_wait_detects_readable() raises:
     """Writing on peer makes the watched fd readable."""
     if not _is_linux():
-        print("  [SKIP] Linux-only")
+        print(" [SKIP] Linux-only")
         return
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = listener.local_addr().port
@@ -320,7 +320,7 @@ def test_kevent_set_filter_negative_roundtrip() raises:
 def test_kqueue_create_and_close() raises:
     """``kqueue()`` returns a valid fd that ``close(2)`` accepts."""
     if not _is_macos():
-        print("  [SKIP] macOS-only")
+        print(" [SKIP] macOS-only")
         return
     var kq = _kqueue()
     assert_true(kq >= 0, "kqueue must return non-negative fd")
@@ -330,7 +330,7 @@ def test_kqueue_create_and_close() raises:
 def test_kevent_zero_changes_zero_events_timeout_returns_zero() raises:
     """Calling kevent with no changes and a zero timeout returns 0."""
     if not _is_macos():
-        print("  [SKIP] macOS-only")
+        print(" [SKIP] macOS-only")
         return
     var kq = _kqueue()
     assert_true(kq >= 0)
@@ -348,7 +348,7 @@ def test_kevent_zero_changes_zero_events_timeout_returns_zero() raises:
 def test_kevent_detects_readable() raises:
     """Registering a socket and writing to its peer reports an event."""
     if not _is_macos():
-        print("  [SKIP] macOS-only")
+        print(" [SKIP] macOS-only")
         return
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = listener.local_addr().port
@@ -402,7 +402,7 @@ def test_kevent_detects_readable() raises:
 def test_eventfd_write_then_read_counts() raises:
     """Linux: write N increments the counter; read returns the current count."""
     if not _is_linux():
-        print("  [SKIP] eventfd is Linux-only")
+        print(" [SKIP] eventfd is Linux-only")
         return
     var counter = UInt64(7)
     var efd = _eventfd(c_uint(0), EFD_NONBLOCK)
@@ -456,7 +456,7 @@ def test_pipe_round_trip_byte() raises:
 def test_epoll_wait_on_invalid_fd_returns_negative() raises:
     """``epoll_wait`` on a bogus fd returns -1 (errno set)."""
     if not _is_linux():
-        print("  [SKIP] Linux-only")
+        print(" [SKIP] Linux-only")
         return
     var out = stack_allocation[EPOLL_EVENT_SIZE * 4, UInt8]()
     var n = _epoll_wait(c_int(-1), out, c_int(4), c_int(0))
@@ -466,7 +466,7 @@ def test_epoll_wait_on_invalid_fd_returns_negative() raises:
 def test_kevent_on_invalid_fd_returns_negative() raises:
     """``kevent`` on a bogus fd returns -1 (errno set)."""
     if not _is_macos():
-        print("  [SKIP] macOS-only")
+        print(" [SKIP] macOS-only")
         return
     var ts = stack_allocation[16, UInt8]()
     for i in range(16):

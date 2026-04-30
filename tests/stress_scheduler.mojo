@@ -9,7 +9,7 @@ locally and in CI. The historical reason this file exists as a
 non-mozz driver — a Mojo MLIR legalization conflict between
 flare's libc ``free`` FFI and the stdlib's ``free`` declaration that
 blocked ``mozz`` from importing ``flare.runtime.scheduler`` — is
-resolved as of v0.4.1 (flare now uses the native Mojo allocator
+resolved as of (flare now uses the native Mojo allocator
 everywhere, see ``_scheduler_free_raw``).
 
 Each iteration:
@@ -30,9 +30,9 @@ Each iteration:
 
 Run:
 
-    pixi run stress-scheduler                    # default: 200 iterations
-    STRESS_ITERS=2000 pixi run stress-scheduler  # longer soak
-    STRESS_SEED=42 pixi run stress-scheduler     # override seed
+    pixi run stress-scheduler # default: 200 iterations
+    STRESS_ITERS=2000 pixi run stress-scheduler # longer soak
+    STRESS_SEED=42 pixi run stress-scheduler # override seed
 
 Expected behaviour: ``0 failed, 0 slow`` across every iteration.
 """
@@ -151,9 +151,9 @@ def main() raises:
     if seed == UInt64(0):
         # xorshift64 needs a non-zero seed or it stays at 0 forever.
         seed = UInt64(12648430)
-    print("  iterations :", iters)
-    print("  seed       :", seed)
-    print("  watchdog   :", ITERATION_WATCHDOG_MS, "ms per iteration")
+    print(" iterations :", iters)
+    print(" seed :", seed)
+    print(" watchdog :", ITERATION_WATCHDOG_MS, "ms per iteration")
     print()
 
     var rng = seed
@@ -170,23 +170,23 @@ def main() raises:
                 max_ms = ms
             if ms > ITERATION_WATCHDOG_MS:
                 slow += 1
-                print("  [SLOW] iter", i, "took", ms, "ms")
+                print(" [SLOW] iter", i, "took", ms, "ms")
         except e:
             failed += 1
-            print("  [FAIL] iter", i, ":", e)
+            print(" [FAIL] iter", i, ":", e)
 
     print()
     print("──────────────────────────────────────────")
-    print("  iterations :", iters)
-    print("  failed     :", failed)
+    print(" iterations :", iters)
+    print(" failed :", failed)
     print(
-        "  slow       :",
+        " slow :",
         slow,
         "(> " + String(ITERATION_WATCHDOG_MS) + " ms)",
     )
     if iters > 0:
-        print("  mean       :", total_ms // iters, "ms / iteration")
-    print("  max        :", max_ms, "ms")
+        print(" mean :", total_ms // iters, "ms / iteration")
+    print(" max :", max_ms, "ms")
     print("──────────────────────────────────────────")
 
     if failed > 0 or slow > 0:

@@ -8,7 +8,7 @@ SSE on top of ``Response.body: List[UInt8]`` would require the
 handler to materialise the entire stream up front, which defeats
 the point.
 
-The v0.5.0 Step 2 streaming primitives (``ChunkSource`` +
+The streaming primitives (``ChunkSource`` +
 ``ChunkedBody``) make SSE a 50-line pattern: the handler implements
 a ``ChunkSource`` that yields one event per ``next(cancel)`` call,
 wraps it in ``ChunkedBody[Source]``, and the reactor pulls a chunk
@@ -76,11 +76,11 @@ def main() raises:
     cell.flip(CancelReason.SHUTDOWN)
     var body2 = ChunkedBody[Counter](source=Counter(0, 100))
     var drained2 = drain_body(body2, cell.handle())
-    print("    drained", len(drained2), "bytes (expected 0 — cancel was set)")
+    print(" drained", len(drained2), "bytes (expected 0 — cancel was set)")
 
     # 3) ChunkedBody declares no Content-Length so chunked
-    #    Transfer-Encoding framing fires when the reactor adopts
-    #    this primitive.
+    # Transfer-Encoding framing fires when the reactor adopts
+    # this primitive.
     var body3 = ChunkedBody[Counter](source=Counter(0, 3))
     print(
         "[3] ChunkedBody.content_length() is None:",

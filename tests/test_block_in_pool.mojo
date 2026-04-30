@@ -90,7 +90,7 @@ def test_work_error_propagates() raises:
 
 def test_pre_flipped_cancel_skips_work_peer_closed() raises:
     if not _is_macos():
-        print("  [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
+        print(" [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
         return
     var cell = CancelCell()
     cell.flip(CancelReason.PEER_CLOSED)
@@ -100,7 +100,7 @@ def test_pre_flipped_cancel_skips_work_peer_closed() raises:
 
 def test_pre_flipped_cancel_skips_work_timeout() raises:
     if not _is_macos():
-        print("  [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
+        print(" [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
         return
     var cell = CancelCell()
     cell.flip(CancelReason.TIMEOUT)
@@ -110,7 +110,7 @@ def test_pre_flipped_cancel_skips_work_timeout() raises:
 
 def test_pre_flipped_cancel_skips_work_shutdown() raises:
     if not _is_macos():
-        print("  [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
+        print(" [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
         return
     var cell = CancelCell()
     cell.flip(CancelReason.SHUTDOWN)
@@ -182,7 +182,7 @@ def test_post_flight_cancel_with_pre_flipped_cell_raises() raises:
     boundary is not yet reliable on Linux x86_64.
     """
     if not _is_macos():
-        print("  [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
+        print(" [SKIP] Mojo nightly Cancel-across-boundary anomaly on Linux")
         return
     var cell = CancelCell()
     cell.flip(CancelReason.TIMEOUT)

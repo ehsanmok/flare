@@ -1,6 +1,6 @@
 """Example 31: Middleware stack — Logger + RequestId + Compress + CatchPanic.
 
-Shows the v0.6 generic middleware library in action:
+Shows the generic middleware library in action:
 
 - ``Logger`` logs ``method url status latency``.
 - ``RequestId`` echoes ``X-Request-Id`` (or generates one).
@@ -65,12 +65,12 @@ def main() raises:
     # ── 1. negotiate_encoding directly ────────────────────────────────────
     print("── 1. negotiate_encoding ──")
     var p1 = negotiate_encoding("gzip, br;q=0.5", True)
-    print("  'gzip, br;q=0.5' ->", p1.encoding)
+    print(" 'gzip, br;q=0.5' ->", p1.encoding)
     var p2 = negotiate_encoding("br;q=1.0, gzip;q=0.5", True)
-    print("  'br;q=1.0, gzip;q=0.5' ->", p2.encoding)
+    print(" 'br;q=1.0, gzip;q=0.5' ->", p2.encoding)
     var p3 = negotiate_encoding("gzip;q=0", False)
     print(
-        "  'gzip;q=0' (gzip explicitly rejected) ->",
+        " 'gzip;q=0' (gzip explicitly rejected) ->",
         p3.encoding,
         " quality=",
         p3.quality,
@@ -83,22 +83,22 @@ def main() raises:
     req.headers.set("Accept-Encoding", "gzip, br;q=0.0")
     req.headers.set("X-Request-Id", "demo-req-42")
     var resp = stack.serve(req)
-    print("  status         :", resp.status)
-    print("  X-Request-Id   :", resp.headers.get("x-request-id"))
-    print("  Content-Encoding:", resp.headers.get("content-encoding"))
-    print("  Vary           :", resp.headers.get("vary"))
-    print("  body length    :", len(resp.body))
+    print(" status :", resp.status)
+    print(" X-Request-Id :", resp.headers.get("x-request-id"))
+    print(" Content-Encoding:", resp.headers.get("content-encoding"))
+    print(" Vary :", resp.headers.get("vary"))
+    print(" body length :", len(resp.body))
     var roundtripped = decompress_gzip(Span[UInt8, _](resp.body))
-    print("  decompressed   :", len(roundtripped), "bytes")
+    print(" decompressed :", len(roundtripped), "bytes")
     print()
 
     # ── 3. Identity request (no Accept-Encoding) ──────────────────────────
     print("── 3. Stack response (identity) ──")
     var req2 = Request(method=Method.GET, url="/")
     var resp2 = stack.serve(req2)
-    print("  status         :", resp2.status)
-    print("  Content-Encoding:", resp2.headers.get("content-encoding"))
-    print("  body length    :", len(resp2.body))
+    print(" status :", resp2.status)
+    print(" Content-Encoding:", resp2.headers.get("content-encoding"))
+    print(" body length :", len(resp2.body))
     print()
 
     print("=== Example 31 complete ===")

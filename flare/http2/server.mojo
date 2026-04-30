@@ -195,7 +195,7 @@ struct H2Connection(Defaultable, Movable):
 
         The connection's stream state is advanced to ``CLOSED`` after
         the response is queued, mirroring HTTP/1.1's per-request
-        lifetime in the v0.6 server (no trailers, no streaming
+        lifetime in the server (no trailers, no streaming
         responses on h2 yet — those come with the reactor wiring).
         """
         if sid not in self.conn.streams:

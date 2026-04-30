@@ -267,8 +267,8 @@ struct Reactor(Movable):
         interest bits.
 
         Args:
-            fd:       The file descriptor to watch.
-            token:    Opaque value returned in events for this fd. Must not
+            fd: The file descriptor to watch.
+            token: Opaque value returned in events for this fd. Must not
                       equal ``WAKEUP_TOKEN``.
             interest: Bitmask of ``INTEREST_READ | INTEREST_WRITE``.
 
@@ -298,7 +298,7 @@ struct Reactor(Movable):
         worker per accept-event instead of all of them. This eliminates
         the SO_REUSEPORT 4-tuple-hash distribution variance that drives
         head-of-line tail latency under high concurrency on this
-        v0.6 benchmark probe (see design-v0.6).
+        benchmark probe.
 
         On macOS / kqueue there is no exclusive-wakeup flag; this method
         falls back to plain ``register``. Modern macOS kernels still
@@ -313,8 +313,8 @@ struct Reactor(Movable):
         per worker and never modifies the listener entry.
 
         Args:
-            fd:       Listener fd, expected to be shared across workers.
-            token:    Opaque value returned in events. Must not equal
+            fd: Listener fd, expected to be shared across workers.
+            token: Opaque value returned in events. Must not equal
                       ``WAKEUP_TOKEN``.
             interest: Bitmask; in practice always ``INTEREST_READ`` for
                       the listener path.
@@ -361,7 +361,7 @@ struct Reactor(Movable):
         The token remains the same; pass the interest you want going forward.
 
         Args:
-            fd:       Previously-registered fd.
+            fd: Previously-registered fd.
             interest: New interest bits (must be non-zero).
 
         Raises:
@@ -453,7 +453,7 @@ struct Reactor(Movable):
         Args:
             timeout_ms: -1 = block indefinitely, 0 = poll (return
                 immediately), positive = max milliseconds to wait.
-            out:        Output list. Cleared on entry.
+            out: Output list. Cleared on entry.
             max_events: Maximum events to return in one call.
 
         Returns:

@@ -64,7 +64,7 @@ struct CertificateHostnameMismatch(Copyable, Movable, Writable):
 
     Fields:
         expected: The hostname that was required.
-        subject:  The certificate's subject DN.
+        subject: The certificate's subject DN.
     """
 
     var expected: String
@@ -75,7 +75,7 @@ struct CertificateHostnameMismatch(Copyable, Movable, Writable):
 
         Args:
             expected: The hostname the client tried to connect to.
-            subject:  Certificate subject DN (may be empty if unavailable).
+            subject: Certificate subject DN (may be empty if unavailable).
         """
         self.expected = expected
         self.subject = subject

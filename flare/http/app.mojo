@@ -1,6 +1,6 @@
 """Application wrapper + typed state injection.
 
-v0.3.x handlers had no way to see request-independent state without
+handlers had no way to see request-independent state without
 reaching for a global. ``App[S]`` fixes that: the server owns an
 application-scoped value of type ``S``, hands a typed ``State[S]``
 view of it to the handler, and the handler accesses it through a
@@ -15,7 +15,7 @@ struct Counters(Copyable):
     var hits: Int
 
 def home(req: Request, state: State[Counters]) raises -> Response:
-    # In v0.4.0 State[T] is a read-only view; user mutation goes
+    # State[T] is a read-only view; user mutation goes
     # through atomics or explicit interior-mutability types.
     return ok("hits so far: " + String(state.get().hits))
 
@@ -30,9 +30,9 @@ def main() raises:
     srv.serve(app^)
 ```
 
-For v0.4.0 the ``State[T]`` extractor is runtime; the comptime-reflected
+For the ``State[T]`` extractor is runtime; the comptime-reflected
 signature-based injection (``def handler(req, state: State[Counters])``)
-lands in v0.4.1 alongside the other typed extractors. Today the user
+lands alongside the other typed extractors. Today the user
 writes a small handler adapter that pulls ``state.get()`` from a
 captured ``App`` reference, or uses ``App[S].serve`` which acts as the
 entry-level ``Handler`` and forwards to its inner Router.
@@ -50,8 +50,8 @@ struct State[T: Copyable & ImplicitlyDestructible](
     """A read-only view onto application state of type ``T``.
 
     ``State[T]`` is a value handlers can accept as a parameter. In
-    v0.4.0 you retrieve it from an ``App[T]`` via ``app.state_view()``
-    or by calling ``state.get()``; v0.4.1 adds comptime-signature
+    you retrieve it from an ``App[T]`` via ``app.state_view()``
+    or by calling ``state.get()``; adds comptime-signature
     reflection so the Router wires it automatically from the
     handler's declared parameter list.
 
@@ -82,7 +82,7 @@ struct App[S: Copyable & ImplicitlyDestructible, H: Handler](Handler):
         H: The inner handler type (typically a ``Router``).
 
     Fields:
-        state:   Application-scoped state shared by every request.
+        state: Application-scoped state shared by every request.
         handler: The inner handler (usually a ``Router``).
 
     Usage:
@@ -96,7 +96,7 @@ struct App[S: Copyable & ImplicitlyDestructible, H: Handler](Handler):
     ``serve[H: Handler & Copyable]`` entry point as any other handler. On
     each request it calls into ``handler.serve(req)`` after recording
     the state snapshot; a comptime extractor layer will let handlers
-    declare ``State[S]`` parameters directly in v0.4.1.
+    declare ``State[S]`` parameters directly .
     """
 
     var state: Self.S
@@ -107,7 +107,7 @@ struct App[S: Copyable & ImplicitlyDestructible, H: Handler](Handler):
         """Build an App with initial state and inner handler.
 
         Args:
-            state:   Initial value of application state.
+            state: Initial value of application state.
             handler: The inner handler (ownership transferred).
         """
         self.state = state^
@@ -121,10 +121,10 @@ struct App[S: Copyable & ImplicitlyDestructible, H: Handler](Handler):
     def serve(self, req: Request) raises -> Response:
         """Delegate to the inner handler.
 
-        For v0.4.0 the inner handler is the only way the state reaches
+        For the inner handler is the only way the state reaches
         the user. Users who need typed ``State[S]`` injection write a
         small wrapper struct around their Router that captures the
         App by reference and pulls ``state_view()`` on each request;
-        v0.4.1's typed-extractor layer will wire this automatically.
+        's typed-extractor layer will wire this automatically.
         """
         return self.handler.serve(req)

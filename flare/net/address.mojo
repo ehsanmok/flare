@@ -22,14 +22,14 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     hold a canonical, valid representation.
 
     Fields:
-        _addr:  Canonical string form (e.g. ``"127.0.0.1"`` or ``"::1"``).
+        _addr: Canonical string form (e.g. ``"127.0.0.1"`` or ``"::1"``).
         _is_v6: ``True`` for IPv6, ``False`` for IPv4.
 
     Example:
         ```mojo
         var lo = IpAddr.parse("127.0.0.1")
-        print(lo)                # 127.0.0.1
-        print(lo.is_loopback())  # True
+        print(lo) # 127.0.0.1
+        print(lo.is_loopback()) # True
         ```
     """
 
@@ -42,7 +42,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         Prefer ``IpAddr.parse`` for user-supplied strings.
 
         Args:
-            addr:  Canonical IP address string.
+            addr: Canonical IP address string.
             is_v6: ``True`` if this is an IPv6 address.
         """
         self._addr = addr
@@ -79,7 +79,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
             raise AddressParseError(s)
 
         # Security: reject any string containing bytes that are invalid in a
-        # hostname — null bytes, CR, LF, or '@'.  Without this check a caller
+        # hostname — null bytes, CR, LF, or '@'. Without this check a caller
         # could pass "127.0.0.1\x00evil" and inet_pton would silently parse only
         # the part before the null, resolving a different address than requested.
         var s_bytes = s.as_bytes()
@@ -263,7 +263,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
 
 
 def _is_172_private(addr: String) -> Bool:
-    """Return ``True`` for ``172.16.x.x`` – ``172.31.x.x``.
+    """Return ``True`` for ``172.16`` – ``172.31``.
 
     Args:
         addr: IPv4 address string known to start with ``"172."``.
@@ -284,7 +284,7 @@ def _find_char(s: String, ch: UInt8) -> Int:
     """Return the index of the first occurrence of byte ``ch`` in ``s``, or -1.
 
     Args:
-        s:  String to search.
+        s: String to search.
         ch: Byte value to find (e.g. ``UInt8(ord("."))``.
     """
     var bytes = s.as_bytes()
@@ -298,8 +298,8 @@ def _find_char_from(s: String, ch: UInt8, start: Int) -> Int:
     """Return the index of the first ``ch`` byte at or after ``start``, or -1.
 
     Args:
-        s:     String to search.
-        ch:    Byte value to find.
+        s: String to search.
+        ch: Byte value to find.
         start: First index to check.
     """
     var bytes = s.as_bytes()
@@ -316,16 +316,16 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
     """A socket address: an IP address combined with a port number.
 
     Fields:
-        ip:   The IP address component.
+        ip: The IP address component.
         port: The port number (0–65535).
 
     Example:
         ```mojo
         var addr = SocketAddr(IpAddr.localhost(), 8080)
-        print(addr)     # 127.0.0.1:8080
+        print(addr) # 127.0.0.1:8080
 
         var v6 = SocketAddr(IpAddr.localhost_v6(), 443)
-        print(v6)       # [::1]:443
+        print(v6) # [::1]:443
         ```
     """
 
@@ -336,7 +336,7 @@ struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
         """Initialise a ``SocketAddr``.
 
         Args:
-            ip:   The IP address component.
+            ip: The IP address component.
             port: The port number (0–65535).
         """
         self.ip = ip.copy()

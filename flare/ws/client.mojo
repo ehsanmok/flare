@@ -9,7 +9,7 @@ Opening handshake (§4.1):
   6. Verify ``Sec-WebSocket-Accept = base64(SHA-1(key + GUID))``.
 
 SHA-1 is computed via libcrypto (OpenSSL) FFI — the same library already
-bundled by the TLS FFI build step.  Base64 is a pure Mojo implementation.
+bundled by the TLS FFI build step. Base64 is a pure Mojo implementation.
 """
 
 from std.ffi import OwnedDLHandle, c_int
@@ -195,7 +195,7 @@ def _read_line_tls(
 
     Args:
         stream: Open TLS stream.
-        buf:    Scratch buffer (single-byte reads).
+        buf: Scratch buffer (single-byte reads).
 
     Returns:
         Line content without the trailing ``\\r\\n``.
@@ -226,7 +226,7 @@ def _read_line_tcp(
 
     Args:
         stream: Open TCP stream.
-        buf:    Scratch buffer (single-byte reads).
+        buf: Scratch buffer (single-byte reads).
 
     Returns:
         Line content without the trailing ``\\r\\n``.
@@ -318,7 +318,7 @@ struct _WsStream(Movable):
         """Read up to ``size`` bytes from the underlying stream.
 
         Args:
-            buf:  Destination buffer (at least ``size`` bytes of storage).
+            buf: Destination buffer (at least ``size`` bytes of storage).
             size: Maximum bytes to read.
 
         Returns:
@@ -365,7 +365,7 @@ def _dummy_tls_stream() -> TlsStream:
 struct WsMessage(Movable):
     """A high-level WebSocket message (Text or Binary).
 
-    Produced by ``WsClient.recv_message()``.  Use ``is_text`` to
+    Produced by ``WsClient.recv_message()``. Use ``is_text`` to
     discriminate between message kinds.
 
     Fields:
@@ -431,12 +431,12 @@ struct WsClient(Movable):
     (client→server frames MUST be masked per RFC 6455 §5.3), and
     automatic PONG replies to PING frames.
 
-    This type is ``Movable`` but not ``Copyable``.  It supports the context
+    This type is ``Movable`` but not ``Copyable``. It supports the context
     manager protocol (``__enter__`` / ``__exit__``) for use with ``with``.
 
     Fields:
-        _stream:      Underlying transport (TLS or TCP).
-        _key:         The ``Sec-WebSocket-Key`` used for this connection.
+        _stream: Underlying transport (TLS or TCP).
+        _key: The ``Sec-WebSocket-Key`` used for this connection.
 
     Example:
         ```mojo
@@ -472,7 +472,7 @@ struct WsClient(Movable):
             A ``WsClient`` with the handshake complete.
 
         Raises:
-            NetworkError:     If the TCP/TLS connection fails.
+            NetworkError: If the TCP/TLS connection fails.
             WsHandshakeError: If the server's Upgrade response is invalid.
         """
         return WsClient._connect_impl(url, TlsConfig())
@@ -484,14 +484,14 @@ struct WsClient(Movable):
         For ``wss://`` URLs, wraps the connection in TLS using ``config``.
 
         Args:
-            url:    WebSocket URL (``ws://`` or ``wss://``).
+            url: WebSocket URL (``ws://`` or ``wss://``).
             config: TLS configuration (only used for ``wss://``).
 
         Returns:
             A ``WsClient`` with the handshake complete.
 
         Raises:
-            NetworkError:     If the TCP/TLS connection fails.
+            NetworkError: If the TCP/TLS connection fails.
             WsHandshakeError: If the server's Upgrade response is invalid or
                               ``Sec-WebSocket-Accept`` does not match.
         """
@@ -679,9 +679,9 @@ struct WsClient(Movable):
             The next ``WsFrame`` (TEXT, BINARY, or CLOSE).
 
         Raises:
-            NetworkError:    On I/O failure.
+            NetworkError: On I/O failure.
             WsProtocolError: On protocol violation.
-            Error:           On truncated frame data.
+            Error: On truncated frame data.
         """
         while True:
             var frame = self._recv_one()
@@ -735,7 +735,7 @@ struct WsClient(Movable):
             ``is_text=False`` for binary frames.
 
         Raises:
-            NetworkError:    If a CLOSE frame is received or I/O fails.
+            NetworkError: If a CLOSE frame is received or I/O fails.
             WsProtocolError: On protocol violation.
 
         Example:

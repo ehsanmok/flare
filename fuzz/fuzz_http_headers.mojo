@@ -1,8 +1,8 @@
 """Fuzz harness: HTTP header key/value parsing via HeaderMap.
 
 Tests ``HeaderMap.set()`` and ``append()`` for crashes on arbitrary byte
-inputs.  ``HeaderInjectionError`` (CR/LF in key or value) is a valid,
-expected rejection.  Any other exception or panic is a bug.
+inputs. ``HeaderInjectionError`` (CR/LF in key or value) is a valid,
+expected rejection. Any other exception or panic is a bug.
 
 Also fuzz-tests the ``Url._parse_port`` path via ``Url.parse`` with
 crafted authority strings (host:PORT where PORT is attacker-controlled).
@@ -28,7 +28,7 @@ def target(data: List[UInt8]) raises:
     Raises:
         Expected: ``HeaderInjectionError``, ``UrlParseError`` — classified
                   as rejections by mozz.
-        Bug:      ``index out of bounds``, ``assertion failed``, ``panic`` —
+        Bug: ``index out of bounds``, ``assertion failed``, ``panic`` —
                   classified as crashes.
     """
     if len(data) == 0:

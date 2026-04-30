@@ -3,7 +3,7 @@
 Reads files synchronously via libc ``open(2)`` / ``read(2)``;
 suitable for sub-100 MB static directories. For larger trees (or
 concurrent reactor pressure) the reactor's ``Pool[T]`` blocking
-escape hatch is the v0.7 follow-up.
+escape hatch is the follow-up.
 
 Features:
 

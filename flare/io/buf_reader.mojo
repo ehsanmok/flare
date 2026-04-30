@@ -12,7 +12,7 @@ Example:
 
     var stream = TcpStream.connect("example.com", 80)
     var reader = BufReader(stream^)
-    var line = reader.readline()     # Read one HTTP header line
+    var line = reader.readline() # Read one HTTP header line
     ```
 """
 
@@ -41,7 +41,7 @@ trait Readable(ImplicitlyDestructible, Movable):
         """Read up to ``size`` bytes into the buffer at ``buf``.
 
         Args:
-            buf:  Destination pointer. The caller must own at least ``size``
+            buf: Destination pointer. The caller must own at least ``size``
                   bytes of initialised storage at this address.
             size: Maximum number of bytes to read.
 
@@ -70,10 +70,10 @@ struct BufReader[S: Readable](Movable):
         S: Any type implementing the ``Readable`` trait (e.g. ``TcpStream``).
 
     Fields:
-        _stream:    The underlying stream (owned).
-        _buf:       Internal ring buffer.
-        _pos:       Byte offset of the next unread byte in ``_buf``.
-        _len:       Number of valid bytes in ``_buf`` starting at ``_pos``.
+        _stream: The underlying stream (owned).
+        _buf: Internal ring buffer.
+        _pos: Byte offset of the next unread byte in ``_buf``.
+        _len: Number of valid bytes in ``_buf`` starting at ``_pos``.
 
     Example:
         ```mojo
@@ -102,7 +102,7 @@ struct BufReader[S: Readable](Movable):
         """Wrap ``stream`` with a read buffer of ``capacity`` bytes.
 
         Args:
-            stream:   The underlying ``Readable`` stream (ownership taken).
+            stream: The underlying ``Readable`` stream (ownership taken).
             capacity: Internal buffer size in bytes (default 8192).
         """
         self._stream = stream^
@@ -172,7 +172,7 @@ struct BufReader[S: Readable](Movable):
         ``\\r\\n`` (CRLF) is also handled — the ``\\r`` is stripped too.
 
         Returns:
-            The line without the trailing newline.  An empty string
+            The line without the trailing newline. An empty string
             signals EOF — the stream is exhausted.
 
         Raises:
@@ -180,7 +180,7 @@ struct BufReader[S: Readable](Movable):
 
         Example:
             ```mojo
-            var line = reader.readline()  # e.g. "HTTP/1.1 200 OK"
+            var line = reader.readline() # e.g. "HTTP/1.1 200 OK"
             ```
         """
         var out = String(capacity=256)
@@ -208,7 +208,7 @@ struct BufReader[S: Readable](Movable):
             delimiter: The byte value to stop at.
 
         Returns:
-            All bytes before the delimiter as a ``String``.  Empty string
+            All bytes before the delimiter as a ``String``. Empty string
             on immediate EOF.
 
         Raises:

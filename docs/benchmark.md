@@ -33,16 +33,15 @@ piled up requests at its own queue while the server falls behind
 peak); (4) five 30 s measurement rounds at 90 % of the
 calibrated peak that report the latency distribution.
 
-Calibrated-peak replaces the earlier "two-phase" harness used
-through v0.5. The two-phase harness measured peak with one wrk2
-overdrive run and sustained at 90 % of *that* number; on a
-single-worker server the overdrive-vs-sustainable gap was small
-(~10 %), but on a multi-worker server the overdrive number
-over-reports the sustainable peak by 30–60 % (the kernel's
-accept queue absorbs the extra load briefly, then the server
-falls behind and tail explodes). The calibrated-peak path closes
-that gap and is what every multi-worker number in this document
-publishes.
+Calibrated-peak replaces the earlier "two-phase" harness. The
+two-phase harness measured peak with one wrk2 overdrive run and
+sustained at 90 % of *that* number; on a single-worker server the
+overdrive-vs-sustainable gap was small (~10 %), but on a
+multi-worker server the overdrive number over-reports the
+sustainable peak by 30–60 % (the kernel's accept queue absorbs
+the extra load briefly, then the server falls behind and tail
+explodes). The calibrated-peak path closes that gap and is what
+every multi-worker number in this document publishes.
 
 wrk2 (rather than wrk) closes the
 [coordinated-omission](https://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html)
@@ -200,17 +199,16 @@ apples-to-apples shape.
 reactor with `EPOLLEXCLUSIVE` (Linux ≥ 4.5). The kernel wakes
 exactly one waiter per accept event in FIFO order across workers
 blocked in `epoll_wait`, so a worker actively running a handler is
-not woken — fair-by-construction across *idle* workers. v0.5 used
-per-worker `SO_REUSEPORT` listeners, which the kernel hashes by
+not woken — fair-by-construction across *idle* workers. The
+earlier per-worker `SO_REUSEPORT` listener path hashed accepts by
 5-tuple stateless of worker readiness; on a 64-core EPYC under
-sustained 8-thread / 256-connection load that distribution is
+sustained 8-thread / 256-connection load that distribution was
 fair on average but bimodal across single 30 s runs (one run
 clean, the next p99 in the seconds because the hot worker's
-queue stalled). The shared-listener path is what
-[`design-v0.6.mdc`](../.cursor/rules/design-v0.6.mdc) calls
-"fair-accept work-stealing, sticky per-conn execution"; the
-`bind_reuseport` helper is preserved for backwards-compat tests
-but no longer the default.
+queue stalled). The shared-listener path replaces that with
+fair-accept across idle workers + sticky per-connection
+execution; the `bind_reuseport` helper is preserved for
+backwards-compat tests but no longer the default.
 
 The load generator is
 [`throughput_mc.yaml`](../benchmark/configs/throughput_mc.yaml)
@@ -245,12 +243,12 @@ Reading order:
    hyper 2.80 / axum 2.84 / actix_web 2.84; p99.99 = 3.30 ms vs
    hyper 3.64 / axum 6.81 / actix_web 26.74). actix_web's
    p99.99 spike is the same SO_REUSEPORT distribution variance
-   v0.5 fell into; actix_web also uses per-worker
-   `SO_REUSEPORT` listeners by default, and the wrk2-corrected
-   tail picks that up. axum / hyper run on the `tokio`
-   multi-thread runtime with a single shared listener and
-   work-stealing, the same kernel-fairness story flare_mc
-   adopts in v0.6.
+   the earlier multi-listener path fell into; actix_web also
+   uses per-worker `SO_REUSEPORT` listeners by default, and the
+   wrk2-corrected tail picks that up. axum / hyper run on the
+   `tokio` multi-thread runtime with a single shared listener
+   and work-stealing — the same kernel-fairness story flare_mc
+   now adopts.
 2. **Throughput: flare_mc lands at 53–67 % of the Rust
    frameworks** on this workload (146 K vs hyper 218 K, axum
    201 K, actix_web 263 K). This is the per-worker handler-cost
@@ -259,15 +257,14 @@ Reading order:
    not claim throughput parity with hyper here.
 3. **stdev across 5 runs: flare_mc 0.35 %**, well under the
    5 % stability gate, within noise of the Rust frameworks
-   (0.17 – 0.27 %). The pre-v0.6 SO_REUSEPORT bimodal
-   (one run p99 = 2 ms, the next p99 = 1.7 s on the same binary)
-   is gone.
+   (0.17 – 0.27 %). The earlier SO_REUSEPORT bimodal (one run
+   p99 = 2 ms, the next p99 = 1.7 s on the same binary) is gone.
 4. **Single-worker no-regression: 53,589 req/s @ p99 = 2.04 ms**.
    The single-worker reactor loop and the public `serve` API are
-   unchanged from v0.5; the better p99 vs the v0.5 dev-box smoke
-   (2.04 ms vs 3.06 ms) comes from the calibrated sustainable-
-   peak harness being honest about the saturation knee, not from
-   a runtime change.
+   unchanged; the better p99 vs the earlier dev-box smoke
+   (2.04 ms vs 3.06 ms) comes from the calibrated
+   sustainable-peak harness being honest about the saturation
+   knee, not from a runtime change.
 
 The single-worker flare / nginx / Go comparison from the previous
 section still applies per-core; multiplying by `N` workers is the
@@ -285,30 +282,30 @@ on macOS — exactly why the Linux table above is the headline.
 
 ### Multi-worker baselines: published (Rust) + pending (Go / nginx)
 
-The matched-worker Rust comparison landed in v0.6: `hyper`,
-`axum`, `actix_web` baselines live under
+The matched-worker Rust comparison is published. `hyper`, `axum`,
+and `actix_web` baselines live under
 [`benchmark/baselines/`](../benchmark/baselines), pinned via
 `Cargo.lock` and built on the same `rust 1.94 +
 sysroot_linux-64 2.34.*` conda-forge toolchain. The numbers are
 in the `flare_mc vs Rust frameworks` table above; the raw run
 data is at
-[`benchmark/results/v0.6/throughput_mc-vs-rust/`](../benchmark/results/v0.6/throughput_mc-vs-rust)
+[`benchmark/results/throughput_mc-vs-rust/`](../benchmark/results/throughput_mc-vs-rust)
 (env, integrity gate, per-target JSON, raw wrk2 stdout).
 
 | Server | Workers | Status |
 |---|---:|---|
-| flare_mc (shared listener) | 4 | numbers above (Linux EPYC, v0.6) |
-| Rust hyper (tokio multi-thread, 4 worker threads) | 4 | published (Linux EPYC, v0.6) |
-| Rust axum (4 worker threads) | 4 | published (Linux EPYC, v0.6) |
-| Rust actix_web (4 worker threads) | 4 | published (Linux EPYC, v0.6) |
+| flare_mc (shared listener) | 4 | numbers above (Linux EPYC) |
+| Rust hyper (tokio multi-thread, 4 worker threads) | 4 | published (Linux EPYC) |
+| Rust axum (4 worker threads) | 4 | published (Linux EPYC) |
+| Rust actix_web (4 worker threads) | 4 | published (Linux EPYC) |
 | nginx | 4 (`worker_processes 4`) | not yet published; needs config + harness run |
 | Go `net/http` | 4 (`GOMAXPROCS=4`) | not yet published; needs `run.sh` knob + harness run |
 
 Until the nginx / Go multi-worker rows exist, the doc does not
 assert "flare_mc is `Nx` of nginx multi-worker" or "flare_mc is
 `Nx` of Go GOMAXPROCS=N". The single-worker per-core table
-(above) and the v0.6 Rust comparison are the apples-to-apples
-points flare commits to publishing.
+(above) and the matched-worker Rust comparison are the
+apples-to-apples points flare commits to publishing.
 
 Reproduce the multi-worker comparison on a Linux box with
 multiple physical cores:

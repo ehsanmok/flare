@@ -1,9 +1,8 @@
-"""Tests for the concrete primitive extractors (v0.5.0 Step 2 /
-Track 1.3).
+"""Tests for the concrete primitive extractors.
 
 The parametric ``Path[T: ParamParser, name]`` etc. wrap parsed
 values in a ``ParamParser`` (``ParamInt``, ``ParamString``, ...)
-which itself wraps a primitive — the v0.4.x ``.value.value``
+which itself wraps a primitive — the ``.value.value``
 chain. These concrete types collapse the chain by exposing
 ``.value`` as the primitive directly.
 

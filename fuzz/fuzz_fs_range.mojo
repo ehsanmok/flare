@@ -1,4 +1,4 @@
-"""Fuzz harness: ``flare.http.fs.parse_range`` (v0.6 — Track H).
+"""Fuzz harness: ``flare.http.fs.parse_range``.
 
 Two properties:
 

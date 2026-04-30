@@ -11,7 +11,7 @@ Design rules enforced here:
 - ``read`` returning 0 means EOF — it is never converted to an error.
 - ``connect_timeout`` on macOS/arm64 delegates to ``flare_connect_timeout``
   in ``libflare_tls.so`` to sidestep a Mojo ABI bug with variadic functions
-  (e.g. ``fcntl``) on that platform.  On Linux, ``connect_timeout`` calls
+  (e.g. ``fcntl``) on that platform. On Linux, ``connect_timeout`` calls
   ``fcntl`` / ``connect`` / ``poll`` / ``getsockopt`` directly via
   ``external_call`` — ``OwnedDLHandle.get_function`` crashes on Linux when
   calling into a freshly-loaded shared library.
@@ -83,7 +83,7 @@ struct TcpStream(Movable):
     The connection is closed automatically when the struct is destroyed.
 
     Thread safety:
-        Not thread-safe in v0.1.0. Do not share a ``TcpStream`` across
+        Not thread-safe . Do not share a ``TcpStream`` across
         threads without external synchronisation.
 
     Example:
@@ -108,7 +108,7 @@ struct TcpStream(Movable):
 
         Args:
             socket: An open, connected file descriptor (ownership transferred).
-            peer:   The remote address.
+            peer: The remote address.
 
         Safety:
             ``socket`` must be connected before calling this constructor.
@@ -135,10 +135,10 @@ struct TcpStream(Movable):
             A connected ``TcpStream``.
 
         Raises:
-            ConnectionRefused:  If the remote port actively refuses.
-            ConnectionTimeout:  If the OS connect timeout expires.
-            ConnectionReset:    If the peer sends a TCP RST during connect.
-            NetworkError:       For any other OS error.
+            ConnectionRefused: If the remote port actively refuses.
+            ConnectionTimeout: If the OS connect timeout expires.
+            ConnectionReset: If the peer sends a TCP RST during connect.
+            NetworkError: For any other OS error.
 
         Example:
             ```mojo
@@ -176,12 +176,12 @@ struct TcpStream(Movable):
 
         On Linux, the non-blocking connect + ``poll(POLLOUT)`` +
         ``getsockopt(SO_ERROR)`` sequence is implemented directly via
-        ``external_call``.  ``OwnedDLHandle.get_function`` crashes on Linux
+        ``external_call``. ``OwnedDLHandle.get_function`` crashes on Linux
         when calling into a freshly-loaded shared library, so the C helper
         cannot be used there.
 
         Args:
-            addr:       The remote socket address.
+            addr: The remote socket address.
             timeout_ms: Maximum time to wait in milliseconds (must be > 0).
 
         Returns:
@@ -190,7 +190,7 @@ struct TcpStream(Movable):
         Raises:
             ConnectionTimeout: If the deadline expires before connecting.
             ConnectionRefused: If the port actively refuses.
-            NetworkError:      For any other OS error.
+            NetworkError: For any other OS error.
 
         Example:
             ```mojo
@@ -325,10 +325,10 @@ struct TcpStream(Movable):
             A connected ``TcpStream``.
 
         Raises:
-            DnsError:          If ``host`` cannot be resolved.
+            DnsError: If ``host`` cannot be resolved.
             ConnectionRefused: If the remote port actively refuses.
             ConnectionTimeout: If the OS connect timeout expires.
-            NetworkError:      For any other OS error.
+            NetworkError: For any other OS error.
 
         Example:
             ```mojo
@@ -347,18 +347,18 @@ struct TcpStream(Movable):
         to the next on failure.
 
         Args:
-            host:       Hostname or IP address string.
-            port:       TCP port number.
+            host: Hostname or IP address string.
+            port: TCP port number.
             timeout_ms: Maximum time to wait in milliseconds.
 
         Returns:
             A connected ``TcpStream``.
 
         Raises:
-            DnsError:          If ``host`` cannot be resolved.
+            DnsError: If ``host`` cannot be resolved.
             ConnectionTimeout: If all addresses time out.
             ConnectionRefused: If all addresses refuse.
-            NetworkError:      For any other OS error.
+            NetworkError: For any other OS error.
         """
         return _connect_with_fallback(host, port, timeout_ms)
 
@@ -381,7 +381,7 @@ struct TcpStream(Movable):
         closed the connection) — this is not an error.
 
         Args:
-            buf:  Destination buffer; the caller must provide at least
+            buf: Destination buffer; the caller must provide at least
                   ``size`` bytes of valid storage.
             size: Maximum number of bytes to read.
 
@@ -390,8 +390,8 @@ struct TcpStream(Movable):
 
         Raises:
             ConnectionReset: If the peer sent a TCP RST.
-            Timeout:         If a recv timeout was set and expired.
-            NetworkError:    For any other OS read error.
+            Timeout: If a recv timeout was set and expired.
+            NetworkError: For any other OS read error.
 
         Example:
             ```mojo
@@ -425,7 +425,7 @@ struct TcpStream(Movable):
         Loops over ``read()`` until ``size`` bytes have been received.
 
         Args:
-            buf:  Destination buffer; must have at least ``size`` bytes.
+            buf: Destination buffer; must have at least ``size`` bytes.
             size: Exact number of bytes to read.
 
         Raises:
@@ -466,8 +466,8 @@ struct TcpStream(Movable):
             Number of bytes actually written (>= 1 if data is non-empty).
 
         Raises:
-            BrokenPipe:  If the peer has closed the read end.
-            Timeout:     If a send timeout was set and expired.
+            BrokenPipe: If the peer has closed the read end.
+            Timeout: If a send timeout was set and expired.
             NetworkError: For any other OS write error.
 
         Example:
@@ -503,7 +503,7 @@ struct TcpStream(Movable):
             data: The bytes to send completely.
 
         Raises:
-            BrokenPipe:  If the peer closes before all bytes are sent.
+            BrokenPipe: If the peer closes before all bytes are sent.
             NetworkError: For any other OS write error.
 
         Example:
@@ -628,15 +628,15 @@ def _connect_with_fallback(
     DNS but unreachable on the local network.
 
     Args:
-        host:       Hostname to resolve.
-        port:       TCP port.
+        host: Hostname to resolve.
+        port: TCP port.
         timeout_ms: Per-address connect timeout in milliseconds.
 
     Returns:
         A connected ``TcpStream``.
 
     Raises:
-        DnsError:     If ``host`` cannot be resolved.
+        DnsError: If ``host`` cannot be resolved.
         NetworkError: If every resolved address fails to connect.
     """
     from ..dns import resolve

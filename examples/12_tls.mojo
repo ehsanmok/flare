@@ -34,11 +34,11 @@ def main() raises:
     print("── 1. Default TlsConfig ──")
     var cfg = TlsConfig()
     print(
-        "  verify    =",
+        " verify =",
         "REQUIRED" if cfg.verify == TlsVerify.REQUIRED else "(other)",
     )
     print(
-        "  ca_bundle =",
+        " ca_bundle =",
         "(default, resolved by TLS wrapper)" if cfg.ca_bundle
         == "" else cfg.ca_bundle,
     )
@@ -48,7 +48,7 @@ def main() raises:
     print("── 2. Handshake + GET https://example.com ──")
     try:
         var tls = TlsStream.connect("example.com", UInt16(443), cfg)
-        print("  handshake OK")
+        print(" handshake OK")
 
         var req = String(
             "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n"
@@ -65,20 +65,20 @@ def main() raises:
                 if c == 13 or c == 10:
                     break
                 line += chr(Int(c))
-            print("  status line: " + line)
+            print(" status line: " + line)
         tls.close()
     except e:
-        print("  [SKIP] network or CA bundle unavailable:", String(e))
+        print(" [SKIP] network or CA bundle unavailable:", String(e))
     print()
 
     # ── 3. TlsVerify.NONE: insecure, prints a security warning ──────────────
     print("── 3. TlsVerify.NONE (insecure, prints a warning to stderr) ──")
     var insecure = TlsConfig(verify=TlsVerify.NONE)
     print(
-        "  verify    = NONE" if insecure.verify
-        == TlsVerify.NONE else "  verify    = (other)"
+        " verify = NONE" if insecure.verify
+        == TlsVerify.NONE else " verify = (other)"
     )
-    print("  (not actually connecting; just showing the config)")
+    print(" (not actually connecting; just showing the config)")
     print()
 
     print("=== Example 12 complete ===")

@@ -1,5 +1,5 @@
 """Tests for the reactor-side ``parse_request_view`` adoption
-(v0.5.0 follow-up / Track 1.1 part 1 / C2).
+(follow-up / Track 1.1 part 1 / C2).
 
 The cancel-aware reactor read path now scans the request as a
 ``RequestView`` borrowed into ``read_buf`` and materialises an
@@ -157,7 +157,7 @@ def test_dual_lf_only_terminators() raises:
 
 def test_dual_ows_trim() raises:
     """OWS (SP / HTAB) on header values trimmed identically."""
-    var raw = "GET / HTTP/1.1\r\nX-Pad:    spaced\t  \r\n\r\n"
+    var raw = "GET / HTTP/1.1\r\nX-Pad: spaced\t \r\n\r\n"
     var via_view = _parse_via_view(raw)
     var via_oracle = _parse_via_oracle(raw)
     assert_equal(via_view.headers.get("X-Pad"), "spaced")

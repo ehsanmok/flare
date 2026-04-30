@@ -96,7 +96,7 @@ struct HeaderMap(Movable, Writable):
         ```mojo
         var h = HeaderMap()
         h.set("Content-Type", "application/json")
-        print(h.get("content-type"))  # application/json
+        print(h.get("content-type")) # application/json
         ```
     """
 
@@ -114,8 +114,8 @@ struct HeaderMap(Movable, Writable):
         lookup uses inline case-insensitive comparison on ``key``.
 
         Args:
-            key:   Header name.
-            lk:    Ignored (kept for backward compat).
+            key: Header name.
+            lk: Ignored (kept for backward compat).
             value: Header value.
         """
         for i in range(len(self._keys)):
@@ -138,7 +138,7 @@ struct HeaderMap(Movable, Writable):
         """Set a header, replacing any existing value with the same key.
 
         Args:
-            key:   Header name (case-insensitive; stored in original casing).
+            key: Header name (case-insensitive; stored in original casing).
             value: Header value.
 
         Raises:
@@ -157,7 +157,7 @@ struct HeaderMap(Movable, Writable):
         """Append a header without replacing existing values.
 
         Args:
-            key:   Header name.
+            key: Header name.
             value: Header value.
 
         Raises:

@@ -368,7 +368,7 @@ def _has_ipv6_loopback() -> Bool:
 def test_v6_listener_bind() raises:
     """TcpListener.bind on [::1]:0 succeeds if IPv6 is available."""
     if not _has_ipv6_loopback():
-        print("  [SKIP] IPv6 loopback not available")
+        print(" [SKIP] IPv6 loopback not available")
         return
     var addr = SocketAddr(IpAddr.localhost_v6(), 0)
     var listener = TcpListener.bind(addr)
@@ -381,7 +381,7 @@ def test_v6_listener_bind() raises:
 def test_v6_connect_loopback() raises:
     """TcpStream.connect to [::1] round-trips data if IPv6 is available."""
     if not _has_ipv6_loopback():
-        print("  [SKIP] IPv6 loopback not available")
+        print(" [SKIP] IPv6 loopback not available")
         return
     var addr = SocketAddr(IpAddr.localhost_v6(), 0)
     var listener = TcpListener.bind(addr)
@@ -406,7 +406,7 @@ def test_v6_connect_loopback() raises:
 def test_v6_peer_addr() raises:
     """Accepted IPv6 stream reports v6 peer address if IPv6 is available."""
     if not _has_ipv6_loopback():
-        print("  [SKIP] IPv6 loopback not available")
+        print(" [SKIP] IPv6 loopback not available")
         return
     var addr = SocketAddr(IpAddr.localhost_v6(), 0)
     var listener = TcpListener.bind(addr)

@@ -5,7 +5,7 @@ The tests exercise four angles:
 1. A plain struct implementing ``Handler`` with state that the handler
    reads.
 2. ``FnHandler`` wrapping a ``def(Request) raises -> Response`` so the
-   v0.3.x signature keeps working unchanged.
+   signature keeps working unchanged.
 3. Handlers that compose by wrapping (``Logged`` wraps an inner handler).
 4. Handlers that raise an error (the trait allows this; the server's
    job is to catch + convert to 500).

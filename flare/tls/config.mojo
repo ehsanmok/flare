@@ -36,12 +36,12 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
     """Configuration for a TLS connection.
 
     Fields:
-        verify:      Verification mode (``TlsVerify.REQUIRED`` by default).
-        ca_bundle:   Path to a PEM CA bundle. Defaults to the pixi-managed
+        verify: Verification mode (``TlsVerify.REQUIRED`` by default).
+        ca_bundle: Path to a PEM CA bundle. Defaults to the pixi-managed
                      ``$CONDA_PREFIX/ssl/cacert.pem``; empty string falls
                      back to the OpenSSL system default.
-        cert_file:   Path to a PEM client certificate (mTLS), or ``""`` for none.
-        key_file:    Path to a PEM client private key (mTLS), or ``""`` for none.
+        cert_file: Path to a PEM client certificate (mTLS), or ``""`` for none.
+        key_file: Path to a PEM client private key (mTLS), or ``""`` for none.
         server_name: SNI hostname override. ``""`` means derive from the
                      connected host at runtime (strongly preferred).
 

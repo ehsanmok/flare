@@ -1,10 +1,10 @@
-"""Streaming response body primitives (v0.5.0 Step 2 / Track 4).
+"""Streaming response body primitives.
 
-The v0.4.x ``Response.body: List[UInt8]`` field forces the entire
+The ``Response.body: List[UInt8]`` field forces the entire
 response body to materialise before the first ``send`` — a 100MB
 download allocates 100MB per concurrent client, regardless of the
 peer's read speed. Track 4 of design-0.5 promotes streaming bodies
-into v0.5: the reactor pulls chunks on writable edges so that:
+into : the reactor pulls chunks on writable edges so that:
 
 - 100MB downloads cost a few KB of buffer per connection (one
   chunk in flight at a time).
@@ -98,7 +98,7 @@ trait Body(ImplicitlyDestructible, Movable):
     Two shipped impls today:
 
     - ``InlineBody``: wraps a ``List[UInt8]``; yields one chunk
-      and signals end-of-stream. The default for v0.4.x-style
+      and signals end-of-stream. The default for -style
       handlers that return a complete body.
     - ``ChunkedBody[Source]``: adapter around a ``ChunkSource``;
       yields chunks until the source returns ``None``.
@@ -135,7 +135,7 @@ trait Body(ImplicitlyDestructible, Movable):
 
 
 struct InlineBody(Body, Movable):
-    """Single-shot body — the v0.4.x ``List[UInt8]`` shape packaged
+    """Single-shot body — the prior ``List[UInt8]`` shape packaged
     as a ``Body`` impl.
 
     On the first call to ``next_chunk`` returns the entire byte

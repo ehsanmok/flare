@@ -6,7 +6,7 @@
 # Phase 1 — flare.net (working)
 #
 # Usage:
-#     pixi run example-addresses
+# pixi run example-addresses
 
 from flare.net import IpAddr, SocketAddr
 
@@ -20,14 +20,14 @@ def main() raises:
     print("── IPv4 Parsing ──")
     var v4 = IpAddr.parse("192.168.1.100")
     print("Parsed:", v4)  # 192.168.1.100
-    print("  is_v4():     ", v4.is_v4())  # True
-    print("  is_private():", v4.is_private())  # True (192.168/16)
+    print(" is_v4(): ", v4.is_v4())  # True
+    print(" is_private():", v4.is_private())  # True (192.168/16)
     print()
 
     var public = IpAddr.parse("8.8.8.8")
     print("Public IP:", public)
-    print("  is_private():", public.is_private())  # False
-    print("  is_loopback():", public.is_loopback())  # False
+    print(" is_private():", public.is_private())  # False
+    print(" is_loopback():", public.is_loopback())  # False
     print()
 
     # ── IPv6 parsing ────────────────────────────────────────────────────────────
@@ -35,21 +35,21 @@ def main() raises:
     print("── IPv6 Parsing ──")
     var loopback_v6 = IpAddr.localhost_v6()
     print("Loopback v6:", loopback_v6)  # ::1
-    print("  is_v6():     ", loopback_v6.is_v6())  # True
-    print("  is_loopback():", loopback_v6.is_loopback())  # True
+    print(" is_v6(): ", loopback_v6.is_v6())  # True
+    print(" is_loopback():", loopback_v6.is_loopback())  # True
     print()
 
     var link_local = IpAddr.parse("fe80::1")
     print("Link-local:", link_local)
-    print("  is_v6():", link_local.is_v6())  # True
+    print(" is_v6():", link_local.is_v6())  # True
     print()
 
     # ── Well-known constants ─────────────────────────────────────────────────────
 
     print("── Well-Known Constants ──")
-    print("localhost     :", IpAddr.localhost())  # 127.0.0.1
-    print("localhost_v6  :", IpAddr.localhost_v6())  # ::1
-    print("unspecified   :", IpAddr.unspecified())  # 0.0.0.0
+    print("localhost :", IpAddr.localhost())  # 127.0.0.1
+    print("localhost_v6 :", IpAddr.localhost_v6())  # ::1
+    print("unspecified :", IpAddr.unspecified())  # 0.0.0.0
     print("unspecified_v6:", IpAddr.unspecified_v6())  # ::
     print()
 
@@ -65,8 +65,8 @@ def main() raises:
     print("── SocketAddr ──")
     var sa = SocketAddr(IpAddr.parse("10.0.0.1"), 8080)
     print("Constructed:", sa)  # 10.0.0.1:8080
-    print("  ip:  ", sa.ip)
-    print("  port:", sa.port)
+    print(" ip: ", sa.ip)
+    print(" port:", sa.port)
     print()
 
     var parsed_sa = SocketAddr.parse("127.0.0.1:9000")
@@ -75,12 +75,12 @@ def main() raises:
 
     var ipv6_sa = SocketAddr.parse("[::1]:443")
     print("IPv6 socket addr:", ipv6_sa)  # [::1]:443
-    print("  is_v6:", ipv6_sa.ip.is_v6())
+    print(" is_v6:", ipv6_sa.ip.is_v6())
     print()
 
     # Port boundary values
     print("Port 0 (OS-assigned):", SocketAddr.localhost(0))
-    print("Port 65535 (max):    ", SocketAddr.localhost(65535))
+    print("Port 65535 (max): ", SocketAddr.localhost(65535))
     print()
 
     # ── Equality ─────────────────────────────────────────────────────────────────
@@ -99,23 +99,23 @@ def main() raises:
     print("Attempting IpAddr.parse('256.0.0.1') ...")
     try:
         _ = IpAddr.parse("256.0.0.1")
-        print("  ERROR: should have raised!")
+        print(" ERROR: should have raised!")
     except e:
-        print("  ✓ Raised as expected:", e)
+        print(" ✓ Raised as expected:", e)
 
     print("Attempting IpAddr.parse('127.0.0.1\\x00evil') ...")
     try:
         _ = IpAddr.parse("127.0.0.1\x00evil")
-        print("  ERROR: should have raised!")
+        print(" ERROR: should have raised!")
     except e:
-        print("  ✓ Raised as expected (null-byte injection blocked):", e)
+        print(" ✓ Raised as expected (null-byte injection blocked):", e)
 
     print("Attempting SocketAddr.parse with CRLF injection ...")
     try:
         _ = SocketAddr.parse("127.0.0.1:80\r\nX-Injected: evil")
-        print("  ERROR: should have raised!")
+        print(" ERROR: should have raised!")
     except e:
-        print("  ✓ Raised as expected (CRLF injection blocked):", e)
+        print(" ✓ Raised as expected (CRLF injection blocked):", e)
 
     print()
     print("=== Example 01 complete ===")

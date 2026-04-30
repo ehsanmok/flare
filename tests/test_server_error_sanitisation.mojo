@@ -1,6 +1,6 @@
-"""Tests for sanitised 4xx error responses (v0.5.0 Step 1).
+"""Tests for sanitised 4xx error responses.
 
-Closes criticism §2.7: a 400 response built from an extractor's
+a 400 response built from an extractor's
 ``raise Error("expected integer, got '" + s + "'")`` must NOT echo
 the user-controlled bytes into the response body by default.
 

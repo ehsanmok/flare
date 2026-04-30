@@ -71,49 +71,49 @@ def main() raises:
     print("=" * 60)
 
     # 1. Size the worker pool with the public helpers — no thread
-    #    primitives, no ``_OpaquePtr``, no ``ThreadHandle``.
+    # primitives, no ``_OpaquePtr``, no ``ThreadHandle``.
     var cpus = num_cpus()
     var workers = default_worker_count()
-    print("  num_cpus               :", cpus)
-    print("  default_worker_count() :", workers)
+    print(" num_cpus :", cpus)
+    print(" default_worker_count() :", workers)
 
     # 2. Build a Router — a real multicore server would pass a
-    #    Copyable Router to ``serve(..., num_workers=N)``; each worker
-    #    gets its own copy, so there is no shared state between workers.
+    # Copyable Router to ``serve(..., num_workers=N)``; each worker
+    # gets its own copy, so there is no shared state between workers.
     var router = Router()
     router.get("/", hello)
     router.get("/users/:id", get_user)
     router.get("/health", health)
 
     # 3. Drive the router with a synthesised request to prove the
-    #    routing graph each worker would run is correctly wired.
+    # routing graph each worker would run is correctly wired.
     var r1 = router.serve(Request(method=Method.GET, url="/"))
-    print("  routed GET /           →", r1.status, r1.text())
+    print(" routed GET / →", r1.status, r1.text())
     var r2 = router.serve(Request(method=Method.GET, url="/users/42"))
-    print("  routed GET /users/42   →", r2.status, r2.text())
+    print(" routed GET /users/42 →", r2.status, r2.text())
     var r3 = router.serve(Request(method=Method.GET, url="/health"))
-    print("  routed GET /health     →", r3.status, r3.text())
+    print(" routed GET /health →", r3.status, r3.text())
     var r4 = router.serve(Request(method=Method.GET, url="/missing"))
-    print("  routed GET /missing    →", r4.status)
+    print(" routed GET /missing →", r4.status)
 
     # 4. Bind an HttpServer (port 0 = auto-assign) and close it. A
-    #    production ``main()`` would now call ``srv.serve(..., num_workers=N)``
-    #    (shown below); doing so here would block the test runner
-    #    because graceful shutdown requires another thread to call
-    #    ``srv.close()``.
+    # production ``main()`` would now call ``srv.serve(..., num_workers=N)``
+    # (shown below); doing so here would block the test runner
+    # because graceful shutdown requires another thread to call
+    # ``srv.close()``.
     var srv = HttpServer.bind(SocketAddr.localhost(0))
-    print("  bound on port          :", srv.local_addr().port)
+    print(" bound on port :", srv.local_addr().port)
     srv.close()
-    print("  closed cleanly")
+    print(" closed cleanly")
 
     print()
     print("Production `main()` — what a real multicore server runs:")
     print("")
-    print("    var router = Router()")
-    print('    router.get("/", hello)')
-    print('    router.get("/users/:id", get_user)')
+    print(" var router = Router()")
+    print(' router.get("/", hello)')
+    print(' router.get("/users/:id", get_user)')
     print("")
-    print("    var srv = HttpServer.bind(SocketAddr.localhost(8080))")
-    print("    srv.serve(router^, num_workers=default_worker_count())")
+    print(" var srv = HttpServer.bind(SocketAddr.localhost(8080))")
+    print(" srv.serve(router^, num_workers=default_worker_count())")
     print()
     print("OK.")

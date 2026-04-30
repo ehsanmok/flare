@@ -11,7 +11,7 @@ This is a complete-but-pragmatic decoder + encoder:
   emit ``H=0`` (raw) on the encode side and tolerate ``H=1`` on
   the decode side by raising — flare's encoder always sends raw
   literals so this is consistent. Adding Huffman is an optional
-  v0.7 optimisation.
+  optimisation.
 - ``Indexed Header Field`` (§6.1), ``Literal Header Field with
   Incremental Indexing`` (§6.2.1), ``Literal Header Field without
   Indexing`` (§6.2.2), ``Literal Header Field Never Indexed``
@@ -281,7 +281,7 @@ struct HpackDecoder(Copyable, Defaultable, Movable):
         if off + slen > len(buf):
             raise Error("hpack: literal string truncated")
         if huffman:
-            raise Error("hpack: Huffman-coded string not supported in v0.6")
+            raise Error("hpack: Huffman-coded string not supported ")
         var s = String(capacity=slen + 1)
         for i in range(slen):
             s += chr(Int(buf[off + i]))
@@ -353,7 +353,7 @@ struct HpackDecoder(Copyable, Defaultable, Movable):
 struct HpackEncoder(Copyable, Defaultable, Movable):
     """Stateless-ish HPACK encoder.
 
-    For v0.6 we emit every header as a Literal-without-Indexing
+    For we emit every header as a Literal-without-Indexing
     field (§6.2.2). The dynamic table on the encoder side is then
     always empty, which is RFC-legal: HPACK explicitly allows the
     encoder to choose not to use the dynamic table at all

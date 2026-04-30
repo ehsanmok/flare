@@ -34,7 +34,7 @@ def main() raises:
     # ── 1. Create a reactor ───────────────────────────────────────────────────
     print("── 1. Create a reactor (platform: kqueue on macOS, epoll on Linux)")
     var reactor = Reactor()
-    print("  registered_count =", reactor.registered_count())
+    print(" registered_count =", reactor.registered_count())
     print()
 
     # ── 2. Register a TCP listener's fd with INTEREST_READ ───────────────────
@@ -45,9 +45,9 @@ def main() raises:
     var LISTENER_TOKEN = UInt64(1)
     reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
     print(
-        "  listening on 127.0.0.1:"
+        " listening on 127.0.0.1:"
         + String(port)
-        + "  token="
+        + " token="
         + String(LISTENER_TOKEN)
     )
     print()
@@ -59,11 +59,11 @@ def main() raises:
     var events = List[Event]()
     # Up to 100ms for the kernel to mark the listener readable.
     _ = reactor.poll(100, events)
-    print("  events observed:", len(events))
+    print(" events observed:", len(events))
     for i in range(len(events)):
         var ev = events[i]
         print(
-            "    token=" + String(ev.token),
+            " token=" + String(ev.token),
             " readable=" + String(ev.is_readable()),
             " writable=" + String(ev.is_writable()),
             " hup=" + String(ev.is_hup()),
@@ -79,13 +79,13 @@ def main() raises:
     var buf = List[UInt8]()
     buf.resize(1, UInt8(0))
     var n = server.read(buf.unsafe_ptr(), 1)
-    print("  server read " + String(n) + " byte: '" + chr(Int(buf[0])) + "'")
+    print(" server read " + String(n) + " byte: '" + chr(Int(buf[0])) + "'")
     print()
 
     # ── 5. Unregister + teardown ────────────────────────────────────────────
     print("── 5. Unregister and close ──")
     reactor.unregister(listener_fd)
-    print("  registered_count =", reactor.registered_count())
+    print(" registered_count =", reactor.registered_count())
     client.close()
     server.close()
     listener.close()

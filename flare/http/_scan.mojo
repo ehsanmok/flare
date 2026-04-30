@@ -1,6 +1,6 @@
 """SIMD-parametric byte scanners for the HTTP/1.1 parser hot path.
 
-The v0.3.x parser walked header bytes with plain scalar loops. For
+The parser walked header bytes with plain scalar loops. For
 short requests that's free; for long keep-alive pipelines with
 16+ headers it adds up. This module provides SIMD-width-parametric
 replacements for the two hottest scanners:
@@ -63,7 +63,7 @@ def find_crlfcrlf[
             ``64`` based on target vector width.
 
     Args:
-        data:  Byte buffer to scan.
+        data: Byte buffer to scan.
         start: Offset to begin scanning at (negative treated as 0).
 
     Returns:
@@ -165,8 +165,8 @@ def scan_content_length[
             ``find_crlfcrlf``.
 
     Args:
-        data:        Byte buffer (header region + maybe body bytes).
-        header_end:  Offset past the ``\\r\\n\\r\\n`` terminator; the
+        data: Byte buffer (header region + maybe body bytes).
+        header_end: Offset past the ``\\r\\n\\r\\n`` terminator; the
             scan stops before this so header-collision with the body is
             impossible.
 

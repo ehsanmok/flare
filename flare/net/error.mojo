@@ -19,7 +19,7 @@ struct NetworkError(Copyable, Movable, Writable):
 
     Fields:
         message: Human-readable description (from ``strerror`` or caller).
-        code:    OS ``errno`` value (0 if not applicable).
+        code: OS ``errno`` value (0 if not applicable).
 
     Example:
         ```mojo
@@ -35,7 +35,7 @@ struct NetworkError(Copyable, Movable, Writable):
 
         Args:
             message: Human-readable description of the failure.
-            code:    OS errno value. Defaults to 0 (not an OS error).
+            code: OS errno value. Defaults to 0 (not an OS error).
         """
         self.message = message
         self.code = code
@@ -219,8 +219,8 @@ struct Timeout(Copyable, Movable, Writable):
     """Raised when a blocking I/O operation exceeds its timeout.
 
     Fields:
-        op:  Name of the operation that timed out (e.g. ``"recv"``).
-        ms:  Timeout in milliseconds that was set (0 if unknown).
+        op: Name of the operation that timed out (e.g. ``"recv"``).
+        ms: Timeout in milliseconds that was set (0 if unknown).
 
     Example:
         ```mojo
@@ -256,8 +256,8 @@ struct DnsError(Copyable, Movable, Writable):
     """Raised when DNS resolution fails.
 
     Fields:
-        host:   The hostname that could not be resolved.
-        code:   The ``getaddrinfo`` error code (from ``gai_strerror``).
+        host: The hostname that could not be resolved.
+        code: The ``getaddrinfo`` error code (from ``gai_strerror``).
         reason: Human-readable reason from ``gai_strerror``.
 
     Example:

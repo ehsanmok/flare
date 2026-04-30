@@ -69,13 +69,13 @@ def main() raises:
     var serve_tree = _ObserveHits(app^, view^)
 
     var resp = serve_tree.serve(Request(method=Method.GET, url="/"))
-    print("GET /           →", resp.status, resp.text())
-    print("  X-Hits:        ", resp.headers.get("X-Hits"))
-    print("  X-Misses:      ", resp.headers.get("X-Misses"))
+    print("GET / →", resp.status, resp.text())
+    print(" X-Hits: ", resp.headers.get("X-Hits"))
+    print(" X-Misses: ", resp.headers.get("X-Misses"))
 
     var resp2 = serve_tree.serve(Request(method=Method.GET, url="/details"))
-    print("GET /details    →", resp2.status, resp2.text())
-    print("  X-Hits:        ", resp2.headers.get("X-Hits"))
+    print("GET /details →", resp2.status, resp2.text())
+    print(" X-Hits: ", resp2.headers.get("X-Hits"))
 
     print()
     print("OK.")

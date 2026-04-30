@@ -16,7 +16,7 @@ Properties verified:
    ``Authorization`` to a string starting with ``"Bearer "``.
 
 5. ``injection_resistance_basic`` — ``BasicAuth`` rejects usernames/passwords
-   whose base64 encoding would embed CRLF in the header value.  Since base64
+   whose base64 encoding would embed CRLF in the header value. Since base64
    output never contains CR or LF, the header must always be injection-free.
 
 Run:
@@ -78,7 +78,7 @@ def _bytes_to_ascii(data: List[UInt8], start: Int, end: Int) -> String:
 
 def basic_auth_prefix(data: List[UInt8]) -> Bool:
     """``BasicAuth`` header always starts with ``"Basic "``."""
-    # Use first half as username, second half as password.  Restrict to ASCII
+    # Use first half as username, second half as password. Restrict to ASCII
     # so that the credential string and its base64 encoding are deterministic.
     var mid = len(data) // 2
     var user = _bytes_to_ascii(data, 0, mid)
@@ -131,11 +131,11 @@ def main() raises:
 
     print("[mozz] prop: b64_charset ...")
     forall_bytes(b64_charset, max_len=MAX_LEN, trials=TRIALS, seed=0)
-    print("[mozz] prop: b64_charset  PASS")
+    print("[mozz] prop: b64_charset PASS")
 
     print("[mozz] prop: b64_length ...")
     forall_bytes(b64_length, max_len=MAX_LEN, trials=TRIALS, seed=1)
-    print("[mozz] prop: b64_length   PASS")
+    print("[mozz] prop: b64_length PASS")
 
     print("[mozz] prop: basic_auth_prefix ...")
     forall_bytes(basic_auth_prefix, max_len=MAX_LEN, trials=TRIALS, seed=2)

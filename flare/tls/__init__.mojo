@@ -14,13 +14,13 @@ from flare.tls import (
 )
 ```
 
-- `TlsConfig`                  — Certificate/key/CA bundle configuration.
-- `TlsVerify`                  — Peer verification mode constants.
-- `TlsStream`                  — Encrypted TCP stream (handshake + read/write).
-- `TlsHandshakeError`          — Generic TLS handshake failure.
-- `CertificateExpired`         — Server cert has passed its `notAfter` date.
+- `TlsConfig` — Certificate/key/CA bundle configuration.
+- `TlsVerify` — Peer verification mode constants.
+- `TlsStream` — Encrypted TCP stream (handshake + read/write).
+- `TlsHandshakeError` — Generic TLS handshake failure.
+- `CertificateExpired` — Server cert has passed its `notAfter` date.
 - `CertificateHostnameMismatch` — Cert CN/SAN does not match the target host.
-- `CertificateUntrusted`       — Cert not trusted by any CA in the bundle.
+- `CertificateUntrusted` — Cert not trusted by any CA in the bundle.
 
 ## Example
 

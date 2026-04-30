@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.session`` (v0.6 — track E).
+"""Tests for ``flare.http.session`` (— track E).
 
 Covers:
 

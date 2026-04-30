@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.form`` (v0.6 — track B).
+"""Tests for ``flare.http.form`` (— track B).
 
 Covers:
 

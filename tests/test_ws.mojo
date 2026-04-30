@@ -369,7 +369,7 @@ def test_ws_connect_plain() raises:
         ws.close()
         assert_true(True)
     except e:
-        print("  [SKIP] ws:// unavailable: " + String(e))
+        print(" [SKIP] ws:// unavailable: " + String(e))
 
 
 def test_ws_echo_roundtrip() raises:
@@ -387,7 +387,7 @@ def test_ws_echo_roundtrip() raises:
         assert_true(found, "echo not received within 5 frames")
         ws.close()
     except e:
-        print("  [SKIP] ws:// unavailable: " + String(e))
+        print(" [SKIP] ws:// unavailable: " + String(e))
 
 
 # ── WsServer + WsConnection on loopback ──────────────────────────────────────
@@ -396,10 +396,10 @@ def test_ws_echo_roundtrip() raises:
 # single-threaded deadlock that would arise if WsClient.connect() (which
 # blocks waiting for 101) and the server accept() had to interleave.
 # Instead each test:
-#   1. Binds a WsServer on port 0.
-#   2. Connects a raw TcpStream.
-#   3. Does the server accept() + handshake helpers explicitly.
-#   4. Exchanges raw WsFrame wire bytes on the client side.
+# 1. Binds a WsServer on port 0.
+# 2. Connects a raw TcpStream.
+# 3. Does the server accept() + handshake helpers explicitly.
+# 4. Exchanges raw WsFrame wire bytes on the client side.
 
 
 def _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:

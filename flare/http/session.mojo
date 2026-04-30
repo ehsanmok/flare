@@ -57,7 +57,7 @@ def signed_cookie_encode(
 
     Args:
         payload: Raw payload bytes.
-        key:     HMAC key.
+        key: HMAC key.
 
     Returns:
         ``"<base64url(payload)>.<base64url(mac)>"`` cookie value.
@@ -79,7 +79,7 @@ def signed_cookie_decode(
 
     Args:
         cookie: Cookie value as produced by ``signed_cookie_encode``.
-        key:    HMAC key.
+        key: HMAC key.
 
     Returns:
         Decoded payload bytes.
@@ -118,7 +118,7 @@ def signed_cookie_decode_keys(
 
     Args:
         cookie: Cookie value.
-        keys:   Acceptable HMAC keys (current key first, previous
+        keys: Acceptable HMAC keys (current key first, previous
                 keys after).
 
     Returns:
@@ -304,9 +304,9 @@ struct CookieSessionStore(Copyable, Defaultable, Movable):
 struct InMemorySessionStore(Copyable, Defaultable, Movable):
     """Server-side session table keyed by signed session id.
 
-    Concurrency note: the v0.6 implementation is single-worker; for
+    Concurrency note: the implementation is single-worker; for
     multi-worker mode the store is per-worker (each worker keeps
-    its own table). A shared backend (Redis, DB) is a v0.7 follow-up
+    its own table). A shared backend (Redis, DB) is a follow-up
     behind the same trait.
     """
 

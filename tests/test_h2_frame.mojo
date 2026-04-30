@@ -1,4 +1,4 @@
-"""Tests for ``flare.http2.frame`` (RFC 9113 §4 codec, v0.6 — Track J).
+"""Tests for ``flare.http2.frame`` (RFC 9113 §4 codec, — Track J).
 
 Covers:
 

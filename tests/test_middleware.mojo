@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.middleware`` (v0.6 — track G).
+"""Tests for ``flare.http.middleware`` (— track G).
 
 Covers:
 

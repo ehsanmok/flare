@@ -30,36 +30,36 @@ struct ServerConfig(Copyable, Movable):
     """Configuration for the HTTP server.
 
     Fields:
-        read_buffer_size:       Socket read chunk size in bytes (default 8192).
-        max_header_size:        Maximum total bytes for request headers (default 8192).
-        max_body_size:          Maximum bytes for the request body (default 10MB).
-        max_uri_length:         Maximum bytes for the request URI (default 8192).
-        keep_alive:             Enable HTTP/1.1 keep-alive (default True).
+        read_buffer_size: Socket read chunk size in bytes (default 8192).
+        max_header_size: Maximum total bytes for request headers (default 8192).
+        max_body_size: Maximum bytes for the request body (default 10MB).
+        max_uri_length: Maximum bytes for the request URI (default 8192).
+        keep_alive: Enable HTTP/1.1 keep-alive (default True).
         max_keepalive_requests: Max requests per connection before forcing close (default 100).
-        idle_timeout_ms:        Max ms a connection may stay idle before the
+        idle_timeout_ms: Max ms a connection may stay idle before the
             reactor closes it (default 500). 0 disables.
-        write_timeout_ms:       Max ms allowed for a partial write to complete
+        write_timeout_ms: Max ms allowed for a partial write to complete
             (default 5000). 0 disables.
-        shutdown_timeout_ms:    Max ms graceful shutdown waits for in-flight
+        shutdown_timeout_ms: Max ms graceful shutdown waits for in-flight
             connections to drain before force-closing (default 5000).
-        expose_error_messages:  When ``True``, 400 / 5xx response bodies
+        expose_error_messages: When ``True``, 400 / 5xx response bodies
             include the raised ``Error`` message verbatim — useful for
             local development. **Default ``False``** so production
             servers send a fixed status reason and log the message
             (with any user-controlled bytes) to stderr instead of
             echoing it back. Closes criticism §2.7.
-        read_body_timeout_ms:   Max ms allowed between headers-end and the
+        read_body_timeout_ms: Max ms allowed between headers-end and the
             last body byte (default 30_000). 0 disables. Closes the
             slow-body-upload variant of the slow-client DoS surface
             described in criticism §2.2. Mirrors nginx's
             ``client_body_timeout``.
-        handler_timeout_ms:     Max ms ``Handler.serve`` (or
+        handler_timeout_ms: Max ms ``Handler.serve`` (or
             ``CancelHandler.serve``) is allowed to run before the
             reactor flips ``Cancel.TIMEOUT`` (default 30_000). 0
             disables. Cooperative — the handler observes the flip on
             its next ``cancel.cancelled()`` poll. Closes the
             handler-watchdog variant of criticism §2.2.
-        request_timeout_ms:     Max ms wall-time from request line in to
+        request_timeout_ms: Max ms wall-time from request line in to
             response bytes out (default 60_000). 0 disables. The
             reactor enforces this as the outermost deadline; the
             other two cooperate via ``Cancel``. Must be >=
@@ -127,7 +127,7 @@ comptime _DEFAULT_SERVER_CONFIG: ServerConfig = ServerConfig()
 @fieldwise_init
 struct ShutdownReport(Copyable, ImplicitlyCopyable, Movable):
     """Result of a graceful shutdown via ``HttpServer.drain`` or
-    ``Scheduler.drain`` (v0.5.0 Step 1).
+    ``Scheduler.drain``.
 
     The multi-worker variant returns one report per worker; the
     single-threaded ``HttpServer.drain`` returns one. ``drained``
@@ -199,7 +199,7 @@ struct HttpServer(Movable):
         """Bind an HTTP server on ``addr``.
 
         Args:
-            addr:   Local address to listen on.
+            addr: Local address to listen on.
             config: Server configuration (optional).
 
         Returns:
@@ -222,35 +222,35 @@ struct HttpServer(Movable):
 
         Plain-function overload: pass a ``def(Request) raises -> Response``
         and the server wraps it in a ``FnHandler`` internally. This is
-        the v0.3.x-compatible shape; the argument list is extended with
+        the -compatible shape; the argument list is extended with
         ``num_workers`` / ``pin_cores`` to match the Handler-typed
         overload below so every user has one entry point to learn.
 
         - ``num_workers == 1`` (default): single-threaded reactor
           (kqueue on macOS, epoll on Linux). Same hot path as the
-          v0.3.x ``serve``.
+          ``serve``.
         - ``num_workers >= 2``: multicore — N ``pthread`` workers
           sharing a single listener fd, each registering it with
           ``EPOLLEXCLUSIVE`` (on Linux >= 4.5) via
-          ``flare.runtime.scheduler.Scheduler`` (v0.6). The kernel
+          ``flare.runtime.scheduler.Scheduler``. The kernel
           wakes one worker per accept event, eliminating the
           ``SO_REUSEPORT`` 4-tuple-hash distribution variance that
-          drove tail-latency spikes in v0.5.x.
+          drove tail-latency spikes .
 
         For Router / middleware / stateful-struct handlers, use the
         Handler-typed overload ``serve[H: Handler & Copyable]``.
 
         Args:
-            handler:     Called once per parsed request.
+            handler: Called once per parsed request.
             num_workers: Worker count. ``<= 0`` is coerced to 1.
                 Values > 256 are rejected (see ``Scheduler.start``).
-            pin_cores:   On Linux, pin worker N to core ``N % num_cpus``.
+            pin_cores: On Linux, pin worker N to core ``N % num_cpus``.
                 Ignored when ``num_workers == 1``. No-op on macOS.
 
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
-            Error:        On ``pthread_create`` failure when
+            Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
         from ._server_reactor_impl import run_reactor_loop
@@ -273,7 +273,7 @@ struct HttpServer(Movable):
     ) raises:
         """Run the reactor loop with a ``Handler``.
 
-        This is the unified v0.4.0 entry point. Any struct implementing
+        This is the unified entry point. Any struct implementing
         ``Handler & Copyable`` works: ``Router``, middleware wrappers,
         stateful user handlers, ``App[S, H]``, or a bare ``FnHandler``.
 
@@ -282,22 +282,21 @@ struct HttpServer(Movable):
           no pthreads.
         - ``num_workers >= 2``: multicore — N ``pthread`` workers
           sharing a single listener fd via
-          ``flare.runtime.scheduler.Scheduler`` (v0.6 redesign with
-          ``EPOLLEXCLUSIVE``-based fair accept distribution).
+          ``flare.runtime.scheduler.Scheduler``.
           ``Copyable`` is required here because each worker gets its
           own ``H.copy()``.
 
         Args:
-            handler:     The request handler (ownership transferred).
+            handler: The request handler (ownership transferred).
             num_workers: Worker count. ``<= 0`` is coerced to 1.
                 Values > 256 are rejected (see ``Scheduler.start``).
-            pin_cores:   On Linux, pin worker N to core ``N % num_cpus``.
+            pin_cores: On Linux, pin worker N to core ``N % num_cpus``.
                 Ignored when ``num_workers == 1``. No-op on macOS.
 
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
-            Error:        On ``pthread_create`` failure when
+            Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
         from ._server_reactor_impl import run_reactor_loop
@@ -337,8 +336,7 @@ struct HttpServer(Movable):
         # the scheduler's own shutdown path is the normal exit).
         #
         # Routes through ``libc_nanosleep_ms`` (50ms) rather than
-        # the inferred-signature ``usleep`` because the v0.5.0
-        # pinned Mojo nightly mis-passes the c_uint argument and
+        # the inferred-signature ``usleep`` because the # pinned Mojo nightly mis-passes the c_uint argument and
         # ends up sleeping ~50 seconds instead of 50 ms — the
         # rolled-own FFI in ``flare.runtime._libc_time`` has
         # explicit Int32 / pointer-to-Int64 signatures.
@@ -460,27 +458,27 @@ struct HttpServer(Movable):
         CH: CancelHandler
     ](mut self, var handler: CH,) raises:
         """Run the cancel-aware reactor loop with a ``CancelHandler``
-        (v0.5.0 Step 1).
+        .
 
-        Single-threaded entry point; the multicore variant lands in a
-        future commit. The reactor allocates one ``CancelCell`` per
-        connection, hands a ``Cancel`` handle bound to it into
-        ``handler.serve(req, cancel)``, and flips the cell on:
+         Single-threaded entry point; the multicore variant lands in a
+         future commit. The reactor allocates one ``CancelCell`` per
+         connection, hands a ``Cancel`` handle bound to it into
+         ``handler.serve(req, cancel)``, and flips the cell on:
 
-        - ``CancelReason.PEER_CLOSED`` — peer FIN observed before the
-          response was queued.
-        - ``CancelReason.TIMEOUT`` — wired in commit 5 of v0.5.0 Step 1.
-        - ``CancelReason.SHUTDOWN`` — wired in commit 6 of v0.5.0 Step 1.
+         - ``CancelReason.PEER_CLOSED`` — peer FIN observed before the
+           response was queued.
+         - ``CancelReason.TIMEOUT`` — wired in commit 5 of .
+         - ``CancelReason.SHUTDOWN`` — wired in commit 6 of .
 
-        For plain ``Handler``s that don't observe cancellation, wrap
-        with ``WithCancel[H](inner=h)`` to plug them into this entry
-        point unchanged.
+         For plain ``Handler``s that don't observe cancellation, wrap
+         with ``WithCancel[H](inner=h)`` to plug them into this entry
+         point unchanged.
 
-        Args:
-            handler: Cancel-aware request handler (ownership transferred).
+         Args:
+             handler: Cancel-aware request handler (ownership transferred).
 
-        Raises:
-            NetworkError: On fatal listener errors.
+         Raises:
+             NetworkError: On fatal listener errors.
         """
         from ._server_reactor_impl import run_reactor_loop_cancel
 
@@ -493,31 +491,31 @@ struct HttpServer(Movable):
         VH: ViewHandler
     ](mut self, var handler: VH,) raises:
         """Run the view-aware reactor loop with a ``ViewHandler``
-        (v0.5.0 follow-up / Track 1.1 part 2 / C3).
+        .
 
-        Single-threaded entry point. Per-request the reactor:
+         Single-threaded entry point. Per-request the reactor:
 
-        1. Reads bytes into ``ConnHandle.read_buf``.
-        2. Parses the request as a ``RequestView`` borrowing into
-           ``read_buf`` (no per-header String alloc, no body copy).
-        3. Dispatches into ``handler.serve_view(view, cancel)`` —
-           ``view.body()`` returns ``Span[UInt8, origin]`` directly.
-        4. Serialises the response and resets ``read_buf`` for
-           the next pipelined request.
+         1. Reads bytes into ``ConnHandle.read_buf``.
+         2. Parses the request as a ``RequestView`` borrowing into
+            ``read_buf`` (no per-header String alloc, no body copy).
+         3. Dispatches into ``handler.serve_view(view, cancel)`` —
+            ``view.body()`` returns ``Span[UInt8, origin]`` directly.
+         4. Serialises the response and resets ``read_buf`` for
+            the next pipelined request.
 
-        Use this entry point for handlers that benefit from
-        zero-copy reads — multipart upload parsers, large-body
-        echos, anything that scans the body without re-encoding
-        it. For v0.4.x ``Handler.serve(req: Request)`` plug-in,
-        wrap with ``WithViewCancel[H](inner=h)`` (the adapter
-        does ``view.into_owned()`` and forwards).
+         Use this entry point for handlers that benefit from
+         zero-copy reads — multipart upload parsers, large-body
+         echos, anything that scans the body without re-encoding
+         it. For ``Handler.serve(req: Request)`` plug-in,
+         wrap with ``WithViewCancel[H](inner=h)`` (the adapter
+         does ``view.into_owned()`` and forwards).
 
-        Args:
-            handler: View-aware request handler (ownership
-                transferred).
+         Args:
+             handler: View-aware request handler (ownership
+                 transferred).
 
-        Raises:
-            NetworkError: On fatal listener errors.
+         Raises:
+             NetworkError: On fatal listener errors.
         """
         from ._server_reactor_impl import run_reactor_loop_view
 
@@ -579,7 +577,7 @@ struct HttpServer(Movable):
         self._listener.close()
 
     def drain(mut self, timeout_ms: Int) raises -> ShutdownReport:
-        """Graceful shutdown (v0.5.0 Step 1).
+        """Graceful shutdown.
 
         Closes the listening socket so no new connections are accepted,
         waits up to ``timeout_ms`` milliseconds for in-flight reactor
@@ -589,7 +587,7 @@ struct HttpServer(Movable):
         elapses.
 
         Wires ``ServerConfig.shutdown_timeout_ms`` (a stub field
-        through v0.4.x) into a real wait-for-drain loop. Closes
+        through ) into a real wait-for-drain loop. Closes
         criticism §2.12.
 
         Args:
@@ -602,7 +600,7 @@ struct HttpServer(Movable):
             drained cleanly and how many were forced closed at the
             deadline. The single-threaded reactor returns
             best-effort counts derived from listener state; the
-            multi-threaded variant on ``Scheduler`` (v0.5.0 Step 2)
+            multi-threaded variant on ``Scheduler``
             returns one report per worker.
 
         Raises:
@@ -636,7 +634,7 @@ struct HttpServer(Movable):
         # connections done" requires per-conn observability the
         # single-threaded reactor doesn't expose to the caller —
         # the multi-threaded ``Scheduler.drain`` variant landing in
-        # v0.5.0 Step 2 returns a richer ``ShutdownReport`` per
+        # returns a richer ``ShutdownReport`` per
         # worker. For the single-threaded path we report best
         # effort: drain succeeded (no forced close visible from
         # this caller's vantage point) iff the timeout was
@@ -687,7 +685,7 @@ def _find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
 
     Thin wrapper over ``flare.http._scan.find_crlfcrlf`` with the
     default SIMD width (32 lanes) so the public call site keeps the
-    same signature as the v0.3.x scalar implementation. Callers who
+    same signature as the scalar implementation. Callers who
     need a non-default width can import ``find_crlfcrlf`` directly.
     """
     from ._scan import find_crlfcrlf as _sc_find
@@ -767,16 +765,16 @@ def _parse_http_request_bytes(
     illegal control characters. Parses HTTP version for keep-alive semantics.
 
     Args:
-        data:            Raw HTTP/1.1 request bytes.
+        data: Raw HTTP/1.1 request bytes.
         max_header_size: Maximum bytes for all header lines combined.
-        max_body_size:   Maximum bytes for the request body.
-        max_uri_length:  Maximum bytes for the request URI.
-        peer:            Kernel-reported peer ``SocketAddr`` captured at
+        max_body_size: Maximum bytes for the request body.
+        max_uri_length: Maximum bytes for the request URI.
+        peer: Kernel-reported peer ``SocketAddr`` captured at
                          accept; copied into the parsed ``Request`` so
                          handlers can read ``req.peer``. Defaults to
                          ``127.0.0.1:0`` for callers that don't have a
                          live connection (tests, fuzzers).
-        expose_errors:   Whether the parsed request will allow handler /
+        expose_errors: Whether the parsed request will allow handler /
                          extractor error messages into its 4xx / 5xx
                          response body. Threaded onto
                          ``Request.expose_errors``. Defaults to
@@ -1072,7 +1070,7 @@ def redirect(url: String, status: Int = 302) -> Response:
     """Create a redirect response (302 Found by default).
 
     Args:
-        url:    Target URL for the ``Location`` header.
+        url: Target URL for the ``Location`` header.
         status: HTTP status code (301, 302, 307, 308). Default 302.
 
     Returns:
@@ -1095,8 +1093,8 @@ def _write_response_buffered(
     """Serialise ``resp`` into a single buffer and write it in one call.
 
     Args:
-        stream:     Open ``TcpStream`` for the client connection.
-        resp:       The response to send.
+        stream: Open ``TcpStream`` for the client connection.
+        resp: The response to send.
         keep_alive: If True, sends ``Connection: keep-alive``; otherwise ``close``.
 
     Raises:

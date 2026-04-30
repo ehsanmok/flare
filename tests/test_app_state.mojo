@@ -10,7 +10,7 @@ Covers:
   ``App.state``.
 - A handler that captures an ``App`` reference can read state while
   serving a request (the runtime-extractor path; the comptime-
-  signature version lands in v0.4.1).
+  signature version lands in ).
 """
 
 from std.testing import (

@@ -1,14 +1,12 @@
 """Cancel token plumbed from the reactor into request handlers.
 
-Closes criticism §2.1 (the largest single gap on the v0.4.x stack):
-
-    A handler runs to completion regardless of client behaviour. If the
+A handler runs to completion regardless of client behaviour. If the
     client TCP-disconnects mid-handler, the handler has no signal until
     the next ``_send`` returns ``EPIPE``. By then the handler has already
     done its expensive work (DB query, downstream HTTP fan-out, JSON
     serialisation).
 
-In v0.5.0 Step 1, the reactor allocates one ``CancelCell`` per
+the reactor allocates one ``CancelCell`` per
 connection (heap-allocated ``Int``). ``Cancel`` is a thin handle the
 reactor passes to a ``CancelHandler.serve(req, cancel)``; the handler
 polls ``cancel.cancelled()`` between expensive steps and short-circuits
@@ -22,9 +20,9 @@ checks the flag at boundaries it owns; the reactor sets it at one of:
 - ``CancelReason.PEER_CLOSED`` — ``recv == 0`` (peer FIN) observed
   before the response was queued.
 - ``CancelReason.TIMEOUT`` — a per-request, per-handler, or
-  per-body-read deadline fired (lands in commit 5 of v0.5.0 Step 1).
+  per-body-read deadline fired.
 - ``CancelReason.SHUTDOWN`` — ``HttpServer.drain(timeout_ms)`` was
-  called (lands in commit 6 of v0.5.0 Step 1).
+  called.
 
 The default-initialised ``Cancel`` returned by ``Cancel.never()`` is a
 sentinel that never fires; tests and synthetic ``CancelHandler`` calls
@@ -38,7 +36,7 @@ lifetime. ``Cancel`` carries the cell's address as an ``Int`` and
 rebuilds a fresh ``UnsafePointer[Int, MutExternalOrigin]`` per access
 — the same pattern the multicore ``Scheduler`` uses for the
 ``stopping`` flag, and the only one that survives Mojo's current
-(v0.26.3.0.dev2026042205) origin / aliasing model when passing the
+(current Mojo nightly) origin / aliasing model when passing the
 cancel handle across function-call boundaries:
 
 - Storing a typed ``UnsafePointer[Int, MutExternalOrigin]`` as a
@@ -100,7 +98,7 @@ struct CancelReason:
     Set by the reactor when the timer wheel reports a deadline for
     the connection has elapsed. The handler should return as soon as
     it observes this; the reactor will discard a too-late response
-    and close the connection. Wired in commit 5 of v0.5.0 Step 1."""
+    and close the connection. """
 
     comptime SHUTDOWN: Int = 3
     """``HttpServer.drain(timeout_ms)`` was called.
@@ -108,7 +106,7 @@ struct CancelReason:
     The server is being torn down gracefully. The handler should
     short-circuit; if it returns within the drain timeout the
     response goes out normally, otherwise the connection is
-    hard-closed. Wired in commit 6 of v0.5.0 Step 1."""
+    hard-closed. """
 
 
 # ── CancelCell ───────────────────────────────────────────────────────────────

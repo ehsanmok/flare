@@ -40,10 +40,10 @@ struct Response(Movable):
     """An HTTP/1.1 response.
 
     Fields:
-        status:  HTTP status code (see ``Status.*`` constants).
-        reason:  Status reason phrase (e.g. ``"OK"``).
+        status: HTTP status code (see ``Status.*`` constants).
+        reason: Status reason phrase (e.g. ``"OK"``).
         headers: Response headers (owned ``HeaderMap``).
-        body:    Response body bytes.
+        body: Response body bytes.
         version: HTTP version string (default ``"HTTP/1.1"``).
 
     This type is ``Movable`` (owns headers and body) but not ``Copyable``.
@@ -94,7 +94,7 @@ struct Response(Movable):
     def text(self) -> String:
         """Decode the body as a UTF-8 string.
 
-        Interprets the body bytes as UTF-8.  Invalid UTF-8 sequences are
+        Interprets the body bytes as UTF-8. Invalid UTF-8 sequences are
         replaced with the Unicode replacement character (best-effort).
 
         Returns:
@@ -141,7 +141,7 @@ struct Response(Movable):
         Example:
             ```mojo
             var resp = client.get("https://httpbin.org/status/404")
-            resp.raise_for_status()   # raises HttpError: 404 Not Found
+            resp.raise_for_status() # raises HttpError: 404 Not Found
             ```
         """
         if self.status < 200 or self.status >= 300:
@@ -176,7 +176,7 @@ struct Response(Movable):
         """Return an iterator that yields the body in chunks.
 
         The entire body is already buffered in memory, so this does not
-        perform additional I/O.  Useful for streaming-style processing.
+        perform additional I/O. Useful for streaming-style processing.
 
         Args:
             chunk_size: Maximum bytes per chunk (default 8192).
@@ -196,7 +196,7 @@ struct Response(Movable):
 struct _BytesIter(Movable):
     """Iterator that yields body bytes in fixed-size chunks.
 
-    Produced by ``Response.iter_bytes()``.  All data is already in memory;
+    Produced by ``Response.iter_bytes()``. All data is already in memory;
     the iterator simply slices through ``_body`` from ``_pos`` to end.
     """
 

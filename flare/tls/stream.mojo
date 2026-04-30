@@ -90,14 +90,14 @@ def _classify_tls_error(err: String, host: String) raises:
     to distinguish them from generic I/O errors.
 
     Args:
-        err:  Error string from ``flare_ssl_last_error()``.
+        err: Error string from ``flare_ssl_last_error()``.
         host: Hostname the client tried to connect to (for context).
 
     Raises:
-        CertificateExpired:          If the cert has passed its ``notAfter``.
+        CertificateExpired: If the cert has passed its ``notAfter``.
         CertificateHostnameMismatch: If hostname does not match the cert.
-        CertificateUntrusted:        For other certificate verification failures.
-        TlsHandshakeError:           For all other handshake errors.
+        CertificateUntrusted: For other certificate verification failures.
+        TlsHandshakeError: For all other handshake errors.
     """
     if err.startswith("verify:"):
         var reason = String(
@@ -136,7 +136,7 @@ struct TlsStream(Movable, Readable):
         - SNI always sent for hostname targets
 
     Thread safety:
-        Not thread-safe in v0.1.0.
+        Not thread-safe .
 
     Example:
         ```mojo
@@ -150,7 +150,7 @@ struct TlsStream(Movable, Readable):
     # called. _tcp keeps the OS fd alive for as long as _ssl needs it.
     # Ownership: this struct owns both _ctx and _ssl; they are freed in close().
     var _ctx: Int  # SSL_CTX* as Int (0 = null / closed)
-    var _ssl: Int  # SSL*     as Int (0 = null / closed)
+    var _ssl: Int  # SSL* as Int (0 = null / closed)
     var _tcp: TcpStream  # owns the TCP fd
 
     def __init__(out self, var tcp: TcpStream, ctx: Int, ssl: Int):
@@ -210,19 +210,19 @@ struct TlsStream(Movable, Readable):
         printed to stderr on every call (intentional).
 
         Args:
-            host:   Hostname or IP string. SNI is derived from this value.
-            port:   Destination TCP port (typically 443 for HTTPS).
+            host: Hostname or IP string. SNI is derived from this value.
+            port: Destination TCP port (typically 443 for HTTPS).
             config: TLS configuration (verification mode, CA bundle, mTLS).
 
         Returns:
             A ``TlsStream`` with the TLS handshake complete.
 
         Raises:
-            NetworkError:                DNS resolution or TCP connect failure.
-            TlsHandshakeError:           Generic TLS handshake failure.
-            CertificateExpired:          Server cert has passed its notAfter.
+            NetworkError: DNS resolution or TCP connect failure.
+            TlsHandshakeError: Generic TLS handshake failure.
+            CertificateExpired: Server cert has passed its notAfter.
             CertificateHostnameMismatch: Hostname does not match the cert.
-            CertificateUntrusted:        Cert not trusted by any CA in bundle.
+            CertificateUntrusted: Cert not trusted by any CA in bundle.
         """
         if config.verify == TlsVerify.NONE:
             print(
@@ -333,24 +333,24 @@ struct TlsStream(Movable, Readable):
         """Connect with TLS, failing after ``timeout_ms`` milliseconds.
 
         Uses ``TcpStream.connect_timeout`` for the TCP phase; the TLS
-        handshake shares the same timeout budget in v0.1.0.
+        handshake shares the same timeout budget .
 
         Args:
-            host:       Hostname or IP string.
-            port:       Destination TCP port.
-            config:     TLS configuration.
+            host: Hostname or IP string.
+            port: Destination TCP port.
+            config: TLS configuration.
             timeout_ms: Maximum milliseconds for TCP + TLS handshake combined.
 
         Returns:
             A ``TlsStream`` with the handshake complete.
 
         Raises:
-            ConnectionTimeout:           If the deadline expires during TCP.
-            NetworkError:                DNS resolution failure.
-            TlsHandshakeError:           Generic TLS handshake failure.
-            CertificateExpired:          Server cert expired.
+            ConnectionTimeout: If the deadline expires during TCP.
+            NetworkError: DNS resolution failure.
+            TlsHandshakeError: Generic TLS handshake failure.
+            CertificateExpired: Server cert expired.
             CertificateHostnameMismatch: Hostname does not match the cert.
-            CertificateUntrusted:        Cert not trusted by any CA.
+            CertificateUntrusted: Cert not trusted by any CA.
         """
         if config.verify == TlsVerify.NONE:
             print(
@@ -431,7 +431,7 @@ struct TlsStream(Movable, Readable):
         Returns 0 on clean TLS closure (``close_notify`` received).
 
         Args:
-            buf:  Destination buffer; the caller must provide at least
+            buf: Destination buffer; the caller must provide at least
                   ``size`` bytes of valid storage.
             size: Maximum number of bytes to read.
 
@@ -454,7 +454,7 @@ struct TlsStream(Movable, Readable):
         """Read exactly ``size`` bytes into ``buf``.
 
         Args:
-            buf:  Destination buffer; must have at least ``size`` bytes.
+            buf: Destination buffer; must have at least ``size`` bytes.
             size: Number of bytes to read.
 
         Raises:

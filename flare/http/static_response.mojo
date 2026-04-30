@@ -23,8 +23,8 @@ var HELLO = precompute_response(
     body="Hello, World!",
 )
 # HELLO holds two wire-form buffers:
-#   keepalive — with "Connection: keep-alive"
-#   close     — with "Connection: close"
+# keepalive — with "Connection: keep-alive"
+# close — with "Connection: close"
 # The reactor picks the right one per request based on Connection:.
 ```
 
@@ -189,13 +189,13 @@ def precompute_response(
     picks one per request based on the parsed ``Connection:`` header.
 
     Args:
-        status:       HTTP status code (200, 204, 404, …). Reason phrase
+        status: HTTP status code (200, 204, 404, …). Reason phrase
             is looked up from the built-in table; callers who need a
             custom reason should pass their own ``StaticResponse``
             instance.
         content_type: Full ``Content-Type`` header value
             (e.g. ``"text/plain; charset=utf-8"``).
-        body:         Response body (UTF-8 string). ``Content-Length``
+        body: Response body (UTF-8 string). ``Content-Length``
             is derived from its byte length.
 
     Returns:

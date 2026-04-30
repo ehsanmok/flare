@@ -150,7 +150,7 @@ def test_resolve_null_byte_injection_raises() raises:
     """Hostname with embedded null byte must raise before getaddrinfo.
 
     A C string passed to getaddrinfo would be silently truncated at the null,
-    potentially resolving a different host.  flare must validate and reject.
+    potentially resolving a different host. flare must validate and reject.
     """
     with assert_raises():
         _ = resolve("localhost\x00evil.com")
@@ -179,7 +179,7 @@ def test_resolve_at_sign_raises() raises:
 def test_resolve_hostname_too_long_raises() raises:
     """Hostname exceeding 253 characters must raise.
 
-    RFC 1035 §2.3.4 limits full domain names to 253 octets.  A hostname
+    RFC 1035 §2.3.4 limits full domain names to 253 octets. A hostname
     longer than this cannot be valid; accept would risk buffer overflows in
     older resolver implementations.
     """

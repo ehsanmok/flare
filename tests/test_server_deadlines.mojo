@@ -1,6 +1,6 @@
-"""Tests for per-request deadlines (v0.5.0 Step 1).
+"""Tests for per-request deadlines.
 
-Closes the API-surface portion of criticism §2.2:
+
 
     A slow-client attack ("send 1 byte every 30 seconds") is
     partially mitigated by ``idle_timeout_ms`` but only because we

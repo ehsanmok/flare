@@ -10,7 +10,7 @@ cross-thread test scaffold yet, so the tests here are lifecycle-only
 - ``serve(..., num_workers>=2)`` is callable at the type level with
   a Router handler and a trivial struct handler.
 
-Real multicore throughput is measured by the v0.4.0 bench step; no
+Real multicore throughput is measured by the bench step; no
 wall-clock behaviour is asserted here.
 """
 

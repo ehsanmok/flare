@@ -1,7 +1,7 @@
 """Fuzz harness: HTTP/1.1 response parser.
 
 Tests the internal ``_parse_http_response()`` pipeline — the most complex
-parser in flare — against arbitrary byte sequences.  Covers:
+parser in flare — against arbitrary byte sequences. Covers:
 
 - Status-line parsing (``_parse_status_line``)
 - Header parsing (key/value splitting, ``HeaderMap.append``)
@@ -10,7 +10,7 @@ parser in flare — against arbitrary byte sequences.  Covers:
 - Connection-close body (remainder-of-buffer path)
 
 Valid ``NetworkError`` / ``Error`` rejections are expected and not reported
-as bugs.  Only crash-marker messages (``"assertion failed"``, ``"index out
+as bugs. Only crash-marker messages (``"assertion failed"``, ``"index out
 of bounds"``, ``"panic"`` etc.) trigger a saved crash.
 
 Run:
@@ -33,7 +33,7 @@ def target(data: List[UInt8]) raises:
 
     Raises:
         Expected: ``NetworkError``, ``Error`` — classified as rejections.
-        Bug:      Crash-marker messages — classified as crashes and saved.
+        Bug: Crash-marker messages — classified as crashes and saved.
     """
     _ = _parse_http_response(data)
 

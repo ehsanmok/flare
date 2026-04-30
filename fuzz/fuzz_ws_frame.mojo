@@ -2,14 +2,14 @@
 
 Tests ``WsFrame.decode_one()`` for crashes on arbitrary byte inputs.
 Valid rejections (``WsProtocolError``, ``Error``) are expected and not
-reported as bugs.  Only error messages matching mozz's crash markers
+reported as bugs. Only error messages matching mozz's crash markers
 (``"assertion failed"``, ``"index out of bounds"``, etc.) trigger a crash.
 
 Run:
     pixi run fuzz-ws
 
 Replay a crash:
-    mojo -I . fuzz/fuzz_ws_frame.mojo  # with seed from crash filename
+    mojo -I . fuzz/fuzz_ws_frame.mojo # with seed from crash filename
 """
 
 from mozz import fuzz, FuzzConfig

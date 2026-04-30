@@ -6,7 +6,7 @@ invariants via ``comptime assert`` so misconfigured servers fail at
 compile time rather than runtime.
 
 Runtime behaviour is covered end-to-end by ``test_server.mojo`` (the
-v0.3.x ``serve(def)`` path) and ``test_server_handler.mojo`` (the
+``serve(def)`` path) and ``test_server_handler.mojo`` (the
 ``serve[H: Handler & Copyable]`` path). This file covers the comptime surface:
 
 - The default config is accepted.

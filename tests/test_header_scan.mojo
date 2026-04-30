@@ -160,7 +160,7 @@ def test_scan_content_length_mixed_case() raises:
 
 
 def test_scan_content_length_leading_tabs() raises:
-    var buf = _bytes("POST / HTTP/1.1\r\nContent-Length:\t  123\r\n\r\n")
+    var buf = _bytes("POST / HTTP/1.1\r\nContent-Length:\t 123\r\n\r\n")
     var end = find_crlfcrlf(buf, 0)
     assert_equal(scan_content_length(buf, end), 123)
 

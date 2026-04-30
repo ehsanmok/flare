@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.multipart`` (v0.6 — track C, RFC 7578).
+"""Tests for ``flare.http.multipart`` (— track C, RFC 7578).
 
 Covers the parser and ``Multipart`` extractor:
 
@@ -73,7 +73,7 @@ def test_boundary_with_spaces() raises:
         'Content-Disposition: form-data; name="a"\r\n\r\nv',
         "xyz",
     )
-    var ct = "multipart/form-data;  boundary=xyz "
+    var ct = "multipart/form-data; boundary=xyz "
     var f = parse_multipart_form_data(body, ct)
     assert_equal(f.value("a"), "v")
 

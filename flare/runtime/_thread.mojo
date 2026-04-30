@@ -14,8 +14,7 @@ pinned to a specific core. The API is intentionally small and unsafe:
   on Linux via ``pthread_setaffinity_np``. On macOS this is a no-op
   placeholder (Mach's ``thread_policy_set`` with
   ``THREAD_AFFINITY_POLICY`` is a hint rather than a hard pin, and
-  documenting that cleanly needs more surface area than v0.4.0
-  deserves — the macOS scheduler's own topology picker is good
+  documenting that cleanly needs more surface area than deserves — the macOS scheduler's own topology picker is good
   enough for our benchmark targets).
 
 Threads that outlive their ``ThreadHandle`` are undefined behaviour.
@@ -28,7 +27,7 @@ Platform notes:
   reachable from the default dynamic link namespace.
 
 This file is *internal* — it is used by
-``flare.runtime.scheduler`` (v0.4.0 Step 9) and nothing else.
+``flare.runtime.scheduler`` and nothing else.
 """
 
 from std.ffi import (
@@ -103,7 +102,7 @@ struct ThreadHandle(Movable):
                 ``fn(UnsafePointer[UInt8]) thin abi("C") -> UnsafePointer[UInt8]``.
                 Must not raise; convert errors into a sentinel return
                 value before returning.
-            arg:   Opaque pointer delivered to the start function.
+            arg: Opaque pointer delivered to the start function.
 
         Returns:
             A ``ThreadHandle`` the caller must ``join()``.

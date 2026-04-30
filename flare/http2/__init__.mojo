@@ -19,7 +19,7 @@ The codec is byte-clean and Connection-agnostic so it can be driven
 by the existing reactor or run synchronously in tests; the server
 glue is what ties it to ``flare.runtime.Reactor``.
 
-Out of scope for v0.6 (per the design doc):
+Out of scope for (per the design doc):
 
 - HTTP/2 push (``PUSH_PROMISE``); we accept it on inbound
   connections from clients (rare) but never originate it.

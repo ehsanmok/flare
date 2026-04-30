@@ -11,12 +11,8 @@ directory carry the detail.
 | [`security.md`](security.md) | Per-layer security posture, the sanitised-error-response policy, fuzz / soak budget. |
 | [`cookbook.md`](cookbook.md) | Index of `examples/NN_*.mojo` mapped to use cases. |
 
-flare is **pre-1.0**. The public Mojo API is stable within a minor:
-patch releases never break source for the same minor. Breaking changes
-only land at minor bumps. Internal types (anything in `_*.mojo`, or
-anything in `flare.runtime.*` not re-exported from the package barrel)
-carry no stability guarantee.
-
-For the per-release strategy + scoping doc, see
-`.cursor/rules/development.mdc` and the matching design notebook
-under `.cursor/rules/` in the repository.
+The public Mojo API is stable within a minor: patch releases never
+break source for the same minor. Breaking changes only land at minor
+bumps. Internal types (anything in `_*.mojo`, or anything in
+`flare.runtime.*` not re-exported from the package barrel) carry no
+stability guarantee.

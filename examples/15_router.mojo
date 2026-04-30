@@ -46,20 +46,20 @@ def main() raises:
 
     # Literal hit
     var home_resp = r.serve(Request(method=Method.GET, url="/"))
-    print("GET /            →", home_resp.status, home_resp.text())
+    print("GET / →", home_resp.status, home_resp.text())
 
     # Parameter extraction
     var u_resp = r.serve(Request(method=Method.GET, url="/users/42"))
-    print("GET /users/42    →", u_resp.status, u_resp.text())
+    print("GET /users/42 →", u_resp.status, u_resp.text())
 
     # POST routed to its own handler
     var post_resp = r.serve(Request(method=Method.POST, url="/users"))
-    print("POST /users      →", post_resp.status, post_resp.text())
+    print("POST /users →", post_resp.status, post_resp.text())
 
     # Wrong method on a known path → 405 with Allow header
     var wrong = r.serve(Request(method=Method.PUT, url="/users"))
     print(
-        "PUT /users       →",
+        "PUT /users →",
         wrong.status,
         "Allow:",
         wrong.headers.get("Allow"),
@@ -67,7 +67,7 @@ def main() raises:
 
     # Unknown path → 404
     var nope = r.serve(Request(method=Method.GET, url="/whoami"))
-    print("GET /whoami      →", nope.status)
+    print("GET /whoami →", nope.status)
 
     print()
     print("OK.")

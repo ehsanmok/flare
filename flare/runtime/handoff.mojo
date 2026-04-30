@@ -1,4 +1,4 @@
-"""Cross-worker connection handoff (v0.6 Track K).
+"""Cross-worker connection handoff.
 
 A small mutex-guarded MPSC FIFO designed for one specific job:
 moving a freshly-accepted file descriptor (or any opaque integer
@@ -13,7 +13,7 @@ kernel's ``SO_REUSEPORT`` hash spreads new connections across the
 listening sockets of the N workers, but the distribution is
 *static per 4-tuple*: keep-alive traffic from a small client pool
 can land disproportionately on one worker. The
-``benchmark/results/v0.5/multicore`` run logs P99.9 tails ~0.5×
+``benchmark/results//multicore`` run logs P99.9 tails ~0.5×
 worse on one worker compared to its three siblings under skewed
 keep-alive — see the design doc for numbers.
 
@@ -198,7 +198,7 @@ struct HandoffPolicy(Copyable, Defaultable, Movable):
     """Knobs for the work-stealing strategy.
 
     * ``enabled`` — master switch. When ``False`` the scheduler skips
-      handoffs entirely and behaves exactly like v0.5 SO_REUSEPORT.
+      handoffs entirely and behaves exactly like SO_REUSEPORT.
     * ``capacity`` — per-worker handoff queue depth.
     * ``steal_threshold`` — when a worker's accept queue goes
       ``steal_threshold`` ticks empty in a row, the scheduler tries

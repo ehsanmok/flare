@@ -1,4 +1,4 @@
-"""Fuzz harness: ``flare.http2.hpack.HpackDecoder`` (v0.6 — Track J).
+"""Fuzz harness: ``flare.http2.hpack.HpackDecoder``.
 
 Properties:
 

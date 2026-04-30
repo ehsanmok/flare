@@ -287,7 +287,7 @@ def test_http_get_plaintext() raises:
             resp.ok(), "Expected 200 from httpbin, got " + String(resp.status)
         )
     except e:
-        print("  [SKIP] network unavailable: " + String(e))
+        print(" [SKIP] network unavailable: " + String(e))
 
 
 def test_https_get_json() raises:
@@ -303,7 +303,7 @@ def test_https_get_json() raises:
         assert_true(body.byte_length() > 0, "Expected non-empty body")
         assert_true("slideshow" in body or "{" in body, "Expected JSON body")
     except e:
-        print("  [SKIP] network unavailable: " + String(e))
+        print(" [SKIP] network unavailable: " + String(e))
 
 
 def test_http_404_not_ok() raises:
@@ -314,7 +314,7 @@ def test_http_404_not_ok() raises:
         assert_equal(resp.status, 404)
         assert_false(resp.ok())
     except e:
-        print("  [SKIP] network unavailable: " + String(e))
+        print(" [SKIP] network unavailable: " + String(e))
 
 
 # ── PATCH method ──────────────────────────────────────────────────────────────
@@ -335,7 +335,7 @@ def test_patch_method_string() raises:
             "Expected PATCH response body",
         )
     except e:
-        print("  [SKIP] network unavailable: " + String(e))
+        print(" [SKIP] network unavailable: " + String(e))
 
 
 # ── HttpServer: round-trip on loopback ────────────────────────────────────────
@@ -570,9 +570,8 @@ def test_decode_content_identity() raises:
 def test_decode_content_unsupported() raises:
     """Unsupported encoding in decode_content raises an error.
 
-    v0.6 Track I added ``br`` (brotli) support, so the previous
-    "br raises" property is gone. ``zstd`` is still unsupported and
-    must raise.
+    ``br`` (brotli) is supported, so the previous "br raises"
+    property is gone. ``zstd`` is still unsupported and must raise.
     """
     from flare.http.encoding import decode_content
 

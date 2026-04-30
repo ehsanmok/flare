@@ -9,7 +9,7 @@ Demonstrates two ways to use flare's typed extractors:
    the struct, pulls each field from the request, and calls the
    inner ``serve``.
 
-Since v0.5.0 Step 2:
+Since :
 
 - ``Router.get(path, handler)`` accepts any ``H: Handler & Copyable
   & Movable`` (Track 1.4), so the production shape is
@@ -99,12 +99,12 @@ def main() raises:
 
     var r2 = Request(method=Method.GET, url="/users/9/posts")
     r2.params_mut()["id"] = "9"
-    print("GET /users/9/posts        →", end=" ")
+    print("GET /users/9/posts →", end=" ")
     var resp2 = list_user_posts(r2)
     print(resp2.status, resp2.text())
 
     # Shape 2 — Extracted[GetUser] registered on a Router (the
-    # production shape since v0.5.0 Step 2). Router.get[H] accepts
+    # production shape since ). Router.get[H] accepts
     # any Handler struct; here it's the reflective-extractor
     # adapter wrapping our GetUser handler. The Router routes the
     # path, captures :id, and dispatches into Extracted's serve
@@ -115,7 +115,7 @@ def main() raises:
     var r3 = Request(method=Method.GET, url="/users/42?trace=req-abc")
     r3.headers.set("Authorization", "Bearer secret")
     var resp3 = router.serve(r3)
-    print("router GET /users/42 ok   →", resp3.status, resp3.text())
+    print("router GET /users/42 ok →", resp3.status, resp3.text())
 
     # Error path: GET /users/abc → ParamInt rejects "abc" → 400.
     # ``expose_errors`` defaults False on synthesised requests so

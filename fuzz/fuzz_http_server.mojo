@@ -1,7 +1,7 @@
 """Fuzz harness: HTTP/1.1 server request parser.
 
 Tests ``_parse_http_request_bytes()`` — the server-side HTTP/1.1 request
-parser — against arbitrary byte sequences.  Covers:
+parser — against arbitrary byte sequences. Covers:
 
 - Request-line parsing (method, path, HTTP version token)
 - Header parsing (key/value splitting, ``HeaderMap.set``)
@@ -12,7 +12,7 @@ parser — against arbitrary byte sequences.  Covers:
 - Huge / overflowing ``Content-Length`` values
 
 Valid ``Error`` / ``NetworkError`` rejections are expected and not
-reported as bugs.  Only crash-marker messages (``"assertion failed"``,
+reported as bugs. Only crash-marker messages (``"assertion failed"``,
 ``"index out of bounds"``, ``"panic"`` etc.) trigger a saved crash.
 
 Run:
@@ -31,7 +31,7 @@ def target(data: List[UInt8]) raises:
 
     Raises:
         Expected: ``Error``, ``NetworkError`` — classified as rejections.
-        Bug:      Crash-marker messages — classified as crashes and saved.
+        Bug: Crash-marker messages — classified as crashes and saved.
     """
     _ = _parse_http_request_bytes(Span[UInt8, _](data))
 

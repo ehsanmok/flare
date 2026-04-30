@@ -1,5 +1,4 @@
-"""Tests for the server-side TLS FFI helpers (v0.5.0 follow-up
-/ Track 5.1 / C6).
+"""Tests for the server-side TLS FFI helpers.
 
 Drives the C-side ``flare_ssl_ctx_new_server`` /
 ``flare_ssl_ctx_set_alpn_server`` /

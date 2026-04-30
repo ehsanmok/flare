@@ -10,7 +10,7 @@ Implements a minimal but correct subset of HTTP/1.1 (RFC 7230/7231):
 
 Module-level convenience functions (``get``, ``post``, ``put``,
 ``delete``, ``head``) create a one-shot ``HttpClient`` per call and are
-suitable for quick scripts.  For multiple requests, prefer instantiating
+suitable for quick scripts. For multiple requests, prefer instantiating
 a shared ``HttpClient``.
 
 ``post`` and ``put`` accept a ``String`` body (sets
@@ -57,7 +57,7 @@ struct HttpClient(Movable):
     Establishes one TCP or TLS connection per request (connection pooling
     is a future feature). Respects HTTP redirects up to ``max_redirects``.
 
-    This type is ``Movable`` but not ``Copyable``.  It supports the context
+    This type is ``Movable`` but not ``Copyable``. It supports the context
     manager protocol (``__enter__``) for use with ``with``.
 
     Constructors follow a natural ergonomic order:
@@ -96,10 +96,10 @@ struct HttpClient(Movable):
         """Initialise an ``HttpClient`` with secure defaults.
 
         Args:
-            base_url:      Optional base URL prepended to relative paths.
+            base_url: Optional base URL prepended to relative paths.
             max_redirects: Maximum number of redirects to follow (default 10).
-            timeout_ms:    Connect + read timeout in milliseconds (default 30 s).
-            user_agent:    Value for the ``User-Agent`` header.
+            timeout_ms: Connect + read timeout in milliseconds (default 30 s).
+            user_agent: Value for the ``User-Agent`` header.
         """
         self._config = TlsConfig()
         self._max_redirects = max_redirects
@@ -119,11 +119,11 @@ struct HttpClient(Movable):
         """Initialise an ``HttpClient`` with custom TLS configuration.
 
         Args:
-            tls:           TLS configuration (e.g. ``TlsConfig.insecure()``).
-            base_url:      Optional base URL prepended to relative paths.
+            tls: TLS configuration (e.g. ``TlsConfig.insecure()``).
+            base_url: Optional base URL prepended to relative paths.
             max_redirects: Maximum number of redirects to follow.
-            timeout_ms:    Connect + read timeout in milliseconds.
-            user_agent:    Value for the ``User-Agent`` header.
+            timeout_ms: Connect + read timeout in milliseconds.
+            user_agent: Value for the ``User-Agent`` header.
         """
         self._config = tls.copy()
         self._max_redirects = max_redirects
@@ -152,12 +152,12 @@ struct HttpClient(Movable):
             A: Any type implementing the ``Auth`` trait.
 
         Args:
-            auth:          Authentication strategy (e.g. ``BasicAuth``,
+            auth: Authentication strategy (e.g. ``BasicAuth``,
                            ``BearerAuth``).
-            base_url:      Optional base URL prepended to relative paths.
+            base_url: Optional base URL prepended to relative paths.
             max_redirects: Maximum number of redirects to follow.
-            timeout_ms:    Connect + read timeout in milliseconds.
-            user_agent:    Value for the ``User-Agent`` header.
+            timeout_ms: Connect + read timeout in milliseconds.
+            user_agent: Value for the ``User-Agent`` header.
 
         Raises:
             HeaderInjectionError: If the generated auth header contains
@@ -193,12 +193,12 @@ struct HttpClient(Movable):
             A: Any type implementing the ``Auth`` trait.
 
         Args:
-            base_url:      Base URL prepended to all relative request paths.
-            auth:          Authentication strategy (e.g. ``BasicAuth``,
+            base_url: Base URL prepended to all relative request paths.
+            auth: Authentication strategy (e.g. ``BasicAuth``,
                            ``BearerAuth``).
             max_redirects: Maximum number of redirects to follow.
-            timeout_ms:    Connect + read timeout in milliseconds.
-            user_agent:    Value for the ``User-Agent`` header.
+            timeout_ms: Connect + read timeout in milliseconds.
+            user_agent: Value for the ``User-Agent`` header.
 
         Raises:
             HeaderInjectionError: If the generated auth header contains
@@ -264,7 +264,7 @@ struct HttpClient(Movable):
             The server's ``Response``.
 
         Raises:
-            NetworkError:    On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var req = Request(method=Method.GET, url=self._resolve_url(url))
@@ -273,19 +273,19 @@ struct HttpClient(Movable):
     def post(self, url: String, body: String) raises -> Response:
         """Perform a POST request with a JSON string body.
 
-        Sets ``Content-Type: application/json`` automatically.  This is the
+        Sets ``Content-Type: application/json`` automatically. This is the
         default for string bodies because virtually every HTTP API that accepts
         a string payload expects JSON.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: The JSON request body as a ``String``.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
 
         Example:
@@ -308,14 +308,14 @@ struct HttpClient(Movable):
         ``Content-Type: application/json`` automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: A ``json.Value`` to serialise and send.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         return self.post(url, dumps(body))
@@ -327,14 +327,14 @@ struct HttpClient(Movable):
         responsible for setting it via a custom ``Request`` if required.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: The raw request body bytes.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var req = Request(
@@ -348,14 +348,14 @@ struct HttpClient(Movable):
         Sets ``Content-Type: application/json`` automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: The JSON request body as a ``String``.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var body_bytes = List[UInt8](body.as_bytes())
@@ -372,14 +372,14 @@ struct HttpClient(Movable):
         ``Content-Type: application/json`` automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: A ``json.Value`` to serialise and send.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         return self.put(url, dumps(body))
@@ -390,14 +390,14 @@ struct HttpClient(Movable):
         No ``Content-Type`` header is set automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: The raw request body bytes.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var req = Request(
@@ -415,7 +415,7 @@ struct HttpClient(Movable):
             The server's ``Response``.
 
         Raises:
-            NetworkError:    On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var req = Request(method=Method.DELETE, url=self._resolve_url(url))
@@ -434,7 +434,7 @@ struct HttpClient(Movable):
             The server's ``Response`` (empty body).
 
         Raises:
-            NetworkError:    On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var req = Request(method=Method.HEAD, url=self._resolve_url(url))
@@ -446,14 +446,14 @@ struct HttpClient(Movable):
         Sets ``Content-Type: application/json`` automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: The JSON request body as a ``String``.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var body_bytes = List[UInt8](body.as_bytes())
@@ -470,14 +470,14 @@ struct HttpClient(Movable):
         ``Content-Type: application/json`` automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: A ``json.Value`` to serialise and send.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         return self.patch(url, dumps(body))
@@ -488,14 +488,14 @@ struct HttpClient(Movable):
         No ``Content-Type`` header is set automatically.
 
         Args:
-            url:  The target URL (absolute or relative to ``base_url``).
+            url: The target URL (absolute or relative to ``base_url``).
             body: The raw request body bytes.
 
         Returns:
             The server's ``Response``.
 
         Raises:
-            NetworkError:     On connection or I/O failure.
+            NetworkError: On connection or I/O failure.
             TooManyRedirects: If the redirect limit is exceeded.
         """
         var req = Request(
@@ -517,7 +517,7 @@ struct HttpClient(Movable):
             The final (possibly redirected) ``Response``.
 
         Raises:
-            NetworkError:    On I/O failure.
+            NetworkError: On I/O failure.
             TooManyRedirects: If more than ``_max_redirects`` redirects occur.
         """
         var current_url = req.url
@@ -574,10 +574,10 @@ struct HttpClient(Movable):
         """Perform a single HTTP/1.1 request (no redirect handling).
 
         Args:
-            method:        HTTP method string.
-            url:           Full URL string.
+            method: HTTP method string.
+            url: Full URL string.
             extra_headers: Headers from the original request.
-            body:          Request body bytes.
+            body: Request body bytes.
 
         Returns:
             Parsed ``Response``.
@@ -769,7 +769,7 @@ def _find_crlf2(data: List[UInt8]) -> Int:
 def _bytes_to_str(data: List[UInt8]) -> String:
     """Convert a byte list to a String, replacing non-printable and non-ASCII bytes.
 
-    HTTP/1.1 headers must be ASCII (RFC 7230 §3.2.6).  NUL bytes and non-ASCII
+    HTTP/1.1 headers must be ASCII (RFC 7230 §3.2.6). NUL bytes and non-ASCII
     bytes are replaced with ``?`` so that every input byte maps to exactly one
     output character, keeping byte-position arithmetic in ``_split_lines`` safe.
     NUL (0x00) is replaced because Mojo strings are NUL-terminated internally
@@ -899,9 +899,9 @@ def _extract_body(
     - Connection-close (remainder of buffer)
 
     Args:
-        raw:        Full raw response bytes.
+        raw: Full raw response bytes.
         body_start: Byte offset of the first body byte.
-        headers:    Parsed response headers.
+        headers: Parsed response headers.
 
     Returns:
         Decoded body bytes.
@@ -936,7 +936,7 @@ def _decode_chunked(raw: List[UInt8], start: Int) raises -> List[UInt8]:
     """Decode a ``Transfer-Encoding: chunked`` body.
 
     Args:
-        raw:   Complete raw byte buffer.
+        raw: Complete raw byte buffer.
         start: Byte offset of the first chunk-size line.
 
     Returns:
@@ -1076,7 +1076,7 @@ def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
 def get(url: String) raises -> Response:
     """Perform a one-shot HTTP GET request.
 
-    Creates a temporary ``HttpClient`` for this single request.  For multiple
+    Creates a temporary ``HttpClient`` for this single request. For multiple
     requests, use a shared ``HttpClient`` instance instead.
 
     Args:
@@ -1097,7 +1097,7 @@ def post(url: String, body: String) raises -> Response:
     Sets ``Content-Type: application/json`` automatically.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: The JSON request body as a ``String``.
 
     Returns:
@@ -1122,7 +1122,7 @@ def post(url: String, body: JsonValue) raises -> Response:
     ``Content-Type: application/json`` automatically.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: A ``json.Value`` to serialise and send.
 
     Returns:
@@ -1138,7 +1138,7 @@ def post(url: String, body: List[UInt8]) raises -> Response:
     """Perform a one-shot HTTP POST with a raw byte body.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: The raw request body bytes.
 
     Returns:
@@ -1156,7 +1156,7 @@ def put(url: String, body: String) raises -> Response:
     Sets ``Content-Type: application/json`` automatically.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: The JSON request body as a ``String``.
 
     Returns:
@@ -1175,7 +1175,7 @@ def put(url: String, body: JsonValue) raises -> Response:
     ``Content-Type: application/json`` automatically.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: A ``json.Value`` to serialise and send.
 
     Returns:
@@ -1191,7 +1191,7 @@ def put(url: String, body: List[UInt8]) raises -> Response:
     """Perform a one-shot HTTP PUT with a raw byte body.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: The raw request body bytes.
 
     Returns:
@@ -1239,7 +1239,7 @@ def patch(url: String, body: String) raises -> Response:
     Sets ``Content-Type: application/json`` automatically.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: The JSON request body as a ``String``.
 
     Returns:
@@ -1258,7 +1258,7 @@ def patch(url: String, body: JsonValue) raises -> Response:
     ``Content-Type: application/json`` automatically.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: A ``json.Value`` to serialise and send.
 
     Returns:
@@ -1274,7 +1274,7 @@ def patch(url: String, body: List[UInt8]) raises -> Response:
     """Perform a one-shot HTTP PATCH with a raw byte body.
 
     Args:
-        url:  The target URL.
+        url: The target URL.
         body: The raw request body bytes.
 
     Returns:

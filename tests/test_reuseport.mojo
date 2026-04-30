@@ -10,7 +10,7 @@ Covers:
   second listener on the same port fails — establishes that the
   ``reuse_port=True`` branch is the thing enabling the coexistence.
 - ``bind_shared`` produces a single listener (no ``SO_REUSEPORT``)
-  intended for the v0.6 shared-listener scheduler. A second
+  intended for the shared-listener scheduler. A second
   ``bind_shared`` on the same port must fail; this is the property
   that prevents accidental dual-listener fan-out.
 
@@ -85,7 +85,7 @@ def test_reuseport_default_backlog_works() raises:
     assert_true(l.local_addr().port != 0)
 
 
-# ── bind_shared (v0.6 shared-listener scheduler) ─────────────────────────
+# ── bind_shared (shared-listener scheduler) ─────────────────────────
 
 
 def test_bind_shared_smoke() raises:
@@ -103,7 +103,7 @@ def test_bind_shared_default_backlog_works() raises:
 def test_bind_shared_exposes_fd() raises:
     """The shared listener exposes a usable raw fd for cross-thread sharing.
 
-    The v0.6 scheduler caches ``listener.as_raw_fd()`` once on the
+    The scheduler caches ``listener.as_raw_fd()`` once on the
     main thread and hands it to every worker via the per-worker
     context struct. Workers call ``accept_fd(listener_fd)`` directly
     rather than touching the (non-thread-safe) Mojo ``TcpListener``

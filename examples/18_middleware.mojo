@@ -7,15 +7,15 @@ whole chain into one direct call sequence per request type.
 
 This example builds a realistic production-shaped pipeline:
 
-    RequestID              # assigns X-Request-ID before anything else runs
-      └─ Logger            # every log line carries the trace id
-          └─ Timing        # adds X-Response-Time-Us to response
-              └─ Recover   # catches raises, returns 500
+    RequestID # assigns X-Request-ID before anything else runs
+      └─ Logger # every log line carries the trace id
+          └─ Timing # adds X-Response-Time-Us to response
+              └─ Recover # catches raises, returns 500
                   └─ RequireAuth[Bearer token]
                       └─ Router
-                          ├─ GET  /              → home
-                          ├─ GET  /secret        → secret
-                          └─ GET  /boom          → raises on purpose
+                          ├─ GET / → home
+                          ├─ GET /secret → secret
+                          └─ GET /boom → raises on purpose
 
 Read it outside-in: every request enters through RequestID and exits
 with a trace id on the response. The order is deliberate; the comments
@@ -70,9 +70,9 @@ struct Logger[Inner: Handler](Handler):
 
     def serve(self, req: Request) raises -> Response:
         var rid = req.headers.get("X-Request-ID")
-        print("  [log]", rid, ">>", req.method, req.url)
+        print(" [log]", rid, ">>", req.method, req.url)
         var resp = self.inner.serve(req)
-        print("  [log]", rid, "<<", req.method, req.url, "→", resp.status)
+        print(" [log]", rid, "<<", req.method, req.url, "→", resp.status)
         return resp^
 
 
@@ -187,61 +187,61 @@ def main() raises:
     # Build the stack. Read outside-in; each line is one wrapper.
     #
     # Ordering rationale:
-    #   1. RequestID outermost so every inner layer (including Logger)
-    #      sees the trace id on both request and response. If Logger
-    #      were outside RequestID, the request-side log line would
-    #      fire before the id existed.
-    #   2. Logger second so it still captures the final status of
-    #      every request, including ones turned into 5xx by Recover.
-    #   3. Timing wraps just the work that matters (auth + routing).
-    #      Putting it outside Logger would include the ``print`` cost
-    #      in the reported time.
-    #   4. Recover below auth so auth failures stay plain 401s instead
-    #      of being caught and reported as 500s.
-    #   5. RequireAuth before Router so unauthenticated requests never
-    #      reach a handler.
+    # 1. RequestID outermost so every inner layer (including Logger)
+    # sees the trace id on both request and response. If Logger
+    # were outside RequestID, the request-side log line would
+    # fire before the id existed.
+    # 2. Logger second so it still captures the final status of
+    # every request, including ones turned into 5xx by Recover.
+    # 3. Timing wraps just the work that matters (auth + routing).
+    # Putting it outside Logger would include the ``print`` cost
+    # in the reported time.
+    # 4. Recover below auth so auth failures stay plain 401s instead
+    # of being caught and reported as 500s.
+    # 5. RequireAuth before Router so unauthenticated requests never
+    # reach a handler.
     var pipeline = RequestID(
         Logger(Timing(Recover(RequireAuth(router^, expected_token="s3cret"))))
     )
 
     # 1. Missing token: RequireAuth short-circuits. Logger sees the
-    #    401 come back. RequestID and Timing still ran, so the client
-    #    gets a trace id and a timing header even for a 401.
+    # 401 come back. RequestID and Timing still ran, so the client
+    # gets a trace id and a timing header even for a 401.
     print()
     print("--- missing token ---")
     var r1 = pipeline.serve(_req(Method.GET, "/secret"))
-    print("  status     =", r1.status)
-    print("  request id =", r1.headers.get("X-Request-ID"))
-    print("  elapsed us =", r1.headers.get("X-Response-Time-Us"))
-    print("  challenge  =", r1.headers.get("WWW-Authenticate"))
+    print(" status =", r1.status)
+    print(" request id =", r1.headers.get("X-Request-ID"))
+    print(" elapsed us =", r1.headers.get("X-Response-Time-Us"))
+    print(" challenge =", r1.headers.get("WWW-Authenticate"))
 
     # 2. Wrong token: same 401 path.
     print()
     print("--- wrong token ---")
     var r2 = pipeline.serve(_req(Method.GET, "/secret", "Bearer nope"))
-    print("  status     =", r2.status)
-    print("  request id =", r2.headers.get("X-Request-ID"))
+    print(" status =", r2.status)
+    print(" request id =", r2.headers.get("X-Request-ID"))
 
     # 3. Correct token on protected path: full pipeline runs top to
-    #    bottom, handler produces 200, every header is stamped on the
-    #    way back out.
+    # bottom, handler produces 200, every header is stamped on the
+    # way back out.
     print()
     print("--- correct token, protected path ---")
     var r3 = pipeline.serve(_req(Method.GET, "/secret", "Bearer s3cret"))
-    print("  status     =", r3.status)
-    print("  body       =", r3.text())
-    print("  request id =", r3.headers.get("X-Request-ID"))
-    print("  elapsed us =", r3.headers.get("X-Response-Time-Us"))
+    print(" status =", r3.status)
+    print(" body =", r3.text())
+    print(" request id =", r3.headers.get("X-Request-ID"))
+    print(" elapsed us =", r3.headers.get("X-Response-Time-Us"))
 
     # 4. Panicking handler: Recover catches the raise and turns it
-    #    into a 500. Logger still sees the request and reports the
-    #    500 status. The outer reactor would never see the raise.
+    # into a 500. Logger still sees the request and reports the
+    # 500 status. The outer reactor would never see the raise.
     print()
     print("--- panicking handler (Recover catches the raise) ---")
     var r4 = pipeline.serve(_req(Method.GET, "/boom", "Bearer s3cret"))
-    print("  status     =", r4.status)
-    print("  body       =", r4.text())
-    print("  request id =", r4.headers.get("X-Request-ID"))
+    print(" status =", r4.status)
+    print(" body =", r4.text())
+    print(" request id =", r4.headers.get("X-Request-ID"))
 
     print()
     print("OK.")

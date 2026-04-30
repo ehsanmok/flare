@@ -30,17 +30,16 @@ def bind_reuseport(addr: SocketAddr, backlog: Int = 1024) raises -> TcpListener:
        The 4-tuple hash distribution is uneven under bursty
        connection arrival: a 256-connection storm from a wrk2-style
        load generator can land 80+ conns on one listener and 30 on
-       another. v0.6 prefers the shared-listener path
+       another. prefers the shared-listener path
        (``bind_shared`` + ``Reactor.register_exclusive``) for
        multi-worker servers because the kernel-driven exclusive
        wakeup gives a fairer accept-time distribution. ``bind_reuseport``
        remains available for the multi-process load-balancing case
        across separate flare processes (where shared-fd inheritance
-       is impossible) and for backward compatibility with v0.5.x
-       benchmarks.
+       is impossible) and for backward compatibility with benchmarks.
 
     Args:
-        addr:    Local address to bind.
+        addr: Local address to bind.
         backlog: Listen backlog (default 1024 — higher than the
             single-worker 128 so a burst of SYNs is less likely to
             overflow before any worker picks them up).
@@ -59,9 +58,9 @@ def bind_reuseport(addr: SocketAddr, backlog: Int = 1024) raises -> TcpListener:
 
 
 def bind_shared(addr: SocketAddr, backlog: Int = 1024) raises -> TcpListener:
-    """Bind a single ``TcpListener`` to be shared across workers (v0.6).
+    """Bind a single ``TcpListener`` to be shared across workers.
 
-    The multi-worker ``Scheduler`` (v0.6) creates ONE listener via
+    The multi-worker ``Scheduler`` creates ONE listener via
     ``bind_shared``, then hands its fd to every worker. Each worker
     registers the fd in its own ``Reactor`` with
     ``Reactor.register_exclusive``, which sets ``EPOLLEXCLUSIVE`` on
@@ -83,7 +82,7 @@ def bind_shared(addr: SocketAddr, backlog: Int = 1024) raises -> TcpListener:
     flare processes on the same port), use ``bind_reuseport``.
 
     Args:
-        addr:    Local address to bind.
+        addr: Local address to bind.
         backlog: Listen backlog (default 1024). With ``EPOLLEXCLUSIVE``
             the accept queue is shared across all workers so the
             backlog can be the same as the single-worker default

@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime.handoff`` (v0.6 — Track K).
+"""Tests for ``flare.runtime.handoff``.
 
 Covers:
 

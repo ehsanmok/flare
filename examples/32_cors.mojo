@@ -51,7 +51,7 @@ def main() raises:
     req.headers.set("Origin", "https://app.example.com")
     var resp = permissive.serve(req)
     print(
-        "  ACAO:",
+        " ACAO:",
         resp.headers.get("access-control-allow-origin"),
     )
     print()
@@ -72,56 +72,56 @@ def main() raises:
     var prod = Cors(ApiHandler(), cfg)
 
     # ── Preflight from an allowed origin ─────────────────────────────
-    print("  preflight from app.example.com:")
+    print(" preflight from app.example.com:")
     var preflight = Request(method=Method.OPTIONS, url="/api/users")
     preflight.headers.set("Origin", "https://app.example.com")
     preflight.headers.set("Access-Control-Request-Method", "DELETE")
     preflight.headers.set("Access-Control-Request-Headers", "Authorization")
     var pre = prod.serve(preflight)
-    print("    status :", pre.status)
+    print(" status :", pre.status)
     print(
-        "    ACAO   :",
+        " ACAO :",
         pre.headers.get("access-control-allow-origin"),
     )
     print(
-        "    ACAM   :",
+        " ACAM :",
         pre.headers.get("access-control-allow-methods"),
     )
     print(
-        "    ACAH   :",
+        " ACAH :",
         pre.headers.get("access-control-allow-headers"),
     )
     print(
-        "    Max-Age:",
+        " Max-Age:",
         pre.headers.get("access-control-max-age"),
     )
     print()
 
     # ── Disallowed origin ────────────────────────────────────────────
-    print("  preflight from evil.example.com:")
+    print(" preflight from evil.example.com:")
     var bad = Request(method=Method.OPTIONS, url="/api/users")
     bad.headers.set("Origin", "https://evil.example.com")
     bad.headers.set("Access-Control-Request-Method", "DELETE")
     var bresp = prod.serve(bad)
-    print("    status :", bresp.status)
+    print(" status :", bresp.status)
     print()
 
     # ── Simple GET from allowed origin ─────────────────────────────────
-    print("  simple GET from app.example.com:")
+    print(" simple GET from app.example.com:")
     var sreq = Request(method=Method.GET, url="/api/users")
     sreq.headers.set("Origin", "https://app.example.com")
     var s = prod.serve(sreq)
-    print("    status :", s.status)
+    print(" status :", s.status)
     print(
-        "    ACAO   :",
+        " ACAO :",
         s.headers.get("access-control-allow-origin"),
     )
     print(
-        "    ACEH   :",
+        " ACEH :",
         s.headers.get("access-control-expose-headers"),
     )
     print(
-        "    ACAC   :",
+        " ACAC :",
         s.headers.get("access-control-allow-credentials"),
     )
     print()

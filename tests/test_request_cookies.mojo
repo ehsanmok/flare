@@ -1,4 +1,4 @@
-"""Tests for request / response cookie ergonomics (v0.6 — track A).
+"""Tests for request / response cookie ergonomics (— track A).
 
 Covers:
 

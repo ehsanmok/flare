@@ -54,17 +54,17 @@ def main() raises:
         data += dup
     var bytes = List[UInt8](data.as_bytes())
     var compressed = compress_brotli(Span[UInt8, _](bytes))
-    print("  raw bytes        :", len(bytes))
-    print("  compressed bytes :", len(compressed))
+    print(" raw bytes :", len(bytes))
+    print(" compressed bytes :", len(compressed))
     var roundtrip = decompress_brotli(Span[UInt8, _](compressed))
-    print("  roundtrip bytes  :", len(roundtrip))
+    print(" roundtrip bytes :", len(roundtrip))
     print()
 
     print("── 2. negotiate_encoding picks br when offered ──")
     var p = negotiate_encoding("gzip;q=0.7, br;q=0.9", True)
-    print("  'gzip;q=0.7, br;q=0.9' ->", p.encoding)
+    print(" 'gzip;q=0.7, br;q=0.9' ->", p.encoding)
     var p2 = negotiate_encoding("gzip", True)
-    print("  'gzip' ->", p2.encoding)
+    print(" 'gzip' ->", p2.encoding)
     print()
 
     print("── 3. Compress middleware emits br ──")
@@ -72,14 +72,14 @@ def main() raises:
     var req = Request(method=Method.GET, url="/")
     req.headers.set("Accept-Encoding", "gzip;q=0.5, br;q=0.95")
     var resp = stack.serve(req)
-    print("  status           :", resp.status)
-    print("  Content-Encoding :", resp.headers.get("content-encoding"))
-    print("  body length      :", len(resp.body))
+    print(" status :", resp.status)
+    print(" Content-Encoding :", resp.headers.get("content-encoding"))
+    print(" body length :", len(resp.body))
     var dec = decode_content(
         Span[UInt8, _](resp.body),
         resp.headers.get("content-encoding"),
     )
-    print("  decoded length   :", len(dec))
+    print(" decoded length :", len(dec))
     print()
 
     print("=== Example 34 complete ===")

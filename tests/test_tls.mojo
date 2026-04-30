@@ -10,10 +10,10 @@ unmap one of them under the other's feet.
 
 Server and client run in a fork(2)-based arrangement:
   - Parent: runs the Mojo TLS client (test assertions)
-  - Child:  calls ``flare_test_server_echo_once`` then ``_exit(0)``
+  - Child: calls ``flare_test_server_echo_once`` then ``_exit(0)``
 
 Test certificates (tests/certs/):
-  ca.crt     — self-signed CA cert (3650-day)
+  ca.crt — self-signed CA cert (3650-day)
   server.crt — server cert signed by ca.crt (SAN: localhost, 127.0.0.1)
   server.key — server private key
 """
@@ -98,8 +98,8 @@ struct _TlsTestServer:
 
         Args:
             cert: Path to PEM server certificate.
-            key:  Path to PEM server private key.
-            ca:   Path to CA bundle for client cert verification, or ``""``.
+            key: Path to PEM server private key.
+            ca: Path to CA bundle for client cert verification, or ``""``.
         """
         self._lib = OwnedDLHandle(_find_flare_lib())
         var fn_new = self._lib.get_function[

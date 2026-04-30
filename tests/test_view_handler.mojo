@@ -1,5 +1,5 @@
 """Tests for the ``ViewHandler`` trait + ``WithViewCancel`` adapter
-(v0.5.0 follow-up / Track 1.1 part 2 / C3).
+(follow-up / Track 1.1 part 2 / C3).
 
 The reactor's view-aware read path (lands in this same commit
 under ``HttpServer.serve_view``) constructs a ``RequestView`` per
@@ -80,7 +80,7 @@ struct _CancelAware(Copyable, Movable, ViewHandler):
 
 @fieldwise_init
 struct _PlainHandler(Copyable, Handler, Movable):
-    """A v0.4.x-shape Handler used to test the WithViewCancel
+    """A -shape Handler used to test the WithViewCancel
     adapter."""
 
     var greeting: String

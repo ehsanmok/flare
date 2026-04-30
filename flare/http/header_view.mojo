@@ -1,4 +1,4 @@
-"""Borrowed header storage (v0.5.0 Step 2 / Track 1.5).
+"""Borrowed header storage.
 
 ``HeaderMapView[origin]`` stores headers as ``(name_start, name_len,
 value_start, value_len)`` offsets into a single byte buffer the
@@ -16,7 +16,7 @@ This commit is **additive**: ``Request`` still carries an owned
 The ``HeaderMapView`` -> ``Request.headers`` wiring lands with the
 ``RequestView[origin]`` refactor in S2.5; until then ``HeaderMapView``
 is a standalone type usable for any byte-range header parsing
-(WebSocket handshakes, HTTP/2 HEADERS frames in v0.6, custom
+(WebSocket handshakes, HTTP/2 HEADERS frames , custom
 protocol layering).
 
 Closes Track 1.5 of design-0.5 modulo the integration step.
@@ -25,15 +25,15 @@ Example:
 
     var raw = "GET / HTTP/1.1\r\nHost: x\r\nX-A: 1\r\n\r\n".as_bytes()
     var view = parse_header_view(Span[UInt8, _](raw))
-    assert_equal(view.get("host"), "x")          # case-insensitive
+    assert_equal(view.get("host"), "x") # case-insensitive
     assert_equal(view.get("X-A"), "1")
     assert_equal(view.len(), 2)
-    var owned = view.into_owned()                # one allocation, copies bytes
+    var owned = view.into_owned() # one allocation, copies bytes
 
 The header offsets list itself does allocate (Mojo's ``List``
 manages its own backing buffer), but each lookup avoids the
 per-header ``String`` copy that ``HeaderMap.get`` would have done.
-For a 12-header request the v0.4.x parse path makes 12 + 12 + 1
+For a 12-header request the parse path makes 12 + 12 + 1
 String allocations (12 keys, 12 values, one HeaderMap struct
 internally). The view path makes one ``List[Int]`` allocation
 holding 4 * 12 ints.

@@ -1,6 +1,6 @@
 """Example 28: ``application/x-www-form-urlencoded`` forms.
 
-Demonstrates the v0.6 form-parsing surface:
+Demonstrates the form-parsing surface:
 
 - ``parse_form_urlencoded`` — bytes -> ``FormData`` multimap.
 - ``urldecode`` / ``urlencode`` — WHATWG form encoding (``+``->space).
@@ -30,13 +30,13 @@ def main() raises:
     print("── 1. parse_form_urlencoded ──")
     var body = "user=alice+smith&age=30&interests=mojo&interests=rust"
     var f = parse_form_urlencoded(body)
-    print("  bindings :", f.len())
-    print("  user     :", f.get("user"))
-    print("  age      :", f.get("age"))
+    print(" bindings :", f.len())
+    print(" user :", f.get("user"))
+    print(" age :", f.get("age"))
     var hobbies = f.get_all("interests")
-    print("  interests:", len(hobbies))
+    print(" interests:", len(hobbies))
     for i in range(len(hobbies)):
-        print("    -", hobbies[i])
+        print(" -", hobbies[i])
     print()
 
     # ── 2. Encode / decode helpers ─────────────────────────────────────────
@@ -44,9 +44,9 @@ def main() raises:
     var raw = "a&b=c d/e"
     var enc = urlencode(raw)
     var dec = urldecode(enc)
-    print("  raw     :", raw)
-    print("  encoded :", enc)
-    print("  decoded :", dec)
+    print(" raw :", raw)
+    print(" encoded :", enc)
+    print(" decoded :", dec)
     print()
 
     # ── 3. Form extractor (typical /login handler shape) ───────────────────
@@ -55,13 +55,13 @@ def main() raises:
     req.headers.set("Content-Type", "application/x-www-form-urlencoded")
     req.body = List[UInt8]("user=alice&pw=secret".as_bytes())
     var form = Form.extract(req)
-    print("  user     :", form.value.get("user"))
-    print("  pw       :", form.value.get("pw"))
+    print(" user :", form.value.get("user"))
+    print(" pw :", form.value.get("pw"))
     print()
 
     # Build the response a real handler might send.
     var resp = ok("welcome " + form.value.get("user"))
-    print("  response :", resp.text())
+    print(" response :", resp.text())
     print()
 
     print("=== Example 28 complete ===")

@@ -113,21 +113,21 @@ struct RawSocket(Movable):
 
     Lifecycle:
     - ``__init__``: calls ``socket(2)``; raises on failure.
-    - ``__del__``:  calls ``close(2)`` when ``fd >= 0``.
+    - ``__del__``: calls ``close(2)`` when ``fd >= 0``.
     - ``__moveinit__``: transfers ownership; source ``fd`` becomes ``INVALID_FD``.
-    - ``close()``:  explicit, idempotent close.
+    - ``close()``: explicit, idempotent close.
 
     Fields:
-        fd:     The OS file descriptor. ``INVALID_FD`` means closed/invalid.
+        fd: The OS file descriptor. ``INVALID_FD`` means closed/invalid.
         family: Address family (``AF_INET`` or ``AF_INET6``).
-        kind:   Socket type (``SOCK_STREAM`` or ``SOCK_DGRAM``).
+        kind: Socket type (``SOCK_STREAM`` or ``SOCK_DGRAM``).
 
     Example:
         ```mojo
         var sock = RawSocket(AF_INET, SOCK_STREAM)
         sock.set_reuse_addr(True)
         # ... use sock.fd ...
-        sock.close()  # or let it fall out of scope
+        sock.close() # or let it fall out of scope
         ```
     """
 
@@ -140,7 +140,7 @@ struct RawSocket(Movable):
 
         Args:
             family: Address family (``AF_INET`` or ``AF_INET6``).
-            kind:   Socket type (``SOCK_STREAM`` for TCP, ``SOCK_DGRAM`` for UDP).
+            kind: Socket type (``SOCK_STREAM`` for TCP, ``SOCK_DGRAM`` for UDP).
 
         Raises:
             NetworkError: If ``socket(2)`` returns -1, with the OS errno and
@@ -177,10 +177,10 @@ struct RawSocket(Movable):
         """Wrap an existing file descriptor without calling ``socket(2)``.
 
         Args:
-            fd:     An already-open file descriptor (from ``accept(2)`` etc.).
+            fd: An already-open file descriptor (from ``accept(2)`` etc.).
             family: Address family (``AF_INET`` or ``AF_INET6``).
-            kind:   Socket type (``SOCK_STREAM`` or ``SOCK_DGRAM``).
-            _wrap:  Dummy parameter that disambiguates this overload from the
+            kind: Socket type (``SOCK_STREAM`` or ``SOCK_DGRAM``).
+            _wrap: Dummy parameter that disambiguates this overload from the
                     public ``__init__(family, kind)`` constructor.
 
         Safety:
@@ -301,7 +301,7 @@ struct RawSocket(Movable):
 
         Example:
             ```mojo
-            sock.set_recv_timeout(5_000)  # 5 seconds
+            sock.set_recv_timeout(5_000) # 5 seconds
             ```
         """
         self._set_timeval_opt(SO_RCVTIMEO, ms)
@@ -412,7 +412,7 @@ struct RawSocket(Movable):
 
         Args:
             level: Option level (e.g. ``SOL_SOCKET``).
-            opt:   Option name (e.g. ``SO_REUSEADDR``).
+            opt: Option name (e.g. ``SO_REUSEADDR``).
             value: ``True`` to enable, ``False`` to disable.
 
         Raises:
@@ -433,7 +433,7 @@ struct RawSocket(Movable):
 
         Args:
             opt: ``SO_RCVTIMEO`` or ``SO_SNDTIMEO``.
-            ms:  Timeout in milliseconds. 0 = disable timeout.
+            ms: Timeout in milliseconds. 0 = disable timeout.
 
         Raises:
             NetworkError: If ``setsockopt(2)`` fails.
@@ -539,12 +539,12 @@ def _raise_net_error(op: String) raises:
         op: Name of the failing operation for context (e.g. ``"connect"``).
 
     Raises:
-        ConnectionRefused:  On ``ECONNREFUSED``.
-        ConnectionTimeout:  On ``ETIMEDOUT``.
-        ConnectionReset:    On ``ECONNRESET``.
-        AddressInUse:       On ``EADDRINUSE``.
-        BrokenPipe:         On ``EPIPE``.
-        NetworkError:       For all other errors.
+        ConnectionRefused: On ``ECONNREFUSED``.
+        ConnectionTimeout: On ``ETIMEDOUT``.
+        ConnectionReset: On ``ECONNRESET``.
+        AddressInUse: On ``EADDRINUSE``.
+        BrokenPipe: On ``EPIPE``.
+        NetworkError: For all other errors.
     """
     var e = get_errno()
     var msg = _strerror(e.value) + " (" + op + ")"

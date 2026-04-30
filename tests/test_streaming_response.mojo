@@ -1,5 +1,4 @@
-"""Tests for ``StreamingResponse[B: Body]`` (v0.5.0 follow-up /
-Track 4 part 1 / C4).
+"""Tests for ``StreamingResponse[B: Body]``.
 
 The streaming-response value type pins:
 
@@ -9,7 +8,7 @@ The streaming-response value type pins:
 - The reactor pull loop (C5) drives ``body.next_chunk(cancel)``
   per writable edge; ``content_length()`` selects the framing.
 - Helpers (``ok``, ``is_redirect``, ``is_client_error``,
-  ``is_server_error``) match the v0.4.x ``Response`` shape so
+  ``is_server_error``) match the ``Response`` shape so
   the public surface stays consistent.
 
 Coverage:

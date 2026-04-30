@@ -14,18 +14,18 @@ returning incorrect byte counts.
 
 Mojo's ASAP (As Soon As Possible) destruction policy destroys an ``OwnedDLHandle``
 immediately after its last *Mojo-visible* use, which is the ``get_function`` call
-that retrieves the function pointer.  ASAP then calls ``dlclose`` and unmaps the
+that retrieves the function pointer. ASAP then calls ``dlclose`` and unmaps the
 library *before* the pointer is actually invoked, crashing the JIT on both macOS
 ARM64 and Linux.
 
 The fix: each public entry point opens ``lib``, then delegates to a private helper
-that accepts ``lib`` as a ``read`` (borrowed) parameter.  A borrow cannot be
+that accepts ``lib`` as a ``read`` (borrowed) parameter. A borrow cannot be
 ASAP-destroyed — it stays alive for the helper's entire execution, including every
 C call inside it.
 
 Public API surface:
 
-- ``decompress_gzip(data)``    → ``List[UInt8]``
+- ``decompress_gzip(data)`` → ``List[UInt8]``
 - ``decompress_deflate(data)`` → ``List[UInt8]``
 - ``compress_gzip(data, level=6)`` → ``List[UInt8]``
 - ``decode_content(data, encoding)`` → ``List[UInt8]``
@@ -64,7 +64,7 @@ def _find_flare_zlib_lib() -> String:
 
 
 def _find_flare_brotli_lib() -> String:
-    """Return the path to ``libflare_brotli.so`` (v0.6 Track I).
+    """Return the path to ``libflare_brotli.so``.
 
     Same search order as ``_find_flare_zlib_lib`` but for the brotli
     wrapper installed by the activation script when libbrotli is
@@ -106,8 +106,8 @@ def _do_decompress(
     keeping the shared library mapped across every C call below.
 
     Args:
-        lib:         Borrowed handle to ``libflare_zlib.so``.
-        data:        Compressed input bytes.
+        lib: Borrowed handle to ``libflare_zlib.so``.
+        data: Compressed input bytes.
         window_bits: zlib windowBits (47=auto gzip/zlib, 15=zlib, -15=raw).
 
     Returns:
@@ -151,7 +151,7 @@ def _decompress_impl(
     """Entry point for gzip/zlib decompression.
 
     Args:
-        data:        Compressed input bytes.
+        data: Compressed input bytes.
         window_bits: zlib windowBits passed through to ``_do_decompress``.
 
     Returns:
@@ -176,7 +176,7 @@ def _do_decompress_deflate(
     keeping the shared library mapped across every C call below.
 
     Args:
-        lib:  Borrowed handle to ``libflare_zlib.so``.
+        lib: Borrowed handle to ``libflare_zlib.so``.
         data: Compressed input bytes.
 
     Returns:
@@ -240,8 +240,8 @@ def _do_compress(
     keeping the shared library mapped across the C call below.
 
     Args:
-        lib:   Borrowed handle to ``libflare_zlib.so``.
-        data:  Plaintext input bytes.
+        lib: Borrowed handle to ``libflare_zlib.so``.
+        data: Plaintext input bytes.
         level: Compression level (1–9).
 
     Returns:
@@ -314,7 +314,7 @@ def compress_gzip(data: Span[UInt8, _], level: Int = 6) raises -> List[UInt8]:
     """Compress bytes using gzip via zlib.
 
     Args:
-        data:  The plaintext bytes to compress.
+        data: The plaintext bytes to compress.
         level: Compression level (1 = fastest, 9 = best; 6 = default).
 
     Returns:
@@ -335,7 +335,7 @@ def decode_content(
     """Decode ``data`` according to the ``Content-Encoding`` header value.
 
     Args:
-        data:     The (possibly compressed) response body.
+        data: The (possibly compressed) response body.
         encoding: The value of the HTTP ``Content-Encoding`` header.
 
     Returns:
@@ -360,7 +360,7 @@ def decode_content(
         raise Error("decode_content: unsupported encoding '" + encoding + "'")
 
 
-# ── Brotli (v0.6 Track I) ────────────────────────────────────────────────────
+# ── Brotli ────────────────────────────────────────────────────
 
 
 def compress_brotli(
@@ -369,7 +369,7 @@ def compress_brotli(
     """Compress bytes using brotli via ``libflare_brotli``.
 
     Args:
-        data:    Plaintext input bytes.
+        data: Plaintext input bytes.
         quality: Brotli quality level 0-11 (5 = sensible default,
                  11 = max compression but slow). Out-of-range values
                  are clamped by the C wrapper.

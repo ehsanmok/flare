@@ -28,7 +28,7 @@ def hello(req: Request) raises -> Response:
 var handler = FnHandler(hello)
 ```
 
-``FnHandler`` is the backwards-compatibility shim for v0.3.x's
+``FnHandler`` is the backwards-compatibility shim for 's
 ``def(Request) raises -> Response`` signature. ``HttpServer.serve`` keeps
 accepting that function signature directly; internally it wraps the
 function in ``FnHandler`` and dispatches through the same ``Handler``
@@ -73,7 +73,7 @@ trait Handler(ImplicitlyDestructible, Movable):
       clones or consumes the relevant fields.
     - ``serve`` returns a ``Response`` value. To stream, return a
       response whose body reads incrementally (see ``Body`` trait,
-      landing in v0.4.3+).
+      landing +).
     - ``serve`` may raise. The server catches the exception and
       converts it to a 500 Internal Server Error; handlers that want
       to signal a 4xx should return the response directly (use
@@ -106,7 +106,7 @@ trait Handler(ImplicitlyDestructible, Movable):
 struct FnHandler(Copyable, Handler):
     """Adapts a plain ``def(Request) raises -> Response`` into a ``Handler``.
 
-    Stores the function as a runtime field (same cost as v0.3.x's
+    Stores the function as a runtime field (same cost as 's
     existing ``HttpServer.serve(handler)`` path). Use this when you want
     ``Router.get(path, my_fn)`` to accept a bare function without a
     user-side wrapper struct.
@@ -141,7 +141,7 @@ struct FnHandler(Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         """Call the wrapped function with ``req``. Inlined so the extra
         trait dispatch layer is eliminated and the call site reduces to
-        a direct ``self.f(req)`` - matches v0.3.x's hot path.
+        a direct ``self.f(req)`` - matches 's hot path.
         """
         return self.f(req)
 
@@ -156,8 +156,7 @@ struct FnHandlerCT[F: def(Request) raises thin -> Response](Copyable, Handler):
     Zero-size at runtime (no ``var f``); the compiler monomorphises
     ``serve`` per ``F`` so the call site reduces to a direct,
     statically-known ``F(req)``. This is what gives the Handler path
-    the same machine code as a bare function call in the v0.3.x
-    ``HttpServer.serve(def...)`` shape.
+    the same machine code as a bare function call in the prior ``HttpServer.serve(def...)`` shape.
 
     Usage:
         ```mojo
@@ -191,7 +190,7 @@ struct FnHandlerCT[F: def(Request) raises thin -> Response](Copyable, Handler):
         return Self.F(req)
 
 
-# ── CancelHandler trait + WithCancel adapter (v0.5.0 Step 1) ────────────────
+# ── CancelHandler trait + WithCancel adapter ────────────────
 
 
 trait CancelHandler(ImplicitlyDestructible, Movable):
@@ -201,7 +200,7 @@ trait CancelHandler(ImplicitlyDestructible, Movable):
     The handler reads ``cancel.cancelled()`` between expensive steps
     and returns early when the cell flips.
 
-    Mojo as of v0.26.3.0.dev2026042205 cannot express "trait B refines
+    Mojo as of .dev2026042205 cannot express "trait B refines
     trait A by adding an extra parameter to the same method," so
     ``CancelHandler`` is a sibling trait to ``Handler`` rather than a
     subtype. Adapter ``WithCancel[H: Handler]`` forwards a plain
@@ -236,7 +235,7 @@ trait CancelHandler(ImplicitlyDestructible, Movable):
         """Produce a ``Response`` for ``req``, observing ``cancel``.
 
         Args:
-            req:    The incoming request.
+            req: The incoming request.
             cancel: Per-request cancel token. Polled by the handler
                 between expensive steps; the reactor flips the cell
                 on peer FIN, deadline, or drain.
@@ -250,7 +249,7 @@ trait CancelHandler(ImplicitlyDestructible, Movable):
         ...
 
 
-# ── ViewHandler trait + WithViewCancel adapter (v0.5.0 follow-up / C3) ────
+# ── ViewHandler trait + WithViewCancel adapter ────
 
 
 trait ViewHandler(ImplicitlyDestructible, Movable):
@@ -307,7 +306,7 @@ trait ViewHandler(ImplicitlyDestructible, Movable):
         """Produce a ``Response`` for ``req``, observing ``cancel``.
 
         Args:
-            req:    The incoming request as a borrowed view. Body
+            req: The incoming request as a borrowed view. Body
                 / URL / headers are offsets into the connection's
                 read buffer; no allocation per request on the
                 read path.
@@ -373,7 +372,7 @@ struct WithViewCancel[H: Handler & Copyable & Movable](
         """Materialise an owned ``Request`` and forward.
 
         Args:
-            req:    Borrowed-view request.
+            req: Borrowed-view request.
             cancel: Per-request cancel token. **Ignored** by the
                 adapter; the wrapped ``Handler`` does not observe
                 cancellation.
@@ -440,7 +439,7 @@ struct WithCancel[H: Handler & Copyable & Movable](
         """Ignore ``cancel`` and forward to ``self.inner.serve(req)``.
 
         Args:
-            req:    The incoming request.
+            req: The incoming request.
             cancel: Per-request cancel token. **Ignored** by the
                 adapter; the wrapped ``Handler`` does not observe
                 cancellation.

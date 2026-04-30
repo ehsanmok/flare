@@ -1,4 +1,4 @@
-"""Tests for ``HeaderMapView[origin]`` (v0.5.0 Step 2 / Track 1.5).
+"""Tests for ``HeaderMapView[origin]``.
 
 Covers:
 
@@ -75,7 +75,7 @@ def test_contains_case_insensitive() raises:
 
 def test_value_ows_trimmed() raises:
     """OWS (SP/HTAB) on the value is trimmed per RFC 7230."""
-    var raw = "X:    spaced\t  \r\n\r\n"
+    var raw = "X: spaced\t \r\n\r\n"
     var bytes = raw.as_bytes()
     var view = parse_header_view(Span[UInt8, _](bytes))
     assert_equal(String(view.get("X")), "spaced")

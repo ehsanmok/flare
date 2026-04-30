@@ -14,13 +14,13 @@ Demonstrates the high-level, requests-style interface:
 
   Authentication
   ──────────────
-  - BasicAuth  (RFC 7617 — base64-encoded username:password)
+  - BasicAuth (RFC 7617 — base64-encoded username:password)
   - BearerAuth (RFC 6750 — Authorization: Bearer <token>)
 
   Context managers
   ────────────────
   - HttpClient as context manager
-  - WsClient   as context manager
+  - WsClient as context manager
 
   High-level WebSocket
   ────────────────────
@@ -65,31 +65,31 @@ def _demo_oneshot():
     print("── 1. Module-level one-shot helpers ──")
     try:
         var resp = get("http://httpbin.org/get")
-        print("  get()    status:", resp.status, "ok:", resp.ok())
+        print(" get() status:", resp.status, "ok:", resp.ok())
 
         # String body → Content-Type: application/json set automatically
         var resp2 = post("http://httpbin.org/post", '{"library": "flare"}')
-        print("  post()   status:", resp2.status)
+        print(" post() status:", resp2.status)
 
         var resp3 = put("http://httpbin.org/put", '{"action": "replace"}')
-        print("  put()    status:", resp3.status)
+        print(" put() status:", resp3.status)
 
         var resp4 = patch("http://httpbin.org/patch", '{"field": "patched"}')
-        print("  patch()  status:", resp4.status)
+        print(" patch() status:", resp4.status)
 
         var resp5 = delete("http://httpbin.org/delete")
-        print("  delete() status:", resp5.status)
+        print(" delete() status:", resp5.status)
 
         var resp6 = head("http://httpbin.org/get")
         print(
-            "  head()   status:",
+            " head() status:",
             resp6.status,
             "body:",
             len(resp6.body),
             "bytes",
         )
     except e:
-        print("  [SKIP] network unavailable:", String(e))
+        print(" [SKIP] network unavailable:", String(e))
     print()
 
 
@@ -104,13 +104,13 @@ def _demo_base_url():
         # Positional base_url: HttpClient("url") — most natural syntax
         var client = HttpClient("http://httpbin.org")
         var resp = client.get("/get")  # relative path resolved against base
-        print("  GET /get →", resp.status)
+        print(" GET /get →", resp.status)
 
         # String body → JSON Content-Type automatic
         var resp2 = client.post("/post", '{"key": "value"}')
-        print("  POST /post →", resp2.status)
+        print(" POST /post →", resp2.status)
     except e:
-        print("  [SKIP] network unavailable:", String(e))
+        print(" [SKIP] network unavailable:", String(e))
     print()
 
 
@@ -125,18 +125,18 @@ def _demo_raise_for_status():
         var resp = get("http://httpbin.org/status/404")
         try:
             resp.raise_for_status()
-            print("  ERROR: expected HttpError for 404")
+            print(" ERROR: expected HttpError for 404")
         except:
-            print("  ✓ HttpError raised for 404 (expected)")
+            print(" ✓ HttpError raised for 404 (expected)")
     except e:
-        print("  [SKIP] network unavailable:", String(e))
+        print(" [SKIP] network unavailable:", String(e))
 
     try:
         var resp = get("http://httpbin.org/get")
         resp.raise_for_status()  # no-op for 200
-        print("  ✓ raise_for_status() no-op on 200")
+        print(" ✓ raise_for_status() no-op on 200")
     except e:
-        print("  [SKIP] network unavailable:", String(e))
+        print(" [SKIP] network unavailable:", String(e))
     print()
 
 
@@ -152,9 +152,9 @@ def _demo_auth():
     try:
         var client = HttpClient(BasicAuth("alice", "s3cr3t"))
         var resp = client.get("http://httpbin.org/basic-auth/alice/s3cr3t")
-        print("  BasicAuth →", resp.status, "(expect 200)")
+        print(" BasicAuth →", resp.status, "(expect 200)")
     except e:
-        print("  [SKIP] BasicAuth network unavailable:", String(e))
+        print(" [SKIP] BasicAuth network unavailable:", String(e))
 
     # BearerAuth — base_url + auth as two positional args
     try:
@@ -162,9 +162,9 @@ def _demo_auth():
             "http://httpbin.org", BearerAuth("my-token-abc")
         )
         var resp = client.get("/bearer")
-        print("  BearerAuth + base_url →", resp.status, "(expect 200)")
+        print(" BearerAuth + base_url →", resp.status, "(expect 200)")
     except e:
-        print("  [SKIP] BearerAuth network unavailable:", String(e))
+        print(" [SKIP] BearerAuth network unavailable:", String(e))
 
     print()
 
@@ -181,9 +181,9 @@ def _demo_iter_bytes():
         var total = 0
         for chunk in resp.iter_bytes(512):
             total += len(chunk)
-        print("  streamed", total, "bytes in chunks of 512")
+        print(" streamed", total, "bytes in chunks of 512")
     except e:
-        print("  [SKIP] network unavailable:", String(e))
+        print(" [SKIP] network unavailable:", String(e))
     print()
 
 
@@ -197,9 +197,9 @@ def _demo_http_context_manager():
     try:
         with HttpClient() as c:
             var resp = c.get("http://httpbin.org/get")
-            print("  context manager GET →", resp.status)
+            print(" context manager GET →", resp.status)
     except e:
-        print("  [SKIP] network unavailable:", String(e))
+        print(" [SKIP] network unavailable:", String(e))
     print()
 
 
@@ -213,21 +213,21 @@ def _demo_ws_high_level():
     try:
         with WsClient.connect("ws://echo.websocket.events") as ws:
             ws.send_text("hello from flare!")
-            print("  Sent: 'hello from flare!'")
+            print(" Sent: 'hello from flare!'")
 
             # recv_message() wraps recv() in a typed WsMessage
             var found = False
             for _ in range(5):
                 var msg = ws.recv_message()
                 if msg.is_text and "hello from flare!" in msg.as_text():
-                    print("  ✓ WsMessage echo:", msg.as_text())
+                    print(" ✓ WsMessage echo:", msg.as_text())
                     found = True
                     break
 
             if not found:
-                print("  echo not received within 5 messages")
+                print(" echo not received within 5 messages")
     except e:
-        print("  [SKIP] echo server unavailable:", String(e))
+        print(" [SKIP] echo server unavailable:", String(e))
     print()
 
 
@@ -252,7 +252,7 @@ def _demo_buf_reader():
             var line = reader.readline()
             print(" ", line, end="")
     except e:
-        print("  [SKIP] TLS unavailable:", String(e))
+        print(" [SKIP] TLS unavailable:", String(e))
     print()
 
 

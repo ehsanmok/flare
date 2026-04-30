@@ -1,10 +1,9 @@
-"""Tests for ``HttpServer.drain`` and ``ShutdownReport`` (v0.5.0
-Step 1).
+"""Tests for ``HttpServer.drain`` and ``ShutdownReport``.
 
-Closes the API-surface portion of criticism §2.12: v0.4.x only had
+only had
 ``HttpServer.close()`` (a hard stop that cuts in-flight handlers
 mid-write) and a ``ServerConfig.shutdown_timeout_ms`` field that
-was never wired to a wait-for-drain loop. v0.5.0 Step 1 adds
+was never wired to a wait-for-drain loop. adds
 ``HttpServer.drain(timeout_ms) -> ShutdownReport`` as the
 recommended graceful shutdown.
 
@@ -22,7 +21,7 @@ Covers:
   resolve.
 
 Multi-worker drain coordination through ``Scheduler.drain`` lands
-in v0.5.0 Step 2; this commit covers the single-threaded path.
+in ; this commit covers the single-threaded path.
 """
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite

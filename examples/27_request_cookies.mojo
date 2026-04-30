@@ -1,6 +1,6 @@
 """Example 27: Request / Response cookies.
 
-Demonstrates the v0.6 cookie ergonomics on the server side:
+Demonstrates the cookie ergonomics on the server side:
 
 - ``Request.cookies()`` — parse all incoming ``Cookie:`` headers into
   a ``CookieJar``.
@@ -34,11 +34,11 @@ def main() raises:
     var req = Request(method=Method.GET, url="/dashboard")
     req.headers.set("Cookie", "session=abc123; theme=dark")
     var jar = req.cookies()
-    print("  jar size :", jar.len())
-    print("  session  :", jar.get("session"))
-    print("  theme    :", jar.get("theme"))
-    print("  helper   :", req.cookie("session"))
-    print("  has_user :", req.has_cookie("user"))
+    print(" jar size :", jar.len())
+    print(" session :", jar.get("session"))
+    print(" theme :", jar.get("theme"))
+    print(" helper :", req.cookie("session"))
+    print(" has_user :", req.has_cookie("user"))
     print()
 
     # ── 2. Set a fresh cookie on the response ───────────────────────────────
@@ -57,15 +57,15 @@ def main() raises:
     )
     resp.set_cookie(Cookie(name="theme", value="light", path="/"))
     var lines = resp.headers.get_all("set-cookie")
-    print("  emitted  :", len(lines), "Set-Cookie line(s)")
+    print(" emitted :", len(lines), "Set-Cookie line(s)")
     for i in range(len(lines)):
-        print("    " + lines[i])
+        print(" " + lines[i])
     print()
 
     # ── 3. Cookies extractor ───────────────────────────────────────────────
     print("── 3. Cookies extractor ──")
     var ck = Cookies.extract(req)
-    print("  via extractor.value.get('theme') =", ck.value.get("theme"))
+    print(" via extractor.value.get('theme') =", ck.value.get("theme"))
     print()
 
     print("=== Example 27 complete ===")

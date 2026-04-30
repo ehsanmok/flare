@@ -3,23 +3,23 @@
 Two independent attack surfaces:
 
 1. **Upgrade request parser** (``_parse_ws_upgrade_bytes``):
-   Feeds arbitrary bytes as an HTTP Upgrade request.  Tests all
+   Feeds arbitrary bytes as an HTTP Upgrade request. Tests all
    header-parsing paths including missing/malformed Upgrade,
    Connection, and Sec-WebSocket-Key headers.
 
 2. **Masked frame receiver** (``WsFrame.decode_one``):
-   Feeds arbitrary bytes as a client→server WebSocket frame.  Since
+   Feeds arbitrary bytes as a client→server WebSocket frame. Since
    clients MUST mask frames (RFC 6455 §5.1), the harness sets the
    MASK bit in the first two bytes when present, ensuring coverage of
    the unmasking logic, length-extension (16/64-bit), and every opcode.
 
 3. **Property — unmasked frames are always rejected**:
    If the MASK bit is clear in the fuzz input and decoding succeeds,
-   the server code would call ``WsProtocolError``.  This property
+   the server code would call ``WsProtocolError``. This property
    checks that ``WsFrame.decode_one`` correctly marks frames as
    unmasked when the bit is absent.
 
-Valid ``Error`` / ``NetworkError`` rejections are expected.  Only
+Valid ``Error`` / ``NetworkError`` rejections are expected. Only
 crash-marker messages trigger a saved crash.
 
 Run:
@@ -42,7 +42,7 @@ def target_upgrade(data: List[UInt8]) raises:
 
     Raises:
         Expected: ``NetworkError``, ``Error`` — classified as rejections.
-        Bug:      Crash-marker messages — classified as crashes and saved.
+        Bug: Crash-marker messages — classified as crashes and saved.
     """
     _ = _parse_ws_upgrade_bytes(Span[UInt8, _](data))
 
@@ -53,7 +53,7 @@ def target_upgrade(data: List[UInt8]) raises:
 def target_frame(data: List[UInt8]) raises:
     """Fuzz target: decode a WebSocket frame as if from a masked client.
 
-    Feeds arbitrary bytes to ``WsFrame.decode_one``.  Any valid frame
+    Feeds arbitrary bytes to ``WsFrame.decode_one``. Any valid frame
     must be consistent (``consumed`` ≤ ``len(data)``).
 
     Args:
@@ -61,7 +61,7 @@ def target_frame(data: List[UInt8]) raises:
 
     Raises:
         Expected: ``Error``, ``WsProtocolError`` — classified as rejections.
-        Bug:      Crash-marker messages — classified as crashes and saved.
+        Bug: Crash-marker messages — classified as crashes and saved.
     """
     try:
         var result = WsFrame.decode_one(Span[UInt8, _](data))
@@ -90,7 +90,7 @@ def target_frame(data: List[UInt8]) raises:
 def prop_mask_bit_honoured(data: List[UInt8]) raises -> Bool:
     """Property: MASK bit in byte 1 of decoded frame matches input bit.
 
-    RFC 6455 §5.2: byte 1 bit 7 (0x80) is the MASK flag.  The decoder
+    RFC 6455 §5.2: byte 1 bit 7 (0x80) is the MASK flag. The decoder
     must faithfully reflect this; it must never flip the bit.
 
     Args:
@@ -119,7 +119,7 @@ def prop_close_code_range(data: List[UInt8]) raises -> Bool:
     """Property: successfully decoded CLOSE frames have valid or absent codes.
 
     RFC 6455 §7.4: valid close codes are 1000–2999 (protocol-defined)
-    and 3000–4999 (application-defined).  Codes below 1000 and 5000+
+    and 3000–4999 (application-defined). Codes below 1000 and 5000+
     are invalid but we allow the decoder to accept/reject as it sees fit;
     this property just checks the decoder doesn't panic.
 
@@ -262,7 +262,7 @@ def main() raises:
         ),
         upgrade_seeds,
     )
-    print("   PASS: upgrade parser never crashed\n")
+    print(" PASS: upgrade parser never crashed\n")
 
     # ── Masked frame decoder seeds ────────────────────────────────────────────
 
@@ -364,16 +364,16 @@ def main() raises:
         ),
         frame_seeds,
     )
-    print("   PASS: frame decoder never crashed\n")
+    print(" PASS: frame decoder never crashed\n")
 
     # ── Property tests ────────────────────────────────────────────────────────
 
     print("3. Property: MASK bit faithfully reflected (20 000 trials)...")
     forall_bytes(prop_mask_bit_honoured, max_len=256, trials=20_000, seed=2)
-    print("   PASS: mask bit always correct\n")
+    print(" PASS: mask bit always correct\n")
 
     print("4. Property: CLOSE frame access never crashes (10 000 trials)...")
     forall_bytes(prop_close_code_range, max_len=200, trials=10_000, seed=3)
-    print("   PASS: CLOSE frame handling safe\n")
+    print(" PASS: CLOSE frame handling safe\n")
 
     print("All WebSocket server fuzz properties hold!")

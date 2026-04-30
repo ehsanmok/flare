@@ -11,11 +11,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-A Mojo HTTP/1.1 server you can put in front of users, plus the raw TCP, UDP, TLS, DNS, and WebSocket primitives it's built on. One reactor per worker (`kqueue` on macOS, `epoll` on Linux), shared-nothing thread-per-core via `SO_REUSEPORT`, RFC 7230 parser with 19 fuzz harnesses, and a `Handler` trait that takes plain `def` functions or compiled-down structs.
+A Mojo HTTP server you can put in front of users, plus the raw TCP, UDP, TLS, DNS, HTTP/2, and WebSocket primitives it's built on. One reactor per worker (`kqueue` on macOS, `epoll` on Linux with `EPOLLEXCLUSIVE` shared listener for multi-worker), a per-connection state machine, an RFC 7230 parser with extensive fuzz coverage, and a `Handler` trait that takes plain `def` functions or compiled-down structs.
 
 ```mojo
-from flare.http import HttpServer, Router, Request, Response, ok
-from flare.net import SocketAddr
+from flare import HttpServer, Router, Request, Response, ok, SocketAddr
 
 def hello(req: Request) raises -> Response:
     return ok("hello")
@@ -27,7 +26,7 @@ def main() raises:
     srv.serve(r^, num_workers=4)
 ```
 
-flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard to misuse under load and easy to operate*.
+The bar isn't "is it fast", it's *is it hard to misuse under load and easy to operate*.
 
 ## Features
 
@@ -55,14 +54,14 @@ channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 preview = ["pixi-build"]
 
 [dependencies]
-flare = { git = "https://github.com/ehsanmok/flare.git", tag = "v0.5.0" }
+flare = { git = "https://github.com/ehsanmok/flare.git", tag = "<latest-release>" }
 ```
 
 ```bash
 pixi install
 ```
 
-Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed on [GitHub Releases](https://github.com/ehsanmok/flare/releases); `main` always targets the next unreleased version.
+Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed on [GitHub Releases](https://github.com/ehsanmok/flare/releases) — pin to one for reproducible builds.
 
 To track unreleased work (breaking changes possible between tags):
 

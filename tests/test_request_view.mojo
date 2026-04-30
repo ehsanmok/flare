@@ -1,10 +1,10 @@
-"""Tests for ``RequestView[origin]`` (v0.5.0 Step 2 / Track 1.1).
+"""Tests for ``RequestView[origin]``.
 
 The ``parse_request_view`` parser produces a borrowed view of an
 HTTP/1.1 request: the URL, headers, and body all point into the
 caller-owned buffer rather than allocating ``String`` /
 ``HeaderMap`` / ``List[UInt8]`` copies. ``into_owned()``
-materialises a v0.4.x ``Request`` for handlers that need owned
+materialises a ``Request`` for handlers that need owned
 state.
 
 The reactor's read path doesn't yet use this view directly — that

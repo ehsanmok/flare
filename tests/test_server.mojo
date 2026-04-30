@@ -982,7 +982,7 @@ def test_v6_server_loopback() raises:
         var probe = TcpListener.bind(SocketAddr(IpAddr("::1", is_v6=True), 0))
         probe.close()
     except:
-        print("  [SKIP] IPv6 loopback not available")
+        print(" [SKIP] IPv6 loopback not available")
         return
 
     var addr = SocketAddr(IpAddr("::1", is_v6=True), 0)

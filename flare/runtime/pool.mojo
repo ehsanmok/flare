@@ -1,4 +1,4 @@
-"""Typed heap-allocator wrapper (v0.5.0 Step 2 / Track 1.2).
+"""Typed heap-allocator wrapper.
 
 ``Pool[T]`` confines ``UnsafePointer.alloc`` / ``free`` /
 ``init_pointee_move`` / ``destroy_pointee`` plumbing to one place

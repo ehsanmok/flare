@@ -1,4 +1,4 @@
-"""libc time FFI (v0.5.0 follow-up / Mojo workaround cleanup).
+"""libc time FFI.
 
 The Mojo nightly we're pinned to has an empirically-observed
 anomaly when calling ``usleep`` via the inferred-signature

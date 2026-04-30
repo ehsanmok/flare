@@ -29,7 +29,7 @@ def get_user(req: Request) raises -> Response:
     return ok("user=" + req.param("id"))
 
 comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET, "/",          home),
+    ComptimeRoute(Method.GET, "/", home),
     ComptimeRoute(Method.GET, "/users/:id", get_user),
 ]
 

@@ -57,13 +57,13 @@ def main() raises:
     var r = ComptimeRouter[ROUTES]()
 
     var r1 = r.serve(Request(method=Method.GET, url="/"))
-    print("GET /          →", r1.status, r1.text())
+    print("GET / →", r1.status, r1.text())
 
     var r2 = r.serve(Request(method=Method.GET, url="/users/42"))
-    print("GET /users/42  →", r2.status, r2.text())
+    print("GET /users/42 →", r2.status, r2.text())
 
     var r3 = r.serve(Request(method=Method.POST, url="/users"))
-    print("POST /users    →", r3.status, r3.text())
+    print("POST /users →", r3.status, r3.text())
 
     var r4 = r.serve(Request(method=Method.GET, url="/files/a/b.txt"))
     print("GET /files/... →", r4.status, r4.text())
@@ -71,7 +71,7 @@ def main() raises:
     # 405 on wrong method
     var r5 = r.serve(Request(method=Method.PUT, url="/users"))
     print(
-        "PUT /users     →",
+        "PUT /users →",
         r5.status,
         "Allow:",
         r5.headers.get("Allow"),
@@ -79,7 +79,7 @@ def main() raises:
 
     # 404 on unknown
     var r6 = r.serve(Request(method=Method.GET, url="/nope"))
-    print("GET /nope      →", r6.status)
+    print("GET /nope →", r6.status)
 
     print()
     print("OK.")

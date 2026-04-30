@@ -98,9 +98,8 @@ For security issues, please open a private security advisory on
 GitHub or email the maintainer directly. Do not file a public issue
 for vulnerabilities.
 
-flare is pre-1.0 and has zero known production deployments. Treat
-the maturity gap honestly: nginx, Go `net/http`, hyper, and axum
-all shipped CVEs in their first two years, and the HTTP/2 HPACK
-parser (planned, future release) is the highest-CVE-risk subsystem
-on the roadmap. That work is explicitly gated on flare's
-operational maturity landing first.
+flare has zero known production deployments. Treat the maturity gap
+honestly: nginx, Go `net/http`, hyper, and axum all shipped CVEs in
+their first two years, and the HTTP/2 HPACK parser is one of the
+highest-CVE-risk subsystems in any HTTP server. flare's HPACK is
+covered by a dedicated fuzz harness for that reason.

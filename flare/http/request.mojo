@@ -27,12 +27,12 @@ struct Request(Movable):
     """An HTTP/1.1 request.
 
     Fields:
-        method:  HTTP method string (use ``Method.*`` constants).
-        url:     Request target (path + query), e.g. ``"/items?page=1"``.
+        method: HTTP method string (use ``Method.*`` constants).
+        url: Request target (path + query), e.g. ``"/items?page=1"``.
         headers: Request headers (owned ``HeaderMap``).
-        body:    Request body bytes (empty for GET/HEAD).
+        body: Request body bytes (empty for GET/HEAD).
         version: HTTP version string (default ``"HTTP/1.1"``).
-        peer:    Kernel-reported peer address (v0.5.0 Step 1). Populated by
+        peer: Kernel-reported peer address. Populated by
                  the reactor at accept time from ``TcpStream.peer_addr()``.
                  Direct ``Request`` constructions (tests, the client side)
                  default to ``SocketAddr.localhost(0)`` so the field is
@@ -83,7 +83,7 @@ struct Request(Movable):
     ``ServerConfig.expose_error_messages`` onto every parsed request.
     See struct docstring."""
     var tls_info: Optional[TlsInfo]
-    """Per-request TLS metadata (v0.5.0 Step 3 / Track 5.2).
+    """Per-request TLS metadata.
 
     ``Some(TlsInfo)`` when the connection terminated TLS at flare's
     ``TlsAcceptor`` (set at handshake time, threaded onto every
@@ -105,7 +105,7 @@ struct Request(Movable):
     allocates the underlying ``Dict`` on the first path-parameter
     extraction via ``params_mut()``. The plaintext-bench fast path
     therefore pays zero ``Dict`` allocation / move cost per request,
-    which closes the ~3% gap to the v0.3.0 baseline (``Dict()`` was
+    which closes the ~3% gap to the baseline (``Dict()`` was
     measured to cost that much per request on TFB plaintext).
 
     Owned by this ``Request`` — the destructor frees the ``Dict`` and
@@ -130,11 +130,11 @@ struct Request(Movable):
         """Create a new HTTP request.
 
         Args:
-            method:        HTTP method string.
-            url:           Full URL or request target.
-            body:          Request body bytes; empty by default.
-            version:       HTTP version; ``"HTTP/1.1"`` by default.
-            peer:          Peer ``SocketAddr``; defaults to ``127.0.0.1:0``
+            method: HTTP method string.
+            url: Full URL or request target.
+            body: Request body bytes; empty by default.
+            version: HTTP version; ``"HTTP/1.1"`` by default.
+            peer: Peer ``SocketAddr``; defaults to ``127.0.0.1:0``
                            for direct constructions. The reactor passes
                            the kernel-reported peer captured at accept
                            time.
@@ -143,7 +143,7 @@ struct Request(Movable):
                            ``False`` (production-safe). The reactor
                            copies this from
                            ``ServerConfig.expose_error_messages``.
-            tls_info:      Per-request TLS metadata (Track 5.2).
+            tls_info: Per-request TLS metadata (Track 5.2).
                            ``Some(TlsInfo)`` when the connection
                            terminated TLS at flare's ``TlsAcceptor``;
                            ``None`` (default) for plain HTTP. Direct

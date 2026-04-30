@@ -1,4 +1,4 @@
-"""Tests for the streaming-body primitives (v0.5.0 Step 2 / Track 4).
+"""Tests for the streaming-body primitives.
 
 Covers the trait + adapter shapes that lay the groundwork for the
 reactor's pull-based response loop. The reactor adoption (which

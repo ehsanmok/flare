@@ -1,5 +1,4 @@
-"""Server-side TLS acceptor (v0.5.0 Step 3 / Track 5.1, with C7
-v0.5.0 follow-up wiring through to the FFI).
+"""Server-side TLS acceptor.
 
 ``TlsAcceptor`` is the server-side counterpart to ``TlsStream`` —
 it wraps a ``TcpListener`` and produces ``TlsStream`` connections
@@ -37,8 +36,8 @@ Public API:
     var cfg = TlsServerConfig(
         cert_file="/etc/letsencrypt/live/example.com/fullchain.pem",
         key_file="/etc/letsencrypt/live/example.com/privkey.pem",
-        alpn=["h2", "http/1.1"],     # served preference order
-        require_client_cert=False,    # mTLS off by default
+        alpn=["h2", "http/1.1"], # served preference order
+        require_client_cert=False, # mTLS off by default
         client_ca_bundle="",
     )
     var acceptor = TlsAcceptor.bind(addr, cfg)
@@ -100,7 +99,7 @@ struct TlsServerNotImplemented(Copyable, Movable, Writable):
     def __init__(out self):
         self.message = (
             "TlsAcceptor scaffolding only — reactor-side SSL_accept"
-            " state machine lands in the v0.5.0 Step 3 follow-up."
+            " state machine lands in the follow-up."
         )
 
     def write_to[W: Writer](self, mut writer: W):
@@ -114,12 +113,12 @@ struct TlsServerConfig(Copyable, Movable):
     """Server-side TLS policy.
 
     Fields:
-        cert_file:           Path to the server certificate chain
+        cert_file: Path to the server certificate chain
                              in PEM format (full chain — leaf
                              first, then intermediates). Required.
-        key_file:            Path to the server private key in
+        key_file: Path to the server private key in
                              PEM format. Required.
-        alpn:                ALPN protocol identifiers to
+        alpn: ALPN protocol identifiers to
                              advertise during the handshake. Order
                              is preference order (the OpenSSL
                              callback selects the first
@@ -129,11 +128,11 @@ struct TlsServerConfig(Copyable, Movable):
                              certificate (mTLS). Defaults False.
                              When True, ``client_ca_bundle`` must
                              also be set.
-        client_ca_bundle:    Path to a PEM bundle of trust anchors
+        client_ca_bundle: Path to a PEM bundle of trust anchors
                              for verifying client certificates
                              (mTLS). Empty = use OpenSSL's default
                              trust store.
-        min_protocol:        Minimum TLS protocol version to
+        min_protocol: Minimum TLS protocol version to
                              negotiate. Default
                              ``TLS_PROTOCOL_TLS12``. TLS 1.0 / 1.1
                              are explicitly rejected.
@@ -203,13 +202,13 @@ struct TlsInfo(Copyable, Movable):
     = None`` (this struct is not threaded onto them).
 
     Fields:
-        protocol:           Negotiated protocol version
+        protocol: Negotiated protocol version
                             (e.g. ``"TLSv1.3"``).
-        cipher:             Cipher suite name
+        cipher: Cipher suite name
                             (e.g. ``"TLS_AES_128_GCM_SHA256"``).
-        sni_host:           Client-Hello SNI hostname, or empty
+        sni_host: Client-Hello SNI hostname, or empty
                             string if the client didn't send one.
-        alpn_protocol:      Negotiated ALPN protocol
+        alpn_protocol: Negotiated ALPN protocol
                             (e.g. ``"h2"``, ``"http/1.1"``), or
                             empty string if ALPN didn't fire.
         client_cert_subject: Subject DN of the client certificate

@@ -9,7 +9,7 @@ Example:
 
     var jar = CookieJar()
     jar.set(Cookie("session", "abc123", secure=True, http_only=True))
-    var header = jar.to_request_header()  # "session=abc123"
+    var header = jar.to_request_header() # "session=abc123"
     ```
 """
 
@@ -28,12 +28,12 @@ struct Cookie(Copyable, Movable):
     """An HTTP cookie (RFC 6265).
 
     Fields:
-        name:      Cookie name (must not be empty).
-        value:     Cookie value.
-        domain:    Domain attribute (empty = not set).
-        path:      Path attribute (empty = not set).
-        max_age:   Max-Age in seconds (-1 = not set, 0 = delete).
-        secure:    Secure flag (HTTPS only).
+        name: Cookie name (must not be empty).
+        value: Cookie value.
+        domain: Domain attribute (empty = not set).
+        path: Path attribute (empty = not set).
+        max_age: Max-Age in seconds (-1 = not set, 0 = delete).
+        secure: Secure flag (HTTPS only).
         http_only: HttpOnly flag (not accessible to JavaScript).
         same_site: SameSite attribute (empty = not set).
     """

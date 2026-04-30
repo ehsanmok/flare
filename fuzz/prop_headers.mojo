@@ -40,7 +40,7 @@ def injection_resistance(data: List[UInt8]) raises -> Bool:
     """Property: set/append must raise when key or value contains CR/LF.
 
     Treats the first half of ``data`` as key bytes, second half as value
-    bytes.  If either contains CR or LF the call MUST raise; otherwise it
+    bytes. If either contains CR or LF the call MUST raise; otherwise it
     MUST succeed.
 
     Args:
@@ -127,10 +127,10 @@ def main() raises:
 
     print("1. Injection resistance (20 000 trials)...")
     forall_bytes(injection_resistance, max_len=64, trials=20_000, seed=1)
-    print("   PASS: CR/LF injection always raises HeaderInjectionError\n")
+    print(" PASS: CR/LF injection always raises HeaderInjectionError\n")
 
     print("2. Internal list consistency (20 000 trials)...")
     forall_bytes(len_consistency, max_len=64, trials=20_000, seed=2)
-    print("   PASS: _keys / _lower_keys / _values always have equal length\n")
+    print(" PASS: _keys / _lower_keys / _values always have equal length\n")
 
     print("All HeaderMap properties hold!")

@@ -9,7 +9,7 @@ best-effort datagram delivery. Use `flare.tcp` for reliable ordered delivery.
 from flare.udp import UdpSocket, DatagramTooLarge
 ```
 
-- `UdpSocket`       — A UDP socket for `send_to` / `recv_from` operations.
+- `UdpSocket` — A UDP socket for `send_to` / `recv_from` operations.
 - `DatagramTooLarge` — Raised when a payload exceeds the 65,507-byte UDP limit.
 
 ## Example
@@ -29,7 +29,7 @@ def main() raises:
     var buf = List[UInt8](capacity=65535)
     buf.resize(65535, 0)
     var (n, from_addr) = rx.recv_from(Span[UInt8, _](buf))
-    print(String(buf[:n]))           # hello
+    print(String(buf[:n])) # hello
     rx.close()
 ```
 """

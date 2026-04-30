@@ -1,5 +1,4 @@
-"""Tests for the server-side TLS acceptor scaffolding (v0.5.0
-Step 3 / Track 5.1).
+"""Tests for the server-side TLS acceptor scaffolding.
 
 Covers the API-surface portion landing in this commit:
 ``TlsServerConfig`` value semantics, ``TlsInfo`` defaults,
@@ -8,7 +7,7 @@ Covers the API-surface portion landing in this commit:
 
 The reactor-side handshake state machine (non-blocking
 ``SSL_accept`` driven by edge-triggered readable / writable
-events) lands in the v0.5.0 Step 3 follow-up; tests for the
+events) lands in the follow-up; tests for the
 end-to-end TLS round-trip (``TlsAcceptor.serve(handler)`` ->
 ``curl --cacert``) move with it.
 

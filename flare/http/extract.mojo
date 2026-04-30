@@ -17,7 +17,7 @@ from flare.http import (
 )
 
 def get_user(req: Request) raises -> Response:
-    var id   = Path[ParamInt,    "id"].extract(req).value.value
+    var id = Path[ParamInt, "id"].extract(req).value.value
     var page = OptionalQuery[ParamInt, "page"].extract(req).value
     var auth = Header[ParamString, "Authorization"].extract(req).value.value
     return ok("user " + String(id))
@@ -362,13 +362,13 @@ struct OptionalHeader[T: ParamParser, name: StaticString](
         return out^
 
 
-# ── Concrete primitive extractors (v0.5.0 Step 2 / Track 1.3) ──────────────
+# ── Concrete primitive extractors ──────────────
 #
 # The parametric ``Path[T: ParamParser, name]`` / ``Query[...]`` /
 # ``Header[...]`` / ``OptionalQuery[...]`` / ``OptionalHeader[...]``
 # extractors wrap the parsed value in a ``ParamParser`` (``ParamInt``,
 # ``ParamString``, ...) which itself wraps a primitive. The result
-# is the v0.4.x ``.value.value`` chain that every example apologised
+# is the prior ``.value.value`` chain that every example apologised
 # for.
 #
 # These concrete types collapse the chain by exposing ``.value`` as
@@ -1116,7 +1116,7 @@ struct Extracted[H: Copyable & Defaultable & Handler & Movable](
 def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
     """Build a 400 Bad Request response from a raised extractor ``Error``.
 
-    Default (production) behaviour, since v0.5.0 Step 1: the response
+    Default (production) behaviour, since : the response
     body is the **fixed reason** ``"Bad Request"`` — *not* the raised
     error message. The full message is logged to stderr with a
     ``[flare:bad-request]`` prefix so server-side debugging still
@@ -1137,7 +1137,7 @@ def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
     code.
 
     Args:
-        e:      The error raised by an extractor.
+        e: The error raised by an extractor.
         expose: ``True`` to echo ``String(e)`` into the response body
                 (verbatim user input). ``False`` (default) to send
                 ``"Bad Request"`` and log the full message.

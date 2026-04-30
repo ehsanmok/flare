@@ -1,5 +1,4 @@
-"""Mojo bindings for the server-side TLS FFI helpers (v0.5.0
-follow-up / Track 5.1 / C6).
+"""Mojo bindings for the server-side TLS FFI helpers.
 
 Exposes the C-side functions added to
 ``flare/tls/ffi/openssl_wrapper.cpp`` for the server-side SSL_CTX
@@ -153,10 +152,10 @@ def server_ssl_new_accept(ctx: ServerCtx, fd: Int) raises -> Int:
 def server_ssl_do_handshake(ctx: ServerCtx, ssl_addr: Int) raises -> Int:
     """Drive ``SSL_accept`` one step. Returns:
 
-    -  0  → handshake complete.
-    -  1  → WANT_READ; reactor should re-arm readable interest.
-    -  2  → WANT_WRITE; reactor should re-arm writable interest.
-    - -1  → fatal; close the connection.
+    - 0 → handshake complete.
+    - 1 → WANT_READ; reactor should re-arm readable interest.
+    - 2 → WANT_WRITE; reactor should re-arm writable interest.
+    - -1 → fatal; close the connection.
     """
     var f = _ssl_get_function_handshake(ctx._lib)
     return Int(f(ssl_addr))

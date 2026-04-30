@@ -9,7 +9,7 @@ Built on `flare.net` POSIX socket primitives. Every connection has
 from flare.tcp import TcpStream, TcpListener
 ```
 
-- `TcpStream`   — A connected TCP socket: `connect`, `read`, `write`, `close`.
+- `TcpStream` — A connected TCP socket: `connect`, `read`, `write`, `close`.
 - `TcpListener` — A bound, listening TCP socket: `bind`, `accept`.
 
 All operations raise typed errors from `flare.net` on failure.
@@ -22,12 +22,12 @@ from flare.net import SocketAddr
 
 def echo_server() raises:
     var listener = TcpListener.bind(SocketAddr.localhost(9000))
-    var client   = listener.accept()
+    var client = listener.accept()
 
     var buf = List[UInt8](capacity=4096)
     buf.resize(4096, 0)
     var n = client.read(buf.unsafe_ptr(), len(buf))
-    _ = client.write(Span[UInt8, _](buf)[:n])  # echo back
+    _ = client.write(Span[UInt8, _](buf)[:n]) # echo back
     client.close()
 
 def echo_client() raises:

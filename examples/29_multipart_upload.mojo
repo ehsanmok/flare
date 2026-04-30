@@ -1,6 +1,6 @@
 """Example 29: ``multipart/form-data`` upload (RFC 7578).
 
-Demonstrates the v0.6 multipart-parsing surface:
+Demonstrates the multipart-parsing surface:
 
 - ``parse_multipart_form_data`` — bytes + ``Content-Type`` boundary
   -> ``MultipartForm`` containing each ``MultipartPart`` (text or
@@ -45,14 +45,14 @@ def main() raises:
     var body = _build_demo_body()
     var ct = "multipart/form-data; boundary=BND"
     var form = parse_multipart_form_data(body, ct)
-    print("  parts     :", form.len())
-    print("  caption   :", form.value("caption"))
+    print(" parts :", form.len())
+    print(" caption :", form.value("caption"))
     var maybe_photo = form.file("photo")
     if maybe_photo:
         var p = maybe_photo.value().copy()
-        print("  filename  :", p.filename)
-        print("  type      :", p.content_type)
-        print("  size      :", len(p.body), "bytes")
+        print(" filename :", p.filename)
+        print(" type :", p.content_type)
+        print(" size :", len(p.body), "bytes")
     print()
 
     # ── 2. Multipart extractor on a Request ────────────────────────────────
@@ -61,8 +61,8 @@ def main() raises:
     req.headers.set("Content-Type", ct)
     req.body = body.copy()
     var m = Multipart.extract(req)
-    print("  via extractor    :", m.value.len(), "parts")
-    print("  via extractor[0] :", m.value.parts[0].name)
+    print(" via extractor :", m.value.len(), "parts")
+    print(" via extractor[0] :", m.value.parts[0].name)
     print()
 
     print("=== Example 29 complete ===")

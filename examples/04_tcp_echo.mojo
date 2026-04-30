@@ -29,13 +29,13 @@ def main() raises:
     print("── 1. Bind + accept ──")
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = listener.local_addr().port
-    print("  Listening on 127.0.0.1:" + String(port))
+    print(" Listening on 127.0.0.1:" + String(port))
 
     var client = TcpStream.connect(SocketAddr.localhost(port))
     var server = listener.accept()
 
-    print("  client local addr : " + String(client.local_addr()))
-    print("  server peer  addr : " + String(server.peer_addr()))
+    print(" client local addr : " + String(client.local_addr()))
+    print(" server peer addr : " + String(server.peer_addr()))
     print()
 
     # ── 2. Bidirectional ping-pong ─────────────────────────────────────────────
@@ -43,19 +43,19 @@ def main() raises:
     var msg = String("hello, flare!")
     var payload = msg.as_bytes()
     client.write_all(Span[UInt8](payload))
-    print("  client → server: '" + msg + "'")
+    print(" client → server: '" + msg + "'")
 
     var buf = zero_buf(64)
     var n = server.read(buf.unsafe_ptr(), len(buf))
     var received = String(unsafe_from_utf8=buf[:n])
-    print("  server received : '" + received + "'")
+    print(" server received : '" + received + "'")
     assert_equal(received, msg)
 
     server.write_all(Span[UInt8](buf[:n]))
     var echo_buf = zero_buf(64)
     var n2 = client.read(echo_buf.unsafe_ptr(), len(echo_buf))
     var echoed = String(unsafe_from_utf8=echo_buf[:n2])
-    print("  client echo     : '" + echoed + "'")
+    print(" client echo : '" + echoed + "'")
     assert_equal(n2, n)
     print()
 
@@ -65,7 +65,7 @@ def main() raises:
     client.set_nodelay(False)
     client.set_keepalive(True)
     client.set_keepalive(False)
-    print("  set_nodelay / set_keepalive: OK")
+    print(" set_nodelay / set_keepalive: OK")
     print()
 
     # ── 4. Large payload (64 KiB) ─────────────────────────────────────────────
@@ -86,7 +86,7 @@ def main() raises:
             recv[total + i] = chunk[i]
         total += got
     assert_equal(total, 65536)
-    print("  transferred " + String(total) + " bytes OK")
+    print(" transferred " + String(total) + " bytes OK")
     print()
 
     # ── Cleanup ───────────────────────────────────────────────────────────────

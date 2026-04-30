@@ -1,5 +1,5 @@
 """Example 25 — TLS certificate reload without restart
-(v0.5.0 Step 3 / Track 5.3).
+().
 
 Production TLS deployments rotate certificates on a regular
 cadence (Let's Encrypt: 60-90 days; internal PKI: weeks). The
@@ -64,30 +64,28 @@ def main() raises:
     print("[1] Acceptor created against", acceptor.config.cert_file)
 
     # 2. Trigger a reload. In production this fires on a SIGHUP
-    #    signal handler, an inotify watch, or a cron-like timer.
-    #    Until the reactor follow-up, reload() is a no-op — but
-    #    deployments can wire the trigger today and the wiring
-    #    flips on without code changes when the implementation
-    #    lands.
+    # signal handler, an inotify watch, or a cron-like timer.
+    # Until the reactor follow-up, reload() is a no-op — but
+    # deployments can wire the trigger today and the wiring
+    # flips on without code changes when the implementation
+    # lands.
     print("[2] Triggering reload — reads cert + key from disk again")
     acceptor.reload()
-    print("    reload() returned cleanly (no-op until reactor follow-up)")
+    print(" reload() returned cleanly (no-op until reactor follow-up)")
 
     # 3. Show the SIGHUP-shaped trigger pattern handlers will
-    #    use once the SIGHUP helper lands. Pseudo-code today.
+    # use once the SIGHUP helper lands. Pseudo-code today.
     print()
     print("[3] Production trigger pattern (pseudo-code, deferred):")
-    print("    install_sighup_handler(lambda: acceptor.reload())")
-    print("    # ... server runs forever ...")
+    print(" install_sighup_handler(lambda: acceptor.reload())")
+    print(" # ... server runs forever ...")
     print()
     print(
-        "    The SIGHUP helper is blocked on Mojo's 'global"
+        " The SIGHUP helper is blocked on Mojo's 'global"
         " variables not supported'"
     )
-    print(
-        "    diagnostic, the same gap that blocks the SIGTERM drain helper from"
-    )
-    print("    Step 1. Both lift together once Mojo unblocks globals.")
+    print(" diagnostic, the same gap that blocks the SIGTERM drain helper from")
+    print(" Step 1. Both lift together once Mojo unblocks globals.")
     print()
 
     print("=== Example 25 complete ===")

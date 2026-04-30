@@ -107,16 +107,16 @@ def main() raises:
 
     print("1. encode→decode round-trip (10 000 trials)...")
     forall_bytes(roundtrip_safe, max_len=131, trials=10_000, seed=1)
-    print("   PASS: round-trip preserves payload\n")
+    print(" PASS: round-trip preserves payload\n")
 
     print("2. No over-read: consumed <= len(data) (20 000 trials)...")
     forall_bytes(no_over_read, max_len=256, trials=20_000, seed=2)
-    print("   PASS: decoder never reads past input\n")
+    print(" PASS: decoder never reads past input\n")
 
     print("3. Control frame payload <= 125 bytes (10 000 trials)...")
     forall_bytes(
         control_frame_payload_limit, max_len=200, trials=10_000, seed=3
     )
-    print("   PASS: control frame payload limit honoured\n")
+    print(" PASS: control frame payload limit honoured\n")
 
     print("All WebSocket properties hold!")

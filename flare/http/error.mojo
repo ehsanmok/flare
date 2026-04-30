@@ -26,7 +26,7 @@ struct HttpError(Copyable, Movable, Writable):
     Fields:
         status: The HTTP status code (e.g. 404, 500).
         reason: The HTTP reason phrase (e.g. ``"Not Found"``).
-        url:    The URL that returned the error (empty if unknown).
+        url: The URL that returned the error (empty if unknown).
 
     Example:
         ```mojo
@@ -44,7 +44,7 @@ struct HttpError(Copyable, Movable, Writable):
         Args:
             status: HTTP status code (e.g. 404).
             reason: HTTP reason phrase (e.g. ``"Not Found"``).
-            url:    URL that returned the error.
+            url: URL that returned the error.
         """
         self.status = status
         self.reason = reason
@@ -67,7 +67,7 @@ struct TooManyRedirects(Copyable, Movable, Writable):
     """Raised when a redirect chain exceeds the configured maximum.
 
     Fields:
-        url:   The URL at which the limit was reached.
+        url: The URL at which the limit was reached.
         count: The number of redirects that were followed.
 
     Example:
@@ -83,7 +83,7 @@ struct TooManyRedirects(Copyable, Movable, Writable):
         """Initialise a ``TooManyRedirects`` error.
 
         Args:
-            url:   The URL that caused the limit to be exceeded.
+            url: The URL that caused the limit to be exceeded.
             count: Number of redirects followed before giving up.
         """
         self.url = url

@@ -49,7 +49,7 @@ struct DatagramTooLarge(Copyable, Movable, Writable):
     """Raised when a UDP datagram exceeds the maximum allowed payload size.
 
     Fields:
-        size:     The datagram size in bytes that was rejected.
+        size: The datagram size in bytes that was rejected.
         max_size: The platform maximum (``65507`` bytes).
 
     Example:
@@ -65,7 +65,7 @@ struct DatagramTooLarge(Copyable, Movable, Writable):
         """Initialise a DatagramTooLarge error.
 
         Args:
-            size:     The requested datagram size.
+            size: The requested datagram size.
             max_size: The allowed maximum. Defaults to ``65507``.
         """
         self.size = size
@@ -96,7 +96,7 @@ struct UdpSocket(Movable):
     to create a send-only socket that the OS assigns a source port to.
 
     Thread safety:
-        Not thread-safe in v0.1.0.
+        Not thread-safe .
 
     Example:
         ```mojo
@@ -105,7 +105,7 @@ struct UdpSocket(Movable):
 
         # Receiver
         var recv = UdpSocket.bind(SocketAddr.localhost(5000))
-        var buf  = List[UInt8]()
+        var buf = List[UInt8]()
         buf.resize(1024, 0)
         var (n, from_addr) = recv.recv_from(Span[UInt8, _](buf))
         print("received", n, "bytes from", String(from_addr))
@@ -124,7 +124,7 @@ struct UdpSocket(Movable):
 
         Args:
             socket: An open UDP socket (ownership transferred).
-            local:  The bound address; use ``SocketAddr(IpAddr.unspecified(), 0)``
+            local: The bound address; use ``SocketAddr(IpAddr.unspecified(), 0)``
                     for an unbound socket.
 
         Safety:
@@ -228,7 +228,7 @@ struct UdpSocket(Movable):
 
         Raises:
             DatagramTooLarge: If ``len(data) > 65507``.
-            NetworkError:     For any OS send error.
+            NetworkError: For any OS send error.
 
         Example:
             ```mojo
@@ -273,7 +273,7 @@ struct UdpSocket(Movable):
             ``(n, sender_addr)`` where ``n`` is the number of bytes received.
 
         Raises:
-            Timeout:     If a recv timeout was set and expired.
+            Timeout: If a recv timeout was set and expired.
             NetworkError: For any other OS error.
 
         Example:

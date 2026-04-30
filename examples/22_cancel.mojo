@@ -7,10 +7,9 @@ reactor flips the cell on:
 - ``CancelReason.PEER_CLOSED`` — the client TCP-disconnected before
   the response was queued.
 - ``CancelReason.TIMEOUT`` — a per-request, per-handler, or
-  per-body-read deadline expired (wired in commit 5 of v0.5.0
-  Step 1).
+  per-body-read deadline expired.
 - ``CancelReason.SHUTDOWN`` — ``HttpServer.drain(timeout_ms)`` was
-  called (wired in commit 6 of v0.5.0 Step 1).
+  called.
 
 Cancellation is **cooperative**: the handler decides when it's safe
 to bail. flare doesn't preempt synchronous code (Mojo can't, and
@@ -99,7 +98,7 @@ def main() raises:
     var req = Request(method=Method.GET, url="/work")
     print("[1] SlowHandler with Cancel.never():")
     var resp1 = slow.serve(req^, Cancel.never())
-    print("    status =", resp1.status, "body =", resp1.text())
+    print(" status =", resp1.status, "body =", resp1.text())
     print()
 
     # Path 2: WithCancel[PlainGreeter] forwards a plain Handler.
@@ -107,11 +106,11 @@ def main() raises:
     var req2 = Request(method=Method.GET, url="/")
     var wrapped = WithCancel[PlainGreeter](inner=PlainGreeter("hi"))
     var resp2 = wrapped.serve(req2^, Cancel.never())
-    print("    status =", resp2.status, "body =", resp2.text())
+    print(" status =", resp2.status, "body =", resp2.text())
     print()
 
     # The reactor-driven path is:
-    #     HttpServer.serve_cancellable(slow^)
+    # HttpServer.serve_cancellable(slow^)
     # The reactor allocates a CancelCell per connection, hands a
     # Cancel handle bound to it into ``slow.serve(req, cancel)``,
     # and flips the cell on peer FIN, deadline (commit 5), or drain

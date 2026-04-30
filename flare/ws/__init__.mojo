@@ -14,11 +14,11 @@ from flare.ws import (
 )
 ```
 
-- `WsClient`        — WebSocket client: `connect`, `send`, `recv`, `close`.
-- `WsServer`        — WebSocket server: upgrades HTTP connections to WebSocket.
-- `WsFrame`         — A single WebSocket frame: `text`, `binary`, `ping`, `pong`, `close`.
-- `WsOpcode`        — Opcode byte constants (`TEXT`, `BINARY`, `PING`, `PONG`, `CLOSE`).
-- `WsCloseCode`     — Close status code constants (`NORMAL`, `GOING_AWAY`, …).
+- `WsClient` — WebSocket client: `connect`, `send`, `recv`, `close`.
+- `WsServer` — WebSocket server: upgrades HTTP connections to WebSocket.
+- `WsFrame` — A single WebSocket frame: `text`, `binary`, `ping`, `pong`, `close`.
+- `WsOpcode` — Opcode byte constants (`TEXT`, `BINARY`, `PING`, `PONG`, `CLOSE`).
+- `WsCloseCode` — Close status code constants (`NORMAL`, `GOING_AWAY`, …).
 - `WsProtocolError` — Raised on RFC 6455 protocol violations.
 - `WsHandshakeError` — Raised when the HTTP Upgrade handshake fails.
 
@@ -37,11 +37,11 @@ def main() raises:
     # Receive echo
     var frame = ws.recv()
     if frame.opcode == WsOpcode.TEXT:
-        print(frame.text_payload())  # hello, flare!
+        print(frame.text_payload()) # hello, flare!
 
     # Ping / pong
     _ = ws.send(WsFrame.ping())
-    var pong = ws.recv()             # WsOpcode.PONG
+    var pong = ws.recv() # WsOpcode.PONG
 
     # Clean close
     ws.close()

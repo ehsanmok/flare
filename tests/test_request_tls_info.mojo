@@ -1,5 +1,5 @@
 """Tests for ``Request.tls_info`` and ALPN advertisement
-(v0.5.0 Step 3 / Tracks 5.2 + 5.5).
+( / Tracks 5.2 + 5.5).
 
 Covers:
 
@@ -13,7 +13,7 @@ Covers:
   to handlers.
 
 The reactor-side handshake that actually populates ``tls_info``
-from a real TLS handshake lands as the v0.5.0 Step 3 follow-up;
+from a real TLS handshake lands as the follow-up;
 these tests cover the type plumbing that handlers can target
 today.
 """

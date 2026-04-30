@@ -1,4 +1,4 @@
-"""Tests for ``flare.http2.hpack`` (RFC 7541 codec, v0.6 — Track J).
+"""Tests for ``flare.http2.hpack`` (RFC 7541 codec, — Track J).
 
 Covers:
 
@@ -12,7 +12,7 @@ Covers:
 - Literal w/o Indexing leaves the dynamic table untouched.
 - Dynamic Table Size Update (§6.3) shrinks / preserves table.
 - Encoder + Decoder round-trip on a realistic request.
-- Huffman strings raise (we don't implement Huffman in v0.6).
+- Huffman strings raise (we don't implement Huffman in ).
 - Truncated inputs / pathological integer sizes raise rather than
   hang.
 """
@@ -152,7 +152,7 @@ def test_decode_literal_without_indexing() raises:
 
 
 def test_decode_huffman_raises() raises:
-    """We don't ship Huffman in v0.6 — encoder must use H=0 strings."""
+    """We don't ship Huffman in — encoder must use H=0 strings."""
     var dec = HpackDecoder()
     var b = List[UInt8]()
     b.append(UInt8(0x00))  # literal w/o indexing

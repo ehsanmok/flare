@@ -1,4 +1,4 @@
-"""Zero-copy HTTP request view (v0.5.0 Step 2 / Track 1.1).
+"""Zero-copy HTTP request view.
 
 ``RequestView[origin]`` borrows method, URL, headers, and body
 from the connection's ``read_buf`` rather than owning them. For a
@@ -15,7 +15,7 @@ Pieces in place after this commit:
   headers + body slice without per-header / per-token
   allocations.
 - ``RequestView.into_owned() raises -> Request`` materialises a
-  v0.4.x ``Request`` for handlers that need to keep request
+  ``Request`` for handlers that need to keep request
   state past one event-loop iteration.
 
 Pieces that **come later** (deferred to S3 follow-up — explicit
@@ -43,10 +43,10 @@ Example:
 
     var raw = "GET /a?q=1 HTTP/1.1\r\nHost: x\r\n\r\n".as_bytes()
     var view = parse_request_view(Span[UInt8, _](raw))
-    print(view.method)              # GET
-    print(view.url)                 # /a?q=1
+    print(view.method) # GET
+    print(view.url) # /a?q=1
     print(view.headers.get("Host")) # x
-    print(len(view.body))           # 0
+    print(len(view.body)) # 0
 
     # Materialise an owned ``Request`` if you need one:
     var owned = view.into_owned()
@@ -118,19 +118,19 @@ struct RequestView[origin: Origin](Movable):
     triggers.
 
     Fields:
-        method:        ASCII method token (``"GET"``, ``"POST"``,
+        method: ASCII method token (``"GET"``, ``"POST"``,
                        ...). Owned ``String``.
-        version:       HTTP version (``"HTTP/1.1"``). Owned.
-        peer:          Kernel-reported peer ``SocketAddr``.
+        version: HTTP version (``"HTTP/1.1"``). Owned.
+        peer: Kernel-reported peer ``SocketAddr``.
         expose_errors: Whether 4xx response bodies may echo
                        handler-error messages.
-        buf:           Underlying byte buffer borrowed from the
+        buf: Underlying byte buffer borrowed from the
                        caller (typically ``ConnHandle.read_buf``).
-        url_start / url_len:   Byte range of the request URL
+        url_start / url_len: Byte range of the request URL
                                within ``buf``.
         body_start / body_len: Byte range of the request body
                                within ``buf``.
-        header_offsets:        Flat ``List[Int]`` of stride 4
+        header_offsets: Flat ``List[Int]`` of stride 4
                                (name_start, name_len, value_start,
                                value_len) — the same shape
                                ``HeaderMapView`` uses internally.
@@ -197,7 +197,7 @@ struct RequestView[origin: Origin](Movable):
         return HeaderMapView[Self.origin](buf=self.buf, offsets=offsets_copy^)
 
     def into_owned(self) raises -> Request:
-        """Materialise a v0.4.x ``Request`` whose fields are owned
+        """Materialise a ``Request`` whose fields are owned
         copies of the borrowed bytes.
 
         Use when a handler needs to keep request state past one
@@ -252,15 +252,15 @@ def parse_request_view[
     allocation, no body copy. The body slice points into ``data``.
 
     Args:
-        data:            Raw HTTP/1.1 request bytes (request line +
+        data: Raw HTTP/1.1 request bytes (request line +
                          headers + body, terminated or not).
         max_header_size: Cap on header bytes; raises if exceeded.
-        max_body_size:   Cap on body length; raises if Content-Length
+        max_body_size: Cap on body length; raises if Content-Length
                          exceeds.
-        max_uri_length:  Cap on URI length; raises if exceeded.
-        peer:            Kernel-reported peer address; threaded onto
+        max_uri_length: Cap on URI length; raises if exceeded.
+        peer: Kernel-reported peer address; threaded onto
                          the view.
-        expose_errors:   Whether 4xx response bodies may echo handler
+        expose_errors: Whether 4xx response bodies may echo handler
                          error messages.
 
     Returns:

@@ -10,10 +10,10 @@ but ignored for request purposes (not sent to server per RFC 7230 §5.1).
 Example:
     ```mojo
     var u = Url.parse("https://api.example.com:8443/v1/items?filter=active")
-    print(u.host)   # api.example.com
-    print(u.port)   # 8443
-    print(u.path)   # /v1/items
-    print(u.query)  # filter=active
+    print(u.host) # api.example.com
+    print(u.port) # 8443
+    print(u.path) # /v1/items
+    print(u.query) # filter=active
     ```
 """
 
@@ -36,11 +36,11 @@ struct Url(Movable):
     """A parsed HTTP/HTTPS URL.
 
     Fields:
-        scheme:   ``"http"`` or ``"https"``.
-        host:     Hostname or IP, without brackets (IPv6 brackets stripped).
-        port:     Numeric port; defaults to 80 (http) or 443 (https).
-        path:     URL path including leading ``/``; ``"/"`` if absent.
-        query:    Query string without leading ``?``; ``""`` if absent.
+        scheme: ``"http"`` or ``"https"``.
+        host: Hostname or IP, without brackets (IPv6 brackets stripped).
+        port: Numeric port; defaults to 80 (http) or 443 (https).
+        path: URL path including leading ``/``; ``"/"`` if absent.
+        query: Query string without leading ``?``; ``""`` if absent.
         fragment: Fragment without leading ``#``; ``""`` if absent.
 
     This type is ``Movable`` but not ``Copyable``.
@@ -140,7 +140,7 @@ struct Url(Movable):
             path = "/"
 
         # ── 5. Host and port ──────────────────────────────────────────────────
-        # Strip optional userinfo (user:pass@) — we don't support auth in v0.1
+        # Strip optional userinfo (user:pass@) — we don't support auth.
         var at_pos = _find(authority, "@")
         if at_pos >= 0:
             authority = String(
@@ -267,7 +267,7 @@ def _parse_port(s: String, raw: String) raises -> Int:
     """Parse a decimal port string.
 
     Args:
-        s:   The port string (e.g. ``"8080"``).
+        s: The port string (e.g. ``"8080"``).
         raw: The original URL for error context.
 
     Returns:
@@ -278,7 +278,7 @@ def _parse_port(s: String, raw: String) raises -> Int:
     """
     if s.byte_length() == 0:
         raise UrlParseError("empty port in URL: " + raw)
-    # Port 1–65535 has at most 5 digits.  Reject longer strings to prevent
+    # Port 1–65535 has at most 5 digits. Reject longer strings to prevent
     # integer overflow in the accumulation loop below.
     if s.byte_length() > 5:
         raise UrlParseError("port too long in URL: " + raw)

@@ -1,5 +1,4 @@
-"""Streaming response serializer (v0.5.0 follow-up / Track 4
-part 2 / C5).
+"""Streaming response serializer.
 
 Renders a ``StreamingResponse[B: Body]`` to wire bytes per
 RFC 7230 §3 (status line + headers) + RFC 7230 §4.1 (chunked
@@ -9,7 +8,7 @@ plain Content-Length framing when it's known.
 The reactor's view-aware write loop (a focused follow-up) calls
 this serializer per writable edge to pull-and-write one chunk
 at a time. Callers that don't need the streaming benefit
-(every existing handler that returns a v0.4.x ``Response``)
+(every existing handler that returns a ``Response``)
 keep the buffer-then-send path through the existing
 ``_serialize_response`` in ``flare/http/_server_reactor_impl``.
 
@@ -181,10 +180,10 @@ def serialize_streaming_response[
     body (Content-Length or chunked framing).
 
     Args:
-        resp:       Streaming response with a ``Body`` impl.
+        resp: Streaming response with a ``Body`` impl.
                     Ownership transferred; the body is consumed
                     chunk by chunk.
-        cancel:     Per-request cancel token. The body's
+        cancel: Per-request cancel token. The body's
                     ``next_chunk(cancel)`` polls this; flipping
                     it mid-stream stops chunk emission cleanly
                     (chunked framing's terminator is still

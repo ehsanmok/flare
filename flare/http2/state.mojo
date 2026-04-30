@@ -20,7 +20,7 @@ which is the one entry point higher layers (the server reactor)
 call for every parsed frame. Returns a list of *outgoing* frames
 the caller must enqueue (e.g. SETTINGS ACK, RST_STREAM, GOAWAY).
 
-Connection-level concerns *not* implemented in v0.6:
+Connection-level concerns *not* implemented :
 
 - Priority dependency tree (deprecated by RFC 9113 §5.3.2 — frames
   are accepted and ignored).

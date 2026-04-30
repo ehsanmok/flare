@@ -1,5 +1,4 @@
-"""Live-handshake tests for TlsAcceptor (v0.5.0 follow-up /
-Tracks 5.2 + 5.3 + 5.4 / C8-C10 combined).
+"""Live-handshake tests for TlsAcceptor.
 
 C7 wired ``TlsAcceptor`` through to the C6 FFI:
 ``handshake_fd`` returns a live-populated ``TlsInfo`` (with the

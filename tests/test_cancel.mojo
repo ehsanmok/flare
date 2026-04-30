@@ -1,14 +1,14 @@
 """Tests for the Cancel token, CancelHandler trait, and WithCancel
-adapter (v0.5.0 Step 1).
+adapter.
 
-Closes criticism §2.1 at the integration level. The reactor's
+at the integration level. The reactor's
 peer-FIN / deadline / drain mechanics that flip the underlying cell
 are exercised here at the handler-call boundary (the production
 usage path); direct unit-level "flip-then-read on a fresh cell"
 tests are intentionally narrow because the Mojo nightly's pointer-
 load-after-write through ``UnsafePointer[Int, MutExternalOrigin]``
 behaves non-deterministically when several short-lived cells are
-allocated in close succession (a bug the v0.6 development cycle
+allocated in close succession (a bug the development cycle
 will revisit; the production usage path — single cell per
 connection, pass to handler, handler polls — passes consistently).
 

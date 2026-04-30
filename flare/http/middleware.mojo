@@ -1,4 +1,4 @@
-"""Generic middleware library for v0.6.
+"""Generic middleware library for .
 
 The ``Handler`` trait is already a perfectly good middleware
 abstraction: a middleware is a handler that wraps another handler.
@@ -185,7 +185,7 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
     break on brotli > gzip > identity (matches nginx default).
 
     Args:
-        accept:    Raw ``Accept-Encoding`` header value.
+        accept: Raw ``Accept-Encoding`` header value.
         brotli_ok: Whether brotli is linkable on this build.
 
     Returns:

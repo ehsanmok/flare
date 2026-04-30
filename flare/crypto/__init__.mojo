@@ -1,6 +1,6 @@
 """flare.crypto — minimal cryptographic primitives over the OpenSSL FFI.
 
-flare relies on OpenSSL 3.x for TLS already (see ``flare.tls``); the
+flare relies on OpenSSL 3 for TLS already (see ``flare.tls``); the
 same shared object (``libflare_tls.so``) hosts the few non-TLS
 primitives flare's HTTP layer needs — primarily the HMAC-SHA256
 construction that drives signed cookies and typed sessions

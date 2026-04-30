@@ -39,14 +39,14 @@ def main() raises:
         )
     )
     jar.set(Cookie("lang", "en"))
-    print("  Cookie:", jar.to_request_header())
+    print(" Cookie:", jar.to_request_header())
     print()
 
     # ── 2. Parse an incoming Cookie: header (as a server would) ─────────────
     print("── 2. Parse 'Cookie: id=42; lang=fr' ──")
     var pairs = parse_cookie_header("id=42; lang=fr")
     for i in range(len(pairs)):
-        print("  " + pairs[i].name + " = " + pairs[i].value)
+        print(" " + pairs[i].name + " = " + pairs[i].value)
     print()
 
     # ── 3. Parse a Set-Cookie: header (as a client would) ───────────────────
@@ -54,12 +54,12 @@ def main() raises:
     var set_cookie = parse_set_cookie_header(
         "id=42; Path=/; Max-Age=3600; Secure"
     )
-    print("  name     :", set_cookie.name)
-    print("  value    :", set_cookie.value)
-    print("  path     :", set_cookie.path)
-    print("  max_age  :", set_cookie.max_age)
-    print("  secure   :", set_cookie.secure)
-    print("  http_only:", set_cookie.http_only)
+    print(" name :", set_cookie.name)
+    print(" value :", set_cookie.value)
+    print(" path :", set_cookie.path)
+    print(" max_age :", set_cookie.max_age)
+    print(" secure :", set_cookie.secure)
+    print(" http_only:", set_cookie.http_only)
     print()
 
     print("=== Example 13 complete ===")

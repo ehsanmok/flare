@@ -303,7 +303,7 @@ def test_router_is_handler() raises:
     assert_equal(resp.text(), "home")
 
 
-# ── v0.5.0 Step 2 — Router accepts Handler structs (Track 1.4) ─────────────
+# ── — Router accepts Handler structs (Track 1.4) ─────────────
 
 # Tiny stateful Handler used by the struct-handler tests below.
 # The Router's `get[H]` / `post[H]` / etc. heap-allocate `H`,

@@ -267,7 +267,7 @@ def block_in_pool[
     returning the now-stale result.
 
     Args:
-        work:   Zero-arg callable returning ``T``.
+        work: Zero-arg callable returning ``T``.
         cancel: Per-request cancel token.
 
     Returns:

@@ -1,7 +1,6 @@
-"""Streaming response with a parametric body type (v0.5.0
-follow-up / Track 4 part 1 / C4).
+"""Streaming response with a parametric body type.
 
-``Response`` is the v0.4.x-shape buffered response: ``body:
+``Response`` is the -shape buffered response: ``body:
 List[UInt8]`` materialised before the first send. For
 unbounded / large / Server-Sent-Event style outputs that would
 defeat the buffer-then-send model, ``StreamingResponse[B: Body]``
@@ -80,11 +79,11 @@ struct StreamingResponse[B: Body](Movable):
     """An HTTP/1.1 response whose body is produced incrementally.
 
     Fields:
-        status:  HTTP status code (use ``Status.*`` constants).
-        reason:  Status reason phrase (e.g. ``"OK"``).
+        status: HTTP status code (use ``Status.*`` constants).
+        reason: Status reason phrase (e.g. ``"OK"``).
         headers: Response headers (owned ``HeaderMap``).
         version: HTTP version string (default ``"HTTP/1.1"``).
-        body:    The streaming body source. Must implement the
+        body: The streaming body source. Must implement the
                  ``Body`` trait. Common impls: ``InlineBody``
                  (single-chunk, ``Content-Length`` framing) and
                  ``ChunkedBody[Source]`` (multi-chunk,
@@ -124,9 +123,9 @@ struct StreamingResponse[B: Body](Movable):
         """Construct a streaming response.
 
         Args:
-            status:  HTTP status code.
-            body:    Streaming body (ownership transferred).
-            reason:  Status reason phrase. If empty, the reactor
+            status: HTTP status code.
+            body: Streaming body (ownership transferred).
+            reason: Status reason phrase. If empty, the reactor
                      will fill in a default from the status code.
             version: HTTP version string.
         """

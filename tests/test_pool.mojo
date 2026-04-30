@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime.Pool[T]`` (v0.5.0 Step 2 / Track 1.2).
+"""Tests for ``flare.runtime.Pool[T]``.
 
 Closes the user-visible portion of criticism §2.9: ``UnsafePointer``
 plumbing is confined to ``flare/runtime/`` (``Pool[T]``); the rest

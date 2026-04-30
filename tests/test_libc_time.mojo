@@ -1,5 +1,4 @@
-"""Tests for the rolled-own libc time FFI (v0.5.0 follow-up /
-Mojo workaround cleanup).
+"""Tests for the rolled-own libc time FFI.
 
 The pinned Mojo nightly has an empirically-observed anomaly when
 calling ``usleep`` via the inferred-signature overload of

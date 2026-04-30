@@ -1,4 +1,4 @@
-"""Tests for ``flare.crypto.hmac`` (v0.6 — track D).
+"""Tests for ``flare.crypto.hmac`` (— track D).
 
 Covers RFC 4231 vectors 1-4, constant-time verify, length mismatch,
 empty key/msg, and base64url round-trip.
@@ -46,7 +46,7 @@ def _bytes(s: String) -> List[UInt8]:
 
 
 def test_rfc4231_test_case_1() raises:
-    # Key  = 0x0b * 20, Data = "Hi There"
+    # Key = 0x0b * 20, Data = "Hi There"
     var key = _hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
     var msg = _bytes("Hi There")
     var got = hmac_sha256(key, msg)
@@ -59,7 +59,7 @@ def test_rfc4231_test_case_1() raises:
 
 
 def test_rfc4231_test_case_2() raises:
-    # Key  = "Jefe", Data = "what do ya want for nothing?"
+    # Key = "Jefe", Data = "what do ya want for nothing?"
     var key = _bytes("Jefe")
     var msg = _bytes("what do ya want for nothing?")
     var got = hmac_sha256(key, msg)

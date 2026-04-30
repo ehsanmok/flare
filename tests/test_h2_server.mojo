@@ -1,4 +1,4 @@
-"""End-to-end driver tests for ``flare.http2.server`` (v0.6 — Track J).
+"""End-to-end driver tests for ``flare.http2.server``.
 
 Drives an :class:`H2Connection` synchronously: feeds the RFC 9113
 preface + a single GET request frame, takes the parsed

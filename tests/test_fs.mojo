@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.fs`` (v0.6 — track H, FileServer + Range).
+"""Tests for ``flare.http.fs`` (— track H, FileServer + Range).
 
 Covers:
 

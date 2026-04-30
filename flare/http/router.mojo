@@ -15,8 +15,7 @@ Unknown paths return **404 Not Found**; known paths called with the
 wrong method return **405 Method Not Allowed** with a synthesised
 ``Allow:`` header listing the supported methods.
 
-Sub-router mounting (``mount(prefix, sub)``) is scheduled for v0.4.1
-once the ownership model for nested routers is settled; the current
+Sub-router mounting (``mount(prefix, sub)``) is scheduled for once the ownership model for nested routers is settled; the current
 Router is a flat map from ``(method, path)`` to handler.
 
 Example:
@@ -32,15 +31,15 @@ def get_user(req: Request) raises -> Response:
 
 def main() raises:
     var r = Router()
-    r.get("/",           home)
-    r.get("/users/:id",  get_user)
+    r.get("/", home)
+    r.get("/users/:id", get_user)
 
     # `r` is a Handler; pass it to HttpServer.serve.
 ```
 
 This first release uses a simple runtime match (linear scan per depth
 plus a per-entry segment compare). A compile-time trie lives on the
-v0.4.1 roadmap; the public Router API will not change when the trie
+roadmap; the public Router API will not change when the trie
 lands, only the internal representation.
 """
 
@@ -141,7 +140,7 @@ wrapped in ``FnHandler``. ``handler_idx`` indexes into
 
 comptime _ROUTE_KIND_STRUCT: Int = 1
 """Route handler is an arbitrary ``H: Handler`` struct
-(v0.5.0 Step 2). ``handler_idx`` indexes into
+(). ``handler_idx`` indexes into
 ``Router._struct_handlers``; the struct lives behind a
 heap-allocated opaque pointer with monomorphised serve / destroy
 thunks (see ``_StructHandler``)."""
@@ -171,7 +170,7 @@ struct _Route(Copyable, Movable):
         self.handler_idx = handler_idx
 
 
-# ── Struct-handler boxing (v0.5.0 Step 2 / Track 1.4) ───────────────────────
+# ── Struct-handler boxing ───────────────────────
 
 # Mojo can't yet store heterogeneous ``H: Handler`` structs in a
 # single ``List``, so we type-erase via a heap-allocated opaque
@@ -236,7 +235,7 @@ struct Router(Handler):
     (wrapped internally in ``FnHandler``) **and** arbitrary
     ``H: Handler & Copyable & Movable`` structs (boxed via
     ``_StructHandler`` with monomorphised serve / destroy thunks)
-    since v0.5.0 Step 2 (Track 1.4). Use the latter to register
+    since (Track 1.4). Use the latter to register
     ``Extracted[H]()``, app-state-bearing handlers, middleware
     wrappers, and any other stateful Handler.
 
@@ -248,7 +247,7 @@ struct Router(Handler):
     Example:
         ```mojo
         var r = Router()
-        r.get("/", home)                         # def(Request)
+        r.get("/", home) # def(Request)
         r.get("/users/:id", Extracted[GetUser]()) # Handler struct
         ```
     """
@@ -301,7 +300,7 @@ struct Router(Handler):
         """Register ``handler`` for ``GET path``.
 
         Args:
-            path:    Route pattern (e.g. ``"/users/:id"``).
+            path: Route pattern (e.g. ``"/users/:id"``).
             handler: The function to call on a match.
         """
         self._add_fn(Method.GET, path, handler)
@@ -358,7 +357,7 @@ struct Router(Handler):
             _Route(method, segs^, _ROUTE_KIND_FN, len(self._handlers) - 1)
         )
 
-    # ── Registration per method (Handler-struct overloads, v0.5.0 Step 2) ──
+    # ── Registration per method (Handler-struct overloads, ) ──
 
     def get[
         H: Handler & Copyable & Movable
@@ -376,7 +375,7 @@ struct Router(Handler):
         overload above continues to work unchanged.
 
         Args:
-            path:    Route pattern (e.g. ``"/users/:id"``).
+            path: Route pattern (e.g. ``"/users/:id"``).
             handler: A ``Handler & Copyable & Movable`` instance;
                      ownership transfers into the Router (the
                      Router owns the heap allocation and frees it
@@ -428,10 +427,10 @@ struct Router(Handler):
         destroy thunks, append to the route + struct-handler
         tables.
 
-        Per the v0.5.0 follow-up cleanup, this routes through
+        Per the follow-up cleanup, this routes through
         ``Pool[H]`` rather than reaching into ``alloc[H]``
         directly — keeps the unsafe-pointer plumbing confined to
-        ``flare/runtime/`` and drops the v0.5.0 Step 2 ``_Boxed[H]``
+        ``flare/runtime/`` and drops the ``_Boxed[H]``
         1-byte phantom pad now that ``size_of`` is public.
         """
         var segs = _compile_segments(path)

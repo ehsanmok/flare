@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.cors`` (v0.6 — track G).
+"""Tests for ``flare.http.cors`` (— track G).
 
 Covers:
 

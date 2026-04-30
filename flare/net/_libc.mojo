@@ -108,7 +108,7 @@ comptime SO_BROADCAST: c_int = c_int(
 )
 
 # ── pollfd struct size ─────────────────────────────────────────────────────────
-# struct pollfd { int fd; short events; short revents; }  = 8 bytes
+# struct pollfd { int fd; short events; short revents; } = 8 bytes
 comptime POLLFD_SIZE: Int = 8
 
 # ── getaddrinfo ───────────────────────────────────────────────────────────────
@@ -123,26 +123,26 @@ comptime NI_MAXSERV: Int = 32
 # Field order differs between macOS (BSD) and Linux:
 #
 # macOS (BSD) – ai_canonname before ai_addr:
-#   ai_flags     : int32     @ 0
-#   ai_family    : int32     @ 4
-#   ai_socktype  : int32     @ 8
-#   ai_protocol  : int32     @ 12
-#   ai_addrlen   : uint32    @ 16
-#   (pad 4 bytes)            @ 20
-#   ai_canonname : *char     @ 24
-#   ai_addr      : *sockaddr @ 32
-#   ai_next      : *addrinfo @ 40   total = 48 bytes
+# ai_flags : int32 @ 0
+# ai_family : int32 @ 4
+# ai_socktype : int32 @ 8
+# ai_protocol : int32 @ 12
+# ai_addrlen : uint32 @ 16
+# (pad 4 bytes) @ 20
+# ai_canonname : *char @ 24
+# ai_addr : *sockaddr @ 32
+# ai_next : *addrinfo @ 40 total = 48 bytes
 #
 # Linux – ai_addr before ai_canonname:
-#   ai_flags     : int32     @ 0
-#   ai_family    : int32     @ 4
-#   ai_socktype  : int32     @ 8
-#   ai_protocol  : int32     @ 12
-#   ai_addrlen   : uint32    @ 16
-#   (pad 4 bytes)            @ 20
-#   ai_addr      : *sockaddr @ 24
-#   ai_canonname : *char     @ 32
-#   ai_next      : *addrinfo @ 40   total = 48 bytes
+# ai_flags : int32 @ 0
+# ai_family : int32 @ 4
+# ai_socktype : int32 @ 8
+# ai_protocol : int32 @ 12
+# ai_addrlen : uint32 @ 16
+# (pad 4 bytes) @ 20
+# ai_addr : *sockaddr @ 24
+# ai_canonname : *char @ 32
+# ai_next : *addrinfo @ 40 total = 48 bytes
 comptime ADDRINFO_AI_FAMILY_OFF: Int = 4
 comptime ADDRINFO_AI_SOCKTYPE_OFF: Int = 8
 comptime ADDRINFO_AI_ADDRLEN_OFF: Int = 16
@@ -198,8 +198,8 @@ def _fill_sockaddr_in(
     """Populate a 16-byte IPv4 ``sockaddr_in`` buffer in-place.
 
     Args:
-        buf:      Caller-allocated 16-byte uninitialized buffer.
-        port:     Port in host byte order; stored as big-endian.
+        buf: Caller-allocated 16-byte uninitialized buffer.
+        port: Port in host byte order; stored as big-endian.
         ip_bytes: 4-byte IPv4 address in network byte order (from
                   ``inet_pton``).
 
@@ -239,15 +239,15 @@ def _fill_sockaddr_in6(
     """Populate a 28-byte IPv6 ``sockaddr_in6`` buffer in-place.
 
     Layout (28 bytes):
-        - [0-1]   sin6_family (AF_INET6) — BSD: [len, family]; Linux: [family_lo, family_hi]
-        - [2-3]   sin6_port (big-endian)
-        - [4-7]   sin6_flowinfo (zeroed)
-        - [8-23]  sin6_addr (16-byte IPv6 address, from ``inet_pton``)
+        - [0-1] sin6_family (AF_INET6) — BSD: [len, family]; Linux: [family_lo, family_hi]
+        - [2-3] sin6_port (big-endian)
+        - [4-7] sin6_flowinfo (zeroed)
+        - [8-23] sin6_addr (16-byte IPv6 address, from ``inet_pton``)
         - [24-27] sin6_scope_id (zeroed)
 
     Args:
-        buf:      Caller-allocated 28-byte buffer.
-        port:     Port in host byte order; stored as big-endian.
+        buf: Caller-allocated 28-byte buffer.
+        port: Port in host byte order; stored as big-endian.
         ip_bytes: 16-byte IPv6 address in network byte order.
 
     Safety:
@@ -597,8 +597,8 @@ def _poll(
     """Wrapper around ``poll(2)``.
 
     Args:
-        fds:        Pointer to an array of ``pollfd`` structs (8 bytes each).
-        nfds:       Number of entries in ``fds``.
+        fds: Pointer to an array of ``pollfd`` structs (8 bytes each).
+        nfds: Number of entries in ``fds``.
         timeout_ms: Milliseconds to wait; -1 = infinite, 0 = immediate.
 
     Returns:
@@ -617,13 +617,13 @@ def _getaddrinfo(
 ) -> c_int:
     """Wrapper around ``getaddrinfo(3)``.
 
-    Resolves *host* with no service constraint (port is not set).  The caller
+    Resolves *host* with no service constraint (port is not set). The caller
     must pass a zero-initialised 48-byte hints buffer and an 8-byte slot to
     receive the ``addrinfo*`` result pointer.
 
     Args:
-        host:     Hostname or numeric IP string to resolve.
-        hints:    Pointer to a 48-byte zero-initialised ``addrinfo`` buffer;
+        host: Hostname or numeric IP string to resolve.
+        hints: Pointer to a 48-byte zero-initialised ``addrinfo`` buffer;
                   caller sets ``ai_socktype`` before calling.
         res_slot: Pointer to an 8-byte zero-initialised slot; on success this
                   receives the linked-list head pointer.
@@ -646,7 +646,7 @@ def _freeaddrinfo(head: Int):
 
     Args:
         head: Integer address of the ``addrinfo`` linked-list head returned by
-              ``getaddrinfo``.  Passing 0 is a no-op.
+              ``getaddrinfo``. Passing 0 is a no-op.
     """
     if head == 0:
         return
@@ -681,8 +681,8 @@ def _inet_pton(
 
     Args:
         family: ``AF_INET`` or ``AF_INET6``.
-        src:    Human-readable IP address string.
-        dst:    Output buffer (4 bytes for AF_INET, 16 for AF_INET6).
+        src: Human-readable IP address string.
+        dst: Output buffer (4 bytes for AF_INET, 16 for AF_INET6).
 
     Returns:
         1 on success, 0 if the input is not valid, -1 on error.
@@ -705,12 +705,12 @@ def _inet_pton(
 # Platform struct-layout quirks (important):
 #
 # 1. ``struct epoll_event`` on Linux is PACKED on x86_64 (12 bytes, data at
-#    offset 4) but NATURALLY ALIGNED on aarch64 (16 bytes, data at offset 8).
-#    See glibc's ``EPOLL_PACKED`` macro. ``EPOLL_EVENT_SIZE`` and
-#    ``EPOLL_DATA_OFFSET`` below handle both.
+# offset 4) but NATURALLY ALIGNED on aarch64 (16 bytes, data at offset 8).
+# See glibc's ``EPOLL_PACKED`` macro. ``EPOLL_EVENT_SIZE`` and
+# ``EPOLL_DATA_OFFSET`` below handle both.
 #
 # 2. ``struct kevent`` on macOS is 32 bytes (ident=8, filter=2, flags=2,
-#    fflags=4, data=8, udata=8). Same on both arm64 and x86_64 macOS.
+# fflags=4, data=8, udata=8). Same on both arm64 and x86_64 macOS.
 
 # ── Epoll constants (Linux) ──────────────────────────────────────────────────
 # Event bits (ORed into ``epoll_event.events``).
@@ -791,8 +791,8 @@ def _epoll_event_set(
     The caller must provide a ``EPOLL_EVENT_SIZE``-byte buffer.
 
     Args:
-        buf:      Pointer to uninitialised epoll_event buffer.
-        events:   ``EPOLLIN | EPOLLOUT | EPOLLET | ...`` bitmask.
+        buf: Pointer to uninitialised epoll_event buffer.
+        events: ``EPOLLIN | EPOLLOUT | EPOLLET | ...`` bitmask.
         data_u64: Token stored in ``data.u64`` (used by reactor as its
                   per-fd opaque handle).
     """
@@ -857,14 +857,14 @@ def _kevent_set(
     """Populate one ``struct kevent`` in-place.
 
     Args:
-        buf:    Pointer to ``KEVENT_SIZE``-byte buffer.
-        ident:  Identifier (usually an fd).
+        buf: Pointer to ``KEVENT_SIZE``-byte buffer.
+        ident: Identifier (usually an fd).
         filter: ``EVFILT_READ``, ``EVFILT_WRITE``, ``EVFILT_TIMER``,
                 ``EVFILT_USER``.
-        flags:  ``EV_ADD | EV_ENABLE | EV_ONESHOT | ...``.
+        flags: ``EV_ADD | EV_ENABLE | EV_ONESHOT | ...``.
         fflags: Filter-specific flags (e.g. ``NOTE_TRIGGER`` for EVFILT_USER).
-        data:   Filter-specific data (e.g. timer duration).
-        udata:  User token, stored in ``udata`` field.
+        data: Filter-specific data (e.g. timer duration).
+        udata: User token, stored in ``udata`` field.
     """
     # ident: 8 bytes LE
     for i in range(8):
@@ -968,9 +968,9 @@ def _epoll_ctl(
     """Wrapper around ``epoll_ctl(2)``.
 
     Args:
-        epfd:  epoll fd from ``epoll_create1``.
-        op:    ``EPOLL_CTL_ADD``, ``EPOLL_CTL_MOD``, or ``EPOLL_CTL_DEL``.
-        fd:    Target fd to register/modify/remove.
+        epfd: epoll fd from ``epoll_create1``.
+        op: ``EPOLL_CTL_ADD``, ``EPOLL_CTL_MOD``, or ``EPOLL_CTL_DEL``.
+        fd: Target fd to register/modify/remove.
         event: Pointer to a populated ``epoll_event`` buffer (ignored for
                ``EPOLL_CTL_DEL`` but kernel still expects non-NULL on some
                kernels; pass a valid buffer even for DEL).
@@ -993,10 +993,10 @@ def _epoll_wait(
     """Wrapper around ``epoll_wait(2)``.
 
     Args:
-        epfd:       epoll fd.
-        events:     Pointer to an array of ``maxevents`` ``epoll_event``
+        epfd: epoll fd.
+        events: Pointer to an array of ``maxevents`` ``epoll_event``
                     structs (each ``EPOLL_EVENT_SIZE`` bytes).
-        maxevents:  Maximum events to return; must be > 0.
+        maxevents: Maximum events to return; must be > 0.
         timeout_ms: Milliseconds to block; -1 blocks indefinitely, 0 polls.
 
     Returns:
@@ -1053,13 +1053,13 @@ def _kevent(
     placeholder so the Mojo module still type-checks there.
 
     Args:
-        kq:         kqueue fd.
+        kq: kqueue fd.
         changelist: Pointer to array of changes (kevent structs). May be
                     NULL (pass stack_allocation base) if ``nchanges == 0``.
-        nchanges:   Number of entries in ``changelist``.
-        eventlist:  Pointer to output array for received events.
-        nevents:    Max events to receive.
-        timeout:    Pointer to ``struct timespec`` (16 bytes: tv_sec + tv_nsec).
+        nchanges: Number of entries in ``changelist``.
+        eventlist: Pointer to output array for received events.
+        nevents: Max events to receive.
+        timeout: Pointer to ``struct timespec`` (16 bytes: tv_sec + tv_nsec).
                     Pass NULL for infinite, or a populated timespec for
                     bounded wait.
 
@@ -1095,7 +1095,7 @@ def _eventfd(initval: c_uint, flags: c_int) -> c_int:
 
     Args:
         initval: Initial value of the internal counter.
-        flags:   ``EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE``.
+        flags: ``EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE``.
 
     Returns:
         New eventfd on success, -1 on error.
@@ -1135,24 +1135,24 @@ def _pipe(fds: UnsafePointer[c_int, _]) -> c_int:
 #
 # Both platforms load the library on demand via ``OwnedDLHandle``:
 #
-# - macOS:  SIP blocks ``DYLD_INSERT_LIBRARIES`` for non-signed binaries,
-#           so a preload-style injection is impossible.
-# - Linux:  Mojo's JIT symbol resolver does **not** look at
-#           ``LD_PRELOAD``ed globals — it only searches the small set of
-#           shared objects it opened itself. So even on Linux we must
-#           ``dlopen`` via ``OwnedDLHandle`` to get a callable pointer.
+# - macOS: SIP blocks ``DYLD_INSERT_LIBRARIES`` for non-signed binaries,
+# so a preload-style injection is impossible.
+# - Linux: Mojo's JIT symbol resolver does **not** look at
+# ``LD_PRELOAD``ed globals — it only searches the small set of
+# shared objects it opened itself. So even on Linux we must
+# ``dlopen`` via ``OwnedDLHandle`` to get a callable pointer.
 #
 # Two call shapes are provided:
 #
 # * ``FlareRawIO`` — a cached handle + function-pointer struct. Owners
-#   (like ``Reactor``) construct one at init time and call
-#   ``io.read() / io.write()`` on the hot path. No dlopen/dlsym per
-#   call. Pattern lifted straight from
-#   ``ehsanmok/json``'s ``SimdjsonFFI``.
+# (like ``Reactor``) construct one at init time and call
+# ``io.read() / io.write()`` on the hot path. No dlopen/dlsym per
+# call. Pattern lifted straight from
+# ``ehsanmok/json``'s ``SimdjsonFFI``.
 # * ``_read_fd`` / ``_write_fd`` — thin module-level helpers that open
-#   the library per call. Convenient for one-off use from tests and
-#   non-hot-path call sites; do **not** use in anything that runs
-#   per-request or per-wakeup.
+# the library per call. Convenient for one-off use from tests and
+# non-hot-path call sites; do **not** use in anything that runs
+# per-request or per-wakeup.
 
 
 def _find_flare_lib_for_io() -> String:

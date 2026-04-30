@@ -15,10 +15,10 @@ Real-world usage:
             var frame = conn.recv()
             if frame.opcode == WsOpcode.CLOSE:
                 break
-            conn.send_text(frame.text_payload())  # echo
+            conn.send_text(frame.text_payload()) # echo
 
     var srv = WsServer.bind(SocketAddr.localhost(9001))
-    srv.serve(on_connect)   # ← blocks indefinitely
+    srv.serve(on_connect) # ← blocks indefinitely
 
 Here we drive the server one connection at a time using the internal
 helpers (_read_upgrade_request, _compute_accept_srv, _send_upgrade_response)
@@ -118,7 +118,7 @@ def recv_raw(mut stream: TcpStream, n: Int) raises -> List[UInt8]:
 
     Args:
         stream: TCP stream to read from.
-        n:      Number of bytes to read.
+        n: Number of bytes to read.
 
     Returns:
         A List[UInt8] with the received bytes.
@@ -144,7 +144,7 @@ def accept_and_upgrade(
     """Accept one TCP connection and perform the WebSocket handshake.
 
     Args:
-        srv:        Bound WsServer.
+        srv: Bound WsServer.
         raw_client: Raw TCP client that sent the upgrade request.
 
     Returns:
@@ -169,7 +169,7 @@ def main() raises:
     print("── 1. Bind WsServer ──")
     var srv = WsServer.bind(SocketAddr.localhost(0))
     var port = srv.local_addr().port
-    print("  Bound on 127.0.0.1:" + String(port))
+    print(" Bound on 127.0.0.1:" + String(port))
     print()
 
     # ── 2. Handshake: 101 Switching Protocols ─────────────────────────────────
@@ -178,7 +178,7 @@ def main() raises:
     send_upgrade_request(client1)
     var conn1 = accept_and_upgrade(srv, client1)
     var status_line = drain_101(client1)
-    print("  Server response: " + status_line)
+    print(" Server response: " + status_line)
     print()
 
     # ── 3. Server receives masked TEXT, echoes back ───────────────────────────
@@ -188,15 +188,15 @@ def main() raises:
     client1.write_all(Span[UInt8, _](wire))
 
     var received = conn1.recv()
-    print("  Server received opcode:", received.opcode, "(expect 1 = TEXT)")
-    print("  Payload:", received.text_payload())
+    print(" Server received opcode:", received.opcode, "(expect 1 = TEXT)")
+    print(" Payload:", received.text_payload())
 
     conn1.send_text("echo: " + received.text_payload())
 
     # Client reads the unmasked server frame
     var echo_bytes = recv_raw(client1, 64)
     print(
-        "  Client received",
+        " Client received",
         len(echo_bytes),
         "bytes from server (unmasked)",
     )
@@ -218,11 +218,11 @@ def main() raises:
     client2.write_all(Span[UInt8, _](bin_wire))
 
     var bin_received = conn2.recv()
-    print("  opcode:", bin_received.opcode, "(expect 2 = BINARY)")
-    print("  payload bytes:", len(bin_received.payload))
+    print(" opcode:", bin_received.opcode, "(expect 2 = BINARY)")
+    print(" payload bytes:", len(bin_received.payload))
     conn2.send_binary(bin_received.payload)  # echo
     _ = recv_raw(client2, 16)
-    print("  BINARY echo complete")
+    print(" BINARY echo complete")
     print()
 
     # ── 5. Server sends PING, expects PONG from client ────────────────────────
@@ -235,7 +235,7 @@ def main() raises:
     conn3.send_frame(WsFrame.ping())
     # Client receives PING and should PONG back
     var ping_bytes = recv_raw(client3, 2)
-    print("  Client got PING bytes:", len(ping_bytes))
+    print(" Client got PING bytes:", len(ping_bytes))
 
     # Send PONG from client
     var pong_wire = WsFrame.pong().encode(mask=True)
@@ -245,7 +245,7 @@ def main() raises:
     var dummy_wire = dummy.encode(mask=True)
     client3.write_all(Span[UInt8, _](dummy_wire))
     var done_frame = conn3.recv()
-    print("  Received after PONG:", done_frame.text_payload())
+    print(" Received after PONG:", done_frame.text_payload())
     print()
 
     # ── 6. Graceful close from server ─────────────────────────────────────────
@@ -256,19 +256,19 @@ def main() raises:
     _ = drain_101(client4)
 
     conn4.close(WsCloseCode.NORMAL)
-    print("  Server sent CLOSE frame with code NORMAL (1000)")
+    print(" Server sent CLOSE frame with code NORMAL (1000)")
 
     # Client reads the CLOSE frame
     var close_bytes = recv_raw(client4, 8)
-    print("  Client received", len(close_bytes), "bytes (CLOSE frame)")
+    print(" Client received", len(close_bytes), "bytes (CLOSE frame)")
     print()
 
     # ── 7. WsServer.bind() + serve() pattern ─────────────────────────────────
     print("── 7. WsServer.bind() + serve() pattern ──")
     var srv2 = WsServer.bind(SocketAddr.localhost(0))
-    print("  WsServer.bind() → " + String(srv2.local_addr()))
+    print(" WsServer.bind() → " + String(srv2.local_addr()))
     print(
-        "  In production: srv2.serve(on_connect)  ← blocks, handles all"
+        " In production: srv2.serve(on_connect) ← blocks, handles all"
         " connections"
     )
     print()

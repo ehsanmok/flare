@@ -1,4 +1,4 @@
-"""Tests for ``flare.http2.state`` (RFC 9113 state machines, v0.6 — Track J).
+"""Tests for ``flare.http2.state`` (RFC 9113 state machines, — Track J).
 
 Covers:
 

@@ -2,26 +2,26 @@
 
 Frame wire format (§5.2):
 
-    0                   1                   2                   3
+    0 1 2 3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-------+-+-------------+-------------------------------+
-   |F|R|R|R| opcode|M| Payload len |    Extended payload length    |
-   |I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
-   |N|V|V|V|       |S|             |   (if payload len==126/127)   |
-   | |1|2|3|       |K|             |                               |
+   |F|R|R|R| opcode|M| Payload len | Extended payload length |
+   |I|S|S|S| (4) |A| (7) | (16/64) |
+   |N|V|V|V| |S| | (if payload len==126/127) |
+   | |1|2|3| |K| | |
    +-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - -+
-   |     Extended payload length continued, if payload len == 127  |
+   | Extended payload length continued, if payload len == 127 |
    + - - - - - - - - - - - - - - -+-------------------------------+
-   |                               |Masking-key, if MASK set to 1  |
+   | |Masking-key, if MASK set to 1 |
    +-------------------------------+-------------------------------+
-   | Masking-key (continued)       |          Payload Data         |
+   | Masking-key (continued) | Payload Data |
    +-------------------------------- - - - - - - - - - - - - - - -+
-   :                     Payload Data continued ...                :
+   : Payload Data continued ... :
    +---------------------------------------------------------------+
 
 Masking (§5.3):
     Every client→server frame payload byte is XOR'd with a rotating
-    4-byte masking key.  Server→client frames MUST NOT be masked.
+    4-byte masking key. Server→client frames MUST NOT be masked.
     This implementation uses SIMD-32 masking for payloads ≥ 64 bytes.
 """
 
@@ -111,16 +111,16 @@ struct WsFrame(Movable, Writable):
     Owns the payload buffer.
 
     Fields:
-        fin:     True if this is the final fragment of a message.
-        rsv1:    Extension bit RSV1 (must be False unless extension negotiated).
-        opcode:  Frame opcode (see ``WsOpcode.*``).
-        masked:  True if the payload was masked on the wire (client→server only).
+        fin: True if this is the final fragment of a message.
+        rsv1: Extension bit RSV1 (must be False unless extension negotiated).
+        opcode: Frame opcode (see ``WsOpcode.*``).
+        masked: True if the payload was masked on the wire (client→server only).
         payload: The unmasked payload bytes.
 
     Example:
         ```mojo
         var frame = WsFrame.text("hello")
-        var wire = frame.encode(mask=True)  # client sending to server
+        var wire = frame.encode(mask=True) # client sending to server
         ```
     """
 
@@ -203,7 +203,7 @@ struct WsFrame(Movable, Writable):
         """Create a CLOSE control frame.
 
         Args:
-            code:   Close status code (see ``WsCloseCode.*``).
+            code: Close status code (see ``WsCloseCode.*``).
             reason: UTF-8 reason phrase (≤123 bytes after encoding).
 
         Returns:
@@ -257,7 +257,7 @@ struct WsFrame(Movable, Writable):
 
         Args:
             mask: True to apply the masking key.
-            key:  The 4-byte masking key (ignored when ``mask=False``).
+            key: The 4-byte masking key (ignored when ``mask=False``).
 
         Returns:
             The complete frame bytes.
@@ -349,7 +349,7 @@ struct WsFrame(Movable, Writable):
         Raises:
             WsProtocolError: If the frame violates RFC 6455 (bad RSV bits,
                              fragmented control frame, etc.).
-            Error:           If ``data`` is too short to contain a complete frame.
+            Error: If ``data`` is too short to contain a complete frame.
         """
         var n = len(data)
         if n < 2:
@@ -571,9 +571,9 @@ def _append_masked(
     Uses SIMD-32 for chunks ≥ ``_SIMD_W`` bytes; scalar for the tail.
 
     Args:
-        out:     Destination list to append masked bytes into.
+        out: Destination list to append masked bytes into.
         payload: Unmasked payload bytes.
-        key:     4-byte masking key.
+        key: 4-byte masking key.
     """
     var n = len(payload)
     var src = payload.unsafe_ptr()

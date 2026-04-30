@@ -45,7 +45,7 @@ struct TcpListener(Movable):
     The listener is closed automatically when the struct is destroyed.
 
     Thread safety:
-        Not thread-safe in v0.1.0. Do not call ``accept()`` concurrently.
+        Not thread-safe . Do not call ``accept()`` concurrently.
 
     Example:
         ```mojo
@@ -53,7 +53,7 @@ struct TcpListener(Movable):
         from flare.net import SocketAddr
 
         var listener = TcpListener.bind(SocketAddr.localhost(8080))
-        var stream = listener.accept()  # blocks until a client connects
+        var stream = listener.accept() # blocks until a client connects
         stream.write_all("welcome".as_bytes())
         ```
     """
@@ -66,7 +66,7 @@ struct TcpListener(Movable):
 
         Args:
             socket: Open, listening socket (ownership transferred).
-            local:  The address the socket was bound to.
+            local: The address the socket was bound to.
 
         Safety:
             ``socket`` must already be in the listening state (``listen(2)``
@@ -112,8 +112,8 @@ struct TcpListener(Movable):
         """Bind with explicit backlog and ``SO_REUSEPORT`` control.
 
         Args:
-            addr:       The local address to bind.
-            backlog:    Maximum length of the pending-connections queue.
+            addr: The local address to bind.
+            backlog: Maximum length of the pending-connections queue.
             reuse_port: If ``True``, set ``SO_REUSEPORT`` (useful for
                         multi-process load balancing).
 
@@ -213,7 +213,7 @@ struct TcpListener(Movable):
     def as_raw_fd(self) -> c_int:
         """Return the underlying file descriptor.
 
-        Intended for the v0.6 shared-listener scheduler: bind once on
+        Intended for the shared-listener scheduler: bind once on
         the main thread, then hand the fd (a small integer) to every
         worker via the per-worker context struct. Workers call
         ``flare.tcp.accept_fd`` directly rather than touching the
@@ -239,7 +239,7 @@ def accept_fd(listener_fd: c_int) raises -> TcpStream:
     Functionally equivalent to ``TcpListener.accept(self)`` but takes
     the listener as a raw integer fd, so the caller can share a single
     listener across multiple workers without giving any one worker
-    ownership of the underlying ``TcpListener`` (v0.6 multi-worker
+    ownership of the underlying ``TcpListener`` (multi-worker
     scheduler path; see ``flare.runtime.scheduler``).
 
     The returned ``TcpStream`` owns the accepted client fd and has

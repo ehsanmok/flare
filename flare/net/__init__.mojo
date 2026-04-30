@@ -19,16 +19,16 @@ from flare.net import (
 from flare.net import IpAddr, SocketAddr
 
 def main() raises:
-    var ip   = IpAddr.parse("93.184.216.34")
-    print(ip.is_global())            # True
-    print(ip.is_private())           # False
+    var ip = IpAddr.parse("93.184.216.34")
+    print(ip.is_global()) # True
+    print(ip.is_private()) # False
 
     var addr = SocketAddr.parse("127.0.0.1:8080")
-    print(addr.port)                 # 8080
-    print(addr.ip.is_loopback())     # True
+    print(addr.port) # 8080
+    print(addr.ip.is_loopback()) # True
 
     var local = SocketAddr.localhost(9000)
-    print(local)                     # 127.0.0.1:9000
+    print(local) # 127.0.0.1:9000
 ```
 """
 

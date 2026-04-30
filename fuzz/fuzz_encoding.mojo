@@ -82,7 +82,7 @@ def main() raises:
     var s3: List[UInt8] = [0x1F, 0x8B, 0x08, 0x00]
     seeds.append(s3^)
 
-    print("  target: decompress_gzip (arbitrary bytes)")
+    print(" target: decompress_gzip (arbitrary bytes)")
     fuzz(
         target_decompress,
         FuzzConfig(
@@ -96,7 +96,7 @@ def main() raises:
         seeds,
     )
 
-    print("  target: compress→decompress round-trip")
+    print(" target: compress→decompress round-trip")
     fuzz(
         target_roundtrip,
         FuzzConfig(

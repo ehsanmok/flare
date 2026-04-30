@@ -1,5 +1,4 @@
-"""Tests for ``serialize_streaming_response`` (v0.5.0 follow-up
-/ Track 4 part 2 / C5).
+"""Tests for ``serialize_streaming_response``.
 
 The streaming serializer renders a ``StreamingResponse[B: Body]``
 to wire bytes. These tests pin the framing semantics per RFC

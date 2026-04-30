@@ -7,7 +7,7 @@ References:
 Memory safety contract:
     ``_freeaddrinfo`` MUST be called on the linked-list head in ALL code
     paths — including every error path that follows a successful
-    ``_getaddrinfo`` call.  This invariant is maintained by calling
+    ``_getaddrinfo`` call. This invariant is maintained by calling
     ``_freeaddrinfo(head)`` before every ``raise`` and at the successful
     return path.
 """
@@ -36,7 +36,7 @@ def resolve(host: String) raises -> List[IpAddr]:
     """Resolve a hostname to a list of IP addresses.
 
     Calls ``getaddrinfo(3)`` which respects ``/etc/hosts``,
-    ``/etc/resolv.conf``, and ``nsswitch.conf``.  Returns both IPv4 and
+    ``/etc/resolv.conf``, and ``nsswitch.conf``. Returns both IPv4 and
     IPv6 results in OS-preference order.
 
     Args:
@@ -44,7 +44,7 @@ def resolve(host: String) raises -> List[IpAddr]:
               (e.g. ``"example.com"``, ``"localhost"``, ``"127.0.0.1"``).
 
     Returns:
-        A non-empty ``List[IpAddr]``.  The first entry is the OS-preferred
+        A non-empty ``List[IpAddr]``. The first entry is the OS-preferred
         address for this host.
 
     Raises:
@@ -64,12 +64,12 @@ def resolve(host: String) raises -> List[IpAddr]:
     # Security: validate hostname before passing to getaddrinfo(3).
     #
     # (1) Null bytes: C string passed to getaddrinfo would be silently
-    #     truncated at the null, resolving a different host than requested.
+    # truncated at the null, resolving a different host than requested.
     # (2) CRLF: hostnames embedded downstream in HTTP Host headers could
-    #     enable header injection.
+    # enable header injection.
     # (3) '@': user-info prefix — "user@host" is not a hostname.
     # (4) Length: RFC 1035 §2.3.4 limits FQDNs to 253 octets and individual
-    #     labels to 63 octets.  Reject early to avoid resolver undefined behaviour.
+    # labels to 63 octets. Reject early to avoid resolver undefined behaviour.
     var host_bytes = host.as_bytes()
     var n = len(host_bytes)
     if n > 253:
@@ -174,7 +174,7 @@ def resolve_v4(host: String) raises -> List[IpAddr]:
     Example:
         ```mojo
         var addrs = resolve_v4("localhost")
-        print(addrs[0])  # 127.0.0.1
+        print(addrs[0]) # 127.0.0.1
         ```
     """
     var all = resolve(host)

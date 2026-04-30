@@ -18,7 +18,7 @@ Example:
 
     var h = HeaderMap()
     BasicAuth("alice", "s3cr3t").apply(h)
-    print(h.get("Authorization"))  # Basic YWxpY2U6czNjcjN0
+    print(h.get("Authorization")) # Basic YWxpY2U6czNjcjN0
     ```
 """
 

@@ -197,16 +197,16 @@ struct MultipartPart(Copyable, Movable):
     """A single part inside a ``multipart/form-data`` body.
 
     Fields:
-        name:         ``name="..."`` from ``Content-Disposition``;
+        name: ``name="..."`` from ``Content-Disposition``;
                       empty if absent (treated as malformed).
-        filename:     ``filename="..."`` if present (file uploads);
+        filename: ``filename="..."`` if present (file uploads);
                       empty for plain text fields.
         content_type: ``Content-Type`` of this part if specified;
                       empty otherwise (defaults to
                       ``text/plain; charset=US-ASCII`` per RFC 7578
                       §4.4 if a consumer needs a non-empty fallback).
-        body:         The part's raw payload bytes (no trailing CRLF).
-        headers:      Every header line for this part as a parallel
+        body: The part's raw payload bytes (no trailing CRLF).
+        headers: Every header line for this part as a parallel
                       ``List[String]`` pair.
     """
 
@@ -319,7 +319,7 @@ def parse_multipart_form_data(
     """Parse a buffered multipart/form-data body.
 
     Args:
-        body:         The raw request body bytes.
+        body: The raw request body bytes.
         content_type: The request's ``Content-Type`` header value
                       (must include ``boundary=<token>``).
 

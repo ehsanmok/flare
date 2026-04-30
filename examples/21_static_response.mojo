@@ -13,14 +13,14 @@ TFB plaintext spec:
     HTTP/1.1 200 OK
     Content-Type: text/plain; charset=utf-8
     Content-Length: 13
-    Connection: keep-alive  (or close, chosen by the reactor)
+    Connection: keep-alive (or close, chosen by the reactor)
 
     Hello, World!
 
 The example prints the byte layout and declares the port the server
 would bind to; it does **not** actually run the reactor loop (that
 would block the test runner). For a live benchmark harness see
-``benchmark/baselines/flare/`` and the v0.3.x TFB plaintext shape.
+``benchmark/baselines/flare/`` and the TFB plaintext shape.
 
 Run:
     pixi run example-static-response
@@ -41,9 +41,9 @@ def main() raises:
         body="Hello, World!",
     )
 
-    print("body length         =", hello.body_length)
+    print("body length =", hello.body_length)
     print("keep-alive wire size =", len(hello.keepalive_bytes), "bytes")
-    print("close wire size      =", len(hello.close_bytes), "bytes")
+    print("close wire size =", len(hello.close_bytes), "bytes")
 
     # Decode the keep-alive wire form as ASCII so the example output
     # makes the byte layout obvious.
@@ -67,7 +67,7 @@ def main() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     print()
     print("(HttpServer.serve_static(hello) would run the reactor loop here)")
-    print("bound to           =", srv.local_addr().port)
+    print("bound to =", srv.local_addr().port)
     srv.close()
 
     print()

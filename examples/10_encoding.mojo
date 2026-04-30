@@ -2,8 +2,8 @@
 
 Demonstrates:
   - compress_gzip(data, level) — compress bytes to gzip format
-  - decompress_gzip(data)      — decompress gzip bytes
-  - decompress_deflate(data)   — decompress zlib-wrapped deflate bytes
+  - decompress_gzip(data) — decompress gzip bytes
+  - decompress_deflate(data) — decompress zlib-wrapped deflate bytes
   - decode_content(body, encoding) — dispatch by Content-Encoding header
   - Round-trip identity: decompress(compress(data)) == data
   - Compressing a JSON payload (simulating a gzip-encoded HTTP response)
@@ -30,10 +30,10 @@ def main() raises:
 
     # ── 1. Encoding constants ────────────────────────────────────────────────
     print("── 1. Encoding constants ──")
-    print("  Encoding.GZIP     :", Encoding.GZIP)
-    print("  Encoding.DEFLATE  :", Encoding.DEFLATE)
-    print("  Encoding.IDENTITY :", Encoding.IDENTITY)
-    print("  Encoding.BR       :", Encoding.BR)
+    print(" Encoding.GZIP :", Encoding.GZIP)
+    print(" Encoding.DEFLATE :", Encoding.DEFLATE)
+    print(" Encoding.IDENTITY :", Encoding.IDENTITY)
+    print(" Encoding.BR :", Encoding.BR)
     print()
 
     # ── 2. Gzip round-trip ───────────────────────────────────────────────────
@@ -42,13 +42,13 @@ def main() raises:
     var original_bytes = original.as_bytes()
 
     var compressed = compress_gzip(Span[UInt8, _](original_bytes))
-    print("  original  :", len(original_bytes), "bytes")
-    print("  compressed:", len(compressed), "bytes (gzip)")
+    print(" original :", len(original_bytes), "bytes")
+    print(" compressed:", len(compressed), "bytes (gzip)")
 
     var decompressed = decompress_gzip(Span[UInt8, _](compressed))
     var restored = String(unsafe_from_utf8=decompressed)
-    print("  restored  :", len(decompressed), "bytes")
-    print("  match     :", restored == original)
+    print(" restored :", len(decompressed), "bytes")
+    print(" match :", restored == original)
     print()
 
     # ── 3. Compression levels ────────────────────────────────────────────────
@@ -61,7 +61,7 @@ def main() raises:
     var lorem_bytes = lorem.as_bytes()
     for level in range(0, 10):
         var c = compress_gzip(Span[UInt8, _](lorem_bytes), level)
-        print("  level", level, "→", len(c), "bytes")
+        print(" level", level, "→", len(c), "bytes")
     print()
 
     # ── 4. Repeated content compresses well ──────────────────────────────────
@@ -71,10 +71,10 @@ def main() raises:
         rep += "AAAA"
     var rep_bytes = rep.as_bytes()
     var rep_compressed = compress_gzip(Span[UInt8, _](rep_bytes))
-    print("  input :", len(rep_bytes), "bytes (400 × 'AAAA')")
-    print("  output:", len(rep_compressed), "bytes (gzip)")
+    print(" input :", len(rep_bytes), "bytes (400 × 'AAAA')")
+    print(" output:", len(rep_compressed), "bytes (gzip)")
     var ratio = Float64(len(rep_bytes)) / Float64(len(rep_compressed))
-    print("  ratio :", ratio, "× compression")
+    print(" ratio :", ratio, "× compression")
     print()
 
     # ── 5. JSON payload round-trip ────────────────────────────────────────────
@@ -84,11 +84,11 @@ def main() raises:
     )
     var json_bytes = json.as_bytes()
     var json_gz = compress_gzip(Span[UInt8, _](json_bytes))
-    print("  JSON original :", len(json_bytes), "bytes")
-    print("  JSON gzip     :", len(json_gz), "bytes")
+    print(" JSON original :", len(json_bytes), "bytes")
+    print(" JSON gzip :", len(json_gz), "bytes")
 
     var json_back = decompress_gzip(Span[UInt8, _](json_gz))
-    print("  JSON restored :", String(unsafe_from_utf8=json_back) == json)
+    print(" JSON restored :", String(unsafe_from_utf8=json_back) == json)
     print()
 
     # ── 6. decode_content() dispatch ─────────────────────────────────────────
@@ -102,7 +102,7 @@ def main() raises:
         body_list_id.append(b)
     var decoded_id = decode_content(body_list_id, Encoding.IDENTITY)
     print(
-        "  identity →",
+        " identity →",
         String(unsafe_from_utf8=decoded_id),
         "(unchanged)",
     )
@@ -113,7 +113,7 @@ def main() raises:
     for b in gz_bytes:
         gz_list.append(b)
     var decoded_gz = decode_content(gz_list, Encoding.GZIP)
-    print("  gzip    →", String(unsafe_from_utf8=decoded_gz))
+    print(" gzip →", String(unsafe_from_utf8=decoded_gz))
     print()
 
     # ── 7. Empty input ────────────────────────────────────────────────────────
@@ -122,7 +122,7 @@ def main() raises:
     var empty_gz = compress_gzip(Span[UInt8, _](empty))
     var empty_back = decompress_gzip(Span[UInt8, _](empty_gz))
     print(
-        "  empty → compressed:",
+        " empty → compressed:",
         len(empty_gz),
         "bytes → decompressed:",
         len(empty_back),
@@ -134,7 +134,7 @@ def main() raises:
     var one_gz = compress_gzip(Span[UInt8, _](one))
     var one_back = decompress_gzip(Span[UInt8, _](one_gz))
     print(
-        "  [42]  → compressed:",
+        " [42] → compressed:",
         len(one_gz),
         "bytes → decompressed:",
         Int(one_back[0]),
@@ -146,10 +146,10 @@ def main() raises:
     var garbage: List[UInt8] = [1, 2, 3, 4, 5, 6, 7, 8]
     try:
         _ = decompress_gzip(Span[UInt8, _](garbage))
-        print("  ERROR: expected an error for invalid gzip data")
+        print(" ERROR: expected an error for invalid gzip data")
     except e:
         print(
-            "  ✓ decompress_gzip raised on garbage input:",
+            " ✓ decompress_gzip raised on garbage input:",
             String(unsafe_from_utf8=String(e).as_bytes()[:40]),
         )
     print()

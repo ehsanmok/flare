@@ -1,5 +1,5 @@
 """Example 26 — Mutual TLS (mTLS) with client certificate
-verification (v0.5.0 Step 3 / Track 5.4).
+verification.
 
 Mutual TLS pins the client's identity on top of the server's:
 the server presents its cert (the standard TLS pattern), AND
@@ -33,7 +33,7 @@ def main() raises:
     print()
 
     # 1. mTLS-enabled config: require client cert, point to the
-    #    trust-anchor bundle. ALPN is independent of mTLS.
+    # trust-anchor bundle. ALPN is independent of mTLS.
     # Uses the bench-tls-setup self-signed cert (which doubles
     # as its own CA) so the example runs end-to-end.
     var alpn = List[String]()
@@ -49,15 +49,15 @@ def main() raises:
     )
     var acceptor = TlsAcceptor(cfg^)
     print("[1] mTLS acceptor configured")
-    print("    cert     :", acceptor.config.cert_file)
-    print("    key      :", acceptor.config.key_file)
-    print("    require  :", acceptor.config.require_client_cert)
-    print("    client CA:", acceptor.config.client_ca_bundle)
+    print(" cert :", acceptor.config.cert_file)
+    print(" key :", acceptor.config.key_file)
+    print(" require :", acceptor.config.require_client_cert)
+    print(" client CA:", acceptor.config.client_ca_bundle)
     print()
 
     # 2. Misconfiguration: require_client_cert without
-    #    client_ca_bundle is rejected at construction time. flare
-    #    refuses to silently disable verification.
+    # client_ca_bundle is rejected at construction time. flare
+    # refuses to silently disable verification.
     print("[2] Demonstrating the rejected misconfiguration:")
     try:
         _ = TlsServerConfig(
@@ -66,22 +66,22 @@ def main() raises:
             require_client_cert=True,
             # client_ca_bundle defaults to "".
         )
-        print("    ERROR: expected raise, got success!")
+        print(" ERROR: expected raise, got success!")
     except e:
-        print("    rejected as expected:")
-        print("    ", String(e))
+        print(" rejected as expected:")
+        print(" ", String(e))
     print()
 
     # 3. Per-request access to the client cert subject (deferred
-    #    until reactor follow-up):
+    # until reactor follow-up):
     print("[3] Per-request access to the client cert subject")
-    print("    (lands with the reactor handshake follow-up):")
+    print(" (lands with the reactor handshake follow-up):")
     print()
-    print("    def handler(req: Request) raises -> Response:")
-    print("        if req.tls_info:")
-    print("            var info = req.tls_info.value()")
-    print("            print('client subject:', info.client_cert_subject)")
-    print("        return ok('hello')")
+    print(" def handler(req: Request) raises -> Response:")
+    print(" if req.tls_info:")
+    print(" var info = req.tls_info.value()")
+    print(" print('client subject:', info.client_cert_subject)")
+    print(" return ok('hello')")
     print()
 
     print("=== Example 26 complete ===")

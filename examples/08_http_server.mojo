@@ -79,7 +79,7 @@ def router(req: Request) raises -> Response:
 
     if req.url == "/whoami" and req.method == "GET":
         # ``req.peer`` is populated by the reactor at accept time
-        # (v0.5.0 Step 1). Real services use this for logging,
+        # . Real services use this for logging,
         # rate limiting, ACLs. Note that this is the *kernel's* view
         # of the peer; flare does not interpret X-Forwarded-For for
         # you.
@@ -102,7 +102,7 @@ def main() raises:
 
     print("GET /hello")
     print(
-        "  "
+        " "
         + send_and_receive(
             listener, "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n"
         )
@@ -110,7 +110,7 @@ def main() raises:
 
     print("GET /json")
     print(
-        "  "
+        " "
         + send_and_receive(
             listener, "GET /json HTTP/1.1\r\nHost: localhost\r\n\r\n"
         )
@@ -118,7 +118,7 @@ def main() raises:
 
     print("POST /echo")
     print(
-        "  "
+        " "
         + send_and_receive(
             listener,
             (
@@ -130,7 +130,7 @@ def main() raises:
 
     print("GET /whoami")
     print(
-        "  "
+        " "
         + send_and_receive(
             listener, "GET /whoami HTTP/1.1\r\nHost: localhost\r\n\r\n"
         )
@@ -138,7 +138,7 @@ def main() raises:
 
     print("GET /missing")
     print(
-        "  "
+        " "
         + send_and_receive(
             listener, "GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n"
         )
@@ -147,8 +147,8 @@ def main() raises:
     print()
     print("HttpServer.bind() pattern:")
     var srv = HttpServer.bind(SocketAddr.localhost(0))
-    print("  Listening on " + String(srv.local_addr()))
-    print("  In production: srv.serve(router)")
+    print(" Listening on " + String(srv.local_addr()))
+    print(" In production: srv.serve(router)")
     print()
 
     listener.close()

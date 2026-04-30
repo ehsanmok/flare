@@ -1,4 +1,4 @@
-"""Fuzz harness: ``flare.http2.frame.parse_frame`` (v0.6 — Track J).
+"""Fuzz harness: ``flare.http2.frame.parse_frame``.
 
 Two properties:
 

@@ -1,4 +1,4 @@
-"""Tests for ``Request.peer`` and the ``Peer`` extractor (v0.5.0 Step 1).
+"""Tests for ``Request.peer`` and the ``Peer`` extractor.
 
 Covers:
 
