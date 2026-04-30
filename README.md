@@ -31,10 +31,12 @@ flare is **pre-1.0**. The bar isn't "is it fast", it's *is it hard to misuse und
 
 ## Features
 
-- **Full networking stack**: HTTP/1.1 (client + server), WebSocket (RFC 6455), TLS 1.2/1.3 (client + server, OpenSSL), TCP, UDP, DNS — layered, each module importing only from below.
-- **One reactor per worker** (`kqueue` on macOS, `epoll` on Linux) with a per-connection state machine + timer wheel; **thread-per-core** via `SO_REUSEPORT` (`HttpServer.serve(handler, num_workers=N)`).
-- **Composable handlers**: `Handler` trait, `Router` with path params, `App[S]` for shared state, typed extractors (`PathInt` / `QueryInt` / `HeaderStr` / ...), middleware as value composition; `ComptimeRouter[ROUTES]` unrolls dispatch at compile time.
-- **Production hygiene**: per-request `Cancel` token (peer FIN, timeout, drain unified), server-side TLS with cert reload + mTLS + ALPN, streaming bodies with backpressure, sanitised 4xx/5xx, graceful drain with per-worker `ShutdownReport`s, 24 h soak harness, **19 fuzz harnesses (4M+ runs, zero known crashes)**.
+- **Full networking stack**: HTTP/1.1 (client + server), HTTP/2 frame codec + HPACK + h2c upgrade, WebSocket (RFC 6455), TLS 1.2/1.3 (client + server, OpenSSL with ALPN), TCP, UDP, DNS — layered, each module importing only from below.
+- **One reactor per worker** (`kqueue` on macOS, `epoll` on Linux + `EPOLLEXCLUSIVE` shared listener) with a per-connection state machine + timer wheel; **thread-per-core** via `HttpServer.serve(handler, num_workers=N)`. Optional cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`) for skewed-keepalive workloads.
+- **Composable handlers**: `Handler` trait, `Router` with path params, `App[S]` for shared state, typed extractors (`PathInt` / `QueryInt` / `HeaderStr` / `Form` / `Multipart` / `Cookies` / ...), middleware stack (`Logger`, `RequestId`, `Compress`, `CatchPanic`), `Cors`, `FileServer` with HEAD + Range; `ComptimeRouter[ROUTES]` unrolls dispatch at compile time.
+- **Sessions + signed cookies**: HMAC-SHA256 (`flare.crypto`) under typed `Session[T]` with `CookieSessionStore` + `InMemorySessionStore` and the `signed_cookie_*` lower-level codec.
+- **Content negotiation**: gzip + brotli content-encoding (RFC 9110 §12.5.3 q-value parser), urlencoded + multipart form parsing, RFC 6265 cookie jars, RFC 9110 Range support.
+- **Production hygiene**: per-request `Cancel` token (peer FIN, timeout, drain unified), server-side TLS with cert reload + mTLS + ALPN, streaming bodies with backpressure, sanitised 4xx/5xx, graceful drain with per-worker `ShutdownReport`s, 24 h soak harness, **22 fuzz harnesses (5M+ runs, zero known crashes)**.
 
 ## Numbers
 

@@ -33,6 +33,16 @@ changes when you tweak it.
 | [`24_sse.mojo`](../examples/24_sse.mojo) | Streaming response body via `ChunkSource` (Server-Sent Events shape) |
 | [`25_cert_reload.mojo`](../examples/25_cert_reload.mojo) | `TlsAcceptor.reload()` for ACME / Let's Encrypt cert rotation without restart |
 | [`26_mtls.mojo`](../examples/26_mtls.mojo) | mTLS configuration + construction-time validation |
+| [`27_request_cookies.mojo`](../examples/27_request_cookies.mojo) | Reading inbound `Cookie:` headers + the `Cookies` extractor |
+| [`28_forms.mojo`](../examples/28_forms.mojo) | `application/x-www-form-urlencoded` parsing + the `Form` extractor |
+| [`29_multipart_upload.mojo`](../examples/29_multipart_upload.mojo) | `multipart/form-data` (file uploads) + the `Multipart` extractor |
+| [`30_sessions.mojo`](../examples/30_sessions.mojo) | Typed `Session[T]` over `CookieSessionStore` (HMAC-SHA256 signed) |
+| [`31_middleware_stack.mojo`](../examples/31_middleware_stack.mojo) | `Logger` + `RequestId` + `Compress` + `CatchPanic` chain |
+| [`32_cors.mojo`](../examples/32_cors.mojo) | `Cors` permissive vs allowlist + preflight + credentials |
+| [`33_static_files.mojo`](../examples/33_static_files.mojo) | `FileServer` with HEAD + Range + path safety |
+| [`34_brotli.mojo`](../examples/34_brotli.mojo) | `compress_brotli` / `decompress_brotli` + `Compress` middleware emitting `br` |
+| [`35_http2.mojo`](../examples/35_http2.mojo) | `H2Connection` driver, ALPN dispatch, h2c upgrade detection |
+| [`36_work_stealing.mojo`](../examples/36_work_stealing.mojo) | `HandoffQueue` + `WorkerHandoffPool` + `FLARE_SOAK_WORKERS` knob |
 
 Run any single example with `pixi run example-<name>`; see the full
 list in [`pixi.toml`](../pixi.toml).
@@ -61,3 +71,13 @@ list in [`pixi.toml`](../pixi.toml).
 | Manage cookies | [`13_cookies.mojo`](../examples/13_cookies.mojo) |
 | Drive the reactor directly | [`14_reactor.mojo`](../examples/14_reactor.mojo) |
 | Use TLS as a client | [`12_tls.mojo`](../examples/12_tls.mojo) |
+| Read inbound cookies | [`27_request_cookies.mojo`](../examples/27_request_cookies.mojo) |
+| Parse a form POST | [`28_forms.mojo`](../examples/28_forms.mojo) |
+| Accept file uploads | [`29_multipart_upload.mojo`](../examples/29_multipart_upload.mojo) |
+| Use signed-cookie sessions | [`30_sessions.mojo`](../examples/30_sessions.mojo) |
+| Stack `Logger` / `RequestId` / `Compress` / `CatchPanic` | [`31_middleware_stack.mojo`](../examples/31_middleware_stack.mojo) |
+| Configure CORS | [`32_cors.mojo`](../examples/32_cors.mojo) |
+| Serve static files (with `Range`) | [`33_static_files.mojo`](../examples/33_static_files.mojo) |
+| Send `Content-Encoding: br` | [`34_brotli.mojo`](../examples/34_brotli.mojo) |
+| Drive HTTP/2 directly | [`35_http2.mojo`](../examples/35_http2.mojo) |
+| Even out skewed-keepalive load | [`36_work_stealing.mojo`](../examples/36_work_stealing.mojo) |

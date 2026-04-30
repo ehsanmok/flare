@@ -6,16 +6,24 @@ below it. No circular dependencies, no global state, no hidden runtime.
 ```
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455)
-flare.h2       HTTP/2 (planned: h2 over TLS only)
+flare.http2    HTTP/2: Frame codec (RFC 9113), HPACK (RFC 7541),
+               state machines, H2Connection driver, h2c upgrade,
+               ALPN dispatch helper
 flare.http     HTTP/1.1 client + reactor server + Handler / Router / App
-               + extractors + ComptimeRouter + StaticResponse
-               + Cancel / CancelHandler
+               + extractors (incl. Form / Multipart / Cookies)
+               + ComptimeRouter + StaticResponse + Cancel / CancelHandler
+               + middleware stack (Logger / RequestId / Compress / CatchPanic)
+               + Cors + FileServer (with HEAD + Range)
+               + content-encoding (gzip + brotli)
+               + signed cookies + typed Session[T] stores
+flare.crypto   HMAC-SHA256, base64url codec
 flare.tls      TLS 1.2/1.3 (OpenSSL); TlsAcceptor + ALPN
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.dns      getaddrinfo (dual-stack)
 flare.net      IpAddr, SocketAddr, RawSocket
-flare.runtime  Reactor (kqueue/epoll), TimerWheel, Scheduler,
+flare.runtime  Reactor (kqueue/epoll + EPOLLEXCLUSIVE), TimerWheel,
+               Scheduler, HandoffQueue + WorkerHandoffPool,
                num_cpus / default_worker_count, pthread + pinning,
                install_drain_on_sigterm
 ```
