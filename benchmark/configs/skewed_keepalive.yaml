@@ -1,0 +1,31 @@
+# Skewed keep-alive workload (v0.6 Track K).
+#
+# Two clients hammer the server from a small, fixed source-port pool
+# so the kernel's SO_REUSEPORT 4-tuple hash steers traffic to a
+# single worker. This is the *adversarial* case for the stock v0.5
+# multicore scheduler: one worker gets all the work and the other
+# N-1 sit mostly idle, blowing the P99.9 tail.
+#
+# v0.6 enables the work-stealing scheduler (FLARE_SOAK_WORKERS=on)
+# so the idle peers can drain the busy worker's accept backlog
+# through the application-level handoff queue. The bench harness
+# compares the two runs on the same hardware.
+name: skewed_keepalive
+wrk_threads: 2
+wrk_connections: 8       # small pool -> static SO_REUSEPORT skew
+wrk_duration_seconds: 60
+warmup_seconds: 15
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 8.0      # higher than throughput.yaml: tail metrics swing
+note: |
+  Run twice on the same checkout, swapping FLARE_SOAK_WORKERS:
+
+      FLARE_SOAK_WORKERS=on  pixi run bench-skewed > on.json
+      FLARE_SOAK_WORKERS=off pixi run bench-skewed > off.json
+
+  Then diff p99.9 latency. v0.6's design doc target is
+  ``on / off >= 0.7`` (work-stealing must not be worse than
+  static SO_REUSEPORT) and the soak mode target is
+  ``on.p99_9 < off.p99_9`` (work-stealing must improve the tail
+  on a skewed workload).

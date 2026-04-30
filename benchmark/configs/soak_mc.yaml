@@ -1,0 +1,27 @@
+# Multicore soak workload (v0.6 Track K).
+#
+# Long-running multicore soak that exercises the work-stealing
+# reactor under a mix of skewed + uniform traffic. The intent is to
+# catch slow leaks, fd-handoff inversions, and stealing-thread
+# starvation that only show up after thousands of seconds of
+# uptime — exactly the regime production servers live in.
+#
+# Pair with ``benchmark/scripts/_run_soak_extended.sh`` for the
+# full multi-hour run; ``_run_soak_smoke.sh`` for a 5-minute CI gate.
+name: soak_mc
+wrk_threads: 4
+wrk_connections: 256
+wrk_duration_seconds: 1800   # 30 minutes per ``runs`` slice
+warmup_seconds: 30
+runs: 1                       # the loop is run by ``_run_soak_*`` itself
+quiet_seconds: 10
+stdev_pct_gate: 5.0
+note: |
+  ``soak_mc`` deliberately mixes skewed and unskewed slices to
+  stress both ``HandoffPolicy.enabled = False`` (v0.5 path) and
+  ``HandoffPolicy.enabled = True`` (v0.6 path).
+
+  Set ``FLARE_SOAK_WORKERS=on`` to run with work-stealing enabled
+  for the whole soak; the harness writes a separate ``baseline_off``
+  run to ``benchmark/results/v0.6/soak_mc/baseline_off.json`` for
+  side-by-side comparison.

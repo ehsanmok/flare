@@ -32,3 +32,4 @@ from .scheduler import Scheduler, default_worker_count
 from .pool import Pool
 from .blocking import block_in_pool, MAX_POOL_SIZE
 from ._libc_time import libc_usleep, libc_nanosleep_ms
+from .handoff import HandoffPolicy, HandoffQueue, WorkerHandoffPool
