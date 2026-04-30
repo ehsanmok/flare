@@ -3,12 +3,12 @@ authors = ["ehsanmok <ehsanmok@users.noreply.github.com>"]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "flare"
 platforms = ["osx-arm64", "linux-aarch64", "linux-64"]
-version = "0.5.0"
+version = "0.6.0"
 preview = ["pixi-build"]
 
 [package]
 name = "flare"
-version = "0.5.0"
+version = "0.6.0"
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
