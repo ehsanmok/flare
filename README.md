@@ -30,7 +30,7 @@ The bar isn't "is it fast", it's *is it hard to misuse under load and easy to op
 
 ## Features
 
-- **Full networking stack**: HTTP/1.1 (client + server), HTTP/2 frame codec + HPACK + h2c upgrade, WebSocket (RFC 6455), TLS 1.2/1.3 (client + server, OpenSSL with ALPN), TCP, UDP, DNS — layered, each module importing only from below.
+- **Full networking stack**: HTTP/1.1 (client + server), HTTP/2 frame codec + HPACK + h2c upgrade, WebSocket (RFC 6455), TLS 1.2/1.3 (client + server, OpenSSL with ALPN), TCP, UDP, DNS, all layered so each module imports only from below.
 - **One reactor per worker** (`kqueue` on macOS, `epoll` on Linux + `EPOLLEXCLUSIVE` shared listener) with a per-connection state machine + timer wheel; **thread-per-core** via `HttpServer.serve(handler, num_workers=N)`. Optional cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`) for skewed-keepalive workloads.
 - **Composable handlers**: `Handler` trait, `Router` with path params, `App[S]` for shared state, typed extractors (`PathInt` / `QueryInt` / `HeaderStr` / `Form` / `Multipart` / `Cookies` / ...), middleware stack (`Logger`, `RequestId`, `Compress`, `CatchPanic`), `Cors`, `FileServer` with HEAD + Range; `ComptimeRouter[ROUTES]` unrolls dispatch at compile time.
 - **Sessions + signed cookies**: HMAC-SHA256 (`flare.crypto`) under typed `Session[T]` with `CookieSessionStore` + `InMemorySessionStore` and the `signed_cookie_*` lower-level codec.
@@ -71,7 +71,7 @@ flare = { git = "https://github.com/ehsanmok/flare.git", tag = "<latest-release>
 pixi install
 ```
 
-Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed on [GitHub Releases](https://github.com/ehsanmok/flare/releases) — pin to one for reproducible builds.
+Requires [pixi](https://pixi.sh) (pulls Mojo nightly automatically). Released tags are listed on [GitHub Releases](https://github.com/ehsanmok/flare/releases). Pin to one for reproducible builds.
 
 To track unreleased work (breaking changes possible between tags):
 
@@ -82,11 +82,43 @@ flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 
 ## Quick start
 
-The full walk-through, gradually-disclosed, used to live here. It now lives in the package docstring on rendered at <https://ehsanmok.github.io/flare/> and in the runnable examples under [`examples/`](examples/). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example.
+The tour below grows the snippet at the top of this README out, one persona at a time. Each level adds roughly one concept; everything compiles, and the runnable equivalents live under [`examples/`](examples/) (every one is part of `pixi run tests`). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example, and the rendered package docstring is at <https://ehsanmok.github.io/flare/>.
 
-### Typed extractors
+### Beginner: your first router
 
-`PathInt["id"]` / `PathStr` / `QueryInt` / `HeaderStr` / etc. parse the request value at extraction time; `Extracted[H]` reflects on a handler struct's fields and pulls each one in before calling `serve`. Missing or malformed values become a 400 with a sanitised body.
+Two routes, one with a path parameter, a JSON-shaped response. This is where most apps start: `def` handlers, a `Router`, `HttpServer.bind`, `num_workers`. No traits, no generics, no extractors yet.
+
+```mojo
+from flare import HttpServer, Router, Request, Response, ok, SocketAddr
+
+def home(req: Request) raises -> Response:
+    return ok("flare is up")
+
+def greet(req: Request) raises -> Response:
+    return ok("hello, " + req.param("name"))
+
+def health(req: Request) raises -> Response:
+    var resp = ok('{"status":"ok"}')
+    resp.headers.set("Content-Type", "application/json")
+    return resp^
+
+def main() raises:
+    var r = Router()
+    r.get("/",           home)
+    r.get("/hi/:name",   greet)
+    r.get("/health",     health)
+
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve(r^, num_workers=4)
+```
+
+What you get for free: 404 on unknown paths, 405 with `Allow` on wrong method, sanitised 4xx / 5xx bodies, peer-FIN cancellation, RFC 7230 size limits, the per-worker reactor with `kqueue` / `epoll`.
+
+For request bodies, query strings, cookies, sessions, multipart forms, gzip / brotli, TLS, HTTP/2, and WebSocket: all under [`examples/`](examples/) (`05_http_get`, `13_cookies`, `28_forms`, `29_multipart_upload`, `30_sessions`, `34_brotli`, `12_tls`, `35_http2`, `06_websocket_echo`).
+
+### Intermediate: typed extractors
+
+Once your handlers need to read structured input (path params as integers, query strings as bools, headers as strings), promote each `Handler` from a `def` into a struct whose fields *are* the inputs. `PathInt["id"]` / `PathStr` / `QueryInt` / `HeaderStr` / `Form[T]` / `Multipart` / `Cookies` / ... parse and validate at extraction time; `Extracted[H]` reflects on the struct's fields and pulls each one in before `serve` runs. Missing or malformed values become a 400 with a sanitised body, so your `serve` only sees well-typed values.
 
 ```mojo
 from flare.http import (
@@ -115,9 +147,13 @@ def main() raises:
     HttpServer.bind(SocketAddr.localhost(8080)).serve(r^, num_workers=4)
 ```
 
-### Cancel-aware handlers
+Middleware is the same shape: a `Handler` that wraps another `Handler`. The stock layers (`Logger`, `RequestId`, `Compress`, `CatchPanic`, `Cors`, `FileServer`) all compose by nesting structs, no callback chain. `examples/18_middleware.mojo` walks through the production-shaped pipeline (`RequestID → Logger → Timing → Recover → RequireAuth → Router`).
 
-`CancelHandler.serve(req, cancel)` gets a token the reactor flips on peer FIN, deadline elapse, or graceful drain. Handlers poll it between expensive steps and return early; plain `Handler`s ignore it and run to completion.
+### Advanced: compile-time dispatch, shared state, cancel awareness
+
+Three patterns the production server leans on. Each is independent; pick the one your workload needs.
+
+**Cancel-aware handlers.** `CancelHandler.serve(req, cancel)` gets a token the reactor flips on peer FIN, deadline elapse, or graceful drain. Long-running handlers poll between expensive steps and return early; plain `Handler`s ignore the token and run to completion. The reactor still tears down the connection if the peer goes away; the token just lets your handler do partial work cleanly.
 
 ```mojo
 from flare.http import CancelHandler, Cancel, Request, Response, ok
@@ -132,9 +168,36 @@ struct SlowHandler(CancelHandler, Copyable, Movable):
         return ok("done")
 ```
 
-### App state and middleware
+**Compile-time route tables.** When the route table is known at build time, `ComptimeRouter[ROUTES]` parses the path patterns at compile time and unrolls the dispatch loop per route. No runtime trie walk, no per-request handler-table indirection. Same path-param + wildcard syntax as the runtime `Router`, same 404 / 405-with-`Allow` semantics; the only difference is *when* the dispatch is decided.
 
-`App[S]` carries shared state alongside an inner handler; `state_view()` hands out a borrow that middleware can read or mutate. Middleware is just a `Handler` that wraps another `Handler`, so composition is value composition, with no callback chain to thread through.
+```mojo
+from flare.http import (
+    ComptimeRoute, ComptimeRouter, HttpServer,
+    Request, Response, Method, ok,
+)
+from flare.net import SocketAddr
+
+def home(req: Request) raises -> Response:
+    return ok("home")
+
+def get_user(req: Request) raises -> Response:
+    return ok("user=" + req.param("id"))
+
+def files(req: Request) raises -> Response:
+    return ok("files=" + req.param("*"))
+
+comptime ROUTES: List[ComptimeRoute] = [
+    ComptimeRoute(Method.GET,  "/",            home),
+    ComptimeRoute(Method.GET,  "/users/:id",   get_user),
+    ComptimeRoute(Method.GET,  "/files/*",     files),
+]
+
+def main() raises:
+    var r = ComptimeRouter[ROUTES]()
+    HttpServer.bind(SocketAddr.localhost(8080)).serve(r^, num_workers=4)
+```
+
+**App state + middleware composition.** `App[S]` carries shared state alongside an inner handler; `state_view()` hands out a borrow that middleware can read or mutate. The compiler monomorphises the whole nested chain into one direct call sequence per request type, with no virtual dispatch and no per-request allocation.
 
 ```mojo
 from flare.http import App, Router, Request, Response, Handler, State, ok, HttpServer
@@ -167,38 +230,7 @@ def main() raises:
     srv.serve(WithHits(inner=app^, snapshot=view^))
 ```
 
-### Static route tables (`ComptimeRouter`)
-
-When the route table is known at build time, `ComptimeRouter[ROUTES]` parses the path patterns at compile time and unrolls the dispatch loop per route. No runtime trie walk, no per-request handler-table indirection. The route table is a single `comptime` list of `(method, pattern, handler)` triples; the handler is bound in the same place as the pattern, no separate `r.get(path, fn)` step.
-
-```mojo
-from flare.http import (
-    ComptimeRoute, ComptimeRouter, HttpServer,
-    Request, Response, Method, ok,
-)
-from flare.net import SocketAddr
-
-def home(req: Request) raises -> Response:
-    return ok("home")
-
-def get_user(req: Request) raises -> Response:
-    return ok("user=" + req.param("id"))
-
-def files(req: Request) raises -> Response:
-    return ok("files=" + req.param("*"))
-
-comptime ROUTES: List[ComptimeRoute] = [
-    ComptimeRoute(Method.GET,  "/",            home),
-    ComptimeRoute(Method.GET,  "/users/:id",   get_user),
-    ComptimeRoute(Method.GET,  "/files/*",     files),
-]
-
-def main() raises:
-    var r = ComptimeRouter[ROUTES]()
-    HttpServer.bind(SocketAddr.localhost(8080)).serve(r^, num_workers=4)
-```
-
-Same path-param + wildcard syntax as the runtime `Router`; same 404 / 405-with-`Allow` semantics. For the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, and the `num_workers` scale knob, see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
+For the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, the multi-worker shared-listener mode (`HttpServer.serve(handler, num_workers=N)`), and the cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`), see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
 
 ## Low-level API
 
@@ -235,7 +267,7 @@ Each layer imports only from layers below it. No circular dependencies. The full
 
 Headline numbers live in the [Numbers](#numbers) block above; full single/multi-worker tables, tail percentiles, methodology, and the soak harness for long-running operational gates live in [`docs/benchmark.md`](docs/benchmark.md). Multi-worker cross-server ratios are gated on matched-worker baselines (Go `GOMAXPROCS=N`, nginx `worker_processes N`, Rust hyper / axum N-worker); flare publishes its own scaling claim and does not publish a "vs Go" multicore ratio against single-worker baselines.
 
-We do not lead on speed. The position is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job is to be operationally honest under load — numbers are a corollary, not the headline.
+We do not lead on speed. The position is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job is to be operationally honest under load. Numbers are a corollary, not the headline.
 
 ## Security
 
