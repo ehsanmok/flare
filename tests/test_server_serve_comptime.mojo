@@ -105,20 +105,23 @@ def test_serve_comptime_bind_close_cycle() raises:
 # comptime config variant so every ``comptime assert`` invariant is
 # checked at build time. The helper is never actually called at
 # runtime (it would block in the reactor loop) but declaring it
-# forces monomorphisation of the generic.
+# forces monomorphisation of the generic. The call site is gated on a
+# runtime-derived sentinel the compiler cannot constant-fold, which
+# keeps the type-checker honest without producing a dead-branch
+# warning.
 def _never_called_force_instantiation_default() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
     srv.close()
-    # The following reference never runs (srv is already closed) but
-    # triggers ``comptime assert`` checking.
-    if False:
+    if port < 0:
         srv.serve_comptime[_CT_HANDLER, _CT_CONFIG_DEFAULT]()
 
 
 def _never_called_force_instantiation_tight() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
     srv.close()
-    if False:
+    if port < 0:
         srv.serve_comptime[_CT_HANDLER, _CT_CONFIG_TIGHT]()
 
 

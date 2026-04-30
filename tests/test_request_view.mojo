@@ -77,9 +77,9 @@ def test_url_borrows_into_buffer() raises:
     underlying byte pointer matches.
     """
     var raw = "GET /borrowed HTTP/1.1\r\n\r\n"
-    var bytes_list = List[UInt8](capacity=len(raw))
-    bytes_list.resize(len(raw), UInt8(0))
-    for i in range(len(raw)):
+    var bytes_list = List[UInt8](capacity=raw.byte_length())
+    bytes_list.resize(raw.byte_length(), UInt8(0))
+    for i in range(raw.byte_length()):
         bytes_list[i] = raw.as_bytes()[i]
     var view = parse_request_view(Span[UInt8, _](bytes_list))
     var url = view.url()
@@ -94,9 +94,9 @@ def test_body_borrows_into_buffer() raises:
     """``view.body()`` is a borrowed slice; pointer must lie inside
     the source buffer."""
     var raw = "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nABC"
-    var bytes_list = List[UInt8](capacity=len(raw))
-    bytes_list.resize(len(raw), UInt8(0))
-    for i in range(len(raw)):
+    var bytes_list = List[UInt8](capacity=raw.byte_length())
+    bytes_list.resize(raw.byte_length(), UInt8(0))
+    for i in range(raw.byte_length()):
         bytes_list[i] = raw.as_bytes()[i]
     var view = parse_request_view(Span[UInt8, _](bytes_list))
     var body = view.body()
@@ -143,16 +143,16 @@ def test_into_owned_independent_lifetime() raises:
     affect the owned Request's contents.
     """
     var raw = "GET /target HTTP/1.1\r\nHost: x\r\n\r\n"
-    var bytes_list = List[UInt8](capacity=len(raw))
-    bytes_list.resize(len(raw), UInt8(0))
-    for i in range(len(raw)):
+    var bytes_list = List[UInt8](capacity=raw.byte_length())
+    bytes_list.resize(raw.byte_length(), UInt8(0))
+    for i in range(raw.byte_length()):
         bytes_list[i] = raw.as_bytes()[i]
     var view = parse_request_view(Span[UInt8, _](bytes_list))
     var owned = view.into_owned()
     # Smash the URL portion of the source buffer.
-    bytes_list[5] = ord("Z")
-    bytes_list[6] = ord("Z")
-    bytes_list[7] = ord("Z")
+    bytes_list[5] = UInt8(ord("Z"))
+    bytes_list[6] = UInt8(ord("Z"))
+    bytes_list[7] = UInt8(ord("Z"))
     # Owned URL still reads "/target".
     assert_equal(owned.url, "/target")
 

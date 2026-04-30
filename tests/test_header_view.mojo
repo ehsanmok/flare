@@ -140,10 +140,10 @@ def test_high_bit_in_header_name_raises() raises:
     """High-bit byte in header name is non-token; reject."""
     var bytes = List[UInt8]()
     bytes.append(UInt8(0x80))
-    bytes.append(ord("X"))
-    bytes.append(ord(":"))
-    bytes.append(ord(" "))
-    bytes.append(ord("v"))
+    bytes.append(UInt8(ord("X")))
+    bytes.append(UInt8(ord(":")))
+    bytes.append(UInt8(ord(" ")))
+    bytes.append(UInt8(ord("v")))
     for b in "\r\n\r\n".as_bytes():
         bytes.append(b)
     with assert_raises():
@@ -157,8 +157,8 @@ def test_bare_cr_in_header_value_raises() raises:
     for b in "X-A: hello".as_bytes():
         bytes.append(b)
     bytes.append(UInt8(0x0D))
-    bytes.append(ord("X"))
-    bytes.append(ord("\n"))
+    bytes.append(UInt8(ord("X")))
+    bytes.append(UInt8(ord("\n")))
     for b in "\r\n".as_bytes():
         bytes.append(b)
     with assert_raises():
@@ -172,7 +172,7 @@ def test_nul_in_header_value_raises() raises:
     for b in "X-A: hello".as_bytes():
         bytes.append(b)
     bytes.append(UInt8(0))
-    bytes.append(ord("X"))
+    bytes.append(UInt8(ord("X")))
     for b in "\r\n\r\n".as_bytes():
         bytes.append(b)
     with assert_raises():
@@ -205,7 +205,7 @@ def test_into_owned_independent_lifetime() raises:
     var view = parse_header_view(Span[UInt8, _](bytes_list))
     var owned = view.into_owned()
     # Mutate the source buffer; the owned map should still see "x".
-    bytes_list[6] = ord("Y")
+    bytes_list[6] = UInt8(ord("Y"))
     assert_equal(owned.get("Host"), "x")
 
 

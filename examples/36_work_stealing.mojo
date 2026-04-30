@@ -10,7 +10,7 @@ Run:
     pixi run example-work-stealing
 """
 
-from os import setenv
+from std.os import setenv
 
 from flare.runtime import HandoffPolicy, HandoffQueue, WorkerHandoffPool
 
@@ -29,11 +29,11 @@ def main() raises:
 
     # ── 2. Soak knob flips the policy on ──
     print("── 2. FLARE_SOAK_WORKERS=on flips it on ──")
-    setenv("FLARE_SOAK_WORKERS", "on", True)
+    _ = setenv("FLARE_SOAK_WORKERS", "on", True)
     var p1 = HandoffPolicy.from_env(HandoffPolicy())
     print(" enabled :", p1.enabled)
     print(" steal_threshold :", p1.steal_threshold)
-    setenv("FLARE_SOAK_WORKERS", "", True)
+    _ = setenv("FLARE_SOAK_WORKERS", "", True)
     print()
 
     # ── 3. Bounded MPSC queue: push, pop, refused ──

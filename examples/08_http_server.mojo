@@ -75,7 +75,7 @@ def router(req: Request) raises -> Response:
         return ok_json('{"greeting": "hello", "from": "flare"}')
 
     if req.url == "/echo" and req.method == "POST":
-        return Response(status=Status.OK, reason="OK", body=req.body)
+        return Response(status=Status.OK, reason="OK", body=req.body.copy())
 
     if req.url == "/whoami" and req.method == "GET":
         # ``req.peer`` is populated by the reactor at accept time

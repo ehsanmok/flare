@@ -112,11 +112,10 @@ def test_request_round_trip() raises:
 
     var bytes = c.drain()
     # Skip the initial SETTINGS frame written on preface.
-    var off = 0
     var maybe1 = parse_frame(Span[UInt8, _](bytes))
     assert_true(Bool(maybe1))
     var settings = maybe1.value().copy()
-    off = 9 + settings.header.length
+    var off = 9 + settings.header.length
 
     # Next is HEADERS.
     var rest = List[UInt8](capacity=len(bytes) - off)

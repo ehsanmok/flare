@@ -33,13 +33,13 @@ from std.collections import Optional
 
 # ── Constants (RFC 9113 §4.2 / §6.5) ─────────────────────────────────────
 
-alias H2_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+comptime H2_PREFACE: StaticString = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 """Fixed connection-preface bytes a client MUST send first."""
 
-alias H2_DEFAULT_FRAME_SIZE = 16384
+comptime H2_DEFAULT_FRAME_SIZE: Int = 16384
 """``SETTINGS_MAX_FRAME_SIZE`` initial value."""
 
-alias H2_MAX_FRAME_SIZE = 16777215
+comptime H2_MAX_FRAME_SIZE: Int = 16777215
 """24-bit length field upper bound."""
 
 

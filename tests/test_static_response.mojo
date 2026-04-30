@@ -204,7 +204,7 @@ def test_server_binds_with_static_response() raises:
 
 
 def test_serve_static_close_without_serve_is_noop() raises:
-    """close() on a server that never ran ``serve_static`` is a no-op."""
+    """``close()`` on a server that never ran ``serve_static`` is a no-op."""
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     srv.close()
 

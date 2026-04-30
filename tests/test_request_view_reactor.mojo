@@ -206,10 +206,10 @@ def test_dual_high_bit_in_header_name_rejected() raises:
     for b in "GET / HTTP/1.1\r\n".as_bytes():
         bytes.append(b)
     bytes.append(UInt8(0x80))
-    bytes.append(ord("X"))
-    bytes.append(ord(":"))
-    bytes.append(ord(" "))
-    bytes.append(ord("v"))
+    bytes.append(UInt8(ord("X")))
+    bytes.append(UInt8(ord(":")))
+    bytes.append(UInt8(ord(" ")))
+    bytes.append(UInt8(ord("v")))
     for b in "\r\n\r\n".as_bytes():
         bytes.append(b)
     with assert_raises():
@@ -225,8 +225,8 @@ def test_dual_bare_cr_in_header_value_rejected() raises:
     for b in "GET / HTTP/1.1\r\nX-A: hello".as_bytes():
         bytes.append(b)
     bytes.append(UInt8(0x0D))  # bare CR
-    bytes.append(ord("X"))
-    bytes.append(ord("\n"))
+    bytes.append(UInt8(ord("X")))
+    bytes.append(UInt8(ord("\n")))
     for b in "\r\n".as_bytes():
         bytes.append(b)
     with assert_raises():
@@ -239,7 +239,7 @@ def test_dual_nul_in_header_value_rejected() raises:
     for b in "GET / HTTP/1.1\r\nX-A: hello".as_bytes():
         bytes.append(b)
     bytes.append(UInt8(0))
-    bytes.append(ord("X"))
+    bytes.append(UInt8(ord("X")))
     for b in "\r\n\r\n".as_bytes():
         bytes.append(b)
     with assert_raises():

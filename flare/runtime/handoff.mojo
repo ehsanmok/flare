@@ -51,13 +51,13 @@ syscall it amortises.
 from std.collections import Optional
 from std.ffi import external_call
 from std.memory import UnsafePointer, alloc
-from os import getenv
+from std.os import getenv
 
 
 # ── Pthread mutex helpers (ABI-stable across glibc / musl / macOS) ──────
 
 
-alias _MUTEX_BYTES = 64  # generous upper bound across libc flavours
+comptime _MUTEX_BYTES: Int = 64  # generous upper bound across libc flavours
 
 
 def _mutex_init(mu: UnsafePointer[UInt8, _]) -> Bool:

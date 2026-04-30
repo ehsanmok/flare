@@ -14,7 +14,7 @@ Covers:
 """
 
 from std.testing import assert_equal, assert_false, assert_true
-from os import setenv
+from std.os import setenv
 
 from flare.runtime import HandoffPolicy, HandoffQueue, WorkerHandoffPool
 
@@ -83,16 +83,16 @@ def test_handoff_policy_default_disabled() raises:
 
 def test_handoff_policy_from_env_on() raises:
     """``FLARE_SOAK_WORKERS=on`` flips the policy enabled."""
-    setenv("FLARE_SOAK_WORKERS", "on", True)
+    _ = setenv("FLARE_SOAK_WORKERS", "on", True)
     var p = HandoffPolicy.from_env(HandoffPolicy())
     assert_true(p.enabled)
     assert_equal(p.steal_threshold, 1)
-    setenv("FLARE_SOAK_WORKERS", "", True)
+    _ = setenv("FLARE_SOAK_WORKERS", "", True)
 
 
 def test_handoff_policy_from_env_off() raises:
     """Anything other than ``on/1/true`` keeps the default."""
-    setenv("FLARE_SOAK_WORKERS", "no", True)
+    _ = setenv("FLARE_SOAK_WORKERS", "no", True)
     var p = HandoffPolicy.from_env(HandoffPolicy())
     assert_false(p.enabled)
 
