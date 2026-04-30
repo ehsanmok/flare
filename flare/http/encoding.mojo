@@ -363,6 +363,52 @@ def decode_content(
 # ── Brotli ────────────────────────────────────────────────────
 
 
+def _do_compress_brotli(
+    read lib: OwnedDLHandle, data: Span[UInt8, _], quality: c_int
+) raises -> List[UInt8]:
+    """Compress using ``flare_brotli_compress``, growing on overflow.
+
+    ``lib`` is a borrow: it cannot be ASAP-destroyed while this function runs,
+    keeping the shared library mapped across every C call below. Without the
+    borrow, the function-local handle is reclaimed after ``get_function`` and
+    the cached pointer dangles, which segfaults the Mojo runtime on macOS
+    arm64 (libKGENCompilerRTShared.dylib+0x40528).
+
+    Args:
+        lib: Borrowed handle to ``libflare_brotli.so``.
+        data: Plaintext input bytes.
+        quality: Brotli quality level (0-11).
+
+    Returns:
+        Brotli-compressed bytes.
+
+    Raises:
+        Error: If the FFI call fails or the output buffer cannot be grown.
+    """
+    var fn_comp = lib.get_function[
+        def(Int, Int, Int, Int, c_int) thin abi("C") -> c_int
+    ]("flare_brotli_compress")
+    var cap = max(len(data) * 2 + 64, 1024)
+    while True:
+        var out = List[UInt8](capacity=cap)
+        out.resize(cap, 0)
+        var written = fn_comp(
+            Int(data.unsafe_ptr()),
+            len(data),
+            Int(out.unsafe_ptr()),
+            cap,
+            quality,
+        )
+        var w = Int(written)
+        if w == -2:
+            cap *= 2
+            continue
+        if w < 0:
+            raise Error("flare_brotli_compress failed: " + String(written))
+        out.resize(w, 0)
+        return out^
+
+
 def compress_brotli(
     data: Span[UInt8, _], quality: Int = 5
 ) raises -> List[UInt8]:
@@ -384,34 +430,19 @@ def compress_brotli(
     if len(data) == 0:
         return List[UInt8]()
     var lib = OwnedDLHandle(_find_flare_brotli_lib())
-    var fn_comp = lib.get_function[
-        def(Int, Int, Int, Int, c_int) thin abi("C") -> c_int
-    ]("flare_brotli_compress")
-    var cap = max(len(data) * 2 + 64, 1024)
-    while True:
-        var out = List[UInt8](capacity=cap)
-        out.resize(cap, 0)
-        var written = fn_comp(
-            Int(data.unsafe_ptr()),
-            len(data),
-            Int(out.unsafe_ptr()),
-            cap,
-            c_int(quality),
-        )
-        var w = Int(written)
-        if w == -2:
-            cap *= 2
-            continue
-        if w < 0:
-            raise Error("flare_brotli_compress failed: " + String(written))
-        out.resize(w, 0)
-        return out^
+    return _do_compress_brotli(lib, data, c_int(quality))
 
 
-def decompress_brotli(data: Span[UInt8, _]) raises -> List[UInt8]:
-    """Decompress brotli-encoded bytes.
+def _do_decompress_brotli(
+    read lib: OwnedDLHandle, data: Span[UInt8, _]
+) raises -> List[UInt8]:
+    """Decompress using ``flare_brotli_decompress``, growing on overflow.
+
+    ``lib`` is a borrow: it cannot be ASAP-destroyed while this function runs,
+    keeping the shared library mapped across every C call below.
 
     Args:
+        lib: Borrowed handle to ``libflare_brotli.so``.
         data: Brotli-encoded input.
 
     Returns:
@@ -420,9 +451,6 @@ def decompress_brotli(data: Span[UInt8, _]) raises -> List[UInt8]:
     Raises:
         Error: If the FFI call fails or the input is not valid brotli.
     """
-    if len(data) == 0:
-        return List[UInt8]()
-    var lib = OwnedDLHandle(_find_flare_brotli_lib())
     var fn_dec = lib.get_function[
         def(Int, Int, Int, Int) thin abi("C") -> c_int
     ]("flare_brotli_decompress")
@@ -444,3 +472,21 @@ def decompress_brotli(data: Span[UInt8, _]) raises -> List[UInt8]:
             raise Error("flare_brotli_decompress failed: " + String(written))
         out.resize(w, 0)
         return out^
+
+
+def decompress_brotli(data: Span[UInt8, _]) raises -> List[UInt8]:
+    """Decompress brotli-encoded bytes.
+
+    Args:
+        data: Brotli-encoded input.
+
+    Returns:
+        Decoded plaintext.
+
+    Raises:
+        Error: If the FFI call fails or the input is not valid brotli.
+    """
+    if len(data) == 0:
+        return List[UInt8]()
+    var lib = OwnedDLHandle(_find_flare_brotli_lib())
+    return _do_decompress_brotli(lib, data)

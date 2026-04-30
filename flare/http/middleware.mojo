@@ -287,6 +287,24 @@ def _brotli_available() -> Bool:
     return _file_exists(p1)
 
 
+def _flare_fs_access(read lib: OwnedDLHandle, addr: Int) -> c_int:
+    """Invoke ``flare_fs_access`` while ``lib`` is borrowed by the caller.
+
+    Taking ``lib`` as ``read`` ties the dylib's lifetime to the caller's
+    frame, so Mojo's ASAP destructor cannot drop the handle (and thus
+    ``dlclose`` it) before the resolved function pointer is invoked.
+    Without this, ``_file_exists`` segfaults inside the runtime call
+    helper on macOS arm64 / Mojo nightly 1.0.0b1.dev2026042717: the
+    function-local ``OwnedDLHandle`` is reclaimed after ``get_function``
+    and the cached pointer dangles into unmapped memory by the time we
+    call it.
+    """
+    var fn_access = lib.get_function[def(Int) thin abi("C") -> c_int](
+        "flare_fs_access"
+    )
+    return fn_access(addr)
+
+
 def _file_exists(path: String) -> Bool:
     """Return whether ``path`` exists.
 
@@ -300,16 +318,13 @@ def _file_exists(path: String) -> Bool:
         if conda:
             lib_path = conda + "/lib/libflare_fs.so"
         var lib = OwnedDLHandle(lib_path)
-        var fn_access = lib.get_function[def(Int) thin abi("C") -> c_int](
-            "flare_fs_access"
-        )
         var n = path.byte_length()
         var c = List[UInt8](length=n + 1, fill=UInt8(0))
         var src = path.unsafe_ptr()
         for i in range(n):
             c[i] = src[i]
         var addr = Int(c.unsafe_ptr())
-        var rc = Int(fn_access(addr))
+        var rc = Int(_flare_fs_access(lib, addr))
         _ = c^
         return rc == 0
     except:

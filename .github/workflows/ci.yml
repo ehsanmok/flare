@@ -34,10 +34,18 @@ jobs:
         # before any user code runs (#0 .so+0x6dc0b -> #1 .so+0x6ade6
         # -> #2 .so+0x6e8b7 -> libc+0x45330). Same per-frame offsets
         # as the fuzz crash, which confirms a single Mojo / glibc-2.39
-        # ABI break, not a flare-side regression. macOS-14 keeps
-        # passing on the same nightly. Revert when Mojo upstream
-        # re-cuts a 24.04-clean nightly.
-        os: [ubuntu-22.04, macos-14]
+        # ABI break, not a flare-side regression. Revert when Mojo
+        # upstream re-cuts a 24.04-clean nightly.
+        #
+        # macOS pinned to ``macos-15`` (Sequoia, arm64). The previous
+        # ``macos-14`` image hit a Mojo-runtime segfault inside
+        # ``libKGENCompilerRTShared.dylib`` whenever a function-local
+        # ``OwnedDLHandle`` was reclaimed before the ``get_function``
+        # pointer was invoked (see ``flare/http/middleware.mojo``
+        # ``_flare_fs_access`` for the lifetime fix). macos-15 matches
+        # the host SDK we develop against locally; revisit if Apple
+        # retires the runner.
+        os: [ubuntu-22.04, macos-15]
 
     steps:
       - uses: actions/checkout@v4
