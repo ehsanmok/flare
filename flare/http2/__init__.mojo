@@ -59,6 +59,7 @@ from .state import (
 )
 from .server import (
     H2Connection,
+    Http2Config,
     detect_h2c_upgrade,
     is_h2_alpn,
 )

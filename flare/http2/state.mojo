@@ -190,6 +190,11 @@ struct Connection(Copyable, Defaultable, Movable):
     var max_frame_size: Int
     var max_concurrent_streams: Int
     var initial_window_size: Int
+    var max_header_list_size: Int
+    """SETTINGS_MAX_HEADER_LIST_SIZE (RFC 9113 §6.5.2). ``0`` means
+    unset / advertise no cap (the RFC default). v0.7 ``Http2Config``
+    sets this to 8192 by default; emitted only when ``> 0``."""
+
     var send_window: Int
     var recv_window: Int
     var goaway_received: Bool
@@ -203,6 +208,7 @@ struct Connection(Copyable, Defaultable, Movable):
         self.max_frame_size = H2_DEFAULT_FRAME_SIZE
         self.max_concurrent_streams = 100
         self.initial_window_size = 65535
+        self.max_header_list_size = 0  # unset / unbounded (RFC default)
         self.send_window = 65535
         self.recv_window = 65535
         self.goaway_received = False
@@ -210,25 +216,61 @@ struct Connection(Copyable, Defaultable, Movable):
         self.settings_acked = False
 
     def _make_settings(self, ack: Bool) -> Frame:
-        """Server-side initial SETTINGS frame (or empty ACK)."""
+        """Server-side initial SETTINGS frame (or empty ACK).
+
+        Emits one (id, value) pair for every server SETTING that
+        differs from its RFC 9113 / RFC 7541 protocol default. The
+        v0.6 default ``Connection()`` shape (``max_concurrent_streams
+        = 100``, all others at RFC defaults) emits a single
+        ``SETTINGS_MAX_CONCURRENT_STREAMS = 100`` pair so the wire
+        bytes stay byte-for-byte identical to the v0.6 driver
+        (``test_preface_only_emits_settings`` still passes
+        unchanged). ``H2Connection.with_config(Http2Config(...))``
+        with non-default fields adds the corresponding pairs.
+        """
         var f = Frame()
         f.header.type = FrameType.SETTINGS()
         f.header.stream_id = 0
         if ack:
             f.header.flags = FrameFlags(FrameFlags.ACK())
             return f^
-        # Send our SETTINGS_MAX_CONCURRENT_STREAMS.
         var p = List[UInt8]()
-        # SETTINGS_MAX_CONCURRENT_STREAMS = 0x3
-        p.append(UInt8(0x00))
-        p.append(UInt8(0x03))
-        var v = self.max_concurrent_streams
-        p.append(UInt8((v >> 24) & 0xFF))
-        p.append(UInt8((v >> 16) & 0xFF))
-        p.append(UInt8((v >> 8) & 0xFF))
-        p.append(UInt8(v & 0xFF))
+
+        # SETTINGS_HEADER_TABLE_SIZE = 0x1 — only when != RFC 7541 default.
+        if self.hpack_decoder.max_size != 4096:
+            self._append_setting(p, 0x1, self.hpack_decoder.max_size)
+
+        # SETTINGS_MAX_CONCURRENT_STREAMS = 0x3 — flare always
+        # advertises its bound (RFC 9113 §6.5.2 has no protocol
+        # default; not advertising it lets a hostile peer open
+        # arbitrarily many streams).
+        self._append_setting(p, 0x3, self.max_concurrent_streams)
+
+        # SETTINGS_INITIAL_WINDOW_SIZE = 0x4 — only when != RFC default.
+        if self.initial_window_size != 65535:
+            self._append_setting(p, 0x4, self.initial_window_size)
+
+        # SETTINGS_MAX_FRAME_SIZE = 0x5 — only when != RFC default.
+        if self.max_frame_size != H2_DEFAULT_FRAME_SIZE:
+            self._append_setting(p, 0x5, self.max_frame_size)
+
+        # SETTINGS_MAX_HEADER_LIST_SIZE = 0x6 — only when set
+        # (``0`` = unset, RFC default is "unlimited").
+        if self.max_header_list_size > 0:
+            self._append_setting(p, 0x6, self.max_header_list_size)
+
         f.payload = p^
         return f^
+
+    def _append_setting(self, mut buf: List[UInt8], id: Int, value: Int):
+        """Append one 6-byte SETTINGS pair (RFC 9113 §6.5.1):
+        big-endian 2-byte id then big-endian 4-byte value."""
+        buf.append(UInt8((id >> 8) & 0xFF))
+        buf.append(UInt8(id & 0xFF))
+        buf.append(UInt8((value >> 24) & 0xFF))
+        buf.append(UInt8((value >> 16) & 0xFF))
+        buf.append(UInt8((value >> 8) & 0xFF))
+        buf.append(UInt8(value & 0xFF))
 
     def initial_settings(self) -> Frame:
         """The first SETTINGS frame the server emits after preface."""
