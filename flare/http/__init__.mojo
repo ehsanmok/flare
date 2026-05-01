@@ -216,6 +216,7 @@ from .middleware import (
     negotiate_encoding,
 )
 from .structured_logger import StructuredLogger
+from .metrics import Metrics, MetricsRegistry
 from .cors import Cors, CorsConfig
 from .fs import ByteRange, FileServer, parse_range
 from .proxy_protocol import (
