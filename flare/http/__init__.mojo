@@ -217,3 +217,9 @@ from .middleware import (
 )
 from .cors import Cors, CorsConfig
 from .fs import ByteRange, FileServer, parse_range
+from .proxy_protocol import (
+    ProxyHeader,
+    parse_proxy_protocol,
+    parse_proxy_v1,
+    parse_proxy_v2,
+)
