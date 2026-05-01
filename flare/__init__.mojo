@@ -488,6 +488,10 @@ from .tcp.listener import TcpListener
 # flare.udp
 from .udp.socket import UdpSocket, DatagramTooLarge
 
+# flare.uds (v0.7 — Track H2)
+from .uds.listener import UnixListener, accept_uds_fd
+from .uds.stream import UnixStream
+
 # flare.tls
 from .tls.config import TlsConfig, TlsVerify
 from .tls.stream import TlsStream
