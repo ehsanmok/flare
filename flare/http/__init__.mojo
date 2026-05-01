@@ -217,6 +217,16 @@ from .middleware import (
 )
 from .structured_logger import StructuredLogger
 from .metrics import Metrics, MetricsRegistry
+from .auth_extract import (
+    BasicCredentials,
+    BasicExtract,
+    BearerExtract,
+    CsrfToken,
+    csrf_token_b64url,
+    csrf_token_compare,
+    parse_basic_credentials,
+    parse_bearer_token,
+)
 from .cors import Cors, CorsConfig
 from .fs import ByteRange, FileServer, parse_range
 from .proxy_protocol import (
