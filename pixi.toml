@@ -369,6 +369,12 @@ example-http2-config    = "mojo -I . examples/37_http2_config.mojo"     # v0.7 T
 example-uds-sidecar     = "mojo -I . examples/38_uds_sidecar.mojo"      # v0.7 Track H2 — UnixListener + UnixStream
 
 examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo && mojo -I . examples/11_udp.mojo && mojo -I . examples/12_tls.mojo && mojo -I . examples/13_cookies.mojo && mojo -I . examples/14_reactor.mojo && mojo -I . examples/15_router.mojo && mojo -I . examples/16_state.mojo && mojo -I . examples/17_multicore.mojo && mojo -I . examples/18_middleware.mojo && mojo -I . examples/19_extractors.mojo && mojo -I . examples/20_comptime_router.mojo && mojo -I . examples/21_static_response.mojo && mojo -I . examples/22_cancel.mojo && mojo -I . examples/23_drain.mojo && mojo -I . examples/24_sse.mojo && mojo -I . examples/25_cert_reload.mojo && mojo -I . examples/26_mtls.mojo && mojo -I . examples/27_request_cookies.mojo && mojo -I . examples/28_forms.mojo && mojo -I . examples/29_multipart_upload.mojo && mojo -I . examples/30_sessions.mojo && mojo -I . examples/31_middleware_stack.mojo && mojo -I . examples/32_cors.mojo && mojo -I . examples/33_static_files.mojo && mojo -I . examples/34_brotli.mojo && mojo -I . examples/35_http2.mojo && mojo -I . examples/36_work_stealing.mojo && mojo -I . examples/37_http2_config.mojo && mojo -I . examples/38_uds_sidecar.mojo" }
+# Example 39 (io_uring HTTP plaintext server) is invocable on
+# its own via `pixi run example-iouring-plaintext` so the smoke
+# spawns a real listener that other examples don't. It's
+# excluded from the headline `examples` aggregate above to
+# avoid an io_uring-required gate on every CI run.
+example-iouring-plaintext = "mojo -I . examples/39_iouring_plaintext.mojo"
 
 # ── Microbenchmarks (mojo-only, no external load generators) ─────────────────
 # bench-parse:   IP parsing + DNS resolution throughput (confirms SIMD NOT useful here)
