@@ -218,6 +218,7 @@ from .middleware import (
 from .structured_logger import StructuredLogger
 from .metrics import Metrics, MetricsRegistry
 from .auth_extract import (
+    AuthError,
     BasicCredentials,
     BasicExtract,
     BearerExtract,
@@ -227,12 +228,19 @@ from .auth_extract import (
     parse_basic_credentials,
     parse_bearer_token,
 )
-from .template import Template, TemplateContext, TemplateNode, html_escape
+from .template import (
+    Template,
+    TemplateContext,
+    TemplateError,
+    TemplateNode,
+    html_escape,
+)
 from .request_chunks import RequestChunkSource
 from .cors import Cors, CorsConfig
 from .fs import ByteRange, FileServer, parse_range
 from .proxy_protocol import (
     ProxyHeader,
+    ProxyParseError,
     parse_proxy_protocol,
     parse_proxy_v1,
     parse_proxy_v2,

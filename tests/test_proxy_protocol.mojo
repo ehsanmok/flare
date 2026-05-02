@@ -25,6 +25,7 @@ from std.testing import (
 
 from flare.http.proxy_protocol import (
     ProxyHeader,
+    ProxyParseError,
     parse_proxy_protocol,
     parse_proxy_v1,
     parse_proxy_v2,
@@ -418,6 +419,67 @@ def test_autodetect_garbage_raises() raises:
     var data = _bytes("HELLO WORLD\r\n")
     with assert_raises(contains="no PROXY protocol signature"):
         var _u = parse_proxy_protocol(Span[UInt8, _](data))
+
+
+# ── ProxyParseError typed shape ────────────────────────────────────────────
+
+
+def test_proxy_parse_error_v1_carries_version_and_phrase() raises:
+    """Catching the typed error directly gives field access; the
+    ``version`` field discriminates v1 vs v2 vs auto-dispatch."""
+    var data = _bytes("PROXY UDP 1.2.3.4 5.6.7.8 80 8080\r\n")
+    var got_version = -1
+    var got_what = String("")
+    try:
+        var _u = parse_proxy_v1(Span[UInt8, _](data))
+    except e:
+        got_version = e.version
+        got_what = e.what.copy()
+    assert_equal(got_version, 1)
+    assert_true(got_what.find("unknown protocol") >= 0)
+
+
+def test_proxy_parse_error_v2_carries_position() raises:
+    """v2 errors carry a byte offset for greppable logs."""
+    var data = _v2_signature()
+    data.append(UInt8(0x11))  # version=1, command=PROXY (wrong version)
+    data.append(UInt8(0x11))
+    data.append(UInt8(0x00))
+    data.append(UInt8(12))
+    for _ in range(12):
+        data.append(UInt8(0))
+    var got_version = -1
+    var got_position = -99
+    try:
+        var _u = parse_proxy_v2(Span[UInt8, _](data))
+    except e:
+        got_version = e.version
+        got_position = e.position
+    assert_equal(got_version, 2)
+    assert_equal(got_position, 12)
+
+
+def test_proxy_parse_error_autodetect_uses_version_zero() raises:
+    """The version-detecting wrapper uses ``version=0`` for the
+    "no signature found" case, so callers can distinguish a
+    not-PROXY-shaped buffer from a malformed v1/v2 header."""
+    var data = _bytes("HELLO WORLD\r\n")
+    var got_version = -1
+    try:
+        var _u = parse_proxy_protocol(Span[UInt8, _](data))
+    except e:
+        got_version = e.version
+    assert_equal(got_version, 0)
+
+
+def test_proxy_parse_error_writable_renders_with_position() raises:
+    var e = ProxyParseError(version=2, position=12, what=String("oops"))
+    assert_equal(String(e), String("ProxyParseError(v2, pos=12): oops"))
+
+
+def test_proxy_parse_error_writable_renders_without_position() raises:
+    var e = ProxyParseError(version=1, position=-1, what=String("oops"))
+    assert_equal(String(e), String("ProxyParseError(v1): oops"))
 
 
 def main() raises:

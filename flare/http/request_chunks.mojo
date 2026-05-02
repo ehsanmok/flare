@@ -47,6 +47,8 @@ Configuration:
 
 from std.collections import Optional
 
+from flare.errors import ValidationError
+
 from .body import ChunkSource
 from .cancel import Cancel
 from .request import Request
@@ -104,16 +106,17 @@ struct RequestChunkSource(ChunkSource, Movable):
     @staticmethod
     def of_with_chunk_size(
         req: Request, chunk_size: Int
-    ) raises -> RequestChunkSource:
+    ) raises ValidationError -> RequestChunkSource:
         """Build a source pulling from ``req.body`` with a
         caller-specified chunk size.
 
-        Raises on ``chunk_size <= 0`` so the source can't enter
-        an infinite loop emitting empty chunks."""
+        Raises :class:`flare.errors.ValidationError` (``field=
+        "chunk_size"``) on ``chunk_size <= 0`` so the source
+        can't enter an infinite loop emitting empty chunks."""
         if chunk_size <= 0:
-            raise Error(
-                "RequestChunkSource: chunk_size must be > 0, got "
-                + String(chunk_size)
+            raise ValidationError(
+                field=String("chunk_size"),
+                reason=String("must be > 0, got ") + String(chunk_size),
             )
         return RequestChunkSource(
             req.body.copy(),

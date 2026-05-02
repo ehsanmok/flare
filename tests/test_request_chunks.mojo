@@ -24,6 +24,7 @@ from std.testing import (
     assert_true,
 )
 
+from flare.errors import ValidationError
 from flare.http.cancel import Cancel, CancelCell, CancelReason
 from flare.http.request import Request
 from flare.http.request_chunks import RequestChunkSource
@@ -56,24 +57,33 @@ def test_of_default_chunk_size_total_and_remaining() raises:
     assert_equal(s.chunk_size, 65536)
 
 
-def test_of_with_chunk_size_zero_raises() raises:
+def test_of_with_chunk_size_zero_raises_validation_error() raises:
+    """Catching the typed ``ValidationError`` directly gives field
+    access — ``field`` identifies which argument failed and
+    ``reason`` carries human-readable context."""
     var req = _make_request_with_body(List[UInt8]())
-    var raised = False
+    var got_field = String("")
+    var got_reason = String("")
     try:
         var _s = RequestChunkSource.of_with_chunk_size(req, 0)
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_field = e.field.copy()
+        got_reason = e.reason.copy()
+    assert_equal(got_field, String("chunk_size"))
+    assert_true(got_reason.find("must be > 0") >= 0)
 
 
-def test_of_with_chunk_size_negative_raises() raises:
+def test_of_with_chunk_size_negative_raises_validation_error() raises:
     var req = _make_request_with_body(List[UInt8]())
-    var raised = False
+    var got_field = String("")
+    var got_reason = String("")
     try:
         var _s = RequestChunkSource.of_with_chunk_size(req, -1)
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_field = e.field.copy()
+        got_reason = e.reason.copy()
+    assert_equal(got_field, String("chunk_size"))
+    assert_true(got_reason.find("got -1") >= 0)
 
 
 # ── Iteration ─────────────────────────────────────────────────────────────

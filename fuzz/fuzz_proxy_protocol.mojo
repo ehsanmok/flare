@@ -26,27 +26,37 @@ from flare.http.proxy_protocol import parse_proxy_protocol
 
 
 def target(data: List[UInt8]) raises:
+    """Soundness check.
+
+    The parser now raises typed :class:`ProxyParseError`, which
+    can't share a single ``try`` block with a generic
+    ``raise Error("...")`` (Mojo doc § "Don't mix error types in
+    a single try block"). Split into two stages: first the parse
+    call (typed-error catch), then the soundness check on
+    ``consumed`` (generic Error raises only fire when the parser
+    succeeded but reported nonsensical bookkeeping)."""
     var span = Span[UInt8, _](data)
+    var consumed: Int = 0
+    var got_value = False
     try:
         var got = parse_proxy_protocol(span)
-        if not got:
-            return
-        var h = got.value().copy()
-        # Soundness invariant: consumed must be in [1, len(data)].
-        if h.consumed <= 0:
-            raise Error(
-                "PROXY parse: consumed <= 0 (got " + String(h.consumed) + ")"
-            )
-        if h.consumed > len(data):
-            raise Error(
-                "PROXY parse: consumed > input length ("
-                + String(h.consumed)
-                + " > "
-                + String(len(data))
-                + ")"
-            )
-    except:
-        pass
+        if got:
+            got_value = True
+            consumed = got.value().consumed
+    except _e:
+        return
+    if not got_value:
+        return
+    if consumed <= 0:
+        raise Error("PROXY parse: consumed <= 0 (got " + String(consumed) + ")")
+    if consumed > len(data):
+        raise Error(
+            "PROXY parse: consumed > input length ("
+            + String(consumed)
+            + " > "
+            + String(len(data))
+            + ")"
+        )
 
 
 def _bytes(s: StringLiteral) -> List[UInt8]:

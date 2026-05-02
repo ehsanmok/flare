@@ -4,12 +4,19 @@ Coverage:
 
 1. ``parse_bearer_token`` — happy path, leading whitespace,
    case-insensitive scheme match, missing scheme / token /
-   header.
+   header. Failure paths assert the typed :class:`AuthError`
+   variant directly.
 2. ``parse_basic_credentials`` — happy path, empty password,
    passwords containing ``:``, base64 padding variants,
-   malformed inputs.
+   malformed inputs (typed-error asserted per failure mode).
 3. ``BearerExtract`` / ``BasicExtract`` — Extractor trait
    round-trip via ``apply`` and the static ``extract`` factory.
+   The ``Extractor`` trait is bare-``raises`` so the caller
+   catches ``Error`` at the compile-time type level; we assert
+   on ``String(e)`` substring matching the typed error's
+   :func:`AuthError.write_to` rendering (which the Mojo runtime
+   preserves through bare-raises propagation per the typed-
+   errors docs § "Avoid bare raises with typed errors").
 4. ``csrf_token_b64url`` — deterministic encoder; matches a
    known-vector for ``[0..32)`` byte input.
 5. ``csrf_token_compare`` — constant-time XOR fold; returns
@@ -17,6 +24,9 @@ Coverage:
    exact match.
 6. ``CsrfToken.verify`` — ties the comparator to a struct shape
    suitable for double-submit cookie pattern.
+7. ``AuthError`` — equality on ``_variant`` only;
+   :func:`AuthError.write_to` rendering with and without
+   ``detail``.
 """
 
 from std.testing import (
@@ -27,6 +37,7 @@ from std.testing import (
 )
 
 from flare.http.auth_extract import (
+    AuthError,
     BasicCredentials,
     BasicExtract,
     BearerExtract,
@@ -62,31 +73,40 @@ def test_bearer_extra_space_between_scheme_and_token() raises:
     assert_equal(t, String("long-token"))
 
 
-def test_bearer_empty_value_raises() raises:
-    var raised = False
+def test_bearer_empty_value_raises_empty_value() raises:
+    var got = 0
     try:
         var _t = parse_bearer_token(String(""))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.EMPTY_VALUE._variant)
 
 
-def test_bearer_wrong_scheme_raises() raises:
-    var raised = False
+def test_bearer_wrong_scheme_raises_wrong_scheme() raises:
+    var got = 0
     try:
         var _t = parse_bearer_token(String("Basic abc"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.WRONG_SCHEME._variant)
 
 
-def test_bearer_missing_token_raises() raises:
-    var raised = False
+def test_bearer_too_short_raises_too_short() raises:
+    var got = 0
+    try:
+        var _t = parse_bearer_token(String("Bear"))
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.TOO_SHORT._variant)
+
+
+def test_bearer_missing_token_raises_empty_token() raises:
+    var got = 0
     try:
         var _t = parse_bearer_token(String("Bearer "))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.EMPTY_TOKEN._variant)
 
 
 # ── parse_basic_credentials ──────────────────────────────────────────────
@@ -118,41 +138,55 @@ def test_basic_empty_password() raises:
     assert_equal(c.password, String(""))
 
 
-def test_basic_no_separator_raises() raises:
+def test_basic_no_separator_raises_missing_separator() raises:
     # base64 of "no-colon-here"
-    var raised = False
+    var got = 0
     try:
         var _c = parse_basic_credentials(String("Basic bm8tY29sb24taGVyZQ=="))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.MISSING_SEPARATOR._variant)
 
 
-def test_basic_invalid_base64_raises() raises:
-    var raised = False
+def test_basic_invalid_base64_char_raises_invalid_char() raises:
+    # length-12 to satisfy mod-4 check, with '!' which is not in
+    # the alphabet.
+    var got = 0
     try:
-        var _c = parse_basic_credentials(String("Basic !!notb64!!"))
-    except:
-        raised = True
-    assert_true(raised)
+        # 12-char b64 payload (mod-4 OK) with '!' which is not in
+        # the alphabet, so we hit B64_INVALID_CHAR not
+        # B64_BAD_LENGTH.
+        var _c = parse_basic_credentials(String("Basic !!!!aaaaaaaa"))
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.B64_INVALID_CHAR._variant)
 
 
-def test_basic_wrong_scheme_raises() raises:
-    var raised = False
+def test_basic_bad_length_raises_bad_length() raises:
+    var got = 0
+    try:
+        var _c = parse_basic_credentials(String("Basic abc"))
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.B64_BAD_LENGTH._variant)
+
+
+def test_basic_wrong_scheme_raises_wrong_scheme() raises:
+    var got = 0
     try:
         var _c = parse_basic_credentials(String("Bearer abc"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.WRONG_SCHEME._variant)
 
 
-def test_basic_empty_value_raises() raises:
-    var raised = False
+def test_basic_empty_value_raises_empty_value() raises:
+    var got = 0
     try:
         var _c = parse_basic_credentials(String(""))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got = e._variant
+    assert_true(got == AuthError.EMPTY_VALUE._variant)
 
 
 # ── BearerExtract / BasicExtract ─────────────────────────────────────────
@@ -165,14 +199,18 @@ def test_bearer_extractor_apply_succeeds() raises:
     assert_equal(e.token, String("my-token"))
 
 
-def test_bearer_extractor_missing_header_raises() raises:
+def test_bearer_extractor_missing_header_raises_typed() raises:
+    """``Extractor.apply`` is bare-raises so the caller sees an
+    ``Error``-typed catch — but the Mojo runtime preserves the
+    AuthError's ``Writable`` identity, observable via
+    ``String(e)``."""
     var req = Request(method=String("GET"), url=String("/"))
-    var raised = False
+    var msg = String("")
     try:
         var _e = BearerExtract.extract(req)
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        msg = String(e)
+    assert_true(msg.find("AuthError(MISSING_HEADER)") >= 0)
 
 
 def test_basic_extractor_apply_succeeds() raises:
@@ -183,14 +221,29 @@ def test_basic_extractor_apply_succeeds() raises:
     assert_equal(e.password, String("s3cr3t"))
 
 
-def test_basic_extractor_missing_header_raises() raises:
+def test_basic_extractor_missing_header_raises_typed() raises:
     var req = Request(method=String("GET"), url=String("/"))
-    var raised = False
+    var msg = String("")
     try:
         var _e = BasicExtract.extract(req)
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        msg = String(e)
+    assert_true(msg.find("AuthError(MISSING_HEADER)") >= 0)
+
+
+def test_basic_extractor_invalid_b64_propagates_typed() raises:
+    """The B64_BAD_LENGTH variant raised inside
+    ``parse_basic_credentials`` should propagate through
+    ``BasicExtract.apply``'s bare-raises signature with its
+    ``Writable`` rendering intact."""
+    var req = Request(method=String("GET"), url=String("/"))
+    req.headers.set("Authorization", "Basic abc")
+    var msg = String("")
+    try:
+        var _e = BasicExtract.extract(req)
+    except e:
+        msg = String(e)
+    assert_true(msg.find("AuthError(B64_BAD_LENGTH)") >= 0)
 
 
 # ── CSRF ─────────────────────────────────────────────────────────────────
@@ -212,14 +265,12 @@ def test_csrf_b64url_empty_input() raises:
 
 
 def test_csrf_b64url_handles_one_byte_tail() raises:
-    """[0xFF] → /w (no padding)."""
     var v = List[UInt8]()
     v.append(UInt8(0xFF))
     assert_equal(csrf_token_b64url(v), String("_w"))
 
 
 def test_csrf_b64url_handles_two_byte_tail() raises:
-    """[0xFF, 0xEE] → /+4 → URL-safe '_-4'."""
     var v = List[UInt8]()
     v.append(UInt8(0xFF))
     v.append(UInt8(0xEE))
@@ -247,6 +298,27 @@ def test_csrf_token_verify_pair() raises:
     assert_true(t.verify())
     var bad = CsrfToken(String("tok-cookie"), String("tok-form"))
     assert_false(bad.verify())
+
+
+# ── AuthError shape ──────────────────────────────────────────────────────
+
+
+def test_auth_error_eq_compares_on_variant_only() raises:
+    var a = AuthError(_variant=1, detail=String("x"))
+    var b = AuthError(_variant=1, detail=String("y"))
+    var c = AuthError(_variant=2, detail=String("x"))
+    assert_true(a == b)
+    assert_true(a != c)
+
+
+def test_auth_error_write_to_renders_variant_and_detail() raises:
+    var e = AuthError(_variant=4, detail=String("expected Bearer"))
+    assert_equal(String(e), String("AuthError(WRONG_SCHEME): expected Bearer"))
+
+
+def test_auth_error_write_to_omits_empty_detail() raises:
+    var e = AuthError(_variant=5, detail=String(""))
+    assert_equal(String(e), String("AuthError(EMPTY_TOKEN)"))
 
 
 def main() raises:

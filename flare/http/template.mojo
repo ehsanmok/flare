@@ -54,9 +54,134 @@ shape (askama / sailfish do this with codegen at compile time);
 flare's reactor latency budget is dominated by network IO not
 template render, so the v0.7 cut keeps the parser-tree-walker
 simple.
+
+Error handling:
+
+Both :func:`Template.compile` and :func:`Template.render`
+raise the typed :class:`TemplateError` (enumerated; one
+``_variant`` field, comptime aliases per condition). Callers
+can pattern-match on the variant to distinguish a parse error
+from a runtime-rendering error from an unbound-name error,
+without ``String(e)`` parsing.
+
+```mojo
+from flare.http.template import Template, TemplateContext, TemplateError
+
+try:
+    var t = Template.compile("{{ name }")
+except e:
+    if e == TemplateError.UNTERMINATED_VAR:
+        print("forgot to close {{:", e.detail)
+```
 """
 
+from std.format import Writable, Writer
+
 from .request import Request
+
+
+# ── TemplateError ──────────────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct TemplateError(
+    Copyable, Equatable, ImplicitlyCopyable, Movable, Writable
+):
+    """Typed error raised by :func:`Template.compile` /
+    :func:`Template.render`.
+
+    Enumerated (``_variant`` Int field) with ``comptime``
+    aliases per condition. Equatable so callers can pattern-
+    match with ``e == TemplateError.UNTERMINATED_VAR`` etc. The
+    ``detail`` field carries human-readable extra context (the
+    offending tag name, the unbound variable name, the malformed
+    raw text, ...) — empty when the variant is self-explanatory.
+
+    Variants:
+
+    - ``UNTERMINATED_VAR`` — ``{{ ... }}`` opener without a
+      matching ``}}`` close.
+    - ``UNTERMINATED_TAG`` — ``{% ... %}`` opener without a
+      matching ``%}`` close (or a ``{% endtag %}`` whose ``%}``
+      ran off the end of source).
+    - ``UNKNOWN_FILTER`` — unsupported filter after ``|`` in
+      ``{{ name | filter }}``. Only ``| safe`` is accepted.
+    - ``EMPTY_VAR`` — ``{{ }}`` or ``{{ | safe }}`` with no
+      variable name.
+    - ``EMPTY_TAG`` — ``{% %}`` with no tokens.
+    - ``MALFORMED_IF`` — ``{% if %}`` not exactly one operand
+      after ``if``.
+    - ``MALFORMED_FOR`` — ``{% for X in Y %}`` shape violated.
+      ``detail`` carries the raw token list.
+    - ``UNMATCHED_END`` — ``{% endif %}`` / ``{% endfor %}``
+      seen at the top level (no matching opener). ``detail``
+      carries the unmatched tag head.
+    - ``UNKNOWN_TAG`` — unrecognised control tag in ``{% ... %}``.
+      ``detail`` carries the tag head.
+    - ``UNBOUND_VARIABLE`` — ``{{ name }}`` for a name not in
+      ``ctx.strings``. ``detail`` carries the variable name.
+    - ``UNBOUND_ITERABLE`` — ``{% for x in name %}`` for a name
+      not in ``ctx.lists``. ``detail`` carries the variable name.
+    - ``UNKNOWN_NODE`` — internal: parsed tree contained a node
+      kind the renderer doesn't handle. Should be unreachable
+      unless ``TemplateNode.kind`` was constructed by hand.
+    """
+
+    var _variant: Int
+    var detail: String
+
+    comptime UNTERMINATED_VAR = TemplateError(_variant=1, detail=String(""))
+    comptime UNTERMINATED_TAG = TemplateError(_variant=2, detail=String(""))
+    comptime UNKNOWN_FILTER = TemplateError(_variant=3, detail=String(""))
+    comptime EMPTY_VAR = TemplateError(_variant=4, detail=String(""))
+    comptime EMPTY_TAG = TemplateError(_variant=5, detail=String(""))
+    comptime MALFORMED_IF = TemplateError(_variant=6, detail=String(""))
+    comptime MALFORMED_FOR = TemplateError(_variant=7, detail=String(""))
+    comptime UNMATCHED_END = TemplateError(_variant=8, detail=String(""))
+    comptime UNKNOWN_TAG = TemplateError(_variant=9, detail=String(""))
+    comptime UNBOUND_VARIABLE = TemplateError(_variant=10, detail=String(""))
+    comptime UNBOUND_ITERABLE = TemplateError(_variant=11, detail=String(""))
+    comptime UNKNOWN_NODE = TemplateError(_variant=12, detail=String(""))
+
+    def __eq__(self, other: TemplateError) -> Bool:
+        """Compare on the ``_variant`` tag only — ``detail`` is
+        human-readable context, not part of the identity."""
+        return self._variant == other._variant
+
+    def __ne__(self, other: TemplateError) -> Bool:
+        return self._variant != other._variant
+
+    def variant_name(self) -> String:
+        if self._variant == 1:
+            return String("UNTERMINATED_VAR")
+        elif self._variant == 2:
+            return String("UNTERMINATED_TAG")
+        elif self._variant == 3:
+            return String("UNKNOWN_FILTER")
+        elif self._variant == 4:
+            return String("EMPTY_VAR")
+        elif self._variant == 5:
+            return String("EMPTY_TAG")
+        elif self._variant == 6:
+            return String("MALFORMED_IF")
+        elif self._variant == 7:
+            return String("MALFORMED_FOR")
+        elif self._variant == 8:
+            return String("UNMATCHED_END")
+        elif self._variant == 9:
+            return String("UNKNOWN_TAG")
+        elif self._variant == 10:
+            return String("UNBOUND_VARIABLE")
+        elif self._variant == 11:
+            return String("UNBOUND_ITERABLE")
+        elif self._variant == 12:
+            return String("UNKNOWN_NODE")
+        return String("UNKNOWN")
+
+    def write_to[W: Writer](self, mut writer: W):
+        writer.write("TemplateError(", self.variant_name(), ")")
+        if self.detail.byte_length() > 0:
+            writer.write(": ", self.detail)
 
 
 # ── HTML escape ─────────────────────────────────────────────────────────────
@@ -165,12 +290,74 @@ struct TemplateContext(Copyable, Defaultable, Movable):
         self.lists[name.copy()] = value.copy()
 
 
+# ── Internal: typed-error wrappers around Dict access ──────────────────────
+#
+# ``Dict[String, T].__getitem__`` raises ``DictKeyError[String]`` (typed).
+# Inside a function declared ``raises TemplateError``, calling that
+# directly fails to compile per the Mojo doc § "Don't mix error
+# types in a single try block". Every Dict access goes through one
+# of these two wrappers, both of which absorb the DictKeyError and
+# either return the value (if the key was checked first via
+# ``__contains__``) or convert to a TemplateError.UNKNOWN_NODE
+# internal error.
+
+
+def _dict_get_string(
+    d: Dict[String, String], name: String
+) raises TemplateError -> String:
+    """Look up a string from ``d`` after a ``__contains__`` check.
+    The contains-check guarantees the access succeeds; the
+    try/except absorbs Mojo's typed ``DictKeyError`` to keep
+    callers' typed-error signature monomorphic."""
+    try:
+        return d[name].copy()
+    except _e:
+        raise TemplateError(
+            _variant=12,
+            detail=String("internal: dict-string lookup of ") + name,
+        )
+
+
+def _dict_get_list(
+    d: Dict[String, List[String]], name: String
+) raises TemplateError -> List[String]:
+    try:
+        return d[name].copy()
+    except _e:
+        raise TemplateError(
+            _variant=12,
+            detail=String("internal: dict-list lookup of ") + name,
+        )
+
+
+def _dict_set_string(mut d: Dict[String, String], name: String, value: String):
+    """``Dict[String, String].__setitem__`` is non-raising on the
+    pinned Mojo nightly; this helper exists for symmetry with
+    ``_dict_get_string`` so renderer call sites read uniformly."""
+    d[name.copy()] = value.copy()
+
+
+def _dict_pop_string(
+    mut d: Dict[String, String], name: String
+) raises TemplateError:
+    """``Dict.pop`` raises ``DictKeyError`` on miss; the renderer
+    only calls this after the corresponding ``__setitem__`` so a
+    miss would be an internal bug."""
+    try:
+        _ = d.pop(name)
+    except _e:
+        raise TemplateError(
+            _variant=12,
+            detail=String("internal: dict-string pop of ") + name,
+        )
+
+
 # ── Parser ─────────────────────────────────────────────────────────────────
 
 
 def _parse_segment(
     src: String, mut pos: Int, until_tags: List[String]
-) raises -> List[TemplateNode]:
+) raises TemplateError -> List[TemplateNode]:
     """Parse template body from ``pos`` until one of
     ``until_tags`` is encountered. Returns the parsed nodes;
     leaves ``pos`` pointing at the first byte of the matched
@@ -186,7 +373,6 @@ def _parse_segment(
     var n = src.byte_length()
     var p = src.unsafe_ptr()
     while pos < n:
-        # Look for the next ``{`` opener.
         var open_pos = -1
         var i = pos
         while i + 1 < n:
@@ -197,7 +383,6 @@ def _parse_segment(
                 break
             i += 1
         if open_pos < 0:
-            # No more tags — emit the remainder as text.
             if pos < n:
                 var t = String(capacity=n - pos)
                 for j in range(pos, n):
@@ -226,13 +411,14 @@ def _parse_segment(
                     List[TemplateNode](),
                 )
             )
-        # We're now at ``{{`` or ``{%``.
         var second = Int(p[open_pos + 1])
         if second == ord("{"):
-            # ``{{ name }}`` or ``{{ name | safe }}``.
             var close = _find_close(src, open_pos + 2, "}}")
             if close < 0:
-                raise Error("template: unterminated {{...}} expression")
+                raise TemplateError(
+                    _variant=1,
+                    detail=String("opened at byte ") + String(open_pos),
+                )
             var inside = _slice(src, open_pos + 2, close)
             var trimmed = _strip(inside)
             var safe = False
@@ -243,11 +429,14 @@ def _parse_segment(
                     _slice(trimmed, pipe_off + 1, trimmed.byte_length())
                 )
                 if filt != String("safe"):
-                    raise Error("template: only the | safe filter is supported")
+                    raise TemplateError(_variant=3, detail=filt^)
                 safe = True
                 name_part = _strip(_slice(trimmed, 0, pipe_off))
             if name_part.byte_length() == 0:
-                raise Error("template: empty variable name in {{...}}")
+                raise TemplateError(
+                    _variant=4,
+                    detail=String("at byte ") + String(open_pos),
+                )
             var kind = _NODE_VAR_SAFE if safe else _NODE_VAR
             out.append(
                 TemplateNode(
@@ -260,29 +449,33 @@ def _parse_segment(
             )
             pos = close + 2
         else:
-            # ``{% ... %}`` control tag.
             var close = _find_close(src, open_pos + 2, "%}")
             if close < 0:
-                raise Error("template: unterminated {%...%} tag")
+                raise TemplateError(
+                    _variant=2,
+                    detail=String("opened at byte ") + String(open_pos),
+                )
             var raw = _strip(_slice(src, open_pos + 2, close))
             pos = close + 2
-            # Tokenise on whitespace.
             var tokens = _split_ws(raw)
             if len(tokens) == 0:
-                raise Error("template: empty control tag")
+                raise TemplateError(
+                    _variant=5,
+                    detail=String("at byte ") + String(open_pos),
+                )
             var head = tokens[0]
             if _matches(until_tags, head):
-                # Stop tag; rewind pos to the start of the
-                # tag so the caller can advance past it.
                 pos = open_pos
                 return out^
             if head == String("if"):
                 if len(tokens) != 2:
-                    raise Error("template: {% if NAME %} requires one operand")
+                    raise TemplateError(
+                        _variant=6,
+                        detail=String("expected one operand, got ")
+                        + String(len(tokens) - 1),
+                    )
                 var children = _parse_segment(src, pos, _list("endif"))
-                # _parse_segment leaves pos at the start of the
-                # matched end tag; advance past it now.
-                pos = _skip_tag(src, pos, "endif")
+                pos = _skip_tag(src, pos)
                 out.append(
                     TemplateNode(
                         _NODE_IF,
@@ -294,13 +487,11 @@ def _parse_segment(
                 )
             elif head == String("for"):
                 if len(tokens) != 4 or tokens[2] != String("in"):
-                    raise Error(
-                        "template: {% for X in Y %} required, got " + raw
-                    )
+                    raise TemplateError(_variant=7, detail=raw^)
                 var loop_v = tokens[1].copy()
                 var iter_n = tokens[3].copy()
                 var children = _parse_segment(src, pos, _list("endfor"))
-                pos = _skip_tag(src, pos, "endfor")
+                pos = _skip_tag(src, pos)
                 out.append(
                     TemplateNode(
                         _NODE_FOR,
@@ -311,9 +502,9 @@ def _parse_segment(
                     )
                 )
             elif head == String("endif") or head == String("endfor"):
-                raise Error("template: unmatched closing tag " + head)
+                raise TemplateError(_variant=8, detail=head.copy())
             else:
-                raise Error("template: unknown tag " + head)
+                raise TemplateError(_variant=9, detail=head.copy())
     return out^
 
 
@@ -408,13 +599,16 @@ def _split_ws(s: String) -> List[String]:
     return out^
 
 
-def _skip_tag(src: String, pos: Int, tag: String) raises -> Int:
+def _skip_tag(src: String, pos: Int) raises TemplateError -> Int:
     """Given ``pos`` pointing at the start of a ``{% TAG %}``
     end tag (validated by ``_parse_segment``), return the byte
     position immediately after ``%}``."""
     var close = _find_close(src, pos + 2, "%}")
     if close < 0:
-        raise Error("template: unterminated end-tag {% " + tag + " %}")
+        raise TemplateError(
+            _variant=2,
+            detail=String("end-tag opened at byte ") + String(pos),
+        )
     return close + 2
 
 
@@ -423,7 +617,7 @@ def _skip_tag(src: String, pos: Int, tag: String) raises -> Int:
 
 def _render_nodes(
     nodes: List[TemplateNode], mut ctx: TemplateContext
-) raises -> String:
+) raises TemplateError -> String:
     var out = String(capacity=256)
     for i in range(len(nodes)):
         var node = nodes[i].copy()
@@ -438,43 +632,42 @@ def _render_nodes(
                 out += _render_nodes(node.children, ctx)
         elif node.kind == _NODE_FOR:
             if not ctx.lists.__contains__(node.name):
-                raise Error(
-                    "template: {% for ... in "
-                    + node.name
-                    + " %} but no list bound to that name"
-                )
-            var seq = ctx.lists[node.name].copy()
+                raise TemplateError(_variant=11, detail=node.name.copy())
+            var seq = _dict_get_list(ctx.lists, node.name)
             for k in range(len(seq)):
-                # Push the loop variable onto the strings map for
-                # the body, then pop after.
                 var prior_present = ctx.strings.__contains__(node.loop_var)
                 var prior_value = String("")
                 if prior_present:
-                    prior_value = ctx.strings[node.loop_var].copy()
-                ctx.strings[node.loop_var.copy()] = seq[k].copy()
+                    prior_value = _dict_get_string(ctx.strings, node.loop_var)
+                _dict_set_string(ctx.strings, node.loop_var, seq[k])
                 out += _render_nodes(node.children, ctx)
                 if prior_present:
-                    ctx.strings[node.loop_var.copy()] = prior_value^
+                    _dict_set_string(ctx.strings, node.loop_var, prior_value)
                 else:
-                    _ = ctx.strings.pop(node.loop_var)
+                    _dict_pop_string(ctx.strings, node.loop_var)
         else:
-            raise Error("template: unknown node kind " + String(node.kind))
+            raise TemplateError(
+                _variant=12,
+                detail=String("kind=") + String(node.kind),
+            )
     return out^
 
 
-def _lookup_string(ctx: TemplateContext, name: String) raises -> String:
+def _lookup_string(
+    ctx: TemplateContext, name: String
+) raises TemplateError -> String:
     if ctx.strings.__contains__(name):
-        return ctx.strings[name].copy()
-    raise Error("template: variable '" + name + "' not bound in context")
+        return _dict_get_string(ctx.strings, name)
+    raise TemplateError(_variant=10, detail=name.copy())
 
 
-def _truthy(ctx: TemplateContext, name: String) raises -> Bool:
+def _truthy(ctx: TemplateContext, name: String) raises TemplateError -> Bool:
     """Truthiness rule: a string is truthy iff non-empty; a
     list is truthy iff len > 0; an unbound name is False."""
     if ctx.strings.__contains__(name):
-        return ctx.strings[name].byte_length() > 0
+        return _dict_get_string(ctx.strings, name).byte_length() > 0
     if ctx.lists.__contains__(name):
-        return len(ctx.lists[name]) > 0
+        return len(_dict_get_list(ctx.lists, name)) > 0
     return False
 
 
@@ -496,22 +689,27 @@ struct Template(Copyable, Movable):
     var nodes: List[TemplateNode]
 
     @staticmethod
-    def compile(src: String) raises -> Template:
+    def compile(src: String) raises TemplateError -> Template:
         """Parse ``src`` into a render-ready :class:`Template`.
 
-        Raises :class:`Error` on:
-        - unterminated ``{{...}}`` / ``{%...%}`` tag
-        - unmatched ``{% endif %}`` / ``{% endfor %}``
-        - empty variable name in ``{{...}}``
-        - unsupported filter (only ``| safe`` is accepted)
-        - malformed ``{% if %}`` / ``{% for %}`` operand list
-        - unknown tag head
+        Raises :class:`TemplateError` (variant indicates which):
+
+        - ``UNTERMINATED_VAR`` — unterminated ``{{...}}``
+        - ``UNTERMINATED_TAG`` — unterminated ``{%...%}``
+        - ``UNMATCHED_END`` — unmatched ``{% endif %}`` /
+          ``{% endfor %}``
+        - ``EMPTY_VAR`` — empty variable name in ``{{...}}``
+        - ``EMPTY_TAG`` — empty ``{% %}``
+        - ``UNKNOWN_FILTER`` — only ``| safe`` is accepted
+        - ``MALFORMED_IF`` — wrong operand count
+        - ``MALFORMED_FOR`` — ``{% for X in Y %}`` shape violated
+        - ``UNKNOWN_TAG`` — unrecognised tag head
         """
         var pos = 0
         var nodes = _parse_segment(src, pos, List[String]())
         return Template(nodes^)
 
-    def render(self, mut ctx: TemplateContext) raises -> String:
+    def render(self, mut ctx: TemplateContext) raises TemplateError -> String:
         """Walk the parsed tree against ``ctx``, returning the
         rendered output as a ``String``.
 
@@ -519,5 +717,14 @@ struct Template(Copyable, Movable):
         scratches the strings map for ``{% for %}`` loop-variable
         shadowing and restoration. After ``render`` returns,
         ``ctx`` is left exactly as it was before the call.
+
+        Raises :class:`TemplateError` (variant indicates which):
+
+        - ``UNBOUND_VARIABLE`` — ``{{ name }}`` for a name not
+          in ``ctx.strings``.
+        - ``UNBOUND_ITERABLE`` — ``{% for x in name %}`` for a
+          name not in ``ctx.lists``.
+        - ``UNKNOWN_NODE`` — internal: parsed tree contained a
+          node kind the renderer doesn't handle.
         """
         return _render_nodes(self.nodes, ctx)

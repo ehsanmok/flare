@@ -431,6 +431,10 @@ def main() raises:
 # Most-used surface — what the typical user imports.
 # ─────────────────────────────────────────────────────────────────────────
 
+from .errors import IoError, ValidationError
+from .http.auth_extract import AuthError
+from .http.proxy_protocol import ProxyParseError
+from .http.template import TemplateError
 from .net.address import IpAddr, SocketAddr
 from .http.server import (
     HttpServer,

@@ -13,11 +13,14 @@ Coverage:
 5. ``{% for x in xs %}...{% endfor %}`` iterates and shadows
    ``x`` for the body; outer ``x`` (if any) is restored.
 6. Nested ``{% if %}`` inside ``{% for %}`` and vice-versa.
-7. Parser raises on: unterminated ``{{``, unterminated ``{%``,
+7. Parser raises typed :class:`TemplateError` with the right
+   variant on: unterminated ``{{``, unterminated ``{%``,
    stray ``{% endif %}``, unknown tag, unknown filter, empty
    variable name, malformed ``{% for %}`` operand list.
-8. Renderer raises on: unbound ``{{ var }}``, unbound
-   ``{% for %}`` iterable.
+8. Renderer raises typed :class:`TemplateError` with the right
+   variant on: unbound ``{{ var }}``, unbound ``{% for %}``
+   iterable.
+9. ``TemplateError`` rendering, equality, and field access.
 """
 
 from std.testing import (
@@ -30,6 +33,7 @@ from std.testing import (
 from flare.http.template import (
     Template,
     TemplateContext,
+    TemplateError,
     html_escape,
 )
 
@@ -97,12 +101,15 @@ def test_var_safe_filter_skips_escape() raises:
 def test_var_unbound_raises() raises:
     var t = Template.compile(String("{{ missing }}"))
     var ctx = TemplateContext()
-    var raised = False
+    var got_variant = 0
+    var got_detail = String("")
     try:
         var _r = t.render(ctx)
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+        got_detail = e.detail.copy()
+    assert_true(got_variant == TemplateError.UNBOUND_VARIABLE._variant)
+    assert_equal(got_detail, String("missing"))
 
 
 # ── {% if %} ──────────────────────────────────────────────────────────────
@@ -180,12 +187,15 @@ def test_for_loop_var_unbinds_after_loop_when_no_prior() raises:
 def test_for_unbound_iterable_raises() raises:
     var t = Template.compile(String("{% for x in xs %}{{ x }}{% endfor %}"))
     var ctx = TemplateContext()
-    var raised = False
+    var got_variant = 0
+    var got_detail = String("")
     try:
         var _r = t.render(ctx)
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+        got_detail = e.detail.copy()
+    assert_true(got_variant == TemplateError.UNBOUND_ITERABLE._variant)
+    assert_equal(got_detail, String("xs"))
 
 
 # ── nesting ───────────────────────────────────────────────────────────────
@@ -216,70 +226,116 @@ def test_if_inside_for() raises:
     assert_equal(t.render(ctx), String("(a)(b)"))
 
 
-# ── parser errors ─────────────────────────────────────────────────────────
+# ── parser errors (typed-error variant + detail) ──────────────────────────
 
 
-def test_unterminated_var_tag_raises() raises:
-    var raised = False
+def test_unterminated_var_tag_raises_unterminated_var() raises:
+    var got_variant = 0
     try:
         var _t = Template.compile(String("hello {{ name "))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+    assert_true(got_variant == TemplateError.UNTERMINATED_VAR._variant)
 
 
-def test_unterminated_control_tag_raises() raises:
-    var raised = False
+def test_unterminated_control_tag_raises_unterminated_tag() raises:
+    var got_variant = 0
     try:
         var _t = Template.compile(String("hello {% if x "))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+    assert_true(got_variant == TemplateError.UNTERMINATED_TAG._variant)
 
 
-def test_stray_endif_raises() raises:
-    var raised = False
+def test_stray_endif_raises_unmatched_end() raises:
+    var got_variant = 0
+    var got_detail = String("")
     try:
         var _t = Template.compile(String("hello {% endif %}"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+        got_detail = e.detail.copy()
+    assert_true(got_variant == TemplateError.UNMATCHED_END._variant)
+    assert_equal(got_detail, String("endif"))
 
 
-def test_unknown_tag_raises() raises:
-    var raised = False
+def test_unknown_tag_raises_unknown_tag() raises:
+    var got_variant = 0
+    var got_detail = String("")
     try:
         var _t = Template.compile(String("hello {% wat %}"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+        got_detail = e.detail.copy()
+    assert_true(got_variant == TemplateError.UNKNOWN_TAG._variant)
+    assert_equal(got_detail, String("wat"))
 
 
-def test_unknown_filter_raises() raises:
-    var raised = False
+def test_unknown_filter_raises_unknown_filter() raises:
+    var got_variant = 0
+    var got_detail = String("")
     try:
         var _t = Template.compile(String("{{ name | upper }}"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+        got_detail = e.detail.copy()
+    assert_true(got_variant == TemplateError.UNKNOWN_FILTER._variant)
+    assert_equal(got_detail, String("upper"))
 
 
-def test_empty_var_name_raises() raises:
-    var raised = False
+def test_empty_var_name_raises_empty_var() raises:
+    var got_variant = 0
     try:
         var _t = Template.compile(String("{{ }}"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+    assert_true(got_variant == TemplateError.EMPTY_VAR._variant)
 
 
-def test_malformed_for_raises() raises:
-    var raised = False
+def test_malformed_for_raises_malformed_for() raises:
+    var got_variant = 0
     try:
         var _t = Template.compile(String("{% for x xs %}{% endfor %}"))
-    except:
-        raised = True
-    assert_true(raised)
+    except e:
+        got_variant = e._variant
+    assert_true(got_variant == TemplateError.MALFORMED_FOR._variant)
+
+
+# ── TemplateError shape ────────────────────────────────────────────────────
+
+
+def test_template_error_eq_compares_on_variant_only() raises:
+    var a = TemplateError(_variant=10, detail=String("name1"))
+    var b = TemplateError(_variant=10, detail=String("name2"))
+    var c = TemplateError(_variant=11, detail=String("name1"))
+    assert_true(a == b)
+    assert_true(a != c)
+    assert_true(b != c)
+
+
+def test_template_error_write_to_renders_variant_and_detail() raises:
+    var e = TemplateError(_variant=10, detail=String("name"))
+    assert_equal(String(e), String("TemplateError(UNBOUND_VARIABLE): name"))
+
+
+def test_template_error_write_to_omits_empty_detail() raises:
+    var e = TemplateError(_variant=4, detail=String(""))
+    assert_equal(String(e), String("TemplateError(EMPTY_VAR)"))
+
+
+def test_template_error_constants_have_distinct_variants() raises:
+    assert_true(
+        TemplateError.UNTERMINATED_VAR._variant
+        != TemplateError.UNTERMINATED_TAG._variant
+    )
+    assert_true(
+        TemplateError.UNBOUND_VARIABLE._variant
+        != TemplateError.UNBOUND_ITERABLE._variant
+    )
+    assert_true(
+        TemplateError.UNKNOWN_TAG._variant
+        != TemplateError.UNKNOWN_FILTER._variant
+    )
 
 
 def main() raises:

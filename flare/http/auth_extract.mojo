@@ -51,33 +51,152 @@ Spec compliance:
   uses ``urandom``-fed bytes (caller responsibility — we
   accept the bytes; we don't seed a PRNG ourselves so the
   randomness contract stays explicit).
+
+Error handling:
+
+The parsers (``parse_bearer_token``, ``parse_basic_credentials``,
+``_b64_decode``) raise the typed :class:`AuthError` so callers
+can pattern-match on the failure mode:
+
+```mojo
+from flare.http.auth_extract import parse_bearer_token, AuthError
+
+try:
+    var tok = parse_bearer_token(req.headers.get("authorization"))
+except e:
+    if e == AuthError.MISSING_HEADER:
+        return unauthorized("login required")
+    elif e == AuthError.WRONG_SCHEME:
+        return bad_request("Bearer required")
+```
+
+The ``BearerExtract`` / ``BasicExtract`` extractors keep the
+:class:`flare.http.extract.Extractor` trait's bare-``raises``
+shape (the trait is widely implemented across path / query /
+header extractors and changing it would break every impl), but
+the :class:`AuthError` raised inside is preserved by the Mojo
+runtime — calling ``String(e)`` on the caught error still
+produces the typed ``AuthError(VARIANT): detail`` rendering.
 """
+
+from std.format import Writable, Writer
 
 from .extract import Extractor
 from .request import Request
 
 
+# ── AuthError ─────────────────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct AuthError(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
+    """Typed error raised by the ``Authorization`` header parsers
+    in this module (``parse_bearer_token``,
+    ``parse_basic_credentials``, ``_b64_decode``).
+
+    Enumerated (``_variant`` Int field) with ``comptime`` aliases
+    per condition. Equatable so callers can pattern-match with
+    ``e == AuthError.MISSING_HEADER`` etc. The ``detail`` field
+    carries human-readable extra context (the offending
+    character, the unexpected scheme, ...) — empty when the
+    variant is self-explanatory.
+
+    Variants:
+
+    - ``MISSING_HEADER`` — ``Authorization`` header absent.
+    - ``EMPTY_VALUE`` — header present but empty after the colon.
+    - ``TOO_SHORT`` — header value too short to start with the
+      expected scheme prefix (``Bearer `` is 7 bytes, ``Basic ``
+      is 6).
+    - ``WRONG_SCHEME`` — scheme prefix doesn't match the parser
+      called (e.g. ``Basic `` passed to ``parse_bearer_token``).
+    - ``EMPTY_TOKEN`` — scheme present but no token / credentials
+      after it.
+    - ``B64_BAD_LENGTH`` — RFC 4648 base64 input length not a
+      multiple of 4.
+    - ``B64_TOO_MUCH_PADDING`` — more than 2 ``=`` pad bytes.
+    - ``B64_INVALID_CHAR`` — character outside the base64
+      alphabet.
+    - ``B64_PADDING_BEFORE_TAIL`` — ``=`` pad byte appears in a
+      block that isn't the final block.
+    - ``MISSING_SEPARATOR`` — RFC 7617 Basic credentials decoded
+      without a ``:`` separator between userid and password.
+    """
+
+    var _variant: Int
+    var detail: String
+
+    comptime MISSING_HEADER = AuthError(_variant=1, detail=String(""))
+    comptime EMPTY_VALUE = AuthError(_variant=2, detail=String(""))
+    comptime TOO_SHORT = AuthError(_variant=3, detail=String(""))
+    comptime WRONG_SCHEME = AuthError(_variant=4, detail=String(""))
+    comptime EMPTY_TOKEN = AuthError(_variant=5, detail=String(""))
+    comptime B64_BAD_LENGTH = AuthError(_variant=6, detail=String(""))
+    comptime B64_TOO_MUCH_PADDING = AuthError(_variant=7, detail=String(""))
+    comptime B64_INVALID_CHAR = AuthError(_variant=8, detail=String(""))
+    comptime B64_PADDING_BEFORE_TAIL = AuthError(_variant=9, detail=String(""))
+    comptime MISSING_SEPARATOR = AuthError(_variant=10, detail=String(""))
+
+    def __eq__(self, other: AuthError) -> Bool:
+        """Compare on the ``_variant`` tag only — ``detail`` is
+        human-readable context, not part of the identity."""
+        return self._variant == other._variant
+
+    def __ne__(self, other: AuthError) -> Bool:
+        return self._variant != other._variant
+
+    def variant_name(self) -> String:
+        if self._variant == 1:
+            return String("MISSING_HEADER")
+        elif self._variant == 2:
+            return String("EMPTY_VALUE")
+        elif self._variant == 3:
+            return String("TOO_SHORT")
+        elif self._variant == 4:
+            return String("WRONG_SCHEME")
+        elif self._variant == 5:
+            return String("EMPTY_TOKEN")
+        elif self._variant == 6:
+            return String("B64_BAD_LENGTH")
+        elif self._variant == 7:
+            return String("B64_TOO_MUCH_PADDING")
+        elif self._variant == 8:
+            return String("B64_INVALID_CHAR")
+        elif self._variant == 9:
+            return String("B64_PADDING_BEFORE_TAIL")
+        elif self._variant == 10:
+            return String("MISSING_SEPARATOR")
+        return String("UNKNOWN")
+
+    def write_to[W: Writer](self, mut writer: W):
+        writer.write("AuthError(", self.variant_name(), ")")
+        if self.detail.byte_length() > 0:
+            writer.write(": ", self.detail)
+
+
 # ── Base64 decoder (RFC 4648) ───────────────────────────────────────────────
 
 
-def _b64_decode(s: String) raises -> List[UInt8]:
+def _b64_decode(s: String) raises AuthError -> List[UInt8]:
     """Decode RFC 4648 standard base64 ``s`` (with or without
     ``=`` padding) into raw bytes.
 
-    Raises on:
-    - characters outside the base64 alphabet
-    - ``s`` length mod 4 != 0 after padding restoration
-    - misplaced ``=`` padding (only at the tail; at most 2)
+    Raises :class:`AuthError` (variant indicates which):
+
+    - ``B64_BAD_LENGTH`` — length not a multiple of 4
+    - ``B64_TOO_MUCH_PADDING`` — > 2 padding bytes at the tail
+    - ``B64_INVALID_CHAR`` — character outside the alphabet
+    - ``B64_PADDING_BEFORE_TAIL`` — pad byte in a non-final block
 
     URL-safe base64 (``-_`` substituted for ``+/``) is **not**
-    accepted here — that's :func:`_b64url_decode` below. RFC 7617
-    Basic credentials use the standard alphabet.
+    accepted here. RFC 7617 Basic credentials use the standard
+    alphabet.
     """
     var n = s.byte_length()
     if n == 0:
         return List[UInt8]()
     if n % 4 != 0:
-        raise Error("base64 decode: input length not a multiple of 4")
+        raise AuthError(_variant=6, detail=String("len=") + String(n))
     var out = List[UInt8]()
     out.reserve(n // 4 * 3)
     var p = s.unsafe_ptr()
@@ -87,7 +206,7 @@ def _b64_decode(s: String) raises -> List[UInt8]:
     if n >= 2 and Int(p[n - 2]) == ord("="):
         pad = 2
     if pad > 2:
-        raise Error("base64 decode: too much padding")
+        raise AuthError(_variant=7, detail=String(""))
     var blocks = n // 4
     for blk in range(blocks):
         var v0 = _b64_value(Int(p[blk * 4 + 0]))
@@ -96,13 +215,13 @@ def _b64_decode(s: String) raises -> List[UInt8]:
         var v3_byte = Int(p[blk * 4 + 3])
         var v2 = -1 if v2_byte == ord("=") else _b64_value(v2_byte)
         var v3 = -1 if v3_byte == ord("=") else _b64_value(v3_byte)
-        # First two sextets are always required.
         if v0 < 0 or v1 < 0:
-            raise Error("base64 decode: invalid character")
+            raise AuthError(_variant=8, detail=String("block ") + String(blk))
         if blk < blocks - 1:
-            # Padding only allowed in the last block.
             if v2 < 0 or v3 < 0:
-                raise Error("base64 decode: padding before tail")
+                raise AuthError(
+                    _variant=9, detail=String("block ") + String(blk)
+                )
         out.append(UInt8(((v0 << 2) | (v1 >> 4)) & 0xFF))
         if v2 >= 0:
             out.append(UInt8((((v1 & 0xF) << 4) | (v2 >> 2)) & 0xFF))
@@ -148,24 +267,31 @@ def _b64url_value(b: Int) -> Int:
 # ── Header parsers ─────────────────────────────────────────────────────────
 
 
-def parse_bearer_token(authz: String) raises -> String:
+def parse_bearer_token(authz: String) raises AuthError -> String:
     """Return the token portion of an ``Authorization: Bearer X``
-    header value, raising on malformed input.
+    header value, raising :class:`AuthError` on malformed input.
 
     Tolerates leading whitespace and a single space between the
     scheme and the token (per RFC 6750 §2.1 "credentials =
     auth-scheme 1*SP token"). The scheme match is
     case-insensitive per RFC 7235 §2.1.
+
+    Raises :class:`AuthError`:
+
+    - ``EMPTY_VALUE`` — the input string is empty
+    - ``TOO_SHORT`` — too short for the ``Bearer `` prefix
+    - ``WRONG_SCHEME`` — scheme is not ``Bearer``
+    - ``EMPTY_TOKEN`` — scheme present but no token follows
     """
     if authz.byte_length() == 0:
-        raise Error("authorization: empty value")
+        raise AuthError(_variant=2, detail=String(""))
     var p = authz.unsafe_ptr()
     var n = authz.byte_length()
     var i = 0
     while i < n and Int(p[i]) == ord(" "):
         i += 1
     if i + 7 > n:
-        raise Error("authorization: too short for Bearer scheme")
+        raise AuthError(_variant=3, detail=String("need 7 bytes for 'Bearer '"))
     var scheme_match = (
         (Int(p[i]) == ord("B") or Int(p[i]) == ord("b"))
         and (Int(p[i + 1]) == ord("E") or Int(p[i + 1]) == ord("e"))
@@ -176,12 +302,12 @@ def parse_bearer_token(authz: String) raises -> String:
         and Int(p[i + 6]) == ord(" ")
     )
     if not scheme_match:
-        raise Error("authorization: scheme is not Bearer")
+        raise AuthError(_variant=4, detail=String("expected Bearer"))
     i += 7
     while i < n and Int(p[i]) == ord(" "):
         i += 1
     if i >= n:
-        raise Error("authorization: empty Bearer token")
+        raise AuthError(_variant=5, detail=String(""))
     var out = String(capacity=n - i)
     for j in range(i, n):
         out += chr(Int(p[j]))
@@ -196,23 +322,32 @@ struct BasicCredentials(Copyable, Movable):
     var password: String
 
 
-def parse_basic_credentials(authz: String) raises -> BasicCredentials:
+def parse_basic_credentials(authz: String) raises AuthError -> BasicCredentials:
     """Decode an ``Authorization: Basic <base64>`` header value
     into a :class:`BasicCredentials` pair.
 
     Splits the post-decode bytes on the first ``:`` per RFC 7617
     §2: ``user-pass = userid ":" password``, where ``userid``
     may not contain ``:`` but ``password`` may.
+
+    Raises :class:`AuthError`:
+
+    - ``EMPTY_VALUE`` — the input string is empty
+    - ``TOO_SHORT`` — too short for the ``Basic `` prefix
+    - ``WRONG_SCHEME`` — scheme is not ``Basic``
+    - ``EMPTY_TOKEN`` — scheme present but no credentials follow
+    - ``B64_*`` — base64 decode failure (see :func:`_b64_decode`)
+    - ``MISSING_SEPARATOR`` — decoded credentials lack a ``:``
     """
     if authz.byte_length() == 0:
-        raise Error("authorization: empty value")
+        raise AuthError(_variant=2, detail=String(""))
     var p = authz.unsafe_ptr()
     var n = authz.byte_length()
     var i = 0
     while i < n and Int(p[i]) == ord(" "):
         i += 1
     if i + 6 > n:
-        raise Error("authorization: too short for Basic scheme")
+        raise AuthError(_variant=3, detail=String("need 6 bytes for 'Basic '"))
     var scheme_match = (
         (Int(p[i]) == ord("B") or Int(p[i]) == ord("b"))
         and (Int(p[i + 1]) == ord("A") or Int(p[i + 1]) == ord("a"))
@@ -222,12 +357,12 @@ def parse_basic_credentials(authz: String) raises -> BasicCredentials:
         and Int(p[i + 5]) == ord(" ")
     )
     if not scheme_match:
-        raise Error("authorization: scheme is not Basic")
+        raise AuthError(_variant=4, detail=String("expected Basic"))
     i += 6
     while i < n and Int(p[i]) == ord(" "):
         i += 1
     if i >= n:
-        raise Error("authorization: empty Basic credentials")
+        raise AuthError(_variant=5, detail=String(""))
     var b64 = String(capacity=n - i)
     for j in range(i, n):
         b64 += chr(Int(p[j]))
@@ -239,7 +374,7 @@ def parse_basic_credentials(authz: String) raises -> BasicCredentials:
             split = k
             break
     if split < 0:
-        raise Error("authorization: missing ':' in Basic credentials")
+        raise AuthError(_variant=10, detail=String(""))
     var user = String(capacity=split)
     for k in range(split):
         user += chr(Int(raw[k]))
@@ -257,9 +392,18 @@ struct BearerExtract(Copyable, Defaultable, Extractor, Movable):
     """Extracts the Bearer token from the inbound
     ``Authorization`` header.
 
-    Raises on missing header, missing scheme, or non-Bearer
-    scheme. Empty token also raises so handlers that opt in to
-    this extractor never have to second-guess the value.
+    Raises typed :class:`AuthError` (preserved at runtime through
+    the bare-``raises`` :class:`Extractor` trait per Mojo doc
+    § "Avoid bare raises with typed errors"). Callers that catch
+    this extractor's error directly via a wrapping ``try`` see
+    the typed error's ``write_to`` rendering through ``String(e)``.
+
+    Specifically raises:
+
+    - ``AuthError.MISSING_HEADER`` if no ``Authorization`` header
+      is present
+    - any of :func:`parse_bearer_token`'s failure modes for an
+      empty / too-short / wrong-scheme / empty-token header
     """
 
     var token: String
@@ -269,7 +413,7 @@ struct BearerExtract(Copyable, Defaultable, Extractor, Movable):
 
     def apply(mut self, req: Request) raises:
         if not req.headers.contains("authorization"):
-            raise Error("authorization: missing header")
+            raise AuthError(_variant=1, detail=String("authorization"))
         self.token = parse_bearer_token(req.headers.get("authorization"))
 
     @staticmethod
@@ -284,9 +428,13 @@ struct BasicExtract(Copyable, Defaultable, Extractor, Movable):
     """Extracts RFC 7617 Basic credentials from the inbound
     ``Authorization`` header.
 
-    Raises on missing header, missing scheme, non-Basic scheme,
-    base64 decode failure, or missing ``:`` separator after
-    decode.
+    Raises typed :class:`AuthError` (preserved at runtime through
+    the bare-``raises`` :class:`Extractor` trait):
+
+    - ``AuthError.MISSING_HEADER`` if no ``Authorization`` header
+    - any of :func:`parse_basic_credentials`'s failure modes
+      (empty / too-short / wrong-scheme / B64_* / missing
+      separator)
     """
 
     var username: String
@@ -298,7 +446,7 @@ struct BasicExtract(Copyable, Defaultable, Extractor, Movable):
 
     def apply(mut self, req: Request) raises:
         if not req.headers.contains("authorization"):
-            raise Error("authorization: missing header")
+            raise AuthError(_variant=1, detail=String("authorization"))
         var creds = parse_basic_credentials(req.headers.get("authorization"))
         self.username = creds.username
         self.password = creds.password
