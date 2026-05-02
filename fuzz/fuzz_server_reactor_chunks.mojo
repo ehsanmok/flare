@@ -24,6 +24,7 @@ Run:
 from mozz import fuzz, FuzzConfig
 from flare.net import SocketAddr
 from flare.tcp import TcpStream, TcpListener
+from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
 from flare.http.server import ServerConfig
@@ -35,13 +36,21 @@ from flare.http._server_reactor_impl import (
 )
 
 
-def _ok_handler(req: Request) raises -> Response:
-    """Trivial handler that always returns 200 OK with a tiny body."""
-    var b = List[UInt8]()
-    b.append(UInt8(ord("O")))
-    b.append(UInt8(ord("K")))
-    var r = Response(status=200, reason="OK", body=b^)
-    return r^
+@fieldwise_init
+struct _OkHandler(Handler):
+    """Trivial ``Handler`` that always returns 200 OK with a tiny body.
+
+    ``ConnHandle.on_readable`` requires a parametric ``Handler`` so we
+    monomorphise to a struct here. The previous plain-``def`` shape no
+    longer satisfies the trait constraint after the v0.5 Step 2 router
+    tightening.
+    """
+
+    def serve(self, req: Request) raises -> Response:
+        var b = List[UInt8]()
+        b.append(UInt8(ord("O")))
+        b.append(UInt8(ord("K")))
+        return Response(status=200, reason="OK", body=b^)
 
 
 def target(data: List[UInt8]) raises:
@@ -89,7 +98,8 @@ def target(data: List[UInt8]) raises:
         # Drive the state machine (at most a few times to surface data).
         var inner = 0
         while inner < 4:
-            var step = ch.on_readable(_ok_handler, cfg)
+            var handler = _OkHandler()
+            var step = ch.on_readable(handler, cfg)
             if step.done:
                 client.close()
                 return
@@ -103,7 +113,8 @@ def target(data: List[UInt8]) raises:
         guard += 1
 
     # Final drive to see if any trailing data completes a request.
-    _ = ch.on_readable(_ok_handler, cfg)
+    var trailing_handler = _OkHandler()
+    _ = ch.on_readable(trailing_handler, cfg)
     if ch.state == STATE_WRITING:
         _ = ch.on_writable(cfg)
     client.close()
