@@ -376,6 +376,32 @@ def test_use_uring_backend_consistent_with_availability() raises:
     assert_equal(got, avail)
 
 
+def test_use_uring_backend_respects_disable_env() raises:
+    """Setting ``FLARE_DISABLE_IO_URING=1`` must force the
+    backend off, even on a Linux host with io_uring available.
+
+    This is the documented A/B-bench escape hatch: contributors
+    flip the env var to compare the io_uring path against the
+    epoll path on the same binary without rebuilding.
+    """
+    from std.os import setenv
+
+    _ = setenv("FLARE_DISABLE_IO_URING", "1", True)
+    assert_false(use_uring_backend())
+
+    # Common falsey spellings are honoured as "do NOT disable",
+    # i.e. the backend is enabled when io_uring is available.
+    _ = setenv("FLARE_DISABLE_IO_URING", "0", True)
+    assert_equal(use_uring_backend(), is_io_uring_available())
+
+    _ = setenv("FLARE_DISABLE_IO_URING", "false", True)
+    assert_equal(use_uring_backend(), is_io_uring_available())
+
+    # Unset → default (= io_uring when available).
+    _ = setenv("FLARE_DISABLE_IO_URING", "", True)
+    assert_equal(use_uring_backend(), is_io_uring_available())
+
+
 # ── runner ───────────────────────────────────────────────────────────────────
 
 
@@ -396,4 +422,6 @@ def main() raises:
     print("    PASS test_wakeup_releases_blocking_poll")
     test_use_uring_backend_consistent_with_availability()
     print("    PASS test_use_uring_backend_consistent_with_availability")
-    print("test_uring_reactor: 8/8 PASS")
+    test_use_uring_backend_respects_disable_env()
+    print("    PASS test_use_uring_backend_respects_disable_env")
+    print("test_uring_reactor: 9/9 PASS")

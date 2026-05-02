@@ -82,6 +82,7 @@ the single owning thread; the only cross-thread hook is
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, c_uint, c_size_t, get_errno
 from std.memory import UnsafePointer, alloc, stack_allocation
+from std.os import getenv
 from std.sys.info import CompilationTarget
 
 from flare.net._libc import (
@@ -579,4 +580,13 @@ def use_uring_backend() -> Bool:
     """
     comptime if not CompilationTarget.is_linux():
         return False
+    # Respect the documented A/B-bench escape hatch. We treat any
+    # non-empty value other than "0" / "false" / "no" as "disable"
+    # so contributors can ``FLARE_DISABLE_IO_URING=1`` (the
+    # documented form) without having to remember the exact spelling.
+    var disabled = getenv("FLARE_DISABLE_IO_URING")
+    if disabled.byte_length() > 0:
+        var d = disabled
+        if not (d == "0" or d == "false" or d == "FALSE" or d == "no"):
+            return False
     return is_io_uring_available()
