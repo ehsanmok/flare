@@ -105,6 +105,7 @@ from flare.runtime.io_uring_sqe import (
     prep_async_cancel,
     prep_close,
     prep_multishot_accept,
+    prep_read,
     prep_recv,
     prep_send,
 )
@@ -283,7 +284,15 @@ struct UringReactor(Movable):
             )
         self._io = FlareRawIO()
         self._driver = IoUringDriver(entries)
-        var efd = _eventfd(c_uint(0), EFD_NONBLOCK | EFD_CLOEXEC)
+        # NOTE: deliberately *blocking* eventfd (no EFD_NONBLOCK).
+        # io_uring's IORING_OP_RECV against a non-blocking eventfd
+        # with no pending data immediately posts a -EAGAIN CQE,
+        # which spins ``poll(1, ...)`` into a 100 % CPU loop on
+        # idle. With the blocking flag clear the kernel actually
+        # waits on the eventfd, the CQE only fires when ``wakeup``
+        # writes a token, and ``wakeup()`` itself is safe from any
+        # thread (the write(2) on the eventfd is atomic + small).
+        var efd = _eventfd(c_uint(0), EFD_CLOEXEC)
         if efd < c_int(0):
             raise Error(
                 "UringReactor: eventfd failed: errno="
@@ -526,18 +535,24 @@ struct UringReactor(Movable):
     # ── Private helpers ──────────────────────────────────────────────────────
 
     def _arm_wakeup_recv(mut self) raises -> None:
-        """Submit a recv SQE on the wakeup eventfd so the next
-        ``wakeup`` write posts a CQE."""
+        """Submit a read SQE on the wakeup eventfd so the next
+        ``wakeup`` write posts a CQE.
+
+        We use ``IORING_OP_READ`` instead of ``IORING_OP_RECV``
+        because eventfd is an anon-inode file, not a socket;
+        ``IORING_OP_RECV`` returns ``-ENOTSOCK`` immediately on
+        an eventfd which would busy-loop ``poll(min_complete=1)``.
+        """
         var slot = self._driver.next_sqe()
         if Int(slot) == 0:
             raise Error("UringReactor._arm_wakeup_recv: SQ is full")
         var ud = pack_user_data(URING_OP_WAKEUP, UInt64(0))
-        prep_recv(
+        prep_read(
             slot,
             Int(self._wake_fd),
             UInt64(Int(self._wake_buf)),
             8,
-            UInt32(0),
+            UInt64(0),
             ud,
         )
         self._driver.commit_sqe()

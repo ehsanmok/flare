@@ -143,6 +143,14 @@ comptime IORING_OP_RECV: Int = 27
 """5.6+. recv(2) async — the per-connection request-read fast
 path on the io_uring backend (combined with
 ``IORING_RECV_MULTISHOT`` from 6.0+ for the steady-state)."""
+comptime IORING_OP_READ: Int = 22
+"""5.6+. read(2) / pread(2) async — works on **any fd** (not
+just sockets). Used for the cross-thread wakeup eventfd:
+``IORING_OP_RECV`` returns ``-ENOTSOCK`` on an eventfd, but
+``IORING_OP_READ`` does the right thing."""
+comptime IORING_OP_WRITE: Int = 23
+"""5.6+. write(2) / pwrite(2) async — companion to
+``IORING_OP_READ``."""
 comptime IORING_OP_OPENAT: Int = 18
 """5.6+. openat(2) async."""
 
@@ -638,6 +646,48 @@ def prep_recv(
     _store_u64_le(buf, _SQE_OFF_ADDR, rx_buf)
     _store_u32_le(buf, _SQE_OFF_LEN, UInt32(rx_len))
     _store_u32_le(buf, _SQE_OFF_OP_FLAGS, recv_flags)
+    _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
+
+
+@always_inline
+def prep_read(
+    buf: UnsafePointer[UInt8, MutExternalOrigin],
+    fd: Int,
+    rx_buf: UInt64,
+    rx_len: Int,
+    offset: UInt64,
+    user_data: UInt64,
+) -> None:
+    """Write an ``IORING_OP_READ`` SQE at ``buf``.
+
+    Like :func:`prep_recv`, but works on **any file descriptor**,
+    not just sockets — the underlying syscall is ``read(2)`` /
+    ``pread(2)``, not ``recv(2)``. Required for fds where ``recv``
+    returns ``-ENOTSOCK``: pipes, eventfds (used by the cross-
+    thread wakeup mechanism), regular files, and timerfds.
+
+    Args:
+        buf: 64-byte SQE buffer.
+        fd: File descriptor to read from. ``debug_assert`` checks
+            ``fd ≥ 0``.
+        rx_buf: Pointer to the destination buffer.
+        rx_len: Length of the destination buffer in bytes.
+        offset: Read offset (0 for streaming files / pipes /
+            eventfds; ``-1`` for "use file position").
+        user_data: Tag returned in the matching CQE.
+    """
+    debug_assert[assert_mode="safe"](
+        fd >= 0, "prep_read: fd must be non-negative; got ", fd
+    )
+    debug_assert[assert_mode="safe"](
+        rx_len >= 0, "prep_read: rx_len must be non-negative; got ", rx_len
+    )
+    encode_sqe_zero(buf)
+    _store_u8(buf, _SQE_OFF_OPCODE, UInt8(IORING_OP_READ))
+    _store_u32_le(buf, _SQE_OFF_FD, UInt32(fd))
+    _store_u64_le(buf, _SQE_OFF_OFF_OR_ADDR2, offset)
+    _store_u64_le(buf, _SQE_OFF_ADDR, rx_buf)
+    _store_u32_le(buf, _SQE_OFF_LEN, UInt32(rx_len))
     _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
 
 
