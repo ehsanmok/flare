@@ -529,15 +529,22 @@ def prep_accept(
     accept_flags: UInt32,
     user_data: UInt64,
 ) -> None:
-    """Write an ``IORING_OP_ACCEPT`` SQE at ``buf``.
+    """Write an oneshot ``IORING_OP_ACCEPT`` SQE at ``buf``.
+
+    The kernel ABI puts ``SOCK_NONBLOCK`` / ``SOCK_CLOEXEC`` /
+    ``SOCK_*`` accept flags into the SQE's ``accept_flags`` union
+    slot at offset 28 (``op_flags``), and the ``IORING_ACCEPT_*``
+    request-class bits into the ``ioprio`` field at offset 2 (so
+    the union slot stays a clean SOCK_* mask). This helper writes
+    only the SOCK_* flags; for multishot accept, see
+    :func:`prep_multishot_accept`.
 
     Args:
         buf: 64-byte SQE buffer.
         fd: Listener socket fd. ``debug_assert`` verifies fd ≥ 0.
         addr: Pointer to a ``struct sockaddr`` (or 0 to skip).
         addrlen_ptr: Pointer to a ``socklen_t`` (or 0 to skip).
-        accept_flags: ``SOCK_NONBLOCK`` / ``SOCK_CLOEXEC`` / on
-            kernels ≥ 5.19, ``IORING_ACCEPT_MULTISHOT``.
+        accept_flags: ``SOCK_NONBLOCK`` / ``SOCK_CLOEXEC`` mask.
         user_data: Tag returned in the matching CQE.
     """
     debug_assert[assert_mode="safe"](
@@ -550,6 +557,52 @@ def prep_accept(
     _store_u64_le(buf, _SQE_OFF_OFF_OR_ADDR2, addrlen_ptr)
     _store_u32_le(buf, _SQE_OFF_OP_FLAGS, accept_flags)
     _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
+
+
+@always_inline
+def prep_multishot_accept(
+    buf: UnsafePointer[UInt8, MutExternalOrigin],
+    fd: Int,
+    addr: UInt64,
+    addrlen_ptr: UInt64,
+    accept_flags: UInt32,
+    user_data: UInt64,
+) -> None:
+    """Write a multishot ``IORING_OP_ACCEPT`` SQE at ``buf``
+    (kernels ≥ 5.19).
+
+    This mirrors ``liburing``'s ``io_uring_prep_multishot_accept``:
+    fill an oneshot accept SQE, then set the
+    ``IORING_ACCEPT_MULTISHOT`` bit in the SQE's ``ioprio`` field.
+    The kernel keeps the accept armed across completions so the
+    listener self-rearms after every accepted connection — exactly
+    one SQE buys an unbounded stream of CQEs (one per accept).
+
+    Each CQE carries:
+
+      * ``user_data``: the tag passed here, unchanged across all
+        completions of this multishot.
+      * ``res``: the new connected fd on success, or a negative
+        ``-errno`` on per-accept failure.
+      * ``IORING_CQE_F_MORE``: set as long as the multishot is
+        still armed; cleared on the terminal completion (e.g. the
+        kernel cancelled the multishot, the listener closed, or
+        an unrecoverable error fired).
+
+    Args:
+        buf: 64-byte SQE buffer.
+        fd: Listener socket fd. ``debug_assert`` verifies fd ≥ 0.
+        addr: Pointer to a ``struct sockaddr`` (or 0 to skip).
+        addrlen_ptr: Pointer to a ``socklen_t`` (or 0 to skip).
+        accept_flags: ``SOCK_NONBLOCK`` / ``SOCK_CLOEXEC`` mask
+            applied to every accepted connection.
+        user_data: Tag returned in every multishot CQE.
+    """
+    prep_accept(buf, fd, addr, addrlen_ptr, accept_flags, user_data)
+    # ioprio is a u16 at offset 2 in the SQE. liburing folds the
+    # IORING_ACCEPT_MULTISHOT bit in here so the ``accept_flags``
+    # union slot stays a clean SOCK_* mask.
+    _store_u16_le(buf, _SQE_OFF_IOPRIO, UInt16(Int(IORING_ACCEPT_MULTISHOT)))
 
 
 @always_inline
