@@ -473,6 +473,12 @@ from .http.hpack_huffman import (
     huffman_encoded_length,
     huffman_decoded_length,
 )
+from .http.simd_parsers import (
+    HttpParseError,
+    simd_memmem,
+    simd_percent_decode,
+    simd_cookie_scan,
+)
 from .http.handler import (
     Handler,
     FnHandler,

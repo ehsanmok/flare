@@ -124,6 +124,12 @@ from .hpack_huffman import (
     huffman_encoded_length,
     huffman_decoded_length,
 )
+from .simd_parsers import (
+    HttpParseError,
+    simd_memmem,
+    simd_percent_decode,
+    simd_cookie_scan,
+)
 from .request import Request, Method
 from .response import Response, Status
 from .response_pool import ResponsePool
