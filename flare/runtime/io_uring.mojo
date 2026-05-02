@@ -347,7 +347,20 @@ fields + 40-byte sq_off + 40-byte cq_off = 120 bytes).
 def _read_u32_le(buf: UnsafePointer[UInt8, _], offset: Int) -> Int:
     """Read a 32-bit little-endian value out of the params
     buffer at ``offset``.
+
+    Bounds-checked under ``-D ASSERT=safe``: ``offset`` must
+    name a 4-byte window inside the 120-byte params buffer.
+    See ``.cursor/rules/sanitizers-and-bounds-checking.mdc``
+    §4.4 for the FFI-buffer-read pattern.
     """
+    debug_assert[assert_mode="safe"](
+        offset >= 0 and offset + 4 <= _IO_URING_PARAMS_BYTES,
+        "_read_u32_le: offset out of range; got ",
+        offset,
+    )
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_read_u32_le: buf must be non-NULL"
+    )
     var v = UInt32(0)
     for k in range(4):
         v = v | (UInt32(Int(buf[offset + k])) << UInt32(k * 8))
@@ -387,6 +400,15 @@ struct IoUringRing(Movable):
         Raises:
             Error: On ``io_uring_setup`` failure.
         """
+        # Kernel hard-caps SQ at 32 768 entries (IORING_MAX_ENTRIES);
+        # zero / negative is a programming error caught here so the
+        # debug build aborts with a clear message instead of letting
+        # the kernel return a generic EINVAL.
+        debug_assert[assert_mode="safe"](
+            entries > 0 and entries <= 32768,
+            "IoUringRing: entries must be in 1..=32768; got ",
+            entries,
+        )
         comptime if not CompilationTarget.is_linux():
             raise Error(
                 "io_uring is a Linux-only feature; this build is not Linux"

@@ -704,10 +704,18 @@ def huffman_encode(input: Span[UInt8, _], mut output: List[UInt8]):
         input: The bytes to encode.
         output: The byte list to append the encoded form to.
     """
+    debug_assert[assert_mode="safe"](
+        len(input) >= 0, "huffman_encode: input length must be non-negative"
+    )
     var bits = UInt64(0)
     var nbits = 0
     for i in range(len(input)):
         var sym = Int(input[i])
+        debug_assert[assert_mode="safe"](
+            sym >= 0 and sym <= 255,
+            "huffman_encode: byte symbol out of range; got ",
+            sym,
+        )
         var code = _hpack_table_code(sym)
         var clen = _hpack_table_length(sym)
         bits = (bits << UInt64(clen)) | UInt64(code)
@@ -780,6 +788,9 @@ def huffman_decode(
     var nbits = 0
     var i = 0
     var n = len(input)
+    debug_assert[assert_mode="safe"](
+        n >= 0, "huffman_decode: input length must be non-negative"
+    )
     while i < n:
         bits = (bits << UInt64(8)) | UInt64(Int(input[i]))
         i += 1

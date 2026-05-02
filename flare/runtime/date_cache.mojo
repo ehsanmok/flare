@@ -162,8 +162,21 @@ def _write_two_digits(
 ) where type_of(p).mut:
     """Write a zero-padded two-digit decimal at ``p + offset``.
 
-    Caller guarantees ``0 <= n < 100``.
+    Caller guarantees ``0 <= n < 100``; the assert verifies
+    that contract under ``-D ASSERT=safe`` so a regression in
+    the civil-from-days arithmetic is caught at the write site
+    instead of becoming garbled wire bytes.
     """
+    debug_assert[assert_mode="safe"](
+        offset >= 0 and offset + 2 <= _IMF_FIXDATE_LEN,
+        "_write_two_digits: offset out of range; got ",
+        offset,
+    )
+    debug_assert[assert_mode="safe"](
+        n >= 0 and n < 100,
+        "_write_two_digits: n must be in 0..=99; got ",
+        n,
+    )
     (p + offset).init_pointee_copy(UInt8(48 + n // 10))
     (p + offset + 1).init_pointee_copy(UInt8(48 + n % 10))
 
@@ -176,6 +189,16 @@ def _write_four_digits(
 
     Caller guarantees ``0 <= n < 10000``.
     """
+    debug_assert[assert_mode="safe"](
+        offset >= 0 and offset + 4 <= _IMF_FIXDATE_LEN,
+        "_write_four_digits: offset out of range; got ",
+        offset,
+    )
+    debug_assert[assert_mode="safe"](
+        n >= 0 and n < 10000,
+        "_write_four_digits: n must be in 0..=9999; got ",
+        n,
+    )
     var thousands = n // 1000
     var hundreds = (n % 1000) // 100
     var tens = (n % 100) // 10
@@ -195,11 +218,25 @@ def _realtime_seconds() -> Int:
 
     ``CLOCK_REALTIME`` is constant 0 on Linux + macOS (the value is
     portable across both platforms).
+
+    The 16-byte stack scratch buffer is zero-initialised so a
+    rare ``clock_gettime`` failure (sandbox / cgroup denial /
+    EINVAL) returns the Unix epoch (0) rather than a UB read of
+    uninitialised stack memory. The accompanying
+    ``debug_assert[assert_mode="safe"]`` makes that failure
+    visible in tests + ``ASSERT=safe`` builds without aborting
+    release builds — see
+    ``.cursor/rules/sanitizers-and-bounds-checking.mdc`` §4.6.
     """
     var buf = stack_allocation[16, UInt8]()
     for i in range(16):
         (buf + i).init_pointee_copy(UInt8(0))
-    _ = external_call["clock_gettime", c_int](c_int(0), buf.bitcast[NoneType]())
+    var rc = external_call["clock_gettime", c_int](
+        c_int(0), buf.bitcast[NoneType]()
+    )
+    debug_assert[assert_mode="safe"](
+        Int(rc) == 0, "clock_gettime(CLOCK_REALTIME) failed; rc=", Int(rc)
+    )
     var sec: Int64 = 0
     for i in range(8):
         sec |= Int64(Int((buf + i).load())) << Int64(8 * i)

@@ -301,6 +301,11 @@ struct BufferPool(Movable):
             A reset-empty ``BufferHandle`` with capacity ≥
             ``min_capacity``.
         """
+        debug_assert[assert_mode="safe"](
+            min_capacity >= 0,
+            "BufferPool.acquire: min_capacity must be non-negative; got ",
+            min_capacity,
+        )
         var idx = _class_index_for(min_capacity)
         if idx == _OVERSIZE_CLASS:
             return BufferHandle(
@@ -326,6 +331,15 @@ struct BufferPool(Movable):
             handle: Owned ``BufferHandle`` to recycle.
         """
         var idx = handle.class_index
+        # Defense-in-depth: any class_index outside the documented
+        # set is silently dropped rather than asserted. A
+        # hand-constructed BufferHandle with a corrupt tag (e.g.
+        # via FFI / unsafe code) shouldn't take the server down.
+        # Under `-D ASSERT=all` the explicit invariant is exercised
+        # in tests/test_safety_asserts.mojo. See
+        # `.cursor/rules/sanitizers-and-bounds-checking.mdc` §4.7
+        # for when "fault-tolerant" beats "fail-fast" at API
+        # boundaries.
         if idx == _OVERSIZE_CLASS:
             return
         if idx < 0 or idx >= _NUM_SIZE_CLASSES:

@@ -89,7 +89,6 @@ def test_memmem_multipart_boundary_in_body() raises:
     var off = simd_memmem(body, bound)
     assert_true(off > 0)
     # Offset should land exactly at the boundary delimiter.
-    var expected = String("hello world\r\n--myboundary--\r\n").byte_length()
     var prefix_len = String(
         "Content-Type: text/plain\r\n\r\nhello world\r\n"
     ).byte_length()

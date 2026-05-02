@@ -110,6 +110,12 @@ struct ResponsePool(Movable):
         Returns:
             A fresh ``ResponsePool`` with the supplied cap.
         """
+        # Defense-in-depth: capacity < 1 is silently clamped to 1
+        # rather than asserted. Pool sizing is a configuration
+        # knob; a hand-typed `0` should round up to a still-usable
+        # 1-slot pool, not abort the worker. The documented
+        # invariant is exercised under `-D ASSERT=all` in
+        # tests/test_safety_asserts.mojo.
         var p = ResponsePool()
         p._capacity = 1 if capacity < 1 else capacity
         return p^

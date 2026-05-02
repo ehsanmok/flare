@@ -130,6 +130,9 @@ struct IoVecBuf(Movable):
         Args:
             n: Number of cells. Must be > 0.
         """
+        debug_assert[assert_mode="safe"](
+            n > 0, "IoVecBuf: n must be positive; got ", n
+        )
         var bytes = n * _IOVEC_BYTES
         var raw = alloc[UInt8](bytes)
         # Zero-init so an unset cell behaves as { NULL, 0 } —
@@ -172,11 +175,32 @@ struct IoVecBuf(Movable):
         """Write the i'th iovec cell.
 
         Args:
-            i: Cell index. NOT bounds-checked.
+            i: Cell index. Bounds-checked under ``-D ASSERT=safe``
+               (the default). The check uses ``debug_assert`` rather
+               than ``std.collections.check_bounds`` because
+               ``check_bounds`` requires the call site to be
+               ``@always_inline`` (it relies on
+               ``call_location[inline_count=2]()``); the per-call
+               cost of inlining ``set`` here would bloat every
+               keep-alive serialiser site without a measurable win.
+               See ``.cursor/rules/sanitizers-and-bounds-checking.mdc``
+               §3 / §4 for the rationale.
             ptr: ``iov_base`` value (typically
                  ``Int(some_buffer.unsafe_ptr())``).
             n: ``iov_len`` value (number of bytes at ``ptr``).
         """
+        debug_assert[assert_mode="safe"](
+            i >= 0 and i < self._n,
+            "IoVecBuf.set: index out of range; got ",
+            i,
+        )
+        debug_assert[assert_mode="safe"](
+            n >= 0, "IoVecBuf.set: iov_len must be non-negative; got ", n
+        )
+        debug_assert[assert_mode="safe"](
+            n == 0 or ptr != 0,
+            "IoVecBuf.set: iov_base must be non-NULL when iov_len > 0",
+        )
         var off = i * _IOVEC_BYTES
         # Write the 8-byte iov_base pointer as a little-endian
         # Int. Mojo's UnsafePointer assignment + init_pointee_copy
@@ -199,7 +223,13 @@ struct IoVecBuf(Movable):
 
         Useful for tests + the ``writev_buf_all`` partial-write
         loop that needs to advance the ptr after a short write.
+        Bounds-checked under ``-D ASSERT=safe``.
         """
+        debug_assert[assert_mode="safe"](
+            i >= 0 and i < self._n,
+            "IoVecBuf.cell_ptr: index out of range; got ",
+            i,
+        )
         var off = i * _IOVEC_BYTES
         var p = self._buf + off
         var v = UInt64(0)
@@ -208,7 +238,15 @@ struct IoVecBuf(Movable):
         return Int(v)
 
     def cell_len(self, i: Int) -> Int:
-        """Read back the i'th cell's ``iov_len``."""
+        """Read back the i'th cell's ``iov_len``.
+
+        Bounds-checked under ``-D ASSERT=safe``.
+        """
+        debug_assert[assert_mode="safe"](
+            i >= 0 and i < self._n,
+            "IoVecBuf.cell_len: index out of range; got ",
+            i,
+        )
         var off = i * _IOVEC_BYTES
         var q = self._buf + off + 8
         var v = UInt64(0)
@@ -247,6 +285,16 @@ def writev_buf(
                  socket with a send timeout).
         NetworkError: For any other libc errno.
     """
+    debug_assert[assert_mode="safe"](
+        fd >= 0, "writev_buf: fd must be non-negative; got ", fd
+    )
+    debug_assert[assert_mode="safe"](
+        iovcnt >= 0, "writev_buf: iovcnt must be non-negative; got ", iovcnt
+    )
+    debug_assert[assert_mode="safe"](
+        iovcnt == 0 or Int(iov_base) != 0,
+        "writev_buf: iov_base must be non-NULL when iovcnt > 0",
+    )
     while True:
         var n = _writev(c_int(fd), iov_base, c_int(iovcnt))
         if n >= 0:

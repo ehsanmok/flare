@@ -131,12 +131,24 @@ def simd_memmem(haystack: Span[UInt8, _], needle: Span[UInt8, _]) -> Int:
     """
     var nh = len(haystack)
     var nn = len(needle)
+    debug_assert[assert_mode="safe"](
+        nh >= 0 and nn >= 0,
+        "simd_memmem: span lengths must be non-negative",
+    )
     if nn == 0:
         return 0
     if nn > nh:
         return -1
     var hp = haystack.unsafe_ptr()
     var np = needle.unsafe_ptr()
+    debug_assert[assert_mode="safe"](
+        Int(hp) != 0 or nh == 0,
+        "simd_memmem: haystack ptr must be non-NULL when len > 0",
+    )
+    debug_assert[assert_mode="safe"](
+        Int(np) != 0,
+        "simd_memmem: needle ptr must be non-NULL when len > 0",
+    )
     var i = 0
     var stop = nh - nn
     while i <= stop:
@@ -195,6 +207,9 @@ def simd_percent_decode(
             a valid hex digit.
     """
     var n = len(input)
+    debug_assert[assert_mode="safe"](
+        n >= 0, "simd_percent_decode: input length must be non-negative"
+    )
     var p = input.unsafe_ptr()
     var i = 0
     while i < n:
@@ -235,6 +250,9 @@ def simd_cookie_scan(input: Span[UInt8, _], mut offsets: List[Int]):
                  Existing contents are preserved.
     """
     var n = len(input)
+    debug_assert[assert_mode="safe"](
+        n >= 0, "simd_cookie_scan: input length must be non-negative"
+    )
     var p = input.unsafe_ptr()
     for i in range(n):
         if p[i] == UInt8(59):  # ';'
