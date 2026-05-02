@@ -176,7 +176,8 @@ fuzz-fs-range      = "mojo -I . fuzz/fuzz_fs_range.mojo"         # v0.6 Track H 
 fuzz-h2-frame      = "mojo -I . fuzz/fuzz_h2_frame.mojo"         # v0.6 Track J — HTTP/2 frame codec (200K)
 fuzz-hpack-decoder = "mojo -I . fuzz/fuzz_hpack_decoder.mojo"    # v0.6 Track J — HPACK decoder (200K)
 fuzz-proxy-protocol = "mojo -I . fuzz/fuzz_proxy_protocol.mojo"  # v0.7 Track H1 — HAProxy PROXY v1+v2 parser (200K)
-fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks", "fuzz-router-paths", "fuzz-scheduler-shutdown", "fuzz-extractors", "fuzz-routes-comptime", "fuzz-header-scan", "fuzz-form", "fuzz-multipart", "fuzz-session-decode", "fuzz-fs-range", "fuzz-h2-frame", "fuzz-hpack-decoder", "fuzz-proxy-protocol"] }
+fuzz-io-uring-sqe   = "mojo -I . fuzz/fuzz_io_uring_sqe.mojo"     # v0.7 Track F1 — io_uring SQE encoder + CQE decoder primitives (200K, codec only — no kernel involved)
+fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks", "fuzz-router-paths", "fuzz-scheduler-shutdown", "fuzz-extractors", "fuzz-routes-comptime", "fuzz-header-scan", "fuzz-form", "fuzz-multipart", "fuzz-session-decode", "fuzz-fs-range", "fuzz-h2-frame", "fuzz-hpack-decoder", "fuzz-proxy-protocol", "fuzz-io-uring-sqe"] }
 
 [feature.dev.tasks]
 # ── Docs (powered by mojodoc; dev-only because mojodoc is in feature.dev) ────
