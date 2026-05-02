@@ -109,6 +109,14 @@ from .intern import (
     intern_common_value,
     intern_common_value_string,
 )
+from .header_phf import (
+    StandardHeader,
+    standard_header_count,
+    standard_header_name,
+    lookup_standard_header_bytes,
+    lookup_standard_header_string,
+    is_standard_header,
+)
 from .request import Request, Method
 from .response import Response, Status
 from .response_pool import ResponsePool

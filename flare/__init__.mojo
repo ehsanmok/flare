@@ -458,6 +458,14 @@ from .http.intern import (
     intern_common_value,
     intern_common_value_string,
 )
+from .http.header_phf import (
+    StandardHeader,
+    standard_header_count,
+    standard_header_name,
+    lookup_standard_header_bytes,
+    lookup_standard_header_string,
+    is_standard_header,
+)
 from .http.handler import (
     Handler,
     FnHandler,
