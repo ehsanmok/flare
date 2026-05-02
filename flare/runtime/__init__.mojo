@@ -31,6 +31,7 @@ from ._thread import num_cpus
 from .scheduler import Scheduler, default_worker_count
 from .pool import Pool
 from .buffer_pool import BufferHandle, BufferPool
+from .iovec import IoVecBuf, writev_buf, writev_buf_all
 from .blocking import block_in_pool, MAX_POOL_SIZE
 from ._libc_time import libc_usleep, libc_nanosleep_ms
 from .handoff import HandoffPolicy, HandoffQueue, WorkerHandoffPool

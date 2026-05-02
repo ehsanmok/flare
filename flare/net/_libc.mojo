@@ -501,6 +501,29 @@ def _send(
 
 
 @always_inline
+def _writev(
+    fd: c_int, iov: UnsafePointer[UInt8, _], iovcnt: c_int
+) -> c_ssize_t:
+    """Wrapper around ``writev(2)``.
+
+    ``iov`` is a pointer to a contiguous array of ``iovcnt``
+    ``struct iovec`` cells. Each cell is laid out as
+    ``{ void *iov_base; size_t iov_len; }`` — 16 bytes on every
+    64-bit Linux / macOS target. The caller is responsible for
+    constructing that buffer (typically via
+    ``flare.runtime.iovec.IoVecBuf`` which packs the pairs into
+    ``stack_allocation`` or ``alloc`` memory).
+
+    Returns the number of bytes written across all vectors, or a
+    negative value on failure (with ``errno`` set per the usual
+    libc convention).
+    """
+    return external_call["writev", c_ssize_t](
+        fd, iov.bitcast[NoneType](), iovcnt
+    )
+
+
+@always_inline
 def _recv(
     fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
