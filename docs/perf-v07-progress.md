@@ -1,6 +1,6 @@
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-02 · **Branch**: `main` (commits `9e9c3d1` → `1b0852d`).
+**Date**: 2026-05-02 (updated) · **Branch**: `main` (commits `9e9c3d1` → `5b8a5d7`).
 
 This note tracks where flare v0.7 stands against the design-0.7
 gate (≥ 220 K req/s on flare_mc 4w EPYC, p99.99 ≤ 3.5 ms) and
@@ -67,7 +67,7 @@ The v0.7 design gate (`design-0.7.mdc § Bar / gate matrix`):
 
 | Bar | Gate | Status |
 |---|---|---|
-| flare_mc 4w EPYC ≥ 220 K req/s | bench-vs-baseline on io_uring backend | ⏭ pending io_uring reactor wire-in (B0 substrate ✅, driver ✅, **reactor wiring TBD**) |
+| flare_mc 4w EPYC ≥ 220 K req/s | bench-vs-baseline on io_uring backend | ⏭ pending server-loop dispatch swap (B0 substrate ✅, driver ✅, **`UringReactor` ✅**, multishot accept/recv/send + cancel + wakeup all ✅, **server-loop wire-in TBD**) |
 | flare_mc 4w EPYC tail p99.99 ≤ 3.5 ms | matched-worker | **✅ holds at 3.25 ms (dev-box) / 3.11 ms (v0.6 EPYC)** — already best-of-class |
 | io_uring Linux fast path operational | ≥ 2 µs/req improvement vs epoll | ⏭ measurable after wire-in; substrate validated end-to-end (NOP round-trip works on host io_uring) |
 | Epoll / kqueue fallback parity | tests pass on both backends | ✅ epoll/kqueue stays the v0.6.0 codepath; comptime branch will preserve it as Linux<5.15 / macOS / FreeBSD fallback |
@@ -108,6 +108,8 @@ harness:
 | B0 SQE/CQE codec | `0c7dba5` | `IoUringSqe` + `IoUringCqe` + 7 prep helpers (20 tests) | (folded into B0) |
 | B0 driver | `cc66b06` | `IoUringDriver` mmap SQ/CQ rings + atomic head/tail + submit/reap; **end-to-end NOP round-trip verified live** (6 tests) | (folded into B0) |
 | B0 fuzz | `1b0852d` | `fuzz-io-uring-sqe` 200 K runs zero crashes | — |
+| B0 multishot accept | `a34b19f` | `prep_multishot_accept` (ioprio bit, matches `liburing`) + live `IORING_OP_ACCEPT_MULTISHOT` round-trip on a `127.0.0.1:0` loopback listener (1 test PASS, kernel 6.8) | (folded into B0) |
+| B0 reactor wire-in | `5b8a5d7` | `UringReactor` — io_uring-native event loop with `pack_user_data` (8-bit op + 56-bit conn_id), multishot accept/recv, fire-and-forget send/close, async cancel, eventfd wakeup; comptime selector `use_uring_backend()`; **8 tests pass live** (incl. end-to-end client→recv→send echo); **fuzz_uring_reactor 100 K runs zero crashes** | (folded into B0) |
 | B2 PHF | (earlier v0.7 commit) | Comptime PHF for ~70 standard headers | 0.5 – 1.0 |
 | B3 intern | (earlier) | `StaticString` interning for HTTP method names + common values | 0.3 – 0.5 |
 | B4 writev | (earlier) | `IoVecBuf` + `writev_buf_all` for vectored response serialization | ~1.0 (epoll); subsumed on io_uring path |
@@ -127,9 +129,10 @@ core. Comfortable margin against the 5 µs target (220 K =
 
 | Task | What | Why blocked |
 |---|---|---|
-| **B0 reactor wiring** | Comptime-branched `UringReactor` / `EpollReactor` / `KqueueReactor` with the `Reactor` API surface from v0.5 | Not blocked; substrate + driver are validated. Implementation is mechanical (call `submit_*` / `reap_cqe` from the existing `_server_reactor_impl.mojo`). |
-| **B0 multishot accept on real fd** | Wire `IORING_OP_ACCEPT_MULTISHOT` against a TCP listener; verify fd / addr / addrlen come back through CQE | Not blocked; one targeted test once reactor branch lands. |
-| **B0 multishot recv + writev send** | Steady-state per-connection pattern (recv-multishot → handler → writev-send) | Same — gated on reactor wire-in. |
+| ~~**B0 reactor wiring**~~ | ~~Comptime-branched `UringReactor` / `EpollReactor` / `KqueueReactor`~~ | **✅ shipped in `5b8a5d7`** — `UringReactor` is in the tree alongside the existing `Reactor`, with its native submit/reap surface (the API epoll/kqueue can't model losslessly). |
+| ~~**B0 multishot accept on real fd**~~ | ~~Wire `IORING_OP_ACCEPT_MULTISHOT` against a TCP listener~~ | **✅ shipped in `a34b19f` + `5b8a5d7`** — `prep_multishot_accept` + live test on a 127.0.0.1:0 listener (kernel 6.8). |
+| ~~**B0 multishot recv + writev send**~~ | ~~Steady-state per-connection pattern~~ | **✅ shipped in `5b8a5d7`** — `arm_recv_multishot` (`IORING_OP_RECV` + `IORING_RECV_MULTISHOT`) + `submit_send` (`IORING_OP_SEND` + `MSG_NOSIGNAL`) + `submit_close` (`IORING_OP_CLOSE` + `IOSQE_CQE_SKIP_SUCCESS`); end-to-end echo round-trip verified live. |
+| **B0 server-loop dispatch** | Have `flare.http.server` instantiate `UringReactor` (when `use_uring_backend()`) and dispatch `_server_reactor_impl.on_readable` from CQE-driven `URING_OP_RECV` completions instead of epoll-driven `EVENT_READABLE` events | Not blocked; the surfaces line up. The ConnHandle state machine reads bytes from a buffer; on the io_uring path the bytes arrive in the recv-multishot buffer with a `UringCompletion(op=RECV, conn_id, res, has_more)`. |
 | **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/` | Hardware-gated. The dev-box probe says we're already where we need to be on tail; peak depends on EPYC re-measurement. |
 
 ## Numbers that matter
@@ -139,8 +142,23 @@ core. Comfortable margin against the 5 µs target (220 K =
 * **flare_mc tail vs every Rust 4w on EPYC**: already
   best-of-class; v0.7 must not regress it. **Confirmed not
   regressed on dev-box (3.25 ms p99.99)**.
-* **io_uring substrate**: built, tested (34 tests), fuzzed
-  (200 K runs zero crashes), end-to-end SQ→CQ NOP round-trip
-  validated live. Wiring into `Reactor` is the next
-  in-flight task; once landed and benched on EPYC, the 220 K
-  gate is in scope.
+* **io_uring substrate**: built, tested (**43 tests** — 8
+  substrate + 20 sqe + 6 driver + 1 multishot accept + 8
+  UringReactor), fuzzed (300 K cumulative runs zero crashes
+  across `fuzz-io-uring-sqe` + `fuzz-uring-reactor`), end-to-
+  end SQ→CQ NOP round-trip + live multishot accept + live
+  recv/send echo all validated against the host kernel 6.8.
+* **`UringReactor` is live**: io_uring-native event loop with
+  multishot accept/recv, fire-and-forget send/close, async
+  cancel, eventfd wakeup, and packed `(op, conn_id)`
+  user_data dispatch. Sits ready as the comptime-selected
+  backend for the next commit that swaps server-loop
+  dispatch from epoll-events to io_uring-completions.
+* Once that swap lands and EPYC is re-benched, the 220 K
+  gate is in scope. **Tail (≤ 3.5 ms p99.99) is already met
+  on every measurement** (3.11 / 3.25 / 3.42 ms across
+  EPYC v0.6 + dev-box v0.7).
+* **Background fuzz sweep this commit**: full `fuzz-all`
+  (27 harnesses, ~3.7 M cumulative runs incl. the new
+  `fuzz-uring-reactor`) — **zero crashes, zero rejections**,
+  no regressions from the io_uring stack landing.
