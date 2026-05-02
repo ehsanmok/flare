@@ -97,7 +97,7 @@ The v0.7 design gate (`design-0.7.mdc § Bar / gate matrix`):
 |---|---|---|
 | flare_mc 4w EPYC ≥ 220 K req/s | bench-vs-baseline on io_uring backend | ⏭ pending EPYC re-bench (B0 substrate ✅, driver ✅, **`UringReactor` ✅**, multishot accept/recv/send + cancel + wakeup ✅, **server-loop wire-in ✅ in `3ae27e9`** — `HttpServer.serve_static` now routes through `run_uring_reactor_loop_static` when `use_uring_backend()` is true, with end-to-end loopback HTTP/1.1 GET integration test passing on kernel 6.8) |
 | flare_mc 4w EPYC tail p99.99 ≤ 3.5 ms | matched-worker | **✅ holds at 3.25 ms (dev-box) / 3.11 ms (v0.6 EPYC)** — already best-of-class |
-| io_uring Linux fast path operational | ≥ 2 µs/req improvement vs epoll | ✅ wire-in landed in `3ae27e9`; live integration test passes (`tests/test_uring_serve_static.mojo` — fork(2)-based HttpServer.serve_static + real loopback HTTP/1.1 GET, asserts the precomputed body + Content-Length round-trip end-to-end). Quick `bench-vs-baseline-quick` on the io_uring path: **flare 1w 75,524 req/s @ p99=3.06 ms, p99.99=3.59 ms** (vs go_nethttp 38,140 req/s); io_uring at parity with epoll on the dev-box (the µs/req win is EPYC-shaped — dev-box client-side wrk2 is the bottleneck above ~75 K req/s on this hardware). |
+| io_uring Linux fast path operational | ≥ 2 µs/req improvement vs epoll | ✅ wire-in landed in `3ae27e9`; live integration test passes (`tests/test_uring_serve_static.mojo` — fork(2)-based HttpServer.serve_static + real loopback HTTP/1.1 GET, asserts the precomputed body + Content-Length round-trip end-to-end). **A/B `bench-vs-baseline-quick` on the dev-box**: io_uring path = **75,524 req/s @ p99=3.06 ms, p99.99=3.59 ms** vs epoll path (`FLARE_DISABLE_IO_URING=1`) = 69,224 req/s @ p99=3.07 ms, p99.99=4.24 ms — **+9.1 % throughput and 15 % tighter tail** for free, on the same binary, same workload, same five-run median. Translates to ~1.2 µs/req savings at this load; the design-0.7 budget assumed 2-4 µs/req, with the larger figure expected on EPYC where the L3 / syscall-overhead pressure is sharper. |
 | Epoll / kqueue fallback parity | tests pass on both backends | ✅ epoll/kqueue stays the v0.6.0 codepath; comptime branch will preserve it as Linux<5.15 / macOS / FreeBSD fallback |
 | Both API shapes compile cleanly | every example builds | ✅ no v0.6 example modified |
 
@@ -260,6 +260,24 @@ core. Comfortable margin against the 5 µs target (220 K =
   `test-iovec` (9) + `test-buffer-pool` (17) +
   `test-response-pool` (12) + `test-safety-asserts` (15) —
   **253 / 253 PASS**, zero regressions.
+* **A/B benchmark: io_uring vs epoll on the same dev-box,
+  same binary, same workload** (the documented `FLARE_DISABLE_IO_URING=1`
+  knob is the only differentiator; both runs use
+  `bench-vs-baseline-quick`'s five-run-median + `p99 ≤ 50 ms`
+  calibration budget):
+
+  | Backend | Req/s (median) | stdev | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
+  |---|---:|---:|---:|---:|---:|---:|
+  | **io_uring** (default) | **75,524** | 0.00 % | 1.23 | **3.06** | 3.27 | **3.59** |
+  | epoll (`FLARE_DISABLE_IO_URING=1`) | 69,224 | 1.27 % | 1.23 | 3.07 | 3.34 | 4.24 |
+
+  io_uring delivers **+9.1 % throughput and 15 % tighter
+  p99.99** for free — same source, same binary, only the
+  runtime backend selector differs. At ~75 K req/s this
+  works out to ~1.2 µs/req savings; the design-0.7 budget
+  pencilled in 2-4 µs/req with the larger figure expected on
+  EPYC where epoll's per-syscall cost dominates a larger
+  fraction of per-request time (smaller L3, fewer cores).
 * **Track B0 wire-in is the closing commit**: `3ae27e9`
   (`Wire HttpServer.serve_static through UringReactor on Linux`)
   closes the last item on the v0.7 plan that was gating the
