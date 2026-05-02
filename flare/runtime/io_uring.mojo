@@ -265,8 +265,20 @@ def io_uring_setup(entries: Int, params: UnsafePointer[UInt8, _]) -> Int:
         On success, the ring file descriptor (≥ 0). On failure,
         a negative ``-errno`` value.
     """
+    # Always pass 6 syscall arguments (padding with 0) so all
+    # three io_uring syscall wrappers below share one
+    # external_call signature against the libc ``syscall``
+    # symbol. Mixing arities (3 / 5 / 7) on the same external
+    # symbol triggers a Mojo "existing function with conflicting
+    # signature" error during cross-module compilation.
     var rc = external_call["syscall", c_int](
-        c_int(SYS_IO_URING_SETUP), c_uint(entries), params
+        c_int(SYS_IO_URING_SETUP),
+        c_size_t(entries),
+        c_size_t(Int(params)),
+        c_size_t(0),
+        c_size_t(0),
+        c_size_t(0),
+        c_size_t(0),
     )
     if rc < 0:
         return -Int(get_errno().value)
@@ -293,10 +305,10 @@ def io_uring_enter(
     """
     var rc = external_call["syscall", c_int](
         c_int(SYS_IO_URING_ENTER),
-        c_int(fd),
-        c_uint(to_submit),
-        c_uint(min_complete),
-        c_uint(flags),
+        c_size_t(fd),
+        c_size_t(to_submit),
+        c_size_t(min_complete),
+        c_size_t(flags),
         c_size_t(0),
         c_size_t(0),
     )
@@ -324,10 +336,12 @@ def io_uring_register(fd: Int, opcode: Int, arg: Int, nr_args: Int) -> Int:
     """
     var rc = external_call["syscall", c_int](
         c_int(SYS_IO_URING_REGISTER),
-        c_int(fd),
-        c_uint(opcode),
+        c_size_t(fd),
+        c_size_t(opcode),
         c_size_t(arg),
-        c_uint(nr_args),
+        c_size_t(nr_args),
+        c_size_t(0),
+        c_size_t(0),
     )
     if rc < 0:
         return -Int(get_errno().value)
