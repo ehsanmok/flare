@@ -117,6 +117,13 @@ from .header_phf import (
     lookup_standard_header_string,
     is_standard_header,
 )
+from .hpack_huffman import (
+    HuffmanError,
+    huffman_encode,
+    huffman_decode,
+    huffman_encoded_length,
+    huffman_decoded_length,
+)
 from .request import Request, Method
 from .response import Response, Status
 from .response_pool import ResponsePool

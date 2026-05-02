@@ -466,6 +466,13 @@ from .http.header_phf import (
     lookup_standard_header_string,
     is_standard_header,
 )
+from .http.hpack_huffman import (
+    HuffmanError,
+    huffman_encode,
+    huffman_decode,
+    huffman_encoded_length,
+    huffman_decoded_length,
+)
 from .http.handler import (
     Handler,
     FnHandler,
