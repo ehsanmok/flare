@@ -75,6 +75,36 @@ struct Response(Movable):
         self.body = body^
         self.version = version^
 
+    def reset(mut self, status: Int = 200, var reason: String = ""):
+        """Recycle this ``Response`` in place for the next request on
+        a keep-alive connection (Track B6).
+
+        Clears the body and header maps without releasing their
+        backing capacity — the next response can refill the same
+        ``List[UInt8]`` body and the same ``HeaderMap`` arrays
+        without re-allocating, as long as the new payload fits
+        in the prior capacity.
+
+        The version is left at ``"HTTP/1.1"``; callers that need a
+        non-default version can set ``self.version`` directly.
+
+        Args:
+            status: New status code (default 200).
+            reason: New reason phrase (default empty —
+                    ``_status_reason`` will fill from the status
+                    code at serialise time).
+        """
+        self.status = status
+        self.reason = reason^
+        self.body.clear()
+        # ``HeaderMap`` does not currently expose a public
+        # ``clear()`` so we drop in-place by length-truncate.
+        # The backing ``List[String]`` storage retains capacity
+        # (``List.clear`` is O(n) destructors + zero capacity
+        # change in the Mojo stdlib).
+        self.headers._keys.clear()
+        self.headers._values.clear()
+
     def ok(self) -> Bool:
         """Return True if the status code is 2xx.
 

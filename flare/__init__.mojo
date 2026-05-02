@@ -449,6 +449,7 @@ from .http.server import (
 )
 from .http.request import Request, Method
 from .http.response import Response, Status
+from .http.response_pool import ResponsePool
 from .http.intern import (
     MethodIntern,
     ValueIntern,
