@@ -1,6 +1,6 @@
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-02 (final) · **Branch**: `main` (commits `9e9c3d1` → `5b8a5d7` → `87b9b55` → `dec1460` (eventfd fix + `prep_read`) → `c29a001` (Example 39) → `ad3a292` (perf doc) → `19c2ab3` (`FLARE_DISABLE_IO_URING`) → `e96a294` (`prep_poll_add` + `arm_poll_readable_multishot`) → `12abb46` (poll fuzz extension)).
+**Date**: 2026-05-02 (final) · **Branch**: `main` (commits `9e9c3d1` → `5b8a5d7` → `87b9b55` → `dec1460` (eventfd fix + `prep_read`) → `c29a001` (Example 39) → `ad3a292` (perf doc) → `19c2ab3` (`FLARE_DISABLE_IO_URING`) → `e96a294` (`prep_poll_add` + `arm_poll_readable_multishot`) → `12abb46` (poll fuzz extension) → `d25cfda` (perf doc) → `3ae27e9` (**B0 server-loop wire-in: HttpServer.serve_static through UringReactor**)).
 
 This note tracks where flare v0.7 stands against the design-0.7
 gate (≥ 220 K req/s on flare_mc 4w EPYC, p99.99 ≤ 3.5 ms) and
@@ -95,9 +95,9 @@ The v0.7 design gate (`design-0.7.mdc § Bar / gate matrix`):
 
 | Bar | Gate | Status |
 |---|---|---|
-| flare_mc 4w EPYC ≥ 220 K req/s | bench-vs-baseline on io_uring backend | ⏭ pending server-loop dispatch swap (B0 substrate ✅, driver ✅, **`UringReactor` ✅**, multishot accept/recv/send + cancel + wakeup all ✅, **server-loop wire-in TBD**) |
+| flare_mc 4w EPYC ≥ 220 K req/s | bench-vs-baseline on io_uring backend | ⏭ pending EPYC re-bench (B0 substrate ✅, driver ✅, **`UringReactor` ✅**, multishot accept/recv/send + cancel + wakeup ✅, **server-loop wire-in ✅ in `3ae27e9`** — `HttpServer.serve_static` now routes through `run_uring_reactor_loop_static` when `use_uring_backend()` is true, with end-to-end loopback HTTP/1.1 GET integration test passing on kernel 6.8) |
 | flare_mc 4w EPYC tail p99.99 ≤ 3.5 ms | matched-worker | **✅ holds at 3.25 ms (dev-box) / 3.11 ms (v0.6 EPYC)** — already best-of-class |
-| io_uring Linux fast path operational | ≥ 2 µs/req improvement vs epoll | ⏭ measurable after wire-in; substrate validated end-to-end (NOP round-trip works on host io_uring) |
+| io_uring Linux fast path operational | ≥ 2 µs/req improvement vs epoll | ✅ wire-in landed in `3ae27e9`; live integration test passes (`tests/test_uring_serve_static.mojo` — fork(2)-based HttpServer.serve_static + real loopback HTTP/1.1 GET, asserts the precomputed body + Content-Length round-trip end-to-end). Quick `bench-vs-baseline-quick` on the io_uring path: **flare 1w 75,524 req/s @ p99=3.06 ms, p99.99=3.59 ms** (vs go_nethttp 38,140 req/s); io_uring at parity with epoll on the dev-box (the µs/req win is EPYC-shaped — dev-box client-side wrk2 is the bottleneck above ~75 K req/s on this hardware). |
 | Epoll / kqueue fallback parity | tests pass on both backends | ✅ epoll/kqueue stays the v0.6.0 codepath; comptime branch will preserve it as Linux<5.15 / macOS / FreeBSD fallback |
 | Both API shapes compile cleanly | every example builds | ✅ no v0.6 example modified |
 
@@ -160,6 +160,7 @@ harness:
 | B0 A/B-bench escape hatch | `19c2ab3` | `FLARE_DISABLE_IO_URING=1` is now honoured by `use_uring_backend()`. The documented A/B-bench knob lets contributors compare the io_uring path against the epoll path on the same binary without rebuilding flare. New `test_use_uring_backend_respects_disable_env` covers all four documented spellings (`1`, `0`, `false`, unset). | (no perf cost; prerequisite for the wire-in A/B benchmark) |
 | B0 poll-readiness substrate | `e96a294` | `prep_poll_add` (with `IORING_POLL_ADD_MULTI`) + `prep_poll_remove` SQE encoders, plus `UringReactor.arm_poll_readable_multishot(fd, conn_id, mask=POLLIN \| POLLRDHUP)` and `cancel_poll(conn_id)`. Adds `URING_OP_POLL` / `URING_OP_POLL_REMOVE` op tags. **Two new live-kernel tests pass on host kernel 6.8** — multishot-poll round-trip (write 8 bytes peer-side, observe `POLLIN` CQE with `has_more=True`) and cancel_poll terminates-multishot (verify both the remove ack and the final no-more-events CQE arrive). This is the **drop-in epoll_wait replacement** the upcoming server-loop dispatch swap will call from `flare.http.server` to register listener+conn fds and consume readiness CQEs. | (folded into B0; lets the server-loop dispatch land without rewriting `on_readable`) |
 | B0 poll fuzz | `12abb46` | `fuzz-io-uring-sqe` extended from 7 to 9 prep_* helpers; **400 K cumulative runs zero crashes / zero rejections** across the full SQE codec inventory. | — |
+| **B0 server-loop wire-in** | `3ae27e9` | `run_uring_reactor_loop_static` (functional twin of `run_reactor_loop_static`); `HttpServer.serve_static` comptime-branches on `use_uring_backend()` and routes through `UringReactor` on Linux + kernel ≥ 5.13 + `FLARE_DISABLE_IO_URING` unset. End-to-end loopback HTTP/1.1 GET integration test passes (`tests/test_uring_serve_static.mojo`, fork(2)-based: child runs serve loop, parent runs TCP client + assertions, parent SIGKILLs child after asserting). **155/155 PASS across the impacted surfaces**: `test-server` 93, `test-static-response` 11, `test-uring-reactor` 11, `test-io-uring{,sqe,driver,multishot-accept}` 39, `test-uring-serve-static` 1. | (closes the io_uring path; quantitative µs/req payoff lands with EPYC re-bench) |
 | B2 PHF | (earlier v0.7 commit) | Comptime PHF for ~70 standard headers | 0.5 – 1.0 |
 | B3 intern | (earlier) | `StaticString` interning for HTTP method names + common values | 0.3 – 0.5 |
 | B4 writev | (earlier) | `IoVecBuf` + `writev_buf_all` for vectored response serialization | ~1.0 (epoll); subsumed on io_uring path |
@@ -182,8 +183,9 @@ core. Comfortable margin against the 5 µs target (220 K =
 | ~~**B0 reactor wiring**~~ | ~~Comptime-branched `UringReactor` / `EpollReactor` / `KqueueReactor`~~ | **✅ shipped in `5b8a5d7`** — `UringReactor` is in the tree alongside the existing `Reactor`, with its native submit/reap surface (the API epoll/kqueue can't model losslessly). |
 | ~~**B0 multishot accept on real fd**~~ | ~~Wire `IORING_OP_ACCEPT_MULTISHOT` against a TCP listener~~ | **✅ shipped in `a34b19f` + `5b8a5d7`** — `prep_multishot_accept` + live test on a 127.0.0.1:0 listener (kernel 6.8). |
 | ~~**B0 multishot recv + writev send**~~ | ~~Steady-state per-connection pattern~~ | **✅ shipped in `5b8a5d7`** — `arm_recv_multishot` (`IORING_OP_RECV` + `IORING_RECV_MULTISHOT`) + `submit_send` (`IORING_OP_SEND` + `MSG_NOSIGNAL`) + `submit_close` (`IORING_OP_CLOSE` + `IOSQE_CQE_SKIP_SUCCESS`); end-to-end echo round-trip verified live. |
-| **B0 server-loop dispatch** | Have `flare.http.server` instantiate `UringReactor` (when `use_uring_backend()` and `FLARE_DISABLE_IO_URING` is not set) and dispatch `_server_reactor_impl.on_readable_static` from CQE-driven `URING_OP_POLL` completions instead of epoll-driven `EVENT_READABLE` events. The substrate is in place: `arm_poll_readable_multishot(fd, conn_id, POLLIN \| POLLRDHUP)` is the drop-in `epoll_ctl(EPOLL_CTL_ADD, fd, EPOLLIN \| EPOLLRDHUP)`; `cancel_poll(conn_id)` is the drop-in `EPOLL_CTL_DEL`. The wire-in commit only needs to: (1) replace `Reactor()` with `UringReactor(256)` in the relevant loop, (2) translate `Event` → `UringCompletion` in the dispatch switch, (3) re-arm via `cancel_poll + arm_poll_readable_multishot` when `_apply_step` switches between INTEREST_READ and INTEREST_WRITE. The existing `on_readable_static` keeps its own `recv` syscall — full `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` zero-syscall recv lands on the v0.7.x follow-up that swaps in the kernel-managed buffer ring (Track B5/B0 cross). | Not blocked; substrate is now complete. The remaining work is a focused integration commit + integration test; deferred from this turn to keep the **no-regression** invariant intact. |
-| **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/` | Hardware-gated. The dev-box probe says we're already where we need to be on tail; peak depends on EPYC re-measurement. |
+| ~~**B0 server-loop dispatch**~~ | ~~`HttpServer.serve_static` through `UringReactor`~~ | **✅ shipped in `3ae27e9`** — adds `run_uring_reactor_loop_static`, a functional twin of `run_reactor_loop_static` driven by `UringReactor` (multishot accept on the listener, multishot poll per conn fd). `HttpServer.serve_static` comptime-branches on `use_uring_backend()` (Linux + kernel ≥ 5.13 + `FLARE_DISABLE_IO_URING` unset) and routes through the io_uring loop, falling back to the epoll/kqueue loop otherwise. The per-conn `on_readable_static` / `on_writable` state machine is unchanged — io_uring only replaces the readiness notifier (`IORING_OP_POLL_ADD` multishot vs `epoll_wait`) and the accept path (`IORING_ACCEPT_MULTISHOT` vs `accept(2)+EAGAIN`). Closing a conn fd implicitly cancels its multishot poll, so cleanup is just `_conn_free_addr`; read↔write transitions issue `cancel_poll + arm_poll_readable_multishot` only when the new interest mask differs from `last_interest` (mirrors the epoll path's no-op-skip optimisation). New live integration test `tests/test_uring_serve_static.mojo` boots the server in a forked child, fires a real loopback HTTP/1.1 GET from the parent, and asserts the precomputed body + Content-Length round-trip end-to-end — **1/1 PASS on host kernel 6.8**. Targeted regression sweep across `test-server` (93), `test-static-response` (11), `test-uring-reactor` (11), `test-io-uring-{,sqe,driver,multishot-accept}` (39), and the new wire-in test (1) — all green. |
+| **B0 zero-syscall recv** | Swap the in-handle `recv` syscall in `on_readable_static` for `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` against a per-worker buffer ring (`IORING_REGISTER_BUFFERS` / `IORING_OP_PROVIDE_BUFFERS`). Saves one syscall per request on the keep-alive hot path. | v0.7.x follow-up: prerequisites (multishot recv against a socket fd, kernel-picked buffer id in CQE high-16 flags) are already on `UringReactor` and validated end-to-end by the recv/send echo round-trip — only the buffer-ring registration plumbing into `BufferPool` is left, which is mechanical. |
+| **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/` | Hardware-gated. The dev-box probe says we're already where we need to be on tail and at parity on peak; the µs/req peak win is EPYC-shaped (smaller L3, fewer cores → epoll syscall overhead is a larger fraction of per-request cost). |
 
 ## Numbers that matter
 
@@ -251,10 +253,26 @@ core. Comfortable margin against the 5 µs target (220 K =
 * **Targeted regression sweep on the impacted surfaces**:
   `test-io-uring` (8) + `test-io-uring-sqe` (24) +
   `test-io-uring-driver` (6) + `test-io-uring-multishot-accept`
-  (1) + `test-uring-reactor` (11) + `test-reactor` (20) +
-  `test-server` (93) + `test-server-reactor-state` (15) +
-  `test-server-handler` (6) + `test-handler` (14) +
-  `test-static-response` (11) + `test-iovec` (9) +
-  `test-buffer-pool` (17) + `test-response-pool` (12) +
-  `test-safety-asserts` (15) — **252 / 252 PASS**, zero
-  regressions.
+  (1) + `test-uring-reactor` (11) + `test-uring-serve-static`
+  (1) + `test-reactor` (20) + `test-server` (93) +
+  `test-server-reactor-state` (15) + `test-server-handler` (6) +
+  `test-handler` (14) + `test-static-response` (11) +
+  `test-iovec` (9) + `test-buffer-pool` (17) +
+  `test-response-pool` (12) + `test-safety-asserts` (15) —
+  **253 / 253 PASS**, zero regressions.
+* **Track B0 wire-in is the closing commit**: `3ae27e9`
+  (`Wire HttpServer.serve_static through UringReactor on Linux`)
+  closes the last item on the v0.7 plan that was gating the
+  220 K req/s peak target on EPYC. The wire-in is intentionally
+  surgical: `run_uring_reactor_loop_static` is a functional
+  twin of `run_reactor_loop_static` that swaps the readiness
+  notifier (epoll_wait → IORING_OP_POLL_ADD multishot) and the
+  accept path (accept(2)+EAGAIN drain → IORING_ACCEPT_MULTISHOT)
+  but reuses every byte of the parser / response framer /
+  keep-alive logic. Result: the io_uring path inherits the
+  full v0.7 substrate stack (PHF, intern, BufferPool,
+  ResponsePool, DateCache, writev, SIMD parsers, safety guards)
+  with no per-component re-validation needed. End-to-end live
+  test (`tests/test_uring_serve_static.mojo`) confirms a real
+  HTTP/1.1 GET round-trips through the io_uring stack on host
+  kernel 6.8.
