@@ -449,6 +449,14 @@ from .http.server import (
 )
 from .http.request import Request, Method
 from .http.response import Response, Status
+from .http.intern import (
+    MethodIntern,
+    ValueIntern,
+    intern_method_bytes,
+    intern_method_string,
+    intern_common_value,
+    intern_common_value_string,
+)
 from .http.handler import (
     Handler,
     FnHandler,

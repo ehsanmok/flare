@@ -101,6 +101,14 @@ from .body import Body, ChunkSource, InlineBody, ChunkedBody, drain_body
 from .streaming_response import StreamingResponse
 from .streaming_serialize import serialize_streaming_response
 from .url import Url, UrlParseError
+from .intern import (
+    MethodIntern,
+    ValueIntern,
+    intern_method_bytes,
+    intern_method_string,
+    intern_common_value,
+    intern_common_value_string,
+)
 from .request import Request, Method
 from .response import Response, Status
 from .handler import (

@@ -15,6 +15,7 @@ from std.ffi import c_int, c_uint, external_call
 from ..runtime._libc_time import libc_nanosleep_ms
 
 from .handler import Handler, CancelHandler
+from .intern import intern_method_bytes
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
@@ -800,7 +801,17 @@ def _parse_http_request_bytes(
             break
     if sp1 < 0:
         raise Error("malformed request line: " + req_line)
-    var method = String(String(unsafe_from_utf8=req_line.as_bytes()[:sp1]))
+    # B3: try the StaticString intern table first — covers the 9
+    # RFC 7231 method names (~99 % of real-world traffic is GET /
+    # POST). On a hit, the returned String's backing comes from
+    # a process-lifetime constant rather than from per-request
+    # request buffer bytes, so the second String wrap is elided.
+    var interned = intern_method_bytes(req_line.as_bytes()[:sp1])
+    var method: String
+    if interned:
+        method = interned.value()
+    else:
+        method = String(String(unsafe_from_utf8=req_line.as_bytes()[:sp1]))
 
     var sp2 = -1
     for i in range(sp1 + 1, req_line.byte_length()):
