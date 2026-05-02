@@ -32,6 +32,17 @@ from .scheduler import Scheduler, default_worker_count
 from .pool import Pool
 from .buffer_pool import BufferHandle, BufferPool
 from .iovec import IoVecBuf, writev_buf, writev_buf_all
+from .io_uring import (
+    IoUringRing,
+    IoUringParams,
+    is_io_uring_available,
+    io_uring_setup,
+    io_uring_enter,
+    io_uring_register,
+    SYS_IO_URING_SETUP,
+    SYS_IO_URING_ENTER,
+    SYS_IO_URING_REGISTER,
+)
 from .blocking import block_in_pool, MAX_POOL_SIZE
 from ._libc_time import libc_usleep, libc_nanosleep_ms
 from .handoff import HandoffPolicy, HandoffQueue, WorkerHandoffPool

@@ -708,3 +708,8 @@ from .runtime.handoff import HandoffPolicy, HandoffQueue, WorkerHandoffPool
 from .runtime.date_cache import DateCache
 from .runtime.buffer_pool import BufferHandle, BufferPool
 from .runtime.iovec import IoVecBuf, writev_buf, writev_buf_all
+from .runtime.io_uring import (
+    IoUringRing,
+    IoUringParams,
+    is_io_uring_available,
+)
