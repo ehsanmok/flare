@@ -30,17 +30,22 @@ from flare.runtime.io_uring_sqe import (
     IO_URING_SQE_BYTES,
     IO_URING_CQE_BYTES,
     IORING_OP_NOP,
+    IORING_OP_POLL_ADD,
+    IORING_OP_POLL_REMOVE,
     IORING_OP_RECV,
     IORING_OP_SEND,
     IORING_OP_WRITEV,
     IORING_OP_CLOSE,
     IORING_OP_ACCEPT,
     IORING_OP_ASYNC_CANCEL,
+    IORING_POLL_ADD_MULTI,
     IoUringSqe,
     IoUringCqe,
     decode_cqe_at,
     prep_nop,
     prep_accept,
+    prep_poll_add,
+    prep_poll_remove,
     prep_recv,
     prep_send,
     prep_writev,
@@ -83,7 +88,7 @@ def _fuzz_prep_helpers(data: List[UInt8]) raises:
     """
     if len(data) < 1:
         return
-    var sel = Int(data[0]) % 7
+    var sel = Int(data[0]) % 9
     var sqe = IoUringSqe()
     var buf = sqe.as_bytes()
 
@@ -151,12 +156,35 @@ def _fuzz_prep_helpers(data: List[UInt8]) raises:
             raise Error("prep_close: opcode mismatch")
         if sqe.fd() != fd:
             raise Error("prep_close: fd mismatch")
-    else:  # sel == 6
+    elif sel == 6:
         prep_async_cancel(buf, addr, user_data)
         if sqe.opcode() != IORING_OP_ASYNC_CANCEL:
             raise Error("prep_async_cancel: opcode mismatch")
         if Int(sqe.addr()) != Int(addr):
             raise Error("prep_async_cancel: target_user_data mismatch")
+    elif sel == 7:
+        # Multishot poll_add: opcode + fd + poll_mask in op_flags
+        # + IORING_POLL_ADD_MULTI in len + user_data.
+        prep_poll_add(buf, fd, op_flags, user_data, True)
+        if sqe.opcode() != IORING_OP_POLL_ADD:
+            raise Error("prep_poll_add: opcode mismatch")
+        if sqe.fd() != fd:
+            raise Error("prep_poll_add: fd mismatch")
+        if Int(sqe.op_flags()) != Int(op_flags):
+            raise Error("prep_poll_add: op_flags mismatch")
+        if sqe.len() != Int(IORING_POLL_ADD_MULTI):
+            raise Error("prep_poll_add: multishot flag missing")
+        if Int(sqe.user_data()) != Int(user_data):
+            raise Error("prep_poll_add: user_data mismatch")
+    else:  # sel == 8
+        # poll_remove: target_user_data in addr + own user_data.
+        prep_poll_remove(buf, addr, user_data)
+        if sqe.opcode() != IORING_OP_POLL_REMOVE:
+            raise Error("prep_poll_remove: opcode mismatch")
+        if Int(sqe.addr()) != Int(addr):
+            raise Error("prep_poll_remove: target_user_data mismatch")
+        if Int(sqe.user_data()) != Int(user_data):
+            raise Error("prep_poll_remove: user_data mismatch")
 
 
 def _fuzz_cqe_decode(data: List[UInt8]) raises:
