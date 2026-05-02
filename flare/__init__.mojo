@@ -685,3 +685,4 @@ from .runtime.event import (
 )
 from .runtime.handoff import HandoffPolicy, HandoffQueue, WorkerHandoffPool
 from .runtime.date_cache import DateCache
+from .runtime.buffer_pool import BufferHandle, BufferPool
