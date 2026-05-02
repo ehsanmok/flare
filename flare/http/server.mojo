@@ -552,9 +552,30 @@ struct HttpServer(Movable):
             NetworkError: On fatal listener errors; per-connection
                 errors close the offending connection silently.
         """
-        from ._server_reactor_impl import run_reactor_loop_static
+        from ._server_reactor_impl import (
+            run_reactor_loop_static,
+            run_uring_reactor_loop_static,
+        )
+        from flare.runtime.uring_reactor import use_uring_backend
+        from std.sys.info import CompilationTarget
 
         self._stopping = False
+        # Track B0 wire-in: route the static-response path through
+        # the io_uring reactor when the kernel exposes io_uring AND
+        # the contributor hasn't set ``FLARE_DISABLE_IO_URING=1`` for
+        # an A/B comparison run. The two loops are functional twins:
+        # same on_readable_static / on_writable per-conn state
+        # machine, same StaticResponse memcpy, same keep-alive
+        # framing — only the readiness notifier differs (epoll_wait
+        # / kqueue vs IORING_OP_POLL_ADD multishot). See the long
+        # comment above ``run_uring_reactor_loop_static`` for the
+        # design tradeoffs.
+        comptime if CompilationTarget.is_linux():
+            if use_uring_backend():
+                run_uring_reactor_loop_static(
+                    self._listener, self.config, resp, self._stopping
+                )
+                return
         run_reactor_loop_static(
             self._listener, self.config, resp, self._stopping
         )

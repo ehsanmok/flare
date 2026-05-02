@@ -1924,3 +1924,291 @@ def run_reactor_loop_view[
         var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
         ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
         _cleanup_conn(leftover[i], conns, timers, reactor)
+
+
+# ── io_uring server-loop dispatch (Track B0 wire-in) ────────────────────────
+#
+# When ``use_uring_backend()`` is true (Linux kernel exposes io_uring
+# AND ``FLARE_DISABLE_IO_URING`` is unset), ``HttpServer.serve_static``
+# routes through ``run_uring_reactor_loop_static`` below instead of
+# the epoll/kqueue ``run_reactor_loop_static`` above.
+#
+# How it differs from the epoll path
+# -----------------------------------
+#
+# * Backend: ``UringReactor`` (multishot accept on the listener,
+#   multishot poll per connection fd) instead of ``Reactor``
+#   (epoll_wait on Linux, kqueue on macOS). One ``io_uring_enter``
+#   per loop iteration replaces ``epoll_wait`` + ``epoll_ctl(MOD)``
+#   per modify; the multishot accept replaces the
+#   ``while True: accept(); EAGAIN`` drain loop with one CQE per
+#   accepted connection.
+# * Per-conn state machine: **unchanged**. ``ConnHandle.on_readable_static``
+#   and ``on_writable`` still do their own non-blocking ``recv`` /
+#   ``send`` on the socket fd. The uring path only replaces the
+#   *readiness notifier*: the kernel posts a ``URING_OP_POLL`` CQE
+#   when the fd becomes readable / writable, and the dispatch loop
+#   calls the same on_readable_static / on_writable code that the
+#   epoll path runs. This keeps the wire-in surgical: zero changes
+#   to the parser / response framer / keep-alive logic.
+# * Cleanup: closing the connection fd implicitly cancels the
+#   kernel's multishot poll on it. Any final-no-more-events CQE
+#   that arrives after cleanup looks like a "conn_id not in dict"
+#   miss in the dispatch switch and is silently ignored.
+# * Modify (read <-> write): ``cancel_poll(fd) +
+#   arm_poll_readable_multishot(fd, mask)`` is the io_uring
+#   equivalent of ``epoll_ctl(EPOLL_CTL_MOD, fd, mask)``. We
+#   trigger it from ``_apply_step_uring`` only when the new
+#   interest mask actually differs from the currently-armed one,
+#   matching the epoll path's no-op-skip optimisation.
+
+
+def _alloc_conn_from_accepted_fd(fd: Int) raises -> Int:
+    """Wrap an already-accepted client fd in a ConnHandle and
+    return its address.
+
+    Mirrors ``_conn_alloc_addr`` but takes a raw integer fd
+    (the kernel returns the accepted fd directly in the
+    ``IORING_OP_ACCEPT`` CQE's ``res`` field; we don't get to
+    call ``accept(2)`` ourselves on the io_uring multishot
+    accept path).
+
+    Sets ``TCP_NODELAY`` + non-blocking on the fd to match the
+    contract of :func:`flare.tcp.listener.accept_fd`. The peer
+    address is left empty (loopback placeholder) -- the
+    multishot-accept path discards it for performance, and the
+    static-response path (the only consumer of this helper today)
+    doesn't use ``Request.peer``.
+    """
+    from std.ffi import c_int
+    from flare.net.socket import RawSocket
+    from flare.net._libc import AF_INET, SOCK_STREAM
+
+    var raw = RawSocket(c_int(fd), AF_INET, SOCK_STREAM, True)
+    raw.set_tcp_nodelay(True)
+    raw.set_nonblocking(True)
+    var stream = TcpStream(raw^, SocketAddr.localhost(0))
+    return Pool[ConnHandle].alloc_move(ConnHandle(stream^))
+
+
+def _cleanup_conn_uring(
+    fd: Int,
+    mut conns: Dict[Int, Int],
+):
+    """``_cleanup_conn`` analog for the io_uring backend.
+
+    Closing the fd implicitly cancels every multishot poll the
+    kernel holds against it, so we don't bother issuing
+    ``cancel_poll`` here -- the kernel auto-posts a final
+    no-more-events CQE shortly after close, which the dispatch
+    loop drops as a "conn_id not in dict" miss.
+
+    The ConnHandle's destructor (run via ``Pool[ConnHandle].free``)
+    closes the underlying ``TcpStream`` socket, which is the
+    actual ``close(fd)`` syscall.
+    """
+    if fd in conns:
+        try:
+            var addr = conns.pop(fd)
+            _conn_free_addr(addr)
+        except:
+            pass
+
+
+def run_uring_reactor_loop_static(
+    mut listener: TcpListener,
+    config: ServerConfig,
+    resp: StaticResponse,
+    ref stopping: Bool,
+) raises:
+    """io_uring-backed reactor loop for the static-response path.
+
+    Functional twin of :func:`run_reactor_loop_static` but uses
+    :class:`flare.runtime.uring_reactor.UringReactor` for both the
+    accept path (multishot accept; one SQE arms it, the kernel
+    posts an accept CQE per incoming connection) and the per-conn
+    readiness path (multishot poll for ``POLLIN | POLLRDHUP`` on
+    accepted fds; ``POLLOUT`` after ``on_readable_static``
+    transitions the connection to write-mode).
+
+    Per-connection ``ConnHandle.on_readable_static`` /
+    ``on_writable`` are unchanged -- the uring path replaces
+    *readiness notification*, not the per-conn syscall pattern.
+    A future v0.7.x commit will swap the in-handle ``recv`` for
+    ``IORING_OP_RECV`` + ``IORING_RECV_MULTISHOT`` against the
+    per-worker BufferPool to drop the recv syscall entirely.
+
+    Linux-only. Caller is expected to gate this on
+    :func:`flare.runtime.uring_reactor.use_uring_backend`.
+
+    Args:
+        listener: Bound and listening ``TcpListener`` (caller
+            owns it; we borrow for accept / fd access).
+        config: Server configuration.
+        resp: Pre-encoded static response from
+            ``precompute_response(...)``.
+        stopping: Checked on every loop iteration; when True the
+            loop exits and in-flight connections are closed.
+    """
+    comptime if not CompilationTarget.is_linux():
+        raise Error(
+            "run_uring_reactor_loop_static: io_uring path is Linux-only"
+        )
+    from flare.runtime.uring_reactor import (
+        URING_OP_ACCEPT,
+        URING_OP_POLL,
+        UringCompletion,
+        UringReactor,
+    )
+    from flare.runtime.io_uring_sqe import POLLIN, POLLOUT, POLLRDHUP
+
+    listener._socket.set_nonblocking(True)
+    var listener_fd = Int(listener._socket.fd)
+
+    var ureactor = UringReactor(256)
+    var conns = Dict[Int, Int]()
+
+    # Multishot accept: one SQE arms it; the kernel posts a CQE per
+    # accepted connection with the new fd in ``comp.res``.
+    ureactor.arm_listener_multishot(listener_fd, UInt64(0))
+
+    var completions = List[UringCompletion]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        completions.clear()
+        try:
+            # min_complete=1 -> block until at least one CQE arrives.
+            # Closing the listener (HttpServer.close()) terminates the
+            # multishot accept which posts a final CQE and wakes us up,
+            # so the loop exits promptly on graceful-shutdown.
+            _ = ureactor.poll(1, completions, 64)
+        except:
+            break
+
+        for i in range(len(completions)):
+            var comp = completions[i]
+            if comp.op == URING_OP_ACCEPT:
+                # Multishot accept completion. ``comp.res`` is the new
+                # client fd on success, or a negative errno on error
+                # (typically -EBADF when the listener is closed during
+                # graceful shutdown -- we let the outer ``stopping``
+                # check handle that).
+                if comp.is_error():
+                    continue
+                var client_fd = Int(comp.res)
+                var addr: Int
+                try:
+                    addr = _alloc_conn_from_accepted_fd(client_fd)
+                except:
+                    # Fd-allocator failure (rare; OOM); close the
+                    # accepted fd to avoid leaking it.
+                    var c = c_int(client_fd)
+                    _ = _close(c)
+                    continue
+                conns[client_fd] = addr
+                var ch_ptr = _conn_ptr_from_int(addr)
+                # Track the initial interest so the no-op-skip in
+                # the dispatch path works on the first read->read cycle.
+                ch_ptr[].last_interest = Int(POLLIN | POLLRDHUP)
+                try:
+                    ureactor.arm_poll_readable_multishot(
+                        client_fd, UInt64(client_fd), POLLIN | POLLRDHUP
+                    )
+                except:
+                    _cleanup_conn_uring(client_fd, conns)
+                continue
+
+            if comp.op != URING_OP_POLL:
+                # Wakeup CQEs are filtered inside UringReactor.poll;
+                # remove-acks (URING_OP_POLL_REMOVE) + the
+                # final-no-more-events poll CQE land here when a
+                # re-arm cancelled an existing poll. Both are safe
+                # to ignore -- the new poll SQE is already in flight
+                # by the time we see them.
+                continue
+
+            # URING_OP_POLL completion. ``conn_id`` is the connection
+            # fd; ``comp.res`` carries the OR of poll bits that fired.
+            var fd = Int(comp.conn_id)
+            if fd not in conns:
+                # Stale CQE from a connection that was just cleaned up.
+                continue
+
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                var poll_bits = UInt32(comp.res)
+                var last_step = StepResult()
+                var did_anything = False
+
+                if (poll_bits & POLLIN) != 0:
+                    last_step = ch_ptr[].on_readable_static(resp, config)
+                    step_done = last_step.done
+                    did_anything = True
+                    # Inline-cycle keep-alive optimisation, mirroring
+                    # the epoll path: while the state machine is still
+                    # cycling, drive the next step rather than bouncing
+                    # back through the reactor. Cap at 3 cycles.
+                    var cycles = 0
+                    while (not step_done) and cycles < 3:
+                        cycles += 1
+                        if (
+                            last_step.want_write
+                            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                        ):
+                            last_step = ch_ptr[].on_writable(config)
+                            step_done = last_step.done
+                        elif (
+                            last_step.want_read
+                            and len(ch_ptr[].read_buf) > 0
+                            and ch_ptr[].state == STATE_READING
+                        ):
+                            last_step = ch_ptr[].on_readable_static(
+                                resp, config
+                            )
+                            step_done = last_step.done
+                        else:
+                            break
+
+                if (not did_anything) and (poll_bits & POLLOUT) != 0:
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+
+                if not step_done:
+                    # Compute the new interest mask + re-arm if it
+                    # changed. This is the io_uring equivalent of
+                    # _apply_step's ``reactor.modify(fd, interest)``.
+                    var new_mask: UInt32 = 0
+                    if last_step.want_read:
+                        new_mask |= POLLIN | POLLRDHUP
+                    if last_step.want_write:
+                        new_mask |= POLLOUT
+                    if new_mask != 0:
+                        var key = Int(new_mask)
+                        if key != ch_ptr[].last_interest:
+                            if ch_ptr[].last_interest != 0:
+                                try:
+                                    ureactor.cancel_poll(UInt64(fd))
+                                except:
+                                    pass
+                            try:
+                                ureactor.arm_poll_readable_multishot(
+                                    fd, UInt64(fd), new_mask
+                                )
+                                ch_ptr[].last_interest = key
+                            except:
+                                step_done = True
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn_uring(fd, conns)
+
+    # Graceful shutdown: drop every in-flight conn. Closing each fd
+    # implicitly tears down its kernel-side multishot poll.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn_uring(leftover[i], conns)
