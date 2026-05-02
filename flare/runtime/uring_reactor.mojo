@@ -101,11 +101,18 @@ from flare.runtime.io_uring_sqe import (
     IORING_RECV_MULTISHOT,
     IORING_CQE_F_MORE,
     IOSQE_CQE_SKIP_SUCCESS,
+    POLLERR,
+    POLLHUP,
+    POLLIN,
+    POLLOUT,
+    POLLRDHUP,
     IoUringCqe,
     prep_accept,
     prep_async_cancel,
     prep_close,
     prep_multishot_accept,
+    prep_poll_add,
+    prep_poll_remove,
     prep_read,
     prep_recv,
     prep_send,
@@ -134,6 +141,16 @@ comptime URING_OP_CANCEL: UInt64 = 5
 """Async cancel of an in-flight op for ``conn_id``."""
 comptime URING_OP_WAKEUP: UInt64 = 6
 """Cross-thread wakeup CQE; ``conn_id`` is 0."""
+comptime URING_OP_POLL: UInt64 = 7
+"""Multishot poll CQE; ``conn_id`` is the registered fd's slot.
+The kernel posts one CQE per readiness change (analog of an
+``epoll_wait`` event); the userspace driver inspects
+``UringCompletion.res`` to see which poll bits fired."""
+comptime URING_OP_POLL_REMOVE: UInt64 = 8
+"""CQE for an ``IORING_OP_POLL_REMOVE`` we issued ourselves;
+the kernel posts it under the remove SQE's own user_data and
+the cancelled poll's final CQE arrives separately under
+``URING_OP_POLL`` without ``IORING_CQE_F_MORE``."""
 
 
 comptime _OP_SHIFT: UInt64 = 56
@@ -444,6 +461,70 @@ struct UringReactor(Movable):
         (slot + 1).init_pointee_copy(
             flag_byte | UInt8(Int(IOSQE_CQE_SKIP_SUCCESS))
         )
+        self._driver.commit_sqe()
+
+    def arm_poll_readable_multishot(
+        mut self,
+        fd: Int,
+        conn_id: UInt64,
+        poll_mask: UInt32 = POLLIN | POLLRDHUP,
+    ) raises -> None:
+        """Submit a multishot ``IORING_OP_POLL_ADD`` against ``fd``.
+
+        Kernel posts a CQE every time the fd's readiness matches
+        any bit in ``poll_mask``, without re-arming. This is the
+        io_uring analog of ``epoll_ctl(EPOLL_CTL_ADD, fd, EPOLLIN
+        | EPOLLET)`` and is the substrate the upcoming server-loop
+        dispatch swap (B0 wire-in) uses to replace ``epoll_wait``
+        on the io_uring backend.
+
+        The CQE is tagged ``URING_OP_POLL`` so the dispatch loop
+        can route it to the same code path that handles
+        ``EVENT_READABLE`` on the epoll backend; the existing
+        ``ConnHandle.on_readable`` then runs its own ``recv``
+        syscall (no buffer-ring required for the wire-in
+        commit; that's the v0.7.x follow-up that swaps to
+        ``IORING_OP_RECV`` + ``IORING_RECV_MULTISHOT``).
+
+        Args:
+            fd: Connected socket fd. ``debug_assert`` checks
+                ``fd >= 0``.
+            conn_id: Caller-defined connection slot id (e.g. the
+                fd itself when 1:1 with a ConnHandle).
+            poll_mask: Defaults to ``POLLIN | POLLRDHUP`` so
+                peer-closed connections surface alongside data-
+                available ones; pass ``POLLOUT`` for write-side
+                readiness or any combination of the ``POLL*``
+                constants.
+
+        Raises:
+            Error: If the SQ is full (hot-path; caller should
+                drain CQEs first).
+        """
+        var slot = self._driver.next_sqe()
+        if Int(slot) == 0:
+            raise Error("UringReactor.arm_poll_readable_multishot: SQ is full")
+        var ud = pack_user_data(URING_OP_POLL, conn_id)
+        prep_poll_add(slot, fd, poll_mask, ud, True)
+        self._driver.commit_sqe()
+
+    def cancel_poll(mut self, conn_id: UInt64) raises -> None:
+        """Submit ``IORING_OP_POLL_REMOVE`` cancelling the
+        multishot poll registered for ``conn_id``.
+
+        After the kernel processes the remove SQE, two CQEs
+        arrive: one tagged ``URING_OP_POLL_REMOVE`` (this SQE's
+        own completion, ``res = 0`` on success or ``-ENOENT`` if
+        nothing matched), and one final tagged ``URING_OP_POLL``
+        without ``IORING_CQE_F_MORE`` for the cancelled poll
+        itself.
+        """
+        var slot = self._driver.next_sqe()
+        if Int(slot) == 0:
+            raise Error("UringReactor.cancel_poll: SQ is full")
+        var target = pack_user_data(URING_OP_POLL, conn_id)
+        var ud = pack_user_data(URING_OP_POLL_REMOVE, conn_id)
+        prep_poll_remove(slot, target, ud)
         self._driver.commit_sqe()
 
     def cancel_conn(mut self, conn_id: UInt64) raises -> None:

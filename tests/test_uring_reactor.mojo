@@ -50,12 +50,15 @@ from flare.net._libc import (
     _fill_sockaddr_in,
 )
 from flare.runtime.io_uring import is_io_uring_available
+from flare.runtime.io_uring_sqe import POLLIN, POLLRDHUP
 from flare.runtime.uring_reactor import (
     URING_OP_ACCEPT,
     URING_OP_RECV,
     URING_OP_SEND,
     URING_OP_CLOSE,
     URING_OP_CANCEL,
+    URING_OP_POLL,
+    URING_OP_POLL_REMOVE,
     URING_OP_WAKEUP,
     UringCompletion,
     UringReactor,
@@ -367,6 +370,146 @@ def test_wakeup_releases_blocking_poll() raises:
     assert_equal(n, 0)
 
 
+def test_arm_poll_readable_multishot_round_trip() raises:
+    """Arm a multishot poll on a connected loopback socket; have
+    the peer write bytes; verify a ``URING_OP_POLL`` CQE comes
+    back with ``POLLIN`` set in ``res`` and ``has_more = True``
+    (multishot still armed). This is the substrate the upcoming
+    server-loop dispatch swap (B0 wire-in) uses to replace
+    ``epoll_wait`` on the io_uring backend.
+    """
+    if not is_io_uring_available():
+        print(
+            "test_arm_poll_readable_multishot_round_trip: skipped (io_uring"
+            " not available)"
+        )
+        return
+    var listener = _make_listener()
+    var r = UringReactor(32)
+    r.arm_listener_multishot(Int(listener.fd), UInt64(0))
+
+    var client = _connect_loopback(listener.port)
+    var out = List[UringCompletion]()
+    _ = r.poll(1, out)
+    var accepted_fd: Int = -1
+    for i in range(len(out)):
+        if out[i].op == URING_OP_ACCEPT:
+            accepted_fd = out[i].res
+            break
+    assert_true(accepted_fd > 0)
+
+    # Arm a multishot poll on the accepted fd. Tag with a
+    # well-known conn_id so we can verify the CQE routing.
+    r.arm_poll_readable_multishot(
+        accepted_fd, UInt64(0xC0DE), POLLIN | POLLRDHUP
+    )
+
+    # Drain any pending CQEs without blocking; nothing should
+    # have fired yet because nobody has written.
+    out.clear()
+    _ = r.poll(0, out)
+    var fired = False
+    for i in range(len(out)):
+        if out[i].op == URING_OP_POLL:
+            fired = True
+            break
+    assert_false(fired)
+
+    # Now write 8 bytes from the client side.
+    var tx = stack_allocation[8, UInt8]()
+    for k in range(8):
+        (tx + k).init_pointee_copy(UInt8(ord("a") + k))
+    var w = _send(client, tx, c_size_t(8), c_int(0))
+    assert_equal(Int(w), 8)
+
+    # Block until at least one CQE arrives, then look for the
+    # poll completion.
+    var saw_poll = False
+    for _ in range(8):
+        out.clear()
+        _ = r.poll(1, out)
+        for i in range(len(out)):
+            var comp = out[i]
+            if comp.op == URING_OP_POLL:
+                assert_equal(Int(comp.conn_id), 0xC0DE)
+                # res carries the OR of poll bits that fired;
+                # POLLIN must be set.
+                assert_true((UInt32(comp.res) & POLLIN) != 0)
+                # Multishot stays armed.
+                assert_true(comp.has_more)
+                saw_poll = True
+                break
+        if saw_poll:
+            break
+    assert_true(saw_poll, "no URING_OP_POLL completion observed after write")
+
+    _ = _close(c_int(accepted_fd))
+    _ = _close(client)
+    _ = _close(listener.fd)
+
+
+def test_cancel_poll_terminates_multishot() raises:
+    """Arm a multishot poll, then ``cancel_poll`` it. Verify the
+    final ``URING_OP_POLL`` CQE arrives without
+    ``IORING_CQE_F_MORE`` (multishot terminated) and a
+    ``URING_OP_POLL_REMOVE`` CQE confirms the cancel succeeded.
+    """
+    if not is_io_uring_available():
+        print(
+            "test_cancel_poll_terminates_multishot: skipped (io_uring not"
+            " available)"
+        )
+        return
+    var listener = _make_listener()
+    var r = UringReactor(32)
+    r.arm_listener_multishot(Int(listener.fd), UInt64(0))
+    var client = _connect_loopback(listener.port)
+
+    var out = List[UringCompletion]()
+    _ = r.poll(1, out)
+    var accepted_fd: Int = -1
+    for i in range(len(out)):
+        if out[i].op == URING_OP_ACCEPT:
+            accepted_fd = out[i].res
+            break
+    assert_true(accepted_fd > 0)
+
+    r.arm_poll_readable_multishot(accepted_fd, UInt64(0xBEEF), POLLIN)
+    r.cancel_poll(UInt64(0xBEEF))
+
+    # Drain enough CQEs to observe both the cancel ack and the
+    # final poll completion. The kernel may post them in either
+    # order, so spin a few times.
+    var saw_remove_ack = False
+    var saw_poll_terminate = False
+    for _ in range(8):
+        out.clear()
+        _ = r.poll(1, out)
+        for i in range(len(out)):
+            var comp = out[i]
+            if comp.op == URING_OP_POLL_REMOVE:
+                assert_equal(Int(comp.conn_id), 0xBEEF)
+                # res = 0 on success, -ENOENT (-2) if nothing matched.
+                # Either is acceptable here — both signal "cancel done".
+                saw_remove_ack = True
+            elif comp.op == URING_OP_POLL:
+                assert_equal(Int(comp.conn_id), 0xBEEF)
+                if not comp.has_more:
+                    saw_poll_terminate = True
+        if saw_remove_ack and saw_poll_terminate:
+            break
+
+    assert_true(saw_remove_ack, "URING_OP_POLL_REMOVE ack never arrived")
+    assert_true(
+        saw_poll_terminate,
+        "final URING_OP_POLL CQE without F_MORE never arrived",
+    )
+
+    _ = _close(c_int(accepted_fd))
+    _ = _close(client)
+    _ = _close(listener.fd)
+
+
 def test_use_uring_backend_consistent_with_availability() raises:
     """``use_uring_backend()`` must agree with
     ``is_io_uring_available()`` on Linux."""
@@ -420,8 +563,12 @@ def main() raises:
     print("    PASS test_submit_send_round_trip")
     test_wakeup_releases_blocking_poll()
     print("    PASS test_wakeup_releases_blocking_poll")
+    test_arm_poll_readable_multishot_round_trip()
+    print("    PASS test_arm_poll_readable_multishot_round_trip")
+    test_cancel_poll_terminates_multishot()
+    print("    PASS test_cancel_poll_terminates_multishot")
     test_use_uring_backend_consistent_with_availability()
     print("    PASS test_use_uring_backend_consistent_with_availability")
     test_use_uring_backend_respects_disable_env()
     print("    PASS test_use_uring_backend_respects_disable_env")
-    print("test_uring_reactor: 9/9 PASS")
+    print("test_uring_reactor: 11/11 PASS")

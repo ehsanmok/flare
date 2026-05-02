@@ -60,13 +60,23 @@ from flare.runtime.io_uring_sqe import (
     IORING_CQE_F_BUFFER,
     IORING_CQE_F_MORE,
     IORING_CQE_F_SOCK_NONEMPTY,
+    IORING_OP_POLL_ADD,
+    IORING_OP_POLL_REMOVE,
+    IORING_POLL_ADD_MULTI,
     IOSQE_IO_LINK,
     IOSQE_FIXED_FILE,
+    POLLERR,
+    POLLHUP,
+    POLLIN,
+    POLLOUT,
+    POLLRDHUP,
     IoUringSqe,
     IoUringCqe,
     encode_sqe_zero,
     prep_nop,
     prep_accept,
+    prep_poll_add,
+    prep_poll_remove,
     prep_recv,
     prep_send,
     prep_writev,
@@ -367,6 +377,64 @@ def test_decode_cqe_at_sign_extends_negative_res() raises:
 # ── prep_* fault-tolerance: zeros prior dirty bytes ───────────────────────────
 
 
+def test_poll_event_constants_match_linux_abi() raises:
+    """``POLLIN``/``POLLOUT``/``POLLERR``/``POLLHUP``/``POLLRDHUP``
+    must match the Linux ``sys/poll.h`` ABI bytes — io_uring
+    passes them through verbatim to ``vfs_poll`` and any drift
+    would silently misroute readiness events."""
+    assert_equal(Int(POLLIN), 0x0001)
+    assert_equal(Int(POLLOUT), 0x0004)
+    assert_equal(Int(POLLERR), 0x0008)
+    assert_equal(Int(POLLHUP), 0x0010)
+    assert_equal(Int(POLLRDHUP), 0x2000)
+    # Multishot + opcode IDs are kernel-stable too.
+    assert_equal(Int(IORING_POLL_ADD_MULTI), 0x01)
+    assert_equal(Int(IORING_OP_POLL_ADD), 6)
+    assert_equal(Int(IORING_OP_POLL_REMOVE), 7)
+
+
+def test_prep_poll_add_writes_full_field_set() raises:
+    """Multishot ``prep_poll_add`` must write the opcode, fd,
+    poll_mask in op_flags, IORING_POLL_ADD_MULTI in len, and
+    user_data — leaving every other field zero."""
+    var sqe = IoUringSqe()
+    var buf = sqe.as_bytes()
+    var mask = POLLIN | POLLRDHUP
+    prep_poll_add(buf, 42, mask, UInt64(0xDEADBEEF), True)
+    assert_equal(sqe.opcode(), IORING_OP_POLL_ADD)
+    assert_equal(sqe.fd(), 42)
+    assert_equal(Int(sqe.op_flags()), Int(mask))
+    assert_equal(sqe.len(), Int(IORING_POLL_ADD_MULTI))
+    assert_equal(Int(sqe.user_data()), 0xDEADBEEF)
+    assert_equal(Int(sqe.addr()), 0)
+
+
+def test_prep_poll_add_oneshot_clears_multi_flag() raises:
+    """``multishot=False`` must NOT set IORING_POLL_ADD_MULTI in
+    the SQE ``len`` field — kernel decides oneshot vs multishot
+    purely from that bit."""
+    var sqe = IoUringSqe()
+    var buf = sqe.as_bytes()
+    prep_poll_add(buf, 7, POLLIN, UInt64(0x1), False)
+    assert_equal(sqe.opcode(), IORING_OP_POLL_ADD)
+    assert_equal(sqe.fd(), 7)
+    assert_equal(sqe.len(), 0)
+    assert_equal(Int(sqe.op_flags()), Int(POLLIN))
+
+
+def test_prep_poll_remove_targets_user_data() raises:
+    """``prep_poll_remove`` must put the target tag in addr
+    (matches kernel ``poll_remove_one`` lookup) and its own
+    user_data tag in the user_data slot."""
+    var sqe = IoUringSqe()
+    var buf = sqe.as_bytes()
+    var target_tag = UInt64(0xCAFEBABE0000)
+    prep_poll_remove(buf, target_tag, UInt64(0x99))
+    assert_equal(sqe.opcode(), IORING_OP_POLL_REMOVE)
+    assert_equal(Int(sqe.addr()), Int(target_tag))
+    assert_equal(Int(sqe.user_data()), 0x99)
+
+
 def test_prep_helpers_overwrite_dirty_buffer() raises:
     """A prep helper called on a dirty SQE buffer must zero
     fields it doesn't write — kernel rejects partially-clean
@@ -409,5 +477,9 @@ def main() raises:
     test_cqe_buffer_id_decodes_high_bits_when_buffer_flag_set()
     test_decode_cqe_at_round_trips_through_byte_buffer()
     test_decode_cqe_at_sign_extends_negative_res()
+    test_poll_event_constants_match_linux_abi()
+    test_prep_poll_add_writes_full_field_set()
+    test_prep_poll_add_oneshot_clears_multi_flag()
+    test_prep_poll_remove_targets_user_data()
     test_prep_helpers_overwrite_dirty_buffer()
-    print("test_io_uring_sqe: 20 PASS")
+    print("test_io_uring_sqe: 24 PASS")

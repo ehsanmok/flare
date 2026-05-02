@@ -205,6 +205,51 @@ comptime IORING_ACCEPT_MULTISHOT: UInt32 = 0x01
 ``IORING_OP_ACCEPT``. Same idea — the listener socket keeps
 firing accept completions without re-submission."""
 
+comptime IORING_POLL_ADD_MULTI: UInt32 = 0x01
+"""5.13+. Set in the SQE ``len`` field on ``IORING_OP_POLL_ADD``
+to request a *multishot* poll: the kernel posts a CQE every
+time the requested poll mask is reached, without requiring
+userspace to re-arm. ``IORING_CQE_F_MORE`` in the CQE's
+``flags`` indicates the multishot is still armed.
+
+This is the io_uring analog of edge-triggered ``epoll_wait``
+with ``EPOLLET`` — it lets a single SQE drive an arbitrary
+number of readiness notifications, which is the substrate
+that the upcoming server-loop dispatch swap (B0 wire-in)
+uses to replace the per-poll ``epoll_wait`` syscall on the
+io_uring backend."""
+
+comptime IORING_POLL_UPDATE_EVENTS: UInt32 = 0x02
+"""5.13+. Set in the SQE ``len`` field on
+``IORING_OP_POLL_REMOVE`` to indicate the SQE is a
+*modify* of an existing poll's event mask, not a remove."""
+
+comptime IORING_POLL_UPDATE_USER_DATA: UInt32 = 0x04
+"""5.13+. Set in the SQE ``len`` field on
+``IORING_OP_POLL_REMOVE`` to indicate the SQE is a
+*modify* of an existing poll's user_data tag."""
+
+
+# ── poll(2) event mask bits (matches sys/poll.h on Linux) ────────────────────
+# These are the flags written into the ``op_flags`` (poll32_events)
+# slot of an ``IORING_OP_POLL_ADD`` SQE. Numeric values are the
+# Linux ABI; the kernel io_uring layer passes them through
+# verbatim to ``vfs_poll``.
+
+comptime POLLIN: UInt32 = 0x0001
+"""Data ready to read (analog of ``EPOLLIN``)."""
+comptime POLLPRI: UInt32 = 0x0002
+"""Urgent data ready (analog of ``EPOLLPRI``)."""
+comptime POLLOUT: UInt32 = 0x0004
+"""Writable without blocking (analog of ``EPOLLOUT``)."""
+comptime POLLERR: UInt32 = 0x0008
+"""Error condition (analog of ``EPOLLERR``)."""
+comptime POLLHUP: UInt32 = 0x0010
+"""Peer hung up (analog of ``EPOLLHUP``)."""
+comptime POLLRDHUP: UInt32 = 0x2000
+"""Peer closed for writing (analog of ``EPOLLRDHUP``).
+Linux-specific; not in POSIX."""
+
 
 # ── CQE flags ────────────────────────────────────────────────────────────────
 
@@ -688,6 +733,96 @@ def prep_read(
     _store_u64_le(buf, _SQE_OFF_OFF_OR_ADDR2, offset)
     _store_u64_le(buf, _SQE_OFF_ADDR, rx_buf)
     _store_u32_le(buf, _SQE_OFF_LEN, UInt32(rx_len))
+    _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
+
+
+@always_inline
+def prep_poll_add(
+    buf: UnsafePointer[UInt8, MutExternalOrigin],
+    fd: Int,
+    poll_mask: UInt32,
+    user_data: UInt64,
+    multishot: Bool = True,
+) -> None:
+    """Write an ``IORING_OP_POLL_ADD`` SQE at ``buf``.
+
+    The io_uring analog of ``epoll_ctl(EPOLL_CTL_ADD, fd, mask)``
+    — the kernel posts a CQE when the fd's readiness matches any
+    bit set in ``poll_mask``. With ``multishot=True`` (5.13+,
+    flare's default) the kernel keeps re-arming after every
+    completion until the userspace driver cancels via
+    ``IORING_OP_ASYNC_CANCEL`` (matched on the same ``user_data``
+    tag).
+
+    This is the substrate the upcoming B0 server-loop dispatch
+    swap uses to replace the per-poll ``epoll_wait`` syscall on
+    the io_uring backend: one SQE per fd at registration time,
+    one CQE per readiness change at runtime, no per-iteration
+    submission cost.
+
+    Args:
+        buf: 64-byte SQE buffer.
+        fd: File descriptor to poll. ``debug_assert`` checks
+            ``fd >= 0``.
+        poll_mask: ORed combination of :data:`POLLIN`,
+            :data:`POLLOUT`, :data:`POLLERR`, :data:`POLLHUP`,
+            :data:`POLLRDHUP`. flare typically arms ``POLLIN |
+            POLLRDHUP`` for read-readiness on connected sockets
+            so peer-closed connections surface alongside data-
+            available ones.
+        user_data: Tag returned in every matching CQE.
+        multishot: When True (default), set
+            :data:`IORING_POLL_ADD_MULTI` so a single SQE drives
+            an unbounded number of CQEs. When False, the kernel
+            posts exactly one CQE and the caller must re-arm.
+    """
+    debug_assert[assert_mode="safe"](
+        fd >= 0, "prep_poll_add: fd must be non-negative; got ", fd
+    )
+    encode_sqe_zero(buf)
+    _store_u8(buf, _SQE_OFF_OPCODE, UInt8(IORING_OP_POLL_ADD))
+    _store_u32_le(buf, _SQE_OFF_FD, UInt32(fd))
+    # poll32_events overlays op_flags at offset 28; this is where
+    # the kernel reads the requested poll bitmask. Matches
+    # liburing's ``io_uring_prep_poll_add`` exactly.
+    _store_u32_le(buf, _SQE_OFF_OP_FLAGS, poll_mask)
+    # IORING_POLL_ADD_MULTI sits in the ``len`` slot for POLL_ADD;
+    # liburing folds it in via ``io_uring_prep_poll_multishot``.
+    if multishot:
+        _store_u32_le(buf, _SQE_OFF_LEN, IORING_POLL_ADD_MULTI)
+    _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
+
+
+@always_inline
+def prep_poll_remove(
+    buf: UnsafePointer[UInt8, MutExternalOrigin],
+    target_user_data: UInt64,
+    user_data: UInt64,
+) -> None:
+    """Write an ``IORING_OP_POLL_REMOVE`` SQE at ``buf``.
+
+    Cancels a previous :func:`prep_poll_add` whose ``user_data``
+    tag equals ``target_user_data``. The kernel posts the
+    cancel CQE under this SQE's own ``user_data``, plus a final
+    CQE for the cancelled poll (without ``IORING_CQE_F_MORE``)
+    so the userspace driver knows the multishot has stopped.
+
+    Functionally equivalent to :func:`prep_async_cancel` for the
+    poll case but slightly cheaper because the kernel doesn't
+    have to walk the SQE work-list looking for the matching op.
+
+    Args:
+        buf: 64-byte SQE buffer.
+        target_user_data: ``user_data`` tag of the
+            ``IORING_OP_POLL_ADD`` to remove.
+        user_data: Tag returned in this SQE's own CQE.
+    """
+    encode_sqe_zero(buf)
+    _store_u8(buf, _SQE_OFF_OPCODE, UInt8(IORING_OP_POLL_REMOVE))
+    # poll_remove identifies the target poll by user_data, written
+    # into the ADDR slot. Matches the kernel's ``poll_remove_one``
+    # path in fs/io_uring.c.
+    _store_u64_le(buf, _SQE_OFF_ADDR, target_user_data)
     _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
 
 
