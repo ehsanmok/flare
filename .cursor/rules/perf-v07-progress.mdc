@@ -4,7 +4,7 @@ alwaysApply: false
 
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-03 · **Branch**: `main` · HEAD `8ffb996` (Phase 1 complete).
+**Date**: 2026-05-03 · **Branch**: `main` · HEAD `e224da0` (Phase 1 + Phase 2 substrate complete).
 
 ## Phase 1 (epoll path) shipped: serve_static_multicore + Connection-fast-path + memcpy-compaction
 
@@ -52,27 +52,49 @@ green throughout. Multi-worker integration is validated by
 `tests/test_static_multicore.mojo` (sequential + concurrent
 fanout, 2/2 PASS).
 
-## Phase 2 (io_uring buffer-ring) -- target: beat hyper + actix
+## Phase 2 (io_uring buffer-ring substrate) shipped
 
 Phase 1 lands flare_mc_static near hyper but doesn't clear it.
 The io_uring buffer-ring path is the next mechanism. Its
-substrate is correct + tested (see "Track B0 status" below);
-the dispatch's sustained-load behaviour was traced to a
-silent-oneshot multishot recv routing bug fixed in `9155bc6`
-+ locked in by tests at `ffb5e41` and `3395a8d`. With true
-multishot working, the next session needs to:
+substrate is correct + tested:
 
-1. Plumb `IORING_SETUP_*` flags (COOP_TASKRUN, DEFER_TASKRUN,
-   SINGLE_ISSUER, SUBMIT_ALL) through `IoUringRing` -- the
-   kernel scheduler hints that empirically unstick the
-   ~16 ms / ~60 Hz throughput throttle observed on the
-   bufring dispatch.
-2. Add peek-then-block to `UringReactor.poll` so the dispatch
-   drains all ready CQEs before re-blocking.
-3. Wire up `enable_wakeup=False` for single-issuer rings to
-   skip the always-pending eventfd recv SQE.
-4. Re-test bufring at 1w under sustained load; if the
-   throttle is gone, default-on for 1w + extend to mc 2w+.
+| Phase | Commit | What |
+|---|---|---|
+| 2A | `48e4230` | 12 new `IORING_SETUP_*` constants (COOP_TASKRUN, TASKRUN_FLAG, SUBMIT_ALL, SINGLE_ISSUER, DEFER_TASKRUN, etc.) plumbed through `IoUringRing` -> `IoUringDriver` -> `UringReactor`. Live-kernel tests verify the kernel accepts each on >= 5.18/5.19/6.0/6.1 (or cleanly EINVALs on older). |
+| 2B | `7a34bff` | `_probe_bufring_setup_flags()` -- runtime kernel probe that picks the highest-impact flag mix the host kernel accepts (DEFER_TASKRUN | SINGLE_ISSUER | COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL on 6.1+, downgraded gracefully on older kernels). Both bufring loops (`run_uring_bufring_reactor_loop` + `_shared`) opt in via the probe. |
+| 2C | `06ce29c` | `UringReactor.poll` peek-then-block dispatch (matches `tokio-uring` / `monoio` pattern). 3 phases: non-blocking submit + collect ready CQEs, drain into out, optionally block for residual. Honours wakeup-CQE-absorbed bit so blocking poll skips block when a wakeup arrived between phases. |
+| 2D | `e224da0` | `enable_wakeup=False` mode on `UringReactor` -- single-issuer bufring rings skip the eventfd creation + lazy-arm SQE entirely. Saves one fd + one always-pending SQE per worker. |
+
+All 4 commits land with focused live-kernel tests
+(`test_io_uring` 11/11 PASS, `test_uring_reactor` 14/14 PASS,
+`test_uring_serve_static` 1/1 PASS).
+
+**Honest empirical note**: combined Phase 2 (B + C + D) on the
+bufring throttle repro (`wrk2 -t1 -c4 -d3s -R2000` against
+`test_bufring_load` with `FLARE_BUFRING_HANDLER=1`) still
+measures ~60 req/s, identical to pre-Phase-2. This confirms
+the throttle is NOT in:
+- the kernel scheduler hints (Phase 2B SETUP flags),
+- the always-block io_uring_enter pattern (Phase 2C peek-then-block),
+- the wakeup-eventfd interaction (Phase 2D no-wakeup mode).
+
+The bottleneck is something deeper in the bufring dispatch's
+per-conn lifecycle; likely candidates left for a future debug
+session:
+- The `cancel_conn` SQE submission cadence vs new accepts on
+  the same fd.
+- The buffer-ring tail-bump race vs the kernel's recv selector
+  on the producer side.
+- A single-CQE-per-iter delivery rate cap that we haven't
+  traced -- something in the per-conn cleanup race that
+  serialises CQEs.
+
+The Phase 2 substrate work IS shippable + tested + locked in;
+the dispatch's throttle root-cause is the only remaining
+blocker for the bufring path to overtake `flare_mc_static` in
+throughput. Phases 2E, 2F, 2G (load test, multi-worker
+stabilisation, default-on flip) all wait on root-causing the
+throttle and are deferred.
 
 ## Honest gate matrix at end of Phase 1
 
