@@ -148,6 +148,53 @@ across workers. Drain returns one `ShutdownReport` per worker.
 
 ---
 
+## HTTP/2: same handler, different wire
+
+`flare.http2` exposes both a high-level handler-driven server
+(`Http2Server.bind(addr).serve(handler)`) and a high-level
+blocking client (`Http2Client.get(url)`) on top of the
+RFC 9113 frame codec, RFC 7541 HPACK, and the per-connection
+state machines in [`flare/http2/state.mojo`](../flare/http2/state.mojo).
+
+The compatibility contract is **the application code doesn't
+know which wire is talking to it**:
+
+- `Http2Server.serve(handler)` accepts any
+  `def(Request) raises -> Response` (auto-wrapped in
+  `FnHandler`) OR any struct implementing the `Handler` trait.
+  A `Router`, an `App[S]`, a middleware-wrapped chain — they
+  all serve the same on HTTP/2 because the per-stream HPACK
+  block decodes into a regular `flare.http.Request` (URL,
+  method, headers, body) that the handler can't tell from an
+  HTTP/1.1 one.
+- `Http2Client(BasicAuth("u", "p"))` /
+  `Http2Client(base_url, BearerAuth("tok"))` mirror the
+  `HttpClient` ergonomic constructors. The stored
+  `Authorization` header is sent on every outbound request as
+  a lower-cased `authorization` HPACK field.
+
+Cleartext h2c (no Upgrade dance — preface-first prior
+knowledge) is wired today; ALPN-negotiated h2 over TLS is
+wired on the client side via `TlsConfig.alpn` + the new
+`flare_ssl_ctx_set_alpn_protos` C wrapper. Server-side
+ALPN-h2 wiring through `TlsAcceptor` and a reactor-integrated
+multi-worker `serve_h2` are deliberate follow-ups; the
+single-connection blocking server in this cut is the
+symmetric counterpart to `HttpServer.serve(handler)` *without*
+`num_workers >= 2`.
+
+What *doesn't* port automatically (RFC 9113 §8.2.2):
+
+- **Connection-level headers** (`Connection`, `Keep-Alive`,
+  `Transfer-Encoding`, `Proxy-Connection`, `Upgrade`) — the
+  `Http2Client` strips these before encoding HEADERS; the
+  `H2Connection.emit_response` server side does the same.
+- **WebSocket-over-HTTP/2** (RFC 8441 Extended CONNECT) is
+  not implemented. WebSocket clients/servers stay on HTTP/1.1
+  for now.
+
+---
+
 ## Timer wheel
 
 [`flare/runtime/timer_wheel.mojo`](../flare/runtime/timer_wheel.mojo)

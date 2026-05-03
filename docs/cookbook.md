@@ -43,6 +43,11 @@ changes when you tweak it.
 | [`34_brotli.mojo`](../examples/34_brotli.mojo) | `compress_brotli` / `decompress_brotli` + `Compress` middleware emitting `br` |
 | [`35_http2.mojo`](../examples/35_http2.mojo) | `H2Connection` driver, ALPN dispatch, h2c upgrade detection |
 | [`36_work_stealing.mojo`](../examples/36_work_stealing.mojo) | `HandoffQueue` + `WorkerHandoffPool` + `FLARE_SOAK_WORKERS` knob |
+| [`37_http2_config.mojo`](../examples/37_http2_config.mojo) | `Http2Config` SETTINGS knobs + validation |
+| [`38_uds_sidecar.mojo`](../examples/38_uds_sidecar.mojo) | `UnixListener` / `UnixStream` AF_UNIX sidecar IPC |
+| [`39_iouring_plaintext.mojo`](../examples/39_iouring_plaintext.mojo) | `io_uring` reactor backend (Linux ≥ 5.10) |
+| [`40_http2_client.mojo`](../examples/40_http2_client.mojo) | `Http2Client` GET + POST over h2c (cleartext HTTP/2) |
+| [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) | `Http2Server.serve(router^)` -- a `flare.http.Router` over HTTP/2 |
 
 Run any single example with `pixi run example-<name>`; see the full
 list in [`pixi.toml`](../pixi.toml).
@@ -80,4 +85,9 @@ list in [`pixi.toml`](../pixi.toml).
 | Serve static files (with `Range`) | [`33_static_files.mojo`](../examples/33_static_files.mojo) |
 | Send `Content-Encoding: br` | [`34_brotli.mojo`](../examples/34_brotli.mojo) |
 | Drive HTTP/2 directly | [`35_http2.mojo`](../examples/35_http2.mojo) |
+| Tune HTTP/2 SETTINGS | [`37_http2_config.mojo`](../examples/37_http2_config.mojo) |
+| Make HTTP/2 client requests (h2c + h2-over-TLS) | [`40_http2_client.mojo`](../examples/40_http2_client.mojo) |
+| Serve a Router over HTTP/2 | [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) |
+| AF_UNIX sidecar IPC | [`38_uds_sidecar.mojo`](../examples/38_uds_sidecar.mojo) |
+| io_uring reactor backend | [`39_iouring_plaintext.mojo`](../examples/39_iouring_plaintext.mojo) |
 | Even out skewed-keepalive load | [`36_work_stealing.mojo`](../examples/36_work_stealing.mojo) |
