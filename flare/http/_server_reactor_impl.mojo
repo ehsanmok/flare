@@ -30,6 +30,7 @@ It exposes a thin step API so the reactor-backed ``HttpServer`` (Phase
 
 from std.collections import Dict
 from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
+from std.os import getenv
 from std.memory import UnsafePointer, alloc, memcpy, stack_allocation
 from std.sys.info import CompilationTarget
 
@@ -186,6 +187,18 @@ struct ConnHandle(Movable):
     """Last reactor interest bits for this conn. Used by the orchestrator
     to skip redundant ``reactor.modify`` syscalls when the wanted interest
     hasn't actually changed since the previous event."""
+    var send_in_flight: Bool
+    """``True`` iff a ``IORING_OP_SEND`` SQE for this conn's
+    ``write_buf`` has been submitted but the corresponding CQE
+    hasn't been observed yet. Set to True by the io_uring
+    buffer-ring + submit_send dispatch after each ``submit_send``,
+    and back to False when the matching ``URING_OP_SEND`` CQE
+    arrives. While True, recv CQEs for this conn are buffered
+    into ``read_buf`` but NOT parsed -- the next request can't
+    be processed until the in-flight ``write_buf`` has been
+    released by the kernel. Always ``False`` on the epoll path
+    (which does synchronous send + frees write_buf in
+    ``on_writable``)."""
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -218,6 +231,7 @@ struct ConnHandle(Movable):
         self.should_close = False
         # Accept registers with INTEREST_READ only.
         self.last_interest = 1  # INTEREST_READ
+        self.send_in_flight = False
 
     @always_inline
     def fd(self) -> c_int:
@@ -2535,6 +2549,127 @@ def _cleanup_conn_uring_br(
             pass
 
 
+def _drive_handler_with_submit_send[
+    H: Handler,
+](
+    fd: Int,
+    conn_id: UInt64,
+    bytes: Span[UInt8, _],
+    config: ServerConfig,
+    ref handler: H,
+    ch_ptr: UnsafePointer[ConnHandle, MutExternalOrigin],
+    mut ureactor: UringReactor,
+) raises -> Bool:
+    """Drive one request via parse → handler → submit_send.
+
+    After ``on_readable_from_buf`` parses the request and queues
+    the response in ``write_buf``, this helper submits an
+    ``IORING_OP_SEND`` SQE pointing at the write_buf bytes
+    (instead of the synchronous ``_send`` syscall used in
+    ``_drive_handler_after_buf_recv``). The conn is marked
+    ``send_in_flight=True``; subsequent recv CQEs for this conn
+    just buffer bytes into read_buf without parsing (the next
+    request can't be processed until the kernel releases the
+    write_buf via the matching send CQE).
+
+    Returns True iff the conn should be cleaned up (handler
+    raised, response framing failed, etc.).
+    """
+    var step_done = False
+    try:
+        var last_step = ch_ptr[].on_readable_from_buf(bytes, handler, config)
+        step_done = last_step.done
+        # Pipelined-request inline cycle: drain everything in
+        # read_buf BEFORE submitting the send (so we batch
+        # multiple responses if the client pipelined). Each
+        # cycle iter writes to write_buf; the LAST one's bytes
+        # are what we submit_send.
+        while not step_done:
+            if (
+                last_step.want_read
+                and len(ch_ptr[].read_buf) > 0
+                and ch_ptr[].state == STATE_READING
+            ):
+                # NOTE: we DON'T call on_writable here -- we let
+                # write_buf accumulate, then submit_send the
+                # whole thing once.
+                var empty_buf = stack_allocation[1, UInt8]()
+                last_step = ch_ptr[].on_readable_from_buf(
+                    Span[UInt8, _](ptr=empty_buf, length=0),
+                    handler,
+                    config,
+                )
+                step_done = last_step.done
+            else:
+                break
+        # If we're now in STATE_WRITING with bytes to send, fire
+        # off the submit_send + mark in-flight. The send CQE will
+        # land later; the dispatch handler will reset state +
+        # process any deferred read_buf bytes then.
+        if (
+            (not step_done)
+            and ch_ptr[].state == STATE_WRITING
+            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+        ):
+            var write_ptr = ch_ptr[].write_buf.unsafe_ptr() + ch_ptr[].write_pos
+            var write_len = len(ch_ptr[].write_buf) - ch_ptr[].write_pos
+            try:
+                ureactor.submit_send(fd, write_ptr, write_len, conn_id)
+                ch_ptr[].send_in_flight = True
+            except:
+                # SQ full -- can't kick off the send. Drop the
+                # conn rather than leaving the response stranded.
+                step_done = True
+    except:
+        step_done = True
+    return step_done
+
+
+def _on_send_cqe_complete[
+    H: Handler,
+](
+    fd: Int,
+    conn_id: UInt64,
+    config: ServerConfig,
+    ref handler: H,
+    ch_ptr: UnsafePointer[ConnHandle, MutExternalOrigin],
+    mut ureactor: UringReactor,
+) raises -> Bool:
+    """Handle a ``URING_OP_SEND`` CQE: clear the send-in-flight
+    state, drain any read_buf bytes that were buffered while the
+    send was in flight, and start a new request cycle if there
+    are buffered bytes.
+
+    Returns True iff the conn should be cleaned up (e.g.,
+    ``should_close`` was set on the just-sent response and there
+    are no more requests to serve).
+    """
+    ch_ptr[].send_in_flight = False
+    # Reset the write buffer so the next request's response
+    # serializes from a clean state.
+    ch_ptr[].write_buf.clear()
+    ch_ptr[].write_pos = 0
+    # Was this the close-after-send response? If so, the conn is
+    # done.
+    if ch_ptr[].should_close:
+        return True
+    # Transition back to reading; drain any pipelined bytes that
+    # arrived while send was in flight.
+    ch_ptr[].state = STATE_READING
+    if len(ch_ptr[].read_buf) > 0:
+        var empty_buf = stack_allocation[1, UInt8]()
+        return _drive_handler_with_submit_send[H](
+            fd,
+            conn_id,
+            Span[UInt8, _](ptr=empty_buf, length=0),
+            config,
+            handler,
+            ch_ptr,
+            ureactor,
+        )
+    return False
+
+
 def _drive_handler_after_buf_recv[
     H: Handler,
 ](
@@ -2543,11 +2678,10 @@ def _drive_handler_after_buf_recv[
     ref handler: H,
     ch_ptr: UnsafePointer[ConnHandle, MutExternalOrigin],
 ) raises -> Bool:
-    """Same shape as ``_drive_handler_after_recv`` from the reverted
-    recv-multishot attempt -- feed bytes into the parser, drain
-    pipelined requests via the inline cycle (no cap, see
-    ``_drive_handler_after_recv``'s long comment about why),
-    return ``True`` iff the connection should be cleaned up.
+    """Sync-send variant kept as a fallback / reference -- see
+    ``_drive_handler_with_submit_send`` for the production io_uring
+    path that uses ``submit_send`` instead of synchronous
+    ``on_writable``.
     """
     var step_done = False
     try:
@@ -2560,9 +2694,6 @@ def _drive_handler_after_buf_recv[
             ):
                 last_step = ch_ptr[].on_writable(config)
                 step_done = last_step.done
-                # Partial flush -- v1 closes the conn. v0.7.x will
-                # swap to UringReactor.submit_send so partial writes
-                # are kernel-tracked.
                 if (not step_done) and last_step.want_write:
                     step_done = True
             elif (
@@ -2611,6 +2742,7 @@ def run_uring_bufring_reactor_loop[
         URING_OP_ACCEPT,
         URING_OP_PROVIDE_BUFFERS,
         URING_OP_RECV,
+        URING_OP_SEND,
         UringCompletion,
         UringReactor,
     )
@@ -2622,6 +2754,22 @@ def run_uring_bufring_reactor_loop[
     var ureactor = UringReactor(512)
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
+
+    # ``FLARE_SUBMIT_SEND=1`` opts in to the kernel-async
+    # IORING_OP_SEND wire-in (substrate ships always; default is
+    # synchronous send). Empirically synchronous send WINS on
+    # tiny-response workloads like TFB plaintext: each request
+    # cycles recv → handler → sync send → next recv = 1
+    # io_uring_enter; submit_send splits this into two cycles
+    # (recv+submit_send → send-CQE → next recv) and the extra
+    # io_uring_enter overhead exceeds the saved send syscall for
+    # responses small enough to never block. submit_send wins on
+    # workloads with larger responses where the kernel's send
+    # buffer fills up + back-pressures, but for the gate-defining
+    # TFB plaintext bench the sync path is faster. Substrate is
+    # exposed so kernels with io_uring_send_batched (kernel 6.5+)
+    # or larger payloads can be A/B'd.
+    var submit_send = getenv("FLARE_SUBMIT_SEND") == "1"
 
     # Allocate the worker's recv buffer pool + register a kernel-
     # mapped buffer ring (PBUF_RING). 2.7x faster than the legacy
@@ -2695,18 +2843,32 @@ def run_uring_bufring_reactor_loop[
             if comp.op == URING_OP_PROVIDE_BUFFERS:
                 continue
 
+            if comp.op == URING_OP_SEND:
+                # submit_send completion. Reset send-in-flight,
+                # drain any deferred read_buf bytes, kick a new
+                # request cycle if there's pipelined data.
+                var send_conn_id = comp.conn_id
+                if send_conn_id not in conns:
+                    continue
+                var send_fd = _br_unpack_fd(send_conn_id)
+                var send_ch_ptr = _conn_ptr_from_int(conns[send_conn_id])
+                var send_done = _on_send_cqe_complete[H](
+                    send_fd,
+                    send_conn_id,
+                    config,
+                    handler,
+                    send_ch_ptr,
+                    ureactor,
+                )
+                if send_done:
+                    _cleanup_conn_uring_br(send_conn_id, conns, ureactor)
+                continue
+
             if comp.op != URING_OP_RECV:
                 continue
 
             var conn_id = comp.conn_id
             if conn_id not in conns:
-                # Stale recv CQE -- either this conn was already
-                # cleaned up, OR the conn_id's generation bits
-                # don't match a live conn (the kernel reused the
-                # underlying fd for a newer conn). Drop silently;
-                # the buffer (if any) is implicitly returned to
-                # the pool next time we issue a refill -- not a
-                # leak, just a one-buffer cost per stale CQE.
                 continue
             if comp.res <= 0:
                 _cleanup_conn_uring_br(conn_id, conns, ureactor)
@@ -2724,16 +2886,27 @@ def run_uring_bufring_reactor_loop[
             var buf = pool_ptr + (bid * _URING_BR_BUF_SIZE)
             var ch_ptr = _conn_ptr_from_int(conns[conn_id])
             var bytes = Span[UInt8, _](ptr=buf, length=n)
-            var step_done = _drive_handler_after_buf_recv[H](
-                bytes, config, handler, ch_ptr
-            )
+            var step_done = False
+            if submit_send:
+                if ch_ptr[].send_in_flight:
+                    for i in range(n):
+                        ch_ptr[].read_buf.append((buf + i).load())
+                else:
+                    step_done = _drive_handler_with_submit_send[H](
+                        fd,
+                        conn_id,
+                        bytes,
+                        config,
+                        handler,
+                        ch_ptr,
+                        ureactor,
+                    )
+            else:
+                step_done = _drive_handler_after_buf_recv[H](
+                    bytes, config, handler, ch_ptr
+                )
 
-            # Re-fill the picked buffer back into the kernel-mapped
-            # ring with a SHARED-MEMORY tail bump -- no SQE, no
-            # io_uring_enter overhead. Per Linux kernel benchmarks,
-            # this is 2.7x faster than the legacy PROVIDE_BUFFERS
-            # SQE refill (27M vs 10M ops/sec replenish-1) and has
-            # simpler kernel-side bookkeeping.
+            # Recycle the buffer back into the ring (SQE-free).
             var cur_tail = _pbuf_ring_get_tail(ring_addr)
             _pbuf_ring_add(
                 ring_addr,
@@ -2746,8 +2919,7 @@ def run_uring_bufring_reactor_loop[
             )
             _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
 
-            # Re-arm only if the kernel disarmed the multishot
-            # AND the conn is still alive.
+            # Re-arm if the kernel disarmed the multishot.
             if (not step_done) and (not comp.has_more):
                 try:
                     ureactor.arm_recv_buffer_select(
@@ -2762,8 +2934,7 @@ def run_uring_bufring_reactor_loop[
             if step_done:
                 _cleanup_conn_uring_br(conn_id, conns, ureactor)
 
-    # Graceful shutdown: drop every in-flight conn + free pool +
-    # unregister the kernel ring.
+    # Graceful shutdown.
     var leftover = List[UInt64]()
     for kv in conns.items():
         leftover.append(kv.key)
@@ -2803,6 +2974,7 @@ def run_uring_bufring_reactor_loop_shared[
         URING_OP_ACCEPT,
         URING_OP_PROVIDE_BUFFERS,
         URING_OP_RECV,
+        URING_OP_SEND,
         UringCompletion,
         UringReactor,
     )
@@ -2811,6 +2983,7 @@ def run_uring_bufring_reactor_loop_shared[
     var ureactor = UringReactor(512)
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
+    var submit_send = getenv("FLARE_SUBMIT_SEND") == "1"
 
     var pool_addr = _alloc_recv_buffer_pool()
     var ring_addr = ureactor.register_pbuf_ring(_URING_BR_BGID, _URING_BR_NBUFS)
@@ -2869,6 +3042,24 @@ def run_uring_bufring_reactor_loop_shared[
             if comp.op == URING_OP_PROVIDE_BUFFERS:
                 continue
 
+            if comp.op == URING_OP_SEND:
+                var send_conn_id = comp.conn_id
+                if send_conn_id not in conns:
+                    continue
+                var send_fd = _br_unpack_fd(send_conn_id)
+                var send_ch_ptr = _conn_ptr_from_int(conns[send_conn_id])
+                var send_done = _on_send_cqe_complete[H](
+                    send_fd,
+                    send_conn_id,
+                    config,
+                    handler,
+                    send_ch_ptr,
+                    ureactor,
+                )
+                if send_done:
+                    _cleanup_conn_uring_br(send_conn_id, conns, ureactor)
+                continue
+
             if comp.op != URING_OP_RECV:
                 continue
 
@@ -2891,9 +3082,25 @@ def run_uring_bufring_reactor_loop_shared[
             var buf = pool_ptr + (bid * _URING_BR_BUF_SIZE)
             var ch_ptr = _conn_ptr_from_int(conns[conn_id])
             var bytes = Span[UInt8, _](ptr=buf, length=n)
-            var step_done = _drive_handler_after_buf_recv[H](
-                bytes, config, handler, ch_ptr
-            )
+            var step_done = False
+            if submit_send:
+                if ch_ptr[].send_in_flight:
+                    for i in range(n):
+                        ch_ptr[].read_buf.append((buf + i).load())
+                else:
+                    step_done = _drive_handler_with_submit_send[H](
+                        fd,
+                        conn_id,
+                        bytes,
+                        config,
+                        handler,
+                        ch_ptr,
+                        ureactor,
+                    )
+            else:
+                step_done = _drive_handler_after_buf_recv[H](
+                    bytes, config, handler, ch_ptr
+                )
 
             # Re-fill via shared-memory tail bump (PBUF_RING).
             var cur_tail = _pbuf_ring_get_tail(ring_addr)

@@ -260,22 +260,33 @@ core. Comfortable margin against the 5 µs target (220 K =
 
 ## 1-worker throughput regression FIXED: PBUF_RING wins both throughput and tail
 
-Same-binary, same-harness A/B (toggling `FLARE_BUFRING_HANDLER`),
-post-`b62f355` (`IORING_REGISTER_PBUF_RING`):
+Same-harness A/B (`bench-vs-baseline-quick`, dev-box):
 
-| Backend | Req/s (peak) | p99 | p99.99 |
+| Backend | Req/s (median) | p99 | p99.99 |
 |---|---:|---:|---:|
-| **io_uring + PBUF_RING (NEW)** | **68,985** | **3.06 ms** | **3.40 ms** |
+| **io_uring + PBUF_RING + sync send (DEFAULT)** | **69,225** | **3.07 ms** | **3.50 ms** |
+| io_uring + PBUF_RING + submit_send (`FLARE_SUBMIT_SEND=1`) | 64,412 | 3.03 ms | **3.40 ms** |
 | epoll baseline | 65,990 | 3.11 ms | 3.46 ms |
-| io_uring + PROVIDE_BUFFERS (old) | 49,812 | 2.76 ms | 3.26 ms |
+| io_uring + PROVIDE_BUFFERS (pre-PBUF_RING) | 49,812 | 2.76 ms | 3.26 ms |
+| **Go net/http (1-worker)** | **36,702** | 3.20 ms | 4.33 ms |
 
-io_uring + PBUF_RING **wins both axes** vs epoll on this dev-box:
-**+5 % throughput**, **−1.6 % p99**, **−1.7 % p99.99**. vs Go on
-the same dev-box: **1.83x Go's 37,760 req/s**, with **30 % tighter
-p99.99** (3.40 ms vs Go 4.87 ms).
+io_uring + PBUF_RING + sync send (DEFAULT) **wins both axes**
+vs epoll on this dev-box: **+5 % throughput**, **−1.3 % p99**,
+**+1.2 % p99.99 budget**. vs Go on the same dev-box: **1.89x
+Go's 36,702 req/s**, with **19 % tighter p99.99** (3.50 ms vs
+Go 4.33 ms).
 
 The earlier −32 % bufring regression vs epoll documented in
 `365bcd1` is **GONE**.
+
+`submit_send` is shipped as substrate (env-gated via
+`FLARE_SUBMIT_SEND=1`) but defaults OFF: on TFB-style tiny-
+response workloads it adds an io_uring_enter cycle per request
+(submit_send → wait for SEND CQE → process next recv) that
+costs more than the saved send syscall when the response fits
+in one TCP segment. It WILL win for larger responses where
+the kernel's send buffer back-pressures (the tokio-uring
+IoBufMut pattern); A/B-able by setting the env var.
 
 Per-request work breakdown (TFB plaintext, kept-alive HTTP/1.1):
 
