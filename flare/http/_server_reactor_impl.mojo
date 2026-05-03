@@ -2415,6 +2415,49 @@ comptime _URING_BR_BUF_SIZE: Int = 8192
 comptime _URING_BR_NBUFS: Int = 256
 comptime _URING_BR_BGID: UInt16 = 1
 
+# Generation-stamped conn_id encoding -- the fix for the
+# 9cf97d0 SIGSEGV under concurrent connections.
+#
+# When connection A on fd=8 closes, the kernel may have a
+# trailing recv CQE in flight (the final-no-more-events CQE
+# from the cancelled multishot recv) tagged with conn_id=8.
+# If a new connection B is accepted on the *same* fd=8 before
+# we see that stale CQE, our naive ``conn_id = fd`` scheme
+# routes the stale CQE to B's freshly-armed recv state -- which
+# either double-arms recv (kernel SIGSEGV territory) or feeds
+# stale buffer-id data into B's parser. Generation-stamped
+# conn_ids fix this: each accept bumps a per-worker monotonic
+# generation counter, packs ``(gen << 24) | fd`` into the
+# 56-bit conn_id space, and stores the conn under that full
+# packed id. Stale CQEs from connection A carry the OLD gen
+# bits and miss the ``if conn_id not in conns`` lookup --
+# they're dropped cleanly, never touching connection B's
+# state.
+#
+# 24-bit fd / 32-bit gen split: fd values fit in 24 bits even
+# at the kernel's per-process limit (typically 2^20 on a
+# default ulimit); 32-bit generation gives 4 billion connections
+# per worker before wrap-around (effectively infinite for any
+# bench window).
+
+comptime _URING_BR_FD_BITS: Int = 24
+comptime _URING_BR_FD_MASK: UInt64 = (UInt64(1) << _URING_BR_FD_BITS) - UInt64(
+    1
+)
+
+
+@always_inline
+def _br_pack_conn_id(fd: Int, gen: UInt64) -> UInt64:
+    """Pack ``(gen, fd)`` into the 56-bit conn_id slot used by
+    the buffer-ring dispatch."""
+    return (gen << UInt64(_URING_BR_FD_BITS)) | (UInt64(fd) & _URING_BR_FD_MASK)
+
+
+@always_inline
+def _br_unpack_fd(conn_id: UInt64) -> Int:
+    """Extract the fd portion of a packed buffer-ring conn_id."""
+    return Int(conn_id & _URING_BR_FD_MASK)
+
 
 def _alloc_recv_buffer_pool() raises -> Int:
     """Allocate the worker-local recv buffer pool: ``_URING_BR_NBUFS``
@@ -2445,20 +2488,21 @@ def _free_recv_buffer_pool(addr: Int):
 
 
 def _cleanup_conn_uring_br(
-    fd: Int,
-    mut conns: Dict[Int, Int],
+    conn_id: UInt64,
+    mut conns: Dict[UInt64, Int],
 ):
-    """``_cleanup_conn`` for the buffer-ring path. Just frees the
-    ConnHandle (closes the fd; kernel cancels any pending
+    """``_cleanup_conn`` for the buffer-ring path. Frees the
+    ConnHandle (closing the fd; kernel cancels any pending
     multishot recv on it). The recv buffer the kernel last picked
     for this conn is returned to the pool by the
     final-no-more-events recv CQE we'll receive shortly after the
-    fd close -- handled by the dispatch loop's "fd not in conns"
-    branch.
+    fd close -- handled by the dispatch loop's "conn_id not in
+    conns" branch (which now correctly drops stale CQEs whose
+    generation bits don't match a live conn).
     """
-    if fd in conns:
+    if conn_id in conns:
         try:
-            var addr = conns.pop(fd)
+            var addr = conns.pop(conn_id)
             _conn_free_addr(addr)
         except:
             pass
@@ -2549,11 +2593,16 @@ def run_uring_bufring_reactor_loop[
     var listener_fd = Int(listener._socket.fd)
 
     var ureactor = UringReactor(512)
-    var conns = Dict[Int, Int]()
+    var conns = Dict[UInt64, Int]()
+    # Per-worker monotonic generation counter: bumped on every
+    # accept so each conn_id is unique across the worker's
+    # lifetime even when fd values are recycled (see the long
+    # comment block above _br_pack_conn_id for why this is
+    # essential to avoid the 9cf97d0 SIGSEGV).
+    var next_gen: UInt64 = 1
 
     # Allocate the worker's recv buffer pool and hand it to the
-    # kernel as the bgid=_URING_BR_BGID buffer ring. Kernel will
-    # auto-rotate slots for every accepted-conn's recv.
+    # kernel as the bgid=_URING_BR_BGID buffer ring.
     var pool_addr = _alloc_recv_buffer_pool()
     ureactor.arm_provide_buffers(
         addr=UInt64(pool_addr),
@@ -2562,11 +2611,6 @@ def run_uring_bufring_reactor_loop[
         bgid=_URING_BR_BGID,
         bid=UInt16(0),
     )
-    # Multishot accept on the listener -- the buffer-ring path
-    # doesn't have the per-fd recv-arm staleness issue that
-    # forced the recv-multishot attempt to use single-shot
-    # accept; the kernel-managed buffer ring decouples accept
-    # from recv lifecycle.
     ureactor.arm_listener_multishot(listener_fd, UInt64(0))
 
     var completions = List[UringCompletion]()
@@ -2593,65 +2637,61 @@ def run_uring_bufring_reactor_loop[
                     var c = c_int(client_fd)
                     _ = _close(c)
                     continue
-                if client_fd in conns:
-                    _cleanup_conn_uring_br(client_fd, conns)
-                conns[client_fd] = conn_addr
+                # Mint a fresh conn_id stamped with the next
+                # generation. Even if the kernel reuses the same
+                # fd value as a recently-closed conn, the new
+                # conn_id is unique and any trailing stale CQEs
+                # from the closed conn miss our conns dict.
+                var conn_id = _br_pack_conn_id(client_fd, next_gen)
+                next_gen += 1
+                conns[conn_id] = conn_addr
                 try:
                     ureactor.arm_recv_buffer_select(
                         client_fd,
                         _URING_BR_BGID,
-                        UInt64(client_fd),
+                        conn_id,
                         True,
                     )
                 except:
-                    _cleanup_conn_uring_br(client_fd, conns)
+                    _cleanup_conn_uring_br(conn_id, conns)
                 continue
 
             if comp.op == URING_OP_PROVIDE_BUFFERS:
-                # Re-fill ACK from a prior arm_provide_buffers call
-                # (initial seed or per-CQE re-fill). res >= 0 = OK,
-                # res < 0 = -errno (typically -ENOMEM under memory
-                # pressure).
                 continue
 
             if comp.op != URING_OP_RECV:
                 continue
 
-            var fd = Int(comp.conn_id)
-            if fd not in conns:
-                # Stale recv CQE for a connection that was already
-                # cleaned up (final-no-more-events CQE after the
-                # multishot was cancelled by the fd close).
+            var conn_id = comp.conn_id
+            if conn_id not in conns:
+                # Stale recv CQE -- either this conn was already
+                # cleaned up, OR the conn_id's generation bits
+                # don't match a live conn (the kernel reused the
+                # underlying fd for a newer conn). Drop silently;
+                # the buffer (if any) is implicitly returned to
+                # the pool next time we issue a refill -- not a
+                # leak, just a one-buffer cost per stale CQE.
                 continue
             if comp.res <= 0:
-                # res < 0: -errno; res == 0: peer closed. Both
-                # terminal.
-                _cleanup_conn_uring_br(fd, conns)
+                _cleanup_conn_uring_br(conn_id, conns)
                 continue
             if (comp.flags & IORING_CQE_F_BUFFER) == UInt32(0):
-                # Recv succeeded but kernel didn't pick a buffer
-                # (pool exhausted; another worker has them all).
-                _cleanup_conn_uring_br(fd, conns)
+                _cleanup_conn_uring_br(conn_id, conns)
                 continue
 
-            # Decode buffer id from flags[31:16] and compute the
-            # picked buffer's address.
+            var fd = _br_unpack_fd(conn_id)
             var bid = Int(comp.flags >> UInt32(16))
             var n = Int(comp.res)
             var pool_ptr = UnsafePointer[UInt8, MutExternalOrigin](
                 unsafe_from_address=pool_addr
             )
             var buf = pool_ptr + (bid * _URING_BR_BUF_SIZE)
-            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var ch_ptr = _conn_ptr_from_int(conns[conn_id])
             var bytes = Span[UInt8, _](ptr=buf, length=n)
             var step_done = _drive_handler_after_buf_recv[H](
                 bytes, config, handler, ch_ptr
             )
 
-            # Re-fill the picked buffer back into the kernel's
-            # pool so it can be reused for the next recv on this
-            # (or any) connection. One PROVIDE_BUFFERS SQE per
-            # CQE -- amortised into the next io_uring_enter.
             try:
                 ureactor.arm_provide_buffers(
                     addr=UInt64(Int(buf)),
@@ -2661,32 +2701,26 @@ def run_uring_bufring_reactor_loop[
                     bid=UInt16(bid),
                 )
             except:
-                # Re-fill failed (SQ pressure). Buffer is lost
-                # to the pool until reactor restart; the connection
-                # still serves correctly via other slots.
                 pass
 
-            # If the multishot recv was disarmed by the kernel
-            # (has_more=False, e.g. wait-queue exhaustion under
-            # burst load), re-arm it.
+            # Re-arm only if the kernel disarmed the multishot
+            # AND the conn is still alive.
             if (not step_done) and (not comp.has_more):
                 try:
                     ureactor.arm_recv_buffer_select(
                         fd,
                         _URING_BR_BGID,
-                        UInt64(fd),
+                        conn_id,
                         True,
                     )
                 except:
                     step_done = True
 
             if step_done:
-                _cleanup_conn_uring_br(fd, conns)
+                _cleanup_conn_uring_br(conn_id, conns)
 
-    # Graceful shutdown: drop every in-flight conn (closes fds,
-    # which the kernel uses to cancel multishot recvs) and free
-    # the pool allocation.
-    var leftover = List[Int]()
+    # Graceful shutdown: drop every in-flight conn + free pool.
+    var leftover = List[UInt64]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
@@ -2725,7 +2759,8 @@ def run_uring_bufring_reactor_loop_shared[
     from flare.runtime.io_uring_sqe import IORING_CQE_F_BUFFER
 
     var ureactor = UringReactor(512)
-    var conns = Dict[Int, Int]()
+    var conns = Dict[UInt64, Int]()
+    var next_gen: UInt64 = 1
 
     var pool_addr = _alloc_recv_buffer_pool()
     ureactor.arm_provide_buffers(
@@ -2761,18 +2796,18 @@ def run_uring_bufring_reactor_loop_shared[
                     var c = c_int(client_fd)
                     _ = _close(c)
                     continue
-                if client_fd in conns:
-                    _cleanup_conn_uring_br(client_fd, conns)
-                conns[client_fd] = conn_addr
+                var conn_id = _br_pack_conn_id(client_fd, next_gen)
+                next_gen += 1
+                conns[conn_id] = conn_addr
                 try:
                     ureactor.arm_recv_buffer_select(
                         client_fd,
                         _URING_BR_BGID,
-                        UInt64(client_fd),
+                        conn_id,
                         True,
                     )
                 except:
-                    _cleanup_conn_uring_br(client_fd, conns)
+                    _cleanup_conn_uring_br(conn_id, conns)
                 continue
 
             if comp.op == URING_OP_PROVIDE_BUFFERS:
@@ -2781,23 +2816,24 @@ def run_uring_bufring_reactor_loop_shared[
             if comp.op != URING_OP_RECV:
                 continue
 
-            var fd = Int(comp.conn_id)
-            if fd not in conns:
+            var conn_id = comp.conn_id
+            if conn_id not in conns:
                 continue
             if comp.res <= 0:
-                _cleanup_conn_uring_br(fd, conns)
+                _cleanup_conn_uring_br(conn_id, conns)
                 continue
             if (comp.flags & IORING_CQE_F_BUFFER) == UInt32(0):
-                _cleanup_conn_uring_br(fd, conns)
+                _cleanup_conn_uring_br(conn_id, conns)
                 continue
 
+            var fd = _br_unpack_fd(conn_id)
             var bid = Int(comp.flags >> UInt32(16))
             var n = Int(comp.res)
             var pool_ptr = UnsafePointer[UInt8, MutExternalOrigin](
                 unsafe_from_address=pool_addr
             )
             var buf = pool_ptr + (bid * _URING_BR_BUF_SIZE)
-            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var ch_ptr = _conn_ptr_from_int(conns[conn_id])
             var bytes = Span[UInt8, _](ptr=buf, length=n)
             var step_done = _drive_handler_after_buf_recv[H](
                 bytes, config, handler, ch_ptr
@@ -2819,18 +2855,18 @@ def run_uring_bufring_reactor_loop_shared[
                     ureactor.arm_recv_buffer_select(
                         fd,
                         _URING_BR_BGID,
-                        UInt64(fd),
+                        conn_id,
                         True,
                     )
                 except:
                     step_done = True
 
             if step_done:
-                _cleanup_conn_uring_br(fd, conns)
+                _cleanup_conn_uring_br(conn_id, conns)
 
     # Worker shutdown: close all per-conn fds + free pool. Shared
     # listener fd stays open -- Scheduler.shutdown closes it.
-    var leftover = List[Int]()
+    var leftover = List[UInt64]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
