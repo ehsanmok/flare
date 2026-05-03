@@ -74,7 +74,13 @@ from std.memory import UnsafePointer, alloc
 
 from ..http.handler import Handler
 from ..http.server import ServerConfig, ShutdownReport
-from ..http._server_reactor_impl import run_reactor_loop_shared
+from ..http._server_reactor_impl import (
+    run_reactor_loop_shared,
+    run_uring_bufring_reactor_loop_shared,
+)
+from .uring_reactor import use_uring_backend
+from std.os import getenv
+from std.sys.info import CompilationTarget
 from ..net import SocketAddr
 from ..tcp import TcpListener
 
@@ -187,12 +193,31 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
                 pass
 
         # ``stopping_ptr[]`` dereferences to the heap-allocated Bool.
-        # ``run_reactor_loop_shared`` takes ``stopping`` as a ``def``
-        # parameter (reference semantics in Mojo), so every iteration
-        # of ``while not stopping`` re-reads the live flag from this
-        # stable heap address. That address was captured at
+        # The shared reactor loop takes ``stopping`` as a ``def``
+        # parameter (reference semantics in Mojo), so every
+        # iteration re-reads the live flag from this stable heap
+        # address. That address was captured at
         # ``Scheduler.start`` time and stays valid until
         # ``Scheduler.shutdown`` joins every worker.
+        #
+        # Track B0 wire-in v3 (multi-worker buffer-ring path):
+        # opt-in via ``FLARE_BUFRING_HANDLER=1`` (see the
+        # HttpServer.serve wire-in for the rationale on why this
+        # is opt-in rather than default). Each pthread worker
+        # owns its own UringReactor + per-worker recv buffer
+        # pool; multishot accept on the shared listener fd
+        # distributes new conns to one worker each.
+        comptime if CompilationTarget.is_linux():
+            if use_uring_backend() and getenv("FLARE_BUFRING_HANDLER") == "1":
+                run_uring_bufring_reactor_loop_shared[H](
+                    ctx_ptr[].listener_fd,
+                    ctx_ptr[].config,
+                    ctx_ptr[].handler,
+                    stopping_ptr[],
+                )
+                return UnsafePointer[UInt8, MutExternalOrigin](
+                    unsafe_from_address=0
+                )
         run_reactor_loop_shared[H](
             ctx_ptr[].listener_fd,
             ctx_ptr[].config,
