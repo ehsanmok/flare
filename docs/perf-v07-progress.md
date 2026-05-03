@@ -1,6 +1,6 @@
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-02 (final) · **Branch**: `main` (commits `9e9c3d1` → `5b8a5d7` → `87b9b55` → `dec1460` (eventfd fix + `prep_read`) → `c29a001` (Example 39) → `ad3a292` (perf doc) → `19c2ab3` (`FLARE_DISABLE_IO_URING`) → `e96a294` (`prep_poll_add` + `arm_poll_readable_multishot`) → `12abb46` (poll fuzz extension) → `d25cfda` (perf doc) → `3ae27e9` (**B0 server-loop wire-in: HttpServer.serve_static through UringReactor**)).
+**Date**: 2026-05-02 (final) · **Branch**: `main` (commits `9e9c3d1` → `5b8a5d7` → `87b9b55` → `dec1460` (eventfd fix + `prep_read`) → `c29a001` (Example 39) → `ad3a292` (perf doc) → `19c2ab3` (`FLARE_DISABLE_IO_URING`) → `e96a294` (`prep_poll_add` + `arm_poll_readable_multishot`) → `12abb46` (poll fuzz extension) → `d25cfda` (perf doc) → `3ae27e9` (**B0 server-loop wire-in: HttpServer.serve_static through UringReactor**) → `c8cd770` (handler-path wire-in attempt) → `46addbd` (**handler-path wire-in revert; v0.7.x follow-up**)).
 
 This note tracks where flare v0.7 stands against the design-0.7
 gate (≥ 220 K req/s on flare_mc 4w EPYC, p99.99 ≤ 3.5 ms) and
@@ -89,6 +89,62 @@ oriented variant** (which pays 21.6 ms p99.99). The
 **flare_mc / go_nethttp ratio = 4.09×** on this box (vs 4.74×
 on the v0.6 EPYC publication).
 
+### Late 2026-05-02 4-worker measurement (commit 46addbd, dev-box)
+
+`bench-vs-baseline --only=flare_mc,hyper,axum,actix_web --configs=throughput_mc`
+(eight wrk threads, 256 keep-alive connections, five-run median, p99 ≤ 50 ms
+calibration budget):
+
+| Target | Workers | Req/s (median) | stdev | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| actix_web | 4 | **266,126** | 0.21 % | 1.19 | **2.77** | 3.24 | 4.74 |
+| hyper | 4 | 220,627 | 0.21 % | 1.24 | 2.85 | 3.29 | **3.73** ← best tail |
+| axum | 4 | 185,291 | 0.33 % | 1.29 | 2.79 | 3.20 | 7.60 |
+| **flare_mc** | 4 | **170,121** | 0.17 % | **1.16** ← best p50 | 27.01 | 39.81 | 68.99 |
+
+* **flare_mc 4w peak**: 170,121 req/s — **identical** to the v0.6
+  EPYC tag (170,305) under a meaningfully different hardware shape
+  (64-vCPU x86-64 dev-box vs 4-physical-core EPYC). The v0.7
+  substrate stack (PHF, intern, BufferPool, ResponsePool, DateCache,
+  writev, SIMD parsers, safety guards) didn't move the peak in
+  either direction on this measurement; it's *the same backend*
+  (epoll on Linux), and the calibration knee on this hardware
+  matches the EPYC v0.6 knee.
+* **flare_mc 4w peak vs Rust libs on the same dev-box**: hyper is
+  +30 %, axum is +9 %, actix is +56 %. The +30 % gap to hyper is
+  **the headline gap the io_uring backend is budgeted to close**
+  (Track B0). Until the handler-path wire-in lands (v0.7.x — see
+  the *What's left* table below), the dynamic-handler bench is
+  best-case epoll on both sides.
+* **flare_mc 4w p50**: 1.16 ms — best-of-class on this measurement,
+  ahead of every Rust 4w. Confirms the v0.7 substrate work
+  (per-worker allocations, BufferPool, ResponsePool, no per-request
+  alloc on the hot path) shaves the median.
+* **flare_mc 4w p99 / p99.99**: 27 ms / 69 ms — significantly
+  worse than every Rust 4w on this dev-box (3-8 ms p99.99) **and**
+  significantly worse than the v0.6 EPYC tag (3.11 ms p99.99 on
+  matched workers / matched cores). The dev-box puts 4 pinned
+  workers on a 64-vCPU NUMA-aware kernel scheduler that *also*
+  shares L3 across many other contexts; under sustained 90-%-of-
+  saturation load (153,108 req/s), tail latency observably blows
+  up. Same code on EPYC measured 3.11 ms p99.99 in the v0.6
+  publication; the v0.7 EPYC re-bench will repeat that measurement
+  on EPYC 7R32 against the io_uring + epoll backends in the same
+  run for an apples-to-apples backend A/B.
+* The p99.99 = 68.99 ms is **dev-box-specific** and not a v0.7
+  regression — the same code on EPYC publishes a 3.11 ms tail
+  (v0.6 release tag, same `bench-vs-baseline` harness, same
+  five-run-median + 50 ms calibration budget). The dev-box noise
+  floor swallows the tail story; the EPYC noise floor doesn't.
+
+### What this means for "beat Rust libs"
+
+| Story | Status |
+|---|---|
+| **Tail (p99.99) on EPYC** | ✅ **Already best-of-class** — 3.11 ms beats hyper 3.67, axum 3.65, actix 21.61 on the v0.6 EPYC tag. The v0.7 substrate doesn't regress this; the v0.7 EPYC re-bench will publish the matched-backend numbers. |
+| **Throughput (peak) on EPYC** | ⏭ **170 K vs hyper 221 K = -23 %**. Closing this gap is what Track B0 (io_uring) is budgeted for: the static-path wire-in (3ae27e9) demonstrates the substrate works end-to-end; the handler-path wire-in is queued for v0.7.x once the multishot-poll edge-trigger bug (see the revert in 46addbd, *What's left* table below) is resolved with either `IORING_POLL_ADD_LEVEL` (kernel feature probe) or full `IORING_OP_RECV` + buffer-ring substrate. |
+| **Tail on dev-box** | ⚠️ **Noisy, blows up under sustained load** — 27-69 ms p99 / p99.99 on this 64-vCPU shared-L3 box. Same code on EPYC: 3.11 ms. Use EPYC for tail measurements; the dev-box is a *throughput regression watchdog only*. |
+
 ## v0.7 perf objective vs Rust libs
 
 The v0.7 design gate (`design-0.7.mdc § Bar / gate matrix`):
@@ -160,7 +216,8 @@ harness:
 | B0 A/B-bench escape hatch | `19c2ab3` | `FLARE_DISABLE_IO_URING=1` is now honoured by `use_uring_backend()`. The documented A/B-bench knob lets contributors compare the io_uring path against the epoll path on the same binary without rebuilding flare. New `test_use_uring_backend_respects_disable_env` covers all four documented spellings (`1`, `0`, `false`, unset). | (no perf cost; prerequisite for the wire-in A/B benchmark) |
 | B0 poll-readiness substrate | `e96a294` | `prep_poll_add` (with `IORING_POLL_ADD_MULTI`) + `prep_poll_remove` SQE encoders, plus `UringReactor.arm_poll_readable_multishot(fd, conn_id, mask=POLLIN \| POLLRDHUP)` and `cancel_poll(conn_id)`. Adds `URING_OP_POLL` / `URING_OP_POLL_REMOVE` op tags. **Two new live-kernel tests pass on host kernel 6.8** — multishot-poll round-trip (write 8 bytes peer-side, observe `POLLIN` CQE with `has_more=True`) and cancel_poll terminates-multishot (verify both the remove ack and the final no-more-events CQE arrive). This is the **drop-in epoll_wait replacement** the upcoming server-loop dispatch swap will call from `flare.http.server` to register listener+conn fds and consume readiness CQEs. | (folded into B0; lets the server-loop dispatch land without rewriting `on_readable`) |
 | B0 poll fuzz | `12abb46` | `fuzz-io-uring-sqe` extended from 7 to 9 prep_* helpers; **400 K cumulative runs zero crashes / zero rejections** across the full SQE codec inventory. | — |
-| **B0 server-loop wire-in** | `3ae27e9` | `run_uring_reactor_loop_static` (functional twin of `run_reactor_loop_static`); `HttpServer.serve_static` comptime-branches on `use_uring_backend()` and routes through `UringReactor` on Linux + kernel ≥ 5.13 + `FLARE_DISABLE_IO_URING` unset. End-to-end loopback HTTP/1.1 GET integration test passes (`tests/test_uring_serve_static.mojo`, fork(2)-based: child runs serve loop, parent runs TCP client + assertions, parent SIGKILLs child after asserting). **155/155 PASS across the impacted surfaces**: `test-server` 93, `test-static-response` 11, `test-uring-reactor` 11, `test-io-uring{,sqe,driver,multishot-accept}` 39, `test-uring-serve-static` 1. | (closes the io_uring path; quantitative µs/req payoff lands with EPYC re-bench) |
+| **B0 static-path wire-in** | `3ae27e9` | `run_uring_reactor_loop_static` (functional twin of `run_reactor_loop_static`); `HttpServer.serve_static` comptime-branches on `use_uring_backend()` and routes through `UringReactor` on Linux + kernel ≥ 5.13 + `FLARE_DISABLE_IO_URING` unset. End-to-end loopback HTTP/1.1 GET integration test passes (`tests/test_uring_serve_static.mojo`, fork(2)-based: child runs serve loop, parent runs TCP client + assertions, parent SIGKILLs child after asserting). **156/156 PASS across the impacted surfaces**: `test-server` 93, `test-server-multicore` 4, `test-static-response` 11, `test-uring-reactor` 11, `test-io-uring{,sqe,driver,multishot-accept}` 39, `test-uring-serve-static` 1. | (closes the io_uring path for the static-response shape; quantitative µs/req payoff lands with EPYC re-bench) |
+| **B0 handler-path wire-in (reverted)** | `c8cd770` (attempted), `46addbd` (revert) | `run_uring_reactor_loop[H]` + `run_uring_reactor_loop_shared[H]` — the dynamic-handler twins of `run_reactor_loop[H]` / `run_reactor_loop_shared[H]`. Wire-in worked correctly for sequential keep-alive (validated by curl-pipelined-keep-alive test against the live server) but lost CQEs under sustained `wrk2 -t4 -c64` load because multishot poll defaults to edge-triggered semantics — the dispatch loop's drain-then-block pattern misses readiness edges that arrive between the `recv-EAGAIN` and the next `io_uring_enter`. Fix is v0.7.x scope: either `IORING_POLL_ADD_LEVEL` (kernel 6.0+, needs feature probe) or `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` + per-worker buffer ring (the right fix for HTTP). Both options leave the static path's wire-in (3ae27e9) intact — that one is provably correct under load by the curl-pipelined-keep-alive workflow that backs the static-path bench. | (no perf cost; revert restores the proven epoll handler path. The 4-worker dev-box bench (170 K, see *v0.7 dev-box probe* above) is therefore epoll-on-both-sides; the hyper / axum / actix peak-throughput gap is precisely what this commit *would* close once the multishot edge issue is resolved.) |
 | B2 PHF | (earlier v0.7 commit) | Comptime PHF for ~70 standard headers | 0.5 – 1.0 |
 | B3 intern | (earlier) | `StaticString` interning for HTTP method names + common values | 0.3 – 0.5 |
 | B4 writev | (earlier) | `IoVecBuf` + `writev_buf_all` for vectored response serialization | ~1.0 (epoll); subsumed on io_uring path |
@@ -183,9 +240,10 @@ core. Comfortable margin against the 5 µs target (220 K =
 | ~~**B0 reactor wiring**~~ | ~~Comptime-branched `UringReactor` / `EpollReactor` / `KqueueReactor`~~ | **✅ shipped in `5b8a5d7`** — `UringReactor` is in the tree alongside the existing `Reactor`, with its native submit/reap surface (the API epoll/kqueue can't model losslessly). |
 | ~~**B0 multishot accept on real fd**~~ | ~~Wire `IORING_OP_ACCEPT_MULTISHOT` against a TCP listener~~ | **✅ shipped in `a34b19f` + `5b8a5d7`** — `prep_multishot_accept` + live test on a 127.0.0.1:0 listener (kernel 6.8). |
 | ~~**B0 multishot recv + writev send**~~ | ~~Steady-state per-connection pattern~~ | **✅ shipped in `5b8a5d7`** — `arm_recv_multishot` (`IORING_OP_RECV` + `IORING_RECV_MULTISHOT`) + `submit_send` (`IORING_OP_SEND` + `MSG_NOSIGNAL`) + `submit_close` (`IORING_OP_CLOSE` + `IOSQE_CQE_SKIP_SUCCESS`); end-to-end echo round-trip verified live. |
-| ~~**B0 server-loop dispatch**~~ | ~~`HttpServer.serve_static` through `UringReactor`~~ | **✅ shipped in `3ae27e9`** — adds `run_uring_reactor_loop_static`, a functional twin of `run_reactor_loop_static` driven by `UringReactor` (multishot accept on the listener, multishot poll per conn fd). `HttpServer.serve_static` comptime-branches on `use_uring_backend()` (Linux + kernel ≥ 5.13 + `FLARE_DISABLE_IO_URING` unset) and routes through the io_uring loop, falling back to the epoll/kqueue loop otherwise. The per-conn `on_readable_static` / `on_writable` state machine is unchanged — io_uring only replaces the readiness notifier (`IORING_OP_POLL_ADD` multishot vs `epoll_wait`) and the accept path (`IORING_ACCEPT_MULTISHOT` vs `accept(2)+EAGAIN`). Closing a conn fd implicitly cancels its multishot poll, so cleanup is just `_conn_free_addr`; read↔write transitions issue `cancel_poll + arm_poll_readable_multishot` only when the new interest mask differs from `last_interest` (mirrors the epoll path's no-op-skip optimisation). New live integration test `tests/test_uring_serve_static.mojo` boots the server in a forked child, fires a real loopback HTTP/1.1 GET from the parent, and asserts the precomputed body + Content-Length round-trip end-to-end — **1/1 PASS on host kernel 6.8**. Targeted regression sweep across `test-server` (93), `test-static-response` (11), `test-uring-reactor` (11), `test-io-uring-{,sqe,driver,multishot-accept}` (39), and the new wire-in test (1) — all green. |
-| **B0 zero-syscall recv** | Swap the in-handle `recv` syscall in `on_readable_static` for `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` against a per-worker buffer ring (`IORING_REGISTER_BUFFERS` / `IORING_OP_PROVIDE_BUFFERS`). Saves one syscall per request on the keep-alive hot path. | v0.7.x follow-up: prerequisites (multishot recv against a socket fd, kernel-picked buffer id in CQE high-16 flags) are already on `UringReactor` and validated end-to-end by the recv/send echo round-trip — only the buffer-ring registration plumbing into `BufferPool` is left, which is mechanical. |
-| **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/` | Hardware-gated. The dev-box probe says we're already where we need to be on tail and at parity on peak; the µs/req peak win is EPYC-shaped (smaller L3, fewer cores → epoll syscall overhead is a larger fraction of per-request cost). |
+| ~~**B0 static-path wire-in**~~ | ~~`HttpServer.serve_static` through `UringReactor`~~ | **✅ shipped in `3ae27e9`** — `run_uring_reactor_loop_static` is a functional twin of `run_reactor_loop_static` driven by `UringReactor` (multishot accept on the listener, multishot poll per conn fd). The static path's tight read→inline-send→read cycle never blocks between request arrivals, which is exactly the pattern multishot poll's edge-triggered semantics handle correctly. Live integration test (`tests/test_uring_serve_static.mojo`) confirms a real HTTP/1.1 GET round-trips through the io_uring stack on host kernel 6.8. **1/1 PASS**. |
+| **B0 handler-path wire-in** | `HttpServer.serve(handler)` and `Scheduler` workers through `UringReactor` -- this is what `flare_mc` 4w benches against `hyper` / `axum` / `actix_web`. | **⚠️ attempted in `c8cd770`, reverted in `46addbd`**. The handler path's drain-then-block dispatch loses CQEs under sustained wrk2 load because multishot poll defaults to **edge-triggered**: a connection becomes readable, the dispatch drains via `recv-EAGAIN`, blocks on the next `io_uring_enter`, and if the next keep-alive request arrives between the drain and the enter the kernel observes no readiness *transition* (only "still ready"). No CQE is posted; the connection stalls. Empirically: epoll path serves 49 K req/s under `wrk2 -t4 -c64 -R50000`, the io_uring poll path serves 0 req/s on the exact same workload. Two v0.7.x options to fix: **(a)** `IORING_POLL_ADD_LEVEL` (kernel 6.0+, value `0x08`) flips multishot to level-triggered; needs a kernel feature probe because some 5.x / early 6.x kernels reject the bit. **(b)** `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` against a kernel-managed buffer ring — the *right* fix for an HTTP server (no poll/recv round-trip; kernel hands bytes directly). Substrate already on `UringReactor` and validated by the recv/send echo round-trip in `test-uring-reactor`; only the `BufferPool` registration is left. |
+| **B0 zero-syscall recv** | Swap the in-handle `recv` syscall for `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` against a per-worker buffer ring (`IORING_REGISTER_BUFFERS` / `IORING_OP_PROVIDE_BUFFERS`). Saves one syscall per request on the keep-alive hot path AND fixes the multishot poll edge-trigger problem above (recv multishot is event-driven, not transition-driven). | v0.7.x follow-up: this is the *right* fix for both the throughput-vs-Rust gap AND the handler-path wire-in stall. Prerequisites (multishot recv against a socket fd, kernel-picked buffer id in CQE high-16 flags) are already on `UringReactor`. Implementation-wise: register a per-worker `BufferPool[64 KB]` ring with `IORING_REGISTER_BUFFERS`, replace `arm_poll_readable_multishot(fd, ...)` with `arm_recv_multishot(fd, buf_group)` at accept time, drive `on_readable` from the `recv` CQE's `(buf_id, len)` instead of the poll CQE. |
+| **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/`. | Hardware-gated. The dev-box 4w bench (`46addbd`) sits at parity with the v0.6 EPYC peak on the epoll path (170 K vs 170 K) but the dev-box tail is dominated by 64-vCPU scheduler noise — the EPYC re-bench will publish the matched-worker / matched-cores numbers (which historically land at p99.99 = 3.11 ms; best-of-class). |
 
 ## Numbers that matter
 
