@@ -175,7 +175,15 @@ def test_prep_accept_writes_full_field_set() raises:
 
 
 def test_prep_recv_writes_full_field_set() raises:
-    """Recv on fd 42 with multishot recv flags."""
+    """Recv on fd 42 with multishot recv flags.
+
+    Post-9155bc6: ``IORING_RECV_MULTISHOT`` is routed by
+    :func:`prep_recv` from ``recv_flags`` into ``sqe->ioprio``
+    (where the kernel actually reads it), NOT ``sqe->op_flags``
+    (= msg_flags). Pre-9155bc6 the bit ended up in msg_flags
+    where the kernel ignored it -- silently degrading every
+    "multishot" recv to one-shot. The test enforces the new
+    routing so the bug can't silently re-occur."""
     var sqe = IoUringSqe()
     var buf = sqe.as_bytes()
     prep_recv(
@@ -190,7 +198,10 @@ def test_prep_recv_writes_full_field_set() raises:
     assert_equal(sqe.fd(), 42)
     assert_equal(Int(sqe.addr()), 0x10000)
     assert_equal(sqe.len(), 4096)
-    assert_equal(Int(sqe.op_flags()), Int(IORING_RECV_MULTISHOT))
+    # MULTISHOT must land in sqe->ioprio (not msg_flags).
+    assert_equal(Int(sqe.ioprio()), Int(IORING_RECV_MULTISHOT))
+    # msg_flags must NOT carry MULTISHOT (only standard MSG_*).
+    assert_equal(Int(sqe.op_flags()), 0)
     assert_equal(Int(sqe.user_data()), 0xAA)
 
 

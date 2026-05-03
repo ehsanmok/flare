@@ -448,6 +448,22 @@ def _load_u32_le(buf: UnsafePointer[UInt8, _], offset: Int) -> UInt32:
 
 
 @always_inline
+def _load_u16_le(buf: UnsafePointer[UInt8, _], offset: Int) -> UInt16:
+    """Read a u16 little-endian out of ``buf[offset..offset+2]``."""
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "io_uring CQE buffer must be non-NULL"
+    )
+    debug_assert[assert_mode="safe"](
+        offset >= 0 and offset + 2 <= IO_URING_SQE_BYTES,
+        "_load_u16_le offset out of range; got ",
+        offset,
+    )
+    var lo = UInt16(Int(buf[offset]))
+    var hi = UInt16(Int(buf[offset + 1]))
+    return lo | (hi << UInt16(8))
+
+
+@always_inline
 def _load_u64_le(buf: UnsafePointer[UInt8, _], offset: Int) -> UInt64:
     """Read a u64 little-endian out of ``buf[offset..offset+8]``."""
     debug_assert[assert_mode="safe"](
@@ -549,8 +565,28 @@ struct IoUringSqe(Movable):
 
     @always_inline
     def op_flags(self) -> UInt32:
-        """Read the op-specific flags field (u32)."""
+        """Read the op-specific flags field (u32, offset 28).
+
+        For ``IORING_OP_RECV`` / ``IORING_OP_SEND`` this is the
+        ``msg_flags`` field (e.g. ``MSG_NOSIGNAL``). NOTE: the
+        ``IORING_RECV_MULTISHOT`` / ``IORING_RECVSEND_POLL_FIRST``
+        bits do NOT live here -- the kernel reads them from
+        :func:`ioprio` (sqe->ioprio @ offset 2). See
+        :func:`prep_recv` / :func:`prep_recv_buffer_select` for
+        the routing.
+        """
         return _load_u32_le(self._buf, _SQE_OFF_OP_FLAGS)
+
+    @always_inline
+    def ioprio(self) -> UInt16:
+        """Read the ioprio field (u16, offset 2).
+
+        For multishot recv / send the kernel reads
+        ``IORING_RECV_MULTISHOT`` / ``IORING_RECVSEND_POLL_FIRST``
+        from THIS field (NOT msg_flags). For multishot accept, the
+        kernel reads ``IORING_ACCEPT_MULTISHOT`` from this field.
+        """
+        return _load_u16_le(self._buf, _SQE_OFF_IOPRIO)
 
     @always_inline
     def set_flags(mut self, flags: UInt8) -> None:
