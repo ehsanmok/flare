@@ -44,6 +44,7 @@ from flare.http.server import (
     _find_crlfcrlf,
     _scan_content_length,
     _parse_http_request_bytes,
+    _parse_http_request_bytes_minimal,
     _ascii_lower,
     _status_reason,
     _append_str,
@@ -330,23 +331,42 @@ struct ConnHandle(Movable):
                 idle_timeout_ms=config.idle_timeout_ms,
             )
 
-        # Parse the request.
+        # Parse the request. Phase 1C: when the config opts in,
+        # use the minimal parser that skips HeaderMap construction.
+        # The Connection-policy decision then uses _wants_close on
+        # the raw header bytes (already in self.read_buf) instead
+        # of the per-request _ascii_lower(req.headers.get(...)).
         var req: Request
+        var close_after: Bool
         try:
-            req = _parse_http_request_bytes(
-                Span[UInt8, _](self.read_buf)[: self.body_total],
-                config.max_header_size,
-                config.max_body_size,
-                config.max_uri_length,
-                self.peer,
-                config.expose_error_messages,
-            )
+            if config.skip_header_decode_for_short_requests:
+                req = _parse_http_request_bytes_minimal(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    self.content_length,
+                    config.max_body_size,
+                    config.max_uri_length,
+                    self.peer,
+                    config.expose_error_messages,
+                )
+                # Raw-bytes Connection-policy decision: scan the
+                # header block bytes without HeaderMap allocation.
+                # _wants_close handles HTTP/1.0 default-close +
+                # explicit Connection: close (case-insensitive).
+                close_after = _wants_close(self.read_buf, self.headers_end)
+            else:
+                req = _parse_http_request_bytes(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    config.max_header_size,
+                    config.max_body_size,
+                    config.max_uri_length,
+                    self.peer,
+                    config.expose_error_messages,
+                )
+                close_after = _compute_close_after(req.headers, req.version)
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
-
-        # Connection disposition before handler consumes the request.
-        var close_after = _compute_close_after(req.headers, req.version)
 
         self.keepalive_count += 1
         if self.keepalive_count >= config.max_keepalive_requests:

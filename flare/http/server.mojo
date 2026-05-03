@@ -82,6 +82,23 @@ struct ServerConfig(Copyable, Movable):
     var read_body_timeout_ms: Int
     var handler_timeout_ms: Int
     var request_timeout_ms: Int
+    var skip_header_decode_for_short_requests: Bool
+    """Phase 1C (throughput parity with Rust libs): when True, the
+    parser skips the per-request ``HeaderMap`` build for requests
+    whose handler doesn't read headers. Header bytes are still
+    scanned (RAW) for ``Content-Length`` (so body framing stays
+    correct) and for ``Connection: close`` (so keep-alive policy
+    stays correct), but per-header ``String`` allocations + the
+    ``HeaderMap`` itself are elided. ``Request.headers`` is an
+    empty ``HeaderMap`` -- handlers that read headers will see
+    an empty map and silently break, so this opt-in is
+    appropriate ONLY for handlers known to ignore headers
+    (TFB plaintext, fixed health-checks, low-latency
+    micro-services).
+
+    Default ``False`` -- the historical full-parse behaviour.
+    Set ``True`` on the bench config and on production servers
+    whose handler shape doesn't depend on headers."""
 
     def __init__(
         out self,
@@ -98,6 +115,7 @@ struct ServerConfig(Copyable, Movable):
         read_body_timeout_ms: Int = 30_000,
         handler_timeout_ms: Int = 30_000,
         request_timeout_ms: Int = 60_000,
+        skip_header_decode_for_short_requests: Bool = False,
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -112,6 +130,9 @@ struct ServerConfig(Copyable, Movable):
         self.read_body_timeout_ms = read_body_timeout_ms
         self.handler_timeout_ms = handler_timeout_ms
         self.request_timeout_ms = request_timeout_ms
+        self.skip_header_decode_for_short_requests = (
+            skip_header_decode_for_short_requests
+        )
 
 
 # Comptime-friendly default config. Used as the default for
@@ -1040,6 +1061,138 @@ def _parse_http_request_bytes(
         expose_errors=expose_errors,
     )
     req.headers = headers^
+    return req^
+
+
+def _parse_http_request_bytes_minimal(
+    data: Span[UInt8, _],
+    header_end: Int,
+    content_length: Int,
+    max_body_size: Int = 10 * 1024 * 1024,
+    max_uri_length: Int = 8_192,
+    peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
+    expose_errors: Bool = False,
+) raises -> Request:
+    """Phase 1C (throughput parity): minimal-headers parser
+    that constructs only the request line + body, leaving the
+    ``HeaderMap`` empty.
+
+    Designed for ``ServerConfig.skip_header_decode_for_short_-
+    requests=True`` callers. The caller has already located the
+    end-of-headers via ``_find_crlfcrlf`` and the
+    ``Content-Length`` via ``_scan_content_length``, so we don't
+    re-scan; we just split the request line and copy the body.
+
+    Drops per-request work compared to
+    :func:`_parse_http_request_bytes`:
+    * No ``HeaderMap`` allocation.
+    * No per-header CRLF/colon scan loop.
+    * No per-header name/value ``String`` allocations.
+    * No RFC 7230 token / value validation per header.
+
+    Returns a ``Request`` whose ``headers`` is an empty
+    ``HeaderMap``. The keep-alive policy decision in the
+    dispatch must use a separate raw-bytes scan
+    (:func:`flare.http._server_reactor_impl._wants_close`) when
+    this parser is used; the dispatch already does this via the
+    ``skip_header_decode_for_short_requests`` config bit.
+
+    Args:
+        data: Raw HTTP/1.1 request bytes (header block + body).
+        header_end: Byte index past the ``\\r\\n\\r\\n``
+            header terminator (= start of body).
+        content_length: Pre-scanned Content-Length value (0 if
+            absent or zero).
+        max_body_size: Body size cap; raises if Content-Length
+            exceeds it.
+        max_uri_length: URI length cap; raises if path exceeds.
+        peer: Kernel-reported peer address (passed through).
+        expose_errors: Threaded onto Request.expose_errors.
+
+    Returns:
+        Parsed Request with empty headers.
+    """
+    var pos = 0
+
+    # 1. Request line only.
+    var req_line = _read_line_buf(data, pos)
+    if req_line.byte_length() == 0:
+        raise Error("empty request line")
+
+    var sp1 = -1
+    for i in range(req_line.byte_length()):
+        if req_line.unsafe_ptr()[i] == 32:
+            sp1 = i
+            break
+    if sp1 < 0:
+        raise Error("malformed request line: " + req_line)
+    var interned = intern_method_bytes(req_line.as_bytes()[:sp1])
+    var method: String
+    if interned:
+        method = interned.value()
+    else:
+        method = String(String(unsafe_from_utf8=req_line.as_bytes()[:sp1]))
+
+    var sp2 = -1
+    for i in range(sp1 + 1, req_line.byte_length()):
+        if req_line.unsafe_ptr()[i] == 32:
+            sp2 = i
+            break
+    var path: String
+    var version: String
+    if sp2 < 0:
+        path = String(String(unsafe_from_utf8=req_line.as_bytes()[sp1 + 1 :]))
+        version = "HTTP/1.1"
+    else:
+        path = String(
+            String(unsafe_from_utf8=req_line.as_bytes()[sp1 + 1 : sp2])
+        )
+        version = String(
+            String(unsafe_from_utf8=req_line.as_bytes()[sp2 + 1 :])
+        )
+
+    if path.byte_length() > max_uri_length:
+        raise Error(
+            "request URI exceeds limit of " + String(max_uri_length) + " bytes"
+        )
+
+    # 2. SKIP headers entirely. The caller passed in the
+    # already-scanned content_length + header_end so we don't
+    # need to walk the header block.
+
+    # 3. Body (caller-supplied Content-Length).
+    var body = List[UInt8]()
+    if content_length > 0:
+        if content_length > max_body_size:
+            raise Error(
+                "request body exceeds limit of "
+                + String(max_body_size)
+                + " bytes"
+            )
+        var body_start = header_end
+        var body_end = body_start + content_length
+        if body_end > len(data):
+            body_end = len(data)
+        var n = body_end - body_start
+        if n > 0:
+            body.resize(n, UInt8(0))
+            memcpy(
+                dest=body.unsafe_ptr(),
+                src=data.unsafe_ptr() + body_start,
+                count=n,
+            )
+
+    var req = Request(
+        method=method,
+        url=path,
+        body=body^,
+        version=version,
+        peer=peer,
+        expose_errors=expose_errors,
+    )
+    # headers stays as the default empty HeaderMap; callers must
+    # use config.skip_header_decode_for_short_requests=True only
+    # when their handler doesn't read req.headers.
     return req^
 
 

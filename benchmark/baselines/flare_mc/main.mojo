@@ -42,8 +42,17 @@ def handler(req: Request) raises -> Response:
 
 
 alias BenchHandler = FnHandlerCT[handler]
+# Phase 1C: skip_header_decode_for_short_requests=True opts into
+# the minimal parser that skips the per-request HeaderMap build
+# entirely. The handler() above only reads req.url, so the
+# headers can be left empty without affecting behaviour. Drops
+# the per-request HeaderMap allocation + per-header String
+# copies, which dominated the parser's CPU cost on TFB plaintext.
 alias BENCH_CONFIG = ServerConfig(
-    idle_timeout_ms=0, write_timeout_ms=0, max_keepalive_requests=100_000
+    idle_timeout_ms=0,
+    write_timeout_ms=0,
+    max_keepalive_requests=100_000,
+    skip_header_decode_for_short_requests=True,
 )
 
 
