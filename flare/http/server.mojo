@@ -627,6 +627,67 @@ struct HttpServer(Movable):
             self._listener, self.config, resp, self._stopping
         )
 
+    def serve_static_multicore(
+        mut self,
+        var resp: StaticResponse,
+        num_workers: Int,
+        pin_cores: Bool = True,
+    ) raises:
+        """Multi-worker twin of :meth:`serve_static`.
+
+        Spawns ``num_workers`` pthread workers via
+        :class:`flare.runtime.scheduler.StaticScheduler`, each running
+        ``run_reactor_loop_static_shared`` against a shared listener
+        with EPOLLEXCLUSIVE accept fairness. Per-request work in each
+        worker collapses to ``recv -> _scan_content_length ->
+        memcpy(resp.bytes) -> send`` -- no parser, no handler, no
+        Response struct allocation, no header lookups, no body
+        re-serialisation. This is the fastest path flare exposes for
+        the gate-defining TFB plaintext bench; it scales near-linearly
+        across cores because each worker owns its own conns dict +
+        write buffers (no cross-thread state).
+
+        The HttpServer's bound listener is closed before spawning
+        (the StaticScheduler binds its own shared listener via
+        ``bind_shared`` at the same address). Caller is expected to
+        hold the StaticScheduler reference returned via
+        ``self._stopping`` indirectly -- in practice, callers run
+        this until SIGINT and let the process exit.
+
+        Args:
+            resp: Pre-encoded response bytes (copied per worker).
+            num_workers: Number of worker threads. ``1..=256``.
+            pin_cores: Pin worker N to core ``N % num_cpus``. No-op
+                on macOS.
+
+        Raises:
+            NetworkError: On fatal listener errors.
+            Error: On ``pthread_create`` failure (rare); partially-
+                started workers are best-effort joined before raise.
+        """
+        from ..runtime.scheduler import StaticScheduler
+        from ..runtime._libc_time import libc_nanosleep_ms
+
+        var addr = self._listener.local_addr()
+        self._listener.close()
+
+        var scheduler = StaticScheduler.start(
+            addr=addr,
+            config=self.config.copy(),
+            resp=resp^,
+            num_workers=num_workers,
+            pin_cores=pin_cores,
+        )
+
+        # Block until self._stopping flips. Same 50 ms sleep loop the
+        # generic _serve_multicore uses (see the long comment there
+        # for why libc_nanosleep_ms beats the inferred-signature
+        # usleep).
+        while not self._stopping and scheduler.is_running():
+            _ = libc_nanosleep_ms(50)
+
+        scheduler.shutdown()
+
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to."""
         return self._listener.local_addr()

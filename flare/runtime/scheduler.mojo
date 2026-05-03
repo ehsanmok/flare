@@ -76,8 +76,10 @@ from ..http.handler import Handler
 from ..http.server import ServerConfig, ShutdownReport
 from ..http._server_reactor_impl import (
     run_reactor_loop_shared,
+    run_reactor_loop_static_shared,
     run_uring_bufring_reactor_loop_shared,
 )
+from ..http.static_response import StaticResponse
 from .uring_reactor import use_uring_backend
 from std.os import getenv
 from std.sys.info import CompilationTarget
@@ -789,3 +791,309 @@ def default_worker_count() -> Int:
     leave headroom for the kernel network stack.
     """
     return num_cpus()
+
+
+# ── Static-response multi-worker scheduler (Phase 1E) ───────────────────────
+#
+# StaticScheduler is the multi-worker twin of HttpServer.serve_static.
+# It binds ONE shared listener (no SO_REUSEPORT -- same EPOLLEXCLUSIVE
+# fairness story as the regular Scheduler) and spawns N pthread workers
+# that each run run_reactor_loop_static_shared with a copy of the
+# StaticResponse. The per-request work in each worker collapses to:
+#
+#   epoll_wait -> recv -> _scan_content_length -> memcpy(resp.bytes) -> send
+#
+# No parser builds a HeaderMap, no handler is called, no Response is
+# allocated, no headers are looked up, no body is re-serialised. This is
+# the fastest path flare exposes for the gate-defining TFB plaintext
+# bench, and it scales near-linearly across the N pthreads because each
+# worker owns its own conns dict + write buffers (no cross-thread
+# state).
+#
+# Design choice: NOT generic. StaticResponse is a concrete type so we
+# don't need the H: Handler & Copyable templating that the regular
+# Scheduler uses. This keeps monomorphisation cost down and makes the
+# struct + worker_entry trivially callable.
+
+
+struct _StaticWorkerCtx(Movable):
+    """Per-worker context for the static-response scheduler.
+
+    Like ``_WorkerCtx[H]`` but carries a ``StaticResponse`` instead of
+    a handler. The ``StaticResponse`` is copied per-worker so each
+    pthread has its own immutable view of the response bytes (the
+    buffers themselves are owned per-worker; the original is dropped
+    after spawn).
+    """
+
+    var listener_fd: Int
+    var bind_addr: SocketAddr
+    var config: ServerConfig
+    var resp: StaticResponse
+    var stopping_addr: Int
+    var worker_idx: Int
+    var pin_cores: Bool
+
+    def __init__(
+        out self,
+        listener_fd: Int,
+        bind_addr: SocketAddr,
+        var config: ServerConfig,
+        var resp: StaticResponse,
+        stopping_addr: Int,
+        worker_idx: Int,
+        pin_cores: Bool,
+    ):
+        self.listener_fd = listener_fd
+        self.bind_addr = bind_addr
+        self.config = config^
+        self.resp = resp^
+        self.stopping_addr = stopping_addr
+        self.worker_idx = worker_idx
+        self.pin_cores = pin_cores
+
+
+def _static_worker_entry(arg: _OpaquePtr) -> _OpaquePtr:
+    """Pthread start routine for one static-response reactor worker.
+
+    Casts ``arg`` back to a ``_StaticWorkerCtx`` pointer, optionally
+    pins to a CPU, then runs ``run_reactor_loop_static_shared`` until
+    the shared stopping flag is observed.
+    """
+    var ctx_addr = Int(arg)
+    var raw = UnsafePointer[UInt8, MutExternalOrigin](
+        unsafe_from_address=ctx_addr
+    )
+    var ctx_ptr = raw.bitcast[_StaticWorkerCtx]()
+
+    try:
+        var stopping_ptr = UnsafePointer[Bool, MutExternalOrigin](
+            unsafe_from_address=ctx_ptr[].stopping_addr
+        )
+
+        if ctx_ptr[].pin_cores:
+            try:
+                var cpu = ctx_ptr[].worker_idx % num_cpus()
+                var self_handle = ThreadHandle(
+                    external_call["pthread_self", UInt64]()
+                )
+                self_handle.pin_to_cpu(cpu)
+            except:
+                pass
+
+        run_reactor_loop_static_shared(
+            ctx_ptr[].listener_fd,
+            ctx_ptr[].config,
+            ctx_ptr[].resp,
+            stopping_ptr[],
+        )
+    except:
+        pass
+
+    return UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=0)
+
+
+def _static_scheduler_free_ctxs(addrs: List[Int]):
+    """Destroy each _StaticWorkerCtx at the given address then free it."""
+    for i in range(len(addrs)):
+        var raw = _OpaquePtr(unsafe_from_address=addrs[i])
+        var typed = raw.bitcast[_StaticWorkerCtx]()
+        typed.destroy_pointee()
+        _scheduler_free_raw(raw)
+
+
+struct StaticScheduler(Movable):
+    """Multi-worker scheduler that serves a single ``StaticResponse``.
+
+    Multi-worker twin of ``HttpServer.serve_static``. Binds one shared
+    ``TcpListener`` (via ``bind_shared`` -- no SO_REUSEPORT; the
+    EPOLLEXCLUSIVE fairness in each worker's reactor handles
+    accept-time distribution) and spawns N pthread workers, each
+    running ``run_reactor_loop_static_shared`` with a copy of the
+    pre-encoded response bytes.
+
+    Use ``StaticScheduler.start(addr, config, resp, num_workers)`` to
+    launch and ``shutdown()`` to drain. Same lifecycle contract as
+    ``Scheduler``.
+
+    Intended for the TFB plaintext gate (where every response is
+    identical) and for production health-check / fixed-response
+    endpoints under heavy load.
+    """
+
+    var _workers_ptr: UnsafePointer[ThreadHandle, MutExternalOrigin]
+    var _workers_len: Int
+    var _shared_listener_addr: Int
+    var _shared_listener_fd: Int
+    var _ctx_addrs: List[Int]
+    var _stopping_addr: Int
+
+    def __init__(out self):
+        """Build an empty scheduler; use ``StaticScheduler.start``."""
+        self._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+            unsafe_from_address=0
+        )
+        self._workers_len = 0
+        self._shared_listener_addr = 0
+        self._shared_listener_fd = -1
+        self._ctx_addrs = List[Int]()
+        self._stopping_addr = 0
+
+    @staticmethod
+    def start(
+        addr: SocketAddr,
+        var config: ServerConfig,
+        var resp: StaticResponse,
+        num_workers: Int,
+        pin_cores: Bool = True,
+    ) raises -> StaticScheduler:
+        """Spawn ``num_workers`` static-response workers sharing one listener.
+
+        Args:
+            addr: Address the shared listener binds.
+            config: Per-worker copy of ``ServerConfig``.
+            resp: Pre-encoded response bytes (copied per worker).
+            num_workers: Number of worker threads. ``1..=256``.
+            pin_cores: Pin worker N to core ``N % num_cpus``. No-op
+                on macOS.
+
+        Returns:
+            A running ``StaticScheduler`` whose workers serve ``resp``
+            until ``shutdown()``.
+        """
+        if num_workers < 1 or num_workers > 256:
+            raise Error(
+                "StaticScheduler.start: num_workers must be in 1..=256 (got "
+                + String(num_workers)
+                + ")"
+            )
+        var s = StaticScheduler()
+
+        var stop_ptr = alloc[Bool](1)
+        stop_ptr.init_pointee_copy(False)
+        var stop_raw = stop_ptr.bitcast[UInt8]()
+        var stopping_addr = Int(stop_ptr)
+        s._stopping_addr = stopping_addr
+
+        # Bind ONE shared listener (no SO_REUSEPORT). EPOLLEXCLUSIVE
+        # in each worker's Reactor.register_exclusive picks one
+        # worker per accept event.
+        var bound = bind_shared(addr)
+        try:
+            bound._socket.set_nonblocking(True)
+        except e:
+            _scheduler_free_raw(stop_raw)
+            s._stopping_addr = 0
+            raise e^
+        var listener_fd = Int(bound.as_raw_fd())
+        var lp = alloc[TcpListener](1)
+        lp.init_pointee_move(bound^)
+        s._shared_listener_addr = Int(lp)
+        s._shared_listener_fd = listener_fd
+
+        s._workers_ptr = alloc[ThreadHandle](num_workers)
+        s._workers_len = 0
+
+        for i in range(num_workers):
+            var cfg_copy = config.copy()
+            var resp_copy = resp.copy()
+            var ctx = _StaticWorkerCtx(
+                listener_fd,
+                addr,
+                cfg_copy^,
+                resp_copy^,
+                stopping_addr,
+                i,
+                pin_cores,
+            )
+            var ctx_ptr = alloc[_StaticWorkerCtx](1)
+            ctx_ptr.init_pointee_move(ctx^)
+            var arg = ctx_ptr.bitcast[UInt8]()
+            var ctx_addr = Int(ctx_ptr)
+
+            var spawned = False
+            try:
+                var th = ThreadHandle.spawn[_static_worker_entry](arg)
+                (s._workers_ptr + s._workers_len).init_pointee_move(th^)
+                s._workers_len += 1
+                s._ctx_addrs.append(ctx_addr)
+                spawned = True
+            except:
+                pass
+            if not spawned:
+                # Roll back partial start.
+                stop_ptr[] = True
+                for j in range(s._workers_len):
+                    try:
+                        (s._workers_ptr + j)[].join()
+                    except:
+                        pass
+                    (s._workers_ptr + j).destroy_pointee()
+                _scheduler_free_raw(s._workers_ptr.bitcast[UInt8]())
+                s._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+                    unsafe_from_address=0
+                )
+                s._workers_len = 0
+                _static_scheduler_free_ctxs(s._ctx_addrs)
+                s._ctx_addrs.clear()
+                ctx_ptr.destroy_pointee()
+                _scheduler_free_raw(ctx_ptr.bitcast[UInt8]())
+                var lpr = _OpaquePtr(
+                    unsafe_from_address=s._shared_listener_addr
+                )
+                var lpt = lpr.bitcast[TcpListener]()
+                lpt.destroy_pointee()
+                _scheduler_free_raw(lpr)
+                s._shared_listener_addr = 0
+                s._shared_listener_fd = -1
+                _scheduler_free_raw(stop_raw)
+                s._stopping_addr = 0
+                raise Error("pthread_create failed in StaticScheduler.start")
+
+        return s^
+
+    def shutdown(mut self) raises:
+        """Signal every worker to stop and wait for them to join."""
+        if self._stopping_addr != 0:
+            var stop_ptr = UnsafePointer[Bool, MutExternalOrigin](
+                unsafe_from_address=self._stopping_addr
+            )
+            stop_ptr[] = True
+
+        if self._shared_listener_fd >= 0:
+            _ = external_call["close", c_int, c_int](
+                c_int(self._shared_listener_fd)
+            )
+            self._shared_listener_fd = -1
+
+        for i in range(self._workers_len):
+            try:
+                (self._workers_ptr + i)[].join()
+            except:
+                pass
+            (self._workers_ptr + i).destroy_pointee()
+        if self._workers_len > 0:
+            _scheduler_free_raw(self._workers_ptr.bitcast[UInt8]())
+            self._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+                unsafe_from_address=0
+            )
+            self._workers_len = 0
+
+        _static_scheduler_free_ctxs(self._ctx_addrs)
+        self._ctx_addrs.clear()
+
+        if self._shared_listener_addr != 0:
+            var raw = _OpaquePtr(unsafe_from_address=self._shared_listener_addr)
+            var typed = raw.bitcast[TcpListener]()
+            typed.destroy_pointee()
+            _scheduler_free_raw(raw)
+            self._shared_listener_addr = 0
+
+        if self._stopping_addr != 0:
+            var stop_raw = _OpaquePtr(unsafe_from_address=self._stopping_addr)
+            _scheduler_free_raw(stop_raw)
+            self._stopping_addr = 0
+
+    def is_running(self) -> Bool:
+        """Return True if any worker has not yet joined."""
+        return self._workers_len > 0

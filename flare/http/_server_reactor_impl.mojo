@@ -1845,6 +1845,123 @@ def run_reactor_loop_static(
         _cleanup_conn(leftover[i], conns, timers, reactor)
 
 
+def run_reactor_loop_static_shared(
+    listener_fd: Int,
+    config: ServerConfig,
+    resp: StaticResponse,
+    ref stopping: Bool,
+) raises:
+    """Multi-worker twin of :func:`run_reactor_loop_static`.
+
+    Drives a pre-encoded ``StaticResponse`` over a SHARED listener fd
+    (owned by the ``Scheduler`` / ``StaticScheduler``; never closed
+    here). Same per-conn state machine as ``run_reactor_loop_static``
+    -- ``ConnHandle.on_readable_static`` parses far enough to find
+    ``\\r\\n\\r\\n`` + ``Content-Length`` and then ``memcpy``s the
+    canned bytes -- but registers via ``register_exclusive`` so the
+    kernel wakes only one worker per accept event (``EPOLLEXCLUSIVE``
+    on Linux >= 4.5; degrades to wake-all on macOS).
+
+    The combination of the static fast path (no parser, no handler,
+    no allocation per request, no response serialisation) with the
+    multi-worker scheduler closes the v0.7 throughput gap on TFB
+    plaintext: the per-request work drops to memcpy + the syscall
+    pair, which scales near-linearly across cores.
+
+    Args:
+        listener_fd: Borrowed shared listener fd. Must be in
+            non-blocking mode (the Scheduler does this once at
+            bind-time). This worker never closes it.
+        config: Per-worker copy of ``ServerConfig``.
+        resp: Pre-encoded static response (immutable; safely shared
+            across workers via ``StaticScheduler``'s heap-stored
+            copy).
+        stopping: Heap-allocated stop flag mutated by
+            ``StaticScheduler.shutdown`` from the main thread.
+    """
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            if fd_tok in conns:
+                _cleanup_conn(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop_fd(listener_fd, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var step_done = False
+            try:
+                var last_step = StepResult()
+                if evt.is_readable():
+                    last_step = ch_ptr[].on_readable_static(resp, config)
+                    step_done = last_step.done
+                    var cycles = 0
+                    while (not step_done) and cycles < 3:
+                        cycles += 1
+                        if (
+                            last_step.want_write
+                            and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                        ):
+                            last_step = ch_ptr[].on_writable(config)
+                            step_done = last_step.done
+                        elif (
+                            last_step.want_read
+                            and len(ch_ptr[].read_buf) > 0
+                            and ch_ptr[].state == STATE_READING
+                        ):
+                            last_step = ch_ptr[].on_readable_static(
+                                resp, config
+                            )
+                            step_done = last_step.done
+                        else:
+                            break
+                elif evt.is_writable():
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+                if not step_done:
+                    _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
+            except:
+                step_done = True
+            if step_done:
+                _cleanup_conn(fd, conns, timers, reactor)
+
+    # Worker shutdown: close per-conn fds. Shared listener fd
+    # stays open -- StaticScheduler.shutdown closes it after
+    # joining all workers.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn(leftover[i], conns, timers, reactor)
+
+
 def run_reactor_loop_cancel[
     CH: CancelHandler
 ](
