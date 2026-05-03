@@ -1,3 +1,7 @@
+---
+alwaysApply: false
+---
+
 # v0.7 perf progress vs Rust libs
 
 **Date**: 2026-05-02 (final) · **Branch**: `main` (commits `9e9c3d1` → `5b8a5d7` → `87b9b55` → `dec1460` (eventfd fix + `prep_read`) → `c29a001` (Example 39) → `ad3a292` (perf doc) → `19c2ab3` (`FLARE_DISABLE_IO_URING`) → `e96a294` (`prep_poll_add` + `arm_poll_readable_multishot`) → `12abb46` (poll fuzz extension) → `d25cfda` (perf doc) → `3ae27e9` (**B0 server-loop wire-in: HttpServer.serve_static through UringReactor**) → `c8cd770` (handler-path wire-in attempt) → `46addbd` (**handler-path wire-in revert; v0.7.x follow-up**)).
