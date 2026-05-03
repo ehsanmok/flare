@@ -807,6 +807,138 @@ def test_register_pbuf_ring_recv_round_trip() raises:
     r.unregister_pbuf_ring(BGID, ring_addr, RING_ENTRIES)
 
 
+def test_register_pbuf_ring_multishot_continues() raises:
+    """Verify that true multishot recv (after the
+    sqe->ioprio routing fix in 9155bc6) actually re-fires for
+    MULTIPLE writes from the peer without any re-arm SQE.
+
+    Sends 5 writes from the client, expects 5 recv CQEs from
+    the SAME single arm_recv_buffer_select call. Each CQE
+    should have F_MORE set (multishot still armed) AND
+    F_BUFFER set with a valid bid.
+
+    Pre-fix this test would deadlock on the 2nd write (kernel
+    treated recv as one-shot, posted 1 CQE without F_MORE,
+    didn't re-fire).
+    """
+    if not is_io_uring_available():
+        print(
+            "test_register_pbuf_ring_multishot_continues: skipped"
+            " (io_uring not available)"
+        )
+        return
+
+    var listener = _make_listener()
+    var r = UringReactor(32)
+
+    comptime BUF_BYTES = 256
+    comptime RING_ENTRIES = 8
+    comptime BGID: UInt16 = 11
+
+    var ring_addr = r.register_pbuf_ring(BGID, RING_ENTRIES)
+    var pool = alloc[UInt8](RING_ENTRIES * BUF_BYTES)
+    for i in range(RING_ENTRIES * BUF_BYTES):
+        (pool + i).init_pointee_copy(UInt8(0))
+
+    for i in range(RING_ENTRIES):
+        var buf_ptr = Int(pool) + i * BUF_BYTES
+        _pbuf_ring_add(
+            ring_addr,
+            RING_ENTRIES,
+            UInt64(buf_ptr),
+            UInt32(BUF_BYTES),
+            UInt16(i),
+            i,
+            UInt16(0),
+        )
+    _pbuf_ring_set_tail(ring_addr, UInt16(RING_ENTRIES))
+
+    r.arm_listener_multishot(Int(listener.fd), UInt64(0))
+    var client = _connect_loopback(listener.port)
+    var out = List[UringCompletion]()
+    var accepted_fd: Int = -1
+    for _ in range(8):
+        out.clear()
+        _ = r.poll(1, out)
+        for i in range(len(out)):
+            if out[i].op == URING_OP_ACCEPT:
+                accepted_fd = out[i].res
+                break
+        if accepted_fd > 0:
+            break
+    assert_true(accepted_fd > 0)
+
+    # ONE arm. Should serve 5 recvs.
+    r.arm_recv_buffer_select(accepted_fd, BGID, UInt64(0xCC), True)
+
+    var num_writes = 5
+    var seen = 0
+    for i in range(num_writes):
+        # Send "Xn" where X='a'+i
+        var tx = stack_allocation[2, UInt8]()
+        (tx + 0).init_pointee_copy(UInt8(ord("a") + i))
+        (tx + 1).init_pointee_copy(UInt8(ord("0") + i))
+        var w = _send(client, tx, c_size_t(2), c_int(0))
+        assert_equal(Int(w), 2)
+
+        # Recycle any consumed buffers back into the ring so we
+        # don't run out (in steady state, the dispatch refills
+        # in this position too).
+        var got_this_round = False
+        for _ in range(8):
+            out.clear()
+            _ = r.poll(1, out)
+            for j in range(len(out)):
+                var c = out[j]
+                if c.op == URING_OP_RECV and Int(c.conn_id) == 0xCC:
+                    assert_equal(c.res, 2)
+                    assert_true(
+                        (c.flags & IORING_CQE_F_BUFFER) != UInt32(0),
+                        "missing F_BUFFER on recv CQE",
+                    )
+                    # Multishot must remain armed across writes.
+                    assert_true(
+                        c.has_more,
+                        "multishot DISARMED on iter "
+                        + String(i)
+                        + " (kernel ran out of buffers? saw="
+                        + String(seen)
+                        + ")",
+                    )
+                    var bid = Int(c.flags >> UInt32(16))
+                    assert_true(bid >= 0 and bid < RING_ENTRIES)
+                    var slot = pool + (bid * BUF_BYTES)
+                    assert_equal(Int(slot.load()), ord("a") + i)
+                    assert_equal(Int((slot + 1).load()), ord("0") + i)
+                    seen += 1
+                    got_this_round = True
+                    # Refill the same bid back so the ring
+                    # doesn't exhaust over the loop.
+                    var cur_tail = UInt16(RING_ENTRIES + i)
+                    _pbuf_ring_add(
+                        ring_addr,
+                        RING_ENTRIES,
+                        UInt64(Int(slot)),
+                        UInt32(BUF_BYTES),
+                        UInt16(bid),
+                        0,
+                        cur_tail,
+                    )
+                    _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
+                    break
+            if got_this_round:
+                break
+        assert_true(got_this_round, "no recv CQE for iter " + String(i))
+
+    assert_equal(seen, num_writes)
+
+    _ = _close(client)
+    _ = _close(c_int(accepted_fd))
+    _ = _close(listener.fd)
+    pool.free()
+    r.unregister_pbuf_ring(BGID, ring_addr, RING_ENTRIES)
+
+
 # ── runner ───────────────────────────────────────────────────────────────────
 
 
@@ -837,4 +969,6 @@ def main() raises:
     print("    PASS test_buffer_ring_recv_round_trip")
     test_register_pbuf_ring_recv_round_trip()
     print("    PASS test_register_pbuf_ring_recv_round_trip")
-    print("test_uring_reactor: 13/13 PASS")
+    test_register_pbuf_ring_multishot_continues()
+    print("    PASS test_register_pbuf_ring_multishot_continues")
+    print("test_uring_reactor: 14/14 PASS")
