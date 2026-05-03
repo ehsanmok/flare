@@ -60,6 +60,7 @@ from flare.runtime import (
     INTEREST_WRITE,
     Pool,
 )
+from flare.runtime.uring_reactor import UringReactor
 
 
 # ── State constants ───────────────────────────────────────────────────────────
@@ -2441,9 +2442,9 @@ comptime _URING_BR_BGID: UInt16 = 1
 # bench window).
 
 comptime _URING_BR_FD_BITS: Int = 24
-comptime _URING_BR_FD_MASK: UInt64 = (UInt64(1) << _URING_BR_FD_BITS) - UInt64(
-    1
-)
+comptime _URING_BR_FD_MASK: UInt64 = (
+    UInt64(1) << UInt64(_URING_BR_FD_BITS)
+) - UInt64(1)
 
 
 @always_inline
@@ -2490,17 +2491,38 @@ def _free_recv_buffer_pool(addr: Int):
 def _cleanup_conn_uring_br(
     conn_id: UInt64,
     mut conns: Dict[UInt64, Int],
+    mut ureactor: UringReactor,
 ):
-    """``_cleanup_conn`` for the buffer-ring path. Frees the
-    ConnHandle (closing the fd; kernel cancels any pending
-    multishot recv on it). The recv buffer the kernel last picked
-    for this conn is returned to the pool by the
-    final-no-more-events recv CQE we'll receive shortly after the
-    fd close -- handled by the dispatch loop's "conn_id not in
-    conns" branch (which now correctly drops stale CQEs whose
-    generation bits don't match a live conn).
+    """``_cleanup_conn`` for the buffer-ring path.
+
+    Cleanup ordering matters because there's a kernel-level race
+    between conn-close and reaccept-on-the-same-fd: if we close
+    the fd while the kernel still has an armed multishot recv on
+    it, the kernel's implicit cancel of that recv races against
+    a potential new accept on the reused fd. Empirically this
+    SIGSEGV's our process under sustained conn-churn (sequential
+    8 short-lived conns reproduces; sleep(50ms) between conns
+    masks it; ASAN's slowdown also masks it).
+
+    The fix: explicitly cancel the multishot recv BEFORE freeing
+    the ConnHandle, so the kernel processes the cancel cleanly
+    while the fd is still open and the io_uring ring resources
+    for that recv are still valid. The cancel CQE arrives a few
+    iterations later and is silently dropped (no op tag handler
+    for URING_OP_CANCEL); the recv's terminal CQE is dropped via
+    the ``conn_id not in conns`` gen-stamp miss.
     """
     if conn_id in conns:
+        # Issue the cancel BEFORE freeing the ConnHandle (which
+        # closes the fd). cancel_conn uses URING_OP_ASYNC_CANCEL
+        # targeting the recv SQE tagged with this conn_id.
+        try:
+            ureactor.cancel_conn(conn_id)
+        except:
+            # SQ pressure -- fall back to implicit cancel via fd
+            # close. Higher race risk but the only alternative is
+            # to drop the cleanup which would leak the conn.
+            pass
         try:
             var addr = conns.pop(conn_id)
             _conn_free_addr(addr)
@@ -2653,7 +2675,7 @@ def run_uring_bufring_reactor_loop[
                         True,
                     )
                 except:
-                    _cleanup_conn_uring_br(conn_id, conns)
+                    _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             if comp.op == URING_OP_PROVIDE_BUFFERS:
@@ -2673,10 +2695,10 @@ def run_uring_bufring_reactor_loop[
                 # leak, just a one-buffer cost per stale CQE.
                 continue
             if comp.res <= 0:
-                _cleanup_conn_uring_br(conn_id, conns)
+                _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
             if (comp.flags & IORING_CQE_F_BUFFER) == UInt32(0):
-                _cleanup_conn_uring_br(conn_id, conns)
+                _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             var fd = _br_unpack_fd(conn_id)
@@ -2717,14 +2739,14 @@ def run_uring_bufring_reactor_loop[
                     step_done = True
 
             if step_done:
-                _cleanup_conn_uring_br(conn_id, conns)
+                _cleanup_conn_uring_br(conn_id, conns, ureactor)
 
     # Graceful shutdown: drop every in-flight conn + free pool.
     var leftover = List[UInt64]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
-        _cleanup_conn_uring_br(leftover[i], conns)
+        _cleanup_conn_uring_br(leftover[i], conns, ureactor)
     _free_recv_buffer_pool(pool_addr)
 
 
@@ -2807,7 +2829,7 @@ def run_uring_bufring_reactor_loop_shared[
                         True,
                     )
                 except:
-                    _cleanup_conn_uring_br(conn_id, conns)
+                    _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             if comp.op == URING_OP_PROVIDE_BUFFERS:
@@ -2820,10 +2842,10 @@ def run_uring_bufring_reactor_loop_shared[
             if conn_id not in conns:
                 continue
             if comp.res <= 0:
-                _cleanup_conn_uring_br(conn_id, conns)
+                _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
             if (comp.flags & IORING_CQE_F_BUFFER) == UInt32(0):
-                _cleanup_conn_uring_br(conn_id, conns)
+                _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             var fd = _br_unpack_fd(conn_id)
@@ -2862,7 +2884,7 @@ def run_uring_bufring_reactor_loop_shared[
                     step_done = True
 
             if step_done:
-                _cleanup_conn_uring_br(conn_id, conns)
+                _cleanup_conn_uring_br(conn_id, conns, ureactor)
 
     # Worker shutdown: close all per-conn fds + free pool. Shared
     # listener fd stays open -- Scheduler.shutdown closes it.
@@ -2870,5 +2892,5 @@ def run_uring_bufring_reactor_loop_shared[
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
-        _cleanup_conn_uring_br(leftover[i], conns)
+        _cleanup_conn_uring_br(leftover[i], conns, ureactor)
     _free_recv_buffer_pool(pool_addr)

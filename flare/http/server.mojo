@@ -254,12 +254,43 @@ struct HttpServer(Movable):
             Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import run_reactor_loop
+        from ._server_reactor_impl import (
+            run_reactor_loop,
+            run_uring_bufring_reactor_loop,
+        )
         from .handler import FnHandler
+        from flare.runtime.uring_reactor import use_uring_backend
+        from std.os import getenv
+        from std.sys.info import CompilationTarget
 
         var h = FnHandler(handler)
         if num_workers <= 1:
             self._stopping = False
+            # Track B0 wire-in v3 (buffer-ring path) is OPT-IN
+            # via ``FLARE_BUFRING_HANDLER=1`` until the dispatch
+            # overhead is tuned to match epoll's peak throughput
+            # on commodity hardware. Substrate + dispatch +
+            # cancel-before-free fix all ship and pass under
+            # sustained load (test_uring_serve_handler 2/2);
+            # bench-vs-baseline on this dev-box currently shows
+            # io_uring with better tail (p99=2.76 vs 3.11 ms,
+            # p99.99=3.26 vs 3.46 ms) but lower peak (49,812
+            # vs 65,990 req/s = -32 % from the per-CQE
+            # PROVIDE_BUFFERS refill + cancel_conn cleanup
+            # overhead). Production / TFB-style benchmarks
+            # default to the proven epoll path until the
+            # io_uring path's overhead is tuned (the EPYC
+            # 4-worker run is the hardware that should flip
+            # the trade in io_uring's favour).
+            comptime if CompilationTarget.is_linux():
+                if (
+                    use_uring_backend()
+                    and getenv("FLARE_BUFRING_HANDLER") == "1"
+                ):
+                    run_uring_bufring_reactor_loop(
+                        self._listener, self.config, h, self._stopping
+                    )
+                    return
             run_reactor_loop(self._listener, self.config, h, self._stopping)
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
