@@ -84,6 +84,15 @@ from .frame import (
 from .hpack import HpackHeader
 from .state import Connection, H2Error, H2ErrorCode, Stream, StreamState
 
+from ..http.headers import HeaderMap
+from ..http.request import Request, Method
+from ..http.response import Response, Status
+from ..http.url import Url
+from ..http.error import HttpError
+from ..tcp import TcpStream
+from ..tcp.stream import _connect_with_fallback
+from ..net import NetworkError, SocketAddr
+
 
 # ── Http2Response ─────────────────────────────────────────────────────────
 
@@ -822,3 +831,430 @@ struct Http2ClientConnection(Defaultable, Movable):
         §6.8). The high-level facade SHOULD stop opening new
         streams; in-flight streams MAY complete."""
         return self.conn.goaway_received
+
+
+# ── Http2Client (high-level, blocking facade) ────────────────────────────
+
+
+comptime _H2_READ_BUF_SIZE: Int = 16384
+"""Per-syscall recv buffer size for the HTTP/2 socket read loop.
+16 KiB matches the RFC 9113 §6.5.2 default ``max_frame_size`` so
+a typical small response fits in one read call."""
+
+
+struct Http2Client(Movable):
+    """A blocking HTTP/2 client over cleartext (h2c) or TLS (h2).
+
+    Mirrors the :class:`flare.http.HttpClient` surface so callers
+    can flip between HTTP/1.1 and HTTP/2 by changing the type
+    name only:
+
+    ```mojo
+    from flare.http2 import Http2Client
+    from flare.http import ok
+
+    with Http2Client("http://localhost:8080") as c:
+        var resp = c.get("/api/users")
+        resp.raise_for_status()
+        print(resp.text())
+    ```
+
+    Each :class:`Http2Client` instance owns one TCP (or TLS, in a
+    later commit) connection. ``get`` / ``post`` / ``put`` /
+    ``delete`` / ``head`` open the connection lazily on the first
+    call and reuse it across subsequent calls (one stream per
+    request, RFC 9113 §5.1.1 odd-id allocation). The connection
+    is closed from :meth:`close` or implicitly when the client
+    leaves scope.
+
+    The current cut sends one request at a time per
+    :class:`Http2Client` instance: each ``get`` / ``post`` /
+    etc. fully completes (request -> response) before returning.
+    Multi-stream concurrency on a single connection
+    (multiplexing 2+ in-flight requests) is a deliberate
+    follow-up; the underlying :class:`Http2ClientConnection`
+    already supports it via the per-stream-id ``response_ready``
+    poll, but the blocking facade here doesn't expose it yet.
+
+    TLS / ALPN: the cut here only supports cleartext
+    ``http://`` URLs (h2c via prior knowledge -- the client
+    sends the connection preface immediately, no HTTP/1.1
+    Upgrade dance). ``https://`` requires ALPN ``h2``
+    negotiation, which lands in a separate commit that adds
+    client-side ALPN to the OpenSSL FFI wrapper +
+    :class:`flare.tls.config.TlsConfig`.
+
+    Fields are private; use the constructors and the
+    :meth:`get` / :meth:`send` style methods.
+    """
+
+    var _base_url: String
+    """Optional URL prefix for relative request paths (mirrors
+    :class:`flare.http.HttpClient._base_url`)."""
+
+    var _user_agent: String
+    """``User-Agent`` header value sent on every request."""
+
+    var _config: Http2ClientConfig
+    """SETTINGS the client advertises to the server."""
+
+    var _stream: Optional[TcpStream]
+    """The underlying TCP stream once :meth:`_ensure_connected` has
+    fired. ``None`` means "no connection yet"; we use
+    :class:`Optional` because :class:`TcpStream` has no
+    default-constructor (it requires a real socket fd)."""
+
+    var _conn: Http2ClientConnection
+    """The HTTP/2 protocol driver. Initialised on the first
+    request and reused across subsequent requests on this
+    client. The default-constructed driver pre-queues a
+    preface + SETTINGS that get drained + written on first
+    :meth:`_ensure_connected` call."""
+
+    var _connected: Bool
+    """True once :attr:`_stream` is ``Some(stream)`` and
+    :attr:`_conn` has been initialised against the live socket."""
+
+    var _connect_host: String
+    """Origin authority (host portion) for the active connection.
+    The client will refuse to send a request whose URL targets a
+    different ``(host, port, scheme)`` 3-tuple (RFC 9113 §9.1.1
+    -- one origin per connection)."""
+
+    var _connect_port: UInt16
+    """Origin port for the active connection."""
+
+    var _connect_scheme: String
+    """``"http"`` (h2c) or ``"https"`` (h2). Recorded at
+    connection time."""
+
+    def __init__(
+        out self,
+        base_url: String = "",
+        user_agent: String = "flare/0.1.0",
+    ):
+        """Construct an :class:`Http2Client` with default SETTINGS.
+
+        Args:
+            base_url: Optional ``http://host[:port]`` prefix
+                prepended to relative paths in
+                :meth:`get` / :meth:`post` / etc. When set, the
+                first request opens the connection to this
+                origin; subsequent requests on the same client
+                MUST target the same origin.
+            user_agent: ``User-Agent`` header value sent on
+                every request. Defaults to ``"flare/0.1.0"`` for
+                parity with :class:`flare.http.HttpClient`.
+        """
+        self._base_url = base_url
+        self._user_agent = user_agent
+        self._config = Http2ClientConfig()
+        self._stream = Optional[TcpStream]()
+        self._conn = Http2ClientConnection()
+        self._connected = False
+        self._connect_host = ""
+        self._connect_port = UInt16(0)
+        self._connect_scheme = ""
+
+    def __init__(
+        out self,
+        var config: Http2ClientConfig,
+        base_url: String = "",
+        user_agent: String = "flare/0.1.0",
+    ) raises:
+        """Construct an :class:`Http2Client` with explicit SETTINGS.
+
+        Validates ``config`` first (RFC 9113 / RFC 7541 bounds);
+        raises if any field is out of range.
+        """
+        config.validate()
+        self._base_url = base_url
+        self._user_agent = user_agent
+        self._config = config^
+        self._stream = Optional[TcpStream]()
+        self._conn = Http2ClientConnection()
+        self._connected = False
+        self._connect_host = ""
+        self._connect_port = UInt16(0)
+        self._connect_scheme = ""
+
+    def __enter__(var self) -> Http2Client:
+        """Transfer ownership of ``self`` into the ``with`` block."""
+        return self^
+
+    # ── URL resolution ───────────────────────────────────────────────────
+
+    def _resolve_url(self, url: String) -> String:
+        if self._base_url.byte_length() == 0:
+            return url
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        return self._base_url + url
+
+    # ── Connection setup ─────────────────────────────────────────────────
+
+    def _ensure_connected(mut self, u: Url) raises -> None:
+        """Open the underlying socket and finish the H2 handshake on
+        the first request; verify the same-origin invariant on
+        subsequent requests.
+
+        RFC 9113 §9.1.1: one HTTP/2 connection serves exactly one
+        origin (scheme + host + port). A request that targets a
+        different origin is rejected (the high-level facade
+        could grow a connection-pool keyed on origin, but that's
+        explicitly out of scope for the cleartext-only cut).
+        """
+        if self._connected:
+            if u.scheme != self._connect_scheme:
+                raise NetworkError(
+                    "Http2Client: cannot reuse a "
+                    + self._connect_scheme
+                    + " connection for "
+                    + u.scheme
+                    + " (RFC 9113 §9.1.1: one origin per H2 connection)"
+                )
+            if u.host != self._connect_host:
+                raise NetworkError(
+                    "Http2Client: cannot reuse "
+                    + self._connect_host
+                    + " connection for "
+                    + u.host
+                    + " (RFC 9113 §9.1.1: one origin per H2 connection)"
+                )
+            if u.port != self._connect_port:
+                raise NetworkError("Http2Client: cannot reuse port")
+            return
+        # Cleartext-only for now (TLS lands in the ALPN commit).
+        if u.scheme != "http":
+            raise NetworkError(
+                "Http2Client: only http:// (h2c) is supported in this"
+                " cut; https:// requires ALPN h2 (follow-up commit"
+                " that wires client-side ALPN through TlsConfig)"
+            )
+        # Fresh socket + driver pair for this client.
+        var stream = _connect_with_fallback(u.host, u.port, 30_000)
+        var conn = Http2ClientConnection.with_config(self._config.copy())
+        # Send the preface + initial SETTINGS in one go.
+        var bootstrap = conn.drain()
+        if len(bootstrap) > 0:
+            stream.write_all(Span[UInt8, _](bootstrap))
+        # The handshake completes asynchronously: the server
+        # will respond with its own SETTINGS + an ACK of ours,
+        # which we'll observe + ACK on the first response read.
+        # Stash for later use.
+        self._stream = Optional[TcpStream](stream^)
+        self._conn = conn^
+        self._connected = True
+        self._connect_host = u.host
+        self._connect_port = u.port
+        self._connect_scheme = u.scheme
+
+    # ── High-level methods ───────────────────────────────────────────────
+
+    def get(mut self, url: String) raises -> Response:
+        """Perform an HTTP/2 GET request."""
+        var req = Request(method=Method.GET, url=self._resolve_url(url))
+        return self.send(req)
+
+    def post(mut self, url: String, body: String) raises -> Response:
+        """Perform an HTTP/2 POST with a string body
+        (sets ``Content-Type: application/json`` automatically)."""
+        var body_bytes = List[UInt8](body.as_bytes())
+        var req = Request(
+            method=Method.POST, url=self._resolve_url(url), body=body_bytes^
+        )
+        req.headers.set("Content-Type", "application/json")
+        return self.send(req)
+
+    def post(mut self, url: String, body: List[UInt8]) raises -> Response:
+        """Perform an HTTP/2 POST with a raw byte body
+        (no automatic ``Content-Type``)."""
+        var req = Request(
+            method=Method.POST, url=self._resolve_url(url), body=body.copy()
+        )
+        return self.send(req)
+
+    def put(mut self, url: String, body: String) raises -> Response:
+        """Perform an HTTP/2 PUT with a string body."""
+        var body_bytes = List[UInt8](body.as_bytes())
+        var req = Request(
+            method=Method.PUT, url=self._resolve_url(url), body=body_bytes^
+        )
+        req.headers.set("Content-Type", "application/json")
+        return self.send(req)
+
+    def put(mut self, url: String, body: List[UInt8]) raises -> Response:
+        """Perform an HTTP/2 PUT with a raw byte body."""
+        var req = Request(
+            method=Method.PUT, url=self._resolve_url(url), body=body.copy()
+        )
+        return self.send(req)
+
+    def delete(mut self, url: String) raises -> Response:
+        """Perform an HTTP/2 DELETE request."""
+        var req = Request(method=Method.DELETE, url=self._resolve_url(url))
+        return self.send(req)
+
+    def head(mut self, url: String) raises -> Response:
+        """Perform an HTTP/2 HEAD request."""
+        var req = Request(method=Method.HEAD, url=self._resolve_url(url))
+        return self.send(req)
+
+    def send(mut self, req: Request) raises -> Response:
+        """Send ``req`` over the connection and block for the response.
+
+        Lazily opens the underlying TCP socket on the first call
+        (verifies same-origin on subsequent calls per RFC 9113
+        §9.1.1). Returns a :class:`flare.http.Response` so
+        callers can continue using the existing
+        ``raise_for_status`` / ``json`` / ``text`` helpers.
+        """
+        var u = Url.parse(req.url)
+        self._ensure_connected(u)
+        # Translate request headers from HeaderMap to
+        # HpackHeader, lower-casing names per RFC 9113 §8.1.2 and
+        # dropping the connection-level headers RFC 9113 §8.2.2
+        # forbids on h2.
+        var extra = List[HpackHeader]()
+        for i in range(req.headers.len()):
+            var k = req.headers._keys[i]
+            var v = req.headers._values[i]
+            var lk = String(capacity=k.byte_length() + 1)
+            var kp = k.unsafe_ptr()
+            for j in range(k.byte_length()):
+                var c = Int(kp[j])
+                if c >= 65 and c <= 90:
+                    lk += chr(c + 32)
+                else:
+                    lk += chr(c)
+            if (
+                lk == "connection"
+                or lk == "transfer-encoding"
+                or lk == "keep-alive"
+                or lk == "proxy-connection"
+                or lk == "upgrade"
+                or lk == "host"
+            ):
+                # Host is encoded as ``:authority`` instead.
+                continue
+            extra.append(HpackHeader(lk^, v))
+        # Authority header value: host[:port] for non-default ports.
+        var authority = u.host
+        if (u.scheme == "http" and u.port != 80) or (
+            u.scheme == "https" and u.port != 443
+        ):
+            authority = authority + ":" + String(Int(u.port))
+        # User-Agent header (caller's value if set, else default).
+        if req.headers.get("User-Agent").byte_length() == 0:
+            extra.append(HpackHeader("user-agent", self._user_agent))
+        # Allocate stream id + send the request.
+        var sid = self._conn.next_stream_id()
+        self._conn.send_request(
+            sid,
+            req.method,
+            u.scheme,
+            authority,
+            u.request_target(),
+            extra,
+            Span[UInt8, _](req.body),
+        )
+        # Push every queued outbound byte (preface SETTINGS-ACK
+        # if pending, plus our HEADERS+DATA) onto the wire.
+        # ``self._stream`` is ``Some`` here because
+        # :meth:`_ensure_connected` populated it; ``unsafe_value``
+        # gives us a borrowed reference into the Optional's
+        # storage which we keep narrow (single statements per
+        # access) so the borrow checker stays happy.
+        var out_bytes = self._conn.drain()
+        if len(out_bytes) > 0:
+            self._stream.unsafe_value().write_all(Span[UInt8, _](out_bytes))
+        # Pump the read loop until our response is ready.
+        var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
+        buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
+        while not self._conn.response_ready(sid):
+            if self._conn.goaway_received():
+                # Server closed the connection on us; this
+                # request never made it.
+                raise NetworkError(
+                    "Http2Client: peer sent GOAWAY before responding to stream "
+                    + String(sid)
+                )
+            var n = self._stream.unsafe_value().read(
+                buf.unsafe_ptr(), _H2_READ_BUF_SIZE
+            )
+            if n == 0:
+                raise NetworkError(
+                    "Http2Client: peer closed connection mid-response"
+                    " on stream "
+                    + String(sid)
+                )
+            self._conn.feed(Span[UInt8, _](buf[:n]))
+            # Auto-acks (PING ACK, SETTINGS ACK, WINDOW_UPDATE)
+            # may have been queued by the feed; flush them.
+            var ack_bytes = self._conn.drain()
+            if len(ack_bytes) > 0:
+                self._stream.unsafe_value().write_all(Span[UInt8, _](ack_bytes))
+        # Surface RST_STREAM as a hard error.
+        var maybe_err = self._conn.stream_error(sid)
+        if Bool(maybe_err):
+            raise NetworkError(
+                "Http2Client: peer sent RST_STREAM (error code "
+                + String(maybe_err.value())
+                + ") on stream "
+                + String(sid)
+            )
+        var h2 = self._conn.take_response(sid)
+        return _h2_response_to_http(h2^)
+
+    def close(mut self) raises:
+        """Send a GOAWAY then close the underlying TCP stream.
+
+        Idempotent: a second call after the connection is gone is
+        a no-op. Called implicitly when the client is destroyed.
+        """
+        if not self._connected:
+            return
+        try:
+            self._conn.send_goaway(self._conn._next_sid - 2, 0)
+            var bytes = self._conn.drain()
+            if len(bytes) > 0:
+                self._stream.unsafe_value().write_all(Span[UInt8, _](bytes))
+        except:
+            pass
+        try:
+            self._stream.unsafe_value().close()
+        except:
+            pass
+        self._stream = Optional[TcpStream]()
+        self._connected = False
+
+
+# ── Http2Response -> flare.http.Response lowering ────────────────────────
+
+
+def _h2_response_to_http(var h2: Http2Response) raises -> Response:
+    """Lower an :class:`Http2Response` (the low-level
+    ``status + HpackHeader[] + body`` triple) into a
+    :class:`flare.http.Response` suitable for the high-level
+    facade's callers.
+
+    The ``:status`` pseudo-header has already been stripped by
+    :meth:`Http2ClientConnection.take_response`; here we just
+    populate the regular headers + body. ``reason`` is left
+    empty (HTTP/2 has no reason phrase per RFC 9113 §8.1.2.4);
+    the existing :func:`flare.http._status_reason` helper fills
+    it on serialise.
+    """
+    # Mojo's borrow checker rejects "move ``h2.body`` out + read
+    # ``h2.status`` and ``h2.headers``" in the same scope (once a
+    # field is moved, the rest of the value is partially-uninit
+    # and Mojo refuses to destroy it). The work-around: copy the
+    # body bytes once -- one-time per response, in the noise.
+    var body_copy = h2.body.copy()
+    var resp = Response(status=h2.status, body=body_copy^)
+    for i in range(len(h2.headers)):
+        try:
+            resp.headers.set(h2.headers[i].name, h2.headers[i].value)
+        except:
+            pass
+    return resp^

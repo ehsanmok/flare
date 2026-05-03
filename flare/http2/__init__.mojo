@@ -71,6 +71,8 @@ from .server import (
     is_h2_alpn,
 )
 from .client import (
+    Http2Client,
     Http2ClientConfig,
     Http2ClientConnection,
+    Http2Response,
 )
