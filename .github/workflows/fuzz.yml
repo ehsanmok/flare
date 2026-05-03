@@ -16,22 +16,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pin Linux to ``ubuntu-22.04`` (glibc 2.35) for the same
-        # reason as the original ``5e28b84`` pin: the pinned Mojo
-        # nightly (``mojo == 0.26.3.0.dev2026042005``) crashes inside
-        # its own runtime on ``ubuntu-latest`` (24.04 / glibc 2.39)
-        # under the fuzzer's workload. The crash has the documented
-        # signature -- four frames inside
-        # ``libKGENCompilerRTShared.so`` finishing in
-        # ``libc.so.6+0x45330``, with ``mojo: error: execution
-        # crashed`` -- and reproduces 100% on ``ubuntu-latest`` while
-        # the same nightly + the same harness run clean on macOS-14
-        # and on this repo's Ubuntu 22.04 dev box. ``ci.yml`` stays on
-        # ``ubuntu-latest`` because the unit-test workload doesn't
-        # trigger the crash; the fuzzer's hot loop is what hits it.
-        # Revert to ``ubuntu-latest`` once Mojo upstream re-cuts a
-        # 24.04-clean nightly we can pin against.
-        os: [ubuntu-22.04, macos-14]
+        # Linux: ``ubuntu-latest`` (currently 24.04, glibc 2.39). The
+        # ``libKGENCompilerRTShared.so`` runtime crash on the pinned
+        # Mojo nightly (``mojo == 0.26.3.0.dev2026042005``) that
+        # previously forced ``ubuntu-22.04`` no longer reproduces on
+        # the current pinned nightly
+        # (``mojo == 0.26.3.0.dev2026042717``); the fuzzer's hot loop
+        # (which was the fastest-to-trip surface) runs clean. As with
+        # ci.yml, the build side (sysroot pinned at glibc ``>=2.34``
+        # via conda-forge) keeps the resulting binaries portable
+        # down to glibc 2.34 hosts.
+        os: [ubuntu-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4

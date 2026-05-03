@@ -75,12 +75,18 @@ rust    = ">=1.83,<2"     # hyper / axum / actix-web build (cargo build --releas
 
 [feature.bench.target.linux-64.dependencies]
 wrk = ">=4.2.0"     # conda-forge has wrk on linux-64; macOS uses system wrk
-# Bench-local sysroot pin: conda-forge rust 1.94 transitively pulls
-# sysroot 2.39, but build-script binaries it produces link against
-# host glibc, which on the v0.5.0-pinned ubuntu-22.04 CI runner is
-# 2.35. Forcing the bench sysroot to 2.34 means rustc-emitted build
-# scripts only reference symbols from glibc <= 2.34, which all
-# supported runners + the dev box satisfy.
+# Bench-local sysroot pin: conda-forge ``rust`` (1.94+) transitively
+# pulls sysroot 2.39, but the build-script binaries rustc emits link
+# against the *host* glibc rather than the conda one. Forcing the
+# bench sysroot to exactly ``2.34.*`` here means every rust-built
+# baseline (hyper / axum / actix-web) only references GLIBC_2.34
+# and below, so the resulting binaries stay portable down to glibc
+# 2.34 hosts (RHEL 9, Debian 12, Ubuntu 22.04) even though the CI
+# runner itself is ``ubuntu-latest`` (24.04, glibc 2.39). The
+# default linux-64 sysroot in ``[target.linux-64.dependencies]``
+# above carries the same lower bound (``>=2.34``) so the
+# ``libflare_tls.so`` / ``libflare_zlib.so`` the activation scripts
+# build pick up the same forward-compatible floor.
 sysroot_linux-64 = "2.34.*"
 
 [feature.bench.tasks]
