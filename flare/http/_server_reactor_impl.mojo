@@ -2212,3 +2212,321 @@ def run_uring_reactor_loop_static(
         leftover.append(kv.key)
     for i in range(len(leftover)):
         _cleanup_conn_uring(leftover[i], conns)
+
+
+# ── io_uring handler-path dispatch (Track B0 wire-in, multi-worker) ─────────
+#
+# ``run_uring_reactor_loop[H]`` and ``run_uring_reactor_loop_shared[H]`` are
+# the io_uring twins of ``run_reactor_loop[H]`` and
+# ``run_reactor_loop_shared[H]`` -- the dynamic-handler path that
+# ``HttpServer.serve`` and ``Scheduler._worker_main`` call.
+#
+# Same structural shape as ``run_uring_reactor_loop_static`` above; the
+# only difference is that ``ConnHandle.on_readable(handler, config)``
+# replaces ``ConnHandle.on_readable_static(resp, config)`` in the dispatch
+# switch. The per-conn state machine, the cancel/re-arm modify dance,
+# and the cleanup-on-fd-close trick are unchanged.
+#
+# Multi-worker note: ``run_uring_reactor_loop_shared`` arms multishot
+# accept on a *shared* listener fd from each worker's own ``UringReactor``.
+# When a new connection arrives, the kernel completes exactly one
+# worker's accept SQE -- the same "wake one worker per accept" guarantee
+# epoll's ``EPOLLEXCLUSIVE`` provides on the legacy path. Per-conn
+# state (the conns dict, the per-conn polls) stays worker-local because
+# accepted client fds are always handled by the worker that received the
+# accept CQE.
+
+
+def _uring_dispatch_handler[
+    H: Handler,
+](
+    fd: Int,
+    poll_bits: UInt32,
+    config: ServerConfig,
+    ref handler: H,
+    ch_ptr: UnsafePointer[ConnHandle, MutExternalOrigin],
+    mut ureactor,
+) raises -> Bool:
+    """Run one CQE through the per-conn handler state machine; return
+    True iff the connection should be cleaned up (``step.done`` or an
+    exception bubbled out of ``on_readable`` / ``on_writable``).
+
+    Factored out so ``run_uring_reactor_loop[H]`` and
+    ``run_uring_reactor_loop_shared[H]`` can share the inner dispatch
+    body verbatim. Mirrors the inner block of
+    ``run_uring_reactor_loop_static`` except that the readable callback
+    is the handler-driven ``on_readable[H]`` instead of the static-
+    response ``on_readable_static``.
+    """
+    from flare.runtime.io_uring_sqe import POLLIN, POLLOUT, POLLRDHUP
+
+    var step_done = False
+    try:
+        var last_step = StepResult()
+        var did_anything = False
+
+        if (poll_bits & POLLIN) != 0:
+            last_step = ch_ptr[].on_readable(handler, config)
+            step_done = last_step.done
+            did_anything = True
+            # Inline-cycle keep-alive optimisation, mirroring the
+            # epoll path: while the state machine is cycling, drive
+            # the next step rather than bouncing through the reactor.
+            # Cap at 3 cycles so a malicious pipelining client can't
+            # starve other fds.
+            var cycles = 0
+            while (not step_done) and cycles < 3:
+                cycles += 1
+                if (
+                    last_step.want_write
+                    and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
+                ):
+                    last_step = ch_ptr[].on_writable(config)
+                    step_done = last_step.done
+                elif (
+                    last_step.want_read
+                    and len(ch_ptr[].read_buf) > 0
+                    and ch_ptr[].state == STATE_READING
+                ):
+                    last_step = ch_ptr[].on_readable(handler, config)
+                    step_done = last_step.done
+                else:
+                    break
+
+        if (not did_anything) and (poll_bits & POLLOUT) != 0:
+            last_step = ch_ptr[].on_writable(config)
+            step_done = last_step.done
+
+        if not step_done:
+            # Compute the new interest mask + re-arm if it changed.
+            # io_uring equivalent of _apply_step's
+            # ``reactor.modify(fd, interest)``.
+            var new_mask: UInt32 = 0
+            if last_step.want_read:
+                new_mask |= POLLIN | POLLRDHUP
+            if last_step.want_write:
+                new_mask |= POLLOUT
+            if new_mask != 0:
+                var key = Int(new_mask)
+                if key != ch_ptr[].last_interest:
+                    if ch_ptr[].last_interest != 0:
+                        try:
+                            ureactor.cancel_poll(UInt64(fd))
+                        except:
+                            pass
+                    try:
+                        ureactor.arm_poll_readable_multishot(
+                            fd, UInt64(fd), new_mask
+                        )
+                        ch_ptr[].last_interest = key
+                    except:
+                        step_done = True
+    except:
+        step_done = True
+    return step_done
+
+
+def run_uring_reactor_loop[
+    H: Handler,
+](
+    mut listener: TcpListener,
+    config: ServerConfig,
+    ref handler: H,
+    ref stopping: Bool,
+) raises:
+    """io_uring-backed reactor loop for the dynamic-handler path
+    (single-worker).
+
+    Functional twin of :func:`run_reactor_loop` (which uses
+    epoll/kqueue). Uses ``UringReactor`` for both the accept path
+    (multishot accept; one SQE arms it, the kernel posts a CQE per
+    incoming connection) and the per-conn readiness path (multishot
+    poll for ``POLLIN | POLLRDHUP`` on accepted fds; ``POLLOUT``
+    after the request handler signals a write transition).
+
+    Per-connection ``ConnHandle.on_readable(handler, config)`` /
+    ``on_writable`` are unchanged -- the io_uring path only swaps
+    the readiness notifier (``IORING_OP_POLL_ADD`` multishot vs
+    ``epoll_wait``) and the accept syscall
+    (``IORING_ACCEPT_MULTISHOT`` vs ``accept(2)+EAGAIN``).
+
+    Linux-only. Caller is expected to gate this on
+    :func:`flare.runtime.uring_reactor.use_uring_backend`.
+    """
+    comptime if not CompilationTarget.is_linux():
+        raise Error("run_uring_reactor_loop: io_uring path is Linux-only")
+    from flare.runtime.uring_reactor import (
+        URING_OP_ACCEPT,
+        URING_OP_POLL,
+        UringCompletion,
+        UringReactor,
+    )
+    from flare.runtime.io_uring_sqe import POLLIN, POLLRDHUP
+
+    listener._socket.set_nonblocking(True)
+    var listener_fd = Int(listener._socket.fd)
+
+    var ureactor = UringReactor(256)
+    var conns = Dict[Int, Int]()
+
+    ureactor.arm_listener_multishot(listener_fd, UInt64(0))
+
+    var completions = List[UringCompletion]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        completions.clear()
+        try:
+            _ = ureactor.poll(1, completions, 64)
+        except:
+            break
+
+        for i in range(len(completions)):
+            var comp = completions[i]
+            if comp.op == URING_OP_ACCEPT:
+                if comp.is_error():
+                    continue
+                var client_fd = Int(comp.res)
+                var addr: Int
+                try:
+                    addr = _alloc_conn_from_accepted_fd(client_fd)
+                except:
+                    var c = c_int(client_fd)
+                    _ = _close(c)
+                    continue
+                conns[client_fd] = addr
+                var ch_ptr = _conn_ptr_from_int(addr)
+                ch_ptr[].last_interest = Int(POLLIN | POLLRDHUP)
+                try:
+                    ureactor.arm_poll_readable_multishot(
+                        client_fd, UInt64(client_fd), POLLIN | POLLRDHUP
+                    )
+                except:
+                    _cleanup_conn_uring(client_fd, conns)
+                continue
+
+            if comp.op != URING_OP_POLL:
+                continue
+
+            var fd = Int(comp.conn_id)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var poll_bits = UInt32(comp.res)
+            var step_done = _uring_dispatch_handler[H](
+                fd, poll_bits, config, handler, ch_ptr, ureactor
+            )
+            if step_done:
+                _cleanup_conn_uring(fd, conns)
+
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn_uring(leftover[i], conns)
+
+
+def run_uring_reactor_loop_shared[
+    H: Handler,
+](
+    listener_fd: Int,
+    config: ServerConfig,
+    ref handler: H,
+    ref stopping: Bool,
+) raises:
+    """Multi-worker io_uring reactor loop sharing a single listener fd.
+
+    Functional twin of :func:`run_reactor_loop_shared`. Each worker
+    arms its own multishot accept on the shared listener fd from its
+    private ``UringReactor``; when a new connection arrives the kernel
+    completes exactly one worker's accept SQE (analogous to epoll's
+    ``EPOLLEXCLUSIVE`` semantics, but provided natively by
+    ``io_uring`` without needing the flag).
+
+    The shared listener fd is owned by the ``Scheduler``; this
+    function never closes it. Per-conn fds are worker-local (the
+    accept CQE returns the new fd directly) and tracked in the
+    worker's private ``conns`` dict.
+
+    Linux-only. Caller is expected to gate this on
+    :func:`flare.runtime.uring_reactor.use_uring_backend`.
+    """
+    comptime if not CompilationTarget.is_linux():
+        raise Error(
+            "run_uring_reactor_loop_shared: io_uring path is Linux-only"
+        )
+    from flare.runtime.uring_reactor import (
+        URING_OP_ACCEPT,
+        URING_OP_POLL,
+        UringCompletion,
+        UringReactor,
+    )
+    from flare.runtime.io_uring_sqe import POLLIN, POLLRDHUP
+
+    var ureactor = UringReactor(256)
+    var conns = Dict[Int, Int]()
+
+    # Multishot accept on the SHARED listener fd. With multiple
+    # workers each arming their own multishot accept on the same
+    # fd, the kernel hands each new connection to exactly one
+    # worker (whichever's SQE it chose to satisfy). No
+    # thundering-herd; no need for EPOLLEXCLUSIVE.
+    ureactor.arm_listener_multishot(listener_fd, UInt64(0))
+
+    var completions = List[UringCompletion]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        completions.clear()
+        try:
+            _ = ureactor.poll(1, completions, 64)
+        except:
+            break
+
+        for i in range(len(completions)):
+            var comp = completions[i]
+            if comp.op == URING_OP_ACCEPT:
+                if comp.is_error():
+                    continue
+                var client_fd = Int(comp.res)
+                var addr: Int
+                try:
+                    addr = _alloc_conn_from_accepted_fd(client_fd)
+                except:
+                    var c = c_int(client_fd)
+                    _ = _close(c)
+                    continue
+                conns[client_fd] = addr
+                var ch_ptr = _conn_ptr_from_int(addr)
+                ch_ptr[].last_interest = Int(POLLIN | POLLRDHUP)
+                try:
+                    ureactor.arm_poll_readable_multishot(
+                        client_fd, UInt64(client_fd), POLLIN | POLLRDHUP
+                    )
+                except:
+                    _cleanup_conn_uring(client_fd, conns)
+                continue
+
+            if comp.op != URING_OP_POLL:
+                continue
+
+            var fd = Int(comp.conn_id)
+            if fd not in conns:
+                continue
+            var ch_ptr = _conn_ptr_from_int(conns[fd])
+            var poll_bits = UInt32(comp.res)
+            var step_done = _uring_dispatch_handler[H](
+                fd, poll_bits, config, handler, ch_ptr, ureactor
+            )
+            if step_done:
+                _cleanup_conn_uring(fd, conns)
+
+    # Worker shutdown: close all per-conn fds. The shared listener
+    # fd stays open -- Scheduler.shutdown closes it.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn_uring(leftover[i], conns)

@@ -74,9 +74,15 @@ from std.memory import UnsafePointer, alloc
 
 from ..http.handler import Handler
 from ..http.server import ServerConfig, ShutdownReport
-from ..http._server_reactor_impl import run_reactor_loop_shared
+from ..http._server_reactor_impl import (
+    run_reactor_loop_shared,
+    run_uring_reactor_loop_shared,
+)
+from .uring_reactor import use_uring_backend
 from ..net import SocketAddr
 from ..tcp import TcpListener
+
+from std.sys.info import CompilationTarget
 
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .reuseport import bind_shared
@@ -193,6 +199,23 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
         # stable heap address. That address was captured at
         # ``Scheduler.start`` time and stays valid until
         # ``Scheduler.shutdown`` joins every worker.
+        # Track B0 wire-in (multi-worker handler path): each pthread
+        # worker gets its own ``UringReactor`` when the kernel
+        # supports io_uring AND ``FLARE_DISABLE_IO_URING`` is unset.
+        # The shared listener fd is armed with multishot accept from
+        # every worker; the kernel hands each new connection to
+        # exactly one worker (analogous to ``EPOLLEXCLUSIVE`` on the
+        # epoll path, but provided natively by io_uring without
+        # needing the flag).
+        comptime if CompilationTarget.is_linux():
+            if use_uring_backend():
+                run_uring_reactor_loop_shared[H](
+                    ctx_ptr[].listener_fd,
+                    ctx_ptr[].config,
+                    ctx_ptr[].handler,
+                    stopping_ptr[],
+                )
+                return
         run_reactor_loop_shared[H](
             ctx_ptr[].listener_fd,
             ctx_ptr[].config,
