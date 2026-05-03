@@ -917,15 +917,45 @@ struct UringReactor(Movable):
         mut out: List[UringCompletion],
         max_completions: Int = 64,
     ) raises -> Int:
-        """Submit any pending SQEs, wait for ``min_complete``
-        CQEs (0 = non-blocking), then drain up to
-        ``max_completions`` CQEs into ``out``.
+        """Submit any pending SQEs, drain ready CQEs, then
+        optionally block for more.
 
-        Returns the number of completions appended.
+        Phase 2C: peek-then-block dispatch (matches the
+        ``tokio-uring`` / ``monoio`` pattern). Three phases per
+        call:
+
+        1. **Submit**: flush any pending SQEs to the kernel
+           via ``io_uring_enter(submit, 0, GETEVENTS)`` -- this
+           does NOT block, but does collect any CQEs the kernel
+           has already posted asynchronously (e.g. multishot
+           recv completions that fired between the prior poll
+           and this one). On kernels with DEFER_TASKRUN
+           (negotiated by Phase 2B's setup_flag probe), this
+           call also runs deferred task work which can produce
+           the CQEs we then drain in step 2.
+
+        2. **Drain**: pull every ready CQE out of the CQ into
+           ``out``, up to ``max_completions``. No syscall in
+           this phase -- pure userspace ring head/tail
+           manipulation. This is where the multishot recv CQEs
+           land in batches under sustained load; the prior
+           always-block design only ever pulled one at a time
+           because ``submit_and_wait(1)`` returned as soon as
+           one CQE was ready.
+
+        3. **Block (only if needed)**: if we drained fewer than
+           ``min_complete`` CQEs, call ``submit_and_wait(...)``
+           with the remaining count to actually block. The
+           common case under sustained load is that step 2
+           returned plenty of CQEs and step 3 is skipped
+           entirely.
+
+        Returns the number of completions appended to ``out``.
 
         Args:
-            min_complete: 0 = non-blocking submit; positive =
-                block until this many CQEs are ready.
+            min_complete: 0 = non-blocking poll; positive =
+                block until at least this many CQEs are ready
+                across the drain + optional block phases.
             out: Output list (cleared on entry).
             max_completions: Per-poll budget so one slow op
                 doesn't starve the reactor (matches epoll's
@@ -940,24 +970,100 @@ struct UringReactor(Movable):
                 self._wake_armed = True
             except _e:
                 # If arming the wakeup fails (e.g. SQ full on a
-                # busy reactor), the poll still works — wakeups
+                # busy reactor), the poll still works -- wakeups
                 # just won't be honoured this round. Try again
                 # next poll.
                 pass
 
-        var rc = self._driver.submit_and_wait(min_complete)
-        # rc >= 0 = SQEs consumed; rc < 0 = -errno. EINTR is benign.
-        if rc < 0 and rc != -4:  # -EINTR
+        # Phase 1: non-blocking submit + collect already-ready
+        # CQEs. submit_and_wait(0) flushes the SQ tail to the
+        # kernel; on COOP_TASKRUN/DEFER_TASKRUN kernels it also
+        # runs deferred task work, which often produces the CQEs
+        # we drain in phase 2.
+        var rc0 = self._driver.submit_and_wait(0)
+        if rc0 < 0 and rc0 != -4:  # -EINTR
             raise Error(
-                "UringReactor.poll: io_uring_enter failed; rc=" + String(rc)
+                "UringReactor.poll: io_uring_enter(0) failed; rc=" + String(rc0)
             )
+
+        # Phase 2: drain everything ready into ``out``. No
+        # syscall. Tracks both the surfaced count (``n``) and
+        # the raw consumed count (``raw``, includes filtered-out
+        # wakeup CQEs). The wakeup-absorbed bit informs the
+        # block decision below: a wakeup that arrived between
+        # phases 1 and 2 means the caller has been signalled to
+        # wake up, so phase 3 must skip the block to honour the
+        # wakeup contract even though no CQE surfaces.
+        var raw_consumed: Int = 0
+        var n = self._drain_into_tracking(out, max_completions, raw_consumed)
+
+        # Phase 3: only block if the caller asked for >= 1 CQE
+        # AND we haven't satisfied that request yet AND no
+        # wakeup-CQE absorbed (a wakeup signals "release any
+        # blocked poll" -- honoured here by skipping the block).
+        # ``need`` is the residual; submit_and_wait(need) blocks
+        # until at least ``need`` more CQEs land.
+        var need = min_complete - n
+        if need > 0 and n < max_completions and raw_consumed == 0:
+            var rc1 = self._driver.submit_and_wait(need)
+            if rc1 < 0 and rc1 != -4:  # -EINTR
+                raise Error(
+                    "UringReactor.poll: io_uring_enter("
+                    + String(need)
+                    + ") failed; rc="
+                    + String(rc1)
+                )
+            n += self._drain_into(out, max_completions - n)
+
+        return n
+
+    def _drain_into(
+        mut self,
+        mut out: List[UringCompletion],
+        max_completions: Int,
+    ) raises -> Int:
+        """Drain every available CQE into ``out``, up to
+        ``max_completions``. Filters out wakeup CQEs (re-arms
+        the lazy wakeup flag instead). Returns the number
+        appended to ``out``.
+
+        Pure userspace -- no syscall. Thin wrapper over
+        :func:`_drain_into_tracking` that discards the
+        raw-consumed count.
+        """
+        var raw: Int = 0
+        return self._drain_into_tracking(out, max_completions, raw)
+
+    def _drain_into_tracking(
+        mut self,
+        mut out: List[UringCompletion],
+        max_completions: Int,
+        mut raw_consumed: Int,
+    ) raises -> Int:
+        """Like :func:`_drain_into` but also writes the raw
+        consumed count into ``raw_consumed`` (which includes
+        wakeup CQEs that were absorbed without surfacing).
+
+        Phase 2C peek-then-block uses the raw count to decide
+        whether to block in the third phase: a wakeup CQE that
+        arrived between phase 1 (submit) and phase 2 (drain)
+        means the caller has been signalled to wake up, even
+        if no surfaced CQE accompanies it -- so phase 3 must
+        skip the block to honour the wakeup contract.
+
+        Returns the number of CQEs appended to ``out`` (the
+        surfaced count); the raw consumed count is written
+        through ``raw_consumed``.
+        """
         var n = 0
-        while n < max_completions:
+        raw_consumed = 0
+        while raw_consumed < max_completions:
             var maybe = self._driver.reap_cqe()
             if not Bool(maybe):
                 break
             var cqe = maybe.value()
             var comp = _cqe_to_completion(cqe)
+            raw_consumed += 1
             # Wakeup CQEs get re-armed lazily and not surfaced.
             if comp.op == URING_OP_WAKEUP:
                 self._wake_armed = False
