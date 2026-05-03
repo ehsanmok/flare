@@ -4,7 +4,7 @@ alwaysApply: false
 
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-03 · **Branch**: `main` (commits `9e9c3d1` → … → `3ae27e9` (**B0 static-path wire-in**) → `c8cd770` → `46addbd` → `765e027` (**doc → `.cursor/rules/`**) → `0116178` (`on_readable_from_buf`) → `981eb8e` → `c6ccc79` → `bf6ca75` (**buffer-ring substrate**) → `9cf97d0` → `392cf15` (gen-stamping) → `a91413d` (**B0 handler-path wire-in shipped opt-in**) → `cf7f138` (Scheduler wire-in opt-in) → `88ea2f7` (**SO_REUSEPORT per-worker bind for io_uring** -- production pattern from monoio + tokio-uring; fixes the shared-listener-fd kernel race for multi-worker bufring smoke; sustained multi-worker load still hangs from a separate buffer-ring multi-ring interaction bug requiring `IORING_REGISTER_PBUF_RING` for resolution)).
+**Date**: 2026-05-03 · **Branch**: `main` (commits `9e9c3d1` → … → `3ae27e9` (**B0 static-path wire-in**) → `765e027` (**doc → `.cursor/rules/`**) → `bf6ca75` (**buffer-ring substrate**) → `a91413d` (**B0 handler-path wire-in shipped opt-in via `FLARE_BUFRING_HANDLER=1`**) → `88ea2f7` (SO_REUSEPORT per-worker bind for io_uring) → `b62f355` (**`IORING_REGISTER_PBUF_RING` (5.19+) -- the 2.7x kernel-buffer-mgmt fix** that closes the -32% bufring throughput regression and pushes 1-worker io_uring AHEAD of epoll: 68,985 req/s vs epoll 65,990 vs prior bufring 49,812 = **+5% over epoll, 1.83x Go**; tail also wins (p99.99 3.40 vs epoll 3.46 vs Go 4.87)). Multi-worker bufring still hangs (separate bug, NOT in PBUF_RING substrate; mc 1w + PBUF_RING is fine at 49.6K req/s; mc 2w+ crashes — likely a Mojo-runtime × pthread × io_uring rings interaction needing Mojo-internal expertise).
 
 This note tracks where flare v0.7 stands against the design-0.7
 gate (≥ 220 K req/s on flare_mc 4w EPYC, p99.99 ≤ 3.5 ms) and
@@ -258,63 +258,46 @@ core. Comfortable margin against the 5 µs target (220 K =
 | **B0 zero-copy recv via buffer ring -- substrate ✅, wire-in ⚠️** | True multishot recv against a **kernel-managed buffer ring**: register a per-worker pool of N×8 KiB buffers via `IORING_OP_PROVIDE_BUFFERS`, set `IOSQE_BUFFER_SELECT` on the recv SQE plus `sqe->buf_group`, and arm a single `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` per accepted fd. The kernel picks a buffer per CQE from the ring (buffer id in CQE's high 16 flag bits, decoded by `IoUringCqe.buffer_id()`), removes per-conn buffer pinning entirely, and matches what `tokio-uring` / `monoio` / `glommio` do for the same workload. | **Substrate shipped in `bf6ca75`** -- `prep_provide_buffers` + `prep_recv_buffer_select` SQE encoders, `arm_provide_buffers` + `arm_recv_buffer_select` on `UringReactor`, new `URING_OP_PROVIDE_BUFFERS=9` op tag. Live-kernel test (`test_buffer_ring_recv_round_trip` in `tests/test_uring_reactor.mojo`) provides a 4-buffer 1 KiB pool, accepts a loopback connection, arms multishot buffer-select recv, validates the recv CQE has `IORING_CQE_F_BUFFER`, the picked buffer id is in `[0, 4)`, and the data lands at the correct pool slot. **12/12 PASS on host kernel 6.8.** **Dispatch loops shipped in `9cf97d0`** -- `run_uring_bufring_reactor_loop[H]` + `_shared[H]` use the substrate end-to-end. **Sequential single-conn keep-alive WORKS at scale (500/500 keep-alive requests on one conn, vs the recv-multishot 981eb8e attempt that died at request #62 -- the ConnHandle lifecycle bug is GONE because the per-conn buffer pinning is gone)**. **Wire-in into `HttpServer.serve` is BLOCKED on a concurrency-conn crash** (SIGSEGV in our code somewhere; sequential 4 conns OR parallel 8 conns reproduces; each conn up to the threshold serves 50/50 cleanly, then the next accept-cleanup-and-re-accept-on-same-fd cycle SEGV's). Best hypotheses: Mojo move semantics in `_serialize_response`'s `var wire = self.write_buf^` interact badly with `Pool[ConnHandle].alloc_move`'s heap slot when the slot is freed and re-allocated rapidly across the conn-close / accept-reuse boundary; or a lifecycle race with the kernel's still-pending recv CQE for a closed-conn fd colliding with the same fd's new ConnHandle slot. Both need lldb / Mojo-native ASAN to root-cause -- outside this session's time budget. The dispatch functions are uncalled in the tree; next debug session can wire them in directly to reproduce on a controlled binary, or extend the substrate test with concurrent recv arming to surface the issue in isolation. |
 | **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/`. | Hardware-gated. The dev-box 4w bench (`46addbd`) sits at parity with the v0.6 EPYC peak on the epoll path (170 K vs 170 K) but the dev-box tail is dominated by 64-vCPU scheduler noise — the EPYC re-bench will publish the matched-worker / matched-cores numbers (which historically land at p99.99 = 3.11 ms; best-of-class). |
 
-## Wire-in 1-worker throughput regression: WHY io_uring 49K < epoll 66K
+## 1-worker throughput regression FIXED: PBUF_RING wins both throughput and tail
 
-Same-binary, same-harness A/B (toggling `FLARE_BUFRING_HANDLER`):
+Same-binary, same-harness A/B (toggling `FLARE_BUFRING_HANDLER`),
+post-`b62f355` (`IORING_REGISTER_PBUF_RING`):
 
 | Backend | Req/s (peak) | p99 | p99.99 |
 |---|---:|---:|---:|
-| io_uring buffer-ring | 49,812 | **2.76 ms** | **3.26 ms** |
-| epoll | **65,990** | 3.11 ms | 3.46 ms |
+| **io_uring + PBUF_RING (NEW)** | **68,985** | **3.06 ms** | **3.40 ms** |
+| epoll baseline | 65,990 | 3.11 ms | 3.46 ms |
+| io_uring + PROVIDE_BUFFERS (old) | 49,812 | 2.76 ms | 3.26 ms |
 
-io_uring trades **−32 % peak throughput** for **−11 % p99 / −6 % p99.99**.
+io_uring + PBUF_RING **wins both axes** vs epoll on this dev-box:
+**+5 % throughput**, **−1.6 % p99**, **−1.7 % p99.99**. vs Go on
+the same dev-box: **1.83x Go's 37,760 req/s**, with **30 % tighter
+p99.99** (3.40 ms vs Go 4.87 ms).
+
+The earlier −32 % bufring regression vs epoll documented in
+`365bcd1` is **GONE**.
 
 Per-request work breakdown (TFB plaintext, kept-alive HTTP/1.1):
 
-| | epoll path | io_uring buffer-ring |
-|---|---|---|
-| Wait for readiness | 1 `epoll_wait` (batched N events) | 1 `io_uring_enter` (batched CQEs + SQEs) |
-| Read bytes | 1 `recv` syscall | **0 syscalls** (kernel push via buffer ring) ✅ |
-| Run handler | — | — |
-| Write response | 1 `send` syscall | 1 `send` syscall ❌ (still synchronous) |
-| Refill kernel buffer | — | **1 `PROVIDE_BUFFERS` SQE** ❌ (extra work per CQE) |
-| **Net syscalls/req** | **3** | **~2** + extra SQE bookkeeping |
+| | epoll path | io_uring + PROVIDE_BUFFERS (old) | io_uring + PBUF_RING (current) |
+|---|---|---|---|
+| Wait for readiness | 1 `epoll_wait` | 1 `io_uring_enter` | 1 `io_uring_enter` |
+| Read bytes | 1 `recv` syscall | **0** (kernel push) ✅ | **0** (kernel push) ✅ |
+| Run handler | — | — | — |
+| Write response | 1 `send` syscall | 1 `send` syscall ❌ | 1 `send` syscall ❌ |
+| Refill kernel buffer | — | **1 SQE per CQE** ❌ | **0 SQEs** (shared-mem tail bump) ✅ |
+| **Net syscalls/req** | **3** | **2 + SQE bookkeeping** | **2** |
 
-io_uring saves the recv syscall but adds the per-CQE
-`PROVIDE_BUFFERS` refill SQE AND still pays the synchronous
-send syscall. On the dev-box at 1-worker, the refill SQE +
-in-kernel buffer-ring bookkeeping cost more than the recv
-syscall cost it saves. The tail wins because each
-`io_uring_enter` does more work per syscall (less context-
-switch jitter), but raw throughput regresses.
-
-**Two paths to close the gap (both v0.7.x scope)**:
-
-1. **`submit_send` for the response** — drops the synchronous
-   send syscall. `UringReactor.submit_send` already exists and
-   is unit-tested. The blocker is per-conn buffer-ownership
-   tracking: the response bytes (in `ConnHandle.write_buf`)
-   must outlive the in-flight send SQE, but the next request's
-   `_serialize_response` would otherwise overwrite them.
-   Cleanest fix: per-conn ping-pong write-buffers (write_buf_a
-   in flight, write_buf_b for the next response), or a
-   reference-count on write_buf bumped on submit_send and
-   decremented on the send CQE.
-
-2. **`IORING_REGISTER_PBUF_RING` (kernel 5.19+)** — drops the
-   per-CQE `PROVIDE_BUFFERS` refill entirely. The kernel
-   manages a fixed-size ring of buffer entries that recycles
-   automatically; userspace only updates a cached_tail pointer
-   to advertise new buffers. Bigger registration API change but
-   eliminates the SQE pressure on the hot path.
-
-Combined, these would eliminate BOTH the synchronous send AND
-the per-CQE refill, dropping io_uring to **~1 syscall/req** vs
-epoll's 3 — at which point the throughput trade flips
-decisively in io_uring's favour. The current wire-in's tail
-win (p99 -11 %, p99.99 -6 %) is direct evidence the io_uring
-substrate is fundamentally faster; the throughput regression
-is a missing-feature problem, not an architectural one.
+`b62f355` (PBUF_RING) eliminates the per-CQE `PROVIDE_BUFFERS`
+SQE — kernel benchmarks (commit
+[c7fb194](https://github.com/torvalds/linux/commit/c7fb19428d67dd0a2a78a4f237af01d39c78dc5a))
+showed the ring-mapped variant is **27M vs 10M ops/sec
+replenish-1 = 2.7x faster**. Now the only remaining syscall vs
+the absolute minimum is `send`. Closing it requires
+**`submit_send` + per-conn ping-pong write buffers** (the
+tokio-uring `IoBufMut` / monoio owned-buffer pattern). When that
+ships, io_uring → ~1 syscall/req vs epoll's 3, locking in the
+throughput lead.
 
 ## Production io_uring HTTP server patterns (deep dive)
 
