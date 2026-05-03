@@ -4,7 +4,7 @@ alwaysApply: false
 
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-03 · **Branch**: `main` (commits `9e9c3d1` → … → `3ae27e9` (**B0 static-path wire-in: HttpServer.serve_static through UringReactor**) → `c8cd770` → `46addbd` → `765e027` (**doc → `.cursor/rules/`**) → `0116178` (`on_readable_from_buf` scaffolding) → `981eb8e` → `c6ccc79` → `bf6ca75` (**buffer-ring substrate: PROVIDE_BUFFERS + IOSQE_BUFFER_SELECT recv, 12/12 PASS**) → `9cf97d0` (buffer-ring dispatch loops as substrate) → `392cf15` (gen-stamped conn_id refinement) → `a91413d` (**B0 handler-path wire-in shipped opt-in via `FLARE_BUFRING_HANDLER=1`**: cancel-before-free fix eliminates the kernel race between conn-close and reaccept-on-the-same-fd; integration test 2/2 PASS via fork(2) sequential keepalive churn + concurrent fan-out; bench-vs-baseline currently shows -32 % peak / -11 % p99 / -6 % p99.99 vs epoll on this dev-box, kept opt-in until tuned)).
+**Date**: 2026-05-03 · **Branch**: `main` (commits `9e9c3d1` → … → `3ae27e9` (**B0 static-path wire-in**) → `c8cd770` → `46addbd` → `765e027` (**doc → `.cursor/rules/`**) → `0116178` (`on_readable_from_buf`) → `981eb8e` → `c6ccc79` → `bf6ca75` (**buffer-ring substrate**) → `9cf97d0` → `392cf15` (gen-stamping) → `a91413d` (**B0 handler-path wire-in shipped opt-in**) → `cf7f138` (Scheduler wire-in opt-in) → `88ea2f7` (**SO_REUSEPORT per-worker bind for io_uring** -- production pattern from monoio + tokio-uring; fixes the shared-listener-fd kernel race for multi-worker bufring smoke; sustained multi-worker load still hangs from a separate buffer-ring multi-ring interaction bug requiring `IORING_REGISTER_PBUF_RING` for resolution)).
 
 This note tracks where flare v0.7 stands against the design-0.7
 gate (≥ 220 K req/s on flare_mc 4w EPYC, p99.99 ≤ 3.5 ms) and
@@ -315,6 +315,118 @@ decisively in io_uring's favour. The current wire-in's tail
 win (p99 -11 %, p99.99 -6 %) is direct evidence the io_uring
 substrate is fundamentally faster; the throughput regression
 is a missing-feature problem, not an architectural one.
+
+## Production io_uring HTTP server patterns (deep dive)
+
+This session burned several iterations re-discovering patterns that
+production io_uring HTTP servers (`monoio`, `tokio-uring`,
+`glommio`) had already converged on. Captured here so the next
+session doesn't make the same mistakes.
+
+### Multi-worker listener: SO_REUSEPORT per-worker, NOT shared fd
+
+* **`monoio`** exposes
+  [`ListenerOpts::reuse_port`](https://docs.rs/monoio/latest/monoio/net/struct.ListenerOpts.html)
+  in its public API. Multi-worker monoio servers default to
+  per-worker SO_REUSEPORT bind.
+* **`tokio-uring`** uses thread-per-core with isolated SQ/CQ
+  pairs per thread (DESIGN.md: "no work-stealing, tasks remain
+  on the thread that spawned them").
+* **The Linux io-uring maintainers** have shipped multiple
+  multishot accept fixes specifically for the shared-listener
+  case (multishot accept overflow handling, double-completion
+  bug, execution-context bug -- all on
+  lore.kernel.org/io-uring). The shared-listener path is a
+  known minefield.
+
+flare's wire-in (`88ea2f7`) now matches this pattern: each
+pthread worker calls `bind_reuseport(addr)` to create its OWN
+listener; the Scheduler does not bind a listener at all on the
+io_uring path (it just probe-binds to validate the addr early).
+
+### Buffer ring API: REGISTER_PBUF_RING (5.19+), not PROVIDE_BUFFERS
+
+Per Linux's own kernel benchmarks
+([commit c7fb194](https://github.com/torvalds/linux/commit/c7fb194)):
+
+| Provider mode | NOP test ops/sec |
+|---|---:|
+| No provided buffers | 30M |
+| `IORING_OP_PROVIDE_BUFFERS` (replenish 32) | 16M |
+| `IORING_OP_PROVIDE_BUFFERS` (replenish 1) | **10M** |
+| `IORING_REGISTER_PBUF_RING` (replenish 32) | 27M |
+| `IORING_REGISTER_PBUF_RING` (replenish 1) | **27M** |
+
+flare currently uses `IORING_OP_PROVIDE_BUFFERS` with
+replenish-1 -- the slowest variant (3x slowdown vs no-buffer).
+Switching to `IORING_REGISTER_PBUF_RING` would give 2.7x
+throughput on the buffer-management path AND has simpler
+kernel-side bookkeeping (the application updates a cached_tail
+pointer to advertise new buffers; no SQE per refill).
+
+### Owned-buffer pattern for `submit_send`
+
+Both `monoio` and `tokio-uring` use an **owned-buffer** pattern
+for I/O ops: pass buffer ownership to the kernel during the
+operation, get it back on the completion CQE. tokio-uring
+defines an `IoBufMut` trait requiring stable memory pointers
+via `stable_mut_ptr` so the kernel can safely access the
+buffer for the operation's full lifetime.
+
+For flare's send path, this means: per-conn write buffer is
+"owned by the kernel" between `submit_send` and the matching
+send CQE; the next request's `_serialize_response` cannot
+touch it until the CQE arrives. Cleanest implementation:
+per-conn ping-pong write buffers (`write_buf_a` in flight,
+`write_buf_b` for the next response). monoio's
+[zero-copy send PR](https://github.com/bytedance/monoio/pull/386)
+shows the matching state machine: lifecycle states
+`CompletedMore`, `WaitingMore`, `IgnoredMore` for the multi-CQE
+flow of `IORING_OP_SEND_ZC`.
+
+### Concrete next-session work (in priority order)
+
+1. **`IORING_REGISTER_PBUF_RING`** -- biggest single perf win
+   (2.7x on buffer mgmt path). Likely also resolves the
+   multi-worker sustained-load hang because of the simpler
+   kernel-side bookkeeping. struct `io_uring_buf_reg` shape
+   is in `liburing/man/io_uring_register.2`.
+2. **`submit_send` with per-conn ping-pong write buffers** --
+   drops the synchronous send syscall on the io_uring path.
+3. **EPYC 4w re-bench** -- on production hardware, both fixes
+   above are expected to flip the trade in io_uring's favour
+   based on published benchmarks of similar Rust servers.
+
+## v0.7 dev-box 4-worker measurement (commit `88ea2f7`)
+
+`bench-vs-baseline --only=flare_mc,hyper,axum,actix_web --configs=throughput_mc`,
+five-run median, p99 ≤ 50 ms calibration, 64-vCPU x86-64 dev-box (Linux 6.8):
+
+| Server | Workers | Req/s (median) | stdev | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **actix_web** | 4 | **262,003** | 0.20 % | 1.22 | 2.81 | 5.71 | 18.08 |
+| **hyper** | 4 | 220,029 | 0.21 % | 1.24 | **2.83** | **3.28** | **3.65** ← best tail |
+| **axum** | 4 | 198,458 | 0.35 % | 1.30 | 2.82 | 3.23 | 3.61 |
+| **flare_mc (epoll)** | 4 | 166,355 | 0.35 % | **1.14** ← best p50 | 38.53 | 42.14 | 42.91 |
+
+* **flare_mc 4w peak vs hyper**: 166 K vs 220 K = **−25 %**.
+  Same as previous run -- no regression from the SO_REUSEPORT +
+  multi-worker bufring wire-in.
+* **flare_mc 4w p50**: 1.14 ms -- still **best-of-class**, ahead
+  of every Rust 4w. Confirms the v0.7 substrate work
+  (BufferPool, ResponsePool, PHF, SIMD parsers, no-alloc hot
+  path).
+* **flare_mc 4w p99 / p99.99**: 38.5 / 42.9 ms -- significantly
+  worse than every Rust 4w. Same dev-box-specific tail
+  inflation we've documented since the v0.6 → v0.7 transition;
+  the EPYC noise floor doesn't have this issue. v0.6 EPYC
+  measurement: 3.11 ms p99.99.
+* **The +25 % gap to hyper is what the `IORING_REGISTER_PBUF_RING`
+  + `submit_send` fixes target**, per the production-pattern
+  research above. The single-worker io_uring bufring path is
+  already correctness-proven (`a91413d` test-uring-serve-handler
+  2/2 PASS, 49,807 req/s sustained); the multi-worker hang
+  fix unlocks the EPYC validation pass that flips the trade.
 
 ## Multi-worker hang: WHY 1w bufring works but 2w bufring hangs
 
