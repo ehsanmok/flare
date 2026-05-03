@@ -134,7 +134,28 @@ comptime IORING_OP_CLOSE: Int = 19
 without a syscall round-trip on the response-completion path."""
 comptime IORING_OP_PROVIDE_BUFFERS: Int = 31
 """5.7+. Register a pool of buffers for ``IOSQE_BUFFER_SELECT``
-recvs."""
+recvs. Slow path -- one SQE per refill. flare ships a faster
+ring-mapped variant via :data:`IORING_REGISTER_PBUF_RING` (5.19+,
+2.7x faster per Linux kernel benchmarks); see
+``UringReactor.register_pbuf_ring``."""
+
+# IORING_REGISTER_* opcodes used with the io_uring_register(2)
+# syscall (NOT in SQE.opcode -- these go into the syscall's
+# ``opcode`` arg directly). Numeric values match
+# ``include/uapi/linux/io_uring.h``.
+comptime IORING_REGISTER_BUFFERS: Int = 0
+"""5.1+. Register fixed buffers for IORING_OP_READ_FIXED /
+WRITE_FIXED. Not used by flare's HTTP path."""
+comptime IORING_REGISTER_PBUF_RING: Int = 22
+"""5.19+. Register a kernel-mapped provided-buffer ring for use
+with ``IOSQE_BUFFER_SELECT``. Replaces the per-CQE
+``IORING_OP_PROVIDE_BUFFERS`` SQE refill with a userspace
+tail-bump on shared memory -- 2.7x faster (27M vs 10M ops/sec
+kernel-bench, replenish-1 measurement). The ring memory is
+``sizeof(struct io_uring_buf) * ring_entries`` (16 bytes each),
+page-aligned, shared with the kernel."""
+comptime IORING_UNREGISTER_PBUF_RING: Int = 23
+"""5.19+. Companion to :data:`IORING_REGISTER_PBUF_RING`."""
 comptime IORING_OP_REMOVE_BUFFERS: Int = 32
 """5.7+. Drop a previously-provided buffer pool."""
 comptime IORING_OP_SEND: Int = 26

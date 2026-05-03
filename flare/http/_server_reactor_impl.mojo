@@ -60,7 +60,12 @@ from flare.runtime import (
     INTEREST_WRITE,
     Pool,
 )
-from flare.runtime.uring_reactor import UringReactor
+from flare.runtime.uring_reactor import (
+    UringReactor,
+    _pbuf_ring_add,
+    _pbuf_ring_get_tail,
+    _pbuf_ring_set_tail,
+)
 
 
 # ── State constants ───────────────────────────────────────────────────────────
@@ -2616,23 +2621,32 @@ def run_uring_bufring_reactor_loop[
 
     var ureactor = UringReactor(512)
     var conns = Dict[UInt64, Int]()
-    # Per-worker monotonic generation counter: bumped on every
-    # accept so each conn_id is unique across the worker's
-    # lifetime even when fd values are recycled (see the long
-    # comment block above _br_pack_conn_id for why this is
-    # essential to avoid the 9cf97d0 SIGSEGV).
     var next_gen: UInt64 = 1
 
-    # Allocate the worker's recv buffer pool and hand it to the
-    # kernel as the bgid=_URING_BR_BGID buffer ring.
+    # Allocate the worker's recv buffer pool + register a kernel-
+    # mapped buffer ring (PBUF_RING). 2.7x faster than the legacy
+    # IORING_OP_PROVIDE_BUFFERS path per Linux kernel benchmarks
+    # (commit c7fb194: 27M vs 10M ops/sec replenish-1) AND uses
+    # SQE-free shared-memory tail bumps for refills, removing the
+    # per-CQE PROVIDE_BUFFERS SQE that was hammering the SQ on the
+    # legacy path.
     var pool_addr = _alloc_recv_buffer_pool()
-    ureactor.arm_provide_buffers(
-        addr=UInt64(pool_addr),
-        nbytes_per_buf=_URING_BR_BUF_SIZE,
-        nbufs=_URING_BR_NBUFS,
-        bgid=_URING_BR_BGID,
-        bid=UInt16(0),
-    )
+    var ring_addr = ureactor.register_pbuf_ring(_URING_BR_BGID, _URING_BR_NBUFS)
+    # Seed all N buffers into the ring. tail starts at 0; each
+    # entry points into the per-worker buffer pool at offset
+    # bid * _URING_BR_BUF_SIZE.
+    for i in range(_URING_BR_NBUFS):
+        _pbuf_ring_add(
+            ring_addr,
+            _URING_BR_NBUFS,
+            UInt64(pool_addr + i * _URING_BR_BUF_SIZE),
+            UInt32(_URING_BR_BUF_SIZE),
+            UInt16(i),
+            i,
+            UInt16(0),
+        )
+    _pbuf_ring_set_tail(ring_addr, UInt16(_URING_BR_NBUFS))
+
     ureactor.arm_listener_multishot(listener_fd, UInt64(0))
 
     var completions = List[UringCompletion]()
@@ -2714,16 +2728,23 @@ def run_uring_bufring_reactor_loop[
                 bytes, config, handler, ch_ptr
             )
 
-            try:
-                ureactor.arm_provide_buffers(
-                    addr=UInt64(Int(buf)),
-                    nbytes_per_buf=_URING_BR_BUF_SIZE,
-                    nbufs=1,
-                    bgid=_URING_BR_BGID,
-                    bid=UInt16(bid),
-                )
-            except:
-                pass
+            # Re-fill the picked buffer back into the kernel-mapped
+            # ring with a SHARED-MEMORY tail bump -- no SQE, no
+            # io_uring_enter overhead. Per Linux kernel benchmarks,
+            # this is 2.7x faster than the legacy PROVIDE_BUFFERS
+            # SQE refill (27M vs 10M ops/sec replenish-1) and has
+            # simpler kernel-side bookkeeping.
+            var cur_tail = _pbuf_ring_get_tail(ring_addr)
+            _pbuf_ring_add(
+                ring_addr,
+                _URING_BR_NBUFS,
+                UInt64(Int(buf)),
+                UInt32(_URING_BR_BUF_SIZE),
+                UInt16(bid),
+                0,
+                cur_tail,
+            )
+            _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
 
             # Re-arm only if the kernel disarmed the multishot
             # AND the conn is still alive.
@@ -2741,12 +2762,19 @@ def run_uring_bufring_reactor_loop[
             if step_done:
                 _cleanup_conn_uring_br(conn_id, conns, ureactor)
 
-    # Graceful shutdown: drop every in-flight conn + free pool.
+    # Graceful shutdown: drop every in-flight conn + free pool +
+    # unregister the kernel ring.
     var leftover = List[UInt64]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
         _cleanup_conn_uring_br(leftover[i], conns, ureactor)
+    try:
+        ureactor.unregister_pbuf_ring(
+            _URING_BR_BGID, ring_addr, _URING_BR_NBUFS
+        )
+    except:
+        pass
     _free_recv_buffer_pool(pool_addr)
 
 
@@ -2785,13 +2813,19 @@ def run_uring_bufring_reactor_loop_shared[
     var next_gen: UInt64 = 1
 
     var pool_addr = _alloc_recv_buffer_pool()
-    ureactor.arm_provide_buffers(
-        addr=UInt64(pool_addr),
-        nbytes_per_buf=_URING_BR_BUF_SIZE,
-        nbufs=_URING_BR_NBUFS,
-        bgid=_URING_BR_BGID,
-        bid=UInt16(0),
-    )
+    var ring_addr = ureactor.register_pbuf_ring(_URING_BR_BGID, _URING_BR_NBUFS)
+    for i in range(_URING_BR_NBUFS):
+        _pbuf_ring_add(
+            ring_addr,
+            _URING_BR_NBUFS,
+            UInt64(pool_addr + i * _URING_BR_BUF_SIZE),
+            UInt32(_URING_BR_BUF_SIZE),
+            UInt16(i),
+            i,
+            UInt16(0),
+        )
+    _pbuf_ring_set_tail(ring_addr, UInt16(_URING_BR_NBUFS))
+
     ureactor.arm_listener_multishot(listener_fd, UInt64(0))
 
     var completions = List[UringCompletion]()
@@ -2861,16 +2895,18 @@ def run_uring_bufring_reactor_loop_shared[
                 bytes, config, handler, ch_ptr
             )
 
-            try:
-                ureactor.arm_provide_buffers(
-                    addr=UInt64(Int(buf)),
-                    nbytes_per_buf=_URING_BR_BUF_SIZE,
-                    nbufs=1,
-                    bgid=_URING_BR_BGID,
-                    bid=UInt16(bid),
-                )
-            except:
-                pass
+            # Re-fill via shared-memory tail bump (PBUF_RING).
+            var cur_tail = _pbuf_ring_get_tail(ring_addr)
+            _pbuf_ring_add(
+                ring_addr,
+                _URING_BR_NBUFS,
+                UInt64(Int(buf)),
+                UInt32(_URING_BR_BUF_SIZE),
+                UInt16(bid),
+                0,
+                cur_tail,
+            )
+            _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
 
             if (not step_done) and (not comp.has_more):
                 try:
@@ -2886,11 +2922,18 @@ def run_uring_bufring_reactor_loop_shared[
             if step_done:
                 _cleanup_conn_uring_br(conn_id, conns, ureactor)
 
-    # Worker shutdown: close all per-conn fds + free pool. Shared
-    # listener fd stays open -- Scheduler.shutdown closes it.
+    # Worker shutdown: close all per-conn fds + free pool +
+    # unregister the kernel ring. Shared listener fd stays open
+    # -- Scheduler.shutdown closes it.
     var leftover = List[UInt64]()
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
         _cleanup_conn_uring_br(leftover[i], conns, ureactor)
+    try:
+        ureactor.unregister_pbuf_ring(
+            _URING_BR_BGID, ring_addr, _URING_BR_NBUFS
+        )
+    except:
+        pass
     _free_recv_buffer_pool(pool_addr)

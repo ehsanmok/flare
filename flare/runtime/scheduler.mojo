@@ -129,14 +129,20 @@ struct _WorkerCtx[H: Handler & Copyable](Movable):
     """
 
     var listener_fd: Int
+    """The listener fd this worker will use. Semantics depend on
+    the backend:
+    * **epoll path**: shared across all workers; owned by the
+      Scheduler; workers call register_exclusive (EPOLLEXCLUSIVE)
+      to share accept fairly.
+    * **io_uring buffer-ring path**: per-worker fd, bound via
+      SO_REUSEPORT on the Scheduler thread (so concurrent-bind
+      races can't happen) and handed to this specific worker;
+      owned by the Scheduler's _shared_listener_addr table for
+      cleanup. Each worker arms multishot accept on its OWN fd."""
     var bind_addr: SocketAddr
-    """Bind address (the same one the Scheduler resolved). The
-    epoll path ignores this and uses ``listener_fd``; the io_uring
-    buffer-ring path ignores ``listener_fd`` and instead creates
-    its OWN per-worker SO_REUSEPORT listener via this addr -- the
-    monoio / tokio-uring pattern that avoids the kernel-level
-    races documented for multishot accept on a shared listener fd
-    from multiple io_uring rings."""
+    """Bind address (the same one the Scheduler resolved). Kept
+    for diagnostics + future use; the actual fd is in
+    ``listener_fd`` regardless of backend now."""
     var config: ServerConfig
     var handler: Self.H
     var stopping_addr: Int
@@ -219,50 +225,21 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
         # distributes new conns to one worker each.
         comptime if CompilationTarget.is_linux():
             if use_uring_backend() and getenv("FLARE_BUFRING_HANDLER") == "1":
-                # SO_REUSEPORT per-worker bind: each worker
-                # creates its OWN listener bound to the shared
-                # addr. The kernel hashes incoming connections
-                # to one of the listeners; multishot accept on
-                # a per-worker listener fd avoids the kernel-
-                # level races (multishot accept overflow,
-                # double-completion, and execution-context bugs)
-                # that hang the shared-listener path -- all
-                # documented on lore.kernel.org/io-uring against
-                # multiple io_uring rings arming multishot accept
-                # on the SAME listener fd. monoio + tokio-uring
-                # both use this exact pattern.
-                try:
-                    var per_worker_listener = bind_reuseport(
-                        ctx_ptr[].bind_addr
-                    )
-                    per_worker_listener._socket.set_nonblocking(True)
-                    var pw_fd = Int(per_worker_listener.as_raw_fd())
-                    # Heap-store the listener so its destructor
-                    # doesn't fire when this stack frame returns
-                    # -- the io_uring loop borrows pw_fd; the
-                    # listener struct must outlive the loop.
-                    var pw_listener_ptr = alloc[TcpListener](1)
-                    pw_listener_ptr.init_pointee_move(per_worker_listener^)
-                    run_uring_bufring_reactor_loop_shared[H](
-                        pw_fd,
-                        ctx_ptr[].config,
-                        ctx_ptr[].handler,
-                        stopping_ptr[],
-                    )
-                    pw_listener_ptr.destroy_pointee()
-                    pw_listener_ptr.free()
-                except:
-                    # bind_reuseport failed (typically because the
-                    # Scheduler's bind_shared listener didn't have
-                    # SO_REUSEPORT, blocking subsequent binds). Fall
-                    # through to the epoll path on the shared fd
-                    # rather than killing the worker.
-                    run_reactor_loop_shared[H](
-                        ctx_ptr[].listener_fd,
-                        ctx_ptr[].config,
-                        ctx_ptr[].handler,
-                        stopping_ptr[],
-                    )
+                # SO_REUSEPORT per-worker bind: each worker has
+                # its OWN pre-bound listener fd (bound on the
+                # Scheduler thread before pthread spawn so binds
+                # are serialised, avoiding the concurrent-bind
+                # race observed on commit 88ea2f7). The fd is
+                # passed through ``ctx_ptr[].listener_fd``; the
+                # corresponding TcpListener struct is owned by
+                # the Scheduler's per_worker_listener_ptrs table
+                # and freed on Scheduler.shutdown.
+                run_uring_bufring_reactor_loop_shared[H](
+                    ctx_ptr[].listener_fd,
+                    ctx_ptr[].config,
+                    ctx_ptr[].handler,
+                    stopping_ptr[],
+                )
                 return UnsafePointer[UInt8, MutExternalOrigin](
                     unsafe_from_address=0
                 )
@@ -338,6 +315,14 @@ struct Scheduler[H: Handler & Copyable](Movable):
     # closing first ensures any in-flight ``accept(2)`` returns -1
     # and the worker observes the stop flag promptly.
     var _shared_listener_fd: Int
+    var _per_worker_listener_addrs: List[Int]
+    """When the io_uring buffer-ring path is active, the
+    Scheduler pre-binds one SO_REUSEPORT listener per worker on
+    its own thread (to serialise binds + avoid the concurrent-
+    bind race observed on commit 88ea2f7). Each entry is the
+    heap address of an owned ``TcpListener``; freed in
+    ``shutdown()`` after all workers join. Empty on the epoll
+    path."""
     var _ctx_addrs: List[Int]
     # Heap-allocated Bool, owned by this Scheduler. Address is stable
     # across struct moves; every worker's ``_WorkerCtx.stopping_addr``
@@ -353,6 +338,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
         self._workers_len = 0
         self._shared_listener_addr = 0
         self._shared_listener_fd = -1
+        self._per_worker_listener_addrs = List[Int]()
         self._ctx_addrs = List[Int]()
         self._stopping_addr = 0
 
@@ -492,11 +478,42 @@ struct Scheduler[H: Handler & Copyable](Movable):
         s._workers_ptr = alloc[ThreadHandle](num_workers)
         s._workers_len = 0
 
+        # If on the io_uring buffer-ring path: pre-bind one
+        # SO_REUSEPORT listener PER WORKER on the Scheduler thread
+        # before spawning any pthreads. Doing the binds serially
+        # on a single thread eliminates any concurrent-bind races
+        # that could surface from N pthreads each calling
+        # bind_reuseport simultaneously, which empirically caused
+        # the multi-worker bufring crash on commit 88ea2f7.
+        # Per-worker listeners are heap-stored in a parallel array
+        # so their destructors don't fire here; the same shutdown
+        # path that frees s._shared_listener_addr will iterate +
+        # free them.
+        if use_io_uring_handler:
+            for _ in range(num_workers):
+                try:
+                    var pwl = bind_reuseport(addr)
+                    pwl._socket.set_nonblocking(True)
+                    var ptr = alloc[TcpListener](1)
+                    ptr.init_pointee_move(pwl^)
+                    s._per_worker_listener_addrs.append(Int(ptr))
+                except:
+                    pass
+
         for i in range(num_workers):
             var cfg_copy = config.copy()
             var handler_copy = handler.copy()
+            # Pick this worker's listener fd: either the shared
+            # epoll listener, or its own per-worker SO_REUSEPORT
+            # listener (pre-bound on this thread above).
+            var worker_listener_fd: Int = listener_fd
+            if use_io_uring_handler and i < len(s._per_worker_listener_addrs):
+                var pwl_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
+                    unsafe_from_address=s._per_worker_listener_addrs[i]
+                )
+                worker_listener_fd = Int(pwl_ptr[].as_raw_fd())
             var ctx = _WorkerCtx[Self.H](
-                listener_fd,
+                worker_listener_fd,
                 addr,
                 cfg_copy^,
                 handler_copy^,
@@ -625,6 +642,19 @@ struct Scheduler[H: Handler & Copyable](Movable):
             typed.destroy_pointee()
             _scheduler_free_raw(raw)
             self._shared_listener_addr = 0
+
+        # Free any per-worker SO_REUSEPORT listeners (io_uring
+        # buffer-ring path). Each listener's destructor closes
+        # its fd; the kernel cancels any in-flight io_uring ops
+        # against that fd as part of the close.
+        for i in range(len(self._per_worker_listener_addrs)):
+            var pwl_raw = _OpaquePtr(
+                unsafe_from_address=self._per_worker_listener_addrs[i]
+            )
+            var pwl_typed = pwl_raw.bitcast[TcpListener]()
+            pwl_typed.destroy_pointee()
+            _scheduler_free_raw(pwl_raw)
+        self._per_worker_listener_addrs.clear()
 
         # Free the heap-allocated stopping flag now that no worker
         # still references it. Setting the address to 0 keeps

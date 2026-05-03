@@ -168,8 +168,13 @@ def libc_mmap(
     debug_assert[assert_mode="safe"](
         length > 0, "libc_mmap: length must be positive; got ", length
     )
+    # ``fd`` is only required to be a valid open fd for the
+    # MAP_SHARED io_uring path; for anonymous mappings (the
+    # IORING_REGISTER_PBUF_RING path), ``fd`` is conventionally
+    # -1 and the kernel ignores it when MAP_ANONYMOUS is in
+    # ``flags``. So accept fd >= -1.
     debug_assert[assert_mode="safe"](
-        fd >= 0, "libc_mmap: fd must be non-negative; got ", fd
+        fd >= -1, "libc_mmap: fd must be >= -1; got ", fd
     )
     var null_addr = UnsafePointer[UInt8, MutExternalOrigin](
         unsafe_from_address=0
