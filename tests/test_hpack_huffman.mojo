@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.hpack_huffman`` (Track B9).
+"""Tests for ``flare.http.hpack_huffman``.
 
 Validates the RFC 7541 Appendix B canonical Huffman codec
 against the Appendix C.4 fixtures (the request examples that

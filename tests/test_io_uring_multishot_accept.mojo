@@ -1,5 +1,5 @@
 """Live ``IORING_OP_ACCEPT`` + ``IORING_ACCEPT_MULTISHOT`` round-trip
-test against a real TCP listener (Track B0 follow-up).
+test against a real TCP listener.
 
 The point of this test
 ----------------------

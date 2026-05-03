@@ -175,9 +175,9 @@ fuzz-session-decode = "mojo -I . fuzz/fuzz_session_decode.mojo"   # v0.6 Track E
 fuzz-fs-range      = "mojo -I . fuzz/fuzz_fs_range.mojo"         # v0.6 Track H — Range header parser (200K)
 fuzz-h2-frame      = "mojo -I . fuzz/fuzz_h2_frame.mojo"         # v0.6 Track J — HTTP/2 frame codec (200K)
 fuzz-hpack-decoder = "mojo -I . fuzz/fuzz_hpack_decoder.mojo"    # v0.6 Track J — HPACK decoder (200K)
-fuzz-proxy-protocol = "mojo -I . fuzz/fuzz_proxy_protocol.mojo"  # v0.7 Track H1 — HAProxy PROXY v1+v2 parser (200K)
-fuzz-io-uring-sqe   = "mojo -I . fuzz/fuzz_io_uring_sqe.mojo"     # v0.7 Track F1 — io_uring SQE encoder + CQE decoder primitives (200K, codec only — no kernel involved)
-fuzz-uring-reactor  = "mojo -I . fuzz/fuzz_uring_reactor.mojo"    # v0.7 Track F1 — UringReactor pack/unpack user_data + cancel-surface stability (100K, kernel-touch when io_uring is available)
+fuzz-proxy-protocol = "mojo -I . fuzz/fuzz_proxy_protocol.mojo"  # HAProxy PROXY v1+v2 parser (200K)
+fuzz-io-uring-sqe   = "mojo -I . fuzz/fuzz_io_uring_sqe.mojo"     # io_uring SQE encoder + CQE decoder primitives (200K, codec only — no kernel involved)
+fuzz-uring-reactor  = "mojo -I . fuzz/fuzz_uring_reactor.mojo"    # UringReactor pack/unpack user_data + cancel-surface stability (100K, kernel-touch when io_uring is available)
 fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks", "fuzz-router-paths", "fuzz-scheduler-shutdown", "fuzz-extractors", "fuzz-routes-comptime", "fuzz-header-scan", "fuzz-form", "fuzz-multipart", "fuzz-session-decode", "fuzz-fs-range", "fuzz-h2-frame", "fuzz-hpack-decoder", "fuzz-proxy-protocol", "fuzz-io-uring-sqe", "fuzz-uring-reactor"] }
 
 [feature.dev.tasks]
@@ -271,36 +271,36 @@ test-h2-hpack        = "mojo -I . tests/test_h2_hpack.mojo"                   # 
 test-h2-state        = "mojo -I . tests/test_h2_state.mojo"                   # v0.6 Track J — Connection / Stream state machines (~11 tests)
 test-h2-server       = "mojo -I . tests/test_h2_server.mojo"                  # v0.6 Track J — H2Connection driver + h2c detection (~6 tests)
 test-handoff         = "mojo -I . tests/test_handoff.mojo"                    # v0.6 Track K — HandoffQueue + WorkerHandoffPool (~12 tests)
-test-closure-send-contract = "mojo -I . tests/test_closure_send_contract.mojo"  # v0.7 Track C — closure-shape + send-discipline contract (~6 tests)
-test-h2-config       = "mojo -I . tests/test_h2_config.mojo"                  # v0.7 Track A6 — Http2Config + with_config + SETTINGS emission (~16 tests)
-test-proxy-protocol  = "mojo -I . tests/test_proxy_protocol.mojo"             # v0.7 Track H1 — HAProxy PROXY v1+v2 parser (~29 tests)
-test-uds-listener    = "mojo -I . tests/test_uds_listener.mojo"               # v0.7 Track H2 — UnixListener + UnixStream + accept_uds_fd (~10 tests)
-test-conditional     = "mojo -I . tests/test_conditional.mojo"                # v0.7 Track H7 — Conditional[Inner] middleware (RFC 9110 §13, ~20 tests)
-test-sse             = "mojo -I . tests/test_sse.mojo"                        # v0.7 Track D3 — SseChannel + SseEvent + sse_response + SseStreamingResponse (~16 tests)
-test-redirect-policy = "mojo -I . tests/test_redirect_policy.mojo"            # v0.7 Track H9 — RedirectPolicy (FOLLOW_ALL / SAME_ORIGIN_ONLY / DENY) (~18 tests)
-test-structured-logger = "mojo -I . tests/test_structured_logger.mojo"        # v0.7 Track D5 — StructuredLogger[Inner] JSON-per-line emitter (~12 tests)
-test-metrics         = "mojo -I . tests/test_metrics.mojo"                    # v0.7 Track D6 — Metrics[Inner] + MetricsRegistry Prometheus text exposition (~27 tests)
-test-auth-extract    = "mojo -I . tests/test_auth_extract.mojo"               # v0.7 Track D4 — BearerExtract + BasicExtract + CsrfToken (~28 tests)
-test-template        = "mojo -I . tests/test_template.mojo"                   # v0.7 Track D8 — Template + TemplateContext + html_escape (~26 tests)
-test-request-chunks  = "mojo -I . tests/test_request_chunks.mojo"             # v0.7 Track D2 — RequestChunkSource (ChunkSource for inbound bodies, ~10 tests)
+test-closure-send-contract = "mojo -I . tests/test_closure_send_contract.mojo"  # Closure-shape + send-discipline contract (~6 tests)
+test-h2-config       = "mojo -I . tests/test_h2_config.mojo"                  # Http2Config + with_config + SETTINGS emission (~16 tests)
+test-proxy-protocol  = "mojo -I . tests/test_proxy_protocol.mojo"             # HAProxy PROXY v1+v2 parser (~29 tests)
+test-uds-listener    = "mojo -I . tests/test_uds_listener.mojo"               # UnixListener + UnixStream + accept_uds_fd (~10 tests)
+test-conditional     = "mojo -I . tests/test_conditional.mojo"                # Conditional[Inner] middleware (RFC 9110 §13, ~20 tests)
+test-sse             = "mojo -I . tests/test_sse.mojo"                        # SseChannel + SseEvent + sse_response + SseStreamingResponse (~16 tests)
+test-redirect-policy = "mojo -I . tests/test_redirect_policy.mojo"            # RedirectPolicy (FOLLOW_ALL / SAME_ORIGIN_ONLY / DENY) (~18 tests)
+test-structured-logger = "mojo -I . tests/test_structured_logger.mojo"        # StructuredLogger[Inner] JSON-per-line emitter (~12 tests)
+test-metrics         = "mojo -I . tests/test_metrics.mojo"                    # Metrics[Inner] + MetricsRegistry Prometheus text exposition (~27 tests)
+test-auth-extract    = "mojo -I . tests/test_auth_extract.mojo"               # BearerExtract + BasicExtract + CsrfToken (~28 tests)
+test-template        = "mojo -I . tests/test_template.mojo"                   # Template + TemplateContext + html_escape (~26 tests)
+test-request-chunks  = "mojo -I . tests/test_request_chunks.mojo"             # RequestChunkSource (ChunkSource for inbound bodies, ~10 tests)
 test-errors          = "mojo -I . tests/test_errors.mojo"                     # v0.7 typed-errors vocabulary (flare.errors.ValidationError + IoError, ~10 tests)
-test-date-cache      = "mojo -I . tests/test_date_cache.mojo"                 # v0.7 Track B7 — per-worker DateCache (one gmtime per second per worker, ~14 tests)
-test-intern          = "mojo -I . tests/test_intern.mojo"                     # v0.7 Track B3 — StaticString intern table for HTTP method names + common header values (~16 tests)
-test-response-pool   = "mojo -I . tests/test_response_pool.mojo"              # v0.7 Track B6 — Response.reset(mut self) + per-worker ResponsePool for keep-alive reuse (~12 tests)
-test-buffer-pool     = "mojo -I . tests/test_buffer_pool.mojo"                # v0.7 Track B5 — Per-worker BufferPool with 1KB / 4KB / 16KB / 64KB size classes (~17 tests)
-test-header-phf      = "mojo -I . tests/test_header_phf.mojo"                 # v0.7 Track B2 — Comptime PHF dispatch for ~70 standard HTTP header names (~13 tests)
-test-iovec           = "mojo -I . tests/test_iovec.mojo"                      # v0.7 Track B4 — writev(2) vectored response serialization primitive (~9 tests, end-to-end TCP loopback)
-test-hpack-huffman   = "mojo -I . tests/test_hpack_huffman.mojo"              # v0.7 Track B9 — RFC 7541 Appendix B HPACK Huffman codec + RFC §C.4 fixtures (~16 tests)
-test-simd-parsers    = "mojo -I . tests/test_simd_parsers.mojo"               # v0.7 Track B10 — SIMD-friendly parser tier (memmem, percent-decode, cookie scan; ~24 tests)
-test-io-uring        = "mojo -I . tests/test_io_uring.mojo"                   # v0.7 Track B0 — io_uring direct-syscall FFI substrate + IoUringRing setup/teardown (~8 tests, Linux-only kernel paths)
-test-io-uring-sqe    = "mojo -I . tests/test_io_uring_sqe.mojo"               # v0.7 Track B0 follow-up — SQE encoder (prep_nop / accept / recv / send / writev / close / async_cancel) + CQE decoder primitives (~20 tests, codec only — no kernel involved)
-test-io-uring-driver = "mojo -I . tests/test_io_uring_driver.mojo"            # v0.7 Track B0 follow-up — IoUringDriver (mmap SQ/CQ rings + atomic head/tail + submit/reap API), end-to-end NOP round-trip on the kernel io_uring (~6 tests, skipped on non-io_uring hosts)
-test-io-uring-multishot-accept = "mojo -I . tests/test_io_uring_multishot_accept.mojo"  # v0.7 Track B0 follow-up — IORING_OP_ACCEPT + IORING_ACCEPT_MULTISHOT round-trip on a real loopback TCP listener; proves the multishot per-connection accept path on a live kernel (skipped on non-io_uring hosts / kernels < 5.19)
-test-uring-reactor   = "mojo -I . tests/test_uring_reactor.mojo"             # v0.7 Track B0 wire-in — UringReactor (pack_user_data round-trip + live multishot accept + multishot recv + submit_send + wakeup) (~8 tests, skipped on non-io_uring hosts)
-test-uring-serve-static = "mojo -I . tests/test_uring_serve_static.mojo"     # v0.7 Track B0 wire-in — end-to-end HttpServer.serve_static through run_uring_reactor_loop_static; forks a child server, fires a real loopback HTTP/1.1 GET, asserts the precomputed response (1 test, no-op skip on non-io_uring hosts / FLARE_DISABLE_IO_URING=1)
-test-uring-serve-handler = "mojo -I . tests/test_uring_serve_handler.mojo"   # v0.7 Track B0 wire-in v3 — end-to-end HttpServer.serve(handler) through run_uring_bufring_reactor_loop; forks a child server, drives sequential keep-alive churn (8 conns × 50 reqs = 400 round-trips, the 981eb8e ConnHandle lifecycle bug reproducer) + concurrent fan-out (8 parallel × 30 reqs, the 9cf97d0 SIGSEGV reproducer); validates the buffer-ring substrate + cancel-before-free fix together; 2 tests, no-op skip on non-io_uring hosts / FLARE_DISABLE_IO_URING=1
-test-uring-serve-handler-load = "mojo -I . tests/test_uring_serve_handler_load.mojo"  # v0.7 Phase 2E — sustained-load floor test for the io_uring buffer-ring handler-path wire-in. 8 sequential conns × 10 keep-alive reqs = 80 round-trips with a real bufring server in a fork(); asserts all 80 succeed. Floor-level for now (the proper >=4500 req/s assertion lands when the bufring throttle is root-caused); guards against a "totally broken bufring" regression. 1 test, no-op skip on non-io_uring hosts.
-test-static-multicore   = "mojo -I . tests/test_static_multicore.mojo"       # v0.7 Phase 1E — end-to-end HttpServer.serve_static_multicore through StaticScheduler + run_reactor_loop_static_shared; forks a child server with 4 workers, drives 8x50 sequential keep-alive churn + 8x30 concurrent fan-out; validates the multi-worker static fast path that closes the throughput-parity gap vs hyper / actix on TFB plaintext (dev-box A/B: +17 % over handler-driven mc); 2 tests, cross-platform (no io_uring dependency)
+test-date-cache      = "mojo -I . tests/test_date_cache.mojo"                 # Per-worker DateCache (one gmtime per second per worker, ~14 tests)
+test-intern          = "mojo -I . tests/test_intern.mojo"                     # StaticString intern table for HTTP method names + common header values (~16 tests)
+test-response-pool   = "mojo -I . tests/test_response_pool.mojo"              # Response.reset(mut self) + per-worker ResponsePool for keep-alive reuse (~12 tests)
+test-buffer-pool     = "mojo -I . tests/test_buffer_pool.mojo"                # Per-worker BufferPool with 1KB / 4KB / 16KB / 64KB size classes (~17 tests)
+test-header-phf      = "mojo -I . tests/test_header_phf.mojo"                 # Comptime PHF dispatch for ~70 standard HTTP header names (~13 tests)
+test-iovec           = "mojo -I . tests/test_iovec.mojo"                      # writev(2) vectored response serialization primitive (~9 tests, end-to-end TCP loopback)
+test-hpack-huffman   = "mojo -I . tests/test_hpack_huffman.mojo"              # RFC 7541 Appendix B HPACK Huffman codec + RFC §C.4 fixtures (~16 tests)
+test-simd-parsers    = "mojo -I . tests/test_simd_parsers.mojo"               # SIMD-friendly parser tier (memmem, percent-decode, cookie scan; ~24 tests)
+test-io-uring        = "mojo -I . tests/test_io_uring.mojo"                   # io_uring direct-syscall FFI substrate + IoUringRing setup/teardown (~8 tests, Linux-only kernel paths)
+test-io-uring-sqe    = "mojo -I . tests/test_io_uring_sqe.mojo"               # SQE encoder (prep_nop / accept / recv / send / writev / close / async_cancel) + CQE decoder primitives (~20 tests, codec only — no kernel involved)
+test-io-uring-driver = "mojo -I . tests/test_io_uring_driver.mojo"            # IoUringDriver (mmap SQ/CQ rings + atomic head/tail + submit/reap API), end-to-end NOP round-trip on the kernel io_uring (~6 tests, skipped on non-io_uring hosts)
+test-io-uring-multishot-accept = "mojo -I . tests/test_io_uring_multishot_accept.mojo"  # IORING_OP_ACCEPT + IORING_ACCEPT_MULTISHOT round-trip on a real loopback TCP listener; proves the multishot per-connection accept path on a live kernel (skipped on non-io_uring hosts / kernels < 5.19)
+test-uring-reactor   = "mojo -I . tests/test_uring_reactor.mojo"             # UringReactor (pack_user_data round-trip + live multishot accept + multishot recv + submit_send + wakeup) (~8 tests, skipped on non-io_uring hosts)
+test-uring-serve-static = "mojo -I . tests/test_uring_serve_static.mojo"     # End-to-end HttpServer.serve_static through run_uring_reactor_loop_static; forks a child server, fires a real loopback HTTP/1.1 GET, asserts the precomputed response (1 test, no-op skip on non-io_uring hosts / FLARE_DISABLE_IO_URING=1)
+test-uring-serve-handler = "mojo -I . tests/test_uring_serve_handler.mojo"   # End-to-end HttpServer.serve(handler) through run_uring_bufring_reactor_loop; forks a child server, drives sequential keep-alive churn (8 conns × 50 reqs = 400 round-trips) + concurrent fan-out (8 parallel × 30 reqs); validates the buffer-ring substrate + cancel-before-free contract; 2 tests, no-op skip on non-io_uring hosts / FLARE_DISABLE_IO_URING=1
+test-uring-serve-handler-load = "mojo -I . tests/test_uring_serve_handler_load.mojo"  # io_uring buffer-ring handler-path sustained-load floor test. 8 sequential conns × 10 keep-alive reqs = 80 round-trips with a real bufring server in a fork(); asserts all 80 succeed. Floor-level regression guard against a "totally broken bufring" failure mode. 1 test, no-op skip on non-io_uring hosts.
+test-static-multicore   = "mojo -I . tests/test_static_multicore.mojo"       # End-to-end HttpServer.serve_static_multicore through StaticScheduler + run_reactor_loop_static_shared; forks a child server with 4 workers, drives 8x50 sequential keep-alive churn + 8x30 concurrent fan-out; validates the multi-worker static fast path. 2 tests, cross-platform (no io_uring dependency).
 test-safety-asserts  = "mojo -I . tests/test_safety_asserts.mojo"             # v0.7 — bounds-check + debug_assert[assert_mode="safe"] guards on FFI substrate (run under -D ASSERT=all to exercise; see .cursor/rules/sanitizers-and-bounds-checking.mdc, ~14 tests)
 
 # ── Sanitizer + assertion harness (see .cursor/rules/sanitizers-and-bounds-checking.mdc) ──
@@ -369,8 +369,8 @@ example-static-files    = "mojo -I . examples/33_static_files.mojo"     # v0.6 T
 example-brotli          = "mojo -I . examples/34_brotli.mojo"           # v0.6 Track I — Content-Encoding: br
 example-http2           = "mojo -I . examples/35_http2.mojo"            # v0.6 Track J — HTTP/2 driver, h2c, ALPN dispatch
 example-work-stealing   = "mojo -I . examples/36_work_stealing.mojo"    # v0.6 Track K — HandoffQueue, FLARE_SOAK_WORKERS knob
-example-http2-config    = "mojo -I . examples/37_http2_config.mojo"     # v0.7 Track A6 — Http2Config SETTINGS surface
-example-uds-sidecar     = "mojo -I . examples/38_uds_sidecar.mojo"      # v0.7 Track H2 — UnixListener + UnixStream
+example-http2-config    = "mojo -I . examples/37_http2_config.mojo"     # Http2Config SETTINGS surface
+example-uds-sidecar     = "mojo -I . examples/38_uds_sidecar.mojo"      # UnixListener + UnixStream
 
 examples = { cmd = "mojo -I . examples/01_addresses.mojo && mojo -I . examples/02_dns_resolution.mojo && mojo -I . examples/03_error_handling.mojo && mojo -I . examples/04_tcp_echo.mojo && mojo -I . examples/05_http_get.mojo && mojo -I . examples/06_websocket_echo.mojo && mojo -I . examples/07_ergonomics.mojo && mojo -I . examples/08_http_server.mojo && mojo -I . examples/09_ws_server.mojo && mojo -I . examples/10_encoding.mojo && mojo -I . examples/11_udp.mojo && mojo -I . examples/12_tls.mojo && mojo -I . examples/13_cookies.mojo && mojo -I . examples/14_reactor.mojo && mojo -I . examples/15_router.mojo && mojo -I . examples/16_state.mojo && mojo -I . examples/17_multicore.mojo && mojo -I . examples/18_middleware.mojo && mojo -I . examples/19_extractors.mojo && mojo -I . examples/20_comptime_router.mojo && mojo -I . examples/21_static_response.mojo && mojo -I . examples/22_cancel.mojo && mojo -I . examples/23_drain.mojo && mojo -I . examples/24_sse.mojo && mojo -I . examples/25_cert_reload.mojo && mojo -I . examples/26_mtls.mojo && mojo -I . examples/27_request_cookies.mojo && mojo -I . examples/28_forms.mojo && mojo -I . examples/29_multipart_upload.mojo && mojo -I . examples/30_sessions.mojo && mojo -I . examples/31_middleware_stack.mojo && mojo -I . examples/32_cors.mojo && mojo -I . examples/33_static_files.mojo && mojo -I . examples/34_brotli.mojo && mojo -I . examples/35_http2.mojo && mojo -I . examples/36_work_stealing.mojo && mojo -I . examples/37_http2_config.mojo && mojo -I . examples/38_uds_sidecar.mojo" }
 # Example 39 (io_uring HTTP plaintext server) is invocable on

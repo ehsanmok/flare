@@ -1,4 +1,4 @@
-"""Tests for ``Response.reset`` + ``ResponsePool`` (Track B6)."""
+"""Tests for ``Response.reset`` + ``ResponsePool``."""
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 

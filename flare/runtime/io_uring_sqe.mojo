@@ -1,4 +1,4 @@
-"""``io_uring`` SQE encoder + CQE decoder primitives (Track B0 follow-up).
+"""``io_uring`` SQE encoder + CQE decoder primitives.
 
 Sits on top of :mod:`flare.runtime.io_uring` (which ships the
 syscall FFI + ``IoUringRing`` setup/teardown). This module adds
@@ -66,7 +66,7 @@ All field accessors and prep helpers assert:
 3. Opcodes stay within the documented kernel set.
 
 These are ``debug_assert[assert_mode="safe"]`` calls, so they
-compile in under ``-D ASSERT=safe`` (the v0.7 default build
+compile in under ``-D ASSERT=safe`` (flare's default build
 profile) and disappear under release-mode ``-D ASSERT=none``.
 The full assertion battery (including loop invariants) is
 exercised by ``pixi run tests-asserts-all``.
@@ -97,13 +97,13 @@ comptime IORING_OP_READV: Int = 1
 """5.1+. Vectored read."""
 comptime IORING_OP_WRITEV: Int = 2
 """5.1+. Vectored write — what flare uses to coalesce status +
-headers + body in a single submission (Track B4 path on the
+headers + body in a single submission (the writev(2) path on the
 io_uring backend; subsumes the epoll-fallback ``writev(2)``).
 """
 comptime IORING_OP_FSYNC: Int = 3
 """5.1+. fsync(2) async."""
 comptime IORING_OP_READ_FIXED: Int = 4
-"""5.1+. Read into a pre-registered buffer (Track E1 file-serve
+"""5.1+. Read into a pre-registered buffer (file-serve
 fast path)."""
 comptime IORING_OP_WRITE_FIXED: Int = 5
 """5.1+. Write from a pre-registered buffer."""
@@ -988,8 +988,7 @@ def prep_recv_buffer_select(
     # the kernel reads MULTISHOT from sqe->ioprio, NOT msg_flags.
     # Putting it in msg_flags silently degrades multishot recv to
     # one-shot, which under high recv-CQE rate causes per-CQE re-
-    # arm pressure that crashes the dispatch (root cause of the
-    # bufring sustained-load SIGSEGV documented in eac6e96).
+    # arm pressure that destabilises the dispatch.
     var ioprio_bits: UInt16 = UInt16(
         Int(recv_flags & (IORING_RECV_MULTISHOT | IORING_RECVSEND_POLL_FIRST))
     )
@@ -1181,8 +1180,8 @@ def prep_writev(
     """Write an ``IORING_OP_WRITEV`` SQE at ``buf``.
 
     flare uses this on the io_uring backend to coalesce status
-    line + headers + body in a single submission (Track B4
-    payoff).
+    line + headers + body in a single submission, eliminating
+    the per-buffer send syscall.
 
     Args:
         buf: 64-byte SQE buffer.

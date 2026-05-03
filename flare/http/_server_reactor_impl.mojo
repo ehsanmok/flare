@@ -331,11 +331,13 @@ struct ConnHandle(Movable):
                 idle_timeout_ms=config.idle_timeout_ms,
             )
 
-        # Parse the request. Phase 1C: when the config opts in,
-        # use the minimal parser that skips HeaderMap construction.
-        # The Connection-policy decision then uses _wants_close on
-        # the raw header bytes (already in self.read_buf) instead
-        # of the per-request _ascii_lower(req.headers.get(...)).
+        # Parse the request. When
+        # ``ServerConfig.skip_header_decode_for_short_requests``
+        # is set, use the minimal parser that skips HeaderMap
+        # construction. The Connection-policy decision then uses
+        # _wants_close on the raw header bytes (already in
+        # self.read_buf) instead of the per-request
+        # _ascii_lower(req.headers.get(...)).
         var req: Request
         var close_after: Bool
         try:
@@ -482,9 +484,9 @@ struct ConnHandle(Movable):
                 idle_timeout_ms=config.idle_timeout_ms,
             )
 
-        # Phase 1C: same parser fast-path as on_readable; opt-in
-        # via the same config bit. Drops per-request HeaderMap
-        # alloc in the bufring path too.
+        # Same parser fast-path as on_readable; opt-in via the
+        # same config bit. Drops per-request HeaderMap alloc in
+        # the bufring path too.
         var req: Request
         var close_after: Bool
         try:
@@ -1999,9 +2001,10 @@ def run_reactor_loop_static_shared(
 
     The combination of the static fast path (no parser, no handler,
     no allocation per request, no response serialisation) with the
-    multi-worker scheduler closes the v0.7 throughput gap on TFB
-    plaintext: the per-request work drops to memcpy + the syscall
-    pair, which scales near-linearly across cores.
+    multi-worker scheduler is the fastest path flare exposes for
+    fixed-response endpoints: the per-request work drops to
+    memcpy + the syscall pair, which scales near-linearly across
+    cores.
 
     Args:
         listener_fd: Borrowed shared listener fd. Must be in
@@ -2336,7 +2339,7 @@ def run_reactor_loop_view[
         _cleanup_conn(leftover[i], conns, timers, reactor)
 
 
-# ── io_uring server-loop dispatch (Track B0 wire-in) ────────────────────────
+# ── io_uring server-loop dispatch ───────────────────────────────────────────
 #
 # When ``use_uring_backend()`` is true (Linux kernel exposes io_uring
 # AND ``FLARE_DISABLE_IO_URING`` is unset), ``HttpServer.serve_static``
@@ -2444,9 +2447,11 @@ def run_uring_reactor_loop_static(
     Per-connection ``ConnHandle.on_readable_static`` /
     ``on_writable`` are unchanged -- the uring path replaces
     *readiness notification*, not the per-conn syscall pattern.
-    A future v0.7.x commit will swap the in-handle ``recv`` for
-    ``IORING_OP_RECV`` + ``IORING_RECV_MULTISHOT`` against the
-    per-worker BufferPool to drop the recv syscall entirely.
+    A separate dispatch loop (``run_uring_bufring_reactor_loop``,
+    opt-in via ``FLARE_BUFRING_HANDLER=1``) swaps the in-handle
+    ``recv`` for ``IORING_OP_RECV`` + ``IORING_RECV_MULTISHOT``
+    against a registered ``IORING_REGISTER_PBUF_RING`` to drop
+    the recv syscall entirely.
 
     Linux-only. Caller is expected to gate this on
     :func:`flare.runtime.uring_reactor.use_uring_backend`.
@@ -2624,36 +2629,25 @@ def run_uring_reactor_loop_static(
         _cleanup_conn_uring(leftover[i], conns)
 
 
-# ── io_uring buffer-ring dispatch (Track B0 wire-in v3, handler path) ───────
+# ── io_uring buffer-ring dispatch (handler path) ────────────────────────────
 #
-# The production handler-path io_uring loop. Supersedes the two reverted
-# attempts (poll-multishot in c8cd770, recv-multishot in 981eb8e) by using
-# the kernel-managed buffer ring substrate (PROVIDE_BUFFERS +
-# IOSQE_BUFFER_SELECT + true IORING_RECV_MULTISHOT) shipped in bf6ca75.
+# Production handler-path io_uring loop using the kernel-managed buffer
+# ring substrate: ``IORING_OP_RECV`` + ``IORING_RECV_MULTISHOT`` +
+# ``IOSQE_BUFFER_SELECT`` against a registered buffer group (set up via
+# ``IORING_REGISTER_PBUF_RING`` on kernels >= 5.19, or
+# ``IORING_OP_PROVIDE_BUFFERS`` on older).
 #
-# Why this finally works
-# ----------------------
+# How it works
+# ------------
 #
-# The c8cd770 poll-multishot attempt failed because IORING_OP_POLL_ADD's
-# multishot mode defaults to edge-triggered semantics -- the dispatch
-# drained via recv-EAGAIN, blocked on the next io_uring_enter, and lost
-# the readiness edge for back-to-back keep-alive requests.
-#
-# The 981eb8e recv-multishot attempt failed because IORING_OP_RECV with
-# IORING_RECV_MULTISHOT REQUIRES IOSQE_BUFFER_SELECT -- without a
-# kernel-managed buffer source, multishot recv either errors, fires
-# once and stops, or unsafely reuses the user's single buffer across
-# overlapping CQEs. The workaround (single-shot recv + per-CQE re-arm
-# against a per-conn 8 KiB pinned buffer) hit a deterministic
-# ConnHandle lifecycle bug at exactly request #62.
-#
-# This third attempt does it the way every Rust io_uring HTTP server
-# (tokio-uring, monoio, glommio) does it:
+# This is the same pattern every Rust io_uring HTTP server (tokio-uring,
+# monoio, glommio) uses:
 #
 #   1. At reactor startup, allocate a per-worker buffer pool of
-#      N × 8 KiB and seed it via arm_provide_buffers(bgid). The
-#      kernel takes ownership of the buffer ring; we keep the
-#      backing allocation alive (free at reactor shutdown).
+#      N × 8 KiB and register it as a buffer group via
+#      ``register_pbuf_ring(bgid, ring_entries)``. The kernel takes
+#      ownership of the buffer ring; we keep the backing allocation
+#      alive (free at reactor shutdown).
 #   2. On each accept CQE, arm one IORING_OP_RECV +
 #      IORING_RECV_MULTISHOT + IOSQE_BUFFER_SELECT SQE with
 #      buf_group=bgid. The kernel auto-rotates buffers from the
@@ -2662,25 +2656,31 @@ def run_uring_reactor_loop_static(
 #   3. On each recv CQE, the buffer id is in the CQE's flags
 #      high 16 bits (IORING_CQE_F_BUFFER set). We compute the
 #      buffer's address as ``pool + bid * BUF_SIZE``, feed the
-#      bytes into ConnHandle.on_readable_from_buf[H] (the
-#      additive scaffolding from 0116178), and re-provide the
-#      same buffer back to the pool via a one-shot
-#      arm_provide_buffers(bgid, nbufs=1, bid=bid) re-fill SQE.
-#   4. On step_done, just free the conn (close fd; kernel
-#      cancels any pending recv multishot SQE). No per-conn
-#      buffer to free -- the buffer was already returned to the
-#      pool in step 3 (or will be returned by the kernel on the
-#      next CQE).
+#      bytes into ConnHandle.on_readable_from_buf[H], and recycle
+#      the buffer back into the pool via a shared-memory tail bump
+#      (PBUF_RING) or a one-shot PROVIDE_BUFFERS SQE (older
+#      kernels).
+#   4. On step_done, just free the conn (close fd; kernel cancels
+#      any pending recv multishot SQE). No per-conn buffer to free
+#      -- the buffer was already returned to the pool in step 3
+#      (or will be returned by the kernel on the next CQE).
 #
-# This eliminates the per-conn buffer pinning that triggered the
-# c6ccc79 lifecycle bug AND drops the recv syscall per request
-# (the kernel hands us bytes via the buffer ring), which is the
-# performance unlock the +30 % gap to hyper is budgeted for.
+# Why MULTISHOT recv requires the buffer ring: without
+# ``IOSQE_BUFFER_SELECT``, IORING_RECV_MULTISHOT either errors out,
+# fires once and stops, or unsafely reuses the user's single buffer
+# across overlapping CQEs. ``IORING_OP_POLL_ADD``'s multishot mode is
+# also unsuitable because its edge-triggered semantics race against
+# the recv-EAGAIN drain pattern under back-to-back keep-alive.
 #
-# Send path is unchanged from the recv-multishot attempt: synchronous
-# on_writable using non-blocking _send. v0.7.x will swap to
-# UringReactor.submit_send for the additional syscall savings on the
-# response path.
+# This eliminates per-conn buffer pinning AND drops the recv
+# syscall per request (the kernel hands us bytes via the buffer
+# ring), which is the principal io_uring performance unlock for
+# the recv-side.
+#
+# Send path is synchronous ``on_writable`` using non-blocking
+# ``_send``. ``UringReactor.submit_send`` is exposed as substrate
+# for callers that want to land kernel-async sends on top of
+# this dispatch.
 
 
 comptime _URING_BR_BUF_SIZE: Int = 8192
@@ -2735,13 +2735,12 @@ def _probe_bufring_setup_flags(entries: Int = 64) -> UInt32:
     """Probe the host kernel for the best ``IORING_SETUP_*``
     flag mask the bufring dispatch can use.
 
-    Phase 2B (throughput parity, beat hyper + actix): the
-    bufring dispatch's ~16 ms / ~60 Hz throttle traces back to
-    the kernel running task work IPI-style mid-syscall, which
-    interferes with the dispatch loop's CQE-drain rhythm. The
-    kernel scheduler hints introduced in 5.19 (COOP_TASKRUN +
-    TASKRUN_FLAG + SUBMIT_ALL) and 6.0/6.1 (SINGLE_ISSUER +
-    DEFER_TASKRUN) eliminate this cost when used together.
+    The bufring dispatch's throughput is sensitive to how the
+    kernel runs task work relative to the dispatch loop's
+    CQE-drain rhythm. The kernel scheduler hints introduced in
+    5.19 (COOP_TASKRUN + TASKRUN_FLAG + SUBMIT_ALL) and 6.0/6.1
+    (SINGLE_ISSUER + DEFER_TASKRUN) batch task work to enter
+    boundaries instead of running it IPI-style mid-syscall.
 
     Probes from highest-impact-first to default:
     1. SINGLE_ISSUER | DEFER_TASKRUN | COOP_TASKRUN |
@@ -3083,10 +3082,10 @@ def run_uring_bufring_reactor_loop[
     # may submit_send + cancel + close-on-disarm). 512 SQEs was
     # not enough -- the dispatch hit silent next_sqe failures
     # under sustained 64-conn load and crashed.
-    # Phase 2B: probe the host kernel for the best
-    # IORING_SETUP_* mix.
-    # Phase 2D: enable_wakeup=False -- bufring is single-
-    # pthread-per-ring; no cross-thread wakeup needed.
+    # Probe the host kernel for the best IORING_SETUP_* mix and
+    # construct the per-worker reactor with enable_wakeup=False
+    # (bufring is single-pthread-per-ring; no cross-thread
+    # wakeup needed, so the eventfd recv SQE is skipped).
     var ureactor = UringReactor(
         4096,
         setup_flags=_probe_bufring_setup_flags(),
@@ -3320,10 +3319,10 @@ def run_uring_bufring_reactor_loop_shared[
     )
     from flare.runtime.io_uring_sqe import IORING_CQE_F_BUFFER
 
-    # Phase 2B: same setup-flag probe as the single-worker
-    # variant; per-worker rings independently negotiate.
-    # Phase 2D: enable_wakeup=False -- per-worker ring is
-    # single-issuer, no cross-thread wakeup needed.
+    # Same setup-flag probe as the single-worker variant;
+    # per-worker rings independently negotiate. Each worker is
+    # single-issuer (one pthread owns its ring) so the wakeup
+    # eventfd is skipped via enable_wakeup=False.
     var ureactor = UringReactor(
         4096,
         setup_flags=_probe_bufring_setup_flags(),

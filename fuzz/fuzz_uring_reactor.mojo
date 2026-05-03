@@ -1,5 +1,5 @@
 """Fuzz harness: ``flare.runtime.uring_reactor`` user-data
-codec + driver-surface stability (Track F1 stability gate, v0.7).
+codec + driver-surface stability.
 
 Two complementary properties:
 

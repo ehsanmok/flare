@@ -1,13 +1,13 @@
 """Unit tests for ``_compact_read_buf_drop_prefix`` in
 :mod:`flare.http._server_reactor_impl`.
 
-Phase 1D (throughput parity with Rust libs): the per-request
-read-buffer compaction at the end of every on_readable_*
-state-machine iteration used to be 5 inlined ``for i in range(...)
-leftover.append(...)`` byte-loops. Replaced with a single
-``memcpy`` shift through this helper. Helpful under HTTP/1.1
-keep-alive pipelining where a single recv can carry multiple
-requests' worth of bytes.
+The per-request read-buffer compaction at the end of every
+on_readable_* state-machine iteration uses this helper to
+``memcpy``-shift the trailing bytes (typically pipelined-next-
+request bytes that arrived in the same recv) into a fresh
+buffer. Replaces an earlier byte-by-byte append loop; helpful
+under HTTP/1.1 keep-alive pipelining where a single recv can
+carry multiple requests' worth of bytes.
 
 Test cases
 ----------

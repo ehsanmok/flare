@@ -18,8 +18,8 @@ The pinned Mojo nightly distinguishes three function-type annotations:
 | Annotation | Meaning | What flare uses it for |
 |---|---|---|
 | `thin` | No captures. Function-pointer-shaped. Materialises as a runtime value. | Every public `def(Request) raises thin -> Response` in [`flare/http/handler.mojo`](../flare/http/handler.mojo) — `FnHandler`, `FnHandlerCT[F]`. The work argument to [`block_in_pool`](../flare/runtime/blocking.mojo) (`work: def() raises thin -> T`). The pthread `start_routine` thunk shape in [`flare/runtime/_thread.mojo`](../flare/runtime/_thread.mojo). |
-| `capturing` | Captures local state. **Cannot be materialised as a runtime value on the pinned nightly** (the compiler emits `"TODO: capturing closures cannot be materialized as runtime values"` if you try). Usable only as a comptime parameter (`[F: def(...) capturing -> ...]`), and even then a method body that calls `F(...)` is silently promoted to `capturing`, which can't satisfy a `Handler` trait method declared without that annotation. | Not used by the v0.6 / v0.7 public surface. The probe entry in [`development.mdc`](../.cursor/rules/development.mdc) § "Mojo-blocked items remaining" tracks the v0.7 re-probe. |
-| `unified` | Universal closure type (per [Mojo Closures 2026 forum thread](https://forum.modular.com/t/mojo-closures-2026/3013)). The keyword is accepted in function-type position (`def(Int) raises unified -> Int`), but the conversion machinery is incomplete — `def f(...) raises unified -> Int:` on a declaration site fails with `"use of unknown declaration 'unified'"`. | Not used today; same re-probe entry. |
+| `capturing` | Captures local state. **Cannot be materialised as a runtime value on the pinned nightly** (the compiler emits `"TODO: capturing closures cannot be materialized as runtime values"` if you try). Usable only as a comptime parameter (`[F: def(...) capturing -> ...]`), and even then a method body that calls `F(...)` is silently promoted to `capturing`, which can't satisfy a `Handler` trait method declared without that annotation. | Not used by the public surface. Tracked as a re-probe item once the nightly lifts the materialisation restriction. |
+| `unified` | Universal closure type (per [Mojo Closures 2026 forum thread](https://forum.modular.com/t/mojo-closures-2026/3013)). The keyword is accepted in function-type position (`def(Int) raises unified -> Int`), but the conversion machinery is incomplete — `def f(...) raises unified -> Int:` on a declaration site fails with `"use of unknown declaration 'unified'"`. | Not used today; same re-probe item. |
 
 The practical consequence: **every callable flare's public API
 accepts is a `thin` closure or a `Handler`-trait struct.** Inline
@@ -125,17 +125,17 @@ classification before accepting it, and to write a postmortem in the
 commit body when the probe demonstrates a previous classification
 was wrong**. This pattern caught:
 
-- v0.5 `block_in_pool` mis-classified as Mojo-blocked (it wasn't —
-  pthread per-call works).
-- v0.6 macOS `OwnedDLHandle` framed as a Mojo runtime flake (it
+- `block_in_pool` was originally mis-classified as Mojo-blocked
+  (it wasn't — pthread per-call works).
+- macOS `OwnedDLHandle` was framed as a Mojo runtime flake (it
   wasn't — function-local handle was being reclaimed by ASAP-
   destruction before its returned function pointer was invoked).
 
-The same audit ran in the other direction for v0.7 closures: the
-design speculated that capturing closures had landed; the probe
-falsified the claim. The result is the entry in
-[`development.mdc`](../.cursor/rules/development.mdc) § "Mojo-blocked
-items remaining" and this doc.
+The same audit ran in the other direction for capturing closures:
+the design speculated that capturing closures had landed; the
+probe falsified the claim. The result is the closure-shape
+contract documented above and pinned by
+[`tests/test_closure_send_contract.mojo`](../tests/test_closure_send_contract.mojo).
 
 ## Recommended patterns today
 
@@ -150,12 +150,8 @@ items remaining" and this doc.
 ## When the closure story changes
 
 When Mojo lifts the runtime-materialisation block on capturing
-closures (and / or completes the `unified` path), flare will land a
-v0.7.x patch that adds closure-flavored overloads to
-`Router.{get, post, ...}`, `App.use`, and the extractor surface
-**alongside** the existing struct-based shapes. Nothing existing
-breaks — the v0.6 / v0.7 API stays valid indefinitely.
-
-The re-probe target lives in
-[`development.mdc`](../.cursor/rules/development.mdc) § "Mojo-blocked
-items remaining"; re-probe on every pinned-nightly bump.
+closures (and / or completes the `unified` path), flare will add
+closure-flavored overloads to `Router.{get, post, ...}`, `App.use`,
+and the extractor surface **alongside** the existing struct-based
+shapes. Nothing existing breaks — the current API stays valid
+indefinitely.

@@ -1,5 +1,5 @@
 """Comptime perfect-hash dispatch for ~70 standard HTTP header
-names (Track B2).
+names.
 
 Replaces the case-insensitive linear scan in
 ``HeaderMap.{get,set,has}`` with a length-first + case-insensitive

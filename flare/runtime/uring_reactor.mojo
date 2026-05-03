@@ -1,5 +1,4 @@
-"""``UringReactor``: io_uring-native event-loop wrapper (Track B0
-wire-in).
+"""``UringReactor``: io_uring-native event-loop wrapper.
 
 Sits on top of :mod:`flare.runtime.io_uring_driver` (which owns
 the ``io_uring_setup`` + the three SQ/CQ/SQE-array mmaps, the
@@ -14,7 +13,7 @@ server reactor calls:
   one ``IORING_OP_RECV`` SQE with ``IORING_RECV_MULTISHOT`` so
   the kernel posts a CQE every time data lands without
   re-arming. (Caller is responsible for buffer ownership; flare
-  uses the per-worker BufferHandle pool from Track B5.)
+  uses :mod:`flare.runtime.buffer_pool`.)
 * ``submit_send(fd, buf_ptr, buf_len, conn_id)`` — fire-and-
   forget ``IORING_OP_SEND``. The CQE confirms the kernel
   enqueued the bytes; no per-byte loop.
@@ -68,7 +67,6 @@ directly. The two backends (``epoll/kqueue`` ``Reactor`` vs
 ``UringReactor``) are selected at the **server** layer by a
 comptime branch — the ``_server_reactor_impl`` state machine
 talks to whichever backend is selected via a thin trait surface.
-This is the v0.7 design-doc Track B0 wire-in.
 
 Concurrency
 -----------
@@ -413,11 +411,11 @@ struct UringReactor(Movable):
     var _io: FlareRawIO
     var _wake_armed: Bool
     var _wakeup_disabled: Bool
-    """Phase 2D: if True, ``poll`` skips the lazy-arm of the
-    wakeup ``IORING_OP_READ`` SQE and ``wakeup()`` becomes a
-    no-op. Eliminates one always-pending SQE on the hot path
-    for single-issuer bufring rings that don't need cross-
-    thread wakeup."""
+    """If True, ``poll`` skips the lazy-arm of the wakeup
+    ``IORING_OP_READ`` SQE and ``wakeup()`` becomes a no-op.
+    Eliminates one always-pending SQE on the hot path for
+    single-issuer bufring rings that don't need cross-thread
+    wakeup."""
 
     def __init__(
         out self,
@@ -440,8 +438,9 @@ struct UringReactor(Movable):
                 batching behaviour. The bufring dispatch path
                 opts into ``COOP_TASKRUN | TASKRUN_FLAG |
                 SUBMIT_ALL`` and (on kernel >= 6.1)
-                ``SINGLE_ISSUER | DEFER_TASKRUN`` to eliminate
-                the ~16 ms / ~60 Hz throughput throttle.
+                ``SINGLE_ISSUER | DEFER_TASKRUN`` so the kernel
+                batches task work to enter boundaries instead
+                of running it IPI-style mid-syscall.
             sq_thread_cpu / sq_thread_idle: SQPOLL knobs;
                 ignored unless ``setup_flags`` includes
                 ``IORING_SETUP_SQPOLL``.
@@ -501,10 +500,11 @@ struct UringReactor(Movable):
                 unsafe_from_address=Int(raw)
             )
         else:
-            # Phase 2D: skip the eventfd + buffer alloc entirely.
-            # _wake_fd = INVALID_FD and _wake_buf = NULL match the
-            # __del__ guards (skip close() / free() when these are
-            # sentinel) so the no-wakeup mode is fully no-op.
+            # No-wakeup mode: skip the eventfd + buffer alloc
+            # entirely. _wake_fd = INVALID_FD and _wake_buf =
+            # NULL match the __del__ guards (skip close() /
+            # free() when these are sentinel) so the no-wakeup
+            # mode is fully no-op on shutdown too.
             self._wake_fd = INVALID_FD
             self._wake_buf = UnsafePointer[UInt8, MutExternalOrigin](
                 unsafe_from_address=0
@@ -874,9 +874,10 @@ struct UringReactor(Movable):
         can route it to the same code path that handles
         ``EVENT_READABLE`` on the epoll backend; the existing
         ``ConnHandle.on_readable`` then runs its own ``recv``
-        syscall (no buffer-ring required for the wire-in
-        commit; that's the v0.7.x follow-up that swaps to
-        ``IORING_OP_RECV`` + ``IORING_RECV_MULTISHOT``).
+        syscall. The buffer-ring path (``IORING_OP_RECV`` +
+        ``IORING_RECV_MULTISHOT`` against a registered
+        ``IORING_REGISTER_PBUF_RING``) is a separate dispatch
+        loop opt-in via ``FLARE_BUFRING_HANDLER=1``.
 
         Args:
             fd: Connected socket fd. ``debug_assert`` checks
@@ -947,9 +948,8 @@ struct UringReactor(Movable):
         """Submit any pending SQEs, drain ready CQEs, then
         optionally block for more.
 
-        Phase 2C: peek-then-block dispatch (matches the
-        ``tokio-uring`` / ``monoio`` pattern). Three phases per
-        call:
+        Peek-then-block dispatch (matches the ``tokio-uring`` /
+        ``monoio`` pattern). Three phases per call:
 
         1. **Submit**: flush any pending SQEs to the kernel
            via ``io_uring_enter(submit, 0, GETEVENTS)`` -- this
@@ -957,18 +957,18 @@ struct UringReactor(Movable):
            has already posted asynchronously (e.g. multishot
            recv completions that fired between the prior poll
            and this one). On kernels with DEFER_TASKRUN
-           (negotiated by Phase 2B's setup_flag probe), this
+           (negotiated by the bufring setup-flag probe), this
            call also runs deferred task work which can produce
            the CQEs we then drain in step 2.
 
         2. **Drain**: pull every ready CQE out of the CQ into
            ``out``, up to ``max_completions``. No syscall in
            this phase -- pure userspace ring head/tail
-           manipulation. This is where the multishot recv CQEs
-           land in batches under sustained load; the prior
-           always-block design only ever pulled one at a time
-           because ``submit_and_wait(1)`` returned as soon as
-           one CQE was ready.
+           manipulation. This is where multishot recv CQEs
+           land in batches under sustained load; an always-block
+           design would only pull one at a time because
+           ``submit_and_wait(1)`` returns as soon as one CQE is
+           ready.
 
         3. **Block (only if needed)**: if we drained fewer than
            ``min_complete`` CQEs, call ``submit_and_wait(...)``
@@ -993,8 +993,9 @@ struct UringReactor(Movable):
             # Lazy-arm the wakeup recv on first poll so the
             # eventfd surfaces wakeups via the same drain loop.
             # Skipped entirely when ``enable_wakeup=False`` was
-            # passed at construction (Phase 2D opt-out for
-            # single-issuer bufring rings).
+            # passed at construction (single-issuer bufring
+            # rings opt out -- they don't need cross-thread
+            # wakeup).
             try:
                 self._arm_wakeup_recv()
                 self._wake_armed = True
@@ -1074,12 +1075,13 @@ struct UringReactor(Movable):
         consumed count into ``raw_consumed`` (which includes
         wakeup CQEs that were absorbed without surfacing).
 
-        Phase 2C peek-then-block uses the raw count to decide
-        whether to block in the third phase: a wakeup CQE that
-        arrived between phase 1 (submit) and phase 2 (drain)
-        means the caller has been signalled to wake up, even
-        if no surfaced CQE accompanies it -- so phase 3 must
-        skip the block to honour the wakeup contract.
+        :func:`poll`'s peek-then-block dispatch uses the raw
+        count to decide whether to block in the third phase: a
+        wakeup CQE that arrived between phase 1 (submit) and
+        phase 2 (drain) means the caller has been signalled to
+        wake up, even if no surfaced CQE accompanies it -- so
+        phase 3 must skip the block to honour the wakeup
+        contract.
 
         Returns the number of CQEs appended to ``out`` (the
         surfaced count); the raw consumed count is written
@@ -1110,9 +1112,8 @@ struct UringReactor(Movable):
         on the eventfd posts a CQE.
 
         No-op when the reactor was constructed with
-        ``enable_wakeup=False`` (Phase 2D opt-out for single-
-        issuer bufring rings that don't need cross-thread
-        signalling).
+        ``enable_wakeup=False`` -- single-issuer bufring rings
+        opt out because they don't need cross-thread signalling.
         """
         if self._wakeup_disabled:
             return

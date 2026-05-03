@@ -9,7 +9,7 @@ Exercises three angles:
 2. ``Http2Config.validate`` enforces the RFC 9113 §6.5.2 +
    RFC 9113 §6.9.2 + RFC 7541 §4.2 numeric bounds.
 3. A non-default config propagates through to the underlying
-   ``Connection`` fields the reactor wiring (v0.7 Track A1) reads —
+   ``Connection`` fields the reactor wiring reads —
    ``max_concurrent_streams``, ``initial_window_size``,
    ``max_frame_size``, the HPACK decoder's ``max_size``, and is
    reflected in the SETTINGS frame the driver emits after the
@@ -64,10 +64,10 @@ def test_with_config_default_emits_extra_max_header_list_size() raises:
     """``H2Connection()`` (bare) emits one SETTINGS pair
     (MAX_CONCURRENT_STREAMS = 100). ``H2Connection.with_config(
     Http2Config())`` emits two: the same MAX_CONCURRENT_STREAMS = 100
-    plus the v0.7 defensive default MAX_HEADER_LIST_SIZE = 8192. The
+    plus the defensive default MAX_HEADER_LIST_SIZE = 8192. The
     extra pair (id 0x6, value 8192) is the additive contract: bare
-    callers stay on the v0.6 wire bytes; opt-in via ``Http2Config``
-    advertises the new cap."""
+    callers stay on the original wire bytes; opt-in via
+    ``Http2Config`` advertises the new cap."""
     var preface = List[UInt8](String(H2_PREFACE).as_bytes())
 
     var c1 = H2Connection()
@@ -114,10 +114,10 @@ def test_with_config_default_emits_extra_max_header_list_size() raises:
 
 def test_with_config_zero_header_list_byte_matches_h2connection() raises:
     """``H2Connection.with_config(Http2Config(..., max_header_list_size
-    = 0, ...))`` is byte-for-byte identical to the v0.6
+    = 0, ...))`` is byte-for-byte identical to the bare
     ``H2Connection()``. The zero-value escape hatch lets a caller opt
-    out of the v0.7 defensive default if wire-level compatibility
-    with a strict v0.6 expectation matters."""
+    out of the defensive default if wire-level compatibility with a
+    strict downstream expectation matters."""
     var preface = List[UInt8](String(H2_PREFACE).as_bytes())
 
     var c1 = H2Connection()
@@ -210,9 +210,9 @@ def test_validate_rejects_negative_header_table_size() raises:
 def test_with_config_propagates_to_connection_fields() raises:
     """Each ``Http2Config`` field (apart from
     ``allow_huffman_decode`` and ``max_header_list_size``, which the
-    reactor wiring reads off the driver directly per Track A) lands
-    on the underlying ``Connection`` so the SETTINGS exchange + the
-    HPACK decoder ack budget the configured values."""
+    reactor wiring reads off the driver directly) lands on the
+    underlying ``Connection`` so the SETTINGS exchange + the HPACK
+    decoder ack budget the configured values."""
     var cfg = Http2Config(
         max_concurrent_streams=200,
         initial_window_size=131072,

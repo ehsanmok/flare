@@ -1,10 +1,10 @@
 """Example 37: HTTP/2 SETTINGS via :class:`flare.http2.Http2Config`.
 
-Shows the v0.7 Track A6 configuration surface for the inline
+Shows the configuration surface for the inline
 :class:`flare.http2.H2Connection` driver. Three configurations:
 
-1. Defaults — equivalent to the v0.6 ``H2Connection()`` call;
-   used when the caller doesn't care.
+1. Defaults — equivalent to ``H2Connection()`` with no
+   per-connection tuning.
 2. A relaxed config — bumps SETTINGS_MAX_CONCURRENT_STREAMS and
    SETTINGS_INITIAL_WINDOW_SIZE for high-fan-out internal services.
 3. A tight config — clamps SETTINGS_MAX_HEADER_LIST_SIZE and the
@@ -12,9 +12,9 @@ Shows the v0.7 Track A6 configuration surface for the inline
    ship behind a public IP to defang header-bomb attacks.
 
 Each configuration is validated up-front via
-:meth:`flare.http2.Http2Config.validate` (the boot-fail-fast path
-the v0.7 Track A1 reactor wiring uses) and the resulting initial
-SETTINGS frame is decoded back to verify the on-wire bytes.
+:meth:`flare.http2.Http2Config.validate` (boot-fail-fast at
+server startup) and the resulting initial SETTINGS frame is
+decoded back to verify the on-wire bytes.
 
 Pure construction. Run:
     pixi run example-http2-config

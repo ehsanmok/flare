@@ -1,10 +1,9 @@
-"""Example 39 — io_uring HTTP/1.1 plaintext server (Track B0 wire-in).
+"""Example 39 — io_uring HTTP/1.1 plaintext server.
 
 Single-worker HTTP/1.1 server built **directly on top of**
-:class:`flare.runtime.uring_reactor.UringReactor`. Returns a fixed
-``Hello, World!`` plain-text response for every request. This
-example is the v0.7 Track B0 *substrate-end-to-end* proof point:
-it demonstrates that the io_uring substrate (FFI, ring driver,
+:class:`flare.runtime.uring_reactor.UringReactor`. Returns a
+fixed ``Hello, World!`` plain-text response for every request.
+Demonstrates that the io_uring substrate (FFI, ring driver,
 multishot accept, per-conn multishot recv, async send + close)
 composes into a working HTTP server with a few hundred LOC of
 pure Mojo and **no** ``liburing`` C dependency.
@@ -26,8 +25,8 @@ What this example demonstrates
 6. **Generation-stamped conn_ids** so a slot reused after a
    close never gets misrouted CQEs from its previous occupant.
 
-What this example deliberately leaves to the v0.7.x series
-----------------------------------------------------------
+What this example deliberately leaves out
+-----------------------------------------
 
 This example is intentionally a **demonstrator**, not a
 production HTTP server. Specifically:
@@ -36,11 +35,12 @@ production HTTP server. Specifically:
   a single-request close-after-response client. Pipelining,
   keep-alive request boundary detection, request-line + header
   validation are deliberately out of scope; that work belongs
-  to the v0.7.x B0 wire-in into ``flare.http._server_reactor_impl``
-  (which already owns the proven state machine + parser).
+  to ``flare.http._server_reactor_impl`` (the production reactor
+  that owns the parser + state machine).
 * The connection slab is a flat ``List[_Conn]`` with linear
   scan ``_alloc_conn``; the production wire-in uses the per-
-  worker ``Pool[BufferHandle]`` from Track B5.
+  worker ``Pool[BufferHandle]`` from
+  :mod:`flare.runtime.buffer_pool`.
 * Concurrent close-heavy workloads (e.g. ``wrk -t8 -c256`` with
   HTTP/1.0-shape close-each-request clients) trigger a slot-
   reuse race that this example handles via a generation counter

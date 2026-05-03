@@ -1,4 +1,4 @@
-"""Closure-shape + send-discipline contract tests for v0.7.
+"""Closure-shape + send-discipline contract tests.
 
 Pins the surface area of what callable shapes flare's public API
 accepts on Mojo ``1.0.0b1.dev2026042717`` so a future Mojo nightly
@@ -84,9 +84,9 @@ def test_shape_thin_top_level_via_fnhandler_ct() raises:
 @fieldwise_init
 struct _ShapeHandlerStruct(Copyable, Handler, Movable):
     """A ``Handler`` struct that closes over per-handler state via
-    fields. This is the v0.6 / v0.7 canonical shape for handlers
-    that need to capture state — replaces what would have been an
-    inline closure with captures in axum / actix.
+    fields. The canonical shape for handlers that need to capture
+    state — replaces what would have been an inline closure with
+    captures in axum / actix.
     """
 
     var greeting: String
@@ -168,7 +168,7 @@ def test_shape_block_in_pool_propagates_raise() raises:
 #       FnHandler-style runtime slot binding fails with:
 #         "TODO: capturing closures cannot be materialized as runtime values"
 #
-# 2. Body-block capture syntax (design-0.7.mdc speculation):
+# 2. Body-block capture syntax (speculative future shape):
 #       def scale(x: Int) -> Int { var multiplier }: ...
 #       Fails to parse: "expected ':' in function definition".
 #

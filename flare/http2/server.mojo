@@ -83,15 +83,13 @@ struct Http2Config(Copyable, Defaultable, Movable):
     (plus the RFC 7541 HPACK header-table size). Defaults are the
     production-shape numbers flare's reactor wiring uses for both
     the inline test driver in :mod:`tests.test_h2_server` and the
-    reactor-attached driver shipping under the v0.7 Track A wiring.
+    reactor-attached driver.
 
     The ``allow_huffman_decode`` flag gates HPACK Huffman decoding
-    on the inbound HEADERS path. v0.6 ships H=0-only encoder + raw-
-    literal decoder (CRIME-class side channels are zero by
-    construction); v0.7 lands the scalar decoder behind this flag,
-    defaulting to ``False`` so production stays on the safe path
-    until soak data is in (the SIMD decoder lands as a B9 follow-up
-    once the flag flips default-on in a v0.7.x patch).
+    on the inbound HEADERS path. The H=0-only encoder + raw-literal
+    decoder is CRIME-class-side-channel-free by construction; the
+    scalar Huffman decoder is gated behind this flag (default
+    ``False``) until soak data justifies flipping it default-on.
 
     Example:
 
@@ -126,9 +124,9 @@ struct Http2Config(Copyable, Defaultable, Movable):
         header_table_size: SETTINGS_HEADER_TABLE_SIZE (RFC 7541
             §4.2). HPACK dynamic-table size budget.
         allow_huffman_decode: When ``True``, the HPACK decoder
-            accepts H=1 literals (Huffman-encoded). v0.7 default
-            ``False`` keeps the v0.6 reject-by-default safe path
-            until soak data is in.
+            accepts H=1 literals (Huffman-encoded). Defaults to
+            ``False`` -- reject-by-default until soak data
+            justifies flipping it on.
     """
 
     var max_concurrent_streams: Int
@@ -233,19 +231,19 @@ struct H2Connection(Defaultable, Movable):
     var outbox: List[UInt8]
     var greeted: Bool
     var config: Http2Config
-    """The :class:`Http2Config` the driver was constructed with. Kept
-    on the driver so the reactor wiring (v0.7 Track A1) can re-read
-    individual fields per-stream (e.g. the ``max_header_list_size``
-    cap when applying inbound HEADERS) without threading it through
-    every per-frame call site."""
+    """The :class:`Http2Config` the driver was constructed with.
+    Kept on the driver so the reactor wiring can re-read
+    individual fields per-stream (e.g. the
+    ``max_header_list_size`` cap when applying inbound HEADERS)
+    without threading it through every per-frame call site."""
 
     def __init__(out self):
         """Default-construct with :class:`Http2Config` defaults.
 
         Equivalent to ``H2Connection.with_config(Http2Config())``;
-        kept as a separate ``__init__`` so the v0.6 callers
-        (``H2Connection()`` in tests + the inline driver) keep
-        working byte-for-byte.
+        kept as a separate ``__init__`` so callers (``H2Connection()``
+        in tests + the inline driver) work byte-for-byte without
+        an explicit config argument.
         """
         self.conn = Connection()
         self.inbox = List[UInt8]()
@@ -266,11 +264,11 @@ struct H2Connection(Defaultable, Movable):
         RFC 9113 §6.5.
 
         The HPACK dynamic-table size budget is propagated to the
-        decoder. The ``allow_huffman_decode`` flag is read by the
-        v0.7 Track A3 Huffman path; on v0.6 + the v0.7 scaffolding
-        commit (this one) the field is stored but not yet acted on
-        — Huffman literals on the inbound side still raise the
-        v0.6 reject-by-default error.
+        decoder. The ``allow_huffman_decode`` flag is stored on
+        the driver but not yet acted on at the inbound HEADERS
+        path -- Huffman-encoded literals on the inbound side
+        currently raise reject-by-default until the scalar
+        Huffman decoder is wired in.
         """
         config.validate()
         var out = H2Connection()
@@ -282,13 +280,12 @@ struct H2Connection(Defaultable, Movable):
         out.conn.max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         out.conn.hpack_decoder.max_size = out.config.header_table_size
-        # The v0.6 ``HpackEncoder`` is stateless (always emits H=0
+        # The ``HpackEncoder`` is stateless (always emits H=0
         # raw literals; no dynamic table). The ``header_table_size``
         # field on ``Http2Config`` is consumed by the decoder side
-        # only until the encoder gains a dynamic table in a v0.7.x
-        # / v0.8 follow-up. The peer's announced HEADER_TABLE_SIZE
-        # is still honoured on inbound SETTINGS via
-        # ``Connection.handle_frame``.
+        # only until the encoder grows a dynamic table. The peer's
+        # announced HEADER_TABLE_SIZE is still honoured on inbound
+        # SETTINGS via ``Connection.handle_frame``.
         return out^
 
     def _emit_initial_settings(mut self):

@@ -1,5 +1,4 @@
-"""Integration test for the io_uring server-loop dispatch (Track B0
-wire-in).
+"""Integration test for the io_uring server-loop dispatch.
 
 When ``flare.runtime.uring_reactor.use_uring_backend()`` returns True,
 ``HttpServer.serve_static`` routes through
@@ -222,7 +221,7 @@ def test_serve_static_io_uring_round_trip() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_uring_serve_static.mojo — Track B0 wire-in integration")
+    print("test_uring_serve_static.mojo — io_uring serve_static integration")
     print("=" * 60)
     var suite = TestSuite()
     suite.test[test_serve_static_io_uring_round_trip]()

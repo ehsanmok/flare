@@ -1,4 +1,4 @@
-"""Tests for ``BufferHandle`` + ``BufferPool`` (Track B5)."""
+"""Tests for ``BufferHandle`` + ``BufferPool``."""
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 

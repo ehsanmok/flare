@@ -30,7 +30,7 @@ contract — Caddy, nginx-prometheus-exporter, Envoy stats):
 - ``flare_http_request_errors_total`` — counter of errors raised
   by the inner handler.
 
-Concurrency note (v0.7 cut):
+Concurrency note:
 
 The current Mojo nightly (``1.0.0b1.dev2026042717``) ships
 ``Atomic[DType.*]`` cells but they are NOT ``Copyable``, so they
@@ -40,7 +40,7 @@ declaration; an ``UnsafePointer[Atomic, ...]`` heap allocation
 would re-introduce the lifetime-management surface that the
 ``Movable``-only registry is trying to avoid.
 
-The v0.7 shape is therefore **per-worker, plain ``UInt64``**
+The shape is therefore **per-worker, plain ``UInt64``**
 counters. flare's HTTP server already monomorphises one
 ``Handler`` instance per worker pthread, so each worker owns
 its own ``MetricsRegistry`` — counters are never shared across
@@ -48,8 +48,8 @@ worker threads, no atomic increment required.
 
 For multi-worker aggregation (i.e. exposing a process-wide
 ``/metrics``), caller wires a small aggregator that snapshots
-every worker's registry and concatenates the rendered text. The
-v0.7.x follow-up swaps the per-cell type to ``Atomic`` once the
+every worker's registry and concatenates the rendered text. A
+follow-up will swap the per-cell type to ``Atomic`` once the
 nightly lifts the ``Copyable`` requirement on ``Atomic`` (or
 once we land an ``UnsafePointer``-backed ``AtomicArray``).
 

@@ -1,13 +1,13 @@
 """Unit tests for ``_parse_http_request_bytes_minimal`` in
 :mod:`flare.http.server`.
 
-Phase 1C (throughput parity with Rust libs): the minimal parser
-skips ``HeaderMap`` allocation entirely for handlers that don't
-read headers (TFB plaintext, fixed health-checks, etc.). The
-caller passes pre-scanned ``header_end`` + ``content_length``
-(which the dispatch already computed via ``_find_crlfcrlf`` +
-``_scan_content_length``), so this parser only does the request
-line split + body memcpy.
+The minimal parser skips ``HeaderMap`` allocation entirely
+for handlers that don't read headers (TFB plaintext, fixed
+health-checks, etc.). The caller passes pre-scanned
+``header_end`` + ``content_length`` (which the dispatch
+already computed via ``_find_crlfcrlf`` +
+``_scan_content_length``), so this parser only does the
+request line split + body memcpy.
 
 Test cases lock in the contract:
 

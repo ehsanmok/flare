@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime.iovec`` (Track B4).
+"""Tests for ``flare.runtime.iovec``.
 
 End-to-end tests use a real TCP loopback pair to verify that
 ``writev(2)`` actually delivers the concatenated bytes to the

@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.intern`` (Track B3).
+"""Tests for ``flare.http.intern``.
 
 Exercises:
 

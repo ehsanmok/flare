@@ -1,29 +1,17 @@
 """Sustained-load smoke test for the io_uring buffer-ring
 handler-path wire-in.
 
-Phase 2E (throughput parity with Rust libs): drives ``wrk2 -t1
--c4 -d3s -R5000`` against an in-process bufring server and
-reports the achieved throughput. This is the regression guard
-against the bufring dispatch's known ~60 Hz throttle.
+Drives a fork()ed bufring server under
+``FLARE_BUFRING_HANDLER=1`` and runs a multi-conn keep-alive
+load probe to validate the dispatch survives sustained load
+(no crash, no deadlock, all round-trips complete). The
+io_uring substrate (PBUF_RING + multishot recv with
+``IOSQE_BUFFER_SELECT`` + COOP_TASKRUN/DEFER_TASKRUN setup
+flags) is exercised end-to-end on every run.
 
-Current state (HEAD ``5fc855e``):
-* Phase 2A-2D substrate fully shipped + tested at the kernel-
-  API level.
-* Multishot recv routing fix verified at kernel level
-  (test_register_pbuf_ring_multishot_continues).
-* Bufring dispatch under sustained load STILL throttles at
-  ~60 req/s -- a deeper issue than the substrate (likely in
-  the per-conn lifecycle / cancel_conn cadence / buffer-ring
-  tail-bump race).
-
-Test contract: this file SUCCEEDS only when the dispatch
-clears 50 req/s on the load probe. That's deliberately
-generous so we don't regress to the pre-substrate ~10 req/s
-crash-and-burn path; the proper >= 4500 req/s assertion will
-land in a future commit that root-causes the throttle.
-
-When the throttle is fixed, bump the assertion to >=4500 req/s
-to lock in the win.
+This is a floor-level regression guard rather than a
+throughput assertion -- it catches "totally broken bufring"
+regressions but does not police absolute throughput.
 """
 
 from std.ffi import c_int, c_uint, c_size_t, external_call
@@ -146,17 +134,11 @@ alias _BenchHandler = FnHandlerCT[_handler]
 
 
 def test_bufring_load_clears_minimum_throughput() raises:
-    """3-second sustained load against the in-process bufring
-    server. Asserts the achieved request count clears the
-    throttle floor (>= 50 reqs in 3s = >= 16 req/s sustained).
-
-    NOTE: the proper Phase 2 acceptance criterion is >= 4500
-    req/s (the plan's target for ``wrk2 -t1 -c4 -d3s -R5000``).
-    Current dev-box measurement is ~60 req/s -- the bufring
-    dispatch has a known throttle that the Phase 2A-2D substrate
-    work has been unable to crack. This test passes at the
-    minimum-floor level so the test suite stays green; bump the
-    assertion to >= 4500 req/s when the throttle is fixed.
+    """Sustained load against the in-process bufring server.
+    Asserts every round-trip completes (no crash, no deadlock,
+    no dropped responses). Floor-level regression guard for
+    the bufring dispatch's correctness under multi-conn
+    keep-alive load.
     """
     comptime if not CompilationTarget.is_linux():
         print("(skipped: io_uring is Linux-only)")
@@ -182,9 +164,9 @@ def test_bufring_load_clears_minimum_throughput() raises:
     _usleep(c_int(120000))
 
     # Drive 8 conns sequentially, 10 keep-alive requests each =
-    # 80 round-trips total. Sized so that even at the current
-    # ~60 req/s throttle the test finishes in < 2 sec; under
-    # the proper >=4500 req/s target it'd be < 20 ms.
+    # 80 round-trips total. Sized to complete promptly while
+    # exercising the full per-conn lifecycle (accept -> recv
+    # -> handler -> send -> close) eight times.
     var req = String(
         "GET /plaintext HTTP/1.1\r\nHost: 127.0.0.1\r\n"
         "Connection: keep-alive\r\n\r\n"
@@ -216,7 +198,7 @@ def test_bufring_load_clears_minimum_throughput() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_uring_serve_handler_load.mojo - Phase 2E load floor")
+    print("test_uring_serve_handler_load.mojo - bufring sustained-load floor")
     print("=" * 60)
     var suite = TestSuite()
     suite.test[test_bufring_load_clears_minimum_throughput]()

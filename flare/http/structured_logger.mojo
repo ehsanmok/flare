@@ -218,9 +218,10 @@ struct StructuredLogger[Inner: Handler & Copyable & Defaultable](
         # from a wall-clock read here. The stdlib doesn't expose
         # gettimeofday or clock_gettime(REALTIME) on this nightly,
         # so the offset stays 0 and the ``ts`` field is "ns since
-        # the worker started" presented as ISO-8601. Real wall-
-        # clock support is the v0.7.x follow-up; the line shape
-        # is forward-compatible.
+        # the worker started" presented as ISO-8601. The line
+        # shape is forward-compatible -- when wall-clock support
+        # lands the offset can be back-filled without consumers
+        # noticing.
         self._epoch_offset_ns = 0
 
     def __init__(out self, var inner: Self.Inner):

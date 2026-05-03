@@ -4,16 +4,13 @@ backed by ``StaticScheduler`` in :mod:`flare.runtime.scheduler` and
 ``run_reactor_loop_static_shared`` in
 :mod:`flare.http._server_reactor_impl`).
 
-Phase 1E (throughput parity with Rust libs): the per-request work
-collapses to ``recv -> _scan_content_length -> memcpy(resp.bytes)
--> send`` -- no parser, no handler, no Response struct allocation,
-no header lookups, no body re-serialisation. With N pthread
-workers each running this fast path under EPOLLEXCLUSIVE accept
-fairness, throughput on the gate-defining TFB plaintext bench
-scales near-linearly across cores. The dev-box A/B (this commit)
-shows ``flare_mc_static`` 4w at 285K req/s vs ``flare_mc``
-(handler-driven) 4w at 244K -- +17 % from the static fast path
-alone.
+The per-request work collapses to ``recv ->
+_scan_content_length -> memcpy(resp.bytes) -> send`` -- no
+parser, no handler, no Response struct allocation, no header
+lookups, no body re-serialisation. With N pthread workers
+each running this fast path under EPOLLEXCLUSIVE accept
+fairness, throughput on TFB-plaintext-style workloads scales
+near-linearly across cores.
 
 Tests parallel ``tests/test_uring_serve_handler.mojo``'s shape:
 fork(2) topology, parent runs TCP clients, child runs the server,
@@ -254,7 +251,7 @@ def test_static_multicore_concurrent_fanout() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_static_multicore.mojo - Phase 1E static multi-worker")
+    print("test_static_multicore.mojo - static multi-worker")
     print("=" * 60)
     var suite = TestSuite()
     suite.test[test_static_multicore_sequential_keepalive_churn]()

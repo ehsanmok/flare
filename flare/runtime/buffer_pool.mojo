@@ -1,4 +1,4 @@
-"""Per-worker, size-class-bucketed buffer pool (Track B5).
+"""Per-worker, size-class-bucketed buffer pool.
 
 Hands out and returns ``BufferHandle`` byte buffers from one of
 four size classes (1 KiB / 4 KiB / 16 KiB / 64 KiB) so the
@@ -12,12 +12,13 @@ flare's reactor reads from each accepted socket into a
 ``List[UInt8]`` chunk buffer (``ServerConfig.read_buffer_size``,
 default 8 KiB) per ``recv(2)`` call, and serialises every
 response into a second contiguous ``List[UInt8]`` before the
-``send(2)`` (or ``writev(2)``, see Track B4) syscall. Both lists
+``send(2)`` (or ``writev(2)`` via :mod:`flare.runtime.iovec`)
+syscall. Both lists
 are constructed-and-destructed once per request on the keep-alive
-hot path. At the v0.7 throughput target (220 K req/s, 4 workers)
-that's ~1.7 M ``alloc + free`` pairs per second per buffer side —
-glibc's malloc is fast but the cache-line eviction it causes for
-every small allocation is not free.
+hot path. At realistic high-throughput targets (>200K req/s on
+4 workers) that's ~1.7 M ``alloc + free`` pairs per second per
+buffer side — glibc's malloc is fast but the cache-line eviction
+it causes for every small allocation is not free.
 
 The Rust analogues to look at:
 
@@ -29,7 +30,7 @@ The Rust analogues to look at:
   shape; ``actix``'s framework adds a per-worker ``BytesMut``
   freelist for response builders.
 
-Track B5 picks the more conservative shape: a **per-worker pool
+``BufferPool`` picks the more conservative shape: a **per-worker pool
 of fixed-size-class buffers** that is independent of any
 connection. The reactor borrows a buffer for one request, fills
 it, drains it, and returns it to the pool; the next request on

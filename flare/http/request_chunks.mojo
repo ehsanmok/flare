@@ -1,18 +1,17 @@
 """Streaming-shape adapter for inbound request bodies.
 
-The v0.6 ``Request.body`` field is a ``List[UInt8]`` — the
-reactor pre-buffers the entire request body before dispatching
-to the handler. That works for the typical 1KB JSON / form
-POST, but a 100MB upload allocates 100MB per concurrent client.
+The ``Request.body`` field is a ``List[UInt8]`` — the reactor
+pre-buffers the entire request body before dispatching to the
+handler. That works for the typical 1KB JSON / form POST, but
+a 100MB upload allocates 100MB per concurrent client.
 
 ``RequestChunkSource`` lets handlers consume request bodies as
 a sequence of bounded-size chunks, mirroring the ``ChunkSource``
-shape used for outbound :class:`StreamingResponse` bodies. On
-the v0.7 cut the source still pulls from the pre-buffered
-``Request.body`` (so memory cost is unchanged); the
-``ChunkSource`` shape is the **handler-side** API surface that
-the upcoming Track-E reactor wiring will pull through with no
-handler change.
+shape used for outbound :class:`StreamingResponse` bodies.
+Today the source pulls from the pre-buffered ``Request.body``
+(so memory cost is unchanged); the ``ChunkSource`` shape is the
+**handler-side** API surface that a future streaming-reactor
+wire-in can pull through without changing handler code.
 
 Symmetric to ``StreamingResponse[B]`` (outbound):
 

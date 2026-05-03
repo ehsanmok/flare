@@ -1,4 +1,4 @@
-"""``io_uring`` backend substrate (Track B0).
+"""``io_uring`` backend substrate.
 
 Lands the direct-syscall FFI + ``IoUringRing`` setup/teardown
 primitive for the Linux 5.1+ ``io_uring`` reactor backend.
@@ -9,13 +9,13 @@ queue plumbing (SQE construction, CQE drain, multishot accept /
 recv / send) lands in follow-up commits that bolt onto this
 primitive without changing its public API.
 
-Why this is a Track B subtrack
--------------------------------
+Why io_uring
+------------
 
 epoll/kqueue need 2-3 syscalls per request on the keep-alive
-hot path: ``epoll_wait`` → ``recvmsg`` → ``sendmsg``. At the
-v0.7 throughput target (220 K req/s, 4 workers), that's
-≥ 660 K syscalls / s per worker. Each syscall costs a
+hot path: ``epoll_wait`` → ``recvmsg`` → ``sendmsg``. At
+realistic high-throughput targets (>200K req/s on 4 workers),
+that's ≥ 660 K syscalls / s per worker. Each syscall costs a
 syscall instruction (≈ 100-200 cycles), a context switch into
 the kernel, and a TLB flush on speculation-mitigation kernels.
 

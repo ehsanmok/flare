@@ -77,7 +77,7 @@ struct Response(Movable):
 
     def reset(mut self, status: Int = 200, var reason: String = ""):
         """Recycle this ``Response`` in place for the next request on
-        a keep-alive connection (Track B6).
+        a keep-alive connection.
 
         Clears the body and header maps without releasing their
         backing capacity — the next response can refill the same

@@ -18,15 +18,17 @@ def main() raises:
 
 ## What flare is
 
-One reactor per worker (``kqueue`` on macOS, ``epoll`` on Linux,
-shared-listener with ``EPOLLEXCLUSIVE`` for multi-worker), a
-``Handler`` trait that takes plain ``def`` functions or
+One reactor per worker (``kqueue`` on macOS, ``epoll`` on Linux),
+a ``Handler`` trait that takes plain ``def`` functions or
 compiled-down structs, an RFC 7230 parser with extensive fuzz
 coverage, and a ``Cancel`` token plumbed to handlers via
 ``CancelHandler``. ``num_workers=1`` is a single-threaded reactor;
-``num_workers=N`` with ``N >= 2`` runs N pthread workers behind a
-single shared listener with optional CPU pinning. Static endpoints
-can skip the parser entirely with ``serve_static(resp)``.
+``num_workers=N`` with ``N >= 2`` runs N pthread workers behind
+a single shared listener with ``EPOLLEXCLUSIVE`` (default,
+tightest p99.99) or per-worker ``SO_REUSEPORT`` listeners
+(opt in via ``FLARE_REUSEPORT_WORKERS=1`` for highest
+throughput; see ``docs/benchmark.md``). Static endpoints can
+skip the parser entirely with ``serve_static(resp)``.
 
 The operational core: per-request / handler / body-read deadlines,
 ``HttpServer.drain(timeout_ms)`` for graceful shutdown, sanitised
@@ -239,9 +241,19 @@ def main() raises:
 
 Every server example above takes an optional ``num_workers``. At
 ``1`` (the default) it's the single-threaded reactor. Set it to
-``default_worker_count()`` and flare binds N ``SO_REUSEPORT``
-listeners across N pthread workers with per-core pinning on Linux.
-The handler type is unchanged.
+``default_worker_count()`` and flare runs N pthread workers,
+each with its own reactor + timer wheel, with per-core pinning
+on Linux. The handler type is unchanged.
+
+By default the workers share one listener fd with
+``EPOLLEXCLUSIVE`` (the kernel offers each accept event to
+whichever worker is currently parked in ``epoll_wait``, giving
+the tightest p99.99). Export ``FLARE_REUSEPORT_WORKERS=1``
+before launch to instead bind one ``SO_REUSEPORT`` listener
+per worker -- ~21 % more req/s for ~0.25 ms more p99.99 on
+unpinned dev-boxes / high-core-count instances. See
+[``docs/benchmark.md``](../docs/benchmark.md) for the
+head-to-head numbers and the rationale.
 
 ```mojo
 from flare.http import HttpServer, Router, Request, Response, ok
@@ -522,7 +534,7 @@ from .tcp.listener import TcpListener
 # flare.udp
 from .udp.socket import UdpSocket, DatagramTooLarge
 
-# flare.uds (v0.7 — Track H2)
+# flare.uds — Unix-domain sockets
 from .uds.listener import UnixListener, accept_uds_fd
 from .uds.stream import UnixStream
 

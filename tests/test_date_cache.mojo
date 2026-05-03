@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime.DateCache`` (Track B7)."""
+"""Tests for ``flare.runtime.DateCache``."""
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 

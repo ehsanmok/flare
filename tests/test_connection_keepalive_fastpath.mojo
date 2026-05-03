@@ -3,13 +3,13 @@
 ``_compute_close_after``) in
 :mod:`flare.http._server_reactor_impl`.
 
-Phase 1B (throughput parity with Rust libs): the per-request
-``_ascii_lower(req.headers.get("connection"))`` allocation in the
-keep-alive policy decision dominated CPU time on the TFB-plaintext
-hot path with wrk2's exact-bytes ``Connection: keep-alive``. The
-new byte-fast-path matches the lowercase wire format in 10-byte
-loads (no allocation) and falls through to the slow
-``_ascii_lower`` path only on mixed-case / unusual values.
+The byte fast-path matches the common lowercase wire format
+(``keep-alive`` / ``close`` / ``Close``) in a few byte loads
+without allocating a lowercased copy of the header value, and
+falls through to the slow ``_ascii_lower`` path only on
+mixed-case or unusual values. Eliminates a per-request
+allocation on the hot path for clients that send the
+canonical lowercase form (wrk2, curl, hyper, reqwest, etc.).
 
 This file locks in:
 

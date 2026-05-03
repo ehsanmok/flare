@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.header_phf`` (Track B2)."""
+"""Tests for ``flare.http.header_phf``."""
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 

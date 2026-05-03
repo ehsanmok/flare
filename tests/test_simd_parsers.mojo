@@ -1,4 +1,4 @@
-"""Tests for ``flare.http.simd_parsers`` (Track B10)."""
+"""Tests for ``flare.http.simd_parsers``."""
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 

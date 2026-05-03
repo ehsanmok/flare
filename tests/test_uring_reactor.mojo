@@ -1,5 +1,5 @@
 """Tests for :mod:`flare.runtime.uring_reactor` — the io_uring-
-native event-loop wrapper (Track B0 wire-in).
+native event-loop wrapper.
 
 Coverage:
 
@@ -560,11 +560,10 @@ def test_buffer_ring_recv_round_trip() raises:
     buffer id is in ``[0, 4)``, and the data lands at the address
     the buffer id points to.
 
-    This is the substrate the v0.7.x handler-path io_uring wire-in
-    uses to drop per-conn buffer pinning entirely (the source of
-    the c6ccc79 lifecycle bug). One PROVIDE_BUFFERS SQE up front,
-    one buffer-select recv per accepted connection, and the kernel
-    rotates buffers from the pool.
+    This is the substrate the bufring handler-path uses to drop
+    per-conn buffer pinning entirely. One PROVIDE_BUFFERS SQE up
+    front, one buffer-select recv per accepted connection, and
+    the kernel rotates buffers from the pool.
     """
     if not is_io_uring_available():
         print(

@@ -218,7 +218,7 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
         # ``Scheduler.start`` time and stays valid until
         # ``Scheduler.shutdown`` joins every worker.
         #
-        # Track B0 wire-in v3 (multi-worker buffer-ring path):
+        # Multi-worker buffer-ring path (FLARE_BUFRING_HANDLER=1):
         # opt-in via ``FLARE_BUFRING_HANDLER=1`` (see the
         # HttpServer.serve wire-in for the rationale on why this
         # is opt-in rather than default). Each pthread worker
@@ -230,12 +230,12 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
                 # SO_REUSEPORT per-worker bind: each worker has
                 # its OWN pre-bound listener fd (bound on the
                 # Scheduler thread before pthread spawn so binds
-                # are serialised, avoiding the concurrent-bind
-                # race observed on commit 88ea2f7). The fd is
-                # passed through ``ctx_ptr[].listener_fd``; the
-                # corresponding TcpListener struct is owned by
-                # the Scheduler's per_worker_listener_ptrs table
-                # and freed on Scheduler.shutdown.
+                # are serialised, avoiding any concurrent-bind
+                # race). The fd is passed through
+                # ``ctx_ptr[].listener_fd``; the corresponding
+                # TcpListener struct is owned by the Scheduler's
+                # per_worker_listener_ptrs table and freed on
+                # Scheduler.shutdown.
                 run_uring_bufring_reactor_loop_shared[H](
                     ctx_ptr[].listener_fd,
                     ctx_ptr[].config,
@@ -264,7 +264,7 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
 
 struct Scheduler[H: Handler & Copyable](Movable):
     """Owns ``num_workers`` pthread workers, each running a reactor
-    loop over its own ``SO_REUSEPORT`` listener.
+    loop sharing a single listener fd.
 
     Usage:
         ```mojo
@@ -283,11 +283,18 @@ struct Scheduler[H: Handler & Copyable](Movable):
           its address survives the move from ``Scheduler.start`` back
           to the caller; every worker captures that address once at
           spawn time.
-        - A *single* listener is bound via ``bind_shared`` and its
-          fd is borrowed by every worker. Each worker registers the
-          shared fd with ``Reactor.register_exclusive`` so the
-          kernel wakes one worker per accept event
-          (``EPOLLEXCLUSIVE`` on Linux >= 4.5).
+        - **Listener strategy.** Default: one listener bound via
+          ``bind_shared`` and borrowed by every worker, registered
+          with ``Reactor.register_exclusive`` so the kernel wakes
+          one worker per accept event (``EPOLLEXCLUSIVE`` on
+          Linux >= 4.5). Tightest p99.99 because idle workers
+          absorb spikes. Opt in to per-worker ``SO_REUSEPORT``
+          listeners by exporting ``FLARE_REUSEPORT_WORKERS=1``
+          before ``start`` -- the kernel hashes new 4-tuples to
+          one of N pre-bound listeners, ~21 % more req/s for
+          ~0.25 ms more p99.99 (see ``docs/benchmark.md``). The
+          io_uring buffer-ring path (``FLARE_BUFRING_HANDLER=1``)
+          uses per-worker SO_REUSEPORT unconditionally.
         - Handler is cloned into each worker via ``H.copy()``.
     """
 
@@ -320,11 +327,10 @@ struct Scheduler[H: Handler & Copyable](Movable):
     var _per_worker_listener_addrs: List[Int]
     """When the io_uring buffer-ring path is active, the
     Scheduler pre-binds one SO_REUSEPORT listener per worker on
-    its own thread (to serialise binds + avoid the concurrent-
-    bind race observed on commit 88ea2f7). Each entry is the
-    heap address of an owned ``TcpListener``; freed in
-    ``shutdown()`` after all workers join. Empty on the epoll
-    path."""
+    its own thread (serialised binds avoid any concurrent-bind
+    race). Each entry is the heap address of an owned
+    ``TcpListener``; freed in ``shutdown()`` after all workers
+    join. Empty on the epoll path."""
     var _ctx_addrs: List[Int]
     # Heap-allocated Bool, owned by this Scheduler. Address is stable
     # across struct moves; every worker's ``_WorkerCtx.stopping_addr``
@@ -438,11 +444,33 @@ struct Scheduler[H: Handler & Copyable](Movable):
             if use_uring_backend() and getenv("FLARE_BUFRING_HANDLER") == "1":
                 use_io_uring_handler = True
 
+        # ``FLARE_REUSEPORT_WORKERS=1`` opts the epoll path into
+        # per-worker ``SO_REUSEPORT`` listeners (each worker
+        # accept(2)s on its own fd, kernel hashes new 4-tuples to
+        # one of N listeners). The default keeps the single-listener
+        # ``EPOLLEXCLUSIVE`` shape because it gives strictly tighter
+        # p99.99 (the kernel offers each accept event to whichever
+        # worker is currently waiting in ``epoll_wait``, so idle
+        # workers absorb spikes). The reuseport mode trades a few
+        # ms of p99.99 for measurably higher throughput on dev-box
+        # workloads where actix_web (which ships per-worker
+        # reuseport listeners by default) leads the multi-worker
+        # pack. See ``docs/benchmark.md`` for the head-to-head
+        # numbers and the rationale.
+        var use_reuseport_workers = False
+        if getenv("FLARE_REUSEPORT_WORKERS") == "1":
+            use_reuseport_workers = True
+
         var listener_fd: Int = -1
         var listener_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
             unsafe_from_address=0
         )
-        if use_io_uring_handler:
+        # Both the io_uring buffer-ring path and the opt-in epoll
+        # reuseport mode pre-bind per-worker SO_REUSEPORT listeners
+        # on this thread (serialised binds avoid concurrent-bind
+        # races) and skip the shared listener.
+        var prebind_per_worker = use_io_uring_handler or use_reuseport_workers
+        if prebind_per_worker:
             # Probe-bind to validate the addr (raises on the
             # caller's thread if AddressInUse / etc.); the probe
             # listener is dropped immediately and each worker binds
@@ -480,7 +508,8 @@ struct Scheduler[H: Handler & Copyable](Movable):
         s._workers_ptr = alloc[ThreadHandle](num_workers)
         s._workers_len = 0
 
-        # If on the io_uring buffer-ring path: pre-bind one
+        # If we need per-worker listeners (io_uring buffer-ring
+        # path OR the opt-in epoll reuseport mode): pre-bind one
         # SO_REUSEPORT listener PER WORKER on the Scheduler thread
         # before spawning any pthreads. Doing the binds serially
         # on a single thread eliminates any concurrent-bind races
@@ -491,7 +520,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
         # so their destructors don't fire here; the same shutdown
         # path that frees s._shared_listener_addr will iterate +
         # free them.
-        if use_io_uring_handler:
+        if prebind_per_worker:
             for _ in range(num_workers):
                 try:
                     var pwl = bind_reuseport(addr)
@@ -509,7 +538,7 @@ struct Scheduler[H: Handler & Copyable](Movable):
             # epoll listener, or its own per-worker SO_REUSEPORT
             # listener (pre-bound on this thread above).
             var worker_listener_fd: Int = listener_fd
-            if use_io_uring_handler and i < len(s._per_worker_listener_addrs):
+            if prebind_per_worker and i < len(s._per_worker_listener_addrs):
                 var pwl_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
                     unsafe_from_address=s._per_worker_listener_addrs[i]
                 )
@@ -793,7 +822,7 @@ def default_worker_count() -> Int:
     return num_cpus()
 
 
-# ── Static-response multi-worker scheduler (Phase 1E) ───────────────────────
+# ── Static-response multi-worker scheduler ──────────────────────────────────
 #
 # StaticScheduler is the multi-worker twin of HttpServer.serve_static.
 # It binds ONE shared listener (no SO_REUSEPORT -- same EPOLLEXCLUSIVE
@@ -805,10 +834,10 @@ def default_worker_count() -> Int:
 #
 # No parser builds a HeaderMap, no handler is called, no Response is
 # allocated, no headers are looked up, no body is re-serialised. This is
-# the fastest path flare exposes for the gate-defining TFB plaintext
-# bench, and it scales near-linearly across the N pthreads because each
-# worker owns its own conns dict + write buffers (no cross-thread
-# state).
+# the fastest path flare exposes for fixed-response endpoints (health
+# checks, TFB-style benchmarks, low-latency micro-services) and scales
+# near-linearly across the N pthreads because each worker owns its own
+# conns dict + write buffers (no cross-thread state).
 #
 # Design choice: NOT generic. StaticResponse is a concrete type so we
 # don't need the H: Handler & Copyable templating that the regular
@@ -905,12 +934,17 @@ def _static_scheduler_free_ctxs(addrs: List[Int]):
 struct StaticScheduler(Movable):
     """Multi-worker scheduler that serves a single ``StaticResponse``.
 
-    Multi-worker twin of ``HttpServer.serve_static``. Binds one shared
-    ``TcpListener`` (via ``bind_shared`` -- no SO_REUSEPORT; the
-    EPOLLEXCLUSIVE fairness in each worker's reactor handles
-    accept-time distribution) and spawns N pthread workers, each
-    running ``run_reactor_loop_static_shared`` with a copy of the
-    pre-encoded response bytes.
+    Multi-worker twin of ``HttpServer.serve_static``. Spawns N
+    pthread workers, each running ``run_reactor_loop_static_shared``
+    with a copy of the pre-encoded response bytes.
+
+    Listener strategy mirrors ``Scheduler``:
+
+    - Default: one listener via ``bind_shared``, borrowed by every
+      worker, registered with ``EPOLLEXCLUSIVE`` (tightest p99.99).
+    - ``FLARE_REUSEPORT_WORKERS=1``: pre-bind one ``SO_REUSEPORT``
+      listener per worker on this thread (highest throughput; ~21 %
+      more req/s for ~0.25 ms more p99.99 on this dev-box).
 
     Use ``StaticScheduler.start(addr, config, resp, num_workers)`` to
     launch and ``shutdown()`` to drain. Same lifecycle contract as
@@ -925,6 +959,13 @@ struct StaticScheduler(Movable):
     var _workers_len: Int
     var _shared_listener_addr: Int
     var _shared_listener_fd: Int
+    var _per_worker_listener_addrs: List[Int]
+    """When ``FLARE_REUSEPORT_WORKERS=1`` is set, the StaticScheduler
+    pre-binds one SO_REUSEPORT listener per worker on its own thread
+    (serialised binds avoid any concurrent-bind race). Each entry
+    is the heap address of an owned ``TcpListener``; freed in
+    ``shutdown()`` after all workers join. Empty in shared-listener
+    EPOLLEXCLUSIVE mode (the default)."""
     var _ctx_addrs: List[Int]
     var _stopping_addr: Int
 
@@ -936,6 +977,7 @@ struct StaticScheduler(Movable):
         self._workers_len = 0
         self._shared_listener_addr = 0
         self._shared_listener_fd = -1
+        self._per_worker_listener_addrs = List[Int]()
         self._ctx_addrs = List[Int]()
         self._stopping_addr = 0
 
@@ -975,30 +1017,78 @@ struct StaticScheduler(Movable):
         var stopping_addr = Int(stop_ptr)
         s._stopping_addr = stopping_addr
 
-        # Bind ONE shared listener (no SO_REUSEPORT). EPOLLEXCLUSIVE
-        # in each worker's Reactor.register_exclusive picks one
-        # worker per accept event.
-        var bound = bind_shared(addr)
-        try:
-            bound._socket.set_nonblocking(True)
-        except e:
-            _scheduler_free_raw(stop_raw)
-            s._stopping_addr = 0
-            raise e^
-        var listener_fd = Int(bound.as_raw_fd())
-        var lp = alloc[TcpListener](1)
-        lp.init_pointee_move(bound^)
-        s._shared_listener_addr = Int(lp)
-        s._shared_listener_fd = listener_fd
+        # ``FLARE_REUSEPORT_WORKERS=1`` opts into per-worker
+        # SO_REUSEPORT listeners (each worker owns its own
+        # listener fd, kernel hashes new 4-tuples to one of N).
+        # Default is the single shared listener with
+        # EPOLLEXCLUSIVE — strictly tighter p99.99 because the
+        # kernel offers each accept to whichever worker is
+        # currently parked in epoll_wait, but the reuseport
+        # mode delivers measurably higher throughput on
+        # workloads where actix_web (per-worker reuseport by
+        # default) leads the multi-worker pack. See
+        # ``docs/benchmark.md`` for the head-to-head numbers.
+        var use_reuseport_workers = False
+        if getenv("FLARE_REUSEPORT_WORKERS") == "1":
+            use_reuseport_workers = True
+
+        var listener_fd: Int = -1
+        if use_reuseport_workers:
+            # Probe-bind to surface AddressInUse / etc. on the
+            # caller's thread before spawning any workers.
+            try:
+                var probe = bind_reuseport(addr)
+                _ = probe^
+            except e:
+                _scheduler_free_raw(stop_raw)
+                s._stopping_addr = 0
+                raise e^
+            s._shared_listener_addr = 0
+            s._shared_listener_fd = -1
+        else:
+            var bound = bind_shared(addr)
+            try:
+                bound._socket.set_nonblocking(True)
+            except e:
+                _scheduler_free_raw(stop_raw)
+                s._stopping_addr = 0
+                raise e^
+            listener_fd = Int(bound.as_raw_fd())
+            var lp = alloc[TcpListener](1)
+            lp.init_pointee_move(bound^)
+            s._shared_listener_addr = Int(lp)
+            s._shared_listener_fd = listener_fd
 
         s._workers_ptr = alloc[ThreadHandle](num_workers)
         s._workers_len = 0
 
+        # Pre-bind per-worker SO_REUSEPORT listeners on this
+        # thread (serialised binds avoid concurrent-bind races).
+        if use_reuseport_workers:
+            for _ in range(num_workers):
+                try:
+                    var pwl = bind_reuseport(addr)
+                    pwl._socket.set_nonblocking(True)
+                    var ptr = alloc[TcpListener](1)
+                    ptr.init_pointee_move(pwl^)
+                    s._per_worker_listener_addrs.append(Int(ptr))
+                except:
+                    pass
+
         for i in range(num_workers):
             var cfg_copy = config.copy()
             var resp_copy = resp.copy()
+            # Pick this worker's listener fd: either the shared
+            # epoll listener, or its own per-worker SO_REUSEPORT
+            # listener (pre-bound on this thread above).
+            var worker_listener_fd: Int = listener_fd
+            if use_reuseport_workers and i < len(s._per_worker_listener_addrs):
+                var pwl_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
+                    unsafe_from_address=s._per_worker_listener_addrs[i]
+                )
+                worker_listener_fd = Int(pwl_ptr[].as_raw_fd())
             var ctx = _StaticWorkerCtx(
-                listener_fd,
+                worker_listener_fd,
                 addr,
                 cfg_copy^,
                 resp_copy^,
@@ -1088,6 +1178,20 @@ struct StaticScheduler(Movable):
             typed.destroy_pointee()
             _scheduler_free_raw(raw)
             self._shared_listener_addr = 0
+
+        # Free any per-worker SO_REUSEPORT listeners
+        # (FLARE_REUSEPORT_WORKERS=1 path). Each listener's
+        # destructor closes its fd; in-flight epoll registrations
+        # against that fd are unregistered as the worker reactor
+        # tears down before join.
+        for i in range(len(self._per_worker_listener_addrs)):
+            var pwl_raw = _OpaquePtr(
+                unsafe_from_address=self._per_worker_listener_addrs[i]
+            )
+            var pwl_typed = pwl_raw.bitcast[TcpListener]()
+            pwl_typed.destroy_pointee()
+            _scheduler_free_raw(pwl_raw)
+        self._per_worker_listener_addrs.clear()
 
         if self._stopping_addr != 0:
             var stop_raw = _OpaquePtr(unsafe_from_address=self._stopping_addr)

@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime.io_uring`` (Track B0).
+"""Tests for ``flare.runtime.io_uring``.
 
 io_uring is a Linux-only kernel feature (5.1+). On macOS / BSD
 the entire surface returns ``False`` from
@@ -120,11 +120,11 @@ def test_setup_flags_zero_default_works() raises:
 
 
 def test_setup_flag_coop_taskrun_accepted_or_einval() raises:
-    """Phase 2A: ``IORING_SETUP_COOP_TASKRUN`` (5.19+) -- the
-    kernel accepts on >= 5.19 and rejects with EINVAL on
-    older kernels. Either outcome is correct; the test fails
-    only if the ring construction throws an unexpected error
-    type or the host kernel is exotic.
+    """``IORING_SETUP_COOP_TASKRUN`` (5.19+) -- the kernel
+    accepts on >= 5.19 and rejects with EINVAL on older
+    kernels. Either outcome is correct; the test fails only
+    if the ring construction throws an unexpected error type
+    or the host kernel is exotic.
 
     On accept, the ring fd is valid; on reject, the constructor
     raises with errno=22 (EINVAL).
@@ -145,12 +145,11 @@ def test_setup_flag_coop_taskrun_accepted_or_einval() raises:
 
 
 def test_setup_flag_combined_bufring_recipe_accepted_or_einval() raises:
-    """Phase 2A: the bufring path's optimal mix
-    (COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL) on kernel >= 5.19,
-    plus SINGLE_ISSUER | DEFER_TASKRUN on >= 6.1. Combine all
-    five and verify the kernel either accepts (modern) or
-    rejects with EINVAL (older). Catches accidental flag-bit
-    typos.
+    """The bufring path's optimal flag mix (COOP_TASKRUN |
+    TASKRUN_FLAG | SUBMIT_ALL on kernel >= 5.19, plus
+    SINGLE_ISSUER | DEFER_TASKRUN on >= 6.1). Combine all five
+    and verify the kernel either accepts (modern) or rejects
+    with EINVAL (older). Catches accidental flag-bit typos.
     """
     from flare.runtime.io_uring_sqe import (
         IORING_SETUP_COOP_TASKRUN,

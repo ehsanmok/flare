@@ -1,4 +1,4 @@
-"""``io_uring`` SQ/CQ ring driver (Track B0 follow-up).
+"""``io_uring`` SQ/CQ ring driver.
 
 Sits on top of :mod:`flare.runtime.io_uring` (syscall FFI +
 ring setup) and :mod:`flare.runtime.io_uring_sqe` (SQE/CQE
@@ -570,7 +570,7 @@ struct IoUringDriver(Movable):
             _atomic_store_u32_release(self._sq_tail_ptr, self._sq_local_tail)
         # IORING_ENTER_GETEVENTS = 0x1. Always set, even for
         # min_complete=0 calls. With ``IORING_SETUP_DEFER_TASKRUN``
-        # (Phase 2B) the kernel runs deferred task work ONLY on
+        # the kernel runs deferred task work ONLY on
         # GETEVENTS-flagged enter calls -- without GETEVENTS,
         # multishot recv completions never surface to userspace
         # until the NEXT enter call gets the flag, which throttles

@@ -1,4 +1,4 @@
-"""HPACK Huffman codec — RFC 7541 Appendix B (Track B9).
+"""HPACK Huffman codec — RFC 7541 Appendix B.
 
 Implements the canonical Huffman code from RFC 7541 Appendix B
 for HPACK string-literal compression. Provides both encoder and

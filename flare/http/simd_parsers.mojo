@@ -1,5 +1,5 @@
 """SIMD-friendly byte-scan primitives for the HTTP/1.1 parser
-hot path (Track B10).
+hot path.
 
 Three primitives:
 

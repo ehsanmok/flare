@@ -1,15 +1,15 @@
 """Flare multicore HTTP server plaintext baseline -- STATIC fast path.
 
-Phase 1E (throughput parity with Rust libs): drives
-``HttpServer.serve_static_multicore(resp, num_workers=N)`` so N
-pthread workers share a single listener fd via ``EPOLLEXCLUSIVE``
-(Linux) or fall back to plain accept (macOS), AND every request
-is answered with a pre-encoded ``StaticResponse`` --
-``ConnHandle.on_readable_static`` parses far enough to locate the
-header terminator + Content-Length, then ``memcpy``s the canned
-bytes into the write queue. No parser builds a HeaderMap, no
-handler is called, no Response struct is allocated, no headers are
-looked up, no body is re-serialised per request.
+Drives ``HttpServer.serve_static_multicore(resp, num_workers=N)``
+so N pthread workers share a single listener fd via
+``EPOLLEXCLUSIVE`` (Linux) or fall back to plain accept (macOS),
+AND every request is answered with a pre-encoded
+``StaticResponse`` -- ``ConnHandle.on_readable_static`` parses
+far enough to locate the header terminator + Content-Length,
+then ``memcpy``s the canned bytes into the write queue. No
+parser builds a HeaderMap, no handler is called, no Response
+struct is allocated, no headers are looked up, no body is
+re-serialised per request.
 
 This is the apples-to-apples shape against the
 ``benchmark/baselines/{actix_web,hyper,axum}`` setups for the

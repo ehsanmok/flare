@@ -1,4 +1,4 @@
-"""Per-worker ``Response`` pool (Track B6).
+"""Per-worker ``Response`` pool.
 
 Holds a small stack of pre-allocated, reset-in-place ``Response``
 objects so the keep-alive hot path can reuse the same struct

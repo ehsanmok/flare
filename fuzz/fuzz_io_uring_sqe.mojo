@@ -1,9 +1,9 @@
 """Fuzz harness: io_uring SQE encoder + CQE decoder primitives
 (``flare.runtime.io_uring_sqe``).
 
-Track F1 (v0.7 stability gate). Targets the byte-level codec
-that the upcoming ``UringReactor`` calls every poll cycle to
-fill SQE slots and decode CQE slots. Three properties:
+Targets the byte-level codec that ``UringReactor`` calls every
+poll cycle to fill SQE slots and decode CQE slots. Three
+properties:
 
 1. **Prep helpers never panic** on arbitrary opcode-shape inputs
    (fd / addr / len / flags / user_data drawn from fuzzer bytes).

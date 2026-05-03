@@ -1,7 +1,7 @@
 """Tiny tag-based template engine.
 
-Askama-shape minimal subset for v0.7. Supports the three tags
-that cover ~90% of HTML / email / config templating use:
+Askama-shape minimal subset. Supports the three tags that
+cover ~90% of HTML / email / config templating use:
 
 * ``{{ name }}`` — variable substitution (HTML-escaped by
   default; ``{{ name | safe }}`` opts out).
@@ -13,7 +13,7 @@ that cover ~90% of HTML / email / config templating use:
   list-typed context value; each iteration shadows ``x`` for
   the body.
 
-Out of scope for v0.7 (deferred to v0.8 per design-0.7.mdc § 273):
+Out of scope (potential future additions):
 
 - Template inheritance / blocks (``{% block %}`` /
   ``{% extends %}``).
@@ -41,7 +41,7 @@ Why a parsed tree and not a single string-walk:
 - The parser runs once per :func:`Template.compile` and the
   parsed tree is cached on the ``Template`` struct, so the
   per-render cost is just the tree walk + variable lookups.
-- A future ``v0.8`` block-inheritance upgrade is a tree-rewrite,
+- A future block-inheritance upgrade would be a tree-rewrite,
   not a re-parse.
 
 Performance:
@@ -52,7 +52,7 @@ the number of variable lookups. Variable lookups are O(1)
 one growing buffer. There is no pre-rendered "compiled function"
 shape (askama / sailfish do this with codegen at compile time);
 flare's reactor latency budget is dominated by network IO not
-template render, so the v0.7 cut keeps the parser-tree-walker
+template render, so the engine keeps the parser-tree-walker
 simple.
 
 Error handling:

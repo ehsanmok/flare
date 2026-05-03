@@ -1,5 +1,5 @@
 """Integration test for the io_uring buffer-ring handler-path
-wire-in (Track B0 v3, the gap-closing commit).
+wire-in.
 
 When :func:`flare.runtime.uring_reactor.use_uring_backend` returns
 True, ``HttpServer.serve(handler)`` routes through
@@ -316,7 +316,7 @@ def test_serve_handler_concurrent_fanout() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_uring_serve_handler.mojo - Track B0 buffer-ring wire-in")
+    print("test_uring_serve_handler.mojo - io_uring buffer-ring wire-in")
     print("=" * 60)
     var suite = TestSuite()
     suite.test[test_serve_handler_sequential_keepalive_churn]()

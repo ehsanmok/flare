@@ -1,5 +1,5 @@
 """Interned ``StaticString`` table for HTTP method names + common
-header values (Track B3).
+header values.
 
 Replaces the parser hot path's per-request ``String`` allocation
 for the 9 RFC 7231 method names (GET, POST, PUT, PATCH, DELETE,

@@ -1,4 +1,4 @@
-"""Per-worker monotonic Date-header cache (Track B7).
+"""Per-worker monotonic Date-header cache.
 
 `Date: <IMF-fixdate>` per RFC 9110 §6.6.1 / RFC 5322 §3.3:
 

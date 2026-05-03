@@ -40,24 +40,27 @@ The bar isn't "is it fast", it's *is it hard to misuse under load and easy to op
 
 ## Numbers
 
-TFB plaintext (`GET /plaintext` → 13-byte `Hello, World!`), `wrk2` calibrated-peak harness with `--latency` (coordinated-omission corrected). Linux AWS EPYC 7R32, `wrk2 -t8 -c256 -d30s`, 5x30 s measurement runs at 90 %-of-peak. Worker counts spelled out per row. Full methodology + tables in [`docs/benchmark.md`](docs/benchmark.md).
+TFB plaintext (`GET /plaintext` → 13-byte `Hello, World!`), `wrk2 -t8 -c256 -d12s --latency` (coordinated-omission corrected), Linux EPYC 7R32. Each row's `R=` is the highest sustained rate that holds p99.99 ≤ 5 ms (one step below the queue-overflow cliff).
 
-| Server | Workers | Req/s (median) | p99 (ms) | p99.99 (ms) |
+| Server | Workers | Req/s (peak-sustainable) | p99 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|
-| actix_web (tokio) | 4 | 264,691 | 2.80 | 21.61 |
-| hyper (tokio multi-thread) | 4 | 221,349 | 2.82 | 3.67 |
-| **flare_mc_static** (Phase 1E, dev-box) | **4** | **200,658** | **2.52** ← best | 31.79 |
-| axum (tokio multi-thread) | 4 | 201,042 | 2.82 | 3.65 |
-| **flare_mc** (handler, shared listener) | **4** | **170,305** | **2.38** | **3.11** |
-| nginx (`worker_processes 1`) | 1 | 63,764 | 2.29 | 3.03 |
-| **flare** (reactor) | **1** | **56,086** | **2.70** | **3.54** |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 35,940 | 2.92 | 5.47 |
+| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **258,292** | **2.77** | **3.54** |
+| actix_web (tokio) | 4 | 248,361 | 2.72 | 3.43 |
+| **flare_mc** (handler) [^reuse] | **4** | **238,431** | **2.76** | **3.47** |
+| hyper (tokio multi-thread) | 4 | 208,624 | 2.79 | 3.70 |
+| axum (tokio multi-thread) | 4 | 189,953 | 2.69 | 3.74 |
+| nginx (`worker_processes 1`) | 1 | 68,875 | 2.95 | 3.59 |
+| **flare** (reactor) | **1** | **52,147** | **2.79** | **3.46** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 34,439 | 2.98 | 4.70 |
 
-- **Phase 1E throughput jump.** `HttpServer.serve_static_multicore(resp, num_workers=N)` collapses per-request work to ``recv -> _scan_content_length -> memcpy(resp.bytes) -> send`` -- no parser, no handler, no Response struct allocation. Dev-box A/B (HEAD `8ffb996`, calibrated `bench-vs-baseline --configs=throughput_mc`): **200,658 req/s** vs handler-driven `flare_mc` **183,588** (+9 % calibrated; +24 % under wrk2 saturate-mode). Holds **best p99 of all 4 mc servers (2.52 ms)** while landing within 8 % of hyper.
-- **Apples-to-apples 4-worker comparison.** `flare_mc`, `hyper`, `axum`, `actix_web` all run **4 OS worker threads**. flare_mc handler-driven holds the **best p99 / p99.9 / p99.99** of the four (2.38 / 2.73 / 3.11 ms) and lands at **64 % of the throughput leader** (actix_web). The new `flare_mc_static` row uses the same OS worker count + the static fast path to close the throughput gap to hyper.
-- **Per-core baseline.** `flare`, `nginx`, `go_nethttp` all run **1 OS worker thread**. flare 1w is **88 % of nginx 1w** throughput and **1.56x Go 1w**, with comparable tail latency.
-- **Multi-worker scaling.** flare_mc 4w / flare 1w = **3.04x** at the same workload.
-- **Apple M-series, single-worker**: ~157K req/s, ~1.10x Go `net/http`.
+- **flare_mc_static beats actix_web** (+4 % req/s, **fastest** of the five 4-worker frameworks).
+- **flare_mc handler beats hyper** (+14 %) **and axum** (+25 %) and is within 4 % of actix_web.
+- **flare keeps a tight tail** at peak: 3.47 ms / 3.54 ms p99.99 vs actix_web 3.43, hyper 3.70, axum 3.74.
+- **flare 1w** keeps the tightest p99.99 of the single-worker pack (3.46 ms vs nginx 3.59 / Go 4.70). Throughput: 76 % of nginx 1w and 1.51x Go 1w on this unpinned dev-box (88 % / 1.56x on the historical CPU-pinned reference).
+
+Full methodology, the rate-sweep that locates each cliff, the historical CPU-pinned reference run, and reproducibility instructions are in [`docs/benchmark.md`](docs/benchmark.md).
+
+[^reuse]: Multi-worker flare runs with `FLARE_REUSEPORT_WORKERS=1`, opting the epoll path into per-worker `SO_REUSEPORT` listeners (matching actix_web's listener strategy for a fair head-to-head). The default `unset` keeps the single-listener `EPOLLEXCLUSIVE` shape, which trades ~10 % req/s for an even tighter p99.99 (3.23 ms in the historical CPU-pinned reference). See [`docs/benchmark.md`](docs/benchmark.md) for both modes.
 
 ## Install
 

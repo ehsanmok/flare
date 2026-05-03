@@ -83,22 +83,21 @@ struct ServerConfig(Copyable, Movable):
     var handler_timeout_ms: Int
     var request_timeout_ms: Int
     var skip_header_decode_for_short_requests: Bool
-    """Phase 1C (throughput parity with Rust libs): when True, the
-    parser skips the per-request ``HeaderMap`` build for requests
-    whose handler doesn't read headers. Header bytes are still
-    scanned (RAW) for ``Content-Length`` (so body framing stays
-    correct) and for ``Connection: close`` (so keep-alive policy
-    stays correct), but per-header ``String`` allocations + the
-    ``HeaderMap`` itself are elided. ``Request.headers`` is an
-    empty ``HeaderMap`` -- handlers that read headers will see
-    an empty map and silently break, so this opt-in is
-    appropriate ONLY for handlers known to ignore headers
-    (TFB plaintext, fixed health-checks, low-latency
-    micro-services).
+    """When True, the parser skips the per-request ``HeaderMap``
+    build for requests whose handler doesn't read headers.
+    Header bytes are still scanned (RAW) for ``Content-Length``
+    (so body framing stays correct) and for ``Connection: close``
+    (so keep-alive policy stays correct), but per-header
+    ``String`` allocations + the ``HeaderMap`` itself are elided.
+    ``Request.headers`` is an empty ``HeaderMap`` -- handlers
+    that read headers will see an empty map and silently break,
+    so this opt-in is appropriate ONLY for handlers known to
+    ignore headers (TFB plaintext, fixed health-checks,
+    low-latency micro-services).
 
-    Default ``False`` -- the historical full-parse behaviour.
-    Set ``True`` on the bench config and on production servers
-    whose handler shape doesn't depend on headers."""
+    Default ``False`` -- the standard full-parse behaviour.
+    Set ``True`` on production servers whose handler shape
+    doesn't depend on headers."""
 
     def __init__(
         out self,
@@ -252,12 +251,16 @@ struct HttpServer(Movable):
           (kqueue on macOS, epoll on Linux). Same hot path as the
           ``serve``.
         - ``num_workers >= 2``: multicore — N ``pthread`` workers
-          sharing a single listener fd, each registering it with
-          ``EPOLLEXCLUSIVE`` (on Linux >= 4.5) via
-          ``flare.runtime.scheduler.Scheduler``. The kernel
-          wakes one worker per accept event, eliminating the
-          ``SO_REUSEPORT`` 4-tuple-hash distribution variance that
-          drove tail-latency spikes .
+          via ``flare.runtime.scheduler.Scheduler``. By default
+          the workers share a single listener fd registered with
+          ``EPOLLEXCLUSIVE`` (Linux >= 4.5), which wakes one
+          worker per accept event and gives the tightest p99.99
+          (no ``SO_REUSEPORT`` 4-tuple-hash distribution variance).
+          Export ``FLARE_REUSEPORT_WORKERS=1`` before launch to
+          instead pre-bind one ``SO_REUSEPORT`` listener per
+          worker on the Scheduler thread -- trades ~0.25 ms
+          p99.99 for ~21 % more req/s on unpinned dev-boxes /
+          high-core-count instances; see ``docs/benchmark.md``.
 
         For Router / middleware / stateful-struct handlers, use the
         Handler-typed overload ``serve[H: Handler & Copyable]``.
@@ -628,7 +631,7 @@ struct HttpServer(Movable):
         from std.sys.info import CompilationTarget
 
         self._stopping = False
-        # Track B0 wire-in: route the static-response path through
+        # Route the static-response path through
         # the io_uring reactor when the kernel exposes io_uring AND
         # the contributor hasn't set ``FLARE_DISABLE_IO_URING=1`` for
         # an A/B comparison run. The two loops are functional twins:
@@ -658,9 +661,8 @@ struct HttpServer(Movable):
 
         Spawns ``num_workers`` pthread workers via
         :class:`flare.runtime.scheduler.StaticScheduler`, each running
-        ``run_reactor_loop_static_shared`` against a shared listener
-        with EPOLLEXCLUSIVE accept fairness. Per-request work in each
-        worker collapses to ``recv -> _scan_content_length ->
+        ``run_reactor_loop_static_shared``. Per-request work in
+        each worker collapses to ``recv -> _scan_content_length ->
         memcpy(resp.bytes) -> send`` -- no parser, no handler, no
         Response struct allocation, no header lookups, no body
         re-serialisation. This is the fastest path flare exposes for
@@ -668,12 +670,18 @@ struct HttpServer(Movable):
         across cores because each worker owns its own conns dict +
         write buffers (no cross-thread state).
 
-        The HttpServer's bound listener is closed before spawning
-        (the StaticScheduler binds its own shared listener via
-        ``bind_shared`` at the same address). Caller is expected to
-        hold the StaticScheduler reference returned via
-        ``self._stopping`` indirectly -- in practice, callers run
-        this until SIGINT and let the process exit.
+        The HttpServer's bound listener is closed before spawning;
+        the StaticScheduler then binds its own listener(s) at the
+        same address. By default a single shared listener is bound
+        with ``EPOLLEXCLUSIVE`` (tightest p99.99). Export
+        ``FLARE_REUSEPORT_WORKERS=1`` before launch to instead
+        pre-bind one ``SO_REUSEPORT`` listener per worker -- ~21 %
+        more req/s for ~0.25 ms more p99.99 on unpinned dev-boxes
+        / high-core-count instances; see ``docs/benchmark.md``.
+
+        Caller is expected to hold the StaticScheduler reference
+        returned via ``self._stopping`` indirectly -- in practice,
+        callers run this until SIGINT and let the process exit.
 
         Args:
             resp: Pre-encoded response bytes (copied per worker).
@@ -1073,9 +1081,8 @@ def _parse_http_request_bytes_minimal(
     peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
     expose_errors: Bool = False,
 ) raises -> Request:
-    """Phase 1C (throughput parity): minimal-headers parser
-    that constructs only the request line + body, leaving the
-    ``HeaderMap`` empty.
+    """Minimal-headers parser that constructs only the request
+    line + body, leaving the ``HeaderMap`` empty.
 
     Designed for ``ServerConfig.skip_header_decode_for_short_-
     requests=True`` callers. The caller has already located the

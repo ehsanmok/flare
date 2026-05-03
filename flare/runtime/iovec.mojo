@@ -1,4 +1,4 @@
-"""``writev(2)`` vectored-I/O primitive (Track B4).
+"""``writev(2)`` vectored-I/O primitive.
 
 Provides ``IoVecBuf`` — a typed wrapper around a heap-allocated
 ``struct iovec[]`` array — and the high-level ``writev_buf_all``
