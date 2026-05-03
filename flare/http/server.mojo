@@ -266,22 +266,10 @@ struct HttpServer(Movable):
         var h = FnHandler(handler)
         if num_workers <= 1:
             self._stopping = False
-            # Track B0 wire-in v3 (buffer-ring path) is OPT-IN
-            # via ``FLARE_BUFRING_HANDLER=1`` until the dispatch
-            # overhead is tuned to match epoll's peak throughput
-            # on commodity hardware. Substrate + dispatch +
-            # cancel-before-free fix all ship and pass under
-            # sustained load (test_uring_serve_handler 2/2);
-            # bench-vs-baseline on this dev-box currently shows
-            # io_uring with better tail (p99=2.76 vs 3.11 ms,
-            # p99.99=3.26 vs 3.46 ms) but lower peak (49,812
-            # vs 65,990 req/s = -32 % from the per-CQE
-            # PROVIDE_BUFFERS refill + cancel_conn cleanup
-            # overhead). Production / TFB-style benchmarks
-            # default to the proven epoll path until the
-            # io_uring path's overhead is tuned (the EPYC
-            # 4-worker run is the hardware that should flip
-            # the trade in io_uring's favour).
+            # OPT-IN via FLARE_BUFRING_HANDLER=1; see the matching
+            # comment in the generic ``serve[H]`` overload above
+            # for why the bufring path is default-OFF (crashes
+            # under sustained 64-conn wrk2 load).
             comptime if CompilationTarget.is_linux():
                 if (
                     use_uring_backend()
@@ -331,10 +319,38 @@ struct HttpServer(Movable):
             Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import run_reactor_loop
+        from ._server_reactor_impl import (
+            run_reactor_loop,
+            run_uring_bufring_reactor_loop,
+        )
+        from flare.runtime.uring_reactor import use_uring_backend
+        from std.os import getenv
+        from std.sys.info import CompilationTarget
 
         if num_workers <= 1:
             self._stopping = False
+            # io_uring buffer-ring path is OPT-IN via
+            # ``FLARE_BUFRING_HANDLER=1``. Substrate ships and
+            # passes test-uring-serve-handler (8 connections,
+            # 50 keepalive churn, 8 concurrent fanout) but
+            # crashes under SUSTAINED 64-conn wrk2-style load
+            # (segfault on the 1st bench iteration). The crash
+            # reproduces with FnHandler closures (test_bufring_load
+            # 6s @ 80K rps target -> SIGSEGV after ~50 reqs) and
+            # is independent of the handler shape -- pointing at
+            # a race in the bufring dispatch / cancel-on-close /
+            # PBUF_RING tail-bump interaction under high recv-CQE
+            # rate. Default-off until the bench-load crash is
+            # root-caused.
+            comptime if CompilationTarget.is_linux():
+                if (
+                    use_uring_backend()
+                    and getenv("FLARE_BUFRING_HANDLER") == "1"
+                ):
+                    run_uring_bufring_reactor_loop[H](
+                        self._listener, self.config, handler, self._stopping
+                    )
+                    return
             run_reactor_loop(
                 self._listener, self.config, handler, self._stopping
             )

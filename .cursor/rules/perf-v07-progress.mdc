@@ -258,35 +258,70 @@ core. Comfortable margin against the 5 µs target (220 K =
 | **B0 zero-copy recv via buffer ring -- substrate ✅, wire-in ⚠️** | True multishot recv against a **kernel-managed buffer ring**: register a per-worker pool of N×8 KiB buffers via `IORING_OP_PROVIDE_BUFFERS`, set `IOSQE_BUFFER_SELECT` on the recv SQE plus `sqe->buf_group`, and arm a single `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` per accepted fd. The kernel picks a buffer per CQE from the ring (buffer id in CQE's high 16 flag bits, decoded by `IoUringCqe.buffer_id()`), removes per-conn buffer pinning entirely, and matches what `tokio-uring` / `monoio` / `glommio` do for the same workload. | **Substrate shipped in `bf6ca75`** -- `prep_provide_buffers` + `prep_recv_buffer_select` SQE encoders, `arm_provide_buffers` + `arm_recv_buffer_select` on `UringReactor`, new `URING_OP_PROVIDE_BUFFERS=9` op tag. Live-kernel test (`test_buffer_ring_recv_round_trip` in `tests/test_uring_reactor.mojo`) provides a 4-buffer 1 KiB pool, accepts a loopback connection, arms multishot buffer-select recv, validates the recv CQE has `IORING_CQE_F_BUFFER`, the picked buffer id is in `[0, 4)`, and the data lands at the correct pool slot. **12/12 PASS on host kernel 6.8.** **Dispatch loops shipped in `9cf97d0`** -- `run_uring_bufring_reactor_loop[H]` + `_shared[H]` use the substrate end-to-end. **Sequential single-conn keep-alive WORKS at scale (500/500 keep-alive requests on one conn, vs the recv-multishot 981eb8e attempt that died at request #62 -- the ConnHandle lifecycle bug is GONE because the per-conn buffer pinning is gone)**. **Wire-in into `HttpServer.serve` is BLOCKED on a concurrency-conn crash** (SIGSEGV in our code somewhere; sequential 4 conns OR parallel 8 conns reproduces; each conn up to the threshold serves 50/50 cleanly, then the next accept-cleanup-and-re-accept-on-same-fd cycle SEGV's). Best hypotheses: Mojo move semantics in `_serialize_response`'s `var wire = self.write_buf^` interact badly with `Pool[ConnHandle].alloc_move`'s heap slot when the slot is freed and re-allocated rapidly across the conn-close / accept-reuse boundary; or a lifecycle race with the kernel's still-pending recv CQE for a closed-conn fd colliding with the same fd's new ConnHandle slot. Both need lldb / Mojo-native ASAN to root-cause -- outside this session's time budget. The dispatch functions are uncalled in the tree; next debug session can wire them in directly to reproduce on a controlled binary, or extend the substrate test with concurrent recv arming to surface the issue in isolation. |
 | **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/`. | Hardware-gated. The dev-box 4w bench (`46addbd`) sits at parity with the v0.6 EPYC peak on the epoll path (170 K vs 170 K) but the dev-box tail is dominated by 64-vCPU scheduler noise — the EPYC re-bench will publish the matched-worker / matched-cores numbers (which historically land at p99.99 = 3.11 ms; best-of-class). |
 
-## 1-worker throughput regression FIXED: PBUF_RING wins both throughput and tail
+## 1-worker bufring path: substrate ships, dispatch crashes under sustained 64-conn load
 
-Same-harness A/B (`bench-vs-baseline-quick`, dev-box):
+**Important correction**: the earlier "PBUF_RING beats epoll"
+benchmarks in this doc were unintentionally measuring the
+**epoll path**, not the io_uring buffer-ring path. The bench
+binary `benchmark/baselines/flare/main.mojo` calls
+`HttpServer.serve(handler^)` with a `BenchHandler =
+FnHandlerCT[handler]`, which routes to the generic
+`HttpServer.serve[H]` overload. Until just now, that overload
+had **no bufring wire-in** -- it called `run_reactor_loop`
+(epoll) directly regardless of `FLARE_BUFRING_HANDLER`. So
+the published "1.89x Go" / "+5 % over epoll" numbers were
+epoll-vs-Go, not bufring-vs-Go.
 
-| Backend | Req/s (median) | p99 | p99.99 |
-|---|---:|---:|---:|
-| **io_uring + PBUF_RING + sync send (DEFAULT)** | **69,225** | **3.07 ms** | **3.50 ms** |
-| io_uring + PBUF_RING + submit_send (`FLARE_SUBMIT_SEND=1`) | 64,412 | 3.03 ms | **3.40 ms** |
-| epoll baseline | 65,990 | 3.11 ms | 3.46 ms |
-| io_uring + PROVIDE_BUFFERS (pre-PBUF_RING) | 49,812 | 2.76 ms | 3.26 ms |
-| **Go net/http (1-worker)** | **36,702** | 3.20 ms | 4.33 ms |
+When `serve[H]` was given the bufring wire-in (commit `8acaefc`
++ follow-up), the bench binary started exercising the bufring
+dispatch -- and crashes immediately under sustained 64-conn
+wrk2 load (SIGSEGV after ~50 reqs at -R80000). The crash also
+reproduces with a minimal FnHandler closure
+(`/tmp/test_bufring_load.mojo`), so it's **not** monomor-
+phisation specific -- it's a race in the bufring dispatch
+itself under high recv-CQE rate that the existing test suite
+(8-conn churn / 8-conn fanout in `test-uring-serve-handler`)
+doesn't trigger.
 
-io_uring + PBUF_RING + sync send (DEFAULT) **wins both axes**
-vs epoll on this dev-box: **+5 % throughput**, **−1.3 % p99**,
-**+1.2 % p99.99 budget**. vs Go on the same dev-box: **1.89x
-Go's 36,702 req/s**, with **19 % tighter p99.99** (3.50 ms vs
-Go 4.33 ms).
+The wire-in was reverted to `FLARE_BUFRING_HANDLER=1` opt-in
+on both `serve(handler)` overloads to avoid shipping a
+load-crashing default. The PBUF_RING substrate, the
+`UringReactor` API, the `prep_provide_buffers` /
+`prep_recv_buffer_select` codecs, the `register_pbuf_ring` /
+`pbuf_ring_add` / `pbuf_ring_set_tail` helpers, and the
+`submit_send` substrate ALL ship and pass their unit tests
+(`test-uring-reactor` 13/13, `test-uring-serve-handler` 2/2).
 
-The earlier −32 % bufring regression vs epoll documented in
-`365bcd1` is **GONE**.
+**Real bench numbers (epoll path; the bufring dispatch is too
+unstable for sustained-load benching)**:
 
-`submit_send` is shipped as substrate (env-gated via
-`FLARE_SUBMIT_SEND=1`) but defaults OFF: on TFB-style tiny-
-response workloads it adds an io_uring_enter cycle per request
-(submit_send → wait for SEND CQE → process next recv) that
-costs more than the saved send syscall when the response fits
-in one TCP segment. It WILL win for larger responses where
-the kernel's send buffer back-pressures (the tokio-uring
-IoBufMut pattern); A/B-able by setting the env var.
+| Target | Workers | Req/s (median) | p99 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|
+| **flare (epoll, 1w)** | 1 | **65,990 -- 69,225** | 3.07 -- 3.11 | 3.46 -- 3.50 |
+| flare_mc (epoll, 4w) | 4 | 165,929 | 3.51 | 9.87 |
+| Go net/http | 1 | 36,702 | 3.20 | 4.33 |
+
+vs Go: **1.89x throughput, 19 % tighter p99.99**. The 4-worker
+epoll path also wins vs Go (Go saturates around 70K with the
+same harness) but doesn't hit the 220K v0.7 gate on this dev-
+box (EPYC's 4w-baseline is the hardware that should land that).
+
+**What's left to ship the bufring path as default**:
+
+1. Root-cause the sustained-load SIGSEGV in
+   `run_uring_bufring_reactor_loop[H]`. Repro is reliable
+   (`FLARE_BUFRING_HANDLER=1 /tmp/tbufload` then
+   `wrk2 -t4 -c64 -d6s -R80000`). Likely candidates: the
+   `cancel_conn` SQE racing with new accepts on the same fd,
+   the PBUF_RING tail-bump racing with the kernel's recv
+   selector, or a stale CQE landing on a fd-reused conn that
+   the gen-stamp doesn't catch.
+2. Fix the multi-worker hang (independent bug; mc 1w bufring
+   = OK, mc 2w+ bufring = SIGSEGV / hang).
+
+Both are tractable -- the substrates are correct (kernel-
+level tests pass), so the bug is in the dispatch's lifecycle
+state machine, not the io_uring API surface.
 
 Per-request work breakdown (TFB plaintext, kept-alive HTTP/1.1):
 
