@@ -254,26 +254,12 @@ struct HttpServer(Movable):
             Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import (
-            run_reactor_loop,
-            run_uring_reactor_loop,
-        )
+        from ._server_reactor_impl import run_reactor_loop
         from .handler import FnHandler
-        from flare.runtime.uring_reactor import use_uring_backend
-        from std.sys.info import CompilationTarget
 
         var h = FnHandler(handler)
         if num_workers <= 1:
             self._stopping = False
-            # Track B0 wire-in (handler path): route the dynamic
-            # handler through the io_uring reactor when the kernel
-            # exposes io_uring AND ``FLARE_DISABLE_IO_URING`` is unset.
-            comptime if CompilationTarget.is_linux():
-                if use_uring_backend():
-                    run_uring_reactor_loop(
-                        self._listener, self.config, h, self._stopping
-                    )
-                    return
             run_reactor_loop(self._listener, self.config, h, self._stopping)
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
@@ -314,24 +300,10 @@ struct HttpServer(Movable):
             Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import (
-            run_reactor_loop,
-            run_uring_reactor_loop,
-        )
-        from flare.runtime.uring_reactor import use_uring_backend
-        from std.sys.info import CompilationTarget
+        from ._server_reactor_impl import run_reactor_loop
 
         if num_workers <= 1:
             self._stopping = False
-            # Track B0 wire-in (handler path): route the dynamic
-            # handler through the io_uring reactor when the kernel
-            # exposes io_uring AND ``FLARE_DISABLE_IO_URING`` is unset.
-            comptime if CompilationTarget.is_linux():
-                if use_uring_backend():
-                    run_uring_reactor_loop[H](
-                        self._listener, self.config, handler, self._stopping
-                    )
-                    return
             run_reactor_loop(
                 self._listener, self.config, handler, self._stopping
             )
