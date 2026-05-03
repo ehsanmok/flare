@@ -95,6 +95,8 @@ from ..tcp.stream import _connect_with_fallback
 from ..tls import TlsStream, TlsConfig
 from ..net import NetworkError, SocketAddr
 
+from json import dumps, Value as JsonValue
+
 
 # ── Http2Response ─────────────────────────────────────────────────────────
 
@@ -1260,6 +1262,15 @@ struct Http2Client(Movable):
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
 
+    def post(mut self, url: String, body: JsonValue) raises -> Response:
+        """Perform an HTTP/2 POST with a ``json.Value`` body.
+
+        Serialises ``body`` to JSON with ``dumps`` and sets
+        ``Content-Type: application/json`` automatically. Mirrors
+        :meth:`flare.http.HttpClient.post(url, body: JsonValue)`.
+        """
+        return self.post(url, dumps(body))
+
     def post(mut self, url: String, body: List[UInt8]) raises -> Response:
         """Perform an HTTP/2 POST with a raw byte body
         (no automatic ``Content-Type``)."""
@@ -1277,10 +1288,44 @@ struct Http2Client(Movable):
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
 
+    def put(mut self, url: String, body: JsonValue) raises -> Response:
+        """Perform an HTTP/2 PUT with a ``json.Value`` body.
+
+        Serialises ``body`` to JSON with ``dumps`` and sets
+        ``Content-Type: application/json`` automatically. Mirrors
+        :meth:`flare.http.HttpClient.put(url, body: JsonValue)`.
+        """
+        return self.put(url, dumps(body))
+
     def put(mut self, url: String, body: List[UInt8]) raises -> Response:
         """Perform an HTTP/2 PUT with a raw byte body."""
         var req = Request(
             method=Method.PUT, url=self._resolve_url(url), body=body.copy()
+        )
+        return self.send(req)
+
+    def patch(mut self, url: String, body: String) raises -> Response:
+        """Perform an HTTP/2 PATCH with a string body
+        (sets ``Content-Type: application/json`` automatically)."""
+        var body_bytes = List[UInt8](body.as_bytes())
+        var req = Request(
+            method=Method.PATCH, url=self._resolve_url(url), body=body_bytes^
+        )
+        req.headers.set("Content-Type", "application/json")
+        return self.send(req)
+
+    def patch(mut self, url: String, body: JsonValue) raises -> Response:
+        """Perform an HTTP/2 PATCH with a ``json.Value`` body.
+
+        Serialises ``body`` to JSON with ``dumps`` and sets
+        ``Content-Type: application/json`` automatically.
+        """
+        return self.patch(url, dumps(body))
+
+    def patch(mut self, url: String, body: List[UInt8]) raises -> Response:
+        """Perform an HTTP/2 PATCH with a raw byte body."""
+        var req = Request(
+            method=Method.PATCH, url=self._resolve_url(url), body=body.copy()
         )
         return self.send(req)
 
@@ -1463,3 +1508,86 @@ def _h2_response_to_http(var h2: Http2Response) raises -> Response:
         except:
             pass
     return resp^
+
+
+# ── Module-level convenience functions ───────────────────────────────────
+
+
+def get(url: String) raises -> Response:
+    """Perform a one-shot HTTP/2 GET request.
+
+    Creates a temporary :class:`Http2Client` for this single
+    request. For multiple requests against the same origin,
+    instantiate :class:`Http2Client` once and reuse it -- HTTP/2
+    multiplexes streams over one TCP connection, so connection
+    reuse is the whole point of the protocol. These module-level
+    shortcuts are the parity surface for
+    :func:`flare.http.get` / :func:`flare.http.post` etc., kept
+    so callers can flip the import without touching the call site.
+    """
+    return Http2Client().get(url)
+
+
+def post(url: String, body: String) raises -> Response:
+    """Perform a one-shot HTTP/2 POST with a string body
+    (auto-sets ``Content-Type: application/json``)."""
+    var c = Http2Client()
+    return c.post(url, body)
+
+
+def post(url: String, body: JsonValue) raises -> Response:
+    """Perform a one-shot HTTP/2 POST with a ``json.Value`` body."""
+    var c = Http2Client()
+    return c.post(url, body)
+
+
+def post(url: String, body: List[UInt8]) raises -> Response:
+    """Perform a one-shot HTTP/2 POST with a raw byte body."""
+    var c = Http2Client()
+    return c.post(url, body)
+
+
+def put(url: String, body: String) raises -> Response:
+    """Perform a one-shot HTTP/2 PUT with a string body."""
+    var c = Http2Client()
+    return c.put(url, body)
+
+
+def put(url: String, body: JsonValue) raises -> Response:
+    """Perform a one-shot HTTP/2 PUT with a ``json.Value`` body."""
+    var c = Http2Client()
+    return c.put(url, body)
+
+
+def put(url: String, body: List[UInt8]) raises -> Response:
+    """Perform a one-shot HTTP/2 PUT with a raw byte body."""
+    var c = Http2Client()
+    return c.put(url, body)
+
+
+def patch(url: String, body: String) raises -> Response:
+    """Perform a one-shot HTTP/2 PATCH with a string body."""
+    var c = Http2Client()
+    return c.patch(url, body)
+
+
+def patch(url: String, body: JsonValue) raises -> Response:
+    """Perform a one-shot HTTP/2 PATCH with a ``json.Value`` body."""
+    var c = Http2Client()
+    return c.patch(url, body)
+
+
+def patch(url: String, body: List[UInt8]) raises -> Response:
+    """Perform a one-shot HTTP/2 PATCH with a raw byte body."""
+    var c = Http2Client()
+    return c.patch(url, body)
+
+
+def delete(url: String) raises -> Response:
+    """Perform a one-shot HTTP/2 DELETE request."""
+    return Http2Client().delete(url)
+
+
+def head(url: String) raises -> Response:
+    """Perform a one-shot HTTP/2 HEAD request."""
+    return Http2Client().head(url)

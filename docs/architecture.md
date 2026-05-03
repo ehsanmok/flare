@@ -193,6 +193,83 @@ What *doesn't* port automatically (RFC 9113 §8.2.2):
   not implemented. WebSocket clients/servers stay on HTTP/1.1
   for now.
 
+### API surface parity (HTTP/1.1 ↔ HTTP/2)
+
+The pairs below have **byte-for-byte identical method
+signatures** -- swap the type name and the call site stays
+the same:
+
+#### Client
+
+| Method | `HttpClient` | `Http2Client` |
+|---|:---:|:---:|
+| `__init__()` | ✓ | ✓ |
+| `__init__(base_url=..., user_agent=...)` | ✓ | ✓ |
+| `__init__(tls: TlsConfig, base_url=..., user_agent=...)` | ✓ | ✓ |
+| `__init__[A: Auth](auth, base_url=..., user_agent=...)` | ✓ | ✓ |
+| `__init__[A: Auth](base_url, auth, user_agent=...)` | ✓ | ✓ |
+| `__enter__` (context manager) | ✓ | ✓ |
+| `get(url) -> Response` | ✓ | ✓ |
+| `post(url, body: String)` | ✓ | ✓ |
+| `post(url, body: json.Value)` | ✓ | ✓ |
+| `post(url, body: List[UInt8])` | ✓ | ✓ |
+| `put(url, body: String)` | ✓ | ✓ |
+| `put(url, body: json.Value)` | ✓ | ✓ |
+| `put(url, body: List[UInt8])` | ✓ | ✓ |
+| `patch(url, body: String)` | ✓ | ✓ |
+| `patch(url, body: json.Value)` | ✓ | ✓ |
+| `patch(url, body: List[UInt8])` | ✓ | ✓ |
+| `delete(url)` | ✓ | ✓ |
+| `head(url)` | ✓ | ✓ |
+| `send(req: Request) -> Response` | ✓ | ✓ |
+| Module-level `flare.http.{get,post,put,patch,delete,head}` / `flare.http2.{get,post,put,patch,delete,head}` | ✓ | ✓ |
+
+Two intrinsic differences (both inherent to the protocol shape,
+not API debt):
+
+- `HttpClient` methods are `self`-borrowing; `Http2Client`
+  methods are `mut self` because the client owns one
+  persistent TCP connection across calls (HTTP/2 multiplexes
+  streams over one connection — that's the whole point of the
+  protocol). Affects only the variable binding; the call-site
+  shape is unchanged.
+- `HttpClient` doesn't expose `close()` (each request opens its
+  own connection); `Http2Client.close()` sends a GOAWAY and
+  tears down the TCP/TLS stream. The `with HttpClient() as c:` /
+  `with Http2Client() as c:` context-manager pattern
+  destructs both implicitly so this surface only matters when
+  you build the client without a `with`.
+
+`Http2Client` additionally enforces RFC 9113 §9.1.1 same-origin
+on subsequent requests (one origin per connection); HttpClient
+opens a fresh connection per request so this constraint
+doesn't apply.
+
+#### Server
+
+| Method | `HttpServer` | `Http2Server` |
+|---|:---:|:---:|
+| `bind(addr, config?)` | ✓ (`ServerConfig`) | ✓ (`Http2Config`) |
+| `serve(handler: def(Request) raises -> Response)` | ✓ | ✓ |
+| `serve[H: Handler](handler)` | ✓ | ✓ |
+| `local_addr()` | ✓ | ✓ |
+| `close()` | ✓ | ✓ |
+| `serve(handler, num_workers=N, pin_cores=...)` | ✓ | ✗ (single-conn blocking; reactor-integrated multi-worker is a follow-up) |
+| `serve_static(resp)` / `serve_static_multicore(resp, ...)` | ✓ | ✗ (HTTP/2-specific static fast path is a follow-up) |
+| `drain(timeout_ms) -> ShutdownReport` | ✓ | partial — `shutdown()` flips a flag; per-worker `ShutdownReport` accounting lands with the multi-worker variant |
+
+The handler trait surface (`flare.http.Handler`,
+`flare.http.FnHandler`, `flare.http.Router`,
+`flare.http.App[S]`, every middleware in
+`flare.http.middleware`, every typed extractor in
+`flare.http.extract`) operates on `flare.http.Request` /
+`flare.http.Response` and is therefore identical across the
+two servers — the same `Router` you hand to
+`HttpServer.serve(r^)` works unchanged in
+`Http2Server.serve(r^)`. See
+[`tests/test_h2_server_handler.mojo`](../tests/test_h2_server_handler.mojo)
+for the end-to-end proof.
+
 ---
 
 ## Timer wheel

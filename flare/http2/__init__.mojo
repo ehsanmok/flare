@@ -76,4 +76,10 @@ from .client import (
     Http2ClientConfig,
     Http2ClientConnection,
     Http2Response,
+    delete,
+    get,
+    head,
+    patch,
+    post,
+    put,
 )

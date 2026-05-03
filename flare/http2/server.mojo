@@ -629,7 +629,37 @@ struct Http2Server(Movable):
             if len(out) > 0:
                 stream.write_all(Span[UInt8, _](out))
 
+    def local_addr(self) -> SocketAddr:
+        """Return the local :class:`SocketAddr` the listener is bound to.
+
+        Mirrors :meth:`flare.http.HttpServer.local_addr` so a test
+        or example that opened ``Http2Server.bind(SocketAddr.localhost(0))``
+        (ephemeral port) can read back the kernel-assigned port
+        without poking at the underlying ``_listener`` field.
+        """
+        return self._listener.local_addr()
+
+    def close(mut self):
+        """Close the underlying TCP listener.
+
+        Sets :attr:`_stopping` first so any concurrent accept loop
+        observes the stop flag, then closes the listener fd.
+        Idempotent (mirrors :meth:`flare.http.HttpServer.close`).
+        """
+        self._stopping = True
+        self._listener.close()
+
     def shutdown(mut self):
         """Set :attr:`_stopping` so the accept loop exits after the
-        current connection completes."""
+        current connection completes.
+
+        For HTTP/1.1 the symmetric helper is
+        :meth:`flare.http.HttpServer.drain(timeout_ms)`, which
+        also returns a :class:`flare.http.ShutdownReport`. The
+        HTTP/2 ``drain(timeout_ms)`` variant lands when the
+        reactor-integrated multi-worker
+        ``Http2Server.serve(handler, num_workers=N)`` does --
+        the per-worker ``ShutdownReport`` accounting only makes
+        sense once there are workers to report on.
+        """
         self._stopping = True

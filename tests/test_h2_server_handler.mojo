@@ -83,7 +83,7 @@ def _echo_custom_header(req: Request) raises -> Response:
 def test_h2_server_simple_handler() raises:
     """Smallest possible handler over Http2Server <- Http2Client."""
     var srv = Http2Server.bind(SocketAddr.localhost(0))
-    var port = UInt16(srv._listener.local_addr().port)
+    var port = UInt16(srv.local_addr().port)
 
     var pid = _fork()
     if pid == 0:
@@ -114,7 +114,7 @@ def test_h2_server_simple_handler() raises:
 def test_h2_server_router_dispatch() raises:
     """``flare.http.Router`` dispatches correctly when driven by HTTP/2."""
     var srv = Http2Server.bind(SocketAddr.localhost(0))
-    var port = UInt16(srv._listener.local_addr().port)
+    var port = UInt16(srv.local_addr().port)
 
     var pid = _fork()
     if pid == 0:
@@ -155,7 +155,7 @@ def test_h2_server_request_body_round_trip() raises:
     """A POST body is reassembled from HTTP/2 DATA frames and visible to
     the handler as ``req.body`` exactly as it would be on HTTP/1.1."""
     var srv = Http2Server.bind(SocketAddr.localhost(0))
-    var port = UInt16(srv._listener.local_addr().port)
+    var port = UInt16(srv.local_addr().port)
 
     var pid = _fork()
     if pid == 0:
@@ -185,7 +185,7 @@ def test_h2_server_request_headers_visible() raises:
     """A custom request header survives HPACK encode/decode and lands in
     ``req.headers`` for the handler to read."""
     var srv = Http2Server.bind(SocketAddr.localhost(0))
-    var port = UInt16(srv._listener.local_addr().port)
+    var port = UInt16(srv.local_addr().port)
 
     var pid = _fork()
     if pid == 0:

@@ -79,7 +79,7 @@ def _bytes_in(req: Request) raises -> Response:
 
 def main() raises:
     var srv = Http2Server.bind(SocketAddr.localhost(0))
-    var port = UInt16(srv._listener.local_addr().port)
+    var port = UInt16(srv.local_addr().port)
     print("[h2 server] listening on 127.0.0.1:" + String(Int(port)))
 
     var pid = _fork()

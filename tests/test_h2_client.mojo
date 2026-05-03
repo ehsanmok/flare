@@ -380,6 +380,41 @@ def test_h2c_bearer_auth_header_propagated() raises:
     assert_equal(got, "Bearer tok_abc")
 
 
+def test_h2c_patch_method_round_trip() raises:
+    """``Http2Client.patch`` rides over h2c the same as POST."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(listener.local_addr().port)
+
+    var pid = _fork()
+    if pid == 0:
+        try:
+            _serve_one_h2_connection(listener, String("patched"))
+        except:
+            pass
+        _exit_child()
+    _usleep(c_int(200000))
+
+    var url = (
+        String("http://127.0.0.1:") + String(Int(port)) + String("/items/42")
+    )
+    var got_status = -1
+    var got_body = String("")
+    var raised = False
+    try:
+        with Http2Client() as c:
+            var r = c.patch(url, '{"name":"updated"}')
+            got_status = r.status
+            got_body = r.text()
+    except:
+        raised = True
+
+    _ = _kill(pid, _SIGKILL)
+    _waitpid(pid)
+    assert_true(not raised, "Http2Client.patch raised")
+    assert_equal(got_status, 200)
+    assert_equal(got_body, "patched")
+
+
 def main() raises:
     test_h2c_get_request_round_trip()
     test_h2c_post_with_body()
@@ -388,4 +423,5 @@ def main() raises:
     test_h2c_cross_origin_reuse_rejected()
     test_h2c_basic_auth_header_propagated()
     test_h2c_bearer_auth_header_propagated()
-    print("test_h2_client: 7 passed")
+    test_h2c_patch_method_round_trip()
+    print("test_h2_client: 8 passed")
