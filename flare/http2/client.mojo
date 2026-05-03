@@ -89,6 +89,7 @@ from ..http.request import Request, Method
 from ..http.response import Response, Status
 from ..http.url import Url
 from ..http.error import HttpError
+from ..http.auth import Auth, BasicAuth, BearerAuth
 from ..tcp import TcpStream
 from ..tcp.stream import _connect_with_fallback
 from ..tls import TlsStream, TlsConfig
@@ -948,6 +949,17 @@ struct Http2Client(Movable):
     """``"http"`` (h2c) or ``"https"`` (h2). Recorded at
     connection time."""
 
+    var _auth_header: String
+    """Pre-rendered ``Authorization`` header value (e.g.
+    ``"Basic dXNlcjpwYXNz"`` or ``"Bearer tok_abc"``). Empty
+    string = no auth header sent. Mirrors the
+    :attr:`flare.http.HttpClient._auth_header` field shape:
+    we apply the :class:`flare.http.auth.Auth` strategy ONCE
+    at construction (so per-request work stays one byte-copy)
+    and then attach the rendered header to every outbound
+    request via the lowercased ``"authorization"`` HPACK
+    pseudo-header field."""
+
     def __init__(
         out self,
         base_url: String = "",
@@ -977,6 +989,7 @@ struct Http2Client(Movable):
         self._connect_host = ""
         self._connect_port = UInt16(0)
         self._connect_scheme = ""
+        self._auth_header = ""
 
     def __init__(
         out self,
@@ -1001,6 +1014,7 @@ struct Http2Client(Movable):
         self._connect_host = ""
         self._connect_port = UInt16(0)
         self._connect_scheme = ""
+        self._auth_header = ""
 
     def __init__(
         out self,
@@ -1031,6 +1045,87 @@ struct Http2Client(Movable):
         self._connect_host = ""
         self._connect_port = UInt16(0)
         self._connect_scheme = ""
+        self._auth_header = ""
+
+    def __init__[
+        A: Auth
+    ](
+        out self,
+        auth: A,
+        base_url: String = "",
+        user_agent: String = "flare/0.1.0",
+    ) raises:
+        """Construct an :class:`Http2Client` with authentication.
+
+        Mirrors the :class:`flare.http.HttpClient` Auth-first
+        constructor: the ``auth`` strategy is applied once at
+        construction time -- the resulting ``Authorization``
+        header is stored and re-sent (lower-cased per RFC 9113
+        §8.1.2) on every request.
+
+        Parameters:
+            A: Any type implementing the :class:`flare.http.Auth`
+                trait (e.g. :class:`flare.http.BasicAuth`,
+                :class:`flare.http.BearerAuth`, or a custom
+                strategy).
+
+        Args:
+            auth: Authentication strategy.
+            base_url: Optional URL prefix for relative paths.
+            user_agent: ``User-Agent`` header value.
+
+        Raises:
+            HeaderInjectionError: When the rendered auth header
+                contains CRLF.
+        """
+        self._base_url = base_url
+        self._user_agent = user_agent
+        self._config = Http2ClientConfig()
+        self._stream = Optional[TcpStream]()
+        self._tls_stream = Optional[TlsStream]()
+        self._tls_config = TlsConfig()
+        self._conn = Http2ClientConnection()
+        self._connected = False
+        self._connect_host = ""
+        self._connect_port = UInt16(0)
+        self._connect_scheme = ""
+        var auth_headers = HeaderMap()
+        auth.apply(auth_headers)
+        self._auth_header = auth_headers.get("Authorization")
+
+    def __init__[
+        A: Auth
+    ](
+        out self,
+        base_url: String,
+        auth: A,
+        user_agent: String = "flare/0.1.0",
+    ) raises:
+        """Construct an :class:`Http2Client` with a base URL and Auth.
+
+        Allows the natural call-site syntax that
+        :class:`flare.http.HttpClient` already uses::
+
+            with Http2Client("https://api.example.com", BearerAuth("tok")) as c:
+                c.get("/users").raise_for_status()
+
+        Parameters + raises behaviour identical to the auth-first
+        overload above; only the argument order differs.
+        """
+        self._base_url = base_url
+        self._user_agent = user_agent
+        self._config = Http2ClientConfig()
+        self._stream = Optional[TcpStream]()
+        self._tls_stream = Optional[TlsStream]()
+        self._tls_config = TlsConfig()
+        self._conn = Http2ClientConnection()
+        self._connected = False
+        self._connect_host = ""
+        self._connect_port = UInt16(0)
+        self._connect_scheme = ""
+        var auth_headers = HeaderMap()
+        auth.apply(auth_headers)
+        self._auth_header = auth_headers.get("Authorization")
 
     def __enter__(var self) -> Http2Client:
         """Transfer ownership of ``self`` into the ``with`` block."""
@@ -1246,6 +1341,15 @@ struct Http2Client(Movable):
         # User-Agent header (caller's value if set, else default).
         if req.headers.get("User-Agent").byte_length() == 0:
             extra.append(HpackHeader("user-agent", self._user_agent))
+        # Stored Authorization header from the construction-time
+        # Auth strategy (BasicAuth / BearerAuth / custom). Skipped
+        # when the caller's Request already carries an
+        # Authorization header (e.g. per-request override).
+        if (
+            self._auth_header.byte_length() > 0
+            and req.headers.get("Authorization").byte_length() == 0
+        ):
+            extra.append(HpackHeader("authorization", self._auth_header))
         # Allocate stream id + send the request.
         var sid = self._conn.next_stream_id()
         self._conn.send_request(

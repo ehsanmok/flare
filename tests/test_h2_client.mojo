@@ -37,7 +37,14 @@ from flare.http2 import (
     HpackHeader,
     Http2Client,
 )
-from flare.http import HttpServer, ServerConfig, Response, ok
+from flare.http import (
+    BasicAuth,
+    BearerAuth,
+    HttpServer,
+    Response,
+    ServerConfig,
+    ok,
+)
 from flare.http2.server import H2Connection as ServerH2
 from flare.tcp import TcpStream, TcpListener
 from flare.net import NetworkError, SocketAddr
@@ -80,14 +87,16 @@ comptime _SIGKILL: c_int = c_int(9)
 def _serve_one_h2_connection(
     mut listener: TcpListener,
     body_for_path: String,
+    echo_auth: Bool = False,
 ) raises:
     """Accept one connection and drive H2Connection until peer close.
 
     For every completed request, builds a :class:`Response` whose
-    body is ``body_for_path`` (constant per test), HPACK-encodes
-    a ``200 OK`` response with that body, and writes the resulting
-    DATA frames back. Loops until ``read`` returns 0 (peer has
-    closed the socket) or any read/write fails.
+    body is either ``body_for_path`` (the default constant
+    response) or, when ``echo_auth = True``, the request's
+    ``authorization`` header value (so the auth-propagation test
+    can confirm the header arrived). Loops until ``read`` returns
+    0 (peer closed) or any read/write fails.
     """
     var stream = listener.accept()
     var h2 = ServerH2()
@@ -110,13 +119,21 @@ def _serve_one_h2_connection(
         var ids = h2.take_completed_streams()
         for i in range(len(ids)):
             var sid = ids[i]
+            var req_auth = String("")
             try:
-                _ = h2.take_request(sid)
+                var req = h2.take_request(sid)
+                if echo_auth:
+                    req_auth = req.headers.get("authorization")
             except:
                 continue
             var resp = Response(status=200)
             resp.headers.set("Content-Type", "text/plain; charset=utf-8")
-            resp.body = List[UInt8](body_for_path.as_bytes())
+            if echo_auth:
+                # Echo the auth header back in the body so the
+                # client test can verify what the server saw.
+                resp.body = List[UInt8](req_auth.as_bytes())
+            else:
+                resp.body = List[UInt8](body_for_path.as_bytes())
             try:
                 h2.emit_response(sid, resp^)
             except:
@@ -295,10 +312,80 @@ def test_h2c_cross_origin_reuse_rejected() raises:
     assert_true(raised, "cross-origin reuse must raise")
 
 
+def test_h2c_basic_auth_header_propagated() raises:
+    """``Http2Client(BasicAuth(...))`` propagates the
+    ``Authorization`` header to the server on every request."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(listener.local_addr().port)
+
+    var pid = _fork()
+    if pid == 0:
+        try:
+            _serve_one_h2_connection(
+                listener, String("ignored"), echo_auth=True
+            )
+        except:
+            pass
+        _exit_child()
+    _usleep(c_int(200000))
+
+    var url = String("http://127.0.0.1:") + String(Int(port)) + String("/")
+    var got = String("")
+    var raised = False
+    try:
+        with Http2Client(BasicAuth("alice", "s3cr3t")) as c:
+            var r = c.get(url)
+            got = r.text()
+    except:
+        raised = True
+
+    _ = _kill(pid, _SIGKILL)
+    _waitpid(pid)
+    assert_true(not raised, "Http2Client(BasicAuth) raised")
+    # ``alice:s3cr3t`` base64-encoded is ``YWxpY2U6czNjcjN0``.
+    assert_equal(got, "Basic YWxpY2U6czNjcjN0")
+
+
+def test_h2c_bearer_auth_header_propagated() raises:
+    """``Http2Client(BearerAuth(...))`` propagates the bearer token."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(listener.local_addr().port)
+
+    var pid = _fork()
+    if pid == 0:
+        try:
+            _serve_one_h2_connection(
+                listener, String("ignored"), echo_auth=True
+            )
+        except:
+            pass
+        _exit_child()
+    _usleep(c_int(200000))
+
+    var base = String("http://127.0.0.1:") + String(Int(port))
+    var got = String("")
+    var raised = False
+    try:
+        # Use the (base_url, auth) overload to mirror the
+        # natural HttpClient call-site shape.
+        with Http2Client(base, BearerAuth("tok_abc")) as c:
+            var r = c.get("/")
+            got = r.text()
+    except:
+        raised = True
+
+    _ = _kill(pid, _SIGKILL)
+    _waitpid(pid)
+    assert_true(not raised, "Http2Client(base_url, BearerAuth) raised")
+    assert_equal(got, "Bearer tok_abc")
+
+
 def main() raises:
     test_h2c_get_request_round_trip()
     test_h2c_post_with_body()
     test_h2c_two_sequential_requests_share_connection()
     test_h2_unsupported_scheme_rejected()
     test_h2c_cross_origin_reuse_rejected()
-    print("test_h2_client: 5 passed")
+    test_h2c_basic_auth_header_propagated()
+    test_h2c_bearer_auth_header_propagated()
+    print("test_h2_client: 7 passed")
