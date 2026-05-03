@@ -1,6 +1,7 @@
-"""flare — a Mojo HTTP server you can put in front of users, plus the
-raw TCP, UDP, TLS, DNS, HTTP/2, and WebSocket primitives it's built
-on. Written in Mojo with a small FFI footprint (libc, OpenSSL for
+"""flare — a Mojo HTTP server (HTTP/1.1 + HTTP/2) and HTTP client
+(HTTP/1.1 + HTTP/2 over h2c or TLS-ALPN h2), plus the raw TCP,
+UDP, TLS, DNS, and WebSocket primitives it's all built on.
+Written in Mojo with a small FFI footprint (libc, OpenSSL for
 TLS, zlib + brotli for content encoding).
 
 ```mojo
@@ -342,6 +343,30 @@ def main() raises:
     var items = client.get("/items").json()
     client.post("/items", '{"name": "new"}').raise_for_status()
 ```
+
+## HTTP/2 client (h2c + h2 over TLS-ALPN)
+
+```mojo
+from flare.http2 import Http2Client
+
+def main() raises:
+    # h2c (cleartext HTTP/2 via prior knowledge):
+    with Http2Client(base_url="http://localhost:8080") as c:
+        var r = c.get("/api/users")
+        r.raise_for_status()
+
+    # h2 (HTTP/2 over TLS via ALPN — refuses to silently
+    # downgrade to HTTP/1.1 if the server doesn't pick "h2"):
+    with Http2Client() as c:
+        var r = c.get("https://nghttp2.org/")
+        print(r.status, r.text())
+```
+
+The ``Http2Client`` API mirrors :class:`flare.http.HttpClient`
+(``get``/``post``/``put``/``delete``/``head`` + context-manager
++ ``base_url`` + per-instance connection reuse + RFC 9113 §9.1.1
+same-origin enforcement). Switch protocols by changing the
+type name and the URL scheme; everything else stays the same.
 
 ## WebSocket
 

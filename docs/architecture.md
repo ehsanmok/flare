@@ -7,8 +7,9 @@ below it. No circular dependencies, no global state, no hidden runtime.
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455)
 flare.http2    HTTP/2: Frame codec (RFC 9113), HPACK (RFC 7541),
-               state machines, H2Connection driver, h2c upgrade,
-               ALPN dispatch helper
+               state machines, H2Connection (server) +
+               Http2ClientConnection / Http2Client (client) drivers,
+               h2c upgrade + h2 ALPN dispatch helper
 flare.http     HTTP/1.1 client + reactor server + Handler / Router / App
                + extractors (incl. Form / Multipart / Cookies)
                + ComptimeRouter + StaticResponse + Cancel / CancelHandler
