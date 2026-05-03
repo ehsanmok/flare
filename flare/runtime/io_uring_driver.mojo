@@ -568,10 +568,18 @@ struct IoUringDriver(Movable):
         var to_submit = Int(self._sq_local_tail) - Int(k_tail)
         if to_submit > 0:
             _atomic_store_u32_release(self._sq_tail_ptr, self._sq_local_tail)
-        var flags = 0
-        if min_complete > 0:
-            # IORING_ENTER_GETEVENTS = 0x1
-            flags = 1
+        # IORING_ENTER_GETEVENTS = 0x1. Always set, even for
+        # min_complete=0 calls. With ``IORING_SETUP_DEFER_TASKRUN``
+        # (Phase 2B) the kernel runs deferred task work ONLY on
+        # GETEVENTS-flagged enter calls -- without GETEVENTS,
+        # multishot recv completions never surface to userspace
+        # until the NEXT enter call gets the flag, which throttles
+        # the dispatch to one CQE per two enter calls (= half
+        # throughput on every poll round). Setting GETEVENTS
+        # always means the kernel processes any ready completions
+        # on every submit, regardless of whether we're blocking
+        # waiting for more.
+        var flags: Int = 1
         return io_uring_enter(self.fd(), to_submit, min_complete, flags)
 
     # ── Reap path ─────────────────────────────────────────────────────────────

@@ -482,21 +482,36 @@ struct ConnHandle(Movable):
                 idle_timeout_ms=config.idle_timeout_ms,
             )
 
+        # Phase 1C: same parser fast-path as on_readable; opt-in
+        # via the same config bit. Drops per-request HeaderMap
+        # alloc in the bufring path too.
         var req: Request
+        var close_after: Bool
         try:
-            req = _parse_http_request_bytes(
-                Span[UInt8, _](self.read_buf)[: self.body_total],
-                config.max_header_size,
-                config.max_body_size,
-                config.max_uri_length,
-                self.peer,
-                config.expose_error_messages,
-            )
+            if config.skip_header_decode_for_short_requests:
+                req = _parse_http_request_bytes_minimal(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    self.content_length,
+                    config.max_body_size,
+                    config.max_uri_length,
+                    self.peer,
+                    config.expose_error_messages,
+                )
+                close_after = _wants_close(self.read_buf, self.headers_end)
+            else:
+                req = _parse_http_request_bytes(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    config.max_header_size,
+                    config.max_body_size,
+                    config.max_uri_length,
+                    self.peer,
+                    config.expose_error_messages,
+                )
+                close_after = _compute_close_after(req.headers, req.version)
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
-
-        var close_after = _compute_close_after(req.headers, req.version)
 
         self.keepalive_count += 1
         if self.keepalive_count >= config.max_keepalive_requests:
@@ -2756,19 +2771,28 @@ def _probe_bufring_setup_flags(entries: Int = 64) -> UInt32:
         IORING_SETUP_DEFER_TASKRUN,
     )
 
+    # Probe order: COOP_TASKRUN + TASKRUN_FLAG + SUBMIT_ALL
+    # FIRST (5.19+ reliable). DEFER_TASKRUN + SINGLE_ISSUER
+    # (6.1+) are tried LAST because they require GETEVENTS-on-
+    # every-enter (which we honour in submit_and_wait), but
+    # under load the kernel still throttles multishot recv CQE
+    # delivery in unpredictable ways with DEFER_TASKRUN. Empirical
+    # observation on dev-box (kernel 6.8): bufring throughput is
+    # ~60 Hz with DEFER_TASKRUN and significantly higher without.
+    # If a future kernel version fixes this, swap the order.
     var t1 = (
+        IORING_SETUP_COOP_TASKRUN
+        | IORING_SETUP_TASKRUN_FLAG
+        | IORING_SETUP_SUBMIT_ALL
+    )
+    var t2 = IORING_SETUP_SUBMIT_ALL
+    var t3 = (
         IORING_SETUP_SINGLE_ISSUER
         | IORING_SETUP_DEFER_TASKRUN
         | IORING_SETUP_COOP_TASKRUN
         | IORING_SETUP_TASKRUN_FLAG
         | IORING_SETUP_SUBMIT_ALL
     )
-    var t2 = (
-        IORING_SETUP_COOP_TASKRUN
-        | IORING_SETUP_TASKRUN_FLAG
-        | IORING_SETUP_SUBMIT_ALL
-    )
-    var t3 = IORING_SETUP_SUBMIT_ALL
 
     var candidates = [t1, t2, t3]
     for i in range(len(candidates)):
