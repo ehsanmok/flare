@@ -4,7 +4,43 @@ alwaysApply: false
 
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-03 · **Branch**: `main` (commits `9e9c3d1` → … → `3ae27e9` (**B0 static-path wire-in**) → `765e027` (**doc → `.cursor/rules/`**) → `bf6ca75` (**buffer-ring substrate**) → `a91413d` (**B0 handler-path wire-in shipped opt-in via `FLARE_BUFRING_HANDLER=1`**) → `88ea2f7` (SO_REUSEPORT per-worker bind for io_uring) → `b62f355` (**`IORING_REGISTER_PBUF_RING` (5.19+) -- the 2.7x kernel-buffer-mgmt fix** that closes the -32% bufring throughput regression and pushes 1-worker io_uring AHEAD of epoll: 68,985 req/s vs epoll 65,990 vs prior bufring 49,812 = **+5% over epoll, 1.83x Go**; tail also wins (p99.99 3.40 vs epoll 3.46 vs Go 4.87)). Multi-worker bufring still hangs (separate bug, NOT in PBUF_RING substrate; mc 1w + PBUF_RING is fine at 49.6K req/s; mc 2w+ crashes — likely a Mojo-runtime × pthread × io_uring rings interaction needing Mojo-internal expertise).
+**Date**: 2026-05-03 · **Branch**: `main` · HEAD `3395a8d`.
+
+## Honest summary against the v0.7 gates
+
+| Gate | Target | Actual (EPYC) | Status |
+|---|---|---|---|
+| flare_mc 4w throughput | ≥ 220K req/s | **170K req/s** | **❌ NOT MET** (77 % of hyper, 64 % of actix) |
+| flare_mc 4w tail (p99.99) | ≤ 3.5 ms | **3.11 ms** | **✅ MET** (best of all 4w servers) |
+| io_uring fast path operational | ≥ 2 µs/req faster than epoll | substrate works, dispatch has open bugs | **⚠️ PARTIAL** |
+| Epoll / kqueue fallback parity | tests pass on both | yes | **✅ MET** |
+| HPACK Huffman + h2 fuzz | 200K runs, zero crashes | yes (and 200K+ on every fuzzer) | **✅ MET** |
+| Multishot recv routing | F_MORE actually set | locked in by 2 layers of tests | **✅ MET** (was silent oneshot pre-9155bc6) |
+
+**The throughput gate is not met.** flare_mc 4w lands at 170K
+req/s vs the 220K target; that is also 77 % of hyper's 221K
+and 64 % of actix's 264K. flare_mc DOES win the tail-latency
+gate (3.11 ms p99.99 vs hyper 3.67, axum 3.65, actix 21.61).
+
+The io_uring buffer-ring path was the planned mechanism to
+close the throughput gap. Its substrate is correct + tested
+(see "Track B0 status" below) but the dispatch loop has open
+crashes / throughput throttles under sustained load that need
+another debug session to root-cause.
+
+## Lineage
+
+`3ae27e9` (B0 static-path wire-in) → `765e027` (doc move) →
+`bf6ca75` (buffer-ring substrate) → `a91413d` (B0 handler-path
+wire-in opt-in via `FLARE_BUFRING_HANDLER=1`) → `88ea2f7`
+(SO_REUSEPORT per-worker bind) → `b62f355`
+(`IORING_REGISTER_PBUF_RING` substrate) → `8acaefc`
+(`submit_send` substrate) → `eac6e96` (revert bufring
+default-on + correct false "PBUF_RING beats epoll" claim) →
+`9155bc6` (**ROOT-CAUSE FIX**: `IORING_RECV_MULTISHOT` belongs
+in `sqe->ioprio`, not `msg_flags`) → `ffb5e41` (live-kernel
+proof of multishot continuity) → `3395a8d` (encoder-test
+locks routing in).
 
 This note tracks where flare v0.7 stands against the design-0.7
 gate (≥ 220 K req/s on flare_mc 4w EPYC, p99.99 ≤ 3.5 ms) and
@@ -17,6 +53,70 @@ The EPYC numbers below are from the v0.6.0 release tag
 -d30s` calibrated peak). The dev-box numbers are this
 worktree's own measurements on a 64-vCPU AWS box (commit
 `1b0852d`, same wrk2 calibration).
+
+## Track B0 (io_uring) status
+
+**Substrate (kernel-tested, all PASS)**:
+
+* `IoUringRing` setup / teardown / mmap (`test_io_uring`: 8/8).
+* SQE byte codecs + CQE decoder (`test_io_uring_sqe`: 24/24,
+  `fuzz_io_uring_sqe`: 200K runs, 0 crashes).
+* `UringReactor` substrate: accept-multishot, recv-multishot,
+  poll-add multishot, cancel, submit_send,
+  `IORING_REGISTER_PBUF_RING` (5.19+), `submit_provide_buffers`
+  (`test_uring_reactor`: 14/14, `fuzz_uring_reactor`: 100K
+  runs, 0 crashes). Includes the new
+  `test_register_pbuf_ring_multishot_continues` which posts 5
+  writes from a libc client and proves the kernel re-fires
+  multishot recv with `F_MORE` set on every CQE. Pre-9155bc6
+  this test would deadlock on the 2nd write -- that test now
+  catches the routing bug at the kernel-API level so it cannot
+  silently re-occur.
+* `arm_listener_multishot`: `test_io_uring_multishot_accept`
+  1/1 PASS.
+* Static-response dispatch
+  (`run_uring_reactor_loop_static`): `test_uring_serve_static`
+  1/1 PASS.
+
+**Dispatch wire-in (opt-in via `FLARE_BUFRING_HANDLER=1`)**:
+
+* `run_uring_bufring_reactor_loop` (1-worker) and `_shared`
+  (multi-worker variant) ship + are wired into
+  `HttpServer.serve` as opt-in. Substrate-level multishot recv
+  works (verified post-9155bc6). The dispatch:
+  * **PASSES** small-conn sequential / concurrent tests
+    (`test_uring_serve_handler` 2/2: 8-conn sequential
+    keep-alive churn, 8-conn concurrent fanout).
+  * **FAILS** under sustained load: at -t1 -c4 -R≥1000 the
+    server hangs at ~60 req/s; multi-worker bufring (mc 2w+)
+    SIGSEGVs on accept-burst within seconds. Symptom is
+    independent of `FLARE_SUBMIT_SEND` and unaffected by SQ
+    depth bump from 512 → 4096. Root cause not yet identified;
+    likely a CQE drain / `io_uring_enter` interaction since
+    the kernel-side multishot is verified working.
+
+**Default = OFF** for both single and multi-worker. The
+`HttpServer.serve` paths route through epoll
+(`run_reactor_loop`) unless `FLARE_BUFRING_HANDLER=1` is
+explicitly set. This is so the bench runs + production
+deployments stay on the proven path while the bufring
+dispatch is debugged.
+
+**Substrate features that ARE production-ready** (would help
+the bufring path the moment the dispatch is fixed):
+
+| Feature | Kernel | Status |
+|---|---|---|
+| `IORING_OP_ACCEPT` + `IORING_ACCEPT_MULTISHOT` | 5.19+ | ✅ shipped, tested |
+| `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` | 6.0+ | ✅ shipped, tested (multishot routing locked in) |
+| `IOSQE_BUFFER_SELECT` | 5.7+ | ✅ shipped, tested |
+| `IORING_OP_PROVIDE_BUFFERS` (slow buffer mgmt) | 5.7+ | ✅ shipped (kept for older kernels) |
+| `IORING_REGISTER_PBUF_RING` (fast buffer mgmt, 2.7x kernel-bench faster) | 5.19+ | ✅ shipped, tested |
+| `IORING_OP_SEND` + `submit_send` | 5.6+ | ✅ shipped (env-gated), tested |
+| `IORING_OP_POLL_ADD` + `IORING_POLL_ADD_MULTI` | 5.13+ | ✅ shipped, tested |
+| `IORING_OP_ASYNC_CANCEL` (cancel by user_data) | 5.5+ | ✅ shipped, tested |
+| `IORING_OP_CLOSE` (kernel-async close) | 5.6+ | ✅ shipped |
+| SO_REUSEPORT per-worker bind | n/a | ✅ shipped (Scheduler thread serialises) |
 
 ## v0.6.0 EPYC tag — the reference
 
