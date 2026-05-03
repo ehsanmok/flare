@@ -3040,12 +3040,14 @@ def run_uring_bufring_reactor_loop[
     # not enough -- the dispatch hit silent next_sqe failures
     # under sustained 64-conn load and crashed.
     # Phase 2B: probe the host kernel for the best
-    # IORING_SETUP_* mix (DEFER_TASKRUN | SINGLE_ISSUER on 6.1+;
-    # COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL on 5.19+;
-    # SUBMIT_ALL on 5.18+; 0 on older). Eliminates the ~16 ms /
-    # ~60 Hz throughput throttle that surfaced when the dispatch
-    # loop blocked in io_uring_enter without batching.
-    var ureactor = UringReactor(4096, setup_flags=_probe_bufring_setup_flags())
+    # IORING_SETUP_* mix.
+    # Phase 2D: enable_wakeup=False -- bufring is single-
+    # pthread-per-ring; no cross-thread wakeup needed.
+    var ureactor = UringReactor(
+        4096,
+        setup_flags=_probe_bufring_setup_flags(),
+        enable_wakeup=False,
+    )
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
 
@@ -3275,9 +3277,14 @@ def run_uring_bufring_reactor_loop_shared[
     from flare.runtime.io_uring_sqe import IORING_CQE_F_BUFFER
 
     # Phase 2B: same setup-flag probe as the single-worker
-    # variant; per-worker rings independently negotiate with the
-    # host kernel.
-    var ureactor = UringReactor(4096, setup_flags=_probe_bufring_setup_flags())
+    # variant; per-worker rings independently negotiate.
+    # Phase 2D: enable_wakeup=False -- per-worker ring is
+    # single-issuer, no cross-thread wakeup needed.
+    var ureactor = UringReactor(
+        4096,
+        setup_flags=_probe_bufring_setup_flags(),
+        enable_wakeup=False,
+    )
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
     var submit_send = getenv("FLARE_SUBMIT_SEND") == "1"

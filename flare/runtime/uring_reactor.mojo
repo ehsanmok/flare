@@ -412,6 +412,12 @@ struct UringReactor(Movable):
     var _wake_buf: UnsafePointer[UInt8, MutExternalOrigin]
     var _io: FlareRawIO
     var _wake_armed: Bool
+    var _wakeup_disabled: Bool
+    """Phase 2D: if True, ``poll`` skips the lazy-arm of the
+    wakeup ``IORING_OP_READ`` SQE and ``wakeup()`` becomes a
+    no-op. Eliminates one always-pending SQE on the hot path
+    for single-issuer bufring rings that don't need cross-
+    thread wakeup."""
 
     def __init__(
         out self,
@@ -419,8 +425,9 @@ struct UringReactor(Movable):
         setup_flags: UInt32 = UInt32(0),
         sq_thread_cpu: UInt32 = UInt32(0),
         sq_thread_idle: UInt32 = UInt32(0),
+        enable_wakeup: Bool = True,
     ) raises:
-        """Set up the ring + wakeup eventfd.
+        """Set up the ring + (optionally) the wakeup eventfd.
 
         Args:
             entries: SQE count (kernel rounds up to a power of
@@ -434,12 +441,23 @@ struct UringReactor(Movable):
                 opts into ``COOP_TASKRUN | TASKRUN_FLAG |
                 SUBMIT_ALL`` and (on kernel >= 6.1)
                 ``SINGLE_ISSUER | DEFER_TASKRUN`` to eliminate
-                the ~16 ms / ~60 Hz throughput throttle that
-                surfaced when the dispatch loop blocked in
-                ``io_uring_enter`` without batching.
+                the ~16 ms / ~60 Hz throughput throttle.
             sq_thread_cpu / sq_thread_idle: SQPOLL knobs;
                 ignored unless ``setup_flags`` includes
                 ``IORING_SETUP_SQPOLL``.
+            enable_wakeup: Default True (the historical
+                behaviour). Set False to skip the wakeup
+                eventfd creation + the lazy-arm of the wakeup
+                ``IORING_OP_READ`` SQE in :func:`poll`. This
+                eliminates one always-pending SQE on the hot
+                path AND removes the eventfd file descriptor.
+                Safe to set False when the reactor's owner
+                thread will never call :func:`wakeup` from
+                another thread (which is the case for the
+                bufring dispatch -- each worker owns its own
+                ring + drives it from one pthread, and shutdown
+                is signalled via a heap-allocated flag the
+                worker checks each iteration).
 
         Raises:
             Error: On ``io_uring_setup`` failure (see
@@ -456,32 +474,41 @@ struct UringReactor(Movable):
             sq_thread_cpu=sq_thread_cpu,
             sq_thread_idle=sq_thread_idle,
         )
-        # NOTE: deliberately *blocking* eventfd (no EFD_NONBLOCK).
-        # io_uring's IORING_OP_RECV against a non-blocking eventfd
-        # with no pending data immediately posts a -EAGAIN CQE,
-        # which spins ``poll(1, ...)`` into a 100 % CPU loop on
-        # idle. With the blocking flag clear the kernel actually
-        # waits on the eventfd, the CQE only fires when ``wakeup``
-        # writes a token, and ``wakeup()`` itself is safe from any
-        # thread (the write(2) on the eventfd is atomic + small).
-        var efd = _eventfd(c_uint(0), EFD_CLOEXEC)
-        if efd < c_int(0):
-            raise Error(
-                "UringReactor: eventfd failed: errno="
-                + String(get_errno().value)
+        self._wakeup_disabled = not enable_wakeup
+        if enable_wakeup:
+            # NOTE: deliberately *blocking* eventfd (no EFD_NONBLOCK).
+            # io_uring's IORING_OP_RECV against a non-blocking eventfd
+            # with no pending data immediately posts a -EAGAIN CQE,
+            # which spins ``poll(1, ...)`` into a 100 % CPU loop on
+            # idle. With the blocking flag clear the kernel actually
+            # waits on the eventfd, the CQE only fires when ``wakeup``
+            # writes a token, and ``wakeup()`` itself is safe from any
+            # thread (the write(2) on the eventfd is atomic + small).
+            var efd = _eventfd(c_uint(0), EFD_CLOEXEC)
+            if efd < c_int(0):
+                raise Error(
+                    "UringReactor: eventfd failed: errno="
+                    + String(get_errno().value)
+                )
+            self._wake_fd = efd
+            # 8 bytes is the eventfd read width; we keep the buffer
+            # pinned for the reactor's lifetime so the multishot recv
+            # arming SQE keeps a stable pointer.
+            var raw = alloc[UInt8](8)
+            for i in range(8):
+                (raw + i).init_pointee_copy(UInt8(0))
+            self._wake_buf = UnsafePointer[UInt8, MutExternalOrigin](
+                unsafe_from_address=Int(raw)
             )
-        self._wake_fd = efd
-        # 8 bytes is the eventfd read width; we keep the buffer
-        # pinned for the reactor's lifetime so the multishot recv
-        # arming SQE keeps a stable pointer. Same ``alloc`` →
-        # ``MutExternalOrigin`` cast pattern used by
-        # ``IoUringRing._params_buf`` in :mod:`io_uring`.
-        var raw = alloc[UInt8](8)
-        for i in range(8):
-            (raw + i).init_pointee_copy(UInt8(0))
-        self._wake_buf = UnsafePointer[UInt8, MutExternalOrigin](
-            unsafe_from_address=Int(raw)
-        )
+        else:
+            # Phase 2D: skip the eventfd + buffer alloc entirely.
+            # _wake_fd = INVALID_FD and _wake_buf = NULL match the
+            # __del__ guards (skip close() / free() when these are
+            # sentinel) so the no-wakeup mode is fully no-op.
+            self._wake_fd = INVALID_FD
+            self._wake_buf = UnsafePointer[UInt8, MutExternalOrigin](
+                unsafe_from_address=0
+            )
         self._wake_armed = False
 
     def __del__(deinit self):
@@ -962,9 +989,12 @@ struct UringReactor(Movable):
                 ``max_events``).
         """
         out.clear()
-        if not self._wake_armed:
+        if (not self._wakeup_disabled) and (not self._wake_armed):
             # Lazy-arm the wakeup recv on first poll so the
             # eventfd surfaces wakeups via the same drain loop.
+            # Skipped entirely when ``enable_wakeup=False`` was
+            # passed at construction (Phase 2D opt-out for
+            # single-issuer bufring rings).
             try:
                 self._arm_wakeup_recv()
                 self._wake_armed = True
@@ -1078,7 +1108,14 @@ struct UringReactor(Movable):
 
         The next ``poll`` will return because the multishot recv
         on the eventfd posts a CQE.
+
+        No-op when the reactor was constructed with
+        ``enable_wakeup=False`` (Phase 2D opt-out for single-
+        issuer bufring rings that don't need cross-thread
+        signalling).
         """
+        if self._wakeup_disabled:
+            return
         var one = stack_allocation[8, UInt8]()
         (one + 0).init_pointee_copy(UInt8(1))
         for k in range(1, 8):
