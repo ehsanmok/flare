@@ -308,6 +308,43 @@ struct TlsStream(Movable, Readable):
                     "mTLS cert/key load failed: " + _c_err(lib)
                 )
 
+        # ── 5b. Client-side ALPN (RFC 7301) ──────────────────────────────────
+        # When ``config.alpn`` is non-empty, build the wire-format
+        # blob (length-prefixed concatenation of each protocol id)
+        # and pass it through the new C wrapper
+        # ``flare_ssl_ctx_set_alpn_protos`` -> OpenSSL's
+        # ``SSL_CTX_set_alpn_protos``. The server then either picks
+        # one of our advertised protocols (visible to the caller via
+        # :meth:`TlsStream.alpn_selected`) or rejects the
+        # connection (TLS-level alert).
+        if len(config.alpn) > 0:
+            var blob = List[UInt8]()
+            for i in range(len(config.alpn)):
+                var p = config.alpn[i]
+                var n = p.byte_length()
+                if n == 0 or n > 255:
+                    fn_ctx_free(ctx)
+                    raise TlsHandshakeError(
+                        "TlsConfig.alpn: each protocol id must be 1..255"
+                        " bytes (RFC 7301)"
+                    )
+                blob.append(UInt8(n))
+                var pp = p.unsafe_ptr()
+                for j in range(n):
+                    blob.append(pp[j])
+            if len(blob) > 255:
+                fn_ctx_free(ctx)
+                raise TlsHandshakeError(
+                    "TlsConfig.alpn: wire-format protos blob must be"
+                    " <= 255 bytes total"
+                )
+            var fn_set_alpn = lib.get_function[
+                def(Int, Int, c_int) thin abi("C") -> c_int
+            ]("flare_ssl_ctx_set_alpn_protos")
+            if fn_set_alpn(ctx, Int(blob.unsafe_ptr()), c_int(len(blob))) != 0:
+                fn_ctx_free(ctx)
+                raise TlsHandshakeError("ALPN setup failed: " + _c_err(lib))
+
         # ── 6. Create SSL session bound to the TCP fd ─────────────────────────
         var ssl = fn_ssl_new(ctx, c_int(tcp._socket.fd))
         if ssl == 0:
@@ -568,6 +605,40 @@ struct TlsStream(Movable, Readable):
         if rc != 0:
             raise NetworkError("peer_cert_subject: " + _c_err(lib))
         # Convert null-terminated C string to Mojo String
+        return String(StringSlice(unsafe_from_utf8_ptr=buf))
+
+    # ── ALPN introspection ───────────────────────────────────────────────────
+
+    def alpn_selected(self) raises -> String:
+        """Return the ALPN protocol the server selected, or ``""`` if
+        ALPN was not negotiated.
+
+        Calls ``flare_ssl_get_alpn_selected`` (RFC 7301) on the
+        live SSL session. Useful for clients that advertise
+        multiple protocols via :attr:`flare.tls.TlsConfig.alpn`
+        (e.g. ``["h2", "http/1.1"]``) and need to know which one
+        the server picked before kicking off the higher-level
+        protocol driver.
+
+        Raises:
+            NetworkError: When the underlying call fails (almost
+                always means the SSL session is closed).
+        """
+        if self._ssl == 0:
+            return String("")
+        var lib = OwnedDLHandle(_find_flare_lib())
+        var fn_get_alpn = lib.get_function[
+            def(Int, Int, c_int) thin abi("C") -> c_int
+        ]("flare_ssl_get_alpn_selected")
+        var buf = stack_allocation[64, UInt8]()
+        var rc = fn_get_alpn(self._ssl, Int(buf), c_int(64))
+        if rc < 0:
+            raise NetworkError("alpn_selected: " + _c_err(lib))
+        if rc == 0:
+            return String("")
+        # ``flare_ssl_get_alpn_selected`` writes a null-terminated
+        # C string into ``buf``; ``String(StringSlice(...))`` copies
+        # before ``buf`` goes out of scope on this stack frame.
         return String(StringSlice(unsafe_from_utf8_ptr=buf))
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────

@@ -91,6 +91,7 @@ from ..http.url import Url
 from ..http.error import HttpError
 from ..tcp import TcpStream
 from ..tcp.stream import _connect_with_fallback
+from ..tls import TlsStream, TlsConfig
 from ..net import NetworkError, SocketAddr
 
 
@@ -899,10 +900,29 @@ struct Http2Client(Movable):
     """SETTINGS the client advertises to the server."""
 
     var _stream: Optional[TcpStream]
-    """The underlying TCP stream once :meth:`_ensure_connected` has
-    fired. ``None`` means "no connection yet"; we use
-    :class:`Optional` because :class:`TcpStream` has no
-    default-constructor (it requires a real socket fd)."""
+    """The underlying *cleartext* TCP stream once
+    :meth:`_ensure_connected` has fired against an ``http://``
+    URL. ``None`` for ``https://`` (where :attr:`_tls_stream`
+    holds the encrypted stream instead) or before the first
+    request. We use :class:`Optional` because :class:`TcpStream`
+    has no default-constructor (it requires a real socket fd)."""
+
+    var _tls_stream: Optional[TlsStream]
+    """The underlying TLS-wrapped TCP stream once
+    :meth:`_ensure_connected` has fired against an ``https://``
+    URL. ``None`` for ``http://`` (where :attr:`_stream` holds
+    the cleartext stream instead) or before the first request."""
+
+    var _tls_config: TlsConfig
+    """TLS configuration used for ``https://`` connections (CA
+    bundle, ALPN protocols, mTLS cert/key). Defaulted at
+    construction; callers can pass a custom :class:`TlsConfig`
+    via the appropriate constructor overload (e.g. for
+    self-signed certs in tests). The ALPN field is overwritten
+    at connect time to advertise ``["h2", "http/1.1"]`` so the
+    server can downgrade if needed -- the high-level facade
+    rejects connections where the server picked anything other
+    than ``"h2"``."""
 
     var _conn: Http2ClientConnection
     """The HTTP/2 protocol driver. Initialised on the first
@@ -950,6 +970,8 @@ struct Http2Client(Movable):
         self._user_agent = user_agent
         self._config = Http2ClientConfig()
         self._stream = Optional[TcpStream]()
+        self._tls_stream = Optional[TlsStream]()
+        self._tls_config = TlsConfig()
         self._conn = Http2ClientConnection()
         self._connected = False
         self._connect_host = ""
@@ -972,6 +994,38 @@ struct Http2Client(Movable):
         self._user_agent = user_agent
         self._config = config^
         self._stream = Optional[TcpStream]()
+        self._tls_stream = Optional[TlsStream]()
+        self._tls_config = TlsConfig()
+        self._conn = Http2ClientConnection()
+        self._connected = False
+        self._connect_host = ""
+        self._connect_port = UInt16(0)
+        self._connect_scheme = ""
+
+    def __init__(
+        out self,
+        var tls: TlsConfig,
+        base_url: String = "",
+        user_agent: String = "flare/0.1.0",
+    ):
+        """Construct an :class:`Http2Client` with custom TLS settings.
+
+        Use this overload when you need a non-default
+        :class:`flare.tls.TlsConfig` (custom CA bundle, mTLS
+        client cert + key, ``TlsConfig.insecure()`` for
+        self-signed test certs, etc.). The ALPN list on the
+        passed-in config is overwritten at connect time with
+        ``["h2", "http/1.1"]`` -- HTTP/2 preference with HTTP/1.1
+        fallback at the TLS layer (the facade still requires
+        ALPN to come back as ``"h2"`` for the connection to
+        succeed).
+        """
+        self._base_url = base_url
+        self._user_agent = user_agent
+        self._config = Http2ClientConfig()
+        self._stream = Optional[TcpStream]()
+        self._tls_stream = Optional[TlsStream]()
+        self._tls_config = tls^
         self._conn = Http2ClientConnection()
         self._connected = False
         self._connect_host = ""
@@ -1024,30 +1078,75 @@ struct Http2Client(Movable):
             if u.port != self._connect_port:
                 raise NetworkError("Http2Client: cannot reuse port")
             return
-        # Cleartext-only for now (TLS lands in the ALPN commit).
-        if u.scheme != "http":
-            raise NetworkError(
-                "Http2Client: only http:// (h2c) is supported in this"
-                " cut; https:// requires ALPN h2 (follow-up commit"
-                " that wires client-side ALPN through TlsConfig)"
+        if u.scheme == "http":
+            # h2c (cleartext HTTP/2 via prior knowledge): no
+            # HTTP/1.1 Upgrade dance; the client sends the
+            # connection preface immediately.
+            var stream = _connect_with_fallback(u.host, u.port, 30_000)
+            var conn = Http2ClientConnection.with_config(self._config.copy())
+            var bootstrap = conn.drain()
+            if len(bootstrap) > 0:
+                stream.write_all(Span[UInt8, _](bootstrap))
+            self._stream = Optional[TcpStream](stream^)
+            self._conn = conn^
+        elif u.scheme == "https":
+            # h2 (HTTP/2 over TLS via ALPN). Force the TLS
+            # config's ALPN list to advertise ``h2`` first with
+            # an ``http/1.1`` fallback so the TLS handshake
+            # itself doesn't fail when talking to an HTTP/1.1
+            # server -- but we then verify the server picked
+            # ``h2`` and refuse the connection if it didn't (we
+            # don't transparently downgrade to HTTP/1.1; that's
+            # a separate code path the caller is expected to
+            # handle by retrying with :class:`flare.http.HttpClient`).
+            var tls = self._tls_config.copy()
+            tls.alpn = List[String]()
+            tls.alpn.append(String("h2"))
+            tls.alpn.append(String("http/1.1"))
+            var tls_stream = TlsStream.connect_timeout(
+                u.host, u.port, tls^, 30_000
             )
-        # Fresh socket + driver pair for this client.
-        var stream = _connect_with_fallback(u.host, u.port, 30_000)
-        var conn = Http2ClientConnection.with_config(self._config.copy())
-        # Send the preface + initial SETTINGS in one go.
-        var bootstrap = conn.drain()
-        if len(bootstrap) > 0:
-            stream.write_all(Span[UInt8, _](bootstrap))
-        # The handshake completes asynchronously: the server
-        # will respond with its own SETTINGS + an ACK of ours,
-        # which we'll observe + ACK on the first response read.
-        # Stash for later use.
-        self._stream = Optional[TcpStream](stream^)
-        self._conn = conn^
+            var negotiated = tls_stream.alpn_selected()
+            if negotiated != "h2":
+                tls_stream.close()
+                raise NetworkError(
+                    "Http2Client: TLS server did not negotiate ALPN h2 (got "
+                    + (negotiated if negotiated.byte_length() > 0 else "<none>")
+                    + "); retry with flare.http.HttpClient for HTTP/1.1"
+                )
+            var conn = Http2ClientConnection.with_config(self._config.copy())
+            var bootstrap = conn.drain()
+            if len(bootstrap) > 0:
+                tls_stream.write_all(Span[UInt8, _](bootstrap))
+            self._tls_stream = Optional[TlsStream](tls_stream^)
+            self._conn = conn^
+        else:
+            raise NetworkError(
+                "Http2Client: unsupported URL scheme '"
+                + u.scheme
+                + "' (only http:// and https:// are supported)"
+            )
         self._connected = True
         self._connect_host = u.host
         self._connect_port = u.port
         self._connect_scheme = u.scheme
+
+    # ── Stream I/O dispatch (cleartext vs TLS) ───────────────────────────
+
+    def _write_all_dispatch(mut self, bytes: Span[UInt8, _]) raises -> None:
+        """Write ``bytes`` to the active stream (cleartext or TLS)."""
+        if self._connect_scheme == "https":
+            self._tls_stream.unsafe_value().write_all(bytes)
+        else:
+            self._stream.unsafe_value().write_all(bytes)
+
+    def _read_dispatch(
+        mut self, ptr: UnsafePointer[UInt8, _], n: Int
+    ) raises -> Int:
+        """Read up to ``n`` bytes from the active stream."""
+        if self._connect_scheme == "https":
+            return self._tls_stream.unsafe_value().read(ptr, n)
+        return self._stream.unsafe_value().read(ptr, n)
 
     # ── High-level methods ───────────────────────────────────────────────
 
@@ -1167,7 +1266,7 @@ struct Http2Client(Movable):
         # access) so the borrow checker stays happy.
         var out_bytes = self._conn.drain()
         if len(out_bytes) > 0:
-            self._stream.unsafe_value().write_all(Span[UInt8, _](out_bytes))
+            self._write_all_dispatch(Span[UInt8, _](out_bytes))
         # Pump the read loop until our response is ready.
         var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
         buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
@@ -1179,9 +1278,7 @@ struct Http2Client(Movable):
                     "Http2Client: peer sent GOAWAY before responding to stream "
                     + String(sid)
                 )
-            var n = self._stream.unsafe_value().read(
-                buf.unsafe_ptr(), _H2_READ_BUF_SIZE
-            )
+            var n = self._read_dispatch(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
             if n == 0:
                 raise NetworkError(
                     "Http2Client: peer closed connection mid-response"
@@ -1193,7 +1290,7 @@ struct Http2Client(Movable):
             # may have been queued by the feed; flush them.
             var ack_bytes = self._conn.drain()
             if len(ack_bytes) > 0:
-                self._stream.unsafe_value().write_all(Span[UInt8, _](ack_bytes))
+                self._write_all_dispatch(Span[UInt8, _](ack_bytes))
         # Surface RST_STREAM as a hard error.
         var maybe_err = self._conn.stream_error(sid)
         if Bool(maybe_err):
@@ -1218,14 +1315,18 @@ struct Http2Client(Movable):
             self._conn.send_goaway(self._conn._next_sid - 2, 0)
             var bytes = self._conn.drain()
             if len(bytes) > 0:
-                self._stream.unsafe_value().write_all(Span[UInt8, _](bytes))
+                self._write_all_dispatch(Span[UInt8, _](bytes))
         except:
             pass
         try:
-            self._stream.unsafe_value().close()
+            if self._connect_scheme == "https":
+                self._tls_stream.unsafe_value().close()
+            else:
+                self._stream.unsafe_value().close()
         except:
             pass
         self._stream = Optional[TcpStream]()
+        self._tls_stream = Optional[TlsStream]()
         self._connected = False
 
 

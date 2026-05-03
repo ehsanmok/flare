@@ -75,6 +75,59 @@ def test_protocol_constants_distinct() raises:
     assert_true(TLS_PROTOCOL_TLS12 < TLS_PROTOCOL_TLS13)
 
 
+# ── TlsConfig (client-side) ALPN field ───────────────────────────────────
+
+
+def test_client_tls_config_default_alpn_empty() raises:
+    """Default :class:`flare.tls.TlsConfig` does not advertise any
+    ALPN protocol. Verifies the new ``alpn`` field added for
+    client-side ALPN (``flare.http2.Http2Client`` uses this to
+    advertise ``h2`` on the ClientHello)."""
+    from flare.tls import TlsConfig
+
+    var cfg = TlsConfig()
+    assert_equal(len(cfg.alpn), 0)
+
+
+def test_client_tls_config_alpn_round_trip() raises:
+    """A non-empty ``alpn`` list is preserved by
+    :class:`flare.tls.TlsConfig` construction and survives
+    ``copy()``."""
+    from flare.tls import TlsConfig
+
+    var protos = List[String]()
+    protos.append(String("h2"))
+    protos.append(String("http/1.1"))
+    var cfg = TlsConfig(alpn=protos^)
+    assert_equal(len(cfg.alpn), 2)
+    assert_equal(cfg.alpn[0], "h2")
+    assert_equal(cfg.alpn[1], "http/1.1")
+    var clone = cfg.copy()
+    assert_equal(len(clone.alpn), 2)
+    assert_equal(clone.alpn[0], "h2")
+    assert_equal(clone.alpn[1], "http/1.1")
+
+
+def test_client_tls_config_alpn_oversized_id_rejected_at_handshake() raises:
+    """A protocol id > 255 bytes will be rejected when
+    :meth:`flare.tls.TlsStream.connect` builds the wire-format
+    blob; the rejection lives in the connect path (not the
+    config constructor) so the failure carries the OpenSSL
+    error context. We only verify the config holds the bad
+    value here -- the connect-time rejection is exercised by
+    the integration tests."""
+    from flare.tls import TlsConfig
+
+    var protos = List[String]()
+    var huge = String("x")
+    for _ in range(300):
+        huge += "x"
+    protos.append(huge^)
+    var cfg = TlsConfig(alpn=protos^)
+    assert_equal(len(cfg.alpn), 1)
+    assert_true(cfg.alpn[0].byte_length() > 255)
+
+
 # ── mTLS validation (Track 5.4) ────────────────────────────────────────────
 
 

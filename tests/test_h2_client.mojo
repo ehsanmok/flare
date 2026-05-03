@@ -244,18 +244,22 @@ def test_h2c_two_sequential_requests_share_connection() raises:
     assert_equal(s2, 200)
 
 
-def test_h2c_https_url_rejected() raises:
-    """``https://`` URLs raise NetworkError in the cleartext-only cut."""
+def test_h2_unsupported_scheme_rejected() raises:
+    """A URL with neither ``http://`` nor ``https://`` raises with a
+    clear message."""
     var raised = False
     var msg = String("")
     try:
         with Http2Client() as c:
-            _ = c.get("https://example.com/")
+            _ = c.get("ftp://example.com/")
     except e:
         raised = True
         msg = String(e)
-    assert_true(raised, "https:// must raise on the cleartext-only cut")
-    assert_true("h2c" in msg or "ALPN" in msg or "https" in msg)
+    assert_true(raised, "non-http/https scheme must raise")
+    assert_true(
+        "ftp" in msg or "scheme" in msg or "supported" in msg,
+        "expected a scheme-related error message; got: " + msg,
+    )
 
 
 def test_h2c_cross_origin_reuse_rejected() raises:
@@ -295,6 +299,6 @@ def main() raises:
     test_h2c_get_request_round_trip()
     test_h2c_post_with_body()
     test_h2c_two_sequential_requests_share_connection()
-    test_h2c_https_url_rejected()
+    test_h2_unsupported_scheme_rejected()
     test_h2c_cross_origin_reuse_rejected()
     print("test_h2_client: 5 passed")

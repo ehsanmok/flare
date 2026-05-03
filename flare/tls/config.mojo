@@ -32,7 +32,7 @@ struct TlsVerify:
     """Verify peer certificate against the trusted CA bundle. Default."""
 
 
-struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
+struct TlsConfig(Copyable, Movable):
     """Configuration for a TLS connection.
 
     Fields:
@@ -44,6 +44,13 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
         key_file: Path to a PEM client private key (mTLS), or ``""`` for none.
         server_name: SNI hostname override. ``""`` means derive from the
                      connected host at runtime (strongly preferred).
+        alpn: Application-Layer Protocol Negotiation protocol IDs to
+                     advertise on the TLS ClientHello in preference order
+                     (e.g. ``["h2", "http/1.1"]`` to prefer HTTP/2 with
+                     fallback). Empty list (the default) disables ALPN
+                     entirely. Per RFC 7301, each ID must be 1..255 bytes
+                     and the wire-format blob (length-prefixed
+                     concatenation) must total at most 255 bytes.
 
     Example:
         ```mojo
@@ -58,6 +65,9 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
             cert_file="/etc/myapp/client.pem",
             key_file="/etc/myapp/client.key",
         )
+
+        # HTTP/2-preferring client with HTTP/1.1 fallback
+        var cfg = TlsConfig(alpn=["h2", "http/1.1"])
         ```
     """
 
@@ -66,6 +76,7 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
     var cert_file: String
     var key_file: String
     var server_name: String
+    var alpn: List[String]
 
     def __init__(
         out self,
@@ -74,6 +85,7 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
         cert_file: String = "",
         key_file: String = "",
         server_name: String = "",
+        var alpn: List[String] = List[String](),
     ):
         self.verify = verify
         # Empty ca_bundle is fine: the C wrapper
@@ -85,6 +97,7 @@ struct TlsConfig(Copyable, ImplicitlyCopyable, Movable):
         self.cert_file = cert_file
         self.key_file = key_file
         self.server_name = server_name
+        self.alpn = alpn^
 
     @staticmethod
     def insecure() -> TlsConfig:

@@ -111,6 +111,18 @@ int flare_ssl_ctx_set_alpn_server(
     flare_ssl_ctx_t ctx, const uint8_t* protos, int protos_len
 );
 
+/* Client-side ALPN: tell OpenSSL which protocols to advertise on
+ * the ClientHello. Wire-format: ``len_byte || proto ||
+ * len_byte || proto || ...`` (same as the server-side blob).
+ *
+ * Returns 0 on success, -1 on failure (set_error() set).
+ * OpenSSL's SSL_CTX_set_alpn_protos uses 0/1 return values
+ * inverted from typical OpenSSL idioms; this wrapper normalises
+ * to the rest of the file's "0 ok, -1 err" convention. */
+int flare_ssl_ctx_set_alpn_protos(
+    flare_ssl_ctx_t ctx, const uint8_t* protos, int protos_len
+);
+
 /**
  * Enable mTLS client-cert verification.
  *

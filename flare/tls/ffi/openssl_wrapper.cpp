@@ -347,6 +347,34 @@ int flare_ssl_ctx_set_alpn_server(
     return 0;
 }
 
+/* Client-side ALPN: tell OpenSSL which protocols to advertise on
+ * the ClientHello. Wire-format same as the server callback's
+ * input: ``len_byte || proto || len_byte || proto || ...``.
+ *
+ * Returns 0 on success, -1 on failure. (OpenSSL's
+ * SSL_CTX_set_alpn_protos returns 0 on success and 1 on
+ * failure -- we normalise to the standard "0 ok, -1 err"
+ * convention used by the rest of this wrapper.) */
+int flare_ssl_ctx_set_alpn_protos(
+    flare_ssl_ctx_t ctx, const uint8_t* protos, int protos_len
+) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) { set_error("ctx is null"); return -1; }
+    if (protos_len <= 0 || protos_len > 255) {
+        set_error("ALPN protos blob must be 1..255 bytes");
+        return -1;
+    }
+    /* SSL_CTX_set_alpn_protos copies the bytes internally so
+     * we don't need to keep our blob alive past this call. */
+    if (SSL_CTX_set_alpn_protos(
+            c, protos, static_cast<unsigned int>(protos_len)
+        ) != 0) {
+        set_error("SSL_CTX_set_alpn_protos failed");
+        return -1;
+    }
+    return 0;
+}
+
 int flare_ssl_ctx_set_verify_client_cert(
     flare_ssl_ctx_t ctx, const char* ca_path
 ) {
