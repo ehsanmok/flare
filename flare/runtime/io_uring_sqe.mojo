@@ -214,12 +214,23 @@ flushed."""
 # ── op-specific flags ────────────────────────────────────────────────────────
 
 comptime IORING_RECV_MULTISHOT: UInt32 = 0x02
-"""6.0+. Set in the SQE ``op_flags`` (recv_msg_flags) field on
-``IORING_OP_RECV``. The kernel keeps re-arming the recv after
-each completion, so the userspace driver only re-submits when
-the multishot is cancelled or the connection closes. Cuts the
-syscall-per-byte ratio dramatically on long-lived keep-alive
-connections."""
+"""Kernel 6.0+. Set in ``sqe->ioprio`` (NOT ``msg_flags``!) to
+make an ``IORING_OP_RECV`` rearm itself after each completion.
+Each CQE includes ``IORING_CQE_F_MORE`` while the multishot is
+still armed; the kernel disarms on terminal errors (EOF, RST,
+ENOBUFS, etc) which surface as a CQE without ``F_MORE`` --
+userspace re-arms then. The MULTISHOT bit is extracted from
+the ``recv_flags`` parameter of :func:`prep_recv` /
+:func:`prep_recv_buffer_select` and routed to ``sqe->ioprio``
+automatically; callers don't need to handle the split. Kernel
+source: ``io_uring/net.c::io_recv_prep`` reads it via
+``READ_ONCE(sqe->ioprio)``."""
+
+comptime IORING_RECVSEND_POLL_FIRST: UInt32 = 0x01
+"""Kernel 5.19+. Set in ``sqe->ioprio`` to force a poll before
+the recv/send is attempted. Like MULTISHOT, this bit is
+extracted from ``recv_flags`` / ``send_flags`` and routed to
+``sqe->ioprio`` by flare's prep helpers."""
 
 comptime IORING_ACCEPT_MULTISHOT: UInt32 = 0x01
 """5.19+. Set in the SQE ``op_flags`` (accept_flags) on
@@ -696,8 +707,14 @@ def prep_recv(
         rx_buf: Pointer to the receive buffer (or 0 if using
             ``IOSQE_BUFFER_SELECT``).
         rx_len: Length of the receive buffer in bytes.
-        recv_flags: Standard ``recv(2)`` flags + on kernels ≥ 6.0,
-            ``IORING_RECV_MULTISHOT`` for self-rearming recv.
+        recv_flags: Standard ``recv(2)`` MSG_* flags (e.g.
+            ``MSG_NOSIGNAL = 0x4000``) AND/OR
+            ``IORING_RECV_MULTISHOT`` (kernel 6.0+) /
+            ``IORING_RECVSEND_POLL_FIRST``. The MULTISHOT and
+            POLL_FIRST bits are extracted and routed to
+            ``sqe->ioprio`` (where the kernel reads them); only
+            the standard MSG_* bits stay in ``sqe->msg_flags``.
+            See io_uring/net.c::io_recv_prep in the Linux source.
         user_data: Tag returned in the matching CQE.
     """
     debug_assert[assert_mode="safe"](
@@ -711,7 +728,19 @@ def prep_recv(
     _store_u32_le(buf, _SQE_OFF_FD, UInt32(fd))
     _store_u64_le(buf, _SQE_OFF_ADDR, rx_buf)
     _store_u32_le(buf, _SQE_OFF_LEN, UInt32(rx_len))
-    _store_u32_le(buf, _SQE_OFF_OP_FLAGS, recv_flags)
+    # Split recv_flags: MULTISHOT + POLL_FIRST go in sqe->ioprio
+    # (kernel reads them there); plain MSG_* flags stay in
+    # msg_flags. The kernel's io_recv_prep:
+    #   sr->flags = READ_ONCE(sqe->ioprio);  // MULTISHOT etc
+    #   sr->msg_flags = READ_ONCE(sqe->msg_flags) | MSG_NOSIGNAL;
+    var ioprio_bits: UInt16 = UInt16(
+        Int(recv_flags & (IORING_RECV_MULTISHOT | IORING_RECVSEND_POLL_FIRST))
+    )
+    var msg_flags: UInt32 = recv_flags & ~(
+        IORING_RECV_MULTISHOT | IORING_RECVSEND_POLL_FIRST
+    )
+    _store_u16_le(buf, _SQE_OFF_IOPRIO, ioprio_bits)
+    _store_u32_le(buf, _SQE_OFF_OP_FLAGS, msg_flags)
     _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
 
 
@@ -830,7 +859,20 @@ def prep_recv_buffer_select(
     # sqe.buf_index (offset 40, u16).
     _store_u8(buf, _SQE_OFF_FLAGS, IOSQE_BUFFER_SELECT)
     _store_u32_le(buf, _SQE_OFF_FD, UInt32(fd))
-    _store_u32_le(buf, _SQE_OFF_OP_FLAGS, recv_flags)
+    # Same MULTISHOT/POLL_FIRST -> ioprio split as prep_recv:
+    # the kernel reads MULTISHOT from sqe->ioprio, NOT msg_flags.
+    # Putting it in msg_flags silently degrades multishot recv to
+    # one-shot, which under high recv-CQE rate causes per-CQE re-
+    # arm pressure that crashes the dispatch (root cause of the
+    # bufring sustained-load SIGSEGV documented in eac6e96).
+    var ioprio_bits: UInt16 = UInt16(
+        Int(recv_flags & (IORING_RECV_MULTISHOT | IORING_RECVSEND_POLL_FIRST))
+    )
+    var msg_flags: UInt32 = recv_flags & ~(
+        IORING_RECV_MULTISHOT | IORING_RECVSEND_POLL_FIRST
+    )
+    _store_u16_le(buf, _SQE_OFF_IOPRIO, ioprio_bits)
+    _store_u32_le(buf, _SQE_OFF_OP_FLAGS, msg_flags)
     _store_u16_le(buf, _SQE_OFF_BUF_INDEX, UInt16(Int(bgid)))
     _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
 

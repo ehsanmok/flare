@@ -2751,7 +2751,13 @@ def run_uring_bufring_reactor_loop[
     listener._socket.set_nonblocking(True)
     var listener_fd = Int(listener._socket.fd)
 
-    var ureactor = UringReactor(512)
+    # SQ depth 4096: under multishot recv + submit_send + 64-conn
+    # bursts, SQ pressure can spike (initial accept burst arms 64
+    # multishot recvs simultaneously; each subsequent recv CQE
+    # may submit_send + cancel + close-on-disarm). 512 SQEs was
+    # not enough -- the dispatch hit silent next_sqe failures
+    # under sustained 64-conn load and crashed.
+    var ureactor = UringReactor(4096)
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
 
@@ -2980,7 +2986,7 @@ def run_uring_bufring_reactor_loop_shared[
     )
     from flare.runtime.io_uring_sqe import IORING_CQE_F_BUFFER
 
-    var ureactor = UringReactor(512)
+    var ureactor = UringReactor(4096)
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
     var submit_send = getenv("FLARE_SUBMIT_SEND") == "1"

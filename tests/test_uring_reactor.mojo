@@ -774,6 +774,19 @@ def test_register_pbuf_ring_recv_round_trip() raises:
                     (c.flags & IORING_CQE_F_BUFFER) != UInt32(0),
                     "recv CQE missing IORING_CQE_F_BUFFER",
                 )
+                # With the b3a... fix that puts IORING_RECV_MULTISHOT
+                # in sqe->ioprio (not msg_flags), the kernel actually
+                # honours multishot and CQEs include F_MORE while
+                # the multishot is armed. Pre-fix this assertion
+                # would fail; that's what was causing the bufring
+                # path to crash under sustained load (silent fall-
+                # back to oneshot meant per-CQE re-arm pressure
+                # and an SQE-region overrun).
+                assert_true(
+                    c.has_more,
+                    "multishot recv CQE missing IORING_CQE_F_MORE -- "
+                    + "kernel didn't see the MULTISHOT bit",
+                )
                 var bid = Int(c.flags >> UInt32(16))
                 assert_true(bid >= 0 and bid < RING_ENTRIES)
                 var slot = pool + (bid * BUF_BYTES)

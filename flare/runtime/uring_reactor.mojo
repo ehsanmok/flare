@@ -520,29 +520,39 @@ struct UringReactor(Movable):
         buf_len: Int,
         conn_id: UInt64,
     ) raises -> None:
-        """Submit one multishot recv SQE so the kernel keeps
-        firing recv CQEs while the connection has data.
+        """Submit one recv SQE that re-fires once when data
+        arrives.
+
+        **NOTE on naming**: the original intent was true multishot
+        (``IORING_RECV_MULTISHOT``) but the Linux kernel rejects
+        multishot recv with ``-EINVAL`` unless ``IOSQE_BUFFER_SELECT``
+        is set on the SQE (kernel needs a buffer pool to pick from
+        on each completion -- it can't pre-allocate space for an
+        unbounded stream into a single fixed buffer). This helper
+        targets a single user-owned buffer, so it's effectively
+        one-shot at the kernel level. For TRUE multishot recv,
+        use :func:`arm_recv_buffer_select` with a registered
+        ``IORING_REGISTER_PBUF_RING`` buffer ring.
 
         Args:
             fd: Connected socket fd.
             buf: Receive buffer (caller-owned; flare uses a
                 BufferHandle from the per-worker pool).
             buf_len: Buffer capacity in bytes.
-            conn_id: Tag returned in each recv CQE.
+            conn_id: Tag returned in the recv CQE.
         """
         var slot = self._driver.next_sqe()
         if Int(slot) == 0:
             raise Error("UringReactor.arm_recv_multishot: SQ is full")
         var ud = pack_user_data(URING_OP_RECV, conn_id)
-        # Multishot recv is signalled via the recv flags slot at
-        # offset 28 (op_flags); see io_uring_prep_multishot_recv
-        # in liburing.
+        # No MULTISHOT flag (kernel rejects without
+        # IOSQE_BUFFER_SELECT). recv_flags=0 -> plain oneshot.
         prep_recv(
             slot,
             fd,
             UInt64(Int(buf)),
             buf_len,
-            IORING_RECV_MULTISHOT,
+            UInt32(0),
             ud,
         )
         self._driver.commit_sqe()
