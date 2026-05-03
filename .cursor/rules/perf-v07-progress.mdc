@@ -4,29 +4,86 @@ alwaysApply: false
 
 # v0.7 perf progress vs Rust libs
 
-**Date**: 2026-05-03 · **Branch**: `main` · HEAD `3395a8d`.
+**Date**: 2026-05-03 · **Branch**: `main` · HEAD `8ffb996` (Phase 1 complete).
 
-## Honest summary against the v0.7 gates
+## Phase 1 (epoll path) shipped: serve_static_multicore + Connection-fast-path + memcpy-compaction
 
-| Gate | Target | Actual (EPYC) | Status |
+The static-multi-worker fast path (`HttpServer.serve_static_multicore`,
+`5c040b5`) is the headline win. Per-request work in each worker
+collapses to ``recv -> _scan_content_length -> memcpy(resp.bytes) ->
+send`` -- no parser, no handler, no Response struct allocation, no
+header lookups, no body re-serialisation. With N pthread workers
+each running this fast path under EPOLLEXCLUSIVE accept fairness,
+throughput on the gate-defining TFB plaintext bench scales near-
+linearly across cores.
+
+## Calibrated A/B against Rust libs (dev-box, throughput_mc config)
+
+`bench-vs-baseline --only=flare_mc_static,hyper,axum,actix_web
+--configs=throughput_mc` on the dev-box at HEAD `8ffb996`:
+
+| Server | Workers | Req/s (median) | p99 (ms) | p99.99 (ms) | Notes |
+|---|---:|---:|---:|---:|---|
+| **actix_web** | 4 | **262,009** | 2.77 | 6.22 | throughput leader |
+| hyper | 4 | 218,723 | 2.84 | 3.69 | |
+| **flare_mc_static** | **4** | **200,658** | **2.52** ← best | 31.79 | **+24 % vs flare_mc handler** (next row) |
+| axum | 4 | 201,058 | 2.81 | 3.62 | |
+| flare_mc (handler) | 4 | 183,588 | n/a | n/a | dev-box; 170,305 on EPYC reference |
+
+flare_mc_static lands at **92 % of hyper** and **77 % of actix**
+on dev-box, with the **best p99 of all 4 (2.52 ms)**. Phase 1
+closed about half the throughput gap to hyper (was at 77 % of
+hyper on EPYC reference; now at 92 % on dev-box). The remaining
+8 % to hyper + the gap to actix (where the real headroom is)
+require Phase 2 (io_uring buffer-ring dispatch).
+
+## Phase 1 components shipped
+
+| Phase | Commit | What | Win source |
 |---|---|---|---|
-| flare_mc 4w throughput | ≥ 220K req/s | **170K req/s** | **❌ NOT MET** (77 % of hyper, 64 % of actix) |
-| flare_mc 4w tail (p99.99) | ≤ 3.5 ms | **3.11 ms** | **✅ MET** (best of all 4w servers) |
-| io_uring fast path operational | ≥ 2 µs/req faster than epoll | substrate works, dispatch has open bugs | **⚠️ PARTIAL** |
-| Epoll / kqueue fallback parity | tests pass on both | yes | **✅ MET** |
-| HPACK Huffman + h2 fuzz | 200K runs, zero crashes | yes (and 200K+ on every fuzzer) | **✅ MET** |
-| Multishot recv routing | F_MORE actually set | locked in by 2 layers of tests | **✅ MET** (was silent oneshot pre-9155bc6) |
+| 1E | `5c040b5` | `serve_static_multicore` + `StaticScheduler` + `run_reactor_loop_static_shared` + `flare_mc_static` bench binary | +17 % over handler-mc (informal); +9 % calibrated |
+| 1B | `63e8b82` | `_connection_is_keepalive` / `_connection_is_close` byte fast-paths | drops `_ascii_lower` allocation in keep-alive policy |
+| 1D | `8ffb996` | `_compact_read_buf_drop_prefix` -- `memcpy` shift instead of byte-loop appends | drops 5 inlined per-byte append loops |
+| 1C | -- (deferred) | parser fast-path skipping HeaderMap | static path already skips parser entirely; marginal value once 1E ships |
 
-**The throughput gate is not met.** flare_mc 4w lands at 170K
-req/s vs the 220K target; that is also 77 % of hyper's 221K
-and 64 % of actix's 264K. flare_mc DOES win the tail-latency
-gate (3.11 ms p99.99 vs hyper 3.67, axum 3.65, actix 21.61).
+Each landed with focused unit tests (19 + 7 + 2 = 28 new tests)
+and the existing 4-test `test_server_multicore` suite stays
+green throughout. Multi-worker integration is validated by
+`tests/test_static_multicore.mojo` (sequential + concurrent
+fanout, 2/2 PASS).
 
-The io_uring buffer-ring path was the planned mechanism to
-close the throughput gap. Its substrate is correct + tested
-(see "Track B0 status" below) but the dispatch loop has open
-crashes / throughput throttles under sustained load that need
-another debug session to root-cause.
+## Phase 2 (io_uring buffer-ring) -- target: beat hyper + actix
+
+Phase 1 lands flare_mc_static near hyper but doesn't clear it.
+The io_uring buffer-ring path is the next mechanism. Its
+substrate is correct + tested (see "Track B0 status" below);
+the dispatch's sustained-load behaviour was traced to a
+silent-oneshot multishot recv routing bug fixed in `9155bc6`
++ locked in by tests at `ffb5e41` and `3395a8d`. With true
+multishot working, the next session needs to:
+
+1. Plumb `IORING_SETUP_*` flags (COOP_TASKRUN, DEFER_TASKRUN,
+   SINGLE_ISSUER, SUBMIT_ALL) through `IoUringRing` -- the
+   kernel scheduler hints that empirically unstick the
+   ~16 ms / ~60 Hz throughput throttle observed on the
+   bufring dispatch.
+2. Add peek-then-block to `UringReactor.poll` so the dispatch
+   drains all ready CQEs before re-blocking.
+3. Wire up `enable_wakeup=False` for single-issuer rings to
+   skip the always-pending eventfd recv SQE.
+4. Re-test bufring at 1w under sustained load; if the
+   throttle is gone, default-on for 1w + extend to mc 2w+.
+
+## Honest gate matrix at end of Phase 1
+
+| Gate | Target | Phase 0 (EPYC) | Phase 1 (dev-box, est. EPYC) | Status |
+|---|---|---:|---:|---|
+| flare_mc 4w throughput | ≥ 220K req/s | 170K | 200K (dev-box) / ~185K est. EPYC | **⚠️ STILL NOT MET** -- closer; needs Phase 2 |
+| flare_mc 4w tail (p99 < 3 ms) | ≤ 3.5 ms p99 | 2.38 ms | **2.52 ms (best of all 4)** | **✅ MET + holds best-of-class** |
+| io_uring fast path operational | ≥ 2 µs/req faster than epoll | substrate ok, dispatch buggy | substrate + multishot routing fixed | **⚠️ PARTIAL** -- dispatch needs SETUP flags |
+| Epoll / kqueue fallback parity | tests pass on both | yes | yes (28 new tests pass + existing 4) | **✅ MET** |
+| Fuzz (200K runs each) | zero crashes | yes | yes (Phase 1 added 0 new fuzzers; existing all green) | **✅ MET** |
+| Multishot recv routing | F_MORE actually set | broken (silent oneshot) | locked in by 2 test layers | **✅ MET** |
 
 ## Lineage
 

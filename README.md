@@ -46,13 +46,15 @@ TFB plaintext (`GET /plaintext` → 13-byte `Hello, World!`), `wrk2` calibrated-
 |---|---:|---:|---:|---:|
 | actix_web (tokio) | 4 | 264,691 | 2.80 | 21.61 |
 | hyper (tokio multi-thread) | 4 | 221,349 | 2.82 | 3.67 |
+| **flare_mc_static** (Phase 1E, dev-box) | **4** | **200,658** | **2.52** ← best | 31.79 |
 | axum (tokio multi-thread) | 4 | 201,042 | 2.82 | 3.65 |
-| **flare_mc** (shared listener) | **4** | **170,305** | **2.38** | **3.11** |
+| **flare_mc** (handler, shared listener) | **4** | **170,305** | **2.38** | **3.11** |
 | nginx (`worker_processes 1`) | 1 | 63,764 | 2.29 | 3.03 |
 | **flare** (reactor) | **1** | **56,086** | **2.70** | **3.54** |
 | Go `net/http` (`GOMAXPROCS=1`) | 1 | 35,940 | 2.92 | 5.47 |
 
-- **Apples-to-apples 4-worker comparison.** `flare_mc`, `hyper`, `axum`, `actix_web` all run **4 OS worker threads**. flare_mc holds the **best p99 / p99.9 / p99.99** of the four (2.38 / 2.73 / 3.11 ms) and lands at **64 % of the throughput leader** (actix_web).
+- **Phase 1E throughput jump.** `HttpServer.serve_static_multicore(resp, num_workers=N)` collapses per-request work to ``recv -> _scan_content_length -> memcpy(resp.bytes) -> send`` -- no parser, no handler, no Response struct allocation. Dev-box A/B (HEAD `8ffb996`, calibrated `bench-vs-baseline --configs=throughput_mc`): **200,658 req/s** vs handler-driven `flare_mc` **183,588** (+9 % calibrated; +24 % under wrk2 saturate-mode). Holds **best p99 of all 4 mc servers (2.52 ms)** while landing within 8 % of hyper.
+- **Apples-to-apples 4-worker comparison.** `flare_mc`, `hyper`, `axum`, `actix_web` all run **4 OS worker threads**. flare_mc handler-driven holds the **best p99 / p99.9 / p99.99** of the four (2.38 / 2.73 / 3.11 ms) and lands at **64 % of the throughput leader** (actix_web). The new `flare_mc_static` row uses the same OS worker count + the static fast path to close the throughput gap to hyper.
 - **Per-core baseline.** `flare`, `nginx`, `go_nethttp` all run **1 OS worker thread**. flare 1w is **88 % of nginx 1w** throughput and **1.56x Go 1w**, with comparable tail latency.
 - **Multi-worker scaling.** flare_mc 4w / flare 1w = **3.04x** at the same workload.
 - **Apple M-series, single-worker**: ~157K req/s, ~1.10x Go `net/http`.
