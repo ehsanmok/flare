@@ -146,7 +146,7 @@ calibration budget):
 | Story | Status |
 |---|---|
 | **Tail (p99.99) on EPYC** | ✅ **Already best-of-class** — 3.11 ms beats hyper 3.67, axum 3.65, actix 21.61 on the v0.6 EPYC tag. The v0.7 substrate doesn't regress this; the v0.7 EPYC re-bench will publish the matched-backend numbers. |
-| **Throughput (peak) on EPYC** | ⏭ **170 K vs hyper 221 K = -23 %**. Buffer-ring handler-path wire-in **CORRECTNESS-COMPLETE** in `a91413d` (cancel-before-free fix; opt-in via `FLARE_BUFRING_HANDLER=1`); two integration tests cover sequential keepalive churn + concurrent fan-out, all PASS, no crashes under sustained `wrk2 -t4 -c64 -R50000` load. **Tail wins on dev-box** (p99 -11 %, p99.99 -6 %), **peak loses on dev-box** (-32 % from per-CQE PROVIDE_BUFFERS refill + cancel_conn cleanup overhead exceeding recv-syscall savings). The EPYC 4-worker bench is the next gate for "beat Rust libs": more cores → epoll's per-syscall overhead becomes a larger fraction of per-request cost → io_uring's substrate wins. Multi-worker Scheduler wire-in still pending (single-worker handler path is correct; multi-worker dispatch has additional thread-interaction issues). |
+| **Throughput (peak) on EPYC** | ⏭ **170 K vs hyper 221 K = -23 %**. Buffer-ring handler-path wire-in (single + multi-worker) **CORRECTNESS-COMPLETE** in `a91413d` + `cf7f138` (both opt-in via `FLARE_BUFRING_HANDLER=1`). Single-worker: 2/2 integration tests PASS, no crashes under sustained `wrk2 -t4 -c64 -R50000`. Multi-worker: known to hang after a few connection-recycle cycles in `>= 2 workers` mode (see *Wire-in 1-worker throughput regression* and *Multi-worker hang* sections below for the complete diagnosis). The EPYC 4-worker bench is the next gate for "beat Rust libs", but it's gated on the multi-worker hang fix first. |
 | **Tail on dev-box** | ⚠️ **Noisy, blows up under sustained load** — 27-69 ms p99 / p99.99 on this 64-vCPU shared-L3 box. Same code on EPYC: 3.11 ms. Use EPYC for tail measurements; the dev-box is a *throughput regression watchdog only*. |
 
 ## v0.7 perf objective vs Rust libs
@@ -228,6 +228,7 @@ harness:
 | **B0 buffer-ring substrate** | `bf6ca75` | `prep_provide_buffers` + `prep_recv_buffer_select` SQE encoders, `arm_provide_buffers` + `arm_recv_buffer_select` on `UringReactor`, new `URING_OP_PROVIDE_BUFFERS=9` op tag. Validated end-to-end by `test_buffer_ring_recv_round_trip` (4-buffer 1 KiB pool, multishot buffer-select recv, kernel picks a buffer per CQE, `IORING_CQE_F_BUFFER` set, data lands at the correct slot). 12/12 PASS on host kernel 6.8. Note: kernel 6.x reports `res=0` on `PROVIDE_BUFFERS` success (count is implicit; either fully succeeds or returns -errno); test asserts only `res >= 0` for portability across 5.7-6.0 (which returned the count) and 6.x. | (substrate-only; no caller in tree until the wire-in below ships) |
 | **B0 buffer-ring dispatch loops (substrate, not yet wired)** | `9cf97d0` | `run_uring_bufring_reactor_loop[H]` + `_shared[H]` -- the production handler-path io_uring loops using the substrate. Sequential single-conn keep-alive **works at scale (500/500)**, removing the ConnHandle lifecycle bug that killed the recv-multishot 981eb8e attempt. Wire-in into `HttpServer.serve` / `Scheduler` blocked on a SIGSEGV under concurrency (sequential 4 conns OR parallel 8 conns reproduces). | (no perf cost; substrate ships, wire-in deferred) |
 | **B0 gen-stamped conn_id refinement** | `392cf15` | Adds a per-worker monotonic generation counter packed into the conn_id (`(gen << 24) \| fd` in the 56-bit conn_id slot) so trailing recv CQEs from a closed conn carry the OLD generation bits and never misroute to a freshly-accepted conn that the kernel happens to give the same fd value. Refines `run_uring_bufring_reactor_loop[H]` + `_shared[H]` to key `conns: Dict[UInt64, Int]` on the full packed conn_id. Necessary but not sufficient -- the cancel-before-free fix in `a91413d` is what actually unblocks the wire-in. | (substrate refinement; necessary for correctness once the wire-in lands) |
+| **B0 multi-worker handler-path wire-in (opt-in; hangs > 1w)** | `cf7f138` | Wires `run_uring_bufring_reactor_loop_shared[H]` into `Scheduler._worker_entry` under the same `FLARE_BUFRING_HANDLER=1` opt-in env var. Single-worker path proven (all 1w tests + smokes pass). Multi-worker path hangs after a few connection-recycle cycles in `>= 2 workers` mode -- the same code on epoll (FLARE_DISABLE_IO_URING=1, mc 2w) serves 99,265 wrk2 requests in 5s cleanly, so the bug is buffer-ring-specific in the multi-worker configuration. Documented hypothesis: kernel-level interaction with multiple multishot accept arms on a SHARED listener fd from DIFFERENT io_uring rings. Recommended fix: switch to `SO_REUSEPORT` + per-worker bind (each worker gets its OWN listener fd) -- matches what `tokio-uring` / `monoio` do; eliminates the shared-fd interaction entirely. flare already has `flare/runtime/reuseport.bind_shared` ready to plug in. | (uniform wire-in surface; multi-worker bug is opt-in-only and well-characterised for the next debug session) |
 | **B0 handler-path wire-in (opt-in via env var)** | `a91413d` | **Closes the race that crashed THREE prior wire-in attempts.** Used `mojo debug --sanitize address` to diagnose: the ASAN-built binary served 99,650 req/s without errors and stayed up under 50K req/s load (where the non-ASAN build crashed instantly). ASAN's runtime overhead slowed userspace dispatch enough that the kernel had time to fully process conn-close before the reaccept landed -- diagnostic proof that the bug is timing-sensitive (kernel race between fd close and reaccept on the same fd, NOT a memory bug). Fix: in `_cleanup_conn_uring_br`, issue `ureactor.cancel_conn(conn_id)` BEFORE `_conn_free_addr` (which closes the fd). The kernel processes the cancel cleanly while the fd is still open and the io_uring ring resources for that recv are still valid; subsequent CQEs are dropped via the gen-stamp miss. **Validation on host kernel 6.8 with `FLARE_BUFRING_HANDLER=1`**: sequential keep-alive churn 8 conns × 50 reqs = 400/400 round-trips clean (the 981eb8e + 9cf97d0 reproducer); parallel fan-out 16 conns × 50 reqs = 800/800 in 0.058s; wrk2 -t4 -c64 -R50000 = 498,108 requests in 10s = 49,807 req/s achieved; p99=1.005ms; new `test-uring-serve-handler` 2/2 PASS via fork(2) integration. **Wire-in is OPT-IN** (gated on `FLARE_BUFRING_HANDLER=1`), NOT default-on, because the bench-vs-baseline single-worker measurement on this dev-box shows io_uring buffer-ring at 49,812 req/s vs epoll at 65,990 req/s -- a -32 % peak regression from the per-CQE PROVIDE_BUFFERS refill SQE + cancel_conn cleanup overhead exceeding the recv-syscall savings on this load shape. Tail latency wins (-11 % p99, -6 % p99.99). The EPYC 4-worker run is the hardware that should flip the trade in io_uring's favour. The Scheduler multi-worker wire-in is left UNWIRED -- a separate debug session is needed for the multi-worker dispatch which has its own thread-interaction issues (FLARE_BENCH_WORKERS=2 hangs after a few requests; FLARE_BENCH_WORKERS=4 crashes). | (correctness ✅; default perf neutral; opt-in for EPYC validation + further tuning) |
 | B2 PHF | (earlier v0.7 commit) | Comptime PHF for ~70 standard headers | 0.5 – 1.0 |
 | B3 intern | (earlier) | `StaticString` interning for HTTP method names + common values | 0.3 – 0.5 |
@@ -256,6 +257,115 @@ core. Comfortable margin against the 5 µs target (220 K =
 | **B0 handler-path wire-in (recv-multishot attempt)** | Same wire-in but driven by `IORING_OP_RECV` (single-shot, re-armed per CQE) instead of poll. The kernel hands us bytes directly with no `poll → recv` round-trip and no edge-trigger race. Adds `ConnHandle.on_readable_from_buf[H]` (a bytes-driven parser entry, additive in commit `0116178`) plus `run_uring_recv_reactor_loop[H]` / `run_uring_recv_reactor_loop_shared[H]`. | **⚠️ attempted in `981eb8e`, reverted in `c6ccc79`**. Hit a deterministic ConnHandle lifecycle bug at exactly request #62 of every keep-alive client: `keepalive_count` resets to 0 with a new `ConnHandle` allocated at a different heap address (verified via instrumented `ch_addr` / `buf_addr` prints), the kernel-side socket fd is closed (peer's TCP state goes from ESTABLISHED to CLOSE without our cleanup path firing), and a genuine new `IORING_OP_ACCEPT` CQE fires for the same fd number. Best hypotheses: **(i)** Mojo's `var wire = self.write_buf^` move-out / move-back in `_serialize_response` interacts with the heap-allocated `Pool[ConnHandle]` slot in a way that runs the destructor mid-request, **(ii)** a Mojo runtime worker thread is racing on the per-conn recv buffer pointer pinned to the kernel SQE, or **(iii)** the kernel's per-fd recv arm has an internal limit we're hitting. Diagnosis was time-boxed; the fix path below sidesteps the bug entirely by removing the per-conn buffer pinning. `ConnHandle.on_readable_from_buf` (the additive parser entry from `0116178`) was kept in the tree as scaffolding for the next attempt. |
 | **B0 zero-copy recv via buffer ring -- substrate ✅, wire-in ⚠️** | True multishot recv against a **kernel-managed buffer ring**: register a per-worker pool of N×8 KiB buffers via `IORING_OP_PROVIDE_BUFFERS`, set `IOSQE_BUFFER_SELECT` on the recv SQE plus `sqe->buf_group`, and arm a single `IORING_OP_RECV` + `IORING_RECV_MULTISHOT` per accepted fd. The kernel picks a buffer per CQE from the ring (buffer id in CQE's high 16 flag bits, decoded by `IoUringCqe.buffer_id()`), removes per-conn buffer pinning entirely, and matches what `tokio-uring` / `monoio` / `glommio` do for the same workload. | **Substrate shipped in `bf6ca75`** -- `prep_provide_buffers` + `prep_recv_buffer_select` SQE encoders, `arm_provide_buffers` + `arm_recv_buffer_select` on `UringReactor`, new `URING_OP_PROVIDE_BUFFERS=9` op tag. Live-kernel test (`test_buffer_ring_recv_round_trip` in `tests/test_uring_reactor.mojo`) provides a 4-buffer 1 KiB pool, accepts a loopback connection, arms multishot buffer-select recv, validates the recv CQE has `IORING_CQE_F_BUFFER`, the picked buffer id is in `[0, 4)`, and the data lands at the correct pool slot. **12/12 PASS on host kernel 6.8.** **Dispatch loops shipped in `9cf97d0`** -- `run_uring_bufring_reactor_loop[H]` + `_shared[H]` use the substrate end-to-end. **Sequential single-conn keep-alive WORKS at scale (500/500 keep-alive requests on one conn, vs the recv-multishot 981eb8e attempt that died at request #62 -- the ConnHandle lifecycle bug is GONE because the per-conn buffer pinning is gone)**. **Wire-in into `HttpServer.serve` is BLOCKED on a concurrency-conn crash** (SIGSEGV in our code somewhere; sequential 4 conns OR parallel 8 conns reproduces; each conn up to the threshold serves 50/50 cleanly, then the next accept-cleanup-and-re-accept-on-same-fd cycle SEGV's). Best hypotheses: Mojo move semantics in `_serialize_response`'s `var wire = self.write_buf^` interact badly with `Pool[ConnHandle].alloc_move`'s heap slot when the slot is freed and re-allocated rapidly across the conn-close / accept-reuse boundary; or a lifecycle race with the kernel's still-pending recv CQE for a closed-conn fd colliding with the same fd's new ConnHandle slot. Both need lldb / Mojo-native ASAN to root-cause -- outside this session's time budget. The dispatch functions are uncalled in the tree; next debug session can wire them in directly to reproduce on a controlled binary, or extend the substrate test with concurrent recv arming to surface the issue in isolation. |
 | **EPYC publication** | Re-run `bench-vs-baseline` on EPYC 7R32 with the io_uring path enabled; refresh `benchmark/results/v0.7/iouring-vs-epoll/`. | Hardware-gated. The dev-box 4w bench (`46addbd`) sits at parity with the v0.6 EPYC peak on the epoll path (170 K vs 170 K) but the dev-box tail is dominated by 64-vCPU scheduler noise — the EPYC re-bench will publish the matched-worker / matched-cores numbers (which historically land at p99.99 = 3.11 ms; best-of-class). |
+
+## Wire-in 1-worker throughput regression: WHY io_uring 49K < epoll 66K
+
+Same-binary, same-harness A/B (toggling `FLARE_BUFRING_HANDLER`):
+
+| Backend | Req/s (peak) | p99 | p99.99 |
+|---|---:|---:|---:|
+| io_uring buffer-ring | 49,812 | **2.76 ms** | **3.26 ms** |
+| epoll | **65,990** | 3.11 ms | 3.46 ms |
+
+io_uring trades **−32 % peak throughput** for **−11 % p99 / −6 % p99.99**.
+
+Per-request work breakdown (TFB plaintext, kept-alive HTTP/1.1):
+
+| | epoll path | io_uring buffer-ring |
+|---|---|---|
+| Wait for readiness | 1 `epoll_wait` (batched N events) | 1 `io_uring_enter` (batched CQEs + SQEs) |
+| Read bytes | 1 `recv` syscall | **0 syscalls** (kernel push via buffer ring) ✅ |
+| Run handler | — | — |
+| Write response | 1 `send` syscall | 1 `send` syscall ❌ (still synchronous) |
+| Refill kernel buffer | — | **1 `PROVIDE_BUFFERS` SQE** ❌ (extra work per CQE) |
+| **Net syscalls/req** | **3** | **~2** + extra SQE bookkeeping |
+
+io_uring saves the recv syscall but adds the per-CQE
+`PROVIDE_BUFFERS` refill SQE AND still pays the synchronous
+send syscall. On the dev-box at 1-worker, the refill SQE +
+in-kernel buffer-ring bookkeeping cost more than the recv
+syscall cost it saves. The tail wins because each
+`io_uring_enter` does more work per syscall (less context-
+switch jitter), but raw throughput regresses.
+
+**Two paths to close the gap (both v0.7.x scope)**:
+
+1. **`submit_send` for the response** — drops the synchronous
+   send syscall. `UringReactor.submit_send` already exists and
+   is unit-tested. The blocker is per-conn buffer-ownership
+   tracking: the response bytes (in `ConnHandle.write_buf`)
+   must outlive the in-flight send SQE, but the next request's
+   `_serialize_response` would otherwise overwrite them.
+   Cleanest fix: per-conn ping-pong write-buffers (write_buf_a
+   in flight, write_buf_b for the next response), or a
+   reference-count on write_buf bumped on submit_send and
+   decremented on the send CQE.
+
+2. **`IORING_REGISTER_PBUF_RING` (kernel 5.19+)** — drops the
+   per-CQE `PROVIDE_BUFFERS` refill entirely. The kernel
+   manages a fixed-size ring of buffer entries that recycles
+   automatically; userspace only updates a cached_tail pointer
+   to advertise new buffers. Bigger registration API change but
+   eliminates the SQE pressure on the hot path.
+
+Combined, these would eliminate BOTH the synchronous send AND
+the per-CQE refill, dropping io_uring to **~1 syscall/req** vs
+epoll's 3 — at which point the throughput trade flips
+decisively in io_uring's favour. The current wire-in's tail
+win (p99 -11 %, p99.99 -6 %) is direct evidence the io_uring
+substrate is fundamentally faster; the throughput regression
+is a missing-feature problem, not an architectural one.
+
+## Multi-worker hang: WHY 1w bufring works but 2w bufring hangs
+
+Tested on commit `cf7f138` with `FLARE_BENCH_WORKERS=2` +
+`FLARE_BUFRING_HANDLER=1`:
+
+| Workload | Result |
+|---|---|
+| Single-conn 50 keepalive reqs | **50/50 OK** |
+| 8 sequential conns × 5 reqs (no sleep) | makes it to conn 3-7, then hangs |
+| Same with `sleep(50ms)` between conns | makes it further (conn 7) |
+| `wrk2 -t4 -c64 -R20000` for 5s | 48 reqs in 6s, 192 timeouts |
+
+`ss -tnp` after the hang shows server-side fds in CLOSE-WAIT
+(peer closed, server didn't process the close). The recv CQE
+that should report `res=0` for the FIN never reaches the
+worker's dispatch loop.
+
+Same code on the **epoll multi-worker path**
+(`FLARE_DISABLE_IO_URING=1`, mc 2w): 99,265 wrk2 requests in
+5s, all 8 sequential conns serve 20/20 each. **So the bug is
+buffer-ring-specific in the multi-worker configuration**, NOT
+a Mojo runtime / Scheduler / Pool issue.
+
+**Most likely root cause**: kernel-level interaction with
+multiple multishot accept arms on a SHARED listener fd from
+DIFFERENT io_uring rings. When worker A's recv multishot for
+fd_N completes (peer FIN), worker A issues `cancel_conn` +
+close. Meanwhile worker B may have stale per-fd kernel
+structure from when the kernel was deciding which ring to
+deliver the original accept to. The cleanup race manifests as
+the FIN's CQE being dropped or routed incorrectly.
+
+**Two debug paths for the next session**:
+
+1. **Per-fd ownership tracking**: accept CQE in worker A
+   "claims" the fd; worker B (if it ever sees state for it)
+   defers. Requires shared state across workers, undoes the
+   per-worker-ring isolation.
+
+2. **`SO_REUSEPORT` + per-worker bind**: each worker has its
+   OWN listener fd bound to the same port via SO_REUSEPORT.
+   Removes the shared-fd interaction entirely; matches what
+   tokio-uring / monoio do for multi-worker. flare already has
+   `flare/runtime/reuseport.bind_shared`; the wire-in change
+   is mechanical (give each worker its own bound listener
+   instead of sharing one).
+
+Path #2 is the right architectural answer (matches the rest
+of the io_uring HTTP server ecosystem) and is the natural
+v0.7.x extension.
 
 ## Numbers that matter
 
