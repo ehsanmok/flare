@@ -366,12 +366,7 @@ struct ConnHandle(Movable):
         # Compact the read buffer: drop the processed request, keep the
         # remainder (pipelining or prefetched next request).
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
-            var leftover = List[UInt8](
-                capacity=len(self.read_buf) - self.body_total
-            )
-            for i in range(self.body_total, len(self.read_buf)):
-                leftover.append(self.read_buf[i])
-            self.read_buf = leftover^
+            _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
@@ -498,12 +493,7 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
 
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
-            var leftover = List[UInt8](
-                capacity=len(self.read_buf) - self.body_total
-            )
-            for i in range(self.body_total, len(self.read_buf)):
-                leftover.append(self.read_buf[i])
-            self.read_buf = leftover^
+            _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
@@ -652,12 +642,7 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
 
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
-            var leftover = List[UInt8](
-                capacity=len(self.read_buf) - self.body_total
-            )
-            for i in range(self.body_total, len(self.read_buf)):
-                leftover.append(self.read_buf[i])
-            self.read_buf = leftover^
+            _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
@@ -791,12 +776,7 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
 
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
-            var leftover = List[UInt8](
-                capacity=len(self.read_buf) - self.body_total
-            )
-            for i in range(self.body_total, len(self.read_buf)):
-                leftover.append(self.read_buf[i])
-            self.read_buf = leftover^
+            _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
@@ -896,12 +876,7 @@ struct ConnHandle(Movable):
 
         # Compact read buffer before writing the canned response.
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
-            var leftover = List[UInt8](
-                capacity=len(self.read_buf) - self.body_total
-            )
-            for i in range(self.body_total, len(self.read_buf)):
-                leftover.append(self.read_buf[i])
-            self.read_buf = leftover^
+            _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
@@ -1231,6 +1206,53 @@ def _connection_is_close(s: String) -> Bool:
         and p[3] == ord("s")
         and p[4] == ord("e")
     )
+
+
+@always_inline
+def _compact_read_buf_drop_prefix(
+    mut read_buf: List[UInt8], drop_n: Int
+) -> None:
+    """Drop the first ``drop_n`` bytes of ``read_buf``, keeping the
+    trailing bytes (typically: pipelined-next-request bytes that
+    arrived in the same recv as the just-handled request).
+
+    Hot path: called once per processed request from every
+    on_readable_* state-machine entry point AND from the static
+    fast path. Replaces the prior 5 inlined ``for i in range(...)
+    leftover.append(...)`` byte loops which did O(N) per-byte
+    appends + bounds-checks; this version uses a single
+    ``memcpy`` from the old buffer into a freshly-sized
+    replacement, preserving the prior allocation pattern (still
+    one List[UInt8] alloc per request) while collapsing the
+    per-byte append loop.
+
+    Pre-conditions enforced by the callers:
+    * ``drop_n > 0`` -- if no bytes to drop, callers skip this
+      helper.
+    * ``drop_n <= len(read_buf)`` -- otherwise the math below
+      under-flows.
+    """
+    var n = len(read_buf)
+    if drop_n >= n:
+        # Either exactly consumed (drop_n == n) or over-consumed
+        # (defensive). Either way the buffer is empty after this.
+        read_buf.clear()
+        return
+    var keep = n - drop_n
+    # Non-overlapping memcpy from old buffer into a fresh
+    # capacity-sized List. The old buffer's drop is implicit when
+    # we move the new one into ``read_buf`` (the caller's previous
+    # storage drops at scope-end). This matches the prior shape
+    # (one List alloc per request, prior bytes freed after) but
+    # replaces the O(N) per-byte append loop with a single memcpy.
+    var leftover = List[UInt8](capacity=keep)
+    leftover.resize(keep, UInt8(0))
+    memcpy(
+        dest=leftover.unsafe_ptr(),
+        src=read_buf.unsafe_ptr() + drop_n,
+        count=keep,
+    )
+    read_buf = leftover^
 
 
 @always_inline
