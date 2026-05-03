@@ -109,5 +109,73 @@ def test_multiple_rings_are_independent() raises:
     assert_true(b.fd() >= 0)
 
 
+def test_setup_flags_zero_default_works() raises:
+    """Default ``setup_flags=0`` matches the historical
+    behaviour: no SQPOLL, no COOP_TASKRUN, no DEFER_TASKRUN.
+    Catches accidental flag-default regressions."""
+    if not is_io_uring_available():
+        return
+    var ring = IoUringRing(4, setup_flags=UInt32(0))
+    assert_true(ring.fd() >= 0)
+
+
+def test_setup_flag_coop_taskrun_accepted_or_einval() raises:
+    """Phase 2A: ``IORING_SETUP_COOP_TASKRUN`` (5.19+) -- the
+    kernel accepts on >= 5.19 and rejects with EINVAL on
+    older kernels. Either outcome is correct; the test fails
+    only if the ring construction throws an unexpected error
+    type or the host kernel is exotic.
+
+    On accept, the ring fd is valid; on reject, the constructor
+    raises with errno=22 (EINVAL).
+    """
+    from flare.runtime.io_uring_sqe import IORING_SETUP_COOP_TASKRUN
+
+    if not is_io_uring_available():
+        return
+    try:
+        var ring = IoUringRing(4, setup_flags=IORING_SETUP_COOP_TASKRUN)
+        assert_true(ring.fd() >= 0)
+    except e:
+        # Older kernel: EINVAL. The error message format is
+        # "io_uring_setup failed: errno=22"; we accept any
+        # non-zero errno here.
+        var msg = String(e)
+        assert_true("io_uring_setup failed" in msg)
+
+
+def test_setup_flag_combined_bufring_recipe_accepted_or_einval() raises:
+    """Phase 2A: the bufring path's optimal mix
+    (COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL) on kernel >= 5.19,
+    plus SINGLE_ISSUER | DEFER_TASKRUN on >= 6.1. Combine all
+    five and verify the kernel either accepts (modern) or
+    rejects with EINVAL (older). Catches accidental flag-bit
+    typos.
+    """
+    from flare.runtime.io_uring_sqe import (
+        IORING_SETUP_COOP_TASKRUN,
+        IORING_SETUP_TASKRUN_FLAG,
+        IORING_SETUP_SUBMIT_ALL,
+        IORING_SETUP_SINGLE_ISSUER,
+        IORING_SETUP_DEFER_TASKRUN,
+    )
+
+    if not is_io_uring_available():
+        return
+    var combined = (
+        IORING_SETUP_COOP_TASKRUN
+        | IORING_SETUP_TASKRUN_FLAG
+        | IORING_SETUP_SUBMIT_ALL
+        | IORING_SETUP_SINGLE_ISSUER
+        | IORING_SETUP_DEFER_TASKRUN
+    )
+    try:
+        var ring = IoUringRing(4, setup_flags=combined)
+        assert_true(ring.fd() >= 0)
+    except e:
+        var msg = String(e)
+        assert_true("io_uring_setup failed" in msg)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -404,12 +404,36 @@ struct IoUringRing(Movable):
     var _fd: Int
     var _params_buf: UnsafePointer[UInt8, MutExternalOrigin]
 
-    def __init__(out self, entries: Int) raises:
+    def __init__(
+        out self,
+        entries: Int,
+        setup_flags: UInt32 = UInt32(0),
+        sq_thread_cpu: UInt32 = UInt32(0),
+        sq_thread_idle: UInt32 = UInt32(0),
+    ) raises:
         """Set up an io_uring with ``entries`` SQEs.
 
         Args:
             entries: Number of SQEs (kernel rounds up to a power
                      of two; max 32 768).
+            setup_flags: Bitwise-OR of ``IORING_SETUP_*`` flags
+                from :mod:`flare.runtime.io_uring_sqe`. Default 0
+                (interrupt-driven, single-thread, no kernel
+                scheduler hints) matches the historical behaviour.
+                Bufring callers typically pass
+                ``COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL`` and
+                add ``SINGLE_ISSUER | DEFER_TASKRUN`` on kernels
+                >= 6.1 (probe via :func:`is_io_uring_available`'s
+                features field). The kernel rejects the
+                io_uring_setup with EINVAL if it doesn't support a
+                requested flag, so callers can pass the highest
+                set they want and fall back on EINVAL.
+            sq_thread_cpu: For ``IORING_SETUP_SQPOLL +
+                IORING_SETUP_SQ_AFF``, the CPU to pin the kernel
+                SQPOLL thread to. Ignored otherwise.
+            sq_thread_idle: For ``IORING_SETUP_SQPOLL``, the
+                idle period in milliseconds before the kernel
+                SQPOLL thread sleeps. Ignored otherwise.
 
         Raises:
             Error: On ``io_uring_setup`` failure.
@@ -430,6 +454,20 @@ struct IoUringRing(Movable):
         var raw = alloc[UInt8](_IO_URING_PARAMS_BYTES)
         for i in range(_IO_URING_PARAMS_BYTES):
             (raw + i).init_pointee_copy(UInt8(0))
+        # Write setup_flags (offset 8, u32 LE), sq_thread_cpu
+        # (offset 12, u32 LE), sq_thread_idle (offset 16, u32 LE)
+        # before io_uring_setup. Layout matches the kernel's
+        # struct io_uring_params (see IoUringParams docstring).
+        for i in range(4):
+            (raw + 8 + i).init_pointee_copy(
+                UInt8(Int((setup_flags >> UInt32(8 * i)) & 0xFF))
+            )
+            (raw + 12 + i).init_pointee_copy(
+                UInt8(Int((sq_thread_cpu >> UInt32(8 * i)) & 0xFF))
+            )
+            (raw + 16 + i).init_pointee_copy(
+                UInt8(Int((sq_thread_idle >> UInt32(8 * i)) & 0xFF))
+            )
         var rc = io_uring_setup(entries, raw)
         if rc < 0:
             raw.free()

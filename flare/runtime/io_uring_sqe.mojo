@@ -156,6 +156,95 @@ kernel-bench, replenish-1 measurement). The ring memory is
 page-aligned, shared with the kernel."""
 comptime IORING_UNREGISTER_PBUF_RING: Int = 23
 """5.19+. Companion to :data:`IORING_REGISTER_PBUF_RING`."""
+
+# IORING_SETUP_* flags passed in io_uring_params.flags at
+# io_uring_setup() time. Numeric values match
+# ``include/uapi/linux/io_uring.h``. flare's bufring path opts
+# into the kernel-scheduler hints (COOP_TASKRUN, DEFER_TASKRUN,
+# SINGLE_ISSUER, SUBMIT_ALL) to eliminate the ~16 ms / ~60 Hz
+# throughput throttle observed when the dispatch loop blocks
+# in io_uring_enter without batching.
+
+comptime IORING_SETUP_IOPOLL: UInt32 = 0x01
+"""5.1+. Block-IO polling instead of interrupt-driven
+completions. Not for network sockets."""
+
+comptime IORING_SETUP_SQPOLL: UInt32 = 0x02
+"""5.1+. Kernel polls the SQ; userspace doesn't need to call
+``io_uring_enter`` for submission. Trades one always-busy
+kernel thread per ring for zero-syscall submission. Useful
+for very high SQE rates (> 1 M/s) but requires CAP_SYS_NICE
+on some kernels OR registered file descriptors."""
+
+comptime IORING_SETUP_SQ_AFF: UInt32 = 0x04
+"""5.1+. Pin the SQPOLL thread to ``sq_thread_cpu``."""
+
+comptime IORING_SETUP_CQSIZE: UInt32 = 0x08
+"""5.1+. Use ``params.cq_entries`` to override the default
+``2 * sq_entries`` CQ size."""
+
+comptime IORING_SETUP_CLAMP: UInt32 = 0x10
+"""5.6+. Clamp ``entries`` / ``cq_entries`` to the kernel max
+instead of failing with EINVAL."""
+
+comptime IORING_SETUP_ATTACH_WQ: UInt32 = 0x20
+"""5.6+. Share the io-wq workers with another ring (specified
+in ``params.wq_fd``)."""
+
+comptime IORING_SETUP_R_DISABLED: UInt32 = 0x40
+"""5.10+. Start the ring in disabled state; enable later via
+io_uring_register(IORING_REGISTER_ENABLE_RINGS)."""
+
+comptime IORING_SETUP_SUBMIT_ALL: UInt32 = 0x80
+"""5.18+. ``io_uring_enter`` continues processing the SQ on a
+per-SQE error rather than aborting the batch. Eliminates the
+'first SQE in batch errored, rest of batch lost' failure mode
+under SQ pressure."""
+
+comptime IORING_SETUP_COOP_TASKRUN: UInt32 = 0x100
+"""5.19+. Don't use IPI-driven task work; instead, run task
+work cooperatively at io_uring_enter boundaries. Lower CPU
+overhead for the common case of a single thread per ring
+(which flare's per-worker UringReactor is). Combined with
+TASKRUN_FLAG below it tells userspace when to call enter."""
+
+comptime IORING_SETUP_TASKRUN_FLAG: UInt32 = 0x200
+"""5.19+. Sets ``IORING_SQ_TASKRUN`` in ``sq_ring->flags``
+when there's pending task work. Userspace can poll the flag
+to know when to call ``io_uring_enter`` to run pending
+completions. Pairs with COOP_TASKRUN."""
+
+comptime IORING_SETUP_SQE128: UInt32 = 0x400
+"""5.19+. Doubles SQE size to 128 bytes. flare's SQE codecs
+still target 64-byte SQEs; not enabled."""
+
+comptime IORING_SETUP_CQE32: UInt32 = 0x800
+"""5.19+. Doubles CQE size to 32 bytes. flare's CQE codecs
+still target 16-byte CQEs; not enabled."""
+
+comptime IORING_SETUP_SINGLE_ISSUER: UInt32 = 0x1000
+"""6.0+. Promise to the kernel that only one thread will
+submit SQEs to this ring. Lets the kernel skip atomic
+operations on the SQ submit path. flare's per-worker
+UringReactor matches this contract (each worker owns its
+own ring + drives it from one pthread). Required by
+DEFER_TASKRUN."""
+
+comptime IORING_SETUP_DEFER_TASKRUN: UInt32 = 0x2000
+"""6.1+. The kernel runs task work ONLY when the app calls
+``io_uring_enter`` (with the GETEVENTS flag). Batches CQE
+delivery to enter boundaries; eliminates the IPI-driven
+mid-syscall task work that interferes with the dispatch
+loop's CQE-drain rhythm. Highest-impact flag for the bufring
+throughput throttle when paired with SINGLE_ISSUER."""
+
+comptime IORING_SETUP_NO_MMAP: UInt32 = 0x4000
+"""6.5+. Userspace allocates the SQ/CQ rings; kernel mmaps
+into them. Not used by flare."""
+
+comptime IORING_SETUP_REGISTERED_FD_ONLY: UInt32 = 0x8000
+"""6.5+. Only registered fds can be passed to SQEs. Not
+used by flare."""
 comptime IORING_OP_REMOVE_BUFFERS: Int = 32
 """5.7+. Drop a previously-provided buffer pool."""
 comptime IORING_OP_SEND: Int = 26

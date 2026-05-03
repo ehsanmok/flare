@@ -347,13 +347,27 @@ struct IoUringDriver(Movable):
 
     var _sq_local_tail: UInt32
 
-    def __init__(out self, entries: Int) raises:
+    def __init__(
+        out self,
+        entries: Int,
+        setup_flags: UInt32 = UInt32(0),
+        sq_thread_cpu: UInt32 = UInt32(0),
+        sq_thread_idle: UInt32 = UInt32(0),
+    ) raises:
         """Set up an io_uring with ``entries`` SQEs and mmap
         the three required regions (SQ ring, CQ ring, SQE array).
 
         Args:
             entries: Number of SQEs (kernel rounds up to a power
                 of two; max 32 768).
+            setup_flags: ``IORING_SETUP_*`` flags forwarded to
+                :class:`IoUringRing`. Default 0 keeps the
+                historical interrupt-driven, unbatched behaviour.
+                See :data:`flare.runtime.io_uring_sqe.IORING_SETUP_COOP_TASKRUN`
+                etc. for the bufring path's optimal mix.
+            sq_thread_cpu / sq_thread_idle: SQPOLL knobs;
+                ignored unless ``setup_flags`` includes
+                ``IORING_SETUP_SQPOLL``.
 
         Raises:
             Error: On ``io_uring_setup`` failure or any of the
@@ -365,7 +379,12 @@ struct IoUringDriver(Movable):
             )
 
         # Set up the underlying ring (raises on syscall failure).
-        self._ring = IoUringRing(entries)
+        self._ring = IoUringRing(
+            entries,
+            setup_flags=setup_flags,
+            sq_thread_cpu=sq_thread_cpu,
+            sq_thread_idle=sq_thread_idle,
+        )
 
         var fd = self._ring.fd()
         var params = self._ring._params_buf

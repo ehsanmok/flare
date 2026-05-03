@@ -413,7 +413,13 @@ struct UringReactor(Movable):
     var _io: FlareRawIO
     var _wake_armed: Bool
 
-    def __init__(out self, entries: Int = 256) raises:
+    def __init__(
+        out self,
+        entries: Int = 256,
+        setup_flags: UInt32 = UInt32(0),
+        sq_thread_cpu: UInt32 = UInt32(0),
+        sq_thread_idle: UInt32 = UInt32(0),
+    ) raises:
         """Set up the ring + wakeup eventfd.
 
         Args:
@@ -421,6 +427,19 @@ struct UringReactor(Movable):
                 two; default 256 matches the v0.6 epoll
                 ``max_events`` budget so the per-worker memory
                 footprint is comparable).
+            setup_flags: Bitwise-OR of ``IORING_SETUP_*`` flags
+                forwarded to :class:`IoUringDriver`. Default 0
+                preserves the original interrupt-driven, no-
+                batching behaviour. The bufring dispatch path
+                opts into ``COOP_TASKRUN | TASKRUN_FLAG |
+                SUBMIT_ALL`` and (on kernel >= 6.1)
+                ``SINGLE_ISSUER | DEFER_TASKRUN`` to eliminate
+                the ~16 ms / ~60 Hz throughput throttle that
+                surfaced when the dispatch loop blocked in
+                ``io_uring_enter`` without batching.
+            sq_thread_cpu / sq_thread_idle: SQPOLL knobs;
+                ignored unless ``setup_flags`` includes
+                ``IORING_SETUP_SQPOLL``.
 
         Raises:
             Error: On ``io_uring_setup`` failure (see
@@ -431,7 +450,12 @@ struct UringReactor(Movable):
                 "UringReactor is a Linux-only feature; this build is not Linux"
             )
         self._io = FlareRawIO()
-        self._driver = IoUringDriver(entries)
+        self._driver = IoUringDriver(
+            entries,
+            setup_flags=setup_flags,
+            sq_thread_cpu=sq_thread_cpu,
+            sq_thread_idle=sq_thread_idle,
+        )
         # NOTE: deliberately *blocking* eventfd (no EFD_NONBLOCK).
         # io_uring's IORING_OP_RECV against a non-blocking eventfd
         # with no pending data immediately posts a -EAGAIN CQE,
