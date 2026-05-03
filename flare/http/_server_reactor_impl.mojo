@@ -36,6 +36,7 @@ from std.sys.info import CompilationTarget
 
 from flare.http.cancel import Cancel, CancelCell, CancelReason
 from flare.http.handler import Handler, CancelHandler, ViewHandler
+from flare.http.headers import HeaderMap
 from flare.http.request import Request
 from flare.http.response import Response
 from flare.http.server import (
@@ -345,13 +346,7 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
 
         # Connection disposition before handler consumes the request.
-        var conn_hdr = _ascii_lower(req.headers.get("connection"))
-        var is_http10 = req.version == "HTTP/1.0"
-        var close_after = False
-        if conn_hdr == "close":
-            close_after = True
-        elif is_http10 and conn_hdr != "keep-alive":
-            close_after = True
+        var close_after = _compute_close_after(req.headers, req.version)
 
         self.keepalive_count += 1
         if self.keepalive_count >= config.max_keepalive_requests:
@@ -486,13 +481,7 @@ struct ConnHandle(Movable):
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
 
-        var conn_hdr = _ascii_lower(req.headers.get("connection"))
-        var is_http10 = req.version == "HTTP/1.0"
-        var close_after = False
-        if conn_hdr == "close":
-            close_after = True
-        elif is_http10 and conn_hdr != "keep-alive":
-            close_after = True
+        var close_after = _compute_close_after(req.headers, req.version)
 
         self.keepalive_count += 1
         if self.keepalive_count >= config.max_keepalive_requests:
@@ -643,13 +632,7 @@ struct ConnHandle(Movable):
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
 
-        var conn_hdr = _ascii_lower(req.headers.get("connection"))
-        var is_http10 = req.version == "HTTP/1.0"
-        var close_after = False
-        if conn_hdr == "close":
-            close_after = True
-        elif is_http10 and conn_hdr != "keep-alive":
-            close_after = True
+        var close_after = _compute_close_after(req.headers, req.version)
 
         self.keepalive_count += 1
         if self.keepalive_count >= config.max_keepalive_requests:
@@ -1190,6 +1173,101 @@ def _is_content_length(k: String) -> Bool:
         if c != t[i]:
             return False
     return True
+
+
+@always_inline
+def _connection_is_keepalive(s: String) -> Bool:
+    """Hot-path byte fast-check for ``Connection: keep-alive``.
+
+    Designed to short-circuit the per-request ``_ascii_lower`` +
+    string-compare in the keep-alive policy decision. wrk2 / wrk /
+    `curl --keepalive` / nearly every Rust HTTP client send the
+    header value as the exact bytes ``keep-alive`` (lowercase,
+    no leading whitespace). This helper matches that exact-bytes
+    case in 10 byte loads + 10 compares without any allocation.
+
+    For non-matching values (uppercase, mixed-case, ``Keep-Alive``
+    with capital K, header missing, etc.) callers fall back to
+    the slow path (``_ascii_lower(s) == "keep-alive"``).
+
+    Returns False on length mismatch or any byte mismatch.
+    """
+    if s.byte_length() != 10:
+        return False
+    var p = s.unsafe_ptr()
+    return (
+        p[0] == ord("k")
+        and p[1] == ord("e")
+        and p[2] == ord("e")
+        and p[3] == ord("p")
+        and p[4] == ord("-")
+        and p[5] == ord("a")
+        and p[6] == ord("l")
+        and p[7] == ord("i")
+        and p[8] == ord("v")
+        and p[9] == ord("e")
+    )
+
+
+@always_inline
+def _connection_is_close(s: String) -> Bool:
+    """Hot-path byte fast-check for ``Connection: close``.
+
+    Companion to :func:`_connection_is_keepalive`. Matches the exact
+    lowercase bytes ``close`` in 5 byte loads, and as a small
+    extension also matches the common mixed-case ``Close`` (capital
+    C only). Anything else falls through to the slow ``_ascii_lower``
+    path. Returns False on length mismatch.
+    """
+    if s.byte_length() != 5:
+        return False
+    var p = s.unsafe_ptr()
+    var c0 = p[0]
+    if c0 != ord("c") and c0 != ord("C"):
+        return False
+    return (
+        p[1] == ord("l")
+        and p[2] == ord("o")
+        and p[3] == ord("s")
+        and p[4] == ord("e")
+    )
+
+
+@always_inline
+def _compute_close_after(req_headers: HeaderMap, req_version: String) -> Bool:
+    """Decide whether to close the connection after this request,
+    based on RFC 9112 keep-alive policy.
+
+    Hot path: called once per request from every on_readable_*
+    state-machine entry point. The byte-fast-paths for
+    ``Connection: keep-alive`` and ``Connection: close`` short-
+    circuit the per-request ``_ascii_lower`` allocation when the
+    header value matches the wrk2 / curl / nearly-every-Rust-
+    client lowercase wire format. Mixed-case + uncommon values
+    fall through to the slow allocation path.
+
+    Caller still needs to combine this with config.max_keepalive_-
+    requests + config.keep_alive (those are per-server policy, not
+    per-request).
+    """
+    var conn_hdr = req_headers.get("connection")
+    var is_http10 = req_version == "HTTP/1.0"
+    if _connection_is_close(conn_hdr):
+        return True
+    if _connection_is_keepalive(conn_hdr):
+        return False
+    if conn_hdr.byte_length() == 0:
+        # No Connection header. RFC 9112: HTTP/1.1 is keep-alive
+        # by default; HTTP/1.0 is close by default.
+        return is_http10
+    # Slow path: lowercase + compare. Reachable on mixed-case
+    # ``Keep-Alive`` etc.
+    var lo = _ascii_lower(conn_hdr)
+    if lo == "close":
+        return True
+    if is_http10 and lo != "keep-alive":
+        return True
+    return False
 
 
 def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
