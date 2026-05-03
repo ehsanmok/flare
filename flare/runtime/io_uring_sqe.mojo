@@ -695,6 +695,126 @@ def prep_recv(
 
 
 @always_inline
+def prep_provide_buffers(
+    buf: UnsafePointer[UInt8, MutExternalOrigin],
+    addr: UInt64,
+    nbytes_per_buf: Int,
+    nbufs: Int,
+    bgid: UInt16,
+    bid: UInt16,
+    user_data: UInt64,
+) -> None:
+    """Write an ``IORING_OP_PROVIDE_BUFFERS`` SQE at ``buf`` (5.7+).
+
+    Hands the kernel a contiguous run of ``nbufs`` buffers of
+    ``nbytes_per_buf`` bytes each, starting at ``addr``. Each
+    buffer gets a sequential id in ``[bid, bid + nbufs)`` and is
+    associated with buffer-group ``bgid``. After this SQE
+    completes (one CQE with ``res >= 0`` reporting the number of
+    buffers actually accepted), subsequent ``IORING_OP_RECV`` SQEs
+    that set ``IOSQE_BUFFER_SELECT`` and the same ``bgid`` in
+    their ``buf_index`` field will have the kernel auto-pick a
+    free buffer from the ring -- no per-conn buffer pinning, no
+    user-managed buffer ownership.
+
+    The chosen buffer's id is reported in the recv CQE's
+    ``flags`` high 16 bits (decoded by
+    :func:`flare.runtime.io_uring_sqe.IoUringCqe.buffer_id`); the
+    user computes the buffer's address as
+    ``addr + buffer_id * nbytes_per_buf`` and processes it. After
+    processing, the same buffer id can be re-provided via another
+    ``IORING_OP_PROVIDE_BUFFERS`` SQE (typically as a one-shot
+    re-fill SQE per CQE; ``IORING_REGISTER_PBUF_RING`` lets you
+    skip the per-recv re-fill, but the simpler PROVIDE_BUFFERS
+    path is enough for the v1 wire-in).
+
+    Args:
+        buf: 64-byte SQE buffer.
+        addr: Pointer to the first buffer in the run.
+        nbytes_per_buf: Per-buffer size in bytes.
+        nbufs: Number of contiguous buffers (must be > 0).
+        bgid: Buffer-group id used by the matching recv SQE's
+            ``buf_index``.
+        bid: Starting buffer id; ids run sequentially up to
+            ``bid + nbufs``.
+        user_data: Tag returned in the matching CQE.
+    """
+    debug_assert[assert_mode="safe"](
+        nbytes_per_buf > 0,
+        "prep_provide_buffers: nbytes_per_buf must be > 0; got ",
+        nbytes_per_buf,
+    )
+    debug_assert[assert_mode="safe"](
+        nbufs > 0, "prep_provide_buffers: nbufs must be > 0; got ", nbufs
+    )
+    encode_sqe_zero(buf)
+    _store_u8(buf, _SQE_OFF_OPCODE, UInt8(IORING_OP_PROVIDE_BUFFERS))
+    # PROVIDE_BUFFERS layout (kernel io_uring/kbuf.c):
+    #   sqe->fd       = nbufs
+    #   sqe->addr     = first buffer ptr
+    #   sqe->len      = bytes per buffer
+    #   sqe->off      = starting buffer id
+    #   sqe->buf_index = buffer group id
+    _store_u32_le(buf, _SQE_OFF_FD, UInt32(nbufs))
+    _store_u64_le(buf, _SQE_OFF_ADDR, addr)
+    _store_u32_le(buf, _SQE_OFF_LEN, UInt32(nbytes_per_buf))
+    _store_u64_le(buf, _SQE_OFF_OFF_OR_ADDR2, UInt64(Int(bid)))
+    _store_u16_le(buf, _SQE_OFF_BUF_INDEX, UInt16(Int(bgid)))
+    _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
+
+
+@always_inline
+def prep_recv_buffer_select(
+    buf: UnsafePointer[UInt8, MutExternalOrigin],
+    fd: Int,
+    bgid: UInt16,
+    recv_flags: UInt32,
+    user_data: UInt64,
+) -> None:
+    """Write an ``IORING_OP_RECV`` SQE that picks its buffer from
+    a previously-provided buffer pool (``IOSQE_BUFFER_SELECT``).
+
+    Companion to :func:`prep_provide_buffers`. The kernel picks a
+    free buffer from buffer-group ``bgid``, recvs into it, and
+    reports the chosen buffer id in the CQE's ``flags`` high 16
+    bits along with ``IORING_CQE_F_BUFFER`` set in the low bits.
+
+    Combined with ``IORING_RECV_MULTISHOT`` in ``recv_flags``,
+    this is the production HTTP server recv shape every Rust
+    io_uring HTTP server uses (tokio-uring / monoio / glommio):
+    one SQE per connection drives an unbounded stream of recv
+    CQEs, each pointing at a fresh kernel-picked buffer; no
+    per-conn buffer ownership, no per-CQE re-arm, no recv
+    syscall round-trip.
+
+    Args:
+        buf: 64-byte SQE buffer.
+        fd: Connected socket fd. ``debug_assert`` checks fd >= 0.
+        bgid: Buffer-group id matching a prior
+            ``prep_provide_buffers`` call.
+        recv_flags: Standard ``recv(2)`` flags + optional
+            ``IORING_RECV_MULTISHOT``.
+        user_data: Tag returned in every recv CQE.
+    """
+    debug_assert[assert_mode="safe"](
+        fd >= 0,
+        "prep_recv_buffer_select: fd must be non-negative; got ",
+        fd,
+    )
+    encode_sqe_zero(buf)
+    _store_u8(buf, _SQE_OFF_OPCODE, UInt8(IORING_OP_RECV))
+    # IOSQE_BUFFER_SELECT in sqe.flags tells the kernel to pick
+    # the buffer at submission time rather than reading
+    # sqe.addr / sqe.len. The buffer group id goes in
+    # sqe.buf_index (offset 40, u16).
+    _store_u8(buf, _SQE_OFF_FLAGS, IOSQE_BUFFER_SELECT)
+    _store_u32_le(buf, _SQE_OFF_FD, UInt32(fd))
+    _store_u32_le(buf, _SQE_OFF_OP_FLAGS, recv_flags)
+    _store_u16_le(buf, _SQE_OFF_BUF_INDEX, UInt16(Int(bgid)))
+    _store_u64_le(buf, _SQE_OFF_USER_DATA, user_data)
+
+
+@always_inline
 def prep_read(
     buf: UnsafePointer[UInt8, MutExternalOrigin],
     fd: Int,

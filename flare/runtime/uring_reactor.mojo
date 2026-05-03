@@ -113,8 +113,10 @@ from flare.runtime.io_uring_sqe import (
     prep_multishot_accept,
     prep_poll_add,
     prep_poll_remove,
+    prep_provide_buffers,
     prep_read,
     prep_recv,
+    prep_recv_buffer_select,
     prep_send,
 )
 
@@ -151,6 +153,12 @@ comptime URING_OP_POLL_REMOVE: UInt64 = 8
 the kernel posts it under the remove SQE's own user_data and
 the cancelled poll's final CQE arrives separately under
 ``URING_OP_POLL`` without ``IORING_CQE_F_MORE``."""
+comptime URING_OP_PROVIDE_BUFFERS: UInt64 = 9
+"""CQE for an ``IORING_OP_PROVIDE_BUFFERS`` we issued ourselves
+to seed (or refill) a buffer ring that recv-buffer-select uses.
+``conn_id`` is typically the buffer-group id so the dispatch
+loop can route refill ACKs to the right ring without a separate
+table."""
 
 
 comptime _OP_SHIFT: UInt64 = 56
@@ -415,6 +423,91 @@ struct UringReactor(Movable):
             IORING_RECV_MULTISHOT,
             ud,
         )
+        self._driver.commit_sqe()
+
+    def arm_provide_buffers(
+        mut self,
+        addr: UInt64,
+        nbytes_per_buf: Int,
+        nbufs: Int,
+        bgid: UInt16,
+        bid: UInt16 = UInt16(0),
+    ) raises -> None:
+        """Submit one ``IORING_OP_PROVIDE_BUFFERS`` SQE that hands
+        the kernel a contiguous run of ``nbufs`` buffers of
+        ``nbytes_per_buf`` bytes each, starting at ``addr`` with
+        ids ``[bid, bid + nbufs)`` in buffer-group ``bgid``.
+
+        After this SQE completes (one CQE tagged
+        ``URING_OP_PROVIDE_BUFFERS`` with ``conn_id = bgid`` and
+        ``res = number of buffers actually accepted``), subsequent
+        ``arm_recv_buffer_select`` calls with the same ``bgid``
+        will have the kernel auto-pick a free buffer for each recv.
+
+        flare's recv-buffer-ring dispatch loop typically calls this
+        once at startup with N×8 KiB buffers per worker, then
+        re-arms the same buffer id after each recv CQE is processed
+        (one PROVIDE_BUFFERS SQE with ``nbufs=1`` per recv CQE -- a
+        cheap re-fill that amortises into the next ``io_uring_enter``).
+
+        Args:
+            addr: Pointer to the first buffer in the run (typically
+                  the worker's owned heap allocation, or the slot
+                  inside it being re-fed).
+            nbytes_per_buf: Per-buffer size in bytes.
+            nbufs: Number of contiguous buffers (must be > 0).
+            bgid: Buffer-group id; used by the matching recv SQE's
+                ``buf_index`` and reported in the CQE's ``conn_id``.
+            bid: Starting buffer id (default 0).
+        """
+        var slot = self._driver.next_sqe()
+        if Int(slot) == 0:
+            raise Error("UringReactor.arm_provide_buffers: SQ is full")
+        var ud = pack_user_data(URING_OP_PROVIDE_BUFFERS, UInt64(Int(bgid)))
+        prep_provide_buffers(slot, addr, nbytes_per_buf, nbufs, bgid, bid, ud)
+        self._driver.commit_sqe()
+
+    def arm_recv_buffer_select(
+        mut self,
+        fd: Int,
+        bgid: UInt16,
+        conn_id: UInt64,
+        multishot: Bool = True,
+    ) raises -> None:
+        """Submit one ``IORING_OP_RECV`` SQE with
+        ``IOSQE_BUFFER_SELECT`` set; the kernel picks a buffer from
+        the ``bgid`` pool at recv time.
+
+        This is the production HTTP server recv shape every Rust
+        io_uring HTTP server uses. Combined with ``multishot=True``
+        (default), one SQE per accepted connection drives an
+        unbounded stream of recv CQEs; each CQE points at a fresh
+        kernel-picked buffer (id in the high 16 bits of
+        ``UringCompletion.flags``, decoded via
+        :func:`IoUringCqe.buffer_id`). No per-conn buffer ownership,
+        no per-CQE re-arm, no recv syscall round-trip.
+
+        Args:
+            fd: Connected socket fd.
+            bgid: Buffer-group id matching a prior
+                ``arm_provide_buffers`` call.
+            conn_id: Tag returned in every recv CQE; identifies the
+                connection this recv belongs to.
+            multishot: When True (default), set
+                ``IORING_RECV_MULTISHOT`` so the kernel keeps the
+                recv armed across CQEs. Only valid in combination
+                with ``IOSQE_BUFFER_SELECT`` (which this helper
+                always sets), since multishot recv requires a
+                buffer-group source.
+        """
+        var slot = self._driver.next_sqe()
+        if Int(slot) == 0:
+            raise Error("UringReactor.arm_recv_buffer_select: SQ is full")
+        var ud = pack_user_data(URING_OP_RECV, conn_id)
+        var recv_flags: UInt32 = 0
+        if multishot:
+            recv_flags |= IORING_RECV_MULTISHOT
+        prep_recv_buffer_select(slot, fd, bgid, recv_flags, ud)
         self._driver.commit_sqe()
 
     def submit_send(

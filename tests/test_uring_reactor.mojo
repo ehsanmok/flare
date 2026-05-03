@@ -59,6 +59,7 @@ from flare.runtime.uring_reactor import (
     URING_OP_CANCEL,
     URING_OP_POLL,
     URING_OP_POLL_REMOVE,
+    URING_OP_PROVIDE_BUFFERS,
     URING_OP_WAKEUP,
     UringCompletion,
     UringReactor,
@@ -67,6 +68,7 @@ from flare.runtime.uring_reactor import (
     unpack_op,
     use_uring_backend,
 )
+from flare.runtime.io_uring_sqe import IORING_CQE_F_BUFFER
 
 
 # ── pack/unpack invariants ───────────────────────────────────────────────────
@@ -545,6 +547,132 @@ def test_use_uring_backend_respects_disable_env() raises:
     assert_equal(use_uring_backend(), is_io_uring_available())
 
 
+# ── buffer-ring (PROVIDE_BUFFERS + IOSQE_BUFFER_SELECT recv) ────────────────
+
+
+def test_buffer_ring_recv_round_trip() raises:
+    """Provide a 4-buffer, 1 KiB-each pool to the kernel; arm a
+    multishot recv with ``IOSQE_BUFFER_SELECT`` on a connected
+    loopback socket; have the peer write 4 bytes; verify the recv
+    CQE arrives with ``IORING_CQE_F_BUFFER`` set, the picked
+    buffer id is in ``[0, 4)``, and the data lands at the address
+    the buffer id points to.
+
+    This is the substrate the v0.7.x handler-path io_uring wire-in
+    uses to drop per-conn buffer pinning entirely (the source of
+    the c6ccc79 lifecycle bug). One PROVIDE_BUFFERS SQE up front,
+    one buffer-select recv per accepted connection, and the kernel
+    rotates buffers from the pool.
+    """
+    if not is_io_uring_available():
+        print(
+            "test_buffer_ring_recv_round_trip: skipped (io_uring not available)"
+        )
+        return
+    var listener = _make_listener()
+    var r = UringReactor(32)
+
+    # Allocate the buffer pool: 4 buffers of 1 KiB each = 4 KiB
+    # contiguous. flare's production wire-in will use 64 buffers
+    # of 8 KiB per worker; 4×1K is enough to validate the
+    # substrate.
+    comptime BUFS = 4
+    comptime BUF_SIZE = 1024
+    comptime BGID: UInt16 = 7
+    var pool = alloc[UInt8](BUFS * BUF_SIZE)
+    for i in range(BUFS * BUF_SIZE):
+        (pool + i).init_pointee_copy(UInt8(0))
+    r.arm_provide_buffers(
+        addr=UInt64(Int(pool)),
+        nbytes_per_buf=BUF_SIZE,
+        nbufs=BUFS,
+        bgid=BGID,
+        bid=UInt16(0),
+    )
+
+    # Accept the loopback client.
+    r.arm_listener_multishot(Int(listener.fd), UInt64(0))
+    var client = _connect_loopback(listener.port)
+    var out = List[UringCompletion]()
+    var accepted_fd: Int = -1
+    var saw_provide = False
+    for _ in range(8):
+        out.clear()
+        _ = r.poll(1, out)
+        for i in range(len(out)):
+            var c = out[i]
+            if c.op == URING_OP_PROVIDE_BUFFERS:
+                # Linux 5.7-6.0: res = number of buffers added.
+                # Linux 6.1+: kernel returns res=0 on success
+                # (the count is implicit; the SQE either fully
+                # succeeded or returned -errno). Either is fine
+                # for our purpose -- the buffers are now in the
+                # bgid pool. Just assert no error.
+                assert_true(
+                    c.res >= 0,
+                    "provide_buffers must succeed (res >= 0)",
+                )
+                assert_equal(Int(c.conn_id), Int(BGID))
+                saw_provide = True
+            elif c.op == URING_OP_ACCEPT:
+                accepted_fd = c.res
+        if saw_provide and accepted_fd > 0:
+            break
+    assert_true(saw_provide, "never saw PROVIDE_BUFFERS CQE")
+    assert_true(accepted_fd > 0, "never saw accept CQE")
+
+    # Arm multishot recv with IOSQE_BUFFER_SELECT on the accepted fd.
+    r.arm_recv_buffer_select(accepted_fd, BGID, UInt64(0xAA), True)
+
+    # Have the client write 4 bytes.
+    var tx = stack_allocation[4, UInt8]()
+    (tx + 0).init_pointee_copy(UInt8(ord("p")))
+    (tx + 1).init_pointee_copy(UInt8(ord("o")))
+    (tx + 2).init_pointee_copy(UInt8(ord("n")))
+    (tx + 3).init_pointee_copy(UInt8(ord("g")))
+    var w = _send(client, tx, c_size_t(4), c_int(0))
+    assert_equal(Int(w), 4)
+
+    # Wait for the recv CQE; verify IORING_CQE_F_BUFFER is set,
+    # extract the buffer id from the high 16 bits of flags, and
+    # check that the picked buffer's first 4 bytes are "pong".
+    var saw_recv = False
+    for _ in range(8):
+        out.clear()
+        _ = r.poll(1, out)
+        for i in range(len(out)):
+            var c = out[i]
+            if c.op == URING_OP_RECV and Int(c.conn_id) == 0xAA:
+                # Recv result: byte count (4).
+                assert_equal(c.res, 4)
+                # IORING_CQE_F_BUFFER must be set so we know the
+                # kernel actually picked a buffer rather than
+                # falling back to the legacy "addr/len" path.
+                assert_true(
+                    (c.flags & IORING_CQE_F_BUFFER) != UInt32(0),
+                    "recv CQE missing IORING_CQE_F_BUFFER",
+                )
+                # Buffer id is in flags[31:16].
+                var bid = Int(c.flags >> UInt32(16))
+                assert_true(bid >= 0 and bid < BUFS)
+                # The kernel wrote at pool + bid * BUF_SIZE.
+                var slot = pool + (bid * BUF_SIZE)
+                assert_equal(Int(slot.load()), ord("p"))
+                assert_equal(Int((slot + 1).load()), ord("o"))
+                assert_equal(Int((slot + 2).load()), ord("n"))
+                assert_equal(Int((slot + 3).load()), ord("g"))
+                saw_recv = True
+                break
+        if saw_recv:
+            break
+    assert_true(saw_recv, "never saw recv CQE with F_BUFFER")
+
+    _ = _close(client)
+    _ = _close(c_int(accepted_fd))
+    _ = _close(listener.fd)
+    pool.free()
+
+
 # ── runner ───────────────────────────────────────────────────────────────────
 
 
@@ -571,4 +699,6 @@ def main() raises:
     print("    PASS test_use_uring_backend_consistent_with_availability")
     test_use_uring_backend_respects_disable_env()
     print("    PASS test_use_uring_backend_respects_disable_env")
-    print("test_uring_reactor: 11/11 PASS")
+    test_buffer_ring_recv_round_trip()
+    print("    PASS test_buffer_ring_recv_round_trip")
+    print("test_uring_reactor: 12/12 PASS")
