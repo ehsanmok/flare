@@ -2696,6 +2696,71 @@ def _br_unpack_fd(conn_id: UInt64) -> Int:
     return Int(conn_id & _URING_BR_FD_MASK)
 
 
+def _probe_bufring_setup_flags(entries: Int = 64) -> UInt32:
+    """Probe the host kernel for the best ``IORING_SETUP_*``
+    flag mask the bufring dispatch can use.
+
+    Phase 2B (throughput parity, beat hyper + actix): the
+    bufring dispatch's ~16 ms / ~60 Hz throttle traces back to
+    the kernel running task work IPI-style mid-syscall, which
+    interferes with the dispatch loop's CQE-drain rhythm. The
+    kernel scheduler hints introduced in 5.19 (COOP_TASKRUN +
+    TASKRUN_FLAG + SUBMIT_ALL) and 6.0/6.1 (SINGLE_ISSUER +
+    DEFER_TASKRUN) eliminate this cost when used together.
+
+    Probes from highest-impact-first to default:
+    1. SINGLE_ISSUER | DEFER_TASKRUN | COOP_TASKRUN |
+       TASKRUN_FLAG | SUBMIT_ALL  (>= 6.1, the optimal mix)
+    2. COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL  (>= 5.19)
+    3. SUBMIT_ALL  (>= 5.18)
+    4. 0 (default; works on any 5.1+ kernel)
+
+    Returns the first mask the kernel accepts via a no-op
+    ``IoUringRing(entries)`` setup; closes the probe ring
+    immediately. Called once per worker at bufring loop init.
+
+    Args:
+        entries: SQE count for the probe ring; tiny so the
+            probe is cheap. Defaults to 64.
+
+    Returns:
+        Best-fit setup_flags mask, or 0 if no flag combination
+        is accepted (kernel < 5.18 or io_uring unavailable).
+    """
+    from flare.runtime.io_uring import IoUringRing
+    from flare.runtime.io_uring_sqe import (
+        IORING_SETUP_COOP_TASKRUN,
+        IORING_SETUP_TASKRUN_FLAG,
+        IORING_SETUP_SUBMIT_ALL,
+        IORING_SETUP_SINGLE_ISSUER,
+        IORING_SETUP_DEFER_TASKRUN,
+    )
+
+    var t1 = (
+        IORING_SETUP_SINGLE_ISSUER
+        | IORING_SETUP_DEFER_TASKRUN
+        | IORING_SETUP_COOP_TASKRUN
+        | IORING_SETUP_TASKRUN_FLAG
+        | IORING_SETUP_SUBMIT_ALL
+    )
+    var t2 = (
+        IORING_SETUP_COOP_TASKRUN
+        | IORING_SETUP_TASKRUN_FLAG
+        | IORING_SETUP_SUBMIT_ALL
+    )
+    var t3 = IORING_SETUP_SUBMIT_ALL
+
+    var candidates = [t1, t2, t3]
+    for i in range(len(candidates)):
+        try:
+            var probe = IoUringRing(entries, setup_flags=candidates[i])
+            _ = probe^
+            return candidates[i]
+        except:
+            pass
+    return UInt32(0)
+
+
 def _alloc_recv_buffer_pool() raises -> Int:
     """Allocate the worker-local recv buffer pool: ``_URING_BR_NBUFS``
     contiguous buffers of ``_URING_BR_BUF_SIZE`` bytes.
@@ -2974,7 +3039,13 @@ def run_uring_bufring_reactor_loop[
     # may submit_send + cancel + close-on-disarm). 512 SQEs was
     # not enough -- the dispatch hit silent next_sqe failures
     # under sustained 64-conn load and crashed.
-    var ureactor = UringReactor(4096)
+    # Phase 2B: probe the host kernel for the best
+    # IORING_SETUP_* mix (DEFER_TASKRUN | SINGLE_ISSUER on 6.1+;
+    # COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL on 5.19+;
+    # SUBMIT_ALL on 5.18+; 0 on older). Eliminates the ~16 ms /
+    # ~60 Hz throughput throttle that surfaced when the dispatch
+    # loop blocked in io_uring_enter without batching.
+    var ureactor = UringReactor(4096, setup_flags=_probe_bufring_setup_flags())
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
 
@@ -3203,7 +3274,10 @@ def run_uring_bufring_reactor_loop_shared[
     )
     from flare.runtime.io_uring_sqe import IORING_CQE_F_BUFFER
 
-    var ureactor = UringReactor(4096)
+    # Phase 2B: same setup-flag probe as the single-worker
+    # variant; per-worker rings independently negotiate with the
+    # host kernel.
+    var ureactor = UringReactor(4096, setup_flags=_probe_bufring_setup_flags())
     var conns = Dict[UInt64, Int]()
     var next_gen: UInt64 = 1
     var submit_send = getenv("FLARE_SUBMIT_SEND") == "1"
