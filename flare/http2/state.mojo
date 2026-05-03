@@ -200,6 +200,14 @@ struct Connection(Copyable, Defaultable, Movable):
     var goaway_received: Bool
     var preface_seen: Bool
     var settings_acked: Bool
+    var is_client: Bool
+    """When ``True``, this :class:`Connection` is driven from the
+    client side (``flare.http2.client.Http2ClientConnection``).
+    Affects the :meth:`handle_frame` HEADERS-receive transition:
+    a stream we sent HEADERS+END_STREAM on (HALF_CLOSED_LOCAL)
+    that receives HEADERS+END_STREAM transitions to CLOSED, not
+    HALF_CLOSED_REMOTE. Defaults to ``False`` (server semantics)
+    so existing server callers are unchanged."""
 
     def __init__(out self):
         self.streams = Dict[StreamId, Stream]()
@@ -214,6 +222,7 @@ struct Connection(Copyable, Defaultable, Movable):
         self.goaway_received = False
         self.preface_seen = False
         self.settings_acked = False
+        self.is_client = False
 
     def _make_settings(self, ack: Bool) -> Frame:
         """Server-side initial SETTINGS frame (or empty ACK).
@@ -360,11 +369,40 @@ struct Connection(Copyable, Defaultable, Movable):
                 s.headers.append(hdrs[j].copy())
             if f.header.flags.has(FrameFlags.END_HEADERS()):
                 s.headers_complete = True
+            # Stream-state transition on HEADERS receipt depends on
+            # whose perspective we're driving (RFC 9113 §5.1):
+            #  * Server-side (``is_client = False``, default): receiving
+            #    HEADERS opens an inbound request stream;
+            #    ``+ END_STREAM`` puts it in HALF_CLOSED_REMOTE
+            #    (request fully buffered, response still to come).
+            #  * Client-side (``is_client = True``): we sent HEADERS
+            #    first (transitioning IDLE -> OPEN or
+            #    HALF_CLOSED_LOCAL); receiving HEADERS is the response
+            #    headers. ``+ END_STREAM`` from a HALF_CLOSED_LOCAL
+            #    stream closes it; from OPEN it transitions to
+            #    HALF_CLOSED_REMOTE (server still has DATA to send,
+            #    but typically a HEADERS-only response carries
+            #    END_STREAM directly).
             if f.header.flags.has(FrameFlags.END_STREAM()):
                 s.data_complete = True
-                s.state = StreamState.HALF_CLOSED_REMOTE()
+                if (
+                    self.is_client
+                    and s.state.value == StreamState.HALF_CLOSED_LOCAL().value
+                ):
+                    s.state = StreamState.CLOSED()
+                else:
+                    s.state = StreamState.HALF_CLOSED_REMOTE()
             else:
-                s.state = StreamState.OPEN()
+                if (
+                    self.is_client
+                    and s.state.value == StreamState.HALF_CLOSED_LOCAL().value
+                ):
+                    # We've sent END_STREAM, peer responded with HEADERS
+                    # but hasn't ended the stream yet (DATA frames to
+                    # follow). Stay in HALF_CLOSED_LOCAL.
+                    pass
+                else:
+                    s.state = StreamState.OPEN()
             self._put_stream(s^)
             return out^
 
@@ -379,7 +417,15 @@ struct Connection(Copyable, Defaultable, Movable):
             s.recv_window -= len(f.payload)
             if f.header.flags.has(FrameFlags.END_STREAM()):
                 s.data_complete = True
-                s.state = StreamState.HALF_CLOSED_REMOTE()
+                # Client-side: a stream we've already half-closed
+                # locally that the peer ends fully closes.
+                if (
+                    self.is_client
+                    and s.state.value == StreamState.HALF_CLOSED_LOCAL().value
+                ):
+                    s.state = StreamState.CLOSED()
+                else:
+                    s.state = StreamState.HALF_CLOSED_REMOTE()
             self._put_stream(s^)
             # Send a generous WINDOW_UPDATE to keep things flowing.
             if len(f.payload) > 0:

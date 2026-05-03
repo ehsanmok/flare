@@ -1,4 +1,4 @@
-"""``flare.http2`` — RFC 9113 / RFC 7541 server primitives.
+"""``flare.http2`` — RFC 9113 / RFC 7541 client + server primitives.
 
 Public surface:
 
@@ -8,12 +8,19 @@ Public surface:
 - :mod:`hpack` — RFC 7541 HPACK encoder + decoder (static table,
   dynamic table, integer codec).
 - :mod:`state` — per-stream + per-connection state machines that
-  enforce RFC 9113 §5 transitions.
+  enforce RFC 9113 §5 transitions for both peer roles
+  (``Connection.is_client`` flips client vs server semantics on
+  HEADERS/DATA receipt).
 - :mod:`server` — high-level ``HttpServer.serve_h2`` loop: prefix
   ``"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n"`` verification,
   SETTINGS exchange, framed request/response shuttling, ``h2c``
   upgrade from HTTP/1.1, ALPN dispatch from
   :mod:`flare.tls.acceptor`.
+- :mod:`client` — :class:`Http2ClientConnection`, the symmetric
+  client-side driver (preface emit, initial SETTINGS, odd-id
+  stream allocator, request HEADERS/CONTINUATION/DATA send,
+  response HEADERS/DATA assembly, GOAWAY / RST_STREAM /
+  WINDOW_UPDATE / PING handling).
 
 The codec is byte-clean and Connection-agnostic so it can be driven
 by the existing reactor or run synchronously in tests; the server
@@ -62,4 +69,8 @@ from .server import (
     Http2Config,
     detect_h2c_upgrade,
     is_h2_alpn,
+)
+from .client import (
+    Http2ClientConfig,
+    Http2ClientConnection,
 )
