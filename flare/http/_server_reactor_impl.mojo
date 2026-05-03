@@ -364,6 +364,144 @@ struct ConnHandle(Movable):
         self._serialize_response(resp^, not close_after)
         return self._transition_to_writing()
 
+    def on_readable_from_buf[
+        H: Handler
+    ](
+        mut self,
+        bytes: Span[UInt8, _],
+        ref handler: H,
+        config: ServerConfig,
+    ) raises -> StepResult:
+        """``on_readable[H]`` variant for the io_uring recv-multishot
+        path: takes pre-recv'd bytes from a kernel-delivered buffer
+        instead of looping on ``_recv()`` itself.
+
+        The caller (``run_uring_recv_reactor_loop``) gets the bytes
+        from a ``URING_OP_RECV`` CQE (the kernel placed them in the
+        per-conn buffer at SQE-submit time). We append them to
+        ``read_buf`` and run the same header-scan / parse / handler
+        / serialise / keep-alive bookkeeping as ``on_readable[H]``
+        does after its drain-until-EAGAIN loop. The per-conn state
+        machine is otherwise identical -- the only delta vs the
+        epoll path is the source of bytes (kernel push vs userspace
+        recv pull).
+
+        The ``IORING_OP_RECV`` CQE with ``res == 0`` (peer closed)
+        is handled by the caller, not here -- this method only
+        runs when there are real bytes to feed.
+
+        Args:
+            bytes: New bytes to feed into the read pipeline. May be
+                empty (legitimate when the kernel re-issues a
+                multishot completion immediately after re-arm; we
+                skip the parse step in that case).
+            handler: Request -> Response callback.
+            config: Server configuration.
+
+        Returns:
+            A ``StepResult`` describing the new reactor-interest
+            state. ``done=True`` means the connection should be
+            cleaned up.
+        """
+        if self.state != STATE_READING:
+            # Spurious recv on a connection that already moved past
+            # reading -- mirror on_readable's no-op shape.
+            return StepResult(
+                want_read=False, want_write=self.state == STATE_WRITING
+            )
+
+        if len(bytes) > 0:
+            var old_len = len(self.read_buf)
+            var add = len(bytes)
+            self.read_buf.resize(old_len + add, UInt8(0))
+            var dst = self.read_buf.unsafe_ptr() + old_len
+            memcpy(dest=dst, src=bytes.unsafe_ptr(), count=add)
+            if (
+                len(self.read_buf)
+                > config.max_header_size + config.max_body_size
+            ):
+                self._queue_error(413, "Content Too Large")
+                return self._transition_to_writing()
+
+        # Header completion check (mirror on_readable lines after the
+        # recv loop).
+        if self.headers_end < 0:
+            var end = _find_crlfcrlf(self.read_buf, 0)
+            if end < 0:
+                if len(self.read_buf) > config.max_header_size:
+                    self._queue_error(431, "Request Header Fields Too Large")
+                    return self._transition_to_writing()
+                return StepResult(
+                    want_read=True,
+                    want_write=False,
+                    idle_timeout_ms=config.idle_timeout_ms,
+                )
+            self.headers_end = end
+            self.content_length = _scan_content_length(
+                self.read_buf, self.headers_end
+            )
+            if self.content_length > config.max_body_size:
+                self._queue_error(413, "Content Too Large")
+                return self._transition_to_writing()
+            self.body_total = self.headers_end + self.content_length
+
+        if len(self.read_buf) < self.body_total:
+            return StepResult(
+                want_read=True,
+                want_write=False,
+                idle_timeout_ms=config.idle_timeout_ms,
+            )
+
+        var req: Request
+        try:
+            req = _parse_http_request_bytes(
+                Span[UInt8, _](self.read_buf)[: self.body_total],
+                config.max_header_size,
+                config.max_body_size,
+                config.max_uri_length,
+                self.peer,
+                config.expose_error_messages,
+            )
+        except:
+            self._queue_error(400, "Bad Request")
+            return self._transition_to_writing()
+
+        var conn_hdr = _ascii_lower(req.headers.get("connection"))
+        var is_http10 = req.version == "HTTP/1.0"
+        var close_after = False
+        if conn_hdr == "close":
+            close_after = True
+        elif is_http10 and conn_hdr != "keep-alive":
+            close_after = True
+
+        self.keepalive_count += 1
+        if self.keepalive_count >= config.max_keepalive_requests:
+            close_after = True
+        if not config.keep_alive:
+            close_after = True
+        self.should_close = close_after
+
+        var resp: Response
+        try:
+            resp = handler.serve(req^)
+        except:
+            self._queue_error(500, "Internal Server Error")
+            return self._transition_to_writing()
+
+        if self.body_total > 0 and self.body_total <= len(self.read_buf):
+            var leftover = List[UInt8](
+                capacity=len(self.read_buf) - self.body_total
+            )
+            for i in range(self.body_total, len(self.read_buf)):
+                leftover.append(self.read_buf[i])
+            self.read_buf = leftover^
+        self.headers_end = -1
+        self.content_length = 0
+        self.body_total = -1
+
+        self._serialize_response(resp^, not close_after)
+        return self._transition_to_writing()
+
     def on_readable_cancel[
         CH: CancelHandler
     ](mut self, ref handler: CH, config: ServerConfig,) raises -> StepResult:
