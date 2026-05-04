@@ -81,7 +81,7 @@ def test_protocol_constants_distinct() raises:
 def test_client_tls_config_default_alpn_empty() raises:
     """Default :class:`flare.tls.TlsConfig` does not advertise any
     ALPN protocol. Verifies the new ``alpn`` field added for
-    client-side ALPN (``flare.http2.Http2Client`` uses this to
+    client-side ALPN (``flare.http.HttpClient`` uses this to
     advertise ``h2`` on the ClientHello)."""
     from flare.tls import TlsConfig
 

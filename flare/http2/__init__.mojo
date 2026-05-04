@@ -1,41 +1,31 @@
-"""``flare.http2`` — RFC 9113 / RFC 7541 client + server primitives.
+"""``flare.http2`` -- low-level HTTP/2 driver primitives (RFC 9113 + RFC 7541).
 
-Public surface:
+This package exposes the byte-level HTTP/2 machinery: frame
+codec, HPACK encoder + decoder, stream + connection state
+machines, the byte-level server driver
+:class:`H2Connection`, and the symmetric byte-level client
+driver :class:`Http2ClientConnection`.
 
-- :mod:`frame` — RFC 9113 §4 frame codec (DATA, HEADERS, PRIORITY,
-  RST_STREAM, SETTINGS, PUSH_PROMISE, PING, GOAWAY, WINDOW_UPDATE,
-  CONTINUATION).
-- :mod:`hpack` — RFC 7541 HPACK encoder + decoder (static table,
-  dynamic table, integer codec).
-- :mod:`state` — per-stream + per-connection state machines that
-  enforce RFC 9113 §5 transitions for both peer roles
-  (``Connection.is_client`` flips client vs server semantics on
-  HEADERS/DATA receipt).
-- :mod:`server` — high-level ``HttpServer.serve_h2`` loop: prefix
-  ``"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n"`` verification,
-  SETTINGS exchange, framed request/response shuttling, ``h2c``
-  upgrade from HTTP/1.1, ALPN dispatch from
-  :mod:`flare.tls.acceptor`.
-- :mod:`client` — :class:`Http2ClientConnection`, the symmetric
-  client-side driver (preface emit, initial SETTINGS, odd-id
-  stream allocator, request HEADERS/CONTINUATION/DATA send,
-  response HEADERS/DATA assembly, GOAWAY / RST_STREAM /
-  WINDOW_UPDATE / PING handling).
+The **user-facing** HTTP/2 entry points live in
+:mod:`flare.http`: :meth:`flare.http.HttpServer.serve`
+auto-dispatches HTTP/1.1 vs HTTP/2 per accepted connection
+(preface peek for cleartext, ALPN ``h2`` for TLS), and
+:class:`flare.http.HttpClient` advertises ALPN
+``["h2", "http/1.1"]`` for ``https://`` URLs (and speaks
+HTTP/2 cleartext via prior knowledge when constructed with
+``prefer_h2c=True``). Application code should reach for those
+unified types; the primitives below are re-exported for callers
+who want to drive the protocol themselves.
 
-The codec is byte-clean and Connection-agnostic so it can be driven
-by the existing reactor or run synchronously in tests; the server
-glue is what ties it to ``flare.runtime.Reactor``.
-
-Out of scope for (per the design doc):
+Out of scope (per the design doc):
 
 - HTTP/2 push (``PUSH_PROMISE``); we accept it on inbound
   connections from clients (rare) but never originate it.
-- HTTP/2 priority; we accept the frames and ignore them. RFC 9113
-  §5.3.2 already deprecates the priority signalling, so this is the
-  modern recommendation.
-- gRPC; the framing is HTTP/2 + a subprotocol — we expose enough
-  primitives that a gRPC server can be layered on, but no
-  ``Code``/``Status`` machinery here.
+- HTTP/2 priority; we accept the frames and ignore them. RFC
+  9113 §5.3.2 already deprecates the priority signalling.
+- gRPC; the framing is HTTP/2 + a subprotocol -- we expose
+  enough primitives that a gRPC server can be layered on, but
+  no ``Code`` / ``Status`` machinery here.
 """
 
 from .frame import (
@@ -67,19 +57,11 @@ from .state import (
 from .server import (
     H2Connection,
     Http2Config,
-    Http2Server,
     detect_h2c_upgrade,
     is_h2_alpn,
 )
 from .client import (
-    Http2Client,
     Http2ClientConfig,
     Http2ClientConnection,
     Http2Response,
-    delete,
-    get,
-    head,
-    patch,
-    post,
-    put,
 )

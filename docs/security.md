@@ -16,7 +16,7 @@ needed.
 | `flare.ws` | CSPRNG nonce for handshake key, UTF-8 validation on TEXT frames. |
 | `flare.http2` (server) | RFC 9113 §6.5.2 `SETTINGS_MAX_HEADER_LIST_SIZE = 8 KiB` advertised by default to bound memory under hostile peers. RFC 9113 §6.5.2 `SETTINGS_MAX_CONCURRENT_STREAMS = 100` advertised so a peer can't open arbitrarily many streams. |
 | `flare.http2` (client) | Advertises `SETTINGS_ENABLE_PUSH = 0` in the preface SETTINGS so servers cannot originate `PUSH_PROMISE`; if one arrives anyway it is rejected with `RST_STREAM(PROTOCOL_ERROR)` and dropped. RFC 9113 §9.1.1 same-origin enforcement: a request whose URL targets a different `(scheme, host, port)` than the established connection raises rather than tunneling cross-origin requests over the wrong connection. |
-| `flare.http2` (TLS) | `Http2Client` over `https://` advertises ALPN `["h2", "http/1.1"]` and **refuses to silently downgrade**: a server that picks `http/1.1` (or no ALPN) raises `NetworkError` rather than tunneling HTTP/2 framing into an HTTP/1.1 session. |
+| `flare.http` (TLS) | `HttpClient` over `https://` advertises ALPN `["h2", "http/1.1"]` and dispatches internally on what the server selected: `h2` -> drive HTTP/2 over the TLS stream; `http/1.1` (or no ALPN) -> existing HTTP/1.1 wire. The same `flare.http.Response` is returned either way -- the wire choice never leaks into application code. |
 
 ---
 

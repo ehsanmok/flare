@@ -23,8 +23,7 @@ from std.ffi import c_int, c_size_t, external_call
 from std.memory import stack_allocation
 from std.testing import assert_equal, assert_true
 
-from flare.http import HttpServer, Request, Response, ok
-from flare.http2 import Http2Client
+from flare.http import HttpClient, HttpServer, Request, Response, ok
 from flare.net import SocketAddr
 from flare.net._libc import (
     AF_INET,
@@ -166,7 +165,7 @@ def test_unified_server_http2_request() raises:
     var got_body = String("")
     var raised = False
     try:
-        with Http2Client() as c:
+        with HttpClient(prefer_h2c=True) as c:
             var r = c.get(url)
             got_status = r.status
             got_body = r.text()
@@ -213,7 +212,7 @@ def test_unified_server_router_dispatch_both_protocols() raises:
     var got_a = String("")
     var got_b = String("")
     try:
-        with Http2Client(base_url=base) as c:
+        with HttpClient(prefer_h2c=True, base_url=base) as c:
             got_a = c.get("/a").text()
             got_b = c.get("/b").text()
     except:

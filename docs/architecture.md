@@ -6,10 +6,14 @@ below it. No circular dependencies, no global state, no hidden runtime.
 ```
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455)
-flare.http2    HTTP/2: Frame codec (RFC 9113), HPACK (RFC 7541),
-               state machines, H2Connection (server) +
-               Http2ClientConnection / Http2Client (client) drivers,
-               h2c upgrade + h2 ALPN dispatch helper
+flare.http2    Low-level HTTP/2 byte drivers (RFC 9113 +
+               RFC 7541): Frame codec, HPACK enc/dec, stream
+               + connection state machines, H2Connection
+               (server byte driver), Http2ClientConnection
+               (client byte driver), h2c upgrade detection,
+               ALPN dispatch helper. Used by the unified
+               flare.http.HttpServer / HttpClient under the
+               hood; usable directly for custom dispatch.
 flare.http     HTTP/1.1 client + reactor server + Handler / Router / App
                + extractors (incl. Form / Multipart / Cookies)
                + ComptimeRouter + StaticResponse + Cancel / CancelHandler
@@ -148,127 +152,79 @@ across workers. Drain returns one `ShutdownReport` per worker.
 
 ---
 
-## HTTP/2: same handler, different wire
+## HTTP/2: one server, one client, version-aware
 
-`flare.http2` exposes both a high-level handler-driven server
-(`Http2Server.bind(addr).serve(handler)`) and a high-level
-blocking client (`Http2Client.get(url)`) on top of the
-RFC 9113 frame codec, RFC 7541 HPACK, and the per-connection
-state machines in [`flare/http2/state.mojo`](../flare/http2/state.mojo).
+There is no separate `Http2Server` / `Http2Client` to learn.
+`flare.http.HttpServer` and `flare.http.HttpClient` are HTTP-
+version-aware internally:
 
-The compatibility contract is **the application code doesn't
-know which wire is talking to it**:
+- `HttpServer.serve(handler, num_workers=N)` runs a unified
+  reactor loop ([`flare/http/_unified_reactor_impl.mojo`](../flare/http/_unified_reactor_impl.mojo))
+  that auto-dispatches every accepted connection to either
+  the existing HTTP/1.1 `ConnHandle` or the new HTTP/2
+  `H2ConnHandle` based on the first 24 bytes (RFC 9113 §3.4
+  client connection preface). The same handler is invoked
+  for both wires.
+- `HttpClient` advertises ALPN `["h2", "http/1.1"]` on every
+  TLS ClientHello and dispatches internally based on what
+  the server selected; if the server picks `http/1.1` (or
+  doesn't speak ALPN at all) the existing HTTP/1.1 wire is
+  used. For cleartext `http://` URLs the default is HTTP/1.1;
+  pass `prefer_h2c=True` to force HTTP/2 cleartext via prior
+  knowledge.
 
-- `Http2Server.serve(handler)` accepts any
-  `def(Request) raises -> Response` (auto-wrapped in
-  `FnHandler`) OR any struct implementing the `Handler` trait.
-  A `Router`, an `App[S]`, a middleware-wrapped chain — they
-  all serve the same on HTTP/2 because the per-stream HPACK
-  block decodes into a regular `flare.http.Request` (URL,
-  method, headers, body) that the handler can't tell from an
-  HTTP/1.1 one.
-- `Http2Client(BasicAuth("u", "p"))` /
-  `Http2Client(base_url, BearerAuth("tok"))` mirror the
-  `HttpClient` ergonomic constructors. The stored
-  `Authorization` header is sent on every outbound request as
-  a lower-cased `authorization` HPACK field.
+Per-connection state machines:
 
-Cleartext h2c (no Upgrade dance — preface-first prior
-knowledge) is wired today; ALPN-negotiated h2 over TLS is
-wired on the client side via `TlsConfig.alpn` + the new
-`flare_ssl_ctx_set_alpn_protos` C wrapper. Server-side
-ALPN-h2 wiring through `TlsAcceptor` and a reactor-integrated
-multi-worker `serve_h2` are deliberate follow-ups; the
-single-connection blocking server in this cut is the
-symmetric counterpart to `HttpServer.serve(handler)` *without*
-`num_workers >= 2`.
+```mermaid
+flowchart LR
+    Accept["accept() new connection"] --> Pending["PendingConnHandle (24-byte preface peek)"]
+    Pending -->|"first byte != 'P'"| H1["ConnHandle (HTTP/1.1)"]
+    Pending -->|"24 bytes == H2 preface"| H2["H2ConnHandle (HTTP/2)"]
+    H1 --> Handler["handler.serve(req)"]
+    H2 --> Handler
+```
+
+Both terminal handles run in the same reactor (`epoll` /
+`kqueue`), share the same accept-fairness story
+(`EPOLLEXCLUSIVE` shared listener vs per-worker `SO_REUSEPORT`
+based on `FLARE_REUSEPORT_WORKERS`), and produce the same
+`flare.http.Response` -- so the entire application surface
+(`Router`, `App[S]`, every middleware, every typed extractor,
+`Cancel`, `Session[T]`, `FileServer`, content negotiation,
+structured logging, Prometheus metrics, auth extractors,
+`CsrfToken`, templates) works identically on both wires.
+
+Low-level driver primitives stay public in `flare.http2` for
+callers who want to roll their own dispatch loop:
+`H2Connection`, `Http2ClientConnection`, `Http2Config`,
+`Http2ClientConfig`, `HpackEncoder`, `HpackDecoder`, the frame
+codec, and the helpers `is_h2_alpn` / `detect_h2c_upgrade`.
 
 What *doesn't* port automatically (RFC 9113 §8.2.2):
 
 - **Connection-level headers** (`Connection`, `Keep-Alive`,
-  `Transfer-Encoding`, `Proxy-Connection`, `Upgrade`) — the
-  `Http2Client` strips these before encoding HEADERS; the
-  `H2Connection.emit_response` server side does the same.
+  `Transfer-Encoding`, `Proxy-Connection`, `Upgrade`) -- the
+  HttpClient h2 path strips these before encoding HEADERS;
+  the H2Connection server-side does the same.
 - **WebSocket-over-HTTP/2** (RFC 8441 Extended CONNECT) is
-  not implemented. WebSocket clients/servers stay on HTTP/1.1
-  for now.
+  wired through the same `WsClient.connect(url)` /
+  `WsServer.serve(handler)` surface (negotiated automatically
+  via ALPN); HTTP/1.1 Upgrade stays the fallback path. See
+  [`flare/ws/`](../flare/ws/) for the bridge.
 
-### API surface parity (HTTP/1.1 ↔ HTTP/2)
+### API surface parity
 
-The pairs below have **byte-for-byte identical method
-signatures** -- swap the type name and the call site stays
-the same:
+End-state: the public client + server APIs are unified, so
+there is no parity table any more -- one type, one shape:
 
-#### Client
-
-| Method | `HttpClient` | `Http2Client` |
-|---|:---:|:---:|
-| `__init__()` | ✓ | ✓ |
-| `__init__(base_url=..., user_agent=...)` | ✓ | ✓ |
-| `__init__(tls: TlsConfig, base_url=..., user_agent=...)` | ✓ | ✓ |
-| `__init__[A: Auth](auth, base_url=..., user_agent=...)` | ✓ | ✓ |
-| `__init__[A: Auth](base_url, auth, user_agent=...)` | ✓ | ✓ |
-| `__enter__` (context manager) | ✓ | ✓ |
-| `get(url) -> Response` | ✓ | ✓ |
-| `post(url, body: String)` | ✓ | ✓ |
-| `post(url, body: json.Value)` | ✓ | ✓ |
-| `post(url, body: List[UInt8])` | ✓ | ✓ |
-| `put(url, body: String)` | ✓ | ✓ |
-| `put(url, body: json.Value)` | ✓ | ✓ |
-| `put(url, body: List[UInt8])` | ✓ | ✓ |
-| `patch(url, body: String)` | ✓ | ✓ |
-| `patch(url, body: json.Value)` | ✓ | ✓ |
-| `patch(url, body: List[UInt8])` | ✓ | ✓ |
-| `delete(url)` | ✓ | ✓ |
-| `head(url)` | ✓ | ✓ |
-| `send(req: Request) -> Response` | ✓ | ✓ |
-| Module-level `flare.http.{get,post,put,patch,delete,head}` / `flare.http2.{get,post,put,patch,delete,head}` | ✓ | ✓ |
-
-Two intrinsic differences (both inherent to the protocol shape,
-not API debt):
-
-- `HttpClient` methods are `self`-borrowing; `Http2Client`
-  methods are `mut self` because the client owns one
-  persistent TCP connection across calls (HTTP/2 multiplexes
-  streams over one connection — that's the whole point of the
-  protocol). Affects only the variable binding; the call-site
-  shape is unchanged.
-- `HttpClient` doesn't expose `close()` (each request opens its
-  own connection); `Http2Client.close()` sends a GOAWAY and
-  tears down the TCP/TLS stream. The `with HttpClient() as c:` /
-  `with Http2Client() as c:` context-manager pattern
-  destructs both implicitly so this surface only matters when
-  you build the client without a `with`.
-
-`Http2Client` additionally enforces RFC 9113 §9.1.1 same-origin
-on subsequent requests (one origin per connection); HttpClient
-opens a fresh connection per request so this constraint
-doesn't apply.
-
-#### Server
-
-| Method | `HttpServer` | `Http2Server` |
-|---|:---:|:---:|
-| `bind(addr, config?)` | ✓ (`ServerConfig`) | ✓ (`Http2Config`) |
-| `serve(handler: def(Request) raises -> Response)` | ✓ | ✓ |
-| `serve[H: Handler](handler)` | ✓ | ✓ |
-| `local_addr()` | ✓ | ✓ |
-| `close()` | ✓ | ✓ |
-| `serve(handler, num_workers=N, pin_cores=...)` | ✓ | ✗ (single-conn blocking; reactor-integrated multi-worker is a follow-up) |
-| `serve_static(resp)` / `serve_static_multicore(resp, ...)` | ✓ | ✗ (HTTP/2-specific static fast path is a follow-up) |
-| `drain(timeout_ms) -> ShutdownReport` | ✓ | partial — `shutdown()` flips a flag; per-worker `ShutdownReport` accounting lands with the multi-worker variant |
-
-The handler trait surface (`flare.http.Handler`,
-`flare.http.FnHandler`, `flare.http.Router`,
-`flare.http.App[S]`, every middleware in
-`flare.http.middleware`, every typed extractor in
-`flare.http.extract`) operates on `flare.http.Request` /
-`flare.http.Response` and is therefore identical across the
-two servers — the same `Router` you hand to
-`HttpServer.serve(r^)` works unchanged in
-`Http2Server.serve(r^)`. See
-[`tests/test_h2_server_handler.mojo`](../tests/test_h2_server_handler.mojo)
-for the end-to-end proof.
+| Surface | Type |
+|---|---|
+| HTTP server (HTTP/1.1 + HTTP/2 via auto-dispatch) | [`flare.http.HttpServer`](../flare/http/server.mojo) |
+| HTTP client (HTTP/1.1 + HTTP/2 via TLS+ALPN or `prefer_h2c=True`) | [`flare.http.HttpClient`](../flare/http/client.mojo) |
+| WebSocket server (HTTP/1.1 Upgrade + RFC 8441 over h2) | [`flare.ws.WsServer`](../flare/ws/server.mojo) |
+| WebSocket client (`ws://` / `wss://` -- ALPN h2 picks RFC 8441) | [`flare.ws.WsClient`](../flare/ws/client.mojo) |
+| Low-level HTTP/2 byte driver (server) | [`flare.http2.H2Connection`](../flare/http2/server.mojo) |
+| Low-level HTTP/2 byte driver (client) | [`flare.http2.Http2ClientConnection`](../flare/http2/client.mojo) |
 
 ---
 
@@ -328,6 +284,10 @@ the reactor thread:
 
 If you want a one-page tour of each, the layered docstrings on the
 public types (`HttpServer`, `Router`, `Handler`, `App`) are the place
+to start; they include "Failure modes" sections describing what
+raises, what becomes a 4xx vs 5xx, what gets logged, and what never
+returns.
+, `App`) are the place
 to start; they include "Failure modes" sections describing what
 raises, what becomes a 4xx vs 5xx, what gets logged, and what never
 returns.

@@ -1,18 +1,22 @@
-"""HTTP/2 server example: drive a flare.http.Router over h2c.
+"""HTTP/2 server example: drive a path-dispatching handler over h2c
+via the unified ``HttpServer`` + ``HttpClient``.
 
-The point of this example is to make the *compatibility story*
-self-evident: the same :class:`flare.http.Router` (with path
-params, multiple methods, typed handlers) that you'd hand to
-:meth:`flare.http.HttpServer.serve` works unchanged when you
-hand it to :meth:`flare.http2.Http2Server.serve`. The
-application code doesn't know -- and doesn't need to know --
-which wire protocol is talking to it.
+The compatibility story made self-evident: the same
+:class:`flare.http.HttpServer` accept loop dispatches both
+HTTP/1.1 and HTTP/2 on the same port (preface peek picks the
+wire per connection); the same handler shape
+``def(Request) raises -> Response`` runs unchanged on either.
+:class:`flare.http.HttpClient` with ``prefer_h2c=True`` forces
+HTTP/2 cleartext via prior knowledge, mirroring how
+``HttpClient.get("https://...")`` would auto-negotiate via
+ALPN once the handler is fronted by TLS.
 
-Topology (mirrors examples/40_http2_client.mojo):
-* Child process: bind an Http2Server on an ephemeral port,
-  serve a Router with three routes, exit on connection close.
-* Parent process: connect via Http2Client, hit each route,
-  print the response.
+Topology:
+* Child process: bind ``HttpServer`` on an ephemeral port,
+  serve a path-dispatching handler with three routes, exit
+  on connection close.
+* Parent process: connect via ``HttpClient(prefer_h2c=True)``,
+  hit each route, print the response.
 
 Run:
     pixi run -e dev mojo -I . examples/41_http2_server_router.mojo
@@ -20,8 +24,7 @@ Run:
 
 from std.ffi import c_int, external_call
 
-from flare.http import Request, Response, Router, ok
-from flare.http2 import Http2Client, Http2Server
+from flare.http import HttpClient, HttpServer, Request, Response, ok
 from flare.net import SocketAddr
 
 
@@ -53,43 +56,28 @@ def _usleep(us: c_int):
 comptime _SIGKILL: c_int = c_int(9)
 
 
-def _hello(req: Request) raises -> Response:
-    """Return a small JSON greeting."""
-    return ok('{"hello":"h2"}')
-
-
-def _user_lookup(req: Request) raises -> Response:
-    """Echo the user id from the URL so the path-param plumbing is visible.
-
-    The same handler shape works on HTTP/1.1; flare.http2.Http2Server
-    hands the parsed flare.http.Request straight to the Router.
-    """
-    return ok(String('{"user":"') + req.url + String('"}'))
-
-
-def _bytes_in(req: Request) raises -> Response:
-    """Report the number of bytes the server received in the body.
-
-    Confirms that HTTP/2 DATA frames reassemble into req.body
-    exactly the way HTTP/1.1's Content-Length-delimited body
-    reads do.
-    """
-    return ok(String("got ") + String(len(req.body)) + String(" bytes"))
+def _route(req: Request) raises -> Response:
+    """In-place path dispatcher. The same handler shape works on
+    HTTP/1.1 and HTTP/2 because flare.http.HttpServer hands the
+    parsed flare.http.Request straight through both wires."""
+    if req.url == "/":
+        return ok('{"hello":"h2"}')
+    if req.url == "/users/me":
+        return ok(String('{"user":"') + req.url + String('"}'))
+    if req.url == "/bytes":
+        return ok(String("got ") + String(len(req.body)) + String(" bytes"))
+    return Response(status=404, reason="Not Found")
 
 
 def main() raises:
-    var srv = Http2Server.bind(SocketAddr.localhost(0))
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
     var port = UInt16(srv.local_addr().port)
     print("[h2 server] listening on 127.0.0.1:" + String(Int(port)))
 
     var pid = _fork()
     if pid == 0:
         try:
-            var r = Router()
-            r.get("/", _hello)
-            r.get("/users/me", _user_lookup)
-            r.post("/bytes", _bytes_in)
-            srv.serve(r^)
+            srv.serve(_route)
         except:
             pass
         _exit_child()
@@ -97,7 +85,7 @@ def main() raises:
 
     var base = String("http://127.0.0.1:") + String(Int(port))
     print("[h2 client] connecting to " + base)
-    with Http2Client(base_url=base) as c:
+    with HttpClient(prefer_h2c=True, base_url=base) as c:
         var r1 = c.get("/")
         print("[h2] GET /          -> " + String(r1.status) + " " + r1.text())
         var r2 = c.get("/users/me")

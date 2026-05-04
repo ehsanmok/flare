@@ -24,7 +24,16 @@ in-process tests below verify:
 from std.ffi import c_int, external_call
 from std.testing import assert_equal, assert_true
 
-from flare.http import HttpClient, HttpServer, Request, Response, ok, get
+from flare.http import (
+    BasicAuth,
+    BearerAuth,
+    HttpClient,
+    HttpServer,
+    Request,
+    Response,
+    get,
+    ok,
+)
 from flare.net import SocketAddr
 
 
@@ -127,7 +136,114 @@ def test_unified_client_module_level_get() raises:
     assert_equal(got_body, "hello unified client")
 
 
+def test_unified_client_h2c_prior_knowledge() raises:
+    """``HttpClient(prefer_h2c=True).get('http://...')`` speaks HTTP/2
+    cleartext via prior knowledge (no Upgrade dance). Proves the
+    h2c path that test_h2_client.mojo previously exercised via the
+    now-removed Http2Client."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = _fork()
+    if pid == 0:
+        try:
+            srv.serve(_hello)
+        except:
+            pass
+        _exit_child()
+    _usleep(c_int(200000))
+
+    var url = String("http://127.0.0.1:") + String(Int(port)) + String("/")
+    var got_status = -1
+    var got_body = String("")
+    var raised = False
+    try:
+        with HttpClient(prefer_h2c=True) as c:
+            var r = c.get(url)
+            got_status = r.status
+            got_body = r.text()
+    except:
+        raised = True
+
+    _ = _kill(pid, _SIGKILL)
+    _waitpid(pid)
+    assert_true(not raised, "HttpClient(prefer_h2c=True).get raised")
+    assert_equal(got_status, 200)
+    assert_equal(got_body, "hello unified client")
+
+
+def _echo_authorization(req: Request) raises -> Response:
+    """Reflect the Authorization header in the response body so the
+    test can verify the auth-propagation path."""
+    return ok(req.headers.get("authorization"))
+
+
+def test_unified_client_basic_auth_h2c() raises:
+    """``HttpClient(BasicAuth(...), prefer_h2c=True)`` propagates the
+    Authorization header through the HTTP/2 cleartext path."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = _fork()
+    if pid == 0:
+        try:
+            srv.serve(_echo_authorization)
+        except:
+            pass
+        _exit_child()
+    _usleep(c_int(200000))
+
+    var url = String("http://127.0.0.1:") + String(Int(port)) + String("/")
+    var got = String("")
+    var raised = False
+    try:
+        with HttpClient(BasicAuth("alice", "s3cr3t"), prefer_h2c=True) as c:
+            got = c.get(url).text()
+    except:
+        raised = True
+
+    _ = _kill(pid, _SIGKILL)
+    _waitpid(pid)
+    assert_true(not raised, "HttpClient(BasicAuth, prefer_h2c=True) raised")
+    # base64("alice:s3cr3t") == "YWxpY2U6czNjcjN0"
+    assert_equal(got, "Basic YWxpY2U6czNjcjN0")
+
+
+def test_unified_client_bearer_auth_h1() raises:
+    """``HttpClient(BearerAuth(...))`` propagates Authorization through
+    the HTTP/1.1 cleartext path (proves the same Auth shape works
+    on the other wire too)."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = _fork()
+    if pid == 0:
+        try:
+            srv.serve(_echo_authorization)
+        except:
+            pass
+        _exit_child()
+    _usleep(c_int(200000))
+
+    var base = String("http://127.0.0.1:") + String(Int(port))
+    var got = String("")
+    var raised = False
+    try:
+        with HttpClient(base, BearerAuth("tok_abc")) as c:
+            got = c.get("/").text()
+    except:
+        raised = True
+
+    _ = _kill(pid, _SIGKILL)
+    _waitpid(pid)
+    assert_true(not raised, "HttpClient(base, BearerAuth) raised")
+    assert_equal(got, "Bearer tok_abc")
+
+
 def main() raises:
     test_unified_client_http_url_round_trip()
     test_unified_client_module_level_get()
-    print("test_unified_http_client: 2 passed")
+    test_unified_client_h2c_prior_knowledge()
+    test_unified_client_basic_auth_h2c()
+    test_unified_client_bearer_auth_h1()
+    print("test_unified_http_client: 5 passed")

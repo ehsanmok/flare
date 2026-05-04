@@ -46,8 +46,8 @@ changes when you tweak it.
 | [`37_http2_config.mojo`](../examples/37_http2_config.mojo) | `Http2Config` SETTINGS knobs + validation |
 | [`38_uds_sidecar.mojo`](../examples/38_uds_sidecar.mojo) | `UnixListener` / `UnixStream` AF_UNIX sidecar IPC |
 | [`39_iouring_plaintext.mojo`](../examples/39_iouring_plaintext.mojo) | `io_uring` reactor backend (Linux ≥ 5.10) |
-| [`40_http2_client.mojo`](../examples/40_http2_client.mojo) | `Http2Client` GET + POST over h2c (cleartext HTTP/2) |
-| [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) | `Http2Server.serve(router^)` -- a `flare.http.Router` over HTTP/2 |
+| [`40_http2_client.mojo`](../examples/40_http2_client.mojo) | `HttpClient(prefer_h2c=True)` GET + POST over h2c (cleartext HTTP/2 via prior knowledge) |
+| [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) | Path-dispatching handler served over HTTP/2 via the unified `HttpServer.serve(handler)` (auto-dispatches HTTP/1.1 + HTTP/2 on the same port) |
 
 Run any single example with `pixi run example-<name>`; see the full
 list in [`pixi.toml`](../pixi.toml).

@@ -92,6 +92,15 @@ struct HttpClient(Movable):
     var _user_agent: String
     var _base_url: String
     var _auth_header: String  # "" = no auth; "Basic ..." or "Bearer ..."
+    var _prefer_h2c: Bool
+    """When ``True``, ``http://`` requests speak HTTP/2 cleartext
+    via prior knowledge (RFC 9113 §3.4 connection preface
+    immediately, no ``Upgrade`` dance). Defaults to ``False``
+    so a plain ``HttpClient().get("http://...")`` keeps the
+    HTTP/1.1 wire it has always used. ``https://`` URLs are
+    independent of this flag -- they always advertise ALPN
+    ``["h2", "http/1.1"]`` and dispatch on what the server
+    picks."""
 
     def __init__(
         out self,
@@ -99,6 +108,7 @@ struct HttpClient(Movable):
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
         user_agent: String = "flare/0.1.0",
+        prefer_h2c: Bool = False,
     ):
         """Initialise an ``HttpClient`` with secure defaults.
 
@@ -107,6 +117,9 @@ struct HttpClient(Movable):
             max_redirects: Maximum number of redirects to follow (default 10).
             timeout_ms: Connect + read timeout in milliseconds (default 30 s).
             user_agent: Value for the ``User-Agent`` header.
+            prefer_h2c: When ``True``, ``http://`` requests speak
+                HTTP/2 over cleartext via prior knowledge. ``https://``
+                requests always negotiate via ALPN regardless.
         """
         self._config = TlsConfig()
         self._max_redirects = max_redirects
@@ -114,6 +127,7 @@ struct HttpClient(Movable):
         self._user_agent = user_agent
         self._base_url = base_url
         self._auth_header = ""
+        self._prefer_h2c = prefer_h2c
 
     def __init__(
         out self,
@@ -122,22 +136,16 @@ struct HttpClient(Movable):
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
         user_agent: String = "flare/0.1.0",
+        prefer_h2c: Bool = False,
     ):
-        """Initialise an ``HttpClient`` with custom TLS configuration.
-
-        Args:
-            tls: TLS configuration (e.g. ``TlsConfig.insecure()``).
-            base_url: Optional base URL prepended to relative paths.
-            max_redirects: Maximum number of redirects to follow.
-            timeout_ms: Connect + read timeout in milliseconds.
-            user_agent: Value for the ``User-Agent`` header.
-        """
+        """Initialise an ``HttpClient`` with custom TLS configuration."""
         self._config = tls.copy()
         self._max_redirects = max_redirects
         self._timeout_ms = timeout_ms
         self._user_agent = user_agent
         self._base_url = base_url
         self._auth_header = ""
+        self._prefer_h2c = prefer_h2c
 
     def __init__[
         A: Auth
@@ -148,28 +156,9 @@ struct HttpClient(Movable):
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
         user_agent: String = "flare/0.1.0",
+        prefer_h2c: Bool = False,
     ) raises:
-        """Initialise an ``HttpClient`` with authentication.
-
-        The ``auth`` strategy is applied once at construction time — the
-        resulting ``Authorization`` header is stored and re-sent with every
-        request.
-
-        Parameters:
-            A: Any type implementing the ``Auth`` trait.
-
-        Args:
-            auth: Authentication strategy (e.g. ``BasicAuth``,
-                           ``BearerAuth``).
-            base_url: Optional base URL prepended to relative paths.
-            max_redirects: Maximum number of redirects to follow.
-            timeout_ms: Connect + read timeout in milliseconds.
-            user_agent: Value for the ``User-Agent`` header.
-
-        Raises:
-            HeaderInjectionError: If the generated auth header contains
-                CRLF characters.
-        """
+        """Initialise an ``HttpClient`` with authentication."""
         self._config = TlsConfig()
         self._max_redirects = max_redirects
         self._timeout_ms = timeout_ms
@@ -178,6 +167,7 @@ struct HttpClient(Movable):
         var auth_headers = HeaderMap()
         auth.apply(auth_headers)
         self._auth_header = auth_headers.get("Authorization")
+        self._prefer_h2c = prefer_h2c
 
     def __init__[
         A: Auth
@@ -188,29 +178,9 @@ struct HttpClient(Movable):
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
         user_agent: String = "flare/0.1.0",
+        prefer_h2c: Bool = False,
     ) raises:
-        """Initialise an ``HttpClient`` with a base URL and authentication.
-
-        Allows the most natural call-site syntax::
-
-            with HttpClient("https://api.example.com", BearerAuth("tok")) as c:
-                c.get("/users").raise_for_status()
-
-        Parameters:
-            A: Any type implementing the ``Auth`` trait.
-
-        Args:
-            base_url: Base URL prepended to all relative request paths.
-            auth: Authentication strategy (e.g. ``BasicAuth``,
-                           ``BearerAuth``).
-            max_redirects: Maximum number of redirects to follow.
-            timeout_ms: Connect + read timeout in milliseconds.
-            user_agent: Value for the ``User-Agent`` header.
-
-        Raises:
-            HeaderInjectionError: If the generated auth header contains
-                CRLF characters.
-        """
+        """Initialise an ``HttpClient`` with a base URL and authentication."""
         self._config = TlsConfig()
         self._max_redirects = max_redirects
         self._timeout_ms = timeout_ms
@@ -219,6 +189,7 @@ struct HttpClient(Movable):
         var auth_headers = HeaderMap()
         auth.apply(auth_headers)
         self._auth_header = auth_headers.get("Authorization")
+        self._prefer_h2c = prefer_h2c
 
     # ── Context manager ───────────────────────────────────────────────────────
 
@@ -666,6 +637,22 @@ struct HttpClient(Movable):
             var stream = _connect_with_fallback(
                 u.host, u.port, self._timeout_ms
             )
+            if self._prefer_h2c:
+                # h2c via prior knowledge (RFC 9113 §3.4):
+                # send the connection preface immediately and
+                # drive the request through Http2ClientConnection
+                # over the cleartext TCP stream. The response
+                # comes back lowered to a regular Response.
+                var resp_h2c = _send_h2_over_tcp(
+                    stream^,
+                    method,
+                    u,
+                    extra_headers,
+                    body,
+                    self._user_agent,
+                    self._auth_header,
+                )
+                return resp_h2c^
             var wire_bytes = wire.as_bytes()
             stream.write_all(Span[UInt8, _](wire_bytes))
             if len(body) > 0:
@@ -1105,36 +1092,28 @@ def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
     return _parse_http_response(raw)
 
 
-# ── HTTP/2-over-TLS helper (ALPN h2 path) ─────────────────────────────────────
+# ── HTTP/2 send helpers (ALPN h2 + h2c-prior-knowledge) ──────────────────────
 
 
 comptime _H2_READ_BUF_SIZE: Int = 16384
-"""Per-syscall recv buffer size for the h2-over-TLS read pump.
-Matches the RFC 9113 §6.5.2 default ``max_frame_size``."""
+"""Per-syscall recv buffer size for the h2 read pump. Matches the
+RFC 9113 §6.5.2 default ``max_frame_size``."""
 
 
-def _send_h2_over_tls(
-    var stream: TlsStream,
-    method: String,
-    u: Url,
+def _build_h2_request_headers(
     extra_headers: HeaderMap,
-    body: List[UInt8],
     user_agent: String,
     auth_header: String,
-) raises -> Response:
-    """Drive a single HTTP/2 request over an already-handshaken TLS
-    stream and return the response.
+) raises -> List[HpackHeader]:
+    """Translate :class:`HeaderMap` to a list of :class:`HpackHeader`
+    suitable for :meth:`Http2ClientConnection.send_request`.
 
-    Used by :meth:`HttpClient._do_request` when the server selected
-    ALPN ``h2``. The caller is responsible for owning the
-    :class:`TlsStream` -- this helper consumes it (sends GOAWAY +
-    closes on the way out) and returns the lowered
-    :class:`flare.http.Response`.
+    Lower-cases header names per RFC 9113 §8.1.2 and strips the
+    connection-level headers RFC 9113 §8.2.2 forbids on h2.
+    Appends ``user-agent`` and ``authorization`` from the
+    HttpClient instance fields if they are not already present
+    on the request's HeaderMap.
     """
-    var conn = Http2ClientConnection()
-    # Translate flare.http headers -> HpackHeader, lower-case names
-    # per RFC 9113 §8.1.2 and strip the connection-level headers
-    # RFC 9113 §8.2.2 forbids on h2.
     var extra = List[HpackHeader]()
     for i in range(extra_headers.len()):
         var k = extra_headers._keys[i]
@@ -1157,36 +1136,62 @@ def _send_h2_over_tls(
         ):
             continue
         extra.append(HpackHeader(lk^, v))
-    # User-Agent (only when caller didn't already supply one).
     if extra_headers.get("User-Agent").byte_length() == 0:
         extra.append(HpackHeader("user-agent", user_agent))
-    # Stored Authorization from the construction-time Auth strategy.
     if (
         auth_header.byte_length() > 0
         and extra_headers.get("Authorization").byte_length() == 0
     ):
         extra.append(HpackHeader("authorization", auth_header))
+    return extra^
+
+
+def _h2_authority(u: Url) -> String:
+    """Build the ``:authority`` pseudo-header value (host[:port] for
+    non-default ports)."""
     var authority = u.host
     if (u.scheme == "http" and u.port != 80) or (
         u.scheme == "https" and u.port != 443
     ):
         authority = authority + ":" + String(Int(u.port))
+    return authority^
+
+
+def _send_h2_over_tls(
+    var stream: TlsStream,
+    method: String,
+    u: Url,
+    extra_headers: HeaderMap,
+    body: List[UInt8],
+    user_agent: String,
+    auth_header: String,
+) raises -> Response:
+    """Drive a single HTTP/2 request over an already-handshaken TLS
+    stream and return the response.
+
+    Used by :meth:`HttpClient._do_request` when the server selected
+    ALPN ``h2``. The caller is responsible for owning the
+    :class:`TlsStream` -- this helper consumes it (sends GOAWAY +
+    closes on the way out) and returns the lowered
+    :class:`flare.http.Response`.
+    """
+    var conn = Http2ClientConnection()
+    var extra = _build_h2_request_headers(
+        extra_headers, user_agent, auth_header
+    )
     var sid = conn.next_stream_id()
     conn.send_request(
         sid,
         method,
         u.scheme,
-        authority,
+        _h2_authority(u),
         u.request_target(),
         extra,
         Span[UInt8, _](body),
     )
-    # Push everything queued (preface SETTINGS + HEADERS + DATA)
-    # onto the wire in one shot.
     var out_bytes = conn.drain()
     if len(out_bytes) > 0:
         stream.write_all(Span[UInt8, _](out_bytes))
-    # Read pump until response_ready.
     var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
     buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
     while not conn.response_ready(sid):
@@ -1226,12 +1231,95 @@ def _send_h2_over_tls(
             + String(sid)
         )
     var h2_resp = conn.take_response(sid)
-    # Tear down the TLS connection -- HttpClient is one-connection-
-    # per-request on HTTP/1.1 and we keep the same shape on h2 to
-    # preserve the existing user-visible behaviour. Multi-request
-    # h2 multiplexing on a persistent connection is what
-    # :class:`flare.http2.Http2Client` is for and stays the high-
-    # throughput surface.
+    try:
+        conn.send_goaway(sid, 0)
+        var goaway_bytes = conn.drain()
+        if len(goaway_bytes) > 0:
+            stream.write_all(Span[UInt8, _](goaway_bytes))
+    except:
+        pass
+    try:
+        stream.close()
+    except:
+        pass
+    return _h2_response_to_http(h2_resp^)
+
+
+def _send_h2_over_tcp(
+    var stream: TcpStream,
+    method: String,
+    u: Url,
+    extra_headers: HeaderMap,
+    body: List[UInt8],
+    user_agent: String,
+    auth_header: String,
+) raises -> Response:
+    """Drive a single HTTP/2 cleartext (h2c) request over a plain
+    TCP stream via prior knowledge.
+
+    Mirror of :func:`_send_h2_over_tls`, used when the caller
+    constructed :class:`HttpClient` with ``prefer_h2c=True`` and
+    targeted an ``http://`` URL. RFC 9113 §3.4: the client sends
+    the connection preface immediately (no ``Upgrade`` dance);
+    if the server doesn't speak h2, the connection just dies.
+    """
+    var conn = Http2ClientConnection()
+    var extra = _build_h2_request_headers(
+        extra_headers, user_agent, auth_header
+    )
+    var sid = conn.next_stream_id()
+    conn.send_request(
+        sid,
+        method,
+        u.scheme,
+        _h2_authority(u),
+        u.request_target(),
+        extra,
+        Span[UInt8, _](body),
+    )
+    var out_bytes = conn.drain()
+    if len(out_bytes) > 0:
+        stream.write_all(Span[UInt8, _](out_bytes))
+    var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
+    buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
+    while not conn.response_ready(sid):
+        if conn.goaway_received():
+            try:
+                stream.close()
+            except:
+                pass
+            raise NetworkError(
+                "HttpClient(h2c): peer sent GOAWAY before responding to stream "
+                + String(sid)
+            )
+        var n = stream.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
+        if n == 0:
+            try:
+                stream.close()
+            except:
+                pass
+            raise NetworkError(
+                "HttpClient(h2c): peer closed connection mid-response on"
+                " stream "
+                + String(sid)
+            )
+        conn.feed(Span[UInt8, _](buf[:n]))
+        var ack_bytes = conn.drain()
+        if len(ack_bytes) > 0:
+            stream.write_all(Span[UInt8, _](ack_bytes))
+    var maybe_err = conn.stream_error(sid)
+    if Bool(maybe_err):
+        try:
+            stream.close()
+        except:
+            pass
+        raise NetworkError(
+            "HttpClient(h2c): peer sent RST_STREAM (error code "
+            + String(maybe_err.value())
+            + ") on stream "
+            + String(sid)
+        )
+    var h2_resp = conn.take_response(sid)
     try:
         conn.send_goaway(sid, 0)
         var goaway_bytes = conn.drain()

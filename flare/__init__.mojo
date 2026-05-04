@@ -344,29 +344,49 @@ def main() raises:
     client.post("/items", '{"name": "new"}').raise_for_status()
 ```
 
-## HTTP/2 client (h2c + h2 over TLS-ALPN)
+## HTTP/2: same client, same server, version-aware
+
+There is no separate ``Http2Client`` / ``Http2Server`` to learn:
+the same :class:`flare.http.HttpClient` and
+:class:`flare.http.HttpServer` are HTTP-version-aware internally.
 
 ```mojo
-from flare.http2 import Http2Client
+from flare.http import HttpClient
 
 def main() raises:
-    # h2c (cleartext HTTP/2 via prior knowledge):
-    with Http2Client(base_url="http://localhost:8080") as c:
-        var r = c.get("/api/users")
-        r.raise_for_status()
-
-    # h2 (HTTP/2 over TLS via ALPN — refuses to silently
-    # downgrade to HTTP/1.1 if the server doesn't pick "h2"):
-    with Http2Client() as c:
+    # https:// auto-negotiates via TLS+ALPN. If the server picks
+    # h2 the request is driven through HTTP/2 internally; if it
+    # picks http/1.1 (or doesn't speak ALPN at all) the
+    # existing HTTP/1.1 wire is used. Either way you get a
+    # flare.http.Response back.
+    with HttpClient() as c:
         var r = c.get("https://nghttp2.org/")
         print(r.status, r.text())
+
+    # http:// is HTTP/1.1 by default; opt into HTTP/2 cleartext
+    # via prior knowledge with prefer_h2c=True:
+    with HttpClient(prefer_h2c=True, base_url="http://localhost:8080") as c:
+        var r = c.get("/api/users")
+        r.raise_for_status()
 ```
 
-The ``Http2Client`` API mirrors :class:`flare.http.HttpClient`
-(``get``/``post``/``put``/``delete``/``head`` + context-manager
-+ ``base_url`` + per-instance connection reuse + RFC 9113 §9.1.1
-same-origin enforcement). Switch protocols by changing the
-type name and the URL scheme; everything else stays the same.
+The server side is symmetric -- one accept loop dispatches both
+wires per connection (preface peek for cleartext, ALPN ``h2``
+for TLS):
+
+```mojo
+from flare.http import HttpServer, Request, Response, ok
+from flare.net import SocketAddr
+
+def hello(req: Request) raises -> Response:
+    return ok("hi")
+
+def main() raises:
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    # The same handler is dispatched whether the client speaks
+    # HTTP/1.1 or HTTP/2 over the same port.
+    srv.serve(hello, num_workers=4)
+```
 
 ## WebSocket
 
