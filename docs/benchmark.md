@@ -339,9 +339,10 @@ the queue-overflow cliff). Each row is `wrk2 -t8 -c256 -d12s
 **4-worker frameworks** (each row uses each framework's
 default-recommended listener strategy: actix_web ships
 per-worker `SO_REUSEPORT`; hyper and axum use tokio's
-multi-thread runtime sharing one accept future; flare opts
-in via `FLARE_REUSEPORT_WORKERS=1` for the same per-worker
-listener shape):
+multi-thread runtime sharing one accept future; flare also
+defaults to per-worker `SO_REUSEPORT` for `num_workers >= 2`
+since it's the strictly higher-throughput shape on dev-box
+workloads):
 
 | Server | Workers | Peak rps | p99 (ms) | p99.99 (ms) | R= used |
 |---|---:|---:|---:|---:|---:|
@@ -358,27 +359,30 @@ choose throughput vs tail-latency tradeoff:
 
 | flare path | Listener mode | Peak rps | p99.99 (ms) |
 |---|---|---:|---:|
-| flare_mc_static (default) | shared listener + EPOLLEXCLUSIVE | 214,306 | 3.26 |
-| flare_mc_static + `FLARE_REUSEPORT_WORKERS=1` | per-worker SO_REUSEPORT | 258,292 (+21 %) | 3.54 (+0.28 ms) |
-| flare_mc handler (default) | shared listener + EPOLLEXCLUSIVE | 196,757 | 3.23 |
-| flare_mc handler + `FLARE_REUSEPORT_WORKERS=1` | per-worker SO_REUSEPORT | 238,431 (+21 %) | 3.47 (+0.24 ms) |
+| flare_mc_static (default) | per-worker SO_REUSEPORT | 258,292 | 3.54 |
+| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-17 %) | 3.26 (-0.28 ms) |
+| flare_mc handler (default) | per-worker SO_REUSEPORT | 238,431 | 3.47 |
+| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-17 %) | 3.23 (-0.24 ms) |
 
 Picking a mode:
 
-- **EPOLLEXCLUSIVE shared listener (default)** — the kernel
-  offers each accept event to whichever worker is currently
-  parked in `epoll_wait`. Idle workers absorb spikes; busy
-  workers aren't burdened with extra accepts. Strictly
-  tighter p99.99 (3.23 ms in the historical CPU-pinned
-  reference, where actix_web's per-worker reuseport hits
-  21.61 ms p99.99 from listener-distribution variance).
-- **per-worker SO_REUSEPORT (`FLARE_REUSEPORT_WORKERS=1`)** —
-  each worker accept(2)s on its own fd, kernel hashes new
-  4-tuples to one of N listeners. Higher throughput on
-  unpinned dev-boxes / high-core-count instances because
-  each worker's accept loop is fully independent (no
-  cross-worker EPOLLEXCLUSIVE wakeup overhead). p99.99
-  trades ~0.25 ms for ~21 % more req/s on this dev-box.
+- **per-worker SO_REUSEPORT (default)** — each worker
+  accept(2)s on its own fd, kernel hashes new 4-tuples to
+  one of N listeners. Higher throughput on unpinned
+  dev-boxes / high-core-count instances because each
+  worker's accept loop is fully independent (no
+  cross-worker EPOLLEXCLUSIVE wakeup overhead). Matches
+  actix_web's listener strategy. This is what the headline
+  "vs Rust libs" numbers above use.
+- **EPOLLEXCLUSIVE shared listener (`FLARE_REUSEPORT_WORKERS=0`)** —
+  the kernel offers each accept event to whichever worker
+  is currently parked in `epoll_wait`. Idle workers absorb
+  spikes; busy workers aren't burdened with extra accepts.
+  Strictly tighter p99.99 (3.23 ms in the historical
+  CPU-pinned reference, where actix_web's per-worker
+  reuseport hits 21.61 ms p99.99 from listener-distribution
+  variance). Trades ~17 % req/s for ~0.25 ms tighter
+  p99.99.
 
 **1-worker frameworks** (single-thread reactor / event loop):
 
@@ -494,6 +498,40 @@ and to whatever is hard-coded in each baseline's run script (1 for
 nginx / Go, 4 for the Rust frameworks). Override `flare_mc` with
 `FLARE_BENCH_WORKERS=N` to scale; the bench harness re-runs the
 peak-finder at the new worker count automatically.
+
+### Production / bench build flags
+
+The headline numbers above use the same compiler posture as
+the Rust baselines: full `-O3` optimisation with all
+`debug_assert` calls compiled out. That's what `cargo build
+--release --locked` produces for actix_web / hyper / axum, and
+what flare's bench harness does via:
+
+```bash
+mojo build -D ASSERT=none -I . benchmark/baselines/flare_mc/main.mojo \
+    -o target/bench_baselines/flare_mc
+./target/bench_baselines/flare_mc
+```
+
+(`mojo build` defaults to `-O3`; `-D ASSERT=none` compiles out
+every `debug_assert[assert_mode="safe"]` call -- the FFI-boundary
+safety asserts that the Mojo stdlib default `ASSERT=safe` keeps
+in the binary. See [`.cursor/rules/sanitizers-and-bounds-checking.mdc`](../.cursor/rules/sanitizers-and-bounds-checking.mdc) §2 for
+the full assert-mode hierarchy.)
+
+For production deployments, **use the same shape**: build
+with `mojo build -D ASSERT=none` and run the resulting binary.
+The `mojo run my_app.mojo` JIT path keeps the safety asserts
+on, which is fine for development (catches use-after-free,
+EBADF, EFAULT in the FFI layer before they become silent
+kernel-mode UB) but adds a measurable per-event tax on the
+reactor hot path. Bench numbers and production traffic see
+the same posture only when both build with `-D ASSERT=none`.
+
+The dev-time flow stays simple: `pixi run tests`, the
+sanitizer harnesses, every example -- they all run under
+the default `ASSERT=safe`. Only the `bench-vs-baseline*`
+tasks and production deployments need the no-asserts build.
 
 ### Platform footnote
 

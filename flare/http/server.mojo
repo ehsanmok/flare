@@ -276,15 +276,15 @@ struct HttpServer(Movable):
           ``serve``.
         - ``num_workers >= 2``: multicore — N ``pthread`` workers
           via ``flare.runtime.scheduler.Scheduler``. By default
-          the workers share a single listener fd registered with
-          ``EPOLLEXCLUSIVE`` (Linux >= 4.5), which wakes one
-          worker per accept event and gives the tightest p99.99
-          (no ``SO_REUSEPORT`` 4-tuple-hash distribution variance).
-          Export ``FLARE_REUSEPORT_WORKERS=1`` before launch to
-          instead pre-bind one ``SO_REUSEPORT`` listener per
-          worker on the Scheduler thread -- trades ~0.25 ms
-          p99.99 for ~21 % more req/s on unpinned dev-boxes /
-          high-core-count instances; see ``docs/benchmark.md``.
+          each worker binds its own ``SO_REUSEPORT`` listener
+          (the kernel hashes new 4-tuples to one of N listeners;
+          matches actix_web's listener strategy and gives the
+          highest steady-state throughput). Export
+          ``FLARE_REUSEPORT_WORKERS=0`` before launch to switch
+          back to the single shared listener with
+          ``EPOLLEXCLUSIVE`` (Linux >= 4.5), which trades
+          ~17 % req/s for ~0.25 ms tighter p99.99; see
+          ``docs/benchmark.md``.
 
         For Router / middleware / stateful-struct handlers, use the
         Handler-typed overload ``serve[H: Handler & Copyable]``.
@@ -705,12 +705,13 @@ struct HttpServer(Movable):
 
         The HttpServer's bound listener is closed before spawning;
         the StaticScheduler then binds its own listener(s) at the
-        same address. By default a single shared listener is bound
-        with ``EPOLLEXCLUSIVE`` (tightest p99.99). Export
-        ``FLARE_REUSEPORT_WORKERS=1`` before launch to instead
-        pre-bind one ``SO_REUSEPORT`` listener per worker -- ~21 %
-        more req/s for ~0.25 ms more p99.99 on unpinned dev-boxes
-        / high-core-count instances; see ``docs/benchmark.md``.
+        same address. By default each worker pre-binds its own
+        ``SO_REUSEPORT`` listener (highest throughput; matches
+        actix_web's listener strategy). Export
+        ``FLARE_REUSEPORT_WORKERS=0`` before launch to switch
+        back to a single shared listener with
+        ``EPOLLEXCLUSIVE`` -- trades ~17 % req/s for ~0.25 ms
+        tighter p99.99; see ``docs/benchmark.md``.
 
         Caller is expected to hold the StaticScheduler reference
         returned via ``self._stopping`` indirectly -- in practice,

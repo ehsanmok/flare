@@ -128,25 +128,26 @@ pthread workers via `Scheduler`. Each worker owns its own reactor,
 its own timer wheel, its own per-connection state.
 **Shared-nothing.** Two listener strategies are supported:
 
-- **Default — shared listener with `EPOLLEXCLUSIVE`.** One
-  listener fd is bound via `bind_shared` and borrowed by every
-  worker, registered with `Reactor.register_exclusive` so the
-  kernel wakes one worker per accept event (Linux >= 4.5; macOS
-  degrades to plain `register`). Tightest p99.99 because idle
-  workers absorb spikes; busy workers aren't burdened with
-  extra accepts. This is what the published p99 / p99.99
-  numbers in [`docs/benchmark.md`](benchmark.md) measure.
-- **Opt-in — per-worker `SO_REUSEPORT` listeners
-  (`FLARE_REUSEPORT_WORKERS=1`).** The Scheduler pre-binds one
-  `SO_REUSEPORT` listener per worker on its own thread
-  (serialised binds avoid concurrent-bind races) and hands each
-  worker its own fd. The kernel hashes new 4-tuples to one of
-  N listeners, matching `actix_web`'s default shape. ~21 % more
-  req/s for ~0.25 ms more p99.99 on unpinned dev-boxes /
-  high-core-count instances. The io_uring buffer-ring path
-  (`FLARE_BUFRING_HANDLER=1`) uses per-worker `SO_REUSEPORT`
-  unconditionally because io_uring's multishot accept attaches
-  to a single fd per ring.
+- **Default — per-worker `SO_REUSEPORT` listeners.** The
+  Scheduler pre-binds one `SO_REUSEPORT` listener per worker on
+  its own thread (serialised binds avoid concurrent-bind races)
+  and hands each worker its own fd. The kernel hashes new
+  4-tuples to one of N listeners, matching `actix_web`'s
+  default shape. Highest steady-state throughput on dev-box
+  workloads -- this is what the published p99 / p99.99 numbers
+  in [`docs/benchmark.md`](benchmark.md) measure. The io_uring
+  buffer-ring path (`FLARE_BUFRING_HANDLER=1`) uses per-worker
+  `SO_REUSEPORT` unconditionally because io_uring's multishot
+  accept attaches to a single fd per ring.
+- **Opt-out — shared listener with `EPOLLEXCLUSIVE`
+  (`FLARE_REUSEPORT_WORKERS=0`).** One listener fd is bound
+  via `bind_shared` and borrowed by every worker, registered
+  with `Reactor.register_exclusive` so the kernel wakes one
+  worker per accept event (Linux >= 4.5; macOS degrades to
+  plain `register`). Tighter p99.99 because idle workers
+  absorb spikes; busy workers aren't burdened with extra
+  accepts. Trades ~17 % req/s for ~0.25 ms tighter p99.99 on
+  unpinned dev-boxes.
 
 `pin_cores=True` (default) pins worker `i` to core `i % num_cpus()`
 on Linux via `pthread_setaffinity_np`. macOS does not expose CPU

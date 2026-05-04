@@ -24,12 +24,15 @@ a ``Handler`` trait that takes plain ``def`` functions or
 compiled-down structs, an RFC 7230 parser with extensive fuzz
 coverage, and a ``Cancel`` token plumbed to handlers via
 ``CancelHandler``. ``num_workers=1`` is a single-threaded reactor;
-``num_workers=N`` with ``N >= 2`` runs N pthread workers behind
-a single shared listener with ``EPOLLEXCLUSIVE`` (default,
-tightest p99.99) or per-worker ``SO_REUSEPORT`` listeners
-(opt in via ``FLARE_REUSEPORT_WORKERS=1`` for highest
-throughput; see ``docs/benchmark.md``). Static endpoints can
-skip the parser entirely with ``serve_static(resp)``.
+``num_workers=N`` with ``N >= 2`` runs N pthread workers
+behind per-worker ``SO_REUSEPORT`` listeners by default
+(highest throughput; matches actix_web's listener strategy).
+Set ``FLARE_REUSEPORT_WORKERS=0`` to opt back into the
+single shared listener with ``EPOLLEXCLUSIVE`` -- trades
+~10 % req/s for an even tighter p99.99. See
+``docs/benchmark.md`` for the head-to-head numbers.
+Static endpoints can skip the parser entirely with
+``serve_static(resp)``.
 
 The operational core: per-request / handler / body-read deadlines,
 ``HttpServer.drain(timeout_ms)`` for graceful shutdown, sanitised
@@ -246,15 +249,17 @@ Every server example above takes an optional ``num_workers``. At
 each with its own reactor + timer wheel, with per-core pinning
 on Linux. The handler type is unchanged.
 
-By default the workers share one listener fd with
-``EPOLLEXCLUSIVE`` (the kernel offers each accept event to
-whichever worker is currently parked in ``epoll_wait``, giving
-the tightest p99.99). Export ``FLARE_REUSEPORT_WORKERS=1``
-before launch to instead bind one ``SO_REUSEPORT`` listener
-per worker -- ~21 % more req/s for ~0.25 ms more p99.99 on
-unpinned dev-boxes / high-core-count instances. See
-[``docs/benchmark.md``](../docs/benchmark.md) for the
-head-to-head numbers and the rationale.
+By default each worker binds its own ``SO_REUSEPORT``
+listener (the kernel hashes new 4-tuples to one of N
+listeners; matches actix_web's listener strategy and gives
+the highest steady-state throughput on dev-box workloads).
+Export ``FLARE_REUSEPORT_WORKERS=0`` before launch to
+opt back into the single shared listener with
+``EPOLLEXCLUSIVE`` -- ~17 % less req/s for ~0.25 ms tighter
+p99.99 (the kernel offers each accept event to whichever
+worker is currently parked in ``epoll_wait``, so idle
+workers absorb spikes). See [``docs/benchmark.md``](../docs/benchmark.md)
+for the head-to-head numbers and the rationale.
 
 ```mojo
 from flare.http import HttpServer, Router, Request, Response, ok

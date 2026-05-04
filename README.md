@@ -64,7 +64,7 @@ TFB plaintext (`GET /plaintext` → 13-byte `Hello, World!`), `wrk2 -t8 -c256 -d
 
 Full methodology, the rate-sweep that locates each cliff, the historical CPU-pinned reference run, and reproducibility instructions are in [`docs/benchmark.md`](docs/benchmark.md).
 
-[^reuse]: Multi-worker flare runs with `FLARE_REUSEPORT_WORKERS=1`, opting the epoll path into per-worker `SO_REUSEPORT` listeners (matching actix_web's listener strategy for a fair head-to-head). The default `unset` keeps the single-listener `EPOLLEXCLUSIVE` shape, which trades ~10 % req/s for an even tighter p99.99 (3.23 ms in the historical CPU-pinned reference). See [`docs/benchmark.md`](docs/benchmark.md) for both modes.
+[^reuse]: Multi-worker flare uses per-worker `SO_REUSEPORT` listeners by default for `num_workers >= 2` (matching actix_web's listener strategy). Set `FLARE_REUSEPORT_WORKERS=0` to opt back into the single-listener `EPOLLEXCLUSIVE` shape, which trades ~10 % req/s for an even tighter p99.99 (3.23 ms in the historical CPU-pinned reference). See [`docs/benchmark.md`](docs/benchmark.md) for both modes. Numbers above are from `mojo build -D ASSERT=none` (matches what production users should pass; see [Production build](#production-build)).
 
 ## Install
 
@@ -278,6 +278,21 @@ Each layer imports only from layers below it. No circular dependencies. The full
 Headline numbers live in the [Numbers](#numbers) block above; full single/multi-worker tables, tail percentiles, methodology, and the soak harness for long-running operational gates live in [`docs/benchmark.md`](docs/benchmark.md). Multi-worker cross-server ratios are gated on matched-worker baselines (Go `GOMAXPROCS=N`, nginx `worker_processes N`, Rust hyper / axum N-worker); flare publishes its own scaling claim and does not publish a "vs Go" multicore ratio against single-worker baselines.
 
 We do not lead on speed. The position is plain: *speed claims in networking are mostly architecture and kernel, not language*. flare's job is to be operationally honest under load. Numbers are a corollary, not the headline.
+
+### Production build
+
+flare ships dev-grade safety asserts on every FFI / unsafe-pointer boundary (`debug_assert[assert_mode="safe"]` per [`.cursor/rules/sanitizers-and-bounds-checking.mdc`](.cursor/rules/sanitizers-and-bounds-checking.mdc)). The Mojo stdlib default `ASSERT=safe` keeps them in the binary — great for development (catches use-after-free, EBADF, EFAULT before they become silent kernel-mode UB), but each one costs one cmp+je on the reactor hot path.
+
+For production deployments and apples-to-apples benchmarks, build with asserts compiled out:
+
+```bash
+mojo build -D ASSERT=none -I . examples/08_http_server.mojo -o myserver
+./myserver
+```
+
+This matches what the bench harness uses for the `flare_mc_static` / `flare_mc` numbers above (so they're directly comparable to Rust's `cargo build --release --locked` posture). `mojo build` defaults to `-O3`; no extra flag needed.
+
+The full assert hierarchy (`none` / `safe` / `all` / `warn`) and when to use each is documented in [`.cursor/rules/sanitizers-and-bounds-checking.mdc`](.cursor/rules/sanitizers-and-bounds-checking.mdc) §2.
 
 ## Security
 

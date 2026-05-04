@@ -314,18 +314,21 @@ struct Scheduler[H: Handler & Copyable](Movable):
           its address survives the move from ``Scheduler.start`` back
           to the caller; every worker captures that address once at
           spawn time.
-        - **Listener strategy.** Default: one listener bound via
-          ``bind_shared`` and borrowed by every worker, registered
-          with ``Reactor.register_exclusive`` so the kernel wakes
-          one worker per accept event (``EPOLLEXCLUSIVE`` on
-          Linux >= 4.5). Tightest p99.99 because idle workers
-          absorb spikes. Opt in to per-worker ``SO_REUSEPORT``
-          listeners by exporting ``FLARE_REUSEPORT_WORKERS=1``
-          before ``start`` -- the kernel hashes new 4-tuples to
-          one of N pre-bound listeners, ~21 % more req/s for
-          ~0.25 ms more p99.99 (see ``docs/benchmark.md``). The
-          io_uring buffer-ring path (``FLARE_BUFRING_HANDLER=1``)
-          uses per-worker SO_REUSEPORT unconditionally.
+        - **Listener strategy.** Default: each worker pre-binds
+          its own ``SO_REUSEPORT`` listener (the kernel hashes
+          new 4-tuples to one of N pre-bound listeners; matches
+          actix_web's listener strategy and gives the highest
+          steady-state throughput on dev-box workloads). Opt out
+          by exporting ``FLARE_REUSEPORT_WORKERS=0`` before
+          ``start`` to switch to a single shared listener bound
+          via ``bind_shared`` and registered with
+          ``Reactor.register_exclusive`` (``EPOLLEXCLUSIVE`` on
+          Linux >= 4.5) -- the kernel wakes one worker per
+          accept event, idle workers absorb spikes, p99.99 is
+          ~0.25 ms tighter for ~17 % less req/s (see
+          ``docs/benchmark.md``). The io_uring buffer-ring path
+          (``FLARE_BUFRING_HANDLER=1``) uses per-worker
+          SO_REUSEPORT unconditionally.
         - Handler is cloned into each worker via ``H.copy()``.
     """
 
@@ -487,22 +490,24 @@ struct Scheduler[H: Handler & Copyable](Movable):
             if use_uring_backend() and getenv("FLARE_BUFRING_HANDLER") == "1":
                 use_io_uring_handler = True
 
-        # ``FLARE_REUSEPORT_WORKERS=1`` opts the epoll path into
-        # per-worker ``SO_REUSEPORT`` listeners (each worker
-        # accept(2)s on its own fd, kernel hashes new 4-tuples to
-        # one of N listeners). The default keeps the single-listener
-        # ``EPOLLEXCLUSIVE`` shape because it gives strictly tighter
-        # p99.99 (the kernel offers each accept event to whichever
-        # worker is currently waiting in ``epoll_wait``, so idle
-        # workers absorb spikes). The reuseport mode trades a few
-        # ms of p99.99 for measurably higher throughput on dev-box
-        # workloads where actix_web (which ships per-worker
-        # reuseport listeners by default) leads the multi-worker
-        # pack. See ``docs/benchmark.md`` for the head-to-head
-        # numbers and the rationale.
-        var use_reuseport_workers = False
-        if getenv("FLARE_REUSEPORT_WORKERS") == "1":
-            use_reuseport_workers = True
+        # Per-worker ``SO_REUSEPORT`` listeners (each worker
+        # accept(2)s on its own fd; kernel hashes new 4-tuples to
+        # one of N listeners) are the **default** for
+        # ``num_workers >= 2``. This matches actix_web's listener
+        # strategy and gives strictly higher steady-state
+        # throughput on dev-box workloads (the headline numbers
+        # in ``docs/benchmark.md`` come from this mode).
+        #
+        # Opt out via ``FLARE_REUSEPORT_WORKERS=0`` to switch back
+        # to the single-listener ``EPOLLEXCLUSIVE`` shape, which
+        # trades ~10 % req/s for an even tighter p99.99 (the
+        # kernel offers each accept event to whichever worker is
+        # currently waiting in ``epoll_wait``, so idle workers
+        # absorb spikes). See ``docs/benchmark.md`` for the
+        # head-to-head numbers in both modes.
+        var use_reuseport_workers = True
+        if getenv("FLARE_REUSEPORT_WORKERS") == "0":
+            use_reuseport_workers = False
 
         var listener_fd: Int = -1
         var listener_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
@@ -985,11 +990,13 @@ struct StaticScheduler(Movable):
 
     Listener strategy mirrors ``Scheduler``:
 
-    - Default: one listener via ``bind_shared``, borrowed by every
-      worker, registered with ``EPOLLEXCLUSIVE`` (tightest p99.99).
-    - ``FLARE_REUSEPORT_WORKERS=1``: pre-bind one ``SO_REUSEPORT``
-      listener per worker on this thread (highest throughput; ~21 %
-      more req/s for ~0.25 ms more p99.99 on this dev-box).
+    - Default: each worker pre-binds its own ``SO_REUSEPORT``
+      listener on this thread (highest throughput; matches
+      actix_web's listener strategy).
+    - ``FLARE_REUSEPORT_WORKERS=0``: opt back into a single
+      shared listener via ``bind_shared``, borrowed by every
+      worker and registered with ``EPOLLEXCLUSIVE`` (~17 % less
+      req/s for ~0.25 ms tighter p99.99 on this dev-box).
 
     Use ``StaticScheduler.start(addr, config, resp, num_workers)`` to
     launch and ``shutdown()`` to drain. Same lifecycle contract as
@@ -1005,12 +1012,13 @@ struct StaticScheduler(Movable):
     var _shared_listener_addr: Int
     var _shared_listener_fd: Int
     var _per_worker_listener_addrs: List[Int]
-    """When ``FLARE_REUSEPORT_WORKERS=1`` is set, the StaticScheduler
-    pre-binds one SO_REUSEPORT listener per worker on its own thread
-    (serialised binds avoid any concurrent-bind race). Each entry
-    is the heap address of an owned ``TcpListener``; freed in
-    ``shutdown()`` after all workers join. Empty in shared-listener
-    EPOLLEXCLUSIVE mode (the default)."""
+    """Default-on for ``num_workers >= 2``: the StaticScheduler
+    pre-binds one SO_REUSEPORT listener per worker on its own
+    thread (serialised binds avoid any concurrent-bind race).
+    Each entry is the heap address of an owned ``TcpListener``;
+    freed in ``shutdown()`` after all workers join. Empty in the
+    opt-out shared-listener EPOLLEXCLUSIVE mode
+    (``FLARE_REUSEPORT_WORKERS=0``)."""
     var _ctx_addrs: List[Int]
     var _stopping_addr: Int
 
@@ -1062,20 +1070,20 @@ struct StaticScheduler(Movable):
         var stopping_addr = Int(stop_ptr)
         s._stopping_addr = stopping_addr
 
-        # ``FLARE_REUSEPORT_WORKERS=1`` opts into per-worker
-        # SO_REUSEPORT listeners (each worker owns its own
-        # listener fd, kernel hashes new 4-tuples to one of N).
-        # Default is the single shared listener with
-        # EPOLLEXCLUSIVE — strictly tighter p99.99 because the
-        # kernel offers each accept to whichever worker is
-        # currently parked in epoll_wait, but the reuseport
-        # mode delivers measurably higher throughput on
-        # workloads where actix_web (per-worker reuseport by
-        # default) leads the multi-worker pack. See
-        # ``docs/benchmark.md`` for the head-to-head numbers.
-        var use_reuseport_workers = False
-        if getenv("FLARE_REUSEPORT_WORKERS") == "1":
-            use_reuseport_workers = True
+        # Per-worker SO_REUSEPORT is the default (each worker
+        # owns its own listener fd; kernel hashes new 4-tuples
+        # to one of N). Matches actix_web's listener strategy
+        # and gives the highest steady-state throughput on
+        # dev-box workloads. ``FLARE_REUSEPORT_WORKERS=0``
+        # opts back into the single shared listener with
+        # EPOLLEXCLUSIVE — strictly tighter p99.99 (kernel
+        # offers each accept to whichever worker is currently
+        # parked in epoll_wait, idle workers absorb spikes)
+        # for ~17 % less req/s. See ``docs/benchmark.md`` for
+        # the head-to-head numbers.
+        var use_reuseport_workers = True
+        if getenv("FLARE_REUSEPORT_WORKERS") == "0":
+            use_reuseport_workers = False
 
         var listener_fd: Int = -1
         if use_reuseport_workers:
@@ -1224,8 +1232,9 @@ struct StaticScheduler(Movable):
             _scheduler_free_raw(raw)
             self._shared_listener_addr = 0
 
-        # Free any per-worker SO_REUSEPORT listeners
-        # (FLARE_REUSEPORT_WORKERS=1 path). Each listener's
+        # Free any per-worker SO_REUSEPORT listeners (the
+        # default path; populated unless FLARE_REUSEPORT_WORKERS=0
+        # opted into the shared-listener mode). Each listener's
         # destructor closes its fd; in-flight epoll registrations
         # against that fd are unregistered as the worker reactor
         # tears down before join.
