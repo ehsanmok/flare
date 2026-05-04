@@ -38,6 +38,7 @@ fd and registers it with ``EPOLLEXCLUSIVE`` (Linux) so the
 kernel wakes one worker per accept event.
 """
 
+from std.builtin.debug_assert import debug_assert
 from std.collections import Dict
 from std.ffi import c_int
 from std.memory import UnsafePointer
@@ -170,6 +171,15 @@ def _apply_step_h2(
     is the same; we just need the type-correct pointer field
     update so the keep-alive interest cache works).
     """
+    debug_assert[assert_mode="safe"](
+        fd >= 0,
+        "_apply_step_h2: fd must be non-negative; got ",
+        fd,
+    )
+    debug_assert[assert_mode="safe"](
+        Int(h2_ptr) != 0,
+        "_apply_step_h2: h2_ptr must be non-NULL",
+    )
     var interest: Int = 0
     if step.want_read:
         interest |= INTEREST_READ
@@ -292,6 +302,16 @@ def _migrate_pending(
     if fd not in pending_conns:
         return False
     var pending_addr = pending_conns[fd]
+    debug_assert[assert_mode="safe"](
+        pending_addr != 0,
+        "_migrate_pending: pending_conns[fd] returned null addr; fd=",
+        fd,
+    )
+    debug_assert[assert_mode="safe"](
+        decision == PROTO_HTTP1 or decision == PROTO_HTTP2,
+        "_migrate_pending: invalid decision sentinel; got ",
+        decision,
+    )
     var pending_ptr = _pending_conn_ptr_from_int(pending_addr)
     # Snapshot what we need OUT of the pending handle before
     # destroying it. UnsafePointer dereference does not give
@@ -304,6 +324,18 @@ def _migrate_pending(
     # per-conn handle.
     var prefaced = pending_ptr[].take_stream_and_buf()
     var inherited_fd = pending_ptr[]._stream._socket.fd
+    debug_assert[assert_mode="safe"](
+        Int(inherited_fd) >= 0,
+        "_migrate_pending: pending handle fd was already detached; got ",
+        Int(inherited_fd),
+    )
+    debug_assert[assert_mode="safe"](
+        Int(inherited_fd) == fd,
+        "_migrate_pending: pending fd does not match dispatch fd; got ",
+        Int(inherited_fd),
+        " vs ",
+        fd,
+    )
     var inherited_peer = pending_ptr[].peer
     pending_ptr[]._stream._socket.fd = c_int(-1)
     _ = pending_conns.pop(fd)

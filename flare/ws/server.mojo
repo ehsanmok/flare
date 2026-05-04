@@ -12,6 +12,7 @@ The upgrade handshake (§4.2):
     5. Hand off to ``WsConnection``.
 """
 
+from std.builtin.debug_assert import debug_assert
 from std.ffi import OwnedDLHandle, c_int
 from std.memory import UnsafePointer
 
@@ -705,6 +706,10 @@ def _ws_worker_entry(arg: _OpaquePtr) -> _OpaquePtr:
     listener closed during shutdown).
     """
     var ctx_addr = Int(arg)
+    debug_assert[assert_mode="safe"](
+        ctx_addr != 0,
+        "_ws_worker_entry: ctx pointer must be non-NULL",
+    )
     var raw = UnsafePointer[UInt8, MutExternalOrigin](
         unsafe_from_address=ctx_addr
     )
@@ -738,6 +743,11 @@ def _ws_serve_multicore(
     never exit on their own (no graceful drain machinery for
     WebSocket); use ``Ctrl-C`` to terminate.
     """
+    debug_assert[assert_mode="safe"](
+        num_workers >= 2 and num_workers <= 256,
+        "_ws_serve_multicore: num_workers must be in [2,256]; got ",
+        num_workers,
+    )
     if num_workers <= 1:
         raise Error("_ws_serve_multicore: num_workers must be >= 2")
 
@@ -752,11 +762,20 @@ def _ws_serve_multicore(
     # array we walk by index.
     var ctx_addrs = List[Int]()
     var threads_ptr = alloc[ThreadHandle](num_workers)
+    debug_assert[assert_mode="safe"](
+        Int(threads_ptr) != 0,
+        "_ws_serve_multicore: alloc[ThreadHandle] returned NULL",
+    )
 
     for i in range(num_workers):
         var listener = bind_reuseport(addr)
         var ctx = _WsWorkerCtx(listener^, handler)
         var ctx_ptr = alloc[_WsWorkerCtx](1)
+        debug_assert[assert_mode="safe"](
+            Int(ctx_ptr) != 0,
+            "_ws_serve_multicore: alloc[_WsWorkerCtx] returned NULL on worker ",
+            i,
+        )
         ctx_ptr.init_pointee_move(ctx^)
         var arg = ctx_ptr.bitcast[UInt8]()
         var addr_int = Int(arg)
@@ -777,6 +796,11 @@ def _ws_serve_multicore(
         (threads_ptr + i)[].join()
     # Free per-worker contexts now the threads are joined.
     for i in range(len(ctx_addrs)):
+        debug_assert[assert_mode="safe"](
+            ctx_addrs[i] != 0,
+            "_ws_serve_multicore: ctx_addrs[i] is null on free; i=",
+            i,
+        )
         var raw = UnsafePointer[UInt8, MutExternalOrigin](
             unsafe_from_address=ctx_addrs[i]
         )

@@ -34,6 +34,7 @@ client preface arrives flushes both the SETTINGS and the
 SETTINGS-ACK in one syscall.
 """
 
+from std.builtin.debug_assert import debug_assert
 from std.collections import Dict
 from std.ffi import c_int, c_size_t, ErrNo, get_errno
 from std.memory import UnsafePointer, stack_allocation
@@ -192,12 +193,25 @@ struct H2ConnHandle(Movable):
             return StepResult(
                 want_read=False, want_write=self.state == STATE_WRITING
             )
+        # FFI precondition: the recv loop assumes a real fd. If it
+        # underflows we'd silently swallow EBADF on every iteration
+        # and burn a CPU; the assert documents the contract.
+        debug_assert[assert_mode="safe"](
+            Int(self.fd()) >= 0,
+            "H2ConnHandle.on_readable: fd must be non-negative; got ",
+            Int(self.fd()),
+        )
         var chunk = stack_allocation[8192, UInt8]()
         var inbound = List[UInt8]()
         while True:
             var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
             if got > 0:
                 var got_int = Int(got)
+                debug_assert[assert_mode="safe"](
+                    got_int <= 8192,
+                    "H2ConnHandle._recv: returned > buf size; got ",
+                    got_int,
+                )
                 for i in range(got_int):
                     inbound.append(chunk[i])
             elif got == 0:
@@ -281,9 +295,23 @@ struct H2ConnHandle(Movable):
             return StepResult(
                 want_read=self.state == STATE_READING, want_write=False
             )
+        debug_assert[assert_mode="safe"](
+            Int(self.fd()) >= 0,
+            "H2ConnHandle.on_writable: fd must be non-negative; got ",
+            Int(self.fd()),
+        )
+        debug_assert[assert_mode="safe"](
+            self.write_pos >= 0 and self.write_pos <= len(self.write_buf),
+            "H2ConnHandle.on_writable: write_pos out of range; got ",
+            self.write_pos,
+        )
         while self.write_pos < len(self.write_buf):
             var remaining = len(self.write_buf) - self.write_pos
             var ptr = self.write_buf.unsafe_ptr() + self.write_pos
+            debug_assert[assert_mode="safe"](
+                remaining > 0 and Int(ptr) != 0,
+                "H2ConnHandle._send: buf must be non-NULL when remaining > 0",
+            )
             var n = _send(
                 self.fd(), ptr, c_size_t(remaining), c_int(MSG_NOSIGNAL)
             )
@@ -332,12 +360,21 @@ def _h2_conn_alloc_addr(
     plumbing stays in :mod:`flare.runtime.pool`. Symmetric with
     :func:`flare.http._server_reactor_impl._conn_alloc_addr`.
     """
-    return Pool[H2ConnHandle].alloc_move(H2ConnHandle(stream^, config^))
+    var addr = Pool[H2ConnHandle].alloc_move(H2ConnHandle(stream^, config^))
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_h2_conn_alloc_addr: Pool returned 0",
+    )
+    return addr
 
 
 def _h2_conn_free_addr(addr: Int):
     """Destroy + free an :class:`H2ConnHandle` previously allocated
     via :func:`_h2_conn_alloc_addr`."""
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_h2_conn_free_addr: addr must be non-zero (double-free?)",
+    )
     Pool[H2ConnHandle].free(addr)
 
 
@@ -345,6 +382,10 @@ def _h2_conn_ptr_from_int(
     addr: Int,
 ) -> UnsafePointer[H2ConnHandle, MutExternalOrigin]:
     """Reverse of :func:`_h2_conn_alloc_addr`: typed pointer from an Int."""
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_h2_conn_ptr_from_int: cannot reconstruct from null addr",
+    )
     return UnsafePointer[UInt8, MutExternalOrigin](
         unsafe_from_address=addr
     ).bitcast[H2ConnHandle]()
@@ -442,6 +483,19 @@ struct PendingConnHandle(Movable):
         delivered by ``recv`` in the same syscall) dropped on the
         floor and the parser would see a truncated request line.
         """
+        # FFI precondition: the preface peek requires a real fd.
+        debug_assert[assert_mode="safe"](
+            Int(self.fd()) >= 0,
+            "PendingConnHandle.on_readable: fd must be non-negative; got ",
+            Int(self.fd()),
+        )
+        # Invariant: preface_buf never exceeds _H2_PREFACE_BYTES_LEN
+        # because we cap ``want`` and the loop exits at equality.
+        debug_assert[assert_mode="safe"](
+            len(self.preface_buf) <= _H2_PREFACE_BYTES_LEN,
+            "PendingConnHandle: preface_buf overflow; got ",
+            len(self.preface_buf),
+        )
         # Read up to 24 bytes total. We always store ALL bytes
         # ``recv`` returns; the preface-prefix check only decides
         # WHETHER to keep reading (preface match) or stop early
@@ -452,12 +506,27 @@ struct PendingConnHandle(Movable):
         var decision: Int = PROTO_HTTP1
         while len(self.preface_buf) < _H2_PREFACE_BYTES_LEN:
             var want = _H2_PREFACE_BYTES_LEN - len(self.preface_buf)
+            debug_assert[assert_mode="safe"](
+                want > 0 and want <= _H2_PREFACE_BYTES_LEN,
+                "PendingConnHandle: want out of range; got ",
+                want,
+            )
             var got = _recv(self.fd(), chunk, c_size_t(want), c_int(0))
             if got > 0:
                 var got_int = Int(got)
+                debug_assert[assert_mode="safe"](
+                    got_int <= want,
+                    "PendingConnHandle._recv: returned > want; got ",
+                    got_int,
+                )
                 for i in range(got_int):
                     var b = chunk[i]
                     var pos = len(self.preface_buf)
+                    debug_assert[assert_mode="safe"](
+                        pos >= 0 and pos < _H2_PREFACE_BYTES_LEN,
+                        "PendingConnHandle: preface_byte index OOR; got ",
+                        pos,
+                    )
                     self.preface_buf.append(b)
                     if (not decision_known) and b != _h2_preface_byte(pos):
                         decision_known = True
@@ -503,11 +572,20 @@ struct PendingConnHandle(Movable):
 
 def _pending_conn_alloc_addr(var stream: TcpStream) raises -> Int:
     """Heap-allocate a :class:`PendingConnHandle` and return its address."""
-    return Pool[PendingConnHandle].alloc_move(PendingConnHandle(stream^))
+    var addr = Pool[PendingConnHandle].alloc_move(PendingConnHandle(stream^))
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_pending_conn_alloc_addr: Pool returned 0",
+    )
+    return addr
 
 
 def _pending_conn_free_addr(addr: Int):
     """Destroy + free a :class:`PendingConnHandle`."""
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_pending_conn_free_addr: addr must be non-zero (double-free?)",
+    )
     Pool[PendingConnHandle].free(addr)
 
 
@@ -515,6 +593,10 @@ def _pending_conn_ptr_from_int(
     addr: Int,
 ) -> UnsafePointer[PendingConnHandle, MutExternalOrigin]:
     """Reverse of :func:`_pending_conn_alloc_addr`."""
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_pending_conn_ptr_from_int: cannot reconstruct from null addr",
+    )
     return UnsafePointer[UInt8, MutExternalOrigin](
         unsafe_from_address=addr
     ).bitcast[PendingConnHandle]()

@@ -91,6 +91,7 @@ def main() raises:
         max_header_list_size=32768,  # 32 KiB
         header_table_size=8192,  # 8 KiB
         allow_huffman_decode=False,
+        enable_connect_protocol=False,
     )
     relaxed.validate()
     var c2 = H2Connection.with_config(relaxed^)
@@ -106,6 +107,7 @@ def main() raises:
         max_header_list_size=4096,  # 4 KiB
         header_table_size=2048,  # 2 KiB
         allow_huffman_decode=False,
+        enable_connect_protocol=False,
     )
     tight.validate()
     var c3 = H2Connection.with_config(tight^)

@@ -64,12 +64,24 @@ ASAN_TESTS=(
   "tests/test_pool.mojo"              # Pool[T] typed allocator
   "tests/test_libc_time.mojo"         # libc_usleep / nanosleep_ms FFI
   "tests/test_safety_asserts.mojo"    # bounds + debug_assert harness
+  # Unified-HTTP/WS-over-HTTP/2 (Phase 1-7) FFI surfaces -- recv/send
+  # loops on raw fds, RawSocket(_wrap=True) reconstruction during
+  # PendingConnHandle -> ConnHandle/H2ConnHandle migration, Pool
+  # alloc/free of the new per-conn handles.
+  "tests/test_h2_conn_handle.mojo"           # H2ConnHandle + PendingConnHandle recv/send
+  "tests/test_unified_http_server.mojo"      # full unified reactor over HTTP/1.1 + HTTP/2
+  "tests/test_unified_http_client.mojo"      # HttpClient h2c + auth FFI
+  "tests/test_h2_server_handler.mojo"        # HttpClient(prefer_h2c=True) <-> HttpServer
+  "tests/test_h2_extended_connect.mojo"      # RFC 8441 SETTINGS/parse (in-memory)
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)
   "tests/test_thread_ffi.mojo"
   "tests/test_scheduler.mojo"
   "tests/test_handoff.mojo"
+  # Multi-worker WsServer (4-worker pthread fan-out with libc malloc'd
+  # _WsWorkerCtx + UnsafePointer[ThreadHandle] storage)
+  "tests/test_ws_multicore.mojo"
 )
 
 # Allow caller to override the test list.

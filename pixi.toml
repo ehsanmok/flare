@@ -330,7 +330,7 @@ test-safety-asserts  = "mojo -I . tests/test_safety_asserts.mojo"             # 
 #                    libasan's __asan_* symbols statically.
 # tests-tsan:        Same shape, but with --sanitize thread for the
 #                    multicore test surfaces (scheduler / handoff / thread FFI).
-tests-asserts-all = { cmd = "bash -c 'set -e; for f in tests/test_io_uring.mojo tests/test_iovec.mojo tests/test_buffer_pool.mojo tests/test_response_pool.mojo tests/test_date_cache.mojo tests/test_hpack_huffman.mojo tests/test_simd_parsers.mojo tests/test_header_phf.mojo tests/test_intern.mojo tests/test_safety_asserts.mojo; do echo \"── -D ASSERT=all  $f\"; pixi run mojo -D ASSERT=all -I . \"$f\"; done'" }
+tests-asserts-all = { cmd = "bash -c 'set -e; for f in tests/test_io_uring.mojo tests/test_iovec.mojo tests/test_buffer_pool.mojo tests/test_response_pool.mojo tests/test_date_cache.mojo tests/test_hpack_huffman.mojo tests/test_simd_parsers.mojo tests/test_header_phf.mojo tests/test_intern.mojo tests/test_safety_asserts.mojo tests/test_h2_conn_handle.mojo tests/test_h2_extended_connect.mojo tests/test_unified_http_server.mojo tests/test_unified_http_client.mojo tests/test_h2_server_handler.mojo; do echo \"── -D ASSERT=all  $f\"; pixi run mojo -D ASSERT=all -I . \"$f\"; done'" }
 tests-asan        = "bash tools/run_sanitizer_tests.sh asan"
 tests-tsan        = "bash tools/run_sanitizer_tests.sh tsan"
 
