@@ -166,6 +166,13 @@ struct Stream(Copyable, Defaultable, Movable):
     var recv_window: Int
     var headers_complete: Bool
     var data_complete: Bool
+    var extended_connect_protocol: String
+    """RFC 8441 ``:protocol`` pseudo-header value when the stream
+    was opened with ``:method = CONNECT``. Empty string otherwise.
+    The unified WebSocket-over-HTTP/2 dispatcher uses this to
+    route ``"websocket"`` Extended CONNECT streams to the WS
+    handler instead of treating them as a regular CONNECT proxy
+    request."""
 
     def __init__(out self):
         self.id = 0
@@ -176,6 +183,7 @@ struct Stream(Copyable, Defaultable, Movable):
         self.recv_window = 65535
         self.headers_complete = False
         self.data_complete = False
+        self.extended_connect_protocol = ""
 
 
 # ── Connection ──────────────────────────────────────────────────────────
@@ -208,6 +216,23 @@ struct Connection(Copyable, Defaultable, Movable):
     that receives HEADERS+END_STREAM transitions to CLOSED, not
     HALF_CLOSED_REMOTE. Defaults to ``False`` (server semantics)
     so existing server callers are unchanged."""
+    var enable_connect_protocol: Bool
+    """When ``True``, the server advertises
+    ``SETTINGS_ENABLE_CONNECT_PROTOCOL = 1`` (RFC 8441) in its
+    initial SETTINGS frame. Required for clients to issue an
+    ``Extended CONNECT`` request (the WebSocket-over-HTTP/2
+    bootstrap). Default ``False`` so existing servers don't
+    accidentally opt into bootstrapping protocols they can't
+    speak; flipped to ``True`` by the unified
+    :class:`flare.http.HttpServer` once the unified
+    :class:`flare.ws.WsServer` is wired in (Phase 6)."""
+    var peer_enable_connect_protocol: Bool
+    """When ``True``, the *peer* advertised
+    ``SETTINGS_ENABLE_CONNECT_PROTOCOL = 1`` in its initial
+    SETTINGS. The HTTP/2 client checks this before issuing an
+    Extended CONNECT (RFC 8441 §3 SHOULD); if the server didn't
+    advertise the setting, the client falls back to the
+    HTTP/1.1 Upgrade dance for WebSocket."""
 
     def __init__(out self):
         self.streams = Dict[StreamId, Stream]()
@@ -223,6 +248,8 @@ struct Connection(Copyable, Defaultable, Movable):
         self.preface_seen = False
         self.settings_acked = False
         self.is_client = False
+        self.enable_connect_protocol = False
+        self.peer_enable_connect_protocol = False
 
     def _make_settings(self, ack: Bool) -> Frame:
         """Server-side initial SETTINGS frame (or empty ACK).
@@ -267,6 +294,15 @@ struct Connection(Copyable, Defaultable, Movable):
         # (``0`` = unset, RFC default is "unlimited").
         if self.max_header_list_size > 0:
             self._append_setting(p, 0x6, self.max_header_list_size)
+
+        # SETTINGS_ENABLE_CONNECT_PROTOCOL = 0x8 (RFC 8441) --
+        # only when the server has opted in. Tells the peer it
+        # MAY use Extended CONNECT (``:method = CONNECT`` +
+        # ``:protocol = websocket``) on this connection. Skipped
+        # by default so a vanilla HTTP/2 server never accidentally
+        # advertises a capability it can't service.
+        if self.enable_connect_protocol:
+            self._append_setting(p, 0x8, 1)
 
         f.payload = p^
         return f^
@@ -325,6 +361,14 @@ struct Connection(Copyable, Defaultable, Movable):
                     self.max_frame_size = v
                 elif id == 0x1:  # SETTINGS_HEADER_TABLE_SIZE
                     self.hpack_decoder.max_size = v
+                elif id == 0x8:  # SETTINGS_ENABLE_CONNECT_PROTOCOL (RFC 8441)
+                    # Peer is advertising whether Extended CONNECT
+                    # is allowed. RFC 8441 §3: on the server side
+                    # only the client's value is significant (server
+                    # MUST NOT send 0 after sending 1). We just
+                    # latch whatever the peer sent so the
+                    # client-side facade can read it.
+                    self.peer_enable_connect_protocol = v != 0
                 i += 6
             out.append(self._make_settings(True))
             return out^
@@ -367,6 +411,16 @@ struct Connection(Copyable, Defaultable, Movable):
             var s = self._ensure_stream(f.header.stream_id)
             for j in range(len(hdrs)):
                 s.headers.append(hdrs[j].copy())
+                # RFC 8441 §4: capture the ``:protocol``
+                # pseudo-header on Extended CONNECT so the
+                # higher-level dispatcher (``H2Connection`` ->
+                # WsServer bridge) can route it. We snapshot
+                # eagerly here rather than scanning the headers
+                # list later because the field stays
+                # well-defined even if a future trailers feature
+                # mutates ``s.headers``.
+                if hdrs[j].name == ":protocol":
+                    s.extended_connect_protocol = hdrs[j].value
             if f.header.flags.has(FrameFlags.END_HEADERS()):
                 s.headers_complete = True
             # Stream-state transition on HEADERS receipt depends on

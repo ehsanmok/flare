@@ -220,6 +220,7 @@ def test_with_config_propagates_to_connection_fields() raises:
         max_header_list_size=16384,
         header_table_size=8192,
         allow_huffman_decode=False,
+        enable_connect_protocol=False,
     )
     var conn = H2Connection.with_config(cfg^)
     assert_equal(conn.conn.max_concurrent_streams, 200)
@@ -245,6 +246,7 @@ def test_with_config_full_emits_all_non_default_settings() raises:
         max_header_list_size=16384,
         header_table_size=8192,
         allow_huffman_decode=False,
+        enable_connect_protocol=False,
     )
     var conn = H2Connection.with_config(cfg^)
     var preface = List[UInt8](String(H2_PREFACE).as_bytes())

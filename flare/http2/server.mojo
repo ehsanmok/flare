@@ -135,13 +135,21 @@ struct Http2Config(Copyable, Defaultable, Movable):
     var max_header_list_size: Int
     var header_table_size: Int
     var allow_huffman_decode: Bool
+    var enable_connect_protocol: Bool
+    # ``enable_connect_protocol``: when True, the server advertises
+    # SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441) in its initial
+    # SETTINGS frame, allowing peers to issue Extended CONNECT
+    # requests (the WebSocket-over-HTTP/2 bootstrap). Default
+    # False -- the unified flare.http.HttpServer flips this on
+    # automatically when the WebSocket-over-HTTP/2 bridge is
+    # wired in (Phase 6).
 
     def __init__(out self):
         """Default to the production-shape SETTINGS pinned in
         the design doc: 100 concurrent streams, 64 KiB-1 initial
         window, 16 KiB max frame, 8 KiB max header list, 4 KiB
         HPACK dynamic table, Huffman-decode disabled (v0.6 safe
-        default).
+        default), Extended CONNECT disabled.
         """
         self.max_concurrent_streams = _H2_DEFAULT_MAX_CONCURRENT_STREAMS
         self.initial_window_size = _H2_DEFAULT_INITIAL_WINDOW_SIZE
@@ -149,6 +157,7 @@ struct Http2Config(Copyable, Defaultable, Movable):
         self.max_header_list_size = _H2_DEFAULT_MAX_HEADER_LIST_SIZE
         self.header_table_size = _H2_DEFAULT_HEADER_TABLE_SIZE
         self.allow_huffman_decode = False
+        self.enable_connect_protocol = False
 
     def validate(self) raises -> None:
         """Raise if any field violates the RFC 9113 / RFC 7541 bounds.
@@ -280,6 +289,7 @@ struct H2Connection(Defaultable, Movable):
         out.conn.max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         out.conn.hpack_decoder.max_size = out.config.header_table_size
+        out.conn.enable_connect_protocol = out.config.enable_connect_protocol
         # The ``HpackEncoder`` is stateless (always emits H=0
         # raw literals; no dynamic table). The ``header_table_size``
         # field on ``Http2Config`` is consumed by the decoder side
