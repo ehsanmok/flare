@@ -1,0 +1,350 @@
+"""Per-connection state machine for HTTP/2 inside the reactor.
+
+Symmetric counterpart to :class:`flare.http._server_reactor_impl.ConnHandle`
+for HTTP/2: owns one accepted ``TcpStream``, drives a
+:class:`flare.http2.server.H2Connection` over non-blocking
+``recv`` / ``send`` syscalls, dispatches every completed stream's
+request through the user's :class:`flare.http.Handler`, and queues
+the response frames back through the same socket. The state-machine
+shape (``on_readable`` / ``on_writable`` returning a
+:class:`StepResult`) is byte-for-byte identical to the HTTP/1.1
+``ConnHandle`` so the unified
+:class:`flare.http.server.HttpServer` reactor loop dispatches both
+connection types via a single ``StepResult`` translator
+(``_apply_step``).
+
+State transitions (mirror ConnHandle):
+
+::
+
+    STATE_READING  -- response queued -->  STATE_WRITING
+    STATE_WRITING  -- write_buf flushed --> STATE_READING (h2 multiplexes)
+    STATE_READING  / STATE_WRITING -- peer FIN / error --> STATE_CLOSING
+
+Unlike HTTP/1.1, h2 connections are persistent and multiplex many
+streams concurrently: ``on_readable`` may dispatch multiple
+``handler.serve(req)`` calls per event (one per ``stream id``
+that finished within the inbound bytes) and the connection stays
+open after the response flushes. Only an explicit ``GOAWAY`` or a
+peer FIN moves to ``STATE_CLOSING``.
+
+The constructor pre-loads the H2 server's initial SETTINGS frame
+into ``write_buf`` so the very first ``on_writable`` after the
+client preface arrives flushes both the SETTINGS and the
+SETTINGS-ACK in one syscall.
+"""
+
+from std.collections import Dict
+from std.ffi import c_int, c_size_t, ErrNo, get_errno
+from std.memory import UnsafePointer, stack_allocation
+
+from flare.http.cancel import Cancel, CancelCell, CancelReason
+from flare.http.handler import Handler
+from flare.http.headers import HeaderMap
+from flare.http.request import Request
+from flare.http.response import Response
+from flare.http.server import ServerConfig
+from flare.http2.server import H2Connection, Http2Config
+from flare.net import IpAddr, SocketAddr
+from flare.net._libc import _recv, _send, MSG_NOSIGNAL
+from flare.runtime import Pool
+from flare.tcp import TcpStream
+
+from ._server_reactor_impl import (
+    StepResult,
+    STATE_READING,
+    STATE_WRITING,
+    STATE_CLOSING,
+)
+
+
+# ── H2ConnHandle ────────────────────────────────────────────────────────────
+
+
+struct H2ConnHandle(Movable):
+    """State + buffers for a single reactor-managed HTTP/2 connection.
+
+    Owns an accepted ``TcpStream`` (closes the fd on destruction)
+    and an :class:`H2Connection` driver (the same byte-level
+    feed/drain machine the standalone server uses, just driven
+    from the reactor instead of a blocking socket loop).
+    """
+
+    var _stream: TcpStream
+    """Underlying TCP stream; this struct is the sole owner."""
+
+    var peer: SocketAddr
+    """Kernel-reported peer address captured at accept time. Threaded
+    into every parsed :class:`flare.http.Request` so handlers can
+    read ``req.peer`` regardless of the wire protocol."""
+
+    var cancel_cell: CancelCell
+    """Per-connection cancel cell, present for parity with
+    :class:`flare.http._server_reactor_impl.ConnHandle`. Wired into
+    each per-stream ``handler.serve`` call once the unified
+    server's :class:`flare.http.cancel.CancelHandler` plumbing for
+    h2 streams lands; for now it stays zero-initialised so the
+    presence of the field doesn't break the reactor loop's
+    cleanup paths."""
+
+    var state: Int
+    """One of :data:`STATE_READING` / :data:`STATE_WRITING` /
+    :data:`STATE_CLOSING`. Same constants the HTTP/1.1
+    ``ConnHandle`` uses."""
+
+    var h2: H2Connection
+    """The byte-level HTTP/2 driver. The connection preface +
+    initial SETTINGS the *client* sent get pushed into this via
+    :meth:`feed`; queued outbound bytes get pulled via
+    :meth:`drain` and shovelled into ``write_buf`` for the
+    reactor's ``send`` syscall."""
+
+    var write_buf: List[UInt8]
+    """Outbound bytes ready to be sent (response HEADERS/DATA
+    frames + auto-acks like SETTINGS_ACK / PING_ACK /
+    WINDOW_UPDATE). Populated by ``on_readable`` after each
+    feed/dispatch round."""
+
+    var write_pos: Int
+    """Number of bytes of :attr:`write_buf` already sent."""
+
+    var should_close: Bool
+    """True once we've decided this connection must close after the
+    last queued bytes flush (peer GOAWAY received, or graceful
+    shutdown)."""
+
+    var idle_timer_id: UInt64
+    """ID of the currently-armed idle timer, 0 if none. The
+    reactor loop manages the actual TimerWheel entry."""
+
+    var last_interest: Int
+    """Last reactor interest bits for this conn. Used to skip
+    redundant ``reactor.modify`` syscalls when the wanted
+    interest hasn't actually changed since the previous event."""
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def __init__(
+        out self, var stream: TcpStream, var config: Http2Config
+    ) raises:
+        """Construct an H2ConnHandle that owns ``stream``.
+
+        Args:
+            stream: Accepted ``TcpStream`` (non-blocking mode must
+                already be set by the caller). Ownership transfers
+                into the handle.
+            config: HTTP/2 SETTINGS the server advertises to the
+                peer. Validated by ``H2Connection.with_config``.
+        """
+        # Snapshot the peer address before moving the stream.
+        self.peer = stream.peer_addr()
+        self._stream = stream^
+        self.cancel_cell = CancelCell()
+        self.state = STATE_READING
+        self.h2 = H2Connection.with_config(config^)
+        self.write_buf = List[UInt8]()
+        self.write_pos = 0
+        self.should_close = False
+        self.idle_timer_id = UInt64(0)
+        self.last_interest = 1  # INTEREST_READ
+
+    @always_inline
+    def fd(self) -> c_int:
+        """Return the underlying fd (fast accessor)."""
+        return self._stream._socket.fd
+
+    # ── Pre-buffered preface bytes (for the unified server's peek path)
+
+    def push_initial_bytes(mut self, bytes: Span[UInt8, _]) raises:
+        """Replay bytes already read from the socket into the H2 driver.
+
+        The unified :class:`flare.http.server.HttpServer` peeks the
+        first 24 bytes on a fresh connection to detect the H2
+        preface (``"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n"``).
+        Once we decide it's HTTP/2 those bytes have already been
+        consumed from the socket; this helper feeds them into the
+        H2 driver before the reactor's first ``on_readable`` call
+        so the connection preface is recognised and the server's
+        initial SETTINGS frame is pre-queued in ``write_buf``.
+        """
+        self.h2.feed(bytes)
+        var ack = self.h2.drain()
+        if len(ack) > 0:
+            for i in range(len(ack)):
+                self.write_buf.append(ack[i])
+
+    # ── Event handlers ────────────────────────────────────────────────────────
+
+    def on_readable[
+        H: Handler
+    ](mut self, ref handler: H, config: ServerConfig) raises -> StepResult:
+        """Drive the state machine on a readable event.
+
+        Drains the socket non-blockingly, feeds bytes into the H2
+        driver, dispatches every newly-completed stream's request
+        through ``handler.serve`` and queues the encoded response
+        frames into ``write_buf``. Returns a :class:`StepResult`
+        that flips the reactor to ``INTEREST_WRITE`` if there's
+        outbound data ready, or stays on ``INTEREST_READ`` to wait
+        for more frames.
+        """
+        if self.state != STATE_READING:
+            return StepResult(
+                want_read=False, want_write=self.state == STATE_WRITING
+            )
+        var chunk = stack_allocation[8192, UInt8]()
+        var inbound = List[UInt8]()
+        while True:
+            var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
+            if got > 0:
+                var got_int = Int(got)
+                for i in range(got_int):
+                    inbound.append(chunk[i])
+            elif got == 0:
+                # Peer FIN observed mid-connection. Mark closed
+                # so the reactor unregisters the fd after any
+                # remaining write_buf flushes.
+                self.should_close = True
+                return StepResult(
+                    want_read=False,
+                    want_write=len(self.write_buf) > self.write_pos,
+                    done=len(self.write_buf) == self.write_pos,
+                )
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    break
+                # Hard read error -- close.
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+        # Push everything we just read into the h2 driver. ``feed``
+        # auto-handles the connection preface (24 bytes) the first
+        # time it's called and queues a SETTINGS_ACK / PING_ACK /
+        # WINDOW_UPDATE / SETTINGS reply via the same outbox we
+        # drain below.
+        if len(inbound) > 0:
+            self.h2.feed(Span[UInt8, _](inbound))
+        # Dispatch any newly-completed streams.
+        var ids = self.h2.take_completed_streams()
+        for i in range(len(ids)):
+            var sid = ids[i]
+            var req = self.h2.take_request(sid)
+            req.peer = self.peer
+            var resp: Response
+            try:
+                resp = handler.serve(req^)
+            except:
+                resp = Response(status=500, reason="Internal Server Error")
+            try:
+                self.h2.emit_response(sid, resp^)
+            except:
+                # If response framing fails (shouldn't happen),
+                # tear the connection down rather than silently
+                # losing the stream.
+                self.should_close = True
+        # Drain everything the driver wants to send.
+        var out = self.h2.drain()
+        if len(out) > 0:
+            for i in range(len(out)):
+                self.write_buf.append(out[i])
+        if self.h2.conn.goaway_received:
+            self.should_close = True
+        # Decide reactor interest: write if there are bytes to
+        # flush, otherwise stay on read for the next frame.
+        var has_outbound = len(self.write_buf) > self.write_pos
+        if has_outbound:
+            self.state = STATE_WRITING
+            return StepResult(
+                want_read=False,
+                want_write=True,
+                idle_timeout_ms=config.write_timeout_ms,
+            )
+        return StepResult(
+            want_read=True,
+            want_write=False,
+            idle_timeout_ms=config.idle_timeout_ms,
+        )
+
+    def on_writable(mut self, config: ServerConfig) raises -> StepResult:
+        """Drive the state machine on a writable event.
+
+        Pumps as much of :attr:`write_buf` as the kernel accepts.
+        When the buffer is fully flushed, transitions back to
+        ``STATE_READING`` (HTTP/2 multiplexes -- the connection
+        stays open across many request/response pairs) unless
+        :attr:`should_close` is set, in which case the connection
+        is finished.
+        """
+        if self.state != STATE_WRITING:
+            return StepResult(
+                want_read=self.state == STATE_READING, want_write=False
+            )
+        while self.write_pos < len(self.write_buf):
+            var remaining = len(self.write_buf) - self.write_pos
+            var ptr = self.write_buf.unsafe_ptr() + self.write_pos
+            var n = _send(
+                self.fd(), ptr, c_size_t(remaining), c_int(MSG_NOSIGNAL)
+            )
+            if n > 0:
+                self.write_pos += Int(n)
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    break
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+        if self.write_pos < len(self.write_buf):
+            # Partial write -- come back when the kernel has more
+            # space. Re-arm the write idle timer so a slow client
+            # doesn't keep us pinned indefinitely.
+            return StepResult(
+                want_read=False,
+                want_write=True,
+                idle_timeout_ms=config.write_timeout_ms,
+            )
+        # write_buf fully drained; reset for the next response.
+        self.write_buf.clear()
+        self.write_pos = 0
+        if self.should_close:
+            return StepResult(want_read=False, want_write=False, done=True)
+        # h2 stays open across many requests; back to reading.
+        self.state = STATE_READING
+        return StepResult(
+            want_read=True,
+            want_write=False,
+            idle_timeout_ms=config.idle_timeout_ms,
+        )
+
+
+# ── Pool helpers (mirror _server_reactor_impl.mojo's ConnHandle pool) ────
+
+
+def _h2_conn_alloc_addr(
+    var stream: TcpStream, var config: Http2Config
+) raises -> Int:
+    """Heap-allocate an :class:`H2ConnHandle` and return its address.
+
+    Routes through ``Pool[H2ConnHandle]`` so all unsafe-pointer
+    plumbing stays in :mod:`flare.runtime.pool`. Symmetric with
+    :func:`flare.http._server_reactor_impl._conn_alloc_addr`.
+    """
+    return Pool[H2ConnHandle].alloc_move(H2ConnHandle(stream^, config^))
+
+
+def _h2_conn_free_addr(addr: Int):
+    """Destroy + free an :class:`H2ConnHandle` previously allocated
+    via :func:`_h2_conn_alloc_addr`."""
+    Pool[H2ConnHandle].free(addr)
+
+
+def _h2_conn_ptr_from_int(
+    addr: Int,
+) -> UnsafePointer[H2ConnHandle, MutExternalOrigin]:
+    """Reverse of :func:`_h2_conn_alloc_addr`: typed pointer from an Int."""
+    return UnsafePointer[UInt8, MutExternalOrigin](
+        unsafe_from_address=addr
+    ).bitcast[H2ConnHandle]()
