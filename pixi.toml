@@ -56,6 +56,18 @@ gxx = ">=13"
 pre-commit = ">=4.2.0,<5"
 mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
 
+# Linux-only: native debug + race-detection tooling for the io_uring
+# root-causing work. gdb -- post-mortem on core dumps (no ptrace_scope
+# dance, works on any unprivileged uid). valgrind -- helgrind for race
+# detection on the shared kernel/userspace producer-consumer rings
+# (PBUF_RING tail bumps, etc); slow but correct. Conda-forge ships
+# both pinned to recent stable releases on linux-64; macOS has its own
+# native lldb / Instruments toolchain so we don't need conda packages
+# there.
+[feature.dev.target.linux-64.dependencies]
+gdb        = ">=14"
+valgrind   = ">=3.22"
+
 [feature.fuzz.dependencies]
 mozz = { git = "https://github.com/ehsanmok/mozz.git", tag = "v0.1.2" }
 
