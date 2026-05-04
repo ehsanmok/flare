@@ -348,3 +348,173 @@ def _h2_conn_ptr_from_int(
     return UnsafePointer[UInt8, MutExternalOrigin](
         unsafe_from_address=addr
     ).bitcast[H2ConnHandle]()
+
+
+# ── Protocol-detection (preface peek) ──────────────────────────────────────
+
+
+comptime _H2_PREFACE_BYTES_LEN: Int = 24
+"""Length in bytes of the RFC 9113 §3.4 ``PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n``
+client connection preface."""
+
+
+comptime PROTO_NEED_MORE: Int = 0
+"""Decision sentinel: PendingConnHandle hasn't seen enough bytes yet."""
+
+comptime PROTO_HTTP1: Int = 1
+"""Decision sentinel: the first bytes don't match the H2 preface
+prefix; this connection is HTTP/1.1 (or h2c via Upgrade, which the
+HTTP/1.1 ConnHandle handles via the existing
+``detect_h2c_upgrade`` helper)."""
+
+comptime PROTO_HTTP2: Int = 2
+"""Decision sentinel: the first 24 bytes match the H2 preface
+exactly; this connection is HTTP/2 via prior knowledge."""
+
+
+def _h2_preface_byte(i: Int) -> UInt8:
+    """Return the i-th byte of the H2 client connection preface
+    (``"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n"``)."""
+    var s = String("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+    return s.unsafe_ptr()[i]
+
+
+struct PendingConnHandle(Movable):
+    """Per-connection state for an accepted socket whose protocol has
+    not yet been determined.
+
+    Buffers up to 24 bytes from the socket non-blockingly until it
+    can decide whether the peer is speaking HTTP/1.1 (any byte
+    sequence that doesn't prefix-match the H2 preface) or HTTP/2
+    via prior knowledge (full 24-byte preface match per RFC 9113
+    §3.4). The buffered bytes are NEVER discarded -- they're
+    handed to the chosen :class:`flare.http._server_reactor_impl.ConnHandle`
+    or :class:`H2ConnHandle` via the move-out helper so the
+    chosen state machine sees a contiguous byte stream.
+
+    The ``on_readable`` step returns one of :data:`PROTO_NEED_MORE`,
+    :data:`PROTO_HTTP1`, or :data:`PROTO_HTTP2`. The unified
+    reactor loop swaps the dict entry for the chosen handle on
+    decision and continues driving the new handle on the next
+    event.
+    """
+
+    var _stream: TcpStream
+    """Underlying TCP stream; this struct owns the fd until the
+    decision is taken via :meth:`take_stream_and_buf`."""
+
+    var peer: SocketAddr
+    """Peer address snapshotted at accept time, threaded onto the
+    chosen :class:`ConnHandle` / :class:`H2ConnHandle` so handlers
+    keep their existing ``req.peer`` semantics."""
+
+    var preface_buf: List[UInt8]
+    """Bytes read so far while waiting for a protocol decision.
+    Maximum :data:`_H2_PREFACE_BYTES_LEN` long."""
+
+    var idle_timer_id: UInt64
+    """ID of the currently-armed idle timer, 0 if none."""
+
+    var last_interest: Int
+    """Last reactor interest bits for this conn."""
+
+    def __init__(out self, var stream: TcpStream) raises:
+        self.peer = stream.peer_addr()
+        self._stream = stream^
+        self.preface_buf = List[UInt8](capacity=_H2_PREFACE_BYTES_LEN)
+        self.idle_timer_id = UInt64(0)
+        self.last_interest = 1  # INTEREST_READ
+
+    @always_inline
+    def fd(self) -> c_int:
+        """Return the underlying fd (fast accessor)."""
+        return self._stream._socket.fd
+
+    def on_readable(mut self) raises -> Int:
+        """Pull more bytes off the socket and return one of
+        :data:`PROTO_NEED_MORE` / :data:`PROTO_HTTP1` / :data:`PROTO_HTTP2`.
+
+        Reads non-blockingly. The buffer keeps EVERY byte read
+        (not just the preface-prefix ones) so :meth:`take_stream_and_buf`
+        hands the whole prefix to the chosen per-conn handle --
+        otherwise an HTTP/1.1 request whose first byte fails the
+        preface check would have its remaining bytes (already
+        delivered by ``recv`` in the same syscall) dropped on the
+        floor and the parser would see a truncated request line.
+        """
+        # Read up to 24 bytes total. We always store ALL bytes
+        # ``recv`` returns; the preface-prefix check only decides
+        # WHETHER to keep reading (preface match) or stop early
+        # (mismatch -> HTTP/1.1). The chosen per-conn handle
+        # consumes the same bytes via :meth:`take_stream_and_buf`.
+        var chunk = stack_allocation[_H2_PREFACE_BYTES_LEN, UInt8]()
+        var decision_known: Bool = False
+        var decision: Int = PROTO_HTTP1
+        while len(self.preface_buf) < _H2_PREFACE_BYTES_LEN:
+            var want = _H2_PREFACE_BYTES_LEN - len(self.preface_buf)
+            var got = _recv(self.fd(), chunk, c_size_t(want), c_int(0))
+            if got > 0:
+                var got_int = Int(got)
+                for i in range(got_int):
+                    var b = chunk[i]
+                    var pos = len(self.preface_buf)
+                    self.preface_buf.append(b)
+                    if (not decision_known) and b != _h2_preface_byte(pos):
+                        decision_known = True
+                        decision = PROTO_HTTP1
+                if decision_known:
+                    return decision
+            elif got == 0:
+                # Peer FIN before we could decide; treat as h1
+                # so the existing graceful-close path tears it
+                # down.
+                return PROTO_HTTP1
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    if decision_known:
+                        return decision
+                    return PROTO_NEED_MORE
+                # Hard error -> treat as h1 so cleanup runs.
+                return PROTO_HTTP1
+        # All 24 bytes accumulated and none triggered an early
+        # mismatch -> the prefix matches the preface exactly ->
+        # this is HTTP/2.
+        return PROTO_HTTP2
+
+    def take_stream_and_buf(
+        mut self,
+    ) -> List[UInt8]:
+        """Move the buffered preface bytes out of the handle.
+
+        The :attr:`_stream` is moved separately by the caller via a
+        regular field move (`var s = handle._stream^`) since Mojo
+        tuple returns are clunky for non-Movable mixes. The caller
+        is responsible for freeing the empty handle via
+        :func:`_pending_conn_free_addr` after taking ownership of
+        both fields.
+        """
+        var out = self.preface_buf^
+        self.preface_buf = List[UInt8]()
+        return out^
+
+
+def _pending_conn_alloc_addr(var stream: TcpStream) raises -> Int:
+    """Heap-allocate a :class:`PendingConnHandle` and return its address."""
+    return Pool[PendingConnHandle].alloc_move(PendingConnHandle(stream^))
+
+
+def _pending_conn_free_addr(addr: Int):
+    """Destroy + free a :class:`PendingConnHandle`."""
+    Pool[PendingConnHandle].free(addr)
+
+
+def _pending_conn_ptr_from_int(
+    addr: Int,
+) -> UnsafePointer[PendingConnHandle, MutExternalOrigin]:
+    """Reverse of :func:`_pending_conn_alloc_addr`."""
+    return UnsafePointer[UInt8, MutExternalOrigin](
+        unsafe_from_address=addr
+    ).bitcast[PendingConnHandle]()

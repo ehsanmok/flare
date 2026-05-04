@@ -20,6 +20,7 @@ from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
 from .static_response import StaticResponse
+from ..http2.server import Http2Config
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 
@@ -197,6 +198,18 @@ struct HttpServer(Movable):
 
     var _listener: TcpListener
     var config: ServerConfig
+    var h2_config: Http2Config
+    """HTTP/2 SETTINGS the server advertises to peers that speak h2.
+
+    The unified reactor loop auto-dispatches every accepted
+    connection to either an HTTP/1.1 ``ConnHandle`` or an
+    HTTP/2 ``H2ConnHandle`` based on the first 24 bytes
+    (RFC 9113 §3.4 client connection preface). The h2 path
+    uses these SETTINGS verbatim. Defaulted to
+    :class:`Http2Config()` -- the same production-shape numbers
+    the standalone HTTP/2 driver used. Tune via
+    ``HttpServer.bind(addr, config, h2_config=Http2Config(...))``.
+    """
     var _stopping: Bool
     """Set by ``close()`` to break the reactor loop. Read from the loop
     itself each iteration."""
@@ -205,9 +218,11 @@ struct HttpServer(Movable):
         out self,
         var listener: TcpListener,
         var config: ServerConfig = ServerConfig(),
+        var h2_config: Http2Config = Http2Config(),
     ):
         self._listener = listener^
         self.config = config^
+        self.h2_config = h2_config^
         self._stopping = False
 
     def __del__(deinit self):
@@ -215,13 +230,22 @@ struct HttpServer(Movable):
 
     @staticmethod
     def bind(
-        addr: SocketAddr, var config: ServerConfig = ServerConfig()
+        addr: SocketAddr,
+        var config: ServerConfig = ServerConfig(),
+        var h2_config: Http2Config = Http2Config(),
     ) raises -> HttpServer:
         """Bind an HTTP server on ``addr``.
 
         Args:
             addr: Local address to listen on.
-            config: Server configuration (optional).
+            config: HTTP/1.1 server configuration (optional).
+            h2_config: HTTP/2 SETTINGS the server advertises to
+                peers that speak h2 (optional). The unified
+                reactor loop auto-dispatches every accepted
+                connection to either the HTTP/1.1 or HTTP/2
+                state machine based on the RFC 9113 §3.4
+                client connection preface; ``h2_config`` is
+                only consulted when a peer is detected as h2.
 
         Returns:
             An ``HttpServer`` ready to call ``serve()``.
@@ -231,7 +255,7 @@ struct HttpServer(Movable):
             NetworkError: For any other OS error.
         """
         var listener = TcpListener.bind(addr)
-        return HttpServer(listener^, config^)
+        return HttpServer(listener^, config^, h2_config^)
 
     def serve(
         mut self,
@@ -278,10 +302,8 @@ struct HttpServer(Movable):
             Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import (
-            run_reactor_loop,
-            run_uring_bufring_reactor_loop,
-        )
+        from ._server_reactor_impl import run_uring_bufring_reactor_loop
+        from ._unified_reactor_impl import run_unified_reactor_loop
         from .handler import FnHandler
         from flare.runtime.uring_reactor import use_uring_backend
         from std.os import getenv
@@ -290,10 +312,10 @@ struct HttpServer(Movable):
         var h = FnHandler(handler)
         if num_workers <= 1:
             self._stopping = False
-            # OPT-IN via FLARE_BUFRING_HANDLER=1; see the matching
-            # comment in the generic ``serve[H]`` overload above
-            # for why the bufring path is default-OFF (crashes
-            # under sustained 64-conn wrk2 load).
+            # OPT-IN via FLARE_BUFRING_HANDLER=1; the bufring
+            # path is HTTP/1.1-only by design and crashes under
+            # sustained 64-conn wrk2 load -- see the matching
+            # comment in the generic ``serve[H]`` overload below.
             comptime if CompilationTarget.is_linux():
                 if (
                     use_uring_backend()
@@ -303,7 +325,17 @@ struct HttpServer(Movable):
                         self._listener, self.config, h, self._stopping
                     )
                     return
-            run_reactor_loop(self._listener, self.config, h, self._stopping)
+            # Unified reactor loop: every accepted connection is
+            # auto-dispatched to either the HTTP/1.1 ConnHandle or
+            # the HTTP/2 H2ConnHandle based on whether its first
+            # 24 bytes match the RFC 9113 §3.4 client preface.
+            run_unified_reactor_loop(
+                self._listener,
+                self.config,
+                self.h2_config.copy(),
+                h,
+                self._stopping,
+            )
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
 
@@ -343,10 +375,8 @@ struct HttpServer(Movable):
             Error: On ``pthread_create`` failure when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import (
-            run_reactor_loop,
-            run_uring_bufring_reactor_loop,
-        )
+        from ._server_reactor_impl import run_uring_bufring_reactor_loop
+        from ._unified_reactor_impl import run_unified_reactor_loop
         from flare.runtime.uring_reactor import use_uring_backend
         from std.os import getenv
         from std.sys.info import CompilationTarget
@@ -354,18 +384,10 @@ struct HttpServer(Movable):
         if num_workers <= 1:
             self._stopping = False
             # io_uring buffer-ring path is OPT-IN via
-            # ``FLARE_BUFRING_HANDLER=1``. Substrate ships and
-            # passes test-uring-serve-handler (8 connections,
-            # 50 keepalive churn, 8 concurrent fanout) but
-            # crashes under SUSTAINED 64-conn wrk2-style load
-            # (segfault on the 1st bench iteration). The crash
-            # reproduces with FnHandler closures (test_bufring_load
-            # 6s @ 80K rps target -> SIGSEGV after ~50 reqs) and
-            # is independent of the handler shape -- pointing at
-            # a race in the bufring dispatch / cancel-on-close /
-            # PBUF_RING tail-bump interaction under high recv-CQE
-            # rate. Default-off until the bench-load crash is
-            # root-caused.
+            # ``FLARE_BUFRING_HANDLER=1``. HTTP/1.1-only by
+            # design. See the matching comment in the
+            # plain-def overload above for the load-crash
+            # status that keeps it default-off.
             comptime if CompilationTarget.is_linux():
                 if (
                     use_uring_backend()
@@ -375,8 +397,17 @@ struct HttpServer(Movable):
                         self._listener, self.config, handler, self._stopping
                     )
                     return
-            run_reactor_loop(
-                self._listener, self.config, handler, self._stopping
+            # Unified reactor loop: every accepted connection is
+            # auto-dispatched to either the HTTP/1.1 ConnHandle
+            # or the HTTP/2 H2ConnHandle based on the first 24
+            # bytes (RFC 9113 §3.4 preface peek). Same handler
+            # callback is used for both wires.
+            run_unified_reactor_loop(
+                self._listener,
+                self.config,
+                self.h2_config.copy(),
+                handler,
+                self._stopping,
             )
         else:
             self._serve_multicore[H](handler^, num_workers, pin_cores)
@@ -401,6 +432,8 @@ struct HttpServer(Movable):
             handler=handler^,
             num_workers=num_workers,
             pin_cores=pin_cores,
+            auto_protocol=True,
+            h2_config=self.h2_config.copy(),
         )
 
         # Block until the caller flips _stopping via close() or until

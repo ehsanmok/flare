@@ -79,7 +79,9 @@ from ..http._server_reactor_impl import (
     run_reactor_loop_static_shared,
     run_uring_bufring_reactor_loop_shared,
 )
+from ..http._unified_reactor_impl import run_unified_reactor_loop_shared
 from ..http.static_response import StaticResponse
+from ..http2.server import Http2Config
 from .uring_reactor import use_uring_backend
 from std.os import getenv
 from std.sys.info import CompilationTarget
@@ -150,6 +152,17 @@ struct _WorkerCtx[H: Handler & Copyable](Movable):
     var stopping_addr: Int
     var worker_idx: Int
     var pin_cores: Bool
+    # ``unified``: True -> dispatch to
+    # ``flare.http._unified_reactor_impl.run_unified_reactor_loop_shared``
+    # (auto HTTP/1.1 + HTTP/2 dispatch via preface peek). False
+    # (default) -> use the HTTP/1.1-only legacy
+    # ``run_reactor_loop_shared`` and preserve byte-for-byte the
+    # behaviour for callers that haven't opted into the unified
+    # path.
+    var auto_protocol: Bool
+    # ``h2_config``: HTTP/2 SETTINGS used by the unified path's
+    # ``H2ConnHandle``. Ignored when ``unified`` is False.
+    var h2_config: Http2Config
 
     def __init__(
         out self,
@@ -160,6 +173,8 @@ struct _WorkerCtx[H: Handler & Copyable](Movable):
         stopping_addr: Int,
         worker_idx: Int,
         pin_cores: Bool,
+        auto_protocol: Bool,
+        var h2_config: Http2Config,
     ):
         self.listener_fd = listener_fd
         self.bind_addr = bind_addr
@@ -168,6 +183,8 @@ struct _WorkerCtx[H: Handler & Copyable](Movable):
         self.stopping_addr = stopping_addr
         self.worker_idx = worker_idx
         self.pin_cores = pin_cores
+        self.auto_protocol = auto_protocol
+        self.h2_config = h2_config^
 
 
 # ── Worker entry point (comptime-specialised per H) ─────────────────────────
@@ -245,12 +262,26 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
                 return UnsafePointer[UInt8, MutExternalOrigin](
                     unsafe_from_address=0
                 )
-        run_reactor_loop_shared[H](
-            ctx_ptr[].listener_fd,
-            ctx_ptr[].config,
-            ctx_ptr[].handler,
-            stopping_ptr[],
-        )
+        # Pick the unified (HTTP/1.1 + HTTP/2 auto-dispatch)
+        # reactor loop or the HTTP/1.1-only loop based on what
+        # the Scheduler caller requested. The unified path
+        # auto-detects the wire protocol per connection by
+        # peeking the first 24 bytes for the H2 preface.
+        if ctx_ptr[].auto_protocol:
+            run_unified_reactor_loop_shared[H](
+                ctx_ptr[].listener_fd,
+                ctx_ptr[].config,
+                ctx_ptr[].h2_config.copy(),
+                ctx_ptr[].handler,
+                stopping_ptr[],
+            )
+        else:
+            run_reactor_loop_shared[H](
+                ctx_ptr[].listener_fd,
+                ctx_ptr[].config,
+                ctx_ptr[].handler,
+                stopping_ptr[],
+            )
     except:
         pass
 
@@ -357,8 +388,20 @@ struct Scheduler[H: Handler & Copyable](Movable):
         var handler: Self.H,
         num_workers: Int,
         pin_cores: Bool = True,
+        auto_protocol: Bool = False,
+        var h2_config: Http2Config = Http2Config(),
     ) raises -> Scheduler[Self.H]:
         """Spawn ``num_workers`` threads sharing one listener.
+
+        Args (in addition to the existing ones):
+            unified: When ``True``, every worker dispatches to
+                :func:`flare.http._unified_reactor_impl.run_unified_reactor_loop_shared`
+                (auto HTTP/1.1 + HTTP/2 dispatch). When ``False``
+                (default), uses the legacy HTTP/1.1-only loop --
+                preserves byte-for-byte the v0.6/v0.7 behaviour
+                for callers that haven't opted in.
+            h2_config: HTTP/2 SETTINGS used by the unified path.
+                Ignored when ``unified`` is ``False``.
 
         redesign: the scheduler binds a single ``TcpListener``
         (via ``bind_shared``) and hands its fd to every worker. Each
@@ -551,6 +594,8 @@ struct Scheduler[H: Handler & Copyable](Movable):
                 stopping_addr,
                 i,
                 pin_cores,
+                auto_protocol,
+                h2_config.copy(),
             )
             # Native Mojo allocator (see _scheduler_free_raw for why).
             var ctx_ptr = alloc[_WorkerCtx[Self.H]](1)
