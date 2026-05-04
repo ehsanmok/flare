@@ -1196,20 +1196,14 @@ def _send_h2_over_tls(
     buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
     while not conn.response_ready(sid):
         if conn.goaway_received():
-            try:
-                stream.close()
-            except:
-                pass
+            stream.close()
             raise NetworkError(
                 "HttpClient(h2): peer sent GOAWAY before responding to stream "
                 + String(sid)
             )
         var n = stream.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
         if n == 0:
-            try:
-                stream.close()
-            except:
-                pass
+            stream.close()
             raise NetworkError(
                 "HttpClient(h2): peer closed connection mid-response on stream "
                 + String(sid)
@@ -1220,10 +1214,7 @@ def _send_h2_over_tls(
             stream.write_all(Span[UInt8, _](ack_bytes))
     var maybe_err = conn.stream_error(sid)
     if Bool(maybe_err):
-        try:
-            stream.close()
-        except:
-            pass
+        stream.close()
         raise NetworkError(
             "HttpClient(h2): peer sent RST_STREAM (error code "
             + String(maybe_err.value())
@@ -1238,10 +1229,7 @@ def _send_h2_over_tls(
             stream.write_all(Span[UInt8, _](goaway_bytes))
     except:
         pass
-    try:
-        stream.close()
-    except:
-        pass
+    stream.close()
     return _h2_response_to_http(h2_resp^)
 
 
@@ -1284,20 +1272,14 @@ def _send_h2_over_tcp(
     buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
     while not conn.response_ready(sid):
         if conn.goaway_received():
-            try:
-                stream.close()
-            except:
-                pass
+            stream.close()
             raise NetworkError(
                 "HttpClient(h2c): peer sent GOAWAY before responding to stream "
                 + String(sid)
             )
         var n = stream.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
         if n == 0:
-            try:
-                stream.close()
-            except:
-                pass
+            stream.close()
             raise NetworkError(
                 "HttpClient(h2c): peer closed connection mid-response on"
                 " stream "
@@ -1309,10 +1291,7 @@ def _send_h2_over_tcp(
             stream.write_all(Span[UInt8, _](ack_bytes))
     var maybe_err = conn.stream_error(sid)
     if Bool(maybe_err):
-        try:
-            stream.close()
-        except:
-            pass
+        stream.close()
         raise NetworkError(
             "HttpClient(h2c): peer sent RST_STREAM (error code "
             + String(maybe_err.value())
@@ -1327,10 +1306,7 @@ def _send_h2_over_tcp(
             stream.write_all(Span[UInt8, _](goaway_bytes))
     except:
         pass
-    try:
-        stream.close()
-    except:
-        pass
+    stream.close()
     return _h2_response_to_http(h2_resp^)
 
 

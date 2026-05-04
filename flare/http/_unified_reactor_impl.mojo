@@ -159,7 +159,7 @@ def _drive_h1[
     must clean it up); ``False`` to keep it live.
     """
     var ch_ptr = _conn_ptr_from_int(addr)
-    var step_done = False
+    var step_done: Bool
     try:
         var last_step = ch_ptr[].on_readable(handler, config)
         step_done = last_step.done
@@ -198,7 +198,7 @@ def _drive_h1_writable(
 ) raises -> Bool:
     """Drive one HTTP/1.1 ConnHandle through ``on_writable`` only."""
     var ch_ptr = _conn_ptr_from_int(addr)
-    var step_done = False
+    var step_done: Bool
     try:
         var last_step = ch_ptr[].on_writable(config)
         step_done = last_step.done
@@ -269,7 +269,7 @@ def _drive_h2[
 ) raises -> Bool:
     """Drive one HTTP/2 H2ConnHandle through one event."""
     var h2_ptr = _h2_conn_ptr_from_int(addr)
-    var step_done = False
+    var step_done: Bool
     try:
         var last_step: StepResult
         if is_readable:

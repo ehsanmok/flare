@@ -105,10 +105,23 @@ def test_h2_conn_handle_get_round_trip() raises:
 
     # Server reactor step: on_readable should pull all the bytes
     # out of the socket, dispatch the handler, queue a response.
+    # On non-Linux loopback (macOS in particular) the just-sent
+    # bytes may not yet be visible to the server's recv on the
+    # very first attempt -- loop with a short usleep until
+    # on_readable sees data (mirrors the live reactor's poll
+    # cadence).
     var cfg = ServerConfig()
     var h = FnHandler(_hello)
-    var step = handle.on_readable(h, cfg)
-    assert_true(step.want_write)
+    var step_pump = handle.on_readable(h, cfg)
+    var pump_attempts = 0
+    while (not step_pump.want_write) and pump_attempts < 50:
+        pump_attempts += 1
+        _ = external_call["usleep", c_int](c_int(2000))
+        step_pump = handle.on_readable(h, cfg)
+    assert_true(
+        step_pump.want_write,
+        "on_readable did not surface a writable step after pumping",
+    )
     # Step 2: on_writable flushes the response bytes.
     var step2 = handle.on_writable(cfg)
     assert_true(step2.want_read)

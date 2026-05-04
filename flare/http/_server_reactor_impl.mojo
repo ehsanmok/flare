@@ -1208,16 +1208,16 @@ def _connection_is_keepalive(s: String) -> Bool:
         return False
     var p = s.unsafe_ptr()
     return (
-        p[0] == ord("k")
-        and p[1] == ord("e")
-        and p[2] == ord("e")
-        and p[3] == ord("p")
-        and p[4] == ord("-")
-        and p[5] == ord("a")
-        and p[6] == ord("l")
-        and p[7] == ord("i")
-        and p[8] == ord("v")
-        and p[9] == ord("e")
+        p[0] == UInt8(ord("k"))
+        and p[1] == UInt8(ord("e"))
+        and p[2] == UInt8(ord("e"))
+        and p[3] == UInt8(ord("p"))
+        and p[4] == UInt8(ord("-"))
+        and p[5] == UInt8(ord("a"))
+        and p[6] == UInt8(ord("l"))
+        and p[7] == UInt8(ord("i"))
+        and p[8] == UInt8(ord("v"))
+        and p[9] == UInt8(ord("e"))
     )
 
 
@@ -1235,13 +1235,13 @@ def _connection_is_close(s: String) -> Bool:
         return False
     var p = s.unsafe_ptr()
     var c0 = p[0]
-    if c0 != ord("c") and c0 != ord("C"):
+    if c0 != UInt8(ord("c")) and c0 != UInt8(ord("C")):
         return False
     return (
-        p[1] == ord("l")
-        and p[2] == ord("o")
-        and p[3] == ord("s")
-        and p[4] == ord("e")
+        p[1] == UInt8(ord("l"))
+        and p[2] == UInt8(ord("o"))
+        and p[3] == UInt8(ord("s"))
+        and p[4] == UInt8(ord("e"))
     )
 
 
@@ -2900,7 +2900,7 @@ def _drive_handler_with_submit_send[
     Returns True iff the conn should be cleaned up (handler
     raised, response framing failed, etc.).
     """
-    var step_done = False
+    var step_done: Bool
     try:
         var last_step = ch_ptr[].on_readable_from_buf(bytes, handler, config)
         step_done = last_step.done
@@ -3008,7 +3008,7 @@ def _drive_handler_after_buf_recv[
     path that uses ``submit_send`` instead of synchronous
     ``on_writable``.
     """
-    var step_done = False
+    var step_done: Bool
     try:
         var last_step = ch_ptr[].on_readable_from_buf(bytes, handler, config)
         step_done = last_step.done
