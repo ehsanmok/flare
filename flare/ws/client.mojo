@@ -499,11 +499,38 @@ struct WsClient(Movable):
 
     @staticmethod
     def _connect_impl(url: String, config: TlsConfig) raises -> WsClient:
-        """Internal implementation shared by both ``connect`` overloads."""
+        """Internal implementation shared by both ``connect`` overloads.
+
+        For ``wss://`` URLs, advertises ALPN ``["http/1.1"]``
+        explicitly so the unified
+        :class:`flare.http.HttpServer` (which auto-dispatches
+        HTTP/1.1 vs HTTP/2 based on ALPN selection) negotiates
+        the existing HTTP/1.1 Upgrade dance instead of HTTP/2.
+        WebSocket-over-HTTP/2 (RFC 8441 Extended CONNECT) is
+        wired on the server byte-driver side
+        (:class:`flare.http2.H2Connection` advertises
+        ``SETTINGS_ENABLE_CONNECT_PROTOCOL`` when opted in via
+        ``Http2Config.enable_connect_protocol`` and captures
+        the inbound ``:protocol`` pseudo-header on the stream)
+        but the per-stream WS tunnel adapter that bridges
+        DATA frames to :class:`WsConnection` is the deliberate
+        follow-up; until it lands, ``WsClient`` forces the
+        HTTP/1.1 path so existing wss:// users see no
+        regression.
+        """
         var http_url = _ws_url_to_http(url)
         var u = Url.parse(http_url)
         var key = _generate_ws_key()
         var expected_accept = _compute_accept(key)
+        # Force HTTP/1.1 ALPN on wss:// so the unified server
+        # routes to the Upgrade-based path. (When the WS-over-h2
+        # tunnel adapter lands we'll change this to ["h2",
+        # "http/1.1"] and add a negotiated-h2 branch above the
+        # existing wire.)
+        var tls_cfg = config.copy()
+        if u.is_tls() and len(tls_cfg.alpn) == 0:
+            tls_cfg.alpn = List[String]()
+            tls_cfg.alpn.append("http/1.1")
 
         # ── 1. Build upgrade request ──────────────────────────────────────────
         var host_header = u.host
@@ -533,7 +560,7 @@ struct WsClient(Movable):
         scratch.append(UInt8(0))
 
         if u.is_tls():
-            var tls = TlsStream.connect(u.host, u.port, config)
+            var tls = TlsStream.connect(u.host, u.port, tls_cfg^)
             var req_bytes = req.as_bytes()
             tls.write_all(Span[UInt8, _](req_bytes))
 

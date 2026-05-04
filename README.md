@@ -40,7 +40,7 @@ The bar isn't "is it fast", it's *is it hard to misuse under load and easy to op
 - **Edge / proxy ready**: HAProxy PROXY protocol v1 + v2 parser (`flare.http.parse_proxy_protocol`, fuzz-clean over 200K runs); `UnixListener` / `UnixStream` AF_UNIX subsystem under `flare.uds` for sidecar IPC; RFC 9110 §13 `Conditional[Inner]` middleware (`If-Match` / `If-None-Match` / `If-Modified-Since` / `If-Unmodified-Since` → 304/412); client-side `RedirectPolicy` (`FOLLOW_ALL` / `SAME_ORIGIN_ONLY` / `DENY`).
 - **Auth + CSRF batteries**: client-side `BasicAuth` / `BearerAuth` (`HttpClient(BasicAuth(...))` works on both wires); server-side `BearerExtract` / `BasicExtract` typed extractors; double-submit-cookie `CsrfToken` with constant-time comparator.
 - **Observability**: JSON-per-line `StructuredLogger[Inner]` for Datadog / Loki / Splunk; `Metrics[Inner]` + Prometheus text exposition (counter / histogram / gauge); askama-shape `Template` engine (`{{ var }}`, `{% if %}`, `{% for %}`, OWASP HTML escape) for human-facing pages.
-- **Production hygiene**: per-request `Cancel` token (peer FIN, timeout, drain unified), server-side TLS with cert reload + mTLS + ALPN, sanitised 4xx/5xx, graceful drain with per-worker `ShutdownReport`s, 24 h soak harness, **22 fuzz harnesses (5M+ runs, zero known crashes)**.
+- **Production hygiene**: per-request `Cancel` token (peer FIN, timeout, drain unified), server-side TLS with cert reload + mTLS + ALPN, sanitised 4xx/5xx, graceful drain with per-worker `ShutdownReport`s, 24 h soak harness, **24 fuzz harnesses (5.4M+ runs, zero known crashes)** including the new RFC 8441 Extended CONNECT dispatch and the unified server's preface-peek classifier.
 
 ## Numbers
 

@@ -5,7 +5,13 @@ below it. No circular dependencies, no global state, no hidden runtime.
 
 ```
 flare.io       BufReader (Readable trait, generic buffered reader)
-flare.ws       WebSocket client + server (RFC 6455)
+flare.ws       WebSocket client + server (RFC 6455). Multi-worker
+               server via WsServer.serve(handler, num_workers=N)
+               on a SO_REUSEPORT-shared port. WsClient.connect
+               advertises ALPN ["http/1.1"] on wss:// today; the
+               WS-over-h2 (RFC 8441 Extended CONNECT) tunnel
+               adapter is the deliberate follow-up that swaps the
+               ALPN advert + adds the negotiated-h2 branch.
 flare.http2    Low-level HTTP/2 byte drivers (RFC 9113 +
                RFC 7541): Frame codec, HPACK enc/dec, stream
                + connection state machines, H2Connection
@@ -221,8 +227,9 @@ there is no parity table any more -- one type, one shape:
 |---|---|
 | HTTP server (HTTP/1.1 + HTTP/2 via auto-dispatch) | [`flare.http.HttpServer`](../flare/http/server.mojo) |
 | HTTP client (HTTP/1.1 + HTTP/2 via TLS+ALPN or `prefer_h2c=True`) | [`flare.http.HttpClient`](../flare/http/client.mojo) |
-| WebSocket server (HTTP/1.1 Upgrade + RFC 8441 over h2) | [`flare.ws.WsServer`](../flare/ws/server.mojo) |
-| WebSocket client (`ws://` / `wss://` -- ALPN h2 picks RFC 8441) | [`flare.ws.WsClient`](../flare/ws/client.mojo) |
+| WebSocket server (HTTP/1.1 Upgrade today; RFC 8441 over h2 wired on the byte driver, tunnel adapter is a follow-up) | [`flare.ws.WsServer`](../flare/ws/server.mojo) |
+| WebSocket server (multi-worker via SO_REUSEPORT) | `flare.ws.WsServer.serve(handler, num_workers=N)` |
+| WebSocket client (`ws://` / `wss://` -- HTTP/1.1 Upgrade today; ALPN advertises `http/1.1` on wss:// to lock in the existing path) | [`flare.ws.WsClient`](../flare/ws/client.mojo) |
 | Low-level HTTP/2 byte driver (server) | [`flare.http2.H2Connection`](../flare/http2/server.mojo) |
 | Low-level HTTP/2 byte driver (client) | [`flare.http2.Http2ClientConnection`](../flare/http2/client.mojo) |
 

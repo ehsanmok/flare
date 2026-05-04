@@ -12,11 +12,15 @@ The upgrade handshake (§4.2):
     5. Hand off to ``WsConnection``.
 """
 
-from std.ffi import OwnedDLHandle
+from std.ffi import OwnedDLHandle, c_int
+from std.memory import UnsafePointer
+
 from .frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream
 from ..net import SocketAddr, NetworkError, _find_flare_lib
+from ..runtime._thread import ThreadHandle, _OpaquePtr
+from ..runtime.reuseport import bind_reuseport
 
 # RFC 6455 §1.3 magic GUID
 comptime _WS_GUID: String = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -560,8 +564,8 @@ struct WsServer(Movable):
         var listener = TcpListener.bind(addr)
         return WsServer(listener^)
 
-    def serve(self, handler: def(WsConnection) raises thin -> None) raises:
-        """Accept WebSocket connections in a loop.
+    def serve(self, handler: def(mut WsConnection) raises thin -> None) raises:
+        """Accept WebSocket connections in a single-threaded loop.
 
         For each accepted TCP connection:
             1. Read the HTTP Upgrade request.
@@ -569,11 +573,14 @@ struct WsServer(Movable):
             3. Send ``101 Switching Protocols``.
             4. Call ``handler(conn)``.
 
-        Upgrade errors for individual connections are silently skipped;
-        only fatal accept-loop errors propagate.
+        Upgrade errors for individual connections are silently
+        skipped; only fatal accept-loop errors propagate.
+        For the multi-worker variant (``num_workers >= 2``), see
+        :meth:`serve_multicore`.
 
         Args:
-            handler: Callback invoked once per successfully upgraded connection.
+            handler: Callback invoked once per successfully upgraded
+                connection.
 
         Raises:
             NetworkError: On fatal accept-loop errors.
@@ -582,6 +589,57 @@ struct WsServer(Movable):
             var stream = self._listener.accept()
             var peer = stream.peer_addr()
             _handle_ws_connection(stream^, peer, handler)
+
+    def serve(
+        mut self,
+        handler: def(mut WsConnection) raises thin -> None,
+        num_workers: Int,
+    ) raises:
+        """Accept WebSocket connections across ``num_workers`` threads.
+
+        ``num_workers <= 1`` falls back to the single-threaded
+        :meth:`serve` shape (one worker on the current thread).
+        ``num_workers >= 2`` binds ``num_workers`` ``SO_REUSEPORT``
+        listeners on the same port (kernel-level load balancing
+        across worker threads, matching the
+        :class:`flare.http.HttpServer` multi-worker shape) and
+        spawns one pthread per worker. Each worker runs its own
+        single-threaded accept loop, so the per-connection
+        upgrade + handler dispatch is unchanged.
+
+        The original :attr:`_listener` (whose port the
+        ``SO_REUSEPORT`` listeners bind to) is closed so its
+        backlog doesn't accept connections that would never be
+        served. Workers are joined before this method returns,
+        which today means it never returns: the workers run
+        forever (no drain machinery yet). Use ``Ctrl-C`` /
+        ``kill`` to terminate.
+
+        Args:
+            handler: Per-connection callback (same shape as the
+                single-threaded variant). Function pointers are
+                trivially copyable so the same value is shared
+                across all workers without per-worker context
+                packaging.
+            num_workers: Worker count. ``<= 0`` is coerced to 1.
+                Values > 256 are rejected.
+
+        Raises:
+            NetworkError: On listener bind failure for any worker.
+            Error: On ``pthread_create`` failure when
+                ``num_workers >= 2``.
+        """
+        if num_workers <= 1:
+            self.serve(handler)
+            return
+        if num_workers > 256:
+            raise Error("WsServer.serve: num_workers must be <= 256")
+        var addr = self._listener.local_addr()
+        # Close the original listener so its backlog doesn't
+        # silently swallow connections we never serve. The
+        # SO_REUSEPORT listeners below take over the port.
+        self._listener.close()
+        _ws_serve_multicore(addr, handler, num_workers)
 
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to.
@@ -599,7 +657,7 @@ struct WsServer(Movable):
 def _handle_ws_connection(
     var stream: TcpStream,
     peer: SocketAddr,
-    handler: def(WsConnection) raises thin -> None,
+    handler: def(mut WsConnection) raises thin -> None,
 ):
     """Perform the WebSocket handshake and call handler.
 
@@ -610,6 +668,118 @@ def _handle_ws_connection(
         var accept = _compute_accept_srv(key)
         _send_upgrade_response(stream, accept)
         var conn = WsConnection(stream^, peer)
-        handler(conn^)
+        handler(conn)
     except e:
         print("[ws] connection error: " + String(e))
+
+
+# ── Multi-worker WsServer ──────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct _WsWorkerCtx(Movable):
+    """Heap-allocated per-worker context for :func:`_ws_serve_multicore`.
+
+    Carries a *fully-bound* per-worker ``SO_REUSEPORT`` listener
+    (the parent thread does the bind so the bind itself is
+    serialised across workers and there is no concurrent-bind
+    race) plus a copy of the ``def`` handler function pointer.
+    Mojo ``def`` function pointers are trivially copyable, so
+    every worker shares the same callable with no per-worker
+    closure state.
+    """
+
+    var listener: TcpListener
+    var handler: def(mut WsConnection) raises thin -> None
+
+
+def _ws_worker_entry(arg: _OpaquePtr) -> _OpaquePtr:
+    """``pthread`` start routine for one WebSocket worker.
+
+    Casts ``arg`` back to a ``_WsWorkerCtx`` pointer, runs the
+    standard single-threaded WsServer accept loop until either
+    ``accept`` raises or the listener is closed. Errors are
+    swallowed -- per-connection upgrade errors are already
+    handled inside :func:`_handle_ws_connection`; the only way
+    out of this loop today is a fatal ``accept`` failure (e.g.
+    listener closed during shutdown).
+    """
+    var ctx_addr = Int(arg)
+    var raw = UnsafePointer[UInt8, MutExternalOrigin](
+        unsafe_from_address=ctx_addr
+    )
+    var ctx_ptr = raw.bitcast[_WsWorkerCtx]()
+    try:
+        while True:
+            var stream = ctx_ptr[].listener.accept()
+            var peer = stream.peer_addr()
+            _handle_ws_connection(stream^, peer, ctx_ptr[].handler)
+    except:
+        pass
+    return UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=0)
+
+
+def _ws_serve_multicore(
+    addr: SocketAddr,
+    handler: def(mut WsConnection) raises thin -> None,
+    num_workers: Int,
+) raises:
+    """Spawn ``num_workers`` WebSocket worker threads sharing a port.
+
+    Each worker binds its own ``SO_REUSEPORT`` listener on the
+    parent thread (so the binds are serialised, no concurrent-
+    bind race), then runs an independent single-threaded accept
+    loop. The kernel hashes new 4-tuples across the listener set
+    so accept fairness is at the OS level, identical to the
+    :class:`flare.http.HttpServer` multi-worker path.
+
+    Workers are spawned via :class:`flare.runtime.ThreadHandle`
+    and joined before this function returns. Today the workers
+    never exit on their own (no graceful drain machinery for
+    WebSocket); use ``Ctrl-C`` to terminate.
+    """
+    if num_workers <= 1:
+        raise Error("_ws_serve_multicore: num_workers must be >= 2")
+
+    from std.memory import alloc
+
+    # Heap-allocate one _WsWorkerCtx per worker via the native
+    # Mojo allocator. We keep the ctx addresses in a List[Int]
+    # since List[ThreadHandle] is not legal (ThreadHandle is
+    # Movable-only by design -- POSIX forbids double-join, so
+    # the type is non-Copyable; see flare/runtime/_thread.mojo).
+    # ThreadHandles themselves live in an UnsafePointer-backed
+    # array we walk by index.
+    var ctx_addrs = List[Int]()
+    var threads_ptr = alloc[ThreadHandle](num_workers)
+
+    for i in range(num_workers):
+        var listener = bind_reuseport(addr)
+        var ctx = _WsWorkerCtx(listener^, handler)
+        var ctx_ptr = alloc[_WsWorkerCtx](1)
+        ctx_ptr.init_pointee_move(ctx^)
+        var arg = ctx_ptr.bitcast[UInt8]()
+        var addr_int = Int(arg)
+        ctx_addrs.append(addr_int)
+        var th = ThreadHandle.spawn[_ws_worker_entry](
+            UnsafePointer[UInt8, MutExternalOrigin](
+                unsafe_from_address=addr_int
+            )
+        )
+        (threads_ptr + i).init_pointee_move(th^)
+
+    # Workers run forever; this join blocks until each pthread
+    # exits (normally never, since the per-worker listener
+    # stays open). Closing the listener from another thread
+    # would unblock the worker's accept call -- the intended
+    # graceful-shutdown handle once WsServer grows a drain API.
+    for i in range(num_workers):
+        (threads_ptr + i)[].join()
+    # Free per-worker contexts now the threads are joined.
+    for i in range(len(ctx_addrs)):
+        var raw = UnsafePointer[UInt8, MutExternalOrigin](
+            unsafe_from_address=ctx_addrs[i]
+        )
+        raw.bitcast[_WsWorkerCtx]().destroy_pointee()
+        raw.free()
+    threads_ptr.free()
