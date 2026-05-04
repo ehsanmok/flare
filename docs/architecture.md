@@ -8,10 +8,14 @@ flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455). Multi-worker
                server via WsServer.serve(handler, num_workers=N)
                on a SO_REUSEPORT-shared port. WsClient.connect
-               advertises ALPN ["http/1.1"] on wss:// today; the
-               WS-over-h2 (RFC 8441 Extended CONNECT) tunnel
-               adapter is the deliberate follow-up that swaps the
-               ALPN advert + adds the negotiated-h2 branch.
+               advertises ALPN ["http/1.1"] on wss:// to lock in
+               the existing Upgrade-based path. The RFC 8441
+               server-side byte driver (SETTINGS_ENABLE_CONNECT_
+               PROTOCOL=1, :protocol=websocket capture) is wired
+               in flare.http2; the WsConnection adapter that
+               bridges DATA frames to/from the H2 stream and the
+               matching WsClient h2 path are the documented
+               follow-ups.
 flare.http2    Low-level HTTP/2 byte drivers (RFC 9113 +
                RFC 7541): Frame codec, HPACK enc/dec, stream
                + connection state machines, H2Connection
@@ -292,10 +296,6 @@ the reactor thread:
 
 If you want a one-page tour of each, the layered docstrings on the
 public types (`HttpServer`, `Router`, `Handler`, `App`) are the place
-to start; they include "Failure modes" sections describing what
-raises, what becomes a 4xx vs 5xx, what gets logged, and what never
-returns.
-, `App`) are the place
 to start; they include "Failure modes" sections describing what
 raises, what becomes a 4xx vs 5xx, what gets logged, and what never
 returns.

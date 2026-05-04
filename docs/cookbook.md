@@ -86,8 +86,8 @@ list in [`pixi.toml`](../pixi.toml).
 | Send `Content-Encoding: br` | [`34_brotli.mojo`](../examples/34_brotli.mojo) |
 | Drive HTTP/2 directly | [`35_http2.mojo`](../examples/35_http2.mojo) |
 | Tune HTTP/2 SETTINGS | [`37_http2_config.mojo`](../examples/37_http2_config.mojo) |
-| Make HTTP/2 client requests (h2c + h2-over-TLS) | [`40_http2_client.mojo`](../examples/40_http2_client.mojo) |
-| Serve a Router over HTTP/2 | [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) |
+| Make HTTP/2 client requests (h2c via prior knowledge; `https://` auto-negotiates h2 vs h1.1 via ALPN) | [`40_http2_client.mojo`](../examples/40_http2_client.mojo) |
+| Serve HTTP/1.1 + HTTP/2 from one port | [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) |
 | AF_UNIX sidecar IPC | [`38_uds_sidecar.mojo`](../examples/38_uds_sidecar.mojo) |
 | io_uring reactor backend | [`39_iouring_plaintext.mojo`](../examples/39_iouring_plaintext.mojo) |
 | Even out skewed-keepalive load | [`36_work_stealing.mojo`](../examples/36_work_stealing.mojo) |

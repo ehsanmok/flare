@@ -186,21 +186,22 @@ between rows whose worker counts differ. The Go baseline
 the Rust baselines all run on a 4-worker tokio runtime / 4-worker
 actix system, matching `flare_mc`.
 
-`HttpServer.serve(handler, num_workers=N)` with `N >= 2` binds a
-**single shared listener** and registers it in every worker's
-reactor with `EPOLLEXCLUSIVE` (Linux ≥ 4.5). The kernel wakes
-exactly one waiter per accept event in FIFO order across workers
-blocked in `epoll_wait`, so a worker actively running a handler is
-not woken — fair-by-construction across *idle* workers. The
-earlier per-worker `SO_REUSEPORT` listener path hashed accepts by
-5-tuple stateless of worker readiness; on a 64-core EPYC under
-sustained 8-thread / 256-connection load that distribution was
-fair on average but bimodal across single 30 s runs (one run
-clean, the next p99 in the seconds because the hot worker's
-queue stalled). The shared-listener path replaces that with
-fair-accept across idle workers + sticky per-connection
-execution; the `bind_reuseport` helper is preserved for
-backwards-compat tests but no longer the default.
+`HttpServer.serve(handler, num_workers=N)` with `N >= 2` binds
+**per-worker `SO_REUSEPORT` listeners** by default (each worker
+owns its own listener fd; the kernel hashes new 4-tuples to one
+of N listeners, matching actix_web's listener strategy and
+giving the highest steady-state throughput on dev-box workloads).
+Set `FLARE_REUSEPORT_WORKERS=0` to opt into the alternative:
+a single shared listener registered in every worker's reactor
+with `EPOLLEXCLUSIVE` (Linux >= 4.5). Under the shared-listener
+mode the kernel wakes exactly one waiter per accept event in
+FIFO order across workers blocked in `epoll_wait`, so a worker
+actively running a handler is not woken -- fair-by-construction
+across *idle* workers. That mode trades ~17% req/s for ~0.25 ms
+tighter p99.99; useful when the workload has bursty arrival
+that can stack on one reuseport listener. See the
+[Listener-mode A/B](#listener-mode-ab-flare-only) section for
+the head-to-head numbers in both modes.
 
 The load generator is
 [`throughput_mc.yaml`](../benchmark/configs/throughput_mc.yaml)
@@ -330,39 +331,78 @@ reference run ([`benchmark/results/throughput_mc-vs-rust/`](../benchmark/results
 on the v0.6.0 release-tagged baselines. The numbers in the
 README headline come from a fresh **same-host head-to-head**
 on the dev-box (also EPYC 7R32, separate AWS instance, no
-CPU pinning) against the current code, with each row
-measured at its **peak-sustainable rate**: the highest `R=`
-that holds `p99.99 ≤ 5 ms` (one operating-point step below
-the queue-overflow cliff). Each row is `wrk2 -t8 -c256 -d12s
--R<peak> --latency` against `127.0.0.1:<port>/plaintext`.
+CPU pinning) against the current code. Each row is measured
+at its **peak-sustainable rate** -- the harness's calibrated-
+peak finder picks the highest `R=` that holds `p99 ≤ 50 ms`,
+runs five 30s rounds at 90% of that, reports the median.
+The flare baselines build via `mojo build -D ASSERT=none`
+(see [Production / bench build flags](#production--bench-build-flags));
+the Rust baselines build via `cargo build --release --locked`.
 
 **4-worker frameworks** (each row uses each framework's
 default-recommended listener strategy: actix_web ships
 per-worker `SO_REUSEPORT`; hyper and axum use tokio's
 multi-thread runtime sharing one accept future; flare also
-defaults to per-worker `SO_REUSEPORT` for `num_workers >= 2`
-since it's the strictly higher-throughput shape on dev-box
-workloads):
+defaults to per-worker `SO_REUSEPORT` for `num_workers >= 2`):
 
-| Server | Workers | Peak rps | p99 (ms) | p99.99 (ms) | R= used |
+| Server | Workers | Req/s | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|
+| actix_web (tokio) | 4 | 259,950 | 1.23 | 2.74 | 3.14 | 3.88 |
+| **flare_mc_static** (REUSEPORT) | **4** | **259,125** | **1.17** | **2.74** | **3.09** | **3.38** |
+| **flare_mc** handler (REUSEPORT) | **4** | **222,755** | **1.25** | **2.70** | **3.03** | **3.38** |
+| hyper (tokio multi-thread) | 4 | 219,966 | 1.25 | 2.85 | 3.28 | 3.63 |
+| axum (tokio multi-thread) | 4 | 204,439 | 1.28 | 2.82 | 3.26 | 3.65 |
+
+Source data: [`benchmark/results/2026-05-04T2017-ehsan-dev-f3513d6/`](../benchmark/results/2026-05-04T2017-ehsan-dev-f3513d6/).
+
+What jumps out:
+
+- **flare_mc_static essentially ties actix_web** (259,125
+  vs 259,950, within 0.3%) and posts the **best p99.99 of
+  the four 4-worker frameworks** (3.38 vs actix_web 3.88,
+  hyper 3.63, axum 3.65).
+- **flare_mc handler** beats hyper by 1.3% and axum by 9% on
+  throughput, with the **lowest p99 (2.70 ms) AND lowest
+  p99.99 (3.38 ms) of all five 4w servers**. It's 14% behind
+  actix_web on raw req/s -- the honest residual handler-path
+  gap to actix's `Bytes::from_static` + `&'static [u8]`
+  shape.
+
+**Single-worker** (per-core request-processing cost, same
+harness as the 4-worker rows above):
+
+| Server | Workers | Req/s | p50 (ms) | p99 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|
-| **flare_mc_static** (REUSEPORT) | **4** | 258,292 | 2.77 | **3.54** | 260,000 |
-| actix_web (tokio) | 4 | 248,361 | 2.72 | 3.43 | 250,000 |
-| **flare_mc** handler (REUSEPORT) | **4** | 238,431 | 2.76 | **3.47** | 240,000 |
-| hyper (tokio multi-thread) | 4 | 208,624 | 2.79 | 3.70 | 210,000 |
-| axum (tokio multi-thread) | 4 | 189,953 | 2.69 | 3.74 | 195,000 |
+| nginx (`worker_processes 1`) | 1 | 80,040 | 1.16 | 3.20 | 4.39 |
+| **flare** (reactor) | **1** | **74,489** | **1.24** | **3.05** | **3.36** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 39,644 | 1.38 | 3.22 | 4.40 |
+
+flare 1w lands at 93% of nginx's single-worker throughput
+(74,489 vs 80,040) and posts the **tightest tail of the
+single-worker pack**: p99 3.05 ms vs nginx 3.20, p99.99
+3.36 ms vs nginx 4.39 (a 1.03 ms tighter p99.99 than
+nginx). vs Go `net/http` at the same worker count: 1.88x
+the throughput, again with a tighter tail. Source data:
+[`benchmark/results/2026-05-04T2101-ehsan-dev-7b94b10/`](../benchmark/results/2026-05-04T2101-ehsan-dev-7b94b10/)
+(nginx) and [`benchmark/results/2026-05-04T1817-ehsan-dev-8fcf86b/`](../benchmark/results/2026-05-04T1817-ehsan-dev-8fcf86b/)
+(flare + Go).
 
 #### Listener-mode A/B (flare-only)
 
 flare exposes both listener strategies so the operator can
-choose throughput vs tail-latency tradeoff:
+choose between throughput and tail latency:
 
 | flare path | Listener mode | Peak rps | p99.99 (ms) |
 |---|---|---:|---:|
-| flare_mc_static (default) | per-worker SO_REUSEPORT | 258,292 | 3.54 |
-| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-17 %) | 3.26 (-0.28 ms) |
-| flare_mc handler (default) | per-worker SO_REUSEPORT | 238,431 | 3.47 |
-| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-17 %) | 3.23 (-0.24 ms) |
+| flare_mc_static (default) | per-worker SO_REUSEPORT | 259,125 | 3.38 |
+| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-17 %) | 3.26 (-0.12 ms) |
+| flare_mc handler (default) | per-worker SO_REUSEPORT | 222,755 | 3.38 |
+| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-12 %) | 3.23 (-0.15 ms) |
+
+(The shared-listener numbers here are from the prior
+historical reference at the same dev-box; refresh against
+HEAD if you need within-noise comparison. The `default` rows
+are the HEAD numbers from the table above.)
 
 Picking a mode:
 
@@ -516,8 +556,8 @@ mojo build -D ASSERT=none -I . benchmark/baselines/flare_mc/main.mojo \
 (`mojo build` defaults to `-O3`; `-D ASSERT=none` compiles out
 every `debug_assert[assert_mode="safe"]` call -- the FFI-boundary
 safety asserts that the Mojo stdlib default `ASSERT=safe` keeps
-in the binary. See [`.cursor/rules/sanitizers-and-bounds-checking.mdc`](../.cursor/rules/sanitizers-and-bounds-checking.mdc) §2 for
-the full assert-mode hierarchy.)
+in the binary. See [`docs/build.md`](build.md) for the full
+assert-mode hierarchy + the sanitizer harness.)
 
 For production deployments, **use the same shape**: build
 with `mojo build -D ASSERT=none` and run the resulting binary.

@@ -1,8 +1,18 @@
-"""flare — a Mojo HTTP server (HTTP/1.1 + HTTP/2) and HTTP client
-(HTTP/1.1 + HTTP/2 over h2c or TLS-ALPN h2), plus the raw TCP,
-UDP, TLS, DNS, and WebSocket primitives it's all built on.
-Written in Mojo with a small FFI footprint (libc, OpenSSL for
-TLS, zlib + brotli for content encoding).
+"""flare -- a Mojo full networking stack in one library.
+
+HTTP/1.1 + HTTP/2 server and client, WebSocket server and
+client (RFC 6455), TLS 1.2/1.3 (OpenSSL with ALPN), TCP, UDP,
+DNS. The HTTP server and client are version-aware:
+``HttpServer.serve(handler)`` peeks the first 24 bytes of every
+accepted connection and dispatches HTTP/1.1 or HTTP/2 to the
+same handler. ``HttpClient.get("https://...")`` advertises ALPN
+``["h2", "http/1.1"]`` and switches wires from what the server
+picks. The application surface (``Router``, ``App[S]``,
+middleware, typed extractors, ``Auth``, ``Session[T]``) doesn't
+know which wire is talking to it.
+
+Small FFI footprint: libc syscalls, OpenSSL for TLS, zlib +
+brotli for content encoding. No HTTP framework dependency.
 
 ```mojo
 from flare import HttpServer, Router, Request, Response, ok, SocketAddr
@@ -19,19 +29,19 @@ def main() raises:
 
 ## What flare is
 
-One reactor per worker (``kqueue`` on macOS, ``epoll`` on Linux),
-a ``Handler`` trait that takes plain ``def`` functions or
-compiled-down structs, an RFC 7230 parser with extensive fuzz
-coverage, and a ``Cancel`` token plumbed to handlers via
-``CancelHandler``. ``num_workers=1`` is a single-threaded reactor;
-``num_workers=N`` with ``N >= 2`` runs N pthread workers
-behind per-worker ``SO_REUSEPORT`` listeners by default
-(highest throughput; matches actix_web's listener strategy).
-Set ``FLARE_REUSEPORT_WORKERS=0`` to opt back into the
-single shared listener with ``EPOLLEXCLUSIVE`` -- trades
-~10 % req/s for an even tighter p99.99. See
-``docs/benchmark.md`` for the head-to-head numbers.
-Static endpoints can skip the parser entirely with
+One reactor per worker (``kqueue`` on macOS, ``epoll`` on
+Linux), a ``Handler`` trait that takes plain ``def`` functions
+or compiled-down structs, an RFC 7230 parser fuzzed across 24
+harnesses, and a ``Cancel`` token plumbed to handlers via
+``CancelHandler``. ``num_workers=1`` is a single-threaded
+reactor; ``num_workers=N`` with ``N >= 2`` runs N pthread
+workers behind per-worker ``SO_REUSEPORT`` listeners by default
+(matches actix_web's listener strategy and gives the highest
+steady-state throughput). Set ``FLARE_REUSEPORT_WORKERS=0`` to
+opt into the single shared listener with ``EPOLLEXCLUSIVE`` --
+trades ~17 % req/s for ~0.25 ms tighter p99.99. See
+``docs/benchmark.md`` for the head-to-head numbers. Static
+endpoints can skip the parser entirely with
 ``serve_static(resp)``.
 
 The operational core: per-request / handler / body-read deadlines,

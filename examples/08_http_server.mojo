@@ -8,12 +8,13 @@ Real-world usage blocks forever:
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(handler)
 
-Under the hood ``serve`` runs a single-threaded event loop on kqueue
-(macOS) or epoll (Linux) with per-connection state machines — nginx-style
-architecture, no thread-per-connection. This keeps memory flat under
-C10K-style loads and sustains ~139K req/s on a single core (TFB
-plaintext, Apple M-series) — on par with Go ``net/http`` at the same
-thread count. See ``benchmark/`` for the full harness.
+Under the hood ``serve`` runs a single-threaded event loop on
+kqueue (macOS) or epoll (Linux) with per-connection state
+machines: nginx-style architecture, no thread-per-connection.
+For ``num_workers >= 2`` it spawns N pthread workers behind
+per-worker SO_REUSEPORT listeners. See ``docs/benchmark.md``
+for the head-to-head numbers vs nginx / actix_web / hyper /
+axum / Go on plaintext throughput, both single- and 4-worker.
 
 Here we drive the server one request at a time using the internal
 _parse_http_request + _write_response so the example exits cleanly.

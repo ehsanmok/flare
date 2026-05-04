@@ -11,7 +11,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-A Mojo HTTP server (HTTP/1.1 + HTTP/2) you can put in front of users, an HTTP client (HTTP/1.1 + HTTP/2 over h2c or TLS-ALPN h2), and the raw TCP, UDP, TLS, DNS, and WebSocket (server + client) primitives it's all built on. One reactor per worker (`kqueue` on macOS, `epoll` on Linux with `EPOLLEXCLUSIVE` shared listener for multi-worker), a per-connection state machine, an RFC 7230 parser with extensive fuzz coverage, and a `Handler` trait that takes plain `def` functions or compiled-down structs.
+**Full networking stack for Mojo**🔥: HTTP/1.1 + HTTP/2 server and client, WebSocket server and client, TLS 1.2/1.3 (OpenSSL with ALPN), TCP, UDP, DNS. The HTTP server and client are version-aware. `HttpServer.serve(handler)` dispatches HTTP/1.1 and HTTP/2 to the same handler from a per-connection preface peek for cleartext, or from TLS ALPN. `HttpClient.get("https://...")` negotiates the same way. One reactor per worker: `kqueue` on macOS, `epoll` on Linux, with an opt-in `io_uring` backend on Linux ≥ 6.0 (`FLARE_BUFRING_HANDLER=1`) that falls back to `epoll` automatically when the kernel is older or the flag is unset. Per-connection state machine, an RFC 7230 parser fuzzed across 24 harnesses, and a `Handler` trait that takes plain `def` functions or compiled-down structs.
 
 ```mojo
 from flare import HttpServer, Router, Request, Response, ok, SocketAddr
@@ -30,41 +30,44 @@ The bar isn't "is it fast", it's *is it hard to misuse under load and easy to op
 
 ## Features
 
-- **Full networking stack — one `HttpClient`, one `HttpServer`, version-aware**: a single `flare.http.HttpServer.serve(handler, num_workers=N)` accept loop auto-dispatches HTTP/1.1 and HTTP/2 per accepted connection (cleartext preface peek + ALPN `h2` for TLS), and a single `flare.http.HttpClient` advertises ALPN `["h2", "http/1.1"]` for `https://` URLs (or speaks h2c via prior knowledge with `prefer_h2c=True`). Same `Router` / `App[S]` / middleware / typed extractors / `Auth` work unchanged on both wires. WebSocket (RFC 6455, client + server), TLS 1.2/1.3 (client + server, OpenSSL with ALPN both directions), TCP, UDP, DNS, all layered so each module imports only from below.
-- **One reactor per worker** (`kqueue` on macOS, `epoll` on Linux + `EPOLLEXCLUSIVE` shared listener) with a per-connection state machine + timer wheel; **thread-per-core** via `HttpServer.serve(handler, num_workers=N)`. Optional cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`) for skewed-keepalive workloads.
-- **Composable handlers**: `Handler` trait, `Router` with path params, `App[S]` for shared state, typed extractors (`PathInt` / `QueryInt` / `HeaderStr` / `Form` / `Multipart` / `Cookies` / ...), middleware stack (`Logger`, `RequestId`, `Compress`, `CatchPanic`), `Cors`, `FileServer` with HEAD + Range; `ComptimeRouter[ROUTES]` unrolls dispatch at compile time.
-- **Same handler runs on HTTP/1.1 + HTTP/2**: every higher-level construct (Router, middleware, extractors, sessions, content negotiation) operates on `Request` / `Response`, so the unified `HttpServer.serve(handler)` loop dispatches both wires through the same handler with no protocol-aware code in the application.
-- **Sessions + signed cookies**: HMAC-SHA256 (`flare.crypto`) under typed `Session[T]` with `CookieSessionStore` + `InMemorySessionStore` and the `signed_cookie_*` lower-level codec.
-- **Content negotiation**: gzip + brotli content-encoding (RFC 9110 §12.5.3 q-value parser), urlencoded + multipart form parsing, RFC 6265 cookie jars, RFC 9110 Range support.
-- **Streaming + push**: first-class Server-Sent Events (`SseChannel` / `SseEvent` / `sse_response` / `SseStreamingResponse`), inbound streaming bodies via `RequestChunkSource`, outbound `StreamingResponse[B]` with backpressure.
-- **Edge / proxy ready**: HAProxy PROXY protocol v1 + v2 parser (`flare.http.parse_proxy_protocol`, fuzz-clean over 200K runs); `UnixListener` / `UnixStream` AF_UNIX subsystem under `flare.uds` for sidecar IPC; RFC 9110 §13 `Conditional[Inner]` middleware (`If-Match` / `If-None-Match` / `If-Modified-Since` / `If-Unmodified-Since` → 304/412); client-side `RedirectPolicy` (`FOLLOW_ALL` / `SAME_ORIGIN_ONLY` / `DENY`).
-- **Auth + CSRF batteries**: client-side `BasicAuth` / `BearerAuth` (`HttpClient(BasicAuth(...))` works on both wires); server-side `BearerExtract` / `BasicExtract` typed extractors; double-submit-cookie `CsrfToken` with constant-time comparator.
-- **Observability**: JSON-per-line `StructuredLogger[Inner]` for Datadog / Loki / Splunk; `Metrics[Inner]` + Prometheus text exposition (counter / histogram / gauge); askama-shape `Template` engine (`{{ var }}`, `{% if %}`, `{% for %}`, OWASP HTML escape) for human-facing pages.
-- **Production hygiene**: per-request `Cancel` token (peer FIN, timeout, drain unified), server-side TLS with cert reload + mTLS + ALPN, sanitised 4xx/5xx, graceful drain with per-worker `ShutdownReport`s, 24 h soak harness, **24 fuzz harnesses (5.4M+ runs, zero known crashes)** including the new RFC 8441 Extended CONNECT dispatch and the unified server's preface-peek classifier.
+- **Everything you need for a network app, in one library.** HTTP/1.1 + HTTP/2 server and client, WebSocket server and client (RFC 6455), TLS 1.2/1.3 over OpenSSL with ALPN, TCP, UDP, DNS. No external HTTP framework, no separate WebSocket library, no add-on for sessions or sanitised errors. The full layer stack lives in [`flare/`](flare/); each module imports only from layers below it.
+- **One `HttpServer`, one `HttpClient`, version-aware.** `HttpServer.serve(handler)` peeks the first 24 bytes of every accepted connection. If they match the RFC 9113 §3.4 preface, the connection is HTTP/2; otherwise it's HTTP/1.1. Same handler is invoked either way. `HttpClient.get("https://...")` advertises ALPN `["h2", "http/1.1"]` and switches wires from what the server picks. `Router`, `App[S]`, middleware, typed extractors, `Auth` — none of them know which wire is talking to them.
+- **Thread-per-core reactor.** `kqueue` on macOS, `epoll` on Linux. `HttpServer.serve(handler, num_workers=N)` runs N pthread workers behind per-worker `SO_REUSEPORT` listeners by default; set `FLARE_REUSEPORT_WORKERS=0` for the shared-listener `EPOLLEXCLUSIVE` shape with tighter p99.99. Optional cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`) for skewed-keepalive workloads.
+- **Handlers compose by nesting structs, not callbacks.** `Handler` is a trait. `Router` with path params, `App[S]` for shared state, `ComptimeRouter[ROUTES]` for compile-time dispatch tables, typed extractors that turn malformed input into a sanitised 400 before your `serve` runs (`PathInt` / `QueryInt` / `HeaderStr` / `Form` / `Multipart` / `Cookies` / `Json` / ...). Middleware (`Logger`, `RequestId`, `Compress`, `CatchPanic`, `Cors`, `Conditional[Inner]`, `FileServer` with HEAD + Range) wraps another `Handler` by holding it in a field.
+- **The plumbing that's usually a separate dependency.** Signed cookies (HMAC-SHA256), typed `Session[T]` with cookie + in-memory stores. gzip + brotli + identity content-encoding. Multipart + urlencoded forms. RFC 6265 cookie jars and RFC 9110 Range. HAProxy PROXY v1 + v2 parser. AF_UNIX sockets for sidecar IPC. Server-Sent Events with backpressure. Client `RedirectPolicy` (`FOLLOW_ALL` / `SAME_ORIGIN_ONLY` / `DENY`). `BasicAuth` / `BearerAuth` on both HTTP wires. CSRF double-submit-cookie. Observability: JSON-per-line `StructuredLogger`, `Metrics` + Prometheus text exposition, askama-shape templates with HTML escaping.
+- **Operational discipline.** Per-request `Cancel` token (peer FIN, deadline, graceful drain) plumbed to `CancelHandler`. TLS cert reload + mTLS. Sanitised 4xx/5xx (extractor messages logged with request id, never echoed to the client). `drain(timeout_ms)` returns a `ShutdownReport` per worker. 24h soak harness. **24 fuzz harnesses, 5.4M+ runs, zero known crashes**, including the RFC 8441 Extended CONNECT dispatch and the unified server's preface-peek classifier. ASan + assert-mode coverage on every FFI boundary.
 
 ## Numbers
 
-TFB plaintext (`GET /plaintext` → 13-byte `Hello, World!`), `wrk2 -t8 -c256 -d12s --latency` (coordinated-omission corrected), Linux EPYC 7R32. Each row's `R=` is the highest sustained rate that holds p99.99 ≤ 5 ms (one step below the queue-overflow cliff).
+TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), Linux EPYC 7R32 dev-box. Each row is the highest sustained rate that holds `p99 ≤ 50 ms` from the bench harness's calibrated peak-finder, with the latency distribution measured at 90% of that peak across five 30s rounds. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` for flare, `cargo build --release --locked` for actix_web / hyper / axum), so the comparison is on the same compiler posture both sides.
 
-| Server | Workers | Req/s (peak-sustainable) | p99 (ms) | p99.99 (ms) |
-|---|---:|---:|---:|---:|
-| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **258,292** | **2.77** | **3.54** |
-| actix_web (tokio) | 4 | 248,361 | 2.72 | 3.43 |
-| **flare_mc** (handler) [^reuse] | **4** | **238,431** | **2.76** | **3.47** |
-| hyper (tokio multi-thread) | 4 | 208,624 | 2.79 | 3.70 |
-| axum (tokio multi-thread) | 4 | 189,953 | 2.69 | 3.74 |
-| nginx (`worker_processes 1`) | 1 | 68,875 | 2.95 | 3.59 |
-| **flare** (reactor) | **1** | **52,147** | **2.79** | **3.46** |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 34,439 | 2.98 | 4.70 |
+**4-worker comparison** (the four frameworks that ship a multi-worker mode):
 
-- **flare_mc_static beats actix_web** (+4 % req/s, **fastest** of the five 4-worker frameworks).
-- **flare_mc handler beats hyper** (+14 %) **and axum** (+25 %) and is within 4 % of actix_web.
-- **flare keeps a tight tail** at peak: 3.47 ms / 3.54 ms p99.99 vs actix_web 3.43, hyper 3.70, axum 3.74.
-- **flare 1w** keeps the tightest p99.99 of the single-worker pack (3.46 ms vs nginx 3.59 / Go 4.70). Throughput: 76 % of nginx 1w and 1.51x Go 1w on this unpinned dev-box (88 % / 1.56x on the historical CPU-pinned reference).
+| Server | Workers | Req/s | p50 (ms) | p99 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|
+| actix_web (tokio) | 4 | 259,950 | 1.23 | 2.74 | 3.88 |
+| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **259,125** | **1.17** | **2.74** | **3.38** |
+| **flare_mc** (handler) [^reuse] | **4** | **222,755** | **1.25** | **2.70** | **3.38** |
+| hyper (tokio multi-thread) | 4 | 219,966 | 1.25 | 2.85 | 3.63 |
+| axum (tokio multi-thread) | 4 | 204,439 | 1.28 | 2.82 | 3.65 |
 
-Full methodology, the rate-sweep that locates each cliff, the historical CPU-pinned reference run, and reproducibility instructions are in [`docs/benchmark.md`](docs/benchmark.md).
+**Single-worker** (per-core request-processing cost):
 
-[^reuse]: Multi-worker flare uses per-worker `SO_REUSEPORT` listeners by default for `num_workers >= 2` (matching actix_web's listener strategy). Set `FLARE_REUSEPORT_WORKERS=0` to opt back into the single-listener `EPOLLEXCLUSIVE` shape, which trades ~10 % req/s for an even tighter p99.99 (3.23 ms in the historical CPU-pinned reference). See [`docs/benchmark.md`](docs/benchmark.md) for both modes. Numbers above are from `mojo build -D ASSERT=none` (matches what production users should pass; see [Production build](#production-build)).
+| Server | Workers | Req/s | p50 (ms) | p99 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|
+| nginx (`worker_processes 1`) | 1 | 80,040 | 1.16 | 3.20 | 4.39 |
+| **flare** (reactor) | **1** | **74,489** | **1.24** | **3.05** | **3.36** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 39,644 | 1.38 | 3.22 | 4.40 |
+
+What jumps out:
+
+- **flare_mc_static essentially ties actix_web for #1 throughput** (within 0.3%) and posts the **best p99.99 of the four 4-worker frameworks** (3.38 ms vs actix_web's 3.88, hyper 3.63, axum 3.65).
+- **flare_mc (the handler path)** beats hyper by 1.3% and axum by 9% on throughput, and **leads on every tail metric** (best p99 *and* best p99.99 of the four). It's 14% behind actix_web on raw req/s, which is the honest residual handler-path gap to actix's `Bytes::from_static` path.
+- **flare 1w**: 93% of nginx 1w throughput (74,489 vs 80,040) but with the **tightest tail of the single-worker pack** -- p99 3.05 vs nginx 3.20, p99.99 3.36 vs nginx 4.39. 1.88x Go `net/http` at the same worker count, again with a tighter tail (p99.99 3.36 vs 4.40 ms).
+
+Full methodology, the rate-sweep that locates each cliff, the historical CPU-pinned reference run, and reproducibility instructions are in [`docs/benchmark.md`](docs/benchmark.md). The matching nginx / hyper / actix_web / axum baselines built from-source by the harness live under [`benchmark/baselines/`](benchmark/baselines/).
+
+[^reuse]: Multi-worker flare uses per-worker `SO_REUSEPORT` listeners by default for `num_workers >= 2` (matching actix_web). Set `FLARE_REUSEPORT_WORKERS=0` to opt into the single-listener `EPOLLEXCLUSIVE` shape, which trades ~17% req/s for ~0.25 ms tighter p99.99. See [`docs/benchmark.md`](docs/benchmark.md) for the listener-mode A/B and [Production build](#production-build) for the `mojo build -D ASSERT=none` shape these numbers use.
 
 ## Install
 
@@ -281,7 +284,7 @@ We do not lead on speed. The position is plain: *speed claims in networking are 
 
 ### Production build
 
-flare ships dev-grade safety asserts on every FFI / unsafe-pointer boundary (`debug_assert[assert_mode="safe"]` per [`.cursor/rules/sanitizers-and-bounds-checking.mdc`](.cursor/rules/sanitizers-and-bounds-checking.mdc)). The Mojo stdlib default `ASSERT=safe` keeps them in the binary — great for development (catches use-after-free, EBADF, EFAULT before they become silent kernel-mode UB), but each one costs one cmp+je on the reactor hot path.
+flare ships safety asserts on every FFI / unsafe-pointer boundary (`debug_assert[assert_mode="safe"]`). The Mojo stdlib default `ASSERT=safe` keeps them in the binary, which is what you want in development -- they catch use-after-free, EBADF, EFAULT in the FFI layer before they become silent kernel-mode UB. Each one costs roughly one cmp+je on the reactor hot path.
 
 For production deployments and apples-to-apples benchmarks, build with asserts compiled out:
 
@@ -290,9 +293,9 @@ mojo build -D ASSERT=none -I . examples/08_http_server.mojo -o myserver
 ./myserver
 ```
 
-This matches what the bench harness uses for the `flare_mc_static` / `flare_mc` numbers above (so they're directly comparable to Rust's `cargo build --release --locked` posture). `mojo build` defaults to `-O3`; no extra flag needed.
+This matches what the bench harness uses for the `flare_mc_static` / `flare_mc` numbers above (directly comparable to Rust's `cargo build --release --locked` posture). `mojo build` defaults to `-O3`; no extra flag needed.
 
-The full assert hierarchy (`none` / `safe` / `all` / `warn`) and when to use each is documented in [`.cursor/rules/sanitizers-and-bounds-checking.mdc`](.cursor/rules/sanitizers-and-bounds-checking.mdc) §2.
+Full assert-mode hierarchy (`none` / `safe` / `all` / `warn`), the sanitizer harness, and contributor guidance for adding `debug_assert` to new FFI wrappers all live in [`docs/build.md`](docs/build.md).
 
 ## Security
 
