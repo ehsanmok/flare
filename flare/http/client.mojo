@@ -50,6 +50,13 @@ from json import dumps, Value as JsonValue
 from ..net import SocketAddr
 from ..dns import resolve
 
+from ..http2.client import (
+    Http2ClientConnection,
+    Http2Response,
+    _h2_response_to_http,
+)
+from ..http2.hpack import HpackHeader
+
 
 struct HttpClient(Movable):
     """A blocking HTTP/1.1 client.
@@ -617,9 +624,37 @@ struct HttpClient(Movable):
 
         # ── Connect and send ───────────────────────────────────────────────
         if u.is_tls():
+            # Always advertise ALPN ``["h2", "http/1.1"]`` on the
+            # TLS ClientHello so the server can pick HTTP/2 if it
+            # supports it. The user-visible API is unchanged: if
+            # the server picks h2 we drive the request through
+            # the internal :class:`Http2ClientConnection`; if it
+            # picks http/1.1 (or doesn't pick anything, e.g. an
+            # ALPN-unaware server) we fall through to the
+            # existing HTTP/1.1 wire path. Either way we return
+            # a :class:`flare.http.Response` so the caller can't
+            # tell which wire was used.
+            var tls_cfg = self._config.copy()
+            if len(tls_cfg.alpn) == 0:
+                tls_cfg.alpn = List[String]()
+                tls_cfg.alpn.append("h2")
+                tls_cfg.alpn.append("http/1.1")
             var stream = TlsStream.connect_timeout(
-                u.host, u.port, self._config, self._timeout_ms
+                u.host, u.port, tls_cfg^, self._timeout_ms
             )
+            var negotiated = stream.alpn_selected()
+            if negotiated == "h2":
+                var resp_h2 = _send_h2_over_tls(
+                    stream^,
+                    method,
+                    u,
+                    extra_headers,
+                    body,
+                    self._user_agent,
+                    self._auth_header,
+                )
+                return resp_h2^
+            # HTTP/1.1 over TLS (existing wire).
             var wire_bytes = wire.as_bytes()
             stream.write_all(Span[UInt8, _](wire_bytes))
             if len(body) > 0:
@@ -1068,6 +1103,147 @@ def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
     """
     var raw = _read_all_tcp(stream)
     return _parse_http_response(raw)
+
+
+# ── HTTP/2-over-TLS helper (ALPN h2 path) ─────────────────────────────────────
+
+
+comptime _H2_READ_BUF_SIZE: Int = 16384
+"""Per-syscall recv buffer size for the h2-over-TLS read pump.
+Matches the RFC 9113 §6.5.2 default ``max_frame_size``."""
+
+
+def _send_h2_over_tls(
+    var stream: TlsStream,
+    method: String,
+    u: Url,
+    extra_headers: HeaderMap,
+    body: List[UInt8],
+    user_agent: String,
+    auth_header: String,
+) raises -> Response:
+    """Drive a single HTTP/2 request over an already-handshaken TLS
+    stream and return the response.
+
+    Used by :meth:`HttpClient._do_request` when the server selected
+    ALPN ``h2``. The caller is responsible for owning the
+    :class:`TlsStream` -- this helper consumes it (sends GOAWAY +
+    closes on the way out) and returns the lowered
+    :class:`flare.http.Response`.
+    """
+    var conn = Http2ClientConnection()
+    # Translate flare.http headers -> HpackHeader, lower-case names
+    # per RFC 9113 §8.1.2 and strip the connection-level headers
+    # RFC 9113 §8.2.2 forbids on h2.
+    var extra = List[HpackHeader]()
+    for i in range(extra_headers.len()):
+        var k = extra_headers._keys[i]
+        var v = extra_headers._values[i]
+        var lk = String(capacity=k.byte_length() + 1)
+        var kp = k.unsafe_ptr()
+        for j in range(k.byte_length()):
+            var c = Int(kp[j])
+            if c >= 65 and c <= 90:
+                lk += chr(c + 32)
+            else:
+                lk += chr(c)
+        if (
+            lk == "connection"
+            or lk == "transfer-encoding"
+            or lk == "keep-alive"
+            or lk == "proxy-connection"
+            or lk == "upgrade"
+            or lk == "host"
+        ):
+            continue
+        extra.append(HpackHeader(lk^, v))
+    # User-Agent (only when caller didn't already supply one).
+    if extra_headers.get("User-Agent").byte_length() == 0:
+        extra.append(HpackHeader("user-agent", user_agent))
+    # Stored Authorization from the construction-time Auth strategy.
+    if (
+        auth_header.byte_length() > 0
+        and extra_headers.get("Authorization").byte_length() == 0
+    ):
+        extra.append(HpackHeader("authorization", auth_header))
+    var authority = u.host
+    if (u.scheme == "http" and u.port != 80) or (
+        u.scheme == "https" and u.port != 443
+    ):
+        authority = authority + ":" + String(Int(u.port))
+    var sid = conn.next_stream_id()
+    conn.send_request(
+        sid,
+        method,
+        u.scheme,
+        authority,
+        u.request_target(),
+        extra,
+        Span[UInt8, _](body),
+    )
+    # Push everything queued (preface SETTINGS + HEADERS + DATA)
+    # onto the wire in one shot.
+    var out_bytes = conn.drain()
+    if len(out_bytes) > 0:
+        stream.write_all(Span[UInt8, _](out_bytes))
+    # Read pump until response_ready.
+    var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
+    buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
+    while not conn.response_ready(sid):
+        if conn.goaway_received():
+            try:
+                stream.close()
+            except:
+                pass
+            raise NetworkError(
+                "HttpClient(h2): peer sent GOAWAY before responding to stream "
+                + String(sid)
+            )
+        var n = stream.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
+        if n == 0:
+            try:
+                stream.close()
+            except:
+                pass
+            raise NetworkError(
+                "HttpClient(h2): peer closed connection mid-response on stream "
+                + String(sid)
+            )
+        conn.feed(Span[UInt8, _](buf[:n]))
+        var ack_bytes = conn.drain()
+        if len(ack_bytes) > 0:
+            stream.write_all(Span[UInt8, _](ack_bytes))
+    var maybe_err = conn.stream_error(sid)
+    if Bool(maybe_err):
+        try:
+            stream.close()
+        except:
+            pass
+        raise NetworkError(
+            "HttpClient(h2): peer sent RST_STREAM (error code "
+            + String(maybe_err.value())
+            + ") on stream "
+            + String(sid)
+        )
+    var h2_resp = conn.take_response(sid)
+    # Tear down the TLS connection -- HttpClient is one-connection-
+    # per-request on HTTP/1.1 and we keep the same shape on h2 to
+    # preserve the existing user-visible behaviour. Multi-request
+    # h2 multiplexing on a persistent connection is what
+    # :class:`flare.http2.Http2Client` is for and stays the high-
+    # throughput surface.
+    try:
+        conn.send_goaway(sid, 0)
+        var goaway_bytes = conn.drain()
+        if len(goaway_bytes) > 0:
+            stream.write_all(Span[UInt8, _](goaway_bytes))
+    except:
+        pass
+    try:
+        stream.close()
+    except:
+        pass
+    return _h2_response_to_http(h2_resp^)
 
 
 # ── Module-level convenience functions ────────────────────────────────────────
