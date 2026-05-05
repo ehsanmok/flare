@@ -26,6 +26,45 @@ from std.memory import UnsafePointer
 from ..net.socket import _find_flare_lib
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Mojo's ASAP destruction policy reclaims a function-local ``OwnedDLHandle``
+# right after its last Mojo-visible use, which in a naive
+# ``var lib = OwnedDLHandle(...); var fn = lib.get_function(...); fn(...)``
+# pattern is the ``get_function`` call — *not* the ``fn(...)`` invocation,
+# because once the cached function pointer has been read out the runtime
+# considers ``lib`` dead. The destructor calls ``dlclose``, the dylib gets
+# unmapped, and the cached pointer dangles into freed memory by the time we
+# call it.  See the long discussion in ``flare/http/encoding.mojo`` and the
+# brotli / ``_flare_fs_access`` ports for the same idiom.
+#
+# The fix is to anchor ``lib``'s lifetime to a scope that the runtime can
+# see is still live during the FFI call: open the handle in the public
+# function and pass it through to a ``read lib`` (borrowed) helper that
+# does the ``get_function`` + invocation. The borrow keeps the outer
+# ``OwnedDLHandle`` alive across the call.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _do_hmac_sha256(
+    read lib: OwnedDLHandle,
+    key: List[UInt8],
+    msg: List[UInt8],
+    mut out: List[UInt8],
+) raises:
+    var fn_hmac = lib.get_function[
+        def(Int, Int, Int, Int, Int) thin abi("C") -> c_int
+    ]("flare_hmac_sha256")
+    var rc = fn_hmac(
+        Int(key.unsafe_ptr()),
+        len(key),
+        Int(msg.unsafe_ptr()),
+        len(msg),
+        Int(out.unsafe_ptr()),
+    )
+    if Int(rc) != 0:
+        raise Error("flare_hmac_sha256: FFI call failed")
+
+
 def hmac_sha256(key: List[UInt8], msg: List[UInt8]) raises -> List[UInt8]:
     """Compute HMAC-SHA256(key, msg). Returns a 32-byte digest.
 
@@ -43,19 +82,30 @@ def hmac_sha256(key: List[UInt8], msg: List[UInt8]) raises -> List[UInt8]:
     """
     var out = List[UInt8](length=32, fill=UInt8(0))
     var lib = OwnedDLHandle(_find_flare_lib())
-    var fn_hmac = lib.get_function[
+    _do_hmac_sha256(lib, key, msg, out)
+    return out^
+
+
+def _do_hmac_sha256_verify(
+    read lib: OwnedDLHandle,
+    key: List[UInt8],
+    msg: List[UInt8],
+    mac: List[UInt8],
+) raises -> Bool:
+    var fn_v = lib.get_function[
         def(Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ]("flare_hmac_sha256")
-    var rc = fn_hmac(
+    ]("flare_hmac_sha256_verify")
+    var rc = fn_v(
         Int(key.unsafe_ptr()),
         len(key),
         Int(msg.unsafe_ptr()),
         len(msg),
-        Int(out.unsafe_ptr()),
+        Int(mac.unsafe_ptr()),
     )
-    if Int(rc) != 0:
-        raise Error("flare_hmac_sha256: FFI call failed")
-    return out^
+    var rc_int = Int(rc)
+    if rc_int < 0:
+        raise Error("flare_hmac_sha256_verify: FFI call failed")
+    return rc_int == 1
 
 
 def hmac_sha256_verify(
@@ -80,20 +130,7 @@ def hmac_sha256_verify(
     if len(mac) != 32:
         return False
     var lib = OwnedDLHandle(_find_flare_lib())
-    var fn_v = lib.get_function[
-        def(Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ]("flare_hmac_sha256_verify")
-    var rc = fn_v(
-        Int(key.unsafe_ptr()),
-        len(key),
-        Int(msg.unsafe_ptr()),
-        len(msg),
-        Int(mac.unsafe_ptr()),
-    )
-    var rc_int = Int(rc)
-    if rc_int < 0:
-        raise Error("flare_hmac_sha256_verify: FFI call failed")
-    return rc_int == 1
+    return _do_hmac_sha256_verify(lib, key, msg, mac)
 
 
 # ── URL-safe base64 (RFC 4648 paragraph 5, no padding) ─────────────────────

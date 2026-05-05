@@ -94,6 +94,40 @@ def _base64_encode(data: Span[UInt8, _]) -> String:
 
 
 # ── SHA-1 via libcrypto FFI ───────────────────────────────────────────────────
+#
+# ``_do_sha1`` takes ``lib`` as a ``read`` (borrow) so Mojo's ASAP destruction
+# policy can't reclaim the handle between ``get_function`` and the actual
+# ``fn_sha1`` invocation. Without this, the dylib is unmapped and the cached
+# function pointer dangles into freed memory by the time we call it. See the
+# long discussion in ``flare/http/encoding.mojo`` and the matching idiom on
+# the server side in ``flare/ws/server.mojo``.
+
+
+def _do_sha1(
+    read lib: OwnedDLHandle, data_bytes: Span[UInt8, _]
+) -> List[UInt8]:
+    """Invoke SHA-1 with ``lib`` borrowed across both ``get_function``
+    and the call.
+
+    Args:
+        lib: Borrowed handle to ``libflare_tls`` (keeps it mapped).
+        data_bytes: Input bytes to hash.
+
+    Returns:
+        20-byte SHA-1 digest.
+    """
+    # SHA1(const unsigned char *d, size_t n, unsigned char *md) -> unsigned char*
+    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int](
+        "SHA1"
+    )
+    var digest_buf = List[UInt8](capacity=_SHA1_LEN)
+    digest_buf.resize(_SHA1_LEN, 0)
+    _ = fn_sha1(
+        Int(data_bytes.unsafe_ptr()),
+        Int(len(data_bytes)),
+        Int(digest_buf.unsafe_ptr()),
+    )
+    return digest_buf^
 
 
 def _sha1(data: String) raises -> List[UInt8]:
@@ -112,19 +146,7 @@ def _sha1(data: String) raises -> List[UInt8]:
         NetworkError: If the SHA-1 function cannot be loaded.
     """
     var lib = OwnedDLHandle(_find_flare_lib())
-    # SHA1(const unsigned char *d, size_t n, unsigned char *md) -> unsigned char*
-    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int](
-        "SHA1"
-    )
-    var digest_buf = List[UInt8](capacity=_SHA1_LEN)
-    digest_buf.resize(_SHA1_LEN, 0)
-    var data_bytes = data.as_bytes()
-    _ = fn_sha1(
-        Int(data_bytes.unsafe_ptr()),
-        Int(len(data_bytes)),
-        Int(digest_buf.unsafe_ptr()),
-    )
-    return digest_buf^
+    return _do_sha1(lib, data.as_bytes())
 
 
 # ── HTTP upgrade helpers ──────────────────────────────────────────────────────

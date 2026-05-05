@@ -14,9 +14,16 @@
 # Mojo's _find_flare_zlib_lib resolves via CONDA_PREFIX, so anything pixi
 # launches finds it automatically without env-var indirection.
 #
-# LD_PRELOAD on Linux: keeps libflare_zlib.so mapped so ASAP-destroyed
-# OwnedDLHandles in flare/http/encoding.mojo don't dlclose it under the
-# JIT's feet. See the sibling flare/tls/ffi/build.sh for the full rationale.
+# LD_PRELOAD on Linux: belt-and-suspenders defense for the
+# OwnedDLHandle / ASAP-destruction class of bug. The Mojo-side fix —
+# routing every FFI call through a ``_do_*(read lib: OwnedDLHandle, ...)``
+# borrow helper — is now applied at every call site (see
+# flare/http/encoding.mojo, flare/http/middleware.mojo, flare/http/fs.mojo,
+# flare/tls/stream.mojo, flare/tls/_server_ffi.mojo, flare/ws/{client,server}.mojo,
+# flare/crypto/hmac.mojo, flare/net/{socket,_libc}.mojo, flare/tcp/stream.mojo).
+# LD_PRELOAD pins the .so refcount above zero so even a hypothetical
+# regression to the naive pattern cannot dlclose the library mid-call.
+# See the sibling flare/tls/ffi/build.sh for the full rationale.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../../../build"

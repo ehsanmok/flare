@@ -104,6 +104,20 @@ def _find_flare_lib() -> String:
     return out^
 
 
+def _do_flare_set_nonblocking(
+    read lib: OwnedDLHandle, fd: c_int, enable: c_int
+) -> c_int:
+    """Invoke ``flare_set_nonblocking`` with ``lib`` borrowed across both
+    ``get_function`` and the call (macOS path only). See the OwnedDLHandle /
+    ASAP-destruction discussion in ``flare/tls/stream.mojo`` for why the
+    borrow is required.
+    """
+    var fn_nb = lib.get_function[def(c_int, c_int) thin abi("C") -> c_int](
+        "flare_set_nonblocking"
+    )
+    return fn_nb(fd, enable)
+
+
 struct RawSocket(Movable):
     """A thin, owning wrapper around a POSIX socket file descriptor.
 
@@ -339,10 +353,9 @@ struct RawSocket(Movable):
 
         comptime if CompilationTarget.is_macos():
             var lib = OwnedDLHandle(_find_flare_lib())
-            var fn_nb = lib.get_function[
-                def(c_int, c_int) thin abi("C") -> c_int
-            ]("flare_set_nonblocking")
-            var rc = fn_nb(self.fd, c_int(1) if enabled else c_int(0))
+            var rc = _do_flare_set_nonblocking(
+                lib, self.fd, c_int(1) if enabled else c_int(0)
+            )
             if rc < c_int(0):
                 var e = get_errno()
                 raise NetworkError(_os_error("fcntl F_SETFL"), Int(e.value))

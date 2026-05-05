@@ -70,6 +70,24 @@ from ..net._libc import (
 )
 
 
+def _do_flare_connect_timeout(
+    read lib: OwnedDLHandle,
+    fd: c_int,
+    sa_addr: Int,
+    sa_len: c_uint,
+    timeout_ms: c_int,
+) -> c_int:
+    """Invoke ``flare_connect_timeout`` with ``lib`` borrowed across both
+    ``get_function`` and the call. See the ASAP-destruction discussion in
+    ``flare/tls/stream.mojo`` and ``flare/http/encoding.mojo`` for why this
+    indirection is required.
+    """
+    var fn_ct = lib.get_function[
+        def(c_int, Int, c_uint, c_int) thin abi("C") -> c_int
+    ]("flare_connect_timeout")
+    return fn_ct(fd, sa_addr, sa_len, timeout_ms)
+
+
 struct TcpStream(Movable):
     """A connected TCP socket.
 
@@ -203,11 +221,14 @@ struct TcpStream(Movable):
 
         comptime if CompilationTarget.is_macos():
             # macOS/arm64: use C helper to avoid Mojo variadic fcntl ABI bug.
+            # Route through ``_do_flare_connect_timeout`` so ``lib`` is held as
+            # a borrow across both ``get_function`` and the call (see
+            # OwnedDLHandle / ASAP-destruction discipline in
+            # flare/tls/stream.mojo).
             var lib = OwnedDLHandle(_find_flare_lib())
-            var fn_ct = lib.get_function[
-                def(c_int, Int, c_uint, c_int) thin abi("C") -> c_int
-            ]("flare_connect_timeout")
-            var rc = fn_ct(sock.fd, Int(sa[0]), sa[1], c_int(timeout_ms))
+            var rc = _do_flare_connect_timeout(
+                lib, sock.fd, Int(sa[0]), sa[1], c_int(timeout_ms)
+            )
             sa[0].free()
 
             if rc == c_int(-2):

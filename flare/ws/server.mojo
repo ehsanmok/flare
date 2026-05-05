@@ -31,16 +31,40 @@ comptime _SHA1_LEN: Int = 20
 # ── SHA-1 helper (same approach as ws/client.mojo) ───────────────────────────
 
 
+def _do_sha1_srv(
+    read lib: OwnedDLHandle, data_bytes: Span[UInt8, _]
+) -> List[UInt8]:
+    """Invoke the SHA-1 C function with ``lib`` borrowed.
+
+    Doing both ``get_function`` and the call inside the borrow keeps
+    ``lib`` mapped across the entire FFI surface — matches the
+    canonical idiom from ``flare.http.encoding._do_compress`` and
+    avoids the ASAP-destruction window where the cached function
+    pointer would dangle after ``get_function`` returns. See the long
+    discussion in ``flare/http/encoding.mojo``.
+
+    Args:
+        lib: Borrowed handle to ``libflare_tls`` (keeps it mapped).
+        data_bytes: Input bytes to hash.
+
+    Returns:
+        20-byte SHA-1 digest as ``List[UInt8]``.
+    """
+    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int](
+        "SHA1"
+    )
+    var digest = List[UInt8](capacity=_SHA1_LEN)
+    digest.resize(_SHA1_LEN, 0)
+    _ = fn_sha1(
+        Int(data_bytes.unsafe_ptr()),
+        Int(len(data_bytes)),
+        Int(digest.unsafe_ptr()),
+    )
+    return digest^
+
+
 def _sha1_srv(data: String) raises -> List[UInt8]:
     """Compute SHA-1 via the bundled libflare_tls shared library.
-
-    Opens the library, retrieves the ``SHA1`` function pointer, then
-    delegates to ``_do_sha1_srv`` which takes ``lib`` as a ``read``
-    (borrow). A borrow cannot be ASAP-destroyed, so the library stays
-    mapped for the entire C call. Without this, Mojo's ASAP policy
-    calls ``dlclose`` right after ``get_function`` — before the pointer
-    is ever invoked — unmapping the library and crashing on macOS ARM64.
-    See MSTDL-2334.
 
     Args:
         data: Input string to hash.
@@ -52,39 +76,7 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
         NetworkError: If the SHA-1 function cannot be loaded.
     """
     var lib = OwnedDLHandle(_find_flare_lib())
-    var fn_sha1 = lib.get_function[def(Int, Int, Int) thin abi("C") -> Int](
-        "SHA1"
-    )
-    return _do_sha1_srv(fn_sha1, data.as_bytes(), lib)
-
-
-def _do_sha1_srv(
-    fn_sha1: def(Int, Int, Int) thin abi("C") -> Int,
-    data_bytes: Span[UInt8, _],
-    read lib: OwnedDLHandle,
-) -> List[UInt8]:
-    """Invoke the SHA-1 C function with ``lib`` kept alive via borrow.
-
-    ``lib`` is a ``read`` (borrow) parameter: Mojo cannot ASAP-destroy
-    it while this function is executing, ensuring the shared library
-    remains mapped across the FFI call.
-
-    Args:
-        fn_sha1: Function pointer to ``SHA1`` from libflare_tls.
-        data_bytes: Input bytes to hash.
-        lib: Borrowed handle to the shared library (keeps it mapped).
-
-    Returns:
-        20-byte SHA-1 digest as ``List[UInt8]``.
-    """
-    var digest = List[UInt8](capacity=_SHA1_LEN)
-    digest.resize(_SHA1_LEN, 0)
-    _ = fn_sha1(
-        Int(data_bytes.unsafe_ptr()),
-        Int(len(data_bytes)),
-        Int(digest.unsafe_ptr()),
-    )
-    return digest^
+    return _do_sha1_srv(lib, data.as_bytes())
 
 
 # ── Base64 encoder (same implementation as ws/client.mojo) ───────────────────

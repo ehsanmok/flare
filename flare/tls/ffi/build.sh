@@ -16,21 +16,23 @@
 # env-var indirection.
 #
 # Why also LD_PRELOAD on Linux (same .so path as the install)?
-#   Most of flare's FFI entry points (flare/tls/stream.mojo,
-#   flare/net/socket.mojo, flare/ws/*, flare/tcp/stream.mojo) still use a
-#   naive `var lib = OwnedDLHandle(...); var fn = lib.get_function(...);
-#   fn(...)` pattern. Mojo's ASAP destruction will dlclose `lib` between
-#   `get_function` and the actual `fn` invocation, unmapping the library
-#   and crashing the JIT on Linux (see the same warning in
-#   flare/http/encoding.mojo). The fix — passing `lib` as a
-#   `read lib: OwnedDLHandle` borrow to an inner helper — is applied in
-#   flare/net/_libc.mojo for the reactor's hot path, but the TLS stack
-#   would need a ~14-site refactor to follow suit. Until that lands,
-#   LD_PRELOADing $INSTALLED keeps its refcount pinned above zero, so
-#   dlclose becomes a no-op and the existing code paths keep working.
-#   Critically we LD_PRELOAD the *same .so file* Mojo dlopens (both
-#   resolve to $INSTALLED), so there is exactly one mapping in the
-#   process — no "two copies, one unmapped" hazard.
+#   All of flare's FFI entry points now route through ``_do_*(read lib:
+#   OwnedDLHandle, ...)`` borrow helpers (see flare/tls/stream.mojo,
+#   flare/tls/_server_ffi.mojo, flare/ws/{client,server}.mojo,
+#   flare/crypto/hmac.mojo, flare/net/_libc.mojo, flare/net/socket.mojo,
+#   flare/tcp/stream.mojo, flare/http/{encoding,middleware,fs}.mojo).
+#   That's the load-bearing fix for Mojo's ASAP destruction policy:
+#   the borrow keeps ``lib`` alive across both ``get_function`` and the
+#   call, so ``dlclose`` cannot fire between them and the cached
+#   function pointer cannot dangle.
+#
+#   LD_PRELOAD remains as belt-and-suspenders defense: it pins the .so
+#   refcount above zero so even a hypothetical regression to the naive
+#   pattern (e.g. a contributor adding a new FFI call site that forgets
+#   the borrow helper) cannot dlclose the library. Critically we
+#   LD_PRELOAD the *same .so file* Mojo dlopens (both resolve to
+#   $INSTALLED), so there is exactly one mapping in the process —
+#   no "two copies, one unmapped" hazard.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../../../build"
