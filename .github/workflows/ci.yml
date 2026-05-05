@@ -26,13 +26,22 @@ jobs:
       matrix:
         # Linux: ``ubuntu-latest`` (currently 24.04, glibc 2.39). The
         # ``libKGENCompilerRTShared.so`` runtime crash that previously
-        # forced this matrix onto ``ubuntu-22.04`` was tied to an
-        # older pinned Mojo nightly; the current
-        # ``mojo == 0.26.3.0.dev2026042717`` runs the full
-        # ``pixi run tests`` workload on glibc 2.39 cleanly. The
-        # toolchain side (``flare/tls/ffi`` C++ wrapper, every
-        # rust-built bench baseline) all build against the
-        # conda-forge sysroot pinned at glibc ``>=2.34`` (see
+        # forced this matrix onto ``ubuntu-22.04`` is back —
+        # specifically, the Mojo runtime segfaults transiently on a
+        # fresh process before any user code runs (same per-frame
+        # offsets ``+0x6ec5b / +0x6be36 / +0x6f907`` documented for
+        # the macos-14 OwnedDLHandle FFI bug). It's heisenbuggy:
+        # CI on ``79dcd54`` (immediate predecessor of ``6b36981``)
+        # passed on the same image, then ``6b36981`` crashed; the
+        # fuzz workflow on the same image hit the same offsets at run
+        # 25351119595. Rather than repinning the matrix again, the
+        # ``Run tests`` step re-uses the retry-up-to-3x wrapper that
+        # was added in ``bcd107d2`` and inadvertently dropped in
+        # ``0a14f15`` — the same wrapper the workflow used to
+        # absorb the same crash family before. Toolchain side
+        # (``flare/tls/ffi`` C++ wrapper, every rust-built bench
+        # baseline) builds against the conda-forge sysroot pinned at
+        # glibc ``>=2.34`` (see
         # ``[target.linux-64.dependencies] sysroot_linux-64 = ">=2.34"``
         # in ``pixi.toml``), so the resulting binaries reference
         # only GLIBC_2.34 and below and stay portable down to RHEL 9
@@ -77,4 +86,26 @@ jobs:
         run: pixi run bash benchmark/scripts/_make_self_signed.sh
 
       - name: Run tests
-        run: pixi run tests
+        # The Mojo nightly's ``libKGENCompilerRTShared.so`` segfaults
+        # transiently on a fresh process before any user code runs
+        # (same per-frame offsets the workflow header documents).
+        # ~1-in-3 invocation rate on the current ``ubuntu-latest``
+        # image; the next run always succeeds. Retry up to three
+        # times so the build only fails if the runtime crash is
+        # stable, not flaky. The shell ``set -e`` is intentionally
+        # not used inside the loop body so the retry can observe the
+        # non-zero exit.
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            echo "── tests attempt $attempt/3 ──"
+            pixi run tests
+            rc=$?
+            if [ $rc -eq 0 ]; then
+              exit 0
+            fi
+            echo "── attempt $attempt failed (rc=$rc), retrying ──"
+            sleep 5
+          done
+          echo "── all 3 attempts failed (rc=$rc) ──"
+          exit $rc
