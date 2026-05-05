@@ -30,7 +30,8 @@ def main() raises:
 ## What flare is
 
 One reactor per worker (``kqueue`` on macOS, ``epoll`` on
-Linux), a ``Handler`` trait that takes plain ``def`` functions
+Linux, opt-in ``io_uring`` on Linux >= 6.0 via
+``FLARE_BUFRING_HANDLER=1``), a ``Handler`` trait that takes plain ``def`` functions
 or compiled-down structs, an RFC 7230 parser fuzzed across 24
 harnesses, and a ``Cancel`` token plumbed to handlers via
 ``CancelHandler``. ``num_workers=1`` is a single-threaded
@@ -73,10 +74,12 @@ flare.crypto   - HMAC-SHA256, base64url
 flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server, ALPN)
 flare.tcp      - TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      - UdpSocket (IPv4 + IPv6)
+flare.uds      - UnixListener + UnixStream (AF_UNIX sidecar IPC)
 flare.dns      - getaddrinfo (dual-stack)
 flare.net      - IpAddr, SocketAddr, RawSocket
-flare.runtime  - Reactor (kqueue/epoll), TimerWheel, Scheduler,
-                 HandoffQueue + WorkerHandoffPool, Pool[T]
+flare.runtime  - Reactor (kqueue / epoll, opt-in io_uring on Linux),
+                 TimerWheel, Scheduler, HandoffQueue +
+                 WorkerHandoffPool, BufferPool, vectored I/O
 ```
 
 Each layer only imports from layers below it. No circular dependencies.

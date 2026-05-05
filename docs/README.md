@@ -6,6 +6,7 @@ directory carry the detail.
 
 | Page | What's in it |
 |---|---|
+| [`features.md`](features.md) | Complete feature inventory across HTTP server / client, HTTP/2, WebSocket, TLS, sessions, middleware, extractors, runtime primitives, observability, configuration knobs, and stability guarantees. Each entry links to the source module and example. |
 | [`architecture.md`](architecture.md) | Reactor + per-connection state machine + thread-per-core scheduler, with a request-lifecycle sequence diagram including the `Cancel` injection point, two listener strategies, and the HTTP/2 same-handler-different-wire compatibility contract. |
 | [`benchmark.md`](benchmark.md) | Methodology, workloads, baselines, single-worker vs multi-worker tables, the listener-mode A/B (`EPOLLEXCLUSIVE` shared listener vs per-worker `SO_REUSEPORT`), and the soak harness for long-running operational gates (slow-client / churn / mixed-load). |
 | [`build.md`](build.md) | Build modes (`-D ASSERT=none/safe/all/warn`), the sanitizer harness (`tests-asan` / `tests-tsan` / `tests-asserts-all`), production-build guidance, and contributor pattern for `debug_assert` on new FFI wrappers. |
