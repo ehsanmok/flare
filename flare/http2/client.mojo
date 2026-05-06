@@ -175,9 +175,15 @@ struct Http2ClientConfig(Copyable, Defaultable, Movable):
             including 32-byte per-entry overhead).
         allow_huffman_decode: When ``True``, the HPACK decoder
             accepts H=1 literals (Huffman-encoded) in inbound
-            HEADERS. Defaults to ``False`` -- reject-by-default
-            until a soak proves the scalar Huffman path is
-            CRIME-class-side-channel-safe under client load.
+            HEADERS via the RFC 7541 Appendix B codec. Defaults
+            to ``False`` -- reject-by-default until a soak proves
+            the scalar Huffman path is CRIME-class-side-channel-
+            safe under client load.
+        allow_huffman_encode: When ``True``, the HPACK encoder
+            picks the shorter of raw vs Huffman per emitted
+            literal on outbound HEADERS. Defaults to ``False`` --
+            v0.6 H=0-only wire output until peers and soak data
+            confirm interop.
     """
 
     var initial_window_size: Int
@@ -185,6 +191,7 @@ struct Http2ClientConfig(Copyable, Defaultable, Movable):
     var header_table_size: Int
     var max_header_list_size: Int
     var allow_huffman_decode: Bool
+    var allow_huffman_encode: Bool
 
     def __init__(out self):
         self.initial_window_size = _DEFAULT_CLIENT_INITIAL_WINDOW_SIZE
@@ -192,6 +199,7 @@ struct Http2ClientConfig(Copyable, Defaultable, Movable):
         self.header_table_size = _DEFAULT_CLIENT_HEADER_TABLE_SIZE
         self.max_header_list_size = _DEFAULT_CLIENT_MAX_HEADER_LIST_SIZE
         self.allow_huffman_decode = False
+        self.allow_huffman_encode = False
 
     def validate(self) raises -> None:
         """Raise if any field violates the RFC 9113 / RFC 7541 bounds.
@@ -352,6 +360,8 @@ struct Http2ClientConnection(Defaultable, Movable):
         out.conn.max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         out.conn.hpack_decoder.max_size = out.config.header_table_size
+        out.conn.hpack_decoder.allow_huffman = out.config.allow_huffman_decode
+        out.conn.hpack_encoder.allow_huffman = out.config.allow_huffman_encode
         # Re-emit preface + SETTINGS into a fresh outbox now that
         # ``config`` has been applied. The default-constructed
         # outbox already holds the *unconfigured* defaults, but

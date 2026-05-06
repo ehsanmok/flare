@@ -86,10 +86,16 @@ struct Http2Config(Copyable, Defaultable, Movable):
     reactor-attached driver.
 
     The ``allow_huffman_decode`` flag gates HPACK Huffman decoding
-    on the inbound HEADERS path. The H=0-only encoder + raw-literal
-    decoder is CRIME-class-side-channel-free by construction; the
-    scalar Huffman decoder is gated behind this flag (default
-    ``False``) until soak data justifies flipping it default-on.
+    on the inbound HEADERS path. The default H=0 encoder + raw-
+    literal decoder is CRIME-class-side-channel-free by construction;
+    the scalar Huffman decoder is wired through ``HpackDecoder``
+    when this flag is ``True``. Default ``False`` keeps the v0.6
+    wire format byte-identical for upgrading peers.
+
+    The ``allow_huffman_encode`` flag mirrors the decoder side: when
+    ``True`` the server's outbound HEADERS encoder picks the shorter
+    of raw vs Huffman per literal. Default ``False`` keeps the v0.6
+    H=0-only emit byte-identical.
 
     Example:
 
@@ -103,6 +109,7 @@ struct Http2Config(Copyable, Defaultable, Movable):
         max_header_list_size=16384,
         header_table_size=8192,
         allow_huffman_decode=False,
+        allow_huffman_encode=False,
     )
     var conn = H2Connection.with_config(cfg)
     ```
@@ -124,9 +131,16 @@ struct Http2Config(Copyable, Defaultable, Movable):
         header_table_size: SETTINGS_HEADER_TABLE_SIZE (RFC 7541
             §4.2). HPACK dynamic-table size budget.
         allow_huffman_decode: When ``True``, the HPACK decoder
-            accepts H=1 literals (Huffman-encoded). Defaults to
-            ``False`` -- reject-by-default until soak data
-            justifies flipping it on.
+            accepts H=1 literals (Huffman-encoded) via the RFC
+            7541 Appendix B codec. Defaults to ``False`` --
+            reject-by-default until soak data justifies flipping
+            it on.
+        allow_huffman_encode: When ``True``, the HPACK encoder
+            picks the shorter of raw vs Huffman per emitted
+            literal (size-only optimisation; H=1 frames remain
+            CRIME-safe because the encoder dynamic table stays
+            empty). Defaults to ``False`` -- v0.6 H=0-only wire
+            output until peers and soak data confirm interop.
     """
 
     var max_concurrent_streams: Int
@@ -135,6 +149,7 @@ struct Http2Config(Copyable, Defaultable, Movable):
     var max_header_list_size: Int
     var header_table_size: Int
     var allow_huffman_decode: Bool
+    var allow_huffman_encode: Bool
     var enable_connect_protocol: Bool
     # ``enable_connect_protocol``: when True, the server advertises
     # SETTINGS_ENABLE_CONNECT_PROTOCOL=1 (RFC 8441) in its initial
@@ -148,8 +163,8 @@ struct Http2Config(Copyable, Defaultable, Movable):
         """Default to the production-shape SETTINGS pinned in
         the design doc: 100 concurrent streams, 64 KiB-1 initial
         window, 16 KiB max frame, 8 KiB max header list, 4 KiB
-        HPACK dynamic table, Huffman-decode disabled (v0.6 safe
-        default), Extended CONNECT disabled.
+        HPACK dynamic table, Huffman decode/encode both disabled
+        (v0.6 wire-compatible default), Extended CONNECT disabled.
         """
         self.max_concurrent_streams = _H2_DEFAULT_MAX_CONCURRENT_STREAMS
         self.initial_window_size = _H2_DEFAULT_INITIAL_WINDOW_SIZE
@@ -157,6 +172,7 @@ struct Http2Config(Copyable, Defaultable, Movable):
         self.max_header_list_size = _H2_DEFAULT_MAX_HEADER_LIST_SIZE
         self.header_table_size = _H2_DEFAULT_HEADER_TABLE_SIZE
         self.allow_huffman_decode = False
+        self.allow_huffman_encode = False
         self.enable_connect_protocol = False
 
     def validate(self) raises -> None:
@@ -273,11 +289,12 @@ struct H2Connection(Defaultable, Movable):
         RFC 9113 §6.5.
 
         The HPACK dynamic-table size budget is propagated to the
-        decoder. The ``allow_huffman_decode`` flag is stored on
-        the driver but not yet acted on at the inbound HEADERS
-        path -- Huffman-encoded literals on the inbound side
-        currently raise reject-by-default until the scalar
-        Huffman decoder is wired in.
+        decoder. The ``allow_huffman_decode`` flag is plumbed
+        into ``conn.hpack_decoder.allow_huffman``; the
+        ``allow_huffman_encode`` flag into
+        ``conn.hpack_encoder.allow_huffman``. Both default to
+        ``False`` so the wire format stays byte-identical to v0.6
+        unless the user opts in.
         """
         config.validate()
         var out = H2Connection()
@@ -289,12 +306,15 @@ struct H2Connection(Defaultable, Movable):
         out.conn.max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         out.conn.hpack_decoder.max_size = out.config.header_table_size
+        out.conn.hpack_decoder.allow_huffman = out.config.allow_huffman_decode
+        out.conn.hpack_encoder.allow_huffman = out.config.allow_huffman_encode
         out.conn.enable_connect_protocol = out.config.enable_connect_protocol
-        # The ``HpackEncoder`` is stateless (always emits H=0
-        # raw literals; no dynamic table). The ``header_table_size``
-        # field on ``Http2Config`` is consumed by the decoder side
-        # only until the encoder grows a dynamic table. The peer's
-        # announced HEADER_TABLE_SIZE is still honoured on inbound
+        # The ``HpackEncoder`` does not maintain a dynamic table
+        # (always Literal-without-Indexing per RFC 7541 §6.2.2);
+        # the ``header_table_size`` field on ``Http2Config`` is
+        # consumed by the decoder side only until the encoder
+        # grows a dynamic table. The peer's announced
+        # HEADER_TABLE_SIZE is still honoured on inbound
         # SETTINGS via ``Connection.handle_frame``.
         return out^
 

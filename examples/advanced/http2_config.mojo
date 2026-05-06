@@ -78,6 +78,7 @@ def main() raises:
     print("  max_header_list_size:", default_cfg.max_header_list_size)
     print("  header_table_size:", default_cfg.header_table_size)
     print("  allow_huffman_decode:", default_cfg.allow_huffman_decode)
+    print("  allow_huffman_encode:", default_cfg.allow_huffman_encode)
     var c1 = H2Connection.with_config(default_cfg^)
     _print_emitted_settings("  emitted SETTINGS", _emit_initial_settings(c1^))
     print()
@@ -91,6 +92,7 @@ def main() raises:
         max_header_list_size=32768,  # 32 KiB
         header_table_size=8192,  # 8 KiB
         allow_huffman_decode=False,
+        allow_huffman_encode=False,
         enable_connect_protocol=False,
     )
     relaxed.validate()
@@ -107,6 +109,7 @@ def main() raises:
         max_header_list_size=4096,  # 4 KiB
         header_table_size=2048,  # 2 KiB
         allow_huffman_decode=False,
+        allow_huffman_encode=False,
         enable_connect_protocol=False,
     )
     tight.validate()

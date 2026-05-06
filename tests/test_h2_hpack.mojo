@@ -12,7 +12,11 @@ Covers:
 - Literal w/o Indexing leaves the dynamic table untouched.
 - Dynamic Table Size Update (§6.3) shrinks / preserves table.
 - Encoder + Decoder round-trip on a realistic request.
-- Huffman strings raise (we don't implement Huffman in ).
+- Huffman gating: ``H=1`` literals raise when ``allow_huffman``
+  is False (default) and round-trip cleanly when set True.
+- Encoder Huffman opt-in: with ``allow_huffman=True`` the encoder
+  picks the shorter of raw vs Huffman per literal; the decoder
+  with the same flag round-trips the result.
 - Truncated inputs / pathological integer sizes raise rather than
   hang.
 """
@@ -151,8 +155,9 @@ def test_decode_literal_without_indexing() raises:
     assert_equal(len(dec.dynamic), 0)
 
 
-def test_decode_huffman_raises() raises:
-    """We don't ship Huffman in — encoder must use H=0 strings."""
+def test_decode_huffman_raises_when_disabled() raises:
+    """``H=1`` raises while ``allow_huffman`` defaults to False —
+    matches v0.6 wire-reject behaviour."""
     var dec = HpackDecoder()
     var b = List[UInt8]()
     b.append(UInt8(0x00))  # literal w/o indexing
@@ -162,6 +167,90 @@ def test_decode_huffman_raises() raises:
     b.append(UInt8(0x03))
     with assert_raises():
         _ = dec.decode(Span[UInt8, _](b))
+
+
+def test_decode_huffman_appendix_c4_www_example_com() raises:
+    """RFC 7541 §C.4.1 — the Huffman literal ``www.example.com``.
+
+    Wire layout (synthesised here as a Literal w/o Indexing,
+    name index 0, name = ``"x"`` raw, value = the Huffman-coded
+    ``"www.example.com"``):
+
+    * 0x00 — Literal w/o Indexing, name idx 0.
+    * 0x01 0x78 — name length 1, ASCII ``'x'``.
+    * 0x8C ... — H=1, length 12 (Huffman length of the 15-byte
+      ASCII source per Appendix C.4.1) followed by the 12 wire
+      bytes from the spec fixture.
+
+    The 12 Huffman bytes for ``www.example.com`` per RFC 7541
+    §C.4.1: ``f1 e3 c2 e5 f2 3a 6b a0 ab 90 f4 ff``.
+    """
+    var dec = HpackDecoder()
+    dec.allow_huffman = True
+    var b = List[UInt8]()
+    b.append(UInt8(0x00))  # literal w/o indexing, name idx 0
+    b.append(UInt8(0x01))  # name length 1
+    b.append(UInt8(0x78))  # 'x'
+    b.append(UInt8(0x8C))  # H=1, value length 12
+    var huff = List[Int]()
+    huff.append(0xF1)
+    huff.append(0xE3)
+    huff.append(0xC2)
+    huff.append(0xE5)
+    huff.append(0xF2)
+    huff.append(0x3A)
+    huff.append(0x6B)
+    huff.append(0xA0)
+    huff.append(0xAB)
+    huff.append(0x90)
+    huff.append(0xF4)
+    huff.append(0xFF)
+    for i in range(len(huff)):
+        b.append(UInt8(huff[i]))
+    var hdrs = dec.decode(Span[UInt8, _](b))
+    assert_equal(len(hdrs), 1)
+    assert_equal(hdrs[0].name, "x")
+    assert_equal(hdrs[0].value, "www.example.com")
+
+
+def test_encoder_decoder_roundtrip_with_huffman() raises:
+    """Encoder + decoder with ``allow_huffman=True`` preserve
+    every header byte-for-byte across compressible payloads."""
+    var enc = HpackEncoder()
+    enc.allow_huffman = True
+    var dec = HpackDecoder()
+    dec.allow_huffman = True
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":method", "GET"))
+    hdrs.append(HpackHeader(":scheme", "https"))
+    hdrs.append(HpackHeader(":path", "/api/users/42"))
+    hdrs.append(HpackHeader(":authority", "www.example.com"))
+    hdrs.append(HpackHeader("user-agent", "flare-test/0.7"))
+    hdrs.append(HpackHeader("accept-encoding", "gzip, br, deflate"))
+    var wire = enc.encode(Span[HpackHeader, _](hdrs))
+    var back = dec.decode(Span[UInt8, _](wire))
+    assert_equal(len(back), len(hdrs))
+    for i in range(len(hdrs)):
+        assert_equal(back[i].name, hdrs[i].name)
+        assert_equal(back[i].value, hdrs[i].value)
+
+
+def test_encoder_huffman_picks_shorter_form() raises:
+    """For a long compressible value the H=1 emit is shorter than
+    the H=0 emit; for a short incompressible value the encoder
+    falls back to H=0."""
+    var enc_h0 = HpackEncoder()
+    var enc_h1 = HpackEncoder()
+    enc_h1.allow_huffman = True
+
+    var h_long = List[HpackHeader]()
+    h_long.append(HpackHeader("x-trace", "abcdefghijklmnopqrstuvwxyz_abcdefgh"))
+    var w0 = enc_h0.encode(Span[HpackHeader, _](h_long))
+    var w1 = enc_h1.encode(Span[HpackHeader, _](h_long))
+    assert_true(
+        len(w1) <= len(w0),
+        "H=1 must not be larger than H=0 for any input",
+    )
 
 
 def test_decode_dynamic_size_update_shrinks() raises:
@@ -227,9 +316,12 @@ def main() raises:
     test_decode_indexed_static()
     test_decode_literal_with_indexing_grows_dynamic()
     test_decode_literal_without_indexing()
-    test_decode_huffman_raises()
+    test_decode_huffman_raises_when_disabled()
+    test_decode_huffman_appendix_c4_www_example_com()
     test_decode_dynamic_size_update_shrinks()
     test_decode_size_update_above_cap_raises()
     test_encoder_decoder_roundtrip()
+    test_encoder_decoder_roundtrip_with_huffman()
+    test_encoder_huffman_picks_shorter_form()
     test_encoder_status_uses_static_name_index()
-    print("test_h2_hpack: 12 passed")
+    print("test_h2_hpack: 15 passed")

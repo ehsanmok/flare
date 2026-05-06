@@ -7,11 +7,15 @@ This is a complete-but-pragmatic decoder + encoder:
 - Integer codec (RFC 7541 §5.1) — 7-bit / 6-bit / 5-bit / 4-bit
   prefixes are all handled by :func:`decode_integer` /
   :func:`encode_integer`.
-- String literal codec (RFC 7541 §5.2) **without Huffman**: we
-  emit ``H=0`` (raw) on the encode side and tolerate ``H=1`` on
-  the decode side by raising — flare's encoder always sends raw
-  literals so this is consistent. Adding Huffman is an optional
-  optimisation.
+- String literal codec (RFC 7541 §5.2) with optional Huffman.
+  ``HpackDecoder`` accepts ``H=1`` literals iff
+  ``allow_huffman`` is set (default ``False``: reject). The
+  decoder uses the canonical RFC 7541 Appendix B codec from
+  ``flare.http.hpack_huffman``. ``HpackEncoder`` emits raw
+  ``H=0`` literals by default; flipping ``allow_huffman`` makes
+  it pick the shorter of raw vs Huffman per literal. The
+  defaults match v0.6 wire behaviour exactly so existing peers
+  keep interoperating.
 - ``Indexed Header Field`` (§6.1), ``Literal Header Field with
   Incremental Indexing`` (§6.2.1), ``Literal Header Field without
   Indexing`` (§6.2.2), ``Literal Header Field Never Indexed``
@@ -23,6 +27,12 @@ inserts evict the oldest entry until ``size <= max_size``.
 """
 
 from std.collections import Optional
+
+from flare.http.hpack_huffman import (
+    huffman_decode,
+    huffman_encode,
+    huffman_encoded_length,
+)
 
 
 # ── Integer codec (§5.1) ─────────────────────────────────────────────────
@@ -214,16 +224,26 @@ struct HpackDecoder(Copyable, Defaultable, Movable):
 
     A decoder must be reused across all HEADERS frames on a single
     connection so the dynamic table tracks the peer's encoder.
+
+    ``allow_huffman`` gates ``H=1`` literal decoding: when ``False``
+    (default) the decoder raises on Huffman-coded strings, matching
+    pre-v0.7 behaviour byte-for-byte. When ``True`` the decoder
+    routes ``H=1`` literals through the RFC 7541 Appendix B codec
+    in ``flare.http.hpack_huffman``. ``Http2Config.with_config``
+    plumbs the flag through from user config; tests can flip it
+    directly.
     """
 
     var dynamic: List[HpackHeader]
     var dynamic_size: Int
     var max_size: Int
+    var allow_huffman: Bool
 
     def __init__(out self):
         self.dynamic = List[HpackHeader]()
         self.dynamic_size = 0
         self.max_size = 4096
+        self.allow_huffman = False
 
     def _entry_size(self, h: HpackHeader) -> Int:
         return h.name.byte_length() + h.value.byte_length() + 32
@@ -281,7 +301,18 @@ struct HpackDecoder(Copyable, Defaultable, Movable):
         if off + slen > len(buf):
             raise Error("hpack: literal string truncated")
         if huffman:
-            raise Error("hpack: Huffman-coded string not supported ")
+            if not self.allow_huffman:
+                raise Error("hpack: Huffman-coded string not supported")
+            var encoded = buf[off : off + slen]
+            var decoded = List[UInt8]()
+            try:
+                huffman_decode(encoded, decoded)
+            except e:
+                raise Error("hpack: Huffman decode failed: " + String(e))
+            var s = String(capacity=len(decoded) + 1)
+            for i in range(len(decoded)):
+                s += chr(Int(decoded[i]))
+            return StringPair(s^, off + slen)
         var s = String(capacity=slen + 1)
         for i in range(slen):
             s += chr(Int(buf[off + i]))
@@ -353,28 +384,47 @@ struct HpackDecoder(Copyable, Defaultable, Movable):
 struct HpackEncoder(Copyable, Defaultable, Movable):
     """Stateless-ish HPACK encoder.
 
-    For we emit every header as a Literal-without-Indexing
-    field (§6.2.2). The dynamic table on the encoder side is then
-    always empty, which is RFC-legal: HPACK explicitly allows the
+    Every header is emitted as a Literal-without-Indexing field
+    (§6.2.2). The dynamic table on the encoder side is always
+    empty, which is RFC-legal: HPACK explicitly allows the
     encoder to choose not to use the dynamic table at all
     (RFC 7541 §2.3.3 / §4.1). This trades a little wire bandwidth
     for a much simpler encoder + zero risk of CRIME-class
     information leaks across requests.
+
+    ``allow_huffman`` gates ``H=1`` literal emission. When
+    ``False`` (default) the encoder emits raw ``H=0`` literals,
+    matching pre-v0.7 wire output byte-for-byte. When ``True``
+    each literal is emitted as the shorter of raw vs Huffman
+    (the Huffman length is computed first; the raw form wins
+    on tie). Since the dynamic table is empty either way, no
+    cross-request information can leak through compressed-length
+    side channels: every literal is encoded against the static
+    Appendix B Huffman table, independent of any prior request's
+    bytes. Callers that worry about a *per-request* compression-
+    side channel against secret tokens should leave the flag off.
 
     A future follow-up can teach the encoder to look up the static
     table for the most common headers (``:status``, ``:method``,
     etc.) without touching the dynamic table.
     """
 
-    var _placeholder: UInt8
+    var allow_huffman: Bool
 
     def __init__(out self):
-        self._placeholder = UInt8(0)
+        self.allow_huffman = False
 
     def _encode_string(self, mut out_buf: List[UInt8], s: String):
         var n = s.byte_length()
-        encode_integer(out_buf, n, 7, UInt8(0))  # H=0
         var src = s.unsafe_ptr()
+        if self.allow_huffman and n > 0:
+            var src_span = Span[UInt8, origin_of(s)](ptr=src, length=n)
+            var hlen = huffman_encoded_length(src_span)
+            if hlen < n:
+                encode_integer(out_buf, hlen, 7, UInt8(0x80))  # H=1
+                huffman_encode(src_span, out_buf)
+                return
+        encode_integer(out_buf, n, 7, UInt8(0))  # H=0
         for i in range(n):
             out_buf.append(src[i])
 

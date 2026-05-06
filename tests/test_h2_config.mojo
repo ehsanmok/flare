@@ -220,6 +220,7 @@ def test_with_config_propagates_to_connection_fields() raises:
         max_header_list_size=16384,
         header_table_size=8192,
         allow_huffman_decode=False,
+        allow_huffman_encode=False,
         enable_connect_protocol=False,
     )
     var conn = H2Connection.with_config(cfg^)
@@ -231,6 +232,7 @@ def test_with_config_propagates_to_connection_fields() raises:
     assert_equal(conn.conn.hpack_decoder.max_size, 8192)
     assert_equal(conn.config.max_header_list_size, 16384)
     assert_false(conn.config.allow_huffman_decode)
+    assert_false(conn.config.allow_huffman_encode)
 
 
 def test_with_config_full_emits_all_non_default_settings() raises:
@@ -246,6 +248,7 @@ def test_with_config_full_emits_all_non_default_settings() raises:
         max_header_list_size=16384,
         header_table_size=8192,
         allow_huffman_decode=False,
+        allow_huffman_encode=False,
         enable_connect_protocol=False,
     )
     var conn = H2Connection.with_config(cfg^)
