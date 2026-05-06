@@ -168,17 +168,29 @@ by nesting structs:
 
 ## HTTP/2
 
-| Surface | Where |
-|---|---|
-| `H2Connection` — synchronous, buffer-driven driver; `take_request() -> Request`, `emit_response(...)` queues `HEADERS [+ DATA]`; strips `Connection / Transfer-Encoding / Keep-Alive / Proxy-Connection / Upgrade` per RFC 9113 §8.2.2 | [`35_http2.mojo`](../examples/35_http2.mojo) |
-| `Http2Config` — SETTINGS knobs validated at construction | [`37_http2_config.mojo`](../examples/37_http2_config.mojo) |
-| `is_h2_alpn(...)`, `detect_h2c_upgrade(headers)` | `flare.http2.server` |
-| `H2_PREFACE`, `H2_DEFAULT_FRAME_SIZE`, `H2_MAX_FRAME_SIZE`, `H2Error`, `H2ErrorCode` | `flare.http2` |
-| Frame codec: `Frame`, `FrameFlags`, `FrameHeader`, `FrameType`, `encode_frame`, `parse_frame` (RFC 9113 §4, all 10 frame types) | `flare.http2.frame` |
-| Stream state: `Stream`, `StreamState`, `Connection.handle_frame` (RFC 9113 §5) | `flare.http2.state` |
-| HPACK (RFC 7541): `HpackEncoder`, `HpackDecoder`, `HpackHeader`, `encode_integer` / `decode_integer` (4/5/6/7-bit prefix codec); static + dynamic table, all four indexing modes, dynamic-table size update | `flare.http2.hpack` |
-| HPACK Huffman: `HuffmanError`, `huffman_encode`, `huffman_decode`, `huffman_encoded_length`, `huffman_decoded_length` | `flare.http.hpack_huffman` |
-| RFC 8441 Extended CONNECT dispatch + SETTINGS latch (fuzz-covered: `fuzz-extended-connect`) | `flare.http2.state` |
+The HTTP/2 surface ships in two waves: the codec / state machine
+landed fuzz-clean in v0.6, and the reactor wiring + h2c-via-Upgrade
+mid-stream switching in v0.7. The `Status` column distinguishes
+shipped-and-load-tested from codec-only-and-synthetic-tested from
+deferred-to-a-later-minor.
+
+| Surface | Status | Where |
+|---|---|---|
+| `H2Connection` synchronous driver — `take_request() -> Request`, `emit_response(...)` queues `HEADERS [+ DATA]`; strips `Connection / Transfer-Encoding / Keep-Alive / Proxy-Connection / Upgrade` per RFC 9113 §8.2.2 | Shipped, fuzz-clean | [`35_http2.mojo`](../examples/35_http2.mojo) |
+| Reactor wiring (one fd → one `H2Connection`, ALPN dispatch, h2 prior-knowledge per RFC 9113 §3.4) | Shipped (v0.7) | `flare.http._unified_reactor_impl`, [`41_http2_server_router.mojo`](../examples/41_http2_server_router.mojo) |
+| h2c via Upgrade (mid-stream switch from h1 to h2 per RFC 7540 §3.2) | Shipped (v0.7) | `flare.http._unified_reactor_impl._migrate_h1_to_h2`, [`tests/test_h2c_upgrade.mojo`](../tests/test_h2c_upgrade.mojo) |
+| RFC 8441 Extended CONNECT dispatch + SETTINGS latch (server side) | Shipped (v0.6), fuzz-covered (`fuzz-extended-connect`) | `flare.http2.state` |
+| `Http2Config` — SETTINGS knobs validated at construction | Shipped | [`37_http2_config.mojo`](../examples/37_http2_config.mojo) |
+| `is_h2_alpn(...)`, `detect_h2c_upgrade(headers)` | Shipped | `flare.http2.server` |
+| `H2_PREFACE`, `H2_DEFAULT_FRAME_SIZE`, `H2_MAX_FRAME_SIZE`, `H2Error`, `H2ErrorCode` | Shipped | `flare.http2` |
+| Frame codec: `Frame`, `FrameFlags`, `FrameHeader`, `FrameType`, `encode_frame`, `parse_frame` (RFC 9113 §4, all 10 frame types) | Shipped, fuzz-clean (`fuzz-h2-frame`) | `flare.http2.frame` |
+| Stream state: `Stream`, `StreamState`, `Connection.handle_frame` (RFC 9113 §5) | Shipped, fuzz-clean (`fuzz-h2-continuation`, `fuzz-h2-rapid-reset`) | `flare.http2.state` |
+| HPACK (RFC 7541): `HpackEncoder`, `HpackDecoder`, `HpackHeader`, `encode_integer` / `decode_integer` (4/5/6/7-bit prefix codec); static + dynamic table, all four indexing modes, dynamic-table size update | Shipped, fuzz-clean (`fuzz-hpack-decoder`) | `flare.http2.hpack` |
+| HPACK Huffman codec | Scalar-correct (v0.7); SIMD decode deferred to v0.7.x | `flare.http.hpack_huffman` |
+| CONTINUATION-flood / RAPID-RESET (CVE-2023-44487) state-machine fuzz coverage | Fuzz-covered (v0.7); explicit per-second rate limits a v0.7.x defensive-hardening item if production exposure surfaces resource-exhaustion shapes the harnesses can't detect | `fuzz/fuzz_h2_continuation.mojo`, `fuzz/fuzz_h2_rapid_reset.mojo` |
+| RFC 8441 Extended CONNECT (client side — `WsClient` over h2) | Deferred to v0.7.x (today: `WsClient` forces ALPN `["http/1.1"]`) | n/a |
+| Per-stream `Cancel` propagation (peer RST_STREAM → handler `cancel.cancelled()`) | Deferred to v0.7.x (today: connection-level `Cancel` only) | n/a |
+| h1.1 client connection pool | Deferred to v0.8 | n/a |
 
 ## WebSocket
 
