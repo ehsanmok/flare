@@ -149,6 +149,64 @@ struct H2ConnHandle(Movable):
         self.idle_timer_id = UInt64(0)
         self.last_interest = 1  # INTEREST_READ
 
+    def __init__(
+        out self,
+        var stream: TcpStream,
+        var config: Http2Config,
+        req: Request,
+        var settings_payload: List[UInt8],
+    ) raises:
+        """Construct an H2ConnHandle from a successful h2c-via-Upgrade
+        switch (RFC 7540 §3.2).
+
+        The h1 side has already written ``101 Switching Protocols``
+        to the wire and migrated this fd's conn-dict entry from
+        ``KIND_H1`` to ``KIND_H2``. This constructor seeds the
+        :class:`H2Connection` driver so that:
+
+        * The original h1 request becomes stream id 1, half-closed
+          from the client side, ready for handler dispatch on the
+          first :meth:`on_readable` event after the client preface
+          arrives.
+        * The ``HTTP2-Settings`` header value (base64url-decoded
+          and passed in as ``settings_payload``) is applied to the
+          connection state.
+        * The server's initial SETTINGS frame is pre-loaded into
+          ``write_buf`` (the server connection preface).
+
+        After this constructor returns, the reactor flips the fd to
+        ``INTEREST_WRITE`` so the SETTINGS-preface flushes; on the
+        next readable event the client preface
+        (``PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n`` + a SETTINGS
+        frame) arrives and is processed normally by
+        :meth:`H2Connection.feed`.
+
+        Args:
+            stream: Accepted ``TcpStream`` whose fd carried the h1
+                request that triggered the upgrade. Ownership
+                transfers into the handle.
+            config: HTTP/2 SETTINGS the server advertises to the
+                peer.
+            req: The original h1 request (becomes stream 1).
+            settings_payload: Raw bytes of the ``HTTP2-Settings``
+                header value (base64url-decoded). Format identical
+                to a SETTINGS frame body.
+        """
+        self.peer = stream.peer_addr()
+        self._stream = stream^
+        self.cancel_cell = CancelCell()
+        self.state = STATE_WRITING  # server preface is queued; flush first
+        self.h2 = H2Connection.from_h2c_upgrade(config^, req, settings_payload)
+        # Drain the H2Connection's outbox (which now contains the
+        # server's initial SETTINGS frame) into our write_buf so the
+        # reactor's send loop can flush it via the same code path
+        # that handles regular response frames.
+        self.write_buf = self.h2.drain()
+        self.write_pos = 0
+        self.should_close = False
+        self.idle_timer_id = UInt64(0)
+        self.last_interest = 2  # INTEREST_WRITE
+
     @always_inline
     def fd(self) -> c_int:
         """Return the underlying fd (fast accessor)."""
@@ -364,6 +422,25 @@ def _h2_conn_alloc_addr(
     debug_assert[assert_mode="safe"](
         addr != 0,
         "_h2_conn_alloc_addr: Pool returned 0",
+    )
+    return addr
+
+
+def _h2_conn_alloc_addr_from_h2c_upgrade(
+    var stream: TcpStream,
+    var config: Http2Config,
+    req: Request,
+    var settings_payload: List[UInt8],
+) raises -> Int:
+    """Heap-allocate an :class:`H2ConnHandle` pre-seeded for an h2c-via-Upgrade
+    migration (see :meth:`H2ConnHandle.__init__` h2c-flavoured overload).
+    """
+    var addr = Pool[H2ConnHandle].alloc_move(
+        H2ConnHandle(stream^, config^, req, settings_payload^)
+    )
+    debug_assert[assert_mode="safe"](
+        addr != 0,
+        "_h2_conn_alloc_addr_from_h2c_upgrade: Pool returned 0",
     )
     return addr
 

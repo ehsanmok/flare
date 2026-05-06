@@ -308,6 +308,129 @@ struct H2Connection(Defaultable, Movable):
             self.outbox.append(bytes[i])
         self.greeted = True
 
+    @staticmethod
+    def from_h2c_upgrade(
+        var config: Http2Config,
+        req: Request,
+        settings_payload: List[UInt8],
+    ) raises -> H2Connection:
+        """Build a server-side :class:`H2Connection` seeded for an h2c upgrade.
+
+        Per RFC 7540 §3.2 ("Starting HTTP/2 for HTTP URIs"), the original
+        HTTP/1.1 request becomes stream id 1 (implicitly half-closed from
+        the client side), and the ``HTTP2-Settings`` header value (the
+        raw SETTINGS payload, base64url-decoded) is applied to the
+        connection immediately. The server emits its initial SETTINGS
+        frame as the server connection preface; the client's connection
+        preface (``PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n`` + a SETTINGS
+        frame) still arrives over the same TCP fd and is processed by
+        :meth:`feed` as usual.
+
+        Args:
+            config: Server SETTINGS to advertise. Validated by
+                :meth:`with_config`.
+            req: The original HTTP/1.1 request that triggered the
+                upgrade. Becomes stream id 1 in
+                ``HALF_CLOSED_REMOTE`` state with
+                ``headers_complete = data_complete = True`` so the
+                handler dispatch loop picks it up immediately.
+            settings_payload: Raw bytes of the
+                ``HTTP2-Settings`` header value (base64url-decoded).
+                Format is identical to a SETTINGS frame body
+                (repeated 6-byte ``(id, value)`` pairs). Applied
+                directly to the connection state without emitting a
+                SETTINGS_ACK -- the ACK on the wire is reserved for
+                the proper SETTINGS frame the client sends inside
+                its connection preface.
+
+        Returns:
+            An :class:`H2Connection` whose ``outbox`` already holds
+            the server's initial SETTINGS frame and whose ``conn.streams``
+            already contains stream 1 ready for handler dispatch via
+            :meth:`take_completed_streams`.
+        """
+        var out = H2Connection.with_config(config^)
+        # Apply the upgrade-time SETTINGS payload manually so the
+        # subsequent ``handle_frame`` loop doesn't auto-emit a
+        # SETTINGS_ACK for these (RFC 7540 §3.2.1: the client expects
+        # an ACK only for the SETTINGS frame in its connection
+        # preface, not for the ``HTTP2-Settings`` header).
+        if (len(settings_payload) % 6) != 0:
+            raise Error("h2c upgrade: HTTP2-Settings payload not multiple of 6")
+        var i = 0
+        while i + 6 <= len(settings_payload):
+            var id = (Int(settings_payload[i]) << 8) | Int(
+                settings_payload[i + 1]
+            )
+            var v = (
+                (Int(settings_payload[i + 2]) << 24)
+                | (Int(settings_payload[i + 3]) << 16)
+                | (Int(settings_payload[i + 4]) << 8)
+                | Int(settings_payload[i + 5])
+            )
+            if id == 0x1:
+                out.conn.hpack_decoder.max_size = v
+            elif id == 0x4:
+                out.conn.initial_window_size = v
+            elif id == 0x5:
+                out.conn.max_frame_size = v
+            elif id == 0x8:
+                out.conn.peer_enable_connect_protocol = v != 0
+            i += 6
+
+        # Pre-create stream 1 with the original request, half-closed
+        # from the client side (RFC 7540 §3.2: the upgrade request is
+        # implicitly END_STREAM-ed on stream 1).
+        var s = Stream()
+        s.id = 1
+        s.state = StreamState.HALF_CLOSED_REMOTE()
+        s.send_window = out.conn.initial_window_size
+        s.recv_window = out.conn.initial_window_size
+        s.headers.append(HpackHeader(":method", req.method))
+        s.headers.append(HpackHeader(":scheme", "http"))
+        var path = req.url
+        s.headers.append(HpackHeader(":path", path))
+        var host = req.headers.get("host")
+        if host.byte_length() == 0:
+            host = req.headers.get("Host")
+        if host.byte_length() > 0:
+            s.headers.append(HpackHeader(":authority", host))
+        # Carry over the user headers, skipping the connection-level
+        # ones that don't apply on h2 (RFC 9113 §8.2.2).
+        for j in range(len(req.headers._keys)):
+            var k = req.headers._keys[j]
+            var lk = String("")
+            for c in range(k.byte_length()):
+                var ch = Int(k.unsafe_ptr()[c])
+                if ch >= 65 and ch <= 90:
+                    lk += chr(ch + 32)
+                else:
+                    lk += chr(ch)
+            if (
+                lk == "host"
+                or lk == "connection"
+                or lk == "upgrade"
+                or lk == "http2-settings"
+                or lk == "transfer-encoding"
+                or lk == "keep-alive"
+                or lk == "proxy-connection"
+            ):
+                continue
+            s.headers.append(HpackHeader(lk, req.headers._values[j]))
+        for j in range(len(req.body)):
+            s.data.append(req.body[j])
+        s.headers_complete = True
+        s.data_complete = True
+        out.conn.streams[1] = s^
+
+        # Emit the server's initial SETTINGS frame as the server
+        # connection preface so the client sees it before its own
+        # connection preface arrives. ``greeted = True`` afterwards
+        # means a subsequent ``feed`` won't double-emit.
+        out._emit_initial_settings()
+
+        return out^
+
     def feed(mut self, data: Span[UInt8, _]) raises:
         """Push ``data`` (bytes from the socket) into the driver."""
         for i in range(len(data)):

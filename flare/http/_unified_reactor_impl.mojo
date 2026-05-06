@@ -65,6 +65,7 @@ from ._h2_conn_handle import (
     PROTO_HTTP2,
     PROTO_NEED_MORE,
     _h2_conn_alloc_addr,
+    _h2_conn_alloc_addr_from_h2c_upgrade,
     _h2_conn_free_addr,
     _h2_conn_ptr_from_int,
     _pending_conn_alloc_addr,
@@ -147,6 +148,8 @@ def _drive_h1[
     addr: Int,
     ref handler: H,
     config: ServerConfig,
+    h2_config: Http2Config,
+    mut conns: Dict[Int, Int],
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
@@ -154,6 +157,13 @@ def _drive_h1[
     """Drive one HTTP/1.1 ConnHandle through ``on_readable`` (with
     the same 3-cycle inline fast-path the standalone HTTP/1.1
     reactor uses) and apply the resulting StepResult.
+
+    If a step returns ``h2c_upgrade=True`` (the 101 Switching
+    Protocols response has flushed and the conn must migrate to
+    HTTP/2), :func:`_migrate_h1_to_h2` is called to swap the
+    conn-dict entry; the function then immediately drives the new
+    H2ConnHandle once so the server's initial SETTINGS frame
+    flushes without a kernel round-trip.
 
     Returns ``True`` when the connection is finished (caller
     must clean it up); ``False`` to keep it live.
@@ -166,6 +176,8 @@ def _drive_h1[
         var cycles = 0
         while (not step_done) and cycles < 3:
             cycles += 1
+            if last_step.h2c_upgrade:
+                break
             if (
                 last_step.want_write
                 and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
@@ -181,6 +193,32 @@ def _drive_h1[
                 step_done = last_step.done
             else:
                 break
+        if last_step.h2c_upgrade and not step_done:
+            # The h1 ConnHandle has flushed the 101 response. Migrate
+            # to the h2 handle in place; the conn-dict entry swaps
+            # KIND_H1 -> KIND_H2 + the original request becomes
+            # stream id 1 on the new H2ConnHandle.
+            var migrated = _migrate_h1_to_h2(fd, h2_config, conns)
+            if not migrated:
+                return True  # migration failed; caller cleans up
+            # Drive the new H2ConnHandle once so its initial-SETTINGS
+            # write_buf flushes immediately + reactor interest is
+            # registered on the writable side.
+            if fd in conns:
+                var packed = conns[fd]
+                if _kind(packed) == KIND_H2:
+                    var done_h2 = _drive_h2(
+                        fd,
+                        _addr(packed),
+                        handler,
+                        config,
+                        False,
+                        reactor,
+                        wheel,
+                        timers,
+                    )
+                    return done_h2
+            return False
         if not step_done:
             _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
     except:
@@ -329,6 +367,81 @@ def _cleanup_conn_unified(
             _h2_conn_free_addr(a)
     except:
         pass
+
+
+def _migrate_h1_to_h2(
+    fd: Int,
+    h2_config: Http2Config,
+    mut conns: Dict[Int, Int],
+) raises -> Bool:
+    """Migrate an h1 ``ConnHandle`` to an h2 :class:`H2ConnHandle`.
+
+    Triggered by ``ConnHandle.on_writable`` returning a
+    :class:`StepResult` with ``h2c_upgrade=True`` after the
+    ``101 Switching Protocols`` response has flushed (RFC 7540
+    §3.2). Snapshots the saved ``Request`` + decoded
+    ``HTTP2-Settings`` payload from the h1 handle, builds an
+    H2ConnHandle pre-seeded with those (the original request
+    becomes stream id 1), and swaps the conn-dict entry from
+    ``KIND_H1`` to ``KIND_H2``. The h1 handle's heap allocation is
+    freed; its TCP fd is inherited by the new h2 handle.
+
+    Returns ``True`` on success; ``False`` if the dict entry was
+    missing or the migration raised mid-transition (the entry is
+    already removed in that case so the caller should NOT attempt
+    cleanup).
+    """
+    if fd not in conns:
+        return False
+    var packed = conns[fd]
+    debug_assert[assert_mode="safe"](
+        _kind(packed) == KIND_H1,
+        "_migrate_h1_to_h2: entry is not KIND_H1; kind=",
+        _kind(packed),
+    )
+    var h1_addr = _addr(packed)
+    debug_assert[assert_mode="safe"](
+        h1_addr != 0,
+        "_migrate_h1_to_h2: conns[fd] returned null addr; fd=",
+        fd,
+    )
+    var h1_ptr = _conn_ptr_from_int(h1_addr)
+    # Pull the migration payload off the h1 handle BEFORE we
+    # detach its TcpStream. ``take_h2c_upgrade_settings`` resets
+    # the pending flag so a second migration attempt on the same
+    # fd raises rather than silently double-using the request.
+    var req = h1_ptr[].take_h2c_upgrade_request()
+    var settings_payload = h1_ptr[].take_h2c_upgrade_settings()
+    # Detach the TCP fd from the h1 handle: snapshot fd + peer,
+    # zero the field on the h1 handle so its destructor doesn't
+    # close the fd we want to inherit.
+    var inherited_fd = h1_ptr[]._stream._socket.fd
+    var inherited_peer = h1_ptr[].peer
+    debug_assert[assert_mode="safe"](
+        Int(inherited_fd) == fd,
+        "_migrate_h1_to_h2: h1 fd does not match dispatch fd; got ",
+        Int(inherited_fd),
+        " vs ",
+        fd,
+    )
+    h1_ptr[]._stream._socket.fd = c_int(-1)
+    _conn_free_addr(h1_addr)
+
+    var raw = RawSocket(inherited_fd, AF_INET, SOCK_STREAM, _wrap=True)
+    var stream = TcpStream(raw^, inherited_peer)
+
+    try:
+        var addr = _h2_conn_alloc_addr_from_h2c_upgrade(
+            stream^, h2_config.copy(), req, settings_payload^
+        )
+        conns[fd] = _pack(KIND_H2, addr)
+        return True
+    except:
+        try:
+            _ = conns.pop(fd)
+        except:
+            pass
+        return False
 
 
 def _migrate_pending(
@@ -575,6 +688,8 @@ def run_unified_reactor_loop[
                         _addr(packed),
                         handler,
                         config,
+                        h2_config,
+                        conns,
                         reactor,
                         wheel,
                         timers,
@@ -648,6 +763,8 @@ def run_unified_reactor_loop[
                         _addr(packed2),
                         handler,
                         config,
+                        h2_config,
+                        conns,
                         reactor,
                         wheel,
                         timers,
@@ -730,6 +847,8 @@ def run_unified_reactor_loop_shared[
                         _addr(packed),
                         handler,
                         config,
+                        h2_config,
+                        conns,
                         reactor,
                         wheel,
                         timers,
@@ -798,6 +917,8 @@ def run_unified_reactor_loop_shared[
                         _addr(packed2),
                         handler,
                         config,
+                        h2_config,
+                        conns,
                         reactor,
                         wheel,
                         timers,

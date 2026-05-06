@@ -28,12 +28,14 @@ It exposes a thin step API so the reactor-backed ``HttpServer`` (Phase
 1.5) owns the lifecycle while this module owns the per-conn logic.
 """
 
-from std.collections import Dict
+from std.builtin.debug_assert import debug_assert
+from std.collections import Dict, Optional
 from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
 from std.os import getenv
 from std.memory import UnsafePointer, alloc, memcpy, stack_allocation
 from std.sys.info import CompilationTarget
 
+from flare.crypto.hmac import base64url_decode
 from flare.http.cancel import Cancel, CancelCell, CancelReason
 from flare.http.handler import Handler, CancelHandler, ViewHandler
 from flare.http.headers import HeaderMap
@@ -51,6 +53,26 @@ from flare.http.server import (
     _append_int,
 )
 from flare.http.static_response import StaticResponse
+
+
+@always_inline
+def _detect_h2c_upgrade_inline(headers: HeaderMap) -> Bool:
+    """Inline copy of :func:`flare.http2.server.detect_h2c_upgrade`.
+
+    Replicated locally to avoid a ``flare.http._server_reactor_impl``
+    -> ``flare.http2.server`` -> ``flare.http`` circular import. The
+    canonical helper in :mod:`flare.http2.server` stays the public-
+    surface name; this private inline mirrors its logic byte-for-byte
+    (RFC 7540 §3.2: ``Upgrade: h2c`` + non-empty ``HTTP2-Settings``).
+    """
+    var upg = headers.get("upgrade")
+    if upg.byte_length() == 0:
+        return False
+    if upg != "h2c":
+        return False
+    return headers.get("http2-settings").byte_length() > 0
+
+
 from flare.net import IpAddr, SocketAddr
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
 from flare.net.error import NetworkError
@@ -101,12 +123,22 @@ struct StepResult(Copyable, ImplicitlyCopyable, Movable):
         idle_timeout_ms: -1 = no change; 0 = clear any pending idle timer;
                         > 0 = arm a fresh idle timer for this many
                         milliseconds.
+        h2c_upgrade: True when the connection has just finished writing
+                     a ``101 Switching Protocols`` response and the unified
+                     reactor must migrate this fd's conn-dict entry from
+                     ``KIND_H1`` to ``KIND_H2`` (RFC 7540 §3.2). The
+                     migration helper extracts the saved Request +
+                     decoded ``HTTP2-Settings`` payload from the h1
+                     ``ConnHandle`` and constructs an
+                     :class:`H2ConnHandle` pre-seeded with the original
+                     request as stream id 1.
     """
 
     var want_read: Bool
     var want_write: Bool
     var done: Bool
     var idle_timeout_ms: Int
+    var h2c_upgrade: Bool
 
     def __init__(
         out self,
@@ -114,6 +146,7 @@ struct StepResult(Copyable, ImplicitlyCopyable, Movable):
         want_write: Bool = False,
         done: Bool = False,
         idle_timeout_ms: Int = -1,
+        h2c_upgrade: Bool = False,
     ):
         """Construct a StepResult.
 
@@ -123,11 +156,15 @@ struct StepResult(Copyable, ImplicitlyCopyable, Movable):
             done: Whether the caller should unregister and close the fd.
             idle_timeout_ms: Idle-timer rearm instruction (-1 = unchanged,
                 0 = clear, >0 = arm for this many ms).
+            h2c_upgrade: True when the unified reactor should migrate
+                this fd from ``KIND_H1`` to ``KIND_H2`` after the 101
+                Switching Protocols response has been flushed.
         """
         self.want_read = want_read
         self.want_write = want_write
         self.done = done
         self.idle_timeout_ms = idle_timeout_ms
+        self.h2c_upgrade = h2c_upgrade
 
 
 # ── Connection handle ─────────────────────────────────────────────────────────
@@ -202,6 +239,24 @@ struct ConnHandle(Movable):
     (which does synchronous send + frees write_buf in
     ``on_writable``)."""
 
+    var _h2c_upgrade_pending: Bool
+    """``True`` iff this h1 connection has received a valid
+    ``Upgrade: h2c`` request (RFC 7540 §3.2), queued the
+    ``101 Switching Protocols`` response into ``write_buf``, and
+    is now waiting for that response to flush before the unified
+    reactor migrates the conn-dict entry from ``KIND_H1`` to
+    ``KIND_H2``. The accompanying :attr:`_h2c_upgrade_request`
+    and :attr:`_h2c_upgrade_settings` fields hold the migration
+    payload."""
+    var _h2c_upgrade_request: Optional[Request]
+    """The original h1 request that triggered the h2c upgrade.
+    The unified reactor's migration helper consumes this to seed
+    stream id 1 on the new :class:`H2ConnHandle`."""
+    var _h2c_upgrade_settings: List[UInt8]
+    """Base64url-decoded raw bytes of the inbound ``HTTP2-Settings``
+    header (a SETTINGS frame body per RFC 7540 §3.2.1). Applied
+    to the new HTTP/2 connection state during migration."""
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def __init__(
@@ -234,6 +289,9 @@ struct ConnHandle(Movable):
         # Accept registers with INTEREST_READ only.
         self.last_interest = 1  # INTEREST_READ
         self.send_in_flight = False
+        self._h2c_upgrade_pending = False
+        self._h2c_upgrade_request = Optional[Request]()
+        self._h2c_upgrade_settings = List[UInt8]()
 
     @always_inline
     def fd(self) -> c_int:
@@ -369,6 +427,42 @@ struct ConnHandle(Movable):
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
+
+        # h2c upgrade detection (RFC 7540 §3.2). Hot-path-aware: 99.99 %
+        # of inbound requests don't carry ``Upgrade: h2c`` so we
+        # short-circuit on the first cheap header lookup -- a single
+        # ``HeaderMap.get("upgrade")`` returning the empty string skips
+        # the entire upgrade-handling branch (no ``Optional[T]``
+        # allocation, no base64url decode, no further function calls).
+        # Only the ~one-in-a-million genuine h2c request takes the cold
+        # path that hands off to ``_h2c_upgrade_decode_settings``.
+        if req.headers.get("upgrade").byte_length() != 0:
+            var settings_payload: Optional[List[UInt8]]
+            try:
+                settings_payload = self._h2c_upgrade_decode_settings(
+                    req.headers
+                )
+            except:
+                settings_payload = Optional[List[UInt8]]()
+            if settings_payload:
+                self._start_h2c_upgrade(req^, settings_payload.value().copy())
+                # Compact the read buffer so subsequent bytes
+                # (the client's h2 connection preface) start at offset 0.
+                if self.body_total > 0 and self.body_total <= len(
+                    self.read_buf
+                ):
+                    _compact_read_buf_drop_prefix(
+                        self.read_buf, self.body_total
+                    )
+                self.headers_end = -1
+                self.content_length = 0
+                self.body_total = -1
+                self.state = STATE_WRITING
+                return StepResult(
+                    want_read=False,
+                    want_write=True,
+                    idle_timeout_ms=0,
+                )
 
         self.keepalive_count += 1
         if self.keepalive_count >= config.max_keepalive_requests:
@@ -971,6 +1065,21 @@ struct ConnHandle(Movable):
         self.write_buf.clear()
         self.write_pos = 0
 
+        # h2c upgrade migration cue: the 101 Switching Protocols response
+        # has just flushed. Tell the unified reactor to swap the conn-dict
+        # entry from KIND_H1 to KIND_H2 (seeded with the saved request +
+        # decoded HTTP2-Settings payload). The reactor reads the
+        # migration data via :meth:`take_h2c_upgrade_payload` before
+        # freeing this h1 ConnHandle.
+        if self._h2c_upgrade_pending:
+            return StepResult(
+                want_read=False,
+                want_write=False,
+                done=False,
+                idle_timeout_ms=0,
+                h2c_upgrade=True,
+            )
+
         if self.should_close:
             return StepResult(want_read=False, want_write=False, done=True)
 
@@ -982,6 +1091,35 @@ struct ConnHandle(Movable):
             want_write=False,
             idle_timeout_ms=config.idle_timeout_ms,
         )
+
+    def take_h2c_upgrade_request(mut self) raises -> Request:
+        """Move the saved h2c upgrade ``Request`` out of this handle.
+
+        Called by ``_unified_reactor_impl._migrate_h1_to_h2`` after
+        ``on_writable`` returns ``StepResult(h2c_upgrade=True)``.
+        Companion to :meth:`take_h2c_upgrade_settings` -- callers
+        invoke both to extract the migration payload before freeing
+        the h1 handle. Setting the in-flight flag to ``False`` here
+        is deferred to :meth:`take_h2c_upgrade_settings` so a partial
+        ``take_request`` doesn't silently leave the settings buffer
+        behind.
+        """
+        if not self._h2c_upgrade_pending:
+            raise Error("take_h2c_upgrade_request: not pending")
+        if not self._h2c_upgrade_request:
+            raise Error("take_h2c_upgrade_request: payload missing")
+        return self._h2c_upgrade_request.take()
+
+    def take_h2c_upgrade_settings(mut self) -> List[UInt8]:
+        """Move the saved decoded ``HTTP2-Settings`` payload out
+        of this handle. Resets the in-flight flag so a subsequent
+        migration attempt raises rather than silently re-using the
+        same buffer.
+        """
+        var settings = self._h2c_upgrade_settings^
+        self._h2c_upgrade_settings = List[UInt8]()
+        self._h2c_upgrade_pending = False
+        return settings^
 
     def on_timeout(mut self) -> StepResult:
         """Handle an idle / write timer firing.
@@ -1016,6 +1154,56 @@ struct ConnHandle(Movable):
             # writable step.
             idle_timeout_ms=0,
         )
+
+    def _h2c_upgrade_decode_settings(
+        self, headers: HeaderMap
+    ) raises -> Optional[List[UInt8]]:
+        """Inspect a parsed h1 request's headers and return the decoded
+        ``HTTP2-Settings`` payload iff this is a valid h2c upgrade.
+
+        Returns ``None`` when:
+
+        * The request lacks ``Upgrade: h2c`` + ``HTTP2-Settings``.
+        * The ``HTTP2-Settings`` value isn't valid base64url.
+        * The decoded payload's length isn't a multiple of 6 (an
+          ill-formed SETTINGS body per RFC 7540 §3.2.1).
+
+        Caller falls through to the normal handler path on ``None``.
+        """
+        if not _detect_h2c_upgrade_inline(headers):
+            return Optional[List[UInt8]]()
+        var s = headers.get("http2-settings")
+        if s.byte_length() == 0:
+            return Optional[List[UInt8]]()
+        var decoded: List[UInt8]
+        try:
+            decoded = base64url_decode(s)
+        except:
+            return Optional[List[UInt8]]()
+        if (len(decoded) % 6) != 0:
+            return Optional[List[UInt8]]()
+        return Optional[List[UInt8]](decoded^)
+
+    def _start_h2c_upgrade(
+        mut self, var req: Request, var settings_payload: List[UInt8]
+    ) -> None:
+        """Save the migration payload + queue the ``101 Switching Protocols``
+        response. Caller must have already verified the upgrade is valid via
+        :meth:`_h2c_upgrade_decode_settings`."""
+        self._h2c_upgrade_settings = settings_payload^
+        self._h2c_upgrade_request = Optional[Request](req^)
+        self._h2c_upgrade_pending = True
+
+        # Queue the 101 Switching Protocols response (RFC 7540 §3.2).
+        # ``Connection: close`` is intentionally OMITTED so the same
+        # TCP fd carries the subsequent HTTP/2 frames.
+        self.write_buf.clear()
+        self.write_pos = 0
+        var wire = self.write_buf^
+        _append_str(wire, "HTTP/1.1 101 Switching Protocols\r\n")
+        _append_str(wire, "Connection: Upgrade\r\n")
+        _append_str(wire, "Upgrade: h2c\r\n\r\n")
+        self.write_buf = wire^
 
     def _queue_error(mut self, status: Int, reason: String) -> None:
         """Build a minimal error response into ``write_buf`` and mark close."""
