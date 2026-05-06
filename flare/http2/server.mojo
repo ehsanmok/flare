@@ -506,6 +506,29 @@ struct H2Connection(Defaultable, Movable):
                 ids.append(s.id)
         return ids^
 
+    def take_reset_streams(mut self) -> List[Int]:
+        """Pop the list of stream ids reset by the peer since the
+        last call.
+
+        Each id corresponds to an inbound RST_STREAM frame
+        (RFC 9113 §6.4) processed by :class:`Connection.handle_frame`.
+        Used by :class:`flare.http._h2_conn_handle.H2ConnHandle` to
+        flip the matching per-stream :class:`CancelCell` so the
+        in-flight handler can short-circuit cooperatively. The list
+        is drained -- a second call returns an empty list unless a
+        new RST_STREAM has arrived in the meantime.
+        """
+        var out = self.conn.reset_streams^
+        self.conn.reset_streams = List[Int]()
+        return out^
+
+    def goaway_received_flag(self) -> Bool:
+        """Return ``True`` once the peer has sent a GOAWAY frame
+        (RFC 9113 §6.8). The reactor checks this between dispatches
+        to flip the per-stream cancel cells before draining the
+        connection."""
+        return self.conn.goaway_received
+
     def take_request(mut self, sid: Int) raises -> Request:
         """Convert stream ``sid`` into a :class:`flare.http.Request`."""
         if sid not in self.conn.streams:

@@ -37,10 +37,10 @@ SETTINGS-ACK in one syscall.
 from std.builtin.debug_assert import debug_assert
 from std.collections import Dict
 from std.ffi import c_int, c_size_t, ErrNo, get_errno
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import UnsafePointer, alloc, stack_allocation
 
 from flare.http.cancel import Cancel, CancelCell, CancelReason
-from flare.http.handler import Handler
+from flare.http.handler import CancelHandler, Handler
 from flare.http.headers import HeaderMap
 from flare.http.request import Request
 from flare.http.response import Response
@@ -80,13 +80,33 @@ struct H2ConnHandle(Movable):
     read ``req.peer`` regardless of the wire protocol."""
 
     var cancel_cell: CancelCell
-    """Per-connection cancel cell, present for parity with
-    :class:`flare.http._server_reactor_impl.ConnHandle`. Wired into
-    each per-stream ``handler.serve`` call once the unified
-    server's :class:`flare.http.cancel.CancelHandler` plumbing for
-    h2 streams lands; for now it stays zero-initialised so the
-    presence of the field doesn't break the reactor loop's
-    cleanup paths."""
+    """Per-connection cancel cell. Used by the
+    :meth:`on_readable_cancel` dispatch path as the *fallback*
+    cell when a stream-specific cell is not available (e.g. when
+    a stream completes and is dispatched in the same feed batch
+    where the per-stream cell hasn't been allocated yet). The
+    flagging-on-FIN / GOAWAY / drain logic also flips this cell so
+    handlers polling a borrowed :class:`Cancel` observe the
+    connection-level signal."""
+
+    var stream_cells: Dict[Int, Int]
+    """Per-stream cancel cells (RFC 9113 §5.1) keyed on stream id.
+
+    The value is the heap address of a single ``Int`` (the same
+    layout :class:`flare.http.cancel.CancelCell` owns) so we can
+    re-materialise a :class:`flare.http.Cancel` handle on demand
+    without having to make ``CancelCell`` :trait:`Copyable` (it
+    isn't -- it owns a heap-allocated ``Int`` whose lifetime is
+    tied to the cell). The address is allocated when a stream is
+    first dispatched to a :trait:`flare.http.CancelHandler` and
+    freed (``destroy_pointee`` + ``free``) once
+    :meth:`emit_response` queues that stream's response.
+
+    Flipped on inbound RST_STREAM(stream_id) so a handler in
+    flight observes the peer cancel via ``cancel.cancelled()``.
+    The connection-level cell (:attr:`cancel_cell`) covers events
+    that aren't keyed on a single stream id (peer FIN, GOAWAY,
+    server drain)."""
 
     var state: Int
     """One of :data:`STATE_READING` / :data:`STATE_WRITING` /
@@ -141,6 +161,7 @@ struct H2ConnHandle(Movable):
         self.peer = stream.peer_addr()
         self._stream = stream^
         self.cancel_cell = CancelCell()
+        self.stream_cells = Dict[Int, Int]()
         self.state = STATE_READING
         self.h2 = H2Connection.with_config(config^)
         self.write_buf = List[UInt8]()
@@ -195,6 +216,7 @@ struct H2ConnHandle(Movable):
         self.peer = stream.peer_addr()
         self._stream = stream^
         self.cancel_cell = CancelCell()
+        self.stream_cells = Dict[Int, Int]()
         self.state = STATE_WRITING  # server preface is queued; flush first
         self.h2 = H2Connection.from_h2c_upgrade(config^, req, settings_payload)
         # Drain the H2Connection's outbox (which now contains the
@@ -338,6 +360,228 @@ struct H2ConnHandle(Movable):
             want_write=False,
             idle_timeout_ms=config.idle_timeout_ms,
         )
+
+    # ── Per-stream Cancel propagation ────────────────────────────────────────
+
+    def __del__(deinit self):
+        """Free any per-stream cell heap addresses that outlived
+        their dispatch (e.g. because the connection was torn down
+        before the handler returned).
+        """
+        for entry in self.stream_cells.items():
+            var addr = entry.value
+            if addr != 0:
+                var p = UnsafePointer[Int, MutExternalOrigin](
+                    unsafe_from_address=addr
+                )
+                p.destroy_pointee()
+                p.free()
+
+    def _alloc_stream_cell(mut self, sid: Int) raises -> Int:
+        """Allocate a fresh cancel cell for ``sid`` (initialised to
+        :data:`CancelReason.NONE`) and return its heap address. If a
+        cell already exists for ``sid`` the existing address is
+        returned so the same handler dispatch keeps observing the
+        same cell.
+        """
+        if sid in self.stream_cells:
+            return self.stream_cells[sid]
+        var p = alloc[Int](1)
+        p.init_pointee_copy(CancelReason.NONE)
+        var addr = Int(p)
+        self.stream_cells[sid] = addr
+        return addr
+
+    def _free_stream_cell(mut self, sid: Int) raises -> None:
+        """Destroy + free the cell bound to ``sid``, removing it
+        from the dict. No-op if the cell has already been freed."""
+        if sid not in self.stream_cells:
+            return
+        var addr = self.stream_cells.pop(sid)
+        if addr != 0:
+            var p = UnsafePointer[Int, MutExternalOrigin](
+                unsafe_from_address=addr
+            )
+            p.destroy_pointee()
+            p.free()
+
+    def _flip_all_stream_cells(mut self, reason: Int) raises -> None:
+        """Flip every live per-stream cell + the connection-level cell.
+
+        Used on connection-scoped events (peer FIN, GOAWAY, server
+        drain) where every in-flight handler should observe the
+        cancel. Idempotent: flipping an already-flipped cell is a
+        no-op so a re-entrant call doesn't reset the reason.
+        """
+        self.cancel_cell.flip(reason)
+        for entry in self.stream_cells.items():
+            var addr = entry.value
+            if addr != 0:
+                var p = UnsafePointer[Int, MutExternalOrigin](
+                    unsafe_from_address=addr
+                )
+                p[] = reason
+
+    def _flip_stream_cell(mut self, sid: Int, reason: Int) raises -> None:
+        """Flip the cell bound to ``sid`` if one has been allocated.
+
+        Stream-scoped events (RST_STREAM) flip only the matching
+        cell; sibling streams keep running. If the cell hasn't been
+        allocated yet (the stream is queued for dispatch but the
+        handler hasn't started), allocate it on the fly so the
+        flip is observed when the dispatcher later checks the cell
+        before invoking the handler.
+        """
+        if sid not in self.stream_cells:
+            _ = self._alloc_stream_cell(sid)
+        var addr = self.stream_cells[sid]
+        if addr != 0:
+            var p = UnsafePointer[Int, MutExternalOrigin](
+                unsafe_from_address=addr
+            )
+            p[] = reason
+
+    def _stream_cell_cancelled(read self, sid: Int) raises -> Bool:
+        """Return ``True`` if the cell bound to ``sid`` has been
+        flipped to a non-zero reason. False (and stream not
+        cancelled) if no cell is allocated for ``sid``.
+        """
+        if sid not in self.stream_cells:
+            return False
+        var addr = self.stream_cells[sid]
+        if addr == 0:
+            return False
+        var p = UnsafePointer[Int, MutExternalOrigin](unsafe_from_address=addr)
+        return p[] != CancelReason.NONE
+
+    def on_readable_cancel[
+        H: CancelHandler
+    ](mut self, ref handler: H, config: ServerConfig) raises -> StepResult:
+        """Cancel-aware mirror of :meth:`on_readable`.
+
+        Drives the same feed-then-dispatch loop, but each
+        completed-stream dispatch invokes
+        ``handler.serve(req, cancel)`` with a per-stream
+        :class:`flare.http.Cancel` cell. The cell is flipped if any
+        of the following apply *before* dispatch starts:
+
+        * The peer sent RST_STREAM for the stream (flipped via
+          :meth:`H2Connection.take_reset_streams`, reason
+          :data:`CancelReason.PEER_CLOSED`);
+        * The peer sent GOAWAY (flips every live cell, reason
+          :data:`CancelReason.PEER_CLOSED`);
+        * The peer FIN'd the socket (``recv == 0``, reason
+          :data:`CancelReason.PEER_CLOSED`).
+
+        Streams whose state is already CLOSED (peer already
+        RST'd before we got to dispatch them) are SKIPPED: the
+        per-stream cell is freed and no handler runs for them.
+        Sibling streams keep flowing through the same connection
+        with their own cells, isolated from the cancelled peer.
+        """
+        if self.state != STATE_READING:
+            return StepResult(
+                want_read=False, want_write=self.state == STATE_WRITING
+            )
+        debug_assert[assert_mode="safe"](
+            Int(self.fd()) >= 0,
+            "H2ConnHandle.on_readable_cancel: fd must be non-negative; got ",
+            Int(self.fd()),
+        )
+        var chunk = stack_allocation[8192, UInt8]()
+        var inbound = List[UInt8]()
+        while True:
+            var got = _recv(self.fd(), chunk, c_size_t(8192), c_int(0))
+            if got > 0:
+                var got_int = Int(got)
+                for i in range(got_int):
+                    inbound.append(chunk[i])
+            elif got == 0:
+                # Peer FIN -- flip every live cell so in-flight
+                # handlers short-circuit cooperatively.
+                self._flip_all_stream_cells(CancelReason.PEER_CLOSED)
+                self.should_close = True
+                return StepResult(
+                    want_read=False,
+                    want_write=len(self.write_buf) > self.write_pos,
+                    done=len(self.write_buf) == self.write_pos,
+                )
+            else:
+                var e = get_errno()
+                if e == ErrNo.EINTR:
+                    continue
+                if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                    break
+                self._flip_all_stream_cells(CancelReason.PEER_CLOSED)
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+        if len(inbound) > 0:
+            self.h2.feed(Span[UInt8, _](inbound))
+        # RST_STREAM -> per-stream cell flip. Drain the list so
+        # idempotent-on-double-feed semantics hold.
+        var resets = self.h2.take_reset_streams()
+        for i in range(len(resets)):
+            self._flip_stream_cell(resets[i], CancelReason.PEER_CLOSED)
+        # GOAWAY -> connection-level cell + every live cell.
+        if self.h2.goaway_received_flag():
+            self._flip_all_stream_cells(CancelReason.PEER_CLOSED)
+            self.should_close = True
+        var ids = self.h2.take_completed_streams()
+        for i in range(len(ids)):
+            var sid = ids[i]
+            var addr = self._alloc_stream_cell(sid)
+            # If the peer already RST'd this stream before we got
+            # here (or the connection-level shutdown flipped every
+            # cell), skip dispatch entirely. The handler isn't
+            # invoked, no response is queued, the stream stays
+            # in CLOSED state on the wire.
+            if self._stream_cell_cancelled(sid):
+                self._free_stream_cell(sid)
+                continue
+            var req = self.h2.take_request(sid)
+            req.peer = self.peer
+            var cancel = Cancel(addr)
+            var resp: Response
+            try:
+                resp = handler.serve(req^, cancel)
+            except:
+                resp = Response(status=500, reason="Internal Server Error")
+            try:
+                self.h2.emit_response(sid, resp^)
+            except:
+                self.should_close = True
+            self._free_stream_cell(sid)
+        var out = self.h2.drain()
+        if len(out) > 0:
+            for i in range(len(out)):
+                self.write_buf.append(out[i])
+        if self.h2.conn.goaway_received:
+            self.should_close = True
+        var has_outbound = len(self.write_buf) > self.write_pos
+        if has_outbound:
+            self.state = STATE_WRITING
+            return StepResult(
+                want_read=False,
+                want_write=True,
+                idle_timeout_ms=config.write_timeout_ms,
+            )
+        return StepResult(
+            want_read=True,
+            want_write=False,
+            idle_timeout_ms=config.idle_timeout_ms,
+        )
+
+    def signal_drain(mut self) raises -> None:
+        """Flip every live cell with :data:`CancelReason.SHUTDOWN`.
+
+        Called by the reactor when ``HttpServer.drain(timeout_ms)``
+        has been triggered: in-flight h2 handlers observe the
+        cancel and may short-circuit cooperatively. The connection
+        is also marked for close so the reactor unregisters the fd
+        once outbound buffers flush.
+        """
+        self._flip_all_stream_cells(CancelReason.SHUTDOWN)
+        self.should_close = True
 
     def on_writable(mut self, config: ServerConfig) raises -> StepResult:
         """Drive the state machine on a writable event.

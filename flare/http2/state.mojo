@@ -233,6 +233,15 @@ struct Connection(Copyable, Defaultable, Movable):
     Extended CONNECT (RFC 8441 §3 SHOULD); if the server didn't
     advertise the setting, the client falls back to the
     HTTP/1.1 Upgrade dance for WebSocket."""
+    var reset_streams: List[Int]
+    """Stream ids that received an inbound RST_STREAM since the
+    last :meth:`take_reset_streams` call (RFC 9113 §6.4). Drained
+    by :class:`flare.http._h2_conn_handle.H2ConnHandle` before each
+    handler-dispatch round so per-stream :class:`CancelCell`
+    plumbing can flip the right cell. The driver also tracks the
+    transition via :class:`StreamState.CLOSED`; the explicit list
+    exists so the reactor can react in O(1) per RST_STREAM rather
+    than scanning every open stream."""
 
     def __init__(out self):
         self.streams = Dict[StreamId, Stream]()
@@ -250,6 +259,7 @@ struct Connection(Copyable, Defaultable, Movable):
         self.is_client = False
         self.enable_connect_protocol = False
         self.peer_enable_connect_protocol = False
+        self.reset_streams = List[Int]()
 
     def _make_settings(self, ack: Bool) -> Frame:
         """Server-side initial SETTINGS frame (or empty ACK).
@@ -504,6 +514,7 @@ struct Connection(Copyable, Defaultable, Movable):
                 var s = self.streams[f.header.stream_id].copy()
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
+                self.reset_streams.append(f.header.stream_id)
             return out^
 
         if ft == FrameType.PRIORITY().value:
