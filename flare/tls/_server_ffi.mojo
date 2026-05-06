@@ -117,6 +117,16 @@ def _do_ssl_ctx_set_verify_client_cert(
         raise Error("flare_ssl_ctx_set_verify_client_cert failed")
 
 
+def _do_ssl_ctx_enable_session_tickets(
+    read lib: OwnedDLHandle, addr: Int, lifetime_s: Int
+) raises:
+    var f = lib.get_function[def(Int, c_int) thin abi("C") -> c_int](
+        "flare_ssl_ctx_enable_session_tickets"
+    )
+    if Int(f(addr, c_int(lifetime_s))) != 0:
+        raise Error("flare_ssl_ctx_enable_session_tickets failed")
+
+
 def _do_ssl_new_accept(read lib: OwnedDLHandle, ctx_addr: Int, fd: Int) -> Int:
     var f = lib.get_function[def(Int, c_int) thin abi("C") -> Int](
         "flare_ssl_new_accept"
@@ -216,6 +226,17 @@ struct ServerCtx(Movable):
         """Enable mTLS — clients must present a cert signed by a
         CA in ``ca_path``."""
         _do_ssl_ctx_set_verify_client_cert(self._lib, self._addr, ca_path)
+
+    def enable_session_tickets(self, lifetime_s: Int) raises:
+        """Turn on RFC 5077 / RFC 8446 §4.6.1 session ticket
+        emission with the given lifetime in seconds. Sets the
+        OpenSSL session-id-context (required whenever tickets are
+        on) to a stable per-process value; clears
+        ``SSL_OP_NO_TICKET`` if it was set; and configures the
+        server-side cache mode so resuming peers find their
+        session.
+        """
+        _do_ssl_ctx_enable_session_tickets(self._lib, self._addr, lifetime_s)
 
     def addr(self) -> Int:
         """Underlying ``SSL_CTX*`` as an Int."""

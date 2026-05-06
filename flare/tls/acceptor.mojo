@@ -148,6 +148,21 @@ struct TlsServerConfig(Copyable, Movable):
     var require_client_cert: Bool
     var client_ca_bundle: String
     var min_protocol: Int
+    var enable_session_tickets: Bool
+    """When True (default), the acceptor's ``SSL_CTX`` is
+    configured to issue RFC 5077 session tickets (TLS 1.2) /
+    RFC 8446 §4.6.1 NewSessionTicket frames (TLS 1.3) so peers
+    can resume on subsequent connects. Cheap to keep on; turn
+    off only for environments where ticket-key rotation is not
+    handled out-of-band (the v0.7 acceptor does not auto-rotate
+    -- the ``flare_ssl_ctx_enable_session_tickets`` FFI permits
+    rotation but the acceptor doesn't expose the hook yet)."""
+    var ticket_lifetime_s: Int
+    """Session ticket lifetime in seconds. Default 7200 (two
+    hours). Maps to ``SSL_CTX_set_timeout`` and the embedded TLS
+    1.3 ``ticket_lifetime`` field. Production deployments should
+    keep this short and rotate ticket keys via an out-of-band
+    secret-management path."""
 
     def __init__(
         out self,
@@ -157,6 +172,8 @@ struct TlsServerConfig(Copyable, Movable):
         require_client_cert: Bool = False,
         client_ca_bundle: String = "",
         min_protocol: Int = TLS_PROTOCOL_TLS12,
+        enable_session_tickets: Bool = True,
+        ticket_lifetime_s: Int = 7200,
     ) raises:
         """Construct the config; validates inter-field invariants.
 
@@ -181,6 +198,8 @@ struct TlsServerConfig(Copyable, Movable):
         self.require_client_cert = require_client_cert
         self.client_ca_bundle = client_ca_bundle
         self.min_protocol = min_protocol
+        self.enable_session_tickets = enable_session_tickets
+        self.ticket_lifetime_s = ticket_lifetime_s
 
 
 # Protocol version constants. Mirror OpenSSL's
@@ -303,6 +322,14 @@ struct TlsAcceptor(Movable):
         # mTLS.
         if config.require_client_cert:
             self._ctx.set_verify_client_cert(config.client_ca_bundle)
+
+        # Session resumption (RFC 5077 / RFC 8446 §4.6.1).
+        # Default-on; cheap to keep enabled because the inner
+        # SSL_CTX_set_options only clears the no-ticket bit, and
+        # SSL_CTX_set_session_id_context is a one-shot at ctx
+        # construction time.
+        if config.enable_session_tickets:
+            self._ctx.enable_session_tickets(config.ticket_lifetime_s)
 
         self.config = config^
 

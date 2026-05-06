@@ -77,6 +77,16 @@ struct TlsConfig(Copyable, Movable):
     var key_file: String
     var server_name: String
     var alpn: List[String]
+    var enable_session_resumption: Bool
+    """When True, the client ``SSL_CTX`` is configured to capture
+    every session OpenSSL surfaces via ``new_session_cb``;
+    :meth:`flare.tls.TlsStream.session` exposes the captured
+    handle so callers can drive the next connect through
+    :meth:`flare.tls.TlsStream.connect_resumed` (RFC 5077 /
+    RFC 8446 §4.6.1). Default ``True`` -- the cache mode is
+    cheap and enables resumption opportunistically; the
+    save/reuse path only fires when the application asks.
+    """
 
     def __init__(
         out self,
@@ -86,6 +96,7 @@ struct TlsConfig(Copyable, Movable):
         key_file: String = "",
         server_name: String = "",
         var alpn: List[String] = List[String](),
+        enable_session_resumption: Bool = True,
     ):
         self.verify = verify
         # Empty ca_bundle is fine: the C wrapper
@@ -98,6 +109,7 @@ struct TlsConfig(Copyable, Movable):
         self.key_file = key_file
         self.server_name = server_name
         self.alpn = alpn^
+        self.enable_session_resumption = enable_session_resumption
 
     @staticmethod
     def insecure() -> TlsConfig:

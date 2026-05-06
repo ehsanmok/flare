@@ -218,6 +218,146 @@ int flare_ssl_get_peer_cert_subject(flare_ssl_t ssl, char* buf, int buf_size) {
     return 0;
 }
 
+// ── Session resumption (RFC 5077 tickets / RFC 8446 §4.6.1) ───────────────
+
+/* Per-CTX storage for the most recent client-side session.
+ * Allocated by ``flare_ssl_ctx_enable_client_session_cache`` and
+ * attached to the ctx via ``SSL_CTX_set_ex_data`` so the
+ * ``new_session_cb`` can populate it without a global mutex.
+ *
+ * Lifetime: the ctx ex_data slot holds a pointer; the matching
+ * ``free_func`` we register with ``SSL_CTX_get_ex_new_index``
+ * frees both the pending session (if any) and the slot itself
+ * when the ctx is freed. */
+struct FlareCtxResume {
+    SSL_SESSION* pending;
+};
+
+static int flare_resume_ex_idx = -1;
+
+/* Free callback for the ex_data slot — called by SSL_CTX_free.
+ * (CRYPTO_EX_free signature: void (*)(void*, void*, CRYPTO_EX_DATA*,
+ *                                     int, long, void*)). */
+static void flare_resume_free_cb(
+    void* /*parent*/, void* ptr, CRYPTO_EX_DATA* /*ad*/,
+    int /*idx*/, long /*argl*/, void* /*argp*/
+) {
+    FlareCtxResume* r = static_cast<FlareCtxResume*>(ptr);
+    if (!r) return;
+    if (r->pending) SSL_SESSION_free(r->pending);
+    delete r;
+}
+
+/* OpenSSL new_session callback. Called once per arrived
+ * NewSessionTicket. We stash the latest session on the ctx; the
+ * application retrieves via flare_ssl_ctx_take_session.
+ * Returning 1 transfers ownership of ``sess`` to the callback. */
+static int flare_new_session_cb(SSL* ssl, SSL_SESSION* sess) {
+    SSL_CTX* ctx = SSL_get_SSL_CTX(ssl);
+    if (!ctx) return 0;
+    FlareCtxResume* r = static_cast<FlareCtxResume*>(
+        SSL_CTX_get_ex_data(ctx, flare_resume_ex_idx)
+    );
+    if (!r) return 0;
+    if (r->pending) SSL_SESSION_free(r->pending);
+    r->pending = sess; /* take ownership */
+    return 1;
+}
+
+int flare_ssl_ctx_enable_client_session_cache(flare_ssl_ctx_t ctx) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) { set_error("ctx is null"); return -1; }
+    if (flare_resume_ex_idx < 0) {
+        flare_resume_ex_idx = SSL_CTX_get_ex_new_index(
+            0, nullptr, nullptr, nullptr, flare_resume_free_cb
+        );
+        if (flare_resume_ex_idx < 0) {
+            set_error("SSL_CTX_get_ex_new_index failed");
+            return -1;
+        }
+    }
+    /* Allocate the slot if not already present. Re-entrant-safe:
+     * if the user happens to call enable twice, we keep the
+     * existing slot. */
+    FlareCtxResume* r = static_cast<FlareCtxResume*>(
+        SSL_CTX_get_ex_data(c, flare_resume_ex_idx)
+    );
+    if (!r) {
+        r = new FlareCtxResume{nullptr};
+        if (SSL_CTX_set_ex_data(c, flare_resume_ex_idx, r) != 1) {
+            delete r;
+            capture_openssl_errors();
+            return -1;
+        }
+    }
+    SSL_CTX_set_session_cache_mode(
+        c, SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL_STORE
+    );
+    SSL_CTX_sess_set_new_cb(c, flare_new_session_cb);
+    return 0;
+}
+
+flare_ssl_session_t flare_ssl_ctx_take_session(flare_ssl_ctx_t ctx) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c || flare_resume_ex_idx < 0) return nullptr;
+    FlareCtxResume* r = static_cast<FlareCtxResume*>(
+        SSL_CTX_get_ex_data(c, flare_resume_ex_idx)
+    );
+    if (!r || !r->pending) return nullptr;
+    SSL_SESSION* sess = r->pending;
+    r->pending = nullptr; /* transfer ownership to caller */
+    return static_cast<void*>(sess);
+}
+
+void flare_ssl_session_free(flare_ssl_session_t sess) {
+    if (sess) SSL_SESSION_free(static_cast<SSL_SESSION*>(sess));
+}
+
+int flare_ssl_set_session(flare_ssl_t ssl, flare_ssl_session_t sess) {
+    SSL* s = static_cast<SSL*>(ssl);
+    if (!s || !sess) { set_error("ssl/sess is null"); return -1; }
+    if (SSL_set_session(s, static_cast<SSL_SESSION*>(sess)) != 1) {
+        capture_openssl_errors();
+        return -1;
+    }
+    return 0;
+}
+
+int flare_ssl_session_reused(flare_ssl_t ssl) {
+    SSL* s = static_cast<SSL*>(ssl);
+    if (!s) return 0;
+    return SSL_session_reused(s);
+}
+
+int flare_ssl_ctx_enable_session_tickets(flare_ssl_ctx_t ctx, int lifetime_s) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) { set_error("ctx is null"); return -1; }
+    /* Make sure tickets are on (clear NO_TICKET if it was set). */
+    SSL_CTX_clear_options(c, SSL_OP_NO_TICKET);
+    /* Set a stable session-id-context. Required by OpenSSL whenever
+     * the server uses session tickets / IDs; otherwise the server
+     * will refuse resumption with SSL_R_SESSION_ID_CONTEXT_UNINITIALIZED. */
+    static const unsigned char kSidCtx[] = "flare-srv";
+    if (SSL_CTX_set_session_id_context(
+            c, kSidCtx, sizeof(kSidCtx) - 1
+        ) != 1) {
+        capture_openssl_errors();
+        return -1;
+    }
+    /* Lifetime: SSL_CTX_set_timeout for TLS 1.2 sessions; OpenSSL
+     * 3.x also derives the TLS 1.3 ticket lifetime from this when
+     * the ticket-key callback isn't installed. Cap to a sane
+     * positive value. */
+    long lt = (lifetime_s > 0) ? static_cast<long>(lifetime_s) : 7200;
+    SSL_CTX_set_timeout(c, lt);
+    /* Server-side cache mode: the default
+     * SSL_SESS_CACHE_SERVER is what we want (cache so SSL_SESSION
+     * lookups during resumption succeed even when a peer presents
+     * a session ID instead of a ticket). */
+    SSL_CTX_set_session_cache_mode(c, SSL_SESS_CACHE_SERVER);
+    return 0;
+}
+
 // ── Error ────────────────────────────────────────────────────────────────────
 
 const char* flare_ssl_last_error(void) {
@@ -496,6 +636,14 @@ flare_test_server_t flare_test_server_new(
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
     }
 
+    /* Enable session tickets on the test server by default so the
+     * v0.7 resumption tests can drive a second handshake against
+     * the same ctx and observe SSL_session_reused() == 1. The
+     * lifetime is the OpenSSL default (7200s). Production callers
+     * use ``flare_ssl_ctx_enable_session_tickets`` on a
+     * properly-configured server ctx via ``ServerCtx``. */
+    flare_ssl_ctx_enable_session_tickets(ctx, 7200);
+
     /* Create and bind TCP listening socket */
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0) {
@@ -588,6 +736,55 @@ int flare_test_server_echo_once(flare_test_server_t srv_ptr) {
     SSL_shutdown(ssl);
     SSL_free(ssl);
     close(client_fd);
+    return 0;
+}
+
+int flare_test_server_echo_n(flare_test_server_t srv_ptr, int n) {
+    /* Sequential N-connection variant of flare_test_server_echo_once.
+     * The same SSL_CTX is reused across all accepts, which is the
+     * point: session tickets cached in the ctx survive between
+     * accepts and the second client can resume via SSL_set_session.
+     *
+     * Unlike flare_test_server_echo_once (read-until-EOF, then
+     * write-all-back), this variant does PER-MESSAGE echo so a
+     * client can do a connect / write 1 / read 1 / close round
+     * trip without deadlocking on a half-closed write-side. The
+     * v0.7 resumption tests rely on the round trip to give the
+     * NewSessionTicket time to arrive at the client. */
+    if (!srv_ptr || n <= 0) return -1;
+    FlareTestServer* srv = static_cast<FlareTestServer*>(srv_ptr);
+    for (int i = 0; i < n; i++) {
+        int client_fd = accept(srv->listen_fd, nullptr, nullptr);
+        if (client_fd < 0) { set_error("accept() failed"); return -1; }
+        SSL* ssl = SSL_new(srv->ctx);
+        if (!ssl) {
+            capture_openssl_errors();
+            close(client_fd);
+            return -1;
+        }
+        SSL_set_fd(ssl, client_fd);
+        if (SSL_accept(ssl) != 1) {
+            capture_openssl_errors();
+            SSL_free(ssl);
+            close(client_fd);
+            return -1;
+        }
+        uint8_t buf[65536];
+        int rn;
+        /* Per-message echo: every successful read is written back
+         * immediately. Loop terminates on EOF / client close. */
+        while ((rn = SSL_read(ssl, buf, (int)sizeof(buf))) > 0) {
+            int sent = 0;
+            while (sent < rn) {
+                int w = SSL_write(ssl, buf + sent, rn - sent);
+                if (w <= 0) break;
+                sent += w;
+            }
+        }
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        close(client_fd);
+    }
     return 0;
 }
 

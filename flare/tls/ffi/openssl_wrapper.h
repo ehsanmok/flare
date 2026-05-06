@@ -24,6 +24,7 @@ extern "C" {
 /* Opaque handles */
 typedef void* flare_ssl_ctx_t;
 typedef void* flare_ssl_t;
+typedef void* flare_ssl_session_t;
 
 /* ── Client context lifecycle ──────────────────────────────────────────────── */
 
@@ -57,6 +58,62 @@ int flare_ssl_write(flare_ssl_t ssl, const uint8_t* buf, int len);
 const char* flare_ssl_get_version(flare_ssl_t ssl);
 const char* flare_ssl_get_cipher(flare_ssl_t ssl);
 int         flare_ssl_get_peer_cert_subject(flare_ssl_t ssl, char* buf, int buf_size);
+
+/* ── Session resumption (TLS tickets, RFC 5077 + RFC 8446 §4.6.1) ───────── */
+
+/**
+ * Enable client-side session caching on a client ``SSL_CTX``.
+ *
+ * Sets ``SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL`` plus a
+ * ``new_session_cb`` that stashes the most recent ``SSL_SESSION``
+ * into per-ctx ex_data. The application retrieves it via
+ * ``flare_ssl_ctx_take_session`` after a post-handshake read
+ * round-trip (TLS 1.3 NewSessionTicket arrives interleaved with
+ * application data).
+ *
+ * Idempotent — safe to call more than once on the same ctx.
+ *
+ * @return 0 on success, -1 on failure.
+ */
+int flare_ssl_ctx_enable_client_session_cache(flare_ssl_ctx_t ctx);
+
+/**
+ * Take the most recently captured session from this client ctx,
+ * transferring ownership to the caller. Returns NULL if no session
+ * has been captured yet (or if the caller already took it). The
+ * caller must pair every non-NULL return with a
+ * ``flare_ssl_session_free`` once done with it.
+ */
+flare_ssl_session_t flare_ssl_ctx_take_session(flare_ssl_ctx_t ctx);
+
+/** Free a session handle returned by ``flare_ssl_ctx_take_session``. */
+void flare_ssl_session_free(flare_ssl_session_t sess);
+
+/**
+ * Apply a saved session to a fresh ``SSL`` before
+ * ``flare_ssl_connect``. The ``SSL`` keeps its own reference; the
+ * caller still owns ``sess`` and must free it (after every
+ * planned reuse).
+ *
+ * @return 0 on success, -1 on failure.
+ */
+int flare_ssl_set_session(flare_ssl_t ssl, flare_ssl_session_t sess);
+
+/**
+ * Returns 1 if the most recent handshake on ``ssl`` resumed a
+ * prior session (full handshake skipped), 0 otherwise.
+ */
+int flare_ssl_session_reused(flare_ssl_t ssl);
+
+/**
+ * Server-side: enable session ticket emission (RFC 5077 / RFC
+ * 8446 §4.6.1) with the given lifetime in seconds. Sets a fixed
+ * session-id-context (required by OpenSSL whenever tickets are
+ * on) and clears ``SSL_OP_NO_TICKET`` if it was set.
+ *
+ * @return 0 on success, -1 on failure.
+ */
+int flare_ssl_ctx_enable_session_tickets(flare_ssl_ctx_t ctx, int lifetime_s);
 
 /* ── Error ─────────────────────────────────────────────────────────────────── */
 
@@ -289,6 +346,17 @@ int flare_test_server_port(flare_test_server_t srv);
  * @return 0 on success, -1 on error.
  */
 int flare_test_server_echo_once(flare_test_server_t srv);
+
+/**
+ * Accept ``n`` sequential connections, echo each one, then return.
+ * Same per-connection semantics as ``flare_test_server_echo_once``;
+ * differs only in that the same ``SSL_CTX`` is reused across all
+ * accepts so cached session tickets / IDs survive between
+ * connections (the v0.7 resumption tests rely on this).
+ *
+ * @return 0 on success, -1 on error.
+ */
+int flare_test_server_echo_n(flare_test_server_t srv, int n);
 
 /* ── HMAC-SHA256 (v0.6 Track D — signed cookies / sessions) ────────────────── */
 

@@ -87,6 +87,7 @@ ASAN_TESTS=(
   "tests/test_tls.mojo"                      # TLS client FFI (17 borrow helpers)
   "tests/test_tls_acceptor.mojo"             # TLS server FFI (TlsAcceptor over OpenSSL)
   "tests/test_tls_server_ffi.mojo"           # ServerCtx FFI (11 borrow helpers)
+  "tests/test_tls_resume.mojo"               # v0.7 TLS resumption: TlsSession lifetime + new_session_cb
   "tests/test_ws.mojo"                       # SHA-1 FFI via compute_accept_key
 )
 TSAN_TESTS=(

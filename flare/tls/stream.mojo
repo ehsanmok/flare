@@ -243,6 +243,48 @@ def _do_ssl_get_alpn_selected(
     return Int(f(ssl, Int(buf), c_int(size)))
 
 
+# ── Session resumption FFI helpers (RFC 5077 / RFC 8446 §4.6.1) ──────────
+
+
+def _do_ssl_ctx_enable_client_session_cache(
+    read lib: OwnedDLHandle, ctx: Int
+) -> Int:
+    var f = lib.get_function[def(Int) thin abi("C") -> c_int](
+        "flare_ssl_ctx_enable_client_session_cache"
+    )
+    return Int(f(ctx))
+
+
+def _do_ssl_ctx_take_session(read lib: OwnedDLHandle, ctx: Int) -> Int:
+    var f = lib.get_function[def(Int) thin abi("C") -> Int](
+        "flare_ssl_ctx_take_session"
+    )
+    return f(ctx)
+
+
+def _do_ssl_session_free(read lib: OwnedDLHandle, sess: Int):
+    if sess == 0:
+        return
+    var f = lib.get_function[def(Int) thin abi("C") -> None](
+        "flare_ssl_session_free"
+    )
+    f(sess)
+
+
+def _do_ssl_set_session(read lib: OwnedDLHandle, ssl: Int, sess: Int) -> Int:
+    var f = lib.get_function[def(Int, Int) thin abi("C") -> c_int](
+        "flare_ssl_set_session"
+    )
+    return Int(f(ssl, sess))
+
+
+def _do_ssl_session_reused(read lib: OwnedDLHandle, ssl: Int) -> Int:
+    var f = lib.get_function[def(Int) thin abi("C") -> c_int](
+        "flare_ssl_session_reused"
+    )
+    return Int(f(ssl))
+
+
 # ── Error classification ──────────────────────────────────────────────────
 
 
@@ -305,7 +347,61 @@ def _build_ssl_ctx(read lib: OwnedDLHandle, config: TlsConfig) raises -> Int:
             _do_ssl_ctx_free(lib, ctx)
             raise TlsHandshakeError("CA bundle load failed: " + err)
 
+    # Opt-in client-side session cache (RFC 5077 / RFC 8446
+    # §4.6.1). The ctx-side cache + new_session_cb fire only when
+    # the peer issues a NewSessionTicket -- i.e. cheap by default
+    # and only meaningful when the user wires up
+    # ``connect_resumed``.
+    if config.enable_session_resumption:
+        if _do_ssl_ctx_enable_client_session_cache(lib, ctx) != 0:
+            var err = _c_err(lib)
+            _do_ssl_ctx_free(lib, ctx)
+            raise TlsHandshakeError("Session cache setup failed: " + err)
+
     return ctx
+
+
+struct TlsSession(Movable):
+    """Opaque, reusable TLS session handle (RFC 5077 / RFC 8446
+    §4.6.1) captured from a completed TLS handshake.
+
+    Constructed exclusively by :meth:`TlsStream.session`, which
+    returns the most recent session OpenSSL surfaced via the
+    ``new_session_cb`` callback for the underlying ``SSL_CTX``.
+    Pass back to :meth:`TlsStream.connect_resumed` to skip the
+    expensive part of the handshake on the next connect to the
+    same origin.
+
+    This type is ``Movable`` but not ``Copyable`` — duplicating
+    an ``SSL_SESSION*`` would require an explicit
+    ``SSL_SESSION_up_ref`` / drop pair which doesn't compose with
+    Mojo's ASAP destruction. Move into the next call site;
+    re-capture per round-trip if you want to share across
+    threads.
+
+    The handle owns the underlying ``SSL_SESSION*`` via
+    ``SSL_SESSION_free`` on drop. Callers don't normally see the
+    raw addr; ``session_addr()`` is exposed for advanced FFI use.
+    """
+
+    var _addr: Int
+    var _lib: OwnedDLHandle
+
+    def __init__(out self, var lib: OwnedDLHandle, addr: Int):
+        self._lib = lib^
+        self._addr = addr
+
+    def __del__(deinit self):
+        if self._addr != 0:
+            _do_ssl_session_free(self._lib, self._addr)
+
+    def session_addr(self) -> Int:
+        """Underlying ``SSL_SESSION*`` as an ``Int``. For
+        advanced FFI integration only — most callers should pass
+        the whole :class:`TlsSession` to
+        :meth:`TlsStream.connect_resumed`.
+        """
+        return self._addr
 
 
 struct TlsStream(Movable, Readable):
@@ -697,6 +793,148 @@ struct TlsStream(Movable, Readable):
         if rc == 0:
             return String("")
         return String(StringSlice(unsafe_from_utf8_ptr=buf))
+
+    # ── Session resumption ─────────────────────────────────────────────────
+
+    def session(self) raises -> TlsSession:
+        """Return the most recent TLS session OpenSSL surfaced
+        for this connection's ``SSL_CTX``.
+
+        Useful sequence:
+
+        1. ``var s = TlsStream.connect(host, port, cfg)``
+        2. write a request, read the response (so the peer's
+           NewSessionTicket arrives and the C-side
+           ``new_session_cb`` fires).
+        3. ``var sess = s.session()`` -- captures the cached
+           session.
+        4. Hand ``sess`` to the next connect via
+           :meth:`connect_resumed` to skip the expensive part
+           of the handshake.
+
+        The returned :class:`TlsSession` owns the underlying
+        ``SSL_SESSION*`` (drop runs ``SSL_SESSION_free``). For
+        TLS 1.3 the ticket arrives interleaved with application
+        data, so calling ``session()`` immediately after
+        :meth:`connect` returns may yield an empty handle (its
+        ``session_addr() == 0``) -- do at least one I/O round
+        trip first, or accept the empty handle and fall back to
+        a full handshake on the next connect.
+
+        Raises:
+            NetworkError: When the underlying FFI surface
+                refuses (almost always means the SSL session is
+                already closed).
+        """
+        var lib = OwnedDLHandle(_find_flare_lib())
+        var addr = _do_ssl_ctx_take_session(lib, self._ctx)
+        return TlsSession(lib^, addr)
+
+    def was_session_reused(self) -> Bool:
+        """Return True if the most recent handshake on this
+        ``TlsStream`` resumed a prior session (peer-acked, full
+        handshake skipped). Mirrors OpenSSL's
+        ``SSL_session_reused``.
+        """
+        try:
+            var lib = OwnedDLHandle(_find_flare_lib())
+            return _do_ssl_session_reused(lib, self._ssl) == 1
+        except:
+            return False
+
+    @staticmethod
+    def connect_resumed(
+        host: String,
+        port: UInt16,
+        config: TlsConfig,
+        var session: TlsSession,
+    ) raises -> TlsStream:
+        """Open a TLS connection and offer ``session`` for
+        resumption. If the server accepts, the handshake skips
+        the certificate exchange and key derivation -- a 1-RTT
+        savings on TLS 1.2, even more on TLS 1.3 (resumption
+        flow uses the early-data shape).
+
+        Falls back to a full handshake silently if the server
+        refuses the session (e.g. ticket expired, key rotated).
+        Use :meth:`was_session_reused` after the call to verify
+        the resumption took.
+
+        Args:
+            host: Hostname or IP string. SNI is derived from
+                this value (or from ``config.server_name`` when
+                set).
+            port: Destination TCP port (typically 443 for HTTPS).
+            config: TLS configuration. ``enable_session_resumption``
+                must be True (the default) for the new ctx to be
+                ready to capture the next session.
+            session: Previously-captured session via
+                :meth:`session`. Ownership is consumed.
+
+        Returns:
+            A ``TlsStream`` with the TLS handshake complete.
+
+        Raises:
+            NetworkError: DNS / TCP / handshake failure.
+            TlsHandshakeError: Generic handshake failure.
+        """
+        if config.verify == TlsVerify.NONE:
+            print(
+                (
+                    "[flare TLS SECURITY WARNING] Certificate verification is"
+                    " disabled. This connection is vulnerable to"
+                    " man-in-the-middle attacks. Never use TlsConfig.insecure()"
+                    " in production."
+                ),
+                file=stderr,
+            )
+
+        var tcp = _connect_with_fallback(host, port, 5000)
+        var lib = OwnedDLHandle(_find_flare_lib())
+        var ctx = _build_ssl_ctx(lib, config)
+
+        # mTLS path matches connect().
+        if config.cert_file != "" and config.key_file != "":
+            if (
+                _do_ssl_ctx_load_cert_key(
+                    lib, ctx, config.cert_file, config.key_file
+                )
+                != 0
+            ):
+                var err = _c_err(lib)
+                _do_ssl_ctx_free(lib, ctx)
+                raise TlsHandshakeError("mTLS cert/key load failed: " + err)
+
+        var ssl = _do_ssl_new(lib, ctx, tcp._socket.fd)
+        if ssl == 0:
+            var err = _c_err(lib)
+            _do_ssl_ctx_free(lib, ctx)
+            raise TlsHandshakeError(err)
+
+        # Apply the saved session BEFORE flare_ssl_connect so
+        # SSL_connect reuses it. Empty handles (addr == 0) are
+        # tolerated -- the server falls back to full handshake.
+        var sess_addr = session.session_addr()
+        if sess_addr != 0:
+            if _do_ssl_set_session(lib, ssl, sess_addr) != 0:
+                var err = _c_err(lib)
+                _do_ssl_free(lib, ssl)
+                _do_ssl_ctx_free(lib, ctx)
+                raise TlsHandshakeError("SSL_set_session failed: " + err)
+
+        var sni = config.server_name if config.server_name != "" else host
+        if _do_ssl_connect(lib, ssl, sni) != 0:
+            var err = _c_err(lib)
+            _do_ssl_free(lib, ssl)
+            _do_ssl_ctx_free(lib, ctx)
+            _classify_tls_error(err, host)
+            raise TlsHandshakeError(err)
+
+        # ``session`` is consumed; the underlying session ref
+        # was up-ref'd by SSL_set_session, our destructor will
+        # release the original.
+        _ = session^
+        return TlsStream(tcp^, ctx, ssl)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 

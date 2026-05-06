@@ -43,7 +43,7 @@ def main() raises:
 """
 
 from .config import TlsConfig, TlsVerify
-from .stream import TlsStream
+from .stream import TlsStream, TlsSession
 from .error import (
     TlsHandshakeError,
     CertificateExpired,
