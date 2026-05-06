@@ -199,6 +199,26 @@ struct HttpServer(Movable):
     """
 
     var _listener: TcpListener
+    var _extra_listener_fds: List[Int]
+    """Raw fds of additional listeners attached via
+    :meth:`bind_many`. Empty when constructed via the single-
+    address :meth:`bind` (the default; preserves the v0.6 / v0.7
+    single-listener behaviour byte-for-byte).
+
+    These fds are owned by the ``HttpServer`` -- they're closed
+    via libc ``close(2)`` in ``HttpServer.__del__`` (see
+    :meth:`_close_extras`). Stored as raw fds rather than
+    ``TcpListener`` because ``TcpListener`` is not ``Copyable``
+    and ``List[T]`` requires ``Copyable``; the multi-listener
+    accept loop only needs the fd anyway (it routes through
+    ``_accept_loop_unified_fd``). The original
+    :class:`SocketAddr` per fd is kept in
+    :attr:`_extra_local_addrs` for diagnostics and the
+    :meth:`local_addrs` accessor."""
+    var _extra_local_addrs: List[SocketAddr]
+    """Local addresses for the extras in :attr:`_extra_listener_fds`,
+    in the same order. Lets ``local_addrs()`` enumerate every
+    bound address without an extra ``getsockname(2)`` syscall."""
     var config: ServerConfig
     var h2_config: Http2Config
     """HTTP/2 SETTINGS the server advertises to peers that speak h2.
@@ -223,12 +243,27 @@ struct HttpServer(Movable):
         var h2_config: Http2Config = Http2Config(),
     ):
         self._listener = listener^
+        self._extra_listener_fds = List[Int]()
+        self._extra_local_addrs = List[SocketAddr]()
         self.config = config^
         self.h2_config = h2_config^
         self._stopping = False
 
     def __del__(deinit self):
         self._listener.close()
+        self._close_extras()
+
+    def _close_extras(mut self):
+        """Close every fd in :attr:`_extra_listener_fds` via
+        libc ``close(2)``. Safe to call from ``__del__``; idempotent
+        because cleared after closing.
+        """
+        for i in range(len(self._extra_listener_fds)):
+            var fd = self._extra_listener_fds[i]
+            if fd >= 0:
+                _ = external_call["close", Int32](Int32(fd))
+        self._extra_listener_fds.clear()
+        self._extra_local_addrs.clear()
 
     @staticmethod
     def bind(
@@ -258,6 +293,100 @@ struct HttpServer(Movable):
         """
         var listener = TcpListener.bind(addr)
         return HttpServer(listener^, config^, h2_config^)
+
+    @staticmethod
+    def bind_many(
+        var addrs: List[SocketAddr],
+        var config: ServerConfig = ServerConfig(),
+        var h2_config: Http2Config = Http2Config(),
+    ) raises -> HttpServer:
+        """Bind an HTTP server on multiple addresses simultaneously.
+
+        Each address gets its own ``TcpListener`` fd; the unified
+        reactor loop accepts on all of them and dispatches each
+        accepted connection through the same handler. Useful for
+        binding the same service on both IPv4 and IPv6, on
+        multiple ports for split traffic classes (e.g. internal
+        admin port + public service port), or on a UNIX socket
+        plus a TCP socket sharing one process (after the upcoming
+        ``UdsListener`` integration).
+
+        ``addrs`` must be non-empty. The first address is the
+        "primary" listener (used by ``local_addr()`` and any
+        legacy single-listener call site); the remainder become
+        extras. All addresses bind in order before any returns,
+        so a partial-bind failure leaves no half-bound state
+        (already-bound listeners are dropped + closed by the
+        ``TcpListener.__del__``).
+
+        Multi-listener mode is **single-worker only** in v0.7.
+        ``HttpServer.serve(handler, num_workers=N)`` with
+        ``N >= 2`` raises when extras are present; the
+        ``SO_REUSEPORT`` multi-worker path is N-fds-on-one-
+        address and is orthogonal. v0.7.x roadmap considers a
+        cross-product N-listeners x M-workers shape; today the
+        right multi-worker path stays through ``bind`` +
+        ``num_workers``.
+
+        Args:
+            addrs: One or more local addresses to listen on.
+                Order matters: ``addrs[0]`` is the primary.
+            config: HTTP/1.1 server configuration (optional).
+            h2_config: HTTP/2 SETTINGS for h2 peers (optional).
+
+        Returns:
+            An ``HttpServer`` whose ``serve()`` accepts on every
+            listener concurrently.
+
+        Raises:
+            Error: If ``addrs`` is empty.
+            AddressInUse: If any port is already bound.
+            NetworkError: For any other OS error.
+
+        Example:
+
+        ```mojo
+        var srv = HttpServer.bind_many(
+            [SocketAddr.localhost(8080), SocketAddr.localhost(8081)],
+        )
+        srv.serve(handler)
+        ```
+        """
+        from flare.net.socket import INVALID_FD
+
+        if len(addrs) == 0:
+            raise Error("HttpServer.bind_many: addrs must be non-empty")
+        var primary = TcpListener.bind(addrs[0])
+        # Bind extras up-front; if any fails, the partially-bound
+        # ``TcpListener`` instances we already moved to ``primary``
+        # / consumed in this loop close themselves via __del__.
+        var extra_fds = List[Int]()
+        var extra_addrs = List[SocketAddr]()
+        for i in range(1, len(addrs)):
+            var l = TcpListener.bind(addrs[i])
+            extra_fds.append(Int(l._socket.fd))
+            extra_addrs.append(l._socket.local_addr())
+            # Detach the fd from ``l`` so its __del__ doesn't close
+            # what HttpServer now owns. RawSocket lacks an explicit
+            # ``release_fd()``; setting ``fd = INVALID_FD`` is the
+            # equivalent contract used elsewhere (e.g. the move
+            # constructor) so the destructor sees "already closed".
+            l._socket.fd = INVALID_FD
+        var srv = HttpServer(primary^, config^, h2_config^)
+        srv._extra_listener_fds = extra_fds^
+        srv._extra_local_addrs = extra_addrs^
+        return srv^
+
+    def local_addrs(self) -> List[SocketAddr]:
+        """Return the bound addresses, primary first then extras
+        in the order they were passed to :meth:`bind_many`. Always
+        returns at least one entry.
+        """
+        var out = List[SocketAddr]()
+        out.append(self._listener.local_addr())
+        for i in range(len(self._extra_local_addrs)):
+            out.append(self._extra_local_addrs[i].copy())
+        return out^
 
     def serve(
         mut self,
@@ -311,6 +440,8 @@ struct HttpServer(Movable):
         from std.os import getenv
         from std.sys.info import CompilationTarget
 
+        from ._unified_reactor_impl import run_unified_reactor_loop_multi
+
         var h = FnHandler(handler)
         if num_workers <= 1:
             self._stopping = False
@@ -318,10 +449,15 @@ struct HttpServer(Movable):
             # path is HTTP/1.1-only by design and crashes under
             # sustained 64-conn wrk2 load -- see the matching
             # comment in the generic ``serve[H]`` overload below.
+            # Bufring is also single-listener-only; we fall
+            # through to the unified loop when extras are
+            # attached so multi-listener users get the proper
+            # accept demux.
             comptime if CompilationTarget.is_linux():
                 if (
                     use_uring_backend()
                     and getenv("FLARE_BUFRING_HANDLER") == "1"
+                    and len(self._extra_listener_fds) == 0
                 ):
                     run_uring_bufring_reactor_loop(
                         self._listener, self.config, h, self._stopping
@@ -331,14 +467,32 @@ struct HttpServer(Movable):
             # auto-dispatched to either the HTTP/1.1 ConnHandle or
             # the HTTP/2 H2ConnHandle based on whether its first
             # 24 bytes match the RFC 9113 §3.4 client preface.
-            run_unified_reactor_loop(
-                self._listener,
-                self.config,
-                self.h2_config.copy(),
-                h,
-                self._stopping,
-            )
+            if len(self._extra_listener_fds) > 0:
+                run_unified_reactor_loop_multi(
+                    self._listener,
+                    self._extra_listener_fds,
+                    self.config,
+                    self.h2_config.copy(),
+                    h,
+                    self._stopping,
+                )
+            else:
+                run_unified_reactor_loop(
+                    self._listener,
+                    self.config,
+                    self.h2_config.copy(),
+                    h,
+                    self._stopping,
+                )
         else:
+            if len(self._extra_listener_fds) > 0:
+                raise Error(
+                    "HttpServer.bind_many is single-worker only in v0.7;"
+                    " pass num_workers=1 (or omit it). Multi-worker uses"
+                    " SO_REUSEPORT (N fds on one address); multi-listener"
+                    " is N distinct addresses on one worker. The cross"
+                    " product (N x M) lands in v0.7.x."
+                )
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
 
     def serve[H: Handler](mut self, var handler: H) raises:
@@ -366,25 +520,42 @@ struct HttpServer(Movable):
                 errors close the offending connection silently.
         """
         from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import run_unified_reactor_loop
+        from ._unified_reactor_impl import (
+            run_unified_reactor_loop,
+            run_unified_reactor_loop_multi,
+        )
         from flare.runtime.uring_reactor import use_uring_backend
         from std.os import getenv
         from std.sys.info import CompilationTarget
 
         self._stopping = False
         comptime if CompilationTarget.is_linux():
-            if use_uring_backend() and getenv("FLARE_BUFRING_HANDLER") == "1":
+            if (
+                use_uring_backend()
+                and getenv("FLARE_BUFRING_HANDLER") == "1"
+                and len(self._extra_listener_fds) == 0
+            ):
                 run_uring_bufring_reactor_loop[H](
                     self._listener, self.config, handler, self._stopping
                 )
                 return
-        run_unified_reactor_loop(
-            self._listener,
-            self.config,
-            self.h2_config.copy(),
-            handler,
-            self._stopping,
-        )
+        if len(self._extra_listener_fds) > 0:
+            run_unified_reactor_loop_multi[H](
+                self._listener,
+                self._extra_listener_fds,
+                self.config,
+                self.h2_config.copy(),
+                handler,
+                self._stopping,
+            )
+        else:
+            run_unified_reactor_loop(
+                self._listener,
+                self.config,
+                self.h2_config.copy(),
+                handler,
+                self._stopping,
+            )
 
     def serve[
         H: Handler & Copyable
@@ -428,17 +599,20 @@ struct HttpServer(Movable):
         from std.os import getenv
         from std.sys.info import CompilationTarget
 
+        from ._unified_reactor_impl import run_unified_reactor_loop_multi
+
         if num_workers <= 1:
             self._stopping = False
             # io_uring buffer-ring path is OPT-IN via
             # ``FLARE_BUFRING_HANDLER=1``. HTTP/1.1-only by
-            # design. See the matching comment in the
-            # plain-def overload above for the load-crash
-            # status that keeps it default-off.
+            # design and single-listener-only. See the matching
+            # comment in the plain-def overload above for the
+            # load-crash status that keeps it default-off.
             comptime if CompilationTarget.is_linux():
                 if (
                     use_uring_backend()
                     and getenv("FLARE_BUFRING_HANDLER") == "1"
+                    and len(self._extra_listener_fds) == 0
                 ):
                     run_uring_bufring_reactor_loop[H](
                         self._listener, self.config, handler, self._stopping
@@ -449,14 +623,32 @@ struct HttpServer(Movable):
             # or the HTTP/2 H2ConnHandle based on the first 24
             # bytes (RFC 9113 §3.4 preface peek). Same handler
             # callback is used for both wires.
-            run_unified_reactor_loop(
-                self._listener,
-                self.config,
-                self.h2_config.copy(),
-                handler,
-                self._stopping,
-            )
+            if len(self._extra_listener_fds) > 0:
+                run_unified_reactor_loop_multi[H](
+                    self._listener,
+                    self._extra_listener_fds,
+                    self.config,
+                    self.h2_config.copy(),
+                    handler,
+                    self._stopping,
+                )
+            else:
+                run_unified_reactor_loop(
+                    self._listener,
+                    self.config,
+                    self.h2_config.copy(),
+                    handler,
+                    self._stopping,
+                )
         else:
+            if len(self._extra_listener_fds) > 0:
+                raise Error(
+                    "HttpServer.bind_many is single-worker only in v0.7;"
+                    " pass num_workers=1 (or omit it). Multi-worker uses"
+                    " SO_REUSEPORT (N fds on one address); multi-listener"
+                    " is N distinct addresses on one worker. The cross"
+                    " product (N x M) lands in v0.7.x."
+                )
             self._serve_multicore[H](handler^, num_workers, pin_cores)
 
     def _serve_multicore[

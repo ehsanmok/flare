@@ -780,6 +780,205 @@ def run_unified_reactor_loop[
         _cleanup_conn_unified(leftover[i], conns, timers, reactor)
 
 
+# ── Unified reactor loop -- multi-listener (single-worker) ─────────────────
+
+
+def run_unified_reactor_loop_multi[
+    H: Handler
+](
+    mut primary: TcpListener,
+    extra_fds: List[Int],
+    config: ServerConfig,
+    var h2_config: Http2Config,
+    ref handler: H,
+    ref stopping: Bool,
+) raises:
+    """Single-worker reactor loop demuxing accepts across N listener fds.
+
+    Same shape and semantics as :func:`run_unified_reactor_loop`
+    (HTTP/1.1 + HTTP/2 auto-dispatch via the RFC 9113 §3.4
+    preface peek), with one structural difference: every listener
+    fd is registered with the reactor under ``token = fd`` so the
+    accept loop can route incoming events to the correct listener.
+    Connection events keep the existing ``token = client_fd``
+    convention; ``conns`` is the disambiguator (a token is a
+    listener fd iff it's not a key in ``conns``).
+
+    Args:
+        primary: First listener (the address returned by
+            :meth:`HttpServer.local_addr`). Closed by the
+            ``HttpServer`` owner; the loop only borrows.
+        extra_fds: Raw fds for the additional listeners attached
+            via :meth:`HttpServer.bind_many`. Owned by the caller
+            (typically ``HttpServer._extra_listener_fds``); closed
+            by ``HttpServer.__del__``. The loop only borrows them
+            for ``accept(2)``.
+        config: HTTP/1.1 server configuration.
+        h2_config: HTTP/2 SETTINGS for h2 peers.
+        handler: User's request handler.
+        stopping: External stop flag.
+    """
+    from flare.net.socket import RawSocket, INVALID_FD, AF_INET, SOCK_STREAM
+
+    primary._socket.set_nonblocking(True)
+    for i in range(len(extra_fds)):
+        # Wrap the fd in a temp RawSocket purely so we can call
+        # set_nonblocking via the existing platform-aware path
+        # (macOS arm64 routes through a libflare shim; Linux uses
+        # fcntl directly). Must zero the fd before drop so the
+        # destructor doesn't close what HttpServer still owns.
+        try:
+            var tmp = RawSocket(
+                c_int(extra_fds[i]), AF_INET, SOCK_STREAM, _wrap=True
+            )
+            tmp.set_nonblocking(True)
+            tmp.fd = INVALID_FD
+        except:
+            pass
+
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    var primary_fd = primary._socket.fd
+    var listener_fds = Dict[Int, Bool]()
+    listener_fds[Int(primary_fd)] = True
+    reactor.register(primary_fd, UInt64(Int(primary_fd)), INTEREST_READ)
+    for i in range(len(extra_fds)):
+        var f = c_int(extra_fds[i])
+        listener_fds[Int(f)] = True
+        reactor.register(f, UInt64(Int(f)), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        var fired = List[UInt64]()
+        wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var fd_tok = Int(fired[i])
+            _cleanup_conn_unified(fd_tok, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            var fd = Int(evt.token)
+            if fd in listener_fds:
+                _accept_loop_unified_fd(fd, reactor, conns)
+                continue
+            if fd not in conns:
+                continue
+            var packed = conns[fd]
+            var k = _kind(packed)
+
+            if k == KIND_H1:
+                var done3 = False
+                if evt.is_readable():
+                    done3 = _drive_h1(
+                        fd,
+                        _addr(packed),
+                        handler,
+                        config,
+                        h2_config,
+                        conns,
+                        reactor,
+                        wheel,
+                        timers,
+                    )
+                elif evt.is_writable():
+                    done3 = _drive_h1_writable(
+                        fd,
+                        _addr(packed),
+                        config,
+                        reactor,
+                        wheel,
+                        timers,
+                    )
+                if done3:
+                    _cleanup_conn_unified(fd, conns, timers, reactor)
+                continue
+
+            if k == KIND_H2:
+                var done4 = _drive_h2(
+                    fd,
+                    _addr(packed),
+                    handler,
+                    config,
+                    evt.is_readable(),
+                    reactor,
+                    wheel,
+                    timers,
+                )
+                if done4:
+                    _cleanup_conn_unified(fd, conns, timers, reactor)
+                continue
+
+            # Cold path: pending (preface-peek). Same code shape
+            # as the single-listener loop above.
+            if not evt.is_readable():
+                continue
+            var pending_ptr = _pending_conn_ptr_from_int(_addr(packed))
+            var decision: Int
+            try:
+                decision = pending_ptr[].on_readable()
+            except:
+                decision = PROTO_HTTP1
+            if decision == PROTO_NEED_MORE:
+                continue
+            var ok = _migrate_pending(fd, decision, h2_config, conns)
+            if not ok:
+                _cleanup_conn_unified(fd, conns, timers, reactor)
+                continue
+            if fd in conns:
+                var packed2 = conns[fd]
+                var k2 = _kind(packed2)
+                if k2 == KIND_H2:
+                    var done = _drive_h2(
+                        fd,
+                        _addr(packed2),
+                        handler,
+                        config,
+                        True,
+                        reactor,
+                        wheel,
+                        timers,
+                    )
+                    if done:
+                        _cleanup_conn_unified(fd, conns, timers, reactor)
+                elif k2 == KIND_H1:
+                    var done2 = _drive_h1(
+                        fd,
+                        _addr(packed2),
+                        handler,
+                        config,
+                        h2_config,
+                        conns,
+                        reactor,
+                        wheel,
+                        timers,
+                    )
+                    if done2:
+                        _cleanup_conn_unified(fd, conns, timers, reactor)
+
+    # Graceful shutdown: close all live conns. Listener fds are
+    # closed by ``HttpServer.__del__`` -- the loop only borrows.
+    var leftover = List[Int]()
+    for kv in conns.items():
+        leftover.append(kv.key)
+    for i in range(len(leftover)):
+        _cleanup_conn_unified(leftover[i], conns, timers, reactor)
+
+
 # ── Unified reactor loop -- shared listener (multi-worker) ──────────────────
 
 
