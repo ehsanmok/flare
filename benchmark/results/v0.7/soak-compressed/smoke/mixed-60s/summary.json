@@ -1,0 +1,37 @@
+{
+  "commit": "7cfaccc",
+  "duration_secs": 60,
+  "fd_count_end": 45,
+  "fd_count_max": 109,
+  "fd_count_start": 45,
+  "gates": {
+    "fd_end_bounded": true,
+    "no_non_2xx": true,
+    "rss_within_2x": true,
+    "server_alive": true
+  },
+  "host": "ehsan-dev",
+  "observe_samples": 62,
+  "pass": true,
+  "rss_kb_end": 33280,
+  "rss_kb_max": 33280,
+  "rss_kb_start": 32256,
+  "tier": "smoke",
+  "workload": "mixed",
+  "wrk": {
+    "duration_secs_actual": 60.0,
+    "non_2xx_3xx": 0,
+    "p50_ms": 0.97,
+    "p75_ms": 1.27,
+    "p90_ms": 2.3,
+    "p99_ms": 2.64,
+    "requests_per_sec": 51075.85,
+    "requests_total": 3064583,
+    "socket_errors_connect": 0,
+    "socket_errors_read": 0,
+    "socket_errors_timeout": 0,
+    "socket_errors_write": 0
+  },
+  "wrk_connections": 64,
+  "wrk_threads": 2
+}
