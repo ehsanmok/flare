@@ -120,3 +120,31 @@ natural.
 | Serve HTTP/1.1 + HTTP/2 from one port | [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
 | AF_UNIX sidecar IPC | [`uds_sidecar.mojo`](../examples/advanced/uds_sidecar.mojo) |
 | Even out skewed-keepalive load | [`work_stealing.mojo`](../examples/advanced/work_stealing.mojo) |
+
+## Reading data from a `Request`
+
+flare exposes inbound request data through a layered surface — the
+right shape depends on whether you want a plain field, a parsed
+primitive, or a typed struct populated by the request as a whole.
+The table below is the canonical reference; pick the cheapest shape
+that gets you the value you need.
+
+| Shape | What you get | Example | When to reach for it |
+|---|---|---|---|
+| **Plain field access** | The raw string / bytes / list / `HeaderMap` directly off `Request` | `req.method`, `req.url`, `req.body`, `req.headers`, `req.peer`, `req.version` | You want the wire-level value as the parser saw it. No copying, no extraction. |
+| **Path params** | Value matched by a Router path segment (`:name`) | `req.param("id") raises -> String`, `req.has_param`, `req.params_mut()["id"] = ...` | The URL path itself carries the value. `param` raises if the segment didn't match (use `has_param` to peek). |
+| **Query params** | Single value from the URL's query string | `req.query_param("k") -> String` (returns `""` if missing), `req.has_query_param` | Querystring `?k=v` style data; return-value-on-miss makes one-line reads natural. |
+| **Cookies** | Inbound `Cookie` header parsed into name/value pairs | `req.cookies() -> CookieJar`, `req.cookie("name") -> String` (returns `""` if missing), `req.has_cookie` | Inspecting an inbound `Cookie` header directly. For typed extraction prefer the `Cookies` extractor. |
+| **Body decoding** | Body interpreted as text / JSON / raw bytes | `req.text() -> String`, `req.json() raises -> json.Value`, `req.body: List[UInt8]` | Reading the body opportunistically inside a handler without an extractor. |
+| **`*.extract(req)` extractors** | Typed value from the body or a header set | `Form.extract(req) -> Form`, `Multipart.extract(req) -> MultipartForm`, `Cookies.extract(req) -> Cookies` | Hand-written extractor pipeline; reach for this when the auto-injection adapter is overkill but you still want typed parsing. |
+| **Comptime-keyed extractors** | Single typed primitive keyed at compile time | `PathInt["id"]`, `QueryStr["q"]`, `OptionalQueryInt["page"]`, `HeaderStr["Authorization"]`, `Json[T]` | Building blocks for the auto-injection shape (next row); each one is a `Defaultable` struct with a `value` field. |
+| **`Extracted[H]` auto-injection** | A handler struct whose fields are the extractor set; the adapter walks the field list per request and populates each | `r.get("/users/:id", Extracted[GetUser]())` where `GetUser(HandlerExtractor)` declares `id: PathInt["id"]` etc. | Production handler shape: declarative, typed, monomorphised. The adapter raises 400 with the parser error on extractor failure; `serve` raises propagate to 500. |
+
+Examples that exercise each shape, in order: the [`router.mojo`](../examples/basic/router.mojo)
+example covers plain field + path param shapes; [`request_cookies.mojo`](../examples/intermediate/request_cookies.mojo)
+walks the cookie surface; [`forms.mojo`](../examples/intermediate/forms.mojo)
+and [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo)
+use the `*.extract(req)` extractors; [`extractors.mojo`](../examples/intermediate/extractors.mojo)
+and [`ok_json_typed.mojo`](../examples/intermediate/ok_json_typed.mojo)
+show comptime-keyed extractors and the `Extracted[H]` auto-injection
+adapter.
