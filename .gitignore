@@ -40,8 +40,6 @@ benchmark/results/*
 !benchmark/results/.gitkeep
 !benchmark/results/v0.6/
 !benchmark/results/v0.6/**
-!benchmark/results/v0.7/
-!benchmark/results/v0.7/**
 benchmark/baselines/*/server
 benchmark/baselines/*/go.sum
 benchmark/baselines/*/nginx-rendered.conf

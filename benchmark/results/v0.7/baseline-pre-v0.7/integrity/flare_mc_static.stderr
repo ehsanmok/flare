@@ -1,4 +1,0 @@
-/home/ubuntu/workspace/flare/benchmark/baselines/flare_mc_static/main.mojo:42:1: warning: 'alias' is deprecated; use 'comptime'
-alias BENCH_CONFIG = ServerConfig(
-^~~~~
-comptime

@@ -1,6 +1,0 @@
-HTTP/1.1 200 OK
-Server: nginx/1.25.3
-Date: Wed, 06 May 2026 03:13:24 GMT
-Content-Type: text/plain; charset=utf-8
-Content-Length: 13
-Connection: keep-alive
