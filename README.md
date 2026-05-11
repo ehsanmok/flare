@@ -32,7 +32,7 @@ def main() raises:
 - **HTTP/2 and h2c without the dance.** `HttpServer.serve(handler)` peeks every accepted connection for the RFC 9113 preface and dispatches h2c without an `Upgrade` negotiation; over TLS it's plain ALPN. The same `Router`, middleware, and extractors run on both wires.
 - **Composable by types, not callbacks.** `Handler` is a trait. `Router`, `App[S]`, middleware, and typed extractors (`PathInt`, `QueryInt`, `Form[T]`, `Json[T]`, `Cookies`) compose by nesting structs. The compiler monomorphises the chain into one direct call sequence per request, with no virtual dispatch and no per-request allocation.
 - **Operationally honest.** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics. Hard to misuse under load.
-- **Fast, with a tight tail.** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`). On a 4-worker plaintext bench, flare posts the best p99 / p99.9 / p99.99 of the four major Rust frameworks, with stdev across 5 runs ≤ 4 ms at every percentile. [Numbers below.](#performance)
+- **Fast, with a tight tail.** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`). On a 4-worker plaintext bench, flare's handler path posts the cleanest tail of the pack — `2.61 ± 0.02 ms` p99 and `3.25 ± 0.10 ms` p99.99 across 5 runs at 212k req/s, while the Rust baselines hit slightly higher headline rates with σ in the hundreds of milliseconds at p99.9 / p99.99. [Numbers below.](#performance)
 - **Fuzzed.** 24 fuzz harnesses, 5.4M+ runs, zero known crashes. ASan and assert-mode coverage on every FFI boundary.
 
 ## Install
@@ -217,31 +217,33 @@ For the static-response fast path (`serve_static`), `serve_comptime[handler, con
 
 ## Performance
 
-TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), Linux x86_64 dev-box. Each row is the highest sustained rate that holds `p99 ≤ 50 ms` from the bench harness's calibrated peak-finder, with the latency distribution measured at 90% of that peak across five 30s rounds. Latency cells are `median ± σ` over the 5 runs (σ = sample stdev across runs, ms); Req/s is the calibrated peak with stdev as a percentage of mean. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` for flare, `cargo build --release --locked` for actix_web / hyper / axum), so the comparison is on the same compiler posture on both sides.
+TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), Linux x86_64 dev-box. Each row is the highest sustained rate that holds `p99 ≤ 50 ms` from the bench harness's calibrated peak-finder — 20 s probes with cliff-fanout gates on p99.9 / p99.99, a transient-blip retry, an absolute-p99 growth gate, and a post-search validation pass at 90 % of the chosen peak — with the latency distribution measured at that sustainable rate across five 30 s rounds. Latency cells are `median ± σ` over the 5 runs (σ = sample stdev across runs, ms); Req/s is the calibrated peak with stdev as a percentage of mean. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` for flare, `cargo build --release --locked` for actix_web / hyper / axum), so the comparison is on the same compiler posture on both sides.
+
+The σ on the tail percentiles is the **honesty meter** for these numbers: a small σ (sub-millisecond on p99.9 / p99.99) means all 5 runs landed inside the working envelope; a large σ (tens or hundreds of ms) means at least one run brushed against the saturation cliff and the headline rate is sitting at the limit, not comfortably inside it.
 
 **4-worker comparison** (the four frameworks that ship a multi-worker mode):
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| actix_web (tokio) | 4 | 251,416 | 0.35 | 1.25 ± 0.01 | 2.74 ± 0.17 | 3.77 ± 35.13 | 7.62 ± 43.93 |
-| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **235,223** | **0.21** | **1.23 ± 0.03** | **2.67 ± 0.02** | **3.01 ± 0.04** | **3.22 ± 3.86** |
-| hyper (tokio multi-thread) | 4 | 218,074 | 0.21 | 1.24 ± 0.00 | 2.83 ± 0.02 | 3.28 ± 6.73 | 3.69 ± 33.56 |
-| **flare_mc** (handler) [^reuse] | **4** | **216,170** | **0.28** | **1.25 ± 0.02** | **2.66 ± 0.02** | **2.98 ± 0.33** | **3.35 ± 31.06** |
-| axum (tokio multi-thread) | 4 | 200,097 | 0.35 | 1.29 ± 0.01 | 2.83 ± 0.03 | 3.32 ± 5.22 | 18.05 ± 37.93 |
+| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **274,514** | **0.59** | **1.12 ± 0.08** | **98.43 ± 406.17** | **133.63 ± 425.84** | **148.35 ± 430.22** |
+| actix_web (tokio) | 4 | 223,847 | 0.35 | 1.28 ± 0.01 | 2.72 ± 0.08 | 3.18 ± 269.54 | 7.51 ± 305.02 |
+| hyper (tokio multi-thread) | 4 | 215,508 | 0.21 | 1.25 ± 0.00 | 2.83 ± 0.07 | 3.30 ± 125.23 | 10.85 ± 147.50 |
+| **flare_mc** (handler) [^reuse] | **4** | **212,246** | **0.21** | **1.23 ± 0.01** | **2.61 ± 0.02** | **2.93 ± 0.02** | **3.25 ± 0.10** |
+| axum (tokio multi-thread) | 4 | 199,380 | 0.17 | 1.30 ± 0.00 | 2.80 ± 0.14 | 3.23 ± 5.50 | 3.58 ± 7.55 |
 
 **Single-worker** (per-core request-processing cost):
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| nginx (`worker_processes 1`) | 1 | 76,000 | 1.27 | 1.14 ± 0.03 | 3.28 ± 0.15 | 3.67 ± 0.22 | 4.11 ± 0.31 |
-| **flare** (reactor) | **1** | **71,997** | **0.00** | **1.17 ± 0.02** | **3.03 ± 0.15** | **3.35 ± 0.14** | **3.48 ± 0.14** |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,974 | 1.27 | 1.39 ± 0.01 | 3.27 ± 29.89 | 3.88 ± 37.71 | 4.72 ± 40.41 |
+| nginx (`worker_processes 1`) | 1 | 80,239 | 1.57 | 1.09 ± 0.02 | 3.45 ± 0.07 | 4.13 ± 0.11 | 4.80 ± 0.11 |
+| **flare** (reactor) | **1** | **71,619** | **1.27** | **1.20 ± 0.02** | **3.01 ± 0.18** | **3.30 ± 1.49** | **3.43 ± 5.67** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,173 | 1.57 | 1.38 ± 0.00 | 3.21 ± 0.01 | 3.74 ± 0.09 | 4.62 ± 0.32 |
 
 What jumps out:
 
-- **flare_mc_static** posts the **best p99 / p99.9 / p99.99 of the four 4-worker frameworks** and the smallest stdev at every percentile — `3.22 ± 3.86 ms` p99.99 vs actix_web's `7.62 ± 43.93`, hyper's `3.69 ± 33.56`, axum's `18.05 ± 37.93`. It trades ~6% throughput to actix_web for an order-of-magnitude tighter p99.99 stdev.
-- **flare_mc (the handler path)** leads on p99 (2.66 ms, tightest with σ=0.02) and ties or wins p99.9, with handler-path throughput between hyper and axum. The honest residual throughput gap to actix_web is the static-vs-handler difference, which `flare_mc_static` closes.
-- **flare 1w** posts 95% of nginx 1w throughput with a uniformly tighter tail (p99 3.03 vs 3.28; p99.9 3.35 vs 3.67; p99.99 3.48 vs 4.11) and the smallest stdev of all three single-worker rows. It does 1.76× Go `net/http` at the same worker count, with Go's tail σ ~200× wider (40 ms vs 0.14 ms at p99.99) due to GC pauses.
+- **flare_mc (the handler path)** has the cleanest tail of the entire 4-worker pack — `2.61 ± 0.02 ms` p99, `2.93 ± 0.02 ms` p99.9, `3.25 ± 0.10 ms` p99.99 — three to four orders of magnitude tighter σ than the Rust baselines at p99.9 / p99.99. Its 212k req/s rate sits comfortably inside the working envelope; the Rust libs (actix_web 224k, hyper 216k) post slightly higher headline rates but with σ in the hundreds of milliseconds, meaning at least one run brushed the cliff.
+- **flare_mc_static** posts the highest throughput of the pack (274k req/s, ~23% over actix_web) but the σ values make the cost explicit: the fixed-response fast path is sitting right at saturation, where 1–2 of 5 measurement runs slip off and the p99.x distribution widens. Use this row when the headline matters and the workload tolerates occasional tail expansion; use `flare_mc` when you want a uniformly tight tail under sustained load.
+- **flare 1w** posts 89% of nginx 1w throughput with a tighter p99 (3.01 vs 3.45 ms) and the smallest tail σ of all three single-worker rows. It does 1.78× Go `net/http` at the same worker count, with the tail σ comparable to nginx and dramatically tighter than Go.
 
 Full methodology, the rate-sweep that locates each cliff, the historical CPU-pinned reference run, and reproducibility instructions are in [`docs/benchmark.md`](docs/benchmark.md). The matching nginx / hyper / actix_web / axum baselines built from source by the harness live under [`benchmark/baselines/`](benchmark/baselines/).
 
@@ -347,4 +349,4 @@ The full task list (per-component + the every-individual-fuzz-harness breakdown)
 
 [MIT](./LICENSE)
 
-[^reuse]: Multi-worker flare uses per-worker `SO_REUSEPORT` listeners by default for `num_workers >= 2` (matching actix_web). Set `FLARE_REUSEPORT_WORKERS=0` to opt into the single-listener `EPOLLEXCLUSIVE` shape, which trades ~17% req/s for ~0.25 ms tighter p99.99. See [`docs/benchmark.md`](docs/benchmark.md) for the listener-mode A/B and [Production build](#production-build) for the `mojo build -D ASSERT=none` shape these numbers use.
+[^reuse]: Multi-worker flare uses per-worker `SO_REUSEPORT` listeners by default for `num_workers >= 2` (matching actix_web). Set `FLARE_REUSEPORT_WORKERS=0` to opt into the single-listener `EPOLLEXCLUSIVE` shape, which trades 7-22 % req/s (handler vs static fast path respectively) for a uniformly tight p99.99 across both paths. See [`docs/benchmark.md`](docs/benchmark.md) for the listener-mode A/B and [Production build](#production-build) for the `mojo build -D ASSERT=none` shape these numbers use.

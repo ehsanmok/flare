@@ -201,53 +201,202 @@ for target_dir in "$BASELINES_DIR"/*/; do
 
             P99_BUDGET_MS=$(awk '/^sustain_p99_budget_ms:/ {print $2}' "$config_file")
             P99_BUDGET_MS=${P99_BUDGET_MS:-50}
-            echo "  overdrive=$(printf '%.0f' "$OVERDRIVE_RPS") req/s; calibrating sustainable peak (p99 ≤ ${P99_BUDGET_MS} ms) …"
+            # Probe duration governs how much tail headroom each
+            # calibration step has to expose. 10 s is too short:
+            # rare 100+ ms blips that mark "edge of cliff" land in
+            # the p99.99 bucket only every ~10-20 k requests, so a
+            # 10 s probe at 200 k rps sees 0-2 of them. 20 s
+            # doubles the sample and exposes the cliff reliably.
+            PROBE_DURATION_SEC="${FLARE_BENCH_PROBE_SEC:-20}"
+            echo "  overdrive=$(printf '%.0f' "$OVERDRIVE_RPS") req/s; calibrating sustainable peak (p99 ≤ ${P99_BUDGET_MS} ms, ${PROBE_DURATION_SEC} s/probe) …"
+
+            # Helper that parses the p50 / p99 / p99.9 / p99.99
+            # block out of one wrk2 stdout file and prints them
+            # in milliseconds on a single line.
+            parse_pct() {
+                python3 - "$1" <<'PY'
+import re, sys
+p = sys.argv[1]
+text = open(p, errors="replace").read()
+re_pct = re.compile(r"^\s*([0-9]+\.[0-9]+)%\s+([0-9.]+)(us|ms|s|m)\s*$", re.M)
+want = {"50.000": "p50", "99.000": "p99", "99.900": "p99_9", "99.990": "p99_99"}
+got = {}
+in_dist = False
+for line in text.splitlines():
+    if "Latency Distribution" in line:
+        in_dist = True; continue
+    if not in_dist: continue
+    s = line.strip()
+    if not s or s.startswith("Detailed"): in_dist = False; continue
+    m = re_pct.match("  " + s)
+    if not m: continue
+    pct, v, u = m.group(1), float(m.group(2)), m.group(3)
+    if pct not in want: continue
+    ms = v / 1000.0 if u == "us" else v if u == "ms" else v * 1000.0 if u == "s" else v * 60000.0
+    got[want[pct]] = ms
+print(f"{got.get('p50', 0):.3f} {got.get('p99', 99999):.3f} {got.get('p99_9', 99999):.3f} {got.get('p99_99', 99999):.3f}")
+PY
+            }
 
             # Binary search between 30% and 100% of overdrive.
             LO=$(python3 -c "print(int(float('$OVERDRIVE_RPS') * 0.30))")
             HI=$(python3 -c "print(int(float('$OVERDRIVE_RPS') * 1.00))")
             SUSTAINABLE_RPS=$LO
+            # Track the lowest p99 seen across probes. A
+            # probe whose absolute p99 has more than doubled
+            # vs this floor signals approaching saturation
+            # even when the tail-fanout ratio is bounded
+            # (the "p99 doubled in the same probe budget"
+            # failure mode caught for actix_web 256k→262k:
+            # tail fanout looked clean but the median p99
+            # grew 2.1×, and the 90%-of-peak sustain rate
+            # then sat right on the cliff). 2.0× is the
+            # smallest factor that lets healthy servers
+            # climb 3-4 probes without false-positive
+            # rejection.
+            P99_FLOOR=999.0
+            # Calibration helper: run one wrk2 probe and parse
+            # its percentiles into P50_MS / P99_MS / P99_9_MS /
+            # P99_99_MS / ACHIEVED_INT. Keeping this as a
+            # function lets the binary-search loop retry a
+            # rejected probe before permanently truncating the
+            # search bound -- single transient blips (NIC IRQ
+            # storms, kernel scheduler jitter, brief noisy
+            # neighbours) should not collapse the search
+            # ceiling.
+            run_probe() {
+                local rate="$1"
+                local raw="$2"
+                "$WRK2_BIN" -t"$WRK_THREADS" -c"$WRK_CONNS" \
+                    -d"${PROBE_DURATION_SEC}s" -R"$rate" --latency "$URL" > "$raw" 2>&1 || true
+                read -r P50_MS P99_MS P99_9_MS P99_99_MS <<< "$(parse_pct "$raw")"
+                local ach
+                ach=$(awk '/^Requests\/sec:/ {print $2}' "$raw")
+                ACHIEVED_INT=$(python3 -c "print(int(float('$ach' or '0')))")
+            }
+            # Gate test as a function so the binary-search
+            # loop can call it on both the original and the
+            # retry probe results without duplicating the
+            # multi-criterion logic. Sets verdict + the four
+            # OK flags as side effects.
+            evaluate_probe() {
+                local mid="$1"
+                MIN_ACHIEVED=$(python3 -c "print(int($mid * 0.90))")
+                P99_OK=$(python3 -c "print(1 if float('$P99_MS') <= $P99_BUDGET_MS else 0)")
+                ACH_OK=$(python3 -c "print(1 if $ACHIEVED_INT >= $MIN_ACHIEVED else 0)")
+                CLIFF_OK=$(python3 -c "
+p99   = float('$P99_MS')
+p99_9 = float('$P99_9_MS')
+p99_99 = float('$P99_99_MS')
+ok_999  = p99_9  <= max(p99 * 3.0, p99 + 2.0)
+ok_9999 = p99_99 <= max(p99 * 10.0, p99 + 5.0)
+print(1 if (ok_999 and ok_9999) else 0)
+")
+                P99_GROWTH_OK=$(python3 -c "
+floor = float('$P99_FLOOR')
+p99 = float('$P99_MS')
+print(1 if p99 <= max(floor * 2.0, floor + 2.0) else 0)
+")
+                if [ "$P99_OK" = "1" ] && [ "$ACH_OK" = "1" ] && [ "$CLIFF_OK" = "1" ] && [ "$P99_GROWTH_OK" = "1" ]; then
+                    verdict=OK
+                elif [ "$P99_GROWTH_OK" = "0" ]; then
+                    verdict=P99_GREW
+                elif [ "$CLIFF_OK" = "0" ]; then
+                    verdict=CLIFF
+                elif [ "$P99_OK" = "0" ]; then
+                    verdict=P99_HIGH
+                else
+                    verdict=UNDER_RATE
+                fi
+            }
             for _step in 1 2 3 4 5; do
                 MID=$(python3 -c "print(int(($LO + $HI) / 2))")
                 cal_raw="$RESULTS_DIR/RAW/$target-$workload-$config-cal-${MID}.txt"
-                "$WRK2_BIN" -t"$WRK_THREADS" -c"$WRK_CONNS" \
-                    -d10s -R"$MID" --latency "$URL" > "$cal_raw" 2>&1 || true
-                P99_LINE=$(grep -E '^[[:space:]]*99\.000%' "$cal_raw" | head -1)
-                P99_MS=$(python3 -c "
-import re,sys
-s = '''$P99_LINE'''.strip()
-m = re.search(r'([0-9.]+)([umms]+)', s.split()[-1] if s else '0ms')
-if not m:
-    print(99999)
-else:
-    v = float(m.group(1)); u = m.group(2)
-    if u == 'us':   ms = v / 1000
-    elif u == 'ms': ms = v
-    elif u == 's':  ms = v * 1000
-    elif u == 'm':  ms = v * 60000
-    else: ms = 99999
-    print(f'{ms:.2f}')
-")
-                ACHIEVED_RPS=$(awk '/^Requests\/sec:/ {print $2}' "$cal_raw")
-                ACHIEVED_INT=$(python3 -c "print(int(float('$ACHIEVED_RPS' or '0')))")
-                # Reject if the load gen couldn't keep up (achieved < 90% of MID),
-                # which means we've already exceeded the server's true rate.
-                MIN_ACHIEVED=$(python3 -c "print(int($MID * 0.90))")
-                P99_OK=$(python3 -c "print(1 if float('$P99_MS') <= $P99_BUDGET_MS else 0)")
-                ACH_OK=$(python3 -c "print(1 if $ACHIEVED_INT >= $MIN_ACHIEVED else 0)")
-                if [ "$P99_OK" = "1" ] && [ "$ACH_OK" = "1" ]; then
+                run_probe "$MID" "$cal_raw"
+                # Update the absolute-p99 floor BEFORE the
+                # first evaluate_probe call so the growth gate
+                # uses the up-to-date floor on this probe.
+                P99_FLOOR=$(python3 -c "print(min(float('$P99_FLOOR'), float('$P99_MS')))")
+                evaluate_probe "$MID"
+                # If we rejected on a transient-looking gate
+                # (CLIFF / P99_GREW), re-run the same probe
+                # ONCE before truncating HI. Single noisy
+                # probes early in the binary search were
+                # permanently capping the search ceiling and
+                # producing artificially low calibrated peaks
+                # (the flare_mc 174k regression in the
+                # 2026-05-11T1740 run — overdrive=278k,
+                # first probe at 65 % = R=180k took a
+                # transient 81 ms p99.99, search collapsed to
+                # 174k). One retry on transient gates lets the
+                # search shake off these blips without giving
+                # up the cliff-detection signal: persistent
+                # cliffs reject twice in a row.
+                if [ "$verdict" = "CLIFF" ] || [ "$verdict" = "P99_GREW" ]; then
+                    retry_raw="$RESULTS_DIR/RAW/$target-$workload-$config-cal-${MID}-retry.txt"
+                    echo "    retry @ R=${MID}: rejected on ${verdict}, re-probing once"
+                    run_probe "$MID" "$retry_raw"
+                    P99_FLOOR=$(python3 -c "print(min(float('$P99_FLOOR'), float('$P99_MS')))")
+                    evaluate_probe "$MID"
+                fi
+                # Apply the verdict from evaluate_probe (after
+                # an optional retry above) to the binary
+                # search bounds.
+                if [ "$verdict" = "OK" ]; then
                     SUSTAINABLE_RPS=$MID
                     LO=$MID
                 else
                     HI=$MID
                 fi
-                echo "    probe @ R=${MID}: ach=${ACHIEVED_INT} p99=${P99_MS}ms (budget=${P99_BUDGET_MS}ms) → $([ "$P99_OK" = "1" ] && [ "$ACH_OK" = "1" ] && echo OK || echo TOO_HIGH)"
+                echo "    probe @ R=${MID}: ach=${ACHIEVED_INT} p99=${P99_MS}ms p99.9=${P99_9_MS}ms p99.99=${P99_99_MS}ms (floor=${P99_FLOOR}ms) → ${verdict}"
             done
             PEAK_RPS=$SUSTAINABLE_RPS
 
             SUSTAIN_PCT=$(awk '/^sustain_rps_pct:/ {print $2}' "$config_file")
             SUSTAIN_PCT=${SUSTAIN_PCT:-90}
             SUSTAIN_RPS=$(python3 -c "print(int(float('$PEAK_RPS') * $SUSTAIN_PCT / 100))")
+
+            # Post-search validation pass. The binary search can
+            # still settle one step above the true sustainable
+            # peak when the boundary probe lands in a momentarily
+            # quiet window. A single 20 s validation at
+            # SUSTAIN_PCT% of the chosen peak catches that case;
+            # if the validation fails the same cliff gate we used
+            # during the search, back the peak off one step
+            # (multiply by 0.92) and re-validate once. The 0.92
+            # factor is empirically large enough to clear a cliff
+            # discovered at SUSTAIN_PCT% of overshoot peak; if it
+            # still fails after one back-off we accept the
+            # current rate and label the run "unstable" via
+            # _stat.py's stdev gate.
+            for _val_attempt in 1 2; do
+                val_raw="$RESULTS_DIR/RAW/$target-$workload-$config-val-${SUSTAIN_RPS}.txt"
+                echo "  validate @ R=${SUSTAIN_RPS} (${PROBE_DURATION_SEC}s) …"
+                "$WRK2_BIN" -t"$WRK_THREADS" -c"$WRK_CONNS" \
+                    -d"${PROBE_DURATION_SEC}s" -R"$SUSTAIN_RPS" --latency "$URL" > "$val_raw" 2>&1 || true
+                read -r VP50 VP99 VP99_9 VP99_99 <<< "$(parse_pct "$val_raw")"
+                V_OK=$(python3 -c "
+p99   = float('$VP99')
+p99_9 = float('$VP99_9')
+p99_99 = float('$VP99_99')
+ok_p99  = p99    <= float('$P99_BUDGET_MS')
+ok_999  = p99_9  <= max(p99 * 3.0,  p99 + 2.0)
+ok_9999 = p99_99 <= max(p99 * 10.0, p99 + 5.0)
+print(1 if (ok_p99 and ok_999 and ok_9999) else 0)
+")
+                if [ "$V_OK" = "1" ]; then
+                    echo "    validation OK: p99=${VP99}ms p99.9=${VP99_9}ms p99.99=${VP99_99}ms"
+                    break
+                else
+                    echo "    validation FAILED: p99=${VP99}ms p99.9=${VP99_9}ms p99.99=${VP99_99}ms"
+                    if [ "$_val_attempt" = "1" ]; then
+                        # Back off 8% and try one more time.
+                        PEAK_RPS=$(python3 -c "print(int(float('$PEAK_RPS') * 0.92))")
+                        SUSTAIN_RPS=$(python3 -c "print(int(float('$PEAK_RPS') * $SUSTAIN_PCT / 100))")
+                        echo "    backing off to peak=${PEAK_RPS} sustain=${SUSTAIN_RPS}"
+                    fi
+                fi
+            done
             echo "  sustainable peak=$(printf '%.0f' "$PEAK_RPS") req/s; sustaining at $SUSTAIN_PCT%% = ${SUSTAIN_RPS} req/s"
 
             # Measurement runs at the sustainable rate. Tail

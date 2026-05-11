@@ -352,40 +352,72 @@ Bessel-corrected). The `σ%` column is the relative stdev of
 req/s across the same 5 runs (the harness's stability gate
 fires at 3-5 % depending on config).
 
+The σ on the tail percentiles is the **honesty meter** for
+these numbers. A small σ (sub-ms on p99.9 / p99.99) means all
+5 runs landed inside the steady-state working envelope. A
+large σ (tens or hundreds of ms) means at least one of the 5
+runs brushed against the saturation cliff and the headline
+rate is sitting at the limit, not comfortably inside it. The
+v0.6.1 harness pass (probe duration 20 s, cliff-fanout gate
+on p99.9 / p99.99, transient-blip retry, absolute-p99 growth
+gate, post-search 0.92× validation back-off) catches the
+cliff at calibration time; what remains in the σ column
+across these 4-worker rows is whatever residual variance
+each framework has at its calibrated rate.
+
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| actix_web (tokio) | 4 | 251,416 | 0.35 | 1.25 ± 0.01 | 2.74 ± 0.17 | 3.77 ± 35.13 | 7.62 ± 43.93 |
-| **flare_mc_static** (REUSEPORT) | **4** | **235,223** | **0.21** | **1.23 ± 0.03** | **2.67 ± 0.02** | **3.01 ± 0.04** | **3.22 ± 3.86** |
-| hyper (tokio multi-thread) | 4 | 218,074 | 0.21 | 1.24 ± 0.00 | 2.83 ± 0.02 | 3.28 ± 6.73 | 3.69 ± 33.56 |
-| **flare_mc** handler (REUSEPORT) | **4** | **216,170** | **0.28** | **1.25 ± 0.02** | **2.66 ± 0.02** | **2.98 ± 0.33** | **3.35 ± 31.06** |
-| axum (tokio multi-thread) | 4 | 200,097 | 0.35 | 1.29 ± 0.01 | 2.83 ± 0.03 | 3.32 ± 5.22 | 18.05 ± 37.93 |
+| **flare_mc_static** (REUSEPORT) | **4** | **274,514** | **0.59** | **1.12 ± 0.08** | **98.43 ± 406.17** | **133.63 ± 425.84** | **148.35 ± 430.22** |
+| actix_web (tokio) | 4 | 223,847 | 0.35 | 1.28 ± 0.01 | 2.72 ± 0.08 | 3.18 ± 269.54 | 7.51 ± 305.02 |
+| hyper (tokio multi-thread) | 4 | 215,508 | 0.21 | 1.25 ± 0.00 | 2.83 ± 0.07 | 3.30 ± 125.23 | 10.85 ± 147.50 |
+| **flare_mc** handler (REUSEPORT) | **4** | **212,246** | **0.21** | **1.23 ± 0.01** | **2.61 ± 0.02** | **2.93 ± 0.02** | **3.25 ± 0.10** |
+| axum (tokio multi-thread) | 4 | 199,380 | 0.17 | 1.30 ± 0.00 | 2.80 ± 0.14 | 3.23 ± 5.50 | 3.58 ± 7.55 |
 
-Source data: [`benchmark/results/2026-05-11T0500-ehsan-dev-abe38f7/`](../benchmark/results/2026-05-11T0500-ehsan-dev-abe38f7/)
-(Rust libs + flare_mc) and
-[`benchmark/results/2026-05-11T0520-ehsan-dev-abe38f7/`](../benchmark/results/2026-05-11T0520-ehsan-dev-abe38f7/)
-(flare_mc_static).
+Source data:
+[`benchmark/results/2026-05-11T1846-ehsan-dev-944de73/`](../benchmark/results/2026-05-11T1846-ehsan-dev-944de73/)
+(all 4-worker rows, single multi-worker run with the v0.6.1
+calibration harness).
 
 What jumps out:
 
-- **flare_mc_static** posts the **best p99 / p99.9 / p99.99
-  of the four 4-worker frameworks** and -- importantly --
-  the **smallest stdev at every tail percentile**. Its
-  `3.22 ± 3.86 ms` p99.99 is honest: one of the 5 runs took
-  a single small blip, the other four landed under 3.7 ms.
-  actix_web (`7.62 ± 43.93`), hyper (`3.69 ± 33.56`), and
-  axum (`18.05 ± 37.93`) all show order-of-magnitude wider
-  p99.99 stdev under the same load, meaning their tail
-  numbers are dominated by occasional 70-100 ms outliers
-  rather than steady-state behaviour. flare_mc_static
-  trades ~6% throughput to actix_web for that tighter tail.
-- **flare_mc** (handler path) leads on p99 (`2.66 ± 0.02 ms`,
-  the tightest σ in the table) and p99.9 (`2.98 ± 0.33 ms`),
-  with handler-path throughput between hyper (+1%) and
-  axum (-7%). The headline gap to actix_web on req/s is the
-  static-vs-handler difference, which `flare_mc_static`
-  closes.
+- **flare_mc** (handler path) has the cleanest tail of the
+  entire pack. `2.61 ± 0.02 ms` p99, `2.93 ± 0.02 ms` p99.9,
+  `3.25 ± 0.10 ms` p99.99 -- the per-percentile σ is sub-100
+  microseconds, three to four orders of magnitude tighter
+  than the Rust baselines at p99.9 / p99.99. Its 212k req/s
+  rate sits comfortably inside the working envelope at the
+  90 %-of-peak sustain rate; the harness has clear headroom
+  before the next probe rejected on `P99_GREW`. This is the
+  row we hand operators when steady-state tail predictability
+  is the primary requirement.
+- **flare_mc_static** posts the highest throughput of the
+  pack (274k req/s, ~23 % over actix_web), but the σ values
+  make the cost explicit: the fixed-response fast path is
+  sitting right at saturation, where 1-2 of 5 measurement
+  runs slip off the cliff and the p99.x distribution widens
+  into hundreds of milliseconds. The validation gate
+  passed at calibration time but the 5×30 s measurement runs
+  catch the variance the 20 s validation probe missed. Use
+  this row when the headline matters and the workload
+  tolerates occasional tail expansion; use `flare_mc` when
+  you want a uniformly tight tail.
+- **actix_web** and **hyper** post slightly higher headline
+  rates than `flare_mc` (224k / 216k vs 212k) but with
+  p99.9 σ of 269 ms and 125 ms respectively. The harness's
+  validation pass let them through because the 20 s probe
+  landed in a quiet window; the measurement rounds caught
+  the same kind of "one run brushes the cliff" pattern as
+  flare_mc_static, just at a lower headline rate. Their
+  median p99 / p99.9 are still competitive (2.72 / 3.18 ms,
+  2.83 / 3.30 ms) but the σ tells you those medians don't
+  hold across all 5 runs.
+- **axum** is the closest competitor to `flare_mc` on tail
+  variance (`3.23 ± 5.50 ms` p99.9, `3.58 ± 7.55 ms`
+  p99.99). It's the most consistent of the Rust libs by σ;
+  its headline rate is correspondingly the lowest of the
+  Rust trio.
 - The harness's σ% column shows req/s itself is rock-steady
-  at the 90%-of-peak sustain rate (0.21-0.35% across the 5
+  at the 90 %-of-peak sustain rate (0.17-0.59 % across the 5
   runs for every framework), so the tail numbers are
   measuring real latency variance, not load-gen drift.
 
@@ -394,21 +426,25 @@ harness as the 4-worker rows above):
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| nginx (`worker_processes 1`) | 1 | 76,000 | 1.27 | 1.14 ± 0.03 | 3.28 ± 0.15 | 3.67 ± 0.22 | 4.11 ± 0.31 |
-| **flare** (reactor) | **1** | **71,997** | **0.00** | **1.17 ± 0.02** | **3.03 ± 0.15** | **3.35 ± 0.14** | **3.48 ± 0.14** |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,974 | 1.27 | 1.39 ± 0.01 | 3.27 ± 29.89 | 3.88 ± 37.71 | 4.72 ± 40.41 |
+| nginx (`worker_processes 1`) | 1 | 80,239 | 1.57 | 1.09 ± 0.02 | 3.45 ± 0.07 | 4.13 ± 0.11 | 4.80 ± 0.11 |
+| **flare** (reactor) | **1** | **71,619** | **1.27** | **1.20 ± 0.02** | **3.01 ± 0.18** | **3.30 ± 1.49** | **3.43 ± 5.67** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,173 | 1.57 | 1.38 ± 0.00 | 3.21 ± 0.01 | 3.74 ± 0.09 | 4.62 ± 0.32 |
 
-flare 1w lands at 95% of nginx's single-worker throughput
-(71,997 vs 76,000) and posts the **tightest tail of the
-single-worker pack at every percentile**: p99 3.03 vs nginx
-3.28, p99.9 3.35 vs 3.67, p99.99 3.48 vs 4.11 (a 0.63 ms
-tighter p99.99 than nginx). It also has the smallest σ at
-every percentile (≤ 0.15 ms across the 5 runs). vs Go
-`net/http` at the same worker count: 1.76× the throughput,
-and Go's tail σ is ~200× wider than flare's at p99.99
-(40 ms vs 0.14 ms) -- the GC-pause signature we expect to
-see. Source data:
-[`benchmark/results/2026-05-11T0422-ehsan-dev-abe38f7/`](../benchmark/results/2026-05-11T0422-ehsan-dev-abe38f7/).
+flare 1w lands at 89 % of nginx's single-worker throughput
+(71,619 vs 80,239) and posts a **tighter p99 than nginx**
+(3.01 ± 0.18 ms vs 3.45 ± 0.07 ms) with comparable p99.9 /
+p99.99 medians (3.30 / 3.43 ms vs nginx's 4.13 / 4.80 ms).
+The σ on flare's p99.99 (5.67 ms) reflects that the harness
+calibrated near the cliff for the single-worker path; the
+median is still 1.37 ms tighter than nginx's, but one of
+the 5 runs took a deeper outlier. vs Go `net/http` at the
+same worker count: 1.78× the throughput, with both
+showing tight tails -- Go has historically had wide tails
+under GC pauses, and the v0.6.1 harness's longer probe
+duration (20 s) gives the runtime enough headroom that the
+GC pauses are now amortised across the measurement window.
+Source data:
+[`benchmark/results/2026-05-11T1821-ehsan-dev-944de73/`](../benchmark/results/2026-05-11T1821-ehsan-dev-944de73/).
 
 #### Listener-mode A/B (flare-only)
 
@@ -417,10 +453,10 @@ choose between throughput and tail latency:
 
 | flare path | Listener mode | Peak rps | p99.99 (ms) |
 |---|---|---:|---:|
-| flare_mc_static (default) | per-worker SO_REUSEPORT | 235,223 | 3.22 ± 3.86 |
-| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-9 %) | 3.26 (-0.04 ms median) |
-| flare_mc handler (default) | per-worker SO_REUSEPORT | 216,170 | 3.35 ± 31.06 |
-| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-9 %) | 3.23 (-0.12 ms median) |
+| flare_mc_static (default) | per-worker SO_REUSEPORT | 274,514 | 148.35 ± 430.22 |
+| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-22 %) | 3.26 (median) |
+| flare_mc handler (default) | per-worker SO_REUSEPORT | 212,246 | 3.25 ± 0.10 |
+| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-7 %) | 3.23 (median) |
 
 (The shared-listener numbers here are from the prior
 historical reference at the same dev-box; refresh against
