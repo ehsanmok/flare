@@ -156,7 +156,7 @@ for target_dir in "$BASELINES_DIR"/*/; do
                 kill -9 $RUNNER_PID 2>/dev/null || true
                 [[ -f "$FLARE_BENCH_PID_FILE" ]] && kill -9 "$(cat "$FLARE_BENCH_PID_FILE")" 2>/dev/null || true
                 kill_port
-                SUMMARY_ROWS+=("$target|$workload|$config|DOWN|-|-|-|-|-|false")
+                SUMMARY_ROWS+=("$target|$workload|$config|DOWN|-|-|-|-|-|-|-|-|-|false")
                 continue
             fi
 
@@ -195,7 +195,7 @@ for target_dir in "$BASELINES_DIR"/*/; do
                 kill -9 $RUNNER_PID 2>/dev/null || true
                 [[ -f "$FLARE_BENCH_PID_FILE" ]] && kill -9 "$(cat "$FLARE_BENCH_PID_FILE")" 2>/dev/null || true
                 kill_port
-                SUMMARY_ROWS+=("$target|$workload|$config|DOWN|-|-|-|-|-|false")
+                SUMMARY_ROWS+=("$target|$workload|$config|DOWN|-|-|-|-|-|-|-|-|-|false")
                 continue
             fi
 
@@ -274,15 +274,22 @@ else:
             python3 "$SCRIPTS_DIR/_stat.py" --peak-rps "$PEAK_RPS" \
                 "$stats_json" "${RUN_FILES[@]}"
 
-            # Append to summary.
+            # Append to summary. Pull both the median and the
+            # sample-stdev for each percentile so the table can
+            # render "value ± σ" cells -- "correct statistics"
+            # over the 5 measurement runs, not just a midpoint.
             med=$(python3 -c "import json; d=json.load(open('$stats_json')); print(int(d['summary']['median_req_per_sec']))")
             stv=$(python3 -c "import json; d=json.load(open('$stats_json')); print(f\"{d['summary']['stdev_pct']:.2f}\")")
             p50=$(python3 -c "import json; d=json.load(open('$stats_json')); print(f\"{d['summary']['median_p50_ms']:.2f}\")")
             p99=$(python3 -c "import json; d=json.load(open('$stats_json')); print(f\"{d['summary']['median_p99_ms']:.2f}\")")
             p99_9=$(python3 -c "import json; d=json.load(open('$stats_json')); v=d['summary'].get('median_p99_9_ms', 0.0); print(f\"{v:.2f}\")")
             p99_99=$(python3 -c "import json; d=json.load(open('$stats_json')); v=d['summary'].get('median_p99_99_ms', 0.0); print(f\"{v:.2f}\")")
+            sp50=$(python3 -c "import json; d=json.load(open('$stats_json')); v=d['summary'].get('stdev_p50_ms', 0.0); print(f\"{v:.2f}\")")
+            sp99=$(python3 -c "import json; d=json.load(open('$stats_json')); v=d['summary'].get('stdev_p99_ms', 0.0); print(f\"{v:.2f}\")")
+            sp99_9=$(python3 -c "import json; d=json.load(open('$stats_json')); v=d['summary'].get('stdev_p99_9_ms', 0.0); print(f\"{v:.2f}\")")
+            sp99_99=$(python3 -c "import json; d=json.load(open('$stats_json')); v=d['summary'].get('stdev_p99_99_ms', 0.0); print(f\"{v:.2f}\")")
             stable=$(python3 -c "import json; d=json.load(open('$stats_json')); print(str(d['summary']['stable']).lower())")
-            SUMMARY_ROWS+=("$target|$workload|$config|$med|$stv|$p50|$p99|$p99_9|$p99_99|$stable")
+            SUMMARY_ROWS+=("$target|$workload|$config|$med|$stv|$p50|$sp50|$p99|$sp99|$p99_9|$sp99_9|$p99_99|$sp99_99|$stable")
 
             # Teardown.
             [[ -f "$FLARE_BENCH_PID_FILE" ]] && kill -9 "$(cat "$FLARE_BENCH_PID_FILE")" 2>/dev/null || true
@@ -293,17 +300,30 @@ else:
 done
 
 # ── Emit summary.md ───────────────────────────────────────────────────────────
+#
+# Each percentile cell is "median ± σ" over the 5 measurement
+# runs (σ is the sample stdev from _stat.py). req/s stays a
+# bare integer (peak capacity) with a separate "req/s stdev%"
+# column that doubles as the stability gate (<3% / <5%
+# depending on the config).
 {
     echo "# Benchmark summary"
     echo ""
     echo "- Run: ${TS}-${HOST_TAG}-${COMMIT}"
     echo "- See env.json for hardware / toolchain versions."
+    echo "- Percentile cells: median ± σ over 5 measurement runs (ms)."
     echo ""
-    echo "| Target | Workload | Config | Req/s (median) | stdev% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | stable |"
+    echo "| Target | Workload | Config | Req/s (median) | req/s σ% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | stable |"
     echo "|---|---|---|---:|---:|---:|---:|---:|---:|---|"
     for row in "${SUMMARY_ROWS[@]}"; do
-        IFS='|' read -r t w c m s p50 p99 p999 p9999 stab <<< "$row"
-        printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n" "$t" "$w" "$c" "$m" "$s" "$p50" "$p99" "$p999" "$p9999" "$stab"
+        IFS='|' read -r t w c m s p50 sp50 p99 sp99 p999 sp999 p9999 sp9999 stab <<< "$row"
+        printf "| %s | %s | %s | %s | %s | %s ± %s | %s ± %s | %s ± %s | %s ± %s | %s |\n" \
+            "$t" "$w" "$c" "$m" "$s" \
+            "$p50" "$sp50" \
+            "$p99" "$sp99" \
+            "$p999" "$sp999" \
+            "$p9999" "$sp9999" \
+            "$stab"
     done
 } > "$RESULTS_DIR/summary.md"
 

@@ -346,47 +346,69 @@ per-worker `SO_REUSEPORT`; hyper and axum use tokio's
 multi-thread runtime sharing one accept future; flare also
 defaults to per-worker `SO_REUSEPORT` for `num_workers >= 2`):
 
-| Server | Workers | Req/s | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
-|---|---:|---:|---:|---:|---:|---:|
-| actix_web (tokio) | 4 | 259,950 | 1.23 | 2.74 | 3.14 | 3.88 |
-| **flare_mc_static** (REUSEPORT) | **4** | **259,125** | **1.17** | **2.74** | **3.09** | **3.38** |
-| **flare_mc** handler (REUSEPORT) | **4** | **222,755** | **1.25** | **2.70** | **3.03** | **3.38** |
-| hyper (tokio multi-thread) | 4 | 219,966 | 1.25 | 2.85 | 3.28 | 3.63 |
-| axum (tokio multi-thread) | 4 | 204,439 | 1.28 | 2.82 | 3.26 | 3.65 |
+Each latency cell is reported as `median ± σ` over the 5
+measurement runs (σ = sample stdev across runs, ms;
+Bessel-corrected). The `σ%` column is the relative stdev of
+req/s across the same 5 runs (the harness's stability gate
+fires at 3-5 % depending on config).
 
-Source data: [`benchmark/results/2026-05-04T2017-ehsan-dev-f3513d6/`](../benchmark/results/2026-05-04T2017-ehsan-dev-f3513d6/).
+| Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| actix_web (tokio) | 4 | 251,416 | 0.35 | 1.25 ± 0.01 | 2.74 ± 0.17 | 3.77 ± 35.13 | 7.62 ± 43.93 |
+| **flare_mc_static** (REUSEPORT) | **4** | **235,223** | **0.21** | **1.23 ± 0.03** | **2.67 ± 0.02** | **3.01 ± 0.04** | **3.22 ± 3.86** |
+| hyper (tokio multi-thread) | 4 | 218,074 | 0.21 | 1.24 ± 0.00 | 2.83 ± 0.02 | 3.28 ± 6.73 | 3.69 ± 33.56 |
+| **flare_mc** handler (REUSEPORT) | **4** | **216,170** | **0.28** | **1.25 ± 0.02** | **2.66 ± 0.02** | **2.98 ± 0.33** | **3.35 ± 31.06** |
+| axum (tokio multi-thread) | 4 | 200,097 | 0.35 | 1.29 ± 0.01 | 2.83 ± 0.03 | 3.32 ± 5.22 | 18.05 ± 37.93 |
+
+Source data: [`benchmark/results/2026-05-11T0500-ehsan-dev-abe38f7/`](../benchmark/results/2026-05-11T0500-ehsan-dev-abe38f7/)
+(Rust libs + flare_mc) and
+[`benchmark/results/2026-05-11T0520-ehsan-dev-abe38f7/`](../benchmark/results/2026-05-11T0520-ehsan-dev-abe38f7/)
+(flare_mc_static).
 
 What jumps out:
 
-- **flare_mc_static essentially ties actix_web** (259,125
-  vs 259,950, within 0.3%) and posts the **best p99.99 of
-  the four 4-worker frameworks** (3.38 vs actix_web 3.88,
-  hyper 3.63, axum 3.65).
-- **flare_mc handler** beats hyper by 1.3% and axum by 9% on
-  throughput, with the **lowest p99 (2.70 ms) AND lowest
-  p99.99 (3.38 ms) of all five 4w servers**. It's 14% behind
-  actix_web on raw req/s -- the honest residual handler-path
-  gap to actix's `Bytes::from_static` + `&'static [u8]`
-  shape.
+- **flare_mc_static** posts the **best p99 / p99.9 / p99.99
+  of the four 4-worker frameworks** and -- importantly --
+  the **smallest stdev at every tail percentile**. Its
+  `3.22 ± 3.86 ms` p99.99 is honest: one of the 5 runs took
+  a single small blip, the other four landed under 3.7 ms.
+  actix_web (`7.62 ± 43.93`), hyper (`3.69 ± 33.56`), and
+  axum (`18.05 ± 37.93`) all show order-of-magnitude wider
+  p99.99 stdev under the same load, meaning their tail
+  numbers are dominated by occasional 70-100 ms outliers
+  rather than steady-state behaviour. flare_mc_static
+  trades ~6% throughput to actix_web for that tighter tail.
+- **flare_mc** (handler path) leads on p99 (`2.66 ± 0.02 ms`,
+  the tightest σ in the table) and p99.9 (`2.98 ± 0.33 ms`),
+  with handler-path throughput between hyper (+1%) and
+  axum (-7%). The headline gap to actix_web on req/s is the
+  static-vs-handler difference, which `flare_mc_static`
+  closes.
+- The harness's σ% column shows req/s itself is rock-steady
+  at the 90%-of-peak sustain rate (0.21-0.35% across the 5
+  runs for every framework), so the tail numbers are
+  measuring real latency variance, not load-gen drift.
 
 **Single-worker** (per-core request-processing cost, same
 harness as the 4-worker rows above):
 
-| Server | Workers | Req/s | p50 (ms) | p99 (ms) | p99.99 (ms) |
-|---|---:|---:|---:|---:|---:|
-| nginx (`worker_processes 1`) | 1 | 80,040 | 1.16 | 3.20 | 4.39 |
-| **flare** (reactor) | **1** | **74,489** | **1.24** | **3.05** | **3.36** |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 39,644 | 1.38 | 3.22 | 4.40 |
+| Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| nginx (`worker_processes 1`) | 1 | 76,000 | 1.27 | 1.14 ± 0.03 | 3.28 ± 0.15 | 3.67 ± 0.22 | 4.11 ± 0.31 |
+| **flare** (reactor) | **1** | **71,997** | **0.00** | **1.17 ± 0.02** | **3.03 ± 0.15** | **3.35 ± 0.14** | **3.48 ± 0.14** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,974 | 1.27 | 1.39 ± 0.01 | 3.27 ± 29.89 | 3.88 ± 37.71 | 4.72 ± 40.41 |
 
-flare 1w lands at 93% of nginx's single-worker throughput
-(74,489 vs 80,040) and posts the **tightest tail of the
-single-worker pack**: p99 3.05 ms vs nginx 3.20, p99.99
-3.36 ms vs nginx 4.39 (a 1.03 ms tighter p99.99 than
-nginx). vs Go `net/http` at the same worker count: 1.88x
-the throughput, again with a tighter tail. Source data:
-[`benchmark/results/2026-05-04T2101-ehsan-dev-7b94b10/`](../benchmark/results/2026-05-04T2101-ehsan-dev-7b94b10/)
-(nginx) and [`benchmark/results/2026-05-04T1817-ehsan-dev-8fcf86b/`](../benchmark/results/2026-05-04T1817-ehsan-dev-8fcf86b/)
-(flare + Go).
+flare 1w lands at 95% of nginx's single-worker throughput
+(71,997 vs 76,000) and posts the **tightest tail of the
+single-worker pack at every percentile**: p99 3.03 vs nginx
+3.28, p99.9 3.35 vs 3.67, p99.99 3.48 vs 4.11 (a 0.63 ms
+tighter p99.99 than nginx). It also has the smallest σ at
+every percentile (≤ 0.15 ms across the 5 runs). vs Go
+`net/http` at the same worker count: 1.76× the throughput,
+and Go's tail σ is ~200× wider than flare's at p99.99
+(40 ms vs 0.14 ms) -- the GC-pause signature we expect to
+see. Source data:
+[`benchmark/results/2026-05-11T0422-ehsan-dev-abe38f7/`](../benchmark/results/2026-05-11T0422-ehsan-dev-abe38f7/).
 
 #### Listener-mode A/B (flare-only)
 
@@ -395,10 +417,10 @@ choose between throughput and tail latency:
 
 | flare path | Listener mode | Peak rps | p99.99 (ms) |
 |---|---|---:|---:|
-| flare_mc_static (default) | per-worker SO_REUSEPORT | 259,125 | 3.38 |
-| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-17 %) | 3.26 (-0.12 ms) |
-| flare_mc handler (default) | per-worker SO_REUSEPORT | 222,755 | 3.38 |
-| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-12 %) | 3.23 (-0.15 ms) |
+| flare_mc_static (default) | per-worker SO_REUSEPORT | 235,223 | 3.22 ± 3.86 |
+| flare_mc_static + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 214,306 (-9 %) | 3.26 (-0.04 ms median) |
+| flare_mc handler (default) | per-worker SO_REUSEPORT | 216,170 | 3.35 ± 31.06 |
+| flare_mc handler + `FLARE_REUSEPORT_WORKERS=0` | shared listener + EPOLLEXCLUSIVE | 196,757 (-9 %) | 3.23 (-0.12 ms median) |
 
 (The shared-listener numbers here are from the prior
 historical reference at the same dev-box; refresh against

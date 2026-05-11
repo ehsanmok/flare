@@ -13,8 +13,13 @@ Reads each runN.txt (raw wrk2 stdout) and parses out:
   - Timeouts.
   - Socket errors.
 
-Writes a JSON blob with runs[], median of middle N-2 runs, mean,
-stdev, stdev_pct, and ``stable`` (True iff stdev_pct < 3.0).
+Writes a JSON blob with runs[], median of middle N-2 runs (req/s),
+median of all N runs (each percentile), mean req/s, req/s absolute
+stdev, req/s stdev_pct, per-percentile sample stdev (ms) over all
+N runs, and ``stable`` (True iff req/s stdev_pct < 3.0). The
+per-percentile stdev pairs with each ``median_pXY_ms`` so
+downstream consumers can quote "p99 = 2.66 ± 0.04 ms" directly
+without re-deriving variance from the raw runs.
 
 wrk2 ``--latency`` block looks like::
 
@@ -184,17 +189,31 @@ def main(argv: list[str]) -> int:
         vals = sorted(r[field] for r in runs if r[field] > 0)
         return statistics.median(vals) if vals else 0.0
 
+    def _stdev_of(field: str) -> float:
+        # Sample stdev (Bessel-corrected) across the N runs for one
+        # percentile. Drops zero-valued samples (parse miss) but
+        # keeps the surviving set; requires >=2 valid samples or
+        # returns 0.0 so the summary doesn't synthesise variance
+        # from a single observation.
+        vals = [r[field] for r in runs if r[field] > 0]
+        return statistics.stdev(vals) if len(vals) >= 2 else 0.0
+
     if len(rps_values) < 3:
         summary = {
             "median_req_per_sec": 0.0,
             "mean_req_per_sec": 0.0,
-            "stdev": 0.0,
+            "stdev_req_per_sec": 0.0,
             "stdev_pct": 100.0,
             "median_p50_ms": 0.0,
             "median_p99_ms": 0.0,
             "median_p99_9_ms": 0.0,
             "median_p99_99_ms": 0.0,
             "median_p99_999_ms": 0.0,
+            "stdev_p50_ms": 0.0,
+            "stdev_p99_ms": 0.0,
+            "stdev_p99_9_ms": 0.0,
+            "stdev_p99_99_ms": 0.0,
+            "stdev_p99_999_ms": 0.0,
             "total_timeouts": sum(r["timeouts"] for r in runs),
             "total_socket_errors": sum(r["socket_errors"] for r in runs),
             "stable": False,
@@ -202,10 +221,15 @@ def main(argv: list[str]) -> int:
         }
     else:
         sorted_rps = sorted(rps_values)
-        # Drop min + max, median of the middle.
+        # Drop min + max, median of the middle 3.
         trimmed = sorted_rps[1:-1] if len(sorted_rps) >= 3 else sorted_rps
         median_rps = statistics.median(trimmed)
         mean_rps = statistics.mean(rps_values)
+        # Sample stdev (Bessel-corrected) over the full N
+        # measurement runs -- this is the "correct statistics"
+        # number for the 5-run throughput: it includes both
+        # endpoints rather than the trimmed middle three, so the
+        # variance reflects the full sample, not the headline.
         stdev = statistics.stdev(rps_values) if len(rps_values) >= 2 else 0.0
         stdev_pct = (stdev / mean_rps * 100.0) if mean_rps > 0 else 100.0
 
@@ -220,13 +244,22 @@ def main(argv: list[str]) -> int:
             "peak_req_per_sec": peak_rps_override or 0.0,
             "sustain_req_per_sec": median_rps,
             "mean_req_per_sec": mean_rps,
-            "stdev": stdev,
+            "stdev_req_per_sec": stdev,
             "stdev_pct": stdev_pct,
             "median_p50_ms": _median_of("p50_ms"),
             "median_p99_ms": _median_of("p99_ms"),
             "median_p99_9_ms": _median_of("p99_9_ms"),
             "median_p99_99_ms": _median_of("p99_99_ms"),
             "median_p99_999_ms": _median_of("p99_999_ms"),
+            # Per-percentile sample stdev across the 5 measurement
+            # runs (ms). Pairs with each median_pXY_ms above so
+            # consumers can quote "p99 = 2.66 ± 0.04 ms" directly
+            # without re-deriving variance from the raw runs.
+            "stdev_p50_ms": _stdev_of("p50_ms"),
+            "stdev_p99_ms": _stdev_of("p99_ms"),
+            "stdev_p99_9_ms": _stdev_of("p99_9_ms"),
+            "stdev_p99_99_ms": _stdev_of("p99_99_ms"),
+            "stdev_p99_999_ms": _stdev_of("p99_999_ms"),
             "total_timeouts": sum(r["timeouts"] for r in runs),
             "total_socket_errors": sum(r["socket_errors"] for r in runs),
             "stable": stdev_pct < 3.0,
@@ -236,11 +269,12 @@ def main(argv: list[str]) -> int:
     out.write_text(json.dumps(payload, indent=2) + "\n")
     print(
         f"  median={summary['median_req_per_sec']:,.0f} req/s "
-        f"stdev={summary['stdev_pct']:.2f}% "
-        f"p50={summary['median_p50_ms']:.2f}ms "
-        f"p99={summary['median_p99_ms']:.2f}ms "
-        f"p99.9={summary['median_p99_9_ms']:.2f}ms "
-        f"p99.99={summary['median_p99_99_ms']:.2f}ms "
+        f"σ={summary.get('stdev_req_per_sec', 0.0):,.0f} req/s "
+        f"({summary['stdev_pct']:.2f}%) "
+        f"p50={summary['median_p50_ms']:.2f}±{summary.get('stdev_p50_ms', 0.0):.2f}ms "
+        f"p99={summary['median_p99_ms']:.2f}±{summary.get('stdev_p99_ms', 0.0):.2f}ms "
+        f"p99.9={summary['median_p99_9_ms']:.2f}±{summary.get('stdev_p99_9_ms', 0.0):.2f}ms "
+        f"p99.99={summary['median_p99_99_ms']:.2f}±{summary.get('stdev_p99_99_ms', 0.0):.2f}ms "
         f"stable={summary['stable']}"
     )
     return 0
