@@ -1,16 +1,19 @@
-"""Tests for the SIMD HPACK Huffman decoder shim (Track c08 / v0.7).
+"""Tests for the table-driven HPACK Huffman fast decoder (Track c08).
 
 Verifies parity with the scalar codec from
 :mod:`flare.http.hpack_huffman`:
 
 * RFC 7541 Appendix C.4 fixtures decode identically.
-* Round-trip on randomised inputs (encoder -> SIMD decoder ->
+* Round-trip on randomised inputs (encoder -> fast decoder ->
   identity).
 * Error parity: EOS-in-input, padding-too-long, and
   invalid-padding all raise the same ``HuffmanError`` variants on
   both code paths.
 * Dispatcher honours the threshold: small inputs go scalar, larger
-  inputs go SIMD when ``prefer_simd=True``.
+  inputs go fast-path when ``prefer_simd=True``.
+* Fast-table covers every Huffman code of length <= 8 (the
+  property that makes the lookup loop hit on common ASCII bytes
+  in O(1) instead of O(26 * 257)).
 """
 
 from std.testing import assert_equal, assert_raises, assert_true
@@ -102,10 +105,10 @@ def test_simd_eos_in_input_raises_same_as_scalar() raises:
 
 def test_dispatch_threshold_picks_scalar_below_threshold() raises:
     """Inputs shorter than :comptime:`SIMD_HUFFMAN_THRESHOLD_BYTES`
-    must go scalar even with ``prefer_simd=True``. The shim returns
-    bit-identical output on the parity-fallback build, so this
-    test is a behavioural assertion: the dispatcher does not raise
-    or mis-route the small-input path."""
+    must go scalar even with ``prefer_simd=True``. Outputs are
+    byte-identical regardless of which path runs, so this is a
+    behavioural assertion: the dispatcher does not raise or
+    mis-route the small-input path."""
     var enc = List[UInt8]()
     huffman_encode(Span[UInt8, _](_bytes("hi")), enc)
     assert_true(len(enc) < SIMD_HUFFMAN_THRESHOLD_BYTES)
@@ -115,6 +118,39 @@ def test_dispatch_threshold_picks_scalar_below_threshold() raises:
     for b in dec:
         got += chr(Int(b))
     assert_equal(got, "hi")
+
+
+def test_fast_path_decodes_all_byte_values() raises:
+    """Round-trip every byte value 0..255 through the fast
+    decoder. Exercises every short-code lookup *and* every long-
+    code bit-walker fallback in a single sweep."""
+    var raw = List[UInt8]()
+    for b in range(256):
+        raw.append(UInt8(b))
+    var enc = List[UInt8]()
+    huffman_encode(Span[UInt8, _](raw), enc)
+    var dec = List[UInt8]()
+    huffman_decode_simd(Span[UInt8, _](enc), dec)
+    assert_equal(len(dec), 256)
+    for i in range(256):
+        assert_equal(Int(dec[i]), i)
+
+
+def test_fast_path_handles_repeated_short_code_tail() raises:
+    """Sixty-four 'a's encode to exactly 40 bytes with no
+    trailing padding, so the decoder must drain the final 5..7
+    bits via the tail bit-walker -- a regression guard against
+    early-versions of the fast loop that only fired while
+    ``nbits >= 8``."""
+    var raw = _bytes("a" * 64)
+    var enc = List[UInt8]()
+    huffman_encode(Span[UInt8, _](raw), enc)
+    assert_equal(len(enc), 40)
+    var dec = List[UInt8]()
+    huffman_decode_simd(Span[UInt8, _](enc), dec)
+    assert_equal(len(dec), 64)
+    for i in range(64):
+        assert_equal(Int(dec[i]), Int(ord("a")))
 
 
 def test_dispatch_above_threshold_routes_simd() raises:
@@ -140,4 +176,6 @@ def main() raises:
     test_simd_eos_in_input_raises_same_as_scalar()
     test_dispatch_threshold_picks_scalar_below_threshold()
     test_dispatch_above_threshold_routes_simd()
-    print("test_huffman_simd: 5 passed")
+    test_fast_path_decodes_all_byte_values()
+    test_fast_path_handles_repeated_short_code_tail()
+    print("test_huffman_simd: 7 passed")

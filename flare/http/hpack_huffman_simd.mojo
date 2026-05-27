@@ -1,64 +1,110 @@
-"""HPACK Huffman SIMD decoder shim (Track B9 / v0.7).
+"""HPACK Huffman fast decoder (Track c08).
 
-Provides ``huffman_decode_simd``, a drop-in alternative to the
-scalar :func:`flare.http.hpack_huffman.huffman_decode`. The public
-API matches the scalar codec byte-for-byte: identical inputs
-produce identical outputs, the same RFC 7541 §5.2 errors are
-raised, and the trailing-padding rules are enforced the same way.
+Drop-in replacement for
+:func:`flare.http.hpack_huffman.huffman_decode` that runs a
+**256-entry 8-bit fast table** over the leading byte of the bit
+accumulator. Codes whose Huffman length is <= 8 bits resolve in a
+single table lookup; codes of length 9..30 bits fall through to
+the same bit-walking slow path as the scalar codec.
 
-Status -- v0.7
---------------
+The table is a canonical-Huffman expansion of the RFC 7541
+Appendix B subset: every 256-entry slot covers the leading bits
+of exactly one short code (the prefix property guarantees no
+collisions), so the lookup encodes ``(symbol << 8) | code_len``
+in one ``UInt16`` per index, with ``code_len == 0`` as the
+"no short match -- fall through to slow path" sentinel.
 
-The current implementation is a **correctness-first scalar
-fallback** that delegates to the scalar codec. It exists so:
+Why this is the right shape today
+---------------------------------
 
-* Callers can write ``huffman_decode_simd(input, output)`` today
-  and pick up SIMD acceleration transparently when the kernel
-  lands.
-* The fuzz harness in ``fuzz/fuzz_huffman_simd.mojo`` already
-  exercises the API surface and asserts byte-for-byte parity vs
-  the scalar codec on every randomised input.
-* The microbench in ``benchmark/scripts/bench_huffman.mojo``
-  measures both code paths so the "is SIMD actually faster" gate
-  is mechanical.
+Mojo's stdlib does not yet expose a 1-byte shuffle intrinsic
+(PSHUFB on x86, TBL on ARM NEON) that would let us decode 4-bit
+nibbles in parallel the way ``hyper``'s and ``nghttp2``'s SIMD
+paths do. Falling back to the scalar bit-walker the v0.7 shim
+inherited means a linear scan over all 257 Huffman symbols for
+every output byte -- the gate "is SIMD actually faster" turns
+into "do we have a usable fast table at all". A table-driven
+fast path was always the bar both reference implementations cite
+as their non-SIMD floor (see ``hpack/src/huffman.rs`` in
+``hyperium/hpack`` and ``lib/nghttp2_hd_huffman.c`` in
+``nghttp2/nghttp2``).
 
-True SIMD acceleration -- a PSHUFB / AVX-512 VPCOMPRESSB shuffle
-decoder, or a BMI2 PEXT-based bit-gather -- requires either:
-1. A new Mojo SIMD intrinsic surface that gives us 1-byte shuffle
-   masks (PSHUFB equivalent), or
-2. A custom assembly path behind ``external_call``.
+The table-build cost is ~256 iterations of trivial work per
+call. The dispatcher threshold (see ``SIMD_HUFFMAN_THRESHOLD_BYTES``)
+keeps tiny inputs on the scalar path so the build never
+dominates; for inputs above the threshold, the table pays for
+itself within ~32 bytes of decoded output and from there
+compounds linearly.
 
-Both are tracked for v0.8. The v0.7 acknowledgment in
-``.cursor/rules/critisize-v0.7.md`` is explicit: *if SIMD doesn't
-beat scalar on the dev-box, we ship the SIMD module gated off,
-document why, and treat the parity bar as "scalar correct, SIMD
-opt-in."*
+Correctness
+-----------
 
-Public API
-----------
+Every error mode mirrors :func:`flare.http.hpack_huffman.huffman_decode`
+exactly:
 
-* :func:`huffman_decode_simd(input, output)`: same shape as the
-  scalar codec; ``raises HuffmanError`` on EOS-in-input,
-  padding-too-long, or invalid-padding.
-* :func:`huffman_decode_dispatch(input, output, prefer_simd=False)`:
-  dispatches to SIMD or scalar based on the runtime flag and the
-  input length.
-* :comptime:`SIMD_HUFFMAN_THRESHOLD_BYTES = 32`: inputs shorter
-  than this always fall back to scalar (the SIMD setup cost
-  dominates for tiny inputs even when the kernel is faster).
+* ``HuffmanError(EOS_IN_INPUT)`` -- the EOS symbol (length 30,
+  ``0x3FFFFFFF``) appears in the input.
+* ``HuffmanError(PADDING_TOO_LONG)`` -- the trailing partial byte
+  carries more than 7 bits.
+* ``HuffmanError(INVALID_PADDING)`` -- the padding bits don't
+  match the high bits of EOS (all 1s).
+
+The fuzz harness in ``fuzz/fuzz_huffman_simd.mojo`` enforces
+byte-for-byte parity with the scalar codec on every randomised
+input; the unit test suite covers RFC 7541 Appendix C.4 fixtures
+plus the three error variants.
 """
 
-from .hpack_huffman import HuffmanError, huffman_decode
+from .hpack_huffman import (
+    HuffmanError,
+    _build_decode_lookup,
+    _hpack_table_code,
+    _hpack_table_length,
+    huffman_decode,
+)
 
 
 comptime SIMD_HUFFMAN_THRESHOLD_BYTES: Int = 32
 """Below this byte count, dispatch always uses the scalar codec.
 
-Even a hypothetical 4x SIMD speedup loses on inputs short enough
-that the per-call setup cost (loading shuffle tables, priming the
-bit accumulator) dominates. 32 B is the typical h2 header-value
-length below which ``hyper`` and ``nghttp2`` also bypass their
-SIMD paths."""
+The fast-table construction is ~256 trivial iterations per call.
+For inputs at least 32 bytes that cost amortises to roughly
+zero; below 32 bytes the bit-walker's per-byte cost is already
+small enough that the table build is a net loss. The threshold
+matches ``hyper`` and ``nghttp2``'s typical short-string bypass.
+"""
+
+
+@always_inline
+def _build_fast_table() -> List[UInt16]:
+    """Construct the 256-entry 8-bit fast lookup.
+
+    Each entry is ``(symbol << 8) | code_len`` for the unique
+    Huffman code whose top bits match the entry's index, OR
+    ``0`` if no code of length <= 8 covers that index.
+
+    Canonical-Huffman codes are prefix-free, so for every entry
+    there is at most one short code matching that prefix; the
+    explicit ``code_len == 0`` sentinel encodes "long code --
+    use the bit-walker".
+
+    The construction iterates the 256 symbols (0..255, excluding
+    EOS at index 256); for each short code of length ``L`` it
+    expands to ``2**(8 - L)`` adjacent entries.
+    """
+    var table = List[UInt16](capacity=256)
+    for _ in range(256):
+        table.append(UInt16(0))
+    for sym in range(256):
+        var clen = _hpack_table_length(sym)
+        if clen <= 8:
+            var code = _hpack_table_code(sym)
+            var shift = 8 - clen
+            var base = code << shift
+            var fanout = 1 << shift
+            for j in range(fanout):
+                table[base + j] = UInt16((sym << 8) | clen)
+    return table^
 
 
 def huffman_decode_simd(
@@ -66,11 +112,11 @@ def huffman_decode_simd(
 ) raises HuffmanError:
     """Append the Huffman-decoded form of ``input`` to ``output``.
 
-    SIMD-accelerated drop-in for
-    :func:`flare.http.hpack_huffman.huffman_decode`. v0.7 ships a
-    correctness-first scalar fallback (see module docstring); v0.8
-    swaps in the PSHUFB / VPCOMPRESSB kernel without changing this
-    signature.
+    Table-driven fast-path drop-in for
+    :func:`flare.http.hpack_huffman.huffman_decode`. Codes of
+    length <= 8 bits resolve in a single 256-entry lookup; codes
+    of length 9..30 bits fall through to the same bit-walking
+    slow path as the scalar codec.
 
     Args:
         input: The Huffman-encoded byte stream.
@@ -84,7 +130,101 @@ def huffman_decode_simd(
         HuffmanError(INVALID_PADDING): The padding bits don't
             match the high bits of EOS (all 1s).
     """
-    huffman_decode(input, output)
+    var n = len(input)
+    if n == 0:
+        return
+    # Pre-size the output buffer with the same upper bound the
+    # scalar codec uses (one output byte costs >=5 input bits).
+    output.reserve(len(output) + ((n * 8) + 4) // 5)
+    var table = _build_fast_table()
+    var bits = UInt64(0)
+    var nbits = 0
+    var i = 0
+    while i < n:
+        bits = (bits << UInt64(8)) | UInt64(Int(input[i]))
+        i += 1
+        nbits += 8
+        # Inner emit loop -- pull as many symbols as the
+        # accumulator currently holds.
+        while nbits >= 8:
+            var top = Int((bits >> UInt64(nbits - 8)) & UInt64(0xFF))
+            var entry = Int(table[top])
+            var clen = entry & 0xFF
+            if clen > 0:
+                var sym = entry >> 8
+                output.append(UInt8(sym))
+                nbits -= clen
+                if nbits > 0:
+                    bits = bits & ((UInt64(1) << UInt64(nbits)) - UInt64(1))
+                else:
+                    bits = UInt64(0)
+                continue
+            # Long-code path: bit-walker covers codes >= 9 bits.
+            var matched = False
+            for clen2 in range(9, 31):
+                if nbits < clen2:
+                    break
+                var code = Int(
+                    (bits >> UInt64(nbits - clen2))
+                    & UInt64((1 << clen2) - 1)
+                )
+                var sym = _build_decode_lookup(code, clen2)
+                if sym >= 0:
+                    if sym == 256:
+                        raise HuffmanError(HuffmanError.EOS_IN_INPUT)
+                    output.append(UInt8(sym))
+                    nbits -= clen2
+                    if nbits > 0:
+                        bits = bits & (
+                            (UInt64(1) << UInt64(nbits)) - UInt64(1)
+                        )
+                    else:
+                        bits = UInt64(0)
+                    matched = True
+                    break
+            if not matched:
+                # Need more input bytes to disambiguate.
+                break
+    # Tail bit-walker: drain any trailing short codes that the
+    # fast-table inner loop couldn't see because it required
+    # ``nbits >= 8``. The HPACK Huffman table has codes as short
+    # as 5 bits, so up to 7 trailing bits after the final byte
+    # load can still encode a valid symbol that the scalar codec
+    # would emit. We walk in the same MSB-first order, trying
+    # successively longer codes -- ``_build_decode_lookup``
+    # returns the unique canonical-prefix match per (code, clen).
+    while True:
+        var matched = False
+        for clen in range(5, 31):
+            if nbits < clen:
+                break
+            var code = Int(
+                (bits >> UInt64(nbits - clen))
+                & UInt64((1 << clen) - 1)
+            )
+            var sym = _build_decode_lookup(code, clen)
+            if sym >= 0:
+                if sym == 256:
+                    raise HuffmanError(HuffmanError.EOS_IN_INPUT)
+                output.append(UInt8(sym))
+                nbits -= clen
+                if nbits > 0:
+                    bits = bits & (
+                        (UInt64(1) << UInt64(nbits)) - UInt64(1)
+                    )
+                else:
+                    bits = UInt64(0)
+                matched = True
+                break
+        if not matched:
+            break
+    # Padding rules -- identical to scalar codec.
+    if nbits > 7:
+        raise HuffmanError(HuffmanError.PADDING_TOO_LONG)
+    if nbits > 0:
+        var expected = UInt64((1 << nbits) - 1)
+        if bits != expected:
+            raise HuffmanError(HuffmanError.INVALID_PADDING)
 
 
 def huffman_decode_dispatch(
@@ -92,16 +232,16 @@ def huffman_decode_dispatch(
     mut output: List[UInt8],
     prefer_simd: Bool = False,
 ) raises HuffmanError:
-    """Pick SIMD vs scalar based on ``prefer_simd`` and input
-    length.
+    """Pick fast-table vs scalar based on ``prefer_simd`` and
+    input length.
 
     Args:
         input: The Huffman-encoded byte stream.
         output: The byte list to append the decoded form to.
         prefer_simd: When ``True`` and ``len(input) >=
             SIMD_HUFFMAN_THRESHOLD_BYTES``, dispatch to
-            :func:`huffman_decode_simd`. Otherwise dispatch to the
-            scalar codec.
+            :func:`huffman_decode_simd`. Otherwise dispatch to
+            the scalar codec.
 
     Raises:
         HuffmanError: Forwarded from the underlying decoder.

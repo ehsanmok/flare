@@ -1,27 +1,22 @@
-"""Benchmark: HPACK Huffman decode -- scalar vs SIMD shim (Track c08).
+"""Benchmark: HPACK Huffman decode -- scalar vs fast table (Track c08).
 
 RFC 7541 Appendix B canonical Huffman is the wire compression
 format for HPACK string literals (h2 + h3 header fields). The
-scalar decoder runs 5..30 bits per output byte through a linear
-table scan; a true SIMD kernel (PSHUFB / VPCOMPRESSB on x86,
-TBL on ARM NEON) can amortise the bit-walking by decoding 4-bit
-nibbles in parallel.
+scalar decoder iterates code lengths 5..30 over a 257-entry
+linear scan per output byte; the fast decoder resolves codes of
+length <= 8 in a single 256-entry table lookup (covering most
+ASCII) and falls through to the same bit-walker only for codes
+of length 9..30.
 
 This bench measures the two paths side by side at four
 representative input sizes:
 
-* 16  B -- below the SIMD setup-cost threshold; scalar should
-  match or beat SIMD.
-* 256 B -- typical h2 header value; SIMD starts paying off.
-* 4 KB -- large header bag (concatenated cookie / set-cookie);
-  SIMD should be >= 10% faster.
-* 64 KB -- pathological header (long opaque token); SIMD's
-  best case.
-
-v0.7 ships the SIMD shim as a *parity fallback* that delegates
-to the scalar decoder, so the two columns will read identically.
-The bench scaffold lands now so the v0.8 SIMD kernel has a
-concrete target.
+* 16  B -- short header value; even with the table-build cost
+  the fast path should beat scalar by ~3x.
+* 256 B -- typical h2 header value; fast path scales linearly.
+* 4 KB -- large header bag (concatenated cookie / set-cookie).
+* 64 KB -- pathological header (long opaque token); fast path's
+  best case where table-build cost amortises to near-zero.
 
 Usage:
     pixi run bench-huffman
