@@ -776,6 +776,22 @@ from .quic import (
     decode_varint as quic_decode_varint,
     encode_varint as quic_encode_varint,
     varint_encoded_length as quic_varint_encoded_length,
+    QUIC_VERSION_1,
+    QUIC_VERSION_NEGOTIATION,
+    PACKET_TYPE_INITIAL as QUIC_PACKET_TYPE_INITIAL,
+    PACKET_TYPE_ZERO_RTT as QUIC_PACKET_TYPE_ZERO_RTT,
+    PACKET_TYPE_HANDSHAKE as QUIC_PACKET_TYPE_HANDSHAKE,
+    PACKET_TYPE_RETRY as QUIC_PACKET_TYPE_RETRY,
+    MAX_CID_LENGTH as QUIC_MAX_CID_LENGTH,
+    ConnectionId as QuicConnectionId,
+    LongHeader as QuicLongHeader,
+    InitialExtras as QuicInitialExtras,
+    ShortHeader as QuicShortHeader,
+    encode_long_header as quic_encode_long_header,
+    encode_short_header as quic_encode_short_header,
+    parse_long_header as quic_parse_long_header,
+    parse_initial_extras as quic_parse_initial_extras,
+    parse_short_header as quic_parse_short_header,
 )
 
 # flare.ws
