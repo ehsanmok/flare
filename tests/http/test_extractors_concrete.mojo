@@ -1,10 +1,9 @@
 """Tests for the concrete primitive extractors.
 
-The parametric ``Path[T: ParamParser, name]`` etc. wrap parsed
-values in a ``ParamParser`` (``ParamInt``, ``ParamString``, ...)
-which itself wraps a primitive — the ``.value.value``
-chain. These concrete types collapse the chain by exposing
-``.value`` as the primitive directly.
+These types expose ``.value`` as the parsed primitive directly
+(``Int``, ``String``, ``Float64``, ``Bool``) — no ``.value.value``
+wrapper chain. The v0.7 parametric ``Path[T: ParamParser, name]``
+layer that introduced the chain was deleted in v0.8.
 
 Covers:
 

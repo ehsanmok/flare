@@ -16,10 +16,10 @@ Since :
   ``r.get("/users/:id", Extracted[GetUser]())``.
 - The concrete ``PathInt`` / ``PathStr`` / ``PathFloat`` /
   ``PathBool`` / ``QueryInt`` / ``HeaderStr`` / ... extractors
-  expose ``.value`` as the primitive directly (Track 1.3) — no
-  ``.value.value`` chain. The parametric ``Path[T: ParamParser,
-  name]`` etc. stay public for users who want to plug in a custom
-  ``ParamParser``.
+  expose ``.value`` as the primitive directly. The earlier
+  parametric ``Path[T: ParamParser, name]`` layer was removed in
+  v0.8 — custom types are handled by writing your own ``Extractor``
+  struct.
 
 Run:
     pixi run example-extractors
@@ -123,7 +123,7 @@ def main() raises:
     var resp3 = router.serve(r3)
     print("router GET /users/42 ok →", resp3.status, resp3.text())
 
-    # Error path: GET /users/abc → ParamInt rejects "abc" → 400.
+    # Error path: GET /users/abc → PathInt rejects "abc" → 400.
     # ``expose_errors`` defaults False on synthesised requests so
     # the body is the fixed "Bad Request" string.
     var bad = Request.test_get("/users/abc?trace=x")

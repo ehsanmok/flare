@@ -33,8 +33,7 @@ from flare.http import (
     ServerConfig,
     Handler,
     ok,
-    Path,
-    ParamInt,
+    PathInt,
     Extracted,
 )
 from flare.http.extract import _bad_request_from_error
@@ -108,18 +107,18 @@ def test_bad_request_reason_always_fixed() raises:
 
 @fieldwise_init
 struct _IdHandler(Copyable, Defaultable, Handler, Movable):
-    var id: Path[ParamInt, "id"]
+    var id: PathInt["id"]
 
     def __init__(out self):
-        self.id = Path[ParamInt, "id"]()
+        self.id = PathInt["id"]()
 
     def serve(self, req: Request) raises -> Response:
-        return ok("user " + String(self.id.value.value))
+        return ok("user " + String(self.id.value))
 
 
 def test_extracted_400_body_is_sanitised_against_hostile_input() raises:
     """Drive an extractor that builds an error message from raw URL
-    bytes (``ParamInt.parse("<script>...")``) and assert the response
+    bytes (``PathInt`` on ``"<script>..."``) and assert the response
     body never contains the payload by default.
     """
     var req = Request(method=Method.GET, url="/users/<hostile>")
@@ -141,9 +140,9 @@ def test_extracted_400_body_echoes_when_exposure_enabled() raises:
     var resp = Extracted[_IdHandler]().serve(req)
     assert_equal(resp.status, Status.BAD_REQUEST)
     var body_str = resp.text()
-    # The ParamInt error message mentions the input "abc"; assert
-    # the substring shows up. (Exact wording is not pinned — only
-    # that user input can flow through when explicitly opted in.)
+    # The integer-parse error message mentions the input "abc";
+    # assert the substring shows up. (Exact wording is not pinned —
+    # only that user input can flow through when explicitly opted in.)
     assert_true("abc" in body_str)
 
 

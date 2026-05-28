@@ -196,9 +196,10 @@ def main() raises:
 
 The concrete ``PathInt`` / ``PathStr`` / ``QueryInt`` / ``HeaderStr``
 / etc. extractors expose ``.value`` directly as the parsed primitive.
-The parametric ``Path[T: ParamParser, name]`` form is still public
-for users who want to plug in a custom ``ParamParser``; concrete
-forms cover the common case. Value-constructor extractors
+The earlier ``Path[T: ParamParser, name]`` parametric layer was
+removed in v0.8 because it never carried a custom ``ParamParser``
+impl in practice; custom types belong as their own ``Extractor``
+struct. Value-constructor extractors
 (``PathInt["id"].extract(req)``) are also available for use inside
 plain ``def`` handlers when the struct shape is overkill.
 
@@ -666,17 +667,7 @@ from .http.streaming_serialize import serialize_streaming_response
 from .http.url import Url, UrlParseError
 from .http.routes import ComptimeRoute, ComptimeRouter
 from .http.extract import (
-    ParamParser,
-    ParamInt,
-    ParamFloat64,
-    ParamBool,
-    ParamString,
     Extractor,
-    Path,
-    Query,
-    OptionalQuery,
-    Header,
-    OptionalHeader,
     PathInt,
     PathStr,
     PathFloat,

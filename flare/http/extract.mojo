@@ -3,8 +3,10 @@
 Extractors turn a ``Request`` into a typed value. Each extractor is a
 zero-runtime-allocation wrapper over the request: the compile-time
 parameter ``name: StaticString`` names the path / query / header key,
-and ``T: ParamParser`` decides how the captured string is parsed into
-a concrete type.
+and the concrete extractor (``PathInt`` / ``QueryStr`` / ...) decides
+how the captured string is parsed into a concrete type. The
+``.value`` accessor returns the primitive directly -- no
+``.value.value`` chain.
 
 ## Primary surface
 
@@ -13,13 +15,13 @@ Value-constructor extractors usable from inside a handler body:
 ```mojo
 from flare.http import (
     Request, Response, ok, bad_request,
-    Path, Query, OptionalQuery, Header, ParamInt, ParamString,
+    PathInt, OptionalQueryInt, HeaderStr,
 )
 
 def get_user(req: Request) raises -> Response:
-    var id = Path[ParamInt, "id"].extract(req).value.value
-    var page = OptionalQuery[ParamInt, "page"].extract(req).value
-    var auth = Header[ParamString, "Authorization"].extract(req).value.value
+    var id = PathInt["id"].extract(req).value
+    var page = OptionalQueryInt["page"].extract(req).value
+    var auth = HeaderStr["Authorization"].extract(req).value
     return ok("user " + String(id))
 ```
 
@@ -32,20 +34,20 @@ wrap it in ``Extracted[H]``:
 ```mojo
 from flare.http import (
     Extracted, Handler, Request, Response, ok,
-    Path, OptionalQuery, ParamInt,
+    PathInt, OptionalQueryInt,
 )
 
 @fieldwise_init
 struct GetUser(Copyable, Defaultable, Handler, Movable):
-    var id: Path[ParamInt, "id"]
-    var page: OptionalQuery[ParamInt, "page"]
+    var id: PathInt["id"]
+    var page: OptionalQueryInt["page"]
 
     def __init__(out self):
-        self.id = Path[ParamInt, "id"]()
-        self.page = OptionalQuery[ParamInt, "page"]()
+        self.id = PathInt["id"]()
+        self.page = OptionalQueryInt["page"]()
 
     def serve(self, req: Request) raises -> Response:
-        return ok("user " + String(self.id.value.value))
+        return ok("user " + String(self.id.value))
 
 # Register with any Router / HttpServer that accepts a ``Handler``:
 # r.get("/users/:id", Extracted[GetUser]())
@@ -65,6 +67,38 @@ a ``Router`` still compiles and calls ``serve(req)`` on default-
 initialised fields — technically valid, almost never what you want,
 so reach for ``Extracted[H]()`` whenever the struct has extractor
 fields.
+
+## Custom-type extraction
+
+For types beyond ``Int`` / ``Float64`` / ``Bool`` / ``String``, write
+a small extractor struct directly. The contract is simple: implement
+the :trait:`Extractor` trait by populating a single ``value`` field
+from the request, then add it to a handler struct or call
+``extract(req)`` as a value constructor. The 20 concrete shipped
+extractors (``PathInt`` ... ``OptionalHeaderBool``) are the canonical
+templates::
+
+    @fieldwise_init
+    struct PathUuid[name: StaticString](
+        Copyable, Defaultable, Extractor, Movable
+    ):
+        var value: Uuid
+
+        def __init__(out self):
+            self.value = Uuid()
+
+        def apply(mut self, req: Request) raises:
+            if not req.has_param(String(Self.name)):
+                raise Error("missing path parameter: " + String(Self.name))
+            self.value = Uuid.parse(req.param(String(Self.name)))
+
+The earlier ``Path[T: ParamParser, name]`` / ``ParamInt`` /
+``ParamString`` parametric layer is deleted in v0.8: the concrete
+extractors exposed everything the parametric layer did, with no
+``.value.value`` chain, and the parametric layer never saw a custom
+``ParamParser`` impl in practice. Custom types belong as their own
+``Extractor`` struct anyway -- the indirection through a wrapper
+trait gave no leverage.
 
 ## Parse-failure handling
 
@@ -91,119 +125,83 @@ from .response import Response, Status
 from ..net import IpAddr, SocketAddr
 
 
-# ── ParamParser: scalar text → typed value ──────────────────────────────────
+# ── Scalar parsing helpers ──────────────────────────────────────────────────
+#
+# These were originally exposed via the ``ParamInt`` / ``ParamFloat64`` /
+# ``ParamBool`` / ``ParamString`` wrappers + ``ParamParser`` trait. The
+# wrappers added a ``.value.value`` chain at every concrete-extractor call
+# site and never carried a custom ``ParamParser`` impl, so the layer
+# collapsed in v0.8. The parsing logic lives here as private helpers; the
+# 20 concrete extractors below call them directly.
 
 
-trait ParamParser(Copyable, Defaultable, ImplicitlyDestructible, Movable):
-    """Parse a URL / header string into a concrete value.
+@always_inline
+def _parse_int_param(s: String) raises -> Int:
+    """Parse an HTTP path / query / header value into an ``Int``.
 
-    Implementors are wrapper structs with a single ``value`` field; a
-    valid default (zero, false, empty) is required so extractors can
-    be default-constructed before ``apply`` runs.
+    Accepts an optional leading ``-``. Raises on empty input, non-
+    digit bytes, or a lone ``-``. The error message includes the
+    rejected input so a 400 response surfaces what the client sent.
     """
-
-    @staticmethod
-    def parse(s: String) raises -> Self:
-        ...
-
-
-@fieldwise_init
-struct ParamInt(Copyable, Defaultable, Movable, ParamParser):
-    """``Int`` parameter parser. Accepts optional leading ``-``."""
-
-    var value: Int
-
-    def __init__(out self):
-        self.value = 0
-
-    @staticmethod
-    def parse(s: String) raises -> Self:
-        var n = s.byte_length()
-        if n == 0:
-            raise Error("expected integer, got empty string")
-        var p = s.unsafe_ptr()
-        var i = 0
-        var neg = False
-        if p[0] == 45:  # '-'
-            neg = True
-            i = 1
-        if i == n:
+    var n = s.byte_length()
+    if n == 0:
+        raise Error("expected integer, got empty string")
+    var p = s.unsafe_ptr()
+    var i = 0
+    var neg = False
+    if p[0] == 45:  # '-'
+        neg = True
+        i = 1
+    if i == n:
+        raise Error("expected integer, got '" + s + "'")
+    var acc = 0
+    while i < n:
+        var c = Int(p[i])
+        if c < 48 or c > 57:
             raise Error("expected integer, got '" + s + "'")
-        var acc = 0
-        while i < n:
-            var c = Int(p[i])
-            if c < 48 or c > 57:
-                raise Error("expected integer, got '" + s + "'")
-            acc = acc * 10 + (c - 48)
-            i += 1
-        return Self(value=-acc) if neg else Self(value=acc)
+        acc = acc * 10 + (c - 48)
+        i += 1
+    return -acc if neg else acc
 
 
-@fieldwise_init
-struct ParamFloat64(Copyable, Defaultable, Movable, ParamParser):
-    """``Float64`` parameter parser. Accepts decimal and exponent forms."""
+@always_inline
+def _parse_float64_param(s: String) raises -> Float64:
+    """Parse an HTTP path / query / header value into a ``Float64``.
 
-    var value: Float64
-
-    def __init__(out self):
-        self.value = Float64(0.0)
-
-    @staticmethod
-    def parse(s: String) raises -> Self:
-        if s.byte_length() == 0:
-            raise Error("expected float, got empty string")
-        # Delegate to Mojo's built-in Float64 constructor; catches NaN,
-        # Infinity, malformed exponents.
-        try:
-            var f = Float64(s)
-            return Self(value=f)
-        except:
-            raise Error("expected float, got '" + s + "'")
-
-
-@fieldwise_init
-struct ParamBool(Copyable, Defaultable, Movable, ParamParser):
-    """``Bool`` parameter parser. Accepts ``true`` / ``false`` / ``1`` /
-    ``0`` / ``yes`` / ``no`` (case-insensitive).
+    Delegates to Mojo's built-in ``Float64`` constructor so NaN,
+    Infinity, malformed exponents are caught.
     """
-
-    var value: Bool
-
-    def __init__(out self):
-        self.value = False
-
-    @staticmethod
-    def parse(s: String) raises -> Self:
-        var n = s.byte_length()
-        if n == 0:
-            raise Error("expected bool, got empty string")
-        # Lower-case compare.
-        var lower = String(capacity=n)
-        var p = s.unsafe_ptr()
-        for i in range(n):
-            var c = p[i]
-            if c >= 65 and c <= 90:
-                c = c + 32
-            lower += chr(Int(c))
-        if lower == "true" or lower == "1" or lower == "yes":
-            return Self(value=True)
-        if lower == "false" or lower == "0" or lower == "no":
-            return Self(value=False)
-        raise Error("expected bool, got '" + s + "'")
+    if s.byte_length() == 0:
+        raise Error("expected float, got empty string")
+    try:
+        return Float64(s)
+    except:
+        raise Error("expected float, got '" + s + "'")
 
 
-@fieldwise_init
-struct ParamString(Copyable, Defaultable, Movable, ParamParser):
-    """``String`` parameter parser. Always succeeds on UTF-8 input."""
+@always_inline
+def _parse_bool_param(s: String) raises -> Bool:
+    """Parse an HTTP path / query / header value into a ``Bool``.
 
-    var value: String
-
-    def __init__(out self):
-        self.value = ""
-
-    @staticmethod
-    def parse(s: String) raises -> Self:
-        return Self(value=s)
+    Accepts ``true`` / ``false`` / ``1`` / ``0`` / ``yes`` / ``no``
+    case-insensitively (same vocabulary the wider HTTP ecosystem
+    uses for ``Accept`` quality flags and similar).
+    """
+    var n = s.byte_length()
+    if n == 0:
+        raise Error("expected bool, got empty string")
+    var lower = String(capacity=n)
+    var p = s.unsafe_ptr()
+    for i in range(n):
+        var c = p[i]
+        if c >= 65 and c <= 90:
+            c = c + 32
+        lower += chr(Int(c))
+    if lower == "true" or lower == "1" or lower == "yes":
+        return True
+    if lower == "false" or lower == "0" or lower == "no":
+        return False
+    raise Error("expected bool, got '" + s + "'")
 
 
 # ── Extractor trait ─────────────────────────────────────────────────────────
@@ -222,170 +220,26 @@ trait Extractor(Copyable, Defaultable, ImplicitlyDestructible, Movable):
         ...
 
 
-# ── Path / Query / Header extractors ────────────────────────────────────────
-
-
-@fieldwise_init
-struct Path[T: ParamParser, name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
-    """Required path parameter named ``name``, parsed into ``T``.
-
-    ``apply`` raises if the route did not capture ``name`` or if
-    ``T.parse`` rejected the captured bytes.
-    """
-
-    var value: Self.T
-
-    def __init__(out self):
-        self.value = Self.T()
-
-    def apply(mut self, req: Request) raises:
-        if not req.has_param(String(Self.name)):
-            raise Error("missing path parameter: " + String(Self.name))
-        self.value = Self.T.parse(req.param(String(Self.name)))
-
-    @staticmethod
-    def extract(req: Request) raises -> Self:
-        """Convenience value-constructor. Builds and applies in one step."""
-        var out = Self()
-        out.apply(req)
-        return out^
-
-
-@fieldwise_init
-struct Query[T: ParamParser, name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
-    """Required query-string parameter named ``name``, parsed into ``T``.
-
-    ``apply`` raises if the query string does not contain ``name``.
-    """
-
-    var value: Self.T
-
-    def __init__(out self):
-        self.value = Self.T()
-
-    def apply(mut self, req: Request) raises:
-        if not req.has_query_param(String(Self.name)):
-            raise Error("missing query parameter: " + String(Self.name))
-        self.value = Self.T.parse(req.query_param(String(Self.name)))
-
-    @staticmethod
-    def extract(req: Request) raises -> Self:
-        var out = Self()
-        out.apply(req)
-        return out^
-
-
-@fieldwise_init
-struct OptionalQuery[T: ParamParser, name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
-    """Optional query-string parameter. ``value`` is ``None`` when absent.
-
-    ``apply`` never raises on a missing parameter; a parse failure on a
-    present parameter still raises.
-    """
-
-    var value: Optional[Self.T]
-
-    def __init__(out self):
-        self.value = Optional[Self.T]()
-
-    def apply(mut self, req: Request) raises:
-        if not req.has_query_param(String(Self.name)):
-            self.value = Optional[Self.T]()
-            return
-        self.value = Optional[Self.T](
-            Self.T.parse(req.query_param(String(Self.name)))
-        )
-
-    @staticmethod
-    def extract(req: Request) raises -> Self:
-        var out = Self()
-        out.apply(req)
-        return out^
-
-
-@fieldwise_init
-struct Header[T: ParamParser, name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
-    """Required header named ``name``, parsed into ``T``.
-
-    Header-name match is case-insensitive; parse runs on the raw header
-    value with no additional trimming beyond what the HTTP parser already
-    performed.
-    """
-
-    var value: Self.T
-
-    def __init__(out self):
-        self.value = Self.T()
-
-    def apply(mut self, req: Request) raises:
-        if not req.headers.contains(String(Self.name)):
-            raise Error("missing header: " + String(Self.name))
-        self.value = Self.T.parse(req.headers.get(String(Self.name)))
-
-    @staticmethod
-    def extract(req: Request) raises -> Self:
-        var out = Self()
-        out.apply(req)
-        return out^
-
-
-@fieldwise_init
-struct OptionalHeader[T: ParamParser, name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
-    """Optional header. ``value`` is ``None`` when absent."""
-
-    var value: Optional[Self.T]
-
-    def __init__(out self):
-        self.value = Optional[Self.T]()
-
-    def apply(mut self, req: Request) raises:
-        if not req.headers.contains(String(Self.name)):
-            self.value = Optional[Self.T]()
-            return
-        self.value = Optional[Self.T](
-            Self.T.parse(req.headers.get(String(Self.name)))
-        )
-
-    @staticmethod
-    def extract(req: Request) raises -> Self:
-        var out = Self()
-        out.apply(req)
-        return out^
-
-
 # ── Concrete primitive extractors ──────────────
 #
-# The parametric ``Path[T: ParamParser, name]`` / ``Query[...]`` /
-# ``Header[...]`` / ``OptionalQuery[...]`` / ``OptionalHeader[...]``
-# extractors wrap the parsed value in a ``ParamParser`` (``ParamInt``,
-# ``ParamString``, ...) which itself wraps a primitive. The result
-# is the prior ``.value.value`` chain that every example apologised
-# for.
+# Each concrete extractor is a thin ``value``-carrier whose ``apply``
+# pulls the named field from the request (path / query / header) and
+# parses the captured bytes via one of the ``_parse_*_param``
+# helpers above. ``OptionalQuery*`` / ``OptionalHeader*`` variants
+# expose ``Optional[T]`` and never raise on a missing field; a parse
+# error on a present field still propagates.
 #
-# These concrete types collapse the chain by exposing ``.value`` as
-# the primitive directly. Internally they call the same ``Param*``
-# parsers, so the parsing logic is shared and there's no behaviour
-# drift.
+# Naming convention: ``<location><type>``.
+# - ``Path`` × {Int, Str, Float, Bool}
+# - ``Query`` × {Int, Str, Float, Bool}
+# - ``OptionalQuery`` × the same
+# - ``Header`` × {Int, Str, Float, Bool}
+# - ``OptionalHeader`` × the same
 #
-# Naming convention: ``<extractor><type>``. ``Path`` × {Int, Str,
-# Float, Bool}, ``Query`` × the same, ``Header`` × the same, plus
-# the ``OptionalQuery`` and ``OptionalHeader`` variants for fields
-# whose absence is not an error.
-#
-# Use these in handler structs registered through ``Extracted[H]``
-# or as value-constructors inside plain handlers. The parametric
-# ``Path[T, name]`` etc. stay public for users who want to plug in
-# a custom ``ParamParser``.
+# Plus the non-scalar request-shape extractors: ``Peer``,
+# ``BodyBytes``, ``BodyText``, ``Cookies``, ``Form``, ``Multipart``,
+# ``Json``. These live below the scalar block and follow the same
+# trait shape.
 
 
 # ── Path concretes ──────────────────────────────────────────────────────────
@@ -395,8 +249,9 @@ struct OptionalHeader[T: ParamParser, name: StaticString](
 struct PathInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     """Required path parameter named ``name``, parsed as ``Int``.
 
-    Equivalent to ``Path[ParamInt, name]`` but with ``.value`` of
-    type ``Int`` directly (no ``.value.value`` chain).
+    ``apply`` raises if the route did not capture ``name`` or if the
+    captured bytes don't parse as a signed integer (optional leading
+    ``-`` followed by ASCII digits).
     """
 
     var value: Int
@@ -407,7 +262,7 @@ struct PathInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     def apply(mut self, req: Request) raises:
         if not req.has_param(String(Self.name)):
             raise Error("missing path parameter: " + String(Self.name))
-        self.value = ParamInt.parse(req.param(String(Self.name))).value
+        self.value = _parse_int_param(req.param(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -449,7 +304,7 @@ struct PathFloat[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     def apply(mut self, req: Request) raises:
         if not req.has_param(String(Self.name)):
             raise Error("missing path parameter: " + String(Self.name))
-        self.value = ParamFloat64.parse(req.param(String(Self.name))).value
+        self.value = _parse_float64_param(req.param(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -470,7 +325,7 @@ struct PathBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     def apply(mut self, req: Request) raises:
         if not req.has_param(String(Self.name)):
             raise Error("missing path parameter: " + String(Self.name))
-        self.value = ParamBool.parse(req.param(String(Self.name))).value
+        self.value = _parse_bool_param(req.param(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -494,7 +349,7 @@ struct QueryInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     def apply(mut self, req: Request) raises:
         if not req.has_query_param(String(Self.name)):
             raise Error("missing query parameter: " + String(Self.name))
-        self.value = ParamInt.parse(req.query_param(String(Self.name))).value
+        self.value = _parse_int_param(req.query_param(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -538,9 +393,7 @@ struct QueryFloat[name: StaticString](
     def apply(mut self, req: Request) raises:
         if not req.has_query_param(String(Self.name)):
             raise Error("missing query parameter: " + String(Self.name))
-        self.value = ParamFloat64.parse(
-            req.query_param(String(Self.name))
-        ).value
+        self.value = _parse_float64_param(req.query_param(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -561,7 +414,7 @@ struct QueryBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     def apply(mut self, req: Request) raises:
         if not req.has_query_param(String(Self.name)):
             raise Error("missing query parameter: " + String(Self.name))
-        self.value = ParamBool.parse(req.query_param(String(Self.name))).value
+        self.value = _parse_bool_param(req.query_param(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -590,7 +443,7 @@ struct OptionalQueryInt[name: StaticString](
             self.value = Optional[Int]()
             return
         self.value = Optional[Int](
-            ParamInt.parse(req.query_param(String(Self.name))).value
+            _parse_int_param(req.query_param(String(Self.name)))
         )
 
     @staticmethod
@@ -640,7 +493,7 @@ struct OptionalQueryFloat[name: StaticString](
             self.value = Optional[Float64]()
             return
         self.value = Optional[Float64](
-            ParamFloat64.parse(req.query_param(String(Self.name))).value
+            _parse_float64_param(req.query_param(String(Self.name)))
         )
 
     @staticmethod
@@ -666,7 +519,7 @@ struct OptionalQueryBool[name: StaticString](
             self.value = Optional[Bool]()
             return
         self.value = Optional[Bool](
-            ParamBool.parse(req.query_param(String(Self.name))).value
+            _parse_bool_param(req.query_param(String(Self.name)))
         )
 
     @staticmethod
@@ -691,7 +544,7 @@ struct HeaderInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
     def apply(mut self, req: Request) raises:
         if not req.headers.contains(String(Self.name)):
             raise Error("missing header: " + String(Self.name))
-        self.value = ParamInt.parse(req.headers.get(String(Self.name))).value
+        self.value = _parse_int_param(req.headers.get(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -735,9 +588,7 @@ struct HeaderFloat[name: StaticString](
     def apply(mut self, req: Request) raises:
         if not req.headers.contains(String(Self.name)):
             raise Error("missing header: " + String(Self.name))
-        self.value = ParamFloat64.parse(
-            req.headers.get(String(Self.name))
-        ).value
+        self.value = _parse_float64_param(req.headers.get(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -760,7 +611,7 @@ struct HeaderBool[name: StaticString](
     def apply(mut self, req: Request) raises:
         if not req.headers.contains(String(Self.name)):
             raise Error("missing header: " + String(Self.name))
-        self.value = ParamBool.parse(req.headers.get(String(Self.name))).value
+        self.value = _parse_bool_param(req.headers.get(String(Self.name)))
 
     @staticmethod
     def extract(req: Request) raises -> Self:
@@ -788,7 +639,7 @@ struct OptionalHeaderInt[name: StaticString](
             self.value = Optional[Int]()
             return
         self.value = Optional[Int](
-            ParamInt.parse(req.headers.get(String(Self.name))).value
+            _parse_int_param(req.headers.get(String(Self.name)))
         )
 
     @staticmethod
@@ -838,7 +689,7 @@ struct OptionalHeaderFloat[name: StaticString](
             self.value = Optional[Float64]()
             return
         self.value = Optional[Float64](
-            ParamFloat64.parse(req.headers.get(String(Self.name))).value
+            _parse_float64_param(req.headers.get(String(Self.name)))
         )
 
     @staticmethod
@@ -864,7 +715,7 @@ struct OptionalHeaderBool[name: StaticString](
             self.value = Optional[Bool]()
             return
         self.value = Optional[Bool](
-            ParamBool.parse(req.headers.get(String(Self.name))).value
+            _parse_bool_param(req.headers.get(String(Self.name)))
         )
 
     @staticmethod

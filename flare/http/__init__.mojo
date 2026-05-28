@@ -34,11 +34,15 @@ from flare.http import (
 - `TooManyRedirects` — Raised when the redirect limit is exceeded.
 - `BasicAuth` — HTTP Basic authentication (RFC 7617).
 - `BearerAuth` — HTTP Bearer token authentication (RFC 6750).
-- `ParamParser`, `ParamInt`, `ParamFloat64`, `ParamBool`, `ParamString`
-  — Typed parsers for URL / header string values.
 - `Extractor` — Trait implemented by each extractor.
-- `Path`, `Query`, `OptionalQuery`, `Header`, `OptionalHeader`
-  — Typed extractors for path params, query string, headers.
+- `PathInt`, `PathStr`, `PathFloat`, `PathBool`,
+  `QueryInt`, `QueryStr`, `QueryFloat`, `QueryBool`,
+  `OptionalQueryInt`, `OptionalQueryStr`, `OptionalQueryFloat`, `OptionalQueryBool`,
+  `HeaderInt`, `HeaderStr`, `HeaderFloat`, `HeaderBool`,
+  `OptionalHeaderInt`, `OptionalHeaderStr`, `OptionalHeaderFloat`, `OptionalHeaderBool`
+  — Concrete typed extractors for path params, query string, headers. Each
+    exposes ``.value`` as the parsed primitive directly. Custom types are
+    handled by writing your own ``Extractor`` struct.
 - `Peer`
   — Extracts the kernel-reported peer ``SocketAddr`` populated by the
     reactor at accept time.
@@ -148,17 +152,7 @@ from .handler import (
 from .router import Router
 from .routes import ComptimeRoute, ComptimeRouter
 from .extract import (
-    ParamParser,
-    ParamInt,
-    ParamFloat64,
-    ParamBool,
-    ParamString,
     Extractor,
-    Path,
-    Query,
-    OptionalQuery,
-    Header,
-    OptionalHeader,
     PathInt,
     PathStr,
     PathFloat,

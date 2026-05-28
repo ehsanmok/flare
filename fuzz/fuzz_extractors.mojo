@@ -19,13 +19,11 @@ from flare.http import (
     Status,
     Method,
     ok,
-    ParamInt,
-    ParamString,
-    Path,
-    Query,
-    OptionalQuery,
-    Header,
-    OptionalHeader,
+    PathInt,
+    OptionalQueryInt,
+    QueryStr,
+    HeaderStr,
+    OptionalHeaderStr,
     Handler,
     Extracted,
 )
@@ -37,18 +35,18 @@ struct _StressHandler(Copyable, Defaultable, Handler, Movable):
     exercises path + query + header + optional variants at once.
     """
 
-    var id: Path[ParamInt, "id"]
-    var page: OptionalQuery[ParamInt, "page"]
-    var name: Query[ParamString, "name"]
-    var auth: Header[ParamString, "Authorization"]
-    var trace: OptionalHeader[ParamString, "X-Trace"]
+    var id: PathInt["id"]
+    var page: OptionalQueryInt["page"]
+    var name: QueryStr["name"]
+    var auth: HeaderStr["Authorization"]
+    var trace: OptionalHeaderStr["X-Trace"]
 
     def __init__(out self):
-        self.id = Path[ParamInt, "id"]()
-        self.page = OptionalQuery[ParamInt, "page"]()
-        self.name = Query[ParamString, "name"]()
-        self.auth = Header[ParamString, "Authorization"]()
-        self.trace = OptionalHeader[ParamString, "X-Trace"]()
+        self.id = PathInt["id"]()
+        self.page = OptionalQueryInt["page"]()
+        self.name = QueryStr["name"]()
+        self.auth = HeaderStr["Authorization"]()
+        self.trace = OptionalHeaderStr["X-Trace"]()
 
     def serve(self, req: Request) raises -> Response:
         return ok("ok")

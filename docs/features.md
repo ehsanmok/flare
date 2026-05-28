@@ -101,14 +101,18 @@ Concrete typed extractors (`.value` is the parsed primitive):
 | `Multipart` | `multipart/form-data` body | [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo) |
 | `Cookies` | inbound `Cookie:` header → `CookieJar` | [`request_cookies.mojo`](../examples/intermediate/request_cookies.mojo) |
 
-Parametric / pluggable forms:
+Extractor traits + reflective adapter:
 
 | Surface | What it does | Where |
 |---|---|---|
-| `Path[T: ParamParser, name]`, `Query[T, name]`, `OptionalQuery[T, name]`, `Header[T, name]`, `OptionalHeader[T, name]` | Plug in a custom `ParamParser` for non-standard primitives | `flare.http.extract` |
-| `ParamParser` trait + `ParamInt` / `ParamFloat64` / `ParamBool` / `ParamString` | Stock parser implementations | `flare.http.extract` |
 | `Extractor` trait | Anything that pulls a value from a `Request` | `flare.http.extract` |
 | `Extracted[H]` | Reflects on a struct's fields, runs every extractor before `serve`; malformed input becomes a sanitised 400 | [`extractors.mojo`](../examples/intermediate/extractors.mojo) |
+
+The v0.7 parametric layer (`Path[T: ParamParser, name]` / `ParamInt`
+/ `ParamString` / ...) was removed in v0.8: it added a `.value.value`
+chain at every call site and never carried a custom `ParamParser`
+impl in practice. Custom types are now handled by writing your own
+`Extractor` struct directly.
 
 ## Middleware
 
