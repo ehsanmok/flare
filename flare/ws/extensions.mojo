@@ -83,9 +83,14 @@ struct ExtensionOffer(Copyable, Defaultable, Movable):
 # ── Parsing ──────────────────────────────────────────────────────
 
 
-def _lc(s: String) -> String:
+def _ascii_lower(s: String) -> String:
     """ASCII lowercase a token (fast path; non-ASCII is left
-    alone -- RFC 6455 tokens are ASCII-only anyway)."""
+    alone -- RFC 6455 tokens are ASCII-only anyway).
+
+    Renamed from the older ``_lc`` for consistency with the
+    rest of the codebase (which spells the helper
+    ``_ascii_lower``); closes critique register §C3 follow-up.
+    """
     var out = String(capacity=s.byte_length())
     for b in s.as_bytes():
         var c = Int(b)
@@ -124,7 +129,7 @@ def _parse_one_offer(piece: String) raises -> ExtensionOffer:
     var parts = piece.split(";")
     if len(parts) == 0:
         raise Error("Sec-WebSocket-Extensions: empty offer")
-    var name = _lc(_strip(parts[0]))
+    var name = _ascii_lower(_strip(parts[0]))
     if name.byte_length() == 0:
         raise Error("Sec-WebSocket-Extensions: missing extension token")
     var offer = ExtensionOffer(name)
@@ -136,10 +141,12 @@ def _parse_one_offer(piece: String) raises -> ExtensionOffer:
         var pname: String
         var pvalue: String
         if eq < 0:
-            pname = _lc(_strip(p))
+            pname = _ascii_lower(_strip(p))
             pvalue = ""
         else:
-            pname = _lc(_strip(String(unsafe_from_utf8=p.as_bytes()[:eq])))
+            pname = _ascii_lower(
+                _strip(String(unsafe_from_utf8=p.as_bytes()[:eq]))
+            )
             pvalue = _strip(String(unsafe_from_utf8=p.as_bytes()[eq + 1 :]))
             # Strip surrounding quotes if present.
             if pvalue.byte_length() >= 2:

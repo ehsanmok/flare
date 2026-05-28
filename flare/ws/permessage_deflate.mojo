@@ -64,7 +64,20 @@ review only needs to scrutinise this single file.
 
 from std.ffi import OwnedDLHandle, c_int
 
-from ..http.encoding import _find_flare_zlib_lib
+from ..utils.dylib import find_flare_lib
+
+
+def _find_flare_zlib_lib() -> String:
+    """Return the path to ``libflare_zlib.so``.
+
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"zlib"`` shim name. Replaces the previous
+    ``from ..http.encoding import _find_flare_zlib_lib`` so the
+    ``flare.ws`` package no longer depends on ``flare.http`` for
+    FFI plumbing (closes critique register §C3 architectural
+    smell: WS shouldn't reach into HTTP just to find a dylib).
+    """
+    return find_flare_lib("zlib")
 
 
 comptime DEFAULT_DEFLATE_LEVEL: Int = 6

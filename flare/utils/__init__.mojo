@@ -26,3 +26,4 @@ from .posix_proc import (
     usleep,
     waitpid,
 )
+from .dylib import find_flare_lib

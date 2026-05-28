@@ -34,6 +34,7 @@ from .error import (
     BrokenPipe,
     AddressParseError,
 )
+from ..utils.dylib import find_flare_lib
 from ._libc import (
     AF_INET,
     AF_INET6,
@@ -82,26 +83,14 @@ from ._libc import (
 def _find_flare_lib() -> String:
     """Return the path to ``libflare_tls.so``.
 
-    Search order:
-    1. ``$CONDA_PREFIX/lib/libflare_tls.so`` — the canonical location,
-       populated by ``flare/tls/ffi/build.sh`` on pixi activation.
-    2. ``build/libflare_tls.so`` — bare-checkout fallback when running
-       outside a conda/pixi environment.
-
-    The path is built via ``String("") += prefix += literal`` rather than
-    the ``prefix + literal`` concat operator. See the module docstring
-    of ``flare.tls.config`` for the full rationale (Mojo 0.26's concat
-    can return a String whose buffer aliases another ``getenv`` +
-    literal result, so two sequential ``CONDA_PREFIX + …`` calls can
-    clobber each other's bytes).
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"tls"`` shim name; kept under the
+    ``flare.net`` namespace because every TLS / DNS / raw-IO
+    call site in flare imports it from here. The canonical
+    cross-package finder is :mod:`flare.utils.dylib` (closes
+    critique register §C3).
     """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix == "":
-        return "build/libflare_tls.so"
-    var out = String("")
-    out += prefix
-    out += "/lib/libflare_tls.so"
-    return out^
+    return find_flare_lib("tls")
 
 
 def _do_flare_set_nonblocking(

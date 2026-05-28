@@ -29,6 +29,7 @@ from std.os import getenv
 from .handler import Handler
 from .request import Request
 from .response import Response
+from ..utils.dylib import find_flare_lib
 
 
 # ── libflare_fs.so bindings ────────────────────────────────────────────
@@ -40,12 +41,13 @@ from .response import Response
 
 
 def _find_flare_fs_lib() -> String:
-    """Resolve ``libflare_fs.so`` next to ``libflare_zlib.so``."""
-    var conda = getenv("CONDA_PREFIX")
-    if conda:
-        var p = conda + "/lib/libflare_fs.so"
-        return p^
-    return "libflare_fs.so"
+    """Return the path to ``libflare_fs.so``.
+
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"fs"`` shim name (closes critique register
+    §C3 -- the canonical resolver is :mod:`flare.utils.dylib`).
+    """
+    return find_flare_lib("fs")
 
 
 def _cstr(path: String) -> List[UInt8]:

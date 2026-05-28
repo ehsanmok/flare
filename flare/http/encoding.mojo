@@ -34,49 +34,30 @@ Public API surface:
 from std.os import getenv
 from std.ffi import OwnedDLHandle, c_int
 
+from ..utils.dylib import find_flare_lib
+
 
 def _find_flare_zlib_lib() -> String:
     """Return the path to ``libflare_zlib.so``.
 
-    Search order:
-    1. ``$CONDA_PREFIX/lib/libflare_zlib.so`` — the canonical location,
-       populated by ``flare/http/ffi/build.sh`` on pixi activation.
-    2. ``build/libflare_zlib.so`` — bare-checkout fallback when running
-       outside a conda/pixi environment.
-
-    Returns:
-        Path string suitable for passing to ``OwnedDLHandle``.
-
-    The path is built via ``String("") += prefix += literal`` rather than
-    the ``prefix + literal`` concat operator. See the module docstring
-    of ``flare.tls.config`` for the full rationale (Mojo 0.26's concat
-    can return a String whose buffer aliases another ``getenv`` +
-    literal result, so two sequential ``CONDA_PREFIX + …`` calls can
-    clobber each other's bytes).
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"zlib"`` shim name; kept under the
+    ``flare.http.encoding`` namespace because every gzip /
+    deflate call site here imports it. (Closes critique register
+    §C3 -- the canonical resolver is :mod:`flare.utils.dylib`.)
     """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix == "":
-        return "build/libflare_zlib.so"
-    var out = String("")
-    out += prefix
-    out += "/lib/libflare_zlib.so"
-    return out^
+    return find_flare_lib("zlib")
 
 
 def _find_flare_brotli_lib() -> String:
     """Return the path to ``libflare_brotli.so``.
 
-    Same search order as ``_find_flare_zlib_lib`` but for the brotli
-    wrapper installed by the activation script when libbrotli is
-    present in ``$CONDA_PREFIX/lib``.
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"brotli"`` shim name. Same search order as
+    :func:`_find_flare_zlib_lib`; only the bundled shim's
+    suffix differs.
     """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix == "":
-        return "build/libflare_brotli.so"
-    var out = String("")
-    out += prefix
-    out += "/lib/libflare_brotli.so"
-    return out^
+    return find_flare_lib("brotli")
 
 
 struct Encoding:

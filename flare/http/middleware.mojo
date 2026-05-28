@@ -34,6 +34,7 @@ from .encoding import (
 from .handler import Handler
 from .request import Request
 from .response import Response
+from ..utils.dylib import find_flare_lib
 
 
 # ── Logger ─────────────────────────────────────────────────────────────────
@@ -273,18 +274,13 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
 def _brotli_available() -> Bool:
     """Best-effort check that ``libflare_brotli.so`` is loadable.
 
-    Probes the canonical install path under ``$CONDA_PREFIX/lib``
-    and falls back to the bare-checkout ``build/`` directory.
-    Pure-syscall (``access(2)``) — no Mojo OwnedDLHandle hot path,
-    so it's safe to call once per request.
+    Probes the canonical path resolved by
+    :func:`flare.utils.dylib.find_flare_lib` (``CONDA_PREFIX``
+    ↦ ``build/`` fallback). Pure-syscall (``access(2)``) -- no
+    Mojo OwnedDLHandle hot path, so it's safe to call once per
+    request.
     """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix == "":
-        return _file_exists("build/libflare_brotli.so")
-    var p1 = String("")
-    p1 += prefix
-    p1 += "/lib/libflare_brotli.so"
-    return _file_exists(p1)
+    return _file_exists(find_flare_lib("brotli"))
 
 
 def _flare_fs_access(read lib: OwnedDLHandle, addr: Int) -> c_int:
@@ -313,11 +309,7 @@ def _file_exists(path: String) -> Bool:
     signatures with the stdlib.
     """
     try:
-        var conda = getenv("CONDA_PREFIX")
-        var lib_path = String("libflare_fs.so")
-        if conda:
-            lib_path = conda + "/lib/libflare_fs.so"
-        var lib = OwnedDLHandle(lib_path)
+        var lib = OwnedDLHandle(find_flare_lib("fs"))
         var n = path.byte_length()
         var c = List[UInt8](length=n + 1, fill=UInt8(0))
         var src = path.unsafe_ptr()

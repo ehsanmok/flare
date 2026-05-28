@@ -31,6 +31,8 @@ from std.memory import UnsafePointer, stack_allocation
 from std.sys.info import CompilationTarget, platform_map
 from std.os import getenv
 
+from ..utils.dylib import find_flare_lib
+
 # ── platform_map shorthand ────────────────────────────────────────────────────
 comptime _pm = platform_map[T=Int, ...]
 
@@ -1181,30 +1183,14 @@ def _pipe(fds: UnsafePointer[c_int, _]) -> c_int:
 def _find_flare_lib_for_io() -> String:
     """Locate ``libflare_tls.so`` at runtime.
 
-    Search order:
-    1. ``$CONDA_PREFIX/lib/libflare_tls.so`` — the canonical location,
-       populated by ``flare/tls/ffi/build.sh`` on pixi activation.
-    2. ``build/libflare_tls.so`` — bare-checkout fallback when running
-       outside a conda/pixi environment.
-
-    Same logic as ``flare.net.socket._find_flare_lib`` but local to this
-    module to avoid a cyclic dependency between ``_libc.mojo`` and
-    ``socket.mojo``.
-
-    The path is built via ``String("") += prefix += literal`` rather than
-    the ``prefix + literal`` concat operator. See the module docstring
-    of ``flare.tls.config`` for the full rationale (Mojo 0.26's concat
-    can return a String whose buffer aliases another ``getenv`` +
-    literal result, so two sequential ``CONDA_PREFIX + …`` calls can
-    clobber each other's bytes).
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"tls"`` shim name. Kept under the
+    ``flare.net._libc`` namespace because the file's own
+    ``FlareRawIO`` constructor uses it; everything else routes
+    through :func:`flare.net.socket._find_flare_lib` which uses
+    the same canonical helper. (Closes critique register §C3.)
     """
-    var prefix = getenv("CONDA_PREFIX", "")
-    if prefix == "":
-        return "build/libflare_tls.so"
-    var out = String("")
-    out += prefix
-    out += "/lib/libflare_tls.so"
-    return out^
+    return find_flare_lib("tls")
 
 
 # ── FlareRawIO: cached handle for the reactor's hot-path ─────────────────────
