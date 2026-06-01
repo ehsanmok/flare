@@ -481,6 +481,7 @@ example-static-files    = "mojo -I . examples/intermediate/static_files.mojo"   
 example-brotli          = "mojo -I . examples/intermediate/brotli.mojo"           # v0.6 Track I — Content-Encoding: br
 example-http2           = "mojo -I . examples/advanced/http2.mojo"            # v0.6 Track J — HTTP/2 driver, h2c, ALPN dispatch
 example-work-stealing   = "mojo -I . examples/advanced/work_stealing.mojo"    # v0.6 Track K — HandoffQueue, FLARE_SOAK_WORKERS knob
+example-quic-codec-demo = "mojo -I . examples/advanced/quic_codec_demo.mojo"  # QUIC v1 codec round-trip (varint + frames + transport params + state machine + CUBIC)
 example-http2-config    = "mojo -I . examples/advanced/http2_config.mojo"     # Http2Config SETTINGS surface
 example-uds-sidecar     = "mojo -I . examples/advanced/uds_sidecar.mojo"      # UnixListener + UnixStream
 
