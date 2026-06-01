@@ -288,6 +288,7 @@ test-quic-transport-params = "mojo -I . tests/quic/test_transport_params.mojo"  
 test-quic-cc         = "mojo -I . tests/quic/test_cc.mojo"               # RFC 9438 CUBIC + RFC 9002 §7.7 pacing + RFC 9406 HyStart++ (~11 cases)
 test-qpack           = "mojo -I . tests/qpack/test_qpack.mojo"           # RFC 9204 static-only encoder/decoder + Huffman fallback (~13 cases)
 test-quic-state      = "mojo -I . tests/quic/test_state.mojo"            # RFC 9000 §3 stream + §10 connection state machines (~13 cases)
+test-grpc-server     = "mojo -I . tests/grpc/test_server.mojo"           # gRPC unary adapter -- header validation + LPM stitching + handler dispatch (~14 cases)
 test-h3-frame        = "mojo -I . tests/h3/test_frame.mojo"              # RFC 9114 §7 HTTP/3 frame codec + SETTINGS (~10 cases)
 test-grpc            = "mojo -I . tests/grpc/test_grpc.mojo"             # gRPC LPM framing + status codes (~10 cases)
 test-grpc-metadata   = "mojo -I . tests/grpc/test_metadata.mojo"         # gRPC initial + trailing metadata carrier (~7 cases)
