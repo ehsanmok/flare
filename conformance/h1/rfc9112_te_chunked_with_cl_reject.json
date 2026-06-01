@@ -1,0 +1,8 @@
+{
+  "name": "te_chunked_with_cl_strict",
+  "spec": "RFC 9112 §6.3 (Transfer-Encoding: chunked + Content-Length is ambiguous; reject)",
+  "input_hex": "50 4f 53 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 78 0d 0a 43 6f 6e 74 65 6e 74 2d 4c 65 6e 67 74 68 3a 20 35 0d 0a 54 72 61 6e 73 66 65 72 2d 45 6e 63 6f 64 69 6e 67 3a 20 63 68 75 6e 6b 65 64 0d 0a 0d 0a 30 0d 0a 0d 0a",
+  "expect": "reject",
+  "expect_reason": "ambiguous framing (TE-chunked + CL) is a request-smuggling vector",
+  "leniency": {}
+}

@@ -1,26 +1,24 @@
 """Conformance runner for ``conformance/h1/`` fixtures.
 
 Loads every ``*.json`` fixture under ``conformance/h1/``, decodes the
-hex bytes, and validates the schema. The runner is the scaffolding
-load-bearing piece: it proves the fixture format is honoured, the
-hex decodes cleanly, and the leniency overlay is wired correctly.
+hex bytes, and invokes :func:`flare.http.server._parse_http_request_bytes`
+with the fixture's leniency overlay applied. Fixtures declare an
+expected outcome (``accept`` / ``reject``) plus, on accept, the
+expected request line; the runner asserts the parser result matches.
 
-Wiring each fixture's outcome to flare's actual H1 parser is the
-next conformance step. The parser entry point
-``_parse_http_request_bytes_minimal`` in ``flare.http.server``
-already exists and is exercised by ``tests/http/test_parse_minimal.mojo``;
-the conformance runner will start invoking it once the
-``_ExperimentalH1LeniencyConfig`` flags are plumbed through the
-parser (the v0.9 audit pass). Today the runner validates that
-every fixture is loadable and self-consistent, which is what
-``test-conformance-h1`` asserts.
+This proves every named ``H1LeniencyConfig`` flag flips parser
+behaviour end-to-end: a fixture that ships ``leniency: {flag: true}``
+must accept under the lenient overlay and reject under strict
+defaults; the strict-shape fixture for the same wire input must
+reject.
 """
 
 from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_true
 from json import loads, Value, Null
 
-from flare.http.proto import _ExperimentalH1LeniencyConfig
+from flare.http.proto import H1LeniencyConfig
+from flare.http.server import _parse_http_request_bytes
 
 
 def _digit(c: UInt8) raises -> Int:
@@ -95,11 +93,11 @@ def _string_or(j: Value, key: String, default: String) raises -> String:
     return v.string_value()
 
 
-def _apply_leniency(j: Value) raises -> _ExperimentalH1LeniencyConfig:
-    """Build an ``_ExperimentalH1LeniencyConfig`` from a fixture's
+def _apply_leniency(j: Value) raises -> H1LeniencyConfig:
+    """Build a :class:`H1LeniencyConfig` from a fixture's
     ``leniency`` overlay. Missing fields fall back to strict
     defaults."""
-    return _ExperimentalH1LeniencyConfig(
+    return H1LeniencyConfig(
         allow_lf_only_line_endings=_bool_or(
             j, "allow_lf_only_line_endings", False
         ),
@@ -134,11 +132,13 @@ def _apply_leniency(j: Value) raises -> _ExperimentalH1LeniencyConfig:
 
 
 def _validate_fixture(j: Value) raises:
-    """Validate a single fixture's schema + hex decoding.
+    """Validate a single fixture's schema + parser outcome.
 
-    Raises on missing required fields, an unknown ``expect`` value,
-    invalid hex pairs, or accept-fixtures without ``expected_*``
-    declarations.
+    Decodes the hex input, applies the leniency overlay, and
+    invokes :func:`_parse_http_request_bytes`. ``accept`` fixtures
+    must parse successfully and the parsed request line must match
+    the declared ``expected_method`` / ``expected_uri`` /
+    ``expected_version``. ``reject`` fixtures must raise.
     """
     assert_true(_has_key(j, "name"))
     assert_true(_has_key(j, "spec"))
@@ -154,13 +154,16 @@ def _validate_fixture(j: Value) raises:
     assert_true(spec.byte_length() > 0)
     assert_true(expect == "accept" or expect == "reject")
 
-    # Hex must decode cleanly; this catches typo'd fixtures at load
-    # time rather than mid-parser.
     var bytes = _decode_hex(hex)
     assert_true(len(bytes) > 0)
 
-    # Accept-fixtures declare what the parser must produce so the
-    # runner has assertions to make once parser invocation is wired.
+    var leniency_val: Value
+    if _has_key(j, "leniency"):
+        leniency_val = j["leniency"]
+    else:
+        leniency_val = Value(Null())
+    var cfg = _apply_leniency(leniency_val)
+
     if expect == "accept":
         var method = _string_or(j, "expected_method", "")
         var uri = _string_or(j, "expected_uri", "")
@@ -169,15 +172,17 @@ def _validate_fixture(j: Value) raises:
         assert_true(uri.byte_length() > 0)
         assert_true(version.byte_length() > 0)
 
-    # Build the leniency overlay; this is the slot where the
-    # parser will pick up the config once it is plumbed through.
-    var leniency_val: Value
-    if _has_key(j, "leniency"):
-        leniency_val = j["leniency"]
+        var req = _parse_http_request_bytes(Span[UInt8, _](bytes), leniency=cfg)
+        assert_equal(req.method, method)
+        assert_equal(req.url, uri)
+        assert_equal(req.version, version)
     else:
-        leniency_val = Value(Null())
-    var cfg = _apply_leniency(leniency_val)
-    _ = cfg.any_enabled()
+        var raised = False
+        try:
+            _ = _parse_http_request_bytes(Span[UInt8, _](bytes), leniency=cfg)
+        except:
+            raised = True
+        assert_true(raised)
 
 
 def _conformance_dir() -> Path:

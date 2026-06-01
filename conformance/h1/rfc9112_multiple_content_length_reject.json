@@ -1,0 +1,8 @@
+{
+  "name": "multiple_content_length_strict",
+  "spec": "RFC 9112 §6.3.5 (duplicate Content-Length rejected)",
+  "input_hex": "50 4f 53 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 78 0d 0a 43 6f 6e 74 65 6e 74 2d 4c 65 6e 67 74 68 3a 20 35 0d 0a 43 6f 6e 74 65 6e 74 2d 4c 65 6e 67 74 68 3a 20 35 0d 0a 0d 0a 68 65 6c 6c 6f",
+  "expect": "reject",
+  "expect_reason": "duplicate Content-Length headers are a request-smuggling vector",
+  "leniency": {}
+}

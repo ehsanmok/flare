@@ -1,0 +1,8 @@
+{
+  "name": "leading_whitespace_strict",
+  "spec": "RFC 9112 §2.2 (leading whitespace rejected by default; HTTP/2 preface peek requires meaningful first bytes)",
+  "input_hex": "0d 0a 0d 0a 47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 78 0d 0a 0d 0a",
+  "expect": "reject",
+  "expect_reason": "strict default rejects empty leading lines so the preface dispatcher sees the real first byte",
+  "leniency": {}
+}

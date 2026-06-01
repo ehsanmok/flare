@@ -1,0 +1,11 @@
+{
+  "name": "obs_fold_lenient",
+  "spec": "RFC 9112 §5.2 with H1LeniencyConfig.allow_obs_fold",
+  "input_hex": "47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 58 2d 4d 79 3a 20 76 61 6c 75 65 31 0d 0a 20 76 61 6c 75 65 32 0d 0a 48 6f 73 74 3a 20 78 0d 0a 0d 0a",
+  "expect": "accept",
+  "expect_reason": "leniency flag accepts obs-fold continuation lines",
+  "leniency": {"allow_obs_fold": true},
+  "expected_method": "GET",
+  "expected_uri": "/",
+  "expected_version": "HTTP/1.1"
+}

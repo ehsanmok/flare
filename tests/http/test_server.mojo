@@ -948,10 +948,20 @@ def test_parse_bytes_crlf_only() raises:
 
 
 def test_parse_bytes_lf_only() raises:
-    """Request with LF-only line endings parses correctly."""
+    """Request with LF-only line endings is rejected by strict default,
+    accepted with H1LeniencyConfig.allow_lf_only_line_endings."""
+    from flare.http.proto import H1LeniencyConfig
+
     var raw = "GET / HTTP/1.1\nHost: test\n\n"
     var data = raw.as_bytes()
-    var req = _parse_http_request_bytes(Span[UInt8, _](data))
+    var rejected = False
+    try:
+        _ = _parse_http_request_bytes(Span[UInt8, _](data))
+    except:
+        rejected = True
+    assert_true(rejected)
+    var lenient = H1LeniencyConfig(allow_lf_only_line_endings=True)
+    var req = _parse_http_request_bytes(Span[UInt8, _](data), leniency=lenient)
     assert_equal(req.method, "GET")
 
 

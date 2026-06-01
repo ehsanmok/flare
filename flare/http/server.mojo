@@ -22,6 +22,7 @@ from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap
 from .proto.ascii import ascii_unchecked_string
+from .proto.h1_leniency import H1LeniencyConfig
 from .static_response import StaticResponse
 from ..http2.server import Http2Config
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
@@ -79,6 +80,13 @@ struct ServerConfig(Copyable, Movable):
             subsequent dispatch decisions read this field directly.
             That guarantees a runtime flip of the env var mid-flight
             cannot reroute live connections.
+        h1_leniency: HTTP/1.1 parser leniency configuration. Strict
+            by default (every flag off); each named flag relaxes a
+            specific RFC 9112 grammar branch. See
+            :class:`flare.http.proto.H1LeniencyConfig` for the per-
+            flag contract. The strict default is the production-safe
+            pick; flip individual flags only when a trusted upstream
+            cannot avoid the corresponding relaxation.
     """
 
     var read_buffer_size: Int
@@ -121,6 +129,11 @@ struct ServerConfig(Copyable, Movable):
     Linux-only, HTTP/1.1-only, single-listener-only -- the
     field is silently ignored on macOS / for HTTP/2 / for
     ``HttpServer.bind_many``."""
+    var h1_leniency: H1LeniencyConfig
+    """HTTP/1.1 parser leniency configuration. Strict by default
+    (every flag off); each named flag relaxes a specific RFC 9112
+    grammar branch. See :class:`flare.http.proto.H1LeniencyConfig`
+    for the per-flag contract."""
 
     def __init__(
         out self,
@@ -139,6 +152,7 @@ struct ServerConfig(Copyable, Movable):
         request_timeout_ms: Int = 60_000,
         skip_header_decode_for_short_requests: Bool = False,
         use_bufring: Bool = False,
+        var h1_leniency: H1LeniencyConfig = H1LeniencyConfig(),
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -157,6 +171,7 @@ struct ServerConfig(Copyable, Movable):
             skip_header_decode_for_short_requests
         )
         self.use_bufring = use_bufring
+        self.h1_leniency = h1_leniency^
 
 
 def _resolve_bufring_handler_env() -> Bool:
@@ -1225,6 +1240,7 @@ def _parse_http_request_bytes(
     max_uri_length: Int = 8_192,
     peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
     expose_errors: Bool = False,
+    leniency: H1LeniencyConfig = H1LeniencyConfig(),
 ) raises -> Request:
     """Parse an HTTP/1.1 request from a byte buffer.
 
@@ -1246,6 +1262,9 @@ def _parse_http_request_bytes(
                          response body. Threaded onto
                          ``Request.expose_errors``. Defaults to
                          ``False`` (production-safe).
+        leniency: Per-flag relaxations of the strict RFC 9112 grammar.
+            See :class:`flare.http.proto.H1LeniencyConfig`. Defaults to
+            strict (every flag off).
 
     Returns:
         A parsed ``Request`` with version set from the request line.
@@ -1254,9 +1273,25 @@ def _parse_http_request_bytes(
         Error: On malformed request line, invalid tokens, or limit violations.
     """
     var pos = 0
+    var n = len(data)
+
+    # 0. RFC 9112 §2.2: leading whitespace before the request line.
+    # Strict default rejects any byte the SHOULD-ignore rule covers
+    # (CR / LF / SP / HTAB) so the HTTP/2 preface peek isn't masked
+    # by a noise prefix; the leniency flag opts back into the
+    # SHOULD-ignore behaviour.
+    if leniency.allow_leading_whitespace_before_request_line:
+        while pos < n:
+            var c = data[pos]
+            if c == 13 or c == 10 or c == 32 or c == 9:
+                pos += 1
+            else:
+                break
 
     # 1. Request line: METHOD SP URI SP VERSION CRLF
-    var req_line = _read_line_buf(data, pos)
+    var req_line = _read_line_buf_lenient(
+        data, pos, leniency.allow_lf_only_line_endings
+    )
     if req_line.byte_length() == 0:
         raise Error("empty request line")
 
@@ -1272,12 +1307,43 @@ def _parse_http_request_bytes(
     # POST). On a hit, the returned String's backing comes from
     # a process-lifetime constant rather than from per-request
     # request buffer bytes, so the second String wrap is elided.
-    var interned = intern_method_bytes(req_line.as_bytes()[:sp1])
+    var method_bytes = req_line.as_bytes()[:sp1]
+    var interned = intern_method_bytes(method_bytes)
     var method: String
     if interned:
         method = interned.value()
     else:
-        method = _ascii_unchecked_string(req_line.as_bytes()[:sp1])
+        method = _ascii_unchecked_string(method_bytes)
+
+    # RFC 9110 §9.1: methods are case-sensitive tokens. The strict
+    # default rejects any lowercase letter in the method name; the
+    # leniency flag normalises mixed-case methods to upper-case.
+    var has_lowercase = False
+    for i in range(method.byte_length()):
+        var mc = method.unsafe_ptr()[i]
+        if mc >= UInt8(ord("a")) and mc <= UInt8(ord("z")):
+            has_lowercase = True
+            break
+    if has_lowercase:
+        if not leniency.allow_mixed_case_method:
+            raise Error(
+                "method '"
+                + method
+                + "' has lowercase letters (RFC 9110 §9.1"
+                " methods are case-sensitive); set"
+                " H1LeniencyConfig.allow_mixed_case_method to accept"
+            )
+        var all_letters = method.byte_length() > 0
+        for i in range(method.byte_length()):
+            var mc = method.unsafe_ptr()[i]
+            if not (
+                (mc >= UInt8(ord("A")) and mc <= UInt8(ord("Z")))
+                or (mc >= UInt8(ord("a")) and mc <= UInt8(ord("z")))
+            ):
+                all_letters = False
+                break
+        if all_letters:
+            method = method.upper()
 
     var sp2 = -1
     for i in range(sp1 + 1, req_line.byte_length()):
@@ -1293,7 +1359,10 @@ def _parse_http_request_bytes(
         path = _ascii_unchecked_string(req_line.as_bytes()[sp1 + 1 : sp2])
         version = _ascii_unchecked_string(req_line.as_bytes()[sp2 + 1 :])
 
-    if path.byte_length() > max_uri_length:
+    if (
+        not leniency.allow_oversized_request_uri
+        and path.byte_length() > max_uri_length
+    ):
         raise Error(
             "request URI exceeds limit of " + String(max_uri_length) + " bytes"
         )
@@ -1301,11 +1370,20 @@ def _parse_http_request_bytes(
     # 2. Headers with RFC 7230 token validation
     var headers = HeaderMap()
     var header_bytes = 0
+    var prev_header_name = String("")
+    var prev_header_value = String("")
+    var have_prev = False
+    var content_length_seen: Int = -1
 
     while True:
-        var line = _read_line_buf(data, pos)
+        var line = _read_line_buf_lenient(
+            data, pos, leniency.allow_lf_only_line_endings
+        )
         header_bytes += line.byte_length()
-        if header_bytes > max_header_size:
+        if (
+            not leniency.allow_oversized_header_list
+            and header_bytes > max_header_size
+        ):
             raise Error(
                 "request headers exceed limit of "
                 + String(max_header_size)
@@ -1313,36 +1391,105 @@ def _parse_http_request_bytes(
             )
         if line.byte_length() == 0:
             break
+
+        # RFC 9112 §5.2 obs-fold: a continuation line starts with
+        # SP / HTAB and folds into the previous header value.
+        # Strict rejects (smuggling primitive); the leniency flag
+        # appends the trimmed continuation to the prior value.
+        var first = line.unsafe_ptr()[0]
+        if first == 32 or first == 9:
+            if not leniency.allow_obs_fold or not have_prev:
+                raise Error("obs-fold rejected (request smuggling vector)")
+            var folded = _ascii_strip_slice(line.as_bytes())
+            prev_header_value = prev_header_value + " " + folded
+            headers.set(prev_header_name, prev_header_value)
+            continue
+
         var colon = -1
         for i in range(line.byte_length()):
-            if line.unsafe_ptr()[i] == 58:  # ':'
+            if line.unsafe_ptr()[i] == 58:
                 colon = i
                 break
-        if colon >= 0:
-            # Validate header name (token chars only)
-            var name_valid = True
-            for i in range(colon):
-                if not _is_token_char(line.unsafe_ptr()[i]):
-                    name_valid = False
+        if colon < 0:
+            continue
+
+        # RFC 9112 §5.1: no whitespace before the colon. Strict
+        # rejects; lenient strips trailing whitespace from the
+        # field-name slice.
+        var name_end = colon
+        if leniency.allow_ows_around_colon:
+            while name_end > 0:
+                var nc = line.unsafe_ptr()[name_end - 1]
+                if nc == 32 or nc == 9:
+                    name_end -= 1
+                else:
                     break
-            if not name_valid:
-                raise Error("invalid character in header name")
 
-            var k = _ascii_strip_slice(line.as_bytes()[:colon])
-            var v = _ascii_strip_slice(line.as_bytes()[colon + 1 :])
+        var name_valid = True
+        for i in range(name_end):
+            if not _is_token_char(line.unsafe_ptr()[i]):
+                name_valid = False
+                break
+        if not name_valid:
+            raise Error("invalid character in header name")
 
-            # Validate header value (no bare CR/LF/NUL)
-            for i in range(v.byte_length()):
-                var vc = v.unsafe_ptr()[i]
-                if vc == 0 or vc == 10 or vc == 13:
-                    raise Error("invalid control character in header value")
-            headers.set(k, v)
+        var k = _ascii_strip_slice(line.as_bytes()[:name_end])
+        var v = _ascii_strip_slice(line.as_bytes()[colon + 1 :])
+
+        # RFC 9112 §5.5: bare CR / LF / NUL always rejected (those
+        # are the smuggling-class bytes). High-bit obs-text is
+        # gated on the leniency flag — strict rejects; lenient
+        # treats the bytes as opaque.
+        for i in range(v.byte_length()):
+            var vc = v.unsafe_ptr()[i]
+            if vc == 0 or vc == 10 or vc == 13:
+                raise Error("invalid control character in header value")
+            if vc >= 128 and not leniency.accept_obs_text_in_field_value:
+                raise Error("obs-text byte in header value rejected")
+
+        # RFC 9112 §6.3.5: duplicate ``Content-Length`` headers are
+        # smuggling vectors unless every value agrees. Strict
+        # treats the second occurrence as malformed; the leniency
+        # flag accepts when the values match.
+        if k.lower() == "content-length":
+            var n = _parse_int_str(v)
+            if content_length_seen >= 0 and n != content_length_seen:
+                raise Error(
+                    "duplicate Content-Length headers with conflicting values"
+                )
+            if (
+                content_length_seen >= 0
+                and not leniency.allow_multiple_content_length
+            ):
+                raise Error("duplicate Content-Length headers rejected")
+            content_length_seen = n
+
+        headers.set(k, v)
+        prev_header_name = k
+        prev_header_value = v
+        have_prev = True
+
+    # RFC 9112 §6.3: ``Transfer-Encoding`` + ``Content-Length`` is
+    # ambiguous. Strict rejects (smuggling-safe); the leniency
+    # flag prefers the chunked framing per the RFC and discards
+    # the Content-Length value. The server today does not decode
+    # chunked request bodies, so the lenient path produces a
+    # zero-body request; the flag still has parser-time effect
+    # because it controls whether the request is rejected at all.
+    var te = headers.get("Transfer-Encoding").lower()
+    if "chunked" in te:
+        if content_length_seen >= 0:
+            if not leniency.allow_te_chunked_when_cl_present:
+                raise Error(
+                    "Transfer-Encoding: chunked + Content-Length is ambiguous"
+                )
+            content_length_seen = 0
+            _ = headers.remove("Content-Length")
 
     # 3. Body (Content-Length)
     var body = List[UInt8]()
-    var cl_str = headers.get("Content-Length")
-    if cl_str.byte_length() > 0:
-        var content_length = _parse_int_str(cl_str)
+    if content_length_seen > 0:
+        var content_length = content_length_seen
         if content_length > max_body_size:
             raise Error(
                 "request body exceeds limit of "
@@ -1355,13 +1502,13 @@ def _parse_http_request_bytes(
                 end = len(data)
             # Bulk-copy the body in one resize + memcpy. Per-byte
             # ``body.append`` was a measurable hot-path cost on POSTs.
-            var n = end - pos
-            if n > 0:
-                body.resize(n, UInt8(0))
+            var n2 = end - pos
+            if n2 > 0:
+                body.resize(n2, UInt8(0))
                 memcpy(
                     dest=body.unsafe_ptr(),
                     src=data.unsafe_ptr() + pos,
-                    count=n,
+                    count=n2,
                 )
 
     var req = Request(
@@ -1501,6 +1648,48 @@ def _parse_http_request_bytes_minimal(
     # use config.skip_header_decode_for_short_requests=True only
     # when their handler doesn't read req.headers.
     return req^
+
+
+def _read_line_buf_lenient(
+    data: Span[UInt8, _], mut pos: Int, allow_lf_only: Bool
+) raises -> String:
+    """Read one line, enforcing CRLF in strict mode.
+
+    Strict (``allow_lf_only=False``) rejects bare LF terminators
+    per RFC 9112 §2.2; lenient accepts both CRLF and LF. Bytes
+    are passed through verbatim so the parser's per-byte
+    validators can inspect them (NUL / control / obs-text
+    handling lives at the parser).
+    """
+    var n = len(data)
+    var start = pos
+    var end = -1
+    var i = start
+    var saw_cr_before_lf = False
+    while i < n:
+        var c = data[i]
+        if c == 10:
+            end = i
+            saw_cr_before_lf = i > start and data[i - 1] == 13
+            break
+        i += 1
+
+    if end < 0:
+        end = n
+
+    if not allow_lf_only and end < n and end > start and not saw_cr_before_lf:
+        raise Error("bare LF line terminator (RFC 9112 §2.2 requires CRLF)")
+
+    pos = end + 1 if end < n else end
+
+    var stop = end
+    if stop > start and data[stop - 1] == 13:
+        stop -= 1
+
+    if stop <= start:
+        return String("")
+
+    return _ascii_unchecked_string(data[start:stop])
 
 
 def _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:

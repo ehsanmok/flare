@@ -1,4 +1,4 @@
-"""Named opt-in flags for HTTP/1.1 parser leniency (experimental).
+"""Named opt-in flags for HTTP/1.1 parser leniency.
 
 RFC 9112 (HTTP/1.1) defines a strict wire grammar. Real-world
 clients ship bugs around the edges of that grammar, and most
@@ -9,82 +9,73 @@ relaxations its parser performs, and the choice is visible at
 the configuration call site rather than buried in parser
 internals.
 
-The struct itself is a configuration carrier -- plumbing each
-flag into the request-line / header / chunked-body parsers is
-**not yet complete**. Today the carrier only drives the
-``allow_lf_only_line_endings`` and ``allow_obs_fold`` paths
-through the conformance corpus; the rest of the named flags
-parse but do not yet alter the parser's strict default. The
-load-bearing first step is giving the relaxations names and a
-documented default policy so deployments can audit what the
-spec relaxations *would* be when the audit pass lands.
-
-The **`_Experimental` prefix** on the public struct name
-communicates this honestly: code that depends on a specific
-relaxation taking effect must wait for the parser-plumbing
-follow-up. Strict mode is fully wired today, so deployments
-that trust only well-behaved peers can ship the strict default
-without surprises.
-
 ## Design
 
-- **Strict by default.** ``_ExperimentalH1LeniencyConfig()``
-  returns the strictest configuration: every flag off. A server
-  that trusts only well-behaved peers can ship this config and
-  reject anything that bends the spec.
+- **Strict by default.** ``H1LeniencyConfig()`` returns the
+  strictest configuration: every flag off. A server that trusts
+  only well-behaved peers can ship this config and reject
+  anything that bends the spec.
 - **One flag, one relaxation.** No "loose" / "strict" master
   preset: each relaxation is justified individually.
-- **No silent relaxations going forward.** The audit pass
-  surfaces relaxations the existing parser performed
-  implicitly; deployments that depended on the old behaviour
-  opt into the corresponding flag.
+- **No silent relaxations.** Each flag's docstring cites the
+  RFC section it relaxes; deployments that depended on prior
+  silent acceptance opt into the corresponding flag.
+
+## Plumbing status
+
+Flags are consumed by the H1 request parser
+(:func:`flare.http.server._parse_http_request_bytes`) when wired
+through :attr:`flare.http.server.ServerConfig.h1_leniency`. The
+ten request-message flags (every flag except the two chunked-
+extension flags below) flip parser behaviour today; the
+conformance corpus under ``conformance/h1/`` carries one accept
++ one reject fixture per flag.
+
+The two chunked-extension flags --
+``accept_empty_chunk_extensions`` and
+``accept_invalid_chunk_extension_chars`` -- govern server-side
+``Transfer-Encoding: chunked`` request-body decoding, which the
+v0.8 server rejects up-front (no chunked request decoder is
+mounted yet). The flags are present so deployment configuration
+that anticipates chunked support compiles today; they become
+load-bearing alongside the chunked-decoder audit pass.
 
 ## Flags
 
-Each flag corresponds to a specific RFC section the parser
-would otherwise reject. See the field docstrings for the
-mapping.
-
 ```mojo
-from flare.http.proto import _ExperimentalH1LeniencyConfig
+from flare.http.proto import H1LeniencyConfig
 
 # Strict (default): reject every relaxation.
-var strict = _ExperimentalH1LeniencyConfig()
+var strict = H1LeniencyConfig()
 
-# Compatible with chatty legacy clients: accept the two most
-# common relaxations and nothing else. Only
-# ``allow_lf_only_line_endings`` is wired into the parser
-# today; ``allow_mixed_case_method`` parses but does not yet
-# normalise mixed-case methods.
-var compat = _ExperimentalH1LeniencyConfig(
+# Compatible with chatty legacy clients.
+var compat = H1LeniencyConfig(
     allow_lf_only_line_endings=True,
     allow_mixed_case_method=True,
 )
 ```
 
-The full audit + parser plumbing is a follow-up; today this
-struct is the public API contract, and
-``_ExperimentalH1LeniencyConfig`` is re-exported from
-``flare.http.proto`` so users can write configuration code
-against the named surface immediately.
+The legacy name ``_ExperimentalH1LeniencyConfig`` is preserved
+as an alias (a structurally-identical rebind) so existing
+configuration code keeps compiling; the canonical name moving
+forward is :class:`H1LeniencyConfig`.
 """
 
 
-struct _ExperimentalH1LeniencyConfig(Copyable, Movable):
-    """HTTP/1.1 parser leniency configuration (experimental).
+struct H1LeniencyConfig(Copyable, Movable):
+    """HTTP/1.1 parser leniency configuration.
 
     Strict by default. Each field maps to one RFC 9112
     relaxation; the docstring on each field cites the section
     it relaxes.
 
-    The underscore prefix is a deliberate signal that the
-    parser-plumbing for individual flags is incomplete: today
-    only ``allow_lf_only_line_endings`` and ``allow_obs_fold``
-    drive parser branches through the conformance corpus; the
-    rest of the fields are documented contract surface that
-    a follow-up audit pass will wire end-to-end. Strict mode (the
-    default) is fully wired and remains the production-safe
-    pick.
+    Wired into :func:`flare.http.server._parse_http_request_bytes`
+    via :attr:`flare.http.server.ServerConfig.h1_leniency`. The
+    parser checks each flag at the matching grammar branch and
+    relaxes the strict default only when the flag is set. The
+    two chunked-extension flags govern a chunked-decoder audit
+    pass that lands alongside server-side chunked-body support;
+    they currently have no parser-side effect.
     """
 
     var allow_lf_only_line_endings: Bool
@@ -119,7 +110,7 @@ struct _ExperimentalH1LeniencyConfig(Copyable, Movable):
     values."""
 
     var allow_oversized_request_uri: Bool
-    """Accept request URIs beyond ``ServerConfig.max_uri_bytes``
+    """Accept request URIs beyond ``ServerConfig.max_uri_length``
     instead of emitting ``414 URI Too Long``. RFC 9110 §15.5.15
     permits the server to choose its own cap; this flag elides
     the cap entirely. Defaults off so DoS surfaces stay
@@ -127,7 +118,7 @@ struct _ExperimentalH1LeniencyConfig(Copyable, Movable):
 
     var allow_oversized_header_list: Bool
     """Accept the request header block beyond
-    ``ServerConfig.max_header_bytes`` instead of emitting
+    ``ServerConfig.max_header_size`` instead of emitting
     ``431 Request Header Fields Too Large``. RFC 6585 §5
     motivates the 431. Defaults off."""
 
@@ -136,7 +127,15 @@ struct _ExperimentalH1LeniencyConfig(Copyable, Movable):
     declare a chunk extension (the ``;`` after the size) and
     then provide no extension value or name. RFC 9112 §7.1.1
     defines the chunk extension grammar; some clients emit a
-    bare ``;`` with no name=value pair. Defaults off."""
+    bare ``;`` with no name=value pair. Defaults off.
+
+    .. note::
+
+       Reserved for the chunked-body decoder audit pass. The
+       server today rejects ``Transfer-Encoding: chunked``
+       request bodies up-front; this flag has no current
+       parser-side effect.
+    """
 
     var allow_multiple_content_length: Bool
     """Accept duplicate ``Content-Length`` headers that agree
@@ -171,7 +170,13 @@ struct _ExperimentalH1LeniencyConfig(Copyable, Movable):
     ``;ext=value`` portion of a chunk-size line. RFC 9112
     §7.1.1 defines the grammar strictly. Defaults off; flip
     only if you trust the upstream's chunk-extension
-    formatting."""
+    formatting.
+
+    .. note::
+
+       Reserved for the chunked-body decoder audit pass; see
+       :attr:`accept_empty_chunk_extensions`.
+    """
 
     var allow_leading_whitespace_before_request_line: Bool
     """Accept leading ``CR`` / ``LF`` / ``SP`` / ``HTAB`` bytes
@@ -252,3 +257,10 @@ struct _ExperimentalH1LeniencyConfig(Copyable, Movable):
             or self.accept_invalid_chunk_extension_chars
             or self.allow_leading_whitespace_before_request_line
         )
+
+
+# Legacy alias preserved for back-compat with v0.7 configuration
+# code. New code should reach for ``H1LeniencyConfig`` directly;
+# the underscore-prefixed alias is documented as a thin rebind in
+# the module docstring and will be removed in a future cycle.
+comptime _ExperimentalH1LeniencyConfig = H1LeniencyConfig

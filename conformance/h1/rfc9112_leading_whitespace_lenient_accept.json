@@ -1,0 +1,11 @@
+{
+  "name": "leading_whitespace_lenient",
+  "spec": "RFC 9112 §2.2 with H1LeniencyConfig.allow_leading_whitespace_before_request_line",
+  "input_hex": "0d 0a 0d 0a 47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 78 0d 0a 0d 0a",
+  "expect": "accept",
+  "expect_reason": "leniency flag honours the SHOULD-ignore-leading-empty-lines rule",
+  "leniency": {"allow_leading_whitespace_before_request_line": true},
+  "expected_method": "GET",
+  "expected_uri": "/",
+  "expected_version": "HTTP/1.1"
+}

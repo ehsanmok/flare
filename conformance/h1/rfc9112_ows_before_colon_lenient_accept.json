@@ -1,0 +1,11 @@
+{
+  "name": "ows_before_colon_lenient",
+  "spec": "RFC 9112 §5.1 with H1LeniencyConfig.allow_ows_around_colon",
+  "input_hex": "47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 20 3a 20 78 0d 0a 0d 0a",
+  "expect": "accept",
+  "expect_reason": "leniency flag strips OWS between header name and ':' separator",
+  "leniency": {"allow_ows_around_colon": true},
+  "expected_method": "GET",
+  "expected_uri": "/",
+  "expected_version": "HTTP/1.1"
+}

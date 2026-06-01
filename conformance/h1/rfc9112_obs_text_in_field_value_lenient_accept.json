@@ -1,0 +1,11 @@
+{
+  "name": "obs_text_in_field_value_lenient",
+  "spec": "RFC 9112 §5.5 with H1LeniencyConfig.accept_obs_text_in_field_value",
+  "input_hex": "47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 58 2d 48 69 3a 20 61 c3 a9 62 0d 0a 48 6f 73 74 3a 20 78 0d 0a 0d 0a",
+  "expect": "accept",
+  "expect_reason": "leniency flag treats high-bit obs-text bytes as opaque",
+  "leniency": {"accept_obs_text_in_field_value": true},
+  "expected_method": "GET",
+  "expected_uri": "/",
+  "expected_version": "HTTP/1.1"
+}

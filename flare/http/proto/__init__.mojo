@@ -58,12 +58,12 @@ embedding flare-as-parser can do the same.
 ## H1 leniency
 
 The H1 parser accepts a handful of widely-deployed RFC 9110 /
-RFC 9112 relaxations (LF-only line endings, OWS around ``:``,
-mixed-case method tokens) that are useful in practice but
-implicit in the call site today. The named
-``_ExperimentalH1LeniencyConfig`` struct surfaces them as
-opt-in flags; the underscore prefix signals that the
-parser-plumbing for individual flags is still landing.
+RFC 9112 relaxations as opt-in flags. The ``H1LeniencyConfig``
+carrier surfaces them; strict mode (the no-argument constructor)
+is the default. Each flag wires to a specific parser branch in
+:func:`flare.http.server._parse_http_request_bytes`. The legacy
+``_ExperimentalH1LeniencyConfig`` alias remains importable for
+back-compat.
 """
 
 # Cookies (RFC 6265) -- pure parsers / constructors / serialisers.
@@ -169,15 +169,16 @@ from flare.http2.state import (
     StreamState as H2StreamState,
 )
 
-# HTTP/1.1 parser leniency configuration carrier (experimental).
-# Strict by default; every relaxation is opt-in and named after
-# the RFC 9112 section it relaxes. The ``_Experimental`` prefix
-# signals that parser plumbing is incomplete -- only
-# ``allow_lf_only_line_endings`` and ``allow_obs_fold`` drive
-# parser branches today; the rest of the named flags are public
-# contract surface that a follow-up audit pass will wire
-# end-to-end.
-from flare.http.proto.h1_leniency import _ExperimentalH1LeniencyConfig
+# HTTP/1.1 parser leniency configuration carrier. Strict by
+# default; every relaxation is opt-in and named after the RFC
+# 9112 section it relaxes. Wired into the H1 request parser
+# via :attr:`flare.http.server.ServerConfig.h1_leniency`. The
+# legacy ``_ExperimentalH1LeniencyConfig`` alias is preserved
+# for back-compat with v0.7 configuration code.
+from flare.http.proto.h1_leniency import (
+    H1LeniencyConfig,
+    _ExperimentalH1LeniencyConfig,
+)
 
 # Zero-validation ASCII -> String helper. Promoted from the
 # reactor-coupled ``flare.http.server`` to the sans-I/O parser

@@ -1,0 +1,8 @@
+{
+  "name": "obs_text_in_field_value_strict",
+  "spec": "RFC 9112 §5.5 (high-bit obs-text rejected by default)",
+  "input_hex": "47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 58 2d 48 69 3a 20 61 c3 a9 62 0d 0a 48 6f 73 74 3a 20 78 0d 0a 0d 0a",
+  "expect": "reject",
+  "expect_reason": "high-bit (obs-text) bytes in header field values rejected by default",
+  "leniency": {}
+}

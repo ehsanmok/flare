@@ -1,0 +1,11 @@
+{
+  "name": "multiple_content_length_lenient",
+  "spec": "RFC 9112 §6.3.5 with H1LeniencyConfig.allow_multiple_content_length",
+  "input_hex": "50 4f 53 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 78 0d 0a 43 6f 6e 74 65 6e 74 2d 4c 65 6e 67 74 68 3a 20 35 0d 0a 43 6f 6e 74 65 6e 74 2d 4c 65 6e 67 74 68 3a 20 35 0d 0a 0d 0a 68 65 6c 6c 6f",
+  "expect": "accept",
+  "expect_reason": "leniency flag accepts duplicate Content-Length when values agree",
+  "leniency": {"allow_multiple_content_length": true},
+  "expected_method": "POST",
+  "expected_uri": "/",
+  "expected_version": "HTTP/1.1"
+}

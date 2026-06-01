@@ -1,0 +1,11 @@
+{
+  "name": "mixed_case_method_lenient",
+  "spec": "RFC 9110 §9.1 with H1LeniencyConfig.allow_mixed_case_method",
+  "input_hex": "47 65 74 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 78 0d 0a 0d 0a",
+  "expect": "accept",
+  "expect_reason": "leniency flag normalises mixed-case method tokens to upper-case",
+  "leniency": {"allow_mixed_case_method": true},
+  "expected_method": "GET",
+  "expected_uri": "/",
+  "expected_version": "HTTP/1.1"
+}
