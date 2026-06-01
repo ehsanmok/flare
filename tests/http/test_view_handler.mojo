@@ -29,13 +29,13 @@ from flare.http import (
     ok,
     Handler,
     ViewHandler,
-    WithViewCancel,
     Cancel,
     CancelCell,
     CancelReason,
     RequestView,
     parse_request_view,
 )
+from flare.http.handler import WithViewCancel
 
 
 # ── Test handlers ──────────────────────────────────────────────────────────

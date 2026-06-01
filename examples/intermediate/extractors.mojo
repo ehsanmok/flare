@@ -32,10 +32,10 @@ from flare.http import (
     OptionalQueryInt,
     QueryStr,
     HeaderStr,
-    HandlerExtractor,
     Router,
     Extracted,
 )
+from flare.http.handler import HandlerExtractor
 
 
 # ── Shape 1: value-constructor extractors inside a function handler ─────────

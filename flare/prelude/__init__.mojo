@@ -85,14 +85,11 @@ from ..http.simd_parsers import (
 )
 from ..http.handler import (
     Handler,
-    HandlerInfallible,
-    WithRaises,
     FnHandler,
     FnHandlerCT,
     CancelHandler,
     WithCancel,
     ViewHandler,
-    WithViewCancel,
 )
 from ..http.router import Router
 from ..http.client import HttpClient, get, post, put, patch, delete, head

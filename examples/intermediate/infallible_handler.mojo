@@ -40,13 +40,12 @@ Run:
 
 from flare.http import (
     Handler,
-    HandlerInfallible,
     Request,
     Response,
     Router,
-    WithRaises,
     ok,
 )
+from flare.http.handler import HandlerInfallible, WithRaises
 
 
 # ── Shape 1: bare function, no ``raises`` -------------------------------------

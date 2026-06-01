@@ -11,7 +11,6 @@ from std.testing import assert_equal
 from flare.http import (
     Extracted,
     Handler,
-    HandlerExtractor,
     PathInt,
     QueryStr,
     Request,
@@ -19,6 +18,7 @@ from flare.http import (
     Router,
     ok,
 )
+from flare.http.handler import HandlerExtractor
 
 
 @fieldwise_init

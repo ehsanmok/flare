@@ -124,6 +124,13 @@ trait Handler(ImplicitlyDestructible, Movable):
 trait HandlerExtractor(Copyable, Defaultable, Handler, Movable):
     """Convenience trait composition for typed-extractor handler structs.
 
+    .. note::
+
+       **Internal adapter.** Not part of the curated public surface;
+       import explicitly via ``from flare.http.handler import
+       HandlerExtractor``. Plain ``(Copyable, Defaultable, Handler,
+       Movable)`` is the documented public shape.
+
     Equivalent to declaring ``(Copyable, Defaultable, Handler,
     Movable)`` directly -- no new methods, no new behaviour.
     Collapses the four-trait conformance line that every
@@ -161,7 +168,8 @@ trait HandlerExtractor(Copyable, Defaultable, Handler, Movable):
         var r = Router()
         r.get(\"/users/:id\", Extracted[GetUser]())
 
-    Re-exported from :mod:`flare.http` and :mod:`flare.prelude`.
+    Re-exported from :mod:`flare.http.handler` only (the demoted
+    internal-adapter import path).
 
     The manual no-arg ``__init__`` body is still required today
     because Mojo's ``@fieldwise_init`` doesn't auto-derive a
@@ -175,6 +183,16 @@ trait HandlerExtractor(Copyable, Defaultable, Handler, Movable):
 
 trait HandlerInfallible(ImplicitlyDestructible, Movable):
     """A :trait:`Handler` whose ``serve`` is provably infallible.
+
+    .. note::
+
+       **Internal adapter.** Not part of the curated public surface;
+       import explicitly via ``from flare.http.handler import
+       HandlerInfallible``. The everyday public path is plain
+       ``Handler`` with ``raises`` annotated only on bodies that
+       actually fail; this trait variant exists as a niche
+       optimisation for static-fast-path handlers and the
+       :class:`WithRaises` adapter.
 
     The standard :trait:`Handler` requires ``serve(self, req: Request)
     raises -> Response``. For most handlers this is the right shape:
@@ -442,6 +460,13 @@ struct WithViewCancel[H: Handler & Copyable & Movable](
     """Adapter that lets a plain ``Handler`` plug into the
     view-aware reactor path.
 
+    .. note::
+
+       **Internal adapter.** Not part of the curated public surface;
+       import explicitly via ``from flare.http.handler import
+       WithViewCancel``. The documented public path for the view
+       reactor is implementing :trait:`ViewHandler` directly.
+
     ``WithViewCancel[H]`` materialises an owned ``Request`` from
     the borrowed view via ``into_owned()`` and forwards every
     request to ``H.serve(req)``. Defeats the zero-copy benefit of
@@ -458,9 +483,8 @@ struct WithViewCancel[H: Handler & Copyable & Movable](
 
     Example:
         ```mojo
-        from flare.http import (
-            HttpServer, Router, WithViewCancel, Request, Response, ok,
-        )
+        from flare.http import HttpServer, Router, Request, Response, ok
+        from flare.http.handler import WithViewCancel
         from flare.net import SocketAddr
 
         def hello(req: Request) raises -> Response:
@@ -571,6 +595,13 @@ struct WithRaises[Inner: HandlerInfallible & Copyable & Movable](
 ):
     """Adapt a :trait:`HandlerInfallible` so it fits the regular
     :trait:`Handler` constraint.
+
+    .. note::
+
+       **Internal adapter.** Not part of the curated public surface;
+       import explicitly via ``from flare.http.handler import
+       WithRaises``. Pairs with :trait:`HandlerInfallible`, which
+       lives behind the same import path.
 
     Use cases:
 

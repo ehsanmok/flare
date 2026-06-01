@@ -19,12 +19,11 @@ from std.testing import assert_equal
 
 from flare.http import (
     Handler,
-    HandlerInfallible,
     Request,
     Response,
-    WithRaises,
     ok,
 )
+from flare.http.handler import HandlerInfallible, WithRaises
 
 
 @fieldwise_init
