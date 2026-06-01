@@ -51,6 +51,7 @@ SANS_IO_FILES=(
     "flare/quic/varint.mojo"
     "flare/quic/packet.mojo"
     "flare/quic/frame.mojo"
+    "flare/quic/transport_params.mojo"
 )
 
 # Forbidden import patterns. Each matches both ``from flare.<X>`` /

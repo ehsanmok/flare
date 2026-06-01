@@ -281,6 +281,7 @@ test-conformance-h1  = "mojo -I . tests/conformance/test_conformance_h1.mojo"  #
 test-quic-varint     = "mojo -I . tests/quic/test_varint.mojo"           # RFC 9000 §16 variable-length integer codec (~12 cases)
 test-quic-packet     = "mojo -I . tests/quic/test_packet.mojo"           # RFC 9000 §17 long/short packet header codec (~11 cases)
 test-quic-frame      = "mojo -I . tests/quic/test_frame.mojo"            # RFC 9000 §19 transport-frame codec, all 22 frame types (~26 cases)
+test-quic-transport-params = "mojo -I . tests/quic/test_transport_params.mojo"  # RFC 9000 §18 transport-parameter codec (~10 cases)
 test-h3-frame        = "mojo -I . tests/h3/test_frame.mojo"              # RFC 9114 §7 HTTP/3 frame codec + SETTINGS (~10 cases)
 test-grpc            = "mojo -I . tests/grpc/test_grpc.mojo"             # gRPC LPM framing + status codes (~10 cases)
 test-grpc-metadata   = "mojo -I . tests/grpc/test_metadata.mojo"         # gRPC initial + trailing metadata carrier (~7 cases)
