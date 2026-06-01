@@ -1,11 +1,13 @@
-# TODO: decompose into _reactor/*.mojo + collapse the three loop
-# variants (run_unified_reactor_loop / _multi / _shared) via comptime
-# config flags. The per-tick body has already been extracted into the
-# shared _unified_poll_once core; the three outer wrappers remain
-# separate because they differ in listener ownership (single fd vs.
-# per-worker SO_REUSEPORT vs. shared EPOLLEXCLUSIVE). A future pass
-# folds those into one comptime-parametric
-# `run_unified_reactor_loop[listener_policy]`.
+# Unified reactor loop: HTTP/1.1 + HTTP/2 on the same listener.
+#
+# Closes register §B3 of the v0.8 critique: the per-tick body and
+# the dedicated/shared single-listener loops share one comptime-
+# parametric core (`_run_unified_loop_for_fd[H, is_shared]`). The
+# multi-listener variant retains its own outer loop because it
+# discriminates accept events by ``fd in listener_fds_dict``
+# instead of ``token == 0``; that fd-set discriminator is
+# structurally distinct and unifying it would add complexity
+# rather than remove it.
 
 """Unified reactor loop: HTTP/1.1 + HTTP/2 on the same listener.
 
@@ -548,47 +550,19 @@ def _migrate_pending(
 # ── Accept loop with deferred-protocol handles ─────────────────────────────
 
 
-def _accept_loop_unified(
-    mut listener: TcpListener,
-    mut reactor: Reactor,
-    mut conns: Dict[Int, Int],
-):
-    """Accept every available connection and register it as a
-    KIND_PENDING-tagged :class:`PendingConnHandle` in the shared
-    ``conns`` table."""
-    while True:
-        var stream: TcpStream
-        try:
-            stream = listener.accept()
-        except:
-            break
-        try:
-            stream._socket.set_nonblocking(True)
-        except:
-            pass
-        var client_fd = Int(stream._socket.fd)
-        var addr: Int
-        try:
-            addr = _pending_conn_alloc_addr(stream^)
-        except:
-            continue
-        conns[client_fd] = _pack(KIND_PENDING, addr)
-        try:
-            reactor.register(c_int(client_fd), UInt64(client_fd), INTEREST_READ)
-        except:
-            _pending_conn_free_addr(addr)
-            try:
-                _ = conns.pop(client_fd)
-            except:
-                pass
-
-
 def _accept_loop_unified_fd(
     listener_fd: Int,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
 ):
-    """Shared-listener variant of :func:`_accept_loop_unified`."""
+    """Accept every available connection on ``listener_fd`` and
+    register it as a KIND_PENDING-tagged
+    :class:`PendingConnHandle` in the shared ``conns`` table.
+
+    Used by every single-listener unified loop variant (dedicated,
+    shared/EPOLLEXCLUSIVE, multi-listener); the dedicated variant
+    extracts the listener fd before calling.
+    """
     while True:
         var stream: TcpStream
         try:
@@ -798,6 +772,81 @@ def _drain_remaining_conns_unified(
 # ── Unified reactor loop -- single listener (single-worker) ────────────────
 
 
+def _run_unified_loop_for_fd[
+    H: Handler,
+    is_shared: Bool,
+](
+    listener_fd: Int,
+    config: ServerConfig,
+    var h2_config: Http2Config,
+    ref handler: H,
+    ref stopping: Bool,
+) raises:
+    """Shared body for the single-listener unified reactor loops.
+
+    Identical poll-and-dispatch core for the dedicated
+    (``is_shared=False``) and shared (``is_shared=True``) variants;
+    the only listener-side difference is ``register`` vs
+    ``register_exclusive``. Both register the listener under
+    ``token = 0`` and route every other event by ``conns`` lookup.
+
+    The multi-listener variant doesn't share this body because it
+    routes accept events by ``fd in listener_fds_dict`` instead of
+    ``token == 0`` -- that fd-set discriminator is structurally
+    different enough to warrant its own outer loop.
+    """
+    var reactor = Reactor()
+    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+
+    comptime if is_shared:
+        reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
+    else:
+        reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
+
+    var events = List[Event]()
+    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    while not UnsafePointer[Bool, MutExternalOrigin](
+        unsafe_from_address=stopping_addr
+    )[]:
+        events.clear()
+        try:
+            _ = reactor.poll(100, events)
+        except:
+            break
+
+        var now_ms = UInt64(_monotonic_ms())
+        _advance_timer_wheel_unified(now_ms, wheel, conns, timers, reactor)
+
+        for i in range(len(events)):
+            var evt = events[i]
+            if evt.is_wakeup():
+                continue
+            if evt.token == UInt64(0):
+                _accept_loop_unified_fd(listener_fd, reactor, conns)
+                continue
+            var fd = Int(evt.token)
+            if fd not in conns:
+                continue
+            var packed = conns[fd]
+            _unified_handle_conn_event(
+                fd,
+                packed,
+                evt.is_readable(),
+                evt.is_writable(),
+                handler,
+                config,
+                h2_config,
+                conns,
+                reactor,
+                wheel,
+                timers,
+            )
+
+    _drain_remaining_conns_unified(conns, timers, reactor)
+
+
 def run_unified_reactor_loop[
     H: Handler
 ](
@@ -823,58 +872,19 @@ def run_unified_reactor_loop[
             via a fresh :class:`UnsafePointer` so the optimiser
             cannot LICM-hoist the load (the multicore Scheduler
             mutates it from another thread).
+
+    Delegates to :func:`_run_unified_loop_for_fd[H, False]` after
+    extracting the listener fd; identical to the shared variant
+    except for ``register`` vs ``register_exclusive``.
     """
     listener._socket.set_nonblocking(True)
-    var listener_fd = listener._socket.fd
-
-    var reactor = Reactor()
-    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
-    var conns = Dict[Int, Int]()
-    var timers = Dict[Int, UInt64]()
-
-    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
-
-    var events = List[Event]()
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutExternalOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
-        events.clear()
-        try:
-            _ = reactor.poll(100, events)
-        except:
-            break
-
-        var now_ms = UInt64(_monotonic_ms())
-        _advance_timer_wheel_unified(now_ms, wheel, conns, timers, reactor)
-
-        for i in range(len(events)):
-            var evt = events[i]
-            if evt.is_wakeup():
-                continue
-            if evt.token == UInt64(0):
-                _accept_loop_unified(listener, reactor, conns)
-                continue
-            var fd = Int(evt.token)
-            if fd not in conns:
-                continue
-            var packed = conns[fd]
-            _unified_handle_conn_event(
-                fd,
-                packed,
-                evt.is_readable(),
-                evt.is_writable(),
-                handler,
-                config,
-                h2_config,
-                conns,
-                reactor,
-                wheel,
-                timers,
-            )
-
-    # Graceful shutdown: close all live conns.
-    _drain_remaining_conns_unified(conns, timers, reactor)
+    _run_unified_loop_for_fd[H, False](
+        Int(listener._socket.fd),
+        config,
+        h2_config^,
+        handler,
+        stopping,
+    )
 
 
 # ── Unified reactor loop -- multi-listener (single-worker) ─────────────────
@@ -1011,51 +1021,13 @@ def run_unified_reactor_loop_shared[
     degrades to plain ``register`` -- the wakeup pattern is
     "wake-all, one-wins" but practical behaviour is similar
     because ``accept(2)`` on the losers returns ``EAGAIN``).
+
+    Delegates to :func:`_run_unified_loop_for_fd[H, True]`.
     """
-    var reactor = Reactor()
-    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
-    var conns = Dict[Int, Int]()
-    var timers = Dict[Int, UInt64]()
-
-    reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
-
-    var events = List[Event]()
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutExternalOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
-        events.clear()
-        try:
-            _ = reactor.poll(100, events)
-        except:
-            break
-
-        var now_ms = UInt64(_monotonic_ms())
-        _advance_timer_wheel_unified(now_ms, wheel, conns, timers, reactor)
-
-        for i in range(len(events)):
-            var evt = events[i]
-            if evt.is_wakeup():
-                continue
-            if evt.token == UInt64(0):
-                _accept_loop_unified_fd(listener_fd, reactor, conns)
-                continue
-            var fd = Int(evt.token)
-            if fd not in conns:
-                continue
-            var packed = conns[fd]
-            _unified_handle_conn_event(
-                fd,
-                packed,
-                evt.is_readable(),
-                evt.is_writable(),
-                handler,
-                config,
-                h2_config,
-                conns,
-                reactor,
-                wheel,
-                timers,
-            )
-
-    _drain_remaining_conns_unified(conns, timers, reactor)
+    _run_unified_loop_for_fd[H, True](
+        listener_fd,
+        config,
+        h2_config^,
+        handler,
+        stopping,
+    )
