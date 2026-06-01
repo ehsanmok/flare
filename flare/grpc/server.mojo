@@ -130,6 +130,38 @@ def _parse_grpc_timeout(value: String) raises -> UInt64:
     raise Error("grpc-timeout: unknown unit suffix")
 
 
+# ── Request-headers carrier ───────────────────────────────────────────────
+
+
+@fieldwise_init
+struct GrpcRequestHeaders(Copyable, Movable):
+    """Typed carrier for the H2 request-HEADERS field set the gRPC
+    adapter consumes.
+
+    The ``method`` / ``path`` / ``content_type`` / ``te`` fields are
+    REQUIRED on every well-formed gRPC call; the optional fields
+    (``timeout`` -- ``grpc-timeout``, ``accept_encoding`` --
+    ``grpc-accept-encoding``) carry the empty :class:`Optional` when
+    the client omits them. ``initial_metadata`` is the
+    application-visible subset (``grpc-`` reserved keys stripped).
+
+    The H2 driver builds this carrier from the parsed
+    ``H2RequestHeaders`` field set and hands it to
+    :func:`parse_request_headers` or :func:`run_unary_call`. The
+    typed shape collapses the prior seven-positional-string
+    signature into a single argument and lets the driver build
+    each field with the right ``Optional[String]`` semantics.
+    """
+
+    var method: String
+    var path: String
+    var content_type: String
+    var te: String
+    var timeout: Optional[String]
+    var accept_encoding: Optional[String]
+    var initial_metadata: GrpcMetadata
+
+
 # ── Per-call context ──────────────────────────────────────────────────────
 
 
@@ -196,13 +228,7 @@ struct GrpcCallOutcome(Copyable, Movable):
 
 
 def parse_request_headers(
-    method: String,
-    path: String,
-    content_type: String,
-    te: String,
-    timeout: String,
-    accept_encoding: String,
-    initial_metadata: GrpcMetadata,
+    headers: GrpcRequestHeaders,
 ) raises -> GrpcCallContext:
     """Validate the H2 request HEADERS for a gRPC call and build
     the :class:`GrpcCallContext`.
@@ -222,9 +248,9 @@ def parse_request_headers(
     deadline; missing / unparseable timeouts surface as ``0``
     (no deadline) so partial deployments don't fail closed.
     """
-    if method != "POST":
+    if headers.method != "POST":
         raise Error("grpc adapter: :method must be POST")
-    var path_bytes = path.as_bytes()
+    var path_bytes = headers.path.as_bytes()
     if len(path_bytes) < 3 or path_bytes[0] != UInt8(ord("/")):
         raise Error("grpc adapter: :path must be /<service>/<method>")
     var seen_slash = False
@@ -234,10 +260,10 @@ def parse_request_headers(
             break
     if not seen_slash:
         raise Error("grpc adapter: :path missing method segment")
-    if not _is_grpc_content_type(content_type):
+    if not _is_grpc_content_type(headers.content_type):
         raise Error("grpc adapter: content-type must be application/grpc")
     var has_trailers = False
-    var te_bytes = te.as_bytes()
+    var te_bytes = headers.te.as_bytes()
     var n = len(te_bytes)
     var idx = 0
     while idx + 8 <= n:
@@ -257,16 +283,21 @@ def parse_request_headers(
     if not has_trailers:
         raise Error("grpc adapter: te header must include 'trailers'")
     var deadline_us = UInt64(0)
-    if timeout.byte_length() > 0:
-        try:
-            deadline_us = _parse_grpc_timeout(timeout)
-        except:
-            deadline_us = UInt64(0)
+    if Bool(headers.timeout):
+        var timeout_str = headers.timeout.value()
+        if timeout_str.byte_length() > 0:
+            try:
+                deadline_us = _parse_grpc_timeout(timeout_str)
+            except:
+                deadline_us = UInt64(0)
+    var accept_encoding = String("")
+    if Bool(headers.accept_encoding):
+        accept_encoding = headers.accept_encoding.value()
     return GrpcCallContext(
-        path=path,
+        path=headers.path,
         deadline_us=deadline_us,
-        initial_metadata=initial_metadata.copy(),
-        accept_encoding=accept_encoding,
+        initial_metadata=headers.initial_metadata.copy(),
+        accept_encoding=accept_encoding^,
     )
 
 
@@ -328,13 +359,7 @@ def run_unary_call[
     H: GrpcUnary
 ](
     mut handler: H,
-    method: String,
-    path: String,
-    content_type: String,
-    te: String,
-    timeout: String,
-    accept_encoding: String,
-    initial_metadata: GrpcMetadata,
+    headers: GrpcRequestHeaders,
     request_data: Span[UInt8, _],
 ) raises -> GrpcCallOutcome:
     """End-to-end driver: validate headers, stitch LPM, invoke
@@ -345,15 +370,7 @@ def run_unary_call[
     DATA frame and whose status / trailing metadata go on the
     trailing HEADERS frame.
     """
-    var ctx = parse_request_headers(
-        method,
-        path,
-        content_type,
-        te,
-        timeout,
-        accept_encoding,
-        initial_metadata,
-    )
+    var ctx = parse_request_headers(headers)
     var request_bytes = stitch_request_data(request_data)
     var result = handler.serve_unary(ctx, Span[UInt8, _](request_bytes))
     var response_data = List[UInt8]()

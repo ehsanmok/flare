@@ -39,6 +39,7 @@ from flare.grpc import (
     GrpcCallOutcome,
     GrpcMessage,
     GrpcMetadata,
+    GrpcRequestHeaders,
     GrpcStatus,
     GrpcUnary,
     decode_grpc_message,
@@ -138,14 +139,16 @@ def main() raises:
     var ok_handler = EchoHandler(fail=False)
     var ok_outcome = run_unary_call[EchoHandler](
         ok_handler,
-        method=String("POST"),
-        path=String("/echo.EchoService/Echo"),
-        content_type=String("application/grpc+proto"),
-        te=String("trailers"),
-        timeout=String(""),
-        accept_encoding=String(""),
-        initial_metadata=initial_meta,
-        request_data=Span[UInt8, _](request_data),
+        GrpcRequestHeaders(
+            method=String("POST"),
+            path=String("/echo.EchoService/Echo"),
+            content_type=String("application/grpc+proto"),
+            te=String("trailers"),
+            timeout=None,
+            accept_encoding=None,
+            initial_metadata=initial_meta.copy(),
+        ),
+        Span[UInt8, _](request_data),
     )
     _print_outcome(String("OK call"), ok_outcome)
 
@@ -153,14 +156,16 @@ def main() raises:
     var err_handler = EchoHandler(fail=True)
     var err_outcome = run_unary_call[EchoHandler](
         err_handler,
-        method=String("POST"),
-        path=String("/echo.EchoService/Echo"),
-        content_type=String("application/grpc+proto"),
-        te=String("trailers"),
-        timeout=String("1S"),
-        accept_encoding=String(""),
-        initial_metadata=initial_meta,
-        request_data=Span[UInt8, _](request_data),
+        GrpcRequestHeaders(
+            method=String("POST"),
+            path=String("/echo.EchoService/Echo"),
+            content_type=String("application/grpc+proto"),
+            te=String("trailers"),
+            timeout=String("1S"),
+            accept_encoding=None,
+            initial_metadata=initial_meta^,
+        ),
+        Span[UInt8, _](request_data),
     )
     _print_outcome(String("ERROR call (RESOURCE_EXHAUSTED)"), err_outcome)
     print("")

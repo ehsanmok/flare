@@ -19,6 +19,7 @@ from flare.grpc import (
     GrpcCompressionFlag,
     GrpcMessage,
     GrpcMetadata,
+    GrpcRequestHeaders,
     GrpcStatus,
     GrpcUnary,
     decode_grpc_message,
@@ -28,6 +29,30 @@ from flare.grpc import (
     run_unary_call,
     stitch_request_data,
 )
+
+
+def _headers(
+    var method: String,
+    var path: String,
+    var content_type: String,
+    var te: String,
+    timeout: Optional[String] = None,
+    accept_encoding: Optional[String] = None,
+) -> GrpcRequestHeaders:
+    """Build a `GrpcRequestHeaders` carrier for the tests; the
+    `Optional[String]` fields default to absent so call sites read
+    as `_headers("POST", "/svc/m", ..., "trailers")` for the
+    minimal-shape cases.
+    """
+    return GrpcRequestHeaders(
+        method=method^,
+        path=path^,
+        content_type=content_type^,
+        te=te^,
+        timeout=timeout,
+        accept_encoding=accept_encoding,
+        initial_metadata=GrpcMetadata(),
+    )
 
 
 @fieldwise_init
@@ -67,13 +92,13 @@ struct ErrorUnary(GrpcUnary, Movable):
 
 def test_parse_request_headers_minimal() raises:
     var ctx = parse_request_headers(
-        String("POST"),
-        String("/echo.Echo/Hello"),
-        String("application/grpc"),
-        String("trailers"),
-        String(""),
-        String("identity"),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/echo.Echo/Hello"),
+            String("application/grpc"),
+            String("trailers"),
+            accept_encoding=String("identity"),
+        )
     )
     assert_equal(ctx.path, "/echo.Echo/Hello")
     assert_equal(ctx.deadline_us, UInt64(0))
@@ -82,13 +107,12 @@ def test_parse_request_headers_minimal() raises:
 
 def test_parse_request_headers_proto_flavor() raises:
     var ctx = parse_request_headers(
-        String("POST"),
-        String("/svc/m"),
-        String("application/grpc+proto"),
-        String("trailers"),
-        String(""),
-        String(""),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc+proto"),
+            String("trailers"),
+        )
     )
     assert_equal(ctx.path, "/svc/m")
 
@@ -97,13 +121,12 @@ def test_parse_request_headers_rejects_get() raises:
     var raised = False
     try:
         var _ = parse_request_headers(
-            String("GET"),
-            String("/svc/m"),
-            String("application/grpc"),
-            String("trailers"),
-            String(""),
-            String(""),
-            GrpcMetadata(),
+            _headers(
+                String("GET"),
+                String("/svc/m"),
+                String("application/grpc"),
+                String("trailers"),
+            )
         )
     except:
         raised = True
@@ -114,13 +137,12 @@ def test_parse_request_headers_rejects_bad_content_type() raises:
     var raised = False
     try:
         var _ = parse_request_headers(
-            String("POST"),
-            String("/svc/m"),
-            String("text/plain"),
-            String("trailers"),
-            String(""),
-            String(""),
-            GrpcMetadata(),
+            _headers(
+                String("POST"),
+                String("/svc/m"),
+                String("text/plain"),
+                String("trailers"),
+            )
         )
     except:
         raised = True
@@ -131,13 +153,12 @@ def test_parse_request_headers_rejects_missing_trailers() raises:
     var raised = False
     try:
         var _ = parse_request_headers(
-            String("POST"),
-            String("/svc/m"),
-            String("application/grpc"),
-            String(""),
-            String(""),
-            String(""),
-            GrpcMetadata(),
+            _headers(
+                String("POST"),
+                String("/svc/m"),
+                String("application/grpc"),
+                String(""),
+            )
         )
     except:
         raised = True
@@ -148,13 +169,12 @@ def test_parse_request_headers_rejects_path_without_method() raises:
     var raised = False
     try:
         var _ = parse_request_headers(
-            String("POST"),
-            String("/svc"),
-            String("application/grpc"),
-            String("trailers"),
-            String(""),
-            String(""),
-            GrpcMetadata(),
+            _headers(
+                String("POST"),
+                String("/svc"),
+                String("application/grpc"),
+                String("trailers"),
+            )
         )
     except:
         raised = True
@@ -163,38 +183,55 @@ def test_parse_request_headers_rejects_path_without_method() raises:
 
 def test_parse_request_headers_parses_timeout() raises:
     var ctx = parse_request_headers(
-        String("POST"),
-        String("/svc/m"),
-        String("application/grpc"),
-        String("trailers"),
-        String("100m"),  # 100 milliseconds = 100,000 us
-        String(""),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("trailers"),
+            timeout=String("100m"),  # 100 milliseconds = 100,000 us
+        )
     )
     assert_equal(ctx.deadline_us, UInt64(100_000))
 
 
 def test_parse_request_headers_timeout_units() raises:
     var ctx_h = parse_request_headers(
-        String("POST"),
-        String("/svc/m"),
-        String("application/grpc"),
-        String("trailers"),
-        String("1H"),
-        String(""),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("trailers"),
+            timeout=String("1H"),
+        )
     )
     assert_equal(ctx_h.deadline_us, UInt64(3600) * UInt64(1_000_000))
     var ctx_s = parse_request_headers(
-        String("POST"),
-        String("/svc/m"),
-        String("application/grpc"),
-        String("trailers"),
-        String("5S"),
-        String(""),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("trailers"),
+            timeout=String("5S"),
+        )
     )
     assert_equal(ctx_s.deadline_us, UInt64(5_000_000))
+
+
+def test_parse_request_headers_missing_optionals_default() raises:
+    """A minimal headers shape with no ``grpc-timeout`` or
+    ``grpc-accept-encoding`` MUST still produce a valid context
+    with a zero deadline and an empty accept-encoding hint.
+    """
+    var ctx = parse_request_headers(
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("trailers"),
+        )
+    )
+    assert_equal(ctx.deadline_us, UInt64(0))
+    assert_equal(ctx.accept_encoding, "")
 
 
 def test_stitch_single_lpm_frame() raises:
@@ -269,17 +306,16 @@ def test_run_unary_call_echo() raises:
     var handler = EchoUnary(seen_path=String(""))
     var outcome = run_unary_call(
         handler,
-        String("POST"),
-        String("/echo.Echo/Hello"),
-        String("application/grpc"),
-        String("trailers"),
-        String(""),
-        String("identity"),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/echo.Echo/Hello"),
+            String("application/grpc"),
+            String("trailers"),
+            accept_encoding=String("identity"),
+        ),
         Span[UInt8, _](encoded),
     )
     assert_equal(outcome.status.code, GRPC_STATUS_OK)
-    # Decode the response LPM frame and confirm payload echo.
     var dec = decode_grpc_message(Span[UInt8, _](outcome.response_data))
     assert_false(dec.needs_more)
     assert_equal(len(dec.message.payload), 2)
@@ -294,13 +330,12 @@ def test_run_unary_call_error_status_emits_empty_body() raises:
     var handler = ErrorUnary(hit=False)
     var outcome = run_unary_call(
         handler,
-        String("POST"),
-        String("/svc/m"),
-        String("application/grpc"),
-        String("trailers"),
-        String(""),
-        String(""),
-        GrpcMetadata(),
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("trailers"),
+        ),
         Span[UInt8, _](encoded),
     )
     assert_equal(outcome.status.code, GRPC_STATUS_INTERNAL)
@@ -316,10 +351,11 @@ def main() raises:
     test_parse_request_headers_rejects_path_without_method()
     test_parse_request_headers_parses_timeout()
     test_parse_request_headers_timeout_units()
+    test_parse_request_headers_missing_optionals_default()
     test_stitch_single_lpm_frame()
     test_stitch_multiple_lpm_frames()
     test_stitch_rejects_truncated_frame()
     test_stitch_rejects_compressed_frame()
     test_run_unary_call_echo()
     test_run_unary_call_error_status_emits_empty_body()
-    print("test_grpc_server: 14 passed")
+    print("test_grpc_server: 15 passed")

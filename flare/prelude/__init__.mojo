@@ -460,6 +460,7 @@ from ..grpc import (
     # Unary server adapter (H2 stream → gRPC call).
     GrpcCallContext,
     GrpcCallOutcome,
+    GrpcRequestHeaders,
     GrpcUnary,
     encode_unary_response as grpc_encode_unary_response,
     parse_request_headers as grpc_parse_request_headers,

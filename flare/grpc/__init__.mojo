@@ -37,6 +37,9 @@ Public re-exports:
 - :class:`GrpcUnary` -- the per-method handler trait the
   application implements; receives a decoded request payload
   and returns either response bytes or a non-OK status.
+- :class:`GrpcRequestHeaders` -- typed carrier for the H2
+  request-HEADERS field set; ``Optional[String]`` covers
+  ``grpc-timeout`` / ``grpc-accept-encoding``.
 - :class:`GrpcCallContext`, :class:`GrpcCallOutcome` -- the
   per-call inputs and outputs the server adapter threads
   through the H2 stream.
@@ -63,6 +66,7 @@ from .metadata import (
 from .server import (
     GrpcCallContext,
     GrpcCallOutcome,
+    GrpcRequestHeaders,
     GrpcUnary,
     encode_unary_response,
     parse_request_headers,
