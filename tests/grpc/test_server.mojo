@@ -14,6 +14,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from flare.grpc import (
     GRPC_STATUS_INTERNAL,
     GRPC_STATUS_INVALID_ARGUMENT,
+    GRPC_STATUS_NOT_FOUND,
     GRPC_STATUS_OK,
     GrpcCallContext,
     GrpcCallOutcome,
@@ -25,6 +26,7 @@ from flare.grpc import (
     GrpcUnary,
     GrpcUnaryReply,
     decode_grpc_message,
+    emit_trailing_headers_status,
     encode_grpc_message,
     encode_unary_response,
     parse_request_headers,
@@ -453,6 +455,51 @@ def test_run_unary_call_handler_raise_emits_internal() raises:
     assert_equal(len(outcome.response_data), 0)
 
 
+def test_emit_trailing_headers_status_ok_minimal() raises:
+    """An OK status with no message and no details emits just the
+    framework-required ``grpc-status: 0`` entry; the H2 driver
+    appends the application trailing metadata after that.
+    """
+    var trailers = emit_trailing_headers_status(GrpcStatus.ok())
+    assert_equal(len(trailers), 1)
+    assert_equal(trailers[0][0], String("grpc-status"))
+    assert_equal(trailers[0][1], String("0"))
+
+
+def test_emit_trailing_headers_status_err_with_message() raises:
+    """A non-OK status with a message emits both ``grpc-status``
+    and ``grpc-message`` (the spec says clients may surface
+    ``grpc-message`` for diagnostics)."""
+    var trailers = emit_trailing_headers_status(
+        GrpcStatus.err(GRPC_STATUS_NOT_FOUND, String("missing"))
+    )
+    assert_equal(len(trailers), 2)
+    assert_equal(trailers[0][0], String("grpc-status"))
+    assert_equal(trailers[0][1], String("5"))
+    assert_equal(trailers[1][0], String("grpc-message"))
+    assert_equal(trailers[1][1], String("missing"))
+
+
+def test_emit_trailing_headers_status_with_details_bin() raises:
+    """``with_details`` attaches an opaque byte payload that the
+    trailer emitter base64-encodes for ``grpc-status-details-bin``.
+    A 4-byte ``0xDEADBEEF`` fixture encodes to ``3q2+7w==`` under
+    the standard alphabet (RFC 4648 §4).
+    """
+    var payload = List[UInt8]()
+    payload.append(UInt8(0xDE))
+    payload.append(UInt8(0xAD))
+    payload.append(UInt8(0xBE))
+    payload.append(UInt8(0xEF))
+    var status = GrpcStatus.err(
+        GRPC_STATUS_INTERNAL, String("boom")
+    ).with_details(payload^)
+    var trailers = emit_trailing_headers_status(status)
+    assert_equal(len(trailers), 3)
+    assert_equal(trailers[2][0], String("grpc-status-details-bin"))
+    assert_equal(trailers[2][1], String("3q2+7w=="))
+
+
 def test_run_unary_call_error_status_emits_empty_body() raises:
     var payload = List[UInt8]()
     payload.append(UInt8(0xAA))
@@ -492,4 +539,7 @@ def main() raises:
     test_run_unary_call_invalid_method_emits_invalid_argument()
     test_run_unary_call_truncated_lpm_emits_invalid_argument()
     test_run_unary_call_handler_raise_emits_internal()
-    print("test_grpc_server: 19 passed")
+    test_emit_trailing_headers_status_ok_minimal()
+    test_emit_trailing_headers_status_err_with_message()
+    test_emit_trailing_headers_status_with_details_bin()
+    print("test_grpc_server: 22 passed")

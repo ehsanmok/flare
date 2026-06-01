@@ -156,6 +156,27 @@ def test_status_ok_and_err_constructors() raises:
     assert_equal(nf.message, String("missing"))
 
 
+def test_status_with_details_round_trip() raises:
+    """``with_details`` attaches an opaque byte payload that the
+    trailer emitter base64-encodes for ``grpc-status-details-bin``.
+    The bytes round-trip through ``Optional[List[UInt8]]`` without
+    mutation; absence is the default.
+    """
+    var base = GrpcStatus.err(GRPC_STATUS_INTERNAL, String("see details"))
+    assert_false(Bool(base.details))
+    var payload = List[UInt8]()
+    payload.append(UInt8(0xDE))
+    payload.append(UInt8(0xAD))
+    payload.append(UInt8(0xBE))
+    payload.append(UInt8(0xEF))
+    var with_d = base.with_details(payload^)
+    assert_true(Bool(with_d.details))
+    var bytes = with_d.details.value().copy()
+    assert_equal(len(bytes), 4)
+    assert_equal(bytes[0], UInt8(0xDE))
+    assert_equal(bytes[3], UInt8(0xEF))
+
+
 def test_status_names() raises:
     """The status-code names are surface-visible (logs, metrics,
     tracer spans) and clients depend on them being stable
@@ -186,5 +207,6 @@ def main() raises:
     test_compression_flag_reserved_bits()
     test_status_numeric_constants()
     test_status_ok_and_err_constructors()
+    test_status_with_details_round_trip()
     test_status_names()
     print("test_grpc: OK")

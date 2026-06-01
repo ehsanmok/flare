@@ -52,6 +52,7 @@ References:
 from std.collections import List, Optional
 from std.memory import Span
 
+from flare.crypto.base64 import base64_encode
 from flare.http.proto.ascii import ascii_lower
 from flare.http.simd_parsers import simd_memmem
 
@@ -61,7 +62,7 @@ from .framing import (
     decode_grpc_message,
     encode_grpc_message,
 )
-from .metadata import GrpcMetadata
+from .metadata import GrpcMetadata, GrpcMetadataEntry
 from .status import (
     GRPC_STATUS_OK,
     GRPC_STATUS_INTERNAL,
@@ -404,6 +405,44 @@ def encode_unary_response(
     a follow-up line item alongside the decompression path.
     """
     return encode_grpc_message(Span[UInt8, _](response_bytes), compressed=False)
+
+
+def emit_trailing_headers_status(
+    status: GrpcStatus,
+) -> List[Tuple[String, String]]:
+    """Return the framework-controlled trailer entries for a
+    completed gRPC call.
+
+    Always emits ``grpc-status`` (the wire-level integer outcome).
+    Emits ``grpc-message`` when ``status.message`` is non-empty
+    (clients use it for diagnostics only). Emits
+    ``grpc-status-details-bin`` when ``status.details`` carries a
+    payload, RFC 4648 §4 base64-encoded per gRPC PROTOCOL-HTTP2.
+
+    The caller (the H2 trailer encoder) appends the application
+    trailing metadata after these framework-owned entries; this
+    helper does not look at :class:`GrpcMetadata`.
+
+    Returning ``List[Tuple[String, String]]`` keeps the trailer
+    emitter sans-I/O: the H2 driver decides how to serialise the
+    pairs onto a HEADERS frame (HPACK literal-without-indexing,
+    QPACK, h3 SETTINGS-aware, etc.).
+    """
+    var trailers = List[Tuple[String, String]]()
+    trailers.append(
+        Tuple[String, String](String("grpc-status"), String(status.code))
+    )
+    if status.message.byte_length() > 0:
+        trailers.append(
+            Tuple[String, String](String("grpc-message"), status.message.copy())
+        )
+    if Bool(status.details):
+        var details_bytes = status.details.value().copy()
+        var encoded = base64_encode(Span[UInt8, _](details_bytes))
+        trailers.append(
+            Tuple[String, String](String("grpc-status-details-bin"), encoded^)
+        )
+    return trailers^
 
 
 def _outcome_from_reply(var reply: GrpcUnaryReply) -> GrpcCallOutcome:

@@ -17,7 +17,10 @@ References:
 - https://grpc.github.io/grpc/core/md_doc_statuscodes.html
 """
 
-from std.collections import Optional
+from std.collections import List, Optional
+from std.memory import Span
+
+from flare.crypto.base64 import base64_encode
 
 
 # Canonical status code constants. The numeric values are stable
@@ -44,25 +47,44 @@ comptime GRPC_STATUS_UNAUTHENTICATED: Int = 16
 
 @fieldwise_init
 struct GrpcStatus(Copyable, Movable):
-    """An RPC outcome: numeric code + optional human message.
+    """An RPC outcome: numeric code + optional human message + optional binary detail.
 
     Status codes are stable across implementations -- a Mojo
     handler returning ``GRPC_STATUS_NOT_FOUND`` will surface as
     the same code in a Go / Python / C++ client. The optional
     ``message`` carries free-text context for diagnostics; it
     must not be used for branching by the client.
+
+    ``details`` carries the optional ``grpc-status-details-bin``
+    payload (RFC 4648 §4 base64 on the wire; opaque bytes here so
+    the application can attach a serialised
+    ``google.rpc.Status`` proto, a typed error envelope, or any
+    other binary frame the client knows how to parse).
     """
 
     var code: Int
     var message: String
+    var details: Optional[List[UInt8]]
 
     @staticmethod
     def ok() -> Self:
-        return Self(code=GRPC_STATUS_OK, message=String(""))
+        return Self(code=GRPC_STATUS_OK, message=String(""), details=None)
 
     @staticmethod
     def err(code: Int, message: String) -> Self:
-        return Self(code=code, message=message)
+        return Self(code=code, message=message, details=None)
+
+    def with_details(self, var details: List[UInt8]) -> Self:
+        """Return a copy of this status with the ``grpc-status-
+        details-bin`` payload attached. The caller owns the bytes;
+        the trailer emitter base64-encodes them when serialising
+        the trailing HEADERS field set.
+        """
+        return Self(
+            code=self.code,
+            message=self.message,
+            details=Optional[List[UInt8]](details^),
+        )
 
     def is_ok(self) -> Bool:
         return self.code == GRPC_STATUS_OK
