@@ -217,6 +217,50 @@ def test_parse_request_headers_timeout_units() raises:
     assert_equal(ctx_s.deadline_us, UInt64(5_000_000))
 
 
+def test_parse_request_headers_te_case_insensitive() raises:
+    """RFC 9110 §10.1.4: TE field tokens compare case-insensitively;
+    the adapter must accept ``Trailers`` / ``TRAILERS`` / ``trailers``
+    interchangeably and accept ``trailers`` anywhere in the list (so
+    a client that emits ``gzip, trailers`` is well-formed).
+    """
+    var ctx_mixed = parse_request_headers(
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("Trailers"),
+        )
+    )
+    assert_equal(ctx_mixed.path, "/svc/m")
+    var ctx_upper = parse_request_headers(
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("TRAILERS"),
+        )
+    )
+    assert_equal(ctx_upper.path, "/svc/m")
+    var ctx_after = parse_request_headers(
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("gzip, trailers"),
+        )
+    )
+    assert_equal(ctx_after.path, "/svc/m")
+    var ctx_before = parse_request_headers(
+        _headers(
+            String("POST"),
+            String("/svc/m"),
+            String("application/grpc"),
+            String("trailers, gzip"),
+        )
+    )
+    assert_equal(ctx_before.path, "/svc/m")
+
+
 def test_parse_request_headers_missing_optionals_default() raises:
     """A minimal headers shape with no ``grpc-timeout`` or
     ``grpc-accept-encoding`` MUST still produce a valid context
@@ -351,6 +395,7 @@ def main() raises:
     test_parse_request_headers_rejects_path_without_method()
     test_parse_request_headers_parses_timeout()
     test_parse_request_headers_timeout_units()
+    test_parse_request_headers_te_case_insensitive()
     test_parse_request_headers_missing_optionals_default()
     test_stitch_single_lpm_frame()
     test_stitch_multiple_lpm_frames()
@@ -358,4 +403,4 @@ def main() raises:
     test_stitch_rejects_compressed_frame()
     test_run_unary_call_echo()
     test_run_unary_call_error_status_emits_empty_body()
-    print("test_grpc_server: 15 passed")
+    print("test_grpc_server: 16 passed")

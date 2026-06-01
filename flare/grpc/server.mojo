@@ -52,6 +52,9 @@ References:
 from std.collections import List, Optional
 from std.memory import Span
 
+from flare.http.proto.ascii import ascii_lower
+from flare.http.simd_parsers import simd_memmem
+
 from .framing import (
     GRPC_COMPRESSION_NONE,
     GrpcMessage,
@@ -262,25 +265,13 @@ def parse_request_headers(
         raise Error("grpc adapter: :path missing method segment")
     if not _is_grpc_content_type(headers.content_type):
         raise Error("grpc adapter: content-type must be application/grpc")
-    var has_trailers = False
-    var te_bytes = headers.te.as_bytes()
-    var n = len(te_bytes)
-    var idx = 0
-    while idx + 8 <= n:
-        if (
-            te_bytes[idx] == UInt8(ord("t"))
-            and te_bytes[idx + 1] == UInt8(ord("r"))
-            and te_bytes[idx + 2] == UInt8(ord("a"))
-            and te_bytes[idx + 3] == UInt8(ord("i"))
-            and te_bytes[idx + 4] == UInt8(ord("l"))
-            and te_bytes[idx + 5] == UInt8(ord("e"))
-            and te_bytes[idx + 6] == UInt8(ord("r"))
-            and te_bytes[idx + 7] == UInt8(ord("s"))
-        ):
-            has_trailers = True
-            break
-        idx += 1
-    if not has_trailers:
+    # RFC 9110 §10.1.4: TE field values are tokens and tokens compare
+    # case-insensitively. Canonicalise via the ASCII-lowercaser and use
+    # ``simd_memmem`` for the contains-``trailers`` probe so values such
+    # as ``Trailers``, ``TRAILERS``, and ``gzip, trailers`` all pass.
+    var lowered = ascii_lower(headers.te)
+    var needle = String("trailers")
+    if simd_memmem(lowered.as_bytes(), needle.as_bytes()) < 0:
         raise Error("grpc adapter: te header must include 'trailers'")
     var deadline_us = UInt64(0)
     if Bool(headers.timeout):
