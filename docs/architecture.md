@@ -5,13 +5,12 @@ modules at the same layer don't import each other. The runtime scheduler
 is generic over a `Frontend` trait, so the runtime → http edge that used
 to exist is now an http → runtime edge (the HTTP worker bring-up lives
 in `flare.http.multicore` and plugs into `Scheduler[F]` via the trait).
-One known intra-package edge remains as cleanup work: `flare.http`
-re-imports `flare.http2` for the unified reactor dispatch (the cycle is
-broken by extracting wire types to `flare.http.wire` in a later
-iteration; see the `# TODO` headers in
-`flare/http/_server_reactor_impl.mojo` and
-`flare/http/_unified_reactor_impl.mojo`). No global state, no hidden
-runtime.
+The historic intra-package edge between `flare.http` and `flare.http2`
+is now broken: shared wire types (`Request`, `Response`, `HeaderMap`,
+`Method`, `Status`) live in the neutral `flare.http.wire` re-export
+layer, and both `flare.http` and `flare.http2` import from there
+instead of each other. The lint `pixi run check-no-http-http2-cycle`
+enforces the rule. No global state, no hidden runtime.
 
 ```
 flare.io       BufReader (Readable trait, generic buffered reader)
@@ -104,10 +103,18 @@ flare.quic     Sans-I/O QUIC v1 codec primitives + pure state
                connection + stream state machines (RFC 9000 §3,
                §10, §13); CUBIC + HyStart++ congestion
                controller + RFC 9002 §7.7 pacing budget as pure
-               functions over a `CcState` value. No socket I/O,
-               no TLS handshake -- the reactor + TLS-on-UDP FFI
-               that drive the wire land alongside the QUIC
-               server in a follow-up release.
+               functions over a `CcState` value. The
+               `CongestionController` trait pairs a CUBIC default
+               (production) with a Reno fallback (deterministic
+               tests) per RFC 9002 Appendix B.
+               `flare.quic.crypto` carries the RFC 9001 §5 +
+               RFC 5869 HKDF key schedule + the `QuicCrypto`
+               trait that abstracts the AEAD backend; the
+               OpenSSL implementation behind the trait is in
+               flight. `flare.quic.server` defines the
+               `QuicListener` + `QuicConnection` +
+               `ConnectionIdTable` carriers; the UDP read loop +
+               per-datagram dispatch land in the next pass.
 flare.h3       Sans-I/O HTTP/3 codec primitives: frame codec +
                SETTINGS payload (RFC 9114 §7); request-stream
                state machine (`H3RequestReader` + the
@@ -122,8 +129,11 @@ flare.h3       Sans-I/O HTTP/3 codec primitives: frame codec +
                pseudo-header validation. The encoders accept a
                `mut out: List[UInt8]` so the caller threads a
                per-connection buffer through repeated writes.
-               Server reactor lives with the QUIC reactor in a
-               follow-up release.
+               The `H3Connection` driver carrier
+               (`flare.h3.server`) lands as a scaffold with
+               per-stream `H3RequestReader` allocation +
+               GOAWAY lifecycle; the per-stream feed / take
+               wiring is the focused follow-up.
 flare.qpack    Sans-I/O static-only QPACK encoder + decoder
                (RFC 9204). Static table per Appendix A (99
                entries), literal field lines with literal
@@ -134,6 +144,10 @@ flare.crypto   HMAC-SHA256, base64url codec
 flare.tls      TLS 1.2/1.3 (OpenSSL); TlsAcceptor + ALPN +
                session resumption (RFC 5077 tickets / RFC 8446
                §4.6.1 NewSessionTicket capture and replay).
+               The QUIC-side binding (`RustlsQuicAcceptor` +
+               `RustlsQuicSession`) sits behind a separate
+               Rust-backed FFI; the OpenSSL path stays the
+               canonical h1 / h2 TLS acceptor.
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.uds      UnixListener + UnixStream (AF_UNIX sidecar IPC)

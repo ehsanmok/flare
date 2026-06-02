@@ -220,17 +220,25 @@ own dispatch loop.
 ## HTTP/3 + QUIC codec primitives
 
 Sans-I/O codec primitives for QUIC v1 (RFC 9000) and HTTP/3
-(RFC 9114). Codecs and pure state machines only — the QUIC
-reactor and the TLS-on-UDP FFI that drive the wire I/O land
-alongside the QUIC server in a follow-up release. The codecs
-are byte-clean and covered by `fuzz-quic-varint`,
+(RFC 9114). The codecs, the pure state machines, and the
+typed reactor + driver scaffolds ship; the wire I/O paths
+(the OpenSSL AEAD backend behind `QuicCrypto`, the rustls
+binding behind `RustlsQuicAcceptor`, the QUIC reactor UDP
+read loop, and the per-stream H3 dispatch) are flagged as
+"raises pending wiring" in the structs themselves so callers
+get a loud immediate failure rather than a silent no-op.
+
+The codec layer is byte-clean and covered by `fuzz-quic-varint`,
 `fuzz-quic-long-header`, `fuzz-quic-frame-decode`,
 `fuzz-quic-transport-params`, `fuzz-h3-frame`, and
 `fuzz-qpack-decode` (200 K runs each, zero crashes); see the
 [fuzz coverage table](#testing-and-fuzz-coverage). The codec
 demo at [`quic_codec_demo.mojo`](../examples/advanced/quic_codec_demo.mojo)
 exercises varint, frame codec, transport parameters, state
-machine, and congestion controller round-trips end-to-end.
+machine, and congestion controller round-trips end-to-end. The
+scaffold demo at [`http3_server_scaffold.mojo`](../examples/advanced/http3_server_scaffold.mojo)
+walks the `H3Connection` driver through its lifecycle (open /
+close / GOAWAY / deferred dispatch).
 
 | Surface | Where |
 |---|---|
@@ -241,6 +249,12 @@ machine, and congestion controller round-trips end-to-end.
 | QUIC transport parameters (RFC 9000 §18): `TransportParameters`, `encode_transport_parameters`, `decode_transport_parameters`, `empty_transport_parameters`; all `TP_ID_*` identifiers and defaults (`DEFAULT_MAX_UDP_PAYLOAD_SIZE`, `DEFAULT_ACK_DELAY_EXPONENT`, `DEFAULT_MAX_ACK_DELAY`, `DEFAULT_ACTIVE_CONNECTION_ID_LIMIT`) | `flare.quic.transport_params` |
 | QUIC connection + stream state machines (RFC 9000 §3, §10, §13): `Connection`, `Stream`, `ConnectionEvents`, `handle_frame`, `mark_handshake_complete`, `is_idle_timeout_expired`, `connection_close`, `new_connection`, `new_stream`, `empty_events`; `CONN_STATE_*` and `STREAM_STATE_*` enums | `flare.quic.state` |
 | QUIC congestion control (RFC 9438 CUBIC + RFC 9406 HyStart++ + RFC 9002 §7.7 pacing) as pure functions over a `CcState` value: `cc_init`, `on_packet_sent`, `on_ack_received`, `on_packets_lost`, `on_round_start`, `pacing_budget`, `pacing_rate_bytes_per_second`, `can_send` | `flare.quic.cc` |
+| QUIC congestion controller trait (RFC 9438 CUBIC default + RFC 9002 Appendix B Reno fallback): `CongestionController` trait, `CubicController`, `RenoController`, `CcChoice` carrier. Picks deterministic Reno for tests and CUBIC for production via a single config field | `flare.quic.cc` |
+| QUIC initial-secret + AEAD key schedule (RFC 9001 §5 + RFC 5869 HKDF): `hkdf_extract`, `hkdf_expand`, `hkdf_expand_label`, `derive_initial_secrets`, `QuicAead` enum, `QuicCrypto` trait, `StubQuicCrypto`. The OpenSSL AEAD backend behind the trait is the focused follow-up commit; the key schedule is RFC 9001 Appendix A.1 byte-exact and pinned by `tests/quic/test_crypto.mojo` | `flare.quic.crypto` |
+| QUIC server reactor scaffold: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). The UDP read loop + per-datagram dispatch is the Track Q3 wiring follow-up; the carrier shapes are pinned | `flare.quic.server` |
+| HTTP/3 server driver scaffold: `H3Connection` (per-connection driver mounted on `Handler`), `H3ConnectionConfig` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `H3StreamType` (RFC 9114 §6.2 codepoints). Per-stream feed + take raise pending Track Q4 wiring | `flare.h3.server` |
+| ALPN -> wire-protocol dispatcher: `WireProtocol` codepoints (UNKNOWN / HTTP_1_1 / H2C / HTTP_2 / HTTP_3), `ALPN_HTTP_1_1` / `ALPN_HTTP_2` / `ALPN_HTTP_3` identifiers, `dispatch_alpn`, `dispatch_h2c_upgrade`, `negotiate_alpn`, `wire_protocol_name`. The pure decision function the reactor consults after a TLS handshake completes | `flare.http.alpn_dispatch` |
+| rustls QUIC binding scaffold: `RustlsQuicConfig`, `RustlsQuicAcceptor`, `RustlsQuicSession`, `RustlsQuicError`, `QuicEncryptionLevel`. The Rust crate behind the binding is the Track Q2 wiring follow-up; the FFI surface is pinned | `flare.tls.rustls_quic` |
 | HTTP/3 frame codec (RFC 9114 §7): `H3Frame`, `H3FrameType`, `encode_h3_frame`, `decode_h3_frame`; frame-type constants `H3_FRAME_TYPE_{DATA,HEADERS,CANCEL_PUSH,SETTINGS,PUSH_PROMISE,GOAWAY,MAX_PUSH_ID}` | `flare.h3.frame` |
 | HTTP/3 SETTINGS payload (RFC 9114 §7.2.4): `H3Setting`, `encode_h3_settings`, `decode_h3_settings`; standard identifiers `H3_SETTINGS_{QPACK_MAX_TABLE_CAPACITY,MAX_FIELD_SECTION_SIZE,QPACK_BLOCKED_STREAMS,ENABLE_CONNECT_PROTOCOL}` | `flare.h3.frame` |
 | HTTP/3 request-stream state machine (RFC 9114 §4 + §7): `H3RequestReader`, `H3RequestEventHandler`, `feed_into[H]`; fires `on_headers` / `on_data` / `on_trailers` / `on_unknown_frame` / `on_protocol_error` callbacks on a caller-supplied handler, returns the byte count consumed (`0` == NEEDS_MORE), and tracks the INIT / BODY / TRAILERS / DONE phases via the `H3_REQUEST_STATE_*` tags | `flare.h3.request_reader` |
@@ -290,6 +304,7 @@ is the next iteration.
 | `permessage-deflate` (RFC 7692) — `PermessageDeflateConfig`, `compress_message` / `decompress_message`, `Sec-WebSocket-Extensions` parser + emitter, `negotiate_permessage_deflate`; default invariant: `no_context_takeover` on both sides + 16 MiB per-message decompressed cap | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo), `flare.ws.permessage_deflate` |
 | `permessage-deflate` context-takeover (RFC 7692 §7.1 default mode) — `PermessageDeflateContext`: persistent compressor + decompressor pair, LZ77 sliding window carries between messages, fuzz-covered lifecycle (`fuzz-pmd-context` × 3 targets, 350K runs) | `flare.ws.permessage_deflate.PermessageDeflateContext` |
 | `WsClient.connect_prefer_h2(url, tls_config)` — ALPN-aware factory: advertises `["h2", "http/1.1"]`; if peer selects `http/1.1` (or none), delegates to the existing H1 Upgrade handshake; if peer selects `h2`, raises pointing at the (in-flight) full H2-tunnel runtime | [`tests/ws/test_ws_prefer_h2.mojo`](../tests/ws/test_ws_prefer_h2.mojo), `flare.ws.client` |
+| `WsAutoClient` + `WsAutoClientConfig` + `WsWireChoice` + `decide_wire` — high-level dispatcher that picks the carrying wire after the TLS handshake completes. Pure decision function consults URL scheme, `prefer_h2`, negotiated ALPN, and the peer's `ENABLE_CONNECT_PROTOCOL` SETTINGS flag (RFC 8441 §3); routes to HTTP/1.1, HTTP/2 (RFC 8441 Extended CONNECT), or FAILED. Runtime hand-off to `WsClient` / `WsOverH2Stream` is the focused follow-up | [`tests/ws/test_ws_autoclient.mojo`](../tests/ws/test_ws_autoclient.mojo), `flare.ws.auto_client` |
 
 ## TLS
 

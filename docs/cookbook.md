@@ -88,6 +88,8 @@ natural.
 | [`client_pool.mojo`](../examples/advanced/client_pool.mojo) | `HttpClient.with_pool` — keyed idle reuse, per-origin caps, stale-conn retry |
 | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo) | RFC 8441 WebSockets-over-HTTP/2 (Extended CONNECT + `:protocol=websocket`) |
 | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo) | RFC 7692 `permessage-deflate` extension: offer / negotiate / compress / decompress |
+| [`alpn_dispatch_demo.mojo`](../examples/advanced/alpn_dispatch_demo.mojo) | ALPN -> wire-protocol dispatcher decisions: h1 / h2c / h2 / h3, including RFC 7301 §3.2 server-preference negotiation |
+| [`http3_server_scaffold.mojo`](../examples/advanced/http3_server_scaffold.mojo) | `H3Connection` driver lifecycle walkthrough (open / close / GOAWAY / deferred dispatch) |
 
 ---
 
@@ -139,6 +141,9 @@ natural.
 | Reuse markup via template inheritance (`{% block %}` / `{% extends %}`) | [`template_inheritance.mojo`](../examples/intermediate/template_inheritance.mojo) |
 | Retry idempotent requests + bound handler latency | [`reliability.mojo`](../examples/intermediate/reliability.mojo) |
 | Cache GET responses with RFC 9111 freshness + revalidation | [`http_cache.mojo`](../examples/intermediate/http_cache.mojo) |
+| Route inbound TLS connections to h1 / h2 / h3 by ALPN | [`alpn_dispatch_demo.mojo`](../examples/advanced/alpn_dispatch_demo.mojo) |
+| Walk the HTTP/3 server driver scaffold (open / close / GOAWAY) | [`http3_server_scaffold.mojo`](../examples/advanced/http3_server_scaffold.mojo) |
+| Pick the WebSocket carrier wire by negotiated ALPN | `flare.ws.WsAutoClient` + `flare.ws.decide_wire` (`tests/ws/test_ws_autoclient.mojo`) |
 
 ## Reading data from a `Request`
 
