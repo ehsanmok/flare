@@ -501,7 +501,11 @@ struct H2Connection(Defaultable, Movable):
         """Return stream ids whose request is fully buffered."""
         var ids = List[Int]()
         for entry in self.conn.streams.items():
-            var s = entry.value.copy()
+            # ``StreamSlab.items()`` returns ``List[Tuple[Int, Stream]]``;
+            # ``entry[1]`` is the per-stream record. Stream is copied
+            # eagerly inside ``items()`` so this loop never aliases the
+            # slab's owned storage.
+            var s = entry[1].copy()
             if s.headers_complete and s.data_complete:
                 ids.append(s.id)
         return ids^

@@ -40,6 +40,7 @@ from .frame import (
     encode_frame,
 )
 from .hpack import HpackDecoder, HpackEncoder, HpackHeader
+from .stream_slab import StreamSlab
 
 
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
@@ -192,7 +193,11 @@ struct Stream(Copyable, Defaultable, Movable):
 struct Connection(Copyable, Defaultable, Movable):
     """Per-connection HTTP/2 state."""
 
-    var streams: Dict[StreamId, Stream]
+    var streams: StreamSlab[Stream]
+    """Per-connection stream table. See :mod:`flare.http2.stream_slab`
+    for the design rationale -- dense small-int keys hit a
+    flat-array fast path; large IDs spill into a Dict overflow.
+    Drop-in API parity with the prior ``Dict[StreamId, Stream]``."""
     var hpack_decoder: HpackDecoder
     var hpack_encoder: HpackEncoder
     var max_frame_size: Int
@@ -244,7 +249,7 @@ struct Connection(Copyable, Defaultable, Movable):
     than scanning every open stream."""
 
     def __init__(out self):
-        self.streams = Dict[StreamId, Stream]()
+        self.streams = StreamSlab[Stream]()
         self.hpack_decoder = HpackDecoder()
         self.hpack_encoder = HpackEncoder()
         self.max_frame_size = H2_DEFAULT_FRAME_SIZE
