@@ -90,6 +90,15 @@ ASAN_TESTS=(
   "tests/tls/test_tls_resume.mojo"               # v0.7 TLS resumption: TlsSession lifetime + new_session_cb
   "tests/ws/test_ws.mojo"                       # SHA-1 FFI via compute_accept_key
   "tests/ws/test_ws_permessage_deflate.mojo"    # v0.7 — RFC 7692 codec (raw deflate / inflate FFI borrow)
+  # Track Q1-W QUIC AEAD + HP mask FFI (RFC 9001 §5.3 / §5.4).
+  # The OpenSslQuicCrypto carrier calls EVP_CIPHER_CTX_new/free
+  # per encrypt/decrypt/mask invocation; ASan verifies the C-side
+  # lifecycle is leak-free and the Mojo-side borrow helpers keep
+  # libflare_tls.so live across the FFI call.
+  "tests/quic/test_aead_ffi.mojo"                 # raw FFI thunks
+  "tests/quic/test_hp_mask_ffi.mojo"              # raw FFI thunks
+  "tests/quic/test_openssl_quic_crypto.mojo"      # Mojo trait surface
+  "tests/quic/test_rfc9001_appendix_a.mojo"       # full RFC vectors
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)
