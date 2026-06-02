@@ -119,6 +119,13 @@ ASAN_TESTS=(
   # (Rust-side Box<Acceptor> / Box<Session> lifetime managed
   # by flare_rustls_quic_acceptor_free / _session_free).
   "tests/tls/test_rustls_quic_handshake.mojo"
+  # Track Q3-W commit 5/5 -- QUIC server reactor over loopback
+  # UDP. Drives the full QuicListener.bind -> tick ->
+  # dispatch_datagram -> handle_packet -> idle-timer path with
+  # real sockets so ASan validates the QuicConnection /
+  # ConnectionIdTable / TimerWheel lifetime + the
+  # OpenSslQuicCrypto FFI on the inbound decrypt hot path.
+  "tests/quic/test_quic_loopback_integration.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)
