@@ -223,6 +223,12 @@ from .crypto import (
     hkdf_expand_label_empty_context,
     hkdf_extract,
 )
+from .protection import (
+    UnprotectedPacket,
+    decode_packet_number,
+    protect_initial_packet,
+    unprotect_initial_packet,
+)
 from .server import (
     ConnectionIdTable,
     QuicConnection,

@@ -64,7 +64,14 @@ from .packet import (
     parse_long_header,
     parse_short_header,
 )
-from .state import Connection, new_connection
+from .protection import unprotect_initial_packet
+from .state import (
+    Connection,
+    ConnectionEvents,
+    empty_events,
+    handle_frame_buf,
+    new_connection,
+)
 from ..tls.rustls_quic import RustlsQuicConfig
 
 
@@ -217,6 +224,66 @@ struct QuicConnection(Copyable, Movable):
         self.peer_cid = peer_cid.copy()
         self.cc_choice = cc_choice
         self.alive = True
+
+    def handle_packet(
+        mut self,
+        datagram: Span[UInt8, _],
+        now_us: UInt64,
+        aead_choice: Int = QuicAead.AES_128_GCM,
+    ) raises -> ConnectionEvents:
+        """Drive one inbound datagram through the per-packet
+        decrypt + frame dispatch pipeline.
+
+        Long-header Initial packets unprotect through
+        :func:`flare.quic.protection.unprotect_initial_packet`
+        with the server-side reader role and the connection's
+        ``local_cid`` (which equals the client-chosen DCID at the
+        handshake-accept moment). Decrypted frame bytes feed
+        :func:`flare.quic.state.handle_frame_buf`, which advances
+        the sans-I/O state machine and reports back through
+        :class:`flare.quic.state.ConnectionEvents`.
+
+        Long-header Handshake + 0-RTT packets and short-header
+        1-RTT packets require keys derived from the TLS handshake;
+        those land with commits 3/5-5/5 of this track once the
+        rustls bridge surfaces per-encryption-level secrets. For
+        now they return empty :class:`ConnectionEvents` so the
+        dispatch loop doesn't crash on legitimate post-handshake
+        traffic.
+        """
+        var events = empty_events()
+        if len(datagram) < 1:
+            return events^
+        var first = Int(datagram[0])
+        var is_long = (first & 0x80) != 0
+        if not is_long:
+            return events^
+        var lh: LongHeader
+        try:
+            lh = parse_long_header(datagram)
+        except:
+            return events^
+        if lh.packet_type != PACKET_TYPE_INITIAL:
+            return events^
+        var up = unprotect_initial_packet(
+            datagram,
+            self.local_cid,
+            is_server=True,
+            largest_received_pn=self.conn.largest_received_packet,
+            aead_choice=aead_choice,
+        )
+        var cursor = 0
+        var payload = Span[UInt8, _](up.payload)
+        while cursor < len(payload):
+            var consumed = handle_frame_buf(
+                self.conn, payload[cursor:], now_us, events
+            )
+            if consumed <= 0:
+                break
+            cursor += consumed
+        if up.packet_number > self.conn.largest_received_packet:
+            self.conn.largest_received_packet = up.packet_number
+        return events^
 
 
 # -- Connection ID table ------------------------------------------------
@@ -382,11 +449,17 @@ struct QuicListener(Movable):
         extracts the Destination Connection ID, looks it up in
         :attr:`cid_table`, and either:
 
-        * Returns the existing slot for a known CID. Commit 2/5
-          of this track threads the per-packet decrypt + state
-          machine through here; today the dispatch just routes.
+        * Routes the datagram to the existing slot via
+          :meth:`QuicConnection.handle_packet` -- the per-packet
+          decrypt + state-machine drive (commit 2/5 of this
+          track). Decryption failures are caught and converted
+          to silent drops so a single bad sender can't poison
+          the listener.
         * Allocates a new slot for an Initial packet with an
-          unknown DCID (the QUIC accept path -- RFC 9000 §7).
+          unknown DCID (the QUIC accept path -- RFC 9000 §7),
+          then drives the same handle_packet path on the new
+          connection so the first Initial advances the state
+          machine.
         * Returns ``-1`` to drop short-header packets with
           unknown DCIDs (the stateless-reset path lands in a
           later cycle; for now those datagrams are silently
@@ -396,9 +469,40 @@ struct QuicListener(Movable):
             return -1
         var first = Int(datagram[0])
         var is_long = (first & 0x80) != 0
+        var slot: Int
         if is_long:
-            return self._dispatch_long(datagram, peer)
-        return self._dispatch_short(datagram, peer)
+            slot = self._dispatch_long(datagram, peer)
+        else:
+            slot = self._dispatch_short(datagram, peer)
+        if slot >= 0 and slot < len(self.connections):
+            self._handle_inbound(slot, datagram)
+        return slot
+
+    def _handle_inbound(mut self, slot: Int, datagram: Span[UInt8, _]) raises:
+        """Drive ``QuicConnection.handle_packet`` on the matched
+        slot. Caught + dropped here:
+
+        * Decryption failures (bad AEAD tag, malformed cipher,
+          wrong key) -- the QUIC protocol mandates silent drop
+          per RFC 9001 §5.2.
+        * Frame parse failures inside the decrypted payload --
+          again silent drop; the connection stays usable for
+          subsequent packets that decode cleanly.
+
+        Other state-machine errors propagate to the caller so
+        the reactor can log + close the connection.
+        """
+        var now_us = UInt64(0)  # Wall-clock driven from commit 3/5
+        var conn = self.connections[slot].copy()
+        try:
+            var _events = conn.handle_packet(datagram, now_us)
+        except:
+            # Silent drop on decrypt + parse failures
+            # (RFC 9001 §5.2). The connection slot stays alive
+            # for retransmits + subsequent valid packets.
+            self.connections[slot] = conn^
+            return
+        self.connections[slot] = conn^
 
     def _dispatch_long(
         mut self, datagram: Span[UInt8, _], peer: SocketAddr
