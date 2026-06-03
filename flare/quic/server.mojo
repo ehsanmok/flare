@@ -112,10 +112,68 @@ from ..tls.rustls_quic import (
 from ..tls._rustls_quic_ffi import (
     _do_accept,
     _do_feed_crypto,
+    _do_have_keys,
     _do_is_handshake_complete,
     _do_session_free,
     _do_take_crypto,
 )
+
+
+def _inbound_level_for_datagram(datagram: Span[UInt8, _]) -> Int:
+    """Derive the QUIC encryption level of an inbound datagram
+    from its first byte.
+
+    The MSB of the first byte is the header-form bit: 1 == long
+    header, 0 == short header.  Long-header type bits 4-5 encode
+    the packet type per RFC 9000 §17.2 (0=Initial, 1=0-RTT,
+    2=Handshake, 3=Retry).  Short-header packets are always 1-RTT
+    (RFC 9000 §17.3).
+
+    Returns the matching :data:`QuicEncryptionLevel` codepoint.
+    Empty datagrams and Retry packets fall back to INITIAL --
+    Retry doesn't carry CRYPTO so the level choice is moot for
+    the rustls dispatch (Retry decode is a separate path that
+    never reaches `_dispatch_crypto_frames`).
+    """
+    if len(datagram) < 1:
+        return QuicEncryptionLevel.INITIAL
+    var first = Int(datagram[0])
+    var is_long = (first & 0x80) != 0
+    if not is_long:
+        return QuicEncryptionLevel.APPLICATION
+    var pt = (first & 0x30) >> 4
+    if pt == 0:
+        return QuicEncryptionLevel.INITIAL
+    if pt == 1:
+        return QuicEncryptionLevel.EARLY_DATA
+    if pt == 2:
+        return QuicEncryptionLevel.HANDSHAKE
+    return QuicEncryptionLevel.INITIAL  # Retry -- moot for CRYPTO dispatch
+
+
+def _ready_sentinel() -> List[UInt8]:
+    """Single-byte readiness marker stamped onto
+    :attr:`QuicConnection.rx_handshake_secret` /
+    `.tx_handshake_secret` / `.rx_1rtt_secret` / `.tx_1rtt_secret`
+    by :meth:`QuicListener._dispatch_crypto_frames` when rustls's
+    `KeyChange` pump installs per-level `Keys`.
+
+    Why a sentinel rather than the real traffic secret bytes:
+    rustls 0.23's `quic::Secrets` exposes the client/server
+    traffic secrets as `pub(crate)` fields (sealed); the
+    `quic::Keys` accessors only hand back trait-object
+    `Box<dyn PacketKey>` / `Box<dyn HeaderProtectionKey>`
+    handles.  Phase F routes post-Initial AEAD through those
+    trait-object handles via
+    :class:`flare.tls.RustlsQuicSession.packet_encrypt` +
+    `.packet_decrypt` + `.header_encrypt` + `.header_decrypt`,
+    so the Mojo side never sees raw traffic secrets.  The
+    sentinel keeps the `len(rx_*_secret) == 0` gates that v0.8
+    shipped without churning the public surface.
+    """
+    var out = List[UInt8]()
+    out.append(UInt8(0xFF))
+    return out^
 
 
 # -- Monotonic clock helper --------------------------------------------
@@ -821,15 +879,34 @@ struct QuicListener(Movable):
     :attr:`tls_acceptor._lib` so the .so stays mapped across
     every feed-crypto / take-crypto roundtrip."""
     var tls_egress_queues: List[List[UInt8]]
-    """Per-slot outbound CRYPTO byte queue. Q9-W lands the
-    drain side: each successful :meth:`feed_crypto` is followed
-    by :meth:`take_crypto` and the resulting bytes append here.
-    Track Q11-W drains this queue inside :meth:`_drain_and_send`
-    -- the bytes are wrapped in a QUIC CRYPTO frame, packaged
-    inside an Initial-level packet, AEAD-protected with
-    :func:`protect_initial_packet`, and emitted via
-    :meth:`send_to`. Cleared after every successful drain.
-    """
+    """Per-slot outbound CRYPTO byte queue at the INITIAL level.
+    Q9-W lands the drain side: each successful :meth:`feed_crypto`
+    is followed by :meth:`take_crypto` and the resulting bytes
+    append here.  Track Q11-W drains this queue inside
+    :meth:`_drain_and_send` -- the bytes are wrapped in a QUIC
+    CRYPTO frame, packaged inside an Initial-level packet,
+    AEAD-protected with :func:`protect_initial_packet`, and
+    emitted via :meth:`send_to`. Cleared after every successful
+    drain."""
+    var tls_handshake_egress_queues: List[List[UInt8]]
+    """Per-slot outbound CRYPTO byte queue at the HANDSHAKE
+    level. Populated by :meth:`_dispatch_crypto_frames` after
+    rustls emits its first ``KeyChange::Handshake`` (Phase F
+    commit 1/6 plumbed the KeyChange capture into the FFI shim,
+    commit 3/6 routes the bytes onto this per-level queue).
+    Drained by the Phase F commit 4/6 egress builder which wraps
+    each batch in a CRYPTO frame inside a Handshake-level packet,
+    AEAD-protects via :class:`RustlsQuicSession.packet_encrypt`
+    at level 2, and emits via :meth:`send_to`."""
+    var tls_1rtt_egress_queues: List[List[UInt8]]
+    """Per-slot outbound CRYPTO byte queue at the 1-RTT
+    (APPLICATION) level. Populated by
+    :meth:`_dispatch_crypto_frames` after rustls emits
+    ``KeyChange::OneRtt`` -- the handshake-complete moment.
+    Drained by the Phase F commit 4/6 egress builder which
+    encodes each batch into a 1-RTT short-header packet,
+    AEAD-protects via :class:`RustlsQuicSession.packet_encrypt`
+    at level 3, and emits via :meth:`send_to`."""
     var peer_addrs: List[SocketAddr]
     """Per-slot peer UDP address. Parallel slab to
     :attr:`connections` -- captured in :meth:`_accept_initial`
@@ -893,6 +970,8 @@ struct QuicListener(Movable):
         self.tls_acceptor = tls_acceptor^
         self.tls_sessions = List[_SessionSlot]()
         self.tls_egress_queues = List[List[UInt8]]()
+        self.tls_handshake_egress_queues = List[List[UInt8]]()
+        self.tls_1rtt_egress_queues = List[List[UInt8]]()
         self.peer_addrs = List[SocketAddr]()
         self.h3_connections = List[H3Connection]()
         self.h3_response_egress = Dict[String, List[UInt8]]()
@@ -1031,28 +1110,45 @@ struct QuicListener(Movable):
         self.connections[slot] = conn^
         if not ok:
             return
-        self._dispatch_crypto_frames(slot, events)
+        # Derive the inbound packet's encryption level from the
+        # header form so `_dispatch_crypto_frames` feeds inbound
+        # CRYPTO bytes to rustls at the right level. Initial /
+        # Handshake / 1-RTT only -- 0-RTT is rejected upstream,
+        # Retry never reaches a connection's handle_packet.
+        var inbound_lvl = _inbound_level_for_datagram(datagram)
+        self._dispatch_crypto_frames(slot, events, inbound_lvl)
         self._route_h3_stream_chunks(slot, events)
         _ = self.schedule_idle_timeout(slot)
 
     def _dispatch_crypto_frames(
-        mut self, slot: Int, events: ConnectionEvents
+        mut self, slot: Int, events: ConnectionEvents, inbound_lvl: Int
     ) raises:
         """Forward inbound CRYPTO frame bytes to the slot's
-        rustls QUIC session and drain its outbound CRYPTO bytes
-        into the per-slot egress queue.
+        rustls QUIC session, drain outbound CRYPTO bytes at
+        EVERY encryption level into the per-slot egress queue,
+        and -- after each drain -- check whether rustls's
+        `KeyChange` pump has just installed Handshake or 1-RTT
+        keys on the slot's session.  When the keys at a level
+        flip from None to Some(_) we stamp a sentinel onto the
+        connection's per-level secret carrier so the
+        post-Initial decrypt path (Phase F commit 4/6) flips
+        from "drop silently" to "dispatch via rustls".
 
-        Track Q9-W covers the INITIAL encryption level only --
-        the dispatcher's :meth:`handle_packet` short-circuits
-        non-Initial packets to empty events today, so every
-        CRYPTO frame reaching this branch came out of an
-        Initial packet. Track Q10-W lands the Handshake +
-        1-RTT branches; Q11-W lands the protect + sendto path
-        that actually puts :attr:`tls_egress_queues` on the
-        wire. The session's ``rustls::quic::Connection::write_hs``
-        coalesces fragments internally; this driver does not
-        need to track CRYPTO frame offsets at the QUIC layer
-        for the rustls handoff.
+        Per Phase F commit 1+2/6 the Mojo side does NOT carry
+        raw traffic secrets -- rustls's `quic::Secrets` is
+        `pub(crate)`-sealed. The carriers
+        :attr:`QuicConnection.rx_handshake_secret` /
+        `.tx_handshake_secret` / `.rx_1rtt_secret` /
+        `.tx_1rtt_secret` are reused as boolean readiness
+        markers: empty list == not installed; non-empty list
+        (length 1, contents `0xff`) == installed and the rustls
+        session has the keys.
+
+        Phase F commit 3/6 (this commit) only installs the
+        sentinels; commit 4/6 wires the Handshake / 1-RTT decrypt
+        path through :meth:`RustlsQuicSession.packet_decrypt` +
+        `header_decrypt` (and the egress path through
+        `packet_encrypt` + `header_encrypt`).
 
         Both the feed-crypto and take-crypto FFI calls route
         through :attr:`tls_acceptor._lib` so the .so stays
@@ -1063,26 +1159,101 @@ struct QuicListener(Movable):
         if slot < 0 or slot >= len(self.tls_sessions):
             return
         var handle = self.tls_sessions[slot].handle
-        if handle == 0 or len(events.crypto_frames) == 0:
+        if handle == 0:
             return
-        var lvl = QuicEncryptionLevel.INITIAL
+
+        # Feed inbound CRYPTO frame bytes at the level the
+        # parent _handle_inbound just decrypted at. All CRYPTO
+        # frames in a single ConnectionEvents batch belong to
+        # the same encryption level (the level of the parent
+        # packet); QUIC explicitly forbids mixing CRYPTO levels
+        # across packets at the protocol layer (RFC 9001
+        # §4.1.3), so the caller supplies the level rather than
+        # the sans-I/O state machine carrying a per-frame tag.
         for i in range(len(events.crypto_frames)):
             var chunk = List[UInt8]()
             for j in range(len(events.crypto_frames[i].data)):
                 chunk.append(events.crypto_frames[i].data[j])
-            var rc = _do_feed_crypto(self.tls_acceptor._lib, handle, lvl, chunk)
+            var rc = _do_feed_crypto(
+                self.tls_acceptor._lib, handle, inbound_lvl, chunk
+            )
             if rc != 0:
                 # rustls rejected the bytes (bad TLS grammar) --
                 # silent drop per RFC 9001 §5.2. The session
-                # level does not advance, which is what Q10-W's
-                # Handshake-key gating reads.
+                # level does not advance, which is what the
+                # post-Initial gating below reads.
                 continue
+
+        # Drain rustls's outbound CRYPTO bytes at every level
+        # rustls might have buffered for us. The KeyChange-driven
+        # pump in `flare_rustls_quic_drain_outbound` (Phase F
+        # commit 1/6) routes bytes onto the correct per-level
+        # pending queue inside the Rust shim; we just call
+        # take_crypto once per level here and append.
         try:
-            var out = _do_take_crypto(self.tls_acceptor._lib, handle, lvl)
-            for k in range(len(out)):
-                self.tls_egress_queues[slot].append(out[k])
+            var out_initial = _do_take_crypto(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.INITIAL,
+            )
+            for k in range(len(out_initial)):
+                self.tls_egress_queues[slot].append(out_initial[k])
         except:
             pass
+        try:
+            var out_hs = _do_take_crypto(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.HANDSHAKE,
+            )
+            for k in range(len(out_hs)):
+                self.tls_handshake_egress_queues[slot].append(out_hs[k])
+        except:
+            pass
+        try:
+            var out_1rtt = _do_take_crypto(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.APPLICATION,
+            )
+            for k in range(len(out_1rtt)):
+                self.tls_1rtt_egress_queues[slot].append(out_1rtt[k])
+        except:
+            pass
+
+        # After every CRYPTO pump, ask rustls whether the
+        # KeyChange-driven pump just installed Handshake or
+        # 1-RTT keys on this session. The conditional install
+        # below is idempotent (stamping the sentinel twice is a
+        # no-op): once the level flips, every subsequent call
+        # sees `have_keys == True` and we install once.
+        var have_hs = (
+            _do_have_keys(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.HANDSHAKE,
+            )
+            == 1
+        )
+        var have_1rtt = (
+            _do_have_keys(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.APPLICATION,
+            )
+            == 1
+        )
+        if have_hs or have_1rtt:
+            var conn_copy = self.connections[slot].copy()
+            if have_hs and len(conn_copy.rx_handshake_secret) == 0:
+                conn_copy.install_handshake_keys(
+                    _ready_sentinel(), _ready_sentinel()
+                )
+            if have_1rtt and len(conn_copy.rx_1rtt_secret) == 0:
+                conn_copy.install_1rtt_keys(
+                    _ready_sentinel(), _ready_sentinel()
+                )
+            self.connections[slot] = conn_copy^
 
     # -- H3 dispatch surface (Track Q12-W) --------------------------------
 
@@ -1261,6 +1432,8 @@ struct QuicListener(Movable):
         self.connections.append(qc^)
         self.tls_sessions.append(self._new_session_slot())
         self.tls_egress_queues.append(List[UInt8]())
+        self.tls_handshake_egress_queues.append(List[UInt8]())
+        self.tls_1rtt_egress_queues.append(List[UInt8]())
         self.peer_addrs.append(peer)
         self.h3_connections.append(H3Connection())
         self.cid_table.register(cid_to_hex(local_cid), slot)
