@@ -26,7 +26,7 @@ invariants we fuzz here are:
 4. **emit_response refuses double-emit.** A repeat
    :meth:`emit_response` on the same stream raises.
 
-The fuzzer carves the input bytes into four work items:
+The fuzzer carves the input bytes into five work items:
 
 * Branch A: feed the bytes as a bidi-stream chunk on stream 0,
   then signal FIN, then take_completed_streams.
@@ -36,6 +36,11 @@ The fuzzer carves the input bytes into four work items:
   FIN, then take_completed_streams.
 * Branch D: feed every byte as a 1-byte chunk (worst case for
   the NEEDS_MORE buffering loop).
+* Branch E (Track Q12-W): route the bytes through
+  :meth:`flare.quic.server.QuicListener._route_h3_stream_chunks`
+  via a synthetic :class:`flare.quic.state.ConnectionEvents` so
+  the new dispatch-on-listener path is fuzz-covered too. Same
+  safety bar as branches A..D.
 
 Run:
     pixi run --environment fuzz fuzz-h3-server
@@ -44,6 +49,17 @@ Run:
 from mozz import FuzzConfig, fuzz
 
 from flare.h3 import H3Connection
+from flare.net import IpAddr, SocketAddr
+from flare.quic.frame import StreamFrame
+from flare.quic.packet import (
+    ConnectionId,
+    LongHeader,
+    PACKET_TYPE_INITIAL,
+    QUIC_VERSION_1,
+)
+from flare.quic.server import QuicListener, QuicServerConfig
+from flare.quic.state import empty_events
+from flare.tls.rustls_quic import RustlsQuicConfig
 
 
 def _bytes(s: StringLiteral) -> List[UInt8]:
@@ -137,6 +153,67 @@ def _run_byte_at_a_time(mut c: H3Connection, data: List[UInt8]) raises:
     _ = c.take_completed_streams()
 
 
+def _run_listener_dispatch(var data: List[UInt8]) raises:
+    """Branch E (Track Q12-W): drive the new H3 dispatch on
+    :class:`flare.quic.server.QuicListener` with a synthetic
+    STREAM frame so the fuzz coverage extends past the
+    sans-I/O driver into the listener-side routing path.
+
+    The empty-PEM acceptor returns a NULL rustls session
+    handle; the path never needs a real TLS roundtrip because
+    :meth:`QuicListener._route_h3_stream_chunks` is
+    sans-I/O too.
+    """
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    cfg.rustls_config = RustlsQuicConfig()
+    var listener: QuicListener
+    try:
+        listener = QuicListener.bind(cfg^)
+    except _:
+        return
+    var dcid_bytes = List[UInt8]()
+    for i in range(8):
+        dcid_bytes.append(UInt8(0xA0 + i))
+    var scid_bytes = List[UInt8]()
+    for i in range(8):
+        scid_bytes.append(UInt8(0xB0 + i))
+    var dcid = ConnectionId(bytes=dcid_bytes^)
+    var scid = ConnectionId(bytes=scid_bytes^)
+    var lh = LongHeader(
+        packet_type=PACKET_TYPE_INITIAL,
+        version=QUIC_VERSION_1,
+        dcid=dcid^,
+        scid=scid^,
+        payload_offset=0,
+    )
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(54321))
+    var slot: Int
+    try:
+        slot = listener._accept_initial(lh, peer)
+    except _:
+        return
+    var events = empty_events()
+    events.stream_chunks.append(
+        StreamFrame(
+            stream_id=UInt64(0),
+            offset=UInt64(0),
+            data=data^,
+            fin=True,
+        )
+    )
+    try:
+        listener._route_h3_stream_chunks(slot, events)
+    except _:
+        return
+    var ready = listener.take_h3_completed_streams(slot)
+    _assert(
+        len(ready) <= 1,
+        "listener dispatch surfaced > 1 ready stream from a single frame",
+    )
+
+
 def target(data: List[UInt8]) raises:
     var n = len(data)
 
@@ -166,6 +243,13 @@ def target(data: List[UInt8]) raises:
         capped = trim^
     var c4 = H3Connection()
     _run_byte_at_a_time(c4, capped)
+
+    # Branch E (Q12-W): the new dispatch-on-listener path. The
+    # listener bind allocates a UDP fd + a TimerWheel; the
+    # constructor is fast (<1 ms) so doing it on every fuzz run
+    # is acceptable. ``data`` is cloned because Branch C already
+    # consumed the original.
+    _run_listener_dispatch(data.copy())
 
 
 def main() raises:

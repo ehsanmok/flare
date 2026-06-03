@@ -342,7 +342,7 @@ struct _H3EventCollector(H3RequestEventHandler, Movable):
 # ── Per-connection driver ──────────────────────────────────────────────
 
 
-struct H3Connection(Defaultable, Movable):
+struct H3Connection(Copyable, Defaultable, Movable):
     """Per-connection HTTP/3 server driver.
 
     Owned by the QUIC reactor. One instance per QUIC connection

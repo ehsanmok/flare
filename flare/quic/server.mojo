@@ -66,7 +66,7 @@ from .cc import (
     pacing_budget,
 )
 from .crypto import QuicAead
-from .frame import CryptoFrame, encode_crypto
+from .frame import CryptoFrame, StreamFrame, encode_crypto
 from .packet import (
     ConnectionId,
     LongHeader,
@@ -93,6 +93,9 @@ from .state import (
     handle_frame_buf,
     new_connection,
 )
+from ..h3.server import H3Connection
+from ..http.request import Request
+from ..http.response import Response
 from .timers import (
     TIMER_KIND_ACK_DELAY,
     TIMER_KIND_IDLE,
@@ -833,6 +836,34 @@ struct QuicListener(Movable):
     from the inbound datagram's sender. The Q11-W reactor's
     egress path reads this to call :meth:`send_to(slot, ...)`
     without re-parsing the inbound datagram."""
+    var h3_connections: List[H3Connection]
+    """Per-slot HTTP/3 connection driver. Parallel slab to
+    :attr:`connections` -- one :class:`flare.h3.H3Connection`
+    instance per QUIC connection (Track Q12-W). Allocated in
+    :meth:`_accept_initial` so every accepted connection has its
+    H3 driver ready; STREAM frames from the post-handshake 1-RTT
+    payload route through :meth:`_route_h3_stream_chunks` into
+    the matching slot.
+
+    The slab carries the H3 driver unconditionally rather than
+    waiting for the ``h3`` ALPN to be negotiated. The QUIC
+    layer cannot inspect ALPN without finishing the rustls
+    handshake and we want the slab indices to stay in lockstep
+    with :attr:`connections`. The H3 driver itself drops
+    non-H3 traffic (the STREAM frames simply never reach
+    :meth:`H3Connection.feed_stream_chunk` until 1-RTT keys
+    install, at which point the peer already negotiated H3 via
+    ALPN by definition)."""
+    var h3_response_egress: Dict[String, List[UInt8]]
+    """Per-(slot, stream_id) outbound H3 response bytes,
+    awaiting QUIC STREAM frame egress. Key is
+    ``str(slot) + ":" + str(stream_id)``; value is the byte
+    buffer emitted by
+    :meth:`flare.h3.H3Connection.take_response_frames` after a
+    handler-produced :class:`Response` is encoded. Drained by
+    the 1-RTT egress path once the per-connection 1-RTT keys
+    are installed (Q12-W follow-up; the bytes here today
+    accumulate until the rustls key-change bridge is wired)."""
     var timer_wheel: TimerWheel
     """Per-listener :class:`flare.runtime.timer_wheel.TimerWheel`
     driving PTO / idle / ack-delay timeouts (Track Q3-W commit
@@ -863,6 +894,8 @@ struct QuicListener(Movable):
         self.tls_sessions = List[_SessionSlot]()
         self.tls_egress_queues = List[List[UInt8]]()
         self.peer_addrs = List[SocketAddr]()
+        self.h3_connections = List[H3Connection]()
+        self.h3_response_egress = Dict[String, List[UInt8]]()
         self.timer_wheel = TimerWheel(now_ms=UInt64(0))
         self._socket = sock^
         self._local_addr = addr
@@ -999,6 +1032,7 @@ struct QuicListener(Movable):
         if not ok:
             return
         self._dispatch_crypto_frames(slot, events)
+        self._route_h3_stream_chunks(slot, events)
         _ = self.schedule_idle_timeout(slot)
 
     def _dispatch_crypto_frames(
@@ -1049,6 +1083,121 @@ struct QuicListener(Movable):
                 self.tls_egress_queues[slot].append(out[k])
         except:
             pass
+
+    # -- H3 dispatch surface (Track Q12-W) --------------------------------
+
+    def _route_h3_stream_chunks(
+        mut self, slot: Int, events: ConnectionEvents
+    ) raises:
+        """Route every STREAM frame surfaced on ``events`` to the
+        slot's :class:`flare.h3.H3Connection`.
+
+        RFC 9114 §6 puts H3 traffic on QUIC bidirectional + uni
+        streams; the stream id parity bits classify which kind a
+        frame belongs to (RFC 9000 §2.1: even = client-initiated
+        bidi / uni based on the low two bits). The H3 driver
+        accepts both flavors through different entry points;
+        this method picks the right one and also signals FIN
+        when the QUIC layer observed end-of-stream.
+
+        No-op if the slot is out of range or no STREAM frames
+        were surfaced this tick. Empty payload chunks with FIN
+        still drive :meth:`flare.h3.H3Connection.signal_end_of_stream`
+        so the H3 driver can advance request state.
+        """
+        if slot < 0 or slot >= len(self.h3_connections):
+            return
+        if len(events.stream_chunks) == 0:
+            return
+        var h3 = self.h3_connections[slot].copy()
+        for i in range(len(events.stream_chunks)):
+            var sid = Int(events.stream_chunks[i].stream_id)
+            var is_uni = (sid & 0x2) != 0
+            var is_fin = events.stream_chunks[i].fin
+            var payload = events.stream_chunks[i].data.copy()
+            if len(payload) > 0:
+                if is_uni:
+                    h3.feed_uni_stream_chunk(sid, payload^)
+                else:
+                    h3.feed_stream_chunk(sid, payload^)
+            if is_fin and not is_uni:
+                h3.signal_end_of_stream(sid)
+        self.h3_connections[slot] = h3^
+
+    def take_h3_completed_streams(self, slot: Int) raises -> List[Int]:
+        """Return the stream ids ready for handler dispatch on
+        ``slot``. Delegates to
+        :meth:`flare.h3.H3Connection.take_completed_streams`.
+        Empty list if the slot is out of range or has no H3
+        driver attached."""
+        if slot < 0 or slot >= len(self.h3_connections):
+            return List[Int]()
+        return self.h3_connections[slot].take_completed_streams()
+
+    def take_h3_request(mut self, slot: Int, stream_id: Int) raises -> Request:
+        """Materialize the :class:`flare.http.Request` for
+        ``(slot, stream_id)``. The dispatch caller invokes a
+        Handler with this Request, then feeds the Response back
+        through :meth:`emit_h3_response`.
+
+        Raises if the slot is out of range or the H3 driver
+        does not track the stream (see
+        :meth:`flare.h3.H3Connection.take_request` for the
+        underlying gating)."""
+        if slot < 0 or slot >= len(self.h3_connections):
+            raise Error(
+                "take_h3_request: slot " + String(slot) + " out of range"
+            )
+        var h3 = self.h3_connections[slot].copy()
+        var req = h3.take_request(stream_id)
+        self.h3_connections[slot] = h3^
+        return req^
+
+    def emit_h3_response(
+        mut self, slot: Int, stream_id: Int, var response: Response
+    ) raises:
+        """Encode ``response`` into the slot's H3 outbox + drain
+        the resulting frame bytes into
+        :attr:`h3_response_egress` keyed by ``slot:stream_id``.
+
+        The byte buffer here is the input to a future QUIC
+        STREAM frame egress pass; the actual on-the-wire
+        emission requires the 1-RTT keys to be installed via
+        the rustls bridge (deferred follow-up). Until then the
+        buffer accumulates and the Handler dispatch path is
+        still exercised end-to-end so tests can verify the wire.
+        """
+        if slot < 0 or slot >= len(self.h3_connections):
+            raise Error(
+                "emit_h3_response: slot " + String(slot) + " out of range"
+            )
+        var h3 = self.h3_connections[slot].copy()
+        h3.emit_response(stream_id, response^)
+        var frames = h3.take_response_frames(stream_id)
+        self.h3_connections[slot] = h3^
+        var key = String(slot) + ":" + String(stream_id)
+        if key in self.h3_response_egress:
+            var existing = self.h3_response_egress[key].copy()
+            for i in range(len(frames)):
+                existing.append(frames[i])
+            self.h3_response_egress[key] = existing^
+        else:
+            self.h3_response_egress[key] = frames^
+
+    def take_h3_response_egress(
+        mut self, slot: Int, stream_id: Int
+    ) raises -> List[UInt8]:
+        """Drain the per-stream response buffer accumulated by
+        :meth:`emit_h3_response`. Returns an empty list when no
+        bytes are queued. Caller (the QUIC STREAM egress path)
+        wraps the bytes in STREAM frames + protects them with
+        :func:`protect_1rtt_packet` -- the wiring lands once
+        1-RTT keys flow through the rustls bridge."""
+        var key = String(slot) + ":" + String(stream_id)
+        if key not in self.h3_response_egress:
+            return List[UInt8]()
+        var out = self.h3_response_egress.pop(key)
+        return out^
 
     def _dispatch_long(
         mut self, datagram: Span[UInt8, _], peer: SocketAddr
@@ -1113,6 +1262,7 @@ struct QuicListener(Movable):
         self.tls_sessions.append(self._new_session_slot())
         self.tls_egress_queues.append(List[UInt8]())
         self.peer_addrs.append(peer)
+        self.h3_connections.append(H3Connection())
         self.cid_table.register(cid_to_hex(local_cid), slot)
         _ = self.schedule_idle_timeout(slot)
         return slot

@@ -153,6 +153,15 @@ struct ConnectionEvents(Copyable, Movable):
       after :func:`handle_frame_buf` returns and forwards each
       payload to its :class:`flare.tls.rustls_quic.RustlsQuicSession`
       at the matching encryption level.
+    * ``stream_chunks`` -- STREAM frames (RFC 9000 §19.8) parsed
+      this tick. Same shape as ``crypto_frames``: the sans-I/O
+      state machine updates per-stream offsets + FIN bookkeeping
+      and appends the full :class:`StreamFrame` (stream id +
+      offset + payload + fin) here so the H3 reactor wrapper
+      (Track Q12-W) can route per-stream bytes to
+      :class:`flare.h3.H3Connection.feed_stream_chunk` /
+      :meth:`feed_uni_stream_chunk` after
+      :func:`handle_frame_buf` returns.
     * ``next_deadline_us`` -- earliest absolute time the driver
       should call back (for idle / PTO / loss detection); ``0``
       means "no scheduled timer".
@@ -164,6 +173,7 @@ struct ConnectionEvents(Copyable, Movable):
     var finished_streams: List[UInt64]
     var new_streams: List[UInt64]
     var crypto_frames: List[CryptoFrame]
+    var stream_chunks: List[StreamFrame]
     var next_deadline_us: UInt64
 
 
@@ -175,6 +185,7 @@ def empty_events() -> ConnectionEvents:
         finished_streams=List[UInt64](),
         new_streams=List[UInt64](),
         crypto_frames=List[CryptoFrame](),
+        stream_chunks=List[StreamFrame](),
         next_deadline_us=UInt64(0),
     )
 
@@ -256,7 +267,12 @@ def apply_stream(
     Creates the stream on first sight, advances the recv offset
     high-water-mark, enforces the flow-control limit, and emits a
     ``finished_streams`` entry when the FIN bit closes the recv
-    side. Raises on flow-control violation.
+    side. Raises on flow-control violation. The full
+    :class:`StreamFrame` is also appended to
+    :attr:`ConnectionEvents.stream_chunks` so the H3 reactor
+    wrapper (Track Q12-W) can route the payload bytes to its
+    per-connection :class:`flare.h3.H3Connection` without
+    re-parsing the QUIC packet.
     """
     var sid = sf.stream_id
     var existing = conn.streams.get(sid)
@@ -281,6 +297,7 @@ def apply_stream(
         elif s.state == STREAM_STATE_HALF_CLOSED_LOCAL:
             s.state = STREAM_STATE_CLOSED
     conn.streams[sid] = s
+    events.stream_chunks.append(sf.copy())
 
 
 def apply_ack(mut conn: Connection, ack: AckFrame):

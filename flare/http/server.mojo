@@ -581,6 +581,113 @@ struct HttpServer(Movable):
         self._h3_listener = listener^
         return count
 
+    def pump_h3_handler_once[
+        H: Handler & Copyable
+    ](mut self, mut handler: H) raises -> Int:
+        """Drain every connection's H3 dispatcher once: for each
+        completed request stream the handler is invoked with the
+        materialized :class:`Request`, the resulting
+        :class:`Response` is encoded into the slot's H3 outbox
+        via :meth:`QuicListener.emit_h3_response`, and the
+        outbound bytes accumulate in the per-(slot, stream_id)
+        egress buffer (Track Q12-W).
+
+        Returns the number of (slot, stream) pairs dispatched
+        this pass. Zero when no H3 request is ready. The QUIC
+        STREAM frame egress + 1-RTT protection wiring that puts
+        :attr:`QuicListener.h3_response_egress` on the wire is
+        gated on the rustls key-change bridge that surfaces
+        1-RTT traffic secrets (deferred follow-up); this pump
+        already exercises the full
+        ``take_completed_streams -> Handler -> emit_response ->
+        take_response_frames`` chain so the dispatch is
+        verifiable end-to-end via unit tests today.
+
+        Raises:
+            Error: If no h3 listener is bound.
+        """
+        if not self.has_h3():
+            raise Error("HttpServer.pump_h3_handler_once: no h3 listener bound")
+        var listener = self._h3_listener.take()
+        var dispatched = 0
+        for slot in range(listener.connection_count()):
+            var ready = listener.take_h3_completed_streams(slot)
+            for j in range(len(ready)):
+                var stream_id = ready[j]
+                var req = listener.take_h3_request(slot, stream_id)
+                var resp = handler.serve(req^)
+                listener.emit_h3_response(slot, stream_id, resp^)
+                dispatched += 1
+        self._h3_listener = listener^
+        return dispatched
+
+    def serve_h3[H: Handler & Copyable](mut self, var handler: H) raises:
+        """Run the QUIC reactor with H3 handler dispatch as a
+        single-threaded loop.
+
+        Per Track Q12-W this is the H3-aware blocking entry
+        point: each iteration runs
+        :meth:`QuicListener.tick` to drain one inbound UDP
+        datagram + drive the QUIC + rustls state machines, then
+        :meth:`pump_h3_handler_once` to dispatch any completed
+        H3 request streams through ``handler``, then
+        :meth:`QuicListener.advance_timers` so PTO + idle +
+        ack-delay callbacks fire on time. Exits cleanly once
+        the h3 listener's stop flag flips
+        (:meth:`QuicListener.shutdown`).
+
+        The serve-loop pairs the TCP unified reactor (the
+        canonical :meth:`serve` overloads above) -- they are
+        peer entry points; production callers running both
+        wires should spawn one OS thread for each loop until
+        the single-thread multiplex via shared epoll lands
+        (v0.8 follow-up; see ``criticism.mdc``).
+
+        Raises:
+            Error: If no h3 listener is bound.
+            NetworkError: On fatal listener errors;
+                per-connection errors close the offending
+                connection silently inside ``tick``.
+        """
+        if not self.has_h3():
+            raise Error("HttpServer.serve_h3: no h3 listener bound")
+        from flare.quic.server import _monotonic_ms as _quic_monotonic_ms
+
+        var listener = self._h3_listener.take()
+        try:
+            while not listener._stopping:
+                _ = listener.tick(timeout_ms=100)
+                var h_copy = handler.copy()
+                _ = self._pump_listener_h3[H](listener, h_copy^)
+                var now_ms = _quic_monotonic_ms()
+                _ = listener.advance_timers(now_ms)
+        except e:
+            self._h3_listener = listener^
+            raise e^
+        self._h3_listener = listener^
+
+    @staticmethod
+    def _pump_listener_h3[
+        H: Handler & Copyable
+    ](mut listener: QuicListener, var handler: H) raises -> Int:
+        """Internal helper: drain every connection's H3
+        dispatcher once on a borrowed listener. Mirrors
+        :meth:`pump_h3_handler_once` but operates on a borrowed
+        listener so :meth:`serve_h3` can hold the listener in
+        its own loop variable without bouncing through the
+        Optional dance every iteration.
+        """
+        var dispatched = 0
+        for slot in range(listener.connection_count()):
+            var ready = listener.take_h3_completed_streams(slot)
+            for j in range(len(ready)):
+                var stream_id = ready[j]
+                var req = listener.take_h3_request(slot, stream_id)
+                var resp = handler.serve(req^)
+                listener.emit_h3_response(slot, stream_id, resp^)
+                dispatched += 1
+        return dispatched
+
     def serve(
         mut self,
         handler: def(Request) raises thin -> Response,
