@@ -20,6 +20,16 @@ for target_dir in "$BASELINES_DIR"/*/; do
     target="$(basename "$target_dir")"
     [[ -f "$target_dir/run.sh" && -f "$target_dir/check.sh" ]] || continue
 
+    # HTTP/3-only baselines (flare_h3, quinn, quiche) speak QUIC over
+    # UDP; they don't serve the curl-driven HTTP/1.1 integrity probe.
+    # Detect by a check.sh that drives h2load with the h3 ALPN list,
+    # and skip them here -- the h3 harness (benchmark/scripts/bench_h3.sh)
+    # owns the cross-h3-target integrity gate.
+    if grep -q -- '--alpn-list=h3\|--npn-list=h3' "$target_dir/check.sh" 2>/dev/null; then
+        echo "[$target] skip (h3-only baseline)" | tee -a "$RESULTS_DIR/integrity.log"
+        continue
+    fi
+
     # Kill anything on our port from a previous attempt.
     (
       lsof -ti tcp:$PORT 2>/dev/null | xargs kill -9 2>/dev/null || true

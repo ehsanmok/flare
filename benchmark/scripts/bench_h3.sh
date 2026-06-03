@@ -47,15 +47,15 @@ H2LOAD_BIN="$(command -v h2load 2>/dev/null || true)"
 
 probe_h2load_h3() {
     # h2load needs to be built against ngtcp2 + nghttp3 for h3
-    # support. The --help output lists --npn-list when the
-    # build supports h3; the same flag is silently rejected on
-    # builds without. Grep both: a missing binary AND a binary
-    # without h3 surface both land in the same "probe fail"
-    # branch.
+    # support. The --help output lists --alpn-list when the
+    # build supports h3 (renamed from --npn-list in nghttp2
+    # v1.69.0+); the same flag is silently rejected on builds
+    # without. Grep both: a missing binary AND a binary without
+    # h3 surface both land in the same "probe fail" branch.
     if [[ -z "${H2LOAD_BIN}" ]]; then
         return 1
     fi
-    if ! "${H2LOAD_BIN}" --help 2>&1 | grep -q -- '--npn-list'; then
+    if ! "${H2LOAD_BIN}" --help 2>&1 | grep -qE -- '--(alpn|npn)-list'; then
         return 1
     fi
     return 0

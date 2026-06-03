@@ -482,7 +482,15 @@ struct WsAutoClient(Movable):
             var n = tls.read(scratch.unsafe_ptr(), 4096)
             if n <= 0:
                 break
-            h2.feed(Span[UInt8, _](scratch[:n]))
+            # Mojo 1.0.0b1 destructor scheduling drops the temporary
+            # ``scratch[:n]`` List before ``h2.feed`` returns, letting
+            # the heap reuse the storage and double the parsed bytes
+            # on the next ``tls.read`` (same shape as the fix in
+            # ``flare/http/client.mojo`` line ~1948). Construct the
+            # ``Span`` directly over ``scratch``'s backing storage so
+            # the lifetime is the named local, not the slice's
+            # anonymous temporary.
+            h2.feed(Span[UInt8, _](ptr=scratch.unsafe_ptr(), length=n))
             var auto_out = h2.drain()
             if len(auto_out) > 0:
                 tls.write_all(Span[UInt8, _](auto_out))
@@ -526,7 +534,11 @@ struct WsAutoClient(Movable):
             var n = tls.read(scratch.unsafe_ptr(), 4096)
             if n <= 0:
                 break
-            h2.feed(Span[UInt8, _](scratch[:n]))
+            # Same destructor-ordering hazard as above; use the
+            # explicit ptr+length Span form to keep the lifetime
+            # tied to the named ``scratch`` rather than a slice
+            # temporary that the heap may reuse.
+            h2.feed(Span[UInt8, _](ptr=scratch.unsafe_ptr(), length=n))
             var auto_out = h2.drain()
             if len(auto_out) > 0:
                 tls.write_all(Span[UInt8, _](auto_out))

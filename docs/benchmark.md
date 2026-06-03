@@ -677,6 +677,67 @@ flare_mc 4w handler >= 214,567 req/s / p99 <= 2.71 ms;
 flare_mc_static 4w >= 246,942 req/s) are unchanged by this
 cycle's additive surfaces.
 
+##### Best-perf refresh at HEAD `65b3282`
+
+Full ``pixi run -e bench bench-vs-baseline`` sweep on the EPYC
+7R32 dev-box, 5x30s runs per target, ``mojo build -D
+ASSERT=none``, ``cargo build --release --locked``. Source:
+[`benchmark/results/2026-06-03T0331-ehsan-dev-65b3282/`](../benchmark/results/2026-06-03T0331-ehsan-dev-65b3282/).
+
+Single-worker plaintext (``throughput`` config, ``flare`` vs
+``nginx`` 1-worker vs ``go_nethttp`` ``GOMAXPROCS=1``):
+
+| Workload | Server | Workers | Median req/s | p99 (ms) | p99.9 (ms) | p99.99 (ms) | sigma% |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `throughput` | **flare**           | 1 | **76,287** | 3.18 | 3.56 | 3.78 | 1.27 |
+| `throughput` | nginx (`worker_processes 1`) | 1 | 73,828 | 3.14 | 3.46 | 3.66 | 1.27 |
+| `throughput` | Go `net/http` (`GOMAXPROCS=1`) | 1 | 39,800 | 3.47 | 4.99 | 6.73 | 1.27 |
+
+Multi-worker plaintext (``throughput_mc`` config, 4 workers,
+``flare_mc`` handler path vs ``flare_mc_static`` fast path vs
+the Rust pack):
+
+| Workload | Server | Workers | Median req/s | p99 (ms) | p99.9 (ms) | p99.99 (ms) | sigma% |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `throughput_mc` | flare_mc_static (peak)  | 4 | **279,541** | n/a (saturation) | n/a | n/a | 1.65 |
+| `throughput_mc` | flare_mc_static (sustain) | 4 | 249,293 | 2.68 (typ.) | n/a | n/a | n/a |
+| `throughput_mc` | actix_web               | 4 | 227,528    | 2.71 | 3.04 | 4.37 | 0.17 |
+| `throughput_mc` | **flare_mc** (handler)  | 4 | **221,299** | **2.65** | **2.98** | **3.26** | 0.17 |
+| `throughput_mc` | axum                    | 4 | 203,673    | 2.80 | 3.26 | 8.44 | 0.21 |
+| `throughput_mc` | hyper                   | 4 | 142,970    | 2.82 | 3.22 | 3.77 | 0.21 |
+
+Floor-hold check vs the Wire-paths-close attestation just above:
+
+- flare 1w: 76,287 req/s (vs 79,028 ceiling, 71,444 refresh
+  floor) -- inside the cross-day spread; p99 3.18 ms <= 3.33 ms
+  floor. HOLD.
+- flare_mc 4w handler: 221,299 req/s >= 214,567 floor; p99
+  2.65 ms <= 2.71 ms floor. HOLD; p99.99 3.26 ms is the
+  tightest reading on file for this dev-box (vs 11.45 ms in the
+  prior refresh, which carried two warmup-phase spikes).
+- flare_mc_static 4w: 249,293 req/s sustained (median peak
+  279,541) >= 246,942 floor. HOLD.
+
+Microbenches at the same HEAD (``pixi run bench-http`` /
+``bench-parse`` / ``bench-huffman`` / ``bench-ws-mask``) match
+the headline numbers in
+[HTTP parsing microbenchmark](#http-parsing-microbenchmark)
+and [WebSocket SIMD masking](#websocket-simd-masking) below
+(Huffman SIMD 4x scalar; WS-mask SIMD 55x scalar at 1 KB,
+33x at 64 KB, 21x at 1 MB; HeaderMap 1.5 us / Response 0.35
+us / URL parse 0.7-0.8 us); zero drift from the prior
+attestations.
+
+The cross-framework HTTP/3 row now has the h2load+H3 client
+landed on the dev-box -- see the
+[HTTP/3 throughput](#http3-throughput) table below for the
+quiche / quinn / flare_h3 reading at this HEAD. flare_h3 still
+sits at 0 req/s because the QUIC reactor's live datagram I/O
+loop is the one wire path that didn't land in this cycle (the
+codec, AEAD, rustls binding, state machine, and H3 dispatch
+all wired; the open-loop reactor that pulls them together into
+a live handshake is the v0.7 commit-1 candidate).
+
 #### Listener-mode A/B (flare-only)
 
 flare exposes both listener strategies so the operator can
@@ -1233,45 +1294,84 @@ Infrastructure for the cross-framework bench:
 - ``pixi run --environment bench bench-h3 {flare,quinn,quiche,all}``
   -- task entry points.
 
-**Status: bench infrastructure complete; running the gate
-requires an h2load build with HTTP/3 support on the dev-box.**
-Stock Ubuntu's ``nghttp2-client`` (1.43) predates h3 support;
-conda-forge's nghttp2 (1.68) ships without ``h2load``. To
-populate the table on the EPYC 7R32 dev-box, build nghttp2 from
-source against vendored ngtcp2 + nghttp3:
+**Status: bench infrastructure + h2load+H3 client complete;
+quiche + quinn baselines run cleanly, flare_h3 awaits the
+live QUIC reactor I/O loop (v0.7 follow-up).** Stock Ubuntu's
+``nghttp2-client`` (1.43) predates h3 support; conda-forge's
+nghttp2 (1.68) ships without ``h2load``. The h2load binary
+used for the numbers below was built from source on the EPYC
+7R32 dev-box against vendored ngtcp2 + nghttp3 + quictls
+(OpenSSL 3.0 + QUIC fork). The build recipe:
 
 ```bash
-# One-time. Builds an h2load binary that links ngtcp2 +
-# nghttp3 + OpenSSL-QUIC patched/BoringSSL; takes ~10-15
-# min on the EPYC dev-box. Drops the binary on PATH ahead
-# of the distro h2load.
-git clone https://github.com/nghttp2/nghttp2
-cd nghttp2 && autoreconf -i && ./configure \
-    --enable-http3 --with-libngtcp2 --with-libnghttp3
-make -j && sudo make install
+# One-time. Builds quictls, ngtcp2, nghttp3, then nghttp2's
+# h2load. Takes ~10-15 min on the EPYC dev-box. Installs
+# the four libraries under /usr/local/lib/h3-stack/ and
+# registers them with ldconfig so the h2load binary at
+# nghttp2/src/.libs/h2load picks them up at runtime.
+# Requires: autoconf, automake, libtool, cmake, pkg-config,
+#           g++-12 (C++20), libc-ares-dev, libev-dev,
+#           libevent-dev, libjansson-dev.
+git clone -b openssl-3.0.15+quic https://github.com/quictls/openssl
+( cd openssl && ./Configure --prefix=/usr/local/lib/h3-stack \
+    enable-tls1_3 && make -j && sudo make install_sw )
+git clone --recurse-submodules https://github.com/ngtcp2/ngtcp2
+( cd ngtcp2 && autoreconf -i && \
+    PKG_CONFIG_PATH=/usr/local/lib/h3-stack/lib/pkgconfig \
+    ./configure --with-openssl && make -j && sudo make install )
+git clone --recurse-submodules https://github.com/ngtcp2/nghttp3
+( cd nghttp3 && autoreconf -i && ./configure && make -j && \
+    sudo make install )
+git clone --recurse-submodules -b v1.69.0 https://github.com/nghttp2/nghttp2
+( cd nghttp2 && autoreconf -i && \
+    CXX=g++-12 CC=gcc-12 \
+    PKG_CONFIG_PATH=/usr/local/lib/h3-stack/lib/pkgconfig \
+    ./configure --enable-http3 --enable-app && make -j )
+echo /usr/local/lib/h3-stack/lib | sudo tee /etc/ld.so.conf.d/h3-stack.conf
+sudo ldconfig
+sudo cp nghttp2/src/.libs/h2load /usr/local/bin/h2load
 ```
 
-Once that's done, ``pixi run -e bench bench-h3 all`` produces
-the real EPYC 7R32 numbers and rewrites the table below
-without further script edits:
+Once the binary is on ``PATH``, ``pixi run -e bench bench-h3 all``
+populates the cross-framework table below directly. Current
+reading at HEAD ``65b3282`` (source data:
+[`benchmark/results/v0.8/h3/`](../benchmark/results/v0.8/h3/),
+5x30s runs, 1 client x 100 concurrent streams per run):
 
-| Target | req/s (median, 5 runs) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | sigma % |
-|---|---|---|---|---|---|
-| flare h3 | (pending h2load h3 build) | (pending) | (pending) | (pending) | (pending) |
-| quinn 0.11 + h3 0.0.8 | (pending h2load h3 build) | (pending) | (pending) | (pending) | (pending) |
-| quiche 0.22 | (pending h2load h3 build) | (pending) | (pending) | (pending) | (pending) |
+| Target | req/s (median, 5 runs) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | notes |
+|---|---:|---:|---:|---:|---|
+| quiche 0.22 (boringssl-vendored) | 72,571 | (per-stream) | (per-stream) | (per-stream) | clean: 0 errors / 0 timeouts across 5 runs, sigma ~1% |
+| quinn 0.11 + h3 0.0.8        | 654    | 4.17     | 4.75       | 5.48        | open-loop 100-stream shape errors 98% (1.2M errored of 1.2M total) -- this is workload-shape calibration, not a quinn ceiling (the 10s warmup with the same client sustained 104k req/s at 0 errors) |
+| flare h3                     | 0      | --       | --         | --          | server binds + ALPN-negotiates h3 but no live datagrams round-trip yet; the codec + AEAD + rustls binding + state machine + H3 dispatch are wired and unit/fuzz/conformance-tested; the open-loop UDP reactor that walks recvmmsg -> ConnectionIdTable -> handle_frame -> sendmmsg is the one wire path that's still pending (v0.7 commit-1 candidate) |
 
-The "pending" rows now name the dev-box prerequisite explicitly
-rather than the in-tree wiring -- the flare side of the gate
-already passes its unit + conformance + fuzz + loopback
-integration suites. When the table lands, the Phase D close
-attestation row in "Server throughput (TFB plaintext)" gets a
-matching "HTTP/3 floor held" entry alongside the h1 / h2 floors.
+Reading order:
 
-``bench_h3.sh`` exits 0 with a clear banner today when h2load
-with h3 support isn't on PATH, so CI continues to pin
-"infrastructure ready, h3 client install pending" as a known
-posture rather than a regression.
+- **quiche** is the steady-state H3 reference at this workload
+  shape: 72.5k req/s with 1% run-σ and zero errored streams.
+- **quinn**'s headline 654 req/s number reflects the harness
+  saturating the server's per-connection stream window at the
+  open-loop 100-streams configuration, not a steady-state
+  throughput ceiling. h2load's 10s warmup with the same client
+  ran 104k req/s @ 0 errors before the long-duration shape
+  exposed the per-conn limit; the calibration knob lives in
+  ``benchmark/configs/h3_throughput.yaml`` (``h2load_streams``
+  + ``h2load_duration_seconds``).
+- **flare h3** at 0 req/s names exactly what's still in flight:
+  the reactor I/O loop on the QUIC server. The infrastructure
+  in front of it (h2load+H3 binary on PATH, baseline-build
+  scripts, ALPN-correct flare_h3 binary, harness gating) is
+  complete and the bench is repeatable today.
+
+When the QUIC reactor I/O loop lands, ``pixi run -e bench bench-h3 all``
+re-runs this table without further script edits; the floor-hold
+row in "Best-perf refresh at HEAD" gains a matching HTTP/3 entry
+at that point.
+
+``bench_h3.sh`` exits 0 with a clear banner when h2load with
+H3 support isn't on ``PATH`` (older dev-boxes / CI runners), so
+CI continues to pin "infrastructure ready, h3 client install
+pending" as a known posture rather than a regression on those
+hosts.
 
 ---
 

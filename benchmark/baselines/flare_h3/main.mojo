@@ -27,16 +27,44 @@ file is the boot-up shim the bench harness drives.
 """
 
 from std.os import getenv
+from std.pathlib import Path
 
 from flare.quic import QuicListener, QuicServerConfig
+from flare.tls import RustlsQuicConfig
+
+
+def _load_pem(path: String) raises -> String:
+    """Read a UTF-8 PEM blob into a Mojo String.
+
+    The bench fixture lives under
+    ``tests/tls/fixtures/rustls-quic-cert/`` (an Ed25519 self-signed
+    cert generated once with ``openssl req -x509 -nodes -newkey
+    ed25519 -days 36500 -subj /CN=flare-quic-test``). The bench
+    baseline reuses it so we don't ship two copies of the same
+    fixture.
+    """
+    return Path(path).read_text()
 
 
 def main() raises:
     var port_str = getenv("FLARE_BENCH_PORT", "8443")
     var port = Int(port_str)
+    var cert_pem = _load_pem(
+        String("tests/tls/fixtures/rustls-quic-cert/cert.pem")
+    )
+    var key_pem = _load_pem(
+        String("tests/tls/fixtures/rustls-quic-cert/key.pem")
+    )
+    var rustls_cfg = RustlsQuicConfig()
+    rustls_cfg.cert_chain_pem = cert_pem^
+    rustls_cfg.private_key_pem = key_pem^
+    rustls_cfg.alpn_protocols = List[String]()
+    rustls_cfg.alpn_protocols.append(String("h3"))
+
     var cfg = QuicServerConfig()
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(port)
+    cfg.rustls_config = rustls_cfg^
     # Bench shape favors throughput; lift the per-connection
     # initial_max_data so the QUIC flow-control window doesn't
     # throttle a high-rate h2load -n large workload. The default
