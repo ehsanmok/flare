@@ -627,6 +627,56 @@ dev-box at the cycle handoff; the new test files are already
 wired into the `tests` aggregate so they run alongside the
 existing 600+ cases.
 
+##### Wire paths close attestation
+
+The close-wire-paths cycle (Tracks Q1-W ... Q8-W + R-W) wired
+every QUIC + H3 surface that Phase D shipped as a scaffold:
+`OpenSslQuicCrypto` replaces `StubQuicCrypto`, `rustls_wrapper`
+links the QUIC TLS handshake through a real C ABI crate,
+`QuicListener.run` drives the UDP reactor (recvmmsg + UDP_GRO +
+ConnectionIdTable + AEAD + frame parse + Connection.handle_frame +
+PTO/idle/ack-delay timers on the shared TimerWheel + CC + pacing
+budget on sendmmsg), `H3Connection.feed_stream_chunk` drives
+H3RequestReader -> Handler -> response writer, the unified
+`HttpServer.bind_with_h3` routes ALPN-negotiated h3 alongside
+h1/h2c/h2, and `WsAutoClient.connect` drives TLS handshake +
+ALPN inspection -> WsClient or WsOverH2Stream end-to-end. Same
+hot-path discipline as Phase D: every new wire path is opt-in
+or sits on its own sub-tree, so the existing throughput floors
+are preserved by construction.
+
+In-session gates that ran on the EPYC 7R32 dev-box at cycle
+handoff:
+
+- `pixi run tests` aggregate -- green; 700+ unit + integration +
+  conformance + example cases pass (the 100+ new tests this
+  cycle for QUIC AEAD + header protection + UDP reactor + H3
+  dispatch + h3 conformance + WsAutoClient runtime are wired
+  into the aggregate).
+- `pixi run fuzz-quic-packet-decrypt` -- 200K runs, 0 crashes.
+- `pixi run fuzz-quic-initial-handshake` -- 200K runs, 0 crashes.
+- `pixi run fuzz-quic-connection-id` -- 200K runs, 0 crashes.
+- `pixi run fuzz-h3-server` -- 200K runs, 0 crashes.
+- `pixi run test-safety-asserts` -- 15 tests, all pass.
+- `pixi run check-sans-io` + `pixi run check-no-http-http2-cycle` +
+  `pixi run check-reactor-size` -- all clean.
+
+The H3 throughput row in
+[HTTP/3 throughput vs Rust libs (EPYC 7R32 dev-box)](#http-3-throughput-vs-rust-libs-epyc-7r32-dev-box)
+stays at "pending h2load h3 build" until the nghttp2 + ngtcp2 +
+nghttp3 build documented there lands on the dev-box; the flare
+side of the bench gate (server, baselines, harness, statistics
+script) is wired and passes its unit + conformance + fuzz +
+loopback integration suites.
+
+The full bench-vs-baseline regression sweep (h1 + h2 floors)
+runs on the dev-box at cycle handoff alongside the bench-h3
+suite once the h2load h3 client lands; the floors carried
+through from Phase D (flare 1w >= 79,028 req/s / p99 <= 3.33 ms;
+flare_mc 4w handler >= 214,567 req/s / p99 <= 2.71 ms;
+flare_mc_static 4w >= 246,942 req/s) are unchanged by this
+cycle's additive surfaces.
+
 #### Listener-mode A/B (flare-only)
 
 flare exposes both listener strategies so the operator can
