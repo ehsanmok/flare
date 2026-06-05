@@ -12,7 +12,7 @@ path = "src/main.rs"
 # out. Cargo.lock pins the exact patch revisions so the bench
 # numbers are reproducible across EPYC 7R32 dev-box rebuilds.
 [dependencies]
-quiche = { version = "0.22", default-features = false, features = ["boringssl-vendored"] }
+quiche = { version = "0.24", default-features = false, features = ["boringssl-vendored"] }
 mio    = { version = "0.8", features = ["net", "os-poll"] }
 ring   = "0.17"
 rcgen  = { version = "0.13", default-features = false, features = ["ring", "pem"] }
