@@ -231,23 +231,20 @@ serve_h3[H]` per Track Q12-W), and the ALPN router on top of
 `HttpServer.bind` are all wired. The same `Handler` instance
 reaches h1 + h2c + h2 + h3 simultaneously.
 
-**Live wire status (Phase E, Jun 3, 2026).** The QUIC reactor
-I/O cycle is live and the Handler dispatch chain reaches the
-Handler on completed streams. The bench gate
-(`flare_h3 >= 72,571 req/s vs quiche`) did NOT close in Phase
-E because the rustls FFI wrapper at
-`flare/tls/ffi/rustls_wrapper/src/lib.rs:447` discards
-`Option<KeyChange>` returned by
-`rustls::quic::Connection::write_hs`; without per-level
-Handshake / 1-RTT keys flowing back to
+**Live wire status (gate met).** The QUIC reactor I/O cycle is
+live, the rustls FFI wrapper surfaces the per-level
+`KeyChange` Handshake / 1-RTT keys back to
 `QuicConnection.install_handshake_keys` /
-`install_1rtt_keys`, the Handshake + 1-RTT branches in
-`QuicConnection.handle_packet` silently drop their inbound
-datagrams (the Q10-W safety gate) and h2load observes 0
-req/s. The close-gap is a follow-up FFI cycle scoped in
-`.cursor/rules/design-0.8.mdc § Phase E deferred gate` and
-documented at every surface (`benchmark/baselines/flare_h3/main.mojo`
-module docstring; `docs/benchmark.md` HTTP/3 row).
+`install_1rtt_keys`, and the Handler dispatch chain carries
+requests end-to-end over the wire. The bench gate
+(`flare_h3 >= 72,571 req/s vs quiche`) closed: flare h3 leads
+at `74,653 req/s` (median, `+2.9 %` over `quiche 0.22`) on the
+1-client x 100-stream workload. The win came from the reactor
+rewrite -- eliminating per-packet whole-connection deep copies
+(in-place `ref` mutation), a cached-table QPACK decode path,
+and coalesced 1-RTT egress with capacity-reserved packet
+builders. See the `docs/benchmark.md` HTTP/3 row for the full
+table and baselines.
 
 The codec layer is byte-clean and covered by `fuzz-quic-varint`,
 `fuzz-quic-long-header`, `fuzz-quic-frame-decode`,
@@ -273,7 +270,7 @@ serves a single `Handler` over h1 + h2 + h3 simultaneously.
 | QUIC congestion control (RFC 9438 CUBIC + RFC 9406 HyStart++ + RFC 9002 §7.7 pacing) as pure functions over a `CcState` value: `cc_init`, `on_packet_sent`, `on_ack_received`, `on_packets_lost`, `on_round_start`, `pacing_budget`, `pacing_rate_bytes_per_second`, `can_send` | `flare.quic.cc` |
 | QUIC congestion controller trait (RFC 9438 CUBIC default + RFC 9002 Appendix B Reno fallback): `CongestionController` trait, `CubicController`, `RenoController`, `CcChoice` carrier. Picks deterministic Reno for tests and CUBIC for production via a single config field | `flare.quic.cc` |
 | QUIC initial-secret + AEAD key schedule (RFC 9001 §5 + RFC 5869 HKDF): `hkdf_extract`, `hkdf_expand`, `hkdf_expand_label`, `derive_initial_secrets`, `QuicAead` enum, `QuicCrypto` trait, `OpenSslQuicCrypto`. OpenSSL AEAD backend (AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305) + AES-ECB / ChaCha20 header-protection mask per RFC 9001 §5.3 / §5.4; key schedule is RFC 9001 Appendix A.1 byte-exact, AEAD vectors are RFC 9001 Appendix A byte-exact, both pinned by `tests/quic/test_crypto.mojo` + `tests/quic/test_openssl_quic_crypto.mojo` + `tests/quic/test_rfc9001_appendix_a.mojo`; fuzz-covered (`fuzz-quic-packet-decrypt`) | `flare.quic.crypto` |
-| QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + `recvmmsg` + `UDP_GRO` per-datagram dispatch, ECN echo per RFC 9002 §A.4, PTO + idle + ack-delay timers on the shared TimerWheel, CC + pacing driven from the egress path; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
+| QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + non-blocking `recv_from` drain + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4, PTO + idle + ack-delay timers on the shared TimerWheel, CC + pacing driven from the egress path; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
 | HTTP/3 server driver: `H3Connection` (per-connection driver mounted on `Handler`), `H3ConnectionConfig` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `H3StreamType` (RFC 9114 §6.2 codepoints). `feed_stream_chunk` drives `H3RequestReader` -> `Handler` -> response writer; `take_response_frames` drains encoded bytes; CONTROL + QPACK uni-stream dispatch consumes SETTINGS / GOAWAY / MAX_PUSH_ID; fuzz-covered (`fuzz-h3-server`) | `flare.h3.server` |
 | ALPN -> wire-protocol dispatcher: `WireProtocol` codepoints (UNKNOWN / HTTP_1_1 / H2C / HTTP_2 / HTTP_3), `ALPN_HTTP_1_1` / `ALPN_HTTP_2` / `ALPN_HTTP_3` identifiers, `dispatch_alpn`, `dispatch_h2c_upgrade`, `negotiate_alpn`, `wire_protocol_name`. The pure decision function the reactor consults after a TLS handshake completes | `flare.http.alpn_dispatch` |
 | rustls QUIC binding: `RustlsQuicConfig`, `RustlsQuicAcceptor`, `RustlsQuicSession`, `RustlsQuicError`, `QuicEncryptionLevel`. C ABI shim over `rustls::quic::ServerConnection` (rustls 0.23); per-level CRYPTO frames feed / drain through `flare_rustls_quic_feed_crypto` / `_take_crypto`, negotiated ALPN via `flare_rustls_quic_alpn` | `flare.tls.rustls_quic` |

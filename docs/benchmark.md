@@ -633,10 +633,11 @@ The close-wire-paths cycle (Tracks Q1-W ... Q8-W + R-W) wired
 every QUIC + H3 surface that Phase D shipped as a scaffold:
 `OpenSslQuicCrypto` replaces `StubQuicCrypto`, `rustls_wrapper`
 links the QUIC TLS handshake through a real C ABI crate,
-`QuicListener.run` drives the UDP reactor (recvmmsg + UDP_GRO +
-ConnectionIdTable + AEAD + frame parse + Connection.handle_frame +
-PTO/idle/ack-delay timers on the shared TimerWheel + CC + pacing
-budget on sendmmsg), `H3Connection.feed_stream_chunk` drives
+`QuicListener.run` drives the UDP reactor (non-blocking
+`recv_from` drain + ConnectionIdTable + AEAD + frame parse +
+Connection.handle_frame + PTO/idle/ack-delay timers on the
+shared TimerWheel + CC + pacing budget gating the egress path),
+`H3Connection.feed_stream_chunk` drives
 H3RequestReader -> Handler -> response writer, the unified
 `HttpServer.bind_with_h3` routes ALPN-negotiated h3 alongside
 h1/h2c/h2, and `WsAutoClient.connect` drives TLS handshake +
@@ -733,10 +734,11 @@ landed on the dev-box -- see the
 [HTTP/3 throughput](#http3-throughput) table below for the
 quiche / quinn / flare_h3 reading at this HEAD. As of Phase E
 flare_h3 sat at 0 req/s because the inbound post-Initial decrypt
-path had not landed; Phase F (Jun 4, 2026) closed it and the
-table now reads a stable 351 req/s. The gate is still unmet --
-the remaining bottleneck is the un-coalesced, un-batched egress
-path, not the handshake (see the table notes below).
+path had not landed; Phase F (Jun 4, 2026) closed the decrypt
+path, and the Phase F2 reactor rewrite (copy elimination,
+cached-table QPACK decode, coalesced 1-RTT egress) closed the
+gate -- the table now reads a stable 74,653 req/s, `+2.9 %`
+over the quiche floor (see the table notes below).
 
 ##### Phase E refresh attestation (Jun 3, 2026, post Track Q14-W)
 
@@ -792,11 +794,13 @@ sustains a stable `351 req/s` (sigma 3.19 %, p50 255 ms) at
 1 client x 100 streams. The `>= 72,571 req/s` gate is still
 unmet, but the bottleneck has moved off the handshake: the
 single-stream path runs at 2,145 req/s with 105 us RTT, while
-the 100-stream gate workload is egress-bound -- one un-coalesced
+the 100-stream gate workload was egress-bound -- one un-coalesced
 UDP datagram per H3 response, each built byte-by-byte through an
-AEAD + header-protection FFI crossing, with no sendmmsg/GSO.
-Closing the gate is the egress coalescing + sendmmsg/GSO
-milestone tracked in `design-0.8.mdc`.
+AEAD + header-protection FFI crossing. The Phase F2 reactor
+rewrite (copy elimination + cached-table QPACK decode + coalesced
+1-RTT egress with capacity-reserved builders) closed the gate to
+74,653 req/s; `sendmmsg`/GSO were not needed and left unbuilt.
+See the HTTP/3 throughput table for the final reading.
 
 Phase E sanitizer + fuzz + lint floors (each gate ran at its
 introducing commit; the close-wire-paths floors carry forward
@@ -1395,15 +1399,15 @@ Handshake + 1-RTT datagrams through the slot's rustls session.
 With the packet-number-space split (an inbound ACK advances
 `largest_acked_by_peer`, never the inbound pn-decode base) the
 handshake completes and h2load sustains a stable reading. The
-cross-framework gate
-(`flare_h3 median req/s >= 72,571 req/s sigma <= 8 %`) is still
-NOT met: the deficit is now egress, not the handshake. Every H3
-response leaves as its own UDP datagram with no coalescing, each
-built byte-by-byte with an AEAD + header-protection FFI crossing,
-and there is no sendmmsg/GSO batching, so the 100-stream gate
-workload is egress-bound (single-stream runs healthy at 2,145
-req/s / 105 us RTT). Closing it is the egress coalescing +
-sendmmsg/GSO milestone scoped in `design-0.8.mdc`.** Stock
+Phase F2 reactor rewrite then closed the cross-framework gate
+(`flare_h3 median req/s >= 72,571 req/s sigma <= 8 %`): flare h3
+leads at 74,653 req/s (median, `+2.9 %` over quiche, sigma
+`0.50 %`). The win came from eliminating per-packet
+whole-connection deep copies (in-place `ref` mutation), a
+cached-table QPACK decode path, and coalesced 1-RTT egress with
+capacity-reserved packet builders -- not from syscall batching
+(`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed
+without them). See the table and reading order below.** Stock
 Ubuntu's
 ``nghttp2-client`` (1.43) predates h3 support; conda-forge's
 nghttp2 (1.68) ships without ``h2load``. The h2load binary

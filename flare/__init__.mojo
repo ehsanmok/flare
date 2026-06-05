@@ -100,8 +100,9 @@ flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  RFC 9000 §18 transport parameters, RFC 9000 §3 /
                  §13 connection + stream state machines, CUBIC +
                  HyStart++ congestion controller per RFC 9438 /
-                 RFC 9406 / RFC 9002 §7.7); reactor + TLS drive ship
-                 later alongside the QUIC server
+                 RFC 9406 / RFC 9002 §7.7), plus the live ``QuicListener``
+                 UDP reactor and the rustls QUIC TLS drive that carry
+                 HTTP/3 end-to-end
 flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  request-stream reader (``H3RequestReader`` +
                  ``H3RequestEventHandler`` + ``feed_into[H]`` --

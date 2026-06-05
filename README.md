@@ -28,7 +28,7 @@ def main() raises:
 
 ## Why flare
 
-- **Batteries included:** HTTP/1.1 + HTTP/2, WebSocket (RFC 6455 + permessage-deflate with context-takeover) with an ALPN-driven `WsAutoClient` that picks h1 vs RFC 8441 h2-tunnel, TLS 1.2/1.3 with ALPN + a wire-protocol dispatcher (`flare.http.alpn_dispatch`) for routing h1 / h2c / h2 / h3, signed cookies, sessions, multipart, gzip + brotli, CORS, static files, SSE, templates with `{% block %}` / `{% extends %}` inheritance, RFC 9111 HTTP cache (`Cache[Inner, S]` middleware over `InMemoryCacheStore`, conditional revalidation), gRPC sans-I/O codec primitives (LPM framing + Status + Metadata) with the unary server adapter on top, an OpenAPI 3.1 spec emitter, sans-I/O HTTP/3 + QUIC codec primitives plus the QUIC reactor / `H3Connection` driver / rustls QUIC binding scaffolds (the wire I/O backend behind those scaffolds is in flight; the scaffolds raise on the wire paths until it lands), `Retry` + `PostHocDeadline` reliability middleware, mTLS, and the PROXY protocol all live in `flare/`. Full inventory in [`docs/features.md`](docs/features.md).
+- **Batteries included:** HTTP/1.1 + HTTP/2, WebSocket (RFC 6455 + permessage-deflate with context-takeover) with an ALPN-driven `WsAutoClient` that picks h1 vs RFC 8441 h2-tunnel, TLS 1.2/1.3 with ALPN + a wire-protocol dispatcher (`flare.http.alpn_dispatch`) for routing h1 / h2c / h2 / h3, signed cookies, sessions, multipart, gzip + brotli, CORS, static files, SSE, templates with `{% block %}` / `{% extends %}` inheritance, RFC 9111 HTTP cache (`Cache[Inner, S]` middleware over `InMemoryCacheStore`, conditional revalidation), gRPC sans-I/O codec primitives (LPM framing + Status + Metadata) with the unary server adapter on top, an OpenAPI 3.1 spec emitter, full HTTP/3 over QUIC (sans-I/O codec primitives plus the live `QuicListener` UDP reactor, `H3Connection` driver, and rustls QUIC binding carrying requests end-to-end -- see the [match-or-beat-quiche bench](#performance)), `Retry` + `PostHocDeadline` reliability middleware, mTLS, and the PROXY protocol all live in `flare/`. Full inventory in [`docs/features.md`](docs/features.md).
 - **Composable by types, not callbacks:** `Handler` is a trait. `Router`, middleware, and typed extractors (`PathInt`, `QueryInt`, `Form[T]`, `Json[T]`, `Cookies`) compose by nesting structs. The compiler monomorphises the handler chain into one direct call sequence per request type — no virtual dispatch through the chain.
 - **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics. A `TestClient[H]` drives handlers in-process without binding a port for fast unit tests.
 - **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`). On a 4-worker plaintext bench, flare's handler path posts the best median p99 of the pack against `hyper` / `axum` / `actix_web`. [Numbers below.](#performance)
@@ -311,15 +311,14 @@ flare.quic     Sans-I/O QUIC v1 codec primitives: varint + long/short
                RFC 5869 HKDF key schedule behind a `QuicCrypto` trait,
                and the `CongestionController` trait (CUBIC default +
                Reno fallback). The `QuicListener` + `QuicConnection` +
-               `ConnectionIdTable` reactor scaffold and the
-               `RustlsQuicAcceptor` binding pin the typed boundary;
-               the UDP read loop, the OpenSSL AEAD backend, and the
-               rustls Rust crate behind those scaffolds are in flight.
+               `ConnectionIdTable` run the live UDP reactor; the
+               `RustlsQuicAcceptor` binding drives the QUIC TLS
+               handshake and per-level keys end-to-end.
 flare.h3       Sans-I/O HTTP/3 frame codec + SETTINGS payload + the
-               `H3RequestReader` state machine + response writer.
-               `H3Connection` driver scaffold mounts on the same
-               `Handler` trait the h1 / h2 paths use; per-stream feed
-               + take is in flight.
+               `H3RequestReader` state machine + response writer. The
+               `H3Connection` driver mounts on the same `Handler` trait
+               the h1 / h2 paths use and is driven per-stream by the
+               QUIC reactor over the wire.
 flare.crypto   HMAC-SHA256, base64url (signed cookies, sessions)
 flare.tls      TLS 1.2/1.3 (OpenSSL, both client and server, session
                resumption via RFC 5077 tickets + RFC 8446 §4.6.1)

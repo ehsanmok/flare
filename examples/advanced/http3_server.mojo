@@ -22,23 +22,17 @@ Walks the production shape of an HTTP/3 server:
   :meth:`flare.http.HttpServer.route_alpn` to pick the matching
   driver per connection.
 
-Phase E live wire status: the QUIC reactor I/O cycle is live
-and Handler dispatch reaches the Handler on completed streams.
-The rustls FFI wrapper at
-``flare/tls/ffi/rustls_wrapper/src/lib.rs:447`` currently
-discards the ``Option<KeyChange>`` returned by
-``rustls::quic::Connection::write_hs``, so per-level Handshake
-/ 1-RTT keys never flow back to
+Live wire status: the QUIC reactor I/O cycle is live, the
+rustls FFI wrapper surfaces the per-level ``KeyChange``
+Handshake / 1-RTT keys back to
 ``QuicConnection.install_handshake_keys`` /
-``install_1rtt_keys`` and the post-Initial AEAD branches in
-``handle_packet`` silently drop inbound datagrams. Closing the
-gap is a follow-up FFI cycle scoped in
-``.cursor/rules/design-0.8.mdc § Phase E deferred gate``;
-until it lands, this example's ``serve_h3`` loop boots, binds,
-and decrypts the first Initial datagram from each peer, but
-does not yet sustain a full request-response round-trip over
-the wire. The shared-Handler dispatch is unit-tested
-end-to-end via ``tests/h3/test_h3_end_to_end.mojo``.
+``install_1rtt_keys``, and this example's ``serve_h3`` loop
+sustains a full request-response round-trip over the wire. The
+HTTP/3 bench gate is met: flare h3 leads at 74,653 req/s
+(median, +2.9 % over quiche 0.22) on the 1-client x 100-stream
+workload -- see ``docs/benchmark.md`` for the full table. The
+shared-Handler dispatch is also unit-tested end-to-end via
+``tests/h3/test_h3_end_to_end.mojo``.
 
 Run:
     pixi run example-http3-server
@@ -181,8 +175,7 @@ def main() raises:
     #
     # which blocks driving the QUIC reactor + H3 Handler
     # dispatch until ``QuicListener.shutdown`` flips the stop
-    # flag. The Phase E deferred gate (rustls KeyChange FFI
-    # bridge) is what's still pending before that loop sustains
-    # a full request-response round-trip end-to-end.
+    # flag. That loop sustains a full request-response
+    # round-trip end-to-end over the wire (h3 bench gate met).
 
     print("== done ==")

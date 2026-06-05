@@ -118,19 +118,20 @@ flare.quic     Sans-I/O QUIC v1 codec primitives + pure state
                `protect_handshake` / `unprotect_1rtt` /
                `protect_1rtt` helpers per RFC 9001 §5.4.
                `flare.quic.server` runs the live UDP reactor
-               loop per Phase E Track Q11-W:
-               `QuicListener.run` binds, `recvmmsg` + `UDP_GRO`
-               feed `ConnectionIdTable.lookup`, the per-datagram
-               bytes flow through `OpenSslQuicCrypto.decrypt` ->
+               loop: `QuicListener.run` binds, a non-blocking
+               `recv_from` drain feeds `ConnectionIdTable.lookup`,
+               the per-datagram bytes flow through
+               `OpenSslQuicCrypto.decrypt` ->
                `parse_frame_into[H]` -> `Connection.handle_frame`
                -> `ConnectionEvents`; each tick drains the
-               per-connection `tls_egress_queues` via
-               `_drain_and_send` + `_build_initial_response` ->
+               per-connection egress, coalescing ACK / flow-control
+               / HANDSHAKE_DONE / H3 STREAM frames into single
+               1-RTT datagrams via `_drain_1rtt_coalesced` ->
                header-protection -> `send_to(peer)`; PTO + idle
                + ack-delay timers sit on the shared
                `flare.runtime.TimerWheel`; CC + pacing budget
-               gate `sendmmsg` on the egress path. ECN is
-               echoed per RFC 9002 §A.4.
+               gate the egress path. ECN is echoed per
+               RFC 9002 §A.4.
 flare.h3       Sans-I/O HTTP/3 codec primitives: frame codec +
                SETTINGS payload (RFC 9114 §7); request-stream
                state machine (`H3RequestReader` + the

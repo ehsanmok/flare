@@ -8,47 +8,24 @@ returns a 13-byte ``"Hello, World!"`` body on every request,
 matching the existing ``/plaintext`` route the bench harness
 expects.
 
-Honest status of the wire (v0.8 continuation, post Q12-W):
+Wire status (gate met):
 
 The QUIC reactor accepts datagrams, decrypts Initial packets,
 feeds the rustls handshake, and drains outbound CRYPTO bytes
-back onto the wire (Q9-W .. Q11-W). The H3 dispatch wire is
-attached + the Handler is invoked once a request stream surfaces
-(Q12-W). The remaining gap is the *rustls KeyChange -> per-level
-traffic secrets -> 1-RTT egress* chain: rustls's QUIC API
-returns ``Option<KeyChange>`` from ``write_hs`` but the FFI
-wrapper currently discards it (see
-``flare/tls/ffi/rustls_wrapper/src/lib.rs:447`` for the
-``let _maybe_keys = ...`` site). Without per-level traffic
-secrets, the Handshake + 1-RTT branches in
-:meth:`QuicConnection.handle_packet` drop their inbound
-datagrams silently (the Q10-W safety gate) and the egress side
-has no key to protect a 1-RTT short-header packet with.
+back onto the wire. The rustls FFI wrapper surfaces the
+per-level ``KeyChange`` Handshake / 1-RTT keys back to
+:meth:`QuicConnection.install_handshake_keys` /
+``install_1rtt_keys``, so the Handshake + 1-RTT branches in
+:meth:`QuicConnection.handle_packet` decrypt their inbound
+datagrams and the egress side protects 1-RTT short-header
+packets. The H3 dispatch wire is attached + the Handler is
+invoked once a request stream surfaces, and the loop sustains a
+full request-response round-trip over the wire.
 
-What that means for the bench harness:
-
-* The binary binds + accepts a UDP socket cleanly.
-* h2load's first Initial datagram is decrypted + fed into rustls.
-* rustls produces a ServerHello which is wrapped in a CRYPTO
-  frame and emitted as a protected server Initial.
-* h2load's Handshake-level reply lands, but the slot's
-  Handshake reader_secret stays empty so the packet is silently
-  dropped -- h2load eventually times out the connection.
-
-Closing this gap is the Q13-W follow-up (see the design notebook):
-either extend the rustls FFI to surface
-``KeyChange::Handshake { keys }`` + ``KeyChange::OneRtt { keys }``
-to the Mojo side (preferred -- minimal Mojo-side churn) or
-mirror the rustls API by deriving 1-RTT keys ourselves once the
-TLS handshake completes (more code, no FFI extension required).
 The bench gate ``flare_h3 median req/s >= 72,571 (quiche
-floor)`` is documented as deferred-to-the-follow-up commit in
-``docs/benchmark.md`` per the Track Q14-W docs sweep.
-
-The binary stays runnable today so the harness can verify the
-boot-up path + the listener bind + the Handler-mounted serve
-loop; the actual request-rate floor lands once the key bridge
-is wired.
+floor)`` is met: flare h3 leads at 74,653 req/s (median, +2.9 %
+over quiche 0.22) on the 1-client x 100-stream workload. See
+``docs/benchmark.md`` for the full table and baselines.
 """
 
 from std.os import getenv
