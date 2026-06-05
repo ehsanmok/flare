@@ -55,6 +55,8 @@ input; the unit test suite covers RFC 7541 Appendix C.4 fixtures
 plus the three error variants.
 """
 
+from std.collections import InlineArray
+
 from .hpack_huffman import (
     HuffmanError,
     _build_decode_lookup,
@@ -107,6 +109,33 @@ def _build_fast_table() -> List[UInt16]:
     return table^
 
 
+def _make_root_table() -> InlineArray[UInt16, 256]:
+    """Comptime-foldable twin of :func:`_build_fast_table`.
+
+    Returns the same 256-entry 8-bit fast lookup as an
+    ``InlineArray`` so it can be materialized once into the
+    :data:`_ROOT_TABLE` alias at compile time -- the decoder then
+    pays zero per-call table-build cost (the build was previously
+    ~256 iterations of canonical-table accessors on every header
+    string, which dominated QPACK decode under load).
+    """
+    var table = InlineArray[UInt16, 256](fill=UInt16(0))
+    for sym in range(256):
+        var clen = _hpack_table_length(sym)
+        if clen <= 8:
+            var code = _hpack_table_code(sym)
+            var shift = 8 - clen
+            var base = code << shift
+            var fanout = 1 << shift
+            for j in range(fanout):
+                table[base + j] = UInt16((sym << 8) | clen)
+    return table^
+
+
+comptime _ROOT_TABLE = _make_root_table()
+"""The 256-entry 8-bit fast lookup, built once at compile time."""
+
+
 def huffman_decode_simd(
     input: Span[UInt8, _], mut output: List[UInt8]
 ) raises HuffmanError:
@@ -136,7 +165,6 @@ def huffman_decode_simd(
     # Pre-size the output buffer with the same upper bound the
     # scalar codec uses (one output byte costs >=5 input bits).
     output.reserve(len(output) + ((n * 8) + 4) // 5)
-    var table = _build_fast_table()
     var bits = UInt64(0)
     var nbits = 0
     var i = 0
@@ -148,7 +176,7 @@ def huffman_decode_simd(
         # accumulator currently holds.
         while nbits >= 8:
             var top = Int((bits >> UInt64(nbits - 8)) & UInt64(0xFF))
-            var entry = Int(table[top])
+            var entry = Int(_ROOT_TABLE[top])
             var clen = entry & 0xFF
             if clen > 0:
                 var sym = entry >> 8

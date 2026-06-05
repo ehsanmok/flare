@@ -121,7 +121,9 @@ def _hpack_table_code(symbol: Int) -> Int:
     """Return the Huffman code for a symbol in [0, 256].
 
     Implemented as a straight switch on symbol so the compiler
-    can fold the table into the instruction stream.
+    can fold the table into the instruction stream. Pure integer
+    logic so it is comptime-foldable for the cached decode table
+    in ``hpack_huffman_simd``.
     """
     if symbol == 0:
         return 0x1FF8

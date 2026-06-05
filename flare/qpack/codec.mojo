@@ -56,6 +56,7 @@ from flare.http2.hpack import (
     decode_integer,
     encode_integer,
 )
+from flare.http.hpack_huffman_simd import huffman_decode_simd
 from flare.http.hpack_huffman import (
     HuffmanError,
     huffman_decode,
@@ -65,6 +66,7 @@ from flare.http.hpack_huffman import (
 
 from .static_table import (
     QPACK_STATIC_TABLE_SIZE,
+    _qpack_static_table,
     static_table_find,
     static_table_find_name,
     static_table_lookup,
@@ -90,10 +92,10 @@ def _encode_string_literal(
     longer (a real concern for already-compressed payloads).
     """
     var raw = value.as_bytes()
-    var raw_list = List[UInt8]()
+    var raw_list = List[UInt8](capacity=len(raw))
     for b in raw:
         raw_list.append(b)
-    var encoded = List[UInt8]()
+    var encoded = List[UInt8](capacity=len(raw))
     huffman_encode(raw_list, encoded)
     var huff_len = len(encoded)
     var raw_len = len(raw_list)
@@ -144,16 +146,28 @@ def encode_field_section(
     out.append(UInt8(0x00))
     # Sign + Delta Base; sign=0 + 7-bit prefix integer 0 -> 0x00.
     out.append(UInt8(0x00))
+    # Build the static table once for the whole field section
+    # instead of rebuilding all 99 entries inside static_table_find
+    # / static_table_find_name on every header.
+    var stbl = _qpack_static_table()
     for i in range(len(headers)):
         var h = headers[i].copy()
-        var idx = static_table_find(h.name, h.value)
+        var idx = -1
+        for j in range(QPACK_STATIC_TABLE_SIZE):
+            if stbl[j].name == h.name and stbl[j].value == h.value:
+                idx = j
+                break
         if idx >= 0:
             # 4.5.2 Indexed Field Line: 1Txxxxxx, T=1 for static,
             # 6-bit prefix integer for the index. Prefix byte
             # 0xC0 carries the high "1T" bits.
             encode_integer(out, idx, 6, UInt8(0xC0))
             continue
-        var name_idx = static_table_find_name(h.name)
+        var name_idx = -1
+        for j in range(QPACK_STATIC_TABLE_SIZE):
+            if stbl[j].name == h.name:
+                name_idx = j
+                break
         if name_idx >= 0:
             # 4.5.4 Literal Field Line With Name Reference:
             # 01NTxxxx, T=1 for static, 4-bit prefix index.
@@ -195,21 +209,28 @@ def _decode_string_literal(
     var n = ip.value
     if ip.offset + n > len(buf):
         raise Error("qpack: literal payload truncated")
-    var raw = List[UInt8]()
-    for i in range(ip.offset, ip.offset + n):
-        raw.append(buf[i])
-    var bytes: List[UInt8]
-    if huffman:
-        bytes = List[UInt8]()
-        huffman_decode(Span[UInt8, _](raw), bytes)
-    else:
-        bytes = raw^
+    # Slice the payload directly out of the input span instead of
+    # rebuilding it byte-by-byte; the per-byte append loop here was a
+    # top _realloc cost under request concurrency.
+    var payload = buf[ip.offset : ip.offset + n]
     # QPACK string literals carry token-shaped ASCII per RFC 9204 §4
-    # (after any Huffman decode); the per-char ``s += chr(...)`` loop
-    # used here previously allocated per byte. The shared
-    # ``ascii_unchecked_string`` helper builds a ``String`` of the
-    # exact length with one ``memcpy`` and no UTF-8 validation pass.
-    var s = ascii_unchecked_string(Span[UInt8, _](bytes))
+    # (after any Huffman decode); ``ascii_unchecked_string`` builds a
+    # ``String`` of the exact length with one ``memcpy`` and no UTF-8
+    # validation pass.
+    if huffman:
+        # Huffman expands ~8:5 worst case; reserve a generous estimate
+        # up front so the decode loop fills one allocation instead of
+        # growing the backing store byte-by-byte (a top allocator cost
+        # under request concurrency).
+        var bytes = List[UInt8](capacity=n + (n // 2) + 8)
+        # Cached-table decoder (see hpack_huffman_simd): O(1) per
+        # short code via the comptime _ROOT_TABLE instead of the
+        # scalar codec's per-byte 257-symbol linear scan, which
+        # dominated QPACK decode CPU under request concurrency.
+        huffman_decode_simd(payload, bytes)
+        var s = ascii_unchecked_string(Span[UInt8, _](bytes))
+        return Tuple[String, Int](s^, ip.offset + n)
+    var s = ascii_unchecked_string(payload)
     return Tuple[String, Int](s^, ip.offset + n)
 
 
@@ -251,6 +272,11 @@ def decode_field_section(
     # parse the byte to advance the cursor.
     var base = decode_integer(buf, ric.offset, 7)
     var pos = base.offset
+    # Build the static table once for the whole field section; the
+    # decoder hits it on every indexed / name-reference line, and
+    # rebuilding all 99 (name, value) pairs per line was a top
+    # decode-side CPU cost under request concurrency.
+    var stbl = _qpack_static_table()
     while pos < len(buf):
         var b0 = buf[pos]
         if (b0 & UInt8(0x80)) != UInt8(0):
@@ -262,8 +288,11 @@ def decode_field_section(
                     " table not supported"
                 )
             var ip = decode_integer(buf, pos, 6)
-            var entry = static_table_lookup(ip.value)
-            headers.append(entry.copy())
+            if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
+                raise Error(
+                    "qpack: static index " + String(ip.value) + " out of range"
+                )
+            headers.append(stbl[ip.value].copy())
             pos = ip.offset
             continue
         if (b0 & UInt8(0x40)) != UInt8(0):
@@ -275,9 +304,14 @@ def decode_field_section(
                     " table not supported"
                 )
             var ip = decode_integer(buf, pos, 4)
-            var entry = static_table_lookup(ip.value)
+            if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
+                raise Error(
+                    "qpack: static name index "
+                    + String(ip.value)
+                    + " out of range"
+                )
             var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
-            headers.append(QpackHeader(entry.name, lit[0]))
+            headers.append(QpackHeader(stbl[ip.value].name, lit[0]))
             pos = lit[1]
             continue
         if (b0 & UInt8(0x20)) != UInt8(0):
