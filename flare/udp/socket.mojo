@@ -359,6 +359,33 @@ struct UdpSocket(Movable):
         """
         self._socket.set_recv_timeout(ms)
 
+    def set_recv_buffer(self, bytes: Int) raises:
+        """Request a kernel receive-buffer size via ``SO_RCVBUF``.
+
+        The kernel doubles the request and clamps it to
+        ``net.core.rmem_max``; the effective size may be smaller. A
+        multi-MB buffer absorbs datagram bursts so the kernel does not
+        drop packets between reactor ticks under load.
+
+        Args:
+            bytes: Requested receive-buffer size in bytes.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        self._socket.set_recv_buffer(bytes)
+
+    def set_send_buffer(self, bytes: Int) raises:
+        """Request a kernel send-buffer size via ``SO_SNDBUF``.
+
+        Args:
+            bytes: Requested send-buffer size in bytes.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        self._socket.set_send_buffer(bytes)
+
     def set_broadcast(self, enabled: Bool) raises:
         """Enable or disable sending to broadcast addresses.
 

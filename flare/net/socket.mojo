@@ -46,6 +46,8 @@ from ._libc import (
     SO_KEEPALIVE,
     SO_RCVTIMEO,
     SO_SNDTIMEO,
+    SO_RCVBUF,
+    SO_SNDBUF,
     SO_NOSIGPIPE,
     TCP_NODELAY,
     IPPROTO_TCP,
@@ -320,6 +322,34 @@ struct RawSocket(Movable):
         """
         self._set_timeval_opt(SO_SNDTIMEO, ms)
 
+    def set_recv_buffer(self, bytes: Int) raises:
+        """Request a kernel receive-buffer size via ``SO_RCVBUF``.
+
+        The kernel doubles the request for bookkeeping and clamps it to
+        ``net.core.rmem_max``; the effective size may be smaller than
+        ``bytes``. Larger buffers absorb datagram bursts so the kernel
+        does not drop packets between reactor ticks (which would force
+        the peer into PTO backoff under load).
+
+        Args:
+            bytes: Requested receive-buffer size in bytes.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        self._set_int_opt(SOL_SOCKET, SO_RCVBUF, bytes)
+
+    def set_send_buffer(self, bytes: Int) raises:
+        """Request a kernel send-buffer size via ``SO_SNDBUF``.
+
+        Args:
+            bytes: Requested send-buffer size in bytes.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        self._set_int_opt(SOL_SOCKET, SO_SNDBUF, bytes)
+
     def set_nonblocking(self, enabled: Bool) raises:
         """Toggle non-blocking mode on the socket.
 
@@ -422,6 +452,24 @@ struct RawSocket(Movable):
         """
         var v = stack_allocation[1, c_int]()
         v.init_pointee_copy(c_int(1) if value else c_int(0))
+        var rc = _setsockopt(self.fd, level, opt, v.bitcast[UInt8](), c_uint(4))
+        if rc < 0:
+            var e = get_errno()
+            raise NetworkError(_os_error("setsockopt"), Int(e.value))
+
+    def _set_int_opt(self, level: c_int, opt: c_int, value: Int) raises:
+        """Helper: call ``setsockopt`` with an ``Int32`` value.
+
+        Args:
+            level: Option level (e.g. ``SOL_SOCKET``).
+            opt: Option name (e.g. ``SO_RCVBUF``).
+            value: The integer option value.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        var v = stack_allocation[1, c_int]()
+        v.init_pointee_copy(c_int(value))
         var rc = _setsockopt(self.fd, level, opt, v.bitcast[UInt8](), c_uint(4))
         if rc < 0:
             var e = get_errno()

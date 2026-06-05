@@ -62,6 +62,8 @@ comptime SO_RCVTIMEO: c_int = c_int(
 comptime SO_SNDTIMEO: c_int = c_int(
     _pm["SO_SNDTIMEO", linux=21, macos=0x1005]()
 )
+comptime SO_SNDBUF: c_int = c_int(_pm["SO_SNDBUF", linux=7, macos=0x1001]())
+comptime SO_RCVBUF: c_int = c_int(_pm["SO_RCVBUF", linux=8, macos=0x1002]())
 
 # ── TCP options ───────────────────────────────────────────────────────────────
 comptime TCP_NODELAY: c_int = 1
