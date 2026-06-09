@@ -302,5 +302,71 @@ def test_tls_server_not_implemented_default_message() raises:
     assert_true(e.message.find("scaffolding only") >= 0)
 
 
+# ── FFI path NUL-termination hardening (follow-up to the SNI fix) ──────────
+#
+# Cert / key / CA paths reach OpenSSL through the same String -> char*
+# FFI hand-off that corrupted the SNI host: a path materialized from a
+# byte-slice (the idiom Url.parse and the config builders use) is not
+# NUL-terminated under unsafe_ptr, so the C-side file open reads past it.
+# These drive the loaders with slice-derived paths and assert the load
+# still succeeds, guarding the as_c_string_slice hardening in
+# flare/tls/_server_ffi.mojo and flare/tls/stream.mojo.
+
+
+def _slice_derived(path: String) -> String:
+    """Return ``path`` as a String materialized from a byte-slice of a
+    larger backing buffer -- the non-NUL-terminated shape (matching
+    ``Url.parse(...).host``) that the FFI loaders must NUL-terminate
+    before handing the pointer to OpenSSL."""
+    var backing = path + "/sentinel-not-part-of-the-path"
+    return String(unsafe_from_utf8=backing.as_bytes()[: len(path)])
+
+
+def test_acceptor_construct_slice_derived_paths() raises:
+    """``_do_ssl_ctx_new_server`` (cert + key load) succeeds when the
+    paths are slice-derived (non-NUL-terminated) rather than literals."""
+    var cfg = TlsServerConfig(
+        cert_file=_slice_derived(_CERT), key_file=_slice_derived(_KEY)
+    )
+    var acc = TlsAcceptor(cfg^)
+    assert_equal(acc.config.cert_file, _CERT)
+    assert_equal(acc.config.key_file, _KEY)
+
+
+def test_acceptor_reload_slice_derived_paths() raises:
+    """``_do_ssl_ctx_reload`` re-reads slice-derived paths without
+    corruption."""
+    var cfg = TlsServerConfig(
+        cert_file=_slice_derived(_CERT), key_file=_slice_derived(_KEY)
+    )
+    var acc = TlsAcceptor(cfg^)
+    acc.reload()
+
+
+def test_acceptor_mtls_slice_derived_ca() raises:
+    """``_do_ssl_ctx_set_verify_client_cert`` (mTLS CA load) succeeds with
+    a slice-derived CA path."""
+    var cfg = TlsServerConfig(
+        cert_file=_slice_derived(_CERT),
+        key_file=_slice_derived(_KEY),
+        require_client_cert=True,
+        client_ca_bundle=_slice_derived(_CERT),  # self-signed: its own CA
+    )
+    var acc = TlsAcceptor(cfg^)
+    assert_true(acc.config.require_client_cert)
+
+
+def test_slice_derived_missing_cert_still_raises() raises:
+    """Negative control: NUL-terminating the path must not mask a
+    genuinely missing file -- a bad slice-derived path still fails fast
+    at construction."""
+    var cfg = TlsServerConfig(
+        cert_file=_slice_derived("/nonexistent/flare-test/cert.pem"),
+        key_file=_slice_derived(_KEY),
+    )
+    with assert_raises():
+        _ = TlsAcceptor(cfg^)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -67,28 +67,6 @@ from .error import (
 comptime _CERT_SUBJ_LEN: Int = 512
 
 
-@always_inline
-def _c_str(s: String) -> Int:
-    """Return a C ``char*`` (as ``Int``) pointing to ``s``'s data.
-
-    Safety: The returned pointer is valid only as long as ``s`` is alive.
-    Never store the returned ``Int`` beyond the lifetime of ``s``.
-
-    Args:
-        s: Mojo ``String`` whose null-terminated bytes are to be passed to C.
-
-    Returns:
-        Integer representation of the ``const char*`` pointer.
-
-    Caution: ``unsafe_ptr`` is only incidentally NUL-terminated for
-    small/static strings; a ``String`` materialised from a ``StringSlice``
-    is not. Callers passing slice-derived strings (e.g. an SNI hostname from
-    ``Url.parse(...).host``) must NUL-terminate first via
-    ``String.as_c_string_slice`` — see ``_do_ssl_connect``.
-    """
-    return Int(s.unsafe_ptr())
-
-
 # ── Borrow helpers (one per FFI export) ──────────────────────────────────────
 
 
@@ -140,21 +118,34 @@ def _do_ssl_ctx_set_verify_peer(
 
 
 def _do_ssl_ctx_load_ca_bundle(
-    read lib: OwnedDLHandle, ctx: Int, ca_path: String
+    read lib: OwnedDLHandle, ctx: Int, var ca_path: String
 ) -> Int:
     var f = lib.get_function[def(Int, Int) thin abi("C") -> c_int](
         "flare_ssl_ctx_load_ca_bundle"
     )
-    return Int(f(ctx, _c_str(ca_path)))
+    # NUL-terminate in place before the C call. A path materialized from
+    # a StringSlice is not NUL-terminated under unsafe_ptr, so OpenSSL's
+    # file open would read past it (same defect as the SNI host fixed in
+    # _do_ssl_connect). `ca_path` is owned and outlives the call; `ca_c`
+    # views its now-terminated buffer.
+    var ca_c = ca_path.as_c_string_slice()
+    return Int(f(ctx, Int(ca_c.unsafe_ptr())))
 
 
 def _do_ssl_ctx_load_cert_key(
-    read lib: OwnedDLHandle, ctx: Int, cert_path: String, key_path: String
+    read lib: OwnedDLHandle,
+    ctx: Int,
+    var cert_path: String,
+    var key_path: String,
 ) -> Int:
     var f = lib.get_function[def(Int, Int, Int) thin abi("C") -> c_int](
         "flare_ssl_ctx_load_cert_key"
     )
-    return Int(f(ctx, _c_str(cert_path), _c_str(key_path)))
+    # See _do_ssl_ctx_load_ca_bundle: NUL-terminate slice-derived paths
+    # in place. Both owned args outlive the single FFI call.
+    var cert_c = cert_path.as_c_string_slice()
+    var key_c = key_path.as_c_string_slice()
+    return Int(f(ctx, Int(cert_c.unsafe_ptr()), Int(key_c.unsafe_ptr())))
 
 
 def _do_ssl_ctx_set_alpn_protos(

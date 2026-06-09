@@ -55,26 +55,29 @@ from ..net import _find_flare_lib
 # ── FFI handle wrappers ────────────────────────────────────────────────────
 
 
-def _c_str(s: String) -> Int:
-    """Return ``s``'s UTF-8 byte pointer as an ``Int`` for FFI
-    pass-through. ``s`` must outlive the call."""
-    return Int(s.unsafe_ptr())
-
-
 # ── Borrow helpers (one per FFI export) ───────────────────────────────────
 #
 # Every helper takes ``read lib: OwnedDLHandle`` and does both
 # ``get_function`` and the call inside the borrow, so the dylib
 # stays mapped across the entire FFI surface.
+#
+# Path arguments are taken as owned ``var`` and NUL-terminated in place
+# with ``as_c_string_slice`` before the C call: a path materialized from
+# a StringSlice is not NUL-terminated under ``unsafe_ptr``, so OpenSSL's
+# file open would read past it (same defect as the SNI host fixed in
+# ``flare/tls/stream.mojo`` ``_do_ssl_connect``). The owned arg outlives
+# the call; the slice views its now-terminated buffer.
 
 
 def _do_ssl_ctx_new_server(
-    read lib: OwnedDLHandle, cert_path: String, key_path: String
+    read lib: OwnedDLHandle, var cert_path: String, var key_path: String
 ) raises -> Int:
     var f = lib.get_function[def(Int, Int) thin abi("C") -> Int](
         "flare_ssl_ctx_new_server"
     )
-    var addr = f(_c_str(cert_path), _c_str(key_path))
+    var cert_c = cert_path.as_c_string_slice()
+    var key_c = key_path.as_c_string_slice()
+    var addr = f(Int(cert_c.unsafe_ptr()), Int(key_c.unsafe_ptr()))
     if addr == 0:
         raise Error("flare_ssl_ctx_new_server failed (see TLS error log)")
     return addr
@@ -88,12 +91,17 @@ def _do_ssl_ctx_free(read lib: OwnedDLHandle, addr: Int):
 
 
 def _do_ssl_ctx_reload(
-    read lib: OwnedDLHandle, addr: Int, cert_path: String, key_path: String
+    read lib: OwnedDLHandle,
+    addr: Int,
+    var cert_path: String,
+    var key_path: String,
 ) raises:
     var f = lib.get_function[def(Int, Int, Int) thin abi("C") -> c_int](
         "flare_ssl_ctx_reload"
     )
-    if Int(f(addr, _c_str(cert_path), _c_str(key_path))) != 0:
+    var cert_c = cert_path.as_c_string_slice()
+    var key_c = key_path.as_c_string_slice()
+    if Int(f(addr, Int(cert_c.unsafe_ptr()), Int(key_c.unsafe_ptr()))) != 0:
         raise Error("flare_ssl_ctx_reload failed")
 
 
@@ -108,12 +116,13 @@ def _do_ssl_ctx_set_alpn(
 
 
 def _do_ssl_ctx_set_verify_client_cert(
-    read lib: OwnedDLHandle, addr: Int, ca_path: String
+    read lib: OwnedDLHandle, addr: Int, var ca_path: String
 ) raises:
     var f = lib.get_function[def(Int, Int) thin abi("C") -> c_int](
         "flare_ssl_ctx_set_verify_client_cert"
     )
-    if Int(f(addr, _c_str(ca_path))) != 0:
+    var ca_c = ca_path.as_c_string_slice()
+    if Int(f(addr, Int(ca_c.unsafe_ptr()))) != 0:
         raise Error("flare_ssl_ctx_set_verify_client_cert failed")
 
 
