@@ -79,6 +79,12 @@ def _c_str(s: String) -> Int:
 
     Returns:
         Integer representation of the ``const char*`` pointer.
+
+    Caution: ``unsafe_ptr`` is only incidentally NUL-terminated for
+    small/static strings; a ``String`` materialised from a ``StringSlice``
+    is not. Callers passing slice-derived strings (e.g. an SNI hostname from
+    ``Url.parse(...).host``) must NUL-terminate first via
+    ``String.as_c_string_slice`` — see ``_do_ssl_connect``.
     """
     return Int(s.unsafe_ptr())
 
@@ -174,11 +180,17 @@ def _do_ssl_free(read lib: OwnedDLHandle, ssl: Int):
     f(ssl)
 
 
-def _do_ssl_connect(read lib: OwnedDLHandle, ssl: Int, sni: String) -> Int:
+def _do_ssl_connect(read lib: OwnedDLHandle, ssl: Int, var sni: String) -> Int:
     var f = lib.get_function[def(Int, Int) thin abi("C") -> c_int](
         "flare_ssl_connect"
     )
-    return Int(f(ssl, _c_str(sni)))
+    # NUL-terminate in place: a `sni` materialised from a StringSlice (the
+    # common case — `Url.parse(...).host`) is not NUL-terminated under
+    # `unsafe_ptr`, so OpenSSL's SSL_set_tlsext_host_name would read past the
+    # hostname and send a corrupted SNI (some servers reply handshake_failure).
+    # `as_c_string_slice` is mutating and `sni` is owned + lives across the call.
+    var cstr = sni.as_c_string_slice()
+    return Int(f(ssl, Int(cstr.unsafe_ptr())))
 
 
 def _do_ssl_read(
