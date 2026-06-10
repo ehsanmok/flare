@@ -20,18 +20,76 @@ match the byte-fast-path / keep-alive helpers in
 """
 
 from std.collections import List
-from std.memory import memcpy
+from std.memory import memcpy, UnsafePointer
 
 from flare.http.response import Response
 from flare.http.server import (
     _status_reason,
     _append_str,
-    _append_int,
 )
 from flare.http.static_response import StaticResponse
 from flare.runtime import DateCache
 
 from .keepalive_scan import _is_connection, _is_content_length, _is_date
+
+
+@always_inline
+def _decimal_digits(n: Int) -> Int:
+    """Number of ASCII digits in the non-negative decimal form of ``n``."""
+    if n < 10:
+        return 1
+    var d = 1
+    var x = n
+    while x >= 10:
+        x //= 10
+        d += 1
+    return d
+
+
+@always_inline
+def _put_str(mut buf: List[UInt8], off: Int, s: StringSlice) -> Int:
+    """memcpy ``s`` into ``buf`` at ``off``; return the advanced offset.
+
+    The caller is responsible for having sized ``buf`` to fit
+    (``serialize_response_into`` computes the exact total up front).
+    """
+    var n = s.byte_length()
+    if n > 0:
+        memcpy(dest=buf.unsafe_ptr() + off, src=s.unsafe_ptr(), count=n)
+    return off + n
+
+
+@always_inline
+def _put_int(mut buf: List[UInt8], off: Int, n: Int) -> Int:
+    """Write the ASCII decimal form of non-negative ``n`` at ``off``.
+
+    Writes digits most-significant first by computing the digit count
+    and filling backwards from the end -- no temporary buffer, no
+    allocation.
+    """
+    var p = buf.unsafe_ptr()
+    if n == 0:
+        p[off] = 48
+        return off + 1
+    var d = _decimal_digits(n)
+    var end = off + d
+    var k = end
+    var x = n
+    while x > 0:
+        k -= 1
+        p[k] = UInt8(48 + (x % 10))
+        x //= 10
+    return end
+
+
+@always_inline
+def _put_bytes(
+    mut buf: List[UInt8], off: Int, src: UnsafePointer[UInt8, _], n: Int
+) -> Int:
+    """memcpy ``n`` bytes from ``src`` into ``buf`` at ``off``."""
+    if n > 0:
+        memcpy(dest=buf.unsafe_ptr() + off, src=src, count=n)
+    return off + n
 
 
 def serialize_static_into(
@@ -98,77 +156,80 @@ def serialize_response_into(
         reason = _status_reason(resp.status)
     var body_len = len(resp.body)
 
-    var estimated = 64 + body_len
-    for i in range(resp.headers.len()):
-        estimated += (
-            resp.headers._keys[i].byte_length()
-            + resp.headers._values[i].byte_length()
-            + 4
-        )
-    write_buf.clear()
-    if write_buf.capacity < estimated:
-        write_buf.reserve(estimated)
-    var wire = write_buf^
-
-    _append_str(wire, "HTTP/1.1 ")
-    _append_int(wire, resp.status)
-    _append_str(wire, " ")
-    _append_str(wire, reason)
-    _append_str(wire, "\r\n")
-
-    for i in range(resp.headers.len()):
-        var k = resp.headers._keys[i]
-        # Case-insensitive skip of Content-Length, Connection,
-        # and Date without allocating a lowercased copy each
-        # header. Date is always emitted by us from the per-
-        # connection DateCache (RFC 9110 §6.6.1 mandates a single
-        # Date field-line).
-        if _is_content_length(k) or _is_connection(k) or _is_date(k):
-            continue
-        _append_str(wire, k)
-        _append_str(wire, ": ")
-        _append_str(wire, resp.headers._values[i])
-        _append_str(wire, "\r\n")
-
-    _append_str(wire, "Content-Length: ")
-    _append_int(wire, body_len)
-    _append_str(wire, "\r\n")
-
     # Date: RFC 9110 §6.6.1, IMF-fixdate from the per-connection
     # DateCache. The cache calls clock_gettime + (re)formats only
     # when the wall-clock second has advanced; reads on the same
-    # second return the cached 29-byte buffer directly.
+    # second return the cached buffer directly.
     date_cache.refresh()
     var date_bytes = date_cache.current_bytes()
-    _append_str(wire, "Date: ")
-    var date_old_len = len(wire)
-    wire.resize(date_old_len + len(date_bytes), UInt8(0))
-    memcpy(
-        dest=wire.unsafe_ptr() + date_old_len,
-        src=date_bytes.unsafe_ptr(),
-        count=len(date_bytes),
-    )
-    _append_str(wire, "\r\n")
+    var date_len = len(date_bytes)
+
+    # Compute the EXACT serialized length up front so the buffer is
+    # sized in a single pass. The previous form issued ~10 separate
+    # ``_append_str`` calls, each doing a ``resize(.,0)`` that
+    # zero-filled its new tail (showing up as ``__memset_avx2`` on the
+    # hot path) before the memcpy overwrote it. Sizing once and writing
+    # through a raw cursor drops both the repeated resize overhead and
+    # the redundant zero-fill -- the bytes emitted are identical.
+    #
+    # Fixed segment widths:
+    #   "HTTP/1.1 " = 9, status digits, " " = 1, reason, "\r\n" = 2
+    #   "Content-Length: " = 16, body_len digits, "\r\n" = 2
+    #   "Date: " = 6, date_bytes, "\r\n" = 2
+    #   "Connection: keep-alive\r\n" = 24  /  "Connection: close\r\n" = 19
+    #   "\r\n" = 2 (header terminator), then body
+    var total = 9 + _decimal_digits(resp.status) + 1 + reason.byte_length() + 2
+    for i in range(resp.headers.len()):
+        var k = resp.headers._keys[i]
+        # Case-insensitive skip of Content-Length, Connection, and Date
+        # without allocating a lowercased copy each header. Date is
+        # always emitted by us from the per-connection DateCache
+        # (RFC 9110 §6.6.1 mandates a single Date field-line).
+        if _is_content_length(k) or _is_connection(k) or _is_date(k):
+            continue
+        total += k.byte_length() + 2 + resp.headers._values[i].byte_length() + 2
+    total += 16 + _decimal_digits(body_len) + 2
+    total += 6 + date_len + 2
+    total += 24 if keep_alive else 19
+    total += 2
+    total += body_len
+
+    write_buf.clear()
+    write_buf.resize(unsafe_uninit_length=total)
+    var off = 0
+
+    off = _put_str(write_buf, off, "HTTP/1.1 ")
+    off = _put_int(write_buf, off, resp.status)
+    off = _put_str(write_buf, off, " ")
+    off = _put_str(write_buf, off, reason)
+    off = _put_str(write_buf, off, "\r\n")
+
+    for i in range(resp.headers.len()):
+        var k = resp.headers._keys[i]
+        if _is_content_length(k) or _is_connection(k) or _is_date(k):
+            continue
+        off = _put_str(write_buf, off, k)
+        off = _put_str(write_buf, off, ": ")
+        off = _put_str(write_buf, off, resp.headers._values[i])
+        off = _put_str(write_buf, off, "\r\n")
+
+    off = _put_str(write_buf, off, "Content-Length: ")
+    off = _put_int(write_buf, off, body_len)
+    off = _put_str(write_buf, off, "\r\n")
+
+    off = _put_str(write_buf, off, "Date: ")
+    off = _put_bytes(write_buf, off, date_bytes.unsafe_ptr(), date_len)
+    off = _put_str(write_buf, off, "\r\n")
 
     if keep_alive:
-        _append_str(wire, "Connection: keep-alive\r\n")
+        off = _put_str(write_buf, off, "Connection: keep-alive\r\n")
     else:
-        _append_str(wire, "Connection: close\r\n")
+        off = _put_str(write_buf, off, "Connection: close\r\n")
 
-    _append_str(wire, "\r\n")
+    off = _put_str(write_buf, off, "\r\n")
 
-    # Bulk-copy the body. Appending byte-by-byte from ``resp.body``
-    # dominates this function's cost on small-body responses.
     if body_len > 0:
-        var old = len(wire)
-        wire.resize(old + body_len, UInt8(0))
-        memcpy(
-            dest=wire.unsafe_ptr() + old,
-            src=resp.body.unsafe_ptr(),
-            count=body_len,
-        )
-
-    write_buf = wire^
+        _ = _put_bytes(write_buf, off, resp.body.unsafe_ptr(), body_len)
 
 
 def build_error_response(status: Int, reason: String) -> Response:
