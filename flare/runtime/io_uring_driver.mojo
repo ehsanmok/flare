@@ -393,14 +393,26 @@ struct IoUringDriver(Movable):
         var params = self._ring._params_buf
 
         # Read kernel-filled offsets.
+        #
+        # NOTE: the ``ring_entries`` field of ``io_sqring_offsets`` /
+        # ``io_cqring_offsets`` is a BYTE OFFSET into the mapped ring
+        # where the entry-count lives -- it is NOT the count itself
+        # (same contract as ``head`` / ``tail`` / ``ring_mask``). The
+        # authoritative ring sizes are the top-level
+        # ``params.sq_entries`` / ``params.cq_entries`` the kernel
+        # rounded up to a power of two; read them straight off the
+        # params buffer via the ring. Sizing the SQE / ring mmaps off
+        # the raw offset (24) undersized the SQE array to 24 slots
+        # while ``ring_mask`` reported 4095, so ``next_sqe`` handed out
+        # slots past the one mapped page and faulted under churn.
         var sq_array_off = _read_u32_le(params, _SQ_OFF_ARRAY_OFF)
-        var sq_ring_entries = _read_u32_le(params, _SQ_OFF_RING_ENTRIES_OFF)
+        var sq_ring_entries = self._ring.sq_entries()
         var sq_head_off = _read_u32_le(params, _SQ_OFF_HEAD_OFF)
         var sq_tail_off = _read_u32_le(params, _SQ_OFF_TAIL_OFF)
         var sq_ring_mask_off = _read_u32_le(params, _SQ_OFF_RING_MASK_OFF)
 
         var cq_cqes_off = _read_u32_le(params, _CQ_OFF_CQES_OFF)
-        var cq_ring_entries = _read_u32_le(params, _CQ_OFF_RING_ENTRIES_OFF)
+        var cq_ring_entries = self._ring.cq_entries()
         var cq_head_off = _read_u32_le(params, _CQ_OFF_HEAD_OFF)
         var cq_tail_off = _read_u32_le(params, _CQ_OFF_TAIL_OFF)
         var cq_ring_mask_off = _read_u32_le(params, _CQ_OFF_RING_MASK_OFF)
