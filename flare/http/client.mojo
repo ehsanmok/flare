@@ -1851,11 +1851,13 @@ def _send_h2c_via_upgrade(
         var lk = k.lower()
         if (
             lk == "host"
-            or lk == "authorization"
             or lk == "connection"
             or lk == "upgrade"
             or lk == "http2-settings"
         ):
+            continue
+        # Only skip caller's Authorization when _auth_header is already set
+        if lk == "authorization" and auth_header.byte_length() > 0:
             continue
         wire += k + ": " + extra_headers._values[i] + "\r\n"
     if len(body) > 0:
