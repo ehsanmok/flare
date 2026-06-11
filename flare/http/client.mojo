@@ -711,6 +711,13 @@ struct HttpClient(Movable):
         for i in range(extra_headers.len()):
             var k = extra_headers._keys[i]
             if k.lower() != "host":
+                # Only skip caller's Authorization when _auth_header is already set,
+                # matching the h2/h2c paths (see _build_h2_request_headers).
+                if (
+                    k.lower() == "authorization"
+                    and self._auth_header.byte_length() > 0
+                ):
+                    continue
                 wire += k + ": " + extra_headers._values[i] + "\r\n"
 
         if len(body) > 0:

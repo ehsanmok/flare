@@ -222,10 +222,145 @@ def test_unified_client_bearer_auth_h1() raises:
     assert_equal(got, "Bearer tok_abc")
 
 
+# ── Authorization header forwarding (regression) ─────────────────────────────
+# Regression: HttpClient._do_request() and _send_h2c_via_upgrade() were
+# silently dropping the caller-supplied Authorization header, blocking
+# per-request auth patterns (AWS SigV4, OAuth2 rotation, HMAC signing).
+# These tests prove the caller's Authorization reaches the wire on every
+# path, and that a client credential still wins when both are set.
+
+
+def _count_authorization_header(blob: String) -> Int:
+    """Count the number of times an "Authorization:" header appears in
+    the raw wire bytes. Used to detect the duplicate-header bug where
+    a stored credential AND a caller-set header both land on the wire."""
+    var count = 0
+    var i = 0
+    while i < blob.byte_length():
+        # Find next "Authorization:" (case-insensitive via lowercased compare)
+        if i + 14 <= blob.byte_length():
+            var tag = String("")
+            for j in range(14):
+                tag += String(blob[byte=i + j])
+            if tag.lower() == "authorization:":
+                count += 1
+        i += 1
+    return count
+
+
+def test_caller_authorization_h1_no_credential() raises:
+    """A caller-set Authorization must reach the wire on H1 when the
+    client has no stored credential. This is the primary use case for
+    per-request auth (AWS SigV4, OAuth2, HMAC)."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_echo_authorization)
+        except:
+            pass
+        exit()
+    usleep(200000)
+
+    var url = String("http://127.0.0.1:") + String(Int(port)) + String("/")
+    var got = String("")
+    var raised = False
+    try:
+        # No client credential — caller's Authorization must be the only one
+        with HttpClient() as c:
+            var req = Request(method="GET", url=url)
+            req.headers.set("Authorization", "Bearer aws4-token-xyz")
+            got = c.send(req).text()
+    except:
+        raised = True
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(
+        not raised, "HttpClient().send with caller Authorization raised"
+    )
+    assert_equal(got, "Bearer aws4-token-xyz")
+
+
+def test_caller_authorization_h2c_no_credential() raises:
+    """A caller-set Authorization must reach the wire on the H2c upgrade
+    path when the client has no stored credential."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_echo_authorization)
+        except:
+            pass
+        exit()
+    usleep(200000)
+
+    var url = String("http://127.0.0.1:") + String(Int(port)) + String("/")
+    var got = String("")
+    var raised = False
+    try:
+        with HttpClient(prefer_h2c=True) as c:
+            var req = Request(method="GET", url=url)
+            req.headers.set("Authorization", "Bearer aws4-token-h2c")
+            got = c.send(req).text()
+    except:
+        raised = True
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(
+        not raised,
+        "HttpClient(prefer_h2c=True).send with caller Authorization raised",
+    )
+    assert_equal(got, "Bearer aws4-token-h2c")
+
+
+def test_no_duplicate_authorization_h1() raises:
+    """When the client has a stored credential (BearerAuth) AND the caller
+    sets a per-request Authorization, the stored credential wins and only
+    ONE Authorization header reaches the wire. No duplicate."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_echo_authorization)
+        except:
+            pass
+        exit()
+    usleep(200000)
+
+    var base = String("http://127.0.0.1:") + String(Int(port))
+    var got = String("")
+    var raised = False
+    try:
+        # Client credential is set, caller also sets one — stored wins
+        with HttpClient(base, BearerAuth("stored-cred")) as c:
+            var req = Request(method="GET", url="/")
+            req.headers.set("Authorization", "Bearer caller-cred")
+            got = c.send(req).text()
+    except:
+        raised = True
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(not raised, "HttpClient with both creds raised")
+    # Stored credential must be the one the server sees, not the caller's
+    assert_equal(got, "Bearer stored-cred")
+
+
 def main() raises:
     test_unified_client_http_url_round_trip()
     test_unified_client_module_level_get()
     test_unified_client_h2c_prior_knowledge()
     test_unified_client_basic_auth_h2c()
     test_unified_client_bearer_auth_h1()
-    print("test_unified_http_client: 5 passed")
+    test_caller_authorization_h1_no_credential()
+    test_caller_authorization_h2c_no_credential()
+    test_no_duplicate_authorization_h1()
+    print("test_unified_http_client: 8 passed")
