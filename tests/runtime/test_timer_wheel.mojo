@@ -93,15 +93,9 @@ def test_zero_advance_fires_nothing() raises:
 # ── Cancellation ──────────────────────────────────────────────────────────────
 
 
-def test_cancel_returns_true_first_time() raises:
-    """Cancel() returns True for an active, never-before-cancelled timer."""
-    var tw = TimerWheel(now_ms=UInt64(0))
-    var id = tw.schedule(100, UInt64(1))
-    assert_true(tw.cancel(id))
-
-
-def test_cancel_returns_false_twice() raises:
-    """Second cancel() on the same id returns False."""
+def test_cancel_is_idempotent() raises:
+    """First cancel() of an active timer returns True; the second
+    cancel() of the same id returns False."""
     var tw = TimerWheel(now_ms=UInt64(0))
     var id = tw.schedule(100, UInt64(1))
     assert_true(tw.cancel(id))
