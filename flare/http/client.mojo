@@ -710,7 +710,14 @@ struct HttpClient(Movable):
         # Forward caller-supplied headers (skip Host — already set)
         for i in range(extra_headers.len()):
             var k = extra_headers._keys[i]
-            if k.lower() != "host" and k.lower() != "authorization":
+            if k.lower() != "host":
+                # Only skip caller's Authorization when _auth_header is already set,
+                # matching the h2/h2c paths (see _build_h2_request_headers).
+                if (
+                    k.lower() == "authorization"
+                    and self._auth_header.byte_length() > 0
+                ):
+                    continue
                 wire += k + ": " + extra_headers._values[i] + "\r\n"
 
         if len(body) > 0:
@@ -1851,11 +1858,13 @@ def _send_h2c_via_upgrade(
         var lk = k.lower()
         if (
             lk == "host"
-            or lk == "authorization"
             or lk == "connection"
             or lk == "upgrade"
             or lk == "http2-settings"
         ):
+            continue
+        # Only skip caller's Authorization when _auth_header is already set
+        if lk == "authorization" and auth_header.byte_length() > 0:
             continue
         wire += k + ": " + extra_headers._values[i] + "\r\n"
     if len(body) > 0:

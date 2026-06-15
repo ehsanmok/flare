@@ -666,7 +666,7 @@ def _getaddrinfo(
     var host_copy = host
     return external_call["getaddrinfo", c_int](
         host_copy.as_c_string_slice(),
-        UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=0),
+        Optional[UnsafePointer[UInt8, MutExternalOrigin]](None),
         hints.bitcast[NoneType](),
         res_slot.bitcast[NoneType](),
     )
