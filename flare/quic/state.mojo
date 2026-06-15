@@ -17,7 +17,7 @@ Public surface:
   RFC 9000 §10.
 * :class:`Connection` -- top-level container holding
   - per-side keying state (handshake_complete flag),
-  - flow-control limits + cwnd via :class:`CcState`,
+  - flow-control limits,
   - per-stream :class:`Stream` instances keyed by stream-id,
   - the timer-driven idle / pto / loss-detection deadlines.
 * :func:`handle_frame_buf` -- per-buffer ingestion entry point.
@@ -195,9 +195,7 @@ struct Connection(Copyable, Movable):
 
     Holds the connection-level state, the per-stream map, and the
     timer-shape fields the driver uses to schedule the next tick.
-    The CC state lives in :mod:`flare.quic.cc` and is owned by the
-    reactor wrapper; the connection here only tracks the data-plane
-    state machines.
+    The connection here only tracks the data-plane state machines.
 
     Uses :class:`Dict` for the stream map so the driver can look
     up by stream id in O(1); RFC 9000 caps stream ids at 2**62-1
@@ -307,9 +305,7 @@ def apply_ack(mut conn: Connection, ack: AckFrame):
     ``largest_acknowledged`` names the largest packet WE sent that
     the peer received; it lives in its own packet-number space and
     must NOT touch ``largest_received_packet`` (the largest packet
-    WE received, which seeds inbound pn reconstruction). The
-    reactor threads precise RTT samples through
-    :func:`flare.quic.cc.on_ack_received`.
+    WE received, which seeds inbound pn reconstruction).
     """
     if ack.largest_acknowledged > conn.largest_acked_by_peer:
         conn.largest_acked_by_peer = ack.largest_acknowledged

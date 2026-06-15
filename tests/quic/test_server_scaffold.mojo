@@ -21,7 +21,6 @@ Properties covered:
 from std.testing import assert_equal, assert_false, assert_true
 
 from flare.quic import (
-    CcChoice,
     ConnectionId,
     ConnectionIdTable,
     QuicAead,
@@ -47,11 +46,10 @@ def test_config_defaults() raises:
     """``QuicServerConfig.__init__`` returns the values documented
     in the design notebook -- 30 s idle timeout, 1452 B MTU,
     1 MiB initial flow control, 100 bidi streams, 3 uni streams,
-    CUBIC + AES-128-GCM by default."""
+    AES-128-GCM by default."""
     var cfg = QuicServerConfig()
     assert_equal(cfg.host, String("0.0.0.0"))
     assert_equal(cfg.port, UInt16(0))
-    assert_equal(cfg.cc_choice, CcChoice.CUBIC)
     assert_equal(cfg.aead_choice, QuicAead.AES_128_GCM)
     assert_equal(cfg.max_idle_timeout_ms, UInt64(30_000))
     assert_equal(cfg.max_udp_payload_size, UInt64(1452))
@@ -65,11 +63,9 @@ def test_config_carries_overrides() raises:
     var cfg = QuicServerConfig()
     cfg.host = String("::")
     cfg.port = UInt16(4433)
-    cfg.cc_choice = CcChoice.RENO
     cfg.max_idle_timeout_ms = UInt64(5_000)
     assert_equal(cfg.host, String("::"))
     assert_equal(cfg.port, UInt16(4433))
-    assert_equal(cfg.cc_choice, CcChoice.RENO)
     assert_equal(cfg.max_idle_timeout_ms, UInt64(5_000))
 
 
@@ -80,7 +76,6 @@ def test_quic_connection_starts_alive_in_handshake() raises:
     var peer = _make_cid(UInt8(0x20))
     var qc = QuicConnection(local, peer)
     assert_true(qc.alive)
-    assert_equal(qc.cc_choice, CcChoice.CUBIC)
     assert_false(qc.conn.handshake_complete)
 
 
@@ -95,17 +90,6 @@ def test_quic_connection_records_cids() raises:
     assert_equal(len(qc.peer_cid.bytes), 8)
     assert_equal(Int(qc.local_cid.bytes[0]), 0x10)
     assert_equal(Int(qc.peer_cid.bytes[0]), 0x20)
-
-
-def test_quic_connection_honors_cc_override() raises:
-    """When the listener is bound with the Reno CC choice (for
-    deterministic tests), :class:`QuicConnection` reports
-    ``RENO`` so the reactor can monomorphize the right
-    controller."""
-    var local = _make_cid(UInt8(0x30))
-    var peer = _make_cid(UInt8(0x40))
-    var qc = QuicConnection(local, peer, CcChoice.RENO)
-    assert_equal(qc.cc_choice, CcChoice.RENO)
 
 
 def test_cid_table_register_lookup_retire() raises:
@@ -143,8 +127,7 @@ def main() raises:
     test_config_carries_overrides()
     test_quic_connection_starts_alive_in_handshake()
     test_quic_connection_records_cids()
-    test_quic_connection_honors_cc_override()
     test_cid_table_register_lookup_retire()
     test_cid_table_lookup_missing_returns_minus_one()
     test_cid_table_register_overwrites()
-    print("test_quic_server_scaffold: 8 passed")
+    print("test_quic_server_scaffold: 7 passed")

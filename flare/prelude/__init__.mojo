@@ -371,16 +371,6 @@ from ..quic import (
     new_connection as quic_new_connection,
     new_stream as quic_new_stream,
     empty_events as quic_empty_events,
-    # RFC 9438 + 9406 + 9002 §7.7 congestion controller.
-    CcState as QuicCcState,
-    cc_init as quic_cc_init,
-    on_packet_sent as quic_on_packet_sent,
-    on_ack_received as quic_on_ack_received,
-    on_packets_lost as quic_on_packets_lost,
-    on_round_start as quic_on_round_start,
-    pacing_budget as quic_pacing_budget,
-    pacing_rate_bytes_per_second as quic_pacing_rate_bytes_per_second,
-    can_send as quic_can_send,
 )
 
 # flare.qpack

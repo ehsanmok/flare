@@ -53,7 +53,6 @@ SANS_IO_FILES=(
     "flare/quic/packet.mojo"
     "flare/quic/frame.mojo"
     "flare/quic/transport_params.mojo"
-    "flare/quic/cc.mojo"
     "flare/quic/state.mojo"
     "flare/h3/request_reader.mojo"
     "flare/h3/response_writer.mojo"

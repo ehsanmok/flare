@@ -16,9 +16,7 @@ the seams every prior commit in this track wired up:
    state-machine drive (commit 2/5).
 4. ``QuicListener.timer_wheel`` -- idle timer arms on accept
    (commit 3/5).
-5. ``QuicConnection.update_on_ack`` / ``pacing_budget`` -- the
-   CC drive (commit 4/5).
-6. Track Q11-W:
+5. Track Q11-W:
    - ``QuicListener.send_to`` thin wrapper around
      ``UdpSocket.send_to``.
    - ``QuicListener._build_initial_response(slot)`` builds a

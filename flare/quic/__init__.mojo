@@ -41,13 +41,6 @@ Public re-exports:
   :func:`is_idle_timeout_expired`, :func:`connection_close`,
   the per-typed-payload ``apply_*`` helpers, and the
   ``CONN_STATE_*`` / ``STREAM_STATE_*`` constants.
-- :mod:`.cc` — CUBIC + HyStart++ congestion controller and
-  pacing budget (RFC 9438 + RFC 9406 + RFC 9002 §7.7) as
-  pure functions over a :class:`CcState` value:
-  :func:`cc_init`, :func:`on_packet_sent`,
-  :func:`on_ack_received`, :func:`on_packets_lost`,
-  :func:`on_round_start`, :func:`pacing_budget`,
-  :func:`pacing_rate_bytes_per_second`, :func:`can_send`.
 - :mod:`.crypto` — sans-I/O QUIC v1 crypto math
   (RFC 9001 §5 + RFC 5869 + RFC 8446 §7.1): HKDF-Extract,
   HKDF-Expand, HKDF-Expand-Label, RFC 9001 §5.2 initial-
@@ -178,33 +171,6 @@ from .transport_params import (
     decode_transport_parameters,
     empty_transport_parameters,
     encode_transport_parameters,
-)
-from .cc import (
-    CUBIC_BETA_DEN,
-    CUBIC_BETA_NUM,
-    CUBIC_C_DEN,
-    CUBIC_C_NUM,
-    CcChoice,
-    CcState,
-    CongestionController,
-    CubicController,
-    DEFAULT_MSS_BYTES,
-    HYSTART_HIGH_RTT_THRESHOLD_MS,
-    HYSTART_LOW_RTT_THRESHOLD_MS,
-    HYSTART_RTT_SAMPLE_COUNT,
-    INITIAL_WINDOW_PACKETS,
-    MIN_WINDOW_PACKETS,
-    PACING_GAIN_DEN,
-    PACING_GAIN_NUM,
-    RenoController,
-    can_send,
-    cc_init,
-    on_ack_received,
-    on_packet_sent,
-    on_packets_lost,
-    on_round_start,
-    pacing_budget,
-    pacing_rate_bytes_per_second,
 )
 from .crypto import (
     InitialSecrets,

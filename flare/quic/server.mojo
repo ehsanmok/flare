@@ -22,8 +22,7 @@ pacing budget gate ``sendmmsg`` on the egress path.
   :meth:`shutdown` requests a clean exit.
 - :class:`QuicConnection` -- per-connection driver that
   composes the existing :class:`flare.quic.state.Connection`
-  state machine with a :trait:`flare.quic.cc.CongestionController`
-  carrier and the rustls QUIC session.
+  state machine with the rustls QUIC session.
 - :class:`ConnectionIdTable` -- per-listener routing table from
   Connection ID to connection slot, used by the dispatch loop
   to route inbound datagrams via the Destination Connection ID
@@ -44,15 +43,6 @@ from std.os import getenv
 
 from ..net.address import IpAddr, SocketAddr
 from ..udp import UdpSocket
-from .cc import (
-    CcChoice,
-    CcState,
-    cc_init,
-    on_ack_received,
-    on_packet_sent,
-    on_packets_lost,
-    pacing_budget,
-)
 from .crypto import QuicAead
 from .frame import (
     AckFrame,
@@ -534,12 +524,6 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
     """The rustls QUIC server configuration carrier. Provides the
     certificate chain, private key, ALPN list, and 0-RTT toggle."""
 
-    var cc_choice: Int
-    """Congestion controller selector
-    (:data:`flare.quic.cc.CcChoice.CUBIC` for production,
-    :data:`flare.quic.cc.CcChoice.RENO` for deterministic tests).
-    Default: CUBIC."""
-
     var aead_choice: Int
     """AEAD selector codepoint (:class:`flare.quic.crypto.QuicAead`).
     Default: AES-128-GCM (the QUIC v1 mandatory-to-implement)."""
@@ -579,7 +563,6 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
         self.host = String("0.0.0.0")
         self.port = UInt16(0)
         self.rustls_config = RustlsQuicConfig()
-        self.cc_choice = CcChoice.CUBIC
         self.aead_choice = QuicAead.AES_128_GCM
         self.max_idle_timeout_ms = UInt64(30_000)
         self.max_udp_payload_size = UInt64(1452)
@@ -600,8 +583,6 @@ struct QuicConnection(Copyable, Movable):
 
     - The sans-I/O :class:`flare.quic.state.Connection` state
       machine.
-    - A :trait:`flare.quic.cc.CongestionController` carrier
-      (CUBIC in production, Reno in deterministic tests).
     - A :class:`flare.tls.rustls_quic.RustlsQuicSession`
       carrying the per-encryption-level keys + handshake state.
 
@@ -615,8 +596,7 @@ struct QuicConnection(Copyable, Movable):
     3. Dispatch each frame in the decrypted payload through
        :func:`flare.quic.state.handle_frame_buf`, which advances
        the per-stream + per-connection state machines.
-    4. Drive the CC controller with any newly-ACKed bytes.
-    5. Build any reply packets the state machine queued and
+    4. Build any reply packets the state machine queued and
        feed them to the rustls session for encryption.
     """
 
@@ -632,11 +612,6 @@ struct QuicConnection(Copyable, Movable):
     var peer_cid: ConnectionId
     """The Connection ID the client picked for incoming
     server-to-client packets."""
-
-    var cc_choice: Int
-    """Which congestion controller this connection runs (RENO
-    or CUBIC). Materialized monomorphically by the reactor at
-    bind time."""
 
     var alive: Bool
     """Whether the connection is still in HANDSHAKE / ESTABLISHED
@@ -660,22 +635,6 @@ struct QuicConnection(Copyable, Movable):
     """Timer-wheel id of the currently-deferred ACK timer. Set
     when ``conn.ack_pending`` flips True; cleared when the ACK
     is actually emitted."""
-
-    var cc_state: CcState
-    """Per-connection congestion-controller state. Drives the
-    cwnd + pacing budget via the pure functions in
-    :mod:`flare.quic.cc`. Initialized via :func:`cc_init` with
-    RFC 9002 §B.2 defaults; the reactor hands per-ACK +
-    per-loss samples in through :meth:`update_on_ack` /
-    :meth:`update_on_loss`."""
-
-    var last_send_us: UInt64
-    """Wall-clock timestamp (microseconds) of the most-recent
-    send-path tick on this connection. Used by the pacing
-    budget calculation: the reactor's egress path calls
-    :meth:`pacing_budget(now_us)` and the helper subtracts
-    ``last_send_us`` to get the elapsed delta the pure
-    :func:`flare.quic.cc.pacing_budget` function consumes."""
 
     var rx_handshake_secret: List[UInt8]
     """Inbound Handshake-level readiness marker (RFC 9001 §5.1).
@@ -725,20 +684,16 @@ struct QuicConnection(Copyable, Movable):
         out self,
         local_cid: ConnectionId,
         peer_cid: ConnectionId,
-        cc_choice: Int = CcChoice.CUBIC,
         idle_timeout_us: UInt64 = UInt64(30_000_000),
         initial_max_data: UInt64 = UInt64(1 << 20),
     ):
         self.conn = new_connection(idle_timeout_us, initial_max_data)
         self.local_cid = local_cid.copy()
         self.peer_cid = peer_cid.copy()
-        self.cc_choice = cc_choice
         self.alive = True
         self.idle_timer_id = UInt64(0)
         self.pto_timer_id = UInt64(0)
         self.ack_delay_timer_id = UInt64(0)
-        self.cc_state = cc_init()
-        self.last_send_us = UInt64(0)
         self.rx_handshake_secret = List[UInt8]()
         self.tx_handshake_secret = List[UInt8]()
         self.rx_1rtt_secret = List[UInt8]()
@@ -797,59 +752,6 @@ struct QuicConnection(Copyable, Movable):
         the peer's RTT estimate stays current."""
         self.ack_delay_timer_id = UInt64(0)
         self.conn.ack_pending = True
-
-    # -- Congestion-control + pacing drive ------------------------------
-
-    def update_on_ack(
-        mut self,
-        acked_bytes: UInt64,
-        rtt_us: UInt64,
-        now_us: UInt64,
-    ) -> UInt64:
-        """Advance the congestion-controller state in response to
-        an ACK that acknowledged ``acked_bytes`` of in-flight
-        payload at time ``now_us`` with RTT sample ``rtt_us``.
-
-        Delegates to the pure
-        :func:`flare.quic.cc.on_ack_received` function, which
-        dispatches between slow-start / CUBIC congestion-
-        avoidance / HyStart++ exit per RFC 9438 + RFC 9406.
-        Returns the new cwnd in bytes.
-        """
-        return on_ack_received(self.cc_state, acked_bytes, rtt_us, now_us)
-
-    def update_on_loss(mut self, lost_bytes: UInt64, now_us: UInt64) -> UInt64:
-        """Apply a loss event: shrink cwnd per the CC's loss
-        response (Reno: cwnd /= 2; CUBIC: cwnd *= 0.7) and reset
-        the slow-start exit threshold. Returns the new cwnd."""
-        return on_packets_lost(self.cc_state, lost_bytes, now_us)
-
-    def on_packet_sent_bytes(mut self, bytes: UInt64, now_us: UInt64):
-        """Update the in-flight accounting + pacing timestamp
-        when the egress path actually sends ``bytes`` of payload.
-        Wraps :func:`flare.quic.cc.on_packet_sent`; the
-        ``last_send_us`` carrier is the seam the next
-        :meth:`pacing_budget` call subtracts against."""
-        on_packet_sent(self.cc_state, bytes)
-        self.last_send_us = now_us
-
-    def pacing_budget(self, now_us: UInt64) -> UInt64:
-        """Bytes the egress path is allowed to send right now
-        under the CC's pacing rate.
-
-        ``now_us`` is the current wall-clock; the helper
-        subtracts the connection's :attr:`last_send_us` to get
-        the elapsed-since-last-send delta the pure
-        :func:`flare.quic.cc.pacing_budget` function consumes.
-        Sub-millisecond elapsed values (e.g. 10 us at 12 Mbps
-        cwnd produces 15 bytes of budget) round-trip cleanly --
-        the underlying multiply happens in nanoseconds inside
-        the pure function so precision is not lost.
-        """
-        if self.last_send_us == UInt64(0) or now_us < self.last_send_us:
-            return self.cc_state.mss
-        var elapsed_us = now_us - self.last_send_us
-        return pacing_budget(self.cc_state, elapsed_us)
 
     def handle_packet(
         mut self,
@@ -1993,7 +1895,6 @@ struct QuicListener(Movable):
         var qc = QuicConnection(
             local_cid,
             peer_cid,
-            self.config.cc_choice,
             self.config.max_idle_timeout_ms * UInt64(1_000),
             self.config.initial_max_data,
         )
