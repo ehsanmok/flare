@@ -329,7 +329,7 @@ test-rustls-quic-keys      = { cmd = "mojo -I . tests/tls/test_rustls_quic_keys.
 test-quic-server-scaffold = "mojo -I . tests/quic/test_server_scaffold.mojo"  # flare.quic.server carriers -- config defaults + connection + cid table (7 cases)
 test-quic-reactor         = "mojo -I . tests/quic/test_quic_reactor.mojo"     # Track Q3-W commit 1/5 -- UDP bind + per-datagram dispatch (12 cases)
 test-quic-handle-packet   = "mojo -I . tests/quic/test_quic_handle_packet.mojo" # Track Q3-W commit 2/5 -- per-packet decrypt + state-machine drive (8 cases)
-test-quic-timers          = "mojo -I . tests/quic/test_quic_timers.mojo"        # Track Q3-W commit 3/5 -- PTO + idle + ack-delay TimerWheel (13 cases)
+test-quic-timers          = "mojo -I . tests/quic/test_quic_timers.mojo"        # Track Q3-W commit 3/5 -- idle TimerWheel arm + dispatch + token codec (9 cases)
 test-quic-loopback-integration = "mojo -I . tests/quic/test_quic_loopback_integration.mojo" # Track Q3-W commit 5/5 -- loopback UDP handshake -> close (4 cases)
 test-quic-handshake-bridge = { cmd = "mojo -I . tests/quic/test_quic_handshake_bridge.mojo", depends-on = ["build-rustls-quic"] }  # Track Q9-W commit 1/6 -- rustls QUIC handshake bridge wiring (10 cases)
 test-quic-keys-install     = { cmd = "mojo -I . tests/quic/test_quic_keys_install.mojo", depends-on = ["build-rustls-quic"] }      # Phase F commit 3/6 -- per-level egress queues + readiness install (3 cases)

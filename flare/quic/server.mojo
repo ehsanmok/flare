@@ -6,15 +6,13 @@ per-connection dispatcher. The per-datagram dispatch loop
 threads bytes through :class:`OpenSslQuicCrypto` packet
 protection, the transport-frame parser, and
 :meth:`Connection.handle_frame` to produce
-:class:`ConnectionEvents` for the H3 driver above; PTO /
-idle / ack-delay timers sit on the shared TimerWheel; CC +
-pacing budget gate ``sendmmsg`` on the egress path.
+:class:`ConnectionEvents` for the H3 driver above; idle
+timers sit on the shared TimerWheel.
 
 ## What ships here
 
 - :class:`QuicServerConfig` -- bind configuration: host, port,
-  rustls config carrier, congestion-controller choice, idle
-  timeout, max packet size.
+  rustls config carrier, idle timeout, max packet size.
 - :class:`QuicListener` -- factory that owns a bound UDP
   socket plus the per-connection dispatch table. The :meth:`bind`
   factory opens the socket, :meth:`tick` drains one datagram
@@ -33,7 +31,6 @@ References:
 - RFC 9000 §10 "Connection Termination" -- idle / draining.
 - RFC 9000 §17 "Packet Formats" -- long / short header parse
   for the dispatch path.
-- RFC 9002 §6.2 "PTO and probe packets" -- PTO timer wiring.
 """
 
 from std.collections import Dict, List, Optional
@@ -95,9 +92,7 @@ from ..h3.server import H3Connection
 from ..http.request import Request
 from ..http.response import Response
 from .timers import (
-    TIMER_KIND_ACK_DELAY,
     TIMER_KIND_IDLE,
-    TIMER_KIND_PTO,
     decode_timer_token,
     encode_timer_token,
 )
@@ -625,17 +620,6 @@ struct QuicConnection(Copyable, Movable):
     previous idle timer and schedules a fresh one. Stored here
     so the reactor can find and cancel it on connection close."""
 
-    var pto_timer_id: UInt64
-    """Timer-wheel id of the currently-scheduled PTO (probe
-    timeout) entry. Re-armed on every ack-eliciting send +
-    cleared on every ACK that retires the relevant packet
-    number space."""
-
-    var ack_delay_timer_id: UInt64
-    """Timer-wheel id of the currently-deferred ACK timer. Set
-    when ``conn.ack_pending`` flips True; cleared when the ACK
-    is actually emitted."""
-
     var rx_handshake_secret: List[UInt8]
     """Inbound Handshake-level readiness marker (RFC 9001 §5.1).
     Stamped with the readiness sentinel once rustls installs the
@@ -692,8 +676,6 @@ struct QuicConnection(Copyable, Movable):
         self.peer_cid = peer_cid.copy()
         self.alive = True
         self.idle_timer_id = UInt64(0)
-        self.pto_timer_id = UInt64(0)
-        self.ack_delay_timer_id = UInt64(0)
         self.rx_handshake_secret = List[UInt8]()
         self.tx_handshake_secret = List[UInt8]()
         self.rx_1rtt_secret = List[UInt8]()
@@ -737,21 +719,6 @@ struct QuicConnection(Copyable, Movable):
         self.alive = False
         self.conn.state = CONN_STATE_CLOSED
         self.idle_timer_id = UInt64(0)
-
-    def on_pto_expired(mut self):
-        """RFC 9002 §6.2 -- the PTO timer fired. The state
-        machine flags that a probe packet is owed; the egress
-        path sends one or two PING / PADDING packets so the
-        peer's ACK recovers the lost packet-number space."""
-        self.pto_timer_id = UInt64(0)
-        self.conn.ack_pending = True  # forces an ACK on the next send
-
-    def on_ack_delay_expired(mut self):
-        """RFC 9000 §13.2.1 -- the deferred-ACK timer fired.
-        The next send is forced to include the pending ACK so
-        the peer's RTT estimate stays current."""
-        self.ack_delay_timer_id = UInt64(0)
-        self.conn.ack_pending = True
 
     def handle_packet(
         mut self,
@@ -1036,8 +1003,8 @@ struct QuicListener(Movable):
     :class:`ConnectionIdTable` maps each Connection ID to the
     slot index. Slots are append-only; the closed-slot sweeper
     runs at the end of every :meth:`advance_timers` call so
-    timer-fired connections (idle, PTO-exhausted) get reaped
-    against the same monotonic clock the wheel uses."""
+    idle-timed-out connections get reaped against the same
+    monotonic clock the wheel uses."""
     var tls_acceptor: RustlsQuicAcceptor
     """Long-lived rustls QUIC acceptor built once at
     :meth:`bind` from :attr:`QuicServerConfig.rustls_config`.
@@ -1153,8 +1120,7 @@ struct QuicListener(Movable):
     are installed."""
     var timer_wheel: TimerWheel
     """Per-listener :class:`flare.runtime.timer_wheel.TimerWheel`
-    driving PTO / idle / ack-delay timeouts. Each scheduled
-    timer's token is
+    driving idle timeouts. Each scheduled timer's token is
     :func:`flare.quic.timers.encode_timer_token(kind, slot)`;
     :meth:`advance_timers` dispatches each fired token to the
     matching :class:`QuicConnection` callback."""
@@ -2652,7 +2618,7 @@ struct QuicListener(Movable):
            :meth:`drain_all_egress` so any session that started
            handshaking can flush its first response.
         3. :meth:`advance_timers` then runs the wheel against
-           the current monotonic clock so PTO + idle + ack-delay
+           the current monotonic clock so the idle-timeout
            callbacks fire on time.
 
         The 100 ms recv timeout caps the worst-case timer slop
@@ -2696,42 +2662,10 @@ struct QuicListener(Movable):
         self.connections[slot].idle_timer_id = id
         return id
 
-    def schedule_pto(mut self, slot: Int, after_ms: Int) raises -> UInt64:
-        """Arm the PTO probe-timer for ``slot``. Cancels any
-        existing PTO entry first so re-arming on every send
-        doesn't pile up wheel entries."""
-        if slot < 0 or slot >= len(self.connections):
-            raise Error("schedule_pto: slot " + String(slot) + " out of range")
-        var old_id = self.connections[slot].pto_timer_id
-        if old_id != UInt64(0):
-            _ = self.timer_wheel.cancel(old_id)
-        var token = encode_timer_token(TIMER_KIND_PTO, slot)
-        var id = self.timer_wheel.schedule(after_ms=after_ms, token=token)
-        self.connections[slot].pto_timer_id = id
-        return id
-
-    def schedule_ack_delay(mut self, slot: Int, after_ms: Int) raises -> UInt64:
-        """Arm the deferred-ACK timer for ``slot``. Idempotent
-        no-op if a deferred-ACK timer is already scheduled --
-        an in-flight deferred ACK should not be re-armed each
-        time another ack-eliciting packet arrives (the existing
-        timer already covers the deadline)."""
-        if slot < 0 or slot >= len(self.connections):
-            raise Error(
-                "schedule_ack_delay: slot " + String(slot) + " out of range"
-            )
-        var existing = self.connections[slot].ack_delay_timer_id
-        if existing != UInt64(0):
-            return existing
-        var token = encode_timer_token(TIMER_KIND_ACK_DELAY, slot)
-        var id = self.timer_wheel.schedule(after_ms=after_ms, token=token)
-        self.connections[slot].ack_delay_timer_id = id
-        return id
-
     def advance_timers(mut self, now_ms: UInt64) raises -> Int:
         """Advance the wheel to ``now_ms`` and dispatch every
-        fired token to the matching :class:`QuicConnection`
-        callback (PTO / IDLE / ACK_DELAY per
+        fired idle-timeout token to the matching
+        :class:`QuicConnection` callback (per
         :mod:`flare.quic.timers`). Returns the number of tokens
         dispatched.
 
@@ -2749,10 +2683,6 @@ struct QuicListener(Movable):
                 continue
             if decoded.kind == TIMER_KIND_IDLE:
                 self.connections[slot].on_idle_expired()
-            elif decoded.kind == TIMER_KIND_PTO:
-                self.connections[slot].on_pto_expired()
-            elif decoded.kind == TIMER_KIND_ACK_DELAY:
-                self.connections[slot].on_ack_delay_expired()
             if not self.connections[slot].alive:
                 self._retire_slot_cids(slot)
         return len(fired)

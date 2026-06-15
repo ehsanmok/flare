@@ -2,20 +2,17 @@
 (`flare.quic.timers` + `flare.quic.server.QuicListener`) --
 Track Q3-W commit 3/5.
 
-Three timer kinds plug into the per-listener
-:class:`flare.runtime.timer_wheel.TimerWheel`:
-
-- PTO (RFC 9002 §6.2) -- probe timeout.
-- IDLE (RFC 9000 §10.1) -- silent close on inactivity.
-- ACK_DELAY (RFC 9000 §13.2.1) -- deferred-ACK timer.
+The token codec (`flare.quic.timers`) supports three timer
+kinds -- PTO (RFC 9002 §6.2), IDLE (RFC 9000 §10.1), and
+ACK_DELAY (RFC 9000 §13.2.1) -- but the server reactor only
+arms + dispatches the IDLE timer; PTO / ACK_DELAY arming is
+deferred to the QUIC-on-a-lossy-wire work in v0.9.
 
 Each timer's payload is the `UInt64` returned by
 :func:`encode_timer_token(kind, slot)`; the high 32 bits carry
 the kind, the low 32 bits carry the connection-slab slot index.
 The dispatcher in :meth:`QuicListener.advance_timers` decodes
-the token + calls the matching :class:`QuicConnection`
-callback (``on_pto_expired`` / ``on_idle_expired`` /
-``on_ack_delay_expired``).
+the token + calls :meth:`QuicConnection.on_idle_expired`.
 
 Properties covered:
 
@@ -26,22 +23,12 @@ Properties covered:
 3. :meth:`QuicListener.schedule_idle_timeout` cancels the
    previous idle timer + arms a fresh one; the slot's
    ``idle_timer_id`` rolls forward.
-4. :meth:`QuicListener.schedule_pto` + ``schedule_ack_delay``
-   round-trip the same way.
-5. ``schedule_ack_delay`` is idempotent: a second call while
-   one ACK timer is already armed returns the existing id
-   instead of stacking a second wheel entry.
-6. :meth:`QuicListener.advance_timers` dispatches an idle
+4. :meth:`QuicListener.advance_timers` dispatches an idle
    timeout to ``QuicConnection.on_idle_expired`` -- the
    connection's ``alive`` flag flips False, state advances to
    ``CONN_STATE_CLOSED``, and the CID is retired from the
    table so retransmits don't route to the dead slot.
-7. ``advance_timers`` dispatches a PTO timer to
-   ``on_pto_expired`` -- ``ack_pending`` flips True so the
-   next send pulls in the probe.
-8. ``advance_timers`` dispatches an ACK_DELAY timer to
-   ``on_ack_delay_expired`` -- ``ack_pending`` flips True.
-9. A successful :meth:`dispatch_datagram` arms the slot's
+5. A successful :meth:`dispatch_datagram` arms the slot's
    idle timer at the configured ``max_idle_timeout_ms`` (the
    accept path schedules it for new slots).
 """
@@ -169,30 +156,6 @@ def test_schedule_idle_cancels_previous() raises:
     assert_equal(listener.connections[0].idle_timer_id, second_id)
 
 
-def test_schedule_pto_round_trip() raises:
-    var listener = _bind_loopback()
-    var dcid = _make_cid(UInt8(0x30), 8)
-    var scid = _make_cid(UInt8(0x40), 8)
-    var datagram = _make_initial_datagram(dcid, scid)
-    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
-    _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
-    var id = listener.schedule_pto(0, after_ms=400)
-    assert_true(id != UInt64(0))
-    assert_equal(listener.connections[0].pto_timer_id, id)
-
-
-def test_schedule_ack_delay_is_idempotent() raises:
-    var listener = _bind_loopback()
-    var dcid = _make_cid(UInt8(0x50), 8)
-    var scid = _make_cid(UInt8(0x60), 8)
-    var datagram = _make_initial_datagram(dcid, scid)
-    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
-    _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
-    var id1 = listener.schedule_ack_delay(0, after_ms=25)
-    var id2 = listener.schedule_ack_delay(0, after_ms=25)
-    assert_equal(id1, id2)
-
-
 def test_advance_idle_closes_connection() raises:
     var listener = _bind_loopback(idle_ms=UInt64(50))
     var dcid = _make_cid(UInt8(0x70), 8)
@@ -210,35 +173,6 @@ def test_advance_idle_closes_connection() raises:
         -1,
         "dead slot's CID must be retired",
     )
-
-
-def test_advance_pto_flips_ack_pending() raises:
-    var listener = _bind_loopback()
-    var dcid = _make_cid(UInt8(0x90), 8)
-    var scid = _make_cid(UInt8(0xA0), 8)
-    var datagram = _make_initial_datagram(dcid, scid)
-    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
-    _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
-    _ = listener.schedule_pto(0, after_ms=20)
-    assert_false(listener.connections[0].conn.ack_pending)
-    var fired = listener.advance_timers(now_ms=UInt64(100))
-    assert_true(fired >= 1)
-    assert_true(listener.connections[0].conn.ack_pending)
-    assert_equal(listener.connections[0].pto_timer_id, UInt64(0))
-
-
-def test_advance_ack_delay_flips_ack_pending() raises:
-    var listener = _bind_loopback()
-    var dcid = _make_cid(UInt8(0xB0), 8)
-    var scid = _make_cid(UInt8(0xC0), 8)
-    var datagram = _make_initial_datagram(dcid, scid)
-    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
-    _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
-    _ = listener.schedule_ack_delay(0, after_ms=15)
-    var fired = listener.advance_timers(now_ms=UInt64(80))
-    assert_true(fired >= 1)
-    assert_true(listener.connections[0].conn.ack_pending)
-    assert_equal(listener.connections[0].ack_delay_timer_id, UInt64(0))
 
 
 def test_dispatch_arms_idle_timer_on_accept() raises:
@@ -277,11 +211,7 @@ def main() raises:
     test_decode_rejects_unknown_kind()
     test_timer_kind_name()
     test_schedule_idle_cancels_previous()
-    test_schedule_pto_round_trip()
-    test_schedule_ack_delay_is_idempotent()
     test_advance_idle_closes_connection()
-    test_advance_pto_flips_ack_pending()
-    test_advance_ack_delay_flips_ack_pending()
     test_dispatch_arms_idle_timer_on_accept()
     test_on_idle_callback_is_idempotent_to_double_fire()
-    print("test_quic_timers: 13 passed")
+    print("test_quic_timers: 9 passed")
