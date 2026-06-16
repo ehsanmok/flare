@@ -52,11 +52,20 @@ ALLOWLIST=(
     "flare/http/_reactor/conn_handle.mojo"
 )
 
-reactor_dir="flare/http/_reactor"
-if [[ ! -d "$reactor_dir" ]]; then
-    echo "check-reactor-size: ERROR: $reactor_dir not found" >&2
-    exit 2
-fi
+# Directories whose every .mojo file must fit the budget. The set
+# grows as decomposition lands: ``_reactor`` was the original v0.8
+# split; ``_server`` holds the request-parser / response-writer
+# helpers peeled out of the oversized ``flare/http/server.mojo``.
+scan_dirs=(
+    "flare/http/_reactor"
+    "flare/http/_server"
+)
+for scan_dir in "${scan_dirs[@]}"; do
+    if [[ ! -d "$scan_dir" ]]; then
+        echo "check-reactor-size: ERROR: $scan_dir not found" >&2
+        exit 2
+    fi
+done
 
 violations=0
 allowlisted=0
@@ -93,7 +102,7 @@ while IFS= read -r -d '' file; do
     else
         clean=$((clean + 1))
     fi
-done < <(find "$reactor_dir" -name '*.mojo' -print0)
+done < <(find "${scan_dirs[@]}" -name '*.mojo' -print0)
 
 total=$((clean + allowlisted + violations))
 
