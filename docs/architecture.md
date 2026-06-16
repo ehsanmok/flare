@@ -469,7 +469,7 @@ the reactor thread:
 | `epoll` impl | [`flare/runtime/_epoll.mojo`](../flare/runtime/_epoll.mojo) |
 | Timer wheel | [`flare/runtime/timer_wheel.mojo`](../flare/runtime/timer_wheel.mojo) |
 | Multicore scheduler | [`flare/runtime/scheduler.mojo`](../flare/runtime/scheduler.mojo) |
-| HTTP request parsing | [`flare/http/server.mojo`](../flare/http/server.mojo) |
+| HTTP request parsing | [`flare/http/_server/parse.mojo`](../flare/http/_server/parse.mojo) (+ [`parse_util.mojo`](../flare/http/_server/parse_util.mojo); re-exported from [`flare/http/server.mojo`](../flare/http/server.mojo)) |
 | HTTP per-conn state machine | [`flare/http/_server_reactor_impl.mojo`](../flare/http/_server_reactor_impl.mojo) |
 | `Cancel` cell + `CancelHandler` | [`flare/http/cancel.mojo`](../flare/http/cancel.mojo) |
 | Server-side TLS | [`flare/tls/acceptor.mojo`](../flare/tls/acceptor.mojo) |
