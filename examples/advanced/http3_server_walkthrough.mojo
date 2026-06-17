@@ -29,7 +29,7 @@ from flare.h3 import (
 
 
 def main() raises:
-    print("== HTTP/3 server scaffold walkthrough ==")
+    print("== HTTP/3 server driver lifecycle walkthrough ==")
     print()
 
     # Step 1: build a config carrier with our SETTINGS.
