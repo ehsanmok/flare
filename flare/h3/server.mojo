@@ -17,13 +17,12 @@ HTTP/3 over QUIC uses four families of streams:
   per direction; carries SETTINGS first, then GOAWAY /
   MAX_PUSH_ID over the connection lifetime.
 * **Unidirectional push stream** (type 0x01) -- server-initiated.
-  Not implemented in the v0.8 cycle (RFC 9114 deprecates push as
-  of revision 9).
+  Not implemented (RFC 9114 deprecates push as of revision 9).
 * **Unidirectional QPACK encoder stream** (type 0x02) +
   **decoder stream** (type 0x03) -- carry dynamic-table
   instructions. The driver runs QPACK in static-table-only
   mode; the SETTINGS we advertise tell the peer not to send
-  dynamic-table inserts. Dynamic table is a follow-up cycle.
+  dynamic-table inserts. Dynamic table is a follow-up.
 
 ## What ships here
 
@@ -41,8 +40,8 @@ HTTP/3 over QUIC uses four families of streams:
 The driver is sans-I/O: the QUIC reactor feeds reassembled stream
 chunks in via :meth:`H3Connection.feed_stream_chunk` and drains
 pending outbound frames via :meth:`H3Connection.take_response_frames`.
-The Handler dispatch sits on the QUIC reactor side (Track Q5);
-the H3 layer surfaces the Request once it's fully reassembled and
+The Handler dispatch sits on the QUIC reactor side; the H3
+layer surfaces the Request once it's fully reassembled and
 the reactor calls :meth:`H3Connection.emit_response` once the
 Handler returns.
 
@@ -76,8 +75,7 @@ from flare.h3.response_writer import (
     encode_response_data,
     encode_response_headers,
 )
-from flare.http.request import Request
-from flare.http.response import Response
+from flare.http.wire import Request, Response
 from flare.qpack import QpackHeader
 from flare.quic.varint import decode_varint, encode_varint
 
@@ -356,8 +354,8 @@ struct H3Connection(Copyable, Defaultable, Movable):
       announced.
     * Tracks the control-stream lifecycle (whether the peer's
       SETTINGS arrived yet, whether GOAWAY was emitted).
-    * Carries the QPACK state. Static-table-only in v0.8;
-      dynamic-table inserts are a follow-up cycle.
+    * Carries the QPACK state. Static-table-only; dynamic-table
+      inserts are a follow-up.
 
     The driver is sans-I/O: the QUIC reactor feeds reassembled
     stream chunks in via :meth:`feed_stream_chunk` and drains

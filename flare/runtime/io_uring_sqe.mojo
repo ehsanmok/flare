@@ -9,8 +9,8 @@ level codec, plus the small set of prep helpers (``prep_nop``,
 ``UringReactor`` (next commit) will call to fill SQE slots before
 ``io_uring_enter`` is invoked.
 
-What this commit ships
-----------------------
+What this module provides
+-------------------------
 
 * **Opcode constants** (``IORING_OP_NOP``, ``IORING_OP_ACCEPT``,
   ``IORING_OP_RECV``, ``IORING_OP_SEND``, ``IORING_OP_WRITEV``,

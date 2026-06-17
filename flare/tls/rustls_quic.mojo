@@ -88,7 +88,7 @@ struct QuicEncryptionLevel:
     comptime EARLY_DATA: Int = 1
     """RFC 9001 §4.1 -- 0-RTT keys. Not implemented in this
     cycle (see :data:`NotImplementedReason`); session resumption
-    + 0-RTT lands in a follow-up cycle."""
+    + 0-RTT is a follow-up."""
 
     comptime HANDSHAKE: Int = 2
     """RFC 9001 §4.1 -- handshake keys derived after the server
@@ -311,7 +311,7 @@ struct RustlsQuicAcceptor(Movable):
         to drop every session in its slab from inside the
         listener's destructor without sub-field access on
         ``self.tls_acceptor._lib`` (which Mojo's ``deinit``
-        ordering rule forbids -- see Track Q9-W).
+        ordering rule forbids).
         """
         _do_session_free(self._lib, handle)
 
@@ -336,11 +336,10 @@ struct RustlsQuicAcceptor(Movable):
                 )
                 + detail
             )
-        # Empty transport_params is the v0.8 floor: the QUIC
-        # server reactor will encode the real transport parameters
-        # (initial_max_data, initial_max_streams_*, etc.) in Track
-        # Q3-W commit 2/5; for the handshake-only floor here the
-        # rustls side accepts an empty extension blob.
+        # Empty transport_params here: the QUIC server reactor
+        # encodes the real transport parameters (initial_max_data,
+        # initial_max_streams_*, etc.); for the handshake-only
+        # path here the rustls side accepts an empty extension blob.
         var tp = List[UInt8]()
         var session_handle = _do_accept(self._lib, self._opaque_handle, tp)
         if session_handle == 0:
@@ -515,11 +514,10 @@ struct RustlsQuicSession(Movable):
 
     def current_level(self) -> Int:
         """Current outbound encryption level. Useful for tests
-        confirming the level machine compiles even before the
-        Rust crate lands."""
+        confirming the level machine compiles."""
         return self._level
 
-    # ── Per-level AEAD + header protection (Phase F commit 2/6) ────────
+    # ── Per-level AEAD + header protection ───────────────────────────
 
     def have_keys(self, level: Int) -> Bool:
         """Whether rustls has installed per-level keys at the
@@ -582,7 +580,7 @@ struct RustlsQuicSession(Movable):
         Returns the plaintext length (always ``len(payload) - 16``
         for the AEAD-GCM / ChaCha20-Poly1305 suites rustls speaks);
         raises if rustls rejects the tag (the typical wrong-keys-
-        at-this-level symptom -- the Phase E QUIC safety gate).
+        at-this-level symptom).
         """
         if self._opaque_session_handle == 0:
             raise Error("RustlsQuicSession.packet_decrypt: NULL session handle")

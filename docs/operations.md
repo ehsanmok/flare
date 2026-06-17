@@ -35,7 +35,7 @@ they help median.
 - Certificate reload without dropping connections:
   ``TlsAcceptor.reload(...)`` swaps the certificate atomically.
   Worked example: [`examples/advanced/cert_reload.mojo`](../examples/advanced/cert_reload.mojo).
-- Backend rationale + v0.9 commitment (rustls for QUIC):
+- Backend rationale + planned rustls-for-QUIC direction:
   [`tls-strategy.md`](tls-strategy.md).
 
 ## Health endpoints

@@ -155,9 +155,9 @@ comptime QPACK_STATIC_TABLE_SIZE: Int = 99
 
 The table is small and tail-biased (most-common shapes early);
 encoders that look up an entry walk the table linearly without
-needing a perfect hash. The encoder threshold for switching from
-linear scan to a perfect-hash side-table is the v0.9 line item;
-QPACK static-only at v0.8 is correctness-bound, not lookup-bound.
+needing a perfect hash. Switching from a linear scan to a
+perfect-hash side-table is a possible future optimisation;
+static-only QPACK is correctness-bound, not lookup-bound.
 """
 
 

@@ -58,7 +58,7 @@ comptime _SECS_PER_DAY: Int = 86400
 
 # ── Public civil-date math (single source of truth) ──────────────────────────
 #
-# Closes critique register §C2: three modules carried their own
+# Three modules carried their own
 # Howard Hinnant civil-from-days / days-from-civil identities --
 # the inverse for IMF-fixdate (here), the forward for HTTP-date
 # parsing (``flare.http.conditional._civil_to_unix_seconds``),

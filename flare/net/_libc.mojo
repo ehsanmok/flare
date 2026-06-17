@@ -1195,7 +1195,7 @@ def _find_flare_lib_for_io() -> String:
     ``flare.net._libc`` namespace because the file's own
     ``FlareRawIO`` constructor uses it; everything else routes
     through :func:`flare.net.socket._find_flare_lib` which uses
-    the same canonical helper. (Closes critique register §C3.)
+    the same canonical helper.
     """
     return find_flare_lib("tls")
 

@@ -44,8 +44,8 @@ def _find_flare_fs_lib() -> String:
     """Return the path to ``libflare_fs.so``.
 
     Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
-    pinned to the ``"fs"`` shim name (closes critique register
-    §C3 -- the canonical resolver is :mod:`flare.utils.dylib`).
+    pinned to the ``"fs"`` shim name (the canonical resolver is
+    :mod:`flare.utils.dylib`).
     """
     return find_flare_lib("fs")
 

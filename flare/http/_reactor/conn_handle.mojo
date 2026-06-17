@@ -28,7 +28,7 @@ State transitions::
 
 The sister module ``flare/http/_server_reactor_impl.mojo`` owns the
 I/O-bearing pieces -- reactor entry-point loops, ``Pool[ConnHandle]``
-allocation glue, io_uring buffer-ring scaffolding -- and re-exports
+allocation glue, io_uring buffer-ring glue -- and re-exports
 every public symbol below for back-compat with existing imports
 across ``flare/http/``, ``flare/http2/``, ``flare/runtime/``, tests,
 and the fuzz corpus.

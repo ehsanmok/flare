@@ -148,7 +148,7 @@ struct ConnectionEvents(Copyable, Movable):
       this tick. The sans-I/O state machine cannot drive the TLS
       handshake adapter directly without breaking the no-I/O
       contract; instead the parser appends every CRYPTO payload
-      here and the reactor wrapper (Track Q9-W) drains the list
+      here and the reactor wrapper drains the list
       after :func:`handle_frame_buf` returns and forwards each
       payload to its :class:`flare.tls.rustls_quic.RustlsQuicSession`
       at the matching encryption level.
@@ -157,7 +157,7 @@ struct ConnectionEvents(Copyable, Movable):
       state machine updates per-stream offsets + FIN bookkeeping
       and appends the full :class:`StreamFrame` (stream id +
       offset + payload + fin) here so the H3 reactor wrapper
-      (Track Q12-W) can route per-stream bytes to
+      can route per-stream bytes to
       :class:`flare.h3.H3Connection.feed_stream_chunk` /
       :meth:`feed_uni_stream_chunk` after
       :func:`handle_frame_buf` returns.
@@ -269,7 +269,7 @@ def apply_stream(
     side. Raises on flow-control violation. The full
     :class:`StreamFrame` is also appended to
     :attr:`ConnectionEvents.stream_chunks` so the H3 reactor
-    wrapper (Track Q12-W) can route the payload bytes to its
+    wrapper can route the payload bytes to its
     per-connection :class:`flare.h3.H3Connection` without
     re-parsing the QUIC packet.
     """
@@ -434,7 +434,7 @@ struct _ConnFrameHandler(FrameHandler):
         # CRYPTO frames carry TLS-handshake bytes that the sans-I/O
         # state machine deliberately does not interpret. Surface the
         # raw frame on :class:`ConnectionEvents` so the reactor
-        # (Track Q9-W) can forward the bytes to the rustls QUIC
+        # can forward the bytes to the rustls QUIC
         # session at the matching encryption level after this
         # :func:`handle_frame_buf` call returns. Handshake completion
         # is still signalled separately via

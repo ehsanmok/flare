@@ -45,8 +45,8 @@ sendv for the response). Shipping the substrate first lets the
 follow-up commits land that subset incrementally without
 re-touching the syscall-ABI plumbing.
 
-What this commit ships
------------------------
+What this module provides
+-------------------------
 
 * **Syscall numbers** — ``SYS_IO_URING_SETUP``,
   ``SYS_IO_URING_ENTER``, ``SYS_IO_URING_REGISTER`` for x86_64

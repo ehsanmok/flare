@@ -5,8 +5,8 @@ four size classes (1 KiB / 4 KiB / 16 KiB / 64 KiB) so the
 HTTP/1.1 reactor's read- and write-side temporaries don't pay
 ``alloc(N)`` / ``free(N)`` per request.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 flare's reactor reads from each accepted socket into a
 ``List[UInt8]`` chunk buffer (``ServerConfig.read_buffer_size``,
@@ -36,7 +36,7 @@ connection. The reactor borrows a buffer for one request, fills
 it, drains it, and returns it to the pool; the next request on
 any connection (same worker) gets the same buffer back. No
 cross-worker handoff, no atomic, no mutex — same per-worker
-discipline as ``DateCache`` (B7) and ``ResponsePool`` (B6).
+discipline as ``DateCache`` and ``ResponsePool``.
 
 Size classes
 ------------
@@ -59,8 +59,8 @@ the pool — the buffer is destroyed on release rather than
 recycled, so giant requests don't cause the pool to grow
 unbounded.
 
-What this commit ships
------------------------
+What this module provides
+-------------------------
 
 * ``BufferHandle`` — the value moved in / out of the pool. Wraps
   a ``List[UInt8]`` plus an Int recording the size class so the
@@ -92,8 +92,8 @@ pushes the address. Net allocation cost: one ``Pool.alloc/free``
 pair per acquire/release; the actual win is that the **underlying
 ``List[UInt8]`` capacity is preserved** across the move-in / out.
 
-Wiring into the reactor's accept-and-read path is a follow-up
-commit; this commit lands the primitive + tests + re-exports.
+Wiring into the reactor's accept-and-read path is a follow-up;
+this module provides the primitive + tests + re-exports.
 """
 
 from .pool import Pool

@@ -1,8 +1,6 @@
 # TODO: decompose into _reactor/*.mojo (per-conn state machine, accept
 # loop, write queue, idle-timer wiring) + collapse the three poll variants
 # (run_unified_reactor_loop / _multi / _shared) via comptime config flags.
-# This 3700-line file is the headline reactor-decomposition track per
-# the .cursor/rules/critisize-0.8.mdc register §1.
 
 """Per-connection state machine for the reactor-backed HTTP server.
 
@@ -108,8 +106,8 @@ from flare.runtime.uring_reactor import (
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ``ConnHandle`` itself lives in ``flare.http._reactor.conn_handle`` and is
-# re-exported above. Below this point only the I/O-bearing scaffolding
-# (Pool[ConnHandle] allocation glue, accept loops, reactor entry-point
+# re-exported above. Below this point only the I/O-bearing glue
+# (Pool[ConnHandle] allocation, accept loops, reactor entry-point
 # loops) remains in this module.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -120,8 +118,8 @@ from flare.runtime.uring_reactor import (
 #
 # The byte-fast-path / keep-alive / monotonic-clock helpers that used to
 # live below now live in ``flare.http._reactor.conn_handle`` and are
-# re-exported above. Only the I/O-bearing scaffolding (Pool[ConnHandle]
-# allocation glue, accept loops, reactor entry-point loops) stays here.
+# re-exported above. Only the I/O-bearing glue (Pool[ConnHandle]
+# allocation, accept loops, reactor entry-point loops) stays here.
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -802,9 +800,9 @@ def run_reactor_loop_cancel[
     # at their next ``cancel.cancelled()`` poll. Plain Handlers
     # (which don't observe Cancel) run to completion as before.
     # The flip is in-thread (the worker walks its own conns,
-    # not via cross-thread atomics) — closes the design-0.5
-    # Track 3.2 cross-thread cancel-flip without exposing the
-    # per-worker registry across threads.
+    # not via cross-thread atomics) — handles the cross-thread
+    # cancel-flip without exposing the per-worker registry across
+    # threads.
     var leftover = List[Int]()
     for kv in conns.items():
         leftover.append(kv.key)
@@ -828,9 +826,9 @@ def run_reactor_loop_view[
     ``ConnHandle.on_readable_view(handler, config)`` instead of
     ``on_readable_cancel``, so the handler receives a borrowed
     ``RequestView[origin]`` whose body slice points directly into
-    ``self.read_buf``. Closes the design-0.5 §1.1 zero-copy
-    upload contract for handlers that opt into the
-    ``ViewHandler`` shape.
+    ``self.read_buf``. This satisfies the zero-copy upload
+    contract for handlers that opt into the ``ViewHandler``
+    shape.
 
     Args:
         listener: Bound and listening ``TcpListener``.
@@ -916,7 +914,7 @@ def run_reactor_loop_view[
 
     # Graceful shutdown: flip Cancel.SHUTDOWN on every in-flight
     # conn before closing — same in-thread pattern as
-    # ``run_reactor_loop_cancel`` (C12 / Track 3.2). Cancel-aware
+    # ``run_reactor_loop_cancel``. Cancel-aware
     # handlers (CancelHandler / ViewHandler) observe the flip
     # at their next ``cancel.cancelled()`` poll. Plain Handlers
     # ignore Cancel and run to completion.

@@ -5,8 +5,8 @@ objects so the keep-alive hot path can reuse the same struct
 (plus its ``HeaderMap`` + ``body`` ``List[UInt8]`` backings)
 across consecutive requests on the same connection.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 Each ``Response.__init__`` allocates:
 
@@ -26,7 +26,7 @@ malloc'd backing as long as it fits.
 Per-worker, not shared
 -----------------------
 
-This pool, like ``DateCache`` (B7) and ``Pool[BufferHandle]`` (B5),
+This pool, like ``DateCache`` and ``Pool[BufferHandle]``,
 is **per-worker**. There's no atomic, no mutex, no cross-thread
 coordination. Each reactor worker constructs its own
 ``ResponsePool`` and calls ``acquire`` / ``release`` on its local

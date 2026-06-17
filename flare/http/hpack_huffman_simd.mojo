@@ -1,4 +1,4 @@
-"""HPACK Huffman fast decoder (Track c08).
+"""HPACK Huffman fast decoder.
 
 Drop-in replacement for
 :func:`flare.http.hpack_huffman.huffman_decode` that runs a

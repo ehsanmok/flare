@@ -5,8 +5,8 @@ for HPACK string-literal compression. Provides both encoder and
 decoder over byte sequences with a direct-lookup table for the
 common short-code path and a bit-by-bit fallback for long codes.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 HTTP/2 (RFC 9113) and HTTP/3 (RFC 9114) both reference RFC 7541
 HPACK as the wire compression format for header strings. The
@@ -17,18 +17,18 @@ hyper's ``hpack`` crate, h2, and nginx all use a precomputed
 state-machine table that consumes 4 bits of input at a time and
 runs in ~3-5 cycles per output byte.
 
-This commit ships the **table + a correct decoder + a correct
+This module provides the **table + a correct decoder + a correct
 encoder + round-trip tests against RFC 7541 §C.4 fixtures** —
 the substrate every later optimisation (4-bit nibble state
 machine, AVX-512 PSHUFB shuffles, BMI2 PEXT-based bit gather)
-will compose against. The current decoder is the bit-by-bit
-canonical form: correct, conformant, slower than the eventual
+composes against. The current decoder is the bit-by-bit
+canonical form: correct, conformant, slower than a
 SIMD-accelerated path but provably right against the spec
-fixtures. SIMD acceleration is a follow-up commit that swaps
-the inner loop without changing the public API.
+fixtures. A SIMD-accelerated inner loop can replace the
+bit-by-bit path without changing the public API.
 
-What this commit ships
------------------------
+What this module provides
+-------------------------
 
 * The full RFC 7541 Appendix B table as an internal
   (symbol → code, code-length) map. 257 entries: byte values

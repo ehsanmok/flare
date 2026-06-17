@@ -74,8 +74,8 @@ def _find_flare_zlib_lib() -> String:
     pinned to the ``"zlib"`` shim name. Replaces the previous
     ``from ..http.encoding import _find_flare_zlib_lib`` so the
     ``flare.ws`` package no longer depends on ``flare.http`` for
-    FFI plumbing (closes critique register §C3 architectural
-    smell: WS shouldn't reach into HTTP just to find a dylib).
+    FFI plumbing (WS shouldn't reach into HTTP just to find a
+    dylib).
     """
     return find_flare_lib("zlib")
 

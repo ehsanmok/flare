@@ -4,8 +4,8 @@ This package ships the data model + in-memory store layer that a
 cache middleware composes on top of. The full RFC 9111 conformance
 surface (Vary header negotiation, stale-while-revalidate /
 stale-if-error refresh policy, validator-driven conditional
-revalidation) is staged across multiple commits; this commit
-opens the package with:
+revalidation) is staged incrementally; this package currently
+provides:
 
 - :class:`CacheControl` — parsed ``Cache-Control`` directive set.
 - :func:`parse_cache_control` — header parser.

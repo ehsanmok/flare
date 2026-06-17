@@ -1,8 +1,8 @@
 """HTTP/3 response-stream writer -- sans-I/O byte emitter.
 
 Symmetric to :mod:`flare.h3.request_reader`. Builds the bytes
-the H3 server reactor (Phase E) hands to the QUIC stream
-abstraction for a response on a request stream.
+the H3 server reactor hands to the QUIC stream abstraction for a
+response on a request stream.
 
 A complete H3 response is at most three concatenated wire
 fragments:

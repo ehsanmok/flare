@@ -778,8 +778,8 @@ struct QuicConnection(Copyable, Movable):
     ) raises -> ConnectionEvents:
         """Per-level Initial decrypt + frame dispatch. Carved out
         of :meth:`handle_packet` so the H + 1-RTT branches stay
-        readable; behaviour is byte-identical to the v0.8 close-
-        wire-paths version."""
+        readable; behaviour is byte-identical to the prior inline
+        version."""
         var events = empty_events()
         var up = unprotect_initial_packet(
             datagram,

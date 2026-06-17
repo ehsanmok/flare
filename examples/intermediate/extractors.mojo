@@ -9,10 +9,10 @@ Demonstrates two ways to use flare's typed extractors:
    the struct, pulls each field from the request, and calls the
    inner ``serve``.
 
-Since :
+Notes:
 
 - ``Router.get(path, handler)`` accepts any ``H: Handler & Copyable
-  & Movable`` (Track 1.4), so the production shape is
+  & Movable``, so the production shape is
   ``r.get("/users/:id", Extracted[GetUser]())``.
 - The concrete ``PathInt`` / ``PathStr`` / ``PathFloat`` /
   ``PathBool`` / ``QueryInt`` / ``HeaderStr`` / ... extractors

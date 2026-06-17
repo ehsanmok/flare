@@ -5,8 +5,8 @@ Walks the production shape of an HTTP/3 server:
 * :meth:`flare.http.HttpServer.bind_with_h3` opens a TCP listener
   for h1 / h2c / h2 AND a QUIC UDP listener for h3 alongside.
 * :meth:`flare.http.HttpServer.serve_h3` runs the QUIC reactor
-  with H3 Handler dispatch as a single-threaded loop per Phase
-  E Track Q12-W: each iteration runs
+  with H3 Handler dispatch as a single-threaded loop: each
+  iteration runs
   :meth:`flare.quic.QuicListener.tick` to drain one inbound UDP
   datagram + drive the QUIC + rustls state machines, then
   :meth:`flare.http.HttpServer.pump_h3_handler_once` to dispatch

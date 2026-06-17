@@ -1,9 +1,10 @@
 """Canonical FFI dylib path resolver shared across :mod:`flare`.
 
-Closes critique register §C3 (every package that owned a C-side
-helper carried its own ``_find_flare_*_lib`` helper -- 7 callers,
-4 lookalike implementations of the same ``CONDA_PREFIX`` /
-bare-checkout fallback search). Different return values for
+Consolidates the per-package FFI-lib finders: every package that
+owned a C-side helper carried its own ``_find_flare_*_lib``
+helper -- 7 callers, 4 lookalike implementations of the same
+``CONDA_PREFIX`` / bare-checkout fallback search. Different
+return values for
 "library not present" (``"build/libflare_X.so"`` vs
 ``"libflare_X.so"``); identical search order otherwise.
 

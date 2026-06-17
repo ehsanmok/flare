@@ -11,13 +11,13 @@ gRPC is a 4-layer protocol on top of HTTP/2:
    :mod:`flare.grpc.status`.
 3. **Call shapes** -- unary (this module, via the
    :mod:`flare.grpc.server` adapter), and server-streaming /
-   client-streaming / bidirectional (deferred). Each maps onto
-   a single HTTP/2 stream (request HEADERS + DATA frames carry
-   length-prefixed messages, response HEADERS + DATA +
-   trailing HEADERS carry the reply).
-4. **Codegen** -- proto3 message + service codegen. Deferred;
-   handler bodies for now construct ``List[UInt8]`` payloads
-   directly using whatever serialiser the user picks.
+   client-streaming / bidirectional (not yet implemented). Each
+   maps onto a single HTTP/2 stream (request HEADERS + DATA
+   frames carry length-prefixed messages, response HEADERS +
+   DATA + trailing HEADERS carry the reply).
+4. **Codegen** -- proto3 message + service codegen. Not yet
+   implemented; handler bodies for now construct ``List[UInt8]``
+   payloads directly using whatever serialiser the user picks.
 
 This module establishes layers 1, 2 and the unary path of
 layer 3. The HTTP/2 reactor already provides the stream

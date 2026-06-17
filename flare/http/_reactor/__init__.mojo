@@ -18,7 +18,7 @@ HTTP server, split across three sibling files:
 
 The sister module ``flare.http._server_reactor_impl`` owns the
 I/O-bearing pieces (reactor entry-point loops, ``Pool[ConnHandle]``
-glue, io_uring buffer-ring scaffolding) and re-exports every public
+glue, io_uring buffer-ring glue) and re-exports every public
 symbol below for back-compat with existing imports across
 ``flare/http/``, ``flare/http2/``, ``flare/runtime/``, the test suite,
 and the fuzz corpus.

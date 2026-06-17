@@ -5,10 +5,10 @@ middleware: it accepts ``(key, entry)`` pairs and returns the
 entry on lookup. Concrete implementations choose their own
 eviction policy + capacity bound.
 
-The :class:`InMemoryCacheStore` ships in this commit; a
-filesystem-backed store + an external-cache adapter (Redis /
-memcached) are the next two follow-ups within the cycle. The
-trait keeps the middleware decoupled from the storage choice.
+The :class:`InMemoryCacheStore` ships here; a filesystem-backed
+store + an external-cache adapter (Redis / memcached) are
+possible follow-ups. The trait keeps the middleware decoupled
+from the storage choice.
 """
 
 from std.collections import List, Optional

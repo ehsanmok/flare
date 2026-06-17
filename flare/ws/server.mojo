@@ -81,7 +81,7 @@ def _sha1_srv(data: String) raises -> List[UInt8]:
 
 
 # ── Sec-WebSocket-Accept derivation uses RFC 4648 §4 base64 from
-#    flare.crypto.base64 (closes critique register §C1) ────────────────────────
+#    flare.crypto.base64 ───────────────────────────────────────────────────────
 #
 # The standard-alphabet base64 encoder lives in
 # :mod:`flare.crypto.base64`; the local ``_b64_encode_srv`` alias

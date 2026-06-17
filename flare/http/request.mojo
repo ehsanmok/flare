@@ -50,7 +50,7 @@ struct Request(Movable):
                  and the policy is set per-server (per-``ServerConfig``);
                  the reactor copies ``ServerConfig.expose_error_messages``
                  onto every parsed ``Request`` and ``_bad_request_from_error``
-                 reads it. Closes criticism §2.7.
+                 reads it.
 
     Path parameters extracted by ``Router`` live on a private field that
     is lazily allocated on the first ``Router`` match. Handlers that

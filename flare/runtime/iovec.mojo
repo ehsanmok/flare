@@ -5,8 +5,8 @@ Provides ``IoVecBuf`` — a typed wrapper around a heap-allocated
 helper that loops over partial writes until every byte across
 every vector has been sent.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 flare's HTTP/1.1 response serializer today copies the status
 line + every header + the body into a single contiguous
@@ -36,8 +36,8 @@ H1 layer: hyper's ``h1::role::Server::encode`` builds an
 ``Tokio``'s ``write_vectored`` (which is ``writev`` on
 epoll/kqueue, ``WSASend`` on IOCP).
 
-What this commit ships (only the primitive)
---------------------------------------------
+What this module provides (only the primitive)
+----------------------------------------------
 
 * ``IoVecBuf(n)`` — allocates a heap region of
   ``n * sizeof(struct iovec)`` bytes (16 B per cell on every
@@ -88,7 +88,7 @@ from ..net.error import NetworkError, BrokenPipe, Timeout, ConnectionReset
 
 comptime _IOVEC_BYTES: Int = 16
 """Size of a single C ``struct iovec`` cell on every 64-bit
-target this commit supports (Linux + macOS / x86_64 + aarch64).
+target this module supports (Linux + macOS / x86_64 + aarch64).
 8 bytes for ``iov_base`` (a pointer) + 8 bytes for ``iov_len``
 (a ``size_t``).
 """

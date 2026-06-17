@@ -3,8 +3,8 @@
 The ``Response.body: List[UInt8]`` field forces the entire
 response body to materialise before the first ``send`` — a 100MB
 download allocates 100MB per concurrent client, regardless of the
-peer's read speed. Track 4 of design-0.5 promotes streaming bodies
-into : the reactor pulls chunks on writable edges so that:
+peer's read speed. This module promotes streaming bodies: the
+reactor pulls chunks on writable edges so that:
 
 - 100MB downloads cost a few KB of buffer per connection (one
   chunk in flight at a time).
@@ -16,7 +16,7 @@ into : the reactor pulls chunks on writable edges so that:
   the kernel send buffer fills, the reactor doesn't ask for the
   next chunk. No high-water marks needed.
 
-Pieces in place after this commit:
+Pieces in place:
 
 - ``ChunkSource`` trait: anything that can produce one chunk of
   bytes per ``next(cancel)`` call.
@@ -28,7 +28,7 @@ Pieces in place after this commit:
 - ``ChunkedBody[Source: ChunkSource]``: adapter from a user
   ``ChunkSource`` to the ``Body`` trait.
 
-Pieces deferred (documented per-section):
+Pieces not yet implemented:
 
 - Making ``Response`` parametric over ``B: Body`` (so handlers
   can return ``Response[ChunkedBody[MySource]]``). Today's
@@ -43,12 +43,9 @@ Pieces deferred (documented per-section):
   ``ChunkSource`` + ``ChunkedBody`` shape against an in-process
   loop; the network-side demo follows the reactor adoption.
 
-This split keeps the diff reviewable. The shape and public API
-of ``ChunkSource`` / ``Body`` / ``InlineBody`` / ``ChunkedBody``
-are stable from this commit forward; integration into
+The shape and public API of ``ChunkSource`` / ``Body`` /
+``InlineBody`` / ``ChunkedBody`` are stable; integration into
 ``Response`` and the reactor lands without breaking handlers.
-
-Closes the trait portion of Track 4.
 """
 
 from std.collections import Optional

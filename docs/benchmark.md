@@ -171,7 +171,7 @@ flare's close-after-disposition handling doesn't introduce
 tail bumps. Both servers are stable under the 3 % stdev gate
 across the 5-run measurement phase.
 
-#### No-regression attestation across the QUIC + H3 + gRPC codec additions
+#### No-regression check across the QUIC + H3 + gRPC codec additions
 
 Codec-layer additions land outside the HTTP/1.1 plaintext hot
 path (the wire that drives every row in the tables above),
@@ -197,7 +197,7 @@ additions don't change the steady-state hot-path shape, and
 the headline tables above remain the correct numbers to
 publish.
 
-#### No-regression attestation after the public-surface refresh
+#### No-regression check after the public-surface refresh
 
 The follow-on pass that tightens the public surface around the
 codec primitives (the `FrameHandler` / `parse_frame_into`
@@ -216,7 +216,7 @@ recorded:
 | `throughput_mc`  | **flare_mc**      | 4 | **218,939** | 1.25 | 2.68 | 3.04 | 11.45 | 0.21 |
 
 flare single-worker p99 holds at 3.05 ms (vs the prior 3.10 ms
-attestation), flare_mc multi-worker p99 holds at 2.68 ms
+check), flare_mc multi-worker p99 holds at 2.68 ms
 (vs 2.72 ms). p50 is tighter on both shapes. Median req/s on
 single-worker flare moved from 76,148 to 71,444 (−6.2 %) and
 on flare_mc from 234,179 to 218,939 (−6.5 %); both deltas sit
@@ -228,7 +228,7 @@ at 1.79× (71,444 / 39,967), and Go itself moved −1.2 % across
 the same window. The flare_mc p99.99 median of 11.45 ms is
 dominated by two warmup-phase rounds with one-off
 74.4 / 20.7 ms spikes; rounds 3–5 settled to p99.99 ≤ 4.81 ms,
-matching the prior attestation. The encoder buffer-reuse path
+matching the prior check. The encoder buffer-reuse path
 and the trait-driven dispatchers are HTTP/3 / QUIC / gRPC
 surfaces — they do not touch the HTTP/1.1 `ConnHandle` read
 path that drives these rows, so the held p99 / p50 numbers are
@@ -594,13 +594,13 @@ prior measurement) with comparable tail medians (Go's
 `3.23 / 3.84 / 4.30 ms`).
 
 Source data: [`benchmark/results/2026-05-27T2256-ehsan-dev-03e55f2/`](../benchmark/results/2026-05-27T2256-ehsan-dev-03e55f2/).
-Prior baseline (v0.7 numbers carried through until this
+Prior baseline (earlier numbers carried through until this
 HEAD): [`benchmark/results/2026-05-11T1821-ehsan-dev-944de73/`](../benchmark/results/2026-05-11T1821-ehsan-dev-944de73/).
 
-##### Phase D close attestation
+##### Feature-pass no-regression check (HTTP/3 + QUIC additive surfaces)
 
-The Phase D feature pass (HTTP/3 + QUIC reactor scaffolds + H3
-server scaffold + rustls QUIC binding + CC trait + crypto key
+The HTTP/3 + QUIC feature pass (QUIC reactor + H3
+server + rustls QUIC binding + CC trait + crypto key
 schedule + ALPN dispatcher + WS auto-dispatcher + http<->http2
 cycle break) is additive to the request-side hot path: every
 new module either runs only when the caller opts into it
@@ -619,7 +619,7 @@ before the next h1 floors are quoted; the in-session gates that
 - `pixi run check-no-http-http2-cycle` -- clean.
 - New tests this cycle (9 files / 88 cases): all pass.
 - `pixi run bench-h3 flare` -- prints the "infra ready, wiring
-  deferred" banner + exits 0 as the gate now expects.
+  pending" banner + exits 0 as the gate now expects.
 
 The full `pixi run tests` aggregate + `fuzz-all` + the sanitizer
 trio + `bench-vs-baseline` cycle (each multi-hour) runs on the
@@ -627,10 +627,10 @@ dev-box at the cycle handoff; the new test files are already
 wired into the `tests` aggregate so they run alongside the
 existing 600+ cases.
 
-##### Wire paths close attestation
+##### Wire-paths no-regression check
 
-The close-wire-paths cycle (Tracks Q1-W ... Q8-W + R-W) wired
-every QUIC + H3 surface that Phase D shipped as a scaffold:
+The wire-paths cycle wired every QUIC + H3 surface that the
+feature pass had stubbed:
 `OpenSslQuicCrypto` replaces `StubQuicCrypto`, `rustls_wrapper`
 links the QUIC TLS handshake through a real C ABI crate,
 `QuicListener.run` drives the UDP reactor (non-blocking
@@ -642,9 +642,9 @@ H3RequestReader -> Handler -> response writer, the unified
 `HttpServer.bind_with_h3` routes ALPN-negotiated h3 alongside
 h1/h2c/h2, and `WsAutoClient.connect` drives TLS handshake +
 ALPN inspection -> WsClient or WsOverH2Stream end-to-end. Same
-hot-path discipline as Phase D: every new wire path is opt-in
-or sits on its own sub-tree, so the existing throughput floors
-are preserved by construction.
+hot-path discipline as the feature pass: every new wire path is
+opt-in or sits on its own sub-tree, so the existing throughput
+floors are preserved by construction.
 
 In-session gates that ran on the EPYC 7R32 dev-box at cycle
 handoff:
@@ -673,7 +673,7 @@ loopback integration suites.
 The full bench-vs-baseline regression sweep (h1 + h2 floors)
 runs on the dev-box at cycle handoff alongside the bench-h3
 suite once the h2load h3 client lands; the floors carried
-through from Phase D (flare 1w >= 79,028 req/s / p99 <= 3.33 ms;
+through from the prior pass (flare 1w >= 79,028 req/s / p99 <= 3.33 ms;
 flare_mc 4w handler >= 214,567 req/s / p99 <= 2.71 ms;
 flare_mc_static 4w >= 246,942 req/s) are unchanged by this
 cycle's additive surfaces.
@@ -707,7 +707,7 @@ the Rust pack):
 | `throughput_mc` | axum                    | 4 | 203,673    | 2.80 | 3.26 | 8.44 | 0.21 |
 | `throughput_mc` | hyper                   | 4 | 142,970    | 2.82 | 3.22 | 3.77 | 0.21 |
 
-Floor-hold check vs the Wire-paths-close attestation just above:
+Floor-hold check vs the wire-paths check just above:
 
 - flare 1w: 76,287 req/s (vs 79,028 ceiling, 71,444 refresh
   floor) -- inside the cross-day spread; p99 3.18 ms <= 3.33 ms
@@ -727,30 +727,29 @@ and [WebSocket SIMD masking](#websocket-simd-masking) below
 (Huffman SIMD 4x scalar; WS-mask SIMD 55x scalar at 1 KB,
 33x at 64 KB, 21x at 1 MB; HeaderMap 1.5 us / Response 0.35
 us / URL parse 0.7-0.8 us); zero drift from the prior
-attestations.
+checks.
 
 The cross-framework HTTP/3 row now has the h2load+H3 client
 landed on the dev-box -- see the
 [HTTP/3 throughput](#http3-throughput) table below for the
-quiche / quinn / flare_h3 reading at this HEAD. As of Phase E
-flare_h3 sat at 0 req/s because the inbound post-Initial decrypt
-path had not landed; Phase F (Jun 4, 2026) closed the decrypt
-path, and the Phase F2 reactor rewrite (copy elimination,
-cached-table QPACK decode, coalesced 1-RTT egress) closed the
-gate -- the table now reads a stable 74,653 req/s, `+2.9 %`
-over the quiche floor (see the table notes below).
+quiche / quinn / flare_h3 reading at this HEAD. An earlier
+reading had flare_h3 at 0 req/s because the inbound post-Initial
+decrypt path had not landed; a later pass (Jun 4, 2026) closed
+the decrypt path, and a follow-on reactor rewrite (copy
+elimination, cached-table QPACK decode, coalesced 1-RTT egress)
+closed the gate -- the table now reads a stable 74,653 req/s,
+`+2.9 %` over the quiche floor (see the table notes below).
 
-##### Phase E refresh attestation (Jun 3, 2026, post Track Q14-W)
+##### Refresh check (Jun 3, 2026)
 
-Phase E (Tracks Q9-W ... Q14-W, 6 atomic commits on top of
-`65b3282`) joined the close-wire-paths primitives into a live
-QUIC reactor + H3 dispatch loop: handshake bridge (Q9-W),
-post-Initial AEAD + `handle_packet` dispatch (Q10-W), UDP
-egress + full I/O cycle (Q11-W), H3 attach + Handler dispatch
-(Q12-W), bench baseline rewritten through `serve_h3` (Q13-W),
-docs sweep (Q14-W, this section).
+This pass (6 atomic commits on top of `65b3282`) joined the
+wire-paths primitives into a live QUIC reactor + H3 dispatch
+loop: handshake bridge, post-Initial AEAD + `handle_packet`
+dispatch, UDP egress + full I/O cycle, H3 attach + Handler
+dispatch, bench baseline rewritten through `serve_h3`, and this
+docs sweep.
 
-h1 / h2 floor reverify at the Phase E HEAD
+h1 / h2 floor reverify at this HEAD
 (`pixi run -e bench bench-vs-baseline-quick` on the same EPYC
 7R32 dev-box, 5x30s plaintext runs):
 
@@ -762,28 +761,26 @@ h1 / h2 floor reverify at the Phase E HEAD
 vs the Best-perf refresh row just above (76,287 req/s p99 3.18
 ms at HEAD `65b3282`): 75,294 is inside the cross-day spread
 (both above the 71,444 refresh floor; p99 3.17 ms below the
-3.33 ms floor). Q9-W ... Q12-W added QUIC + H3 surfaces that
+3.33 ms floor). The QUIC + H3 surfaces added in this pass
 sit on their own sub-tree, so the TCP hot path's floors are
 preserved by construction. HOLD.
 
 The bench-h3 cross-framework gate `flare_h3 >= 72,571 req/s`
-(quiche reading at HEAD `65b3282`) did NOT close in Phase E.
+(quiche reading at HEAD `65b3282`) did NOT close in that pass.
 The QUIC reactor I/O loop is live and the Handler dispatch
 chain reaches the Handler; the open gap is the rustls FFI
 wrapper at `flare/tls/ffi/rustls_wrapper/src/lib.rs:447`
 discarding `Option<KeyChange>` so per-level Handshake / 1-RTT
 keys never reach the AEAD layer. h2load drives the boot-up +
 bind + Initial-decrypt path (5 datagrams sent, 0 received).
-The deferred-gate close is scoped in
-`design-0.8.mdc § Phase E deferred gate` and
-`critisize-0.8.mdc § 11.13`; once the FFI bridge lands,
+Once the FFI bridge lands,
 `pixi run -e bench bench-h3 all` re-runs the cross-framework
 table and this section gains a `flare_h3` row alongside the
 existing `quiche` + `quinn` rows above.
 
-##### Phase F update (Jun 4, 2026): decrypt gap closed, gate egress-bound
+##### Update (Jun 4, 2026): decrypt gap closed, gate egress-bound
 
-Phase F landed the rustls `KeyChange` bridge (Rust wrapper +
+A later pass landed the rustls `KeyChange` bridge (Rust wrapper +
 Mojo bindings + per-level key install), the listener-level
 Handshake + 1-RTT header-protection + AEAD decrypt, a
 packet-number-space split (an inbound ACK advances
@@ -796,37 +793,37 @@ unmet, but the bottleneck has moved off the handshake: the
 single-stream path runs at 2,145 req/s with 105 us RTT, while
 the 100-stream gate workload was egress-bound -- one un-coalesced
 UDP datagram per H3 response, each built byte-by-byte through an
-AEAD + header-protection FFI crossing. The Phase F2 reactor
+AEAD + header-protection FFI crossing. A follow-on reactor
 rewrite (copy elimination + cached-table QPACK decode + coalesced
 1-RTT egress with capacity-reserved builders) closed the gate to
 74,653 req/s; `sendmmsg`/GSO were not needed and left unbuilt.
 See the HTTP/3 throughput table for the final reading.
 
-Phase E sanitizer + fuzz + lint floors (each gate ran at its
-introducing commit; the close-wire-paths floors carry forward
+Sanitizer + fuzz + lint floors (each gate ran at its
+introducing commit; the wire-paths floors carry forward
 intact, no new breakage):
 
-- `pixi run tests` aggregate -- green per-commit at Q9-W ...
-  Q13-W; the new test files (`test_quic_handshake_bridge.mojo`,
+- `pixi run tests` aggregate -- green per-commit across the
+  pass; the new test files (`test_quic_handshake_bridge.mojo`,
   RFC 9001 Appendix A.4 + A.5 vectors,
   `test_quic_loopback_integration.mojo` egress cases,
   `test_h3_end_to_end.mojo`) are all in the `tests` aggregate.
 - `pixi run fuzz-quic-initial-handshake` -- 200K runs green at
-  Q9-W introduction.
-- `pixi run fuzz-quic-packet-decrypt` -- 200K runs green at
-  Q10-W over Initial + Handshake + 1-RTT branches.
-- `pixi run fuzz-h3-server` -- 200K runs green at Q12-W
-  including the QuicListener dispatch branch.
+  introduction.
+- `pixi run fuzz-quic-packet-decrypt` -- 200K runs green over
+  Initial + Handshake + 1-RTT branches.
+- `pixi run fuzz-h3-server` -- 200K runs green including the
+  QuicListener dispatch branch.
 - `pixi run test-safety-asserts` -- green at each commit.
 - `pixi run check-sans-io` + `pixi run check-no-http-http2-cycle`
   + `pixi run check-reactor-size` -- clean at each commit.
 
 The full sanitizer trio (`pixi run tests-asan` /
-`pixi run tests-tsan`) re-runs once the Phase F (rustls
-KeyChange FFI bridge) lands -- the Q11-W reverify confirmed
-the existing 2 pre-existing ASan failures + the pre-existing
-TSan linker errors carry from close-wire-paths without new
-regressions on the touched surfaces.
+`pixi run tests-tsan`) re-runs once the rustls KeyChange FFI
+bridge lands -- the reverify confirmed the existing 2
+pre-existing ASan failures + the pre-existing TSan linker
+errors carry forward without new regressions on the touched
+surfaces.
 
 #### Listener-mode A/B (flare-only)
 
@@ -1338,26 +1335,25 @@ parser regressions, not as a headline.
 ## HTTP/3 throughput
 
 The HTTP/3 cross-framework throughput table is the hard release
-gate for the v0.8 close-wire-paths cycle (Track Q7-W). The four
+gate for the QUIC + H3 wire-paths work. The four
 flare-side wiring follow-ups (AEAD backend, rustls QUIC binding,
 QUIC reactor, H3 driver dispatch) all landed in this cycle, so
 the dependency chain in front of the bench harness is now:
 
 - ``flare/tls/ffi/openssl_wrapper.cpp`` -- AEAD seal / open +
-  header-protection mask thunks (Track Q1-W; tested against
+  header-protection mask thunks (tested against
   RFC 9001 Appendix A vectors + cross-validated with aioquic).
 - ``flare/tls/ffi/rustls_wrapper/`` -- rustls 0.23 ServerConnection
   over a C ABI; idempotent build via
-  ``flare/tls/ffi/build_rustls.sh`` (Track Q2-W).
+  ``flare/tls/ffi/build_rustls.sh``.
 - ``flare/quic/server.mojo`` -- UDP listener + per-datagram
   dispatch + TimerWheel-driven PTO / idle / ack-delay + CC
-  reactor (Track Q3-W; loopback handshake -> 1-RTT -> close
+  reactor (loopback handshake -> 1-RTT -> close
   tested vs. a vendored quinn smoke client).
 - ``flare/h3/server.mojo`` -- ``H3Connection.feed_stream_chunk``
   through ``H3RequestReader`` -> ``Handler`` -> response writer,
   uni-stream type dispatch, SETTINGS + GOAWAY consumption,
-  conformance round-trip vs. aioquic + quiche fixtures
-  (Track Q4-W).
+  conformance round-trip vs. aioquic + quiche fixtures.
 
 Infrastructure for the cross-framework bench:
 
@@ -1384,22 +1380,23 @@ Infrastructure for the cross-framework bench:
 - ``pixi run --environment bench bench-h3 {flare,quinn,quiche,all}``
   -- task entry points.
 
-**Status: Phase E (Tracks Q9-W ... Q14-W, Jun 3, 2026) joined
-the close-wire-paths primitives into a live QUIC reactor + H3
+**Status: an earlier pass (Jun 3, 2026) joined
+the wire-paths primitives into a live QUIC reactor + H3
 dispatch loop. The bench baseline now drives through
 `HttpServer.bind_with_h3 + serve_h3(handler)`; the reactor's
 `recv -> dispatch -> handle -> drain -> protect -> sendto`
 cycle is live and the Handler dispatch chain reaches the
-Handler on completed streams. Phase F (Jun 4, 2026) then closed
-the inbound post-Initial decrypt path the gate depended on: the
-rustls FFI wrapper now returns `KeyChange`, per-level Handshake /
-1-RTT keys reach `install_handshake_keys` / `install_1rtt_keys`,
-and the listener strips header protection + AEAD-decrypts
-Handshake + 1-RTT datagrams through the slot's rustls session.
-With the packet-number-space split (an inbound ACK advances
-`largest_acked_by_peer`, never the inbound pn-decode base) the
-handshake completes and h2load sustains a stable reading. The
-Phase F2 reactor rewrite then closed the cross-framework gate
+Handler on completed streams. A later pass (Jun 4, 2026) then
+closed the inbound post-Initial decrypt path the gate depended
+on: the rustls FFI wrapper now returns `KeyChange`, per-level
+Handshake / 1-RTT keys reach `install_handshake_keys` /
+`install_1rtt_keys`, and the listener strips header protection +
+AEAD-decrypts Handshake + 1-RTT datagrams through the slot's
+rustls session. With the packet-number-space split (an inbound
+ACK advances `largest_acked_by_peer`, never the inbound
+pn-decode base) the handshake completes and h2load sustains a
+stable reading. A follow-on reactor rewrite then closed the
+cross-framework gate
 (`flare_h3 median req/s >= 72,571 req/s sigma <= 8 %`): flare h3
 leads at 74,653 req/s (median, `+2.9 %` over quiche, sigma
 `0.50 %`). The win came from eliminating per-packet
@@ -1454,7 +1451,32 @@ reading at HEAD ``b9aeeef`` (source data:
 |---|---:|---:|---:|---:|---|
 | quiche 0.22 (boringssl-vendored) | 72,571 | (per-stream) | (per-stream) | (per-stream) | clean: 0 errors / 0 timeouts across 5 runs, sigma ~1% |
 | quinn 0.11 + h3 0.0.8        | 654    | 4.17     | 4.75       | 5.48        | open-loop 100-stream shape errors 98% (1.2M errored of 1.2M total) -- this is workload-shape calibration, not a quinn ceiling (the 10s warmup with the same client sustained 104k req/s at 0 errors) |
-| **flare h3**                 | **74,653** | **1.45** | **2.45**   | 433.45      | Gate MET: beats quiche's 72,571 by +2.9% at sigma 0.50% (stable across 5x30s runs). The Phase F reactor rewrite removed the per-packet/per-op whole-state deep copies (in-place `ref` mutation of the `connections` / `h3_connections` slabs), routed QPACK decode through the cached-table SIMD Huffman path + a build-once static table + slice-based literal decode, and reserved capacity on the hot `List[UInt8]` egress builders so the per-datagram assembly fills one allocation instead of growing byte-by-byte. The last lever mattered most: the allocator's thread-local cache lives in a dlopen'd lib, so every spared malloc/free also spares a slow dynamic-TLS lookup, which collapsed both the `List._realloc` and `__tls_get_addr` profile peaks. p99.9 fell from 410 ms (Phase F first pass) to 2.45 ms; the lone p99.99 outlier (433 ms) is a per-run connection-setup artifact, not a steady-state stall. Egress was already coalesced (ACK + flow-control + multiple H3 STREAM frames per 1-RTT datagram); `recvmmsg`/`sendmmsg`/GSO were left unbuilt because the gate closed without them. |
+| **flare h3**                 | **74,653** | **1.45** | **2.45**   | 433.45      | Gate MET: beats quiche's 72,571 by +2.9% at sigma 0.50% (stable across 5x30s runs). The reactor rewrite removed the per-packet/per-op whole-state deep copies (in-place `ref` mutation of the `connections` / `h3_connections` slabs), routed QPACK decode through the cached-table SIMD Huffman path + a build-once static table + slice-based literal decode, and reserved capacity on the hot `List[UInt8]` egress builders so the per-datagram assembly fills one allocation instead of growing byte-by-byte. The last lever mattered most: the allocator's thread-local cache lives in a dlopen'd lib, so every spared malloc/free also spares a slow dynamic-TLS lookup, which collapsed both the `List._realloc` and `__tls_get_addr` profile peaks. p99.9 fell from 410 ms (first pass) to 2.45 ms; the lone p99.99 outlier (433 ms) is a per-run connection-setup artifact, not a steady-state stall. Egress was already coalesced (ACK + flow-control + multiple H3 STREAM frames per 1-RTT datagram); `recvmmsg`/`sendmmsg`/GSO were left unbuilt because the gate closed without them. |
+
+Note (Jun 16, 2026 re-measurement): the published comparison
+above is against the quiche 0.22 baseline. After the baseline
+crate was bumped to quiche 0.24.5, a re-run on the EPYC dev-box
+re-confirmed flare h3 at 74,003 req/s (median, 5x30s, sigma
+0.51%, p99 1.46 ms) -- within run-to-run noise of the 74,653
+above, so the table stands. The quiche 0.24.5 reference server,
+however, could not be benched on this host: it serves exactly
+one request per connection, then `quiche::Connection::send`
+returns `CryptoFail` on every subsequent datagram. The failure
+is isolated to the AES-GCM cipher path -- quiche selects
+BoringSSL's stateful `EVP_aead_aes_128_gcm_tls13` AEAD for
+AES-128-GCM (vs the stateless `EVP_aead_chacha20_poly1305` for
+ChaCha20) -- reproduces identically on both the `boringssl-
+vendored` and `boringssl-boring-crate` backends, and is not a
+harness artifact (the baseline mirrors quiche's own
+`examples/http3-server.rs` and fails even at one stream per
+connection). The `openssl` backend was not a usable substitute
+on this host either: stock OpenSSL 3.6 omits the quictls
+`SSL_set_quic_method` API that quiche 0.24.5 links, the
+installed quictls 3.0.15 predates `EVP_CIPHER_CTX_dup` (OpenSSL
+3.2+), and the only quictls `+quic` branch at 3.2 or newer
+(`openssl-3.3.0+quic`) fails to compile. The quiche 0.22 number
+is therefore retained as the last reproducible cross-framework
+reading on this hardware.
 
 Reading order:
 
@@ -1481,9 +1503,9 @@ Reading order:
   exposed the per-conn limit; the calibration knob lives in
   ``benchmark/configs/h3_throughput.yaml`` (``h2load_streams``
   + ``h2load_duration_seconds``).
-- **flare h3** at 74,653 req/s reflects the post-Phase-F reactor
+- **flare h3** at 74,653 req/s reflects the reactor
   rewrite. The inbound post-Initial decrypt path was already live
-  after Phase F's first pass (rustls KeyChange -> per-level keys,
+  after the first pass (rustls KeyChange -> per-level keys,
   Handshake + 1-RTT AEAD/HP decrypt, packet-number-space split);
   the first pass measured only 351 req/s because per-inbound-packet
   and per-egress-op work deep-copied the whole `QuicConnection` /

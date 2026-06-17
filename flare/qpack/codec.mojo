@@ -249,7 +249,7 @@ def decode_field_section(
     Returns the parsed headers in wire order. Field-line type
     dispatch:
 
-    * ``1Txxxxxx`` -- indexed; rejects T=0 (dynamic) until v0.9.
+    * ``1Txxxxxx`` -- indexed; rejects T=0 (dynamic; not supported).
     * ``01NTxxxx`` -- literal with name reference; rejects T=0.
     * ``001Nhxxx`` -- literal with literal name.
     * ``0001xxxx`` -- indexed post-base (dynamic only) -> reject.

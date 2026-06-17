@@ -40,7 +40,7 @@ Parameter ids covered (RFC 9000 §18.2 + RFC 9221 §3 for datagram):
 
 The 0x0d preferred_address parameter is structurally more
 complex (carries a peer's preferred IP/port for migration); it is
-not in v0.8's scope and is skipped on decode like any other
+not currently handled and is skipped on decode like any other
 unknown id. Adding it is a strict superset change.
 
 Sans-I/O contract: zero I/O imports; registered in

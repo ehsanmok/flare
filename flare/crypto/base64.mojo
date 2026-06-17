@@ -1,8 +1,8 @@
 """``flare.crypto.base64`` -- RFC 4648 §4 standard base64 encode/decode.
 
-Closes critique register §C1 (three identical near-duplicate
-encoders): the standard-alphabet base64 implementation lived in
-three places before -- ``_b64_encode`` in ``flare.http.auth``,
+Consolidates three identical near-duplicate encoders: the
+standard-alphabet base64 implementation lived in three places
+before -- ``_b64_encode`` in ``flare.http.auth``,
 ``_base64_encode`` in ``flare.ws.client``, ``_b64_encode_srv`` in
 ``flare.ws.server`` -- each with the same RFC 4648 §4 table and
 the same chunk-of-3 / pad-tail loop. This module is the single

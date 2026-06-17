@@ -10,8 +10,8 @@ json`` / ``application/octet-stream`` / ``gzip`` / ``br`` /
 ``HTTP/1.0`` / ``HTTP/1.1``) with shared ``StaticString``
 constants.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 `flare.http.server._parse_http_request_bytes` allocates the
 method String *twice* per request today (the
@@ -32,8 +32,8 @@ sets ``Connection: keep-alive``; every JSON response sets
 ``StaticString`` lets future hot-path serializers compare against
 the interned shape without an allocation.
 
-What this commit ships
------------------------
+What this module provides
+-------------------------
 
 * ``MethodIntern`` — namespace struct holding the 9 method
   ``StaticString`` constants. Mirrors the
@@ -55,7 +55,7 @@ What this commit ships
   then a tiny per-length switch (most lengths have ≤ 2
   candidates).
 
-Wiring into the parser is a follow-up commit; this commit lands
+Wiring into the parser is a follow-up; this module provides
 the primitive + tests + re-exports so the wiring change is
 mechanical.
 

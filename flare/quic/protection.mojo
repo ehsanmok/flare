@@ -10,7 +10,7 @@ entry points compose the three primitives already in
 - :class:`flare.quic.crypto.OpenSslQuicCrypto` (AEAD + HP mask)
 
 into the full inbound / outbound packet pipeline that the QUIC
-server reactor (Track Q3-W) wires per datagram:
+server reactor wires per datagram:
 
 * **unprotect** (inbound): strip header protection, reconstruct
   the truncated packet number per RFC 9000 §A.3, decrypt the
@@ -21,20 +21,19 @@ server reactor (Track Q3-W) wires per datagram:
   packet-number bytes + the low header bits, return the wire
   bytes ready for ``sendto``.
 
-Track Q10-W extends the Initial pair with the post-Initial
-encryption levels:
+The post-Initial encryption levels extend the Initial pair:
 
 * :func:`unprotect_handshake_packet` / :func:`protect_handshake_packet`
   -- long-header packets at the Handshake encryption level (RFC
   9000 §17.2.4). Same AEAD + HP shape as Initial but no token
   field in the long-header extras, and the per-direction secret
   is supplied by the caller (the rustls QUIC bridge surfaces it
-  through Track Q9-W's session slab).
+  through the session slab).
 * :func:`unprotect_1rtt_packet` / :func:`protect_1rtt_packet` --
   short-header packets at the 1-RTT encryption level (RFC 9000
   §17.3). Short-header parsing instead of long-header; ``key_phase``
   is exposed for key-update tracking but applying a new key is
-  outside this commit's scope.
+  outside this module's scope.
 
 References:
 - RFC 9001 §5.3 "AEAD Usage".
@@ -277,7 +276,7 @@ def protect_initial_packet(
     return protected^
 
 
-# -- Handshake-packet unprotect (Track Q10-W) --------------------------
+# -- Handshake-packet unprotect ----------------------------------------
 
 
 def unprotect_handshake_packet(

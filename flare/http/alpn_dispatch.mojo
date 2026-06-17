@@ -1,4 +1,4 @@
-"""``flare.http.alpn_dispatch`` -- ALPN-driven wire dispatcher (Track Q5).
+"""``flare.http.alpn_dispatch`` -- ALPN-driven wire dispatcher.
 
 When a TLS-terminated TCP listener completes a handshake with
 ALPN negotiation, the server has to pick which protocol driver
@@ -21,7 +21,7 @@ reactor uses this codepoint to switch into the matching driver.
 The full ``HttpServer.bind`` integration -- mounting one
 :trait:`Handler` instance across an h1 + h2c + h2 reactor and an
 h3 listener simultaneously, sharing state between TCP and UDP
-acceptors -- ships in a focused Track Q5 follow-up commit. This
+acceptors -- ships as a focused follow-up. This
 module is the small, pure piece that makes the decision: the
 expensive wiring (UDP listener allocation, separate epoll
 registration, ALPN list assembly per-listener) sits on top of

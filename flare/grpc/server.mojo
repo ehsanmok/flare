@@ -368,8 +368,8 @@ def stitch_request_data(
     Raises on:
     * truncated LPM frame (need-more-data at the end of the
       request body),
-    * compressed flag set without a negotiated encoding (the
-      decompression step is a v0.9 line item; for now we accept
+    * compressed flag set without a negotiated encoding
+      (decompression is not yet supported; for now we accept
       uncompressed only and surface a typed error).
     """
     var out = List[UInt8]()
@@ -404,7 +404,7 @@ def encode_unary_response(
     The encoder always emits flag=0 (no message-level
     compression). Compression negotiation lives at the channel
     level (``grpc-encoding`` / ``grpc-accept-encoding``) and is
-    a follow-up line item alongside the decompression path.
+    not yet implemented, alongside the decompression path.
 
     The caller owns the buffer and may reuse the same
     ``List[UInt8]`` across responses so the underlying

@@ -8,11 +8,10 @@ in O(1). Stream IDs are dense small integers per RFC 9113 §5.1.1
 ``SETTINGS_MAX_CONCURRENT_STREAMS`` is typically a few hundred --
 the working set of "open" stream IDs at any instant is small.
 
-The original v0.7 / v0.8 implementation stored streams in a
-generic ``Dict[StreamId, Stream]``. The hash + Robin-Hood eviction
-is overhead the dense-small-int key shape doesn't need. The
-v0.8 §11.5.4 inspection flagged this as a deferred SHOULD; Phase D
-absorbed it as Track O.
+An earlier implementation stored streams in a generic
+``Dict[StreamId, Stream]``. The hash + Robin-Hood eviction is
+overhead the dense-small-int key shape doesn't need, which is
+why this slab replaces it.
 
 ## Design
 
@@ -29,15 +28,14 @@ are recycled as streams close) the slab routes accesses through
 a flat ``List[Optional[S]]`` indexed by the stream ID directly.
 No hashing, no probing, no eviction -- just an array lookup and
 an ``Optional`` discriminator. The fast path is the entire body
-of every method when the ID fits, which matches the v0.7
-plaintext fast path's "do the cheapest thing if you can"
-principle.
+of every method when the ID fits, which matches the plaintext
+fast path's "do the cheapest thing if you can" principle.
 
 When a stream ID exceeds ``FAST_CAPACITY`` (long-running h2
 connections that have churned through enough streams to overflow
 the dense range, or peers that send unusually high client-chosen
 IDs) the slab falls through to a chained ``Dict[Int, S]`` with
-the same semantics as the v0.7 implementation. The overflow
+the same semantics as the fast path. The overflow
 Dict only allocates on first use, so connections that never
 exceed the fast range pay zero extra cost over the prior code.
 

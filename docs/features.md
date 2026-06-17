@@ -224,10 +224,10 @@ sans-I/O codecs, the pure state machines, the OpenSSL AEAD
 backend behind `QuicCrypto`, the rustls binding behind
 `RustlsQuicAcceptor`, the QUIC UDP reactor (live
 `recv -> dispatch -> handle -> drain -> protect -> sendto`
-cycle per Phase E Track Q11-W), the per-stream H3 dispatch
-(`H3Connection` slab on `QuicListener` per Track Q12-W), the
+cycle), the per-stream H3 dispatch
+(`H3Connection` slab on `QuicListener`), the
 Handler-mounted serve loop (`HttpServer.bind_with_h3 +
-serve_h3[H]` per Track Q12-W), and the ALPN router on top of
+serve_h3[H]`), and the ALPN router on top of
 `HttpServer.bind` are all wired. The same `Handler` instance
 reaches h1 + h2c + h2 + h3 simultaneously.
 
@@ -288,7 +288,7 @@ carrier) ship as sans-I/O codecs; the unary call shape ships
 as a server adapter that maps an HTTP/2 stream to a typed
 `GrpcUnary` handler. Server-streaming, client-streaming,
 bidirectional, the client side, and proto3 codegen are
-deferred to follow-up cycles.
+deferred to follow-ups.
 
 | Surface | Where |
 |---|---|

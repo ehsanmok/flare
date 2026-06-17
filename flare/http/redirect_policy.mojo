@@ -39,7 +39,7 @@ Public surface:
 
 The decision-helper :meth:`RedirectPolicy.decide` is pure (no
 network), so the :class:`HttpClient` can be retrofitted onto
-it in a follow-up commit without touching the policy logic. It
+it as a follow-up without touching the policy logic. It
 also makes the policy unit-testable in isolation, which is the
 entire point — each cross-origin / auth-forwarding rule has an
 explicit assertion in :mod:`tests.test_redirect_policy`.

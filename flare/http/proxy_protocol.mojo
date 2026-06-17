@@ -46,7 +46,7 @@ Public surface:
   yet (keep reading).
 
 The reactor integration (``ServerConfig.trust_proxy_protocol``)
-opt-in lives in a follow-up commit; this module ships the parsers
+opt-in is a follow-up; this module ships the parsers
 + tests + fuzz harness independently so the wire shapes can be
 audited and reused.
 

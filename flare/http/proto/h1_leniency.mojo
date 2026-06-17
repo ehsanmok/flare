@@ -35,8 +35,8 @@ The two chunked-extension flags --
 ``accept_empty_chunk_extensions`` and
 ``accept_invalid_chunk_extension_chars`` -- govern server-side
 ``Transfer-Encoding: chunked`` request-body decoding, which the
-v0.8 server rejects up-front (no chunked request decoder is
-mounted yet). The flags are present so deployment configuration
+server rejects up-front (no chunked request decoder is mounted
+yet). The flags are present so deployment configuration
 that anticipates chunked support compiles today; they become
 load-bearing alongside the chunked-decoder audit pass.
 
@@ -259,8 +259,8 @@ struct H1LeniencyConfig(Copyable, Movable):
         )
 
 
-# Legacy alias preserved for back-compat with v0.7 configuration
-# code. New code should reach for ``H1LeniencyConfig`` directly;
-# the underscore-prefixed alias is documented as a thin rebind in
-# the module docstring and will be removed in a future cycle.
+# Thin rebind preserved for existing configuration code. New code
+# should reach for ``H1LeniencyConfig`` directly; the underscore-
+# prefixed alias is documented as a thin rebind in the module
+# docstring and may be removed in the future.
 comptime _ExperimentalH1LeniencyConfig = H1LeniencyConfig

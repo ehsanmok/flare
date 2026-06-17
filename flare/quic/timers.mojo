@@ -1,5 +1,5 @@
 """``flare.quic.timers`` -- per-connection timer kinds + token encoding
-for the QUIC reactor (Track Q3-W commit 3/5).
+for the QUIC reactor.
 
 The reactor reuses the shared :class:`flare.runtime.timer_wheel.TimerWheel`
 for every timeout it needs to track. The wheel's per-entry payload is a
@@ -24,7 +24,7 @@ billion concurrent connections, 4 billion timer kinds) while letting
 the reactor dispatch with a single arithmetic comparison on the
 high-half kind.
 
-Three kinds ship in this commit; the comments name the RFC sections
+Three kinds ship here; the comments name the RFC sections
 the reactor dispatch wires each one against:
 
 - :data:`TIMER_KIND_PTO`        -- RFC 9002 §6.2 PTO probe timer.

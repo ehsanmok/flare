@@ -200,8 +200,7 @@ def _struct_serve_thunk[
 
     Routes through ``Pool[H].get_ptr`` rather than reconstructing
     the ``UnsafePointer`` arithmetic in-line — keeps the unsafe
-    pointer plumbing confined to ``flare/runtime/`` per the
-    criticism §2.9 invariant.
+    pointer plumbing confined to ``flare/runtime/``.
     """
     var ptr = Pool[H].get_ptr(addr)
     return ptr[].serve(req)
@@ -298,8 +297,8 @@ struct Router(Copyable, Handler, Movable):
     Accepts both plain ``def(Request) raises -> Response`` functions
     (wrapped internally in ``FnHandler``) **and** arbitrary
     ``H: Handler & Copyable & Movable`` structs (boxed via
-    ``_StructHandler`` with monomorphised serve / destroy thunks)
-    since (Track 1.4). Use the latter to register
+    ``_StructHandler`` with monomorphised serve / destroy thunks).
+    Use the latter to register
     ``Extracted[H]()``, app-state-bearing handlers, middleware
     wrappers, and any other stateful Handler.
 

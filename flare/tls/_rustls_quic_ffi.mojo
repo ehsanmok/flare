@@ -257,7 +257,7 @@ def _do_alpn(read lib: OwnedDLHandle, session: Int) raises -> String:
     return String(unsafe_from_utf8=Span[UInt8, _](buf[:written]))
 
 
-# ── Per-level AEAD + header protection (Phase F commit 2/6) ────────────────
+# ── Per-level AEAD + header protection ─────────────────────────────────────
 
 
 def _do_have_keys(read lib: OwnedDLHandle, session: Int, level: Int) -> Int:
@@ -265,9 +265,9 @@ def _do_have_keys(read lib: OwnedDLHandle, session: Int, level: Int) -> Int:
     keys at ``level``, 0 otherwise, -1 on bad pointer / level out
     of range.
 
-    Phase F: the QuicListener reactor calls this after every
-    take_crypto pump to learn whether the Handshake (2) or 1-RTT
-    (3) `Keys` slot has flipped from None to Some(_). Once
+    The QuicListener reactor calls this after every take_crypto
+    pump to learn whether the Handshake (2) or 1-RTT (3) `Keys`
+    slot has flipped from None to Some(_). Once
     installed, the matching packet/header thunks below dispatch
     AEAD + HP through rustls's already-derived `Keys` instead of
     re-deriving them from a traffic secret on the flare side
@@ -352,7 +352,7 @@ def _do_packet_decrypt(
     ``len(payload) - 16`` for AEAD-GCM / ChaCha20-Poly1305).
 
     Raises if rustls rejects the tag (the typical "wrong keys at
-    this level" symptom -- the Phase E QUIC safety gate).
+    this level" symptom).
     """
     var f = lib.get_function[
         def(Int, c_int, UInt64, Int, Int, Int, Int, Int) thin abi("C") -> c_int

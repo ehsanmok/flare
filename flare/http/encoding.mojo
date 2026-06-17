@@ -43,8 +43,8 @@ def _find_flare_zlib_lib() -> String:
     Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
     pinned to the ``"zlib"`` shim name; kept under the
     ``flare.http.encoding`` namespace because every gzip /
-    deflate call site here imports it. (Closes critique register
-    §C3 -- the canonical resolver is :mod:`flare.utils.dylib`.)
+    deflate call site here imports it. (The canonical resolver
+    is :mod:`flare.utils.dylib`.)
     """
     return find_flare_lib("zlib")
 

@@ -8,8 +8,8 @@ the kernel-shared SPMC protocol requires, and the high-level
 ``submit_sqe`` / ``reap_cqe`` API the upcoming ``UringReactor``
 calls every poll cycle.
 
-What this commit ships
-----------------------
+What this module provides
+-------------------------
 
 * **``mmap``** + **``munmap``** FFI wrappers (libc constants
   ``PROT_READ``, ``PROT_WRITE``, ``MAP_SHARED``, ``MAP_FAILED``).

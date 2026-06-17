@@ -89,8 +89,7 @@ def _find_flare_lib() -> String:
     pinned to the ``"tls"`` shim name; kept under the
     ``flare.net`` namespace because every TLS / DNS / raw-IO
     call site in flare imports it from here. The canonical
-    cross-package finder is :mod:`flare.utils.dylib` (closes
-    critique register §C3).
+    cross-package finder is :mod:`flare.utils.dylib`.
     """
     return find_flare_lib("tls")
 

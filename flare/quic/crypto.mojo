@@ -2,7 +2,7 @@
 
 Sans-I/O. Every entry point is a pure function over byte spans;
 no socket, no fd, no TLS context, no allocator that survives the
-call. The QUIC server reactor (Track Q3) plumbs the AEAD output
+call. The QUIC server reactor plumbs the AEAD output
 into the packet codec; this module owns the math.
 
 ## Layering
@@ -306,7 +306,7 @@ struct QuicAead:
 trait QuicCrypto(Copyable, Movable):
     """Pluggable QUIC v1 AEAD + header-protection backend.
 
-    The QUIC server reactor (Track Q3) drives one carrier per
+    The QUIC server reactor drives one carrier per
     connection. The carrier owns the per-direction packet-
     protection keys derived from the initial-secret pair (and
     later the 1-RTT secrets) and exposes the encrypt-with-AD /
@@ -315,11 +315,11 @@ trait QuicCrypto(Copyable, Movable):
 
     Backends:
 
-    * ``OpensslQuicCrypto`` (Track Q1, OpenSSL FFI wiring commit)
+    * ``OpensslQuicCrypto`` (OpenSSL FFI backend)
       -- production default. Routes through the OpenSSL EVP_AEAD
       surface plus EVP_aes_*_ecb for the AES-128-CTR header-
       protection mask.
-    * ``RustlsQuicCrypto`` (Track Q2) -- alternative backend used
+    * ``RustlsQuicCrypto`` -- alternative backend used
       when ``rustls`` is selected as the QUIC TLS provider.
 
     The :class:`StubQuicCrypto` is a typed sentinel: it raises a
@@ -404,9 +404,8 @@ struct StubQuicCrypto(Copyable, Movable, QuicCrypto):
     ) raises -> List[UInt8]:
         raise Error(
             "StubQuicCrypto.encrypt: OpenSSL AEAD backend not wired"
-            " yet (Track Q1 follow-up commit). The trait boundary"
-            " is in place; tests that need a real handshake should"
-            " switch to OpensslQuicCrypto once it ships."
+            " yet. The trait boundary is in place; tests that need"
+            " a real handshake should switch to OpensslQuicCrypto."
         )
 
     def decrypt(
@@ -416,8 +415,7 @@ struct StubQuicCrypto(Copyable, Movable, QuicCrypto):
         packet_number: UInt64,
     ) raises -> List[UInt8]:
         raise Error(
-            "StubQuicCrypto.decrypt: OpenSSL AEAD backend not wired"
-            " yet (Track Q1 follow-up commit)."
+            "StubQuicCrypto.decrypt: OpenSSL AEAD backend not wired yet."
         )
 
     def header_protection_mask(
@@ -425,7 +423,7 @@ struct StubQuicCrypto(Copyable, Movable, QuicCrypto):
     ) raises -> List[UInt8]:
         raise Error(
             "StubQuicCrypto.header_protection_mask: OpenSSL backend"
-            " not wired yet (Track Q1 follow-up commit)."
+            " not wired yet."
         )
 
 
@@ -481,8 +479,7 @@ def derive_packet_keys(secret: Span[UInt8, _], aead: Int) raises -> PacketKeys:
     The same schedule applies to initial, handshake, and 1-RTT
     secrets; only the source secret changes. The handshake +
     1-RTT secrets come from the TLS 1.3 exporter (RFC 9001 §7
-    handshake state machine, wired in Track Q2 once rustls is
-    integrated).
+    handshake state machine, wired once rustls is integrated).
     """
     var key_len = aead_key_length(aead)
     var key = hkdf_expand_label_empty_context(secret, "quic key", key_len)
@@ -676,7 +673,7 @@ struct OpenSslQuicCrypto(Copyable, Movable, QuicCrypto):
       direction secret + AEAD codepoint, then wrap into the carrier.
     - :py:meth:`__init__` -- bring-your-own ``PacketKeys`` for the
       test path or when the keys come from an outboard schedule
-      (e.g. the rustls QUIC binding once Track Q2 lands).
+      (e.g. the rustls QUIC binding).
     """
 
     var keys: PacketKeys

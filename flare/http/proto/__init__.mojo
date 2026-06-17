@@ -180,8 +180,8 @@ from flare.http2.state import (
 # default; every relaxation is opt-in and named after the RFC
 # 9112 section it relaxes. Wired into the H1 request parser
 # via :attr:`flare.http.server.ServerConfig.h1_leniency`. The
-# legacy ``_ExperimentalH1LeniencyConfig`` alias is preserved
-# for back-compat with v0.7 configuration code.
+# ``_ExperimentalH1LeniencyConfig`` alias is preserved as a thin
+# rebind for existing configuration code.
 from flare.http.proto.h1_leniency import (
     H1LeniencyConfig,
     _ExperimentalH1LeniencyConfig,

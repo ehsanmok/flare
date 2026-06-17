@@ -34,9 +34,9 @@ from .headers import HeaderMap
 # The standard-alphabet base64 implementation lives in
 # :mod:`flare.crypto.base64`; the local ``_b64_encode`` alias keeps
 # call-site readability while routing through the canonical
-# helper. (Closes critique register §C1: the previous private
-# table + chunk-of-3 loop is gone in favour of the single source
-# of truth shared with the WS handshake helpers.)
+# helper. (The previous private table + chunk-of-3 loop is gone
+# in favour of the single source of truth shared with the WS
+# handshake helpers.)
 
 
 # ── Auth trait ────────────────────────────────────────────────────────────────

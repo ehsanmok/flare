@@ -14,12 +14,10 @@ alive past one event-loop iteration.
 This commit is **additive**: ``Request`` still carries an owned
 ``HeaderMap``, and ``_parse_http_request_bytes`` still allocates.
 The ``HeaderMapView`` -> ``Request.headers`` wiring lands with the
-``RequestView[origin]`` refactor in S2.5; until then ``HeaderMapView``
+``RequestView[origin]`` refactor; until then ``HeaderMapView``
 is a standalone type usable for any byte-range header parsing
-(WebSocket handshakes, HTTP/2 HEADERS frames , custom
+(WebSocket handshakes, HTTP/2 HEADERS frames, custom
 protocol layering).
-
-Closes Track 1.5 of design-0.5 modulo the integration step.
 
 Example:
 

@@ -89,7 +89,7 @@ def _ascii_lower(s: String) -> String:
 
     Renamed from the older ``_lc`` for consistency with the
     rest of the codebase (which spells the helper
-    ``_ascii_lower``); closes critique register §C3 follow-up.
+    ``_ascii_lower``).
     """
     var out = String(capacity=s.byte_length())
     for b in s.as_bytes():

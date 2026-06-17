@@ -18,8 +18,8 @@ Three primitives:
   returning the byte-offset list of separators so the caller
   can build cookie name/value pairs without per-byte iteration.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 Mojo's stdlib ``Span[UInt8]`` doesn't ship a vectorised
 ``memmem`` / percent-decode / cookie-split primitive yet. The
@@ -27,16 +27,16 @@ HTTP/1.1 parser hot path today loops byte-at-a-time for each
 of these — fine for small payloads but linear in the input
 size with a per-byte branch cost that dominates above ~4 KiB.
 
-The "SIMD" in B10 refers to the eventual SSE4.2 / AVX2
-vectorised inner loop using ``PCMPESTRI`` / ``PSHUFB`` — that
-inner-loop swap is a follow-up commit. **This commit lands the
-clean public API + correct scalar implementations + property
-tests.** All future SIMD acceleration plugs in behind the same
-function signatures. Same approach as B9 (canonical decoder
-ships first; SIMD swap follows).
+The "SIMD" here refers to an SSE4.2 / AVX2 vectorised inner
+loop using ``PCMPESTRI`` / ``PSHUFB`` — that inner-loop swap
+can land later. This module provides the clean public API +
+correct scalar implementations + property tests. All future
+SIMD acceleration plugs in behind the same function
+signatures: a canonical scalar decoder first, with a SIMD swap
+behind the same signatures.
 
-What this commit ships
------------------------
+What this module provides
+-------------------------
 
 * ``simd_memmem(haystack, needle) -> Int`` — return the
   byte-offset of the first match, or -1 on no match. Empty

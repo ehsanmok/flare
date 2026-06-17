@@ -7,7 +7,7 @@ from the connection's ``read_buf`` rather than owning them. For a
 multipart upload it's the difference between one ``memcpy`` of
 the whole body and zero.
 
-Pieces in place after this commit:
+Pieces in place:
 
 - ``RequestView[origin]`` value type (this file).
 - ``parse_request_view(data: Span[UInt8, origin]) raises ->
@@ -18,8 +18,7 @@ Pieces in place after this commit:
   ``Request`` for handlers that need to keep request
   state past one event-loop iteration.
 
-Pieces that **come later** (deferred to S3 follow-up — explicit
-notes in the relevant commit bodies):
+Pieces that **come later**:
 
 - A ``ViewHandler`` trait whose ``serve_view`` takes
   ``RequestView[origin]`` directly. Today's ``Handler.serve``
@@ -31,13 +30,10 @@ notes in the relevant commit bodies):
   here as a standalone public function; the reactor will adopt
   it once the trait integration is settled.
 
-This intentional split keeps the diff reviewable. The shape and
-public API of ``RequestView`` are stable from this commit
-forward; the integration step is purely "switch the reactor's
-internal call site," which lands without breaking handlers.
-
-Closes the *type* portion of Track 1.1; the integration portion
-moves to a follow-up alongside the reactor surgery.
+The shape and public API of ``RequestView`` are stable; the
+integration step is purely "switch the reactor's internal call
+site," which lands without breaking handlers. The integration
+portion is a follow-up alongside the reactor surgery.
 
 Example:
 

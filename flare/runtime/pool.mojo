@@ -3,9 +3,9 @@
 ``Pool[T]`` confines ``UnsafePointer.alloc`` / ``free`` /
 ``init_pointee_move`` / ``destroy_pointee`` plumbing to one place
 so the rest of ``flare/http`` and ``flare/runtime`` can stay
-pointer-free at the source level. Closes the criticism §2.9
-"raw pointers in the hot path" item by giving callers a typed
-API that owns the pointer arithmetic.
+pointer-free at the source level. This keeps raw pointers out
+of the hot path by giving callers a typed API that owns the
+pointer arithmetic.
 
 Today's callers go through ``UnsafePointer[T].alloc(1)`` directly:
 
@@ -21,7 +21,7 @@ Today's callers go through ``UnsafePointer[T].alloc(1)`` directly:
     ptr.destroy_pointee()
     ptr.free()
 
-After this commit, the same flow reads:
+With ``Pool[T]``, the same flow reads:
 
     var addr = Pool[ConnHandle].alloc_move(ConnHandle(stream^))
     ...

@@ -109,7 +109,7 @@ from ..http.cancel import Cancel, CancelReason
 from ._thread import ThreadHandle
 
 
-# Per-call pool size cap (design-0.5 Track 2.5). The cap is exposed
+# Per-call pool size cap. The cap is exposed
 # for callers that batch / fan-out and want to bound their own
 # concurrent ``block_in_pool`` count; the library itself does not
 # enforce it on the per-call shape.

@@ -2,14 +2,13 @@
 
 flare's TLS layer today is **OpenSSL via FFI** through
 [`flare/tls/ffi/openssl_wrapper.cpp`](../flare/tls/ffi/openssl_wrapper.cpp).
-That choice has carried through v0.6 (server-side, hot reload),
-v0.7 (session resumption, ALPN dispatch), and v0.8
-(no changes to the TLS backend; new features layered on top --
-``WsClient.connect_prefer_h2`` advertises ALPN, the
-``HttpClient`` over ``https://`` advertises ``["h2",
-"http/1.1"]``). This page documents the rationale, the
-boundaries, and the v0.9 commitment that lands alongside the
-QUIC server.
+That choice has carried through server-side termination, hot
+reload, session resumption, and ALPN dispatch, with new
+features layered on top -- ``WsClient.connect_prefer_h2``
+advertises ALPN, the ``HttpClient`` over ``https://`` advertises
+``["h2", "http/1.1"]``. This page documents the rationale, the
+boundaries, and the planned rustls-for-QUIC direction that lands
+alongside the QUIC server.
 
 ## Current posture
 
@@ -44,13 +43,13 @@ Three reasons, in priority order:
    (the FFI calls inline into the reactor's read / write
    stages with one libc indirection).
 
-The alternative (Mojo-native TLS) was scoped during v0.6: the
+The alternative (Mojo-native TLS) was scoped and rejected: the
 shape would require a 5K+-line Mojo crate plus a separate set
 of conformance suites (NIST SP 800-52, BoringSSL test vectors).
 That is the same investment as the rest of flare's HTTP/2 + WS
 + runtime layers combined. The cost is not justified.
 
-## Why rustls for QUIC (v0.9)
+## Why rustls for QUIC (planned)
 
 QUIC has a different TLS shape than TLS-over-TCP: the handshake
 runs inside QUIC frames, the keys are derived per-encryption-
@@ -63,7 +62,7 @@ against OpenSSL 3.2+ QUIC means re-implementing the
 key-derivation + record-shape dance that the rest of the
 ecosystem ships off-the-shelf.
 
-For v0.9, flare's QUIC server will use **rustls + quinn-style
+flare's QUIC server will use **rustls + quinn-style
 QUIC API bindings** through a Rust FFI shim. The rationale:
 
 - `rustls` carries the BoringSSL-shape QUIC API natively (the
@@ -72,14 +71,10 @@ QUIC API bindings** through a Rust FFI shim. The rationale:
   harness baselines build via cargo); adding a second
   ``rustls_wrapper`` shim is a small extension.
 - A single TLS strategy for QUIC + new TLS-over-TCP wires
-  (h2 / WS-over-h2) is technically possible but blows up the
-  v0.9 scope; v0.9 keeps the OpenSSL path for TCP, adds the
-  rustls path for QUIC, and v0.10 considers whether to
-  collapse onto a single backend.
-
-This decision was recorded in design-0.8.mdc under the
-`tls-strategy` question and confirmed (`rustls-quic`) in this
-cycle.
+  (h2 / WS-over-h2) is technically possible but is out of scope
+  for now; the OpenSSL path stays for TCP, the rustls path is
+  added for QUIC, and collapsing onto a single backend is a
+  later consideration.
 
 ## What stays out-of-tree
 

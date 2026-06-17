@@ -446,14 +446,14 @@ pub extern "C" fn flare_rustls_quic_alpn(
 
 /// Crate version sanity-check thunk so Mojo callers can confirm
 /// the .so dlopen resolved to this crate (not a stale build).
-/// Returns 2 for the Phase F surface (rustls KeyChange bridge +
+/// Returns 2 for the current surface (rustls KeyChange bridge +
 /// per-level AEAD + header-protection thunks); future ABI breaks
 /// bump this and force the activation script to rebuild.
 ///
 /// Versions:
-/// * 1 -- close-wire-paths Track Q2-W: acceptor + session +
-///   feed/take CRYPTO + ALPN introspection.
-/// * 2 -- Phase F commit 1/6: adds
+/// * 1 -- acceptor + session + feed/take CRYPTO + ALPN
+///   introspection.
+/// * 2 -- adds
 ///   `flare_rustls_quic_have_keys`,
 ///   `flare_rustls_quic_packet_encrypt` / `_packet_decrypt`,
 ///   `flare_rustls_quic_header_encrypt` / `_header_decrypt`,
@@ -763,7 +763,7 @@ pub extern "C" fn flare_rustls_quic_header_decrypt(
 /// change so a single Mojo-side call drains every outbound batch
 /// rustls has queued.
 ///
-/// Per Phase F (the rustls KeyChange FFI extension) the
+/// Through the rustls KeyChange FFI extension, the
 /// `KeyChange::Handshake { keys }` + `KeyChange::OneRtt { keys,
 /// next: _ }` variants flip the session's `keys[LEVEL_*]` slots
 /// from `None` to `Some(keys)`; the new
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn abi_version_returns_two() {
-        // Phase F commit 1/6 bumped the ABI from 1 to 2 when the
+        // The ABI bumped from 1 to 2 when the
         // KeyChange-capture + per-level AEAD/HP thunks landed.
         // The activation script keys off this number, so a stale
         // .so on a developer machine surfaces as a hard mismatch

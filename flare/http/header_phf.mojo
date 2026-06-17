@@ -7,8 +7,8 @@ byte-compare lookup against a fixed table of RFC 7230 + RFC 7231
 + RFC 7232 + RFC 7233 + RFC 7234 + RFC 7235 + RFC 9110 + RFC 6265
 header names.
 
-Why this is a Track B subtrack
--------------------------------
+Background
+----------
 
 ``HeaderMap.get(name)`` walks the underlying ``List[String]``
 linearly, ASCII-lowercase comparing each entry. With ~10 headers
@@ -24,7 +24,7 @@ regardless of how many other headers the request carries.
 The deliverable here is the **dispatch primitive**: given a byte
 slice, return an integer index 0..N-1 if it matches a known
 standard header (case-insensitively), else -1. Wiring into the
-``HeaderMap`` hot path is a follow-up commit; this commit lands
+``HeaderMap`` hot path is a follow-up; this module provides
 the table + tests + the public ``StandardHeader.*`` index
 constants for downstream code that wants to talk in indices
 rather than strings (e.g. the upcoming SIMD HPACK decoder needs
@@ -57,8 +57,8 @@ classic ``b | 0x20`` trick gated to ASCII letters [A-Z]. The
 table itself stores the canonical lowercase form; one fold +
 one byte compare per character.
 
-What this commit ships
------------------------
+What this module provides
+-------------------------
 
 * ``StandardHeader`` — namespace struct holding the canonical
   index constants (``StandardHeader.HOST``,

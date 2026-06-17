@@ -13,8 +13,8 @@ already bundled by the TLS FFI build step. Base64 (RFC 4648 §4
 standard alphabet) is the canonical helper at
 :mod:`flare.crypto.base64`; the local ``_base64_encode`` alias
 keeps the call sites readable while routing through one source
-of truth (closes critique register §C1: this used to ship as
-three near-identical private encoders).
+of truth (this used to ship as three near-identical private
+encoders).
 """
 
 from std.ffi import OwnedDLHandle, c_int

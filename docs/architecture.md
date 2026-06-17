@@ -84,7 +84,7 @@ flare.grpc     gRPC primitives on top of the HTTP/2 reactor.
                response bytes + final GrpcStatus + trailing
                GrpcMetadata. Server-streaming, client-streaming,
                bidirectional, the client side, and proto3
-               codegen ship in follow-up cycles.
+               codegen ship as follow-ups.
 flare.openapi  OpenAPI 3.1 spec model + deterministic JSON
                emitter (stable key order for diffable specs).
                Auto-derivation from ComptimeRouter +
@@ -153,8 +153,8 @@ flare.h3       Sans-I/O HTTP/3 codec primitives: frame codec +
                and CONTROL + QPACK uni-stream type dispatch per
                RFC 9114 §6.2 (SETTINGS / GOAWAY / MAX_PUSH_ID
                consumed; QPACK dynamic-table inserts rejected
-               per the SETTINGS we advertise). Per Phase E
-               Track Q12-W the `H3Connection` is slot-allocated
+               per the SETTINGS we advertise). The
+               `H3Connection` is slot-allocated
                on `QuicListener.h3_connections` per
                `QuicConnection`; decrypted STREAM payloads route
                through `QuicListener._route_h3_stream_chunks`
@@ -168,7 +168,7 @@ flare.qpack    Sans-I/O static-only QPACK encoder + decoder
                entries), literal field lines with literal
                names, Huffman shared with the HPACK
                implementation in `flare.http.proto.huffman`.
-               Dynamic table deferred to a follow-up cycle.
+               Dynamic table is a follow-up.
 flare.crypto   HMAC-SHA256, base64url codec
 flare.tls      TLS 1.2/1.3 (OpenSSL); TlsAcceptor + ALPN +
                session resumption (RFC 5077 tickets / RFC 8446

@@ -734,14 +734,13 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         worker to publish its in-flight count back through a
         shared atomic — lands in a follow-up.
 
-        For the cooperative-cancellation portion of design-0.5
-        Track 3.2: each worker's reactor loop reads the
-        ``stopping`` flag on every poll iteration and breaks out
-        of accept; the ``CancelReason.SHUTDOWN`` flip on every
-        in-flight ``ConnHandle`` requires the worker-side
-        per-conn registry to expose its addresses to a different
-        thread. That's the same per-worker-publish gap as above.
-        Documented in design-0.5 Track 3.2.
+        For the cooperative-cancellation path: each worker's
+        reactor loop reads the ``stopping`` flag on every poll
+        iteration and breaks out of accept; the
+        ``CancelReason.SHUTDOWN`` flip on every in-flight
+        ``ConnHandle`` requires the worker-side per-conn registry
+        to expose its addresses to a different thread. That's the
+        same per-worker-publish gap as above.
 
         ``timeout_ms <= 0`` is a hard stop (equivalent to
         ``shutdown()`` with the documented hard-cut semantics).
@@ -797,7 +796,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         # below records "1" when ``deadline_ms > 0`` (workers
         # were given budget to drain) and "0" when 0 (hard cut).
         # The ``Cancel.SHUTDOWN`` flip on in-flight conns via
-        # worker-self-walk-conns lands in C12 and tightens this
+        # worker-self-walk-conns is a follow-up that tightens this
         # contract.
 
         # Step 4: actually join. ``shutdown()`` does the join +

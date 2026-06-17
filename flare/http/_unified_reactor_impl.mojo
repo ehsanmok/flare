@@ -1,8 +1,8 @@
 # Unified reactor loop: HTTP/1.1 + HTTP/2 on the same listener.
 #
-# Closes register §B3 of the v0.8 critique: the per-tick body and
-# the dedicated/shared single-listener loops share one comptime-
-# parametric core (`_run_unified_loop_for_fd[H, is_shared]`). The
+# The per-tick body and the dedicated/shared single-listener loops
+# share one comptime-parametric core
+# (`_run_unified_loop_for_fd[H, is_shared]`). The
 # multi-listener variant retains its own outer loop because it
 # discriminates accept events by ``fd in listener_fds_dict``
 # instead of ``token == 0``; that fd-set discriminator is
@@ -592,7 +592,7 @@ def _accept_loop_unified_fd(
 
 # ── Shared per-event dispatch + lifecycle helpers ──────────────────────────
 #
-# Closes critique register §B3: the three reactor entry points
+# The three reactor entry points
 # (run_unified_reactor_loop, _multi, _shared) used to embed three
 # byte-for-byte copies of the same per-event dispatch body
 # (~80 LOC each). Behaviour-preserving extraction collapses
