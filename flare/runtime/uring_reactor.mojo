@@ -122,253 +122,38 @@ from flare.runtime.io_uring_sqe import (
 )
 
 
-# ── mmap helpers for kernel-shared buffer ring ───────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Provided-buffer-ring memory helpers live in ``_pbuf_ring.mojo`` (split out
+# for file size); re-exported here so existing call sites resolve unchanged.
+# ──────────────────────────────────────────────────────────────────────────────
+from ._pbuf_ring import (
+    _mmap_anon_rw,
+    _munmap,
+    _pbuf_ring_add,
+    _pbuf_ring_get_tail,
+    _pbuf_ring_set_tail,
+)
 
-
-@always_inline
-def _mmap_anon_rw(size: Int) -> Int:
-    """Allocate ``size`` bytes of page-aligned anonymous memory
-    (PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS).
-
-    Returns the address as ``Int``, or 0 on failure.
-
-    Used for ``IORING_REGISTER_PBUF_RING`` ring memory which the
-    kernel requires to be page-aligned (libc malloc doesn't
-    guarantee this for small allocations).
-
-    Routes through :func:`flare.runtime.io_uring_driver.libc_mmap`
-    so the FFI signature stays consistent across the codebase
-    (Mojo's external_call cache rejects two different signatures
-    for the same symbol).
-    """
-    # PROT_READ=1, PROT_WRITE=2; MAP_PRIVATE=2, MAP_ANONYMOUS=0x20.
-    var p = libc_mmap(length=size, prot=3, flags=0x22, fd=-1, offset=0)
-    if Int(p) == -1 or Int(p) == 0:
-        return 0
-    return Int(p)
-
-
-@always_inline
-def _munmap(addr: Int, size: Int) -> None:
-    """Release memory previously returned by ``_mmap_anon_rw``."""
-    if addr == 0:
-        return
-    var p = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
-    _ = libc_munmap(p, size)
-
-
-# ── PBUF ring helpers (work directly on the registered ring memory) ─────────
-#
-# Layout (struct io_uring_buf, 16 bytes per slot):
-#   offset  0: __u64 addr   (buffer's user-space pointer)
-#   offset  8: __u32 len    (buffer length)
-#   offset 12: __u16 bid    (buffer id)
-#   offset 14: __u16 resv   (reserved -- but for slot index 0 this
-#                            field overlaps with the ring's tail
-#                            pointer in the union layout the kernel
-#                            uses; see io_uring/kbuf.h)
-#
-# The kernel reads the tail field at slot[0].resv with acquire
-# ordering. Userspace writes it with release ordering. Head is
-# kernel-private.
-
-
-@always_inline
-def _pbuf_ring_add(
-    ring_addr: Int,
-    ring_entries: Int,
-    buf_addr: UInt64,
-    buf_len: UInt32,
-    bid: UInt16,
-    buf_offset: Int,
-    cur_tail: UInt16,
-) -> None:
-    """Write one ``struct io_uring_buf`` entry into the ring at
-    index ``(cur_tail + buf_offset) & (ring_entries - 1)``.
-
-    Does NOT advance the tail; caller calls ``_pbuf_ring_advance``
-    after adding all batched entries with the right release
-    ordering. This matches liburing's ``io_uring_buf_ring_add``.
-    """
-    var mask = ring_entries - 1
-    var idx = (Int(cur_tail) + buf_offset) & mask
-    var entry = UnsafePointer[UInt8, MutExternalOrigin](
-        unsafe_from_address=ring_addr + idx * 16
-    )
-    # addr (offset 0, u64 LE)
-    for i in range(8):
-        (entry + i).init_pointee_copy(
-            UInt8(Int((buf_addr >> UInt64(8 * i)) & 0xFF))
-        )
-    # len (offset 8, u32 LE)
-    for i in range(4):
-        (entry + 8 + i).init_pointee_copy(
-            UInt8(Int((buf_len >> UInt32(8 * i)) & 0xFF))
-        )
-    # bid (offset 12, u16 LE)
-    (entry + 12).init_pointee_copy(UInt8(Int(bid) & 0xFF))
-    (entry + 13).init_pointee_copy(UInt8((Int(bid) >> 8) & 0xFF))
-    # resv left as-is (overwritten by tail-advance for slot 0;
-    # ignored by kernel for other slots).
-
-
-@always_inline
-def _pbuf_ring_get_tail(ring_addr: Int) -> UInt16:
-    """Load the ring's tail field (kernel-shared u16 at offset 14
-    of slot[0]) with relaxed ordering. App-side load only -- the
-    kernel reads tail on every recv-buffer-select with acquire
-    ordering, which is the publishing barrier."""
-    var tail_ptr = UnsafePointer[UInt8, MutExternalOrigin](
-        unsafe_from_address=ring_addr + 14
-    )
-    var lo = Int(tail_ptr.load())
-    var hi = Int((tail_ptr + 1).load())
-    return UInt16((hi << 8) | lo)
-
-
-@always_inline
-def _pbuf_ring_set_tail(ring_addr: Int, new_tail: UInt16) -> None:
-    """Release-store the ring's tail field. Pairs with the
-    kernel's acquire-load on every recv-buffer-select.
-    """
-    var tail_ptr = UnsafePointer[UInt8, MutExternalOrigin](
-        unsafe_from_address=ring_addr + 14
-    )
-    # Use Atomic[u16] release store for cross-platform memory
-    # ordering. On x86 this compiles to a regular mov + compiler
-    # barrier; on ARM it emits the proper release-store instruction.
-    var typed = tail_ptr.bitcast[Scalar[DType.uint16]]()
-    Atomic[DType.uint16].store[ordering=Ordering.RELEASE](typed, new_tail)
-
-
-# ── op-kind tag bits ─────────────────────────────────────────────────────────
-#
-# Eight-bit tag we pack into the high byte of ``user_data`` so the
-# CQE handler can dispatch without per-conn state-machine lookup.
-# Numeric values are stable; the wire-in commit pins them as
-# ``comptime`` so any accidental renumber breaks compilation.
-
-comptime URING_OP_ACCEPT: UInt64 = 1
-"""Multishot accept on the listener fd. ``conn_id`` is 0 or the
-listener slot id."""
-comptime URING_OP_RECV: UInt64 = 2
-"""Multishot recv on a connected fd. ``conn_id`` is the
-connection slot."""
-comptime URING_OP_SEND: UInt64 = 3
-"""Single send on a connected fd. ``conn_id`` is the connection
-slot."""
-comptime URING_OP_CLOSE: UInt64 = 4
-"""Async close. ``conn_id`` is the connection slot."""
-comptime URING_OP_CANCEL: UInt64 = 5
-"""Async cancel of an in-flight op for ``conn_id``."""
-comptime URING_OP_WAKEUP: UInt64 = 6
-"""Cross-thread wakeup CQE; ``conn_id`` is 0."""
-comptime URING_OP_POLL: UInt64 = 7
-"""Multishot poll CQE; ``conn_id`` is the registered fd's slot.
-The kernel posts one CQE per readiness change (analog of an
-``epoll_wait`` event); the userspace driver inspects
-``UringCompletion.res`` to see which poll bits fired."""
-comptime URING_OP_POLL_REMOVE: UInt64 = 8
-"""CQE for an ``IORING_OP_POLL_REMOVE`` we issued ourselves;
-the kernel posts it under the remove SQE's own user_data and
-the cancelled poll's final CQE arrives separately under
-``URING_OP_POLL`` without ``IORING_CQE_F_MORE``."""
-comptime URING_OP_PROVIDE_BUFFERS: UInt64 = 9
-"""CQE for an ``IORING_OP_PROVIDE_BUFFERS`` we issued ourselves
-to seed (or refill) a buffer ring that recv-buffer-select uses.
-``conn_id`` is typically the buffer-group id so the dispatch
-loop can route refill ACKs to the right ring without a separate
-table."""
-
-
-comptime _OP_SHIFT: UInt64 = 56
-comptime _CONN_MASK: UInt64 = (UInt64(1) << _OP_SHIFT) - UInt64(1)
-
-
-@always_inline
-def pack_user_data(op: UInt64, conn_id: UInt64) -> UInt64:
-    """Pack ``(op, conn_id)`` into the 64-bit user_data slot.
-
-    ``op`` lives in the top 8 bits, ``conn_id`` in the bottom
-    56 bits. ``debug_assert``ed: ``conn_id <= 2^56 - 1``.
-    """
-    debug_assert[assert_mode="safe"](
-        Int(conn_id) <= Int(_CONN_MASK),
-        "pack_user_data: conn_id exceeds 56-bit range; got ",
-        Int(conn_id),
-    )
-    debug_assert[assert_mode="safe"](
-        Int(op) <= 0xFF,
-        "pack_user_data: op_kind exceeds 8-bit range; got ",
-        Int(op),
-    )
-    return (op << _OP_SHIFT) | (conn_id & _CONN_MASK)
-
-
-@always_inline
-def unpack_op(user_data: UInt64) -> UInt64:
-    """Return the op_kind portion of a packed user_data."""
-    return (user_data >> _OP_SHIFT) & UInt64(0xFF)
-
-
-@always_inline
-def unpack_conn_id(user_data: UInt64) -> UInt64:
-    """Return the conn_id portion of a packed user_data."""
-    return user_data & _CONN_MASK
-
-
-# ── Completion record ────────────────────────────────────────────────────────
-
-
-@fieldwise_init
-struct UringCompletion(Copyable, ImplicitlyCopyable, Movable):
-    """A decoded io_uring completion, suitable for the
-    server reactor's hot-path dispatch.
-
-    Fields:
-        op: One of ``URING_OP_*``.
-        conn_id: Connection slot id from the original SQE tag.
-        res: ``IoUringCqe.res()``; negative on failure
-            (``-errno``).
-        flags: ``IoUringCqe.flags()``; carries
-            ``IORING_CQE_F_MORE`` (multishot still armed) and
-            ``IORING_CQE_F_BUFFER`` (kernel-picked buffer id in
-            the high 16 bits).
-        has_more: True iff the originating multishot is still
-            armed.
-    """
-
-    var op: UInt64
-    var conn_id: UInt64
-    var res: Int
-    var flags: UInt32
-    var has_more: Bool
-
-    @always_inline
-    def is_error(self) -> Bool:
-        """Convenience: ``res < 0``."""
-        return self.res < 0
-
-    @always_inline
-    def errno(self) -> Int:
-        """Convenience: ``-res`` if it's an error, else 0."""
-        if self.res >= 0:
-            return 0
-        return -self.res
-
-
-@always_inline
-def _cqe_to_completion(cqe: IoUringCqe) -> UringCompletion:
-    """Decode an :class:`IoUringCqe` into a high-level
-    :class:`UringCompletion` ready for the server reactor."""
-    var ud = cqe.user_data()
-    return UringCompletion(
-        op=unpack_op(ud),
-        conn_id=unpack_conn_id(ud),
-        res=cqe.res(),
-        flags=cqe.flags(),
-        has_more=cqe.has_more(),
-    )
+# ──────────────────────────────────────────────────────────────────────────────
+# Op-tag encoding + completion record live in ``_uring_optag.mojo`` (split out
+# for file size); re-exported here so existing call sites resolve unchanged.
+# ──────────────────────────────────────────────────────────────────────────────
+from ._uring_optag import (
+    URING_OP_ACCEPT,
+    URING_OP_RECV,
+    URING_OP_SEND,
+    URING_OP_CLOSE,
+    URING_OP_CANCEL,
+    URING_OP_WAKEUP,
+    URING_OP_POLL,
+    URING_OP_POLL_REMOVE,
+    URING_OP_PROVIDE_BUFFERS,
+    pack_user_data,
+    unpack_op,
+    unpack_conn_id,
+    UringCompletion,
+    _cqe_to_completion,
+)
 
 
 # ── UringReactor ─────────────────────────────────────────────────────────────
