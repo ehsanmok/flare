@@ -33,6 +33,15 @@ References:
   for the dispatch path.
 """
 
+# TODO(2026-08-31, track-quic-listener): this module is dominated by the
+# single ``QuicListener`` struct (bind / tick / run / shutdown + the
+# per-datagram dispatch loop). Mojo cannot split one struct's methods
+# across files, so the file stays over the 1000-line bar; the value
+# types (QuicServerConfig / QuicConnection / ConnectionIdTable) and pure
+# helpers already moved to ``_server_types`` / ``_server_support``.
+# Further shrinking needs the cold dispatch methods reworked into free
+# functions. Allowlisted in tools/check_reactor_size.sh until then.
+
 from std.collections import Dict, List
 from std.memory import Span
 
