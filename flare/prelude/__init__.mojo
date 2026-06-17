@@ -92,7 +92,8 @@ from ..http.handler import (
     ViewHandler,
 )
 from ..http.router import Router
-from ..http.client import HttpClient, get, post, put, patch, delete, head
+from ..http.client import HttpClient
+from ..http._client.shortcuts import get, post, put, patch, delete, head
 from ..http.auth import Auth, BasicAuth, BearerAuth
 from ..runtime._thread import num_cpus
 from ..runtime.scheduler import default_worker_count

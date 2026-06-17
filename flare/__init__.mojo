@@ -578,7 +578,8 @@ from .http.server import (
     internal_error,
     redirect,
 )
-from .http.client import HttpClient, get, post, put, patch, delete, head
+from .http.client import HttpClient
+from .http._client.shortcuts import get, post, put, patch, delete, head
 from .http.request import Request, Method
 from .http.response import Response, Status
 from .http.request_view import RequestView
