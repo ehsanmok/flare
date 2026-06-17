@@ -299,7 +299,7 @@ def test_tls_server_error_writes_message_and_code() raises:
 
 def test_tls_server_not_implemented_default_message() raises:
     var e = TlsServerNotImplemented()
-    assert_true(e.message.find("scaffolding only") >= 0)
+    assert_true(e.message.find("blocking handshake_fd path") >= 0)
 
 
 # ── FFI path NUL-termination hardening (follow-up to the SNI fix) ──────────

@@ -18,14 +18,10 @@ the existing ``flare/tls/ffi/openssl_wrapper.cpp``.
 
 Why split: the C-side handshake state machine is ~150 lines of
 ``SSL_accept`` + ``SSL_get_error`` + ``BIO`` plumbing, plus
-matching reactor surgery. Landing the API surface in this commit
-lets S3.2 (per-request ``TlsInfo`` plumbing), S3.3 (cert reload),
-and S3.4 (mTLS) all plug into the public surface; the actual
-cipher-on-
-the-wire bits land together in a single follow-up the user can
-review in one shot.
-
-Closes the API-surface portion of design-0.5 Track 5.1.
+matching reactor surgery. The API surface here lets per-request
+``TlsInfo`` plumbing, cert reload, and mTLS all plug into the
+public surface; the actual cipher-on-the-wire bits land
+together in a single follow-up.
 
 Public API:
 
@@ -89,18 +85,18 @@ struct TlsServerError(Copyable, Movable, Writable):
 
 
 struct TlsServerNotImplemented(Copyable, Movable, Writable):
-    """Marker raised by the API-surface scaffolding to signal
-    that the reactor-side handshake state machine has not landed
-    yet. Distinct type so callers can match on it for graceful
-    degradation while the implementation is in flight.
+    """Marker raised to signal that the reactor-side handshake
+    state machine is not available. Distinct type so callers can
+    match on it for graceful degradation and fall back to the
+    blocking ``handshake_fd`` path.
     """
 
     var message: String
 
     def __init__(out self):
         self.message = (
-            "TlsAcceptor scaffolding only — reactor-side SSL_accept"
-            " state machine lands in the follow-up."
+            "TlsAcceptor reactor-side SSL_accept state machine is"
+            " not available; use the blocking handshake_fd path."
         )
 
     def write_to[W: Writer](self, mut writer: W):
@@ -182,8 +178,8 @@ struct TlsServerConfig(Copyable, Movable):
             Error: When ``require_client_cert=True`` is set
                 without a ``client_ca_bundle`` (mTLS without trust
                 anchors is meaningless — the verify callback
-                would have nothing to verify against). Closes the
-                Track 5.4 misconfiguration foot-gun by failing at
+                would have nothing to verify against). Prevents
+                the misconfiguration foot-gun by failing at
                 construction time rather than at handshake time.
         """
         if require_client_cert and client_ca_bundle == "":
@@ -289,7 +285,7 @@ struct TlsAcceptor(Movable):
 
     var config: TlsServerConfig
     """The acceptor's policy. Mutable via ``reload()`` for cert
-    rotation without restart (S3.3)."""
+    rotation without restart."""
 
     var _ctx: ServerCtx
     """Underlying ``SSL_CTX``. Owned for the acceptor's lifetime.
@@ -403,8 +399,8 @@ struct TlsAcceptor(Movable):
 
     def info_placeholder(self) -> TlsInfo:
         """Return a default ``TlsInfo`` value with empty strings
-        in every field. Kept for API-surface compatibility with
-        the S3.1 scaffolding; production callers go through
-        ``handshake_fd`` which returns a live-populated TlsInfo.
+        in every field. Kept for API-surface compatibility;
+        production callers go through ``handshake_fd`` which
+        returns a live-populated TlsInfo.
         """
         return TlsInfo()
