@@ -121,7 +121,7 @@ struct IoVecBuf(Movable):
         ```
     """
 
-    var _buf: UnsafePointer[UInt8, MutExternalOrigin]
+    var _buf: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _n: Int
 
     def __init__(out self, n: Int):
@@ -139,7 +139,7 @@ struct IoVecBuf(Movable):
         # writev(2) treats { ptr, 0 } as "skip this cell".
         for i in range(bytes):
             (raw + i).init_pointee_copy(UInt8(0))
-        self._buf = UnsafePointer[UInt8, MutExternalOrigin](
+        self._buf = UnsafePointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(raw)
         )
         self._n = n
@@ -161,7 +161,7 @@ struct IoVecBuf(Movable):
         """
         return n * _IOVEC_BYTES
 
-    def base(self) -> UnsafePointer[UInt8, MutExternalOrigin]:
+    def base(self) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
         """Return the buffer's base pointer (suitable as the
         ``iov`` arg to ``writev_buf``).
         """

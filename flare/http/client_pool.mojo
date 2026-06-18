@@ -166,14 +166,16 @@ struct ClientPool(Copyable, Movable):
         """Return ``True`` when ``_addr != 0`` (pooling is on)."""
         return self._addr != 0
 
-    def _state(read self) -> UnsafePointer[_ClientPoolState, MutExternalOrigin]:
+    def _state(
+        read self,
+    ) -> UnsafePointer[_ClientPoolState, MutUntrackedOrigin]:
         """Re-materialise a typed pointer from :attr:`_addr`.
 
         Mirrors the :class:`flare.http.cancel.Cancel` pattern --
         the typed pointer is rebuilt per access so Mojo's optimiser
         cannot hoist a stale load across function boundaries.
         """
-        return UnsafePointer[UInt8, MutExternalOrigin](
+        return UnsafePointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).bitcast[_ClientPoolState]()
 

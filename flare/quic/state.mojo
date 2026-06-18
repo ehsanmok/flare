@@ -398,16 +398,16 @@ struct _ConnFrameHandler(FrameHandler):
     var now_us: UInt64
 
     @always_inline
-    def _conn(self) -> UnsafePointer[Connection, MutExternalOrigin]:
-        return UnsafePointer[Connection, MutExternalOrigin](
+    def _conn(self) -> UnsafePointer[Connection, MutUntrackedOrigin]:
+        return UnsafePointer[Connection, MutUntrackedOrigin](
             unsafe_from_address=self.conn_addr
         )
 
     @always_inline
     def _events(
         self,
-    ) -> UnsafePointer[ConnectionEvents, MutExternalOrigin]:
-        return UnsafePointer[ConnectionEvents, MutExternalOrigin](
+    ) -> UnsafePointer[ConnectionEvents, MutUntrackedOrigin]:
+        return UnsafePointer[ConnectionEvents, MutUntrackedOrigin](
             unsafe_from_address=self.events_addr
         )
 

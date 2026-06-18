@@ -371,7 +371,7 @@ struct H2ConnHandle(Movable):
         for entry in self.stream_cells.items():
             var addr = entry.value
             if addr != 0:
-                var p = UnsafePointer[Int, MutExternalOrigin](
+                var p = UnsafePointer[Int, MutUntrackedOrigin](
                     unsafe_from_address=addr
                 )
                 p.destroy_pointee()
@@ -399,7 +399,7 @@ struct H2ConnHandle(Movable):
             return
         var addr = self.stream_cells.pop(sid)
         if addr != 0:
-            var p = UnsafePointer[Int, MutExternalOrigin](
+            var p = UnsafePointer[Int, MutUntrackedOrigin](
                 unsafe_from_address=addr
             )
             p.destroy_pointee()
@@ -417,7 +417,7 @@ struct H2ConnHandle(Movable):
         for entry in self.stream_cells.items():
             var addr = entry.value
             if addr != 0:
-                var p = UnsafePointer[Int, MutExternalOrigin](
+                var p = UnsafePointer[Int, MutUntrackedOrigin](
                     unsafe_from_address=addr
                 )
                 p[] = reason
@@ -436,7 +436,7 @@ struct H2ConnHandle(Movable):
             _ = self._alloc_stream_cell(sid)
         var addr = self.stream_cells[sid]
         if addr != 0:
-            var p = UnsafePointer[Int, MutExternalOrigin](
+            var p = UnsafePointer[Int, MutUntrackedOrigin](
                 unsafe_from_address=addr
             )
             p[] = reason
@@ -451,7 +451,7 @@ struct H2ConnHandle(Movable):
         var addr = self.stream_cells[sid]
         if addr == 0:
             return False
-        var p = UnsafePointer[Int, MutExternalOrigin](unsafe_from_address=addr)
+        var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
         return p[] != CancelReason.NONE
 
     def on_readable_cancel[
@@ -701,13 +701,13 @@ def _h2_conn_free_addr(addr: Int):
 
 def _h2_conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[H2ConnHandle, MutExternalOrigin]:
+) -> UnsafePointer[H2ConnHandle, MutUntrackedOrigin]:
     """Reverse of :func:`_h2_conn_alloc_addr`: typed pointer from an Int."""
     debug_assert[assert_mode="safe"](
         addr != 0,
         "_h2_conn_ptr_from_int: cannot reconstruct from null addr",
     )
-    return UnsafePointer[UInt8, MutExternalOrigin](
+    return UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).bitcast[H2ConnHandle]()
 
@@ -912,12 +912,12 @@ def _pending_conn_free_addr(addr: Int):
 
 def _pending_conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[PendingConnHandle, MutExternalOrigin]:
+) -> UnsafePointer[PendingConnHandle, MutUntrackedOrigin]:
     """Reverse of :func:`_pending_conn_alloc_addr`."""
     debug_assert[assert_mode="safe"](
         addr != 0,
         "_pending_conn_ptr_from_int: cannot reconstruct from null addr",
     )
-    return UnsafePointer[UInt8, MutExternalOrigin](
+    return UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).bitcast[PendingConnHandle]()

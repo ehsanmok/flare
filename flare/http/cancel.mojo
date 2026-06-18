@@ -33,13 +33,13 @@ Implementation
 
 A ``CancelCell`` heap-allocates a single ``Int`` and owns its
 lifetime. ``Cancel`` carries the cell's address as an ``Int`` and
-rebuilds a fresh ``UnsafePointer[Int, MutExternalOrigin]`` per access
+rebuilds a fresh ``UnsafePointer[Int, MutUntrackedOrigin]`` per access
 — the same pattern the multicore ``Scheduler`` uses for the
 ``stopping`` flag, and the only one that survives Mojo's current
 (current Mojo nightly) origin / aliasing model when passing the
 cancel handle across function-call boundaries:
 
-- Storing a typed ``UnsafePointer[Int, MutExternalOrigin]`` as a
+- Storing a typed ``UnsafePointer[Int, MutUntrackedOrigin]`` as a
   struct field in ``Cancel`` produces stale reads after the struct is
   passed through a function (verified empirically: reads at a
   numerically-correct address returned the pointer struct size,
@@ -56,7 +56,7 @@ passes the test suite and the
 Why ``Int`` instead of ``UInt8`` for the cell value: a byte-sized
 heap cell hit the same aliasing failure as the typed-pointer field,
 suggesting Mojo's aliasing model treats sub-word-aligned loads
-through ``MutExternalOrigin`` differently than full-word loads. A
+through ``MutUntrackedOrigin`` differently than full-word loads. A
 machine word avoids the path the bug appeared to depend on. The
 cell is one cache line per connection — acceptable cost for the
 cancel infrastructure.
@@ -134,7 +134,7 @@ struct CancelCell(Movable):
 
     def __del__(deinit self):
         if self._addr != 0:
-            var p = UnsafePointer[Int, MutExternalOrigin](
+            var p = UnsafePointer[Int, MutUntrackedOrigin](
                 unsafe_from_address=self._addr
             )
             p.destroy_pointee()
@@ -144,7 +144,7 @@ struct CancelCell(Movable):
         """Set the cell's reason."""
         if self._addr == 0:
             return
-        var p = UnsafePointer[Int, MutExternalOrigin](
+        var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         )
         p[] = reason
@@ -153,7 +153,7 @@ struct CancelCell(Movable):
         """Reset the cell to ``NONE``."""
         if self._addr == 0:
             return
-        var p = UnsafePointer[Int, MutExternalOrigin](
+        var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         )
         p[] = CancelReason.NONE
@@ -195,7 +195,7 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
     var _addr: Int
     """Raw address of the cell ``Int`` (or 0 for ``never()``).
     Re-materialised into a fresh
-    ``UnsafePointer[Int, MutExternalOrigin]`` on every access so
+    ``UnsafePointer[Int, MutUntrackedOrigin]`` on every access so
     the Mojo optimiser cannot hoist the load out of a polling
     loop. Same idiom the reactor uses for the ``stopping`` flag."""
 
@@ -215,7 +215,7 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
         """Return True once the cell is non-zero."""
         if self._addr == 0:
             return False
-        var p = UnsafePointer[Int, MutExternalOrigin](
+        var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         )
         return p[] != CancelReason.NONE
@@ -224,7 +224,7 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
         """Return the reason code currently in the cell."""
         if self._addr == 0:
             return CancelReason.NONE
-        var p = UnsafePointer[Int, MutExternalOrigin](
+        var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         )
         var v: Int = p[]

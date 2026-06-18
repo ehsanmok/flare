@@ -55,7 +55,7 @@ def _c_str(s: String) -> Int:
 def _tls_err(lib: OwnedDLHandle) -> String:
     """Return the last error from ``flare_ssl_last_error``."""
     var fn_e = lib.get_function[
-        def() thin abi("C") -> UnsafePointer[UInt8, MutExternalOrigin]
+        def() thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
     ]("flare_ssl_last_error")
     var p = fn_e()
     return String(StringSlice(unsafe_from_utf8_ptr=p))

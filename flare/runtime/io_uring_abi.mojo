@@ -376,7 +376,7 @@ def _check_opcode(op: Int) -> None:
 
 @always_inline
 def _store_u8(
-    buf: UnsafePointer[UInt8, MutExternalOrigin], offset: Int, value: UInt8
+    buf: UnsafePointer[UInt8, MutUntrackedOrigin], offset: Int, value: UInt8
 ) -> None:
     """Write a u8 into ``buf[offset]`` with bounds + non-NULL guard."""
     debug_assert[assert_mode="safe"](
@@ -392,7 +392,7 @@ def _store_u8(
 
 @always_inline
 def _store_u16_le(
-    buf: UnsafePointer[UInt8, MutExternalOrigin], offset: Int, value: UInt16
+    buf: UnsafePointer[UInt8, MutUntrackedOrigin], offset: Int, value: UInt16
 ) -> None:
     """Write a u16 little-endian into ``buf[offset..offset+2]``."""
     debug_assert[assert_mode="safe"](
@@ -410,7 +410,7 @@ def _store_u16_le(
 
 @always_inline
 def _store_u32_le(
-    buf: UnsafePointer[UInt8, MutExternalOrigin], offset: Int, value: UInt32
+    buf: UnsafePointer[UInt8, MutUntrackedOrigin], offset: Int, value: UInt32
 ) -> None:
     """Write a u32 little-endian into ``buf[offset..offset+4]``."""
     debug_assert[assert_mode="safe"](
@@ -430,7 +430,7 @@ def _store_u32_le(
 
 @always_inline
 def _store_u64_le(
-    buf: UnsafePointer[UInt8, MutExternalOrigin], offset: Int, value: UInt64
+    buf: UnsafePointer[UInt8, MutUntrackedOrigin], offset: Int, value: UInt64
 ) -> None:
     """Write a u64 little-endian into ``buf[offset..offset+8]``."""
     debug_assert[assert_mode="safe"](

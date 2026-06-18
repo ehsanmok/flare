@@ -262,7 +262,7 @@ struct Cache[
         self.inner = inner^
         self.store_addr = _alloc_store_or_zero_move[Self.S](store^)
 
-    def _store_ptr(self) -> UnsafePointer[Self.S, MutExternalOrigin]:
+    def _store_ptr(self) -> UnsafePointer[Self.S, MutUntrackedOrigin]:
         return Pool[Self.S].get_ptr(self.store_addr)
 
     def _build_key(self, req: Request) raises -> CacheKey:

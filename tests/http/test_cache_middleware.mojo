@@ -74,7 +74,7 @@ struct _CountingHandler(Copyable, Defaultable, Handler, Movable):
         self.set_cookie = False
 
     def serve(self, req: Request) raises -> Response:
-        var p = UnsafePointer[Int, MutExternalOrigin](
+        var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self.counter_addr
         )
         p[0] = p[0] + 1
@@ -92,7 +92,7 @@ struct _CountingHandler(Copyable, Defaultable, Handler, Movable):
         return resp^
 
     def _count(self) -> Int:
-        var p = UnsafePointer[Int, MutExternalOrigin](
+        var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self.counter_addr
         )
         return p[0]

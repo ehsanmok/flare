@@ -47,7 +47,7 @@ def _munmap(addr: Int, size: Int) -> None:
     """Release memory previously returned by ``_mmap_anon_rw``."""
     if addr == 0:
         return
-    var p = UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
+    var p = UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
     _ = libc_munmap(p, size)
 
 
@@ -86,7 +86,7 @@ def _pbuf_ring_add(
     """
     var mask = ring_entries - 1
     var idx = (Int(cur_tail) + buf_offset) & mask
-    var entry = UnsafePointer[UInt8, MutExternalOrigin](
+    var entry = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=ring_addr + idx * 16
     )
     # addr (offset 0, u64 LE)
@@ -112,7 +112,7 @@ def _pbuf_ring_get_tail(ring_addr: Int) -> UInt16:
     of slot[0]) with relaxed ordering. App-side load only -- the
     kernel reads tail on every recv-buffer-select with acquire
     ordering, which is the publishing barrier."""
-    var tail_ptr = UnsafePointer[UInt8, MutExternalOrigin](
+    var tail_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=ring_addr + 14
     )
     var lo = Int(tail_ptr.load())
@@ -125,7 +125,7 @@ def _pbuf_ring_set_tail(ring_addr: Int, new_tail: UInt16) -> None:
     """Release-store the ring's tail field. Pairs with the
     kernel's acquire-load on every recv-buffer-select.
     """
-    var tail_ptr = UnsafePointer[UInt8, MutExternalOrigin](
+    var tail_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=ring_addr + 14
     )
     # Use Atomic[u16] release store for cross-platform memory

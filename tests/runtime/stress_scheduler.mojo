@@ -66,7 +66,7 @@ struct _NopFrontend(Copyable, Frontend, Movable):
 
     def run_worker(mut self, listener_fd: Int, mut stopping: Bool):
         var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-        while not UnsafePointer[Bool, MutExternalOrigin](
+        while not UnsafePointer[Bool, MutUntrackedOrigin](
             unsafe_from_address=stopping_addr
         )[]:
             _ = libc_nanosleep_ms(50)

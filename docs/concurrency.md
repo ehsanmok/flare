@@ -157,7 +157,7 @@ it:
   lifetime explicitly, or convert to `Span[UInt8]` over a
   comptime-stable buffer.
 - A `Pool[T]` instance — pools are explicitly per-worker.
-- An `UnsafePointer[T, MutExternalOrigin]` reconstructed in the
+- An `UnsafePointer[T, MutUntrackedOrigin]` reconstructed in the
   worker thread from an `Int` address that points into another
   thread's stack. The pointer arithmetic is fine; the pointed-at
   memory is not (the source thread can unwind and the storage

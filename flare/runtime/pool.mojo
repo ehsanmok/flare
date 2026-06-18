@@ -15,7 +15,7 @@ Today's callers go through ``UnsafePointer[T].alloc(1)`` directly:
     p.init_pointee_move(ConnHandle(stream^))
     var addr = Int(p)
     ...
-    var ptr = UnsafePointer[UInt8, MutExternalOrigin](
+    var ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).bitcast[ConnHandle]()
     ptr.destroy_pointee()
@@ -125,7 +125,7 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
             return
 
         comptime if size_of[Self.T]() > 0:
-            var ptr = UnsafePointer[UInt8, MutExternalOrigin](
+            var ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=addr
             ).bitcast[Self.T]()
             ptr.destroy_pointee()
@@ -135,7 +135,7 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
             # allocated. Still run T's destructor for symmetry —
             # it touches 0 bytes for a zero-sized type but keeps
             # the contract identical to the non-ZST case.
-            var raw = UnsafePointer[UInt8, MutExternalOrigin](
+            var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=addr
             )
             raw.bitcast[Self.T]().destroy_pointee()
@@ -143,18 +143,18 @@ struct Pool[T: ImplicitlyDestructible & Movable]:
 
     @staticmethod
     @always_inline
-    def get_ptr(addr: Int) -> UnsafePointer[Self.T, MutExternalOrigin]:
+    def get_ptr(addr: Int) -> UnsafePointer[Self.T, MutUntrackedOrigin]:
         """Re-materialise a typed pointer from an address.
 
         For callers that need to dereference the cell (e.g. read /
         write a field) without allocating their own
         ``UnsafePointer`` arithmetic. Returned pointer carries
-        ``MutExternalOrigin`` so the Mojo optimiser cannot hoist
+        ``MutUntrackedOrigin`` so the Mojo optimiser cannot hoist
         loads through it.
 
         Caller is responsible for ensuring ``addr`` is a valid
         live pool allocation.
         """
-        return UnsafePointer[UInt8, MutExternalOrigin](
+        return UnsafePointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=addr
         ).bitcast[Self.T]()

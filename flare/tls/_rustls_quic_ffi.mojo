@@ -465,7 +465,7 @@ def _do_last_error(read lib: OwnedDLHandle) -> String:
     recorded.
     """
     var f = lib.get_function[
-        def() thin abi("C") -> UnsafePointer[UInt8, MutExternalOrigin]
+        def() thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
     ]("flare_rustls_quic_last_error")
     var p = f()
     return String(StringSlice(unsafe_from_utf8_ptr=p))

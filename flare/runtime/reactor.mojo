@@ -529,7 +529,7 @@ struct Reactor(Movable):
             else:
                 # b2: UnsafePointer is non-nullable; C NULL from a runtime 0.
                 var null_addr = 0
-                var null_ts = UnsafePointer[UInt8, MutExternalOrigin](
+                var null_ts = UnsafePointer[UInt8, MutUntrackedOrigin](
                     unsafe_from_address=null_addr
                 )
                 n = _kevent(

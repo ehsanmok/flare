@@ -402,7 +402,7 @@ struct IoUringRing(Movable):
     """
 
     var _fd: Int
-    var _params_buf: UnsafePointer[UInt8, MutExternalOrigin]
+    var _params_buf: UnsafePointer[UInt8, MutUntrackedOrigin]
 
     def __init__(
         out self,
@@ -473,7 +473,7 @@ struct IoUringRing(Movable):
             raw.free()
             raise Error("io_uring_setup failed: errno=" + String(-rc))
         self._fd = rc
-        self._params_buf = UnsafePointer[UInt8, MutExternalOrigin](
+        self._params_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(raw)
         )
 

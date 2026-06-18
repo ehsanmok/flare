@@ -101,7 +101,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
             for i in range(64):
                 (ntop + i).init_pointee_copy(0)
             _ = external_call[
-                "inet_ntop", UnsafePointer[UInt8, MutExternalOrigin]
+                "inet_ntop", UnsafePointer[UInt8, MutUntrackedOrigin]
             ](
                 AF_INET,
                 ip4.bitcast[NoneType](),
@@ -121,7 +121,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
             for i in range(64):
                 (ntop + i).init_pointee_copy(0)
             _ = external_call[
-                "inet_ntop", UnsafePointer[UInt8, MutExternalOrigin]
+                "inet_ntop", UnsafePointer[UInt8, MutUntrackedOrigin]
             ](
                 AF_INET6,
                 ip6.bitcast[NoneType](),

@@ -29,17 +29,17 @@ from flare.runtime._thread import (
 
 
 @always_inline
-def _null_out() -> UnsafePointer[UInt8, MutExternalOrigin]:
+def _null_out() -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    return UnsafePointer[UInt8, MutExternalOrigin](
+    return UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=null_addr
     )
 
 
 def _write_42(
-    arg: UnsafePointer[UInt8, MutExternalOrigin],
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+    arg: UnsafePointer[UInt8, MutUntrackedOrigin],
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Treat ``arg`` as a ``UnsafePointer[Int]`` and write 42 to it."""
     var as_int_ptr = arg.bitcast[Int]()
     as_int_ptr[] = 42
@@ -47,8 +47,8 @@ def _write_42(
 
 
 def _increment_counter(
-    arg: UnsafePointer[UInt8, MutExternalOrigin],
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+    arg: UnsafePointer[UInt8, MutUntrackedOrigin],
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Treat ``arg`` as ``UnsafePointer[Int]``; non-atomic increment,
     fine because each test thread has its own counter.
     """
@@ -58,8 +58,8 @@ def _increment_counter(
 
 
 def _nop(
-    arg: UnsafePointer[UInt8, MutExternalOrigin],
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+    arg: UnsafePointer[UInt8, MutUntrackedOrigin],
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Do nothing; used to probe join semantics in isolation."""
     return _null_out()
 
@@ -102,22 +102,22 @@ def test_spawn_join_noop() raises:
 @always_inline
 def _ptr_to_int(
     ref value: Int,
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
-    """Get a MutExternalOrigin-typed UInt8 pointer to a stack Int.
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+    """Get a MutUntrackedOrigin-typed UInt8 pointer to a stack Int.
 
     Safe here because every test joins the worker before ``value``
     goes out of scope.
     """
     var addr = Int(UnsafePointer[Int, _](to=value))
-    return UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
+    return UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
 
 
 @always_inline
 def _ptr_to_u64(
     ref value: UInt64,
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     var addr = Int(UnsafePointer[UInt64, _](to=value))
-    return UnsafePointer[UInt8, MutExternalOrigin](unsafe_from_address=addr)
+    return UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
 
 
 def test_spawn_writes_argument() raises:
@@ -179,8 +179,8 @@ def test_many_spawn_join_cycles() raises:
 
 
 def _write_tid(
-    arg: UnsafePointer[UInt8, MutExternalOrigin],
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+    arg: UnsafePointer[UInt8, MutUntrackedOrigin],
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     var as_u64_ptr = arg.bitcast[UInt64]()
     as_u64_ptr[] = current_thread_id()
     return _null_out()

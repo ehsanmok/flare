@@ -49,7 +49,7 @@ from std.sys.info import CompilationTarget
 # is ABI-compatible with what pthread expects. The function must not
 # raise (pthread has no exception channel); convert any error to a
 # sentinel pointer value before returning.
-comptime _OpaquePtr = UnsafePointer[UInt8, MutExternalOrigin]
+comptime _OpaquePtr = UnsafePointer[UInt8, MutUntrackedOrigin]
 
 
 # Shortcut for making a NULL pointer of the flavour we use throughout.
@@ -123,7 +123,7 @@ struct ThreadHandle(Movable):
         """
         var tid = UInt64(0)
         var tid_addr = Int(UnsafePointer[UInt64, _](to=tid))
-        var tid_ptr = UnsafePointer[UInt64, MutExternalOrigin](
+        var tid_ptr = UnsafePointer[UInt64, MutUntrackedOrigin](
             unsafe_from_address=tid_addr
         )
 
@@ -133,7 +133,7 @@ struct ThreadHandle(Movable):
         var rc = external_call[
             "pthread_create",
             c_int,
-            UnsafePointer[UInt64, MutExternalOrigin],  # thread*
+            UnsafePointer[UInt64, MutUntrackedOrigin],  # thread*
             _OpaquePtr,  # attr*
             def(_OpaquePtr) thin -> _OpaquePtr,  # start routine
             _OpaquePtr,  # arg

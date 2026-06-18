@@ -101,7 +101,7 @@ struct HandoffQueue(Defaultable, Movable):
     var tail: Int
     var count: Int
     var capacity: Int
-    var mu: UnsafePointer[UInt8, MutExternalOrigin]
+    var mu: UnsafePointer[UInt8, MutUntrackedOrigin]
     var pushes: Int
     var pops: Int
     var refused: Int
@@ -262,7 +262,7 @@ struct WorkerHandoffPool(Movable):
     *evening out* skew over *flat-shuffling* a stable workload.
     """
 
-    var queues: UnsafePointer[HandoffQueue, MutExternalOrigin]
+    var queues: UnsafePointer[HandoffQueue, MutUntrackedOrigin]
     var num: Int
     var policy: HandoffPolicy
 

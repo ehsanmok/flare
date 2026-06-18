@@ -78,21 +78,21 @@ def libc_nanosleep_ms(ms: Int) -> Int:
     ts[0] = Int64(ms // 1000)
     ts[1] = Int64((ms % 1000) * 1_000_000)
     # ``rem`` argument is NULL — we discard interrupt remainders.
-    # Use the same MutExternalOrigin we already use elsewhere for
+    # Use the same MutUntrackedOrigin we already use elsewhere for
     # libc-facing pointers; this keeps the optimiser from reordering
     # loads through the ``ts`` page across the syscall boundary.
     # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    var null_rem = UnsafePointer[Int64, MutExternalOrigin](
+    var null_rem = UnsafePointer[Int64, MutUntrackedOrigin](
         unsafe_from_address=null_addr
     )
-    var ts_ext = UnsafePointer[Int64, MutExternalOrigin](
+    var ts_ext = UnsafePointer[Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(ts)
     )
     var rc = external_call[
         "nanosleep",
         Int32,
-        UnsafePointer[Int64, MutExternalOrigin],
-        UnsafePointer[Int64, MutExternalOrigin],
+        UnsafePointer[Int64, MutUntrackedOrigin],
+        UnsafePointer[Int64, MutUntrackedOrigin],
     ](ts_ext, null_rem)
     return Int(rc)

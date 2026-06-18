@@ -81,7 +81,7 @@ def _c_err(read lib: OwnedDLHandle) -> String:
         Human-readable error string (empty if no error).
     """
     var fn_err = lib.get_function[
-        def() thin abi("C") -> UnsafePointer[UInt8, MutExternalOrigin]
+        def() thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
     ]("flare_ssl_last_error")
     var p = fn_err()
     return String(StringSlice(unsafe_from_utf8_ptr=p))
@@ -228,7 +228,7 @@ def _do_ssl_shutdown(read lib: OwnedDLHandle, ssl: Int) -> Int:
 
 def _do_ssl_get_version(read lib: OwnedDLHandle, ssl: Int) -> String:
     var f = lib.get_function[
-        def(Int) thin abi("C") -> UnsafePointer[UInt8, MutExternalOrigin]
+        def(Int) thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
     ]("flare_ssl_get_version")
     var p = f(ssl)
     return String(StringSlice(unsafe_from_utf8_ptr=p))
@@ -236,7 +236,7 @@ def _do_ssl_get_version(read lib: OwnedDLHandle, ssl: Int) -> String:
 
 def _do_ssl_get_cipher(read lib: OwnedDLHandle, ssl: Int) -> String:
     var f = lib.get_function[
-        def(Int) thin abi("C") -> UnsafePointer[UInt8, MutExternalOrigin]
+        def(Int) thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
     ]("flare_ssl_get_cipher")
     var p = f(ssl)
     return String(StringSlice(unsafe_from_utf8_ptr=p))

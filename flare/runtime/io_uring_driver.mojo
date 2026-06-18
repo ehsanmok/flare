@@ -40,7 +40,7 @@ What this module provides
 
 * **High-level submit/reap API**:
 
-  - ``next_sqe() -> UnsafePointer[UInt8, MutExternalOrigin]``
+  - ``next_sqe() -> UnsafePointer[UInt8, MutUntrackedOrigin]``
     — return a writable pointer to the next free SQE slot
     (caller fills via ``prep_*`` helpers from
     :mod:`flare.runtime.io_uring_sqe`).
@@ -148,7 +148,7 @@ slots; the SQ ring's ``array`` field is an indirection table of
 @always_inline
 def libc_mmap(
     length: Int, prot: Int, flags: Int, fd: Int, offset: UInt64
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Wrap ``mmap(2)`` via libc's ``mmap`` symbol.
 
     Args:
@@ -178,10 +178,10 @@ def libc_mmap(
     )
     # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr_int = 0
-    var null_addr = UnsafePointer[UInt8, MutExternalOrigin](
+    var null_addr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=null_addr_int
     )
-    var rc = external_call["mmap", UnsafePointer[UInt8, MutExternalOrigin]](
+    var rc = external_call["mmap", UnsafePointer[UInt8, MutUntrackedOrigin]](
         null_addr,
         c_size_t(length),
         c_int(prot),
@@ -194,7 +194,7 @@ def libc_mmap(
 
 @always_inline
 def libc_munmap(
-    addr: UnsafePointer[UInt8, MutExternalOrigin], length: Int
+    addr: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
 ) -> Int:
     """Wrap ``munmap(2)``. Returns 0 on success, ``-errno`` on
     failure."""
@@ -209,7 +209,7 @@ def libc_munmap(
 
 @always_inline
 def _atomic_load_u32_acquire(
-    ptr: UnsafePointer[UInt8, MutExternalOrigin],
+    ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
 ) -> UInt32:
     """Acquire-load a 32-bit value out of the kernel-shared SQ/CQ
     ring region.
@@ -231,7 +231,7 @@ def _atomic_load_u32_acquire(
 
 @always_inline
 def _atomic_load_u32_relaxed(
-    ptr: UnsafePointer[UInt8, MutExternalOrigin],
+    ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
 ) -> UInt32:
     """Relaxed-load a 32-bit value (no ordering guarantees).
     Used for the ring_mask / cached-tail reads where the
@@ -245,7 +245,7 @@ def _atomic_load_u32_relaxed(
 
 @always_inline
 def _atomic_store_u32_release(
-    ptr: UnsafePointer[UInt8, MutExternalOrigin], value: UInt32
+    ptr: UnsafePointer[UInt8, MutUntrackedOrigin], value: UInt32
 ) -> None:
     """Release-store a 32-bit value into the kernel-shared
     SQ/CQ ring region. Pairs with the kernel's acquire-load on
@@ -259,7 +259,7 @@ def _atomic_store_u32_release(
 
 @always_inline
 def _atomic_store_u32_relaxed(
-    ptr: UnsafePointer[UInt8, MutExternalOrigin], value: UInt32
+    ptr: UnsafePointer[UInt8, MutUntrackedOrigin], value: UInt32
 ) -> None:
     """Relaxed-store a 32-bit value (no ordering guarantees).
     Used for the SQ array's identity-mapping writes where the
@@ -330,21 +330,21 @@ struct IoUringDriver(Movable):
     """
 
     var _ring: IoUringRing
-    var _sq_ring_ptr: UnsafePointer[UInt8, MutExternalOrigin]
+    var _sq_ring_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _sq_ring_len: Int
-    var _cq_ring_ptr: UnsafePointer[UInt8, MutExternalOrigin]
+    var _cq_ring_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _cq_ring_len: Int
-    var _sqes_ptr: UnsafePointer[UInt8, MutExternalOrigin]
+    var _sqes_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _sqes_len: Int
 
-    var _sq_head_ptr: UnsafePointer[UInt8, MutExternalOrigin]
-    var _sq_tail_ptr: UnsafePointer[UInt8, MutExternalOrigin]
-    var _sq_array_ptr: UnsafePointer[UInt8, MutExternalOrigin]
+    var _sq_head_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _sq_tail_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _sq_array_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _sq_ring_mask: UInt32
 
-    var _cq_head_ptr: UnsafePointer[UInt8, MutExternalOrigin]
-    var _cq_tail_ptr: UnsafePointer[UInt8, MutExternalOrigin]
-    var _cq_cqes_ptr: UnsafePointer[UInt8, MutExternalOrigin]
+    var _cq_head_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _cq_tail_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _cq_cqes_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _cq_ring_mask: UInt32
 
     var _sq_local_tail: UInt32
@@ -523,7 +523,7 @@ struct IoUringDriver(Movable):
 
     # ── Submit path ───────────────────────────────────────────────────────────
 
-    def next_sqe(self) -> UnsafePointer[UInt8, MutExternalOrigin]:
+    def next_sqe(self) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
         """Return a writable 64-byte pointer to the next free
         SQE slot.
 
@@ -543,7 +543,7 @@ struct IoUringDriver(Movable):
         if pending >= self.sq_entries():
             # b2: UnsafePointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
-            return UnsafePointer[UInt8, MutExternalOrigin](
+            return UnsafePointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=null_addr
             )
         var idx = Int(self._sq_local_tail & self._sq_ring_mask)

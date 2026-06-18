@@ -189,10 +189,10 @@ struct UringReactor(Movable):
     var _wake_fd: c_int
     # Owning pointer to the 8-byte eventfd recv buffer; pinned for
     # the reactor's lifetime so the multishot recv arming SQE
-    # stays valid. Stored under ``MutExternalOrigin`` to match
+    # stays valid. Stored under ``MutUntrackedOrigin`` to match
     # the ``prep_recv`` buf-pointer convention used everywhere
     # in :mod:`flare.runtime.io_uring_sqe`.
-    var _wake_buf: UnsafePointer[UInt8, MutExternalOrigin]
+    var _wake_buf: UnsafePointer[UInt8, MutUntrackedOrigin]
     var _io: FlareRawIO
     var _wake_armed: Bool
     var _cross_thread_wakeup: Bool
@@ -289,7 +289,7 @@ struct UringReactor(Movable):
             var raw = alloc[UInt8](8)
             for i in range(8):
                 (raw + i).init_pointee_copy(UInt8(0))
-            self._wake_buf = UnsafePointer[UInt8, MutExternalOrigin](
+            self._wake_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=Int(raw)
             )
         else:
@@ -301,7 +301,7 @@ struct UringReactor(Movable):
             self._wake_fd = INVALID_FD
             # b2: UnsafePointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
-            self._wake_buf = UnsafePointer[UInt8, MutExternalOrigin](
+            self._wake_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=null_addr
             )
         self._wake_armed = False
@@ -362,7 +362,7 @@ struct UringReactor(Movable):
     def arm_recv_multishot(
         mut self,
         fd: Int,
-        buf: UnsafePointer[UInt8, MutExternalOrigin],
+        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
         buf_len: Int,
         conn_id: UInt64,
     ) raises -> None:

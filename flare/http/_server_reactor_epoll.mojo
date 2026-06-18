@@ -108,9 +108,9 @@ def _conn_free_addr(addr: Int):
 
 def _conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[ConnHandle, MutExternalOrigin]:
+) -> UnsafePointer[ConnHandle, MutUntrackedOrigin]:
     """Reverse of ``_conn_alloc_addr``: reconstruct a typed pointer."""
-    return UnsafePointer[UInt8, MutExternalOrigin](
+    return UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).bitcast[ConnHandle]()
 
@@ -121,7 +121,7 @@ def _apply_step(
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
-    conn_ptr: UnsafePointer[ConnHandle, MutExternalOrigin],
+    conn_ptr: UnsafePointer[ConnHandle, MutUntrackedOrigin],
 ) raises:
     """Translate a ``StepResult`` into reactor + timer-wheel operations.
 
@@ -311,7 +311,7 @@ def _run_handler_loop_impl[
 
     var events = List[Event]()
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutExternalOrigin](
+    while not UnsafePointer[Bool, MutUntrackedOrigin](
         unsafe_from_address=stopping_addr
     )[]:
         events.clear()
@@ -504,7 +504,7 @@ def _run_static_loop_impl[
 
     var events = List[Event]()
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutExternalOrigin](
+    while not UnsafePointer[Bool, MutUntrackedOrigin](
         unsafe_from_address=stopping_addr
     )[]:
         events.clear()
@@ -692,7 +692,7 @@ def run_reactor_loop_cancel[
 
     var events = List[Event]()
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutExternalOrigin](
+    while not UnsafePointer[Bool, MutUntrackedOrigin](
         unsafe_from_address=stopping_addr
     )[]:
         events.clear()
@@ -810,7 +810,7 @@ def run_reactor_loop_view[
 
     var events = List[Event]()
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutExternalOrigin](
+    while not UnsafePointer[Bool, MutUntrackedOrigin](
         unsafe_from_address=stopping_addr
     )[]:
         events.clear()

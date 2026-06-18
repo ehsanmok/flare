@@ -127,7 +127,7 @@ struct _Task[T: ImplicitlyDestructible & Movable](Movable):
     """Heap-allocated task delivered to the worker pthread.
 
     Address fields are stored as ``Int`` rather than typed
-    pointers because ``UnsafePointer[T, MutExternalOrigin]``
+    pointers because ``UnsafePointer[T, MutUntrackedOrigin]``
     survives the cross-function-call boundary unreliably on
     Linux x86_64 in the pinned Mojo nightly (the same anomaly
     that gates the ``test_pre_flipped_cancel_skips_work_*``
@@ -163,8 +163,8 @@ struct _Task[T: ImplicitlyDestructible & Movable](Movable):
 
 def _block_thunk[
     T: ImplicitlyDestructible & Movable
-](arg: UnsafePointer[UInt8, MutExternalOrigin]) -> UnsafePointer[
-    UInt8, MutExternalOrigin
+](arg: UnsafePointer[UInt8, MutUntrackedOrigin]) -> UnsafePointer[
+    UInt8, MutUntrackedOrigin
 ]:
     """pthread start routine. Per-T monomorphisation.
 
@@ -180,22 +180,22 @@ def _block_thunk[
     6. Always free the ``_Task`` allocation we own; the buffers
        it points at are freed-or-not based on step 5.
     """
-    var raw = UnsafePointer[UInt8, MutExternalOrigin](
+    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(arg)
     )
     var task_ptr = raw.bitcast[_Task[T]]()
     var task = task_ptr.take_pointee()
 
-    var result_ptr = UnsafePointer[UInt8, MutExternalOrigin](
+    var result_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.result_addr
     ).bitcast[T]()
-    var err_buf = UnsafePointer[UInt8, MutExternalOrigin](
+    var err_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.err_buf_addr
     )
-    var err_len_ptr = UnsafePointer[UInt8, MutExternalOrigin](
+    var err_len_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.err_len_addr
     ).bitcast[Int]()
-    var success_ptr = UnsafePointer[UInt8, MutExternalOrigin](
+    var success_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.success_addr
     )
 
@@ -222,7 +222,7 @@ def _block_thunk[
 
     # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    return UnsafePointer[UInt8, MutExternalOrigin](
+    return UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=null_addr
     )
 
@@ -320,7 +320,7 @@ def block_in_pool[
     # libc_usleep, which on this Mojo nightly hits the documented
     # 1000-1500x multiplier in multi-threaded contexts and inflates
     # per-call latency from ~50 us to ~1 s.
-    var task_opaque = UnsafePointer[UInt8, MutExternalOrigin](
+    var task_opaque = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(task_ptr)
     )
     var handle = ThreadHandle.spawn[_block_thunk[T]](task_opaque)

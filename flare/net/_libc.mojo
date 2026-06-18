@@ -329,7 +329,7 @@ def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
         (ntop_buf + i).init_pointee_copy(0)
 
     # inet_ntop(AF_INET, &sin_addr, dst, dst_len) — sin_addr is at offset 4
-    _ = external_call["inet_ntop", UnsafePointer[UInt8, MutExternalOrigin]](
+    _ = external_call["inet_ntop", UnsafePointer[UInt8, MutUntrackedOrigin]](
         AF_INET,
         (buf + 4).bitcast[NoneType](),
         ntop_buf.bitcast[c_char](),
@@ -358,7 +358,7 @@ def _read_ipv6_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
         (ntop_buf + i).init_pointee_copy(0)
 
     # inet_ntop(AF_INET6, &sin6_addr, dst, dst_len) — sin6_addr at offset 8
-    _ = external_call["inet_ntop", UnsafePointer[UInt8, MutExternalOrigin]](
+    _ = external_call["inet_ntop", UnsafePointer[UInt8, MutUntrackedOrigin]](
         AF_INET6,
         (buf + 8).bitcast[NoneType](),
         ntop_buf.bitcast[c_char](),
@@ -401,7 +401,7 @@ def _strerror(code: c_int) -> String:
         The human-readable error string.
     """
     var ptr = external_call[
-        "strerror", UnsafePointer[UInt8, MutExternalOrigin]
+        "strerror", UnsafePointer[UInt8, MutUntrackedOrigin]
     ](code)
     if ptr[0] == 0:
         return "unknown error " + String(code)
@@ -666,7 +666,7 @@ def _getaddrinfo(
     var host_copy = host
     return external_call["getaddrinfo", c_int](
         host_copy.as_c_string_slice(),
-        Optional[UnsafePointer[UInt8, MutExternalOrigin]](None),
+        Optional[UnsafePointer[UInt8, MutUntrackedOrigin]](None),
         hints.bitcast[NoneType](),
         res_slot.bitcast[NoneType](),
     )
@@ -683,7 +683,7 @@ def _freeaddrinfo(head: Int):
     if head == 0:
         return
     _ = external_call["freeaddrinfo", NoneType](
-        UnsafePointer[NoneType, MutExternalOrigin](unsafe_from_address=head)
+        UnsafePointer[NoneType, MutUntrackedOrigin](unsafe_from_address=head)
     )
 
 
@@ -698,7 +698,7 @@ def _gai_strerror(code: c_int) -> String:
         The error description string.
     """
     var ptr = external_call[
-        "gai_strerror", UnsafePointer[UInt8, MutExternalOrigin]
+        "gai_strerror", UnsafePointer[UInt8, MutUntrackedOrigin]
     ](code)
     if ptr[0] == 0:
         return "unknown getaddrinfo error " + String(code)

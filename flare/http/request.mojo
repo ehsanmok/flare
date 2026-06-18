@@ -83,7 +83,7 @@ struct Request(Movable):
     ``ServerConfig.expose_error_messages`` onto every parsed request.
     See struct docstring."""
     var _params: Optional[
-        UnsafePointer[Dict[String, String], MutExternalOrigin]
+        UnsafePointer[Dict[String, String], MutUntrackedOrigin]
     ]
     """Lazily-allocated path-params table. ``None`` by default; ``Router``
     allocates the underlying ``Dict`` on the first path-parameter
@@ -219,7 +219,7 @@ struct Request(Movable):
         """
         if not self._params:
             # Use Mojo's native allocator (``std.memory.alloc`` returns a
-            # ``MutExternalOrigin``-tagged pointer) rather than libc
+            # ``MutUntrackedOrigin``-tagged pointer) rather than libc
             # ``malloc``/``free`` via FFI: ``external_call["free", ...]``
             # conflicts with the stdlib's own ``free`` declaration at
             # MLIR legalization time when this module is pulled into a

@@ -129,7 +129,7 @@ def test_encode_sqe_zero_clears_dirty_buffer() raises:
     var raw = alloc[UInt8](IO_URING_SQE_BYTES)
     for i in range(IO_URING_SQE_BYTES):
         (raw + i).init_pointee_copy(UInt8(0xAB))
-    var p = UnsafePointer[UInt8, MutExternalOrigin](
+    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(raw)
     )
     encode_sqe_zero(p)
@@ -334,7 +334,7 @@ def test_decode_cqe_at_round_trips_through_byte_buffer() raises:
     """Write a 16-byte CQE slot manually + ``decode_cqe_at``
     must reproduce the same fields."""
     var raw = alloc[UInt8](IO_URING_CQE_BYTES)
-    var p = UnsafePointer[UInt8, MutExternalOrigin](
+    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(raw)
     )
     # user_data = 0x1122334455667788 (LE).
@@ -367,7 +367,7 @@ def test_decode_cqe_at_sign_extends_negative_res() raises:
     """A CQE with res = -125 (ECANCELED) round-trips as -125,
     not 0xFFFFFF83."""
     var raw = alloc[UInt8](IO_URING_CQE_BYTES)
-    var p = UnsafePointer[UInt8, MutExternalOrigin](
+    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(raw)
     )
     for i in range(IO_URING_CQE_BYTES):

@@ -62,7 +62,7 @@ Known limitations:
   no ``Atomic[Bool]`` / ``Atomic[Int]`` type yet, so we rely on two
   things: (1) aligned single-byte loads and stores being atomic at
   the hardware level on x86-64 and ARM64 with no torn reads;
-  (2) the volatile-style ``UnsafePointer[Bool, MutExternalOrigin]``
+  (2) the volatile-style ``UnsafePointer[Bool, MutUntrackedOrigin]``
   materialisation inside the frontend's serving loop defeating
   the optimiser's LICM so every iteration re-reads the flag.
   This is enough in practice on both platforms flare targets,
@@ -222,12 +222,12 @@ def _worker_entry[F: Frontend & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     frees it after joining this worker.
     """
     var ctx_addr = Int(arg)
-    var raw = UnsafePointer[UInt8, MutExternalOrigin](
+    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=ctx_addr
     )
     var ctx_ptr = raw.bitcast[_WorkerCtx[F]]()
 
-    var stopping_ptr = UnsafePointer[Bool, MutExternalOrigin](
+    var stopping_ptr = UnsafePointer[Bool, MutUntrackedOrigin](
         unsafe_from_address=ctx_ptr[].stopping_addr
     )
 
@@ -267,7 +267,7 @@ def _worker_entry[F: Frontend & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     # ctx AFTER joining the worker, so we don't touch it here.
     # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    return UnsafePointer[UInt8, MutExternalOrigin](
+    return UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=null_addr
     )
 
@@ -332,7 +332,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
     # (freshly constructed or post-shutdown); ``_workers_len`` tracks
     # how many slots hold a live ``ThreadHandle`` that still needs
     # joining + destroying.
-    var _workers_ptr: UnsafePointer[ThreadHandle, MutExternalOrigin]
+    var _workers_ptr: UnsafePointer[ThreadHandle, MutUntrackedOrigin]
     var _workers_len: Int
     # Heap-allocated ``TcpListener`` shared by all workers. Address is
     # stable across struct moves so worker ctxs can carry the fd as a
@@ -364,7 +364,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         """Build an empty scheduler; use ``Scheduler.start`` instead."""
         # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
         var null_addr = 0
-        self._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+        self._workers_ptr = UnsafePointer[ThreadHandle, MutUntrackedOrigin](
             unsafe_from_address=null_addr
         )
         self._workers_len = 0
@@ -481,7 +481,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         var listener_fd: Int = -1
         # b2: UnsafePointer is non-nullable; build C NULL from a runtime 0.
         var null_addr = 0
-        var listener_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
+        var listener_ptr = UnsafePointer[TcpListener, MutUntrackedOrigin](
             unsafe_from_address=null_addr
         )
         # Both the io_uring buffer-ring path and the opt-in epoll
@@ -559,7 +559,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
             # listener (pre-bound on this thread above).
             var worker_listener_fd: Int = listener_fd
             if prebind_per_worker and i < len(s._per_worker_listener_addrs):
-                var pwl_ptr = UnsafePointer[TcpListener, MutExternalOrigin](
+                var pwl_ptr = UnsafePointer[TcpListener, MutUntrackedOrigin](
                     unsafe_from_address=s._per_worker_listener_addrs[i]
                 )
                 worker_listener_fd = Int(pwl_ptr[].as_raw_fd())
@@ -601,9 +601,9 @@ struct Scheduler[F: Frontend & Copyable](Movable):
                 _scheduler_free_raw(s._workers_ptr.bitcast[UInt8]())
                 # b2: UnsafePointer is non-nullable; C NULL from a runtime 0.
                 var null_addr = 0
-                s._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
-                    unsafe_from_address=null_addr
-                )
+                s._workers_ptr = UnsafePointer[
+                    ThreadHandle, MutUntrackedOrigin
+                ](unsafe_from_address=null_addr)
                 s._workers_len = 0
                 # Destroy + free EVERY ctx (the ones that workers claimed
                 # + this one that never got claimed).
@@ -643,7 +643,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         # means we were never started (or were already shut down):
         # leave the no-op path to the worker/fd loops below.
         if self._stopping_addr != 0:
-            var stop_ptr = UnsafePointer[Bool, MutExternalOrigin](
+            var stop_ptr = UnsafePointer[Bool, MutUntrackedOrigin](
                 unsafe_from_address=self._stopping_addr
             )
             stop_ptr[] = True
@@ -673,7 +673,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
             _scheduler_free_raw(self._workers_ptr.bitcast[UInt8]())
             # b2: UnsafePointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
-            self._workers_ptr = UnsafePointer[ThreadHandle, MutExternalOrigin](
+            self._workers_ptr = UnsafePointer[ThreadHandle, MutUntrackedOrigin](
                 unsafe_from_address=null_addr
             )
             self._workers_len = 0
@@ -774,7 +774,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         # flag on their next reactor poll (poll interval 100ms in
         # ``run_reactor_loop_shared``).
         if self._stopping_addr != 0:
-            var stop_ptr = UnsafePointer[Bool, MutExternalOrigin](
+            var stop_ptr = UnsafePointer[Bool, MutUntrackedOrigin](
                 unsafe_from_address=self._stopping_addr
             )
             stop_ptr[] = True

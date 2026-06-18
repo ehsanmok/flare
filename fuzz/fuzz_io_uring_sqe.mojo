@@ -195,7 +195,7 @@ def _fuzz_cqe_decode(data: List[UInt8]) raises:
     if len(data) < IO_URING_CQE_BYTES:
         return
     var raw = alloc[UInt8](IO_URING_CQE_BYTES)
-    var p = UnsafePointer[UInt8, MutExternalOrigin](
+    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(raw)
     )
     for i in range(IO_URING_CQE_BYTES):
