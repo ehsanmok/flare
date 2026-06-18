@@ -440,14 +440,14 @@ framework has at its calibrated rate.
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| actix_web (tokio) | 4 | 252,671 | 0.22 | 1.22 ± 0.01 | 10.04 ± 4.55 | 27.15 ± 4.31 | 37.41 ± 18.49 |
-| **flare_mc_static** (REUSEPORT) | **4** | **246,942** | **0.69** | **1.14 ± 0.08** | **2.68 ± 664.62** | **3.09 ± 676.39** | **17.50 ± 678.01** |
-| hyper (tokio multi-thread) | 4 | 216,406 | 0.17 | 1.25 ± 0.00 | 2.83 ± 0.03 | 3.26 ± 3.91 | 3.66 ± 31.18 |
-| **flare_mc** handler (REUSEPORT) | **4** | **214,567** | **0.21** | **1.22 ± 0.02** | **2.63 ± 17.53** | **2.94 ± 47.57** | **3.26 ± 50.52** |
-| axum (tokio multi-thread) | 4 | 195,044 | 0.21 | 1.30 ± 0.00 | 2.80 ± 0.01 | 3.21 ± 0.02 | 3.57 ± 0.02 |
+| **flare_mc_static** (REUSEPORT) | **4** | **242,384** | **0.21** | **1.18 ± 0.02** | **2.67 ± 0.02** | **3.03 ± 0.02** | **3.34 ± 0.16** |
+| actix_web (tokio) | 4 | 239,108 | 0.33 | 1.26 ± 0.00 | 2.73 ± 0.04 | 3.25 ± 11.28 | 5.21 ± 12.05 |
+| **flare_mc** handler (REUSEPORT) | **4** | **237,761** | **0.34** | **1.20 ± 0.02** | **2.74 ± 320.65** | **5.99 ± 359.05** | **64.86 ± 350.97** |
+| hyper (tokio multi-thread) | 4 | 217,036 | 0.21 | 1.24 ± 0.01 | 2.83 ± 0.02 | 3.28 ± 0.08 | 3.66 ± 2.72 |
+| axum (tokio multi-thread) | 4 | 201,216 | 0.35 | 1.29 ± 0.00 | 2.82 ± 0.03 | 3.25 ± 2.50 | 3.64 ± 29.52 |
 
 Source data:
-[`benchmark/results/2026-05-27T2021-ehsan-dev-6e44e63/`](../benchmark/results/2026-05-27T2021-ehsan-dev-6e44e63/)
+[`benchmark/results/2026-06-18T0322-ehsan-dev-6439147/`](../benchmark/results/2026-06-18T0322-ehsan-dev-6439147/)
 (all 4-worker rows, single multi-worker run with the
 calibration harness, hot-path UTF-8 validation bypass
 included; see [Hot-path measurement
