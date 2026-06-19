@@ -10,8 +10,6 @@ opening a UDP socket. It exercises:
   parameter codec.
 * :mod:`flare.quic.state` -- the §3 stream + §10 connection
   state machines.
-* :mod:`flare.quic.cc` -- the RFC 9438 CUBIC + RFC 9406
-  HyStart++ controller as pure functions.
 
 The example builds three frames, encodes them, parses them back,
 walks the decoded frames through the connection state machine,
@@ -42,8 +40,6 @@ from flare.quic import (
     StreamFrame,
     apply_handshake_done,
     apply_stream,
-    cc_init,
-    can_send,
     decode_transport_parameters,
     empty_events,
     encode_handshake_done,
@@ -53,10 +49,6 @@ from flare.quic import (
     encode_varint,
     handle_frame_buf,
     new_connection,
-    on_ack_received,
-    on_packet_sent,
-    on_round_start,
-    pacing_rate_bytes_per_second,
     parse_frame_into,
 )
 from flare.quic.frame import (
@@ -294,23 +286,6 @@ def main() raises:
     print("    new_streams = " + String(len(events.new_streams)))
     print("    finished_streams = " + String(len(events.finished_streams)))
     print("    state = " + String(conn.state))
-    print()
-
-    # ── Congestion control drive ──────────────────────────────────
-    print("[5] CUBIC + HyStart++ drive")
-    var cc = cc_init()
-    on_round_start(cc)
-    on_packet_sent(cc, UInt64(1200))
-    var new_cwnd = on_ack_received(
-        cc, UInt64(1200), UInt64(20_000), UInt64(20_000)
-    )
-    print("    cwnd after first ack = " + String(new_cwnd) + " bytes")
-    print(
-        "    pacing rate = "
-        + String(pacing_rate_bytes_per_second(cc) // 1024)
-        + " KiB/s"
-    )
-    print("    can_send 1200B? " + String(can_send(cc)))
     print()
 
     print("[OK] codec round-trip + state-machine drive clean.")
