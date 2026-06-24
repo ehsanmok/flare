@@ -128,6 +128,18 @@ from ..udp.socket import UdpSocket, DatagramTooLarge
 # flare.uds
 from ..uds.listener import UnixListener, accept_uds_fd
 from ..uds.stream import UnixStream
+from ..uds.frame_mux import (
+    Frame,
+    FrameDemux,
+    FrameKind,
+    FrameMux,
+    encode_frame,
+    decode_frame,
+)
+
+# v0.9 streaming-proxy surface
+from ..http.streaming_server import StreamHandler, StreamConn
+from ..http.async_body import AsyncChunkSource, ChunkPoll, UpstreamChunkSource
 
 # flare.tls
 from ..tls.config import TlsConfig, TlsVerify
@@ -482,6 +494,7 @@ from ..ws.extensions import (
 
 # flare.io
 from ..io.buf_reader import Readable, BufReader
+from ..io import ByteReader, ByteWriter
 
 # flare.runtime
 from ..runtime.reactor import Reactor
