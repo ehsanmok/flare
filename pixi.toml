@@ -3,12 +3,12 @@ authors = ["ehsanmok <ehsanmok@users.noreply.github.com>"]
 channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "flare"
 platforms = ["osx-arm64", "linux-aarch64", "linux-64"]
-version = "0.8.1"
+version = "0.9.0"
 preview = ["pixi-build"]
 
 [package]
 name = "flare"
-version = "0.8.1"
+version = "0.9.0"
 
 [package.build]
 # Pin below the 0.4 series: pixi-build-rattler-build 0.4.0 negotiates a
