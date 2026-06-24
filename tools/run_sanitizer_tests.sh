@@ -60,6 +60,10 @@ ASAN_TESTS=(
   # Dict[Int, StreamConn] + EPOLLOUT drain). ASan validates the
   # parent-side client path and the connection-table teardown.
   "tests/http/test_streaming_server_reactor.mojo"
+  # v0.9 A4 — attach_upstream + on_upstream pump (forked server, OS
+  # pipe upstream + reactor upstream-fd register/route/unregister).
+  # ASan validates the parent-side client path and upstream teardown.
+  "tests/http/test_streaming_upstream.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf

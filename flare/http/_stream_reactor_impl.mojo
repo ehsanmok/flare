@@ -1,4 +1,4 @@
-"""Single-threaded reactor loop for the typed streaming surface (A2).
+"""Single-threaded reactor loop for the typed streaming surface (A2/A4).
 
 ``run_stream_reactor_loop`` is the multi-connection driver behind
 ``HttpServer.serve_streaming``. It owns the reactor and the connection
@@ -8,14 +8,21 @@ front never blocks the event loop.
 
 Connection state lives in a ``Dict[Int, StreamConn]`` keyed by client
 fd, accessed by mutable ``ref`` -- no heap-address-as-``Int`` smuggling
-(``StreamConn`` is non-copyable and stays put in the dict). The reactor
-token for a connection is its fd; the listener fd is its own token, and
-a token is a connection iff it is a key in ``conns``.
+(``StreamConn`` is non-copyable and stays put in the dict). A connection
+may also attach one upstream fd (``StreamConn.attach_upstream``); the
+reactor registers it for read, routes its readiness through
+``up_to_client`` to fire ``on_upstream`` on the owning connection, and
+unregisters it on teardown. The reactor token for a connection is its
+client fd; an attached upstream fd is its own token; the listener fd is
+its own token. A token routes by membership: listener, then
+``up_to_client`` (upstream), then ``conns`` (client).
 
-Scope (A2): the outbound streaming path -- accept, ``on_open``, and
-``on_writable``-driven chunking with backpressure-correct draining, plus
-peer-FIN / error teardown via ``on_close``. ``on_upstream`` is wired to a
-real upstream fd in A4/B1; inbound request-body consumption is B5.
+Scope (A2/A4): the outbound streaming path -- accept, ``on_open``,
+``on_writable``-driven chunking with backpressure-correct draining, and
+upstream pumping via ``on_upstream`` -- plus peer-FIN / error teardown
+via ``on_close``. The front owns the upstream fd's lifetime (open in
+``on_open``, close in ``on_close``); the reactor only watches it.
+Inbound request-body consumption is B5.
 
 ponytail: while a connection is open and not closing, ``INTEREST_WRITE``
 stays armed, so a front that stalls without producing or closing will
@@ -52,11 +59,13 @@ def _close_conn[
     mut reactor: Reactor,
     mut conns: Dict[Int, StreamConn],
     mut interests: Dict[Int, Int],
+    mut up_to_client: Dict[Int, Int],
     fd: Int,
     mut handler: H,
 ):
-    """Tear one connection down: unregister, fire ``on_close``, drop
-    (which closes the socket). Never raises -- teardown is best-effort.
+    """Tear one connection down: unregister the client fd (and any
+    attached upstream fd), fire ``on_close``, drop (which closes the
+    client socket). Never raises -- teardown is best-effort.
     """
     if fd not in conns:
         return
@@ -64,6 +73,14 @@ def _close_conn[
         var conn = conns.pop(fd)
         if fd in interests:
             _ = interests.pop(fd)
+        var ufd = conn.reg_upstream_fd()
+        if ufd != -1:
+            try:
+                reactor.unregister(c_int(ufd))
+            except:
+                pass
+            if ufd in up_to_client:
+                _ = up_to_client.pop(ufd)
         try:
             reactor.unregister(c_int(fd))
         except:
@@ -72,9 +89,53 @@ def _close_conn[
             handler.on_close(conn)
         except:
             pass
-        # ``conn`` drops here -> client socket closed.
+        # ``conn`` drops here -> client socket closed. The upstream fd
+        # is the front's to close (it owns the upstream stream).
     except:
         pass
+
+
+def _reconcile_after(
+    mut reactor: Reactor,
+    mut conns: Dict[Int, StreamConn],
+    mut interests: Dict[Int, Int],
+    mut up_to_client: Dict[Int, Int],
+    fd: Int,
+) raises:
+    """After a lifecycle callback, reconcile the connection's upstream
+    registration (the front may have called ``attach_upstream`` /
+    ``detach_upstream``) and re-arm its client write interest.
+
+    Diffs desired (``upstream_fd``) against registered
+    (``reg_upstream_fd``) so a no-op call costs only two lookups.
+    """
+    ref c = conns[fd]
+    # Upstream reconcile.
+    var want = c.upstream_fd()
+    var have = c.reg_upstream_fd()
+    if want != have:
+        if have != -1:
+            try:
+                reactor.unregister(c_int(have))
+            except:
+                pass
+            if have in up_to_client:
+                _ = up_to_client.pop(have)
+        if want != -1:
+            try:
+                reactor.register(c_int(want), UInt64(want), INTEREST_READ)
+                up_to_client[want] = fd
+            except:
+                pass
+        c._set_reg_upstream_fd(want)
+    # Client write-interest reconcile.
+    var desired = _desired_interest(c)
+    if interests[fd] != desired:
+        try:
+            reactor.modify(c_int(fd), desired)
+            interests[fd] = desired
+        except:
+            pass
 
 
 def run_stream_reactor_loop[
@@ -104,6 +165,9 @@ def run_stream_reactor_loop[
 
     var conns = Dict[Int, StreamConn]()
     var interests = Dict[Int, Int]()
+    # Maps an attached upstream fd -> its owning client fd, so an
+    # upstream readiness event routes to the right connection.
+    var up_to_client = Dict[Int, Int]()
     var next_id = 1
     var events = List[Event]()
 
@@ -156,6 +220,48 @@ def run_stream_reactor_loop[
                         continue
                     interests[cfd] = interest
                     conns[cfd] = conn^
+                    # Pick up any upstream the front attached in on_open.
+                    _reconcile_after(
+                        reactor, conns, interests, up_to_client, cfd
+                    )
+                continue
+
+            # ── Upstream readiness: pump via on_upstream ───────────
+            if tok in up_to_client:
+                var client_fd = up_to_client[tok]
+                if client_fd not in conns:
+                    try:
+                        reactor.unregister(c_int(tok))
+                    except:
+                        pass
+                    _ = up_to_client.pop(tok)
+                    continue
+                var up_drop = False
+                ref uc = conns[client_fd]
+                try:
+                    handler.on_upstream(uc)
+                    _ = uc.drain_nonblocking()
+                except:
+                    up_drop = True
+                if not up_drop:
+                    if (
+                        conns[client_fd].is_closing()
+                        and not conns[client_fd].has_pending_out()
+                    ):
+                        up_drop = True
+                if up_drop:
+                    _close_conn(
+                        reactor,
+                        conns,
+                        interests,
+                        up_to_client,
+                        client_fd,
+                        handler,
+                    )
+                else:
+                    _reconcile_after(
+                        reactor, conns, interests, up_to_client, client_fd
+                    )
                 continue
 
             if tok not in conns:
@@ -164,7 +270,9 @@ def run_stream_reactor_loop[
             # ── Peer error / hangup: tear down ─────────────────────
             if ev.is_error() or ev.is_hup():
                 conns[tok].flip_cancel(CancelReason.PEER_CLOSED)
-                _close_conn(reactor, conns, interests, tok, handler)
+                _close_conn(
+                    reactor, conns, interests, up_to_client, tok, handler
+                )
                 continue
 
             var drop_it = False
@@ -198,22 +306,19 @@ def run_stream_reactor_loop[
                         drop_it = True
 
             if drop_it:
-                _close_conn(reactor, conns, interests, tok, handler)
+                _close_conn(
+                    reactor, conns, interests, up_to_client, tok, handler
+                )
                 continue
 
-            # Re-arm interest only when it actually changed.
-            var want = _desired_interest(conns[tok])
-            if interests[tok] != want:
-                try:
-                    reactor.modify(c_int(tok), want)
-                    interests[tok] = want
-                except:
-                    _close_conn(reactor, conns, interests, tok, handler)
+            # Reconcile upstream registration + re-arm write interest.
+            _reconcile_after(reactor, conns, interests, up_to_client, tok)
 
-    # Drain remaining connections on shutdown (interests keys mirror
-    # conns keys; interests is copyable so it is safe to iterate).
+    # Drain remaining connections on shutdown. ``conns`` keys are the
+    # client fds; the upstream entries in ``up_to_client`` are cleaned up
+    # by ``_close_conn`` as each owning connection is torn down.
     var live = List[Int]()
     for fd_key in interests.keys():
         live.append(fd_key)
     for fd_key in live:
-        _close_conn(reactor, conns, interests, fd_key, handler)
+        _close_conn(reactor, conns, interests, up_to_client, fd_key, handler)

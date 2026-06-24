@@ -23,7 +23,7 @@ from std.testing import (
 )
 from std.time import monotonic
 
-from flare.runtime import libc_usleep, libc_nanosleep_ms
+from flare.runtime import libc_usleep, libc_nanosleep_ms, monotonic_now_ms
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -128,6 +128,32 @@ def test_nanosleep_200ms_takes_at_least_100ms() raises:
     assert_true(
         elapsed_ms < 1500,
         "nanosleep_ms(200) took >=1500ms — Mojo anomaly",
+    )
+
+
+# ── monotonic_now_ms (v0.9 A4) ─────────────────────────────────────────────
+
+
+def test_monotonic_is_non_decreasing() raises:
+    """The steady clock never runs backwards across consecutive reads."""
+    var a = monotonic_now_ms()
+    var b = monotonic_now_ms()
+    assert_true(b >= a, "monotonic_now_ms went backwards")
+
+
+def test_monotonic_tracks_a_sleep() raises:
+    """A ~50 ms sleep advances the steady clock by at least 25 ms and
+    not absurdly more (catches a unit / scaling bug in the wrapper)."""
+    var t0 = monotonic_now_ms()
+    _ = libc_nanosleep_ms(50)
+    var elapsed = monotonic_now_ms() - t0
+    assert_true(
+        elapsed >= 25,
+        "monotonic_now_ms advanced <25ms over a 50ms sleep",
+    )
+    assert_true(
+        elapsed < 2000,
+        "monotonic_now_ms advanced >=2000ms over a 50ms sleep — scaling bug",
     )
 
 

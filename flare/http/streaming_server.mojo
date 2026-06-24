@@ -99,6 +99,16 @@ struct StreamConn(Movable):
     """Bytes of ``out_buf`` already written to the socket. The unwritten
     tail is ``out_buf[out_pos:]``; ``out_pos == len(out_buf)`` means
     fully drained."""
+    var _upstream_fd: Int
+    """Upstream fd the front wants the reactor to watch, or ``-1`` for
+    none. Set by ``attach_upstream`` / cleared by ``detach_upstream``;
+    the reactor reconciles it into the epoll set and fires
+    ``on_upstream`` when the fd is readable. The front owns the
+    upstream's lifetime (open/close); the framework only watches it."""
+    var _reg_upstream_fd: Int
+    """Reactor bookkeeping: the upstream fd currently registered (or
+    ``-1``). Lets the reactor diff desired vs registered without a
+    reverse lookup. Framework-internal; fronts never touch it."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -108,6 +118,8 @@ struct StreamConn(Movable):
         self._close_requested = False
         self.out_buf = List[UInt8]()
         self.out_pos = 0
+        self._upstream_fd = -1
+        self._reg_upstream_fd = -1
 
     @always_inline
     def id(self) -> Int:
@@ -140,6 +152,52 @@ struct StreamConn(Movable):
     def is_closing(self) -> Bool:
         """True once ``request_close`` has been called."""
         return self._close_requested
+
+    # ── Upstream attachment ────────────────────────────────────────
+
+    @always_inline
+    def attach_upstream(mut self, fd: Int):
+        """Ask the reactor to watch ``fd`` (a front-owned upstream
+        socket / pipe) for readability and deliver ``on_upstream`` for
+        this connection when it fires.
+
+        The front owns ``fd``'s lifetime: it opened the upstream and is
+        responsible for closing it (typically by holding the upstream
+        stream in its per-connection state and dropping it in
+        ``on_close``). The framework only adds/removes ``fd`` from the
+        event loop. Re-attaching a different fd replaces the previous
+        one on the next reactor reconcile.
+        """
+        self._upstream_fd = fd
+
+    @always_inline
+    def detach_upstream(mut self):
+        """Stop watching the attached upstream fd. The reactor
+        unregisters it on the next reconcile; the front still owns the
+        close."""
+        self._upstream_fd = -1
+
+    @always_inline
+    def has_upstream(self) -> Bool:
+        """True if an upstream fd is currently attached."""
+        return self._upstream_fd != -1
+
+    @always_inline
+    def upstream_fd(self) -> Int:
+        """The attached upstream fd, or ``-1`` if none."""
+        return self._upstream_fd
+
+    @always_inline
+    def reg_upstream_fd(self) -> Int:
+        """Framework-internal: the upstream fd currently registered with
+        the reactor, or ``-1``."""
+        return self._reg_upstream_fd
+
+    @always_inline
+    def _set_reg_upstream_fd(mut self, fd: Int):
+        """Framework-internal: record the reactor's registered upstream
+        fd after a reconcile."""
+        self._reg_upstream_fd = fd
 
     @always_inline
     def set_nonblocking(mut self, enabled: Bool) raises:
@@ -274,8 +332,10 @@ trait StreamHandler(ImplicitlyDestructible, Movable):
         ...
 
     def on_upstream(mut self, mut conn: StreamConn) raises:
-        """Called when attached upstream data is ready to be pumped to
-        the client. (Wired to a real upstream fd in A4 / B1.)"""
+        """Called when the fd attached via ``conn.attach_upstream`` is
+        readable: read from the upstream and ``conn.send`` to the client.
+        The front owns the upstream fd's lifetime (close it in
+        ``on_close``); the reactor only watches it."""
         ...
 
     def on_writable(mut self, mut conn: StreamConn) raises:
@@ -302,9 +362,9 @@ def run_stream_connection[
 
     Calls ``on_open`` once, then ``on_writable`` repeatedly until the
     front requests close (so a streaming front emits chunk-by-chunk),
-    then ``on_close`` exactly once. ``on_upstream`` is driven by the
-    reactor path (A4 / B1); this blocking driver is the single-
-    connection core used by tests and one-shot sidecars.
+    then ``on_close`` exactly once. ``on_upstream`` is only driven by the
+    reactor path (``serve_streaming``); this blocking driver is the
+    single-connection core used by tests and one-shot sidecars.
 
     The connection is closed when ``conn`` drops at function exit.
     """

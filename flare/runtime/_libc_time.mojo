@@ -36,6 +36,35 @@ from std.memory import UnsafePointer, stack_allocation
 
 
 @always_inline
+def monotonic_now_ms() -> Int:
+    """Return the monotonic clock in milliseconds.
+
+    Canonical ``flare.runtime`` wrapper over
+    ``clock_gettime(CLOCK_MONOTONIC, ...)`` for deadline math in the
+    streaming reactor and elsewhere. The clock is steady (never jumps
+    backwards), so ``monotonic_now_ms() - start`` is a sound elapsed
+    measure. ``CLOCK_MONOTONIC`` is id ``1`` on Linux (the supported
+    target here).
+
+    Returns:
+        Milliseconds since an unspecified but fixed epoch.
+    """
+    var ts = stack_allocation[2, Int64]()
+    ts[0] = Int64(0)
+    ts[1] = Int64(0)
+    var ts_ext = UnsafePointer[Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(ts)
+    )
+    _ = external_call[
+        "clock_gettime",
+        Int32,
+        Int32,
+        UnsafePointer[Int64, MutUntrackedOrigin],
+    ](Int32(1), ts_ext)
+    return Int(ts[0]) * 1000 + Int(ts[1]) // 1_000_000
+
+
+@always_inline
 def libc_usleep(microseconds: Int) -> Int:
     """Sleep for at least ``microseconds`` microseconds.
 
