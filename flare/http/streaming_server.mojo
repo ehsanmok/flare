@@ -148,6 +148,12 @@ struct StreamConn(Movable):
     itself via ``read_body`` and the reactor stops draining-and-discarding
     client bytes for FIN detection (which would otherwise steal the
     body). Default False -- existing fronts are unchanged."""
+    var _write_syscalls: Int
+    """B7: count of ``send(2)`` calls issued by ``drain_nonblocking`` /
+    ``flush_blocking``. A burst of K chunks queued via ``send`` (each a
+    memcpy into the single ``out_buf``) flushes in one syscall when the
+    socket accepts it -- so this stays ~1 per drain regardless of K, the
+    per-token syscall tax B7 removes. Observable for the microbench."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -166,6 +172,7 @@ struct StreamConn(Movable):
         self._pause_count = 0
         self._resume_count = 0
         self._inbound_enabled = False
+        self._write_syscalls = 0
 
     @always_inline
     def id(self) -> Int:
@@ -346,7 +353,16 @@ struct StreamConn(Movable):
         with ``flush_blocking`` after each lifecycle step; the reactor
         drains with ``drain_nonblocking`` on writable edges. Same call
         site in both modes, so a front never blocks the event loop.
-        """
+
+        B7 (token-burst coalescing): each ``send`` is an O(n) memcpy into
+        the single contiguous ``out_buf`` -- it issues no syscall. When a
+        front emits K ready chunks in one reactor tick (call ``send`` K
+        times), the subsequent drain flushes all K in ONE ``send(2)``,
+        removing the per-token syscall round-trip that dominates long-
+        output nTPOT. ponytail: the gather is a memcpy into ``out_buf``,
+        not a zero-copy ``writev`` over the K chunk buffers; swap in
+        ``writev_buf`` over a chunk vector only if that memcpy shows up in
+        a profile -- the syscall count (the nTPOT win) is already 1."""
         var n = len(data)
         if n == 0:
             return
@@ -367,6 +383,18 @@ struct StreamConn(Movable):
     def has_pending_out(self) -> Bool:
         """True if there are unwritten outbound bytes."""
         return self.out_pos < len(self.out_buf)
+
+    @always_inline
+    def write_syscalls(self) -> Int:
+        """B7: number of ``send(2)`` calls issued so far by the drain path.
+        A burst of K chunks queued via ``send`` flushes in one syscall, so
+        this advances by ~1 per drain regardless of K."""
+        return self._write_syscalls
+
+    @always_inline
+    def reset_write_syscalls(mut self):
+        """Reset the write-syscall counter (for microbenches)."""
+        self._write_syscalls = 0
 
     @always_inline
     def _reset_out(mut self):
@@ -417,6 +445,7 @@ struct StreamConn(Movable):
         while self.out_pos < len(self.out_buf):
             var ptr = self.out_buf.unsafe_ptr() + self.out_pos
             var n_to = len(self.out_buf) - self.out_pos
+            self._write_syscalls += 1
             var sent = _send(
                 self.client._socket.fd, ptr, c_size_t(n_to), MSG_NOSIGNAL
             )

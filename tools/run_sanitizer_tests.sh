@@ -92,6 +92,10 @@ ASAN_TESTS=(
   # a client disconnect drives a CANCEL frame to the backend. ASan
   # validates the send_cancel frame write + the relay teardown path.
   "tests/http/test_upstream_cancel.mojo"
+  # v0.9 B7 — write coalescing: K queued chunks flush in one send(2)
+  # (syscall counter) and the peer receives them in order. ASan validates
+  # the contiguous out_buf gather + drain.
+  "tests/http/test_write_coalescing.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf
