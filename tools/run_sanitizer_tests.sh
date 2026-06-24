@@ -96,6 +96,11 @@ ASAN_TESTS=(
   # (syscall counter) and the peer receives them in order. ASan validates
   # the contiguous out_buf gather + drain.
   "tests/http/test_write_coalescing.mojo"
+  # Ergonomic surface — send() byte-type overloads (in-process loopback)
+  # + framework-owned UpstreamChunkSource attach/relay/auto-close (forked
+  # backend e2e). ASan validates the Optional[UpstreamChunkSource] move
+  # into StreamConn + the teardown drop closing the owned upstream.
+  "tests/http/test_streaming_ergonomics.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf

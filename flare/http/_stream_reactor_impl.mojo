@@ -112,12 +112,18 @@ def _close_conn[
             reactor.unregister(c_int(fd))
         except:
             pass
+        # If the connection was cancelled (peer FIN / deadline / drain)
+        # and owns its upstream source, tell the backend to stop
+        # producing before we drop it. No-op for a front managing its
+        # own raw-fd upstream.
+        conn._maybe_cancel_upstream()
         try:
             handler.on_close(conn)
         except:
             pass
-        # ``conn`` drops here -> client socket closed. The upstream fd
-        # is the front's to close (it owns the upstream stream).
+        # ``conn`` drops here -> client socket closed (and the
+        # framework-owned upstream source, if any). A raw-fd upstream is
+        # the front's to close (it owns the upstream stream).
     except:
         pass
 

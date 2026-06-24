@@ -42,10 +42,17 @@ typed and usable:
   connection and every event, so the fields are shared, mutable, and
   fully typed -- this is the shared ``ServeState`` (e.g. a persistent
   ``FrameMux``) reached as a typed ref rather than an ``Int`` address.
-- **Per-connection state** is keyed by ``conn.id()`` in a typed
-  container the handler declares once (e.g. ``Dict[Int, MyConnState]``).
-  The framework assigns the id and signals ``on_open`` / ``on_close``
-  so the handler inserts / removes its entry -- no ``alloc``, no manual
+- **Per-connection state** for the common single-upstream relay is
+  framework-owned: ``conn.attach_upstream(source)`` moves an
+  ``UpstreamChunkSource`` into the ``StreamConn``, the framework pumps
+  it (``relay_upstream``), and teardown closes it. The relay front then
+  has *no* per-connection container at all and touches no file
+  descriptor or byte ``Span``.
+- **Richer per-connection state** (fan-in, several upstreams, custom
+  bookkeeping) is still keyed by ``conn.id()`` in a typed container the
+  handler declares once (e.g. ``Dict[Int, MyConnState]``). The
+  framework assigns the id and signals ``on_open`` / ``on_close`` so
+  the handler inserts / removes its entry -- no ``alloc``, no manual
   free list, lifecycle framework-owned.
 
 Together this removes the need for a hand-rolled context of ``Int``
@@ -53,10 +60,11 @@ addresses and the ``alloc[...](max_slots)`` slot tables + free stack a
 raw-reactor front would otherwise carry.
 """
 
+from std.collections import Optional
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
 from std.memory import memcpy
 
-from .async_body import ChunkPoll
+from .async_body import ChunkPoll, UpstreamChunkSource
 from .cancel import Cancel, CancelCell, CancelReason
 from flare.net import NetworkError
 from flare.net._libc import _recv, _send, _strerror, MSG_NOSIGNAL
@@ -89,6 +97,12 @@ struct StreamConn(Movable):
     when it is done with the connection. The ``client`` stream is owned
     here (sole owner) and closed when the handle is dropped -- the same
     ownership rule the reactor's ``ConnHandle`` follows.
+
+    For the common streaming-proxy shape it also owns one optional
+    ``UpstreamChunkSource``: ``attach_upstream(source)`` moves the source
+    in, ``relay_upstream`` drains it, and teardown closes it -- so a
+    relay front carries no per-connection table and never names a file
+    descriptor or a byte ``Span``.
     """
 
     var client: TcpStream
@@ -153,6 +167,12 @@ struct StreamConn(Movable):
     memcpy into the single ``out_buf``) flushes in one syscall when the
     socket accepts it -- so this stays ~1 per drain regardless of K,
     removing the per-token syscall tax. Observable for the microbench."""
+    var _upstream: Optional[UpstreamChunkSource]
+    """Framework-owned upstream source, set by the source-taking
+    ``attach_upstream`` overload. When present the framework owns its
+    lifetime (closes it on teardown) and ``relay_upstream`` drains it --
+    the front never touches a file descriptor or a per-connection table.
+    Empty when the front manages its own upstream via the raw-fd overload."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -172,6 +192,7 @@ struct StreamConn(Movable):
         self._resume_count = 0
         self._inbound_enabled = False
         self._write_syscalls = 0
+        self._upstream = None
 
     @always_inline
     def id(self) -> Int:
@@ -207,32 +228,119 @@ struct StreamConn(Movable):
 
     # ── Upstream attachment ────────────────────────────────────────
 
+    def attach_upstream(mut self, var src: UpstreamChunkSource):
+        """Attach an upstream source and let the framework run it.
+
+        This is the recommended, low-ceremony path: hand the connection
+        the source and the framework takes over -- it reads the fd to
+        watch internally (no descriptors in front code), owns the
+        source for the connection's lifetime (closing it on teardown),
+        and ``relay_upstream`` drains it. The front never keeps a
+        per-connection table, never names a file descriptor, and never
+        remembers to close anything.
+
+        ```mojo
+        def on_open(mut self, mut conn: StreamConn) raises:
+            conn.attach_upstream(UpstreamChunkSource.connect(self.backend))
+        ```
+        """
+        self._upstream_fd = Int(src.fd())
+        self._upstream = src^
+
     @always_inline
     def attach_upstream(mut self, fd: Int):
-        """Ask the reactor to watch ``fd`` (a front-owned upstream
-        socket / pipe) for readability and deliver ``on_upstream`` for
-        this connection when it fires.
+        """Low-level: ask the reactor to watch a raw ``fd`` (a
+        front-owned upstream socket / pipe / eventfd) for readability.
 
-        The front owns ``fd``'s lifetime: it opened the upstream and is
-        responsible for closing it (typically by holding the upstream
-        stream in its per-connection state and dropping it in
-        ``on_close``). The framework only adds/removes ``fd`` from the
-        event loop. Re-attaching a different fd replaces the previous
-        one on the next reactor reconcile.
+        Prefer the ``attach_upstream(UpstreamChunkSource)`` overload --
+        it hides the descriptor and the lifetime. Use this only for an
+        upstream that is not an ``UpstreamChunkSource`` (a bare pipe, an
+        eventfd). The front then owns ``fd``'s lifetime: it opened the
+        upstream and must close it (typically by holding the stream in
+        its own per-connection state and dropping it in ``on_close``).
+        The framework only adds/removes ``fd`` from the event loop.
         """
         self._upstream_fd = fd
 
     @always_inline
     def detach_upstream(mut self):
-        """Stop watching the attached upstream fd. The reactor
-        unregisters it on the next reconcile; the front still owns the
-        close."""
+        """Stop watching the attached upstream and drop any
+        framework-owned source. The reactor unregisters the fd on the
+        next reconcile."""
         self._upstream_fd = -1
+        self._upstream = None
 
     @always_inline
     def has_upstream(self) -> Bool:
         """True if an upstream fd is currently attached."""
         return self._upstream_fd != -1
+
+    @always_inline
+    def has_attached_source(self) -> Bool:
+        """True if a framework-owned ``UpstreamChunkSource`` is attached
+        (via the source-taking ``attach_upstream``)."""
+        return Bool(self._upstream)
+
+    def upstream(mut self) -> ref[self._upstream] UpstreamChunkSource:
+        """The framework-owned upstream source, for fronts that want to
+        poll it directly instead of using ``relay_upstream``.
+
+        Only valid when ``has_attached_source()``; call after attaching
+        via ``attach_upstream(UpstreamChunkSource)``.
+        """
+        return self._upstream.value()
+
+    @always_inline
+    def _poll_upstream(mut self, cancel: Cancel) raises -> ChunkPoll:
+        """Poll the framework-owned source once, isolating its mutable
+        borrow so the caller can ``send`` in the same step without an
+        aliasing conflict."""
+        return self._upstream.value().poll(cancel)
+
+    def relay_upstream(mut self) raises:
+        """Drain the attached source into the client with backpressure.
+
+        The standard ``on_upstream`` body, shipped once so every relay
+        front does not re-derive it: pull ready chunks and ``send`` them
+        until the client write buffer hits the high watermark (so a
+        single readable edge cannot overshoot the bound -- the reactor
+        re-arms upstream interest when the client drains), request close
+        on EOF, and stop on pending (the reactor parks on the fd, no
+        spin). No-op if no source is attached.
+
+        ```mojo
+        def on_upstream(mut self, mut conn: StreamConn) raises:
+            conn.relay_upstream()
+        ```
+        """
+        if not self._upstream:
+            return
+        var cancel = self.cancel()
+        while not self.write_buffer_full():
+            var p = self._poll_upstream(cancel)
+            if p.is_ready():
+                self.send(p.take_chunk())
+            elif p.is_eof():
+                self.request_close()
+                break
+            else:
+                break
+
+    def _maybe_cancel_upstream(mut self):
+        """Framework-internal: on teardown, if the connection was
+        cancelled (client FIN / deadline / drain) and owns a source,
+        emit one CANCEL frame upstream so the backend stops producing
+        tokens nobody will read. Idempotent and best-effort -- normal
+        EOF completion has already latched the source, so this only
+        fires on a genuine abandon."""
+        if not self._upstream:
+            return
+        if not self.cancel().cancelled():
+            return
+        try:
+            self._upstream.value().send_cancel()
+        except:
+            pass
 
     @always_inline
     def upstream_fd(self) -> Int:
@@ -372,6 +480,24 @@ struct StreamConn(Movable):
             src=data.unsafe_ptr(),
             count=n,
         )
+
+    @always_inline
+    def send(mut self, data: List[UInt8]):
+        """Queue an owned byte list for the client (no ``Span`` wrap).
+
+        Convenience over ``send(Span[UInt8, _])`` for the common case
+        where a front holds a ``List[UInt8]`` -- e.g. a chunk just taken
+        from a ``ChunkPoll``. Same coalescing semantics."""
+        self.send(Span[UInt8, _](data))
+
+    @always_inline
+    def send(mut self, text: StringSlice):
+        """Queue a UTF-8 string for the client (no byte juggling).
+
+        Convenience for text protocols (SSE, NDJSON, a status line):
+        ``conn.send("data: " + line + \"\\n\")``. Appends the string's
+        UTF-8 bytes with the same coalescing as ``send(Span[UInt8, _])``."""
+        self.send(text.as_bytes())
 
     @always_inline
     def pending_out(self) -> Int:
@@ -552,10 +678,11 @@ trait StreamHandler(ImplicitlyDestructible, Movable):
         ...
 
     def on_upstream(mut self, mut conn: StreamConn) raises:
-        """Called when the fd attached via ``conn.attach_upstream`` is
-        readable: read from the upstream and ``conn.send`` to the client.
-        The front owns the upstream fd's lifetime (close it in
-        ``on_close``); the reactor only watches it."""
+        """Called when the attached upstream is readable. For a source
+        attached via ``conn.attach_upstream(UpstreamChunkSource)`` the
+        whole body is ``conn.relay_upstream()`` (drain ready chunks to
+        the client with backpressure, close on EOF). A front that
+        attached a raw fd reads it itself and calls ``conn.send``."""
         ...
 
     def on_writable(mut self, mut conn: StreamConn) raises:

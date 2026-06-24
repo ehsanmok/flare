@@ -1,9 +1,11 @@
 """Example — streaming proxy (pump an external producer to a client).
 
 A front that pumps an external producer's framed output to a client,
-with end-to-end backpressure, in a dozen safe lines on top of flare.
-Zero ``UnsafePointer``, zero ``alloc`` slot tables, zero
-``external_call`` clock, zero manual reactor-token math.
+with end-to-end backpressure, in a handful of safe lines on top of
+flare. Zero ``UnsafePointer``, zero ``alloc`` slot tables, zero
+``external_call`` clock, zero manual reactor-token math -- and zero
+file descriptors, byte ``Span`` wrapping, or per-connection tables in
+the front itself.
 
 The composable pieces, all from ``flare``:
 
@@ -11,10 +13,13 @@ The composable pieces, all from ``flare``:
   handler is a struct whose fields are its shared state; the framework
   owns the reactor and the per-connection lifecycle and hands the front
   a ``StreamConn`` per event.
-- ``UpstreamChunkSource`` — a response body whose chunks arrive on a
-  reactor-registered fd (here a Unix-domain socket to a backend).
-- ``conn.attach_upstream(fd)`` — register that fd so the reactor fires
-  ``on_upstream`` when a chunk is ready; no token bookkeeping.
+- ``UpstreamChunkSource.connect(path)`` — a response body whose chunks
+  arrive over a Unix-domain socket to a backend; one call dials it.
+- ``conn.attach_upstream(source)`` — hand the source to the framework;
+  it watches the fd, owns the source's lifetime, and fires
+  ``on_upstream`` when a chunk is ready. No descriptors, no token math.
+- ``conn.relay_upstream()`` — the standard drain loop: ready chunks to
+  the client with backpressure, close on EOF, park on pending.
 - watermark backpressure — if the client is slow, the reactor
   stops reading the upstream until the relay buffer drains, so a slow
   consumer cannot force unbounded buffering.
@@ -30,8 +35,6 @@ Run:
     pixi run example-streaming-proxy
 """
 
-from std.collections import Dict
-
 from flare.http import HttpServer, UpstreamChunkSource
 from flare.http.streaming_server import StreamConn, StreamHandler
 from flare.net import SocketAddr
@@ -41,58 +44,41 @@ from flare.uds._libc import unlink_path
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 
-# ── The front: a dozen safe lines ───────────────────────────────────────────
+# ── The front: a handful of safe lines ──────────────────────────────────────
 
 
 struct ProxyFront(Movable, StreamHandler):
     """Relay a backend's framed token stream to the client.
 
-    Shared state is just the backend socket path. Per-connection state
-    is one ``UpstreamChunkSource`` keyed by ``conn.id()`` — the
-    framework assigns the id and signals open/close, so there is no
-    hand-rolled slot table or free list.
+    Shared state is just the backend socket path. The per-connection
+    upstream is framework-owned -- ``attach_upstream`` moves the source
+    into the connection and ``relay_upstream`` drains it, so the front
+    keeps no table, names no file descriptor, and closes nothing by hand.
     """
 
     var backend_path: String
-    var sources: Dict[Int, UpstreamChunkSource]
 
     def __init__(out self, backend_path: String):
         self.backend_path = backend_path
-        self.sources = Dict[Int, UpstreamChunkSource]()
 
     def on_open(mut self, mut conn: StreamConn) raises:
-        # Open one upstream stream and let the reactor watch its fd.
-        var up = UnixStream.connect(self.backend_path)
-        var src = UpstreamChunkSource(up^, 1)
-        conn.attach_upstream(Int(src.fd()))
+        # Dial the backend and hand the source to the framework. It
+        # watches the fd and owns the source for the connection.
+        conn.attach_upstream(UpstreamChunkSource.connect(self.backend_path))
         # Size the relay pipe: pause the upstream once 64 KiB is queued
         # for a slow client, resume at 16 KiB (hysteresis).
         conn.set_watermarks(hi=64 * 1024, lo=16 * 1024)
-        self.sources[conn.id()] = src^
 
     def on_upstream(mut self, mut conn: StreamConn) raises:
-        # A chunk is ready on the upstream fd. Drain ready chunks into
-        # the client buffer; stop at the high watermark so one readable
-        # edge cannot overshoot the bound (the reactor re-arms interest
-        # when the client drains).
-        ref src = self.sources[conn.id()]
-        while not conn.write_buffer_full():
-            var p = src.poll(conn.cancel())
-            if p.is_ready():
-                var chunk = p.take_chunk()
-                conn.send(Span[UInt8, _](chunk))
-            elif p.is_eof():
-                conn.request_close()
-                break
-            else:
-                break  # pending: park until the next readable edge
+        # A chunk is ready: drain ready chunks into the client with
+        # backpressure, close on EOF, park on pending. The whole loop.
+        conn.relay_upstream()
 
     def on_writable(mut self, mut conn: StreamConn) raises:
         pass  # the framework drains conn's buffer; nothing to hand-roll
 
     def on_close(mut self, mut conn: StreamConn) raises:
-        if conn.id() in self.sources:
-            _ = self.sources.pop(conn.id())
+        pass  # framework closes the upstream source on teardown
 
 
 # ── A toy backend over FrameMux (stands in for a token generator) ────────────

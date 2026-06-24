@@ -26,21 +26,22 @@ This module adds the missing state as a small, total API:
 Composition with the typed streaming surface
 --------------------------------------------
 
-A handler drives an ``AsyncChunkSource`` with no bespoke reactor code::
+A handler drives an ``AsyncChunkSource`` with no bespoke reactor code,
+no file descriptors, and no per-connection bookkeeping -- attach the
+source and let the framework pump it::
 
     def on_open(mut self, mut conn: StreamConn) raises:
-        var src = UpstreamChunkSource(UnixStream.connect(self.worker), id)
-        conn.attach_upstream(src.fd())     # reactor watches the fd
-        self.sources[conn.id()] = src^     # per-connection state
+        conn.attach_upstream(UpstreamChunkSource.connect(self.worker))
 
     def on_upstream(mut self, mut conn: StreamConn) raises:
-        ref src = self.sources[conn.id()]
-        var p = src.poll(conn.cancel())    # never blocks
-        if p.is_ready():
-            conn.send(Span[UInt8, _](p.take_chunk()))   # coalesced on drain
-        elif p.is_eof():
-            conn.request_close()
-        # is_pending(): do nothing -- stay parked on the fd (no spin)
+        conn.relay_upstream()              # drains ready chunks, EOF -> close
+
+``attach_upstream`` takes the source (it reads the fd to watch
+internally and owns the source for the connection's lifetime, closing
+it on teardown), and ``relay_upstream`` is the standard drain loop:
+pull ready chunks into the client with backpressure, request close on
+EOF, park on pending. A front that needs custom per-chunk handling can
+still drive the source directly via ``conn.upstream().poll(...)``.
 
 The reactor calls ``on_upstream`` only when the attached fd is readable,
 so the ``pending`` branch is a genuine park, not a poll loop (no
@@ -208,14 +209,36 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
     """Latched once a CANCEL frame has been emitted, so a teardown that
     both polls (cancel observed) and calls ``send_cancel`` sends it once."""
 
-    def __init__(out self, var conn: UnixStream, request_id: UInt64) raises:
-        """Adopt ``conn`` (switched to non-blocking) for ``request_id``."""
+    def __init__(out self, var conn: UnixStream, request_id: UInt64 = 1) raises:
+        """Adopt ``conn`` (switched to non-blocking) for ``request_id``.
+
+        ``request_id`` defaults to ``1`` -- a dedicated single-stream link
+        carries one logical stream, so the id is meaningful only when a
+        front multiplexes several streams over one connection.
+        """
         conn._socket.set_nonblocking(True)
         self.conn = conn^
         self.demux = FrameDemux()
         self.request_id = request_id
         self._eof = False
         self._cancel_sent = False
+
+    @staticmethod
+    def connect(
+        path: String, request_id: UInt64 = 1
+    ) raises -> UpstreamChunkSource:
+        """Open a dedicated framed upstream over the UDS at ``path``.
+
+        The one-call convenience: dials the worker and adopts the
+        connection, so a front never assembles a ``UnixStream`` by hand
+        just to feed it here. Mirrors ``UnixStream.connect`` /
+        ``TcpStream.connect``.
+
+        ```mojo
+        var src = UpstreamChunkSource.connect("/run/backend.sock")
+        ```
+        """
+        return UpstreamChunkSource(UnixStream.connect(path), request_id)
 
     @always_inline
     def fd(self) -> c_int:
