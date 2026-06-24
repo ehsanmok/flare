@@ -16,16 +16,22 @@ Per RFC 9114 a client:
    stream until the QUIC FIN (:meth:`read_response` /
    :meth:`fetch`).
 
-Two driving styles are exposed so the engine is usable both from a
+Three driving styles are exposed so the engine is usable from a
 single-threaded loopback test (server + client pumped in lockstep
-on one thread) and from a real network client (the server is
-remote, so a blocking poll loop is fine):
+on one thread), from a real network client (the server is remote,
+so a blocking poll loop is fine), and as a multiplexer that keeps
+many requests in flight over the one connection:
 
 * granular -- :meth:`open_streams`, :meth:`send_request`, and
-  :meth:`read_response` (one poll burst, returns whether the
-  response is complete) so a test can interleave server ticks,
+  :meth:`read_response` (one poll burst into a caller-owned reader,
+  returns whether the response is complete) so a test can
+  interleave server ticks,
 * blocking -- :meth:`fetch`, which polls until the response
-  completes or a poll budget is exhausted.
+  completes or a poll budget is exhausted,
+* multiplexed -- :meth:`request` (register an owned reader),
+  :meth:`poll_responses` (one burst fanned out across every
+  in-flight stream), and :meth:`take_if_complete` so any number of
+  concurrent requests can share the single QUIC connection.
 
 Inbound STREAM frames are reassembled in offset order by
 :class:`_StreamReasm` before reaching the response reader: a
@@ -52,7 +58,7 @@ from .request_writer import (
 from .response_reader import H3Response, H3ResponseReader
 
 
-struct _StreamReasm(Movable):
+struct _StreamReasm(Copyable, Movable):
     """Per-stream offset-ordered byte reassembler.
 
     QUIC STREAM frames carry a per-stream byte ``offset`` and may
@@ -142,24 +148,43 @@ struct _StreamReasm(Movable):
             self.fin_signaled = True
 
 
+struct _PendingRequest(Copyable, Movable):
+    """An in-flight multiplexed request: its offset-ordered
+    reassembler plus the response reader that owns the decoded
+    state. One per concurrent request stream, keyed by stream id in
+    :attr:`H3ClientConnection._pending`."""
+
+    var reasm: _StreamReasm
+    var reader: H3ResponseReader
+
+    def __init__(
+        out self, var reasm: _StreamReasm, var reader: H3ResponseReader
+    ):
+        self.reasm = reasm^
+        self.reader = reader^
+
+
 struct H3ClientConnection(Movable):
     """An HTTP/3 client over an established QUIC connection.
 
     Wraps a :class:`QuicClientConnection` (whose handshake must
     already be complete -- 1-RTT keys installed) and drives H3
-    request/response exchanges on it.
+    request/response exchanges on it. Multiplexes any number of
+    concurrent requests over the single QUIC connection: each
+    :meth:`request` opens its own bidi stream and registers a
+    :class:`_PendingRequest`; :meth:`poll_responses` demuxes one
+    QUIC burst across every in-flight stream.
     """
 
     var quic: QuicClientConnection
     var streams_opened: Bool
     var max_field_section_size: UInt64
-    var _reasm: _StreamReasm
-    """Offset-ordered reassembler for the current request stream.
-    Reset whenever :meth:`read_response` sees a new stream id."""
-    var _reasm_sid: Int
-    """Stream id the :attr:`_reasm` currently tracks (-1 = none).
-    A single sequential request at a time, so one reassembler
-    suffices; it is reset per stream rather than kept per id."""
+    var _pending: Dict[UInt64, _PendingRequest]
+    """In-flight requests with reader ownership, keyed by stream id
+    (the multiplexed :meth:`request`/:meth:`poll_responses` API)."""
+    var _ext_reasms: Dict[UInt64, _StreamReasm]
+    """Per-stream reassemblers for the external-reader
+    :meth:`read_response` API, keyed by stream id."""
 
     def __init__(
         out self,
@@ -169,8 +194,8 @@ struct H3ClientConnection(Movable):
         self.quic = quic^
         self.streams_opened = False
         self.max_field_section_size = max_field_section_size
-        self._reasm = _StreamReasm()
-        self._reasm_sid = -1
+        self._pending = Dict[UInt64, _PendingRequest]()
+        self._ext_reasms = Dict[UInt64, _StreamReasm]()
 
     def open_streams(mut self) raises:
         """Open the client control + QPACK uni-streams (RFC 9114
@@ -224,31 +249,102 @@ struct H3ClientConnection(Movable):
         timeout_ms: Int = 100,
     ) raises -> Bool:
         """Poll one QUIC burst, route this stream's STREAM chunks
-        into ``reader`` through the offset-ordered reassembler, and
-        return whether the response is complete. Chunks for other
-        streams (server control / QPACK uni-streams) are ignored."""
+        into the caller-owned ``reader`` through its offset-ordered
+        reassembler, and return whether the response is complete.
+        Chunks for other streams (server control / QPACK uni-streams
+        / other requests) are ignored. This is the external-reader
+        single-stream API; :meth:`poll_responses` is the multiplexed
+        owned-reader counterpart."""
         var events = self.quic.poll(timeout_ms)
-        self._feed(stream_id, events, reader)
+        self._feed_ext(stream_id, events, reader)
         return reader.is_complete()
 
-    def _feed(
+    def _feed_ext(
         mut self,
         stream_id: UInt64,
         events: ConnectionEvents,
         mut reader: H3ResponseReader,
     ) raises:
-        if Int(stream_id) != self._reasm_sid:
-            self._reasm = _StreamReasm()
-            self._reasm_sid = Int(stream_id)
+        if stream_id not in self._ext_reasms:
+            self._ext_reasms[stream_id] = _StreamReasm()
+        # Pop/reinsert so the reassembler and the caller's reader are
+        # both locals while pushing (no Dict-entry aliasing).
+        var reasm = self._ext_reasms.pop(stream_id)
         for i in range(len(events.stream_chunks)):
             if events.stream_chunks[i].stream_id != stream_id:
                 continue  # server uni-streams / other requests
-            self._reasm.push(
+            reasm.push(
                 reader,
                 events.stream_chunks[i].offset,
                 Span[UInt8, _](events.stream_chunks[i].data),
                 events.stream_chunks[i].fin,
             )
+        self._ext_reasms[stream_id] = reasm^
+
+    def request(
+        mut self,
+        method: String,
+        scheme: String,
+        authority: String,
+        path: String,
+        headers: List[QpackHeader],
+        body: List[UInt8],
+    ) raises -> UInt64:
+        """Multiplexed request: open a bidi stream, write
+        ``HEADERS [+ DATA]`` with FIN, register an owned reader, and
+        return the stream id. Any number of requests can be in flight
+        at once over the one QUIC connection; drive them with
+        :meth:`poll_responses` and collect with
+        :meth:`take_if_complete`."""
+        var sid = self.send_request(
+            method, scheme, authority, path, headers, body
+        )
+        self._pending[sid] = _PendingRequest(
+            _StreamReasm(), H3ResponseReader(self.max_field_section_size)
+        )
+        return sid
+
+    def poll_responses(mut self, timeout_ms: Int = 100) raises -> Bool:
+        """Poll one QUIC burst and fan its STREAM chunks out across
+        every in-flight request registered by :meth:`request`.
+        Returns whether at least one pending response is now
+        complete."""
+        var events = self.quic.poll(timeout_ms)
+        var sids = List[UInt64]()
+        for entry in self._pending.items():
+            sids.append(entry.key)
+        for s in range(len(sids)):
+            var sid = sids[s]
+            var pr = self._pending.pop(sid)
+            for i in range(len(events.stream_chunks)):
+                if events.stream_chunks[i].stream_id != sid:
+                    continue
+                pr.reasm.push(
+                    pr.reader,
+                    events.stream_chunks[i].offset,
+                    Span[UInt8, _](events.stream_chunks[i].data),
+                    events.stream_chunks[i].fin,
+                )
+            self._pending[sid] = pr^
+        var any_done = False
+        for entry in self._pending.items():
+            if entry.value.reader.is_complete():
+                any_done = True
+        return any_done
+
+    def take_if_complete(
+        mut self, stream_id: UInt64
+    ) raises -> Optional[H3Response]:
+        """If the request on ``stream_id`` has a fully assembled
+        response, remove it from the in-flight set and return it;
+        otherwise return ``None`` (the request stays registered)."""
+        if stream_id not in self._pending:
+            return None
+        var pr = self._pending.pop(stream_id)
+        if not pr.reader.is_complete():
+            self._pending[stream_id] = pr^
+            return None
+        return Optional(pr.reader.take_response())
 
     def fetch(
         mut self,
@@ -264,14 +360,14 @@ struct H3ClientConnection(Movable):
         """Blocking single-request round-trip for the real-network
         client: send the request, then poll until the response is
         complete or the poll budget is exhausted. Raises on a
-        budget timeout (the caller falls back to h2/h1)."""
-        var sid = self.send_request(
-            method, scheme, authority, path, headers, body
-        )
-        var reader = H3ResponseReader(self.max_field_section_size)
+        budget timeout (the caller falls back to h2/h1). A thin
+        wrapper over :meth:`request`/:meth:`poll_responses`."""
+        var sid = self.request(method, scheme, authority, path, headers, body)
         for _ in range(max_polls):
-            if self.read_response(sid, reader, timeout_ms):
-                return reader.take_response()
+            _ = self.poll_responses(timeout_ms)
+            var resp = self.take_if_complete(sid)
+            if resp:
+                return resp.value().copy()
         raise Error("h3 client: response did not complete within poll budget")
 
     def is_established(self) -> Bool:
