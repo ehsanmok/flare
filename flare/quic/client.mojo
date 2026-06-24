@@ -69,6 +69,7 @@ from .frame import (
     StreamFrame,
     encode_ack,
     encode_crypto,
+    encode_ping,
     encode_stream,
 )
 from .packet import (
@@ -930,34 +931,73 @@ struct QuicClientConnection(Movable):
         self.next_uni_stream += UInt64(4)
         return sid
 
+    def _stream_chunk_cap(self) -> Int:
+        """Max STREAM payload bytes that fit in one 1-RTT packet,
+        leaving room for the short header (1 + dcid + up to a 4-byte
+        packet number), the STREAM frame header (type + three
+        varints, <= 25 bytes), and the 16-byte AEAD tag."""
+        return self.max_udp_payload_size - len(self.dcid.bytes) - 46
+
     def send_stream(
         mut self, stream_id: UInt64, data: List[UInt8], fin: Bool
     ) raises:
-        """Send ``data`` (with optional FIN) on ``stream_id`` in a
-        single 1-RTT STREAM frame.
-
-        ponytail: capped at one packet (path MTU). A payload that
-        would not fit raises rather than fragmenting across
-        packets -- adequate for H3 request headers + small bodies;
-        large uploads are the upgrade path."""
+        """Send ``data`` (with optional FIN) on ``stream_id``,
+        fragmenting across as many 1-RTT STREAM frames / packets as
+        the path MTU requires and advancing the per-stream offset.
+        An empty FIN-only send emits a single zero-length frame so a
+        body-less request still closes its stream."""
         if not self.have_1rtt_keys:
             raise Error("quic client: send_stream before 1-RTT keys")
-        if len(data) + 32 > self.max_udp_payload_size:
-            raise Error(
-                "quic client: send_stream payload exceeds single-packet MTU"
-            )
+        var cap = self._stream_chunk_cap()
+        if cap < 1:
+            raise Error("quic client: MTU too small for a STREAM frame")
         var off = UInt64(0)
         if stream_id in self.send_offsets:
             off = self.send_offsets[stream_id]
-        var sf = StreamFrame(
-            stream_id=stream_id, offset=off, data=data.copy(), fin=fin
-        )
+        var total = len(data)
+        var sent = 0
+        while True:
+            var take = total - sent
+            if take > cap:
+                take = cap
+            var is_last = (sent + take) >= total
+            var chunk = List[UInt8](capacity=take)
+            for i in range(take):
+                chunk.append(data[sent + i])
+            var sf = StreamFrame(
+                stream_id=stream_id,
+                offset=off,
+                data=chunk^,
+                fin=(fin and is_last),
+            )
+            var payload = List[UInt8]()
+            encode_stream(sf, payload, emit_length=True)
+            var dg = self._build_1rtt(payload^)
+            if len(dg) > 0:
+                _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+            off += UInt64(take)
+            sent += take
+            if is_last:
+                break
+        self.send_offsets[stream_id] = off
+
+    def keepalive(mut self) raises:
+        """Send a 1-RTT PING to keep a pooled-idle connection alive
+        and elicit a server ACK (RFC 9000 §10.1.2). A no-op until
+        1-RTT keys are installed."""
+        if not self.have_1rtt_keys:
+            return
         var payload = List[UInt8]()
-        encode_stream(sf, payload, emit_length=True)
+        encode_ping(payload)
+        # Pad with PADDING frames (0x00) so the protected packet has
+        # enough ciphertext for the header-protection sample (RFC 9001
+        # sec 5.4.2 needs 4 bytes past the packet-number offset + a
+        # 16-byte sample).
+        while len(payload) < 16:
+            payload.append(UInt8(0))
         var dg = self._build_1rtt(payload^)
         if len(dg) > 0:
             _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
-        self.send_offsets[stream_id] = off + UInt64(len(data))
 
     # ── Accessors ───────────────────────────────────────────────────
 

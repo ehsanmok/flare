@@ -227,6 +227,10 @@ ASAN_TESTS=(
   # ASan validates the per-stream _PendingRequest Dict (reasm + owned
   # reader) pop/reinsert churn while two requests are demuxed in flight.
   "tests/h3/test_h3_client_mux.mojo"
+  # H3C follow-up -- multi-packet request-body fragmentation + idle
+  # keepalive reuse. ASan validates the per-chunk STREAM frame buffer
+  # churn across several packets and the padded keepalive PING build.
+  "tests/h3/test_h3_client_frag.mojo"
   # H3C follow-up -- live HttpClient h3 dial over loopback QUIC (fork).
   # ASan validates the AltSvcStore interior-mut heap lifetime, the
   # per-request QuicClientConnection + H3ClientConnection allocation,
