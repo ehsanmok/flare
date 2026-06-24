@@ -57,9 +57,10 @@ free stack.
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
 from std.memory import memcpy
 
+from .async_body import ChunkPoll
 from .cancel import Cancel, CancelCell, CancelReason
 from flare.net import NetworkError
-from flare.net._libc import _send, _strerror, MSG_NOSIGNAL
+from flare.net._libc import _recv, _send, _strerror, MSG_NOSIGNAL
 from flare.tcp import TcpStream
 
 
@@ -142,6 +143,11 @@ struct StreamConn(Movable):
     for the B2 acceptance test; cheap counter otherwise."""
     var _resume_count: Int
     """Number of low-watermark crossings (upstream resumed)."""
+    var _inbound_enabled: Bool
+    """B5 opt-in: when True the front consumes the inbound request body
+    itself via ``read_body`` and the reactor stops draining-and-discarding
+    client bytes for FIN detection (which would otherwise steal the
+    body). Default False -- existing fronts are unchanged."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -159,6 +165,7 @@ struct StreamConn(Movable):
         self._reg_upstream_interest = -1
         self._pause_count = 0
         self._resume_count = 0
+        self._inbound_enabled = False
 
     @always_inline
     def id(self) -> Int:
@@ -438,6 +445,64 @@ struct StreamConn(Movable):
         var n = self.client.read(buf.unsafe_ptr() + old, max_bytes)
         buf.resize(old + n, UInt8(0))
         return n
+
+    # ── Incremental inbound body (B5) ──────────────────────────────
+
+    @always_inline
+    def enable_inbound(mut self, enabled: Bool = True):
+        """Opt into front-owned inbound body consumption (B5).
+
+        Call in ``on_open`` for a front that reads a (possibly large)
+        request body itself via ``read_body``. While enabled the reactor
+        no longer drains-and-discards client bytes for FIN detection, so
+        the body bytes reach the front intact; the front pulls them in
+        bounded chunks (peak memory independent of body size) and detects
+        end-of-body when ``read_body`` returns ``eof``.
+        """
+        self._inbound_enabled = enabled
+
+    @always_inline
+    def inbound_enabled(self) -> Bool:
+        """True if the front owns inbound body consumption (B5)."""
+        return self._inbound_enabled
+
+    def read_body(mut self, max_bytes: Int = 65536) raises -> ChunkPoll:
+        """Read up to ``max_bytes`` of the inbound request body, without
+        blocking, as a B1 ``ChunkPoll`` (so inbound and outbound share
+        one tri-state shape):
+
+        - ``ready(bytes)`` -- a body chunk is available now;
+        - ``eof()`` -- the client finished the body (clean FIN);
+        - ``pending(fd)`` -- nothing buffered yet; the reactor will fire
+          again on the next readable edge (no busy-poll).
+
+        A front loops on this in ``on_writable`` (the streaming reactor
+        keeps the connection live), processing each chunk and dropping it,
+        so peak memory is one chunk regardless of total body size up to
+        whatever ceiling the front enforces.
+        """
+        while True:
+            var buf = List[UInt8](capacity=max_bytes)
+            buf.resize(max_bytes, UInt8(0))
+            var n = _recv(
+                self.client._socket.fd,
+                buf.unsafe_ptr(),
+                c_size_t(max_bytes),
+                c_int(0),
+            )
+            if n > 0:
+                buf.resize(Int(n), UInt8(0))
+                return ChunkPoll.ready(buf^)
+            if n == 0:
+                return ChunkPoll.eof()
+            var e = get_errno()
+            if e == ErrNo.EINTR:
+                continue
+            if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                return ChunkPoll.pending(self.client._socket.fd)
+            raise NetworkError(
+                _strerror(e.value) + " (inbound body recv)", Int(e.value)
+            )
 
 
 # ── StreamHandler ──────────────────────────────────────────────────────────

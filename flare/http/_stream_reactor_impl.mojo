@@ -334,17 +334,29 @@ def run_stream_reactor_loop[
                 continue
 
             # ── Peer error / hangup: tear down ─────────────────────
+            # For an inbound-owning front (B5) a peer *half-close*
+            # (EPOLLRDHUP, which folds into EVENT_HUP) is the normal
+            # end-of-body signal, not a teardown: fall through so the
+            # handler reads ``read_body`` -> eof and replies on the still-
+            # open write side. A genuine full hangup then makes the
+            # writable drain raise, which closes the connection below.
             if ev.is_error() or ev.is_hup():
-                conns[tok].flip_cancel(CancelReason.PEER_CLOSED)
-                _close_conn(
-                    reactor, conns, interests, up_to_client, tok, handler
-                )
-                continue
+                if not conns[tok].inbound_enabled():
+                    conns[tok].flip_cancel(CancelReason.PEER_CLOSED)
+                    _close_conn(
+                        reactor, conns, interests, up_to_client, tok, handler
+                    )
+                    continue
 
             var drop_it = False
 
-            # ── Readable: detect peer FIN (inbound body is B5) ─────
-            if ev.is_readable():
+            # ── Readable: detect peer FIN, or hand inbound body to the
+            # front (B5). When the front owns the inbound body
+            # (``enable_inbound``), the reactor must NOT drain-and-discard
+            # client bytes here -- that would steal the body. The front
+            # reads it via ``read_body`` (and learns EOF there); the
+            # reactor still tears down on a hard error / hangup above.
+            if ev.is_readable() and not conns[tok].inbound_enabled():
                 var got: Int
                 ref c = conns[tok]
                 try:

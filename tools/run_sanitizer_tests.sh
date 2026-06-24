@@ -84,6 +84,10 @@ ASAN_TESTS=(
   # as slots free. ASan validates the accept-edge shed path (canned
   # response build + socket teardown) and the live-conn table.
   "tests/http/test_admission.mojo"
+  # v0.9 B5 — incremental inbound body: a forked client streams multi-MB
+  # while the front consumes it in fixed 64 KiB read_body chunks. ASan
+  # validates the non-blocking inbound recv path and the bounded reader.
+  "tests/http/test_inbound_body.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf
