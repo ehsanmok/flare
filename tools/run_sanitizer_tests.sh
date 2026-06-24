@@ -236,6 +236,11 @@ ASAN_TESTS=(
   # per-request QuicClientConnection + H3ClientConnection allocation,
   # and the H3Response -> Response lowering across the dial path.
   "tests/http/test_h3_live_dial.mojo"
+  # H3C follow-up -- HttpClient h3 connection reuse (fork). ASan
+  # validates the QuicConnectionPool heap-cell churn (Pool[H3Conn]
+  # alloc_move / take_pointee / free) across acquire + release + the
+  # graceful CONNECTION_CLOSE drain in __del__.
+  "tests/http/test_h3_pool_reuse.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)

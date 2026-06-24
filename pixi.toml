@@ -387,6 +387,7 @@ test-h3-client-reasm = "mojo -I . tests/h3/test_h3_client_reasm.mojo" # H3C foll
 test-h3-client-mux = { cmd = "mojo -I . tests/h3/test_h3_client_mux.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- multiplexed H3 client: 2 concurrent requests over one QUIC connection demux to independent bodies
 test-h3-client-frag = { cmd = "mojo -I . tests/h3/test_h3_client_frag.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- multi-packet request-body fragmentation + idle keepalive reuse (large POST reassembled; idle-then-reuse, 2 cases)
 test-h3-live-dial = { cmd = "mojo -I . tests/http/test_h3_live_dial.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- live HttpClient h3 dial over loopback QUIC (fork: GET + POST + Alt-Svc upgrade, 3 cases)
+test-h3-pool-reuse = { cmd = "mojo -I . tests/http/test_h3_pool_reuse.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- HttpClient h3 connection reuse: 2 sequential same-origin GETs share one QUIC connection (fork, dial-count == 1)
 test-h3-frame        = "mojo -I . tests/h3/test_frame.mojo"              # RFC 9114 §7 HTTP/3 frame codec + SETTINGS (~10 cases)
 test-grpc            = "mojo -I . tests/grpc/test_grpc.mojo"             # gRPC LPM framing + status codes (~10 cases)
 test-grpc-metadata   = "mojo -I . tests/grpc/test_metadata.mojo"         # gRPC initial + trailing metadata carrier (~7 cases)

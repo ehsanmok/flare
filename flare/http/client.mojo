@@ -77,6 +77,7 @@ from ._client.alt_svc import (
     decide_h3_wire,
     monotonic_now_s,
 )
+from ._client.quic_pool import QuicConnectionPool
 from ..net.socket import RawSocket
 from ..net._libc import (
     AF_INET,
@@ -161,10 +162,17 @@ struct HttpClient(Movable):
     """Per-origin ``Alt-Svc`` (RFC 7838) discovery cache, behind a
     pointer-backed interior-mutable handle so a read-``self`` request
     path can auto-record headers. Populated from response ``Alt-Svc``
-    headers in :meth:`send` (and via :meth:`record_alt_svc`); consulted
+    headers in :meth:`send` (and via :meth:`record_alt_svc`);     consulted
     by :meth:`h3_wire_choice` so an origin that advertised an h3
     endpoint upgrades transparently on the next request. Freed in
     :meth:`__del__`."""
+    var _quic_pool: QuicConnectionPool
+    """Idle HTTP/3 (QUIC) connection pool keyed on ``host:port``,
+    behind a pointer-backed interior-mutable handle so the read-``self``
+    :meth:`_send_h3` can acquire / release. Enabled by default (an
+    established QUIC connection is expensive, so reuse is the right
+    default), so consecutive h3 requests to one origin amortise the
+    handshake. Freed in :meth:`__del__`."""
 
     def __init__(
         out self,
@@ -202,6 +210,7 @@ struct HttpClient(Movable):
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
         self._alt_svc = AltSvcStore.new()
+        self._quic_pool = QuicConnectionPool.new()
 
     def __init__(
         out self,
@@ -225,6 +234,7 @@ struct HttpClient(Movable):
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
         self._alt_svc = AltSvcStore.new()
+        self._quic_pool = QuicConnectionPool.new()
 
     def __init__[
         A: Auth
@@ -252,6 +262,7 @@ struct HttpClient(Movable):
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
         self._alt_svc = AltSvcStore.new()
+        self._quic_pool = QuicConnectionPool.new()
 
     def __init__[
         A: Auth
@@ -279,6 +290,7 @@ struct HttpClient(Movable):
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
         self._alt_svc = AltSvcStore.new()
+        self._quic_pool = QuicConnectionPool.new()
 
     def __del__(deinit self):
         """Free the pooled fds + the ``Alt-Svc`` store owned by this
@@ -295,6 +307,10 @@ struct HttpClient(Movable):
             pass
         try:
             self._alt_svc.free()
+        except:
+            pass
+        try:
+            self._quic_pool.free()
         except:
             pass
 
@@ -348,6 +364,17 @@ struct HttpClient(Movable):
         the pool. Returns 0 when pooling is disabled.
         """
         return self._pool.total_idle()
+
+    def quic_dials(read self) -> Int:
+        """Number of fresh HTTP/3 (QUIC) connections this client has
+        had to dial (pool misses). Stays at 1 across repeated
+        same-origin h3 requests when reuse is working."""
+        return self._quic_pool.dials()
+
+    def quic_idle_count(read self) -> Int:
+        """Number of established HTTP/3 connections currently idle in
+        the QUIC pool."""
+        return self._quic_pool.idle_count()
 
     def with_prefer_h3(var self, enabled: Bool = True) -> HttpClient:
         """Opt this client into HTTP/3 (move-in / move-out so it
@@ -433,38 +460,31 @@ struct HttpClient(Movable):
         with open(path, "r") as f:
             return f.read()
 
-    def _send_h3(
-        self,
-        u: Url,
-        method: String,
-        extra_headers: HeaderMap,
-        body: List[UInt8],
-    ) raises -> Response:
-        """Dial HTTP/3 over QUIC for one ``https://`` request and
-        lower the result to a :class:`Response`.
-
-        Resolves the host, opens a fresh
-        :class:`QuicClientConnection` (blocking handshake -- the peer
-        is remote), drives one request/response through
-        :class:`H3ClientConnection`, and converts the
-        :class:`flare.h3.response_reader.H3Response` into the same
-        :class:`Response` the h2/h1 paths return so the caller can't
-        tell which wire was used. Raises on any QUIC/h3 failure; the
-        caller (:meth:`_do_request`) treats that as a transparent
-        fallback to h2/h1.
-
-        ponytail: one QUIC connection per request (no reuse yet). The
-        h3 connection-reuse / pooling work is the post-v0.9 roadmap
-        item; the dial cost here is the handshake-per-request ceiling.
-        """
+    def _dial_h3(self, u: Url) raises -> H3ClientConnection:
+        """Open a fresh established :class:`H3ClientConnection` to
+        ``u``'s origin (DNS -> rustls QUIC connector -> blocking QUIC
+        handshake). Reports the dial to the pool's miss counter."""
         var addrs = resolve(u.host)
         var peer = SocketAddr(addrs[0], u.port)
         var alpn = List[String]()
         alpn.append("h3")
         var connector = RustlsQuicConnector(self._resolve_quic_ca_pem(), alpn^)
         var quic = QuicClientConnection.connect(peer, connector, u.host)
-        var h3 = H3ClientConnection(quic^)
+        self._quic_pool.note_dial()
+        return H3ClientConnection(quic^)
 
+    def _run_h3_request(
+        self,
+        mut h3: H3ClientConnection,
+        u: Url,
+        method: String,
+        extra_headers: HeaderMap,
+        body: List[UInt8],
+    ) raises -> Response:
+        """Drive one request/response over an established (possibly
+        reused) ``h3`` connection and lower the
+        :class:`flare.h3.response_reader.H3Response` to a
+        :class:`Response`."""
         var headers = List[QpackHeader]()
         headers.append(QpackHeader("user-agent", self._user_agent))
         if self._auth_header.byte_length() > 0:
@@ -487,6 +507,52 @@ struct HttpClient(Movable):
         var resp = Response(hr.status, "", hr.body.copy())
         for i in range(len(hr.headers)):
             resp.headers.set(hr.headers[i].name, hr.headers[i].value)
+        return resp^
+
+    def _send_h3(
+        self,
+        u: Url,
+        method: String,
+        extra_headers: HeaderMap,
+        body: List[UInt8],
+    ) raises -> Response:
+        """Send one ``https://`` request over HTTP/3, reusing a pooled
+        QUIC connection when one is idle for this origin.
+
+        Acquires an idle :class:`H3ClientConnection` from the
+        per-origin pool (or dials a fresh one on a miss), runs the
+        request, and releases the connection back to the pool while it
+        is still established. A pooled connection that fails mid-flight
+        (e.g. the server idled it out) is dropped and the request is
+        retried once on a fresh dial. Raises on any QUIC/h3 failure;
+        the caller (:meth:`_do_request`) treats that as a transparent
+        fallback to h2/h1.
+        """
+        var key = QuicConnectionPool.build_key(u.host, Int(u.port))
+        var pooled = self._quic_pool.acquire(key)
+        if pooled:
+            var h3 = pooled.take()
+            var failed = False
+            var resp = Response(0, "", List[UInt8]())
+            try:
+                resp = self._run_h3_request(h3, u, method, extra_headers, body)
+            except:
+                failed = True
+            if not failed:
+                if h3.is_established():
+                    self._quic_pool.release(key, h3^)
+                else:
+                    h3.close()
+                return resp^
+            # Stale reused connection: drop it and dial fresh below.
+            h3.close()
+
+        var fresh = self._dial_h3(u)
+        var resp = self._run_h3_request(fresh, u, method, extra_headers, body)
+        if fresh.is_established():
+            self._quic_pool.release(key, fresh^)
+        else:
+            fresh.close()
         return resp^
 
     # ── Context manager ───────────────────────────────────────────────────────

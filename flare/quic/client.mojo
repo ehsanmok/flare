@@ -65,9 +65,11 @@ from ..udp import UdpSocket
 from .crypto import QuicAead
 from .frame import (
     AckFrame,
+    ConnectionCloseFrame,
     CryptoFrame,
     StreamFrame,
     encode_ack,
+    encode_connection_close,
     encode_crypto,
     encode_ping,
     encode_stream,
@@ -1014,6 +1016,28 @@ struct QuicClientConnection(Movable):
     def local_addr(self) -> SocketAddr:
         """The ephemeral local UDP address the client bound to."""
         return self.sock.local_addr()
+
+    def shutdown(mut self) raises:
+        """Gracefully close: send a 1-RTT application-level
+        CONNECTION_CLOSE (RFC 9000 sec 10.2, error 0) so the peer
+        tears the connection down immediately instead of waiting out
+        its idle timeout, then close the socket. A no-op send until
+        1-RTT keys are installed."""
+        if self.have_1rtt_keys:
+            var cc = ConnectionCloseFrame(
+                application=True,
+                error_code=UInt64(0),
+                frame_type=UInt64(0),
+                reason_phrase=List[UInt8](),
+            )
+            var payload = List[UInt8]()
+            encode_connection_close(cc, payload)
+            while len(payload) < 16:
+                payload.append(UInt8(0))
+            var dg = self._build_1rtt(payload^)
+            if len(dg) > 0:
+                _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+        self.sock.close()
 
     def close(mut self):
         """Close the underlying UDP socket. Idempotent."""
