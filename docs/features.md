@@ -191,18 +191,23 @@ response body's chunks arrive on a reactor-registered fd, with
 backpressure coupled across upstream and downstream. The front is
 a `StreamHandler` plus a typed state struct — no raw reactor loop, no
 `UnsafePointer` state smuggling, no per-slot `alloc` tables, no manual
-byte parsing, no manual fd/token bookkeeping. See
+byte parsing, and — for the common single-upstream relay — no file
+descriptors, no byte `Span` wrapping, and no per-connection table in
+front code at all. See
 [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) for
-the end-to-end shape.
+the end-to-end shape; a complete relay front is `on_open` (attach a
+source) + `on_upstream` (`conn.relay_upstream()`).
 
 | Surface | Where |
 |---|---|
-| `StreamHandler` — typed lifecycle trait (`on_open` / `on_upstream` / `on_writable` / `on_close`); the handler struct's fields are its shared state, per-connection state keys on `conn.id()` | `flare.http.streaming_server`, `flare` |
-| `StreamConn` — framework-owned per-connection handle: owns the client `TcpStream`, a per-connection `Cancel`, a single coalescing outbound buffer (`send` queues; the reactor drains on writable edges) | `flare.http.streaming_server`, `flare` |
+| `StreamHandler` — typed lifecycle trait (`on_open` / `on_upstream` / `on_writable` / `on_close`); the handler struct's fields are its shared state | `flare.http.streaming_server`, `flare` |
+| `StreamConn` — framework-owned per-connection handle: owns the client `TcpStream`, a per-connection `Cancel`, one optional framework-owned upstream source, and a single coalescing outbound buffer (`send` queues; the reactor drains on writable edges) | `flare.http.streaming_server`, `flare` |
 | `HttpServer.serve_streaming[H](handler, max_in_flight=0, retry_after_s=1)` — the streaming entry point (single-listener, single-worker); `max_in_flight` admits with a 503 + `Retry-After` past the cap | `flare.http.server` |
-| `conn.attach_upstream(fd)` / `detach_upstream()` — register a front-owned upstream fd so the reactor fires `on_upstream` when it is readable; no token math | `flare.http.streaming_server` |
+| `conn.attach_upstream(source)` + `conn.relay_upstream()` — hand an `UpstreamChunkSource` to the framework (it watches the fd, owns the source, closes it on teardown, and cancels upstream on client disconnect); `relay_upstream` is the whole drain loop. No descriptors, no table, no manual close | `flare.http.streaming_server` |
+| `conn.send(data)` — accepts `Span[UInt8, _]` (zero-copy), `List[UInt8]`, or a `StringSlice`/string; a front sends bytes or text with no `Span[UInt8, _]` wrap at the call site | `flare.http.streaming_server` |
+| `conn.attach_upstream(fd)` / `detach_upstream()` (low-level) — register a raw front-owned upstream fd (a bare pipe / eventfd, not an `UpstreamChunkSource`) so the reactor fires `on_upstream`; the front then owns the fd's close | `flare.http.streaming_server` |
 | `AsyncChunkSource` trait + `ChunkPoll` tri-state (`ready(bytes)` / `pending(fd)` / `eof()`) — a body whose chunks arrive asynchronously without busy-polling | `flare.http.async_body`, `flare` |
-| `UpstreamChunkSource` — concrete `AsyncChunkSource` over a framed UDS logical stream; `poll(cancel)` returns the tri-state, `send_cancel()` propagates a client disconnect upstream | `flare.http.async_body`, `flare` |
+| `UpstreamChunkSource` — concrete `AsyncChunkSource` over a framed UDS logical stream; `UpstreamChunkSource.connect(path)` dials it in one call (`request_id` defaults to `1`); `poll(cancel)` returns the tri-state, `send_cancel()` propagates a client disconnect upstream | `flare.http.async_body`, `flare` |
 | Watermark backpressure: `conn.set_watermarks(hi, lo)`, `write_buffer_full()`, `apply_backpressure()` — hi/lo hysteresis gates upstream read interest so a slow client cannot force unbounded buffering | `flare.http.streaming_server` |
 | Incremental inbound body: `conn.enable_inbound()`, `conn.read_body(max_bytes)` returning `ChunkPoll` — bounded-memory consumption of a large request body | `flare.http.streaming_server` |
 | Write coalescing: K `send` calls in one tick flush in one `send(2)`; `conn.write_syscalls()` observes it | `flare.http.streaming_server` |

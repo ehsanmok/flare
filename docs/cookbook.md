@@ -78,7 +78,7 @@ natural.
 | [`reactor.mojo`](../examples/advanced/reactor.mojo) | direct `flare.runtime.Reactor` usage for custom protocols |
 | [`work_stealing.mojo`](../examples/advanced/work_stealing.mojo) | `HandoffQueue` + `WorkerHandoffPool` + `FLARE_SOAK_WORKERS` knob |
 | [`uds_sidecar.mojo`](../examples/advanced/uds_sidecar.mojo) | `UnixListener` / `UnixStream` AF_UNIX sidecar IPC |
-| [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) | streaming-proxy surface: `StreamHandler` + `UpstreamChunkSource` + `attach_upstream` over `serve_streaming`, relaying a `FrameMux` backend with watermark backpressure |
+| [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) | streaming-proxy surface: `StreamHandler` + `attach_upstream(UpstreamChunkSource)` + `relay_upstream()` over `serve_streaming`, relaying a `FrameMux` backend with watermark backpressure — no fd, no `Span`, no per-connection table in front code |
 | [`cert_reload.mojo`](../examples/advanced/cert_reload.mojo) | `TlsAcceptor.reload()` for ACME / Let's Encrypt cert rotation without restart |
 | [`mtls.mojo`](../examples/advanced/mtls.mojo) | mTLS configuration + construction-time validation |
 | [`http2.mojo`](../examples/advanced/http2.mojo) | `H2Connection` driver, ALPN dispatch, h2c upgrade detection |
