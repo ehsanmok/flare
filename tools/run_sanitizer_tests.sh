@@ -223,6 +223,11 @@ ASAN_TESTS=(
   # ASan validates the pending-chunk Dict churn + the trimmed/borrowed
   # Span feeds across out-of-order / duplicate / overlapping chunks.
   "tests/h3/test_h3_client_reasm.mojo"
+  # H3C follow-up -- live HttpClient h3 dial over loopback QUIC (fork).
+  # ASan validates the AltSvcStore interior-mut heap lifetime, the
+  # per-request QuicClientConnection + H3ClientConnection allocation,
+  # and the H3Response -> Response lowering across the dial path.
+  "tests/http/test_h3_live_dial.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)

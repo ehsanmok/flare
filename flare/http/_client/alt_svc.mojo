@@ -35,7 +35,7 @@ References:
 
 from std.collections import Dict, List, Optional
 from std.ffi import c_int, external_call
-from std.memory import alloc
+from std.memory import UnsafePointer, alloc
 
 from flare.http.proto.ascii import ascii_lower
 
@@ -246,6 +246,110 @@ struct AltSvcCache(Copyable, Movable):
     def has_fresh_h3(self, origin: String, now_s: UInt64) -> Bool:
         """Whether ``origin`` has a cached, unexpired h3 advert."""
         return Bool(self.h3_endpoint(origin, now_s))
+
+
+# ── Interior-mutable store handle ────────────────────────────────────────────
+
+
+@fieldwise_init
+struct _AltSvcState(Movable):
+    """Heap-allocated mutable state behind an :class:`AltSvcStore`.
+
+    A thin wrapper over the pure :class:`AltSvcCache` value so the
+    cache can be mutated through a ``read self`` handle (the
+    ``HttpClient.send`` / ``get`` / ``post`` surface stays
+    read-``self`` while still auto-recording ``Alt-Svc`` headers).
+    """
+
+    var cache: AltSvcCache
+
+
+struct AltSvcStore(Copyable, Movable):
+    """Pointer-backed, interior-mutable ``Alt-Svc`` cache handle.
+
+    Mirrors :class:`flare.http.client_pool.ClientPool`: the struct is
+    a thin ``Copyable`` handle over the heap address of an
+    :class:`_AltSvcState`; every access re-materialises a typed
+    pointer so the cache can be recorded into from a read-``self``
+    request path (transparent ``Alt-Svc`` discovery without forcing
+    ``mut self`` onto ``get`` / ``post`` / ``send``).
+
+    The owner (an :class:`HttpClient`) eagerly allocates via
+    :meth:`new` and frees via :meth:`free` in ``__del__``. The empty
+    handle (:meth:`disabled`, ``_addr == 0``) is the moved-from /
+    never-allocated state: every method is a no-op on it.
+
+    ponytail: allocated eagerly (one empty ``Dict``) rather than lazily
+    on first record. Lazy alloc is impossible through a read-``self``
+    handle (it would have to flip ``_addr``), and auto-record must work
+    by default so a non-``prefer_h3`` client still upgrades after seeing
+    an ``Alt-Svc`` header. The empty-cache cost is negligible.
+    """
+
+    var _addr: Int
+    """Heap address of the :class:`_AltSvcState`. ``0`` == empty."""
+
+    @staticmethod
+    def disabled() -> AltSvcStore:
+        """The no-op handle (``_addr == 0``)."""
+        return AltSvcStore(0)
+
+    @staticmethod
+    def new() -> AltSvcStore:
+        """Allocate a fresh, empty store."""
+        var p = alloc[_AltSvcState](1)
+        p.init_pointee_move(_AltSvcState(AltSvcCache()))
+        return AltSvcStore(Int(p))
+
+    @always_inline
+    def __init__(out self, addr: Int):
+        self._addr = addr
+
+    @always_inline
+    def enabled(read self) -> Bool:
+        """Return ``True`` when the store is allocated."""
+        return self._addr != 0
+
+    def _state(read self) -> UnsafePointer[_AltSvcState, MutUntrackedOrigin]:
+        """Re-materialise a typed pointer from :attr:`_addr` (mirrors
+        the :class:`ClientPool._state` pattern)."""
+        return UnsafePointer[UInt8, MutUntrackedOrigin](
+            unsafe_from_address=self._addr
+        ).bitcast[_AltSvcState]()
+
+    def record(
+        read self, origin: String, header_value: String, now_s: UInt64
+    ) raises:
+        """Record an origin's ``Alt-Svc`` header into the cache.
+        No-op on the empty handle."""
+        if not self.enabled():
+            return
+        self._state()[].cache.record(origin, header_value, now_s)
+
+    def has_fresh_h3(read self, origin: String, now_s: UInt64) -> Bool:
+        """Whether ``origin`` has a cached, unexpired h3 advert.
+        ``False`` on the empty handle."""
+        if not self.enabled():
+            return False
+        return self._state()[].cache.has_fresh_h3(origin, now_s)
+
+    def h3_endpoint(
+        read self, origin: String, now_s: UInt64
+    ) -> Optional[Tuple[String, UInt16]]:
+        """The cached ``(host, port)`` h3 endpoint for ``origin`` if
+        fresh, else ``None`` (also ``None`` on the empty handle)."""
+        if not self.enabled():
+            return None
+        return self._state()[].cache.h3_endpoint(origin, now_s)
+
+    def free(mut self) raises -> None:
+        """Destroy + free the heap state. Idempotent on ``_addr == 0``."""
+        if self._addr == 0:
+            return
+        var sp = self._state()
+        sp.destroy_pointee()
+        sp.free()
+        self._addr = 0
 
 
 def _origin_host(origin: String) -> String:

@@ -51,6 +51,11 @@ from ..net import SocketAddr
 from ..dns import resolve
 
 from ..http2.client import Http2ClientConnection
+from ..quic.client import QuicClientConnection
+from ..h3.client import H3ClientConnection
+from ..tls.rustls_quic import RustlsQuicConnector
+from ..qpack import QpackHeader
+from std.os import getenv
 from .client_pool import ClientPool
 from ._client.parse import (
     _decode_chunked,
@@ -67,7 +72,7 @@ from ._client.h2_send import (
     _send_h2c_via_upgrade,
 )
 from ._client.alt_svc import (
-    AltSvcCache,
+    AltSvcStore,
     H3WireChoice,
     decide_h3_wire,
     monotonic_now_s,
@@ -152,11 +157,14 @@ struct HttpClient(Movable):
     is computed by :func:`flare.http._client.alt_svc.decide_h3_wire`
     in :meth:`h3_wire_choice`; the runtime dial falls back to the
     h2/h1 path on any QUIC failure (transparent policy)."""
-    var _alt_svc: AltSvcCache
-    """Per-origin ``Alt-Svc`` (RFC 7838) discovery cache. Populated
-    from response ``Alt-Svc`` headers via :meth:`record_alt_svc`;
-    consulted by :meth:`h3_wire_choice` so an origin that advertised
-    an h3 endpoint upgrades transparently on the next request."""
+    var _alt_svc: AltSvcStore
+    """Per-origin ``Alt-Svc`` (RFC 7838) discovery cache, behind a
+    pointer-backed interior-mutable handle so a read-``self`` request
+    path can auto-record headers. Populated from response ``Alt-Svc``
+    headers in :meth:`send` (and via :meth:`record_alt_svc`); consulted
+    by :meth:`h3_wire_choice` so an origin that advertised an h3
+    endpoint upgrades transparently on the next request. Freed in
+    :meth:`__del__`."""
 
     def __init__(
         out self,
@@ -193,7 +201,7 @@ struct HttpClient(Movable):
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
-        self._alt_svc = AltSvcCache.new()
+        self._alt_svc = AltSvcStore.new()
 
     def __init__(
         out self,
@@ -216,7 +224,7 @@ struct HttpClient(Movable):
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
-        self._alt_svc = AltSvcCache.new()
+        self._alt_svc = AltSvcStore.new()
 
     def __init__[
         A: Auth
@@ -243,7 +251,7 @@ struct HttpClient(Movable):
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
-        self._alt_svc = AltSvcCache.new()
+        self._alt_svc = AltSvcStore.new()
 
     def __init__[
         A: Auth
@@ -270,17 +278,23 @@ struct HttpClient(Movable):
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
         self._prefer_h3 = False
-        self._alt_svc = AltSvcCache.new()
+        self._alt_svc = AltSvcStore.new()
 
     def __del__(deinit self):
-        """Free any pooled fds owned by this client.
+        """Free the pooled fds + the ``Alt-Svc`` store owned by this
+        client.
 
-        Idempotent on a moved-from client (``_pool._addr == 0``).
-        Single-owner: copies are never produced for ``HttpClient``
-        because the type is :trait:`Movable` only, so the
-        ``ClientPool`` heap state is freed exactly once."""
+        Idempotent on a moved-from client (``_pool._addr == 0`` /
+        ``_alt_svc._addr == 0``). Single-owner: copies are never
+        produced for ``HttpClient`` because the type is
+        :trait:`Movable` only, so each heap state is freed exactly
+        once."""
         try:
             self._pool.free()
+        except:
+            pass
+        try:
+            self._alt_svc.free()
         except:
             pass
 
@@ -353,13 +367,16 @@ struct HttpClient(Movable):
         self._prefer_h3 = enabled
         return self^
 
-    def record_alt_svc(mut self, origin: String, alt_svc_header: String) raises:
+    def record_alt_svc(self, origin: String, alt_svc_header: String) raises:
         """Record an origin's ``Alt-Svc`` response header (RFC 7838)
         into the discovery cache.
 
-        ``origin`` is the ``host:port`` the response came from;
-        ``alt_svc_header`` is the raw header value. A later request
-        to the same origin then sees a fresh h3 advert via
+        Reads ``self`` (the cache is interior-mutable behind the
+        :class:`AltSvcStore` handle), so it composes with the
+        read-``self`` request surface and the transparent auto-record
+        in :meth:`send`. ``origin`` is the ``host:port`` the response
+        came from; ``alt_svc_header`` is the raw header value. A later
+        request to the same origin then sees a fresh h3 advert via
         :meth:`h3_wire_choice`. A ``clear`` token evicts the cached
         entry. Non-h3 adverts are ignored."""
         self._alt_svc.record(origin, alt_svc_header, monotonic_now_s())
@@ -383,6 +400,94 @@ struct HttpClient(Movable):
             available,
             quic_supported=True,
         )
+
+    def _resolve_quic_ca_pem(self) raises -> String:
+        """Return the trusted-roots PEM bundle (contents) for the
+        QUIC connector.
+
+        The rustls QUIC shim ships no built-in roots, so a concrete
+        PEM is required (unlike the OpenSSL h1/h2 path, which can
+        route an empty ``ca_bundle`` to the system default). Resolution:
+
+        1. an explicit :attr:`TlsConfig.ca_bundle` path, else
+        2. the pixi-managed ``$CONDA_PREFIX/ssl/cacert.pem`` that the
+           ``ca-certificates`` dependency installs.
+
+        The ``$CONDA_PREFIX`` path is assembled with ``String("") +=``
+        accumulation rather than the ``+`` concat operator to avoid
+        the Mojo ``getenv`` + literal aliasing bug documented in
+        :mod:`flare.tls.config`.
+        """
+        if self._config.ca_bundle.byte_length() > 0:
+            with open(self._config.ca_bundle, "r") as f:
+                return f.read()
+        var prefix = getenv("CONDA_PREFIX", "")
+        if prefix == "":
+            raise Error(
+                "h3: no CA bundle -- set TlsConfig.ca_bundle or run inside"
+                " the pixi env that provides $CONDA_PREFIX/ssl/cacert.pem"
+            )
+        var path = String("")
+        path += prefix
+        path += "/ssl/cacert.pem"
+        with open(path, "r") as f:
+            return f.read()
+
+    def _send_h3(
+        self,
+        u: Url,
+        method: String,
+        extra_headers: HeaderMap,
+        body: List[UInt8],
+    ) raises -> Response:
+        """Dial HTTP/3 over QUIC for one ``https://`` request and
+        lower the result to a :class:`Response`.
+
+        Resolves the host, opens a fresh
+        :class:`QuicClientConnection` (blocking handshake -- the peer
+        is remote), drives one request/response through
+        :class:`H3ClientConnection`, and converts the
+        :class:`flare.h3.response_reader.H3Response` into the same
+        :class:`Response` the h2/h1 paths return so the caller can't
+        tell which wire was used. Raises on any QUIC/h3 failure; the
+        caller (:meth:`_do_request`) treats that as a transparent
+        fallback to h2/h1.
+
+        ponytail: one QUIC connection per request (no reuse yet). The
+        h3 connection-reuse / pooling work is the post-v0.9 roadmap
+        item; the dial cost here is the handshake-per-request ceiling.
+        """
+        var addrs = resolve(u.host)
+        var peer = SocketAddr(addrs[0], u.port)
+        var alpn = List[String]()
+        alpn.append("h3")
+        var connector = RustlsQuicConnector(self._resolve_quic_ca_pem(), alpn^)
+        var quic = QuicClientConnection.connect(peer, connector, u.host)
+        var h3 = H3ClientConnection(quic^)
+
+        var headers = List[QpackHeader]()
+        headers.append(QpackHeader("user-agent", self._user_agent))
+        if self._auth_header.byte_length() > 0:
+            headers.append(QpackHeader("authorization", self._auth_header))
+        for i in range(extra_headers.len()):
+            var k = extra_headers._keys[i]
+            var kl = k.lower()
+            if kl == "host":
+                continue  # :authority carries the host in h3
+            if kl == "authorization" and self._auth_header.byte_length() > 0:
+                continue  # stored auth wins, matching the h1/h2 paths
+            headers.append(QpackHeader(kl, extra_headers._values[i]))
+
+        var authority = u.host
+        if u.port != 443:
+            authority = authority + ":" + String(Int(u.port))
+        var hr = h3.fetch(
+            method, "https", authority, u.request_target(), headers, body
+        )
+        var resp = Response(hr.status, "", hr.body.copy())
+        for i in range(len(hr.headers)):
+            resp.headers.set(hr.headers[i].name, hr.headers[i].value)
+        return resp^
 
     # ── Context manager ───────────────────────────────────────────────────────
 
@@ -699,6 +804,19 @@ struct HttpClient(Movable):
         while True:
             var resp = self._do_request(method, current_url, req.headers, body)
 
+            # Transparent Alt-Svc discovery (RFC 7838): record any
+            # advertised h3 endpoint so the NEXT request to this origin
+            # upgrades to HTTP/3 via h3_wire_choice. No-op when the
+            # header is absent or carries no h3 advert.
+            var alt_svc = resp.headers.get("Alt-Svc")
+            if alt_svc.byte_length() > 0:
+                try:
+                    var pu = Url.parse(current_url)
+                    var origin = pu.host + ":" + String(Int(pu.port))
+                    self._alt_svc.record(origin, alt_svc, monotonic_now_s())
+                except:
+                    pass  # malformed header / parse error: ignore
+
             if resp.is_redirect() and redirects < self._max_redirects:
                 var location = resp.headers.get("Location")
                 if location.byte_length() == 0:
@@ -808,6 +926,18 @@ struct HttpClient(Movable):
 
         # ── Connect and send ───────────────────────────────────────────────
         if u.is_tls():
+            # HTTP/3 first when the policy says so (prefer_h3 or a
+            # fresh cached Alt-Svc advert). Any QUIC/h3 failure falls
+            # through transparently to the proven h2/h1 TLS path, so
+            # the worst case is exactly the prior behaviour.
+            if (
+                self.h3_wire_choice("https", u.host, u.port)
+                == H3WireChoice.HTTP_3
+            ):
+                try:
+                    return self._send_h3(u, method, extra_headers, body)
+                except:
+                    pass  # transparent fallback to h2/h1
             # Always advertise ALPN ``["h2", "http/1.1"]`` on the
             # TLS ClientHello so the server can pick HTTP/2 if it
             # supports it. The user-visible API is unchanged: if
