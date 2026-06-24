@@ -708,7 +708,14 @@ struct HttpServer(Movable):
                 self._stopping,
             )
 
-    def serve_streaming[H: StreamHandler](mut self, var handler: H) raises:
+    def serve_streaming[
+        H: StreamHandler
+    ](
+        mut self,
+        var handler: H,
+        max_in_flight: Int = 0,
+        retry_after_s: Int = 1,
+    ) raises:
         """Run the single-threaded streaming reactor loop (v0.9 A2).
 
         The typed-streaming counterpart of ``serve``: instead of a
@@ -725,6 +732,11 @@ struct HttpServer(Movable):
         Args:
             handler: The streaming front (ownership transferred). One
                 instance services every connection.
+            max_in_flight: Admission cap (B4); ``0`` (default) = unlimited.
+                When the live-connection count is at the cap, a new
+                connection is refused with a 503 + ``Retry-After`` instead
+                of hanging in the accept backlog.
+            retry_after_s: ``Retry-After`` seconds advertised in the 503.
 
         Raises:
             NetworkError: On fatal listener / reactor errors;
@@ -738,7 +750,13 @@ struct HttpServer(Movable):
                 " with HttpServer.bind (not bind_many)."
             )
         self._stopping = False
-        run_stream_reactor_loop(self._listener, handler, self._stopping)
+        run_stream_reactor_loop(
+            self._listener,
+            handler,
+            self._stopping,
+            max_in_flight=max_in_flight,
+            retry_after_s=retry_after_s,
+        )
 
     def serve[
         H: Handler & Copyable

@@ -79,6 +79,11 @@ ASAN_TESTS=(
   # relay-buffer compaction under throttled draining and the upstream
   # interest toggle path.
   "tests/http/test_backpressure.mojo"
+  # v0.9 B4 — admission cap: a forked server with max_in_flight refuses
+  # the over-capacity connection with a 503 + Retry-After and recovers
+  # as slots free. ASan validates the accept-edge shed path (canned
+  # response build + socket teardown) and the live-conn table.
+  "tests/http/test_admission.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf

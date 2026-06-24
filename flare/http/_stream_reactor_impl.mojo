@@ -51,6 +51,23 @@ from .cancel import CancelReason
 from .streaming_server import StreamConn, StreamHandler
 
 
+def _shed_503_bytes(retry_after_s: Int) -> List[UInt8]:
+    """Canned ``503 Service Unavailable`` with ``Retry-After`` and
+    ``Connection: close`` -- the graceful overload signal sent to a
+    connection refused by the admission cap (B4). Fixed/sanitized: no
+    request-derived bytes, so it is safe to emit before ``on_open``."""
+    var ra = retry_after_s if retry_after_s >= 0 else 0
+    var s = String("HTTP/1.1 503 Service Unavailable\r\n")
+    s += "Retry-After: " + String(ra) + "\r\n"
+    s += "Content-Length: 0\r\n"
+    s += "Connection: close\r\n\r\n"
+    var bytes = s.as_bytes()
+    var out = List[UInt8](capacity=len(bytes))
+    for i in range(len(bytes)):
+        out.append(bytes[i])
+    return out^
+
+
 @always_inline
 def _desired_interest(conn: StreamConn) -> Int:
     """Interest bits for an open connection: always READ (to see peer
@@ -170,6 +187,8 @@ def run_stream_reactor_loop[
     mut handler: H,
     ref stopping: Bool,
     poll_timeout_ms: Int = 100,
+    max_in_flight: Int = 0,
+    retry_after_s: Int = 1,
 ) raises:
     """Run the streaming reactor loop until ``stopping`` flips.
 
@@ -181,6 +200,16 @@ def run_stream_reactor_loop[
         stopping: External stop flag, checked each iteration.
         poll_timeout_ms: Reactor poll timeout; bounds how often
             ``stopping`` is re-checked when idle.
+        max_in_flight: Admission cap (B4). ``0`` = unlimited. When the
+            live-connection count is at the cap, a newly accepted
+            connection is refused with a canned 503 + ``Retry-After``
+            (``on_open`` is never called for it) instead of leaning on the
+            accept backlog -- a deliberate overload policy with a graceful
+            client signal. Unlike the synchronous request/response path
+            (where ``serve`` runs one at a time so in-flight is always 1),
+            the streaming reactor holds many connections concurrently, so
+            this cap is meaningful and enforced at the accept edge.
+        retry_after_s: ``Retry-After`` seconds advertised in the 503.
     """
     listener._socket.set_nonblocking(True)
     var listen_fd = Int(listener._socket.fd)
@@ -212,6 +241,18 @@ def run_stream_reactor_loop[
                         client = accept_fd(c_int(listen_fd))
                     except:
                         break  # EAGAIN / no more pending this round
+                    # Admission cap (B4): refuse over-capacity connections
+                    # with a 503 + Retry-After on the still-blocking socket
+                    # before any on_open work, then drop (close). Counted
+                    # for observability.
+                    if max_in_flight > 0 and len(conns) >= max_in_flight:
+                        try:
+                            client.write_all(
+                                Span[UInt8, _](_shed_503_bytes(retry_after_s))
+                            )
+                        except:
+                            pass
+                        continue  # client drops here -> socket closed
                     try:
                         client._socket.set_nonblocking(True)
                     except:
