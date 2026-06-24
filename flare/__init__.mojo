@@ -101,8 +101,9 @@ flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  ``encode_*(payload, mut out: List[UInt8])`` writers,
                  RFC 9000 §18 transport parameters, and RFC 9000 §3 /
                  §13 connection + stream state machines, plus the live
-                 ``QuicListener`` UDP reactor and the rustls QUIC TLS
-                 drive that carry HTTP/3 end-to-end
+                 ``QuicListener`` UDP reactor, the ``QuicClientConnection``
+                 client driver, and the rustls QUIC TLS drive that
+                 carry HTTP/3 end-to-end
 flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  request-stream reader (``H3RequestReader`` +
                  ``H3RequestEventHandler`` + ``feed_into[H]`` --
@@ -110,7 +111,9 @@ flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  callbacks), response-stream writer with QPACK-
                  encoded field sections and the ``mut out:
                  List[UInt8]`` buffer-reuse contract (RFC 9114 §4 +
-                 §7)
+                 §7), plus the client side: ``H3ClientConnection``
+                 (request writer + response reader over the QUIC
+                 client driver) for end-to-end HTTP/3 requests
 flare.qpack    - Sans-I/O static-only QPACK encoder / decoder for
                  HTTP/3 field sections (RFC 9204 Appendix A static
                  table + literal + Huffman, shared with HPACK)

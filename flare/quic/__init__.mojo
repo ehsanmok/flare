@@ -204,6 +204,7 @@ from .timers import (
     encode_timer_token,
     timer_kind_name,
 )
+from .client import QuicClientConnection
 from .server import (
     ConnectionIdTable,
     QuicConnection,
