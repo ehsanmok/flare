@@ -36,6 +36,11 @@ Public surface:
 - :func:`accept_uds_fd` — accept on a borrowed listener fd
   (multi-worker scheduler hand-off path; mirrors
   :func:`flare.tcp.accept_fd`).
+- :class:`FrameMux` — multiplexed framed transport over one
+  ``UnixStream`` (v0.9 B3): many logical streams demuxed by
+  ``request_id``, with :class:`FrameDemux` / :class:`Frame` /
+  :class:`FrameKind` and the pure :func:`encode_frame` /
+  :func:`decode_frame` codec.
 
 Example:
 
@@ -59,5 +64,13 @@ Out of scope today:
   POSIX shim layer, no Mach involvement.
 """
 
+from .frame_mux import (
+    Frame,
+    FrameDemux,
+    FrameKind,
+    FrameMux,
+    decode_frame,
+    encode_frame,
+)
 from .listener import UnixListener, accept_uds_fd
 from .stream import UnixStream

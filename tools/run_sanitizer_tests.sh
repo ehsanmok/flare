@@ -64,6 +64,11 @@ ASAN_TESTS=(
   # pipe upstream + reactor upstream-fd register/route/unregister).
   # ASan validates the parent-side client path and upstream teardown.
   "tests/http/test_streaming_upstream.mojo"
+  # v0.9 B3 — FrameMux codec + FrameDemux reassembly + 1k-stream
+  # loopback over one forked UnixStream. ASan validates the contiguous
+  # reassembly buffer (compaction + sub-span decode) and the payload
+  # copies on the parent client path.
+  "tests/uds/test_frame_mux.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf
