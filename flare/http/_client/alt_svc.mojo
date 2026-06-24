@@ -34,8 +34,30 @@ References:
 """
 
 from std.collections import Dict, List, Optional
+from std.ffi import c_int, external_call
+from std.memory import alloc
 
 from flare.http.proto.ascii import ascii_lower
+
+
+def monotonic_now_s() -> UInt64:
+    """Return ``CLOCK_MONOTONIC`` whole seconds for Alt-Svc expiry
+    bookkeeping. Monotonic (not wall-clock) is correct here: the
+    cache only ever compares ``now`` against a previously stored
+    ``now + max_age``, so a steadily increasing clock is all that is
+    required and it is immune to wall-clock jumps. Falls back to 0
+    on FFI failure (every entry then reads as fresh, which is
+    conservative)."""
+    var ts_buf = alloc[Int](2)
+    ts_buf[0] = 0
+    ts_buf[1] = 0
+    var rc = external_call["clock_gettime", c_int](c_int(1), ts_buf)
+    if Int(rc) != 0:
+        ts_buf.free()
+        return UInt64(0)
+    var sec = ts_buf[0]
+    ts_buf.free()
+    return UInt64(sec)
 
 
 @fieldwise_init

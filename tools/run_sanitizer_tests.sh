@@ -78,6 +78,10 @@ ASAN_TESTS=(
   # work, but ASan validates the StringSlice byte-slicing borrows in
   # the lenient parser and the Dict record/evict churn in the cache.
   "tests/http/test_alt_svc.mojo"
+  # H3C-3 -- HttpClient h3 policy surface (prefer_h3 + Alt-Svc
+  # record/consult + decision). ASan validates the AltSvcCache field
+  # embedded in the moved HttpClient + the clock FFI buffer.
+  "tests/http/test_client_h3_policy.mojo"
   # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
   # counter checks, plus a forked slow-client soak. ASan validates the
   # relay-buffer compaction under throttled draining and the upstream

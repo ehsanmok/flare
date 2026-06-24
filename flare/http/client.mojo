@@ -66,6 +66,12 @@ from ._client.h2_send import (
     _send_h2_over_tls,
     _send_h2c_via_upgrade,
 )
+from ._client.alt_svc import (
+    AltSvcCache,
+    H3WireChoice,
+    decide_h3_wire,
+    monotonic_now_s,
+)
 from ..net.socket import RawSocket
 from ..net._libc import (
     AF_INET,
@@ -139,6 +145,18 @@ struct HttpClient(Movable):
     cleartext ``http://`` requests reuse pooled fds today;
     ``https://`` always full-handshakes (the TLS-resumption work
     in Commit 04 keeps that handshake cheap)."""
+    var _prefer_h3: Bool
+    """When ``True`` the client prefers HTTP/3 over QUIC for
+    ``https://`` requests (RFC 9114). Defaults to ``False`` so the
+    client keeps its h2/h1 ALPN behaviour unchanged. The decision
+    is computed by :func:`flare.http._client.alt_svc.decide_h3_wire`
+    in :meth:`h3_wire_choice`; the runtime dial falls back to the
+    h2/h1 path on any QUIC failure (transparent policy)."""
+    var _alt_svc: AltSvcCache
+    """Per-origin ``Alt-Svc`` (RFC 7838) discovery cache. Populated
+    from response ``Alt-Svc`` headers via :meth:`record_alt_svc`;
+    consulted by :meth:`h3_wire_choice` so an origin that advertised
+    an h3 endpoint upgrades transparently on the next request."""
 
     def __init__(
         out self,
@@ -174,6 +192,8 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
+        self._prefer_h3 = False
+        self._alt_svc = AltSvcCache.new()
 
     def __init__(
         out self,
@@ -195,6 +215,8 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
+        self._prefer_h3 = False
+        self._alt_svc = AltSvcCache.new()
 
     def __init__[
         A: Auth
@@ -220,6 +242,8 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
+        self._prefer_h3 = False
+        self._alt_svc = AltSvcCache.new()
 
     def __init__[
         A: Auth
@@ -245,6 +269,8 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
+        self._prefer_h3 = False
+        self._alt_svc = AltSvcCache.new()
 
     def __del__(deinit self):
         """Free any pooled fds owned by this client.
@@ -308,6 +334,55 @@ struct HttpClient(Movable):
         the pool. Returns 0 when pooling is disabled.
         """
         return self._pool.total_idle()
+
+    def with_prefer_h3(var self, enabled: Bool = True) -> HttpClient:
+        """Opt this client into HTTP/3 (move-in / move-out so it
+        chains off the constructor like :meth:`with_pool`).
+
+        When enabled, ``https://`` requests prefer h3 over QUIC; the
+        decision still flows through :meth:`h3_wire_choice` and any
+        QUIC dial failure falls back transparently to the existing
+        h2/h1 path.
+
+        Example:
+            ```mojo
+            with HttpClient("https://example.com").with_prefer_h3() as c:
+                _ = c.get("/")
+            ```
+        """
+        self._prefer_h3 = enabled
+        return self^
+
+    def record_alt_svc(mut self, origin: String, alt_svc_header: String) raises:
+        """Record an origin's ``Alt-Svc`` response header (RFC 7838)
+        into the discovery cache.
+
+        ``origin`` is the ``host:port`` the response came from;
+        ``alt_svc_header`` is the raw header value. A later request
+        to the same origin then sees a fresh h3 advert via
+        :meth:`h3_wire_choice`. A ``clear`` token evicts the cached
+        entry. Non-h3 adverts are ignored."""
+        self._alt_svc.record(origin, alt_svc_header, monotonic_now_s())
+
+    def h3_wire_choice(self, scheme: String, host: String, port: UInt16) -> Int:
+        """The transparent h3-vs-h2 decision for one request.
+
+        Consults the ``prefer_h3`` knob + the per-origin ``Alt-Svc``
+        cache and returns an
+        :class:`flare.http._client.alt_svc.H3WireChoice` codepoint
+        (``HTTP_3`` or ``HTTP_2_OR_LOWER``). QUIC support is compiled
+        in, so the only gates are the scheme (``https`` only) and
+        whether h3 is preferred or freshly advertised. The runtime
+        send path falls back to h2/h1 on any QUIC dial failure
+        regardless of this result."""
+        var origin = host + ":" + String(Int(port))
+        var available = self._alt_svc.has_fresh_h3(origin, monotonic_now_s())
+        return decide_h3_wire(
+            scheme,
+            self._prefer_h3,
+            available,
+            quic_supported=True,
+        )
 
     # ── Context manager ───────────────────────────────────────────────────────
 
