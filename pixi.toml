@@ -368,6 +368,7 @@ test-h3-uni-streams       = "mojo -I . tests/h3/test_h3_uni_streams.mojo"     # 
 test-conformance-h3-server = "mojo -I . tests/conformance/test_conformance_h3_server.mojo" # Track Q4-W commit 3/3 -- H3 server wire-shape conformance (7 cases)
 test-http-server-with-h3   = "mojo -I . tests/http/test_http_server_with_h3.mojo" # Track Q5-W commit 1/2 -- HttpServer.bind_with_h3 + ALPN routing (10 cases)
 test-alpn-dispatch        = "mojo -I . tests/http/test_alpn_dispatch.mojo"    # ALPN -> wire-protocol dispatcher decisions (~11 cases)
+test-alt-svc              = "mojo -I . tests/http/test_alt_svc.mojo"          # H3C-3 -- RFC 7838 Alt-Svc parser + per-origin cache + h3 wire policy (10 cases)
 test-ws-autoclient        = "mojo -I . tests/ws/test_ws_autoclient.mojo"      # ALPN-driven WS wire dispatcher decision matrix (~13 cases)
 test-ws-autoclient-loopback = "mojo -I . tests/ws/test_ws_autoclient_loopback.mojo"  # WsAutoClient I/O round-trip vs forked WsServer (4 cases)
 example-alpn-dispatch-demo    = "mojo -I . examples/advanced/alpn_dispatch_demo.mojo"

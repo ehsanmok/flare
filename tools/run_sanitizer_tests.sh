@@ -74,6 +74,10 @@ ASAN_TESTS=(
   # (serve_streaming relay). ASan validates the non-blocking recv +
   # FrameDemux drain and the per-connection source teardown.
   "tests/http/test_async_chunk_source.mojo"
+  # H3C-3 -- Alt-Svc parser + per-origin cache. Pure String/Dict
+  # work, but ASan validates the StringSlice byte-slicing borrows in
+  # the lenient parser and the Dict record/evict churn in the cache.
+  "tests/http/test_alt_svc.mojo"
   # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
   # counter checks, plus a forked slow-client soak. ASan validates the
   # relay-buffer compaction under throttled draining and the upstream
