@@ -76,8 +76,10 @@ flare.http     - HTTP/1.1 client + reactor server + Router /
                  Cors / Retry / PostHocDeadline / Conditional) + FileServer +
                  forms + cookies + sessions + content-encoding + SSE
                  + template engine with {% block %} / {% extends %}
-                 inheritance + sans-I/O parser sublayer under
-                 flare.http.proto.*
+                 inheritance + serve_streaming streaming-proxy surface
+                 (StreamHandler / StreamConn, UpstreamChunkSource,
+                 watermark backpressure, admission control) + sans-I/O
+                 parser sublayer under flare.http.proto.*
 flare.http.cache - RFC 9111 cache primitives (CacheControl directive
                  parser, CacheKey, InMemoryCacheStore)
 flare.grpc     - gRPC primitives on flare.http2: LPM message framing,
@@ -116,7 +118,9 @@ flare.crypto   - HMAC-SHA256, base64url
 flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server, ALPN, session resumption)
 flare.tcp      - TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      - UdpSocket (IPv4 + IPv6)
-flare.uds      - UnixListener + UnixStream (AF_UNIX sidecar IPC)
+flare.uds      - UnixListener + UnixStream (AF_UNIX sidecar IPC);
+                 FrameMux / FrameDemux multiplex logical streams over
+                 one UnixStream (encode_frame / decode_frame)
 flare.dns      - getaddrinfo (dual-stack)
 flare.net      - IpAddr, SocketAddr, RawSocket
 flare.runtime  - Reactor (kqueue / epoll, opt-in io_uring on Linux),

@@ -29,7 +29,7 @@ def main() raises:
 ## Why flare
 
 - **Batteries included:** HTTP/1.1 + HTTP/2, WebSocket (RFC 6455 + permessage-deflate with context-takeover) with an ALPN-driven `WsAutoClient` that picks h1 vs RFC 8441 h2-tunnel, TLS 1.2/1.3 with ALPN + a wire-protocol dispatcher (`flare.http.alpn_dispatch`) for routing h1 / h2c / h2 / h3, signed cookies, sessions, multipart, gzip + brotli, CORS, static files, SSE, templates with `{% block %}` / `{% extends %}` inheritance, RFC 9111 HTTP cache (`Cache[Inner, S]` middleware over `InMemoryCacheStore`, conditional revalidation), gRPC sans-I/O codec primitives (LPM framing + Status + Metadata) with the unary server adapter on top, an OpenAPI 3.1 spec emitter, full HTTP/3 over QUIC (sans-I/O codec primitives plus the live `QuicListener` UDP reactor, `H3Connection` driver, and rustls QUIC binding carrying requests end-to-end -- see the [match-or-beat-quiche bench](#performance)), `Retry` + `PostHocDeadline` reliability middleware, mTLS, and the PROXY protocol all live in `flare/`. Full inventory in [`docs/features.md`](docs/features.md).
-- **Composable by types, not callbacks:** `Handler` is a trait. `Router`, middleware, and typed extractors (`PathInt`, `QueryInt`, `Form[T]`, `Json[T]`, `Cookies`) compose by nesting structs. The compiler monomorphises the handler chain into one direct call sequence per request type — no virtual dispatch through the chain.
+- **Composable by types, not callbacks:** `Handler` is a trait. `Router`, middleware, and typed extractors (`PathInt`, `QueryInt`, `Form[T]`, `Json[T]`, `Cookies`) compose by nesting structs. The compiler monomorphises the handler chain into one direct call sequence per request type - no virtual dispatch through the chain.
 - **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics. A `TestClient[H]` drives handlers in-process without binding a port for fast unit tests.
 - **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`). On a 4-worker plaintext bench, flare's handler path posts the best median p99 of the pack against `hyper` / `axum` / `actix_web`. [Numbers below.](#performance)
 - **Fuzzed:** 40 fuzz harnesses, 9M+ runs, zero known crashes. ASan and assert-mode coverage on every FFI boundary.
@@ -212,6 +212,37 @@ def main() raises:
 
 For the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, the multi-worker shared-listener mode (`HttpServer.serve(handler, num_workers=N)`), and the cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`), see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
 
+### Streaming proxy: relay an upstream with backpressure
+
+When the response body is produced elsewhere, for example a backend that streams chunks over a Unix socket, a `StreamHandler` relays it to the client with end-to-end backpressure. The framework owns the per-connection upstream: you hand it the source, it watches the fd, drains it, and closes it on teardown. Front code touches no file descriptors, no byte `Span`, and no per-connection table.
+
+```mojo
+from flare import HttpServer, StreamHandler, StreamConn, UpstreamChunkSource
+from flare.net import SocketAddr
+
+struct Proxy(Movable, StreamHandler):
+    var backend: String
+
+    def __init__(out self, backend: String):
+        self.backend = backend
+
+    def on_open(mut self, mut conn: StreamConn) raises:
+        conn.attach_upstream(UpstreamChunkSource.connect(self.backend))
+        conn.set_watermarks(hi=64 * 1024, lo=16 * 1024)
+
+    def on_upstream(mut self, mut conn: StreamConn) raises:
+        conn.relay_upstream()
+
+    def on_writable(mut self, mut conn: StreamConn) raises: pass
+    def on_close(mut self, mut conn: StreamConn) raises: pass
+
+def main() raises:
+    var srv = HttpServer.bind(SocketAddr.localhost(8080))
+    srv.serve_streaming(Proxy("/run/backend.sock"))
+```
+
+`set_watermarks` couples the two pipes: when the client falls behind and the relay buffer crosses the high mark, the reactor stops reading the upstream until it drains back to the low mark, so a slow consumer cannot force unbounded buffering. A client disconnect propagates a `CANCEL` upstream automatically. The runnable end-to-end version is [`examples/advanced/streaming_proxy.mojo`](examples/advanced/streaming_proxy.mojo).
+
 ## Performance
 
 TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), Linux x86_64 dev-box. Each row is the highest rate that survives the bench harness's sustainable-peak finder; latency cells are `median ± σ` over five 30 s measurement rounds at that rate. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` / `cargo build --release --locked`). Full methodology in [`docs/benchmark.md`](docs/benchmark.md#methodology).
@@ -238,14 +269,14 @@ The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 
 
 What jumps out:
 
-- **flare_mc (the handler path)** posts the best median p99 of the 4-worker pack at `2.63 ms`, edging hyper (`2.83 ms`) and matching axum (`2.80 ms`). The σ on flare_mc's tail (`17–50 ms` across the 5×30 s runs at p99 / p99.9 / p99.99) is larger than axum's flat σ but smaller than hyper's at p99.99 — one of five runs brushed the working-envelope edge while the other four landed clean. A `+1.1 %` throughput tightening over the previous baseline comes from eliminating a redundant UTF-8 validation pass on the H1 parser's ASCII artifacts (`Method` / `Path` / `Version` / header names + values are already RFC 7230-validated by the byte-level parser before string materialisation).
-- **flare_mc_static** still leads on req/s of the multi-worker pack that ships a fixed-response fast path (`247k req/s`, ~13 % under actix_web's new headline). Its p99 median is `2.68 ms` — tight when the harness lands inside the working envelope. The 664 ms σ at every tail percentile is the **honesty meter** firing: at this rate the fixed-response path occasionally tips off the saturation cliff, and the σ tells you that's where the next 10 % of throughput goes. Use this row when headline matters and the workload tolerates occasional tail expansion; use `flare_mc` when you want a uniformly tight tail under sustained load.
-- **actix_web** posts the highest headline of the pack (`253k req/s`) but its p99 median is `10.04 ms` and p99.99 is `37.41 ms` — the same cliff dynamic flare_mc_static shows, just at a higher rate. The σ on actix's p99 / p99.9 (`4.55 ms` / `4.31 ms`) is tight enough that this isn't measurement noise; it's a steady-state shape at that rate.
-- **axum** is the steadiest of the pack at `195k req/s` with `σ ≤ 0.02 ms` at every percentile — flat at the cost of being the lowest headline of the four. Use it as the reference for what an in-envelope p99 distribution looks like at this load.
-- **hyper** is the reference baseline — its current numbers (`216k req/s`, `2.83 ms` p99 median) move within `±0.5 %` of the prior measurement, so the same Rust binary under the same Linux kernel returns the same throughput run-over-run.
-- **flare 1w** is on par with nginx 1w. Both land within `2.8 %` of each other on req/s (`79.0k` vs `76.9k`) — the gap sits inside the combined `1σ` envelope of the two measurements (`±1.58k req/s`), and nginx itself drifted `-4.2 %` between the prior and current runs of the same binary. Median p99 is identical at `3.23 ms`. Statistically indistinguishable at single-core load. The prior measurement had flare at 89 % of nginx; the H1 parser tightening lands more aggressively at the single-worker shape (the workload runs on one core, so the ~5 % CPU reclaim from the UTF-8 bypass shows up as ~10 % throughput). Against Go `net/http` at the same worker count flare does `1.96x` the throughput with comparable tail medians.
+- **flare_mc (the handler path)** posts the best median p99 of the 4-worker pack at `2.63 ms`, edging hyper (`2.83 ms`) and matching axum (`2.80 ms`). The σ on flare_mc's tail (`17–50 ms` across the 5×30 s runs at p99 / p99.9 / p99.99) is larger than axum's flat σ but smaller than hyper's at p99.99 - one of five runs brushed the working-envelope edge while the other four landed clean. A `+1.1 %` throughput tightening over the previous baseline comes from eliminating a redundant UTF-8 validation pass on the H1 parser's ASCII artifacts (`Method` / `Path` / `Version` / header names + values are already RFC 7230-validated by the byte-level parser before string materialisation).
+- **flare_mc_static** still leads on req/s of the multi-worker pack that ships a fixed-response fast path (`247k req/s`, ~13 % under actix_web's new headline). Its p99 median is `2.68 ms` - tight when the harness lands inside the working envelope. The 664 ms σ at every tail percentile is the **honesty meter** firing: at this rate the fixed-response path occasionally tips off the saturation cliff, and the σ tells you that's where the next 10 % of throughput goes. Use this row when headline matters and the workload tolerates occasional tail expansion; use `flare_mc` when you want a uniformly tight tail under sustained load.
+- **actix_web** posts the highest headline of the pack (`253k req/s`) but its p99 median is `10.04 ms` and p99.99 is `37.41 ms` - the same cliff dynamic flare_mc_static shows, just at a higher rate. The σ on actix's p99 / p99.9 (`4.55 ms` / `4.31 ms`) is tight enough that this isn't measurement noise; it's a steady-state shape at that rate.
+- **axum** is the steadiest of the pack at `195k req/s` with `σ ≤ 0.02 ms` at every percentile - flat at the cost of being the lowest headline of the four. Use it as the reference for what an in-envelope p99 distribution looks like at this load.
+- **hyper** is the reference baseline - its current numbers (`216k req/s`, `2.83 ms` p99 median) move within `±0.5 %` of the prior measurement, so the same Rust binary under the same Linux kernel returns the same throughput run-over-run.
+- **flare 1w** is on par with nginx 1w. Both land within `2.8 %` of each other on req/s (`79.0k` vs `76.9k`) - the gap sits inside the combined `1σ` envelope of the two measurements (`±1.58k req/s`), and nginx itself drifted `-4.2 %` between the prior and current runs of the same binary. Median p99 is identical at `3.23 ms`. Statistically indistinguishable at single-core load. The prior measurement had flare at 89 % of nginx; the H1 parser tightening lands more aggressively at the single-worker shape (the workload runs on one core, so the ~5 % CPU reclaim from the UTF-8 bypass shows up as ~10 % throughput). Against Go `net/http` at the same worker count flare does `1.96x` the throughput with comparable tail medians.
 
-**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare h3 wire path landed in v0.8 — codec, AEAD, rustls QUIC binding, state machine, H3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare h3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite — eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders — not from new syscall batching (`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed without them). Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
+**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare h3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, H3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare h3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from new syscall batching (`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed without them). Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
 
 The matching nginx / hyper / actix_web / axum baselines built from source by the harness live under [`benchmark/baselines/`](benchmark/baselines/).
 
@@ -368,14 +399,14 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 | `format-check` / `format` | `default` / `dev` | `mojo format` over `flare`, `tests`, `benchmark`, `examples`, `fuzz` |
 | `docs` / `docs-build` | `dev` | mojodoc-rendered package docstring (live or static) |
 | `fuzz-all` | `fuzz` | Every harness in [`fuzz/`](fuzz/) (40 harnesses, 9M+ runs combined) |
-| `fuzz-<name>` / `prop-<name>` | `fuzz` | Single harness — see [`pixi.toml`](pixi.toml) for the full list |
+| `fuzz-<name>` / `prop-<name>` | `fuzz` | Single harness - see [`pixi.toml`](pixi.toml) for the full list |
 | `bench-vs-baseline-quick` | `bench` | flare vs Go `net/http`, throughput config (~7 min) |
 | `bench-vs-baseline` | `bench` | flare vs all baselines (Go, nginx, hyper, axum, actix_web), all configs |
 | `bench-tail-quick` | `bench` | Tail-percentile harness at the calibrated peak rate |
 | `bench-mixed-keepalive` | `bench` | Mixed keepalive / non-keepalive workload |
 | `bench-soak-{slow_clients,churn,mixed,smoke,extended}` | `bench` | 24 h soak harnesses for long-running operational gates |
 | `bench-tls-setup` | `bench` | Generate self-signed cert + key for the TLS benches |
-| `perf-server-alloc` | `dev` (Linux) | Repeatable allocation + CPU profile of the bench server (heaptrack + `strace -c` + `perf record`) — outputs land under `build/perf-profile/` |
+| `perf-server-alloc` | `dev` (Linux) | Repeatable allocation + CPU profile of the bench server (heaptrack + `strace -c` + `perf record`) - outputs land under `build/perf-profile/` |
 
 ```bash
 pixi run tests                                          # full suite + every example under examples/

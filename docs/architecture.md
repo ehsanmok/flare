@@ -72,6 +72,12 @@ flare.http     HTTP/1.1 client + reactor server + Handler / Router
                with parsed freshness on CacheEntry.is_fresh.
                Router is Copyable (refcounted struct-handler list)
                and resolves the multi-worker overload directly.
+               HttpServer.serve_streaming runs the streaming-proxy
+               surface: the StreamHandler trait + framework-owned
+               StreamConn (typed reactor context), reactor-integrated
+               AsyncChunkSource / UpstreamChunkSource, hi/lo watermark
+               backpressure, admission control (503 + Retry-After),
+               incremental inbound body, and coalesced small writes.
 flare.grpc     gRPC primitives on top of the HTTP/2 reactor.
                Wire codecs (length-prefixed message framing,
                canonical Status codes, Metadata carrier with
@@ -185,7 +191,10 @@ flare.tls      TLS 1.2/1.3 (OpenSSL); TlsAcceptor + ALPN +
                draft branch.
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
-flare.uds      UnixListener + UnixStream (AF_UNIX sidecar IPC)
+flare.uds      UnixListener + UnixStream (AF_UNIX sidecar IPC);
+               FrameMux / FrameDemux multiplex many logical streams
+               over one UnixStream (len / request_id / kind / payload
+               frames via encode_frame / decode_frame)
 flare.dns      getaddrinfo (dual-stack)
 flare.net      IpAddr, SocketAddr, RawSocket
 flare.runtime  Reactor (kqueue/epoll + EPOLLEXCLUSIVE), TimerWheel,
@@ -474,6 +483,9 @@ the reactor thread:
 | `Cancel` cell + `CancelHandler` | [`flare/http/cancel.mojo`](../flare/http/cancel.mojo) |
 | Server-side TLS | [`flare/tls/acceptor.mojo`](../flare/tls/acceptor.mojo) |
 | Streaming response bodies | [`flare/http/streaming_response.mojo`](../flare/http/streaming_response.mojo) |
+| Streaming-proxy server (`serve_streaming`, `StreamHandler`, `StreamConn`) | [`flare/http/streaming_server.mojo`](../flare/http/streaming_server.mojo) (loop in [`_stream_reactor_impl.mojo`](../flare/http/_stream_reactor_impl.mojo)) |
+| Reactor-integrated upstream sources | [`flare/http/async_body.mojo`](../flare/http/async_body.mojo) |
+| Multiplexed framed transport (`FrameMux`) | [`flare/uds/frame_mux.mojo`](../flare/uds/frame_mux.mojo) |
 | `block_in_pool` escape hatch | [`flare/runtime/blocking.mojo`](../flare/runtime/blocking.mojo) |
 
 If you want a one-page tour of each, the layered docstrings on the
