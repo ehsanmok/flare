@@ -64,13 +64,19 @@ def _do_acceptor_new(
     read cert_pem: List[UInt8],
     read key_pem: List[UInt8],
     read alpn_wire: List[UInt8],
+    max_early_data: UInt32,
 ) -> Int:
     """Call ``flare_rustls_quic_acceptor_new`` and return the
     ``Box<Acceptor>*`` as an ``Int``. Zero on failure (read
     :func:`_do_last_error` for the reason).
+
+    ``max_early_data`` (ABI 4) is the 0-RTT toggle: 0 leaves the
+    server 1-RTT-only (prior behavior); any non-zero value installs
+    a TLS1.3 ticketer and sets the RFC-9001 0xffffffff QUIC early-data
+    window on the rustls ServerConfig.
     """
     var f = lib.get_function[
-        def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int
+        def(Int, Int, Int, Int, Int, Int, UInt32) thin abi("C") -> Int
     ]("flare_rustls_quic_acceptor_new")
     return f(
         Int(cert_pem.unsafe_ptr()),
@@ -79,6 +85,7 @@ def _do_acceptor_new(
         len(key_pem),
         Int(alpn_wire.unsafe_ptr()),
         len(alpn_wire),
+        max_early_data,
     )
 
 
@@ -342,6 +349,36 @@ def _do_have_keys(read lib: OwnedDLHandle, session: Int, level: Int) -> Int:
         "flare_rustls_quic_have_keys"
     )
     return Int(f(session, c_int(level)))
+
+
+def _do_install_early_keys(read lib: OwnedDLHandle, session: Int) -> Int:
+    """``flare_rustls_quic_install_early_keys``: capture rustls's
+    0-RTT (EarlyData) ``DirectionalKeys`` into the session's slot.
+
+    Returns 1 if 0-RTT keys are available (resumed client / accepted
+    server), 0 if rustls has none for this connection, -1 on a NULL
+    session. After a ``1``, the EARLY_DATA (level 1) packet/header
+    thunks below encrypt/decrypt 0-RTT packets.
+    """
+    if session == 0:
+        return -1
+    var f = lib.get_function[def(Int) thin abi("C") -> c_int](
+        "flare_rustls_quic_install_early_keys"
+    )
+    return Int(f(session))
+
+
+def _do_is_early_data_accepted(read lib: OwnedDLHandle, session: Int) -> Int:
+    """``flare_rustls_quic_is_early_data_accepted``: 1 if the server
+    accepted the client's 0-RTT data, 0 if not (or not a resumed
+    client), -1 on a NULL session. Client-role only; the server
+    side always returns 0."""
+    if session == 0:
+        return -1
+    var f = lib.get_function[def(Int) thin abi("C") -> c_int](
+        "flare_rustls_quic_is_early_data_accepted"
+    )
+    return Int(f(session))
 
 
 def _do_packet_encrypt(

@@ -5,7 +5,7 @@ This test confirms that:
 1. ``libflare_rustls_quic.so`` is present in the expected location
    (next to ``libflare_tls.so`` under the canonical build root, or
    in ``$CONDA_PREFIX/lib`` after the activation script runs).
-2. The ABI-version thunk resolves and returns 3 (the crate version
+2. The ABI-version thunk resolves and returns 4 (the crate version
    the Mojo binding expects).
 3. The acceptor-new thunk rejects empty PEM input with a non-NULL
    "no CERTIFICATE blocks" error path through ``last_error``.
@@ -58,26 +58,30 @@ def _call_acceptor_new(
     alpn_len: Int,
 ) -> Int:
     """`read lib` wrapper for `flare_rustls_quic_acceptor_new`; see
-    `_call_abi_version` for why the borrow is required."""
+    `_call_abi_version` for why the borrow is required. The trailing
+    0 is the ABI-4 ``max_early_data`` arg (0 = 1-RTT only)."""
     var new_fn = lib.get_function[
-        def(Int, Int, Int, Int, Int, Int) thin abi("C") -> Int
+        def(Int, Int, Int, Int, Int, Int, UInt32) thin abi("C") -> Int
     ]("flare_rustls_quic_acceptor_new")
-    return new_fn(cert_ptr, cert_len, key_ptr, key_len, alpn_ptr, alpn_len)
+    return new_fn(
+        cert_ptr, cert_len, key_ptr, key_len, alpn_ptr, alpn_len, UInt32(0)
+    )
 
 
 def test_abi_version() raises:
-    # ABI v3 adds the client role on top of v2's surface: the
-    # acceptor/session/feed-crypto/take-crypto/ALPN thunks plus the
-    # KeyChange-driven per-level AEAD + header-protection thunks
-    # (v2), plus `flare_rustls_quic_connector_new` / `_free` and
-    # `flare_rustls_quic_connect` (v3, the HTTP/3 client binding).
-    # The activation script keys off this number, so a stale .so on
-    # a developer machine surfaces as a hard mismatch on
+    # ABI v4 adds 0-RTT early data + resumption on top of v3's client
+    # role: `flare_rustls_quic_install_early_keys` /
+    # `_is_early_data_accepted`, the connector's in-memory session
+    # store + `enable_early_data`, a server ticketer +
+    # `max_early_data_size` (new `max_early_data` arg on
+    # `acceptor_new`), and EarlyData-level (1) AEAD + header
+    # protection. The activation script keys off this number, so a
+    # stale .so on a developer machine surfaces as a hard mismatch on
     # `pixi install` rather than a silent run-time confusion.
     var path = _find_rustls_lib()
     var lib = OwnedDLHandle(path)
     var v = _call_abi_version(lib)
-    assert_equal(v, 3)
+    assert_equal(v, 4)
 
 
 def test_acceptor_new_rejects_empty_pem() raises:

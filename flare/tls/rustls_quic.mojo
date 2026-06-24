@@ -61,6 +61,8 @@ from ._rustls_quic_ffi import (
     _do_is_handshake_complete,
     _do_alpn,
     _do_have_keys,
+    _do_install_early_keys,
+    _do_is_early_data_accepted,
     _do_packet_encrypt,
     _do_packet_decrypt,
     _do_header_encrypt,
@@ -89,9 +91,12 @@ struct QuicEncryptionLevel:
     first client-hello flight."""
 
     comptime EARLY_DATA: Int = 1
-    """RFC 9001 §4.1 -- 0-RTT keys. Not implemented in this
-    cycle (see :data:`NotImplementedReason`); session resumption
-    + 0-RTT is a follow-up."""
+    """RFC 9001 §4.1 -- 0-RTT keys. Captured from rustls via
+    :meth:`RustlsQuicSession.install_early_keys` (which wraps
+    ``Connection::zero_rtt_keys()``) rather than the per-level
+    ``KeyChange`` pump; the AEAD + header-protection thunks accept
+    this level for the 0-RTT send/recv path on a resumed
+    connection."""
 
     comptime HANDSHAKE: Int = 2
     """RFC 9001 §4.1 -- handshake keys derived after the server
@@ -296,7 +301,13 @@ struct RustlsQuicAcceptor(Movable):
         # handle that the reactor surfaces via
         # ``RustlsQuicError`` (see ``accept()`` below).
         var alpn_wire = _encode_alpn_wire(config.alpn_protocols)
-        var handle = _do_acceptor_new(lib, cert_bytes, key_bytes, alpn_wire)
+        var handle = _do_acceptor_new(
+            lib,
+            cert_bytes,
+            key_bytes,
+            alpn_wire,
+            config.max_early_data_size,
+        )
         self._lib = lib^
         self._opaque_handle = handle
         self.config = config^
@@ -651,6 +662,43 @@ struct RustlsQuicSession(Movable):
         if self._opaque_session_handle == 0:
             return False
         return _do_have_keys(self._lib, self._opaque_session_handle, level) == 1
+
+    def install_early_keys(self) -> Bool:
+        """Capture rustls's 0-RTT (EarlyData) keys into the session,
+        if available (RFC 9001 §4.1; wraps
+        ``Connection::zero_rtt_keys()``).
+
+        On the client this returns True right after
+        :meth:`RustlsQuicConnector.connect` IFF the connector's
+        session store held a ticket for the SNI (a resumed
+        connection) and early data is enabled; on the server it
+        returns True once the resumed ClientHello has been fed and
+        0-RTT was accepted. After True, the
+        :data:`QuicEncryptionLevel.EARLY_DATA` AEAD + header
+        thunks encrypt/decrypt 0-RTT packets. Returns False on a
+        NULL session (test path) or when rustls has no 0-RTT keys
+        for this connection (the common first-flight case).
+        """
+        if self._opaque_session_handle == 0:
+            return False
+        return (
+            _do_install_early_keys(self._lib, self._opaque_session_handle) == 1
+        )
+
+    def is_early_data_accepted(self) -> Bool:
+        """Whether the server signalled it will process the client's
+        0-RTT data (RFC 8446 §4.2.10; client-role only).
+
+        A False after the handshake completes means the server
+        rejected early data and the client must replay it in 1-RTT.
+        Returns False on a NULL session or for the server role.
+        """
+        if self._opaque_session_handle == 0:
+            return False
+        return (
+            _do_is_early_data_accepted(self._lib, self._opaque_session_handle)
+            == 1
+        )
 
     def packet_encrypt(
         self,

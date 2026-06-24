@@ -46,7 +46,7 @@ use std::slice;
 use std::sync::Arc;
 
 use rustls::pki_types::ServerName;
-use rustls::quic::{Connection as QuicConnection, KeyChange, Keys, Version};
+use rustls::quic::{Connection as QuicConnection, DirectionalKeys, KeyChange, Keys, Version};
 use rustls::server::{ServerConfig, ServerConnection};
 use rustls::{ClientConfig, RootCertStore};
 
@@ -58,6 +58,7 @@ use rustls::{ClientConfig, RootCertStore};
 /// stays empty here; the post-Initial branches (Handshake, 1-RTT)
 /// are what rustls actually surfaces.
 const LEVEL_COUNT: usize = 4;
+const LEVEL_EARLY_DATA: usize = 1;
 const LEVEL_HANDSHAKE: usize = 2;
 const LEVEL_1RTT: usize = 3;
 
@@ -129,6 +130,19 @@ pub struct Session {
     /// rustls's `Secrets` fields are `pub(crate)` (sealed) and
     /// only the already-derived `Keys` are exposed.
     keys: [Option<Keys>; LEVEL_COUNT],
+    /// 0-RTT (EarlyData) keys, captured via
+    /// `Connection::zero_rtt_keys()` rather than `KeyChange`
+    /// (rustls has no `KeyChange::EarlyData`).  This is a SINGLE
+    /// `DirectionalKeys`, not a `Keys` pair: on the client it is
+    /// the local/encrypt direction, on the server the
+    /// remote/decrypt direction.  Both ends derive it from the
+    /// same client->server early-traffic secret, so the client
+    /// `encrypt_in_place`s and the server `decrypt_in_place`s
+    /// with the same key object.  `None` until
+    /// `flare_rustls_quic_install_early_keys` captures it (after
+    /// `connect` on a resumed client, or after the ClientHello is
+    /// read on the server).
+    early_keys: Option<DirectionalKeys>,
 }
 
 /// `flare_rustls_quic_acceptor_new` parses the PEM cert + key,
@@ -150,6 +164,7 @@ pub extern "C" fn flare_rustls_quic_acceptor_new(
     key_len: usize,
     alpn_protos: *const u8,
     alpn_len: usize,
+    max_early_data: u32,
 ) -> *mut c_void {
     if cert_pem.is_null() || key_pem.is_null() {
         set_last_error("flare_rustls_quic_acceptor_new: NULL cert or key");
@@ -226,6 +241,30 @@ pub extern "C" fn flare_rustls_quic_acceptor_new(
     }
     server_config.alpn_protocols = alpn_list;
 
+    // ABI 4: 0-RTT early data. When the caller asks for a non-zero
+    // window we install a stateless TLS1.3 ticketer (so resumption +
+    // 0-RTT work without server-side session storage) and set
+    // `max_early_data_size`. RFC 9001 sec 4.6.1 requires the ticket's
+    // max_early_data_size be 0xffffffff for QUIC (QUIC does its own
+    // flow control), so any non-zero request is clamped up to that
+    // sentinel; the caller's numeric value is only a feature toggle.
+    // The default (0) leaves the server 1-RTT-only, matching prior
+    // behavior. Anti-replay: the ticketer rotates keys and rustls
+    // enforces single-use obfuscated-age windows; the Mojo driver
+    // adds the idempotent-method gate on top.
+    if max_early_data != 0 {
+        match rustls::crypto::ring::Ticketer::new() {
+            Ok(t) => server_config.ticketer = t,
+            Err(e) => {
+                set_last_error(format!(
+                    "flare_rustls_quic_acceptor_new: Ticketer::new failed: {e}"
+                ));
+                return std::ptr::null_mut();
+            }
+        }
+        server_config.max_early_data_size = 0xffff_ffff;
+    }
+
     let acceptor = Box::new(Acceptor {
         config: Arc::new(server_config),
     });
@@ -296,6 +335,7 @@ pub extern "C" fn flare_rustls_quic_accept(
         conn: QuicConnection::Server(quic_conn),
         pending: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
         keys: [None, None, None, None],
+        early_keys: None,
     });
     Box::into_raw(session) as *mut c_void
 }
@@ -388,6 +428,17 @@ pub extern "C" fn flare_rustls_quic_connector_new(
             return std::ptr::null_mut();
         }
     };
+
+    // ABI 4: enable session resumption + 0-RTT early data. The
+    // ClientConfig already defaults `resumption` to an in-memory
+    // ClientSessionMemoryCache, so a Connector (one Arc<ClientConfig>
+    // reused across every QUIC connection the HttpClient opens to an
+    // origin) shares one store: the first handshake stores the ticket
+    // and the second connect to the same origin resumes + offers
+    // 0-RTT. `enable_early_data` is opt-in (default false), so we flip
+    // it here; rustls only actually rides 0-RTT when a stored ticket
+    // for the SNI exists, so the first connection is always 1-RTT.
+    client_config.enable_early_data = true;
 
     // Parse the wire-format ALPN list into Vec<Vec<u8>> (same shape
     // as acceptor_new so both roles share one Mojo encoder).
@@ -498,6 +549,7 @@ pub extern "C" fn flare_rustls_quic_connect(
         conn: QuicConnection::Client(quic_conn),
         pending: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
         keys: [None, None, None, None],
+        early_keys: None,
     });
     Box::into_raw(session) as *mut c_void
 }
@@ -652,6 +704,66 @@ pub extern "C" fn flare_rustls_quic_alpn(
     bytes.len() as c_int
 }
 
+/// Capture the 0-RTT (EarlyData) `DirectionalKeys` from rustls,
+/// if available, into the session's `early_keys` slot.
+///
+/// rustls exposes 0-RTT keys via `Connection::zero_rtt_keys()`
+/// (NOT through `KeyChange`, which has no EarlyData variant). On
+/// the client this returns `Some` right after `connect` IF the
+/// ClientConfig had a stored ticket for the SNI + `enable_early_data`
+/// (so a resumed connection); on the server it returns `Some` after
+/// the ClientHello has been read and early data was accepted. Callers
+/// poll this after `connect` (client) / `feed_crypto` of the Initial
+/// (server) and, on a `1` return, drive 0-RTT packets through the
+/// `_packet_*` / `_header_*` thunks at `level == 1`.
+///
+/// Returns 1 if keys were captured (or already present), 0 if rustls
+/// has no 0-RTT keys for this connection, -1 on a NULL session.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_install_early_keys(session: *mut c_void) -> c_int {
+    if session.is_null() {
+        set_last_error("flare_rustls_quic_install_early_keys: NULL session");
+        return -1;
+    }
+    let sess = unsafe { &mut *(session as *mut Session) };
+    if sess.early_keys.is_some() {
+        return 1;
+    }
+    match sess.conn.zero_rtt_keys() {
+        Some(k) => {
+            sess.early_keys = Some(k);
+            1
+        }
+        None => 0,
+    }
+}
+
+/// Whether the server signalled it will process the client's early
+/// data (client-role only; RFC 8446 sec 4.2.10). A `0` after the
+/// handshake completes means the server rejected 0-RTT and the
+/// client must replay the early data in 1-RTT.
+///
+/// Returns 1 if accepted, 0 if not (or not a client / not resumed),
+/// -1 on a NULL session.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_is_early_data_accepted(session: *mut c_void) -> c_int {
+    if session.is_null() {
+        set_last_error("flare_rustls_quic_is_early_data_accepted: NULL session");
+        return -1;
+    }
+    let sess = unsafe { &*(session as *const Session) };
+    match &sess.conn {
+        QuicConnection::Client(c) => {
+            if c.is_early_data_accepted() {
+                1
+            } else {
+                0
+            }
+        }
+        QuicConnection::Server(_) => 0,
+    }
+}
+
 /// Crate version sanity-check thunk so Mojo callers can confirm
 /// the .so dlopen resolved to this crate (not a stale build).
 /// Returns 2 for the current surface (rustls KeyChange bridge +
@@ -680,9 +792,17 @@ pub extern "C" fn flare_rustls_quic_alpn(
 /// shape is the lossless path. The other thunks return `c_int`
 /// for parity with the rustls / C-string API and Mojo callers
 /// declare them as `c_int` on the Mojo side.
+/// * 4 -- adds 0-RTT early data + resumption:
+///   `flare_rustls_quic_install_early_keys` (captures
+///   `Connection::zero_rtt_keys()` into the EarlyData slot),
+///   `flare_rustls_quic_is_early_data_accepted`, an in-memory
+///   client session store + `enable_early_data` on the connector,
+///   a server ticketer + `max_early_data_size` (new `max_early_data`
+///   arg on `acceptor_new`), and EarlyData (`level == 1`) support
+///   in the `_packet_*` / `_header_*` / `_have_keys` thunks.
 #[no_mangle]
 pub extern "C" fn flare_rustls_quic_abi_version() -> i64 {
-    3
+    4
 }
 
 /// Returns 1 if rustls has installed per-level keys at the given
@@ -709,7 +829,12 @@ pub extern "C" fn flare_rustls_quic_have_keys(
         return -1;
     }
     let sess = unsafe { &*(session as *const Session) };
-    if sess.keys[lvl].is_some() {
+    let present = if lvl == LEVEL_EARLY_DATA {
+        sess.early_keys.is_some()
+    } else {
+        sess.keys[lvl].is_some()
+    };
+    if present {
         1
     } else {
         0
@@ -770,13 +895,20 @@ pub extern "C" fn flare_rustls_quic_packet_encrypt(
     }
     let sess = unsafe { &*(session as *const Session) };
     let lvl = level as usize;
-    let keys = match keys_for_level(sess, lvl) {
-        Some(k) => k,
-        None => return -1,
+    let packet_key = if lvl == LEVEL_EARLY_DATA {
+        match early_keys_for_level(sess) {
+            Some(k) => &k.packet,
+            None => return -1,
+        }
+    } else {
+        match keys_for_level(sess, lvl) {
+            Some(k) => &k.local.packet,
+            None => return -1,
+        }
     };
     let header = unsafe { slice::from_raw_parts(header_ptr, header_len) };
     let payload = unsafe { slice::from_raw_parts_mut(payload_ptr, payload_len) };
-    match keys.local.packet.encrypt_in_place(packet_number, header, payload) {
+    match packet_key.encrypt_in_place(packet_number, header, payload) {
         Ok(tag) => {
             let tag_bytes = tag.as_ref();
             let n = tag_bytes.len();
@@ -838,13 +970,20 @@ pub extern "C" fn flare_rustls_quic_packet_decrypt(
     }
     let sess = unsafe { &*(session as *const Session) };
     let lvl = level as usize;
-    let keys = match keys_for_level(sess, lvl) {
-        Some(k) => k,
-        None => return -1,
+    let packet_key = if lvl == LEVEL_EARLY_DATA {
+        match early_keys_for_level(sess) {
+            Some(k) => &k.packet,
+            None => return -1,
+        }
+    } else {
+        match keys_for_level(sess, lvl) {
+            Some(k) => &k.remote.packet,
+            None => return -1,
+        }
     };
     let header = unsafe { slice::from_raw_parts(header_ptr, header_len) };
     let payload = unsafe { slice::from_raw_parts_mut(payload_ptr, payload_len) };
-    match keys.remote.packet.decrypt_in_place(packet_number, header, payload) {
+    match packet_key.decrypt_in_place(packet_number, header, payload) {
         Ok(pt) => {
             unsafe { *plaintext_len = pt.len() };
             0
@@ -895,14 +1034,21 @@ pub extern "C" fn flare_rustls_quic_header_encrypt(
     }
     let sess = unsafe { &*(session as *const Session) };
     let lvl = level as usize;
-    let keys = match keys_for_level(sess, lvl) {
-        Some(k) => k,
-        None => return -1,
+    let header_key = if lvl == LEVEL_EARLY_DATA {
+        match early_keys_for_level(sess) {
+            Some(k) => &k.header,
+            None => return -1,
+        }
+    } else {
+        match keys_for_level(sess, lvl) {
+            Some(k) => &k.local.header,
+            None => return -1,
+        }
     };
     let sample = unsafe { slice::from_raw_parts(sample_ptr, sample_len) };
     let first = unsafe { &mut *first_byte };
     let pn = unsafe { slice::from_raw_parts_mut(pn_ptr, pn_len) };
-    match keys.local.header.encrypt_in_place(sample, first, pn) {
+    match header_key.encrypt_in_place(sample, first, pn) {
         Ok(()) => 0,
         Err(e) => {
             set_last_error(format!(
@@ -944,14 +1090,21 @@ pub extern "C" fn flare_rustls_quic_header_decrypt(
     }
     let sess = unsafe { &*(session as *const Session) };
     let lvl = level as usize;
-    let keys = match keys_for_level(sess, lvl) {
-        Some(k) => k,
-        None => return -1,
+    let header_key = if lvl == LEVEL_EARLY_DATA {
+        match early_keys_for_level(sess) {
+            Some(k) => &k.header,
+            None => return -1,
+        }
+    } else {
+        match keys_for_level(sess, lvl) {
+            Some(k) => &k.remote.header,
+            None => return -1,
+        }
     };
     let sample = unsafe { slice::from_raw_parts(sample_ptr, sample_len) };
     let first = unsafe { &mut *first_byte };
     let pn = unsafe { slice::from_raw_parts_mut(pn_ptr, pn_len) };
-    match keys.remote.header.decrypt_in_place(sample, first, pn) {
+    match header_key.decrypt_in_place(sample, first, pn) {
         Ok(()) => 0,
         Err(e) => {
             set_last_error(format!(
@@ -1054,6 +1207,19 @@ fn keys_for_level(sess: &Session, level: usize) -> Option<&Keys> {
     }
 }
 
+/// Borrow the 0-RTT (EarlyData) `DirectionalKeys`, or set an error
+/// and return None if they have not been captured yet (the Mojo
+/// driver must call `flare_rustls_quic_install_early_keys` first).
+fn early_keys_for_level(sess: &Session) -> Option<&DirectionalKeys> {
+    match &sess.early_keys {
+        Some(k) => Some(k),
+        None => {
+            set_last_error("rustls_quic: 0-RTT keys not yet installed");
+            None
+        }
+    }
+}
+
 // ── In-crate unit tests (cargo test + cargo miri test) ──────────────
 //
 // These tests exercise the C ABI surface from inside Rust so
@@ -1083,6 +1249,7 @@ mod tests {
             0,
             std::ptr::null(),
             0,
+            0,
         );
         assert!(p.is_null(), "NULL cert should be rejected");
         let err = unsafe { CStr::from_ptr(flare_rustls_quic_last_error()) };
@@ -1102,6 +1269,7 @@ mod tests {
             garbage.as_ptr(),
             garbage.len(),
             std::ptr::null(),
+            0,
             0,
         );
         assert!(p.is_null(), "garbage PEM should be rejected");
@@ -1125,14 +1293,16 @@ mod tests {
     }
 
     #[test]
-    fn abi_version_returns_three() {
+    fn abi_version_returns_four() {
         // The ABI bumped 1 -> 2 (KeyChange-capture + per-level
         // AEAD/HP thunks) -> 3 (client role: connector_new/_free +
-        // connect). The activation script keys off this number, so a
-        // stale .so on a developer machine surfaces as a hard
-        // mismatch on `pixi install` rather than a silent run-time
-        // confusion.
-        assert_eq!(flare_rustls_quic_abi_version(), 3);
+        // connect) -> 4 (0-RTT early data + resumption: install_early_keys
+        // / is_early_data_accepted + EarlyData-level AEAD/HP + the
+        // max_early_data arg on acceptor_new). The activation script
+        // keys off this number, so a stale .so on a developer machine
+        // surfaces as a hard mismatch on `pixi install` rather than a
+        // silent run-time confusion.
+        assert_eq!(flare_rustls_quic_abi_version(), 4);
     }
 
     #[test]
