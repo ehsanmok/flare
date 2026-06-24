@@ -63,6 +63,30 @@ def test_chunk_poll_tristate() raises:
     assert_equal(Int(e.wait_fd()), -1)
 
 
+def test_chunk_poll_consume() raises:
+    """F6: ``consume`` collapses ready -> Some / eof -> None and refuses
+    to consume a pending poll (it must be parked, not drained)."""
+    var bytes = List[UInt8]()
+    bytes.append(UInt8(65))
+    bytes.append(UInt8(66))
+    var r = ChunkPoll.ready(bytes^)
+    var got = r.consume()
+    assert_true(got.__bool__())
+    assert_equal(len(got.value()), 2)
+    assert_equal(Int(got.value()[0]), 65)
+
+    var e = ChunkPoll.eof()
+    assert_true(not e.consume().__bool__())
+
+    var raised = False
+    var p = ChunkPoll.pending(c_int(7))
+    try:
+        _ = p.consume()
+    except:
+        raised = True
+    assert_true(raised, "consume on a pending poll must raise")
+
+
 struct RelayFront(Movable, StreamHandler):
     """A streaming front that relays an upstream framed source to the
     client with no bespoke reactor code: ``on_open`` connects the
@@ -176,6 +200,7 @@ def _run_reactor_e2e() raises:
 
 def main() raises:
     test_chunk_poll_tristate()
+    test_chunk_poll_consume()
 
     var N = 5
     var path = String("/tmp/flare_async_src_test.sock")

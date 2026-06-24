@@ -49,6 +49,7 @@ busy-poll between gaps). Watermark backpressure additionally gates the
 *upstream* read interest when the client is write-blocked.
 """
 
+from std.collections import Optional
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
 
 from flare.io import ByteWriter
@@ -138,6 +139,22 @@ struct ChunkPoll(Movable):
         var out = self._chunk^
         self._chunk = List[UInt8]()
         return out^
+
+    def consume(mut self) raises -> Optional[List[UInt8]]:
+        """Collapse the ready/eof split into one move-out.
+
+        Returns ``Some(chunk)`` when a chunk is ready (moved out, as
+        ``take_chunk``) and ``None`` on EOF. Raises on ``pending``: a
+        pending poll must be parked on ``wait_fd()`` and re-polled, never
+        consumed. This is the one-call form for callers that drain to EOF
+        and have already handled the pending branch (the reactor only
+        delivers an upstream edge when the fd is readable, so a relay loop
+        sees only ready / eof)."""
+        if self._state == _PENDING:
+            raise Error("ChunkPoll.consume on a pending poll; park on wait_fd")
+        if self._state == _EOF:
+            return None
+        return Optional(self.take_chunk())
 
 
 # ── AsyncChunkSource ─────────────────────────────────────────────────────────
