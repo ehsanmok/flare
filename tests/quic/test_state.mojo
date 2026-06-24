@@ -46,15 +46,54 @@ from flare.quic.frame import (
     FRAME_TYPE_PING,
     FRAME_TYPE_STREAM_BASE,
     MaxDataFrame,
+    NewConnectionIdFrame,
+    PathChallengeFrame,
+    PathResponseFrame,
+    RetireConnectionIdFrame,
     StreamFrame,
     encode_ack,
     encode_connection_close,
     encode_handshake_done,
     encode_max_data,
+    encode_new_connection_id,
     encode_padding,
+    encode_path_challenge,
+    encode_path_response,
     encode_ping,
+    encode_retire_connection_id,
     encode_stream,
 )
+
+
+def _ncid_bytes(
+    seq: UInt64, retire: UInt64, cid_byte: UInt8
+) raises -> List[UInt8]:
+    """Encode one NEW_CONNECTION_ID with a 4-byte CID + 16-byte
+    reset token, all derived from ``cid_byte`` for easy asserts."""
+    var cid = List[UInt8]()
+    for _ in range(4):
+        cid.append(cid_byte)
+    var token = List[UInt8]()
+    for _ in range(16):
+        token.append(cid_byte)
+    var buf = List[UInt8]()
+    encode_new_connection_id(
+        NewConnectionIdFrame(
+            sequence_number=seq,
+            retire_prior_to=retire,
+            connection_id=cid^,
+            stateless_reset_token=token^,
+        ),
+        buf,
+    )
+    return buf^
+
+
+def _path_data(fill: UInt8) -> List[UInt8]:
+    var d = List[UInt8]()
+    for _ in range(8):
+        d.append(fill)
+    return d^
 
 
 def test_initial_connection_state() raises:
@@ -232,6 +271,102 @@ def test_ack_frame_advances_largest_acked() raises:
     assert_equal(conn.largest_received_packet, UInt64(0))
 
 
+def test_new_connection_id_stores_peer_cid() raises:
+    var conn = new_connection()
+    var events = empty_events()
+    var buf = _ncid_bytes(UInt64(1), UInt64(0), UInt8(0xAB))
+    _ = handle_frame_buf(conn, Span[UInt8, _](buf), UInt64(100), events)
+    var got = conn.peer_cids.get(UInt64(1))
+    assert_true(Bool(got))
+    assert_equal(len(got.value().cid), 4)
+    assert_equal(got.value().cid[0], UInt8(0xAB))
+    assert_equal(len(events.retire_connection_ids), 0)
+    assert_true(conn.ack_pending)
+
+
+def test_new_connection_id_retire_prior_to_queues_retire() raises:
+    var conn = new_connection()
+    var events = empty_events()
+    var b0 = _ncid_bytes(UInt64(0), UInt64(0), UInt8(0x10))
+    _ = handle_frame_buf(conn, Span[UInt8, _](b0), UInt64(100), events)
+    var b1 = _ncid_bytes(UInt64(1), UInt64(0), UInt8(0x11))
+    _ = handle_frame_buf(conn, Span[UInt8, _](b1), UInt64(100), events)
+    # seq=2, retire_prior_to=2 retires seqs 0 and 1.
+    var ev2 = empty_events()
+    var b2 = _ncid_bytes(UInt64(2), UInt64(2), UInt8(0x12))
+    _ = handle_frame_buf(conn, Span[UInt8, _](b2), UInt64(100), ev2)
+    assert_false(Bool(conn.peer_cids.get(UInt64(0))))
+    assert_false(Bool(conn.peer_cids.get(UInt64(1))))
+    assert_true(Bool(conn.peer_cids.get(UInt64(2))))
+    assert_equal(len(ev2.retire_connection_ids), 2)
+    assert_equal(conn.active_dcid_seq, UInt64(2))
+
+
+def test_new_connection_id_bad_length_raises() raises:
+    # Hand-craft a NCID with a zero-length CID; the parser must
+    # reject it before the handler runs.
+    var conn = new_connection()
+    var events = empty_events()
+    var buf = List[UInt8]()
+    buf.append(UInt8(0x18))  # NEW_CONNECTION_ID
+    buf.append(UInt8(0))  # sequence_number = 0
+    buf.append(UInt8(0))  # retire_prior_to = 0
+    buf.append(UInt8(0))  # cid length = 0 (illegal)
+    var raised = False
+    try:
+        _ = handle_frame_buf(conn, Span[UInt8, _](buf), UInt64(100), events)
+    except:
+        raised = True
+    assert_true(raised)
+
+
+def test_retire_connection_id_acks() raises:
+    var conn = new_connection()
+    var events = empty_events()
+    var buf = List[UInt8]()
+    encode_retire_connection_id(
+        RetireConnectionIdFrame(sequence_number=UInt64(3)), buf
+    )
+    _ = handle_frame_buf(conn, Span[UInt8, _](buf), UInt64(100), events)
+    assert_true(conn.ack_pending)
+
+
+def test_path_challenge_queues_response() raises:
+    var conn = new_connection()
+    var events = empty_events()
+    var buf = List[UInt8]()
+    encode_path_challenge(PathChallengeFrame(data=_path_data(UInt8(0x7E))), buf)
+    _ = handle_frame_buf(conn, Span[UInt8, _](buf), UInt64(100), events)
+    assert_equal(len(events.path_responses), 1)
+    assert_equal(len(events.path_responses[0]), 8)
+    assert_equal(events.path_responses[0][0], UInt8(0x7E))
+
+
+def test_path_response_validates_matching_challenge() raises:
+    var conn = new_connection()
+    conn.outgoing_path_challenge = _path_data(UInt8(0x55))
+    var events = empty_events()
+    var buf = List[UInt8]()
+    encode_path_response(PathResponseFrame(data=_path_data(UInt8(0x55))), buf)
+    _ = handle_frame_buf(conn, Span[UInt8, _](buf), UInt64(100), events)
+    assert_true(events.path_validated)
+    assert_true(conn.path_validated)
+    assert_equal(len(conn.outgoing_path_challenge), 0)
+
+
+def test_path_response_mismatch_ignored() raises:
+    var conn = new_connection()
+    conn.outgoing_path_challenge = _path_data(UInt8(0x55))
+    var events = empty_events()
+    var buf = List[UInt8]()
+    encode_path_response(PathResponseFrame(data=_path_data(UInt8(0x66))), buf)
+    _ = handle_frame_buf(conn, Span[UInt8, _](buf), UInt64(100), events)
+    assert_false(events.path_validated)
+    assert_false(conn.path_validated)
+    # The outstanding probe is untouched by a non-matching echo.
+    assert_equal(len(conn.outgoing_path_challenge), 8)
+
+
 def main() raises:
     test_initial_connection_state()
     test_handshake_done_advances_state()
@@ -246,4 +381,11 @@ def main() raises:
     test_idle_timeout_detection()
     test_flow_control_violation_raises()
     test_ack_frame_advances_largest_acked()
-    print("test_quic_state: 13 passed")
+    test_new_connection_id_stores_peer_cid()
+    test_new_connection_id_retire_prior_to_queues_retire()
+    test_new_connection_id_bad_length_raises()
+    test_retire_connection_id_acks()
+    test_path_challenge_queues_response()
+    test_path_response_validates_matching_challenge()
+    test_path_response_mismatch_ignored()
+    print("test_quic_state: 20 passed")

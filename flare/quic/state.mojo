@@ -129,6 +129,25 @@ comptime CONN_STATE_DRAINING: Int = 3
 comptime CONN_STATE_CLOSED: Int = 4
 
 
+# ── Connection migration limits (RFC 9000 §19.15-§19.18) ──────────────────
+comptime _CID_MIN_LEN: Int = 1
+comptime _CID_MAX_LEN: Int = 20
+comptime _RESET_TOKEN_LEN: Int = 16
+comptime _PATH_DATA_LEN: Int = 8
+
+
+@fieldwise_init
+struct _PeerConnId(Copyable, Movable):
+    """One entry in the peer's connection-ID table (RFC 9000
+    §5.1.1): a Source CID the peer issued via NEW_CONNECTION_ID
+    plus its stateless-reset token. Keyed by sequence number in
+    :attr:`Connection.peer_cids`; the client picks one of these as
+    the active Destination CID when it migrates paths."""
+
+    var cid: List[UInt8]
+    var reset_token: List[UInt8]
+
+
 @fieldwise_init
 struct ConnectionEvents(Copyable, Movable):
     """Per-tick output of the connection state machine.
@@ -174,6 +193,16 @@ struct ConnectionEvents(Copyable, Movable):
     var crypto_frames: List[CryptoFrame]
     var stream_chunks: List[StreamFrame]
     var next_deadline_us: UInt64
+    var path_responses: List[List[UInt8]]
+    """PATH_RESPONSE payloads (§19.18) the driver must echo back on
+    the path a PATH_CHALLENGE arrived on, to prove reachability."""
+    var retire_connection_ids: List[UInt64]
+    """Peer-CID sequence numbers the driver must RETIRE_CONNECTION_ID
+    (§19.16), queued when a NEW_CONNECTION_ID's ``retire_prior_to``
+    obsoletes a stored CID."""
+    var path_validated: Bool
+    """Set when an inbound PATH_RESPONSE matched our outstanding
+    PATH_CHALLENGE: the new path is confirmed reachable (§8.2)."""
 
 
 def empty_events() -> ConnectionEvents:
@@ -186,6 +215,9 @@ def empty_events() -> ConnectionEvents:
         crypto_frames=List[CryptoFrame](),
         stream_chunks=List[StreamFrame](),
         next_deadline_us=UInt64(0),
+        path_responses=List[List[UInt8]](),
+        retire_connection_ids=List[UInt64](),
+        path_validated=False,
     )
 
 
@@ -216,6 +248,20 @@ struct Connection(Copyable, Movable):
     var largest_acked_by_peer: UInt64
     var close_error_code: UInt64
     var close_reason: List[UInt8]
+    var peer_cids: Dict[UInt64, _PeerConnId]
+    """Peer-issued Source CIDs (RFC 9000 §5.1.1) keyed by sequence
+    number, learned from NEW_CONNECTION_ID. The migration path
+    picks a spare entry as the next active Destination CID."""
+    var active_dcid_seq: UInt64
+    """Sequence number of the peer CID currently used as the active
+    Destination CID. ``0`` is the handshake CID (§5.1.1)."""
+    var outgoing_path_challenge: List[UInt8]
+    """The 8-byte PATH_CHALLENGE payload we last sent while probing
+    a new path; an inbound PATH_RESPONSE must echo it to validate
+    the path (§8.2). Empty when no probe is outstanding."""
+    var path_validated: Bool
+    """True once the outstanding path probe was confirmed by a
+    matching PATH_RESPONSE."""
 
 
 def new_connection(
@@ -237,6 +283,10 @@ def new_connection(
         largest_acked_by_peer=UInt64(0),
         close_error_code=UInt64(0),
         close_reason=List[UInt8](),
+        peer_cids=Dict[UInt64, _PeerConnId](),
+        active_dcid_seq=UInt64(0),
+        outgoing_path_challenge=List[UInt8](),
+        path_validated=False,
     )
 
 
@@ -378,6 +428,104 @@ def apply_handshake_done(mut conn: Connection, mut events: ConnectionEvents):
     events.handshake_done = True
 
 
+def apply_new_connection_id(
+    mut conn: Connection,
+    ncid: NewConnectionIdFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a NEW_CONNECTION_ID frame (RFC 9000 §19.15).
+
+    Records the peer's spare Source CID + stateless-reset token in
+    :attr:`Connection.peer_cids`, then honors ``retire_prior_to``:
+    every stored CID with a lower sequence number is dropped and a
+    RETIRE_CONNECTION_ID is queued in
+    :attr:`ConnectionEvents.retire_connection_ids` (§5.1.2). If the
+    active DCID is among those retired, the active sequence advances
+    to this freshly issued CID.
+
+    Validates the wire fields at this trust boundary: CID length in
+    [1, 20], a 16-byte reset token, and ``retire_prior_to`` no
+    greater than ``sequence_number`` (a PROTOCOL_VIOLATION per
+    §19.15 otherwise).
+    """
+    if (
+        len(ncid.connection_id) < _CID_MIN_LEN
+        or len(ncid.connection_id) > _CID_MAX_LEN
+    ):
+        raise Error("quic state: NEW_CONNECTION_ID length out of [1, 20]")
+    if len(ncid.stateless_reset_token) != _RESET_TOKEN_LEN:
+        raise Error(
+            "quic state: NEW_CONNECTION_ID reset token must be 16 bytes"
+        )
+    if ncid.retire_prior_to > ncid.sequence_number:
+        raise Error(
+            "quic state: NEW_CONNECTION_ID retire_prior_to > sequence_number"
+        )
+    conn.peer_cids[ncid.sequence_number] = _PeerConnId(
+        cid=ncid.connection_id.copy(),
+        reset_token=ncid.stateless_reset_token.copy(),
+    )
+    if ncid.retire_prior_to > UInt64(0):
+        var to_retire = List[UInt64]()
+        for entry in conn.peer_cids.items():
+            if entry.key < ncid.retire_prior_to:
+                to_retire.append(entry.key)
+        for i in range(len(to_retire)):
+            _ = conn.peer_cids.pop(to_retire[i])
+            events.retire_connection_ids.append(to_retire[i])
+        if conn.active_dcid_seq < ncid.retire_prior_to:
+            conn.active_dcid_seq = ncid.sequence_number
+
+
+def apply_retire_connection_id(
+    mut conn: Connection, rcid: RetireConnectionIdFrame
+):
+    """Apply a RETIRE_CONNECTION_ID frame (RFC 9000 §19.16): the
+    peer is retiring one of the CIDs WE issued. The state-machine
+    layer has no local-CID table to prune (the driver owns SCID
+    issuance), so this is bookkeeping-only: activity + ack-pending
+    are recorded by the caller. Kept as a named helper for symmetry
+    and so the driver can hook CID-pool accounting later."""
+    pass
+
+
+def apply_path_challenge(
+    mut conn: Connection,
+    pc: PathChallengeFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a PATH_CHALLENGE frame (RFC 9000 §19.17): queue a
+    PATH_RESPONSE echoing the exact 8-byte payload so the peer can
+    validate the path (§8.2). Validates the fixed 8-byte length at
+    this trust boundary."""
+    if len(pc.data) != _PATH_DATA_LEN:
+        raise Error("quic state: PATH_CHALLENGE data must be 8 bytes")
+    events.path_responses.append(pc.data.copy())
+
+
+def apply_path_response(
+    mut conn: Connection,
+    pr: PathResponseFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a PATH_RESPONSE frame (RFC 9000 §19.18): if it echoes
+    our outstanding PATH_CHALLENGE byte-for-byte, the probed path is
+    validated -- clear the probe and surface ``path_validated`` so
+    the driver can promote the new path (§8.2). A non-matching
+    response is ignored (a stale or spoofed echo). Validates the
+    fixed 8-byte length at this trust boundary."""
+    if len(pr.data) != _PATH_DATA_LEN:
+        raise Error("quic state: PATH_RESPONSE data must be 8 bytes")
+    if len(conn.outgoing_path_challenge) != _PATH_DATA_LEN:
+        return
+    for i in range(_PATH_DATA_LEN):
+        if pr.data[i] != conn.outgoing_path_challenge[i]:
+            return
+    conn.path_validated = True
+    conn.outgoing_path_challenge = List[UInt8]()
+    events.path_validated = True
+
+
 # ── Frame-dispatch adapter ────────────────────────────────────────────────
 
 
@@ -470,15 +618,19 @@ struct _ConnFrameHandler(FrameHandler):
 
     def on_new_connection_id(mut self, ncid: NewConnectionIdFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_new_connection_id(self._conn()[], ncid, self._events()[])
 
     def on_retire_connection_id(mut self, rcid: RetireConnectionIdFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_retire_connection_id(self._conn()[], rcid)
 
     def on_path_challenge(mut self, pc: PathChallengeFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_path_challenge(self._conn()[], pc, self._events()[])
 
     def on_path_response(mut self, pr: PathResponseFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_path_response(self._conn()[], pr, self._events()[])
 
     def on_connection_close(mut self, cc: ConnectionCloseFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=False)

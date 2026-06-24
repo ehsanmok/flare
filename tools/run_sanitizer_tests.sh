@@ -158,6 +158,14 @@ ASAN_TESTS=(
   "tests/quic/test_hp_mask_ffi.mojo"              # raw FFI thunks
   "tests/quic/test_openssl_quic_crypto.mojo"      # Mojo trait surface
   "tests/quic/test_rfc9001_appendix_a.mojo"       # full RFC vectors
+  # State machine (sans-I/O) incl. connection-migration frame
+  # transitions: the dispatcher routes frames through
+  # _ConnFrameHandler, which holds raw Int addresses of the
+  # caller's Connection / ConnectionEvents and dereferences them
+  # via UnsafePointer[..., MutUntrackedOrigin]. ASan validates
+  # those interior pointers stay in-bounds across the peer-CID
+  # table mutations + path-validation match.
+  "tests/quic/test_state.mojo"
   # Track Q2-W rustls QUIC FFI smoke (Cargo cdylib over rustls::quic).
   # The Mojo binding routes every OwnedDLHandle.get_function call
   # through a `read lib` borrow helper (same pattern as the OpenSSL
