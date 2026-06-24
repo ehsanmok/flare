@@ -88,6 +88,10 @@ ASAN_TESTS=(
   # while the front consumes it in fixed 64 KiB read_body chunks. ASan
   # validates the non-blocking inbound recv path and the bounded reader.
   "tests/http/test_inbound_body.mojo"
+  # v0.9 B6 — upstream-cancel propagation: a forked backend + relay front;
+  # a client disconnect drives a CANCEL frame to the backend. ASan
+  # validates the send_cancel frame write + the relay teardown path.
+  "tests/http/test_upstream_cancel.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf

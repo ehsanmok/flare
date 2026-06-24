@@ -51,9 +51,10 @@ write-blocked.
 
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
 
+from flare.io import ByteWriter
 from flare.net import NetworkError
 from flare.net._libc import _recv, _strerror
-from flare.uds.frame_mux import FrameDemux, FrameKind
+from flare.uds.frame_mux import FrameDemux, FrameKind, encode_frame
 from flare.uds.stream import UnixStream
 
 from .cancel import Cancel
@@ -204,6 +205,9 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
     """The single logical stream this source reads."""
     var _eof: Bool
     """Latched once DONE / connection-EOF is seen; further polls are EOF."""
+    var _cancel_sent: Bool
+    """B6: latched once a CANCEL frame has been emitted, so a teardown that
+    both polls (cancel observed) and calls ``send_cancel`` sends it once."""
 
     def __init__(out self, var conn: UnixStream, request_id: UInt64) raises:
         """Adopt ``conn`` (switched to non-blocking) for ``request_id``."""
@@ -212,18 +216,45 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
         self.demux = FrameDemux()
         self.request_id = request_id
         self._eof = False
+        self._cancel_sent = False
 
     @always_inline
     def fd(self) -> c_int:
         """The upstream fd to register / wait on (for ``attach_upstream``)."""
         return self.conn._socket.fd
 
+    def send_cancel(mut self) raises:
+        """Emit a CANCEL frame for this ``request_id`` upstream (B6).
+
+        Tells the backend to stop producing tokens nobody will read --
+        e.g. the client disconnected mid-generation. Idempotent and
+        best-effort framed (a 13-byte CANCEL fits one write); after this
+        the source is EOF. Call it from a front's ``on_close`` when the
+        connection's ``cancel`` is set, and ``poll`` calls it too when it
+        observes cancellation on an upstream edge.
+        """
+        if self._cancel_sent:
+            return
+        self._cancel_sent = True
+        self._eof = True
+        var w = ByteWriter()
+        var empty = List[UInt8]()
+        encode_frame(
+            w, self.request_id, FrameKind.CANCEL, Span[UInt8, _](empty)
+        )
+        var bytes = w.take()
+        self.conn.write_all(Span[UInt8, _](bytes))
+
     def poll(mut self, cancel: Cancel) raises -> ChunkPoll:
         """Drain a ready frame, else one non-blocking read; never blocks."""
         if self._eof:
             return ChunkPoll.eof()
         if cancel.cancelled():
-            self._eof = True
+            # B6: propagate the cancel to the backend, then EOF.
+            try:
+                self.send_cancel()
+            except:
+                self._eof = True
             return ChunkPoll.eof()
 
         while True:
