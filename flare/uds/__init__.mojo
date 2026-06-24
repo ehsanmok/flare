@@ -37,7 +37,7 @@ Public surface:
   (multi-worker scheduler hand-off path; mirrors
   :func:`flare.tcp.accept_fd`).
 - :class:`FrameMux` — multiplexed framed transport over one
-  ``UnixStream`` (v0.9 B3): many logical streams demuxed by
+  ``UnixStream``: many logical streams demuxed by
   ``request_id``, with :class:`FrameDemux` / :class:`Frame` /
   :class:`FrameKind` and the pure :func:`encode_frame` /
   :func:`decode_frame` codec.

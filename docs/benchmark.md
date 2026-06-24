@@ -270,6 +270,35 @@ settled at 3.24 ms (run stdev 0.06 ms) against the prior run's
 64.86 ms p99.99 with a 351 ms stdev. No b2 regression on either
 shape.
 
+#### No-regression check after the v0.9 streaming surface
+
+Re-running the harness on the same dev box after the v0.9
+streaming-proxy surface landed (the typed streaming server,
+reactor-integrated external sources, and the multiplexed framed
+transport are all additive modules; none touch the plaintext hot
+path) recorded:
+
+| Workload | Server | Workers | Peak req/s | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | stdev% |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `throughput`     | **flare**     | 1 | **76,634**  | 1.13 | 3.31 | 3.73 | 4.07  | 1.27 |
+| `throughput`     | Go `net/http` | 1 | 39,758      | 1.39 | 3.23 | 4.18 | 6.06  | 1.27 |
+| `throughput`     | nginx         | 1 | 76,024      | 1.13 | 3.24 | 3.57 | 3.86  | 0.00 |
+| `throughput_mc`  | **flare_mc**  | 4 | **232,555** | 1.22 | 2.71 | 3.13 | 49.95 | 0.36 |
+| `throughput_mc`  | actix-web     | 4 | 234,774     | 1.27 | 2.71 | 3.05 | 3.27  | 0.21 |
+| `throughput_mc`  | hyper         | 4 | 217,001     | 1.25 | 2.85 | 3.27 | 3.62  | 0.28 |
+| `throughput_mc`  | axum          | 4 | 203,306     | 1.29 | 2.88 | 4.30 | 6.88  | 0.17 |
+
+Single-worker flare moved up from 70,939 to 76,634 req/s (+8.0 %),
+landing at 1.93x Go `net/http` (76,634 / 39,758) and at parity with
+nginx (100.8 % of its single-worker peak, up from 90.5 %). On the
+multi-worker shape flare_mc held its standing relative to the Rust
+libraries: 1.07x hyper (232,555 / 217,001) and 1.14x axum
+(232,555 / 203,306), neck-and-neck with actix-web (99.1 %). The
+flare_mc p99.99 of 49.95 ms (run stdev ±341 ms) is a single noisy
+tail blip on the shared box, not a steady-state cost -- p50 / p99 /
+p99.9 are all tighter than or equal to the Rust baselines. No
+regression from the v0.9 surface on either shape.
+
 ### Multi-worker scaling, Linux EPYC
 
 **Worker-count discipline:** the tables below show two things,

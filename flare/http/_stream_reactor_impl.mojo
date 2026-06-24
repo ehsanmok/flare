@@ -1,4 +1,4 @@
-"""Single-threaded reactor loop for the typed streaming surface (A2/A4).
+"""Single-threaded reactor loop for the typed streaming surface.
 
 ``run_stream_reactor_loop`` is the multi-connection driver behind
 ``HttpServer.serve_streaming``. It owns the reactor and the connection
@@ -17,14 +17,14 @@ client fd; an attached upstream fd is its own token; the listener fd is
 its own token. A token routes by membership: listener, then
 ``up_to_client`` (upstream), then ``conns`` (client).
 
-Scope (A2/A4): the outbound streaming path -- accept, ``on_open``,
+Scope: the outbound streaming path -- accept, ``on_open``,
 ``on_writable``-driven chunking with backpressure-correct draining, and
 upstream pumping via ``on_upstream`` -- plus peer-FIN / error teardown
 via ``on_close``. The front owns the upstream fd's lifetime (open in
 ``on_open``, close in ``on_close``); the reactor only watches it.
-Inbound request-body consumption is B5.
+Inbound request-body consumption is opt-in via ``StreamConn.enable_inbound``.
 
-Backpressure (B2): a connection's attached upstream fd is read only
+Backpressure: a connection's attached upstream fd is read only
 while its client relay buffer is below the high watermark. ``_reconcile_after``
 calls ``StreamConn.apply_backpressure`` (hi/lo hysteresis) and toggles the
 upstream's ``INTEREST_READ`` accordingly, so a slow client throttles the
@@ -36,9 +36,10 @@ avoid overshooting within a single readable edge.
 ponytail: while a connection is open and not closing, ``INTEREST_WRITE``
 stays armed, so a front *without an upstream* that stalls without
 producing or closing still busy-spins on level-triggered writable edges.
-The upstream-relay shape (the inference-front case) is fully gated by the
-B1 park + B2 watermark; the residual spin is the no-upstream stalled
-front, expected to produce on every writable edge until ``request_close``.
+The upstream-relay shape (the streaming-proxy case) is fully gated by the
+pending-fd park + watermark backpressure; the residual spin is the
+no-upstream stalled front, expected to produce on every writable edge
+until ``request_close``.
 """
 
 from std.collections import Dict
@@ -54,7 +55,7 @@ from .streaming_server import StreamConn, StreamHandler
 def _shed_503_bytes(retry_after_s: Int) -> List[UInt8]:
     """Canned ``503 Service Unavailable`` with ``Retry-After`` and
     ``Connection: close`` -- the graceful overload signal sent to a
-    connection refused by the admission cap (B4). Fixed/sanitized: no
+    connection refused by the admission cap. Fixed/sanitized: no
     request-derived bytes, so it is safe to emit before ``on_open``."""
     var ra = retry_after_s if retry_after_s >= 0 else 0
     var s = String("HTTP/1.1 503 Service Unavailable\r\n")
@@ -136,7 +137,7 @@ def _reconcile_after(
     (``reg_upstream_fd``) so a no-op call costs only two lookups.
     """
     ref c = conns[fd]
-    # Upstream reconcile (fd attach/detach) + B2 backpressure gating: the
+    # Upstream reconcile (fd attach/detach) + backpressure gating: the
     # upstream read interest is armed only while the client relay buffer
     # is below the high watermark, so a slow client throttles the upstream
     # instead of forcing unbounded token buffering.
@@ -200,7 +201,7 @@ def run_stream_reactor_loop[
         stopping: External stop flag, checked each iteration.
         poll_timeout_ms: Reactor poll timeout; bounds how often
             ``stopping`` is re-checked when idle.
-        max_in_flight: Admission cap (B4). ``0`` = unlimited. When the
+        max_in_flight: Admission cap. ``0`` = unlimited. When the
             live-connection count is at the cap, a newly accepted
             connection is refused with a canned 503 + ``Retry-After``
             (``on_open`` is never called for it) instead of leaning on the
@@ -241,7 +242,7 @@ def run_stream_reactor_loop[
                         client = accept_fd(c_int(listen_fd))
                     except:
                         break  # EAGAIN / no more pending this round
-                    # Admission cap (B4): refuse over-capacity connections
+                    # Admission cap: refuse over-capacity connections
                     # with a 503 + Retry-After on the still-blocking socket
                     # before any on_open work, then drop (close). Counted
                     # for observability.
@@ -334,7 +335,7 @@ def run_stream_reactor_loop[
                 continue
 
             # ── Peer error / hangup: tear down ─────────────────────
-            # For an inbound-owning front (B5) a peer *half-close*
+            # For an inbound-owning front a peer *half-close*
             # (EPOLLRDHUP, which folds into EVENT_HUP) is the normal
             # end-of-body signal, not a teardown: fall through so the
             # handler reads ``read_body`` -> eof and replies on the still-
@@ -351,7 +352,7 @@ def run_stream_reactor_loop[
             var drop_it = False
 
             # ── Readable: detect peer FIN, or hand inbound body to the
-            # front (B5). When the front owns the inbound body
+            # front. When the front owns the inbound body
             # (``enable_inbound``), the reactor must NOT drain-and-discard
             # client bytes here -- that would steal the body. The front
             # reads it via ``read_body`` (and learns EOF there); the

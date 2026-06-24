@@ -1,10 +1,9 @@
-"""Example — v0.9 streaming proxy (the surface an inference front needs).
+"""Example — streaming proxy (pump an external producer to a client).
 
-This is the shape the v0.9 design targets: a front that pumps an
-external producer's framed output to a client, with end-to-end
-backpressure, in a dozen safe lines on top of flare. Zero
-``UnsafePointer``, zero ``alloc`` slot tables, zero ``external_call``
-clock, zero manual reactor-token math.
+A front that pumps an external producer's framed output to a client,
+with end-to-end backpressure, in a dozen safe lines on top of flare.
+Zero ``UnsafePointer``, zero ``alloc`` slot tables, zero
+``external_call`` clock, zero manual reactor-token math.
 
 The composable pieces, all from ``flare``:
 
@@ -16,7 +15,7 @@ The composable pieces, all from ``flare``:
   reactor-registered fd (here a Unix-domain socket to a backend).
 - ``conn.attach_upstream(fd)`` — register that fd so the reactor fires
   ``on_upstream`` when a chunk is ready; no token bookkeeping.
-- watermark backpressure (B2) — if the client is slow, the reactor
+- watermark backpressure — if the client is slow, the reactor
   stops reading the upstream until the relay buffer drains, so a slow
   consumer cannot force unbounded buffering.
 - ``HttpServer.serve_streaming(front)`` — the streaming entry point.

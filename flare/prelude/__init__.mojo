@@ -137,7 +137,7 @@ from ..uds.frame_mux import (
     decode_frame,
 )
 
-# v0.9 streaming-proxy surface
+# Streaming-proxy surface
 from ..http.streaming_server import StreamHandler, StreamConn
 from ..http.async_body import AsyncChunkSource, ChunkPoll, UpstreamChunkSource
 

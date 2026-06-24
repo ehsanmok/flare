@@ -1,6 +1,6 @@
-"""Typed streaming-handler surface (v0.9 gap family A).
+"""Typed streaming-handler surface.
 
-A custom multiplexing / streaming front -- the shape an LLM-inference
+A custom multiplexing / streaming front -- the shape a streaming
 proxy needs -- used to drop to the raw reactor and smuggle every live
 object (the reactor, the streams, the buffers) as an ``Int`` address,
 rebuilding it with ``UnsafePointer(unsafe_from_address=...)``, plus
@@ -40,18 +40,17 @@ typed and usable:
 - **Shared state** is the handler struct's own fields. The framework
   holds one handler instance and calls it (via ``mut self``) for every
   connection and every event, so the fields are shared, mutable, and
-  fully typed -- this is the ``ServeState`` (e.g. a persistent
-  ``FrameMux``) the design's "after" sketch wanted, reached as a typed
-  ref rather than an ``Int`` address.
+  fully typed -- this is the shared ``ServeState`` (e.g. a persistent
+  ``FrameMux``) reached as a typed ref rather than an ``Int`` address.
 - **Per-connection state** is keyed by ``conn.id()`` in a typed
   container the handler declares once (e.g. ``Dict[Int, MyConnState]``).
   The framework assigns the id and signals ``on_open`` / ``on_close``
   so the handler inserts / removes its entry -- no ``alloc``, no manual
   free list, lifecycle framework-owned.
 
-Together this deletes the design-0.9 A1/A2 gaps: the 18-field ``Ctx``
-of ``Int`` addresses and the ``alloc[...](max_slots)`` slot tables +
-free stack.
+Together this removes the need for a hand-rolled context of ``Int``
+addresses and the ``alloc[...](max_slots)`` slot tables + free stack a
+raw-reactor front would otherwise carry.
 """
 
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
@@ -65,7 +64,7 @@ from flare.tcp import TcpStream
 
 
 comptime DEFAULT_HI_WATERMARK: Int = 256 * 1024
-"""Default high watermark for the per-connection relay buffer (B2). When
+"""Default high watermark for the per-connection relay buffer. When
 unwritten outbound bytes reach this, the reactor drops read interest on
 the attached upstream fd so a slow client cannot force unbounded token
 buffering. ponytail: a fixed 256 KiB ceiling -- one in-flight relay
@@ -125,13 +124,13 @@ struct StreamConn(Movable):
     ``-1``). Lets the reactor diff desired vs registered without a
     reverse lookup. Framework-internal; fronts never touch it."""
     var _hi_watermark: Int
-    """Relay-buffer high watermark (B2): at this occupancy upstream read
+    """Relay-buffer high watermark: at this occupancy upstream read
     interest is dropped. Defaults to ``DEFAULT_HI_WATERMARK``."""
     var _lo_watermark: Int
-    """Relay-buffer low watermark (B2): below this, upstream read interest
+    """Relay-buffer low watermark: below this, upstream read interest
     is re-armed. Defaults to ``DEFAULT_LO_WATERMARK``."""
     var _upstream_paused: Bool
-    """B2 state: True while upstream reads are gated off because the
+    """Backpressure state: True while upstream reads are gated off because the
     client write buffer is above the high watermark. Hysteresis: cleared
     only when occupancy falls to the low watermark."""
     var _reg_upstream_interest: Int
@@ -140,20 +139,20 @@ struct StreamConn(Movable):
     ``modify`` calls when the watermark state is unchanged."""
     var _pause_count: Int
     """Number of high-watermark crossings (upstream paused). Observable
-    for the B2 acceptance test; cheap counter otherwise."""
+    for backpressure tests; cheap counter otherwise."""
     var _resume_count: Int
     """Number of low-watermark crossings (upstream resumed)."""
     var _inbound_enabled: Bool
-    """B5 opt-in: when True the front consumes the inbound request body
+    """Inbound opt-in: when True the front consumes the inbound request body
     itself via ``read_body`` and the reactor stops draining-and-discarding
     client bytes for FIN detection (which would otherwise steal the
     body). Default False -- existing fronts are unchanged."""
     var _write_syscalls: Int
-    """B7: count of ``send(2)`` calls issued by ``drain_nonblocking`` /
+    """Count of ``send(2)`` calls issued by ``drain_nonblocking`` /
     ``flush_blocking``. A burst of K chunks queued via ``send`` (each a
     memcpy into the single ``out_buf``) flushes in one syscall when the
-    socket accepts it -- so this stays ~1 per drain regardless of K, the
-    per-token syscall tax B7 removes. Observable for the microbench."""
+    socket accepts it -- so this stays ~1 per drain regardless of K,
+    removing the per-token syscall tax. Observable for the microbench."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -252,7 +251,7 @@ struct StreamConn(Movable):
         fd after a reconcile."""
         self._reg_upstream_fd = fd
 
-    # ── Backpressure watermarks (B2) ───────────────────────────────
+    # ── Backpressure watermarks ────────────────────────────────────
 
     def set_watermarks(mut self, hi: Int, lo: Int):
         """Tune the relay-buffer hi/lo watermarks for this connection.
@@ -354,7 +353,7 @@ struct StreamConn(Movable):
         drains with ``drain_nonblocking`` on writable edges. Same call
         site in both modes, so a front never blocks the event loop.
 
-        B7 (token-burst coalescing): each ``send`` is an O(n) memcpy into
+        Token-burst coalescing: each ``send`` is an O(n) memcpy into
         the single contiguous ``out_buf`` -- it issues no syscall. When a
         front emits K ready chunks in one reactor tick (call ``send`` K
         times), the subsequent drain flushes all K in ONE ``send(2)``,
@@ -386,7 +385,7 @@ struct StreamConn(Movable):
 
     @always_inline
     def write_syscalls(self) -> Int:
-        """B7: number of ``send(2)`` calls issued so far by the drain path.
+        """Number of ``send(2)`` calls issued so far by the drain path.
         A burst of K chunks queued via ``send`` flushes in one syscall, so
         this advances by ~1 per drain regardless of K."""
         return self._write_syscalls
@@ -475,11 +474,11 @@ struct StreamConn(Movable):
         buf.resize(old + n, UInt8(0))
         return n
 
-    # ── Incremental inbound body (B5) ──────────────────────────────
+    # ── Incremental inbound body ───────────────────────────────────
 
     @always_inline
     def enable_inbound(mut self, enabled: Bool = True):
-        """Opt into front-owned inbound body consumption (B5).
+        """Opt into front-owned inbound body consumption.
 
         Call in ``on_open`` for a front that reads a (possibly large)
         request body itself via ``read_body``. While enabled the reactor
@@ -492,12 +491,12 @@ struct StreamConn(Movable):
 
     @always_inline
     def inbound_enabled(self) -> Bool:
-        """True if the front owns inbound body consumption (B5)."""
+        """True if the front owns inbound body consumption."""
         return self._inbound_enabled
 
     def read_body(mut self, max_bytes: Int = 65536) raises -> ChunkPoll:
         """Read up to ``max_bytes`` of the inbound request body, without
-        blocking, as a B1 ``ChunkPoll`` (so inbound and outbound share
+        blocking, as a ``ChunkPoll`` (so inbound and outbound share
         one tri-state shape):
 
         - ``ready(bytes)`` -- a body chunk is available now;

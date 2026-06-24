@@ -1,4 +1,4 @@
-"""Multiplexed duplex framed transport over one connection (v0.9 B3).
+"""Multiplexed duplex framed transport over one connection.
 
 A streaming-proxy front otherwise opens one backend connection *per
 request* -- fd churn and a connect(2) round trip on the hot path at high
@@ -18,7 +18,7 @@ first 13 bytes, so partial reads reassemble deterministically.
 Three layers, smallest first (each is independently testable):
 
 - ``encode_frame`` / ``decode_frame`` -- the pure codec over
-  ``ByteWriter`` / ``ByteReader`` (A3). No I/O, no allocation beyond the
+  ``ByteWriter`` / ``ByteReader``. No I/O, no allocation beyond the
   payload copy. This is the fuzz/ASan core.
 - ``FrameDemux`` -- a sans-I/O reassembly buffer: ``feed(bytes)`` appends
   raw bytes (possibly splitting or coalescing frames arbitrarily) and
@@ -37,8 +37,9 @@ compacts the consumed prefix after each drain (so a slow consumer cannot
 make the buffer grow without bound across the *consumed* bytes). The
 ceiling is one in-flight frame's payload held contiguously; a frame
 larger than ``MAX_FRAME_PAYLOAD`` is rejected as a protocol error rather
-than allocated. ``open`` returns nothing here; the ``UpstreamChunkSource``
-wrapper that the design sketches over ``open`` lands in B1.
+than allocated. ``open`` returns nothing here; the single-stream
+``UpstreamChunkSource`` (``flare.http.async_body``) is the reactor-
+integrated wrapper over one logical stream.
 """
 
 from std.collections import Dict, Optional
@@ -69,7 +70,7 @@ struct FrameKind:
     comptime ERROR = UInt8(3)
     """Stream failed; payload may carry a diagnostic. Isolated to this id."""
     comptime CANCEL = UInt8(4)
-    """Caller abandoned the stream; peer should stop producing (B6)."""
+    """Caller abandoned the stream; peer should stop producing."""
 
 
 struct Frame(Copyable, Movable):
@@ -300,7 +301,7 @@ struct FrameMux(Movable):
 
     def cancel(mut self, request_id: UInt64) raises:
         """Queue a CANCEL frame and drop the local inbox for
-        ``request_id`` (the cancel path B6 builds on)."""
+        ``request_id`` (the upstream-cancel path builds on this)."""
         var empty = List[UInt8]()
         encode_frame(
             self.out, request_id, FrameKind.CANCEL, Span[UInt8, _](empty)

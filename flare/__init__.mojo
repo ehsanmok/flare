@@ -594,9 +594,9 @@ from .http.error import HttpError, TooManyRedirects
 from .http.static_response import precompute_response
 from .http.cookie import Cookie, CookieJar, parse_set_cookie_header
 
-# v0.9 streaming-proxy surface (typed streaming server + reactor-integrated
-# external sources + multiplexed framed transport). The composable shape an
-# inference / streaming front reaches for.
+# Streaming-proxy surface (typed streaming server + reactor-integrated
+# external sources + multiplexed framed transport). The composable shape a
+# streaming front reaches for.
 from .io import ByteReader, ByteWriter
 from .http.streaming_server import StreamHandler, StreamConn
 from .http.async_body import AsyncChunkSource, ChunkPoll, UpstreamChunkSource

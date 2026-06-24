@@ -1,4 +1,4 @@
-"""Reactor-integrated external streaming source (v0.9 B1).
+"""Reactor-integrated external streaming source.
 
 The synchronous ``ChunkSource`` (``flare.http.body``) is a *pull*: each
 ``next`` returns the next chunk or ``None`` for EOF. That is exactly
@@ -8,7 +8,7 @@ another fd." A streaming proxy whose chunks arrive on a UDS / pipe /
 eventfd needs that third state, or every front re-implements an epoll
 loop and a hand-rolled fd->client copy.
 
-B1 adds the missing state as a small, total API:
+This module adds the missing state as a small, total API:
 
 - ``ChunkPoll`` -- a tri-state poll result. Exactly one of: a ready
   chunk, "pending, wake me on this fd", or EOF. The three states are
@@ -18,35 +18,34 @@ B1 adds the missing state as a small, total API:
 - ``AsyncChunkSource`` -- the async sibling of ``ChunkSource``: one
   method, ``poll(cancel) -> ChunkPoll``. Synchronous sources keep using
   ``ChunkSource``; this is purely additive.
-- ``UpstreamChunkSource`` -- the concrete impl an inference front needs:
+- ``UpstreamChunkSource`` -- the concrete impl a streaming proxy needs:
   a single framed logical stream over a non-blocking connection. It
-  composes the B3 frame codec (``FrameDemux``) for parsing and reports
+  composes the frame codec (``FrameDemux``) for parsing and reports
   ``pending(fd)`` on EAGAIN so the reactor parks instead of busy-polling.
 
-Composition with the typed streaming surface (A2/A4)
----------------------------------------------------
+Composition with the typed streaming surface
+--------------------------------------------
 
 A handler drives an ``AsyncChunkSource`` with no bespoke reactor code::
 
     def on_open(mut self, mut conn: StreamConn) raises:
         var src = UpstreamChunkSource(UnixStream.connect(self.worker), id)
-        conn.attach_upstream(src.fd())     # A4: reactor watches the fd
-        self.sources[conn.id()] = src^     # per-connection state (A2)
+        conn.attach_upstream(src.fd())     # reactor watches the fd
+        self.sources[conn.id()] = src^     # per-connection state
 
     def on_upstream(mut self, mut conn: StreamConn) raises:
         ref src = self.sources[conn.id()]
         var p = src.poll(conn.cancel())    # never blocks
         if p.is_ready():
-            conn.send(Span[UInt8, _](p.take_chunk()))   # B7 will coalesce
+            conn.send(Span[UInt8, _](p.take_chunk()))   # coalesced on drain
         elif p.is_eof():
             conn.request_close()
         # is_pending(): do nothing -- stay parked on the fd (no spin)
 
 The reactor calls ``on_upstream`` only when the attached fd is readable,
-so the ``pending`` branch is a genuine park, not a poll loop -- that is
-the B1 acceptance bar (no busy-poll between gaps). B2 adds the watermark
-coupling that also gates the *upstream* read interest when the client is
-write-blocked.
+so the ``pending`` branch is a genuine park, not a poll loop (no
+busy-poll between gaps). Watermark backpressure additionally gates the
+*upstream* read interest when the client is write-blocked.
 """
 
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
@@ -179,14 +178,14 @@ trait AsyncChunkSource(ImplicitlyDestructible, Movable):
 struct UpstreamChunkSource(AsyncChunkSource, Movable):
     """One framed logical stream over a non-blocking connection.
 
-    Owns a ``UnixStream`` to a worker and reads B3 frames for a single
+    Owns a ``UnixStream`` to a worker and reads frames for a single
     ``request_id`` off it. ``poll`` drains any buffered ``CHUNK`` frame,
     else does one non-blocking read: a completed ``CHUNK`` -> ``ready``;
     a ``DONE`` / connection EOF -> ``eof``; ``EAGAIN`` -> ``pending(fd)``
     so the reactor waits on the fd instead of spinning; ``ERROR`` raises.
 
     The frame parsing is the same ``FrameDemux`` the multiplexed
-    ``FrameMux`` (B3) uses, so a worker can speak one wire shape to both
+    ``FrameMux`` uses, so a worker can speak one wire shape to both
     the single-stream and multiplexed fronts.
 
     ponytail: one source owns one connection (a dedicated framed link).
@@ -200,13 +199,13 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
     var conn: UnixStream
     """The owned framed upstream connection (set non-blocking at init)."""
     var demux: FrameDemux
-    """Frame reassembly for the inbound byte stream (B3 codec)."""
+    """Frame reassembly for the inbound byte stream."""
     var request_id: UInt64
     """The single logical stream this source reads."""
     var _eof: Bool
     """Latched once DONE / connection-EOF is seen; further polls are EOF."""
     var _cancel_sent: Bool
-    """B6: latched once a CANCEL frame has been emitted, so a teardown that
+    """Latched once a CANCEL frame has been emitted, so a teardown that
     both polls (cancel observed) and calls ``send_cancel`` sends it once."""
 
     def __init__(out self, var conn: UnixStream, request_id: UInt64) raises:
@@ -224,7 +223,7 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
         return self.conn._socket.fd
 
     def send_cancel(mut self) raises:
-        """Emit a CANCEL frame for this ``request_id`` upstream (B6).
+        """Emit a CANCEL frame for this ``request_id`` upstream.
 
         Tells the backend to stop producing tokens nobody will read --
         e.g. the client disconnected mid-generation. Idempotent and
@@ -250,7 +249,7 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
         if self._eof:
             return ChunkPoll.eof()
         if cancel.cancelled():
-            # B6: propagate the cancel to the backend, then EOF.
+            # propagate the cancel to the backend, then EOF.
             try:
                 self.send_cancel()
             except:

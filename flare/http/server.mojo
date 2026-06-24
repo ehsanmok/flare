@@ -716,7 +716,7 @@ struct HttpServer(Movable):
         max_in_flight: Int = 0,
         retry_after_s: Int = 1,
     ) raises:
-        """Run the single-threaded streaming reactor loop (v0.9 A2).
+        """Run the single-threaded streaming reactor loop.
 
         The typed-streaming counterpart of ``serve``: instead of a
         request/response ``Handler``, it drives a ``StreamHandler``
@@ -724,7 +724,7 @@ struct HttpServer(Movable):
         ``on_writable`` / ``on_upstream`` / ``on_close``) over the
         reactor, owning the EPOLLOUT-driven outbound drain so the front
         never blocks the event loop. Use this for multiplexing /
-        streaming fronts (e.g. an LLM-inference proxy).
+        streaming fronts (e.g. a streaming proxy).
 
         Single-listener, single-worker. ``bind_many`` extra listeners
         and multi-worker mode are not supported here yet.
@@ -732,7 +732,7 @@ struct HttpServer(Movable):
         Args:
             handler: The streaming front (ownership transferred). One
                 instance services every connection.
-            max_in_flight: Admission cap (B4); ``0`` (default) = unlimited.
+            max_in_flight: Admission cap; ``0`` (default) = unlimited.
                 When the live-connection count is at the cap, a new
                 connection is refused with a 503 + ``Retry-After`` instead
                 of hanging in the accept backlog.

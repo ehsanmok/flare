@@ -1,6 +1,6 @@
 """Safe, bounds-checked byte cursors.
 
-``ByteReader`` and ``ByteWriter`` are the v0.9 replacement for the
+``ByteReader`` and ``ByteWriter`` replace the
 hand-rolled big-endian readers and unchecked ``String(unsafe_from_utf8=...)``
 construction that a custom protocol front otherwise reaches for. Every
 read is bounds-checked (a short buffer raises rather than reading out

@@ -185,10 +185,10 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 
 ## Streaming proxy surface (v0.9)
 
-The shape an LLM-inference front (or any reverse proxy that pumps an
-external producer's output to a client) needs: a typed streaming
-server whose response body's chunks arrive on a reactor-registered fd,
-with backpressure coupled across upstream and downstream. The front is
+The shape a streaming proxy (any reverse proxy that pumps an external
+producer's output to a client) needs: a typed streaming server whose
+response body's chunks arrive on a reactor-registered fd, with
+backpressure coupled across upstream and downstream. The front is
 a `StreamHandler` plus a typed state struct — no raw reactor loop, no
 `UnsafePointer` state smuggling, no per-slot `alloc` tables, no manual
 byte parsing, no manual fd/token bookkeeping. See
@@ -199,13 +199,13 @@ the end-to-end shape.
 |---|---|
 | `StreamHandler` — typed lifecycle trait (`on_open` / `on_upstream` / `on_writable` / `on_close`); the handler struct's fields are its shared state, per-connection state keys on `conn.id()` | `flare.http.streaming_server`, `flare` |
 | `StreamConn` — framework-owned per-connection handle: owns the client `TcpStream`, a per-connection `Cancel`, a single coalescing outbound buffer (`send` queues; the reactor drains on writable edges) | `flare.http.streaming_server`, `flare` |
-| `HttpServer.serve_streaming[H](handler, max_in_flight=0, retry_after_s=1)` — the streaming entry point (single-listener, single-worker); `max_in_flight` admits with a 503 + `Retry-After` past the cap (B4) | `flare.http.server` |
-| `conn.attach_upstream(fd)` / `detach_upstream()` — register a front-owned upstream fd so the reactor fires `on_upstream` when it is readable (B1); no token math | `flare.http.streaming_server` |
+| `HttpServer.serve_streaming[H](handler, max_in_flight=0, retry_after_s=1)` — the streaming entry point (single-listener, single-worker); `max_in_flight` admits with a 503 + `Retry-After` past the cap | `flare.http.server` |
+| `conn.attach_upstream(fd)` / `detach_upstream()` — register a front-owned upstream fd so the reactor fires `on_upstream` when it is readable; no token math | `flare.http.streaming_server` |
 | `AsyncChunkSource` trait + `ChunkPoll` tri-state (`ready(bytes)` / `pending(fd)` / `eof()`) — a body whose chunks arrive asynchronously without busy-polling | `flare.http.async_body`, `flare` |
-| `UpstreamChunkSource` — concrete `AsyncChunkSource` over a framed UDS logical stream; `poll(cancel)` returns the tri-state, `send_cancel()` propagates a client disconnect upstream (B6) | `flare.http.async_body`, `flare` |
-| Watermark backpressure (B2): `conn.set_watermarks(hi, lo)`, `write_buffer_full()`, `apply_backpressure()` — hi/lo hysteresis gates upstream read interest so a slow client cannot force unbounded buffering | `flare.http.streaming_server` |
-| Incremental inbound body (B5): `conn.enable_inbound()`, `conn.read_body(max_bytes)` returning `ChunkPoll` — bounded-memory consumption of a large request body | `flare.http.streaming_server` |
-| Write coalescing (B7): K `send` calls in one tick flush in one `send(2)`; `conn.write_syscalls()` observes it | `flare.http.streaming_server` |
+| `UpstreamChunkSource` — concrete `AsyncChunkSource` over a framed UDS logical stream; `poll(cancel)` returns the tri-state, `send_cancel()` propagates a client disconnect upstream | `flare.http.async_body`, `flare` |
+| Watermark backpressure: `conn.set_watermarks(hi, lo)`, `write_buffer_full()`, `apply_backpressure()` — hi/lo hysteresis gates upstream read interest so a slow client cannot force unbounded buffering | `flare.http.streaming_server` |
+| Incremental inbound body: `conn.enable_inbound()`, `conn.read_body(max_bytes)` returning `ChunkPoll` — bounded-memory consumption of a large request body | `flare.http.streaming_server` |
+| Write coalescing: K `send` calls in one tick flush in one `send(2)`; `conn.write_syscalls()` observes it | `flare.http.streaming_server` |
 | `FrameMux` — multiplexes many logical streams over one owned `UnixStream` (`open` / `send_chunk` / `done` / `cancel` / `flush` / `pump` / `poll`); frame `\| u32 len \| u64 request_id \| u8 kind \| payload \|` via `encode_frame` / `decode_frame`, `Frame`, `FrameKind`, `FrameDemux`; fuzz-clean | `flare.uds.frame_mux`, `flare` |
 | `ByteReader[origin]` / `ByteWriter` — bounds-checked, endian-aware byte cursors (checked u8/u16/u32/u64 be+le, `read_utf8`); replace raw `UnsafePointer` frame parsing | `flare.io`, `flare` |
 
