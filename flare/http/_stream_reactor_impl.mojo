@@ -24,12 +24,21 @@ via ``on_close``. The front owns the upstream fd's lifetime (open in
 ``on_open``, close in ``on_close``); the reactor only watches it.
 Inbound request-body consumption is B5.
 
+Backpressure (B2): a connection's attached upstream fd is read only
+while its client relay buffer is below the high watermark. ``_reconcile_after``
+calls ``StreamConn.apply_backpressure`` (hi/lo hysteresis) and toggles the
+upstream's ``INTEREST_READ`` accordingly, so a slow client throttles the
+upstream instead of forcing unbounded token buffering. The buffer is
+bounded by the high watermark plus at most one upstream read; a relay
+front should also check ``conn.write_buffer_full()`` in its drain loop to
+avoid overshooting within a single readable edge.
+
 ponytail: while a connection is open and not closing, ``INTEREST_WRITE``
-stays armed, so a front that stalls without producing or closing will
-busy-spin on level-triggered writable edges. That is the exact ceiling
-B1/B2 lift (park on the upstream fd + hi/lo watermark deregistration);
-until then a streaming front is expected to produce on every writable
-edge until it calls ``request_close``.
+stays armed, so a front *without an upstream* that stalls without
+producing or closing still busy-spins on level-triggered writable edges.
+The upstream-relay shape (the inference-front case) is fully gated by the
+B1 park + B2 watermark; the residual spin is the no-upstream stalled
+front, expected to produce on every writable edge until ``request_close``.
 """
 
 from std.collections import Dict
@@ -110,7 +119,10 @@ def _reconcile_after(
     (``reg_upstream_fd``) so a no-op call costs only two lookups.
     """
     ref c = conns[fd]
-    # Upstream reconcile.
+    # Upstream reconcile (fd attach/detach) + B2 backpressure gating: the
+    # upstream read interest is armed only while the client relay buffer
+    # is below the high watermark, so a slow client throttles the upstream
+    # instead of forcing unbounded token buffering.
     var want = c.upstream_fd()
     var have = c.reg_upstream_fd()
     if want != have:
@@ -122,12 +134,25 @@ def _reconcile_after(
             if have in up_to_client:
                 _ = up_to_client.pop(have)
         if want != -1:
+            var up_int = INTEREST_READ if c.apply_backpressure() else 0
             try:
-                reactor.register(c_int(want), UInt64(want), INTEREST_READ)
+                reactor.register(c_int(want), UInt64(want), up_int)
                 up_to_client[want] = fd
             except:
                 pass
+            c._set_reg_upstream_interest(up_int)
+        else:
+            c._set_reg_upstream_interest(-1)
         c._set_reg_upstream_fd(want)
+    elif want != -1:
+        # Same upstream fd: toggle its read interest across watermarks.
+        var up_int = INTEREST_READ if c.apply_backpressure() else 0
+        if up_int != c.reg_upstream_interest():
+            try:
+                reactor.modify(c_int(want), up_int)
+                c._set_reg_upstream_interest(up_int)
+            except:
+                pass
     # Client write-interest reconcile.
     var desired = _desired_interest(c)
     if interests[fd] != desired:

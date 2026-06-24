@@ -63,6 +63,20 @@ from flare.net._libc import _send, _strerror, MSG_NOSIGNAL
 from flare.tcp import TcpStream
 
 
+comptime DEFAULT_HI_WATERMARK: Int = 256 * 1024
+"""Default high watermark for the per-connection relay buffer (B2). When
+unwritten outbound bytes reach this, the reactor drops read interest on
+the attached upstream fd so a slow client cannot force unbounded token
+buffering. ponytail: a fixed 256 KiB ceiling -- one in-flight relay
+window; tune per-connection with ``set_watermarks`` if a front needs a
+deeper or shallower pipe."""
+
+comptime DEFAULT_LO_WATERMARK: Int = 64 * 1024
+"""Default low watermark. Once the relay buffer drains back to this, the
+reactor re-arms upstream read interest. The hi/lo gap is the hysteresis
+band that stops interest from thrashing on every chunk."""
+
+
 # ── StreamConn ─────────────────────────────────────────────────────────────
 
 
@@ -109,6 +123,25 @@ struct StreamConn(Movable):
     """Reactor bookkeeping: the upstream fd currently registered (or
     ``-1``). Lets the reactor diff desired vs registered without a
     reverse lookup. Framework-internal; fronts never touch it."""
+    var _hi_watermark: Int
+    """Relay-buffer high watermark (B2): at this occupancy upstream read
+    interest is dropped. Defaults to ``DEFAULT_HI_WATERMARK``."""
+    var _lo_watermark: Int
+    """Relay-buffer low watermark (B2): below this, upstream read interest
+    is re-armed. Defaults to ``DEFAULT_LO_WATERMARK``."""
+    var _upstream_paused: Bool
+    """B2 state: True while upstream reads are gated off because the
+    client write buffer is above the high watermark. Hysteresis: cleared
+    only when occupancy falls to the low watermark."""
+    var _reg_upstream_interest: Int
+    """Reactor bookkeeping: interest bits currently registered for the
+    upstream fd (``-1`` unknown). Lets the reactor skip redundant
+    ``modify`` calls when the watermark state is unchanged."""
+    var _pause_count: Int
+    """Number of high-watermark crossings (upstream paused). Observable
+    for the B2 acceptance test; cheap counter otherwise."""
+    var _resume_count: Int
+    """Number of low-watermark crossings (upstream resumed)."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -120,6 +153,12 @@ struct StreamConn(Movable):
         self.out_pos = 0
         self._upstream_fd = -1
         self._reg_upstream_fd = -1
+        self._hi_watermark = DEFAULT_HI_WATERMARK
+        self._lo_watermark = DEFAULT_LO_WATERMARK
+        self._upstream_paused = False
+        self._reg_upstream_interest = -1
+        self._pause_count = 0
+        self._resume_count = 0
 
     @always_inline
     def id(self) -> Int:
@@ -198,6 +237,94 @@ struct StreamConn(Movable):
         """Framework-internal: record the reactor's registered upstream
         fd after a reconcile."""
         self._reg_upstream_fd = fd
+
+    # ── Backpressure watermarks (B2) ───────────────────────────────
+
+    def set_watermarks(mut self, hi: Int, lo: Int):
+        """Tune the relay-buffer hi/lo watermarks for this connection.
+
+        ``hi`` is the occupancy at which the reactor stops reading the
+        attached upstream; ``lo`` (< ``hi``) is where it resumes. Values
+        are clamped to a sane order (``lo`` forced below ``hi``) so a
+        front cannot wedge the gate shut. Call in ``on_open`` to size the
+        relay pipe before any bytes flow.
+        """
+        var h = hi if hi > 0 else 1
+        var l = lo if lo >= 0 else 0
+        if l >= h:
+            l = h - 1
+        self._hi_watermark = h
+        self._lo_watermark = l
+
+    @always_inline
+    def hi_watermark(self) -> Int:
+        """The high watermark in bytes."""
+        return self._hi_watermark
+
+    @always_inline
+    def lo_watermark(self) -> Int:
+        """The low watermark in bytes."""
+        return self._lo_watermark
+
+    @always_inline
+    def write_buffer_full(self) -> Bool:
+        """True once unwritten outbound bytes reach the high watermark.
+
+        A relay front should check this in its ``on_upstream`` drain loop
+        and stop pulling from the upstream when it returns True, so a
+        single readable edge cannot overshoot the bound before the
+        reactor's interest gate takes effect on the next reconcile.
+        """
+        return self.pending_out() >= self._hi_watermark
+
+    @always_inline
+    def upstream_paused(self) -> Bool:
+        """True while upstream reads are gated off by backpressure."""
+        return self._upstream_paused
+
+    @always_inline
+    def pause_count(self) -> Int:
+        """How many times upstream reads were paused (hi crossings)."""
+        return self._pause_count
+
+    @always_inline
+    def resume_count(self) -> Int:
+        """How many times upstream reads were resumed (lo crossings)."""
+        return self._resume_count
+
+    def apply_backpressure(mut self) -> Bool:
+        """Recompute the upstream read gate from buffer occupancy with
+        hi/lo hysteresis; update the paused flag and crossing counters.
+
+        Returns whether the attached upstream fd should currently be read
+        (``True`` = arm ``INTEREST_READ``; ``False`` = pause). Pauses on
+        crossing the high watermark, resumes on falling to the low one;
+        between the two it holds the prior state -- the band that stops
+        interest thrash. Framework-internal: the reactor calls this on
+        each reconcile.
+        """
+        var occ = self.pending_out()
+        if not self._upstream_paused:
+            if occ >= self._hi_watermark:
+                self._upstream_paused = True
+                self._pause_count += 1
+        else:
+            if occ <= self._lo_watermark:
+                self._upstream_paused = False
+                self._resume_count += 1
+        return not self._upstream_paused
+
+    @always_inline
+    def reg_upstream_interest(self) -> Int:
+        """Framework-internal: upstream interest bits currently
+        registered (``-1`` unknown)."""
+        return self._reg_upstream_interest
+
+    @always_inline
+    def _set_reg_upstream_interest(mut self, interest: Int):
+        """Framework-internal: record registered upstream interest after a
+        reconcile."""
+        self._reg_upstream_interest = interest
 
     @always_inline
     def set_nonblocking(mut self, enabled: Bool) raises:

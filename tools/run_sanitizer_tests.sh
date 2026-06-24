@@ -74,6 +74,11 @@ ASAN_TESTS=(
   # (serve_streaming relay). ASan validates the non-blocking recv +
   # FrameDemux drain and the per-connection source teardown.
   "tests/http/test_async_chunk_source.mojo"
+  # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
+  # counter checks, plus a forked slow-client soak. ASan validates the
+  # relay-buffer compaction under throttled draining and the upstream
+  # interest toggle path.
+  "tests/http/test_backpressure.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf
