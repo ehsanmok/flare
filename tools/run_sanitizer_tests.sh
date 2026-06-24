@@ -199,6 +199,11 @@ ASAN_TESTS=(
   # builders' Span/List borrows, and the inbound decrypt hot path
   # (header_decrypt + packet_decrypt through rustls).
   "tests/quic/test_quic_client.mojo"
+  # H3C-2 -- HTTP/3 client request writer + response reader. Pure
+  # byte codecs (no QUIC), but ASan validates the response reader's
+  # inbox compaction across frame boundaries and the QPACK field-
+  # section decode borrows on the client side.
+  "tests/h3/test_h3_client_streams.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)

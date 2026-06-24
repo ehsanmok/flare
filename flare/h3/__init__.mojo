@@ -32,6 +32,15 @@ Public re-exports:
   DATA, TRAILERS) with QPACK-encoded field sections, ASCII
   header-name lowercasing, and pseudo-header validation per
   RFC 9114 §4.
+- :func:`encode_request_headers`, :func:`encode_request_data`,
+  :func:`encode_request_trailers`, :func:`encode_client_control_stream`,
+  and the QPACK uni-stream preamble encoders — the client-side
+  request writer (mirror of the response writer) plus the
+  unidirectional control / QPACK stream preambles (RFC 9114 §6.2).
+- :class:`H3ResponseReader` + :class:`H3Response` — the stateful
+  client-side response decoder that accumulates HEADERS / DATA /
+  trailers into an assembled response (mirror of the request
+  reader).
 """
 
 from .frame import (
@@ -67,6 +76,25 @@ from .response_writer import (
     encode_response_data,
     encode_response_headers,
     encode_response_trailers,
+)
+from .request_writer import (
+    H3_UNI_STREAM_CONTROL,
+    H3_UNI_STREAM_QPACK_DECODER,
+    H3_UNI_STREAM_QPACK_ENCODER,
+    encode_client_control_stream,
+    encode_qpack_decoder_stream,
+    encode_qpack_encoder_stream,
+    encode_request_data,
+    encode_request_headers,
+    encode_request_trailers,
+)
+from .response_reader import (
+    H3_RESPONSE_STATE_BODY,
+    H3_RESPONSE_STATE_DONE,
+    H3_RESPONSE_STATE_INIT,
+    H3_RESPONSE_STATE_TRAILERS,
+    H3Response,
+    H3ResponseReader,
 )
 from .server import (
     H3Connection,
