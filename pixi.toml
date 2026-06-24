@@ -360,6 +360,7 @@ test-quic-handshake-bridge = { cmd = "mojo -I . tests/quic/test_quic_handshake_b
 test-quic-keys-install     = { cmd = "mojo -I . tests/quic/test_quic_keys_install.mojo", depends-on = ["build-rustls-quic"] }      # Phase F commit 3/6 -- per-level egress queues + readiness install (3 cases)
 test-quic-post-initial-egress = { cmd = "mojo -I . tests/quic/test_quic_post_initial_egress.mojo", depends-on = ["build-rustls-quic"] }  # Phase F commit 4/6 -- Handshake + 1-RTT egress builders gating (8 cases)
 test-quic-post-initial-decrypt = { cmd = "mojo -I . tests/quic/test_quic_post_initial_decrypt.mojo", depends-on = ["build-rustls-quic"] }  # inbound Handshake + 1-RTT decrypt gating + bounds (4 cases)
+test-quic-client = { cmd = "mojo -I . tests/quic/test_quic_client.mojo", depends-on = ["build-rustls-quic"] }  # H3C-1 -- QUIC client connection driver vs QuicListener loopback handshake + 1-RTT stream egress (2 cases)
 test-h3-server-scaffold   = "mojo -I . tests/h3/test_server_scaffold.mojo"    # flare.h3.server scaffold -- H3Connection carrier + stream lifecycle (~11 cases)
 test-h3-dispatch          = "mojo -I . tests/h3/test_h3_dispatch.mojo"        # Track Q4-W commit 1/3 -- H3Connection feed -> take_request -> emit_response (10 cases)
 test-h3-end-to-end        = "mojo -I . tests/h3/test_h3_end_to_end.mojo"      # Track Q12-W commit 4/6 -- QuicListener H3 dispatch + Handler wire (6 cases)

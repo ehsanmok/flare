@@ -192,6 +192,13 @@ ASAN_TESTS=(
   # non-zero session handle freed exactly once via
   # RustlsQuicAcceptor.free_session at listener teardown.
   "tests/quic/test_quic_handshake_bridge.mojo"
+  # H3C-1 -- the QUIC client connection driver. Drives a full
+  # client handshake (QuicClientConnection.start -> poll) against
+  # the real QuicListener over loopback UDP so ASan validates the
+  # client-side RustlsQuicSession lifetime, the per-level egress
+  # builders' Span/List borrows, and the inbound decrypt hot path
+  # (header_decrypt + packet_decrypt through rustls).
+  "tests/quic/test_quic_client.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)
