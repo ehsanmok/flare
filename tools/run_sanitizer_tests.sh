@@ -56,6 +56,10 @@ ASAN_TESTS=(
   # v0.9 A1 — StreamHandler/StreamConn typed lifecycle over loopback
   # TCP (per-connection CancelCell heap alloc + owned TcpStream).
   "tests/http/test_streaming_server.mojo"
+  # v0.9 A2 — serve_streaming reactor loop e2e (forked server +
+  # Dict[Int, StreamConn] + EPOLLOUT drain). ASan validates the
+  # parent-side client path and the connection-table teardown.
+  "tests/http/test_streaming_server_reactor.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf

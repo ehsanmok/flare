@@ -18,13 +18,15 @@ Pieces:
   token, no address-as-``Int``.
 - ``StreamConn`` -- the framework-owned per-connection handle. Owns the
   client ``TcpStream``, a per-connection ``Cancel`` cell, a stable
-  per-connection id, and the close flag.
+  per-connection id, the close flag, and a single owned outbound write
+  buffer (``send`` queues; ``flush_blocking`` / ``drain_nonblocking``
+  empty it). No per-slot ``alloc`` table, no free list.
 - ``run_stream_connection`` -- a blocking single-connection driver that
   walks one connection through the lifecycle. The reactor-integrated
-  multi-connection entry point (``HttpServer.serve_streaming``) builds
-  on the same trait and lands next (A2); this driver is the testable
-  core of the contract and is itself useful for one-connection UDS
-  sidecars.
+  multi-connection entry point (``HttpServer.serve_streaming``, in
+  ``_stream_reactor_impl``) builds on the same trait and the same
+  ``StreamConn``; this driver is the testable single-connection core
+  and is itself useful for one-connection UDS sidecars.
 
 Typed-state model
 -----------------
@@ -52,9 +54,12 @@ of ``Int`` addresses and the ``alloc[...](max_slots)`` slot tables +
 free stack.
 """
 
-from std.ffi import c_int
+from std.ffi import c_int, c_size_t, get_errno, ErrNo
+from std.memory import memcpy
 
 from .cancel import Cancel, CancelCell, CancelReason
+from flare.net import NetworkError
+from flare.net._libc import _send, _strerror, MSG_NOSIGNAL
 from flare.tcp import TcpStream
 
 
@@ -85,6 +90,15 @@ struct StreamConn(Movable):
     """Set by the front via ``request_close()`` once it has finished
     with the connection; the driver / reactor tears the connection down
     after the current step returns."""
+    var out_buf: List[UInt8]
+    """Pending outbound bytes. ``send`` appends here; the blocking
+    driver flushes with ``flush_blocking`` and the reactor drains
+    incrementally with ``drain_nonblocking`` on writable edges. This is
+    the single owned write buffer (no per-slot ``alloc`` table)."""
+    var out_pos: Int
+    """Bytes of ``out_buf`` already written to the socket. The unwritten
+    tail is ``out_buf[out_pos:]``; ``out_pos == len(out_buf)`` means
+    fully drained."""
 
     def __init__(out self, var client: TcpStream, id: Int = 0) raises:
         """Adopt ``client`` into a fresh per-connection handle."""
@@ -92,6 +106,8 @@ struct StreamConn(Movable):
         self._id = id
         self._cancel_cell = CancelCell()
         self._close_requested = False
+        self.out_buf = List[UInt8]()
+        self.out_pos = 0
 
     @always_inline
     def id(self) -> Int:
@@ -125,15 +141,109 @@ struct StreamConn(Movable):
         """True once ``request_close`` has been called."""
         return self._close_requested
 
-    def send(mut self, data: Span[UInt8, _]) raises:
-        """Write ``data`` to the client, looping until fully sent.
+    @always_inline
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Toggle non-blocking mode on the client socket (reactor
+        path sets this once at accept)."""
+        self.client._socket.set_nonblocking(enabled)
 
-        Blocking on this single-connection driver. The reactor-backed
-        ``serve_streaming`` (A2) replaces this with a buffered,
-        backpressure-aware EPOLLOUT write path; the front's call site
-        is unchanged.
+    def send(mut self, data: Span[UInt8, _]):
+        """Queue ``data`` for delivery to the client.
+
+        Buffered, not written immediately: the blocking driver flushes
+        with ``flush_blocking`` after each lifecycle step; the reactor
+        drains with ``drain_nonblocking`` on writable edges. Same call
+        site in both modes, so a front never blocks the event loop.
         """
-        self.client.write_all(data)
+        var n = len(data)
+        if n == 0:
+            return
+        var old = len(self.out_buf)
+        self.out_buf.resize(old + n, UInt8(0))
+        memcpy(
+            dest=self.out_buf.unsafe_ptr() + old,
+            src=data.unsafe_ptr(),
+            count=n,
+        )
+
+    @always_inline
+    def pending_out(self) -> Int:
+        """Unwritten outbound bytes (``len(out_buf) - out_pos``)."""
+        return len(self.out_buf) - self.out_pos
+
+    @always_inline
+    def has_pending_out(self) -> Bool:
+        """True if there are unwritten outbound bytes."""
+        return self.out_pos < len(self.out_buf)
+
+    @always_inline
+    def _reset_out(mut self):
+        """Drop the outbound buffer (fully flushed)."""
+        self.out_buf.clear()
+        self.out_pos = 0
+
+    def _compact(mut self):
+        """Reclaim the already-written prefix of ``out_buf`` so a slow
+        client cannot make the buffer grow without bound."""
+        if self.out_pos == 0:
+            return
+        var rem = len(self.out_buf) - self.out_pos
+        if rem == 0:
+            self._reset_out()
+            return
+        var nb = List[UInt8](capacity=rem)
+        nb.resize(rem, UInt8(0))
+        memcpy(
+            dest=nb.unsafe_ptr(),
+            src=self.out_buf.unsafe_ptr() + self.out_pos,
+            count=rem,
+        )
+        self.out_buf = nb^
+        self.out_pos = 0
+
+    def flush_blocking(mut self) raises:
+        """Write all pending outbound bytes, blocking. Used by the
+        single-connection driver."""
+        if self.out_pos < len(self.out_buf):
+            var rem = Span[UInt8, _](
+                ptr=self.out_buf.unsafe_ptr() + self.out_pos,
+                length=len(self.out_buf) - self.out_pos,
+            )
+            self.client.write_all(rem)
+        self._reset_out()
+
+    def drain_nonblocking(mut self) raises -> Bool:
+        """Write as much of the pending buffer as the socket accepts
+        without blocking.
+
+        Returns ``True`` once the buffer is fully flushed, ``False`` if
+        the socket would block (EAGAIN) with bytes still pending -- the
+        caller then keeps ``INTEREST_WRITE`` armed and retries on the
+        next writable edge. Raises on a real socket error (EPIPE /
+        ECONNRESET) so the reactor closes the connection.
+        """
+        while self.out_pos < len(self.out_buf):
+            var ptr = self.out_buf.unsafe_ptr() + self.out_pos
+            var n_to = len(self.out_buf) - self.out_pos
+            var sent = _send(
+                self.client._socket.fd, ptr, c_size_t(n_to), MSG_NOSIGNAL
+            )
+            if sent > 0:
+                self.out_pos += Int(sent)
+                continue
+            if sent == 0:
+                break
+            var e = get_errno()
+            if e == ErrNo.EINTR:
+                continue
+            if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                self._compact()
+                return False
+            raise NetworkError(
+                _strerror(e.value) + " (stream send)", Int(e.value)
+            )
+        self._reset_out()
+        return True
 
     def recv(mut self, mut buf: List[UInt8], max_bytes: Int) raises -> Int:
         """Append up to ``max_bytes`` bytes read from the client onto
@@ -200,6 +310,8 @@ def run_stream_connection[
     """
     var conn = StreamConn(client^, id)
     handler.on_open(conn)
+    conn.flush_blocking()
     while not conn.is_closing():
         handler.on_writable(conn)
+        conn.flush_blocking()
     handler.on_close(conn)

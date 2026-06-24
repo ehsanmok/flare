@@ -26,6 +26,7 @@ from ..runtime._libc_time import libc_nanosleep_ms
 from std.collections import Optional
 
 from .handler import Handler, CancelHandler
+from .streaming_server import StreamHandler
 from .intern import intern_method_bytes
 from .request import Request, Method
 from .response import Response, Status
@@ -706,6 +707,38 @@ struct HttpServer(Movable):
                 handler,
                 self._stopping,
             )
+
+    def serve_streaming[H: StreamHandler](mut self, var handler: H) raises:
+        """Run the single-threaded streaming reactor loop (v0.9 A2).
+
+        The typed-streaming counterpart of ``serve``: instead of a
+        request/response ``Handler``, it drives a ``StreamHandler``
+        through the per-connection lifecycle (``on_open`` /
+        ``on_writable`` / ``on_upstream`` / ``on_close``) over the
+        reactor, owning the EPOLLOUT-driven outbound drain so the front
+        never blocks the event loop. Use this for multiplexing /
+        streaming fronts (e.g. an LLM-inference proxy).
+
+        Single-listener, single-worker. ``bind_many`` extra listeners
+        and multi-worker mode are not supported here yet.
+
+        Args:
+            handler: The streaming front (ownership transferred). One
+                instance services every connection.
+
+        Raises:
+            NetworkError: On fatal listener / reactor errors;
+                per-connection errors close the offending connection.
+        """
+        from ._stream_reactor_impl import run_stream_reactor_loop
+
+        if len(self._extra_listener_fds) > 0:
+            raise Error(
+                "HttpServer.serve_streaming is single-listener only; bind"
+                " with HttpServer.bind (not bind_many)."
+            )
+        self._stopping = False
+        run_stream_reactor_loop(self._listener, handler, self._stopping)
 
     def serve[
         H: Handler & Copyable
