@@ -78,6 +78,7 @@ natural.
 | [`reactor.mojo`](../examples/advanced/reactor.mojo) | direct `flare.runtime.Reactor` usage for custom protocols |
 | [`work_stealing.mojo`](../examples/advanced/work_stealing.mojo) | `HandoffQueue` + `WorkerHandoffPool` + `FLARE_SOAK_WORKERS` knob |
 | [`uds_sidecar.mojo`](../examples/advanced/uds_sidecar.mojo) | `UnixListener` / `UnixStream` AF_UNIX sidecar IPC |
+| [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) | v0.9 streaming-proxy surface: `StreamHandler` + `UpstreamChunkSource` + `attach_upstream` over `serve_streaming`, relaying a `FrameMux` backend with watermark backpressure (the inference-front shape) |
 | [`cert_reload.mojo`](../examples/advanced/cert_reload.mojo) | `TlsAcceptor.reload()` for ACME / Let's Encrypt cert rotation without restart |
 | [`mtls.mojo`](../examples/advanced/mtls.mojo) | mTLS configuration + construction-time validation |
 | [`http2.mojo`](../examples/advanced/http2.mojo) | `H2Connection` driver, ALPN dispatch, h2c upgrade detection |
@@ -130,6 +131,7 @@ natural.
 | Make HTTP/2 client requests (h2c via prior knowledge; `https://` auto-negotiates h2 vs h1.1 via ALPN) | [`http2_client.mojo`](../examples/advanced/http2_client.mojo) |
 | Serve HTTP/1.1 + HTTP/2 from one port | [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
 | AF_UNIX sidecar IPC | [`uds_sidecar.mojo`](../examples/advanced/uds_sidecar.mojo) |
+| Proxy an external producer's stream with end-to-end backpressure | [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) |
 | Even out skewed-keepalive load | [`work_stealing.mojo`](../examples/advanced/work_stealing.mojo) |
 | Emit gRPC-style HTTP/1.1 trailers | [`trailers.mojo`](../examples/intermediate/trailers.mojo) |
 | Bind a single worker on multiple addresses | [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) |
