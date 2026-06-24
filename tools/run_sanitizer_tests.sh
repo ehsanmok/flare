@@ -241,6 +241,11 @@ ASAN_TESTS=(
   # alloc_move / take_pointee / free) across acquire + release + the
   # graceful CONNECTION_CLOSE drain in __del__.
   "tests/http/test_h3_pool_reuse.mojo"
+  # H3C follow-up -- threaded h3-vs-h2 happy-eyeballs race. ASan
+  # validates the heap result/arg cells shared across the two spawned
+  # workers and freed after the join barrier, plus the live h3 leg's
+  # QUIC alloc path while the h2 leg fast-fails concurrently.
+  "tests/http/test_h3_happy_eyeballs.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)
@@ -250,6 +255,9 @@ TSAN_TESTS=(
   # Multi-worker WsServer (4-worker pthread fan-out with libc malloc'd
   # _WsWorkerCtx + UnsafePointer[ThreadHandle] storage)
   "tests/ws/test_ws_multicore.mojo"
+  # Happy-eyeballs race: two ThreadHandle workers over shared heap
+  # result cells, read only after the join barrier (no atomics).
+  "tests/http/test_h3_happy_eyeballs.mojo"
 )
 
 # Allow caller to override the test list.

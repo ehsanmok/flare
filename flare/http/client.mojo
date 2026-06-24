@@ -56,6 +56,7 @@ from ..h3.client import H3ClientConnection
 from ..tls.rustls_quic import RustlsQuicConnector
 from ..qpack import QpackHeader
 from std.os import getenv
+from std.memory import UnsafePointer
 from .client_pool import ClientPool
 from ._client.parse import (
     _decode_chunked,
@@ -78,6 +79,7 @@ from ._client.alt_svc import (
     monotonic_now_s,
 )
 from ._client.quic_pool import QuicConnectionPool
+from ._client.h3_race import race_h3_h2
 from ..net.socket import RawSocket
 from ..net._libc import (
     AF_INET,
@@ -85,6 +87,46 @@ from ..net._libc import (
     INVALID_FD,
 )
 from std.ffi import c_int
+
+
+def _is_idempotent(method: String) -> Bool:
+    """Whether ``method`` is idempotent per RFC 9110 sec 9.2.2 (safe to
+    send more than once with the same effect). Only idempotent requests
+    are eligible for the happy-eyeballs race, which dispatches the
+    request on both the h3 and h2 wires concurrently."""
+    var m = method.upper()
+    return (
+        m == "GET"
+        or m == "HEAD"
+        or m == "OPTIONS"
+        or m == "PUT"
+        or m == "DELETE"
+        or m == "TRACE"
+    )
+
+
+def _race_leg(
+    client_addr: Int,
+    is_h3: Bool,
+    url: String,
+    method: String,
+    headers: HeaderMap,
+    body: List[UInt8],
+    wire: String,
+) raises -> Response:
+    """Happy-eyeballs leg trampoline: re-materialise the
+    :class:`HttpClient` from its address, parse ``url`` (Url is
+    move-only so each leg parses its own), and run the h3 or h2/h1 path.
+    Passed to :func:`race_h3_h2` so that module needs no HttpClient
+    import. Only the h3 leg mutates client state (the QUIC pool), so the
+    two concurrent legs have a single writer."""
+    var client = UnsafePointer[HttpClient, MutUntrackedOrigin](
+        unsafe_from_address=client_addr
+    )
+    var u = Url.parse(url)
+    if is_h3:
+        return client[]._send_h3(u, method, headers, body)
+    return client[]._send_h2_or_h1_tls(u, method, headers, body, wire)
 
 
 struct HttpClient(Movable):
@@ -555,6 +597,49 @@ struct HttpClient(Movable):
             fresh.close()
         return resp^
 
+    def _send_h2_or_h1_tls(
+        self,
+        u: Url,
+        method: String,
+        extra_headers: HeaderMap,
+        body: List[UInt8],
+        wire: String,
+    ) raises -> Response:
+        """The proven TLS path: ALPN-negotiate ``["h2", "http/1.1"]``
+        and drive the request over HTTP/2 (via the internal
+        :class:`Http2ClientConnection`) or HTTP/1.1, returning a
+        :class:`Response` either way so the caller can't tell which
+        wire was used. Used both as the direct h2/h1 path and as the
+        h2 leg of the happy-eyeballs race."""
+        var tls_cfg = self._config.copy()
+        if len(tls_cfg.alpn) == 0:
+            tls_cfg.alpn = List[String]()
+            tls_cfg.alpn.append("h2")
+            tls_cfg.alpn.append("http/1.1")
+        var stream = TlsStream.connect_timeout(
+            u.host, u.port, tls_cfg^, self._timeout_ms
+        )
+        var negotiated = stream.alpn_selected()
+        if negotiated == "h2":
+            var resp_h2 = _send_h2_over_tls(
+                stream^,
+                method,
+                u,
+                extra_headers,
+                body,
+                self._user_agent,
+                self._auth_header,
+            )
+            return resp_h2^
+        # HTTP/1.1 over TLS (existing wire).
+        var wire_bytes = wire.as_bytes()
+        stream.write_all(Span[UInt8, _](wire_bytes))
+        if len(body) > 0:
+            stream.write_all(Span[UInt8, _](body))
+        var resp = _read_http_response_tls(stream)
+        stream.close()
+        return resp^
+
     # ── Context manager ───────────────────────────────────────────────────────
 
     def __enter__(var self) -> HttpClient:
@@ -992,56 +1077,33 @@ struct HttpClient(Movable):
 
         # ── Connect and send ───────────────────────────────────────────────
         if u.is_tls():
-            # HTTP/3 first when the policy says so (prefer_h3 or a
-            # fresh cached Alt-Svc advert). Any QUIC/h3 failure falls
-            # through transparently to the proven h2/h1 TLS path, so
-            # the worst case is exactly the prior behaviour.
+            # HTTP/3 when the policy says so (prefer_h3 or a fresh
+            # cached Alt-Svc advert). For idempotent methods we race h3
+            # against the h2/h1 TLS path concurrently (happy-eyeballs):
+            # whichever establishes + completes first wins, and a dead
+            # h3 path never stalls the request. For non-idempotent
+            # methods we must not duplicate the request, so we try h3
+            # then fall back sequentially. Any QUIC/h3 failure falls
+            # through transparently to the proven h2/h1 path.
             if (
                 self.h3_wire_choice("https", u.host, u.port)
                 == H3WireChoice.HTTP_3
             ):
+                if _is_idempotent(method):
+                    return race_h3_h2(
+                        _race_leg,
+                        Int(UnsafePointer(to=self)),
+                        url,
+                        method,
+                        extra_headers,
+                        body,
+                        wire,
+                    )
                 try:
                     return self._send_h3(u, method, extra_headers, body)
                 except:
                     pass  # transparent fallback to h2/h1
-            # Always advertise ALPN ``["h2", "http/1.1"]`` on the
-            # TLS ClientHello so the server can pick HTTP/2 if it
-            # supports it. The user-visible API is unchanged: if
-            # the server picks h2 we drive the request through
-            # the internal :class:`Http2ClientConnection`; if it
-            # picks http/1.1 (or doesn't pick anything, e.g. an
-            # ALPN-unaware server) we fall through to the
-            # existing HTTP/1.1 wire path. Either way we return
-            # a :class:`flare.http.Response` so the caller can't
-            # tell which wire was used.
-            var tls_cfg = self._config.copy()
-            if len(tls_cfg.alpn) == 0:
-                tls_cfg.alpn = List[String]()
-                tls_cfg.alpn.append("h2")
-                tls_cfg.alpn.append("http/1.1")
-            var stream = TlsStream.connect_timeout(
-                u.host, u.port, tls_cfg^, self._timeout_ms
-            )
-            var negotiated = stream.alpn_selected()
-            if negotiated == "h2":
-                var resp_h2 = _send_h2_over_tls(
-                    stream^,
-                    method,
-                    u,
-                    extra_headers,
-                    body,
-                    self._user_agent,
-                    self._auth_header,
-                )
-                return resp_h2^
-            # HTTP/1.1 over TLS (existing wire).
-            var wire_bytes = wire.as_bytes()
-            stream.write_all(Span[UInt8, _](wire_bytes))
-            if len(body) > 0:
-                stream.write_all(Span[UInt8, _](body))
-            var resp = _read_http_response_tls(stream)
-            stream.close()
-            return resp^
+            return self._send_h2_or_h1_tls(u, method, extra_headers, body, wire)
         else:
             var stream = _connect_with_fallback(
                 u.host, u.port, self._timeout_ms
