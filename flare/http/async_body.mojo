@@ -1,0 +1,269 @@
+"""Reactor-integrated external streaming source (v0.9 B1).
+
+The synchronous ``ChunkSource`` (``flare.http.body``) is a *pull*: each
+``next`` returns the next chunk or ``None`` for EOF. That is exactly
+right for an in-process FIFO (e.g. ``SseChannel``) but it can never
+*wait* -- it has no way to say "nothing yet, the bytes are coming on
+another fd." A streaming proxy whose chunks arrive on a UDS / pipe /
+eventfd needs that third state, or every front re-implements an epoll
+loop and a hand-rolled fd->client copy.
+
+B1 adds the missing state as a small, total API:
+
+- ``ChunkPoll`` -- a tri-state poll result. Exactly one of: a ready
+  chunk, "pending, wake me on this fd", or EOF. The three states are
+  constructed by named factories (``ready`` / ``pending`` / ``eof``) and
+  read by predicates, so an illegal combination (a chunk *and* a wait fd)
+  is unrepresentable.
+- ``AsyncChunkSource`` -- the async sibling of ``ChunkSource``: one
+  method, ``poll(cancel) -> ChunkPoll``. Synchronous sources keep using
+  ``ChunkSource``; this is purely additive.
+- ``UpstreamChunkSource`` -- the concrete impl an inference front needs:
+  a single framed logical stream over a non-blocking connection. It
+  composes the B3 frame codec (``FrameDemux``) for parsing and reports
+  ``pending(fd)`` on EAGAIN so the reactor parks instead of busy-polling.
+
+Composition with the typed streaming surface (A2/A4)
+---------------------------------------------------
+
+A handler drives an ``AsyncChunkSource`` with no bespoke reactor code::
+
+    def on_open(mut self, mut conn: StreamConn) raises:
+        var src = UpstreamChunkSource(UnixStream.connect(self.worker), id)
+        conn.attach_upstream(src.fd())     # A4: reactor watches the fd
+        self.sources[conn.id()] = src^     # per-connection state (A2)
+
+    def on_upstream(mut self, mut conn: StreamConn) raises:
+        ref src = self.sources[conn.id()]
+        var p = src.poll(conn.cancel())    # never blocks
+        if p.is_ready():
+            conn.send(Span[UInt8, _](p.take_chunk()))   # B7 will coalesce
+        elif p.is_eof():
+            conn.request_close()
+        # is_pending(): do nothing -- stay parked on the fd (no spin)
+
+The reactor calls ``on_upstream`` only when the attached fd is readable,
+so the ``pending`` branch is a genuine park, not a poll loop -- that is
+the B1 acceptance bar (no busy-poll between gaps). B2 adds the watermark
+coupling that also gates the *upstream* read interest when the client is
+write-blocked.
+"""
+
+from std.ffi import c_int, c_size_t, get_errno, ErrNo
+
+from flare.net import NetworkError
+from flare.net._libc import _recv, _strerror
+from flare.uds.frame_mux import FrameDemux, FrameKind
+from flare.uds.stream import UnixStream
+
+from .cancel import Cancel
+
+
+# ── ChunkPoll ────────────────────────────────────────────────────────────────
+
+
+comptime _READY: Int = 0
+comptime _PENDING: Int = 1
+comptime _EOF: Int = 2
+
+
+struct ChunkPoll(Movable):
+    """The result of one ``AsyncChunkSource.poll`` -- a total tri-state.
+
+    Exactly one state holds:
+
+    - **ready**: a chunk is available now (``is_ready()``; take it with
+      ``take_chunk()``).
+    - **pending**: nothing yet; the caller should wait until ``wait_fd()``
+      is readable and poll again (``is_pending()``). No busy-poll.
+    - **eof**: the stream is complete; no more chunks (``is_eof()``).
+
+    Built only through ``ready`` / ``pending`` / ``eof`` so a chunk can
+    never coexist with a wait fd.
+    """
+
+    var _state: Int
+    """One of ``_READY`` / ``_PENDING`` / ``_EOF``."""
+    var _chunk: List[UInt8]
+    """The ready chunk (empty unless ``_state == _READY``)."""
+    var _fd: c_int
+    """The fd to wait on (``-1`` unless ``_state == _PENDING``)."""
+
+    @staticmethod
+    def ready(var chunk: List[UInt8]) -> ChunkPoll:
+        """A chunk is available now."""
+        return ChunkPoll(_state=_READY, chunk=chunk^, fd=c_int(-1))
+
+    @staticmethod
+    def pending(fd: c_int) -> ChunkPoll:
+        """Nothing yet; wake and re-poll when ``fd`` is readable."""
+        return ChunkPoll(_state=_PENDING, chunk=List[UInt8](), fd=fd)
+
+    @staticmethod
+    def eof() -> ChunkPoll:
+        """The stream is complete."""
+        return ChunkPoll(_state=_EOF, chunk=List[UInt8](), fd=c_int(-1))
+
+    def __init__(out self, _state: Int, var chunk: List[UInt8], fd: c_int):
+        """Internal: prefer the ``ready`` / ``pending`` / ``eof`` factories."""
+        self._state = _state
+        self._chunk = chunk^
+        self._fd = fd
+
+    @always_inline
+    def is_ready(self) -> Bool:
+        """True if a chunk is available now."""
+        return self._state == _READY
+
+    @always_inline
+    def is_pending(self) -> Bool:
+        """True if the source is waiting on ``wait_fd()``."""
+        return self._state == _PENDING
+
+    @always_inline
+    def is_eof(self) -> Bool:
+        """True if the stream is complete."""
+        return self._state == _EOF
+
+    @always_inline
+    def wait_fd(self) -> c_int:
+        """The fd to wait on (valid only when ``is_pending()``; ``-1``
+        otherwise)."""
+        return self._fd
+
+    def take_chunk(mut self) -> List[UInt8]:
+        """Move the ready chunk out (valid only when ``is_ready()``;
+        leaves the poll holding an empty chunk)."""
+        var out = self._chunk^
+        self._chunk = List[UInt8]()
+        return out^
+
+
+# ── AsyncChunkSource ─────────────────────────────────────────────────────────
+
+
+trait AsyncChunkSource(ImplicitlyDestructible, Movable):
+    """A byte-chunk source whose chunks may arrive on a registered fd.
+
+    The async sibling of ``ChunkSource``: instead of a blocking pull,
+    ``poll`` returns immediately with one of the three ``ChunkPoll``
+    states. A source that has data returns ``ready``; a source still
+    waiting for bytes on its fd returns ``pending(fd)`` (the caller parks
+    the response on that fd); a finished source returns ``eof``.
+
+    Implementors must not block in ``poll`` -- that is the whole point.
+    The ``cancel`` token lets a source short-circuit on client FIN /
+    deadline / drain.
+    """
+
+    def poll(mut self, cancel: Cancel) raises -> ChunkPoll:
+        """Return the next chunk, a pending-on-fd signal, or EOF.
+
+        Args:
+            cancel: Per-request cancel token; poll it to abort early.
+
+        Returns:
+            A ``ChunkPoll``: ``ready`` / ``pending`` / ``eof``.
+
+        Raises:
+            Error: On an unrecoverable source error; the reactor closes
+                the connection.
+        """
+        ...
+
+
+# ── UpstreamChunkSource ──────────────────────────────────────────────────────
+
+
+struct UpstreamChunkSource(AsyncChunkSource, Movable):
+    """One framed logical stream over a non-blocking connection.
+
+    Owns a ``UnixStream`` to a worker and reads B3 frames for a single
+    ``request_id`` off it. ``poll`` drains any buffered ``CHUNK`` frame,
+    else does one non-blocking read: a completed ``CHUNK`` -> ``ready``;
+    a ``DONE`` / connection EOF -> ``eof``; ``EAGAIN`` -> ``pending(fd)``
+    so the reactor waits on the fd instead of spinning; ``ERROR`` raises.
+
+    The frame parsing is the same ``FrameDemux`` the multiplexed
+    ``FrameMux`` (B3) uses, so a worker can speak one wire shape to both
+    the single-stream and multiplexed fronts.
+
+    ponytail: one source owns one connection (a dedicated framed link).
+    The many-streams-over-one-connection case is the handler owning a
+    ``FrameMux`` as shared state and driving it directly; a future
+    ``FrameMux.open`` returning a lightweight per-stream handle is the
+    multiplexed evolution (it needs a shared-mux reference the fixed
+    trait method cannot carry in the current Mojo).
+    """
+
+    var conn: UnixStream
+    """The owned framed upstream connection (set non-blocking at init)."""
+    var demux: FrameDemux
+    """Frame reassembly for the inbound byte stream (B3 codec)."""
+    var request_id: UInt64
+    """The single logical stream this source reads."""
+    var _eof: Bool
+    """Latched once DONE / connection-EOF is seen; further polls are EOF."""
+
+    def __init__(out self, var conn: UnixStream, request_id: UInt64) raises:
+        """Adopt ``conn`` (switched to non-blocking) for ``request_id``."""
+        conn._socket.set_nonblocking(True)
+        self.conn = conn^
+        self.demux = FrameDemux()
+        self.request_id = request_id
+        self._eof = False
+
+    @always_inline
+    def fd(self) -> c_int:
+        """The upstream fd to register / wait on (for ``attach_upstream``)."""
+        return self.conn._socket.fd
+
+    def poll(mut self, cancel: Cancel) raises -> ChunkPoll:
+        """Drain a ready frame, else one non-blocking read; never blocks."""
+        if self._eof:
+            return ChunkPoll.eof()
+        if cancel.cancelled():
+            self._eof = True
+            return ChunkPoll.eof()
+
+        while True:
+            # 1. Hand back any frame already reassembled.
+            var f = self.demux.poll(self.request_id)
+            if f.__bool__():
+                var frame = f.value().copy()
+                var kind = frame.kind
+                if kind == FrameKind.CHUNK:
+                    var payload = frame.payload.copy()
+                    return ChunkPoll.ready(payload^)
+                elif kind == FrameKind.DONE:
+                    self._eof = True
+                    return ChunkPoll.eof()
+                elif kind == FrameKind.ERROR:
+                    self._eof = True
+                    raise Error("UpstreamChunkSource: upstream ERROR frame")
+                else:
+                    continue  # OPEN / CANCEL: not data, keep draining
+
+            # 2. No buffered frame -- pull more bytes (non-blocking).
+            var buf = List[UInt8](capacity=65536)
+            buf.resize(65536, UInt8(0))
+            var got = _recv(
+                self.conn._socket.fd,
+                buf.unsafe_ptr(),
+                c_size_t(65536),
+                c_int(0),
+            )
+            if got > 0:
+                self.demux.feed(Span[UInt8, _](buf)[0 : Int(got)])
+                continue
+            if got == 0:
+                self._eof = True
+                return ChunkPoll.eof()
+            var e = get_errno()
+            if e == ErrNo.EINTR:
+                continue
+            if e == ErrNo.EAGAIN or e == ErrNo.EWOULDBLOCK:
+                return ChunkPoll.pending(self.conn._socket.fd)
+            raise NetworkError(
+                _strerror(e.value) + " (upstream recv)", Int(e.value)
+            )

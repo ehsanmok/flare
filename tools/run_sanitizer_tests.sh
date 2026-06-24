@@ -69,6 +69,11 @@ ASAN_TESTS=(
   # reassembly buffer (compaction + sub-span decode) and the payload
   # copies on the parent client path.
   "tests/uds/test_frame_mux.mojo"
+  # v0.9 B1 — AsyncChunkSource/ChunkPoll/UpstreamChunkSource: fork
+  # loopback (framed chunks with gaps, no busy-poll) + reactor e2e
+  # (serve_streaming relay). ASan validates the non-blocking recv +
+  # FrameDemux drain and the per-connection source teardown.
+  "tests/http/test_async_chunk_source.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf
