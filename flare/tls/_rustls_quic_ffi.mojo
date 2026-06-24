@@ -124,6 +124,63 @@ def _do_session_free(read lib: OwnedDLHandle, handle: Int):
     f(handle)
 
 
+# ── Connector lifecycle (client role) ────────────────────────────────────────
+
+
+def _do_connector_new(
+    read lib: OwnedDLHandle,
+    read ca_pem: List[UInt8],
+    read alpn_wire: List[UInt8],
+) -> Int:
+    """Call ``flare_rustls_quic_connector_new`` and return the
+    ``Box<Connector>*`` as an ``Int``. Zero on failure (read
+    :func:`_do_last_error` for the reason). The client-role mirror
+    of :func:`_do_acceptor_new`.
+    """
+    var f = lib.get_function[def(Int, Int, Int, Int) thin abi("C") -> Int](
+        "flare_rustls_quic_connector_new"
+    )
+    return f(
+        Int(ca_pem.unsafe_ptr()),
+        len(ca_pem),
+        Int(alpn_wire.unsafe_ptr()),
+        len(alpn_wire),
+    )
+
+
+def _do_connector_free(read lib: OwnedDLHandle, handle: Int):
+    """Free a connector allocated by :func:`_do_connector_new`.
+    NULL handle is a no-op."""
+    if handle == 0:
+        return
+    var f = lib.get_function[def(Int) thin abi("C") -> None](
+        "flare_rustls_quic_connector_free"
+    )
+    f(handle)
+
+
+def _do_connect(
+    read lib: OwnedDLHandle,
+    connector: Int,
+    read server_name: List[UInt8],
+    read transport_params: List[UInt8],
+) -> Int:
+    """Call ``flare_rustls_quic_connect`` to construct a fresh
+    client-role per-connection session for ``server_name`` (SNI).
+    Returns the ``Box<Session>*`` as ``Int``; zero on failure
+    (read :func:`_do_last_error`)."""
+    var f = lib.get_function[def(Int, Int, Int, Int, Int) thin abi("C") -> Int](
+        "flare_rustls_quic_connect"
+    )
+    return f(
+        connector,
+        Int(server_name.unsafe_ptr()),
+        len(server_name),
+        Int(transport_params.unsafe_ptr()),
+        len(transport_params),
+    )
+
+
 # ── Handshake driving ────────────────────────────────────────────────────────
 
 
@@ -242,10 +299,16 @@ def _do_alpn(read lib: OwnedDLHandle, session: Int) raises -> String:
         buf.append(UInt8(0))
     var written: Int = 0
     var written_addr = Int(UnsafePointer(to=written))
+    # The FFI returns the ALPN byte count as its return value (and
+    # also writes it through ``written``). Use the return value as
+    # the length: the ``written`` out-parameter readback is folded to
+    # its initial 0 by the optimizer across the opaque FFI call (the
+    # same hazard documented on ``_do_packet_encrypt`` / ``_decrypt``),
+    # which would truncate a real ALPN id to an empty string.
     var rc = Int(f(session, Int(buf.unsafe_ptr()), 256, written_addr))
     if rc < 0:
         raise Error(String("flare_rustls_quic_alpn returned ") + String(rc))
-    if written == 0:
+    if rc == 0:
         return String("")
     # Build the ALPN identifier as a String from the bytes the
     # FFI just wrote. The identifiers we care about are ASCII
@@ -254,7 +317,7 @@ def _do_alpn(read lib: OwnedDLHandle, session: Int) raises -> String:
     # ``unsafe_from_utf8 = Span(buf[:n])`` shape is the
     # canonical path used by ``flare.tls._server_ffi`` for the
     # OpenSSL alpn-selected helper.
-    return String(unsafe_from_utf8=Span[UInt8, _](buf[:written]))
+    return String(unsafe_from_utf8=Span[UInt8, _](buf[:rc]))
 
 
 # ── Per-level AEAD + header protection ─────────────────────────────────────

@@ -1,9 +1,9 @@
 [package]
 name = "flare_rustls_quic"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "C ABI shim around rustls::quic for the flare QUIC server reactor"
+description = "C ABI shim around rustls::quic for the flare QUIC server + client reactor"
 publish = false
 
 # cdylib: produces libflare_rustls_quic.so / .dylib that Mojo's

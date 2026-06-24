@@ -71,6 +71,7 @@ from .rustls_quic import (
     QuicEncryptionLevel,
     RustlsQuicAcceptor,
     RustlsQuicConfig,
+    RustlsQuicConnector,
     RustlsQuicError,
     RustlsQuicErrorKind,
     RustlsQuicSession,

@@ -52,6 +52,9 @@ from ._rustls_quic_ffi import (
     _do_acceptor_new,
     _do_acceptor_free,
     _do_accept,
+    _do_connector_new,
+    _do_connector_free,
+    _do_connect,
     _do_session_free,
     _do_feed_crypto,
     _do_take_crypto,
@@ -353,6 +356,116 @@ struct RustlsQuicAcceptor(Movable):
         var session_lib = OwnedDLHandle(_find_rustls_quic_lib())
         return RustlsQuicSession._wrap(
             session_lib^, session_handle, dst_cid.copy()
+        )
+
+
+# ── Connector (client role) ─────────────────────────────────────────────
+
+
+struct RustlsQuicConnector(Movable):
+    """Client-role factory for per-connection rustls QUIC sessions.
+
+    The mirror of :class:`RustlsQuicAcceptor`: long-lived, one
+    instance per HttpClient h3 origin policy (trust roots + ALPN),
+    reused across every QUIC connection the client opens. Wraps a
+    heap-allocated Rust ``Box<Connector>`` (the rustls
+    ``ClientConfig``) behind a raw pointer carried as ``Int`` plus
+    the pinned ``libflare_rustls_quic.so`` handle.
+
+    Lifecycle mirrors the acceptor: ``__init__`` ->
+    ``flare_rustls_quic_connector_new`` (0 handle on PEM/ALPN
+    failure, surfaced by :meth:`connect`); ``__del__`` ->
+    ``flare_rustls_quic_connector_free``; :meth:`connect` ->
+    ``flare_rustls_quic_connect`` returning a
+    :class:`RustlsQuicSession` (role-agnostic on the Mojo side).
+    """
+
+    var alpn_protocols: List[String]
+    """ALPN identifiers advertised to the origin (``"h3"`` for
+    HTTP/3). Order is preference order, as the acceptor's list."""
+
+    var _opaque_handle: Int
+    """Raw ``Box<Connector>*`` (as ``Int``). Zero when the FFI
+    rejected the CA bundle / ALPN list."""
+
+    var _lib: OwnedDLHandle
+    """Pinned library handle (same defensive pin as the acceptor)."""
+
+    def __init__(
+        out self, ca_pem: String, var alpn_protocols: List[String]
+    ) raises:
+        """Build a connector from a trust-anchor PEM bundle + ALPN list.
+
+        ``ca_pem`` is a PEM bundle of trusted roots; for a loopback
+        link to flare's own server, pass that server's self-signed
+        cert (a self-signed leaf is its own root). Does not raise on
+        PEM-parse failure -- the carrier constructs with a 0 handle
+        and :meth:`connect` surfaces the rustls last-error -- so a
+        configuration mistake is one clear error at connect time, not
+        a partial-construction half-state. Raises only on an invalid
+        ALPN list (empty or >255-byte protocol).
+        """
+        var lib = OwnedDLHandle(_find_rustls_quic_lib())
+        var ca_bytes = List[UInt8]()
+        for b in ca_pem.as_bytes():
+            ca_bytes.append(b)
+        var alpn_wire = _encode_alpn_wire(alpn_protocols)
+        var handle = _do_connector_new(lib, ca_bytes, alpn_wire)
+        self._lib = lib^
+        self._opaque_handle = handle
+        self.alpn_protocols = alpn_protocols^
+
+    def __del__(deinit self):
+        if self._opaque_handle != 0:
+            _do_connector_free(self._lib, self._opaque_handle)
+
+    def free_session(self, handle: Int):
+        """Release a per-connection session through the connector's
+        pinned library handle (mirror of
+        :meth:`RustlsQuicAcceptor.free_session`). NULL is a no-op."""
+        _do_session_free(self._lib, handle)
+
+    def connect(
+        self,
+        server_name: String,
+        transport_params: List[UInt8] = List[UInt8](),
+    ) raises -> RustlsQuicSession:
+        """Open a client-role session against ``server_name`` (SNI).
+
+        ``transport_params`` is the client's encoded QUIC transport
+        parameters (empty is accepted for the handshake-only path;
+        the QUIC client driver in H3C-1 fills the real blob). The
+        returned :class:`RustlsQuicSession` drives the client
+        handshake through the same feed/take CRYPTO + AEAD + header
+        thunks the server session uses; the first
+        ``take_crypto(INITIAL)`` drains the ClientHello.
+        """
+        if self._opaque_handle == 0:
+            var detail = _do_last_error(self._lib)
+            raise Error(
+                String(
+                    "RustlsQuicConnector.connect: connector handle is"
+                    " NULL (typically because the supplied CA PEM"
+                    " failed to parse, or the ALPN wire-format"
+                    " encoding raised); last_error="
+                )
+                + detail
+            )
+        var name_bytes = List[UInt8]()
+        for b in server_name.as_bytes():
+            name_bytes.append(b)
+        var session_handle = _do_connect(
+            self._lib, self._opaque_handle, name_bytes, transport_params
+        )
+        if session_handle == 0:
+            var detail = _do_last_error(self._lib)
+            raise Error(String("RustlsQuicConnector.connect failed: ") + detail)
+        var session_lib = OwnedDLHandle(_find_rustls_quic_lib())
+        # The client picks its own SCID/DCID in the QUIC driver
+        # (H3C-1), so the session-handle carrier holds no DCID-bound
+        # identity here; an empty dcid is the right placeholder.
+        return RustlsQuicSession._wrap(
+            session_lib^, session_handle, List[UInt8]()
         )
 
 

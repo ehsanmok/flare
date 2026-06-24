@@ -103,7 +103,15 @@ echo "Built: $TARGET"
 ls -la "$TARGET"
 
 mkdir -p "$CONDA_PREFIX/lib"
-cp -f "$TARGET" "$INSTALLED"
+# Atomic install: copy to a temp then rename over $INSTALLED. A plain
+# `cp -f` overwrites the file in place, which corrupts the running
+# image whenever $INSTALLED is the LD_PRELOADed path (this script
+# exports it below) -- the loader's mapped pages get truncated and any
+# process holding the mapping (including cp itself) takes a SIGSEGV.
+# rename() swaps the directory entry to a fresh inode and leaves the
+# old mapped inode intact, so in-flight mappings stay valid.
+cp -f "$TARGET" "$INSTALLED.tmp.$$"
+mv -f "$INSTALLED.tmp.$$" "$INSTALLED"
 echo "Installed: $INSTALLED"
 
 # ── Keep the library mapped on Linux so ASAP-destroyed OwnedDLHandles ────────

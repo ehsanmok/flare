@@ -170,6 +170,13 @@ ASAN_TESTS=(
   # (Rust-side Box<Acceptor> / Box<Session> lifetime managed
   # by flare_rustls_quic_acceptor_free / _session_free).
   "tests/tls/test_rustls_quic_handshake.mojo"
+  # H3C-0 -- the client-role binding (RustlsQuicConnector +
+  # connect()). Drives a full client<->server loopback handshake
+  # through the role-agnostic feed/take CRYPTO path so ASan
+  # validates the Box<Connector> / Box<Session> client lifetimes
+  # (freed via flare_rustls_quic_connector_free / _session_free)
+  # and the .so stays mapped across every client-side FFI call.
+  "tests/tls/test_rustls_quic_client.mojo"
   # Track Q3-W commit 5/5 -- QUIC server reactor over loopback
   # UDP. Drives the full QuicListener.bind -> tick ->
   # dispatch_datagram -> handle_packet -> idle-timer path with

@@ -350,6 +350,7 @@ test-rustls-quic-crate-smoke = { cmd = "mojo -I . tests/tls/test_rustls_quic_cra
 test-rustls-quic     = "mojo -I . tests/tls/test_rustls_quic.mojo"       # flare.tls.rustls_quic scaffold -- carrier + level + error enum (~12 cases)
 test-rustls-quic-handshake = { cmd = "mojo -I . tests/tls/test_rustls_quic_handshake.mojo", depends-on = ["build-rustls-quic"] }  # Track Q2-W -- live-fire FFI vs real Ed25519 PEM (8 cases)
 test-rustls-quic-keys      = { cmd = "mojo -I . tests/tls/test_rustls_quic_keys.mojo", depends-on = ["build-rustls-quic"] }       # Phase F commit 2/6 -- RustlsQuicSession.have_keys / packet_{encrypt,decrypt} / header_{encrypt,decrypt} binding tests (10 cases)
+test-rustls-quic-client    = { cmd = "mojo -I . tests/tls/test_rustls_quic_client.mojo", depends-on = ["build-rustls-quic"] }    # H3C-0 -- RustlsQuicConnector + connect() client binding; full client<->server loopback handshake negotiating h3 (5 cases)
 test-quic-server-scaffold = "mojo -I . tests/quic/test_server_scaffold.mojo"  # flare.quic.server carriers -- config defaults + connection + cid table (7 cases)
 test-quic-reactor         = "mojo -I . tests/quic/test_quic_reactor.mojo"     # Track Q3-W commit 1/5 -- UDP bind + per-datagram dispatch (12 cases)
 test-quic-handle-packet   = "mojo -I . tests/quic/test_quic_handle_packet.mojo" # Track Q3-W commit 2/5 -- per-packet decrypt + state-machine drive (8 cases)

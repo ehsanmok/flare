@@ -8,6 +8,13 @@
 //! - Per-connection session:
 //!   `flare_rustls_quic_accept`
 //!   (constructs a fresh `rustls::quic::ServerConnection` for a DCID).
+//! - Client role (mirror of the acceptor):
+//!   `flare_rustls_quic_connector_new` / `_free`
+//!   (build an `Arc<ClientConfig>` from a CA PEM bundle + ALPN list),
+//!   `flare_rustls_quic_connect`
+//!   (constructs a `rustls::quic::ClientConnection` for an SNI host).
+//!   The feed/take CRYPTO, AEAD, header-protection, ALPN, and
+//!   handshake-complete thunks below are role-agnostic.
 //! - Drive the handshake:
 //!   `flare_rustls_quic_feed_crypto` (write peer's CRYPTO bytes)
 //!   `flare_rustls_quic_take_crypto` (drain our outbound CRYPTO bytes)
@@ -38,8 +45,10 @@ use std::io::Read;
 use std::slice;
 use std::sync::Arc;
 
+use rustls::pki_types::ServerName;
 use rustls::quic::{Connection as QuicConnection, KeyChange, Keys, Version};
 use rustls::server::{ServerConfig, ServerConnection};
+use rustls::{ClientConfig, RootCertStore};
 
 /// Encryption-level slot count. Order matches the QUIC spec
 /// `[Initial, EarlyData, Handshake, 1-RTT]` so callers can use
@@ -83,6 +92,14 @@ pub extern "C" fn flare_rustls_quic_last_error() -> *const c_char {
 /// Acceptor: long-lived, holds the rustls `ServerConfig`.
 pub struct Acceptor {
     config: Arc<ServerConfig>,
+}
+
+/// Connector: long-lived, holds the rustls `ClientConfig`.
+/// The client-role mirror of `Acceptor` -- one per HttpClient h3
+/// origin policy (ALPN list + trust roots), reused across every
+/// QUIC connection the client opens.
+pub struct Connector {
+    config: Arc<ClientConfig>,
 }
 
 /// Session: one per QUIC connection. Wraps a
@@ -294,6 +311,197 @@ pub extern "C" fn flare_rustls_quic_session_free(session: *mut c_void) {
     }
 }
 
+/// `flare_rustls_quic_connector_new` builds a `ClientConfig` from a
+/// trust-anchor PEM bundle + ALPN list and returns a Box-leaked
+/// Connector (the client-role mirror of `acceptor_new`).
+///
+/// `ca_pem` is a PEM bundle of trusted root / self-signed
+/// certificates: for a loopback test against flare's own server the
+/// caller passes the server's self-signed cert (it is its own root);
+/// for a public origin the caller passes the system trust bundle.
+/// `ca_pem` must contain at least one CERTIFICATE block -- this shim
+/// does not ship a default root set (webpki-roots lands with the
+/// HttpClient public-h3 path), so an empty bundle is an error rather
+/// than a silently-insecure connector.
+///
+/// `alpn_protos` is the same wire-format ALPN list shape as
+/// `acceptor_new` (`len_byte || proto_bytes || ...`).
+///
+/// Returns NULL on construction failure; check
+/// `flare_rustls_quic_last_error` for the reason.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_connector_new(
+    ca_pem: *const u8,
+    ca_len: usize,
+    alpn_protos: *const u8,
+    alpn_len: usize,
+) -> *mut c_void {
+    if ca_pem.is_null() || ca_len == 0 {
+        set_last_error("flare_rustls_quic_connector_new: NULL or empty CA bundle");
+        return std::ptr::null_mut();
+    }
+    let ca_bytes = unsafe { slice::from_raw_parts(ca_pem, ca_len) };
+    let alpn_bytes = if alpn_protos.is_null() || alpn_len == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(alpn_protos, alpn_len) }
+    };
+
+    let cert_iter =
+        rustls_pemfile::certs(&mut std::io::Cursor::new(ca_bytes)).collect::<Result<Vec<_>, _>>();
+    let ca_certs = match cert_iter {
+        Ok(certs) if !certs.is_empty() => certs,
+        Ok(_) => {
+            set_last_error(
+                "flare_rustls_quic_connector_new: CA PEM contained no CERTIFICATE blocks",
+            );
+            return std::ptr::null_mut();
+        }
+        Err(e) => {
+            set_last_error(format!(
+                "flare_rustls_quic_connector_new: CA PEM parse failed: {e}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+
+    let mut roots = RootCertStore::empty();
+    for cert in ca_certs {
+        if let Err(e) = roots.add(cert) {
+            set_last_error(format!(
+                "flare_rustls_quic_connector_new: add root cert failed: {e}"
+            ));
+            return std::ptr::null_mut();
+        }
+    }
+
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let builder = ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map(|b| b.with_root_certificates(roots).with_no_client_auth());
+    let mut client_config = match builder {
+        Ok(c) => c,
+        Err(e) => {
+            set_last_error(format!(
+                "flare_rustls_quic_connector_new: ClientConfig build failed: {e}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Parse the wire-format ALPN list into Vec<Vec<u8>> (same shape
+    // as acceptor_new so both roles share one Mojo encoder).
+    let mut alpn_list = Vec::new();
+    let mut i = 0;
+    while i < alpn_bytes.len() {
+        let len = alpn_bytes[i] as usize;
+        i += 1;
+        if i + len > alpn_bytes.len() {
+            set_last_error("flare_rustls_quic_connector_new: ALPN wire format truncated");
+            return std::ptr::null_mut();
+        }
+        alpn_list.push(alpn_bytes[i..i + len].to_vec());
+        i += len;
+    }
+    client_config.alpn_protocols = alpn_list;
+
+    let connector = Box::new(Connector {
+        config: Arc::new(client_config),
+    });
+    Box::into_raw(connector) as *mut c_void
+}
+
+/// Free a connector returned by `flare_rustls_quic_connector_new`.
+///
+/// NULL is a no-op (safe to call on `_new` returning NULL).
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_connector_free(connector: *mut c_void) {
+    if connector.is_null() {
+        return;
+    }
+    unsafe {
+        let _ = Box::from_raw(connector as *mut Connector);
+    }
+}
+
+/// Construct a client-role per-connection session against
+/// `server_name` (SNI / cert-verification hostname).
+///
+/// `server_name` is the UTF-8 hostname bytes (no trailing NUL).
+/// `transport_params` is the client's QUIC transport-parameters
+/// extension (RFC 9000 §7.4), encoded by `flare.quic.transport_params`
+/// on the Mojo side, mirroring `flare_rustls_quic_accept`.
+///
+/// The returned `Session` wraps a `rustls::quic::ClientConnection`;
+/// the very first `flare_rustls_quic_take_crypto(level=0)` drains the
+/// Initial-level ClientHello rustls produces, so the caller drives the
+/// client handshake through the same feed/take CRYPTO thunks the
+/// server uses.
+///
+/// Returns NULL on construction failure.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_connect(
+    connector: *mut c_void,
+    server_name: *const u8,
+    server_name_len: usize,
+    transport_params: *const u8,
+    transport_params_len: usize,
+) -> *mut c_void {
+    if connector.is_null() {
+        set_last_error("flare_rustls_quic_connect: NULL connector");
+        return std::ptr::null_mut();
+    }
+    if server_name.is_null() || server_name_len == 0 {
+        set_last_error("flare_rustls_quic_connect: NULL or empty server_name");
+        return std::ptr::null_mut();
+    }
+    let connector_ref = unsafe { &*(connector as *const Connector) };
+    let name_bytes = unsafe { slice::from_raw_parts(server_name, server_name_len) };
+    let name_str = match std::str::from_utf8(name_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            set_last_error(format!(
+                "flare_rustls_quic_connect: server_name is not valid UTF-8: {e}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let sni = match ServerName::try_from(name_str.to_owned()) {
+        Ok(n) => n,
+        Err(e) => {
+            set_last_error(format!(
+                "flare_rustls_quic_connect: invalid server_name '{name_str}': {e}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let tp = if transport_params.is_null() || transport_params_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(transport_params, transport_params_len).to_vec() }
+    };
+    let quic_conn = match rustls::quic::ClientConnection::new(
+        connector_ref.config.clone(),
+        Version::V1,
+        sni,
+        tp,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            set_last_error(format!(
+                "flare_rustls_quic_connect: rustls::quic::ClientConnection::new failed: {e}"
+            ));
+            return std::ptr::null_mut();
+        }
+    };
+    let session = Box::new(Session {
+        conn: QuicConnection::Client(quic_conn),
+        pending: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+        keys: [None, None, None, None],
+    });
+    Box::into_raw(session) as *mut c_void
+}
+
 /// Feed inbound CRYPTO frame bytes at the given encryption level.
 ///
 /// rustls's QUIC API takes the level implicitly -- the level is
@@ -458,6 +666,12 @@ pub extern "C" fn flare_rustls_quic_alpn(
 ///   `flare_rustls_quic_packet_encrypt` / `_packet_decrypt`,
 ///   `flare_rustls_quic_header_encrypt` / `_header_decrypt`,
 ///   and the per-level `KeyChange` capture inside `drain_outbound`.
+/// * 3 -- adds the client role:
+///   `flare_rustls_quic_connector_new` / `_free`,
+///   `flare_rustls_quic_connect` (builds a
+///   `rustls::quic::ClientConnection`). The feed/take CRYPTO, AEAD,
+///   header-protection, ALPN, and handshake-complete thunks are
+///   role-agnostic and serve both roles unchanged.
 ///
 /// Returns `i64` rather than `c_int` because Mojo callers bind
 /// every flare FFI no-arg thunk via `def() thin abi("C") -> Int`,
@@ -468,7 +682,7 @@ pub extern "C" fn flare_rustls_quic_alpn(
 /// declare them as `c_int` on the Mojo side.
 #[no_mangle]
 pub extern "C" fn flare_rustls_quic_abi_version() -> i64 {
-    2
+    3
 }
 
 /// Returns 1 if rustls has installed per-level keys at the given
@@ -911,13 +1125,63 @@ mod tests {
     }
 
     #[test]
-    fn abi_version_returns_two() {
-        // The ABI bumped from 1 to 2 when the
-        // KeyChange-capture + per-level AEAD/HP thunks landed.
-        // The activation script keys off this number, so a stale
-        // .so on a developer machine surfaces as a hard mismatch
-        // on `pixi install` rather than a silent run-time confusion.
-        assert_eq!(flare_rustls_quic_abi_version(), 2);
+    fn abi_version_returns_three() {
+        // The ABI bumped 1 -> 2 (KeyChange-capture + per-level
+        // AEAD/HP thunks) -> 3 (client role: connector_new/_free +
+        // connect). The activation script keys off this number, so a
+        // stale .so on a developer machine surfaces as a hard
+        // mismatch on `pixi install` rather than a silent run-time
+        // confusion.
+        assert_eq!(flare_rustls_quic_abi_version(), 3);
+    }
+
+    #[test]
+    fn connector_new_rejects_empty_ca() {
+        let alpn = b"\x02h3";
+        let p = flare_rustls_quic_connector_new(
+            std::ptr::null(),
+            0,
+            alpn.as_ptr(),
+            alpn.len(),
+        );
+        assert!(p.is_null(), "empty CA bundle should be rejected");
+        let err = unsafe { CStr::from_ptr(flare_rustls_quic_last_error()) };
+        assert!(
+            err.to_string_lossy().contains("CA bundle"),
+            "expected CA-bundle error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn connector_new_rejects_garbage_ca() {
+        let garbage = b"not actually pem";
+        let alpn = b"\x02h3";
+        let p = flare_rustls_quic_connector_new(
+            garbage.as_ptr(),
+            garbage.len(),
+            alpn.as_ptr(),
+            alpn.len(),
+        );
+        assert!(p.is_null(), "garbage CA PEM should be rejected");
+    }
+
+    #[test]
+    fn connector_free_null_is_noop() {
+        flare_rustls_quic_connector_free(std::ptr::null_mut());
+    }
+
+    #[test]
+    fn connect_rejects_null_connector() {
+        let name = b"example.com";
+        let p = flare_rustls_quic_connect(
+            std::ptr::null_mut(),
+            name.as_ptr(),
+            name.len(),
+            std::ptr::null(),
+            0,
+        );
+        assert!(p.is_null(), "NULL connector should be rejected");
     }
 
     #[test]
