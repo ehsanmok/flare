@@ -383,6 +383,7 @@ test-h3-request-reader = "mojo -I . tests/h3/test_request_reader.mojo"   # RFC 9
 test-h3-response-writer = "mojo -I . tests/h3/test_response_writer.mojo" # RFC 9114 §4.3 H3 response-stream sans-I/O writer (~7 cases)
 test-h3-client-streams = "mojo -I . tests/h3/test_h3_client_streams.mojo" # H3C-2 -- client request writer + response reader wire round-trips vs server codecs (6 cases)
 test-h3-client-e2e = { cmd = "mojo -I . tests/h3/test_h3_client_e2e.mojo", depends-on = ["build-rustls-quic"] } # H3C-4 -- end-to-end H3 client vs QuicListener loopback (GET + POST echo over real QUIC, 2 cases)
+test-h3-client-reasm = "mojo -I . tests/h3/test_h3_client_reasm.mojo" # H3C follow-up -- out-of-order/dup/overlap STREAM reassembly in H3ClientConnection (3 cases)
 test-h3-frame        = "mojo -I . tests/h3/test_frame.mojo"              # RFC 9114 §7 HTTP/3 frame codec + SETTINGS (~10 cases)
 test-grpc            = "mojo -I . tests/grpc/test_grpc.mojo"             # gRPC LPM framing + status codes (~10 cases)
 test-grpc-metadata   = "mojo -I . tests/grpc/test_metadata.mojo"         # gRPC initial + trailing metadata carrier (~7 cases)

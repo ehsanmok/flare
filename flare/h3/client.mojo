@@ -27,14 +27,15 @@ remote, so a blocking poll loop is fine):
 * blocking -- :meth:`fetch`, which polls until the response
   completes or a poll budget is exhausted.
 
-ponytail: response reassembly assumes in-order STREAM delivery
-(true on loopback and the common single-packet response). Out-of-
-order / retransmitted STREAM frames on a multi-packet response are
-not reordered here; the upgrade path is a per-stream offset
-reassembly buffer (the QUIC layer already exposes frame offsets).
+Inbound STREAM frames are reassembled in offset order by
+:class:`_StreamReasm` before reaching the response reader: a
+reordered, duplicated, or overlapping STREAM frame (multi-packet
+responses, retransmits) is buffered and only the contiguous prefix
+is delivered, so the reader always sees the response bytes in order
+and FIN fires only once every byte up to the final offset arrived.
 """
 
-from std.collections import List, Optional
+from std.collections import Dict, List, Optional
 from std.memory import Span
 
 from flare.qpack import QpackHeader
@@ -51,6 +52,96 @@ from .request_writer import (
 from .response_reader import H3Response, H3ResponseReader
 
 
+struct _StreamReasm(Movable):
+    """Per-stream offset-ordered byte reassembler.
+
+    QUIC STREAM frames carry a per-stream byte ``offset`` and may
+    arrive out of order, be duplicated, or overlap (retransmits).
+    :class:`H3ResponseReader` assumes in-order bytes, so this buffer
+    sits in front of it: it delivers the contiguous prefix starting
+    at :attr:`next_offset`, stashes any gap-ahead chunk in
+    :attr:`pending` keyed by its start offset, and drains stashed
+    chunks as the gaps fill. FIN is recorded as the absolute end
+    offset (:attr:`fin_offset`) and only signalled to the reader
+    once every byte up to it has been delivered.
+
+    ponytail: ``_drain_pending`` rescans ``pending`` each step
+    (O(n^2) in the number of buffered gap chunks). A single response
+    rarely buffers more than a couple of out-of-order frames, so the
+    quadratic scan is a non-issue; the upgrade path is an
+    offset-sorted structure if a pathological reorder depth ever
+    shows up.
+    """
+
+    var next_offset: UInt64
+    var pending: Dict[UInt64, List[UInt8]]
+    var fin_offset: Optional[UInt64]
+    var fin_signaled: Bool
+
+    def __init__(out self):
+        self.next_offset = UInt64(0)
+        self.pending = Dict[UInt64, List[UInt8]]()
+        self.fin_offset = None
+        self.fin_signaled = False
+
+    def push(
+        mut self,
+        mut reader: H3ResponseReader,
+        offset: UInt64,
+        data: Span[UInt8, _],
+        fin: Bool,
+    ) raises:
+        """Ingest one STREAM chunk: deliver / stash / dedupe by
+        offset, then drain any now-contiguous stashed chunks and
+        signal FIN if the stream is fully delivered."""
+        if fin:
+            self.fin_offset = Optional(offset + UInt64(len(data)))
+        var end = offset + UInt64(len(data))
+        if end > self.next_offset:
+            if offset <= self.next_offset:
+                var skip = Int(self.next_offset - offset)
+                reader.feed(data[skip:])
+                self.next_offset = end
+                self._drain_pending(reader)
+            else:
+                # Gap ahead of the contiguous frontier: stash a copy
+                # (the inbound span is borrowed from the event).
+                var copy = List[UInt8](capacity=len(data))
+                for i in range(len(data)):
+                    copy.append(data[i])
+                self.pending[offset] = copy^
+        self._maybe_fin(reader)
+
+    def _drain_pending(mut self, mut reader: H3ResponseReader) raises:
+        """Deliver every stashed chunk that has become contiguous
+        with (or is wholly behind) :attr:`next_offset`."""
+        var made_progress = True
+        while made_progress:
+            made_progress = False
+            var chosen = Optional[UInt64](None)
+            for entry in self.pending.items():
+                var k = entry.key
+                if k <= self.next_offset:
+                    chosen = Optional(k)
+                    break
+            if chosen:
+                var key = chosen.value()
+                var chunk = self.pending.pop(key)
+                var end = key + UInt64(len(chunk))
+                if end > self.next_offset:
+                    var skip = Int(self.next_offset - key)
+                    reader.feed(Span[UInt8, _](chunk)[skip:])
+                    self.next_offset = end
+                made_progress = True
+
+    def _maybe_fin(mut self, mut reader: H3ResponseReader):
+        if self.fin_signaled:
+            return
+        if self.fin_offset and self.next_offset >= self.fin_offset.value():
+            reader.signal_fin()
+            self.fin_signaled = True
+
+
 struct H3ClientConnection(Movable):
     """An HTTP/3 client over an established QUIC connection.
 
@@ -62,6 +153,13 @@ struct H3ClientConnection(Movable):
     var quic: QuicClientConnection
     var streams_opened: Bool
     var max_field_section_size: UInt64
+    var _reasm: _StreamReasm
+    """Offset-ordered reassembler for the current request stream.
+    Reset whenever :meth:`read_response` sees a new stream id."""
+    var _reasm_sid: Int
+    """Stream id the :attr:`_reasm` currently tracks (-1 = none).
+    A single sequential request at a time, so one reassembler
+    suffices; it is reset per stream rather than kept per id."""
 
     def __init__(
         out self,
@@ -71,6 +169,8 @@ struct H3ClientConnection(Movable):
         self.quic = quic^
         self.streams_opened = False
         self.max_field_section_size = max_field_section_size
+        self._reasm = _StreamReasm()
+        self._reasm_sid = -1
 
     def open_streams(mut self) raises:
         """Open the client control + QPACK uni-streams (RFC 9114
@@ -124,25 +224,31 @@ struct H3ClientConnection(Movable):
         timeout_ms: Int = 100,
     ) raises -> Bool:
         """Poll one QUIC burst, route this stream's STREAM chunks
-        into ``reader``, and return whether the response is
-        complete. Chunks for other streams (server control / QPACK
-        uni-streams) are ignored."""
+        into ``reader`` through the offset-ordered reassembler, and
+        return whether the response is complete. Chunks for other
+        streams (server control / QPACK uni-streams) are ignored."""
         var events = self.quic.poll(timeout_ms)
         self._feed(stream_id, events, reader)
         return reader.is_complete()
 
     def _feed(
-        self,
+        mut self,
         stream_id: UInt64,
         events: ConnectionEvents,
         mut reader: H3ResponseReader,
     ) raises:
+        if Int(stream_id) != self._reasm_sid:
+            self._reasm = _StreamReasm()
+            self._reasm_sid = Int(stream_id)
         for i in range(len(events.stream_chunks)):
             if events.stream_chunks[i].stream_id != stream_id:
                 continue  # server uni-streams / other requests
-            reader.feed(Span[UInt8, _](events.stream_chunks[i].data))
-            if events.stream_chunks[i].fin:
-                reader.signal_fin()
+            self._reasm.push(
+                reader,
+                events.stream_chunks[i].offset,
+                Span[UInt8, _](events.stream_chunks[i].data),
+                events.stream_chunks[i].fin,
+            )
 
     def fetch(
         mut self,

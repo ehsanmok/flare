@@ -219,6 +219,10 @@ ASAN_TESTS=(
   # reassembly into the response reader, and the H3ClientConnection
   # lifetime across the poll loop.
   "tests/h3/test_h3_client_e2e.mojo"
+  # H3C follow-up -- offset-ordered STREAM reassembly (_StreamReasm).
+  # ASan validates the pending-chunk Dict churn + the trimmed/borrowed
+  # Span feeds across out-of-order / duplicate / overlapping chunks.
+  "tests/h3/test_h3_client_reasm.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)
