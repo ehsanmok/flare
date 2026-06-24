@@ -208,6 +208,13 @@ ASAN_TESTS=(
   # inbox compaction across frame boundaries and the QPACK field-
   # section decode borrows on the client side.
   "tests/h3/test_h3_client_streams.mojo"
+  # H3C-4 -- end-to-end H3 client vs the real QuicListener over
+  # loopback UDP (GET + POST echo through real QUIC encryption).
+  # ASan validates the full client request/response hot path:
+  # uni-stream + bidi send through rustls 1-RTT, inbound STREAM
+  # reassembly into the response reader, and the H3ClientConnection
+  # lifetime across the poll loop.
+  "tests/h3/test_h3_client_e2e.mojo"
 )
 TSAN_TESTS=(
   # Multicore + reactor (the only places we spawn pthreads)

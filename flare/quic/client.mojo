@@ -263,6 +263,11 @@ struct QuicClientConnection(Movable):
     var next_bidi_stream: UInt64
     """Next client-initiated bidirectional stream id to hand out
     (RFC 9000 §2.1: client bidi ids are 0, 4, 8, ...)."""
+    var next_uni_stream: UInt64
+    """Next client-initiated unidirectional stream id to hand out
+    (RFC 9000 §2.1: client uni ids are 2, 6, 10, ...). H3 opens
+    three of these per connection: control + QPACK encoder/decoder.
+    """
     var send_offsets: Dict[UInt64, UInt64]
     """Per-stream cumulative send offset for outbound STREAM
     frames."""
@@ -310,6 +315,7 @@ struct QuicClientConnection(Movable):
         self.got_server_cid = False
         self.established = False
         self.next_bidi_stream = UInt64(0)
+        self.next_uni_stream = UInt64(2)
         self.send_offsets = Dict[UInt64, UInt64]()
 
     @staticmethod
@@ -914,6 +920,14 @@ struct QuicClientConnection(Movable):
         opens one bidi stream per request."""
         var sid = self.next_bidi_stream
         self.next_bidi_stream += UInt64(4)
+        return sid
+
+    def open_uni_stream(mut self) -> UInt64:
+        """Allocate the next client-initiated unidirectional stream
+        id (RFC 9000 §2.1: 2, 6, 10, ...). H3 opens three of these
+        per connection (control + QPACK encoder/decoder)."""
+        var sid = self.next_uni_stream
+        self.next_uni_stream += UInt64(4)
         return sid
 
     def send_stream(

@@ -96,6 +96,7 @@ from .response_reader import (
     H3Response,
     H3ResponseReader,
 )
+from .client import H3ClientConnection
 from .server import (
     H3Connection,
     H3ConnectionConfig,
