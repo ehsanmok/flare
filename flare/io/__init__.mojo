@@ -12,6 +12,9 @@ from flare.io import Readable, BufReader
 - ``Readable`` — Trait satisfied by ``TcpStream`` and ``TlsStream``.
 - ``BufReader`` — Wraps any ``Readable`` and adds ``readline``,
   ``read_until``, ``read_exact``.
+- ``ByteReader`` / ``ByteWriter`` — bounds-checked, sans-I/O byte
+  cursors over an in-memory buffer (big- + little-endian integers,
+  ``read_utf8`` validates).
 
 ## Example
 
@@ -29,3 +32,4 @@ def main() raises:
 """
 
 from .buf_reader import Readable, BufReader
+from .byte_cursor import ByteReader, ByteWriter

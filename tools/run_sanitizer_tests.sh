@@ -50,6 +50,9 @@ esac
 # Curated lists — keep in sync with the `tests-asan` / `tests-tsan`
 # sections in `.cursor/rules/sanitizers-and-bounds-checking.mdc`.
 ASAN_TESTS=(
+  # v0.9 A3 — ByteReader/ByteWriter bounds-checked cursors (Span +
+  # memcpy + sub-span borrows); ASan validates no OOB on the read path.
+  "tests/io/test_byte_cursor.mojo"
   # Track B substrate (FFI-heavy by construction)
   "tests/runtime/test_io_uring.mojo"          # B0 — io_uring direct-syscall FFI
   "tests/runtime/test_iovec.mojo"             # B4 — writev(2) iovec-buf
