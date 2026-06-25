@@ -43,8 +43,15 @@ freed and any remaining fds are closed.
 from std.collections import Dict
 from std.ffi import c_int, external_call
 from std.memory import UnsafePointer, alloc
+from std.sys.info import CompilationTarget
 
 from flare.net._libc import _close
+
+# CLOCK_MONOTONIC clock id: 1 on Linux, 6 on Darwin/macOS (id 1 is
+# undefined there, so clock_gettime would fail and the clock read 0).
+comptime _CLOCK_MONOTONIC: c_int = c_int(
+    6
+) if CompilationTarget.is_macos() else c_int(1)
 
 
 # ── _ClientPoolState (heap-allocated) ────────────────────────────────────────
@@ -324,8 +331,7 @@ def _monotonic_ms() -> Int:
     var ts_buf = alloc[Int](2)
     ts_buf[0] = 0
     ts_buf[1] = 0
-    # CLOCK_MONOTONIC = 1 on linux + macos.
-    var rc = external_call["clock_gettime", c_int](c_int(1), ts_buf)
+    var rc = external_call["clock_gettime", c_int](_CLOCK_MONOTONIC, ts_buf)
     if Int(rc) != 0:
         ts_buf.free()
         return 0

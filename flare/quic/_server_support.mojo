@@ -18,8 +18,15 @@ from std.collections import List
 from std.ffi import c_int, external_call
 from std.memory import Span, stack_allocation
 from std.os import getenv
+from std.sys.info import CompilationTarget
 
 from .frame import AckFrame, AckRange, EcnCounts
+
+# CLOCK_MONOTONIC clock id: 1 on Linux, 6 on Darwin/macOS (id 1 is
+# undefined there, so clock_gettime would fail and the clock read 0).
+comptime _CLOCK_MONOTONIC: c_int = c_int(
+    6
+) if CompilationTarget.is_macos() else c_int(1)
 from .varint import encode_varint
 from ..tls.rustls_quic import QuicEncryptionLevel
 
@@ -245,17 +252,18 @@ def _ready_sentinel() -> List[UInt8]:
 def _monotonic_ms() -> UInt64:
     """Return the monotonic clock in milliseconds.
 
-    Uses ``clock_gettime(CLOCK_MONOTONIC, ...)``. The constant value
-    1 for ``CLOCK_MONOTONIC`` is portable between Linux and macOS
-    (macOS has supported it since 10.12). Same shape as
-    :func:`flare.http._reactor.keepalive_scan._monotonic_ms` but
+    Uses ``clock_gettime(CLOCK_MONOTONIC, ...)`` with the per-OS clock
+    id (1 on Linux, 6 on macOS; see ``_CLOCK_MONOTONIC``). Same shape
+    as :func:`flare.http._reactor.keepalive_scan._monotonic_ms` but
     returns ``UInt64`` so it composes with :class:`TimerWheel`
     without an extra cast.
     """
     var buf = stack_allocation[16, UInt8]()
     for i in range(16):
         (buf + i).init_pointee_copy(UInt8(0))
-    _ = external_call["clock_gettime", c_int](c_int(1), buf.bitcast[NoneType]())
+    _ = external_call["clock_gettime", c_int](
+        _CLOCK_MONOTONIC, buf.bitcast[NoneType]()
+    )
     var sec: Int64 = 0
     var nsec: Int64 = 0
     for i in range(8):
