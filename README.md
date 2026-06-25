@@ -11,7 +11,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-**Full networking stack for Mojo** 🔥 HTTP/1.1 and HTTP/2 server and client, HTTP/3 server (over QUIC), WebSocket, TLS, TCP, UDP, Unix sockets, DNS, all in one library on top of one non-blocking reactor. Drop to raw sockets when HTTP isn't the right shape.
+**Full networking stack for Mojo** 🔥 HTTP/1.1, HTTP/2, and HTTP/3 server and client (HTTP/3 over QUIC), WebSocket, TLS, TCP, UDP, Unix sockets, DNS, all in one library on top of one non-blocking reactor. Drop to raw sockets when HTTP isn't the right shape.
 
 ```mojo
 from flare.prelude import *
@@ -26,13 +26,24 @@ def main() raises:
     srv.serve(r^, num_workers=2)
 ```
 
+And a version-aware client (negotiates h2 via ALPN, opt into h3):
+
+```mojo
+from flare.prelude import *
+
+def main() raises:
+    with HttpClient("https://example.com", prefer_h3=True) as c:
+        var r = c.get("/")
+        print(r.status, r.text())
+```
+
 ## Why flare
 
-- **Batteries included:** HTTP/1.1 + HTTP/2, WebSocket (RFC 6455 + permessage-deflate with context-takeover) with an ALPN-driven `WsAutoClient` that picks h1 vs RFC 8441 h2-tunnel, TLS 1.2/1.3 with ALPN + a wire-protocol dispatcher (`flare.http.alpn_dispatch`) for routing h1 / h2c / h2 / h3, signed cookies, sessions, multipart, gzip + brotli, CORS, static files, SSE, templates with `{% block %}` / `{% extends %}` inheritance, RFC 9111 HTTP cache (`Cache[Inner, S]` middleware over `InMemoryCacheStore`, conditional revalidation), gRPC sans-I/O codec primitives (LPM framing + Status + Metadata) with the unary server adapter on top, an OpenAPI 3.1 spec emitter, full HTTP/3 over QUIC (sans-I/O codec primitives plus the live `QuicListener` UDP reactor, `H3Connection` driver, and rustls QUIC binding carrying requests end-to-end -- see the [match-or-beat-quiche bench](#performance)), `Retry` + `PostHocDeadline` reliability middleware, mTLS, and the PROXY protocol all live in `flare/`. Full inventory in [`docs/features.md`](docs/features.md).
-- **Composable by types, not callbacks:** `Handler` is a trait. `Router`, middleware, and typed extractors (`PathInt`, `QueryInt`, `Form[T]`, `Json[T]`, `Cookies`) compose by nesting structs. The compiler monomorphises the handler chain into one direct call sequence per request type - no virtual dispatch through the chain.
-- **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics. A `TestClient[H]` drives handlers in-process without binding a port for fast unit tests.
-- **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`). On a 4-worker plaintext bench, flare's handler path posts the best median p99 of the pack against `hyper` / `axum` / `actix_web`. [Numbers below.](#performance)
-- **Fuzzed:** 40 fuzz harnesses, 9M+ runs, zero known crashes. ASan and assert-mode coverage on every FFI boundary.
+- **Batteries included:** HTTP/1.1, HTTP/2, and HTTP/3 over QUIC (server + client), WebSocket (RFC 6455 + permessage-deflate), gRPC, TLS 1.2/1.3 + mTLS, sessions, gzip + brotli, CORS, static files, SSE, templates, RFC 9111 caching, and an OpenAPI 3.1 emitter. Full inventory in [`docs/features.md`](docs/features.md).
+- **Composable by types, not callbacks:** `Handler` is a trait; `Router`, middleware, and typed extractors (`PathInt`, `Json[T]`, `Cookies`, ...) compose by nesting structs, monomorphised into one direct call sequence per request type with no virtual dispatch.
+- **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics, and an in-process `TestClient[H]`.
+- **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`); top-of-pack throughput with a p99 median that ties `actix_web` and beats `hyper` / `axum`, plus [match-or-beat-quiche on HTTP/3](#performance).
+- **Fuzzed:** 40 fuzz harnesses, 9M+ runs, zero known crashes; ASan + assert-mode coverage on every FFI boundary.
 
 ## Install
 
@@ -60,11 +71,11 @@ flare = { git = "https://github.com/ehsanmok/flare.git", branch = "main" }
 
 ## Quick start
 
-The tour below walks the snippet at the top of this README from beginner to advanced. Each level adds roughly one concept; everything compiles, and the runnable equivalents live under [`examples/`](examples/) (every one is part of `pixi run tests`). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to the right example, and the rendered package docstring is at <https://ehsanmok.github.io/flare/>.
+Beginner to advanced, roughly one concept per level. Everything compiles; runnable equivalents live under [`examples/`](examples/) (all part of `pixi run tests`). [`docs/cookbook.md`](docs/cookbook.md) maps "I want to..." to an example; rendered docs at <https://ehsanmok.github.io/flare/>.
 
 ### Beginner: your first router
 
-Three routes (two infallible, one that may fail), a path parameter, and a JSON response. Plain `def` handlers, a `Router`, `HttpServer.bind`, `num_workers`. No traits, no generics, no extractors yet.
+Three routes (one fallible), a path param, a JSON response. Plain `def` handlers, no traits or generics yet.
 
 ```mojo
 from flare.prelude import *  # Request, Response, Router, HttpServer, ok, ok_json, SocketAddr, ...
@@ -88,19 +99,17 @@ def main() raises:
     srv.serve(r^)
 ```
 
-The single-worker `srv.serve(r^)` shape works with any `Handler`. For multi-worker mode (`num_workers=N`) the handler must be `Copyable` because each worker gets its own `H.copy()`. `Router` is `Copyable` because its routes are held behind an Arc-style refcount, so each worker copy shares the same boxed handlers without re-allocating. Bare-function handlers (`srv.serve(my_fn, num_workers=4)`) and `ComptimeRouter[ROUTES]` work the same way.
+`srv.serve(r^)` accepts any `Handler`. Multi-worker (`num_workers=N`) needs a `Copyable` handler (each worker gets its own `H.copy()`); `Router` qualifies because its routes sit behind an Arc-style refcount. Bare functions and `ComptimeRouter[ROUTES]` work the same.
 
-`flare.prelude` re-exports the everyday handler surface: `Request`, `Response`, `Router`, `HttpServer`, `ok` / `ok_json` / `ok_json_value` / `not_found` / `bad_request` / `internal_error` / `redirect`, `Method` / `Status`, the `Handler` family, and `SocketAddr`. Anything outside that set (typed extractors, middleware, sessions, cookies, forms, comptime routing, HTTP/2 internals, lower-level transports) stays as an explicit `from flare.http import ...` so the import block continues to document what each module reaches for. Everywhere in this Quick start uses the prelude; the Intermediate example below is the exception because it reaches for `Extracted` and `PathInt`, which sit outside the prelude. Spelling out the imports there keeps it obvious which names are in play.
+`flare.prelude` re-exports the everyday surface (`Request`, `Response`, `Router`, `HttpServer`, the `ok` / `ok_json` / `not_found` / ... builders, `Method` / `Status`, the `Handler` family, `SocketAddr`). Everything else (extractors, middleware, sessions, transports) stays an explicit `from flare.http import ...` so imports document intent, which is why the Intermediate example below spells them out.
 
-`raises` is optional and tracks the body. If the handler cannot fail (`home`, `health` above) drop the annotation; if it parses input or talks to a DB (`greet`'s `req.param` raises when `:name` is missing) keep it and let the server's catch-converts-to-500 contract take over. Mojo's function-type subtyping accepts both shapes at the same `Router.get(...)` call site. For *stateful* infallible handlers (the body still cannot fail but needs to carry struct fields) see [`HandlerInfallible`](examples/intermediate/infallible_handler.mojo).
+`raises` is optional and tracks the body: drop it when the handler cannot fail, keep it when it parses input or does I/O (the server converts a raise to a sanitized 500). Both shapes bind at the same `Router.get(...)` call. For stateful infallible handlers see [`HandlerInfallible`](examples/intermediate/infallible_handler.mojo).
 
-What you get for free: 404 on unknown paths, 405 with `Allow` on wrong method, sanitized 4xx / 5xx bodies, peer-FIN cancellation, RFC 7230 size limits, the per-worker reactor with `kqueue` / `epoll` (opt-in `io_uring`).
-
-For request bodies, query strings, cookies, sessions, multipart forms, gzip / brotli, TLS, HTTP/2, and WebSocket, see [`examples/`](examples/) (one per topic, indexed in [`docs/cookbook.md`](docs/cookbook.md)).
+Free: 404 on unknown paths, 405 with `Allow`, sanitized 4xx/5xx, peer-FIN cancellation, RFC 7230 size limits, per-worker `kqueue` / `epoll` (opt-in `io_uring`). Bodies, query strings, cookies, sessions, multipart, gzip/brotli, TLS, HTTP/2, WebSocket: see [`examples/`](examples/) (indexed in [`docs/cookbook.md`](docs/cookbook.md)).
 
 ### Intermediate: typed extractors
 
-Once your handlers need to read structured input (path params as integers, query strings as bools, headers as strings), promote each `Handler` from a `def` into a struct whose fields *are* the inputs. `PathInt["id"]` / `PathStr` / `QueryInt` / `HeaderStr` / `Form[T]` / `Multipart` / `Cookies` / ... parse and validate at extraction time; `Extracted[H]` reflects on the struct's fields and pulls each one in before `serve` runs. Missing or malformed values become a 400 with a sanitized body, so your `serve` only sees well-typed values.
+When handlers need structured input, make each `Handler` a struct whose fields *are* the inputs. `PathInt["id"]` / `QueryInt` / `HeaderStr` / `Form[T]` / `Multipart` / `Cookies` / ... parse and validate at extraction; `Extracted[H]` pulls them in before `serve`. Bad values become a sanitized 400, so `serve` only sees well-typed values.
 
 ```mojo
 from flare.http import (
@@ -129,13 +138,13 @@ def main() raises:
     HttpServer.bind(SocketAddr.localhost(8080)).serve(r^, num_workers=4)
 ```
 
-Middleware is the same shape: a `Handler` that wraps another `Handler`. The stock middleware (`Logger`, `RequestId`, `Compress`, `CatchPanic`, `Cors`) and stock leaf handlers (`FileServer`) all compose by nesting structs, no callback chain. `examples/intermediate/middleware.mojo` walks through a typical production stack (`RequestID → Logger → Timing → Recover → RequireAuth → Router`).
+Middleware is the same shape: a `Handler` wrapping a `Handler`. Stock middleware (`Logger`, `RequestId`, `Compress`, `CatchPanic`, `Cors`) and leaf handlers (`FileServer`) all nest as structs, no callback chain. [`examples/intermediate/middleware.mojo`](examples/intermediate/middleware.mojo) walks a production stack (RequestID -> Logger -> Timing -> Recover -> RequireAuth -> Router).
 
 ### Advanced: compile-time dispatch, shared state, cancel awareness
 
 Three independent patterns. Pick the ones your workload needs.
 
-**Cancel-aware handlers:** `CancelHandler.serve(req, cancel)` gets a token the reactor flips on peer FIN, deadline elapse, or graceful drain. Long-running handlers poll between expensive steps and return early; plain `Handler`s ignore the token and run to completion. The reactor still tears down the connection if the peer goes away; the token just lets your handler do partial work cleanly.
+**Cancel-aware handlers:** `CancelHandler.serve(req, cancel)` gets a token the reactor flips on peer FIN, deadline, or drain. Poll it between expensive steps to return partial work early; plain `Handler`s ignore it and run to completion.
 
 ```mojo
 from flare.http import CancelHandler, Cancel, Request, Response, ok
@@ -150,7 +159,7 @@ struct SlowHandler(CancelHandler, Copyable, Movable):
         return ok("done")
 ```
 
-**Compile-time route tables:** When the route table is known at build time, `ComptimeRouter[ROUTES]` parses the path patterns at compile time and unrolls the dispatch loop per route. No runtime trie walk, no per-request handler-table indirection. Same path-param + wildcard syntax as the runtime `Router`, same 404 / 405-with-`Allow` semantics; the only difference is *when* the dispatch is decided.
+**Compile-time route tables:** `ComptimeRouter[ROUTES]` parses path patterns at compile time and unrolls dispatch per route, no runtime trie walk. Same path-param + wildcard syntax and 404 / 405-with-`Allow` semantics as `Router`; only *when* dispatch is decided differs.
 
 ```mojo
 from flare.http import (
@@ -179,7 +188,7 @@ def main() raises:
     HttpServer.bind(SocketAddr.localhost(8080)).serve(r^, num_workers=4)
 ```
 
-**Shared state + middleware composition:** When a handler needs application-scoped state, build a `Handler` struct that captures the state by value. Middleware is itself a `Handler` that holds another `Handler`, so layers stack by nesting constructors. The compiler monomorphises the whole nested chain into one direct call sequence per request type, with no virtual dispatch and no per-request allocation. For shared mutation across worker copies, hold the state behind a `flare.runtime.Pool` heap address.
+**Shared state + middleware composition:** capture app-scoped state by value in a `Handler` struct; layers stack by nesting constructors. The compiler monomorphises the chain into one direct call sequence per request type, no virtual dispatch, no per-request allocation. For cross-worker mutation, hold state behind a `flare.runtime.Pool` heap address.
 
 ```mojo
 from flare.http import Router, Request, Response, Handler, ok, HttpServer
@@ -210,11 +219,11 @@ def main() raises:
     srv.serve(WithHits(inner=router^, counters=Counters(hits=37)))
 ```
 
-For the static-response fast path (`serve_static`), `serve_comptime[handler, config]` with build-time invariant checks, the multi-worker shared-listener mode (`HttpServer.serve(handler, num_workers=N)`), and the cross-worker `WorkerHandoffPool` (`FLARE_SOAK_WORKERS=on`), see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
+For `serve_static`, `serve_comptime[handler, config]` (build-time invariant checks), shared-listener multi-worker mode, and the cross-worker `WorkerHandoffPool`, see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
 
 ### Streaming proxy: relay an upstream with backpressure
 
-When the response body is produced elsewhere, for example a backend that streams chunks over a Unix socket, a `StreamHandler` relays it to the client with end-to-end backpressure. The framework owns the per-connection upstream: you hand it the source, it watches the fd, drains it, and closes it on teardown. Front code touches no file descriptors, no byte `Span`, and no per-connection table.
+When the body is produced elsewhere (e.g. a backend streaming chunks over a Unix socket), a `StreamHandler` relays it with end-to-end backpressure. The framework owns the per-connection upstream: hand it the source, it watches, drains, and closes the fd. Front code touches no file descriptors, byte `Span`, or per-connection table.
 
 ```mojo
 from flare import HttpServer, StreamHandler, StreamConn, UpstreamChunkSource
@@ -241,7 +250,7 @@ def main() raises:
     srv.serve_streaming(Proxy("/run/backend.sock"))
 ```
 
-`set_watermarks` couples the two pipes: when the client falls behind and the relay buffer crosses the high mark, the reactor stops reading the upstream until it drains back to the low mark, so a slow consumer cannot force unbounded buffering. A client disconnect propagates a `CANCEL` upstream automatically. The runnable end-to-end version is [`examples/advanced/streaming_proxy.mojo`](examples/advanced/streaming_proxy.mojo).
+`set_watermarks` couples the two pipes: when the relay buffer crosses the high mark the reactor stops reading upstream until it drains to the low mark, so a slow consumer cannot force unbounded buffering. A client disconnect propagates a `CANCEL` upstream. Runnable version: [`examples/advanced/streaming_proxy.mojo`](examples/advanced/streaming_proxy.mojo).
 
 ## Performance
 
@@ -269,12 +278,12 @@ The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 
 
 What jumps out:
 
-- **flare_mc (the handler path)** posts the best median p99 of the 4-worker pack at `2.63 ms`, edging hyper (`2.83 ms`) and matching axum (`2.80 ms`). The σ on flare_mc's tail (`17–50 ms` across the 5×30 s runs at p99 / p99.9 / p99.99) is larger than axum's flat σ but smaller than hyper's at p99.99 - one of five runs brushed the working-envelope edge while the other four landed clean. A `+1.1 %` throughput tightening over the previous baseline comes from eliminating a redundant UTF-8 validation pass on the H1 parser's ASCII artifacts (`Method` / `Path` / `Version` / header names + values are already RFC 7230-validated by the byte-level parser before string materialisation).
-- **flare_mc_static** still leads on req/s of the multi-worker pack that ships a fixed-response fast path (`247k req/s`, ~13 % under actix_web's new headline). Its p99 median is `2.68 ms` - tight when the harness lands inside the working envelope. The 664 ms σ at every tail percentile is the **honesty meter** firing: at this rate the fixed-response path occasionally tips off the saturation cliff, and the σ tells you that's where the next 10 % of throughput goes. Use this row when headline matters and the workload tolerates occasional tail expansion; use `flare_mc` when you want a uniformly tight tail under sustained load.
-- **actix_web** posts the highest headline of the pack (`253k req/s`) but its p99 median is `10.04 ms` and p99.99 is `37.41 ms` - the same cliff dynamic flare_mc_static shows, just at a higher rate. The σ on actix's p99 / p99.9 (`4.55 ms` / `4.31 ms`) is tight enough that this isn't measurement noise; it's a steady-state shape at that rate.
-- **axum** is the steadiest of the pack at `195k req/s` with `σ ≤ 0.02 ms` at every percentile - flat at the cost of being the lowest headline of the four. Use it as the reference for what an in-envelope p99 distribution looks like at this load.
-- **hyper** is the reference baseline - its current numbers (`216k req/s`, `2.83 ms` p99 median) move within `±0.5 %` of the prior measurement, so the same Rust binary under the same Linux kernel returns the same throughput run-over-run.
-- **flare 1w** is on par with nginx 1w. Both land within `2.8 %` of each other on req/s (`79.0k` vs `76.9k`) - the gap sits inside the combined `1σ` envelope of the two measurements (`±1.58k req/s`), and nginx itself drifted `-4.2 %` between the prior and current runs of the same binary. Median p99 is identical at `3.23 ms`. Statistically indistinguishable at single-core load. The prior measurement had flare at 89 % of nginx; the H1 parser tightening lands more aggressively at the single-worker shape (the workload runs on one core, so the ~5 % CPU reclaim from the UTF-8 bypass shows up as ~10 % throughput). Against Go `net/http` at the same worker count flare does `1.96x` the throughput with comparable tail medians.
+- **flare_mc_static** (fixed-response fast path) leads the 4-worker pack on throughput at `242,384 req/s` and holds a uniformly tight tail (σ `<= 0.16 ms` at every percentile) - all five runs landed inside the working envelope this round.
+- **flare_mc** (the handler path) is third at `237,761 req/s`, within `~2 %` of the leader, and its p99 *median* of `2.74 ms` is essentially tied with actix (`2.73`) and ahead of hyper (`2.83`) and axum (`2.82`). The large `+/- 320-359 ms` σ on its tail is the **honesty meter** firing, not an error rate: every request succeeded, but one of the five 30 s runs tipped over the saturation cliff and its tail spiked into the hundreds of ms while the other four stayed tight, so the median held and the run-to-run tail did not. The handler headline here is the edge of the envelope, not its comfortable interior - back the rate off slightly for a uniformly tight tail.
+- **actix_web** is second at `239,108 req/s` with a near-flat tail (σ `<= 12 ms` at p99.9 / p99.99) - a mild cliff brush rather than a steady-state blowup.
+- **hyper** is the reference baseline at `217,036 req/s` with the tightest tail of the Rust pack (σ `<= 2.72 ms`); the same binary returns the same throughput run-over-run.
+- **axum** is steady by design but the lowest headline of the four at `201,216 req/s`, tight everywhere except a `29.5 ms` σ at p99.99.
+- **flare 1w** edges nginx 1w by `2.8 %` (`79.0k` vs `76.9k req/s`) with an identical `3.23 ms` p99 median - on par at single-core load. Against Go `net/http` at the same worker count flare does `1.96x` the throughput with comparable tail medians.
 
 **HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare h3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, H3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare h3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from new syscall batching (`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed without them). Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
 
