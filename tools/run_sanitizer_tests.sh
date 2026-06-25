@@ -223,6 +223,12 @@ ASAN_TESTS=(
   # pending-migration buffers + the rustls 1-RTT crypto across the
   # path change.
   "tests/quic/test_quic_migration.mojo"
+  # RFC 9001 sec 4.6 client session resumption / 0-RTT early-key
+  # readiness over loopback: two QUIC connections on one connector,
+  # the second resumes the cached ticket (stateful server resumption)
+  # and installs EarlyData keys. ASan validates the cross-connection
+  # rustls session reuse + the early-key install/teardown path.
+  "tests/quic/test_quic_resumption.mojo"
   # H3C-2 -- HTTP/3 client request writer + response reader. Pure
   # byte codecs (no QUIC), but ASan validates the response reader's
   # inbox compaction across frame boundaries and the QPACK field-

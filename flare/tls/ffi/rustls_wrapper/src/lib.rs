@@ -242,26 +242,33 @@ pub extern "C" fn flare_rustls_quic_acceptor_new(
     server_config.alpn_protocols = alpn_list;
 
     // ABI 4: 0-RTT early data. When the caller asks for a non-zero
-    // window we install a stateless TLS1.3 ticketer (so resumption +
-    // 0-RTT work without server-side session storage) and set
-    // `max_early_data_size`. RFC 9001 sec 4.6.1 requires the ticket's
-    // max_early_data_size be 0xffffffff for QUIC (QUIC does its own
-    // flow control), so any non-zero request is clamped up to that
-    // sentinel; the caller's numeric value is only a feature toggle.
-    // The default (0) leaves the server 1-RTT-only, matching prior
-    // behavior. Anti-replay: the ticketer rotates keys and rustls
-    // enforces single-use obfuscated-age windows; the Mojo driver
-    // adds the idempotent-method gate on top.
+    // window we enable STATEFUL resumption and set max_early_data_size.
+    //
+    // RFC 8446 sec 8.1 (and rustls server/tls13.rs: early_data_configured
+    // = max_early_data_size > 0 && !ticketer.enabled()) only permits
+    // 0-RTT with stateful resumption: a stateless TLS1.3 Ticketer drops
+    // max_early_data_size from the issued NewSessionTicket, so the
+    // resumed client never offers early data and `zero_rtt_keys()`
+    // stays None. We therefore install an in-memory session cache (the
+    // builder default, made explicit here) and deliberately leave the
+    // ticketer disabled.
+    //
+    // RFC 9001 sec 4.6.1 requires the ticket's max_early_data_size be
+    // 0xffffffff for QUIC (QUIC does its own flow control), so any
+    // non-zero request is clamped up to that sentinel; the caller's
+    // numeric value is only a feature toggle. The default (0) leaves
+    // the server 1-RTT-only, matching prior behavior.
+    //
+    // ponytail: stateful resumption keeps session state in this
+    // process's memory only -- it does not share across a server fleet
+    // (a multi-node deployment would need a shared ServerSessionStore).
+    // For a single flare server process this is correct; the upgrade
+    // path is a distributed StoresServerSessions impl. Anti-replay:
+    // rustls enforces single-use obfuscated-age windows on the stateful
+    // cache; the Mojo driver adds the idempotent-method gate on top.
     if max_early_data != 0 {
-        match rustls::crypto::ring::Ticketer::new() {
-            Ok(t) => server_config.ticketer = t,
-            Err(e) => {
-                set_last_error(format!(
-                    "flare_rustls_quic_acceptor_new: Ticketer::new failed: {e}"
-                ));
-                return std::ptr::null_mut();
-            }
-        }
+        server_config.session_storage =
+            rustls::server::ServerSessionMemoryCache::new(256);
         server_config.max_early_data_size = 0xffff_ffff;
     }
 
@@ -902,7 +909,9 @@ pub extern "C" fn flare_rustls_quic_is_early_data_accepted(session: *mut c_void)
 ///   `Connection::zero_rtt_keys()` into the EarlyData slot),
 ///   `flare_rustls_quic_is_early_data_accepted`, an in-memory
 ///   client session store + `enable_early_data` on the connector,
-///   a server ticketer + `max_early_data_size` (new `max_early_data`
+///   server-side stateful resumption (in-memory session cache, NOT a
+///   stateless ticketer -- RFC 8446 sec 8.1 forbids 0-RTT with
+///   stateless tickets) + `max_early_data_size` (new `max_early_data`
 ///   arg on `acceptor_new`), and EarlyData (`level == 1`) support
 ///   in the `_packet_*` / `_header_*` / `_have_keys` thunks.
 /// * 5 -- adds `flare_rustls_quic_connector_new_native_roots`
@@ -1405,16 +1414,182 @@ mod tests {
     }
 
     #[test]
-    fn abi_version_returns_five() {
+    fn abi_version_returns_six() {
         // The ABI bumped 1 -> 2 (KeyChange-capture + per-level
         // AEAD/HP thunks) -> 3 (client role: connector_new/_free +
         // connect) -> 4 (0-RTT early data + resumption: install_early_keys
         // / is_early_data_accepted + EarlyData-level AEAD/HP + the
         // max_early_data arg on acceptor_new) -> 5 (native-roots
-        // connector). The activation script keys off this number, so a
-        // stale .so on a developer machine surfaces as a hard mismatch
-        // on `pixi install` rather than a silent run-time confusion.
-        assert_eq!(flare_rustls_quic_abi_version(), 5);
+        // connector) -> 6 (peer transport-param accessor). The
+        // activation script keys off this number, so a stale .so on a
+        // developer machine surfaces as a hard mismatch on
+        // `pixi install` rather than a silent run-time confusion.
+        assert_eq!(flare_rustls_quic_abi_version(), 6);
+    }
+
+    #[test]
+    fn quic_client_resumes_with_early_keys() {
+        // Ground-truth diagnostic for the v0.9 client-side 0-RTT
+        // readiness path: drive TWO full in-memory QUIC handshakes
+        // against rustls directly (no FFI, no Mojo driver, no UDP) on
+        // ONE shared ClientConfig, and assert the resumed connection
+        // is handed 0-RTT (EarlyData) keys via `zero_rtt_keys()`.
+        //
+        // This isolates whether rustls itself supplies early keys
+        // under our exact connector/acceptor config (enable_early_data
+        // + ticketer + max_early_data_size). If this passes but the
+        // loopback test fails, the gap is in the Mojo driver's ticket
+        // delivery, not the crypto config.
+        use rustls::pki_types::ServerName;
+        use rustls::quic::{ClientConnection, Connection, ServerConnection, Version};
+
+        let ca_pem = include_str!(
+            "../../../../../tests/tls/fixtures/rustls-quic-client/ca.pem"
+        );
+        let cert_pem = include_str!(
+            "../../../../../tests/tls/fixtures/rustls-quic-client/cert.pem"
+        );
+        let key_pem = include_str!(
+            "../../../../../tests/tls/fixtures/rustls-quic-client/key.pem"
+        );
+
+        // Client config: mirror `finish_connector` (roots from CA PEM,
+        // enable_early_data, h3 ALPN). Shared Arc => shared in-memory
+        // session store across both connections.
+        let mut roots = RootCertStore::empty();
+        for c in
+            rustls_pemfile::certs(&mut std::io::Cursor::new(ca_pem.as_bytes()))
+        {
+            roots.add(c.unwrap()).unwrap();
+        }
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let mut client_config = ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_config.enable_early_data = true;
+        client_config.alpn_protocols = vec![b"h3".to_vec()];
+        let client_config = Arc::new(client_config);
+
+        // Server config: mirror `acceptor_new` with 0-RTT enabled
+        // (ticketer + max_early_data_size).
+        let certs =
+            rustls_pemfile::certs(&mut std::io::Cursor::new(cert_pem.as_bytes()))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+        let key =
+            rustls_pemfile::private_key(&mut std::io::Cursor::new(key_pem.as_bytes()))
+                .unwrap()
+                .unwrap();
+        let mut server_config = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .unwrap();
+        server_config.alpn_protocols = vec![b"h3".to_vec()];
+        // RFC 8446 sec 8.1 / rustls: 0-RTT requires STATEFUL resumption.
+        // A stateless `Ticketer` drops max_early_data_size from the
+        // ticket, so use the default in-memory session storage and do
+        // NOT install a ticketer.
+        server_config.session_storage =
+            rustls::server::ServerSessionMemoryCache::new(256);
+        server_config.max_early_data_size = 0xffff_ffff;
+        let server_config = Arc::new(server_config);
+
+        let tp = vec![0x00u8, 0x01, 0x02, 0x03];
+
+        // Drain one side's pending handshake plaintext fully. rustls's
+        // `write_hs` may append bytes AND return None on the same call,
+        // so loop until neither bytes nor a KeyChange are produced.
+        fn drain(conn: &mut Connection) -> Vec<u8> {
+            let mut out = Vec::new();
+            loop {
+                let before = out.len();
+                let kc = conn.write_hs(&mut out);
+                if kc.is_none() && out.len() == before {
+                    break;
+                }
+            }
+            out
+        }
+
+        fn handshake(client: &mut Connection, server: &mut Connection) {
+            for _ in 0..16 {
+                let c = drain(client);
+                if !c.is_empty() {
+                    server.read_hs(&c).unwrap();
+                }
+                let s = drain(server);
+                if !s.is_empty() {
+                    client.read_hs(&s).unwrap();
+                }
+                if !client.is_handshaking() && !server.is_handshaking() {
+                    return;
+                }
+            }
+            panic!("handshake did not complete within 16 rounds");
+        }
+
+        // Connection 1: full handshake. A fresh client has no resumed
+        // session, so no early keys yet.
+        let mut c1 = Connection::Client(
+            ClientConnection::new(
+                client_config.clone(),
+                Version::V1,
+                ServerName::try_from("localhost").unwrap(),
+                tp.clone(),
+            )
+            .unwrap(),
+        );
+        let mut s1 = Connection::Server(
+            ServerConnection::new(server_config.clone(), Version::V1, tp.clone())
+                .unwrap(),
+        );
+        // A fresh (non-resumed) client never has 0-RTT keys, even
+        // after writing its ClientHello.
+        assert!(
+            c1.zero_rtt_keys().is_none(),
+            "a fresh (non-resumed) client must not have 0-RTT keys"
+        );
+        handshake(&mut c1, &mut s1);
+
+        // Post-handshake: pump both directions so the server emits its
+        // NewSessionTicket(s) and the client caches them in the shared
+        // ClientConfig store.
+        for _ in 0..6 {
+            let c = drain(&mut c1);
+            if !c.is_empty() {
+                s1.read_hs(&c).unwrap();
+            }
+            let s = drain(&mut s1);
+            if !s.is_empty() {
+                c1.read_hs(&s).unwrap();
+            }
+        }
+
+        // Connection 2: same shared ClientConfig => resumed session.
+        // After writing the ClientHello, rustls must hand back 0-RTT
+        // keys (this is exactly what `install_early_keys` captures).
+        let mut c2 = Connection::Client(
+            ClientConnection::new(
+                client_config.clone(),
+                Version::V1,
+                ServerName::try_from("localhost").unwrap(),
+                tp.clone(),
+            )
+            .unwrap(),
+        );
+        // Writing the resumed ClientHello loads the cached ticket and,
+        // because the server issued it with stateful resumption +
+        // max_early_data_size, rustls derives the 0-RTT keys here. This
+        // is exactly what the Mojo `install_early_keys` captures.
+        let _ = drain(&mut c2);
+        assert!(
+            c2.zero_rtt_keys().is_some(),
+            "resumed client must be handed 0-RTT early keys",
+        );
     }
 
     #[test]

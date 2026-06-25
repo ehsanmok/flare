@@ -381,6 +381,7 @@ test-qpack           = "mojo -I . tests/qpack/test_qpack.mojo"           # RFC 9
 test-quic-state      = "mojo -I . tests/quic/test_state.mojo"            # RFC 9000 §3 stream + §10 connection state machines (~13 cases)
 test-quic-loss-recovery = "mojo -I . tests/quic/test_loss_recovery.mojo"  # RFC 9002 §6.2 minimal PTO loss-recovery bookkeeping + ACK-range expansion (6 cases)
 test-quic-migration  = { cmd = "mojo -I . tests/quic/test_quic_migration.mojo", depends-on = ["build-rustls-quic"] }  # RFC 9000 §9 client-initiated connection migration over loopback (1 case)
+test-quic-resumption = { cmd = "mojo -I . tests/quic/test_quic_resumption.mojo", depends-on = ["build-rustls-quic"] }  # RFC 9001 §4.6 client session resumption / 0-RTT early-key readiness over loopback (1 case)
 test-grpc-server     = "mojo -I . tests/grpc/test_server.mojo"           # gRPC unary adapter -- header validation + LPM stitching + handler dispatch (~14 cases)
 test-h3-request-reader = "mojo -I . tests/h3/test_request_reader.mojo"   # RFC 9114 §4 + §7 H3 request-stream sans-I/O reader (~10 cases)
 test-h3-response-writer = "mojo -I . tests/h3/test_response_writer.mojo" # RFC 9114 §4.3 H3 response-stream sans-I/O writer (~7 cases)

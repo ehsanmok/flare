@@ -289,6 +289,17 @@ struct QuicClientConnection(Movable):
     """Minimal PTO loss recovery (RFC 9002 §6.2) for ack-eliciting
     1-RTT packets: retransmits unacked request frames on a probe
     timeout. See :mod:`flare.quic._loss_recovery`."""
+    var enable_0rtt: Bool
+    """Opt-in TLS session resumption / 0-RTT (RFC 9001 §4.6). Off by
+    default so the standard path is byte-for-byte unchanged. When the
+    same :class:`RustlsQuicConnector` is reused for a later connection
+    to a server that issued a 0-RTT-capable ticket, rustls resumes the
+    session and (in-process only -- rustls 0.23 has no cross-process
+    ticket export) exposes early keys."""
+    var _early_keys_ready: Bool
+    """Whether rustls installed 0-RTT (EarlyData) keys for this
+    connection -- True only on a resumed connection whose ticket
+    allowed early data. See :meth:`early_data_ready`."""
 
     def __init__(
         out self,
@@ -336,6 +347,8 @@ struct QuicClientConnection(Movable):
         self.next_uni_stream = UInt64(2)
         self.send_offsets = Dict[UInt64, UInt64]()
         self._loss = LossRecovery()
+        self.enable_0rtt = False
+        self._early_keys_ready = False
 
     @staticmethod
     def start(
@@ -346,6 +359,7 @@ struct QuicClientConnection(Movable):
         initial_max_data: UInt64 = UInt64(1 << 20),
         max_udp_payload_size: Int = 1452,
         aead_choice: Int = QuicAead.AES_128_GCM,
+        enable_0rtt: Bool = False,
     ) raises -> QuicClientConnection:
         """Open a client connection and emit the first Initial
         (ClientHello) packet without blocking on the response.
@@ -381,7 +395,17 @@ struct QuicClientConnection(Movable):
             aead_choice,
             max_udp_payload_size,
         )
+        self.enable_0rtt = enable_0rtt
         self._send_first_initial()
+        if enable_0rtt:
+            # On a resumed connection (same connector reused, server
+            # issued a 0-RTT-capable ticket) rustls exposes the
+            # EarlyData keys once the ClientHello is written (the
+            # first_initial drain above); capture them so a later send
+            # can ride 0-RTT when the server driver pumps early-data
+            # packets (tracked follow-up). A fresh connection returns
+            # no early keys -- a harmless no-op.
+            self._early_keys_ready = self.session.install_early_keys()
         return self^
 
     @staticmethod
@@ -394,12 +418,17 @@ struct QuicClientConnection(Movable):
         initial_max_data: UInt64 = UInt64(1 << 20),
         max_udp_payload_size: Int = 1452,
         aead_choice: Int = QuicAead.AES_128_GCM,
+        enable_0rtt: Bool = False,
     ) raises -> QuicClientConnection:
         """Open a client connection and block until the QUIC + TLS
         handshake completes (or ``handshake_timeout_ms`` elapses).
 
         Raises on timeout. On return the connection is
         ESTABLISHED and ready for :meth:`send_stream`.
+
+        ``enable_0rtt`` opts into session resumption (RFC 9001 §4.6):
+        reuse the same :class:`RustlsQuicConnector` across connections
+        so a later one resumes the cached session. Off by default.
         """
         var self = QuicClientConnection.start(
             peer,
@@ -409,6 +438,7 @@ struct QuicClientConnection(Movable):
             initial_max_data,
             max_udp_payload_size,
             aead_choice,
+            enable_0rtt,
         )
         var deadline = _monotonic_ms() + UInt64(handshake_timeout_ms)
         while not self.established:
@@ -1172,6 +1202,29 @@ struct QuicClientConnection(Movable):
         """Whether the QUIC + TLS handshake has completed and 1-RTT
         keys are installed."""
         return self.established
+
+    def early_data_ready(self) -> Bool:
+        """Whether this connection resumed a session and rustls
+        installed 0-RTT (EarlyData) keys (RFC 9001 §4.6). True only
+        when :attr:`enable_0rtt` was set, the same connector was
+        reused, and the server's prior ticket allowed early data.
+
+        ponytail: this reports key readiness; actually transmitting
+        application data at 0-RTT additionally needs the server QUIC
+        driver to pump EarlyData packets, which is the tracked v0.9
+        0-RTT server follow-up. Until then a resumed connection still
+        sends its request at 1-RTT (no behavior change)."""
+        return self._early_keys_ready
+
+    def early_data_accepted(self) -> Bool:
+        """Whether the server accepted early data for this resumed
+        connection (RFC 8446 §4.2.10; meaningful after the handshake
+        completes). False on a fresh connection or when 0-RTT was not
+        enabled. A client that sent 0-RTT data must replay it at
+        1-RTT when this is False."""
+        if not self.enable_0rtt:
+            return False
+        return self.session.is_early_data_accepted()
 
     def path_validated(self) -> Bool:
         """Whether the most recent :meth:`migrate` probe has been

@@ -145,8 +145,13 @@ struct RustlsQuicConfig(Copyable, Defaultable, Movable):
 
     var max_early_data_size: UInt32
     """Maximum 0-RTT data the server will accept. Set to 0 to
-    disable 0-RTT (the default). 0-RTT replay protection is
-    out of scope for this cycle; see RFC 9001 §9.2."""
+    disable 0-RTT (the default). A non-zero value switches the
+    server to STATEFUL resumption (an in-memory session cache,
+    not a stateless ticket) because RFC 8446 sec 8.1 forbids
+    0-RTT with stateless tickets; rustls then advertises early
+    data in the issued NewSessionTicket. 0-RTT replay protection
+    beyond the rustls single-use window is out of scope for this
+    cycle; see RFC 9001 sec 9.2."""
 
     var session_resumption_enabled: Bool
     """Whether to issue NewSessionTicket frames for session
