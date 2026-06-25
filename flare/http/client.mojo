@@ -224,6 +224,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
+        prefer_h3: Bool = False,
     ):
         """Initialise an ``HttpClient`` with secure defaults.
 
@@ -240,6 +241,12 @@ struct HttpClient(Movable):
                 instead of using prior knowledge; the connection switches
                 to HTTP/2 only if the server returns ``101 Switching
                 Protocols``, otherwise it stays on HTTP/1.1.
+            prefer_h3: When ``True``, ``https://`` requests prefer
+                HTTP/3 over QUIC on first contact rather than waiting
+                for an ``Alt-Svc`` advert; any QUIC dial failure falls
+                back transparently to h2/h1. (Without this, h3 still
+                kicks in automatically once a server advertises it via
+                ``Alt-Svc``.)
         """
         self._config = TlsConfig()
         self._max_redirects = max_redirects
@@ -250,7 +257,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = False
+        self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
 
@@ -263,6 +270,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
+        prefer_h3: Bool = False,
     ):
         """Initialise an ``HttpClient`` with custom TLS configuration."""
         self._config = tls.copy()
@@ -274,7 +282,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = False
+        self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
 
@@ -289,6 +297,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
+        prefer_h3: Bool = False,
     ) raises:
         """Initialise an ``HttpClient`` with authentication."""
         self._config = TlsConfig()
@@ -302,7 +311,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = False
+        self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
 
@@ -317,6 +326,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
+        prefer_h3: Bool = False,
     ) raises:
         """Initialise an ``HttpClient`` with a base URL and authentication."""
         self._config = TlsConfig()
@@ -330,7 +340,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = False
+        self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
 
