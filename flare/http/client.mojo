@@ -510,7 +510,14 @@ struct HttpClient(Movable):
         var peer = SocketAddr(addrs[0], u.port)
         var alpn = List[String]()
         alpn.append("h3")
-        var connector = RustlsQuicConnector(self._resolve_quic_ca_pem(), alpn^)
+        # Empty ca_bundle parity with the OpenSSL h1/h2 path: fall back
+        # to the OS trust store (rustls-native-certs) instead of
+        # requiring a concrete PEM. An explicit ca_bundle still wins.
+        var connector: RustlsQuicConnector
+        if self._config.ca_bundle.byte_length() > 0:
+            connector = RustlsQuicConnector(self._resolve_quic_ca_pem(), alpn^)
+        else:
+            connector = RustlsQuicConnector.with_system_roots(alpn^)
         var quic = QuicClientConnection.connect(peer, connector, u.host)
         self._quic_pool.note_dial()
         return H3ClientConnection(quic^)

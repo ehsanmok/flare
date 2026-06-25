@@ -1,6 +1,6 @@
 [package]
 name = "flare_rustls_quic"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "C ABI shim around rustls::quic for the flare QUIC server + client reactor"
@@ -22,6 +22,10 @@ crate-type = ["cdylib", "rlib"]
 # on the flare side -- see flare/quic/crypto.mojo).
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2"
+# OS trust store loader for the public-internet h3 client path
+# (RustlsQuicConnector.with_system_roots): reads the platform CA
+# bundle at runtime so callers don't have to ship a PEM.
+rustls-native-certs = "0.8"
 # Pinned: panics over the FFI boundary are UB. Catch every panic at
 # the C ABI surface, convert to a -1 return + thread-local error
 # message via the std::panic::catch_unwind path.

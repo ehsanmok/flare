@@ -155,6 +155,23 @@ def _do_connector_new(
     )
 
 
+def _do_connector_new_native_roots(
+    read lib: OwnedDLHandle,
+    read alpn_wire: List[UInt8],
+) -> Int:
+    """Call ``flare_rustls_quic_connector_new_native_roots`` and
+    return the ``Box<Connector>*`` as an ``Int``. Zero on failure
+    (read :func:`_do_last_error` for the reason). Builds a connector
+    trusting the OS CA bundle (loaded via rustls-native-certs)."""
+    var f = lib.get_function[def(Int, Int) thin abi("C") -> Int](
+        "flare_rustls_quic_connector_new_native_roots"
+    )
+    return f(
+        Int(alpn_wire.unsafe_ptr()),
+        len(alpn_wire),
+    )
+
+
 def _do_connector_free(read lib: OwnedDLHandle, handle: Int):
     """Free a connector allocated by :func:`_do_connector_new`.
     NULL handle is a no-op."""

@@ -415,6 +415,15 @@ pub extern "C" fn flare_rustls_quic_connector_new(
         }
     }
 
+    finish_connector(roots, alpn_bytes, "flare_rustls_quic_connector_new")
+}
+
+/// Shared connector-build tail for both the explicit-CA and
+/// native-roots constructors: build the ClientConfig off the ring
+/// provider with the supplied roots, enable resumption + 0-RTT, set
+/// the wire-format ALPN list, and Box-leak the Connector. Returns
+/// NULL + sets the thread-local error on failure.
+fn finish_connector(roots: RootCertStore, alpn_bytes: &[u8], who: &str) -> *mut c_void {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let builder = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -422,9 +431,7 @@ pub extern "C" fn flare_rustls_quic_connector_new(
     let mut client_config = match builder {
         Ok(c) => c,
         Err(e) => {
-            set_last_error(format!(
-                "flare_rustls_quic_connector_new: ClientConfig build failed: {e}"
-            ));
+            set_last_error(format!("{who}: ClientConfig build failed: {e}"));
             return std::ptr::null_mut();
         }
     };
@@ -448,7 +455,7 @@ pub extern "C" fn flare_rustls_quic_connector_new(
         let len = alpn_bytes[i] as usize;
         i += 1;
         if i + len > alpn_bytes.len() {
-            set_last_error("flare_rustls_quic_connector_new: ALPN wire format truncated");
+            set_last_error(format!("{who}: ALPN wire format truncated"));
             return std::ptr::null_mut();
         }
         alpn_list.push(alpn_bytes[i..i + len].to_vec());
@@ -460,6 +467,51 @@ pub extern "C" fn flare_rustls_quic_connector_new(
         config: Arc::new(client_config),
     });
     Box::into_raw(connector) as *mut c_void
+}
+
+/// `flare_rustls_quic_connector_new_native_roots` builds a Connector
+/// trusting the operating system's CA bundle (loaded at runtime via
+/// `rustls-native-certs`) instead of a caller-supplied PEM. This is
+/// the public-internet h3 client path: no PEM to ship, the platform
+/// trust store is the source of truth.
+///
+/// `alpn_protos` is the same wire-format ALPN list shape as
+/// `connector_new` (`len_byte || proto_bytes || ...`).
+///
+/// Returns NULL on failure (no native roots found, or none usable);
+/// check `flare_rustls_quic_last_error` for the reason.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_connector_new_native_roots(
+    alpn_protos: *const u8,
+    alpn_len: usize,
+) -> *mut c_void {
+    let alpn_bytes = if alpn_protos.is_null() || alpn_len == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(alpn_protos, alpn_len) }
+    };
+
+    let loaded = rustls_native_certs::load_native_certs();
+    if loaded.certs.is_empty() {
+        set_last_error(
+            "flare_rustls_quic_connector_new_native_roots: no native root certificates found",
+        );
+        return std::ptr::null_mut();
+    }
+    let mut roots = RootCertStore::empty();
+    let (added, _ignored) = roots.add_parsable_certificates(loaded.certs);
+    if added == 0 {
+        set_last_error(
+            "flare_rustls_quic_connector_new_native_roots: no usable native root certificates",
+        );
+        return std::ptr::null_mut();
+    }
+
+    finish_connector(
+        roots,
+        alpn_bytes,
+        "flare_rustls_quic_connector_new_native_roots",
+    )
 }
 
 /// Free a connector returned by `flare_rustls_quic_connector_new`.
@@ -800,9 +852,12 @@ pub extern "C" fn flare_rustls_quic_is_early_data_accepted(session: *mut c_void)
 ///   a server ticketer + `max_early_data_size` (new `max_early_data`
 ///   arg on `acceptor_new`), and EarlyData (`level == 1`) support
 ///   in the `_packet_*` / `_header_*` / `_have_keys` thunks.
+/// * 5 -- adds `flare_rustls_quic_connector_new_native_roots`
+///   (builds a Connector trusting the OS CA bundle via
+///   `rustls-native-certs`, for the public-internet h3 client path).
 #[no_mangle]
 pub extern "C" fn flare_rustls_quic_abi_version() -> i64 {
-    4
+    5
 }
 
 /// Returns 1 if rustls has installed per-level keys at the given
@@ -1293,16 +1348,40 @@ mod tests {
     }
 
     #[test]
-    fn abi_version_returns_four() {
+    fn abi_version_returns_five() {
         // The ABI bumped 1 -> 2 (KeyChange-capture + per-level
         // AEAD/HP thunks) -> 3 (client role: connector_new/_free +
         // connect) -> 4 (0-RTT early data + resumption: install_early_keys
         // / is_early_data_accepted + EarlyData-level AEAD/HP + the
-        // max_early_data arg on acceptor_new). The activation script
-        // keys off this number, so a stale .so on a developer machine
-        // surfaces as a hard mismatch on `pixi install` rather than a
-        // silent run-time confusion.
-        assert_eq!(flare_rustls_quic_abi_version(), 4);
+        // max_early_data arg on acceptor_new) -> 5 (native-roots
+        // connector). The activation script keys off this number, so a
+        // stale .so on a developer machine surfaces as a hard mismatch
+        // on `pixi install` rather than a silent run-time confusion.
+        assert_eq!(flare_rustls_quic_abi_version(), 5);
+    }
+
+    #[test]
+    fn connector_new_native_roots_builds_or_reports() {
+        // On a host with a populated OS trust store (CI images ship
+        // ca-certificates) this returns a non-null connector; on a
+        // bare host with no roots it returns NULL + a descriptive
+        // error. Either way it must not panic, and a non-null handle
+        // must free cleanly.
+        let alpn = b"\x02h3";
+        let p = flare_rustls_quic_connector_new_native_roots(
+            alpn.as_ptr(),
+            alpn.len(),
+        );
+        if p.is_null() {
+            let err = unsafe { CStr::from_ptr(flare_rustls_quic_last_error()) };
+            assert!(
+                err.to_string_lossy().contains("native root"),
+                "expected native-root error, got {:?}",
+                err
+            );
+        } else {
+            flare_rustls_quic_connector_free(p);
+        }
     }
 
     #[test]

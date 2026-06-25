@@ -108,6 +108,32 @@ def test_connector_bad_ca_is_null() raises:
     assert_true(raised, "connect on a NULL connector must raise")
 
 
+def test_connector_system_roots() raises:
+    """``with_system_roots`` builds a usable connector off the OS CA
+    bundle (rustls-native-certs): a non-zero handle and a fresh
+    client session that drives a ClientHello -- no PEM supplied.
+    Skips the non-zero assertion only if the host has no trust store
+    (a bare container), in which case the handle is 0 and connect
+    raises, which is the documented behavior."""
+    var connector = RustlsQuicConnector.with_system_roots(_h3_alpn())
+    if connector._opaque_handle == 0:
+        # No native roots on this host: connect must surface it.
+        var raised = False
+        try:
+            var _s = connector.connect(String("example.com"))
+        except:
+            raised = True
+        assert_true(raised, "NULL native-roots connector must raise")
+        return
+    var session = connector.connect(String("example.com"))
+    assert_true(
+        session._opaque_session_handle != 0,
+        "system-roots connect should produce a non-zero session",
+    )
+    var hello = session.take_crypto(QuicEncryptionLevel.INITIAL)
+    assert_true(len(hello) > 0, "client should emit a ClientHello")
+
+
 def test_connect_fresh_session() raises:
     """A fresh client session (connect) is non-zero, not yet complete,
     and has no negotiated ALPN before the handshake runs."""
@@ -160,7 +186,8 @@ def test_loopback_handshake_completes() raises:
 def main() raises:
     test_connector_construct()
     test_connector_bad_ca_is_null()
+    test_connector_system_roots()
     test_connect_fresh_session()
     test_client_emits_clienthello()
     test_loopback_handshake_completes()
-    print("test_rustls_quic_client: 5 passed")
+    print("test_rustls_quic_client: 6 passed")

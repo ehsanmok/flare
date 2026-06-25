@@ -53,6 +53,7 @@ from ._rustls_quic_ffi import (
     _do_acceptor_free,
     _do_accept,
     _do_connector_new,
+    _do_connector_new_native_roots,
     _do_connector_free,
     _do_connect,
     _do_session_free,
@@ -425,6 +426,39 @@ struct RustlsQuicConnector(Movable):
         self._lib = lib^
         self._opaque_handle = handle
         self.alpn_protocols = alpn_protocols^
+
+    def __init__(
+        out self,
+        var alpn_protocols: List[String],
+        use_system_roots: Bool,
+    ) raises:
+        """Build a connector trusting the operating system's CA
+        bundle (loaded at runtime via rustls-native-certs) instead of
+        a PEM. ``use_system_roots`` distinguishes this overload from
+        the PEM constructor. Mirrors the PEM path: a 0 handle (no
+        native roots found / none usable) is surfaced at
+        :meth:`connect` time, not at construction. Raises only on an
+        invalid ALPN list.
+        """
+        var lib = OwnedDLHandle(_find_rustls_quic_lib())
+        var alpn_wire = _encode_alpn_wire(alpn_protocols)
+        var handle = Int(0)
+        if use_system_roots:
+            handle = _do_connector_new_native_roots(lib, alpn_wire)
+        self._lib = lib^
+        self._opaque_handle = handle
+        self.alpn_protocols = alpn_protocols^
+
+    @staticmethod
+    def with_system_roots(
+        var alpn_protocols: List[String],
+    ) raises -> RustlsQuicConnector:
+        """Build a connector trusting the OS CA bundle
+        (rustls-native-certs) -- the public-internet h3 client path
+        where there is no PEM to ship. Equivalent to the
+        ``use_system_roots=True`` constructor; provided as a named
+        factory for an ergonomic call site."""
+        return RustlsQuicConnector(alpn_protocols^, use_system_roots=True)
 
     def __del__(deinit self):
         if self._opaque_handle != 0:

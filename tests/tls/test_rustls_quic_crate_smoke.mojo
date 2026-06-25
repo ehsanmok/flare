@@ -5,7 +5,7 @@ This test confirms that:
 1. ``libflare_rustls_quic.so`` is present in the expected location
    (next to ``libflare_tls.so`` under the canonical build root, or
    in ``$CONDA_PREFIX/lib`` after the activation script runs).
-2. The ABI-version thunk resolves and returns 4 (the crate version
+2. The ABI-version thunk resolves and returns 5 (the crate version
    the Mojo binding expects).
 3. The acceptor-new thunk rejects empty PEM input with a non-NULL
    "no CERTIFICATE blocks" error path through ``last_error``.
@@ -69,19 +69,16 @@ def _call_acceptor_new(
 
 
 def test_abi_version() raises:
-    # ABI v4 adds 0-RTT early data + resumption on top of v3's client
-    # role: `flare_rustls_quic_install_early_keys` /
-    # `_is_early_data_accepted`, the connector's in-memory session
-    # store + `enable_early_data`, a server ticketer +
-    # `max_early_data_size` (new `max_early_data` arg on
-    # `acceptor_new`), and EarlyData-level (1) AEAD + header
-    # protection. The activation script keys off this number, so a
-    # stale .so on a developer machine surfaces as a hard mismatch on
-    # `pixi install` rather than a silent run-time confusion.
+    # ABI v5 adds the native-roots connector
+    # (`flare_rustls_quic_connector_new_native_roots`) on top of v4's
+    # 0-RTT early data + resumption. The activation script keys off
+    # this number, so a stale .so on a developer machine surfaces as a
+    # hard mismatch on `pixi install` rather than a silent run-time
+    # confusion.
     var path = _find_rustls_lib()
     var lib = OwnedDLHandle(path)
     var v = _call_abi_version(lib)
-    assert_equal(v, 4)
+    assert_equal(v, 5)
 
 
 def test_acceptor_new_rejects_empty_pem() raises:
