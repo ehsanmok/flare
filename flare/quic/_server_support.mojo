@@ -136,18 +136,20 @@ def _ack_from_ranges(flat: List[UInt64], ack_delay: UInt64) raises -> AckFrame:
 def _encode_h3_stream_frame(
     mut out: List[UInt8],
     stream_id: UInt64,
+    offset: UInt64,
     stream_bytes: Span[UInt8, _],
     fin: Bool,
 ) raises:
     """Append one QUIC STREAM frame (RFC 9000 sec 19.8) carrying
-    ``stream_bytes`` for ``stream_id`` to ``out``.
+    ``stream_bytes`` for ``stream_id`` at byte ``offset`` to ``out``.
 
     Frame type bits: ``0b00001 | OFF | LEN | FIN``. OFF + LEN are
-    always set (offset 0, explicit length) so multiple STREAM
-    frames coalesce unambiguously into one packet payload; FIN
-    per the caller's flag. Used by the coalescing 1-RTT drain
-    (:meth:`QuicListener._drain_1rtt_coalesced`) so it can pack
-    many responses into a single 1-RTT datagram.
+    always set (explicit offset + length) so multiple STREAM frames
+    coalesce unambiguously into one packet payload AND a single
+    large response can be fragmented across several packets at
+    increasing offsets; FIN per the caller's flag (only the final
+    fragment of a stream sets it). Used by the coalescing 1-RTT
+    drain (:meth:`QuicListener._drain_1rtt_coalesced`).
     """
     var frame_type: Int = 0x08 | 0x04 | 0x02
     if fin:
@@ -156,7 +158,7 @@ def _encode_h3_stream_frame(
     var sid_var = encode_varint(stream_id)
     for i in range(len(sid_var)):
         out.append(sid_var[i])
-    var off_var = encode_varint(UInt64(0))
+    var off_var = encode_varint(offset)
     for i in range(len(off_var)):
         out.append(off_var[i])
     var len_var = encode_varint(UInt64(len(stream_bytes)))

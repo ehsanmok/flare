@@ -756,6 +756,59 @@ pub extern "C" fn flare_rustls_quic_alpn(
     bytes.len() as c_int
 }
 
+/// Copy the peer's raw QUIC transport-parameters extension into
+/// `out` (the bytes the peer advertised in its ClientHello /
+/// EncryptedExtensions `quic_transport_parameters` extension,
+/// RFC 9000 §7.4). The caller decodes them with
+/// `flare.quic.transport_params.decode_transport_parameters`.
+///
+/// rustls only surfaces these once the relevant handshake flight
+/// has been processed (server params become available to the
+/// client after the EncryptedExtensions are read; client params
+/// to the server after the ClientHello). Poll after the handshake
+/// completes for a stable result.
+///
+/// Returns the byte count written, 0 if the peer params are not
+/// yet available, or -1 on bad pointer / out_cap too small.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_peer_transport_params(
+    session: *mut c_void,
+    out: *mut u8,
+    out_cap: usize,
+    written: *mut usize,
+) -> c_int {
+    if session.is_null() || written.is_null() {
+        set_last_error(
+            "flare_rustls_quic_peer_transport_params: NULL session or written",
+        );
+        return -1;
+    }
+    let sess = unsafe { &*(session as *const Session) };
+    let params = sess.conn.quic_transport_parameters();
+    let bytes = match params {
+        Some(b) => b,
+        None => {
+            unsafe { *written = 0 };
+            return 0;
+        }
+    };
+    if bytes.len() > out_cap {
+        set_last_error(
+            "flare_rustls_quic_peer_transport_params: out_cap too small",
+        );
+        return -1;
+    }
+    if !out.is_null() {
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+            *written = bytes.len();
+        }
+    } else {
+        unsafe { *written = bytes.len() };
+    }
+    bytes.len() as c_int
+}
+
 /// Capture the 0-RTT (EarlyData) `DirectionalKeys` from rustls,
 /// if available, into the session's `early_keys` slot.
 ///
@@ -855,9 +908,13 @@ pub extern "C" fn flare_rustls_quic_is_early_data_accepted(session: *mut c_void)
 /// * 5 -- adds `flare_rustls_quic_connector_new_native_roots`
 ///   (builds a Connector trusting the OS CA bundle via
 ///   `rustls-native-certs`, for the public-internet h3 client path).
+/// * 6 -- adds `flare_rustls_quic_peer_transport_params` (copies the
+///   peer's raw `quic_transport_parameters` extension out for the
+///   Mojo-side decoder, so the stack can apply the peer's flow
+///   control / CID limits after the handshake).
 #[no_mangle]
 pub extern "C" fn flare_rustls_quic_abi_version() -> i64 {
-    5
+    6
 }
 
 /// Returns 1 if rustls has installed per-level keys at the given

@@ -93,6 +93,7 @@ from .response_reader import (
     H3_RESPONSE_STATE_DONE,
     H3_RESPONSE_STATE_INIT,
     H3_RESPONSE_STATE_TRAILERS,
+    H3BodyChunk,
     H3Response,
     H3ResponseReader,
 )

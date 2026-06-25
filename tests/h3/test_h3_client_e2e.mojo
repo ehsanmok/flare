@@ -27,7 +27,7 @@ from std.collections import List
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import H3ClientConnection, H3ResponseReader
+from flare.h3 import H3BodyChunk, H3ClientConnection, H3ResponseReader
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -180,7 +180,56 @@ def test_h3_post_echo() raises:
     h3.close()
 
 
+def test_h3_stream_body() raises:
+    """Streaming body read: POST a multi-chunk body and drain the
+    echoed response incrementally via poll_body, asserting the head
+    (status + headers) is visible mid-stream and the concatenated
+    chunks reconstruct the full body -- never buffering it whole."""
+    var server = _bind_server()
+    var client = _drive_handshake(server)
+    var h3 = H3ClientConnection(client^)
+
+    var sent = List[UInt8]()
+    for _ in range(8192):
+        sent.append(UInt8(0x41))
+    var hdrs = List[QpackHeader]()
+    hdrs.append(QpackHeader("content-type", "application/octet-stream"))
+    var sid = h3.request(
+        String("POST"),
+        String("https"),
+        String("example.com"),
+        String("/echo"),
+        hdrs,
+        sent,
+    )
+
+    var got = List[UInt8]()
+    var done = False
+    var saw_head = False
+    for _ in range(200):
+        _ = server.tick(timeout_ms=50)
+        _server_dispatch(server)
+        _ = server.tick(timeout_ms=50)
+        var chunk = h3.poll_body(sid, timeout_ms=50)
+        if not saw_head and h3.head_ready(sid):
+            saw_head = True
+            assert_equal(h3.stream_status(sid), 200)
+        for i in range(len(chunk.data)):
+            got.append(chunk.data[i])
+        if chunk.done:
+            done = True
+            break
+    assert_true(done, "streaming body must finish over loopback h3")
+    assert_true(saw_head, "head must be visible before stream end")
+    assert_equal(len(got), 8192)
+    assert_equal(Int(got[0]), 0x41)
+    assert_equal(Int(got[8191]), 0x41)
+    server.close()
+    h3.close()
+
+
 def main() raises:
     test_h3_get()
     test_h3_post_echo()
-    print("test_h3_client_e2e: 2 passed")
+    test_h3_stream_body()
+    print("test_h3_client_e2e: 3 passed")

@@ -1457,25 +1457,45 @@ struct QuicListener(Movable):
             var sid = _stream_id_from_key(k)
             if sid < 0:
                 continue
-            # STREAM frame overhead is <= ~16 bytes (type + 3
-            # varints). Flush the in-progress datagram first if this
-            # response would push it past the MTU budget.
-            var frame_cost = len(bytes) + 16
-            if len(plaintext) > 0 and len(plaintext) + frame_cost > budget:
-                var dg = self._build_1rtt_response(slot, plaintext^)
-                if len(dg) > 0:
-                    _ = self.send_to(Span[UInt8, _](dg), peer)
-                    emitted = True
-                plaintext = List[UInt8](capacity=budget + 64)
-            _encode_h3_stream_frame(
-                plaintext, UInt64(sid), Span[UInt8, _](bytes), fin=True
-            )
-            # The response is complete (fin=True), so reclaim the
-            # per-stream carriers now. Without this, completed
-            # streams pile up in both the H3 driver's stream Dict
-            # and the QUIC connection's stream Dict, and the
-            # per-tick `take_completed_streams` scan degrades to
-            # O(streams-ever-opened) -- quadratic over a long run.
+            # Fragment the response across as many 1-RTT datagrams as
+            # the MTU budget needs. A STREAM frame header is <= ~24
+            # bytes (type + sid/offset/length varints); reserve that
+            # so each frame body fits the remaining budget. Only the
+            # final fragment carries FIN. Without this split a
+            # response larger than the path MTU was encoded as one
+            # oversized datagram the peer drops (RFC 9000 sec 14.1
+            # -- a QUIC packet must fit a single UDP datagram).
+            comptime _STREAM_HDR_MAX = 24
+            var n = len(bytes)
+            var off = 0
+            while off < n:
+                var room = budget - len(plaintext) - _STREAM_HDR_MAX
+                if room <= 0:
+                    var dg = self._build_1rtt_response(slot, plaintext^)
+                    if len(dg) > 0:
+                        _ = self.send_to(Span[UInt8, _](dg), peer)
+                        emitted = True
+                    plaintext = List[UInt8](capacity=budget + 64)
+                    room = budget - _STREAM_HDR_MAX
+                var take = room
+                if take > n - off:
+                    take = n - off
+                var is_last = (off + take) == n
+                _encode_h3_stream_frame(
+                    plaintext,
+                    UInt64(sid),
+                    UInt64(off),
+                    Span[UInt8, _](bytes)[off : off + take],
+                    fin=is_last,
+                )
+                off += take
+            # The response is complete (fin emitted on the last
+            # fragment), so reclaim the per-stream carriers now.
+            # Without this, completed streams pile up in both the H3
+            # driver's stream Dict and the QUIC connection's stream
+            # Dict, and the per-tick `take_completed_streams` scan
+            # degrades to O(streams-ever-opened) -- quadratic over a
+            # long run.
             self.h3_connections[slot].close_request_stream(sid)
             if UInt64(sid) in self.connections[slot].conn.streams:
                 _ = self.connections[slot].conn.streams.pop(UInt64(sid))

@@ -81,6 +81,21 @@ struct H3Response(Copyable, Movable):
     var trailers: List[QpackHeader]
 
 
+@fieldwise_init
+struct H3BodyChunk(Copyable, Movable):
+    """One incremental slice of a streaming HTTP/3 response body.
+
+    Returned by :meth:`flare.h3.client.H3ClientConnection.poll_body`.
+    ``data`` is the body bytes that became available on this poll
+    (possibly empty); ``done`` is True once the response stream has
+    finished (QUIC FIN), after which no further DATA will arrive and
+    the trailers / final status are retrievable via
+    :meth:`take_if_complete`."""
+
+    var data: List[UInt8]
+    var done: Bool
+
+
 struct H3ResponseReader(Copyable, Movable):
     """Per-stream stateful HTTP/3 response decoder.
 
@@ -141,6 +156,43 @@ struct H3ResponseReader(Copyable, Movable):
 
     def has_error(self) -> Bool:
         return len(self.error.as_bytes()) > 0
+
+    def head_ready(self) -> Bool:
+        """Whether the response head (``:status`` + headers) has been
+        parsed. True as soon as the first HEADERS frame is decoded --
+        before the body or FIN arrive -- so a streaming caller can
+        read :meth:`status_code` / :meth:`headers_copy` and begin
+        draining the body with :meth:`drain_body` while DATA is still
+        in flight. False on a protocol error before the head."""
+        return (
+            self.state == H3_RESPONSE_STATE_BODY
+            or self.state == H3_RESPONSE_STATE_TRAILERS
+        )
+
+    def status_code(self) -> Int:
+        """The parsed ``:status`` (0 until :meth:`head_ready`)."""
+        return self.status
+
+    def headers_copy(self) -> List[QpackHeader]:
+        """A copy of the application response headers parsed so far
+        (``:status`` already stripped). Valid once :meth:`head_ready`
+        is True."""
+        var out = List[QpackHeader](capacity=len(self.headers))
+        for i in range(len(self.headers)):
+            out.append(self.headers[i].copy())
+        return out^
+
+    def drain_body(mut self) -> List[UInt8]:
+        """Move out the body bytes accumulated since the last drain,
+        leaving the reader ready to accumulate more DATA. This is the
+        streaming counterpart to :meth:`take_response`: a caller polls
+        the connection, drains the available body chunk, and repeats
+        until :meth:`is_complete`, never holding the whole body in
+        memory at once. Trailers (if any) are still available via
+        :meth:`take_response` after completion."""
+        var out = self.body^
+        self.body = List[UInt8]()
+        return out^
 
     def take_response(mut self) raises -> H3Response:
         """Move out the assembled response. Raises if a protocol

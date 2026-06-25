@@ -23,10 +23,16 @@ both the root and the leaf -- webpki rejects that as ``CaUsedAsEndEntity``
 -- so the chain mirrors a real deployment.
 """
 
-from std.collections import List
+from std.collections import List, Optional
+from std.memory import Span
 from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_true
 
+from flare.quic.transport_params import (
+    decode_transport_parameters,
+    empty_transport_parameters,
+    encode_transport_parameters,
+)
 from flare.tls import (
     QuicEncryptionLevel,
     RustlsQuicAcceptor,
@@ -183,6 +189,47 @@ def test_loopback_handshake_completes() raises:
     assert_equal(server.selected_alpn(), String("h3"))
 
 
+def test_peer_transport_params_roundtrip() raises:
+    """The client encodes a real transport-parameters blob and sets
+    it on connect(); after the loopback handshake the server reads
+    those bytes back through peer_transport_params() and the Mojo
+    decoder recovers the exact values -- proving the ABI-6 getter
+    bridges the rustls extension to flare.quic.transport_params."""
+    var params = empty_transport_parameters()
+    params.initial_max_data = Optional[UInt64](UInt64(1048576))
+    params.initial_max_streams_bidi = Optional[UInt64](UInt64(16))
+    var blob = encode_transport_parameters(params)
+
+    var connector = _make_connector()
+    var acceptor = _make_acceptor()
+    var client = connector.connect(String("localhost"), blob)
+    var server = acceptor.accept(List[UInt8]())
+
+    var done = False
+    for _ in range(12):
+        var moved = _pump(client, server)
+        moved += _pump(server, client)
+        if client.is_handshake_complete() and server.is_handshake_complete():
+            done = True
+            break
+        if moved == 0:
+            break
+    assert_true(done, "handshake should complete for the peer-params test")
+
+    var peer_bytes = server.peer_transport_params()
+    assert_true(
+        len(peer_bytes) > 0,
+        "server should see the client's transport params",
+    )
+    var decoded = decode_transport_parameters(Span[UInt8, _](peer_bytes))
+    assert_true(Bool(decoded.initial_max_data), "initial_max_data present")
+    assert_equal(decoded.initial_max_data.value(), UInt64(1048576))
+    assert_true(
+        Bool(decoded.initial_max_streams_bidi), "initial_max_streams_bidi"
+    )
+    assert_equal(decoded.initial_max_streams_bidi.value(), UInt64(16))
+
+
 def main() raises:
     test_connector_construct()
     test_connector_bad_ca_is_null()
@@ -190,4 +237,5 @@ def main() raises:
     test_connect_fresh_session()
     test_client_emits_clienthello()
     test_loopback_handshake_completes()
-    print("test_rustls_quic_client: 6 passed")
+    test_peer_transport_params_roundtrip()
+    print("test_rustls_quic_client: 7 passed")

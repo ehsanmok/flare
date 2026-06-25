@@ -61,6 +61,7 @@ from ._rustls_quic_ffi import (
     _do_take_crypto,
     _do_is_handshake_complete,
     _do_alpn,
+    _do_peer_transport_params,
     _do_have_keys,
     _do_install_early_keys,
     _do_is_early_data_accepted,
@@ -669,6 +670,24 @@ struct RustlsQuicSession(Movable):
         application protocol over QUIC.
         """
         return _do_alpn(self._lib, self._opaque_session_handle)
+
+    def peer_transport_params(self) raises -> List[UInt8]:
+        """The peer's raw ``quic_transport_parameters`` extension
+        bytes (RFC 9000 §7.4), or an empty list if rustls has not
+        yet surfaced them.
+
+        rustls only exposes these once the carrying handshake flight
+        has been processed (the server's params reach the client
+        after EncryptedExtensions; the client's reach the server
+        after the ClientHello). Poll after the handshake completes
+        for a stable result, then decode with
+        :func:`flare.quic.transport_params.decode_transport_parameters`
+        to apply the peer's flow-control and CID limits. Returns an
+        empty list on a NULL session (test path).
+        """
+        if self._opaque_session_handle == 0:
+            return List[UInt8]()
+        return _do_peer_transport_params(self._lib, self._opaque_session_handle)
 
     def current_level(self) -> Int:
         """Current outbound encryption level. Useful for tests

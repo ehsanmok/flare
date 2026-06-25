@@ -55,7 +55,7 @@ from .request_writer import (
     encode_request_data,
     encode_request_headers,
 )
-from .response_reader import H3Response, H3ResponseReader
+from .response_reader import H3BodyChunk, H3Response, H3ResponseReader
 
 
 struct _StreamReasm(Copyable, Movable):
@@ -345,6 +345,74 @@ struct H3ClientConnection(Movable):
             self._pending[stream_id] = pr^
             return None
         return Optional(pr.reader.take_response())
+
+    def head_ready(mut self, stream_id: UInt64) raises -> Bool:
+        """Whether the response head (status + headers) for a
+        multiplexed request has been parsed yet, so a streaming
+        caller can read :meth:`stream_status` / :meth:`stream_headers`
+        before draining the body."""
+        if stream_id not in self._pending:
+            return False
+        var pr = self._pending.pop(stream_id)
+        var ready = pr.reader.head_ready()
+        self._pending[stream_id] = pr^
+        return ready
+
+    def stream_status(mut self, stream_id: UInt64) raises -> Int:
+        """The ``:status`` of a multiplexed request (0 until the head
+        is parsed -- check :meth:`head_ready`)."""
+        if stream_id not in self._pending:
+            return 0
+        var pr = self._pending.pop(stream_id)
+        var s = pr.reader.status_code()
+        self._pending[stream_id] = pr^
+        return s
+
+    def stream_headers(mut self, stream_id: UInt64) raises -> List[QpackHeader]:
+        """A copy of the application response headers of a multiplexed
+        request (valid once :meth:`head_ready`)."""
+        if stream_id not in self._pending:
+            return List[QpackHeader]()
+        var pr = self._pending.pop(stream_id)
+        var h = pr.reader.headers_copy()
+        self._pending[stream_id] = pr^
+        return h^
+
+    def poll_body(
+        mut self, stream_id: UInt64, timeout_ms: Int = 100
+    ) raises -> H3BodyChunk:
+        """Streaming body read: poll one QUIC burst (fanning chunks
+        out across every in-flight request so none stall), then move
+        out the body bytes that became available on ``stream_id``
+        without ever buffering the whole body. Returns the new bytes
+        plus whether the stream has finished (FIN). After ``done`` is
+        True the trailers / final response are still retrievable with
+        :meth:`take_if_complete`. An unknown / already-taken stream id
+        returns an empty, ``done=True`` chunk."""
+        var events = self.quic.poll(timeout_ms)
+        var sids = List[UInt64]()
+        for entry in self._pending.items():
+            sids.append(entry.key)
+        for s in range(len(sids)):
+            var sid = sids[s]
+            var pr = self._pending.pop(sid)
+            for i in range(len(events.stream_chunks)):
+                if events.stream_chunks[i].stream_id != sid:
+                    continue
+                pr.reasm.push(
+                    pr.reader,
+                    events.stream_chunks[i].offset,
+                    Span[UInt8, _](events.stream_chunks[i].data),
+                    events.stream_chunks[i].fin,
+                )
+            self._pending[sid] = pr^
+        if stream_id not in self._pending:
+            return H3BodyChunk(List[UInt8](), True)
+        var target = self._pending.pop(stream_id)
+        var chunk = target.reader.drain_body()
+        var done = target.reader.is_complete()
+        self._pending[stream_id] = target^
+        return H3BodyChunk(chunk^, done)
 
     def fetch(
         mut self,

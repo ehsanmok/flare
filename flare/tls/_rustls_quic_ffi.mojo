@@ -344,6 +344,43 @@ def _do_alpn(read lib: OwnedDLHandle, session: Int) raises -> String:
     return String(unsafe_from_utf8=Span[UInt8, _](buf[:rc]))
 
 
+def _do_peer_transport_params(
+    read lib: OwnedDLHandle, session: Int
+) raises -> List[UInt8]:
+    """Copy the peer's raw ``quic_transport_parameters`` extension
+    out of the rustls session. Returns an empty list when rustls
+    has not yet surfaced them (handshake flight not processed).
+    Raises on the FFI's bad-pointer / out-cap-too-small codes.
+
+    ponytail: the readback uses a fixed 1024-byte buffer. A peer's
+    transport-parameters blob is a handful of varint params (well
+    under 256 bytes in practice); the FFI returns -1 (raise) rather
+    than truncating if a peer ever exceeds the cap -- upgrade path
+    is a grow-and-retry loop keyed off ``written``.
+    """
+    if session == 0:
+        raise Error("flare_rustls_quic_peer_transport_params: NULL session")
+    var f = lib.get_function[def(Int, Int, Int, Int) thin abi("C") -> c_int](
+        "flare_rustls_quic_peer_transport_params"
+    )
+    var cap = 1024
+    var buf = List[UInt8](capacity=cap)
+    for _ in range(cap):
+        buf.append(UInt8(0))
+    var written: Int = 0
+    var written_addr = Int(UnsafePointer(to=written))
+    var rc = Int(f(session, Int(buf.unsafe_ptr()), cap, written_addr))
+    if rc < 0:
+        raise Error(
+            String("flare_rustls_quic_peer_transport_params returned ")
+            + String(rc)
+        )
+    var out = List[UInt8]()
+    for i in range(rc):
+        out.append(buf[i])
+    return out^
+
+
 # ── Per-level AEAD + header protection ─────────────────────────────────────
 
 
