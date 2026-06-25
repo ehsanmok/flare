@@ -71,6 +71,10 @@ jobs:
           # nginx, wrk, … — hundreds of MB of contributor-only tooling
           # that the CI test job doesn't touch.
           environments: default
+          # Install straight from the committed pixi.lock; never re-solve
+          # conda-forge in CI (the network solve is flaky). Fails loudly
+          # if the lock has drifted from pixi.toml.
+          locked: true
           cache: false
           post-cleanup: false
 

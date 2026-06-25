@@ -1,6 +1,11 @@
 # Pixi
 .pixi/
 *.lock
+# pixi.lock is exception-tracked so CI installs the environment from a
+# pinned, reproducible dep graph instead of re-solving conda-forge on
+# every run (a network solve is flaky and was breaking CI). Both CI
+# workflows pass `locked: true` to setup-pixi to consume this file.
+!pixi.lock
 # Cargo.lock for the Rust bench baselines is exception-tracked: the
 # bench harness runs `cargo build --release --locked` to reproduce
 # the exact dep graph the published numbers were measured against.

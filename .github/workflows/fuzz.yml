@@ -41,6 +41,10 @@ jobs:
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
           environments: fuzz
+          # Install straight from the committed pixi.lock; never re-solve
+          # conda-forge in CI (the network solve is flaky). Fails loudly
+          # if the lock has drifted from pixi.toml.
+          locked: true
           cache: false
           post-cleanup: false
 
