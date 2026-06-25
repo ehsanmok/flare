@@ -215,6 +215,14 @@ ASAN_TESTS=(
   # builders' Span/List borrows, and the inbound decrypt hot path
   # (header_decrypt + packet_decrypt through rustls).
   "tests/quic/test_quic_client.mojo"
+  # RFC 9000 §9 client-initiated connection migration over loopback:
+  # server NEW_CONNECTION_ID issuance + cid_table multi-registration,
+  # client socket rebind (old fd closed, new UdpSocket bound) + DCID
+  # switch + PATH_CHALLENGE, server peer-addr follow + PATH_RESPONSE
+  # echo. ASan validates the rebind fd lifecycle + the per-slot
+  # pending-migration buffers + the rustls 1-RTT crypto across the
+  # path change.
+  "tests/quic/test_quic_migration.mojo"
   # H3C-2 -- HTTP/3 client request writer + response reader. Pure
   # byte codecs (no QUIC), but ASan validates the response reader's
   # inbox compaction across frame boundaries and the QPACK field-

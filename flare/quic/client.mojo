@@ -67,11 +67,17 @@ from .frame import (
     AckFrame,
     ConnectionCloseFrame,
     CryptoFrame,
+    PathChallengeFrame,
+    PathResponseFrame,
+    RetireConnectionIdFrame,
     StreamFrame,
     encode_ack,
     encode_connection_close,
     encode_crypto,
+    encode_path_challenge,
+    encode_path_response,
     encode_ping,
+    encode_retire_connection_id,
     encode_stream,
 )
 from .packet import (
@@ -457,10 +463,47 @@ struct QuicClientConnection(Movable):
             if nb_got <= 0:
                 break
             self._process_datagram(Span[UInt8, _](buf[:nb_got]), events)
+        self._flush_migration(events)
         self._drain_egress()
         if self.session.is_handshake_complete() and self.have_1rtt_keys:
             self.established = True
         return events^
+
+    def _flush_migration(mut self, events: ConnectionEvents) raises:
+        """Send the migration frames surfaced this poll: a
+        PATH_RESPONSE for every inbound PATH_CHALLENGE (RFC 9000
+        sec 8.2 -- proves our reachability when the peer probes a
+        path) and a RETIRE_CONNECTION_ID for every peer CID a
+        NEW_CONNECTION_ID's ``retire_prior_to`` obsoleted (sec
+        5.1.2). Each frame rides its own padded 1-RTT packet."""
+        if not self.have_1rtt_keys:
+            return
+        for i in range(len(events.path_responses)):
+            var payload = List[UInt8]()
+            encode_path_response(
+                PathResponseFrame(data=events.path_responses[i].copy()), payload
+            )
+            self._send_padded_1rtt(payload^)
+        for i in range(len(events.retire_connection_ids)):
+            var payload = List[UInt8]()
+            encode_retire_connection_id(
+                RetireConnectionIdFrame(
+                    sequence_number=events.retire_connection_ids[i]
+                ),
+                payload,
+            )
+            self._send_padded_1rtt(payload^)
+
+    def _send_padded_1rtt(mut self, var payload: List[UInt8]) raises:
+        """Pad a small frame buffer to the header-protection sample
+        floor (RFC 9001 sec 5.4.2 needs 4 bytes past the pn offset +
+        a 16-byte sample), wrap it in a 1-RTT packet, and send it to
+        the current peer."""
+        while len(payload) < 16:
+            payload.append(UInt8(0))
+        var dg = self._build_1rtt(payload^)
+        if len(dg) > 0:
+            _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
     def _process_datagram(
         mut self, datagram: Span[UInt8, _], mut events: ConnectionEvents
@@ -1001,12 +1044,95 @@ struct QuicClientConnection(Movable):
         if len(dg) > 0:
             _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
+    # ── Connection migration (RFC 9000 §9) ──────────────────────────
+
+    def migrate(mut self, rebind: Bool = True) raises -> Bool:
+        """Migrate the connection to a fresh network path.
+
+        Switches the active Destination CID to a spare the server
+        granted via NEW_CONNECTION_ID (RFC 9000 §9.5 requires an
+        unused CID per path so the two paths cannot be linked),
+        optionally rebinds the local UDP socket to a new ephemeral
+        port (the address change that defines a migration), and
+        probes the new path with a PATH_CHALLENGE (§8.2). The peer
+        echoes a PATH_RESPONSE which :meth:`poll` matches to mark
+        :attr:`path_validated`. The old CID is retired.
+
+        Returns ``False`` if the connection is not established or the
+        server has not granted a spare CID yet (no migration is
+        possible without one). Use :meth:`migrate_and_validate` for
+        the blocking convenience that polls until the new path is
+        confirmed.
+        """
+        if not self.established:
+            return False
+        var active = self.conn.active_dcid_seq
+        var best_seq = active
+        var found = False
+        for entry in self.conn.peer_cids.items():
+            if entry.key != active and (not found or entry.key > best_seq):
+                best_seq = entry.key
+                found = True
+        if not found:
+            return False
+        var spare_cid = self.conn.peer_cids[best_seq].cid.copy()
+        self.dcid = ConnectionId(bytes=spare_cid^)
+        self.conn.active_dcid_seq = best_seq
+        if rebind:
+            var local = SocketAddr(IpAddr.parse("0.0.0.0"), UInt16(0))
+            var newsock = UdpSocket.bind(local)
+            self.sock.close()
+            self.sock = newsock^
+        var probe = _random_cid(8)
+        var challenge = probe.bytes.copy()
+        self.conn.outgoing_path_challenge = challenge.copy()
+        self.conn.path_validated = False
+        var cpayload = List[UInt8]()
+        encode_path_challenge(PathChallengeFrame(data=challenge^), cpayload)
+        self._send_padded_1rtt(cpayload^)
+        var rpayload = List[UInt8]()
+        encode_retire_connection_id(
+            RetireConnectionIdFrame(sequence_number=active), rpayload
+        )
+        self._send_padded_1rtt(rpayload^)
+        return True
+
+    def migrate_and_validate(
+        mut self, rebind: Bool = True, timeout_ms: Int = 2_000
+    ) raises -> Bool:
+        """Migrate (see :meth:`migrate`) then block until the new
+        path is validated by a PATH_RESPONSE or ``timeout_ms``
+        elapses. Returns ``True`` on a validated path."""
+        if not self.migrate(rebind):
+            return False
+        var deadline = _monotonic_ms() + UInt64(timeout_ms)
+        while not self.conn.path_validated:
+            if _monotonic_ms() > deadline:
+                return False
+            _ = self.poll(timeout_ms=100)
+        return True
+
     # ── Accessors ───────────────────────────────────────────────────
 
     def is_established(self) -> Bool:
         """Whether the QUIC + TLS handshake has completed and 1-RTT
         keys are installed."""
         return self.established
+
+    def path_validated(self) -> Bool:
+        """Whether the most recent :meth:`migrate` probe has been
+        confirmed by a matching PATH_RESPONSE (RFC 9000 §8.2)."""
+        return self.conn.path_validated
+
+    def active_dcid_seq(self) -> UInt64:
+        """Sequence number of the peer Connection ID currently used
+        as the active Destination CID (0 is the handshake CID)."""
+        return self.conn.active_dcid_seq
+
+    def peer_cid_count(self) -> Int:
+        """Number of spare peer Connection IDs learned via
+        NEW_CONNECTION_ID. A migration needs at least one."""
+        return len(self.conn.peer_cids)
 
     def alpn(self) raises -> String:
         """Negotiated ALPN identifier (e.g. ``"h3"``). Meaningful

@@ -52,12 +52,16 @@ from .frame import (
     CryptoFrame,
     MaxDataFrame,
     MaxStreamsFrame,
+    NewConnectionIdFrame,
+    PathResponseFrame,
     StreamFrame,
     encode_ack,
     encode_crypto,
     encode_handshake_done,
     encode_max_data,
     encode_max_streams,
+    encode_new_connection_id,
+    encode_path_response,
 )
 from .packet import (
     ConnectionId,
@@ -119,6 +123,7 @@ from ._server_support import (
     _encode_h3_stream_frame,
     _inbound_level_for_datagram,
     _monotonic_ms,
+    _random_bytes,
     _ready_sentinel,
     _stream_id_from_key,
 )
@@ -259,6 +264,18 @@ struct QuicListener(Movable):
     (RFC 9000 sec 19.20) once the 1-RTT keys installed. Confirms
     the handshake so the peer stops retransmitting its Finished
     and discards Handshake keys."""
+    var next_local_cid_seq: List[UInt64]
+    """Per-slot next NEW_CONNECTION_ID sequence number to issue
+    (RFC 9000 sec 19.15). The handshake CID is sequence 0; the
+    server issues sequence 1 with the first 1-RTT flight so a
+    migrating client has a spare Destination CID to switch to
+    (sec 9.5 requires a fresh CID per path)."""
+    var pending_migration_tx: List[List[UInt8]]
+    """Per-slot buffer of already-encoded 1-RTT migration frames
+    (PATH_RESPONSE echoes for inbound PATH_CHALLENGEs) awaiting
+    egress. Stashed in :meth:`_process_one_packet` from the
+    surfaced :class:`ConnectionEvents` and flushed by the 1-RTT
+    coalesced drain."""
     var rx_stream_bytes: List[UInt64]
     """Per-slot cumulative count of inbound stream payload bytes.
     Feeds the connection-level MAX_DATA the egress path advertises
@@ -332,6 +349,8 @@ struct QuicListener(Movable):
         self.rx_1rtt_ranges = List[List[UInt64]]()
         self.rx_1rtt_ack_pending = List[Bool]()
         self.handshake_done_sent = List[Bool]()
+        self.next_local_cid_seq = List[UInt64]()
+        self.pending_migration_tx = List[List[UInt8]]()
         self.rx_stream_bytes = List[UInt64]()
         self.rx_bidi_stream_count = List[UInt64]()
         self.h3_connections = List[H3Connection]()
@@ -449,6 +468,23 @@ struct QuicListener(Movable):
             slot = self._dispatch_long(datagram, peer)
         else:
             slot = self._dispatch_short(datagram, peer)
+            # Connection migration (RFC 9000 sec 9): a short-header
+            # (1-RTT) packet routed by a known DCID but arriving from
+            # a new source address means the client moved paths (NAT
+            # rebind or an explicit migrate()). Follow it so the
+            # egress + PATH_RESPONSE go back to where the client now
+            # is.
+            # ponytail: switch the send path immediately, without the
+            # RFC sec 8 path validation (server-initiated
+            # PATH_CHALLENGE) or sec 21.5.4 anti-amplification limit.
+            # That hardening is the follow-up commit; here the client
+            # still proves reachability by validating its own probe.
+            if (
+                slot >= 0
+                and slot < len(self.peer_addrs)
+                and self.peer_addrs[slot] != peer
+            ):
+                self.peer_addrs[slot] = peer
         if slot >= 0 and slot < len(self.connections):
             self._handle_inbound(slot, datagram)
         return slot
@@ -594,6 +630,62 @@ struct QuicListener(Movable):
             return
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
         self._route_h3_stream_chunks(slot, events)
+        self._stash_migration_egress(slot, events)
+
+    def _stash_migration_egress(
+        mut self, slot: Int, events: ConnectionEvents
+    ) raises:
+        """Encode the migration frames surfaced this packet
+        (PATH_RESPONSE echoes for inbound PATH_CHALLENGEs, RFC 9000
+        sec 8.2 / 19.18) into the slot's pending-migration buffer.
+        The 1-RTT coalesced drain flushes them on the next egress
+        pass, back to the (possibly migrated) peer address."""
+        if slot < 0 or slot >= len(self.pending_migration_tx):
+            return
+        if len(events.path_responses) == 0:
+            return
+        var buf = self.pending_migration_tx[slot].copy()
+        for i in range(len(events.path_responses)):
+            encode_path_response(
+                PathResponseFrame(data=events.path_responses[i].copy()), buf
+            )
+        self.pending_migration_tx[slot] = buf^
+
+    def _issue_new_connection_id(
+        mut self, slot: Int, mut plaintext: List[UInt8]
+    ) raises:
+        """Encode a NEW_CONNECTION_ID frame (RFC 9000 sec 19.15)
+        into ``plaintext`` granting the peer a fresh server Source
+        CID, and register it in :attr:`cid_table` so a migrating
+        client that switches its Destination CID to this value still
+        routes to ``slot`` (sec 9.5 requires a new CID per path).
+
+        The CID length matches the listener's pinned
+        ``local_cid_length`` so the short-header parser
+        (:meth:`_dispatch_short`) reads it correctly. The CID + the
+        16-byte stateless-reset token are drawn from urandom so
+        neither is guessable (sec 5.1.1 / 10.3).
+        """
+        if slot < 0 or slot >= len(self.next_local_cid_seq):
+            return
+        var cid_len = self.config.local_cid_length
+        if cid_len <= 0 or cid_len > MAX_CID_LENGTH:
+            return
+        var seq = self.next_local_cid_seq[slot]
+        var cid_bytes = _random_bytes(cid_len)
+        var new_cid = ConnectionId(bytes=cid_bytes.copy())
+        var token = _random_bytes(16)
+        encode_new_connection_id(
+            NewConnectionIdFrame(
+                sequence_number=seq,
+                retire_prior_to=UInt64(0),
+                connection_id=cid_bytes^,
+                stateless_reset_token=token^,
+            ),
+            plaintext,
+        )
+        self.cid_table.register(cid_to_hex(new_cid), slot)
+        self.next_local_cid_seq[slot] = seq + UInt64(1)
 
     def _decrypt_post_initial(
         mut self,
@@ -1054,6 +1146,8 @@ struct QuicListener(Movable):
         self.rx_1rtt_ranges.append(List[UInt64]())
         self.rx_1rtt_ack_pending.append(False)
         self.handshake_done_sent.append(False)
+        self.next_local_cid_seq.append(UInt64(1))
+        self.pending_migration_tx.append(List[UInt8]())
         self.rx_stream_bytes.append(UInt64(0))
         self.rx_bidi_stream_count.append(UInt64(0))
         self.h3_connections.append(H3Connection())
@@ -1331,8 +1425,22 @@ struct QuicListener(Movable):
                 + _MAX_STREAMS_BIDI_WINDOW,
             )
             encode_max_streams(max_streams, plaintext)
+            if not self.handshake_done_sent[slot]:
+                self._issue_new_connection_id(slot, plaintext)
             self.rx_1rtt_ack_pending[slot] = False
             self.handshake_done_sent[slot] = True
+
+        # Flush any pending migration frames (PATH_RESPONSE echoes).
+        # These are small and ride the leading datagram; they must go
+        # out promptly so the client's path probe validates.
+        if (
+            slot < len(self.pending_migration_tx)
+            and len(self.pending_migration_tx[slot]) > 0
+        ):
+            var mig = self.pending_migration_tx[slot].copy()
+            self.pending_migration_tx[slot] = List[UInt8]()
+            for i in range(len(mig)):
+                plaintext.append(mig[i])
 
         # Collect this slot's ready responses.
         var slot_prefix = String(slot) + ":"

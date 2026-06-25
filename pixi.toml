@@ -379,6 +379,7 @@ example-http3-server-walkthrough = "mojo -I . examples/advanced/http3_server_wal
 example-http3-server          = "mojo -I . examples/advanced/http3_server.mojo"      # shared Handler across h1 / h2c / h2 / h3
 test-qpack           = "mojo -I . tests/qpack/test_qpack.mojo"           # RFC 9204 static-only encoder/decoder + Huffman fallback (~13 cases)
 test-quic-state      = "mojo -I . tests/quic/test_state.mojo"            # RFC 9000 §3 stream + §10 connection state machines (~13 cases)
+test-quic-migration  = { cmd = "mojo -I . tests/quic/test_quic_migration.mojo", depends-on = ["build-rustls-quic"] }  # RFC 9000 §9 client-initiated connection migration over loopback (1 case)
 test-grpc-server     = "mojo -I . tests/grpc/test_server.mojo"           # gRPC unary adapter -- header validation + LPM stitching + handler dispatch (~14 cases)
 test-h3-request-reader = "mojo -I . tests/h3/test_request_reader.mojo"   # RFC 9114 §4 + §7 H3 request-stream sans-I/O reader (~10 cases)
 test-h3-response-writer = "mojo -I . tests/h3/test_response_writer.mojo" # RFC 9114 §4.3 H3 response-stream sans-I/O writer (~7 cases)

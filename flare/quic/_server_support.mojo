@@ -263,6 +263,32 @@ def _monotonic_ms() -> UInt64:
     return UInt64(Int(sec) * 1000 + Int(nsec) // 1_000_000)
 
 
+def _random_bytes(n: Int) -> List[UInt8]:
+    """Return ``n`` unpredictable bytes from ``/dev/urandom``.
+
+    Used for server-issued Connection IDs + stateless-reset tokens
+    (RFC 9000 sec 5.1.1 / 10.3: both must be unguessable). Falls
+    back to a clock-mixed deterministic fill only if urandom is
+    unavailable (should not happen on Linux / macOS).
+    """
+    var out = List[UInt8](capacity=n)
+    try:
+        with open("/dev/urandom", "r") as f:
+            var raw = f.read_bytes(n)
+            for i in range(n):
+                out.append(raw[i])
+    except:
+        var seed = _monotonic_ms()
+        for i in range(n):
+            out.append(
+                UInt8(
+                    Int((seed >> UInt64(i * 8)) & UInt64(0xFF))
+                    ^ (i * 31 + 0x5A)
+                )
+            )
+    return out^
+
+
 # -- Per-slot rustls QUIC session carrier ------------------------------
 
 
