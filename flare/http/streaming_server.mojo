@@ -281,7 +281,9 @@ struct StreamConn(Movable):
         (via the source-taking ``attach_upstream``)."""
         return Bool(self._upstream)
 
-    def upstream(mut self) -> ref[self._upstream] UpstreamChunkSource:
+    def upstream(
+        mut self,
+    ) -> ref[origin_of(self._upstream.value())] UpstreamChunkSource:
         """The framework-owned upstream source, for fronts that want to
         poll it directly instead of using ``relay_upstream``.
 
