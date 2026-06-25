@@ -46,14 +46,17 @@ from ..response import Response
 
 
 # A leg runs the full request for one protocol. Args:
-# ``(client_addr, is_h3, url, method, headers, body, wire) -> Response``.
-# The URL is passed as a String (re-parsed in the leg) because Url is
-# move-only and each of the two legs needs its own copy. ``thin``
+# ``(client_addr, is_h3, url, method, headers, body, wire, auth_header)
+# -> Response``. The URL is passed as a String (re-parsed in the leg)
+# because Url is move-only and each of the two legs needs its own copy.
+# ``auth_header`` is the effective Authorization value for this hop
+# (already redirect-policy gated), threaded so cross-origin redirects can
+# suppress the stored credential on the raced path too. ``thin``
 # (non-capturing) so it can be stored in a struct field and passed as a
 # value; supplied by the client module so this file needs no HttpClient
 # import (avoids an import cycle).
 comptime _LegFn = def(
-    Int, Bool, String, String, HeaderMap, List[UInt8], String
+    Int, Bool, String, String, HeaderMap, List[UInt8], String, String
 ) raises thin -> Response
 
 
@@ -84,6 +87,7 @@ struct _RaceArg(Movable):
     var headers: HeaderMap
     var body: List[UInt8]
     var wire: String
+    var auth_header: String
 
     def __init__(
         out self,
@@ -96,6 +100,7 @@ struct _RaceArg(Movable):
         headers: HeaderMap,
         body: List[UInt8],
         wire: String,
+        auth_header: String,
     ):
         self.leg = leg
         self.client_addr = client_addr
@@ -106,6 +111,7 @@ struct _RaceArg(Movable):
         self.headers = headers.copy()
         self.body = body.copy()
         self.wire = wire
+        self.auth_header = auth_header
 
 
 def _race_worker(arg: _OpaquePtr) -> _OpaquePtr:
@@ -125,6 +131,7 @@ def _race_worker(arg: _OpaquePtr) -> _OpaquePtr:
             a[].headers,
             a[].body,
             a[].wire,
+            a[].auth_header,
         )
         result[].resp = Optional(resp^)
     except e:
@@ -140,6 +147,7 @@ def race_h3_h2(
     headers: HeaderMap,
     body: List[UInt8],
     wire: String,
+    auth_header: String,
 ) raises -> Response:
     """Race the h3 and h2/h1 legs concurrently and return the winning
     :class:`Response` (h3 preferred). Raises if both legs fail. ``leg``
@@ -162,6 +170,7 @@ def race_h3_h2(
             headers,
             body,
             wire,
+            auth_header,
         )
     )
     var h2_arg = alloc[_RaceArg](1)
@@ -176,6 +185,7 @@ def race_h3_h2(
             headers,
             body,
             wire,
+            auth_header,
         )
     )
 

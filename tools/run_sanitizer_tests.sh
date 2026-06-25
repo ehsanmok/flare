@@ -82,6 +82,15 @@ ASAN_TESTS=(
   # record/consult + decision). ASan validates the AltSvcCache field
   # embedded in the moved HttpClient + the clock FFI buffer.
   "tests/http/test_client_h3_policy.mojo"
+  # W1 -- interior-mutable client cookie store: alloc/record/replay/free
+  # churn through the pointer-backed handle. ASan validates the heap
+  # CookieJar lifecycle (no leak / use-after-free on the empty handle).
+  "tests/http/test_cookie_store.mojo"
+  # W1 -- wired client UX (redirect policy + auto-decompress + cookie jar
+  # + retry) over a forked router. ASan validates the per-hop header
+  # rebuild, the gzip decode buffer, and the cookie-store teardown in
+  # the moved HttpClient.
+  "tests/http/test_client_ux.mojo"
   # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
   # counter checks, plus a forked slow-client soak. ASan validates the
   # relay-buffer compaction under throttled draining and the upstream

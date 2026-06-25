@@ -42,6 +42,11 @@ from .headers import HeaderMap
 from .url import Url
 from .auth import Auth, BasicAuth, BearerAuth
 from .error import HttpError, TooManyRedirects
+from .redirect_policy import RedirectPolicy, RedirectAction, RedirectMode
+from .reliability import RetryPolicy, _backoff_sleep_ms
+from .encoding import decode_content
+from ._client.cookie_store import CookieStore
+from ..runtime._libc_time import libc_nanosleep_ms
 from ..tcp import TcpStream
 from ..tcp.stream import _connect_with_fallback
 from ..tls import TlsStream, TlsConfig
@@ -113,27 +118,36 @@ def _race_leg(
     headers: HeaderMap,
     body: List[UInt8],
     wire: String,
+    auth_header: String,
 ) raises -> Response:
     """Happy-eyeballs leg trampoline: re-materialise the
     :class:`HttpClient` from its address, parse ``url`` (Url is
     move-only so each leg parses its own), and run the h3 or h2/h1 path.
     Passed to :func:`race_h3_h2` so that module needs no HttpClient
     import. Only the h3 leg mutates client state (the QUIC pool), so the
-    two concurrent legs have a single writer."""
+    two concurrent legs have a single writer. ``auth_header`` is the
+    redirect-policy-gated Authorization value for this hop."""
     var client = UnsafePointer[HttpClient, MutUntrackedOrigin](
         unsafe_from_address=client_addr
     )
     var u = Url.parse(url)
     if is_h3:
-        return client[]._send_h3(u, method, headers, body)
-    return client[]._send_h2_or_h1_tls(u, method, headers, body, wire)
+        return client[]._send_h3(u, method, headers, body, auth_header)
+    return client[]._send_h2_or_h1_tls(
+        u, method, headers, body, wire, auth_header
+    )
 
 
 struct HttpClient(Movable):
-    """A blocking HTTP/1.1 client.
+    """A blocking HTTP client (HTTP/1.1, HTTP/2, and HTTP/3).
 
-    Establishes one TCP or TLS connection per request (connection pooling
-    is a future feature). Respects HTTP redirects up to ``max_redirects``.
+    Opens one connection per request by default; opt into keep-alive
+    reuse for cleartext HTTP/1.1 with :meth:`with_pool` and into HTTP/3
+    QUIC connection reuse (on by default once h3 is used). Follows
+    redirects per a configurable :meth:`with_redirect_policy`, optionally
+    auto-decompresses responses, retries transient failures via
+    :meth:`with_retry`, and keeps a session cookie jar via
+    :meth:`with_cookies`.
 
     This type is ``Movable`` but not ``Copyable``. It supports the context
     manager protocol (``__enter__``) for use with ``with``.
@@ -215,6 +229,36 @@ struct HttpClient(Movable):
     established QUIC connection is expensive, so reuse is the right
     default), so consecutive h3 requests to one origin amortise the
     handshake. Freed in :meth:`__del__`."""
+    var _redirect_policy: RedirectPolicy
+    """Redirect-following policy (RFC 9110 sec 15.4). Defaults to
+    :meth:`RedirectPolicy.follow_all` with the constructor's
+    ``max_redirects`` cap, preserving the legacy unconditional-follow
+    behaviour byte-for-byte. :meth:`with_redirect_policy` swaps in a
+    ``same_origin_only`` / ``deny`` policy; the decision (and any
+    cross-origin Authorization suppression) flows through
+    :meth:`RedirectPolicy.decide` in :meth:`_send_once`."""
+    var _auto_decompress: Bool
+    """When ``True`` (default), the client advertises
+    ``Accept-Encoding: gzip, deflate, br`` (unless the caller set one)
+    and transparently decodes a compressed response body via
+    :func:`flare.http.encoding.decode_content`, stripping the
+    ``Content-Encoding`` header and fixing ``Content-Length``. Identity
+    / absent encodings pass through untouched, so a non-compressed
+    response is byte-for-byte unchanged."""
+    var _retry: RetryPolicy
+    """Client request-level retry policy (distinct from the server-side
+    :class:`flare.http.reliability.Retry` middleware). Only consulted
+    when :attr:`_retry_enabled` is set via :meth:`with_retry`."""
+    var _retry_enabled: Bool
+    """Whether :meth:`with_retry` opted this client into request
+    retries. ``False`` by default so a plain client issues exactly one
+    attempt per request (legacy behaviour)."""
+    var _cookies: CookieStore
+    """Per-client cookie jar behind a pointer-backed interior-mutable
+    handle (mirrors :attr:`_alt_svc`). Disabled (no-op) by default;
+    :meth:`with_cookies` opts in. When enabled, :meth:`_send_once`
+    captures ``Set-Cookie`` response headers and replays them as a
+    ``Cookie`` request header. Freed in :meth:`__del__`."""
 
     def __init__(
         out self,
@@ -225,6 +269,7 @@ struct HttpClient(Movable):
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_h3: Bool = False,
+        auto_decompress: Bool = True,
     ):
         """Initialise an ``HttpClient`` with secure defaults.
 
@@ -260,6 +305,11 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
+        self._auto_decompress = auto_decompress
+        self._retry = RetryPolicy()
+        self._retry_enabled = False
+        self._cookies = CookieStore.disabled()
 
     def __init__(
         out self,
@@ -271,6 +321,7 @@ struct HttpClient(Movable):
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_h3: Bool = False,
+        auto_decompress: Bool = True,
     ):
         """Initialise an ``HttpClient`` with custom TLS configuration."""
         self._config = tls.copy()
@@ -285,6 +336,11 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
+        self._auto_decompress = auto_decompress
+        self._retry = RetryPolicy()
+        self._retry_enabled = False
+        self._cookies = CookieStore.disabled()
 
     def __init__[
         A: Auth
@@ -298,6 +354,7 @@ struct HttpClient(Movable):
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_h3: Bool = False,
+        auto_decompress: Bool = True,
     ) raises:
         """Initialise an ``HttpClient`` with authentication."""
         self._config = TlsConfig()
@@ -314,6 +371,11 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
+        self._auto_decompress = auto_decompress
+        self._retry = RetryPolicy()
+        self._retry_enabled = False
+        self._cookies = CookieStore.disabled()
 
     def __init__[
         A: Auth
@@ -327,6 +389,7 @@ struct HttpClient(Movable):
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_h3: Bool = False,
+        auto_decompress: Bool = True,
     ) raises:
         """Initialise an ``HttpClient`` with a base URL and authentication."""
         self._config = TlsConfig()
@@ -343,6 +406,11 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
+        self._auto_decompress = auto_decompress
+        self._retry = RetryPolicy()
+        self._retry_enabled = False
+        self._cookies = CookieStore.disabled()
 
     def __del__(deinit self):
         """Free the pooled fds + the ``Alt-Svc`` store owned by this
@@ -363,6 +431,10 @@ struct HttpClient(Movable):
             pass
         try:
             self._quic_pool.free()
+        except:
+            pass
+        try:
+            self._cookies.free()
         except:
             pass
 
@@ -445,6 +517,86 @@ struct HttpClient(Movable):
         """
         self._prefer_h3 = enabled
         return self^
+
+    def with_redirect_policy(var self, policy: RedirectPolicy) -> HttpClient:
+        """Set the redirect-following policy (move-in / move-out so it
+        chains off the constructor like :meth:`with_pool`).
+
+        The default (:meth:`RedirectPolicy.follow_all`) preserves the
+        legacy unconditional-follow behaviour. Swap in
+        :meth:`RedirectPolicy.same_origin_only` to refuse cross-origin
+        redirects (and never leak the Authorization header across
+        origins), or :meth:`RedirectPolicy.deny` to surface 3xx
+        responses to the caller unfollowed.
+
+        Example:
+            ```mojo
+            var pol = RedirectPolicy.same_origin_only(max_redirects=5)
+            with HttpClient("https://api.example.com")
+                .with_redirect_policy(pol) as c:
+                _ = c.get("/protected")
+            ```
+        """
+        self._redirect_policy = policy.copy()
+        return self^
+
+    def with_retry(var self, policy: RetryPolicy = RetryPolicy()) -> HttpClient:
+        """Opt into request-level retries on transient failure
+        (move-in / move-out, chains off the constructor).
+
+        Retries fire when a request raises (connection/I/O error) or
+        returns a ``>= 500`` status, up to ``policy.max_attempts``
+        total attempts. By default only idempotent methods (RFC 9110
+        sec 9.2.2) are retried; set ``policy.retry_only_idempotent =
+        False`` to retry any method. Backoff follows the same jittered
+        exponential schedule as the server-side
+        :class:`flare.http.reliability.Retry` middleware.
+
+        Example:
+            ```mojo
+            var pol = RetryPolicy()
+            pol.max_attempts = 4
+            pol.initial_backoff_ms = 50
+            with HttpClient().with_retry(pol) as c:
+                _ = c.get("https://flaky.example.com/data")
+            ```
+        """
+        self._retry = policy.copy()
+        self._retry_enabled = True
+        return self^
+
+    def with_cookies(var self) raises -> HttpClient:
+        """Enable a per-client cookie jar (move-in / move-out, chains
+        off the constructor).
+
+        When enabled, the client captures ``Set-Cookie`` response
+        headers and replays the stored cookies as a ``Cookie`` request
+        header on subsequent requests -- the standard session-cookie
+        flow for a logged-in client. The jar is origin-agnostic (every
+        stored cookie is sent on every request from this client), which
+        matches the common single-origin ``HttpClient(base_url=...)``
+        session.
+
+        Example:
+            ```mojo
+            with HttpClient("https://api.example.com")
+                .with_cookies() as c:
+                _ = c.post("/login", '{"u":"a","p":"b"}')  # stores session
+                _ = c.get("/me")                            # replays cookie
+            ```
+        """
+        try:
+            self._cookies.free()
+        except:
+            pass
+        self._cookies = CookieStore.new()
+        return self^
+
+    def cookie_header(read self) raises -> String:
+        """The ``Cookie`` request header value the jar would send, or
+        ``""`` when cookies are disabled / the jar is empty. Useful for
+        tests and introspection."""
+        return self._cookies.request_header()
 
     def record_alt_svc(self, origin: String, alt_svc_header: String) raises:
         """Record an origin's ``Alt-Svc`` response header (RFC 7838)
@@ -539,21 +691,23 @@ struct HttpClient(Movable):
         method: String,
         extra_headers: HeaderMap,
         body: List[UInt8],
+        auth_header: String,
     ) raises -> Response:
         """Drive one request/response over an established (possibly
         reused) ``h3`` connection and lower the
         :class:`flare.h3.response_reader.H3Response` to a
-        :class:`Response`."""
+        :class:`Response`. ``auth_header`` is the effective (redirect-
+        policy-gated) Authorization value for this hop."""
         var headers = List[QpackHeader]()
         headers.append(QpackHeader("user-agent", self._user_agent))
-        if self._auth_header.byte_length() > 0:
-            headers.append(QpackHeader("authorization", self._auth_header))
+        if auth_header.byte_length() > 0:
+            headers.append(QpackHeader("authorization", auth_header))
         for i in range(extra_headers.len()):
             var k = extra_headers._keys[i]
             var kl = k.lower()
             if kl == "host":
                 continue  # :authority carries the host in h3
-            if kl == "authorization" and self._auth_header.byte_length() > 0:
+            if kl == "authorization" and auth_header.byte_length() > 0:
                 continue  # stored auth wins, matching the h1/h2 paths
             headers.append(QpackHeader(kl, extra_headers._values[i]))
 
@@ -574,6 +728,7 @@ struct HttpClient(Movable):
         method: String,
         extra_headers: HeaderMap,
         body: List[UInt8],
+        auth_header: String,
     ) raises -> Response:
         """Send one ``https://`` request over HTTP/3, reusing a pooled
         QUIC connection when one is idle for this origin.
@@ -594,7 +749,9 @@ struct HttpClient(Movable):
             var failed = False
             var resp = Response(0, "", List[UInt8]())
             try:
-                resp = self._run_h3_request(h3, u, method, extra_headers, body)
+                resp = self._run_h3_request(
+                    h3, u, method, extra_headers, body, auth_header
+                )
             except:
                 failed = True
             if not failed:
@@ -607,7 +764,9 @@ struct HttpClient(Movable):
             h3.close()
 
         var fresh = self._dial_h3(u)
-        var resp = self._run_h3_request(fresh, u, method, extra_headers, body)
+        var resp = self._run_h3_request(
+            fresh, u, method, extra_headers, body, auth_header
+        )
         if fresh.is_established():
             self._quic_pool.release(key, fresh^)
         else:
@@ -621,13 +780,16 @@ struct HttpClient(Movable):
         extra_headers: HeaderMap,
         body: List[UInt8],
         wire: String,
+        auth_header: String,
     ) raises -> Response:
         """The proven TLS path: ALPN-negotiate ``["h2", "http/1.1"]``
         and drive the request over HTTP/2 (via the internal
         :class:`Http2ClientConnection`) or HTTP/1.1, returning a
         :class:`Response` either way so the caller can't tell which
         wire was used. Used both as the direct h2/h1 path and as the
-        h2 leg of the happy-eyeballs race."""
+        h2 leg of the happy-eyeballs race. ``auth_header`` is the
+        effective Authorization value for this hop (the h1 ``wire``
+        already carries it; this gates the h2 path)."""
         var tls_cfg = self._config.copy()
         if len(tls_cfg.alpn) == 0:
             tls_cfg.alpn = List[String]()
@@ -645,7 +807,7 @@ struct HttpClient(Movable):
                 extra_headers,
                 body,
                 self._user_agent,
-                self._auth_header,
+                auth_header,
             )
             return resp_h2^
         # HTTP/1.1 over TLS (existing wire).
@@ -950,9 +1112,14 @@ struct HttpClient(Movable):
     # ── Core ──────────────────────────────────────────────────────────────────
 
     def send(self, req: Request) raises -> Response:
-        """Send an HTTP/1.1 request and return the response.
+        """Send an HTTP request and return the response.
 
-        Handles redirect chains up to ``_max_redirects``.
+        Follows redirects per the configured :class:`RedirectPolicy`
+        (default: follow all, capped at ``max_redirects``), transparently
+        decodes a compressed body when ``auto_decompress`` is on, and
+        replays / captures cookies when the jar is enabled. When
+        :meth:`with_retry` opted in, the whole exchange is retried on a
+        transient failure per the :class:`RetryPolicy`.
 
         Args:
             req: The request to send.
@@ -962,20 +1129,77 @@ struct HttpClient(Movable):
 
         Raises:
             NetworkError: On I/O failure.
-            TooManyRedirects: If more than ``_max_redirects`` redirects occur.
+            TooManyRedirects: If the redirect cap is exceeded.
+            Error: On a cross-origin redirect refused by a
+                ``same_origin_only`` policy.
         """
+        if self._retry_enabled:
+            return self._send_with_retry(req)
+        return self._send_once(req)
+
+    def _send_with_retry(self, req: Request) raises -> Response:
+        """Run :meth:`_send_once` under the client retry policy.
+
+        Retries on a raised error or a ``>= 500`` status, up to
+        ``policy.max_attempts`` total attempts, gated on method
+        idempotency unless the policy opts out. Backoff reuses the
+        server-middleware jittered-exponential schedule."""
+        var attempts = self._retry.max_attempts
+        if attempts < 1:
+            attempts = 1
+        var gate = (not self._retry.retry_only_idempotent) or _is_idempotent(
+            req.method.upper()
+        )
+        if not gate:
+            return self._send_once(req)
+        var attempt = 1
+        while True:
+            try:
+                var resp = self._send_once(req)
+                if resp.status < 500 or attempt >= attempts:
+                    return resp^
+            except e:
+                if attempt >= attempts:
+                    raise e^
+            var sleep_ms = _backoff_sleep_ms(self._retry, attempt + 1)
+            if sleep_ms > 0:
+                _ = libc_nanosleep_ms(sleep_ms)
+            attempt += 1
+
+    def _send_once(self, req: Request) raises -> Response:
+        """One redirect-following exchange (no retry wrapper).
+
+        Threads the effective Authorization through each hop (cleared on
+        a cross-origin redirect unless the policy forwards it), attaches
+        / records cookies, auto-records ``Alt-Svc``, and decompresses the
+        final body."""
         var current_url = req.url
-        var redirects = 0
+        var hops = 0
         var method = req.method
         var body = req.body.copy()
+        var auth_header = self._auth_header
+        var headers = req.headers.copy()
+        if self._auto_decompress and not headers.contains("Accept-Encoding"):
+            headers.set("Accept-Encoding", "gzip, deflate, br")
 
         while True:
-            var resp = self._do_request(method, current_url, req.headers, body)
+            # Attach session cookies for this hop (jar wins over a stale
+            # caller-supplied Cookie since it carries the live session).
+            var cookie_hdr = self._cookies.request_header()
+            if cookie_hdr.byte_length() > 0:
+                headers.set("Cookie", cookie_hdr)
 
-            # Transparent Alt-Svc discovery (RFC 7838): record any
-            # advertised h3 endpoint so the NEXT request to this origin
-            # upgrades to HTTP/3 via h3_wire_choice. No-op when the
-            # header is absent or carries no h3 advert.
+            var resp = self._do_request(
+                method, current_url, headers, body, auth_header
+            )
+
+            # Capture Set-Cookie(s) into the jar (no-op if disabled).
+            if self._cookies.enabled():
+                var set_cookies = resp.headers.get_all("Set-Cookie")
+                for i in range(len(set_cookies)):
+                    self._cookies.record_set_cookie(set_cookies[i])
+
+            # Transparent Alt-Svc discovery (RFC 7838).
             var alt_svc = resp.headers.get("Alt-Svc")
             if alt_svc.byte_length() > 0:
                 try:
@@ -985,41 +1209,64 @@ struct HttpClient(Movable):
                 except:
                     pass  # malformed header / parse error: ignore
 
-            if resp.is_redirect() and redirects < self._max_redirects:
-                var location = resp.headers.get("Location")
-                if location.byte_length() == 0:
-                    return resp^  # redirect without Location: just return
-                # Handle relative redirects
-                if location.startswith("http://") or location.startswith(
-                    "https://"
-                ):
-                    current_url = location
-                else:
-                    # Prepend origin from current URL
-                    var parsed = Url.parse(current_url)
-                    current_url = (
-                        parsed.scheme
-                        + "://"
-                        + parsed.host
-                        + ":"
-                        + String(Int(parsed.port))
-                        + location
-                    )
-                # POST redirect → GET (standard 301/302/303 behaviour)
-                if (
-                    resp.status == 301
-                    or resp.status == 302
-                    or resp.status == 303
-                ):
-                    method = Method.GET
+            if not resp.is_redirect():
+                return self._maybe_decompress(resp^)
+
+            var location = resp.headers.get("Location")
+            var decision = self._redirect_policy.decide(
+                current_url, method, resp.status, location, hops
+            )
+
+            if decision.action == RedirectAction.FOLLOW:
+                current_url = decision.next_url
+                method = decision.next_method
+                if decision.next_body_dropped:
                     body = List[UInt8]()
-                redirects += 1
+                    _ = headers.remove("Content-Type")
+                if not decision.forward_authorization:
+                    auth_header = String("")
+                    _ = headers.remove("Authorization")
+                hops += 1
                 continue
 
-            if resp.is_redirect():
-                raise TooManyRedirects(current_url, redirects)
+            if decision.action == RedirectAction.REJECT:
+                raise Error(
+                    String("RedirectPolicy: cross-origin redirect to '")
+                    + location
+                    + String("' refused (same_origin_only)")
+                )
 
+            # STOP: empty Location or DENY -> surface the 3xx unchanged;
+            # otherwise the hop cap was hit -> raise (legacy behaviour).
+            if (
+                location.byte_length() == 0
+                or self._redirect_policy.mode == RedirectMode.DENY
+            ):
+                return self._maybe_decompress(resp^)
+            raise TooManyRedirects(current_url, hops)
+
+    def _maybe_decompress(self, var resp: Response) raises -> Response:
+        """Decode a compressed response body in place when
+        ``auto_decompress`` is on. Identity / absent / multi-stacked /
+        unsupported encodings are left untouched."""
+        if not self._auto_decompress:
             return resp^
+        var enc = resp.headers.get("Content-Encoding")
+        if enc.byte_length() == 0:
+            return resp^
+        var el = String(enc.strip()).lower()
+        if el == "identity" or el == "":
+            return resp^
+        if el.find(",") >= 0:
+            return resp^  # stacked encodings unsupported: leave raw
+        try:
+            var decoded = decode_content(Span[UInt8, _](resp.body), el)
+            resp.body = decoded^
+            _ = resp.headers.remove("Content-Encoding")
+            resp.headers.set("Content-Length", String(len(resp.body)))
+        except:
+            pass  # unsupported / corrupt payload: leave the raw bytes
+        return resp^
 
     def _do_request(
         self,
@@ -1027,6 +1274,7 @@ struct HttpClient(Movable):
         url: String,
         extra_headers: HeaderMap,
         body: List[UInt8],
+        auth_header: String,
     ) raises -> Response:
         """Perform a single HTTP/1.1 request (no redirect handling).
 
@@ -1035,6 +1283,9 @@ struct HttpClient(Movable):
             url: Full URL string.
             extra_headers: Headers from the original request.
             body: Request body bytes.
+            auth_header: Effective Authorization value for this hop
+                (the redirect policy may have cleared it across a
+                cross-origin redirect).
 
         Returns:
             Parsed ``Response``.
@@ -1070,19 +1321,19 @@ struct HttpClient(Movable):
             wire += "Connection: close\r\n"
         wire += "Accept: */*\r\n"
 
-        # Authorization header from stored auth credential
-        if self._auth_header.byte_length() > 0:
-            wire += "Authorization: " + self._auth_header + "\r\n"
+        # Authorization header from the effective (redirect-gated) auth
+        if auth_header.byte_length() > 0:
+            wire += "Authorization: " + auth_header + "\r\n"
 
         # Forward caller-supplied headers (skip Host — already set)
         for i in range(extra_headers.len()):
             var k = extra_headers._keys[i]
             if k.lower() != "host":
-                # Only skip caller's Authorization when _auth_header is already set,
-                # matching the h2/h2c paths (see _build_h2_request_headers).
+                # Only skip caller's Authorization when the effective auth
+                # is set, matching the h2/h2c paths (_build_h2_request_headers).
                 if (
                     k.lower() == "authorization"
-                    and self._auth_header.byte_length() > 0
+                    and auth_header.byte_length() > 0
                 ):
                     continue
                 wire += k + ": " + extra_headers._values[i] + "\r\n"
@@ -1115,12 +1366,17 @@ struct HttpClient(Movable):
                         extra_headers,
                         body,
                         wire,
+                        auth_header,
                     )
                 try:
-                    return self._send_h3(u, method, extra_headers, body)
+                    return self._send_h3(
+                        u, method, extra_headers, body, auth_header
+                    )
                 except:
                     pass  # transparent fallback to h2/h1
-            return self._send_h2_or_h1_tls(u, method, extra_headers, body, wire)
+            return self._send_h2_or_h1_tls(
+                u, method, extra_headers, body, wire, auth_header
+            )
         else:
             var stream = _connect_with_fallback(
                 u.host, u.port, self._timeout_ms
@@ -1138,7 +1394,7 @@ struct HttpClient(Movable):
                     extra_headers,
                     body,
                     self._user_agent,
-                    self._auth_header,
+                    auth_header,
                 )
                 return resp_h2c^
             if self._h2c_upgrade:
@@ -1154,7 +1410,7 @@ struct HttpClient(Movable):
                     extra_headers,
                     body,
                     self._user_agent,
-                    self._auth_header,
+                    auth_header,
                 )
                 return resp_upg^
             if pool_enabled:
