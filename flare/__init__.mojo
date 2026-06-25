@@ -444,7 +444,21 @@ def main() raises:
     with HttpClient(prefer_h2c=True, base_url="http://localhost:8080") as c:
         var r = c.get("/api/users")
         r.raise_for_status()
+
+    # https:// can prefer HTTP/3 over QUIC with prefer_h3=True. The
+    # same call site applies; an idempotent GET races h3 against h2/h1
+    # (happy-eyeballs) and any QUIC failure falls back transparently:
+    with HttpClient(prefer_h3=True, base_url="https://cloudflare.com") as c:
+        var r = c.get("/")
+        print(r.status, r.text())
 ```
+
+The client surface is additive and composable: ``with_redirect_policy``,
+``with_retry``, ``with_cookies``, and ``with_pool`` chain off the
+constructor, and ``auto_decompress`` (default on) transparently decodes
+``gzip`` / ``deflate`` / ``br`` responses. The H3 / QUIC client drivers
+stay internal -- you reach HTTP/3 through ``HttpClient``, never a
+separate type.
 
 The server side is symmetric -- one accept loop dispatches both
 wires per connection (preface peek for cleartext, ALPN ``h2``
