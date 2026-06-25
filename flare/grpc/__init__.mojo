@@ -53,6 +53,7 @@ Public re-exports:
   LPM-wrapped response bytes + outcome).
 """
 
+from .client import GrpcCallResult, GrpcClient
 from .framing import (
     GRPC_COMPRESSION_NONE,
     GRPC_COMPRESSION_COMPRESSED,

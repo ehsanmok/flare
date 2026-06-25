@@ -36,3 +36,4 @@ def main() raises:
 """
 
 from .resolver import resolve, resolve_v4, resolve_v6
+from .cache import DnsCache

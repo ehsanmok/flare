@@ -91,6 +91,13 @@ ASAN_TESTS=(
   # rebuild, the gzip decode buffer, and the cookie-store teardown in
   # the moved HttpClient.
   "tests/http/test_client_ux.mojo"
+  # W3 -- unary gRPC client over the h2c path against a forked greeter.
+  # ASan validates the LPM encode/decode buffers and the response
+  # header/trailer merge on the moved HttpClient.
+  "tests/grpc/test_grpc_client.mojo"
+  # W3 -- TTL DNS cache over the sync resolver. ASan validates the
+  # Dict[String, _CachedAddrs] lifecycle and the IpAddr list copies.
+  "tests/dns/test_dns_cache.mojo"
   # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
   # counter checks, plus a forked slow-client soak. ASan validates the
   # relay-buffer compaction under throttled draining and the upstream
