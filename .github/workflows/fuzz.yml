@@ -40,6 +40,10 @@ jobs:
       - name: Setup Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
+          # Pin pixi: latest ships build-api-version >=5 which drops the
+          # pixi-build-rattler-build 0.3.13 backend this repo pins, breaking
+          # source-package builds. 0.70.2 is the newest compatible pixi.
+          pixi-version: v0.70.2
           environments: fuzz
           # Install straight from the committed pixi.lock; never re-solve
           # conda-forge in CI (the network solve is flaky). Fails loudly

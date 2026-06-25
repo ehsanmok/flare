@@ -65,6 +65,12 @@ jobs:
       - name: Setup Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
+          # Pin pixi: the default "latest" ships a build-api-version >=5
+          # that drops pixi-build-rattler-build 0.3.13 (the backend this
+          # repo pins in [package.build]), breaking source-package builds
+          # with "no candidates were found". 0.70.2 is the newest pixi
+          # compatible with the 0.3.13 backend (see pixi.toml [package.build]).
+          pixi-version: v0.70.2
           # Only solve + install the lean runtime env. Without this,
           # setup-pixi installs every environment declared in pixi.toml
           # (dev, fuzz, bench), which would pull in mojodoc, mozz, go,
