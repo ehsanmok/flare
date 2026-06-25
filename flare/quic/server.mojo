@@ -105,6 +105,7 @@ from ..tls._rustls_quic_ffi import (
     _do_have_keys,
     _do_header_decrypt,
     _do_header_encrypt,
+    _do_install_early_keys,
     _do_is_handshake_complete,
     _do_packet_decrypt,
     _do_packet_encrypt,
@@ -112,6 +113,7 @@ from ..tls._rustls_quic_ffi import (
     _do_take_crypto,
 )
 from .packet import encode_short_header
+from ._server_0rtt import EarlyDataReplayGuard, early_data_packet_len
 from ._server_support import (
     _ACK_MAX_RANGES,
     _CryptoReasm,
@@ -541,8 +543,19 @@ struct QuicListener(Movable):
                         packet_len = (
                             lh.payload_offset + lv.consumed + Int(lv.value)
                         )
+                    elif (
+                        lvl == QuicEncryptionLevel.EARLY_DATA
+                        and len(self.connections[slot].rx_early_secret) != 0
+                    ):
+                        # 0-RTT with early keys installed: a long-header
+                        # packet with an explicit Length varint, framed
+                        # like Handshake. Step into it so the inner
+                        # 1-RTT packet (if coalesced after) is still
+                        # reached.
+                        packet_len = early_data_packet_len(sub)
                     else:
-                        # 0-RTT / Retry: stop the coalescing scan.
+                        # 0-RTT without early keys, or Retry: stop the
+                        # coalescing scan.
                         break
                 except:
                     break
@@ -624,8 +637,30 @@ struct QuicListener(Movable):
                         self.rx_1rtt_ack_pending[slot] = True
                 except:
                     ok = False
+        elif inbound_lvl == QuicEncryptionLevel.EARLY_DATA:
+            if len(self.connections[slot].rx_early_secret) == 0:
+                ok = False  # 0-RTT keys not installed: drop
+            else:
+                try:
+                    var dec = self._decrypt_post_initial(
+                        slot, packet, inbound_lvl, local_cid_len
+                    )
+                    # Anti-replay + byte-budget admission (RFC 9001
+                    # sec 9.2): a replayed / stale 0-RTT packet number
+                    # or an over-budget flight is dropped before it can
+                    # touch the state machine.
+                    if self.connections[slot].early_guard.admit(
+                        dec[1], len(dec[0])
+                    ):
+                        events = self.connections[slot].dispatch_plaintext(
+                            Span[UInt8, _](dec[0]), now_us, dec[1]
+                        )
+                    else:
+                        ok = False
+                except:
+                    ok = False
         else:
-            ok = False  # 0-RTT / Retry not handled here
+            ok = False  # Retry not handled here
         if not ok:
             return
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
@@ -724,7 +759,12 @@ struct QuicListener(Movable):
         # to the datagram end.
         var pn_offset: Int
         var packet_end: Int
-        if level == QuicEncryptionLevel.HANDSHAKE:
+        if (
+            level == QuicEncryptionLevel.HANDSHAKE
+            or level == QuicEncryptionLevel.EARLY_DATA
+        ):
+            # Both are long-header packets carrying a Length varint
+            # after the SCID that bounds the protected payload.
             var lh = parse_long_header(datagram)
             var len_var = decode_varint(datagram[lh.payload_offset :])
             pn_offset = lh.payload_offset + len_var.consumed
@@ -950,6 +990,26 @@ struct QuicListener(Movable):
             self.connections[slot].install_1rtt_keys(
                 _ready_sentinel(), _ready_sentinel()
             )
+
+        # 0-RTT (EarlyData) keys: only when the listener is configured
+        # for early data (budget > 0) and we have not already installed
+        # them. Gated this way, the default (0-RTT off) hot path pays
+        # nothing -- no FFI call, no branch beyond the budget compare.
+        # rustls exposes the resumed-ClientHello early keys after the
+        # Initial CRYPTO feed; install_early_keys returns 1 once they
+        # exist and 0-RTT was accepted (RFC 9001 sec 4.1).
+        var early_budget = self.config.rustls_config.max_early_data_size
+        if (
+            early_budget > UInt32(0)
+            and len(self.connections[slot].rx_early_secret) == 0
+        ):
+            if _do_install_early_keys(self.tls_acceptor._lib, handle) == 1:
+                self.connections[slot].install_early_data_keys(
+                    _ready_sentinel()
+                )
+                self.connections[slot].early_guard = EarlyDataReplayGuard(
+                    max_bytes=UInt64(Int(early_budget))
+                )
 
     # -- H3 dispatch surface ----------------------------------------------
 

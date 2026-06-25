@@ -22,6 +22,7 @@ keep resolving unchanged.
 from std.collections import Dict, List, Optional
 from std.memory import Span
 
+from ._server_0rtt import EarlyDataReplayGuard
 from .crypto import QuicAead
 from .packet import (
     ConnectionId,
@@ -196,6 +197,15 @@ struct QuicConnection(Copyable, Movable):
     """Outbound 1-RTT traffic secret. Populated alongside
     :attr:`rx_1rtt_secret`."""
 
+    var rx_early_secret: List[UInt8]
+    """Inbound 0-RTT (EarlyData) readiness marker (RFC 9001 §4.1).
+    Empty by default -- 0-RTT is OFF unless the server is
+    configured with ``max_early_data_size > 0`` AND the resumed
+    ClientHello is accepted, at which point the listener stamps the
+    readiness sentinel after ``RustlsQuicSession.install_early_keys``
+    succeeds. While empty, inbound 0-RTT packets drop silently (the
+    client replays the request in 1-RTT)."""
+
     var tx_initial_pn: UInt64
     """Next packet number to use on the outbound Initial path.
     Monotonic per RFC 9001 §5.3; incremented after every
@@ -219,6 +229,11 @@ struct QuicConnection(Copyable, Movable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var early_guard: EarlyDataReplayGuard
+    """Per-connection 0-RTT admission control (anti-replay window +
+    byte budget). Disabled (budget 0) until the listener installs
+    early keys on an accepted resumed ClientHello."""
+
     def __init__(
         out self,
         local_cid: ConnectionId,
@@ -235,11 +250,13 @@ struct QuicConnection(Copyable, Movable):
         self.tx_handshake_secret = List[UInt8]()
         self.rx_1rtt_secret = List[UInt8]()
         self.tx_1rtt_secret = List[UInt8]()
+        self.rx_early_secret = List[UInt8]()
         self.tx_initial_pn = UInt64(0)
         self.tx_initial_offset = UInt64(0)
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.early_guard = EarlyDataReplayGuard()
 
     def install_handshake_keys(
         mut self,
@@ -262,6 +279,13 @@ struct QuicConnection(Copyable, Movable):
         handshake-complete moment."""
         self.rx_1rtt_secret = rx_secret^
         self.tx_1rtt_secret = tx_secret^
+
+    def install_early_data_keys(mut self, var rx_secret: List[UInt8]):
+        """Stamp the inbound 0-RTT (EarlyData) readiness marker
+        (RFC 9001 §4.1) once the listener has confirmed rustls
+        accepted early data on a resumed ClientHello. Inbound-only:
+        the server never sends 0-RTT, so there is no tx counterpart."""
+        self.rx_early_secret = rx_secret^
 
     def on_idle_expired(mut self):
         """RFC 9000 §10.1.2 -- silent close on idle timeout.

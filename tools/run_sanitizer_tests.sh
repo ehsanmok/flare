@@ -98,6 +98,10 @@ ASAN_TESTS=(
   # W3 -- TTL DNS cache over the sync resolver. ASan validates the
   # Dict[String, _CachedAddrs] lifecycle and the IpAddr list copies.
   "tests/dns/test_dns_cache.mojo"
+  # W4a -- server 0-RTT anti-replay window + byte budget + the
+  # coalesced packet-length parser. ASan validates the guard's
+  # value-type bookkeeping and the long-header bounds reads.
+  "tests/quic/test_quic_0rtt_replay.mojo"
   # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
   # counter checks, plus a forked slow-client soak. ASan validates the
   # relay-buffer compaction under throttled draining and the upstream
