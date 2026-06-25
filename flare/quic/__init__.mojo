@@ -239,6 +239,7 @@ from .state import (
     apply_reset_stream,
     apply_retire_connection_id,
     apply_stop_sending,
+    expand_ack_ranges,
     apply_stream,
     connection_close,
     empty_events,

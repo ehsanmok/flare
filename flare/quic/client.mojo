@@ -38,11 +38,15 @@ client packet-number spaces.
 This driver targets the common single-path, low-loss case the
 HTTP/3 client needs:
 
-- ponytail: no PTO-driven retransmission beyond the handshake
-  drive loop. On a lossy path a dropped Finished is recovered by
-  the peer's retransmission re-driving our flight; a dropped
-  request needs the caller to retry. Upgrade path: a loss timer
-  on the shared :class:`flare.runtime.timer_wheel.TimerWheel`.
+- Minimal PTO-driven retransmission for the 1-RTT (request) path
+  via :mod:`flare.quic._loss_recovery`: ack-eliciting 1-RTT packets
+  are tracked, retired as ACKs arrive, and retransmitted on a probe
+  timeout. ponytail: this is NOT full RFC 9002 -- it omits ACK-based
+  loss detection, an RTT estimator + congestion control, and
+  handshake-level (Initial / Handshake CRYPTO) + server-side
+  response retransmit. Those are the tracked v0.9 loss-recovery
+  follow-up. During the handshake a dropped Finished is still
+  recovered by the peer re-driving our flight.
 - ponytail: one STREAM frame per :meth:`send_stream` call, capped
   at the path MTU. A request body larger than one packet is
   rejected rather than fragmented across packets. Upgrade path:
@@ -110,6 +114,7 @@ from .transport_params import (
     encode_transport_parameters,
 )
 from .varint import decode_varint, encode_varint
+from ._loss_recovery import LossRecovery
 from ._server_support import (
     _CryptoReasm,
     _ack_from_ranges,
@@ -280,6 +285,10 @@ struct QuicClientConnection(Movable):
     var send_offsets: Dict[UInt64, UInt64]
     """Per-stream cumulative send offset for outbound STREAM
     frames."""
+    var _loss: LossRecovery
+    """Minimal PTO loss recovery (RFC 9002 §6.2) for ack-eliciting
+    1-RTT packets: retransmits unacked request frames on a probe
+    timeout. See :mod:`flare.quic._loss_recovery`."""
 
     def __init__(
         out self,
@@ -326,6 +335,7 @@ struct QuicClientConnection(Movable):
         self.next_bidi_stream = UInt64(0)
         self.next_uni_stream = UInt64(2)
         self.send_offsets = Dict[UInt64, UInt64]()
+        self._loss = LossRecovery()
 
     @staticmethod
     def start(
@@ -449,6 +459,7 @@ struct QuicClientConnection(Movable):
             var msg = String(e)
             if msg.startswith("Timeout") or msg.startswith("recvfrom"):
                 self._drain_egress()
+                self._check_pto()
                 return events^
             raise e^
         if got > 0:
@@ -464,10 +475,33 @@ struct QuicClientConnection(Movable):
                 break
             self._process_datagram(Span[UInt8, _](buf[:nb_got]), events)
         self._flush_migration(events)
+        if len(events.acked_packets) > 0:
+            _ = self._loss.on_ack(events.acked_packets)
         self._drain_egress()
+        self._check_pto()
         if self.session.is_handshake_complete() and self.have_1rtt_keys:
             self.established = True
         return events^
+
+    def _check_pto(mut self) raises:
+        """Fire the PTO if the probe timer has elapsed with
+        ack-eliciting 1-RTT data still in flight: retransmit the
+        oldest unacked frames in a fresh packet (RFC 9002 §6.2).
+        A no-op until 1-RTT keys are installed or when nothing is
+        outstanding."""
+        if not self.have_1rtt_keys:
+            return
+        if self._loss.outstanding() == 0:
+            return
+        var deadline = self._loss.pto_deadline()
+        if deadline == UInt64(0) or _monotonic_ms() < deadline:
+            return
+        var frames = self._loss.fire_pto()
+        if len(frames) == 0:
+            return
+        var dg = self._build_1rtt(frames^, ack_eliciting=True)
+        if len(dg) > 0:
+            _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
     def _flush_migration(mut self, events: ConnectionEvents) raises:
         """Send the migration frames surfaced this poll: a
@@ -776,14 +810,19 @@ struct QuicClientConnection(Movable):
             if len(self.rx_1rtt_ranges) >= 2:
                 var ack = _ack_from_ranges(self.rx_1rtt_ranges, UInt64(0))
                 encode_ack(ack, payload)
-            if len(self.tx_1rtt_crypto) > 0:
+            var carries_crypto = len(self.tx_1rtt_crypto) > 0
+            if carries_crypto:
                 var cf = CryptoFrame(
                     offset=UInt64(0), data=self.tx_1rtt_crypto^
                 )
                 self.tx_1rtt_crypto = List[UInt8]()
                 encode_crypto(cf, payload)
             if len(payload) > 0:
-                var dg = self._build_1rtt(payload^)
+                # Ack-eliciting only when the packet carries CRYPTO;
+                # an ACK-only packet must not be tracked for PTO.
+                var dg = self._build_1rtt(
+                    payload^, ack_eliciting=carries_crypto
+                )
                 if len(dg) > 0:
                     _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
             self.rx_1rtt_ack_pending = False
@@ -883,12 +922,25 @@ struct QuicClientConnection(Movable):
         return dg^
 
     def _build_1rtt(
-        mut self, var plaintext: List[UInt8], pn_length: Int = 2
+        mut self,
+        var plaintext: List[UInt8],
+        pn_length: Int = 2,
+        ack_eliciting: Bool = False,
     ) raises -> List[UInt8]:
         """Build a protected 1-RTT short-header datagram around an
         already-encoded ``plaintext`` frame buffer. AEAD + header
         protection route through rustls at level 3. Advances
-        :attr:`tx_1rtt_pn`."""
+        :attr:`tx_1rtt_pn`.
+
+        When ``ack_eliciting`` is True the plaintext frames are
+        registered with the loss-recovery tracker (under this
+        packet's number) so a PTO can retransmit them if the peer's
+        ACK never arrives. ACK-only / PADDING-only packets pass
+        False so they are not tracked (RFC 9002 §2 -- they are not
+        ack-eliciting)."""
+        var frames_copy = List[UInt8]()
+        if ack_eliciting:
+            frames_copy = plaintext.copy()
         var prefix = encode_short_header(
             self.dcid,
             spin_bit=False,
@@ -904,6 +956,8 @@ struct QuicClientConnection(Movable):
             pn_length,
         )
         self.tx_1rtt_pn = pn + UInt64(1)
+        if ack_eliciting:
+            self._loss.on_sent(pn, frames_copy^, _monotonic_ms())
         return dg^
 
     def _protect_via_rustls(
@@ -1017,7 +1071,7 @@ struct QuicClientConnection(Movable):
             )
             var payload = List[UInt8]()
             encode_stream(sf, payload, emit_length=True)
-            var dg = self._build_1rtt(payload^)
+            var dg = self._build_1rtt(payload^, ack_eliciting=True)
             if len(dg) > 0:
                 _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
             off += UInt64(take)
@@ -1040,7 +1094,7 @@ struct QuicClientConnection(Movable):
         # 16-byte sample).
         while len(payload) < 16:
             payload.append(UInt8(0))
-        var dg = self._build_1rtt(payload^)
+        var dg = self._build_1rtt(payload^, ack_eliciting=True)
         if len(dg) > 0:
             _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 

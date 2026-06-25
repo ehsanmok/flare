@@ -203,6 +203,10 @@ struct ConnectionEvents(Copyable, Movable):
     var path_validated: Bool
     """Set when an inbound PATH_RESPONSE matched our outstanding
     PATH_CHALLENGE: the new path is confirmed reachable (§8.2)."""
+    var acked_packets: List[UInt64]
+    """Packet numbers an inbound ACK frame acknowledged this tick
+    (§19.3, expanded from the ACK ranges). The client loss-recovery
+    path retires its in-flight sent packets against this list."""
 
 
 def empty_events() -> ConnectionEvents:
@@ -218,6 +222,7 @@ def empty_events() -> ConnectionEvents:
         path_responses=List[List[UInt8]](),
         retire_connection_ids=List[UInt64](),
         path_validated=False,
+        acked_packets=List[UInt64](),
     )
 
 
@@ -359,6 +364,56 @@ def apply_ack(mut conn: Connection, ack: AckFrame):
     """
     if ack.largest_acknowledged > conn.largest_acked_by_peer:
         conn.largest_acked_by_peer = ack.largest_acknowledged
+
+
+comptime _ACK_EXPAND_CAP: Int = 256
+"""Cap how many individual packet numbers one ACK is expanded into.
+Bounds the work an adversarial ACK with huge ranges can cause; our
+own flows ack a handful of packets per frame. ponytail: a peer that
+genuinely acks more than 256 packets in one frame just gets the
+newest 256 retired here -- the rest retire on the next ACK."""
+
+
+def expand_ack_ranges(ack: AckFrame) -> List[UInt64]:
+    """Expand an ACK frame's ranges (RFC 9000 §19.3.1) into the
+    explicit list of acknowledged packet numbers, newest first,
+    capped at :data:`_ACK_EXPAND_CAP`.
+
+    The first range covers ``[largest - first_ack_range, largest]``;
+    each subsequent range starts ``gap + 2`` below the previous
+    range's smallest and spans ``length + 1`` packets.
+    """
+    var out = List[UInt64]()
+    var largest = ack.largest_acknowledged
+    # Implicit first range.
+    var first_len = ack.first_ack_range
+    var lo = largest - first_len if largest >= first_len else UInt64(0)
+    var pn = largest
+    while pn >= lo:
+        out.append(pn)
+        if len(out) >= _ACK_EXPAND_CAP or pn == UInt64(0):
+            return out^
+        pn -= UInt64(1)
+    var cur_lo = lo
+    for i in range(len(ack.ranges)):
+        var gap = ack.ranges[i].gap
+        var length = ack.ranges[i].length
+        # Next range's largest = cur_lo - gap - 2 (RFC 9000 §19.3.1).
+        var step = gap + UInt64(2)
+        if cur_lo < step:
+            break
+        var next_largest = cur_lo - step
+        var next_lo = (
+            next_largest - length if next_largest >= length else UInt64(0)
+        )
+        var p = next_largest
+        while p >= next_lo:
+            out.append(p)
+            if len(out) >= _ACK_EXPAND_CAP or p == UInt64(0):
+                return out^
+            p -= UInt64(1)
+        cur_lo = next_lo
+    return out^
 
 
 def apply_connection_close(
@@ -568,6 +623,9 @@ struct _ConnFrameHandler(FrameHandler):
     def on_ack(mut self, ack: AckFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=False)
         apply_ack(self._conn()[], ack)
+        var acked = expand_ack_ranges(ack)
+        for i in range(len(acked)):
+            self._events()[].acked_packets.append(acked[i])
 
     def on_reset_stream(mut self, rs: ResetStreamFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
