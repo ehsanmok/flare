@@ -1668,3 +1668,33 @@ handshake that ties them into the cancel-aware reactor loop is
 gated on a Mojo improvement.
 
 Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.
+
+---
+
+## Continued v0.9.0 work - no regression
+
+The continued v0.9.0 work (client ergonomics, gRPC unary client +
+DNS cache, server 0-RTT data path, migration path-validation) is
+additive and does not touch the measured hot paths in the default
+configuration:
+
+- W1-W3 add new client-side modules (`RedirectPolicy`/cookie/retry
+  wiring, `GrpcClient`, `DnsCache`). The HTTP/1.1, h2, and h2c server
+  serve loops are unchanged; the new client features are opt-in
+  (builders / kwargs that default to prior behavior).
+- W4a server 0-RTT is gated on `max_early_data_size > 0` (default 0).
+  With 0-RTT disabled the per-packet path is byte-identical to before:
+  no extra FFI call, only a single `UInt32` budget compare before
+  the (skipped) early-key install block.
+- W4b migration adds a server-initiated `PATH_CHALLENGE` plus an
+  anti-amplification counter, and these fire only when a 1-RTT packet
+  arrives from a *new* peer address (a migration event), never on the
+  steady-state single-path request path.
+
+Functional parity is covered by the unchanged QUIC/H3 suites
+(`test-quic-loopback-integration`, `test-quic-post-initial-decrypt`,
+`test-quic-post-initial-egress`, `test-quic-handle-packet`,
+`test-quic-resumption`, `test-quic-migration`, `test-h3-end-to-end`),
+which stay green after these changes. Run `bench-vs-baseline` /
+`bench-h3*` on a quiet host to confirm throughput/tail parity with the
+headline numbers above before a release.

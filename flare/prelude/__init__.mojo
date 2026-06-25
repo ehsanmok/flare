@@ -117,6 +117,7 @@ from ..net.error import (
 
 # flare.dns
 from ..dns.resolver import resolve, resolve_v4, resolve_v6
+from ..dns.cache import DnsCache
 
 # flare.tcp
 from ..tcp.stream import TcpStream
@@ -471,6 +472,9 @@ from ..grpc import (
     parse_request_headers as grpc_parse_request_headers,
     run_unary_call as grpc_run_unary_call,
     stitch_request_data as grpc_stitch_request_data,
+    # Unary client (RPC over the HttpClient H2 path).
+    GrpcClient,
+    GrpcCallResult,
 )
 
 # flare.ws

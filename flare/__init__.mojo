@@ -85,13 +85,14 @@ flare.http.cache - RFC 9111 cache primitives (CacheControl directive
 flare.grpc     - gRPC primitives on flare.http2: LPM message framing,
                  canonical Status codes (with optional
                  ``grpc-status-details-bin`` payload), Metadata
-                 carrier, and the unary server adapter
+                 carrier, the unary server adapter
                  (``GrpcRequestHeaders`` typed request-headers
-                 carrier → ``GrpcUnaryReply`` typed handler return
-                 (``ok`` / ``err`` factories) → ``run_unary_call``
+                 carrier -> ``GrpcUnaryReply`` typed handler return
+                 (``ok`` / ``err`` factories) -> ``run_unary_call``
                  never-raises orchestrator that maps header / LPM /
                  handler failures to typed ``INVALID_ARGUMENT`` /
-                 ``INTERNAL`` outcomes)
+                 ``INTERNAL`` outcomes), and a unary ``GrpcClient`` that
+                 drives RPCs over the ``HttpClient`` HTTP/2 path
 flare.openapi  - OpenAPI 3.1 spec model + deterministic JSON emitter
 flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  short packet headers, all 22 RFC 9000 §19 transport
@@ -124,7 +125,8 @@ flare.udp      - UdpSocket (IPv4 + IPv6)
 flare.uds      - UnixListener + UnixStream (AF_UNIX sidecar IPC);
                  FrameMux / FrameDemux multiplex logical streams over
                  one UnixStream (encode_frame / decode_frame)
-flare.dns      - getaddrinfo (dual-stack)
+flare.dns      - getaddrinfo (dual-stack) + an additive TTL
+                 ``DnsCache`` over the sync resolver
 flare.net      - IpAddr, SocketAddr, RawSocket
 flare.runtime  - Reactor (kqueue / epoll, opt-in io_uring on Linux),
                  TimerWheel, Scheduler, HandoffQueue +
