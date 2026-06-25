@@ -114,6 +114,7 @@ from ..tls._rustls_quic_ffi import (
 )
 from .packet import encode_short_header
 from ._server_0rtt import EarlyDataReplayGuard, early_data_packet_len
+from ._server_migration import MigrationProbe, new_path_challenge
 from ._server_support import (
     _ACK_MAX_RANGES,
     _CryptoReasm,
@@ -249,6 +250,11 @@ struct QuicListener(Movable):
     from the inbound datagram's sender. The egress path reads
     this to call :meth:`send_to(slot, ...)` without re-parsing
     the inbound datagram."""
+    var migration_probe: List[MigrationProbe]
+    """Per-slot connection-migration path-validation state (RFC 9000
+    sec 8 / sec 9): the candidate address under validation plus the
+    anti-amplification byte counters. Default (no migration) is an
+    idle probe that costs nothing."""
     var rx_1rtt_ranges: List[List[UInt64]]
     """Per-slot received 1-RTT packet numbers, stored as disjoint
     ranges (flat [low, high] pairs, descending by high). The ACK
@@ -348,6 +354,7 @@ struct QuicListener(Movable):
         self.crypto_reasm = List[_CryptoReasm]()
         self.tls_1rtt_egress_queues = List[List[UInt8]]()
         self.peer_addrs = List[SocketAddr]()
+        self.migration_probe = List[MigrationProbe]()
         self.rx_1rtt_ranges = List[List[UInt64]]()
         self.rx_1rtt_ack_pending = List[Bool]()
         self.handshake_done_sent = List[Bool]()
@@ -476,17 +483,22 @@ struct QuicListener(Movable):
             # rebind or an explicit migrate()). Follow it so the
             # egress + PATH_RESPONSE go back to where the client now
             # is.
-            # ponytail: switch the send path immediately, without the
-            # RFC sec 8 path validation (server-initiated
-            # PATH_CHALLENGE) or sec 21.5.4 anti-amplification limit.
-            # That hardening is the follow-up commit; here the client
-            # still proves reachability by validating its own probe.
+            # RFC 9000 sec 8 / sec 9 path validation: a 1-RTT packet
+            # from a new source means the client moved paths. Follow it
+            # for responsiveness AND actively probe it -- emit a
+            # server-initiated PATH_CHALLENGE and bound server-
+            # originated bytes to the unvalidated path at 3x received
+            # (sec 8.1 / sec 21.5.4 anti-amplification) so a spoofed-
+            # source migration cannot reflect/amplify off the server.
             if (
                 slot >= 0
                 and slot < len(self.peer_addrs)
                 and self.peer_addrs[slot] != peer
             ):
+                self._begin_path_validation(slot, peer, len(datagram))
                 self.peer_addrs[slot] = peer
+            elif slot >= 0 and slot < len(self.migration_probe):
+                self.migration_probe[slot].note_rx(peer, UInt64(len(datagram)))
         if slot >= 0 and slot < len(self.connections):
             self._handle_inbound(slot, datagram)
         return slot
@@ -666,6 +678,39 @@ struct QuicListener(Movable):
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
         self._route_h3_stream_chunks(slot, events)
         self._stash_migration_egress(slot, events)
+        # The client echoed our server-initiated PATH_CHALLENGE: the
+        # new path is validated, so lift the anti-amplification cap.
+        if events.path_validated and slot < len(self.migration_probe):
+            self.migration_probe[slot].on_validated()
+
+    def _begin_path_validation(
+        mut self, slot: Int, peer: SocketAddr, datagram_len: Int
+    ) raises:
+        """Start (or refresh) server-initiated validation of a new
+        peer address (RFC 9000 sec 8.2). Emits a PATH_CHALLENGE on the
+        new path -- subject to the anti-amplification budget -- and
+        arms the connection to match the client's PATH_RESPONSE. Idle
+        when the candidate is already being probed (no re-issue per
+        packet)."""
+        if slot < 0 or slot >= len(self.migration_probe):
+            return
+        if not self.migration_probe[slot].should_start(peer):
+            self.migration_probe[slot].note_rx(peer, UInt64(datagram_len))
+            return
+        self.migration_probe[slot].start(peer, UInt64(datagram_len))
+        var data = _random_bytes(8)
+        self.connections[slot].conn.outgoing_path_challenge = data.copy()
+        var frame = new_path_challenge(data)
+        # Only emit the probe if it stays within the 3x amplification
+        # budget for the unvalidated path (it always does for a normal
+        # padded migration datagram; the guard matters for a tiny
+        # spoofed trigger).
+        if self.migration_probe[slot].amplification_allows(len(frame)):
+            var buf = self.pending_migration_tx[slot].copy()
+            for i in range(len(frame)):
+                buf.append(frame[i])
+            self.pending_migration_tx[slot] = buf^
+            self.migration_probe[slot].note_tx(len(frame))
 
     def _stash_migration_egress(
         mut self, slot: Int, events: ConnectionEvents
@@ -1203,6 +1248,7 @@ struct QuicListener(Movable):
         self.crypto_reasm.append(_CryptoReasm())
         self.tls_1rtt_egress_queues.append(List[UInt8]())
         self.peer_addrs.append(peer)
+        self.migration_probe.append(MigrationProbe())
         self.rx_1rtt_ranges.append(List[UInt64]())
         self.rx_1rtt_ack_pending.append(False)
         self.handshake_done_sent.append(False)

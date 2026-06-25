@@ -102,6 +102,10 @@ ASAN_TESTS=(
   # coalesced packet-length parser. ASan validates the guard's
   # value-type bookkeeping and the long-header bounds reads.
   "tests/quic/test_quic_0rtt_replay.mojo"
+  # W4b -- server path-validation probe + anti-amplification budget +
+  # PATH_CHALLENGE encoder. ASan validates the probe value type and the
+  # frame buffer build.
+  "tests/quic/test_quic_migration_probe.mojo"
   # v0.9 B2 — hi/lo watermark backpressure: deterministic hysteresis +
   # counter checks, plus a forked slow-client soak. ASan validates the
   # relay-buffer compaction under throttled draining and the upstream
