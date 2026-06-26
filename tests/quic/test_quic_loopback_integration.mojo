@@ -271,18 +271,20 @@ def test_loopback_idle_close_retires_cid() raises:
     listener.close()
 
 
-def test_loopback_unknown_short_header_dropped() raises:
-    """Short-header datagrams with no registered DCID get
-    silently dropped (no stateless-reset yet -- v0.9 line
-    item). The listener stays usable."""
+def test_loopback_unknown_short_header_stateless_reset() raises:
+    """A short-header datagram with no registered DCID gets a
+    stateless reset (RFC 9000 sec 10.3) rather than a silent drop:
+    no slot is allocated, and the client receives a datagram whose
+    trailing 16 bytes are the reset token derived from the DCID."""
     var listener = _bind_listener()
     var server_addr = listener.local_addr()
     var client = UdpSocket.bind(SocketAddr(IpAddr.localhost(), UInt16(0)))
     # Short-header indicator (high bit clear) + 8-byte unknown DCID.
+    var dcid = _make_cid(UInt8(0x99), 8)
     var datagram = List[UInt8]()
     datagram.append(UInt8(0x40))
     for i in range(8):
-        datagram.append(UInt8(0x99 + i))
+        datagram.append(dcid.bytes[i])
     for _ in range(50):
         datagram.append(UInt8(0))
     _ = client.send_to(Span[UInt8, _](datagram), server_addr)
@@ -292,6 +294,25 @@ def test_loopback_unknown_short_header_dropped() raises:
         0,
         "unknown short-header datagrams do not allocate slots",
     )
+    # The server should have sent a stateless reset back to us.
+    client.set_recv_timeout(500)
+    var buf = List[UInt8](capacity=128)
+    for _ in range(128):
+        buf.append(UInt8(0))
+    var pair = client.recv_from(Span[UInt8, _](buf))
+    var n = pair[0]
+    assert_true(n >= 21, "stateless reset must be at least 21 bytes")
+    assert_true(
+        n < len(datagram), "reset must be shorter than the trigger (no loop)"
+    )
+    assert_equal(Int(buf[0]) & 0xC0, 0x40, "reset wears a short-header shape")
+    var expected = listener._stateless_reset_token(dcid)
+    for i in range(16):
+        assert_equal(
+            Int(buf[n - 16 + i]),
+            Int(expected[i]),
+            "reset token must be HMAC(reset_key, dcid)[:16]",
+        )
     listener.shutdown()
     listener.close()
 
@@ -499,7 +520,7 @@ def main() raises:
     test_loopback_initial_handshake_round_trip()
     test_loopback_retransmit_routes_to_existing_slot()
     test_loopback_idle_close_retires_cid()
-    test_loopback_unknown_short_header_dropped()
+    test_loopback_unknown_short_header_stateless_reset()
     test_egress_build_initial_response_decrypts_at_client()
     test_egress_drain_clears_queue_and_advances_counters()
     test_egress_no_op_when_queue_empty()

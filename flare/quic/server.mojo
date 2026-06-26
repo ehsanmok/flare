@@ -47,6 +47,8 @@ from std.memory import Span
 
 from ..net.address import IpAddr, SocketAddr
 from ..udp import UdpSocket
+from flare.crypto.hmac import hmac_sha256
+
 from .crypto import QuicAead
 from .frame import (
     CryptoFrame,
@@ -89,7 +91,9 @@ from ..h3.server import H3Connection
 from ..http.request import Request
 from ..http.response import Response
 from .timers import (
+    TIMER_KIND_ACK_DELAY,
     TIMER_KIND_IDLE,
+    TIMER_KIND_PTO,
     decode_timer_token,
     encode_timer_token,
 )
@@ -339,6 +343,13 @@ struct QuicListener(Movable):
     :func:`flare.quic.timers.encode_timer_token(kind, slot)`;
     :meth:`advance_timers` dispatches each fired token to the
     matching :class:`QuicConnection` callback."""
+    var _reset_key: List[UInt8]
+    """Listener-wide static key (32 bytes from urandom) for deriving
+    stateless-reset tokens (RFC 9000 sec 10.3.1). The token for a CID is
+    ``HMAC-SHA256(_reset_key, cid)[:16]``: deterministic so a peer that
+    stored the token (issued via NEW_CONNECTION_ID) recognizes the reset,
+    yet unguessable without the key. The same key signs every issued
+    token and every emitted stateless reset, so they always match."""
     var _socket: UdpSocket
     var _local_addr: SocketAddr
     var _stopping: Bool
@@ -379,6 +390,7 @@ struct QuicListener(Movable):
             window_ms=config.early_data_strike_window_ms
         )
         self.timer_wheel = TimerWheel(now_ms=UInt64(0))
+        self._reset_key = _random_bytes(32)
         self._socket = sock^
         self._local_addr = addr
         self._stopping = False
@@ -491,6 +503,15 @@ struct QuicListener(Movable):
             slot = self._dispatch_long(datagram, peer)
         else:
             slot = self._dispatch_short(datagram, peer)
+            # Unknown-DCID short-header datagram (RFC 9000 sec 10.3): the
+            # peer thinks a connection exists that we have no state for.
+            # Instead of a silent drop, send a stateless reset so the peer
+            # tears the dead connection down promptly rather than waiting
+            # out its idle timeout. Bounded + loop-safe by
+            # :meth:`_build_stateless_reset`.
+            if slot < 0:
+                self._maybe_send_stateless_reset(datagram, peer)
+                return -1
             # Connection migration (RFC 9000 sec 9): a short-header
             # (1-RTT) packet routed by a known DCID but arriving from
             # a new source address means the client moved paths (NAT
@@ -791,7 +812,10 @@ struct QuicListener(Movable):
         var seq = self.next_local_cid_seq[slot]
         var cid_bytes = _random_bytes(cid_len)
         var new_cid = ConnectionId(bytes=cid_bytes.copy())
-        var token = _random_bytes(16)
+        # Derive the reset token from the CID so a later stateless reset
+        # for this CID (RFC 9000 sec 10.3) reproduces the same 16 bytes
+        # the peer stored here.
+        var token = self._stateless_reset_token(new_cid)
         encode_new_connection_id(
             NewConnectionIdFrame(
                 sequence_number=seq,
@@ -803,6 +827,53 @@ struct QuicListener(Movable):
         )
         self.cid_table.register(cid_to_hex(new_cid), slot)
         self.next_local_cid_seq[slot] = seq + UInt64(1)
+
+    def _stateless_reset_token(self, cid: ConnectionId) raises -> List[UInt8]:
+        """Derive the 16-byte stateless-reset token for ``cid``
+        (RFC 9000 sec 10.3.1): the first 16 bytes of
+        ``HMAC-SHA256(_reset_key, cid_bytes)``. Deterministic in the CID,
+        so the token issued via NEW_CONNECTION_ID and the token on a
+        later stateless reset for the same CID are identical."""
+        var mac = hmac_sha256(self._reset_key, cid.bytes.copy())
+        var token = List[UInt8](capacity=16)
+        for i in range(16):
+            token.append(mac[i])
+        return token^
+
+    def _build_stateless_reset(
+        self, dcid: ConnectionId, triggering_len: Int
+    ) raises -> List[UInt8]:
+        """Build a stateless-reset datagram for an unknown short-header
+        ``dcid`` (RFC 9000 sec 10.3).
+
+        Layout: a short-header-shaped packet of unpredictable bytes
+        ending in the 16-byte stateless-reset token derived from
+        ``dcid``. The first byte has the high bit clear + the fixed bit
+        set (``0x40``) so it reads as a valid short header; the leading
+        bytes are random so the datagram is indistinguishable from a
+        regular 1-RTT packet on the wire.
+
+        Returns an empty list (caller drops) when the triggering packet
+        is too small to safely reset: the reset MUST be shorter than the
+        packet that triggered it (to avoid an infinite reset loop, sec
+        10.3) yet at least 21 bytes (5 random + 16 token). When the
+        triggering packet can't accommodate both bounds we stay silent.
+        """
+        comptime MIN_RESET_LEN = 21
+        if triggering_len <= MIN_RESET_LEN:
+            return List[UInt8]()
+        # Largest reset still strictly shorter than the trigger, capped
+        # so we don't echo arbitrarily large datagrams.
+        var total = triggering_len - 1
+        if total > 64:
+            total = 64
+        var rand_len = total - 16
+        var out = _random_bytes(rand_len)
+        out[0] = (out[0] & 0x3F) | 0x40  # clear long-header + key-phase noise
+        var token = self._stateless_reset_token(dcid)
+        for i in range(16):
+            out.append(token[i])
+        return out^
 
     def _decrypt_post_initial(
         mut self,
@@ -1251,6 +1322,33 @@ struct QuicListener(Movable):
         var sh = parse_short_header(datagram, sh_dcid_len)
         var dcid_hex = cid_to_hex(sh.dcid)
         return self.cid_table.lookup(dcid_hex)
+
+    def _maybe_send_stateless_reset(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises:
+        """Emit a stateless reset for an unknown-DCID short-header
+        datagram (RFC 9000 sec 10.3), best-effort.
+
+        Parses the DCID with the listener's pinned length, derives the
+        reset token from it, and sends a loop-safe reset to ``peer``.
+        Any parse / build / send failure is swallowed (the reset is an
+        optimization over a silent drop, never a correctness
+        requirement)."""
+        var sh_dcid_len = self.config.local_cid_length
+        if sh_dcid_len <= 0 or sh_dcid_len > MAX_CID_LENGTH:
+            return
+        var dcid: ConnectionId
+        try:
+            dcid = parse_short_header(datagram, sh_dcid_len).dcid.copy()
+        except:
+            return
+        var reset = self._build_stateless_reset(dcid, len(datagram))
+        if len(reset) == 0:
+            return
+        try:
+            _ = self.send_to(Span[UInt8, _](reset), peer)
+        except:
+            pass
 
     def _accept_initial(
         mut self, lh: LongHeader, peer: SocketAddr
@@ -2132,11 +2230,21 @@ struct QuicListener(Movable):
         return id
 
     def advance_timers(mut self, now_ms: UInt64) raises -> Int:
-        """Advance the wheel to ``now_ms`` and dispatch every
-        fired idle-timeout token to the matching
-        :class:`QuicConnection` callback (per
+        """Advance the wheel to ``now_ms`` and dispatch every fired
+        timer token to the matching action (per
         :mod:`flare.quic.timers`). Returns the number of tokens
         dispatched.
+
+        Handles all three registered kinds:
+
+        * ``TIMER_KIND_IDLE`` -- RFC 9000 sec 10.1 idle timeout:
+          flips the connection to closed via ``on_idle_expired``.
+        * ``TIMER_KIND_ACK_DELAY`` -- RFC 9000 sec 13.2.1 deferred
+          ACK: flushes any owed 1-RTT ACK through the coalesced
+          egress path so a quiescent peer still learns what arrived
+          even when no further inbound packet drives a drain.
+        * ``TIMER_KIND_PTO`` -- RFC 9002 sec 6.2 probe timeout:
+          dispatched to :meth:`_on_pto_expired`.
 
         Also sweeps the CID table for any connections whose
         ``alive`` flag flipped False during dispatch (idle
@@ -2152,9 +2260,33 @@ struct QuicListener(Movable):
                 continue
             if decoded.kind == TIMER_KIND_IDLE:
                 self.connections[slot].on_idle_expired()
+            elif decoded.kind == TIMER_KIND_ACK_DELAY:
+                if slot < len(self.peer_addrs):
+                    var peer = self.peer_addrs[slot]
+                    _ = self._drain_1rtt_coalesced(slot, peer)
+            elif decoded.kind == TIMER_KIND_PTO:
+                self._on_pto_expired(slot)
             if not self.connections[slot].alive:
                 self._retire_slot_cids(slot)
         return len(fired)
+
+    def _on_pto_expired(mut self, slot: Int) raises:
+        """RFC 9002 sec 6.2 probe-timeout action for ``slot``.
+
+        ponytail: server-side 1-RTT response retransmit is not wired
+        yet -- it needs the per-slot sent-packet bookkeeping +
+        RTT-estimated PTO scheduling that lands with the full RFC 9002
+        loss-recovery work (the ``flare.quic.cc`` track). Until then a
+        fired PTO re-flushes whatever 1-RTT egress is still pending so
+        an owed ACK / response that never reached the wire gets another
+        chance, which is strictly better than dropping the timer. The
+        upgrade path: track ack-eliciting 1-RTT sends in a per-slot
+        ``LossRecovery`` and retransmit the oldest unacked frames here.
+        """
+        if slot < 0 or slot >= len(self.peer_addrs):
+            return
+        var peer = self.peer_addrs[slot]
+        _ = self._drain_1rtt_coalesced(slot, peer)
 
     def _retire_slot_cids(mut self, slot: Int) raises:
         """Drop every CID -> slot mapping that points at this
