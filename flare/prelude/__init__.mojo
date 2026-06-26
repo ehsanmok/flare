@@ -118,6 +118,7 @@ from ..net.error import (
 # flare.dns
 from ..dns.resolver import resolve, resolve_v4, resolve_v6
 from ..dns.cache import DnsCache
+from ..dns.async_resolve import resolve_async, order_happy_eyeballs
 
 # flare.tcp
 from ..tcp.stream import TcpStream
@@ -475,6 +476,9 @@ from ..grpc import (
     # Unary client (RPC over the HttpClient H2 path).
     GrpcClient,
     GrpcCallResult,
+    # Streaming client RPC handles (server / client / bidi).
+    GrpcServerStream,
+    GrpcBidiStream,
 )
 
 # flare.ws

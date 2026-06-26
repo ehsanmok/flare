@@ -11,10 +11,11 @@ gRPC is a 4-layer protocol on top of HTTP/2:
    :mod:`flare.grpc.status`.
 3. **Call shapes** -- unary (this module, via the
    :mod:`flare.grpc.server` adapter), and server-streaming /
-   client-streaming / bidirectional (not yet implemented). Each
-   maps onto a single HTTP/2 stream (request HEADERS + DATA
-   frames carry length-prefixed messages, response HEADERS +
-   DATA + trailing HEADERS carry the reply).
+   client-streaming / bidirectional (the client side, via
+   :mod:`flare.grpc.streaming`). Each maps onto a single HTTP/2
+   stream (request HEADERS + DATA frames carry length-prefixed
+   messages, response HEADERS + DATA + trailing HEADERS carry the
+   reply).
 4. **Codegen** -- proto3 message + service codegen. Not yet
    implemented; handler bodies for now construct ``List[UInt8]``
    payloads directly using whatever serialiser the user picks.
@@ -46,6 +47,12 @@ Public re-exports:
 - :class:`GrpcUnaryReply` -- typed handler return value with
   :func:`GrpcUnaryReply.ok` / :func:`GrpcUnaryReply.err`
   factories that fill in the status + default metadata.
+- :class:`GrpcServerStream`, :class:`GrpcBidiStream` -- the
+  client-side streaming RPC handles returned by
+  :meth:`GrpcClient.call_server_streaming` /
+  :meth:`GrpcClient.call_client_streaming` /
+  :meth:`GrpcClient.call_bidi`; pull reply messages incrementally
+  with ``recv()`` and read the final ``status()``.
 - :func:`parse_request_headers`, :func:`stitch_request_data`,
   :func:`encode_unary_response`, :func:`run_unary_call` -- the
   sans-I/O building blocks of the unary server adapter (H2
@@ -54,6 +61,7 @@ Public re-exports:
 """
 
 from .client import GrpcCallResult, GrpcClient
+from .streaming import GrpcBidiStream, GrpcServerStream
 from .framing import (
     GRPC_COMPRESSION_NONE,
     GRPC_COMPRESSION_COMPRESSED,

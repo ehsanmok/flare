@@ -91,8 +91,12 @@ flare.grpc     - gRPC primitives on flare.http2: LPM message framing,
                  (``ok`` / ``err`` factories) -> ``run_unary_call``
                  never-raises orchestrator that maps header / LPM /
                  handler failures to typed ``INVALID_ARGUMENT`` /
-                 ``INTERNAL`` outcomes), and a unary ``GrpcClient`` that
-                 drives RPCs over the ``HttpClient`` HTTP/2 path
+                 ``INTERNAL`` outcomes), and a ``GrpcClient`` that
+                 drives unary RPCs over the ``HttpClient`` HTTP/2 path
+                 plus server- / client- / bidi-streaming RPCs
+                 (``GrpcServerStream`` / ``GrpcBidiStream``) that
+                 surface LPM messages incrementally on a long-lived
+                 HTTP/2 stream
 flare.openapi  - OpenAPI 3.1 spec model + deterministic JSON emitter
 flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  short packet headers, all 22 RFC 9000 §19 transport
@@ -114,7 +118,9 @@ flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  List[UInt8]`` buffer-reuse contract (RFC 9114 §4 +
                  §7), plus the client side: ``H3ClientConnection``
                  (request writer + response reader over the QUIC
-                 client driver) for end-to-end HTTP/3 requests
+                 client driver) for end-to-end HTTP/3 requests,
+                 including ``fetch_0rtt`` -- the idempotent-method-only
+                 0-RTT request gate with transparent 1-RTT fallback
 flare.qpack    - Sans-I/O static-only QPACK encoder / decoder for
                  HTTP/3 field sections (RFC 9204 Appendix A static
                  table + literal + Huffman, shared with HPACK)
@@ -126,7 +132,9 @@ flare.uds      - UnixListener + UnixStream (AF_UNIX sidecar IPC);
                  FrameMux / FrameDemux multiplex logical streams over
                  one UnixStream (encode_frame / decode_frame)
 flare.dns      - getaddrinfo (dual-stack) + an additive TTL
-                 ``DnsCache`` over the sync resolver
+                 ``DnsCache`` over the sync resolver, plus an
+                 off-reactor ``resolve_async`` (getaddrinfo on a pool
+                 thread) and ``order_happy_eyeballs`` address ordering
 flare.net      - IpAddr, SocketAddr, RawSocket
 flare.runtime  - Reactor (kqueue / epoll, opt-in io_uring on Linux),
                  TimerWheel, Scheduler, HandoffQueue +
