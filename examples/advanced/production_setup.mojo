@@ -23,63 +23,45 @@ Run:
 
 from flare.http import (
     CatchPanic,
-    Handler,
     HttpServer,
     Request,
     RequestId,
     Response,
+    Router,
     ServerConfig,
     StructuredLogger,
+    ok,
 )
 from flare.net import SocketAddr
 
 
-@fieldwise_init
-struct AppHandler(Copyable, Defaultable, Handler, Movable):
-    """The application's request-dispatch handler.
+def healthz(req: Request) raises -> Response:
+    # The canonical /healthz contract. Deepen as your service
+    # requires (DB pings, upstream readiness, etc); the framework
+    # cannot guess.
+    var resp = ok("ok\n")
+    resp.headers.set("Content-Type", "text/plain; charset=utf-8")
+    return resp^
 
-    Path-routes ``/healthz`` and ``/users`` and 404s everything
-    else. Defaultable so the middleware stack
-    (RequestId / StructuredLogger / CatchPanic) can wrap it
-    monomorphically; you can swap this struct for a richer
-    dispatcher (e.g. ``ComptimeRouter`` adapter) without
-    touching the stack.
-    """
 
-    var _placeholder: UInt8
-
-    def __init__(out self):
-        self._placeholder = UInt8(0)
-
-    def serve(self, req: Request) raises -> Response:
-        if req.method == "GET" and req.url == "/healthz":
-            # The canonical /healthz contract. Deepen as your
-            # service requires (DB pings, upstream readiness,
-            # etc); the framework cannot guess.
-            var ok = Response(status=200)
-            ok.body = List[UInt8]("ok\n".as_bytes())
-            ok.headers.set("Content-Type", "text/plain; charset=utf-8")
-            ok.headers.set("Content-Length", String(len(ok.body)))
-            return ok^
-        if req.method == "GET" and req.url == "/users":
-            var resp = Response(status=200)
-            var body = String('{"users":[{"id":1,"name":"ada"}]}')
-            resp.body = List[UInt8](body.as_bytes())
-            resp.headers.set("Content-Type", "application/json")
-            resp.headers.set("Content-Length", String(len(resp.body)))
-            return resp^
-        var nf = Response(status=404)
-        nf.body = List[UInt8]("Not Found".as_bytes())
-        nf.headers.set("Content-Type", "text/plain; charset=utf-8")
-        nf.headers.set("Content-Length", String(len(nf.body)))
-        return nf^
+def list_users(req: Request) raises -> Response:
+    var resp = ok('{"users":[{"id":1,"name":"ada"}]}')
+    resp.headers.set("Content-Type", "application/json")
+    return resp^
 
 
 def main() raises:
     print("=== flare: production-shaped server ===")
     print()
 
-    # CatchPanic -> StructuredLogger -> RequestId -> AppHandler.
+    # The application dispatcher is a plain Router. Since v0.9 Router
+    # is Defaultable, so the stock middleware family wraps it directly
+    # -- no hand-rolled forwarding struct needed.
+    var router = Router()
+    router.get("/healthz", healthz)
+    router.get("/users", list_users)
+
+    # CatchPanic -> StructuredLogger -> RequestId -> Router.
     # Order matters:
     # - CatchPanic on the outside so any abort inside the stack
     #   surfaces as a sanitised 500 rather than tearing down the
@@ -90,7 +72,7 @@ def main() raises:
     #   through both the response header and the log line.
     var stack = CatchPanic(
         StructuredLogger(
-            RequestId(AppHandler()),
+            RequestId(router^),
         )
     )
 
@@ -117,9 +99,7 @@ def main() raises:
     #     srv.serve(stack, num_workers=4)
     _ = stack
     _ = cfg
-    print(
-        "constructed: CatchPanic -> StructuredLogger -> RequestId -> AppHandler"
-    )
+    print("constructed: CatchPanic -> StructuredLogger -> RequestId -> Router")
     print("routes: GET /healthz, GET /users")
     print("timeouts: read_body=30s handler=30s request=60s (see ServerConfig)")
     print()

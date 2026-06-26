@@ -291,7 +291,7 @@ struct _StructHandlerRegistry(Movable):
 # ── Router ───────────────────────────────────────────────────────────────────
 
 
-struct Router(Copyable, Handler, Movable):
+struct Router(Copyable, Defaultable, Handler, Movable):
     """HTTP router with method dispatch, path parameters, and nesting.
 
     Accepts both plain ``def(Request) raises -> Response`` functions
