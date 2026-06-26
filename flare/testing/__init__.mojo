@@ -15,5 +15,5 @@ its own module; ``TestClient`` complements it for the much
 larger universe of pure handler-level tests.
 """
 
-from .client import TestClient
+from .client import H2cTestClient, TestClient
 from .fork_server import fork_server, kill_forked_server

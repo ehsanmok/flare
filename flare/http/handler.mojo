@@ -171,11 +171,16 @@ trait HandlerExtractor(Copyable, Defaultable, Handler, Movable):
     Re-exported from :mod:`flare.http.handler` only (the demoted
     internal-adapter import path).
 
-    The manual no-arg ``__init__`` body is still required today
-    because Mojo's ``@fieldwise_init`` doesn't auto-derive a
-    no-arg constructor from per-field ``Defaultable`` impls
-    (tracked as a Mojo language-support item; once it lands,
-    the body collapses to ``pass``).
+    ponytail: the manual no-arg ``__init__`` body is still required
+    today because Mojo's ``@fieldwise_init`` doesn't auto-derive a
+    no-arg constructor from per-field ``Defaultable`` impls. Ceiling:
+    every handler struct must hand-write the field-by-field default
+    constructor. Upgrade path: a Mojo language-support item -- once
+    ``@fieldwise_init`` (or a ``@default``-style derive) synthesizes
+    the no-arg ctor from per-field ``Defaultable``, each handler's
+    body collapses to ``pass``. Tracked here rather than worked
+    around, since there is no in-language workaround that removes the
+    boilerplate.
     """
 
     pass
