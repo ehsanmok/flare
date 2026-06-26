@@ -897,3 +897,144 @@ struct Http2ClientConnection(Defaultable, Movable):
         §6.8). The high-level facade SHOULD stop opening new
         streams; in-flight streams MAY complete."""
         return self.conn.goaway_received
+
+    # ── Incremental streaming surface (W6) ───────────────────────────────
+    #
+    # The unary path above buffers the whole response and pops it via
+    # take_response(). The streaming gRPC client instead opens a stream,
+    # pumps DATA frames as they arrive, and surfaces each LPM message
+    # incrementally -- so a long server-streaming response stays
+    # bounded-memory rather than materializing every frame. These
+    # methods give the caller the live stream state without consuming it.
+
+    def send_request_open(
+        mut self,
+        sid: Int,
+        method: String,
+        scheme: String,
+        authority: String,
+        path: String,
+        extra_headers: List[HpackHeader],
+    ) raises -> None:
+        """Open a request stream that stays OPEN for incremental body
+        writes (client-streaming / bidi).
+
+        Like :meth:`send_request` but emits HEADERS *without*
+        ``END_STREAM`` and never any body, leaving the stream in OPEN
+        state so the caller pumps request DATA frames via
+        :meth:`send_data` and half-closes with an empty
+        ``end_stream=True`` DATA frame when the request body is done.
+        """
+        var hh = List[HpackHeader]()
+        hh.append(HpackHeader(":method", method))
+        hh.append(HpackHeader(":scheme", scheme))
+        hh.append(HpackHeader(":authority", authority))
+        hh.append(HpackHeader(":path", path))
+        for i in range(len(extra_headers)):
+            hh.append(extra_headers[i].copy())
+        var enc = self.conn.hpack_encoder.encode(Span[HpackHeader, _](hh))
+        var max_frame = self.conn.max_frame_size
+        var n_enc = len(enc)
+        if n_enc <= max_frame:
+            var hf = Frame()
+            hf.header.type = FrameType.HEADERS()
+            hf.header.stream_id = sid
+            hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+            hf.payload = enc^
+            hf.header.length = len(hf.payload)
+            var hb = encode_frame(hf^)
+            for i in range(len(hb)):
+                self.outbox.append(hb[i])
+        else:
+            var hf = Frame()
+            hf.header.type = FrameType.HEADERS()
+            hf.header.stream_id = sid
+            hf.header.flags = FrameFlags(UInt8(0))
+            var first_payload = List[UInt8](capacity=max_frame)
+            for i in range(max_frame):
+                first_payload.append(enc[i])
+            hf.payload = first_payload^
+            hf.header.length = len(hf.payload)
+            var hb = encode_frame(hf^)
+            for i in range(len(hb)):
+                self.outbox.append(hb[i])
+            var pos = max_frame
+            while pos < n_enc:
+                var chunk = max_frame
+                if pos + chunk > n_enc:
+                    chunk = n_enc - pos
+                var cf = Frame()
+                cf.header.type = FrameType.CONTINUATION()
+                cf.header.stream_id = sid
+                if pos + chunk == n_enc:
+                    cf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+                else:
+                    cf.header.flags = FrameFlags(UInt8(0))
+                var cp = List[UInt8](capacity=chunk)
+                for i in range(chunk):
+                    cp.append(enc[pos + i])
+                cf.payload = cp^
+                cf.header.length = len(cf.payload)
+                var cb = encode_frame(cf^)
+                for i in range(len(cb)):
+                    self.outbox.append(cb[i])
+                pos += chunk
+        var s = Stream()
+        s.id = sid
+        s.send_window = self.conn.initial_window_size
+        s.recv_window = self.conn.initial_window_size
+        s.state = StreamState.OPEN()
+        self.conn.streams[sid] = s^
+
+    def headers_received(self, sid: Int) raises -> Bool:
+        """``True`` once the response HEADERS block on ``sid`` is fully
+        received (END_HEADERS observed). Body / trailers may still be
+        arriving."""
+        if sid not in self.conn.streams:
+            return False
+        return self.conn.streams[sid].copy().headers_complete
+
+    def stream_ended(self, sid: Int) raises -> Bool:
+        """``True`` once the peer has ENDed (END_STREAM) or RESET the
+        stream, i.e. no more response DATA will arrive."""
+        if sid in self._stream_errors:
+            return True
+        if sid not in self.conn.streams:
+            # An already-popped / never-opened stream counts as ended.
+            return True
+        var s = self.conn.streams[sid].copy()
+        return s.data_complete or s.state.value == StreamState.CLOSED().value
+
+    def drain_body(mut self, sid: Int) raises -> List[UInt8]:
+        """Move out and return the response DATA accumulated on ``sid``
+        so far, clearing the stream's buffer.
+
+        Returns an empty list when no new DATA has arrived. Keeps the
+        stream entry alive (unlike :meth:`take_response`) so subsequent
+        DATA frames keep accumulating; this is what bounds memory on a
+        long streaming response."""
+        if sid not in self.conn.streams:
+            return List[UInt8]()
+        var s = self.conn.streams.pop(sid)
+        var out = s.data^
+        s.data = List[UInt8]()
+        self.conn.streams[sid] = s^
+        return out^
+
+    def response_headers(self, sid: Int) raises -> List[HpackHeader]:
+        """Return a copy of the current header list for ``sid`` (initial
+        HEADERS plus any trailing HEADERS the driver has merged in).
+        Read after :meth:`stream_ended` to pick up gRPC trailers
+        (``grpc-status`` / ``grpc-message``)."""
+        if sid not in self.conn.streams:
+            return List[HpackHeader]()
+        return self.conn.streams[sid].copy().headers.copy()
+
+    def discard_stream(mut self, sid: Int) -> None:
+        """Drop the stream entry for ``sid`` (after the caller has read
+        the trailers), reclaiming its per-connection memory."""
+        try:
+            if sid in self.conn.streams:
+                _ = self.conn.streams.pop(sid)
+        except:
+            pass

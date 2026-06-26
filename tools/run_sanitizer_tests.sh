@@ -103,6 +103,15 @@ ASAN_TESTS=(
   # ASan validates the LPM encode/decode buffers and the response
   # header/trailer merge on the moved HttpClient.
   "tests/grpc/test_grpc_client.mojo"
+  # W6 -- streaming gRPC (server/client/bidi) over h2c. ASan validates
+  # the _H2Transport heap cell (pooled TcpStream), the long-lived
+  # Http2ClientConnection, and the LPM reassembly buffer across the
+  # incremental drain_body / send_data path.
+  "tests/grpc/test_grpc_streaming.mojo"
+  # W6 -- off-reactor resolve_async. ASan validates the cross-thread
+  # _ResolveCtx heap cell + the Pool[String]/Pool[List[IpAddr]] handoff
+  # cells freed after pthread_join.
+  "tests/dns/test_async_resolve.mojo"
   # W3 -- TTL DNS cache over the sync resolver. ASan validates the
   # Dict[String, _CachedAddrs] lifecycle and the IpAddr list copies.
   "tests/dns/test_dns_cache.mojo"

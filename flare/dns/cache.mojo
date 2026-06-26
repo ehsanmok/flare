@@ -25,8 +25,10 @@ of this pure cache without changing its logic.
 
 from std.collections import Dict, List
 
+from ..http.cancel import Cancel
 from ..net import IpAddr
 from ..runtime._libc_time import monotonic_now_ms
+from .async_resolve import order_happy_eyeballs, resolve_async
 from .resolver import resolve
 
 
@@ -88,6 +90,36 @@ struct DnsCache(Movable):
             addrs=fresh.copy(), expires_at_ms=now + self._ttl_ms
         )
         return fresh^
+
+    def resolve_async(
+        mut self, host: String, cancel: Cancel
+    ) raises -> List[IpAddr]:
+        """Cache-aware off-reactor resolve: serve a fresh entry from
+        memory (no thread spawn), else resolve on a pool thread via
+        :func:`flare.dns.resolve_async` and cache the result.
+
+        Same caching semantics as :meth:`resolve`; only the miss path
+        differs (off-thread, cancellable). Failures are not cached."""
+        var now = monotonic_now_ms()
+        try:
+            var hit = self._by_host[host].copy()
+            if now < hit.expires_at_ms:
+                self._hits += 1
+                return hit.addrs.copy()
+        except:
+            pass
+        var fresh = resolve_async(host, cancel)
+        self._resolves += 1
+        self._by_host[host] = _CachedAddrs(
+            addrs=fresh.copy(), expires_at_ms=now + self._ttl_ms
+        )
+        return fresh^
+
+    def resolve_ordered(mut self, host: String) raises -> List[IpAddr]:
+        """Like :meth:`resolve` but returns the addresses in RFC 8305
+        happy-eyeballs connection-attempt order (interleaved IPv6/IPv4)
+        so a dialer can race the families."""
+        return order_happy_eyeballs(self.resolve(host))
 
     def invalidate(mut self, host: String):
         """Drop any cached entry for ``host`` (e.g. after a dial to the

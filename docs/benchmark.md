@@ -1698,6 +1698,15 @@ configuration:
   used. `send_chunked` is a separate explicit method (no change to
   `send` / `get` / `post`); it holds one chunk in flight, so a multi-MB
   upload stays bounded-memory rather than materializing the body.
+- W6 gRPC streaming + async DNS is additive. The unary HttpClient h2/h2c
+  fast path (`take_response`) is untouched; streaming opens its own
+  long-lived stream and only uses the new additive
+  `Http2ClientConnection` accessors (`send_request_open` / `drain_body` /
+  `stream_ended` / `response_headers`), so existing unary and h2-driver
+  suites stay green. `resolve_async` offloads `getaddrinfo` to a pool
+  thread (same mechanism as `block_in_pool`); the sync `resolve` /
+  `DnsCache.resolve` hot path is unchanged, and a within-TTL cache hit
+  spawns no thread.
 
 Functional parity is covered by the unchanged QUIC/H3 suites
 (`test-quic-loopback-integration`, `test-quic-post-initial-decrypt`,

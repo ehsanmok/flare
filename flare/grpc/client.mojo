@@ -30,9 +30,26 @@ from ..http.client import HttpClient
 from ..http.request import Method, Request
 from ..http.headers import HeaderMap
 from ..http.proto.ascii import ascii_unchecked_string
+from ..http.url import Url
+from ..http2.client import Http2ClientConnection
+from ..tcp import TcpStream
+from ..tls import TlsStream
+from ..tls.config import TlsConfig
 from .framing import decode_grpc_message, encode_grpc_message
 from .metadata import GrpcMetadata
 from .status import GRPC_STATUS_OK, GRPC_STATUS_UNKNOWN, GrpcStatus
+from .streaming import (
+    GrpcBidiStream,
+    GrpcServerStream,
+    _H2Transport,
+    _authority,
+    _grpc_request_headers,
+)
+
+comptime _GRPC_DIAL_TIMEOUT_MS: Int = 30_000
+"""Connect timeout for a streaming RPC dial. Matches the HttpClient
+default; streaming calls open their own h2 connection rather than going
+through the unary HttpClient path."""
 
 
 @fieldwise_init
@@ -73,12 +90,14 @@ struct GrpcClient(Movable):
 
     var _client: HttpClient
     var _base_url: String
+    var _cleartext: Bool
 
     def __init__(out self, base_url: String, *, cleartext: Bool = True):
         """Create a channel to ``base_url`` (origin only, e.g.
         ``http://host:port``). ``cleartext`` selects h2c prior knowledge
         vs HTTP/2 over TLS."""
         self._base_url = base_url
+        self._cleartext = cleartext
         if cleartext:
             self._client = HttpClient(prefer_h2c=True, auto_decompress=False)
         else:
@@ -160,3 +179,127 @@ struct GrpcClient(Movable):
             http_status=resp.status,
             headers=resp.headers.copy(),
         )
+
+    # ── Streaming RPCs (W6) ───────────────────────────────────────────────
+
+    def _normalize_path(self, service_method: String) -> String:
+        if service_method.byte_length() == 0 or service_method.unsafe_ptr()[
+            0
+        ] != UInt8(ord("/")):
+            return String("/") + service_method
+        return service_method
+
+    def _connect(self, u: Url) raises -> _H2Transport:
+        """Open a fresh HTTP/2 transport to ``u`` (h2c prior-knowledge
+        TCP, or h2-over-TLS via ALPN) and write the connection preface
+        is left to the caller."""
+        if self._cleartext:
+            var tcp = TcpStream.connect(u.host, u.port, _GRPC_DIAL_TIMEOUT_MS)
+            return _H2Transport.from_tcp(tcp^)
+        var cfg = TlsConfig()
+        cfg.alpn = List[String]()
+        cfg.alpn.append("h2")
+        var tls = TlsStream.connect_timeout(
+            u.host, u.port, cfg^, _GRPC_DIAL_TIMEOUT_MS
+        )
+        return _H2Transport.from_tls(tls^)
+
+    def call_server_streaming(
+        self,
+        service_method: String,
+        request: Span[UInt8, _],
+        metadata: GrpcMetadata = GrpcMetadata(),
+    ) raises -> GrpcServerStream:
+        """Open a server-streaming RPC: send one request message, then
+        receive N reply messages.
+
+        The returned :class:`GrpcServerStream` yields reply payloads one
+        at a time via ``recv()`` (``None`` at end of stream) as the
+        server's DATA frames arrive -- only one message plus the
+        partial-frame reassembly buffer are ever held in memory. Read
+        the final ``grpc-status`` with ``status()`` after ``recv()``
+        returns ``None``.
+
+        Args:
+            service_method: ``/package.Service/Method`` (leading ``/``
+                added if missing).
+            request: the single request message bytes (LPM-framed here).
+            metadata: optional initial metadata (text entries only).
+        """
+        var path = self._normalize_path(service_method)
+        var u = Url.parse(self._base_url + path)
+        var body = List[UInt8]()
+        encode_grpc_message(request, body)
+
+        var conn = Http2ClientConnection()
+        var t = self._connect(u)
+        var preface = conn.drain()
+        if len(preface) > 0:
+            t.write_all(Span[UInt8, _](preface))
+        var sid = conn.next_stream_id()
+        conn.send_request(
+            sid,
+            "POST",
+            u.scheme,
+            _authority(u),
+            u.request_target(),
+            _grpc_request_headers(metadata),
+            Span[UInt8, _](body),
+        )
+        var out = conn.drain()
+        if len(out) > 0:
+            t.write_all(Span[UInt8, _](out))
+        return GrpcServerStream(t^, conn^, sid)
+
+    def call_client_streaming(
+        self,
+        service_method: String,
+        metadata: GrpcMetadata = GrpcMetadata(),
+    ) raises -> GrpcBidiStream:
+        """Open a client-streaming RPC: the request stream stays OPEN so
+        the caller pumps request messages with ``send()`` then
+        half-closes with ``close_send()``, after which ``recv()`` drains
+        the (typically single) reply message and ``status()`` the final
+        status.
+
+        Implemented on the same OPEN-stream machinery as :meth:`call_bidi`
+        (a client-streaming RPC is a bidi RPC the server answers only
+        after the request half-closes)."""
+        return self.call_bidi(service_method, metadata)
+
+    def call_bidi(
+        self,
+        service_method: String,
+        metadata: GrpcMetadata = GrpcMetadata(),
+    ) raises -> GrpcBidiStream:
+        """Open a bidirectional-streaming RPC. The returned
+        :class:`GrpcBidiStream` keeps the request side OPEN: pump request
+        messages with ``send()``, half-close with ``close_send()``, and
+        drain replies with ``recv()`` (then ``status()``).
+
+        Args:
+            service_method: ``/package.Service/Method`` (leading ``/``
+                added if missing).
+            metadata: optional initial metadata (text entries only).
+        """
+        var path = self._normalize_path(service_method)
+        var u = Url.parse(self._base_url + path)
+
+        var conn = Http2ClientConnection()
+        var t = self._connect(u)
+        var preface = conn.drain()
+        if len(preface) > 0:
+            t.write_all(Span[UInt8, _](preface))
+        var sid = conn.next_stream_id()
+        conn.send_request_open(
+            sid,
+            "POST",
+            u.scheme,
+            _authority(u),
+            u.request_target(),
+            _grpc_request_headers(metadata),
+        )
+        var out = conn.drain()
+        if len(out) > 0:
+            t.write_all(Span[UInt8, _](out))
+        return GrpcBidiStream(t^, conn^, sid)
