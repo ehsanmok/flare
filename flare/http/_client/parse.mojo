@@ -14,6 +14,7 @@ from ..response import Response
 from ..headers import HeaderMap
 from ...tcp import TcpStream
 from ...tls import TlsStream
+from ...io.buf_reader import Readable
 from ...net import NetworkError
 
 
@@ -560,6 +561,27 @@ def _read_http_response_framed_tcp(
     mut stream: TcpStream,
     mut can_reuse: Bool,
 ) raises -> Response:
+    """Read one framed HTTP/1.1 response from a cleartext TCP stream.
+
+    Thin wrapper over :func:`_read_http_response_framed` (which works
+    over any ``Readable``); kept for the existing cleartext pool call
+    site and its name.
+    """
+    return _read_http_response_framed(stream, can_reuse)
+
+
+def _read_http_response_framed_tls(
+    mut stream: TlsStream,
+    mut can_reuse: Bool,
+) raises -> Response:
+    """Read one framed HTTP/1.1 response from a TLS stream, for HTTPS
+    keep-alive pooling (W5). See :func:`_read_http_response_framed`."""
+    return _read_http_response_framed(stream, can_reuse)
+
+
+def _read_http_response_framed[
+    R: Readable
+](mut stream: R, mut can_reuse: Bool,) raises -> Response:
     """Read one framed HTTP/1.1 response and return whether the
     connection is in a reusable state.
 
@@ -567,7 +589,8 @@ def _read_http_response_framed_tcp(
     end of the framed body (``Content-Length`` or
     ``Transfer-Encoding: chunked``) instead of reading until EOF, so
     the underlying socket can be returned to a connection pool for
-    keep-alive reuse.
+    keep-alive reuse. Generic over any ``Readable`` so the cleartext
+    (``TcpStream``) and TLS (``TlsStream``) pools share one parser.
 
     Returns:
         ``(response, can_reuse)``: ``can_reuse`` is ``True`` when no

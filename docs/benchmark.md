@@ -1690,6 +1690,14 @@ configuration:
   anti-amplification counter, and these fire only when a 1-RTT packet
   arrives from a *new* peer address (a migration event), never on the
   steady-state single-path request path.
+- W5 client transport reuse + request streaming is fully opt-in. HTTPS
+  keep-alive pooling only engages after `with_pool()`; with pooling off
+  the TLS h1 path is byte-identical to before (one `_addr == 0` compare,
+  then the prior full-handshake + read-to-EOF path). The shared generic
+  framed reader compiles to the same code the cleartext pool already
+  used. `send_chunked` is a separate explicit method (no change to
+  `send` / `get` / `post`); it holds one chunk in flight, so a multi-MB
+  upload stays bounded-memory rather than materializing the body.
 
 Functional parity is covered by the unchanged QUIC/H3 suites
 (`test-quic-loopback-integration`, `test-quic-post-initial-decrypt`,

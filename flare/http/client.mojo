@@ -46,6 +46,8 @@ from .redirect_policy import RedirectPolicy, RedirectAction, RedirectMode
 from .reliability import RetryPolicy, _backoff_sleep_ms
 from .encoding import decode_content
 from ._client.cookie_store import CookieStore
+from .body import ChunkSource
+from .cancel import Cancel
 from ..runtime._libc_time import libc_nanosleep_ms
 from ..tcp import TcpStream
 from ..tcp.stream import _connect_with_fallback
@@ -68,6 +70,7 @@ from ._client.parse import (
     _extract_body_and_trailers,
     _parse_http_response,
     _read_http_response_framed_tcp,
+    _read_http_response_framed_tls,
     _read_http_response_tcp,
     _read_http_response_tls,
 )
@@ -84,6 +87,7 @@ from ._client.alt_svc import (
     monotonic_now_s,
 )
 from ._client.quic_pool import QuicConnectionPool
+from ._client.tls_pool import TlsConnectionPool
 from ._client.h3_race import race_h3_h2
 from ..net.socket import RawSocket
 from ..net._libc import (
@@ -92,6 +96,24 @@ from ..net._libc import (
     INVALID_FD,
 )
 from std.ffi import c_int
+
+
+def _chunk_frame_prefix(n: Int) -> String:
+    """Return the chunked-transfer size line for a chunk of ``n`` bytes:
+    the lowercase hex length followed by CRLF (RFC 7230 sec 4.1). The
+    caller writes this, then the chunk bytes, then a trailing CRLF."""
+    if n <= 0:
+        return String("0\r\n")
+    var digits = String("0123456789abcdef")
+    var rev = List[UInt8]()
+    var v = n
+    while v > 0:
+        rev.append(digits.as_bytes()[v & 0xF])
+        v = v >> 4
+    var out = String("")
+    for i in range(len(rev) - 1, -1, -1):
+        out += String(unsafe_from_utf8=Span[UInt8, _](rev)[i : i + 1])
+    return out + "\r\n"
 
 
 def _is_idempotent(method: String) -> Bool:
@@ -229,6 +251,15 @@ struct HttpClient(Movable):
     established QUIC connection is expensive, so reuse is the right
     default), so consecutive h3 requests to one origin amortise the
     handshake. Freed in :meth:`__del__`."""
+    var _tls_pool: TlsConnectionPool
+    """Idle HTTPS (TLS HTTP/1.1) connection pool keyed on
+    ``scheme://host:port``, behind a pointer-backed interior-mutable
+    handle so the read-``self`` :meth:`_send_h2_or_h1_tls` can acquire /
+    release. ``TlsConnectionPool.disabled()`` (the default) keeps the
+    close-after-each-request behaviour; :meth:`with_pool` opts in
+    alongside the cleartext pool. Only the ``http/1.1`` ALPN result is
+    pooled (an ``h2`` connection is multiplexed on the h2 path). Freed
+    in :meth:`__del__`."""
     var _redirect_policy: RedirectPolicy
     """Redirect-following policy (RFC 9110 sec 15.4). Defaults to
     :meth:`RedirectPolicy.follow_all` with the constructor's
@@ -305,6 +336,7 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
         self._retry = RetryPolicy()
@@ -336,6 +368,7 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
         self._retry = RetryPolicy()
@@ -371,6 +404,7 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
         self._retry = RetryPolicy()
@@ -406,6 +440,7 @@ struct HttpClient(Movable):
         self._prefer_h3 = prefer_h3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
         self._retry = RetryPolicy()
@@ -434,6 +469,10 @@ struct HttpClient(Movable):
         except:
             pass
         try:
+            self._tls_pool.free()
+        except:
+            pass
+        try:
             self._cookies.free()
         except:
             pass
@@ -447,17 +486,19 @@ struct HttpClient(Movable):
         """Enable connection pooling on this client.
 
         Returns the client (move-in / move-out so the call chains
-        with the regular ``HttpClient(...)`` constructor). The
-        pool is keyed on ``(scheme, host, port)`` and only
-        cleartext ``http://`` requests reuse pooled fds today
-        (TLS pooling lands together with the resumption-aware
-        pool key in a follow-up).
+        with the regular ``HttpClient(...)`` constructor). Two pools
+        are enabled, both keyed on the origin: the cleartext HTTP/1.1
+        pool (``http://``, reuses idle fds) and the HTTPS HTTP/1.1 pool
+        (``https://``, reuses the whole established ``TlsStream`` so the
+        TLS handshake is skipped on keep-alive reuse). An ``h2``-
+        negotiated TLS connection is multiplexed on the h2 path and is
+        not pooled here.
 
         Args:
             max_idle_per_host: Per-origin idle cap. Default ``8``.
-            max_idle_total: Total idle cap across origins. Default
-                ``64``. ``0`` disables the total cap.
-            idle_timeout_ms: Max wallclock age for a pooled fd
+            max_idle_total: Total idle cap across origins (cleartext
+                pool). Default ``64``. ``0`` disables the total cap.
+            idle_timeout_ms: Max wallclock age for a pooled connection
                 before lazy eviction. Default ``90_000`` ms.
 
         Returns:
@@ -465,9 +506,9 @@ struct HttpClient(Movable):
 
         Example:
             ```mojo
-            with HttpClient(base_url="http://api.example.com")
+            with HttpClient(base_url="https://api.example.com")
                 .with_pool() as c:
-                # Two GETs reuse the same TCP connection on idle reuse.
+                # Two GETs reuse the same TLS connection on idle reuse.
                 _ = c.get("/users")
                 _ = c.get("/items")
             ```
@@ -481,13 +522,27 @@ struct HttpClient(Movable):
             max_idle_total=max_idle_total,
             idle_timeout_ms=idle_timeout_ms,
         )
+        try:
+            self._tls_pool.free()
+        except:
+            pass
+        self._tls_pool = TlsConnectionPool.new(
+            max_idle_per_host=max_idle_per_host,
+            idle_timeout_ms=idle_timeout_ms,
+        )
         return self^
 
     def idle_count(read self) -> Int:
-        """Return the total number of fds currently sitting idle in
-        the pool. Returns 0 when pooling is disabled.
+        """Return the total number of connections currently sitting idle
+        across both keep-alive pools (cleartext HTTP/1.1 fds + HTTPS
+        ``TlsStream`` connections). Returns 0 when pooling is disabled.
         """
-        return self._pool.total_idle()
+        return self._pool.total_idle() + self._tls_pool.idle_count()
+
+    def tls_idle_count(read self) -> Int:
+        """Return the number of idle HTTPS (TLS HTTP/1.1) connections in
+        the pool. Returns 0 when pooling is disabled."""
+        return self._tls_pool.idle_count()
 
     def quic_dials(read self) -> Int:
         """Number of fresh HTTP/3 (QUIC) connections this client has
@@ -789,7 +844,31 @@ struct HttpClient(Movable):
         wire was used. Used both as the direct h2/h1 path and as the
         h2 leg of the happy-eyeballs race. ``auth_header`` is the
         effective Authorization value for this hop (the h1 ``wire``
-        already carries it; this gates the h2 path)."""
+        already carries it; this gates the h2 path).
+
+        When :meth:`with_pool` enabled the HTTPS pool, an idle
+        ``http/1.1``-over-TLS connection is reused (skipping the TLS
+        handshake) and returned to the pool when the response permits
+        keep-alive; a stale pooled connection is dropped and the
+        request retried once on a fresh dial (RFC 7230 sec 6.3.1). An
+        ``h2`` connection is never pooled here."""
+        var pool_on = self._tls_pool.enabled()
+        var key = TlsConnectionPool.build_key(u.scheme, u.host, Int(u.port))
+
+        # 1. Reuse a pooled http/1.1-over-TLS connection if available.
+        #    The helper owns the moved-in stream so a stale connection
+        #    is closed there and signalled back as a miss (None).
+        if pool_on:
+            var pooled = self._tls_pool.acquire(key)
+            if pooled:
+                var reused = self._send_h1_tls_pooled_once(
+                    key, pooled.take(), wire, body
+                )
+                if reused:
+                    return reused.take()
+                # Stale pooled connection: dial fresh below.
+
+        # 2. Fresh dial with ALPN negotiation.
         var tls_cfg = self._config.copy()
         if len(tls_cfg.alpn) == 0:
             tls_cfg.alpn = List[String]()
@@ -810,11 +889,186 @@ struct HttpClient(Movable):
                 auth_header,
             )
             return resp_h2^
-        # HTTP/1.1 over TLS (existing wire).
+        # HTTP/1.1 over TLS.
         var wire_bytes = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wire_bytes))
         if len(body) > 0:
             stream.write_all(Span[UInt8, _](body))
+        if pool_on:
+            # Framed read so the connection can return to the pool.
+            var can_reuse2 = False
+            var resp_f = _read_http_response_framed_tls(stream, can_reuse2)
+            if can_reuse2:
+                self._tls_pool.release(key, stream^)
+            else:
+                stream.close()
+            return resp_f^
+        var resp = _read_http_response_tls(stream)
+        stream.close()
+        return resp^
+
+    def _send_h1_tls_pooled_once(
+        self,
+        key: String,
+        var st: TlsStream,
+        wire: String,
+        body: List[UInt8],
+    ) raises -> Optional[Response]:
+        """Drive one HTTP/1.1 request over a pooled ``TlsStream``.
+
+        Owns ``st``: on a clean keep-alive response the stream is
+        released back to the pool and the ``Response`` is returned; on a
+        stale connection (write/read failure -- the canonical idle-keep-
+        alive-closed signature) the stream is closed and ``None`` is
+        returned so the caller dials a fresh connection (RFC 7230
+        sec 6.3.1)."""
+        var io_failed = False
+        try:
+            var wb = wire.as_bytes()
+            st.write_all(Span[UInt8, _](wb))
+            if len(body) > 0:
+                st.write_all(Span[UInt8, _](body))
+        except:
+            io_failed = True
+        if not io_failed:
+            var can_reuse = False
+            var parsed = True
+            var resp = Response(0, "", List[UInt8]())
+            try:
+                resp = _read_http_response_framed_tls(st, can_reuse)
+            except:
+                parsed = False
+            if parsed:
+                if can_reuse:
+                    self._tls_pool.release(key, st^)
+                else:
+                    st.close()
+                return Optional(resp^)
+        # Stale connection: close and signal a pool miss.
+        st.close()
+        return None
+
+    # ── Streaming request body (W5) ───────────────────────────────────────────
+
+    def send_chunked[
+        B: ChunkSource
+    ](
+        self,
+        method: String,
+        url: String,
+        mut source: B,
+        content_type: String = "application/octet-stream",
+    ) raises -> Response:
+        """Send a request whose body is streamed from a ``ChunkSource``
+        using ``Transfer-Encoding: chunked``, without materializing the
+        full body in memory.
+
+        For large uploads (multi-MB / multi-GB) this keeps client memory
+        bounded to one chunk in flight: the source's ``next(cancel)`` is
+        pulled, framed as a chunked-transfer chunk, and written straight
+        to the socket. The body is never assembled into a single buffer.
+
+        This is an explicit bounded-memory path over HTTP/1.1 (cleartext
+        or TLS, ALPN forced to ``http/1.1``); it deliberately does not
+        go through connection pooling, redirects, retries, h2, or h3
+        (all of which buffer or re-send the body). Use :meth:`post` /
+        :meth:`send` for those.
+
+        Args:
+            method: HTTP method (e.g. ``"POST"`` / ``"PUT"``).
+            url: Target URL (absolute or relative to ``base_url``).
+            source: A ``ChunkSource`` yielding body chunks; pulled to
+                exhaustion (``next`` returns ``None``).
+            content_type: ``Content-Type`` header value. Defaults to
+                ``application/octet-stream``.
+
+        Returns:
+            The server's ``Response``.
+
+        Raises:
+            NetworkError: On connection or I/O failure.
+        """
+        var u = Url.parse(self._resolve_url(url))
+
+        var host_header = u.host
+        if (u.scheme == "http" and u.port != 80) or (
+            u.scheme == "https" and u.port != 443
+        ):
+            host_header = host_header + ":" + String(Int(u.port))
+
+        var wire = method + " " + u.request_target() + " HTTP/1.1\r\n"
+        wire += "Host: " + host_header + "\r\n"
+        wire += "User-Agent: " + self._user_agent + "\r\n"
+        wire += "Accept: */*\r\n"
+        wire += "Content-Type: " + content_type + "\r\n"
+        wire += "Transfer-Encoding: chunked\r\n"
+        # Streaming uploads do not pool the connection.
+        wire += "Connection: close\r\n"
+        wire += "\r\n"
+
+        if u.is_tls():
+            return self._send_chunked_tls(u, wire, source)
+        return self._send_chunked_tcp(u, wire, source)
+
+    def _send_chunked_tcp[
+        B: ChunkSource
+    ](self, u: Url, wire: String, mut source: B) raises -> Response:
+        var stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        var wb = wire.as_bytes()
+        stream.write_all(Span[UInt8, _](wb))
+        # One chunk in flight at a time -- the body is never materialized.
+        var cancel = Cancel.never()
+        while True:
+            var chunk_opt = source.next(cancel)
+            if not chunk_opt:
+                break
+            var chunk = chunk_opt.take()
+            if len(chunk) == 0:
+                continue
+            var frame = _chunk_frame_prefix(len(chunk))
+            var fb = frame.as_bytes()
+            stream.write_all(Span[UInt8, _](fb))
+            stream.write_all(Span[UInt8, _](chunk))
+            var crlf = String("\r\n")
+            var cb = crlf.as_bytes()
+            stream.write_all(Span[UInt8, _](cb))
+        var last = String("0\r\n\r\n")
+        var lb = last.as_bytes()
+        stream.write_all(Span[UInt8, _](lb))
+        var resp = _read_http_response_tcp(stream)
+        stream.close()
+        return resp^
+
+    def _send_chunked_tls[
+        B: ChunkSource
+    ](self, u: Url, wire: String, mut source: B) raises -> Response:
+        # Force http/1.1 -- a chunked upload is an h1 construct.
+        var tls_cfg = self._config.copy()
+        tls_cfg.alpn = List[String]()
+        tls_cfg.alpn.append("http/1.1")
+        var stream = TlsStream.connect_timeout(
+            u.host, u.port, tls_cfg^, self._timeout_ms
+        )
+        var wb = wire.as_bytes()
+        stream.write_all(Span[UInt8, _](wb))
+        var cancel = Cancel.never()
+        while True:
+            var chunk_opt = source.next(cancel)
+            if not chunk_opt:
+                break
+            var chunk = chunk_opt.take()
+            if len(chunk) == 0:
+                continue
+            var frame = _chunk_frame_prefix(len(chunk))
+            var fb = frame.as_bytes()
+            stream.write_all(Span[UInt8, _](fb))
+            stream.write_all(Span[UInt8, _](chunk))
+            var crlf = String("\r\n")
+            var cb = crlf.as_bytes()
+            stream.write_all(Span[UInt8, _](cb))
+        var last = String("0\r\n\r\n")
+        var lb = last.as_bytes()
+        stream.write_all(Span[UInt8, _](lb))
         var resp = _read_http_response_tls(stream)
         stream.close()
         return resp^
@@ -1304,6 +1558,15 @@ struct HttpClient(Movable):
             and not self._prefer_h2c
             and not self._h2c_upgrade
         )
+        # The HTTPS pool keeps the http/1.1-over-TLS connection alive;
+        # the wire below must then advertise keep-alive (an h2 dial
+        # ignores the h1 wire entirely, so this is harmless there).
+        var tls_pool_enabled = (
+            self._tls_pool._addr != 0
+            and u.is_tls()
+            and not self._prefer_h2c
+            and not self._h2c_upgrade
+        )
 
         # ── Build wire request ─────────────────────────────────────────────
         var wire = method + " " + u.request_target() + " HTTP/1.1\r\n"
@@ -1315,7 +1578,7 @@ struct HttpClient(Movable):
             host_header = host_header + ":" + String(Int(u.port))
         wire += "Host: " + host_header + "\r\n"
         wire += "User-Agent: " + self._user_agent + "\r\n"
-        if pool_enabled:
+        if pool_enabled or tls_pool_enabled:
             wire += "Connection: keep-alive\r\n"
         else:
             wire += "Connection: close\r\n"

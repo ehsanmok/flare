@@ -91,6 +91,14 @@ ASAN_TESTS=(
   # rebuild, the gzip decode buffer, and the cookie-store teardown in
   # the moved HttpClient.
   "tests/http/test_client_ux.mojo"
+  # W5 -- HTTPS (TLS h1) client pool driven with real TlsStreams. ASan
+  # validates the Pool[TlsStream] heap cells (move in/out + close on
+  # over-cap / disabled) and the per-origin deque + timestamp maps.
+  "tests/http/test_tls_client_pool.mojo"
+  # W5 -- streaming request body (chunked TE) round trip. ASan validates
+  # the per-chunk frame buffers and the de-chunk decode on the forked
+  # raw-TCP decoder server.
+  "tests/http/test_client_stream_upload.mojo"
   # W3 -- unary gRPC client over the h2c path against a forked greeter.
   # ASan validates the LPM encode/decode buffers and the response
   # header/trailer merge on the moved HttpClient.

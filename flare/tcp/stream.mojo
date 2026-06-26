@@ -39,6 +39,7 @@ from ..net import (
     Timeout,
     DnsError,
 )
+from ..io.buf_reader import Readable
 from ..net.socket import (
     RawSocket,
     AF_INET,
@@ -88,7 +89,7 @@ def _do_flare_connect_timeout(
     return fn_ct(fd, sa_addr, sa_len, timeout_ms)
 
 
-struct TcpStream(Movable):
+struct TcpStream(Movable, Readable):
     """A connected TCP socket.
 
     Owns a ``RawSocket`` and exposes blocking read/write operations.
