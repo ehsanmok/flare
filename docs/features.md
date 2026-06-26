@@ -336,9 +336,10 @@ service ships as a mountable handler. The **client** ships unary
 (`GrpcClient`, including base64 binary `-bin` metadata) plus
 server-streaming / client-streaming / bidirectional
 (`call_server_streaming` / `call_client_streaming` / `call_bidi` ->
-`GrpcServerStream` / `GrpcBidiStream`). Still deferred: server-side
-streaming adapter, a full `.proto` file compiler, server reflection,
-and `Health/Watch`.
+`GrpcServerStream` / `GrpcBidiStream`). A **server-streaming server**
+ships as `GrpcStreamingService` (one request, N response LPM frames in
+one DATA stream; buffered, not incrementally flushed). Still deferred:
+a full `.proto` file compiler, server reflection, and `Health/Watch`.
 
 | Surface | Where |
 |---|---|

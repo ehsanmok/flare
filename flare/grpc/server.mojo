@@ -53,7 +53,7 @@ from std.collections import List, Optional
 from std.memory import Span
 from std.time import perf_counter_ns
 
-from flare.crypto.base64 import base64_encode
+from flare.crypto.base64 import base64_decode, base64_encode
 from flare.http.encoding import (
     compress_gzip,
     decompress_deflate,
@@ -678,8 +678,7 @@ def _grpc_headers_from_request(req: Request) raises -> GrpcRequestHeaders:
     for i in range(len(req.headers._keys)):
         var k = ascii_lower(req.headers._keys[i])
         # Skip pseudo-headers, framing fields, and reserved grpc-* keys
-        # (those are framework-managed). ``-bin`` keys carry base64 on
-        # the wire; decoding them is a future-phase concern.
+        # (those are framework-managed).
         if (
             k == "content-type"
             or k == "te"
@@ -688,10 +687,15 @@ def _grpc_headers_from_request(req: Request) raises -> GrpcRequestHeaders:
             or k.startswith(":")
         ):
             continue
-        # ``append_text`` rejects reserved/``-bin`` keys by raising; we
-        # swallow that so a stray binary header just isn't forwarded.
+        # ``-bin`` keys carry base64 on the wire; decode to raw bytes and
+        # forward as binary metadata. Text keys forward verbatim. Either
+        # branch swallows a malformed value (bad base64, reserved key) so
+        # a stray header just isn't surfaced to the handler.
         try:
-            meta.append_text(k, req.headers._values[i])
+            if k.endswith("-bin"):
+                meta.append(k, base64_decode(req.headers._values[i]))
+            else:
+                meta.append_text(k, req.headers._values[i])
         except:
             pass
     return GrpcRequestHeaders(
