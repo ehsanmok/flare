@@ -64,10 +64,6 @@ struct _H2Transport(Movable):
         self._tcp_addr = tcp_addr
         self._tls_addr = tls_addr
 
-    def __moveinit__(out self, deinit existing: Self):
-        self._tcp_addr = existing._tcp_addr
-        self._tls_addr = existing._tls_addr
-
     def __del__(deinit self):
         Pool[TcpStream].free(self._tcp_addr)
         Pool[TlsStream].free(self._tls_addr)
@@ -157,13 +153,6 @@ struct GrpcServerStream(Movable):
         self._sid = sid
         self._lpm = List[UInt8]()
         self._ended = False
-
-    def __moveinit__(out self, deinit existing: Self):
-        self._t = existing._t^
-        self._conn = existing._conn^
-        self._sid = existing._sid
-        self._lpm = existing._lpm^
-        self._ended = existing._ended
 
     def _try_decode(mut self) raises -> Optional[List[UInt8]]:
         """Decode one LPM frame from :attr:`_lpm` if a full one is
@@ -278,13 +267,6 @@ struct GrpcBidiStream(Movable):
         self._sid = sid
         self._lpm = List[UInt8]()
         self._send_closed = False
-
-    def __moveinit__(out self, deinit existing: Self):
-        self._t = existing._t^
-        self._conn = existing._conn^
-        self._sid = existing._sid
-        self._lpm = existing._lpm^
-        self._send_closed = existing._send_closed
 
     def send(mut self, message: Span[UInt8, _]) raises:
         """Send one request message (LPM-framed) on the open stream."""
