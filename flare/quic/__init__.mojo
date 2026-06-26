@@ -178,8 +178,10 @@ from .transport_params import (
     TP_ID_PREFERRED_ADDRESS,
     TP_ID_RETRY_SCID,
     TP_ID_STATELESS_RESET_TOKEN,
+    PeerSendLimits,
     TransportParameters,
     decode_transport_parameters,
+    derive_peer_send_limits,
     empty_transport_parameters,
     encode_transport_parameters,
 )

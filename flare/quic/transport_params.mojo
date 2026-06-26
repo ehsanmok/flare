@@ -165,6 +165,74 @@ def empty_transport_parameters() -> TransportParameters:
     )
 
 
+# ── Peer send-limit view ───────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct PeerSendLimits(Copyable, Movable):
+    """The subset of a peer's transport parameters that constrains what
+    *we* may send, with RFC 9000 §18.2 defaults already applied.
+
+    A client decodes the server's ``quic_transport_parameters`` after the
+    handshake (:meth:`flare.tls.rustls_quic.RustlsQuicSession.
+    peer_transport_params`) and derives this view via
+    :func:`derive_peer_send_limits`. The QUIC driver then clamps its
+    egress datagram size to :attr:`max_udp_payload_size` and refuses
+    stream / connection sends that would exceed
+    :attr:`max_stream_data_bidi_remote` / :attr:`max_data`.
+
+    Flow-control directions are from the *sender's* perspective: for a
+    bidi stream the client opens, the server's receive limit is its
+    ``initial_max_stream_data_bidi_remote`` (``remote`` = peer-initiated
+    from the server's point of view). The flow-control limits default to
+    ``0`` when absent (RFC 9000 §18.2 -- no data may be sent until a
+    MAX_DATA / MAX_STREAM_DATA frame raises them)."""
+
+    var max_data: UInt64
+    var max_stream_data_bidi_remote: UInt64
+    var max_stream_data_uni: UInt64
+    var max_udp_payload_size: UInt64
+    var max_datagram_frame_size: UInt64
+    var max_streams_bidi: UInt64
+    var max_streams_uni: UInt64
+
+
+def _opt_or(value: Optional[UInt64], default: UInt64) -> UInt64:
+    """Return ``value`` if populated, else the RFC default."""
+    if Bool(value):
+        return value.value()
+    return default
+
+
+def derive_peer_send_limits(params: TransportParameters) -> PeerSendLimits:
+    """Project a decoded :class:`TransportParameters` onto the
+    send-constraining :class:`PeerSendLimits` view, applying the
+    RFC 9000 §18.2 defaults for any absent parameter.
+
+    The flow-control parameters default to ``0`` (absence means "no
+    initial allowance"); ``max_udp_payload_size`` defaults to 65527;
+    ``max_datagram_frame_size`` defaults to ``0`` (peer forbids
+    DATAGRAM frames). Pure / sans-I/O so it is unit-testable against
+    :func:`encode_transport_parameters` round-trips."""
+    return PeerSendLimits(
+        max_data=_opt_or(params.initial_max_data, UInt64(0)),
+        max_stream_data_bidi_remote=_opt_or(
+            params.initial_max_stream_data_bidi_remote, UInt64(0)
+        ),
+        max_stream_data_uni=_opt_or(
+            params.initial_max_stream_data_uni, UInt64(0)
+        ),
+        max_udp_payload_size=_opt_or(
+            params.max_udp_payload_size, DEFAULT_MAX_UDP_PAYLOAD_SIZE
+        ),
+        max_datagram_frame_size=_opt_or(
+            params.max_datagram_frame_size, UInt64(0)
+        ),
+        max_streams_bidi=_opt_or(params.initial_max_streams_bidi, UInt64(0)),
+        max_streams_uni=_opt_or(params.initial_max_streams_uni, UInt64(0)),
+    )
+
+
 # ── Encoder helpers ────────────────────────────────────────────────────────
 
 

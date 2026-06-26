@@ -51,9 +51,13 @@ HTTP/3 client needs:
   at the path MTU. A request body larger than one packet is
   rejected rather than fragmented across packets. Upgrade path:
   the same coalescing drain the server uses.
-- ponytail: the server's advertised transport parameters are not
-  decoded (rustls seals the peer extension); the client assumes
-  the generous flare-server defaults for its own send limits.
+- The server's advertised transport parameters are decoded once the
+  handshake completes (:meth:`QuicClientConnection._apply_peer_transport_
+  params`): the client clamps its egress datagram size to the peer's
+  ``max_udp_payload_size`` and gates STREAM sends on the peer's
+  per-stream / connection flow-control limits. ponytail: the gate uses
+  the *initial* limits only -- it does not yet raise the ceiling from
+  inbound MAX_DATA / MAX_STREAM_DATA frames.
 
 References:
 - RFC 9000 §7 "Cryptographic and Transport Handshake".
@@ -117,6 +121,10 @@ from .state import (
     new_connection,
 )
 from .transport_params import (
+    DEFAULT_MAX_UDP_PAYLOAD_SIZE,
+    PeerSendLimits,
+    decode_transport_parameters,
+    derive_peer_send_limits,
     empty_transport_parameters,
     encode_transport_parameters,
 )
@@ -332,6 +340,17 @@ struct QuicClientConnection(Movable):
     :meth:`send_stream_early`), retained so :meth:`finish_early_data`
     can replay them at 1-RTT if the server rejects early data. Empty on
     a non-0-RTT connection."""
+    var _peer_limits: PeerSendLimits
+    """The server's send-constraining transport parameters, decoded once
+    the handshake completes (see :meth:`_apply_peer_transport_params`).
+    Until then the generous local defaults stand."""
+    var _peer_limits_known: Bool
+    """Whether :attr:`_peer_limits` has been populated from the peer's
+    decoded ``quic_transport_parameters`` (one-shot, post-handshake)."""
+    var _conn_send_total: UInt64
+    """Cumulative application STREAM bytes sent on this connection, gated
+    against the peer's connection-level ``initial_max_data`` once known
+    (RFC 9000 §4.1 connection flow control)."""
 
     def __init__(
         out self,
@@ -382,6 +401,17 @@ struct QuicClientConnection(Movable):
         self.enable_0rtt = False
         self._early_keys_ready = False
         self._early_flight = List[_EarlySend]()
+        self._peer_limits = PeerSendLimits(
+            max_data=UInt64(0),
+            max_stream_data_bidi_remote=UInt64(0),
+            max_stream_data_uni=UInt64(0),
+            max_udp_payload_size=DEFAULT_MAX_UDP_PAYLOAD_SIZE,
+            max_datagram_frame_size=UInt64(0),
+            max_streams_bidi=UInt64(0),
+            max_streams_uni=UInt64(0),
+        )
+        self._peer_limits_known = False
+        self._conn_send_total = UInt64(0)
 
     @staticmethod
     def start(
@@ -545,7 +575,40 @@ struct QuicClientConnection(Movable):
         self._check_pto()
         if self.session.is_handshake_complete() and self.have_1rtt_keys:
             self.established = True
+            if not self._peer_limits_known:
+                self._apply_peer_transport_params()
         return events^
+
+    def _apply_peer_transport_params(mut self):
+        """Decode the server's ``quic_transport_parameters`` (surfaced by
+        rustls after the handshake flight) and apply its send-side
+        limits, once.
+
+        Clamps :attr:`max_udp_payload_size` down to the peer's advertised
+        receive maximum so we never emit a datagram the server would drop
+        (RFC 9000 §18.2 -- the decoder already enforces the 1200-byte
+        floor). The flow-control limits land in :attr:`_peer_limits` for
+        :meth:`send_stream` to honour. Best-effort: a missing / malformed
+        extension (or the NULL-session test path) leaves the generous
+        local defaults in place."""
+        var raw: List[UInt8]
+        try:
+            raw = self.session.peer_transport_params()
+        except:
+            return
+        if len(raw) == 0:
+            return
+        try:
+            var tp = decode_transport_parameters(Span[UInt8, _](raw))
+            self._peer_limits = derive_peer_send_limits(tp)
+            self._peer_limits_known = True
+            var peer_mtu = Int(self._peer_limits.max_udp_payload_size)
+            if peer_mtu < self.max_udp_payload_size:
+                self.max_udp_payload_size = peer_mtu
+        except:
+            # Malformed peer params: keep defaults rather than fail the
+            # established connection (the handshake already succeeded).
+            pass
 
     def _retransmit_lost(mut self) raises:
         """Retransmit frames from packets the ACK-based loss detector
@@ -1040,10 +1103,18 @@ struct QuicClientConnection(Movable):
         for i in range(len(len_var)):
             prefix.append(len_var[i])
         var pn = self.tx_1rtt_pn
+        # 0-RTT STREAM frames are ack-eliciting; snapshot them before the
+        # protect call consumes ``plaintext`` so a lost-but-not-rejected
+        # 0-RTT packet retransmits. 0-RTT and 1-RTT share one packet-
+        # number space (RFC 9000 §12.3), so the retransmit rides a fresh
+        # 1-RTT packet via the normal loss path -- exactly the upgrade
+        # path the old ponytail named.
+        var frames_copy = plaintext.copy()
         var dg = self._protect_via_rustls(
             QuicEncryptionLevel.EARLY_DATA, prefix^, plaintext^, pn, pn_length
         )
         self.tx_1rtt_pn = pn + UInt64(1)
+        self._loss.on_sent(pn, frames_copy^, _monotonic_ms())
         return dg^
 
     def _build_1rtt(
@@ -1179,6 +1250,7 @@ struct QuicClientConnection(Movable):
         if stream_id in self.send_offsets:
             off = self.send_offsets[stream_id]
         var total = len(data)
+        self._check_send_limits(stream_id, off, UInt64(total))
         var sent = 0
         while True:
             var take = total - sent
@@ -1204,6 +1276,45 @@ struct QuicClientConnection(Movable):
             if is_last:
                 break
         self.send_offsets[stream_id] = off
+        self._conn_send_total += UInt64(total)
+
+    def _check_send_limits(
+        mut self, stream_id: UInt64, off: UInt64, length: UInt64
+    ) raises:
+        """Enforce the peer's flow-control limits before a STREAM send
+        (RFC 9000 §4.1). A no-op until the peer's transport parameters
+        are decoded; once known, a send that would push the stream past
+        the peer's per-stream limit or the connection past its
+        ``initial_max_data`` raises rather than emitting bytes the server
+        is entitled to drop as a FLOW_CONTROL_ERROR.
+
+        ponytail: this is a static initial-limits check -- it does not
+        track inbound MAX_DATA / MAX_STREAM_DATA frames that raise the
+        ceiling mid-connection. Ceiling: a long-lived connection that
+        legitimately exceeds the initial allowance is rejected locally.
+        Upgrade path: fold MAX_DATA / MAX_STREAM_DATA handling in
+        ``poll`` into a running credit and gate on that."""
+        if not self._peer_limits_known:
+            return
+        var stream_limit: UInt64
+        if stream_id % UInt64(4) == UInt64(2):
+            stream_limit = self._peer_limits.max_stream_data_uni
+        else:
+            stream_limit = self._peer_limits.max_stream_data_bidi_remote
+        if off + length > stream_limit:
+            raise Error(
+                "quic client: stream "
+                + String(stream_id)
+                + " send exceeds peer initial_max_stream_data ("
+                + String(stream_limit)
+                + ")"
+            )
+        if self._conn_send_total + length > self._peer_limits.max_data:
+            raise Error(
+                "quic client: connection send exceeds peer initial_max_data ("
+                + String(self._peer_limits.max_data)
+                + ")"
+            )
 
     def send_stream_early(
         mut self, stream_id: UInt64, data: List[UInt8], fin: Bool
@@ -1221,11 +1332,18 @@ struct QuicClientConnection(Movable):
 
         The full send is recorded in :attr:`_early_flight` so
         :meth:`finish_early_data` can replay it at 1-RTT if the server
-        rejects early data. ponytail: 0-RTT packets are not registered
-        with the loss-recovery tracker, so a lost-but-accepted 0-RTT
-        packet is not retransmitted (fine on the lossless loopback the
-        client targets; the upgrade path is registering the shared-pn
-        send so :meth:`_check_pto` re-sends it as 1-RTT).
+        rejects early data. The emitted 0-RTT packets are registered with
+        the loss-recovery tracker (see :meth:`_build_0rtt`), so a lost
+        0-RTT packet is retransmitted as 1-RTT once keys are up (the
+        shared packet-number space makes this transparent).
+
+        ponytail: on the *reject* path the registered 0-RTT packets are
+        never acked (the server discarded them), so the PTO eventually
+        re-sends their frames in addition to :meth:`finish_early_data`'s
+        explicit 1-RTT replay. Both carry identical stream offsets, so
+        the receiver dedupes them -- the only cost is a few redundant
+        packets on rejection. Upgrade path: a drop-by-pn on the loss
+        tracker invoked from the reject branch.
         """
         if not self._early_keys_ready:
             raise Error("quic client: send_stream_early before early keys")

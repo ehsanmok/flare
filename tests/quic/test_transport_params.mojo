@@ -13,6 +13,7 @@ from std.memory import Span
 from std.collections import Optional
 
 from flare.quic import (
+    DEFAULT_MAX_UDP_PAYLOAD_SIZE,
     TP_ID_ACK_DELAY_EXPONENT,
     TP_ID_ACTIVE_CONNECTION_ID_LIMIT,
     TP_ID_DISABLE_ACTIVE_MIGRATION,
@@ -21,8 +22,10 @@ from flare.quic import (
     TP_ID_MAX_IDLE_TIMEOUT,
     TP_ID_ORIGINAL_DCID,
     TP_ID_STATELESS_RESET_TOKEN,
+    PeerSendLimits,
     TransportParameters,
     decode_transport_parameters,
+    derive_peer_send_limits,
     empty_transport_parameters,
     encode_transport_parameters,
 )
@@ -218,6 +221,41 @@ def test_max_datagram_frame_size_roundtrip() raises:
     assert_false(Bool(empty.max_datagram_frame_size))
 
 
+def test_derive_peer_send_limits_defaults() raises:
+    # Absent flow-control params -> 0 allowance; max_udp_payload defaults
+    # to 65527; datagrams disabled.
+    var limits = derive_peer_send_limits(empty_transport_parameters())
+    assert_equal(limits.max_data, UInt64(0))
+    assert_equal(limits.max_stream_data_bidi_remote, UInt64(0))
+    assert_equal(limits.max_stream_data_uni, UInt64(0))
+    assert_equal(limits.max_udp_payload_size, DEFAULT_MAX_UDP_PAYLOAD_SIZE)
+    assert_equal(limits.max_datagram_frame_size, UInt64(0))
+
+
+def test_derive_peer_send_limits_set() raises:
+    # A populated set round-trips through encode/decode and projects onto
+    # the send-limit view with the explicit values.
+    var p = empty_transport_parameters()
+    p.initial_max_data = Optional[UInt64](UInt64(1 << 20))
+    p.initial_max_stream_data_bidi_remote = Optional[UInt64](UInt64(65536))
+    p.initial_max_stream_data_uni = Optional[UInt64](UInt64(4096))
+    p.max_udp_payload_size = Optional[UInt64](UInt64(1350))
+    p.max_datagram_frame_size = Optional[UInt64](UInt64(1200))
+    p.initial_max_streams_bidi = Optional[UInt64](UInt64(100))
+    p.initial_max_streams_uni = Optional[UInt64](UInt64(3))
+    var decoded = decode_transport_parameters(
+        Span[UInt8, _](encode_transport_parameters(p))
+    )
+    var limits = derive_peer_send_limits(decoded)
+    assert_equal(limits.max_data, UInt64(1 << 20))
+    assert_equal(limits.max_stream_data_bidi_remote, UInt64(65536))
+    assert_equal(limits.max_stream_data_uni, UInt64(4096))
+    assert_equal(limits.max_udp_payload_size, UInt64(1350))
+    assert_equal(limits.max_datagram_frame_size, UInt64(1200))
+    assert_equal(limits.max_streams_bidi, UInt64(100))
+    assert_equal(limits.max_streams_uni, UInt64(3))
+
+
 def main() raises:
     test_round_trip_full_set()
     test_max_datagram_frame_size_roundtrip()
@@ -230,4 +268,6 @@ def main() raises:
     test_duplicate_id_rejected()
     test_unknown_id_silently_dropped()
     test_truncated_value_rejected()
-    print("test_quic_transport_params: 11 passed")
+    test_derive_peer_send_limits_defaults()
+    test_derive_peer_send_limits_set()
+    print("test_quic_transport_params: 13 passed")
