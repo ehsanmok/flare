@@ -15,8 +15,15 @@ Unknown paths return **404 Not Found**; known paths called with the
 wrong method return **405 Method Not Allowed** with a synthesised
 ``Allow:`` header listing the supported methods.
 
-Sub-router mounting (``mount(prefix, sub)``) is scheduled for once the ownership model for nested routers is settled; the current
-Router is a flat map from ``(method, path)`` to handler.
+Sub-router mounting (``mount(prefix, sub)``) attaches a whole nested
+``Router`` under a literal path prefix (e.g. ``/api/v1``). The mounted
+router is owned by value behind the same ``ArcPointer`` refcount the
+struct-handler registry uses, so Router copies (one per worker) share
+the mounted subtree without double-freeing it. A mounted prefix owns
+its entire subtree: direct routes registered on the parent take
+priority, and any unmatched request whose path starts with the prefix
+is delegated (with the prefix stripped) to the sub-router, which runs
+its own method dispatch and 404/405 synthesis.
 
 Example:
 
@@ -166,6 +173,24 @@ struct _Route(Copyable, Movable):
         self.method = method
         self.segs = segs^
         self.handler_kind = handler_kind
+        self.handler_idx = handler_idx
+
+
+struct _Mount(Copyable, Movable):
+    """A mounted sub-router: a literal path prefix plus an index into
+    the shared struct-handler registry where the boxed
+    ``_MountedRouter`` wrapper lives.
+
+    ``segs`` are literal-only (mount prefixes are static); a request
+    whose leading path segments equal ``segs`` is delegated to the
+    wrapper, which strips the prefix before calling the sub-router.
+    """
+
+    var segs: List[_Segment]
+    var handler_idx: Int
+
+    def __init__(out self, var segs: List[_Segment], handler_idx: Int):
+        self.segs = segs^
         self.handler_idx = handler_idx
 
 
@@ -319,6 +344,11 @@ struct Router(Copyable, Defaultable, Handler, Movable):
     """Per-Router routing table; deep-copied on each Router clone."""
     var _handlers: List[FnHandler]
     """Per-Router function-handler list; deep-copied on each clone."""
+    var _mounts: List[_Mount]
+    """Per-Router mounted-subtree table; deep-copied on each clone.
+    Each entry indexes the shared registry where the boxed
+    ``_MountedRouter`` wrapper lives, so mounted sub-routers are
+    shared (and freed once) the same way struct handlers are."""
     var _struct_registry: ArcPointer[_StructHandlerRegistry]
     """Shared registry of boxed Handler-struct addresses + thunks.
 
@@ -333,6 +363,7 @@ struct Router(Copyable, Defaultable, Handler, Movable):
         """Create an empty router (no routes)."""
         self._routes = List[_Route]()
         self._handlers = List[FnHandler]()
+        self._mounts = List[_Mount]()
         self._struct_registry = ArcPointer[_StructHandlerRegistry](
             _StructHandlerRegistry()
         )
@@ -495,6 +526,44 @@ struct Router(Copyable, Defaultable, Handler, Movable):
             )
         )
 
+    # ── Sub-router mounting ─────────────────────────────────────────────────
+
+    def mount(mut self, prefix: String, var sub: Router) raises:
+        """Mount ``sub`` under the literal path ``prefix``.
+
+        Every request whose path starts with ``prefix`` (and which no
+        directly-registered route on this Router already handled) is
+        delegated to ``sub`` with ``prefix`` stripped, so ``sub`` sees
+        paths relative to its mount point. ``sub`` performs its own
+        method dispatch and 404/405 synthesis.
+
+        The sub-router is boxed into the shared struct-handler registry
+        (heap-allocated, monomorphised destroy thunk) so it is owned by
+        value and freed exactly once on the last Router drop -- the same
+        ownership model as struct handlers.
+
+        Args:
+            prefix: A literal path prefix, e.g. ``"/api/v1"``. Parameter
+                    (``:id``) and wildcard (``*``) segments are rejected.
+            sub:    The sub-router to mount; ownership transfers in.
+        """
+        var psegs = _compile_segments(prefix)
+        for i in range(len(psegs)):
+            if psegs[i].kind != 0:
+                raise Error(
+                    "mount prefix must be literal segments only (no ':param'"
+                    " or '*')"
+                )
+        if len(psegs) == 0:
+            raise Error("mount prefix must have at least one segment")
+        var wrapper = _MountedRouter(sub^, len(psegs))
+        var addr = Pool[_MountedRouter].alloc_move(wrapper^)
+        ref reg = self._struct_registry[]
+        reg.addrs.append(addr)
+        reg.serve_thunks.append(_struct_serve_thunk[_MountedRouter])
+        reg.destroy_thunks.append(_struct_destroy_thunk[_MountedRouter])
+        self._mounts.append(_Mount(psegs^, len(reg.addrs) - 1))
+
     # ── Handler impl ─────────────────────────────────────────────────────────
 
     def serve(self, req: Request) raises -> Response:
@@ -554,9 +623,78 @@ struct Router(Copyable, Defaultable, Handler, Movable):
                 var thunk = reg.serve_thunks[sh_idx]
                 return thunk(addr, child^)
 
+        # No direct route handled the request. A mounted sub-router
+        # owns its whole subtree, so delegate to the first mount whose
+        # literal prefix the path starts with. The wrapper strips the
+        # prefix and the sub-router runs its own dispatch (including its
+        # own 404/405), which is why this runs even when ``allowed`` was
+        # populated by an unrelated direct route on the parent.
+        for i in range(len(self._mounts)):
+            if _prefix_match(segs_in, self._mounts[i].segs):
+                var sh_idx = self._mounts[i].handler_idx
+                ref reg = self._struct_registry[]
+                var addr = reg.addrs[sh_idx]
+                var thunk = reg.serve_thunks[sh_idx]
+                var child = Request(
+                    method=req.method,
+                    url=req.url,
+                    body=req.body.copy(),
+                    version=req.version,
+                )
+                child.headers = req.headers.copy()
+                if req.has_params():
+                    for kv in req._params.value()[].items():
+                        child.params_mut()[kv.key] = kv.value
+                return thunk(addr, child^)
+
         if len(allowed) > 0:
             return _method_not_allowed(allowed)
         return not_found(req.url)
+
+
+# ── Mounted sub-router wrapper ───────────────────────────────────────────────
+
+
+struct _MountedRouter(Copyable, Handler, Movable):
+    """Boxed wrapper that strips a mount prefix and forwards to a
+    nested ``Router``.
+
+    Stored in the parent Router's struct-handler registry; its
+    ``serve`` rebuilds the request path with the first
+    ``prefix_segs`` segments removed (preserving the query string and
+    any captured params) before delegating, so the sub-router matches
+    against paths relative to its mount point.
+    """
+
+    var sub: Router
+    var prefix_segs: Int
+
+    def __init__(out self, var sub: Router, prefix_segs: Int):
+        self.sub = sub^
+        self.prefix_segs = prefix_segs
+
+    def serve(self, req: Request) raises -> Response:
+        var segs = _split_path(_path_only(req.url))
+        var rebuilt = String("/")
+        for i in range(self.prefix_segs, len(segs)):
+            if i > self.prefix_segs:
+                rebuilt += "/"
+            rebuilt += segs[i]
+        var q = _query_of(req.url)
+        if q.byte_length() > 0:
+            rebuilt += "?"
+            rebuilt += q
+        var child = Request(
+            method=req.method,
+            url=rebuilt,
+            body=req.body.copy(),
+            version=req.version,
+        )
+        child.headers = req.headers.copy()
+        if req.has_params():
+            for kv in req._params.value()[].items():
+                child.params_mut()[kv.key] = kv.value
+        return self.sub.serve(child^)
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
@@ -630,6 +768,28 @@ def _method_not_allowed(allowed: List[String]) raises -> Response:
     resp.headers.set("Content-Type", "text/plain; charset=utf-8")
     resp.headers.set("Allow", allow_value)
     return resp^
+
+
+def _prefix_match(url_segs: List[String], prefix: List[_Segment]) -> Bool:
+    """True if ``url_segs`` starts with every literal segment in
+    ``prefix`` (the bare prefix itself counts as a match)."""
+    if len(url_segs) < len(prefix):
+        return False
+    for i in range(len(prefix)):
+        if url_segs[i] != prefix[i].text:
+            return False
+    return True
+
+
+@always_inline
+def _query_of(url: String) -> String:
+    """Return the query portion of ``url`` (after ``?``), or empty."""
+    var n = url.byte_length()
+    var p = url.unsafe_ptr()
+    for i in range(n):
+        if p[i] == _QMARK:
+            return ascii_unchecked_string(url.as_bytes()[i + 1 : n])
+    return String("")
 
 
 @always_inline
