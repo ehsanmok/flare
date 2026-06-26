@@ -36,6 +36,13 @@ Example:
     ```
 """
 
+# TODO(2026-12-31, track-http-client): this module is dominated by the single
+# ``HttpClient`` struct (h1/h2c/h2/h3 dial + redirect/cookie/retry/decompress +
+# pool checkout). Mojo cannot split one struct's methods across files, so the
+# file sits over the 1000-line Pass-B cap. Planned decomposition: move the
+# free helpers + per-wire dial bodies into ``flare/http/_client/`` once the
+# struct-method-split language support lands. Allowlisted in
+# tools/check_reactor_size.sh until then.
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap

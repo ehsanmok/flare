@@ -61,6 +61,12 @@ References:
 - RFC 9000 §14.1 "Initial datagram size" (>= 1200 bytes).
 """
 
+# TODO(2026-12-31, track-quic-client): this module is dominated by the single
+# ``QuicClientConnection`` struct (handshake drive + 1-RTT egress + loss
+# recovery + 0-RTT EarlyData + migration). Mojo cannot split one struct's
+# methods across files, so the file sits over the 1000-line Pass-B cap.
+# Planned decomposition tracks the same struct-method-split language support
+# as the listener. Allowlisted in tools/check_reactor_size.sh until then.
 from std.collections import Dict, List, Optional
 from std.memory import Span, UnsafePointer
 

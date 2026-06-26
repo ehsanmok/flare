@@ -68,6 +68,11 @@ stream-state transitions, the high-level request/response
 plumbing) lives here.
 """
 
+# TODO(2026-12-31, track-http2-client): this module is dominated by the single
+# ``Http2ClientConnection`` struct (frame codec drive + stream state + flow
+# control + HPACK + request/response pump). Mojo cannot split one struct's
+# methods across files, so the file sits over the 1000-line Pass-B cap.
+# Allowlisted in tools/check_reactor_size.sh until then.
 from std.collections import Dict, Optional
 
 from .frame import (

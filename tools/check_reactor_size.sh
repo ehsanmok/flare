@@ -64,6 +64,9 @@ pass_b_dirs=(
 pass_b_allowlist=(
     "flare/quic/server.mojo"
     "flare/http/server.mojo"
+    "flare/http/client.mojo"
+    "flare/quic/client.mojo"
+    "flare/http2/client.mojo"
 )
 
 total_violations=0
