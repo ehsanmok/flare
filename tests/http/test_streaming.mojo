@@ -177,11 +177,18 @@ def test_chunked_body_drain_runs_to_completion_with_never_cancel() raises:
 
 def main() raises:
     # Explicit dispatch rather than ``TestSuite.discover_tests`` here:
-    # the reflective discovery path for *this* module's function set
-    # intermittently trips a SIGSEGV in the stdlib ``SwissTable``
-    # resize (Dict insert) on some toolchains, making the aggregate
-    # ``tests`` gate flaky (~50%). Listing the cases keeps the gate
-    # deterministic with identical coverage.
+    # on Mojo 1.0.0b2 the ``TestSuite.run()`` report-formatting path
+    # intermittently trips a SIGSEGV for this module -- an
+    # out-of-bounds ``memcpy`` while concatenating the report String
+    # (``String._iadd`` at string.mojo:1034, via
+    # ``TestSuiteReport.write_to`` -> ``_writeln`` in
+    # std/testing/suite.mojo). It is heap-layout dependent (the large
+    # ``flare.http`` import shifts the allocator arena so the OOB read
+    # lands on an unmapped page ~half the time), so every assertion
+    # passes yet the process crashes, making the aggregate ``tests``
+    # gate flaky (~50%). Calling the cases directly bypasses
+    # ``TestSuite`` entirely and keeps the gate deterministic with
+    # identical coverage.
     test_inline_body_content_length()
     test_inline_body_returns_bytes_then_none()
     test_inline_body_drain()
