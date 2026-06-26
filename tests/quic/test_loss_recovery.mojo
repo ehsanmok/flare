@@ -130,6 +130,62 @@ def test_expand_ack_with_gap() raises:
     assert_equal(pns[2], UInt64(6))
 
 
+def test_rtt_sample_drives_pto() raises:
+    # With an RTT sample the PTO interval becomes
+    # smoothed_rtt + max(4*rttvar, 1) + max_ack_delay (25ms default),
+    # not the fixed base.
+    var lr = LossRecovery(base_pto_ms=UInt64(100))
+    lr.on_sent(UInt64(0), _frames(0xD0), UInt64(1000))
+    var acked = List[UInt64]()
+    acked.append(UInt64(0))
+    # Ack at t=1040 -> latest_rtt = 40ms (first sample seeds smoothed).
+    _ = lr.on_ack(acked, UInt64(1040))
+    assert_true(lr.has_rtt)
+    assert_equal(lr.smoothed_rtt, UInt64(40))
+    # First sample: rttvar = 40/2 = 20; pto_base = 40 + 80 + 25 = 145.
+    lr.on_sent(UInt64(1), _frames(0xD1), UInt64(2000))
+    assert_equal(lr.pto_deadline(), UInt64(2000) + UInt64(145))
+
+
+def test_ack_based_loss_detection_packet_threshold() raises:
+    # pn 0..3 in flight; acking pn 3 makes pn 0 lost by the
+    # packet-number threshold (gap 3) -> detect_lost returns its frames.
+    # Large RTT (100ms) so the time threshold (112ms) does not catch the
+    # younger packets; only pn 0 is lost by the packet-number gap of 3.
+    var lr = LossRecovery(base_pto_ms=UInt64(100))
+    lr.on_sent(UInt64(0), _frames(0xE0), UInt64(2000))
+    lr.on_sent(UInt64(1), _frames(0xE1), UInt64(2000))
+    lr.on_sent(UInt64(2), _frames(0xE2), UInt64(2000))
+    lr.on_sent(UInt64(3), _frames(0xE3), UInt64(2000))
+    var acked = List[UInt64]()
+    acked.append(UInt64(3))
+    _ = lr.on_ack(acked, UInt64(2100))
+    var lost = lr.detect_lost(UInt64(2100))
+    assert_equal(len(lost), 1)
+    assert_equal(Int(lost[0][0]), 0xE0)
+    # pn 1, 2 are within the threshold and not time-expired: still held.
+    assert_equal(lr.outstanding(), 2)
+
+
+def test_cc_reduces_window_on_loss() raises:
+    var lr = LossRecovery()
+    var w0 = lr.window()
+    lr.on_sent(UInt64(0), _frames(0xF0), UInt64(1000), size=UInt64(1200))
+    lr.on_sent(UInt64(1), _frames(0xF1), UInt64(1001), size=UInt64(1200))
+    lr.on_sent(UInt64(2), _frames(0xF2), UInt64(1002), size=UInt64(1200))
+    lr.on_sent(UInt64(3), _frames(0xF3), UInt64(1003), size=UInt64(1200))
+    assert_equal(lr.bytes_in_flight, UInt64(4800))
+    var acked = List[UInt64]()
+    acked.append(UInt64(3))
+    _ = lr.on_ack(acked, UInt64(1010))
+    # pn3 acked: 1200 bytes leave flight.
+    assert_equal(lr.bytes_in_flight, UInt64(3600))
+    var lost = lr.detect_lost(UInt64(1010))
+    assert_true(len(lost) >= 1)
+    # A congestion event reduced the window below the initial value.
+    assert_true(lr.window() < w0)
+
+
 def main() raises:
     test_ack_retires_and_resets_backoff()
     test_ack_gap_leaves_lost_packet_outstanding()
@@ -137,4 +193,7 @@ def main() raises:
     test_fire_pto_empty_is_noop()
     test_expand_ack_single_range()
     test_expand_ack_with_gap()
-    print("test_loss_recovery: 6 passed")
+    test_rtt_sample_drives_pto()
+    test_ack_based_loss_detection_packet_threshold()
+    test_cc_reduces_window_on_loss()
+    print("test_loss_recovery: 9 passed")

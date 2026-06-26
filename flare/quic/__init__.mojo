@@ -50,6 +50,12 @@ Public re-exports:
   commit; this module exposes :class:`StubQuicCrypto` as a
   typed sentinel so the reactor wiring tests can pin the
   trait boundary today.
+- :mod:`.cc` — RFC 9002 §7 congestion control: the
+  :trait:`CongestionController` contract plus :class:`RenoController`
+  (RFC 9002 NewReno) and :class:`CubicController` (RFC 9438 CUBIC with
+  RFC 9406 HyStart++), selected by :class:`CcChoice`. The
+  loss-recovery bookkeeping in ``_loss_recovery`` drives a controller
+  on every ACK / loss.
 """
 
 from .varint import (
@@ -203,6 +209,12 @@ from .timers import (
     decode_timer_token,
     encode_timer_token,
     timer_kind_name,
+)
+from .cc import (
+    CcChoice,
+    CongestionController,
+    CubicController,
+    RenoController,
 )
 from .client import QuicClientConnection
 from .server import (

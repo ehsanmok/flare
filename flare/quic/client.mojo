@@ -539,12 +539,30 @@ struct QuicClientConnection(Movable):
             self._process_datagram(Span[UInt8, _](buf[:nb_got]), events)
         self._flush_migration(events)
         if len(events.acked_packets) > 0:
-            _ = self._loss.on_ack(events.acked_packets)
+            _ = self._loss.on_ack(events.acked_packets, _monotonic_ms())
+            self._retransmit_lost()
         self._drain_egress()
         self._check_pto()
         if self.session.is_handshake_complete() and self.have_1rtt_keys:
             self.established = True
         return events^
+
+    def _retransmit_lost(mut self) raises:
+        """Retransmit frames from packets the ACK-based loss detector
+        (RFC 9002 section 6.1) just declared lost: each lost packet's
+        frames ride a fresh 1-RTT packet (frames are retransmitted,
+        packet numbers are not reused). A no-op until 1-RTT keys exist
+        or when nothing is lost."""
+        if not self.have_1rtt_keys:
+            return
+        var lost = self._loss.detect_lost(_monotonic_ms())
+        for i in range(len(lost)):
+            var frames = lost[i].copy()
+            if len(frames) == 0:
+                continue
+            var dg = self._build_1rtt(frames^, ack_eliciting=True)
+            if len(dg) > 0:
+                _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
     def _check_pto(mut self) raises:
         """Fire the PTO if the probe timer has elapsed with
