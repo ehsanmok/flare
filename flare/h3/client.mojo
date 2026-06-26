@@ -238,27 +238,45 @@ struct H3ClientConnection(Movable):
         self._pending = Dict[UInt64, _PendingRequest]()
         self._ext_reasms = Dict[UInt64, _StreamReasm]()
 
-    def open_streams(mut self) raises:
+    def _send_stream(
+        mut self,
+        stream_id: UInt64,
+        var data: List[UInt8],
+        fin: Bool,
+        early: Bool,
+    ) raises:
+        """Route one STREAM send to the 1-RTT path or, when ``early``,
+        the 0-RTT (EarlyData) path on the underlying QUIC connection.
+        The single switch that makes :meth:`open_streams` /
+        :meth:`send_request` emit either flight without duplicating the
+        H3 encoding."""
+        if early:
+            self.quic.send_stream_early(stream_id, data^, fin)
+        else:
+            self.quic.send_stream(stream_id, data^, fin)
+
+    def open_streams(mut self, early: Bool = False) raises:
         """Open the client control + QPACK uni-streams (RFC 9114
         §6.2). The control stream carries the mandatory first
         ``SETTINGS`` frame; the QPACK streams are empty in flare's
-        static-table-only mode. Idempotent."""
+        static-table-only mode. Idempotent. When ``early`` the streams
+        are emitted at 0-RTT (EarlyData) instead of 1-RTT."""
         if self.streams_opened:
             return
         var ctrl = self.quic.open_uni_stream()
         var ctrl_bytes = List[UInt8]()
         encode_client_control_stream(self.max_field_section_size, ctrl_bytes)
-        self.quic.send_stream(ctrl, ctrl_bytes, fin=False)
+        self._send_stream(ctrl, ctrl_bytes^, False, early)
 
         var enc = self.quic.open_uni_stream()
         var enc_bytes = List[UInt8]()
         encode_qpack_encoder_stream(enc_bytes)
-        self.quic.send_stream(enc, enc_bytes, fin=False)
+        self._send_stream(enc, enc_bytes^, False, early)
 
         var dec = self.quic.open_uni_stream()
         var dec_bytes = List[UInt8]()
         encode_qpack_decoder_stream(dec_bytes)
-        self.quic.send_stream(dec, dec_bytes, fin=False)
+        self._send_stream(dec, dec_bytes^, False, early)
         self.streams_opened = True
 
     def send_request(
@@ -269,18 +287,20 @@ struct H3ClientConnection(Movable):
         path: String,
         headers: List[QpackHeader],
         body: List[UInt8],
+        early: Bool = False,
     ) raises -> UInt64:
         """Open a fresh bidi stream, write the request
         ``HEADERS [+ DATA]`` with FIN, and return the stream id the
         response will arrive on. Opens the control/QPACK streams
-        first if not already open."""
-        self.open_streams()
+        first if not already open. When ``early`` the control/QPACK
+        streams and the request ride 0-RTT (EarlyData) packets."""
+        self.open_streams(early)
         var sid = self.quic.open_bidi_stream()
         var wire = List[UInt8]()
         encode_request_headers(method, scheme, authority, path, headers, wire)
         if len(body) > 0:
             encode_request_data(Span[UInt8, _](body), wire)
-        self.quic.send_stream(sid, wire, fin=True)
+        self._send_stream(sid, wire^, True, early)
         return sid
 
     def read_response(
@@ -330,15 +350,17 @@ struct H3ClientConnection(Movable):
         path: String,
         headers: List[QpackHeader],
         body: List[UInt8],
+        early: Bool = False,
     ) raises -> UInt64:
         """Multiplexed request: open a bidi stream, write
         ``HEADERS [+ DATA]`` with FIN, register an owned reader, and
         return the stream id. Any number of requests can be in flight
         at once over the one QUIC connection; drive them with
         :meth:`poll_responses` and collect with
-        :meth:`take_if_complete`."""
+        :meth:`take_if_complete`. When ``early`` the request is emitted
+        at 0-RTT (EarlyData)."""
         var sid = self.send_request(
-            method, scheme, authority, path, headers, body
+            method, scheme, authority, path, headers, body, early
         )
         self._pending[sid] = _PendingRequest(
             _StreamReasm(), H3ResponseReader(self.max_field_section_size)
@@ -501,41 +523,61 @@ struct H3ClientConnection(Movable):
         A non-idempotent method, or a fresh (unresumed) connection,
         is carried normally at 1-RTT.
 
-        After the handshake, if 0-RTT was attempted but the server
-        *rejected* early data
+        The request is emitted in the first 0-RTT flight (the
+        control/QPACK streams + the request ride EarlyData packets via
+        :meth:`QuicClientConnection.send_stream_early`). After the
+        handshake, if the server *rejected* early data
         (:meth:`QuicClientConnection.early_data_accepted` is False),
-        the request still completes at 1-RTT and the result reports
+        :meth:`QuicClientConnection.finish_early_data` transparently
+        replays the identical flight at 1-RTT on the same stream, the
+        request still completes, and the result reports
         ``replayed=True`` -- the caller never observes a
         rejected-0-RTT failure. ``used_0rtt`` is True only when the
         server accepted the early data.
 
-        ponytail: the QUIC client driver does not yet emit 0-RTT
-        (EarlyData) STREAM frames -- the request rides the 1-RTT keys
-        regardless -- so today this method's value is the *safety
-        policy*: it refuses to treat a non-idempotent or unresumed
-        request as 0-RTT-eligible and reports the true acceptance
-        outcome. Wiring real EarlyData STREAM emission into
-        :class:`QuicClientConnection` is the named upgrade path; this
-        gate already guarantees only replay-safe requests would take
-        it.
+        ponytail: 0-RTT packets are not wired into loss recovery, so a
+        lost-but-accepted 0-RTT packet is not retransmitted (fine on
+        the lossless loopback this client targets; the upgrade path is
+        the shared-pn loss-recovery registration in
+        :class:`QuicClientConnection`).
         """
         var eligible = is_idempotent_method(method) and (
             self.quic.early_data_ready()
         )
-        var resp = self.fetch(
-            method,
-            scheme,
-            authority,
-            path,
-            headers,
-            body,
-            timeout_ms,
-            max_polls,
+        if not eligible:
+            var resp = self.fetch(
+                method,
+                scheme,
+                authority,
+                path,
+                headers,
+                body,
+                timeout_ms,
+                max_polls,
+            )
+            return H3ZeroRttOutcome(resp^, used_0rtt=False, replayed=False)
+
+        var sid = self.request(
+            method, scheme, authority, path, headers, body, early=True
         )
-        var accepted = eligible and self.quic.early_data_accepted()
-        return H3ZeroRttOutcome(
-            resp^, used_0rtt=accepted, replayed=eligible and not accepted
-        )
+        var finished_early = False
+        for _ in range(max_polls):
+            _ = self.poll_responses(timeout_ms)
+            # Resolve early data once the handshake lands: on rejection
+            # this replays the flight at 1-RTT on the same stream, so a
+            # later poll completes the response transparently.
+            if not finished_early and self.quic.is_established():
+                _ = self.quic.finish_early_data()
+                finished_early = True
+            var done = self.take_if_complete(sid)
+            if done:
+                var accepted = self.quic.early_data_accepted()
+                return H3ZeroRttOutcome(
+                    done.value().copy(),
+                    used_0rtt=accepted,
+                    replayed=not accepted,
+                )
+        raise Error("h3 client: 0-RTT response did not complete within budget")
 
     def is_established(self) -> Bool:
         return self.quic.is_established()

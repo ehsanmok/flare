@@ -286,6 +286,11 @@ ASAN_TESTS=(
   # reassembly into the response reader, and the H3ClientConnection
   # lifetime across the poll loop.
   "tests/h3/test_h3_client_e2e.mojo"
+  # W9 -- client 0-RTT (EarlyData) send flight (fork). ASan validates
+  # the _build_0rtt packet build + send_stream_early flight buffer and
+  # the finish_early_data replay path (reset offsets + 1-RTT resend on
+  # a foreign-ticket reject) across the resumed connection lifetime.
+  "tests/h3/test_h3_0rtt_e2e.mojo"
   # H3C follow-up -- offset-ordered STREAM reassembly (_StreamReasm).
   # ASan validates the pending-chunk Dict churn + the trimmed/borrowed
   # Span feeds across out-of-order / duplicate / overlapping chunks.

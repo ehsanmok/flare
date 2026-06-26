@@ -1715,8 +1715,9 @@ configuration:
   (no Dict touch, no clock read). The strike `Dict[String, UInt64]`
   stays empty unless 0-RTT is enabled; its prune is amortized and only
   fires at capacity. The client `fetch_0rtt` gate is a pure
-  `is_idempotent_method` predicate plus two existing accessor reads,
-  and the unary `fetch` path is untouched.
+  `is_idempotent_method` predicate plus two existing accessor reads on
+  the non-eligible path, which falls straight through to the unchanged
+  unary `fetch`; the eligible emit path is the W9 note below.
 - W8 migration strict egress hold adds no steady-state cost. The
   per-slot egress drain (`_drain_and_send`) gains one
   `_drain_migration_probe` call whose body returns immediately when the
@@ -1729,6 +1730,17 @@ configuration:
   benchmarks never migrate, so throughput/tail are unaffected. The hold
   trades one validation round trip of latency on a genuine migration for
   the guarantee that no 1-RTT egress reflects to an unvalidated address.
+- W9 client 0-RTT EarlyData emission adds no steady-state cost. The new
+  `_build_0rtt` / `send_stream_early` / `finish_early_data` run only on a
+  resumed connection opened with `enable_0rtt=True` whose ticket
+  installed early keys (`early_data_ready()`); a fresh connection -- the
+  only kind the benchmarks open -- never enters the early path, so the
+  1-RTT `send_stream` / `_build_1rtt` / `fetch` hot path is byte-identical
+  (those functions are untouched). 0-RTT and 1-RTT share the application
+  packet-number space (`tx_1rtt_pn`), so 1-RTT egress after the handshake
+  needs no special handling. On a server reject, `finish_early_data`
+  replays the recorded flight once at 1-RTT (a one-time cost on the saved
+  round trip), not on any steady-state path.
 
 Functional parity is covered by the unchanged QUIC/H3 suites
 (`test-quic-loopback-integration`, `test-quic-post-initial-decrypt`,

@@ -81,9 +81,16 @@ QUIC API bindings** through a Rust FFI shim. The rationale:
 - **Certificate issuance + renewal**: use certbot / cert-
   manager / ACME directly. flare's ``TlsAcceptor.reload`` is
   the integration point.
-- **TLS 1.3 0-RTT**: not implemented. Replay protection is
-  trickier than it looks and the win is small for our target
-  workloads (API servers + sidecars).
+- **TLS 1.3 0-RTT over TCP** (OpenSSL h1 / h2 / WS): not
+  implemented. Replay protection is trickier than it looks and the
+  win is small for our target workloads (API servers + sidecars).
+  Note this is the TCP path only -- **QUIC 0-RTT is implemented**
+  (rustls EarlyData): the server admits + dispatches early data
+  with per-connection (``EarlyDataReplayGuard``) and cross-
+  connection (``EarlyDataStrikeSet``) replay defense, and the H3
+  client (``H3ClientConnection.fetch_0rtt``) emits idempotent
+  requests in the first EarlyData flight, replaying transparently
+  at 1-RTT on server reject.
 - **DTLS / SCTP**: not in scope.
 - **CRL / OCSP responder**: out-of-tree; if you need
   revocation enforcement, terminate at a proxy.

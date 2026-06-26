@@ -89,6 +89,7 @@ from .packet import (
     LongHeader,
     PACKET_TYPE_HANDSHAKE,
     PACKET_TYPE_INITIAL,
+    PACKET_TYPE_ZERO_RTT,
     QUIC_VERSION_1,
     encode_long_header,
     encode_short_header,
@@ -202,6 +203,26 @@ def _encode_client_transport_params(
     return encode_transport_parameters(tp)
 
 
+struct _EarlySend(Copyable, Movable):
+    """One application STREAM send made at 0-RTT (EarlyData).
+
+    Buffered so the flight can be replayed at 1-RTT if the server
+    rejects early data (RFC 9001 sec 4.6 -- a client that sent 0-RTT
+    data the server did not accept retransmits it once the handshake
+    completes). Records the exact ``(stream_id, data, fin)`` so the
+    replay reproduces byte-identical STREAM frames on the same stream.
+    """
+
+    var stream_id: UInt64
+    var data: List[UInt8]
+    var fin: Bool
+
+    def __init__(out self, stream_id: UInt64, var data: List[UInt8], fin: Bool):
+        self.stream_id = stream_id
+        self.data = data^
+        self.fin = fin
+
+
 struct QuicClientConnection(Movable):
     """A single client-role QUIC connection over a connected UDP flow.
 
@@ -300,6 +321,11 @@ struct QuicClientConnection(Movable):
     """Whether rustls installed 0-RTT (EarlyData) keys for this
     connection -- True only on a resumed connection whose ticket
     allowed early data. See :meth:`early_data_ready`."""
+    var _early_flight: List[_EarlySend]
+    """Application STREAM sends emitted at 0-RTT (via
+    :meth:`send_stream_early`), retained so :meth:`finish_early_data`
+    can replay them at 1-RTT if the server rejects early data. Empty on
+    a non-0-RTT connection."""
 
     def __init__(
         out self,
@@ -349,6 +375,7 @@ struct QuicClientConnection(Movable):
         self._loss = LossRecovery()
         self.enable_0rtt = False
         self._early_keys_ready = False
+        self._early_flight = List[_EarlySend]()
 
     @staticmethod
     def start(
@@ -951,6 +978,50 @@ struct QuicClientConnection(Movable):
         self.tx_handshake_pn = pn + UInt64(1)
         return dg^
 
+    def _build_0rtt(
+        mut self,
+        var plaintext: List[UInt8],
+        pn_length: Int = 2,
+    ) raises -> List[UInt8]:
+        """Build a protected 0-RTT (EarlyData) long-header datagram
+        around an already-encoded ``plaintext`` frame buffer.
+
+        Shape mirrors :meth:`_build_handshake` (long header with an
+        explicit Length varint, RFC 9000 sec 17.2.3) but the packet
+        type is ZERO_RTT and AEAD + header protection route through
+        rustls at :data:`QuicEncryptionLevel.EARLY_DATA`. A 0-RTT
+        packet carries no token (only Initial does) and no ACK (the
+        client cannot acknowledge anything before the handshake).
+
+        The packet number is drawn from the **shared application
+        packet-number space** (:attr:`tx_1rtt_pn`), because 0-RTT and
+        1-RTT are one number space (RFC 9000 sec 12.3); 1-RTT egress
+        after the handshake therefore continues the sequence with no
+        special handling. The DCID is the client-chosen
+        :attr:`initial_dcid` (still in :attr:`dcid` at first-flight
+        time), which the server routes on and binds the 0-RTT keys to.
+        """
+        if len(plaintext) == 0:
+            return List[UInt8]()
+        var first_bits = (pn_length - 1) & 0x3
+        var prefix = encode_long_header(
+            PACKET_TYPE_ZERO_RTT,
+            QUIC_VERSION_1,
+            self.dcid,
+            self.scid,
+            type_specific_bits=first_bits,
+        )
+        var payload_total = UInt64(len(plaintext) + pn_length + _AEAD_TAG_LEN)
+        var len_var = encode_varint(payload_total)
+        for i in range(len(len_var)):
+            prefix.append(len_var[i])
+        var pn = self.tx_1rtt_pn
+        var dg = self._protect_via_rustls(
+            QuicEncryptionLevel.EARLY_DATA, prefix^, plaintext^, pn, pn_length
+        )
+        self.tx_1rtt_pn = pn + UInt64(1)
+        return dg^
+
     def _build_1rtt(
         mut self,
         var plaintext: List[UInt8],
@@ -1110,6 +1181,97 @@ struct QuicClientConnection(Movable):
                 break
         self.send_offsets[stream_id] = off
 
+    def send_stream_early(
+        mut self, stream_id: UInt64, data: List[UInt8], fin: Bool
+    ) raises:
+        """Send ``data`` (with optional FIN) on ``stream_id`` at 0-RTT
+        (EarlyData), before the handshake completes.
+
+        The 0-RTT counterpart of :meth:`send_stream`: same
+        MTU-bounded STREAM-frame fragmentation and per-stream offset
+        bookkeeping (it shares :attr:`send_offsets`), but each frame
+        rides a :meth:`_build_0rtt` packet protected with the resumed
+        connection's EarlyData keys. Requires
+        :attr:`_early_keys_ready` (a resumed connection that installed
+        0-RTT keys -- see :meth:`early_data_ready`).
+
+        The full send is recorded in :attr:`_early_flight` so
+        :meth:`finish_early_data` can replay it at 1-RTT if the server
+        rejects early data. ponytail: 0-RTT packets are not registered
+        with the loss-recovery tracker, so a lost-but-accepted 0-RTT
+        packet is not retransmitted (fine on the lossless loopback the
+        client targets; the upgrade path is registering the shared-pn
+        send so :meth:`_check_pto` re-sends it as 1-RTT).
+        """
+        if not self._early_keys_ready:
+            raise Error("quic client: send_stream_early before early keys")
+        var cap = self._stream_chunk_cap()
+        if cap < 1:
+            raise Error("quic client: MTU too small for a STREAM frame")
+        self._early_flight.append(_EarlySend(stream_id, data.copy(), fin))
+        var off = UInt64(0)
+        if stream_id in self.send_offsets:
+            off = self.send_offsets[stream_id]
+        var total = len(data)
+        var sent = 0
+        while True:
+            var take = total - sent
+            if take > cap:
+                take = cap
+            var is_last = (sent + take) >= total
+            var chunk = List[UInt8](capacity=take)
+            for i in range(take):
+                chunk.append(data[sent + i])
+            var sf = StreamFrame(
+                stream_id=stream_id,
+                offset=off,
+                data=chunk^,
+                fin=(fin and is_last),
+            )
+            var payload = List[UInt8]()
+            encode_stream(sf, payload, emit_length=True)
+            var dg = self._build_0rtt(payload^)
+            if len(dg) > 0:
+                _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+            off += UInt64(take)
+            sent += take
+            if is_last:
+                break
+        self.send_offsets[stream_id] = off
+
+    def finish_early_data(mut self) raises -> Bool:
+        """Resolve the 0-RTT flight after the handshake completes.
+
+        Call once the connection is ESTABLISHED. Returns ``True`` when
+        the server accepted early data (the 0-RTT flight stands, nothing
+        more to send) and ``False`` when it rejected it (RFC 9001 sec
+        4.6) -- in which case the recorded flight
+        (:attr:`_early_flight`) is replayed at 1-RTT so the request
+        still completes, transparently to the caller.
+
+        A rejected 0-RTT flight leaves no stream state on the server
+        (rustls drops the early data), so the replay resends the
+        identical STREAM frames on the **same** stream ids from offset
+        0: each distinct early stream's offset is reset, then every
+        recorded send is re-emitted in order via :meth:`send_stream`
+        (1-RTT). The H3 response reader keys on the stream id, so it is
+        oblivious to which flight delivered the request.
+        """
+        if not self.enable_0rtt or len(self._early_flight) == 0:
+            return True
+        if self.early_data_accepted():
+            self._early_flight = List[_EarlySend]()
+            return True
+        # Rejected: reset each distinct early stream's send offset, then
+        # replay the recorded flight at 1-RTT in order.
+        var flight = self._early_flight^
+        self._early_flight = List[_EarlySend]()
+        for i in range(len(flight)):
+            self.send_offsets[flight[i].stream_id] = UInt64(0)
+        for i in range(len(flight)):
+            self.send_stream(flight[i].stream_id, flight[i].data, flight[i].fin)
+        return False
+
     def keepalive(mut self) raises:
         """Send a 1-RTT PING to keep a pooled-idle connection alive
         and elicit a server ACK (RFC 9000 §10.1.2). A no-op until
@@ -1209,11 +1371,10 @@ struct QuicClientConnection(Movable):
         when :attr:`enable_0rtt` was set, the same connector was
         reused, and the server's prior ticket allowed early data.
 
-        ponytail: this reports key readiness; actually transmitting
-        application data at 0-RTT additionally needs the server QUIC
-        driver to pump EarlyData packets, which is the tracked v0.9
-        0-RTT server follow-up. Until then a resumed connection still
-        sends its request at 1-RTT (no behavior change)."""
+        When True, :meth:`send_stream_early` emits application STREAM
+        frames in 0-RTT (EarlyData) packets and
+        :meth:`finish_early_data` resolves acceptance after the
+        handshake (replaying at 1-RTT on rejection)."""
         return self._early_keys_ready
 
     def early_data_accepted(self) -> Bool:

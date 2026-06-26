@@ -107,7 +107,8 @@ flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  RFC 9000 §18 transport parameters, and RFC 9000 §3 /
                  §13 connection + stream state machines, plus the live
                  ``QuicListener`` UDP reactor, the ``QuicClientConnection``
-                 client driver, and the rustls QUIC TLS drive that
+                 client driver (incl. resumption + 0-RTT EarlyData
+                 send flight), and the rustls QUIC TLS drive that
                  carry HTTP/3 end-to-end
 flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  request-stream reader (``H3RequestReader`` +
@@ -119,8 +120,10 @@ flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  §7), plus the client side: ``H3ClientConnection``
                  (request writer + response reader over the QUIC
                  client driver) for end-to-end HTTP/3 requests,
-                 including ``fetch_0rtt`` -- the idempotent-method-only
-                 0-RTT request gate with transparent 1-RTT fallback
+                 including ``fetch_0rtt`` -- idempotent-method-only
+                 0-RTT: emits the request in the first EarlyData flight
+                 on a resumed connection and transparently replays it
+                 at 1-RTT if the server rejects early data
 flare.qpack    - Sans-I/O static-only QPACK encoder / decoder for
                  HTTP/3 field sections (RFC 9204 Appendix A static
                  table + literal + Huffman, shared with HPACK)

@@ -405,6 +405,7 @@ test-grpc-streaming  = "mojo -I . tests/grpc/test_grpc_streaming.mojo"   # W6 --
 test-async-resolve   = "mojo -I . tests/dns/test_async_resolve.mojo"     # W6 -- off-reactor resolve_async + happy-eyeballs ordering + cache async (6 cases)
 test-quic-0rtt-replay = "mojo -I . tests/quic/test_quic_0rtt_replay.mojo"  # W4a + W7 -- server 0-RTT anti-replay window + byte budget + packet-len + cross-connection strike set (11 cases)
 test-h3-0rtt-gate    = "mojo -I . tests/h3/test_h3_0rtt_gate.mojo"       # W7 -- client idempotent-only 0-RTT gate + outcome carrier (4 cases)
+test-h3-0rtt-e2e     = { cmd = "mojo -I . tests/h3/test_h3_0rtt_e2e.mojo", depends-on = ["build-rustls-quic"] } # W9 -- client 0-RTT EarlyData send flight: accept (used_0rtt) + foreign-ticket reject/replay (2 cases)
 test-quic-migration-probe = "mojo -I . tests/quic/test_quic_migration_probe.mojo"  # W4b -- server path-validation probe + anti-amplification budget (6 cases)
 test-dns-cache       = "mojo -I . tests/dns/test_dns_cache.mojo"         # W3 -- TTL DNS cache over the sync resolver (5 cases)
 test-cache           = "mojo -I . tests/http/test_cache.mojo"            # RFC 9111 Cache-Control parser + InMemoryCacheStore (~12 cases)
