@@ -45,9 +45,10 @@ References:
 """
 
 from std.collections import List
-from std.memory import Span
+from std.memory import ArcPointer, Span
 
-from flare.qpack import QpackHeader, decode_field_section
+from flare.qpack import QpackHeader
+from flare.qpack.dynamic import QpackDynamicTable, decode_field_section_dynamic
 from flare.quic.varint import decode_varint
 
 from .frame import (
@@ -143,12 +144,22 @@ struct H3RequestReader(Copyable, Movable):
 
     var state: Int
     var max_field_section_bytes: UInt64
+    var qpack_table: ArcPointer[QpackDynamicTable]
+    """RFC 9204 dynamic table shared (by ``ArcPointer``) from the
+    owning :class:`H3Connection`. Defaults to an empty (capacity-0)
+    table so a standalone reader decodes static-only field sections
+    identically to the static path; the connection injects its real
+    table at :meth:`H3Connection.open_request_stream` so dynamic
+    references resolve."""
 
     @staticmethod
     def new(max_field_section_bytes: UInt64 = UInt64(8192)) -> Self:
         return Self(
             state=H3_REQUEST_STATE_INIT,
             max_field_section_bytes=max_field_section_bytes,
+            qpack_table=ArcPointer[QpackDynamicTable](
+                QpackDynamicTable(UInt64(0))
+            ),
         )
 
 
@@ -237,7 +248,9 @@ def feed_into[
         var payload = buf[header_size:total]
         var headers: List[QpackHeader]
         try:
-            headers = decode_field_section(payload)
+            headers = decode_field_section_dynamic(
+                payload, reader.qpack_table[]
+            )
         except:
             reader.state = H3_REQUEST_STATE_DONE
             handler.on_protocol_error(String("h3 reader: QPACK decode failed"))

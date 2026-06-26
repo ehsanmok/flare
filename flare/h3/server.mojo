@@ -20,9 +20,12 @@ HTTP/3 over QUIC uses four families of streams:
   Not implemented (RFC 9114 deprecates push as of revision 9).
 * **Unidirectional QPACK encoder stream** (type 0x02) +
   **decoder stream** (type 0x03) -- carry dynamic-table
-  instructions. The driver runs QPACK in static-table-only
-  mode; the SETTINGS we advertise tell the peer not to send
-  dynamic-table inserts. Dynamic table is a follow-up.
+  instructions. The driver mirrors the peer encoder's inserts
+  into a per-connection dynamic table (RFC 9204) so request
+  field sections referencing dynamic entries decode, and emits
+  Insert Count Increment back on the decoder stream. Dynamic-
+  table use is gated on the ``qpack_max_table_capacity`` the
+  SETTINGS advertise: the default (0) keeps static-only behavior.
 
 ## What ships here
 
@@ -51,7 +54,7 @@ References:
 """
 
 from std.collections import Dict, List, Optional
-from std.memory import Span
+from std.memory import ArcPointer, Span
 
 from flare.h3.frame import (
     H3_FRAME_TYPE_GOAWAY,
@@ -77,6 +80,11 @@ from flare.h3.response_writer import (
 )
 from flare.http.wire import Request, Response
 from flare.qpack import QpackHeader
+from flare.qpack.dynamic import (
+    QpackDynamicTable,
+    apply_encoder_instructions_partial,
+    encode_insert_count_increment,
+)
 from flare.quic.varint import decode_varint, encode_varint
 
 
@@ -354,8 +362,9 @@ struct H3Connection(Copyable, Defaultable, Movable):
       announced.
     * Tracks the control-stream lifecycle (whether the peer's
       SETTINGS arrived yet, whether GOAWAY was emitted).
-    * Carries the QPACK state. Static-table-only; dynamic-table
-      inserts are a follow-up.
+    * Carries the QPACK state, including a per-connection dynamic
+      table (RFC 9204) mirroring the peer encoder's inserts when
+      ``qpack_max_table_capacity`` is advertised non-zero.
 
     The driver is sans-I/O: the QUIC reactor feeds reassembled
     stream chunks in via :meth:`feed_stream_chunk` and drains
@@ -448,6 +457,19 @@ struct H3Connection(Copyable, Defaultable, Movable):
     reserved). Empty means the type varint has not been
     resolved yet on that stream."""
 
+    var qpack_table: ArcPointer[QpackDynamicTable]
+    """RFC 9204 QPACK dynamic table mirroring the peer encoder's
+    insert log. Shared (by ``ArcPointer``) with every per-stream
+    reader so a request HEADERS field section can resolve dynamic
+    references the peer streamed over its encoder stream. Capacity
+    is 0 (static-only) unless :attr:`config` advertises a non-zero
+    ``qpack_max_table_capacity``."""
+
+    var pending_qpack_increment: Int
+    """Count of peer inserts applied since the last Insert Count
+    Increment we emitted on our QPACK decoder stream (RFC 9204
+    §4.4.3). Drained by :meth:`take_qpack_decoder_frames`."""
+
     def __init__(out self):
         self.config = H3ConnectionConfig()
         self.peer_settings_received = False
@@ -466,12 +488,19 @@ struct H3Connection(Copyable, Defaultable, Movable):
         self.peer_goaway_max_stream_id = UInt64((1 << 63) - 1)
         self.peer_uni_buffers = Dict[Int, List[UInt8]]()
         self.peer_uni_kinds = Dict[Int, Int]()
+        self.qpack_table = ArcPointer[QpackDynamicTable](
+            QpackDynamicTable(UInt64(0))
+        )
+        self.pending_qpack_increment = 0
 
     @staticmethod
     def with_config(config: H3ConnectionConfig) -> Self:
         """Construct with a non-default config carrier."""
         var out = Self()
         out.config = config.copy()
+        out.qpack_table = ArcPointer[QpackDynamicTable](
+            QpackDynamicTable(config.qpack_max_table_capacity)
+        )
         return out^
 
     def open_request_stream(mut self, stream_id: Int) raises:
@@ -488,9 +517,11 @@ struct H3Connection(Copyable, Defaultable, Movable):
                 "H3Connection.open_request_stream: GOAWAY emitted;"
                 " new request streams are rejected"
             )
-        self.streams[stream_id] = _H3StreamState.with_limits(
+        var state = _H3StreamState.with_limits(
             self.config.max_field_section_size
         )
+        state.reader.qpack_table = self.qpack_table
+        self.streams[stream_id] = state^
 
     def close_request_stream(mut self, stream_id: Int) raises:
         """Drop the per-stream carrier. Called after the
@@ -751,10 +782,14 @@ struct H3Connection(Copyable, Defaultable, Movable):
         * 0x01 (Push) -- the server records but ignores the
           stream (push is deprecated as of RFC 9114 revision
           9; the reactor STOP_SENDINGs at the QUIC layer).
-        * 0x02 (QPACK encoder) -- captured for the dynamic-
-          table follow-up; bytes sink in static-only mode.
-        * 0x03 (QPACK decoder) -- captured but unused (we
-          never emit dynamic-table inserts).
+        * 0x02 (QPACK encoder) -- replayed into the connection
+          dynamic table via
+          :meth:`_feed_peer_qpack_encoder_stream`; each insert
+          owes an Insert Count Increment back on our decoder
+          stream (drained by :meth:`take_qpack_decoder_frames`).
+        * 0x03 (QPACK decoder) -- captured but unused (we emit
+          only static-table field sections, so the peer never
+          acknowledges dynamic inserts to us).
 
         The stream-type varint may span multiple chunks (it is
         at most 8 bytes per RFC 9000 §16). The driver buffers
@@ -793,7 +828,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         if kind == H3StreamType.CONTROL:
             self._feed_peer_control_stream(buf^)
         elif kind == H3StreamType.QPACK_ENCODER:
-            pass
+            self._feed_peer_qpack_encoder_stream(stream_id, buf^)
         elif kind == H3StreamType.QPACK_DECODER:
             pass
         elif kind == H3StreamType.PUSH:
@@ -856,6 +891,46 @@ struct H3Connection(Copyable, Defaultable, Movable):
             for k in range(cursor, len(bytes)):
                 carry.append(bytes[k])
             self.peer_uni_buffers[self.peer_control_stream_id] = carry^
+
+    def _feed_peer_qpack_encoder_stream(
+        mut self, stream_id: Int, var bytes: List[UInt8]
+    ) raises:
+        """Replay peer QPACK encoder-stream inserts into the
+        connection's dynamic table (RFC 9204 section 4.3). ``bytes``
+        already carries any tail re-buffered after the previous chunk
+        (the caller consolidates :attr:`peer_uni_buffers` before
+        dispatch), so we apply every whole instruction and re-buffer
+        the unconsumed remainder for the next chunk. Each applied insert
+        owes one Insert Count Increment back on our decoder stream."""
+        var result = apply_encoder_instructions_partial(
+            self.qpack_table[], Span[UInt8, _](bytes)
+        )
+        self.pending_qpack_increment += result[0]
+        var consumed = result[1]
+        if consumed < len(bytes):
+            var carry = List[UInt8](capacity=len(bytes) - consumed)
+            for k in range(consumed, len(bytes)):
+                carry.append(bytes[k])
+            self.peer_uni_buffers[stream_id] = carry^
+
+    def take_qpack_decoder_frames(mut self) -> List[UInt8]:
+        """Drain the QPACK decoder-stream bytes the connection owes the
+        peer: an Insert Count Increment covering every encoder-stream
+        insert applied since the last drain (RFC 9204 section 4.4.3).
+        Returns empty when nothing is pending.
+
+        ponytail: the default config advertises ``qpack_max_table_capacity
+        = 0``, so a conforming peer never streams dynamic inserts and this
+        never has anything to drain. Routing the drained bytes onto a
+        locally-opened QPACK decoder uni-stream is the reactor-side
+        upgrade path, gated on advertising a non-zero capacity. Section
+        Acknowledgment / Stream Cancellation are likewise deferred -- with
+        our static-only encoder the peer never blocks on them."""
+        var out = List[UInt8]()
+        if self.pending_qpack_increment > 0:
+            encode_insert_count_increment(out, self.pending_qpack_increment)
+            self.pending_qpack_increment = 0
+        return out^
 
     def _dispatch_control_frame(
         mut self, frame_type: UInt64, payload: Span[UInt8, _]
