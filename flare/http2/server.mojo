@@ -572,8 +572,14 @@ struct H2Connection(Defaultable, Movable):
 
         The connection's stream state is advanced to ``CLOSED`` after
         the response is queued, mirroring HTTP/1.1's per-request
-        lifetime in the server (no trailers, no streaming
-        responses on h2 yet — those come with the reactor wiring).
+        lifetime in the server. When ``resp.trailers`` is non-empty the
+        response is framed as HEADERS [+ DATA] + trailing HEADERS with
+        END_STREAM on the trailing block (the gRPC-over-HTTP/2 shape);
+        otherwise it frames as a single buffered response.
+
+        ponytail: still no streaming-response bodies on h2 here (one
+        buffered DATA frame per stream). Chunked/flow-controlled h2
+        response bodies come with the streaming reactor wiring.
         """
         if sid not in self.conn.streams:
             raise Error("h2: emit_response on unknown stream")
@@ -601,11 +607,29 @@ struct H2Connection(Defaultable, Movable):
             ):
                 continue
             hdrs.append(HpackHeader(lk, v))
-        var frames = self.conn.make_response(
+        # Trailing HEADERS (e.g. gRPC ``grpc-status``): only regular
+        # field names are legal after the leading block, and the
+        # forbidden-connection-header filter is unnecessary because
+        # trailers never carry hop-by-hop fields in practice.
+        var trailers = List[HpackHeader]()
+        for i in range(len(resp.trailers._keys)):
+            var tk = resp.trailers._keys[i]
+            var tv = resp.trailers._values[i]
+            var ltk = String(capacity=tk.byte_length() + 1)
+            var tkp = tk.unsafe_ptr()
+            for j in range(tk.byte_length()):
+                var tc = Int(tkp[j])
+                if tc >= 65 and tc <= 90:
+                    ltk += chr(tc + 32)
+                else:
+                    ltk += chr(tc)
+            trailers.append(HpackHeader(ltk, tv))
+        var frames = self.conn.make_response_with_trailers(
             sid,
             resp.status,
             Span[HpackHeader, _](hdrs),
             Span[UInt8, _](resp.body),
+            Span[HpackHeader, _](trailers),
         )
         for i in range(len(frames)):
             var bytes = encode_frame(frames[i])

@@ -38,6 +38,11 @@ Public re-exports:
 - :class:`GrpcUnary` -- the per-method handler trait the
   application implements; receives a decoded request payload
   and returns either response bytes or a non-OK status.
+- :class:`GrpcService` -- adapts a :class:`GrpcUnary` handler
+  into a plain :trait:`flare.http.Handler` so it serves over the
+  unified :class:`flare.http.HttpServer` H2 reactor with no
+  bespoke glue; carries ``grpc-status`` in HTTP/2 trailers and
+  enforces ``grpc-timeout`` deadlines.
 - :class:`GrpcRequestHeaders` -- typed carrier for the H2
   request-HEADERS field set; ``Optional[String]`` covers
   ``grpc-timeout`` / ``grpc-accept-encoding``.
@@ -79,6 +84,7 @@ from .server import (
     GrpcCallContext,
     GrpcCallOutcome,
     GrpcRequestHeaders,
+    GrpcService,
     GrpcUnary,
     GrpcUnaryReply,
     emit_trailing_headers_status,

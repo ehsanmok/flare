@@ -111,6 +111,7 @@ struct GrpcClient(Movable):
         service_method: String,
         request: Span[UInt8, _],
         metadata: GrpcMetadata = GrpcMetadata(),
+        timeout_ms: Int = 0,
     ) raises -> GrpcCallResult:
         """Invoke a unary RPC.
 
@@ -123,6 +124,10 @@ struct GrpcClient(Movable):
             metadata: optional initial metadata (text entries become
                 request headers; binary ``-bin`` entries are skipped in
                 this unary v1).
+            timeout_ms: optional call deadline in milliseconds. When
+                ``> 0`` it is emitted as the ``grpc-timeout`` header
+                (``<n>m`` millisecond form) so a deadline-aware server
+                can abort the RPC and reply ``DEADLINE_EXCEEDED``.
 
         Returns:
             A :class:`GrpcCallResult` with the RPC status + reply bytes.
@@ -143,6 +148,8 @@ struct GrpcClient(Movable):
         req.headers.set("te", "trailers")
         req.headers.set("grpc-encoding", "identity")
         req.headers.set("grpc-accept-encoding", "identity")
+        if timeout_ms > 0:
+            req.headers.set("grpc-timeout", String(timeout_ms) + "m")
         var entries = metadata.entries()
         for i in range(len(entries)):
             if entries[i].is_binary:

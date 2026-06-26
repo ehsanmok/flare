@@ -578,3 +578,66 @@ struct Connection(Copyable, Defaultable, Movable):
             df.payload = pl^
             frames.append(df^)
         return frames^
+
+    def make_response_with_trailers(
+        mut self,
+        sid: StreamId,
+        status: Int,
+        headers: Span[HpackHeader, _],
+        body: Span[UInt8, _],
+        trailers: Span[HpackHeader, _],
+    ) -> List[Frame]:
+        """Produce ``HEADERS [+ DATA] + trailing-HEADERS`` frames for ``sid``.
+
+        Unlike :meth:`make_response`, END_STREAM rides on the trailing
+        HEADERS block (RFC 9113 6.10), not on the initial HEADERS or the
+        DATA frame. This is the gRPC-over-HTTP/2 response shape: the
+        ``grpc-status`` (and optional ``grpc-message``) live in trailers
+        that close the stream. The trailing block carries only regular
+        fields -- pseudo-headers are forbidden after the leading block,
+        so the caller must pass non-colon names only.
+
+        If ``trailers`` is empty this degrades to plain
+        :meth:`make_response` semantics so callers can route every
+        response through one path.
+        """
+        if len(trailers) == 0:
+            return self.make_response(sid, status, headers, body)
+        var frames = List[Frame]()
+        # Leading HEADERS: :status + real headers, never END_STREAM
+        # (a body and/or the trailers still follow).
+        var hh = List[HpackHeader]()
+        hh.append(HpackHeader(":status", String(status)))
+        for i in range(len(headers)):
+            hh.append(headers[i].copy())
+        var enc = self.hpack_encoder.encode(Span[HpackHeader, _](hh))
+        var hf = Frame()
+        hf.header.type = FrameType.HEADERS()
+        hf.header.stream_id = sid
+        hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+        hf.payload = enc^
+        frames.append(hf^)
+        if len(body) > 0:
+            var df = Frame()
+            df.header.type = FrameType.DATA()
+            df.header.stream_id = sid
+            # No END_STREAM: the trailing HEADERS below closes the stream.
+            df.header.flags = FrameFlags()
+            var pl = List[UInt8](capacity=len(body))
+            for i in range(len(body)):
+                pl.append(body[i])
+            df.payload = pl^
+            frames.append(df^)
+        var tl = List[HpackHeader]()
+        for i in range(len(trailers)):
+            tl.append(trailers[i].copy())
+        var tenc = self.hpack_encoder.encode(Span[HpackHeader, _](tl))
+        var tf = Frame()
+        tf.header.type = FrameType.HEADERS()
+        tf.header.stream_id = sid
+        tf.header.flags = FrameFlags(
+            FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
+        )
+        tf.payload = tenc^
+        frames.append(tf^)
+        return frames^

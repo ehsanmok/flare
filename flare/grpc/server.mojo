@@ -51,9 +51,13 @@ References:
 
 from std.collections import List, Optional
 from std.memory import Span
+from std.time import perf_counter_ns
 
 from flare.crypto.base64 import base64_encode
+from flare.http.handler import Handler
 from flare.http.proto.ascii import ascii_lower
+from flare.http.request import Request
+from flare.http.response import Response
 from flare.http.simd_parsers import simd_memmem
 
 from .framing import (
@@ -65,6 +69,7 @@ from .framing import (
 from .metadata import GrpcMetadata, GrpcMetadataEntry
 from .status import (
     GRPC_STATUS_OK,
+    GRPC_STATUS_DEADLINE_EXCEEDED,
     GRPC_STATUS_INTERNAL,
     GRPC_STATUS_INVALID_ARGUMENT,
     GrpcStatus,
@@ -538,3 +543,149 @@ def run_unary_call[
             GrpcUnaryReply.err(GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e)))
         )
     return _outcome_from_reply(reply^)
+
+
+# ── Reactor-mounted unary service (HttpServer H2) ─────────────────────────────
+
+
+def _grpc_headers_from_request(req: Request) raises -> GrpcRequestHeaders:
+    """Lift an HTTP/2 :class:`Request` into the typed
+    :class:`GrpcRequestHeaders` the sans-I/O adapter consumes.
+
+    ``:method`` / ``:path`` arrive on ``req.method`` / ``req.url`` (the
+    H2 reactor already mapped the pseudo-headers); the gRPC framing
+    fields come off the regular header map. Application metadata is the
+    set of non-reserved, non-framing text headers; ``-bin`` keys are
+    skipped here (their wire value is base64 and the unary v1 client
+    omits them too).
+    """
+    var content_type = req.headers.get("content-type")
+    var te = req.headers.get("te")
+    var timeout = Optional[String]()
+    var to = req.headers.get("grpc-timeout")
+    if to.byte_length() > 0:
+        timeout = Optional[String](to)
+    var accept_encoding = Optional[String]()
+    var ae = req.headers.get("grpc-accept-encoding")
+    if ae.byte_length() > 0:
+        accept_encoding = Optional[String](ae)
+    var meta = GrpcMetadata()
+    for i in range(len(req.headers._keys)):
+        var k = ascii_lower(req.headers._keys[i])
+        # Skip pseudo-headers, framing fields, and reserved grpc-* keys
+        # (those are framework-managed). ``-bin`` keys carry base64 on
+        # the wire; decoding them is a future-phase concern.
+        if (
+            k == "content-type"
+            or k == "te"
+            or k == "host"
+            or k.startswith("grpc-")
+            or k.startswith(":")
+        ):
+            continue
+        # ``append_text`` rejects reserved/``-bin`` keys by raising; we
+        # swallow that so a stray binary header just isn't forwarded.
+        try:
+            meta.append_text(k, req.headers._values[i])
+        except:
+            pass
+    return GrpcRequestHeaders(
+        method=req.method,
+        path=req.url,
+        content_type=content_type^,
+        te=te^,
+        timeout=timeout^,
+        accept_encoding=accept_encoding^,
+        initial_metadata=meta^,
+    )
+
+
+def _response_from_outcome(var outcome: GrpcCallOutcome) raises -> Response:
+    """Pack a :class:`GrpcCallOutcome` into an HTTP/2 :class:`Response`.
+
+    The reply rides as ``:status=200`` + ``content-type:
+    application/grpc`` with the LPM frame in the body; ``grpc-status`` /
+    ``grpc-message`` (+ any text trailing metadata) land in
+    ``Response.trailers`` so the H2 reactor frames them as a trailing
+    HEADERS block (END_STREAM). A real gRPC client reads the status off
+    those trailers.
+    """
+    var resp = Response(200, "", outcome.response_data.copy())
+    resp.headers.set("content-type", "application/grpc")
+    var status_trailers = emit_trailing_headers_status(outcome.status)
+    for i in range(len(status_trailers)):
+        resp.trailers.set(status_trailers[i][0], status_trailers[i][1])
+    var entries = outcome.trailing_metadata.entries()
+    for i in range(len(entries)):
+        if entries[i].is_binary:
+            continue
+        resp.trailers.set(
+            entries[i].key,
+            String(unsafe_from_utf8=Span[UInt8, _](entries[i].value)),
+        )
+    return resp^
+
+
+@fieldwise_init
+struct GrpcService[H: Copyable & GrpcUnary & ImplicitlyDestructible](
+    Copyable, Handler, Movable
+):
+    """Adapt a :class:`GrpcUnary` handler into a plain :trait:`Handler`
+    so it serves over the unified :class:`flare.http.HttpServer` H2
+    reactor path -- no bespoke per-RPC glue.
+
+    Mount it like any other handler::
+
+        var svc = GrpcService(EchoHandler())
+        var server = HttpServer.bind(addr)
+        server.serve(svc)   # over h2c / h2
+
+    One H2 stream maps to one unary call: the reactor hands this
+    adapter the assembled :class:`Request` (HEADERS + DATA), the adapter
+    runs :func:`run_unary_call`, and returns a :class:`Response` whose
+    trailers carry ``grpc-status``. The inner handler is copied per call
+    (``H: Copyable``) so the immutable ``serve`` borrow holds while
+    ``serve_unary`` mutates its own copy -- unary handlers are config-
+    only in practice, so the copy is cheap.
+
+    Deadlines: when the client sends ``grpc-timeout`` the adapter
+    enforces it as a wall-clock ceiling on the handler invocation and
+    returns ``DEADLINE_EXCEEDED`` if the handler overruns.
+
+    ponytail: deadline enforcement is a post-hoc elapsed check, not a
+    cooperative mid-call cancel (the handler runs to completion, then we
+    compare elapsed vs budget). Ceiling: a runaway handler still burns
+    its full time before the status flips. Upgrade path: thread a
+    :class:`flare.http.Cancel` into a cancel-aware ``GrpcUnary`` variant
+    and flip it from a deadline timer.
+    """
+
+    var handler: Self.H
+
+    def serve(self, req: Request) raises -> Response:
+        var headers = _grpc_headers_from_request(req)
+        var budget_us = UInt64(0)
+        if Bool(headers.timeout):
+            var ts = headers.timeout.value()
+            if ts.byte_length() > 0:
+                try:
+                    budget_us = _parse_grpc_timeout(ts)
+                except:
+                    budget_us = UInt64(0)
+        var start_ns = perf_counter_ns()
+        var h = self.handler.copy()
+        var outcome = run_unary_call[Self.H](
+            h, headers, Span[UInt8, _](req.body)
+        )
+        if budget_us > UInt64(0):
+            var elapsed_us = UInt64((perf_counter_ns() - start_ns) // 1_000)
+            if elapsed_us > budget_us:
+                outcome = _outcome_from_reply(
+                    GrpcUnaryReply.err(
+                        GrpcStatus.err(
+                            GRPC_STATUS_DEADLINE_EXCEEDED,
+                            String("deadline exceeded"),
+                        )
+                    )
+                )
+        return _response_from_outcome(outcome^)
