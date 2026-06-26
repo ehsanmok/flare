@@ -1029,7 +1029,24 @@ struct HttpServer(Movable):
 
         For plain ``Handler``s that don't observe cancellation, wrap
         with ``WithCancel[H](inner=h)`` to plug them into this entry
-        point unchanged.
+        point unchanged. This is the **shared-middleware path** for the
+        cancel-aware reactor: a full ``Handler`` middleware stack over a
+        ``Router`` composes directly, because every middleware layer is
+        itself a ``Handler`` and ``WithCancel`` bridges the whole stack
+        in one wrap (cancel-awareness composes with routing)::
+
+            var r = Router()
+            r.get("/", home)
+            var stack = Logger(RequestId(r^), prefix="[app]")
+            var srv = HttpServer.bind(SocketAddr.localhost(8080))
+            srv.serve_cancellable(WithCancel(stack^))
+
+        To run the *same* stack inside a streaming front (one process,
+        one logging/auth/routing stack behind both a REST control plane
+        and a token-streaming endpoint), call ``stack.serve(req)`` in the
+        ``StreamHandler`` and frame the result with
+        ``StreamConn.send_response`` (see
+        :mod:`flare.http.streaming_server`).
 
         Args:
             handler: Cancel-aware request handler (ownership transferred).

@@ -58,6 +58,21 @@ typed and usable:
 Together this removes the need for a hand-rolled context of ``Int``
 addresses and the ``alloc[...](max_slots)`` slot tables + free stack a
 raw-reactor front would otherwise carry.
+
+Shared middleware with the request/response path
+-------------------------------------------------
+
+``serve`` (request/response ``Handler``) and ``serve_streaming``
+(event-lifecycle ``StreamHandler``) are distinct entry points, but they
+share one middleware stack through ``StreamConn.send_response``: build a
+single ``Handler`` stack (e.g. ``Logger[RequestId[Router]]``), run it in
+``on_open`` via ``stack.serve(req)``, and frame the resulting
+``Response`` onto the connection with ``conn.send_response(resp)`` before
+streaming the tail with ``conn.send``. This lets one process put a REST
+control plane and a token-streaming endpoint behind the same
+logging / request-id / routing stack. The request/response counterpart
+is ``HttpServer.serve_cancellable(WithCancel(stack^))`` -- see that
+method's docstring.
 """
 
 from std.collections import Optional
@@ -66,6 +81,9 @@ from std.memory import memcpy
 
 from .async_body import ChunkPoll, UpstreamChunkSource
 from .cancel import Cancel, CancelCell, CancelReason
+from .headers import _eq_icase
+from .response import Response
+from ._server.write import _status_reason
 from flare.net import NetworkError
 from flare.net._libc import _recv, _send, _strerror, MSG_NOSIGNAL
 from flare.tcp import TcpStream
@@ -500,6 +518,61 @@ struct StreamConn(Movable):
         ``conn.send("data: " + line + \"\\n\")``. Appends the string's
         UTF-8 bytes with the same coalescing as ``send(Span[UInt8, _])``."""
         self.send(text.as_bytes())
+
+    def send_response(mut self, resp: Response, keep_alive: Bool = False):
+        """Queue a ``Handler``-produced ``Response`` as this stream's
+        response head (and fixed body, if any).
+
+        This is the shared-middleware bridge between ``serve`` and
+        ``serve_streaming``: build one ``Handler`` middleware stack
+        (e.g. ``Logger[RequestId[Router]]``), call ``stack.serve(req)``
+        inside ``on_open``, then ``conn.send_response(resp)`` -- the
+        streaming front gets the exact logging / request-id / routing
+        behaviour the request/response path has, and keeps
+        ``conn.send(...)`` for the streamed tail (SSE tokens, relayed
+        chunks). Without this a streaming front had to hand-roll its
+        status line and headers as a raw string, bypassing the
+        middleware stack entirely (the gap in section 5.2).
+
+        ``Content-Length`` is emitted from the body length unless the
+        response already declares ``Transfer-Encoding`` or
+        ``Content-Length`` (chunked / SSE fronts set ``Transfer-Encoding``
+        and stream the body via ``send``). ``Connection`` is always set
+        from ``keep_alive`` (any inbound ``Connection`` header is
+        dropped). ponytail: HTTP/1.x framing only -- a streaming front
+        speaks h1 to the client; h2/h3 response heads have their own
+        framing on those paths.
+        """
+        var reason = resp.reason
+        if reason.byte_length() == 0:
+            reason = _status_reason(resp.status)
+        var head = String("HTTP/1.1 ")
+        head += String(resp.status)
+        head += " "
+        head += reason
+        head += "\r\n"
+        for i in range(resp.headers.len()):
+            var k = resp.headers._keys[i]
+            if _eq_icase(k, "connection"):
+                continue
+            head += k
+            head += ": "
+            head += resp.headers._values[i]
+            head += "\r\n"
+        if not resp.headers.contains(
+            "transfer-encoding"
+        ) and not resp.headers.contains("content-length"):
+            head += "Content-Length: "
+            head += String(len(resp.body))
+            head += "\r\n"
+        if keep_alive:
+            head += "Connection: keep-alive\r\n"
+        else:
+            head += "Connection: close\r\n"
+        head += "\r\n"
+        self.send(head)
+        if len(resp.body) > 0:
+            self.send(Span[UInt8, _](resp.body))
 
     @always_inline
     def pending_out(self) -> Int:
