@@ -55,10 +55,15 @@ an example file. For layering and the request lifecycle, see
 | Surface | Where |
 |---|---|
 | `HttpClient(base_url, auth=...)`, `HttpClient(prefer_h2c=True)` — version-aware over TLS+ALPN; `prefer_h2c=True` opts into HTTP/2 cleartext via prior knowledge | [`http_get.mojo`](../examples/basic/http_get.mojo), [`http2_client.mojo`](../examples/advanced/http2_client.mojo) |
-| `HttpClient.with_pool(...)` — HTTP/1.1 connection pool keyed on `(scheme, host, port)`, idle reuse, per-origin caps, stale-conn retry; opt-in via the builder | [`client_pool.mojo`](../examples/advanced/client_pool.mojo) |
+| `HttpClient.with_pool(...)` — connection pool keyed on `(scheme, host, port)`, idle reuse, per-origin caps, stale-conn retry. Covers cleartext HTTP/1.1 and, over TLS, a `TlsConnectionPool` for HTTPS keep-alive (the whole established `TlsStream` is pooled); `idle_count()` / `tls_idle_count()` expose pool depth | [`client_pool.mojo`](../examples/advanced/client_pool.mojo), [`tests/http/test_tls_client_pool.mojo`](../tests/http/test_tls_client_pool.mojo) |
 | `HttpClient(h2c_upgrade=True)` — h2c via Upgrade (RFC 7540 §3.2): client emits `Upgrade: h2c` + `HTTP2-Settings` on the first request, reads 101, carries the peer SETTINGS forward into a fresh h2 connection | [`h2c_client.mojo`](../examples/advanced/h2c_client.mojo), [`tests/http/test_h2c_client_upgrade.mojo`](../tests/http/test_h2c_client_upgrade.mojo) |
+| `HttpClient(prefer_h3=True)` / `.with_prefer_h3()` — HTTP/3 over QUIC: per-origin `Alt-Svc` (RFC 7838) discovery + cache, happy-eyeballs race of h3 against h2 on first contact, transparent fallback to h2/h1 on any QUIC failure. Idempotent requests may ride 0-RTT on a resumed connection (replaying at 1-RTT if the server rejects). h3 connections are pooled + multiplexed per origin | [`http3_client.mojo`](../examples/advanced/http3_client.mojo), [`tests/http/test_h3_live_dial.mojo`](../tests/http/test_h3_live_dial.mojo) |
+| `.with_redirect_policy(...)` — `RedirectPolicy.follow_all()` / `.same_origin_only()` / `.deny()` factories; modes on `RedirectMode.FOLLOW_ALL` / `.SAME_ORIGIN_ONLY` / `.DENY`; `TooManyRedirects` error | `flare.http.{redirect_policy,error}` |
+| `.with_cookies()` — pointer-backed `CookieStore` cookie jar; captures `Set-Cookie` and replays matching cookies on subsequent requests | [`tests/http/test_cookie_store.mojo`](../tests/http/test_cookie_store.mojo) |
+| `.with_retry(RetryPolicy)` — bounded retry + backoff for idempotent requests | [`tests/http/test_client_ux.mojo`](../tests/http/test_client_ux.mojo) |
+| `auto_decompress=True` (default) — transparent response body decompression (gzip / brotli) driven by `Content-Encoding` | [`tests/http/test_client_ux.mojo`](../tests/http/test_client_ux.mojo) |
+| `HttpClient.send_chunked(method, url, source)` — streaming request upload from a `ChunkSource` via chunked transfer-encoding (one chunk in flight, body never materialized) | [`tests/http/test_client_stream_upload.mojo`](../tests/http/test_client_stream_upload.mojo) |
 | Module-level helpers: `get`, `post`, `put`, `patch`, `delete`, `head` — `post` with `String` body sets `Content-Type: application/json` automatically | `flare.http.client` |
-| `RedirectPolicy.follow_all()` / `.same_origin_only()` / `.deny()` (default) factories; modes live on `RedirectMode.FOLLOW_ALL` / `.SAME_ORIGIN_ONLY` / `.DENY`; `TooManyRedirects` error | `flare.http.{redirect_policy,error}` |
 | `Auth`, `BasicAuth(user, pass)`, `BearerAuth(token)` — both wires | `flare.http.auth` |
 | `Response.json()`, `.text()`, `.raise_for_status()`, `.ok()`, `.status` | `flare.http.response` |
 
@@ -299,10 +304,9 @@ serves a single `Handler` over h1 + h2 + h3 simultaneously.
 | QUIC transport-frame codec (RFC 9000 §19 — all 22 frame types: PADDING, PING, ACK / ACK_ECN, RESET_STREAM, STOP_SENDING, CRYPTO, NEW_TOKEN, STREAM, MAX_DATA, MAX_STREAM_DATA, MAX_STREAMS_BIDI / _UNI, DATA_BLOCKED, STREAM_DATA_BLOCKED, STREAMS_BLOCKED_BIDI / _UNI, NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, PATH_CHALLENGE, PATH_RESPONSE, CONNECTION_CLOSE (transport + application), HANDSHAKE_DONE): typed payload structs (`AckFrame`, `StreamFrame`, `CryptoFrame`, ...) plus the `FrameHandler` trait + `parse_frame_into[H](buf, handler)` zero-carrier dispatcher (the parser walks one wire frame and fires the matching `on_*` callback on the caller's handler -- no intermediate union allocation), the per-type `encode_*(payload, mut out: List[UInt8])` writers that append to a caller-owned buffer, and the `FRAME_TYPE_*` constants | `flare.quic.frame` |
 | QUIC transport parameters (RFC 9000 §18): `TransportParameters`, `encode_transport_parameters`, `decode_transport_parameters`, `empty_transport_parameters`; all `TP_ID_*` identifiers and defaults (`DEFAULT_MAX_UDP_PAYLOAD_SIZE`, `DEFAULT_ACK_DELAY_EXPONENT`, `DEFAULT_MAX_ACK_DELAY`, `DEFAULT_ACTIVE_CONNECTION_ID_LIMIT`) | `flare.quic.transport_params` |
 | QUIC connection + stream state machines (RFC 9000 §3, §10, §13): `Connection`, `Stream`, `ConnectionEvents`, `handle_frame`, `mark_handshake_complete`, `is_idle_timeout_expired`, `connection_close`, `new_connection`, `new_stream`, `empty_events`; `CONN_STATE_*` and `STREAM_STATE_*` enums | `flare.quic.state` |
-| QUIC congestion control (RFC 9438 CUBIC + RFC 9406 HyStart++ + RFC 9002 §7.7 pacing) as pure functions over a `CcState` value: `cc_init`, `on_packet_sent`, `on_ack_received`, `on_packets_lost`, `on_round_start`, `pacing_budget`, `pacing_rate_bytes_per_second`, `can_send` | `flare.quic.cc` |
-| QUIC congestion controller trait (RFC 9438 CUBIC default + RFC 9002 Appendix B Reno fallback): `CongestionController` trait, `CubicController`, `RenoController`, `CcChoice` carrier. Picks deterministic Reno for tests and CUBIC for production via a single config field | `flare.quic.cc` |
+| QUIC congestion control (RFC 9438 CUBIC + RFC 9406 HyStart++ + RFC 9002 §7.7 pacing) and the `CongestionController` trait (CUBIC default + Reno fallback) -- **planned, not yet implemented** (tracked as the v0.9.x loss-recovery + congestion-control follow-up; `flare.quic.cc` does not exist in the tree today). The 1-RTT request path currently relies on a minimal PTO timer (`flare.quic._loss_recovery`) without an RTT-aware controller | (planned) |
 | QUIC initial-secret + AEAD key schedule (RFC 9001 §5 + RFC 5869 HKDF): `hkdf_extract`, `hkdf_expand`, `hkdf_expand_label`, `derive_initial_secrets`, `QuicAead` enum, `QuicCrypto` trait, `OpenSslQuicCrypto`. OpenSSL AEAD backend (AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305) + AES-ECB / ChaCha20 header-protection mask per RFC 9001 §5.3 / §5.4; key schedule is RFC 9001 Appendix A.1 byte-exact, AEAD vectors are RFC 9001 Appendix A byte-exact, both pinned by `tests/quic/test_crypto.mojo` + `tests/quic/test_openssl_quic_crypto.mojo` + `tests/quic/test_rfc9001_appendix_a.mojo`; fuzz-covered (`fuzz-quic-packet-decrypt`) | `flare.quic.crypto` |
-| QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + non-blocking `recv_from` drain + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4, PTO + idle + ack-delay timers on the shared TimerWheel, CC + pacing driven from the egress path; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
+| QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + non-blocking `recv_from` drain + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4. Idle-timeout dispatch is wired today; PTO / ack-delay timer dispatch, server-side 1-RTT retransmit, stateless reset, and CC + pacing are tracked v0.9.x follow-ups (see the congestion-control row above); fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
 | HTTP/3 server driver: `H3Connection` (per-connection driver mounted on `Handler`), `H3ConnectionConfig` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `H3StreamType` (RFC 9114 §6.2 codepoints). `feed_stream_chunk` drives `H3RequestReader` -> `Handler` -> response writer; `take_response_frames` drains encoded bytes; CONTROL + QPACK uni-stream dispatch consumes SETTINGS / GOAWAY / MAX_PUSH_ID; fuzz-covered (`fuzz-h3-server`) | `flare.h3.server` |
 | ALPN -> wire-protocol dispatcher: `WireProtocol` codepoints (UNKNOWN / HTTP_1_1 / H2C / HTTP_2 / HTTP_3), `ALPN_HTTP_1_1` / `ALPN_HTTP_2` / `ALPN_HTTP_3` identifiers, `dispatch_alpn`, `dispatch_h2c_upgrade`, `negotiate_alpn`, `wire_protocol_name`. The pure decision function the reactor consults after a TLS handshake completes | `flare.http.alpn_dispatch` |
 | rustls QUIC binding: `RustlsQuicConfig`, `RustlsQuicAcceptor`, `RustlsQuicSession`, `RustlsQuicError`, `QuicEncryptionLevel`. C ABI shim over `rustls::quic::ServerConnection` (rustls 0.23); per-level CRYPTO frames feed / drain through `flare_rustls_quic_feed_crypto` / `_take_crypto`, negotiated ALPN via `flare_rustls_quic_alpn` | `flare.tls.rustls_quic` |
@@ -314,13 +318,19 @@ serves a single `Handler` over h1 + h2 + h3 simultaneously.
 
 ## gRPC
 
-gRPC primitives on top of the HTTP/2 reactor. The bottom two
-wire layers (LPM framing, canonical Status codes, Metadata
-carrier) ship as sans-I/O codecs; the unary call shape ships
-as a server adapter that maps an HTTP/2 stream to a typed
-`GrpcUnary` handler. Server-streaming, client-streaming,
-bidirectional, the client side, and proto3 codegen are
-deferred to follow-ups.
+gRPC primitives on top of HTTP/2. The bottom two wire layers (LPM
+framing, canonical Status codes, Metadata carrier) ship as sans-I/O
+codecs. The **unary server** call shape ships as a *sans-I/O* adapter
+(`GrpcUnary` trait + `run_unary_call`) that maps an already-parsed
+HTTP/2 stream to a typed handler -- it is not yet auto-mounted on
+`HttpServer` (the reactor bridge that feeds it H2 HEADERS/DATA is a
+tracked v0.9.x follow-up). The **client** ships unary (`GrpcClient`)
+plus server-streaming / client-streaming / bidirectional
+(`call_server_streaming` / `call_client_streaming` / `call_bidi` ->
+`GrpcServerStream` / `GrpcBidiStream`). Still deferred: a
+reactor-mounted server adapter, server-side streaming, proto3 codegen,
+reflection, health checking, interceptors, deadline enforcement, and
+message-level compression.
 
 | Surface | Where |
 |---|---|
