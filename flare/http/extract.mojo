@@ -882,7 +882,7 @@ struct Extracted[H: Copyable & Defaultable & Handler & Movable](
                 )
                 field.apply(req)
             except e:
-                return _bad_request_from_error(e, expose)
+                return _extractor_error_response(e, expose)
         return h.serve(req)
 
 
@@ -935,3 +935,42 @@ def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
     except:
         pass
     return resp^
+
+
+def _extractor_error_response(e: Error, expose: Bool = False) -> Response:
+    """Map an extractor's raised error to the right 4xx response.
+
+    A failed ``Authorization`` parse (``flare.http.auth_extract``
+    raises :class:`AuthError`, which renders as ``AuthError(...)``)
+    means *not authenticated* -> ``401 Unauthorized`` with a
+    ``WWW-Authenticate: Bearer`` challenge, not the catch-all 400 that
+    every other extractor failure (bad path int, missing query param,
+    ...) maps to.
+
+    The concrete error type is erased through the bare-``raises``
+    ``Extractor`` trait, so -- as with :func:`flare.errors.map_handler_error`
+    -- we recover intent from the typed error's ``Writable`` rendering
+    (the ``AuthError(`` prefix is fixed in its ``write_to``). The
+    detail is sanitized by default and only echoed under ``expose``.
+
+    ponytail: string-prefix recovery (not an ``import AuthError`` +
+    typed catch) deliberately avoids the ``extract -> auth_extract ->
+    extract`` import cycle; the prefix is the contract.
+    """
+    var msg = String(e)
+    if msg.startswith("AuthError("):
+        print("[flare:unauthorized] ", msg)
+        var body_str = "Unauthorized" if not expose else msg
+        var body = List[UInt8](capacity=body_str.byte_length())
+        for b in body_str.as_bytes():
+            body.append(b)
+        var resp = Response(
+            status=Status.UNAUTHORIZED, reason="Unauthorized", body=body^
+        )
+        try:
+            resp.headers.set("Content-Type", "text/plain; charset=utf-8")
+            resp.headers.set("WWW-Authenticate", "Bearer")
+        except:
+            pass
+        return resp^
+    return _bad_request_from_error(e, expose)

@@ -59,6 +59,7 @@ The parsers (``parse_bearer_token``, ``parse_basic_credentials``,
 can pattern-match on the failure mode:
 
 ```mojo
+from flare.http import unauthorized, bad_request
 from flare.http.auth_extract import parse_bearer_token, AuthError
 
 try:
@@ -69,6 +70,12 @@ except e:
     elif e == AuthError.WRONG_SCHEME:
         return bad_request("Bearer required")
 ```
+
+When a ``BearerExtract`` / ``BasicExtract`` is used as an
+``Extracted[H]`` field, the framework does this mapping for you: a
+raised :class:`AuthError` becomes a sanitized ``401 Unauthorized``
+with a ``WWW-Authenticate: Bearer`` challenge (see
+``flare.http.extract._extractor_error_response``).
 
 The ``BearerExtract`` / ``BasicExtract`` extractors keep the
 :class:`flare.http.extract.Extractor` trait's bare-``raises``

@@ -1351,12 +1351,14 @@ from ._server.parse_util import (
 from ._server.responses import (
     _string_to_bytes,
     bad_request,
+    forbidden,
     internal_error,
     not_found,
     ok,
     ok_json,
     ok_json_value,
     redirect,
+    unauthorized,
 )
 from ._server.write import (
     _append_int,

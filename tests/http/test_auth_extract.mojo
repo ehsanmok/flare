@@ -36,6 +36,15 @@ from std.testing import (
     assert_true,
 )
 
+from flare.http import (
+    Extracted,
+    Handler,
+    Method,
+    Response,
+    forbidden,
+    ok,
+    unauthorized,
+)
 from flare.http.auth_extract import (
     AuthError,
     BasicCredentials,
@@ -319,6 +328,67 @@ def test_auth_error_write_to_renders_variant_and_detail() raises:
 def test_auth_error_write_to_omits_empty_detail() raises:
     var e = AuthError(_variant=5, detail=String(""))
     assert_equal(String(e), String("AuthError(EMPTY_TOKEN)"))
+
+
+# ── unauthorized() / forbidden() builders ───────────────────────────────────
+
+
+def test_unauthorized_builder_sets_challenge() raises:
+    var resp = unauthorized()
+    assert_equal(resp.status, 401)
+    assert_equal(resp.headers.get("WWW-Authenticate"), String("Bearer"))
+
+
+def test_unauthorized_builder_custom_challenge() raises:
+    var resp = unauthorized(String("nope"), challenge=String('Basic realm="x"'))
+    assert_equal(resp.status, 401)
+    assert_equal(
+        resp.headers.get("WWW-Authenticate"), String('Basic realm="x"')
+    )
+
+
+def test_unauthorized_builder_omits_challenge_when_empty() raises:
+    var resp = unauthorized(String("nope"), challenge=String(""))
+    assert_equal(resp.status, 401)
+    assert_false(resp.headers.contains("WWW-Authenticate"))
+
+
+def test_forbidden_builder() raises:
+    var resp = forbidden()
+    assert_equal(resp.status, 403)
+
+
+# ── Extracted[BearerExtract] maps AuthError -> 401 ──────────────────────────
+
+
+@fieldwise_init
+struct _NeedsBearer(Copyable, Defaultable, Handler, Movable):
+    var token: BearerExtract
+
+    def __init__(out self):
+        self.token = BearerExtract()
+
+    def serve(self, req: Request) raises -> Response:
+        return ok("token=" + self.token.token)
+
+
+def test_extracted_bearer_missing_header_is_401() raises:
+    var h = Extracted[_NeedsBearer]()
+    var req = Request(method=Method.GET, url="/")
+    var resp = h.serve(req)
+    assert_equal(resp.status, 401)
+    assert_equal(resp.headers.get("WWW-Authenticate"), String("Bearer"))
+    # Sanitized body by default (no AuthError detail leak).
+    assert_equal(resp.text(), String("Unauthorized"))
+
+
+def test_extracted_bearer_present_succeeds() raises:
+    var h = Extracted[_NeedsBearer]()
+    var req = Request(method=Method.GET, url="/")
+    req.headers.set("Authorization", "Bearer abc.def")
+    var resp = h.serve(req)
+    assert_equal(resp.status, 200)
+    assert_equal(resp.text(), String("token=abc.def"))
 
 
 def main() raises:

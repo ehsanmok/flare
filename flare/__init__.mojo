@@ -608,6 +608,8 @@ from .http.server import (
     ShutdownReport,
     ok,
     bad_request,
+    unauthorized,
+    forbidden,
     not_found,
     internal_error,
     redirect,

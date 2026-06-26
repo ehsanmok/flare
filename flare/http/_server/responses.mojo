@@ -142,6 +142,47 @@ def not_found(path: String = "") -> Response:
     return resp^
 
 
+def unauthorized(
+    msg: String = "Unauthorized", challenge: String = "Bearer"
+) -> Response:
+    """Create a 401 Unauthorized response.
+
+    Sets ``WWW-Authenticate`` to ``challenge`` (default ``"Bearer"``)
+    per RFC 9110 - a 401 MUST carry the challenge so clients know how
+    to authenticate. Pass ``challenge=""`` to omit it.
+    """
+    var resp = Response(
+        status=Status.UNAUTHORIZED,
+        reason="Unauthorized",
+        body=_string_to_bytes(msg),
+    )
+    try:
+        resp.headers.set("Content-Type", "text/plain")
+        if challenge.byte_length() > 0:
+            resp.headers.set("WWW-Authenticate", challenge)
+    except:
+        pass
+    return resp^
+
+
+def forbidden(msg: String = "Forbidden") -> Response:
+    """Create a 403 Forbidden response.
+
+    Use when the caller is authenticated but not permitted (contrast
+    with :func:`unauthorized`, which means *not yet authenticated*).
+    """
+    var resp = Response(
+        status=Status.FORBIDDEN,
+        reason="Forbidden",
+        body=_string_to_bytes(msg),
+    )
+    try:
+        resp.headers.set("Content-Type", "text/plain")
+    except:
+        pass
+    return resp^
+
+
 def internal_error(msg: String = "Internal Server Error") -> Response:
     """Create a 500 Internal Server Error response."""
     var resp = Response(
