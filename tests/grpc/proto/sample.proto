@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package flare.sample;
+
+// Exercises the proto_gen.py supported subset: scalars, enum, nested
+// message, repeated scalar (packed read), repeated + singular message.
+
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  RED = 1;
+  GREEN = 2;
+  BLUE = 3;
+}
+
+message Point {
+  int32 x = 1;
+  int32 y = 2;
+  Color color = 3;
+}
+
+message Shape {
+  string name = 1;
+  double area = 2;
+  bool filled = 3;
+  bytes blob = 4;
+  repeated int64 tags = 5;
+  Point origin = 6;
+  repeated Point vertices = 7;
+}

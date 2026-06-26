@@ -331,15 +331,21 @@ enforcement, gzip message-compression negotiation
 (`grpc-accept-encoding` / `grpc-encoding`, request decompress + response
 compress), and chainable interceptors (`Intercepted[I, H]`). A proto3
 wire codec (`ProtoWriter` / `ProtoReader`) is the serializer handlers
-and codegen target, and the standard `grpc.health.v1.Health` Check
-service ships as a mountable handler. The **client** ships unary
+target, and `tools/proto_gen.py` generates Mojo message structs
+(encode/decode) from a `.proto` for the supported subset (messages,
+nested messages, enums, scalars, repeated, singular message fields).
+The standard `grpc.health.v1.Health` Check service ships as a mountable
+handler, and server reflection (`grpc.reflection.v1alpha`) answers
+`list_services`. The **client** ships unary
 (`GrpcClient`, including base64 binary `-bin` metadata) plus
 server-streaming / client-streaming / bidirectional
 (`call_server_streaming` / `call_client_streaming` / `call_bidi` ->
 `GrpcServerStream` / `GrpcBidiStream`). A **server-streaming server**
 ships as `GrpcStreamingService` (one request, N response LPM frames in
 one DATA stream; buffered, not incrementally flushed). Still deferred:
-a full `.proto` file compiler, server reflection, and `Health/Watch`.
+codegen for `service` blocks / maps / oneof, reflection descriptor
+lookups (`file_by_filename` -- needs serialized `FileDescriptorProto`),
+and `Health/Watch`.
 
 | Surface | Where |
 |---|---|

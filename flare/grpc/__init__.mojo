@@ -78,6 +78,13 @@ from .proto import (
     WIRE_I32,
 )
 from .interceptor import GrpcInterceptor, Intercepted
+from .reflection import (
+    ReflectionRequest,
+    ReflectionService,
+    REFLECT_FILE_BY_FILENAME,
+    REFLECT_FILE_CONTAINING_SYMBOL,
+    REFLECT_LIST_SERVICES,
+)
 from .health import (
     HealthService,
     HEALTH_UNKNOWN,
