@@ -50,14 +50,23 @@ ALLOWLISTED_REACTOR_BRIDGES=(
     "flare/http/_unified_reactor_impl.mojo"
     "flare/http/frontend.mojo"
     "flare/http/proto/__init__.mojo"
+    # HttpServer / HttpClient drive H2 directly (Http2Config /
+    # Http2ClientConnection are h2 structs, not shared wire types, so
+    # they cannot move to flare.http.wire). The cycle is acknowledged
+    # here and in flare/__init__.mojo rather than hidden.
+    "flare/http/server.mojo"
+    "flare/http/client.mojo"
 )
 
 violations=0
 
 # Pass 1: flare/http2/** must not import bare ``flare.http``.
 while IFS= read -r -d '' file; do
-    # Find any ``from flare.http`` or ``import flare.http`` statements.
-    matches="$(grep -nE '^(from|import)[[:space:]]+flare\.http\b' "$file" || true)"
+    # Find any ``from flare.http`` / ``import flare.http`` statements, plus
+    # the relative ``from ..http`` form (inside flare/http2 and flare/h3,
+    # ``..http`` resolves to the absolute ``flare.http``). ``http\b`` does
+    # not match ``http2`` so this stays scoped to the parent namespace.
+    matches="$(grep -nE '^(from|import)[[:space:]]+(flare\.http|\.\.http)\b' "$file" || true)"
     if [[ -z "$matches" ]]; then
         continue
     fi
@@ -65,6 +74,11 @@ while IFS= read -r -d '' file; do
         # Extract the import path (the token after ``from`` / ``import``).
         path="$(echo "$line" \
             | sed -E 's/^[0-9]+:[[:space:]]*(from|import)[[:space:]]+([^[:space:]]+).*/\2/')"
+        # Normalize a leading relative ``..`` to its absolute form so the
+        # allowlist comparison below catches relative-import bypasses.
+        if [[ "${path:0:2}" == ".." ]]; then
+            path="flare.${path:2}"
+        fi
         allowed=0
         for prefix in "${ALLOWED_HTTP_SUBPATHS[@]}"; do
             if [[ "$path" == "$prefix" ]] || [[ "$path" == "$prefix."* ]]; then
@@ -94,7 +108,11 @@ while IFS= read -r -d '' file; do
     if [[ "$on_allowlist" -eq 1 ]]; then
         continue
     fi
-    matches="$(grep -nE '^(from|import)[[:space:]]+flare\.http2\b' "$file" || true)"
+    # Catch both the absolute ``flare.http2`` form and the relative
+    # ``..http2`` form (inside flare/http, ``..http2`` resolves to the
+    # absolute ``flare.http2``). The relative form previously slipped
+    # past this lint -- see flare/http/server.mojo + client.mojo.
+    matches="$(grep -nE '^(from|import)[[:space:]]+(flare\.http2|\.\.http2)\b' "$file" || true)"
     if [[ -n "$matches" ]]; then
         echo "check-no-http-http2-cycle: $file: forbidden import (not on reactor-bridge allowlist):" >&2
         while IFS= read -r line; do

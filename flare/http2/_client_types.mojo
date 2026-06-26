@@ -15,7 +15,7 @@ from std.collections import List
 
 from .frame import H2_DEFAULT_FRAME_SIZE
 from .hpack import HpackHeader
-from ..http.response import Response
+from ..http.wire import Response
 
 
 # ── Http2Response ─────────────────────────────────────────────────────────
