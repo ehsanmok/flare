@@ -5,22 +5,22 @@ Two layers:
 1. e2e win: a real loopback QUIC (h3) server + a ``prefer_h3``
    :class:`HttpClient` issuing an idempotent GET. The TLS branch of
    ``_do_request`` routes idempotent + h3-eligible requests through
-   :func:`race_h3_h2`, which spawns the h3 and h2/h1 legs on two OS
-   threads. The h2/h1 leg fast-fails (no TCP listener on the QUIC
-   port -> ECONNREFUSED), so h3 wins and the caller sees a normal 200
-   Response. This drives the real threaded race over the wire.
+   :func:`race_h3_h2_connect`, which spawns the h3 and h2/h1 *connect*
+   legs on two OS threads. The h2/h1 leg fast-fails (no TCP listener on
+   the QUIC port -> ECONNREFUSED), so h3 wins the connect race and the
+   caller sends the request once on the pooled h3 connection, seeing a
+   normal 200 Response.
 
-2. orchestration unit cases: :func:`race_h3_h2` is exercised directly
-   with a synthetic ``thin`` leg so the win/fallback/both-fail picks
-   are deterministic without a second TLS server (there is no
-   TLS-terminating h1+h2 fork harness yet):
-     * both legs succeed   -> h3 response is preferred,
-     * h3 leg raises       -> h2 response is used (transparent
-                              fallback, the point of the race),
-     * both legs raise     -> the combined error is raised.
+2. orchestration unit cases: :func:`race_h3_h2_connect` is exercised
+   directly with a synthetic ``thin`` connect leg so the win/fallback/
+   both-fail picks are deterministic without a second TLS server:
+     * both legs connect   -> RACE_H3 (h3 preferred),
+     * h3 connect raises   -> RACE_H2 (transparent fallback, the point
+                              of the race),
+     * both connects raise -> RACE_NONE.
 
-The scenario is carried in the ``url`` arg (race_h3_h2 hands the same
-url to both legs); the synthetic leg branches on it and on ``is_h3``.
+The scenario is carried in the ``url`` arg (the race hands the same url
+to both legs); the synthetic leg branches on it and on ``is_h3``.
 
 ASan note: the race joins both worker threads before reading either
 result cell (pthread_join is a happens-before barrier) and frees all
@@ -33,9 +33,13 @@ from std.testing import assert_equal, assert_true
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 from flare.http import HttpClient, Request, Response, ok
-from flare.http._client.h3_race import race_h3_h2
+from flare.http._client.h3_race import (
+    RACE_H2,
+    RACE_H3,
+    RACE_NONE,
+    race_h3_h2_connect,
+)
 from flare.http.handler import Handler
-from flare.http.headers import HeaderMap
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import TlsConfig
 from std.pathlib import Path
@@ -126,76 +130,41 @@ def test_race_h3_wins_e2e() raises:
     assert_equal(got_body, String("h3-server"))
 
 
-def _bytes(s: String) -> List[UInt8]:
-    var b = List[UInt8]()
-    for c in s.as_bytes():
-        b.append(c)
-    return b^
-
-
-def _synthetic_leg(
+def _synthetic_connect_leg(
     client_addr: Int,
     is_h3: Bool,
     url: String,
-    method: String,
-    headers: HeaderMap,
-    body: List[UInt8],
-    wire: String,
-) raises -> Response:
-    """Deterministic stand-in for a real protocol leg. The scenario is
+) raises -> Bool:
+    """Deterministic stand-in for a real connect leg. The scenario is
     encoded in ``url``; each leg branches on ``is_h3``."""
     if is_h3:
         if url == "h3-dead" or url == "both-dead":
             raise Error("synthetic h3 down")
-        return Response(200, String("OK"), _bytes(String("h3-won")))
+        return True
     if url == "both-dead":
         raise Error("synthetic h2 down")
-    return Response(200, String("OK"), _bytes(String("h2-won")))
+    return True
 
 
 def test_race_prefers_h3_when_both_ok() raises:
-    var r = race_h3_h2(
-        _synthetic_leg,
-        0,
-        String("both-ok"),
-        String("GET"),
-        HeaderMap(),
-        List[UInt8](),
-        String("h2"),
+    var winner = race_h3_h2_connect(
+        _synthetic_connect_leg, 0, String("both-ok")
     )
-    assert_equal(r.status, 200)
-    assert_equal(r.text(), String("h3-won"))
+    assert_equal(winner, RACE_H3)
 
 
 def test_race_falls_back_to_h2_when_h3_dead() raises:
-    var r = race_h3_h2(
-        _synthetic_leg,
-        0,
-        String("h3-dead"),
-        String("GET"),
-        HeaderMap(),
-        List[UInt8](),
-        String("h2"),
+    var winner = race_h3_h2_connect(
+        _synthetic_connect_leg, 0, String("h3-dead")
     )
-    assert_equal(r.status, 200)
-    assert_equal(r.text(), String("h2-won"))
+    assert_equal(winner, RACE_H2)
 
 
-def test_race_raises_when_both_dead() raises:
-    var raised = False
-    try:
-        _ = race_h3_h2(
-            _synthetic_leg,
-            0,
-            String("both-dead"),
-            String("GET"),
-            HeaderMap(),
-            List[UInt8](),
-            String("h2"),
-        )
-    except:
-        raised = True
-    assert_true(raised, "race must raise when both legs fail")
+def test_race_none_when_both_dead() raises:
+    var winner = race_h3_h2_connect(
+        _synthetic_connect_leg, 0, String("both-dead")
+    )
+    assert_equal(winner, RACE_NONE)
 
 
 def main() raises:
@@ -205,6 +174,6 @@ def main() raises:
     print("OK test_race_prefers_h3_when_both_ok")
     test_race_falls_back_to_h2_when_h3_dead()
     print("OK test_race_falls_back_to_h2_when_h3_dead")
-    test_race_raises_when_both_dead()
-    print("OK test_race_raises_when_both_dead")
+    test_race_none_when_both_dead()
+    print("OK test_race_none_when_both_dead")
     print("test_h3_happy_eyeballs: 4 passed")

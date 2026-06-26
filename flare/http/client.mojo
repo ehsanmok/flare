@@ -95,7 +95,11 @@ from ._client.alt_svc import (
 )
 from ._client.quic_pool import QuicConnectionPool
 from ._client.tls_pool import TlsConnectionPool
-from ._client.h3_race import race_h3_h2
+from ._client.h3_race import (
+    RACE_H3,
+    RACE_NONE,
+    race_h3_h2_connect,
+)
 from ..net.socket import RawSocket
 from ..net._libc import (
     AF_INET,
@@ -139,32 +143,25 @@ def _is_idempotent(method: String) -> Bool:
     )
 
 
-def _race_leg(
+def _race_connect_leg(
     client_addr: Int,
     is_h3: Bool,
     url: String,
-    method: String,
-    headers: HeaderMap,
-    body: List[UInt8],
-    wire: String,
-    auth_header: String,
-) raises -> Response:
-    """Happy-eyeballs leg trampoline: re-materialise the
-    :class:`HttpClient` from its address, parse ``url`` (Url is
-    move-only so each leg parses its own), and run the h3 or h2/h1 path.
-    Passed to :func:`race_h3_h2` so that module needs no HttpClient
-    import. Only the h3 leg mutates client state (the QUIC pool), so the
-    two concurrent legs have a single writer. ``auth_header`` is the
-    redirect-policy-gated Authorization value for this hop."""
+) raises -> Bool:
+    """Happy-eyeballs connect-leg trampoline: re-materialise the
+    :class:`HttpClient` from its address, parse ``url`` (Url is move-only
+    so each leg parses its own), and establish *only the connection* for
+    the h3 or h2/h1 path. Passed to :func:`race_h3_h2_connect` so that
+    module needs no HttpClient import. Only the h3 leg mutates client
+    state (the QUIC pool), so the two concurrent legs have a single
+    writer. Returns ``True`` when the connection established."""
     var client = UnsafePointer[HttpClient, MutUntrackedOrigin](
         unsafe_from_address=client_addr
     )
     var u = Url.parse(url)
     if is_h3:
-        return client[]._send_h3(u, method, headers, body, auth_header)
-    return client[]._send_h2_or_h1_tls(
-        u, method, headers, body, wire, auth_header
-    )
+        return client[]._connect_h3(u)
+    return client[]._connect_h2(u)
 
 
 struct HttpClient(Movable):
@@ -783,6 +780,57 @@ struct HttpClient(Movable):
         for i in range(len(hr.headers)):
             resp.headers.set(hr.headers[i].name, hr.headers[i].value)
         return resp^
+
+    def _connect_h3(self, u: Url) raises -> Bool:
+        """Happy-eyeballs h3 leg: establish a QUIC/h3 connection to
+        ``u``'s origin and leave it idle in the per-origin QUIC pool so a
+        subsequent :meth:`_send_h3` reuses it (no second dial).
+
+        Returns ``True`` once an established connection is pooled. A pool
+        hit (an already-idle connection for this origin) counts as an
+        instant win without re-dialing. Never sends the request -- that
+        is the caller's job on the winning protocol."""
+        var key = QuicConnectionPool.build_key(u.host, Int(u.port))
+        var pooled = self._quic_pool.acquire(key)
+        if pooled:
+            var existing = pooled.take()
+            if existing.is_established():
+                self._quic_pool.release(key, existing^)
+                return True
+            existing.close()
+        var fresh = self._dial_h3(u)
+        if fresh.is_established():
+            self._quic_pool.release(key, fresh^)
+            return True
+        fresh.close()
+        return False
+
+    def _connect_h2(self, u: Url) raises -> Bool:
+        """Happy-eyeballs h2/h1 leg: probe that the proven TLS path is
+        reachable by establishing (and ALPN-negotiating) a TLS
+        connection to ``u``'s origin.
+
+        ponytail: unless the HTTPS keep-alive pool is enabled the probed
+        connection is closed immediately, so the (rarer) h2-wins path
+        re-dials TLS for the real request -- one redundant handshake. An
+        ``http/1.1`` connection is pooled when ``with_pool`` is on so the
+        real request reuses it; ``h2`` is not poolable here. Returns
+        ``True`` when the TLS connection established."""
+        var tls_cfg = self._config.copy()
+        if len(tls_cfg.alpn) == 0:
+            tls_cfg.alpn = List[String]()
+            tls_cfg.alpn.append("h2")
+            tls_cfg.alpn.append("http/1.1")
+        var stream = TlsStream.connect_timeout(
+            u.host, u.port, tls_cfg^, self._timeout_ms
+        )
+        var negotiated = stream.alpn_selected()
+        if self._tls_pool.enabled() and negotiated != "h2":
+            var key = TlsConnectionPool.build_key(u.scheme, u.host, Int(u.port))
+            self._tls_pool.release(key, stream^)
+        else:
+            stream.close()
+        return True
 
     def _send_h3(
         self,
@@ -1628,15 +1676,29 @@ struct HttpClient(Movable):
                 == H3WireChoice.HTTP_3
             ):
                 if _is_idempotent(method):
-                    return race_h3_h2(
-                        _race_leg,
+                    # Happy-eyeballs: race only the *connection*
+                    # establishment, then send the request once on the
+                    # winner (h3 preferred). Racing connects -- not whole
+                    # requests -- means the idempotent request is never
+                    # duplicated on the wire.
+                    var winner = race_h3_h2_connect(
+                        _race_connect_leg,
                         Int(UnsafePointer(to=self)),
                         url,
-                        method,
-                        extra_headers,
-                        body,
-                        wire,
-                        auth_header,
+                    )
+                    if winner == RACE_H3:
+                        try:
+                            return self._send_h3(
+                                u, method, extra_headers, body, auth_header
+                            )
+                        except:
+                            pass  # h3 dropped post-connect: fall back
+                    # RACE_H2 or RACE_NONE (or an h3 post-connect drop):
+                    # use the proven TLS path. On RACE_NONE both connects
+                    # failed; _send_h2_or_h1_tls re-dials and surfaces the
+                    # real error.
+                    return self._send_h2_or_h1_tls(
+                        u, method, extra_headers, body, wire, auth_header
                     )
                 try:
                     return self._send_h3(
