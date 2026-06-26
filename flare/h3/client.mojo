@@ -58,6 +58,47 @@ from .request_writer import (
 from .response_reader import H3BodyChunk, H3Response, H3ResponseReader
 
 
+def is_idempotent_method(method: String) -> Bool:
+    """Whether ``method`` is idempotent per RFC 9110 sec 9.2.2 -- safe
+    to send more than once with the same effect.
+
+    The 0-RTT replay hazard (RFC 9001 sec 9.2) is exactly that an
+    on-path attacker can re-send the captured early-data flight, so
+    only idempotent requests are ever eligible to ride 0-RTT
+    (:meth:`H3ClientConnection.fetch_0rtt`). POST / PATCH / CONNECT
+    are excluded -- a replay could double a side effect."""
+    var m = method.upper()
+    return (
+        m == "GET"
+        or m == "HEAD"
+        or m == "OPTIONS"
+        or m == "PUT"
+        or m == "DELETE"
+        or m == "TRACE"
+    )
+
+
+struct H3ZeroRttOutcome(Copyable, Movable):
+    """Result of :meth:`H3ClientConnection.fetch_0rtt`: the response
+    plus how the request was actually carried.
+
+    ``used_0rtt`` is True only when the request was 0-RTT-eligible
+    *and* the server accepted early data; ``replayed`` is True when
+    0-RTT was attempted but the server rejected it and the request
+    completed at 1-RTT instead (transparent to the caller)."""
+
+    var response: H3Response
+    var used_0rtt: Bool
+    var replayed: Bool
+
+    def __init__(
+        out self, var response: H3Response, used_0rtt: Bool, replayed: Bool
+    ):
+        self.response = response^
+        self.used_0rtt = used_0rtt
+        self.replayed = replayed
+
+
 struct _StreamReasm(Copyable, Movable):
     """Per-stream offset-ordered byte reassembler.
 
@@ -437,6 +478,64 @@ struct H3ClientConnection(Movable):
             if resp:
                 return resp.value().copy()
         raise Error("h3 client: response did not complete within poll budget")
+
+    def fetch_0rtt(
+        mut self,
+        method: String,
+        scheme: String,
+        authority: String,
+        path: String,
+        headers: List[QpackHeader],
+        body: List[UInt8],
+        timeout_ms: Int = 100,
+        max_polls: Int = 100,
+    ) raises -> H3ZeroRttOutcome:
+        """Idempotent-only 0-RTT request with transparent 1-RTT
+        fallback.
+
+        Gates strictly: a request is 0-RTT-eligible only when its
+        method is idempotent (:func:`is_idempotent_method` -- a replay
+        is safe) AND the connection resumed a session with rustls
+        early keys installed
+        (:meth:`flare.quic.client.QuicClientConnection.early_data_ready`).
+        A non-idempotent method, or a fresh (unresumed) connection,
+        is carried normally at 1-RTT.
+
+        After the handshake, if 0-RTT was attempted but the server
+        *rejected* early data
+        (:meth:`QuicClientConnection.early_data_accepted` is False),
+        the request still completes at 1-RTT and the result reports
+        ``replayed=True`` -- the caller never observes a
+        rejected-0-RTT failure. ``used_0rtt`` is True only when the
+        server accepted the early data.
+
+        ponytail: the QUIC client driver does not yet emit 0-RTT
+        (EarlyData) STREAM frames -- the request rides the 1-RTT keys
+        regardless -- so today this method's value is the *safety
+        policy*: it refuses to treat a non-idempotent or unresumed
+        request as 0-RTT-eligible and reports the true acceptance
+        outcome. Wiring real EarlyData STREAM emission into
+        :class:`QuicClientConnection` is the named upgrade path; this
+        gate already guarantees only replay-safe requests would take
+        it.
+        """
+        var eligible = is_idempotent_method(method) and (
+            self.quic.early_data_ready()
+        )
+        var resp = self.fetch(
+            method,
+            scheme,
+            authority,
+            path,
+            headers,
+            body,
+            timeout_ms,
+            max_polls,
+        )
+        var accepted = eligible and self.quic.early_data_accepted()
+        return H3ZeroRttOutcome(
+            resp^, used_0rtt=accepted, replayed=eligible and not accepted
+        )
 
     def is_established(self) -> Bool:
         return self.quic.is_established()

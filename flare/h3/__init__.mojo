@@ -97,7 +97,11 @@ from .response_reader import (
     H3Response,
     H3ResponseReader,
 )
-from .client import H3ClientConnection
+from .client import (
+    H3ClientConnection,
+    H3ZeroRttOutcome,
+    is_idempotent_method,
+)
 from .server import (
     H3Connection,
     H3ConnectionConfig,

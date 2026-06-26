@@ -20,6 +20,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from flare.quic._server_0rtt import (
     EarlyDataReplayGuard,
+    EarlyDataStrikeSet,
     early_data_packet_len,
 )
 from flare.quic.packet import QUIC_VERSION_1, ConnectionId, encode_long_header
@@ -97,6 +98,50 @@ def test_early_data_packet_len_matches_total() raises:
     assert_equal(early_data_packet_len(Span[UInt8, _](pkt)), len(pkt))
 
 
+# ── EarlyDataStrikeSet (cross-connection replay, W7) ─────────────────
+
+
+def test_strike_fresh_then_replay_refused() raises:
+    var s = EarlyDataStrikeSet(window_ms=UInt64(1_000))
+    # First connection's ODCID: fresh -> allowed and recorded.
+    assert_true(s.strike(String("aabbcc"), UInt64(100)))
+    # Replayed first flight (same ODCID) within the window: refused.
+    assert_false(s.strike(String("aabbcc"), UInt64(500)))
+    assert_false(s.strike(String("aabbcc"), UInt64(1_099)))
+
+
+def test_strike_distinct_keys_independent() raises:
+    var s = EarlyDataStrikeSet(window_ms=UInt64(1_000))
+    assert_true(s.strike(String("aa"), UInt64(0)))
+    assert_true(s.strike(String("bb"), UInt64(0)))  # different ODCID: fresh
+    assert_false(s.strike(String("aa"), UInt64(10)))  # aa is a replay
+    assert_false(s.strike(String("bb"), UInt64(10)))  # bb is a replay
+
+
+def test_strike_expired_window_allows_again() raises:
+    var s = EarlyDataStrikeSet(window_ms=UInt64(1_000))
+    assert_true(s.strike(String("dd"), UInt64(100)))
+    # now_ms past expiry (100 + 1000): the old strike lapsed, so a new
+    # connection reusing the ODCID is treated as fresh again. Beyond the
+    # window we rely on rustls's own single-use ticket check.
+    assert_true(s.strike(String("dd"), UInt64(1_101)))
+    # ...and that fresh strike re-arms the window.
+    assert_false(s.strike(String("dd"), UInt64(1_500)))
+
+
+def test_strike_capacity_fail_closed() raises:
+    var s = EarlyDataStrikeSet(window_ms=UInt64(1_000_000))
+    # Fill to capacity with distinct live ODCIDs.
+    for i in range(4096):
+        assert_true(s.strike(String("k") + String(i), UInt64(0)))
+    # One more distinct key with everything still live: fail-closed
+    # (refuse 0-RTT) rather than evict a live strike.
+    assert_false(s.strike(String("overflow"), UInt64(0)))
+    # Once the window lapses, the prune frees space and new strikes
+    # are admitted again.
+    assert_true(s.strike(String("overflow"), UInt64(2_000_000)))
+
+
 def main() raises:
     test_disabled_by_default_rejects_all()
     test_admits_fresh_in_order()
@@ -105,4 +150,8 @@ def main() raises:
     test_rejects_stale_outside_window()
     test_byte_budget_enforced()
     test_early_data_packet_len_matches_total()
-    print("test_quic_0rtt_replay: 7 passed")
+    test_strike_fresh_then_replay_refused()
+    test_strike_distinct_keys_independent()
+    test_strike_expired_window_allows_again()
+    test_strike_capacity_fail_closed()
+    print("test_quic_0rtt_replay: 11 passed")

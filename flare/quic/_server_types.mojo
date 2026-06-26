@@ -110,6 +110,15 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
     quinn / quiche default and is what the dispatch loop assumes
     when parsing short-header packets after the handshake."""
 
+    var early_data_strike_window_ms: UInt64
+    """How long (ms) an accepted 0-RTT connection's original DCID is
+    remembered for cross-connection replay defense
+    (:class:`flare.quic._server_0rtt.EarlyDataStrikeSet`). A 0-RTT
+    flight replayed within this window of the original is refused.
+    Default: 10_000 ms (10 s) -- comfortably covers handshake +
+    clock-skew while bounding memory. Only matters when 0-RTT is
+    enabled (``rustls_config`` issues 0-RTT-capable tickets)."""
+
     def __init__(out self):
         self.host = String("0.0.0.0")
         self.port = UInt16(0)
@@ -121,6 +130,7 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
         self.initial_max_streams_bidi = UInt64(100)
         self.initial_max_streams_uni = UInt64(3)
         self.local_cid_length = 8
+        self.early_data_strike_window_ms = UInt64(10_000)
 
 
 # -- Per-connection driver ----------------------------------------------

@@ -1707,6 +1707,16 @@ configuration:
   thread (same mechanism as `block_in_pool`); the sync `resolve` /
   `DnsCache.resolve` hot path is unchanged, and a within-TTL cache hit
   spawns no thread.
+- W7 0-RTT replay hardening adds no steady-state cost. The server
+  cross-connection strike set is consulted only on a connection's
+  *first* 0-RTT packet (gated by `not early_guard.any_seen`), and 0-RTT
+  is off by default (`max_early_data_size == 0`), so the 1-RTT request
+  path -- the only path the benchmarks exercise -- runs zero extra work
+  (no Dict touch, no clock read). The strike `Dict[String, UInt64]`
+  stays empty unless 0-RTT is enabled; its prune is amortized and only
+  fires at capacity. The client `fetch_0rtt` gate is a pure
+  `is_idempotent_method` predicate plus two existing accessor reads,
+  and the unary `fetch` path is untouched.
 
 Functional parity is covered by the unchanged QUIC/H3 suites
 (`test-quic-loopback-integration`, `test-quic-post-initial-decrypt`,

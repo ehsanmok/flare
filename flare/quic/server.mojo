@@ -113,7 +113,11 @@ from ..tls._rustls_quic_ffi import (
     _do_take_crypto,
 )
 from .packet import encode_short_header
-from ._server_0rtt import EarlyDataReplayGuard, early_data_packet_len
+from ._server_0rtt import (
+    EarlyDataReplayGuard,
+    EarlyDataStrikeSet,
+    early_data_packet_len,
+)
 from ._server_migration import MigrationProbe, new_path_challenge
 from ._server_support import (
     _ACK_MAX_RANGES,
@@ -322,6 +326,13 @@ struct QuicListener(Movable):
     handler-produced :class:`Response` is encoded. Drained by
     the 1-RTT egress path once the per-connection 1-RTT keys
     are installed."""
+    var early_strike: EarlyDataStrikeSet
+    """Listener-level cross-connection 0-RTT replay defense (RFC 9001
+    sec 9.2). Keyed on each accepted connection's original DCID with a
+    time window from :attr:`QuicServerConfig.early_data_strike_window_ms`.
+    Consulted once per connection on its first 0-RTT packet so a
+    captured first flight replayed as a fresh accept is refused. Idle
+    (never populated) unless 0-RTT is enabled."""
     var timer_wheel: TimerWheel
     """Per-listener :class:`flare.runtime.timer_wheel.TimerWheel`
     driving idle timeouts. Each scheduled timer's token is
@@ -364,6 +375,9 @@ struct QuicListener(Movable):
         self.rx_bidi_stream_count = List[UInt64]()
         self.h3_connections = List[H3Connection]()
         self.h3_response_egress = Dict[String, List[UInt8]]()
+        self.early_strike = EarlyDataStrikeSet(
+            window_ms=config.early_data_strike_window_ms
+        )
         self.timer_wheel = TimerWheel(now_ms=UInt64(0))
         self._socket = sock^
         self._local_addr = addr
@@ -657,11 +671,25 @@ struct QuicListener(Movable):
                     var dec = self._decrypt_post_initial(
                         slot, packet, inbound_lvl, local_cid_len
                     )
+                    # Cross-connection replay defense (RFC 9001 sec
+                    # 9.2): on this connection's *first* 0-RTT packet,
+                    # strike its original DCID against the listener-wide
+                    # set. A captured first flight replayed as a fresh
+                    # accept reuses the same ODCID, so a live strike
+                    # means refuse 0-RTT (fall back to 1-RTT). The
+                    # intra-connection guard below then handles replays
+                    # within this same connection.
+                    var admit_ok = True
+                    if not self.connections[slot].early_guard.any_seen:
+                        var now_ms = now_us // UInt64(1000)
+                        var odcid = cid_to_hex(self.connections[slot].local_cid)
+                        if not self.early_strike.strike(odcid, now_ms):
+                            admit_ok = False
                     # Anti-replay + byte-budget admission (RFC 9001
                     # sec 9.2): a replayed / stale 0-RTT packet number
                     # or an over-budget flight is dropped before it can
                     # touch the state machine.
-                    if self.connections[slot].early_guard.admit(
+                    if admit_ok and self.connections[slot].early_guard.admit(
                         dec[1], len(dec[0])
                     ):
                         events = self.connections[slot].dispatch_plaintext(

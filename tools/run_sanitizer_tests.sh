@@ -115,10 +115,14 @@ ASAN_TESTS=(
   # W3 -- TTL DNS cache over the sync resolver. ASan validates the
   # Dict[String, _CachedAddrs] lifecycle and the IpAddr list copies.
   "tests/dns/test_dns_cache.mojo"
-  # W4a -- server 0-RTT anti-replay window + byte budget + the
-  # coalesced packet-length parser. ASan validates the guard's
-  # value-type bookkeeping and the long-header bounds reads.
+  # W4a + W7 -- server 0-RTT anti-replay window + byte budget + the
+  # coalesced packet-length parser + the cross-connection strike set.
+  # ASan validates the guard's value-type bookkeeping, the long-header
+  # bounds reads, and the strike set's Dict[String, UInt64] lifecycle.
   "tests/quic/test_quic_0rtt_replay.mojo"
+  # W7 -- client idempotent-only 0-RTT gate + outcome carrier. ASan
+  # validates the H3ZeroRttOutcome move/copy of the embedded H3Response.
+  "tests/h3/test_h3_0rtt_gate.mojo"
   # W4b -- server path-validation probe + anti-amplification budget +
   # PATH_CHALLENGE encoder. ASan validates the probe value type and the
   # frame buffer build.
