@@ -408,6 +408,16 @@ struct UdpSocket(Movable):
         """
         return self._local
 
+    def fd(self) -> Int:
+        """Return the underlying socket file descriptor.
+
+        Exposed for the batched-I/O helpers in ``flare.udp.batch``
+        (``recvmmsg`` / ``sendmmsg`` / GSO) which operate on the raw
+        fd. Do not close it directly -- ``UdpSocket`` owns its
+        lifetime.
+        """
+        return Int(self._socket.fd)
+
     def close(mut self):
         """Close the socket. Idempotent."""
         self._socket.close()

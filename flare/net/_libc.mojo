@@ -600,6 +600,72 @@ def _recvfrom(
 
 
 @always_inline
+def _recvmmsg(
+    fd: c_int,
+    msgvec: UnsafePointer[UInt8, _],
+    vlen: c_uint,
+    flags: c_int,
+    timeout: Int,
+) -> c_int:
+    """Wrapper around Linux ``recvmmsg(2)``.
+
+    ``msgvec`` points at a contiguous ``struct mmsghdr[vlen]`` array
+    (64 bytes per cell on x86_64 / aarch64 Linux). The caller owns
+    and lays out that buffer (see ``flare.udp.batch.BatchReceiver``).
+    Returns the number of messages received, or a negative value with
+    ``errno`` set. ``ENOSYS`` means the running kernel lacks the
+    syscall and the caller must fall back to per-datagram ``recvfrom``.
+    Linux-only: not present on macOS.
+
+    ``timeout`` is the address of a ``struct timespec`` or ``0`` for a
+    NULL timeout. Pass ``0`` together with ``MSG_DONTWAIT`` to drain
+    every immediately-available datagram in one call without blocking;
+    a non-NULL ``{0,0}`` timespec would instead make the kernel return
+    after the first datagram (per-message timeout check).
+    """
+    return external_call["recvmmsg", c_int](
+        fd, msgvec.bitcast[NoneType](), vlen, flags, timeout
+    )
+
+
+@always_inline
+def _sendmmsg(
+    fd: c_int,
+    msgvec: UnsafePointer[UInt8, _],
+    vlen: c_uint,
+    flags: c_int,
+) -> c_int:
+    """Wrapper around Linux ``sendmmsg(2)``.
+
+    Sends up to ``vlen`` datagrams in one syscall; returns the number
+    of messages sent (each cell's ``msg_len`` is updated with the byte
+    count). ``ENOSYS`` => fall back to per-datagram ``sendto``.
+    Linux-only.
+    """
+    return external_call["sendmmsg", c_int](
+        fd, msgvec.bitcast[NoneType](), vlen, flags
+    )
+
+
+@always_inline
+def _sendmsg(
+    fd: c_int,
+    msg: UnsafePointer[UInt8, _],
+    flags: c_int,
+) -> c_ssize_t:
+    """Wrapper around ``sendmsg(2)``.
+
+    Used for UDP GSO (generic segmentation offload): a single
+    ``struct msghdr`` carrying one big buffer plus a ``UDP_SEGMENT``
+    control message tells the kernel to slice the buffer into wire
+    datagrams of the cmsg's segment size. Returns bytes accepted.
+    """
+    return external_call["sendmsg", c_ssize_t](
+        fd, msg.bitcast[NoneType](), flags
+    )
+
+
+@always_inline
 def _setsockopt(
     fd: c_int,
     level: c_int,

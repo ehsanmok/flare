@@ -44,9 +44,11 @@ References:
 
 from std.collections import Dict, List
 from std.memory import Span
+from std.os import getenv
 
 from ..net.address import IpAddr, SocketAddr
 from ..udp import UdpSocket
+from ..udp.batch import BatchReceiver, udp_batch_supported
 from flare.crypto.hmac import hmac_sha256
 
 from .crypto import QuicAead
@@ -356,6 +358,15 @@ struct QuicListener(Movable):
     """Set by :meth:`shutdown`. Read by :meth:`run` at the top of
     every loop iteration so the event loop exits cleanly after
     the next ``recv_from`` returns or times out."""
+    var _rx_batch: BatchReceiver
+    """Reusable ``recvmmsg`` vector that drains a burst of inbound
+    datagrams in one syscall (RFC-agnostic kernel optimization).
+    Sized to :data:`_RX_BATCH` x ``max_udp_payload_size``."""
+    var _rx_batch_ok: Bool
+    """Latched capability flag: ``True`` while the batched
+    ``recvmmsg`` drain is usable. Flipped to ``False`` permanently on
+    the first ``ENOSYS`` (kernel without the syscall) so the reactor
+    falls back to the per-datagram ``try_recv_from`` loop."""
 
     def __init__(
         out self,
@@ -394,6 +405,17 @@ struct QuicListener(Movable):
         self._socket = sock^
         self._local_addr = addr
         self._stopping = False
+        self._rx_batch = BatchReceiver(
+            capacity=_RX_BATCH,
+            max_payload=Int(config.max_udp_payload_size),
+        )
+        # Batched recvmmsg drain is on by default on Linux. Operators
+        # can force the per-datagram path (e.g. to A/B the syscall-
+        # batching win, or work around an exotic kernel) by setting
+        # FLARE_QUIC_NO_BATCH=1.
+        self._rx_batch_ok = udp_batch_supported() and (
+            getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
+        )
 
     def __del__(deinit self):
         """Drop the listener: release every rustls session in
@@ -1469,7 +1491,28 @@ struct QuicListener(Movable):
         if slot >= 0:
             _ = self._drain_and_send(slot)
         # Drain the rest of the socket queue without blocking so a
-        # high-rate sender's burst is handled in one tick.
+        # high-rate sender's burst is handled in one tick. On Linux a
+        # single ``recvmmsg`` pulls the whole burst across the
+        # user/kernel boundary in one syscall; everywhere else (or on a
+        # kernel without the syscall) fall back to the per-datagram
+        # ``try_recv_from`` loop with identical dispatch semantics.
+        if self._rx_batch_ok:
+            try:
+                var n = self._rx_batch.recv(self._socket.fd())
+                for i in range(n):
+                    var nslot = self.dispatch_datagram(
+                        self._rx_batch.message(i), self._rx_batch.sender(i)
+                    )
+                    if nslot >= 0:
+                        _ = self._drain_and_send(nslot)
+                return True
+            except e:
+                # ENOSYS: latch off and fall through to the per-datagram
+                # path for the rest of the process lifetime.
+                if String(e).startswith("UdpBatchUnsupported"):
+                    self._rx_batch_ok = False
+                else:
+                    raise e^
         for _ in range(_RX_BATCH - 1):
             var nb_got: Int
             var nb_sender: SocketAddr

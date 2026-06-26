@@ -35,3 +35,10 @@ def main() raises:
 """
 
 from .socket import UdpSocket, DatagramTooLarge
+from .batch import (
+    BatchReceiver,
+    UdpBatchUnsupported,
+    send_batch,
+    send_segmented,
+    udp_batch_supported,
+)
