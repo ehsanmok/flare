@@ -29,7 +29,6 @@ from std.testing import (
     assert_equal,
     assert_true,
     assert_false,
-    TestSuite,
 )
 from std.collections import Optional
 
@@ -177,4 +176,19 @@ def test_chunked_body_drain_runs_to_completion_with_never_cancel() raises:
 
 
 def main() raises:
-    TestSuite.discover_tests[__functions_in_module()]().run()
+    # Explicit dispatch rather than ``TestSuite.discover_tests`` here:
+    # the reflective discovery path for *this* module's function set
+    # intermittently trips a SIGSEGV in the stdlib ``SwissTable``
+    # resize (Dict insert) on some toolchains, making the aggregate
+    # ``tests`` gate flaky (~50%). Listing the cases keeps the gate
+    # deterministic with identical coverage.
+    test_inline_body_content_length()
+    test_inline_body_returns_bytes_then_none()
+    test_inline_body_drain()
+    test_inline_body_empty()
+    test_chunked_body_content_length_is_none()
+    test_chunked_body_streams_three_chunks()
+    test_chunked_body_empty_source()
+    test_chunked_body_cancel_pre_flip_yields_nothing()
+    test_chunked_body_drain_runs_to_completion_with_never_cancel()
+    print("test_streaming: OK")
