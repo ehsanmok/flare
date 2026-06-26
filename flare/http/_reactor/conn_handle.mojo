@@ -50,6 +50,7 @@ from std.ffi import c_int, c_size_t, ErrNo, get_errno
 from std.memory import memcpy, stack_allocation
 
 from flare.crypto.hmac import base64url_decode
+from flare.errors import map_handler_error
 from flare.http.cancel import CancelCell, CancelReason
 from flare.http.handler import Handler, CancelHandler, ViewHandler
 from flare.http.headers import HeaderMap
@@ -486,11 +487,13 @@ struct ConnHandle(Movable):
                 )
 
         var final_close = self._apply_keepalive_policy(config, close_after)
+        var expose_errors = req.expose_errors
         var resp: Response
         try:
             resp = handler.serve(req^)
-        except:
-            self._queue_error(500, "Internal Server Error")
+        except e:
+            var mapped = map_handler_error(String(e), expose_errors)
+            self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
         return self._finalise_response(resp^, final_close)
 
@@ -563,11 +566,13 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
 
         var final_close = self._apply_keepalive_policy(config, close_after)
+        var expose_errors = req.expose_errors
         var resp: Response
         try:
             resp = handler.serve(req^)
-        except:
-            self._queue_error(500, "Internal Server Error")
+        except e:
+            var mapped = map_handler_error(String(e), expose_errors)
+            self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
         return self._finalise_response(resp^, final_close)
 
@@ -627,14 +632,16 @@ struct ConnHandle(Movable):
 
         var close_after = _compute_close_after(req.headers, req.version)
         var final_close = self._apply_keepalive_policy(config, close_after)
+        var expose_errors = req.expose_errors
         var resp: Response
         try:
             # Hand the handler a cancel handle bound to this
             # connection's cancel cell. The cell outlives the handler
             # call (it's owned by ``self``).
             resp = handler.serve(req^, self.cancel_cell.handle())
-        except:
-            self._queue_error(500, "Internal Server Error")
+        except e:
+            var mapped = map_handler_error(String(e), expose_errors)
+            self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
         return self._finalise_response(resp^, final_close)
 
@@ -695,8 +702,11 @@ struct ConnHandle(Movable):
 
             try:
                 resp = handler.serve_view(view, self.cancel_cell.handle())
-            except:
-                self._queue_error(500, "Internal Server Error")
+            except e:
+                var mapped = map_handler_error(
+                    String(e), config.expose_error_messages
+                )
+                self._queue_error(mapped.status, mapped.reason)
                 return self._transition_to_writing()
         except:
             self._queue_error(400, "Bad Request")

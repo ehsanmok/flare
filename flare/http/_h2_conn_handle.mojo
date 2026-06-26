@@ -39,6 +39,7 @@ from std.collections import Dict
 from std.ffi import c_int, c_size_t, ErrNo, get_errno
 from std.memory import UnsafePointer, alloc, stack_allocation
 
+from flare.errors import map_handler_error
 from flare.http.cancel import Cancel, CancelCell, CancelReason
 from flare.http.handler import CancelHandler, Handler
 from flare.http.headers import HeaderMap
@@ -326,11 +327,13 @@ struct H2ConnHandle(Movable):
             var sid = ids[i]
             var req = self.h2.take_request(sid)
             req.peer = self.peer
+            var expose_errors = req.expose_errors
             var resp: Response
             try:
                 resp = handler.serve(req^)
-            except:
-                resp = Response(status=500, reason="Internal Server Error")
+            except e:
+                var mapped = map_handler_error(String(e), expose_errors)
+                resp = Response(status=mapped.status, reason=mapped.reason)
             try:
                 self.h2.emit_response(sid, resp^)
             except:
@@ -541,11 +544,13 @@ struct H2ConnHandle(Movable):
             var req = self.h2.take_request(sid)
             req.peer = self.peer
             var cancel = Cancel(addr)
+            var expose_errors = req.expose_errors
             var resp: Response
             try:
                 resp = handler.serve(req^, cancel)
-            except:
-                resp = Response(status=500, reason="Internal Server Error")
+            except e:
+                var mapped = map_handler_error(String(e), expose_errors)
+                resp = Response(status=mapped.status, reason=mapped.reason)
             try:
                 self.h2.emit_response(sid, resp^)
             except:

@@ -26,7 +26,13 @@ from std.testing import (
     assert_true,
 )
 
-from flare.errors import IoError, ValidationError
+from flare.errors import (
+    HttpStatusError,
+    IoError,
+    ValidationError,
+    http_reason_phrase,
+    map_handler_error,
+)
 
 
 # ── ValidationError ────────────────────────────────────────────────────────
@@ -141,6 +147,78 @@ def test_io_error_typed_round_trip_preserves_fields() raises:
         got_code = e.code
     assert_equal(got_op, String("open"))
     assert_equal(got_code, 22)
+
+
+# ── HttpStatusError + map_handler_error ─────────────────────────────────────
+
+
+def test_http_status_error_render() raises:
+    var e = HttpStatusError(status=404, message=String("user not found"))
+    assert_equal(String(e), String("HttpStatusError(404): user not found"))
+
+
+def test_http_status_error_default_message() raises:
+    var e = HttpStatusError(409)
+    assert_equal(e.message, String("Conflict"))
+    assert_equal(String(e), String("HttpStatusError(409): Conflict"))
+
+
+def _raise_status() raises -> Int:
+    """Bare-raises wrapper: erases the type but keeps the rendering."""
+    raise HttpStatusError(status=403, message=String("nope"))
+
+
+def test_map_http_status_error_through_bare_raises() raises:
+    var rendered = String("")
+    try:
+        var _r = _raise_status()
+    except e:
+        rendered = String(e)
+    var mapped = map_handler_error(rendered, expose=False)
+    assert_equal(mapped.status, 403)
+    # HttpStatusError message is always echoed (handler-authored).
+    assert_equal(mapped.reason, String("nope"))
+
+
+def test_map_validation_error_sanitized() raises:
+    var rendered = String("ValidationError(email): bad <user> input")
+    var mapped = map_handler_error(rendered, expose=False)
+    assert_equal(mapped.status, 400)
+    assert_equal(mapped.reason, String("Bad Request"))
+
+
+def test_map_validation_error_exposed() raises:
+    var rendered = String("ValidationError(email): why")
+    var mapped = map_handler_error(rendered, expose=True)
+    assert_equal(mapped.status, 400)
+    assert_equal(mapped.reason, rendered)
+
+
+def test_map_generic_error_defaults_to_500() raises:
+    var mapped = map_handler_error(String("kaboom"), expose=False)
+    assert_equal(mapped.status, 500)
+    assert_equal(mapped.reason, String("Internal Server Error"))
+
+
+def test_map_malformed_status_error_falls_back_to_500() raises:
+    # Looks like the prefix but the code is junk -> safe 500.
+    var mapped = map_handler_error(
+        String("HttpStatusError(abc): x"), expose=False
+    )
+    assert_equal(mapped.status, 500)
+
+
+def test_map_out_of_range_status_falls_back_to_500() raises:
+    var mapped = map_handler_error(
+        String("HttpStatusError(700): x"), expose=False
+    )
+    assert_equal(mapped.status, 500)
+
+
+def test_reason_phrase_fallbacks() raises:
+    assert_equal(http_reason_phrase(404), String("Not Found"))
+    assert_equal(http_reason_phrase(599), String("Server Error"))
+    assert_equal(http_reason_phrase(450), String("Client Error"))
 
 
 def main() raises:

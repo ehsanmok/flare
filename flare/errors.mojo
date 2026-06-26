@@ -48,8 +48,12 @@ error type" guidance.
 
 - :class:`ValidationError` — invalid input / argument validation
   failures. Carries ``field`` + ``reason`` so callers can
-  distinguish per-field failures (and ``HttpServer`` can map
-  to a 400 with the field name as the body).
+  distinguish per-field failures. ``HttpServer`` maps an uncaught
+  ``ValidationError`` to a sanitized ``400 Bad Request`` (see
+  :func:`map_handler_error`).
+- :class:`HttpStatusError` — a handler-authored error that names the
+  exact status to return (mapped through the bare-``raises``
+  ``Handler.serve`` boundary by :func:`map_handler_error`).
 - :class:`IoError` — I/O-layer failure not covered by the more
   specific :class:`flare.net.NetworkError` subtypes (e.g. a
   generic syscall that returned ``-1`` with a not-otherwise-
@@ -101,6 +105,159 @@ struct ValidationError(Copyable, Movable, Writable):
     def write_to[W: Writer](self, mut writer: W):
         """Write ``ValidationError(field): reason`` to ``writer``."""
         writer.write("ValidationError(", self.field, "): ", self.reason)
+
+
+# ── HttpStatusError ─────────────────────────────────────────────────────────
+
+
+def http_reason_phrase(status: Int) -> String:
+    """Canonical RFC 9110 reason phrase for the common status codes.
+
+    Falls back to a generic class phrase ("Client Error" / "Server
+    Error") for codes without a dedicated entry so the body is never
+    empty.
+    """
+    if status == 400:
+        return "Bad Request"
+    if status == 401:
+        return "Unauthorized"
+    if status == 403:
+        return "Forbidden"
+    if status == 404:
+        return "Not Found"
+    if status == 405:
+        return "Method Not Allowed"
+    if status == 406:
+        return "Not Acceptable"
+    if status == 409:
+        return "Conflict"
+    if status == 410:
+        return "Gone"
+    if status == 412:
+        return "Precondition Failed"
+    if status == 413:
+        return "Payload Too Large"
+    if status == 415:
+        return "Unsupported Media Type"
+    if status == 422:
+        return "Unprocessable Entity"
+    if status == 429:
+        return "Too Many Requests"
+    if status == 500:
+        return "Internal Server Error"
+    if status == 501:
+        return "Not Implemented"
+    if status == 502:
+        return "Bad Gateway"
+    if status == 503:
+        return "Service Unavailable"
+    if status == 504:
+        return "Gateway Timeout"
+    if status >= 500:
+        return "Server Error"
+    return "Client Error"
+
+
+@fieldwise_init
+struct HttpStatusError(Copyable, Movable, Writable):
+    """An error that names the exact HTTP status a handler wants returned.
+
+    Raise this from a handler (or anything it calls) to short-circuit
+    to a specific status instead of the catch-all 500. ``HttpServer``
+    recognizes it -- even across the bare-``raises`` ``Handler.serve``
+    boundary -- by its ``Writable`` rendering and maps it to
+    ``status`` with ``message`` as the response body.
+
+    Because the message is *deliberately authored by the handler*
+    (unlike a parser error built from request bytes) it is echoed to
+    the client regardless of ``ServerConfig.expose_error_messages`` --
+    it is the escape hatch for intentional, client-facing errors.
+
+    Example:
+        ```mojo
+        from flare.errors import HttpStatusError
+
+        def get_user(req: Request) raises -> Response:
+            var u = lookup(req.param("id"))
+            if not u:
+                raise HttpStatusError(status=404, message="user not found")
+            return ok(u.value().name)
+        ```
+    """
+
+    var status: Int
+    var message: String
+
+    def __init__(out self, status: Int):
+        """Construct with the canonical reason phrase for ``status``."""
+        self.status = status
+        self.message = http_reason_phrase(status)
+
+    def write_to[W: Writer](self, mut writer: W):
+        """Render ``HttpStatusError(<status>): <message>``.
+
+        The status code is embedded in a fixed, parseable shape so the
+        framework can recover it after type erasure through a
+        bare-``raises`` boundary (see :func:`map_handler_error`).
+        """
+        writer.write("HttpStatusError(", self.status, "): ", self.message)
+
+
+@fieldwise_init
+struct MappedHandlerError(Copyable, Movable):
+    """The (status, reason) an uncaught handler error maps to.
+
+    Returned by :func:`map_handler_error`; the reactor feeds it to its
+    error-response builder.
+    """
+
+    var status: Int
+    var reason: String
+
+
+def map_handler_error(error_str: String, expose: Bool) -> MappedHandlerError:
+    """Map an uncaught handler error's rendered string to (status, reason).
+
+    Mojo's ``Handler.serve`` is bare ``raises``, which erases the
+    concrete error type at the catch site. The typed error's
+    ``Writable`` rendering survives, though, so we recover intent from
+    the string:
+
+    - ``HttpStatusError(<n>): <msg>`` -> ``(n, msg)`` (message always
+      echoed -- the handler authored it on purpose).
+    - ``ValidationError(...)`` -> ``(400, "Bad Request")`` (or the raw
+      string when ``expose``).
+    - anything else -> ``(500, "Internal Server Error")`` (or the raw
+      string when ``expose``).
+
+    ponytail: string-shape recovery is the only option until Mojo lets
+    a catch site downcast a type-erased error; the prefixes are fixed
+    in the structs' ``write_to`` above, so this stays in lockstep.
+    """
+    if error_str.startswith("HttpStatusError("):
+        var lp = error_str.find("(")
+        var rp = error_str.find(")")
+        if lp != -1 and rp > lp + 1:
+            try:
+                var status = Int(String(error_str[byte = lp + 1 : rp]))
+                if status >= 100 and status <= 599:
+                    var marker = error_str.find("): ")
+                    var message: String
+                    if marker != -1:
+                        message = String(error_str[byte = marker + 3 :])
+                    else:
+                        message = http_reason_phrase(status)
+                    return MappedHandlerError(status, message)
+            except:
+                pass
+        # Malformed rendering: fall through to the 500 default.
+    if error_str.startswith("ValidationError("):
+        if expose:
+            return MappedHandlerError(400, error_str)
+        return MappedHandlerError(400, "Bad Request")
+    if expose:
+        return MappedHandlerError(500, error_str)
+    return MappedHandlerError(500, "Internal Server Error")
 
 
 # ── IoError ─────────────────────────────────────────────────────────────────

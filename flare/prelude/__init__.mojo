@@ -27,7 +27,7 @@ examples that touch many layers at once.
 # Most-used surface — mirrored from the root ``flare`` package.
 # ─────────────────────────────────────────────────────────────────────────
 
-from ..errors import IoError, ValidationError
+from ..errors import HttpStatusError, IoError, ValidationError
 from ..http.auth_extract import AuthError
 from ..http.proxy_protocol import ProxyParseError
 from ..http.template import Template, TemplateContext, TemplateError

@@ -599,7 +599,7 @@ def main() raises:
 # ─────────────────────────────────────────────────────────────────────────
 
 # Errors
-from .errors import IoError, ValidationError
+from .errors import HttpStatusError, IoError, ValidationError
 
 # HTTP core types + builders
 from .http.server import (
