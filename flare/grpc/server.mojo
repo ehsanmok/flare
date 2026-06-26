@@ -54,6 +54,11 @@ from std.memory import Span
 from std.time import perf_counter_ns
 
 from flare.crypto.base64 import base64_encode
+from flare.http.encoding import (
+    compress_gzip,
+    decompress_deflate,
+    decompress_gzip,
+)
 from flare.http.handler import Handler
 from flare.http.proto.ascii import ascii_lower
 from flare.http.request import Request
@@ -173,6 +178,7 @@ struct GrpcRequestHeaders(Copyable, Movable):
     var te: String
     var timeout: Optional[String]
     var accept_encoding: Optional[String]
+    var encoding: Optional[String]
     var initial_metadata: GrpcMetadata
 
 
@@ -294,6 +300,7 @@ struct GrpcCallOutcome(Copyable, Movable):
     var response_data: List[UInt8]
     var status: GrpcStatus
     var trailing_metadata: GrpcMetadata
+    var encoding: String
 
 
 def parse_request_headers(
@@ -358,8 +365,51 @@ def parse_request_headers(
     )
 
 
+comptime GRPC_COMPRESS_MIN_BYTES: Int = 64
+"""Response payloads at or above this size are eligible for
+message-level compression when the client advertises a codec via
+``grpc-accept-encoding``. Below it the gzip/deflate header overhead
+outweighs the saving, so the frame ships uncompressed (flag 0).
+ponytail: a fixed cutoff, not an adaptive ratio probe."""
+
+
+def _negotiate_response_encoding(accept_encoding: String) -> String:
+    """Pick the response message codec from a client
+    ``grpc-accept-encoding`` list. Prefers ``gzip``, then
+    ``deflate``; returns the empty string (identity) when the
+    client offered neither (or sent nothing)."""
+    if accept_encoding.byte_length() == 0:
+        return String("")
+    var lowered = ascii_lower(accept_encoding)
+    if simd_memmem(lowered.as_bytes(), String("gzip").as_bytes()) >= 0:
+        return String("gzip")
+    if simd_memmem(lowered.as_bytes(), String("deflate").as_bytes()) >= 0:
+        return String("deflate")
+    return String("")
+
+
+def _decompress_payload(
+    payload: Span[UInt8, _], encoding: String
+) raises -> List[UInt8]:
+    """Decompress a compressed LPM payload per the request's
+    ``grpc-encoding``. Supports ``gzip`` and ``deflate``; any other
+    (or empty) encoding on a compressed frame is a protocol error."""
+    var enc = ascii_lower(encoding)
+    if enc == "gzip":
+        return decompress_gzip(payload)
+    if enc == "deflate":
+        return decompress_deflate(payload)
+    raise Error(
+        "grpc adapter: compressed LPM frame with unsupported / missing "
+        "grpc-encoding '"
+        + encoding
+        + "'"
+    )
+
+
 def stitch_request_data(
     request_data: Span[UInt8, _],
+    encoding: String = String(""),
 ) raises -> List[UInt8]:
     """Stitch one or more LPM frames out of the accumulated
     request DATA bytes into a single contiguous payload.
@@ -370,12 +420,14 @@ def stitch_request_data(
     inside one call (a streaming client packing requests through
     a unary stub is the example shape); the adapter handles both.
 
+    Compressed frames (flag bit 0 set) are decompressed using the
+    call's ``grpc-encoding`` (``gzip`` / ``deflate``). A compressed
+    frame with no / unsupported ``grpc-encoding`` raises.
+
     Raises on:
     * truncated LPM frame (need-more-data at the end of the
       request body),
-    * compressed flag set without a negotiated encoding
-      (decompression is not yet supported; for now we accept
-      uncompressed only and surface a typed error).
+    * compressed flag set with no negotiated / supported encoding.
     """
     var out = List[UInt8]()
     var pos = 0
@@ -388,13 +440,14 @@ def stitch_request_data(
                 "grpc adapter: truncated LPM frame at offset " + String(pos)
             )
         if dec.message.flag.is_compressed():
-            raise Error(
-                "grpc adapter: compressed LPM frame received but no "
-                "encoding negotiated (server-side decompression is "
-                "not implemented in this build)"
+            var plain = _decompress_payload(
+                Span[UInt8, _](dec.message.payload), encoding
             )
-        for i in range(len(dec.message.payload)):
-            out.append(dec.message.payload[i])
+            for i in range(len(plain)):
+                out.append(plain[i])
+        else:
+            for i in range(len(dec.message.payload)):
+                out.append(dec.message.payload[i])
         pos += dec.consumed
     return out^
 
@@ -402,21 +455,46 @@ def stitch_request_data(
 def encode_unary_response(
     response_bytes: List[UInt8],
     mut out: List[UInt8],
+    encoding: String = String(""),
 ) raises:
-    """Append a single uncompressed LPM frame wrapping
-    ``response_bytes`` to ``out``.
+    """Append a single LPM frame wrapping ``response_bytes`` to
+    ``out``.
 
-    The encoder always emits flag=0 (no message-level
-    compression). Compression negotiation lives at the channel
-    level (``grpc-encoding`` / ``grpc-accept-encoding``) and is
-    not yet implemented, alongside the decompression path.
+    When ``encoding`` is ``gzip`` / ``deflate`` and the payload is at
+    least :data:`GRPC_COMPRESS_MIN_BYTES`, the payload is compressed
+    and the frame's flag byte is set (bit 0). Otherwise an
+    uncompressed frame (flag 0) is emitted. The caller is responsible
+    for advertising the chosen codec on the response ``grpc-encoding``
+    header (see :func:`_response_from_outcome`).
 
     The caller owns the buffer and may reuse the same
     ``List[UInt8]`` across responses so the underlying
     allocation amortises across the stream. The encoder appends
     only; it never reads from or truncates the existing contents.
     """
-    encode_grpc_message(Span[UInt8, _](response_bytes), out, compressed=False)
+    var enc = ascii_lower(encoding)
+    if len(response_bytes) >= GRPC_COMPRESS_MIN_BYTES and (
+        enc == "gzip" or enc == "deflate"
+    ):
+        var compressed: List[UInt8]
+        if enc == "gzip":
+            compressed = compress_gzip(Span[UInt8, _](response_bytes))
+        else:
+            # gRPC "deflate" is zlib-wrapped DEFLATE; compress_gzip
+            # emits a gzip container, so for deflate we fall back to
+            # an uncompressed frame rather than mislabel the bytes.
+            # ponytail: deflate egress not wired (only gzip);
+            # upgrade path: add a raw-zlib compressor to
+            # flare.http.encoding and emit it here.
+            encode_grpc_message(
+                Span[UInt8, _](response_bytes), out, compressed=False
+            )
+            return
+        encode_grpc_message(Span[UInt8, _](compressed), out, compressed=True)
+    else:
+        encode_grpc_message(
+            Span[UInt8, _](response_bytes), out, compressed=False
+        )
 
 
 def emit_trailing_headers_status(
@@ -457,7 +535,10 @@ def emit_trailing_headers_status(
     return trailers^
 
 
-def _outcome_from_reply(var reply: GrpcUnaryReply) -> GrpcCallOutcome:
+def _outcome_from_reply(
+    var reply: GrpcUnaryReply,
+    accept_encoding: String = String(""),
+) -> GrpcCallOutcome:
     """Pack a :class:`GrpcUnaryReply` into the wire-shape
     :class:`GrpcCallOutcome` the H2 driver actually emits.
 
@@ -467,14 +548,24 @@ def _outcome_from_reply(var reply: GrpcUnaryReply) -> GrpcCallOutcome:
     (out-of-memory) the outcome falls back to an empty body +
     INTERNAL status so the driver still has something well-formed
     to put on the wire.
+
+    When the client advertised ``grpc-accept-encoding: gzip`` and the
+    OK body is large enough to be worth it, the response frame is
+    gzip-compressed and ``outcome.encoding`` is set to ``gzip`` so the
+    driver emits the matching ``grpc-encoding`` header.
     """
     var response_data = List[UInt8]()
     var status = reply.status.copy()
+    var used_encoding = String("")
     if status.is_ok():
+        var chosen = _negotiate_response_encoding(accept_encoding)
+        if chosen == "gzip" and len(reply.body) >= GRPC_COMPRESS_MIN_BYTES:
+            used_encoding = String("gzip")
         try:
-            encode_unary_response(reply.body, response_data)
+            encode_unary_response(reply.body, response_data, used_encoding)
         except:
             response_data = List[UInt8]()
+            used_encoding = String("")
             status = GrpcStatus.err(
                 GRPC_STATUS_INTERNAL,
                 String("grpc adapter: response LPM encode failed"),
@@ -484,6 +575,7 @@ def _outcome_from_reply(var reply: GrpcUnaryReply) -> GrpcCallOutcome:
         response_data=response_data^,
         status=status^,
         trailing_metadata=trailing_copy^,
+        encoding=used_encoding^,
     )
 
 
@@ -517,6 +609,12 @@ def run_unary_call[
       only; the failure mode is "server side bug, not client
       input").
     """
+    var accept = String("")
+    if Bool(headers.accept_encoding):
+        accept = headers.accept_encoding.value()
+    var req_encoding = String("")
+    if Bool(headers.encoding):
+        req_encoding = headers.encoding.value()
     var ctx: GrpcCallContext
     try:
         ctx = parse_request_headers(headers)
@@ -524,25 +622,28 @@ def run_unary_call[
         return _outcome_from_reply(
             GrpcUnaryReply.err(
                 GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
-            )
+            ),
+            accept,
         )
     var request_bytes: List[UInt8]
     try:
-        request_bytes = stitch_request_data(request_data)
+        request_bytes = stitch_request_data(request_data, req_encoding)
     except e:
         return _outcome_from_reply(
             GrpcUnaryReply.err(
                 GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
-            )
+            ),
+            accept,
         )
     var reply: GrpcUnaryReply
     try:
         reply = handler.serve_unary(ctx, Span[UInt8, _](request_bytes))
     except e:
         return _outcome_from_reply(
-            GrpcUnaryReply.err(GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e)))
+            GrpcUnaryReply.err(GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))),
+            accept,
         )
-    return _outcome_from_reply(reply^)
+    return _outcome_from_reply(reply^, accept)
 
 
 # ── Reactor-mounted unary service (HttpServer H2) ─────────────────────────────
@@ -569,6 +670,10 @@ def _grpc_headers_from_request(req: Request) raises -> GrpcRequestHeaders:
     var ae = req.headers.get("grpc-accept-encoding")
     if ae.byte_length() > 0:
         accept_encoding = Optional[String](ae)
+    var encoding = Optional[String]()
+    var enc = req.headers.get("grpc-encoding")
+    if enc.byte_length() > 0:
+        encoding = Optional[String](enc)
     var meta = GrpcMetadata()
     for i in range(len(req.headers._keys)):
         var k = ascii_lower(req.headers._keys[i])
@@ -596,6 +701,7 @@ def _grpc_headers_from_request(req: Request) raises -> GrpcRequestHeaders:
         te=te^,
         timeout=timeout^,
         accept_encoding=accept_encoding^,
+        encoding=encoding^,
         initial_metadata=meta^,
     )
 
@@ -612,6 +718,8 @@ def _response_from_outcome(var outcome: GrpcCallOutcome) raises -> Response:
     """
     var resp = Response(200, "", outcome.response_data.copy())
     resp.headers.set("content-type", "application/grpc")
+    if outcome.encoding != "":
+        resp.headers.set("grpc-encoding", outcome.encoding)
     var status_trailers = emit_trailing_headers_status(outcome.status)
     for i in range(len(status_trailers)):
         resp.trailers.set(status_trailers[i][0], status_trailers[i][1])

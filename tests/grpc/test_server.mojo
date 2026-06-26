@@ -56,6 +56,7 @@ def _headers(
     var te: String,
     timeout: Optional[String] = None,
     accept_encoding: Optional[String] = None,
+    encoding: Optional[String] = None,
 ) -> GrpcRequestHeaders:
     """Build a `GrpcRequestHeaders` carrier for the tests; the
     `Optional[String]` fields default to absent so call sites read
@@ -69,6 +70,7 @@ def _headers(
         te=te^,
         timeout=timeout,
         accept_encoding=accept_encoding,
+        encoding=encoding,
         initial_metadata=GrpcMetadata(),
     )
 

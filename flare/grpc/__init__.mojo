@@ -16,9 +16,11 @@ gRPC is a 4-layer protocol on top of HTTP/2:
    stream (request HEADERS + DATA frames carry length-prefixed
    messages, response HEADERS + DATA + trailing HEADERS carry the
    reply).
-4. **Codegen** -- proto3 message + service codegen. Not yet
-   implemented; handler bodies for now construct ``List[UInt8]``
-   payloads directly using whatever serialiser the user picks.
+4. **Codegen** -- proto3 message serialization. The
+   :mod:`flare.grpc.proto` codec (``ProtoWriter`` / ``ProtoReader``)
+   is the runtime that hand-written message structs and generated
+   code target; a full ``.proto`` file compiler is tracked
+   separately.
 
 This module establishes layers 1, 2 and the unary path of
 layer 3. The HTTP/2 reactor already provides the stream
@@ -67,6 +69,24 @@ Public re-exports:
 
 from .client import GrpcCallResult, GrpcClient
 from .streaming import GrpcBidiStream, GrpcServerStream
+from .proto import (
+    ProtoReader,
+    ProtoWriter,
+    WIRE_VARINT,
+    WIRE_I64,
+    WIRE_LEN,
+    WIRE_I32,
+)
+from .interceptor import GrpcInterceptor, Intercepted
+from .health import (
+    HealthService,
+    HEALTH_UNKNOWN,
+    HEALTH_SERVING,
+    HEALTH_NOT_SERVING,
+    HEALTH_SERVICE_UNKNOWN,
+    decode_health_request,
+    encode_health_response,
+)
 from .framing import (
     GRPC_COMPRESSION_NONE,
     GRPC_COMPRESSION_COMPRESSED,

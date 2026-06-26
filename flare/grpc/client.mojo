@@ -26,6 +26,7 @@ if reply.is_ok():
 from std.collections import List
 from std.memory import Span
 
+from ..crypto.base64 import base64_encode
 from ..http.client import HttpClient
 from ..http.request import Method, Request
 from ..http.headers import HeaderMap
@@ -121,9 +122,10 @@ struct GrpcClient(Movable):
                 if missing.
             request: the serialised request message bytes (LPM-wrapped
                 here; the caller passes raw protobuf / codec bytes).
-            metadata: optional initial metadata (text entries become
-                request headers; binary ``-bin`` entries are skipped in
-                this unary v1).
+            metadata: optional initial metadata. Text entries become
+                request headers verbatim; binary ``-bin`` entries are
+                base64-encoded onto their ``-bin`` header per the gRPC
+                wire format.
             timeout_ms: optional call deadline in milliseconds. When
                 ``> 0`` it is emitted as the ``grpc-timeout`` header
                 (``<n>m`` millisecond form) so a deadline-aware server
@@ -153,11 +155,16 @@ struct GrpcClient(Movable):
         var entries = metadata.entries()
         for i in range(len(entries)):
             if entries[i].is_binary:
-                continue  # binary metadata unsupported in unary v1
-            req.headers.set(
-                entries[i].key,
-                ascii_unchecked_string(Span[UInt8, _](entries[i].value)),
-            )
+                # Binary metadata (``-bin`` key): the wire value is the
+                # raw bytes base64-encoded (gRPC PROTOCOL-HTTP2). The
+                # server's framing layer base64-decodes on ingress.
+                var encoded = base64_encode(Span[UInt8, _](entries[i].value))
+                req.headers.set(entries[i].key, encoded)
+            else:
+                req.headers.set(
+                    entries[i].key,
+                    ascii_unchecked_string(Span[UInt8, _](entries[i].value)),
+                )
 
         var resp = self._client.send(req)
 

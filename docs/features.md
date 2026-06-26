@@ -324,17 +324,21 @@ serves a single `Handler` over h1 + h2 + h3 simultaneously.
 
 gRPC primitives on top of HTTP/2. The bottom two wire layers (LPM
 framing, canonical Status codes, Metadata carrier) ship as sans-I/O
-codecs. The **unary server** call shape ships as a *sans-I/O* adapter
-(`GrpcUnary` trait + `run_unary_call`) that maps an already-parsed
-HTTP/2 stream to a typed handler -- it is not yet auto-mounted on
-`HttpServer` (the reactor bridge that feeds it H2 HEADERS/DATA is a
-tracked v0.9.x follow-up). The **client** ships unary (`GrpcClient`)
-plus server-streaming / client-streaming / bidirectional
+codecs. The **unary server** ships both the sans-I/O adapter
+(`GrpcUnary` trait + `run_unary_call`) and the reactor-mounted
+`GrpcService` over `HttpServer` H2, with `grpc-timeout` deadline
+enforcement, gzip message-compression negotiation
+(`grpc-accept-encoding` / `grpc-encoding`, request decompress + response
+compress), and chainable interceptors (`Intercepted[I, H]`). A proto3
+wire codec (`ProtoWriter` / `ProtoReader`) is the serializer handlers
+and codegen target, and the standard `grpc.health.v1.Health` Check
+service ships as a mountable handler. The **client** ships unary
+(`GrpcClient`, including base64 binary `-bin` metadata) plus
+server-streaming / client-streaming / bidirectional
 (`call_server_streaming` / `call_client_streaming` / `call_bidi` ->
-`GrpcServerStream` / `GrpcBidiStream`). Still deferred: a
-reactor-mounted server adapter, server-side streaming, proto3 codegen,
-reflection, health checking, interceptors, deadline enforcement, and
-message-level compression.
+`GrpcServerStream` / `GrpcBidiStream`). Still deferred: server-side
+streaming adapter, a full `.proto` file compiler, server reflection,
+and `Health/Watch`.
 
 | Surface | Where |
 |---|---|
