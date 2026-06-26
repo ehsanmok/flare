@@ -37,6 +37,7 @@ Parameter ids covered (RFC 9000 §18.2 + RFC 9221 §3 for datagram):
   - 0x0e active_connection_id_limit (default 2; minimum 2)
   - 0x0f initial_source_connection_id
   - 0x10 retry_source_connection_id (server only)
+  - 0x20 max_datagram_frame_size (RFC 9221 §3; enables DATAGRAM)
 
 The 0x0d preferred_address parameter is structurally more
 complex (carries a peer's preferred IP/port for migration); it is
@@ -83,6 +84,9 @@ comptime TP_ID_PREFERRED_ADDRESS: Int = 0x0D
 comptime TP_ID_ACTIVE_CONNECTION_ID_LIMIT: Int = 0x0E
 comptime TP_ID_INITIAL_SCID: Int = 0x0F
 comptime TP_ID_RETRY_SCID: Int = 0x10
+comptime TP_ID_MAX_DATAGRAM_FRAME_SIZE: Int = 0x20
+"""RFC 9221 §3: max DATAGRAM frame size the endpoint will accept.
+Absent or 0 means the peer MUST NOT send DATAGRAM frames."""
 
 # Default values from RFC 9000 §18.2 (used when a parameter is
 # absent on the wire). Encoders should NOT emit a parameter whose
@@ -128,6 +132,10 @@ struct TransportParameters(Copyable, Movable):
     var active_connection_id_limit: Optional[UInt64]
     var initial_source_connection_id: List[UInt8]
     var retry_source_connection_id: List[UInt8]
+    var max_datagram_frame_size: Optional[UInt64]
+    """RFC 9221 §3 max_datagram_frame_size (id 0x20). When populated
+    and non-zero, the peer may send DATAGRAM frames up to this size;
+    absent / 0 disables datagrams for this connection."""
 
 
 def empty_transport_parameters() -> TransportParameters:
@@ -153,6 +161,7 @@ def empty_transport_parameters() -> TransportParameters:
         active_connection_id_limit=None,
         initial_source_connection_id=List[UInt8](),
         retry_source_connection_id=List[UInt8](),
+        max_datagram_frame_size=None,
     )
 
 
@@ -309,6 +318,12 @@ def encode_transport_parameters(
             TP_ID_RETRY_SCID,
             params.retry_source_connection_id,
         )
+    if Bool(params.max_datagram_frame_size):
+        _emit_varint_param(
+            out,
+            TP_ID_MAX_DATAGRAM_FRAME_SIZE,
+            params.max_datagram_frame_size.value(),
+        )
     return out^
 
 
@@ -434,5 +449,9 @@ def decode_transport_parameters(
         elif id == TP_ID_RETRY_SCID:
             for i in range(value_len):
                 out.retry_source_connection_id.append(value[i])
+        elif id == TP_ID_MAX_DATAGRAM_FRAME_SIZE:
+            out.max_datagram_frame_size = Optional[UInt64](
+                _read_param_varint(value)
+            )
         # Any other id is silently dropped (RFC 9000 §7.4.2).
     return out^

@@ -42,6 +42,7 @@ from flare.quic import (
 from flare.quic.frame import (
     CryptoFrame,
     DataBlockedFrame,
+    DatagramFrame,
     MaxDataFrame,
     MaxStreamDataFrame,
     MaxStreamsFrame,
@@ -157,6 +158,10 @@ struct _PrintingHandler(FrameHandler, Movable):
     def on_handshake_done(mut self) raises:
         print("  HANDSHAKE_DONE")
         self.handshake_done += 1
+
+    def on_datagram(mut self, dg: DatagramFrame) raises:
+        print("  DATAGRAM       len=" + String(len(dg.data)))
+        self.other += 1
 
     def on_unknown(mut self, type_id: UInt64) raises:
         print("  UNKNOWN        type_id=" + String(type_id))

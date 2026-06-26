@@ -29,6 +29,7 @@ from flare.quic import (
     AckFrame,
     AckRange,
     ConnectionCloseFrame,
+    DatagramFrame,
     EcnCounts,
     FRAME_TYPE_ACK,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
@@ -144,6 +145,9 @@ struct _DemoHandler(FrameHandler, Movable):
 
     def on_handshake_done(mut self) raises:
         self.handshake_done_count += 1
+
+    def on_datagram(mut self, dg: DatagramFrame) raises:
+        pass
 
     def on_unknown(mut self, type_id: UInt64) raises:
         pass

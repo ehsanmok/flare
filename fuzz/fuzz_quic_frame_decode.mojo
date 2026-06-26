@@ -34,6 +34,7 @@ from flare.quic.frame import (
     ConnectionCloseFrame,
     CryptoFrame,
     DataBlockedFrame,
+    DatagramFrame,
     FrameHandler,
     MaxDataFrame,
     MaxStreamDataFrame,
@@ -133,6 +134,9 @@ struct _NoOpHandler(FrameHandler, Movable):
         self.dispatches += 1
 
     def on_handshake_done(mut self) raises:
+        self.dispatches += 1
+
+    def on_datagram(mut self, dg: DatagramFrame) raises:
         self.dispatches += 1
 
     def on_unknown(mut self, type_id: UInt64) raises:

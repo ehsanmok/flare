@@ -25,6 +25,8 @@ from flare.quic import (
     FRAME_TYPE_DATA_BLOCKED,
     FRAME_TYPE_HANDSHAKE_DONE,
     FRAME_TYPE_MAX_DATA,
+    FRAME_TYPE_DATAGRAM_LEN,
+    FRAME_TYPE_DATAGRAM_NOLEN,
     FRAME_TYPE_MAX_STREAM_DATA,
     FRAME_TYPE_MAX_STREAMS_BIDI,
     FRAME_TYPE_MAX_STREAMS_UNI,
@@ -41,6 +43,7 @@ from flare.quic import (
     FRAME_TYPE_STREAM_DATA_BLOCKED,
     FRAME_TYPE_STREAMS_BLOCKED_BIDI,
     FRAME_TYPE_STREAMS_BLOCKED_UNI,
+    DatagramFrame,
     FrameHandler,
     HandshakeDoneFrame,
     MaxDataFrame,
@@ -60,6 +63,7 @@ from flare.quic import (
     encode_connection_close,
     encode_crypto,
     encode_data_blocked,
+    encode_datagram,
     encode_handshake_done,
     encode_max_data,
     encode_max_stream_data,
@@ -155,6 +159,9 @@ struct _Recorder(FrameHandler, Movable):
     var connection_close: ConnectionCloseFrame
     var connection_close_seen: Bool
 
+    var datagram: DatagramFrame
+    var datagram_seen: Bool
+
     def on_padding(mut self, count: Int) raises:
         self.padding_count += count
 
@@ -231,6 +238,10 @@ struct _Recorder(FrameHandler, Movable):
 
     def on_handshake_done(mut self) raises:
         self.handshake_done_count += 1
+
+    def on_datagram(mut self, dg: DatagramFrame) raises:
+        self.datagram = dg.copy()
+        self.datagram_seen = True
 
     def on_unknown(mut self, type_id: UInt64) raises:
         self.unknown_type = Int(type_id)
@@ -313,6 +324,8 @@ def _empty_recorder() -> _Recorder:
             reason_phrase=List[UInt8](),
         ),
         connection_close_seen=False,
+        datagram=DatagramFrame(data=List[UInt8](), has_length=False),
+        datagram_seen=False,
     )
 
 
@@ -740,6 +753,35 @@ def test_truncated_crypto_rejected() raises:
     assert_true(raised)
 
 
+def test_datagram_with_length_round_trip() raises:
+    var payload = _bytes(0xDE, 0xAD, 0xBE, 0xEF)
+    var out = List[UInt8]()
+    encode_datagram(DatagramFrame(data=payload.copy(), has_length=True), out)
+    assert_equal(Int(out[0]), FRAME_TYPE_DATAGRAM_LEN)
+    assert_equal(Int(out[1]), 4)  # explicit length varint
+    var rec = _empty_recorder()
+    var consumed = parse_frame_into(Span[UInt8, _](out), rec)
+    assert_equal(consumed, len(out))
+    assert_true(rec.datagram_seen)
+    assert_true(rec.datagram.has_length)
+    assert_equal(len(rec.datagram.data), 4)
+    assert_equal(Int(rec.datagram.data[0]), 0xDE)
+
+
+def test_datagram_no_length_runs_to_end() raises:
+    var payload = _bytes(0x01, 0x02, 0x03)
+    var out = List[UInt8]()
+    encode_datagram(DatagramFrame(data=payload.copy(), has_length=False), out)
+    assert_equal(Int(out[0]), FRAME_TYPE_DATAGRAM_NOLEN)
+    assert_equal(len(out), 4)  # type byte + 3 payload, no length prefix
+    var rec = _empty_recorder()
+    var consumed = parse_frame_into(Span[UInt8, _](out), rec)
+    assert_equal(consumed, len(out))
+    assert_true(rec.datagram_seen)
+    assert_false(rec.datagram.has_length)
+    assert_equal(len(rec.datagram.data), 3)
+
+
 def main() raises:
     test_padding_single_byte()
     test_ping_round_trip()
@@ -767,4 +809,6 @@ def main() raises:
     test_handshake_done_round_trip()
     test_unknown_frame_type_rejected()
     test_truncated_crypto_rejected()
-    print("test_quic_frame: 26 passed")
+    test_datagram_with_length_round_trip()
+    test_datagram_no_length_runs_to_end()
+    print("test_quic_frame: 28 passed")

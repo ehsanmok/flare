@@ -202,8 +202,25 @@ def test_truncated_value_rejected() raises:
     assert_true(raised)
 
 
+def test_max_datagram_frame_size_roundtrip() raises:
+    var params = empty_transport_parameters()
+    params.max_datagram_frame_size = Optional[UInt64](UInt64(65535))
+    var encoded = encode_transport_parameters(params)
+    var decoded = decode_transport_parameters(Span[UInt8, _](encoded))
+    assert_true(Bool(decoded.max_datagram_frame_size))
+    assert_equal(decoded.max_datagram_frame_size.value(), UInt64(65535))
+    # Absent by default.
+    var empty = decode_transport_parameters(
+        Span[UInt8, _](
+            encode_transport_parameters(empty_transport_parameters())
+        )
+    )
+    assert_false(Bool(empty.max_datagram_frame_size))
+
+
 def main() raises:
     test_round_trip_full_set()
+    test_max_datagram_frame_size_roundtrip()
     test_empty_params_roundtrip()
     test_disable_active_migration_zero_length()
     test_stateless_reset_token_must_be_16_bytes()
@@ -213,4 +230,4 @@ def main() raises:
     test_duplicate_id_rejected()
     test_unknown_id_silently_dropped()
     test_truncated_value_rejected()
-    print("test_quic_transport_params: 10 passed")
+    print("test_quic_transport_params: 11 passed")

@@ -54,6 +54,7 @@ from .frame import (
     ConnectionCloseFrame,
     CryptoFrame,
     DataBlockedFrame,
+    DatagramFrame,
     FrameHandler,
     MaxDataFrame,
     MaxStreamDataFrame,
@@ -207,6 +208,10 @@ struct ConnectionEvents(Copyable, Movable):
     """Packet numbers an inbound ACK frame acknowledged this tick
     (§19.3, expanded from the ACK ranges). The client loss-recovery
     path retires its in-flight sent packets against this list."""
+    var datagrams: List[List[UInt8]]
+    """RFC 9221 DATAGRAM payloads received this tick. The reactor /
+    application drains these after :func:`handle_frame_buf` returns;
+    unreliable, unordered, and not retransmitted on loss."""
 
 
 def empty_events() -> ConnectionEvents:
@@ -223,6 +228,7 @@ def empty_events() -> ConnectionEvents:
         retire_connection_ids=List[UInt64](),
         path_validated=False,
         acked_packets=List[UInt64](),
+        datagrams=List[List[UInt8]](),
     )
 
 
@@ -697,6 +703,14 @@ struct _ConnFrameHandler(FrameHandler):
     def on_handshake_done(mut self) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_handshake_done(self._conn()[], self._events()[])
+
+    def on_datagram(mut self, dg: DatagramFrame) raises:
+        # RFC 9221 §5: DATAGRAM frames are ack-eliciting; the payload
+        # is surfaced for the reactor/application to drain. The
+        # sans-I/O layer keeps no per-datagram ordering or retransmit
+        # state -- they are unreliable by contract.
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        self._events()[].datagrams.append(dg.data.copy())
 
     def on_unknown(mut self, type_id: UInt64) raises:
         # Forward-compatibility: extension codepoints are ignored

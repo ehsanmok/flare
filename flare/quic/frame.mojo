@@ -104,8 +104,30 @@ comptime FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: Int = 0x1C
 comptime FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: Int = 0x1D
 comptime FRAME_TYPE_HANDSHAKE_DONE: Int = 0x1E
 
+# RFC 9221 unreliable DATAGRAM frames. The low bit is the LEN flag:
+# 0x30 carries the payload to the end of the QUIC packet, 0x31 prefixes
+# the payload with an explicit length varint so it can be followed by
+# more frames in the same packet.
+comptime FRAME_TYPE_DATAGRAM_NOLEN: Int = 0x30
+comptime FRAME_TYPE_DATAGRAM_LEN: Int = 0x31
+
 
 # ── Typed frame payload structs ──────────────────────────────────────────────
+
+
+@fieldwise_init
+struct DatagramFrame(Copyable, Movable):
+    """DATAGRAM (RFC 9221 §4) -- unreliable application datagram.
+
+    ``has_length`` carries the wire-type distinction: ``True`` for type
+    0x31 (an explicit length varint precedes the payload, so the frame
+    may be followed by more frames), ``False`` for type 0x30 (the
+    payload runs to the end of the QUIC packet -- it must be the last
+    frame). The encoder picks the type from this flag.
+    """
+
+    var data: List[UInt8]
+    var has_length: Bool
 
 
 @fieldwise_init
@@ -423,6 +445,13 @@ trait FrameHandler(ImplicitlyDestructible, Movable):
         """HANDSHAKE_DONE (§19.20)."""
         ...
 
+    def on_datagram(mut self, dg: DatagramFrame) raises:
+        """DATAGRAM (RFC 9221 §4) -- an unreliable application
+        datagram. ``dg.has_length`` records whether the wire type
+        carried an explicit length (0x31) or ran to the end of the
+        packet (0x30)."""
+        ...
+
     def on_unknown(mut self, type_id: UInt64) raises:
         """A frame whose wire type lies outside the v1 master
         table fired. Default policy lives in the implementor: a
@@ -447,6 +476,22 @@ def _push_bytes(mut out: List[UInt8], data: List[UInt8]):
 
 
 # ── Per-type encoders ────────────────────────────────────────────────────────
+
+
+def encode_datagram(frame: DatagramFrame, mut out: List[UInt8]) raises:
+    """Encode a DATAGRAM frame (RFC 9221 §4).
+
+    When ``frame.has_length`` is set, emit type 0x31 with an explicit
+    length varint so the frame may be followed by others in the packet;
+    otherwise emit type 0x30, which the caller MUST place last in the
+    packet (its payload runs to the end of the QUIC payload).
+    """
+    if frame.has_length:
+        out.append(UInt8(FRAME_TYPE_DATAGRAM_LEN))
+        _push_varint(out, UInt64(len(frame.data)))
+    else:
+        out.append(UInt8(FRAME_TYPE_DATAGRAM_NOLEN))
+    _push_bytes(out, frame.data)
 
 
 def encode_padding(length: Int, mut out: List[UInt8]) raises:
@@ -896,6 +941,18 @@ def parse_frame_into[
         return pos
     if t == FRAME_TYPE_HANDSHAKE_DONE:
         handler.on_handshake_done()
+        return pos
+    if t == FRAME_TYPE_DATAGRAM_NOLEN or t == FRAME_TYPE_DATAGRAM_LEN:
+        # RFC 9221 §4: 0x30 runs to the end of the packet; 0x31 has an
+        # explicit length varint and may be followed by more frames.
+        var has_len = t == FRAME_TYPE_DATAGRAM_LEN
+        var dlen: Int
+        if has_len:
+            dlen = Int(_read_varint(buf, pos))
+        else:
+            dlen = len(buf) - pos
+        var data = _read_bytes(buf, pos, dlen)
+        handler.on_datagram(DatagramFrame(data=data^, has_length=has_len))
         return pos
     handler.on_unknown(raw_type)
     return pos
