@@ -1717,6 +1717,18 @@ configuration:
   fires at capacity. The client `fetch_0rtt` gate is a pure
   `is_idempotent_method` predicate plus two existing accessor reads,
   and the unary `fetch` path is untouched.
+- W8 migration strict egress hold adds no steady-state cost. The
+  per-slot egress drain (`_drain_and_send`) gains one
+  `_drain_migration_probe` call whose body returns immediately when the
+  slot has no stashed path-validation frames -- the universal case when
+  no migration is in flight -- so the coalesced 1-RTT response/ACK drain
+  is byte-identical to before. Path frames are no longer mixed into the
+  coalesced datagram; they only ever exist mid-migration. The new
+  per-datagram 3x byte accounting and candidate routing run solely on
+  the migration path (a `probing` bool check otherwise), and the
+  benchmarks never migrate, so throughput/tail are unaffected. The hold
+  trades one validation round trip of latency on a genuine migration for
+  the guarantee that no 1-RTT egress reflects to an unvalidated address.
 
 Functional parity is covered by the unchanged QUIC/H3 suites
 (`test-quic-loopback-integration`, `test-quic-post-initial-decrypt`,

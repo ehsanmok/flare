@@ -7,25 +7,31 @@ policy in one auditable place.
 When a 1-RTT packet for a known connection arrives from a *new* source
 address (a NAT rebind or an explicit client ``migrate()``), RFC 9000
 sec 9 requires the server to validate the new path before trusting it.
-flare's listener follows the new address for responsiveness, and -- with
-this module -- also actively probes it:
+flare's listener implements a **strict egress hold** (W8): it does NOT
+follow the new address for general egress until the path validates.
 
+* It keeps every non-probe 1-RTT egress (ACKs, H3 response STREAM
+  frames) on the previously validated address; the candidate is
+  promoted to the egress address only once the client echoes the
+  server's ``PATH_CHALLENGE``
+  (:meth:`flare.quic.server.QuicListener._process_one_packet`).
 * It sends a server-initiated ``PATH_CHALLENGE`` (RFC 9000 sec 8.2) to
-  the new address; the client's matching ``PATH_RESPONSE`` flips the
-  connection's ``path_validated`` event.
-* Until the path is validated it caps server-originated bytes to the
-  new address at ``3x`` the bytes received from it (RFC 9000 sec 8.1 /
-  sec 21.5.4 anti-amplification), so a spoofed-source migration cannot
-  turn the server into a reflection amplifier.
+  the candidate; the client's matching ``PATH_RESPONSE`` flips the
+  connection's ``path_validated`` event and releases the hold.
+* Probe / echo egress to the unvalidated candidate is bounded at
+  ``3x`` the bytes received from it (RFC 9000 sec 8.1 / sec 21.5.4
+  anti-amplification), charged per *protected datagram* (not just the
+  frame) in :meth:`QuicListener._drain_migration_probe`, so a
+  spoofed-source migration cannot turn the server into a reflection
+  amplifier. When the budget is exhausted the probe is held back and
+  retried once more bytes arrive on the path.
 
-ponytail: this enforces the amplification limit on the server's own
-probe/echo frames (the bytes most at risk of being used for
-reflection) and re-probes only when the candidate address changes. The
-ceiling is a *strict* egress hold -- not committing ANY 1-RTT egress to
-the new path until validation completes, with full per-path byte
-accounting across every datagram. That is the documented upgrade path;
-it is higher-regression-risk surgery on the egress drain and is tracked
-as a follow-up rather than shipped here.
+ponytail: the budget is seeded from the migration-triggering datagram
+and grows with each received datagram on the candidate. The hold trades
+a round trip of added latency on a genuine migration (the response to
+the migrating request waits for validation) for the guarantee that no
+1-RTT egress ever reflects off the server to an unvalidated address --
+the security property the strict hold exists to provide.
 """
 
 from std.collections import List

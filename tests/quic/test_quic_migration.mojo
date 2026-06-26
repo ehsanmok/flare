@@ -93,6 +93,9 @@ def test_client_migrates_to_new_path() raises:
     assert_equal(client.active_dcid_seq(), UInt64(0))
 
     var old_addr = client.local_addr()
+    # The server's egress address for this slot is the client's
+    # pre-migration address (W8 strict-hold baseline).
+    var server_old_egress = server.peer_addrs[0]
 
     # 2. Migrate: switch CID + rebind socket + probe the new path.
     var started = client.migrate(rebind=True)
@@ -104,6 +107,21 @@ def test_client_migrates_to_new_path() raises:
         "rebind must pick a new local port",
     )
 
+    # W8 strict egress hold: after the server first sees the migrating
+    # packet it probes the new path but must NOT yet switch its egress
+    # address to the unvalidated candidate -- the client has not echoed
+    # the server's PATH_CHALLENGE, so validation cannot have completed.
+    _ = server.tick(timeout_ms=50)
+    assert_true(
+        not client.path_validated(),
+        "client cannot be validated before it polls the server probe",
+    )
+    assert_equal(
+        Int(server.peer_addrs[0].port),
+        Int(server_old_egress.port),
+        "strict hold: egress stays on the validated path pre-validation",
+    )
+
     # 3. Pump until the server echoes PATH_RESPONSE on the new path.
     var validated = False
     for _ in range(40):
@@ -113,6 +131,19 @@ def test_client_migrates_to_new_path() raises:
             validated = True
             break
     assert_true(validated, "new path must validate via PATH_RESPONSE")
+
+    # Once the client echoes the server's PATH_CHALLENGE the server
+    # promotes the candidate to its egress address (hold released).
+    var promoted = False
+    for _ in range(40):
+        _ = client.poll(timeout_ms=50)
+        _ = server.tick(timeout_ms=50)
+        if Int(server.peer_addrs[0].port) != Int(server_old_egress.port):
+            promoted = True
+            break
+    assert_true(
+        promoted, "server must promote the validated candidate to egress"
+    )
 
     # 4. Application data still flows on the migrated path.
     var sid = client.open_bidi_stream()
@@ -133,4 +164,4 @@ def test_client_migrates_to_new_path() raises:
 
 def main() raises:
     test_client_migrates_to_new_path()
-    print("test_quic_migration: 1 passed")
+    print("test_quic_migration: 1 passed (strict egress hold + promotion)")

@@ -498,21 +498,23 @@ struct QuicListener(Movable):
             # egress + PATH_RESPONSE go back to where the client now
             # is.
             # RFC 9000 sec 8 / sec 9 path validation: a 1-RTT packet
-            # from a new source means the client moved paths. Follow it
-            # for responsiveness AND actively probe it -- emit a
-            # server-initiated PATH_CHALLENGE and bound server-
-            # originated bytes to the unvalidated path at 3x received
-            # (sec 8.1 / sec 21.5.4 anti-amplification) so a spoofed-
-            # source migration cannot reflect/amplify off the server.
+            # from a new source means the client moved paths. W8 strict
+            # egress hold -- do NOT switch the egress address to the new
+            # path yet (the prior "follow immediately" let large 1-RTT
+            # responses reflect off the server to a spoofed source).
+            # Instead start a server-initiated PATH_CHALLENGE probe to
+            # the candidate, keep all non-probe egress on the validated
+            # path (:attr:`peer_addrs`), and only promote the candidate
+            # once the client echoes our challenge (see
+            # :meth:`_process_one_packet`). Probe egress to the
+            # unvalidated candidate is bounded at 3x received bytes
+            # (sec 8.1 / sec 21.5.4) by :meth:`_drain_migration_probe`.
             if (
                 slot >= 0
                 and slot < len(self.peer_addrs)
                 and self.peer_addrs[slot] != peer
             ):
                 self._begin_path_validation(slot, peer, len(datagram))
-                self.peer_addrs[slot] = peer
-            elif slot >= 0 and slot < len(self.migration_probe):
-                self.migration_probe[slot].note_rx(peer, UInt64(len(datagram)))
         if slot >= 0 and slot < len(self.connections):
             self._handle_inbound(slot, datagram)
         return slot
@@ -707,19 +709,32 @@ struct QuicListener(Movable):
         self._route_h3_stream_chunks(slot, events)
         self._stash_migration_egress(slot, events)
         # The client echoed our server-initiated PATH_CHALLENGE: the
-        # new path is validated, so lift the anti-amplification cap.
+        # candidate path is validated (RFC 9000 sec 8.2). Promote it to
+        # the connection's egress address -- this is the W8 strict-hold
+        # release point, the first moment non-probe 1-RTT egress is
+        # allowed to follow the client to the new path -- and lift the
+        # anti-amplification cap.
         if events.path_validated and slot < len(self.migration_probe):
+            if self.migration_probe[slot].probing and slot < len(
+                self.peer_addrs
+            ):
+                self.peer_addrs[slot] = self.migration_probe[slot].candidate
             self.migration_probe[slot].on_validated()
 
     def _begin_path_validation(
         mut self, slot: Int, peer: SocketAddr, datagram_len: Int
     ) raises:
         """Start (or refresh) server-initiated validation of a new
-        peer address (RFC 9000 sec 8.2). Emits a PATH_CHALLENGE on the
-        new path -- subject to the anti-amplification budget -- and
-        arms the connection to match the client's PATH_RESPONSE. Idle
-        when the candidate is already being probed (no re-issue per
-        packet)."""
+        peer address (RFC 9000 sec 8.2). Stashes a PATH_CHALLENGE for
+        the candidate and arms the connection to match the client's
+        PATH_RESPONSE. When the candidate is already being probed this
+        only grows its received-byte budget (no re-issue per packet).
+
+        The actual probe egress -- and its 3x anti-amplification
+        accounting -- happens at drain time in
+        :meth:`_drain_migration_probe`, which charges the protected
+        datagram (not just the frame) against the candidate's budget
+        and holds it back when the budget is exhausted."""
         if slot < 0 or slot >= len(self.migration_probe):
             return
         if not self.migration_probe[slot].should_start(peer):
@@ -729,16 +744,10 @@ struct QuicListener(Movable):
         var data = _random_bytes(8)
         self.connections[slot].conn.outgoing_path_challenge = data.copy()
         var frame = new_path_challenge(data)
-        # Only emit the probe if it stays within the 3x amplification
-        # budget for the unvalidated path (it always does for a normal
-        # padded migration datagram; the guard matters for a tiny
-        # spoofed trigger).
-        if self.migration_probe[slot].amplification_allows(len(frame)):
-            var buf = self.pending_migration_tx[slot].copy()
-            for i in range(len(frame)):
-                buf.append(frame[i])
-            self.pending_migration_tx[slot] = buf^
-            self.migration_probe[slot].note_tx(len(frame))
+        var buf = self.pending_migration_tx[slot].copy()
+        for i in range(len(frame)):
+            buf.append(frame[i])
+        self.pending_migration_tx[slot] = buf^
 
     def _stash_migration_egress(
         mut self, slot: Int, events: ConnectionEvents
@@ -1498,9 +1507,70 @@ struct QuicListener(Movable):
         # STREAM frame are packed into as few datagrams as the MTU
         # allows -- one AEAD encrypt + one sendto per datagram
         # instead of one per response plus a separate ACK packet.
+        # Path-validation probe egress (W8): routed to the candidate
+        # under its own 3x budget, kept off the validated-path drain
+        # below. No-op in steady state (nothing stashed, not probing).
+        if self._drain_migration_probe(slot):
+            emitted = True
         if self._drain_1rtt_coalesced(slot, peer):
             emitted = True
         return emitted
+
+    def _drain_migration_probe(mut self, slot: Int) raises -> Bool:
+        """Strict-hold egress for path-validation frames (W8).
+
+        PATH_CHALLENGE / PATH_RESPONSE frames stashed for ``slot`` are
+        sent in their own 1-RTT datagram. While a candidate path is
+        under validation they go ONLY to that candidate -- never the
+        validated path -- and the protected datagram is charged against
+        the candidate's 3x anti-amplification budget (RFC 9000 sec 8.1
+        / sec 21.5.4); when the budget is exhausted the frames stay
+        stashed and flush on a later drain once more bytes arrive on
+        the path. With no migration in flight (the steady state) this
+        is a pure no-op: nothing is stashed and ``probing`` is False.
+
+        Returns ``True`` iff a datagram was emitted.
+        """
+        if slot < 0 or slot >= len(self.pending_migration_tx):
+            return False
+        if len(self.pending_migration_tx[slot]) == 0:
+            return False
+        if not self._has_1rtt_keys(slot):
+            return False
+        var probing = (
+            slot < len(self.migration_probe)
+            and self.migration_probe[slot].probing
+        )
+        var dest: SocketAddr
+        if probing:
+            dest = self.migration_probe[slot].candidate
+        else:
+            # A same-path client PATH_CHALLENGE (no migration): echo on
+            # the validated path, no amplification cap.
+            dest = self.peer_addrs[slot]
+        var frames = self.pending_migration_tx[slot].copy()
+        if probing:
+            # Estimate the protected datagram size (frames + short
+            # header + pn + AEAD tag) and refuse to exceed the
+            # unvalidated path's 3x budget. Held frames stay stashed and
+            # flush once inbound bytes grow the budget.
+            var est = (
+                len(frames)
+                + self.connections[slot].peer_cid.length()
+                + 1  # short-header flags byte
+                + 2  # packet-number length
+                + 16  # AEAD tag
+            )
+            if not self.migration_probe[slot].amplification_allows(est):
+                return False
+        var dg = self._build_1rtt_response(slot, frames^)
+        if len(dg) == 0:
+            return False
+        _ = self.send_to(Span[UInt8, _](dg), dest)
+        self.pending_migration_tx[slot] = List[UInt8]()
+        if probing:
+            self.migration_probe[slot].note_tx(len(dg))
+        return True
 
     def _has_1rtt_keys(self, slot: Int) -> Bool:
         """True if the slot has installed 1-RTT traffic secrets
@@ -1564,17 +1634,12 @@ struct QuicListener(Movable):
             self.rx_1rtt_ack_pending[slot] = False
             self.handshake_done_sent[slot] = True
 
-        # Flush any pending migration frames (PATH_RESPONSE echoes).
-        # These are small and ride the leading datagram; they must go
-        # out promptly so the client's path probe validates.
-        if (
-            slot < len(self.pending_migration_tx)
-            and len(self.pending_migration_tx[slot]) > 0
-        ):
-            var mig = self.pending_migration_tx[slot].copy()
-            self.pending_migration_tx[slot] = List[UInt8]()
-            for i in range(len(mig)):
-                plaintext.append(mig[i])
+        # Migration path-validation frames (PATH_CHALLENGE /
+        # PATH_RESPONSE) are NOT coalesced here -- W8 routes them to the
+        # candidate path under their own anti-amplification budget via
+        # :meth:`_drain_migration_probe`, which runs separately in
+        # :meth:`_drain_and_send`. This drain only ever targets the
+        # validated egress address.
 
         # Collect this slot's ready responses.
         var slot_prefix = String(slot) + ":"
