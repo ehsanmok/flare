@@ -623,9 +623,17 @@ def _recvmmsg(
     a non-NULL ``{0,0}`` timespec would instead make the kernel return
     after the first datagram (per-message timeout check).
     """
-    return external_call["recvmmsg", c_int](
-        fd, msgvec.bitcast[NoneType](), vlen, flags, timeout
-    )
+    comptime if CompilationTarget.is_linux():
+        return external_call["recvmmsg", c_int](
+            fd, msgvec.bitcast[NoneType](), vlen, flags, timeout
+        )
+    else:
+        # recvmmsg(2) is Linux-only; on other targets the symbol does not
+        # exist so referencing it at all breaks JIT materialization. The
+        # comptime gate keeps the symbol out of non-Linux builds. Callers
+        # are guarded by udp_batch_supported() and never reach this branch.
+        _ = (fd, msgvec, vlen, flags, timeout)
+        return c_int(-1)
 
 
 @always_inline
@@ -642,9 +650,16 @@ def _sendmmsg(
     count). ``ENOSYS`` => fall back to per-datagram ``sendto``.
     Linux-only.
     """
-    return external_call["sendmmsg", c_int](
-        fd, msgvec.bitcast[NoneType](), vlen, flags
-    )
+    comptime if CompilationTarget.is_linux():
+        return external_call["sendmmsg", c_int](
+            fd, msgvec.bitcast[NoneType](), vlen, flags
+        )
+    else:
+        # sendmmsg(2) is Linux-only; gate the symbol out of non-Linux
+        # builds (see _recvmmsg). Callers are guarded by
+        # udp_batch_supported() and never reach this branch.
+        _ = (fd, msgvec, vlen, flags)
+        return c_int(-1)
 
 
 @always_inline
