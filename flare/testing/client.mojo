@@ -32,7 +32,7 @@ from flare.http.headers import HeaderMap
 from flare.http.proto.ascii import ascii_lower
 from flare.http.request import Request
 from flare.http.response import Response
-from flare.http2 import H2Connection, Http2ClientConnection, HpackHeader
+from flare.http2 import Http2Connection, Http2ClientConnection, HpackHeader
 from flare.net import IpAddr, SocketAddr
 
 
@@ -126,7 +126,7 @@ struct H2cTestClient[H: Handler](ImplicitlyDestructible, Movable):
     :class:`Request` directly, :class:`H2cTestClient` drives the request
     through the *real* HTTP/2 stack -- the byte-level
     :class:`flare.http2.Http2ClientConnection` and
-    :class:`flare.http2.H2Connection` exchange frames in memory (preface,
+    :class:`flare.http2.Http2Connection` exchange frames in memory (preface,
     SETTINGS, HPACK-encoded HEADERS, DATA) so the h2 framing + HPACK
     request-assembly + response-encoding path gets coverage with no TLS,
     no socket, and no reactor. The handler runs server-side exactly as
@@ -170,7 +170,7 @@ struct H2cTestClient[H: Handler](ImplicitlyDestructible, Movable):
         :class:`Request` to ``self.handler``, frames the response back,
         and decodes it on the client driver."""
         var client = Http2ClientConnection()
-        var server = H2Connection()
+        var server = Http2Connection()
         var sid = client.next_stream_id()
         var extra = List[HpackHeader]()
         for i in range(len(headers._keys)):

@@ -66,7 +66,7 @@ from ..dns import resolve
 
 from ..http2.client import Http2ClientConnection
 from ..quic.client import QuicClientConnection
-from ..h3.client import H3ClientConnection
+from ..http3.client import Http3ClientConnection
 from ..tls.rustls_quic import RustlsQuicConnector
 from ..qpack import QpackHeader
 from std.os import getenv
@@ -89,8 +89,8 @@ from ._client.h2_send import (
 )
 from ._client.alt_svc import (
     AltSvcStore,
-    H3WireChoice,
-    decide_h3_wire,
+    Http3WireChoice,
+    decide_http3_wire,
     monotonic_now_s,
 )
 from ._client.quic_pool import QuicConnectionPool
@@ -98,7 +98,7 @@ from ._client.tls_pool import TlsConnectionPool
 from ._client.h3_race import (
     RACE_H3,
     RACE_NONE,
-    race_h3_h2_connect,
+    race_http3_h2_connect,
 )
 from ..net.socket import RawSocket
 from ..net._libc import (
@@ -151,7 +151,7 @@ def _race_connect_leg(
     """Happy-eyeballs connect-leg trampoline: re-materialise the
     :class:`HttpClient` from its address, parse ``url`` (Url is move-only
     so each leg parses its own), and establish *only the connection* for
-    the h3 or h2/h1 path. Passed to :func:`race_h3_h2_connect` so that
+    the h3 or h2/h1 path. Passed to :func:`race_http3_h2_connect` so that
     module needs no HttpClient import. Only the h3 leg mutates client
     state (the QUIC pool), so the two concurrent legs have a single
     writer. Returns ``True`` when the connection established."""
@@ -160,7 +160,7 @@ def _race_connect_leg(
     )
     var u = Url.parse(url)
     if is_h3:
-        return client[]._connect_h3(u)
+        return client[]._connect_http3(u)
     return client[]._connect_h2(u)
 
 
@@ -233,25 +233,25 @@ struct HttpClient(Movable):
     cleartext ``http://`` requests reuse pooled fds today;
     ``https://`` always full-handshakes (the TLS-resumption work
     in Commit 04 keeps that handshake cheap)."""
-    var _prefer_h3: Bool
+    var _prefer_http3: Bool
     """When ``True`` the client prefers HTTP/3 over QUIC for
     ``https://`` requests (RFC 9114). Defaults to ``False`` so the
     client keeps its h2/h1 ALPN behaviour unchanged. The decision
-    is computed by :func:`flare.http._client.alt_svc.decide_h3_wire`
-    in :meth:`h3_wire_choice`; the runtime dial falls back to the
+    is computed by :func:`flare.http._client.alt_svc.decide_http3_wire`
+    in :meth:`http3_wire_choice`; the runtime dial falls back to the
     h2/h1 path on any QUIC failure (transparent policy)."""
     var _alt_svc: AltSvcStore
     """Per-origin ``Alt-Svc`` (RFC 7838) discovery cache, behind a
     pointer-backed interior-mutable handle so a read-``self`` request
     path can auto-record headers. Populated from response ``Alt-Svc``
     headers in :meth:`send` (and via :meth:`record_alt_svc`);     consulted
-    by :meth:`h3_wire_choice` so an origin that advertised an h3
+    by :meth:`http3_wire_choice` so an origin that advertised an h3
     endpoint upgrades transparently on the next request. Freed in
     :meth:`__del__`."""
     var _quic_pool: QuicConnectionPool
     """Idle HTTP/3 (QUIC) connection pool keyed on ``host:port``,
     behind a pointer-backed interior-mutable handle so the read-``self``
-    :meth:`_send_h3` can acquire / release. Enabled by default (an
+    :meth:`_send_http3` can acquire / release. Enabled by default (an
     established QUIC connection is expensive, so reuse is the right
     default), so consecutive h3 requests to one origin amortise the
     handshake. Freed in :meth:`__del__`."""
@@ -303,7 +303,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
-        prefer_h3: Bool = False,
+        prefer_http3: Bool = False,
         auto_decompress: Bool = True,
     ):
         """Initialise an ``HttpClient`` with secure defaults.
@@ -321,7 +321,7 @@ struct HttpClient(Movable):
                 instead of using prior knowledge; the connection switches
                 to HTTP/2 only if the server returns ``101 Switching
                 Protocols``, otherwise it stays on HTTP/1.1.
-            prefer_h3: When ``True``, ``https://`` requests prefer
+            prefer_http3: When ``True``, ``https://`` requests prefer
                 HTTP/3 over QUIC on first contact rather than waiting
                 for an ``Alt-Svc`` advert; any QUIC dial failure falls
                 back transparently to h2/h1. (Without this, h3 still
@@ -337,7 +337,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = prefer_h3
+        self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
         self._tls_pool = TlsConnectionPool.disabled()
@@ -356,7 +356,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
-        prefer_h3: Bool = False,
+        prefer_http3: Bool = False,
         auto_decompress: Bool = True,
     ):
         """Initialise an ``HttpClient`` with custom TLS configuration."""
@@ -369,7 +369,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = prefer_h3
+        self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
         self._tls_pool = TlsConnectionPool.disabled()
@@ -390,7 +390,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
-        prefer_h3: Bool = False,
+        prefer_http3: Bool = False,
         auto_decompress: Bool = True,
     ) raises:
         """Initialise an ``HttpClient`` with authentication."""
@@ -405,7 +405,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = prefer_h3
+        self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
         self._tls_pool = TlsConnectionPool.disabled()
@@ -426,7 +426,7 @@ struct HttpClient(Movable):
         user_agent: String = "flare/0.1.0",
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
-        prefer_h3: Bool = False,
+        prefer_http3: Bool = False,
         auto_decompress: Bool = True,
     ) raises:
         """Initialise an ``HttpClient`` with a base URL and authentication."""
@@ -441,7 +441,7 @@ struct HttpClient(Movable):
         self._prefer_h2c = prefer_h2c
         self._h2c_upgrade = h2c_upgrade
         self._pool = ClientPool.disabled()
-        self._prefer_h3 = prefer_h3
+        self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
         self._tls_pool = TlsConnectionPool.disabled()
@@ -559,22 +559,22 @@ struct HttpClient(Movable):
         the QUIC pool."""
         return self._quic_pool.idle_count()
 
-    def with_prefer_h3(var self, enabled: Bool = True) -> HttpClient:
+    def with_prefer_http3(var self, enabled: Bool = True) -> HttpClient:
         """Opt this client into HTTP/3 (move-in / move-out so it
         chains off the constructor like :meth:`with_pool`).
 
         When enabled, ``https://`` requests prefer h3 over QUIC; the
-        decision still flows through :meth:`h3_wire_choice` and any
+        decision still flows through :meth:`http3_wire_choice` and any
         QUIC dial failure falls back transparently to the existing
         h2/h1 path.
 
         Example:
             ```mojo
-            with HttpClient("https://example.com").with_prefer_h3() as c:
+            with HttpClient("https://example.com").with_prefer_http3() as c:
                 _ = c.get("/")
             ```
         """
-        self._prefer_h3 = enabled
+        self._prefer_http3 = enabled
         return self^
 
     def with_redirect_policy(var self, policy: RedirectPolicy) -> HttpClient:
@@ -667,16 +667,18 @@ struct HttpClient(Movable):
         in :meth:`send`. ``origin`` is the ``host:port`` the response
         came from; ``alt_svc_header`` is the raw header value. A later
         request to the same origin then sees a fresh h3 advert via
-        :meth:`h3_wire_choice`. A ``clear`` token evicts the cached
+        :meth:`http3_wire_choice`. A ``clear`` token evicts the cached
         entry. Non-h3 adverts are ignored."""
         self._alt_svc.record(origin, alt_svc_header, monotonic_now_s())
 
-    def h3_wire_choice(self, scheme: String, host: String, port: UInt16) -> Int:
+    def http3_wire_choice(
+        self, scheme: String, host: String, port: UInt16
+    ) -> Int:
         """The transparent h3-vs-h2 decision for one request.
 
-        Consults the ``prefer_h3`` knob + the per-origin ``Alt-Svc``
+        Consults the ``prefer_http3`` knob + the per-origin ``Alt-Svc``
         cache and returns an
-        :class:`flare.http._client.alt_svc.H3WireChoice` codepoint
+        :class:`flare.http._client.alt_svc.Http3WireChoice` codepoint
         (``HTTP_3`` or ``HTTP_2_OR_LOWER``). QUIC support is compiled
         in, so the only gates are the scheme (``https`` only) and
         whether h3 is preferred or freshly advertised. The runtime
@@ -684,9 +686,9 @@ struct HttpClient(Movable):
         regardless of this result."""
         var origin = host + ":" + String(Int(port))
         var available = self._alt_svc.has_fresh_h3(origin, monotonic_now_s())
-        return decide_h3_wire(
+        return decide_http3_wire(
             scheme,
-            self._prefer_h3,
+            self._prefer_http3,
             available,
             quic_supported=True,
         )
@@ -723,8 +725,8 @@ struct HttpClient(Movable):
         with open(path, "r") as f:
             return f.read()
 
-    def _dial_h3(self, u: Url) raises -> H3ClientConnection:
-        """Open a fresh established :class:`H3ClientConnection` to
+    def _dial_http3(self, u: Url) raises -> Http3ClientConnection:
+        """Open a fresh established :class:`Http3ClientConnection` to
         ``u``'s origin (DNS -> rustls QUIC connector -> blocking QUIC
         handshake). Reports the dial to the pool's miss counter."""
         var addrs = resolve(u.host)
@@ -741,11 +743,11 @@ struct HttpClient(Movable):
             connector = RustlsQuicConnector.with_system_roots(alpn^)
         var quic = QuicClientConnection.connect(peer, connector, u.host)
         self._quic_pool.note_dial()
-        return H3ClientConnection(quic^)
+        return Http3ClientConnection(quic^)
 
-    def _run_h3_request(
+    def _run_http3_request(
         self,
-        mut h3: H3ClientConnection,
+        mut h3: Http3ClientConnection,
         u: Url,
         method: String,
         extra_headers: HeaderMap,
@@ -754,7 +756,7 @@ struct HttpClient(Movable):
     ) raises -> Response:
         """Drive one request/response over an established (possibly
         reused) ``h3`` connection and lower the
-        :class:`flare.h3.response_reader.H3Response` to a
+        :class:`flare.http3.response_reader.Http3Response` to a
         :class:`Response`. ``auth_header`` is the effective (redirect-
         policy-gated) Authorization value for this hop."""
         var headers = List[QpackHeader]()
@@ -781,10 +783,10 @@ struct HttpClient(Movable):
             resp.headers.set(hr.headers[i].name, hr.headers[i].value)
         return resp^
 
-    def _connect_h3(self, u: Url) raises -> Bool:
+    def _connect_http3(self, u: Url) raises -> Bool:
         """Happy-eyeballs h3 leg: establish a QUIC/h3 connection to
         ``u``'s origin and leave it idle in the per-origin QUIC pool so a
-        subsequent :meth:`_send_h3` reuses it (no second dial).
+        subsequent :meth:`_send_http3` reuses it (no second dial).
 
         Returns ``True`` once an established connection is pooled. A pool
         hit (an already-idle connection for this origin) counts as an
@@ -798,7 +800,7 @@ struct HttpClient(Movable):
                 self._quic_pool.release(key, existing^)
                 return True
             existing.close()
-        var fresh = self._dial_h3(u)
+        var fresh = self._dial_http3(u)
         if fresh.is_established():
             self._quic_pool.release(key, fresh^)
             return True
@@ -832,7 +834,7 @@ struct HttpClient(Movable):
             stream.close()
         return True
 
-    def _send_h3(
+    def _send_http3(
         self,
         u: Url,
         method: String,
@@ -843,7 +845,7 @@ struct HttpClient(Movable):
         """Send one ``https://`` request over HTTP/3, reusing a pooled
         QUIC connection when one is idle for this origin.
 
-        Acquires an idle :class:`H3ClientConnection` from the
+        Acquires an idle :class:`Http3ClientConnection` from the
         per-origin pool (or dials a fresh one on a miss), runs the
         request, and releases the connection back to the pool while it
         is still established. A pooled connection that fails mid-flight
@@ -859,7 +861,7 @@ struct HttpClient(Movable):
             var failed = False
             var resp = Response(0, "", List[UInt8]())
             try:
-                resp = self._run_h3_request(
+                resp = self._run_http3_request(
                     h3, u, method, extra_headers, body, auth_header
                 )
             except:
@@ -873,8 +875,8 @@ struct HttpClient(Movable):
             # Stale reused connection: drop it and dial fresh below.
             h3.close()
 
-        var fresh = self._dial_h3(u)
-        var resp = self._run_h3_request(
+        var fresh = self._dial_http3(u)
+        var resp = self._run_http3_request(
             fresh, u, method, extra_headers, body, auth_header
         )
         if fresh.is_established():
@@ -1663,7 +1665,7 @@ struct HttpClient(Movable):
 
         # ── Connect and send ───────────────────────────────────────────────
         if u.is_tls():
-            # HTTP/3 when the policy says so (prefer_h3 or a fresh
+            # HTTP/3 when the policy says so (prefer_http3 or a fresh
             # cached Alt-Svc advert). For idempotent methods we race h3
             # against the h2/h1 TLS path concurrently (happy-eyeballs):
             # whichever establishes + completes first wins, and a dead
@@ -1672,8 +1674,8 @@ struct HttpClient(Movable):
             # then fall back sequentially. Any QUIC/h3 failure falls
             # through transparently to the proven h2/h1 path.
             if (
-                self.h3_wire_choice("https", u.host, u.port)
-                == H3WireChoice.HTTP_3
+                self.http3_wire_choice("https", u.host, u.port)
+                == Http3WireChoice.HTTP_3
             ):
                 if _is_idempotent(method):
                     # Happy-eyeballs: race only the *connection*
@@ -1681,14 +1683,14 @@ struct HttpClient(Movable):
                     # winner (h3 preferred). Racing connects -- not whole
                     # requests -- means the idempotent request is never
                     # duplicated on the wire.
-                    var winner = race_h3_h2_connect(
+                    var winner = race_http3_h2_connect(
                         _race_connect_leg,
                         Int(UnsafePointer(to=self)),
                         url,
                     )
                     if winner == RACE_H3:
                         try:
-                            return self._send_h3(
+                            return self._send_http3(
                                 u, method, extra_headers, body, auth_header
                             )
                         except:
@@ -1701,7 +1703,7 @@ struct HttpClient(Movable):
                         u, method, extra_headers, body, wire, auth_header
                     )
                 try:
-                    return self._send_h3(
+                    return self._send_http3(
                         u, method, extra_headers, body, auth_header
                     )
                 except:

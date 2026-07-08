@@ -14,7 +14,7 @@ HTTP/3 uses QPACK on top of QUIC streams. This package ships:
   request field sections against it.
 
 The codec lives entirely in the sans-I/O sublayer; tests live in
-``tests/qpack/`` and the H3 frame layer (``flare.h3``) is the call site
+``tests/qpack/`` and the H3 frame layer (``flare.http3``) is the call site
 that consumes it.
 """
 

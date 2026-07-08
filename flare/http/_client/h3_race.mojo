@@ -1,6 +1,6 @@
 """Happy-eyeballs HTTP/3-vs-HTTP/2 *connection* race.
 
-When an ``https://`` request is eligible for HTTP/3 (``prefer_h3`` or a
+When an ``https://`` request is eligible for HTTP/3 (``prefer_http3`` or a
 fresh Alt-Svc advert) AND is idempotent, flare races the h3 (QUIC)
 *connection establishment* against the proven h2/h1 (TLS) connect
 *concurrently* on two OS threads instead of trying h3 first and falling
@@ -19,7 +19,7 @@ Design (mirrors :func:`flare.runtime.scheduler._worker_entry`):
   passed in (rather than this module importing ``HttpClient``) to avoid
   an import cycle. The h3 leg leaves its established connection in the
   client's QUIC pool so the subsequent request reuses it.
-* :func:`race_h3_h2_connect` spawns both
+* :func:`race_http3_h2_connect` spawns both
   :class:`flare.runtime._thread.ThreadHandle` workers and ``join()``s
   both before reading any result. ``pthread_join`` is a happens-before
   barrier, so the result cells are read race-free with no atomics, and
@@ -73,7 +73,7 @@ comptime _ConnectFn = def(Int, Bool, String) raises thin -> Bool
 struct _RaceResult(Movable):
     """One leg's outcome: whether the connection established, plus an
     error message on failure. Heap-allocated; written by the worker
-    thread, read by :func:`race_h3_h2_connect` after the join barrier."""
+    thread, read by :func:`race_http3_h2_connect` after the join barrier."""
 
     var ok: Bool
     var err: String
@@ -124,7 +124,7 @@ def _race_worker(arg: _OpaquePtr) -> _OpaquePtr:
     return _null_ptr()
 
 
-def race_h3_h2_connect(
+def race_http3_h2_connect(
     leg: _ConnectFn,
     client_addr: Int,
     url: String,

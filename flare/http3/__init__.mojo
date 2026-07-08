@@ -1,4 +1,4 @@
-"""``flare.h3`` — sans-I/O HTTP/3 codec primitives (RFC 9114).
+"""``flare.http3`` — sans-I/O HTTP/3 codec primitives (RFC 9114).
 
 HTTP/3 maps onto QUIC streams: each request lives on its own
 bidirectional stream, and the application data is a sequence of
@@ -12,14 +12,14 @@ the varint codec in :mod:`flare.quic.varint`.
 
 Public re-exports:
 
-- :class:`H3Frame`, :class:`H3FrameType` — the parsed-frame
+- :class:`Http3Frame`, :class:`Http3FrameType` — the parsed-frame
   carrier + named frame-type constants.
-- :func:`encode_h3_frame`, :func:`decode_h3_frame` — byte-level
+- :func:`encode_http3_frame`, :func:`decode_http3_frame` — byte-level
   codec helpers.
-- :func:`decode_h3_settings`, :func:`encode_h3_settings` — the
+- :func:`decode_http3_settings`, :func:`encode_http3_settings` — the
   HTTP/3 SETTINGS frame payload codec (a list of ``identifier:
   value`` varint pairs, RFC 9114 §7.2.4).
-- :class:`H3RequestReader` + :trait:`H3RequestEventHandler` +
+- :class:`Http3RequestReader` + :trait:`Http3RequestEventHandler` +
   :func:`feed_into[H]` — sans-I/O state machine that consumes
   the request-stream byte stream and fires typed callbacks
   (``on_headers`` / ``on_data`` / ``on_trailers`` /
@@ -37,14 +37,14 @@ Public re-exports:
   and the QPACK uni-stream preamble encoders — the client-side
   request writer (mirror of the response writer) plus the
   unidirectional control / QPACK stream preambles (RFC 9114 §6.2).
-- :class:`H3ResponseReader` + :class:`H3Response` — the stateful
+- :class:`Http3ResponseReader` + :class:`Http3Response` — the stateful
   client-side response decoder that accumulates HEADERS / DATA /
   trailers into an assembled response (mirror of the request
   reader).
 """
 
 from .frame import (
-    H3FrameType,
+    Http3FrameType,
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
     H3_FRAME_TYPE_CANCEL_PUSH,
@@ -56,20 +56,20 @@ from .frame import (
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
-    H3Frame,
-    H3Setting,
-    decode_h3_frame,
-    encode_h3_frame,
-    decode_h3_settings,
-    encode_h3_settings,
+    Http3Frame,
+    Http3Setting,
+    decode_http3_frame,
+    encode_http3_frame,
+    decode_http3_settings,
+    encode_http3_settings,
 )
 from .request_reader import (
     H3_REQUEST_STATE_BODY,
     H3_REQUEST_STATE_DONE,
     H3_REQUEST_STATE_INIT,
     H3_REQUEST_STATE_TRAILERS,
-    H3RequestEventHandler,
-    H3RequestReader,
+    Http3RequestEventHandler,
+    Http3RequestReader,
     feed_into,
 )
 from .response_writer import (
@@ -93,17 +93,17 @@ from .response_reader import (
     H3_RESPONSE_STATE_DONE,
     H3_RESPONSE_STATE_INIT,
     H3_RESPONSE_STATE_TRAILERS,
-    H3BodyChunk,
-    H3Response,
-    H3ResponseReader,
+    Http3BodyChunk,
+    Http3Response,
+    Http3ResponseReader,
 )
 from .client import (
-    H3ClientConnection,
-    H3ZeroRttOutcome,
+    Http3ClientConnection,
+    Http3ZeroRttOutcome,
     is_idempotent_method,
 )
 from .server import (
-    H3Connection,
-    H3ConnectionConfig,
-    H3StreamType,
+    Http3Connection,
+    Http3Config,
+    Http3StreamType,
 )

@@ -3,11 +3,11 @@
 Two wire-compatibility round-trips that pin the client codecs
 against the already-shipped server codecs (no QUIC, pure bytes):
 
-1. client ``encode_request_*`` -> server ``H3RequestReader`` /
+1. client ``encode_request_*`` -> server ``Http3RequestReader`` /
    ``feed_into``: the bytes the client emits for a request decode
    exactly into the pseudo-headers + body + trailers the server
    parses.
-2. server ``encode_response_*`` -> client ``H3ResponseReader``:
+2. server ``encode_response_*`` -> client ``Http3ResponseReader``:
    the bytes the server emits for a response assemble into the
    status + headers + body the client reader yields.
 
@@ -20,14 +20,14 @@ from std.collections import List
 from std.memory import Span
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import (
-    H3RequestEventHandler,
-    H3RequestReader,
-    H3ResponseReader,
+from flare.http3 import (
+    Http3RequestEventHandler,
+    Http3RequestReader,
+    Http3ResponseReader,
     H3_FRAME_TYPE_SETTINGS,
     H3_UNI_STREAM_CONTROL,
-    decode_h3_frame,
-    decode_h3_settings,
+    decode_http3_frame,
+    decode_http3_settings,
     encode_client_control_stream,
     encode_qpack_decoder_stream,
     encode_qpack_encoder_stream,
@@ -45,7 +45,7 @@ from flare.quic.varint import decode_varint
 # ── A collector implementing the server's request-event handler ────────
 
 
-struct _Collector(H3RequestEventHandler):
+struct _Collector(Http3RequestEventHandler):
     var method: String
     var scheme: String
     var authority: String
@@ -98,7 +98,7 @@ struct _Collector(H3RequestEventHandler):
 
 
 def _drain_request(buf: List[UInt8], mut col: _Collector) raises:
-    var reader = H3RequestReader.new()
+    var reader = Http3RequestReader.new()
     var cursor = 0
     while cursor < len(buf):
         var view = Span[UInt8, _](buf)[cursor:]
@@ -188,7 +188,7 @@ def test_response_roundtrip_into_client_reader() raises:
 
     # Feed the wire in two arbitrary splits to exercise the inbox
     # buffering across a frame boundary.
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var split = len(wire) // 3
     reader.feed(Span[UInt8, _](wire)[:split])
     reader.feed(Span[UInt8, _](wire)[split:])
@@ -212,10 +212,10 @@ def test_response_reader_rejects_control_frame() raises:
     protocol error per RFC 9114 §6.2."""
     var wire = List[UInt8]()
     var empty = List[UInt8]()
-    from flare.h3 import encode_h3_frame
+    from flare.http3 import encode_http3_frame
 
-    encode_h3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](empty), wire)
-    var reader = H3ResponseReader.new()
+    encode_http3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](empty), wire)
+    var reader = Http3ResponseReader.new()
     reader.feed(Span[UInt8, _](wire))
     assert_true(reader.has_error(), "SETTINGS on request stream must error")
 
@@ -227,9 +227,9 @@ def test_control_stream_preamble_is_settings_first() raises:
     encode_client_control_stream(UInt64(1 << 16), wire)
     var tvar = decode_varint(Span[UInt8, _](wire))
     assert_equal(tvar.value, H3_UNI_STREAM_CONTROL)
-    var frame = decode_h3_frame(Span[UInt8, _](wire)[tvar.consumed :])
+    var frame = decode_http3_frame(Span[UInt8, _](wire)[tvar.consumed :])
     assert_equal(frame.frame_type.raw, H3_FRAME_TYPE_SETTINGS)
-    var settings = decode_h3_settings(Span[UInt8, _](frame.payload))
+    var settings = decode_http3_settings(Span[UInt8, _](frame.payload))
     assert_true(len(settings) >= 1, "control SETTINGS must carry params")
 
 

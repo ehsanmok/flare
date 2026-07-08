@@ -14,7 +14,7 @@ set of canonical wire fixtures here and verify that
 assembles the same :class:`flare.http.Request` the spec mandates.
 The fixtures double as encoder-drift oracles: each test builds
 the wire bytes through flare's own
-:func:`encode_field_section` + :func:`encode_h3_frame`, asserts
+:func:`encode_field_section` + :func:`encode_http3_frame`, asserts
 the snapshot byte vector, then feeds the snapshot back through
 the H3 server driver.
 
@@ -33,11 +33,11 @@ for these inputs because the QPACK static table is normative).
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import (
+from flare.http3 import (
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
-    H3Connection,
-    encode_h3_frame,
+    Http3Connection,
+    encode_http3_frame,
     encode_response_data,
     encode_response_headers,
 )
@@ -129,7 +129,7 @@ def _build_get_minimal() raises -> List[UInt8]:
     var field_section = List[UInt8]()
     encode_field_section(headers^, field_section)
     var frame = List[UInt8]()
-    encode_h3_frame(
+    encode_http3_frame(
         H3_FRAME_TYPE_HEADERS,
         Span[UInt8, _](field_section),
         frame,
@@ -150,9 +150,9 @@ def _build_post_with_body() raises -> List[UInt8]:
     var hf = List[UInt8]()
     encode_field_section(headers^, hf)
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](hf), out)
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](hf), out)
     var body = _bytes_from_string("hello")
-    encode_h3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](body), out)
+    encode_http3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](body), out)
     return out^
 
 
@@ -168,14 +168,14 @@ def _build_multi_data_chunks() raises -> List[UInt8]:
     var hf = List[UInt8]()
     encode_field_section(headers^, hf)
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](hf), out)
-    encode_h3_frame(
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](hf), out)
+    encode_http3_frame(
         H3_FRAME_TYPE_DATA, Span[UInt8, _](_bytes_from_string("abc")), out
     )
-    encode_h3_frame(
+    encode_http3_frame(
         H3_FRAME_TYPE_DATA, Span[UInt8, _](_bytes_from_string("def")), out
     )
-    encode_h3_frame(
+    encode_http3_frame(
         H3_FRAME_TYPE_DATA, Span[UInt8, _](_bytes_from_string("ghi")), out
     )
     return out^
@@ -213,7 +213,7 @@ def test_rfc9114_get_minimal_round_trip() raises:
     assert_equal(Int(bytes[6]), 0xD7)
     assert_equal(Int(bytes[7]), 0x50)
 
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, bytes.copy())
     c.signal_end_of_stream(0)
     var ready = c.take_completed_streams()
@@ -229,7 +229,7 @@ def test_aioquic_post_body_round_trip() raises:
     """``POST /upload`` with a 5-byte body. Mirrors aioquic's
     test_h3.TestH3Connection -> handle_h3_request_post fixture."""
     var bytes = _build_post_with_body()
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(4, bytes.copy())
     c.signal_end_of_stream(4)
     var ready = c.take_completed_streams()
@@ -252,7 +252,7 @@ def test_quiche_multi_data_chunks_assemble() raises:
     reader must concatenate all DATA bytes into a single body.
     9-byte body across three 3-byte DATA frames."""
     var bytes = _build_multi_data_chunks()
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(8, bytes.copy())
     c.signal_end_of_stream(8)
     var req = c.take_request(8)
@@ -270,7 +270,7 @@ def test_split_feed_reassembles_request() raises:
     This is the path the QUIC reactor exercises when STREAM
     frames arrive in small UDP-packet-sized increments."""
     var bytes = _build_get_minimal()
-    var c = H3Connection()
+    var c = Http3Connection()
     for i in range(len(bytes)):
         var single = List[UInt8]()
         single.append(bytes[i])
@@ -289,7 +289,7 @@ def test_response_round_trips_through_writer() raises:
     (type 0x01) followed by a DATA frame (type 0x00). This is
     the encode-side cross-validation."""
     var bytes = _build_get_minimal()
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, bytes^)
     c.signal_end_of_stream(0)
     _ = c.take_request(0)
@@ -320,7 +320,7 @@ def test_idempotent_take_request_after_round_trip() raises:
     invariant (driver-level guard) but the cross-implementation
     behaviour matches aioquic + quiche."""
     var bytes = _build_get_minimal()
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, bytes^)
     c.signal_end_of_stream(0)
     var _r = c.take_request(0)
@@ -344,7 +344,7 @@ def test_truncated_headers_does_not_complete() raises:
     var truncated = List[UInt8]()
     for i in range(len(bytes) - 1):
         truncated.append(bytes[i])
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, truncated^)
     var ready = c.take_completed_streams()
     assert_equal(len(ready), 0)

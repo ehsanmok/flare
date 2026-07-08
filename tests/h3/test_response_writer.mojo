@@ -11,9 +11,9 @@ from std.collections import List
 from std.memory import Span
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import (
-    H3RequestEventHandler,
-    H3RequestReader,
+from flare.http3 import (
+    Http3RequestEventHandler,
+    Http3RequestReader,
     encode_response_data,
     encode_response_headers,
     encode_response_trailers,
@@ -25,7 +25,7 @@ from flare.qpack import QpackHeader
 # Local recorder mirroring the one in test_request_reader.mojo so
 # this test stays standalone.
 @fieldwise_init
-struct _Recorder(H3RequestEventHandler, Movable):
+struct _Recorder(Http3RequestEventHandler, Movable):
     var headers_count: Int
     var trailers_count: Int
     var data_count: Int
@@ -68,7 +68,7 @@ struct _Recorder(H3RequestEventHandler, Movable):
 def test_status_only() raises:
     var bytes = List[UInt8]()
     encode_response_headers(200, List[QpackHeader](), bytes)
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var _ = feed_into(r, Span[UInt8, _](bytes), rec)
     assert_equal(rec.headers_count, 1)
@@ -83,7 +83,7 @@ def test_status_with_application_headers() raises:
     hs.append(QpackHeader("X-Trace-ID", "abc"))
     var bytes = List[UInt8]()
     encode_response_headers(200, hs, bytes)
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var _ = feed_into(r, Span[UInt8, _](bytes), rec)
     assert_equal(rec.headers_count, 1)
@@ -136,7 +136,7 @@ def test_data_frame_round_trip() raises:
         stream.append(hbytes[i])
     for i in range(len(dbytes)):
         stream.append(dbytes[i])
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var consumed1 = feed_into(r, Span[UInt8, _](stream), rec)
     assert_equal(rec.headers_count, 1)
@@ -167,7 +167,7 @@ def test_trailers_round_trip() raises:
         stream.append(dbytes[i])
     for i in range(len(tbytes)):
         stream.append(tbytes[i])
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var consumed1 = feed_into(r, Span[UInt8, _](stream), rec)
     var rest1 = List[UInt8]()

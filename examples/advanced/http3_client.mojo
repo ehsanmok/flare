@@ -1,15 +1,15 @@
 """HTTP/3 client -- one HttpClient call site, h3 over QUIC on the wire.
 
 The same :class:`flare.http.HttpClient` that speaks HTTP/1.1 and HTTP/2
-also speaks HTTP/3 when you opt in with ``prefer_h3=True``. The call
+also speaks HTTP/3 when you opt in with ``prefer_http3=True``. The call
 site never changes: ``client.get(url)`` returns the same
 :class:`flare.http.Response` regardless of which wire carried it.
 
 What this example proves end to end, over real QUIC encryption:
 
-* A forked :meth:`flare.http.HttpServer.serve_h3` loop serves a shared
+* A forked :meth:`flare.http.HttpServer.serve_http3` loop serves a shared
   :class:`flare.http.Handler` over QUIC/UDP (h3 ALPN).
-* The parent's ``HttpClient(prefer_h3=True)`` dials QUIC, completes the
+* The parent's ``HttpClient(prefer_http3=True)`` dials QUIC, completes the
   rustls handshake, and round-trips a GET over HTTP/3.
 * Because GET is idempotent and h3 is preferred, flare runs a
   happy-eyeballs race (h3 vs h2/h1) concurrently; the h3 leg wins here
@@ -66,30 +66,30 @@ def main() raises:
     h3_alpn.append(String("h3"))
     udp_cfg.rustls_config.alpn_protocols = h3_alpn^
 
-    var srv = HttpServer.bind_with_h3(tcp_addr, udp_cfg^)
-    var udp_port = UInt16(srv.local_h3_addr().port)
+    var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
+    var udp_port = UInt16(srv.local_http3_addr().port)
     print("[h3 server] QUIC listening on 127.0.0.1:" + String(Int(udp_port)))
 
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_h3(SharedHandler())
+            srv.serve_http3(SharedHandler())
         except:
             pass
         exit()
     usleep(300_000)  # let the QUIC listener come up
 
     # The client trusts the fixture CA and dials by hostname so SNI
-    # matches the leaf cert. prefer_h3=True opts the https path into h3.
+    # matches the leaf cert. prefer_http3=True opts the https path into h3.
     var tls = TlsConfig()
     tls.ca_bundle = _FIXDIR + "ca.pem"
     var base = String("https://localhost:") + String(Int(udp_port))
-    print("[h3 client] GET " + base + "/hello  (prefer_h3=True)")
+    print("[h3 client] GET " + base + "/hello  (prefer_http3=True)")
 
     var status = -1
     var body = String("")
     try:
-        with HttpClient(tls, base_url=base, prefer_h3=True) as c:
+        with HttpClient(tls, base_url=base, prefer_http3=True) as c:
             var r = c.get("/hello")
             status = r.status
             body = r.text()

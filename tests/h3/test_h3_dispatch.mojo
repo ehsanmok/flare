@@ -1,11 +1,11 @@
 """Tests for the HTTP/3 server driver's request -> handler ->
 response wire path.
 
-The new methods on :class:`flare.h3.H3Connection`:
+The new methods on :class:`flare.http3.Http3Connection`:
 
 - :meth:`feed_stream_chunk(stream_id, chunk)` -- feed reassembled
   QUIC stream bytes; drives the per-stream
-  :class:`H3RequestReader` one frame at a time and accumulates
+  :class:`Http3RequestReader` one frame at a time and accumulates
   the request shape (headers, body, trailers) into the
   per-stream carrier.
 - :meth:`signal_end_of_stream(stream_id)` -- flip the per-stream
@@ -39,12 +39,12 @@ Properties covered:
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import (
+from flare.http3 import (
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
-    H3Connection,
-    H3ConnectionConfig,
-    encode_h3_frame,
+    Http3Connection,
+    Http3Config,
+    encode_http3_frame,
 )
 from flare.http.response import Response
 from flare.http.server import ok
@@ -56,13 +56,13 @@ def _encode_headers_frame(headers: List[QpackHeader]) raises -> List[UInt8]:
     var payload = List[UInt8]()
     encode_field_section(headers, payload)
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](payload), out)
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](payload), out)
     return out^
 
 
 def _encode_data_frame(payload: List[UInt8]) raises -> List[UInt8]:
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](payload), out)
+    encode_http3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](payload), out)
     return out^
 
 
@@ -99,7 +99,7 @@ def _build_post_request_bytes(
 def test_feed_stream_chunk_implicit_open() raises:
     """A chunk arriving for an un-tracked stream allocates the
     carrier implicitly (no separate open-stream signal)."""
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/index"))
     assert_true(c.has_stream(0))
 
@@ -107,7 +107,7 @@ def test_feed_stream_chunk_implicit_open() raises:
 def test_get_request_surfaces_after_fin() raises:
     """A complete GET (HEADERS only) surfaces as a completed
     stream once the QUIC layer signals FIN."""
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/hello"))
     assert_true(c.stream_has_headers(0))
     assert_equal(
@@ -122,7 +122,7 @@ def test_get_request_surfaces_after_fin() raises:
 
 
 def test_take_request_assembles_method_and_path() raises:
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/api/v1/users"))
     c.signal_end_of_stream(0)
     var req = c.take_request(0)
@@ -135,7 +135,7 @@ def test_take_request_assembles_method_and_path() raises:
 def test_take_request_body_round_trip() raises:
     """POST with a body: feed HEADERS + DATA + signal FIN, then
     take_request must surface the body bytes exactly."""
-    var c = H3Connection()
+    var c = Http3Connection()
     var body = List[UInt8]()
     for v in [72, 101, 108, 108, 111]:
         body.append(UInt8(v))
@@ -156,7 +156,7 @@ def test_take_request_body_round_trip() raises:
 def test_take_request_is_idempotent_guarded() raises:
     """Calling take_request twice on the same stream raises so
     the reactor can't accidentally double-dispatch."""
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/once"))
     c.signal_end_of_stream(0)
     var _req = c.take_request(0)
@@ -171,7 +171,7 @@ def test_take_request_is_idempotent_guarded() raises:
 def test_emit_response_buffers_headers_and_data() raises:
     """The emit_response path queues HEADERS + DATA frames in
     the per-stream outbox; take_response_frames drains them."""
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/ok"))
     c.signal_end_of_stream(0)
     var _req = c.take_request(0)
@@ -184,7 +184,7 @@ def test_emit_response_buffers_headers_and_data() raises:
 
 
 def test_take_response_frames_drains_once() raises:
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/x"))
     c.signal_end_of_stream(0)
     var _req = c.take_request(0)
@@ -196,7 +196,7 @@ def test_take_response_frames_drains_once() raises:
 
 
 def test_emit_response_is_idempotent_guarded() raises:
-    var c = H3Connection()
+    var c = Http3Connection()
     c.feed_stream_chunk(0, _build_get_request_bytes("/x"))
     c.signal_end_of_stream(0)
     var _req = c.take_request(0)
@@ -214,7 +214,7 @@ def test_garbled_chunk_sets_protocol_error() raises:
     length lies about the body fires on_protocol_error inside
     the reader; the H3 driver surfaces it via
     stream_protocol_error."""
-    var c = H3Connection()
+    var c = Http3Connection()
     # An H3 frame with type=HEADERS but a payload-length-varint
     # that claims the body is 8 bytes long with only 2 supplied.
     # The reader fires the QPACK decode failure once the
@@ -238,7 +238,7 @@ def test_partial_chunk_needs_more_then_completes() raises:
     """The reader is NEEDS_MORE friendly: split the headers
     payload across two feed_stream_chunk calls and the request
     must still surface correctly."""
-    var c = H3Connection()
+    var c = Http3Connection()
     var full = _build_get_request_bytes("/split")
     var half = len(full) // 2
     var part1 = List[UInt8]()

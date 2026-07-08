@@ -1,6 +1,6 @@
 """HTTP/3 server driver lifecycle walkthrough.
 
-Walks the :class:`flare.h3.H3Connection` driver carrier through
+Walks the :class:`flare.http3.Http3Connection` driver carrier through
 the lifecycle the QUIC reactor exercises when a peer opens a
 fresh connection. This example focuses on the driver's pure
 state-machine surface; the full "open a UDP listener, accept
@@ -10,21 +10,21 @@ Handler" walkthrough lives in
 
 This example illustrates:
 
-* Constructing an :class:`H3ConnectionConfig` with non-default
+* Constructing an :class:`Http3Config` with non-default
   SETTINGS (max field section size, CONNECT-Protocol advertised).
 * Opening per-stream readers as new QUIC bidirectional streams
   arrive, and closing them after the response FIN.
 * Emitting GOAWAY and confirming that new request streams are
   rejected.
-* Driving :meth:`H3Connection.feed_stream_chunk` against a
+* Driving :meth:`Http3Connection.feed_stream_chunk` against a
   mocked request stream and reading the encoded response bytes
-  back through :meth:`H3Connection.take_response_frames`.
+  back through :meth:`Http3Connection.take_response_frames`.
 """
 
-from flare.h3 import (
-    H3Connection,
-    H3ConnectionConfig,
-    H3StreamType,
+from flare.http3 import (
+    Http3Connection,
+    Http3Config,
+    Http3StreamType,
 )
 
 
@@ -33,7 +33,7 @@ def main() raises:
     print()
 
     # Step 1: build a config carrier with our SETTINGS.
-    var cfg = H3ConnectionConfig()
+    var cfg = Http3Config()
     cfg.max_field_section_size = UInt64(8192)
     cfg.enable_connect_protocol = True
     print("Configured H3 with:")
@@ -42,7 +42,7 @@ def main() raises:
     print()
 
     # Step 2: construct the connection driver.
-    var conn = H3Connection.with_config(cfg)
+    var conn = Http3Connection.with_config(cfg)
     print(
         "Driver state: peer_settings_received =",
         conn.peer_settings_received,
@@ -84,7 +84,7 @@ def main() raises:
     print()
 
     # Step 6: drive feed_stream_chunk + take_response_frames on
-    # an existing request stream id. The H3RequestReader is
+    # an existing request stream id. The Http3RequestReader is
     # tolerant of partial frames (waits for the full frame-type
     # + length + payload before firing the per-frame callback),
     # so a single 0x01 byte is consumed cleanly and the reader
@@ -101,7 +101,7 @@ def main() raises:
 
     # The four stream-type codepoints the driver dispatches on.
     print("RFC 9114 paragraph 6.2 unidirectional stream types:")
-    print("  CONTROL       =", H3StreamType.CONTROL)
-    print("  PUSH          =", H3StreamType.PUSH)
-    print("  QPACK_ENCODER =", H3StreamType.QPACK_ENCODER)
-    print("  QPACK_DECODER =", H3StreamType.QPACK_DECODER)
+    print("  CONTROL       =", Http3StreamType.CONTROL)
+    print("  PUSH          =", Http3StreamType.PUSH)
+    print("  QPACK_ENCODER =", Http3StreamType.QPACK_ENCODER)
+    print("  QPACK_DECODER =", Http3StreamType.QPACK_DECODER)

@@ -175,7 +175,7 @@ def _encode_h3_stream_frame(
 
 
 def _stream_id_from_key(k: String) -> Int:
-    """Parse the QUIC stream id out of an ``h3_response_egress``
+    """Parse the QUIC stream id out of an ``http3_response_egress``
     key of the form ``"<slot>:<stream_id>"`` (ASCII only, so
     byte-level iteration is safe). Returns -1 if the key has no
     colon or no digits after it.

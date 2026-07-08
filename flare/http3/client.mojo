@@ -2,8 +2,8 @@
 
 Stitches the QUIC client driver
 (:class:`flare.quic.client.QuicClientConnection`) to the sans-I/O H3
-client codecs (:mod:`flare.h3.request_writer` +
-:mod:`flare.h3.response_reader`) into a request/response engine.
+client codecs (:mod:`flare.http3.request_writer` +
+:mod:`flare.http3.response_reader`) into a request/response engine.
 
 Per RFC 9114 a client:
 
@@ -55,7 +55,7 @@ from .request_writer import (
     encode_request_data,
     encode_request_headers,
 )
-from .response_reader import H3BodyChunk, H3Response, H3ResponseReader
+from .response_reader import Http3BodyChunk, Http3Response, Http3ResponseReader
 
 
 def is_idempotent_method(method: String) -> Bool:
@@ -65,7 +65,7 @@ def is_idempotent_method(method: String) -> Bool:
     The 0-RTT replay hazard (RFC 9001 sec 9.2) is exactly that an
     on-path attacker can re-send the captured early-data flight, so
     only idempotent requests are ever eligible to ride 0-RTT
-    (:meth:`H3ClientConnection.fetch_0rtt`). POST / PATCH / CONNECT
+    (:meth:`Http3ClientConnection.fetch_0rtt`). POST / PATCH / CONNECT
     are excluded -- a replay could double a side effect."""
     var m = method.upper()
     return (
@@ -78,8 +78,8 @@ def is_idempotent_method(method: String) -> Bool:
     )
 
 
-struct H3ZeroRttOutcome(Copyable, Movable):
-    """Result of :meth:`H3ClientConnection.fetch_0rtt`: the response
+struct Http3ZeroRttOutcome(Copyable, Movable):
+    """Result of :meth:`Http3ClientConnection.fetch_0rtt`: the response
     plus how the request was actually carried.
 
     ``used_0rtt`` is True only when the request was 0-RTT-eligible
@@ -87,12 +87,12 @@ struct H3ZeroRttOutcome(Copyable, Movable):
     0-RTT was attempted but the server rejected it and the request
     completed at 1-RTT instead (transparent to the caller)."""
 
-    var response: H3Response
+    var response: Http3Response
     var used_0rtt: Bool
     var replayed: Bool
 
     def __init__(
-        out self, var response: H3Response, used_0rtt: Bool, replayed: Bool
+        out self, var response: Http3Response, used_0rtt: Bool, replayed: Bool
     ):
         self.response = response^
         self.used_0rtt = used_0rtt
@@ -104,7 +104,7 @@ struct _StreamReasm(Copyable, Movable):
 
     QUIC STREAM frames carry a per-stream byte ``offset`` and may
     arrive out of order, be duplicated, or overlap (retransmits).
-    :class:`H3ResponseReader` assumes in-order bytes, so this buffer
+    :class:`Http3ResponseReader` assumes in-order bytes, so this buffer
     sits in front of it: it delivers the contiguous prefix starting
     at :attr:`next_offset`, stashes any gap-ahead chunk in
     :attr:`pending` keyed by its start offset, and drains stashed
@@ -133,7 +133,7 @@ struct _StreamReasm(Copyable, Movable):
 
     def push(
         mut self,
-        mut reader: H3ResponseReader,
+        mut reader: Http3ResponseReader,
         offset: UInt64,
         data: Span[UInt8, _],
         fin: Bool,
@@ -159,7 +159,7 @@ struct _StreamReasm(Copyable, Movable):
                 self.pending[offset] = copy^
         self._maybe_fin(reader)
 
-    def _drain_pending(mut self, mut reader: H3ResponseReader) raises:
+    def _drain_pending(mut self, mut reader: Http3ResponseReader) raises:
         """Deliver every stashed chunk that has become contiguous
         with (or is wholly behind) :attr:`next_offset`."""
         var made_progress = True
@@ -181,7 +181,7 @@ struct _StreamReasm(Copyable, Movable):
                     self.next_offset = end
                 made_progress = True
 
-    def _maybe_fin(mut self, mut reader: H3ResponseReader):
+    def _maybe_fin(mut self, mut reader: Http3ResponseReader):
         if self.fin_signaled:
             return
         if self.fin_offset and self.next_offset >= self.fin_offset.value():
@@ -193,19 +193,19 @@ struct _PendingRequest(Copyable, Movable):
     """An in-flight multiplexed request: its offset-ordered
     reassembler plus the response reader that owns the decoded
     state. One per concurrent request stream, keyed by stream id in
-    :attr:`H3ClientConnection._pending`."""
+    :attr:`Http3ClientConnection._pending`."""
 
     var reasm: _StreamReasm
-    var reader: H3ResponseReader
+    var reader: Http3ResponseReader
 
     def __init__(
-        out self, var reasm: _StreamReasm, var reader: H3ResponseReader
+        out self, var reasm: _StreamReasm, var reader: Http3ResponseReader
     ):
         self.reasm = reasm^
         self.reader = reader^
 
 
-struct H3ClientConnection(Movable):
+struct Http3ClientConnection(Movable):
     """An HTTP/3 client over an established QUIC connection.
 
     Wraps a :class:`QuicClientConnection` (whose handshake must
@@ -306,7 +306,7 @@ struct H3ClientConnection(Movable):
     def read_response(
         mut self,
         stream_id: UInt64,
-        mut reader: H3ResponseReader,
+        mut reader: Http3ResponseReader,
         timeout_ms: Int = 100,
     ) raises -> Bool:
         """Poll one QUIC burst, route this stream's STREAM chunks
@@ -324,7 +324,7 @@ struct H3ClientConnection(Movable):
         mut self,
         stream_id: UInt64,
         events: ConnectionEvents,
-        mut reader: H3ResponseReader,
+        mut reader: Http3ResponseReader,
     ) raises:
         if stream_id not in self._ext_reasms:
             self._ext_reasms[stream_id] = _StreamReasm()
@@ -363,7 +363,7 @@ struct H3ClientConnection(Movable):
             method, scheme, authority, path, headers, body, early
         )
         self._pending[sid] = _PendingRequest(
-            _StreamReasm(), H3ResponseReader(self.max_field_section_size)
+            _StreamReasm(), Http3ResponseReader(self.max_field_section_size)
         )
         return sid
 
@@ -397,7 +397,7 @@ struct H3ClientConnection(Movable):
 
     def take_if_complete(
         mut self, stream_id: UInt64
-    ) raises -> Optional[H3Response]:
+    ) raises -> Optional[Http3Response]:
         """If the request on ``stream_id`` has a fully assembled
         response, remove it from the in-flight set and return it;
         otherwise return ``None`` (the request stays registered)."""
@@ -443,7 +443,7 @@ struct H3ClientConnection(Movable):
 
     def poll_body(
         mut self, stream_id: UInt64, timeout_ms: Int = 100
-    ) raises -> H3BodyChunk:
+    ) raises -> Http3BodyChunk:
         """Streaming body read: poll one QUIC burst (fanning chunks
         out across every in-flight request so none stall), then move
         out the body bytes that became available on ``stream_id``
@@ -470,12 +470,12 @@ struct H3ClientConnection(Movable):
                 )
             self._pending[sid] = pr^
         if stream_id not in self._pending:
-            return H3BodyChunk(List[UInt8](), True)
+            return Http3BodyChunk(List[UInt8](), True)
         var target = self._pending.pop(stream_id)
         var chunk = target.reader.drain_body()
         var done = target.reader.is_complete()
         self._pending[stream_id] = target^
-        return H3BodyChunk(chunk^, done)
+        return Http3BodyChunk(chunk^, done)
 
     def fetch(
         mut self,
@@ -487,7 +487,7 @@ struct H3ClientConnection(Movable):
         body: List[UInt8],
         timeout_ms: Int = 100,
         max_polls: Int = 100,
-    ) raises -> H3Response:
+    ) raises -> Http3Response:
         """Blocking single-request round-trip for the real-network
         client: send the request, then poll until the response is
         complete or the poll budget is exhausted. Raises on a
@@ -511,7 +511,7 @@ struct H3ClientConnection(Movable):
         body: List[UInt8],
         timeout_ms: Int = 100,
         max_polls: Int = 100,
-    ) raises -> H3ZeroRttOutcome:
+    ) raises -> Http3ZeroRttOutcome:
         """Idempotent-only 0-RTT request with transparent 1-RTT
         fallback.
 
@@ -555,7 +555,7 @@ struct H3ClientConnection(Movable):
                 timeout_ms,
                 max_polls,
             )
-            return H3ZeroRttOutcome(resp^, used_0rtt=False, replayed=False)
+            return Http3ZeroRttOutcome(resp^, used_0rtt=False, replayed=False)
 
         var sid = self.request(
             method, scheme, authority, path, headers, body, early=True
@@ -572,7 +572,7 @@ struct H3ClientConnection(Movable):
             var done = self.take_if_complete(sid)
             if done:
                 var accepted = self.quic.early_data_accepted()
-                return H3ZeroRttOutcome(
+                return Http3ZeroRttOutcome(
                     done.value().copy(),
                     used_0rtt=accepted,
                     replayed=not accepted,

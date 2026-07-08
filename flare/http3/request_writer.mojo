@@ -1,6 +1,6 @@
 """HTTP/3 request-stream writer -- sans-I/O byte emitter.
 
-The client-side mirror of :mod:`flare.h3.response_writer`. Builds
+The client-side mirror of :mod:`flare.http3.response_writer`. Builds
 the bytes an HTTP/3 client hands to the QUIC stream layer for a
 request on a client-initiated bidirectional stream, plus the
 preambles for the client's unidirectional control + QPACK streams.
@@ -56,9 +56,9 @@ from .frame import (
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-    H3Setting,
-    encode_h3_frame,
-    encode_h3_settings,
+    Http3Setting,
+    encode_http3_frame,
+    encode_http3_settings,
 )
 
 
@@ -84,7 +84,7 @@ def encode_request_headers(
     §4.3.1) before the supplied application headers (all names
     lowercased). The caller MUST NOT include any pseudo-header in
     ``headers`` -- the writer rejects a name starting with ``:``
-    there, mirroring :func:`flare.h3.response_writer.encode_response_headers`.
+    there, mirroring :func:`flare.http3.response_writer.encode_response_headers`.
 
     ``authority`` may be empty for the ``CONNECT``-less origin case
     where a ``Host`` header is used instead, but for normal
@@ -111,7 +111,9 @@ def encode_request_headers(
         emit.append(QpackHeader(name^, String(headers[i].value)))
     var qpack_payload = List[UInt8]()
     encode_field_section(emit, qpack_payload)
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out)
+    encode_http3_frame(
+        H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out
+    )
 
 
 def encode_request_data(
@@ -123,7 +125,7 @@ def encode_request_data(
     The client calls this once per body chunk. Empty payloads are
     legal and encode as a 2-byte frame (type=0x00 + length=0x00).
     """
-    encode_h3_frame(H3_FRAME_TYPE_DATA, payload, out)
+    encode_http3_frame(H3_FRAME_TYPE_DATA, payload, out)
 
 
 def encode_request_trailers(
@@ -148,7 +150,9 @@ def encode_request_trailers(
         emit.append(QpackHeader(name^, String(trailers[i].value)))
     var qpack_payload = List[UInt8]()
     encode_field_section(emit, qpack_payload)
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out)
+    encode_http3_frame(
+        H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out
+    )
 
 
 def encode_client_control_stream(
@@ -168,24 +172,26 @@ def encode_client_control_stream(
     var type_var = encode_varint(H3_UNI_STREAM_CONTROL)
     for i in range(len(type_var)):
         out.append(type_var[i])
-    var settings = List[H3Setting]()
+    var settings = List[Http3Setting]()
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
             value=max_field_section_size,
         )
     )
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY, value=UInt64(0)
         )
     )
     settings.append(
-        H3Setting(identifier=H3_SETTINGS_QPACK_BLOCKED_STREAMS, value=UInt64(0))
+        Http3Setting(
+            identifier=H3_SETTINGS_QPACK_BLOCKED_STREAMS, value=UInt64(0)
+        )
     )
     var payload = List[UInt8]()
-    encode_h3_settings(settings, payload)
-    encode_h3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
+    encode_http3_settings(settings, payload)
+    encode_http3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
 
 
 def encode_qpack_encoder_stream(mut out: List[UInt8]) raises:

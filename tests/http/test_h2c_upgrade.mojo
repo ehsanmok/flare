@@ -2,7 +2,7 @@
 
 Covers the unit-level wiring added in v0.7 for h2c-via-Upgrade:
 
-* :meth:`flare.http2.server.H2Connection.from_h2c_upgrade` — server-side
+* :meth:`flare.http2.server.Http2Connection.from_h2c_upgrade` — server-side
   state seeded from an h1 request becoming stream id 1 plus the
   decoded ``HTTP2-Settings`` payload from the upgrade request.
 * :meth:`flare.http._server_reactor_impl.ConnHandle._h2c_upgrade_decode_settings`
@@ -25,7 +25,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from flare.crypto.hmac import base64url_encode
 from flare.http import Request
 from flare.http.headers import HeaderMap
-from flare.http2 import H2Connection, Http2Config
+from flare.http2 import Http2Connection, Http2Config
 from flare.http2.state import StreamState
 
 
@@ -43,7 +43,7 @@ def _build_settings_payload(initial_window_size: Int) -> List[UInt8]:
 
 
 def test_from_h2c_upgrade_creates_stream_1_with_request_headers() raises:
-    """``H2Connection.from_h2c_upgrade`` pre-populates stream id 1
+    """``Http2Connection.from_h2c_upgrade`` pre-populates stream id 1
     with the original h1 request's pseudo-headers (``:method``,
     ``:scheme``, ``:path``, ``:authority``) and marks both header /
     data complete so the next ``take_completed_streams`` returns
@@ -53,7 +53,7 @@ def test_from_h2c_upgrade_creates_stream_1_with_request_headers() raises:
     req.headers.set("X-Custom", "abc")
 
     var settings_payload = _build_settings_payload(131072)
-    var conn = H2Connection.from_h2c_upgrade(
+    var conn = Http2Connection.from_h2c_upgrade(
         Http2Config(), req, settings_payload^
     )
 
@@ -76,7 +76,7 @@ def test_from_h2c_upgrade_applies_settings_payload() raises:
     req.headers.set("Host", "example.com")
 
     var settings_payload = _build_settings_payload(131072)
-    var conn = H2Connection.from_h2c_upgrade(
+    var conn = Http2Connection.from_h2c_upgrade(
         Http2Config(), req, settings_payload^
     )
 
@@ -91,7 +91,7 @@ def test_from_h2c_upgrade_seeds_outbox_with_server_settings() raises:
     req.headers.set("Host", "example.com")
     var settings_payload = _build_settings_payload(65535)
 
-    var conn = H2Connection.from_h2c_upgrade(
+    var conn = Http2Connection.from_h2c_upgrade(
         Http2Config(), req, settings_payload^
     )
 
@@ -115,7 +115,7 @@ def test_from_h2c_upgrade_rejects_misaligned_settings_payload() raises:
 
     var raised = False
     try:
-        var _conn = H2Connection.from_h2c_upgrade(Http2Config(), req, bad^)
+        var _conn = Http2Connection.from_h2c_upgrade(Http2Config(), req, bad^)
     except:
         raised = True
     assert_true(
@@ -131,7 +131,7 @@ def test_from_h2c_upgrade_stream_1_state_is_half_closed_remote() raises:
     req.headers.set("Host", "example.com")
     var settings_payload = _build_settings_payload(65535)
 
-    var conn = H2Connection.from_h2c_upgrade(
+    var conn = Http2Connection.from_h2c_upgrade(
         Http2Config(), req, settings_payload^
     )
     var s = conn.conn.streams[1].copy()
@@ -152,7 +152,7 @@ def test_from_h2c_upgrade_carries_request_body() raises:
         req.body.append(bb[i])
 
     var settings_payload = _build_settings_payload(65535)
-    var conn = H2Connection.from_h2c_upgrade(
+    var conn = Http2Connection.from_h2c_upgrade(
         Http2Config(), req, settings_payload^
     )
 

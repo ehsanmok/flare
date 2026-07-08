@@ -1,10 +1,10 @@
 """Tests for :class:`flare.http2.Http2Config` and
-:meth:`H2Connection.with_config`.
+:meth:`Http2Connection.with_config`.
 
 Exercises three angles:
 
 1. The default ``Http2Config()`` produces the same observable
-   SETTINGS shape as the v0.6 ``H2Connection()`` (no behavioural
+   SETTINGS shape as the v0.6 ``Http2Connection()`` (no behavioural
    regression for callers that don't configure anything).
 2. ``Http2Config.validate`` enforces the RFC 9113 §6.5.2 +
    RFC 9113 §6.9.2 + RFC 7541 §4.2 numeric bounds.
@@ -27,7 +27,7 @@ from std.testing import (
 )
 
 from flare.http2 import (
-    H2Connection,
+    Http2Connection,
     H2_DEFAULT_FRAME_SIZE,
     H2_PREFACE,
     Http2Config,
@@ -41,7 +41,7 @@ from flare.http2 import (
 def test_default_config_matches_rfc_and_v0_6_shape() raises:
     """``Http2Config()`` defaults match RFC 9113 / RFC 7541 + the
     v0.6 ``Connection`` defaults so a caller upgrading from
-    ``H2Connection()`` to ``H2Connection.with_config(Http2Config())``
+    ``Http2Connection()`` to ``Http2Connection.with_config(Http2Config())``
     sees no observable change."""
     var cfg = Http2Config()
     assert_equal(cfg.max_concurrent_streams, 100)
@@ -61,8 +61,8 @@ def test_default_config_validates() raises:
 
 
 def test_with_config_default_emits_extra_max_header_list_size() raises:
-    """``H2Connection()`` (bare) emits one SETTINGS pair
-    (MAX_CONCURRENT_STREAMS = 100). ``H2Connection.with_config(
+    """``Http2Connection()`` (bare) emits one SETTINGS pair
+    (MAX_CONCURRENT_STREAMS = 100). ``Http2Connection.with_config(
     Http2Config())`` emits two: the same MAX_CONCURRENT_STREAMS = 100
     plus the defensive default MAX_HEADER_LIST_SIZE = 8192. The
     extra pair (id 0x6, value 8192) is the additive contract: bare
@@ -70,7 +70,7 @@ def test_with_config_default_emits_extra_max_header_list_size() raises:
     ``Http2Config`` advertises the new cap."""
     var preface = List[UInt8](String(H2_PREFACE).as_bytes())
 
-    var c1 = H2Connection()
+    var c1 = Http2Connection()
     c1.feed(Span[UInt8, _](preface))
     var b1 = c1.drain()
     var f1 = parse_frame(Span[UInt8, _](b1)).value().copy()
@@ -85,7 +85,7 @@ def test_with_config_default_emits_extra_max_header_list_size() raises:
     assert_equal(sid1, 0x3)  # SETTINGS_MAX_CONCURRENT_STREAMS
     assert_equal(sval1, 100)
 
-    var c2 = H2Connection.with_config(Http2Config())
+    var c2 = Http2Connection.with_config(Http2Config())
     c2.feed(Span[UInt8, _](preface))
     var b2 = c2.drain()
     var f2 = parse_frame(Span[UInt8, _](b2)).value().copy()
@@ -113,20 +113,20 @@ def test_with_config_default_emits_extra_max_header_list_size() raises:
 
 
 def test_with_config_zero_header_list_byte_matches_h2connection() raises:
-    """``H2Connection.with_config(Http2Config(..., max_header_list_size
+    """``Http2Connection.with_config(Http2Config(..., max_header_list_size
     = 0, ...))`` is byte-for-byte identical to the bare
-    ``H2Connection()``. The zero-value escape hatch lets a caller opt
+    ``Http2Connection()``. The zero-value escape hatch lets a caller opt
     out of the defensive default if wire-level compatibility with a
     strict downstream expectation matters."""
     var preface = List[UInt8](String(H2_PREFACE).as_bytes())
 
-    var c1 = H2Connection()
+    var c1 = Http2Connection()
     c1.feed(Span[UInt8, _](preface))
     var b1 = c1.drain()
 
     var cfg = Http2Config()
     cfg.max_header_list_size = 0
-    var c2 = H2Connection.with_config(cfg^)
+    var c2 = Http2Connection.with_config(cfg^)
     c2.feed(Span[UInt8, _](preface))
     var b2 = c2.drain()
 
@@ -223,7 +223,7 @@ def test_with_config_propagates_to_connection_fields() raises:
         allow_huffman_encode=False,
         enable_connect_protocol=False,
     )
-    var conn = H2Connection.with_config(cfg^)
+    var conn = Http2Connection.with_config(cfg^)
     assert_equal(conn.conn.max_concurrent_streams, 200)
     assert_equal(conn.conn.initial_window_size, 131072)
     assert_equal(conn.conn.send_window, 131072)
@@ -251,7 +251,7 @@ def test_with_config_full_emits_all_non_default_settings() raises:
         allow_huffman_encode=False,
         enable_connect_protocol=False,
     )
-    var conn = H2Connection.with_config(cfg^)
+    var conn = Http2Connection.with_config(cfg^)
     var preface = List[UInt8](String(H2_PREFACE).as_bytes())
     conn.feed(Span[UInt8, _](preface))
     var bytes = conn.drain()
@@ -287,7 +287,7 @@ def test_with_config_validates_inputs() raises:
     var cfg = Http2Config()
     cfg.max_frame_size = 16383
     with assert_raises(contains="16384"):
-        var _unused = H2Connection.with_config(cfg^)
+        var _unused = Http2Connection.with_config(cfg^)
 
 
 def main() raises:

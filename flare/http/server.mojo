@@ -111,7 +111,7 @@ struct HttpServer(Movable):
 
     The unified reactor loop auto-dispatches every accepted
     connection to either an HTTP/1.1 ``ConnHandle`` or an
-    HTTP/2 ``H2ConnHandle`` based on the first 24 bytes
+    HTTP/2 ``Http2ConnHandle`` based on the first 24 bytes
     (RFC 9113 §3.4 client connection preface). The h2 path
     uses these SETTINGS verbatim. Defaulted to
     :class:`Http2Config()` -- the same production-shape numbers
@@ -121,18 +121,18 @@ struct HttpServer(Movable):
     var _stopping: Bool
     """Set by ``close()`` to break the reactor loop. Read from the loop
     itself each iteration."""
-    var _h3_listener: Optional[QuicListener]
+    var _http3_listener: Optional[QuicListener]
     """Optional HTTP/3 UDP listener.
 
     ``None`` (the default) when the server was constructed via
     :meth:`bind` or :meth:`bind_many` (TCP-only flows). Set to a
     fully-bound :class:`flare.quic.server.QuicListener` when the
-    server was constructed via :meth:`bind_with_h3`; the listener
+    server was constructed via :meth:`bind_with_http3`; the listener
     owns its UDP socket fd, its per-listener timer wheel, and the
     QUIC connection slab. The reactor drains inbound datagrams,
-    dispatches them through :class:`flare.h3.H3Connection`, and
+    dispatches them through :class:`flare.http3.Http3Connection`, and
     drains outbound at every reactor tick. The per-listener
-    :meth:`tick_h3_once` entry point lets unit tests advance the
+    :meth:`tick_http3_once` entry point lets unit tests advance the
     listener's timer wheel without spinning up the full reactor.
     """
 
@@ -148,7 +148,7 @@ struct HttpServer(Movable):
         self.config = config^
         self.h2_config = h2_config^
         self._stopping = False
-        self._h3_listener = None
+        self._http3_listener = None
 
     def __del__(deinit self):
         self._listener.close()
@@ -157,7 +157,7 @@ struct HttpServer(Movable):
         # the UDP fd + tears down the QUIC connection slab + the
         # timer wheel via QuicListener.__del__. No-op when no h3
         # listener is bound.
-        _ = self._h3_listener^
+        _ = self._http3_listener^
 
     def _close_extras(mut self):
         """Close every fd in :attr:`_extra_listener_fds` via
@@ -295,7 +295,7 @@ struct HttpServer(Movable):
         return out^
 
     @staticmethod
-    def bind_with_h3(
+    def bind_with_http3(
         tcp_addr: SocketAddr,
         var udp_cfg: QuicServerConfig,
         var config: ServerConfig = ServerConfig(),
@@ -312,16 +312,16 @@ struct HttpServer(Movable):
         :func:`flare.http.alpn_dispatch.dispatch_alpn` routes the
         negotiated ALPN identifier to the matching driver:
 
-        * ``"h3"`` -> the QUIC listener / :class:`H3Connection`.
-        * ``"h2"`` -> the TCP h2 reactor / :class:`H2ConnHandle`.
+        * ``"h3"`` -> the QUIC listener / :class:`Http3Connection`.
+        * ``"h2"`` -> the TCP h2 reactor / :class:`Http2ConnHandle`.
         * ``"http/1.1"`` / empty -> the TCP h1 reactor /
           :class:`ConnHandle`.
         * h2c upgrade hint -> H2C (TCP path only).
 
         Calling :meth:`serve` on a server returned by this method
         runs the TCP + UDP reactors side by side; the UDP listener
-        is also reachable via :meth:`local_h3_addr` /
-        :meth:`tick_h3_once` for tests that want to drive the
+        is also reachable via :meth:`local_http3_addr` /
+        :meth:`tick_http3_once` for tests that want to drive the
         h3 path without spinning up the full reactor. Closing
         the server (via :meth:`close` or ``__del__``) closes
         both listeners.
@@ -347,22 +347,22 @@ struct HttpServer(Movable):
         var tcp_listener = TcpListener.bind(tcp_addr)
         var quic_listener = QuicListener.bind(udp_cfg^)
         var srv = HttpServer(tcp_listener^, config^, h2_config^)
-        srv._h3_listener = quic_listener^
+        srv._http3_listener = quic_listener^
         return srv^
 
-    def has_h3(self) -> Bool:
+    def has_http3(self) -> Bool:
         """Whether this server has an h3 UDP listener bound."""
-        return self._h3_listener is not None
+        return self._http3_listener is not None
 
-    def local_h3_addr(self) raises -> SocketAddr:
+    def local_http3_addr(self) raises -> SocketAddr:
         """Return the local address of the h3 UDP listener.
 
         Raises:
             Error: If no h3 listener is bound.
         """
-        if not self.has_h3():
-            raise Error("HttpServer.local_h3_addr: no h3 listener bound")
-        return self._h3_listener.value().local_addr()
+        if not self.has_http3():
+            raise Error("HttpServer.local_http3_addr: no h3 listener bound")
+        return self._http3_listener.value().local_addr()
 
     def advertised_alpn_protocols(self) -> List[String]:
         """Return the ALPN identifier list this server expects to
@@ -376,7 +376,7 @@ struct HttpServer(Movable):
         consumes verbatim.
         """
         var out = List[String]()
-        if self.has_h3():
+        if self.has_http3():
             out.append(ALPN_HTTP_3)
         out.append(ALPN_HTTP_2)
         out.append(ALPN_HTTP_1_1)
@@ -403,14 +403,14 @@ struct HttpServer(Movable):
                 bound.
         """
         var decision = dispatch_alpn(alpn)
-        if decision == WireProtocol.HTTP_3 and not self.has_h3():
+        if decision == WireProtocol.HTTP_3 and not self.has_http3():
             raise Error(
                 "HttpServer.route_alpn: peer negotiated 'h3' but no h3 "
                 "listener is bound"
             )
         return decision
 
-    def tick_h3_once(mut self, now_ms: UInt64) raises -> Int:
+    def tick_http3_once(mut self, now_ms: UInt64) raises -> Int:
         """Advance the h3 listener's timer wheel one tick. Test-
         only entry point used to validate the bind path; returns
         the number of connections still alive after the sweep.
@@ -418,22 +418,22 @@ struct HttpServer(Movable):
         Raises:
             Error: If no h3 listener is bound.
         """
-        if not self.has_h3():
-            raise Error("HttpServer.tick_h3_once: no h3 listener bound")
-        var listener = self._h3_listener.take()
+        if not self.has_http3():
+            raise Error("HttpServer.tick_http3_once: no h3 listener bound")
+        var listener = self._http3_listener.take()
         _ = listener.advance_timers(now_ms)
         var count = listener.connection_count()
-        self._h3_listener = listener^
+        self._http3_listener = listener^
         return count
 
-    def pump_h3_handler_once[
+    def pump_http3_handler_once[
         H: Handler & Copyable
     ](mut self, mut handler: H) raises -> Int:
         """Drain every connection's H3 dispatcher once: for each
         completed request stream the handler is invoked with the
         materialized :class:`Request`, the resulting
         :class:`Response` is encoded into the slot's H3 outbox
-        via :meth:`QuicListener.emit_h3_response`, and the
+        via :meth:`QuicListener.emit_http3_response`, and the
         outbound bytes accumulate in the per-(slot, stream_id)
         egress buffer.
 
@@ -445,29 +445,31 @@ struct HttpServer(Movable):
         Raises:
             Error: If no h3 listener is bound.
         """
-        if not self.has_h3():
-            raise Error("HttpServer.pump_h3_handler_once: no h3 listener bound")
-        var listener = self._h3_listener.take()
+        if not self.has_http3():
+            raise Error(
+                "HttpServer.pump_http3_handler_once: no h3 listener bound"
+            )
+        var listener = self._http3_listener.take()
         var dispatched = 0
         for slot in range(listener.connection_count()):
-            var ready = listener.take_h3_completed_streams(slot)
+            var ready = listener.take_http3_completed_streams(slot)
             for j in range(len(ready)):
                 var stream_id = ready[j]
-                var req = listener.take_h3_request(slot, stream_id)
+                var req = listener.take_http3_request(slot, stream_id)
                 var resp = handler.serve(req^)
-                listener.emit_h3_response(slot, stream_id, resp^)
+                listener.emit_http3_response(slot, stream_id, resp^)
                 dispatched += 1
-        self._h3_listener = listener^
+        self._http3_listener = listener^
         return dispatched
 
-    def serve_h3[H: Handler & Copyable](mut self, var handler: H) raises:
+    def serve_http3[H: Handler & Copyable](mut self, var handler: H) raises:
         """Run the QUIC reactor with H3 handler dispatch as a
         single-threaded loop.
 
         This is the H3-aware blocking entry point: each iteration
         runs :meth:`QuicListener.tick` to drain one inbound UDP
         datagram + drive the QUIC + rustls state machines, then
-        :meth:`pump_h3_handler_once` to dispatch any completed
+        :meth:`pump_http3_handler_once` to dispatch any completed
         H3 request streams through ``handler``, then
         :meth:`QuicListener.advance_timers` so PTO + idle +
         ack-delay callbacks fire on time. Exits cleanly once
@@ -485,8 +487,8 @@ struct HttpServer(Movable):
                 per-connection errors close the offending
                 connection silently inside ``tick``.
         """
-        if not self.has_h3():
-            raise Error("HttpServer.serve_h3: no h3 listener bound")
+        if not self.has_http3():
+            raise Error("HttpServer.serve_http3: no h3 listener bound")
         # Inline: pulled from the leaf _server_support helper module
         # (not flare.quic.server) to avoid loading the QUIC reactor --
         # which imports flare.http -- at flare.http.server import time.
@@ -494,7 +496,7 @@ struct HttpServer(Movable):
             _monotonic_ms as _quic_monotonic_ms,
         )
 
-        var listener = self._h3_listener.take()
+        var listener = self._http3_listener.take()
         try:
             while not listener._stopping:
                 _ = listener.tick(timeout_ms=100)
@@ -507,9 +509,9 @@ struct HttpServer(Movable):
                 var now_ms = _quic_monotonic_ms()
                 _ = listener.advance_timers(now_ms)
         except e:
-            self._h3_listener = listener^
+            self._http3_listener = listener^
             raise e^
-        self._h3_listener = listener^
+        self._http3_listener = listener^
 
     @staticmethod
     def _pump_listener_h3[
@@ -517,19 +519,19 @@ struct HttpServer(Movable):
     ](mut listener: QuicListener, var handler: H) raises -> Int:
         """Internal helper: drain every connection's H3
         dispatcher once on a borrowed listener. Mirrors
-        :meth:`pump_h3_handler_once` but operates on a borrowed
-        listener so :meth:`serve_h3` can hold the listener in
+        :meth:`pump_http3_handler_once` but operates on a borrowed
+        listener so :meth:`serve_http3` can hold the listener in
         its own loop variable without bouncing through the
         Optional dance every iteration.
         """
         var dispatched = 0
         for slot in range(listener.connection_count()):
-            var ready = listener.take_h3_completed_streams(slot)
+            var ready = listener.take_http3_completed_streams(slot)
             for j in range(len(ready)):
                 var stream_id = ready[j]
-                var req = listener.take_h3_request(slot, stream_id)
+                var req = listener.take_http3_request(slot, stream_id)
                 var resp = handler.serve(req^)
-                listener.emit_h3_response(slot, stream_id, resp^)
+                listener.emit_http3_response(slot, stream_id, resp^)
                 dispatched += 1
         return dispatched
 
@@ -615,7 +617,7 @@ struct HttpServer(Movable):
                     return
             # Unified reactor loop: every accepted connection is
             # auto-dispatched to either the HTTP/1.1 ConnHandle or
-            # the HTTP/2 H2ConnHandle based on whether its first
+            # the HTTP/2 Http2ConnHandle based on whether its first
             # 24 bytes match the RFC 9113 §3.4 client preface.
             if len(self._extra_listener_fds) > 0:
                 run_unified_reactor_loop_multi(
@@ -824,7 +826,7 @@ struct HttpServer(Movable):
                     return
             # Unified reactor loop: every accepted connection is
             # auto-dispatched to either the HTTP/1.1 ConnHandle
-            # or the HTTP/2 H2ConnHandle based on the first 24
+            # or the HTTP/2 Http2ConnHandle based on the first 24
             # bytes (RFC 9113 §3.4 preface peek). Same handler
             # callback is used for both wires.
             if len(self._extra_listener_fds) > 0:

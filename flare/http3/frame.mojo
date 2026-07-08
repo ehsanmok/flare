@@ -53,7 +53,7 @@ comptime H3_SETTINGS_ENABLE_CONNECT_PROTOCOL: UInt64 = 0x08
 
 
 @fieldwise_init
-struct H3FrameType(Copyable, Movable):
+struct Http3FrameType(Copyable, Movable):
     """Wraps a varint-encoded frame type. ``raw`` is the wire
     value; ``is_known()`` checks whether the type is one of the
     seven core types defined by RFC 9114. Receivers must ignore
@@ -84,7 +84,7 @@ struct H3FrameType(Copyable, Movable):
 
 
 @fieldwise_init
-struct H3Frame(Copyable, Movable):
+struct Http3Frame(Copyable, Movable):
     """Parsed HTTP/3 frame: type + payload bytes.
 
     ``payload`` is a deep copy of the wire bytes that follow the
@@ -92,11 +92,11 @@ struct H3Frame(Copyable, Movable):
     receive buffer can be advanced/recycled.
     """
 
-    var frame_type: H3FrameType
+    var frame_type: Http3FrameType
     var payload: List[UInt8]
 
 
-def encode_h3_frame(
+def encode_http3_frame(
     frame_type: UInt64,
     payload: Span[UInt8, _],
     mut out: List[UInt8],
@@ -120,7 +120,7 @@ def encode_h3_frame(
         out.append(payload[i])
 
 
-def decode_h3_frame(buf: Span[UInt8, _]) raises -> H3Frame:
+def decode_http3_frame(buf: Span[UInt8, _]) raises -> Http3Frame:
     """Decode the first complete frame at the start of ``buf``.
 
     Raises ``Error`` on a truncated input (a partial varint or a
@@ -152,8 +152,8 @@ def decode_h3_frame(buf: Span[UInt8, _]) raises -> H3Frame:
     var payload = List[UInt8](capacity=Int(len_var.value))
     for i in range(payload_start, payload_end):
         payload.append(buf[i])
-    return H3Frame(
-        frame_type=H3FrameType(raw=type_var.value),
+    return Http3Frame(
+        frame_type=Http3FrameType(raw=type_var.value),
         payload=payload^,
     )
 
@@ -162,7 +162,7 @@ def decode_h3_frame(buf: Span[UInt8, _]) raises -> H3Frame:
 
 
 @fieldwise_init
-struct H3Setting(Copyable, Movable):
+struct Http3Setting(Copyable, Movable):
     """A single ``identifier: value`` pair inside a SETTINGS
     frame's payload."""
 
@@ -170,15 +170,15 @@ struct H3Setting(Copyable, Movable):
     var value: UInt64
 
 
-def encode_h3_settings(
-    settings: List[H3Setting],
+def encode_http3_settings(
+    settings: List[Http3Setting],
     mut out: List[UInt8],
 ) raises:
     """Append the body of an HTTP/3 SETTINGS frame to ``out``.
 
     Writes the ``identifier`` / ``value`` varint pairs in order;
     the result is the *payload* only. Wrap it in
-    :func:`encode_h3_frame` with type
+    :func:`encode_http3_frame` with type
     :data:`H3_FRAME_TYPE_SETTINGS` to get a complete frame.
 
     The caller owns the buffer and may reuse the same
@@ -195,7 +195,7 @@ def encode_h3_settings(
             out.append(val_bytes[j])
 
 
-def decode_h3_settings(payload: Span[UInt8, _]) raises -> List[H3Setting]:
+def decode_http3_settings(payload: Span[UInt8, _]) raises -> List[Http3Setting]:
     """Decode a SETTINGS-frame payload into a list of pairs.
 
     Raises if the payload is malformed (truncated varint, dangling
@@ -204,7 +204,7 @@ def decode_h3_settings(payload: Span[UInt8, _]) raises -> List[H3Setting]:
     and respond with H3_SETTINGS_ERROR, but that policy belongs
     to the connection driver, not the codec.
     """
-    var out = List[H3Setting]()
+    var out = List[Http3Setting]()
     var offset = 0
     var n = len(payload)
     while offset < n:
@@ -214,5 +214,5 @@ def decode_h3_settings(payload: Span[UInt8, _]) raises -> List[H3Setting]:
             raise Error("h3 settings: identifier without value")
         var val_var = decode_varint(payload[offset:])
         offset += val_var.consumed
-        out.append(H3Setting(identifier=id_var.value, value=val_var.value))
+        out.append(Http3Setting(identifier=id_var.value, value=val_var.value))
     return out^

@@ -6,7 +6,7 @@
 # share the same harness shape; the wire is the only difference.
 #
 # Status: published as infrastructure in this commit.  The
-# in-tree h3 server (flare/quic/server.mojo + flare/h3/server.mojo)
+# in-tree h3 server (flare/quic/server.mojo + flare/http3/server.mojo)
 # is a typed scaffold today; the actual request-response round-trip
 # requires the rustls QUIC binding (Track Q2 follow-up) plus the
 # OpenSSL AEAD wiring (Track Q1 follow-up) before bench_h3.sh can

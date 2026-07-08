@@ -19,7 +19,7 @@ This module provides:
 - :class:`FrameHeader` — the 9-byte fixed header.
 - :class:`Frame` — owned wrapper carrying header + payload.
 - :class:`FrameType` / :class:`FrameFlags` — typed constants.
-- :func:`parse_frame` — best-effort parser; raises ``H2Error`` on
+- :func:`parse_frame` — best-effort parser; raises ``Http2Error`` on
   malformed length / oversized payload / invalid stream-id.
 - :func:`encode_frame` — emit the wire representation.
 

@@ -1,11 +1,11 @@
 """HTTP/3 response-stream reader -- sans-I/O stateful decoder.
 
-The client-side mirror of :mod:`flare.h3.request_reader`. Where the
+The client-side mirror of :mod:`flare.http3.request_reader`. Where the
 server's request reader fires a callback per frame, the client side
 almost always wants the *assembled* response, so this reader is
 stateful: feed it the reassembled bytes of a request (bidi) stream
 as they arrive and it accumulates the response into an
-:class:`H3Response` (status + headers + body + trailers).
+:class:`Http3Response` (status + headers + body + trailers).
 
 A response stream carries, in order (RFC 9114 §4.1):
 
@@ -20,7 +20,7 @@ error (RFC 9114 §6.2).
 Usage:
 
 ```mojo
-var reader = H3ResponseReader.new()
+var reader = Http3ResponseReader.new()
 reader.feed(chunk0)
 reader.feed(chunk1)
 reader.signal_fin()
@@ -66,7 +66,7 @@ comptime H3_RESPONSE_STATE_DONE: Int = 3
 
 
 @fieldwise_init
-struct H3Response(Copyable, Movable):
+struct Http3Response(Copyable, Movable):
     """An assembled HTTP/3 response.
 
     ``status`` is the ``:status`` pseudo-header (RFC 9114 §4.3.2);
@@ -82,10 +82,10 @@ struct H3Response(Copyable, Movable):
 
 
 @fieldwise_init
-struct H3BodyChunk(Copyable, Movable):
+struct Http3BodyChunk(Copyable, Movable):
     """One incremental slice of a streaming HTTP/3 response body.
 
-    Returned by :meth:`flare.h3.client.H3ClientConnection.poll_body`.
+    Returned by :meth:`flare.http3.client.Http3ClientConnection.poll_body`.
     ``data`` is the body bytes that became available on this poll
     (possibly empty); ``done`` is True once the response stream has
     finished (QUIC FIN), after which no further DATA will arrive and
@@ -96,7 +96,7 @@ struct H3BodyChunk(Copyable, Movable):
     var done: Bool
 
 
-struct H3ResponseReader(Copyable, Movable):
+struct Http3ResponseReader(Copyable, Movable):
     """Per-stream stateful HTTP/3 response decoder.
 
     Feed reassembled request-stream bytes via :meth:`feed`; the
@@ -105,7 +105,7 @@ struct H3ResponseReader(Copyable, Movable):
     until the next :meth:`feed`. Mark the QUIC FIN with
     :meth:`signal_fin`; once HEADERS are parsed and FIN is seen
     :meth:`is_complete` returns True and :meth:`take_response`
-    yields the assembled :class:`H3Response`.
+    yields the assembled :class:`Http3Response`.
     """
 
     var state: Int
@@ -194,14 +194,14 @@ struct H3ResponseReader(Copyable, Movable):
         self.body = List[UInt8]()
         return out^
 
-    def take_response(mut self) raises -> H3Response:
+    def take_response(mut self) raises -> Http3Response:
         """Move out the assembled response. Raises if a protocol
         error fired or the response head was never parsed."""
         if self.has_error():
             raise Error("h3 response reader: " + self.error)
         if self.state == H3_RESPONSE_STATE_INIT:
             raise Error("h3 response reader: no HEADERS frame parsed")
-        var out = H3Response(
+        var out = Http3Response(
             status=self.status,
             headers=self.headers^,
             body=self.body^,

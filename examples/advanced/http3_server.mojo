@@ -2,14 +2,14 @@
 
 Walks the production shape of an HTTP/3 server:
 
-* :meth:`flare.http.HttpServer.bind_with_h3` opens a TCP listener
+* :meth:`flare.http.HttpServer.bind_with_http3` opens a TCP listener
   for h1 / h2c / h2 AND a QUIC UDP listener for h3 alongside.
-* :meth:`flare.http.HttpServer.serve_h3` runs the QUIC reactor
+* :meth:`flare.http.HttpServer.serve_http3` runs the QUIC reactor
   with H3 Handler dispatch as a single-threaded loop: each
   iteration runs
   :meth:`flare.quic.QuicListener.tick` to drain one inbound UDP
   datagram + drive the QUIC + rustls state machines, then
-  :meth:`flare.http.HttpServer.pump_h3_handler_once` to dispatch
+  :meth:`flare.http.HttpServer.pump_http3_handler_once` to dispatch
   any completed H3 request streams through the handler, then
   :meth:`flare.quic.QuicListener.advance_timers` so PTO + idle
   + ack-delay callbacks fire on time.
@@ -26,7 +26,7 @@ Live wire status: the QUIC reactor I/O cycle is live, the
 rustls FFI wrapper surfaces the per-level ``KeyChange``
 Handshake / 1-RTT keys back to
 ``QuicConnection.install_handshake_keys`` /
-``install_1rtt_keys``, and this example's ``serve_h3`` loop
+``install_1rtt_keys``, and this example's ``serve_http3`` loop
 sustains a full request-response round-trip over the wire. The
 HTTP/3 bench gate is met: flare h3 leads at 74,653 req/s
 (median, +2.9 % over quiche 0.22) on the 1-client x 100-stream
@@ -38,7 +38,7 @@ Run:
     pixi run example-http3-server
 """
 
-from flare.h3 import H3Connection, H3ConnectionConfig
+from flare.http3 import Http3Connection, Http3Config
 from flare.http import Handler
 from flare.http.alpn_dispatch import (
     ALPN_HTTP_1_1,
@@ -90,10 +90,10 @@ def main() raises:
     var udp_cfg = QuicServerConfig()
     udp_cfg.host = String("127.0.0.1")
     udp_cfg.port = UInt16(0)
-    var srv = HttpServer.bind_with_h3(tcp_addr, udp_cfg^)
+    var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
 
     print("[bind] TCP listener:", String(srv.local_addrs()[0]))
-    print("[bind] UDP listener:", String(srv.local_h3_addr()))
+    print("[bind] UDP listener:", String(srv.local_http3_addr()))
     print()
 
     # Step 2: the advertised ALPN list. The TLS handshake on
@@ -131,11 +131,11 @@ def main() raises:
     print()
 
     # Step 4: prove the shared Handler dispatch surface. The
-    # same Handler the QUIC reactor invokes via ``serve_h3``
+    # same Handler the QUIC reactor invokes via ``serve_http3``
     # is the one a TCP reactor invokes via ``serve``. Dispatch
     # a synthetic Request through the handler directly so the
     # demo returns deterministically (running the actual
-    # serve_h3 loop would block until SIGINT).
+    # serve_http3 loop would block until SIGINT).
     print("[demo] dispatch a synthetic request through the shared Handler:")
     var handler = SharedHandler()
     var req = Request(
@@ -149,21 +149,21 @@ def main() raises:
     )
     print()
 
-    # Step 5: pump_h3_handler_once is the per-tick H3 dispatch
-    # surface ``serve_h3`` drives. With no live UDP traffic in
+    # Step 5: pump_http3_handler_once is the per-tick H3 dispatch
+    # surface ``serve_http3`` drives. With no live UDP traffic in
     # this demo the listener has no completed streams to drain,
     # so the count is 0 -- but the call exercises the dispatch
     # path so a reader can see the shape.
     print("[h3] one-shot Handler pump on the live QUIC listener:")
-    var dispatched = srv.pump_h3_handler_once[SharedHandler](handler)
+    var dispatched = srv.pump_http3_handler_once[SharedHandler](handler)
     print("    streams dispatched this pass:", dispatched)
     print()
 
-    # Step 6: H3Connection is what the QUIC reactor will hand
+    # Step 6: Http3Connection is what the QUIC reactor will hand
     # each accepted QUIC connection to. Build one + verify it
     # emits the server SETTINGS that the listener will write
     # on the new control stream.
-    var h3 = H3Connection.with_config(H3ConnectionConfig())
+    var h3 = Http3Connection.with_config(Http3Config())
     var initial_settings = h3.emit_initial_settings()
     print("[h3] initial server SETTINGS emit length =", len(initial_settings))
     print()
@@ -171,7 +171,7 @@ def main() raises:
     # The full live-traffic loop would replace the lines above
     # with::
     #
-    #     srv.serve_h3[SharedHandler](handler^)
+    #     srv.serve_http3[SharedHandler](handler^)
     #
     # which blocks driving the QUIC reactor + H3 Handler
     # dispatch until ``QuicListener.shutdown`` flips the stop

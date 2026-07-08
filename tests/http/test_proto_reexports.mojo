@@ -69,7 +69,7 @@ from flare.http.proto import (
     HpackStringPair,
     hpack_decode_integer,
     hpack_encode_integer,
-    H2Connection,
+    Http2Connection,
     H2Stream,
     H2StreamState,
     _ExperimentalH1LeniencyConfig,
@@ -224,7 +224,7 @@ def test_h2_state_smoke() raises:
     # ``test_h2_state.mojo``. This is the re-export channel check.
     var s = H2Stream()
     assert_equal(s.state.value, H2StreamState.IDLE().value)
-    var c = H2Connection()
+    var c = Http2Connection()
     assert_true(c.max_concurrent_streams > 0)
 
 

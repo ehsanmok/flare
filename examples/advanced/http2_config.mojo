@@ -1,9 +1,9 @@
 """Example 37: HTTP/2 SETTINGS via :class:`flare.http2.Http2Config`.
 
 Shows the configuration surface for the inline
-:class:`flare.http2.H2Connection` driver. Three configurations:
+:class:`flare.http2.Http2Connection` driver. Three configurations:
 
-1. Defaults — equivalent to ``H2Connection()`` with no
+1. Defaults — equivalent to ``Http2Connection()`` with no
    per-connection tuning.
 2. A relaxed config — bumps SETTINGS_MAX_CONCURRENT_STREAMS and
    SETTINGS_INITIAL_WINDOW_SIZE for high-fan-out internal services.
@@ -21,7 +21,7 @@ Pure construction. Run:
 """
 
 from flare.http2 import (
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     Http2Config,
     parse_frame,
@@ -32,7 +32,7 @@ def _preface_bytes() -> List[UInt8]:
     return List[UInt8](String(H2_PREFACE).as_bytes())
 
 
-def _emit_initial_settings(var conn: H2Connection) raises -> List[UInt8]:
+def _emit_initial_settings(var conn: Http2Connection) raises -> List[UInt8]:
     """Drive the preface then drain the SETTINGS frame the server
     emits as its half of the handshake."""
     conn.feed(Span[UInt8, _](_preface_bytes()))
@@ -79,7 +79,7 @@ def main() raises:
     print("  header_table_size:", default_cfg.header_table_size)
     print("  allow_huffman_decode:", default_cfg.allow_huffman_decode)
     print("  allow_huffman_encode:", default_cfg.allow_huffman_encode)
-    var c1 = H2Connection.with_config(default_cfg^)
+    var c1 = Http2Connection.with_config(default_cfg^)
     _print_emitted_settings("  emitted SETTINGS", _emit_initial_settings(c1^))
     print()
 
@@ -96,7 +96,7 @@ def main() raises:
         enable_connect_protocol=False,
     )
     relaxed.validate()
-    var c2 = H2Connection.with_config(relaxed^)
+    var c2 = Http2Connection.with_config(relaxed^)
     _print_emitted_settings("  emitted SETTINGS", _emit_initial_settings(c2^))
     print()
 
@@ -113,7 +113,7 @@ def main() raises:
         enable_connect_protocol=False,
     )
     tight.validate()
-    var c3 = H2Connection.with_config(tight^)
+    var c3 = Http2Connection.with_config(tight^)
     _print_emitted_settings("  emitted SETTINGS", _emit_initial_settings(c3^))
     print()
 

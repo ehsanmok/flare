@@ -81,7 +81,7 @@ natural.
 | [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) | streaming-proxy surface: `StreamHandler` + `attach_upstream(UpstreamChunkSource)` + `relay_upstream()` over `serve_streaming`, relaying a `FrameMux` backend with watermark backpressure, no fd, no `Span`, no per-connection table in front code |
 | [`cert_reload.mojo`](../examples/advanced/cert_reload.mojo) | `TlsAcceptor.reload()` for ACME / Let's Encrypt cert rotation without restart |
 | [`mtls.mojo`](../examples/advanced/mtls.mojo) | mTLS configuration + construction-time validation |
-| [`http2.mojo`](../examples/advanced/http2.mojo) | `H2Connection` driver, ALPN dispatch, h2c upgrade detection |
+| [`http2.mojo`](../examples/advanced/http2.mojo) | `Http2Connection` driver, ALPN dispatch, h2c upgrade detection |
 | [`http2_config.mojo`](../examples/advanced/http2_config.mojo) | `Http2Config` SETTINGS knobs + validation |
 | [`http2_client.mojo`](../examples/advanced/http2_client.mojo) | `HttpClient(prefer_h2c=True)` GET + POST over h2c (cleartext HTTP/2 via prior knowledge) |
 | [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) | Path-dispatching handler served over HTTP/2 via the unified `HttpServer.serve(handler)` (auto-dispatches HTTP/1.1 + HTTP/2 on the same port) |

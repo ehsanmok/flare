@@ -11,7 +11,7 @@ without binding a port. It exercises:
   ``run_unary_call`` orchestrator that validates HTTP/2
   pseudo-headers, stitches LPM frames out of the request DATA
   payload, invokes the handler, and emits the response DATA +
-  trailers shape an :class:`H2Connection` would put on the
+  trailers shape an :class:`Http2Connection` would put on the
   wire.
 
 The demo runs two calls against a tiny "echo" handler:
@@ -23,7 +23,7 @@ The demo runs two calls against a tiny "echo" handler:
   the adapter emits an empty response body and the trailers
   carry the status.
 
-Sans-I/O contract: no socket, no H2Connection, no allocator
+Sans-I/O contract: no socket, no Http2Connection, no allocator
 beyond the codec's own. The adapter is the same one the
 HTTP/2 reactor wraps once the bytes reach the per-stream
 handler.

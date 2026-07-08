@@ -1,6 +1,6 @@
 """H3 server <-> QPACK dynamic-table wiring (RFC 9204).
 
-Exercises the per-connection dynamic table on :class:`H3Connection`:
+Exercises the per-connection dynamic table on :class:`Http3Connection`:
 
 1. Peer QPACK encoder-stream inserts (Set Capacity + Insert With
    Literal Name) replayed over :meth:`feed_uni_stream_chunk` land in
@@ -16,11 +16,11 @@ Exercises the per-connection dynamic table on :class:`H3Connection`:
 from std.memory import Span
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import (
+from flare.http3 import (
     H3_FRAME_TYPE_HEADERS,
-    H3Connection,
-    H3ConnectionConfig,
-    encode_h3_frame,
+    Http3Connection,
+    Http3Config,
+    encode_http3_frame,
 )
 from flare.qpack import QpackHeader
 from flare.qpack.dynamic import (
@@ -36,10 +36,10 @@ comptime _QPACK_ENCODER_STREAM: Int = 2
 """RFC 9114 §6.2.1 unidirectional stream type 0x02."""
 
 
-def _conn_with_dynamic(capacity: UInt64 = 4096) raises -> H3Connection:
-    var config = H3ConnectionConfig()
+def _conn_with_dynamic(capacity: UInt64 = 4096) raises -> Http3Connection:
+    var config = Http3Config()
     config.qpack_max_table_capacity = capacity
-    return H3Connection.with_config(config)
+    return Http3Connection.with_config(config)
 
 
 def _encoder_stream_inserts() raises -> List[UInt8]:
@@ -70,7 +70,7 @@ def _dynamic_get_frame(path: String) raises -> List[UInt8]:
     var payload = List[UInt8]()
     encode_field_section_dynamic(headers, mirror, payload)
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](payload), out)
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](payload), out)
     return out^
 
 

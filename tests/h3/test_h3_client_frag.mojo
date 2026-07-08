@@ -1,4 +1,4 @@
-"""H3C frag: multi-packet request-body send + idle keepalive reuse.
+"""Multi-packet request-body send + idle keepalive reuse.
 
 Drives the real H3 client over the loopback QUIC server (same lockstep
 harness as ``test_h3_client_e2e.mojo``) to exercise two reuse
@@ -17,7 +17,7 @@ from std.collections import List
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import H3ClientConnection, H3ResponseReader
+from flare.http3 import Http3ClientConnection, Http3ResponseReader
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -73,12 +73,12 @@ struct _Digest(Copyable, Handler, Movable):
 def _server_dispatch(mut server: QuicListener) raises:
     var handler = _Digest()
     for slot in range(server.connection_count()):
-        var ready = server.take_h3_completed_streams(slot)
+        var ready = server.take_http3_completed_streams(slot)
         for i in range(len(ready)):
             var sid = ready[i]
-            var req = server.take_h3_request(slot, sid)
+            var req = server.take_http3_request(slot, sid)
             var resp = handler.serve(req^)
-            server.emit_h3_response(slot, sid, resp^)
+            server.emit_http3_response(slot, sid, resp^)
 
 
 def _drive_handshake(mut server: QuicListener) raises -> QuicClientConnection:
@@ -114,7 +114,7 @@ def test_large_body_fragments() raises:
     reassembles it intact."""
     var server = _bind_server()
     var client = _drive_handshake(server)
-    var h3 = H3ClientConnection(client^)
+    var h3 = Http3ClientConnection(client^)
 
     var body = _pattern(6000)  # > default 1452 MTU -> several frames
     var want = _digest_of(body)
@@ -126,7 +126,7 @@ def test_large_body_fragments() raises:
         List[QpackHeader](),
         body,
     )
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var done = False
     for _ in range(80):
         _ = server.tick(timeout_ms=50)
@@ -148,7 +148,7 @@ def test_idle_then_reuse() raises:
     established and a second request reuses it."""
     var server = _bind_server()
     var client = _drive_handshake(server)
-    var h3 = H3ClientConnection(client^)
+    var h3 = Http3ClientConnection(client^)
 
     var body1 = _pattern(64)
     var want1 = _digest_of(body1)
@@ -160,7 +160,7 @@ def test_idle_then_reuse() raises:
         List[QpackHeader](),
         body1,
     )
-    var reader1 = H3ResponseReader.new()
+    var reader1 = Http3ResponseReader.new()
     var done1 = False
     for _ in range(40):
         _ = server.tick(timeout_ms=50)
@@ -194,7 +194,7 @@ def test_idle_then_reuse() raises:
         body2,
     )
     assert_true(sid2 != sid1, "reuse opens a fresh stream")
-    var reader2 = H3ResponseReader.new()
+    var reader2 = Http3ResponseReader.new()
     var done2 = False
     for _ in range(40):
         _ = server.tick(timeout_ms=50)

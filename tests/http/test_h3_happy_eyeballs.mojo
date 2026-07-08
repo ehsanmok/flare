@@ -2,16 +2,16 @@
 
 Two layers:
 
-1. e2e win: a real loopback QUIC (h3) server + a ``prefer_h3``
+1. e2e win: a real loopback QUIC (h3) server + a ``prefer_http3``
    :class:`HttpClient` issuing an idempotent GET. The TLS branch of
    ``_do_request`` routes idempotent + h3-eligible requests through
-   :func:`race_h3_h2_connect`, which spawns the h3 and h2/h1 *connect*
+   :func:`race_http3_h2_connect`, which spawns the h3 and h2/h1 *connect*
    legs on two OS threads. The h2/h1 leg fast-fails (no TCP listener on
    the QUIC port -> ECONNREFUSED), so h3 wins the connect race and the
    caller sends the request once on the pooled h3 connection, seeing a
    normal 200 Response.
 
-2. orchestration unit cases: :func:`race_h3_h2_connect` is exercised
+2. orchestration unit cases: :func:`race_http3_h2_connect` is exercised
    directly with a synthetic ``thin`` connect leg so the win/fallback/
    both-fail picks are deterministic without a second TLS server:
      * both legs connect   -> RACE_H3 (h3 preferred),
@@ -37,7 +37,7 @@ from flare.http._client.h3_race import (
     RACE_H2,
     RACE_H3,
     RACE_NONE,
-    race_h3_h2_connect,
+    race_http3_h2_connect,
 )
 from flare.http.handler import Handler
 from flare.quic.server import QuicListener, QuicServerConfig
@@ -82,19 +82,19 @@ def _serve_forever(mut server: QuicListener):
         try:
             _ = server.tick(timeout_ms=50)
             for slot in range(server.connection_count()):
-                var ready = server.take_h3_completed_streams(slot)
+                var ready = server.take_http3_completed_streams(slot)
                 for i in range(len(ready)):
                     var sid = ready[i]
-                    var req = server.take_h3_request(slot, sid)
+                    var req = server.take_http3_request(slot, sid)
                     var resp = handler.serve(req^)
-                    server.emit_h3_response(slot, sid, resp^)
+                    server.emit_http3_response(slot, sid, resp^)
         except:
             return
 
 
 def _client() raises -> HttpClient:
     var cfg = TlsConfig(ca_bundle=_FIXDIR + "ca.pem")
-    return HttpClient(cfg).with_prefer_h3()
+    return HttpClient(cfg).with_prefer_http3()
 
 
 def test_race_h3_wins_e2e() raises:
@@ -147,21 +147,21 @@ def _synthetic_connect_leg(
 
 
 def test_race_prefers_h3_when_both_ok() raises:
-    var winner = race_h3_h2_connect(
+    var winner = race_http3_h2_connect(
         _synthetic_connect_leg, 0, String("both-ok")
     )
     assert_equal(winner, RACE_H3)
 
 
 def test_race_falls_back_to_h2_when_h3_dead() raises:
-    var winner = race_h3_h2_connect(
+    var winner = race_http3_h2_connect(
         _synthetic_connect_leg, 0, String("h3-dead")
     )
     assert_equal(winner, RACE_H2)
 
 
 def test_race_none_when_both_dead() raises:
-    var winner = race_h3_h2_connect(
+    var winner = race_http3_h2_connect(
         _synthetic_connect_leg, 0, String("both-dead")
     )
     assert_equal(winner, RACE_NONE)

@@ -12,7 +12,7 @@ exercises each one minimally. If a leaf module changes its public
 surface, this test breaks first.
 
 The companion lint job (``pixi run check-no-http-http2-cycle``)
-enforces statically that ``flare/http2/**`` and ``flare/h3/**``
+enforces statically that ``flare/http2/**`` and ``flare/http3/**``
 only reach into the ``flare.http`` namespace through this package
 (or through ``flare.http.proto``). This test exercises the same
 public surface from the user's side.

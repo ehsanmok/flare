@@ -1,5 +1,5 @@
 """Fuzz harness: HTTP/3 server driver
-(:class:`flare.h3.H3Connection`).
+(:class:`flare.http3.Http3Connection`).
 
 Drives the bidirectional + unidirectional stream entry points
 of the server-side H3 connection driver against arbitrary
@@ -37,7 +37,7 @@ The fuzzer carves the input bytes into five work items:
 * Branch D: feed every byte as a 1-byte chunk (worst case for
   the NEEDS_MORE buffering loop).
 * Branch E: route the bytes through
-  :meth:`flare.quic.server.QuicListener._route_h3_stream_chunks`
+  :meth:`flare.quic.server.QuicListener._route_http3_stream_chunks`
   via a synthetic :class:`flare.quic.state.ConnectionEvents` so
   the dispatch-on-listener path is fuzz-covered too. Same
   safety bar as branches A..D.
@@ -48,7 +48,7 @@ Run:
 
 from mozz import FuzzConfig, fuzz
 
-from flare.h3 import H3Connection
+from flare.http3 import Http3Connection
 from flare.net import IpAddr, SocketAddr
 from flare.quic.frame import StreamFrame
 from flare.quic.packet import (
@@ -76,7 +76,7 @@ def _assert(cond: Bool, msg: String) raises:
         raise Error(msg)
 
 
-def _run_bidi_round(mut c: H3Connection, var chunk: List[UInt8]) raises:
+def _run_bidi_round(mut c: Http3Connection, var chunk: List[UInt8]) raises:
     """Feed a bidi chunk on stream 0, signal FIN, and check the
     bounded-growth invariants."""
     var pre_count = len(c.streams)
@@ -110,7 +110,7 @@ def _run_bidi_round(mut c: H3Connection, var chunk: List[UInt8]) raises:
             )
 
 
-def _run_uni_round(mut c: H3Connection, var chunk: List[UInt8]) raises:
+def _run_uni_round(mut c: Http3Connection, var chunk: List[UInt8]) raises:
     """Feed a chunk on peer uni stream 3 -- the typical peer
     control stream id. Errors are acceptable (the chunk may be
     structurally invalid)."""
@@ -120,7 +120,7 @@ def _run_uni_round(mut c: H3Connection, var chunk: List[UInt8]) raises:
         pass
 
 
-def _run_split_feed(mut c: H3Connection, data: List[UInt8]) raises:
+def _run_split_feed(mut c: Http3Connection, data: List[UInt8]) raises:
     var mid = len(data) // 2
     var a = List[UInt8](capacity=mid)
     var b = List[UInt8](capacity=len(data) - mid)
@@ -141,7 +141,7 @@ def _run_split_feed(mut c: H3Connection, data: List[UInt8]) raises:
     )
 
 
-def _run_byte_at_a_time(mut c: H3Connection, data: List[UInt8]) raises:
+def _run_byte_at_a_time(mut c: Http3Connection, data: List[UInt8]) raises:
     for i in range(len(data)):
         var chunk = List[UInt8]()
         chunk.append(data[i])
@@ -161,7 +161,7 @@ def _run_listener_dispatch(var data: List[UInt8]) raises:
 
     The empty-PEM acceptor returns a NULL rustls session
     handle; the path never needs a real TLS roundtrip because
-    :meth:`QuicListener._route_h3_stream_chunks` is
+    :meth:`QuicListener._route_http3_stream_chunks` is
     sans-I/O too.
     """
     var cfg = QuicServerConfig()
@@ -204,10 +204,10 @@ def _run_listener_dispatch(var data: List[UInt8]) raises:
         )
     )
     try:
-        listener._route_h3_stream_chunks(slot, events)
+        listener._route_http3_stream_chunks(slot, events)
     except _:
         return
-    var ready = listener.take_h3_completed_streams(slot)
+    var ready = listener.take_http3_completed_streams(slot)
     _assert(
         len(ready) <= 1,
         "listener dispatch surfaced > 1 ready stream from a single frame",
@@ -218,18 +218,18 @@ def target(data: List[UInt8]) raises:
     var n = len(data)
 
     # Branch A: bidi chunk on stream 0.
-    var c1 = H3Connection()
+    var c1 = Http3Connection()
     _run_bidi_round(c1, data.copy())
 
     # Branch B: peer uni stream chunk.
-    var c2 = H3Connection()
+    var c2 = Http3Connection()
     _run_uni_round(c2, data.copy())
 
     if n < 2:
         return
 
     # Branch C: split bidi feed.
-    var c3 = H3Connection()
+    var c3 = Http3Connection()
     _run_split_feed(c3, data)
 
     # Branch D: 1-byte-at-a-time feed (the NEEDS_MORE buffering
@@ -241,7 +241,7 @@ def target(data: List[UInt8]) raises:
         for i in range(64):
             trim.append(capped[i])
         capped = trim^
-    var c4 = H3Connection()
+    var c4 = Http3Connection()
     _run_byte_at_a_time(c4, capped)
 
     # Branch E (Q12-W): the new dispatch-on-listener path. The

@@ -1,7 +1,7 @@
 """HTTP/2 client byte driver (RFC 9113).
 
 Cleartext (h2c) and TLS (h2) client-side counterpart to
-:class:`flare.http2.server.H2Connection`.
+:class:`flare.http2.server.Http2Connection`.
 
 This module exposes the *low-level* HTTP/2 client byte driver
 that :class:`flare.http.HttpClient` uses internally when it
@@ -18,7 +18,7 @@ public for callers who want to roll their own dispatch loop.
   into ``feed`` and pulls outbound bytes from ``drain``;
   per-stream completion is observed via
   ``response_ready(sid)`` / ``take_response(sid)``. Same
-  shape as :class:`flare.http2.server.H2Connection` so the
+  shape as :class:`flare.http2.server.Http2Connection` so the
   two drivers can be paired entirely in-memory in tests.
 
 Wire-protocol scope:
@@ -85,7 +85,7 @@ from .frame import (
     parse_frame,
 )
 from .hpack import HpackHeader
-from .state import Connection, H2Error, H2ErrorCode, Stream, StreamState
+from .state import Connection, Http2Error, Http2ErrorCode, Stream, StreamState
 
 from ._client_types import (
     Http2ClientConfig,
@@ -169,7 +169,7 @@ struct Http2ClientConnection(Defaultable, Movable):
     var greeted: Bool
     """``True`` once the preface + initial SETTINGS have been
     queued in :attr:`outbox`. Mirrors
-    :attr:`H2Connection.greeted`."""
+    :attr:`Http2Connection.greeted`."""
 
     var config: Http2ClientConfig
     """The :class:`Http2ClientConfig` the driver was constructed
@@ -265,7 +265,7 @@ struct Http2ClientConnection(Defaultable, Movable):
 
         Validates ``config`` first (RFC 9113 / RFC 7541 bounds);
         raises if any field is out of range. Same construction
-        shape as :meth:`H2Connection.with_config`.
+        shape as :meth:`Http2Connection.with_config`.
         """
         config.validate()
         var out = Http2ClientConnection()
@@ -359,7 +359,7 @@ struct Http2ClientConnection(Defaultable, Movable):
     def drain(mut self) -> List[UInt8]:
         """Return all queued outbound bytes and clear the buffer.
 
-        Mirrors :meth:`H2Connection.drain` for symmetry.
+        Mirrors :meth:`Http2Connection.drain` for symmetry.
         """
         var out = self.outbox.copy()
         self.outbox = List[UInt8]()
@@ -410,7 +410,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                         | Int(frame.payload[3])
                     ) & 0x7FFFFFFF
                     self._send_rst_stream(
-                        promised, H2ErrorCode.PROTOCOL_ERROR().value
+                        promised, Http2ErrorCode.PROTOCOL_ERROR().value
                     )
                 continue
             # Special-case: RST_STREAM. ``Connection.handle_frame``
@@ -777,7 +777,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         The peer should treat any stream id > ``last_stream_id``
         as not-processed; in-flight streams below that id MAY
         complete. ``error_code`` defaults to 0 (NO_ERROR) for a
-        clean shutdown; pass an :class:`H2ErrorCode` value for
+        clean shutdown; pass an :class:`Http2ErrorCode` value for
         an abnormal close.
         """
         var f = Frame()

@@ -1,7 +1,7 @@
 """Tests for HTTP/3 unidirectional stream type dispatch + the
 control stream + SETTINGS/GOAWAY consumption.
 
-The new surface on :class:`flare.h3.H3Connection`:
+The new surface on :class:`flare.http3.Http3Connection`:
 
 - :meth:`feed_uni_stream_chunk(stream_id, chunk)` -- demuxes the
   peer's uni streams by the leading type varint (RFC 9114 §6.2),
@@ -34,7 +34,7 @@ Properties covered:
    H3_STREAM_CREATION_ERROR.
 8. emit_initial_settings round-trips: bytes the server emits
    decode back to the same SETTINGS the local
-   :class:`H3ConnectionConfig` carries.
+   :class:`Http3Config` carries.
 9. emit_goaway round-trips and flips ``goaway_emitted``.
 10. Push / unknown / grease uni-stream codepoints are accepted
     without raising; the driver tracks the kind so the reactor
@@ -43,7 +43,7 @@ Properties covered:
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import (
+from flare.http3 import (
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_GOAWAY,
     H3_FRAME_TYPE_SETTINGS,
@@ -51,14 +51,14 @@ from flare.h3 import (
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-    H3Connection,
-    H3ConnectionConfig,
-    H3Setting,
-    H3StreamType,
-    decode_h3_frame,
-    decode_h3_settings,
-    encode_h3_frame,
-    encode_h3_settings,
+    Http3Connection,
+    Http3Config,
+    Http3Setting,
+    Http3StreamType,
+    decode_http3_frame,
+    decode_http3_settings,
+    encode_http3_frame,
+    encode_http3_settings,
 )
 from flare.quic.varint import decode_varint, encode_varint
 
@@ -71,43 +71,43 @@ def _bytes_from_list(items: List[Int]) -> List[UInt8]:
 
 
 def _build_peer_control_prefix(
-    settings: List[H3Setting],
+    settings: List[Http3Setting],
 ) raises -> List[UInt8]:
     """Type varint (0x00) + SETTINGS frame body."""
     var out = List[UInt8]()
-    var type_var = encode_varint(UInt64(H3StreamType.CONTROL))
+    var type_var = encode_varint(UInt64(Http3StreamType.CONTROL))
     for i in range(len(type_var)):
         out.append(type_var[i])
     var payload = List[UInt8]()
-    encode_h3_settings(settings, payload)
-    encode_h3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
+    encode_http3_settings(settings, payload)
+    encode_http3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
     return out^
 
 
 def _build_goaway_frame(stream_id: UInt64) raises -> List[UInt8]:
     var payload = encode_varint(stream_id)
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
+    encode_http3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
     return out^
 
 
 def test_peer_control_stream_settings_round_trip() raises:
-    var c = H3Connection()
-    var settings = List[H3Setting]()
+    var c = Http3Connection()
+    var settings = List[Http3Setting]()
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
             value=UInt64(32768),
         )
     )
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
             value=UInt64(4096),
         )
     )
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
             value=UInt64(1),
         )
@@ -125,16 +125,16 @@ def test_uni_stream_type_varint_split_across_chunks() raises:
     """The stream-type varint is at most 8 bytes. Feeding only
     a portion of it on the first chunk must defer classification
     until the second chunk arrives."""
-    var c = H3Connection()
+    var c = Http3Connection()
     # Single-byte control-stream type varint (0x00). Feeding
     # zero bytes shouldn't classify; the next chunk with the
     # type byte should resolve it.
     c.feed_uni_stream_chunk(3, List[UInt8]())
     assert_equal(c.peer_control_stream_id, -1)
     # Now feed the type byte + a small SETTINGS frame.
-    var settings = List[H3Setting]()
+    var settings = List[Http3Setting]()
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
             value=UInt64(8192),
         )
@@ -146,7 +146,7 @@ def test_uni_stream_type_varint_split_across_chunks() raises:
 
 
 def test_qpack_uni_stream_kinds_are_recorded() raises:
-    var c = H3Connection()
+    var c = Http3Connection()
     # QPACK encoder stream (type 0x02).
     var enc = List[UInt8]()
     enc.append(UInt8(0x02))
@@ -163,20 +163,20 @@ def test_push_uni_stream_tolerated() raises:
     """Push is deprecated but the type code is reserved; the
     driver records the kind without raising so the reactor can
     STOP_SENDING."""
-    var c = H3Connection()
+    var c = Http3Connection()
     var push = List[UInt8]()
     push.append(UInt8(0x01))
     push.append(UInt8(0xAA))
     push.append(UInt8(0xBB))
     c.feed_uni_stream_chunk(15, push^)
     assert_true(15 in c.peer_uni_kinds)
-    assert_equal(c.peer_uni_kinds[15], H3StreamType.PUSH)
+    assert_equal(c.peer_uni_kinds[15], Http3StreamType.PUSH)
 
 
 def test_grease_uni_stream_codepoint_tolerated() raises:
     """RFC 9114 §6.2.3: unknown / grease codepoints must be
     ignored. The driver classifies them as kind=-1 (sink)."""
-    var c = H3Connection()
+    var c = Http3Connection()
     var grease = List[UInt8]()
     # Two-byte varint encoding 0x21 (an unassigned codepoint).
     grease.append(UInt8(0x40))
@@ -190,10 +190,10 @@ def test_grease_uni_stream_codepoint_tolerated() raises:
 def test_settings_twice_is_frame_unexpected() raises:
     """RFC 9114 §7.2.4: a second SETTINGS on the same control
     stream is H3_FRAME_UNEXPECTED."""
-    var c = H3Connection()
-    var settings = List[H3Setting]()
+    var c = Http3Connection()
+    var settings = List[Http3Setting]()
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
             value=UInt64(1024),
         )
@@ -201,9 +201,9 @@ def test_settings_twice_is_frame_unexpected() raises:
     c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings))
     # Second SETTINGS on the *same* stream:
     var dup_payload = List[UInt8]()
-    encode_h3_settings(settings^, dup_payload)
+    encode_http3_settings(settings^, dup_payload)
     var dup_frame = List[UInt8]()
-    encode_h3_frame(
+    encode_http3_frame(
         H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](dup_payload), dup_frame
     )
     var raised = False
@@ -217,9 +217,9 @@ def test_settings_twice_is_frame_unexpected() raises:
 def test_non_settings_before_settings_is_missing_settings() raises:
     """RFC 9114 §7.2.4: control stream MUST start with SETTINGS;
     any other frame first is H3_MISSING_SETTINGS."""
-    var c = H3Connection()
+    var c = Http3Connection()
     var hdr = List[UInt8]()
-    hdr.append(UInt8(H3StreamType.CONTROL))
+    hdr.append(UInt8(Http3StreamType.CONTROL))
     # GOAWAY frame body before SETTINGS:
     var goaway = _build_goaway_frame(UInt64(8))
     for i in range(len(goaway)):
@@ -233,10 +233,10 @@ def test_non_settings_before_settings_is_missing_settings() raises:
 
 
 def test_goaway_records_peer_max_stream_id() raises:
-    var c = H3Connection()
-    var settings = List[H3Setting]()
+    var c = Http3Connection()
+    var settings = List[Http3Setting]()
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
             value=UInt64(1024),
         )
@@ -261,10 +261,10 @@ def test_goaway_records_peer_max_stream_id() raises:
 
 
 def test_second_peer_control_stream_raises() raises:
-    var c = H3Connection()
-    var settings = List[H3Setting]()
+    var c = Http3Connection()
+    var settings = List[Http3Setting]()
     settings.append(
-        H3Setting(
+        Http3Setting(
             identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
             value=UInt64(1024),
         )
@@ -282,12 +282,12 @@ def test_second_peer_control_stream_raises() raises:
 
 def test_emit_initial_settings_round_trips() raises:
     """Server-emitted control-stream prefix must decode to the
-    same SETTINGS values the local H3ConnectionConfig carries."""
-    var cfg = H3ConnectionConfig()
+    same SETTINGS values the local Http3Config carries."""
+    var cfg = Http3Config()
     cfg.max_field_section_size = UInt64(4096)
     cfg.qpack_max_table_capacity = UInt64(0)
     cfg.enable_connect_protocol = True
-    var c = H3Connection.with_config(cfg)
+    var c = Http3Connection.with_config(cfg)
     var emitted = c.emit_initial_settings()
     # The first byte is the stream-type varint 0x00 (1 byte).
     assert_equal(Int(emitted[0]), 0x00)
@@ -295,9 +295,9 @@ def test_emit_initial_settings_round_trips() raises:
     var rest = List[UInt8]()
     for i in range(1, len(emitted)):
         rest.append(emitted[i])
-    var frame = decode_h3_frame(Span[UInt8, _](rest))
+    var frame = decode_http3_frame(Span[UInt8, _](rest))
     assert_equal(frame.frame_type.raw, H3_FRAME_TYPE_SETTINGS)
-    var settings = decode_h3_settings(Span[UInt8, _](frame.payload))
+    var settings = decode_http3_settings(Span[UInt8, _](frame.payload))
     var saw_field_size = False
     var saw_connect = False
     for i in range(len(settings)):
@@ -312,11 +312,11 @@ def test_emit_initial_settings_round_trips() raises:
 
 
 def test_emit_goaway_flips_flag_and_double_emit_raises() raises:
-    var c = H3Connection()
+    var c = Http3Connection()
     assert_false(c.goaway_emitted)
     var frame = c.emit_goaway(UInt64(16))
     assert_true(c.goaway_emitted)
-    var decoded = decode_h3_frame(Span[UInt8, _](frame))
+    var decoded = decode_http3_frame(Span[UInt8, _](frame))
     assert_equal(decoded.frame_type.raw, H3_FRAME_TYPE_GOAWAY)
     var raised = False
     try:

@@ -12,7 +12,7 @@
 """Unified reactor loop: HTTP/1.1 + HTTP/2 on the same listener.
 
 Wires :class:`flare.http._server_reactor_impl.ConnHandle` (HTTP/1.1)
-and :class:`flare.http._h2_conn_handle.H2ConnHandle` (HTTP/2)
+and :class:`flare.http._h2_conn_handle.Http2ConnHandle` (HTTP/2)
 behind a single accept loop that auto-detects the wire protocol per
 connection by peeking the first 24 bytes for the RFC 9113 §3.4
 client connection preface (``"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n"``).
@@ -28,7 +28,7 @@ Per-connection lifecycle:
      PROTO_HTTP1           PROTO_HTTP2
        |                      |
        v                      v
-     ConnHandle            H2ConnHandle
+     ConnHandle            Http2ConnHandle
    (existing HTTP/1.1)   (HTTP/2 driver in the reactor)
 
 Both terminal handles dispatch through the same
@@ -70,7 +70,7 @@ from flare.runtime import (
 from flare.tcp import TcpListener, TcpStream, accept_fd
 
 from ._h2_conn_handle import (
-    H2ConnHandle,
+    Http2ConnHandle,
     PendingConnHandle,
     PROTO_HTTP1,
     PROTO_HTTP2,
@@ -136,7 +136,7 @@ def _drive_h1[
     Protocols response has flushed and the conn must migrate to
     HTTP/2), :func:`_migrate_h1_to_h2` is called to swap the
     conn-dict entry; the function then immediately drives the new
-    H2ConnHandle once so the server's initial SETTINGS frame
+    Http2ConnHandle once so the server's initial SETTINGS frame
     flushes without a kernel round-trip.
 
     Returns ``True`` when the connection is finished (caller
@@ -171,11 +171,11 @@ def _drive_h1[
             # The h1 ConnHandle has flushed the 101 response. Migrate
             # to the h2 handle in place; the conn-dict entry swaps
             # KIND_H1 -> KIND_H2 + the original request becomes
-            # stream id 1 on the new H2ConnHandle.
+            # stream id 1 on the new Http2ConnHandle.
             var migrated = _migrate_h1_to_h2(fd, h2_config, conns)
             if not migrated:
                 return True  # migration failed; caller cleans up
-            # Drive the new H2ConnHandle once so its initial-SETTINGS
+            # Drive the new Http2ConnHandle once so its initial-SETTINGS
             # write_buf flushes immediately + reactor interest is
             # registered on the writable side.
             if fd in conns:
@@ -227,11 +227,11 @@ def _apply_step_h2(
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
-    h2_ptr: UnsafePointer[H2ConnHandle, MutUntrackedOrigin],
+    h2_ptr: UnsafePointer[Http2ConnHandle, MutUntrackedOrigin],
 ) raises:
-    """Translate an :class:`H2ConnHandle` step into reactor + timer ops.
+    """Translate an :class:`Http2ConnHandle` step into reactor + timer ops.
 
-    Identical to :func:`_apply_step` but typed for H2ConnHandle's
+    Identical to :func:`_apply_step` but typed for Http2ConnHandle's
     ``last_interest`` field (the actual reactor.modify call shape
     is the same; we just need the type-correct pointer field
     update so the keep-alive interest cache works).
@@ -279,7 +279,7 @@ def _drive_h2[
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
 ) raises -> Bool:
-    """Drive one HTTP/2 H2ConnHandle through one event."""
+    """Drive one HTTP/2 Http2ConnHandle through one event."""
     var h2_ptr = _h2_conn_ptr_from_int(addr)
     var step_done: Bool
     try:
@@ -348,14 +348,14 @@ def _migrate_h1_to_h2(
     h2_config: Http2Config,
     mut conns: Dict[Int, Int],
 ) raises -> Bool:
-    """Migrate an h1 ``ConnHandle`` to an h2 :class:`H2ConnHandle`.
+    """Migrate an h1 ``ConnHandle`` to an h2 :class:`Http2ConnHandle`.
 
     Triggered by ``ConnHandle.on_writable`` returning a
     :class:`StepResult` with ``h2c_upgrade=True`` after the
     ``101 Switching Protocols`` response has flushed (RFC 7540
     §3.2). Snapshots the saved ``Request`` + decoded
     ``HTTP2-Settings`` payload from the h1 handle, builds an
-    H2ConnHandle pre-seeded with those (the original request
+    Http2ConnHandle pre-seeded with those (the original request
     becomes stream id 1), and swaps the conn-dict entry from
     ``KIND_H1`` to ``KIND_H2``. The h1 handle's heap allocation is
     freed; its TCP fd is inherited by the new h2 handle.
@@ -424,7 +424,7 @@ def _migrate_pending(
     h2_config: Http2Config,
     mut conns: Dict[Int, Int],
 ) raises -> Bool:
-    """Promote a pending conn to either ConnHandle or H2ConnHandle.
+    """Promote a pending conn to either ConnHandle or Http2ConnHandle.
 
     Mutates the dict entry **in place**: replaces the
     KIND_PENDING-tagged value with a KIND_H1- or KIND_H2-tagged
@@ -828,7 +828,7 @@ def run_unified_reactor_loop[
         config: HTTP/1.1 server configuration (used by the
             :class:`ConnHandle` state machine and timer wheel).
         h2_config: HTTP/2 server configuration (used by every
-            :class:`H2ConnHandle` we instantiate when the
+            :class:`Http2ConnHandle` we instantiate when the
             preface peek decides a connection is h2).
         handler: User's request handler.
         stopping: External stop flag; checked each loop iteration

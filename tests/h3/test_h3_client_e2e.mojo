@@ -1,6 +1,6 @@
 """End-to-end HTTP/3 client <-> flare QUIC/H3 server.
 
-Drives the real :class:`flare.h3.client.H3ClientConnection` (over
+Drives the real :class:`flare.http3.client.Http3ClientConnection` (over
 :class:`flare.quic.client.QuicClientConnection`) against the real
 :class:`flare.quic.server.QuicListener` over loopback UDP, pumped in
 lockstep on one thread:
@@ -12,7 +12,7 @@ lockstep on one thread:
    :trait:`flare.http.Handler`, and emits the response, which the
    1-RTT egress flushes back.
 4. The client assembles the response via
-   :class:`flare.h3.response_reader.H3ResponseReader`.
+   :class:`flare.http3.response_reader.Http3ResponseReader`.
 
 This proves the full client path end to end over real QUIC
 encryption: request HEADERS/DATA QPACK-encoded, server dispatch,
@@ -27,7 +27,11 @@ from std.collections import List
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import H3BodyChunk, H3ClientConnection, H3ResponseReader
+from flare.http3 import (
+    Http3BodyChunk,
+    Http3ClientConnection,
+    Http3ResponseReader,
+)
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -86,12 +90,12 @@ def _server_dispatch(mut server: QuicListener) raises:
     loop, run inline so the test stays single-threaded)."""
     var handler = _EchoOrOk()
     for slot in range(server.connection_count()):
-        var ready = server.take_h3_completed_streams(slot)
+        var ready = server.take_http3_completed_streams(slot)
         for i in range(len(ready)):
             var sid = ready[i]
-            var req = server.take_h3_request(slot, sid)
+            var req = server.take_http3_request(slot, sid)
             var resp = handler.serve(req^)
-            server.emit_h3_response(slot, sid, resp^)
+            server.emit_http3_response(slot, sid, resp^)
 
 
 def _drive_handshake(mut server: QuicListener) raises -> QuicClientConnection:
@@ -112,7 +116,7 @@ def test_h3_get() raises:
     """GET /hello over real QUIC: 200 + body 'ok'."""
     var server = _bind_server()
     var client = _drive_handshake(server)
-    var h3 = H3ClientConnection(client^)
+    var h3 = Http3ClientConnection(client^)
 
     var sid = h3.send_request(
         String("GET"),
@@ -122,7 +126,7 @@ def test_h3_get() raises:
         List[QpackHeader](),
         List[UInt8](),
     )
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var done = False
     for _ in range(40):
         _ = server.tick(timeout_ms=50)
@@ -145,7 +149,7 @@ def test_h3_post_echo() raises:
     """POST /echo with a body over real QUIC: 200 + echoed body."""
     var server = _bind_server()
     var client = _drive_handshake(server)
-    var h3 = H3ClientConnection(client^)
+    var h3 = Http3ClientConnection(client^)
 
     var body = List[UInt8]()
     for b in String("flare-h3-body").as_bytes():
@@ -160,7 +164,7 @@ def test_h3_post_echo() raises:
         hdrs,
         body,
     )
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var done = False
     for _ in range(40):
         _ = server.tick(timeout_ms=50)
@@ -187,7 +191,7 @@ def test_h3_stream_body() raises:
     chunks reconstruct the full body -- never buffering it whole."""
     var server = _bind_server()
     var client = _drive_handshake(server)
-    var h3 = H3ClientConnection(client^)
+    var h3 = Http3ClientConnection(client^)
 
     var sent = List[UInt8]()
     for _ in range(8192):

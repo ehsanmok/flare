@@ -1,4 +1,4 @@
-"""Smoke + round-trip tests for ``flare.http._h2_conn_handle.H2ConnHandle``.
+"""Smoke + round-trip tests for ``flare.http._h2_conn_handle.Http2ConnHandle``.
 
 Exercises the reactor-shaped HTTP/2 per-connection state machine
 that the unified :class:`flare.http.server.HttpServer` will dispatch
@@ -6,7 +6,7 @@ to when the first 24 bytes on an accepted TCP stream match the H2
 connection preface.
 
 Each test pairs a real TCP socketpair (one side hand-driven, one
-side wrapped in :class:`H2ConnHandle`) so the
+side wrapped in :class:`Http2ConnHandle`) so the
 non-blocking ``recv`` / ``send`` syscalls inside the handle exercise
 the same code path the live reactor would. The "H2 client" half is
 driven via :class:`flare.http2.Http2ClientConnection` so we exchange
@@ -27,7 +27,7 @@ from flare.http2 import (
     Http2ClientConnection,
     Http2Config,
 )
-from flare.http._h2_conn_handle import H2ConnHandle
+from flare.http._h2_conn_handle import Http2ConnHandle
 from flare.net import SocketAddr
 from flare.net._libc import _close, _recv, _send, MSG_NOSIGNAL
 from flare.tcp import TcpListener, TcpStream
@@ -49,7 +49,7 @@ def _hello(req: Request) raises -> Response:
 
 
 def test_h2_conn_handle_init_smoke() raises:
-    """Smoke: constructing an H2ConnHandle over an accepted stream
+    """Smoke: constructing an Http2ConnHandle over an accepted stream
     produces a valid handle with no inbox/outbox content yet."""
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = UInt16(listener.local_addr().port)
@@ -59,7 +59,7 @@ def test_h2_conn_handle_init_smoke() raises:
     client._socket.fd = c_int(-1)
     _ = client^
 
-    var handle = H2ConnHandle(server^, Http2Config())
+    var handle = Http2ConnHandle(server^, Http2Config())
     assert_true(Int(handle.fd()) > 0)
     assert_equal(handle.write_pos, 0)
     assert_equal(len(handle.write_buf), 0)
@@ -67,7 +67,7 @@ def test_h2_conn_handle_init_smoke() raises:
 
 
 def test_h2_conn_handle_get_round_trip() raises:
-    """End-to-end: client sends preface + GET, H2ConnHandle dispatches
+    """End-to-end: client sends preface + GET, Http2ConnHandle dispatches
     handler, response frames flow back to the client."""
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = UInt16(listener.local_addr().port)
@@ -79,7 +79,7 @@ def test_h2_conn_handle_get_round_trip() raises:
     _set_nonblocking(server._socket.fd)
     _set_nonblocking(client_fd)
 
-    var handle = H2ConnHandle(server^, Http2Config())
+    var handle = Http2ConnHandle(server^, Http2Config())
 
     # Client side: drive an Http2ClientConnection. Send preface +
     # SETTINGS + a GET request.

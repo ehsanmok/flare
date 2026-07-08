@@ -1,4 +1,4 @@
-"""Fuzz harness: ``flare.h3.frame.decode_h3_frame``.
+"""Fuzz harness: ``flare.http3.frame.decode_http3_frame``.
 
 Every HTTP/3 frame is (varint type) + (varint length) + (length
 payload bytes), per RFC 9114 §7. Both the type and length varints
@@ -10,8 +10,8 @@ varints with the full encoding range.
 
 Properties checked:
 
-1. ``decode_h3_frame`` either:
-   - returns an ``H3Frame`` whose payload length matches the
+1. ``decode_http3_frame`` either:
+   - returns an ``Http3Frame`` whose payload length matches the
      declared length varint, with the type's wire bytes equal to
      ``encode_varint(frame_type.raw)`` (canonical re-encode), or
    - raises a regular ``Error`` (truncated input). It must never
@@ -24,8 +24,8 @@ Properties checked:
    types explicitly (grease + handpicked 2/4/8-byte type
    encodings).
 
-3. **SETTINGS payload codec round trip.** ``decode_h3_settings``
-   then ``encode_h3_settings`` on a list of pairs synthesised
+3. **SETTINGS payload codec round trip.** ``decode_http3_settings``
+   then ``encode_http3_settings`` on a list of pairs synthesised
    from the fuzz bytes recovers the original pairs.
 
 Run:
@@ -34,17 +34,17 @@ Run:
 
 from mozz import fuzz, FuzzConfig
 
-from flare.h3 import (
-    H3FrameType,
-    H3Frame,
-    H3Setting,
+from flare.http3 import (
+    Http3FrameType,
+    Http3Frame,
+    Http3Setting,
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
     H3_FRAME_TYPE_SETTINGS,
-    decode_h3_frame,
-    decode_h3_settings,
-    encode_h3_frame,
-    encode_h3_settings,
+    decode_http3_frame,
+    decode_http3_settings,
+    encode_http3_frame,
+    encode_http3_settings,
 )
 from flare.quic.varint import (
     VARINT_MAX,
@@ -71,8 +71,8 @@ def target(data: List[UInt8]) raises:
     """Three exercises per fuzz run.
 
     Branch A — raw decode:
-        Feed the bytes directly into ``decode_h3_frame``. Either
-        we get an ``H3Frame`` whose payload length matches the
+        Feed the bytes directly into ``decode_http3_frame``. Either
+        we get an ``Http3Frame`` whose payload length matches the
         declared length, or the decoder raises a regular ``Error``.
 
     Branch B — encode/decode round trip with multi-byte type:
@@ -91,7 +91,7 @@ def target(data: List[UInt8]) raises:
 
     # ── A. Raw decode of fuzz bytes ─────────────────────────────
     try:
-        var frame = decode_h3_frame(span)
+        var frame = decode_http3_frame(span)
         # The decoded payload length is bounded by the declared
         # length varint value (which the decoder already enforced
         # against the buffer). Re-encoding the type varint must
@@ -152,8 +152,8 @@ def target(data: List[UInt8]) raises:
         for i in range(payload_len):
             payload.append(data[2 + i])
         var encoded = List[UInt8]()
-        encode_h3_frame(frame_type, Span[UInt8, _](payload), encoded)
-        var parsed = decode_h3_frame(Span[UInt8, _](encoded))
+        encode_http3_frame(frame_type, Span[UInt8, _](payload), encoded)
+        var parsed = decode_http3_frame(Span[UInt8, _](encoded))
         _assert(
             parsed.frame_type.raw == frame_type,
             (
@@ -175,7 +175,7 @@ def target(data: List[UInt8]) raises:
 
     # ── C. SETTINGS pairs round trip ────────────────────────────
     if n >= 16:
-        var pairs = List[H3Setting]()
+        var pairs = List[Http3Setting]()
         var pair_count = n // 16
         # Cap at 8 pairs to keep each fuzz run fast.
         if pair_count > 8:
@@ -190,10 +190,10 @@ def target(data: List[UInt8]) raises:
             # Clamp into [0, VARINT_MAX].
             ident = ident & UInt64(VARINT_MAX)
             value = value & UInt64(VARINT_MAX)
-            pairs.append(H3Setting(identifier=ident, value=value))
+            pairs.append(Http3Setting(identifier=ident, value=value))
         var payload = List[UInt8]()
-        encode_h3_settings(pairs, payload)
-        var decoded = decode_h3_settings(Span[UInt8, _](payload))
+        encode_http3_settings(pairs, payload)
+        var decoded = decode_http3_settings(Span[UInt8, _](payload))
         _assert(
             len(decoded) == pair_count,
             "h3 settings round-trip: pair count drift",

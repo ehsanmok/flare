@@ -39,7 +39,7 @@ flare.http2    Low-level HTTP/2 byte drivers (RFC 9113 +
                H=1 Huffman literals + a 256-entry table-driven
                fast decoder for short codes, 3-4x scalar),
                stream + connection state machines,
-               H2Connection (server byte driver),
+               Http2Connection (server byte driver),
                Http2ClientConnection (client byte driver,
                with SETTINGS_ENABLE_CONNECT_PROTOCOL +
                send_extended_connect for WS-over-h2),
@@ -138,10 +138,10 @@ flare.quic     Sans-I/O QUIC v1 codec primitives + pure state
                `flare.runtime.TimerWheel`; CC + pacing budget
                gate the egress path. ECN is echoed per
                RFC 9002 §A.4.
-flare.h3       Sans-I/O HTTP/3 codec primitives: frame codec +
+flare.http3       Sans-I/O HTTP/3 codec primitives: frame codec +
                SETTINGS payload (RFC 9114 §7); request-stream
-               state machine (`H3RequestReader` + the
-               `H3RequestEventHandler` trait + `feed_into[H]`
+               state machine (`Http3RequestReader` + the
+               `Http3RequestEventHandler` trait + `feed_into[H]`
                dispatcher) that consumes wire bytes and fires
                typed `on_headers` / `on_data` / `on_trailers` /
                `on_unknown_frame` / `on_protocol_error`
@@ -152,23 +152,23 @@ flare.h3       Sans-I/O HTTP/3 codec primitives: frame codec +
                pseudo-header validation. The encoders accept a
                `mut out: List[UInt8]` so the caller threads a
                per-connection buffer through repeated writes.
-               The `H3Connection` driver in `flare.h3.server`
-               drives per-stream `H3RequestReader` allocation,
+               The `Http3Connection` driver in `flare.http3.server`
+               drives per-stream `Http3RequestReader` allocation,
                `feed_stream_chunk` -> Handler -> response writer
                dispatch, `take_response_frames` egress draining,
                and CONTROL + QPACK uni-stream type dispatch per
                RFC 9114 §6.2 (SETTINGS / GOAWAY / MAX_PUSH_ID
                consumed; QPACK dynamic-table inserts rejected
                per the SETTINGS we advertise). The
-               `H3Connection` is slot-allocated
-               on `QuicListener.h3_connections` per
+               `Http3Connection` is slot-allocated
+               on `QuicListener.http3_connections` per
                `QuicConnection`; decrypted STREAM payloads route
-               through `QuicListener._route_h3_stream_chunks`
+               through `QuicListener._route_http3_stream_chunks`
                using the extended `ConnectionEvents.stream_chunks`,
-               and `HttpServer.serve_h3[H]` walks
-               `take_h3_completed_streams -> take_h3_request ->
-               handler.serve -> emit_h3_response ->
-               take_h3_response_egress` every reactor tick.
+               and `HttpServer.serve_http3[H]` walks
+               `take_http3_completed_streams -> take_http3_request ->
+               handler.serve -> emit_http3_response ->
+               take_http3_response_egress` every reactor tick.
 flare.qpack    Sans-I/O static-only QPACK encoder + decoder
                (RFC 9204). Static table per Appendix A (99
                entries), literal field lines with literal
@@ -357,14 +357,14 @@ There is no separate `Http2Server` / `Http2Client` /
   reactor loop ([`flare/http/_unified_reactor_impl.mojo`](../flare/http/_unified_reactor_impl.mojo))
   that auto-dispatches every accepted TCP connection to either
   the existing HTTP/1.1 `ConnHandle` or the new HTTP/2
-  `H2ConnHandle` based on the first 24 bytes (RFC 9113 §3.4
+  `Http2ConnHandle` based on the first 24 bytes (RFC 9113 §3.4
   client connection preface). The same handler is invoked
   for both wires.
-- `HttpServer.bind_with_h3(addr, quic_cfg)` adds a UDP
-  listener alongside the TCP one and routes h3 to
-  `flare.h3.H3Connection` after the rustls QUIC handshake
-  selects ALPN `h3`. The same handler is invoked on h1, h2,
-  and h3 simultaneously; see
+- `HttpServer.bind_with_http3(addr, quic_cfg)` adds a UDP
+  listener alongside the TCP one and routes HTTP/3 to
+  `flare.http3.Http3Connection` after the rustls QUIC handshake
+  selects ALPN `h3`. The same handler is invoked on HTTP/1.1, HTTP/2,
+  and HTTP/3 simultaneously; see
   [`http3_server.mojo`](../examples/advanced/http3_server.mojo).
 - `HttpClient` advertises ALPN `["h2", "http/1.1"]` on every
   TLS ClientHello and dispatches internally based on what
@@ -380,7 +380,7 @@ Per-connection state machines:
 flowchart LR
     Accept["accept() new connection"] --> Pending["PendingConnHandle (24-byte preface peek)"]
     Pending -->|"first byte != 'P'"| H1["ConnHandle (HTTP/1.1)"]
-    Pending -->|"24 bytes == H2 preface"| H2["H2ConnHandle (HTTP/2)"]
+    Pending -->|"24 bytes == H2 preface"| H2["Http2ConnHandle (HTTP/2)"]
     H1 --> Handler["handler.serve(req)"]
     H2 --> Handler
 ```
@@ -397,7 +397,7 @@ structured logging, Prometheus metrics, auth extractors,
 
 Low-level driver primitives stay public in `flare.http2` for
 callers who want to roll their own dispatch loop:
-`H2Connection`, `Http2ClientConnection`, `Http2Config`,
+`Http2Connection`, `Http2ClientConnection`, `Http2Config`,
 `Http2ClientConfig`, `HpackEncoder`, `HpackDecoder`, the frame
 codec, and the helpers `is_h2_alpn` / `detect_h2c_upgrade`.
 
@@ -406,7 +406,7 @@ What *doesn't* port automatically (RFC 9113 §8.2.2):
 - **Connection-level headers** (`Connection`, `Keep-Alive`,
   `Transfer-Encoding`, `Proxy-Connection`, `Upgrade`) -- the
   HttpClient h2 path strips these before encoding HEADERS;
-  the H2Connection server-side does the same.
+  the Http2Connection server-side does the same.
 - **WebSocket-over-HTTP/2** (RFC 8441 Extended CONNECT) is
   wired through the same `WsClient.connect(url)` /
   `WsServer.serve(handler)` surface (negotiated automatically
@@ -421,12 +421,12 @@ there is no parity table any more -- one type, one shape:
 | Surface | Type |
 |---|---|
 | HTTP server (HTTP/1.1 + HTTP/2 via auto-dispatch) | [`flare.http.HttpServer`](../flare/http/server.mojo) |
-| HTTP server (HTTP/1.1 + HTTP/2 + HTTP/3 via ALPN; UDP listener mounted alongside TCP) | [`flare.http.HttpServer.bind_with_h3`](../flare/http/server.mojo) |
+| HTTP server (HTTP/1.1 + HTTP/2 + HTTP/3 via ALPN; UDP listener mounted alongside TCP) | [`flare.http.HttpServer.bind_with_http3`](../flare/http/server.mojo) |
 | HTTP client (HTTP/1.1 + HTTP/2 via TLS+ALPN or `prefer_h2c=True`) | [`flare.http.HttpClient`](../flare/http/client.mojo) |
 | WebSocket server (HTTP/1.1 Upgrade; RFC 8441 over h2 wired on the byte driver) | [`flare.ws.WsServer`](../flare/ws/server.mojo) |
 | WebSocket server (multi-worker via SO_REUSEPORT) | `flare.ws.WsServer.serve(handler, num_workers=N)` |
 | WebSocket client (`ws://` / `wss://` — HTTP/1.1 Upgrade; ALPN advertises `http/1.1` on `wss://` to lock in the Upgrade path) | [`flare.ws.WsClient`](../flare/ws/client.mojo) |
-| Low-level HTTP/2 byte driver (server) | [`flare.http2.H2Connection`](../flare/http2/server.mojo) |
+| Low-level HTTP/2 byte driver (server) | [`flare.http2.Http2Connection`](../flare/http2/server.mojo) |
 | Low-level HTTP/2 byte driver (client) | [`flare.http2.Http2ClientConnection`](../flare/http2/client.mojo) |
 
 ---

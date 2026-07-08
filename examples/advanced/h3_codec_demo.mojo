@@ -5,24 +5,24 @@ opening a QUIC stream. It exercises:
 
 * :mod:`flare.qpack` -- the RFC 9204 static-only field-section
   encoder + decoder.
-* :mod:`flare.h3.frame` -- the RFC 9114 §7 frame codec
-  (``encode_h3_frame`` + the ``H3_FRAME_TYPE_*`` tags).
-* :mod:`flare.h3.request_reader` -- the sans-I/O state machine
+* :mod:`flare.http3.frame` -- the RFC 9114 §7 frame codec
+  (``encode_http3_frame`` + the ``H3_FRAME_TYPE_*`` tags).
+* :mod:`flare.http3.request_reader` -- the sans-I/O state machine
   that turns request-stream bytes back into typed callback
   dispatches on a caller-supplied
-  :trait:`H3RequestEventHandler` (``on_headers`` /
+  :trait:`Http3RequestEventHandler` (``on_headers`` /
   ``on_data`` / ``on_trailers``).
-* :mod:`flare.h3.response_writer` -- the symmetric writer that
+* :mod:`flare.http3.response_writer` -- the symmetric writer that
   serialises a status + headers + body + trailers into the
   wire bytes a QUIC stream send would carry.
 
 The walk is::
 
-    +----------+ encode_field_section / encode_h3_frame
+    +----------+ encode_field_section / encode_http3_frame
     |  client  |--------------------------------------+
     +----------+                                      |
                                                       v
-    +----------+ <-- feed_into() <-- H3RequestReader -+ wire bytes
+    +----------+ <-- feed_into() <-- Http3RequestReader -+ wire bytes
     | reader   |                                         + handler
     +----------+
 
@@ -32,7 +32,7 @@ then::
     |  server  |--------------------------------------+
     +----------+                                      |
                                                       v
-    +----------+ <--- decode_h3_frame ----------------+ wire bytes
+    +----------+ <--- decode_http3_frame ----------------+ wire bytes
     | decoder  | -> decode_field_section
     +----------+
 
@@ -44,13 +44,13 @@ this entry point.
 from std.collections import List
 from std.memory import Span
 
-from flare.h3 import (
+from flare.http3 import (
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
-    H3RequestEventHandler,
-    H3RequestReader,
-    decode_h3_frame,
-    encode_h3_frame,
+    Http3RequestEventHandler,
+    Http3RequestReader,
+    decode_http3_frame,
+    encode_http3_frame,
     encode_response_data,
     encode_response_headers,
     encode_response_trailers,
@@ -68,7 +68,7 @@ from flare.qpack import (
 # production handler would forward fields into an application
 # request type and stream body bytes into the handler pipeline.
 @fieldwise_init
-struct _DemoHandler(H3RequestEventHandler, Movable):
+struct _DemoHandler(Http3RequestEventHandler, Movable):
     def on_headers(mut self, headers: List[QpackHeader]) raises:
         print(
             "   HEADERS",
@@ -122,20 +122,20 @@ def _build_request_bytes() raises -> List[UInt8]:
     var headers_payload = List[UInt8]()
     encode_field_section(req_headers, headers_payload)
     var wire = List[UInt8]()
-    encode_h3_frame(
+    encode_http3_frame(
         H3_FRAME_TYPE_HEADERS, Span[UInt8, _](headers_payload), wire
     )
 
     var body = List[UInt8]()
     for b in String("hello").as_bytes():
         body.append(b)
-    encode_h3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](body), wire)
+    encode_http3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](body), wire)
 
     var trailers = List[QpackHeader]()
     trailers.append(QpackHeader("x-trailer", "ok"))
     var trailer_payload = List[UInt8]()
     encode_field_section(trailers, trailer_payload)
-    encode_h3_frame(
+    encode_http3_frame(
         H3_FRAME_TYPE_HEADERS, Span[UInt8, _](trailer_payload), wire
     )
     return wire^
@@ -146,7 +146,7 @@ def _drain_reader(wire: List[UInt8]) raises:
     fully consumed; the demo handler prints each callback as it
     fires.
     """
-    var reader = H3RequestReader.new()
+    var reader = Http3RequestReader.new()
     var handler = _DemoHandler()
     var offset = 0
     var loops = 0
@@ -196,8 +196,8 @@ def _decode_response_bytes(wire: List[UInt8]) raises:
     while offset < len(wire) and loops < 16:
         loops += 1
         var rest = Span[UInt8, _](wire)[offset:]
-        var frame = decode_h3_frame(rest)
-        # decode_h3_frame does not advance the cursor on its own;
+        var frame = decode_http3_frame(rest)
+        # decode_http3_frame does not advance the cursor on its own;
         # re-walk the (type, length) varints to compute consumed.
         var type_var = decode_varint(rest)
         var len_var = decode_varint(rest[type_var.consumed :])

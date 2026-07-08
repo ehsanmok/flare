@@ -2,13 +2,13 @@
 
 Exercises the reactor: STREAM payloads surfaced via
 :attr:`flare.quic.state.ConnectionEvents.stream_chunks` route
-through :meth:`flare.quic.server.QuicListener._route_h3_stream_chunks`
-into the per-slot :class:`flare.h3.H3Connection`, the dispatch
+through :meth:`flare.quic.server.QuicListener._route_http3_stream_chunks`
+into the per-slot :class:`flare.http3.Http3Connection`, the dispatch
 pump on :class:`flare.http.HttpServer` materializes the request,
 calls a user :trait:`flare.http.Handler`, encodes the
 :class:`flare.http.Response` back into the slot's H3 outbox, and
 the bytes accumulate in
-:attr:`flare.quic.server.QuicListener.h3_response_egress` for the
+:attr:`flare.quic.server.QuicListener.http3_response_egress` for the
 1-RTT egress wiring to pick up.
 
 The 1-RTT wire path (rustls KeyChange surfacing 1-RTT traffic
@@ -33,7 +33,11 @@ Cases:
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS, encode_h3_frame
+from flare.http3 import (
+    H3_FRAME_TYPE_DATA,
+    H3_FRAME_TYPE_HEADERS,
+    encode_http3_frame,
+)
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -58,13 +62,13 @@ def _encode_headers_frame(headers: List[QpackHeader]) raises -> List[UInt8]:
     var payload = List[UInt8]()
     encode_field_section(headers, payload)
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](payload), out)
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](payload), out)
     return out^
 
 
 def _encode_data_frame(payload: List[UInt8]) raises -> List[UInt8]:
     var out = List[UInt8]()
-    encode_h3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](payload), out)
+    encode_http3_frame(H3_FRAME_TYPE_DATA, Span[UInt8, _](payload), out)
     return out^
 
 
@@ -194,21 +198,21 @@ def test_get_request_dispatches_through_handler() raises:
     var stream_id = UInt64(0)  # client-initiated bidi
     var req_bytes = _build_get_request("/hello")
     var events = _make_stream_event(stream_id, req_bytes^)
-    listener._route_h3_stream_chunks(slot, events)
+    listener._route_http3_stream_chunks(slot, events)
 
-    var ready = listener.take_h3_completed_streams(slot)
+    var ready = listener.take_http3_completed_streams(slot)
     assert_equal(len(ready), 1, "GET with FIN must surface as completed")
     assert_equal(ready[0], 0)
 
     var handler = _OkHandler(body=String("ok"))
-    var req = listener.take_h3_request(slot, Int(stream_id))
+    var req = listener.take_http3_request(slot, Int(stream_id))
     assert_equal(req.method, String("GET"))
     assert_equal(req.url, String("/hello"))
     var resp = handler.serve(req^)
     assert_equal(resp.status, 200)
-    listener.emit_h3_response(slot, Int(stream_id), resp^)
+    listener.emit_http3_response(slot, Int(stream_id), resp^)
 
-    var egress = listener.take_h3_response_egress(slot, Int(stream_id))
+    var egress = listener.take_http3_response_egress(slot, Int(stream_id))
     assert_true(
         len(egress) > 0,
         "H3 emit_response must accumulate HEADERS+DATA bytes",
@@ -227,25 +231,25 @@ def test_post_request_body_echo() raises:
         body.append(UInt8(v))
     var req_bytes = _build_post_request("/upload", body)
     var events = _make_stream_event(stream_id, req_bytes^)
-    listener._route_h3_stream_chunks(slot, events)
+    listener._route_http3_stream_chunks(slot, events)
 
-    var ready = listener.take_h3_completed_streams(slot)
+    var ready = listener.take_http3_completed_streams(slot)
     assert_equal(len(ready), 1)
     assert_equal(ready[0], Int(stream_id))
 
     var handler = _EchoHandler()
-    var req = listener.take_h3_request(slot, Int(stream_id))
+    var req = listener.take_http3_request(slot, Int(stream_id))
     assert_equal(req.method, String("POST"))
     assert_equal(len(req.body), 5)
     var resp = handler.serve(req^)
     assert_equal(resp.status, 200)
     assert_equal(len(resp.body), 5)
-    listener.emit_h3_response(slot, Int(stream_id), resp^)
+    listener.emit_http3_response(slot, Int(stream_id), resp^)
 
-    var egress = listener.take_h3_response_egress(slot, Int(stream_id))
+    var egress = listener.take_http3_response_egress(slot, Int(stream_id))
     assert_true(len(egress) > 0)
     # Drain again must be empty (the dict.pop drained the buffer).
-    var second = listener.take_h3_response_egress(slot, Int(stream_id))
+    var second = listener.take_http3_response_egress(slot, Int(stream_id))
     assert_equal(len(second), 0)
 
 
@@ -258,24 +262,24 @@ def test_concurrent_streams_on_one_connection() raises:
 
     var req_a = _build_get_request("/a")
     var events_a = _make_stream_event(UInt64(0), req_a^)
-    listener._route_h3_stream_chunks(slot, events_a)
+    listener._route_http3_stream_chunks(slot, events_a)
 
     var req_b = _build_get_request("/b")
     var events_b = _make_stream_event(UInt64(4), req_b^)
-    listener._route_h3_stream_chunks(slot, events_b)
+    listener._route_http3_stream_chunks(slot, events_b)
 
-    var ready = listener.take_h3_completed_streams(slot)
+    var ready = listener.take_http3_completed_streams(slot)
     assert_equal(len(ready), 2)
 
     var handler = _OkHandler(body=String("ok"))
     for i in range(len(ready)):
         var sid = ready[i]
-        var req = listener.take_h3_request(slot, sid)
+        var req = listener.take_http3_request(slot, sid)
         var resp = handler.serve(req^)
-        listener.emit_h3_response(slot, sid, resp^)
+        listener.emit_http3_response(slot, sid, resp^)
 
-    var egress_a = listener.take_h3_response_egress(slot, 0)
-    var egress_b = listener.take_h3_response_egress(slot, 4)
+    var egress_a = listener.take_http3_response_egress(slot, 0)
+    var egress_b = listener.take_http3_response_egress(slot, 4)
     assert_true(len(egress_a) > 0)
     assert_true(len(egress_b) > 0)
 
@@ -292,76 +296,76 @@ def test_multiple_connections_dispatch_independently() raises:
 
     var req_a = _build_get_request("/a")
     var events_a = _make_stream_event(UInt64(0), req_a^)
-    listener._route_h3_stream_chunks(slot_a, events_a)
+    listener._route_http3_stream_chunks(slot_a, events_a)
 
     var req_b = _build_get_request("/b")
     var events_b = _make_stream_event(UInt64(0), req_b^)
-    listener._route_h3_stream_chunks(slot_b, events_b)
+    listener._route_http3_stream_chunks(slot_b, events_b)
 
     var handler = _OkHandler(body=String("ok"))
-    var ready_a = listener.take_h3_completed_streams(slot_a)
+    var ready_a = listener.take_http3_completed_streams(slot_a)
     assert_equal(len(ready_a), 1)
-    var req_a_recv = listener.take_h3_request(slot_a, ready_a[0])
+    var req_a_recv = listener.take_http3_request(slot_a, ready_a[0])
     var resp_a = handler.serve(req_a_recv^)
-    listener.emit_h3_response(slot_a, ready_a[0], resp_a^)
+    listener.emit_http3_response(slot_a, ready_a[0], resp_a^)
 
-    var ready_b = listener.take_h3_completed_streams(slot_b)
+    var ready_b = listener.take_http3_completed_streams(slot_b)
     assert_equal(len(ready_b), 1)
-    var req_b_recv = listener.take_h3_request(slot_b, ready_b[0])
+    var req_b_recv = listener.take_http3_request(slot_b, ready_b[0])
     var resp_b = handler.serve(req_b_recv^)
-    listener.emit_h3_response(slot_b, ready_b[0], resp_b^)
+    listener.emit_http3_response(slot_b, ready_b[0], resp_b^)
 
-    var egress_a = listener.take_h3_response_egress(slot_a, 0)
-    var egress_b = listener.take_h3_response_egress(slot_b, 0)
+    var egress_a = listener.take_http3_response_egress(slot_a, 0)
+    var egress_b = listener.take_http3_response_egress(slot_b, 0)
     assert_true(len(egress_a) > 0)
     assert_true(len(egress_b) > 0)
 
 
-# ── HttpServer.pump_h3_handler_once dispatch path ─────────────────────
+# ── HttpServer.pump_http3_handler_once dispatch path ─────────────────────
 
 
-def test_pump_h3_handler_once_drives_handler() raises:
-    """The :meth:`HttpServer.pump_h3_handler_once` overload pulls
+def test_pump_http3_handler_once_drives_handler() raises:
+    """The :meth:`HttpServer.pump_http3_handler_once` overload pulls
     completed streams and runs the handler in one call --
-    mirrors the inner loop body of :meth:`HttpServer.serve_h3`
+    mirrors the inner loop body of :meth:`HttpServer.serve_http3`
     so the dispatch is verifiable without binding a TCP
     listener and starting the full event loop."""
     var tcp_addr = SocketAddr(IpAddr.localhost(), UInt16(0))
     var udp_cfg = QuicServerConfig()
     udp_cfg.host = String("127.0.0.1")
     udp_cfg.port = UInt16(0)
-    var srv = HttpServer.bind_with_h3(tcp_addr, udp_cfg^)
-    assert_true(srv.has_h3())
+    var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
+    assert_true(srv.has_http3())
 
     # Seed a slot via the same path real reactor uses.
-    var listener_borrow = srv._h3_listener.take()
+    var listener_borrow = srv._http3_listener.take()
     var slot = _seed_slot(listener_borrow)
     var req_bytes = _build_get_request("/pumped")
     var events = _make_stream_event(UInt64(0), req_bytes^)
-    listener_borrow._route_h3_stream_chunks(slot, events)
-    srv._h3_listener = listener_borrow^
+    listener_borrow._route_http3_stream_chunks(slot, events)
+    srv._http3_listener = listener_borrow^
 
     var handler = _OkHandler(body=String("pumped"))
-    var dispatched = srv.pump_h3_handler_once[_OkHandler](handler)
+    var dispatched = srv.pump_http3_handler_once[_OkHandler](handler)
     assert_equal(dispatched, 1)
 
     # Re-borrow to verify egress accumulated.
-    var listener_reborrow = srv._h3_listener.take()
-    var egress = listener_reborrow.take_h3_response_egress(slot, 0)
+    var listener_reborrow = srv._http3_listener.take()
+    var egress = listener_reborrow.take_http3_response_egress(slot, 0)
     assert_true(len(egress) > 0)
-    srv._h3_listener = listener_reborrow^
+    srv._http3_listener = listener_reborrow^
 
 
-def test_pump_h3_handler_once_zero_when_no_streams_ready() raises:
+def test_pump_http3_handler_once_zero_when_no_streams_ready() raises:
     """No completed streams -> pump returns 0; no side effects."""
     var tcp_addr = SocketAddr(IpAddr.localhost(), UInt16(0))
     var udp_cfg = QuicServerConfig()
     udp_cfg.host = String("127.0.0.1")
     udp_cfg.port = UInt16(0)
-    var srv = HttpServer.bind_with_h3(tcp_addr, udp_cfg^)
+    var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
 
     var handler = _OkHandler(body=String("never"))
-    var dispatched = srv.pump_h3_handler_once[_OkHandler](handler)
+    var dispatched = srv.pump_http3_handler_once[_OkHandler](handler)
     assert_equal(dispatched, 0)
 
 
@@ -370,6 +374,6 @@ def main() raises:
     test_post_request_body_echo()
     test_concurrent_streams_on_one_connection()
     test_multiple_connections_dispatch_independently()
-    test_pump_h3_handler_once_drives_handler()
-    test_pump_h3_handler_once_zero_when_no_streams_ready()
+    test_pump_http3_handler_once_drives_handler()
+    test_pump_http3_handler_once_zero_when_no_streams_ready()
     print("test_h3_end_to_end: 6 passed")

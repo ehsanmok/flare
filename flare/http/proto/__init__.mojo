@@ -44,7 +44,7 @@ from flare.http.proto import (
     HeaderMap, HeaderMapView,
     H2Frame, parse_h2_frame, encode_h2_frame,
     HpackEncoder, HpackDecoder,
-    H2Connection, H2Stream, H2StreamState,
+    Http2Connection, H2Stream, H2StreamState,
 )
 ```
 
@@ -168,10 +168,10 @@ from flare.http2.hpack import (
 )
 
 # HTTP/2 connection + stream state machines (RFC 9113 §5).
-# ``H2Connection`` exposes ``handle_frame`` as the single
+# ``Http2Connection`` exposes ``handle_frame`` as the single
 # per-frame entry point; no timers, no fd, no reactor.
 from flare.http2.state import (
-    Connection as H2Connection,
+    Connection as Http2Connection,
     Stream as H2Stream,
     StreamState as H2StreamState,
 )

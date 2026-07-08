@@ -12,7 +12,7 @@ What lives here:
 - :class:`Connection` — connection-level state: open streams,
   next-stream-id watermark, peer + local SETTINGS, the receive
   window, and the GOAWAY / RST_STREAM machinery.
-- :class:`H2Error` — typed connection / stream errors with their
+- :class:`Http2Error` — typed connection / stream errors with their
   RFC 9113 §7 error codes.
 
 The state machine is enforced by :meth:`Connection.handle_frame`
@@ -46,7 +46,7 @@ from .stream_slab import StreamSlab
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
 
 
-struct H2ErrorCode(Copyable, Defaultable, Movable):
+struct Http2ErrorCode(Copyable, Defaultable, Movable):
     """One of the 14 RFC 9113 §7 error codes."""
 
     var value: Int
@@ -58,60 +58,60 @@ struct H2ErrorCode(Copyable, Defaultable, Movable):
         self.value = v
 
     @staticmethod
-    def NO_ERROR() -> H2ErrorCode:
-        return H2ErrorCode(0x0)
+    def NO_ERROR() -> Http2ErrorCode:
+        return Http2ErrorCode(0x0)
 
     @staticmethod
-    def PROTOCOL_ERROR() -> H2ErrorCode:
-        return H2ErrorCode(0x1)
+    def PROTOCOL_ERROR() -> Http2ErrorCode:
+        return Http2ErrorCode(0x1)
 
     @staticmethod
-    def INTERNAL_ERROR() -> H2ErrorCode:
-        return H2ErrorCode(0x2)
+    def INTERNAL_ERROR() -> Http2ErrorCode:
+        return Http2ErrorCode(0x2)
 
     @staticmethod
-    def FLOW_CONTROL_ERROR() -> H2ErrorCode:
-        return H2ErrorCode(0x3)
+    def FLOW_CONTROL_ERROR() -> Http2ErrorCode:
+        return Http2ErrorCode(0x3)
 
     @staticmethod
-    def SETTINGS_TIMEOUT() -> H2ErrorCode:
-        return H2ErrorCode(0x4)
+    def SETTINGS_TIMEOUT() -> Http2ErrorCode:
+        return Http2ErrorCode(0x4)
 
     @staticmethod
-    def STREAM_CLOSED() -> H2ErrorCode:
-        return H2ErrorCode(0x5)
+    def STREAM_CLOSED() -> Http2ErrorCode:
+        return Http2ErrorCode(0x5)
 
     @staticmethod
-    def FRAME_SIZE_ERROR() -> H2ErrorCode:
-        return H2ErrorCode(0x6)
+    def FRAME_SIZE_ERROR() -> Http2ErrorCode:
+        return Http2ErrorCode(0x6)
 
     @staticmethod
-    def REFUSED_STREAM() -> H2ErrorCode:
-        return H2ErrorCode(0x7)
+    def REFUSED_STREAM() -> Http2ErrorCode:
+        return Http2ErrorCode(0x7)
 
     @staticmethod
-    def CANCEL() -> H2ErrorCode:
-        return H2ErrorCode(0x8)
+    def CANCEL() -> Http2ErrorCode:
+        return Http2ErrorCode(0x8)
 
     @staticmethod
-    def COMPRESSION_ERROR() -> H2ErrorCode:
-        return H2ErrorCode(0x9)
+    def COMPRESSION_ERROR() -> Http2ErrorCode:
+        return Http2ErrorCode(0x9)
 
 
-struct H2Error(Copyable, Defaultable, Movable):
+struct Http2Error(Copyable, Defaultable, Movable):
     """A typed HTTP/2 error. ``stream_id == 0`` means connection error."""
 
-    var code: H2ErrorCode
+    var code: Http2ErrorCode
     var stream_id: Int
     var debug: String
 
     def __init__(out self):
-        self.code = H2ErrorCode()
+        self.code = Http2ErrorCode()
         self.stream_id = 0
         self.debug = ""
 
     def __init__(
-        out self, var code: H2ErrorCode, stream_id: Int, var debug: String
+        out self, var code: Http2ErrorCode, stream_id: Int, var debug: String
     ):
         self.code = code^
         self.stream_id = stream_id
@@ -241,7 +241,7 @@ struct Connection(Copyable, Defaultable, Movable):
     var reset_streams: List[Int]
     """Stream ids that received an inbound RST_STREAM since the
     last :meth:`take_reset_streams` call (RFC 9113 §6.4). Drained
-    by :class:`flare.http._h2_conn_handle.H2ConnHandle` before each
+    by :class:`flare.http._h2_conn_handle.Http2ConnHandle` before each
     handler-dispatch round so per-stream :class:`CancelCell`
     plumbing can flip the right cell. The driver also tracks the
     transition via :class:`StreamState.CLOSED`; the explicit list
@@ -276,7 +276,7 @@ struct Connection(Copyable, Defaultable, Movable):
         ``SETTINGS_MAX_CONCURRENT_STREAMS = 100`` pair so the wire
         bytes stay byte-for-byte identical to the original driver
         (``test_preface_only_emits_settings`` still passes
-        unchanged). ``H2Connection.with_config(Http2Config(...))``
+        unchanged). ``Http2Connection.with_config(Http2Config(...))``
         with non-default fields adds the corresponding pairs.
         """
         var f = Frame()
@@ -428,7 +428,7 @@ struct Connection(Copyable, Defaultable, Movable):
                 s.headers.append(hdrs[j].copy())
                 # RFC 8441 §4: capture the ``:protocol``
                 # pseudo-header on Extended CONNECT so the
-                # higher-level dispatcher (``H2Connection`` ->
+                # higher-level dispatcher (``Http2Connection`` ->
                 # WsServer bridge) can route it. We snapshot
                 # eagerly here rather than scanning the headers
                 # list later because the field stays

@@ -201,7 +201,7 @@ publish.
 
 The follow-on pass that tightens the public surface around the
 codec primitives (the `FrameHandler` / `parse_frame_into`
-trait-driven QUIC dispatcher, the `H3RequestEventHandler` /
+trait-driven QUIC dispatcher, the `Http3RequestEventHandler` /
 `feed_into` HTTP/3 reader, the `mut out: List[UInt8]` encoder
 buffer-reuse contract across QPACK / H3 / gRPC LPM, and the
 typed `GrpcRequestHeaders` / `GrpcUnaryReply` / never-raises
@@ -716,9 +716,9 @@ links the QUIC TLS handshake through a real C ABI crate,
 `recv_from` drain + ConnectionIdTable + AEAD + frame parse +
 Connection.handle_frame + PTO/idle/ack-delay timers on the
 shared TimerWheel + CC + pacing budget gating the egress path),
-`H3Connection.feed_stream_chunk` drives
-H3RequestReader -> Handler -> response writer, the unified
-`HttpServer.bind_with_h3` routes ALPN-negotiated h3 alongside
+`Http3Connection.feed_stream_chunk` drives
+Http3RequestReader -> Handler -> response writer, the unified
+`HttpServer.bind_with_http3` routes ALPN-negotiated h3 alongside
 h1/h2c/h2, and `WsAutoClient.connect` drives TLS handshake +
 ALPN inspection -> WsClient or WsOverH2Stream end-to-end. Same
 hot-path discipline as the feature pass: every new wire path is
@@ -825,7 +825,7 @@ This pass (6 atomic commits on top of `65b3282`) joined the
 wire-paths primitives into a live QUIC reactor + H3 dispatch
 loop: handshake bridge, post-Initial AEAD + `handle_packet`
 dispatch, UDP egress + full I/O cycle, H3 attach + Handler
-dispatch, bench baseline rewritten through `serve_h3`, and this
+dispatch, bench baseline rewritten through `serve_http3`, and this
 docs sweep.
 
 h1 / h2 floor reverify at this HEAD
@@ -1429,8 +1429,8 @@ the dependency chain in front of the bench harness is now:
   dispatch + TimerWheel-driven PTO / idle / ack-delay + CC
   reactor (loopback handshake -> 1-RTT -> close
   tested vs. a vendored quinn smoke client).
-- ``flare/h3/server.mojo`` -- ``H3Connection.feed_stream_chunk``
-  through ``H3RequestReader`` -> ``Handler`` -> response writer,
+- ``flare/http3/server.mojo`` -- ``Http3Connection.feed_stream_chunk``
+  through ``Http3RequestReader`` -> ``Handler`` -> response writer,
   uni-stream type dispatch, SETTINGS + GOAWAY consumption,
   conformance round-trip vs. aioquic + quiche fixtures.
 
@@ -1462,7 +1462,7 @@ Infrastructure for the cross-framework bench:
 **Status: an earlier pass (Jun 3, 2026) joined
 the wire-paths primitives into a live QUIC reactor + H3
 dispatch loop. The bench baseline now drives through
-`HttpServer.bind_with_h3 + serve_h3(handler)`; the reactor's
+`HttpServer.bind_with_http3 + serve_http3(handler)`; the reactor's
 `recv -> dispatch -> handle -> drain -> protect -> sendto`
 cycle is live and the Handler dispatch chain reaches the
 Handler on completed streams. A later pass (Jun 4, 2026) then
@@ -1476,7 +1476,7 @@ ACK advances `largest_acked_by_peer`, never the inbound
 pn-decode base) the handshake completes and h2load sustains a
 stable reading. A follow-on reactor rewrite then closed the
 cross-framework gate
-(`flare_h3 median req/s >= 72,571 req/s sigma <= 8 %`): flare h3
+(`flare_h3 median req/s >= 72,571 req/s sigma <= 8 %`): flare HTTP/3
 leads at 74,653 req/s (median, `+2.9 %` over quiche, sigma
 `0.50 %`). The win came from eliminating per-packet
 whole-connection deep copies (in-place `ref` mutation), a
@@ -1530,12 +1530,12 @@ reading at HEAD ``b9aeeef`` (source data:
 |---|---:|---:|---:|---:|---|
 | quiche 0.22 (boringssl-vendored) | 72,571 | (per-stream) | (per-stream) | (per-stream) | clean: 0 errors / 0 timeouts across 5 runs, sigma ~1% |
 | quinn 0.11 + h3 0.0.8        | 654    | 4.17     | 4.75       | 5.48        | open-loop 100-stream shape errors 98% (1.2M errored of 1.2M total) -- this is workload-shape calibration, not a quinn ceiling (the 10s warmup with the same client sustained 104k req/s at 0 errors) |
-| **flare h3**                 | **74,653** | **1.45** | **2.45**   | 433.45      | Gate MET: beats quiche's 72,571 by +2.9% at sigma 0.50% (stable across 5x30s runs). The reactor rewrite removed the per-packet/per-op whole-state deep copies (in-place `ref` mutation of the `connections` / `h3_connections` slabs), routed QPACK decode through the cached-table SIMD Huffman path + a build-once static table + slice-based literal decode, and reserved capacity on the hot `List[UInt8]` egress builders so the per-datagram assembly fills one allocation instead of growing byte-by-byte. The last lever mattered most: the allocator's thread-local cache lives in a dlopen'd lib, so every spared malloc/free also spares a slow dynamic-TLS lookup, which collapsed both the `List._realloc` and `__tls_get_addr` profile peaks. p99.9 fell from 410 ms (first pass) to 2.45 ms; the lone p99.99 outlier (433 ms) is a per-run connection-setup artifact, not a steady-state stall. Egress was already coalesced (ACK + flow-control + multiple H3 STREAM frames per 1-RTT datagram); `recvmmsg`/`sendmmsg`/GSO were left unbuilt because the gate closed without them. |
+| **flare h3**                 | **74,653** | **1.45** | **2.45**   | 433.45      | Gate MET: beats quiche's 72,571 by +2.9% at sigma 0.50% (stable across 5x30s runs). The reactor rewrite removed the per-packet/per-op whole-state deep copies (in-place `ref` mutation of the `connections` / `http3_connections` slabs), routed QPACK decode through the cached-table SIMD Huffman path + a build-once static table + slice-based literal decode, and reserved capacity on the hot `List[UInt8]` egress builders so the per-datagram assembly fills one allocation instead of growing byte-by-byte. The last lever mattered most: the allocator's thread-local cache lives in a dlopen'd lib, so every spared malloc/free also spares a slow dynamic-TLS lookup, which collapsed both the `List._realloc` and `__tls_get_addr` profile peaks. p99.9 fell from 410 ms (first pass) to 2.45 ms; the lone p99.99 outlier (433 ms) is a per-run connection-setup artifact, not a steady-state stall. Egress was already coalesced (ACK + flow-control + multiple H3 STREAM frames per 1-RTT datagram); `recvmmsg`/`sendmmsg`/GSO were left unbuilt because the gate closed without them. |
 
 Note (Jun 16, 2026 re-measurement): the published comparison
 above is against the quiche 0.22 baseline. After the baseline
 crate was bumped to quiche 0.24.5, a re-run on the EPYC dev-box
-re-confirmed flare h3 at 74,003 req/s (median, 5x30s, sigma
+re-confirmed flare HTTP/3 at 74,003 req/s (median, 5x30s, sigma
 0.51%, p99 1.46 ms) -- within run-to-run noise of the 74,653
 above, so the table stands. The quiche 0.24.5 reference server,
 however, could not be benched on this host: it serves exactly
@@ -1559,11 +1559,11 @@ reading on this hardware.
 
 Reading order:
 
-- **flare h3** now leads the table at 74,653 req/s -- a +2.9%
+- **flare HTTP/3** now leads the table at 74,653 req/s -- a +2.9%
   margin over quiche at a tighter 0.50% run-sigma. The gate
   (`flare_h3 median >= 72,571 req/s, sigma <= 8%`) is MET. The
   win came from the reactor rewrite, not from new syscall
-  batching: eliminating per-packet whole-connection / whole-H3
+  batching: eliminating per-packet whole-connection / whole-HTTP/3
   deep copies, a cached-table QPACK decode path, and reserving
   the hot egress buffers so each datagram is assembled in one
   allocation. Because the Mojo allocator's per-thread cache is
@@ -1572,7 +1572,7 @@ Reading order:
   `_dl_update_slotinfo` overhead that dominated the profile, so
   the allocation fix paid off twice. p99/p99.9 are 1.45/2.45 ms;
   the single 433 ms p99.99 reading is a per-run setup artifact.
-- **quiche** is the steady-state H3 reference at this workload
+- **quiche** is the steady-state HTTP/3 reference at this workload
   shape: 72.5k req/s with 1% run-σ and zero errored streams.
 - **quinn**'s headline 654 req/s number reflects the harness
   saturating the server's per-connection stream window at the
@@ -1582,13 +1582,13 @@ Reading order:
   exposed the per-conn limit; the calibration knob lives in
   ``benchmark/configs/h3_throughput.yaml`` (``h2load_streams``
   + ``h2load_duration_seconds``).
-- **flare h3** at 74,653 req/s reflects the reactor
+- **flare HTTP/3** at 74,653 req/s reflects the reactor
   rewrite. The inbound post-Initial decrypt path was already live
   after the first pass (rustls KeyChange -> per-level keys,
   Handshake + 1-RTT AEAD/HP decrypt, packet-number-space split);
   the first pass measured only 351 req/s because per-inbound-packet
   and per-egress-op work deep-copied the whole `QuicConnection` /
-  `H3Connection` slab entry (each holds a `Dict` of every open
+  `Http3Connection` slab entry (each holds a `Dict` of every open
   stream), making 100 concurrent streams quadratic. The rewrite
   bound a mutable `ref` into the slab slot and mutated in place,
   routed QPACK decode through the cached-table SIMD Huffman path +

@@ -92,7 +92,7 @@ struct StepResult(Copyable, ImplicitlyCopyable, Movable):
                      migration helper extracts the saved Request +
                      decoded ``HTTP2-Settings`` payload from the h1
                      ``ConnHandle`` and constructs an
-                     :class:`H2ConnHandle` pre-seeded with the original
+                     :class:`Http2ConnHandle` pre-seeded with the original
                      request as stream id 1.
     """
 

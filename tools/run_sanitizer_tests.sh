@@ -74,11 +74,11 @@ ASAN_TESTS=(
   # (serve_streaming relay). ASan validates the non-blocking recv +
   # FrameDemux drain and the per-connection source teardown.
   "tests/http/test_async_chunk_source.mojo"
-  # H3C-3 -- Alt-Svc parser + per-origin cache. Pure String/Dict
+  # Alt-Svc parser + per-origin cache. Pure String/Dict
   # work, but ASan validates the StringSlice byte-slicing borrows in
   # the lenient parser and the Dict record/evict churn in the cache.
   "tests/http/test_alt_svc.mojo"
-  # H3C-3 -- HttpClient h3 policy surface (prefer_h3 + Alt-Svc
+  # HttpClient h3 policy surface (prefer_http3 + Alt-Svc
   # record/consult + decision). ASan validates the AltSvcCache field
   # embedded in the moved HttpClient + the clock FFI buffer.
   "tests/http/test_client_h3_policy.mojo"
@@ -121,7 +121,7 @@ ASAN_TESTS=(
   # bounds reads, and the strike set's Dict[String, UInt64] lifecycle.
   "tests/quic/test_quic_0rtt_replay.mojo"
   # W7 -- client idempotent-only 0-RTT gate + outcome carrier. ASan
-  # validates the H3ZeroRttOutcome move/copy of the embedded H3Response.
+  # validates the Http3ZeroRttOutcome move/copy of the embedded Http3Response.
   "tests/h3/test_h3_0rtt_gate.mojo"
   # W4b -- server path-validation probe + anti-amplification budget +
   # PATH_CHALLENGE encoder. ASan validates the probe value type and the
@@ -170,9 +170,9 @@ ASAN_TESTS=(
   "tests/runtime/test_safety_asserts.mojo"    # bounds + debug_assert harness
   # Unified-HTTP/WS-over-HTTP/2 (Phase 1-7) FFI surfaces -- recv/send
   # loops on raw fds, RawSocket(_wrap=True) reconstruction during
-  # PendingConnHandle -> ConnHandle/H2ConnHandle migration, Pool
+  # PendingConnHandle -> ConnHandle/Http2ConnHandle migration, Pool
   # alloc/free of the new per-conn handles.
-  "tests/http2/test_h2_conn_handle.mojo"           # H2ConnHandle + PendingConnHandle recv/send
+  "tests/http2/test_h2_conn_handle.mojo"           # Http2ConnHandle + PendingConnHandle recv/send
   "tests/http/test_unified_http_server.mojo"      # full unified reactor over HTTP/1.1 + HTTP/2
   "tests/http/test_unified_http_client.mojo"      # HttpClient h2c + auth FFI
   "tests/http2/test_h2_server_handler.mojo"        # HttpClient(prefer_h2c=True) <-> HttpServer
@@ -231,7 +231,7 @@ ASAN_TESTS=(
   # (Rust-side Box<Acceptor> / Box<Session> lifetime managed
   # by flare_rustls_quic_acceptor_free / _session_free).
   "tests/tls/test_rustls_quic_handshake.mojo"
-  # H3C-0 -- the client-role binding (RustlsQuicConnector +
+  # The client-role binding (RustlsQuicConnector +
   # connect()). Drives a full client<->server loopback handshake
   # through the role-agnostic feed/take CRYPTO path so ASan
   # validates the Box<Connector> / Box<Session> client lifetimes
@@ -253,7 +253,7 @@ ASAN_TESTS=(
   # non-zero session handle freed exactly once via
   # RustlsQuicAcceptor.free_session at listener teardown.
   "tests/quic/test_quic_handshake_bridge.mojo"
-  # H3C-1 -- the QUIC client connection driver. Drives a full
+  # The QUIC client connection driver. Drives a full
   # client handshake (QuicClientConnection.start -> poll) against
   # the real QuicListener over loopback UDP so ASan validates the
   # client-side RustlsQuicSession lifetime, the per-level egress
@@ -274,16 +274,16 @@ ASAN_TESTS=(
   # and installs EarlyData keys. ASan validates the cross-connection
   # rustls session reuse + the early-key install/teardown path.
   "tests/quic/test_quic_resumption.mojo"
-  # H3C-2 -- HTTP/3 client request writer + response reader. Pure
+  # HTTP/3 client request writer + response reader. Pure
   # byte codecs (no QUIC), but ASan validates the response reader's
   # inbox compaction across frame boundaries and the QPACK field-
   # section decode borrows on the client side.
   "tests/h3/test_h3_client_streams.mojo"
-  # H3C-4 -- end-to-end H3 client vs the real QuicListener over
+  # End-to-end H3 client vs the real QuicListener over
   # loopback UDP (GET + POST echo through real QUIC encryption).
   # ASan validates the full client request/response hot path:
   # uni-stream + bidi send through rustls 1-RTT, inbound STREAM
-  # reassembly into the response reader, and the H3ClientConnection
+  # reassembly into the response reader, and the Http3ClientConnection
   # lifetime across the poll loop.
   "tests/h3/test_h3_client_e2e.mojo"
   # W9 -- client 0-RTT (EarlyData) send flight (fork). ASan validates
@@ -291,29 +291,29 @@ ASAN_TESTS=(
   # the finish_early_data replay path (reset offsets + 1-RTT resend on
   # a foreign-ticket reject) across the resumed connection lifetime.
   "tests/h3/test_h3_0rtt_e2e.mojo"
-  # H3C follow-up -- offset-ordered STREAM reassembly (_StreamReasm).
+  # Offset-ordered STREAM reassembly (_StreamReasm).
   # ASan validates the pending-chunk Dict churn + the trimmed/borrowed
   # Span feeds across out-of-order / duplicate / overlapping chunks.
   "tests/h3/test_h3_client_reasm.mojo"
-  # H3C follow-up -- multiplexed H3 client over one QUIC connection.
+  # Multiplexed H3 client over one QUIC connection.
   # ASan validates the per-stream _PendingRequest Dict (reasm + owned
   # reader) pop/reinsert churn while two requests are demuxed in flight.
   "tests/h3/test_h3_client_mux.mojo"
-  # H3C follow-up -- multi-packet request-body fragmentation + idle
+  # Multi-packet request-body fragmentation + idle
   # keepalive reuse. ASan validates the per-chunk STREAM frame buffer
   # churn across several packets and the padded keepalive PING build.
   "tests/h3/test_h3_client_frag.mojo"
-  # H3C follow-up -- live HttpClient h3 dial over loopback QUIC (fork).
+  # Live HttpClient h3 dial over loopback QUIC (fork).
   # ASan validates the AltSvcStore interior-mut heap lifetime, the
-  # per-request QuicClientConnection + H3ClientConnection allocation,
-  # and the H3Response -> Response lowering across the dial path.
+  # per-request QuicClientConnection + Http3ClientConnection allocation,
+  # and the Http3Response -> Response lowering across the dial path.
   "tests/http/test_h3_live_dial.mojo"
-  # H3C follow-up -- HttpClient h3 connection reuse (fork). ASan
-  # validates the QuicConnectionPool heap-cell churn (Pool[H3Conn]
+  # HttpClient h3 connection reuse (fork). ASan
+  # validates the QuicConnectionPool heap-cell churn (Pool[Http3ClientConnection]
   # alloc_move / take_pointee / free) across acquire + release + the
   # graceful CONNECTION_CLOSE drain in __del__.
   "tests/http/test_h3_pool_reuse.mojo"
-  # H3C follow-up -- threaded h3-vs-h2 happy-eyeballs race. ASan
+  # Threaded h3-vs-h2 happy-eyeballs race. ASan
   # validates the heap result/arg cells shared across the two spawned
   # workers and freed after the join barrier, plus the live h3 leg's
   # QUIC alloc path while the h2 leg fast-fails concurrently.

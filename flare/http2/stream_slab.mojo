@@ -53,7 +53,7 @@ Drop-in replacement for ``Dict[Int, S]`` at every call site in
 - ``len(slab)`` -- total count across both tiers.
 - ``slab.items()`` -- eager copy out a list of ``(sid, value)``
   tuples for callers that need to scan the table
-  (``H2Connection.take_completed_streams`` is the only caller).
+  (``Http2Connection.take_completed_streams`` is the only caller).
 
 Nothing about the API is hidden inside the Dict-or-slab choice:
 both tiers see the same operations, and the slab boundary is the
@@ -179,7 +179,7 @@ struct StreamSlab[S: Copyable & Movable & ImplicitlyDestructible](
     def items(self) -> List[Tuple[Int, Self.S]]:
         """Eager copy of every ``(sid, value)`` pair.
 
-        Used by :meth:`flare.http2.server.H2Connection.take_completed_streams`
+        Used by :meth:`flare.http2.server.Http2Connection.take_completed_streams`
         to scan the table for streams whose request is fully
         buffered. The call already copies every entry, so the
         eager-copy semantics here add no real cost over the prior

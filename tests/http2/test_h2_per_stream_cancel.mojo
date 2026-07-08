@@ -1,7 +1,7 @@
 """Per-stream Cancel propagation for HTTP/2 (RFC 9113 §6.4 RST_STREAM).
 
 Exercises the v0.7 wiring in
-:class:`flare.http._h2_conn_handle.H2ConnHandle` that flips a
+:class:`flare.http._h2_conn_handle.Http2ConnHandle` that flips a
 per-stream :class:`flare.http.cancel.CancelCell` so an in-flight
 :trait:`flare.http.CancelHandler` observes peer RST_STREAM and
 sibling streams stay isolated.
@@ -9,7 +9,7 @@ sibling streams stay isolated.
 Cases:
 
 * ``test_rst_stream_flips_only_target_cell``: server-side
-  ``H2Connection`` records the reset stream id; the per-conn
+  ``Http2Connection`` records the reset stream id; the per-conn
   handle's helper flips only that cell.
 * ``test_concurrent_streams_isolated``: flipping stream 3 leaves
   stream 1's cell live.
@@ -40,7 +40,7 @@ from flare.http import (
 from flare.http.cancel import CancelReason
 from flare.net import RawSocket, SocketAddr
 from flare.net._libc import AF_INET, SOCK_STREAM, _close
-from flare.http._h2_conn_handle import H2ConnHandle
+from flare.http._h2_conn_handle import Http2ConnHandle
 from flare.http2 import Http2Config
 from flare.tcp import TcpListener, TcpStream
 
@@ -60,11 +60,11 @@ struct _RecordingCancelHandler(CancelHandler, Copyable, Movable):
 
 
 struct _Pair(Movable):
-    """Test fixture: an :class:`H2ConnHandle` paired with the raw
+    """Test fixture: an :class:`Http2ConnHandle` paired with the raw
     fd for the peer side of the loopback connection so the test
     can close it on tear-down."""
 
-    var handle: H2ConnHandle
+    var handle: Http2ConnHandle
     var client_fd: c_int
 
     def __init__(out self) raises:
@@ -75,7 +75,7 @@ struct _Pair(Movable):
         self.client_fd = client._socket.fd
         client._socket.fd = c_int(-1)
         _ = client^
-        self.handle = H2ConnHandle(server^, Http2Config())
+        self.handle = Http2ConnHandle(server^, Http2Config())
 
 
 def test_rst_stream_flips_only_target_cell() raises:

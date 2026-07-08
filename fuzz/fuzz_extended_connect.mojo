@@ -1,6 +1,6 @@
 """Fuzz harness: RFC 8441 Extended CONNECT inbound dispatch.
 
-Drives :class:`flare.http2.H2Connection` (server-side) with
+Drives :class:`flare.http2.Http2Connection` (server-side) with
 arbitrary HEADERS-frame payloads representing CONNECT requests
 + a fuzzer-controlled ``:protocol`` value (well-formed and
 malformed). The contract: the parser MUST never panic; any
@@ -19,7 +19,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     HpackEncoder,
     HpackHeader,
@@ -67,15 +67,15 @@ def target(data: List[UInt8]) raises:
         return
 
     # ENABLE_CONNECT_PROTOCOL flag byte: low bit decides whether
-    # the H2Connection advertised RFC 8441 in its initial SETTINGS
+    # the Http2Connection advertised RFC 8441 in its initial SETTINGS
     # (the server-side latch the fuzzer must explore both ways
     # of).
     var enable_connect = (Int(data[0]) & 1) != 0
 
-    # Build the H2Connection.
+    # Build the Http2Connection.
     var cfg = Http2Config()
     cfg.enable_connect_protocol = enable_connect
-    var c = H2Connection.with_config(cfg^)
+    var c = Http2Connection.with_config(cfg^)
     try:
         c.feed(Span[UInt8, _](_preface()))
         _ = c.drain()

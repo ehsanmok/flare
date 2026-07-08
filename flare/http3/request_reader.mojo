@@ -9,19 +9,19 @@ exchange.
 
 This module ships the codec-side reader that turns a stream of
 bytes into a typed callback sequence on a caller-supplied
-:trait:`H3RequestEventHandler`:
+:trait:`Http3RequestEventHandler`:
 
-* :meth:`H3RequestEventHandler.on_headers`  -- the first HEADERS
+* :meth:`Http3RequestEventHandler.on_headers`  -- the first HEADERS
   frame has been parsed and QPACK-decoded.
-* :meth:`H3RequestEventHandler.on_data`     -- a DATA frame's
+* :meth:`Http3RequestEventHandler.on_data`     -- a DATA frame's
   payload is ready.
-* :meth:`H3RequestEventHandler.on_trailers` -- the trailing
+* :meth:`Http3RequestEventHandler.on_trailers` -- the trailing
   HEADERS frame closing the request side has been parsed.
-* :meth:`H3RequestEventHandler.on_unknown_frame` -- an unknown /
+* :meth:`Http3RequestEventHandler.on_unknown_frame` -- an unknown /
   grease frame type was parsed; receivers MUST ignore (RFC 9114
   §7.2.8). The reader skips the payload bytes and fires the
   callback so the caller can log it.
-* :meth:`H3RequestEventHandler.on_protocol_error` -- the byte
+* :meth:`Http3RequestEventHandler.on_protocol_error` -- the byte
   stream is malformed (truncated varint, oversize length, QPACK
   decode failure, repeated HEADERS); the caller surfaces this as
   an H3_FRAME_UNEXPECTED / QPACK_DECOMPRESSION_FAILED stream-
@@ -80,7 +80,7 @@ comptime H3_REQUEST_STATE_DONE: Int = 3
 # ── Event-handler trait ────────────────────────────────────────────────────
 
 
-trait H3RequestEventHandler(ImplicitlyDestructible, Movable):
+trait Http3RequestEventHandler(ImplicitlyDestructible, Movable):
     """Per-event callback contract :func:`feed_into` fires.
 
     The dispatcher reads one wire frame at the start of the
@@ -132,7 +132,7 @@ trait H3RequestEventHandler(ImplicitlyDestructible, Movable):
 
 
 @fieldwise_init
-struct H3RequestReader(Copyable, Movable):
+struct Http3RequestReader(Copyable, Movable):
     """Per-stream H3 request-side reader.
 
     The reader is stateful: it tracks whether the initial HEADERS
@@ -146,10 +146,10 @@ struct H3RequestReader(Copyable, Movable):
     var max_field_section_bytes: UInt64
     var qpack_table: ArcPointer[QpackDynamicTable]
     """RFC 9204 dynamic table shared (by ``ArcPointer``) from the
-    owning :class:`H3Connection`. Defaults to an empty (capacity-0)
+    owning :class:`Http3Connection`. Defaults to an empty (capacity-0)
     table so a standalone reader decodes static-only field sections
     identically to the static path; the connection injects its real
-    table at :meth:`H3Connection.open_request_stream` so dynamic
+    table at :meth:`Http3Connection.open_request_stream` so dynamic
     references resolve."""
 
     @staticmethod
@@ -185,14 +185,14 @@ def _parse_frame_header(
 
 
 def feed_into[
-    H: H3RequestEventHandler
+    H: Http3RequestEventHandler
 ](
-    mut reader: H3RequestReader,
+    mut reader: Http3RequestReader,
     buf: Span[UInt8, _],
     mut handler: H,
 ) raises -> Int:
     """Try to parse the next H3 frame at the start of ``buf`` and
-    fire the matching :trait:`H3RequestEventHandler` callback.
+    fire the matching :trait:`Http3RequestEventHandler` callback.
 
     Returns the number of bytes consumed:
 

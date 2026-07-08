@@ -14,7 +14,7 @@
 #     specific leaf modules (``flare.http.hpack_huffman``,
 #     ``flare.http.hpack_huffman_simd``) that the HPACK codec needs.
 #
-#   * ``flare/h3/**`` MUST NOT contain ``from flare.http`` either. It
+#   * ``flare/http3/**`` MUST NOT contain ``from flare.http`` either. It
 #     follows the same allowlist (``flare.http.wire`` / ``flare.http.proto``).
 #
 #   * ``flare/http/**`` MAY reach into ``flare.http2`` only from the
@@ -32,7 +32,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# Allowed import prefixes from inside ``flare/http2/**`` and ``flare/h3/**``
+# Allowed import prefixes from inside ``flare/http2/**`` and ``flare/http3/**``
 # that reach the ``flare.http`` namespace. Anything else triggers the lint.
 ALLOWED_HTTP_SUBPATHS=(
     "flare.http.wire"
@@ -42,7 +42,7 @@ ALLOWED_HTTP_SUBPATHS=(
 )
 
 # Modules under ``flare/http/**`` that ARE allowed to import
-# ``flare.http2.*`` (the reactor-bridge files that drive H2Connection
+# ``flare.http2.*`` (the reactor-bridge files that drive Http2Connection
 # from the unified reactor; these are not codec modules and live in
 # flare.http because the reactor is here).
 ALLOWLISTED_REACTOR_BRIDGES=(
@@ -63,7 +63,7 @@ violations=0
 # Pass 1: flare/http2/** must not import bare ``flare.http``.
 while IFS= read -r -d '' file; do
     # Find any ``from flare.http`` / ``import flare.http`` statements, plus
-    # the relative ``from ..http`` form (inside flare/http2 and flare/h3,
+    # the relative ``from ..http`` form (inside flare/http2 and flare/http3,
     # ``..http`` resolves to the absolute ``flare.http``). ``http\b`` does
     # not match ``http2`` so this stays scoped to the parent namespace.
     matches="$(grep -nE '^(from|import)[[:space:]]+(flare\.http|\.\.http)\b' "$file" || true)"
@@ -89,11 +89,11 @@ while IFS= read -r -d '' file; do
         if [[ "$allowed" -eq 0 ]]; then
             echo "check-no-http-http2-cycle: $file: forbidden import:" >&2
             echo "  $line" >&2
-            echo "  (only ${ALLOWED_HTTP_SUBPATHS[*]} are allowed from flare/http2/** and flare/h3/**.)" >&2
+            echo "  (only ${ALLOWED_HTTP_SUBPATHS[*]} are allowed from flare/http2/** and flare/http3/**.)" >&2
             violations=$((violations + 1))
         fi
     done <<< "$matches"
-done < <(find flare/http2 flare/h3 -name '*.mojo' -print0 2>/dev/null)
+done < <(find flare/http2 flare/http3 -name '*.mojo' -print0 2>/dev/null)
 
 # Pass 2: flare/http/** files that aren't on the allowlist must not
 # import ``flare.http2.*``.

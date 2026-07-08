@@ -1,8 +1,8 @@
-"""``flare.h3.server`` -- HTTP/3 server connection driver.
+"""``flare.http3.server`` -- HTTP/3 server connection driver.
 
 Wraps the sans-I/O HTTP/3 codec primitives
-(:class:`flare.h3.H3RequestReader`,
-:func:`flare.h3.encode_response_headers`) and the QUIC connection
+(:class:`flare.http3.Http3RequestReader`,
+:func:`flare.http3.encode_response_headers`) and the QUIC connection
 driver (:class:`flare.quic.server.QuicConnection`) into a per-
 connection HTTP/3 server.
 
@@ -29,23 +29,23 @@ HTTP/3 over QUIC uses four families of streams:
 
 ## What ships here
 
-- :class:`H3ConnectionConfig` -- per-connection HTTP/3 config:
+- :class:`Http3Config` -- per-connection HTTP/3 config:
   max field section size, max blocked streams, the GOAWAY
   threshold above which the server stops accepting new
   request streams.
-- :class:`H3Connection` -- the per-connection driver carrier.
-  Owns the per-stream :class:`H3RequestReader` instances (keyed
+- :class:`Http3Connection` -- the per-connection driver carrier.
+  Owns the per-stream :class:`Http3RequestReader` instances (keyed
   by QUIC stream ID), the per-stream accumulated request state,
   and the per-stream pending outbound bytes.
-- :class:`H3StreamType` -- the unidirectional-stream type
+- :class:`Http3StreamType` -- the unidirectional-stream type
   codepoints from RFC 9114 §6.2.
 
 The driver is sans-I/O: the QUIC reactor feeds reassembled stream
-chunks in via :meth:`H3Connection.feed_stream_chunk` and drains
-pending outbound frames via :meth:`H3Connection.take_response_frames`.
+chunks in via :meth:`Http3Connection.feed_stream_chunk` and drains
+pending outbound frames via :meth:`Http3Connection.take_response_frames`.
 The Handler dispatch sits on the QUIC reactor side; the H3
 layer surfaces the Request once it's fully reassembled and
-the reactor calls :meth:`H3Connection.emit_response` once the
+the reactor calls :meth:`Http3Connection.emit_response` once the
 Handler returns.
 
 References:
@@ -56,25 +56,25 @@ References:
 from std.collections import Dict, List, Optional
 from std.memory import ArcPointer, Span
 
-from flare.h3.frame import (
+from flare.http3.frame import (
     H3_FRAME_TYPE_GOAWAY,
     H3_FRAME_TYPE_SETTINGS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-    H3Setting,
-    decode_h3_settings,
-    encode_h3_frame,
-    encode_h3_settings,
+    Http3Setting,
+    decode_http3_settings,
+    encode_http3_frame,
+    encode_http3_settings,
 )
-from flare.h3.request_reader import (
+from flare.http3.request_reader import (
     H3_REQUEST_STATE_DONE,
-    H3RequestEventHandler,
-    H3RequestReader,
+    Http3RequestEventHandler,
+    Http3RequestReader,
     feed_into,
 )
-from flare.h3.response_writer import (
+from flare.http3.response_writer import (
     encode_response_data,
     encode_response_headers,
 )
@@ -91,7 +91,7 @@ from flare.quic.varint import decode_varint, encode_varint
 # ── Unidirectional stream type codepoints (RFC 9114 §6.2) ───────────────
 
 
-struct H3StreamType:
+struct Http3StreamType:
     """RFC 9114 §6.2 unidirectional stream types.
 
     Each uni stream's first varint is the stream type; the reader
@@ -121,7 +121,7 @@ struct H3StreamType:
 # ── Configuration carrier ──────────────────────────────────────────────
 
 
-struct H3ConnectionConfig(Copyable, Defaultable, Movable):
+struct Http3Config(Copyable, Defaultable, Movable):
     """Per-connection HTTP/3 settings.
 
     The server advertises these via the control stream's SETTINGS
@@ -168,7 +168,7 @@ struct H3ConnectionConfig(Copyable, Defaultable, Movable):
 # ── Per-stream accumulator + event collector ──────────────────────────
 
 
-struct _H3StreamState(Copyable, Defaultable, Movable):
+struct _Http3StreamState(Copyable, Defaultable, Movable):
     """Per-bidirectional-stream H3 server state.
 
     Carries everything that accumulates over the lifetime of a
@@ -179,7 +179,7 @@ struct _H3StreamState(Copyable, Defaultable, Movable):
     dispatch + when it's safe to retire.
     """
 
-    var reader: H3RequestReader
+    var reader: Http3RequestReader
     """Sans-I/O frame reader. ``feed_stream_chunk`` advances this
     one frame at a time."""
 
@@ -208,7 +208,7 @@ struct _H3StreamState(Copyable, Defaultable, Movable):
     var fin_received: Bool
     """Set when the QUIC stream signals end-of-stream (the FIN
     bit on the last STREAM frame). The reactor calls
-    :meth:`H3Connection.signal_end_of_stream` to flip this; the
+    :meth:`Http3Connection.signal_end_of_stream` to flip this; the
     sans-I/O reader has no FIN signal of its own."""
 
     var protocol_error: String
@@ -224,8 +224,8 @@ struct _H3StreamState(Copyable, Defaultable, Movable):
 
     var outbox: List[UInt8]
     """Pending outbound response bytes produced by
-    :meth:`H3Connection.emit_response`. Drained by
-    :meth:`H3Connection.take_response_frames`."""
+    :meth:`Http3Connection.emit_response`. Drained by
+    :meth:`Http3Connection.take_response_frames`."""
 
     var response_emitted: Bool
     """Set when ``emit_response`` has been called for this
@@ -240,7 +240,7 @@ struct _H3StreamState(Copyable, Defaultable, Movable):
     request through a Handler."""
 
     def __init__(out self):
-        self.reader = H3RequestReader.new()
+        self.reader = Http3RequestReader.new()
         self.inbox = List[UInt8]()
         self.headers = List[QpackHeader]()
         self.body = List[UInt8]()
@@ -256,17 +256,17 @@ struct _H3StreamState(Copyable, Defaultable, Movable):
     @staticmethod
     def with_limits(max_field_section_bytes: UInt64) -> Self:
         var out = Self()
-        out.reader = H3RequestReader.new(max_field_section_bytes)
+        out.reader = Http3RequestReader.new(max_field_section_bytes)
         return out^
 
 
 @fieldwise_init
-struct _H3EventCollector(H3RequestEventHandler, Movable):
+struct _Http3EventCollector(Http3RequestEventHandler, Movable):
     """Internal handler the H3 server passes to ``feed_into``.
 
     Records callback invocations into typed buffers; the
-    surrounding :meth:`H3Connection.feed_stream_chunk` drains
-    these into the per-stream :class:`_H3StreamState` after the
+    surrounding :meth:`Http3Connection.feed_stream_chunk` drains
+    these into the per-stream :class:`_Http3StreamState` after the
     frame-reader returns. Splitting the recorder from the
     state-update step keeps the event-handler trait surface
     small (no driver-context plumbing through callbacks)."""
@@ -347,13 +347,13 @@ struct _H3EventCollector(H3RequestEventHandler, Movable):
 # ── Per-connection driver ──────────────────────────────────────────────
 
 
-struct H3Connection(Copyable, Defaultable, Movable):
+struct Http3Connection(Copyable, Defaultable, Movable):
     """Per-connection HTTP/3 server driver.
 
     Owned by the QUIC reactor. One instance per QUIC connection
     that negotiated the ``h3`` ALPN identifier. The driver:
 
-    * Tracks per-bidirectional-stream :class:`_H3StreamState`
+    * Tracks per-bidirectional-stream :class:`_Http3StreamState`
       instances keyed by QUIC stream ID. Each carrier owns the
       sans-I/O frame reader, the accumulated request bytes /
       headers / body / trailers, and the pending outbound
@@ -375,7 +375,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
     :class:`Response` via :meth:`emit_response`.
     """
 
-    var config: H3ConnectionConfig
+    var config: Http3Config
     """Local configuration -- the values the server advertises
     via SETTINGS."""
 
@@ -389,7 +389,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
     """Whether the server has emitted GOAWAY. Once True, new
     request streams are rejected with H3_REQUEST_CANCELLED."""
 
-    var streams: Dict[Int, _H3StreamState]
+    var streams: Dict[Int, _Http3StreamState]
     """Per-stream state carriers. Keys are QUIC stream IDs.
     Streams are removed via :meth:`close_request_stream` once
     the response is fully drained from the outbox."""
@@ -471,10 +471,10 @@ struct H3Connection(Copyable, Defaultable, Movable):
     §4.4.3). Drained by :meth:`take_qpack_decoder_frames`."""
 
     def __init__(out self):
-        self.config = H3ConnectionConfig()
+        self.config = Http3Config()
         self.peer_settings_received = False
         self.goaway_emitted = False
-        self.streams = Dict[Int, _H3StreamState]()
+        self.streams = Dict[Int, _Http3StreamState]()
         self.control_stream_id = -1
         self.qpack_encoder_stream_id = -1
         self.qpack_decoder_stream_id = -1
@@ -494,7 +494,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         self.pending_qpack_increment = 0
 
     @staticmethod
-    def with_config(config: H3ConnectionConfig) -> Self:
+    def with_config(config: Http3Config) -> Self:
         """Construct with a non-default config carrier."""
         var out = Self()
         out.config = config.copy()
@@ -514,10 +514,10 @@ struct H3Connection(Copyable, Defaultable, Movable):
             return
         if self.goaway_emitted:
             raise Error(
-                "H3Connection.open_request_stream: GOAWAY emitted;"
+                "Http3Connection.open_request_stream: GOAWAY emitted;"
                 " new request streams are rejected"
             )
-        var state = _H3StreamState.with_limits(
+        var state = _Http3StreamState.with_limits(
             self.config.max_field_section_size
         )
         state.reader.qpack_table = self.qpack_table
@@ -577,7 +577,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         is the open-stream signal). Appends the chunk to the
         per-stream inbox, then drains the inbox one frame at a
         time via :func:`feed_into`. Each frame's callback fires
-        through a transient :class:`_H3EventCollector`; the
+        through a transient :class:`_Http3EventCollector`; the
         collector's contents are merged into the per-stream
         accumulator after the call returns.
 
@@ -591,14 +591,14 @@ struct H3Connection(Copyable, Defaultable, Movable):
         if stream_id not in self.streams:
             self.open_request_stream(stream_id)
         # Mutate the stream state in place; deep-copying the whole
-        # _H3StreamState (inbox + headers + body) on every inbound
+        # _Http3StreamState (inbox + headers + body) on every inbound
         # chunk is the dominant per-request cost under concurrency.
         ref state = self.streams[stream_id]
         for i in range(len(chunk)):
             state.inbox.append(chunk[i])
         var cursor = 0
         while cursor < len(state.inbox):
-            var collector = _H3EventCollector.new()
+            var collector = _Http3EventCollector.new()
             var view = state.inbox[cursor:]
             var consumed = feed_into(
                 state.reader, Span[UInt8, _](view), collector
@@ -670,7 +670,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         var ready = List[Int]()
         for entry in self.streams.items():
             # Read fields through the dict ref; copying each
-            # _H3StreamState here just to test four flags would be
+            # _Http3StreamState here just to test four flags would be
             # O(open streams) deep copies every tick.
             if entry.value.request_taken:
                 continue
@@ -693,18 +693,18 @@ struct H3Connection(Copyable, Defaultable, Movable):
         dispatch the same request through a Handler twice."""
         if stream_id not in self.streams:
             raise Error(
-                "H3Connection.take_request: stream not tracked: "
+                "Http3Connection.take_request: stream not tracked: "
                 + String(stream_id)
             )
         ref state = self.streams[stream_id]
         if state.request_taken:
             raise Error(
-                "H3Connection.take_request: request already taken on stream "
+                "Http3Connection.take_request: request already taken on stream "
                 + String(stream_id)
             )
         if not state.headers_complete:
             raise Error(
-                "H3Connection.take_request: HEADERS frame not yet parsed on"
+                "Http3Connection.take_request: HEADERS frame not yet parsed on"
                 " stream "
                 + String(stream_id)
             )
@@ -744,13 +744,13 @@ struct H3Connection(Copyable, Defaultable, Movable):
         """
         if stream_id not in self.streams:
             raise Error(
-                "H3Connection.emit_response: stream not tracked: "
+                "Http3Connection.emit_response: stream not tracked: "
                 + String(stream_id)
             )
         ref state = self.streams[stream_id]
         if state.response_emitted:
             raise Error(
-                "H3Connection.emit_response: response already emitted on"
+                "Http3Connection.emit_response: response already emitted on"
                 " stream "
                 + String(stream_id)
             )
@@ -825,13 +825,13 @@ struct H3Connection(Copyable, Defaultable, Movable):
                 rest.append(buf[k])
             buf = rest^
 
-        if kind == H3StreamType.CONTROL:
+        if kind == Http3StreamType.CONTROL:
             self._feed_peer_control_stream(buf^)
-        elif kind == H3StreamType.QPACK_ENCODER:
+        elif kind == Http3StreamType.QPACK_ENCODER:
             self._feed_peer_qpack_encoder_stream(stream_id, buf^)
-        elif kind == H3StreamType.QPACK_DECODER:
+        elif kind == Http3StreamType.QPACK_DECODER:
             pass
-        elif kind == H3StreamType.PUSH:
+        elif kind == Http3StreamType.PUSH:
             pass
         else:
             pass
@@ -844,22 +844,22 @@ struct H3Connection(Copyable, Defaultable, Movable):
         in :attr:`peer_uni_kinds`. Also records the peer's
         stream IDs (control / qpack-enc / qpack-dec) for the
         reactor's duplicate-stream check."""
-        if type_code == UInt64(H3StreamType.CONTROL):
+        if type_code == UInt64(Http3StreamType.CONTROL):
             if self.peer_control_stream_id >= 0:
                 raise Error(
                     "h3 server: peer opened a second control stream "
                     "(RFC 9114 6.2.1 H3_STREAM_CREATION_ERROR)"
                 )
             self.peer_control_stream_id = stream_id
-            return H3StreamType.CONTROL
-        if type_code == UInt64(H3StreamType.PUSH):
-            return H3StreamType.PUSH
-        if type_code == UInt64(H3StreamType.QPACK_ENCODER):
+            return Http3StreamType.CONTROL
+        if type_code == UInt64(Http3StreamType.PUSH):
+            return Http3StreamType.PUSH
+        if type_code == UInt64(Http3StreamType.QPACK_ENCODER):
             self.peer_qpack_encoder_stream_id = stream_id
-            return H3StreamType.QPACK_ENCODER
-        if type_code == UInt64(H3StreamType.QPACK_DECODER):
+            return Http3StreamType.QPACK_ENCODER
+        if type_code == UInt64(Http3StreamType.QPACK_DECODER):
             self.peer_qpack_decoder_stream_id = stream_id
-            return H3StreamType.QPACK_DECODER
+            return Http3StreamType.QPACK_DECODER
         return -1
 
     def _feed_peer_control_stream(mut self, var bytes: List[UInt8]) raises:
@@ -950,7 +950,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
                     "h3 server: peer sent SETTINGS twice "
                     "(RFC 9114 7.2.4 H3_FRAME_UNEXPECTED)"
                 )
-            var settings = decode_h3_settings(payload)
+            var settings = decode_http3_settings(payload)
             self._apply_peer_settings(settings^)
             self.peer_settings_received = True
             return
@@ -975,7 +975,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
             self.peer_goaway_max_stream_id = goaway_id.value
             return
 
-    def _apply_peer_settings(mut self, var settings: List[H3Setting]) raises:
+    def _apply_peer_settings(mut self, var settings: List[Http3Setting]) raises:
         """Update the connection's view of the peer's announced
         SETTINGS. Unknown settings identifiers are ignored per
         RFC 9114 §7.2.4.1; the codec already rejects malformed
@@ -996,7 +996,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         """Build the server's outbound control-stream prefix:
         the stream-type varint (0x00) followed by a SETTINGS
         frame carrying the local
-        :class:`H3ConnectionConfig` values.
+        :class:`Http3Config` values.
 
         The reactor opens a local control uni-stream via QUIC
         and emits these bytes as the very first payload (RFC
@@ -1005,38 +1005,38 @@ struct H3Connection(Copyable, Defaultable, Movable):
         proactively; GOAWAY / MAX_PUSH_ID are emitted on
         demand."""
         var out = List[UInt8]()
-        var type_var = encode_varint(UInt64(H3StreamType.CONTROL))
+        var type_var = encode_varint(UInt64(Http3StreamType.CONTROL))
         for i in range(len(type_var)):
             out.append(type_var[i])
-        var settings = List[H3Setting]()
+        var settings = List[Http3Setting]()
         settings.append(
-            H3Setting(
+            Http3Setting(
                 identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
                 value=self.config.max_field_section_size,
             )
         )
         settings.append(
-            H3Setting(
+            Http3Setting(
                 identifier=H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
                 value=self.config.qpack_max_table_capacity,
             )
         )
         settings.append(
-            H3Setting(
+            Http3Setting(
                 identifier=H3_SETTINGS_QPACK_BLOCKED_STREAMS,
                 value=self.config.qpack_blocked_streams,
             )
         )
         if self.config.enable_connect_protocol:
             settings.append(
-                H3Setting(
+                Http3Setting(
                     identifier=H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
                     value=UInt64(1),
                 )
             )
         var payload = List[UInt8]()
-        encode_h3_settings(settings, payload)
-        encode_h3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
+        encode_http3_settings(settings, payload)
+        encode_http3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
         return out^
 
     def emit_goaway(mut self, max_stream_id: UInt64) raises -> List[UInt8]:
@@ -1049,7 +1049,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
             raise Error("h3 server: GOAWAY already emitted")
         var out = List[UInt8]()
         var payload = encode_varint(max_stream_id)
-        encode_h3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
+        encode_http3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
         self.goaway_emitted = True
         return out^
 
@@ -1062,7 +1062,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         for re-reads)."""
         if stream_id not in self.streams:
             raise Error(
-                "H3Connection.take_response_frames: stream not tracked: "
+                "Http3Connection.take_response_frames: stream not tracked: "
                 + String(stream_id)
             )
         ref state = self.streams[stream_id]

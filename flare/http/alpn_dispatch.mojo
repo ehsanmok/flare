@@ -70,7 +70,7 @@ struct WireProtocol:
 
     comptime HTTP_3: Int = 4
     """HTTP/3 over QUIC -- ALPN ``"h3"`` (RFC 9114 §3.1).
-    Routed to the :class:`flare.h3.H3Connection` driver on
+    Routed to the :class:`flare.http3.Http3Connection` driver on
     the UDP listener side."""
 
 

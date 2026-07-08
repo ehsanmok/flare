@@ -1,6 +1,6 @@
-"""H3C mux: many concurrent requests over one QUIC connection.
+"""Many concurrent requests over one QUIC connection.
 
-Drives the multiplexed :class:`flare.h3.client.H3ClientConnection`
+Drives the multiplexed :class:`flare.http3.client.Http3ClientConnection`
 API (:meth:`request` / :meth:`poll_responses` / :meth:`take_if_complete`)
 against the real :class:`flare.quic.server.QuicListener` over loopback
 UDP, pumped in lockstep on one thread (same harness as
@@ -17,7 +17,7 @@ from std.collections import List
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import H3ClientConnection
+from flare.http3 import Http3ClientConnection
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -71,12 +71,12 @@ struct _EchoBody(Copyable, Handler, Movable):
 def _server_dispatch(mut server: QuicListener) raises:
     var handler = _EchoBody()
     for slot in range(server.connection_count()):
-        var ready = server.take_h3_completed_streams(slot)
+        var ready = server.take_http3_completed_streams(slot)
         for i in range(len(ready)):
             var sid = ready[i]
-            var req = server.take_h3_request(slot, sid)
+            var req = server.take_http3_request(slot, sid)
             var resp = handler.serve(req^)
-            server.emit_h3_response(slot, sid, resp^)
+            server.emit_http3_response(slot, sid, resp^)
 
 
 def _drive_handshake(mut server: QuicListener) raises -> QuicClientConnection:
@@ -104,7 +104,7 @@ def test_two_concurrent_requests() raises:
     """Two POSTs in flight on one connection get independent bodies."""
     var server = _bind_server()
     var client = _drive_handshake(server)
-    var h3 = H3ClientConnection(client^)
+    var h3 = Http3ClientConnection(client^)
 
     var body_a = _body(String("alpha-request-body"))
     var body_b = _body(String("bravo-request-body"))

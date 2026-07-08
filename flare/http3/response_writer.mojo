@@ -1,6 +1,6 @@
 """HTTP/3 response-stream writer -- sans-I/O byte emitter.
 
-Symmetric to :mod:`flare.h3.request_reader`. Builds the bytes
+Symmetric to :mod:`flare.http3.request_reader`. Builds the bytes
 the H3 server reactor hands to the QUIC stream abstraction for a
 response on a request stream.
 
@@ -45,7 +45,7 @@ from std.memory import Span
 from flare.http.proto.ascii import ascii_lower
 from flare.qpack import QpackHeader, encode_field_section
 
-from .frame import H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS, encode_h3_frame
+from .frame import H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS, encode_http3_frame
 
 
 def encode_response_headers(
@@ -85,7 +85,9 @@ def encode_response_headers(
         emit.append(QpackHeader(name^, String(headers[i].value)))
     var qpack_payload = List[UInt8]()
     encode_field_section(emit, qpack_payload)
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out)
+    encode_http3_frame(
+        H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out
+    )
 
 
 def encode_response_data(
@@ -104,7 +106,7 @@ def encode_response_data(
     ``List[UInt8]`` across HEADERS + DATA + trailers so the
     underlying allocation amortises across the response.
     """
-    encode_h3_frame(H3_FRAME_TYPE_DATA, payload, out)
+    encode_http3_frame(H3_FRAME_TYPE_DATA, payload, out)
 
 
 def encode_response_trailers(
@@ -134,4 +136,6 @@ def encode_response_trailers(
         emit.append(QpackHeader(name^, String(trailers[i].value)))
     var qpack_payload = List[UInt8]()
     encode_field_section(emit, qpack_payload)
-    encode_h3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out)
+    encode_http3_frame(
+        H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out
+    )

@@ -1,6 +1,6 @@
 """Example 35: HTTP/2 + h2c upgrade detection.
 
-Drives :class:`flare.http2.H2Connection` end-to-end without a
+Drives :class:`flare.http2.Http2Connection` end-to-end without a
 network: feeds the connection preface + a HEADERS frame, takes the
 parsed :class:`flare.http.Request`, builds a
 :class:`flare.http.Response`, calls :meth:`emit_response`, and
@@ -20,7 +20,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     HpackEncoder,
     HpackHeader,
@@ -55,8 +55,8 @@ def main() raises:
     print()
 
     # ── Synchronous round-trip ───────────────────────────────────────────
-    print("── 3. Synchronous H2Connection round-trip ──")
-    var c = H2Connection()
+    print("── 3. Synchronous Http2Connection round-trip ──")
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     var settings_bytes = c.drain()
     print(" bytes after preface :", len(settings_bytes), "(SETTINGS frame)")

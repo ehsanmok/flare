@@ -3,7 +3,7 @@
 This package exposes the byte-level HTTP/2 machinery: frame
 codec, HPACK encoder + decoder, stream + connection state
 machines, the byte-level server driver
-:class:`H2Connection`, and the symmetric byte-level client
+:class:`Http2Connection`, and the symmetric byte-level client
 driver :class:`Http2ClientConnection`.
 
 The **user-facing** HTTP/2 entry points live in
@@ -51,11 +51,11 @@ from .state import (
     StreamId,
     Stream,
     Connection,
-    H2Error,
-    H2ErrorCode,
+    Http2Error,
+    Http2ErrorCode,
 )
 from .server import (
-    H2Connection,
+    Http2Connection,
     Http2Config,
     detect_h2c_upgrade,
     is_h2_alpn,

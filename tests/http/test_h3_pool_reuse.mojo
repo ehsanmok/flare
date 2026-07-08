@@ -1,7 +1,7 @@
-"""H3C follow-up: HttpClient HTTP/3 connection reuse (pooling).
+"""HttpClient HTTP/3 connection reuse (pooling).
 
 Proves the QUIC connection pool wired into
-:meth:`flare.http.HttpClient._send_h3`: two sequential ``https://``
+:meth:`flare.http.HttpClient._send_http3`: two sequential ``https://``
 requests to the same origin reuse one established QUIC connection
 instead of re-handshaking. The client exposes :meth:`quic_dials` (the
 pool's miss counter) and :meth:`quic_idle_count`; after two GETs the
@@ -61,12 +61,12 @@ def _serve_forever(mut server: QuicListener):
         try:
             _ = server.tick(timeout_ms=50)
             for slot in range(server.connection_count()):
-                var ready = server.take_h3_completed_streams(slot)
+                var ready = server.take_http3_completed_streams(slot)
                 for i in range(len(ready)):
                     var sid = ready[i]
-                    var req = server.take_h3_request(slot, sid)
+                    var req = server.take_http3_request(slot, sid)
                     var resp = handler.serve(req^)
-                    server.emit_h3_response(slot, sid, resp^)
+                    server.emit_http3_response(slot, sid, resp^)
         except:
             return
 
@@ -89,7 +89,7 @@ def test_two_gets_reuse_one_connection() raises:
     var raised = False
     try:
         var cfg = TlsConfig(ca_bundle=_FIXDIR + "ca.pem")
-        with HttpClient(cfg).with_prefer_h3() as c:
+        with HttpClient(cfg).with_prefer_http3() as c:
             var r1 = c.get(base + String("/one"))
             status1 = r1.status
             # After the first request the connection is back in the pool.

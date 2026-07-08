@@ -180,7 +180,7 @@ struct ConnHandle(Movable):
     var _h2c_upgrade_request: Optional[Request]
     """The original h1 request that triggered the h2c upgrade.
     The unified reactor's migration helper consumes this to seed
-    stream id 1 on the new :class:`H2ConnHandle`."""
+    stream id 1 on the new :class:`Http2ConnHandle`."""
     var _h2c_upgrade_settings: List[UInt8]
     """Base64url-decoded raw bytes of the inbound ``HTTP2-Settings``
     header (a SETTINGS frame body per RFC 7540 §3.2.1). Applied

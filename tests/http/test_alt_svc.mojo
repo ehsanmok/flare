@@ -3,7 +3,7 @@
 Covers the RFC 7838 parser (single + multi advert, params, quoted
 authority, same-host shorthand, ``clear``, malformed-skip), the
 per-origin cache (record / fresh / expired / clear eviction), and
-the pure :func:`decide_h3_wire` policy table.
+the pure :func:`decide_http3_wire` policy table.
 """
 
 from std.collections import List
@@ -11,8 +11,8 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from flare.http._client.alt_svc import (
     AltSvcCache,
-    H3WireChoice,
-    decide_h3_wire,
+    Http3WireChoice,
+    decide_http3_wire,
     parse_alt_svc,
 )
 
@@ -91,28 +91,28 @@ def test_cache_ignores_non_h3() raises:
 def test_decide_policy_table() raises:
     # https + prefer -> h3
     assert_equal(
-        decide_h3_wire(String("https"), True, False, True),
-        H3WireChoice.HTTP_3,
+        decide_http3_wire(String("https"), True, False, True),
+        Http3WireChoice.HTTP_3,
     )
     # https + cached advert -> h3
     assert_equal(
-        decide_h3_wire(String("https"), False, True, True),
-        H3WireChoice.HTTP_3,
+        decide_http3_wire(String("https"), False, True, True),
+        Http3WireChoice.HTTP_3,
     )
     # https, no pref/advert -> lower
     assert_equal(
-        decide_h3_wire(String("https"), False, False, True),
-        H3WireChoice.HTTP_2_OR_LOWER,
+        decide_http3_wire(String("https"), False, False, True),
+        Http3WireChoice.HTTP_2_OR_LOWER,
     )
     # cleartext never h3
     assert_equal(
-        decide_h3_wire(String("http"), True, True, True),
-        H3WireChoice.HTTP_2_OR_LOWER,
+        decide_http3_wire(String("http"), True, True, True),
+        Http3WireChoice.HTTP_2_OR_LOWER,
     )
     # quic unavailable never h3
     assert_equal(
-        decide_h3_wire(String("https"), True, True, False),
-        H3WireChoice.HTTP_2_OR_LOWER,
+        decide_http3_wire(String("https"), True, True, False),
+        Http3WireChoice.HTTP_2_OR_LOWER,
     )
 
 

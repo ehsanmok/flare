@@ -26,7 +26,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     HpackEncoder,
     HpackHeader,
@@ -64,10 +64,10 @@ def _has_setting(payload: List[UInt8], id: Int) -> Bool:
 
 
 def test_settings_enable_connect_protocol_off_by_default() raises:
-    """A default-constructed H2Connection MUST NOT advertise
+    """A default-constructed Http2Connection MUST NOT advertise
     SETTINGS_ENABLE_CONNECT_PROTOCOL. The pre-RFC-8441 wire shape
     must round-trip byte-for-byte."""
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     var bytes = c.drain()
     var payload = _settings_payload(bytes)
@@ -82,7 +82,7 @@ def test_settings_enable_connect_protocol_when_opted_in() raises:
     SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 in the initial SETTINGS."""
     var cfg = Http2Config()
     cfg.enable_connect_protocol = True
-    var c = H2Connection.with_config(cfg^)
+    var c = Http2Connection.with_config(cfg^)
     c.feed(Span[UInt8, _](_preface_bytes()))
     var bytes = c.drain()
     var payload = _settings_payload(bytes)
@@ -97,7 +97,7 @@ def test_extended_connect_headers_landed_on_stream() raises:
     ``:protocol=websocket`` (RFC 8441 §4) leaves the stream in
     a state where ``stream.extended_connect_protocol == "websocket"``.
     """
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     _ = c.drain()  # discard server SETTINGS
 
@@ -138,7 +138,7 @@ def test_extended_connect_protocol_empty_for_plain_get() raises:
     """A regular HEADERS frame (no ``:protocol``) leaves
     ``extended_connect_protocol`` empty, so the dispatcher
     routes it as a normal request."""
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     _ = c.drain()
 
@@ -167,7 +167,7 @@ def test_peer_enable_connect_protocol_latched_on_settings_recv() raises:
 
     The HTTP/2 client side gates its Extended CONNECT issuance
     on this latch per RFC 8441 §3."""
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     _ = c.drain()
 

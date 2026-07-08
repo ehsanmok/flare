@@ -1,6 +1,6 @@
-"""H3C follow-up: out-of-order STREAM reassembly in the H3 client.
+"""Out-of-order STREAM reassembly in the H3 client.
 
-Drives :class:`flare.h3.client._StreamReasm` directly with a real
+Drives :class:`flare.http3.client._StreamReasm` directly with a real
 response wire (built by the shipped server writer) split into
 several STREAM chunks delivered out of order, duplicated, and with a
 gap-then-fill, asserting:
@@ -16,9 +16,9 @@ from std.collections import List
 from std.memory import Span
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import encode_response_data, encode_response_headers
-from flare.h3.client import _StreamReasm
-from flare.h3.response_reader import H3ResponseReader
+from flare.http3 import encode_response_data, encode_response_headers
+from flare.http3.client import _StreamReasm
+from flare.http3.response_reader import Http3ResponseReader
 from flare.qpack import QpackHeader
 
 
@@ -51,7 +51,7 @@ def test_out_of_order_with_dup_and_gap() raises:
     var seg1 = _slice(wire, a, b)
     var seg2 = _slice(wire, b, n)
 
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var reasm = _StreamReasm()
 
     # Deliver the LAST segment first (carries FIN). It is ahead of
@@ -96,7 +96,7 @@ def test_overlapping_chunk_trimmed() raises:
     var overlap_start = mid - 4
     var second = _slice(wire, overlap_start, n)
 
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var reasm = _StreamReasm()
     reasm.push(reader, UInt64(0), Span[UInt8, _](first), False)
     reasm.push(reader, UInt64(overlap_start), Span[UInt8, _](second), True)
@@ -115,7 +115,7 @@ def test_in_order_fast_path() raises:
     var wire = _build_response_wire()
     var n = len(wire)
     var mid = n // 2
-    var reader = H3ResponseReader.new()
+    var reader = Http3ResponseReader.new()
     var reasm = _StreamReasm()
     reasm.push(reader, UInt64(0), Span[UInt8, _](_slice(wire, 0, mid)), False)
     assert_false(reader.is_complete())

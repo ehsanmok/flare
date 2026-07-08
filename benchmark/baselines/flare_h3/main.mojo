@@ -1,8 +1,8 @@
 """Flare HTTP/3 plaintext baseline binary for the bench_h3 harness.
 
 The bench baseline goes through
-:meth:`flare.http.HttpServer.bind_with_h3` +
-:meth:`HttpServer.serve_h3` so the same Handler dispatch shape
+:meth:`flare.http.HttpServer.bind_with_http3` +
+:meth:`HttpServer.serve_http3` so the same Handler dispatch shape
 production callers use drives the bench workload. The handler
 returns a 13-byte ``"Hello, World!"`` body on every request,
 matching the existing ``/plaintext`` route the bench harness
@@ -91,14 +91,14 @@ def main() raises:
     # tickle the idle reaper.
     udp_cfg.max_idle_timeout_ms = UInt64(300_000)
 
-    # bind_with_h3 also opens a TCP listener on tcp_addr for
+    # bind_with_http3 also opens a TCP listener on tcp_addr for
     # h1 / h2c / h2; we point it at an ephemeral kernel-picked
     # port we never serve on so the bench harness only sees the
     # UDP socket. This keeps the harness's "single-wire
     # comparison" contract intact -- the harness drives h2load
     # on the UDP port only.
     var tcp_addr = SocketAddr(IpAddr.localhost(), UInt16(0))
-    var srv = HttpServer.bind_with_h3(tcp_addr, udp_cfg^)
+    var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
     var handler = _PlaintextHandler()
     print("flare-h3 listening on 127.0.0.1:", port)
-    srv.serve_h3[_PlaintextHandler](handler^)
+    srv.serve_http3[_PlaintextHandler](handler^)

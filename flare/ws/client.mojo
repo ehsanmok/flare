@@ -492,7 +492,7 @@ struct WsClient(Movable):
         the existing HTTP/1.1 Upgrade dance instead of HTTP/2.
         WebSocket-over-HTTP/2 (RFC 8441 Extended CONNECT) is
         wired on the server byte-driver side
-        (:class:`flare.http2.H2Connection` advertises
+        (:class:`flare.http2.Http2Connection` advertises
         ``SETTINGS_ENABLE_CONNECT_PROTOCOL`` when opted in via
         ``Http2Config.enable_connect_protocol`` and captures
         the inbound ``:protocol`` pseudo-header on the stream)

@@ -42,7 +42,7 @@ Public surface:
 The adapter is sans-I/O at the codec boundary: byte streams in,
 HTTP/2 wire bytes (HEADERS frame field section + DATA payload +
 trailing HEADERS field section) out. Networking + flow control
-is the H2Connection's job.
+is the Http2Connection's job.
 
 References:
 - gRPC PROTOCOL-HTTP2 spec.

@@ -249,8 +249,8 @@ fuzz-quic-long-header = "mojo -I . fuzz/fuzz_quic_long_header.mojo"  # v0.8 — 
 fuzz-quic-early-data-len = "mojo -I . fuzz/fuzz_quic_early_data_len.mojo"  # 0-RTT (EarlyData) coalesced packet-length parser (200K)
 fuzz-quic-early-data-strike = "mojo -I . fuzz/fuzz_quic_early_data_strike.mojo"  # cross-connection 0-RTT strike set vs reference model (200K)
 fuzz-h3-frame      = "mojo -I . fuzz/fuzz_h3_frame.mojo"            # v0.8 — HTTP/3 frame codec + SETTINGS payload round-trip (200K)
-fuzz-h3-server     = "mojo -I . fuzz/fuzz_h3_server.mojo"           # H3Connection sans-I/O feed safety (200K)
-fuzz-h3-response-reader = "mojo -I . fuzz/fuzz_h3_response_reader.mojo" # H3ResponseReader sans-I/O feed safety + split-invariance (200K)
+fuzz-h3-server     = "mojo -I . fuzz/fuzz_h3_server.mojo"           # Http3Connection sans-I/O feed safety (200K)
+fuzz-h3-response-reader = "mojo -I . fuzz/fuzz_h3_response_reader.mojo" # Http3ResponseReader sans-I/O feed safety + split-invariance (200K)
 fuzz-quic-frame-decode    = "mojo -I . fuzz/fuzz_quic_frame_decode.mojo"     # RFC 9000 §19 frame codec safety + idempotence (200K)
 fuzz-quic-retry           = "mojo -I . fuzz/fuzz_quic_retry.mojo"            # v0.9 - RFC 9000 Retry token + RFC 9001 integrity verify never panic (100K)
 fuzz-qpack-decode         = "mojo -I . fuzz/fuzz_qpack_decode.mojo"          # RFC 9204 static-only decoder + round-trip (200K)
@@ -321,7 +321,7 @@ check-sans-io   = "bash tools/check_sans_io.sh"
 #                decomposition gain; offenders are either split or
 #                explicitly allowlisted with a documented split plan.
 check-reactor-size = "bash tools/check_reactor_size.sh"
-# check-no-http-http2-cycle: enforces that flare/http2/** and flare/h3/**
+# check-no-http-http2-cycle: enforces that flare/http2/** and flare/http3/**
 #                only reach into flare.http via the neutral re-export
 #                layer at flare.http.wire (and the codec namespace at
 #                flare.http.proto). Stops the layering drift that put
@@ -369,24 +369,24 @@ test-quic-keys-install     = { cmd = "mojo -I . tests/quic/test_quic_keys_instal
 test-quic-post-initial-egress = { cmd = "mojo -I . tests/quic/test_quic_post_initial_egress.mojo", depends-on = ["build-rustls-quic"] }  # Handshake + 1-RTT egress builders gating (8 cases)
 test-quic-post-initial-decrypt = { cmd = "mojo -I . tests/quic/test_quic_post_initial_decrypt.mojo", depends-on = ["build-rustls-quic"] }  # inbound Handshake + 1-RTT decrypt gating + bounds (4 cases)
 test-quic-client = { cmd = "mojo -I . tests/quic/test_quic_client.mojo", depends-on = ["build-rustls-quic"] }  # QUIC client connection driver vs QuicListener loopback handshake + 1-RTT stream egress (2 cases)
-test-h3-server-scaffold   = "mojo -I . tests/h3/test_server_scaffold.mojo"    # flare.h3.server scaffold -- H3Connection carrier + stream lifecycle (~11 cases)
-test-h3-dispatch          = "mojo -I . tests/h3/test_h3_dispatch.mojo"        # H3Connection feed -> take_request -> emit_response (10 cases)
+test-h3-server-scaffold   = "mojo -I . tests/h3/test_server_scaffold.mojo"    # flare.http3.server scaffold -- Http3Connection carrier + stream lifecycle (~11 cases)
+test-h3-dispatch          = "mojo -I . tests/h3/test_h3_dispatch.mojo"        # Http3Connection feed -> take_request -> emit_response (10 cases)
 test-h3-end-to-end        = "mojo -I . tests/h3/test_h3_end_to_end.mojo"      # QuicListener H3 dispatch + Handler wire (6 cases)
 test-h3-uni-streams       = "mojo -I . tests/h3/test_h3_uni_streams.mojo"     # uni-stream type dispatch + SETTINGS + GOAWAY (11 cases)
 test-conformance-h3-server = "mojo -I . tests/conformance/test_conformance_h3_server.mojo" # H3 server wire-shape conformance (7 cases)
-test-http-server-with-h3   = "mojo -I . tests/http/test_http_server_with_h3.mojo" # HttpServer.bind_with_h3 + ALPN routing (10 cases)
+test-http-server-with-h3   = "mojo -I . tests/http/test_http_server_with_h3.mojo" # HttpServer.bind_with_http3 + ALPN routing (10 cases)
 test-alpn-dispatch        = "mojo -I . tests/http/test_alpn_dispatch.mojo"    # ALPN -> wire-protocol dispatcher decisions (~11 cases)
 test-alt-svc              = "mojo -I . tests/http/test_alt_svc.mojo"          # RFC 7838 Alt-Svc parser + per-origin cache + h3 wire policy (10 cases)
-test-client-h3-policy     = "mojo -I . tests/http/test_client_h3_policy.mojo" # HttpClient prefer_h3 knob (builder + ctor kwarg) + Alt-Svc record + h3 wire decision (5 cases)
+test-client-h3-policy     = "mojo -I . tests/http/test_client_h3_policy.mojo" # HttpClient prefer_http3 knob (builder + ctor kwarg) + Alt-Svc record + h3 wire decision (5 cases)
 test-ws-autoclient        = "mojo -I . tests/ws/test_ws_autoclient.mojo"      # ALPN-driven WS wire dispatcher decision matrix (~13 cases)
 test-ws-autoclient-loopback = "mojo -I . tests/ws/test_ws_autoclient_loopback.mojo"  # WsAutoClient I/O round-trip vs forked WsServer (4 cases)
 example-alpn-dispatch-demo    = "mojo -I . examples/advanced/alpn_dispatch_demo.mojo"
 example-http3-server-walkthrough = "mojo -I . examples/advanced/http3_server_walkthrough.mojo"
 example-http3-server          = "mojo -I . examples/advanced/http3_server.mojo"      # shared Handler across h1 / h2c / h2 / h3
-example-http3-client          = "mojo -I . examples/advanced/http3_client.mojo"      # HttpClient(prefer_h3=True) live h3 round-trip + happy-eyeballs
+example-http3-client          = "mojo -I . examples/advanced/http3_client.mojo"      # HttpClient(prefer_http3=True) live h3 round-trip + happy-eyeballs
 test-qpack           = "mojo -I . tests/qpack/test_qpack.mojo"           # RFC 9204 static-only encoder/decoder + Huffman fallback (~13 cases)
 test-qpack-dynamic   = "mojo -I . tests/qpack/test_qpack_dynamic.mojo"   # v0.9 - RFC 9204 dynamic table + encoder/decoder stream instructions
-test-h3-qpack-dynamic = "mojo -I . tests/h3/test_h3_qpack_dynamic.mojo"  # v0.9 - H3Connection dynamic-table wiring: encoder-stream inserts decode requests
+test-h3-qpack-dynamic = "mojo -I . tests/h3/test_h3_qpack_dynamic.mojo"  # v0.9 - Http3Connection dynamic-table wiring: encoder-stream inserts decode requests
 test-quic-state      = "mojo -I . tests/quic/test_state.mojo"            # RFC 9000 §3 stream + §10 connection state machines (~13 cases)
 test-quic-loss-recovery = "mojo -I . tests/quic/test_loss_recovery.mojo"  # RFC 9002 loss-recovery: RTT est + ACK-based loss detection + PTO + CC integration (9 cases)
 test-quic-cc         = "mojo -I . tests/quic/test_quic_cc.mojo"                    # v0.9 - RFC 9002/9438/9406 Reno + CUBIC(HyStart++) congestion controllers (9 tests)
@@ -397,12 +397,12 @@ test-h3-request-reader = "mojo -I . tests/h3/test_request_reader.mojo"   # RFC 9
 test-h3-response-writer = "mojo -I . tests/h3/test_response_writer.mojo" # RFC 9114 §4.3 H3 response-stream sans-I/O writer (~7 cases)
 test-h3-client-streams = "mojo -I . tests/h3/test_h3_client_streams.mojo" # client request writer + response reader wire round-trips vs server codecs (6 cases)
 test-h3-client-e2e = { cmd = "mojo -I . tests/h3/test_h3_client_e2e.mojo", depends-on = ["build-rustls-quic"] } # end-to-end H3 client vs QuicListener loopback (GET + POST echo over real QUIC, 2 cases)
-test-h3-client-reasm = "mojo -I . tests/h3/test_h3_client_reasm.mojo" # H3C follow-up -- out-of-order/dup/overlap STREAM reassembly in H3ClientConnection (3 cases)
-test-h3-client-mux = { cmd = "mojo -I . tests/h3/test_h3_client_mux.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- multiplexed H3 client: 2 concurrent requests over one QUIC connection demux to independent bodies
-test-h3-client-frag = { cmd = "mojo -I . tests/h3/test_h3_client_frag.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- multi-packet request-body fragmentation + idle keepalive reuse (large POST reassembled; idle-then-reuse, 2 cases)
-test-h3-live-dial = { cmd = "mojo -I . tests/http/test_h3_live_dial.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- live HttpClient h3 dial over loopback QUIC (fork: GET + POST + Alt-Svc upgrade, 3 cases)
-test-h3-pool-reuse = { cmd = "mojo -I . tests/http/test_h3_pool_reuse.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- HttpClient h3 connection reuse: 2 sequential same-origin GETs share one QUIC connection (fork, dial-count == 1)
-test-h3-happy-eyeballs = { cmd = "mojo -I . tests/http/test_h3_happy_eyeballs.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- threaded h3-vs-h2 race: live h3 win + synthetic fallback/both-fail orchestration (4 cases)
+test-h3-client-reasm = "mojo -I . tests/h3/test_h3_client_reasm.mojo" # out-of-order/dup/overlap STREAM reassembly in Http3ClientConnection (3 cases)
+test-h3-client-mux = { cmd = "mojo -I . tests/h3/test_h3_client_mux.mojo", depends-on = ["build-rustls-quic"] } # multiplexed H3 client: 2 concurrent requests over one QUIC connection demux to independent bodies
+test-h3-client-frag = { cmd = "mojo -I . tests/h3/test_h3_client_frag.mojo", depends-on = ["build-rustls-quic"] } # multi-packet request-body fragmentation + idle keepalive reuse (large POST reassembled; idle-then-reuse, 2 cases)
+test-h3-live-dial = { cmd = "mojo -I . tests/http/test_h3_live_dial.mojo", depends-on = ["build-rustls-quic"] } # live HttpClient h3 dial over loopback QUIC (fork: GET + POST + Alt-Svc upgrade, 3 cases)
+test-h3-pool-reuse = { cmd = "mojo -I . tests/http/test_h3_pool_reuse.mojo", depends-on = ["build-rustls-quic"] } # HttpClient h3 connection reuse: 2 sequential same-origin GETs share one QUIC connection (fork, dial-count == 1)
+test-h3-happy-eyeballs = { cmd = "mojo -I . tests/http/test_h3_happy_eyeballs.mojo", depends-on = ["build-rustls-quic"] } # threaded h3-vs-h2 race: live h3 win + synthetic fallback/both-fail orchestration (4 cases)
 test-h3-frame        = "mojo -I . tests/h3/test_frame.mojo"              # RFC 9114 §7 HTTP/3 frame codec + SETTINGS (~10 cases)
 test-grpc            = "mojo -I . tests/grpc/test_grpc.mojo"             # gRPC LPM framing + status codes (~10 cases)
 test-grpc-metadata   = "mojo -I . tests/grpc/test_metadata.mojo"         # gRPC initial + trailing metadata carrier (~7 cases)
@@ -498,13 +498,13 @@ test-fs              = "mojo -I . tests/http/test_fs.mojo"                      
 test-h2-frame        = "mojo -I . tests/http2/test_h2_frame.mojo"                   # v0.6 Track J — RFC 9113 frame codec (~9 tests)
 test-h2-hpack        = "mojo -I . tests/http2/test_h2_hpack.mojo"                   # v0.6 Track J — RFC 7541 HPACK codec (~12 tests)
 test-h2-state        = "mojo -I . tests/http2/test_h2_state.mojo"                   # v0.6 Track J — Connection / Stream state machines (~11 tests)
-test-h2-server       = "mojo -I . tests/http2/test_h2_server.mojo"                  # v0.6 Track J — H2Connection driver + h2c detection (~6 tests)
+test-h2-server       = "mojo -I . tests/http2/test_h2_server.mojo"                  # v0.6 Track J — Http2Connection driver + h2c detection (~6 tests)
 test-handoff         = "mojo -I . tests/runtime/test_handoff.mojo"                    # v0.6 Track K — HandoffQueue + WorkerHandoffPool (~12 tests)
 test-closure-send-contract = "mojo -I . tests/runtime/test_closure_send_contract.mojo"  # Closure-shape + send-discipline contract (~6 tests)
 test-h2-config       = "mojo -I . tests/http2/test_h2_config.mojo"                  # Http2Config + with_config + SETTINGS emission (~16 tests)
 test-h2-client-conn  = "mojo -I . tests/http2/test_h2_client_conn.mojo"             # Http2ClientConnection low-level byte driver (~10 tests)
 test-h2-server-handler = "mojo -I . tests/http2/test_h2_server_handler.mojo"        # HttpServer.serve(handler) <-> HttpClient(prefer_h2c=True) (~4 tests)
-test-h2-conn-handle  = "mojo -I . tests/http2/test_h2_conn_handle.mojo"             # H2ConnHandle reactor-shaped per-conn state machine (~2 tests)
+test-h2-conn-handle  = "mojo -I . tests/http2/test_h2_conn_handle.mojo"             # Http2ConnHandle reactor-shaped per-conn state machine (~2 tests)
 test-h2-extended-connect = "mojo -I . tests/http2/test_h2_extended_connect.mojo"    # RFC 8441 SETTINGS + :protocol capture (~5 tests)
 test-h2c-upgrade     = "mojo -I . tests/http/test_h2c_upgrade.mojo"               # v0.7 — h2c-via-Upgrade (RFC 7540 §3.2) reactor wiring (~7 tests)
 test-ok-json-typed   = "mojo -I . tests/http/test_ok_json_typed.mojo"             # v0.7 — ok_json_value(value: JsonValue) typed response builder (~7 tests)

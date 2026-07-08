@@ -26,13 +26,13 @@ def main() raises:
     srv.serve(r^, num_workers=2)
 ```
 
-And a version-aware client (negotiates h2 via ALPN, opt into h3):
+And a version-aware client (negotiates HTTP/2 via ALPN, opt into HTTP/3):
 
 ```mojo
 from flare.prelude import *
 
 def main() raises:
-    with HttpClient("https://example.com", prefer_h3=True) as c:
+    with HttpClient("https://example.com", prefer_http3=True) as c:
         var r = c.get("/")
         print(r.status, r.text())
 ```
@@ -285,7 +285,7 @@ What jumps out:
 - **axum** is steady by design but the lowest headline of the four at `201,216 req/s`, tight everywhere except a `29.5 ms` σ at p99.99.
 - **flare 1w** edges nginx 1w by `2.8 %` (`79.0k` vs `76.9k req/s`) with an identical `3.23 ms` p99 median - on par at single-core load. Against Go `net/http` at the same worker count flare does `1.96x` the throughput with comparable tail medians.
 
-**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare h3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, H3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare h3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from new syscall batching (`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed without them). Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
+**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare HTTP/3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, HTTP/3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare HTTP/3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from new syscall batching (`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed without them). Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
 
 The matching nginx / hyper / actix_web / axum baselines built from source by the harness live under [`benchmark/baselines/`](benchmark/baselines/).
 
@@ -354,9 +354,9 @@ flare.quic     Sans-I/O QUIC v1 codec primitives: varint + long/short
                `ConnectionIdTable` run the live UDP reactor; the
                `RustlsQuicAcceptor` binding drives the QUIC TLS
                handshake and per-level keys end-to-end.
-flare.h3       Sans-I/O HTTP/3 frame codec + SETTINGS payload + the
-               `H3RequestReader` state machine + response writer. The
-               `H3Connection` driver mounts on the same `Handler` trait
+flare.http3       Sans-I/O HTTP/3 frame codec + SETTINGS payload + the
+               `Http3RequestReader` state machine + response writer. The
+               `Http3Connection` driver mounts on the same `Handler` trait
                the h1 / h2 paths use and is driven per-stream by the
                QUIC reactor over the wire.
 flare.crypto   HMAC-SHA256, base64url (signed cookies, sessions)

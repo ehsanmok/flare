@@ -5,7 +5,7 @@ Connects :mod:`flare.http2.frame` + :mod:`flare.http2.hpack` +
 
 The high-level surface:
 
-- :class:`H2Connection` — a synchronous, buffer-driven driver. The
+- :class:`Http2Connection` — a synchronous, buffer-driven driver. The
   caller feeds it inbound bytes (``feed``) and pulls outbound bytes
   (``drain``). When a stream's request is complete, :meth:`take_request`
   yields a :class:`flare.http.Request` ready for a normal Handler.
@@ -17,7 +17,7 @@ The high-level surface:
   ``Connection: Upgrade, HTTP2-Settings`` + ``Upgrade: h2c`` and
   return ``True`` when the connection should switch protocols. The
   caller is responsible for emitting the 101 response and then
-  driving the connection through :class:`H2Connection`.
+  driving the connection through :class:`Http2Connection`.
 
 - :func:`is_h2_alpn` — string match for ``"h2"`` so TLS code paths
   can dispatch from ALPN.
@@ -59,7 +59,7 @@ comptime _H2_DEFAULT_INITIAL_WINDOW_SIZE: Int = 65535
 """RFC 9113 §6.5.2 mandates 65535 as the default for new streams
 until SETTINGS negotiates a different value. ``Http2Config`` ships
 the same number so the default ``Http2Config()`` is observably
-identical to the legacy ``H2Connection()`` shape."""
+identical to the legacy ``Http2Connection()`` shape."""
 
 comptime _H2_DEFAULT_MAX_FRAME_SIZE: Int = 16384
 """RFC 9113 §6.5.2 mandates 16384 (2^14) as both the protocol
@@ -77,7 +77,7 @@ comptime _H2_DEFAULT_HEADER_TABLE_SIZE: Int = 4096
 
 @fieldwise_init
 struct Http2Config(Copyable, Defaultable, Movable):
-    """Tunable HTTP/2 SETTINGS for an :class:`H2Connection`.
+    """Tunable HTTP/2 SETTINGS for an :class:`Http2Connection`.
 
     All five fields map 1:1 to RFC 9113 §6.5.2 SETTINGS identifiers
     (plus the RFC 7541 HPACK header-table size). Defaults are the
@@ -100,7 +100,7 @@ struct Http2Config(Copyable, Defaultable, Movable):
     Example:
 
     ```mojo
-    from flare.http2 import H2Connection, Http2Config
+    from flare.http2 import Http2Connection, Http2Config
 
     var cfg = Http2Config(
         max_concurrent_streams=200,
@@ -111,7 +111,7 @@ struct Http2Config(Copyable, Defaultable, Movable):
         allow_huffman_decode=False,
         allow_huffman_encode=False,
     )
-    var conn = H2Connection.with_config(cfg)
+    var conn = Http2Connection.with_config(cfg)
     ```
 
     Fields:
@@ -222,7 +222,7 @@ def detect_h2c_upgrade(headers: HeaderMap) -> Bool:
     the canonical sans-I/O implementation. The decoded
     ``HTTP2-Settings`` payload is fed into the connection during
     initialisation by the caller via
-    :meth:`H2Connection.feed_settings_payload` — that step is the
+    :meth:`Http2Connection.feed_settings_payload` — that step is the
     reactor-bound side of the upgrade and does not happen here.
     """
     from flare.http.proto.h2c_upgrade import (
@@ -232,10 +232,10 @@ def detect_h2c_upgrade(headers: HeaderMap) -> Bool:
     return _proto_detect_h2c_upgrade(headers)
 
 
-# ── H2Connection driver ─────────────────────────────────────────────────
+# ── Http2Connection driver ─────────────────────────────────────────────────
 
 
-struct H2Connection(Defaultable, Movable):
+struct Http2Connection(Defaultable, Movable):
     """Synchronous HTTP/2 driver with separate I/O sides.
 
     A pure state object: the caller drives I/O. It exposes:
@@ -265,8 +265,8 @@ struct H2Connection(Defaultable, Movable):
     def __init__(out self):
         """Default-construct with :class:`Http2Config` defaults.
 
-        Equivalent to ``H2Connection.with_config(Http2Config())``;
-        kept as a separate ``__init__`` so callers (``H2Connection()``
+        Equivalent to ``Http2Connection.with_config(Http2Config())``;
+        kept as a separate ``__init__`` so callers (``Http2Connection()``
         in tests + the inline driver) work byte-for-byte without
         an explicit config argument.
         """
@@ -277,8 +277,8 @@ struct H2Connection(Defaultable, Movable):
         self.config = Http2Config()
 
     @staticmethod
-    def with_config(var config: Http2Config) raises -> H2Connection:
-        """Construct an :class:`H2Connection` whose underlying
+    def with_config(var config: Http2Config) raises -> Http2Connection:
+        """Construct an :class:`Http2Connection` whose underlying
         :class:`Connection` SETTINGS are populated from ``config``.
 
         Validates ``config`` first (RFC 9113 / RFC 7541 bounds);
@@ -297,7 +297,7 @@ struct H2Connection(Defaultable, Movable):
         legacy default unless the user opts in.
         """
         config.validate()
-        var out = H2Connection()
+        var out = Http2Connection()
         out.config = config^
         out.conn.max_concurrent_streams = out.config.max_concurrent_streams
         out.conn.initial_window_size = out.config.initial_window_size
@@ -333,8 +333,8 @@ struct H2Connection(Defaultable, Movable):
         var config: Http2Config,
         req: Request,
         settings_payload: List[UInt8],
-    ) raises -> H2Connection:
-        """Build a server-side :class:`H2Connection` seeded for an h2c upgrade.
+    ) raises -> Http2Connection:
+        """Build a server-side :class:`Http2Connection` seeded for an h2c upgrade.
 
         Per RFC 7540 §3.2 ("Starting HTTP/2 for HTTP URIs"), the original
         HTTP/1.1 request becomes stream id 1 (implicitly half-closed from
@@ -364,12 +364,12 @@ struct H2Connection(Defaultable, Movable):
                 its connection preface.
 
         Returns:
-            An :class:`H2Connection` whose ``outbox`` already holds
+            An :class:`Http2Connection` whose ``outbox`` already holds
             the server's initial SETTINGS frame and whose ``conn.streams``
             already contains stream 1 ready for handler dispatch via
             :meth:`take_completed_streams`.
         """
-        var out = H2Connection.with_config(config^)
+        var out = Http2Connection.with_config(config^)
         # Apply the upgrade-time SETTINGS payload manually so the
         # subsequent ``handle_frame`` loop doesn't auto-emit a
         # SETTINGS_ACK for these (RFC 7540 §3.2.1: the client expects
@@ -526,7 +526,7 @@ struct H2Connection(Defaultable, Movable):
 
         Each id corresponds to an inbound RST_STREAM frame
         (RFC 9113 §6.4) processed by :class:`Connection.handle_frame`.
-        Used by :class:`flare.http._h2_conn_handle.H2ConnHandle` to
+        Used by :class:`flare.http._h2_conn_handle.Http2ConnHandle` to
         flip the matching per-stream :class:`CancelCell` so the
         in-flight handler can short-circuit cooperatively. The list
         is drained -- a second call returns an empty list unless a

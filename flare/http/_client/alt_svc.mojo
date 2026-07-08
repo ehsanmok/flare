@@ -19,9 +19,9 @@ This module is the client-side discovery + policy layer that lets
   that remembers the freshest advertised h3 endpoint with an
   absolute expiry, so a later request to the same origin can dial
   h3 without re-probing.
-* :class:`H3WireChoice` + :func:`decide_h3_wire` -- the pure
+* :class:`Http3WireChoice` + :func:`decide_http3_wire` -- the pure
   wire-selection decision (mirror of the WS ``decide_wire``): given
-  the URL scheme, the ``prefer_h3`` knob, whether a fresh h3 advert
+  the URL scheme, the ``prefer_http3`` knob, whether a fresh h3 advert
   is cached, and whether the QUIC stack is available, returns the
   carrier the client should attempt. The runtime
   :class:`HttpClient` plumbs the real values in and falls back to
@@ -289,7 +289,7 @@ struct AltSvcStore(Copyable, Movable):
     Allocated eagerly (one empty ``Dict``) rather than lazily
     on first record. Lazy alloc is impossible through a read-``self``
     handle (it would have to flip ``_addr``), and auto-record must work
-    by default so a non-``prefer_h3`` client still upgrades after seeing
+    by default so a non-``prefer_http3`` client still upgrades after seeing
     an ``Alt-Svc`` header. The empty-cache cost is negligible.
     """
 
@@ -370,16 +370,16 @@ def _origin_host(origin: String) -> String:
 # ── Wire-selection policy (mirror of WS decide_wire) ─────────────────────────
 
 
-struct H3WireChoice:
+struct Http3WireChoice:
     """Stable codepoints for the carrier the client attempts after
-    consulting the ``Alt-Svc`` cache + ``prefer_h3`` knob."""
+    consulting the ``Alt-Svc`` cache + ``prefer_http3`` knob."""
 
     comptime UNDETERMINED: Int = 0
     """The policy has not run yet."""
 
     comptime HTTP_3: Int = 1
     """Attempt HTTP/3 over QUIC. Chosen when the scheme is
-    ``https``, the QUIC stack is available, and either ``prefer_h3``
+    ``https``, the QUIC stack is available, and either ``prefer_http3``
     is set or the origin has a fresh cached h3 advert."""
 
     comptime HTTP_2_OR_LOWER: Int = 2
@@ -392,9 +392,9 @@ struct H3WireChoice:
     symmetry with the WS ``decide_wire`` codepoints)."""
 
 
-def decide_h3_wire(
+def decide_http3_wire(
     url_scheme: String,
-    prefer_h3: Bool,
+    prefer_http3: Bool,
     h3_cached_available: Bool,
     quic_supported: Bool,
 ) -> Int:
@@ -405,20 +405,20 @@ def decide_h3_wire(
 
     - ``url_scheme`` -- ``"https"`` enables h3; anything else
       (``"http"``) forces the lower path (h3 requires TLS).
-    - ``prefer_h3`` -- the explicit opt-in knob.
+    - ``prefer_http3`` -- the explicit opt-in knob.
     - ``h3_cached_available`` -- a fresh ``Alt-Svc`` h3 advert is
       cached for this origin.
     - ``quic_supported`` -- the QUIC/rustls stack is built in.
 
-    Returns an :class:`H3WireChoice` codepoint. The decision is
+    Returns an :class:`Http3WireChoice` codepoint. The decision is
     pure + testable; the runtime client falls back to
     ``HTTP_2_OR_LOWER`` on any QUIC dial failure regardless of this
     result.
     """
     if not quic_supported:
-        return H3WireChoice.HTTP_2_OR_LOWER
+        return Http3WireChoice.HTTP_2_OR_LOWER
     if url_scheme != "https":
-        return H3WireChoice.HTTP_2_OR_LOWER
-    if prefer_h3 or h3_cached_available:
-        return H3WireChoice.HTTP_3
-    return H3WireChoice.HTTP_2_OR_LOWER
+        return Http3WireChoice.HTTP_2_OR_LOWER
+    if prefer_http3 or h3_cached_available:
+        return Http3WireChoice.HTTP_3
+    return Http3WireChoice.HTTP_2_OR_LOWER

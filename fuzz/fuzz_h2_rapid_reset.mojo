@@ -24,7 +24,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     HpackEncoder,
     HpackHeader,
@@ -91,7 +91,7 @@ def target(data: List[UInt8]) raises:
     if len(data) < 4:
         return
 
-    var c = H2Connection.with_config(Http2Config())
+    var c = Http2Connection.with_config(Http2Config())
     try:
         c.feed(Span[UInt8, _](_preface()))
         _ = c.drain()

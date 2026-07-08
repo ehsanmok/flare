@@ -102,7 +102,7 @@ def main() raises:
 
     # HttpServer.route_alpn cross-checks the negotiated ALPN
     # against which listeners the server has bound. A TCP-only
-    # server raises on "h3"; the bind_with_h3 variant accepts it.
+    # server raises on "h3"; the bind_with_http3 variant accepts it.
     print("== HttpServer.route_alpn cross-checked routing ==")
     var tcp_only = HttpServer.bind(SocketAddr(IpAddr.localhost(), UInt16(0)))
     print(
@@ -122,7 +122,7 @@ def main() raises:
     var udp_cfg = QuicServerConfig()
     udp_cfg.host = String("127.0.0.1")
     udp_cfg.port = UInt16(0)
-    var h3_srv = HttpServer.bind_with_h3(
+    var h3_srv = HttpServer.bind_with_http3(
         SocketAddr(IpAddr.localhost(), UInt16(0)), udp_cfg^
     )
     print("    h3 server advertises:", h3_srv.advertised_alpn_protocols())

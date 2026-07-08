@@ -2,7 +2,7 @@
 
 The packed ``(kind << TAG_SHIFT) | addr`` dict-value encoding that lets
 :mod:`flare.http._unified_reactor_impl` keep all three per-connection
-state machines (PendingConnHandle / ConnHandle / H2ConnHandle) in one
+state machines (PendingConnHandle / ConnHandle / Http2ConnHandle) in one
 ``Dict[Int, Int]`` table with a single lookup + bitshift per event.
 Split out of ``_unified_reactor_impl.mojo`` to keep that module within
 the file-size budget; the reactor imports these back unchanged.
@@ -11,7 +11,7 @@ the file-size budget; the reactor imports these back unchanged.
 # ── Tagged-pointer dispatch ───────────────────────────────────────────────
 #
 # All three per-conn state machines (PendingConnHandle / ConnHandle /
-# H2ConnHandle) live in a single ``conns: Dict[Int, Int]`` table where
+# Http2ConnHandle) live in a single ``conns: Dict[Int, Int]`` table where
 # each value is a packed ``(kind << TAG_SHIFT) | addr`` int. Linux
 # x86_64 limits user-space virtual addresses to 47 bits (canonical
 # form), and macOS arm64 to 47 bits as well, so the top 17 bits of any
@@ -40,7 +40,7 @@ comptime KIND_H1: Int = 1
 """Tag: addr points at a :class:`flare.http._server_reactor_impl.ConnHandle`."""
 
 comptime KIND_H2: Int = 2
-"""Tag: addr points at a :class:`H2ConnHandle`."""
+"""Tag: addr points at a :class:`Http2ConnHandle`."""
 
 
 @always_inline

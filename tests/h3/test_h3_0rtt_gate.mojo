@@ -3,9 +3,9 @@
 The 0-RTT replay hazard (RFC 9001 sec 9.2) means an attacker can
 re-send a captured early-data flight, so the client must only ever let
 an *idempotent* request ride 0-RTT. These tests pin the gate
-(:func:`flare.h3.is_idempotent_method`) and the outcome carrier
-(:class:`flare.h3.H3ZeroRttOutcome`) that
-:meth:`H3ClientConnection.fetch_0rtt` returns.
+(:func:`flare.http3.is_idempotent_method`) and the outcome carrier
+(:class:`flare.http3.Http3ZeroRttOutcome`) that
+:meth:`Http3ClientConnection.fetch_0rtt` returns.
 
 The end-to-end emission path is covered by the H3 client e2e harness;
 here we lock down the security-critical classification in isolation so
@@ -14,13 +14,13 @@ a future edit cannot silently make POST 0-RTT-eligible.
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.h3 import H3ZeroRttOutcome, is_idempotent_method
-from flare.h3.response_reader import H3Response
+from flare.http3 import Http3ZeroRttOutcome, is_idempotent_method
+from flare.http3.response_reader import Http3Response
 from flare.qpack import QpackHeader
 
 
-def _empty_response() -> H3Response:
-    return H3Response(
+def _empty_response() -> Http3Response:
+    return Http3Response(
         200, List[QpackHeader](), List[UInt8](), List[QpackHeader]()
     )
 
@@ -48,13 +48,13 @@ def test_method_classification_case_insensitive() raises:
 
 
 def test_outcome_carrier_fields() raises:
-    var accepted = H3ZeroRttOutcome(
+    var accepted = Http3ZeroRttOutcome(
         _empty_response(), used_0rtt=True, replayed=False
     )
     assert_true(accepted.used_0rtt)
     assert_false(accepted.replayed)
 
-    var rejected = H3ZeroRttOutcome(
+    var rejected = Http3ZeroRttOutcome(
         _empty_response(), used_0rtt=False, replayed=True
     )
     assert_false(rejected.used_0rtt)

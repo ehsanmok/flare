@@ -88,7 +88,7 @@ QUIC API bindings** through a Rust FFI shim. The rationale:
   (rustls EarlyData): the server admits + dispatches early data
   with per-connection (``EarlyDataReplayGuard``) and cross-
   connection (``EarlyDataStrikeSet``) replay defense, and the H3
-  client (``H3ClientConnection.fetch_0rtt``) emits idempotent
+  client (``Http3ClientConnection.fetch_0rtt``) emits idempotent
   requests in the first EarlyData flight, replaying transparently
   at 1-RTT on server reject.
 - **DTLS / SCTP**: not in scope.

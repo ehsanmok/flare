@@ -1,7 +1,7 @@
-"""H3C follow-up: live HttpClient HTTP/3 dial over loopback QUIC.
+"""Live HttpClient HTTP/3 dial over loopback QUIC.
 
 Proves the transparent h3 dial path wired into
-:meth:`flare.http.HttpClient._do_request`: a ``prefer_h3`` client
+:meth:`flare.http.HttpClient._do_request`: a ``prefer_http3`` client
 issuing ``get`` / ``post`` against an ``https://`` origin actually
 opens a real QUIC connection, drives an HTTP/3 request/response, and
 lowers the result back to a normal :class:`flare.http.Response` -- the
@@ -15,8 +15,8 @@ fixture CA. The host MUST be ``localhost`` (the leaf SAN) so cert
 verification passes; ``resolve("localhost")`` maps to 127.0.0.1.
 
 A final assertion covers the Alt-Svc upgrade: a client WITHOUT
-``prefer_h3`` that has recorded an ``Alt-Svc: h3`` advert for an origin
-flips :meth:`HttpClient.h3_wire_choice` to ``HTTP_3`` -- the auto-record
+``prefer_http3`` that has recorded an ``Alt-Svc: h3`` advert for an origin
+flips :meth:`HttpClient.http3_wire_choice` to ``HTTP_3`` -- the auto-record
 store path that makes a second request to that origin upgrade.
 
 Note: public-Internet HTTP/3 is not exercised in CI; the fork + fixture
@@ -29,7 +29,7 @@ from std.testing import assert_equal, assert_true
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 from flare.http import HttpClient, Request, Response, ok
-from flare.http._client.alt_svc import H3WireChoice
+from flare.http._client.alt_svc import Http3WireChoice
 from flare.http.handler import Handler
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import TlsConfig
@@ -81,19 +81,19 @@ def _serve_forever(mut server: QuicListener):
         try:
             _ = server.tick(timeout_ms=50)
             for slot in range(server.connection_count()):
-                var ready = server.take_h3_completed_streams(slot)
+                var ready = server.take_http3_completed_streams(slot)
                 for i in range(len(ready)):
                     var sid = ready[i]
-                    var req = server.take_h3_request(slot, sid)
+                    var req = server.take_http3_request(slot, sid)
                     var resp = handler.serve(req^)
-                    server.emit_h3_response(slot, sid, resp^)
+                    server.emit_http3_response(slot, sid, resp^)
         except:
             return
 
 
 def _client() raises -> HttpClient:
     var cfg = TlsConfig(ca_bundle=_FIXDIR + "ca.pem")
-    return HttpClient(cfg).with_prefer_h3()
+    return HttpClient(cfg).with_prefer_http3()
 
 
 def test_live_h3_get() raises:
@@ -157,21 +157,25 @@ def test_live_h3_post_echo() raises:
 
 
 def test_alt_svc_auto_upgrade() raises:
-    """A client without prefer_h3 that has seen an Alt-Svc h3 advert
+    """A client without prefer_http3 that has seen an Alt-Svc h3 advert
     for an origin upgrades the NEXT request to HTTP/3 (the auto-record
-    store flips h3_wire_choice)."""
+    store flips http3_wire_choice)."""
     with HttpClient() as c:
         # Before any advert: cleartext-equivalent decision stays h2/h1.
         assert_equal(
-            c.h3_wire_choice("https", String("api.example.com"), UInt16(443)),
-            H3WireChoice.HTTP_2_OR_LOWER,
+            c.http3_wire_choice(
+                "https", String("api.example.com"), UInt16(443)
+            ),
+            Http3WireChoice.HTTP_2_OR_LOWER,
         )
         c.record_alt_svc(
             String("api.example.com:443"), String('h3=":443"; ma=3600')
         )
         assert_equal(
-            c.h3_wire_choice("https", String("api.example.com"), UInt16(443)),
-            H3WireChoice.HTTP_3,
+            c.http3_wire_choice(
+                "https", String("api.example.com"), UInt16(443)
+            ),
+            Http3WireChoice.HTTP_3,
         )
 
 

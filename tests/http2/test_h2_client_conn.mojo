@@ -1,7 +1,7 @@
 """End-to-end driver tests for ``flare.http2.client.Http2ClientConnection``.
 
 Exercises the client-side driver entirely in-memory by pairing it
-with the existing server-side :class:`flare.http2.server.H2Connection`
+with the existing server-side :class:`flare.http2.server.Http2Connection`
 and shuttling the byte streams between the two without any sockets.
 This confirms RFC 9113 wire compatibility on both sides AND keeps
 the test fast / hermetic (no port binding, no networking).
@@ -44,7 +44,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     HpackEncoder,
     HpackHeader,
@@ -58,7 +58,7 @@ from flare.http import Response
 
 
 def _shuttle(
-    mut client: Http2ClientConnection, mut server: H2Connection
+    mut client: Http2ClientConnection, mut server: Http2Connection
 ) raises:
     """Pump bytes one-way then the other until both outboxes are empty.
 
@@ -110,7 +110,7 @@ def test_preface_emitted_on_construction() raises:
 def test_settings_exchange_roundtrip() raises:
     """Server SETTINGS feed -> client emits SETTINGS ACK."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
     # By the end of the shuttle, the client must have ACKed the
     # server's initial SETTINGS. We verify by walking the bytes
@@ -129,7 +129,7 @@ def test_settings_exchange_roundtrip() raises:
 def test_get_request_response_roundtrip() raises:
     """Client GET -> server response -> client reassembles."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     # Get the initial SETTINGS exchange out of the way first
     # so the server is in the request-handling state.
     _shuttle(client, server)
@@ -190,7 +190,7 @@ def test_get_request_response_roundtrip() raises:
 def test_post_request_with_body() raises:
     """Client POST with a body -> server reads body bytes."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
 
     var sid = client.next_stream_id()
@@ -222,7 +222,7 @@ def test_post_request_with_body() raises:
 def test_two_sequential_requests_share_connection() raises:
     """Two requests on stream ids 1 and 3 share one driver pair."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
 
     # Request 1 on stream 1.
@@ -290,7 +290,7 @@ def test_two_sequential_requests_share_connection() raises:
 def test_response_with_chunked_body() raises:
     """Server emits a response across multiple DATA frames; client merges."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
 
     var sid = client.next_stream_id()
@@ -358,7 +358,7 @@ def test_response_with_chunked_body() raises:
 def test_rst_stream_surfaced() raises:
     """A peer RST_STREAM marks the stream done and exposes the error code."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
 
     var sid = client.next_stream_id()
@@ -401,7 +401,7 @@ def test_rst_stream_surfaced() raises:
 def test_goaway_received_flag() raises:
     """A GOAWAY from the server flips ``goaway_received``."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
 
     assert_false(client.goaway_received())
@@ -425,7 +425,7 @@ def test_goaway_received_flag() raises:
 def test_push_promise_rejected_by_rst_stream() raises:
     """A server PUSH_PROMISE despite our SETTINGS_ENABLE_PUSH=0 is RSTd."""
     var client = Http2ClientConnection()
-    var server = H2Connection()
+    var server = Http2Connection()
     _shuttle(client, server)
 
     # Hand-craft a PUSH_PROMISE on stream 1 with promised stream 2.

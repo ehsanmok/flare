@@ -10,7 +10,7 @@ The root :mod:`flare` package itself is curated to ~40 most-used
 symbols (HttpServer / Router / Request / Response / extractors /
 middleware / TLS / sockets / WsClient / TestClient). Everything
 beyond that core surface lives in an opt-in submodule
-(:mod:`flare.http2`, :mod:`flare.quic`, :mod:`flare.h3`,
+(:mod:`flare.http2`, :mod:`flare.quic`, :mod:`flare.http3`,
 :mod:`flare.grpc`, :mod:`flare.runtime`, :mod:`flare.crypto`,
 :mod:`flare.openapi`, :mod:`flare.testing`). The prelude pulls
 all of them in one shot.
@@ -300,9 +300,9 @@ from ..http.cookie import (
 
 # flare.http2
 from ..http2 import (
-    H2Connection,
-    H2Error,
-    H2ErrorCode,
+    Http2Connection,
+    Http2Error,
+    Http2ErrorCode,
     H2_PREFACE,
     H2_DEFAULT_FRAME_SIZE,
     H2_MAX_FRAME_SIZE,
@@ -407,9 +407,9 @@ from ..qpack import (
     static_table_lookup as qpack_static_table_lookup,
 )
 
-# flare.h3
-from ..h3 import (
-    H3FrameType,
+# flare.http3
+from ..http3 import (
+    Http3FrameType,
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
     H3_FRAME_TYPE_CANCEL_PUSH,
@@ -421,22 +421,22 @@ from ..h3 import (
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
-    H3Frame,
-    H3Setting,
-    decode_h3_frame,
-    encode_h3_frame,
-    decode_h3_settings,
-    encode_h3_settings,
+    Http3Frame,
+    Http3Setting,
+    decode_http3_frame,
+    encode_http3_frame,
+    decode_http3_settings,
+    encode_http3_settings,
     # H3 request-stream reader (RFC 9114 §4 + §7).
-    H3RequestEventHandler,
-    H3RequestReader,
-    feed_into as h3_feed_into,
+    Http3RequestEventHandler,
+    Http3RequestReader,
+    feed_into as http3_feed_into,
     H3_REQUEST_STATE_INIT,
     H3_REQUEST_STATE_BODY,
     H3_REQUEST_STATE_TRAILERS,
     H3_REQUEST_STATE_DONE,
     # H3 response-stream writer (RFC 9114 §4 + §7).
-    encode_response_headers as h3_encode_response_headers,
+    encode_response_headers as http3_encode_response_headers,
     encode_response_data as h3_encode_response_data,
     encode_response_trailers as h3_encode_response_trailers,
 )

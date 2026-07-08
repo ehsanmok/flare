@@ -1,6 +1,6 @@
 """End-to-end driver tests for ``flare.http2.server``.
 
-Drives an :class:`H2Connection` synchronously: feeds the RFC 9113
+Drives an :class:`Http2Connection` synchronously: feeds the RFC 9113
 preface + a single GET request frame, takes the parsed
 :class:`flare.http.Request`, builds a :class:`flare.http.Response`,
 calls :meth:`emit_response`, and asserts the drain stream contains a
@@ -14,7 +14,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
-    H2Connection,
+    Http2Connection,
     H2_PREFACE,
     HpackEncoder,
     HpackHeader,
@@ -67,7 +67,7 @@ def test_h2c_upgrade_detection() raises:
 
 
 def test_preface_only_emits_settings() raises:
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     var bytes = c.drain()
     assert_true(len(bytes) >= 9)
@@ -78,7 +78,7 @@ def test_preface_only_emits_settings() raises:
 
 
 def test_bad_preface_raises() raises:
-    var c = H2Connection()
+    var c = Http2Connection()
     var bad = String("PRI * HTTP/2.0\r\n\r\nXX\r\n\r\n")
     var bytes = List[UInt8](bad.as_bytes())
     var raised = False
@@ -90,7 +90,7 @@ def test_bad_preface_raises() raises:
 
 
 def test_request_round_trip() raises:
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     var hf = _build_get_request_frame()
     c.feed(Span[UInt8, _](hf))
@@ -145,7 +145,7 @@ def test_request_round_trip() raises:
 
 def test_partial_feed_buffers_frames() raises:
     """A frame split across two ``feed`` calls must be parsed exactly once."""
-    var c = H2Connection()
+    var c = Http2Connection()
     c.feed(Span[UInt8, _](_preface_bytes()))
     var hf = _build_get_request_frame()
     var first = List[UInt8](capacity=5)

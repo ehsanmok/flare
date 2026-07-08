@@ -1,4 +1,4 @@
-"""Unit tests for ``flare.h3.request_reader`` -- H3 request-stream
+"""Unit tests for ``flare.http3.request_reader`` -- H3 request-stream
 sans-I/O state machine.
 
 Validates the callback sequence the reader fires on the four
@@ -14,7 +14,7 @@ from std.collections import List
 from std.memory import Span
 from std.testing import assert_equal, assert_true
 
-from flare.h3 import (
+from flare.http3 import (
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_HEADERS,
     H3_FRAME_TYPE_SETTINGS,
@@ -22,9 +22,9 @@ from flare.h3 import (
     H3_REQUEST_STATE_DONE,
     H3_REQUEST_STATE_INIT,
     H3_REQUEST_STATE_TRAILERS,
-    H3RequestEventHandler,
-    H3RequestReader,
-    encode_h3_frame,
+    Http3RequestEventHandler,
+    Http3RequestReader,
+    encode_http3_frame,
     feed_into,
 )
 from flare.qpack import QpackHeader, encode_field_section
@@ -33,7 +33,7 @@ from flare.qpack import QpackHeader, encode_field_section
 # Test-only recorder that captures every callback the reader fires
 # so assertions can inspect the dispatched payloads.
 @fieldwise_init
-struct _Recorder(H3RequestEventHandler, Movable):
+struct _Recorder(Http3RequestEventHandler, Movable):
     var headers_count: Int
     var trailers_count: Int
     var data_count: Int
@@ -94,17 +94,17 @@ def _qpack_request_headers() raises -> List[UInt8]:
 
 def _frame(ftype: UInt64, payload: List[UInt8]) raises -> List[UInt8]:
     var out = List[UInt8]()
-    encode_h3_frame(ftype, Span[UInt8, _](payload), out)
+    encode_http3_frame(ftype, Span[UInt8, _](payload), out)
     return out^
 
 
 def test_initial_state() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     assert_equal(r.state, H3_REQUEST_STATE_INIT)
 
 
 def test_headers_only() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var headers = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     var consumed = feed_into(r, Span[UInt8, _](headers), rec)
@@ -117,7 +117,7 @@ def test_headers_only() raises:
 
 
 def test_headers_then_data() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     var data_payload = List[UInt8]()
@@ -133,7 +133,7 @@ def test_headers_then_data() raises:
 
 
 def test_headers_then_data_then_trailers() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     var data_payload = List[UInt8]()
@@ -156,7 +156,7 @@ def test_headers_then_data_then_trailers() raises:
 
 
 def test_data_before_headers_is_protocol_error() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var data_payload = List[UInt8]()
     data_payload.append(UInt8(0x41))
@@ -167,7 +167,7 @@ def test_data_before_headers_is_protocol_error() raises:
 
 
 def test_control_frame_on_request_stream_is_protocol_error() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var settings_payload = List[UInt8]()
     var sf = _frame(H3_FRAME_TYPE_SETTINGS, settings_payload)
@@ -177,7 +177,7 @@ def test_control_frame_on_request_stream_is_protocol_error() raises:
 
 
 def test_truncated_frame_yields_needs_more() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     # Slice off the final byte to truncate.
@@ -192,7 +192,7 @@ def test_truncated_frame_yields_needs_more() raises:
 
 
 def test_unknown_frame_type_is_skipped() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     # Grease frame: 0x21 (one of the reserved unknown shapes).
@@ -215,7 +215,7 @@ def test_unknown_frame_type_is_skipped() raises:
 
 
 def test_oversized_headers_is_protocol_error() raises:
-    var r = H3RequestReader.new(max_field_section_bytes=UInt64(8))
+    var r = Http3RequestReader.new(max_field_section_bytes=UInt64(8))
     var rec = _Recorder.new()
     var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     var _ = feed_into(r, Span[UInt8, _](hf), rec)
@@ -224,7 +224,7 @@ def test_oversized_headers_is_protocol_error() raises:
 
 
 def test_repeat_headers_after_trailers_is_protocol_error() raises:
-    var r = H3RequestReader.new()
+    var r = Http3RequestReader.new()
     var rec = _Recorder.new()
     var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
     var trailers_qpack = List[UInt8]()

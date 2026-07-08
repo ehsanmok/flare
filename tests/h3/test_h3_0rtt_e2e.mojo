@@ -1,6 +1,6 @@
 """End-to-end HTTP/3 client 0-RTT (EarlyData) send flight.
 
-Drives the real :meth:`flare.h3.client.H3ClientConnection.fetch_0rtt`
+Drives the real :meth:`flare.http3.client.Http3ClientConnection.fetch_0rtt`
 against a real :class:`flare.quic.server.QuicListener` over loopback
 QUIC, with the server run in a forked child process so the client's
 internal poll loop has a live peer (mirrors
@@ -31,7 +31,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
-from flare.h3 import H3ClientConnection
+from flare.http3 import Http3ClientConnection
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -96,12 +96,12 @@ def _serve_forever(mut server: QuicListener):
         try:
             _ = server.tick(timeout_ms=50)
             for slot in range(server.connection_count()):
-                var ready = server.take_h3_completed_streams(slot)
+                var ready = server.take_http3_completed_streams(slot)
                 for i in range(len(ready)):
                     var sid = ready[i]
-                    var req = server.take_h3_request(slot, sid)
+                    var req = server.take_http3_request(slot, sid)
                     var resp = handler.serve(req^)
-                    server.emit_h3_response(slot, sid, resp^)
+                    server.emit_http3_response(slot, sid, resp^)
         except:
             return
 
@@ -151,7 +151,7 @@ def test_0rtt_accept() raises:
             enable_0rtt=True,
         )
         assert_true(c2.early_data_ready(), "resumed connection has early keys")
-        var h3 = H3ClientConnection(c2^)
+        var h3 = Http3ClientConnection(c2^)
         var outcome = h3.fetch_0rtt(
             String("GET"),
             String("https"),
@@ -214,7 +214,7 @@ def test_0rtt_reject_replays() raises:
             c2.early_data_ready(),
             "client derives early keys from the cached ticket",
         )
-        var h3 = H3ClientConnection(c2^)
+        var h3 = Http3ClientConnection(c2^)
         var outcome = h3.fetch_0rtt(
             String("GET"),
             String("https"),

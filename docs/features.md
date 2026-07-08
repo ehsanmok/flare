@@ -57,7 +57,7 @@ an example file. For layering and the request lifecycle, see
 | `HttpClient(base_url, auth=...)`, `HttpClient(prefer_h2c=True)` — version-aware over TLS+ALPN; `prefer_h2c=True` opts into HTTP/2 cleartext via prior knowledge | [`http_get.mojo`](../examples/basic/http_get.mojo), [`http2_client.mojo`](../examples/advanced/http2_client.mojo) |
 | `HttpClient.with_pool(...)` — connection pool keyed on `(scheme, host, port)`, idle reuse, per-origin caps, stale-conn retry. Covers cleartext HTTP/1.1 and, over TLS, a `TlsConnectionPool` for HTTPS keep-alive (the whole established `TlsStream` is pooled); `idle_count()` / `tls_idle_count()` expose pool depth | [`client_pool.mojo`](../examples/advanced/client_pool.mojo), [`tests/http/test_tls_client_pool.mojo`](../tests/http/test_tls_client_pool.mojo) |
 | `HttpClient(h2c_upgrade=True)` — h2c via Upgrade (RFC 7540 §3.2): client emits `Upgrade: h2c` + `HTTP2-Settings` on the first request, reads 101, carries the peer SETTINGS forward into a fresh h2 connection | [`h2c_client.mojo`](../examples/advanced/h2c_client.mojo), [`tests/http/test_h2c_client_upgrade.mojo`](../tests/http/test_h2c_client_upgrade.mojo) |
-| `HttpClient(prefer_h3=True)` / `.with_prefer_h3()` — HTTP/3 over QUIC: per-origin `Alt-Svc` (RFC 7838) discovery + cache, happy-eyeballs race of the h3-vs-h2 connection establishment on first contact (the request is sent once on the winner, never duplicated), transparent fallback to h2/h1 on any QUIC failure. Idempotent requests may ride 0-RTT on a resumed connection (replaying at 1-RTT if the server rejects). h3 connections are pooled + multiplexed per origin | [`http3_client.mojo`](../examples/advanced/http3_client.mojo), [`tests/http/test_h3_live_dial.mojo`](../tests/http/test_h3_live_dial.mojo) |
+| `HttpClient(prefer_http3=True)` / `.with_prefer_http3()` — HTTP/3 over QUIC: per-origin `Alt-Svc` (RFC 7838) discovery + cache, happy-eyeballs race of the HTTP/3-vs-HTTP/2 connection establishment on first contact (the request is sent once on the winner, never duplicated), transparent fallback to HTTP/2/HTTP/1.1 on any QUIC failure. Idempotent requests may ride 0-RTT on a resumed connection (replaying at 1-RTT if the server rejects). HTTP/3 connections are pooled + multiplexed per origin | [`http3_client.mojo`](../examples/advanced/http3_client.mojo), [`tests/http/test_h3_live_dial.mojo`](../tests/http/test_h3_live_dial.mojo) |
 | `.with_redirect_policy(...)` — `RedirectPolicy.follow_all()` / `.same_origin_only()` / `.deny()` factories; modes on `RedirectMode.FOLLOW_ALL` / `.SAME_ORIGIN_ONLY` / `.DENY`; `TooManyRedirects` error | `flare.http.{redirect_policy,error}` |
 | `.with_cookies()` — pointer-backed `CookieStore` cookie jar; captures `Set-Cookie` and replays matching cookies on subsequent requests | [`tests/http/test_cookie_store.mojo`](../tests/http/test_cookie_store.mojo) |
 | `.with_retry(RetryPolicy)` — bounded retry + backoff for idempotent requests | [`tests/http/test_client_ux.mojo`](../tests/http/test_client_ux.mojo) |
@@ -237,20 +237,20 @@ own dispatch loop.
 
 | Surface | Where |
 |---|---|
-| `H2Connection` synchronous driver — `take_request() -> Request`, `emit_response(...)` queues `HEADERS [+ DATA]`; strips `Connection / Transfer-Encoding / Keep-Alive / Proxy-Connection / Upgrade` per RFC 9113 §8.2.2 | [`http2.mojo`](../examples/advanced/http2.mojo) |
-| Reactor wiring (one fd → one `H2Connection`, ALPN dispatch, h2 prior-knowledge per RFC 9113 §3.4) | `flare.http._unified_reactor_impl`, [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
+| `Http2Connection` synchronous driver — `take_request() -> Request`, `emit_response(...)` queues `HEADERS [+ DATA]`; strips `Connection / Transfer-Encoding / Keep-Alive / Proxy-Connection / Upgrade` per RFC 9113 §8.2.2 | [`http2.mojo`](../examples/advanced/http2.mojo) |
+| Reactor wiring (one fd → one `Http2Connection`, ALPN dispatch, h2 prior-knowledge per RFC 9113 §3.4) | `flare.http._unified_reactor_impl`, [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
 | h2c via Upgrade (mid-stream switch from h1 to h2 per RFC 7540 §3.2) | `flare.http._unified_reactor_impl._migrate_h1_to_h2`, [`tests/http/test_h2c_upgrade.mojo`](../tests/http/test_h2c_upgrade.mojo) |
 | RFC 8441 Extended CONNECT dispatch + SETTINGS latch (server side); fuzz-covered (`fuzz-extended-connect`) | `flare.http2.state` |
 | `Http2Config` — SETTINGS knobs validated at construction | [`http2_config.mojo`](../examples/advanced/http2_config.mojo) |
 | `is_h2_alpn(...)`, `detect_h2c_upgrade(headers)` | `flare.http2.server` |
-| `H2_PREFACE`, `H2_DEFAULT_FRAME_SIZE`, `H2_MAX_FRAME_SIZE`, `H2Error`, `H2ErrorCode` | `flare.http2` |
+| `H2_PREFACE`, `H2_DEFAULT_FRAME_SIZE`, `H2_MAX_FRAME_SIZE`, `Http2Error`, `Http2ErrorCode` | `flare.http2` |
 | Frame codec: `Frame`, `FrameFlags`, `FrameHeader`, `FrameType`, `encode_frame`, `parse_frame` (RFC 9113 §4, all 10 frame types); fuzz-clean (`fuzz-h2-frame`) | `flare.http2.frame` |
 | Stream state: `Stream`, `StreamState`, `Connection.handle_frame` (RFC 9113 §5); fuzz-clean (`fuzz-h2-continuation`, `fuzz-h2-rapid-reset`) | `flare.http2.state` |
 | HPACK (RFC 7541): `HpackEncoder`, `HpackDecoder`, `HpackHeader`, `encode_integer` / `decode_integer` (4/5/6/7-bit prefix codec); static + dynamic table, all four indexing modes, dynamic-table size update; fuzz-clean (`fuzz-hpack-decoder`) | `flare.http2.hpack` |
 | HPACK Huffman codec — scalar-correct, H=1 wire-up + RFC 7541 §C.4 fixtures, and a 256-entry table-driven fast decoder that resolves codes of length <= 8 in one lookup (>=3x scalar across 16 B / 256 B / 4 KB / 64 KB input sizes; codes of length 9..30 fall through to the scalar bit-walker) | `flare.http.hpack_huffman`, `flare.http.hpack_huffman_simd` |
 | CONTINUATION-flood / RAPID-RESET (CVE-2023-44487) state-machine fuzz coverage | `fuzz/fuzz_h2_continuation.mojo`, `fuzz/fuzz_h2_rapid_reset.mojo` |
 | RFC 8441 Extended CONNECT (client side — `WsClient` over h2): `Http2ClientConnection.send_extended_connect` + `WsOverH2Stream` adapter + `bootstrap_ws_over_h2` | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo), `flare.ws.client_h2` |
-| Per-stream `Cancel` propagation (peer RST_STREAM → handler `cancel.cancelled()`): `H2ConnHandle` carries a `Dict[StreamId, Cancel]`, RST_STREAM / GOAWAY / drain all signal the matching cell | `flare.http._h2_conn_handle`, [`tests/http2/test_h2_per_stream_cancel.mojo`](../tests/http2/test_h2_per_stream_cancel.mojo) |
+| Per-stream `Cancel` propagation (peer RST_STREAM → handler `cancel.cancelled()`): `Http2ConnHandle` carries a `Dict[StreamId, Cancel]`, RST_STREAM / GOAWAY / drain all signal the matching cell | `flare.http._h2_conn_handle`, [`tests/http2/test_h2_per_stream_cancel.mojo`](../tests/http2/test_h2_per_stream_cancel.mojo) |
 | h1.1 client connection pool: `HttpClient.with_pool(...)` keyed on `(scheme, host, port)`, idle reuse + per-origin caps + stale-conn retry | [`client_pool.mojo`](../examples/advanced/client_pool.mojo), `flare.http.client_pool` |
 | h2c via Upgrade (client side — `Upgrade` + `HTTP2-Settings` + 101 carry-forward) | [`h2c_client.mojo`](../examples/advanced/h2c_client.mojo), [`tests/http/test_h2c_client_upgrade.mojo`](../tests/http/test_h2c_client_upgrade.mojo) |
 
@@ -261,12 +261,12 @@ sans-I/O codecs, the pure state machines, the OpenSSL AEAD
 backend behind `QuicCrypto`, the rustls binding behind
 `RustlsQuicAcceptor`, the QUIC UDP reactor (live
 `recv -> dispatch -> handle -> drain -> protect -> sendto`
-cycle), the per-stream H3 dispatch
-(`H3Connection` slab on `QuicListener`), the
-Handler-mounted serve loop (`HttpServer.bind_with_h3 +
-serve_h3[H]`), and the ALPN router on top of
+cycle), the per-stream HTTP/3 dispatch
+(`Http3Connection` slab on `QuicListener`), the
+Handler-mounted serve loop (`HttpServer.bind_with_http3 +
+serve_http3[H]`), and the ALPN router on top of
 `HttpServer.bind` are all wired. The same `Handler` instance
-reaches h1 + h2c + h2 + h3 simultaneously.
+reaches HTTP/1.1 + h2c + HTTP/2 + HTTP/3 simultaneously.
 
 **Live wire status (gate met).** The QUIC reactor I/O cycle is
 live, the rustls FFI wrapper surfaces the per-level
@@ -274,7 +274,7 @@ live, the rustls FFI wrapper surfaces the per-level
 `QuicConnection.install_handshake_keys` /
 `install_1rtt_keys`, and the Handler dispatch chain carries
 requests end-to-end over the wire. The bench gate
-(`flare_h3 >= 72,571 req/s vs quiche`) closed: flare h3 leads
+(`flare_h3 >= 72,571 req/s vs quiche`) closed: flare HTTP/3 leads
 at `74,653 req/s` (median, `+2.9 %` over `quiche 0.22`) on the
 1-client x 100-stream workload. The win came from the reactor
 rewrite -- eliminating per-packet whole-connection deep copies
@@ -294,7 +294,7 @@ demo at [`quic_codec_demo.mojo`](../examples/advanced/quic_codec_demo.mojo)
 exercises varint, frame codec, transport parameters, state
 machine, and congestion controller round-trips end-to-end. The
 runnable server example at [`http3_server.mojo`](../examples/advanced/http3_server.mojo)
-serves a single `Handler` over h1 + h2 + h3 simultaneously.
+serves a single `Handler` over HTTP/1.1 + HTTP/2 + HTTP/3 simultaneously.
 
 | Surface | Where |
 |---|---|
@@ -306,17 +306,17 @@ serves a single `Handler` over h1 + h2 + h3 simultaneously.
 | QUIC connection + stream state machines (RFC 9000 §3, §10, §13): `Connection`, `Stream`, `ConnectionEvents`, `handle_frame`, `mark_handshake_complete`, `is_idle_timeout_expired`, `connection_close`, `new_connection`, `new_stream`, `empty_events`; `CONN_STATE_*` and `STREAM_STATE_*` enums | `flare.quic.state` |
 | QUIC congestion control (RFC 9002 §7): the `CongestionController` trait + `RenoController` (RFC 9002 NewReno) + `CubicController` (RFC 9438 CUBIC with RFC 9406 HyStart++ slow-start exit), selected by `CcChoice`. The 1-RTT loss-recovery path (`flare.quic._loss_recovery`) now runs an RTT estimator (RFC 9002 §5), ACK-based loss detection (§6.1 packet-number + time thresholds), the §6.2 PTO formula, and drives a CUBIC controller on every ACK / loss. RFC 9002 §7.7 send pacing is not yet wired (the window gates burst size; no inter-packet timer) -- tracked v0.9.x follow-up | `flare.quic.cc` |
 | QUIC initial-secret + AEAD key schedule (RFC 9001 §5 + RFC 5869 HKDF): `hkdf_extract`, `hkdf_expand`, `hkdf_expand_label`, `derive_initial_secrets`, `QuicAead` enum, `QuicCrypto` trait, `OpenSslQuicCrypto`. OpenSSL AEAD backend (AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305) + AES-ECB / ChaCha20 header-protection mask per RFC 9001 §5.3 / §5.4; key schedule is RFC 9001 Appendix A.1 byte-exact, AEAD vectors are RFC 9001 Appendix A byte-exact, both pinned by `tests/quic/test_crypto.mojo` + `tests/quic/test_openssl_quic_crypto.mojo` + `tests/quic/test_rfc9001_appendix_a.mojo`; fuzz-covered (`fuzz-quic-packet-decrypt`) | `flare.quic.crypto` |
-| Batched UDP I/O (`flare.udp.batch`, Linux): `BatchReceiver` (one `recvmmsg(2)` drains a whole inbound burst), `send_batch` (one `sendmmsg(2)` for a vector of datagrams), `send_segmented` (GSO `UDP_SEGMENT` one-`sendmsg` egress), all behind `udp_batch_supported()` + an `ENOSYS`-latched fallback to per-datagram `recvfrom` / `sendto`. The QUIC reactor's per-tick drain uses `BatchReceiver` by default (disable with `FLARE_QUIC_NO_BATCH=1`); loopback A/B shows no throughput regression on the single-client h3 bench and tighter run-to-run variance | `flare.udp.batch` |
+| Batched UDP I/O (`flare.udp.batch`, Linux): `BatchReceiver` (one `recvmmsg(2)` drains a whole inbound burst), `send_batch` (one `sendmmsg(2)` for a vector of datagrams), `send_segmented` (GSO `UDP_SEGMENT` one-`sendmsg` egress), all behind `udp_batch_supported()` + an `ENOSYS`-latched fallback to per-datagram `recvfrom` / `sendto`. The QUIC reactor's per-tick drain uses `BatchReceiver` by default (disable with `FLARE_QUIC_NO_BATCH=1`); loopback A/B shows no throughput regression on the single-client HTTP/3 bench and tighter run-to-run variance | `flare.udp.batch` |
 | QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + a blocking `recv_from` wake followed by a batched `recvmmsg` burst drain (per-datagram `try_recv_from` fallback) + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4. Idle-timeout dispatch is wired today, plus stateless reset on unknown short-header DCIDs (RFC 9000 §10.3) and structural PTO / ack-delay timer dispatch that re-flushes 1-RTT egress; full server-side loss-driven retransmit and send pacing are tracked v0.9.x follow-ups; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
-| HTTP/3 server driver: `H3Connection` (per-connection driver mounted on `Handler`), `H3ConnectionConfig` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `H3StreamType` (RFC 9114 §6.2 codepoints). `feed_stream_chunk` drives `H3RequestReader` -> `Handler` -> response writer; `take_response_frames` drains encoded bytes; CONTROL + QPACK uni-stream dispatch consumes SETTINGS / GOAWAY / MAX_PUSH_ID and replays peer QPACK encoder-stream inserts into a per-connection dynamic table (`take_qpack_decoder_frames` drains the owed Insert Count Increment); fuzz-covered (`fuzz-h3-server`) | `flare.h3.server` |
+| HTTP/3 server driver: `Http3Connection` (per-connection driver mounted on `Handler`), `Http3Config` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `Http3StreamType` (RFC 9114 §6.2 codepoints). `feed_stream_chunk` drives `Http3RequestReader` -> `Handler` -> response writer; `take_response_frames` drains encoded bytes; CONTROL + QPACK uni-stream dispatch consumes SETTINGS / GOAWAY / MAX_PUSH_ID and replays peer QPACK encoder-stream inserts into a per-connection dynamic table (`take_qpack_decoder_frames` drains the owed Insert Count Increment); fuzz-covered (`fuzz-h3-server`) | `flare.http3.server` |
 | ALPN -> wire-protocol dispatcher: `WireProtocol` codepoints (UNKNOWN / HTTP_1_1 / H2C / HTTP_2 / HTTP_3), `ALPN_HTTP_1_1` / `ALPN_HTTP_2` / `ALPN_HTTP_3` identifiers, `dispatch_alpn`, `dispatch_h2c_upgrade`, `negotiate_alpn`, `wire_protocol_name`. The pure decision function the reactor consults after a TLS handshake completes | `flare.http.alpn_dispatch` |
 | QUIC server Retry + Version Negotiation codecs (`flare.quic.retry`): `encode_retry_packet` / `verify_retry_integrity` (RFC 9001 §5.8 AES-128-GCM integrity tag, RFC 9001 Appendix A.4 byte-exact), `mint_retry_token` / `validate_retry_token` (HMAC-SHA256 address-validation token bound to the peer address + expiry), and `encode_version_negotiation` (RFC 9000 §17.2.1). Codecs are spec-validated and fuzz-clean (`fuzz-quic-retry`); reactor emission on new Initials is a tracked v0.9.x wiring follow-up gated on the egress perf bench | `flare.quic.retry` |
 | QUIC DATAGRAM transport (RFC 9221): `DatagramFrame` + `encode_datagram` / `FrameHandler.on_datagram`, the `max_datagram_frame_size` transport parameter (`TP_ID_MAX_DATAGRAM_FRAME_SIZE`), and received datagrams surfaced on `ConnectionEvents.datagrams` | `flare.quic.frame`, `flare.quic.transport_params` |
 | rustls QUIC binding: `RustlsQuicConfig`, `RustlsQuicAcceptor`, `RustlsQuicSession`, `RustlsQuicError`, `QuicEncryptionLevel`. C ABI shim over `rustls::quic::ServerConnection` (rustls 0.23); per-level CRYPTO frames feed / drain through `flare_rustls_quic_feed_crypto` / `_take_crypto`, negotiated ALPN via `flare_rustls_quic_alpn` | `flare.tls.rustls_quic` |
-| HTTP/3 frame codec (RFC 9114 §7): `H3Frame`, `H3FrameType`, `encode_h3_frame`, `decode_h3_frame`; frame-type constants `H3_FRAME_TYPE_{DATA,HEADERS,CANCEL_PUSH,SETTINGS,PUSH_PROMISE,GOAWAY,MAX_PUSH_ID}` | `flare.h3.frame` |
-| HTTP/3 SETTINGS payload (RFC 9114 §7.2.4): `H3Setting`, `encode_h3_settings`, `decode_h3_settings`; standard identifiers `H3_SETTINGS_{QPACK_MAX_TABLE_CAPACITY,MAX_FIELD_SECTION_SIZE,QPACK_BLOCKED_STREAMS,ENABLE_CONNECT_PROTOCOL}` | `flare.h3.frame` |
-| HTTP/3 request-stream state machine (RFC 9114 §4 + §7): `H3RequestReader`, `H3RequestEventHandler`, `feed_into[H]`; fires `on_headers` / `on_data` / `on_trailers` / `on_unknown_frame` / `on_protocol_error` callbacks on a caller-supplied handler, returns the byte count consumed (`0` == NEEDS_MORE), and tracks the INIT / BODY / TRAILERS / DONE phases via the `H3_REQUEST_STATE_*` tags | `flare.h3.request_reader` |
-| HTTP/3 response-stream writer (RFC 9114 §4 + §7): `encode_response_headers`, `encode_response_data`, `encode_response_trailers`; lowercases header names, rejects pseudo-headers in application + trailer sections, validates status in 100..599; QPACK-encodes field sections via `flare.qpack` | `flare.h3.response_writer` |
+| HTTP/3 frame codec (RFC 9114 §7): `Http3Frame`, `Http3FrameType`, `encode_http3_frame`, `decode_http3_frame`; frame-type constants `H3_FRAME_TYPE_{DATA,HEADERS,CANCEL_PUSH,SETTINGS,PUSH_PROMISE,GOAWAY,MAX_PUSH_ID}` | `flare.http3.frame` |
+| HTTP/3 SETTINGS payload (RFC 9114 §7.2.4): `Http3Setting`, `encode_http3_settings`, `decode_http3_settings`; standard identifiers `H3_SETTINGS_{QPACK_MAX_TABLE_CAPACITY,MAX_FIELD_SECTION_SIZE,QPACK_BLOCKED_STREAMS,ENABLE_CONNECT_PROTOCOL}` | `flare.http3.frame` |
+| HTTP/3 request-stream state machine (RFC 9114 §4 + §7): `Http3RequestReader`, `Http3RequestEventHandler`, `feed_into[H]`; fires `on_headers` / `on_data` / `on_trailers` / `on_unknown_frame` / `on_protocol_error` callbacks on a caller-supplied handler, returns the byte count consumed (`0` == NEEDS_MORE), and tracks the INIT / BODY / TRAILERS / DONE phases via the `H3_REQUEST_STATE_*` tags | `flare.http3.request_reader` |
+| HTTP/3 response-stream writer (RFC 9114 §4 + §7): `encode_response_headers`, `encode_response_data`, `encode_response_trailers`; lowercases header names, rejects pseudo-headers in application + trailer sections, validates status in 100..599; QPACK-encodes field sections via `flare.qpack` | `flare.http3.response_writer` |
 | QPACK encoder + decoder (RFC 9204 — static table per Appendix A, literal field lines with literal names, Huffman shared with HPACK): `QpackHeader`, `encode_field_section`, `decode_field_section`, `static_table_lookup`, `static_table_find`, `static_table_find_name`, `QPACK_STATIC_TABLE_SIZE` | `flare.qpack` |
 | QPACK dynamic table (RFC 9204 §3-4): `QpackDynamicTable` (capacity-bounded eviction, absolute / relative indexing), encoder-stream instruction codec (Set Capacity, Insert With Name Reference, Insert With Literal Name, Duplicate) via `apply_encoder_instructions` / `apply_encoder_instructions_partial`, decoder-stream instructions (Section Ack, Stream Cancel, Insert Count Increment), dynamic field-section codec `encode_field_section_dynamic` / `decode_field_section_dynamic`, owners `QpackEncoder` / `QpackDecoder`; fuzz-clean (`fuzz-qpack-dynamic`) | `flare.qpack.dynamic` |
 
@@ -462,7 +462,7 @@ caller can distinguish recoverable from terminal cases.
 | Headers / URL | `HeaderInjectionError`, `UrlParseError` |
 | Network | `NetworkError`, `ConnectionRefused`, `ConnectionTimeout`, `ConnectionReset`, `AddressInUse`, `AddressParseError`, `BrokenPipe`, `DnsError`, `Timeout` |
 | TLS | `TlsHandshakeError`, `CertificateExpired`, `CertificateHostnameMismatch`, `CertificateUntrusted`, `TlsServerError`, `TlsServerNotImplemented` |
-| HTTP/2 | `H2Error`, `H2ErrorCode`, `HuffmanError` |
+| HTTP/2 | `Http2Error`, `Http2ErrorCode`, `HuffmanError` |
 | WebSocket | `WsHandshakeError`, `WsProtocolError` |
 | UDP | `DatagramTooLarge` |
 

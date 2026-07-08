@@ -110,14 +110,14 @@ flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  client driver (incl. resumption + 0-RTT EarlyData
                  send flight), and the rustls QUIC TLS drive that
                  carry HTTP/3 end-to-end
-flare.h3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
-                 request-stream reader (``H3RequestReader`` +
-                 ``H3RequestEventHandler`` + ``feed_into[H]`` --
+flare.http3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
+                 request-stream reader (``Http3RequestReader`` +
+                 ``Http3RequestEventHandler`` + ``feed_into[H]`` --
                  typed ``on_headers`` / ``on_data`` / ``on_trailers``
                  callbacks), response-stream writer with QPACK-
                  encoded field sections and the ``mut out:
                  List[UInt8]`` buffer-reuse contract (RFC 9114 §4 +
-                 §7), plus the client side: ``H3ClientConnection``
+                 §7), plus the client side: ``Http3ClientConnection``
                  (request writer + response reader over the QUIC
                  client driver) for end-to-end HTTP/3 requests,
                  including ``fetch_0rtt`` -- idempotent-method-only
@@ -458,10 +458,10 @@ def main() raises:
         var r = c.get("/api/users")
         r.raise_for_status()
 
-    # https:// can prefer HTTP/3 over QUIC with prefer_h3=True. The
+    # https:// can prefer HTTP/3 over QUIC with prefer_http3=True. The
     # same call site applies; an idempotent GET races h3 against h2/h1
     # (happy-eyeballs) and any QUIC failure falls back transparently:
-    with HttpClient(prefer_h3=True, base_url="https://cloudflare.com") as c:
+    with HttpClient(prefer_http3=True, base_url="https://cloudflare.com") as c:
         var r = c.get("/")
         print(r.status, r.text())
 ```

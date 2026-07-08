@@ -1,5 +1,5 @@
 """Fuzz harness: HTTP/3 client response reader
-(:class:`flare.h3.response_reader.H3ResponseReader`).
+(:class:`flare.http3.response_reader.Http3ResponseReader`).
 
 The client-side mirror of ``fuzz_h3_server``. The response reader
 is sans-I/O: the QUIC client driver feeds it reassembled
@@ -32,7 +32,7 @@ Run:
 
 from mozz import FuzzConfig, fuzz
 
-from flare.h3 import H3ResponseReader
+from flare.http3 import Http3ResponseReader
 
 
 def _bytes(s: StringLiteral) -> List[UInt8]:
@@ -49,7 +49,7 @@ def _assert(cond: Bool, msg: String) raises:
         raise Error(msg)
 
 
-def _probe(mut r: H3ResponseReader, fed: Int) raises:
+def _probe(mut r: Http3ResponseReader, fed: Int) raises:
     """Shared post-feed invariant probe: bounded body + take
     discipline. Never crashes regardless of reader disposition."""
     _assert(
@@ -67,7 +67,7 @@ def _probe(mut r: H3ResponseReader, fed: Int) raises:
 
 
 def _run_whole(data: List[UInt8]) raises:
-    var r = H3ResponseReader.new()
+    var r = Http3ResponseReader.new()
     try:
         r.feed(Span[UInt8, _](data))
     except _:
@@ -76,7 +76,7 @@ def _run_whole(data: List[UInt8]) raises:
 
 
 def _run_byte_at_a_time(data: List[UInt8]) raises:
-    var r = H3ResponseReader.new()
+    var r = Http3ResponseReader.new()
     var fed = 0
     for i in range(len(data)):
         var one = List[UInt8]()
@@ -97,7 +97,7 @@ def _run_split(data: List[UInt8]) raises:
         a.append(data[i])
     for i in range(mid, len(data)):
         b.append(data[i])
-    var r = H3ResponseReader.new()
+    var r = Http3ResponseReader.new()
     try:
         r.feed(Span[UInt8, _](a))
         r.feed(Span[UInt8, _](b))

@@ -12,7 +12,7 @@ Before this package existed, h1 and h2 both reached into each
 other for these types: ``flare.http2.server`` imported
 ``Request`` / ``Response`` / ``HeaderMap`` / ``Method`` from
 ``flare.http``, while ``flare.http._h2_conn_handle`` (the
-reactor bridge) imported ``H2Connection`` / ``Http2Config`` from
+reactor bridge) imported ``Http2Connection`` / ``Http2Config`` from
 ``flare.http2.server``. The cycle made layering hard to reason
 about and hard to lint.
 
@@ -30,11 +30,11 @@ Layering contract enforced by ``pixi run check-no-http-http2-cycle``:
 - ``flare/http/**`` MAY NOT import ``from flare.http2`` except in
   the explicitly allowlisted reactor-bridge module
   (``flare/http/_h2_conn_handle.mojo``) and helpers that need the
-  ``H2Connection`` driver.
+  ``Http2Connection`` driver.
 - ``flare/http2/**`` MAY NOT import ``from flare.http`` -- it
   imports ``from flare.http.wire`` for the shared types and
   ``from flare.http.proto`` for codec primitives instead.
-- ``flare/h3/**`` follows the same rule: ``from flare.http.wire``
+- ``flare/http3/**`` follows the same rule: ``from flare.http.wire``
   for the canonical handler-facing types; no reach into
   ``flare.http``.
 

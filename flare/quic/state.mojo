@@ -178,7 +178,7 @@ struct ConnectionEvents(Copyable, Movable):
       and appends the full :class:`StreamFrame` (stream id +
       offset + payload + fin) here so the H3 reactor wrapper
       can route per-stream bytes to
-      :class:`flare.h3.H3Connection.feed_stream_chunk` /
+      :class:`flare.http3.Http3Connection.feed_stream_chunk` /
       :meth:`feed_uni_stream_chunk` after
       :func:`handle_frame_buf` returns.
     * ``next_deadline_us`` -- earliest absolute time the driver
@@ -331,7 +331,7 @@ def apply_stream(
     :class:`StreamFrame` is also appended to
     :attr:`ConnectionEvents.stream_chunks` so the H3 reactor
     wrapper can route the payload bytes to its
-    per-connection :class:`flare.h3.H3Connection` without
+    per-connection :class:`flare.http3.Http3Connection` without
     re-parsing the QUIC packet.
     """
     var sid = sf.stream_id
