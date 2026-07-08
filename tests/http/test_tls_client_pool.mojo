@@ -1,4 +1,4 @@
-"""Tests for the HTTPS (TLS HTTP/1.1) client connection pool (W5).
+"""Tests for the HTTPS (TLS HTTP/1.1) client connection pool.
 
 Unlike the cleartext pool -- which stores raw fds -- the TLS pool
 (:class:`flare.http._client.tls_pool.TlsConnectionPool`) stores whole
@@ -256,7 +256,7 @@ def test_pool_is_per_origin() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_tls_client_pool.mojo -- HTTPS keep-alive pool (W5)")
+    print("test_tls_client_pool.mojo -- HTTPS keep-alive pool")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -12,7 +12,7 @@ empty handle (:meth:`disabled`, ``_addr == 0``) is the never-allocated /
 moved-from state: every method is a no-op on it, so a client that did not
 opt into cookies pays nothing and behaves exactly as before.
 
-ponytail: this jar is origin-agnostic -- every stored cookie is replayed on
+This jar is origin-agnostic -- every stored cookie is replayed on
 every request from this client (no RFC 6265 domain/path matching). That is
 the correct shape for the common single-origin ``HttpClient(base_url=...)``
 session; the upgrade path is per-(domain, path) scoping keyed on the

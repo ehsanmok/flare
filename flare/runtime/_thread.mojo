@@ -53,11 +53,11 @@ comptime _OpaquePtr = UnsafePointer[UInt8, MutUntrackedOrigin]
 
 
 # Shortcut for making a NULL pointer of the flavour we use throughout.
-# ponytail: Mojo 1.0.0b2 makes UnsafePointer non-nullable and rejects a
+# Mojo 1.0.0b2 makes UnsafePointer non-nullable and rejects a
 # comptime-literal address of 0, but pthread genuinely needs a C NULL here
 # (NULL attr arg, NULL retval slot, NULL start-routine return). Build it
-# from a runtime zero so the non-null constraint doesn't fire. Upgrade
-# path: model these as Optional[UnsafePointer], which marshals as NULL
+# from a runtime zero so the non-null constraint doesn't fire. A cleaner
+# fix would model these as Optional[UnsafePointer], which marshals as NULL
 # across FFI with identical layout (the null address is the None niche).
 @always_inline
 def _null_ptr() -> _OpaquePtr:

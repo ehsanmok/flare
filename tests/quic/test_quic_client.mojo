@@ -1,4 +1,4 @@
-"""H3C-1: the QUIC client connection driver end to end.
+"""The QUIC client connection driver end to end.
 
 Drives :class:`flare.quic.client.QuicClientConnection` against the
 real :class:`flare.quic.server.QuicListener` over loopback UDP. The
@@ -85,8 +85,8 @@ def test_client_send_stream_after_handshake() raises:
     """Once established the client can open a bidi stream and ship a
     1-RTT STREAM frame; the server tick consumes it without error.
 
-    The payload here is opaque bytes (real H3/QPACK framing lands in
-    H3C-2); this asserts the 1-RTT egress + server ingress path is
+    The payload here is opaque bytes (real H3/QPACK framing is tested
+    separately); this asserts the 1-RTT egress + server ingress path is
     wired, not the H3 semantics."""
     var server = _bind_server()
     var connector = _make_connector()

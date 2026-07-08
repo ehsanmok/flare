@@ -1,5 +1,5 @@
 """Tests for the HTTP/3 server driver's request -> handler ->
-response wire path -- Track Q4-W commit 1/3.
+response wire path.
 
 The new methods on :class:`flare.h3.H3Connection`:
 

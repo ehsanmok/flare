@@ -1,4 +1,4 @@
-"""TTL-bounded DNS resolution cache (W3).
+"""TTL-bounded DNS resolution cache.
 
 An additive layer over the sync :func:`flare.dns.resolve`: a value-type
 cache the caller owns and threads through repeated lookups. Within a
@@ -16,9 +16,9 @@ var b = cache.resolve("example.com")   # served from cache, no syscall
 print(cache.resolve_count())            # 1
 ```
 
-ponytail: single-threaded value type (the owner serializes access); no
-internal lock. The upgrade path for a shared cache across reactor
-workers is the same pointer-backed interior-mutable handle pattern as
+This is a single-threaded value type (the owner serializes access); it
+has no internal lock. A shared cache across reactor workers could reuse
+the same pointer-backed interior-mutable handle pattern as
 ``flare.http._client.alt_svc.AltSvcStore`` plus a mutex, layered on top
 of this pure cache without changing its logic.
 """

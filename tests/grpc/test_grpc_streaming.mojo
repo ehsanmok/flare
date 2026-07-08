@@ -1,4 +1,4 @@
-"""End-to-end tests for gRPC streaming RPCs (W6).
+"""End-to-end tests for gRPC streaming RPCs.
 
 Drives :class:`flare.grpc.GrpcClient`'s streaming calls over the HTTP/2
 cleartext (h2c prior-knowledge) path against a forked flare

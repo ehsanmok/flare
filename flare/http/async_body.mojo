@@ -206,7 +206,7 @@ struct UpstreamChunkSource(AsyncChunkSource, Movable):
     ``FrameMux`` uses, so a worker can speak one wire shape to both
     the single-stream and multiplexed fronts.
 
-    ponytail: one source owns one connection (a dedicated framed link).
+    One source owns one connection (a dedicated framed link).
     The many-streams-over-one-connection case is the handler owning a
     ``FrameMux`` as shared state and driving it directly; a future
     ``FrameMux.open`` returning a lightweight per-stream handle is the

@@ -4,13 +4,12 @@
 The decision function :func:`decide_wire` is the pure piece the
 dispatcher consults after the TLS handshake completes; this
 suite pins every observable outcome at the byte level. The
-runtime hand-off (Track Q8-W commit 1/2) is now wired:
-:meth:`WsAutoClient.connect` drives a real TLS handshake, the
-h2 preface + SETTINGS exchange when ALPN selects ``h2``, the
-Extended CONNECT bootstrap, and the per-path carrier storage.
-The I/O-touching integration tests over loopback TLS land in
-Track Q8-W commit 2/2; this file pins the no-I/O decision
-matrix + the error surfaces of the runtime call.
+runtime hand-off is now wired: :meth:`WsAutoClient.connect`
+drives a real TLS handshake, the h2 preface + SETTINGS exchange
+when ALPN selects ``h2``, the Extended CONNECT bootstrap, and
+the per-path carrier storage. The I/O-touching integration
+tests over loopback TLS live separately; this file pins the
+no-I/O decision matrix + the error surfaces of the runtime call.
 
 The 13 test cases:
 
@@ -30,7 +29,7 @@ The 13 test cases:
 11. :meth:`WsAutoClient.url_scheme` parses ``ws://...``.
 12. :meth:`WsAutoClient.connect` against an unreachable host
     surfaces a clear error + leaves :attr:`chosen_wire` at
-    FAILED (the Track Q8-W commit 1/2 runtime surface).
+    FAILED (the runtime surface).
 13. :meth:`take_h1_client` / :meth:`take_h2_carrier` raise
     when the dispatcher hasn't picked the matching path.
 """
@@ -142,9 +141,8 @@ def test_url_scheme_parses_ws() raises:
 
 
 def test_connect_unreachable_host_surfaces_failure() raises:
-    """The runtime hand-off lives in
-    :meth:`WsAutoClient.connect` (Track Q8-W commit 1/2). With
-    no listener at the configured host the DNS / TCP / TLS
+    """The runtime hand-off lives in :meth:`WsAutoClient.connect`.
+    With no listener at the configured host the DNS / TCP / TLS
     layers raise before the dispatcher reaches any wire choice;
     :attr:`chosen_wire` lands on :data:`WsWireChoice.FAILED`
     and :attr:`last_error` carries the failing message."""

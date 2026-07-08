@@ -968,7 +968,7 @@ def _extractor_error_response(e: Error, expose: Bool = False) -> Response:
     (the ``AuthError(`` prefix is fixed in its ``write_to``). The
     detail is sanitized by default and only echoed under ``expose``.
 
-    ponytail: string-prefix recovery (not an ``import AuthError`` +
+    String-prefix recovery (not an ``import AuthError`` +
     typed catch) deliberately avoids the ``extract -> auth_extract ->
     extract`` import cycle; the prefix is the contract.
     """

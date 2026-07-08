@@ -36,10 +36,10 @@ The fuzzer carves the input bytes into five work items:
   FIN, then take_completed_streams.
 * Branch D: feed every byte as a 1-byte chunk (worst case for
   the NEEDS_MORE buffering loop).
-* Branch E (Track Q12-W): route the bytes through
+* Branch E: route the bytes through
   :meth:`flare.quic.server.QuicListener._route_h3_stream_chunks`
   via a synthetic :class:`flare.quic.state.ConnectionEvents` so
-  the new dispatch-on-listener path is fuzz-covered too. Same
+  the dispatch-on-listener path is fuzz-covered too. Same
   safety bar as branches A..D.
 
 Run:
@@ -154,7 +154,7 @@ def _run_byte_at_a_time(mut c: H3Connection, data: List[UInt8]) raises:
 
 
 def _run_listener_dispatch(var data: List[UInt8]) raises:
-    """Branch E (Track Q12-W): drive the new H3 dispatch on
+    """Branch E: drive the H3 dispatch on
     :class:`flare.quic.server.QuicListener` with a synthetic
     STREAM frame so the fuzz coverage extends past the
     sans-I/O driver into the listener-side routing path.

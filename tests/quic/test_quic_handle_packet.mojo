@@ -2,7 +2,7 @@
 (`flare.quic.server.QuicConnection.handle_packet` +
 `flare.quic.server.QuicListener.dispatch_datagram` ->
 `flare.quic.protection.unprotect_initial_packet` ->
-`flare.quic.state.handle_frame_buf`) -- Track Q3-W commit 2/5.
+`flare.quic.state.handle_frame_buf`).
 
 The pipeline runs the same path a real QUIC handshake walks for
 its first client Initial: the client encrypts a CRYPTO+PADDING
@@ -317,8 +317,8 @@ def test_handle_packet_drops_short_header_silently() raises:
 
 def test_handle_packet_drops_handshake_long_silently() raises:
     """Handshake long-header packets need keys installed by the
-    TLS bridge (commit 4/5); handle_packet returns empty events
-    so the dispatch loop survives any post-Initial traffic."""
+    TLS bridge; handle_packet returns empty events so the
+    dispatch loop survives any post-Initial traffic."""
     var dcid = _make_cid(UInt8(0xC0), 8)
     var scid = _make_cid(UInt8(0xD0), 8)
     var qc = QuicConnection(dcid, scid)

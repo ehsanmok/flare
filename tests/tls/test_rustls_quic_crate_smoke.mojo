@@ -11,8 +11,8 @@ This test confirms that:
    "no CERTIFICATE blocks" error path through ``last_error``.
 
 The full handshake fixture suite lives in
-``test_rustls_quic_handshake.mojo`` (lands in Track Q2-W commit
-4/4). This smoke just pins the link.
+``test_rustls_quic_handshake.mojo``. This smoke just pins the
+link.
 """
 
 from std.ffi import OwnedDLHandle, c_int
@@ -25,11 +25,10 @@ def _find_rustls_lib() -> String:
     """Canonical-path resolver for the rustls QUIC cdylib.
 
     Delegates to ``flare.utils.dylib.find_flare_lib("rustls_quic")``
-    which the Track Q2-W commit 2/4 activation script
-    (``flare/tls/ffi/build_rustls.sh``) populates at
-    ``$CONDA_PREFIX/lib/libflare_rustls_quic.so``. Falls back to
-    ``build/libflare_rustls_quic.so`` for bare checkouts that
-    haven't run the activation script yet.
+    which the activation script (``flare/tls/ffi/build_rustls.sh``)
+    populates at ``$CONDA_PREFIX/lib/libflare_rustls_quic.so``.
+    Falls back to ``build/libflare_rustls_quic.so`` for bare
+    checkouts that haven't run the activation script yet.
     """
     return find_flare_lib("rustls_quic")
 

@@ -1,4 +1,4 @@
-"""Fuzz harness: QUIC migration anti-amplification budget (W8).
+"""Fuzz harness: QUIC migration anti-amplification budget.
 
 The strict egress hold bounds server-originated bytes to an unvalidated
 candidate path at 3x the bytes received from it (RFC 9000 sec 8.1 /

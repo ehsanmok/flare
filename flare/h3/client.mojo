@@ -112,7 +112,7 @@ struct _StreamReasm(Copyable, Movable):
     offset (:attr:`fin_offset`) and only signalled to the reader
     once every byte up to it has been delivered.
 
-    ponytail: ``_drain_pending`` rescans ``pending`` each step
+    ``_drain_pending`` rescans ``pending`` each step
     (O(n^2) in the number of buffered gap chunks). A single response
     rarely buffers more than a couple of out-of-order frames, so the
     quadratic scan is a non-issue; the upgrade path is an
@@ -535,7 +535,7 @@ struct H3ClientConnection(Movable):
         rejected-0-RTT failure. ``used_0rtt`` is True only when the
         server accepted the early data.
 
-        ponytail: 0-RTT packets are not wired into loss recovery, so a
+        0-RTT packets are not wired into loss recovery, so a
         lost-but-accepted 0-RTT packet is not retransmitted (fine on
         the lossless loopback this client targets; the upgrade path is
         the shared-pn loss-recovery registration in

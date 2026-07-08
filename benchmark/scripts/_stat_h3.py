@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Aggregate multiple ``h2load --npn-list=h3`` runs into a single
-stable/unstable datapoint for the v0.8 Phase D Track Q7-W harness.
+stable/unstable datapoint for the v0.8 HTTP/3 bench harness.
 
 Usage:
     _stat_h3.py <out.json> <run1.txt> <run2.txt> ...

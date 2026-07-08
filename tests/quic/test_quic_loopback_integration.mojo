@@ -1,22 +1,19 @@
-"""Loopback integration test for the QUIC server reactor --
-Track Q3-W commit 5/5, extended at Track Q11-W with the egress
-+ I/O-loop close cases.
+"""Loopback integration test for the QUIC server reactor,
+extended with the egress + I/O-loop close cases.
 
 Drives the full server-side reactor over a real loopback UDP
 socket: client sends a synth Initial -> kernel routes it to the
 listener -> listener accepts the new slot + drives the state
 machine + arms the idle timer. The packet round-trip exercises
-the seams every prior commit in this track wired up:
+the seams wired up across the reactor:
 
 1. ``QuicListener.bind`` -- real UDP bind on 127.0.0.1, kernel-
-   chosen ephemeral port (commit 1/5).
-2. ``QuicListener.tick`` -- ``recv_from`` -> dispatch_datagram
-   (commit 1/5).
+   chosen ephemeral port.
+2. ``QuicListener.tick`` -- ``recv_from`` -> dispatch_datagram.
 3. ``QuicConnection.handle_packet`` -- the per-packet decrypt +
-   state-machine drive (commit 2/5).
-4. ``QuicListener.timer_wheel`` -- idle timer arms on accept
-   (commit 3/5).
-5. Track Q11-W:
+   state-machine drive.
+4. ``QuicListener.timer_wheel`` -- idle timer arms on accept.
+5. Egress path:
    - ``QuicListener.send_to`` thin wrapper around
      ``UdpSocket.send_to``.
    - ``QuicListener._build_initial_response(slot)`` builds a
@@ -32,10 +29,9 @@ the seams every prior commit in this track wired up:
 
 The test stays inside the Mojo process: a second
 :class:`UdpSocket` is opened on the same loopback interface as
-the client, sends one or more synth packets + (for the Q11-W
-cases) receives the server's protected Initial response and
-verifies it decrypts back to the originally-injected CRYPTO
-bytes.
+the client, sends one or more synth packets + receives the
+server's protected Initial response and verifies it decrypts
+back to the originally-injected CRYPTO bytes.
 
 Two packets cover the close path:
 
@@ -317,7 +313,7 @@ def test_loopback_unknown_short_header_stateless_reset() raises:
     listener.close()
 
 
-# -- Track Q11-W: egress + UDP I/O loop close cases --------------------
+# -- Egress + UDP I/O loop close cases --------------------
 
 
 def test_egress_build_initial_response_decrypts_at_client() raises:

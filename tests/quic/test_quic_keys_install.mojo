@@ -1,4 +1,4 @@
-"""Phase F commit 3/6 -- per-level egress queues + readiness install.
+"""Per-level egress queues + readiness install.
 
 Covers the wiring added to :meth:`QuicListener._dispatch_crypto_frames`:
 
@@ -143,8 +143,8 @@ def _build_synth_initial_with_crypto(
 def test_per_level_egress_queues_allocated_in_lockstep() raises:
     """Accepting an Initial allocates one entry per slot in EACH
     of the three per-level egress queues (Initial, Handshake,
-    1-RTT). Phase F commit 3/6 added the new pair; v0.8 originally
-    only had the Initial-level queue. Lockstep with
+    1-RTT); v0.8 originally only had the Initial-level queue.
+    Lockstep with
     :attr:`tls_sessions` + `connections` so the
     :meth:`_dispatch_crypto_frames` pump can index by slot for
     every level."""
@@ -187,8 +187,8 @@ def test_synth_initial_does_not_flip_handshake_or_1rtt_keys() raises:
     """A synthetic Initial that rustls REJECTS (the bytes are
     opaque garbage, not a real ClientHello) must NOT flip the
     handshake-readiness sentinel on the connection.  Negative-
-    control regression for the Phase F commit 3/6 pump: without
-    a successful TLS state transition, rustls's `KeyChange` never
+    control regression for the pump: without a successful TLS
+    state transition, rustls's `KeyChange` never
     fires, so :func:`_do_have_keys` returns 0 at every level and
     the connection's :attr:`rx_handshake_secret` +
     `rx_1rtt_secret` stay empty -- the post-Initial decrypt path

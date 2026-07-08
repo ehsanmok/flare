@@ -10,9 +10,9 @@ the canonical 1162-byte client-initial CRYPTO+PADDING frame.
 
 The RFC's Appendix A bytes are the cross-implementation reference
 that aioquic, quinn, quiche, mvfst, quic-go, and ngtcp2 all pin
-against; matching those bytes from this commit's
-:class:`OpenSslQuicCrypto` is sufficient evidence the AEAD stack
-will interoperate with every QUIC implementation in the wild.
+against; matching those bytes from :class:`OpenSslQuicCrypto` is
+sufficient evidence the AEAD stack will interoperate with every
+QUIC implementation in the wild.
 
 Vectors covered:
 
@@ -28,11 +28,11 @@ Vectors covered:
   unprotected long header as AAD; output matches the RFC.
 - A.5 ChaCha20-Poly1305 short header: full
   :func:`protect_1rtt_packet` round-trip against the RFC's
-  ``4cfe4189655e5cd55c41f69080575d7999c25a5bfb`` reference packet
-  (Track Q10-W). Pins both the AEAD output and the header
-  protection mask width for short headers.
+  ``4cfe4189655e5cd55c41f69080575d7999c25a5bfb`` reference packet.
+  Pins both the AEAD output and the header protection mask width
+  for short headers.
 
-Track Q10-W also adds Handshake + 1-RTT round-trip cases for
+Also included are Handshake + 1-RTT round-trip cases for
 :func:`protect_handshake_packet` / :func:`unprotect_handshake_packet`
 and :func:`protect_1rtt_packet` / :func:`unprotect_1rtt_packet`.
 Those use synthetic 32-byte secrets (the schedule downstream of
@@ -297,7 +297,7 @@ def test_a2_client_initial_full_ciphertext_bytes() raises:
     _eq_bytes(got_last_16, rfc_last_16)
 
 
-# -- Track Q10-W: Handshake + 1-RTT round-trips ------------------------
+# -- Handshake + 1-RTT round-trips ------------------------
 
 
 def _synth_secret() raises -> List[UInt8]:
@@ -315,7 +315,7 @@ def _synth_secret() raises -> List[UInt8]:
 
 
 def test_handshake_round_trip_short_payload() raises:
-    """Track Q10-W: protect_handshake_packet round-trips through
+    """protect_handshake_packet round-trips through
     unprotect_handshake_packet with a synthetic Handshake secret.
 
     Builds a long-header Handshake prefix (no token, payload-
@@ -409,7 +409,7 @@ def test_handshake_round_trip_aes_256_gcm() raises:
 
 
 def test_1rtt_round_trip_synthetic() raises:
-    """Track Q10-W: protect_1rtt_packet round-trips through
+    """protect_1rtt_packet round-trips through
     unprotect_1rtt_packet with a synthetic application secret.
 
     Builds a short-header prefix (first byte + 4-byte DCID),

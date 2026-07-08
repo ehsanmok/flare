@@ -23,7 +23,7 @@ What this covers (RFC 9002):
 - Congestion control (section 7): a CUBIC/HyStart++ controller grows on
   ACK and reduces on loss; ``bytes_in_flight`` is the gate input.
 
-ponytail: handshake-level (Initial / Handshake) PTO uses the same 1-RTT
+Handshake-level (Initial / Handshake) PTO uses the same 1-RTT
 machinery here -- separate per-encryption-level packet-number spaces are
 not modelled, because the client retransmits CRYPTO via its handshake
 loop, not this struct. Peer ``ack_delay`` is treated as 0 (the client

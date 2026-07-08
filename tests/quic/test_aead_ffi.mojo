@@ -1,8 +1,7 @@
 """Tests for the QUIC AEAD FFI thunks (RFC 9001 §5.3).
 
 The Mojo-side ``QuicCrypto`` trait + ``OpenSslQuicCrypto`` impl
-lands in commit 3/4 of Track Q1-W. This commit ships the
-FFI thunks ``flare_quic_aead_seal`` / ``flare_quic_aead_open``
+ships the FFI thunks ``flare_quic_aead_seal`` / ``flare_quic_aead_open``
 / ``flare_quic_aead_build_nonce``; the tests here exercise
 the FFI directly through ``OwnedDLHandle`` to pin:
 
@@ -16,8 +15,8 @@ the FFI directly through ``OwnedDLHandle`` to pin:
   RFC 5116 §3.1).
 
 The RFC 9001 Appendix A vectors that exercise the full
-initial-secret -> AEAD-key -> seal round-trip land in the
-Track Q1-W conformance commit (4/4); this suite covers the
+initial-secret -> AEAD-key -> seal round-trip live in a
+separate conformance suite; this suite covers the
 primitive layer first.
 """
 

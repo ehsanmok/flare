@@ -1,13 +1,12 @@
 """Integration tests for the QUIC server reactor
-(``flare.quic.server.QuicListener``) -- Track Q3-W commit 1/5.
+(``flare.quic.server.QuicListener``).
 
 The dispatch loop wires `QuicListener.bind` (UDP socket open +
 bind via :class:`flare.udp.UdpSocket`) to a per-datagram
-dispatcher that routes by Destination Connection ID. The
-follow-up commits in Track Q3-W thread the per-packet decrypt +
-state-machine dispatch through ``QuicConnection.handle_packet``
-(2/5), wire the PTO / idle / ack-delay TimerWheel entries (3/5),
-and drive the CC reactor hooks (4/5).
+dispatcher that routes by Destination Connection ID. Follow-up
+work threads the per-packet decrypt + state-machine dispatch
+through ``QuicConnection.handle_packet``, wires the PTO / idle /
+ack-delay TimerWheel entries, and drives the CC reactor hooks.
 
 Properties covered here:
 
@@ -71,7 +70,7 @@ def _make_initial_datagram(
     """Build the smallest valid Initial-packet prefix: long header +
     empty token (varint 0) + payload-length varint of 1 + a single
     payload byte. The dispatch layer only inspects the public
-    header in commit 1/5, so the payload byte is a no-op."""
+    header, so the payload byte is a no-op."""
     var hdr = encode_long_header(
         PACKET_TYPE_INITIAL,
         QUIC_VERSION_1,
@@ -111,9 +110,9 @@ def _make_handshake_datagram(
 
 def _make_short_datagram(dcid: ConnectionId) raises -> List[UInt8]:
     """Build a short-header packet for the given DCID. The
-    dispatch layer in commit 1/5 only inspects the public header
-    plus the DCID; the rest of the bytes are filler the per-packet
-    decrypt path (commit 2/5) will consume."""
+    dispatch layer only inspects the public header plus the DCID;
+    the rest of the bytes are filler the per-packet decrypt path
+    will consume."""
     var prefix = encode_short_header(
         dcid, spin_bit=False, key_phase=False, pn_length=1
     )

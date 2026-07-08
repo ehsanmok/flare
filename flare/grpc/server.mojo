@@ -370,7 +370,7 @@ comptime GRPC_COMPRESS_MIN_BYTES: Int = 64
 message-level compression when the client advertises a codec via
 ``grpc-accept-encoding``. Below it the gzip/deflate header overhead
 outweighs the saving, so the frame ships uncompressed (flag 0).
-ponytail: a fixed cutoff, not an adaptive ratio probe."""
+This is a fixed cutoff, not an adaptive ratio probe."""
 
 
 def _negotiate_response_encoding(accept_encoding: String) -> String:
@@ -483,9 +483,9 @@ def encode_unary_response(
             # gRPC "deflate" is zlib-wrapped DEFLATE; compress_gzip
             # emits a gzip container, so for deflate we fall back to
             # an uncompressed frame rather than mislabel the bytes.
-            # ponytail: deflate egress not wired (only gzip);
-            # upgrade path: add a raw-zlib compressor to
-            # flare.http.encoding and emit it here.
+            # Deflate egress is not wired (only gzip); supporting it
+            # would need a raw-zlib compressor added to
+            # flare.http.encoding to emit it here.
             encode_grpc_message(
                 Span[UInt8, _](response_bytes), out, compressed=False
             )
@@ -764,12 +764,12 @@ struct GrpcService[H: Copyable & GrpcUnary & ImplicitlyDestructible](
     enforces it as a wall-clock ceiling on the handler invocation and
     returns ``DEADLINE_EXCEEDED`` if the handler overruns.
 
-    ponytail: deadline enforcement is a post-hoc elapsed check, not a
+    Deadline enforcement is a post-hoc elapsed check, not a
     cooperative mid-call cancel (the handler runs to completion, then we
-    compare elapsed vs budget). Ceiling: a runaway handler still burns
-    its full time before the status flips. Upgrade path: thread a
-    :class:`flare.http.Cancel` into a cancel-aware ``GrpcUnary`` variant
-    and flip it from a deadline timer.
+    compare elapsed vs budget), so a runaway handler still burns
+    its full time before the status flips. Cancelling it promptly would
+    need a :class:`flare.http.Cancel` threaded into a cancel-aware
+    ``GrpcUnary`` variant and flipped from a deadline timer.
     """
 
     var handler: Self.H

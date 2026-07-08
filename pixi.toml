@@ -62,19 +62,19 @@ gxx = ">=13"
 pre-commit = ">=4.2.0,<5"
 mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
 
-# Linux-only: native debug + race-detection tooling for the io_uring
-# root-causing work and the v0.8 allocation-profile pass. gdb --
-# post-mortem on core dumps (no ptrace_scope dance, works on any
-# unprivileged uid). valgrind -- helgrind for race detection on the
-# shared kernel/userspace producer-consumer rings (PBUF_RING tail
-# bumps, etc); slow but correct; also brings callgrind + massif + dhat
-# for instruction-level / heap-snapshot / allocation-history profiling.
+# Linux-only: native debug + race-detection tooling for io_uring
+# root-causing and allocation profiling. gdb -- post-mortem on core
+# dumps (no ptrace_scope dance, works on any unprivileged uid).
+# valgrind -- helgrind for race detection on the shared
+# kernel/userspace producer-consumer rings (PBUF_RING tail bumps,
+# etc); slow but correct; also brings callgrind + massif + dhat for
+# instruction-level / heap-snapshot / allocation-history profiling.
 # heaptrack -- lightweight LD_PRELOAD-based malloc tracer with a much
-# cheaper overhead than massif; the v0.8 pass used it to confirm the
-# H1 hot path is allocation-free (171 syscalls / 600K reqs steady
-# state). Conda-forge ships all three pinned to recent stable releases
-# on linux-64; macOS has its own native lldb / Instruments toolchain
-# so we don't need conda packages there.
+# cheaper overhead than massif; used to confirm the H1 hot path is
+# allocation-free (171 syscalls / 600K reqs steady state). Conda-forge
+# ships all three pinned to recent stable releases on linux-64; macOS
+# has its own native lldb / Instruments toolchain so we don't need
+# conda packages there.
 [feature.dev.target.linux-64.dependencies]
 gdb        = ">=14"
 valgrind   = ">=3.22"
@@ -140,13 +140,13 @@ sysroot_linux-64 = "2.34.*"
 # Run with: pixi run --environment bench <task>
 bench-vs-baseline         = "bash benchmark/scripts/bench_vs_baseline.sh"
 bench-vs-baseline-quick   = "bash benchmark/scripts/bench_vs_baseline.sh --only=flare,go_nethttp --configs=throughput"
-bench-h3                  = "bash benchmark/scripts/bench_h3.sh"            # Track Q7-W commit 3/4 -- HTTP/3 throughput harness
+bench-h3                  = "bash benchmark/scripts/bench_h3.sh"            # HTTP/3 throughput harness
 bench-h3-flare            = "bash benchmark/scripts/bench_h3.sh flare"      # flare h3 baseline only
 bench-h3-quinn            = "bash benchmark/scripts/bench_h3.sh quinn"      # quinn h3 baseline only
 bench-h3-quiche           = "bash benchmark/scripts/bench_h3.sh quiche"     # quiche h3 baseline only
 bench-h3-all              = "bash benchmark/scripts/bench_h3.sh all"        # flare + quinn + quiche back-to-back
-bench-build-quinn-h3      = "cargo build --release --locked --manifest-path benchmark/baselines/quinn/Cargo.toml"  # Track Q7-W commit 1/4 -- quinn HTTP/3 baseline
-bench-build-quiche-h3     = "cargo build --release --locked --manifest-path benchmark/baselines/quiche/Cargo.toml" # Track Q7-W commit 2/4 -- quiche HTTP/3 baseline
+bench-build-quinn-h3      = "cargo build --release --locked --manifest-path benchmark/baselines/quinn/Cargo.toml"  # quinn HTTP/3 baseline
+bench-build-quiche-h3     = "cargo build --release --locked --manifest-path benchmark/baselines/quiche/Cargo.toml" # quiche HTTP/3 baseline
 bench-integrity-only      = "bash benchmark/scripts/_integrity_check.sh"
 bench-collect-env         = "bash benchmark/scripts/_collect_env.sh"
 
@@ -246,24 +246,24 @@ fuzz-uring-reactor  = "mojo -I . fuzz/fuzz_uring_reactor.mojo"    # UringReactor
 fuzz-grpc-lpm-decoder = "mojo -I . fuzz/fuzz_grpc_lpm_decoder.mojo"  # v0.8 — gRPC LPM (length-prefixed message) byte-level decoder (200K)
 fuzz-quic-varint   = "mojo -I . fuzz/fuzz_quic_varint.mojo"        # v0.8 — QUIC varint codec, canonical round-trip + non-shortest accept (200K)
 fuzz-quic-long-header = "mojo -I . fuzz/fuzz_quic_long_header.mojo"  # v0.8 — QUIC long-header public-prefix parser (200K)
-fuzz-quic-early-data-len = "mojo -I . fuzz/fuzz_quic_early_data_len.mojo"  # W4a — 0-RTT (EarlyData) coalesced packet-length parser (200K)
-fuzz-quic-early-data-strike = "mojo -I . fuzz/fuzz_quic_early_data_strike.mojo"  # W7 — cross-connection 0-RTT strike set vs reference model (200K)
+fuzz-quic-early-data-len = "mojo -I . fuzz/fuzz_quic_early_data_len.mojo"  # 0-RTT (EarlyData) coalesced packet-length parser (200K)
+fuzz-quic-early-data-strike = "mojo -I . fuzz/fuzz_quic_early_data_strike.mojo"  # cross-connection 0-RTT strike set vs reference model (200K)
 fuzz-h3-frame      = "mojo -I . fuzz/fuzz_h3_frame.mojo"            # v0.8 — HTTP/3 frame codec + SETTINGS payload round-trip (200K)
-fuzz-h3-server     = "mojo -I . fuzz/fuzz_h3_server.mojo"           # Track Q4-W commit 3/3 -- H3Connection sans-I/O feed safety (200K)
-fuzz-h3-response-reader = "mojo -I . fuzz/fuzz_h3_response_reader.mojo" # H3C-4 -- H3ResponseReader sans-I/O feed safety + split-invariance (200K)
+fuzz-h3-server     = "mojo -I . fuzz/fuzz_h3_server.mojo"           # H3Connection sans-I/O feed safety (200K)
+fuzz-h3-response-reader = "mojo -I . fuzz/fuzz_h3_response_reader.mojo" # H3ResponseReader sans-I/O feed safety + split-invariance (200K)
 fuzz-quic-frame-decode    = "mojo -I . fuzz/fuzz_quic_frame_decode.mojo"     # RFC 9000 §19 frame codec safety + idempotence (200K)
 fuzz-quic-retry           = "mojo -I . fuzz/fuzz_quic_retry.mojo"            # v0.9 - RFC 9000 Retry token + RFC 9001 integrity verify never panic (100K)
 fuzz-qpack-decode         = "mojo -I . fuzz/fuzz_qpack_decode.mojo"          # RFC 9204 static-only decoder + round-trip (200K)
 fuzz-qpack-dynamic        = "mojo -I . fuzz/fuzz_qpack_dynamic.mojo"         # v0.9 - RFC 9204 dynamic-table encoder/decoder streams (200K)
 fuzz-quic-transport-params = "mojo -I . fuzz/fuzz_quic_transport_params.mojo"# RFC 9000 §18 transport-parameter codec round-trip + reject (200K)
 fuzz-quic-packet-decrypt = "mojo -I . fuzz/fuzz_quic_packet_decrypt.mojo"   # RFC 9001 §5.3 AEAD open + HP mask safety on random bytes (200K)
-fuzz-quic-initial-handshake = "mojo -I . fuzz/fuzz_quic_initial_handshake.mojo" # Track Q3-W commit 5/5 -- QuicListener.dispatch_datagram safety on random bytes (200K)
-fuzz-quic-connection-id    = "mojo -I . fuzz/fuzz_quic_connection_id.mojo"     # Track Q3-W commit 5/5 -- ConnectionId + ConnectionIdTable round-trip (200K)
+fuzz-quic-initial-handshake = "mojo -I . fuzz/fuzz_quic_initial_handshake.mojo" # QuicListener.dispatch_datagram safety on random bytes (200K)
+fuzz-quic-connection-id    = "mojo -I . fuzz/fuzz_quic_connection_id.mojo"     # ConnectionId + ConnectionIdTable round-trip (200K)
 fuzz-cache-control-parser = "mojo -I . fuzz/fuzz_cache_control_parser.mojo"  # v0.8 — RFC 9111 §5.2 Cache-Control directive parser (200K)
 fuzz-byte-cursor   = "mojo -I . fuzz/fuzz_byte_cursor.mojo"      # v0.9 A3 — ByteReader/ByteWriter bounds + UTF-8 + round-trip (200K)
 fuzz-frame-mux     = "mojo -I . fuzz/fuzz_frame_mux.mojo"        # v0.9 B3 — FrameDemux reassembly + codec round-trip + split-invariance (200K)
 fuzz-quic-migration = "mojo -I . fuzz/fuzz_quic_migration.mojo"  # v0.9 — RFC 9000 §19.15-§19.18 migration state transitions (200K)
-fuzz-quic-migration-amplification = "mojo -I . fuzz/fuzz_quic_migration_amplification.mojo"  # W8 — RFC 9000 sec 8.1 strict-hold 3x anti-amplification budget invariant (200K)
+fuzz-quic-migration-amplification = "mojo -I . fuzz/fuzz_quic_migration_amplification.mojo"  # RFC 9000 sec 8.1 strict-hold 3x anti-amplification budget invariant (200K)
 fuzz-all           = { depends-on = ["fuzz-ws", "fuzz-pmd-context", "fuzz-url", "fuzz-headers", "fuzz-http-response", "fuzz-http-server", "fuzz-ws-server", "prop-ws", "prop-headers", "prop-auth", "fuzz-encoding", "fuzz-cookie", "fuzz-reactor-churn", "prop-timer-wheel", "fuzz-server-reactor-chunks", "fuzz-router-paths", "fuzz-scheduler-shutdown", "fuzz-extractors", "fuzz-routes-comptime", "fuzz-header-scan", "fuzz-form", "fuzz-multipart", "fuzz-session-decode", "fuzz-fs-range", "fuzz-h2-frame", "fuzz-hpack-decoder", "fuzz-huffman-simd", "fuzz-ws-deflate", "fuzz-extended-connect", "fuzz-h2-preface-peek", "fuzz-h2-continuation", "fuzz-h2-rapid-reset", "fuzz-proxy-protocol", "fuzz-io-uring-sqe", "fuzz-uring-reactor", "fuzz-grpc-lpm-decoder", "fuzz-quic-varint", "fuzz-quic-long-header", "fuzz-quic-early-data-len", "fuzz-quic-early-data-strike", "fuzz-h3-frame", "fuzz-cache-control-parser", "fuzz-quic-frame-decode", "fuzz-qpack-decode", "fuzz-quic-transport-params", "fuzz-quic-packet-decrypt", "fuzz-quic-initial-handshake", "fuzz-quic-connection-id", "fuzz-h3-server", "fuzz-h3-response-reader", "fuzz-byte-cursor", "fuzz-frame-mux", "fuzz-quic-migration", "fuzz-quic-migration-amplification", "fuzz-qpack-dynamic", "fuzz-quic-retry"] }
 
 [feature.dev.tasks]
@@ -350,40 +350,40 @@ test-openssl-quic-crypto = "mojo -I . tests/quic/test_openssl_quic_crypto.mojo" 
 test-quic-rfc9001-appendix-a = "mojo -I . tests/quic/test_rfc9001_appendix_a.mojo"  # RFC 9001 Appendix A.1-A.3 byte-exact conformance vectors (6 cases)
 # Build the rustls QUIC cdylib (libflare_rustls_quic.so) via cargo.
 # Idempotent: cargo's incremental build skips unchanged sources.
-# Track Q2-W commit 2/4 wires this into [activation] scripts so
-# `pixi install` auto-builds the .so the same way it auto-builds
+# This wires into [activation] scripts so `pixi install`
+# auto-builds the .so the same way it auto-builds
 # libflare_tls.so today.
 build-rustls-quic    = "cargo build --release --locked --manifest-path flare/tls/ffi/rustls_wrapper/Cargo.toml"
 test-rustls-quic-crate-smoke = { cmd = "mojo -I . tests/tls/test_rustls_quic_crate_smoke.mojo", depends-on = ["build-rustls-quic"] }  # rustls cdylib link + abi_version + empty-PEM rejection (2 cases)
 test-rustls-quic     = "mojo -I . tests/tls/test_rustls_quic.mojo"       # flare.tls.rustls_quic scaffold -- carrier + level + error enum (~12 cases)
-test-rustls-quic-handshake = { cmd = "mojo -I . tests/tls/test_rustls_quic_handshake.mojo", depends-on = ["build-rustls-quic"] }  # Track Q2-W -- live-fire FFI vs real Ed25519 PEM (8 cases)
-test-rustls-quic-keys      = { cmd = "mojo -I . tests/tls/test_rustls_quic_keys.mojo", depends-on = ["build-rustls-quic"] }       # Phase F commit 2/6 -- RustlsQuicSession.have_keys / packet_{encrypt,decrypt} / header_{encrypt,decrypt} binding tests (10 cases)
-test-rustls-quic-client    = { cmd = "mojo -I . tests/tls/test_rustls_quic_client.mojo", depends-on = ["build-rustls-quic"] }    # H3C-0 -- RustlsQuicConnector + connect() client binding; full client<->server loopback handshake negotiating h3 (5 cases)
+test-rustls-quic-handshake = { cmd = "mojo -I . tests/tls/test_rustls_quic_handshake.mojo", depends-on = ["build-rustls-quic"] }  # live-fire FFI vs real Ed25519 PEM (8 cases)
+test-rustls-quic-keys      = { cmd = "mojo -I . tests/tls/test_rustls_quic_keys.mojo", depends-on = ["build-rustls-quic"] }       # RustlsQuicSession.have_keys / packet_{encrypt,decrypt} / header_{encrypt,decrypt} binding tests (10 cases)
+test-rustls-quic-client    = { cmd = "mojo -I . tests/tls/test_rustls_quic_client.mojo", depends-on = ["build-rustls-quic"] }    # RustlsQuicConnector + connect() client binding; full client<->server loopback handshake negotiating h3 (5 cases)
 test-quic-server-scaffold = "mojo -I . tests/quic/test_server_scaffold.mojo"  # flare.quic.server carriers -- config defaults + connection + cid table (7 cases)
-test-quic-reactor         = "mojo -I . tests/quic/test_quic_reactor.mojo"     # Track Q3-W commit 1/5 -- UDP bind + per-datagram dispatch (12 cases)
-test-quic-handle-packet   = "mojo -I . tests/quic/test_quic_handle_packet.mojo" # Track Q3-W commit 2/5 -- per-packet decrypt + state-machine drive (8 cases)
-test-quic-timers          = "mojo -I . tests/quic/test_quic_timers.mojo"        # Track Q3-W commit 3/5 -- idle TimerWheel arm + dispatch + token codec (9 cases)
-test-quic-loopback-integration = "mojo -I . tests/quic/test_quic_loopback_integration.mojo" # Track Q3-W commit 5/5 -- loopback UDP handshake -> close (4 cases)
-test-quic-handshake-bridge = { cmd = "mojo -I . tests/quic/test_quic_handshake_bridge.mojo", depends-on = ["build-rustls-quic"] }  # Track Q9-W commit 1/6 -- rustls QUIC handshake bridge wiring (10 cases)
-test-quic-keys-install     = { cmd = "mojo -I . tests/quic/test_quic_keys_install.mojo", depends-on = ["build-rustls-quic"] }      # Phase F commit 3/6 -- per-level egress queues + readiness install (3 cases)
-test-quic-post-initial-egress = { cmd = "mojo -I . tests/quic/test_quic_post_initial_egress.mojo", depends-on = ["build-rustls-quic"] }  # Phase F commit 4/6 -- Handshake + 1-RTT egress builders gating (8 cases)
+test-quic-reactor         = "mojo -I . tests/quic/test_quic_reactor.mojo"     # UDP bind + per-datagram dispatch (12 cases)
+test-quic-handle-packet   = "mojo -I . tests/quic/test_quic_handle_packet.mojo" # per-packet decrypt + state-machine drive (8 cases)
+test-quic-timers          = "mojo -I . tests/quic/test_quic_timers.mojo"        # idle TimerWheel arm + dispatch + token codec (9 cases)
+test-quic-loopback-integration = "mojo -I . tests/quic/test_quic_loopback_integration.mojo" # loopback UDP handshake -> close (4 cases)
+test-quic-handshake-bridge = { cmd = "mojo -I . tests/quic/test_quic_handshake_bridge.mojo", depends-on = ["build-rustls-quic"] }  # rustls QUIC handshake bridge wiring (10 cases)
+test-quic-keys-install     = { cmd = "mojo -I . tests/quic/test_quic_keys_install.mojo", depends-on = ["build-rustls-quic"] }      # per-level egress queues + readiness install (3 cases)
+test-quic-post-initial-egress = { cmd = "mojo -I . tests/quic/test_quic_post_initial_egress.mojo", depends-on = ["build-rustls-quic"] }  # Handshake + 1-RTT egress builders gating (8 cases)
 test-quic-post-initial-decrypt = { cmd = "mojo -I . tests/quic/test_quic_post_initial_decrypt.mojo", depends-on = ["build-rustls-quic"] }  # inbound Handshake + 1-RTT decrypt gating + bounds (4 cases)
-test-quic-client = { cmd = "mojo -I . tests/quic/test_quic_client.mojo", depends-on = ["build-rustls-quic"] }  # H3C-1 -- QUIC client connection driver vs QuicListener loopback handshake + 1-RTT stream egress (2 cases)
+test-quic-client = { cmd = "mojo -I . tests/quic/test_quic_client.mojo", depends-on = ["build-rustls-quic"] }  # QUIC client connection driver vs QuicListener loopback handshake + 1-RTT stream egress (2 cases)
 test-h3-server-scaffold   = "mojo -I . tests/h3/test_server_scaffold.mojo"    # flare.h3.server scaffold -- H3Connection carrier + stream lifecycle (~11 cases)
-test-h3-dispatch          = "mojo -I . tests/h3/test_h3_dispatch.mojo"        # Track Q4-W commit 1/3 -- H3Connection feed -> take_request -> emit_response (10 cases)
-test-h3-end-to-end        = "mojo -I . tests/h3/test_h3_end_to_end.mojo"      # Track Q12-W commit 4/6 -- QuicListener H3 dispatch + Handler wire (6 cases)
-test-h3-uni-streams       = "mojo -I . tests/h3/test_h3_uni_streams.mojo"     # Track Q4-W commit 2/3 -- uni-stream type dispatch + SETTINGS + GOAWAY (11 cases)
-test-conformance-h3-server = "mojo -I . tests/conformance/test_conformance_h3_server.mojo" # Track Q4-W commit 3/3 -- H3 server wire-shape conformance (7 cases)
-test-http-server-with-h3   = "mojo -I . tests/http/test_http_server_with_h3.mojo" # Track Q5-W commit 1/2 -- HttpServer.bind_with_h3 + ALPN routing (10 cases)
+test-h3-dispatch          = "mojo -I . tests/h3/test_h3_dispatch.mojo"        # H3Connection feed -> take_request -> emit_response (10 cases)
+test-h3-end-to-end        = "mojo -I . tests/h3/test_h3_end_to_end.mojo"      # QuicListener H3 dispatch + Handler wire (6 cases)
+test-h3-uni-streams       = "mojo -I . tests/h3/test_h3_uni_streams.mojo"     # uni-stream type dispatch + SETTINGS + GOAWAY (11 cases)
+test-conformance-h3-server = "mojo -I . tests/conformance/test_conformance_h3_server.mojo" # H3 server wire-shape conformance (7 cases)
+test-http-server-with-h3   = "mojo -I . tests/http/test_http_server_with_h3.mojo" # HttpServer.bind_with_h3 + ALPN routing (10 cases)
 test-alpn-dispatch        = "mojo -I . tests/http/test_alpn_dispatch.mojo"    # ALPN -> wire-protocol dispatcher decisions (~11 cases)
-test-alt-svc              = "mojo -I . tests/http/test_alt_svc.mojo"          # H3C-3 -- RFC 7838 Alt-Svc parser + per-origin cache + h3 wire policy (10 cases)
-test-client-h3-policy     = "mojo -I . tests/http/test_client_h3_policy.mojo" # H3C-3 -- HttpClient prefer_h3 knob (builder + ctor kwarg) + Alt-Svc record + h3 wire decision (5 cases)
+test-alt-svc              = "mojo -I . tests/http/test_alt_svc.mojo"          # RFC 7838 Alt-Svc parser + per-origin cache + h3 wire policy (10 cases)
+test-client-h3-policy     = "mojo -I . tests/http/test_client_h3_policy.mojo" # HttpClient prefer_h3 knob (builder + ctor kwarg) + Alt-Svc record + h3 wire decision (5 cases)
 test-ws-autoclient        = "mojo -I . tests/ws/test_ws_autoclient.mojo"      # ALPN-driven WS wire dispatcher decision matrix (~13 cases)
 test-ws-autoclient-loopback = "mojo -I . tests/ws/test_ws_autoclient_loopback.mojo"  # WsAutoClient I/O round-trip vs forked WsServer (4 cases)
 example-alpn-dispatch-demo    = "mojo -I . examples/advanced/alpn_dispatch_demo.mojo"
 example-http3-server-walkthrough = "mojo -I . examples/advanced/http3_server_walkthrough.mojo"
 example-http3-server          = "mojo -I . examples/advanced/http3_server.mojo"      # shared Handler across h1 / h2c / h2 / h3
-example-http3-client          = "mojo -I . examples/advanced/http3_client.mojo"      # W2 — HttpClient(prefer_h3=True) live h3 round-trip + happy-eyeballs
+example-http3-client          = "mojo -I . examples/advanced/http3_client.mojo"      # HttpClient(prefer_h3=True) live h3 round-trip + happy-eyeballs
 test-qpack           = "mojo -I . tests/qpack/test_qpack.mojo"           # RFC 9204 static-only encoder/decoder + Huffman fallback (~13 cases)
 test-qpack-dynamic   = "mojo -I . tests/qpack/test_qpack_dynamic.mojo"   # v0.9 - RFC 9204 dynamic table + encoder/decoder stream instructions
 test-h3-qpack-dynamic = "mojo -I . tests/h3/test_h3_qpack_dynamic.mojo"  # v0.9 - H3Connection dynamic-table wiring: encoder-stream inserts decode requests
@@ -395,8 +395,8 @@ test-quic-resumption = { cmd = "mojo -I . tests/quic/test_quic_resumption.mojo",
 test-grpc-server     = "mojo -I . tests/grpc/test_server.mojo"           # gRPC unary adapter -- header validation + LPM stitching + handler dispatch (~14 cases)
 test-h3-request-reader = "mojo -I . tests/h3/test_request_reader.mojo"   # RFC 9114 §4 + §7 H3 request-stream sans-I/O reader (~10 cases)
 test-h3-response-writer = "mojo -I . tests/h3/test_response_writer.mojo" # RFC 9114 §4.3 H3 response-stream sans-I/O writer (~7 cases)
-test-h3-client-streams = "mojo -I . tests/h3/test_h3_client_streams.mojo" # H3C-2 -- client request writer + response reader wire round-trips vs server codecs (6 cases)
-test-h3-client-e2e = { cmd = "mojo -I . tests/h3/test_h3_client_e2e.mojo", depends-on = ["build-rustls-quic"] } # H3C-4 -- end-to-end H3 client vs QuicListener loopback (GET + POST echo over real QUIC, 2 cases)
+test-h3-client-streams = "mojo -I . tests/h3/test_h3_client_streams.mojo" # client request writer + response reader wire round-trips vs server codecs (6 cases)
+test-h3-client-e2e = { cmd = "mojo -I . tests/h3/test_h3_client_e2e.mojo", depends-on = ["build-rustls-quic"] } # end-to-end H3 client vs QuicListener loopback (GET + POST echo over real QUIC, 2 cases)
 test-h3-client-reasm = "mojo -I . tests/h3/test_h3_client_reasm.mojo" # H3C follow-up -- out-of-order/dup/overlap STREAM reassembly in H3ClientConnection (3 cases)
 test-h3-client-mux = { cmd = "mojo -I . tests/h3/test_h3_client_mux.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- multiplexed H3 client: 2 concurrent requests over one QUIC connection demux to independent bodies
 test-h3-client-frag = { cmd = "mojo -I . tests/h3/test_h3_client_frag.mojo", depends-on = ["build-rustls-quic"] } # H3C follow-up -- multi-packet request-body fragmentation + idle keepalive reuse (large POST reassembled; idle-then-reuse, 2 cases)
@@ -406,20 +406,20 @@ test-h3-happy-eyeballs = { cmd = "mojo -I . tests/http/test_h3_happy_eyeballs.mo
 test-h3-frame        = "mojo -I . tests/h3/test_frame.mojo"              # RFC 9114 §7 HTTP/3 frame codec + SETTINGS (~10 cases)
 test-grpc            = "mojo -I . tests/grpc/test_grpc.mojo"             # gRPC LPM framing + status codes (~10 cases)
 test-grpc-metadata   = "mojo -I . tests/grpc/test_metadata.mojo"         # gRPC initial + trailing metadata carrier (~7 cases)
-test-grpc-client     = "mojo -I . tests/grpc/test_grpc_client.mojo"      # W3 -- unary gRPC client over h2c: echo + non-ok status + metadata (3 cases)
-test-grpc-streaming  = "mojo -I . tests/grpc/test_grpc_streaming.mojo"   # W6 -- streaming gRPC client over h2c: server-stream + client-stream + bidi (3 cases)
+test-grpc-client     = "mojo -I . tests/grpc/test_grpc_client.mojo"      # unary gRPC client over h2c: echo + non-ok status + metadata (3 cases)
+test-grpc-streaming  = "mojo -I . tests/grpc/test_grpc_streaming.mojo"   # streaming gRPC client over h2c: server-stream + client-stream + bidi (3 cases)
 test-grpc-proto      = "mojo -I . tests/grpc/test_grpc_proto.mojo"       # v0.9 - proto3 wire codec (varint/zigzag/len/fixed/float/skip, 6 cases)
 test-grpc-interceptor-health = "mojo -I . tests/grpc/test_grpc_interceptor_health.mojo"  # v0.9 - chainable interceptors + grpc.health.v1 Check (7 cases)
 test-grpc-compression = "mojo -I . tests/grpc/test_grpc_compression.mojo"  # v0.9 - gRPC gzip message compression negotiation (5 cases)
 test-grpc-server-stream = "mojo -I . tests/grpc/test_grpc_server_stream.mojo"  # v0.9 - server-streaming adapter (n-frame / zero / raise-internal, 3 cases)
 test-grpc-reflection = "mojo -I . tests/grpc/test_grpc_reflection.mojo"  # v0.9 - server reflection v1alpha list_services + error path (3 cases)
 test-grpc-codegen    = { cmd = "mkdir -p build/gen && python tools/proto_gen.py tests/grpc/proto/sample.proto -o build/gen/sample_pb.mojo --doc 'Sample proto3 messages for the codegen round-trip test.' && mojo -I . -I build/gen tests/grpc/proto/test_codegen.mojo" }  # v0.9 - proto_gen.py .proto -> Mojo round-trip (4 cases); generates into gitignored build/gen
-test-async-resolve   = "mojo -I . tests/dns/test_async_resolve.mojo"     # W6 -- off-reactor resolve_async + happy-eyeballs ordering + cache async (6 cases)
-test-quic-0rtt-replay = "mojo -I . tests/quic/test_quic_0rtt_replay.mojo"  # W4a + W7 -- server 0-RTT anti-replay window + byte budget + packet-len + cross-connection strike set (11 cases)
-test-h3-0rtt-gate    = "mojo -I . tests/h3/test_h3_0rtt_gate.mojo"       # W7 -- client idempotent-only 0-RTT gate + outcome carrier (4 cases)
-test-h3-0rtt-e2e     = { cmd = "mojo -I . tests/h3/test_h3_0rtt_e2e.mojo", depends-on = ["build-rustls-quic"] } # W9 -- client 0-RTT EarlyData send flight: accept (used_0rtt) + foreign-ticket reject/replay (2 cases)
-test-quic-migration-probe = "mojo -I . tests/quic/test_quic_migration_probe.mojo"  # W4b -- server path-validation probe + anti-amplification budget (6 cases)
-test-dns-cache       = "mojo -I . tests/dns/test_dns_cache.mojo"         # W3 -- TTL DNS cache over the sync resolver (5 cases)
+test-async-resolve   = "mojo -I . tests/dns/test_async_resolve.mojo"     # off-reactor resolve_async + happy-eyeballs ordering + cache async (6 cases)
+test-quic-0rtt-replay = "mojo -I . tests/quic/test_quic_0rtt_replay.mojo"  # server 0-RTT anti-replay window + byte budget + packet-len + cross-connection strike set (11 cases)
+test-h3-0rtt-gate    = "mojo -I . tests/h3/test_h3_0rtt_gate.mojo"       # client idempotent-only 0-RTT gate + outcome carrier (4 cases)
+test-h3-0rtt-e2e     = { cmd = "mojo -I . tests/h3/test_h3_0rtt_e2e.mojo", depends-on = ["build-rustls-quic"] } # client 0-RTT EarlyData send flight: accept (used_0rtt) + foreign-ticket reject/replay (2 cases)
+test-quic-migration-probe = "mojo -I . tests/quic/test_quic_migration_probe.mojo"  # server path-validation probe + anti-amplification budget (6 cases)
+test-dns-cache       = "mojo -I . tests/dns/test_dns_cache.mojo"         # TTL DNS cache over the sync resolver (5 cases)
 test-cache           = "mojo -I . tests/http/test_cache.mojo"            # RFC 9111 Cache-Control parser + InMemoryCacheStore (~12 cases)
 test-cache-freshness = "mojo -I . tests/http/test_cache_freshness.mojo"  # RFC 9111 §4.2 freshness + Vary parser (~15 cases)
 test-cache-middleware = "mojo -I . tests/http/test_cache_middleware.mojo"  # Cache[Inner, S] end-to-end (~8 cases)
@@ -519,8 +519,8 @@ test-h2c-client-upgrade = "mojo -I . tests/http/test_h2c_client_upgrade.mojo"   
 test-h2c-client-double-body = "mojo -I . tests/http/test_h2c_client_double_body.mojo"  # v0.7.1 — regression: h2c-Upgrade client must not double-count single-recv-blob response bodies (Mojo 1.0.0b1 Span lifetime)
 test-h2-per-stream-cancel = "mojo -I . tests/http2/test_h2_per_stream_cancel.mojo" # v0.7 — per-stream Cancel cells + RST_STREAM/GOAWAY/drain propagation (~6 tests)
 test-h1-client-pool  = "mojo -I . tests/http/test_h1_client_pool.mojo"            # v0.7 — HTTP/1.1 client connection pool: idle reuse + per-origin buckets + caps (~4 tests)
-test-tls-client-pool = "mojo -I . tests/http/test_tls_client_pool.mojo"           # W5 -- HTTPS (TLS h1) client pool: live-conn reuse + caps + per-origin (~4 tests)
-test-client-stream-upload = "mojo -I . tests/http/test_client_stream_upload.mojo" # W5 -- streaming request body (chunked TE, bounded memory) round trip (~1 test)
+test-tls-client-pool = "mojo -I . tests/http/test_tls_client_pool.mojo"           # HTTPS (TLS h1) client pool: live-conn reuse + caps + per-origin (~4 tests)
+test-client-stream-upload = "mojo -I . tests/http/test_client_stream_upload.mojo" # streaming request body (chunked TE, bounded memory) round trip (~1 test)
 test-huffman-simd    = "mojo -I . tests/http/test_huffman_simd.mojo"              # v0.7 — SIMD HPACK Huffman shim: parity + dispatch (~5 tests)
 test-ws-h2           = "mojo -I . tests/ws/test_ws_h2.mojo"                     # v0.7 — WS-over-HTTP/2 (RFC 8441) stream <-> frame adapter (~6 tests)
 test-ws-permessage-deflate = "mojo -I . tests/ws/test_ws_permessage_deflate.mojo"  # v0.7 — RFC 7692 permessage-deflate codec + Sec-WebSocket-Extensions parser (~8 tests)
@@ -533,8 +533,8 @@ test-frame-mux       = "mojo -I . tests/uds/test_frame_mux.mojo"                
 test-conditional     = "mojo -I . tests/http/test_conditional.mojo"                # Conditional[Inner] middleware (RFC 9110 §13, ~20 tests)
 test-sse             = "mojo -I . tests/http/test_sse.mojo"                        # SseChannel + SseEvent + sse_response + SseStreamingResponse (~16 tests)
 test-redirect-policy = "mojo -I . tests/http/test_redirect_policy.mojo"            # RedirectPolicy (FOLLOW_ALL / SAME_ORIGIN_ONLY / DENY) (~18 tests)
-test-cookie-store    = "mojo -I . tests/http/test_cookie_store.mojo"               # W1 -- interior-mutable client cookie store (6 cases)
-test-client-ux       = "mojo -I . tests/http/test_client_ux.mojo"                 # W1 -- wired client UX: redirect policy + auto-decompress + cookies + retry (7 cases)
+test-cookie-store    = "mojo -I . tests/http/test_cookie_store.mojo"               # interior-mutable client cookie store (6 cases)
+test-client-ux       = "mojo -I . tests/http/test_client_ux.mojo"                 # wired client UX: redirect policy + auto-decompress + cookies + retry (7 cases)
 test-structured-logger = "mojo -I . tests/http/test_structured_logger.mojo"        # StructuredLogger[Inner] JSON-per-line emitter (~12 tests)
 test-metrics         = "mojo -I . tests/http/test_metrics.mojo"                    # Metrics[Inner] + MetricsRegistry Prometheus text exposition (~27 tests)
 test-auth-extract    = "mojo -I . tests/http/test_auth_extract.mojo"               # BearerExtract + BasicExtract + CsrfToken (~28 tests)
@@ -640,11 +640,11 @@ example-h3-codec-demo   = "mojo -I . examples/advanced/h3_codec_demo.mojo"   # H
 example-grpc-unary-demo = "mojo -I . examples/advanced/grpc_unary_demo.mojo" # gRPC unary server adapter on the H2 wire surface
 example-grpc-unary-server = "mojo -I . examples/advanced/grpc_unary_server.mojo"  # v0.9 -- GrpcService mounted on the HttpServer H2 reactor (T1.5)
 example-unified-middleware = "mojo -I . examples/advanced/unified_middleware.mojo"  # v0.9 -- one Handler stack behind control plane + streaming (T2.2)
-example-grpc-client-demo = "mojo -I . examples/advanced/grpc_client_demo.mojo" # W3 -- unary gRPC client over h2c against a forked greeter server
+example-grpc-client-demo = "mojo -I . examples/advanced/grpc_client_demo.mojo" # unary gRPC client over h2c against a forked greeter server
 example-http2-config    = "mojo -I . examples/advanced/http2_config.mojo"     # Http2Config SETTINGS surface
 example-uds-sidecar     = "mojo -I . examples/advanced/uds_sidecar.mojo"      # UnixListener + UnixStream
 example-streaming-proxy = "mojo -I . examples/advanced/streaming_proxy.mojo"  # v0.9 — StreamHandler + UpstreamChunkSource + backpressure
-example-openai-sse-front = "mojo -I . examples/advanced/openai_sse_front.mojo"  # W2 — OpenAI-shaped SSE front over a token backend + backpressure
+example-openai-sse-front = "mojo -I . examples/advanced/openai_sse_front.mojo"  # OpenAI-shaped SSE front over a token backend + backpressure
 
 examples = { cmd = "mojo -I . examples/basic/addresses.mojo && mojo -I . examples/basic/dns_resolution.mojo && mojo -I . examples/basic/error_handling.mojo && mojo -I . examples/basic/tcp_echo.mojo && mojo -I . examples/basic/http_get.mojo && mojo -I . examples/basic/websocket_echo.mojo && mojo -I . examples/basic/ergonomics.mojo && mojo -I . examples/basic/http_server.mojo && mojo -I . examples/basic/ws_server.mojo && mojo -I . examples/basic/encoding.mojo && mojo -I . examples/basic/udp.mojo && mojo -I . examples/basic/tls.mojo && mojo -I . examples/basic/cookies.mojo && mojo -I . examples/advanced/reactor.mojo && mojo -I . examples/basic/router.mojo && mojo -I . examples/intermediate/state.mojo && mojo -I . examples/intermediate/multicore.mojo && mojo -I . examples/intermediate/middleware.mojo && mojo -I . examples/intermediate/extractors.mojo && mojo -I . examples/advanced/comptime_router.mojo && mojo -I . examples/intermediate/static_response.mojo && mojo -I . examples/intermediate/cancel.mojo && mojo -I . examples/intermediate/drain.mojo && mojo -I . examples/intermediate/sse.mojo && mojo -I . examples/advanced/cert_reload.mojo && mojo -I . examples/advanced/mtls.mojo && mojo -I . examples/intermediate/request_cookies.mojo && mojo -I . examples/intermediate/forms.mojo && mojo -I . examples/intermediate/multipart_upload.mojo && mojo -I . examples/intermediate/sessions.mojo && mojo -I . examples/intermediate/middleware_stack.mojo && mojo -I . examples/intermediate/http_cache.mojo && mojo -I . examples/intermediate/cors.mojo && mojo -I . examples/intermediate/static_files.mojo && mojo -I . examples/intermediate/brotli.mojo && mojo -I . examples/advanced/http2.mojo && mojo -I . examples/advanced/work_stealing.mojo && mojo -I . examples/advanced/http2_config.mojo && mojo -I . examples/advanced/uds_sidecar.mojo && mojo -I . examples/advanced/streaming_proxy.mojo && mojo -I . examples/advanced/openai_sse_front.mojo && mojo -I . examples/advanced/grpc_client_demo.mojo && mojo -I . examples/advanced/unified_middleware.mojo" }
 example-http2-client = "mojo -I . examples/advanced/http2_client.mojo"  # h2c GET + POST via HttpClient(prefer_h2c=True)

@@ -1,4 +1,4 @@
-"""H3C-4: end-to-end HTTP/3 client <-> flare QUIC/H3 server.
+"""End-to-end HTTP/3 client <-> flare QUIC/H3 server.
 
 Drives the real :class:`flare.h3.client.H3ClientConnection` (over
 :class:`flare.quic.client.QuicClientConnection`) against the real

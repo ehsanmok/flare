@@ -1,4 +1,4 @@
-"""Track Q9-W (commit 1/6) -- rustls QUIC handshake bridge tests.
+"""Rustls QUIC handshake bridge tests.
 
 Live-fire tests for the bridge wiring inside
 :class:`flare.quic.server.QuicListener` that hands inbound CRYPTO
@@ -31,8 +31,8 @@ frame bytes to the per-slot
    via :meth:`RustlsQuicAcceptor.free_session`.
 
 The full live-handshake test (real ClientHello -> ServerHello on
-the wire) lands in Track Q11-W's loopback rewrite once the
-reactor's egress path (send_to + protect_initial) is wired.
+the wire) lands in the loopback rewrite once the reactor's
+egress path (send_to + protect_initial) is wired.
 """
 
 from std.collections import List

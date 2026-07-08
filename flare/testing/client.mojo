@@ -142,7 +142,7 @@ struct H2cTestClient[H: Handler](ImplicitlyDestructible, Movable):
     fresh client + server driver pair so requests are independent (no
     shared HPACK dynamic-table state across calls).
 
-    ponytail: one request/response round per call over a fresh
+    This does one request/response round per call over a fresh
     connection pair -- no multiplexing or connection reuse across calls,
     and request/response bodies must fit the default flow-control window
     (no WINDOW_UPDATE-gated body pumping here). That is plenty to cover

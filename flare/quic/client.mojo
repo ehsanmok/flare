@@ -29,11 +29,11 @@ client packet-number spaces.
    client Finished) drains back out and ships in a Handshake
    packet. ACKs are emitted per packet-number space.
 3. Once rustls reports the handshake complete and installs 1-RTT
-   keys, the connection is ESTABLISHED and the H3 layer (H3C-2)
+   keys, the connection is ESTABLISHED and the H3 layer
    drives request / response STREAM frames through
    :meth:`send_stream` / :meth:`poll`.
 
-## Scope / ceilings (ponytail)
+## Scope / ceilings
 
 This driver targets the common single-path, low-loss case the
 HTTP/3 client needs:
@@ -41,13 +41,13 @@ HTTP/3 client needs:
 - Minimal PTO-driven retransmission for the 1-RTT (request) path
   via :mod:`flare.quic._loss_recovery`: ack-eliciting 1-RTT packets
   are tracked, retired as ACKs arrive, and retransmitted on a probe
-  timeout. ponytail: this is NOT full RFC 9002 -- it omits ACK-based
-  loss detection, an RTT estimator + congestion control, and
+  timeout. This is not the full RFC 9002 implementation -- it omits
+  ACK-based loss detection, an RTT estimator + congestion control, and
   handshake-level (Initial / Handshake CRYPTO) + server-side
-  response retransmit. Those are the tracked v0.9 loss-recovery
+  response retransmit. Those are tracked as a loss-recovery
   follow-up. During the handshake a dropped Finished is still
   recovered by the peer re-driving our flight.
-- ponytail: one STREAM frame per :meth:`send_stream` call, capped
+- One STREAM frame per :meth:`send_stream` call, capped
   at the path MTU. A request body larger than one packet is
   rejected rather than fragmented across packets. Upgrade path:
   the same coalescing drain the server uses.
@@ -55,7 +55,7 @@ HTTP/3 client needs:
   handshake completes (:meth:`QuicClientConnection._apply_peer_transport_
   params`): the client clamps its egress datagram size to the peer's
   ``max_udp_payload_size`` and gates STREAM sends on the peer's
-  per-stream / connection flow-control limits. ponytail: the gate uses
+  per-stream / connection flow-control limits. The gate uses
   the *initial* limits only -- it does not yet raise the ceiling from
   inbound MAX_DATA / MAX_STREAM_DATA frames.
 
@@ -1108,7 +1108,7 @@ struct QuicClientConnection(Movable):
         # 0-RTT packet retransmits. 0-RTT and 1-RTT share one packet-
         # number space (RFC 9000 §12.3), so the retransmit rides a fresh
         # 1-RTT packet via the normal loss path -- exactly the upgrade
-        # path the old ponytail named.
+        # path described above.
         var frames_copy = plaintext.copy()
         var dg = self._protect_via_rustls(
             QuicEncryptionLevel.EARLY_DATA, prefix^, plaintext^, pn, pn_length
@@ -1208,7 +1208,7 @@ struct QuicClientConnection(Movable):
             protected[pn_offset + i] = pn_local[i]
         return protected^
 
-    # ── Stream surface (H3C-2 consumes this) ────────────────────────
+    # ── Stream surface (consumed by the HTTP/3 layer) ────────────────
 
     def open_bidi_stream(mut self) -> UInt64:
         """Allocate the next client-initiated bidirectional stream
@@ -1288,7 +1288,7 @@ struct QuicClientConnection(Movable):
         ``initial_max_data`` raises rather than emitting bytes the server
         is entitled to drop as a FLOW_CONTROL_ERROR.
 
-        ponytail: this is a static initial-limits check -- it does not
+        This is a static initial-limits check -- it does not
         track inbound MAX_DATA / MAX_STREAM_DATA frames that raise the
         ceiling mid-connection. Ceiling: a long-lived connection that
         legitimately exceeds the initial allowance is rejected locally.
@@ -1337,7 +1337,7 @@ struct QuicClientConnection(Movable):
         0-RTT packet is retransmitted as 1-RTT once keys are up (the
         shared packet-number space makes this transparent).
 
-        ponytail: on the *reject* path the registered 0-RTT packets are
+        On the *reject* path the registered 0-RTT packets are
         never acked (the server discarded them), so the PTO eventually
         re-sends their frames in addition to :meth:`finish_early_data`'s
         explicit 1-RTT replay. Both carry identical stream offsets, so

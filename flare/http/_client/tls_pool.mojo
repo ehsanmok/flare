@@ -1,4 +1,4 @@
-"""HTTPS (TLS) HTTP/1.1 client connection pool (W5).
+"""HTTPS (TLS) HTTP/1.1 client connection pool.
 
 Idle-connection reuse for the TLS HTTP/1.1 leg of
 :meth:`flare.http.HttpClient._send_h2_or_h1_tls`. A TLS handshake is

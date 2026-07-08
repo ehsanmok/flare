@@ -1,4 +1,4 @@
-"""gRPC unary client over the HTTP/2 ``HttpClient`` path (W3).
+"""gRPC unary client over the HTTP/2 ``HttpClient`` path.
 
 Composes on the existing :class:`flare.http.HttpClient` HTTP/2 surface
 rather than introducing a new transport: a unary call is one POST whose
@@ -194,7 +194,7 @@ struct GrpcClient(Movable):
             headers=resp.headers.copy(),
         )
 
-    # ── Streaming RPCs (W6) ───────────────────────────────────────────────
+    # ── Streaming RPCs ──────────────────────────────────────────────────────
 
     def _normalize_path(self, service_method: String) -> String:
         if service_method.byte_length() == 0 or service_method.unsafe_ptr()[

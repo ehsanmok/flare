@@ -1,4 +1,4 @@
-"""H3C-2: HTTP/3 client request writer + response reader codecs.
+"""HTTP/3 client request writer + response reader codecs.
 
 Two wire-compatibility round-trips that pin the client codecs
 against the already-shipped server codecs (no QUIC, pure bytes):

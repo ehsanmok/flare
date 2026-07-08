@@ -1,5 +1,5 @@
 """Fuzz harness: ``OpenSslQuicCrypto.decrypt`` over random
-ciphertext + AAD + packet-number inputs, plus the Track Q10-W
+ciphertext + AAD + packet-number inputs, plus the
 ``unprotect_handshake_packet`` and ``unprotect_1rtt_packet``
 entry points over random datagrams.
 
@@ -45,9 +45,9 @@ from flare.quic.protection import (
     unprotect_handshake_packet,
 )
 
-# Phase F commit 4/6 -- the egress builders that now route
-# Handshake + 1-RTT through rustls AEAD share their inbound
-# level-derivation helper with the dispatch pump; the helper
+# The egress builders that route Handshake + 1-RTT through
+# rustls AEAD share their inbound level-derivation helper with
+# the dispatch pump; the helper
 # must never panic on arbitrary first bytes, since it's the
 # very first thing the reactor calls per datagram.
 from flare.quic.server import _inbound_level_for_datagram
@@ -133,8 +133,8 @@ def target(data: List[UInt8]) raises:
         except _:
             pass
 
-    # Track Q10-W: drive the new Handshake + 1-RTT unprotect
-    # entry points with the same fuzz datagram. The carriers use
+    # Drive the Handshake + 1-RTT unprotect entry points with
+    # the same fuzz datagram. The carriers use
     # the same fixed PacketKeys schedule so the AEAD-tag-failure
     # path dominates; the prior interesting bug class
     # (out-of-bounds in the HP-sample window or in the truncated-
@@ -182,8 +182,8 @@ def target(data: List[UInt8]) raises:
     except _:
         pass
 
-    # Phase F commit 4/6 -- exercise the inbound level
-    # classifier over the same fuzz datagram.  Property: the
+    # Exercise the inbound level classifier over the same fuzz
+    # datagram.  Property: the
     # classifier MUST return one of the four valid QUIC
     # encryption-level codepoints, and MUST NOT panic on any
     # first-byte combination (including the long-header bit

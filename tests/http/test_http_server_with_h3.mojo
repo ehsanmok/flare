@@ -1,5 +1,4 @@
-"""Tests for :meth:`HttpServer.bind_with_h3` + ALPN routing
-(Track Q5-W commit 1/2).
+"""Tests for :meth:`HttpServer.bind_with_h3` + ALPN routing.
 
 The bind path opens a TCP listener for h1 / h2c / h2 traffic AND
 a QUIC UDP listener for h3 traffic. The ALPN routing decision

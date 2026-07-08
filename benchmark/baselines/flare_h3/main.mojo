@@ -1,7 +1,7 @@
 """Flare HTTP/3 plaintext baseline binary for the bench_h3 harness.
 
-Per Track Q13-W (v0.8 continuation): the bench baseline now
-goes through :meth:`flare.http.HttpServer.bind_with_h3` +
+The bench baseline goes through
+:meth:`flare.http.HttpServer.bind_with_h3` +
 :meth:`HttpServer.serve_h3` so the same Handler dispatch shape
 production callers use drives the bench workload. The handler
 returns a 13-byte ``"Hello, World!"`` body on every request,

@@ -1,4 +1,4 @@
-"""Unit tests for the interior-mutable client cookie store (W1).
+"""Unit tests for the interior-mutable client cookie store.
 
 Exercises :class:`flare.http._client.cookie_store.CookieStore` in
 isolation (no network): the empty/no-op handle, record + replay,

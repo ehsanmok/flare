@@ -1,7 +1,6 @@
 """I/O-touching integration tests for the WS auto-dispatcher.
 
-Track Q8-W commit 2/2 -- complements
-:mod:`tests.ws.test_ws_autoclient` (which pins the pure
+Complements :mod:`tests.ws.test_ws_autoclient` (which pins the pure
 :func:`decide_wire` matrix + the runtime error surface without
 real I/O) with four cases that drive
 :meth:`flare.ws.WsAutoClient.connect` end-to-end against a real

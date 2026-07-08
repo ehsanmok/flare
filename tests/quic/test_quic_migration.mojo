@@ -94,7 +94,7 @@ def test_client_migrates_to_new_path() raises:
 
     var old_addr = client.local_addr()
     # The server's egress address for this slot is the client's
-    # pre-migration address (W8 strict-hold baseline).
+    # pre-migration address (the strict-hold baseline).
     var server_old_egress = server.peer_addrs[0]
 
     # 2. Migrate: switch CID + rebind socket + probe the new path.
@@ -107,7 +107,7 @@ def test_client_migrates_to_new_path() raises:
         "rebind must pick a new local port",
     )
 
-    # W8 strict egress hold: after the server first sees the migrating
+    # Strict egress hold: after the server first sees the migrating
     # packet it probes the new path but must NOT yet switch its egress
     # address to the unvalidated candidate -- the client has not echoed
     # the server's PATH_CHALLENGE, so validation cannot have completed.

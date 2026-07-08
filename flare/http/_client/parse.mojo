@@ -575,7 +575,7 @@ def _read_http_response_framed_tls(
     mut can_reuse: Bool,
 ) raises -> Response:
     """Read one framed HTTP/1.1 response from a TLS stream, for HTTPS
-    keep-alive pooling (W5). See :func:`_read_http_response_framed`."""
+    keep-alive pooling. See :func:`_read_http_response_framed`."""
     return _read_http_response_framed(stream, can_reuse)
 
 

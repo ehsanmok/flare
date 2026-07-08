@@ -1,4 +1,4 @@
-"""H3C-3: Alt-Svc parser + per-origin cache + h3 wire policy.
+"""Alt-Svc parser + per-origin cache + h3 wire policy.
 
 Covers the RFC 7838 parser (single + multi advert, params, quoted
 authority, same-host shorthand, ``clear``, malformed-skip), the

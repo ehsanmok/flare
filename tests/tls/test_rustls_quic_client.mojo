@@ -1,4 +1,4 @@
-"""H3C-0 smoke: the rustls QUIC client-role binding.
+"""Smoke test for the rustls QUIC client-role binding.
 
 Companion to ``test_rustls_quic_handshake.mojo`` (the server side).
 This drives the client surface added for the HTTP/3 client:

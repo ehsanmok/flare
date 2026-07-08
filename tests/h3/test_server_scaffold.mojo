@@ -1,13 +1,12 @@
 """Unit tests for the HTTP/3 server connection scaffold
-(``flare.h3.server`` -- Track Q4).
+(``flare.h3.server``).
 
 The full driver -- per-stream :class:`flare.h3.H3RequestReader`
 -> :trait:`Handler` -> :func:`flare.h3.encode_response_headers`
 wiring, control-stream lifecycle, settings exchange, push,
 GOAWAY -- ships in a focused follow-up commit. This suite pins
-the carrier shapes + the typed boundary the ALPN dispatcher
-(Track Q5) and the H3 bench harness (Track Q7) will build
-against.
+the carrier shapes + the typed boundary the ALPN dispatcher and
+the H3 bench harness will build against.
 """
 
 from std.testing import assert_equal, assert_false, assert_true

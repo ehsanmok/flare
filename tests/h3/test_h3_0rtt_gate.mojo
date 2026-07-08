@@ -1,4 +1,4 @@
-"""Unit tests for the client-side 0-RTT safety gate (W7).
+"""Unit tests for the client-side 0-RTT safety gate.
 
 The 0-RTT replay hazard (RFC 9001 sec 9.2) means an attacker can
 re-send a captured early-data flight, so the client must only ever let

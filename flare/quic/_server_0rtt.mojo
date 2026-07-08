@@ -1,4 +1,4 @@
-"""Server-side 0-RTT (EarlyData) support helpers (W4a).
+"""Server-side 0-RTT (EarlyData) support helpers.
 
 Carved out of :mod:`flare.quic.server` so the 1974-line listener
 stays under the 1k-line budget and the security-sensitive 0-RTT
@@ -26,7 +26,7 @@ This module provides:
   long-header packet, so the datagram-walk in the listener can step
   over / into a 0-RTT packet instead of bailing.
 
-ponytail: the two guards are layered. :class:`EarlyDataReplayGuard` is
+The two guards are layered. :class:`EarlyDataReplayGuard` is
 *intra-connection* (a replay within one resumed connection, plus the
 byte budget); :class:`EarlyDataStrikeSet` is *cross-connection* (the
 same flight replayed as a new accept). The strike set is keyed on the
@@ -155,7 +155,7 @@ struct EarlyDataStrikeSet(Movable):
     and its 0-RTT flight is refused -- it falls back to a full 1-RTT
     handshake, safe, just a round trip slower.
 
-    ponytail: keyed on the client-chosen DCID + a wall-clock window,
+    Keyed on the client-chosen DCID + a wall-clock window,
     not on an opaque session ticket. rustls 0.23 cannot export
     single-use tickets (confirmed for this project), so ticket-keyed
     exact-once admission is unavailable; DCID+window is the achievable

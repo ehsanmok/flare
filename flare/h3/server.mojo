@@ -919,7 +919,7 @@ struct H3Connection(Copyable, Defaultable, Movable):
         insert applied since the last drain (RFC 9204 section 4.4.3).
         Returns empty when nothing is pending.
 
-        ponytail: the default config advertises ``qpack_max_table_capacity
+        The default config advertises ``qpack_max_table_capacity
         = 0``, so a conforming peer never streams dynamic inserts and this
         never has anything to drain. Routing the drained bytes onto a
         locally-opened QPACK decoder uni-stream is the reactor-side

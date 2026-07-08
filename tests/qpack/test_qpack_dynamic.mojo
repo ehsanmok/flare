@@ -1,5 +1,4 @@
-"""QPACK dynamic table + encoder/decoder stream instructions (T2.4 /
-critique section 7.4, RFC 9204).
+"""QPACK dynamic table + encoder/decoder stream instructions (RFC 9204).
 
 Pins the dynamic-table machinery the static-only codec lacked: capacity
 eviction + absolute index resolution, the encoder-stream insertion

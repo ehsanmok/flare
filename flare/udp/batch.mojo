@@ -41,10 +41,10 @@ The arrays are modeled as flat ``UnsafePointer[UInt8]`` regions with
 the fields poked at fixed offsets, mirroring
 ``flare.runtime.iovec.IoVecBuf``.
 
-ponytail: IPv4 + IPv6 sized name slots (28 B) but the wire structs are
-pinned to the 64-bit Linux ABI -- the only ABI where these syscalls
-exist in this codebase. A 32-bit Linux port would need different
-offsets (upgrade path: branch the comptime offsets on pointer width).
+The name slots are sized for IPv4 + IPv6 (28 B), but the wire structs
+are pinned to the 64-bit Linux ABI -- the only ABI where these
+syscalls exist in this codebase. A 32-bit Linux port would need
+different offsets, branching the comptime offsets on pointer width.
 """
 
 from std.ffi import c_int, c_uint, get_errno, ErrNo

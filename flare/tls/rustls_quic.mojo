@@ -485,7 +485,7 @@ struct RustlsQuicConnector(Movable):
 
         ``transport_params`` is the client's encoded QUIC transport
         parameters (empty is accepted for the handshake-only path;
-        the QUIC client driver in H3C-1 fills the real blob). The
+        the QUIC client driver fills the real blob). The
         returned :class:`RustlsQuicSession` drives the client
         handshake through the same feed/take CRYPTO + AEAD + header
         thunks the server session uses; the first
@@ -512,8 +512,8 @@ struct RustlsQuicConnector(Movable):
             var detail = _do_last_error(self._lib)
             raise Error(String("RustlsQuicConnector.connect failed: ") + detail)
         var session_lib = OwnedDLHandle(_find_rustls_quic_lib())
-        # The client picks its own SCID/DCID in the QUIC driver
-        # (H3C-1), so the session-handle carrier holds no DCID-bound
+        # The client picks its own SCID/DCID in the QUIC driver,
+        # so the session-handle carrier holds no DCID-bound
         # identity here; an empty dcid is the right placeholder.
         return RustlsQuicSession._wrap(
             session_lib^, session_handle, List[UInt8]()

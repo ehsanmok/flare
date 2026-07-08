@@ -60,7 +60,7 @@ def _sse_token_frame(token: List[UInt8]) -> List[UInt8]:
     """Wrap one upstream token as an OpenAI ``chat.completion.chunk``
     SSE frame: ``data: {json}\\n\\n``.
 
-    ponytail: the token content is spliced into the JSON verbatim (no
+    Note: the token content is spliced into the JSON verbatim (no
     escaping). Sound here because the backend emits ASCII tokens; the
     upgrade path is a JSON string-escape pass if untrusted tokens flow.
     """

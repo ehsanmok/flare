@@ -21,7 +21,7 @@ Two algorithms ship:
 constants below and the in-recovery guard (one window reduction per
 round-trip, keyed on the lost packet's send time).
 
-ponytail: these controllers model the window only -- they do not pace
+These controllers model the window only -- they do not pace
 egress (no inter-packet send timer). The QUIC send path uses the window
 as a gate (burst up to ``cwnd - bytes_in_flight``); add a pacer
 (RFC 9002 section 7.7) only if a profile shows bursty loss. The upgrade

@@ -352,7 +352,7 @@ def _do_peer_transport_params(
     has not yet surfaced them (handshake flight not processed).
     Raises on the FFI's bad-pointer / out-cap-too-small codes.
 
-    ponytail: the readback uses a fixed 1024-byte buffer. A peer's
+    The readback uses a fixed 1024-byte buffer. A peer's
     transport-parameters blob is a handful of varint params (well
     under 256 bytes in practice); the FFI returns -1 (raise) rather
     than truncating if a peer ever exceeds the cap -- upgrade path

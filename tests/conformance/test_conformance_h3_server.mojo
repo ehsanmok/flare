@@ -1,5 +1,4 @@
-"""HTTP/3 server conformance round-trip fixtures (Track Q4-W
-commit 3/3).
+"""HTTP/3 server conformance round-trip fixtures.
 
 The HTTP/3 wire shape is fully determined by RFC 9114 + RFC 9204.
 Two production implementations -- aioquic (Python) and quiche

@@ -1,4 +1,4 @@
-"""Off-reactor DNS resolution + happy-eyeballs ordering (W6).
+"""Off-reactor DNS resolution + happy-eyeballs ordering.
 
 ``getaddrinfo(3)`` is a blocking syscall with no async variant on the
 platforms flare targets. :func:`resolve_async` offloads it to a fresh
@@ -12,12 +12,12 @@ not need the off-thread variant pay nothing.
 RFC 8305 connection-attempt order (interleave IPv6 / IPv4) so a dialer
 can race families without one stalling the other.
 
-ponytail: the worker thread is joined (the public API is synchronous --
+The worker thread is joined (the public API is synchronous --
 the submitter waits for the result anyway), so a flipped ``cancel`` is
 honored at the pre-flight and post-flight boundaries, the same contract
 as ``block_in_pool``. A truly fire-and-forget resolve that returns the
-reactor to its loop while the lookup runs needs reactor-side completion
-wiring (eventfd/pipe wakeup); that is the documented upgrade path.
+reactor to its loop while the lookup runs would need reactor-side
+completion wiring (eventfd/pipe wakeup) instead.
 """
 
 from std.memory import UnsafePointer, alloc

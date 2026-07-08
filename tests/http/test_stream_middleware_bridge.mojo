@@ -1,5 +1,4 @@
-"""Shared middleware path between ``serve`` and ``serve_streaming`` (T2.2 /
-critique section 5.2).
+"""Shared middleware path between ``serve`` and ``serve_streaming``.
 
 A streaming front used to hand-roll its status line + headers as a raw
 string, bypassing the ``Handler`` middleware stack the request/response

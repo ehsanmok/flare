@@ -1,5 +1,5 @@
-"""Unit tests for the ALPN dispatcher (``flare.http.alpn_dispatch``,
-Track Q5 scaffold).
+"""Unit tests for the ALPN dispatcher (``flare.http.alpn_dispatch``
+scaffold).
 
 Pins the pure decision functions that map an ALPN-negotiation
 outcome to a :data:`WireProtocol` codepoint. The reactor-side

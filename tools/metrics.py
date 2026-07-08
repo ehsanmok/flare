@@ -11,11 +11,11 @@ lean on two open-source proxies that work on Mojo's overwhelmingly
 
 * coverage  -- a *reference* proxy, not line coverage: a source module counts
   as covered when its dotted import path is named by at least one test, OR a
-  ``test_<stem>.mojo`` exists. ponytail: this can't see lines executed only
+  ``test_<stem>.mojo`` exists. This can't see lines executed only
   transitively (a private ``_server/parse.mojo`` exercised via the
   ``http.server`` re-export reads as uncovered); the per-module list below
-  makes those explicit. Upgrade path: real coverage once the Mojo toolchain
-  emits instrumentation.
+  makes those explicit. Real coverage will need to wait until the Mojo
+  toolchain emits instrumentation.
 
 Usage: ``python tools/metrics.py [complexity|coverage|all]``  (default: all)
 """

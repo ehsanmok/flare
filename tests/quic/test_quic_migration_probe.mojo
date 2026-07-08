@@ -1,4 +1,4 @@
-"""Unit tests for server path-validation policy (W4b).
+"""Unit tests for server path-validation policy.
 
 Covers :mod:`flare.quic._server_migration` in isolation:
 

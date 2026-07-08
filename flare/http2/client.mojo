@@ -903,7 +903,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         streams; in-flight streams MAY complete."""
         return self.conn.goaway_received
 
-    # ── Incremental streaming surface (W6) ───────────────────────────────
+    # ── Incremental streaming surface ─────────────────────────────────────
     #
     # The unary path above buffers the whole response and pops it via
     # take_response(). The streaming gRPC client instead opens a stream,

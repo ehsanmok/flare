@@ -1,4 +1,4 @@
-"""End-to-end tests for the gRPC unary client (W3).
+"""End-to-end tests for the gRPC unary client.
 
 Drives :class:`flare.grpc.GrpcClient` over the HTTP/2 cleartext (h2c
 prior-knowledge) path against a forked flare ``HttpServer`` whose

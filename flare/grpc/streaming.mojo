@@ -1,4 +1,4 @@
-"""gRPC streaming calls over a long-lived HTTP/2 stream (W6).
+"""gRPC streaming calls over a long-lived HTTP/2 stream.
 
 The unary :class:`flare.grpc.GrpcClient.call` path buffers the whole
 response and pops it in one shot. Streaming RPCs instead keep one HTTP/2

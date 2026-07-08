@@ -33,7 +33,7 @@ bounded by the high watermark plus at most one upstream read; a relay
 front should also check ``conn.write_buffer_full()`` in its drain loop to
 avoid overshooting within a single readable edge.
 
-ponytail: while a connection is open and not closing, ``INTEREST_WRITE``
+While a connection is open and not closing, ``INTEREST_WRITE``
 stays armed, so a front *without an upstream* that stalls without
 producing or closing still busy-spins on level-triggered writable edges.
 The upstream-relay shape (the streaming-proxy case) is fully gated by the

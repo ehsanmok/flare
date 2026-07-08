@@ -375,7 +375,7 @@ def apply_ack(mut conn: Connection, ack: AckFrame):
 comptime _ACK_EXPAND_CAP: Int = 256
 """Cap how many individual packet numbers one ACK is expanded into.
 Bounds the work an adversarial ACK with huge ranges can cause; our
-own flows ack a handful of packets per frame. ponytail: a peer that
+own flows ack a handful of packets per frame. A peer that
 genuinely acks more than 256 packets in one frame just gets the
 newest 256 retired here -- the rest retire on the next ACK."""
 

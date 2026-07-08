@@ -1,4 +1,4 @@
-"""Phase F commit 4/6 -- Handshake + 1-RTT egress builders.
+"""Handshake + 1-RTT egress builders.
 
 Exercises the :meth:`QuicListener._build_handshake_response` /
 `._build_1rtt_response` builders and the per-level
@@ -10,11 +10,11 @@ return empty bytes; valid arguments produce non-empty bytes
 matching the expected long/short header form).
 
 The full end-to-end "encrypts a packet a real QUIC client can
-decrypt" path is the Phase F commit 5/6 bench gate's job -- it
-needs a live handshake that flips both readiness sentinels via
-rustls's KeyChange, which only happens against a real ClientHello.
-For F4 we drive the builders directly with the readiness
-sentinels stamped manually, mirroring how
+decrypt" path is the bench gate's job -- it needs a live
+handshake that flips both readiness sentinels via rustls's
+KeyChange, which only happens against a real ClientHello. Here
+we drive the builders directly with the readiness sentinels
+stamped manually, mirroring how
 :meth:`QuicListener._dispatch_crypto_frames` would stamp them
 once rustls's KeyChange::Handshake / KeyChange::OneRtt fires.
 """

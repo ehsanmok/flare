@@ -1678,19 +1678,19 @@ DNS cache, server 0-RTT data path, migration path-validation) is
 additive and does not touch the measured hot paths in the default
 configuration:
 
-- W1-W3 add new client-side modules (`RedirectPolicy`/cookie/retry
-  wiring, `GrpcClient`, `DnsCache`). The HTTP/1.1, h2, and h2c server
+- The new client-side modules (`RedirectPolicy`/cookie/retry
+  wiring, `GrpcClient`, `DnsCache`) are additive. The HTTP/1.1, h2, and h2c server
   serve loops are unchanged; the new client features are opt-in
   (builders / kwargs that default to prior behavior).
-- W4a server 0-RTT is gated on `max_early_data_size > 0` (default 0).
+- Server 0-RTT is gated on `max_early_data_size > 0` (default 0).
   With 0-RTT disabled the per-packet path is byte-identical to before:
   no extra FFI call, only a single `UInt32` budget compare before
   the (skipped) early-key install block.
-- W4b migration adds a server-initiated `PATH_CHALLENGE` plus an
+- Migration adds a server-initiated `PATH_CHALLENGE` plus an
   anti-amplification counter, and these fire only when a 1-RTT packet
   arrives from a *new* peer address (a migration event), never on the
   steady-state single-path request path.
-- W5 client transport reuse + request streaming is fully opt-in. HTTPS
+- Client transport reuse + request streaming is fully opt-in. HTTPS
   keep-alive pooling only engages after `with_pool()`; with pooling off
   the TLS h1 path is byte-identical to before (one `_addr == 0` compare,
   then the prior full-handshake + read-to-EOF path). The shared generic
@@ -1698,7 +1698,7 @@ configuration:
   used. `send_chunked` is a separate explicit method (no change to
   `send` / `get` / `post`); it holds one chunk in flight, so a multi-MB
   upload stays bounded-memory rather than materializing the body.
-- W6 gRPC streaming + async DNS is additive. The unary HttpClient h2/h2c
+- gRPC streaming + async DNS is additive. The unary HttpClient h2/h2c
   fast path (`take_response`) is untouched; streaming opens its own
   long-lived stream and only uses the new additive
   `Http2ClientConnection` accessors (`send_request_open` / `drain_body` /
@@ -1707,7 +1707,7 @@ configuration:
   thread (same mechanism as `block_in_pool`); the sync `resolve` /
   `DnsCache.resolve` hot path is unchanged, and a within-TTL cache hit
   spawns no thread.
-- W7 0-RTT replay hardening adds no steady-state cost. The server
+- 0-RTT replay hardening adds no steady-state cost. The server
   cross-connection strike set is consulted only on a connection's
   *first* 0-RTT packet (gated by `not early_guard.any_seen`), and 0-RTT
   is off by default (`max_early_data_size == 0`), so the 1-RTT request
@@ -1717,8 +1717,8 @@ configuration:
   fires at capacity. The client `fetch_0rtt` gate is a pure
   `is_idempotent_method` predicate plus two existing accessor reads on
   the non-eligible path, which falls straight through to the unchanged
-  unary `fetch`; the eligible emit path is the W9 note below.
-- W8 migration strict egress hold adds no steady-state cost. The
+  unary `fetch`; the eligible emit path is the 0-RTT EarlyData note below.
+- Migration strict egress hold adds no steady-state cost. The
   per-slot egress drain (`_drain_and_send`) gains one
   `_drain_migration_probe` call whose body returns immediately when the
   slot has no stashed path-validation frames -- the universal case when
@@ -1730,7 +1730,7 @@ configuration:
   benchmarks never migrate, so throughput/tail are unaffected. The hold
   trades one validation round trip of latency on a genuine migration for
   the guarantee that no 1-RTT egress reflects to an unvalidated address.
-- W9 client 0-RTT EarlyData emission adds no steady-state cost. The new
+- Client 0-RTT EarlyData emission adds no steady-state cost. The new
   `_build_0rtt` / `send_stream_early` / `finish_early_data` run only on a
   resumed connection opened with `enable_0rtt=True` whose ticket
   installed early keys (`early_data_ready()`); a fresh connection -- the

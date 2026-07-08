@@ -67,12 +67,12 @@ remains isolated.
 
 ## Cross-validation
 
-The bench harness (`benchmark/scripts/bench_h3.sh`, Track Q7-W
-commit 3/4) runs the same `h2load --npn-list=h3` workload
-against flare, this quinn baseline, and the matching
-`benchmark/baselines/quiche/` baseline. Each baseline serves
-the same hello-world body; the harness computes the five-run
-median + p99 / p99.9 / p99.99 / sigma and writes the result
-table to `benchmark/results/v0.8/h3/`. The cross-framework
-table published in `docs/benchmark.md` (Track Q7-W commit 4/4)
-is the v0.8 hard-gate HTTP/3 throughput row.
+The bench harness (`benchmark/scripts/bench_h3.sh`) runs the
+same `h2load --npn-list=h3` workload against flare, this quinn
+baseline, and the matching `benchmark/baselines/quiche/`
+baseline. Each baseline serves the same hello-world body; the
+harness computes the five-run median + p99 / p99.9 / p99.99 /
+sigma and writes the result table to
+`benchmark/results/v0.8/h3/`. The cross-framework table
+published in `docs/benchmark.md` is the v0.8 hard-gate HTTP/3
+throughput row.

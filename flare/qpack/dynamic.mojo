@@ -31,7 +31,7 @@ Pieces:
   pair a table with the stream bookkeeping (Known Received Count, the
   Insert Count Increment to emit).
 
-ponytail: eviction follows the encoder (evict the oldest entry to make
+Eviction follows the encoder (evict the oldest entry to make
 room) and does not track per-entry reference counts -- a decoder mirror
 trusts the peer encoder not to evict an entry a not-yet-acknowledged
 field section still references (RFC 9204 section 2.2 makes that the
@@ -109,7 +109,7 @@ struct QpackDynamicTable(Copyable, Movable):
     def _evict_to(mut self, target: UInt64):
         while self.size > target and len(self.entries) > 0:
             self.size -= entry_size(self.entries[0])
-            # Drop the oldest entry (shift). ponytail: O(n) shift on a
+            # Drop the oldest entry (shift). This is an O(n) shift on a
             # List; a ring buffer is the upgrade path if eviction shows
             # up in a profile, but inserts dominate and tables are small.
             var rest = List[QpackHeader](capacity=len(self.entries) - 1)
@@ -251,7 +251,7 @@ def apply_encoder_instructions_partial(
     returns ``(inserts_applied, bytes_consumed)`` so the caller can keep
     the unconsumed tail and retry once more bytes arrive.
 
-    ponytail: an incomplete *and* a corrupt trailing instruction look the
+    An incomplete *and* a corrupt trailing instruction look the
     same here (both raise mid-parse), so both stop consumption. A truly
     corrupt encoder stream therefore stalls rather than erroring; the
     QUIC idle timeout closes such a connection. The upgrade path is to

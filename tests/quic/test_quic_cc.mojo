@@ -1,5 +1,4 @@
-"""Congestion controllers: Reno + CUBIC (HyStart++) window dynamics
-(T2.3 / critique sections 7.1-7.2).
+"""Congestion controllers: Reno + CUBIC (HyStart++) window dynamics.
 
 Sans-I/O unit tests pinning the RFC 9002 / 9438 / 9406 behaviours the
 QUIC send path relies on: initial window, slow-start growth, the

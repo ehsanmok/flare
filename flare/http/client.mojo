@@ -810,7 +810,7 @@ struct HttpClient(Movable):
         reachable by establishing (and ALPN-negotiating) a TLS
         connection to ``u``'s origin.
 
-        ponytail: unless the HTTPS keep-alive pool is enabled the probed
+        Unless the HTTPS keep-alive pool is enabled, the probed
         connection is closed immediately, so the (rarer) h2-wins path
         re-dials TLS for the real request -- one redundant handshake. An
         ``http/1.1`` connection is pooled when ``with_pool`` is on so the
@@ -1003,7 +1003,7 @@ struct HttpClient(Movable):
         st.close()
         return None
 
-    # ── Streaming request body (W5) ───────────────────────────────────────────
+    # ── Streaming request body ────────────────────────────────────────────────
 
     def send_chunked[
         B: ChunkSource

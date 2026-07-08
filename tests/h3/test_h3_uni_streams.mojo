@@ -1,6 +1,5 @@
 """Tests for HTTP/3 unidirectional stream type dispatch + the
-control stream + SETTINGS/GOAWAY consumption -- Track Q4-W
-commit 2/3.
+control stream + SETTINGS/GOAWAY consumption.
 
 The new surface on :class:`flare.h3.H3Connection`:
 

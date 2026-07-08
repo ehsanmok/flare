@@ -541,7 +541,7 @@ struct QuicListener(Movable):
             # egress + PATH_RESPONSE go back to where the client now
             # is.
             # RFC 9000 sec 8 / sec 9 path validation: a 1-RTT packet
-            # from a new source means the client moved paths. W8 strict
+            # from a new source means the client moved paths. A strict
             # egress hold -- do NOT switch the egress address to the new
             # path yet (the prior "follow immediately" let large 1-RTT
             # responses reflect off the server to a spoofed source).
@@ -753,7 +753,7 @@ struct QuicListener(Movable):
         self._stash_migration_egress(slot, events)
         # The client echoed our server-initiated PATH_CHALLENGE: the
         # candidate path is validated (RFC 9000 sec 8.2). Promote it to
-        # the connection's egress address -- this is the W8 strict-hold
+        # the connection's egress address -- this is the strict-hold
         # release point, the first moment non-probe 1-RTT egress is
         # allowed to follow the client to the new path -- and lift the
         # anti-amplification cap.
@@ -1648,7 +1648,7 @@ struct QuicListener(Movable):
         # STREAM frame are packed into as few datagrams as the MTU
         # allows -- one AEAD encrypt + one sendto per datagram
         # instead of one per response plus a separate ACK packet.
-        # Path-validation probe egress (W8): routed to the candidate
+        # Path-validation probe egress: routed to the candidate
         # under its own 3x budget, kept off the validated-path drain
         # below. No-op in steady state (nothing stashed, not probing).
         if self._drain_migration_probe(slot):
@@ -1658,7 +1658,7 @@ struct QuicListener(Movable):
         return emitted
 
     def _drain_migration_probe(mut self, slot: Int) raises -> Bool:
-        """Strict-hold egress for path-validation frames (W8).
+        """Strict-hold egress for path-validation frames.
 
         PATH_CHALLENGE / PATH_RESPONSE frames stashed for ``slot`` are
         sent in their own 1-RTT datagram. While a candidate path is
@@ -1776,7 +1776,7 @@ struct QuicListener(Movable):
             self.handshake_done_sent[slot] = True
 
         # Migration path-validation frames (PATH_CHALLENGE /
-        # PATH_RESPONSE) are NOT coalesced here -- W8 routes them to the
+        # PATH_RESPONSE) are NOT coalesced here -- they are routed to the
         # candidate path under their own anti-amplification budget via
         # :meth:`_drain_migration_probe`, which runs separately in
         # :meth:`_drain_and_send`. This drain only ever targets the
@@ -2316,7 +2316,7 @@ struct QuicListener(Movable):
     def _on_pto_expired(mut self, slot: Int) raises:
         """RFC 9002 sec 6.2 probe-timeout action for ``slot``.
 
-        ponytail: server-side 1-RTT response retransmit is not wired
+        Server-side 1-RTT response retransmit is not wired
         yet -- it needs the per-slot sent-packet bookkeeping +
         RTT-estimated PTO scheduling that lands with the full RFC 9002
         loss-recovery work (the ``flare.quic.cc`` track). Until then a

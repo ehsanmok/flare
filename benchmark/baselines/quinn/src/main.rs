@@ -1,5 +1,4 @@
-//! quinn 0.11 + h3 0.0.6 plaintext-over-h3 baseline (Track Q7-W
-//! commit 1/4).
+//! quinn 0.11 + h3 0.0.6 plaintext-over-h3 baseline.
 //!
 //! Mirrors the route surface of
 //! `benchmark/baselines/hyper/src/main.rs` -- `/`, `/plaintext`,

@@ -1,4 +1,4 @@
-"""W9: end-to-end HTTP/3 client 0-RTT (EarlyData) send flight.
+"""End-to-end HTTP/3 client 0-RTT (EarlyData) send flight.
 
 Drives the real :meth:`flare.h3.client.H3ClientConnection.fetch_0rtt`
 against a real :class:`flare.quic.server.QuicListener` over loopback

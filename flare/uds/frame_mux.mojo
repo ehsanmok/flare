@@ -32,10 +32,10 @@ Three layers, smallest first (each is independently testable):
   inbound bytes and demuxes. No call ever reconnects -- the connection is
   opened once and owned for the mux's lifetime.
 
-ponytail: ``FrameDemux`` accumulates into a single ``List[UInt8]`` and
+``FrameDemux`` accumulates into a single ``List[UInt8]`` and
 compacts the consumed prefix after each drain (so a slow consumer cannot
 make the buffer grow without bound across the *consumed* bytes). The
-ceiling is one in-flight frame's payload held contiguously; a frame
+limit is one in-flight frame's payload held contiguously; a frame
 larger than ``MAX_FRAME_PAYLOAD`` is rejected as a protocol error rather
 than allocated. ``open`` returns nothing here; the single-stream
 ``UpstreamChunkSource`` (``flare.http.async_body``) is the reactor-
@@ -54,7 +54,7 @@ comptime HEADER_LEN: Int = 13
 comptime MAX_FRAME_PAYLOAD: Int = 64 * 1024 * 1024
 """Reject any frame claiming a payload larger than this (protocol-error
 guard against a corrupt/hostile 4-byte length blowing up allocation).
-ponytail: 64 MiB is generous for a token-streaming relay; raise it only
+64 MiB is generous for a token-streaming relay; raise it only
 with a matching backpressure story."""
 
 

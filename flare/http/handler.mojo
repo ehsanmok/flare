@@ -171,7 +171,7 @@ trait HandlerExtractor(Copyable, Defaultable, Handler, Movable):
     Re-exported from :mod:`flare.http.handler` only (the demoted
     internal-adapter import path).
 
-    ponytail: the manual no-arg ``__init__`` body is still required
+    The manual no-arg ``__init__`` body is still required
     today because Mojo's ``@fieldwise_init`` doesn't auto-derive a
     no-arg constructor from per-field ``Defaultable`` impls. Ceiling:
     every handler struct must hand-write the field-by-field default

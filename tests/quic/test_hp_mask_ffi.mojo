@@ -17,9 +17,8 @@ RFC 9001 Appendix A vectors:
 RFC 9001 Appendix A doesn't ship an AES-256 vector, so the AES-256
 case pins determinism (same input -> same output, different sample
 -> different output) and the OpenSSL contract directly. The Mojo
-``OpenSslQuicCrypto`` impl (Track Q1-W commit 3/4) is the layer
-that uses these masks; that commit's tests pin the impl against
-full packet-protect round-trips.
+``OpenSslQuicCrypto`` impl is the layer that uses these masks;
+its tests pin the impl against full packet-protect round-trips.
 """
 
 from std.ffi import OwnedDLHandle, c_int

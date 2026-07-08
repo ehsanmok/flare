@@ -1,4 +1,4 @@
-"""Tests for off-reactor DNS resolution + happy-eyeballs ordering (W6).
+"""Tests for off-reactor DNS resolution + happy-eyeballs ordering.
 
 ``resolve_async`` runs ``getaddrinfo`` on a pool thread and returns the
 same result as the sync ``resolve``; a pre-flipped cancel short-circuits
@@ -85,7 +85,7 @@ def test_cache_async_serves_hit_without_spawn() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_async_resolve.mojo -- off-reactor DNS + happy-eyeballs (W6)")
+    print("test_async_resolve.mojo -- off-reactor DNS + happy-eyeballs")
     print("=" * 60)
     test_resolve_async_matches_sync_localhost()
     test_resolve_async_empty_host_raises()

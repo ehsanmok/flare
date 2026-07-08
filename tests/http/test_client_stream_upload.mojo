@@ -1,4 +1,4 @@
-"""Streaming request-body upload over HTTP/1.1 (W5).
+"""Streaming request-body upload over HTTP/1.1.
 
 :meth:`flare.http.HttpClient.send_chunked` streams a request body from
 a ``ChunkSource`` using ``Transfer-Encoding: chunked`` without ever
@@ -148,7 +148,7 @@ def test_streamed_upload_round_trips_full_body() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_client_stream_upload.mojo -- chunked request body (W5)")
+    print("test_client_stream_upload.mojo -- chunked request body")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -1,6 +1,6 @@
-"""End-to-end H3 dispatch tests -- Track Q12-W.
+"""End-to-end H3 dispatch tests.
 
-Exercises the post-Q11-W reactor: STREAM payloads surfaced via
+Exercises the reactor: STREAM payloads surfaced via
 :attr:`flare.quic.state.ConnectionEvents.stream_chunks` route
 through :meth:`flare.quic.server.QuicListener._route_h3_stream_chunks`
 into the per-slot :class:`flare.h3.H3Connection`, the dispatch
@@ -15,7 +15,7 @@ The 1-RTT wire path (rustls KeyChange surfacing 1-RTT traffic
 secrets + ``protect_1rtt_packet`` egress) is deferred to a
 follow-up commit; this suite covers the dispatch wire end-to-end
 via direct event injection so a real h2load smoke (gated on the
-key-change FFI extension) lands in Track Q13-W.
+key-change FFI extension) can land in a follow-up.
 
 Cases:
 

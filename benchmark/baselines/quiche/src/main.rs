@@ -1,5 +1,4 @@
-//! Cloudflare quiche 0.22 plaintext-over-h3 baseline (Track Q7-W
-//! commit 2/4).
+//! Cloudflare quiche 0.22 plaintext-over-h3 baseline.
 //!
 //! Mirrors the route surface of
 //! `benchmark/baselines/hyper/src/main.rs` -- `/`, `/plaintext`,

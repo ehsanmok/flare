@@ -1,11 +1,10 @@
 """Unit tests for the QUIC server reactor carriers
-(``flare.quic.server`` -- Track Q3-W).
+(``flare.quic.server``).
 
-The reactor wiring landed in Track Q3-W commit 1/5 (UDP bind +
-per-datagram dispatch); this suite covers the carrier shapes
-that downstream tracks (H3 dispatch -- Q4-W, ALPN dispatcher
--- Q5-W) build against. The reactor-loop tests live in
-``tests/quic/test_quic_reactor.mojo``.
+The reactor wiring landed with UDP bind + per-datagram dispatch;
+this suite covers the carrier shapes that downstream work (H3
+dispatch, ALPN dispatcher) builds against. The reactor-loop
+tests live in ``tests/quic/test_quic_reactor.mojo``.
 
 Properties covered:
 

@@ -1,5 +1,5 @@
 """``Router.mount(prefix, sub)`` attaches a nested router under a path
-prefix (T2.1 / critique section 5.1).
+prefix.
 
 A mounted sub-router owns its whole subtree: the prefix is stripped
 before delegation, the sub sees relative paths, runs its own method

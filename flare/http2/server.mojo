@@ -577,7 +577,7 @@ struct H2Connection(Defaultable, Movable):
         END_STREAM on the trailing block (the gRPC-over-HTTP/2 shape);
         otherwise it frames as a single buffered response.
 
-        ponytail: still no streaming-response bodies on h2 here (one
+        There are still no streaming-response bodies on h2 here (one
         buffered DATA frame per stream). Chunked/flow-controlled h2
         response bodies come with the streaming reactor wiring.
         """

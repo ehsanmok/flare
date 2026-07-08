@@ -20,16 +20,16 @@ and message fields, singular message fields (modeled as
 oneof, groups, sfixed*, and ``service`` blocks are out of scope (the
 service shape is the GrpcUnary / GrpcStreamingService adapters).
 
-ponytail: the encoder writes repeated scalars UNPACKED (one tag per
-element) -- valid proto3 wire but larger than protoc's packed default.
-Ceiling: a few extra tag bytes on big numeric arrays. The decoder reads
-both, so interop is intact. Upgrade path: emit a packed LEN block by
-exposing a raw-varint sink on ProtoWriter.
+Note: the encoder writes repeated scalars UNPACKED (one tag per
+element) -- valid proto3 wire but larger than protoc's packed default,
+costing a few extra tag bytes on big numeric arrays. The decoder reads
+both, so interop is intact. A packed LEN block could be emitted later
+by exposing a raw-varint sink on ProtoWriter.
 
-ponytail: type-name resolution is last-component, nearest-scope match,
-not full proto name resolution. Ceiling: two same-named messages in
-different packages would collide; upgrade path: carry fully-qualified
-names through the resolver.
+Note: type-name resolution is last-component, nearest-scope match,
+not full proto name resolution, so two same-named messages in
+different packages would collide. Fully-qualified names would need to
+be carried through the resolver to fix this.
 
 Usage:
     python3 tools/proto_gen.py INPUT.proto -o OUTPUT.mojo

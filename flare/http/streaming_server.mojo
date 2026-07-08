@@ -93,7 +93,7 @@ comptime DEFAULT_HI_WATERMARK: Int = 256 * 1024
 """Default high watermark for the per-connection relay buffer. When
 unwritten outbound bytes reach this, the reactor drops read interest on
 the attached upstream fd so a slow client cannot force unbounded token
-buffering. ponytail: a fixed 256 KiB ceiling -- one in-flight relay
+buffering. This is a fixed 256 KiB ceiling -- one in-flight relay
 window; tune per-connection with ``set_watermarks`` if a front needs a
 deeper or shallower pipe."""
 
@@ -476,17 +476,17 @@ struct StreamConn(Movable):
     def send(mut self, data: Span[UInt8, _]):
         """Queue ``data`` for delivery to the client.
 
-        Buffered, not written immediately: the blocking driver flushes
-        with ``flush_blocking`` after each lifecycle step; the reactor
-        drains with ``drain_nonblocking`` on writable edges. Same call
-        site in both modes, so a front never blocks the event loop.
+                Buffered, not written immediately: the blocking driver flushes
+                with ``flush_blocking`` after each lifecycle step; the reactor
+                drains with ``drain_nonblocking`` on writable edges. Same call
+                site in both modes, so a front never blocks the event loop.
 
-        Token-burst coalescing: each ``send`` is an O(n) memcpy into
-        the single contiguous ``out_buf`` -- it issues no syscall. When a
-        front emits K ready chunks in one reactor tick (call ``send`` K
-        times), the subsequent drain flushes all K in ONE ``send(2)``,
-        removing the per-token syscall round-trip that dominates long-
-        output nTPOT. ponytail: the gather is a memcpy into ``out_buf``,
+                Token-burst coalescing: each ``send`` is an O(n) memcpy into
+                the single contiguous ``out_buf`` -- it issues no syscall. When a
+                front emits K ready chunks in one reactor tick (call ``send`` K
+                times), the subsequent drain flushes all K in ONE ``send(2)``,
+                removing the per-token syscall round-trip that dominates long-
+        output nTPOT. The gather is a memcpy into ``out_buf``,
         not a zero-copy ``writev`` over the K chunk buffers; swap in
         ``writev_buf`` over a chunk vector only if that memcpy shows up in
         a profile -- the syscall count (the nTPOT win) is already 1."""
@@ -532,14 +532,14 @@ struct StreamConn(Movable):
         ``conn.send(...)`` for the streamed tail (SSE tokens, relayed
         chunks). Without this a streaming front had to hand-roll its
         status line and headers as a raw string, bypassing the
-        middleware stack entirely (the gap in section 5.2).
+        middleware stack entirely.
 
         ``Content-Length`` is emitted from the body length unless the
         response already declares ``Transfer-Encoding`` or
         ``Content-Length`` (chunked / SSE fronts set ``Transfer-Encoding``
         and stream the body via ``send``). ``Connection`` is always set
         from ``keep_alive`` (any inbound ``Connection`` header is
-        dropped). ponytail: HTTP/1.x framing only -- a streaming front
+        dropped). This is HTTP/1.x framing only -- a streaming front
         speaks h1 to the client; h2/h3 response heads have their own
         framing on those paths.
         """

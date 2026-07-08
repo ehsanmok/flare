@@ -1,4 +1,4 @@
-"""Unit tests for the server 0-RTT admission logic (W4a).
+"""Unit tests for the server 0-RTT admission logic.
 
 Covers the security-sensitive parts of :mod:`flare.quic._server_0rtt`
 in isolation (no handshake, no I/O):
@@ -98,7 +98,7 @@ def test_early_data_packet_len_matches_total() raises:
     assert_equal(early_data_packet_len(Span[UInt8, _](pkt)), len(pkt))
 
 
-# ── EarlyDataStrikeSet (cross-connection replay, W7) ─────────────────
+# ── EarlyDataStrikeSet (cross-connection replay) ──────────────────────
 
 
 def test_strike_fresh_then_replay_refused() raises:

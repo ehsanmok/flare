@@ -1,4 +1,4 @@
-"""H3C-3: HttpClient HTTP/3 discovery + wire-policy surface.
+"""HttpClient HTTP/3 discovery + wire-policy surface.
 
 Exercises the transparent-upgrade decision surface on
 :class:`flare.http.HttpClient`: the ``prefer_h3`` knob (the

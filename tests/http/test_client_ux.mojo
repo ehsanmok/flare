@@ -1,4 +1,4 @@
-"""End-to-end tests for the wired HttpClient ergonomics (W1).
+"""End-to-end tests for the wired HttpClient ergonomics.
 
 Drives :class:`flare.http.HttpClient` against a forked, path-routed
 server and verifies the additive client UX:
@@ -26,7 +26,7 @@ from flare.net import SocketAddr
 from flare.testing import fork_server, kill_forked_server
 
 
-# ponytail: fixed temp path for the flaky-origin counter; the test
+# Fixed temp path for the flaky-origin counter; the test
 # truncates it before forking. Single-writer (one forked child), so a
 # fixed name is safe here. Upgrade path: a per-test unique temp name.
 comptime _FLAKY_COUNTER = "/tmp/flare_client_ux_retry.cnt"

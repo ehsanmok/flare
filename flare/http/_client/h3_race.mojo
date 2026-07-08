@@ -34,14 +34,14 @@ This replaces the earlier whole-*request* race, which sent an idempotent
 request on both wires (the server saw it twice). Racing only the connect
 keeps the latency win while sending the request exactly once.
 
-ponytail: the h2/h1 leg probes reachability by establishing a TLS
+The h2/h1 leg probes reachability by establishing a TLS
 connection; unless the HTTPS keep-alive pool is enabled (``with_pool``)
 that probed connection is closed, so on the (rarer) h2-wins path the
 real request re-dials TLS -- one redundant handshake. The h3 leg always
 pools its connection, so the common h3-wins path does not re-dial.
 Upgrade path: pool the probed h2/h1 connection unconditionally once the
 TLS pool accepts h2 connections.
-ponytail: bounded join (not detach) -- each leg's own dial timeout caps
+The join is bounded (not detached) -- each leg's own dial timeout caps
 how long the slower leg holds up the return; the upgrade path is
 ``pthread_detach`` + an atomic refcount on the cell once the stdlib
 ships an ``Atomic`` type.

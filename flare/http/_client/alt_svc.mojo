@@ -286,7 +286,7 @@ struct AltSvcStore(Copyable, Movable):
     handle (:meth:`disabled`, ``_addr == 0``) is the moved-from /
     never-allocated state: every method is a no-op on it.
 
-    ponytail: allocated eagerly (one empty ``Dict``) rather than lazily
+    Allocated eagerly (one empty ``Dict``) rather than lazily
     on first record. Lazy alloc is impossible through a read-``self``
     handle (it would have to flip ``_addr``), and auto-record must work
     by default so a non-``prefer_h3`` client still upgrades after seeing

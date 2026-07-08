@@ -1,10 +1,10 @@
-"""Unit tests for the `flare.tls.rustls_quic` scaffold (Track Q2).
+"""Unit tests for the `flare.tls.rustls_quic` scaffold.
 
 The actual rustls Rust crate (`flare/tls/ffi/rustls_wrapper.rs`)
 plus the `build_rustls.sh` activation script land in a focused
 follow-up commit. This test suite pins the Mojo-side API surface
-so the QUIC server reactor (Track Q3) + the H3 server (Track Q4)
-can build against the typed boundary today.
+so the QUIC server reactor + the H3 server can build against the
+typed boundary today.
 
 Every test exercises one of two properties:
 
@@ -109,10 +109,9 @@ def test_acceptor_constructs() raises:
 
 def test_acceptor_accept_raises() raises:
     """:meth:`RustlsQuicAcceptor.accept` raises a clear error
-    pointing at the Track Q2 follow-up commit. The reactor
-    treats this as a hard configuration failure (every
-    connection bounces immediately) rather than a silent
-    handshake hang."""
+    pointing at the follow-up work needed. The reactor treats
+    this as a hard configuration failure (every connection
+    bounces immediately) rather than a silent handshake hang."""
     var cfg = _make_config()
     var acceptor = RustlsQuicAcceptor(cfg^)
     var dcid = List[UInt8]()

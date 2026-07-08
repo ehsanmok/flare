@@ -1,4 +1,4 @@
-"""Unary gRPC client example over HTTP/2 cleartext (W3).
+"""Unary gRPC client example over HTTP/2 cleartext.
 
 Spawns a child running :class:`flare.http.HttpServer` whose handler
 speaks just enough gRPC to round-trip a unary call (LPM-decode the

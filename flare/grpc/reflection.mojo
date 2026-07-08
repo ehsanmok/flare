@@ -14,18 +14,19 @@ and a :class:`ReflectionService` that answers ``list_services`` from a
 registered service-name list. Descriptor lookups return the reflection
 ``ErrorResponse`` with ``UNIMPLEMENTED``.
 
-ponytail: only ``list_services`` is answered with data;
+Only ``list_services`` is answered with data;
 ``file_by_filename`` / ``file_containing_symbol`` return UNIMPLEMENTED.
-Ceiling: ``grpcurl list`` works, but ``grpcurl describe`` /
+As a result, ``grpcurl list`` works, but ``grpcurl describe`` /
 ``<call without -proto>`` does not -- those need serialized
-``FileDescriptorProto`` bytes. Upgrade path: have ``tools/proto_gen.py``
-also emit a ``FileDescriptorProto`` blob per file and serve it here.
+``FileDescriptorProto`` bytes. Supporting them would mean having
+``tools/proto_gen.py`` also emit a ``FileDescriptorProto`` blob per
+file and serve it here.
 
-ponytail: this is the sans-I/O codec + a per-request answerer.
+This is the sans-I/O codec + a per-request answerer.
 ``ServerReflectionInfo`` is bidi-streaming; wiring it onto a live
 server needs a bidi server adapter (the unary / server-streaming
-adapters in this package handle one request message). Ceiling: not
-auto-mountable yet. Upgrade path: a ``GrpcBidi`` server adapter that
+adapters in this package handle one request message), so it is not
+auto-mountable yet. That would take a ``GrpcBidi`` server adapter that
 feeds each inbound request message through :meth:`ReflectionService.
 answer` and frames each response as its own LPM frame.
 

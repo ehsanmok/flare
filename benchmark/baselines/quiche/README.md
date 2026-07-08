@@ -72,10 +72,10 @@ comparable.
 
 ## Cross-validation
 
-The bench harness (`benchmark/scripts/bench_h3.sh`, Track Q7-W
-commit 3/4) runs the same `h2load --npn-list=h3` workload
-against flare, `benchmark/baselines/quinn/`, and this quiche
-baseline. Five-run median + p99 / p99.9 / p99.99 / sigma are
-written to `benchmark/results/v0.8/h3/`; the cross-framework
-table published in `docs/benchmark.md` (Track Q7-W commit 4/4)
-is the v0.8 hard-gate HTTP/3 throughput row.
+The bench harness (`benchmark/scripts/bench_h3.sh`) runs the
+same `h2load --npn-list=h3` workload against flare,
+`benchmark/baselines/quinn/`, and this quiche baseline.
+Five-run median + p99 / p99.9 / p99.99 / sigma are written to
+`benchmark/results/v0.8/h3/`; the cross-framework table
+published in `docs/benchmark.md` is the v0.8 hard-gate HTTP/3
+throughput row.

@@ -3,9 +3,9 @@ initial-secret derivation + RFC 5869 HKDF + RFC 8446 §7.1
 HKDF-Expand-Label.
 
 The AEAD encrypt / decrypt / header-protection-mask surface is
-deliberately stubbed in this commit (Track Q1 scaffold); the
-OpenSSL FFI wiring lands in a focused follow-up. These tests
-cover the *math-only* slabs that ship today:
+deliberately stubbed here; the OpenSSL FFI wiring lands in a
+focused follow-up. These tests cover the *math-only* slabs
+that ship today:
 
 1. HKDF-Extract over the QUIC v1 initial salt against the test
    vector in RFC 9001 Appendix A.1.

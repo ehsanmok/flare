@@ -259,7 +259,7 @@ pub extern "C" fn flare_rustls_quic_acceptor_new(
     // numeric value is only a feature toggle. The default (0) leaves
     // the server 1-RTT-only, matching prior behavior.
     //
-    // ponytail: stateful resumption keeps session state in this
+    // Stateful resumption keeps session state in this
     // process's memory only -- it does not share across a server fleet
     // (a multi-node deployment would need a shared ServerSessionStore).
     // For a single flare server process this is correct; the upgrade

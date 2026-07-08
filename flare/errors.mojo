@@ -230,7 +230,7 @@ def map_handler_error(error_str: String, expose: Bool) -> MappedHandlerError:
     - anything else -> ``(500, "Internal Server Error")`` (or the raw
       string when ``expose``).
 
-    ponytail: string-shape recovery is the only option until Mojo lets
+    String-shape recovery is the only option until Mojo lets
     a catch site downcast a type-erased error; the prefixes are fixed
     in the structs' ``write_to`` above, so this stays in lockstep.
     """

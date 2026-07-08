@@ -1,4 +1,4 @@
-"""Unit tests for the TTL DNS cache (W3).
+"""Unit tests for the TTL DNS cache.
 
 Verifies the additive :class:`flare.dns.DnsCache` over the sync resolver:
 within the TTL a repeated lookup is served from memory (the resolver

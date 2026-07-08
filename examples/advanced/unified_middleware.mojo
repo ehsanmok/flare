@@ -1,7 +1,7 @@
 """Advanced - one middleware stack behind both a control plane and a
-streaming endpoint (critique section 5.2 / T2.2).
+streaming endpoint.
 
-The concrete case from the critique: an inference front wants a REST
+The concrete case: an inference front wants a REST
 control plane (``Handler`` + middleware) and a token-streaming endpoint
 (``StreamHandler``) in ONE process behind ONE logging / request-id /
 routing stack. Before v0.9 that was two serve paths with no shared

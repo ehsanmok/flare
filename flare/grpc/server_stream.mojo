@@ -19,14 +19,14 @@ and the unary :func:`_response_from_outcome` glue -- the only new
 surface is the handler trait (which yields a *list* of messages)
 and the per-message encode loop.
 
-ponytail: this adapter is *buffered* -- the handler returns the
+This adapter is *buffered* -- the handler returns the
 full message list and the adapter encodes them all into one
 :class:`Response` body, which the reactor flushes once at
-END_STREAM. Ceiling: an unbounded / large stream holds every
-message in memory before the first byte ships. Upgrade path: an
-incremental variant that writes each LPM frame onto the live H2
-DATA path via :mod:`flare.http.streaming_server` and only frames
-the trailers at the end.
+END_STREAM. That means an unbounded / large stream holds every
+message in memory before the first byte ships. A streaming-friendly
+variant would write each LPM frame onto the live H2 DATA path via
+:mod:`flare.http.streaming_server` and only frame the trailers at the
+end.
 """
 
 from std.collections import List, Optional

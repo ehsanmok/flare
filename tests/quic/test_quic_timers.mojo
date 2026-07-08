@@ -1,6 +1,5 @@
 """Tests for the QUIC reactor's TimerWheel integration
-(`flare.quic.timers` + `flare.quic.server.QuicListener`) --
-Track Q3-W commit 3/5.
+(`flare.quic.timers` + `flare.quic.server.QuicListener`).
 
 The token codec (`flare.quic.timers`) supports three timer
 kinds -- PTO (RFC 9002 §6.2), IDLE (RFC 9000 §10.1), and

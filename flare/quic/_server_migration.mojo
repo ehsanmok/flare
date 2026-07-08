@@ -1,4 +1,4 @@
-"""Server-side connection-migration support helpers (W4b).
+"""Server-side connection-migration support helpers.
 
 Carved out of :mod:`flare.quic.server` to keep the listener under the
 1k-line budget and to isolate the path-validation + anti-amplification
@@ -7,7 +7,7 @@ policy in one auditable place.
 When a 1-RTT packet for a known connection arrives from a *new* source
 address (a NAT rebind or an explicit client ``migrate()``), RFC 9000
 sec 9 requires the server to validate the new path before trusting it.
-flare's listener implements a **strict egress hold** (W8): it does NOT
+flare's listener implements a **strict egress hold**: it does NOT
 follow the new address for general egress until the path validates.
 
 * It keeps every non-probe 1-RTT egress (ACKs, H3 response STREAM
@@ -26,7 +26,7 @@ follow the new address for general egress until the path validates.
   amplifier. When the budget is exhausted the probe is held back and
   retried once more bytes arrive on the path.
 
-ponytail: the budget is seeded from the migration-triggering datagram
+The budget is seeded from the migration-triggering datagram
 and grows with each received datagram on the candidate. The hold trades
 a round trip of added latency on a genuine migration (the response to
 the migrating request waits for validation) for the guarantee that no

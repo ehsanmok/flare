@@ -1,4 +1,4 @@
-"""Track Q2-W commit 4/4 handshake fixtures for the rustls QUIC FFI.
+"""Handshake fixtures for the rustls QUIC FFI.
 
 This is the live-fire test for the full FFI surface. Unlike the
 scaffold suite in ``test_rustls_quic.mojo`` -- which exercises the
@@ -26,14 +26,14 @@ What the suite covers:
 8. Sessions across different DCIDs are independent (no cross-talk
    in the test).
 
-Out of scope for this commit (queued under Track Q3-W):
+Out of scope here:
 
 - Driving an actual ClientHello packet from a vendored aioquic
   fixture -- requires loading the encrypted Initial packet and
   feeding the decrypted CRYPTO frame bytes via
   :func:`OpenSslQuicCrypto.decrypt`. The handshake-to-completion
-  test lands under ``tests/quic/test_server.mojo`` in Track Q3-W
-  commit 5/5 once the reactor wiring is in place.
+  test lands under ``tests/quic/test_server.mojo`` once the
+  reactor wiring is in place.
 """
 
 from std.collections import List

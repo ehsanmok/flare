@@ -1,4 +1,4 @@
-"""Phase F commit 2/6 -- Mojo binding tests for the new
+"""Mojo binding tests for the
 KeyChange-driven per-level AEAD + header-protection FFI thunks.
 
 These tests exercise the new public surface added to
