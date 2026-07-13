@@ -31,6 +31,8 @@ from ._reactor import (
 )
 
 from ._server_reactor_epoll import (
+    _poll_timeout_ms,
+    _accept_errno_is_retry,
     _conn_alloc_addr,
     _conn_free_addr,
     _conn_ptr_from_int,

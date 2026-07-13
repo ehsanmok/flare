@@ -116,6 +116,16 @@ struct ServerConfig(Copyable, Movable):
     (every flag off); each named flag relaxes a specific RFC 9112
     grammar branch. See :class:`flare.http.proto.H1LeniencyConfig`
     for the per-flag contract."""
+    var max_connections: Int
+    """Accept-path admission cap: the maximum number of concurrent
+    connections a single reactor worker will hold. ``0`` (default)
+    means unlimited. When the live count reaches the cap the accept
+    drainer stops pulling new connections (kernel backpressure via
+    the listen backlog) rather than growing the per-worker table
+    without bound; accepting resumes as slots free. Bounds the
+    file-descriptor-exhaustion / connection-flood DoS surface on the
+    plain Handler path, mirroring what the streaming path already
+    does with its own 503 + Retry-After shed."""
 
     def __init__(
         out self,
@@ -135,6 +145,7 @@ struct ServerConfig(Copyable, Movable):
         skip_header_decode_for_short_requests: Bool = False,
         use_bufring: Bool = False,
         var h1_leniency: H1LeniencyConfig = H1LeniencyConfig(),
+        max_connections: Int = 0,
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -154,6 +165,7 @@ struct ServerConfig(Copyable, Movable):
         )
         self.use_bufring = use_bufring
         self.h1_leniency = h1_leniency^
+        self.max_connections = max_connections
 
 
 def _resolve_bufring_handler_env() -> Bool:

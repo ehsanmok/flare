@@ -143,6 +143,40 @@ def test_pool_disabled_peek_returns_minus_one() raises:
     assert_equal(pool.peek_idle_worker(0), -1)
 
 
+# ── Load-aware target selection (D1) ────────────────────────────────────────
+
+
+def test_choose_target_hands_off_under_skew() raises:
+    """A heavily-loaded local worker hands a new conn to an idle peer
+    once its load exceeds the peer's queue depth by ``steal_threshold``.
+    """
+    var pool = WorkerHandoffPool(HandoffPolicy(True, 64, 4), 4)
+    # Peers all idle (queue depth 0); local load 10 >> threshold 4.
+    var target = pool.choose_handoff_target(local_worker=0, local_load=10)
+    assert_true(target >= 0)
+    assert_true(target != 0)
+
+
+def test_choose_target_keeps_uniform_local() raises:
+    """A uniform (unskewed) workload stays local -- no cross-thread
+    chatter when local load is within ``steal_threshold`` of the peers.
+    """
+    var pool = WorkerHandoffPool(HandoffPolicy(True, 64, 4), 4)
+    assert_equal(pool.choose_handoff_target(local_worker=0, local_load=2), -1)
+
+
+def test_choose_target_disabled_keeps_local() raises:
+    """Disabled policy always keeps the connection local."""
+    var pool = WorkerHandoffPool(HandoffPolicy(False, 64, 4), 4)
+    assert_equal(pool.choose_handoff_target(local_worker=0, local_load=100), -1)
+
+
+def test_choose_target_single_worker_keeps_local() raises:
+    """With one worker there is no peer to hand off to."""
+    var pool = WorkerHandoffPool(HandoffPolicy(True, 64, 4), 1)
+    assert_equal(pool.choose_handoff_target(local_worker=0, local_load=100), -1)
+
+
 def main() raises:
     test_push_pop_basic()
     test_push_full_refuses()
@@ -156,4 +190,8 @@ def main() raises:
     test_pool_enabled_routes_fd()
     test_pool_peek_idle_excludes_self()
     test_pool_disabled_peek_returns_minus_one()
-    print("test_handoff: 12 passed")
+    test_choose_target_hands_off_under_skew()
+    test_choose_target_keeps_uniform_local()
+    test_choose_target_disabled_keeps_local()
+    test_choose_target_single_worker_keeps_local()
+    print("test_handoff: 16 passed")

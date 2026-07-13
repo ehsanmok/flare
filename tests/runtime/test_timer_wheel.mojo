@@ -211,6 +211,53 @@ def test_next_fire_ms_returns_earliest() raises:
     assert_equal(tw.next_fire_ms(), UInt64(200))
 
 
+def test_next_fire_ms_empty_returns_sentinel() raises:
+    """No timers -> a far-future sentinel so the reactor uses its cap."""
+    var tw = TimerWheel(now_ms=UInt64(1000))
+    assert_true(tw.next_fire_ms() > UInt64(1000) + UInt64(1_000_000))
+
+
+def test_next_fire_ms_overflow_only_returns_rotation() raises:
+    """A timer past one full rotation (>512ms) yields a one-rotation
+    lower-bound hint, never a value in the past.
+    """
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(5000, UInt64(9))
+    var nf = tw.next_fire_ms()
+    assert_true(nf > UInt64(0))
+    assert_true(nf <= UInt64(5000))
+
+
+def test_next_fire_ms_recovers_after_advance() raises:
+    """After the earliest timer fires, next_fire_ms tracks the next one
+    (independent of active-timer count; bounded slot scan).
+    """
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(50, UInt64(1))
+    _ = tw.schedule(300, UInt64(2))
+    assert_equal(tw.next_fire_ms(), UInt64(50))
+    var fired = List[UInt64]()
+    tw.advance(UInt64(60), fired)
+    assert_equal(tw.next_fire_ms(), UInt64(300))
+
+
+def test_next_fire_ms_cancel_is_lower_bound() raises:
+    """Lazy cancel may leave a stale slot entry; next_fire_ms stays a
+    valid lower bound (never later than the true next fire) and firms
+    up once the wheel advances past the cancelled slot.
+    """
+    var tw = TimerWheel(now_ms=UInt64(0))
+    var id1 = tw.schedule(100, UInt64(1))
+    _ = tw.schedule(400, UInt64(2))
+    _ = tw.cancel(id1)
+    # Lower bound: <= the true next active fire (400).
+    assert_true(tw.next_fire_ms() <= UInt64(400))
+    var fired = List[UInt64]()
+    tw.advance(UInt64(150), fired)
+    assert_equal(len(fired), 0)  # id1 was cancelled, nothing fires
+    assert_equal(tw.next_fire_ms(), UInt64(400))
+
+
 def main() raises:
     print("=" * 60)
     print("test_timer_wheel.mojo — Phase 1.3 TimerWheel")

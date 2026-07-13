@@ -45,7 +45,10 @@ Public API:
 from std.format import Writable, Writer
 
 from std.collections import Optional
+from std.ffi import c_int, c_uint
+from std.memory import UnsafePointer, stack_allocation
 
+from ..net._libc import _setsockopt, SOL_SOCKET, SO_RCVTIMEO, SO_SNDTIMEO
 from ._server_ffi import (
     ServerCtx,
     server_ssl_new_accept,
@@ -54,6 +57,27 @@ from ._server_ffi import (
     server_ssl_get_sni_host,
     server_ssl_free,
 )
+
+
+def _set_fd_recv_send_timeout(fd: Int, ms: Int):
+    """Best-effort ``SO_RCVTIMEO`` + ``SO_SNDTIMEO`` on a raw fd.
+
+    Bounds a *blocking* ``SSL_accept`` read/write so a stalled client
+    cannot pin the worker inside the syscall: the read unblocks after
+    ``ms`` with EAGAIN, ``SSL_do_handshake`` reports WANT_READ, and the
+    handshake loop's monotonic deadline then aborts. Failures are
+    ignored (the loop deadline is still a backstop). ``timeval`` layout
+    on 64-bit: 8-byte tv_sec + 8-byte tv_usec.
+    """
+    if ms <= 0:
+        return
+    var tv = stack_allocation[16, UInt8]()
+    for i in range(16):
+        (tv + i).init_pointee_copy(0)
+    tv.bitcast[Int64]().init_pointee_copy(Int64(ms // 1000))
+    (tv + 8).bitcast[Int64]().init_pointee_copy(Int64((ms % 1000) * 1000))
+    _ = _setsockopt(c_int(fd), SOL_SOCKET, SO_RCVTIMEO, tv, c_uint(16))
+    _ = _setsockopt(c_int(fd), SOL_SOCKET, SO_SNDTIMEO, tv, c_uint(16))
 
 
 # ── Server-side errors ─────────────────────────────────────────────────────
@@ -160,6 +184,14 @@ struct TlsServerConfig(Copyable, Movable):
     1.3 ``ticket_lifetime`` field. Production deployments should
     keep this short and rotate ticket keys via an out-of-band
     secret-management path."""
+    var handshake_timeout_ms: Int
+    """Wall-clock cap (milliseconds) on a single blocking
+    ``SSL_accept`` drive in ``TlsAcceptor.handshake_fd``. Default
+    10_000 (10 s). A slow or stalled client that never completes the
+    handshake is aborted at the deadline so it cannot hold the
+    worker indefinitely (slow-loris-on-handshake DoS bound). Measured
+    against a monotonic clock, not an iteration count, so it stays
+    honest under the libc-sleep multiplier. ``0`` disables the cap."""
 
     def __init__(
         out self,
@@ -171,6 +203,7 @@ struct TlsServerConfig(Copyable, Movable):
         min_protocol: Int = TLS_PROTOCOL_TLS12,
         enable_session_tickets: Bool = True,
         ticket_lifetime_s: Int = 7200,
+        handshake_timeout_ms: Int = 10_000,
     ) raises:
         """Construct the config; validates inter-field invariants.
 
@@ -197,6 +230,7 @@ struct TlsServerConfig(Copyable, Movable):
         self.min_protocol = min_protocol
         self.enable_session_tickets = enable_session_tickets
         self.ticket_lifetime_s = ticket_lifetime_s
+        self.handshake_timeout_ms = handshake_timeout_ms
 
 
 # Protocol version constants. Mirror OpenSSL's
@@ -361,7 +395,7 @@ struct TlsAcceptor(Movable):
             Error: On fatal handshake failure (cert mismatch,
                 client refused, etc.).
         """
-        from ..runtime._libc_time import libc_nanosleep_ms
+        from ..runtime._libc_time import libc_nanosleep_ms, monotonic_now_ms
 
         var ssl_addr = server_ssl_new_accept(self._ctx, fd)
         if ssl_addr == 0:
@@ -373,7 +407,17 @@ struct TlsAcceptor(Movable):
         # since the underlying fd will block in SSL_accept's read
         # / write anyway — but with explicit yields we don't
         # peg a CPU on transient EAGAIN.
-        var iters = 0
+        #
+        # Deadline is measured against a monotonic clock (not an
+        # iteration count) so a slow/stalled client cannot hold the
+        # worker past ``handshake_timeout_ms`` even if the 1ms sleeps
+        # dilate under the libc-sleep multiplier. The reactor follow-up
+        # replaces this with poll-driven WANT_*-aware state transitions.
+        var timeout_ms = self.config.handshake_timeout_ms
+        # Bound a blocking SSL_accept read/write so a stalled client
+        # cannot pin the worker inside the syscall past the deadline.
+        _set_fd_recv_send_timeout(fd, timeout_ms)
+        var deadline_ms = monotonic_now_ms() + timeout_ms
         while True:
             var rc = server_ssl_do_handshake(self._ctx, ssl_addr)
             if rc == 0:
@@ -381,14 +425,13 @@ struct TlsAcceptor(Movable):
             if rc < 0:
                 server_ssl_free(self._ctx, ssl_addr)
                 raise Error("TLS handshake failed")
-            # WANT_READ or WANT_WRITE — yield and retry. Cap at
-            # 30 seconds total to avoid hanging on a stalled
-            # client. The reactor follow-up replaces this with
-            # poll-driven WANT_*-aware reactor state transitions.
-            iters += 1
-            if iters > 30_000:
+            # WANT_READ or WANT_WRITE — yield and retry until the
+            # deadline (0 disables the cap).
+            if timeout_ms > 0 and monotonic_now_ms() >= deadline_ms:
                 server_ssl_free(self._ctx, ssl_addr)
-                raise Error("TLS handshake timed out (30s)")
+                raise Error(
+                    "TLS handshake timed out (" + String(timeout_ms) + "ms)"
+                )
             _ = libc_nanosleep_ms(1)
 
         # Pull live info.

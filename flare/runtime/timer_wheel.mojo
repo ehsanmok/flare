@@ -252,16 +252,27 @@ struct TimerWheel(Movable):
                 n += 1
         return n
 
-    def next_fire_ms(self) raises -> UInt64:
+    def next_fire_ms(self) -> UInt64:
         """Absolute time of the soonest scheduled fire, or ``now_ms`` + 2^32
-        if no timers are active.
+        if no timers are scheduled.
 
-        Useful for sizing the reactor poll timeout: the reactor should
-        wake up at least by this time so the wheel can fire pending
-        timers on its next ``advance``.
+        Sizing the reactor poll timeout: the reactor sleeps at most until
+        this time so the wheel can fire pending timers on its next
+        ``advance``. Cost is a bounded scan of the wheel slots
+        (``_WHEEL_SLOTS`` = 512), independent of the number of active
+        timers -- the earlier O(n) ``_entries`` scan is gone.
+
+        The result is a *lower bound*: a slot may hold only lazily
+        cancelled ids, in which case the reactor wakes one tick early
+        and re-polls (harmless). It is never later than the true next
+        fire, so a timer can never be missed.
         """
-        var earliest: UInt64 = self._current_tick_ms + UInt64(0xFFFFFFFF)
-        for entry in self._entries.values():
-            if entry.active and entry.fire_at_ms < earliest:
-                earliest = entry.fire_at_ms
-        return earliest
+        for d in range(1, _WHEEL_SLOTS + 1):
+            var slot = (self._current_slot + d) & _WHEEL_MASK
+            if len(self._wheel[slot]) > 0:
+                return self._current_tick_ms + UInt64(d)
+        # Nothing in the wheel; any overflow entry is at least one full
+        # rotation away, so a full-rotation hint is a safe lower bound.
+        if len(self._overflow) > 0:
+            return self._current_tick_ms + UInt64(_WHEEL_SLOTS)
+        return self._current_tick_ms + UInt64(0xFFFFFFFF)

@@ -67,7 +67,9 @@ trait Frontend(Copyable, ImplicitlyDestructible, Movable):
     cheap.
     """
 
-    def run_worker(mut self, listener_fd: Int, mut stopping: Bool):
+    def run_worker(
+        mut self, listener_fd: Int, mut stopping: Bool, stats_addr: Int
+    ):
         """Run this worker's accept-and-serve loop until ``stopping`` flips.
 
         Args:
@@ -76,6 +78,11 @@ trait Frontend(Copyable, ImplicitlyDestructible, Movable):
                 closes it.
             stopping: Heap-shared stop flag; observed every loop
                 iteration. Frontend exits cleanly when ``True``.
+            stats_addr: Heap address of this worker's two-slot
+                ``Int64`` stats cell (live-connection snapshot +
+                exit status), or 0 to disable. The frontend forwards
+                it into the reactor loop so the Scheduler can read a
+                real drain report and detect worker crashes.
         """
         ...
 

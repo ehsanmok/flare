@@ -26,6 +26,7 @@ from ..http.cancel import Cancel
 from ..net import IpAddr
 from ..net.error import AddressParseError, DnsError
 from ..runtime._thread import ThreadHandle, _OpaquePtr
+from ..runtime.blocking import _pool_try_acquire, _pool_release, MAX_POOL_SIZE
 from ..runtime.pool import Pool
 from .resolver import resolve
 
@@ -96,6 +97,15 @@ def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
     if host.byte_length() == 0:
         raise AddressParseError("empty hostname")
 
+    # Admission: share the process-wide pool-thread cap with
+    # ``block_in_pool`` so a fan-out of resolves cannot thread-bomb.
+    if not _pool_try_acquire():
+        raise Error(
+            "resolve_async: pool saturated (MAX_POOL_SIZE="
+            + String(MAX_POOL_SIZE)
+            + " concurrent pool threads)"
+        )
+
     var host_addr = Pool[String].alloc_move(host)
     var ctx_ptr = alloc[_ResolveCtx](1)
     ctx_ptr.init_pointee_move(_ResolveCtx(host_addr, 0, 0, 0))
@@ -103,8 +113,16 @@ def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
         unsafe_from_address=Int(ctx_ptr)
     )
 
-    var handle = ThreadHandle.spawn[_resolve_start](ctx_opaque)
-    handle.join()
+    try:
+        var handle = ThreadHandle.spawn[_resolve_start](ctx_opaque)
+        handle.join()
+    except e:
+        Pool[String].free(host_addr)
+        ctx_ptr.destroy_pointee()
+        ctx_ptr.free()
+        _pool_release()
+        raise e^
+    _pool_release()
 
     var ok = ctx_ptr[].ok == 1
     var res_addr = ctx_ptr[].result_addr

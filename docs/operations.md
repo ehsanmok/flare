@@ -75,6 +75,15 @@ Two reasons for the explicit choice:
    handler's `Cancel.is_cancelled()` will be `True` for the
    final response.
 
+Multi-worker `Scheduler.drain(timeout_ms)` returns one
+`ShutdownReport` per worker. `in_flight_at_deadline` and `timed_out`
+are the real per-worker live-connection counts (each worker publishes
+its count to a shared atomic cell every reactor iteration, read back
+after the worker joins), not a fabricated 0/1. `Scheduler.crashed_worker_count()`
+reports how many workers exited on a reactor poll failure rather than
+a clean stop -- `is_running()` only tracks join state and cannot make
+that distinction.
+
 For zero-downtime deploys behind a load balancer:
 
 1. Stop sending traffic at the LB.
@@ -114,6 +123,7 @@ auditing the buffering chain.
 | `max_body_bytes` | 10 MiB | You're accepting file uploads. Use multipart streaming, not in-memory. |
 | `max_uri_bytes` | 8 KiB | Almost never. URLs longer than 8 KiB are usually a bug. |
 | `keep_alive_idle_ms` | 60 s | Keep-alive-heavy clients (browsers) -- consider 120 s; CDN -- 300 s; never above 600 s. |
+| `max_connections` | 0 (unlimited) | Per-worker accept-path cap. Set it to bound the file-descriptor / connection-flood surface; at the cap the worker stops accepting (surplus waits in the listen backlog) until a slot frees. |
 
 The corresponding HTTP/2 limits live on `Http2ServerConfig`:
 

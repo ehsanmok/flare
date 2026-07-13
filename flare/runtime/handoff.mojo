@@ -41,6 +41,16 @@ is portable, tiny, and matches flare's "shared-nothing per worker"
 discipline — every worker's reactor still owns its own fd set, the
 handoff just changes *which* worker owns a brand-new fd.
 
+Scope, stated plainly (D1): this rebalances only **newly accepted**
+connections at accept time (:meth:`WorkerHandoffPool.choose_handoff_target`
+picks an idle peer under skew). **Established keep-alive connections
+are never migrated** — moving a live connection's fd *and* its
+per-connection state machine to another worker's reactor would need
+cross-thread ownership transfer, which fights Mojo's shared-nothing
+model and the missing ``Send``/``Sync`` type system. That migration
+is deliberately out of scope; the accept-time rebalance is the
+portable, safe subset that still attacks reuseport head-of-line skew.
+
 The locked design adds a single uncontended atomic acquire on the
 hot path (push). Under load the contention point is the producer
 side, and benchmarks below show <50ns added per accept on a
@@ -318,3 +328,34 @@ struct WorkerHandoffPool(Movable):
                 best = i
                 best_size = s
         return best
+
+    def choose_handoff_target(
+        mut self, local_worker: Int, local_load: Int
+    ) -> Int:
+        """Load-aware target for a *newly accepted* connection: the id of
+        an idle peer to hand it to, or ``-1`` to keep it on
+        ``local_worker``.
+
+        Only hands off under genuine skew -- when ``local_load`` exceeds
+        the idlest peer's queue depth by at least ``steal_threshold``. A
+        uniform workload therefore stays local (no cross-thread chatter),
+        and rebalancing only kicks in when the ``SO_REUSEPORT`` hash has
+        piled disproportionately onto this worker (the head-of-line case
+        D1 targets). Returns ``-1`` when handoff is disabled, there are no
+        peers, or the skew is below threshold.
+
+        This rebalances the placement of *new* connections only.
+        Established keep-alive connections are never migrated across
+        workers -- see the module docstring.
+        """
+        if not self.policy.enabled:
+            return -1
+        if self.num <= 1:
+            return -1
+        var peer = self.peek_idle_worker(local_worker)
+        if peer < 0:
+            return -1
+        var peer_load = (self.queues + peer)[].size()
+        if local_load - peer_load >= self.policy.steal_threshold:
+            return peer
+        return -1

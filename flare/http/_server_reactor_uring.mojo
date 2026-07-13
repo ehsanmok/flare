@@ -25,6 +25,14 @@ from flare.net import SocketAddr
 from flare.net._libc import _close
 from flare.tcp import TcpStream, TcpListener
 from flare.runtime import Pool
+from flare.runtime.scheduler import (
+    load_stop_flag,
+    store_worker_stat,
+    WORKER_STAT_INFLIGHT,
+    WORKER_STAT_STATUS,
+    WORKER_STATUS_CLEAN,
+    WORKER_STATUS_CRASHED,
+)
 from flare.runtime.uring_reactor import (
     UringReactor,
     _pbuf_ring_add,
@@ -188,9 +196,7 @@ def run_uring_reactor_loop_static(
 
     var completions = List[UringCompletion]()
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
         completions.clear()
         try:
             # min_complete=1 -> block until at least one CQE arrives.
@@ -778,6 +784,7 @@ def run_uring_bufring_reactor_loop_shared[
     config: ServerConfig,
     ref handler: H,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Multi-worker io_uring buffer-ring reactor loop.
 
@@ -832,14 +839,15 @@ def run_uring_bufring_reactor_loop_shared[
     ureactor.arm_listener_multishot(listener_fd, UInt64(0))
 
     var completions = List[UringCompletion]()
+    var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
+        store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         completions.clear()
         try:
             _ = ureactor.poll(1, completions, 64)
         except:
+            exit_status = WORKER_STATUS_CRASHED
             break
 
         for i in range(len(completions)):
@@ -965,6 +973,8 @@ def run_uring_bufring_reactor_loop_shared[
 
             if step_done:
                 _cleanup_conn_uring_br(conn_id, conns, ureactor)
+
+    store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Worker shutdown: close all per-conn fds + free pool +
     # unregister the kernel ring. Shared listener fd stays open

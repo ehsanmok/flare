@@ -137,6 +137,11 @@ ASAN_TESTS=(
   # as slots free. ASan validates the accept-edge shed path (canned
   # response build + socket teardown) and the live-conn table.
   "tests/http/test_admission.mojo"
+  # D8 — plain HTTP/1.1 accept-path ServerConfig.max_connections cap:
+  # a forked server backpressures the over-capacity connection (holds
+  # it in the backlog) and admits it once a slot frees. ASan validates
+  # the accept drainer's errno path + the live-conn table teardown.
+  "tests/http/test_admission_h1.mojo"
   # v0.9 B5 — incremental inbound body: a forked client streams multi-MB
   # while the front consumes it in fixed 64 KiB read_body chunks. ASan
   # validates the non-blocking inbound recv path and the bounded reader.
@@ -320,6 +325,11 @@ ASAN_TESTS=(
   "tests/http/test_h3_happy_eyeballs.mojo"
 )
 TSAN_TESTS=(
+  # D5 -- Cancel cell + scheduler stop flag now go through
+  # Atomic[DType.int64] / Atomic[DType.uint8] acquire/release. The
+  # cross-thread stop-flag path is exercised by test_scheduler; the
+  # cell round-trip guards the bitcast/dtype.
+  "tests/http/test_cancel.mojo"
   # Multicore + reactor (the only places we spawn pthreads)
   "tests/runtime/test_thread_ffi.mojo"
   "tests/runtime/test_scheduler.mojo"

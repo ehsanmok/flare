@@ -26,6 +26,13 @@ from std.testing import assert_true, assert_equal, TestSuite
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler, default_worker_count
 from flare.runtime._libc_time import libc_nanosleep_ms
+from flare.runtime.scheduler import (
+    load_stop_flag,
+    store_worker_stat,
+    WORKER_STAT_INFLIGHT,
+    WORKER_STAT_STATUS,
+    WORKER_STATUS_CLEAN,
+)
 
 
 # ── A minimal Frontend whose run_worker idles until stopping flips ──────────
@@ -45,12 +52,14 @@ struct _NopFrontend(Copyable, Frontend, Movable):
     def requires_per_worker_listener(self) -> Bool:
         return False
 
-    def run_worker(mut self, listener_fd: Int, mut stopping: Bool):
+    def run_worker(
+        mut self, listener_fd: Int, mut stopping: Bool, stats_addr: Int
+    ):
         var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-        while not UnsafePointer[Bool, MutUntrackedOrigin](
-            unsafe_from_address=stopping_addr
-        )[]:
+        while not load_stop_flag(stopping_addr):
+            store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, 0)
             _ = libc_nanosleep_ms(50)
+        store_worker_stat(stats_addr, WORKER_STAT_STATUS, WORKER_STATUS_CLEAN)
 
 
 # ── default_worker_count ───────────────────────────────────────────────────
@@ -101,6 +110,8 @@ def test_scheduler_drain_returns_per_worker_reports() raises:
         assert_equal(reports[i].timed_out, 0)
         assert_equal(reports[i].in_flight_at_deadline, 0)
     assert_true(not s.is_running())
+    # D9: idle workers exit cleanly, so no worker is reported crashed.
+    assert_equal(s.crashed_worker_count(), 0)
 
 
 def test_scheduler_drain_zero_timeout_is_hard_stop() raises:

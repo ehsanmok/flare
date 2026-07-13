@@ -110,6 +110,33 @@ def test_slow_handler_short_circuits_on_pre_flip() raises:
     assert_equal(resp.text(), "partial:0")
 
 
+# ── Atomic cell round-trip (D5) ─────────────────────────────────────────────
+
+
+def test_cell_atomic_reason_roundtrip() raises:
+    """A single cell flipped to each reason code reads that exact
+    reason back and resets to NONE, through the ``Atomic[DType.int64]``
+    release-store / acquire-load path (guards the bitcast + dtype).
+    """
+    var cell = CancelCell()
+    var c = cell.handle()
+    assert_false(c.cancelled())
+    assert_equal(c.reason(), CancelReason.NONE)
+
+    for r in [
+        CancelReason.PEER_CLOSED,
+        CancelReason.TIMEOUT,
+        CancelReason.SHUTDOWN,
+    ]:
+        cell.flip(r)
+        assert_true(c.cancelled())
+        assert_equal(c.reason(), r)
+        cell.reset()
+        assert_false(c.cancelled())
+        assert_equal(c.reason(), CancelReason.NONE)
+    _ = cell^
+
+
 # ── WithCancel[H] adapter ───────────────────────────────────────────────────
 
 

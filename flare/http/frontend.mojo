@@ -111,7 +111,9 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
                 return True
         return False
 
-    def run_worker(mut self, listener_fd: Int, mut stopping: Bool):
+    def run_worker(
+        mut self, listener_fd: Int, mut stopping: Bool, stats_addr: Int
+    ):
         """Pick the reactor entry point and run it until ``stopping`` flips."""
         try:
             comptime if CompilationTarget.is_linux():
@@ -121,6 +123,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
                         self.config,
                         self.handler,
                         stopping,
+                        stats_addr,
                     )
                     return
             if self.auto_protocol:
@@ -130,6 +133,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
                     self.h2_config.copy(),
                     self.handler,
                     stopping,
+                    stats_addr,
                 )
             else:
                 run_reactor_loop_shared[Self.H](
@@ -137,6 +141,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
                     self.config,
                     self.handler,
                     stopping,
+                    stats_addr,
                 )
         except:
             pass
@@ -180,7 +185,9 @@ struct StaticHttpFrontend(Copyable, Frontend, Movable):
         """
         return False
 
-    def run_worker(mut self, listener_fd: Int, mut stopping: Bool):
+    def run_worker(
+        mut self, listener_fd: Int, mut stopping: Bool, stats_addr: Int
+    ):
         """Drive the static-response fast path."""
         try:
             run_reactor_loop_static_shared(
@@ -188,6 +195,7 @@ struct StaticHttpFrontend(Copyable, Frontend, Movable):
                 self.config,
                 self.resp,
                 stopping,
+                stats_addr,
             )
         except:
             pass

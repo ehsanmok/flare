@@ -183,6 +183,13 @@ struct Reactor(Movable):
     round-trip on every wakeup event, which matters once Stage 2+
     cross-thread wakeup traffic ramps up."""
 
+    var _event_buf: List[UInt8]
+    """Reused scratch buffer for the raw ``epoll_event`` / ``kevent``
+    array ``poll`` fills each call. Grown once to fit ``max_events``
+    and reused for the lifetime of the reactor so the hot poll path
+    stops heap-allocating (and freeing) an event array on every
+    iteration (D10)."""
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def __init__(out self) raises:
@@ -196,6 +203,10 @@ struct Reactor(Movable):
         # dlopen per wakeup. Construct this before any fd is opened so a
         # failure here doesn't leak an epoll/kqueue fd.
         self._io = FlareRawIO()
+        # Reused event array; sized lazily on the first poll. Initialised
+        # before any fd is opened so a raise below leaves a valid field to
+        # destroy.
+        self._event_buf = List[UInt8]()
 
         comptime if CompilationTarget.is_linux():
             var epfd = _epoll_create1(EPOLL_CLOEXEC)
@@ -469,9 +480,9 @@ struct Reactor(Movable):
 
         comptime if CompilationTarget.is_linux():
             var buf_size = EPOLL_EVENT_SIZE * max_events
-            var buf = List[UInt8](capacity=buf_size)
-            buf.resize(buf_size, UInt8(0))
-            var buf_ptr = buf.unsafe_ptr()
+            if len(self._event_buf) < buf_size:
+                self._event_buf.resize(buf_size, UInt8(0))
+            var buf_ptr = self._event_buf.unsafe_ptr()
             var n = _epoll_wait(
                 self._fd, buf_ptr, c_int(max_events), c_int(timeout_ms)
             )
@@ -494,9 +505,9 @@ struct Reactor(Movable):
             return Int(n)
         else:
             var buf_size = KEVENT_SIZE * max_events
-            var buf = List[UInt8](capacity=buf_size)
-            buf.resize(buf_size, UInt8(0))
-            var buf_ptr = buf.unsafe_ptr()
+            if len(self._event_buf) < buf_size:
+                self._event_buf.resize(buf_size, UInt8(0))
+            var buf_ptr = self._event_buf.unsafe_ptr()
             var ts = stack_allocation[16, UInt8]()
             var has_timeout = timeout_ms >= 0
             if has_timeout:

@@ -18,6 +18,7 @@ from std.testing import (
 )
 
 from flare.runtime import block_in_pool, MAX_POOL_SIZE
+from flare.runtime.blocking import _pool_try_acquire, _pool_release
 from flare.http import Cancel, CancelCell, CancelReason
 
 
@@ -216,6 +217,30 @@ def test_runs_on_different_thread() raises:
         caller_tid != work_tid,
         "block_in_pool ran work on the caller's thread, not a fresh one",
     )
+
+
+# ── Process-wide thread-count cap (D2) ──────────────────────────────────────
+
+
+def test_pool_cap_enforced_and_recovers() raises:
+    """The process-wide cap admits exactly ``MAX_POOL_SIZE`` slots, then
+    refuses, and admits again as slots are released. Uses the low-level
+    acquire/release helpers so the cap is exercised deterministically
+    without spawning real threads.
+    """
+    var got = 0
+    for _ in range(MAX_POOL_SIZE):
+        if _pool_try_acquire():
+            got += 1
+    assert_equal(got, MAX_POOL_SIZE)
+    # At the cap: the next claim is refused.
+    assert_true(not _pool_try_acquire())
+    # Free one slot -> a claim succeeds again (recovery).
+    _pool_release()
+    assert_true(_pool_try_acquire())
+    # Restore the semaphore to its full value (we hold MAX_POOL_SIZE).
+    for _ in range(MAX_POOL_SIZE):
+        _pool_release()
 
 
 def main() raises:

@@ -83,6 +83,34 @@ from flare.runtime.uring_reactor import (
     _pbuf_ring_get_tail,
     _pbuf_ring_set_tail,
 )
+from flare.runtime.scheduler import (
+    load_stop_flag,
+    store_worker_stat,
+    WORKER_STAT_INFLIGHT,
+    WORKER_STAT_STATUS,
+    WORKER_STATUS_CLEAN,
+    WORKER_STATUS_CRASHED,
+)
+
+
+@always_inline
+def _poll_timeout_ms(read wheel: TimerWheel, cap_ms: Int = 100) -> Int:
+    """Reactor poll timeout: time until the next timer fires, capped.
+
+    Replaces the fixed 100ms poll (D7). The ``cap_ms`` stays
+    load-bearing for shutdown-flag responsiveness (the stop flag is
+    re-read once per poll), so idle workers still wake at most every
+    ``cap_ms``; when a timer is due sooner the reactor wakes just in
+    time to fire it. Floor of 1ms avoids a busy 0ms spin on a
+    just-past-due timer. Cost is one bounded ``next_fire_ms`` slot
+    scan, independent of the active-timer count.
+    """
+    var nf = wheel.next_fire_ms()
+    var now = UInt64(_monotonic_ms())
+    if nf <= now:
+        return 1
+    var delta = Int(nf - now)
+    return delta if delta < cap_ms else cap_ms
 
 
 def _conn_alloc_addr(var stream: TcpStream) raises -> Int:
@@ -176,22 +204,54 @@ def _cleanup_conn(
             pass
 
 
+# errno values consulted on the accept path. EAGAIN / EWOULDBLOCK mean
+# the backlog is drained (normal stop); ECONNABORTED means one pending
+# connection was aborted before we accepted it (skip it, keep draining);
+# EMFILE / ENFILE mean the process / system fd table is exhausted (stop
+# and let a later poll retry once fds free). Linux and macOS disagree on
+# the numeric values for EAGAIN / EWOULDBLOCK / ECONNABORTED, so both
+# sets are matched; a misread just degrades to the old "break on any
+# error" behaviour, which is safe.
+comptime _EAGAIN_LINUX: Int = 11
+comptime _EAGAIN_MACOS: Int = 35
+comptime _ECONNABORTED_LINUX: Int = 103
+comptime _ECONNABORTED_MACOS: Int = 53
+
+
+@always_inline
+def _accept_errno_is_retry(ev: Int) -> Bool:
+    """True when the accept errno is ECONNABORTED (skip + keep draining)."""
+    return ev == _ECONNABORTED_LINUX or ev == _ECONNABORTED_MACOS
+
+
 def _accept_loop(
     mut listener: TcpListener,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
+    max_connections: Int = 0,
 ):
     """Accept every connection available on ``listener`` (until EAGAIN).
 
     Each accepted socket is switched to non-blocking mode, heap-allocated
     into a ``ConnHandle``, and registered with the reactor using the
     client fd as the token.
+
+    ``max_connections`` (0 = unlimited) caps the per-worker live table:
+    at the cap the drainer stops accepting so surplus connections stay
+    in the kernel backlog (backpressure) instead of growing the table
+    without bound. On an accept error the errno decides the action --
+    ECONNABORTED skips one and keeps draining; everything else
+    (EAGAIN drained / EMFILE-ENFILE exhausted) stops this pass.
     """
     while True:
+        if max_connections > 0 and len(conns) >= max_connections:
+            break
         var stream: TcpStream
         try:
             stream = listener.accept()
         except:
+            if _accept_errno_is_retry(Int(get_errno().value)):
+                continue
             break
         try:
             stream._socket.set_nonblocking(True)
@@ -218,6 +278,7 @@ def _accept_loop_fd(
     listener_fd: Int,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
+    max_connections: Int = 0,
 ):
     """Accept every available connection on a *borrowed* listener fd.
 
@@ -228,16 +289,20 @@ def _accept_loop_fd(
     listener fd is owned by the ``Scheduler`` and stays open for the
     lifetime of the multi-worker run.
 
-    Stops on the first ``accept(2)`` error (typically ``EAGAIN`` /
-    ``EWOULDBLOCK`` once the kernel's accept queue is drained for
-    this worker) — same shape as ``_accept_loop`` so the caller
-    sees identical "drain until empty" semantics.
+    Stops on ``EAGAIN`` / ``EWOULDBLOCK`` (backlog drained) or on
+    ``EMFILE`` / ``ENFILE`` (fd table exhausted); skips + keeps draining
+    on ``ECONNABORTED``. ``max_connections`` (0 = unlimited) caps the
+    per-worker live table exactly as in ``_accept_loop``.
     """
     while True:
+        if max_connections > 0 and len(conns) >= max_connections:
+            break
         var stream: TcpStream
         try:
             stream = accept_fd(c_int(listener_fd))
         except:
+            if _accept_errno_is_retry(Int(get_errno().value)):
+                continue
             break
         try:
             stream._socket.set_nonblocking(True)
@@ -267,6 +332,7 @@ def _run_handler_loop_impl[
     config: ServerConfig,
     ref handler: H,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Shared epoll/kqueue event-loop body for the dynamic-handler path.
 
@@ -310,14 +376,15 @@ def _run_handler_loop_impl[
         reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
 
     var events = List[Event]()
+    var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
+        store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
         try:
-            _ = reactor.poll(100, events)
+            _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
+            exit_status = WORKER_STATUS_CRASHED
             break
 
         var now_ms = UInt64(_monotonic_ms())
@@ -333,7 +400,9 @@ def _run_handler_loop_impl[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop_fd(listener_fd, reactor, conns)
+                _accept_loop_fd(
+                    listener_fd, reactor, conns, config.max_connections
+                )
                 continue
             var fd = Int(evt.token)
             if fd not in conns:
@@ -379,6 +448,8 @@ def _run_handler_loop_impl[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
+
+    store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Graceful shutdown: close every per-conn fd. The listener fd
     # is owned by the caller in both modes (Scheduler in the shared
@@ -427,6 +498,7 @@ def run_reactor_loop_shared[
     config: ServerConfig,
     ref handler: H,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Worker reactor loop sharing a single listener fd across workers.
 
@@ -454,7 +526,7 @@ def run_reactor_loop_shared[
             ``Scheduler`` from another thread on shutdown.
     """
     _run_handler_loop_impl[H, is_shared=True](
-        listener_fd, config, handler, stopping
+        listener_fd, config, handler, stopping, stats_addr
     )
 
 
@@ -465,6 +537,7 @@ def _run_static_loop_impl[
     config: ServerConfig,
     resp: StaticResponse,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Shared epoll/kqueue event-loop body for the static-response path.
 
@@ -503,14 +576,15 @@ def _run_static_loop_impl[
         reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
 
     var events = List[Event]()
+    var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
+        store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
         try:
-            _ = reactor.poll(100, events)
+            _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
+            exit_status = WORKER_STATUS_CRASHED
             break
 
         var now_ms = UInt64(_monotonic_ms())
@@ -526,7 +600,9 @@ def _run_static_loop_impl[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop_fd(listener_fd, reactor, conns)
+                _accept_loop_fd(
+                    listener_fd, reactor, conns, config.max_connections
+                )
                 continue
             var fd = Int(evt.token)
             if fd not in conns:
@@ -567,6 +643,8 @@ def _run_static_loop_impl[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
+
+    store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Graceful shutdown. Dedicated path flips ``Cancel.SHUTDOWN`` on
     # every leftover ConnHandle before close (paranoia copy from the
@@ -622,6 +700,7 @@ def run_reactor_loop_static_shared(
     config: ServerConfig,
     resp: StaticResponse,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Multi-worker twin of :func:`run_reactor_loop_static`.
 
@@ -647,7 +726,9 @@ def run_reactor_loop_static_shared(
         stopping: Heap-allocated stop flag mutated by
             ``StaticScheduler.shutdown`` from the main thread.
     """
-    _run_static_loop_impl[is_shared=True](listener_fd, config, resp, stopping)
+    _run_static_loop_impl[is_shared=True](
+        listener_fd, config, resp, stopping, stats_addr
+    )
 
 
 def run_reactor_loop_cancel[
@@ -657,6 +738,7 @@ def run_reactor_loop_cancel[
     config: ServerConfig,
     ref handler: CH,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Cancel-aware variant of ``run_reactor_loop``.
 
@@ -691,14 +773,15 @@ def run_reactor_loop_cancel[
     reactor.register(listener_fd, UInt64(0), INTEREST_READ)
 
     var events = List[Event]()
+    var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
+        store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
         try:
-            _ = reactor.poll(100, events)
+            _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
+            exit_status = WORKER_STATUS_CRASHED
             break
 
         var now_ms = UInt64(_monotonic_ms())
@@ -714,7 +797,7 @@ def run_reactor_loop_cancel[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop(listener, reactor, conns)
+                _accept_loop(listener, reactor, conns, config.max_connections)
                 continue
             var fd = Int(evt.token)
             if fd not in conns:
@@ -756,6 +839,8 @@ def run_reactor_loop_cancel[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
 
+    store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
+
     # Graceful shutdown: walk every active conn and flip its
     # CancelCell to SHUTDOWN before closing. Cancel-aware
     # handlers (CancelHandler) observe the flip and short-circuit
@@ -781,6 +866,7 @@ def run_reactor_loop_view[
     config: ServerConfig,
     ref handler: VH,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """View-aware variant of ``run_reactor_loop_cancel``.
 
@@ -809,14 +895,15 @@ def run_reactor_loop_view[
     reactor.register(listener_fd, UInt64(0), INTEREST_READ)
 
     var events = List[Event]()
+    var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
+        store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
         try:
-            _ = reactor.poll(100, events)
+            _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
+            exit_status = WORKER_STATUS_CRASHED
             break
 
         var now_ms = UInt64(_monotonic_ms())
@@ -832,7 +919,7 @@ def run_reactor_loop_view[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop(listener, reactor, conns)
+                _accept_loop(listener, reactor, conns, config.max_connections)
                 continue
             var fd = Int(evt.token)
             if fd not in conns:
@@ -873,6 +960,8 @@ def run_reactor_loop_view[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor)
+
+    store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Graceful shutdown: flip Cancel.SHUTDOWN on every in-flight
     # conn before closing — same in-thread pattern as

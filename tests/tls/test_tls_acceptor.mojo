@@ -32,6 +32,10 @@ from flare.tls import (
     TLS_PROTOCOL_TLS12,
     TLS_PROTOCOL_TLS13,
 )
+from flare.net import SocketAddr
+from flare.tcp import TcpListener, TcpStream
+from flare.runtime._libc_time import monotonic_now_ms
+from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 
 # ── TlsServerConfig ────────────────────────────────────────────────────────
@@ -73,6 +77,19 @@ def test_protocol_constants_distinct() raises:
     assert_true(TLS_PROTOCOL_TLS12 != TLS_PROTOCOL_TLS13)
     # Sanity: TLS 1.2 < TLS 1.3 numerically (matches OpenSSL).
     assert_true(TLS_PROTOCOL_TLS12 < TLS_PROTOCOL_TLS13)
+
+
+# ── Handshake deadline (D4) ────────────────────────────────────────────────
+
+
+def test_config_handshake_timeout_default_and_custom() raises:
+    """``handshake_timeout_ms`` defaults to 10 s and is configurable."""
+    var cfg = TlsServerConfig(cert_file="/c.pem", key_file="/k.pem")
+    assert_equal(cfg.handshake_timeout_ms, 10_000)
+    var cfg2 = TlsServerConfig(
+        cert_file="/c.pem", key_file="/k.pem", handshake_timeout_ms=250
+    )
+    assert_equal(cfg2.handshake_timeout_ms, 250)
 
 
 # ── TlsConfig (client-side) ALPN field ───────────────────────────────────
@@ -285,6 +302,54 @@ def test_acceptor_with_mtls_succeeds() raises:
     )
     var acc = TlsAcceptor(cfg^)
     assert_true(acc.config.require_client_cert)
+
+
+def test_handshake_deadline_fires_on_silent_client() raises:
+    """A client that opens a TCP connection but never sends a
+    ClientHello is aborted at ``handshake_timeout_ms`` instead of
+    holding the worker. Drives a real ``handshake_fd`` on a blocking
+    accepted fd: ``handshake_fd`` sets ``SO_RCVTIMEO`` so the blocking
+    ``SSL_accept`` read unblocks and the monotonic deadline fires.
+    """
+    var lis = TcpListener.bind(SocketAddr.localhost(0))
+    var port = lis.local_addr().port
+    var pid = fork()
+    if pid == 0:
+        # Child: connect, then idle without sending any bytes.
+        try:
+            var c = TcpStream.connect(SocketAddr.localhost(port))
+            usleep(1_000_000)
+            _ = c^
+        except:
+            pass
+        exit()
+
+    var stream = lis.accept()
+    var cfg = TlsServerConfig(
+        cert_file=_CERT, key_file=_KEY, handshake_timeout_ms=300
+    )
+    var acc = TlsAcceptor(cfg^)
+    var start = monotonic_now_ms()
+    var raised = False
+    try:
+        _ = acc.handshake_fd(Int(stream._socket.fd))
+    except:
+        raised = True
+    var elapsed = monotonic_now_ms() - start
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+
+    # The safety property: a client that never completes the handshake
+    # frees the worker in bounded time (via the deadline / socket
+    # timeout / fatal) rather than pinning it indefinitely. The exact
+    # abort path is OpenSSL/socket-mode dependent; what matters for the
+    # DoS bound is that handshake_fd returns and does not hang.
+    assert_true(raised, "silent-client handshake must not succeed")
+    assert_true(
+        elapsed < 5000,
+        "handshake must abort in bounded time, elapsed=" + String(elapsed),
+    )
 
 
 # ── Errors ─────────────────────────────────────────────────────────────────

@@ -37,7 +37,10 @@ rebuilds a fresh ``UnsafePointer[Int, MutUntrackedOrigin]`` per access
 — the same pattern the multicore ``Scheduler`` uses for the
 ``stopping`` flag, and the only one that survives Mojo's current
 (current Mojo nightly) origin / aliasing model when passing the
-cancel handle across function-call boundaries:
+cancel handle across function-call boundaries. Reads / writes go
+through ``Atomic[DType.int64]`` acquire-load / release-store (the
+cell can be flipped from a peer thread on shutdown), which lowers to
+a plain ``mov`` on x86-64 (TSO) and to ``ldar`` / ``stlr`` on ARM64:
 
 - Storing a typed ``UnsafePointer[Int, MutUntrackedOrigin]`` as a
   struct field in ``Cancel`` produces stale reads after the struct is
@@ -62,6 +65,7 @@ cell is one cache line per connection — acceptable cost for the
 cancel infrastructure.
 """
 
+from std.atomic import Atomic, Ordering
 from std.memory import UnsafePointer, alloc
 
 
@@ -141,22 +145,29 @@ struct CancelCell(Movable):
             p.free()
 
     def flip(mut self, reason: Int) -> None:
-        """Set the cell's reason."""
+        """Set the cell's reason with a release store.
+
+        Pairs with the acquire load in ``Cancel.cancelled`` /
+        ``Cancel.reason`` so a reader on another thread that observes
+        the flip also observes every write the flipper made before it.
+        """
         if self._addr == 0:
             return
         var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
-        )
-        p[] = reason
+        ).bitcast[Scalar[DType.int64]]()
+        Atomic[DType.int64].store[ordering=Ordering.RELEASE](p, Int64(reason))
 
     def reset(mut self) -> None:
-        """Reset the cell to ``NONE``."""
+        """Reset the cell to ``NONE`` with a release store."""
         if self._addr == 0:
             return
         var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
+        ).bitcast[Scalar[DType.int64]]()
+        Atomic[DType.int64].store[ordering=Ordering.RELEASE](
+            p, Int64(CancelReason.NONE)
         )
-        p[] = CancelReason.NONE
 
     def handle(mut self) -> Cancel:
         """Hand out a ``Cancel`` value bound to this cell."""
@@ -212,20 +223,21 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
         return Cancel(0)
 
     def cancelled(read self) -> Bool:
-        """Return True once the cell is non-zero."""
+        """Return True once the cell is non-zero (acquire load)."""
         if self._addr == 0:
             return False
         var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
+        ).bitcast[Scalar[DType.int64]]()
+        return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p) != Int64(
+            CancelReason.NONE
         )
-        return p[] != CancelReason.NONE
 
     def reason(read self) -> Int:
-        """Return the reason code currently in the cell."""
+        """Return the reason code currently in the cell (acquire load)."""
         if self._addr == 0:
             return CancelReason.NONE
         var p = UnsafePointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
-        )
-        var v: Int = p[]
-        return v
+        ).bitcast[Scalar[DType.int64]]()
+        return Int(Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p))

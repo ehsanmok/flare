@@ -1,5 +1,11 @@
 # Unified reactor loop: HTTP/1.1 + HTTP/2 on the same listener.
 #
+# TODO(2026-07-13): split the unified auto-dispatch reactor (the h1/h2
+# per-event dispatch helpers + the accept drainer) into a flare/http/_reactor/
+# submodule to drop back under the 1000-line Pass-B cap. It crossed the cap
+# with the D5 (atomic stop flag) / D8 (accept admission) / D9 (per-worker
+# stats) cross-cutting wiring; a structural split is the real fix.
+#
 # The per-tick body and the dedicated/shared single-listener loops
 # share one comptime-parametric core
 # (`_run_unified_loop_for_fd[H, is_shared]`). The
@@ -51,7 +57,7 @@ kernel wakes one worker per accept event.
 
 from std.builtin.debug_assert import debug_assert
 from std.collections import Dict
-from std.ffi import c_int
+from std.ffi import c_int, get_errno
 from std.memory import UnsafePointer
 
 from flare.http.cancel import CancelReason
@@ -66,6 +72,14 @@ from flare.runtime import (
     TimerWheel,
     INTEREST_READ,
     INTEREST_WRITE,
+)
+from flare.runtime.scheduler import (
+    load_stop_flag,
+    store_worker_stat,
+    WORKER_STAT_INFLIGHT,
+    WORKER_STAT_STATUS,
+    WORKER_STATUS_CLEAN,
+    WORKER_STATUS_CRASHED,
 )
 from flare.tcp import TcpListener, TcpStream, accept_fd
 
@@ -93,6 +107,8 @@ from ._server_reactor_impl import (
     _conn_free_addr,
     _conn_ptr_from_int,
     _monotonic_ms,
+    _poll_timeout_ms,
+    _accept_errno_is_retry,
 )
 
 
@@ -517,6 +533,7 @@ def _accept_loop_unified_fd(
     listener_fd: Int,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
+    max_connections: Int = 0,
 ):
     """Accept every available connection on ``listener_fd`` and
     register it as a KIND_PENDING-tagged
@@ -525,12 +542,20 @@ def _accept_loop_unified_fd(
     Used by every single-listener unified loop variant (dedicated,
     shared/EPOLLEXCLUSIVE, multi-listener); the dedicated variant
     extracts the listener fd before calling.
+
+    ``max_connections`` (0 = unlimited) caps the per-worker live table
+    and the errno decides the stop/skip action -- same admission
+    contract as the HTTP/1.1 ``_accept_loop_fd`` (D8).
     """
     while True:
+        if max_connections > 0 and len(conns) >= max_connections:
+            break
         var stream: TcpStream
         try:
             stream = accept_fd(c_int(listener_fd))
         except:
+            if _accept_errno_is_retry(Int(get_errno().value)):
+                continue
             break
         try:
             stream._socket.set_nonblocking(True)
@@ -744,6 +769,7 @@ def _run_unified_loop_for_fd[
     var h2_config: Http2Config,
     ref handler: H,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Shared body for the single-listener unified reactor loops.
 
@@ -769,14 +795,15 @@ def _run_unified_loop_for_fd[
         reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
 
     var events = List[Event]()
+    var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
+        store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
         try:
-            _ = reactor.poll(100, events)
+            _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
+            exit_status = WORKER_STATUS_CRASHED
             break
 
         var now_ms = UInt64(_monotonic_ms())
@@ -787,7 +814,9 @@ def _run_unified_loop_for_fd[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop_unified_fd(listener_fd, reactor, conns)
+                _accept_loop_unified_fd(
+                    listener_fd, reactor, conns, config.max_connections
+                )
                 continue
             var fd = Int(evt.token)
             if fd not in conns:
@@ -807,6 +836,7 @@ def _run_unified_loop_for_fd[
                 timers,
             )
 
+    store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
     _drain_remaining_conns_unified(conns, timers, reactor)
 
 
@@ -922,12 +952,10 @@ def run_unified_reactor_loop_multi[
 
     var events = List[Event]()
     var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-    while not UnsafePointer[Bool, MutUntrackedOrigin](
-        unsafe_from_address=stopping_addr
-    )[]:
+    while not load_stop_flag(stopping_addr):
         events.clear()
         try:
-            _ = reactor.poll(100, events)
+            _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
             break
 
@@ -940,7 +968,9 @@ def run_unified_reactor_loop_multi[
                 continue
             var fd = Int(evt.token)
             if fd in listener_fds:
-                _accept_loop_unified_fd(fd, reactor, conns)
+                _accept_loop_unified_fd(
+                    fd, reactor, conns, config.max_connections
+                )
                 continue
             if fd not in conns:
                 continue
@@ -975,6 +1005,7 @@ def run_unified_reactor_loop_shared[
     var h2_config: Http2Config,
     ref handler: H,
     ref stopping: Bool,
+    stats_addr: Int = 0,
 ) raises:
     """Multi-worker variant of :func:`run_unified_reactor_loop`.
 
@@ -993,4 +1024,5 @@ def run_unified_reactor_loop_shared[
         h2_config^,
         handler,
         stopping,
+        stats_addr,
     )

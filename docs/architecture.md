@@ -455,9 +455,11 @@ the reactor thread:
 
 - **TLS handshake.** Client handshake is inline on
   `TlsStream.connect`. The server-side `TlsAcceptor` exposes a
-  blocking `handshake_fd(fd)`; a non-blocking reactor-state-machine
-  variant (advanced via the same `on_readable` / `on_writable` calls
-  as HTTP) is gated on a Mojo improvement.
+  blocking `handshake_fd(fd)` bounded by a monotonic-clock deadline
+  (`TlsServerConfig.handshake_timeout_ms`, default 10 s) so a slow or
+  stalled client cannot hold the worker indefinitely. A non-blocking
+  reactor-state-machine variant (advanced via the same `on_readable`
+  / `on_writable` calls as HTTP) is still gated on a Mojo improvement.
 - **DNS resolution.** `getaddrinfo` is a blocking call; the
   client uses it pre-connect. The reactor never blocks on it.
 - **Long-running handler work.** The contract is synchronous: a

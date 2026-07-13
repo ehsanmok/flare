@@ -44,6 +44,7 @@ from flare.http._server_reactor_impl import _monotonic_ms
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler
 from flare.runtime._libc_time import libc_nanosleep_ms
+from flare.runtime.scheduler import load_stop_flag
 
 
 # ── Frontend: zero-protocol, idles until stopping flips ─────────────────────
@@ -64,11 +65,11 @@ struct _NopFrontend(Copyable, Frontend, Movable):
     def requires_per_worker_listener(self) -> Bool:
         return False
 
-    def run_worker(mut self, listener_fd: Int, mut stopping: Bool):
+    def run_worker(
+        mut self, listener_fd: Int, mut stopping: Bool, stats_addr: Int
+    ):
         var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
-        while not UnsafePointer[Bool, MutUntrackedOrigin](
-            unsafe_from_address=stopping_addr
-        )[]:
+        while not load_stop_flag(stopping_addr):
             _ = libc_nanosleep_ms(50)
 
 

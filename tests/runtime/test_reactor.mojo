@@ -354,6 +354,31 @@ def test_wakeup_after_drain_can_fire_again() raises:
     assert_true(n >= 1, "expected second wakeup to fire")
 
 
+def test_poll_reuses_event_buffer_across_calls() raises:
+    """D10: the reactor caches + reuses its event array. Poll many times
+    (including a grow to a larger max_events and a shrink back) and
+    confirm each wakeup is still delivered correctly -- guards the
+    reused-buffer path against stale reads / corruption.
+    """
+    var r = Reactor()
+    var events = List[Event]()
+    for _ in range(5):
+        r.wakeup()
+        events.clear()
+        var n = r.poll(100, events)
+        assert_true(n >= 1, "wakeup should fire on the reused buffer")
+    # Grow the buffer, then poll again with the default cap: the larger
+    # allocation must stay valid and keep delivering events.
+    r.wakeup()
+    events.clear()
+    var big = r.poll(100, events, max_events=256)
+    assert_true(big >= 1, "wakeup should fire after buffer grew")
+    r.wakeup()
+    events.clear()
+    var small = r.poll(100, events, max_events=8)
+    assert_true(small >= 1, "wakeup should fire after buffer reuse")
+
+
 # ── Max-events capping ────────────────────────────────────────────────────────
 
 

@@ -99,10 +99,16 @@ applies to `Pool[T]` instances and the per-worker scheduler state in
 The cross-thread surfaces are an explicit, narrow list:
 
 1. **`Cancel`** — see [`flare/http/cancel.mojo`](../flare/http/cancel.mojo).
-   The cell flips from any thread; readers see the flip via a relaxed
-   atomic load. The reactor flips it on `PEER_CLOSED` / `TIMEOUT` /
-   `SHUTDOWN`; handlers poll. No lock; the cell is a single-byte
-   atomic.
+   The cell flips from any thread via an `Atomic[DType.int64]`
+   release-store; readers see the flip via the paired acquire load,
+   so a reader that observes the flip also observes every write the
+   flipper made before it. Lowers to a plain `mov` on x86-64 (TSO)
+   and to `stlr` / `ldar` on ARM64. The reactor flips it on
+   `PEER_CLOSED` / `TIMEOUT` / `SHUTDOWN`; handlers poll. No lock.
+   The multicore scheduler's stopping flag uses the same
+   release-store / acquire-load pair
+   ([`store_stop_flag`](../flare/runtime/scheduler.mojo) /
+   `load_stop_flag`).
 
 2. **`HandoffQueue` / `WorkerHandoffPool`** — see
    [`flare/runtime/handoff.mojo`](../flare/runtime/handoff.mojo).

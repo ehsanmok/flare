@@ -34,12 +34,14 @@ Why per-call rather than a singleton pool:
    x86_64. The API targets millisecond-scale blocking work
    (DB queries, disk I/O); the overhead is < 5 % of any
    workload that needs ``block_in_pool`` in the first place.
-3. The MAX_POOL_SIZE cap (32) exposed in the public API still
-   matters: callers that create pools-of-pools (e.g. fan-out
-   query patterns) can use it to bound concurrent kernel
-   threads. The library does not enforce it on the per-call
-   shape because the natural place to enforce it is the
-   caller's own admission control.
+3. The MAX_POOL_SIZE cap (32) is enforced process-wide via a
+   kernel-backed POSIX named semaphore shared by ``block_in_pool``
+   and ``resolve_async``: a call that would exceed the cap raises
+   "pool saturated" instead of spawning the over-limit thread, so a
+   fan-out burst cannot thread-bomb the process. The mechanism is
+   fail-open (an unsupported platform skips the cap rather than
+   blocking work) and per-process (keyed by pid, since Mojo has no
+   module-level mutable globals).
 
 What the kernel-thread split actually buys:
 
@@ -103,17 +105,88 @@ care about fast-cancel during long work can poll ``cancel``
 inside ``work()``.
 """
 
+from std.ffi import external_call
 from std.memory import UnsafePointer, alloc, memcpy
+from std.sys.info import CompilationTarget
 
 from ..http.cancel import Cancel, CancelReason
 from ._thread import ThreadHandle
 
 
-# Per-call pool size cap. The cap is exposed
-# for callers that batch / fan-out and want to bound their own
-# concurrent ``block_in_pool`` count; the library itself does not
-# enforce it on the per-call shape.
+# Process-wide cap on concurrent pool threads. Enforced by
+# ``block_in_pool`` and ``resolve_async`` via a kernel-backed POSIX
+# named semaphore (see ``_pool_try_acquire`` / ``_pool_release``): a
+# call that would exceed the cap raises "pool saturated" instead of
+# spawning the over-limit thread, so a pathological fan-out cannot
+# thread-bomb the process. The cap is shared across both entry points
+# (they draw from the same pool).
 comptime MAX_POOL_SIZE: Int = 32
+
+
+# ── Process-wide thread-count cap (POSIX named semaphore) ────────────────────
+# Mojo has no module-level mutable globals, so the cap lives in a
+# kernel object keyed by a per-pid name. ``sem_open(O_CREAT)`` sets the
+# initial value only on first creation; later opens reuse the existing
+# object, so the count persists across calls. The mechanism is
+# fail-open: if the semaphore cannot be created (unsupported platform,
+# /dev/shm full) the cap is skipped rather than blocking real work.
+#
+# ponytail: kernel-name-keyed cap. Ceiling: a prior process with the
+# SAME pid that crashed while holding slots can leave the cap reduced
+# until reboot clears /dev/shm (benign -- results are never wrong, only
+# the cap tightens). Upgrade path: a C-static atomic counter in the FFI
+# lib, or Mojo module-globals once the language supports them.
+
+comptime _SEM_MODE: Int32 = 0o600
+
+
+@always_inline
+def _o_creat() -> Int32:
+    """``O_CREAT`` flag value (differs between Linux and macOS)."""
+    comptime if CompilationTarget.is_linux():
+        return Int32(0x40)
+    else:
+        return Int32(0x200)
+
+
+@always_inline
+def _pool_sem_name() -> String:
+    """Per-process semaphore name (``/flare_pool_<pid>``)."""
+    var pid = external_call["getpid", Int32]()
+    return String("/flare_pool_") + String(Int(pid))
+
+
+@always_inline
+def _pool_try_acquire() -> Bool:
+    """Try to claim one pool slot. Returns True on success, False when
+    the process is already at ``MAX_POOL_SIZE`` concurrent pool threads.
+
+    Fail-open: if the semaphore cannot be opened, returns True so work
+    still runs (the cap is best-effort, never a hard dependency).
+    """
+    var name = _pool_sem_name()
+    var sem = external_call[
+        "sem_open", UnsafePointer[UInt8, MutUntrackedOrigin]
+    ](name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE))
+    if Int(sem) == -1:
+        return True
+    var rc = external_call["sem_trywait", Int32](sem)
+    _ = external_call["sem_close", Int32](sem)
+    return rc == Int32(0)
+
+
+@always_inline
+def _pool_release():
+    """Return one pool slot claimed by ``_pool_try_acquire``."""
+    var name = _pool_sem_name()
+    var sem = external_call[
+        "sem_open", UnsafePointer[UInt8, MutUntrackedOrigin]
+    ](name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE))
+    if Int(sem) == -1:
+        return
+    _ = external_call["sem_post", Int32](sem)
+    _ = external_call["sem_close", Int32](sem)
+
 
 # Error message buffer size. Truncates longer Error strings.
 comptime _ERR_BUF_CAP: Int = 256
@@ -285,6 +358,17 @@ def block_in_pool[
     if cancel.cancelled():
         _raise_cancel("block_in_pool: cancelled", cancel.reason())
 
+    # ── Admission: claim a pool slot before spawning ───────────────────────
+    # Enforces the process-wide MAX_POOL_SIZE cap so a fan-out burst
+    # cannot thread-bomb the process. Acquired before any allocation so
+    # the saturation path needs no cleanup.
+    if not _pool_try_acquire():
+        raise Error(
+            "block_in_pool: pool saturated (MAX_POOL_SIZE="
+            + String(MAX_POOL_SIZE)
+            + " concurrent pool threads)"
+        )
+
     # ── Heap-allocate task buffers ──────────────────────────────────────────
     # The result slot is sized to T; the err buf is fixed _ERR_BUF_CAP;
     # the four flag bytes + err_len Int slot are 1-byte / sizeof(Int)
@@ -323,8 +407,13 @@ def block_in_pool[
     var task_opaque = UnsafePointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(task_ptr)
     )
-    var handle = ThreadHandle.spawn[_block_thunk[T]](task_opaque)
-    handle.join()
+    try:
+        var handle = ThreadHandle.spawn[_block_thunk[T]](task_opaque)
+        handle.join()
+    except e:
+        _pool_release()
+        raise e^
+    _pool_release()
 
     # ── Worker finished. Read result + free buffers. ───────────────────────
     var success = success_ptr[0] == UInt8(1)
