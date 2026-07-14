@@ -1,9 +1,13 @@
 """HTTP response type."""
 
+from std.collections import Optional
+
 from json import loads, Value
+from .body import ChunkSource
 from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_set_cookie_header
 from .error import HttpError
+from .response_stream import ChunkSourceBox
 
 
 struct Status:
@@ -74,6 +78,13 @@ struct Response(Movable):
     var body: List[UInt8]
     var version: String
     var trailers: HeaderMap
+    var body_stream: Optional[ChunkSourceBox]
+    """Optional streaming body source (K1). ``None`` for the ordinary
+    buffered response (the ``body`` field carries the bytes); ``Some``
+    when a handler returns a streaming response, in which case the
+    reactor emits ``Transfer-Encoding: chunked`` headers and pulls this
+    source chunk-by-chunk on each writable edge instead of sending
+    ``body``. Move-only, so ``Response`` stays move-only."""
 
     def __init__(
         out self,
@@ -88,6 +99,7 @@ struct Response(Movable):
         self.body = body^
         self.version = version^
         self.trailers = HeaderMap()
+        self.body_stream = Optional[ChunkSourceBox]()
 
     def reset(mut self, status: Int = 200, var reason: String = ""):
         """Recycle this ``Response`` in place for the next request on
@@ -111,6 +123,9 @@ struct Response(Movable):
         self.status = status
         self.reason = reason^
         self.body.clear()
+        # Drop any attached streaming source so a recycled Response
+        # never carries a stale chunk source into the next request.
+        self.body_stream = Optional[ChunkSourceBox]()
         # ``HeaderMap`` does not currently expose a public
         # ``clear()`` so we drop in-place by length-truncate.
         # The backing ``List[String]`` storage retains capacity
@@ -237,6 +252,33 @@ struct Response(Movable):
             ```
         """
         return _BytesIter(self.body, chunk_size)
+
+
+def stream_response[
+    S: ChunkSource
+](var source: S, status: Int = 200) raises -> Response:
+    """Build a streaming ``Response`` backed by ``source`` (K1).
+
+    The reactor serves this with ``Transfer-Encoding: chunked``,
+    pulling ``source.next(cancel)`` on each writable edge until it
+    returns ``None`` (end-of-stream), so an open-ended or large body
+    never has to materialise in memory. Set response headers (e.g.
+    ``Content-Type: text/event-stream`` for SSE) on the returned value
+    before returning it from a handler.
+
+    Args:
+        source: The chunk source; ownership transfers in.
+        status: HTTP status code (default 200).
+
+    Returns:
+        A ``Response`` whose ``body_stream`` carries ``source`` and
+        whose ``body`` is empty.
+    """
+    var resp = Response(status=status)
+    resp.body_stream = Optional[ChunkSourceBox](
+        ChunkSourceBox.create[S](source^)
+    )
+    return resp^
 
 
 struct _BytesIter(Movable):

@@ -145,6 +145,10 @@ ASAN_TESTS=(
   # K1 foundation — ChunkSourceBox type-erased chunk-source box: ASan
   # validates the Pool[S] heap box alloc/next/free + move-once ownership.
   "tests/http/test_response_stream.mojo"
+  # K1 e2e — stream_response through HttpServer.serve(handler): a forked
+  # server streams a chunked body via the reactor per-edge pull loop.
+  # ASan validates the ConnHandle.body_src box lifetime + framing buffers.
+  "tests/http/test_streaming_handler.mojo"
   # v0.9 B5 — incremental inbound body: a forked client streams multi-MB
   # while the front consumes it in fixed 64 KiB read_body chunks. ASan
   # validates the non-blocking inbound recv path and the bounded reader.

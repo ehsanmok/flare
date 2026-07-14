@@ -274,6 +274,27 @@ def _is_connection(k: String) -> Bool:
     return True
 
 
+def _is_transfer_encoding(k: String) -> Bool:
+    """Return True if ``k`` is ``Transfer-Encoding`` (ASCII case-insensitive).
+
+    Used by the chunked-response header serializer to drop any
+    caller-supplied ``Transfer-Encoding`` in favour of the canonical
+    ``Transfer-Encoding: chunked`` it emits itself.
+    """
+    if k.byte_length() != 17:
+        return False
+    var p = k.unsafe_ptr()
+    var target = "transfer-encoding"
+    var t = target.unsafe_ptr()
+    for i in range(17):
+        var c = p[i]
+        if c >= 65 and c <= 90:
+            c = c + 32
+        if c != t[i]:
+            return False
+    return True
+
+
 # ── Read buffer compaction ────────────────────────────────────────────────────
 
 

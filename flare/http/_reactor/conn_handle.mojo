@@ -56,6 +56,11 @@ from flare.http.handler import Handler, CancelHandler, ViewHandler
 from flare.http.headers import HeaderMap
 from flare.http.request import Request
 from flare.http.response import Response
+from flare.http.response_stream import (
+    ChunkSourceBox,
+    frame_chunk_into,
+    frame_terminator_into,
+)
 from flare.http.server import (
     ServerConfig,
     _find_crlfcrlf,
@@ -89,6 +94,7 @@ from .write_path import (
     build_error_response,
     queue_h2c_upgrade_101,
     serialize_response_into,
+    serialize_response_headers_chunked_into,
     serialize_static_into,
 )
 
@@ -193,6 +199,14 @@ struct ConnHandle(Movable):
     wall-clock second has rolled over since the previous response
     on this connection."""
 
+    var body_src: Optional[ChunkSourceBox]
+    """Active streaming body source (K1), ``None`` for the buffered
+    path. Set from ``Response.body_stream`` at response completion; the
+    ``on_writable`` refill loop pulls one chunk per writable edge,
+    frames it as ``Transfer-Encoding: chunked``, and clears this after
+    the terminator flushes. Freed with the ConnHandle if the peer
+    disconnects mid-stream."""
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def __init__(
@@ -229,6 +243,7 @@ struct ConnHandle(Movable):
         self._h2c_upgrade_request = Optional[Request]()
         self._h2c_upgrade_settings = List[UInt8]()
         self._date_cache = DateCache()
+        self.body_src = Optional[ChunkSourceBox]()
 
     @always_inline
     def fd(self) -> c_int:
@@ -392,7 +407,15 @@ struct ConnHandle(Movable):
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
-        self._serialize_response(resp^, not close_after)
+        # Streaming path (K1): a handler that returned a streaming
+        # Response carries a chunk source. Take it onto the connection,
+        # emit chunked-framed headers, and let ``on_writable`` pull the
+        # body chunk-by-chunk. The buffered path is unchanged.
+        if resp.body_stream:
+            self.body_src = resp.body_stream.take()
+            self._serialize_response_chunked(resp^, not close_after)
+        else:
+            self._serialize_response(resp^, not close_after)
         return self._transition_to_writing()
 
     # ── Event handlers ────────────────────────────────────────────────────────
@@ -803,6 +826,24 @@ struct ConnHandle(Movable):
         self.write_buf.clear()
         self.write_pos = 0
 
+        # Streaming body (K1): when a chunk source is attached, refill
+        # write_buf with the next framed chunk (or the terminator) and
+        # stay in STATE_WRITING. Buffered responses have ``body_src ==
+        # None`` and skip this with a single Optional check.
+        if self.body_src:
+            var more: Bool
+            try:
+                more = self._stream_refill()
+            except:
+                self.should_close = True
+                return StepResult(want_read=False, want_write=False, done=True)
+            if more:
+                return StepResult(
+                    want_read=False,
+                    want_write=True,
+                    idle_timeout_ms=config.write_timeout_ms,
+                )
+
         # h2c upgrade migration cue: the 101 Switching Protocols response
         # has just flushed. Tell the unified reactor to swap the conn-dict
         # entry from KIND_H1 to KIND_H2.
@@ -945,3 +986,44 @@ struct ConnHandle(Movable):
             self.write_buf, self._date_cache, resp, keep_alive
         )
         self.write_pos = 0
+
+    def _serialize_response_chunked(
+        mut self, resp: Response, keep_alive: Bool
+    ) -> None:
+        """Serialise ``resp``'s chunked headers (K1 streaming path)."""
+        serialize_response_headers_chunked_into(
+            self.write_buf, self._date_cache, resp, keep_alive
+        )
+        self.write_pos = 0
+
+    def _stream_refill(mut self) raises -> Bool:
+        """Refill ``write_buf`` with the next framed chunk (or the
+        terminator) from ``body_src``. Returns ``True`` when bytes were
+        queued (stay in ``STATE_WRITING`` to flush them), ``False`` when
+        the stream is fully drained and its terminator has already been
+        queued on a prior call.
+
+        Called only when ``write_buf`` is fully flushed and ``body_src``
+        is set. Empty non-terminal chunks are skipped (a zero-length
+        chunk is the terminator, so a source must not frame one as data).
+        """
+        if not self.body_src:
+            return False
+        var cancel = self.cancel_cell.handle()
+        while True:
+            var chunk_opt = self.body_src.value().next(cancel)
+            if not chunk_opt:
+                # End-of-stream: queue the terminator and drop the
+                # source so the next flush-complete transitions normally.
+                self.write_buf.clear()
+                frame_terminator_into(self.write_buf)
+                self.write_pos = 0
+                self.body_src = Optional[ChunkSourceBox]()
+                return True
+            var chunk = chunk_opt.value().copy()
+            if len(chunk) == 0:
+                continue  # skip empty non-terminal chunks
+            self.write_buf.clear()
+            frame_chunk_into(self.write_buf, chunk)
+            self.write_pos = 0
+            return True

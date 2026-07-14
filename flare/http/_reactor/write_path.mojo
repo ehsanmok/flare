@@ -30,7 +30,12 @@ from flare.http.server import (
 from flare.http.static_response import StaticResponse
 from flare.runtime import DateCache
 
-from .keepalive_scan import _is_connection, _is_content_length, _is_date
+from .keepalive_scan import (
+    _is_connection,
+    _is_content_length,
+    _is_date,
+    _is_transfer_encoding,
+)
 
 
 @always_inline
@@ -230,6 +235,64 @@ def serialize_response_into(
 
     if body_len > 0:
         _ = _put_bytes(write_buf, off, resp.body.unsafe_ptr(), body_len)
+
+
+def serialize_response_headers_chunked_into(
+    mut write_buf: List[UInt8],
+    mut date_cache: DateCache,
+    resp: Response,
+    keep_alive: Bool,
+) -> None:
+    """Serialise ``resp``'s status line + headers with
+    ``Transfer-Encoding: chunked`` framing (no ``Content-Length``, no
+    body) into ``write_buf``.
+
+    Used for the streaming-response path: the reactor emits these
+    headers once, then frames each pulled chunk (see
+    ``flare.http.response_stream``) on subsequent writable edges. Not
+    on the plaintext hot path -- correctness over micro-optimisation,
+    so it uses the append-based writer rather than the single-pass
+    exact-size writer ``serialize_response_into`` uses.
+    """
+    var reason = resp.reason
+    if reason.byte_length() == 0:
+        reason = _status_reason(resp.status)
+    date_cache.refresh()
+    var date_bytes = date_cache.current_bytes()
+
+    write_buf.clear()
+    var wire = write_buf^
+    _append_str(wire, "HTTP/1.1 ")
+    _append_str(wire, String(resp.status))
+    _append_str(wire, " ")
+    _append_str(wire, reason)
+    _append_str(wire, "\r\n")
+    for i in range(resp.headers.len()):
+        var k = resp.headers._keys[i]
+        # Drop caller-supplied framing / hop headers -- we emit the
+        # canonical Transfer-Encoding, Date, and Connection ourselves.
+        if (
+            _is_content_length(k)
+            or _is_connection(k)
+            or _is_date(k)
+            or _is_transfer_encoding(k)
+        ):
+            continue
+        _append_str(wire, k)
+        _append_str(wire, ": ")
+        _append_str(wire, resp.headers._values[i])
+        _append_str(wire, "\r\n")
+    _append_str(wire, "Transfer-Encoding: chunked\r\n")
+    _append_str(wire, "Date: ")
+    for i in range(len(date_bytes)):
+        wire.append(date_bytes[i])
+    _append_str(wire, "\r\n")
+    if keep_alive:
+        _append_str(wire, "Connection: keep-alive\r\n")
+    else:
+        _append_str(wire, "Connection: close\r\n")
+    _append_str(wire, "\r\n")
+    write_buf = wire^
 
 
 def build_error_response(status: Int, reason: String) -> Response:
