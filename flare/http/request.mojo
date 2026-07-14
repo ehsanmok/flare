@@ -246,6 +246,20 @@ struct Request(Movable):
             return False
         return name in self._params.value()[]
 
+    def param_opt(self, name: String) raises -> Optional[String]:
+        """Return path param ``name`` as ``Optional[String]`` (``None`` on
+        miss).
+
+        The consistent, non-raising miss accessor: ``param`` raises,
+        ``query_param`` / ``cookie`` return ``""`` (indistinguishable
+        from a present-empty value). ``param_opt`` / ``query_param_opt``
+        / ``cookie_opt`` give one uniform ``Optional`` miss semantics
+        across all three sources.
+        """
+        if not self.has_param(name):
+            return Optional[String]()
+        return Optional[String](self.param(name))
+
     def query_param(self, name: String) -> String:
         """Return the first query-string value for ``name``, or ``""``.
 
@@ -357,6 +371,17 @@ struct Request(Movable):
             cursor = pair_end + 1
         return False
 
+    def query_param_opt(self, name: String) -> Optional[String]:
+        """Return query param ``name`` as ``Optional[String]`` (``None`` when
+        the key is absent; ``Optional("")`` for a present-empty value).
+
+        Companion to ``param_opt`` / ``cookie_opt`` for uniform miss
+        semantics.
+        """
+        if not self.has_query_param(name):
+            return Optional[String]()
+        return Optional[String](self.query_param(name))
+
     def text(self) -> String:
         """Decode the request body as a UTF-8 string.
 
@@ -421,6 +446,20 @@ struct Request(Movable):
                 if c.name == name:
                     return c.value
         return ""
+
+    def cookie_opt(self, name: String) -> Optional[String]:
+        """Return cookie ``name`` as ``Optional[String]`` (``None`` on miss).
+
+        Companion to ``param_opt`` / ``query_param_opt`` for uniform miss
+        semantics across path params, query params, and cookies.
+        """
+        var values = self.headers.get_all("cookie")
+        for v in values:
+            var parsed = parse_cookie_header(v)
+            for c in parsed:
+                if c.name == name:
+                    return Optional[String](c.value)
+        return Optional[String]()
 
     def has_cookie(self, name: String) -> Bool:
         """Return ``True`` if cookie ``name`` is set on this request."""

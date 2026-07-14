@@ -50,7 +50,7 @@ roadmap; the public Router API will not change when the trie
 lands, only the internal representation.
 """
 
-from std.collections import Dict
+from std.collections import Dict, Optional
 from std.memory import ArcPointer
 
 from ..runtime import Pool
@@ -358,6 +358,10 @@ struct Router(Copyable, Defaultable, Handler, Movable):
     destructor (which walks the destroy thunks). This replaces an
     earlier hand-rolled refcount cell.
     """
+    var _fallback: Optional[FnHandler]
+    """Optional custom fallback invoked when no route matched and no
+    mount claimed the path. When unset, ``serve`` returns the default
+    404 (or 405 when the path exists under other methods)."""
 
     def __init__(out self):
         """Create an empty router (no routes)."""
@@ -367,6 +371,7 @@ struct Router(Copyable, Defaultable, Handler, Movable):
         self._struct_registry = ArcPointer[_StructHandlerRegistry](
             _StructHandlerRegistry()
         )
+        self._fallback = Optional[FnHandler]()
 
     # ── Registration per method (def-function overloads) ────────────────────
 
@@ -422,6 +427,43 @@ struct Router(Copyable, Defaultable, Handler, Movable):
     ) raises:
         """Register ``handler`` for ``HEAD path``."""
         self._add_fn(Method.HEAD, path, handler)
+
+    def options(
+        mut self,
+        path: String,
+        handler: def(Request) raises thin -> Response,
+    ) raises:
+        """Register ``handler`` for ``OPTIONS path``."""
+        self._add_fn(Method.OPTIONS, path, handler)
+
+    def trace(
+        mut self,
+        path: String,
+        handler: def(Request) raises thin -> Response,
+    ) raises:
+        """Register ``handler`` for ``TRACE path``."""
+        self._add_fn(Method.TRACE, path, handler)
+
+    def connect(
+        mut self,
+        path: String,
+        handler: def(Request) raises thin -> Response,
+    ) raises:
+        """Register ``handler`` for ``CONNECT path``."""
+        self._add_fn(Method.CONNECT, path, handler)
+
+    def fallback(
+        mut self,
+        handler: def(Request) raises thin -> Response,
+    ):
+        """Set a custom fallback handler.
+
+        Invoked when no registered route matched and no mounted
+        sub-router claimed the path. Replaces the default 404 body
+        (the 405 path for a known path under other methods still
+        fires first). Registering twice keeps the last handler.
+        """
+        self._fallback = Optional[FnHandler](FnHandler(handler))
 
     def _add_fn(
         mut self,
@@ -495,6 +537,27 @@ struct Router(Copyable, Defaultable, Handler, Movable):
         """Register ``handler`` (a Handler struct) for ``HEAD path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.HEAD, path, handler^)
+
+    def options[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``OPTIONS path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.OPTIONS, path, handler^)
+
+    def trace[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``TRACE path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.TRACE, path, handler^)
+
+    def connect[
+        H: Handler & Copyable & Movable
+    ](mut self, path: String, var handler: H) raises:
+        """Register ``handler`` (a Handler struct) for ``CONNECT path``.
+        See ``get[H]`` for the type-erasure shape."""
+        self._add_struct[H](Method.CONNECT, path, handler^)
 
     def _add_struct[
         H: Handler & Copyable & Movable
@@ -649,6 +712,18 @@ struct Router(Copyable, Defaultable, Handler, Movable):
 
         if len(allowed) > 0:
             return _method_not_allowed(allowed)
+        if self._fallback:
+            var child = Request(
+                method=req.method,
+                url=req.url,
+                body=req.body.copy(),
+                version=req.version,
+            )
+            child.headers = req.headers.copy()
+            if req.has_params():
+                for kv in req._params.value()[].items():
+                    child.params_mut()[kv.key] = kv.value
+            return self._fallback.value().serve(child^)
         return not_found(req.url)
 
 

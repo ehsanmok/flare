@@ -76,6 +76,28 @@ def test_factories_carry_default_peer() raises:
     assert_equal(Int(p.peer.port), 0)
 
 
+def test_optional_accessors_uniform_miss() raises:
+    """param_opt / query_param_opt / cookie_opt give one uniform
+    Optional miss semantics across the three sources."""
+    var req = Request.test_get("/search?q=mojo&empty=")
+    # query: present, present-empty, absent.
+    var q = req.query_param_opt("q")
+    assert_true(Bool(q))
+    assert_equal(q.value(), "mojo")
+    var e = req.query_param_opt("empty")
+    assert_true(Bool(e))  # present-empty -> Some("")
+    assert_equal(e.value(), "")
+    assert_true(not req.query_param_opt("missing"))
+    # path param: absent here (no router injected).
+    assert_true(not req.param_opt("id"))
+    req.params_mut()["id"] = "42"
+    var pid = req.param_opt("id")
+    assert_true(Bool(pid))
+    assert_equal(pid.value(), "42")
+    # cookie: absent.
+    assert_true(not req.cookie_opt("session"))
+
+
 def main() raises:
     test_test_get_basic()
     print("OK test_test_get_basic")
@@ -97,3 +119,6 @@ def main() raises:
 
     test_factories_carry_default_peer()
     print("OK test_factories_carry_default_peer")
+
+    test_optional_accessors_uniform_miss()
+    print("OK test_optional_accessors_uniform_miss")

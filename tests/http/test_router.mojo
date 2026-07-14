@@ -431,6 +431,85 @@ def test_router_drops_struct_handlers_cleanly() raises:
         # ``r`` drops here; Router.__del__ runs every destroy_thunk.
 
 
+# ── OPTIONS / TRACE / CONNECT + fallback ────────────────────────────────────
+
+
+def h_opts(req: Request) raises -> Response:
+    return ok("opts")
+
+
+def h_trace(req: Request) raises -> Response:
+    return ok("trace")
+
+
+def h_connect(req: Request) raises -> Response:
+    return ok("connect")
+
+
+def h_fb(req: Request) raises -> Response:
+    return ok("fallback:" + req.url)
+
+
+def test_router_options_registration() raises:
+    var r = Router()
+    r.options("/thing", h_opts)
+    var resp = r.serve(Request(method=Method.OPTIONS, url="/thing"))
+    assert_equal(resp.status, Status.OK)
+    assert_equal(resp.text(), "opts")
+
+
+def test_router_trace_registration() raises:
+    var r = Router()
+    r.trace("/thing", h_trace)
+    var resp = r.serve(Request(method=Method.TRACE, url="/thing"))
+    assert_equal(resp.text(), "trace")
+
+
+def test_router_connect_registration() raises:
+    var r = Router()
+    r.connect("/thing", h_connect)
+    var resp = r.serve(Request(method=Method.CONNECT, url="/thing"))
+    assert_equal(resp.text(), "connect")
+
+
+def test_router_options_405_lists_allow() raises:
+    """A path registered under OPTIONS still yields 405 + Allow for a
+    different method."""
+    var r = Router()
+    r.options("/thing", h_opts)
+    var resp = r.serve(Request(method=Method.GET, url="/thing"))
+    assert_equal(resp.status, Status.METHOD_NOT_ALLOWED)
+    assert_true(resp.headers.get("Allow").find("OPTIONS") >= 0)
+
+
+def test_router_custom_fallback() raises:
+    """When set, the fallback replaces the default 404 body for an
+    unmatched path (and returns 200 from the fallback here)."""
+    var r = Router()
+    r.get("/", h_home)
+    r.fallback(h_fb)
+    var resp = r.serve(Request(method=Method.GET, url="/nope"))
+    assert_equal(resp.status, Status.OK)
+    assert_equal(resp.text(), "fallback:/nope")
+
+
+def test_router_fallback_not_used_on_405() raises:
+    """A known path under another method returns 405, not the
+    fallback (the fallback is a not-found hook only)."""
+    var r = Router()
+    r.get("/users", h_list_users)
+    r.fallback(h_fb)
+    var resp = r.serve(Request(method=Method.POST, url="/users"))
+    assert_equal(resp.status, Status.METHOD_NOT_ALLOWED)
+
+
+def test_router_default_404_without_fallback() raises:
+    var r = Router()
+    r.get("/", h_home)
+    var resp = r.serve(Request(method=Method.GET, url="/nope"))
+    assert_equal(resp.status, Status.NOT_FOUND)
+
+
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 

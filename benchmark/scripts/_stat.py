@@ -38,6 +38,7 @@ on the same line.
 """
 
 import json
+import os
 import re
 import statistics
 import sys
@@ -233,6 +234,22 @@ def main(argv: list[str]) -> int:
         stdev = statistics.stdev(rps_values) if len(rps_values) >= 2 else 0.0
         stdev_pct = (stdev / mean_rps * 100.0) if mean_rps > 0 else 100.0
 
+        # Bimodality gate: the throughput sigma can stay tight while
+        # whole rounds stall (a pinned worker's standing queue turns
+        # into hundreds-of-ms percentiles under wrk2's CO correction).
+        # A round-to-round p99 max/min ratio above BIMODAL_MAX means a
+        # subset of rounds cliffed even though req/s held, so the run
+        # must not be published as ``stable``. Threshold is env-tunable
+        # (FLARE_BENCH_BIMODAL_MAX, default 10.0).
+        _p99_vals = [r["p99_ms"] for r in runs if r["p99_ms"] > 0]
+        bimodal_ratio = (
+            max(_p99_vals) / min(_p99_vals)
+            if len(_p99_vals) >= 2 and min(_p99_vals) > 0
+            else 1.0
+        )
+        bimodal_max = float(os.environ.get("FLARE_BENCH_BIMODAL_MAX", "10.0"))
+        bimodal_ok = bimodal_ratio <= bimodal_max
+
         # Headline req/s is peak capacity (find-peak phase) when
         # the harness supplied it; otherwise fall back to the
         # median over measurement runs.
@@ -262,8 +279,19 @@ def main(argv: list[str]) -> int:
             "stdev_p99_999_ms": _stdev_of("p99_999_ms"),
             "total_timeouts": sum(r["timeouts"] for r in runs),
             "total_socket_errors": sum(r["socket_errors"] for r in runs),
-            "stable": stdev_pct < 3.0,
+            "p99_bimodality_ratio": bimodal_ratio,
+            # A run is stable only when BOTH the throughput sigma is
+            # tight AND the per-round p99 did not cliff (no bimodality).
+            "stable": stdev_pct < 3.0 and bimodal_ok,
         }
+        if not bimodal_ok:
+            summary["note"] = (
+                "bimodal p99: round max/min ratio %.1fx exceeds %.1fx"
+                " (throughput sigma was tight but some rounds cliffed;"
+                " pin server + loadgen to disjoint cores or set"
+                " FLARE_BENCH_PIN=0 and rerun)"
+                % (bimodal_ratio, bimodal_max)
+            )
 
     payload = {"runs": runs, "summary": summary}
     out.write_text(json.dumps(payload, indent=2) + "\n")

@@ -313,6 +313,26 @@ pinned, both ahead of hyper and axum). On a dedicated machine the
 pinned shape is the faster one; the numbers above use the unpinned
 control purely to isolate flare from shared-box scheduler noise.
 
+**Bimodality gate (harness).** `benchmark/scripts/_stat.py` now marks a
+run `stable` only when BOTH the throughput sigma is tight (`stdev_pct
+< 3.0`) AND the per-round p99 did not cliff: it computes
+`p99_bimodality_ratio = max(round p99) / min(round p99)` and requires
+it at or below `FLARE_BENCH_BIMODAL_MAX` (default 10x). This closes the
+prior gap where a 393 ms-median-p99 round could ship `stable: true`
+because req/s held steady -- the standing-queue cliff above is exactly
+that shape and is now caught. When the ratio trips, the summary carries
+a `note` telling the operator to pin server and load generator to
+disjoint cores (or set `FLARE_BENCH_PIN=0` on a shared box) and rerun.
+
+**Pinning guidance.** On a shared box, either run the unpinned control
+(`FLARE_BENCH_PIN=0`) or pin the server workers and the load generator
+to disjoint core sets so wrk2 never preempts a pinned reactor worker:
+give the server cores `0..N-1` (its default `worker % num_cpus`
+pinning) and launch wrk2 under `taskset -c N..M` on the remaining
+cores, steering NIC IRQs away from the server cores. Co-locating the
+load generator on a server core is the single largest source of the
+bimodal tail above.
+
 ### Multi-worker scaling, Linux EPYC
 
 **Worker-count discipline:** the tables below show two things,
