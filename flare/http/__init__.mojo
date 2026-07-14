@@ -137,6 +137,7 @@ from .simd_parsers import (
     simd_cookie_scan,
 )
 from .request import Request, Method
+from .request_builder import RequestBuilder
 from .response import Response, Status
 from .response_pool import ResponsePool
 from .handler import (

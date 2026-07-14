@@ -149,6 +149,8 @@ ASAN_TESTS=(
   # server streams a chunked body via the reactor per-edge pull loop.
   # ASan validates the ConnHandle.body_src box lifetime + framing buffers.
   "tests/http/test_streaming_handler.mojo"
+  # Client RequestBuilder: HeaderMap + body buffer + urlencode churn.
+  "tests/http/test_request_builder.mojo"
   # v0.9 B5 — incremental inbound body: a forked client streams multi-MB
   # while the front consumes it in fixed 64 KiB read_body chunks. ASan
   # validates the non-blocking inbound recv path and the bounded reader.
