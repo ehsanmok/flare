@@ -142,6 +142,9 @@ ASAN_TESTS=(
   # it in the backlog) and admits it once a slot frees. ASan validates
   # the accept drainer's errno path + the live-conn table teardown.
   "tests/http/test_admission_h1.mojo"
+  # K1 foundation — ChunkSourceBox type-erased chunk-source box: ASan
+  # validates the Pool[S] heap box alloc/next/free + move-once ownership.
+  "tests/http/test_response_stream.mojo"
   # v0.9 B5 — incremental inbound body: a forked client streams multi-MB
   # while the front consumes it in fixed 64 KiB read_body chunks. ASan
   # validates the non-blocking inbound recv path and the bounded reader.
