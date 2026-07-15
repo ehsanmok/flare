@@ -296,6 +296,8 @@ from .redirect_policy import (
     RedirectPolicy,
 )
 from .reliability import (
+    CircuitBreaker,
+    RateLimit,
     Retry,
     RetryPolicy,
     PostHocDeadline,

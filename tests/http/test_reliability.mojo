@@ -6,6 +6,8 @@ from std.time import perf_counter_ns
 
 from flare.http.handler import Handler
 from flare.http.reliability import (
+    CircuitBreaker,
+    RateLimit,
     Retry,
     RetryPolicy,
     PostHocDeadline,
@@ -300,6 +302,44 @@ def test_timeout_returns_504_on_zero_budget() raises:
     assert_equal(resp.status, 504)
 
 
+def test_ratelimit_allows_burst_then_429() raises:
+    """A burst of 2 with rate 1/s admits 2 rapid calls, rejects the
+    3rd with 429 (refill is negligible over microseconds)."""
+    var rl = RateLimit(AlwaysOkHandler(), rate_per_sec=1, burst=2)
+    var req = Request(method=String("GET"), url=String("/"))
+    assert_equal(rl.serve(req).status, 200)
+    assert_equal(rl.serve(req).status, 200)
+    assert_equal(rl.serve(req).status, 429)
+
+
+def test_ratelimit_disabled_passthrough() raises:
+    """Disabled when rate_per_sec <= 0 (pass-through)."""
+    var rl = RateLimit(AlwaysOkHandler(), rate_per_sec=0)
+    var req = Request(method=String("GET"), url=String("/"))
+    for _ in range(5):
+        assert_equal(rl.serve(req).status, 200)
+
+
+def test_circuitbreaker_opens_after_threshold() raises:
+    """Two consecutive 500s open the breaker; the 3rd call fast-fails
+    with 503 while the cooldown is still in effect."""
+    var cb = CircuitBreaker(
+        AlwaysFiveHundredHandler(), failure_threshold=2, cooldown_ms=60_000
+    )
+    var req = Request(method=String("GET"), url=String("/"))
+    assert_equal(cb.serve(req).status, 500)
+    assert_equal(cb.serve(req).status, 500)
+    assert_equal(cb.serve(req).status, 503)
+
+
+def test_circuitbreaker_disabled_passthrough() raises:
+    """Disabled when failure_threshold <= 0 (pass-through)."""
+    var cb = CircuitBreaker(AlwaysFiveHundredHandler(), failure_threshold=0)
+    var req = Request(method=String("GET"), url=String("/"))
+    for _ in range(5):
+        assert_equal(cb.serve(req).status, 500)
+
+
 def main() raises:
     test_retry_succeeds_on_first_attempt()
     test_retry_recovers_after_transient_failures()
@@ -311,4 +351,8 @@ def main() raises:
     test_retry_backoff_sleeps_between_attempts()
     test_timeout_passes_through_fast_handler()
     test_timeout_returns_504_on_zero_budget()
+    test_ratelimit_allows_burst_then_429()
+    test_ratelimit_disabled_passthrough()
+    test_circuitbreaker_opens_after_threshold()
+    test_circuitbreaker_disabled_passthrough()
     print("test_reliability: OK")

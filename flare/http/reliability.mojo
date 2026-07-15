@@ -1,12 +1,9 @@
-"""Reliability middleware: ``Retry`` + ``PostHocDeadline`` policies.
+"""Reliability middleware: ``Retry`` / ``PostHocDeadline`` /
+``RateLimit`` / ``CircuitBreaker`` policies.
 
 A reliability middleware wraps an inner ``Handler`` and adds a
 policy that improves the chance the call succeeds in the face of
 transient failures (transient upstream 5xx, slow handlers, etc).
-
-This commit ships two policies; the matching ``RateLimit`` and
-``CircuitBreaker`` policies follow in subsequent commits within
-this cycle.
 
 - :class:`Retry[Inner]` — re-invoke the inner handler when it
   raises or returns a 5xx response, up to ``max_attempts`` times.
@@ -19,16 +16,29 @@ this cycle.
   middleware records the entry timestamp, runs the inner handler
   to completion, then compares elapsed time against the budget
   and replaces the response with a 504 if the budget was
-  exceeded. **It does not preempt the inner handler.** That
-  reactor-cooperative cancel-cell flip lands in a later commit;
-  until then this primitive is enough for handlers that complete
-  promptly (cleanup that must observe the deadline drift through
-  the inner handler return path).
+  exceeded. **It does not preempt the inner handler** -- Mojo
+  cannot preempt synchronous code (see ``flare/http/cancel.mojo``),
+  so a genuinely runaway synchronous handler runs to completion on
+  its worker; reactor-enforced cancellation exists only at the
+  peer-FIN, shutdown, and streaming-edge boundaries, not inside a
+  synchronous handler body. This is the K2 model limit.
+- :class:`RateLimit[Inner]` — token-bucket admission control:
+  reject with ``429 Too Many Requests`` once the per-second rate
+  (with burst) is exceeded. State is a leaked, atomic heap cell
+  shared across worker copies (ponytail: process-lifetime leak of
+  one small cell per middleware instance; the atomics keep it
+  race-free, so N workers enforce an approximate shared rate).
+- :class:`CircuitBreaker[Inner]` — trip to ``503`` after
+  ``failure_threshold`` consecutive failures (5xx or raise), then
+  fast-fail for ``cooldown_ms`` before letting one probe through.
+  Same leaked-atomic-cell state model as ``RateLimit``.
 
 Each middleware is generic over its inner ``Handler`` so the
 chain stays monomorphised -- no virtual dispatch.
 """
 
+from std.atomic import Atomic, Ordering
+from std.memory import UnsafePointer, alloc
 from std.time import perf_counter_ns
 from std.random import random_ui64
 
@@ -36,6 +46,35 @@ from ..runtime._libc_time import libc_nanosleep_ms
 from .handler import Handler
 from .request import Request
 from .response import Response
+
+
+# ── Shared atomic-cell helpers (leaked, process-lifetime) ────────────────
+def _alloc_cell(n: Int) -> Int:
+    """Allocate an ``n``-slot ``Int`` cell zeroed; return its address.
+
+    Leaked on purpose: the middleware structs are ``Copyable`` and a
+    default copy shares the address, so freeing on ``__del__`` would
+    double-free across worker copies. One small cell per middleware
+    instance (created once at setup) is a negligible, bounded leak.
+    """
+    var p = alloc[Int](n)
+    for i in range(n):
+        (p + i).init_pointee_copy(0)
+    return Int(p)
+
+
+@always_inline
+def _cell_get(addr: Int, i: Int) -> Int64:
+    var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var slot = (p + i).bitcast[Scalar[DType.int64]]()
+    return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](slot)
+
+
+@always_inline
+def _cell_set(addr: Int, i: Int, v: Int64):
+    var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var slot = (p + i).bitcast[Scalar[DType.int64]]()
+    Atomic[DType.int64].store[ordering=Ordering.RELEASE](slot, v)
 
 
 @fieldwise_init
@@ -272,3 +311,150 @@ struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
         if elapsed_ms > UInt(self.budget_ms):
             return Response(status=504, reason=String("Gateway Timeout"))
         return resp^
+
+
+struct RateLimit[Inner: Handler & Copyable & Defaultable](
+    Copyable, Defaultable, Handler, Movable
+):
+    """Token-bucket rate limiter.
+
+    Admits up to ``rate_per_sec`` requests per second with a bucket
+    depth of ``burst`` (defaults to ``rate_per_sec``). Once the
+    bucket is empty the middleware short-circuits with ``429 Too
+    Many Requests`` without invoking the inner handler.
+
+    ``rate_per_sec <= 0`` disables the limiter (pass-through). The
+    bucket lives in a leaked atomic cell (see module docstring):
+    worker copies share it, so the enforced rate is approximately
+    global rather than strictly per-worker.
+    """
+
+    var inner: Self.Inner
+    var rate_per_sec: Int
+    var burst: Int
+    var _cell: Int
+    """Leaked 2-slot cell: [0] = milli-tokens, [1] = last-refill ns."""
+
+    def __init__(out self):
+        self.inner = Self.Inner()
+        self.rate_per_sec = 0
+        self.burst = 0
+        self._cell = _alloc_cell(2)
+
+    def __init__(
+        out self, var inner: Self.Inner, rate_per_sec: Int, burst: Int = 0
+    ):
+        self.inner = inner^
+        self.rate_per_sec = rate_per_sec
+        self.burst = burst if burst > 0 else rate_per_sec
+        self._cell = _alloc_cell(2)
+        if self.rate_per_sec > 0:
+            _cell_set(self._cell, 0, Int64(self.burst) * 1000)
+            _cell_set(self._cell, 1, Int64(perf_counter_ns()))
+
+    def serve(self, req: Request) raises -> Response:
+        if self.rate_per_sec <= 0:
+            return self.inner.serve(req)
+        var now = Int64(perf_counter_ns())
+        var last = _cell_get(self._cell, 1)
+        var tokens = _cell_get(self._cell, 0)
+        var elapsed = now - last
+        if elapsed < 0:
+            elapsed = 0
+        # milli-tokens accrued: elapsed_ns * rate / 1e6 (1 token = 1000 milli).
+        var refill = (elapsed * Int64(self.rate_per_sec)) // 1_000_000
+        var cap = Int64(self.burst) * 1000
+        var new_tokens = tokens + refill
+        if new_tokens > cap:
+            new_tokens = cap
+        var allow = new_tokens >= 1000
+        if allow:
+            new_tokens -= 1000
+        _cell_set(self._cell, 0, new_tokens)
+        _cell_set(self._cell, 1, now)
+        if not allow:
+            return Response(status=429, reason=String("Too Many Requests"))
+        return self.inner.serve(req)
+
+
+# CircuitBreaker states.
+comptime _CB_CLOSED: Int64 = 0
+comptime _CB_OPEN: Int64 = 1
+comptime _CB_HALF_OPEN: Int64 = 2
+
+
+struct CircuitBreaker[Inner: Handler & Copyable & Defaultable](
+    Copyable, Defaultable, Handler, Movable
+):
+    """Trip open after consecutive failures, fast-fail during cooldown.
+
+    Counts consecutive failures (a raised exception or a ``>= 500``
+    response). After ``failure_threshold`` in a row the breaker
+    opens: every call fast-fails with ``503 Service Unavailable``
+    for ``cooldown_ms``. The first call after cooldown is a probe
+    (half-open); success closes the breaker, another failure
+    re-opens it.
+
+    ``failure_threshold <= 0`` disables the breaker (pass-through).
+    State lives in a leaked atomic cell (see module docstring).
+    """
+
+    var inner: Self.Inner
+    var failure_threshold: Int
+    var cooldown_ms: Int
+    var _cell: Int
+    """Leaked 3-slot cell: [0] = state, [1] = consecutive fails,
+    [2] = opened-at ns."""
+
+    def __init__(out self):
+        self.inner = Self.Inner()
+        self.failure_threshold = 0
+        self.cooldown_ms = 0
+        self._cell = _alloc_cell(3)
+
+    def __init__(
+        out self,
+        var inner: Self.Inner,
+        failure_threshold: Int,
+        cooldown_ms: Int = 5_000,
+    ):
+        self.inner = inner^
+        self.failure_threshold = failure_threshold
+        self.cooldown_ms = cooldown_ms
+        self._cell = _alloc_cell(3)
+
+    def _record_failure(self, now: Int64):
+        var fails = _cell_get(self._cell, 1) + 1
+        _cell_set(self._cell, 1, fails)
+        if fails >= Int64(self.failure_threshold):
+            _cell_set(self._cell, 0, _CB_OPEN)
+            _cell_set(self._cell, 2, now)
+
+    def _record_success(self):
+        _cell_set(self._cell, 1, 0)
+        _cell_set(self._cell, 0, _CB_CLOSED)
+
+    def serve(self, req: Request) raises -> Response:
+        if self.failure_threshold <= 0:
+            return self.inner.serve(req)
+        var now = Int64(perf_counter_ns())
+        var state = _cell_get(self._cell, 0)
+        if state == _CB_OPEN:
+            var opened = _cell_get(self._cell, 2)
+            var cooldown_ns = Int64(self.cooldown_ms) * 1_000_000
+            if now - opened < cooldown_ns:
+                return Response(
+                    status=503, reason=String("Service Unavailable")
+                )
+            # Cooldown elapsed: let one probe through (half-open).
+            _cell_set(self._cell, 0, _CB_HALF_OPEN)
+        try:
+            var resp = self.inner.serve(req)
+            if resp.status >= 500:
+                self._record_failure(now)
+            else:
+                self._record_success()
+            return resp^
+        except e:
+            self._record_failure(now)
+            raise e^
