@@ -3,9 +3,11 @@
 OpenAPI 3.1 (which aligns with JSON Schema 2020-12) describes
 the request/response surface of an HTTP API in a single
 machine-readable document. This package ships the data model +
-emitter; the comptime spec generator that walks
-``ComptimeRouter`` and emits a populated document is the
-follow-up commit within this cycle.
+emitter plus :func:`spec_from_router`, which derives a spec
+(paths, methods, path parameters) by walking a runtime
+:class:`flare.http.Router`. Deriving request/response body schemas
+from the typed ``Extracted[H]`` handler is a comptime follow-up
+(the Router erases the handler type at registration).
 
 The data model is deliberately small: only the subset of
 OpenAPI 3.1 that flare handlers can produce mechanically (paths,
@@ -20,6 +22,7 @@ Public re-exports:
 - :class:`OpenApiOperation` — per-method documentation.
 - :class:`OpenApiSpec` — the root document.
 - :func:`emit_openapi_json` — serialise a spec to JSON.
+- :func:`spec_from_router` — derive a spec from a runtime Router.
 """
 
 from .spec import (
@@ -31,3 +34,4 @@ from .spec import (
     OpenApiSpec,
     emit_openapi_json,
 )
+from .from_router import spec_from_router

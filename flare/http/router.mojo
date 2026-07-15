@@ -88,6 +88,26 @@ comptime _STAR: UInt8 = 42
 
 
 @always_inline
+def _segs_to_openapi_template(segs: List[_Segment]) -> String:
+    """Render compiled segments as an OpenAPI path template.
+
+    Literal -> verbatim; ``:name`` -> ``{name}``; wildcard ``*`` ->
+    ``{path}``. The empty segment list (root) renders as ``/``.
+    """
+    if len(segs) == 0:
+        return "/"
+    var out = String("")
+    for i in range(len(segs)):
+        out += "/"
+        if segs[i].kind == 0:
+            out += segs[i].text
+        elif segs[i].kind == 1:
+            out += "{" + segs[i].text + "}"
+        else:
+            out += "{path}"
+    return out^
+
+
 def _split_path(path: String) -> List[String]:
     """Split a path on ``/``. Drops empty segments produced by a
     leading or trailing ``/`` so ``"/users/"`` and ``"users"`` both
@@ -626,6 +646,29 @@ struct Router(Copyable, Defaultable, Handler, Movable):
         reg.serve_thunks.append(_struct_serve_thunk[_MountedRouter])
         reg.destroy_thunks.append(_struct_destroy_thunk[_MountedRouter])
         self._mounts.append(_Mount(psegs^, len(reg.addrs) - 1))
+
+    # ── Route introspection (OpenAPI derivation) ───────────────────────────────
+
+    def route_count(self) -> Int:
+        """Number of registered top-level routes (excludes mounts)."""
+        return len(self._routes)
+
+    def route_method(self, i: Int) -> String:
+        """HTTP method of route ``i`` (uppercase, e.g. ``GET``)."""
+        return self._routes[i].method
+
+    def route_openapi_template(self, i: Int) -> String:
+        """Route ``i``'s path as an OpenAPI template: ``:id`` -> ``{id}``,
+        wildcard ``*`` -> ``{path}`` (``/`` for the empty root)."""
+        return _segs_to_openapi_template(self._routes[i].segs)
+
+    def route_path_params(self, i: Int) -> List[String]:
+        """Names of route ``i``'s path parameters (``:name`` segments)."""
+        var out = List[String]()
+        for j in range(len(self._routes[i].segs)):
+            if self._routes[i].segs[j].kind == 1:
+                out.append(self._routes[i].segs[j].text)
+        return out^
 
     # ── Handler impl ─────────────────────────────────────────────────────────
 

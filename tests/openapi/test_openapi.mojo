@@ -3,6 +3,7 @@
 from std.testing import assert_equal, assert_true
 from json import loads
 
+from flare.http import Method, Request, Response, Router, ok
 from flare.openapi import (
     OpenApiOperation,
     OpenApiParameter,
@@ -10,7 +11,12 @@ from flare.openapi import (
     OpenApiResponse,
     OpenApiSpec,
     emit_openapi_json,
+    spec_from_router,
 )
+
+
+def _h(req: Request) raises -> Response:
+    return ok("x")
 
 
 def test_minimal_spec_round_trips_through_json_parser() raises:
@@ -105,9 +111,53 @@ def test_emitter_is_deterministic() raises:
     assert_equal(emit_openapi_json(s1), emit_openapi_json(s2))
 
 
+def test_spec_from_router_paths_and_params() raises:
+    """Deriving from a runtime Router yields the right templates, merged
+    methods per path, and path parameters."""
+    var r = Router()
+    r.get("/users", _h)
+    r.post("/users", _h)
+    r.get("/users/:id", _h)
+    r.get("/files/*", _h)
+
+    var spec = spec_from_router(r, String("Derived"), String("9.9"))
+    var s = emit_openapi_json(spec)
+    var j = loads(s)
+    assert_equal(j["info"]["title"].string_value(), String("Derived"))
+    var paths = j["paths"]
+
+    # /users carries both get and post operations.
+    var users = paths["/users"]
+    assert_true(users["get"].is_object())
+    assert_true(users["post"].is_object())
+
+    # :id -> {id} template with a required path parameter.
+    var by_id = paths["/users/{id}"]
+    var params = by_id["get"]["parameters"]
+    assert_equal(params[0]["name"].string_value(), String("id"))
+    assert_equal(params[0]["in"].string_value(), String("path"))
+
+    # Wildcard tail -> {path} template.
+    assert_true(paths["/files/{path}"]["get"].is_object())
+
+
+def test_spec_from_router_is_deterministic() raises:
+    var r1 = Router()
+    r1.get("/a", _h)
+    r1.post("/a", _h)
+    var r2 = Router()
+    r2.get("/a", _h)
+    r2.post("/a", _h)
+    var s1 = emit_openapi_json(spec_from_router(r1, String("A"), String("1")))
+    var s2 = emit_openapi_json(spec_from_router(r2, String("A"), String("1")))
+    assert_equal(s1, s2)
+
+
 def main() raises:
     test_minimal_spec_round_trips_through_json_parser()
     test_path_with_get_operation()
     test_json_escaping_preserves_special_chars()
     test_emitter_is_deterministic()
+    test_spec_from_router_paths_and_params()
+    test_spec_from_router_is_deterministic()
     print("test_openapi: OK")
