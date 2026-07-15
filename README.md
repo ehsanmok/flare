@@ -43,7 +43,7 @@ def main() raises:
 - **Composable by types, not callbacks:** `Handler` is a trait; `Router`, middleware, and typed extractors (`PathInt`, `Json[T]`, `Cookies`, ...) compose by nesting structs, monomorphised into one direct call sequence per request type with no virtual dispatch.
 - **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics, and an in-process `TestClient[H]`.
 - **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`); top-of-pack throughput with a p99 median that ties `actix_web` and beats `hyper` / `axum`, plus [match-or-beat-quiche on HTTP/3](#performance).
-- **Fuzzed:** 40 fuzz harnesses, 9M+ runs, zero known crashes; ASan + assert-mode coverage on every FFI boundary.
+- **Fuzzed:** 57 fuzz harnesses, 9M+ runs, zero known crashes; ASan + assert-mode coverage on every FFI boundary.
 
 ## Install
 
@@ -285,7 +285,7 @@ What jumps out:
 - **axum** is steady by design but the lowest headline of the four at `201,216 req/s`, tight everywhere except a `29.5 ms` σ at p99.99.
 - **flare 1w** edges nginx 1w by `2.8 %` (`79.0k` vs `76.9k req/s`) with an identical `3.23 ms` p99 median - on par at single-core load. Against Go `net/http` at the same worker count flare does `1.96x` the throughput with comparable tail medians.
 
-**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare HTTP/3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, HTTP/3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare HTTP/3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from new syscall batching (`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed without them). Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
+**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare HTTP/3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, HTTP/3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare HTTP/3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from egress syscall batching (ingress `recvmmsg` is built and default-on; egress `sendmmsg`/GSO are built in `flare.udp.batch` but not yet wired into QUIC egress - the gate closed without them). `quinn 0.11 + h3 0.0.8` is not a valid comparison at this workload shape (98% errored streams) and is excluded pending recalibration. Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
 
 The matching nginx / hyper / actix_web / axum baselines built from source by the harness live under [`benchmark/baselines/`](benchmark/baselines/).
 
@@ -340,9 +340,11 @@ flare.http.cache  RFC 9111 cache: CacheControl directive parser,
 flare.grpc     Sans-I/O gRPC codec primitives: LPM framing, canonical
                Status codes, Metadata carrier, plus the unary
                server adapter (`GrpcUnary` trait + `run_unary_call`)
-               that maps an HTTP/2 stream to a typed handler;
-               server-streaming + client-streaming + bidirectional
-               + the client side are in flight.
+               that maps an HTTP/2 stream to a typed handler. The
+               client ships (`GrpcClient`: unary + server-/client-
+               streaming + bidi) and a buffered server-streaming
+               adapter; `service` codegen, reflection descriptors,
+               and Health/Watch are in flight.
 flare.openapi  OpenAPI 3.1 spec model + deterministic JSON emitter
 flare.quic     Sans-I/O QUIC v1 codec primitives: varint + long/short
                packet headers, all 22 transport frames driven through
@@ -379,7 +381,7 @@ Each layer imports only from layers below it. No circular dependencies. The full
 
 ## Security
 
-Per-layer security posture and the sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights: RFC 7230 token validation, configurable size limits, sanitised 4xx/5xx bodies, TLS 1.2+ only, WebSocket frame masking + UTF-8 validation, 40 fuzz harnesses with 9M+ runs and zero known crashes.
+Per-layer security posture and the sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights: RFC 7230 token validation, configurable size limits, sanitised 4xx/5xx bodies, TLS 1.2+ only, WebSocket frame masking + UTF-8 validation, enforced HTTP/2 DoS caps (header-list / CONTINUATION / rapid-reset), client decompression-bomb cap, 57 fuzz harnesses with 9M+ runs and zero known crashes.
 
 For security issues, please open a private security advisory on GitHub or email the maintainer directly.
 
@@ -407,7 +409,7 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 | `tests` | `default` | Full unit + integration suite plus every example under [`examples/`](examples/) |
 | `format-check` / `format` | `default` / `dev` | `mojo format` over `flare`, `tests`, `benchmark`, `examples`, `fuzz` |
 | `docs` / `docs-build` | `dev` | mojodoc-rendered package docstring (live or static) |
-| `fuzz-all` | `fuzz` | Every harness in [`fuzz/`](fuzz/) (40 harnesses, 9M+ runs combined) |
+| `fuzz-all` | `fuzz` | Every harness in [`fuzz/`](fuzz/) (57 harnesses, 9M+ runs combined) |
 | `fuzz-<name>` / `prop-<name>` | `fuzz` | Single harness - see [`pixi.toml`](pixi.toml) for the full list |
 | `bench-vs-baseline-quick` | `bench` | flare vs Go `net/http`, throughput config (~7 min) |
 | `bench-vs-baseline` | `bench` | flare vs all baselines (Go, nginx, hyper, axum, actix_web), all configs |
@@ -419,7 +421,7 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 
 ```bash
 pixi run tests                                          # full suite + every example under examples/
-pixi run --environment fuzz fuzz-all                    # 40 harnesses
+pixi run --environment fuzz fuzz-all                    # 57 harnesses
 pixi run --environment bench bench-vs-baseline-quick    # ~7 min
 ```
 
