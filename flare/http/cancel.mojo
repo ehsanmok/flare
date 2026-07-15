@@ -241,3 +241,9 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
             unsafe_from_address=self._addr
         ).bitcast[Scalar[DType.int64]]()
         return Int(Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p))
+
+    def addr(read self) -> Int:
+        """Return the raw address of the backing cell (0 for the
+        ``never()`` sentinel). Used by the deadline watchdog to flip
+        this cell from another thread."""
+        return self._addr
