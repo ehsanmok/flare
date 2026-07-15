@@ -3,16 +3,20 @@
 from std.memory import Span
 from std.testing import assert_equal, assert_true, TestSuite
 
+from flare.grpc import GrpcCallContext, GrpcMetadata
 from flare.grpc.proto import ProtoReader, ProtoWriter, WIRE_LEN
 from flare.grpc.reflection import (
     REFLECT_ERROR_RESPONSE,
     REFLECT_FILE_BY_FILENAME,
+    REFLECT_FILE_CONTAINING_SYMBOL,
+    REFLECT_FILE_DESCRIPTOR_RESPONSE,
     REFLECT_LIST_SERVICES,
     REFLECT_LIST_SERVICES_RESPONSE,
+    ReflectionBidiHandler,
     ReflectionRequest,
     ReflectionService,
 )
-from flare.grpc.status import GRPC_STATUS_UNIMPLEMENTED
+from flare.grpc.status import GRPC_STATUS_NOT_FOUND, GRPC_STATUS_UNIMPLEMENTED
 
 
 def _request(field: Int, arg: String) raises -> List[UInt8]:
@@ -87,14 +91,85 @@ def test_list_services_response() raises:
     assert_equal(names[1], String("grpc.health.v1.Health"))
 
 
-def test_descriptor_request_returns_unimplemented() raises:
+def test_unregistered_descriptor_returns_not_found() raises:
     var svc = ReflectionService()
     svc.register(String("flare.sample.Greeter"))
     var req = _request(REFLECT_FILE_BY_FILENAME, String("sample.proto"))
     var resp = svc.answer(Span[UInt8, _](req))
-    assert_equal(_error_code(resp), GRPC_STATUS_UNIMPLEMENTED)
-    # No list_services payload on the error path.
+    assert_equal(_error_code(resp), GRPC_STATUS_NOT_FOUND)
     assert_equal(len(_service_names(resp)), 0)
+
+
+def _descriptor_bytes(response: List[UInt8]) raises -> List[UInt8]:
+    """Pull the FileDescriptorResponse.file_descriptor_proto (field 4 ->
+    inner field 1) out of a ServerReflectionResponse, or empty."""
+    var r = ProtoReader(Span[UInt8, _](response))
+    while r.has_more():
+        var tw = r.read_tag()
+        if tw[0] == REFLECT_FILE_DESCRIPTOR_RESPONSE and tw[1] == WIRE_LEN:
+            var fdr = r.read_bytes()
+            var fr = ProtoReader(Span[UInt8, _](fdr))
+            while fr.has_more():
+                var ftw = fr.read_tag()
+                if ftw[0] == 1 and ftw[1] == WIRE_LEN:
+                    return fr.read_bytes()
+                else:
+                    fr.skip(ftw[1])
+        else:
+            r.skip(tw[1])
+    return List[UInt8]()
+
+
+def test_file_by_filename_returns_descriptor() raises:
+    var svc = ReflectionService()
+    var fdp: List[UInt8] = [1, 2, 3, 4, 5]
+    var symbols = List[String]()
+    symbols.append(String("flare.sample.Greeter"))
+    svc.register_descriptor(String("sample.proto"), fdp^, symbols)
+    var req = _request(REFLECT_FILE_BY_FILENAME, String("sample.proto"))
+    var resp = svc.answer(Span[UInt8, _](req))
+    var got = _descriptor_bytes(resp)
+    assert_equal(len(got), 5)
+    assert_equal(got[0], UInt8(1))
+    assert_equal(got[4], UInt8(5))
+
+
+def test_file_containing_symbol_returns_descriptor() raises:
+    var svc = ReflectionService()
+    var fdp: List[UInt8] = [9, 8, 7]
+    var symbols = List[String]()
+    symbols.append(String("flare.sample.Greeter"))
+    svc.register_descriptor(String("sample.proto"), fdp^, symbols)
+    var req = _request(
+        REFLECT_FILE_CONTAINING_SYMBOL, String("flare.sample.Greeter")
+    )
+    var resp = svc.answer(Span[UInt8, _](req))
+    var got = _descriptor_bytes(resp)
+    assert_equal(len(got), 3)
+    assert_equal(got[0], UInt8(9))
+    # A symbol we did not register misses with NOT_FOUND.
+    var miss = _request(REFLECT_FILE_CONTAINING_SYMBOL, String("nope.Nope"))
+    var miss_resp = svc.answer(Span[UInt8, _](miss))
+    assert_equal(_error_code(miss_resp), GRPC_STATUS_NOT_FOUND)
+
+
+def test_bidi_handler_answers_each_message() raises:
+    var svc = ReflectionService()
+    svc.register(String("flare.sample.Greeter"))
+    var handler = ReflectionBidiHandler(svc^)
+    var msgs = List[List[UInt8]]()
+    msgs.append(_request(REFLECT_LIST_SERVICES, String("")))
+    msgs.append(_request(REFLECT_LIST_SERVICES, String("")))
+    var ctx = GrpcCallContext(
+        path=String("/grpc.reflection.v1alpha.ServerReflection/"),
+        deadline_us=UInt64(0),
+        initial_metadata=GrpcMetadata(),
+        accept_encoding=String(""),
+    )
+    var reply = handler.serve_bidi(ctx, msgs^)
+    assert_equal(len(reply.messages), 2)
+    assert_equal(len(_service_names(reply.messages[0])), 1)
+    assert_equal(len(_service_names(reply.messages[1])), 1)
 
 
 def main() raises:

@@ -79,10 +79,12 @@ from .proto import (
 )
 from .interceptor import GrpcInterceptor, Intercepted
 from .reflection import (
+    ReflectionBidiHandler,
     ReflectionRequest,
     ReflectionService,
     REFLECT_FILE_BY_FILENAME,
     REFLECT_FILE_CONTAINING_SYMBOL,
+    REFLECT_FILE_DESCRIPTOR_RESPONSE,
     REFLECT_LIST_SERVICES,
 )
 from .health import (

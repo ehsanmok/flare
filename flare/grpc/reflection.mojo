@@ -11,34 +11,30 @@ method ``ServerReflectionInfo`` -- each request message asks one of:
 
 This module ships the wire codec for the request / response messages
 and a :class:`ReflectionService` that answers ``list_services`` from a
-registered service-name list. Descriptor lookups return the reflection
-``ErrorResponse`` with ``UNIMPLEMENTED``.
+registered service-name list and ``file_by_filename`` /
+``file_containing_symbol`` from a registered ``FileDescriptorProto``
+registry (the blobs ``tools/proto_gen.py`` emits per ``.proto`` file).
+Lookups that miss return ``NOT_FOUND``. As a result ``grpcurl list``,
+``grpcurl describe``, and reflection-driven calls all work once the
+generated descriptors are registered.
 
-Only ``list_services`` is answered with data;
-``file_by_filename`` / ``file_containing_symbol`` return UNIMPLEMENTED.
-As a result, ``grpcurl list`` works, but ``grpcurl describe`` /
-``<call without -proto>`` does not -- those need serialized
-``FileDescriptorProto`` bytes. Supporting them would mean having
-``tools/proto_gen.py`` also emit a ``FileDescriptorProto`` blob per
-file and serve it here.
-
-This is the sans-I/O codec + a per-request answerer.
-``ServerReflectionInfo`` is bidi-streaming; wiring it onto a live
-server needs a bidi server adapter (the unary / server-streaming
-adapters in this package handle one request message), so it is not
-auto-mountable yet. That would take a ``GrpcBidi`` server adapter that
-feeds each inbound request message through :meth:`ReflectionService.
-answer` and frames each response as its own LPM frame.
+``ServerReflectionInfo`` is bidi-streaming;
+:class:`ReflectionBidiHandler` adapts :meth:`ReflectionService.answer`
+onto the :trait:`flare.grpc.GrpcBidiStreaming` server trait, so it is
+mountable via ``GrpcBidiService(ReflectionBidiHandler(svc))``.
 
 References:
 - https://github.com/grpc/grpc/blob/master/src/proto/grpc/reflection/v1alpha/reflection.proto
 """
 
-from std.collections import List
+from std.collections import Dict, List
 from std.memory import Span
 
+from .client_stream import GrpcBidiStreaming
 from .proto import ProtoReader, ProtoWriter, WIRE_LEN
-from .status import GRPC_STATUS_UNIMPLEMENTED
+from .server import GrpcCallContext
+from .server_stream import GrpcServerStreamReply
+from .status import GRPC_STATUS_NOT_FOUND, GRPC_STATUS_UNIMPLEMENTED
 
 
 # Reflection request oneof field numbers (message_request).
@@ -47,6 +43,7 @@ comptime REFLECT_FILE_CONTAINING_SYMBOL: Int = 4
 comptime REFLECT_LIST_SERVICES: Int = 7
 
 # Reflection response oneof field numbers (message_response).
+comptime REFLECT_FILE_DESCRIPTOR_RESPONSE: Int = 4
 comptime REFLECT_LIST_SERVICES_RESPONSE: Int = 6
 comptime REFLECT_ERROR_RESPONSE: Int = 7
 
@@ -88,21 +85,31 @@ struct ReflectionRequest(Copyable, Movable):
 
 
 struct ReflectionService(Copyable, Movable):
-    """Answers ``ServerReflectionInfo`` requests from a registered set
-    of service names.
+    """Answers ``ServerReflectionInfo`` requests.
 
-    Register every gRPC service path (``package.Service``) the server
-    mounts; :meth:`answer` then satisfies ``list_services`` and returns
-    ``UNIMPLEMENTED`` for descriptor lookups (see module ceiling).
+    Register every gRPC service path (``package.Service``) for
+    ``list_services``; register a serialized ``FileDescriptorProto`` per
+    ``.proto`` file (from :func:`tools.proto_gen` output) with its symbol
+    names for ``file_by_filename`` / ``file_containing_symbol``. Lookups
+    that miss return ``NOT_FOUND``.
     """
 
     var services: List[String]
+    var descriptors: Dict[String, List[UInt8]]
+    """filename -> serialized FileDescriptorProto bytes."""
+    var symbol_index: Dict[String, String]
+    """fully-qualified symbol (``pkg.Service`` / ``pkg.Message``) ->
+    the filename whose descriptor defines it."""
 
     def __init__(out self):
         self.services = List[String]()
+        self.descriptors = Dict[String, List[UInt8]]()
+        self.symbol_index = Dict[String, String]()
 
     def __init__(out self, *, copy: Self):
         self.services = copy.services.copy()
+        self.descriptors = copy.descriptors.copy()
+        self.symbol_index = copy.symbol_index.copy()
 
     def copy(self) -> Self:
         return Self(copy=self)
@@ -111,14 +118,27 @@ struct ReflectionService(Copyable, Movable):
         """Add a fully-qualified service name (``package.Service``)."""
         self.services.append(name)
 
+    def register_descriptor(
+        mut self,
+        filename: String,
+        var descriptor: List[UInt8],
+        symbols: List[String],
+    ):
+        """Register a serialized ``FileDescriptorProto`` under
+        ``filename`` and index every ``symbols`` entry (service / message
+        fully-qualified names) to it for ``file_containing_symbol``."""
+        for i in range(len(symbols)):
+            self.symbol_index[symbols[i]] = filename
+        self.descriptors[filename] = descriptor^
+
     def answer(self, request_bytes: Span[UInt8, _]) raises -> List[UInt8]:
         """Decode one ``ServerReflectionRequest`` and encode the
         matching ``ServerReflectionResponse`` bytes.
 
-        ``list_services`` returns a ``ListServiceResponse`` naming every
-        registered service. Every other arm returns an ``ErrorResponse``
-        carrying ``UNIMPLEMENTED`` -- the descriptor path is the
-        documented ceiling.
+        ``list_services`` names every registered service.
+        ``file_by_filename`` / ``file_containing_symbol`` return the
+        registered ``FileDescriptorProto`` (``NOT_FOUND`` on a miss). An
+        unrecognised arm returns ``UNIMPLEMENTED``.
         """
         var req = ReflectionRequest.decode(request_bytes)
         var w = ProtoWriter()
@@ -130,20 +150,48 @@ struct ReflectionService(Copyable, Movable):
                 REFLECT_LIST_SERVICES_RESPONSE,
                 Span[UInt8, _](self._list_services_response()),
             )
+        elif req.kind == REFLECT_FILE_BY_FILENAME:
+            self._write_descriptor(w, req.arg, req.arg in self.descriptors)
+        elif req.kind == REFLECT_FILE_CONTAINING_SYMBOL:
+            var fname = String("")
+            var found = req.arg in self.symbol_index
+            if found:
+                fname = self.symbol_index[req.arg]
+            self._write_descriptor(w, fname, found)
         else:
             w.write_message(
                 REFLECT_ERROR_RESPONSE,
                 Span[UInt8, _](
                     _error_response(
                         GRPC_STATUS_UNIMPLEMENTED,
-                        String(
-                            "reflection: descriptor responses not supported"
-                            " (list_services only)"
-                        ),
+                        String("reflection: unrecognised request"),
                     )
                 ),
             )
         return w.take()
+
+    def _write_descriptor(
+        self, mut w: ProtoWriter, filename: String, found: Bool
+    ) raises:
+        """Append a FileDescriptorResponse (field 4) for ``filename`` or a
+        NOT_FOUND error when the descriptor is not registered."""
+        if not found or filename not in self.descriptors:
+            w.write_message(
+                REFLECT_ERROR_RESPONSE,
+                Span[UInt8, _](
+                    _error_response(
+                        GRPC_STATUS_NOT_FOUND,
+                        String("reflection: descriptor not found"),
+                    )
+                ),
+            )
+            return
+        # FileDescriptorResponse { repeated bytes file_descriptor_proto = 1; }
+        var fw = ProtoWriter()
+        fw.write_bytes(1, Span[UInt8, _](self.descriptors[filename]))
+        w.write_message(
+            REFLECT_FILE_DESCRIPTOR_RESPONSE, Span[UInt8, _](fw.take())
+        )
 
     def _list_services_response(self) raises -> List[UInt8]:
         # ListServiceResponse { repeated ServiceResponse service = 1; }
@@ -154,6 +202,28 @@ struct ReflectionService(Copyable, Movable):
             sw.write_string(1, self.services[i])
             lw.write_message(1, Span[UInt8, _](sw.take()))
         return lw.take()
+
+
+@fieldwise_init
+struct ReflectionBidiHandler(Copyable, GrpcBidiStreaming, Movable):
+    """Bidi adapter that runs every inbound ``ServerReflectionRequest``
+    through :meth:`ReflectionService.answer`, framing each response as
+    its own LPM frame. Mount via
+    ``GrpcBidiService(ReflectionBidiHandler(svc))`` on
+    ``/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo``.
+    """
+
+    var service: ReflectionService
+
+    def serve_bidi(
+        mut self,
+        ctx: GrpcCallContext,
+        messages: List[List[UInt8]],
+    ) raises -> GrpcServerStreamReply:
+        var outs = List[List[UInt8]]()
+        for i in range(len(messages)):
+            outs.append(self.service.answer(Span[UInt8, _](messages[i])))
+        return GrpcServerStreamReply.ok(outs^)
 
 
 def _error_response(code: Int, message: String) raises -> List[UInt8]:
