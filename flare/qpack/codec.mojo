@@ -47,7 +47,7 @@ References:
 - RFC 7541 Appendix B (Huffman -- shared with HPACK).
 """
 
-from std.collections import List
+from std.collections import Dict, List
 from std.memory import Span
 
 from flare.http.proto.ascii import ascii_unchecked_string
@@ -150,24 +150,40 @@ def encode_field_section(
     # instead of rebuilding all 99 entries inside static_table_find
     # / static_table_find_name on every header.
     var stbl = _qpack_static_table()
+    # Index the static table by header name once (name -> ascending
+    # list of static indices) so per-header matching is O(1) hash +
+    # a short same-name scan instead of two O(99) linear passes per
+    # header (Part II item 6). Indices are appended in ascending j
+    # order, preserving the "lowest index wins" semantics the linear
+    # scan had for both exact (name+value) and name-only matches.
+    var name_to_indices = Dict[String, List[Int]]()
+    for j in range(QPACK_STATIC_TABLE_SIZE):
+        var nm = stbl[j].name
+        if nm in name_to_indices:
+            name_to_indices[nm].append(j)
+        else:
+            var lst = List[Int]()
+            lst.append(j)
+            name_to_indices[nm] = lst^
     for i in range(len(headers)):
         var h = headers[i].copy()
         var idx = -1
-        for j in range(QPACK_STATIC_TABLE_SIZE):
-            if stbl[j].name == h.name and stbl[j].value == h.value:
-                idx = j
-                break
+        var name_idx = -1
+        if h.name in name_to_indices:
+            ref cands = name_to_indices[h.name]
+            # Lowest-index entry with this name (name-only fallback).
+            name_idx = cands[0]
+            # Lowest-index entry with this name AND matching value.
+            for k in range(len(cands)):
+                if stbl[cands[k]].value == h.value:
+                    idx = cands[k]
+                    break
         if idx >= 0:
             # 4.5.2 Indexed Field Line: 1Txxxxxx, T=1 for static,
             # 6-bit prefix integer for the index. Prefix byte
             # 0xC0 carries the high "1T" bits.
             encode_integer(out, idx, 6, UInt8(0xC0))
             continue
-        var name_idx = -1
-        for j in range(QPACK_STATIC_TABLE_SIZE):
-            if stbl[j].name == h.name:
-                name_idx = j
-                break
         if name_idx >= 0:
             # 4.5.4 Literal Field Line With Name Reference:
             # 01NTxxxx, T=1 for static, 4-bit prefix index.
