@@ -482,6 +482,7 @@ test-error-sanitise  = "mojo -I . tests/http/test_server_error_sanitisation.mojo
 test-cancel          = "mojo -I . tests/http/test_cancel.mojo"                     # v0.5.0 Step 1 — Cancel / CancelHandler / WithCancel (~14 tests)
 test-streaming-server = "mojo -I . tests/http/test_streaming_server.mojo"          # v0.9 A1 — StreamHandler / StreamConn typed lifecycle (loopback, ~2 tests)
 test-streaming-reactor = "mojo -I . tests/http/test_streaming_server_reactor.mojo" # v0.9 A2 — HttpServer.serve_streaming reactor loop (fork e2e, ~2 tests)
+test-streaming-multicore = "mojo -I . tests/http/test_streaming_multicore.mojo" # v0.9 — HttpServer.serve_streaming(num_workers=N) multi-worker fan-out (fork e2e)
 test-streaming-upstream = "mojo -I . tests/http/test_streaming_upstream.mojo"      # v0.9 A4 — attach_upstream / on_upstream pump (fork e2e, ~2 tests)
 test-async-source    = "mojo -I . tests/http/test_async_chunk_source.mojo"         # v0.9 B1 — AsyncChunkSource/ChunkPoll/UpstreamChunkSource (fork loopback + reactor e2e)
 test-backpressure    = "mojo -I . tests/http/test_backpressure.mojo"               # v0.9 B2 — hi/lo watermark hysteresis + slow-client soak (no drop)

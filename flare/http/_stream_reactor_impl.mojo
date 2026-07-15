@@ -219,10 +219,72 @@ def run_stream_reactor_loop[
         retry_after_s: ``Retry-After`` seconds advertised in the 503.
     """
     listener._socket.set_nonblocking(True)
-    var listen_fd = Int(listener._socket.fd)
+    _run_stream_loop_impl[H, is_shared=False](
+        Int(listener._socket.fd),
+        handler,
+        stopping,
+        poll_timeout_ms,
+        max_in_flight,
+        retry_after_s,
+    )
 
+
+def run_stream_reactor_loop_shared[
+    H: StreamHandler
+](
+    listener_fd: Int,
+    mut handler: H,
+    ref stopping: Bool,
+    stats_addr: Int = 0,
+    poll_timeout_ms: Int = 100,
+    max_in_flight: Int = 0,
+    retry_after_s: Int = 1,
+) raises:
+    """Multi-worker streaming reactor loop sharing a borrowed listener fd.
+
+    The scheduler-driven twin of :func:`run_stream_reactor_loop`: each
+    worker calls this with the same (or a per-worker SO_REUSEPORT)
+    ``listener_fd`` and its own ``handler`` copy + heap ``stopping``
+    flag, mirroring :func:`run_reactor_loop_shared` on the Handler path.
+    The listener is registered with ``EPOLLEXCLUSIVE`` so a shared fd
+    wakes one worker per accept event; per-worker SO_REUSEPORT fds also
+    work (the exclusive flag is a harmless no-op there).
+
+    ``stats_addr`` is accepted for :trait:`flare.runtime.Frontend`
+    signature parity; the streaming loop does not publish per-worker
+    stats yet (documented ceiling).
+    """
+    _run_stream_loop_impl[H, is_shared=True](
+        listener_fd,
+        handler,
+        stopping,
+        poll_timeout_ms,
+        max_in_flight,
+        retry_after_s,
+    )
+
+
+def _run_stream_loop_impl[
+    H: StreamHandler, *, is_shared: Bool
+](
+    listen_fd: Int,
+    mut handler: H,
+    ref stopping: Bool,
+    poll_timeout_ms: Int,
+    max_in_flight: Int,
+    retry_after_s: Int,
+) raises:
+    """Shared body for the streaming reactor loop (single- and
+    multi-worker). ``is_shared`` picks ``register_exclusive`` (shared
+    listener) vs plain ``register`` for the listener fd."""
     var reactor = Reactor()
-    reactor.register(c_int(listen_fd), UInt64(listen_fd), INTEREST_READ)
+
+    comptime if is_shared:
+        reactor.register_exclusive(
+            c_int(listen_fd), UInt64(listen_fd), INTEREST_READ
+        )
+    else:
+        reactor.register(c_int(listen_fd), UInt64(listen_fd), INTEREST_READ)
 
     var conns = Dict[Int, StreamConn]()
     var interests = Dict[Int, Int]()

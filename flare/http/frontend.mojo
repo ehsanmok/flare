@@ -34,8 +34,10 @@ from flare.http._server_reactor_impl import (
     run_reactor_loop_static_shared,
     run_uring_bufring_reactor_loop_shared,
 )
+from flare.http._stream_reactor_impl import run_stream_reactor_loop_shared
 from flare.http._unified_reactor_impl import run_unified_reactor_loop_shared
 from flare.http.static_response import StaticResponse
+from flare.http.streaming_server import StreamHandler
 from flare.http2.server import Http2Config
 from flare.runtime.frontend import Frontend
 from flare.runtime.uring_reactor import use_uring_backend
@@ -143,6 +145,53 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
                     stopping,
                     stats_addr,
                 )
+        except:
+            pass
+
+
+struct StreamFrontend[H: StreamHandler & Copyable](Copyable, Frontend, Movable):
+    """Typed-streaming frontend for the multicore scheduler.
+
+    The :trait:`StreamHandler` twin of :class:`HttpFrontend`: carries a
+    per-worker streaming handler + admission-control knobs and drives
+    :func:`run_stream_reactor_loop_shared` on each worker's listener fd.
+    Copied once per worker before pthread spawn (the ``H: Copyable``
+    bound); expensive shared state should sit behind an
+    :class:`UnsafePointer` so the per-worker copy stays cheap.
+    """
+
+    var handler: Self.H
+    var max_in_flight: Int
+    var retry_after_s: Int
+
+    def __init__(
+        out self,
+        var handler: Self.H,
+        max_in_flight: Int = 0,
+        retry_after_s: Int = 1,
+    ):
+        self.handler = handler^
+        self.max_in_flight = max_in_flight
+        self.retry_after_s = retry_after_s
+
+    def requires_per_worker_listener(self) -> Bool:
+        """Streaming is fine with either listener strategy (honours the
+        ``FLARE_REUSEPORT_WORKERS`` knob via the scheduler)."""
+        return False
+
+    def run_worker(
+        mut self, listener_fd: Int, mut stopping: Bool, stats_addr: Int
+    ):
+        """Drive the shared streaming reactor loop."""
+        try:
+            run_stream_reactor_loop_shared[Self.H](
+                listener_fd,
+                self.handler,
+                stopping,
+                stats_addr=stats_addr,
+                max_in_flight=self.max_in_flight,
+                retry_after_s=self.retry_after_s,
+            )
         except:
             pass
 

@@ -760,6 +760,79 @@ struct HttpServer(Movable):
             retry_after_s=retry_after_s,
         )
 
+    def serve_streaming[
+        H: StreamHandler & Copyable
+    ](
+        mut self,
+        var handler: H,
+        num_workers: Int,
+        pin_cores: Bool = True,
+        max_in_flight: Int = 0,
+        retry_after_s: Int = 1,
+    ) raises:
+        """Multi-worker streaming reactor (N pthreads over the scheduler).
+
+        The :trait:`StreamHandler` twin of ``serve(handler, num_workers)``:
+        each worker runs its own copy of ``handler`` on its own reactor +
+        connection table (state is fully per-worker; the ``H: Copyable``
+        bound clones the handler once per worker before spawn). Listener
+        sharing (per-worker SO_REUSEPORT vs one EPOLLEXCLUSIVE fd) is the
+        scheduler's decision via ``FLARE_REUSEPORT_WORKERS``.
+
+        ``num_workers <= 1`` falls through to the single-worker loop.
+        Single-listener only: ``bind_many`` extra listeners are rejected
+        (multi-worker uses SO_REUSEPORT, not multi-address).
+        """
+        if num_workers <= 1:
+            self.serve_streaming[H](
+                handler^,
+                max_in_flight=max_in_flight,
+                retry_after_s=retry_after_s,
+            )
+            return
+        if len(self._extra_listener_fds) > 0:
+            raise Error(
+                "HttpServer.serve_streaming multi-worker is single-listener"
+                " only; bind with HttpServer.bind (not bind_many)."
+            )
+        self._serve_streaming_multicore[H](
+            handler^, num_workers, pin_cores, max_in_flight, retry_after_s
+        )
+
+    def _serve_streaming_multicore[
+        H: StreamHandler & Copyable
+    ](
+        mut self,
+        var handler: H,
+        num_workers: Int,
+        pin_cores: Bool,
+        max_in_flight: Int,
+        retry_after_s: Int,
+    ) raises:
+        """Internal: run the multicore streaming path (mirror of
+        :meth:`_serve_multicore` with a :class:`StreamFrontend`)."""
+        from ..runtime import Scheduler
+        from .frontend import StreamFrontend
+
+        var addr = self._listener.local_addr()
+        self._listener.close()
+        self._stopping = False
+
+        var frontend = StreamFrontend[H](
+            handler^,
+            max_in_flight=max_in_flight,
+            retry_after_s=retry_after_s,
+        )
+        var scheduler = Scheduler[StreamFrontend[H]].start(
+            addr=addr,
+            frontend=frontend^,
+            num_workers=num_workers,
+            pin_cores=pin_cores,
+        )
+        while not self._stopping and scheduler.is_running():
+            _ = libc_nanosleep_ms(50)
+        scheduler.shutdown()
+
     def serve[
         H: Handler & Copyable
     ](
