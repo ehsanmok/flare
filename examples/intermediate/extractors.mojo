@@ -34,6 +34,7 @@ from flare.http import (
     HeaderStr,
     Router,
     Extracted,
+    State,
 )
 from flare.http.handler import HandlerExtractor
 
@@ -89,6 +90,30 @@ struct GetUser(HandlerExtractor):
         )
 
 
+# ── Shape 3: State[T] — registration-time state beside extractors ──────────
+
+
+@fieldwise_init
+struct GreetUser(HandlerExtractor):
+    """Mixes a request-derived extractor (``id``) with a
+    registration-time ``State[String]`` (a stand-in for a DB pool /
+    config handle). ``Extracted[H]`` copies the registered prototype
+    per request, so ``greeting`` survives while ``id`` is filled from
+    the path -- the analogue of axum's ``State(db)`` next to
+    ``Path(id)``.
+    """
+
+    var id: PathInt["id"]
+    var greeting: State[String]
+
+    def __init__(out self):
+        self.id = PathInt["id"]()
+        self.greeting = State[String]()
+
+    def serve(self, req: Request) raises -> Response:
+        return ok(self.greeting.value + " user " + String(self.id.value))
+
+
 def main() raises:
     print("=" * 60)
     print("flare example 19 — Typed extractors")
@@ -128,6 +153,17 @@ def main() raises:
     bad.headers.set("Authorization", "Bearer x")
     var bad_resp = router.serve(bad)
     print("router GET /users/abc err →", bad_resp.status, bad_resp.text())
+
+    # Shape 3 — State[T]: build a prototype, set its registration-time
+    # state, and register it. The state flows into every request while
+    # the PathInt is populated from the path.
+    var proto = GreetUser()
+    proto.greeting = State[String]("hello")
+    var stateful = Router()
+    stateful.get("/greet/:id", Extracted[GreetUser](proto^))
+    var r4 = Request.test_get("/greet/7")
+    var resp4 = stateful.serve(r4)
+    print("router GET /greet/7 →", resp4.status, resp4.text())
 
     print()
     print("OK.")

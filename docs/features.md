@@ -61,7 +61,8 @@ an example file. For layering and the request lifecycle, see
 | `.with_redirect_policy(...)` — `RedirectPolicy.follow_all()` / `.same_origin_only()` / `.deny()` factories; modes on `RedirectMode.FOLLOW_ALL` / `.SAME_ORIGIN_ONLY` / `.DENY`; `TooManyRedirects` error | `flare.http.{redirect_policy,error}` |
 | `.with_cookies()` — pointer-backed `CookieStore` cookie jar; captures `Set-Cookie` and replays matching cookies on subsequent requests | [`tests/http/test_cookie_store.mojo`](../tests/http/test_cookie_store.mojo) |
 | `.with_retry(RetryPolicy)` — bounded retry + backoff for idempotent requests | [`tests/http/test_client_ux.mojo`](../tests/http/test_client_ux.mojo) |
-| `auto_decompress=True` (default) — transparent response body decompression (gzip / brotli) driven by `Content-Encoding` | [`tests/http/test_client_ux.mojo`](../tests/http/test_client_ux.mojo) |
+| `auto_decompress=True` (default) — transparent response body decompression (gzip / deflate / brotli) driven by `Content-Encoding`, bounded by a 16 MiB decompressed-size cap (zip-bomb guard) tunable via `.with_max_decompressed_bytes(n)` | [`tests/http/test_http.mojo`](../tests/http/test_http.mojo) |
+| `RequestBuilder(method, url)` — per-request method / headers / query / typed body; `MultipartFormBuilder` assembles `multipart/form-data` bodies (RFC 7578) client-side | [`tests/http/test_multipart_builder.mojo`](../tests/http/test_multipart_builder.mojo) |
 | `HttpClient.send_chunked(method, url, source)` — streaming request upload from a `ChunkSource` via chunked transfer-encoding (one chunk in flight, body never materialized) | [`tests/http/test_client_stream_upload.mojo`](../tests/http/test_client_stream_upload.mojo) |
 | Module-level helpers: `get`, `post`, `put`, `patch`, `delete`, `head` — `post` with `String` body sets `Content-Type: application/json` automatically | `flare.http.client` |
 | `Auth`, `BasicAuth(user, pass)`, `BearerAuth(token)` — both wires | `flare.http.auth` |
@@ -111,7 +112,8 @@ Extractor traits + reflective adapter:
 | Surface | What it does | Where |
 |---|---|---|
 | `Extractor` trait | Anything that pulls a value from a `Request` | `flare.http.extract` |
-| `Extracted[H]` | Reflects on a struct's fields, runs every extractor before `serve`; malformed input becomes a sanitised 400 | [`extractors.mojo`](../examples/intermediate/extractors.mojo) |
+| `Extracted[H]` | Reflects on a struct's fields, runs every extractor before `serve`; malformed input becomes a sanitised 400. Copies a registration-time prototype per request, so pre-set fields survive | [`extractors.mojo`](../examples/intermediate/extractors.mojo) |
+| `State[T]` | No-op extractor field carrying registration-time state (DB pool, config, cache) alongside request-derived extractors -- the analogue of axum's `State(db)`. Set it on a prototype `H`, then `Extracted[H](proto^)` | [`extractors.mojo`](../examples/intermediate/extractors.mojo) |
 
 Custom types are handled by writing your own `Extractor` struct
 that pulls and validates the value from the request. The
@@ -135,6 +137,8 @@ by nesting structs:
 | `FileServer.new(root)` | Static file serving with GET / HEAD + RFC 9110 §14.4 single-Range, MIME inference, path safety (`..` / NUL / absolute path rejection), `index.html` directory fall-through | [`static_files.mojo`](../examples/intermediate/static_files.mojo) |
 | `Retry[Inner]` + `RetryPolicy` | Re-invoke the inner handler up to `max_attempts` times on 5xx; RFC 9110 §9.2.2 idempotent-method gate on by default (GET / HEAD / PUT / DELETE / OPTIONS retry; POST / PATCH pass through once unless `retry_only_idempotent` is `False`). Optional exponential backoff with jitter via `RetryPolicy(backoff_base_ms, backoff_max_ms, backoff_jitter_ms)` | [`reliability.mojo`](../examples/intermediate/reliability.mojo) |
 | `PostHocDeadline[Inner]` | **Post-hoc** wall-clock guard: invokes the inner handler synchronously, then if the elapsed time exceeds `budget_ms`, replaces the response with a sanitised 504. Does **not** cancel the inner handler mid-execution -- it only refuses the response that was produced too late. `budget_ms <= 0` is the explicit "disabled" sentinel that always trips 504. The cancel-cell wiring that would let the deadline preempt the inner handler is a future addition. | [`reliability.mojo`](../examples/intermediate/reliability.mojo) |
+| `RateLimit[Inner]` | Token-bucket admission gate: admits `rate_per_sec` req/s with a `burst` depth, rejects with `429 Too Many Requests` once the bucket is empty (inner handler never invoked on rejection). `rate_per_sec <= 0` disables it | [`reliability.mojo`](../examples/intermediate/reliability.mojo) |
+| `CircuitBreaker[Inner]` | Opens after `failure_threshold` consecutive failures (5xx or raise), fast-fails with `503` for `cooldown_ms`, then a half-open probe; success closes it. `failure_threshold <= 0` disables it | [`reliability.mojo`](../examples/intermediate/reliability.mojo) |
 | `negotiate_encoding(Accept-Encoding) -> Encoding` | RFC 9110 §12.5.3 q-value parser exposed for direct use | `flare.http.middleware` |
 
 ## HTTP caching (RFC 9111)
@@ -170,7 +174,7 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 | Surface | Where |
 |---|---|
 | `FormData`, `parse_form_urlencoded`, `urldecode`, `urlencode`, `Form` extractor | [`forms.mojo`](../examples/intermediate/forms.mojo) |
-| `MultipartPart`, `MultipartForm`, `parse_multipart_form_data`, `Multipart` extractor | [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo) |
+| `MultipartPart`, `MultipartForm`, `parse_multipart_form_data`, `Multipart` extractor (server parse); `MultipartFormBuilder` (client build) | [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo) |
 | `Url`, `UrlParseError` — URL parser, percent decoding | `flare.http.url` |
 | `Encoding` enum, `compress_gzip` / `decompress_gzip`, `compress_brotli` / `decompress_brotli`, `decompress_deflate` | [`encoding.mojo`](../examples/basic/encoding.mojo), [`brotli.mojo`](../examples/intermediate/brotli.mojo) |
 | `decode_content("br" / "gzip" / "deflate" / "identity", ...)` | `flare.http.encoding` |
@@ -578,3 +582,4 @@ Per-harness breakdown (input → fuzzer):
 | QUIC Connection ID dispatch (`ConnectionIdTable.lookup` on arbitrary bytes) | `fuzz-quic-connection-id` |
 | HTTP/3 server end-to-end (request stream feed → handler → response writer) | `fuzz-h3-server` |
 | Cache-Control header parser (idempotent re-parse) | `fuzz-cache-control-parser` |
+| Alt-Svc response-header parser (RFC 7838, idempotent re-parse) | `fuzz-alt-svc-parser` |

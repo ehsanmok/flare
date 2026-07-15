@@ -40,8 +40,8 @@ basics.
 
 | File | What it shows |
 |---|---|
-| [`extractors.mojo`](../examples/intermediate/extractors.mojo) | Typed extractors: `Path[T, name]`, `Query`, `Header`, `Json[T]`, and reflective `Extracted[H]` auto-injection |
-| [`state.mojo`](../examples/intermediate/state.mojo) | `App[Counters]` + typed `State[T]` injected into a middleware handler |
+| [`extractors.mojo`](../examples/intermediate/extractors.mojo) | Typed extractors (`PathInt`, `QueryStr`, `HeaderStr`, ...), reflective `Extracted[H]` auto-injection, and `State[T]` registration-time injection alongside request extractors |
+| [`state.mojo`](../examples/intermediate/state.mojo) | Shared application state via a captured wrapping `Handler` (a `Counters` snapshot tagged onto responses) -- the no-injection pattern; for injected state beside extractors see `State[T]` in `extractors.mojo` |
 | [`middleware.mojo`](../examples/intermediate/middleware.mojo) | Middleware composition (outside-in): `RequestID` → `Logger` → `Timing` → `Recover` → `RequireAuth` → `Router` |
 | [`middleware_stack.mojo`](../examples/intermediate/middleware_stack.mojo) | `Logger` + `RequestId` + `Compress` + `CatchPanic` chain |
 | [`multicore.mojo`](../examples/intermediate/multicore.mojo) | `HttpServer.serve(..., num_workers=default_worker_count())` |

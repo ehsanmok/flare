@@ -1,6 +1,7 @@
-"""Reliability middleware — Retry[Inner] + PostHocDeadline[Inner].
+"""Reliability middleware — Retry / PostHocDeadline / RateLimit /
+CircuitBreaker.
 
-Shows how to wrap a handler with two production-grade reliability
+Shows how to wrap a handler with production-grade reliability
 primitives:
 
 - ``Retry[Inner]`` re-invokes the inner handler up to
@@ -24,13 +25,29 @@ primitives:
   remains bound to ``flare.net.error.Timeout`` (the I/O timeout
   error type).
 
+- ``RateLimit[Inner]`` is a token-bucket admission gate: it admits up
+  to ``rate_per_sec`` requests/second with a ``burst`` depth, and
+  short-circuits with ``429 Too Many Requests`` once the bucket is
+  empty (the inner handler is never invoked on a rejected request).
+
+- ``CircuitBreaker[Inner]`` opens after ``failure_threshold``
+  consecutive failures (a 5xx response or a raised exception),
+  fast-failing with ``503`` for ``cooldown_ms`` before letting a
+  single probe through (half-open); a success closes it again.
+
 Pure construction — no live network. Run:
 
     pixi run example-reliability
 """
 
 from flare.http import Handler, Request, Response
-from flare.http.reliability import Retry, RetryPolicy, PostHocDeadline
+from flare.http.reliability import (
+    CircuitBreaker,
+    PostHocDeadline,
+    RateLimit,
+    Retry,
+    RetryPolicy,
+)
 
 
 @fieldwise_init
@@ -129,3 +146,22 @@ def main() raises:
     var bounded_ok = PostHocDeadline(OkHandler(), budget_ms=30_000)
     var resp4 = bounded_ok.serve(req)
     print("PostHocDeadline / 30s       status:", resp4.status)
+
+    # 6. RateLimit token bucket: rate 1/s, burst 2. Two rapid requests
+    # drain the bucket (200, 200); the third is rejected with 429
+    # without ever reaching the inner handler.
+    var limited = RateLimit(OkHandler(), rate_per_sec=1, burst=2)
+    print("RateLimit / req 1   status:", limited.serve(req).status)
+    print("RateLimit / req 2   status:", limited.serve(req).status)
+    print("RateLimit / req 3   status:", limited.serve(req).status)
+
+    # 7. CircuitBreaker: opens after 2 consecutive 5xx. The first two
+    # calls hit the flaky inner (503, 503) and trip the breaker; the
+    # third fast-fails with 503 during the cooldown without invoking
+    # the inner.
+    var breaker = CircuitBreaker(
+        FlakyHandler(), failure_threshold=2, cooldown_ms=60_000
+    )
+    print("CircuitBreaker / call 1  status:", breaker.serve(req).status)
+    print("CircuitBreaker / call 2  status:", breaker.serve(req).status)
+    print("CircuitBreaker / open    status:", breaker.serve(req).status)
