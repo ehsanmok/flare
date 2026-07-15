@@ -351,6 +351,7 @@ test-quic-packet     = "mojo -I . tests/quic/test_packet.mojo"           # RFC 9
 test-quic-frame      = "mojo -I . tests/quic/test_frame.mojo"            # RFC 9000 §19 transport-frame codec, all 22 frame types (~26 cases)
 test-quic-transport-params = "mojo -I . tests/quic/test_transport_params.mojo"  # RFC 9000 §18 transport-parameter codec (~10 cases)
 test-quic-retry      = "mojo -I . tests/quic/test_retry.mojo"            # v0.9 - RFC 9000 Retry/VN packets + RFC 9001 A.4 integrity tag + HMAC token (8 cases)
+test-quic-retry-server = "mojo -I . tests/quic/test_quic_retry_server.mojo"  # v0.9 - server Retry issuance + token validate over loopback UDP
 test-quic-crypto     = "mojo -I . tests/quic/test_crypto.mojo"           # RFC 9001 §5.2 initial-secret HKDF math + QuicCrypto trait surface (~11 cases)
 test-quic-aead-ffi   = "mojo -I . tests/quic/test_aead_ffi.mojo"         # RFC 9001 §5.3 AEAD FFI round-trip + tamper-detection (10 cases)
 test-quic-hp-mask-ffi = "mojo -I . tests/quic/test_hp_mask_ffi.mojo"     # RFC 9001 §5.4 HP mask FFI vs Appendix A.2 + A.5 vectors (5 cases)

@@ -119,6 +119,20 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
     clock-skew while bounding memory. Only matters when 0-RTT is
     enabled (``rustls_config`` issues 0-RTT-capable tickets)."""
 
+    var require_address_validation: Bool
+    """RFC 9000 sec 8.1: when ``True``, the server answers a token-less
+    Initial with a Retry packet (address-validation round-trip) instead
+    of accepting immediately, and only accepts an Initial whose token
+    validates. Default ``False`` (accept on first Initial) -- flip on
+    under load / DDoS to force every new client to prove its source
+    address before the server commits handshake state."""
+
+    var retry_token_max_age_ms: UInt64
+    """Maximum age (ms) a Retry token is accepted after issuance.
+    Default: 10_000 ms (10 s) -- long enough for a client RTT + retry,
+    short enough to bound replay. Only consulted when
+    :attr:`require_address_validation` is set."""
+
     def __init__(out self):
         self.host = String("0.0.0.0")
         self.port = UInt16(0)
@@ -131,6 +145,8 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
         self.initial_max_streams_uni = UInt64(3)
         self.local_cid_length = 8
         self.early_data_strike_window_ms = UInt64(10_000)
+        self.require_address_validation = False
+        self.retry_token_max_age_ms = UInt64(10_000)
 
 
 # -- Per-connection driver ----------------------------------------------

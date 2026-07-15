@@ -69,6 +69,7 @@ from .frame import (
 )
 from .packet import (
     ConnectionId,
+    InitialExtras,
     LongHeader,
     MAX_CID_LENGTH,
     PACKET_TYPE_INITIAL,
@@ -119,6 +120,11 @@ from ..tls._rustls_quic_ffi import (
     _do_take_crypto,
 )
 from .packet import encode_short_header
+from .retry import (
+    encode_retry_packet,
+    mint_retry_token,
+    validate_retry_token,
+)
 from ._server_0rtt import (
     EarlyDataReplayGuard,
     EarlyDataStrikeSet,
@@ -352,6 +358,11 @@ struct QuicListener(Movable):
     stored the token (issued via NEW_CONNECTION_ID) recognizes the reset,
     yet unguessable without the key. The same key signs every issued
     token and every emitted stateless reset, so they always match."""
+    var _retry_key: List[UInt8]
+    """Listener-wide static key (32 bytes from urandom) for HMAC Retry
+    tokens (RFC 9000 sec 8.1 address validation). Only used when
+    :attr:`QuicServerConfig.require_address_validation` is set; signs
+    every minted token and validates every replayed one."""
     var _socket: UdpSocket
     var _local_addr: SocketAddr
     var _stopping: Bool
@@ -402,6 +413,7 @@ struct QuicListener(Movable):
         )
         self.timer_wheel = TimerWheel(now_ms=UInt64(0))
         self._reset_key = _random_bytes(32)
+        self._retry_key = _random_bytes(32)
         self._socket = sock^
         self._local_addr = addr
         self._stopping = False
@@ -1332,8 +1344,60 @@ struct QuicListener(Movable):
         if slot >= 0:
             return slot
         if lh.packet_type == PACKET_TYPE_INITIAL:
+            if self.config.require_address_validation:
+                if self._retry_gate(lh, datagram, peer):
+                    # A Retry was issued, or the token was absent/invalid:
+                    # do not commit handshake state for this datagram.
+                    return -1
             return self._accept_initial(lh, peer)
         return -1
+
+    def _retry_gate(
+        mut self, lh: LongHeader, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises -> Bool:
+        """RFC 9000 sec 8.1 address-validation gate for an unknown-DCID
+        Initial. Returns ``True`` when the caller must NOT accept
+        (a Retry was sent, or the token was missing / invalid); ``False``
+        when a valid token cleared the client to be accepted.
+
+        Token-less Initial -> mint an HMAC token bound to the peer address
+        + original DCID and answer with a Retry (the client re-sends its
+        Initial carrying the token + the server's new DCID). Tokened
+        Initial -> validate; a good token accepts, a bad / expired one is
+        dropped. The Retry datagram is tiny relative to the >=1200-byte
+        Initial that triggered it, so it is inherently within the RFC 9000
+        sec 8.1 3x anti-amplification limit.
+        """
+        var addr_bytes = List[UInt8](String(peer).as_bytes())
+        var now = _monotonic_ms()
+        var extras: InitialExtras
+        try:
+            extras = parse_initial_extras(datagram, lh.payload_offset)
+        except:
+            return True  # malformed Initial -> drop
+        if len(extras.token) == 0:
+            try:
+                var token = mint_retry_token(
+                    self._retry_key, addr_bytes, lh.dcid, now
+                )
+                var scid = ConnectionId(
+                    bytes=_random_bytes(self.config.local_cid_length)
+                )
+                var retry = encode_retry_packet(
+                    lh.version, lh.scid, scid, token, lh.dcid
+                )
+                _ = self.send_to(Span[UInt8, _](retry), peer)
+            except:
+                pass  # best-effort; a failed Retry just drops the Initial
+            return True
+        var odcid = validate_retry_token(
+            self._retry_key,
+            extras.token,
+            addr_bytes,
+            now,
+            self.config.retry_token_max_age_ms,
+        )
+        return not odcid  # valid token -> accept (False); else drop (True)
 
     def _dispatch_short(
         mut self, datagram: Span[UInt8, _], peer: SocketAddr
