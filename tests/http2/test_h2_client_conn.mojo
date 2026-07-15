@@ -537,6 +537,42 @@ def test_oversized_headers_split_across_continuation() raises:
     assert_true(last_was_end_headers)
 
 
+def test_pending_body_drains_on_window_update() raises:
+    """A body larger than the send window is partially sent and the
+    remainder stashed; the server's WINDOW_UPDATE (auto-emitted on
+    DATA receipt) reopens the window and the client drains the rest,
+    so the server reassembles the full body (RFC 9113 §6.9)."""
+    var client = Http2ClientConnection()
+    var server = Http2Connection()
+    _shuttle(client, server)
+
+    var sid = client.next_stream_id()
+    var extra = List[HpackHeader]()
+    extra.append(HpackHeader("content-type", "text/plain"))
+    var body_str = String("0123456789AB")  # 12 bytes
+    var body = List[UInt8](body_str.as_bytes())
+    # Force a partial send: only 5 of 12 body bytes fit the window.
+    client.conn.send_window = 5
+    client.send_request(
+        sid, "POST", "https", "x", "/u", extra, Span[UInt8, _](body)
+    )
+    # The remainder must be queued, not raised.
+    assert_true(client.has_pending_body(sid))
+
+    _shuttle(client, server)
+
+    # After the shuttle, the window reopened and the queue drained.
+    assert_false(client.has_pending_body(sid))
+    var ids = server.take_completed_streams()
+    var found = False
+    for i in range(len(ids)):
+        if ids[i] == sid:
+            found = True
+    assert_true(found)
+    var req = server.take_request(sid)
+    assert_equal(String(unsafe_from_utf8=Span[UInt8, _](req.body)), body_str)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -548,4 +584,5 @@ def main() raises:
     test_goaway_received_flag()
     test_push_promise_rejected_by_rst_stream()
     test_oversized_headers_split_across_continuation()
-    print("test_h2_client_conn: 10 passed")
+    test_pending_body_drains_on_window_update()
+    print("test_h2_client_conn: 11 passed")

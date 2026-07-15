@@ -190,6 +190,16 @@ struct Http2ClientConnection(Defaultable, Movable):
     so the high-level facade can surface a meaningful error to
     the caller; queried via :meth:`stream_error`."""
 
+    var _pending_body: Dict[Int, List[UInt8]]
+    """Stream-id -> not-yet-sent body remainder when the send
+    window was exhausted mid-body (RFC 9113 §6.9). Drained by
+    :meth:`pump_pending_body` when an inbound WINDOW_UPDATE opens
+    the window."""
+
+    var _pending_body_fin: Dict[Int, Bool]
+    """Stream-id -> whether the stashed remainder's final DATA
+    frame must carry END_STREAM once fully drained."""
+
     def __init__(out self):
         """Default-construct with :class:`Http2ClientConfig` defaults."""
         self.conn = Connection()
@@ -200,6 +210,8 @@ struct Http2ClientConnection(Defaultable, Movable):
         self.config = Http2ClientConfig()
         self._next_sid = 1
         self._stream_errors = Dict[Int, Int]()
+        self._pending_body = Dict[Int, List[UInt8]]()
+        self._pending_body_fin = Dict[Int, Bool]()
         try:
             self._emit_preface_and_settings()
         except:
@@ -426,11 +438,19 @@ struct Http2ClientConnection(Defaultable, Movable):
                         | Int(frame.payload[3])
                     )
                     self._stream_errors[frame.header.stream_id] = code
+            var was_window_update = (
+                frame.header.type.value == FrameType.WINDOW_UPDATE().value
+            )
             var reply = self.conn.handle_frame(frame^)
             for i in range(len(reply)):
                 var rb = encode_frame(reply[i])
                 for j in range(len(rb)):
                     self.outbox.append(rb[j])
+            # An inbound WINDOW_UPDATE (connection- or stream-level)
+            # may have opened the send window; drain any body stashed
+            # when a prior send exhausted it.
+            if was_window_update:
+                self._pump_all_pending()
 
     # ── Stream id allocation ─────────────────────────────────────────────
 
@@ -445,6 +465,107 @@ struct Http2ClientConnection(Defaultable, Movable):
         var sid = self._next_sid
         self._next_sid += 2
         return sid
+
+    # ── Body emission + pending-body queue (RFC 9113 §6.9) ───────────────
+
+    def _emit_body_span(
+        mut self,
+        sid: Int,
+        body: Span[UInt8, _],
+        start: Int,
+        end_stream: Bool,
+    ) raises -> Int:
+        """Emit DATA frames for ``body[start:]`` bounded by the
+        connection + stream send windows and ``max_frame_size``.
+
+        Returns the absolute position reached: ``len(body)`` when the
+        whole body was sent, or the offset where the send window ran
+        out (the caller stashes the remainder for
+        :meth:`pump_pending_body`). Never raises on window exhaustion.
+        """
+        var n_body = len(body)
+        var max_frame = self.conn.max_frame_size
+        var pos = start
+        while pos < n_body:
+            var chunk = max_frame
+            if pos + chunk > n_body:
+                chunk = n_body - pos
+            var win = self.conn.send_window
+            if sid in self.conn.streams:
+                var sl = self.conn.streams[sid].copy()
+                if sl.send_window < win:
+                    win = sl.send_window
+            if chunk > win:
+                chunk = win
+            if chunk <= 0:
+                return pos  # window exhausted; caller stashes remainder
+            var df = Frame()
+            df.header.type = FrameType.DATA()
+            df.header.stream_id = sid
+            var is_last = pos + chunk == n_body
+            if is_last and end_stream:
+                df.header.flags = FrameFlags(FrameFlags.END_STREAM())
+            else:
+                df.header.flags = FrameFlags(UInt8(0))
+            var dp = List[UInt8](capacity=chunk)
+            for i in range(chunk):
+                dp.append(body[pos + i])
+            df.payload = dp^
+            df.header.length = len(df.payload)
+            var db = encode_frame(df^)
+            for i in range(len(db)):
+                self.outbox.append(db[i])
+            self.conn.send_window -= chunk
+            if sid in self.conn.streams:
+                var sl2 = self.conn.streams[sid].copy()
+                sl2.send_window -= chunk
+                if is_last and end_stream:
+                    sl2.state = StreamState.HALF_CLOSED_LOCAL()
+                self.conn.streams[sid] = sl2^
+            pos += chunk
+        return pos
+
+    def _stash_pending(
+        mut self, sid: Int, body: Span[UInt8, _], start: Int, fin: Bool
+    ):
+        """Stash ``body[start:]`` as this stream's pending body."""
+        var rem = List[UInt8](capacity=len(body) - start)
+        for i in range(start, len(body)):
+            rem.append(body[i])
+        self._pending_body[sid] = rem^
+        self._pending_body_fin[sid] = fin
+
+    def pump_pending_body(mut self, sid: Int) raises:
+        """Re-attempt draining a stream's stashed body after a
+        WINDOW_UPDATE opened the send window. No-op when the stream
+        has no pending body."""
+        if sid not in self._pending_body:
+            return
+        var rem = self._pending_body[sid].copy()
+        var fin = self._pending_body_fin[sid]
+        var sent = self._emit_body_span(sid, Span(rem), 0, fin)
+        if sent >= len(rem):
+            _ = self._pending_body.pop(sid)
+            _ = self._pending_body_fin.pop(sid)
+        else:
+            var still = List[UInt8](capacity=len(rem) - sent)
+            for i in range(sent, len(rem)):
+                still.append(rem[i])
+            self._pending_body[sid] = still^
+
+    def _pump_all_pending(mut self) raises:
+        """Drain every stream with a pending body (called after an
+        inbound WINDOW_UPDATE)."""
+        var sids = List[Int]()
+        for entry in self._pending_body.items():
+            sids.append(entry.key)
+        for i in range(len(sids)):
+            self.pump_pending_body(sids[i])
+
+    def has_pending_body(self, sid: Int) -> Bool:
+        """True if stream ``sid`` has a body remainder still awaiting a
+        WINDOW_UPDATE (RFC 9113 §6.9)."""
+        return sid in self._pending_body
 
     # ── Sending requests ─────────────────────────────────────────────────
 
@@ -577,53 +698,16 @@ struct Http2ClientConnection(Defaultable, Movable):
         else:
             s.state = StreamState.OPEN()
         self.conn.streams[sid] = s^
-        # Body: emit one or more DATA frames bounded by the
-        # current send windows + max_frame_size. We do not yet
-        # support pending-body retransmission on WINDOW_UPDATE;
-        # for the cases the caller hits (small request bodies on
-        # default-sized windows), the entire body fits in one
-        # shot.
+        # Body: emit DATA frames bounded by the current send windows
+        # + max_frame_size. If the window is exhausted mid-body the
+        # remainder is stashed and drained by ``pump_pending_body``
+        # when an inbound WINDOW_UPDATE opens the window (RFC 9113
+        # §6.9), instead of raising.
         var n_body = len(body)
         if n_body > 0:
-            var pos = 0
-            while pos < n_body:
-                var chunk = max_frame
-                if pos + chunk > n_body:
-                    chunk = n_body - pos
-                # Bound by the smaller of connection + stream
-                # send-window (RFC 9113 §6.9).
-                var win = self.conn.send_window
-                var s_local = self.conn.streams[sid].copy()
-                if s_local.send_window < win:
-                    win = s_local.send_window
-                if chunk > win:
-                    chunk = win
-                if chunk <= 0:
-                    raise Error(
-                        "h2 client: send window exhausted before body"
-                        " complete; pending-body queue is a follow-up"
-                    )
-                var df = Frame()
-                df.header.type = FrameType.DATA()
-                df.header.stream_id = sid
-                if pos + chunk == n_body:
-                    df.header.flags = FrameFlags(FrameFlags.END_STREAM())
-                else:
-                    df.header.flags = FrameFlags(UInt8(0))
-                var dp = List[UInt8](capacity=chunk)
-                for i in range(chunk):
-                    dp.append(body[pos + i])
-                df.payload = dp^
-                df.header.length = len(df.payload)
-                var db = encode_frame(df^)
-                for i in range(len(db)):
-                    self.outbox.append(db[i])
-                self.conn.send_window -= chunk
-                s_local.send_window -= chunk
-                if pos + chunk == n_body:
-                    s_local.state = StreamState.HALF_CLOSED_LOCAL()
-                self.conn.streams[sid] = s_local^
-                pos += chunk
+            var sent = self._emit_body_span(sid, body, 0, True)
+            if sent < n_body:
+                self._stash_pending(sid, body, sent, True)
 
     def send_extended_connect(
         mut self,
@@ -700,8 +784,6 @@ struct Http2ClientConnection(Defaultable, Movable):
         raises if the body wouldn't fit.
         """
         var n_body = len(body)
-        var max_frame = self.conn.max_frame_size
-        var pos = 0
         if n_body == 0 and end_stream:
             # Empty DATA with END_STREAM is the half-close marker.
             var df = Frame()
@@ -718,46 +800,11 @@ struct Http2ClientConnection(Defaultable, Movable):
                 s_local.state = StreamState.HALF_CLOSED_LOCAL()
                 self.conn.streams[sid] = s_local^
             return
-        while pos < n_body:
-            var chunk = max_frame
-            if pos + chunk > n_body:
-                chunk = n_body - pos
-            var win = self.conn.send_window
-            if sid in self.conn.streams:
-                var sl = self.conn.streams[sid].copy()
-                if sl.send_window < win:
-                    win = sl.send_window
-            if chunk > win:
-                chunk = win
-            if chunk <= 0:
-                raise Error(
-                    "h2 client: send_data window exhausted; pending-body"
-                    " queue is a follow-up"
-                )
-            var df = Frame()
-            df.header.type = FrameType.DATA()
-            df.header.stream_id = sid
-            var is_last = pos + chunk == n_body
-            if is_last and end_stream:
-                df.header.flags = FrameFlags(FrameFlags.END_STREAM())
-            else:
-                df.header.flags = FrameFlags(UInt8(0))
-            var dp = List[UInt8](capacity=chunk)
-            for i in range(chunk):
-                dp.append(body[pos + i])
-            df.payload = dp^
-            df.header.length = len(df.payload)
-            var db = encode_frame(df^)
-            for i in range(len(db)):
-                self.outbox.append(db[i])
-            self.conn.send_window -= chunk
-            if sid in self.conn.streams:
-                var sl2 = self.conn.streams[sid].copy()
-                sl2.send_window -= chunk
-                if is_last and end_stream:
-                    sl2.state = StreamState.HALF_CLOSED_LOCAL()
-                self.conn.streams[sid] = sl2^
-            pos += chunk
+        # Emit as far as the window allows; stash any remainder for
+        # pump_pending_body on the next WINDOW_UPDATE (RFC 9113 §6.9).
+        var sent = self._emit_body_span(sid, body, 0, end_stream)
+        if sent < n_body:
+            self._stash_pending(sid, body, sent, end_stream)
 
     def peer_supports_extended_connect(read self) -> Bool:
         """Return ``True`` once the peer has advertised
