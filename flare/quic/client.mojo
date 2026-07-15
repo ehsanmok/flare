@@ -99,6 +99,7 @@ from .packet import (
     LongHeader,
     PACKET_TYPE_HANDSHAKE,
     PACKET_TYPE_INITIAL,
+    PACKET_TYPE_RETRY,
     PACKET_TYPE_ZERO_RTT,
     QUIC_VERSION_1,
     encode_long_header,
@@ -107,6 +108,7 @@ from .packet import (
     parse_long_header,
     parse_short_header,
 )
+from .retry import verify_retry_integrity
 from .protection import (
     decode_packet_number,
     protect_initial_packet,
@@ -309,6 +311,16 @@ struct QuicClientConnection(Movable):
     var got_server_cid: Bool
     var established: Bool
 
+    var retry_token: List[UInt8]
+    """Address-validation token from an inbound Retry (RFC 9000 sec 8.1),
+    echoed on every subsequent Initial. Empty until a Retry arrives."""
+    var retried: Bool
+    """True once a Retry has been consumed; further Retries are ignored
+    (RFC 9000 sec 17.2.5.2)."""
+    var first_initial_crypto: List[UInt8]
+    """Cached ClientHello CRYPTO so the Initial can be re-sent verbatim
+    (with the token + new Initial keys) after a Retry."""
+
     var next_bidi_stream: UInt64
     """Next client-initiated bidirectional stream id to hand out
     (RFC 9000 §2.1: client bidi ids are 0, 4, 8, ...)."""
@@ -394,6 +406,9 @@ struct QuicClientConnection(Movable):
         self.have_1rtt_keys = False
         self.got_server_cid = False
         self.established = False
+        self.retry_token = List[UInt8]()
+        self.retried = False
+        self.first_initial_crypto = List[UInt8]()
         self.next_bidi_stream = UInt64(0)
         self.next_uni_stream = UInt64(2)
         self.send_offsets = Dict[UInt64, UInt64]()
@@ -524,6 +539,9 @@ struct QuicClientConnection(Movable):
             raise Error(
                 "quic client: rustls produced no ClientHello on connect"
             )
+        # Cache the ClientHello so a Retry can re-send it verbatim (with
+        # the token + Retry-derived Initial keys).
+        self.first_initial_crypto = ch.copy()
         var dg = self._build_initial(ch, pad=True, with_ack=False)
         _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
         self.tx_initial_offset += UInt64(len(ch))
@@ -683,6 +701,36 @@ struct QuicClientConnection(Movable):
         if len(dg) > 0:
             _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
+    def _handle_retry(
+        mut self, datagram: Span[UInt8, _], lh: LongHeader
+    ) raises:
+        """Consume an inbound Retry (RFC 9000 sec 8.1): verify its
+        integrity tag against the original DCID, capture the token +
+        server-chosen SCID, and re-send the cached ClientHello with the
+        token and Retry-derived Initial keys."""
+        var pkt = List[UInt8]()
+        for i in range(len(datagram)):
+            pkt.append(datagram[i])
+        if not verify_retry_integrity(pkt, self.initial_dcid):
+            return  # spoofed / corrupt Retry -> ignore
+        var token = List[UInt8]()
+        for i in range(lh.payload_offset, len(datagram) - 16):
+            token.append(datagram[i])
+        if len(self.first_initial_crypto) == 0:
+            return  # nothing cached to re-send (shouldn't happen)
+        self.retry_token = token^
+        self.retried = True
+        # The server's SCID becomes the new DCID + Initial-key source.
+        self.initial_dcid = lh.scid.copy()
+        self.dcid = lh.scid.copy()
+        self.got_server_cid = True
+        # Re-send the ClientHello at CRYPTO offset 0 with the token.
+        self.tx_initial_offset = UInt64(0)
+        var ch = self.first_initial_crypto.copy()
+        var dg = self._build_initial(ch, pad=True, with_ack=False)
+        _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+        self.tx_initial_offset += UInt64(len(ch))
+
     def _process_datagram(
         mut self, datagram: Span[UInt8, _], mut events: ConnectionEvents
     ) raises:
@@ -693,6 +741,19 @@ struct QuicClientConnection(Movable):
         scan; a short-header (1-RTT) packet is always last and
         runs to the datagram end. Decrypt / parse failures drop
         the offending packet silently (RFC 9001 §5.2)."""
+        # RFC 9000 sec 8.1: a Retry arrives as its own datagram before
+        # any handshake keys exist. Intercept it before the coalescing
+        # scan (which stops on Retry) and re-send the Initial with the
+        # token. Only the first Retry is honored.
+        if len(datagram) >= 1 and (Int(datagram[0]) & 0x80) != 0:
+            if not self.retried:
+                try:
+                    var lh0 = parse_long_header(datagram)
+                    if lh0.packet_type == PACKET_TYPE_RETRY:
+                        self._handle_retry(datagram, lh0)
+                        return
+                except:
+                    pass
         var n = len(datagram)
         var offset = 0
         while offset < n:
@@ -1004,9 +1065,11 @@ struct QuicClientConnection(Movable):
             self.scid,
             type_specific_bits=first_bits,
         )
-        var token_len_var = encode_varint(UInt64(0))
+        var token_len_var = encode_varint(UInt64(len(self.retry_token)))
         for i in range(len(token_len_var)):
             prefix.append(token_len_var[i])
+        for i in range(len(self.retry_token)):
+            prefix.append(self.retry_token[i])
         var payload_total = UInt64(len(payload) + pn_length + _AEAD_TAG_LEN)
         var len_var = encode_varint(payload_total)
         for i in range(len(len_var)):

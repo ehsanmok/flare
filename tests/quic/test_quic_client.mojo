@@ -118,7 +118,47 @@ def test_client_send_stream_after_handshake() raises:
     client.close()
 
 
+def _bind_validating_server() raises -> QuicListener:
+    var cert = _read_file(_FIXDIR + "cert.pem")
+    var key = _read_file(_FIXDIR + "key.pem")
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    cfg.rustls_config.cert_chain_pem = cert^
+    cfg.rustls_config.private_key_pem = key^
+    cfg.rustls_config.alpn_protocols = _h3_alpn()
+    cfg.require_address_validation = True
+    return QuicListener.bind(cfg^)
+
+
+def test_client_handshake_through_retry() raises:
+    """With server address validation on, the first Initial draws a
+    Retry; the client re-sends with the token + server-chosen DCID and
+    the handshake still completes (RFC 9000 sec 8.1 both sides)."""
+    var server = _bind_validating_server()
+    var connector = _make_connector()
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+
+    var done = False
+    for _ in range(60):
+        _ = server.tick(timeout_ms=50)
+        _ = client.poll(timeout_ms=50)
+        if client.is_established():
+            done = True
+            break
+
+    assert_true(done, "handshake must complete through a Retry round-trip")
+    assert_true(client.retried, "client must have consumed a Retry")
+    assert_equal(client.alpn(), String("h3"))
+    assert_equal(server.connection_count(), 1)
+    server.close()
+    client.close()
+
+
 def main() raises:
     test_client_handshake_completes()
     test_client_send_stream_after_handshake()
-    print("test_quic_client: 2 passed")
+    test_client_handshake_through_retry()
+    print("test_quic_client: 3 passed")
