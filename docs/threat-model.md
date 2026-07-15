@@ -126,7 +126,7 @@ PR is fixing it), the normal issue tracker is fine.
 | What | When | Where |
 |---|---|---|
 | Sanitiser builds (asan + tsan) | Every cycle, before release. | `pixi run tests-asan` / `pixi run tests-tsan` |
-| Fuzz corpora (57 harnesses, 9M+ runs combined) | Every cycle, >= 200K runs each. | `pixi run fuzz-all` |
+| Fuzz corpora (60 harnesses, 9M+ runs combined) | Every cycle, >= 200K runs each. | `pixi run fuzz-all` |
 | Conformance fixtures (h1 + ws) | Every cycle. | `pixi run test-conformance-h1` + `pixi run test-conformance-ws` |
 | Soak (24 h) | Once per minor release on EPYC 7R32. | `SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-mixed` (output under `benchmark/results/`) |
 | Cross-arch soak (Apple Silicon) | Once per minor release. | Same task on the M2 host. |

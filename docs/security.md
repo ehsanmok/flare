@@ -63,7 +63,7 @@ runs at every release tag.
 
 ## Fuzz / property-test budget
 
-57 harnesses today (53 fuzz + 4 property), covering:
+60 harnesses today (56 fuzz + 4 property), covering:
 
 - HTTP parsing (request, response, headers, URL, cookies, auth)
 - WebSocket frames (mask, opcode, close codes)
@@ -79,7 +79,7 @@ runs at every release tag.
 - Property tests on the timer wheel, headers, auth, WebSocket
   round-trip
 
-57 harnesses, 9M+ runs combined, zero crashes to date.
+60 harnesses, 9M+ runs combined, zero crashes to date.
 
 ---
 

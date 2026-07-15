@@ -528,7 +528,7 @@ Tests under [`tests/`](../tests/) mirror the package layout:
 |---|---|
 | Unit + integration tests | 600+ across `tests/` |
 | Examples (each part of `pixi run tests`) | 40+ under [`examples/`](../examples/) |
-| Fuzz harnesses | 57 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes |
+| Fuzz harnesses | 60 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes |
 | Sanitizer harnesses | `tests-asan` / `tests-tsan` / `tests-asserts-all` (see [`build.md`](build.md)) |
 | Conformance corpora | RFC 7230 HTTP/1 wire shapes under [`conformance/h1/`](../conformance/h1/) (runner: `test-conformance-h1`); RFC 6455 WebSocket frames under [`conformance/ws/`](../conformance/ws/) (runner: `test-conformance-ws`, 13 fixtures; Autobahn-anchored case ids 1.x / 2.x / 3.x / 5.x / 7.x) |
 
