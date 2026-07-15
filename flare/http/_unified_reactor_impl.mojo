@@ -56,7 +56,7 @@ kernel wakes one worker per accept event.
 """
 
 from std.builtin.debug_assert import debug_assert
-from std.collections import Dict
+from std.collections import Dict, Optional
 from std.ffi import c_int, get_errno
 from std.memory import UnsafePointer
 
@@ -82,6 +82,7 @@ from flare.runtime.scheduler import (
     WORKER_STATUS_CRASHED,
 )
 from flare.tcp import TcpListener, TcpStream, accept_fd
+from flare.ws.server_h2 import WsH2Hooks
 
 from ._h2_conn_handle import (
     Http2ConnHandle,
@@ -143,6 +144,7 @@ def _drive_h1[
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises -> Bool:
     """Drive one HTTP/1.1 ConnHandle through ``on_readable`` (with
     the same 3-cycle inline fast-path the standalone HTTP/1.1
@@ -188,7 +190,9 @@ def _drive_h1[
             # to the h2 handle in place; the conn-dict entry swaps
             # KIND_H1 -> KIND_H2 + the original request becomes
             # stream id 1 on the new Http2ConnHandle.
-            var migrated = _migrate_h1_to_h2(fd, h2_config, conns)
+            var migrated = _migrate_h1_to_h2(
+                fd, h2_config, conns, ws_hooks.copy()
+            )
             if not migrated:
                 return True  # migration failed; caller cleans up
             # Drive the new Http2ConnHandle once so its initial-SETTINGS
@@ -363,6 +367,7 @@ def _migrate_h1_to_h2(
     fd: Int,
     h2_config: Http2Config,
     mut conns: Dict[Int, Int],
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises -> Bool:
     """Migrate an h1 ``ConnHandle`` to an h2 :class:`Http2ConnHandle`.
 
@@ -422,7 +427,7 @@ def _migrate_h1_to_h2(
 
     try:
         var addr = _h2_conn_alloc_addr_from_h2c_upgrade(
-            stream^, h2_config.copy(), req, settings_payload^
+            stream^, h2_config.copy(), req, settings_payload^, ws_hooks.copy()
         )
         conns[fd] = _pack(KIND_H2, addr)
         return True
@@ -439,6 +444,7 @@ def _migrate_pending(
     decision: Int,
     h2_config: Http2Config,
     mut conns: Dict[Int, Int],
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises -> Bool:
     """Promote a pending conn to either ConnHandle or Http2ConnHandle.
 
@@ -495,7 +501,9 @@ def _migrate_pending(
 
     if decision == PROTO_HTTP2:
         try:
-            var addr = _h2_conn_alloc_addr(stream^, h2_config.copy())
+            var addr = _h2_conn_alloc_addr(
+                stream^, h2_config.copy(), ws_hooks.copy()
+            )
             conns[fd] = _pack(KIND_H2, addr)
             var h2_ptr = _h2_conn_ptr_from_int(addr)
             if len(prefaced) > 0:
@@ -626,6 +634,7 @@ def _unified_handle_conn_event[
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises:
     """Dispatch one reactor event for an already-known connection fd.
 
@@ -656,6 +665,7 @@ def _unified_handle_conn_event[
                 reactor,
                 wheel,
                 timers,
+                ws_hooks.copy(),
             )
         elif is_writable:
             done3 = _drive_h1_writable(
@@ -698,7 +708,7 @@ def _unified_handle_conn_event[
         decision = PROTO_HTTP1
     if decision == PROTO_NEED_MORE:
         return
-    var ok = _migrate_pending(fd, decision, h2_config, conns)
+    var ok = _migrate_pending(fd, decision, h2_config, conns, ws_hooks.copy())
     if not ok:
         _cleanup_conn_unified(fd, conns, timers, reactor)
         return
@@ -733,6 +743,7 @@ def _unified_handle_conn_event[
             reactor,
             wheel,
             timers,
+            ws_hooks.copy(),
         )
         if done2:
             _cleanup_conn_unified(fd, conns, timers, reactor)
@@ -770,6 +781,7 @@ def _run_unified_loop_for_fd[
     ref handler: H,
     ref stopping: Bool,
     stats_addr: Int = 0,
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises:
     """Shared body for the single-listener unified reactor loops.
 
@@ -834,6 +846,7 @@ def _run_unified_loop_for_fd[
                 reactor,
                 wheel,
                 timers,
+                ws_hooks.copy(),
             )
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
@@ -848,6 +861,7 @@ def run_unified_reactor_loop[
     var h2_config: Http2Config,
     ref handler: H,
     ref stopping: Bool,
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises:
     """Single-threaded reactor loop that auto-dispatches HTTP/1.1 vs
     HTTP/2 per connection.
@@ -877,6 +891,8 @@ def run_unified_reactor_loop[
         h2_config^,
         handler,
         stopping,
+        0,
+        ws_hooks,
     )
 
 

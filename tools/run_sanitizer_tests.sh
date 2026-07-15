@@ -208,6 +208,11 @@ ASAN_TESTS=(
   "tests/tls/test_tls_resume.mojo"               # v0.7 TLS resumption: TlsSession lifetime + new_session_cb
   "tests/ws/test_ws.mojo"                       # SHA-1 FFI via compute_accept_key
   "tests/ws/test_ws_permessage_deflate.mojo"    # v0.7 — RFC 7692 codec (raw deflate / inflate FFI borrow)
+  # v0.9 — WS-over-h2 sidecar dispatch on the unified reactor (forked
+  # HttpServer.serve[H,W] over h2c). ASan validates the per-connection
+  # Dict[Int, WsOverH2ServerStream] carrier lifecycle + boxed WsH2Hooks
+  # thunk plumbing on the parent client path.
+  "tests/ws/test_ws_h2_reactor.mojo"
   # Track Q1-W QUIC AEAD + HP mask FFI (RFC 9001 §5.3 / §5.4).
   # The OpenSslQuicCrypto carrier calls EVP_CIPHER_CTX_new/free
   # per encrypt/decrypt/mask invocation; ASan verifies the C-side

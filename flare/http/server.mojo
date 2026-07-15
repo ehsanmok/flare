@@ -46,6 +46,7 @@ from .alpn_dispatch import (
     dispatch_alpn,
 )
 from ..http2.server import Http2Config
+from ..ws.server_h2 import WsH2Handler, WsH2Hooks
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 from ..quic.server import QuicListener, QuicServerConfig
@@ -709,6 +710,49 @@ struct HttpServer(Movable):
                 handler,
                 self._stopping,
             )
+
+    def serve[
+        H: Handler, W: WsH2Handler
+    ](mut self, var handler: H, var ws_handler: W) raises:
+        """Run the single-worker reactor with a WebSocket-over-h2 sidecar.
+
+        Serves ordinary HTTP requests through ``handler`` and, on the same
+        HTTP/2 server, bridges RFC 8441 Extended CONNECT (``:protocol=
+        websocket``) tunnels to the edge-driven ``ws_handler``. Advertising
+        ``SETTINGS_ENABLE_CONNECT_PROTOCOL`` is turned on automatically so
+        clients may open WS tunnels.
+
+        Single-listener, single-worker (the WS carrier state is per
+        connection and shares one boxed handler on the worker). ``bind_many``
+        and multi-worker WS sidecars are a future addition.
+
+        Args:
+            handler: The HTTP request handler (ownership transferred).
+            ws_handler: The WS-over-h2 sidecar (ownership transferred);
+                boxed once and shared across every tunnel on the worker.
+        """
+        from ._unified_reactor_impl import run_unified_reactor_loop
+        from flare.ws.server_h2 import make_ws_h2_hooks
+
+        if len(self._extra_listener_fds) > 0:
+            raise Error(
+                "HttpServer.serve WS-over-h2 sidecar is single-listener;"
+                " bind_many is not supported with a ws_handler yet."
+            )
+        self._stopping = False
+        self.h2_config.enable_connect_protocol = True
+        var hooks = make_ws_h2_hooks[W](ws_handler^)
+        try:
+            run_unified_reactor_loop(
+                self._listener,
+                self.config,
+                self.h2_config.copy(),
+                handler,
+                self._stopping,
+                Optional[WsH2Hooks](hooks.copy()),
+            )
+        finally:
+            hooks.destroy_thunk(hooks.addr)
 
     def serve_streaming[
         H: StreamHandler

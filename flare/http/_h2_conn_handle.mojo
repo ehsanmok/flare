@@ -52,6 +52,7 @@ from flare.net import IpAddr, SocketAddr
 from flare.net._libc import _recv, _send, MSG_NOSIGNAL
 from flare.runtime import Pool
 from flare.tcp import TcpStream
+from flare.ws.server_h2 import WsH2Hooks, WsOverH2ServerStream
 
 from ._server_reactor_impl import (
     StepResult,
@@ -177,10 +178,22 @@ struct Http2ConnHandle(Movable):
     var _stream_tv: List[String]
     """Trailer field values paired with :attr:`_stream_tk`."""
 
+    # ── WebSocket-over-HTTP/2 sidecar (RFC 8441) ───────────────────────────
+    var _ws_hooks: Optional[WsH2Hooks]
+    """Non-owning boxed sidecar handler + thunks; ``None`` when the server
+    was started without a WS-over-h2 handler. Set once at construction."""
+
+    var _ws_tunnels: Dict[Int, WsOverH2ServerStream]
+    """Per-connection accepted WS tunnels keyed on stream id. Each carries
+    its own inbound decode buffer."""
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def __init__(
-        out self, var stream: TcpStream, var config: Http2Config
+        out self,
+        var stream: TcpStream,
+        var config: Http2Config,
+        var ws_hooks: Optional[WsH2Hooks] = None,
     ) raises:
         """Construct an Http2ConnHandle that owns ``stream``.
 
@@ -190,6 +203,8 @@ struct Http2ConnHandle(Movable):
                 into the handle.
             config: HTTP/2 SETTINGS the server advertises to the
                 peer. Validated by ``Http2Connection.with_config``.
+            ws_hooks: Optional non-owning WS-over-h2 sidecar handler
+                (RFC 8441). ``None`` disables the WS carrier path.
         """
         # Snapshot the peer address before moving the stream.
         self.peer = stream.peer_addr()
@@ -209,6 +224,8 @@ struct Http2ConnHandle(Movable):
         self._stream_ppos = 0
         self._stream_tk = List[String]()
         self._stream_tv = List[String]()
+        self._ws_hooks = ws_hooks^
+        self._ws_tunnels = Dict[Int, WsOverH2ServerStream]()
 
     def __init__(
         out self,
@@ -216,6 +233,7 @@ struct Http2ConnHandle(Movable):
         var config: Http2Config,
         req: Request,
         var settings_payload: List[UInt8],
+        var ws_hooks: Optional[WsH2Hooks] = None,
     ) raises:
         """Construct an Http2ConnHandle from a successful h2c-via-Upgrade
         switch (RFC 7540 §3.2).
@@ -276,6 +294,8 @@ struct Http2ConnHandle(Movable):
         self._stream_ppos = 0
         self._stream_tk = List[String]()
         self._stream_tv = List[String]()
+        self._ws_hooks = ws_hooks^
+        self._ws_tunnels = Dict[Int, WsOverH2ServerStream]()
 
     @always_inline
     def fd(self) -> c_int:
@@ -368,6 +388,11 @@ struct Http2ConnHandle(Movable):
         # drain below.
         if len(inbound) > 0:
             self.h2.feed(Span[UInt8, _](inbound))
+        # WebSocket-over-h2 sidecar (RFC 8441): accept Extended CONNECT
+        # tunnels and pump client frames BEFORE the request dispatch so the
+        # 200-OK HEADERS + any server frames ride out on this event.
+        if self._ws_hooks:
+            self._ws_dispatch()
         # Dispatch any newly-completed streams.
         var ids = self.h2.take_completed_streams()
         for i in range(len(ids)):
@@ -376,6 +401,10 @@ struct Http2ConnHandle(Movable):
             # CLOSED) until its source drains, so take_completed_streams
             # keeps returning it; skip re-dispatch here.
             if self._stream_sid != 0 and sid == self._stream_sid:
+                continue
+            # WS tunnels are driven by _ws_dispatch, not the request path;
+            # never dispatch a WS stream (even if it END_STREAM's).
+            if sid in self._ws_tunnels:
                 continue
             var req = self.h2.take_request(sid)
             req.peer = self.peer
@@ -426,6 +455,46 @@ struct Http2ConnHandle(Movable):
             want_write=False,
             idle_timeout_ms=config.idle_timeout_ms,
         )
+
+    # ── WebSocket-over-HTTP/2 sidecar dispatch (RFC 8441) ────────────────────
+
+    def _ws_dispatch(mut self) raises:
+        """Accept new WS tunnels and pump one edge's worth of client frames.
+
+        Runs only when a :class:`WsH2Hooks` sidecar is registered. Newly
+        arrived Extended CONNECT streams are accepted (200 HEADERS, no
+        END_STREAM) and ``on_open`` is fired; every live tunnel then decodes
+        all currently-buffered client frames (``on_message`` per frame) and
+        is torn down (``on_close`` + drop) once its carrier sees a CLOSE or
+        the peer resets/ends the stream. Carriers are copied out of the map,
+        mutated, and copied back (WS-over-h2 is not the hot path).
+        """
+        var hooks = self._ws_hooks.value().copy()
+        var newly = self.h2.take_extended_connect_streams()
+        for i in range(len(newly)):
+            var sid = newly[i]
+            self.h2.accept_ws_over_h2(sid)
+            var carrier = WsOverH2ServerStream(sid)
+            hooks.open_thunk(hooks.addr, carrier, self.h2)
+            self._ws_tunnels[sid] = carrier^
+        var sids = List[Int]()
+        for kv in self._ws_tunnels.items():
+            sids.append(kv.key)
+        for i in range(len(sids)):
+            var sid = sids[i]
+            var carrier = self._ws_tunnels[sid].copy()
+            while True:
+                var f = carrier.try_pull_frame(self.h2)
+                if not f:
+                    break
+                hooks.msg_thunk(hooks.addr, carrier, self.h2, f.take())
+                if carrier.is_closed():
+                    break
+            if carrier.is_closed() or not self.h2.stream_is_open(sid):
+                hooks.close_thunk(hooks.addr, carrier, self.h2)
+                _ = self._ws_tunnels.pop(sid)
+            else:
+                self._ws_tunnels[sid] = carrier^
 
     # ── Streaming response (K1 on h2) ────────────────────────────────────────
 
@@ -848,7 +917,9 @@ struct Http2ConnHandle(Movable):
 
 
 def _h2_conn_alloc_addr(
-    var stream: TcpStream, var config: Http2Config
+    var stream: TcpStream,
+    var config: Http2Config,
+    var ws_hooks: Optional[WsH2Hooks] = None,
 ) raises -> Int:
     """Heap-allocate an :class:`Http2ConnHandle` and return its address.
 
@@ -857,7 +928,7 @@ def _h2_conn_alloc_addr(
     :func:`flare.http._server_reactor_impl._conn_alloc_addr`.
     """
     var addr = Pool[Http2ConnHandle].alloc_move(
-        Http2ConnHandle(stream^, config^)
+        Http2ConnHandle(stream^, config^, ws_hooks^)
     )
     debug_assert[assert_mode="safe"](
         addr != 0,
@@ -871,12 +942,13 @@ def _h2_conn_alloc_addr_from_h2c_upgrade(
     var config: Http2Config,
     req: Request,
     var settings_payload: List[UInt8],
+    var ws_hooks: Optional[WsH2Hooks] = None,
 ) raises -> Int:
     """Heap-allocate an :class:`Http2ConnHandle` pre-seeded for an h2c-via-Upgrade
     migration (see :meth:`Http2ConnHandle.__init__` h2c-flavoured overload).
     """
     var addr = Pool[Http2ConnHandle].alloc_move(
-        Http2ConnHandle(stream^, config^, req, settings_payload^)
+        Http2ConnHandle(stream^, config^, req, settings_payload^, ws_hooks^)
     )
     debug_assert[assert_mode="safe"](
         addr != 0,

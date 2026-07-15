@@ -15,9 +15,10 @@ the connection; the caller feeds/drains the underlying
 
 from .frame import WsCloseCode, WsFrame, WsOpcode, _DecodeResult
 from ..http2.server import Http2Connection
+from ..runtime.pool import Pool
 
 
-struct WsOverH2ServerStream(Movable):
+struct WsOverH2ServerStream(Copyable, Movable):
     """Stream-keyed server adapter turning one h2 stream into a WS tunnel.
 
     Owns the per-stream receive buffer. Unlike the client carrier it does
@@ -90,3 +91,145 @@ struct WsOverH2ServerStream(Movable):
         if self.closed:
             return
         self.send_frame(conn, WsFrame.close(code, reason))
+
+
+# ── Edge-driven WS-over-h2 sidecar handler ─────────────────────────────────
+#
+# The h1 ``WsHandler.on_connection`` is a blocking run-to-completion loop;
+# on the non-blocking multiplexed h2 reactor that would head-of-line block
+# the whole worker. So the sidecar handler is edge-driven: the reactor calls
+# ``on_open`` once when an Extended CONNECT tunnel (RFC 8441) is accepted,
+# ``on_message`` per decoded client frame, and ``on_close`` on teardown. The
+# handler never blocks -- it reacts to one edge and returns.
+
+
+trait WsH2Handler(Copyable, ImplicitlyDestructible, Movable):
+    """Edge-driven handler for WebSocket-over-HTTP/2 tunnels (RFC 8441).
+
+    One handler instance is shared across every tunnel on the worker (like
+    the HTTP :trait:`flare.http.Handler`); per-tunnel state belongs on the
+    ``carrier`` or in handler-owned maps keyed by ``carrier.stream_id``.
+    """
+
+    def on_open(
+        mut self,
+        mut carrier: WsOverH2ServerStream,
+        mut conn: Http2Connection,
+    ) raises -> None:
+        """Called once when a tunnel is accepted; may send opening frames."""
+        ...
+
+    def on_message(
+        mut self,
+        mut carrier: WsOverH2ServerStream,
+        mut conn: Http2Connection,
+        frame: WsFrame,
+    ) raises -> None:
+        """Called per decoded client->server frame."""
+        ...
+
+    def on_close(
+        mut self,
+        mut carrier: WsOverH2ServerStream,
+        mut conn: Http2Connection,
+    ) raises -> None:
+        """Called once on teardown (peer CLOSE / RST / END_STREAM)."""
+        ...
+
+
+# Type-erasure: the reactor's non-generic ``Http2ConnHandle`` cannot carry
+# the user's ``W`` as a type parameter, so we box ``W`` behind an opaque
+# address + monomorphised ``thin`` thunks (the same idiom the Router uses
+# for struct handlers). ``Http2ConnHandle`` owns the per-connection carrier
+# map and passes each carrier by ref into these thunks.
+
+comptime _WsOpenThunk = def(
+    Int, mut WsOverH2ServerStream, mut Http2Connection
+) raises thin -> None
+comptime _WsMsgThunk = def(
+    Int, mut WsOverH2ServerStream, mut Http2Connection, WsFrame
+) raises thin -> None
+comptime _WsCloseThunk = def(
+    Int, mut WsOverH2ServerStream, mut Http2Connection
+) raises thin -> None
+comptime _WsDestroyThunk = def(Int) thin -> None
+
+
+def _ws_h2_open_thunk[
+    W: WsH2Handler
+](
+    addr: Int, mut carrier: WsOverH2ServerStream, mut conn: Http2Connection
+) raises -> None:
+    Pool[W].get_ptr(addr)[].on_open(carrier, conn)
+
+
+def _ws_h2_msg_thunk[
+    W: WsH2Handler
+](
+    addr: Int,
+    mut carrier: WsOverH2ServerStream,
+    mut conn: Http2Connection,
+    frame: WsFrame,
+) raises -> None:
+    Pool[W].get_ptr(addr)[].on_message(carrier, conn, frame)
+
+
+def _ws_h2_close_thunk[
+    W: WsH2Handler
+](
+    addr: Int, mut carrier: WsOverH2ServerStream, mut conn: Http2Connection
+) raises -> None:
+    Pool[W].get_ptr(addr)[].on_close(carrier, conn)
+
+
+def _ws_h2_destroy_thunk[W: WsH2Handler](addr: Int) -> None:
+    Pool[W].free(addr)
+
+
+struct WsH2Hooks(Copyable, Movable):
+    """Opaque, non-owning boxed WS-over-h2 handler + its thunks.
+
+    Carries the heap address of the boxed ``W`` and its monomorphised
+    thunks so the non-generic reactor handle can invoke ``W``'s methods
+    without knowing its type. The address is owned by the ``serve`` call
+    that created it (:func:`make_ws_h2_hooks`); copies threaded to
+    connection handles are non-owning -- only the owner runs
+    ``destroy_thunk``.
+    """
+
+    var addr: Int
+    var open_thunk: _WsOpenThunk
+    var msg_thunk: _WsMsgThunk
+    var close_thunk: _WsCloseThunk
+    var destroy_thunk: _WsDestroyThunk
+
+    def __init__(
+        out self,
+        addr: Int,
+        open_thunk: _WsOpenThunk,
+        msg_thunk: _WsMsgThunk,
+        close_thunk: _WsCloseThunk,
+        destroy_thunk: _WsDestroyThunk,
+    ):
+        self.addr = addr
+        self.open_thunk = open_thunk
+        self.msg_thunk = msg_thunk
+        self.close_thunk = close_thunk
+        self.destroy_thunk = destroy_thunk
+
+
+def make_ws_h2_hooks[W: WsH2Handler](var handler: W) raises -> WsH2Hooks:
+    """Box ``handler`` on the heap and return its :class:`WsH2Hooks`.
+
+    The caller owns the returned hooks' allocation and MUST run
+    ``hooks.destroy_thunk(hooks.addr)`` exactly once after the serving
+    loop exits.
+    """
+    var addr = Pool[W].alloc_move(handler^)
+    return WsH2Hooks(
+        addr=addr,
+        open_thunk=_ws_h2_open_thunk[W],
+        msg_thunk=_ws_h2_msg_thunk[W],
+        close_thunk=_ws_h2_close_thunk[W],
+        destroy_thunk=_ws_h2_destroy_thunk[W],
+    )

@@ -685,6 +685,16 @@ struct Http2Connection(Defaultable, Movable):
         s.extended_connect_protocol = String("")
         self.conn.streams[sid] = s^
 
+    def stream_is_open(self, sid: Int) raises -> Bool:
+        """True while ``sid`` exists and is still OPEN (bidirectional).
+
+        The WS-over-h2 reactor path uses this to detect peer teardown
+        (RST_STREAM / END_STREAM moves the stream off OPEN) so it can run
+        the sidecar handler's ``on_close`` and drop the tunnel."""
+        if sid not in self.conn.streams:
+            return False
+        return self.conn.streams[sid].state.value == StreamState.OPEN().value
+
     def drain_stream_data(mut self, sid: Int) raises -> List[UInt8]:
         """Move any inbound DATA accumulated for ``sid`` out of the stream
         record (the WS-over-h2 read path pulls client frames from here)."""
