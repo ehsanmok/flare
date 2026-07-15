@@ -14,7 +14,7 @@ needed.
 | `flare.http` | **Sanitised error responses**: 4xx bodies do not echo extractor `raise Error(...)` messages by default. Logs carry the full message + request id; the client gets a fixed status reason. |
 | `flare.ws` | Client frames masked per RFC 6455, `Sec-WebSocket-Accept` verified. |
 | `flare.ws` | CSPRNG nonce for handshake key, UTF-8 validation on TEXT frames. |
-| `flare.http2` (server) | RFC 9113 §6.5.2 `SETTINGS_MAX_HEADER_LIST_SIZE = 8 KiB` advertised by default to bound memory under hostile peers. RFC 9113 §6.5.2 `SETTINGS_MAX_CONCURRENT_STREAMS = 100` advertised so a peer can't open arbitrarily many streams. |
+| `flare.http2` (server) | RFC 9113 §6.5.2 `SETTINGS_MAX_HEADER_LIST_SIZE = 8 KiB` advertised **and enforced** on inbound HEADERS + CONTINUATION accumulation: an oversized header block is closed with `RST_STREAM(ENHANCE_YOUR_CALM)` (a 1 MiB hard cap applies even when the setting is unset). CONTINUATION frames per header block are capped (CVE-2024-27316), and an inbound `RST_STREAM` flood trips `GOAWAY(ENHANCE_YOUR_CALM)` (CVE-2023-44487 rapid reset). RFC 9113 §6.5.2 `SETTINGS_MAX_CONCURRENT_STREAMS = 100` advertised (advisory; new streams past the cap are not yet refused). |
 | `flare.http2` (client) | Advertises `SETTINGS_ENABLE_PUSH = 0` in the preface SETTINGS so servers cannot originate `PUSH_PROMISE`; if one arrives anyway it is rejected with `RST_STREAM(PROTOCOL_ERROR)` and dropped. RFC 9113 §9.1.1 same-origin enforcement: a request whose URL targets a different `(scheme, host, port)` than the established connection raises rather than tunneling cross-origin requests over the wrong connection. |
 | `flare.http` (TLS) | `HttpClient` over `https://` advertises ALPN `["h2", "http/1.1"]` and dispatches internally on what the server selected: `h2` -> drive HTTP/2 over the TLS stream; `http/1.1` (or no ALPN) -> existing HTTP/1.1 wire. The same `flare.http.Response` is returned either way -- the wire choice never leaks into application code. |
 
@@ -63,7 +63,7 @@ runs at every release tag.
 
 ## Fuzz / property-test budget
 
-19 harnesses today, covering:
+56 harnesses today (52 fuzz + 4 property), covering:
 
 - HTTP parsing (request, response, headers, URL, cookies, auth)
 - WebSocket frames (mask, opcode, close codes)
@@ -79,7 +79,7 @@ runs at every release tag.
 - Property tests on the timer wheel, headers, auth, WebSocket
   round-trip
 
-35 harnesses, 8M+ runs combined, zero crashes to date.
+56 harnesses, 9M+ runs combined, zero crashes to date.
 
 ---
 

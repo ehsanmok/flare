@@ -831,7 +831,9 @@ checks.
 The cross-framework HTTP/3 row now has the h2load+H3 client
 landed on the dev-box -- see the
 [HTTP/3 throughput](#http3-throughput) table below for the
-quiche / quinn / flare_h3 reading at this HEAD. An earlier
+quiche / flare_h3 reading at this HEAD (the quinn baseline is
+miscalibrated at this workload shape and is excluded -- see the
+table caveats). An earlier
 reading had flare_h3 at 0 req/s because the inbound post-Initial
 decrypt path had not landed; a later pass (Jun 4, 2026) closed
 the decrypt path, and a follow-on reactor rewrite (copy
@@ -895,7 +897,9 @@ UDP datagram per H3 response, each built byte-by-byte through an
 AEAD + header-protection FFI crossing. A follow-on reactor
 rewrite (copy elimination + cached-table QPACK decode + coalesced
 1-RTT egress with capacity-reserved builders) closed the gate to
-74,653 req/s; `sendmmsg`/GSO were not needed and left unbuilt.
+74,653 req/s; egress `sendmmsg`/GSO were not needed for the gate
+and remain unwired (built in `flare.udp.batch` but QUIC egress
+still uses per-datagram `sendto`; ingress `recvmmsg` is default-on).
 See the HTTP/3 throughput table for the final reading.
 
 Sanitizer + fuzz + lint floors (each gate ran at its
@@ -1501,9 +1505,11 @@ leads at 74,653 req/s (median, `+2.9 %` over quiche, sigma
 `0.50 %`). The win came from eliminating per-packet
 whole-connection deep copies (in-place `ref` mutation), a
 cached-table QPACK decode path, and coalesced 1-RTT egress with
-capacity-reserved packet builders -- not from syscall batching
-(`recvmmsg`/`sendmmsg`/GSO were left unbuilt; the gate closed
-without them). See the table and reading order below.** Stock
+capacity-reserved packet builders -- not from egress syscall
+batching (ingress `recvmmsg` is built and default-on; egress
+`sendmmsg`/GSO are built in `flare.udp.batch` but not yet wired
+into QUIC egress; the gate closed without them). See the table and
+reading order below.** Stock
 Ubuntu's
 ``nghttp2-client`` (1.43) predates h3 support; conda-forge's
 nghttp2 (1.68) ships without ``h2load``. The h2load binary
@@ -1549,8 +1555,8 @@ reading at HEAD ``b9aeeef`` (source data:
 | Target | req/s (median, 5 runs) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | notes |
 |---|---:|---:|---:|---:|---|
 | quiche 0.22 (boringssl-vendored) | 72,571 | (per-stream) | (per-stream) | (per-stream) | clean: 0 errors / 0 timeouts across 5 runs, sigma ~1% |
-| quinn 0.11 + h3 0.0.8        | 654    | 4.17     | 4.75       | 5.48        | open-loop 100-stream shape errors 98% (1.2M errored of 1.2M total) -- this is workload-shape calibration, not a quinn ceiling (the 10s warmup with the same client sustained 104k req/s at 0 errors) |
-| **flare h3**                 | **74,653** | **1.45** | **2.45**   | 433.45      | Gate MET: beats quiche's 72,571 by +2.9% at sigma 0.50% (stable across 5x30s runs). The reactor rewrite removed the per-packet/per-op whole-state deep copies (in-place `ref` mutation of the `connections` / `http3_connections` slabs), routed QPACK decode through the cached-table SIMD Huffman path + a build-once static table + slice-based literal decode, and reserved capacity on the hot `List[UInt8]` egress builders so the per-datagram assembly fills one allocation instead of growing byte-by-byte. The last lever mattered most: the allocator's thread-local cache lives in a dlopen'd lib, so every spared malloc/free also spares a slow dynamic-TLS lookup, which collapsed both the `List._realloc` and `__tls_get_addr` profile peaks. p99.9 fell from 410 ms (first pass) to 2.45 ms; the lone p99.99 outlier (433 ms) is a per-run connection-setup artifact, not a steady-state stall. Egress was already coalesced (ACK + flow-control + multiple H3 STREAM frames per 1-RTT datagram); `recvmmsg`/`sendmmsg`/GSO were left unbuilt because the gate closed without them. |
+| quinn 0.11 + h3 0.0.8        | N/A*   | 4.17     | 4.75       | 5.48        | **NOT A VALID COMPARISON -- excluded from the gate.** Open-loop 100-stream shape errors 98% (1.2M errored of 1.2M total); the 654 req/s figure is a harness artifact, not a quinn ceiling (the 10s warmup with the same client sustained 104k req/s at 0 errors). Recalibrate `benchmark/configs/h3_throughput.yaml` before citing quinn. |
+| **flare h3**                 | **74,653** | **1.45** | **2.45**   | 433.45      | Gate MET: beats quiche's 72,571 by +2.9% at sigma 0.50% (stable across 5x30s runs). The reactor rewrite removed the per-packet/per-op whole-state deep copies (in-place `ref` mutation of the `connections` / `http3_connections` slabs), routed QPACK decode through the cached-table SIMD Huffman path + a build-once static table + slice-based literal decode, and reserved capacity on the hot `List[UInt8]` egress builders so the per-datagram assembly fills one allocation instead of growing byte-by-byte. The last lever mattered most: the allocator's thread-local cache lives in a dlopen'd lib, so every spared malloc/free also spares a slow dynamic-TLS lookup, which collapsed both the `List._realloc` and `__tls_get_addr` profile peaks. p99.9 fell from 410 ms (first pass) to 2.45 ms; the lone p99.99 outlier (433 ms) is a per-run connection-setup artifact, not a steady-state stall. Egress was already coalesced (ACK + flow-control + multiple H3 STREAM frames per 1-RTT datagram); ingress `recvmmsg` is built and default-on, while egress `sendmmsg`/GSO are built in `flare.udp.batch` but not yet wired into QUIC egress -- the gate closed without egress batching. |
 
 Note (Jun 16, 2026 re-measurement): the published comparison
 above is against the quiche 0.22 baseline. After the baseline
@@ -1594,14 +1600,16 @@ Reading order:
   the single 433 ms p99.99 reading is a per-run setup artifact.
 - **quiche** is the steady-state HTTP/3 reference at this workload
   shape: 72.5k req/s with 1% run-σ and zero errored streams.
-- **quinn**'s headline 654 req/s number reflects the harness
-  saturating the server's per-connection stream window at the
-  open-loop 100-streams configuration, not a steady-state
-  throughput ceiling. h2load's 10s warmup with the same client
-  ran 104k req/s @ 0 errors before the long-duration shape
-  exposed the per-conn limit; the calibration knob lives in
+- **quinn** is excluded from the gate comparison: its headline
+  654 req/s number reflects the harness saturating the server's
+  per-connection stream window at the open-loop 100-streams
+  configuration, not a steady-state throughput ceiling. h2load's
+  10s warmup with the same client ran 104k req/s @ 0 errors before
+  the long-duration shape exposed the per-conn limit. Do not cite
+  654 req/s as a baseline; the calibration knob lives in
   ``benchmark/configs/h3_throughput.yaml`` (``h2load_streams``
-  + ``h2load_duration_seconds``).
+  + ``h2load_duration_seconds``) and must be re-run before quinn
+  is a valid comparison.
 - **flare HTTP/3** at 74,653 req/s reflects the reactor
   rewrite. The inbound post-Initial decrypt path was already live
   after the first pass (rustls KeyChange -> per-level keys,
@@ -1620,9 +1628,10 @@ Reading order:
   `__tls_get_addr` -> `_dl_update_slotinfo` walk -- the two profile
   peaks fell together. Egress coalescing (ACK + flow-control +
   multiple H3 STREAM frames packed per 1-RTT datagram, MTU-bounded)
-  was already in place; the gate closed without needing the
-  pre-authorized `recvmmsg`/`sendmmsg`/GSO batching, so that work
-  was left unbuilt. UDP `SO_RCVBUF`/`SO_SNDBUF` setters + the
+  was already in place; the gate closed without needing egress
+  `sendmmsg`/GSO batching (those helpers are built in
+  `flare.udp.batch` but not wired into QUIC egress; ingress
+  `recvmmsg` is built and default-on). UDP `SO_RCVBUF`/`SO_SNDBUF` setters + the
   `FLARE_QUIC_RCVBUF` / `FLARE_QUIC_SNDBUF` env knobs were added but
   default off: raising the receive buffer on this single-reactor
   loopback shape added queuing delay (bufferbloat) that hurt both
@@ -1693,10 +1702,10 @@ Results land under `benchmark/results/<timestamp>-<host>-<commit>/`.
 
 ## Continued v0.9.0 work - no regression
 
-The continued v0.9.0 work (client ergonomics, gRPC unary client +
-DNS cache, server 0-RTT data path, migration path-validation) is
-additive and does not touch the measured hot paths in the default
-configuration:
+The continued v0.9.0 work (client ergonomics, DNS cache, server
+0-RTT data path, migration path-validation) is additive and does
+not touch the measured hot paths in the default configuration
+(`GrpcClient` already ships -- unary plus streaming client):
 
 - The new client-side modules (`RedirectPolicy`/cookie/retry
   wiring, `GrpcClient`, `DnsCache`) are additive. The HTTP/1.1, h2, and h2c server

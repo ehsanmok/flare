@@ -88,9 +88,12 @@ flare.grpc     gRPC primitives on top of the HTTP/2 reactor.
                stitching from HTTP/2 DATA frames, and the
                sans-I/O run_unary_call orchestrator that emits
                response bytes + final GrpcStatus + trailing
-               GrpcMetadata. Server-streaming, client-streaming,
-               bidirectional, the client side, and proto3
-               codegen ship as follow-ups.
+               GrpcMetadata. The client ships (GrpcClient: unary
+               plus server-/client-streaming and bidi); the
+               buffered server-streaming adapter ships. proto3
+               `service` codegen, server-side client-streaming /
+               bidi, reflection descriptor lookups, and
+               Health/Watch ship as follow-ups.
 flare.openapi  OpenAPI 3.1 spec model + deterministic JSON
                emitter (stable key order for diffable specs).
                Auto-derivation from ComptimeRouter +

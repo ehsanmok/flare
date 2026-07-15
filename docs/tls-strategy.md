@@ -38,7 +38,8 @@ Three reasons, in priority order:
    planet. Every CVE that lands gets a same-day pixi bump --
    far better than carrying our own bug in the bytes we put on
    the wire.
-3. **Footprint.** The FFI shim is < 600 lines of C++; the rest
+3. **Footprint.** The FFI shim is ~1,200 lines of C++
+   (`flare/tls/ffi/openssl_wrapper.cpp`); the rest
    is Mojo. We do not pay for the abstraction layer at runtime
    (the FFI calls inline into the reactor's read / write
    stages with one libc indirection).

@@ -50,9 +50,9 @@ existing credentials.
 | Malformed HTTP/1.1 request (header injection, smuggling, CRLF). | `flare.http.proto` is a sans-I/O parser with RFC 7230 / 9112 token validation. CR / LF / NUL rejected at parse time; multiple `Content-Length` rejected. TE-chunked-with-CL rejected. Conformance suite under `conformance/h1/` covers the negative cases. The strict default is the only wire policy currently enforced and is the production-safe pick. `_ExperimentalH1LeniencyConfig` is a **future-policy** carrier — its leading underscore + `_Experimental` prefix mark it as an unstable surface; only `allow_lf_only_line_endings` and `allow_obs_fold` have parser-side plumbing today, and even those default off. The rest of the named relaxations are not yet wired alongside the per-flag plumbing; do not rely on them changing parser behavior today. |
 | Slowloris-style header flood. | `ServerConfig.max_header_list_size` caps the header bytes the server will accept before closing; default 8 KiB. The reactor's per-connection read timeout (configurable) shuts the socket on stalls. |
 | Large body upload to exhaust memory. | `ServerConfig.max_body_bytes` (default 10 MiB) is checked at the parser layer before allocating. Multipart streaming is opt-in; the default body-buffering path enforces the cap. |
-| HTTP/2 rapid-reset flood (CVE-2023-44487). | `SETTINGS_MAX_CONCURRENT_STREAMS = 100` advertised in the preface bounds the rapid-reset budget per connection. Cancellation cost is constant; no goroutine-per-stream allocation lurks behind the abstraction. |
+| HTTP/2 rapid-reset flood (CVE-2023-44487). | The driver counts inbound `RST_STREAM` frames and trips `GOAWAY(ENHANCE_YOUR_CALM)` once the connection-lifetime flood threshold is crossed; `SETTINGS_MAX_CONCURRENT_STREAMS = 100` is also advertised. Cancellation cost is constant; no goroutine-per-stream allocation lurks behind the abstraction. |
 | HTTP/2 priority frame abuse. | flare's H2 driver ignores PRIORITY (RFC 9113 §5.3.1 deprecation); never builds the priority tree, so priority-tree attacks have no surface. |
-| HPACK decoding DoS (HEADERS bomb). | The HPACK decoder enforces `SETTINGS_MAX_HEADER_LIST_SIZE`; once the limit is exceeded the stream is RST'd with `ENHANCE_YOUR_CALM`. The dynamic table size is capped via SETTINGS. |
+| HPACK decoding DoS (HEADERS / CONTINUATION bomb). | The H2 driver enforces `SETTINGS_MAX_HEADER_LIST_SIZE` on the inbound HEADERS + CONTINUATION accumulation (falling back to a 1 MiB hard cap when the setting is unset); an oversized block is RST'd with `ENHANCE_YOUR_CALM`, and CONTINUATION frames per block are capped (CVE-2024-27316). The dynamic table size is capped via SETTINGS. |
 | HPACK Huffman DoS (compression oracle). | The decoder is constant-time relative to input length; the table-driven kernel does not branch on payload content. |
 | permessage-deflate zip-bomb. | Per-message decompressed-size cap (default 16 MiB) is enforced before allocation. Exceeding the cap raises and the WS connection is closed with 1009 (`MESSAGE_TOO_BIG`). Both the no-context-takeover and context-takeover code paths honour the cap. |
 | TLS downgrade. | TLS 1.2+ only, weak ciphers disabled (`flare.tls.config` whitelist). No TLS 1.0 / 1.1 fallback path exists. |
@@ -126,7 +126,7 @@ PR is fixing it), the normal issue tracker is fine.
 | What | When | Where |
 |---|---|---|
 | Sanitiser builds (asan + tsan) | Every cycle, before release. | `pixi run tests-asan` / `pixi run tests-tsan` |
-| Fuzz corpora (35 harnesses, 8M+ runs combined) | Every cycle, >= 200K runs each. | `pixi run fuzz-all` |
+| Fuzz corpora (56 harnesses, 9M+ runs combined) | Every cycle, >= 200K runs each. | `pixi run fuzz-all` |
 | Conformance fixtures (h1 + ws) | Every cycle. | `pixi run test-conformance-h1` + `pixi run test-conformance-ws` |
 | Soak (24 h) | Once per minor release on EPYC 7R32. | `SOAK_DURATION_SECS=86400 pixi run --environment bench bench-soak-mixed` (output under `benchmark/results/`) |
 | Cross-arch soak (Apple Silicon) | Once per minor release. | Same task on the M2 host. |
