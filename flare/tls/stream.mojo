@@ -978,13 +978,11 @@ struct TlsStream(Movable, Readable):
         this, so explicit ``close()`` is not required.
         """
         if self._ssl != 0:
-            try:
-                var lib = OwnedDLHandle(_find_flare_lib())
-                _ = _do_ssl_shutdown(lib, self._ssl)
-                _do_ssl_free(lib, self._ssl)
-                _do_ssl_ctx_free(lib, self._ctx)
-            except:
-                pass
+            # Use the connection-cached handle (valid for the stream's
+            # lifetime) rather than reopening per close.
+            _ = _do_ssl_shutdown(self._lib, self._ssl)
+            _do_ssl_free(self._lib, self._ssl)
+            _do_ssl_ctx_free(self._lib, self._ctx)
             self._ssl = 0
             self._ctx = 0
         self._tcp.close()
