@@ -33,9 +33,12 @@ from std.collections import List, Optional
 from std.memory import Span
 from std.time import perf_counter_ns
 
+from flare.http.body import ChunkSource
+from flare.http.cancel import Cancel
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
+from flare.http.response_stream import ChunkSourceBox
 
 from .metadata import GrpcMetadata
 from .server import (
@@ -44,7 +47,7 @@ from .server import (
     GrpcRequestHeaders,
     _grpc_headers_from_request,
     _negotiate_response_encoding,
-    _response_from_outcome,
+    emit_trailing_headers_status,
     encode_unary_response,
     parse_request_headers,
     stitch_request_data,
@@ -165,6 +168,50 @@ def _outcome_from_stream_reply(
     )
 
 
+def _drive_stream_reply[
+    H: GrpcServerStreaming
+](
+    mut handler: H,
+    headers: GrpcRequestHeaders,
+    request_data: Span[UInt8, _],
+) -> GrpcServerStreamReply:
+    """Validate + dispatch a server-streaming call to its handler.
+
+    Folds failures into typed replies exactly like
+    :func:`flare.grpc.server.run_unary_call`: HEADERS validation and
+    LPM-stitch failures map to ``INVALID_ARGUMENT``; a handler ``raises``
+    maps to ``INTERNAL``. Returns the raw :class:`GrpcServerStreamReply`
+    (messages + status) so callers can either buffer it
+    (:func:`run_server_streaming_call`) or stream it incrementally
+    (:func:`_streaming_response_from_reply`).
+    """
+    var ctx: GrpcCallContext
+    try:
+        ctx = parse_request_headers(headers)
+    except e:
+        return GrpcServerStreamReply.err(
+            GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
+        )
+    var req_encoding = String("")
+    if Bool(headers.encoding):
+        req_encoding = headers.encoding.value()
+    var request_bytes: List[UInt8]
+    try:
+        request_bytes = stitch_request_data(request_data, req_encoding)
+    except e:
+        return GrpcServerStreamReply.err(
+            GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
+        )
+    try:
+        return handler.serve_server_streaming(
+            ctx, Span[UInt8, _](request_bytes)
+        )
+    except e:
+        return GrpcServerStreamReply.err(
+            GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))
+        )
+
+
 def run_server_streaming_call[
     H: GrpcServerStreaming
 ](
@@ -172,52 +219,94 @@ def run_server_streaming_call[
     headers: GrpcRequestHeaders,
     request_data: Span[UInt8, _],
 ) -> GrpcCallOutcome:
-    """End-to-end driver for a server-streaming call.
+    """End-to-end (buffered) driver for a server-streaming call.
 
-    Same failure folding as :func:`flare.grpc.server.run_unary_call`:
-    HEADERS validation and LPM-stitch failures map to
-    ``INVALID_ARGUMENT``; a handler ``raises`` maps to ``INTERNAL``.
-    The OK path encodes every yielded message into the response body.
+    Same failure folding as :func:`flare.grpc.server.run_unary_call`.
+    The OK path encodes every yielded message into one response body.
+    The reactor-mounted service prefers the incremental path
+    (:func:`_streaming_response_from_reply`); this buffered outcome
+    remains for direct/unit-test use.
     """
     var accept = String("")
     if Bool(headers.accept_encoding):
         accept = headers.accept_encoding.value()
-    var req_encoding = String("")
-    if Bool(headers.encoding):
-        req_encoding = headers.encoding.value()
-    var ctx: GrpcCallContext
-    try:
-        ctx = parse_request_headers(headers)
-    except e:
-        return _outcome_from_stream_reply(
-            GrpcServerStreamReply.err(
-                GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
-            ),
-            accept,
-        )
-    var request_bytes: List[UInt8]
-    try:
-        request_bytes = stitch_request_data(request_data, req_encoding)
-    except e:
-        return _outcome_from_stream_reply(
-            GrpcServerStreamReply.err(
-                GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
-            ),
-            accept,
-        )
-    var reply: GrpcServerStreamReply
-    try:
-        reply = handler.serve_server_streaming(
-            ctx, Span[UInt8, _](request_bytes)
-        )
-    except e:
-        return _outcome_from_stream_reply(
-            GrpcServerStreamReply.err(
-                GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))
-            ),
-            accept,
-        )
+    var reply = _drive_stream_reply[H](handler, headers, request_data)
     return _outcome_from_stream_reply(reply^, accept)
+
+
+# ── Incremental (per-message DATA-frame) streaming path ────────────────────
+
+
+struct _GrpcStreamMessageSource(ChunkSource, Movable):
+    """A :trait:`ChunkSource` that emits one LPM frame per ``next`` call.
+
+    Wraps the handler's materialized message list so each response
+    message ships as its own HTTP/2 DATA frame on a writable edge
+    (flow-controlled) instead of one buffered blob. Compression is
+    negotiated once for the whole stream and applied per frame, matching
+    the buffered encoder's semantics.
+
+    ponytail: the handler still returns the full ``List[List[UInt8]]``
+    up front, so this bounds *wire flushing*, not handler-side memory.
+    A pull-based ``GrpcServerStreaming`` variant (yield one message per
+    call) is the upgrade path for unbounded streams.
+    """
+
+    var messages: List[List[UInt8]]
+    var encoding: String
+    var idx: Int
+
+    def __init__(
+        out self, var messages: List[List[UInt8]], var encoding: String
+    ):
+        self.messages = messages^
+        self.encoding = encoding^
+        self.idx = 0
+
+    def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
+        if cancel.cancelled() or self.idx >= len(self.messages):
+            return Optional[List[UInt8]]()
+        var frame = List[UInt8]()
+        encode_unary_response(
+            self.messages[self.idx].copy(), frame, self.encoding
+        )
+        self.idx += 1
+        return Optional[List[UInt8]](frame^)
+
+
+def _streaming_response_from_reply(
+    var reply: GrpcServerStreamReply,
+    accept_encoding: String = String(""),
+) raises -> Response:
+    """Build a streaming :class:`Response` from a server-stream reply.
+
+    Leading HEADERS carry ``:status=200`` + ``content-type`` (+
+    ``grpc-encoding``); each message ships incrementally as its own DATA
+    frame via :class:`_GrpcStreamMessageSource`; ``grpc-status`` + any
+    text trailing metadata ride the trailing HEADERS block that the H2
+    reactor emits at END_STREAM.
+    """
+    var used_encoding = _negotiate_response_encoding(accept_encoding)
+    var resp = Response(200)
+    resp.headers.set("content-type", "application/grpc")
+    if used_encoding != "":
+        resp.headers.set("grpc-encoding", used_encoding)
+    var status_trailers = emit_trailing_headers_status(reply.status)
+    for i in range(len(status_trailers)):
+        resp.trailers.set(status_trailers[i][0], status_trailers[i][1])
+    var entries = reply.trailing_metadata.entries()
+    for i in range(len(entries)):
+        if entries[i].is_binary:
+            continue
+        resp.trailers.set(
+            entries[i].key,
+            String(unsafe_from_utf8=Span[UInt8, _](entries[i].value)),
+        )
+    var src = _GrpcStreamMessageSource(reply.messages.copy(), used_encoding^)
+    resp.body_stream = Optional[ChunkSourceBox](
+        ChunkSourceBox.create[_GrpcStreamMessageSource](src^)
+    )
+    return resp^
 
 
 # ── Reactor-mounted server-streaming service ──────────────────────────────
@@ -252,6 +341,9 @@ struct GrpcStreamingService[
 
     def serve(self, req: Request) raises -> Response:
         var headers = _grpc_headers_from_request(req)
+        var accept = String("")
+        if Bool(headers.accept_encoding):
+            accept = headers.accept_encoding.value()
         var budget_us = UInt64(0)
         if Bool(headers.timeout):
             var ts = headers.timeout.value()
@@ -262,18 +354,21 @@ struct GrpcStreamingService[
                     budget_us = UInt64(0)
         var start_ns = perf_counter_ns()
         var h = self.handler.copy()
-        var outcome = run_server_streaming_call[Self.H](
+        var reply = _drive_stream_reply[Self.H](
             h, headers, Span[UInt8, _](req.body)
         )
+        # Deadline is a post-hoc elapsed check (the handler ran to
+        # completion producing the message list); on overrun the reply
+        # is replaced with a DEADLINE_EXCEEDED trailer, no messages.
         if budget_us > UInt64(0):
             var elapsed_us = UInt64((perf_counter_ns() - start_ns) // 1_000)
             if elapsed_us > budget_us:
-                outcome = _outcome_from_stream_reply(
-                    GrpcServerStreamReply.err(
-                        GrpcStatus.err(
-                            GRPC_STATUS_DEADLINE_EXCEEDED,
-                            String("deadline exceeded"),
-                        )
+                reply = GrpcServerStreamReply.err(
+                    GrpcStatus.err(
+                        GRPC_STATUS_DEADLINE_EXCEEDED,
+                        String("deadline exceeded"),
                     )
                 )
-        return _response_from_outcome(outcome^)
+        # Incremental flush: each message ships as its own DATA frame on
+        # a writable edge, trailers close the stream at END_STREAM.
+        return _streaming_response_from_reply(reply^, accept)

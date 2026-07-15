@@ -20,9 +20,18 @@ The flare H2 server carries ``grpc-status`` in the response header set
 arrived as an initial header or a trailing HEADERS frame.
 """
 
+from std.memory import Span
 from std.testing import assert_equal, assert_true
 
-from flare.grpc import GrpcClient, decode_grpc_message, encode_grpc_message
+from flare.grpc import (
+    GrpcCallContext,
+    GrpcClient,
+    GrpcServerStreamReply,
+    GrpcServerStreaming,
+    GrpcStreamingService,
+    decode_grpc_message,
+    encode_grpc_message,
+)
 from flare.http import HttpServer, Request, Response
 from flare.net import SocketAddr
 from flare.testing import fork_server, kill_forked_server
@@ -87,8 +96,67 @@ def _stream_handler(req: Request) raises -> Response:
     return Response(404, "", List[UInt8]())
 
 
+@fieldwise_init
+struct _CountStreamHandler(Copyable, GrpcServerStreaming, Movable):
+    """Yields ``msg-0`` .. ``msg-(N-1)`` where N is the ASCII request."""
+
+    var _seed: Int
+
+    def serve_server_streaming(
+        mut self,
+        ctx: GrpcCallContext,
+        request_bytes: Span[UInt8, _],
+    ) raises -> GrpcServerStreamReply:
+        var n = 0
+        if len(request_bytes) > 0:
+            n = Int(String(unsafe_from_utf8=request_bytes))
+        var msgs = List[List[UInt8]]()
+        for i in range(n):
+            var p = (String("msg-") + String(i)).as_bytes()
+            var m = List[UInt8]()
+            for b in p:
+                m.append(b)
+            msgs.append(m^)
+        return GrpcServerStreamReply.ok(msgs^)
+
+
 def _base(port: UInt16) -> String:
     return String("http://127.0.0.1:") + String(Int(port))
+
+
+def test_server_streaming_service_incremental_frames() raises:
+    """A real GrpcStreamingService streams each message as its own DATA
+    frame (incremental H2 path) and closes with grpc-status:0 trailers."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var svc = GrpcStreamingService(_CountStreamHandler(0))
+    var pid = fork_server(srv^, svc^)
+
+    var raised = False
+    var msgs = List[String]()
+    var code = -1
+    try:
+        var ch = GrpcClient(_base(port))
+        var st = ch.call_server_streaming(
+            "/echo.Echo/ServerStream", "4".as_bytes()
+        )
+        while True:
+            var m = st.recv()
+            if not m:
+                break
+            msgs.append(String(unsafe_from_utf8=Span[UInt8, _](m.value())))
+        code = st.status().code
+        st.close()
+    except e:
+        print("service server-streaming raised:", e)
+        raised = True
+
+    kill_forked_server(pid)
+    assert_true(not raised, "service server-streaming raised")
+    assert_equal(len(msgs), 4)
+    assert_equal(msgs[0], "msg-0")
+    assert_equal(msgs[3], "msg-3")
+    assert_equal(code, 0)
 
 
 def test_server_streaming_yields_n_messages_in_order() raises:
@@ -191,6 +259,7 @@ def test_bidi_echoes_each_message() raises:
 
 def main() raises:
     test_server_streaming_yields_n_messages_in_order()
+    test_server_streaming_service_incremental_frames()
     test_client_streaming_counts_messages()
     test_bidi_echoes_each_message()
-    print("test_grpc_streaming: 3 passed")
+    print("test_grpc_streaming: 4 passed")
