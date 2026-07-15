@@ -1338,6 +1338,7 @@ struct HttpServer(Movable):
             drained=1 if deadline_ms > 0 else 0,
             timed_out=0,
             in_flight_at_deadline=0,
+            crashed=0,
         )
 
 

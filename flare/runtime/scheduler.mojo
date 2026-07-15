@@ -194,11 +194,16 @@ struct ShutdownReport(Copyable, ImplicitlyCopyable, Movable):
         in_flight_at_deadline: Connections still alive at the
             instant the timeout fired (== ``timed_out`` after the
             force-close completes).
+        crashed: 1 if this worker's last run exited crashed (poll
+            failure) rather than cleanly, else 0. Mirrors the
+            per-worker slot behind ``crashed_worker_count()`` so a
+            caller can attribute a crash to a specific worker.
     """
 
     var drained: Int
     var timed_out: Int
     var in_flight_at_deadline: Int
+    var crashed: Int
 
 
 # ── Context cleanup helpers ──────────────────────────────────────────────────
@@ -913,11 +918,15 @@ struct Scheduler[F: Frontend & Copyable](Movable):
             var inflight = load_worker_stat(
                 self._stats_addrs[i], WORKER_STAT_INFLIGHT
             )
+            var status = load_worker_stat(
+                self._stats_addrs[i], WORKER_STAT_STATUS
+            )
             reports.append(
                 ShutdownReport(
                     drained=1 if deadline_ms > 0 else 0,
                     timed_out=inflight,
                     in_flight_at_deadline=inflight,
+                    crashed=1 if status == WORKER_STATUS_CRASHED else 0,
                 )
             )
         self._record_crash_count()

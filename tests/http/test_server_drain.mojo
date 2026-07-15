@@ -35,14 +35,19 @@ from flare.net import SocketAddr
 
 
 def test_shutdown_report_constructor() raises:
-    var r = ShutdownReport(drained=3, timed_out=1, in_flight_at_deadline=1)
+    var r = ShutdownReport(
+        drained=3, timed_out=1, in_flight_at_deadline=1, crashed=0
+    )
     assert_equal(r.drained, 3)
     assert_equal(r.timed_out, 1)
     assert_equal(r.in_flight_at_deadline, 1)
+    assert_equal(r.crashed, 0)
 
 
 def test_shutdown_report_zero_state() raises:
-    var r = ShutdownReport(drained=0, timed_out=0, in_flight_at_deadline=0)
+    var r = ShutdownReport(
+        drained=0, timed_out=0, in_flight_at_deadline=0, crashed=0
+    )
     assert_equal(r.drained, 0)
     assert_equal(r.timed_out, 0)
     assert_equal(r.in_flight_at_deadline, 0)
@@ -97,7 +102,9 @@ def test_drain_marks_stopping_idempotent() raises:
 
 
 def test_root_package_re_exports_shutdown_report() raises:
-    var r = RootShutdownReport(drained=2, timed_out=0, in_flight_at_deadline=0)
+    var r = RootShutdownReport(
+        drained=2, timed_out=0, in_flight_at_deadline=0, crashed=0
+    )
     assert_equal(r.drained, 2)
 
 
