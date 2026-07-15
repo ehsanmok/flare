@@ -27,3 +27,21 @@ message Shape {
   Point origin = 6;
   repeated Point vertices = 7;
 }
+
+// Exercises the service-block codegen: unary, server-streaming,
+// client-streaming, and bidi RPC shapes.
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}
+
+service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply);
+  rpc ServerTick (HelloRequest) returns (stream HelloReply);
+  rpc Collect (stream HelloRequest) returns (HelloReply);
+  rpc Chat (stream HelloRequest) returns (stream HelloReply);
+}

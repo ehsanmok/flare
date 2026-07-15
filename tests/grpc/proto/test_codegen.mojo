@@ -22,9 +22,28 @@ encode/decode symmetry, including packed repeated-scalar reads.
 from std.memory import Span
 from std.testing import assert_equal, assert_true, TestSuite
 
+from flare.grpc import GrpcCallContext, GrpcService
 from flare.grpc.proto import ProtoWriter
+from flare.http import HttpServer
+from flare.net import SocketAddr
+from flare.testing import fork_server, kill_forked_server
 
-from sample_pb import Color_BLUE, Color_RED, Point, Shape
+from sample_pb import (
+    Color_BLUE,
+    Color_RED,
+    GREETER_CHAT_PATH,
+    GREETER_SAYHELLO_PATH,
+    GREETER_SERVERTICK_PATH,
+    Greeter_SayHello_Adapter,
+    GreeterClient,
+    GreeterServer,
+    HelloReply,
+    HelloRequest,
+    Point,
+    SAMPLE_PROTO_FILENAME,
+    Shape,
+    sample_file_descriptor,
+)
 
 
 def test_point_round_trip() raises:
@@ -100,9 +119,86 @@ def test_packed_repeated_scalar_decodes() raises:
     assert_equal(back.tags[2], 3)
 
 
+def test_service_path_consts() raises:
+    assert_equal(
+        String(GREETER_SAYHELLO_PATH), "/flare.sample.Greeter/SayHello"
+    )
+    assert_equal(
+        String(GREETER_SERVERTICK_PATH), "/flare.sample.Greeter/ServerTick"
+    )
+    assert_equal(String(GREETER_CHAT_PATH), "/flare.sample.Greeter/Chat")
+
+
+def test_file_descriptor_emitted() raises:
+    # FileDescriptorProto: field 1 (name) tag = (1<<3)|2 = 0x0a, then the
+    # length-prefixed filename "sample.proto" (12 bytes).
+    var fd = sample_file_descriptor()
+    assert_true(len(fd) > 12)
+    assert_equal(fd[0], UInt8(0x0A))
+    assert_equal(fd[1], UInt8(12))
+    assert_equal(String(SAMPLE_PROTO_FILENAME), "sample.proto")
+
+
+@fieldwise_init
+struct _MyGreeter(Copyable, GreeterServer, Movable):
+    """Minimal GreeterServer impl for the codegen e2e check."""
+
+    var _seed: Int
+
+    def say_hello(
+        mut self, ctx: GrpcCallContext, request: HelloRequest
+    ) raises -> HelloReply:
+        var r = HelloReply()
+        r.message = String("hi ") + request.name
+        return r^
+
+    def server_tick(
+        mut self, ctx: GrpcCallContext, request: HelloRequest
+    ) raises -> List[HelloReply]:
+        return List[HelloReply]()
+
+    def collect(
+        mut self, ctx: GrpcCallContext, requests: List[HelloRequest]
+    ) raises -> HelloReply:
+        return HelloReply()
+
+    def chat(
+        mut self, ctx: GrpcCallContext, requests: List[HelloRequest]
+    ) raises -> List[HelloReply]:
+        return List[HelloReply]()
+
+
+def _greeter_unary_e2e() raises:
+    """Full loop through generated client stub + server adapter: the typed
+    GreeterClient.say_hello drives GrpcService(Greeter_SayHello_Adapter)."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var svc = GrpcService(Greeter_SayHello_Adapter(_MyGreeter(0)))
+    var pid = fork_server(srv^, svc^)
+
+    var raised = False
+    var msg = String("")
+    try:
+        var base = String("http://127.0.0.1:") + String(Int(port))
+        var client = GreeterClient(base)
+        var req = HelloRequest()
+        req.name = String("bob")
+        var reply = client.say_hello(req)
+        msg = reply.message
+    except e:
+        print("greeter e2e raised:", e)
+        raised = True
+
+    kill_forked_server(pid)
+    assert_true(not raised, "greeter e2e raised")
+    assert_equal(msg, "hi bob")
+
+
 def main() raises:
     print("=" * 60)
-    print("test_codegen.mojo -- proto_gen round-trip")
+    print("test_codegen.mojo -- proto_gen round-trip + service codegen")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()
+    _greeter_unary_e2e()
+    print("test_codegen.mojo -- greeter unary e2e passed")

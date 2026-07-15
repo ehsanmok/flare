@@ -16,9 +16,15 @@ Supported proto3 subset: ``message`` (incl. nested), ``enum`` (incl.
 nested), scalar fields (double/float/int32/int64/uint32/uint64/
 sint32/sint64/bool/string/bytes/fixed32/fixed64), ``repeated`` scalar
 and message fields, singular message fields (modeled as
-``Optional[Msg]`` for proto3 message presence), and enum fields. Maps,
-oneof, groups, sfixed*, and ``service`` blocks are out of scope (the
-service shape is the GrpcUnary / GrpcStreamingService adapters).
+``Optional[Msg]`` for proto3 message presence), and enum fields.
+
+``service`` blocks emit: ``PATH_*`` StaticString consts, a typed
+``<Service>Server`` trait, per-RPC byte adapters (bridging the typed
+trait onto the runtime GrpcUnary / GrpcServerStreaming /
+GrpcClientStreaming / GrpcBidiStreaming traits), a typed
+``<Service>Client`` stub wired to ``GrpcClient``, and a serialized
+``FileDescriptorProto`` (for reflection). Maps, oneof, groups, and
+sfixed* are out of scope.
 
 Note: the encoder writes repeated scalars UNPACKED (one tag per
 element) -- valid proto3 wire but larger than protoc's packed default,
@@ -82,6 +88,21 @@ class Enum:
     values: list[tuple[str, int]] = dc_field(default_factory=list)
 
 
+@dataclass
+class Rpc:
+    name: str
+    req_type: str
+    resp_type: str
+    client_streaming: bool
+    server_streaming: bool
+
+
+@dataclass
+class Service:
+    name: str
+    rpcs: list[Rpc] = dc_field(default_factory=list)
+
+
 class Parser:
     """A small recursive proto3 tokenizer + parser for the supported
     subset. Comments (// and /* */) are stripped first."""
@@ -89,10 +110,12 @@ class Parser:
     def __init__(self, text: str):
         text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
         text = re.sub(r"//[^\n]*", " ", text)
-        self.toks = re.findall(r"[A-Za-z_][\w.]*|\d+|[{}=;]", text)
+        self.toks = re.findall(r"[A-Za-z_][\w.]*|\d+|[{}=;()]", text)
         self.i = 0
         self.messages: list[Message] = []
         self.enums: list[Enum] = []
+        self.services: list[Service] = []
+        self.package: str = ""
 
     def peek(self) -> str | None:
         return self.toks[self.i] if self.i < len(self.toks) else None
@@ -116,13 +139,19 @@ class Parser:
                 # to the semicolon.
                 while self.next() != ";":
                     pass
-            elif t in ("package", "option", "import"):
+            elif t == "package":
+                self.package = self.next()
+                while self.next() != ";":
+                    pass
+            elif t in ("option", "import"):
                 while self.next() != ";":
                     pass
             elif t == "message":
                 self._message(prefix="")
             elif t == "enum":
                 self._enum(prefix="")
+            elif t == "service":
+                self._service()
             elif t == ";":
                 continue
             else:
@@ -183,6 +212,54 @@ class Parser:
             self.expect(";")
             en.values.append((vname, vnum))
         self.enums.append(en)
+
+    def _service(self) -> None:
+        name = self.next()
+        self.expect("{")
+        svc = Service(name=name)
+        while True:
+            t = self.next()
+            if t == "}":
+                break
+            if t == "option":
+                while self.next() != ";":
+                    pass
+                continue
+            if t != "rpc":
+                raise SystemExit(f"proto_gen: unexpected service token '{t}'")
+            # rpc <Method> ( [stream] <Req> ) returns ( [stream] <Resp> ) ;
+            mname = self.next()
+            self.expect("(")
+            client_streaming = False
+            req = self.next()
+            if req == "stream":
+                client_streaming = True
+                req = self.next()
+            self.expect(")")
+            self.expect("returns")
+            self.expect("(")
+            server_streaming = False
+            resp = self.next()
+            if resp == "stream":
+                server_streaming = True
+                resp = self.next()
+            self.expect(")")
+            # optional method body { ... } or trailing ';'
+            nx = self.next()
+            if nx == "{":
+                depth = 1
+                while depth > 0:
+                    tok = self.next()
+                    if tok == "{":
+                        depth += 1
+                    elif tok == "}":
+                        depth -= 1
+            elif nx != ";":
+                raise SystemExit(f"proto_gen: expected ';' after rpc, got '{nx}'")
+            svc.rpcs.append(
+                Rpc(mname, req, resp, client_streaming, server_streaming)
+            )
+        self.services.append(svc)
 
 
 class Resolver:
@@ -460,6 +537,324 @@ def emit_enum(e: Enum) -> str:
     return "\n".join(lines)
 
 
+# ── FileDescriptorProto (descriptor.proto) serialization ───────────────────
+# Hand-encoded protobuf (no protoc dependency) so the emitted descriptor is
+# deterministic and golden-testable. Reflection serves these bytes verbatim.
+
+# FieldDescriptorProto.Type enum (descriptor.proto).
+_FDP_TYPE = {
+    "double": 1, "float": 2, "int64": 3, "uint64": 4, "int32": 5,
+    "fixed64": 6, "fixed32": 7, "bool": 8, "string": 9, "bytes": 12,
+    "uint32": 13, "sfixed32": 15, "sfixed64": 16, "sint32": 17, "sint64": 18,
+}
+
+
+def _pb_varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return bytes(out)
+
+
+def _pb_tag(field: int, wire: int) -> bytes:
+    return _pb_varint((field << 3) | wire)
+
+
+def _pb_str(field: int, s: str) -> bytes:
+    b = s.encode("utf-8")
+    return _pb_tag(field, 2) + _pb_varint(len(b)) + b
+
+
+def _pb_bool(field: int, v: bool) -> bytes:
+    return _pb_tag(field, 0) + _pb_varint(1) if v else b""
+
+
+def _pb_u32(field: int, n: int) -> bytes:
+    return _pb_tag(field, 0) + _pb_varint(n)
+
+
+def _pb_msg(field: int, body: bytes) -> bytes:
+    return _pb_tag(field, 2) + _pb_varint(len(body)) + body
+
+
+def _fqname(package: str, name: str) -> str:
+    """Fully-qualified proto name ``.pkg.Name`` (dotted, not flattened)."""
+    dotted = name.replace("_", ".")
+    return ("." + package + "." + dotted) if package else ("." + dotted)
+
+
+def _field_descriptor(f: Field, res: Resolver, package: str) -> bytes:
+    """One FieldDescriptorProto: name(1), number(3), label(4), type(5),
+    type_name(6 for message/enum)."""
+    k = res.kind(f.type_token)
+    body = _pb_str(1, f.name) + _pb_u32(3, f.number)
+    body += _pb_u32(4, 3 if f.repeated else 1)  # LABEL_REPEATED / OPTIONAL
+    if k == "scalar":
+        body += _pb_u32(5, _FDP_TYPE[f.type_token])
+    elif k == "enum":
+        body += _pb_u32(5, 14)  # TYPE_ENUM
+        body += _pb_str(6, _fqname(package, res.flatten(f.type_token)))
+    else:
+        body += _pb_u32(5, 11)  # TYPE_MESSAGE
+        body += _pb_str(6, _fqname(package, res.flatten(f.type_token)))
+    return body
+
+
+def _message_descriptor(m: Message, res: Resolver, package: str) -> bytes:
+    """DescriptorProto: name(1) + field(2)*. Nested types are emitted flat
+    at file scope (the Mojo side flattens too), so no nested_type here."""
+    body = _pb_str(1, m.name.split("_")[-1])
+    for f in m.fields:
+        body += _pb_msg(2, _field_descriptor(f, res, package))
+    return body
+
+
+def _method_descriptor(r: Rpc, res: Resolver, package: str) -> bytes:
+    """MethodDescriptorProto: name(1), input_type(2), output_type(3),
+    client_streaming(5), server_streaming(6)."""
+    body = _pb_str(1, r.name)
+    body += _pb_str(2, _fqname(package, res.flatten(r.req_type)))
+    body += _pb_str(3, _fqname(package, res.flatten(r.resp_type)))
+    body += _pb_bool(5, r.client_streaming)
+    body += _pb_bool(6, r.server_streaming)
+    return body
+
+
+def _service_descriptor(s: Service, res: Resolver, package: str) -> bytes:
+    body = _pb_str(1, s.name)
+    for r in s.rpcs:
+        body += _pb_msg(2, _method_descriptor(r, res, package))
+    return body
+
+
+def build_file_descriptor(
+    filename: str, p: Parser, res: Resolver
+) -> bytes:
+    """Serialize a FileDescriptorProto: name(1), package(2),
+    message_type(4)*, service(6)*, syntax(12)."""
+    out = _pb_str(1, filename)
+    if p.package:
+        out += _pb_str(2, p.package)
+    for m in p.messages:
+        out += _pb_msg(4, _message_descriptor(m, res, p.package))
+    for s in p.services:
+        out += _pb_msg(6, _service_descriptor(s, res, p.package))
+    out += _pb_str(12, "proto3")
+    return out
+
+
+def _const_stem(filename: str) -> str:
+    base = filename.rsplit("/", 1)[-1]
+    if base.endswith(".proto"):
+        base = base[: -len(".proto")]
+    return re.sub(r"[^0-9A-Za-z]", "_", base).upper()
+
+
+# ── service codegen (PATH consts, server trait + adapters, client stub) ────
+
+
+def _method_snake(name: str) -> str:
+    """CamelCase rpc name -> snake_case Mojo method name."""
+    s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+    return s.lower()
+
+
+def _path_const(svc: str, rpc: str) -> str:
+    return f"{svc.upper()}_{rpc.upper()}_PATH"
+
+
+def emit_service_paths(s: Service, package: str) -> str:
+    lines: list[str] = [f"# service {s.name} RPC paths"]
+    for r in s.rpcs:
+        full = f"/{package}.{s.name}/{r.name}" if package else f"/{s.name}/{r.name}"
+        lines.append(
+            f'comptime {_path_const(s.name, r.name)}: StaticString = "{full}"'
+        )
+    return "\n".join(lines)
+
+
+def emit_server_trait(s: Service, res: Resolver) -> str:
+    lines: list[str] = []
+    lines.append(f"trait {s.name}Server(Copyable, Movable):")
+    lines.append(
+        f'    """Typed server surface for the ``{s.name}`` gRPC service."""'
+    )
+    lines.append("")
+    for r in s.rpcs:
+        req = res.flatten(r.req_type)
+        resp = res.flatten(r.resp_type)
+        m = _method_snake(r.name)
+        if r.client_streaming and r.server_streaming:
+            sig = (
+                f"    def {m}(mut self, ctx: GrpcCallContext,"
+                f" requests: List[{req}]) raises -> List[{resp}]:"
+            )
+        elif r.client_streaming:
+            sig = (
+                f"    def {m}(mut self, ctx: GrpcCallContext,"
+                f" requests: List[{req}]) raises -> {resp}:"
+            )
+        elif r.server_streaming:
+            sig = (
+                f"    def {m}(mut self, ctx: GrpcCallContext,"
+                f" request: {req}) raises -> List[{resp}]:"
+            )
+        else:
+            sig = (
+                f"    def {m}(mut self, ctx: GrpcCallContext,"
+                f" request: {req}) raises -> {resp}:"
+            )
+        lines.append(sig)
+        lines.append("        ...")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _adapter_name(s: Service, r: Rpc) -> str:
+    return f"{s.name}_{r.name}_Adapter"
+
+
+def emit_rpc_adapter(s: Service, r: Rpc, res: Resolver) -> str:
+    req = res.flatten(r.req_type)
+    resp = res.flatten(r.resp_type)
+    m = _method_snake(r.name)
+    name = _adapter_name(s, r)
+    hb = f"H: Copyable & {s.name}Server & ImplicitlyDestructible"
+    lines: list[str] = []
+    lines.append("@fieldwise_init")
+    if r.client_streaming and r.server_streaming:
+        base = "GrpcBidiStreaming"
+    elif r.client_streaming:
+        base = "GrpcClientStreaming"
+    elif r.server_streaming:
+        base = "GrpcServerStreaming"
+    else:
+        base = "GrpcUnary"
+    lines.append(f"struct {name}[{hb}]({base}, Copyable, Movable):")
+    lines.append(
+        f'    """Byte adapter mapping ``{s.name}.{r.name}`` onto the'
+        f' runtime {base} trait."""'
+    )
+    lines.append("    var handler: Self.H")
+    lines.append("")
+    if r.client_streaming and r.server_streaming:
+        lines.append(
+            "    def serve_bidi(mut self, ctx: GrpcCallContext,"
+            " messages: List[List[UInt8]]) raises -> GrpcServerStreamReply:"
+        )
+        lines.append(f"        var reqs = List[{req}]()")
+        lines.append("        for i in range(len(messages)):")
+        lines.append(
+            f"            reqs.append({req}.decode(Span[UInt8, _](messages[i])))"
+        )
+        lines.append("        var outs = self.handler." + m + "(ctx, reqs^)")
+        lines.append("        var raw = List[List[UInt8]]()")
+        lines.append("        for i in range(len(outs)):")
+        lines.append("            raw.append(outs[i].encode())")
+        lines.append("        return GrpcServerStreamReply.ok(raw^)")
+    elif r.client_streaming:
+        lines.append(
+            "    def serve_client_streaming(mut self, ctx: GrpcCallContext,"
+            " messages: List[List[UInt8]]) raises -> GrpcUnaryReply:"
+        )
+        lines.append(f"        var reqs = List[{req}]()")
+        lines.append("        for i in range(len(messages)):")
+        lines.append(
+            f"            reqs.append({req}.decode(Span[UInt8, _](messages[i])))"
+        )
+        lines.append("        var out = self.handler." + m + "(ctx, reqs^)")
+        lines.append("        return GrpcUnaryReply.ok(out.encode())")
+    elif r.server_streaming:
+        lines.append(
+            "    def serve_server_streaming(mut self, ctx: GrpcCallContext,"
+            " request_bytes: Span[UInt8, _]) raises -> GrpcServerStreamReply:"
+        )
+        lines.append(f"        var req = {req}.decode(request_bytes)")
+        lines.append("        var outs = self.handler." + m + "(ctx, req)")
+        lines.append("        var raw = List[List[UInt8]]()")
+        lines.append("        for i in range(len(outs)):")
+        lines.append("            raw.append(outs[i].encode())")
+        lines.append("        return GrpcServerStreamReply.ok(raw^)")
+    else:
+        lines.append(
+            "    def serve_unary(mut self, ctx: GrpcCallContext,"
+            " request_bytes: Span[UInt8, _]) raises -> GrpcUnaryReply:"
+        )
+        lines.append(f"        var req = {req}.decode(request_bytes)")
+        lines.append("        var out = self.handler." + m + "(ctx, req)")
+        lines.append("        return GrpcUnaryReply.ok(out.encode())")
+    return "\n".join(lines)
+
+
+def emit_client_stub(s: Service, res: Resolver) -> str:
+    lines: list[str] = []
+    lines.append("@fieldwise_init")
+    lines.append(f"struct {s.name}Client(Copyable, Movable):")
+    lines.append(
+        f'    """Typed client stub for ``{s.name}``; wraps GrpcClient."""'
+    )
+    lines.append("    var base_url: String")
+    lines.append("")
+    for r in s.rpcs:
+        req = res.flatten(r.req_type)
+        resp = res.flatten(r.resp_type)
+        m = _method_snake(r.name)
+        path = _path_const(s.name, r.name)
+        if r.client_streaming:
+            lines.append(f"    def {m}(self) raises -> GrpcBidiStream:")
+            lines.append("        var c = GrpcClient(self.base_url)")
+            lines.append(f"        return c.call_bidi(String({path}))")
+        elif r.server_streaming:
+            lines.append(
+                f"    def {m}(self, request: {req}) raises -> GrpcServerStream:"
+            )
+            lines.append("        var c = GrpcClient(self.base_url)")
+            lines.append(
+                f"        return c.call_server_streaming(String({path}),"
+                " Span[UInt8, _](request.encode()))"
+            )
+        else:
+            lines.append(f"    def {m}(self, request: {req}) raises -> {resp}:")
+            lines.append("        var c = GrpcClient(self.base_url)")
+            lines.append(
+                f"        var res = c.call(String({path}),"
+                " Span[UInt8, _](request.encode()))"
+            )
+            lines.append(
+                f"        return {resp}.decode(Span[UInt8, _](res.message))"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def emit_descriptor(filename: str, p: Parser, res: Resolver) -> str:
+    fd = build_file_descriptor(filename, p, res)
+    stem = _const_stem(filename)
+    base = filename.rsplit("/", 1)[-1]
+    lines: list[str] = []
+    lines.append(f'comptime {stem}_PROTO_FILENAME: StaticString = "{base}"')
+    lines.append("")
+    lines.append(f"def {stem.lower()}_file_descriptor() -> List[UInt8]:")
+    lines.append(
+        f'    """Serialized FileDescriptorProto for ``{base}`` (reflection)."""'
+    )
+    # Emit the bytes as one list literal, wrapped 16 per line.
+    nums = list(fd)
+    lines.append("    var out: List[UInt8] = [")
+    for i in range(0, len(nums), 16):
+        chunk = ", ".join(str(b) for b in nums[i : i + 16])
+        lines.append(f"        {chunk},")
+    lines.append("    ]")
+    lines.append("    return out^")
+    return "\n".join(lines)
+
+
 def generate(path_in: str, module_doc: str) -> str:
     with open(path_in, "r") as fh:
         text = fh.read()
@@ -486,6 +881,22 @@ def generate(path_in: str, module_doc: str) -> str:
         "    WIRE_VARINT,\n"
         ")"
     )
+    if p.services:
+        # Service codegen pulls in the runtime gRPC adapters + client.
+        out.append(
+            "from flare.grpc import (\n"
+            "    GrpcBidiStream,\n"
+            "    GrpcBidiStreaming,\n"
+            "    GrpcCallContext,\n"
+            "    GrpcClient,\n"
+            "    GrpcClientStreaming,\n"
+            "    GrpcServerStream,\n"
+            "    GrpcServerStreamReply,\n"
+            "    GrpcServerStreaming,\n"
+            "    GrpcUnary,\n"
+            "    GrpcUnaryReply,\n"
+            ")"
+        )
     out.append("")
     out.append("")
     for e in p.enums:
@@ -495,6 +906,24 @@ def generate(path_in: str, module_doc: str) -> str:
     for m in ordered:
         out.append(emit_message(m, res))
         out.append("")
+    if p.services:
+        filename = path_in.rsplit("/", 1)[-1]
+        out.append(emit_descriptor(filename, p, res))
+        out.append("")
+        out.append("")
+        for s in p.services:
+            out.append(emit_service_paths(s, p.package))
+            out.append("")
+            out.append("")
+            out.append(emit_server_trait(s, res))
+            out.append("")
+            out.append("")
+            for r in s.rpcs:
+                out.append(emit_rpc_adapter(s, r, res))
+                out.append("")
+                out.append("")
+            out.append(emit_client_stub(s, res))
+            out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 
