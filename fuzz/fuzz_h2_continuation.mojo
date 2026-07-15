@@ -11,11 +11,13 @@ or until the connection is killed).
 Property checked: ``Connection.handle_frame`` does not panic on
 any sequence of HEADERS / CONTINUATION / DATA / RST_STREAM frames
 the fuzzer can construct, *whatever* the byte stream looks like.
-The harness deliberately does NOT mark "unbounded growth" as a
-crash, because today the state machine has no explicit
-CONTINUATION-sequence cap. v0.7 commit C2 would add one if this
-fuzzer surfaces a real issue (or as a defensive hardening even
-if it doesn't).
+The state machine now caps CONTINUATION frames per header block
+(``_CONTINUATION_FRAME_CAP``) and the accumulated header-list
+bytes, RST'ing an over-cap block with ENHANCE_YOUR_CALM (the
+exact behavior is asserted in tests/http2/test_h2_state.mojo). A
+sentinel first byte (0xFF) drives a long empty-CONTINUATION flood
+so the fuzzer exercises that enforcement branch; the invariant
+here stays no-panic.
 
 Run:
     pixi run fuzz-h2-continuation
@@ -132,6 +134,23 @@ def target(data: List[UInt8]) raises:
     except:
         return
 
+    # Sentinel: drive a long empty-CONTINUATION flood past the cap to
+    # exercise the RST(ENHANCE_YOUR_CALM) enforcement branch cheaply.
+    # Invariant remains no-panic.
+    if Int(data[0]) == 0xFF:
+        var fenc = HpackEncoder()
+        try:
+            var hf = _build_headers_frame(fenc, 1, False, False, "")
+            c.feed(Span[UInt8, _](encode_frame(hf)))
+            _ = c.drain()
+            for _ in range(80):
+                var cf = _build_continuation_frame(fenc, 1, False, "")
+                c.feed(Span[UInt8, _](encode_frame(cf)))
+                _ = c.drain()
+        except:
+            pass
+        return
+
     # Decode the fuzzer bytes into a frame plan:
     #  data[0]                 -> n_continuations (0..31), shifted >> 3
     #  data[0] & 0x07          -> control bits:
@@ -243,6 +262,8 @@ def main() raises:
     # via the +1 nudge -- but a CONTINUATION targeted at stream 0
     # is exercised inside the fuzzer's mutation space, not here.
     seeds.append(_seed(0x04 | (1 << 3), 0, 0, 1, ord("x")))
+    # Sentinel: long empty-CONTINUATION flood past the cap.
+    seeds.append(_seed(0xFF, 1, 0))
 
     fuzz(
         target,

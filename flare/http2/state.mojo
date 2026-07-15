@@ -97,6 +97,27 @@ struct Http2ErrorCode(Copyable, Defaultable, Movable):
     def COMPRESSION_ERROR() -> Http2ErrorCode:
         return Http2ErrorCode(0x9)
 
+    @staticmethod
+    def ENHANCE_YOUR_CALM() -> Http2ErrorCode:
+        return Http2ErrorCode(0xB)
+
+
+# ── DoS mitigation caps (RFC 9113 security considerations) ───────────────
+comptime _CONTINUATION_FRAME_CAP: Int = 64
+"""Max CONTINUATION frames per header block before the stream is
+RST'd (CVE-2024-27316 CONTINUATION flood)."""
+comptime _DEFAULT_HARD_HEADER_CAP: Int = 1 << 20
+"""Fallback header-list byte ceiling when ``max_header_list_size``
+is unset (0), so an unbounded HEADERS+CONTINUATION accumulation
+still cannot grow without limit."""
+comptime _RST_FLOOD_THRESHOLD: Int = 500
+"""Connection-lifetime inbound RST_STREAM count that trips a
+GOAWAY(ENHANCE_YOUR_CALM) (CVE-2023-44487 rapid reset).
+ponytail: lifetime cap, not a time-windowed token bucket --
+``handle_frame`` is sans-clock. A legitimate peer that cancels
+>500 streams on one connection gets GOAWAY and reconnects; the
+upgrade path is a clock-fed bucket if that ever bites."""
+
 
 struct Http2Error(Copyable, Defaultable, Movable):
     """A typed HTTP/2 error. ``stream_id == 0`` means connection error."""
@@ -167,6 +188,14 @@ struct Stream(Copyable, Defaultable, Movable):
     var recv_window: Int
     var headers_complete: Bool
     var data_complete: Bool
+    var header_list_bytes: Int
+    """Running RFC 9113 6.5.2 header-list size (sum of
+    ``name + value + 32`` over every field decoded so far for this
+    stream, across HEADERS + CONTINUATION). Enforced against the
+    connection cap to reject oversized header blocks."""
+    var continuation_count: Int
+    """CONTINUATION frames seen for this stream's header block;
+    capped to stop a CONTINUATION flood."""
     var extended_connect_protocol: String
     """RFC 8441 ``:protocol`` pseudo-header value when the stream
     was opened with ``:method = CONNECT``. Empty string otherwise.
@@ -184,6 +213,8 @@ struct Stream(Copyable, Defaultable, Movable):
         self.recv_window = 65535
         self.headers_complete = False
         self.data_complete = False
+        self.header_list_bytes = 0
+        self.continuation_count = 0
         self.extended_connect_protocol = ""
 
 
@@ -238,6 +269,13 @@ struct Connection(Copyable, Defaultable, Movable):
     Extended CONNECT (RFC 8441 §3 SHOULD); if the server didn't
     advertise the setting, the client falls back to the
     HTTP/1.1 Upgrade dance for WebSocket."""
+    var rst_stream_count: Int
+    """Connection-lifetime count of inbound RST_STREAM frames.
+    Trips a GOAWAY(ENHANCE_YOUR_CALM) past ``_RST_FLOOD_THRESHOLD``
+    (rapid-reset mitigation)."""
+    var goaway_sent: Bool
+    """Set once the driver has queued a GOAWAY so it is emitted at
+    most once."""
     var reset_streams: List[Int]
     """Stream ids that received an inbound RST_STREAM since the
     last :meth:`take_reset_streams` call (RFC 9113 §6.4). Drained
@@ -264,6 +302,8 @@ struct Connection(Copyable, Defaultable, Movable):
         self.is_client = False
         self.enable_connect_protocol = False
         self.peer_enable_connect_protocol = False
+        self.rst_stream_count = 0
+        self.goaway_sent = False
         self.reset_streams = List[Int]()
 
     def _make_settings(self, ack: Bool) -> Frame:
@@ -349,6 +389,48 @@ struct Connection(Copyable, Defaultable, Movable):
     def _put_stream(mut self, var s: Stream):
         self.streams[s.id] = s^
 
+    def _header_list_cap(self) -> Int:
+        """Effective header-list byte ceiling: the negotiated
+        ``max_header_list_size`` when set, else the hard fallback."""
+        if self.max_header_list_size > 0:
+            return self.max_header_list_size
+        return _DEFAULT_HARD_HEADER_CAP
+
+    def _rst_stream_frame(self, sid: Int, error_code: Int) -> Frame:
+        """Build a RST_STREAM frame (RFC 9113 6.4)."""
+        var f = Frame()
+        f.header.type = FrameType.RST_STREAM()
+        f.header.stream_id = sid
+        f.header.flags = FrameFlags(UInt8(0))
+        var p = List[UInt8]()
+        p.append(UInt8((error_code >> 24) & 0xFF))
+        p.append(UInt8((error_code >> 16) & 0xFF))
+        p.append(UInt8((error_code >> 8) & 0xFF))
+        p.append(UInt8(error_code & 0xFF))
+        f.payload = p^
+        f.header.length = len(f.payload)
+        return f^
+
+    def _goaway_frame(self, last_stream_id: Int, error_code: Int) -> Frame:
+        """Build a GOAWAY frame (RFC 9113 6.8)."""
+        var f = Frame()
+        f.header.type = FrameType.GOAWAY()
+        f.header.stream_id = 0
+        f.header.flags = FrameFlags(UInt8(0))
+        var p = List[UInt8]()
+        var lsi = last_stream_id & 0x7FFFFFFF
+        p.append(UInt8((lsi >> 24) & 0xFF))
+        p.append(UInt8((lsi >> 16) & 0xFF))
+        p.append(UInt8((lsi >> 8) & 0xFF))
+        p.append(UInt8(lsi & 0xFF))
+        p.append(UInt8((error_code >> 24) & 0xFF))
+        p.append(UInt8((error_code >> 16) & 0xFF))
+        p.append(UInt8((error_code >> 8) & 0xFF))
+        p.append(UInt8(error_code & 0xFF))
+        f.payload = p^
+        f.header.length = len(f.payload)
+        return f^
+
     def handle_frame(mut self, var f: Frame) raises -> List[Frame]:
         """Apply ``f`` to the connection state, return reply frames."""
         var out = List[Frame]()
@@ -424,7 +506,26 @@ struct Connection(Copyable, Defaultable, Movable):
                 raise Error("h2: HEADERS on stream 0")
             var hdrs = self.hpack_decoder.decode(Span[UInt8, _](f.payload))
             var s = self._ensure_stream(f.header.stream_id)
+            var cap = self._header_list_cap()
             for j in range(len(hdrs)):
+                # RFC 9113 §6.5.2 header-list size accounting; reject
+                # an oversized block with RST(ENHANCE_YOUR_CALM) before
+                # it can grow the per-stream buffer without bound.
+                s.header_list_bytes += (
+                    hdrs[j].name.byte_length()
+                    + hdrs[j].value.byte_length()
+                    + 32
+                )
+                if s.header_list_bytes > cap:
+                    out.append(
+                        self._rst_stream_frame(
+                            f.header.stream_id,
+                            Http2ErrorCode.ENHANCE_YOUR_CALM().value,
+                        )
+                    )
+                    s.state = StreamState.CLOSED()
+                    self._put_stream(s^)
+                    return out^
                 s.headers.append(hdrs[j].copy())
                 # RFC 8441 §4: capture the ``:protocol``
                 # pseudo-header on Extended CONNECT so the
@@ -520,6 +621,22 @@ struct Connection(Copyable, Defaultable, Movable):
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
                 self.reset_streams.append(f.header.stream_id)
+            # Rapid-reset mitigation (CVE-2023-44487): a flood of
+            # RST_STREAMs forces stream churn without tripping the
+            # concurrency limit. Past the lifetime threshold, GOAWAY
+            # the connection with ENHANCE_YOUR_CALM (once).
+            self.rst_stream_count += 1
+            if (
+                self.rst_stream_count > _RST_FLOOD_THRESHOLD
+                and not self.goaway_sent
+            ):
+                self.goaway_sent = True
+                out.append(
+                    self._goaway_frame(
+                        f.header.stream_id,
+                        Http2ErrorCode.ENHANCE_YOUR_CALM().value,
+                    )
+                )
             return out^
 
         if ft == FrameType.PRIORITY().value:
@@ -533,7 +650,36 @@ struct Connection(Copyable, Defaultable, Movable):
                 raise Error("h2: CONTINUATION on unknown stream")
             var hdrs = self.hpack_decoder.decode(Span[UInt8, _](f.payload))
             var s = self.streams[f.header.stream_id].copy()
+            # CONTINUATION flood cap (CVE-2024-27316): bound the number
+            # of CONTINUATION frames per header block.
+            s.continuation_count += 1
+            if s.continuation_count > _CONTINUATION_FRAME_CAP:
+                out.append(
+                    self._rst_stream_frame(
+                        f.header.stream_id,
+                        Http2ErrorCode.ENHANCE_YOUR_CALM().value,
+                    )
+                )
+                s.state = StreamState.CLOSED()
+                self._put_stream(s^)
+                return out^
+            var cap = self._header_list_cap()
             for j in range(len(hdrs)):
+                s.header_list_bytes += (
+                    hdrs[j].name.byte_length()
+                    + hdrs[j].value.byte_length()
+                    + 32
+                )
+                if s.header_list_bytes > cap:
+                    out.append(
+                        self._rst_stream_frame(
+                            f.header.stream_id,
+                            Http2ErrorCode.ENHANCE_YOUR_CALM().value,
+                        )
+                    )
+                    s.state = StreamState.CLOSED()
+                    self._put_stream(s^)
+                    return out^
                 s.headers.append(hdrs[j].copy())
             if f.header.flags.has(FrameFlags.END_HEADERS()):
                 s.headers_complete = True

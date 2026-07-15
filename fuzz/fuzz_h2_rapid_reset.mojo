@@ -8,11 +8,13 @@ out a non-trivial fraction of public h2 traffic in October 2023.
 
 Property checked: ``Connection.handle_frame`` does not panic on
 any sequence of HEADERS / RST_STREAM / DATA / WINDOW_UPDATE frames
-on stream ids the fuzzer can name. The harness deliberately does
-NOT mark "unbounded RST churn" as a crash, because today the
-state machine has no explicit per-second RST_STREAM rate limiter.
-v0.7 commit C2 would add one if this fuzzer surfaces a real
-issue (or as a defensive hardening even if it doesn't).
+on stream ids the fuzzer can name. The state machine now enforces
+a rapid-reset cap: past ``_RST_FLOOD_THRESHOLD`` inbound
+RST_STREAMs it emits GOAWAY(ENHANCE_YOUR_CALM) once (the exact
+threshold behavior is asserted in tests/http2/test_h2_state.mojo).
+Shape bit 4 drives a cheap single-stream RST flood so the fuzzer
+exercises that enforcement branch; the invariant here stays
+no-panic.
 
 Run:
     pixi run fuzz-h2-rapid-reset
@@ -114,6 +116,25 @@ def target(data: List[UInt8]) raises:
     var with_data = (shape & 0x02) != 0
     var alt_codes = (shape & 0x04) != 0
     var rst_zero = (shape & 0x08) != 0
+    var flood = (shape & 0x10) != 0
+
+    # Cheap single-stream RST flood: open one stream, then blast
+    # RST_STREAMs past the rapid-reset threshold to exercise the
+    # GOAWAY(ENHANCE_YOUR_CALM) enforcement branch without paying a
+    # HEADERS decode per reset. Invariant remains no-panic.
+    if flood:
+        var fenc = HpackEncoder()
+        try:
+            var of = _build_headers_frame(fenc, 1, False, "/flood")
+            c.feed(Span[UInt8, _](encode_frame(of)))
+            _ = c.drain()
+            for _ in range(600):
+                var rf = _build_rst_stream_frame(1, 0x8)
+                c.feed(Span[UInt8, _](encode_frame(rf)))
+                _ = c.drain()
+        except:
+            pass
+        return
 
     var enc = HpackEncoder()
     var sid = 1  # Client streams MUST be odd (RFC 9113 paragraph 5.1.1)
@@ -198,6 +219,8 @@ def main() raises:
     seeds.append(_seed(16, 0x04))
     # RST_STREAM on stream 0 (RFC 9113 paragraph 6.4 violation).
     seeds.append(_seed(8, 0x08))
+    # Single-stream RST flood past the rapid-reset threshold.
+    seeds.append(_seed(1, 0x10))
     # Mix: HEADERS+DATA+RST_STREAM with alternating error codes.
     seeds.append(_seed(16, 0x06, 2, 2, 2, 2, 2, 2, 2, 2))
 

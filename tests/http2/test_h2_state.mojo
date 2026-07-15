@@ -195,6 +195,76 @@ def test_make_response_with_body_emits_two_frames() raises:
     assert_equal(len(frames[1].payload), 2)
 
 
+def test_oversized_header_list_rsts_enhance_your_calm() raises:
+    var c = Connection()
+    c.max_header_list_size = 100
+    var big = String()
+    for _ in range(200):
+        big += "x"
+    var enc = HpackEncoder()
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":path", big))
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.stream_id = 1
+    f.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+    f.payload = enc.encode(Span[HpackHeader, _](hdrs))
+    var out = c.handle_frame(f^)
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+    assert_equal(Int(out[0].payload[3]), 0xB)  # ENHANCE_YOUR_CALM
+    var s = c.streams[1].copy()
+    assert_equal(s.state.value, StreamState.CLOSED().value)
+
+
+def test_continuation_flood_rsts() raises:
+    var c = Connection()
+    var enc = HpackEncoder()
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":method", "GET"))
+    var hf = Frame()
+    hf.header.type = FrameType.HEADERS()
+    hf.header.stream_id = 1
+    hf.header.flags = FrameFlags(UInt8(0))  # END_HEADERS not set
+    hf.payload = enc.encode(Span[HpackHeader, _](hdrs))
+    _ = c.handle_frame(hf^)
+    var rst_seen = False
+    for _ in range(70):
+        var cf = Frame()
+        cf.header.type = FrameType.CONTINUATION()
+        cf.header.stream_id = 1
+        cf.header.flags = FrameFlags(UInt8(0))
+        cf.payload = List[UInt8]()
+        var out = c.handle_frame(cf^)
+        if len(out) > 0 and Int(out[0].header.type.value) == 0x3:
+            assert_equal(Int(out[0].payload[3]), 0xB)
+            rst_seen = True
+            break
+    assert_true(rst_seen)
+
+
+def test_rst_flood_triggers_goaway() raises:
+    var c = Connection()
+    var goaway_seen = False
+    for _ in range(501):
+        var rf = Frame()
+        rf.header.type = FrameType.RST_STREAM()
+        rf.header.stream_id = 1
+        var rp = List[UInt8]()
+        rp.append(UInt8(0))
+        rp.append(UInt8(0))
+        rp.append(UInt8(0))
+        rp.append(UInt8(0x8))  # CANCEL
+        rf.payload = rp^
+        var out = c.handle_frame(rf^)
+        for i in range(len(out)):
+            if Int(out[i].header.type.value) == 0x7:  # GOAWAY
+                assert_equal(Int(out[i].payload[7]), 0xB)
+                goaway_seen = True
+    assert_true(goaway_seen)
+    assert_true(c.goaway_sent)
+
+
 def test_priority_accepted_and_ignored() raises:
     var c = Connection()
     var f = Frame()
@@ -222,5 +292,8 @@ def main() raises:
     test_ping_auto_replies_with_ack()
     test_make_response_no_body_sets_end_stream_on_headers()
     test_make_response_with_body_emits_two_frames()
+    test_oversized_header_list_rsts_enhance_your_calm()
+    test_continuation_flood_rsts()
+    test_rst_flood_triggers_goaway()
     test_priority_accepted_and_ignored()
-    print("test_h2_state: 11 passed")
+    print("test_h2_state: 14 passed")
