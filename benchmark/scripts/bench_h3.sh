@@ -32,7 +32,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET="${1:-flare}"
-CONFIG="${REPO_ROOT}/benchmark/configs/h3_throughput.yaml"
+# H3_CONFIG selects the workload; defaults to the single-connection
+# throughput gate. Point it at h3_multiconn.yaml to exercise UDP GSO
+# egress (Part II Cycle C).
+CONFIG="${H3_CONFIG:-${REPO_ROOT}/benchmark/configs/h3_throughput.yaml}"
 RESULTS_DIR="${REPO_ROOT}/benchmark/results/v0.8/h3"
 RAW_DIR="${RESULTS_DIR}/RAW"
 PORT="${FLARE_BENCH_PORT:-18443}"

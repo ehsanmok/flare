@@ -1,0 +1,28 @@
+# HTTP/3 multi-connection workload (Part II Cycle C -- GSO / crypto
+# fusion measurement).
+#
+# The single-connection h3_throughput.yaml cannot exercise UDP GSO:
+# one connection's per-drain datagram burst is small, so segmented
+# sendmsg has nothing to coalesce. This workload fans out to many
+# concurrent connections, each with a wide stream window, so the
+# QUIC egress drain accumulates equal-size datagrams per destination
+# -- the shape send_segmented (UDP_SEGMENT) coalesces into one
+# syscall. Used flare-vs-flare (before/after) to keep GSO only on a
+# measured multi-conn win; not a cross-framework table.
+#
+# Select via: H3_CONFIG=benchmark/configs/h3_multiconn.yaml \
+#             benchmark/scripts/bench_h3.sh flare
+
+name: h3_multiconn
+h2load_clients: 32
+h2load_streams: 100
+h2load_requests: 400000
+h2load_duration_seconds: 20
+warmup_seconds: 8
+runs: 5
+quiet_seconds: 5
+stdev_pct_gate: 8.0
+
+udp_payload_max_bytes: 1452
+initial_congestion_window_packets: 10
+max_idle_timeout_ms: 30000
