@@ -678,6 +678,44 @@ struct TlsStream(Movable, Readable):
 
         return TlsStream(tcp^, ctx, ssl)
 
+    @staticmethod
+    def connect_over_tcp(
+        var tcp: TcpStream, host: String, config: TlsConfig
+    ) raises -> TlsStream:
+        """Run the TLS handshake over an already-connected ``tcp``.
+
+        Unlike :meth:`connect` / :meth:`connect_timeout` (which dial the
+        TCP themselves), this takes an existing stream -- e.g. a proxy
+        ``CONNECT`` tunnel -- and performs the client handshake on its
+        fd. ``host`` is used as the default SNI + cert-hostname when
+        ``config.server_name`` is empty.
+        """
+        if config.verify == TlsVerify.NONE:
+            print(
+                (
+                    "[flare TLS SECURITY WARNING] Certificate verification is"
+                    " disabled. This connection is vulnerable to"
+                    " man-in-the-middle attacks. Never use TlsConfig.insecure()"
+                    " in production."
+                ),
+                file=stderr,
+            )
+        var lib = OwnedDLHandle(_find_flare_lib())
+        var ctx = _build_ssl_ctx(lib, config)
+        var ssl = _do_ssl_new(lib, ctx, tcp._socket.fd)
+        if ssl == 0:
+            var err = _c_err(lib)
+            _do_ssl_ctx_free(lib, ctx)
+            raise TlsHandshakeError(err)
+        var sni = config.server_name if config.server_name != "" else host
+        if _do_ssl_connect(lib, ssl, sni) != 0:
+            var err = _c_err(lib)
+            _do_ssl_free(lib, ssl)
+            _do_ssl_ctx_free(lib, ctx)
+            _classify_tls_error(err, host)
+            raise TlsHandshakeError(err)
+        return TlsStream(tcp^, ctx, ssl)
+
     # ── I/O ───────────────────────────────────────────────────────────────────
 
     def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:

@@ -294,6 +294,11 @@ struct HttpClient(Movable):
     """Whether :meth:`with_retry` opted this client into request
     retries. ``False`` by default so a plain client issues exactly one
     attempt per request (legacy behaviour)."""
+    var _proxy: String
+    """Explicit proxy URL (``http://host:port``) set via
+    :meth:`with_proxy`. When empty the standard ``HTTP_PROXY`` /
+    ``HTTPS_PROXY`` / ``NO_PROXY`` / ``ALL_PROXY`` env policy applies
+    (see :meth:`_resolve_proxy`)."""
     var _cookies: CookieStore
     """Per-client cookie jar behind a pointer-backed interior-mutable
     handle (mirrors :attr:`_alt_svc`). Disabled (no-op) by default;
@@ -353,6 +358,7 @@ struct HttpClient(Movable):
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
+        self._proxy = String("")
 
     def __init__(
         out self,
@@ -386,6 +392,7 @@ struct HttpClient(Movable):
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
+        self._proxy = String("")
 
     def __init__[
         A: Auth
@@ -423,6 +430,7 @@ struct HttpClient(Movable):
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
+        self._proxy = String("")
 
     def __init__[
         A: Auth
@@ -460,6 +468,7 @@ struct HttpClient(Movable):
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
+        self._proxy = String("")
 
     def __del__(deinit self):
         """Free the pooled fds + the ``Alt-Svc`` store owned by this
@@ -649,6 +658,24 @@ struct HttpClient(Movable):
             ```
         """
         self._max_decompressed_bytes = n
+        return self^
+
+    def with_proxy(var self, proxy_url: String) raises -> HttpClient:
+        """Route every request through the HTTP proxy at ``proxy_url``
+        (move-in / move-out, chains off the constructor).
+
+        Establishes a ``CONNECT`` tunnel to the origin through the proxy
+        for both ``http://`` and ``https://`` (TLS then runs over the
+        tunnel). Overrides the ``HTTP_PROXY`` / ``HTTPS_PROXY`` env
+        policy; ``NO_PROXY`` is still honored. Pass ``""`` to clear.
+
+        Example:
+            ```mojo
+            with HttpClient().with_proxy("http://127.0.0.1:8080") as c:
+                var r = c.get("http://example.com/")
+            ```
+        """
+        self._proxy = proxy_url
         return self^
 
     def with_cookies(var self) raises -> HttpClient:
@@ -936,7 +963,11 @@ struct HttpClient(Movable):
         keep-alive; a stale pooled connection is dropped and the
         request retried once on a fresh dial (RFC 7230 sec 6.3.1). An
         ``h2`` connection is never pooled here."""
-        var pool_on = self._tls_pool.enabled()
+        var proxy = self._resolve_proxy(u)
+        # A proxy tunnel dials a fresh CONNECT each time; pooled direct
+        # connections would bypass the proxy, so pooling is off when one
+        # is active.
+        var pool_on = self._tls_pool.enabled() and proxy.byte_length() == 0
         var key = TlsConnectionPool.build_key(u.scheme, u.host, Int(u.port))
 
         # 1. Reuse a pooled http/1.1-over-TLS connection if available.
@@ -958,9 +989,14 @@ struct HttpClient(Movable):
             tls_cfg.alpn = List[String]()
             tls_cfg.alpn.append("h2")
             tls_cfg.alpn.append("http/1.1")
-        var stream = TlsStream.connect_timeout(
-            u.host, u.port, tls_cfg^, self._timeout_ms
-        )
+        var stream: TlsStream
+        if proxy.byte_length() > 0:
+            var tcp = self._connect_tunnel(proxy, u.host, u.port)
+            stream = TlsStream.connect_over_tcp(tcp^, u.host, tls_cfg^)
+        else:
+            stream = TlsStream.connect_timeout(
+                u.host, u.port, tls_cfg^, self._timeout_ms
+            )
         var negotiated = stream.alpn_selected()
         if negotiated == "h2":
             var resp_h2 = _send_h2_over_tls(
@@ -1195,6 +1231,89 @@ struct HttpClient(Movable):
             return url
         return self._base_url + url
 
+    # ── Proxy (CONNECT tunnel + env policy) ────────────────────────────────────
+
+    def _resolve_proxy(self, u: Url) raises -> String:
+        """Return the proxy URL to use for ``u`` per the standard env
+        policy, or ``""`` for a direct connection.
+
+        Honors ``NO_PROXY`` (comma-separated host suffixes; ``*`` bypasses
+        all), then ``HTTPS_PROXY`` / ``HTTP_PROXY`` by scheme, falling
+        back to ``ALL_PROXY`` (lowercase variants accepted, matching
+        curl / requests).
+        """
+        var host = u.host.lower()
+        var no = getenv("NO_PROXY", getenv("no_proxy", ""))
+        if no.byte_length() > 0:
+            if no == "*":
+                return ""
+            for entry in no.split(","):
+                var e = String(entry).strip().lower()
+                if e.byte_length() == 0:
+                    continue
+                if host == e or host.endswith("." + e):
+                    return ""
+        # Explicit with_proxy() overrides env.
+        if self._proxy.byte_length() > 0:
+            return self._proxy
+        if u.is_tls():
+            var ph = getenv("HTTPS_PROXY", getenv("https_proxy", ""))
+            if ph.byte_length() > 0:
+                return ph
+        else:
+            var ph = getenv("HTTP_PROXY", getenv("http_proxy", ""))
+            if ph.byte_length() > 0:
+                return ph
+        return getenv("ALL_PROXY", getenv("all_proxy", ""))
+
+    def _connect_tunnel(
+        self, proxy_url: String, host: String, port: UInt16
+    ) raises -> TcpStream:
+        """Open a TCP connection to ``proxy_url`` and establish a
+        ``CONNECT host:port`` tunnel, returning the tunneled stream ready
+        to carry the origin request (cleartext GET or a TLS handshake).
+        """
+        var pu = Url.parse(proxy_url)
+        var tcp = _connect_with_fallback(pu.host, pu.port, self._timeout_ms)
+        var target = host + ":" + String(Int(port))
+        var req = String("CONNECT ") + target + " HTTP/1.1\r\n"
+        req += "Host: " + target + "\r\n"
+        req += "Proxy-Connection: keep-alive\r\n\r\n"
+        var rb = req.as_bytes()
+        tcp.write_all(Span[UInt8, _](rb))
+        # Read the proxy response head (until CRLFCRLF) and require 2xx.
+        var buf = List[UInt8](capacity=1024)
+        buf.resize(1024, 0)
+        var acc = List[UInt8]()
+        var hdr_end = -1
+        while hdr_end < 0:
+            var n = tcp.read(buf.unsafe_ptr(), 1024)
+            if n == 0:
+                raise NetworkError("proxy CONNECT: closed before reply")
+            for i in range(n):
+                acc.append(buf[i])
+            var m = len(acc)
+            if m >= 4:
+                for j in range(m - 3):
+                    if (
+                        acc[j] == 13
+                        and acc[j + 1] == 10
+                        and acc[j + 2] == 13
+                        and acc[j + 3] == 10
+                    ):
+                        hdr_end = j
+                        break
+        # Status line: "HTTP/1.1 200 ...". Require the code to start '2'.
+        var line_end = 0
+        while line_end < len(acc) and acc[line_end] != 13:
+            line_end += 1
+        var sp = 0
+        while sp < line_end and acc[sp] != 32:
+            sp += 1
+        if sp + 1 >= line_end or acc[sp + 1] != UInt8(ord("2")):
+            raise NetworkError("proxy CONNECT: non-2xx from proxy")
+        return tcp^
+
     # ── High-level helpers ────────────────────────────────────────────────────
 
     def get(self, url: String) raises -> Response:
@@ -1243,7 +1362,12 @@ struct HttpClient(Movable):
         wire += "Accept: */*\r\n"
         wire += "Accept-Encoding: identity\r\n"
         wire += "Connection: close\r\n\r\n"
-        var stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        var proxy = self._resolve_proxy(u)
+        var stream: TcpStream
+        if proxy.byte_length() > 0:
+            stream = self._connect_tunnel(proxy, u.host, u.port)
+        else:
+            stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         return HttpDownload[TcpStream](stream^)
@@ -1775,9 +1899,14 @@ struct HttpClient(Movable):
                 u, method, extra_headers, body, wire, auth_header
             )
         else:
-            var stream = _connect_with_fallback(
-                u.host, u.port, self._timeout_ms
-            )
+            var proxy = self._resolve_proxy(u)
+            var stream: TcpStream
+            if proxy.byte_length() > 0:
+                stream = self._connect_tunnel(proxy, u.host, u.port)
+            else:
+                stream = _connect_with_fallback(
+                    u.host, u.port, self._timeout_ms
+                )
             if self._prefer_h2c:
                 # h2c via prior knowledge (RFC 9113 §3.4):
                 # send the connection preface immediately and
@@ -1810,12 +1939,13 @@ struct HttpClient(Movable):
                     auth_header,
                 )
                 return resp_upg^
-            if pool_enabled:
+            if pool_enabled and proxy.byte_length() == 0:
                 # Pooled keep-alive path with one stale-conn retry.
                 # If the first attempt was on a pooled fd and the
                 # peer FIN'd the idle keep-alive while we were
                 # writing, retry once with a fresh connection (RFC
-                # 7230 §6.3.1).
+                # 7230 §6.3.1). Skipped when a proxy tunnel is active
+                # (pooled direct connections would bypass the proxy).
                 stream.close()  # discard the fresh stream we just opened
                 var key = ClientPool.build_key(u.scheme, u.host, Int(u.port))
                 return self._send_h1_pooled(key, u.host, u.port, wire, body)
