@@ -471,8 +471,16 @@ struct TlsStream(Movable, Readable):
     var _ctx: Int  # SSL_CTX* as Int (0 = null / closed)
     var _ssl: Int  # SSL* as Int (0 = null / closed)
     var _tcp: TcpStream  # owns the TCP fd
+    var _lib: OwnedDLHandle
+    """Cached handle to the OpenSSL FFI wrapper, opened once per
+    connection instead of per ``read`` / ``write`` (the per-write
+    dlopen the assessment flagged). Held as a field for the stream's
+    lifetime and always used via the ``read lib`` borrow helpers, the
+    same safe pattern :struct:`TlsSession` uses -- so there is no
+    dlclose-on-ASAP-destruction use-after-free (the hazard was
+    function-local handles reclaimed mid-call, not owned fields)."""
 
-    def __init__(out self, var tcp: TcpStream, ctx: Int, ssl: Int):
+    def __init__(out self, var tcp: TcpStream, ctx: Int, ssl: Int) raises:
         """Internal constructor — use ``TlsStream.connect`` instead.
 
         Args:
@@ -483,17 +491,17 @@ struct TlsStream(Movable, Readable):
         self._tcp = tcp^
         self._ctx = ctx
         self._ssl = ssl
+        self._lib = OwnedDLHandle(_find_flare_lib())
 
     def __del__(deinit self):
         """Send ``close_notify`` and free OpenSSL objects (best-effort)."""
         if self._ssl != 0:
-            try:
-                var lib = OwnedDLHandle(_find_flare_lib())
-                _ = _do_ssl_shutdown(lib, self._ssl)
-                _do_ssl_free(lib, self._ssl)
-                _do_ssl_ctx_free(lib, self._ctx)
-            except:
-                pass  # best-effort; tcp fd closed by _tcp.__del__
+            # Best-effort; the cached lib handle is valid for the
+            # stream's lifetime, so these no longer open (and cannot
+            # fail on) a per-call handle. tcp fd closed by _tcp.__del__.
+            _ = _do_ssl_shutdown(self._lib, self._ssl)
+            _do_ssl_free(self._lib, self._ssl)
+            _do_ssl_ctx_free(self._lib, self._ctx)
 
     # ── Context manager ───────────────────────────────────────────────────────
 
@@ -688,10 +696,9 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: On I/O or decryption error.
         """
-        var lib = OwnedDLHandle(_find_flare_lib())
-        var n = _do_ssl_read(lib, self._ssl, buf, size)
+        var n = _do_ssl_read(self._lib, self._ssl, buf, size)
         if n < 0:
-            raise NetworkError("TLS read error: " + _c_err(lib))
+            raise NetworkError("TLS read error: " + _c_err(self._lib))
         return n
 
     def read_exact(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises:
@@ -723,10 +730,9 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: On I/O or encryption error.
         """
-        var lib = OwnedDLHandle(_find_flare_lib())
-        var n = _do_ssl_write(lib, self._ssl, data)
+        var n = _do_ssl_write(self._lib, self._ssl, data)
         if n < 0:
-            raise NetworkError("TLS write error: " + _c_err(lib))
+            raise NetworkError("TLS write error: " + _c_err(self._lib))
         return n
 
     def write_all(self, data: Span[UInt8, _]) raises:
@@ -756,11 +762,7 @@ struct TlsStream(Movable, Readable):
             E.g. ``"TLSv1.3"`` or ``"TLSv1.2"``. Returns ``"unknown"`` if
             called before the handshake or if the library cannot be loaded.
         """
-        try:
-            var lib = OwnedDLHandle(_find_flare_lib())
-            return _do_ssl_get_version(lib, self._ssl)
-        except:
-            return "unknown"
+        return _do_ssl_get_version(self._lib, self._ssl)
 
     def cipher_suite(self) -> String:
         """Return the negotiated cipher suite name.
@@ -768,11 +770,7 @@ struct TlsStream(Movable, Readable):
         Returns:
             E.g. ``"TLS_AES_256_GCM_SHA384"`` or ``"unknown"``.
         """
-        try:
-            var lib = OwnedDLHandle(_find_flare_lib())
-            return _do_ssl_get_cipher(lib, self._ssl)
-        except:
-            return "unknown"
+        return _do_ssl_get_cipher(self._lib, self._ssl)
 
     def peer_cert_subject(self) raises -> String:
         """Return the subject DN of the server's certificate.
@@ -786,13 +784,12 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: If no peer certificate is available.
         """
-        var lib = OwnedDLHandle(_find_flare_lib())
         var buf = stack_allocation[_CERT_SUBJ_LEN, UInt8]()
         var rc = _do_ssl_get_peer_cert_subject(
-            lib, self._ssl, buf, _CERT_SUBJ_LEN
+            self._lib, self._ssl, buf, _CERT_SUBJ_LEN
         )
         if rc != 0:
-            raise NetworkError("peer_cert_subject: " + _c_err(lib))
+            raise NetworkError("peer_cert_subject: " + _c_err(self._lib))
         return String(
             StringSlice(
                 unsafe_from_utf8=CStringSlice(
@@ -820,11 +817,10 @@ struct TlsStream(Movable, Readable):
         """
         if self._ssl == 0:
             return String("")
-        var lib = OwnedDLHandle(_find_flare_lib())
         var buf = stack_allocation[64, UInt8]()
-        var rc = _do_ssl_get_alpn_selected(lib, self._ssl, buf, 64)
+        var rc = _do_ssl_get_alpn_selected(self._lib, self._ssl, buf, 64)
         if rc < 0:
-            raise NetworkError("alpn_selected: " + _c_err(lib))
+            raise NetworkError("alpn_selected: " + _c_err(self._lib))
         if rc == 0:
             return String("")
         return String(
@@ -877,11 +873,7 @@ struct TlsStream(Movable, Readable):
         handshake skipped). Mirrors OpenSSL's
         ``SSL_session_reused``.
         """
-        try:
-            var lib = OwnedDLHandle(_find_flare_lib())
-            return _do_ssl_session_reused(lib, self._ssl) == 1
-        except:
-            return False
+        return _do_ssl_session_reused(self._lib, self._ssl) == 1
 
     @staticmethod
     def connect_resumed(

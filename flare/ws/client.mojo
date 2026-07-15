@@ -279,7 +279,7 @@ struct _WsStream(Movable):
         self._tls = tls^
         self._tcp = _dummy_tcp_stream()
 
-    def __init__(out self, var tcp: TcpStream):
+    def __init__(out self, var tcp: TcpStream) raises:
         self._is_tls = False
         self._tls = _dummy_tls_stream()
         self._tcp = tcp^
@@ -336,11 +336,13 @@ def _dummy_tcp_stream() -> TcpStream:
     return TcpStream(sock^, SocketAddr(IpAddr.localhost(), 0))
 
 
-def _dummy_tls_stream() -> TlsStream:
+def _dummy_tls_stream() raises -> TlsStream:
     """Return a sentinel TLS stream (for use in the inactive branch).
 
     With ``_ssl=0``, ``TlsStream.__del__`` is a no-op.
     This is never called on an active ``_WsStream`` of TLS type.
+    Raises only if the OpenSSL FFI wrapper cannot be opened (the
+    ``TlsStream`` now caches its lib handle for the connection).
     """
     var tcp = _dummy_tcp_stream()
     return TlsStream(tcp^, 0, 0)
