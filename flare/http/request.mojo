@@ -250,15 +250,32 @@ struct Request(Movable):
         """Return path param ``name`` as ``Optional[String]`` (``None`` on
         miss).
 
-        The consistent, non-raising miss accessor: ``param`` raises,
-        ``query_param`` / ``cookie`` return ``""`` (indistinguishable
-        from a present-empty value). ``param_opt`` / ``query_param_opt``
-        / ``cookie_opt`` give one uniform ``Optional`` miss semantics
-        across all three sources.
+        Uniform miss-behavior matrix -- every request-value source
+        (path param / query param / cookie) offers the same three
+        accessors:
+
+        - base (``param`` / ``query_param`` / ``cookie``): the
+          domain-appropriate default. ``param`` **raises** because a
+          missing path param is a routing/programming error, not client
+          input; ``query_param`` / ``cookie`` return ``""`` because
+          those are genuinely optional client input.
+        - ``*_opt`` -> ``Optional[String]``: ``None`` on absent,
+          ``Optional("")`` on present-empty (distinguishes the two).
+        - ``*_or(name, default)`` -> ``String``: ``default`` on absent.
+
+        Pick ``*_opt`` for uniform absence handling regardless of source.
         """
         if not self.has_param(name):
             return Optional[String]()
         return Optional[String](self.param(name))
+
+    def param_or(self, name: String, default: String = "") raises -> String:
+        """Return path param ``name``, or ``default`` when absent.
+
+        The non-raising convenience form of ``param`` (see ``param_opt``
+        for the full uniform-accessor matrix)."""
+        var v = self.param_opt(name)
+        return v.value() if v else default
 
     def query_param(self, name: String) -> String:
         """Return the first query-string value for ``name``, or ``""``.
@@ -382,6 +399,15 @@ struct Request(Movable):
             return Optional[String]()
         return Optional[String](self.query_param(name))
 
+    def query_param_or(self, name: String, default: String) -> String:
+        """Return query param ``name``, or ``default`` when the key is
+        absent (unlike ``query_param``'s bare ``""``, which cannot tell
+        absent from present-empty). Uniform with ``param_or`` /
+        ``cookie_or``."""
+        if not self.has_query_param(name):
+            return default
+        return self.query_param(name)
+
     def text(self) -> String:
         """Decode the request body as a UTF-8 string.
 
@@ -460,6 +486,12 @@ struct Request(Movable):
                 if c.name == name:
                     return Optional[String](c.value)
         return Optional[String]()
+
+    def cookie_or(self, name: String, default: String) -> String:
+        """Return cookie ``name``, or ``default`` when absent. Uniform
+        with ``param_or`` / ``query_param_or``."""
+        var v = self.cookie_opt(name)
+        return v.value() if v else default
 
     def has_cookie(self, name: String) -> Bool:
         """Return ``True`` if cookie ``name`` is set on this request."""

@@ -98,6 +98,21 @@ def test_optional_accessors_uniform_miss() raises:
     assert_true(not req.cookie_opt("session"))
 
 
+def test_or_accessors_uniform_default() raises:
+    """param_or / query_param_or / cookie_or return the supplied
+    default on absence, uniformly across the three sources."""
+    var req = Request.test_get("/search?q=mojo")
+    # query: present -> value; absent -> default.
+    assert_equal(req.query_param_or("q", "fallback"), "mojo")
+    assert_equal(req.query_param_or("missing", "fallback"), "fallback")
+    # path param: absent -> default; present -> value.
+    assert_equal(req.param_or("id", "none"), "none")
+    req.params_mut()["id"] = "42"
+    assert_equal(req.param_or("id", "none"), "42")
+    # cookie: absent -> default.
+    assert_equal(req.cookie_or("session", "anon"), "anon")
+
+
 def main() raises:
     test_test_get_basic()
     print("OK test_test_get_basic")
@@ -122,3 +137,6 @@ def main() raises:
 
     test_optional_accessors_uniform_miss()
     print("OK test_optional_accessors_uniform_miss")
+
+    test_or_accessors_uniform_default()
+    print("OK test_or_accessors_uniform_default")
