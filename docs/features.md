@@ -64,6 +64,8 @@ an example file. For layering and the request lifecycle, see
 | `auto_decompress=True` (default) — transparent response body decompression (gzip / deflate / brotli) driven by `Content-Encoding`, bounded by a 16 MiB decompressed-size cap (zip-bomb guard) tunable via `.with_max_decompressed_bytes(n)` | [`tests/http/test_http.mojo`](../tests/http/test_http.mojo) |
 | `RequestBuilder(method, url)` — per-request method / headers / query / typed body; `MultipartFormBuilder` assembles `multipart/form-data` bodies (RFC 7578) client-side | [`tests/http/test_multipart_builder.mojo`](../tests/http/test_multipart_builder.mojo) |
 | `HttpClient.send_chunked(method, url, source)` — streaming request upload from a `ChunkSource` via chunked transfer-encoding (one chunk in flight, body never materialized) | [`tests/http/test_client_stream_upload.mojo`](../tests/http/test_client_stream_upload.mojo) |
+| `HttpClient.get_streaming(url) -> HttpDownload` — streaming *download*: parses the response head, then `read_chunk()` pulls the body in bounded memory (Content-Length / chunked / close-delimited decoded on the fly) | [`tests/http/test_client_stream_download.mojo`](../tests/http/test_client_stream_download.mojo) |
+| `.with_proxy(url)` + `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `ALL_PROXY` env — routes requests through an HTTP proxy via a `CONNECT` tunnel (both `http://` and `https://`; TLS runs over the tunnel via `TlsStream.connect_over_tcp`) | [`tests/http/test_client_proxy.mojo`](../tests/http/test_client_proxy.mojo) |
 | Module-level helpers: `get`, `post`, `put`, `patch`, `delete`, `head` — `post` with `String` body sets `Content-Type: application/json` automatically | `flare.http.client` |
 | `Auth`, `BasicAuth(user, pass)`, `BearerAuth(token)` — both wires | `flare.http.auth` |
 | `Response.json()`, `.text()`, `.raise_for_status()`, `.ok()`, `.status` | `flare.http.response` |
@@ -165,7 +167,8 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 | `signed_cookie_encode(value, key)` / `signed_cookie_decode(cookie, key)` — HMAC-SHA256 over base64url payload + tag | `flare.http.session` |
 | `signed_cookie_decode_keys(cookie, keys)` — accept any of N keys, for graceful key rotation | `flare.http.session` |
 | `Session[T]`, `SessionCodec`, `StringSessionCodec` | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
-| `CookieSessionStore[T]` (signed-cookie-backed), `InMemorySessionStore[T]` (server-side) | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
+| `CookieSessionStore` (signed-cookie-backed), `InMemorySessionStore` (server-side); both satisfy the `SessionStore` read trait (`cookie_name` + `load`) | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
+| `BackedSessionStore[B: SessionBackend]` — CSPRNG-id signed cookie + a pluggable `SessionBackend` (`get`/`set`/`delete`/`sweep`) with TTL expiry + `destroy` revocation; `MemorySessionBackend` reference impl; `new_session_id()` (256-bit `/dev/urandom` id) | [`tests/http/test_session.mojo`](../tests/http/test_session.mojo) |
 | `Auth`, `BasicAuth`, `BearerAuth`, `AuthError` | `flare.http.{auth,auth_extract}` |
 | HAProxy PROXY v1 + v2 parser, `ProxyParseError` | `flare.http.proxy_protocol` |
 
@@ -188,7 +191,7 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 | `RequestView[origin]`, `parse_request_view` — zero-copy borrow over the parsed request, paired with `ViewHandler` | `flare.http.request_view` |
 | `HeaderMap`, `HeaderInjectionError`, `HeaderMapView`, `parse_header_view` | `flare.http.{headers,header_view}` |
 | `StaticResponse`, `precompute_response` — pre-encoded wire form for fixed-body endpoints | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
-| `SseEvent`, `SseChannel` (in-memory FIFO + cancel-aware `ChunkSource` wrapper), `format_sse_event`, `sse_response`, `SseStreamingResponse[B]` | [`sse.mojo`](../examples/intermediate/sse.mojo) |
+| `SseEvent`, `SseChannel` (in-memory FIFO + cancel-aware `ChunkSource` wrapper), `format_sse_event`, `sse_response` (buffered snapshot), `stream_sse_response` (K1 streaming via the Router/Handler path over H1 chunked + H2 DATA), `SseStreamingResponse[B]` | [`sse.mojo`](../examples/intermediate/sse.mojo) |
 | Askama-shape templates: `{{ name }}` (HTML-escaped, `| safe` opt-out), `{% if %}...{% endif %}`, `{% for x in name %}...{% endfor %}`, single-level inheritance via `{% block <name> %}...{% endblock %}` + `{% extends "<parent>" %}` (rendered via `Template.render_extending(ctx, parent)`), `TemplateError` | `flare.http.template`, [`template_inheritance.mojo`](../examples/intermediate/template_inheritance.mojo) |
 | `ByteRange`, `parse_range`, `FileServer` (see [Middleware](#middleware)) | `flare.http.fs` |
 
@@ -211,7 +214,7 @@ source) + `on_upstream` (`conn.relay_upstream()`).
 |---|---|
 | `StreamHandler` — typed lifecycle trait (`on_open` / `on_upstream` / `on_writable` / `on_close`); the handler struct's fields are its shared state | `flare.http.streaming_server`, `flare` |
 | `StreamConn` — framework-owned per-connection handle: owns the client `TcpStream`, a per-connection `Cancel`, one optional framework-owned upstream source, and a single coalescing outbound buffer (`send` queues; the reactor drains on writable edges) | `flare.http.streaming_server`, `flare` |
-| `HttpServer.serve_streaming[H](handler, max_in_flight=0, retry_after_s=1)` — the streaming entry point (single-listener, single-worker); `max_in_flight` admits with a 503 + `Retry-After` past the cap | `flare.http.server` |
+| `HttpServer.serve_streaming[H](handler, max_in_flight=0, retry_after_s=1)` — the streaming entry point; `max_in_flight` admits with a 503 + `Retry-After` past the cap. A `serve_streaming[H](handler, num_workers=N)` overload fans out across N pthreads (`StreamFrontend` + shared reactor loop), each worker with its own handler copy | [`tests/http/test_streaming_multicore.mojo`](../tests/http/test_streaming_multicore.mojo), `flare.http.server` |
 | `conn.attach_upstream(source)` + `conn.relay_upstream()` — hand an `UpstreamChunkSource` to the framework (it watches the fd, owns the source, closes it on teardown, and cancels upstream on client disconnect); `relay_upstream` is the whole drain loop. No descriptors, no table, no manual close | `flare.http.streaming_server` |
 | `conn.send(data)` — accepts `Span[UInt8, _]` (zero-copy), `List[UInt8]`, or a `StringSlice`/string; a front sends bytes or text with no `Span[UInt8, _]` wrap at the call site | `flare.http.streaming_server` |
 | `conn.attach_upstream(fd)` / `detach_upstream()` (low-level) — register a raw front-owned upstream fd (a bare pipe / eventfd, not an `UpstreamChunkSource`) so the reactor fires `on_upstream`; the front then owns the fd's close | `flare.http.streaming_server` |
@@ -254,6 +257,8 @@ own dispatch loop.
 | HPACK Huffman codec — scalar-correct, H=1 wire-up + RFC 7541 §C.4 fixtures, and a 256-entry table-driven fast decoder that resolves codes of length <= 8 in one lookup (>=3x scalar across 16 B / 256 B / 4 KB / 64 KB input sizes; codes of length 9..30 fall through to the scalar bit-walker) | `flare.http.hpack_huffman`, `flare.http.hpack_huffman_simd` |
 | CONTINUATION-flood / RAPID-RESET (CVE-2023-44487) state-machine fuzz coverage | `fuzz/fuzz_h2_continuation.mojo`, `fuzz/fuzz_h2_rapid_reset.mojo` |
 | RFC 8441 Extended CONNECT (client side — `WsClient` over h2): `Http2ClientConnection.send_extended_connect` + `WsOverH2Stream` adapter + `bootstrap_ws_over_h2` | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo), `flare.ws.client_h2` |
+| RFC 8441 Extended CONNECT (server side — WS-over-h2 bridge): `Http2Connection.take_extended_connect_streams` / `accept_ws_over_h2` (200 without END_STREAM) / `drain_stream_data` + `WsOverH2ServerStream` (unmasked server frames, unmasks client frames); full paired-driver round-trip | [`tests/ws/test_ws_h2_roundtrip.mojo`](../tests/ws/test_ws_h2_roundtrip.mojo), `flare.ws.server_h2` |
+| HTTP/2 incremental server streaming (K1): a handler returning `stream_response` / `stream_sse_response` ships DATA frames per writable edge (window-bounded), trailers close the stream — the same body-stream path as H1 chunked | [`tests/http2/test_h2_server_handler.mojo`](../tests/http2/test_h2_server_handler.mojo), `flare.http2.server` |
 | Per-stream `Cancel` propagation (peer RST_STREAM → handler `cancel.cancelled()`): `Http2ConnHandle` carries a `Dict[StreamId, Cancel]`, RST_STREAM / GOAWAY / drain all signal the matching cell | `flare.http._h2_conn_handle`, [`tests/http2/test_h2_per_stream_cancel.mojo`](../tests/http2/test_h2_per_stream_cancel.mojo) |
 | h1.1 client connection pool: `HttpClient.with_pool(...)` keyed on `(scheme, host, port)`, idle reuse + per-origin caps + stale-conn retry | [`client_pool.mojo`](../examples/advanced/client_pool.mojo), `flare.http.client_pool` |
 | h2c via Upgrade (client side — `Upgrade` + `HTTP2-Settings` + 101 carry-forward) | [`h2c_client.mojo`](../examples/advanced/h2c_client.mojo), [`tests/http/test_h2c_client_upgrade.mojo`](../tests/http/test_h2c_client_upgrade.mojo) |
@@ -314,7 +319,7 @@ serves a single `Handler` over HTTP/1.1 + HTTP/2 + HTTP/3 simultaneously.
 | QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + a blocking `recv_from` wake followed by a batched `recvmmsg` burst drain (per-datagram `try_recv_from` fallback) + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4. Idle-timeout dispatch is wired today, plus stateless reset on unknown short-header DCIDs (RFC 9000 §10.3) and structural PTO / ack-delay timer dispatch that re-flushes 1-RTT egress; full server-side loss-driven retransmit and send pacing are tracked v0.9.x follow-ups; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
 | HTTP/3 server driver: `Http3Connection` (per-connection driver mounted on `Handler`), `Http3Config` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `Http3StreamType` (RFC 9114 §6.2 codepoints). `feed_stream_chunk` drives `Http3RequestReader` -> `Handler` -> response writer; `take_response_frames` drains encoded bytes; CONTROL + QPACK uni-stream dispatch consumes SETTINGS / GOAWAY / MAX_PUSH_ID and replays peer QPACK encoder-stream inserts into a per-connection dynamic table (`take_qpack_decoder_frames` drains the owed Insert Count Increment); fuzz-covered (`fuzz-h3-server`) | `flare.http3.server` |
 | ALPN -> wire-protocol dispatcher: `WireProtocol` codepoints (UNKNOWN / HTTP_1_1 / H2C / HTTP_2 / HTTP_3), `ALPN_HTTP_1_1` / `ALPN_HTTP_2` / `ALPN_HTTP_3` identifiers, `dispatch_alpn`, `dispatch_h2c_upgrade`, `negotiate_alpn`, `wire_protocol_name`. The pure decision function the reactor consults after a TLS handshake completes | `flare.http.alpn_dispatch` |
-| QUIC server Retry + Version Negotiation codecs (`flare.quic.retry`): `encode_retry_packet` / `verify_retry_integrity` (RFC 9001 §5.8 AES-128-GCM integrity tag, RFC 9001 Appendix A.4 byte-exact), `mint_retry_token` / `validate_retry_token` (HMAC-SHA256 address-validation token bound to the peer address + expiry), and `encode_version_negotiation` (RFC 9000 §17.2.1). Codecs are spec-validated and fuzz-clean (`fuzz-quic-retry`); reactor emission on new Initials is a tracked v0.9.x wiring follow-up gated on the egress perf bench | `flare.quic.retry` |
+| QUIC Retry address validation (RFC 9000 §8.1), server **and** client wired: `QuicServerConfig.require_address_validation` answers a token-less Initial with a Retry (HMAC token bound to peer addr + original DCID, amplification-safe) and only accepts a validated token; the client detects an inbound Retry, captures the token + server-chosen DCID, and re-sends its Initial. Codecs (`encode_retry_packet` / `verify_retry_integrity` RFC 9001 §5.8 + Appendix A.4, `mint_retry_token` / `validate_retry_token`, `encode_version_negotiation`) are spec-validated + fuzz-clean; a full loopback handshake-through-Retry e2e passes | `flare.quic.retry`, `flare.quic.server`, `flare.quic.client` |
 | QUIC DATAGRAM transport (RFC 9221): `DatagramFrame` + `encode_datagram` / `FrameHandler.on_datagram`, the `max_datagram_frame_size` transport parameter (`TP_ID_MAX_DATAGRAM_FRAME_SIZE`), and received datagrams surfaced on `ConnectionEvents.datagrams` | `flare.quic.frame`, `flare.quic.transport_params` |
 | rustls QUIC binding: `RustlsQuicConfig`, `RustlsQuicAcceptor`, `RustlsQuicSession`, `RustlsQuicError`, `QuicEncryptionLevel`. C ABI shim over `rustls::quic::ServerConnection` (rustls 0.23); per-level CRYPTO frames feed / drain through `flare_rustls_quic_feed_crypto` / `_take_crypto`, negotiated ALPN via `flare_rustls_quic_alpn` | `flare.tls.rustls_quic` |
 | HTTP/3 frame codec (RFC 9114 §7): `Http3Frame`, `Http3FrameType`, `encode_http3_frame`, `decode_http3_frame`; frame-type constants `H3_FRAME_TYPE_{DATA,HEADERS,CANCEL_PUSH,SETTINGS,PUSH_PROMISE,GOAWAY,MAX_PUSH_ID}` | `flare.http3.frame` |
@@ -338,18 +343,22 @@ wire codec (`ProtoWriter` / `ProtoReader`) is the serializer handlers
 target, and `tools/proto_gen.py` generates Mojo message structs
 (encode/decode) from a `.proto` for the supported subset (messages,
 nested messages, enums, scalars, repeated, singular message fields).
-The standard `grpc.health.v1.Health` Check service ships as a mountable
-handler, and server reflection (`grpc.reflection.v1alpha`) answers
-`list_services`. The **client** ships unary
-(`GrpcClient`, including base64 binary `-bin` metadata) plus
-server-streaming / client-streaming / bidirectional
-(`call_server_streaming` / `call_client_streaming` / `call_bidi` ->
-`GrpcServerStream` / `GrpcBidiStream`). A **server-streaming server**
-ships as `GrpcStreamingService` (one request, N response LPM frames in
-one DATA stream; buffered, not incrementally flushed). Still deferred:
-codegen for `service` blocks / maps / oneof, reflection descriptor
-lookups (`file_by_filename` -- needs serialized `FileDescriptorProto`),
-and `Health/Watch`.
+The standard `grpc.health.v1.Health` ships both `Check` (unary) and
+`Watch` (`HealthWatchHandler`, server-streaming status transitions), and
+server reflection (`grpc.reflection.v1alpha`) answers `list_services`
+**plus** `file_by_filename` / `file_containing_symbol` from a registered
+`FileDescriptorProto` registry (mountable over the bidi
+`ReflectionBidiHandler`). The **client** ships unary (`GrpcClient`,
+including base64 binary `-bin` metadata) plus server-streaming /
+client-streaming / bidirectional. All four **server** shapes ship as
+reactor-mounted adapters: `GrpcService` (unary), `GrpcStreamingService`
+(server-streaming, now **incrementally flushed** -- one DATA frame per
+message via the K1 body-stream path), `GrpcClientStreamingService`, and
+`GrpcBidiService`. `tools/proto_gen.py` now also emits **`service`-block
+codegen**: `PATH_*` consts, a typed `<Service>Server` trait, per-RPC byte
+adapters, a typed `<Service>Client` stub, and a serialized
+`FileDescriptorProto`. Still deferred: maps / oneof in the message
+codegen.
 
 | Surface | Where |
 |---|---|
@@ -361,15 +370,17 @@ and `Health/Watch`.
 
 ## OpenAPI
 
-OpenAPI 3.1 spec model + deterministic JSON emitter. The
-model is hand-built today (manual `OpenApiSpec` construction
-+ `emit_openapi_json`); auto-derivation from `ComptimeRouter`
-is the next iteration.
+OpenAPI 3.1 spec model + deterministic JSON emitter, plus
+`spec_from_router` which derives a spec (paths, methods, path
+parameters) by walking a runtime `Router`. Request/response body schemas
+from the typed `Extracted[H]` handler remain a comptime follow-up (the
+Router erases the handler type at registration).
 
 | Surface | Where |
 |---|---|
 | Spec model: `OpenApiSpec`, `OpenApiInfo`, `OpenApiPath`, `OpenApiOperation`, `OpenApiParameter`, `OpenApiResponse` | `flare.openapi.spec` |
 | Deterministic JSON emitter (stable key order — diffable specs in CI): `emit_openapi_json(spec) -> String` | `flare.openapi.spec` |
+| Router derivation: `spec_from_router(router, title, version)` — route-table walk, `:id` → `{id}` templates, path params, one operation per method | [`tests/openapi/test_openapi.mojo`](../tests/openapi/test_openapi.mojo) |
 
 ## WebSocket
 
@@ -377,10 +388,11 @@ is the next iteration.
 |---|---|
 | `WsClient.connect(url)` — handshake + frame loop, `WsHandshakeError` | [`websocket_echo.mojo`](../examples/basic/websocket_echo.mojo) |
 | `WsServer` — server-side handshake + frame loop | [`ws_server.mojo`](../examples/basic/ws_server.mojo) |
+| `WsHandler` trait + `WsServer.serve[H]` — stateful struct handler (per-connection state via `mut self`), the struct-handler twin of the `def(mut WsConnection)` callback | [`tests/ws/test_ws_stateful_handler.mojo`](../tests/ws/test_ws_stateful_handler.mojo) |
 | `WsMessage` — high-level text / binary message wrapper | [`ergonomics.mojo`](../examples/basic/ergonomics.mojo) |
 | `WsFrame`, `WsOpcode`, `WsCloseCode`, `WsProtocolError` — low-level frame surface | `flare.ws.frame` |
 | Mandatory client-mask validation, UTF-8 validation on text frames (RFC 6455) | `flare.ws.frame` |
-| WS-over-HTTP/2 (RFC 8441) — `WsOverH2Stream` + `bootstrap_ws_over_h2`; CONNECT + `:protocol=websocket` over a single h2 stream, frame masking preserved | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo), `flare.ws.client_h2` |
+| WS-over-HTTP/2 (RFC 8441), client + server — `WsOverH2Stream` + `bootstrap_ws_over_h2` (client) and `WsOverH2ServerStream` + `Http2Connection.{take_extended_connect_streams,accept_ws_over_h2,drain_stream_data}` (server); CONNECT + `:protocol=websocket` over one h2 stream, mask discipline both directions; full paired round-trip | [`tests/ws/test_ws_h2_roundtrip.mojo`](../tests/ws/test_ws_h2_roundtrip.mojo), `flare.ws.client_h2`, `flare.ws.server_h2` |
 | `permessage-deflate` (RFC 7692) — `PermessageDeflateConfig`, `compress_message` / `decompress_message`, `Sec-WebSocket-Extensions` parser + emitter, `negotiate_permessage_deflate`; default invariant: `no_context_takeover` on both sides + 16 MiB per-message decompressed cap | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo), `flare.ws.permessage_deflate` |
 | `permessage-deflate` context-takeover (RFC 7692 §7.1 default mode) — `PermessageDeflateContext`: persistent compressor + decompressor pair, LZ77 sliding window carries between messages, fuzz-covered lifecycle (`fuzz-pmd-context` × 3 targets, 350K runs) | `flare.ws.permessage_deflate.PermessageDeflateContext` |
 | `WsClient.connect_prefer_h2(url, tls_config)` — ALPN-aware factory: advertises `["h2", "http/1.1"]`; if peer selects `http/1.1` (or none), delegates to the existing H1 Upgrade handshake; if peer selects `h2`, raises pointing at the (in-flight) full H2-tunnel runtime | [`tests/ws/test_ws_prefer_h2.mojo`](../tests/ws/test_ws_prefer_h2.mojo), `flare.ws.client` |
