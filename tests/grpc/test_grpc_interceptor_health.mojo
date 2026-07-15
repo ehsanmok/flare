@@ -6,6 +6,7 @@ from std.testing import assert_equal, assert_true, TestSuite
 
 from flare.grpc.health import (
     HealthService,
+    HealthWatchHandler,
     HEALTH_SERVING,
     HEALTH_NOT_SERVING,
     HEALTH_SERVICE_UNKNOWN,
@@ -178,6 +179,35 @@ def test_health_unknown_service() raises:
 def test_health_request_roundtrip() raises:
     var req = _health_request("svc.A")
     assert_equal(decode_health_request(Span[UInt8, _](req)), "svc.A")
+
+
+def test_watch_replays_status_transitions() raises:
+    # Each set_status is a transition; Watch streams the current status
+    # plus every change as its own HealthCheckResponse message.
+    var h = HealthService()
+    h.set_status("my.Svc", HEALTH_SERVING)
+    h.set_status("my.Svc", HEALTH_NOT_SERVING)
+    h.set_status("my.Svc", HEALTH_SERVING)
+    var watch = HealthWatchHandler(h^)
+    var req = _health_request("my.Svc")
+    var reply = watch.serve_server_streaming(
+        _ctx(GrpcMetadata()), Span[UInt8, _](req)
+    )
+    assert_equal(len(reply.messages), 3)
+    assert_equal(_decode_status(reply.messages[0]), HEALTH_SERVING)
+    assert_equal(_decode_status(reply.messages[1]), HEALTH_NOT_SERVING)
+    assert_equal(_decode_status(reply.messages[2]), HEALTH_SERVING)
+
+
+def test_watch_unknown_service_reports_unknown() raises:
+    var h = HealthService()
+    var watch = HealthWatchHandler(h^)
+    var req = _health_request("nope.Svc")
+    var reply = watch.serve_server_streaming(
+        _ctx(GrpcMetadata()), Span[UInt8, _](req)
+    )
+    assert_equal(len(reply.messages), 1)
+    assert_equal(_decode_status(reply.messages[0]), HEALTH_SERVICE_UNKNOWN)
 
 
 def main() raises:

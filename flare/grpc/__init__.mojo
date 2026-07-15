@@ -89,6 +89,7 @@ from .reflection import (
 )
 from .health import (
     HealthService,
+    HealthWatchHandler,
     HEALTH_UNKNOWN,
     HEALTH_SERVING,
     HEALTH_NOT_SERVING,
