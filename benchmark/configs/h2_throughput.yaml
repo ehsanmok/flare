@@ -1,15 +1,18 @@
-# HTTP/2 throughput configuration (v0.6 Track J).
+# HTTP/2 throughput configuration.
 #
-# Drives ``h2load`` against the in-process flare HTTP/2 driver via a
-# tiny adapter binary. Uses a small connection count with high
-# concurrent streams per connection — the hyper / nghttp2 numbers in
-# benchmark/results/v0.6/h2 use the same parameters.
+# Drives ``h2load`` against the flare unified server over cleartext
+# HTTP/2 (h2c prior knowledge) and the reference baselines under the
+# same knobs. Mirrors h3_throughput.yaml so h2 vs h3 comparisons share
+# the harness shape; the wire (TCP h2c vs UDP h3) is the only
+# difference.
+
 name: h2_throughput
 h2load_clients: 1
 h2load_streams: 100
 h2load_requests: 100000
 h2load_duration_seconds: 30
 warmup_seconds: 10
-runs: 3
+runs: 5
 quiet_seconds: 5
-stdev_pct_gate: 5.0
+# h2-over-TCP is steadier than h3; the standard 3% gate applies.
+stdev_pct_gate: 3.0

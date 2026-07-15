@@ -140,6 +140,8 @@ sysroot_linux-64 = "2.34.*"
 # Run with: pixi run --environment bench <task>
 bench-vs-baseline         = "bash benchmark/scripts/bench_vs_baseline.sh"
 bench-vs-baseline-quick   = "bash benchmark/scripts/bench_vs_baseline.sh --only=flare,go_nethttp --configs=throughput"
+bench-h2                  = "bash benchmark/scripts/bench_h2.sh"            # HTTP/2 (h2c) throughput harness (h2load)
+bench-h2-flare            = "bash benchmark/scripts/bench_h2.sh flare"      # flare h2c baseline only
 bench-h3                  = "bash benchmark/scripts/bench_h3.sh"            # HTTP/3 throughput harness
 bench-h3-flare            = "bash benchmark/scripts/bench_h3.sh flare"      # flare h3 baseline only
 bench-h3-quinn            = "bash benchmark/scripts/bench_h3.sh quinn"      # quinn h3 baseline only

@@ -1084,6 +1084,32 @@ nginx / Go, 4 for the Rust frameworks). Override `flare_mc` with
 `FLARE_BENCH_WORKERS=N` to scale; the bench harness re-runs the
 peak-finder at the new worker count automatically.
 
+### HTTP/2, TLS, and upload/download workload harnesses
+
+Beyond the plaintext throughput matrix, the harness ships the wire +
+workload variants the assessment called for:
+
+- **HTTP/2 (h2c):** [`benchmark/scripts/bench_h2.sh`](../benchmark/scripts/bench_h2.sh)
+  drives `h2load` over cleartext HTTP/2 against the flare unified server
+  and the nginx / Go / Rust baselines under
+  [`benchmark/configs/h2_throughput.yaml`](../benchmark/configs/h2_throughput.yaml),
+  mirroring `bench_h3.sh`. Run with `pixi run --environment bench bench-h2`
+  (or `bench-h2-flare` for the flare row only).
+- **TLS termination, uploads, downloads, mixed keep-alive:** the
+  workload Lua scripts already live under `benchmark/scripts/`
+  (`wrk_tls_handshake.lua`, `wrk_upload_{4kb,64kb,1mb,16mb}.lua`,
+  `wrk_download_{4kb,64kb,1mb,16mb}.lua`, `wrk_mixed_keepalive.lua`);
+  `bench_vs_baseline.sh --workloads=<name>` selects them.
+
+**Host blocker (documented):** publishing a byte-stable cross-framework
+h2 / TLS / upload / download table -- and re-calibrating the `quinn` /
+`quiche` HTTP/3 baselines against the current quiche 0.24.5 -- requires a
+quiet, isolated multi-core Linux box (no co-tenant load) so the 3%
+variance gate holds. The CI runners and the shared dev sandbox do not
+meet that bar; the harnesses above produce the tables unchanged once run
+on such a host. The headline plaintext tables in this doc were captured
+on the EPYC 7R32 dev-box under those conditions.
+
 ### Production / bench build flags
 
 The headline numbers above use the same compiler posture as
