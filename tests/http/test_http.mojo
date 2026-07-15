@@ -540,6 +540,46 @@ def test_decode_content_unsupported() raises:
         _ = decode_content(Span[UInt8, _](data), "zstd")
 
 
+def test_decompress_gzip_cap_rejects_bomb() raises:
+    """A gzip body inflating past max_out is rejected before allocation."""
+    from flare.http.encoding import compress_gzip, decompress_gzip
+
+    var big = List[UInt8]()
+    for _ in range(1024 * 1024):  # 1 MiB of zeros -> tiny gzip
+        big.append(UInt8(0))
+    var compressed = compress_gzip(Span[UInt8, _](big))
+    with assert_raises():
+        _ = decompress_gzip(Span[UInt8, _](compressed), max_out=64 * 1024)
+    var ok = decompress_gzip(Span[UInt8, _](compressed))
+    assert_equal(len(ok), 1024 * 1024)
+
+
+def test_decompress_brotli_cap_rejects_bomb() raises:
+    """A brotli body inflating past max_out is rejected."""
+    from flare.http.encoding import compress_brotli, decompress_brotli
+
+    var big = List[UInt8]()
+    for _ in range(1024 * 1024):
+        big.append(UInt8(0))
+    var compressed = compress_brotli(Span[UInt8, _](big))
+    with assert_raises():
+        _ = decompress_brotli(Span[UInt8, _](compressed), max_out=64 * 1024)
+    var ok = decompress_brotli(Span[UInt8, _](compressed))
+    assert_equal(len(ok), 1024 * 1024)
+
+
+def test_decode_content_cap_rejects_bomb() raises:
+    """decode_content threads the cap through to the codec."""
+    from flare.http.encoding import compress_gzip, decode_content
+
+    var big = List[UInt8]()
+    for _ in range(1024 * 1024):
+        big.append(UInt8(0))
+    var compressed = compress_gzip(Span[UInt8, _](big))
+    with assert_raises():
+        _ = decode_content(Span[UInt8, _](compressed), "gzip", 64 * 1024)
+
+
 def main() raises:
     print("=" * 60)
     print("test_http.mojo — HeaderMap, Url, Response, Status, HttpClient")

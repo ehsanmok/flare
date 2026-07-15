@@ -37,6 +37,14 @@ from std.ffi import OwnedDLHandle, c_int
 from ..utils.dylib import find_flare_lib
 
 
+comptime DEFAULT_MAX_DECOMPRESSED_BYTES: Int = 16 * 1024 * 1024
+"""Default decompressed-size ceiling for a single body (16 MiB).
+A malicious server can ship a tiny compressed payload that inflates
+without bound (a "zip bomb"); the decoders bail with an Error before
+growing output past this cap. Mirrors the WS permessage-deflate cap
+(``flare/ws/permessage_deflate.mojo``)."""
+
+
 def _find_flare_zlib_lib() -> String:
     """Return the path to ``libflare_zlib.so``.
 
@@ -80,6 +88,7 @@ def _do_decompress(
     read lib: OwnedDLHandle,
     data: Span[UInt8, _],
     window_bits: c_int,
+    max_out: Int,
 ) raises -> List[UInt8]:
     """Decompress using ``flare_decompress``, growing the output buffer on overflow.
 
@@ -90,6 +99,7 @@ def _do_decompress(
         lib: Borrowed handle to ``libflare_zlib.so``.
         data: Compressed input bytes.
         window_bits: zlib windowBits (47=auto gzip/zlib, 15=zlib, -15=raw).
+        max_out: Decompressed-size ceiling; raises before growing past it.
 
     Returns:
         Decompressed bytes.
@@ -102,6 +112,8 @@ def _do_decompress(
     ]("flare_decompress")
 
     var cap = max(len(data) * 4, 4096)
+    if cap > max_out:
+        cap = max_out
     while True:
         var out = List[UInt8](capacity=cap)
         out.resize(cap, 0)
@@ -122,18 +134,28 @@ def _do_decompress(
             out.resize(Int(written), 0)
             return out^
 
-        # Output buffer was completely filled — might be truncated; double and retry.
+        # Output buffer was completely filled — might be truncated. Bail
+        # if we have hit the decompressed-size cap, else double and retry.
+        if cap >= max_out:
+            raise Error(
+                "decompressed output exceeded max_decompressed_bytes ("
+                + String(max_out)
+                + " bytes)"
+            )
         cap *= 2
+        if cap > max_out:
+            cap = max_out
 
 
 def _decompress_impl(
-    data: Span[UInt8, _], window_bits: c_int
+    data: Span[UInt8, _], window_bits: c_int, max_out: Int
 ) raises -> List[UInt8]:
     """Entry point for gzip/zlib decompression.
 
     Args:
         data: Compressed input bytes.
         window_bits: zlib windowBits passed through to ``_do_decompress``.
+        max_out: Decompressed-size ceiling; raises before growing past it.
 
     Returns:
         Decompressed bytes.
@@ -144,12 +166,13 @@ def _decompress_impl(
     if len(data) == 0:
         return List[UInt8]()
     var lib = OwnedDLHandle(_find_flare_zlib_lib())
-    return _do_decompress(lib, data, window_bits)
+    return _do_decompress(lib, data, window_bits, max_out)
 
 
 def _do_decompress_deflate(
     read lib: OwnedDLHandle,
     data: Span[UInt8, _],
+    max_out: Int,
 ) raises -> List[UInt8]:
     """Decompress using ``flare_decompress_deflate``, growing on overflow.
 
@@ -159,6 +182,7 @@ def _do_decompress_deflate(
     Args:
         lib: Borrowed handle to ``libflare_zlib.so``.
         data: Compressed input bytes.
+        max_out: Decompressed-size ceiling; raises before growing past it.
 
     Returns:
         Decompressed bytes.
@@ -171,6 +195,8 @@ def _do_decompress_deflate(
     ]("flare_decompress_deflate")
 
     var cap = max(len(data) * 4, 4096)
+    if cap > max_out:
+        cap = max_out
     while True:
         var out = List[UInt8](capacity=cap)
         out.resize(cap, 0)
@@ -189,14 +215,25 @@ def _do_decompress_deflate(
             out.resize(Int(written), 0)
             return out^
 
+        if cap >= max_out:
+            raise Error(
+                "decompressed output exceeded max_decompressed_bytes ("
+                + String(max_out)
+                + " bytes)"
+            )
         cap *= 2
+        if cap > max_out:
+            cap = max_out
 
 
-def _decompress_deflate_impl(data: Span[UInt8, _]) raises -> List[UInt8]:
+def _decompress_deflate_impl(
+    data: Span[UInt8, _], max_out: Int
+) raises -> List[UInt8]:
     """Entry point for deflate decompression (zlib-wrapped with raw fallback).
 
     Args:
         data: Compressed input bytes.
+        max_out: Decompressed-size ceiling; raises before growing past it.
 
     Returns:
         Decompressed bytes.
@@ -207,7 +244,7 @@ def _decompress_deflate_impl(data: Span[UInt8, _]) raises -> List[UInt8]:
     if len(data) == 0:
         return List[UInt8]()
     var lib = OwnedDLHandle(_find_flare_zlib_lib())
-    return _do_decompress_deflate(lib, data)
+    return _do_decompress_deflate(lib, data, max_out)
 
 
 def _do_compress(
@@ -255,7 +292,10 @@ def _do_compress(
     return out^
 
 
-def decompress_gzip(data: Span[UInt8, _]) raises -> List[UInt8]:
+def decompress_gzip(
+    data: Span[UInt8, _],
+    max_out: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
+) raises -> List[UInt8]:
     """Decompress a gzip-encoded buffer using zlib.
 
     Uses ``flare_decompress`` with ``windowBits = 47`` (auto-detect gzip or
@@ -263,17 +303,23 @@ def decompress_gzip(data: Span[UInt8, _]) raises -> List[UInt8]:
 
     Args:
         data: The compressed bytes to decompress.
+        max_out: Decompressed-size ceiling; decompression bails with an
+            Error before growing output past this (zip-bomb guard).
 
     Returns:
         The decompressed bytes.
 
     Raises:
-        Error: If the input is not valid gzip data or decompression fails.
+        Error: If the input is not valid gzip data, decompression fails,
+            or the output would exceed ``max_out``.
     """
-    return _decompress_impl(data, c_int(47))
+    return _decompress_impl(data, c_int(47), max_out)
 
 
-def decompress_deflate(data: Span[UInt8, _]) raises -> List[UInt8]:
+def decompress_deflate(
+    data: Span[UInt8, _],
+    max_out: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
+) raises -> List[UInt8]:
     """Decompress a deflate-encoded buffer using zlib.
 
     Tries zlib-wrapped deflate first; falls back to raw deflate, matching
@@ -281,14 +327,16 @@ def decompress_deflate(data: Span[UInt8, _]) raises -> List[UInt8]:
 
     Args:
         data: The compressed bytes to decompress.
+        max_out: Decompressed-size ceiling (zip-bomb guard).
 
     Returns:
         The decompressed bytes.
 
     Raises:
-        Error: If neither zlib-wrapped nor raw deflate succeeds.
+        Error: If neither zlib-wrapped nor raw deflate succeeds, or the
+            output would exceed ``max_out``.
     """
-    return _decompress_deflate_impl(data)
+    return _decompress_deflate_impl(data, max_out)
 
 
 def compress_gzip(data: Span[UInt8, _], level: Int = 6) raises -> List[UInt8]:
@@ -311,27 +359,32 @@ def compress_gzip(data: Span[UInt8, _], level: Int = 6) raises -> List[UInt8]:
 
 
 def decode_content(
-    data: Span[UInt8, _], encoding: String
+    data: Span[UInt8, _],
+    encoding: String,
+    max_out: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
 ) raises -> List[UInt8]:
     """Decode ``data`` according to the ``Content-Encoding`` header value.
 
     Args:
         data: The (possibly compressed) response body.
         encoding: The value of the HTTP ``Content-Encoding`` header.
+        max_out: Decompressed-size ceiling for the compressed encodings
+            (zip-bomb guard); ignored for identity.
 
     Returns:
         Decoded bytes. If ``encoding`` is ``"identity"`` or ``""``
         the original bytes are copied and returned.
 
     Raises:
-        Error: If the encoding is not supported or decompression fails.
+        Error: If the encoding is not supported, decompression fails, or
+            the decompressed output would exceed ``max_out``.
     """
     if encoding == Encoding.GZIP:
-        return decompress_gzip(data)
+        return decompress_gzip(data, max_out)
     elif encoding == Encoding.DEFLATE:
-        return decompress_deflate(data)
+        return decompress_deflate(data, max_out)
     elif encoding == Encoding.BR:
-        return decompress_brotli(data)
+        return decompress_brotli(data, max_out)
     elif encoding == Encoding.IDENTITY or encoding == "":
         var out = List[UInt8](capacity=len(data))
         for b in data:
@@ -415,7 +468,7 @@ def compress_brotli(
 
 
 def _do_decompress_brotli(
-    read lib: OwnedDLHandle, data: Span[UInt8, _]
+    read lib: OwnedDLHandle, data: Span[UInt8, _], max_out: Int
 ) raises -> List[UInt8]:
     """Decompress using ``flare_brotli_decompress``, growing on overflow.
 
@@ -425,6 +478,7 @@ def _do_decompress_brotli(
     Args:
         lib: Borrowed handle to ``libflare_brotli.so``.
         data: Brotli-encoded input.
+        max_out: Decompressed-size ceiling; raises before growing past it.
 
     Returns:
         Decoded plaintext.
@@ -436,6 +490,8 @@ def _do_decompress_brotli(
         def(Int, Int, Int, Int) thin abi("C") -> c_int
     ]("flare_brotli_decompress")
     var cap = max(len(data) * 8, 4096)
+    if cap > max_out:
+        cap = max_out
     while True:
         var out = List[UInt8](capacity=cap)
         out.resize(cap, 0)
@@ -447,7 +503,15 @@ def _do_decompress_brotli(
         )
         var w = Int(written)
         if w == -2:
+            if cap >= max_out:
+                raise Error(
+                    "decompressed output exceeded max_decompressed_bytes ("
+                    + String(max_out)
+                    + " bytes)"
+                )
             cap *= 2
+            if cap > max_out:
+                cap = max_out
             continue
         if w < 0:
             raise Error("flare_brotli_decompress failed: " + String(written))
@@ -455,19 +519,24 @@ def _do_decompress_brotli(
         return out^
 
 
-def decompress_brotli(data: Span[UInt8, _]) raises -> List[UInt8]:
+def decompress_brotli(
+    data: Span[UInt8, _],
+    max_out: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
+) raises -> List[UInt8]:
     """Decompress brotli-encoded bytes.
 
     Args:
         data: Brotli-encoded input.
+        max_out: Decompressed-size ceiling (zip-bomb guard).
 
     Returns:
         Decoded plaintext.
 
     Raises:
-        Error: If the FFI call fails or the input is not valid brotli.
+        Error: If the FFI call fails, the input is not valid brotli, or
+            the output would exceed ``max_out``.
     """
     if len(data) == 0:
         return List[UInt8]()
     var lib = OwnedDLHandle(_find_flare_brotli_lib())
-    return _do_decompress_brotli(lib, data)
+    return _do_decompress_brotli(lib, data, max_out)

@@ -51,7 +51,7 @@ from .auth import Auth, BasicAuth, BearerAuth
 from .error import HttpError, TooManyRedirects
 from .redirect_policy import RedirectPolicy, RedirectAction, RedirectMode
 from .reliability import RetryPolicy, _backoff_sleep_ms
-from .encoding import decode_content
+from .encoding import DEFAULT_MAX_DECOMPRESSED_BYTES, decode_content
 from ._client.cookie_store import CookieStore
 from .body import ChunkSource
 from .cancel import Cancel
@@ -280,6 +280,11 @@ struct HttpClient(Movable):
     ``Content-Encoding`` header and fixing ``Content-Length``. Identity
     / absent encodings pass through untouched, so a non-compressed
     response is byte-for-byte unchanged."""
+    var _max_decompressed_bytes: Int
+    """Decompressed-size ceiling for auto-decompressed response bodies
+    (zip-bomb guard). Defaults to
+    :data:`flare.http.encoding.DEFAULT_MAX_DECOMPRESSED_BYTES` (16 MiB);
+    change it via :meth:`with_max_decompressed_bytes`."""
     var _retry: RetryPolicy
     """Client request-level retry policy (distinct from the server-side
     :class:`flare.http.reliability.Retry` middleware). Only consulted
@@ -343,6 +348,7 @@ struct HttpClient(Movable):
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
+        self._max_decompressed_bytes = DEFAULT_MAX_DECOMPRESSED_BYTES
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
@@ -375,6 +381,7 @@ struct HttpClient(Movable):
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
+        self._max_decompressed_bytes = DEFAULT_MAX_DECOMPRESSED_BYTES
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
@@ -411,6 +418,7 @@ struct HttpClient(Movable):
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
+        self._max_decompressed_bytes = DEFAULT_MAX_DECOMPRESSED_BYTES
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
@@ -447,6 +455,7 @@ struct HttpClient(Movable):
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
+        self._max_decompressed_bytes = DEFAULT_MAX_DECOMPRESSED_BYTES
         self._retry = RetryPolicy()
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
@@ -622,6 +631,23 @@ struct HttpClient(Movable):
         """
         self._retry = policy.copy()
         self._retry_enabled = True
+        return self^
+
+    def with_max_decompressed_bytes(var self, n: Int) -> HttpClient:
+        """Set the decompressed-size ceiling for auto-decompressed
+        response bodies (move-in / move-out, chains off the constructor).
+
+        Guards against a decompression bomb: a small compressed body that
+        inflates without bound. Defaults to 16 MiB; raise or lower it to
+        fit the largest legitimate response this client expects.
+
+        Example:
+            ```mojo
+            with HttpClient().with_max_decompressed_bytes(64 * 1024 * 1024) as c:
+                _ = c.get("https://example.com/big.json.gz")
+            ```
+        """
+        self._max_decompressed_bytes = n
         return self^
 
     def with_cookies(var self) raises -> HttpClient:
@@ -1571,7 +1597,9 @@ struct HttpClient(Movable):
         if el.find(",") >= 0:
             return resp^  # stacked encodings unsupported: leave raw
         try:
-            var decoded = decode_content(Span[UInt8, _](resp.body), el)
+            var decoded = decode_content(
+                Span[UInt8, _](resp.body), el, self._max_decompressed_bytes
+            )
             resp.body = decoded^
             _ = resp.headers.remove("Content-Encoding")
             resp.headers.set("Content-Length", String(len(resp.body)))
