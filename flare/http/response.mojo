@@ -3,7 +3,8 @@
 from std.collections import Optional
 
 from json import loads, Value
-from .body import ChunkSource
+from .body import Body, ChunkSource
+from .cancel import Cancel
 from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_set_cookie_header
 from .error import HttpError
@@ -278,6 +279,72 @@ def stream_response[
     resp.body_stream = Optional[ChunkSourceBox](
         ChunkSourceBox.create[S](source^)
     )
+    return resp^
+
+
+# ── Parametric-body bridge (opt-in Response[B: Body] ergonomics) ──────────────
+#
+# The concrete ``Response`` stays byte-buffered on the hot path; this
+# bridge lets a handler build one from ANY ``Body`` impl without a generic
+# ``Response[B]`` type (which would erase to ``InlineBody`` at every
+# ``Handler.serve -> Response`` / ``Router`` thunk boundary anyway). A body
+# that knows its length is buffered (``Content-Length`` framing, identical
+# to today); an open-ended body is lowered onto the K1 ``body_stream``
+# path (``Transfer-Encoding: chunked``).
+
+
+struct _BodyChunkSource[B: Body](ChunkSource, Movable):
+    """Adapts a ``Body`` to the ``ChunkSource`` box so an open-ended body
+    can ride the existing ``Response.body_stream`` streaming path."""
+
+    var body: Self.B
+
+    def __init__(out self, var body: Self.B):
+        self.body = body^
+
+    def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
+        return self.body.next_chunk(cancel)
+
+
+def response_from_body[
+    B: Body
+](var body: B, status: Int = 200, var reason: String = "") raises -> Response:
+    """Build a concrete ``Response`` from any ``Body`` impl (opt-in
+    ``Response[B]`` ergonomics).
+
+    Known-length bodies (``content_length()`` is ``Some``) are drained into
+    the buffered ``Response.body`` -- byte-identical to the ordinary
+    ``Response`` path. Open-ended bodies (``None``) are attached to
+    ``body_stream`` so the reactor emits ``Transfer-Encoding: chunked`` and
+    pulls chunks on writable edges. Set headers on the returned value before
+    returning it from a ``Handler``.
+
+    Args:
+        body: The body source; ownership transfers in.
+        status: HTTP status code (default 200).
+        reason: Status reason phrase (default empty -> filled at serialise).
+
+    Returns:
+        A concrete ``Response`` ready to return from ``Handler.serve``.
+    """
+    if body.content_length():
+        # A known-length body buffers into the ordinary Response.body
+        # (Content-Length framing). Use the never-cancel sentinel: this is
+        # a synchronous drain at handler-return time, not a reactor edge.
+        var cancel = Cancel.never()
+        var bytes = List[UInt8]()
+        while True:
+            var c = body.next_chunk(cancel)
+            if not c:
+                break
+            var cb = c.value().copy()
+            for i in range(len(cb)):
+                bytes.append(cb[i])
+        return Response(status=status, reason=reason^, body=bytes^)
+    var resp = stream_response[_BodyChunkSource[B]](
+        _BodyChunkSource[B](body^), status
+    )
+    resp.reason = reason^
     return resp^
 
 

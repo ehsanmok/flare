@@ -426,7 +426,8 @@ there is no parity table any more -- one type, one shape:
 | HTTP server (HTTP/1.1 + HTTP/2 via auto-dispatch) | [`flare.http.HttpServer`](../flare/http/server.mojo) |
 | HTTP server (HTTP/1.1 + HTTP/2 + HTTP/3 via ALPN; UDP listener mounted alongside TCP) | [`flare.http.HttpServer.bind_with_http3`](../flare/http/server.mojo) |
 | HTTP client (HTTP/1.1 + HTTP/2 via TLS+ALPN or `prefer_h2c=True`) | [`flare.http.HttpClient`](../flare/http/client.mojo) |
-| WebSocket server (HTTP/1.1 Upgrade; RFC 8441 over h2 wired on the byte driver) | [`flare.ws.WsServer`](../flare/ws/server.mojo) |
+| WebSocket server (HTTP/1.1 Upgrade) | [`flare.ws.WsServer`](../flare/ws/server.mojo) |
+| WebSocket-over-HTTP/2 server (RFC 8441 Extended CONNECT; reactor sidecar) | [`flare.http.HttpServer.serve[H, W: WsH2Handler]`](../flare/http/server.mojo) |
 | WebSocket server (multi-worker via SO_REUSEPORT) | `flare.ws.WsServer.serve(handler, num_workers=N)` |
 | WebSocket client (`ws://` / `wss://` — HTTP/1.1 Upgrade; ALPN advertises `http/1.1` on `wss://` to lock in the Upgrade path) | [`flare.ws.WsClient`](../flare/ws/client.mojo) |
 | Low-level HTTP/2 byte driver (server) | [`flare.http2.Http2Connection`](../flare/http2/server.mojo) |

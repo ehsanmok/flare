@@ -392,6 +392,7 @@ test-ws-autoclient-loopback = "mojo -I . tests/ws/test_ws_autoclient_loopback.mo
 test-ws-stateful-handler = "mojo -I . tests/ws/test_ws_stateful_handler.mojo"  # stateful WsHandler trait via WsServer.serve[H] (ws:// loopback)
 test-ws-h2-roundtrip = "mojo -I . tests/ws/test_ws_h2_roundtrip.mojo"  # WS-over-h2 server bridge full round-trip (paired sans-I/O drivers)
 test-ws-h2-reactor = "mojo -I . tests/ws/test_ws_h2_reactor.mojo"  # WS-over-h2 sidecar dispatch on the unified reactor (forked HttpServer.serve[H,W] over h2c)
+test-response-from-body = "mojo -I . tests/http/test_response_from_body.mojo"  # opt-in Response[B: Body] bridge (response_from_body / StreamingResponse.into_response)
 example-alpn-dispatch-demo    = "mojo -I . examples/advanced/alpn_dispatch_demo.mojo"
 example-http3-server-walkthrough = "mojo -I . examples/advanced/http3_server_walkthrough.mojo"
 example-http3-server          = "mojo -I . examples/advanced/http3_server.mojo"      # shared Handler across h1 / h2c / h2 / h3

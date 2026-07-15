@@ -188,6 +188,7 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 |---|---|
 | `Body`, `InlineBody`, `ChunkedBody`, `ChunkSource`, `drain_body` | `flare.http.body` |
 | `StreamingResponse[B]`, `serialize_streaming_response` | `flare.http.streaming_response` |
+| `response_from_body[B: Body](body, status, reason)` — opt-in `Response[B]` ergonomics: lowers any `Body` impl into the concrete `Response` (buffered when length-known, `body_stream`-chunked otherwise) for the normal `Handler` path, no hot-path change | `flare.http.response` |
 | `RequestView[origin]`, `parse_request_view` — zero-copy borrow over the parsed request, paired with `ViewHandler` | `flare.http.request_view` |
 | `HeaderMap`, `HeaderInjectionError`, `HeaderMapView`, `parse_header_view` | `flare.http.{headers,header_view}` |
 | `StaticResponse`, `precompute_response` — pre-encoded wire form for fixed-body endpoints | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
@@ -258,6 +259,7 @@ own dispatch loop.
 | CONTINUATION-flood / RAPID-RESET (CVE-2023-44487) state-machine fuzz coverage | `fuzz/fuzz_h2_continuation.mojo`, `fuzz/fuzz_h2_rapid_reset.mojo` |
 | RFC 8441 Extended CONNECT (client side — `WsClient` over h2): `Http2ClientConnection.send_extended_connect` + `WsOverH2Stream` adapter + `bootstrap_ws_over_h2` | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo), `flare.ws.client_h2` |
 | RFC 8441 Extended CONNECT (server side — WS-over-h2 bridge): `Http2Connection.take_extended_connect_streams` / `accept_ws_over_h2` (200 without END_STREAM) / `drain_stream_data` + `WsOverH2ServerStream` (unmasked server frames, unmasks client frames); full paired-driver round-trip | [`tests/ws/test_ws_h2_roundtrip.mojo`](../tests/ws/test_ws_h2_roundtrip.mojo), `flare.ws.server_h2` |
+| RFC 8441 Extended CONNECT (server side — reactor sidecar dispatch): edge-driven `WsH2Handler` (`on_open`/`on_message`/`on_close`) + `HttpServer.serve[H: Handler, W: WsH2Handler](handler, ws_handler)` route a live CONNECT stream to the handler over the unified reactor (boxed `WsH2Hooks`, zero-cost when no ws_handler); forked h2c e2e | [`tests/ws/test_ws_h2_reactor.mojo`](../tests/ws/test_ws_h2_reactor.mojo), `flare.ws.server_h2`, `flare.http.server` |
 | HTTP/2 incremental server streaming (K1): a handler returning `stream_response` / `stream_sse_response` ships DATA frames per writable edge (window-bounded), trailers close the stream — the same body-stream path as H1 chunked | [`tests/http2/test_h2_server_handler.mojo`](../tests/http2/test_h2_server_handler.mojo), `flare.http2.server` |
 | Per-stream `Cancel` propagation (peer RST_STREAM → handler `cancel.cancelled()`): `Http2ConnHandle` carries a `Dict[StreamId, Cancel]`, RST_STREAM / GOAWAY / drain all signal the matching cell | `flare.http._h2_conn_handle`, [`tests/http2/test_h2_per_stream_cancel.mojo`](../tests/http2/test_h2_per_stream_cancel.mojo) |
 | h1.1 client connection pool: `HttpClient.with_pool(...)` keyed on `(scheme, host, port)`, idle reuse + per-origin caps + stale-conn retry | [`client_pool.mojo`](../examples/advanced/client_pool.mojo), `flare.http.client_pool` |

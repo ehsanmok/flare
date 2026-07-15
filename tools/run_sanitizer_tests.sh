@@ -74,6 +74,10 @@ ASAN_TESTS=(
   # (serve_streaming relay). ASan validates the non-blocking recv +
   # FrameDemux drain and the per-connection source teardown.
   "tests/http/test_async_chunk_source.mojo"
+  # v0.9 -- opt-in Response[B: Body] bridge (response_from_body): a
+  # known-length Body buffers, an open-ended Body boxes onto body_stream.
+  # ASan validates the ChunkSourceBox heap cell + the buffered drain path.
+  "tests/http/test_response_from_body.mojo"
   # Alt-Svc parser + per-origin cache. Pure String/Dict
   # work, but ASan validates the StringSlice byte-slicing borrows in
   # the lenient parser and the Dict record/evict churn in the cache.
