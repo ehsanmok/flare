@@ -32,6 +32,7 @@ from flare.errors import (
     ValidationError,
     http_reason_phrase,
     map_handler_error,
+    parse_status_error,
 )
 
 
@@ -161,6 +162,24 @@ def test_http_status_error_default_message() raises:
     var e = HttpStatusError(409)
     assert_equal(e.message, String("Conflict"))
     assert_equal(String(e), String("HttpStatusError(409): Conflict"))
+
+
+def test_status_error_codec_round_trip() raises:
+    """render -> String -> parse_status_error must reproduce the exact
+    (status, message) the codec is defined to carry."""
+    var e = HttpStatusError(status=418, message=String("teapot: 3): x"))
+    var parsed = parse_status_error(String(e))
+    assert_true(Bool(parsed))
+    assert_equal(parsed.value().status, 418)
+    # Message-containing-"): " must survive (delimiter is the first
+    # "): " after the numeric status).
+    assert_equal(parsed.value().reason, String("teapot: 3): x"))
+
+
+def test_status_error_codec_rejects_non_status() raises:
+    assert_true(not parse_status_error(String("kaboom")))
+    assert_true(not parse_status_error(String("HttpStatusError(abc): x")))
+    assert_true(not parse_status_error(String("HttpStatusError(700): x")))
 
 
 def _raise_status() raises -> Int:

@@ -64,7 +64,14 @@ Both types are ``Copyable``, ``Movable``, ``Writable``, and
 shaped per the Mojo typed-errors guidance.
 """
 
+from std.collections import Optional
 from std.format import Writable, Writer
+
+
+comptime HTTP_STATUS_ERROR_PREFIX: String = "HttpStatusError("
+"""Shared prefix for the :struct:`HttpStatusError` wire format, used by
+both the renderer (:meth:`HttpStatusError.write_to`) and the parser
+(:func:`parse_status_error`) so the codec cannot drift."""
 
 
 # ── ValidationError ────────────────────────────────────────────────────────
@@ -194,13 +201,18 @@ struct HttpStatusError(Copyable, Movable, Writable):
         self.message = http_reason_phrase(status)
 
     def write_to[W: Writer](self, mut writer: W):
-        """Render ``HttpStatusError(<status>): <message>``.
+        """Render the defined status-error wire format
+        ``HttpStatusError(<status>): <message>``.
 
-        The status code is embedded in a fixed, parseable shape so the
-        framework can recover it after type erasure through a
-        bare-``raises`` boundary (see :func:`map_handler_error`).
+        Mojo's ``raises`` erases the concrete error type at the catch
+        site and offers no typed downcast (and no thread-local
+        side-channel to plumb one), so the rendered string is the only
+        transport across the ``Handler.serve`` boundary. This format is
+        therefore a *defined codec*, not an incidental rendering: it is
+        produced only here and parsed only by
+        :func:`parse_status_error`, which the round-trip test pins.
         """
-        writer.write("HttpStatusError(", self.status, "): ", self.message)
+        writer.write(HTTP_STATUS_ERROR_PREFIX, self.status, "): ", self.message)
 
 
 @fieldwise_init
@@ -215,42 +227,55 @@ struct MappedHandlerError(Copyable, Movable):
     var reason: String
 
 
+def parse_status_error(error_str: String) -> Optional[MappedHandlerError]:
+    """Decode the :struct:`HttpStatusError` wire format.
+
+    The single authoritative parser for the format
+    :meth:`HttpStatusError.write_to` produces -- ``None`` when
+    ``error_str`` is not a well-formed status-error rendering (wrong
+    prefix, non-numeric or out-of-range status). Kept as its own
+    function so producer + consumer are one defined codec pair (pinned
+    by the round-trip test) rather than a sniff duplicated at call
+    sites.
+    """
+    if not error_str.startswith(HTTP_STATUS_ERROR_PREFIX):
+        return Optional[MappedHandlerError]()
+    var lp = HTTP_STATUS_ERROR_PREFIX.byte_length() - 1  # index of the '('
+    var rp = error_str.find(")", lp)
+    if rp <= lp + 1:
+        return Optional[MappedHandlerError]()
+    try:
+        var status = Int(String(error_str[byte = lp + 1 : rp]))
+        if status < 100 or status > 599:
+            return Optional[MappedHandlerError]()
+        var marker = error_str.find("): ", lp)
+        var message = http_reason_phrase(status)
+        if marker != -1:
+            message = String(error_str[byte = marker + 3 :])
+        return Optional[MappedHandlerError](MappedHandlerError(status, message))
+    except:
+        return Optional[MappedHandlerError]()
+
+
 def map_handler_error(error_str: String, expose: Bool) -> MappedHandlerError:
     """Map an uncaught handler error's rendered string to (status, reason).
 
     Mojo's ``Handler.serve`` is bare ``raises``, which erases the
-    concrete error type at the catch site. The typed error's
-    ``Writable`` rendering survives, though, so we recover intent from
-    the string:
+    concrete error type at the catch site (no typed downcast). The
+    typed error's ``Writable`` rendering is the transport; we recover
+    intent from it:
 
-    - ``HttpStatusError(<n>): <msg>`` -> ``(n, msg)`` (message always
-      echoed -- the handler authored it on purpose).
+    - ``HttpStatusError(<n>): <msg>`` -> ``(n, msg)`` via the defined
+      :func:`parse_status_error` codec (message always echoed -- the
+      handler authored it on purpose).
     - ``ValidationError(...)`` -> ``(400, "Bad Request")`` (or the raw
       string when ``expose``).
     - anything else -> ``(500, "Internal Server Error")`` (or the raw
       string when ``expose``).
-
-    String-shape recovery is the only option until Mojo lets
-    a catch site downcast a type-erased error; the prefixes are fixed
-    in the structs' ``write_to`` above, so this stays in lockstep.
     """
-    if error_str.startswith("HttpStatusError("):
-        var lp = error_str.find("(")
-        var rp = error_str.find(")")
-        if lp != -1 and rp > lp + 1:
-            try:
-                var status = Int(String(error_str[byte = lp + 1 : rp]))
-                if status >= 100 and status <= 599:
-                    var marker = error_str.find("): ")
-                    var message: String
-                    if marker != -1:
-                        message = String(error_str[byte = marker + 3 :])
-                    else:
-                        message = http_reason_phrase(status)
-                    return MappedHandlerError(status, message)
-            except:
-                pass
-        # Malformed rendering: fall through to the 500 default.
+    var mapped = parse_status_error(error_str)
+    if mapped:
+        return mapped.value().copy()
     if error_str.startswith("ValidationError("):
         if expose:
             return MappedHandlerError(400, error_str)
