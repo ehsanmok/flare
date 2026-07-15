@@ -186,6 +186,7 @@ from .extract import (
     Form,
     Multipart,
     Extracted,
+    State,
 )
 from .encoding import (
     Encoding,

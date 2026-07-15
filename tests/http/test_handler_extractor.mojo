@@ -16,9 +16,23 @@ from flare.http import (
     Request,
     Response,
     Router,
+    State,
     ok,
 )
 from flare.http.handler import HandlerExtractor
+
+
+@fieldwise_init
+struct GreetUser(HandlerExtractor):
+    var id: PathInt["id"]
+    var greeting: State[String]
+
+    def __init__(out self):
+        self.id = PathInt["id"]()
+        self.greeting = State[String]()
+
+    def serve(self, req: Request) raises -> Response:
+        return ok(self.greeting.value + " " + String(self.id.value))
 
 
 @fieldwise_init
@@ -94,6 +108,31 @@ def test_handler_extractor_serves_directly() raises:
     assert_equal(resp.text(), "user=7 trace=abc")
 
 
+def test_state_flows_through_prototype() raises:
+    """A ``State[T]`` field set on the registered prototype survives
+    the per-request copy while the extractor field is populated from
+    the request."""
+    var proto = GreetUser()
+    proto.greeting = State[String]("hello")
+    var r = Router()
+    r.get("/users/:id", Extracted[GreetUser](proto^))
+    var req = Request.test_get("/users/7")
+    var resp = r.serve(req)
+    assert_equal(resp.status, 200)
+    assert_equal(resp.text(), "hello 7")
+
+
+def test_state_defaults_when_no_prototype() raises:
+    """``Extracted[H]()`` default-constructs the prototype, so a
+    ``State[T]`` field is its default value."""
+    var r = Router()
+    r.get("/users/:id", Extracted[GreetUser]())
+    var req = Request.test_get("/users/9")
+    var resp = r.serve(req)
+    assert_equal(resp.status, 200)
+    assert_equal(resp.text(), " 9")
+
+
 def main() raises:
     test_handler_extractor_satisfies_handler_bound()
     print("OK test_handler_extractor_satisfies_handler_bound")
@@ -106,3 +145,9 @@ def main() raises:
 
     test_handler_extractor_serves_directly()
     print("OK test_handler_extractor_serves_directly")
+
+    test_state_flows_through_prototype()
+    print("OK test_state_flows_through_prototype")
+
+    test_state_defaults_when_no_prototype()
+    print("OK test_state_defaults_when_no_prototype")

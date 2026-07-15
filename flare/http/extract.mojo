@@ -849,6 +849,39 @@ struct Json(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
+# ── State (registration-time injection) ─────────────────────────────────────
+
+
+struct State[T: Copyable & Defaultable & ImplicitlyDestructible & Movable](
+    Copyable, Defaultable, Extractor, Movable
+):
+    """A handler field carrying registration-time state, not request data.
+
+    ``State[T]`` is a no-op :trait:`Extractor`: its ``apply`` reads
+    nothing from the request, so the value set when the handler
+    prototype was registered survives ``Extracted[H]``'s per-request
+    prototype copy. Use it for shared, request-independent state -- a
+    DB pool, config, a cache handle -- next to the request-derived
+    extractor fields. The direct analogue of axum's ``State(db)``.
+
+    ``T`` must be ``Copyable & Defaultable & Movable`` (the same bound
+    the enclosing handler struct needs). See :class:`Extracted` for a
+    full registration example.
+    """
+
+    var value: Self.T
+
+    def __init__(out self):
+        self.value = Self.T()
+
+    def __init__(out self, var value: Self.T):
+        self.value = value^
+
+    def apply(mut self, req: Request) raises:
+        # Registration-time state; nothing is read from the request.
+        pass
+
+
 # ── Extracted adapter ───────────────────────────────────────────────────────
 
 
@@ -878,16 +911,48 @@ struct Extracted[H: Copyable & Defaultable & Handler & Movable](
     list declares the extractor chain" pattern, but implemented via
     Mojo's struct reflection so the Router doesn't need per-arity
     wrapper types and the whole pipeline monomorphises per ``H``.
+
+    ## Registration-time state (``State[T]``)
+
+    ``serve`` copies a stored *prototype* ``H`` per request rather than
+    default-constructing a fresh one, so any field whose value was set
+    at registration survives into the request. Pair this with the
+    :class:`State[T]` field type -- a no-op extractor that carries a
+    registration-time value (a DB pool handle, config, shared cache)
+    alongside the request-derived extractor fields, the direct
+    analogue of axum's ``State(db)``::
+
+        @fieldwise_init
+        struct GetUser(HandlerExtractor):
+            var id: PathInt["id"]
+            var db: State[DbPool]
+            def __init__(out self):
+                self.id = PathInt["id"]()
+                self.db = State[DbPool]()
+            def serve(self, req: Request) raises -> Response:
+                return ok(self.db.value.lookup(self.id.value))
+
+        var proto = GetUser()
+        proto.db = State[DbPool](pool)
+        r.get("/users/:id", Extracted[GetUser](proto^))
     """
 
+    var prototype: Self.H
+    """Registration-time handler prototype. Copied per request so
+    ``State[T]`` (and any other pre-populated) fields survive; the
+    reflective extractor walk overwrites the request-derived fields."""
+
     def __init__(out self):
-        pass
+        self.prototype = Self.H()
+
+    def __init__(out self, var prototype: Self.H):
+        self.prototype = prototype^
 
     def __init__(out self, *, copy: Self):
-        pass
+        self.prototype = copy.prototype.copy()
 
     def serve(self, req: Request) raises -> Response:
-        var h = Self.H()
+        var h = self.prototype.copy()
         comptime n = reflect[Self.H].field_count()
         var expose = req.expose_errors
         comptime for idx in range(n):
