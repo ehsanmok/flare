@@ -46,6 +46,20 @@ from .hpack import HpackHeader
 from .state import Connection, Stream, StreamState
 
 
+def _lower_ascii(k: String) -> String:
+    """Lowercase ASCII ``A-Z`` in a header name (HTTP/2 requires
+    lowercase field names, RFC 9113 8.2.1)."""
+    var out = String(capacity=k.byte_length() + 1)
+    var kp = k.unsafe_ptr()
+    for j in range(k.byte_length()):
+        var c = Int(kp[j])
+        if c >= 65 and c <= 90:
+            out += chr(c + 32)
+        else:
+            out += chr(c)
+    return out^
+
+
 # ── Http2Config ─────────────────────────────────────────────────────────────
 
 
@@ -633,6 +647,122 @@ struct Http2Connection(Defaultable, Movable):
         )
         for i in range(len(frames)):
             var bytes = encode_frame(frames[i])
+            for j in range(len(bytes)):
+                self.outbox.append(bytes[j])
+        var s = self.conn.streams[sid].copy()
+        s.state = StreamState.CLOSED()
+        self.conn.streams[sid] = s^
+
+    def begin_stream_response(mut self, sid: Int, var resp: Response) raises:
+        """Queue the leading HEADERS of an incremental streaming response.
+
+        Filters hop-by-hop fields (RFC 9113 8.2.2) and encodes a
+        no-END_STREAM HEADERS block into the outbox. The stream is left
+        open; :meth:`queue_stream_data` sends the body and
+        :meth:`end_stream_response` closes it (trailers captured by the
+        caller from ``resp.trailers`` before this move).
+        """
+        if sid not in self.conn.streams:
+            raise Error("h2: begin_stream_response on unknown stream")
+        var hdrs = List[HpackHeader]()
+        for i in range(len(resp.headers._keys)):
+            var lk = _lower_ascii(resp.headers._keys[i])
+            if (
+                lk == "connection"
+                or lk == "transfer-encoding"
+                or lk == "keep-alive"
+                or lk == "proxy-connection"
+                or lk == "upgrade"
+            ):
+                continue
+            hdrs.append(HpackHeader(lk, resp.headers._values[i]))
+        var hf = self.conn.make_stream_headers(
+            sid, resp.status, Span[HpackHeader, _](hdrs)
+        )
+        var bytes = encode_frame(hf)
+        for j in range(len(bytes)):
+            self.outbox.append(bytes[j])
+
+    def queue_stream_data(
+        mut self, sid: Int, data: Span[UInt8, _]
+    ) raises -> Int:
+        """Frame as much of ``data`` as the send windows allow.
+
+        Emits DATA frames (each <= ``max_frame_size``) bounded by the
+        min of the connection and per-stream send windows, decrements
+        both, and returns the number of bytes consumed. Returns 0 when
+        the window is exhausted -- the caller stashes the remainder and
+        re-pumps on the next WINDOW_UPDATE.
+        """
+        if sid not in self.conn.streams:
+            return 0
+        var s = self.conn.streams[sid].copy()
+        var budget = (
+            self.conn.send_window if self.conn.send_window
+            < s.send_window else s.send_window
+        )
+        if budget <= 0:
+            return 0
+        var mfs = self.conn.max_frame_size
+        var total = len(data)
+        var sent = 0
+        while sent < total and budget > 0:
+            var take = total - sent
+            if take > mfs:
+                take = mfs
+            if take > budget:
+                take = budget
+            var df = Frame()
+            df.header.type = FrameType.DATA()
+            df.header.stream_id = sid
+            df.header.flags = FrameFlags()
+            var pl = List[UInt8](capacity=take)
+            for i in range(take):
+                pl.append(data[sent + i])
+            df.payload = pl^
+            var bytes = encode_frame(df)
+            for j in range(len(bytes)):
+                self.outbox.append(bytes[j])
+            sent += take
+            budget -= take
+        self.conn.send_window -= sent
+        s.send_window -= sent
+        self.conn.streams[sid] = s^
+        return sent
+
+    def end_stream_response(
+        mut self,
+        sid: Int,
+        trailers_k: List[String],
+        trailers_v: List[String],
+    ) raises:
+        """Close a streaming response.
+
+        Emits trailing HEADERS with END_STREAM when trailers are present,
+        otherwise an empty DATA frame with END_STREAM, and advances the
+        stream to CLOSED.
+        """
+        if sid not in self.conn.streams:
+            return
+        if len(trailers_k) > 0:
+            var trailers = List[HpackHeader]()
+            for i in range(len(trailers_k)):
+                trailers.append(
+                    HpackHeader(_lower_ascii(trailers_k[i]), trailers_v[i])
+                )
+            var tf = self.conn.make_stream_trailers(
+                sid, Span[HpackHeader, _](trailers)
+            )
+            var bytes = encode_frame(tf)
+            for j in range(len(bytes)):
+                self.outbox.append(bytes[j])
+        else:
+            var df = Frame()
+            df.header.type = FrameType.DATA()
+            df.header.stream_id = sid
+            df.header.flags = FrameFlags(FrameFlags.END_STREAM())
+            df.payload = List[UInt8]()
+            var bytes = encode_frame(df)
             for j in range(len(bytes)):
                 self.outbox.append(bytes[j])
         var s = self.conn.streams[sid].copy()

@@ -37,6 +37,7 @@ Coverage:
   HTTP/1.1.
 """
 
+from std.collections import Optional
 from std.ffi import c_int
 from std.testing import assert_equal, assert_true
 
@@ -57,11 +58,41 @@ from flare.http import (
     Response,
     ok,
 )
+from flare.http.body import ChunkSource
+from flare.http.cancel import Cancel
+from flare.http.response import stream_response
 from flare.net import SocketAddr
 
 
 def _hello(req: Request) raises -> Response:
     return ok("hi")
+
+
+struct _CountSource(ChunkSource, Movable):
+    """Yields ``count`` chunks ("chunk0".."chunkN-1"), then None."""
+
+    var count: Int
+    var i: Int
+
+    def __init__(out self, count: Int):
+        self.count = count
+        self.i = 0
+
+    def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
+        if cancel.cancelled() or self.i >= self.count:
+            return Optional[List[UInt8]]()
+        var s = String("chunk") + String(self.i)
+        self.i += 1
+        var out = List[UInt8]()
+        for b in s.as_bytes():
+            out.append(b)
+        return Optional[List[UInt8]](out^)
+
+
+def _stream_greeter(req: Request) raises -> Response:
+    var resp = stream_response[_CountSource](_CountSource(3))
+    resp.headers.set("Content-Type", "text/plain")
+    return resp^
 
 
 def _echo_body_len(req: Request) raises -> Response:
@@ -210,9 +241,42 @@ def test_h2_server_request_headers_visible() raises:
     assert_equal(got, "hello-h2")
 
 
+def test_h2_server_streaming_response() raises:
+    """A handler returning ``stream_response`` streams incremental DATA
+    frames on h2; the client reassembles them into the full body (K1)."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_stream_greeter)
+        except:
+            pass
+        exit()
+    usleep(200000)
+
+    var url = String("http://127.0.0.1:") + String(Int(port)) + String("/")
+    var got_status = -1
+    var got_body = String("")
+    try:
+        with HttpClient(prefer_h2c=True) as c:
+            var r = c.get(url)
+            got_status = r.status
+            got_body = r.text()
+    except:
+        pass
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(got_status, 200)
+    assert_equal(got_body, "chunk0chunk1chunk2")
+
+
 def main() raises:
     test_h2_server_simple_handler()
     test_h2_server_router_dispatch()
     test_h2_server_request_body_round_trip()
     test_h2_server_request_headers_visible()
-    print("test_h2_server_handler: 4 passed")
+    test_h2_server_streaming_response()
+    print("test_h2_server_handler: 5 passed")

@@ -69,6 +69,7 @@ pass_b_allowlist=(
     "flare/http2/client.mojo"
     "flare/http/_unified_reactor_impl.mojo"
     "flare/http/_reactor/conn_handle.mojo"
+    "flare/http/_h2_conn_handle.mojo"
 )
 
 total_violations=0

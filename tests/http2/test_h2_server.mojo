@@ -143,6 +143,107 @@ def test_request_round_trip() raises:
     assert_equal(len(data_frame.payload), 11)
 
 
+def _walk_frames(bytes: List[UInt8]) raises -> List[Frame]:
+    """Parse every complete frame in ``bytes`` into a list."""
+    var out = List[Frame]()
+    var off = 0
+    while off < len(bytes):
+        var rest = List[UInt8](capacity=len(bytes) - off)
+        for i in range(off, len(bytes)):
+            rest.append(bytes[i])
+        var m = parse_frame(Span[UInt8, _](rest))
+        if not m:
+            break
+        var f = m.value().copy()
+        off += 9 + f.header.length
+        out.append(f^)
+    return out^
+
+
+def _drive_get(mut c: Http2Connection) raises -> Int:
+    """Feed the preface + a GET on stream 1 and return the stream id."""
+    c.feed(Span[UInt8, _](_preface_bytes()))
+    c.feed(Span[UInt8, _](_build_get_request_frame()))
+    _ = c.drain()  # discard preface SETTINGS
+    var ids = c.take_completed_streams()
+    return ids[0]
+
+
+def test_stream_response_incremental_frames() raises:
+    """Incremental begin/queue/end emit HEADERS (no END_STREAM), DATA
+    chunks, then trailing HEADERS(END_STREAM) carrying trailers."""
+    var c = Http2Connection()
+    var sid = _drive_get(c)
+    var resp = Response(status=200)
+    resp.headers.set("Content-Type", "text/plain")
+    resp.trailers.set("grpc-status", "0")
+    c.begin_stream_response(sid, resp^)
+    _ = c.queue_stream_data(
+        sid, Span[UInt8, _](List[UInt8](String("AB").as_bytes()))
+    )
+    _ = c.queue_stream_data(
+        sid, Span[UInt8, _](List[UInt8](String("CDE").as_bytes()))
+    )
+    var tk = List[String]()
+    tk.append("grpc-status")
+    var tv = List[String]()
+    tv.append("0")
+    c.end_stream_response(sid, tk, tv)
+
+    var frames = _walk_frames(c.drain())
+    assert_equal(len(frames), 4)
+    # Leading HEADERS: END_HEADERS, not END_STREAM.
+    assert_equal(Int(frames[0].header.type.value), 0x1)
+    assert_true(frames[0].header.flags.has(FrameFlags.END_HEADERS()))
+    assert_false(frames[0].header.flags.has(FrameFlags.END_STREAM()))
+    # Two DATA frames, neither END_STREAM.
+    assert_equal(Int(frames[1].header.type.value), 0x0)
+    assert_equal(len(frames[1].payload), 2)
+    assert_false(frames[1].header.flags.has(FrameFlags.END_STREAM()))
+    assert_equal(Int(frames[2].header.type.value), 0x0)
+    assert_equal(len(frames[2].payload), 3)
+    # Trailing HEADERS: END_STREAM closes the stream.
+    assert_equal(Int(frames[3].header.type.value), 0x1)
+    assert_true(frames[3].header.flags.has(FrameFlags.END_STREAM()))
+
+
+def test_stream_response_no_trailers_ends_with_empty_data() raises:
+    """Without trailers the stream closes on an empty DATA(END_STREAM)."""
+    var c = Http2Connection()
+    var sid = _drive_get(c)
+    var resp = Response(status=200)
+    c.begin_stream_response(sid, resp^)
+    _ = c.queue_stream_data(
+        sid, Span[UInt8, _](List[UInt8](String("x").as_bytes()))
+    )
+    c.end_stream_response(sid, List[String](), List[String]())
+
+    var frames = _walk_frames(c.drain())
+    assert_equal(len(frames), 3)
+    assert_equal(Int(frames[2].header.type.value), 0x0)  # DATA
+    assert_equal(len(frames[2].payload), 0)
+    assert_true(frames[2].header.flags.has(FrameFlags.END_STREAM()))
+
+
+def test_stream_data_bounded_by_send_window() raises:
+    """The queue_stream_data path sends only up to the send window and
+    reports the consumed byte count so the caller can stash the tail."""
+    var c = Http2Connection()
+    var sid = _drive_get(c)
+    # Shrink the per-stream + connection send windows to 3 bytes.
+    c.conn.send_window = 3
+    var s = c.conn.streams[sid].copy()
+    s.send_window = 3
+    c.conn.streams[sid] = s^
+    var resp = Response(status=200)
+    c.begin_stream_response(sid, resp^)
+    var big = List[UInt8](String("HELLO").as_bytes())
+    var n = c.queue_stream_data(sid, Span[UInt8, _](big))
+    assert_equal(n, 3)  # only the window's worth went out
+    var n2 = c.queue_stream_data(sid, Span[UInt8, _](big))
+    assert_equal(n2, 0)  # window now exhausted
+
+
 def test_partial_feed_buffers_frames() raises:
     """A frame split across two ``feed`` calls must be parsed exactly once."""
     var c = Http2Connection()
@@ -168,5 +269,8 @@ def main() raises:
     test_preface_only_emits_settings()
     test_bad_preface_raises()
     test_request_round_trip()
+    test_stream_response_incremental_frames()
+    test_stream_response_no_trailers_ends_with_empty_data()
+    test_stream_data_bounded_by_send_window()
     test_partial_feed_buffers_frames()
-    print("test_h2_server: 6 passed")
+    print("test_h2_server: 9 passed")

@@ -787,3 +787,51 @@ struct Connection(Copyable, Defaultable, Movable):
         tf.payload = tenc^
         frames.append(tf^)
         return frames^
+
+    def make_stream_headers(
+        mut self,
+        sid: StreamId,
+        status: Int,
+        headers: Span[HpackHeader, _],
+    ) -> Frame:
+        """Leading HEADERS for an incremental streaming response.
+
+        Carries ``:status`` + real headers with END_HEADERS but never
+        END_STREAM -- DATA frames (and possibly trailing HEADERS) follow
+        on later writable edges. Companion to :meth:`make_response` for
+        the h2 server-streaming path (K1).
+        """
+        var hh = List[HpackHeader]()
+        hh.append(HpackHeader(":status", String(status)))
+        for i in range(len(headers)):
+            hh.append(headers[i].copy())
+        var enc = self.hpack_encoder.encode(Span[HpackHeader, _](hh))
+        var hf = Frame()
+        hf.header.type = FrameType.HEADERS()
+        hf.header.stream_id = sid
+        hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+        hf.payload = enc^
+        return hf^
+
+    def make_stream_trailers(
+        mut self,
+        sid: StreamId,
+        trailers: Span[HpackHeader, _],
+    ) -> Frame:
+        """Trailing HEADERS closing a streaming response (RFC 9113 6.10).
+
+        END_HEADERS | END_STREAM ride on this block; only regular field
+        names are legal after the leading block.
+        """
+        var tl = List[HpackHeader]()
+        for i in range(len(trailers)):
+            tl.append(trailers[i].copy())
+        var tenc = self.hpack_encoder.encode(Span[HpackHeader, _](tl))
+        var tf = Frame()
+        tf.header.type = FrameType.HEADERS()
+        tf.header.stream_id = sid
+        tf.header.flags = FrameFlags(
+            FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
+        )
+        tf.payload = tenc^
+        return tf^
