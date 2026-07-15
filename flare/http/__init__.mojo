@@ -138,6 +138,7 @@ from .simd_parsers import (
 )
 from .request import Request, Method
 from .request_builder import RequestBuilder
+from .multipart_builder import MultipartFormBuilder
 from .response import Response, Status
 from .response_pool import ResponsePool
 from .handler import (
