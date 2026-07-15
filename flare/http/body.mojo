@@ -28,24 +28,27 @@ Pieces in place:
 - ``ChunkedBody[Source: ChunkSource]``: adapter from a user
   ``ChunkSource`` to the ``Body`` trait.
 
-Pieces not yet implemented:
+Status (K1 landed):
 
-- Making ``Response`` parametric over ``B: Body`` (so handlers
-  can return ``Response[ChunkedBody[MySource]]``). Today's
-  ``Response`` keeps its concrete ``List[UInt8]`` body field;
-  user code that wants streaming uses ``ChunkSource`` directly
-  with the reactor adoption that lands as a follow-up.
-- The reactor's ``Transfer-Encoding: chunked`` write loop —
-  pulls the next chunk on each writable edge. The piece that
-  delivers the headline "100MB without 100MB allocation" lands
-  with the reactor adoption.
-- The SSE example (``examples/intermediate/sse.mojo``) demonstrates the
-  ``ChunkSource`` + ``ChunkedBody`` shape against an in-process
-  loop; the network-side demo follows the reactor adoption.
+- Streaming a ``Response`` through the normal ``Handler`` path on
+  HTTP/1.1 works: ``Response.body_stream`` carries a
+  ``ChunkSourceBox`` and the epoll reactor's chunked write loop
+  (``flare/http/_reactor/conn_handle.mojo``) pulls the next framed
+  chunk on each writable edge -- the "100MB without 100MB
+  allocation" path. Use ``stream_response(source)`` to build one.
+
+Pieces still open:
+
+- Making ``Response`` parametric over ``B: Body`` (so handlers can
+  return ``Response[ChunkedBody[MySource]]``). Today's ``Response``
+  keeps its concrete ``List[UInt8]`` body plus the optional
+  ``body_stream``; the parametric migration is a follow-up.
+- HTTP/2 streaming response bodies: the h2 server still emits one
+  buffered DATA frame per stream; ``body_stream`` is H1-only for now.
+- Multi-worker ``serve_streaming`` (single-listener only today).
 
 The shape and public API of ``ChunkSource`` / ``Body`` /
-``InlineBody`` / ``ChunkedBody`` are stable; integration into
-``Response`` and the reactor lands without breaking handlers.
+``InlineBody`` / ``ChunkedBody`` are stable.
 """
 
 from std.collections import Optional

@@ -319,10 +319,12 @@ struct SseStreamingResponse(Movable):
     to the channel after the handler returns are flushed by the
     reactor on the next writable edge.
 
-    Reactor adoption: the same ``ChunkedBody`` plumbing example 24
-    already drives is what the reactor's
-    ``serve_streaming(StreamingResponse[B])`` entry point will use
-    once the streaming reactor lands.
+    Reactor adoption (K1, landed for HTTP/1.1): a Router/Handler can
+    stream SSE by returning ``stream_response(channel)`` (the epoll
+    reactor pulls one framed chunk per writable edge via
+    ``Response.body_stream``). This ``SseStreamingResponse`` wrapper
+    remains for the ``serve_streaming`` entry point; HTTP/2 streaming
+    bodies are still a follow-up.
     """
 
     var response: Response
