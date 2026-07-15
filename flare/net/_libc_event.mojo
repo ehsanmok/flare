@@ -117,6 +117,9 @@ def _epoll_event_set(
         data_u64: Token stored in ``data.u64`` (used by reactor as its
                   per-fd opaque handle).
     """
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_epoll_event_set: null epoll_event buffer"
+    )
     # events field is always at offset 0, little-endian UInt32.
     (buf + 0).init_pointee_copy(UInt8(events & 0xFF))
     (buf + 1).init_pointee_copy(UInt8((events >> 8) & 0xFF))
@@ -142,6 +145,9 @@ def _epoll_event_set(
 @always_inline
 def _epoll_event_read_events(buf: UnsafePointer[UInt8, _]) -> UInt32:
     """Read the ``events`` field from an ``epoll_event`` buffer."""
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_epoll_event_read_events: null epoll_event buffer"
+    )
     return (
         UInt32((buf + 0).load())
         | (UInt32((buf + 1).load()) << 8)
@@ -153,6 +159,9 @@ def _epoll_event_read_events(buf: UnsafePointer[UInt8, _]) -> UInt32:
 @always_inline
 def _epoll_event_read_data(buf: UnsafePointer[UInt8, _]) -> UInt64:
     """Read ``data.u64`` from an ``epoll_event`` buffer."""
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_epoll_event_read_data: null epoll_event buffer"
+    )
     var off = EPOLL_EVENT_DATA_OFF
     var v: UInt64 = 0
     for i in range(8):

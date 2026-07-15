@@ -568,6 +568,9 @@ def _sockaddr_to_socket_addr(buf: UnsafePointer[UInt8, _]) raises -> SocketAddr:
     Raises:
         NetworkError: If ``inet_ntop`` fails or the family is unknown.
     """
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_sockaddr_to_socket_addr: null sockaddr buffer"
+    )
     var family = _get_family_from_sockaddr(buf)
     var port = _read_port_from_sockaddr(buf)
     if family == AF_INET6:

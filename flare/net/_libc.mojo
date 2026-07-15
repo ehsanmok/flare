@@ -301,6 +301,9 @@ def _read_port_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> UInt16:
     Returns:
         The port in host byte order.
     """
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_read_port_from_sockaddr: null sockaddr buffer"
+    )
     # buf[2] is the high byte and buf[3] is the low byte of the port in
     # network byte order (big-endian). Reconstructing the integer manually
     # as (high << 8 | low) already yields the host-byte-order value on
@@ -325,6 +328,9 @@ def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
     Safety:
         ``buf`` must be a valid ``sockaddr_in`` returned by the kernel.
     """
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_read_ip_from_sockaddr: null sockaddr buffer"
+    )
     var ntop_buf = stack_allocation[64, UInt8]()
     for i in range(64):
         (ntop_buf + i).init_pointee_copy(0)
@@ -360,6 +366,9 @@ def _read_ipv6_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
     Raises:
         Error: If ``inet_ntop`` fails.
     """
+    debug_assert[assert_mode="safe"](
+        Int(buf) != 0, "_read_ipv6_from_sockaddr: null sockaddr buffer"
+    )
     var ntop_buf = stack_allocation[64, UInt8]()
     for i in range(64):
         (ntop_buf + i).init_pointee_copy(0)
@@ -463,6 +472,10 @@ def _close(fd: c_int) -> c_int:
 @always_inline
 def _bind(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
     """Wrapper around ``bind(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(addr) != 0 and Int(addrlen) > 0,
+        "_bind: null addr or zero addrlen",
+    )
     return external_call["bind", c_int](fd, addr.bitcast[NoneType](), addrlen)
 
 
@@ -479,6 +492,10 @@ def _accept(
     addrlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``accept(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(addr) != 0 and Int(addrlen) != 0,
+        "_accept: null addr / addrlen out-parameter",
+    )
     return external_call["accept", c_int](fd, addr.bitcast[NoneType](), addrlen)
 
 
@@ -487,6 +504,10 @@ def _connect(
     fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint
 ) -> c_int:
     """Wrapper around ``connect(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(addr) != 0 and Int(addrlen) > 0,
+        "_connect: null addr or zero addrlen",
+    )
     return external_call["connect", c_int](
         fd, addr.bitcast[NoneType](), addrlen
     )
@@ -499,6 +520,10 @@ def _getsockname(
     addrlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getsockname(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(addr) != 0 and Int(addrlen) != 0,
+        "_getsockname: null addr / addrlen out-parameter",
+    )
     return external_call["getsockname", c_int](
         fd, addr.bitcast[NoneType](), addrlen
     )
@@ -511,6 +536,10 @@ def _getpeername(
     addrlen: UnsafePointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getpeername(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(addr) != 0 and Int(addrlen) != 0,
+        "_getpeername: null addr / addrlen out-parameter",
+    )
     return external_call["getpeername", c_int](
         fd, addr.bitcast[NoneType](), addrlen
     )
@@ -521,6 +550,9 @@ def _send(
     fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``send(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(n) == 0 or Int(buf) != 0, "_send: null buffer with non-zero length"
+    )
     return external_call["send", c_ssize_t](
         fd, buf.bitcast[NoneType](), n, flags
     )
@@ -544,6 +576,10 @@ def _writev(
     negative value on failure (with ``errno`` set per the usual
     libc convention).
     """
+    debug_assert[assert_mode="safe"](
+        Int(iovcnt) >= 0 and (Int(iovcnt) == 0 or Int(iov) != 0),
+        "_writev: null iovec array with non-zero iovcnt",
+    )
     return external_call["writev", c_ssize_t](
         fd, iov.bitcast[NoneType](), iovcnt
     )
@@ -554,6 +590,9 @@ def _recv(
     fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``recv(2)``."""
+    debug_assert[assert_mode="safe"](
+        Int(n) == 0 or Int(buf) != 0, "_recv: null buffer with non-zero length"
+    )
     return external_call["recv", c_ssize_t](
         fd, buf.bitcast[NoneType](), n, flags
     )
@@ -623,6 +662,10 @@ def _recvmmsg(
     a non-NULL ``{0,0}`` timespec would instead make the kernel return
     after the first datagram (per-message timeout check).
     """
+    debug_assert[assert_mode="safe"](
+        Int(vlen) == 0 or Int(msgvec) != 0,
+        "_recvmmsg: null msgvec with non-zero vlen",
+    )
     comptime if CompilationTarget.is_linux():
         return external_call["recvmmsg", c_int](
             fd, msgvec.bitcast[NoneType](), vlen, flags, timeout
@@ -650,6 +693,10 @@ def _sendmmsg(
     count). ``ENOSYS`` => fall back to per-datagram ``sendto``.
     Linux-only.
     """
+    debug_assert[assert_mode="safe"](
+        Int(vlen) == 0 or Int(msgvec) != 0,
+        "_sendmmsg: null msgvec with non-zero vlen",
+    )
     comptime if CompilationTarget.is_linux():
         return external_call["sendmmsg", c_int](
             fd, msgvec.bitcast[NoneType](), vlen, flags
@@ -675,6 +722,9 @@ def _sendmsg(
     control message tells the kernel to slice the buffer into wire
     datagrams of the cmsg's segment size. Returns bytes accepted.
     """
+    debug_assert[assert_mode="safe"](
+        Int(msg) != 0, "_sendmsg: null msghdr pointer"
+    )
     return external_call["sendmsg", c_ssize_t](
         fd, msg.bitcast[NoneType](), flags
     )
