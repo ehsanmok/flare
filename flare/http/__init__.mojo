@@ -237,11 +237,17 @@ from .multipart import (
     parse_multipart_form_data,
 )
 from .session import (
+    BackedSessionStore,
     CookieSessionStore,
     InMemorySessionStore,
+    MemorySessionBackend,
     Session,
+    SessionBackend,
     SessionCodec,
+    SessionStore,
     StringSessionCodec,
+    new_session_id,
+    session_now_s,
     signed_cookie_decode,
     signed_cookie_decode_keys,
     signed_cookie_encode,
