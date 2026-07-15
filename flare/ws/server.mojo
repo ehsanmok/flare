@@ -474,6 +474,25 @@ struct WsConnection(Movable):
 # ── WsServer ──────────────────────────────────────────────────────────────────
 
 
+trait WsHandler(Copyable, ImplicitlyDestructible, Movable):
+    """Stateful per-connection WebSocket handler.
+
+    The struct-handler counterpart to the ``def(mut WsConnection)``
+    callback: because :meth:`on_connection` takes ``mut self``, the
+    handler can carry state (a shared registry, a counter, config) that
+    persists across the connections one server instance serves. Mount via
+    :meth:`WsServer.serve` (the ``[H: WsHandler]`` overload).
+
+    The trait is protocol-agnostic -- it drives a :class:`WsConnection`,
+    which is the h1 carrier today; the same handler will run over the
+    WS-over-h2 carrier once that bridge lands (carrier abstraction).
+    """
+
+    def on_connection(mut self, mut conn: WsConnection) raises -> None:
+        """Run one established WebSocket connection to completion."""
+        ...
+
+
 struct WsServer(Movable):
     """A WebSocket server that upgrades incoming HTTP connections.
 
@@ -600,6 +619,32 @@ struct WsServer(Movable):
         # SO_REUSEPORT listeners below take over the port.
         self._listener.close()
         _ws_serve_multicore(addr, handler, num_workers)
+
+    def serve[H: WsHandler](mut self, var handler: H) raises:
+        """Accept WebSocket connections, dispatching each to a stateful
+        :trait:`WsHandler` struct.
+
+        The struct-handler variant of :meth:`serve`: one ``handler``
+        instance serves every connection via ``mut self``, so it can
+        accumulate state (connection count, a shared room registry, etc.)
+        across connections. Single-threaded; a multi-worker struct-handler
+        path (per-worker handler copies over the SO_REUSEPORT listeners)
+        is a follow-up -- the ``def`` handler already has ``num_workers``.
+
+        Upgrade errors for individual connections are logged and skipped;
+        only fatal accept-loop errors propagate.
+        """
+        while True:
+            var stream = self._listener.accept()
+            var peer = stream.peer_addr()
+            try:
+                var key = _read_upgrade_request(stream)
+                var accept = _compute_accept_srv(key)
+                _send_upgrade_response(stream, accept)
+                var conn = WsConnection(stream^, peer)
+                handler.on_connection(conn)
+            except e:
+                print("[ws] connection error: " + String(e))
 
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to.
