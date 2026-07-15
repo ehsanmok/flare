@@ -390,6 +390,7 @@ test-client-h3-policy     = "mojo -I . tests/http/test_client_h3_policy.mojo" # 
 test-ws-autoclient        = "mojo -I . tests/ws/test_ws_autoclient.mojo"      # ALPN-driven WS wire dispatcher decision matrix (~13 cases)
 test-ws-autoclient-loopback = "mojo -I . tests/ws/test_ws_autoclient_loopback.mojo"  # WsAutoClient I/O round-trip vs forked WsServer (4 cases)
 test-ws-stateful-handler = "mojo -I . tests/ws/test_ws_stateful_handler.mojo"  # stateful WsHandler trait via WsServer.serve[H] (ws:// loopback)
+test-ws-h2-roundtrip = "mojo -I . tests/ws/test_ws_h2_roundtrip.mojo"  # WS-over-h2 server bridge full round-trip (paired sans-I/O drivers)
 example-alpn-dispatch-demo    = "mojo -I . examples/advanced/alpn_dispatch_demo.mojo"
 example-http3-server-walkthrough = "mojo -I . examples/advanced/http3_server_walkthrough.mojo"
 example-http3-server          = "mojo -I . examples/advanced/http3_server.mojo"      # shared Handler across h1 / h2c / h2 / h3

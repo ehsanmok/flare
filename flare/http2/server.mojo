@@ -653,6 +653,49 @@ struct Http2Connection(Defaultable, Movable):
         s.state = StreamState.CLOSED()
         self.conn.streams[sid] = s^
 
+    # ── WebSocket-over-HTTP/2 bridge (RFC 8441) ────────────────────────────
+
+    def take_extended_connect_streams(self) -> List[Int]:
+        """Return stream ids of open Extended CONNECT tunnels awaiting
+        acceptance: ``:method=CONNECT`` + ``:protocol=websocket``, headers
+        complete, not yet END_STREAM'd, still OPEN (RFC 8441). The
+        ``:protocol`` marker is cleared by :meth:`accept_ws_over_h2`, so an
+        accepted tunnel is not re-returned."""
+        var ids = List[Int]()
+        for entry in self.conn.streams.items():
+            var s = entry[1].copy()
+            if (
+                s.headers_complete
+                and not s.data_complete
+                and s.extended_connect_protocol == "websocket"
+                and s.state.value == StreamState.OPEN().value
+            ):
+                ids.append(s.id)
+        return ids^
+
+    def accept_ws_over_h2(mut self, sid: Int) raises:
+        """Accept a WebSocket Extended CONNECT tunnel on ``sid``: emit a
+        ``:status=200`` HEADERS block WITHOUT END_STREAM (RFC 8441 5.2)
+        so the stream stays open for bidirectional WS DATA. Clears the
+        ``:protocol`` marker so the tunnel is not re-surfaced."""
+        if sid not in self.conn.streams:
+            raise Error("h2: accept_ws_over_h2 on unknown stream")
+        self.begin_stream_response(sid, Response(200))
+        var s = self.conn.streams[sid].copy()
+        s.extended_connect_protocol = String("")
+        self.conn.streams[sid] = s^
+
+    def drain_stream_data(mut self, sid: Int) raises -> List[UInt8]:
+        """Move any inbound DATA accumulated for ``sid`` out of the stream
+        record (the WS-over-h2 read path pulls client frames from here)."""
+        if sid not in self.conn.streams:
+            return List[UInt8]()
+        var s = self.conn.streams[sid].copy()
+        var out = s.data^
+        s.data = List[UInt8]()
+        self.conn.streams[sid] = s^
+        return out^
+
     def begin_stream_response(mut self, sid: Int, var resp: Response) raises:
         """Queue the leading HEADERS of an incremental streaming response.
 
