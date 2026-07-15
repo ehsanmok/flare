@@ -126,6 +126,13 @@ from .server_stream import (
     GrpcStreamingService,
     run_server_streaming_call,
 )
+from .client_stream import (
+    GrpcBidiService,
+    GrpcBidiStreaming,
+    GrpcClientStreaming,
+    GrpcClientStreamingService,
+    decode_request_messages,
+)
 from .status import (
     GRPC_STATUS_OK,
     GRPC_STATUS_CANCELLED,

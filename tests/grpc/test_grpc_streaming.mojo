@@ -24,11 +24,16 @@ from std.memory import Span
 from std.testing import assert_equal, assert_true
 
 from flare.grpc import (
+    GrpcBidiService,
+    GrpcBidiStreaming,
     GrpcCallContext,
     GrpcClient,
+    GrpcClientStreaming,
+    GrpcClientStreamingService,
     GrpcServerStreamReply,
     GrpcServerStreaming,
     GrpcStreamingService,
+    GrpcUnaryReply,
     decode_grpc_message,
     encode_grpc_message,
 )
@@ -117,6 +122,41 @@ struct _CountStreamHandler(Copyable, GrpcServerStreaming, Movable):
             for b in p:
                 m.append(b)
             msgs.append(m^)
+        return GrpcServerStreamReply.ok(msgs^)
+
+
+@fieldwise_init
+struct _CountClientHandler(Copyable, GrpcClientStreaming, Movable):
+    """Replies with the decimal count of request messages received."""
+
+    var _seed: Int
+
+    def serve_client_streaming(
+        mut self,
+        ctx: GrpcCallContext,
+        messages: List[List[UInt8]],
+    ) raises -> GrpcUnaryReply:
+        var body = String(len(messages)).as_bytes()
+        var out = List[UInt8]()
+        for b in body:
+            out.append(b)
+        return GrpcUnaryReply.ok(out^)
+
+
+@fieldwise_init
+struct _EchoBidiHandler(Copyable, GrpcBidiStreaming, Movable):
+    """Echoes each request message back as a response message."""
+
+    var _seed: Int
+
+    def serve_bidi(
+        mut self,
+        ctx: GrpcCallContext,
+        messages: List[List[UInt8]],
+    ) raises -> GrpcServerStreamReply:
+        var msgs = List[List[UInt8]]()
+        for i in range(len(messages)):
+            msgs.append(messages[i].copy())
         return GrpcServerStreamReply.ok(msgs^)
 
 
@@ -257,9 +297,82 @@ def test_bidi_echoes_each_message() raises:
     assert_equal(code, 0)
 
 
+def test_client_streaming_service_counts_messages() raises:
+    """A real GrpcClientStreamingService decodes every request frame and
+    replies once with their count."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var svc = GrpcClientStreamingService(_CountClientHandler(0))
+    var pid = fork_server(srv^, svc^)
+
+    var raised = False
+    var reply = String("")
+    var code = -1
+    try:
+        var ch = GrpcClient(_base(port))
+        var st = ch.call_client_streaming("/echo.Echo/ClientStream")
+        st.send("a".as_bytes())
+        st.send("bb".as_bytes())
+        st.send("ccc".as_bytes())
+        st.send("dddd".as_bytes())
+        st.close_send()
+        var m = st.recv()
+        if m:
+            reply = String(unsafe_from_utf8=Span[UInt8, _](m.value()))
+        code = st.status().code
+        st.close()
+    except e:
+        print("client-streaming service raised:", e)
+        raised = True
+
+    kill_forked_server(pid)
+    assert_true(not raised, "client-streaming service raised")
+    assert_equal(reply, "4")
+    assert_equal(code, 0)
+
+
+def test_bidi_service_echoes_each_message() raises:
+    """A real GrpcBidiService echoes each request message back as its own
+    incrementally-streamed response frame."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var svc = GrpcBidiService(_EchoBidiHandler(0))
+    var pid = fork_server(srv^, svc^)
+
+    var raised = False
+    var echoes = List[String]()
+    var code = -1
+    try:
+        var ch = GrpcClient(_base(port))
+        var st = ch.call_bidi("/echo.Echo/Bidi")
+        st.send("ping".as_bytes())
+        st.send("pong".as_bytes())
+        st.send("pang".as_bytes())
+        st.close_send()
+        while True:
+            var m = st.recv()
+            if not m:
+                break
+            echoes.append(String(unsafe_from_utf8=Span[UInt8, _](m.value())))
+        code = st.status().code
+        st.close()
+    except e:
+        print("bidi service raised:", e)
+        raised = True
+
+    kill_forked_server(pid)
+    assert_true(not raised, "bidi service raised")
+    assert_equal(len(echoes), 3)
+    assert_equal(echoes[0], "ping")
+    assert_equal(echoes[2], "pang")
+    assert_equal(code, 0)
+
+
 def main() raises:
     test_server_streaming_yields_n_messages_in_order()
     test_server_streaming_service_incremental_frames()
     test_client_streaming_counts_messages()
+    test_client_streaming_service_counts_messages()
     test_bidi_echoes_each_message()
-    print("test_grpc_streaming: 4 passed")
+    test_bidi_service_echoes_each_message()
+    print("test_grpc_streaming: 6 passed")
