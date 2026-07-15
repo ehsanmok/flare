@@ -81,6 +81,7 @@ from ._client.parse import (
     _read_http_response_tcp,
     _read_http_response_tls,
 )
+from ._client.download import HttpDownload
 from ._client.h2_send import (
     _build_h2_request_headers,
     _send_h2_over_tcp,
@@ -1212,6 +1213,40 @@ struct HttpClient(Movable):
         """
         var req = Request(method=Method.GET, url=self._resolve_url(url))
         return self.send(req)
+
+    def get_streaming(self, url: String) raises -> HttpDownload[TcpStream]:
+        """GET a response and stream its body incrementally.
+
+        Parses only the status line + headers up front and returns an
+        :class:`HttpDownload`; the caller pulls the body with
+        ``read_chunk()`` in bounded memory (Content-Length, chunked, and
+        close-delimited framings decoded on the fly). The connection is
+        not pooled (``Connection: close``).
+
+        ponytail: cleartext ``http://`` only today -- TLS / h2 / h3
+        streaming download needs a type-erased reader over the TLS / QUIC
+        transports (follow-up). Use :meth:`get` for a buffered ``https``
+        response.
+        """
+        var u = Url.parse(self._resolve_url(url))
+        if u.is_tls():
+            raise Error(
+                "get_streaming: cleartext http:// only today; use get() for"
+                " https (buffered)"
+            )
+        var host_header = u.host
+        if u.port != 80:
+            host_header = host_header + ":" + String(Int(u.port))
+        var wire = String("GET ") + u.request_target() + " HTTP/1.1\r\n"
+        wire += "Host: " + host_header + "\r\n"
+        wire += "User-Agent: " + self._user_agent + "\r\n"
+        wire += "Accept: */*\r\n"
+        wire += "Accept-Encoding: identity\r\n"
+        wire += "Connection: close\r\n\r\n"
+        var stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        var wb = wire.as_bytes()
+        stream.write_all(Span[UInt8, _](wb))
+        return HttpDownload[TcpStream](stream^)
 
     def post(self, url: String, body: String) raises -> Response:
         """Perform a POST request with a JSON string body.

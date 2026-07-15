@@ -531,6 +531,7 @@ test-h2-per-stream-cancel = "mojo -I . tests/http2/test_h2_per_stream_cancel.moj
 test-h1-client-pool  = "mojo -I . tests/http/test_h1_client_pool.mojo"            # v0.7 — HTTP/1.1 client connection pool: idle reuse + per-origin buckets + caps (~4 tests)
 test-tls-client-pool = "mojo -I . tests/http/test_tls_client_pool.mojo"           # HTTPS (TLS h1) client pool: live-conn reuse + caps + per-origin (~4 tests)
 test-client-stream-upload = "mojo -I . tests/http/test_client_stream_upload.mojo" # streaming request body (chunked TE, bounded memory) round trip (~1 test)
+test-client-stream-download = "mojo -I . tests/http/test_client_stream_download.mojo" # streaming response body (get_streaming: content-length/chunked/close) (~3 cases)
 test-huffman-simd    = "mojo -I . tests/http/test_huffman_simd.mojo"              # v0.7 — SIMD HPACK Huffman shim: parity + dispatch (~5 tests)
 test-ws-h2           = "mojo -I . tests/ws/test_ws_h2.mojo"                     # v0.7 — WS-over-HTTP/2 (RFC 8441) stream <-> frame adapter (~6 tests)
 test-ws-permessage-deflate = "mojo -I . tests/ws/test_ws_permessage_deflate.mojo"  # v0.7 — RFC 7692 permessage-deflate codec + Sec-WebSocket-Extensions parser (~8 tests)
