@@ -484,6 +484,12 @@ struct PermessageDeflateContext(Movable):
     :meth:`reset_*` calls can re-initialise without parameter
     drift."""
 
+    var _lib: OwnedDLHandle
+    """Cached handle to ``libflare_zlib.so``, opened once for the
+    context's lifetime instead of per ``compress`` / ``decompress``
+    message. Used only via the ``read lib`` borrow helpers, the same
+    safe field-cache pattern as ``TlsStream`` / ``TlsSession``."""
+
     def __init__(
         out self,
         level: Int = DEFAULT_DEFLATE_LEVEL,
@@ -506,8 +512,10 @@ struct PermessageDeflateContext(Movable):
             Error: If either ``flare_pmd_*_new`` returns a zlib
                 error code, or the heap allocation fails.
         """
-        var lib = OwnedDLHandle(_find_flare_zlib_lib())
-        var c = _do_pmd_compressor_new(lib, c_int(level), c_int(window_bits))
+        self._lib = OwnedDLHandle(_find_flare_zlib_lib())
+        var c = _do_pmd_compressor_new(
+            self._lib, c_int(level), c_int(window_bits)
+        )
         if c == 0:
             raise Error(
                 "permessage-deflate: flare_pmd_compressor_new"
@@ -522,15 +530,15 @@ struct PermessageDeflateContext(Movable):
                 "permessage-deflate: deflateInit2 returned zlib error "
                 + String(c)
             )
-        var d = _do_pmd_decompressor_new(lib, c_int(window_bits))
+        var d = _do_pmd_decompressor_new(self._lib, c_int(window_bits))
         if d == 0:
-            _do_pmd_compressor_free(lib, c)
+            _do_pmd_compressor_free(self._lib, c)
             raise Error(
                 "permessage-deflate: flare_pmd_decompressor_new"
                 " returned 0 (heap allocation failed)"
             )
         if d < 0:
-            _do_pmd_compressor_free(lib, c)
+            _do_pmd_compressor_free(self._lib, c)
             raise Error(
                 "permessage-deflate: inflateInit2 returned zlib error "
                 + String(d)
@@ -549,6 +557,7 @@ struct PermessageDeflateContext(Movable):
         self.max_decompressed_bytes = take.max_decompressed_bytes
         self._level = take._level
         self._window_bits = take._window_bits
+        self._lib = take._lib^
 
     def __del__(deinit self):
         """Release both z_streams through the FFI; safe to call
@@ -558,11 +567,10 @@ struct PermessageDeflateContext(Movable):
         # Best-effort cleanup; surfaces of failures are limited
         # to log lines (Error in __del__ would propagate badly).
         try:
-            var lib = OwnedDLHandle(_find_flare_zlib_lib())
             if self._comp_handle != 0:
-                _do_pmd_compressor_free(lib, self._comp_handle)
+                _do_pmd_compressor_free(self._lib, self._comp_handle)
             if self._decomp_handle != 0:
-                _do_pmd_decompressor_free(lib, self._decomp_handle)
+                _do_pmd_decompressor_free(self._lib, self._decomp_handle)
         except:
             pass
 
@@ -592,7 +600,6 @@ struct PermessageDeflateContext(Movable):
             var out = List[UInt8]()
             out.append(UInt8(0x00))
             return out^
-        var lib = OwnedDLHandle(_find_flare_zlib_lib())
         var n = len(data)
         # Worst-case bound from zlib: srclen + (srclen >> 12) +
         # (srclen >> 14) + (srclen >> 25) + 13. Add slack for the
@@ -602,7 +609,7 @@ struct PermessageDeflateContext(Movable):
             var out = List[UInt8](capacity=cap)
             out.resize(cap, 0)
             var written = _do_pmd_compress_chunk(
-                lib,
+                self._lib,
                 self._comp_handle,
                 Int(data.unsafe_ptr()),
                 c_int(n),
@@ -668,7 +675,6 @@ struct PermessageDeflateContext(Movable):
                 " §7.2.2 forbids a zero-length compressed"
                 " message)"
             )
-        var lib = OwnedDLHandle(_find_flare_zlib_lib())
         var n = len(data)
         var with_trailer = List[UInt8](capacity=n + 4)
         for i in range(n):
@@ -684,7 +690,7 @@ struct PermessageDeflateContext(Movable):
             var out = List[UInt8](capacity=cap)
             out.resize(cap, 0)
             var written = _do_pmd_decompress_chunk(
-                lib,
+                self._lib,
                 self._decomp_handle,
                 Int(with_trailer.unsafe_ptr()),
                 c_int(len(with_trailer)),
