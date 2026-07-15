@@ -121,3 +121,42 @@ jobs:
           done
           echo "── all 3 attempts failed (rc=$rc) ──"
           exit $rc
+
+  sanitizers:
+    name: ASan (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: v0.70.2
+          environments: default
+          locked: true
+          cache: false
+          post-cleanup: false
+
+      - name: Generate self-signed cert for TLS tests
+        run: pixi run bash benchmark/scripts/_make_self_signed.sh
+
+      - name: Run ASan sanitizer suite
+        # AOT-builds the curated FFI / streaming / QUIC / TLS test
+        # inventory with ``mojo build --sanitize address`` and runs
+        # each (tools/run_sanitizer_tests.sh). The same
+        # runtime-crash retry wrapper the test job uses guards the
+        # transient libKGENCompilerRTShared fresh-process segfault.
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            echo "── asan attempt $attempt/3 ──"
+            pixi run tests-asan
+            rc=$?
+            if [ $rc -eq 0 ]; then
+              exit 0
+            fi
+            echo "── attempt $attempt failed (rc=$rc), retrying ──"
+            sleep 5
+          done
+          echo "── all 3 attempts failed (rc=$rc) ──"
+          exit $rc
