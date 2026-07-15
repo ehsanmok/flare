@@ -37,6 +37,7 @@ from ..http.sse import (
     SseStreamingResponse,
     format_sse_event,
     sse_response,
+    stream_sse_response,
 )
 from ..net.address import IpAddr, SocketAddr
 from ..http.server import (

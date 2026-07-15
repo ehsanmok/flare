@@ -290,6 +290,7 @@ from .sse import (
     SseStreamingResponse,
     format_sse_event,
     sse_response,
+    stream_sse_response,
 )
 from .redirect_policy import (
     RedirectAction,

@@ -1,94 +1,89 @@
-"""Example 24 — Streaming bodies via ``ChunkSource`` (Server-Sent
-Events shape).
+"""Example 24 -- Server-Sent Events via the K1 streaming path.
 
 Server-Sent Events is the canonical "the body isn't bounded at
-handler-return time" case: the server emits ``data: ...\\n\\n``
-chunks indefinitely (or until the client disconnects). Building
-SSE on top of ``Response.body: List[UInt8]`` would require the
-handler to materialise the entire stream up front, which defeats
-the point.
+handler-return time" case: the server emits ``data: ...\\n\\n`` records
+until the client disconnects. Building SSE on ``Response.body:
+List[UInt8]`` would force the handler to materialize the whole stream up
+front, defeating the point.
 
-The streaming primitives (``ChunkSource`` +
-``ChunkedBody``) make SSE a 50-line pattern: the handler implements
-a ``ChunkSource`` that yields one event per ``next(cancel)`` call,
-wraps it in ``ChunkedBody[Source]``, and the reactor pulls a chunk
-on each writable edge. Backpressure is implicit (when the kernel
-send buffer fills, the reactor stops calling ``next``). Cancellation
-is cooperative (``cancel.cancelled()`` short-circuits the source).
+Flare ships SSE as a first-class :class:`ChunkSource`
+(:class:`SseChannel`) plus the :func:`stream_sse_response` helper. A
+normal ``Handler`` / ``Router`` returns::
 
-This example drives a ``Counter`` SSE source through the
-in-process ``drain_body`` helper to keep the demo self-contained.
-The reactor adoption — wiring ``ChunkedBody`` into the
-``HttpServer.serve_streaming`` entry point — lands as a follow-up;
-when it does the same ``Counter`` source plugs in unchanged.
+    def events(req: Request) raises -> Response:
+        var ch = SseChannel()
+        ch.push(SseEvent.message("hello"))
+        ch.close()                      # or keep open for a live stream
+        return stream_sse_response(ch^)
+
+and the reactor streams one SSE record per writable edge -- over HTTP/1.1
+(chunked transfer-encoding) and HTTP/2 (DATA frames) with no
+SSE-specific reactor code. Backpressure is implicit (when the kernel
+send buffer fills, the reactor stops calling ``next``); cancellation is
+cooperative (``cancel.cancelled()`` ends the source).
+
+This example drives an :class:`SseChannel` through the in-process
+``drain`` helper so the demo is self-contained and deterministic; the
+same channel plugs straight into ``stream_sse_response`` on a live
+server (see ``tests/http/test_sse.mojo`` for the forked e2e).
 
 Run:
     pixi run example-sse
 """
 
-from std.collections import Optional
-
 from flare.http import (
     Cancel,
-    CancelCell,
-    CancelReason,
-    ChunkSource,
-    ChunkedBody,
-    drain_body,
+    Response,
+    SseChannel,
+    SseEvent,
+    format_sse_event,
+    stream_sse_response,
 )
 
 
-@fieldwise_init
-struct Counter(ChunkSource, Copyable, Movable):
-    """Yields ``"data: 0\\n\\n"`` ... ``"data: (max_i-1)\\n\\n"`` then
-    terminates. Real SSE sources connect to a database / queue /
-    websocket / metric stream and emit one event per tick.
-    """
-
-    var i: Int
-    var max_i: Int
-
-    def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
-        if cancel.cancelled() or self.i >= self.max_i:
-            return Optional[List[UInt8]]()
-        var line = "data: " + String(self.i) + "\n\n"
-        var bytes = List[UInt8]()
-        for b in line.as_bytes():
-            bytes.append(b)
-        self.i += 1
-        return Optional[List[UInt8]](bytes^)
+def _drain(var channel: SseChannel) raises -> String:
+    """Pull every record out of a closed channel and join the bytes."""
+    var out = List[UInt8]()
+    var sentinel = Cancel.never()
+    while True:
+        var maybe = channel.next(sentinel)
+        if not maybe:
+            break
+        var chunk = maybe.value().copy()
+        for i in range(len(chunk)):
+            out.append(chunk[i])
+    return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
 def main() raises:
-    print("=== flare Example 24: SSE-shaped streaming body ===")
+    print("=== flare Example 24: Server-Sent Events (K1) ===")
     print()
 
-    # 1) Bounded source: 5 events, no cancellation.
-    print("[1] Counter(0..5) drained without cancellation:")
-    var body1 = ChunkedBody[Counter](source=Counter(0, 5))
-    var drained1 = drain_body(body1, Cancel.never())
-    var s1 = String(unsafe_from_utf8=Span[UInt8, _](drained1))
-    print(s1)
+    # 1) One event formatted to the SSE wire shape.
+    print("[1] format_sse_event(SseEvent.named):")
+    var ev = SseEvent.named("tick", "42")
+    print(String(unsafe_from_utf8=Span[UInt8, _](format_sse_event(ev))))
 
-    # 2) Same source, but cancel mid-stream after the first chunk.
-    print("[2] Counter(0..100) cancelled before draining:")
-    var cell = CancelCell()
-    cell.flip(CancelReason.SHUTDOWN)
-    var body2 = ChunkedBody[Counter](source=Counter(0, 100))
-    var drained2 = drain_body(body2, cell.handle())
-    print(" drained", len(drained2), "bytes (expected 0 — cancel was set)")
+    # 2) A closed channel drains to the concatenated records.
+    print("[2] SseChannel with 3 events, drained:")
+    var ch = SseChannel()
+    ch.push(SseEvent.message("alpha"))
+    ch.push(SseEvent.message("beta"))
+    ch.push(SseEvent.named("done", "bye"))
+    ch.close()
+    print(_drain(ch^))
 
-    # 3) ChunkedBody declares no Content-Length so chunked
-    # Transfer-Encoding framing fires when the reactor adopts
-    # this primitive.
-    var body3 = ChunkedBody[Counter](source=Counter(0, 3))
-    print(
-        "[3] ChunkedBody.content_length() is None:",
-        not body3.content_length(),
-    )
+    # 3) The canonical Router shape: stream_sse_response wraps a channel
+    # as a streaming Response with the spec-correct SSE headers.
+    print("[3] stream_sse_response builds the streaming Response:")
+    var live = SseChannel()
+    live.push(SseEvent.message("hello"))
+    live.close()
+    var resp = stream_sse_response(live^)
+    print(" status           :", resp.status)
+    print(" content-type     :", resp.headers.get("content-type"))
+    print(" cache-control    :", resp.headers.get("cache-control"))
+    print(" body is streaming:", Bool(resp.body_stream))
 
-    print()
-    print("Reactor adoption (HttpServer.serve_streaming) is the")
-    print("follow-up that wires this into the wire path.")
     print()
     print("=== Example 24 complete ===")

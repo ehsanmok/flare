@@ -55,7 +55,7 @@ from std.collections import Optional
 
 from .body import Body, ChunkSource, ChunkedBody, InlineBody
 from .cancel import Cancel
-from .response import Response
+from .response import Response, stream_response
 
 
 # ── SseEvent ────────────────────────────────────────────────────────────────
@@ -303,6 +303,31 @@ def sse_response(channel: SseChannel) raises -> Response:
             )
     resp.body = body^
     resp.headers.set("Content-Length", String(len(resp.body)))
+    return resp^
+
+
+def stream_sse_response(
+    var channel: SseChannel, status: Int = 200
+) raises -> Response:
+    """Build a streaming (K1) SSE :class:`Response` from ``channel``.
+
+    This is the canonical way to serve SSE through the normal
+    ``Handler`` / ``Router`` path: the returned ``Response`` carries the
+    channel on ``body_stream`` (one SSE record per writable edge) plus
+    the spec-correct SSE headers, and streams over both HTTP/1.1 (chunked
+    transfer-encoding) and HTTP/2 (DATA frames) with no SSE-specific
+    reactor code.
+
+    Unlike :func:`sse_response` (a synchronous, ``Content-Length``
+    snapshot that requires a closed channel), the channel may stay open:
+    the reactor pulls ``next(cancel)`` per writable edge -- yielding the
+    ``": keep-alive"`` heartbeat while empty -- until the channel is
+    closed or the peer disconnects. Prefer this over the legacy
+    :class:`SseStreamingResponse`, which only fed the ``serve_streaming``
+    entry point.
+    """
+    var resp = stream_response[SseChannel](channel^, status)
+    _set_sse_headers(resp)
     return resp^
 
 

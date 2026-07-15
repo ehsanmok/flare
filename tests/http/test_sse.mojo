@@ -34,6 +34,7 @@ from std.testing import (
     assert_true,
 )
 
+from flare.http import HttpClient, HttpServer, Request, Response
 from flare.http.body import drain_body
 from flare.http.cancel import Cancel, CancelCell, CancelReason
 from flare.http.sse import (
@@ -42,7 +43,10 @@ from flare.http.sse import (
     SseStreamingResponse,
     format_sse_event,
     sse_response,
+    stream_sse_response,
 )
+from flare.net import SocketAddr
+from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 
 def _bytes_to_str(b: List[UInt8]) -> String:
@@ -219,5 +223,62 @@ def test_streaming_response_body_drains_via_chunked_body() raises:
     assert_equal(_bytes_to_str(drained), "data: alpha\n\ndata: beta\n\n")
 
 
+# ── stream_sse_response (K1 Router path) ──────────────────────────────────
+
+
+def test_stream_sse_response_carries_stream_and_headers() raises:
+    var ch = SseChannel()
+    ch.push(SseEvent.message("alpha"))
+    ch.close()
+    var resp = stream_sse_response(ch^)
+    assert_equal(resp.status, 200)
+    assert_equal(resp.headers.get("content-type"), "text/event-stream")
+    assert_equal(resp.headers.get("cache-control"), "no-cache")
+    assert_true(Bool(resp.body_stream))
+
+
+def _sse_stream_handler(req: Request) raises -> Response:
+    var ch = SseChannel()
+    ch.push(SseEvent.message("alpha"))
+    ch.push(SseEvent.message("beta"))
+    ch.close()
+    return stream_sse_response(ch^)
+
+
+def _sse_router_e2e() raises:
+    """A handler returning stream_sse_response streams the SSE records
+    through the reactor; the client reassembles the de-chunked body."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_sse_stream_handler)
+        except:
+            pass
+        exit()
+    usleep(200000)
+
+    var url = (
+        String("http://127.0.0.1:") + String(Int(port)) + String("/events")
+    )
+    var got_body = String("")
+    var got_ct = String("")
+    try:
+        with HttpClient() as c:
+            var r = c.get(url)
+            got_body = r.text()
+            got_ct = r.headers.get("content-type")
+    except:
+        pass
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(got_body, "data: alpha\n\ndata: beta\n\n")
+    assert_equal(got_ct, "text/event-stream")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
+    _sse_router_e2e()
+    print("test_sse.mojo -- SSE Router K1 e2e passed")
