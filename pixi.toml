@@ -596,6 +596,7 @@ test-safety-asserts  = "mojo -I . tests/runtime/test_safety_asserts.mojo"       
 tests-asserts-all = { cmd = "bash -c 'set -e; for f in tests/runtime/test_io_uring.mojo tests/runtime/test_iovec.mojo tests/runtime/test_buffer_pool.mojo tests/http/test_response_pool.mojo tests/runtime/test_date_cache.mojo tests/http/test_hpack_huffman.mojo tests/http/test_simd_parsers.mojo tests/http/test_header_phf.mojo tests/http/test_intern.mojo tests/runtime/test_safety_asserts.mojo tests/http2/test_h2_conn_handle.mojo tests/http2/test_h2_extended_connect.mojo tests/http/test_unified_http_server.mojo tests/http/test_unified_http_client.mojo tests/http2/test_h2_server_handler.mojo; do echo \"── -D ASSERT=all  $f\"; pixi run mojo -D ASSERT=all -I . \"$f\"; done'" }
 tests-asan        = "bash tools/run_sanitizer_tests.sh asan"
 tests-tsan        = "bash tools/run_sanitizer_tests.sh tsan"
+conformance       = "bash tools/run_conformance.sh"   # h2spec/autobahn/quic-interop (skips legs whose binary isn't provisioned)
 
 # ── Scheduler stress driver (non-mozz; runnable under the lean default env) ──
 # Hammers Scheduler.start/shutdown with random (num_workers, pin_cores, churn)
