@@ -157,6 +157,24 @@ def _pool_sem_name() -> String:
 
 
 @always_inline
+def _pool_reset():
+    """Unlink the per-process pool semaphore so the next acquire recreates
+    it at ``MAX_POOL_SIZE``.
+
+    Test-only. The cap semaphore persists for the process lifetime, so a
+    prior test in the same binary that left a slot held (e.g. a
+    ``block_in_pool`` worker whose ``sem_post`` lands late on some
+    platforms) would leave the count below the max. Unlinking drops the
+    name; the next ``sem_open(O_CREAT)`` makes a fresh object at
+    ``MAX_POOL_SIZE`` (already-open handles held by a straggler thread are
+    unaffected and are reclaimed when closed). No effect on production
+    paths, which never call this.
+    """
+    var name = _pool_sem_name()
+    _ = external_call["sem_unlink", Int32](name.unsafe_ptr())
+
+
+@always_inline
 def _pool_try_acquire() -> Bool:
     """Try to claim one pool slot. Returns True on success, False when
     the process is already at ``MAX_POOL_SIZE`` concurrent pool threads.

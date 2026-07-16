@@ -18,7 +18,7 @@ from std.testing import (
 )
 
 from flare.runtime import block_in_pool, MAX_POOL_SIZE
-from flare.runtime.blocking import _pool_try_acquire, _pool_release
+from flare.runtime.blocking import _pool_reset, _pool_try_acquire, _pool_release
 from flare.http import Cancel, CancelCell, CancelReason
 
 
@@ -228,6 +228,11 @@ def test_pool_cap_enforced_and_recovers() raises:
     acquire/release helpers so the cap is exercised deterministically
     without spawning real threads.
     """
+    # Reset the per-process cap semaphore to a pristine MAX_POOL_SIZE:
+    # an earlier test in this binary may have left a slot held (a
+    # block_in_pool worker whose sem_post lands late -- observed on
+    # macOS), which would otherwise make this exact-count assertion flaky.
+    _pool_reset()
     var got = 0
     for _ in range(MAX_POOL_SIZE):
         if _pool_try_acquire():
