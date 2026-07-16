@@ -49,6 +49,7 @@ basics.
 | [`cancel.mojo`](../examples/intermediate/cancel.mojo) | `CancelHandler` polling `cancel.cancelled()` between expensive steps |
 | [`drain.mojo`](../examples/intermediate/drain.mojo) | `HttpServer.drain(timeout_ms)` per-worker (caller wires SIGTERM today) |
 | [`sse.mojo`](../examples/intermediate/sse.mojo) | Streaming response body via `ChunkSource` (Server-Sent Events shape) |
+| [`response_from_body.mojo`](../examples/intermediate/response_from_body.mojo) | Opt-in `Response[B: Body]` ergonomics via `response_from_body` (buffered `InlineBody` + chunk-streamed `ChunkedBody` over a forked server) |
 | [`request_cookies.mojo`](../examples/intermediate/request_cookies.mojo) | Reading inbound `Cookie:` headers + the `Cookies` extractor |
 | [`forms.mojo`](../examples/intermediate/forms.mojo) | `application/x-www-form-urlencoded` parsing + the `Form` extractor |
 | [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo) | `multipart/form-data` (file uploads) + the `Multipart` extractor |

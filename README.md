@@ -324,7 +324,8 @@ Round-trip examples for each (`basic/tcp_echo`, `basic/websocket_echo`, `basic/u
 ```
 flare.io       BufReader (Readable trait, generic buffered reader)
 flare.ws       WebSocket client + server (RFC 6455, permessage-deflate
-               with context-takeover, WS-over-h2)
+               with context-takeover, WS-over-h2 incl. server-side
+               RFC 8441 reactor dispatch via HttpServer.serve[H, W])
 flare.http     HTTP/1.1 client + reactor server + Cancel + Handler /
                Router + middleware (Logger / RequestId / Compress
                / Cors / Retry / PostHocDeadline / Conditional / Cache)
