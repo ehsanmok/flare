@@ -161,27 +161,14 @@ jobs:
           echo "── all 3 attempts failed (rc=$rc) ──"
           exit $rc
 
-  tsan:
-    name: TSan (ubuntu-latest)
-    runs-on: ubuntu-latest
-    # DOCUMENTED HOST BLOCKER: the Mojo runtime links tcmalloc, which
-    # aborts under ThreadSanitizer's allocator interception on the CI
-    # image (and in the dev sandbox) before user code runs. The leg is
-    # wired so it runs automatically once a TSan-compatible toolchain /
-    # allocator ships; until then it must not fail the build.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-      - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
-        with:
-          pixi-version: v0.70.2
-          environments: default
-          locked: true
-          cache: false
-          post-cleanup: false
-      - name: Run TSan sanitizer suite
-        run: pixi run tests-tsan
+  # No CI TSan leg: the Mojo runtime links tcmalloc, which aborts under
+  # ThreadSanitizer's allocator interception before user code runs --
+  # reproduces even on a trivial one-line program, on every ubuntu-latest
+  # runner and in the dev sandbox, regardless of ASLR settings. This is a
+  # Mojo-toolchain bug, not a flare one; `continue-on-error: true` still
+  # left a permanently-red job in every run for no signal. Run `pixi run
+  # tests-tsan` locally instead; re-add this leg once a TSan-compatible
+  # Mojo toolchain/allocator ships.
 
   conformance:
     name: Conformance (h2spec / autobahn / quic-interop)
