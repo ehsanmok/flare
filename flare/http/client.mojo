@@ -782,9 +782,17 @@ struct HttpClient(Movable):
     def _dial_http3(self, u: Url) raises -> Http3ClientConnection:
         """Open a fresh established :class:`Http3ClientConnection` to
         ``u``'s origin (DNS -> rustls QUIC connector -> blocking QUIC
-        handshake). Reports the dial to the pool's miss counter."""
+        handshake). Reports the dial to the pool's miss counter.
+
+        Tries each resolved address in order, falling back to the next
+        on a handshake failure/timeout -- the same dual-stack fallback
+        :func:`_connect_with_fallback` gives the TCP h1/h2 path. Needed
+        because ``resolve()`` returns OS-preferred order, and hosts
+        that map a name to both an IPv6 and IPv4 loopback address (e.g.
+        ``localhost`` on a typical Linux ``/etc/hosts``) may put the
+        family the server isn't listening on first.
+        """
         var addrs = resolve(u.host)
-        var peer = SocketAddr(addrs[0], u.port)
         var alpn = List[String]()
         alpn.append("h3")
         # Empty ca_bundle parity with the OpenSSL h1/h2 path: fall back
@@ -795,9 +803,18 @@ struct HttpClient(Movable):
             connector = RustlsQuicConnector(self._resolve_quic_ca_pem(), alpn^)
         else:
             connector = RustlsQuicConnector.with_system_roots(alpn^)
-        var quic = QuicClientConnection.connect(peer, connector, u.host)
-        self._quic_pool.note_dial()
-        return Http3ClientConnection(quic^)
+        var last_err = String("")
+        for i in range(len(addrs)):
+            var peer = SocketAddr(addrs[i], u.port)
+            try:
+                var quic = QuicClientConnection.connect(peer, connector, u.host)
+                self._quic_pool.note_dial()
+                return Http3ClientConnection(quic^)
+            except e:
+                last_err = String(e)
+        raise NetworkError(
+            "h3: all addresses failed for " + u.host + ": " + last_err
+        )
 
     def _run_http3_request(
         self,
