@@ -23,14 +23,6 @@ jobs:
   test:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # macos-15 has an intermittent hang in the full suite (seen running to
-    # GitHub's 6h default job timeout instead of the normal 20-45 min) that
-    # is not yet root-caused. Cap it well below that so a hang fails fast
-    # with a log pointing at the stuck test instead of burning 6h, and mark
-    # it non-blocking so runner slowness/variance on macOS can never fail
-    # the required CI signal -- ubuntu-latest + ASan remain the hard gate.
-    continue-on-error: ${{ matrix.os == 'macos-15' }}
-    timeout-minutes: ${{ matrix.os == 'macos-15' && 90 || 180 }}
     strategy:
       fail-fast: false
       matrix:
@@ -106,6 +98,7 @@ jobs:
         run: pixi run bash benchmark/scripts/_make_self_signed.sh
 
       - name: Run tests
+        if: matrix.os == 'ubuntu-latest'
         # The Mojo nightly's ``libKGENCompilerRTShared.so`` segfaults
         # transiently on a fresh process before any user code runs
         # (same per-frame offsets the workflow header documents).
@@ -128,6 +121,31 @@ jobs:
             sleep 5
           done
           echo "── all 3 attempts failed (rc=$rc) ──"
+          exit $rc
+
+      - name: Run tests (macOS)
+        if: matrix.os == 'macos-15'
+        # macos-15 has an intermittent full-suite hang (confirmed running
+        # to GitHub's 6h default job timeout instead of the normal
+        # 20-45 min baseline; root cause not yet identified). A plain
+        # bash watchdog (this image has no GNU coreutils ``timeout``)
+        # SIGTERMs the run at 90 min so a hang surfaces as an ordinary
+        # step failure instead of burning 6h. `continue-on-error` then
+        # keeps that failure from blocking the required CI signal --
+        # note a job-level `timeout-minutes` can't do this instead,
+        # because a job cancelled by its own timeout gets conclusion
+        # ``cancelled``, which `continue-on-error` does not rescue.
+        # ubuntu-latest Tests + ASan + Conformance remain the hard gate.
+        continue-on-error: true
+        run: |
+          set +e
+          pixi run tests &
+          pid=$!
+          ( sleep 5400; kill -TERM "$pid" 2>/dev/null ) &
+          watcher=$!
+          wait "$pid"
+          rc=$?
+          kill "$watcher" 2>/dev/null
           exit $rc
 
   sanitizers:
