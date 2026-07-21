@@ -397,8 +397,8 @@ Router erases the handler type at registration).
 | WS-over-HTTP/2 (RFC 8441), client + server — `WsOverH2Stream` + `bootstrap_ws_over_h2` (client) and `WsOverH2ServerStream` + `Http2Connection.{take_extended_connect_streams,accept_ws_over_h2,drain_stream_data}` (server); CONNECT + `:protocol=websocket` over one h2 stream, mask discipline both directions; full paired round-trip | [`tests/ws/test_ws_h2_roundtrip.mojo`](../tests/ws/test_ws_h2_roundtrip.mojo), `flare.ws.client_h2`, `flare.ws.server_h2` |
 | `permessage-deflate` (RFC 7692) — `PermessageDeflateConfig`, `compress_message` / `decompress_message`, `Sec-WebSocket-Extensions` parser + emitter, `negotiate_permessage_deflate`; default invariant: `no_context_takeover` on both sides + 16 MiB per-message decompressed cap | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo), `flare.ws.permessage_deflate` |
 | `permessage-deflate` context-takeover (RFC 7692 §7.1 default mode) — `PermessageDeflateContext`: persistent compressor + decompressor pair, LZ77 sliding window carries between messages, fuzz-covered lifecycle (`fuzz-pmd-context` × 3 targets, 350K runs) | `flare.ws.permessage_deflate.PermessageDeflateContext` |
-| `WsClient.connect_prefer_h2(url, tls_config)` — ALPN-aware factory: advertises `["h2", "http/1.1"]`; if peer selects `http/1.1` (or none), delegates to the existing H1 Upgrade handshake; if peer selects `h2`, raises pointing at the (in-flight) full H2-tunnel runtime | [`tests/ws/test_ws_prefer_h2.mojo`](../tests/ws/test_ws_prefer_h2.mojo), `flare.ws.client` |
-| `WsAutoClient` + `WsAutoClientConfig` + `WsWireChoice` + `decide_wire` — high-level dispatcher that picks the carrying wire after the TLS handshake completes. Pure decision function consults URL scheme, `prefer_h2`, negotiated ALPN, and the peer's `ENABLE_CONNECT_PROTOCOL` SETTINGS flag (RFC 8441 §3); routes to HTTP/1.1, HTTP/2 (RFC 8441 Extended CONNECT), or FAILED. Runtime hand-off to `WsClient` / `WsOverH2Stream` is the focused follow-up | [`tests/ws/test_ws_autoclient.mojo`](../tests/ws/test_ws_autoclient.mojo), `flare.ws.auto_client` |
+| `WsAutoClient.connect()` — runtime ALPN-aware dispatcher: on `wss://` with `prefer_h2=True` it handshakes advertising `["h2", "http/1.1"]`, and if the peer selects `h2` drives the WS-over-HTTP/2 tunnel (`bootstrap_ws_over_h2`, RFC 8441 Extended CONNECT); otherwise it opens a fresh HTTP/1.1 `WsClient`. `chosen_wire` reports the outcome | [`tests/ws/test_ws_autoclient.mojo`](../tests/ws/test_ws_autoclient.mojo), `flare.ws.auto_client` |
+| `WsAutoClient` + `WsAutoClientConfig` + `WsWireChoice` + `decide_wire` — the pure decision function behind the dispatcher: consults URL scheme, `prefer_h2`, negotiated ALPN, and the peer's `ENABLE_CONNECT_PROTOCOL` SETTINGS flag (RFC 8441 §3); routes to HTTP/1.1, HTTP/2 (RFC 8441 Extended CONNECT), or FAILED. Folding this into a single `WsClient` `prefer_h2` knob (so callers don't pick between the two client types) is the remaining polish | [`tests/ws/test_ws_autoclient.mojo`](../tests/ws/test_ws_autoclient.mojo), `flare.ws.auto_client` |
 
 ## TLS
 
@@ -541,8 +541,8 @@ Tests under [`tests/`](../tests/) mirror the package layout:
 | | Count |
 |---|---|
 | Unit + integration tests | 600+ across `tests/` |
-| Examples (each part of `pixi run tests`) | 40+ under [`examples/`](../examples/) |
-| Fuzz harnesses | 60 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes |
+| Examples (each part of `pixi run tests`) | 67 under [`examples/`](../examples/) |
+| Fuzz harnesses | 62 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes |
 | Sanitizer harnesses | `tests-asan` / `tests-tsan` / `tests-asserts-all` (see [`build.md`](build.md)) |
 | Conformance corpora | RFC 7230 HTTP/1 wire shapes under [`conformance/h1/`](../conformance/h1/) (runner: `test-conformance-h1`); RFC 6455 WebSocket frames under [`conformance/ws/`](../conformance/ws/) (runner: `test-conformance-ws`, 13 fixtures; Autobahn-anchored case ids 1.x / 2.x / 3.x / 5.x / 7.x) |
 
@@ -597,3 +597,15 @@ Per-harness breakdown (input → fuzzer):
 | HTTP/3 server end-to-end (request stream feed → handler → response writer) | `fuzz-h3-server` |
 | Cache-Control header parser (idempotent re-parse) | `fuzz-cache-control-parser` |
 | Alt-Svc response-header parser (RFC 7838, idempotent re-parse) | `fuzz-alt-svc-parser` |
+| ALPN -> wire-protocol dispatch (decision function on arbitrary bytes) | `fuzz-alpn-dispatch` |
+| `ByteReader` / `ByteWriter` bounds-checked cursor (reads past end raise; `read_utf8` validates) | `fuzz-byte-cursor` |
+| HTTP/1.1 chunked transfer-decoder (standalone) | `fuzz-chunked-decoder` |
+| Conditional-request preconditions (ETag / date parse; RFC 9110 §13) | `fuzz-conditional` |
+| UDS `FrameMux` frame codec (split-invariance encode / decode) | `fuzz-frame-mux` |
+| HTTP/3 client response-stream reader (whole / byte-at-a-time / split feed) | `fuzz-h3-response-reader` |
+| proto3 `ProtoReader` (varint / zigzag / wire-type decode) | `fuzz-proto-reader` |
+| Template engine parser + renderer | `fuzz-template` |
+| QUIC 0-RTT EarlyData length framing | `fuzz-quic-early-data-len` |
+| QUIC 0-RTT cross-connection replay strike set | `fuzz-quic-early-data-strike` |
+| QUIC connection migration (CID switch / PATH_CHALLENGE parse) | `fuzz-quic-migration` |
+| QUIC migration anti-amplification byte accounting | `fuzz-quic-migration-amplification` |

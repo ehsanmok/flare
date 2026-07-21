@@ -25,9 +25,9 @@ they help median.
 
 ## TLS
 
-- ALPN advertised on wss:// is `["http/1.1"]` today (the
-  `WsClient.connect_prefer_h2` factory is the opt-in route to
-  `["h2", "http/1.1"]`; see [`features.md`](features.md)).
+- ALPN advertised on wss:// is `["http/1.1"]` for a plain
+  `WsClient`; `WsAutoClient` with `prefer_h2=True` is the opt-in
+  route to `["h2", "http/1.1"]` (see [`features.md`](features.md)).
 - `HttpClient` over `https://` advertises both and dispatches on
   the server's selection (RFC 7301).
 - The TLS layer uses the host's OpenSSL. Pin the openssl pixi

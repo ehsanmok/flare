@@ -32,8 +32,8 @@ def main() raises:
 One reactor per worker (``kqueue`` on macOS, ``epoll`` on
 Linux, opt-in ``io_uring`` on Linux >= 6.0 via
 ``FLARE_BUFRING_HANDLER=1``), a ``Handler`` trait that takes plain ``def`` functions
-or compiled-down structs, an RFC 7230 parser exercised by 35
-fuzz harnesses (8M+ runs combined, zero known crashes), and a ``Cancel`` token plumbed to handlers via
+or compiled-down structs, an RFC 7230 parser under continuous fuzzing (62
+fuzz harnesses across the tree, 9M+ runs combined, zero known crashes), and a ``Cancel`` token plumbed to handlers via
 ``CancelHandler``. ``num_workers=1`` is a single-threaded
 reactor; ``num_workers=N`` with ``N >= 2`` runs N pthread
 workers behind per-worker ``SO_REUSEPORT`` listeners by default

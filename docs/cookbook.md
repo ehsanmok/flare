@@ -41,6 +41,7 @@ basics.
 | File | What it shows |
 |---|---|
 | [`extractors.mojo`](../examples/intermediate/extractors.mojo) | Typed extractors (`PathInt`, `QueryStr`, `HeaderStr`, ...), reflective `Extracted[H]` auto-injection, and `State[T]` registration-time injection alongside request extractors |
+| [`typed_extractors.mojo`](../examples/intermediate/typed_extractors.mojo) | `OptionalPath{Int,Str,Float,Bool}` optional path params + `JsonAs[T: FromJson]` typed-body deserialization |
 | [`state.mojo`](../examples/intermediate/state.mojo) | Shared application state via a captured wrapping `Handler` (a `Counters` snapshot tagged onto responses) -- the no-injection pattern; for injected state beside extractors see `State[T]` in `extractors.mojo` |
 | [`middleware.mojo`](../examples/intermediate/middleware.mojo) | Middleware composition (outside-in): `RequestID` → `Logger` → `Timing` → `Recover` → `RequireAuth` → `Router` |
 | [`middleware_stack.mojo`](../examples/intermediate/middleware_stack.mojo) | `Logger` + `RequestId` + `Compress` + `CatchPanic` chain |
@@ -92,6 +93,17 @@ natural.
 | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo) | RFC 7692 `permessage-deflate` extension: offer / negotiate / compress / decompress |
 | [`alpn_dispatch_demo.mojo`](../examples/advanced/alpn_dispatch_demo.mojo) | ALPN -> wire-protocol dispatcher decisions: h1 / h2c / h2 / h3, including RFC 7301 §3.2 server-preference negotiation |
 | [`http3_server.mojo`](../examples/advanced/http3_server.mojo) | Serve the same `Handler` over HTTP/1.1 + HTTP/2 + HTTP/3 simultaneously: TCP listener for h1 / h2c / h2 alongside a UDP listener for h3 |
+| [`http3_client.mojo`](../examples/advanced/http3_client.mojo) | `HttpClient(prefer_http3=True)` live HTTP/3 GET over QUIC: Alt-Svc discovery, happy-eyeballs race vs h2 / h1, transparent fallback |
+| [`http3_server_walkthrough.mojo`](../examples/advanced/http3_server_walkthrough.mojo) | `Http3Connection` driver lifecycle walkthrough (pure state-machine surface; pairs with `http3_server.mojo`) |
+| [`quic_codec_demo.mojo`](../examples/advanced/quic_codec_demo.mojo) | QUIC varint / frame codec / transport params / state machine / congestion controller round-trips |
+| [`h3_codec_demo.mojo`](../examples/advanced/h3_codec_demo.mojo) | HTTP/3 codec round-trip without a QUIC stream: QPACK field sections + RFC 9114 §7 frame codec + request reader |
+| [`quic_handler_dispatch.mojo`](../examples/advanced/quic_handler_dispatch.mojo) | RFC 9000 §19 transport-frame dispatch via `FrameHandler` + `parse_frame_into` (per-type callbacks, no union carrier) |
+| [`grpc_unary_server.mojo`](../examples/advanced/grpc_unary_server.mojo) | Reactor-mounted gRPC unary server: a `GrpcService` served over the unified `HttpServer` H2 reactor, `grpc-status` in H2 trailers |
+| [`grpc_unary_demo.mojo`](../examples/advanced/grpc_unary_demo.mojo) | Sans-I/O gRPC unary adapter (no socket): LPM framing + metadata + status + `run_unary_call` orchestration |
+| [`grpc_client_demo.mojo`](../examples/advanced/grpc_client_demo.mojo) | `GrpcClient` unary RPC over the `HttpClient` HTTP/2 path (h2c), against a forked gRPC-speaking server |
+| [`openai_sse_front.mojo`](../examples/advanced/openai_sse_front.mojo) | OpenAI-shaped `chat.completion.chunk` SSE front relaying an upstream token stream over `UpstreamChunkSource` / `FrameMux` with watermark backpressure |
+| [`unified_middleware.mojo`](../examples/advanced/unified_middleware.mojo) | One `Logger(RequestId(Router))` middleware stack shared across both a `Handler` control plane and a `StreamHandler` streaming endpoint |
+| [`production_setup.mojo`](../examples/advanced/production_setup.mojo) | Production-shaped server: `RequestId` + `StructuredLogger` + `CatchPanic` + graceful shutdown + healthz |
 
 ---
 

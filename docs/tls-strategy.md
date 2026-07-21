@@ -4,8 +4,8 @@ flare's TLS layer today is **OpenSSL via FFI** through
 [`flare/tls/ffi/openssl_wrapper.cpp`](../flare/tls/ffi/openssl_wrapper.cpp).
 That choice has carried through server-side termination, hot
 reload, session resumption, and ALPN dispatch, with new
-features layered on top -- ``WsClient.connect_prefer_h2``
-advertises ALPN, the ``HttpClient`` over ``https://`` advertises
+features layered on top -- ``WsAutoClient`` advertises ALPN on
+``wss://``, the ``HttpClient`` over ``https://`` advertises
 ``["h2", "http/1.1"]``. This page documents the rationale, the
 boundaries, and the planned rustls-for-QUIC direction that lands
 alongside the QUIC server.

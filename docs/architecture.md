@@ -89,11 +89,13 @@ flare.grpc     gRPC primitives on top of the HTTP/2 reactor.
                sans-I/O run_unary_call orchestrator that emits
                response bytes + final GrpcStatus + trailing
                GrpcMetadata. The client ships (GrpcClient: unary
-               plus server-/client-streaming and bidi); the
-               buffered server-streaming adapter ships. proto3
-               `service` codegen, server-side client-streaming /
-               bidi, reflection descriptor lookups, and
-               Health/Watch ship as follow-ups.
+               plus server-/client-streaming and bidi); all four
+               server shapes ship (unary, incremental server-
+               streaming, client-streaming, bidi), plus proto3
+               `service` codegen, server reflection (list + file
+               descriptor lookups), and `grpc.health.v1.Health`
+               Check + Watch. Maps / oneof in the message codegen
+               are the remaining deferral.
 flare.openapi  OpenAPI 3.1 spec model + deterministic JSON
                emitter (stable key order for diffable specs).
                Auto-derivation from ComptimeRouter +
@@ -172,12 +174,13 @@ flare.http3       Sans-I/O HTTP/3 codec primitives: frame codec +
                `take_http3_completed_streams -> take_http3_request ->
                handler.serve -> emit_http3_response ->
                take_http3_response_egress` every reactor tick.
-flare.qpack    Sans-I/O static-only QPACK encoder + decoder
-               (RFC 9204). Static table per Appendix A (99
-               entries), literal field lines with literal
-               names, Huffman shared with the HPACK
-               implementation in `flare.http.proto.huffman`.
-               Dynamic table is a follow-up.
+flare.qpack    Sans-I/O QPACK encoder + decoder (RFC 9204).
+               Static table per Appendix A (99 entries),
+               literal field lines with literal names, Huffman
+               shared with the HPACK implementation in
+               `flare.http.proto.huffman`, plus the dynamic
+               table (RFC 9204 §3-4: capacity-bounded eviction
+               + encoder/decoder instruction streams).
 flare.crypto   HMAC-SHA256, base64url codec
 flare.tls      TLS 1.2/1.3 (OpenSSL); TlsAcceptor + ALPN +
                session resumption (RFC 5077 tickets / RFC 8446
