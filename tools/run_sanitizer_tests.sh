@@ -212,6 +212,7 @@ ASAN_TESTS=(
   "tests/tls/test_tls_resume.mojo"               # v0.7 TLS resumption: TlsSession lifetime + new_session_cb
   "tests/tls/test_tls_conn_handle.mojo"          # streaming Phase 4 — non-blocking server TLS reactor (SSL_read/write _ex FFI + loopback handshake)
   "tests/tls/test_https_server.mojo"             # streaming Phase 4 — HTTPS/1.1 serve_tls e2e (buffered + chunked over TLS)
+  "tests/http/test_cross_wire_streaming.mojo"    # streaming — cross-wire framing round-trip (pure-function; h1/h2/h3 DATA + chunked)
   "tests/ws/test_ws.mojo"                       # SHA-1 FFI via compute_accept_key
   "tests/ws/test_ws_permessage_deflate.mojo"    # v0.7 — RFC 7692 codec (raw deflate / inflate FFI borrow)
   # v0.9 — WS-over-h2 sidecar dispatch on the unified reactor (forked
