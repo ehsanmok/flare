@@ -81,9 +81,8 @@ from std.memory import memcpy
 
 from .async_body import ChunkPoll, UpstreamChunkSource
 from .cancel import Cancel, CancelCell, CancelReason
-from .headers import _eq_icase
 from .response import Response
-from ._server.write import _status_reason
+from ._server.write import frame_h1_stream_head_into
 from flare.net import NetworkError
 from flare.net._libc import _recv, _send, _strerror, MSG_NOSIGNAL
 from flare.tcp import TcpStream
@@ -542,35 +541,16 @@ struct StreamConn(Movable):
         dropped). This is HTTP/1.x framing only -- a streaming front
         speaks h1 to the client; h2/h3 response heads have their own
         framing on those paths.
+
+        The head framing is the shared, transport-agnostic
+        ``frame_h1_stream_head_into`` adapter (see
+        ``flare/http/_server/write.mojo``), so an HTTPS front streaming
+        over ``TlsConnHandle`` frames its head identically -- the bytes
+        just ride ``SSL_write`` instead of ``send``.
         """
-        var reason = resp.reason
-        if reason.byte_length() == 0:
-            reason = _status_reason(resp.status)
-        var head = String("HTTP/1.1 ")
-        head += String(resp.status)
-        head += " "
-        head += reason
-        head += "\r\n"
-        for i in range(resp.headers.len()):
-            var k = resp.headers._keys[i]
-            if _eq_icase(k, "connection"):
-                continue
-            head += k
-            head += ": "
-            head += resp.headers._values[i]
-            head += "\r\n"
-        if not resp.headers.contains(
-            "transfer-encoding"
-        ) and not resp.headers.contains("content-length"):
-            head += "Content-Length: "
-            head += String(len(resp.body))
-            head += "\r\n"
-        if keep_alive:
-            head += "Connection: keep-alive\r\n"
-        else:
-            head += "Connection: close\r\n"
-        head += "\r\n"
-        self.send(head)
+        var head = List[UInt8]()
+        frame_h1_stream_head_into(head, resp, keep_alive)
+        self.send(Span[UInt8, _](head))
         if len(resp.body) > 0:
             self.send(Span[UInt8, _](resp.body))
 

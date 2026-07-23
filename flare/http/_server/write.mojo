@@ -10,6 +10,7 @@ reactor and gRPC adapter import from ``flare.http.server``).
 from std.memory import memcpy, stack_allocation
 
 from ..response import Response
+from ..headers import _eq_icase
 from ...tcp import TcpStream
 
 # ``_ascii_lower`` lives in ``flare.http.proto.ascii`` (canonical
@@ -189,3 +190,61 @@ def _write_response(mut stream: TcpStream, resp: Response) raises:
     """Legacy response writer. Delegates to buffered version with Connection: close.
     """
     _write_response_buffered(stream, resp, keep_alive=False)
+
+
+def frame_h1_stream_head_into(
+    mut out: List[UInt8], resp: Response, keep_alive: Bool
+):
+    """Append the HTTP/1.1 head (status line + headers + blank line) of a
+    *streaming* response to ``out``.
+
+    This is the h1 member of the per-wire streaming-response head framers:
+    the reusable framing adapter behind :meth:`StreamConn.send_response`
+    and any HTTPS front that streams over :class:`TlsConnHandle` (the head
+    bytes are transport-agnostic -- write them via ``send`` on plaintext or
+    ``SSL_write`` on TLS). The sibling wires frame their heads through their
+    own codecs: **h2** via HPACK (``encode_headers`` in the h2 server) and
+    **h3** via QPACK (``encode_response_headers`` in the h3 response
+    writer); those are frames on a multiplexed connection, not raw bytes,
+    so they live with their drivers rather than here.
+
+    Framing rules (streaming-specific, distinct from the buffered
+    serialiser):
+
+    - Any inbound ``Connection`` header is dropped; ``Connection`` is set
+      solely from ``keep_alive``.
+    - ``Content-Length`` is emitted from ``len(resp.body)`` **only** when
+      the response declares neither ``Transfer-Encoding`` nor
+      ``Content-Length`` -- a chunked / SSE front sets ``Transfer-Encoding``
+      itself and streams the body via ``send``, so this must not force a
+      length onto it.
+
+    The fixed body (if any) is the caller's to append after the head.
+    """
+    var reason = resp.reason
+    if reason.byte_length() == 0:
+        reason = _status_reason(resp.status)
+    _append_str(out, "HTTP/1.1 ")
+    _append_str(out, String(resp.status))
+    _append_str(out, " ")
+    _append_str(out, reason)
+    _append_str(out, "\r\n")
+    for i in range(resp.headers.len()):
+        var k = resp.headers._keys[i]
+        if _eq_icase(k, "connection"):
+            continue
+        _append_str(out, k)
+        _append_str(out, ": ")
+        _append_str(out, resp.headers._values[i])
+        _append_str(out, "\r\n")
+    if not resp.headers.contains(
+        "transfer-encoding"
+    ) and not resp.headers.contains("content-length"):
+        _append_str(out, "Content-Length: ")
+        _append_str(out, String(len(resp.body)))
+        _append_str(out, "\r\n")
+    if keep_alive:
+        _append_str(out, "Connection: keep-alive\r\n")
+    else:
+        _append_str(out, "Connection: close\r\n")
+    _append_str(out, "\r\n")
