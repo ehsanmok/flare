@@ -166,6 +166,32 @@ def _do_ssl_do_handshake(read lib: OwnedDLHandle, ssl_addr: Int) -> Int:
     return Int(f(ssl_addr))
 
 
+# Non-blocking I/O sentinels; mirror the FLARE_SSL_IO_* macros in
+# ``openssl_wrapper.h``. Positive returns are byte counts.
+comptime SSL_IO_WANT_READ: Int = -1
+comptime SSL_IO_WANT_WRITE: Int = -2
+comptime SSL_IO_CLOSED: Int = -3
+comptime SSL_IO_FATAL: Int = -4
+
+
+def _do_ssl_read_ex(
+    read lib: OwnedDLHandle, ssl_addr: Int, buf_ptr: Int, buf_len: Int
+) -> Int:
+    var f = lib.get_function[def(Int, Int, c_int) thin abi("C") -> c_int](
+        "flare_ssl_read_ex"
+    )
+    return Int(f(ssl_addr, buf_ptr, c_int(buf_len)))
+
+
+def _do_ssl_write_ex(
+    read lib: OwnedDLHandle, ssl_addr: Int, buf_ptr: Int, buf_len: Int
+) -> Int:
+    var f = lib.get_function[def(Int, Int, c_int) thin abi("C") -> c_int](
+        "flare_ssl_write_ex"
+    )
+    return Int(f(ssl_addr, buf_ptr, c_int(buf_len)))
+
+
 def _do_ssl_get_alpn_selected(read lib: OwnedDLHandle, ssl_addr: Int) -> String:
     var f = lib.get_function[def(Int, Int, c_int) thin abi("C") -> c_int](
         "flare_ssl_get_alpn_selected"
@@ -285,6 +311,43 @@ def server_ssl_do_handshake(ctx: ServerCtx, ssl_addr: Int) raises -> Int:
     - -1 → fatal; close the connection.
     """
     return _do_ssl_do_handshake(ctx._lib, ssl_addr)
+
+
+def server_ssl_read_ex(
+    ctx: ServerCtx, ssl_addr: Int, mut buf: List[UInt8], max_bytes: Int
+) raises -> Int:
+    """Non-blocking ``SSL_read`` of up to ``max_bytes`` into ``buf``.
+
+    Appends the plaintext bytes to ``buf`` and returns the number read
+    (>0) or a ``SSL_IO_*`` sentinel (WANT_READ / WANT_WRITE / CLOSED /
+    FATAL). ``max_bytes`` bounds one read (the caller's chunk size).
+    """
+    if max_bytes <= 0:
+        return 0
+    var old_len = len(buf)
+    buf.resize(old_len + max_bytes, UInt8(0))
+    var dst = Int(buf.unsafe_ptr()) + old_len
+    var n = _do_ssl_read_ex(ctx._lib, ssl_addr, dst, max_bytes)
+    if n > 0:
+        buf.resize(old_len + n, UInt8(0))
+    else:
+        buf.resize(old_len, UInt8(0))
+    return n
+
+
+def server_ssl_write_ex(
+    ctx: ServerCtx, ssl_addr: Int, bytes: Span[UInt8, _], off: Int = 0
+) raises -> Int:
+    """Non-blocking ``SSL_write`` of ``bytes[off:]``.
+
+    Returns the number of bytes consumed (>0) or a ``SSL_IO_*``
+    sentinel. Partial writes are the caller's responsibility to resume
+    (advance ``off`` by the return value)."""
+    var n = len(bytes) - off
+    if n <= 0:
+        return 0
+    var ptr = Int(bytes.unsafe_ptr()) + off
+    return _do_ssl_write_ex(ctx._lib, ssl_addr, ptr, n)
 
 
 def server_ssl_get_alpn_selected(

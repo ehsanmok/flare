@@ -51,6 +51,7 @@ from ..ws.server_h2 import WsH2Handler, WsH2Hooks
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 from ..quic.server import QuicListener, QuicServerConfig
+from ..tls._server_ffi import ServerCtx
 
 
 # ── ShutdownReport ───────────────────────────────────────────────────────────
@@ -137,6 +138,13 @@ struct HttpServer(Movable):
     :meth:`tick_http3_once` entry point lets unit tests advance the
     listener's timer wheel without spinning up the full reactor.
     """
+    var _tls_ctx: Optional[ServerCtx]
+    """Optional server-side ``SSL_CTX`` for the HTTPS (TLS-terminated)
+    path. ``None`` (the default) for the plaintext flows; set to a loaded
+    :class:`flare.tls._server_ffi.ServerCtx` by :meth:`bind_tls`, and
+    consumed by :meth:`serve_tls` to spawn a per-connection
+    :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`. Kept
+    ``Optional`` so the plaintext server carries no TLS/OpenSSL cost."""
 
     def __init__(
         out self,
@@ -151,6 +159,7 @@ struct HttpServer(Movable):
         self.h2_config = h2_config^
         self._stopping = False
         self._http3_listener = None
+        self._tls_ctx = None
 
     def __del__(deinit self):
         self._listener.close()
@@ -160,6 +169,9 @@ struct HttpServer(Movable):
         # timer wheel via QuicListener.__del__. No-op when no h3
         # listener is bound.
         _ = self._http3_listener^
+        # The Optional[ServerCtx] destructor runs flare_ssl_ctx_free
+        # when an HTTPS context was bound; no-op otherwise.
+        _ = self._tls_ctx^
 
     def _close_extras(mut self):
         """Close every fd in :attr:`_extra_listener_fds` via
@@ -350,6 +362,65 @@ struct HttpServer(Movable):
         var quic_listener = QuicListener.bind(udp_cfg^)
         var srv = HttpServer(tcp_listener^, config^, h2_config^)
         srv._http3_listener = quic_listener^
+        return srv^
+
+    @staticmethod
+    def bind_tls(
+        addr: SocketAddr,
+        cert_file: String,
+        key_file: String,
+        var alpn: List[String] = List[String](),
+        var config: ServerConfig = ServerConfig(),
+        var h2_config: Http2Config = Http2Config(),
+    ) raises -> HttpServer:
+        """Bind an HTTPS (TLS-terminated HTTP/1.1) server on ``addr``.
+
+        Loads ``cert_file`` / ``key_file`` into a server ``SSL_CTX`` and
+        stashes it on the returned server; :meth:`serve_tls` then drives
+        each accepted connection through a non-blocking
+        :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`
+        (handshake + ``SSL_read`` / ``SSL_write``) before dispatching the
+        decrypted request to the handler. The plaintext reactor path is
+        untouched.
+
+        Args:
+            addr: Local address to listen on.
+            cert_file: Path to the PEM server certificate (chain).
+            key_file: Path to the PEM server private key.
+            alpn: ALPN protocol identifiers to advertise, in preference
+                order (e.g. ``["http/1.1"]``). Empty (the default)
+                advertises no ALPN and serves HTTP/1.1. Note: the current
+                synchronous ``serve_tls`` path frames HTTP/1.1 only; if a
+                client negotiates ``h2`` the connection is closed cleanly
+                (h2-over-TLS is the reactor-integration follow-up).
+            config: HTTP/1.1 server configuration (optional).
+            h2_config: HTTP/2 SETTINGS (stored for parity; unused by the
+                current h1-only ``serve_tls``).
+
+        Returns:
+            An ``HttpServer`` ready to call :meth:`serve_tls`.
+
+        Raises:
+            AddressInUse: If the port is already bound.
+            NetworkError: For any other OS error.
+            Error: If the cert / key fails to load.
+        """
+        var listener = TcpListener.bind(addr)
+        var ctx = ServerCtx.new(cert_file, key_file)
+        if len(alpn) > 0:
+            var wire = List[UInt8]()
+            for i in range(len(alpn)):
+                var p = alpn[i]
+                if p.byte_length() == 0 or p.byte_length() > 255:
+                    raise Error(
+                        "HttpServer.bind_tls: each ALPN id must be 1..255 bytes"
+                    )
+                wire.append(UInt8(p.byte_length()))
+                for b in p.as_bytes():
+                    wire.append(b)
+            ctx.set_alpn(wire)
+        var srv = HttpServer(listener^, config^, h2_config^)
+        srv._tls_ctx = Optional[ServerCtx](ctx^)
         return srv^
 
     def has_http3(self) -> Bool:
@@ -716,6 +787,54 @@ struct HttpServer(Movable):
                 handler,
                 self._stopping,
             )
+
+    def serve_tls[H: Handler](mut self, var handler: H) raises:
+        """Serve HTTPS (TLS-terminated HTTP/1.1) with any ``Handler``.
+
+        Requires the server to have been constructed via
+        :meth:`bind_tls`. Runs a synchronous accept loop; each accepted
+        connection is driven through a non-blocking
+        :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`
+        (handshake on ``poll``-blocked edges, then an HTTP/1.1
+        request/response keep-alive loop over ``SSL_read`` / ``SSL_write``
+        reusing the same parse + serialise helpers as the plaintext
+        path). Streaming responses compose: a ``body_stream`` handler is
+        emitted with ``Transfer-Encoding: chunked`` framing written as
+        ciphertext.
+
+        This path handles one connection at a time on the calling thread
+        (matching the original blocking ``HttpServer`` semantics);
+        reactor-multiplexed TLS + h2-over-TLS reuse this same
+        ``TlsConnHandle`` state machine and are the follow-up.
+
+        Args:
+            handler: The request handler (ownership transferred).
+
+        Raises:
+            Error: If no TLS context is bound (use :meth:`bind_tls`).
+            NetworkError: On fatal listener errors.
+        """
+        # Function-scope imports break the server<->tls_server module
+        # cycle: tls_server imports parsing/serialisation helpers from
+        # this module, so importing it at module scope would be circular.
+        from .tls_server import handle_tls_h1_connection
+        from ._reactor.tls_conn_handle import TlsConnHandle
+
+        if not self._tls_ctx:
+            raise Error(
+                "HttpServer.serve_tls: no TLS context bound; construct the"
+                " server via HttpServer.bind_tls(addr, cert, key)"
+            )
+        self._stopping = False
+        while not self._stopping:
+            var stream = self._listener.accept()
+            var conn = TlsConnHandle(stream^, self._tls_ctx.value())
+            try:
+                handle_tls_h1_connection(conn, self.config, handler)
+            except:
+                pass
+            # Free the SSL + close the fd promptly before the next accept.
+            _ = conn^
 
     def serve[
         H: Handler, W: WsH2Handler

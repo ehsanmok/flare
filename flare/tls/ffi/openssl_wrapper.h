@@ -53,6 +53,37 @@ int flare_ssl_shutdown(flare_ssl_t ssl);
 int flare_ssl_read(flare_ssl_t ssl, uint8_t* buf, int len);
 int flare_ssl_write(flare_ssl_t ssl, const uint8_t* buf, int len);
 
+/* ── Non-blocking I/O (reactor state machine) ──────────────────────────────── */
+
+/* Sentinel return codes for the ``_ex`` I/O helpers. Positive values
+ * are byte counts; these negatives disambiguate the non-fatal
+ * "call again after the matching readiness edge" cases (mapped from
+ * ``SSL_get_error``) from a clean TLS shutdown and a fatal error, so
+ * a non-blocking reactor never has to guess at ``errno``. */
+#define FLARE_SSL_IO_WANT_READ  (-1)
+#define FLARE_SSL_IO_WANT_WRITE (-2)
+#define FLARE_SSL_IO_CLOSED     (-3)  /* peer close_notify (clean EOF) */
+#define FLARE_SSL_IO_FATAL      (-4)
+
+/**
+ * Non-blocking ``SSL_read``. Returns the number of plaintext bytes
+ * read (>0), or one of the ``FLARE_SSL_IO_*`` sentinels: WANT_READ /
+ * WANT_WRITE (re-arm the matching interest and call again), CLOSED
+ * (the peer sent close_notify -- clean end of stream), or FATAL.
+ *
+ * A TLS record can require a write during a read (mid-stream
+ * renegotiation / key update), hence WANT_WRITE is possible here.
+ */
+int flare_ssl_read_ex(flare_ssl_t ssl, uint8_t* buf, int len);
+
+/**
+ * Non-blocking ``SSL_write``. Returns the number of plaintext bytes
+ * consumed (>0), or a ``FLARE_SSL_IO_*`` sentinel. WANT_READ is
+ * possible here for the symmetric reason (a write can need to read a
+ * handshake record first).
+ */
+int flare_ssl_write_ex(flare_ssl_t ssl, const uint8_t* buf, int len);
+
 /* ── Introspection ─────────────────────────────────────────────────────────── */
 
 const char* flare_ssl_get_version(flare_ssl_t ssl);

@@ -191,6 +191,39 @@ int flare_ssl_write(flare_ssl_t ssl, const uint8_t* buf, int len) {
     return n;
 }
 
+// Map an SSL_get_error result on a <= 0 SSL_read/SSL_write return into
+// the reactor-friendly FLARE_SSL_IO_* sentinel. Shared by the _ex
+// helpers so read and write classify identically.
+static int flare_ssl_io_classify(SSL* s, int ret) {
+    int err = SSL_get_error(s, ret);
+    if (err == SSL_ERROR_WANT_READ)  return FLARE_SSL_IO_WANT_READ;
+    if (err == SSL_ERROR_WANT_WRITE) return FLARE_SSL_IO_WANT_WRITE;
+    if (err == SSL_ERROR_ZERO_RETURN) return FLARE_SSL_IO_CLOSED;
+    // SSL_ERROR_SYSCALL with ret==0 is an unclean EOF (peer vanished
+    // without close_notify); treat like a closed stream so the reactor
+    // tears the connection down rather than looping. Everything else is
+    // a genuine protocol / library fatal.
+    if (err == SSL_ERROR_SYSCALL && ret == 0) return FLARE_SSL_IO_CLOSED;
+    capture_openssl_errors();
+    return FLARE_SSL_IO_FATAL;
+}
+
+int flare_ssl_read_ex(flare_ssl_t ssl, uint8_t* buf, int len) {
+    ERR_clear_error();
+    SSL* s = static_cast<SSL*>(ssl);
+    int n = SSL_read(s, buf, len);
+    if (n > 0) return n;
+    return flare_ssl_io_classify(s, n);
+}
+
+int flare_ssl_write_ex(flare_ssl_t ssl, const uint8_t* buf, int len) {
+    ERR_clear_error();
+    SSL* s = static_cast<SSL*>(ssl);
+    int n = SSL_write(s, buf, len);
+    if (n > 0) return n;
+    return flare_ssl_io_classify(s, n);
+}
+
 // ── Introspection ────────────────────────────────────────────────────────────
 
 const char* flare_ssl_get_version(flare_ssl_t ssl) {
