@@ -51,8 +51,10 @@ The operational core: per-request / handler / body-read deadlines,
 error responses, ``Request.peer`` threaded from the accept path,
 zero-copy reads (``RequestView[origin]`` + ``ViewHandler``),
 streaming response primitives (``Body`` / ``ChunkSource`` /
-``StreamingResponse[B]``), and server-side TLS (``TlsAcceptor``
-over OpenSSL).
+``StreamingResponse[B]``; ``stream_response(source)`` streams the same
+handler byte-identically over h1 / h2 / h3 / https), and server-side
+TLS (``TlsAcceptor`` over OpenSSL, plus in-process HTTPS termination
+via ``HttpServer.bind_tls`` / ``serve_tls``).
 
 The application layer: ``Router`` with path params, typed
 extractors (``PathInt`` / ``QueryInt`` /
@@ -617,7 +619,7 @@ from .http.server import (
 from .http.client import HttpClient
 from .http._client.shortcuts import get, post, put, patch, delete, head
 from .http.request import Request, Method
-from .http.response import Response, Status
+from .http.response import Response, Status, stream_response
 from .http.request_view import RequestView
 from .http.url import Url, UrlParseError
 from .http.headers import HeaderMap, HeaderInjectionError
