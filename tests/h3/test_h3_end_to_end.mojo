@@ -31,6 +31,7 @@ Cases:
    own streams to independent H3 drivers.
 """
 
+from std.collections import Optional
 from std.testing import assert_equal, assert_false, assert_true
 
 from flare.http3 import (
@@ -38,10 +39,13 @@ from flare.http3 import (
     H3_FRAME_TYPE_HEADERS,
     encode_http3_frame,
 )
+from flare.http.body import ChunkSource
+from flare.http.cancel import Cancel
 from flare.http.handler import Handler
 from flare.http.request import Request
-from flare.http.response import Response
+from flare.http.response import Response, stream_response
 from flare.http.server import HttpServer, ok
+from flare.quic.varint import decode_varint
 from flare.net import IpAddr, SocketAddr
 from flare.qpack import QpackHeader, encode_field_section
 from flare.quic.frame import StreamFrame
@@ -117,6 +121,61 @@ struct _EchoHandler(Copyable, Handler, Movable):
         var resp = ok(String(""))
         resp.body = body^
         return resp^
+
+
+@fieldwise_init
+struct _ListSource(ChunkSource, Copyable, Movable):
+    """Chunk source that yields a fixed list of chunks, then EOS.
+
+    Drives the streaming-response tests: each ``next`` returns the
+    next stashed chunk (one per writable edge, mirroring a real
+    open-ended source) until the list is exhausted, then ``None``.
+    """
+
+    var chunks: List[List[UInt8]]
+    var idx: Int
+
+    def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
+        if self.idx >= len(self.chunks):
+            return None
+        var out = self.chunks[self.idx].copy()
+        self.idx += 1
+        return out^
+
+
+def _bytes(s: String) -> List[UInt8]:
+    """ASCII string -> byte list."""
+    var out = List[UInt8]()
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        out.append(b[i])
+    return out^
+
+
+def _extract_h3_data_payload(buf: List[UInt8]) raises -> List[UInt8]:
+    """Walk the HTTP/3 frame stream in ``buf`` and concatenate every
+    DATA-frame payload in order.
+
+    Each frame is ``varint(type) varint(len) payload`` (RFC 9114 §7.1),
+    so a linear walk recovers the streamed body bytes independent of how
+    many DATA frames the pump split them into. HEADERS / trailers frames
+    are skipped."""
+    var out = List[UInt8]()
+    var pos = 0
+    var n = len(buf)
+    while pos < n:
+        var view = buf[pos:]
+        var t = decode_varint(Span[UInt8, _](view))
+        pos += t.consumed
+        var view2 = buf[pos:]
+        var length = decode_varint(Span[UInt8, _](view2))
+        pos += length.consumed
+        var frame_len = Int(length.value)
+        if t.value == UInt64(H3_FRAME_TYPE_DATA):
+            for j in range(pos, pos + frame_len):
+                out.append(buf[j])
+        pos += frame_len
+    return out^
 
 
 # ── Helpers: bind a listener + drive a synthetic event ─────────────────
@@ -369,6 +428,104 @@ def test_pump_http3_handler_once_zero_when_no_streams_ready() raises:
     assert_equal(dispatched, 0)
 
 
+# ── Streaming response (body_stream) incremental emit ────────────────────
+
+
+def test_streaming_response_incremental_data() raises:
+    """A streaming Response (``stream_response`` over a chunk source)
+    emits HEADERS immediately and registers the stream; each
+    :meth:`pump_http3_streams` pulls exactly one chunk into a DATA
+    frame; end-of-stream flags the record ``done`` and frees the
+    source. The accumulated egress decodes to the concatenated chunk
+    bytes in order."""
+    var listener = _bind_listener()
+    var slot = _seed_slot(listener)
+    var sid = UInt64(0)
+    var req_bytes = _build_get_request("/stream")
+    var events = _make_stream_event(sid, req_bytes^)
+    listener._route_http3_stream_chunks(slot, events)
+    var ready = listener.take_http3_completed_streams(slot)
+    assert_equal(len(ready), 1)
+
+    var req = listener.take_http3_request(slot, Int(sid))
+    assert_equal(req.url, String("/stream"))
+
+    var chunks = List[List[UInt8]]()
+    chunks.append(_bytes("aaa"))
+    chunks.append(_bytes("bbbb"))
+    chunks.append(_bytes("cc"))
+    var src = _ListSource(chunks^, 0)
+    var resp = stream_response(src^)
+    listener.emit_http3_response(slot, Int(sid), resp^)
+
+    var key = String("0:0")
+    # HEADERS rode the egress immediately; the stream is registered and
+    # not yet done (no DATA pulled).
+    assert_true(key in listener.http3_streams, "stream must be registered")
+    assert_false(listener.http3_streams[key].done)
+    var headers_only = listener.http3_response_egress[key].copy()
+    assert_true(len(headers_only) > 0, "HEADERS must be queued on emit")
+    assert_equal(
+        len(_extract_h3_data_payload(headers_only)),
+        0,
+        "no DATA before the first pump",
+    )
+
+    # Pump three times: one chunk per pump, source not yet exhausted.
+    for _ in range(3):
+        var adv = listener.pump_http3_streams(Cancel.never())
+        assert_equal(adv, 1)
+        assert_true(key in listener.http3_streams)
+        assert_false(listener.http3_streams[key].done)
+
+    # Fourth pump hits end-of-stream: still counts as advanced, marks
+    # done, and frees the boxed source.
+    var adv_eos = listener.pump_http3_streams(Cancel.never())
+    assert_equal(adv_eos, 1)
+    assert_true(listener.http3_streams[key].done, "EOS must set done")
+    assert_equal(listener.http3_streams[key].src_addr, 0, "source freed")
+
+    # A further pump is a no-op (source exhausted).
+    var adv_none = listener.pump_http3_streams(Cancel.never())
+    assert_equal(adv_none, 0)
+
+    # The accumulated egress (HEADERS + 3 DATA frames) decodes to the
+    # concatenated chunk payloads in order.
+    var full = listener.http3_response_egress[key].copy()
+    var body = _extract_h3_data_payload(full)
+    assert_equal(len(body), 9)  # "aaa" + "bbbb" + "cc"
+    var expect = _bytes("aaabbbbcc")
+    for i in range(len(expect)):
+        assert_equal(body[i], expect[i])
+
+
+def test_buffered_response_not_registered_as_stream() raises:
+    """A plain buffered Response never lands in ``http3_streams`` and
+    still emits HEADERS+DATA up front -- the byte-identical original
+    path, unaffected by the streaming machinery."""
+    var listener = _bind_listener()
+    var slot = _seed_slot(listener)
+    var sid = UInt64(0)
+    var req_bytes = _build_get_request("/plain")
+    var events = _make_stream_event(sid, req_bytes^)
+    listener._route_http3_stream_chunks(slot, events)
+    _ = listener.take_http3_completed_streams(slot)
+    var req = listener.take_http3_request(slot, Int(sid))
+    var handler = _OkHandler(body=String("hello"))
+    var resp = handler.serve(req^)
+    listener.emit_http3_response(slot, Int(sid), resp^)
+
+    var key = String("0:0")
+    assert_false(
+        key in listener.http3_streams, "buffered must not register a stream"
+    )
+    # A pump does nothing for buffered responses.
+    assert_equal(listener.pump_http3_streams(Cancel.never()), 0)
+    var full = listener.http3_response_egress[key].copy()
+    var body = _extract_h3_data_payload(full)
+    assert_equal(len(body), 5)  # "hello" emitted as DATA up front
+
+
 def main() raises:
     test_get_request_dispatches_through_handler()
     test_post_request_body_echo()
@@ -376,4 +533,6 @@ def main() raises:
     test_multiple_connections_dispatch_independently()
     test_pump_http3_handler_once_drives_handler()
     test_pump_http3_handler_once_zero_when_no_streams_ready()
-    print("test_h3_end_to_end: 6 passed")
+    test_streaming_response_incremental_data()
+    test_buffered_response_not_registered_as_stream()
+    print("test_h3_end_to_end: 8 passed")

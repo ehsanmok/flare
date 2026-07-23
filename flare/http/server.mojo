@@ -26,6 +26,7 @@ from ..runtime._libc_time import libc_nanosleep_ms
 from std.collections import Optional
 
 from .handler import Handler, CancelHandler
+from .cancel import Cancel
 from .streaming_server import StreamHandler
 from .intern import intern_method_bytes
 from .request import Request, Method
@@ -503,6 +504,11 @@ struct HttpServer(Movable):
                 _ = listener.tick(timeout_ms=100)
                 var h_copy = handler.copy()
                 _ = self._pump_listener_h3[H](listener, h_copy^)
+                # Advance any in-flight streaming responses by one chunk
+                # each so their DATA frames ride this loop turn's drain.
+                # A streaming stream stays registered across turns until
+                # its source is exhausted, so the loop keeps pulling.
+                _ = listener.pump_http3_streams(Cancel.never())
                 # Flush H3 responses the handler just queued so they
                 # leave on this loop turn rather than waiting for the
                 # next inbound datagram to trigger a per-slot drain.
