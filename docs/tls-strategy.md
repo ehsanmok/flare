@@ -21,8 +21,54 @@ alongside the QUIC server.
 | Cert reload | ``TlsAcceptor.reload()`` atomic swap (no in-flight drop). |
 | Session resumption | RFC 5077 tickets + RFC 8446 §4.6.1 ``NewSessionTicket`` capture/replay. Server-side opt-in via ``TlsServerConfig.enable_session_tickets``; client-side opt-in via ``TlsConfig.enable_session_resumption``. |
 | mTLS | Construction-time CA chain validation; ``TlsAcceptor.with_client_cert_verification`` enforces presence + chain. |
+| HTTPS server termination | In-process, non-blocking. ``HttpServer.bind_tls`` / ``serve_tls`` terminate TLS on a ``TlsConnHandle`` and serve HTTP/1.1 (buffered + chunked-streaming) over ``SSL_read`` / ``SSL_write``. See below. |
 | OCSP stapling | Not in-tree. Most production deployments terminate TLS at a proxy with stapling enabled. |
 | Encrypted ClientHello (ECH) | Not in-tree. The plan is to land it when OpenSSL stable carries it. |
+
+## In-process HTTPS server termination
+
+flare terminates TLS itself -- no reverse proxy required to speak
+``https://``. The primitive is
+[`TlsConnHandle`](../flare/http/_reactor/tls_conn_handle.mojo): it owns
+the accepted ``TcpStream``, forces the fd non-blocking, and drives
+OpenSSL's non-blocking ``SSL_accept`` / ``SSL_read`` / ``SSL_write``,
+mapping ``WANT_READ`` / ``WANT_WRITE`` onto the reactor's own
+``StepResult`` re-arm contract (the FFI seams
+``flare_ssl_read_ex`` / ``flare_ssl_write_ex`` return explicit
+``FLARE_SSL_IO_*`` sentinels rather than ambiguous ``-1``). ALPN + SNI
+are read on handshake completion so the caller can dispatch h1 vs h2.
+
+The application-facing surface is two calls:
+
+```mojo
+var srv = HttpServer.bind_tls(
+    SocketAddr.localhost(8443),
+    cert_file="server.crt",
+    key_file="server.key",
+    alpn=["http/1.1"],
+)
+srv.serve_tls(router^)
+```
+
+``bind_tls`` loads the PEM cert/key into a server ``SSL_CTX`` and
+advertises ALPN; ``serve_tls`` runs the accept loop, driving each
+connection through the handshake and an HTTP/1.1 keep-alive loop that
+reuses the **exact** plaintext request-parse + response-serialise
+helpers -- only the byte transport differs. Streaming composes for
+free: a handler returning ``stream_response(source)`` is emitted with
+``Transfer-Encoding: chunked`` framing written as ciphertext, so the
+same handler streams byte-identically on h1, h2, h3, and https (the
+head is framed by the shared ``frame_h1_stream_head_into`` adapter; the
+wire is an implementation detail). See
+[`examples/advanced/https_server.mojo`](../examples/advanced/https_server.mojo)
+(`pixi run example-https`).
+
+Scope today: ``serve_tls`` is synchronous (one connection at a time on
+the calling thread, matching the original blocking ``HttpServer``
+semantics) and frames HTTP/1.1 only -- an ALPN-negotiated ``h2``
+connection is closed cleanly rather than mis-framed. Reactor-multiplexed
+TLS (many concurrent TLS connections on one event loop) and h2-over-TLS
+reuse this same ``TlsConnHandle`` state machine and are the follow-up.
 
 ## Why OpenSSL + FFI rather than a Mojo-native stack
 
