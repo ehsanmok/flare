@@ -248,7 +248,7 @@ def _struct_serve_thunk[
     pointer plumbing confined to ``flare/runtime/``.
     """
     var ptr = Pool[H].get_ptr(addr)
-    return ptr[].serve(req)
+    return ptr[].serve(req).lower()
 
 
 def _struct_destroy_thunk[H: Handler & Copyable & Movable](addr: Int) -> None:

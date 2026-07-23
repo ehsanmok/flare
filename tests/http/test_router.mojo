@@ -25,6 +25,7 @@ from flare.http import (
     Router,
     Request,
     Response,
+    ResponseImpl,
     Status,
     Method,
     ok,
@@ -285,9 +286,10 @@ def test_query_string_with_param() raises:
 struct _RouterWrapper[Inner: Handler](Handler):
     """Tiny test wrapper proving ``Router`` satisfies ``Handler``."""
 
+    comptime BodyType = Self.Inner.BodyType
     var inner: Self.Inner
 
-    def serve(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> ResponseImpl[Self.BodyType]:
         return self.inner.serve(req)
 
 

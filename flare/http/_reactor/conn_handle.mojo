@@ -513,7 +513,7 @@ struct ConnHandle(Movable):
         var expose_errors = req.expose_errors
         var resp: Response
         try:
-            resp = handler.serve(req^)
+            resp = handler.serve(req^).lower()
         except e:
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)
@@ -592,7 +592,7 @@ struct ConnHandle(Movable):
         var expose_errors = req.expose_errors
         var resp: Response
         try:
-            resp = handler.serve(req^)
+            resp = handler.serve(req^).lower()
         except e:
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)

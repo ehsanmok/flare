@@ -417,7 +417,7 @@ struct Cache[
 
     def serve(self, req: Request) raises -> Response:
         if _is_invalidating_method(req.method):
-            var resp = self.inner.serve(req)
+            var resp = self.inner.serve(req).lower()
             if resp.status >= 200 and resp.status < 400:
                 # RFC 9111 §4.4: invalidate the URI's cached entry
                 # on a successful unsafe response. Cache keys are
@@ -441,7 +441,7 @@ struct Cache[
                 self._store_ptr()[].remove(head_key)
             return resp^
         if not _is_cacheable_method(req.method):
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         var base_key = self._build_key(req)
         var base_hit = self._store_ptr()[].get(base_key)
         if base_hit:
@@ -480,5 +480,5 @@ struct Cache[
                             _now_ms(),
                         ):
                             return self._build_hit_response(entry)
-        var fresh = self.inner.serve(req)
+        var fresh = self.inner.serve(req).lower()
         return self._store_response(req, fresh^)

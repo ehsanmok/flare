@@ -3,7 +3,7 @@
 from std.collections import Optional
 
 from json import loads, Value
-from .body import Body, ChunkSource
+from .body import Body, ChunkSource, InlineBody
 from .cancel import Cancel
 from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_set_cookie_header
@@ -41,8 +41,21 @@ struct Status:
     comptime GATEWAY_TIMEOUT: Int = 504
 
 
-struct Response(Movable):
-    """An HTTP/1.1 response.
+struct ResponseImpl[B: Body = InlineBody](Movable):
+    """An HTTP/1.1 response, parameterised by its authoring body type ``B``.
+
+    ``B`` is a *phantom* type parameter: it records the ``Body`` impl a
+    handler authored the response with (for the typed ``Handler.BodyType``
+    UX) but does not change the runtime layout. The body is always carried
+    by the erased carrier fields ``body`` (buffered bytes) or
+    ``body_stream`` (a boxed streaming source), which is the single
+    representation every wire driver consumes. On the pinned
+    ``mojo == 1.0.0b2`` a bare defaulted struct name is not concrete, so
+    the ergonomic public spelling is the ``comptime Response =
+    ResponseImpl[InlineBody]`` alias below; all existing call sites keep
+    working unchanged through it. Typed authoring builds
+    ``ResponseImpl[SomeBody]`` and calls :meth:`lower` at the wire
+    boundary to obtain the erased ``Response``.
 
     Fields:
         status: HTTP status code (see ``Status.*`` constants).
@@ -254,6 +267,44 @@ struct Response(Movable):
         """
         return _BytesIter(self.body, chunk_size)
 
+    def lower(deinit self) -> ResponseImpl[InlineBody]:
+        """Erase the phantom body type, yielding the concrete ``Response``
+        (``ResponseImpl[InlineBody]``) that every wire driver consumes.
+
+        ``B`` never affected the layout, so this moves every field across
+        unchanged -- no copy of the body bytes or the stream box. Typed
+        handlers that author a ``ResponseImpl[SomeBody]`` call this at the
+        wire boundary to hand the reactor the single erased representation.
+
+        Uses the ``deinit self`` convention so the fields can be moved out
+        and repacked into the ``InlineBody`` binding without a copy.
+
+        Returns:
+            The same response, retyped as the erased ``Response``.
+        """
+        var out = ResponseImpl[InlineBody](
+            status=self.status,
+            reason=self.reason^,
+            body=self.body^,
+            version=self.version^,
+        )
+        out.headers = self.headers^
+        out.trailers = self.trailers^
+        out.body_stream = self.body_stream^
+        return out^
+
+
+comptime Response = ResponseImpl[InlineBody]
+"""The concrete, body-type-erased HTTP response every wire driver consumes.
+
+This is the ergonomic public spelling of :struct:`ResponseImpl` bound to
+:struct:`InlineBody`. On the pinned ``mojo == 1.0.0b2`` a bare defaulted
+struct name (``ResponseImpl``) is not itself concrete, so ``Response`` is
+provided as a ``comptime`` alias -- all existing ``Response(...)`` /
+``-> Response`` / ``Optional[Response]`` sites resolve through it
+unchanged. Handlers that want the typed authoring surface build a
+``ResponseImpl[SomeBody]`` and call ``.lower()`` to obtain this type."""
+
 
 def stream_response[
     S: ChunkSource
@@ -282,15 +333,15 @@ def stream_response[
     return resp^
 
 
-# ── Parametric-body bridge (opt-in Response[B: Body] ergonomics) ──────────────
+# ── Parametric-body bridge (Response[B: Body] ergonomics) ─────────────────────
 #
-# The concrete ``Response`` stays byte-buffered on the hot path; this
-# bridge lets a handler build one from ANY ``Body`` impl without a generic
-# ``Response[B]`` type (which would erase to ``InlineBody`` at every
-# ``Handler.serve -> Response`` / ``Router`` thunk boundary anyway). A body
-# that knows its length is buffered (``Content-Length`` framing, identical
-# to today); an open-ended body is lowered onto the K1 ``body_stream``
-# path (``Transfer-Encoding: chunked``).
+# The concrete ``Response`` (``ResponseImpl[InlineBody]``) stays byte-buffered
+# on the hot path. ``ResponseImpl[B]`` carries the authored ``Body`` type as a
+# phantom parameter (see the struct docstring); this helper builds one from ANY
+# ``Body`` impl and lowers it to the erased carrier the wire drivers consume. A
+# body that knows its length is buffered (``Content-Length`` framing, identical
+# to today); an open-ended body is lowered onto the K1 ``body_stream`` path
+# (``Transfer-Encoding: chunked``).
 
 
 struct _BodyChunkSource[B: Body](ChunkSource, Movable):

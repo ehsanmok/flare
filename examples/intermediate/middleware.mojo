@@ -71,7 +71,7 @@ struct Logger[Inner: Handler](Handler):
     def serve(self, req: Request) raises -> Response:
         var rid = req.headers.get("X-Request-ID")
         print(" [log]", rid, ">>", req.method, req.url)
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         print(" [log]", rid, "<<", req.method, req.url, "→", resp.status)
         return resp^
 
@@ -101,7 +101,7 @@ struct RequestID[Inner: Handler](Handler):
         )
         tagged.headers = req.headers.copy()
         tagged.headers.set("X-Request-ID", rid)
-        var resp = self.inner.serve(tagged^)
+        var resp = self.inner.serve(tagged^).lower()
         resp.headers.set("X-Request-ID", rid)
         return resp^
 
@@ -114,7 +114,7 @@ struct Timing[Inner: Handler](Handler):
 
     def serve(self, req: Request) raises -> Response:
         var t0 = perf_counter_ns()
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         var elapsed_us = (perf_counter_ns() - t0) // 1000
         resp.headers.set("X-Response-Time-Us", String(elapsed_us))
         return resp^
@@ -134,7 +134,7 @@ struct Recover[Inner: Handler](Handler):
 
     def serve(self, req: Request) raises -> Response:
         try:
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         except e:
             var resp = internal_error(String(e))
             resp.status = 500
@@ -156,7 +156,7 @@ struct RequireAuth[Inner: Handler](Handler):
     def serve(self, req: Request) raises -> Response:
         var expected = String("Bearer ") + self.expected_token
         if req.headers.get("Authorization") == expected:
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         var resp = bad_request("unauthorized")
         resp.status = 401
         resp.reason = "Unauthorized"

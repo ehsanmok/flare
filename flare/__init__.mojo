@@ -311,7 +311,7 @@ struct WithHits[Inner: Handler](Handler):
     var counters: Counters
 
     def serve(self, req: Request) raises -> Response:
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         resp.headers.set("X-Hits", String(self.counters.hits))
         return resp^
 

@@ -216,7 +216,7 @@ struct StructuredLogger[Inner: Handler & Copyable & Defaultable](
         var start = perf_counter_ns()
         var resp: Response
         try:
-            resp = self.inner.serve(req)
+            resp = self.inner.serve(req).lower()
         except e:
             var latency_ms = Int((perf_counter_ns() - start) // 1_000_000)
             var line = self._build_error_line(

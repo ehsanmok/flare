@@ -902,7 +902,7 @@ struct Extracted[H: Copyable & Defaultable & Handler & Movable](
                 field.apply(req)
             except e:
                 return _extractor_error_response(e, expose)
-        return h.serve(req)
+        return h.serve(req).lower()
 
 
 @always_inline

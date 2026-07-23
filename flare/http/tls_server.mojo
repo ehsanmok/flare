@@ -210,7 +210,7 @@ def handle_tls_h1_connection[
         # Dispatch.
         var resp: Response
         try:
-            resp = handler.serve(req^)
+            resp = handler.serve(req^).lower()
         except e:
             var mapped = map_handler_error(String(e), expose_errors)
             var er = build_error_response(mapped.status, mapped.reason)

@@ -165,7 +165,7 @@ struct Cors[Inner: Handler & Copyable & Defaultable](
 
         if origin.byte_length() == 0:
             # Same-origin or non-CORS request; pass through unchanged.
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
 
         if not _origin_allowed(origin, self.config):
             if is_preflight:
@@ -174,7 +174,7 @@ struct Cors[Inner: Handler & Copyable & Defaultable](
                 # users see the rejection.
                 var resp = Response(status=403)
                 return resp^
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
 
         if is_preflight:
             var resp = Response(status=204)
@@ -198,6 +198,6 @@ struct Cors[Inner: Handler & Copyable & Defaultable](
             return resp^
 
         # Simple / actual request.
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         self._attach_origin(resp, origin)
         return resp^

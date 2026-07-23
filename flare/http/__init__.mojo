@@ -139,7 +139,13 @@ from .simd_parsers import (
 from .request import Request, Method
 from .request_builder import RequestBuilder
 from .multipart_builder import MultipartFormBuilder
-from .response import Response, Status, response_from_body, stream_response
+from .response import (
+    Response,
+    ResponseImpl,
+    Status,
+    response_from_body,
+    stream_response,
+)
 from .response_pool import ResponsePool
 from .handler import (
     Handler,

@@ -529,7 +529,7 @@ struct Metrics[Inner: Handler & Copyable & Defaultable](
         reg[].enter()
         var resp: Response
         try:
-            resp = self.inner.serve(req)
+            resp = self.inner.serve(req).lower()
         except e:
             var latency_micros = (perf_counter_ns() - start) // UInt(1_000)
             reg[].record_error(UInt64(Int(latency_micros)))

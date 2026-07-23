@@ -440,7 +440,7 @@ struct Http2ConnHandle(Movable):
             var expose_errors = req.expose_errors
             var resp: Response
             try:
-                resp = handler.serve(req^)
+                resp = handler.serve(req^).lower()
             except e:
                 var mapped = map_handler_error(String(e), expose_errors)
                 resp = Response(status=mapped.status, reason=mapped.reason)

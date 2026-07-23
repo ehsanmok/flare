@@ -68,7 +68,7 @@ struct Logger[Inner: Handler & Copyable & Defaultable](
         var start = perf_counter_ns()
         var resp: Response
         try:
-            resp = self.inner.serve(req)
+            resp = self.inner.serve(req).lower()
         except e:
             var latency_ms = (perf_counter_ns() - start) // 1_000_000
             var msg = String(e)
@@ -117,7 +117,7 @@ struct RequestId[Inner: Handler & Copyable & Defaultable](
         var id = req.headers.get("x-request-id")
         if id.byte_length() == 0:
             id = String("req-") + String(perf_counter_ns())
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         resp.headers.set("X-Request-Id", id)
         return resp^
 
@@ -366,7 +366,7 @@ struct Compress[Inner: Handler & Copyable & Defaultable](
         var accept = req.headers.get("accept-encoding")
         var brotli_ok = _brotli_available()
         var pick = negotiate_encoding(accept, brotli_ok)
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         if pick.quality == 0:
             return resp^
         if len(resp.body) < self.min_size_bytes:
@@ -422,7 +422,7 @@ struct CatchPanic[Inner: Handler & Copyable & Defaultable](
 
     def serve(self, req: Request) raises -> Response:
         try:
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         except:
             var resp = Response(status=500)
             resp.body = List[UInt8](self.body.as_bytes())

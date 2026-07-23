@@ -331,7 +331,7 @@ struct Conditional[Inner: Handler & Copyable & Defaultable](
         return out^
 
     def serve(self, req: Request) raises -> Response:
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
 
         # Auto-ETag: only synthesise if the inner didn't set one.
         if self.auto_etag and not resp.headers.contains("etag"):

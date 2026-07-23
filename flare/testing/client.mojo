@@ -72,7 +72,7 @@ struct TestClient[H: Handler](ImplicitlyDestructible, Movable):
             expose_errors=True,
         )
         req.headers = headers^
-        return self.handler.serve(req)
+        return self.handler.serve(req).lower()
 
     def get(
         self, path: String, var headers: HeaderMap = HeaderMap()
@@ -199,7 +199,7 @@ struct H2cTestClient[H: Handler](ImplicitlyDestructible, Movable):
             for di in range(len(done)):
                 var rid = done[di]
                 var req = server.take_request(rid)
-                var resp = self.handler.serve(req)
+                var resp = self.handler.serve(req).lower()
                 server.emit_response(rid, resp^)
             client.feed(Span[UInt8, _](server.drain()))
             if client.response_ready(sid):

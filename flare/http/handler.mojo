@@ -42,19 +42,27 @@ call:
 
 ```mojo
 struct Logged[Inner: Handler](Handler):
-    var inner: Inner
+    # Forward the inner handler's BodyType so the typed response
+    # flows through unchanged (the canonical generic-wrapper shape).
+    comptime BodyType = Self.Inner.BodyType
+    var inner: Self.Inner
     var prefix: String
 
-    def serve(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> ResponseImpl[Self.BodyType]:
         print(self.prefix, req.method, req.url)
         return self.inner.serve(req)
 ```
+
+A wrapper that may *substitute* its own response (auth 401, error 500)
+instead keeps ``-> Response`` and calls ``.lower()`` on the inner
+result so both branches share the erased type.
 """
 
+from .body import Body, InlineBody
 from .cancel import Cancel
 from .request import Request
 from .request_view import RequestView
-from .response import Response
+from .response import Response, ResponseImpl
 
 
 # ── Trait ────────────────────────────────────────────────────────────────────
@@ -101,16 +109,46 @@ trait Handler(ImplicitlyDestructible, Movable):
     For *stateful* infallible handlers (the body still cannot fail
     but needs to carry struct fields), see the sibling
     :trait:`HandlerInfallible` trait + :class:`WithRaises` adapter.
+
+    ## Typed body (``BodyType``)
+
+    ``Handler`` carries an associated ``comptime BodyType: Body`` that
+    defaults to :struct:`InlineBody`, so ``serve`` returns the
+    parametric :struct:`ResponseImpl[Self.BodyType]`. A handler that
+    just returns the ordinary ``Response`` (``= ResponseImpl[InlineBody]``)
+    needs to declare nothing -- the default makes its return type resolve
+    to ``Response`` unchanged. A handler that authors a typed body
+    overrides ``BodyType`` and returns ``ResponseImpl[ThatBody]``::
+
+        struct Sse(Handler):
+            comptime BodyType = ChunkedBody[EventSource]
+            def serve(self, req: Request) raises -> ResponseImpl[Self.BodyType]:
+                ...
+
+    ``BodyType`` is *phantom* at runtime -- the body always travels in the
+    erased carrier (``body`` bytes or ``body_stream`` box) that every wire
+    driver consumes. Generic wrappers forward it with
+    ``comptime BodyType = Self.Inner.BodyType``; the dynamic boundary
+    (Router / reactor) calls ``.lower()`` to obtain the erased ``Response``.
     """
 
-    def serve(self, req: Request) raises -> Response:
+    comptime BodyType: Body = InlineBody
+    """The ``Body`` impl this handler authors its response with.
+
+    Defaults to :struct:`InlineBody` so plain handlers that return
+    ``Response`` conform without declaring it. Override in a handler that
+    returns a typed ``ResponseImpl[SomeBody]``."""
+
+    def serve(self, req: Request) raises -> ResponseImpl[Self.BodyType]:
         """Produce a ``Response`` for ``req``.
 
         Args:
             req: The incoming request.
 
         Returns:
-            The response to send back to the client.
+            The response to send back to the client, typed as
+            ``ResponseImpl[Self.BodyType]`` (``= Response`` for the
+            default ``InlineBody``).
 
         Raises:
             Error: Any error; the server maps this to a 500 response.
@@ -519,10 +557,11 @@ struct WithViewCancel[H: Handler & Copyable & Movable](
                 cancellation.
 
         Returns:
-            Whatever ``self.inner.serve(owned)`` returns.
+            Whatever ``self.inner.serve(owned)`` returns, lowered to the
+            erased ``Response``.
         """
         var owned = req.into_owned()
-        return self.inner.serve(owned^)
+        return self.inner.serve(owned^).lower()
 
 
 # ── (existing) WithCancel adapter ──────────────────────────────────────────
@@ -586,9 +625,10 @@ struct WithCancel[H: Handler & Copyable & Movable](
                 cancellation.
 
         Returns:
-            Whatever ``self.inner.serve(req)`` returns.
+            Whatever ``self.inner.serve(req)`` returns, lowered to the
+            erased ``Response``.
         """
-        return self.inner.serve(req)
+        return self.inner.serve(req).lower()
 
 
 # ── WithRaises: HandlerInfallible -> Handler adapter ─────────────────────────

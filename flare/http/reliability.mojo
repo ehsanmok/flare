@@ -224,14 +224,14 @@ struct Retry[Inner: Handler & Copyable & Defaultable](
         ):
             allow_retry = False
         if not allow_retry or self.policy.max_attempts <= 1:
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         var attempt = 0
         var last_err: String = String("")
         var last_raised = False
         while attempt < self.policy.max_attempts:
             attempt += 1
             try:
-                var resp = self.inner.serve(req)
+                var resp = self.inner.serve(req).lower()
                 if resp.status < 500 or attempt == self.policy.max_attempts:
                     return resp^
                 # 5xx and we still have attempts: jittered sleep
@@ -252,7 +252,7 @@ struct Retry[Inner: Handler & Copyable & Defaultable](
             raise Error(last_err)
         # Should be unreachable: the only way out without a
         # response is via the raise branch above.
-        return self.inner.serve(req)
+        return self.inner.serve(req).lower()
 
 
 struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
@@ -306,7 +306,7 @@ struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
         if self.budget_ms <= 0:
             return Response(status=504, reason=String("Gateway Timeout"))
         var start = perf_counter_ns()
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         var elapsed_ms = (perf_counter_ns() - start) // 1_000_000
         if elapsed_ms > UInt(self.budget_ms):
             return Response(status=504, reason=String("Gateway Timeout"))
@@ -354,7 +354,7 @@ struct RateLimit[Inner: Handler & Copyable & Defaultable](
 
     def serve(self, req: Request) raises -> Response:
         if self.rate_per_sec <= 0:
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         var now = Int64(perf_counter_ns())
         var last = _cell_get(self._cell, 1)
         var tokens = _cell_get(self._cell, 0)
@@ -374,7 +374,7 @@ struct RateLimit[Inner: Handler & Copyable & Defaultable](
         _cell_set(self._cell, 1, now)
         if not allow:
             return Response(status=429, reason=String("Too Many Requests"))
-        return self.inner.serve(req)
+        return self.inner.serve(req).lower()
 
 
 # CircuitBreaker states.
@@ -436,7 +436,7 @@ struct CircuitBreaker[Inner: Handler & Copyable & Defaultable](
 
     def serve(self, req: Request) raises -> Response:
         if self.failure_threshold <= 0:
-            return self.inner.serve(req)
+            return self.inner.serve(req).lower()
         var now = Int64(perf_counter_ns())
         var state = _cell_get(self._cell, 0)
         if state == _CB_OPEN:
@@ -449,7 +449,7 @@ struct CircuitBreaker[Inner: Handler & Copyable & Defaultable](
             # Cooldown elapsed: let one probe through (half-open).
             _cell_set(self._cell, 0, _CB_HALF_OPEN)
         try:
-            var resp = self.inner.serve(req)
+            var resp = self.inner.serve(req).lower()
             if resp.status >= 500:
                 self._record_failure(now)
             else:

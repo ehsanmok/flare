@@ -113,7 +113,7 @@ struct _Log[Inner: Handler](Handler):
     var inner: Self.Inner
 
     def serve(self, req: Request) raises -> Response:
-        var resp = self.inner.serve(req)
+        var resp = self.inner.serve(req).lower()
         resp.headers.set("X-Log", "seen")
         return resp^
 

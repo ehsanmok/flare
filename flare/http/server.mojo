@@ -529,7 +529,7 @@ struct HttpServer(Movable):
             for j in range(len(ready)):
                 var stream_id = ready[j]
                 var req = listener.take_http3_request(slot, stream_id)
-                var resp = handler.serve(req^)
+                var resp = handler.serve(req^).lower()
                 listener.emit_http3_response(slot, stream_id, resp^)
                 dispatched += 1
         self._http3_listener = listener^
@@ -608,7 +608,7 @@ struct HttpServer(Movable):
             for j in range(len(ready)):
                 var stream_id = ready[j]
                 var req = listener.take_http3_request(slot, stream_id)
-                var resp = handler.serve(req^)
+                var resp = handler.serve(req^).lower()
                 listener.emit_http3_response(slot, stream_id, resp^)
                 dispatched += 1
         return dispatched

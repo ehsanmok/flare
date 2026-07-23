@@ -19,7 +19,16 @@ from std.testing import (
     TestSuite,
 )
 
-from flare.http import Handler, FnHandler, Request, Response, Status, Method, ok
+from flare.http import (
+    Handler,
+    FnHandler,
+    Request,
+    Response,
+    ResponseImpl,
+    Status,
+    Method,
+    ok,
+)
 from flare.http.server import bad_request
 
 
@@ -149,12 +158,17 @@ def test_fnhandler_propagates_raise() raises:
 
 @fieldwise_init
 struct _Tagged[Inner: Handler](Handler):
-    """Middleware handler that runs ``inner`` and tags the response."""
+    """Middleware handler that runs ``inner`` and tags the response.
 
+    Demonstrates the canonical generic-wrapper pattern: forward the
+    inner handler's ``BodyType`` so the typed response flows through
+    unchanged (no premature ``.lower()``)."""
+
+    comptime BodyType = Self.Inner.BodyType
     var inner: Self.Inner
     var tag: String
 
-    def serve(self, req: Request) raises -> Response:
+    def serve(self, req: Request) raises -> ResponseImpl[Self.BodyType]:
         var resp = self.inner.serve(req)
         resp.headers.set("X-Tag", self.tag)
         return resp^
