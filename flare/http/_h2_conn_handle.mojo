@@ -65,6 +65,53 @@ from ._server_reactor_impl import (
 # ── Http2ConnHandle ────────────────────────────────────────────────────────────
 
 
+struct H2StreamOut(ImplicitlyDestructible, Movable):
+    """Per-stream outbound state for one in-flight streaming response.
+
+    HTTP/2 multiplexes: several handlers can each return a streaming
+    ``Response`` concurrently on the same connection. Each active
+    streaming stream owns one of these — its chunk source, the unsent
+    tail of the current chunk (when a send window ran out mid-chunk),
+    and the trailers to emit at end-of-stream.
+
+    Heap-boxed via ``Pool[H2StreamOut]`` and referenced by address from
+    :attr:`Http2ConnHandle._stream_out` (a ``Dict[Int, Int]`` keyed on
+    stream id): ``ChunkSourceBox`` is move-only and cannot be stored
+    directly as a ``Dict`` value (``Dict`` requires ``Copyable``
+    values), so we box it and store the address, mirroring the
+    :attr:`Http2ConnHandle.stream_cells` cancel-cell pattern.
+    """
+
+    var src: ChunkSourceBox
+    """Chunk source, pulled one chunk per writable edge and window-framed
+    into DATA frames."""
+
+    var pending: List[UInt8]
+    """Unsent tail of the current chunk when the send window ran out
+    mid-chunk; flushed first on the next pump."""
+
+    var ppos: Int
+    """Read cursor into :attr:`pending`."""
+
+    var tk: List[String]
+    """Lowercased trailer field names to emit at end-of-stream."""
+
+    var tv: List[String]
+    """Trailer field values paired with :attr:`tk`."""
+
+    def __init__(
+        out self,
+        var src: ChunkSourceBox,
+        var tk: List[String],
+        var tv: List[String],
+    ):
+        self.src = src^
+        self.pending = List[UInt8]()
+        self.ppos = 0
+        self.tk = tk^
+        self.tv = tv^
+
+
 # TODO(2026-07-15 split): the K1 streaming state machine pushed this
 # file past 1000 lines. A split is blocked -- these are all methods on
 # the single Http2ConnHandle struct and Mojo structs cannot span files.
@@ -152,31 +199,22 @@ struct Http2ConnHandle(Movable):
     interest hasn't actually changed since the previous event."""
 
     # ── Streaming response state (K1 on h2) ────────────────────────────
-    # ponytail: one active streaming response per connection. A second
-    # streaming response arriving while one is in flight is buffered
-    # synchronously (drained into `body` before emit_response). Upgrade
-    # path: a per-stream source map keyed on sid if concurrent streaming
-    # bodies become a real workload.
+    # HTTP/2 multiplexes: N handlers can each return a streaming Response
+    # concurrently on one connection. Each active streaming stream is
+    # boxed in _stream_out keyed on its stream id and pumped fairly (one
+    # chunk per stream per writable edge) subject to the shared connection
+    # send window + per-stream window (see _stream_pump).
 
-    var _stream_sid: Int
-    """Stream id of the active incremental streaming response, 0 = none."""
+    var _stream_out: Dict[Int, Int]
+    """Active concurrent streaming responses keyed on stream id.
 
-    var _stream_src: Optional[ChunkSourceBox]
-    """Chunk source for the active streaming response, pulled one chunk
-    per writable edge and window-framed into DATA frames."""
-
-    var _stream_pending: List[UInt8]
-    """Unsent tail of the current chunk when the send window ran out
-    mid-chunk; flushed first on the next pump."""
-
-    var _stream_ppos: Int
-    """Read cursor into :attr:`_stream_pending`."""
-
-    var _stream_tk: List[String]
-    """Lowercased trailer field names to emit at end-of-stream."""
-
-    var _stream_tv: List[String]
-    """Trailer field values paired with :attr:`_stream_tk`."""
+    The value is the heap address of a boxed :class:`H2StreamOut`
+    (allocated via ``Pool[H2StreamOut]``) — ``ChunkSourceBox`` is
+    move-only so it can't be a ``Dict`` value directly, exactly like the
+    :attr:`stream_cells` cancel-cell addresses. Entries are added by
+    :meth:`_begin_stream`, drained by :meth:`_stream_pump`, and freed +
+    removed when the source reaches end-of-stream (or in :meth:`__del__`
+    if the connection tears down mid-stream)."""
 
     # ── WebSocket-over-HTTP/2 sidecar (RFC 8441) ───────────────────────────
     var _ws_hooks: Optional[WsH2Hooks]
@@ -218,12 +256,7 @@ struct Http2ConnHandle(Movable):
         self.should_close = False
         self.idle_timer_id = UInt64(0)
         self.last_interest = 1  # INTEREST_READ
-        self._stream_sid = 0
-        self._stream_src = Optional[ChunkSourceBox]()
-        self._stream_pending = List[UInt8]()
-        self._stream_ppos = 0
-        self._stream_tk = List[String]()
-        self._stream_tv = List[String]()
+        self._stream_out = Dict[Int, Int]()
         self._ws_hooks = ws_hooks^
         self._ws_tunnels = Dict[Int, WsOverH2ServerStream]()
 
@@ -288,12 +321,7 @@ struct Http2ConnHandle(Movable):
         self.should_close = False
         self.idle_timer_id = UInt64(0)
         self.last_interest = 2  # INTEREST_WRITE
-        self._stream_sid = 0
-        self._stream_src = Optional[ChunkSourceBox]()
-        self._stream_pending = List[UInt8]()
-        self._stream_ppos = 0
-        self._stream_tk = List[String]()
-        self._stream_tv = List[String]()
+        self._stream_out = Dict[Int, Int]()
         self._ws_hooks = ws_hooks^
         self._ws_tunnels = Dict[Int, WsOverH2ServerStream]()
 
@@ -397,10 +425,11 @@ struct Http2ConnHandle(Movable):
         var ids = self.h2.take_completed_streams()
         for i in range(len(ids)):
             var sid = ids[i]
-            # The active streaming response's stream stays open (not
+            # An active streaming response's stream stays open (not
             # CLOSED) until its source drains, so take_completed_streams
-            # keeps returning it; skip re-dispatch here.
-            if self._stream_sid != 0 and sid == self._stream_sid:
+            # keeps returning it; skip re-dispatch for any stream that is
+            # already streaming.
+            if sid in self._stream_out:
                 continue
             # WS tunnels are driven by _ws_dispatch, not the request path;
             # never dispatch a WS stream (even if it END_STREAM's).
@@ -416,7 +445,7 @@ struct Http2ConnHandle(Movable):
                 var mapped = map_handler_error(String(e), expose_errors)
                 resp = Response(status=mapped.status, reason=mapped.reason)
             try:
-                if resp.body_stream and self._stream_sid == 0:
+                if resp.body_stream:
                     self._begin_stream(sid, resp^)
                 else:
                     self._emit_buffered(sid, resp^)
@@ -425,10 +454,10 @@ struct Http2ConnHandle(Movable):
                 # tear the connection down rather than silently
                 # losing the stream.
                 self.should_close = True
-        # Feed may have carried a WINDOW_UPDATE that unblocks the active
-        # streaming response; pump before draining so the fresh frames
+        # Feed may have carried WINDOW_UPDATEs that unblock active
+        # streaming responses; pump before draining so the fresh frames
         # ride out on this event.
-        if self._stream_sid != 0:
+        if len(self._stream_out) > 0:
             try:
                 self._stream_pump()
             except:
@@ -499,99 +528,113 @@ struct Http2ConnHandle(Movable):
     # ── Streaming response (K1 on h2) ────────────────────────────────────────
 
     def _begin_stream(mut self, sid: Int, var resp: Response) raises:
-        """Adopt ``resp`` as the connection's active streaming response.
+        """Adopt ``resp`` as a concurrent streaming response on ``sid``.
 
         Takes its chunk source, queues the leading HEADERS + captures
-        trailers metadata, and marks ``sid`` active. The first body
-        chunks are pumped by the post-dispatch / on_writable pump.
+        trailers metadata into a boxed :class:`H2StreamOut`, and records
+        ``sid`` as active. The body chunks are pumped by the
+        post-dispatch / on_writable pump. Any number of streams can be
+        active at once (bounded only by the peer's MAX_CONCURRENT_STREAMS
+        and the connection/stream send windows).
         """
-        self._stream_src = Optional[ChunkSourceBox](resp.body_stream.take())
+        var src = resp.body_stream.take()
         # Capture trailers before the response is moved into the driver;
         # end_stream_response lowercases the field names at emit time.
-        self._stream_tk = List[String]()
-        self._stream_tv = List[String]()
+        var tk = List[String]()
+        var tv = List[String]()
         for i in range(len(resp.trailers._keys)):
-            self._stream_tk.append(resp.trailers._keys[i].copy())
-            self._stream_tv.append(resp.trailers._values[i].copy())
+            tk.append(resp.trailers._keys[i].copy())
+            tv.append(resp.trailers._values[i].copy())
         self.h2.begin_stream_response(sid, resp^)
-        self._stream_sid = sid
-        self._stream_pending = List[UInt8]()
-        self._stream_ppos = 0
+        var addr = Pool[H2StreamOut].alloc_move(H2StreamOut(src^, tk^, tv^))
+        self._stream_out[sid] = addr
 
     def _emit_buffered(mut self, sid: Int, var resp: Response) raises:
-        """Queue a buffered response. A streaming ``resp`` arriving while
-        another stream is already active (single-active-stream ceiling)
-        is drained synchronously into ``body`` so no data is lost."""
-        if resp.body_stream:
-            var src = resp.body_stream.take()
-            var cancel = self.cancel_cell.handle()
-            while True:
-                var c = src.next(cancel)
-                if not c:
-                    break
-                var cb = c.value().copy()
-                for k in range(len(cb)):
-                    resp.body.append(cb[k])
+        """Queue a fully-buffered response (no streaming source).
+
+        Streaming responses now route through :meth:`_begin_stream`
+        regardless of how many other streams are already active, so this
+        path only ever handles the ordinary buffered ``Response``.
+        """
         self.h2.emit_response(sid, resp^)
 
     def _stream_pump(mut self) raises:
-        """Send one edge's worth of the active streaming response.
+        """Fairly advance every active streaming response by one chunk.
 
-        Flushes any stashed remainder first (window permitting), then
-        pulls a single chunk from the source (mirroring the H1 refill's
+        For each active stream (in a stable snapshot order) flushes any
+        stashed remainder first (window permitting), then pulls a single
+        chunk from the source (mirroring the H1 refill's
         one-chunk-per-edge yield), window-frames it, and stashes any
         unsent tail. On end-of-stream it queues the trailers / END_STREAM
-        and clears the active-stream state.
+        and frees the stream's box. All framing is bounded by the shared
+        connection send window and each stream's own window inside
+        ``queue_stream_data``, so a stream whose window is exhausted
+        simply makes no progress this pump and is retried on the next
+        WINDOW_UPDATE.
         """
-        if self._stream_sid == 0:
+        if len(self._stream_out) == 0:
             return
-        if self._stream_ppos < len(self._stream_pending):
-            var rem = Span[UInt8, origin_of(self._stream_pending)](
-                self._stream_pending
-            )[self._stream_ppos :]
-            var n = self.h2.queue_stream_data(self._stream_sid, rem)
-            self._stream_ppos += n
-            if self._stream_ppos < len(self._stream_pending):
-                return  # window exhausted; wait for WINDOW_UPDATE
-            self._stream_pending = List[UInt8]()
-            self._stream_ppos = 0
+        var sids = List[Int]()
+        for entry in self._stream_out.items():
+            sids.append(entry.key)
         var cancel = self.cancel_cell.handle()
+        for i in range(len(sids)):
+            self._pump_one(sids[i], cancel)
+
+    def _pump_one(mut self, sid: Int, cancel: Cancel) raises:
+        """Advance a single streaming response ``sid`` by one edge.
+
+        Flushes the stashed remainder (if any), then pulls at most one
+        fresh chunk. Frees + removes the stream's box on end-of-stream.
+        """
+        if sid not in self._stream_out:
+            return
+        var addr = self._stream_out[sid]
+        var st = Pool[H2StreamOut].get_ptr(addr)
+        if st[].ppos < len(st[].pending):
+            var rem = List[UInt8](capacity=len(st[].pending) - st[].ppos)
+            for k in range(st[].ppos, len(st[].pending)):
+                rem.append(st[].pending[k])
+            var n = self.h2.queue_stream_data(sid, Span[UInt8, _](rem))
+            st[].ppos += n
+            if st[].ppos < len(st[].pending):
+                return  # window exhausted; wait for WINDOW_UPDATE
+            st[].pending = List[UInt8]()
+            st[].ppos = 0
         while True:
-            var nxt = self._stream_src.value().next(cancel)
+            var nxt = st[].src.next(cancel)
             if not nxt:
-                self.h2.end_stream_response(
-                    self._stream_sid, self._stream_tk, self._stream_tv
-                )
-                self._clear_stream()
+                self.h2.end_stream_response(sid, st[].tk, st[].tv)
+                self._clear_stream(sid)
                 return
             var chunk = nxt.value().copy()
             if len(chunk) == 0:
                 continue  # skip empty non-terminal chunks
-            var n = self.h2.queue_stream_data(
-                self._stream_sid, Span[UInt8, _](chunk)
-            )
+            var n = self.h2.queue_stream_data(sid, Span[UInt8, _](chunk))
             if n < len(chunk):
-                self._stream_pending = List[UInt8]()
+                var tail = List[UInt8](capacity=len(chunk) - n)
                 for k in range(n, len(chunk)):
-                    self._stream_pending.append(chunk[k])
-                self._stream_ppos = 0
+                    tail.append(chunk[k])
+                st[].pending = tail^
+                st[].ppos = 0
             return
 
-    def _clear_stream(mut self):
-        """Reset all active-stream state once the response fully drains."""
-        self._stream_sid = 0
-        self._stream_src = Optional[ChunkSourceBox]()
-        self._stream_pending = List[UInt8]()
-        self._stream_ppos = 0
-        self._stream_tk = List[String]()
-        self._stream_tv = List[String]()
+    def _clear_stream(mut self, sid: Int) raises:
+        """Free + remove the boxed streaming state for ``sid`` once its
+        response has fully drained. No-op if ``sid`` isn't active."""
+        if sid not in self._stream_out:
+            return
+        var addr = self._stream_out.pop(sid)
+        if addr != 0:
+            Pool[H2StreamOut].free(addr)
 
     # ── Per-stream Cancel propagation ────────────────────────────────────────
 
     def __del__(deinit self):
         """Free any per-stream cell heap addresses that outlived
         their dispatch (e.g. because the connection was torn down
-        before the handler returned).
+        before the handler returned), plus any streaming-response boxes
+        for streams still in flight when the connection is destroyed.
         """
         for entry in self.stream_cells.items():
             var addr = entry.value
@@ -601,6 +644,10 @@ struct Http2ConnHandle(Movable):
                 )
                 p.destroy_pointee()
                 p.free()
+        for entry in self._stream_out.items():
+            var addr = entry.value
+            if addr != 0:
+                Pool[H2StreamOut].free(addr)
 
     def _alloc_stream_cell(mut self, sid: Int) raises -> Int:
         """Allocate a fresh cancel cell for ``sid`` (initialised to
@@ -754,9 +801,9 @@ struct Http2ConnHandle(Movable):
         var ids = self.h2.take_completed_streams()
         for i in range(len(ids)):
             var sid = ids[i]
-            # The active streaming response keeps its stream open until
+            # An active streaming response keeps its stream open until
             # drained; skip re-dispatch (see :meth:`on_readable`).
-            if self._stream_sid != 0 and sid == self._stream_sid:
+            if sid in self._stream_out:
                 continue
             var addr = self._alloc_stream_cell(sid)
             # If the peer already RST'd this stream before we got
@@ -778,14 +825,14 @@ struct Http2ConnHandle(Movable):
                 var mapped = map_handler_error(String(e), expose_errors)
                 resp = Response(status=mapped.status, reason=mapped.reason)
             try:
-                if resp.body_stream and self._stream_sid == 0:
+                if resp.body_stream:
                     self._begin_stream(sid, resp^)
                 else:
                     self._emit_buffered(sid, resp^)
             except:
                 self.should_close = True
             self._free_stream_cell(sid)
-        if self._stream_sid != 0:
+        if len(self._stream_out) > 0:
             try:
                 self._stream_pump()
             except:
@@ -881,12 +928,12 @@ struct Http2ConnHandle(Movable):
         # write_buf fully drained; reset for the next response.
         self.write_buf.clear()
         self.write_pos = 0
-        # Streaming response (K1 on h2): refill from the active chunk
+        # Streaming responses (K1 on h2): refill from every active chunk
         # source, window permitting, and stay in STATE_WRITING to flush.
-        # When the pump queues nothing but the stream is still active the
-        # send window is exhausted -- fall through to STATE_READING to
+        # When the pump queues nothing but streams are still active the
+        # send windows are exhausted -- fall through to STATE_READING to
         # await the peer's WINDOW_UPDATE (a readable event).
-        if self._stream_sid != 0:
+        if len(self._stream_out) > 0:
             try:
                 self._stream_pump()
             except:
