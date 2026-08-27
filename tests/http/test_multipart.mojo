@@ -103,6 +103,16 @@ def test_single_text_part() raises:
     assert_false(p.is_file())
 
 
+def test_text_part_utf8_value() raises:
+    """A non-ASCII field value must decode per code point, not per byte."""
+    var body = _single(
+        'Content-Disposition: form-data; name="greeting"\r\n\r\ncafé 日本語 😀',
+        "BND",
+    )
+    var f = parse_multipart_form_data(body, "multipart/form-data; boundary=BND")
+    assert_equal(f.value("greeting"), "café 日本語 😀")
+
+
 def test_multiple_text_parts() raises:
     var lst = List[String]()
     lst.append('Content-Disposition: form-data; name="a"\r\n\r\n1')
@@ -272,6 +282,7 @@ def main() raises:
     test_boundary_missing_raises()
     test_boundary_empty_raises()
     test_single_text_part()
+    test_text_part_utf8_value()
     test_multiple_text_parts()
     test_file_part()
     test_mixed_text_and_file()
@@ -285,4 +296,4 @@ def main() raises:
     test_multipart_extractor()
     test_multipart_extractor_empty_raises()
     test_contains()
-    print("test_multipart: 19 passed")
+    print("test_multipart: 20 passed")

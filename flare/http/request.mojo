@@ -6,6 +6,7 @@ from json import loads, Value
 from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_cookie_header
 from .proto.ascii import ascii_unchecked_string
+from .proto.utf8 import utf8_lossy_string
 from ..net import IpAddr, SocketAddr
 
 
@@ -411,15 +412,16 @@ struct Request(Movable):
     def text(self) -> String:
         """Decode the request body as a UTF-8 string.
 
+        Invalid UTF-8 sequences are replaced with the Unicode
+        replacement character; the body comes from the client, so this
+        never raises on malformed input.
+
         Returns:
             The body decoded as a ``String``. Empty string if body is empty.
         """
         if len(self.body) == 0:
             return ""
-        var out = String(capacity=len(self.body) + 1)
-        for b in self.body:
-            out += chr(Int(b))
-        return out^
+        return utf8_lossy_string(Span[UInt8, _](self.body))
 
     def json(self) raises -> Value:
         """Parse the request body as JSON.

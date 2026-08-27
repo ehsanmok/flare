@@ -38,6 +38,8 @@ held by ``Request.body``); a streaming variant on top of
 
 from std.collections import Optional
 
+from .proto.utf8 import utf8_lossy_string
+
 
 @always_inline
 def _bytes_eq(
@@ -226,13 +228,15 @@ struct MultipartPart(Copyable, Movable):
         self.header_values = List[String]()
 
     def text(self) -> String:
-        """Decode the part body as a UTF-8 ``String``."""
+        """Decode the part body as a UTF-8 ``String``.
+
+        Invalid UTF-8 sequences are replaced with the Unicode
+        replacement character: part bodies are raw client-supplied bytes
+        (RFC 7578 §4.2), so this never raises on malformed input.
+        """
         if len(self.body) == 0:
             return ""
-        var out = String(capacity=len(self.body) + 1)
-        for b in self.body:
-            out += chr(Int(b))
-        return out^
+        return utf8_lossy_string(Span[UInt8, _](self.body))
 
     def is_file(self) -> Bool:
         """Return True if this part represents a file upload (has ``filename``).

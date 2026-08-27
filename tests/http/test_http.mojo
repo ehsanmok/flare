@@ -86,6 +86,35 @@ def test_response_text_large_body() raises:
     assert_equal(len(r.text().as_bytes()), n)
 
 
+def test_response_text_invalid_utf8_replaced() raises:
+    """Malformed bytes become U+FFFD, never an ill-formed ``String``.
+
+    The body is chosen by the peer, so decoding must be total:
+    ``String(unsafe_from_utf8=...)`` alone passes bad bytes through in
+    the default build and aborts the process under ``-D ASSERT=all``.
+    """
+    var body = List[UInt8]()
+    body.append(UInt8(ord("a")))
+    body.append(UInt8(0xFF))  # never valid UTF-8 anywhere
+    body.append(UInt8(ord("b")))
+    var r = Response(status=200, body=body^)
+    assert_equal(r.text(), "a" + chr(0xFFFD) + "b")
+
+
+def test_response_text_truncated_sequence_is_one_replacement() raises:
+    """A truncated sequence collapses to a single U+FFFD, not one per byte.
+
+    Unicode 15 3.9 substitutes one replacement character per maximal
+    ill-formed subpart; here the 3-byte lead plus its one good
+    continuation byte are a single subpart.
+    """
+    var body = List[UInt8]()
+    body.append(UInt8(0xE6))
+    body.append(UInt8(0x97))  # third byte of the sequence is missing
+    var r = Response(status=200, body=body^)
+    assert_equal(r.text(), chr(0xFFFD))
+
+
 # ── Status constants ───────────────────────────────────────────────────────────
 
 

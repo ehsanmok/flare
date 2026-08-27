@@ -36,6 +36,13 @@ def test_test_post_default_content_type() raises:
     assert_equal(req.headers.get("Content-Type"), "application/octet-stream")
 
 
+def test_test_post_body_utf8_roundtrip() raises:
+    """A non-ASCII body must decode per code point, not per byte."""
+    var src = String("café 日本語 😀")
+    var req = Request.test_post("/echo", src)
+    assert_equal(req.text(), src)
+
+
 def test_test_post_explicit_content_type() raises:
     """``test_post`` with ``content_type`` sets that value."""
     var req = Request.test_post(
@@ -122,6 +129,9 @@ def main() raises:
 
     test_test_post_default_content_type()
     print("OK test_test_post_default_content_type")
+
+    test_test_post_body_utf8_roundtrip()
+    print("OK test_test_post_body_utf8_roundtrip")
 
     test_test_post_explicit_content_type()
     print("OK test_test_post_explicit_content_type")
