@@ -161,6 +161,38 @@ struct ServerConfig(Copyable, Movable):
     it rides through :meth:`ServerConfig.copy` into each per-worker
     config clone at no cost -- the same property the standalone
     ``WsServer`` multi-worker path relies on."""
+    var ws_offload: Bool
+    """Run each upgraded WebSocket on its own detached thread instead of
+    inline on the reactor worker.
+
+    ``False`` (the default) keeps the historical behaviour: the reactor
+    calls ``ws_handler(conn)`` synchronously and that worker is parked
+    for the connection's whole lifetime -- the model
+    :class:`flare.ws.WsServer` uses. That is fine for short handlers,
+    but one long-lived connection head-of-line-blocks every OTHER
+    connection pinned to that worker, ordinary keep-alive HTTP requests
+    included.
+
+    ``True`` hands the (already-detached, blocking-mode) fd to a fresh
+    detached thread via :func:`flare.ws.server._spawn_ws_offload` and
+    returns, so the worker keeps serving other connections while the
+    WebSocket runs to completion off-reactor. The connection stays on
+    that one thread start to finish, so ``WsConnection``'s
+    non-thread-safe writes are never touched concurrently.
+
+    The costs: one thread per concurrent WebSocket, with no built-in
+    cap, and handlers that used to be serialised per worker now run
+    concurrently -- any state they share is theirs to protect.
+
+    An offloaded connection leaves the reactor's live-connection table
+    as soon as the handshake completes, so
+    :attr:`ServerConfig.max_connections` does not bound it. Until a cap
+    exists, leave this off on a listener reachable by untrusted peers:
+    N concurrent handshakes means N pthreads, each with a
+    platform-default stack.
+
+    A trivially-copyable ``Bool``, so it propagates through
+    :meth:`ServerConfig.copy` to every per-worker clone."""
 
     def __init__(
         out self,
@@ -182,6 +214,7 @@ struct ServerConfig(Copyable, Movable):
         var h1_leniency: H1LeniencyConfig = H1LeniencyConfig(),
         max_connections: Int = 0,
         ws_handler: Optional[WsHandlerFn] = None,
+        ws_offload: Bool = False,
     ):
         self.read_buffer_size = read_buffer_size
         self.max_header_size = max_header_size
@@ -203,6 +236,7 @@ struct ServerConfig(Copyable, Movable):
         self.h1_leniency = h1_leniency^
         self.max_connections = max_connections
         self.ws_handler = ws_handler
+        self.ws_offload = ws_offload
 
 
 def _resolve_bufring_handler_env() -> Bool:
