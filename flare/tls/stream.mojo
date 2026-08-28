@@ -769,6 +769,22 @@ struct TlsStream(Movable, Readable):
                 raise NetworkError("TLS EOF before buffer full")
             received += n
 
+    def set_recv_timeout(self, ms: Int) raises:
+        """Bound blocking reads on the underlying TCP socket.
+
+        ``SO_RCVTIMEO`` applies to the socket, not to the TLS record
+        layer, so a stalled ``read`` raises ``Timeout`` after ``ms``
+        milliseconds without data on the wire -- the case a half-open
+        connection produces when the network drops mid-response.
+
+        Args:
+            ms: Timeout in milliseconds. ``0`` disables the timeout.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        self._tcp.set_recv_timeout(ms)
+
     def write(self, data: Span[UInt8, _]) raises -> Int:
         """Encrypt and send bytes.
 

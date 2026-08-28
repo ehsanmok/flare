@@ -305,6 +305,13 @@ struct HttpClient(Movable):
     :meth:`with_cookies` opts in. When enabled, :meth:`_send_once`
     captures ``Set-Cookie`` response headers and replays them as a
     ``Cookie`` request header. Freed in :meth:`__deinit__`."""
+    var _read_timeout_ms: Int
+    """Opt-in read timeout applied to every connection this client
+    dials, via ``SO_RCVTIMEO`` on the underlying socket. ``0``
+    (the default) leaves body reads unbounded, preserving the
+    historical behaviour; :meth:`with_read_timeout` opts in.
+    Distinct from :attr:`_timeout_ms`, which bounds ``connect(2)``
+    only."""
 
     def __init__(
         out self,
@@ -322,7 +329,9 @@ struct HttpClient(Movable):
         Args:
             base_url: Optional base URL prepended to relative paths.
             max_redirects: Maximum number of redirects to follow (default 10).
-            timeout_ms: Connect + read timeout in milliseconds (default 30 s).
+            timeout_ms: Connect timeout in milliseconds (default 30 s).
+                Body reads stay unbounded unless
+                :meth:`with_read_timeout` sets a read timeout.
             user_agent: Value for the ``User-Agent`` header.
             prefer_h2c: When ``True``, ``http://`` requests speak
                 HTTP/2 over cleartext via prior knowledge. ``https://``
@@ -359,6 +368,7 @@ struct HttpClient(Movable):
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
         self._proxy = String("")
+        self._read_timeout_ms = 0
 
     def __init__(
         out self,
@@ -393,6 +403,7 @@ struct HttpClient(Movable):
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
         self._proxy = String("")
+        self._read_timeout_ms = 0
 
     def __init__[
         A: Auth
@@ -431,6 +442,7 @@ struct HttpClient(Movable):
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
         self._proxy = String("")
+        self._read_timeout_ms = 0
 
     def __init__[
         A: Auth
@@ -469,6 +481,7 @@ struct HttpClient(Movable):
         self._retry_enabled = False
         self._cookies = CookieStore.disabled()
         self._proxy = String("")
+        self._read_timeout_ms = 0
 
     def __deinit__(deinit self):
         """Free the pooled fds + the ``Alt-Svc`` store owned by this
@@ -595,6 +608,57 @@ struct HttpClient(Movable):
         """
         self._prefer_http3 = enabled
         return self^
+
+    def with_read_timeout(var self, ms: Int) -> HttpClient:
+        """Bound body reads, not just ``connect(2)`` (move-in /
+        move-out so it chains off the constructor like
+        :meth:`with_pool`).
+
+        ``timeout_ms`` only ever reached ``connect``; once the
+        connection was up a read could block forever. That is what a
+        half-open connection looks like to the client -- the network
+        drops after the request goes out, the peer never learns it
+        should FIN, and ``recv`` waits for bytes that will never
+        arrive. ``ms`` sets ``SO_RCVTIMEO`` on the socket, so a read
+        that stalls that long raises ``Timeout`` instead.
+
+        The bound is per-read inactivity, not a deadline on the whole
+        response: a large body that keeps arriving never trips it, and
+        a stalled one trips it after ``ms`` of silence. Use
+        ``PostHocDeadline`` for a whole-request deadline.
+
+        Set it before the first request. The timeout is armed when a
+        connection is dialled and rides on the socket, so it covers
+        pooled connections for their whole lifetime -- but connections
+        already pooled keep whatever was armed when they were dialled.
+
+        Args:
+            ms: Read timeout in milliseconds. ``0`` (the default)
+                disables it and restores the unbounded behaviour.
+
+        Returns:
+            The client, for chaining.
+
+        Example:
+            ```mojo
+            with HttpClient().with_read_timeout(10_000) as c:
+                _ = c.get("https://example.com/")
+            ```
+        """
+        self._read_timeout_ms = ms
+        return self^
+
+    def _arm_read_timeout(self, stream: TcpStream) raises:
+        """Apply :attr:`_read_timeout_ms` to a freshly dialled TCP
+        connection. A no-op when no read timeout is configured."""
+        if self._read_timeout_ms > 0:
+            stream.set_recv_timeout(self._read_timeout_ms)
+
+    def _arm_read_timeout(self, stream: TlsStream) raises:
+        """Apply :attr:`_read_timeout_ms` to a freshly dialled TLS
+        connection (it delegates to the underlying TCP socket)."""
+        if self._read_timeout_ms > 0:
+            stream.set_recv_timeout(self._read_timeout_ms)
 
     def with_redirect_policy(var self, policy: RedirectPolicy) -> HttpClient:
         """Set the redirect-following policy (move-in / move-out so it
@@ -897,6 +961,7 @@ struct HttpClient(Movable):
         var stream = TlsStream.connect_timeout(
             u.host, u.port, tls_cfg^, self._timeout_ms
         )
+        self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
         if self._tls_pool.enabled() and negotiated != "h2":
             var key = TlsConnectionPool.build_key(u.scheme, u.host, Int(u.port))
@@ -1014,6 +1079,7 @@ struct HttpClient(Movable):
             stream = TlsStream.connect_timeout(
                 u.host, u.port, tls_cfg^, self._timeout_ms
             )
+        self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
         if negotiated == "h2":
             var resp_h2 = _send_h2_over_tls(
@@ -1151,6 +1217,7 @@ struct HttpClient(Movable):
         B: ChunkSource
     ](self, u: Url, wire: String, mut source: B) raises -> Response:
         var stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         # One chunk in flight at a time -- the body is never materialized.
@@ -1186,6 +1253,7 @@ struct HttpClient(Movable):
         var stream = TlsStream.connect_timeout(
             u.host, u.port, tls_cfg^, self._timeout_ms
         )
+        self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         var cancel = Cancel.never()
@@ -1292,6 +1360,7 @@ struct HttpClient(Movable):
         """
         var pu = Url.parse(proxy_url)
         var tcp = _connect_with_fallback(pu.host, pu.port, self._timeout_ms)
+        self._arm_read_timeout(tcp)
         var target = host + ":" + String(Int(port))
         var req = String("CONNECT ") + target + " HTTP/1.1\r\n"
         req += "Host: " + target + "\r\n"
@@ -1377,6 +1446,7 @@ struct HttpClient(Movable):
             stream = self._connect_tunnel(proxy, u.host, u.port)
         else:
             stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         return HttpDownload[TcpStream](stream^)
@@ -1444,6 +1514,7 @@ struct HttpClient(Movable):
             stream = TlsStream.connect_timeout(
                 u.host, u.port, tls_cfg^, self._timeout_ms
             )
+        self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         return HttpDownload[TlsStream](stream^)
@@ -1983,6 +2054,7 @@ struct HttpClient(Movable):
                 stream = _connect_with_fallback(
                     u.host, u.port, self._timeout_ms
                 )
+            self._arm_read_timeout(stream)
             if self._prefer_h2c:
                 # h2c via prior knowledge (RFC 9113 §3.4):
                 # send the connection preface immediately and
@@ -2060,6 +2132,7 @@ struct HttpClient(Movable):
             stream = TcpStream(sock^, SocketAddr.localhost(port))
         else:
             stream = _connect_with_fallback(host, port, self._timeout_ms)
+        self._arm_read_timeout(stream)
 
         var wire_bytes = wire.as_bytes()
         var io_failed = False
@@ -2095,6 +2168,7 @@ struct HttpClient(Movable):
             raise NetworkError("HTTP/1.1 pooled request failed")
 
         var fresh = _connect_with_fallback(host, port, self._timeout_ms)
+        self._arm_read_timeout(fresh)
         fresh.write_all(Span[UInt8, _](wire_bytes))
         if len(body) > 0:
             fresh.write_all(Span[UInt8, _](body))
