@@ -148,26 +148,54 @@ void flare_ssl_free(flare_ssl_t ssl) {
     if (ssl) SSL_free(static_cast<SSL*>(ssl));
 }
 
-int flare_ssl_connect(flare_ssl_t ssl, const char* server_name) {
+/* Set SNI + the verification hostname and drive the handshake. Returns
+ * SSL_connect's raw return so callers can classify it themselves. */
+static int flare_ssl_connect_raw(SSL* s, const char* server_name) {
     ERR_clear_error();
-    SSL* s = static_cast<SSL*>(ssl);
     /* Always send SNI when a hostname (not IP) is given */
     if (server_name && server_name[0] != '\0') {
         SSL_set_tlsext_host_name(s, server_name);
         /* Also set hostname for certificate verification */
         SSL_set1_host(s, server_name);
     }
-    if (SSL_connect(s) != 1) {
-        capture_openssl_errors();
-        /* Annotate certificate verification failures with "verify:" prefix */
-        long verify_err = SSL_get_verify_result(s);
-        if (verify_err != X509_V_OK) {
-            const char* v = X509_verify_cert_error_string(verify_err);
-            last_error_msg = std::string("verify:") + v;
-        }
+    return SSL_connect(s);
+}
+
+/* Stash why a handshake failed into last_error_msg. This drains the
+ * error queue, so SSL_get_error must run before it, never after. */
+static void flare_ssl_connect_capture(SSL* s) {
+    capture_openssl_errors();
+    /* Annotate certificate verification failures with "verify:" prefix */
+    long verify_err = SSL_get_verify_result(s);
+    if (verify_err != X509_V_OK) {
+        const char* v = X509_verify_cert_error_string(verify_err);
+        last_error_msg = std::string("verify:") + v;
+    }
+}
+
+int flare_ssl_connect(flare_ssl_t ssl, const char* server_name) {
+    SSL* s = static_cast<SSL*>(ssl);
+    if (flare_ssl_connect_raw(s, server_name) != 1) {
+        flare_ssl_connect_capture(s);
         return -1;
     }
     return 0;
+}
+
+int flare_ssl_connect_ex(flare_ssl_t ssl, const char* server_name) {
+    SSL* s = static_cast<SSL*>(ssl);
+    int ret = flare_ssl_connect_raw(s, server_name);
+    if (ret == 1) return 0;
+    /* Classify first: capture_openssl_errors() empties the queue that
+     * SSL_get_error reads. A blocking fd with SO_RCVTIMEO armed reports
+     * the expiry as WANT_READ (recv returned EAGAIN), which
+     * flare_ssl_connect cannot separate from a protocol failure --
+     * both leave the error queue empty and last_error_msg blank. */
+    int err = SSL_get_error(s, ret);
+    if (err == SSL_ERROR_WANT_READ)  return FLARE_SSL_IO_WANT_READ;
+    if (err == SSL_ERROR_WANT_WRITE) return FLARE_SSL_IO_WANT_WRITE;
+    flare_ssl_connect_capture(s);
+    return FLARE_SSL_IO_FATAL;
 }
 
 int flare_ssl_shutdown(flare_ssl_t ssl) {
@@ -214,6 +242,28 @@ int flare_ssl_read_ex(flare_ssl_t ssl, uint8_t* buf, int len) {
     int n = SSL_read(s, buf, len);
     if (n > 0) return n;
     return flare_ssl_io_classify(s, n);
+}
+
+int flare_ssl_read_blocking(flare_ssl_t ssl, uint8_t* buf, int len) {
+    ERR_clear_error();
+    SSL* s = static_cast<SSL*>(ssl);
+    int n = SSL_read(s, buf, len);
+    if (n > 0) return n;
+    int err = SSL_get_error(s, n);
+    /* On a blocking fd these two mean the socket's own SO_RCVTIMEO /
+     * SO_SNDTIMEO expired -- recv/send returned EAGAIN mid-record. */
+    if (err == SSL_ERROR_WANT_READ)  return FLARE_SSL_IO_WANT_READ;
+    if (err == SSL_ERROR_WANT_WRITE) return FLARE_SSL_IO_WANT_WRITE;
+    /* Every other zero return is end of stream. Deliberately wider than
+     * flare_ssl_read_ex's CLOSED, which only covers close_notify and
+     * SSL_ERROR_SYSCALL: OpenSSL 3.x reports a peer that vanished
+     * without close_notify as SSL_ERROR_SSL / "unexpected eof while
+     * reading", and a blocking reader has always seen that as a plain
+     * 0 from flare_ssl_read. Turning it into an error here would break
+     * every caller that reads a body until EOF. */
+    if (n == 0) return 0;
+    capture_openssl_errors();
+    return FLARE_SSL_IO_FATAL;
 }
 
 int flare_ssl_write_ex(flare_ssl_t ssl, const uint8_t* buf, int len) {

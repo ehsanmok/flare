@@ -57,6 +57,8 @@ from ..tcp import TcpStream
 from ..tcp.stream import _connect_with_fallback
 from ..io import Readable
 from .config import TlsConfig, TlsVerify
+from ..net.error import Timeout
+from ._server_ffi import SSL_IO_WANT_READ, SSL_IO_WANT_WRITE
 from .error import (
     TlsHandshakeError,
     CertificateExpired,
@@ -205,14 +207,38 @@ def _do_ssl_connect(
     return rc
 
 
-def _do_ssl_read(
+def _do_ssl_connect_ex(
+    imm lib: OwnedDLHandle, ssl: Int, var sni: String
+) raises -> Int:
+    """``flare_ssl_connect`` with the failure classified: 0 on success,
+    else an ``SSL_IO_*`` sentinel. On a blocking fd, WANT_READ /
+    WANT_WRITE mean the socket's own send/receive timeout expired
+    mid-handshake -- ``flare_ssl_connect`` flattens that to -1 with an
+    empty error string, which is indistinguishable from a protocol
+    failure."""
+    var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
+        lib, "flare_ssl_connect_ex"
+    )
+    # Same NUL-termination dance as _do_ssl_connect; see the note there.
+    var cstr = sni.as_c_string_slice()
+    var rc = Int(f(ssl, Int(cstr.unsafe_ptr())))
+    _ = sni^
+    return rc
+
+
+def _do_ssl_read_blocking(
     imm lib: OwnedDLHandle,
     ssl: Int,
     buf: Pointer[UInt8, _],
     size: Int,
 ) raises -> Int:
+    """``SSL_read`` on a blocking fd: bytes (>0), 0 at end of stream, or
+    an ``SSL_IO_*`` sentinel. Only WANT_READ / WANT_WRITE and FATAL are
+    reachable -- a socket timeout and a real failure respectively. Not
+    ``flare_ssl_read_ex``, which is the reactor's non-blocking variant
+    and calls an unclean EOF fatal rather than end of stream."""
     var f = dl_sym[def(Int, Int, c_int) thin abi("C") -> c_int](
-        lib, "flare_ssl_read"
+        lib, "flare_ssl_read_blocking"
     )
     return Int(f(ssl, Int(buf), c_int(size)))
 
@@ -639,20 +665,33 @@ struct TlsStream(Movable, Readable):
     ) raises -> TlsStream:
         """Connect with TLS, failing after ``timeout_ms`` milliseconds.
 
-        Uses ``TcpStream.connect_timeout`` for the TCP phase; the TLS
-        handshake shares the same timeout budget.
+        Uses ``TcpStream.connect_timeout`` for the TCP phase. The TLS
+        handshake is bounded separately, by arming ``SO_RCVTIMEO`` on
+        the connected socket for its duration: ``timeout_ms`` is
+        therefore a bound on each phase, not one budget shared across
+        both. Without it a peer that completes the TCP handshake and
+        then says nothing parks the caller inside ``SSL_connect``
+        forever -- which is what a bound listener that never calls
+        ``accept`` produces, since the kernel finishes the handshake
+        out of the backlog.
+
+        The option is cleared again once the handshake completes, so a
+        returned stream reads unbounded unless the caller arms its own
+        timeout via :meth:`set_recv_timeout`.
 
         Args:
             host: Hostname or IP string.
             port: Destination TCP port.
             config: TLS configuration.
-            timeout_ms: Maximum milliseconds for TCP + TLS handshake combined.
+            timeout_ms: Maximum milliseconds for the TCP connect, and
+                again for the TLS handshake that follows it.
 
         Returns:
             A ``TlsStream`` with the handshake complete.
 
         Raises:
             ConnectionTimeout: If the deadline expires during TCP.
+            Timeout: If the deadline expires during the TLS handshake.
             NetworkError: DNS resolution failure.
             TlsHandshakeError: Generic TLS handshake failure.
             CertificateExpired: Server cert expired.
@@ -681,13 +720,29 @@ struct TlsStream(Movable, Readable):
             _do_ssl_ctx_free(lib, ctx)
             raise TlsHandshakeError(err)
 
+        # Bound the handshake itself. `_connect_with_fallback` above
+        # only bounds `connect(2)`; a peer that completes the TCP
+        # handshake and then sends nothing blocks in `SSL_connect`'s
+        # first `recv` with no deadline of its own.
+        if timeout_ms > 0:
+            tcp.set_recv_timeout(timeout_ms)
+
         var sni = config.server_name if config.server_name != "" else host
-        if _do_ssl_connect(lib, ssl, sni) != 0:
+        var rc = _do_ssl_connect_ex(lib, ssl, sni)
+        if rc != 0:
             var err = _c_err(lib)
             _do_ssl_free(lib, ssl)
             _do_ssl_ctx_free(lib, ctx)
+            if rc == SSL_IO_WANT_READ or rc == SSL_IO_WANT_WRITE:
+                raise Timeout("tls_handshake", timeout_ms)
             _classify_tls_error(err, host)
             raise TlsHandshakeError(err)
+
+        # Hand back a stream that reads the way it did before this
+        # bound existed; the caller arms its own read timeout if it
+        # wants one.
+        if timeout_ms > 0:
+            tcp.set_recv_timeout(0)
 
         return TlsStream(tcp^, ctx, ssl)
 
@@ -736,6 +791,18 @@ struct TlsStream(Movable, Readable):
 
         Returns 0 on clean TLS closure (``close_notify`` received).
 
+        Reads through ``flare_ssl_read_blocking`` so the retryable case
+        is classified rather than flattened: with ``SO_RCVTIMEO`` armed
+        (see :meth:`set_recv_timeout`) an expiry reaches OpenSSL as
+        ``recv`` returning ``EAGAIN``, which ``SSL_read`` reports as
+        ``SSL_ERROR_WANT_READ`` on an empty error queue. The plain
+        ``flare_ssl_read`` turns that into a ``NetworkError`` whose
+        reason is the empty string; here it raises ``Timeout``, so a
+        stalled TLS read reads the same as a stalled cleartext one.
+        It is never reported as a 0-byte read, which would truncate a
+        body into a parsed response. End of stream is unchanged, an
+        unclean one included.
+
         Args:
             buf: Destination buffer; the caller must provide at least
                   ``size`` bytes of valid storage.
@@ -745,12 +812,20 @@ struct TlsStream(Movable, Readable):
             Bytes placed in ``buf``, or 0 on clean EOF.
 
         Raises:
+            Timeout: If a socket-level send/receive timeout expired
+                mid-record.
             NetworkError: On I/O or decryption error.
         """
-        var n = _do_ssl_read(self._lib, self._ssl, buf, size)
-        if n < 0:
-            raise NetworkError("TLS read error: " + _c_err(self._lib))
-        return n
+        var n = _do_ssl_read_blocking(self._lib, self._ssl, buf, size)
+        if n >= 0:
+            return n
+        if n == SSL_IO_WANT_READ:
+            raise Timeout("recv")
+        if n == SSL_IO_WANT_WRITE:
+            # A record needed a write mid-read (renegotiation, key
+            # update) and SO_SNDTIMEO expired on it.
+            raise Timeout("send")
+        raise NetworkError("TLS read error: " + _c_err(self._lib))
 
     def read_exact(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises:
         """Read exactly ``size`` bytes into ``buf``.
@@ -768,6 +843,24 @@ struct TlsStream(Movable, Readable):
             if n == 0:
                 raise NetworkError("TLS EOF before buffer full")
             received += n
+
+    def set_recv_timeout(self, ms: Int) raises:
+        """Bound blocking reads on the underlying TCP socket.
+
+        ``SO_RCVTIMEO`` applies to the socket, not to the TLS record
+        layer: OpenSSL sees the expiry as ``SSL_ERROR_WANT_READ``.
+        :meth:`read` maps that to ``Timeout``, so a stalled read raises
+        after ``ms`` milliseconds without data on the wire and reads
+        the same as a stalled cleartext read -- the case a half-open
+        connection produces when the network drops mid-response.
+
+        Args:
+            ms: Timeout in milliseconds. ``0`` disables the timeout.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        self._tcp.set_recv_timeout(ms)
 
     def write(self, data: Span[UInt8, _]) raises -> Int:
         """Encrypt and send bytes.

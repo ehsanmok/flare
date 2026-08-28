@@ -48,6 +48,20 @@ void        flare_ssl_free(flare_ssl_t ssl);
 int flare_ssl_connect(flare_ssl_t ssl, const char* server_name);
 int flare_ssl_shutdown(flare_ssl_t ssl);
 
+/**
+ * ``flare_ssl_connect`` with the failure classified rather than
+ * flattened to -1. Returns 0 on a completed handshake, or a
+ * ``FLARE_SSL_IO_*`` sentinel (see below): WANT_READ / WANT_WRITE when
+ * the handshake needs more I/O -- which on a *blocking* fd means the
+ * socket's ``SO_RCVTIMEO`` / ``SO_SNDTIMEO`` expired -- or FATAL, with
+ * the reason in ``flare_ssl_last_error()``.
+ *
+ * ``flare_ssl_connect`` cannot report the timeout: an expiry leaves the
+ * OpenSSL error queue empty, so it is indistinguishable there from a
+ * protocol failure that also left nothing behind.
+ */
+int flare_ssl_connect_ex(flare_ssl_t ssl, const char* server_name);
+
 /* ── I/O ───────────────────────────────────────────────────────────────────── */
 
 int flare_ssl_read(flare_ssl_t ssl, uint8_t* buf, int len);
@@ -83,6 +97,23 @@ int flare_ssl_read_ex(flare_ssl_t ssl, uint8_t* buf, int len);
  * handshake record first).
  */
 int flare_ssl_write_ex(flare_ssl_t ssl, const uint8_t* buf, int len);
+
+/**
+ * ``SSL_read`` for a *blocking* fd, with the retryable case split out.
+ * Returns bytes read (>0), 0 at end of stream, WANT_READ / WANT_WRITE
+ * when the socket's own ``SO_RCVTIMEO`` / ``SO_SNDTIMEO`` expired
+ * mid-record, or FATAL.
+ *
+ * ``flare_ssl_read`` cannot report the timeout -- it arrives as
+ * ``SSL_ERROR_WANT_READ`` on an empty error queue, so the caller gets
+ * an error with no reason attached. ``flare_ssl_read_ex`` reports it,
+ * but treats a peer that vanished without ``close_notify`` as FATAL
+ * (OpenSSL 3.x raises ``SSL_ERROR_SSL`` / "unexpected eof while
+ * reading" there), which for a blocking reader draining a body to EOF
+ * is a regression. This keeps ``flare_ssl_read``'s end-of-stream
+ * contract and adds only the timeout split.
+ */
+int flare_ssl_read_blocking(flare_ssl_t ssl, uint8_t* buf, int len);
 
 /* ── Introspection ─────────────────────────────────────────────────────────── */
 
