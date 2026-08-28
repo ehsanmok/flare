@@ -36,6 +36,7 @@ from .proto.ascii import ascii_unchecked_string, ascii_eq_ignore_case
 from .static_response import StaticResponse
 from ._server.config import (
     ServerConfig,
+    WsHandlerFn,
     _DEFAULT_SERVER_CONFIG,
     _resolve_bufring_handler_env,
 )
@@ -749,6 +750,74 @@ struct HttpServer(Movable):
                 )
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
+
+    def serve_ws_upgrade(
+        mut self,
+        handler: def(Request) raises thin -> Response,
+        ws_handler: WsHandlerFn,
+        num_workers: Int = 1,
+        pin_cores: Bool = True,
+    ) raises:
+        """Serve HTTP and WebSocket on one listener, on one port.
+
+        Ordinary requests go to ``handler`` exactly as they do under
+        :meth:`serve`. A request that carries a well-formed HTTP/1.1
+        handshake -- ``Connection: Upgrade`` plus ``Upgrade:
+        websocket`` plus a non-empty ``Sec-WebSocket-Key`` (RFC 6455
+        4.2.1) -- gets a ``101 Switching Protocols``, and its socket is
+        handed to ``ws_handler`` as a
+        :class:`flare.ws.WsConnection`. No second listener, no second
+        port.
+
+        ``ws_handler`` has the same signature as
+        :meth:`flare.ws.WsServer.serve`'s callback, so a handler
+        written against a standalone ``WsServer`` moves over unchanged.
+        It owns its connection for as long as that connection lives and
+        blocks the reactor worker for that whole time -- the model
+        ``WsServer`` already uses. With one worker, one long-lived
+        WebSocket therefore stalls the HTTP traffic behind it; give the
+        server ``num_workers > 1``, or reach for
+        :meth:`flare.ws.WsServer` when connections are many and
+        long-lived.
+
+        Distinct from :meth:`serve`'s two-argument overload, which
+        takes a WS-over-h2 sidecar (RFC 8441 ``CONNECT`` streams inside
+        an HTTP/2 connection). This is the plain HTTP/1.1 handshake.
+
+        Cleartext only: a ``wss://`` connection is terminated by the
+        TLS connection handler, which has no upgrade seam.
+
+        Equivalent to setting :attr:`ServerConfig.ws_handler` and then
+        calling ``serve(handler)``; this just wires the field for you.
+
+        Args:
+            handler: Unary request -> response callback, for every
+                request that is not a WebSocket handshake.
+            ws_handler: Called once per upgraded connection.
+            num_workers: Worker count (``<= 0`` is coerced to 1). The
+                handler is a plain function pointer, so it copies into
+                each per-worker ``ServerConfig`` for free.
+            pin_cores: On Linux, pin worker N to core ``N % num_cpus``.
+
+        Raises:
+            NetworkError: On fatal listener errors.
+
+        Example:
+            ```mojo
+            def echo(mut ws: WsConnection) raises:
+                while True:
+                    var frame = ws.recv()
+                    ws.send_text(frame.text_payload())
+
+            def hello(req: Request) raises -> Response:
+                return ok("hello over HTTP")
+
+            var srv = HttpServer.bind(SocketAddr.localhost(8080))
+            srv.serve_ws_upgrade(hello, echo)
+            ```
+        """
+        self.config.ws_handler = Optional[WsHandlerFn](ws_handler)
+        self.serve(handler, num_workers, pin_cores)
 
     def serve[H: Handler](mut self, var handler: H) raises:
         """Run the single-worker reactor loop with any ``Handler``.

@@ -337,10 +337,41 @@ struct WsConnection(Movable):
 
     var _stream: TcpStream
     var _peer: SocketAddr
+    var _prebuf: List[UInt8]
+    """Bytes already drained from the socket before this
+    ``WsConnection`` took ownership of the fd. Non-empty only on the
+    shared-listener upgrade path (``HttpServer.serve(handler,
+    ws_handler)``), where the HTTP/1.1 reactor may have buffered
+    post-handshake WebSocket frame bytes in the same ``recv`` that
+    delivered the upgrade request (TCP coalescing). ``_recv_one``
+    consumes this prefix before issuing any socket ``read``, so a
+    client that pipelines its first frame immediately after the
+    handshake is never dropped. Empty (the common case) for the
+    standalone ``WsServer`` path, which reads the handshake
+    byte-at-a-time and leaves nothing buffered."""
 
     def __init__(out self, var stream: TcpStream, peer: SocketAddr):
         self._stream = stream^
         self._peer = peer
+        self._prebuf = List[UInt8]()
+
+    def __init__(
+        out self,
+        var stream: TcpStream,
+        peer: SocketAddr,
+        var prebuf: List[UInt8],
+    ):
+        """Construct a ``WsConnection`` seeded with already-buffered
+        post-handshake bytes.
+
+        Used by the ``HttpServer`` WebSocket-upgrade seam to hand off
+        any frame bytes the HTTP reactor had already read past the
+        upgrade request. ``prebuf`` is consumed by the first
+        ``recv``/``_recv_one`` before any socket read.
+        """
+        self._stream = stream^
+        self._peer = peer
+        self._prebuf = prebuf^
 
     def __deinit__(deinit self):
         self._stream.close()
@@ -414,6 +445,13 @@ struct WsConnection(Movable):
     def _recv_one(mut self) raises -> WsFrame:
         """Read bytes from stream and decode one complete frame."""
         var buf = List[UInt8](capacity=4096)
+        # Drain any bytes the HTTP reactor pre-buffered past the
+        # handshake (shared-listener upgrade path) before touching the
+        # socket. Empty for the standalone WsServer path.
+        if len(self._prebuf) > 0:
+            for i in range(len(self._prebuf)):
+                buf.append(self._prebuf[i])
+            self._prebuf.clear()
         var tmp = List[UInt8](capacity=4096)
         tmp.resize(4096, 0)
 

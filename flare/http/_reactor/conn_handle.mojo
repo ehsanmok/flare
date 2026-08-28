@@ -634,6 +634,31 @@ struct ConnHandle(Movable):
         # ``HeaderMap.get("upgrade")`` returning the empty string skips
         # the entire upgrade-handling branch.
         if req.headers.get("upgrade").byte_length() != 0:
+            # WebSocket upgrade (RFC 6455), opt-in via
+            # ``config.ws_handler``. Checked inside the same guard the
+            # h2c path already pays for, so non-upgrade traffic is
+            # unaffected. On success the handler has run to completion
+            # and the fd now belongs to the WsConnection, so the
+            # reactor is told to drop this connection.
+            if config.ws_handler:
+                var upgraded: Bool
+                try:
+                    upgraded = self._handle_ws_upgrade(req, config)
+                except:
+                    # The handshake or the handler failed after the fd
+                    # may already have been detached; there is nothing
+                    # left to write to, so tear the connection down.
+                    self.should_close = True
+                    return StepResult(
+                        want_read=False, want_write=False, done=True
+                    )
+                if upgraded:
+                    return StepResult(
+                        want_read=False,
+                        want_write=False,
+                        done=True,
+                        idle_timeout_ms=0,
+                    )
             var settings_payload: Optional[List[UInt8]]
             try:
                 settings_payload = self._h2c_upgrade_decode_settings(
@@ -1179,6 +1204,87 @@ struct ConnHandle(Movable):
         self._h2c_upgrade_pending = True
         queue_h2c_upgrade_101(self.write_buf)
         self.write_pos = 0
+
+    def _handle_ws_upgrade(
+        mut self, req: Request, config: ServerConfig
+    ) raises -> Bool:
+        """Perform an RFC 6455 upgrade on this connection, if it is one.
+
+        Returns ``False`` -- cheaply and with no side effects -- when
+        the request is not a WebSocket handshake, so the caller falls
+        through to the ordinary unary handler path.
+
+        Returns ``True`` once the handshake has been answered and the
+        user's ``ws_handler`` has run to completion. By then this
+        method has:
+
+        1. Computed ``Sec-WebSocket-Accept`` and written ``101
+           Switching Protocols`` straight to the socket.
+        2. **Detached** the fd from ``self._stream`` -- its ``fd`` is
+           set to ``-1`` so this handle's destructor will not close a
+           socket it no longer owns -- and handed it to a
+           :class:`flare.ws.WsConnection`, seeded with any frame bytes
+           the reactor had already read past the handshake request.
+        3. Put the socket back into blocking mode, because the WS
+           handler uses blocking ``recv`` exactly as
+           :class:`flare.ws.WsServer` does.
+        4. Run ``ws_handler(conn)``, which owns that connection for as
+           long as it lives.
+
+        The caller then returns ``done=True`` so the reactor
+        unregisters the fd; closing it is the ``WsConnection``'s job.
+
+        Cleartext only. A ``wss://`` connection arrives through
+        ``TlsConnHandle``, which has no equivalent seam, so a
+        TLS-terminated server still needs a separate ``WsServer``.
+        """
+        from flare.http.server import _ascii_lower
+
+        # RFC 6455 4.2.1 qualification.
+        var upg = _ascii_lower(req.headers.get("upgrade"))
+        if upg != "websocket":
+            return False
+        var conn_hdr = _ascii_lower(req.headers.get("connection"))
+        if "upgrade" not in conn_hdr:
+            return False
+        var ws_key = req.headers.get("sec-websocket-key")
+        if ws_key.byte_length() == 0:
+            return False
+
+        from flare.ws.server import (
+            WsConnection,
+            _compute_accept_srv,
+            _send_upgrade_response,
+        )
+        from flare.net.socket import RawSocket
+        from flare.net._libc import AF_INET, SOCK_STREAM
+
+        var accept = _compute_accept_srv(ws_key)
+
+        # A client is allowed to send its first frame in the same
+        # segment as the handshake. Those bytes are already sitting in
+        # ``read_buf`` past the request, and the reactor is about to
+        # stop reading this fd, so they have to travel with the
+        # connection or they are lost.
+        var prebuf = List[UInt8]()
+        if self.body_total >= 0 and self.body_total < len(self.read_buf):
+            for i in range(self.body_total, len(self.read_buf)):
+                prebuf.append(self.read_buf[i])
+
+        # Hand over the fd. Zeroing it here is what stops this handle's
+        # destructor from closing the socket the WsConnection owns.
+        var fd = self._stream._socket.fd
+        var peer = self.peer
+        self._stream._socket.fd = c_int(-1)
+
+        var raw = RawSocket(fd, AF_INET, SOCK_STREAM, _wrap=True)
+        raw.set_nonblocking(False)
+        var stream = TcpStream(raw^, peer)
+
+        _send_upgrade_response(stream, accept)
+        var conn = WsConnection(stream^, peer, prebuf^)
+        config.ws_handler.value()(conn)
+        return True
 
     def _queue_error(mut self, status: Int, reason: String) -> None:
         """Build a minimal error response into ``write_buf`` and mark close."""
