@@ -1,4 +1,4 @@
-"""HTTP/1.1 client with optional TLS support.
+"""HTTP client with buffered and streaming APIs over HTTP/1.1, HTTP/2, and HTTP/3.
 
 Implements a minimal but correct subset of HTTP/1.1 (RFC 7230/7231):
 - ``Content-Length``-delimited responses
@@ -82,8 +82,19 @@ from ._client.parse import (
     _read_http_response_tls,
 )
 from ._client.download import HttpDownload
+from ._client.stream_response import HttpStreamResponse
+from ._client.h2_transport import _H2Transport
+from ._client.h2_stream import Http2Download
+from ._client.h3_stream import Http3Download
+from ._client.stream_request import (
+    prepare_stream_headers,
+    stream_h1_head,
+    stream_qpack_headers,
+    finish_stream_h1,
+)
 from ._client.h2_send import (
     _build_h2_request_headers,
+    _h2_authority,
     _send_h2_over_tcp,
     _send_h2_over_tls,
     _send_h2c_via_upgrade,
@@ -1292,6 +1303,9 @@ struct HttpClient(Movable):
         """
         var pu = Url.parse(proxy_url)
         var tcp = _connect_with_fallback(pu.host, pu.port, self._timeout_ms)
+        if self._timeout_ms > 0:
+            tcp.set_recv_timeout(self._timeout_ms)
+            tcp.set_send_timeout(self._timeout_ms)
         var target = host + ":" + String(Int(port))
         var req = String("CONNECT ") + target + " HTTP/1.1\r\n"
         req += "Host: " + target + "\r\n"
@@ -1304,6 +1318,8 @@ struct HttpClient(Movable):
         var acc = List[UInt8]()
         var hdr_end = -1
         while hdr_end < 0:
+            if len(acc) >= 65536:
+                raise NetworkError("proxy CONNECT: response head too large")
             var n = tcp.read(buf.unsafe_ptr(), 1024)
             if n == 0:
                 raise NetworkError("proxy CONNECT: closed before reply")
@@ -1350,103 +1366,206 @@ struct HttpClient(Movable):
         var req = Request(method=Method.GET, url=self._resolve_url(url))
         return self.send(req)
 
-    def get_streaming(self, url: String) raises -> HttpDownload[TcpStream]:
-        """GET a response and stream its body incrementally.
+    def get_streaming(self, url: String) raises -> HttpStreamResponse:
+        """GET a streamed response over the selected HTTP protocol."""
+        return self.send_streaming(Request(method="GET", url=url))
 
-        Parses only the status line + headers up front and returns an
-        :class:`HttpDownload`; the caller pulls the body with
-        ``read_chunk()`` in bounded memory (Content-Length, chunked, and
-        close-delimited framings decoded on the fly). The connection is
-        not pooled (``Connection: close``).
-
-        For ``https://`` use :meth:`get_streaming_tls`. Mojo cannot
-        return two different concrete types from one function and
-        ``HttpDownload`` is parametric over its transport, so the two
-        schemes are two entry points rather than one with a branch.
-        """
-        var u = Url.parse(self._resolve_url(url))
-        if u.is_tls():
-            raise Error(
-                "get_streaming: cleartext http:// only; use"
-                " get_streaming_tls() for https"
-            )
-        var wire = self._streaming_get_wire(u, 80)
-        var proxy = self._resolve_proxy(u)
-        var stream: TcpStream
-        if proxy.byte_length() > 0:
-            stream = self._connect_tunnel(proxy, u.host, u.port)
-        else:
-            stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
-        var wb = wire.as_bytes()
-        stream.write_all(Span[UInt8, _](wb))
-        return HttpDownload[TcpStream](stream^)
-
-    def _streaming_get_wire(self, u: Url, default_port: Int) -> String:
-        """Build the HTTP/1.1 GET head shared by both streaming paths.
-
-        ``Accept-Encoding: identity`` on purpose: a streaming download
-        pulls bounded chunks, and a compressed body would have to be
-        fully buffered to inflate, which is the opposite of the point.
-        """
-        var host_header = u.host
-        if Int(u.port) != default_port:
-            host_header = host_header + ":" + String(Int(u.port))
-        var wire = String("GET ") + u.request_target() + " HTTP/1.1\r\n"
-        wire += "Host: " + host_header + "\r\n"
-        wire += "User-Agent: " + self._user_agent + "\r\n"
-        wire += "Accept: */*\r\n"
-        wire += "Accept-Encoding: identity\r\n"
-        wire += "Connection: close\r\n\r\n"
-        return wire^
-
-    def get_streaming_tls(self, url: String) raises -> HttpDownload[TlsStream]:
-        """GET an ``https://`` response and stream its body incrementally.
-
-        The TLS twin of :meth:`get_streaming`. ``HttpDownload`` is
-        already generic over :trait:`flare.io.Readable` and ``TlsStream``
-        already satisfies it, so this is the same reader driven over a
-        different transport -- a 1 GB HTTPS response no longer costs
-        1 GB of client memory.
-
-        ALPN is pinned to ``http/1.1``: ``HttpDownload`` decodes HTTP/1.1
-        framing (Content-Length, chunked, close-delimited), so letting
-        the handshake settle on ``h2`` would hand it frame bytes. HTTP/2
-        and HTTP/3 streaming downloads need a reader over their
-        multiplexed streams and remain a follow-up.
-
-        The connection is not pooled (``Connection: close``).
-
-        Args:
-            url: The target URL (absolute or relative to ``base_url``).
-
-        Returns:
-            An :class:`HttpDownload` positioned at the first body byte.
-
-        Raises:
-            Error: If ``url`` is not ``https://``.
-            NetworkError: On connection, TLS or I/O failure.
-        """
+    def get_streaming_tls(self, url: String) raises -> HttpStreamResponse:
+        """Compatibility HTTPS-only wrapper around get_streaming."""
         var u = Url.parse(self._resolve_url(url))
         if not u.is_tls():
             raise Error(
                 "get_streaming_tls: https:// only; use get_streaming() for http"
             )
-        var wire = self._streaming_get_wire(u, 443)
-        var tls_cfg = self._config.copy()
-        tls_cfg.alpn = List[String]()
-        tls_cfg.alpn.append("http/1.1")
-        var stream: TlsStream
-        var proxy = self._resolve_proxy(u)
-        if proxy.byte_length() > 0:
-            var tcp = self._connect_tunnel(proxy, u.host, u.port)
-            stream = TlsStream.connect_over_tcp(tcp^, u.host, tls_cfg^)
-        else:
-            stream = TlsStream.connect_timeout(
-                u.host, u.port, tls_cfg^, self._timeout_ms
+        return self.get_streaming(url)
+
+    def send_streaming(self, req: Request) raises -> HttpStreamResponse:
+        """Send a buffered request; return its final head before reading its body.
+
+        Uses ordinary redirect/retry policy only until this method returns.
+        Body reads are never replayed. Content encodings are not decompressed.
+        The result exclusively owns its connection; close or drop cancels it.
+        """
+        var attempts = 1
+        if self._retry_enabled and (
+            (not self._retry.retry_only_idempotent)
+            or _is_idempotent(req.method)
+        ):
+            attempts = max(1, self._retry.max_attempts)
+        var attempt = 1
+        while True:
+            try:
+                var response = self._stream_once(req)
+                if response.status < 500 or attempt >= attempts:
+                    return response^
+                response.close()
+            except e:
+                if attempt >= attempts:
+                    raise e^
+            var delay = _backoff_sleep_ms(self._retry, attempt + 1)
+            if delay > 0:
+                _ = libc_nanosleep_ms(delay)
+            attempt += 1
+
+    def _record_stream_head(self, url: String, headers: HeaderMap) raises:
+        if self._cookies.enabled():
+            var values = headers.get_all("Set-Cookie")
+            for value in values:
+                self._cookies.record_set_cookie(value)
+        var alt = headers.get("Alt-Svc")
+        if alt.byte_length() > 0:
+            try:
+                var u = Url.parse(url)
+                self._alt_svc.record(
+                    u.host + ":" + String(Int(u.port)), alt, monotonic_now_s()
+                )
+            except:
+                pass
+
+    def _stream_once(self, req: Request) raises -> HttpStreamResponse:
+        var url = self._resolve_url(req.url)
+        var method = req.method.upper()
+        var body = req.body.copy()
+        var headers = req.headers.copy()
+        var auth = self._auth_header
+        var hops = 0
+        while True:
+            var cookie = self._cookies.request_header()
+            if cookie.byte_length() > 0:
+                headers.set("Cookie", cookie)
+            var prepared = prepare_stream_headers(
+                headers, len(body), self._user_agent, auth
             )
-        var wb = wire.as_bytes()
-        stream.write_all(Span[UInt8, _](wb))
-        return HttpDownload[TlsStream](stream^)
+            var response = self._stream_exchange(method, url, prepared, body)
+            self._record_stream_head(url, response.headers)
+            if (
+                response.status != 301
+                and response.status != 302
+                and response.status != 303
+                and response.status != 307
+                and response.status != 308
+            ):
+                return response^
+            var location = response.header("Location")
+            var decision = self._redirect_policy.decide(
+                url, method, response.status, location, hops
+            )
+            if decision.action == RedirectAction.FOLLOW:
+                response.close()
+                url = decision.next_url
+                method = decision.next_method
+                if decision.next_body_dropped:
+                    body = List[UInt8]()
+                    _ = headers.remove("Content-Type")
+                if not decision.forward_authorization:
+                    auth = ""
+                    _ = headers.remove("Authorization")
+                hops += 1
+                continue
+            if decision.action == RedirectAction.REJECT:
+                response.close()
+                raise Error(
+                    "RedirectPolicy: cross-origin redirect refused"
+                    " (same_origin_only)"
+                )
+            if (
+                location.byte_length() == 0
+                or self._redirect_policy.mode == RedirectMode.DENY
+            ):
+                return response^
+            response.close()
+            raise TooManyRedirects(url, hops)
+
+    def _stream_transport(self, u: Url, proxy: String) raises -> _H2Transport:
+        var tcp: TcpStream
+        if proxy.byte_length() > 0:
+            tcp = self._connect_tunnel(proxy, u.host, u.port)
+        else:
+            tcp = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        if self._timeout_ms > 0:
+            tcp.set_recv_timeout(self._timeout_ms)
+            tcp.set_send_timeout(self._timeout_ms)
+        if u.is_tls():
+            var cfg = self._config.copy()
+            if len(cfg.alpn) == 0:
+                cfg.alpn = ["h2", "http/1.1"]
+            var tls = TlsStream.connect_over_tcp(tcp^, u.host, cfg^)
+            var selected = tls.alpn_selected()
+            if selected != "" and selected != "http/1.1" and selected != "h2":
+                raise Error("HTTP streaming: unsupported negotiated ALPN")
+            var transport = _H2Transport.from_tls(tls^)
+            transport._is_h2 = selected == "h2"
+            return transport^
+        var transport = _H2Transport.from_tcp(tcp^)
+        transport._is_h2 = self._prefer_h2c
+        return transport^
+
+    def _stream_exchange(
+        self, method: String, url: String, headers: HeaderMap, body: List[UInt8]
+    ) raises -> HttpStreamResponse:
+        var u = Url.parse(url)
+        # Validate the generic request even when its wire will be h2/h3.
+        var wire = stream_h1_head(
+            method,
+            u,
+            headers,
+            upgrade=(
+                self._h2c_upgrade and not u.is_tls() and not self._prefer_h2c
+            ),
+        )
+        var proxy = self._resolve_proxy(u)
+        if (
+            u.is_tls()
+            and proxy.byte_length() == 0
+            and self.http3_wire_choice("https", u.host, u.port)
+            == Http3WireChoice.HTTP_3
+        ):
+            var dialed = Optional[Http3ClientConnection]()
+            try:
+                dialed = self._dial_http3(u)
+            except:
+                pass  # Only connection establishment is eligible for fallback.
+            if dialed:
+                var h3 = dialed.take()
+                var fields = stream_qpack_headers(headers)
+                var sid = h3.send_request_open(
+                    method,
+                    u.scheme,
+                    _h2_authority(u),
+                    u.request_target(),
+                    fields,
+                    self._timeout_ms,
+                )
+                h3.send_request_body(sid, body, True, self._timeout_ms)
+                return HttpStreamResponse(
+                    Http3Download(h3^, sid, self._timeout_ms)
+                )
+        var transport = self._stream_transport(u, proxy)
+        if transport._is_h2:
+            var conn = Http2ClientConnection()
+            var sid = conn.next_stream_id()
+            var fields = _build_h2_request_headers(
+                headers, self._user_agent, ""
+            )
+            conn.send_request(
+                sid,
+                method,
+                u.scheme,
+                _h2_authority(u),
+                u.request_target(),
+                fields,
+                Span(body),
+            )
+            var s = conn.conn.streams[sid].copy()
+            s.response_body_allowed = method != "HEAD"
+            conn.conn.streams[sid] = s^
+            return HttpStreamResponse(Http2Download(transport^, conn^, sid))
+        transport.write_all(Span(wire.as_bytes()))
+        if len(body) > 0:
+            transport.write_all(Span(body))
+        return finish_stream_h1(
+            transport^, method, self._h2c_upgrade and not u.is_tls()
+        )
 
     def post(self, url: String, body: String) raises -> Response:
         """Perform a POST request with a JSON string body.
