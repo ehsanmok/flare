@@ -91,6 +91,7 @@ from ._client.stream_request import (
     stream_h1_head,
     stream_qpack_headers,
     finish_stream_h1,
+    upload_h2,
 )
 from ._client.h2_send import (
     _build_h2_request_headers,
@@ -1107,119 +1108,116 @@ struct HttpClient(Movable):
         mut source: B,
         content_type: String = "application/octet-stream",
     ) raises -> Response:
-        """Send a request whose body is streamed from a ``ChunkSource``
-        using ``Transfer-Encoding: chunked``, without materializing the
-        full body in memory.
+        """Convenience wrapper for an unknown-length streamed upload."""
+        var req = Request(method=method, url=url)
+        req.headers.set("Content-Type", content_type)
+        return self.send_chunked(req, source)
 
-        For large uploads (multi-MB / multi-GB) this keeps client memory
-        bounded to one chunk in flight: the source's ``next(cancel)`` is
-        pulled, framed as a chunked-transfer chunk, and written straight
-        to the socket. The body is never assembled into a single buffer.
+    def send_chunked[
+        B: ChunkSource
+    ](self, req: Request, mut source: B,) raises -> Response:
+        """Stream a request body, then buffer its response.
 
-        This is an explicit bounded-memory path over HTTP/1.1 (cleartext
-        or TLS, ALPN forced to ``http/1.1``); it deliberately does not
-        go through connection pooling, redirects, retries, h2, or h3
-        (all of which buffer or re-send the body). Use :meth:`post` /
-        :meth:`send` for those.
-
-        Args:
-            method: HTTP method (e.g. ``"POST"`` / ``"PUT"``).
-            url: Target URL (absolute or relative to ``base_url``).
-            source: A ``ChunkSource`` yielding body chunks; pulled to
-                exhaustion (``next`` returns ``None``).
-            content_type: ``Content-Type`` header value. Defaults to
-                ``application/octet-stream``.
-
-        Returns:
-            The server's ``Response``.
-
-        Raises:
-            NetworkError: On connection or I/O failure.
+        HTTP/1 uses chunked transfer; HTTP/2 and HTTP/3 use DATA plus
+        end-of-stream. The source is never retried or redirected. A response
+        and an upload are not exposed concurrently (this is not full duplex).
+        A nonempty Request.body is rejected because source supplies the body.
         """
-        var u = Url.parse(self._resolve_url(url))
-
-        var host_header = u.host
-        if (u.scheme == "http" and u.port != 80) or (
-            u.scheme == "https" and u.port != 443
-        ):
-            host_header = host_header + ":" + String(Int(u.port))
-
-        var wire = method + " " + u.request_target() + " HTTP/1.1\r\n"
-        wire += "Host: " + host_header + "\r\n"
-        wire += "User-Agent: " + self._user_agent + "\r\n"
-        wire += "Accept: */*\r\n"
-        wire += "Content-Type: " + content_type + "\r\n"
-        wire += "Transfer-Encoding: chunked\r\n"
-        # Streaming uploads do not pool the connection.
-        wire += "Connection: close\r\n"
-        wire += "\r\n"
-
-        if u.is_tls():
-            return self._send_chunked_tls(u, wire, source)
-        return self._send_chunked_tcp(u, wire, source)
-
-    def _send_chunked_tcp[
-        B: ChunkSource
-    ](self, u: Url, wire: String, mut source: B) raises -> Response:
-        var stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
-        var wb = wire.as_bytes()
-        stream.write_all(Span[UInt8, _](wb))
-        # One chunk in flight at a time -- the body is never materialized.
-        var cancel = Cancel.never()
-        while True:
-            var chunk_opt = source.next(cancel)
-            if not chunk_opt:
-                break
-            var chunk = chunk_opt.take()
-            if len(chunk) == 0:
-                continue
-            var frame = _chunk_frame_prefix(len(chunk))
-            var fb = frame.as_bytes()
-            stream.write_all(Span[UInt8, _](fb))
-            stream.write_all(Span[UInt8, _](chunk))
-            var crlf = String("\r\n")
-            var cb = crlf.as_bytes()
-            stream.write_all(Span[UInt8, _](cb))
-        var last = String("0\r\n\r\n")
-        var lb = last.as_bytes()
-        stream.write_all(Span[UInt8, _](lb))
-        var resp = _read_http_response_tcp(stream)
-        stream.close()
-        return resp^
-
-    def _send_chunked_tls[
-        B: ChunkSource
-    ](self, u: Url, wire: String, mut source: B) raises -> Response:
-        # Force http/1.1 -- a chunked upload is an h1 construct.
-        var tls_cfg = self._config.copy()
-        tls_cfg.alpn = List[String]()
-        tls_cfg.alpn.append("http/1.1")
-        var stream = TlsStream.connect_timeout(
-            u.host, u.port, tls_cfg^, self._timeout_ms
+        if len(req.body) != 0:
+            raise Error(
+                "send_chunked: Request.body must be empty when a source is"
+                " supplied"
+            )
+        var url = self._resolve_url(req.url)
+        var method = req.method.upper()
+        var supplied = req.headers.copy()
+        var cookie = self._cookies.request_header()
+        if cookie.byte_length() > 0:
+            supplied.set("Cookie", cookie)
+        var headers = prepare_stream_headers(
+            supplied, -1, self._user_agent, self._auth_header
         )
-        var wb = wire.as_bytes()
-        stream.write_all(Span[UInt8, _](wb))
+        var response = self._upload_exchange(method, url, headers, source)
+        self._record_stream_head(url, response.headers)
+        var body = response.read_all()
+        var buffered = Response(response.status, response.reason, body^)
+        buffered.headers = response.headers.copy()
+        buffered.trailers = response.trailers.copy()
+        if response.protocol() == "h2":
+            buffered.version = "HTTP/2"
+        elif response.protocol() == "h3":
+            buffered.version = "HTTP/3"
+        return self._maybe_decompress(buffered^)
+
+    def _upload_exchange[
+        B: ChunkSource
+    ](
+        self,
+        method: String,
+        url: String,
+        headers: HeaderMap,
+        mut source: B,
+    ) raises -> HttpStreamResponse:
+        var u = Url.parse(url)
+        # h2c Upgrade is not used for a one-shot upload; prior knowledge is.
+        var wire = stream_h1_head(method, u, headers, upload=True)
+        var proxy = self._resolve_proxy(u)
+        if (
+            u.is_tls()
+            and proxy.byte_length() == 0
+            and self.http3_wire_choice("https", u.host, u.port)
+            == Http3WireChoice.HTTP_3
+        ):
+            var dialed = Optional[Http3ClientConnection]()
+            try:
+                dialed = self._dial_http3(u)
+            except:
+                pass
+            if dialed:
+                var h3 = dialed.take()
+                var fields = stream_qpack_headers(headers)
+                var sid = h3.send_request_open(
+                    method,
+                    u.scheme,
+                    _h2_authority(u),
+                    u.request_target(),
+                    fields,
+                    self._timeout_ms,
+                )
+                var cancel = Cancel.never()
+                while True:
+                    var next_chunk = source.next(cancel)
+                    if not next_chunk:
+                        break
+                    var chunk = next_chunk.take()
+                    if len(chunk) > 0:
+                        h3.send_request_body(
+                            sid, chunk, False, self._timeout_ms
+                        )
+                h3.send_request_body(sid, List[UInt8](), True, self._timeout_ms)
+                return HttpStreamResponse(
+                    Http3Download(h3^, sid, self._timeout_ms)
+                )
+        var transport = self._stream_transport(u, proxy)
+        if transport._is_h2:
+            return upload_h2(transport^, method, u, headers, source)
+        transport.write_all(Span(wire.as_bytes()))
         var cancel = Cancel.never()
         while True:
-            var chunk_opt = source.next(cancel)
-            if not chunk_opt:
+            var next_chunk = source.next(cancel)
+            if not next_chunk:
                 break
-            var chunk = chunk_opt.take()
+            var chunk = next_chunk.take()
             if len(chunk) == 0:
                 continue
-            var frame = _chunk_frame_prefix(len(chunk))
-            var fb = frame.as_bytes()
-            stream.write_all(Span[UInt8, _](fb))
-            stream.write_all(Span[UInt8, _](chunk))
+            var prefix = _chunk_frame_prefix(len(chunk))
+            transport.write_all(Span(prefix.as_bytes()))
+            transport.write_all(Span(chunk))
             var crlf = String("\r\n")
-            var cb = crlf.as_bytes()
-            stream.write_all(Span[UInt8, _](cb))
+            transport.write_all(Span(crlf.as_bytes()))
         var last = String("0\r\n\r\n")
-        var lb = last.as_bytes()
-        stream.write_all(Span[UInt8, _](lb))
-        var resp = _read_http_response_tls(stream)
-        stream.close()
-        return resp^
+        transport.write_all(Span(last.as_bytes()))
+        return finish_stream_h1(transport^, method, False)
 
     # ── Context manager ───────────────────────────────────────────────────────
 

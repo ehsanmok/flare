@@ -1,6 +1,8 @@
 """Request preparation and HTTP/1 upgrade for exclusive streaming exchanges."""
 
 from ..headers import HeaderMap
+from ..body import ChunkSource
+from ..cancel import Cancel
 from ..url import Url
 from ...crypto.hmac import base64url_encode
 from ...http2.client import (
@@ -188,3 +190,56 @@ def finish_stream_h1(
     if end + 4 < len(raw):
         conn.feed(Span(raw)[end + 4 :])
     return HttpStreamResponse(Http2Download(transport^, conn^, 1))
+
+
+def upload_h2[
+    B: ChunkSource
+](
+    var transport: _H2Transport,
+    method: String,
+    u: Url,
+    headers: HeaderMap,
+    mut source: B,
+) raises -> HttpStreamResponse:
+    from .h2_send import _build_h2_request_headers
+
+    var conn = Http2ClientConnection()
+    var sid = conn.next_stream_id()
+    var fields = _build_h2_request_headers(headers, "", "")
+    conn.send_request_open(
+        sid, method, u.scheme, _h2_authority(u), u.request_target(), fields
+    )
+    var s = conn.conn.streams[sid].copy()
+    s.response_body_allowed = method != "HEAD"
+    conn.conn.streams[sid] = s^
+    var wire = conn.drain()
+    transport.write_all(Span(wire))
+    var cancel = Cancel.never()
+    while True:
+        var next_chunk = source.next(cancel)
+        if not next_chunk:
+            break
+        var chunk = next_chunk.take()
+        if len(chunk) == 0:
+            continue
+        conn.send_data(sid, Span(chunk), False)
+        wire = conn.drain()
+        transport.write_all(Span(wire))
+        while conn.has_pending_body(sid):
+            var scratch = List[UInt8]()
+            scratch.resize(16384, 0)
+            var n = transport.read(scratch.unsafe_ptr(), len(scratch))
+            if n == 0:
+                raise Error("HTTP/2 upload: EOF while waiting for flow control")
+            conn.feed(Span(scratch)[:n])
+            if conn.conn.goaway_sent:
+                raise Error("HTTP/2 upload: connection protocol error")
+            if conn.stream_error(sid):
+                raise Error("HTTP/2 upload: stream reset")
+            if conn.response_ready(sid):
+                conn.finish_upload(sid)
+                return HttpStreamResponse(Http2Download(transport^, conn^, sid))
+            wire = conn.drain()
+            transport.write_all(Span(wire))
+    conn.send_data(sid, Span[UInt8, _](List[UInt8]()), True)
+    return HttpStreamResponse(Http2Download(transport^, conn^, sid))

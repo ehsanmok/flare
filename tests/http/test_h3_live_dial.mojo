@@ -87,6 +87,8 @@ struct _EchoOrOk(Copyable, Handler, Movable):
             response.headers.append("x-value", "two")
             response.trailers.set("x-complete", "yes")
             return response^
+        if req.url == "/upload-size":
+            return ok(String(len(req.body)))
         if len(req.body) > 0:
             var resp = ok(String(""))
             resp.body = req.body.copy()
@@ -234,6 +236,10 @@ def test_live_h3_generic_streaming() raises:
             total += len(part)
         assert_equal(total, 2 * 1024 * 1024)
         assert_equal(large.trailers.get("x-complete"), "yes")
+        var source = _StreamChunks(32)
+        var upload = Request(method="POST", url=base + "/upload-size")
+        var uploaded = client.send_chunked(upload, source)
+        assert_equal(uploaded.text(), "262144")
         var abandoned = client.get_streaming(base + "/large")
         abandoned.close()
         abandoned.close()
