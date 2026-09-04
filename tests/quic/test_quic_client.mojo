@@ -21,6 +21,7 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from flare.quic.client import QuicClientConnection
+from flare.quic._loss_recovery import LossRecovery
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import RustlsQuicConfig, RustlsQuicConnector
 
@@ -157,8 +158,53 @@ def test_client_handshake_through_retry() raises:
     client.close()
 
 
+def test_stream_control_frames_are_retransmitted_on_pto() raises:
+    var server = _bind_server()
+    var connector = _make_connector()
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+    for _ in range(40):
+        _ = server.tick(timeout_ms=50)
+        _ = client.poll(timeout_ms=50)
+        if client.is_established():
+            break
+    assert_true(client.is_established())
+    var sid = client.open_bidi_stream()
+    client.send_stream(sid, List[UInt8](), False)
+    for cancel in [False, True]:
+        client._loss = LossRecovery()
+        var pn = client.tx_1rtt_pn
+        if cancel:
+            client.cancel_stream(sid)
+        else:
+            client.release_stream_credit(sid, 1024)
+        assert_equal(client.tx_1rtt_pn, pn + 1)
+        assert_equal(client._loss.outstanding(), 1)
+        var original = client._loss.sent[0].frames.copy()
+        # Drop the original datagram and expire its timer without sleeping.
+        var dropped = List[UInt8]()
+        dropped.resize(2048, 0)
+        for _ in range(16):
+            try:
+                if server._socket.try_recv_from(Span(dropped))[0] <= 0:
+                    break
+            except:
+                break
+        client._loss.sent[0].time_ms = 1
+        client._check_pto()
+        assert_equal(client.tx_1rtt_pn, pn + 2)
+        assert_equal(client._loss.pto_count, 1)
+        assert_equal(client._loss.outstanding(), 1)
+        assert_equal(client._loss.sent[0].pn, pn + 1)
+        assert_equal(client._loss.sent[0].frames, original)
+    server.close()
+    client.close()
+
+
 def main() raises:
     test_client_handshake_completes()
     test_client_send_stream_after_handshake()
     test_client_handshake_through_retry()
-    print("test_quic_client: 3 passed")
+    test_stream_control_frames_are_retransmitted_on_pto()
+    print("test_quic_client: 4 passed")
