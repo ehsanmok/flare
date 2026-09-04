@@ -115,7 +115,8 @@ natural.
 | Serve hello-world | [`http_server.mojo`](../examples/basic/http_server.mojo) |
 | Add a route with a parameter | [`router.mojo`](../examples/basic/router.mojo) |
 | Make HTTP requests | [`http_get.mojo`](../examples/basic/http_get.mojo) |
-| Download a large body without buffering it | `HttpClient.get_streaming(url)` for `http://`, `get_streaming_tls(url)` for `https://`, then loop `read_chunk(n)` |
+| Download a large body without buffering it | `HttpClient.get_streaming(url)` for HTTP or HTTPS, then loop `read_chunk(n)`; `send_streaming(req)` also accepts arbitrary methods, headers, and a buffered request body |
+| Bound a streamed response or stop early | `response.read_all_limited(max_body_bytes)` raises on overflow; `response.close()` cancels early; inspect `response.trailers` after EOS |
 | Accept a chunked upload | Nothing to do -- `Transfer-Encoding: chunked` request bodies are decoded before `Handler.serve` sees them |
 | Talk WebSocket | [`websocket_echo.mojo`](../examples/basic/websocket_echo.mojo) |
 | Use TLS as a client | [`tls.mojo`](../examples/basic/tls.mojo) |
