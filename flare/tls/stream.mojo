@@ -420,6 +420,39 @@ def _build_ssl_ctx(imm lib: OwnedDLHandle, config: TlsConfig) raises -> Int:
             _do_ssl_ctx_free(lib, ctx)
             raise TlsHandshakeError("Session cache setup failed: " + err)
 
+    # All client connection paths share identity and ALPN setup here.
+    if config.cert_file != "":
+        if (
+            _do_ssl_ctx_load_cert_key(
+                lib, ctx, config.cert_file, config.key_file
+            )
+            != 0
+        ):
+            var err = _c_err(lib)
+            _do_ssl_ctx_free(lib, ctx)
+            raise TlsHandshakeError("mTLS cert/key load failed: " + err)
+    if len(config.alpn) > 0:
+        var blob = List[UInt8]()
+        for protocol in config.alpn:
+            var n = protocol.byte_length()
+            if n == 0 or n > 255:
+                _do_ssl_ctx_free(lib, ctx)
+                raise TlsHandshakeError(
+                    "TlsConfig.alpn: each protocol id must be 1..255 bytes"
+                )
+            blob.append(UInt8(n))
+            blob.extend(List[UInt8](protocol.as_bytes()))
+        if len(blob) > 255:
+            _do_ssl_ctx_free(lib, ctx)
+            raise TlsHandshakeError(
+                "TlsConfig.alpn: wire-format protos blob must be <= 255 bytes"
+                " total"
+            )
+        if _do_ssl_ctx_set_alpn_protos(lib, ctx, blob) != 0:
+            var err = _c_err(lib)
+            _do_ssl_ctx_free(lib, ctx)
+            raise TlsHandshakeError("ALPN setup failed: " + err)
+
     return ctx
 
 
@@ -598,56 +631,17 @@ struct TlsStream(Movable, Readable):
         # ── 2. Load OpenSSL wrapper library ───────────────────────────────────
         var lib = OwnedDLHandle(_find_flare_lib())
 
-        # ── 3. SSL_CTX + security policy + verify + CA bundle ────────────────
+        # ── 3. SSL_CTX + verification + CA bundle + mTLS + ALPN ──────────────
         var ctx = _build_ssl_ctx(lib, config)
 
-        # ── 4. mTLS: load client cert + key if provided ──────────────────────
-        if config.cert_file != "" and config.key_file != "":
-            if (
-                _do_ssl_ctx_load_cert_key(
-                    lib, ctx, config.cert_file, config.key_file
-                )
-                != 0
-            ):
-                var err = _c_err(lib)
-                _do_ssl_ctx_free(lib, ctx)
-                raise TlsHandshakeError("mTLS cert/key load failed: " + err)
-
-        # ── 5. Client-side ALPN (RFC 7301) ──────────────────────────────────
-        if len(config.alpn) > 0:
-            var blob = List[UInt8]()
-            for i in range(len(config.alpn)):
-                var p = config.alpn[i]
-                var n = p.byte_length()
-                if n == 0 or n > 255:
-                    _do_ssl_ctx_free(lib, ctx)
-                    raise TlsHandshakeError(
-                        "TlsConfig.alpn: each protocol id must be 1..255"
-                        " bytes (RFC 7301)"
-                    )
-                blob.append(UInt8(n))
-                var pp = p.unsafe_ptr()
-                for j in range(n):
-                    blob.append(pp[unsafe_offset=j])
-            if len(blob) > 255:
-                _do_ssl_ctx_free(lib, ctx)
-                raise TlsHandshakeError(
-                    "TlsConfig.alpn: wire-format protos blob must be"
-                    " <= 255 bytes total"
-                )
-            if _do_ssl_ctx_set_alpn_protos(lib, ctx, blob) != 0:
-                var err = _c_err(lib)
-                _do_ssl_ctx_free(lib, ctx)
-                raise TlsHandshakeError("ALPN setup failed: " + err)
-
-        # ── 6. Create SSL session bound to the TCP fd ─────────────────────────
+        # ── 4. Create SSL session bound to the TCP fd ─────────────────────────
         var ssl = _do_ssl_new(lib, ctx, tcp._socket.fd)
         if ssl == 0:
             var err = _c_err(lib)
             _do_ssl_ctx_free(lib, ctx)
             raise TlsHandshakeError(err)
 
-        # ── 7. TLS handshake (flare_ssl_connect sends SNI) ────────────────────
+        # ── 5. TLS handshake (flare_ssl_connect sends SNI) ────────────────────
         var sni = config.server_name if config.server_name != "" else host
         if _do_ssl_connect(lib, ssl, sni) != 0:
             var err = _c_err(lib)
