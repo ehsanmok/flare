@@ -127,8 +127,12 @@ def test_data_appends_and_emits_window_update() raises:
     var s = c.streams[3].copy()
     assert_equal(len(s.data), 5)
     assert_true(s.data_complete)
-    assert_equal(len(out), 1)
+    assert_equal(len(out), 2)  # Credit both the stream and the connection.
     assert_equal(Int(out[0].header.type.value), 0x8)  # WINDOW_UPDATE
+    assert_equal(Int(out[1].header.type.value), 0x8)
+    assert_equal(out[0].header.stream_id, 3)
+    assert_equal(out[1].header.stream_id, 0)
+    assert_equal(s.recv_window, 65535)
 
 
 def test_window_update_adjusts_send_window() raises:

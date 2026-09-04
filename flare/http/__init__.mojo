@@ -208,6 +208,7 @@ from .error import HttpError, TooManyRedirects
 from .auth import Auth, BasicAuth, BearerAuth
 from .client import HttpClient
 from ._client.download import HttpDownload
+from ._client.stream_response import HttpStreamResponse
 from ._client.shortcuts import get, post, put, patch, delete, head
 from .frontend import HttpFrontend, StaticHttpFrontend
 from .server import (

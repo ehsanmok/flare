@@ -58,8 +58,7 @@ def _serve_proxy(mut listener: TcpListener) raises -> None:
     c.close()
 
 
-def main() raises:
-    print("test_client_proxy")
+def run_case(streaming: Bool) raises:
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = UInt16(listener.local_addr().port)
 
@@ -77,9 +76,15 @@ def main() raises:
     var text = String("")
     try:
         with HttpClient().with_proxy(proxy_url) as c:
-            var r = c.get("http://example.test/path")
-            status = r.status
-            text = r.text()
+            if streaming:
+                var r = c.get_streaming("http://example.test/path")
+                status = r.status
+                var bytes = r.read_all()
+                text = String(unsafe_from_utf8=Span(bytes))
+            else:
+                var r = c.get("http://example.test/path")
+                status = r.status
+                text = r.text()
     except e:
         print("proxy request raised:", e)
 
@@ -88,4 +93,9 @@ def main() raises:
 
     assert_equal(status, 200)
     assert_equal(text, "via-proxy")
-    print("test_client_proxy: 1 passed")
+
+
+def main() raises:
+    run_case(False)
+    run_case(True)
+    print("test_client_proxy: 2 passed")

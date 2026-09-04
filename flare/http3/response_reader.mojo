@@ -1,11 +1,10 @@
 """HTTP/3 response-stream reader -- sans-I/O stateful decoder.
 
 The client-side mirror of :mod:`flare.http3.request_reader`. Where the
-server's request reader fires a callback per frame, the client side
-almost always wants the *assembled* response, so this reader is
-stateful: feed it the reassembled bytes of a request (bidi) stream
-as they arrive and it accumulates the response into an
-:class:`Http3Response` (status + headers + body + trailers).
+server's request reader fires a callback per frame, this reader keeps
+the response head and trailers while accepting reassembled bidi-stream
+bytes. DATA is available immediately, even within an incomplete frame.
+Drain it incrementally or collect an assembled :class:`Http3Response`.
 
 A response stream carries, in order (RFC 9114 §4.1):
 
@@ -117,8 +116,18 @@ struct Http3ResponseReader(Copyable, Movable):
     var fin_received: Bool
     var error: String
     var max_field_section_bytes: UInt64
+    var _remaining: UInt64
+    var _data_frame: Bool
+    var _received: UInt64
+    var _content_length: Int
+    var _body_allowed: Bool
+    var _header_bytes: UInt64
 
-    def __init__(out self, max_field_section_bytes: UInt64 = UInt64(1 << 16)):
+    def __init__(
+        out self,
+        max_field_section_bytes: UInt64 = UInt64(1 << 16),
+        method: String = "GET",
+    ):
         self.state = H3_RESPONSE_STATE_INIT
         self.inbox = List[UInt8]()
         self.status = 0
@@ -128,6 +137,12 @@ struct Http3ResponseReader(Copyable, Movable):
         self.fin_received = False
         self.error = String("")
         self.max_field_section_bytes = max_field_section_bytes
+        self._remaining = 0
+        self._data_frame = False
+        self._received = 0
+        self._content_length = -1
+        self._body_allowed = method.upper() != "HEAD"
+        self._header_bytes = 0
 
     @staticmethod
     def new(max_field_section_bytes: UInt64 = UInt64(1 << 16)) -> Self:
@@ -138,6 +153,11 @@ struct Http3ResponseReader(Copyable, Movable):
         frame. Stops at the first incomplete frame (buffered) or
         on a protocol error (state -> DONE, message in
         :attr:`error`)."""
+        if self.state == H3_RESPONSE_STATE_DONE:
+            return
+        if self.fin_received and len(chunk) > 0:
+            self._fail("bytes received after FIN")
+            return
         for i in range(len(chunk)):
             self.inbox.append(chunk[i])
         self._drain()
@@ -145,6 +165,16 @@ struct Http3ResponseReader(Copyable, Movable):
     def signal_fin(mut self):
         """Record that the QUIC layer signalled end-of-stream."""
         self.fin_received = True
+        if self.has_error():
+            return
+        if self.state == H3_RESPONSE_STATE_INIT:
+            self._fail("FIN before final response headers")
+        elif self._remaining > 0 or len(self.inbox) > 0:
+            self._fail("FIN inside an HTTP/3 frame")
+        elif self._content_length >= 0 and self._received != UInt64(
+            self._content_length
+        ):
+            self._fail("Content-Length does not match response body")
 
     def is_complete(self) -> Bool:
         """Whether a full response head has been parsed and the
@@ -217,10 +247,29 @@ struct Http3ResponseReader(Copyable, Movable):
         self.error = message
 
     def _drain(mut self) raises:
-        """Consume as many complete frames from :attr:`inbox` as
-        are present, compacting the inbox afterward."""
+        """Consume available DATA/unknown payload bytes and complete HEADERS.
+
+        Only a bounded header block or partial frame header is retained in
+        inbox; a large DATA frame never forces full-frame buffering.
+        """
         var cursor = 0
         while self.state != H3_RESPONSE_STATE_DONE and cursor < len(self.inbox):
+            if self._remaining > 0:
+                var count = Int(
+                    min(self._remaining, UInt64(len(self.inbox) - cursor))
+                )
+                if self._data_frame:
+                    self._received += UInt64(count)
+                    if self._content_length >= 0 and self._received > UInt64(
+                        self._content_length
+                    ):
+                        self._fail("body exceeds Content-Length")
+                        break
+                    for i in range(cursor, cursor + count):
+                        self.body.append(self.inbox[i])
+                self._remaining -= UInt64(count)
+                cursor += count
+                continue
             var view = Span[UInt8, _](self.inbox)[cursor:]
             # Frame header = type varint + length varint.
             var ftype: UInt64
@@ -237,6 +286,24 @@ struct Http3ResponseReader(Copyable, Movable):
                 header_size = tvar.consumed + lvar.consumed
             except:
                 break  # NEEDS_MORE: truncated varint
+            if ftype != H3_FRAME_TYPE_HEADERS:
+                # DATA is delivered as it arrives, independently of the
+                # peer's frame size. Unknown frames are skipped likewise.
+                if ftype == H3_FRAME_TYPE_DATA:
+                    if self.state != H3_RESPONSE_STATE_BODY or (
+                        not self._body_allowed and flen > 0
+                    ):
+                        self._fail("DATA outside response body")
+                        break
+                else:
+                    self._consume_frame(ftype, Span[UInt8, _](List[UInt8]()))
+                self._data_frame = ftype == H3_FRAME_TYPE_DATA
+                self._remaining = flen
+                cursor += header_size
+                continue
+            if flen > self.max_field_section_bytes:
+                self._fail("HEADERS field section above limit")
+                break
             var total = header_size + Int(flen)
             if total > len(view):
                 break  # NEEDS_MORE: frame body not fully buffered
@@ -269,12 +336,36 @@ struct Http3ResponseReader(Copyable, Movable):
             except:
                 self._fail(String("QPACK decode failed"))
                 return
+            for field in fields:
+                self._header_bytes += UInt64(
+                    field.name.byte_length() + field.value.byte_length() + 32
+                )
+                if self._header_bytes > self.max_field_section_bytes:
+                    self._fail("response headers above limit")
+                    return
+                if (
+                    field.name.byte_length() == 0
+                    or field.name != field.name.lower()
+                    or field.name == "connection"
+                    or field.name == "transfer-encoding"
+                    or field.name == "keep-alive"
+                    or field.name == "proxy-connection"
+                    or field.name == "upgrade"
+                ):
+                    self._fail("invalid response header field")
+                    return
             if self.state == H3_RESPONSE_STATE_INIT:
                 self._apply_head(fields^)
-                self.state = H3_RESPONSE_STATE_BODY
             else:
                 # Trailing HEADERS frame.
                 for i in range(len(fields)):
+                    if (
+                        fields[i].name.startswith(":")
+                        or fields[i].name == "content-length"
+                        or fields[i].name == "transfer-encoding"
+                    ):
+                        self._fail("invalid trailer field")
+                        return
                     self.trailers.append(fields[i].copy())
                 self.state = H3_RESPONSE_STATE_TRAILERS
             return
@@ -303,8 +394,12 @@ struct Http3ResponseReader(Copyable, Movable):
         """Split the first field section into ``:status`` + the
         application response headers."""
         var saw_status = False
+        var regular = False
         for i in range(len(fields)):
             if fields[i].name == ":status":
+                if saw_status or regular:
+                    self._fail("duplicate or out-of-order :status")
+                    return
                 self.status = _parse_status(fields[i].value)
                 saw_status = True
             elif len(fields[i].name.as_bytes()) > 0 and fields[
@@ -317,9 +412,43 @@ struct Http3ResponseReader(Copyable, Movable):
                 )
                 return
             else:
+                regular = True
+                if fields[i].name == "content-length":
+                    var value = fields[i].value.as_bytes()
+                    var n = 0
+                    if len(value) == 0:
+                        self._fail("empty Content-Length")
+                        return
+                    for b in value:
+                        if (
+                            b < 48
+                            or b > 57
+                            or n > (Int.MAX - Int(b - 48)) // 10
+                        ):
+                            self._fail("invalid Content-Length")
+                            return
+                        n = n * 10 + Int(b - 48)
+                    if self._content_length >= 0 and n != self._content_length:
+                        self._fail("conflicting Content-Length")
+                        return
+                    self._content_length = n
                 self.headers.append(fields[i].copy())
         if not saw_status:
             self._fail(String("response HEADERS missing :status"))
+            return
+        if self.status == 101:
+            self._fail("101 is invalid in HTTP/3")
+            return
+        if self.status < 200:
+            self.headers = List[QpackHeader]()
+            self._content_length = -1
+            self.status = 0
+            return
+        if self.status == 204 or self.status == 304:
+            self._body_allowed = False
+        if not self._body_allowed:
+            self._content_length = -1
+        self.state = H3_RESPONSE_STATE_BODY
 
 
 def _parse_status(value: String) raises -> Int:
@@ -327,8 +456,8 @@ def _parse_status(value: String) raises -> Int:
     code, RFC 9114 §4.3.2) into an Int. Raises on a non-numeric or
     out-of-range value."""
     var bytes = value.as_bytes()
-    if len(bytes) == 0:
-        raise Error("h3 response reader: empty :status")
+    if len(bytes) != 3:
+        raise Error("h3 response reader: :status must have three digits")
     var code = 0
     for i in range(len(bytes)):
         var b = Int(bytes[i])

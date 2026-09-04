@@ -29,6 +29,9 @@ from std.testing import assert_equal, assert_true
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 from flare.http import HttpClient, Request, Response, ok
+from flare.http.body import ChunkSource
+from flare.http.cancel import Cancel
+from flare.http.response import stream_response
 from flare.http._client.alt_svc import Http3WireChoice
 from flare.http.handler import Handler
 from flare.quic.server import QuicListener, QuicServerConfig
@@ -36,6 +39,19 @@ from flare.tls import TlsConfig
 
 
 comptime _FIXDIR: String = "tests/tls/fixtures/rustls-quic-client/"
+
+
+@fieldwise_init
+struct _StreamChunks(ChunkSource, Copyable, Movable):
+    var remaining: Int
+
+    def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
+        if self.remaining == 0 or cancel.cancelled():
+            return None
+        self.remaining -= 1
+        var chunk = List[UInt8]()
+        chunk.resize(8192, 97)
+        return chunk^
 
 
 def _read_file(path: String) raises -> String:
@@ -65,6 +81,12 @@ struct _EchoOrOk(Copyable, Handler, Movable):
     """200 handler: echoes a non-empty request body, else 'ok'."""
 
     def serve(self, req: Request) raises -> Response:
+        if req.url == "/large":
+            var response = stream_response(_StreamChunks(256))
+            response.headers.append("x-value", "one")
+            response.headers.append("x-value", "two")
+            response.trailers.set("x-complete", "yes")
+            return response^
         if len(req.body) > 0:
             var resp = ok(String(""))
             resp.body = req.body.copy()
@@ -87,6 +109,7 @@ def _serve_forever(mut server: QuicListener):
                     var req = server.take_http3_request(slot, sid)
                     var resp = handler.serve(req^)
                     server.emit_http3_response(slot, sid, resp^)
+            _ = server.pump_http3_streams(Cancel.never())
         except:
             return
 
@@ -179,8 +202,53 @@ def test_alt_svc_auto_upgrade() raises:
         )
 
 
+def test_live_h3_generic_streaming() raises:
+    var server = _bind_server()
+    var base = "https://localhost:" + String(Int(server.local_addr().port))
+    var pid = fork()
+    if pid == 0:
+        _serve_forever(server)
+        exit()
+    usleep(300000)
+    try:
+        var client = _client()
+        var req = Request(
+            method="POST",
+            url=base + "/echo",
+            body=List[UInt8](String("payload").as_bytes()),
+        )
+        req.headers.set("Authorization", "Bearer test")
+        var response = client.send_streaming(req)
+        assert_equal(response.protocol(), "h3")
+        var bytes = response.read_all_limited(100)
+        assert_equal(String(unsafe_from_utf8=Span(bytes)), "payload")
+        var large = client.get_streaming(base + "/large")
+        assert_equal(large.protocol(), "h3")
+        assert_equal(len(large.headers.get_all("x-value")), 2)
+        var total = 0
+        while True:
+            var part = large.read_chunk(997)
+            assert_true(len(part) <= 997)
+            if len(part) == 0:
+                break
+            total += len(part)
+        assert_equal(total, 2 * 1024 * 1024)
+        assert_equal(large.trailers.get("x-complete"), "yes")
+        var abandoned = client.get_streaming(base + "/large")
+        abandoned.close()
+        abandoned.close()
+        assert_true(abandoned.done())
+    except e:
+        _ = kill(pid, SIGKILL)
+        waitpid(pid)
+        raise e^
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+
+
 def main() raises:
     test_live_h3_get()
     test_live_h3_post_echo()
     test_alt_svc_auto_upgrade()
-    print("test_h3_live_dial: 3 passed")
+    test_live_h3_generic_streaming()
+    print("test_h3_live_dial: 4 passed")

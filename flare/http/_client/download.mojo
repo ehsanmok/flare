@@ -50,60 +50,114 @@ struct HttpDownload[R: Readable & Movable](Movable):
     var status: Int
     var reason: String
     var headers: HeaderMap
+    var trailers: HeaderMap
     var _buf: List[UInt8]
     var _pos: Int
     var _mode: Int
     var _cl_remaining: Int
     var _chunk_remaining: Int
     var _done: Bool
+    var _need_chunk_crlf: Bool
+    var _max_header_bytes: Int
 
-    def __init__(out self, var stream: Self.R) raises:
+    def __init__(
+        out self,
+        var stream: Self.R,
+        method: String = "GET",
+        max_header_bytes: Int = 65536,
+        var initial: List[UInt8] = List[UInt8](),
+    ) raises:
         """Read + parse the response head from ``stream`` (request already
         written) and set up incremental body framing."""
         self._stream = stream^
         self.status = 0
         self.reason = ""
         self.headers = HeaderMap()
-        self._buf = List[UInt8]()
+        self.trailers = HeaderMap()
+        self._buf = initial^
         self._pos = 0
         self._mode = _DL_MODE_CLOSE
         self._cl_remaining = -1
         self._chunk_remaining = -1
         self._done = False
+        self._need_chunk_crlf = False
+        self._max_header_bytes = max_header_bytes
+        if max_header_bytes <= 0:
+            raise Error("HTTP download: header limit must be positive")
 
-        var scratch = List[UInt8](capacity=_READ_BUF_SIZE)
-        scratch.resize(_READ_BUF_SIZE, 0)
-        var raw = List[UInt8](capacity=4096)
-        var hdr_end = -1
-        while hdr_end < 0:
-            var n = self._stream.read(scratch.unsafe_ptr(), len(scratch))
-            if n == 0:
-                if len(raw) == 0:
+        # Keep read-ahead in the same bounded buffer, including between 1xx
+        # heads. Do not mistake an informational response for the final head.
+        var total_head_bytes = 0
+        while True:
+            var hdr_end = _find_crlf2(self._buf)
+            while hdr_end < 0:
+                if len(self._buf) >= max_header_bytes:
+                    raise NetworkError("HTTP download: response head too large")
+                if not self._fill():
                     raise NetworkError(
-                        "HTTP download: peer closed before reply"
+                        "HTTP download: EOF before response head"
                     )
-                raise NetworkError("HTTP download: missing header terminator")
-            for i in range(n):
-                raw.append(scratch[i])
-            hdr_end = _find_crlf2(raw)
+                hdr_end = _find_crlf2(self._buf)
+            total_head_bytes += hdr_end + 4
+            if total_head_bytes > max_header_bytes:
+                raise NetworkError("HTTP download: response head too large")
+            var head = List[UInt8]()
+            for i in range(hdr_end):
+                head.append(self._buf[i])
+            self._pos = hdr_end + 4
+            self._compact()
+            self._parse_head(head)
+            if self.status == 101:
+                raise NetworkError(
+                    "HTTP download: protocol upgrades are not supported"
+                )
+            if self.status >= 200:
+                break
+            self.headers = HeaderMap()
 
-        var header_bytes = List[UInt8](capacity=hdr_end)
-        for i in range(hdr_end):
-            header_bytes.append(raw[i])
-        var lines = _split_lines(_bytes_to_str(header_bytes))
+        if method.upper() == "HEAD" or self.status == 204 or self.status == 304:
+            self._done = True
+            self._buf = List[UInt8]()
+            return
+
+        var content_length = -1
+        var lengths = self.headers.get_all("content-length")
+        for i in range(len(lengths)):
+            var value = _parse_decimal(lengths[i])
+            if content_length >= 0 and value != content_length:
+                raise NetworkError("HTTP download: conflicting Content-Length")
+            content_length = value
+        var encodings = self.headers.get_all("transfer-encoding")
+        if len(encodings) > 0:
+            if len(encodings) != 1 or encodings[0].lower() != "chunked":
+                raise NetworkError(
+                    "HTTP download: unsupported Transfer-Encoding"
+                )
+            if content_length >= 0:
+                raise NetworkError("HTTP download: ambiguous response framing")
+            self._mode = _DL_MODE_CHUNKED
+        elif content_length >= 0:
+            self._mode = _DL_MODE_CONTENT_LENGTH
+            self._cl_remaining = content_length
+            self._done = content_length == 0
+        else:
+            self._mode = _DL_MODE_CLOSE
+
+    def _parse_head(mut self, head: List[UInt8]) raises:
+        var lines = _split_lines(_bytes_to_str(head))
         if len(lines) == 0:
             raise NetworkError("HTTP download: empty response")
         var sl = _parse_status_line(lines[0])
         self.status = sl.code
         self.reason = sl.reason
+        if self.status < 100 or self.status > 599:
+            raise NetworkError("HTTP download: invalid status code")
 
-        var content_length = -1
-        var is_chunked = False
         for li in range(1, len(lines)):
             var ln = lines[li]
             var colon = ln.find(":")
-            if colon < 0:
-                continue
+            if colon <= 0:
+                raise NetworkError("HTTP download: malformed response header")
             var k = (
                 String(String(unsafe_from_utf8=ln.as_bytes()[:colon]))
                 .strip()
@@ -112,31 +166,7 @@ struct HttpDownload[R: Readable & Movable](Movable):
             var v = String(
                 String(unsafe_from_utf8=ln.as_bytes()[colon + 1 :])
             ).strip()
-            self.headers.set(String(k), String(v))
-            if k == "content-length":
-                try:
-                    content_length = Int(atol(v))
-                except:
-                    raise NetworkError("HTTP download: invalid Content-Length")
-            elif k == "transfer-encoding":
-                if v.lower() == "chunked":
-                    is_chunked = True
-
-        # Stash any body bytes already read past the header terminator.
-        var body_start = hdr_end + 4
-        for i in range(body_start, len(raw)):
-            self._buf.append(raw[i])
-
-        if is_chunked:
-            self._mode = _DL_MODE_CHUNKED
-            self._chunk_remaining = -1
-        elif content_length >= 0:
-            self._mode = _DL_MODE_CONTENT_LENGTH
-            self._cl_remaining = content_length
-            if content_length == 0:
-                self._done = True
-        else:
-            self._mode = _DL_MODE_CLOSE
+            self.headers.append(String(k), String(v))
 
     def _compact(mut self):
         """Drop consumed prefix so the buffer stays bounded."""
@@ -181,7 +211,9 @@ struct HttpDownload[R: Readable & Movable](Movable):
 
     def read_chunk(mut self, max_bytes: Int = 65536) raises -> List[UInt8]:
         """Return the next body bytes (<= ``max_bytes``); empty at EOS."""
-        if self._done or max_bytes <= 0:
+        if max_bytes <= 0:
+            raise Error("HTTP download: max_bytes must be positive")
+        if self._done:
             return List[UInt8]()
         if self._mode == _DL_MODE_CONTENT_LENGTH:
             return self._read_content_length(max_bytes)
@@ -213,13 +245,29 @@ struct HttpDownload[R: Readable & Movable](Movable):
         return self._take(max_bytes)
 
     def _read_chunked(mut self, max_bytes: Int) raises -> List[UInt8]:
+        # Validate a preceding chunk terminator on the NEXT pull, so a
+        # server withholding framing cannot delay delivery of available data.
+        if self._need_chunk_crlf:
+            while len(self._buf) - self._pos < 2:
+                if not self._fill():
+                    raise NetworkError("HTTP download: EOF in chunk terminator")
+            if self._buf[self._pos] != 13 or self._buf[self._pos + 1] != 10:
+                raise NetworkError("HTTP download: invalid chunk terminator")
+            self._pos += 2
+            self._need_chunk_crlf = False
         if self._chunk_remaining < 0:
             # Need a chunk-size line: ensure a CRLF is buffered.
             var crlf = self._find_crlf_from(self._pos)
             while crlf < 0:
+                if len(self._buf) - self._pos >= self._max_header_bytes:
+                    raise NetworkError(
+                        "HTTP download: chunk size line too large"
+                    )
                 if not self._fill():
                     raise NetworkError("HTTP download: EOF in chunk size line")
                 crlf = self._find_crlf_from(self._pos)
+            if crlf - self._pos > self._max_header_bytes:
+                raise NetworkError("HTTP download: chunk size line too large")
             var line = String(
                 unsafe_from_utf8=Span[UInt8, origin_of(self._buf)](self._buf)[
                     self._pos : crlf
@@ -233,7 +281,7 @@ struct HttpDownload[R: Readable & Movable](Movable):
             )
             var size = _parse_hex(String(String(size_str).strip()))
             if size == 0:
-                # Final chunk: consume trailing CRLF(s) / trailers to EOS.
+                self._read_trailers()
                 self._done = True
                 return List[UInt8]()
             self._chunk_remaining = size
@@ -248,14 +296,43 @@ struct HttpDownload[R: Readable & Movable](Movable):
         var out = self._take(cap)
         self._chunk_remaining -= len(out)
         if self._chunk_remaining == 0:
-            # Consume the CRLF that terminates the chunk data.
-            while len(self._buf) - self._pos < 2:
-                if not self._fill():
-                    break
-            if len(self._buf) - self._pos >= 2:
-                self._pos += 2
+            self._need_chunk_crlf = True
             self._chunk_remaining = -1
         return out^
+
+    def _read_trailers(mut self) raises:
+        var size = 0
+        while True:
+            var crlf = self._find_crlf_from(self._pos)
+            while crlf < 0:
+                if size + len(self._buf) - self._pos >= self._max_header_bytes:
+                    raise NetworkError("HTTP download: trailers too large")
+                if not self._fill():
+                    raise NetworkError("HTTP download: EOF in trailers")
+                crlf = self._find_crlf_from(self._pos)
+            size += crlf - self._pos + 2
+            if size > self._max_header_bytes:
+                raise NetworkError("HTTP download: trailers too large")
+            var line = _bytes_to_str(
+                List[UInt8](Span(self._buf)[self._pos : crlf])
+            )
+            self._pos = crlf + 2
+            if line.byte_length() == 0:
+                return
+            var colon = line.find(":")
+            if colon <= 0:
+                raise NetworkError("HTTP download: malformed trailer")
+            var key = String(unsafe_from_utf8=line.as_bytes()[:colon]).lower()
+            if (
+                key == "content-length"
+                or key == "transfer-encoding"
+                or key == "host"
+            ):
+                raise NetworkError("HTTP download: forbidden trailer")
+            var value = String(
+                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :]).strip()
+            )
+            self.trailers.append(key, value)
 
     def read_all(mut self, max_bytes: Int = 65536) raises -> List[UInt8]:
         """Drain the whole body into one buffer (convenience for tests /
@@ -276,6 +353,8 @@ struct HttpDownload[R: Readable & Movable](Movable):
 def _parse_hex(s: String) raises -> Int:
     """Parse a lowercase/uppercase hex string to an Int."""
     var acc = 0
+    if s.byte_length() == 0:
+        raise NetworkError("HTTP download: empty chunk size")
     for i in range(s.byte_length()):
         var c = Int(s.unsafe_ptr()[i])
         var d: Int
@@ -287,5 +366,19 @@ def _parse_hex(s: String) raises -> Int:
             d = c - 65 + 10
         else:
             raise NetworkError("HTTP download: bad hex in chunk size")
+        if acc > (Int.MAX - d) // 16:
+            raise NetworkError("HTTP download: chunk size overflow")
         acc = acc * 16 + d
+    return acc
+
+
+def _parse_decimal(s: String) raises -> Int:
+    var acc = 0
+    if s.byte_length() == 0:
+        raise NetworkError("HTTP download: empty Content-Length")
+    for byte in s.as_bytes():
+        var digit = Int(byte) - 48
+        if digit < 0 or digit > 9 or acc > (Int.MAX - digit) // 10:
+            raise NetworkError("HTTP download: invalid Content-Length")
+        acc = acc * 10 + digit
     return acc

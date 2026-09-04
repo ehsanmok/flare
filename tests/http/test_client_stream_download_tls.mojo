@@ -1,13 +1,8 @@
-"""Streaming response-body download over HTTPS (v0.10 S5).
+"""Streaming response-body download over HTTP/1.1 with TLS.
 
-``get_streaming`` refused ``https://`` and told callers to use ``get()``
-instead, which buffers -- so a 1 GB HTTPS response cost 1 GB of client
-memory and there was no way around it. The in-code note said this needed
-"a type-erased reader over the TLS / QUIC transports", but
-``HttpDownload`` was already parametric over
-:trait:`flare.io.Readable` and ``TlsStream`` already satisfied it. The
-only real obstacle was that one Mojo function cannot return two concrete
-types, so ``get_streaming_tls`` is a second entry point.
+The generic get_streaming entry point accepts HTTPS; get_streaming_tls
+remains an HTTPS-only compatibility wrapper. H2 negotiation is exercised
+separately in test_client_stream_response.
 
 Asserts the property that matters for a streaming reader: the bytes
 arrive intact *and* no single pull exceeds the caller's bound, which is
@@ -75,7 +70,7 @@ def _drain(port: UInt16, path: String) raises -> Tuple[Int, Int]:
     """
     var url = String("https://localhost:") + String(Int(port)) + path
     with HttpClient(TlsConfig(ca_bundle=_CA_CRT)) as c:
-        var dl = c.get_streaming_tls(url)
+        var dl = c.get_streaming(url)
         var total = 0
         var largest = 0
         while True:
@@ -156,19 +151,19 @@ def test_https_streaming_download_chunked() raises:
     assert_true(largest <= _PULL_CAP, "pull exceeded the cap")
 
 
-def test_get_streaming_rejects_https() raises:
-    """The cleartext entry point still refuses https, with a pointer."""
+def test_get_streaming_tls_rejects_cleartext() raises:
+    """The compatibility entry point remains HTTPS-only."""
     var raised = False
     var msg = String("")
     try:
         with HttpClient() as c:
-            _ = c.get_streaming("https://example.invalid/x")
+            _ = c.get_streaming_tls("http://example.invalid/x")
     except e:
         raised = True
         msg = String(e)
-    assert_true(raised, "get_streaming must reject https")
+    assert_true(raised, "get_streaming_tls must reject cleartext")
     assert_true(
-        "get_streaming_tls" in msg,
+        "https:// only" in msg,
         "the error should name the right entry point; got: " + msg,
     )
 
