@@ -97,10 +97,10 @@ comptime _H2_DEFAULT_HEADER_TABLE_SIZE: Int = 4096
 
 @fieldwise_init
 struct Http2Config(Copyable, Defaultable):
-    """Tunable HTTP/2 SETTINGS for an :class:`Http2Connection`.
+    """Tunable HTTP/2 SETTINGS and limits for an :class:`Http2Connection`.
 
-    All five fields map 1:1 to RFC 9113 §6.5.2 SETTINGS identifiers
-    (plus the RFC 7541 HPACK header-table size). Defaults are the
+    Protocol fields map to RFC 9113 §6.5.2 SETTINGS identifiers
+    (including the RFC 7541 HPACK header-table size). Defaults are the
     production-shape numbers flare's reactor wiring uses for both
     the inline test driver in :mod:`tests.test_h2_server` and the
     reactor-attached driver.
@@ -132,12 +132,14 @@ struct Http2Config(Copyable, Defaultable):
 
     var cfg = Http2Config(
         max_concurrent_streams=200,
+        max_body_size=10 * 1024 * 1024,
         initial_window_size=131072,
         max_frame_size=32768,
         max_header_list_size=16384,
         header_table_size=8192,
         allow_huffman_decode=True,
         allow_huffman_encode=False,
+        enable_connect_protocol=False,
     )
     var conn = Http2Connection.with_config(cfg)
     ```
@@ -146,6 +148,9 @@ struct Http2Config(Copyable, Defaultable):
         max_concurrent_streams: SETTINGS_MAX_CONCURRENT_STREAMS
             (RFC 9113 §6.5.2). Bounds the per-connection live-stream
             count.
+        max_body_size: Maximum buffered request bytes per stream, default
+            10 MiB. Exceeding the limit resets the stream and frees its body.
+            Zero permits only empty bodies; this is not a SETTINGS value.
         initial_window_size: SETTINGS_INITIAL_WINDOW_SIZE
             (RFC 9113 §6.5.2). Per-stream flow-control receive
             window the server advertises on inbound connections.
@@ -172,6 +177,8 @@ struct Http2Config(Copyable, Defaultable):
     """
 
     var max_concurrent_streams: Int
+    var max_body_size: Int
+    """Maximum buffered request bytes per stream (default 10 MiB)."""
     var initial_window_size: Int
     var max_frame_size: Int
     var max_header_list_size: Int
@@ -195,6 +202,7 @@ struct Http2Config(Copyable, Defaultable):
         Extended CONNECT disabled.
         """
         self.max_concurrent_streams = _H2_DEFAULT_MAX_CONCURRENT_STREAMS
+        self.max_body_size = 10 * 1024 * 1024
         self.initial_window_size = _H2_DEFAULT_INITIAL_WINDOW_SIZE
         self.max_frame_size = _H2_DEFAULT_MAX_FRAME_SIZE
         self.max_header_list_size = _H2_DEFAULT_MAX_HEADER_LIST_SIZE
@@ -202,6 +210,29 @@ struct Http2Config(Copyable, Defaultable):
         self.allow_huffman_decode = True
         self.allow_huffman_encode = False
         self.enable_connect_protocol = False
+
+    def __init__(
+        out self,
+        max_concurrent_streams: Int,
+        initial_window_size: Int,
+        max_frame_size: Int,
+        max_header_list_size: Int,
+        header_table_size: Int,
+        allow_huffman_decode: Bool,
+        allow_huffman_encode: Bool,
+        enable_connect_protocol: Bool,
+        max_body_size: Int = 10 * 1024 * 1024,
+    ):
+        """Configure all SETTINGS, preserving the existing constructor shape."""
+        self.max_concurrent_streams = max_concurrent_streams
+        self.max_body_size = max_body_size
+        self.initial_window_size = initial_window_size
+        self.max_frame_size = max_frame_size
+        self.max_header_list_size = max_header_list_size
+        self.header_table_size = header_table_size
+        self.allow_huffman_decode = allow_huffman_decode
+        self.allow_huffman_encode = allow_huffman_encode
+        self.enable_connect_protocol = enable_connect_protocol
 
     def validate(self) raises -> None:
         """Raise if any field violates the RFC 9113 / RFC 7541 bounds.
@@ -212,6 +243,8 @@ struct Http2Config(Copyable, Defaultable):
         """
         if self.max_concurrent_streams < 0:
             raise Error("Http2Config: max_concurrent_streams must be >= 0")
+        if self.max_body_size < 0:
+            raise Error("Http2Config: max_body_size must be >= 0")
         if self.initial_window_size < 0:
             raise Error("Http2Config: initial_window_size must be >= 0")
         if self.initial_window_size > 0x7FFFFFFF:
@@ -337,6 +370,7 @@ struct Http2Connection(Defaultable, Movable):
         var out = Http2Connection()
         out.config = config^
         out.conn.max_concurrent_streams = out.config.max_concurrent_streams
+        out.conn.max_request_body_size = out.config.max_body_size
         out.conn.initial_window_size = out.config.initial_window_size
         out.conn.send_window = out.config.initial_window_size
         out.conn.recv_window = out.config.initial_window_size
