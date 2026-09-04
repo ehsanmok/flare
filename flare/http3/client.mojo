@@ -45,7 +45,7 @@ from std.collections import Dict, List, Optional
 from std.collections.span import Span
 
 from flare.qpack import QpackHeader
-from flare.quic.client import QuicClientConnection
+from flare.quic.client import QuicClientConnection, _monotonic_ms
 from flare.quic.state import ConnectionEvents
 
 from .request_writer import (
@@ -142,8 +142,15 @@ struct _StreamReasm(Copyable):
         offset, then drain any now-contiguous stashed chunks and
         signal FIN if the stream is fully delivered."""
         if fin:
-            self.fin_offset = Optional(offset + UInt64(len(data)))
+            var final_size = offset + UInt64(len(data))
+            if (
+                self.fin_offset and final_size != self.fin_offset.value()
+            ) or final_size < self.next_offset:
+                raise Error("h3 client: inconsistent QUIC final size")
+            self.fin_offset = Optional(final_size)
         var end = offset + UInt64(len(data))
+        if self.fin_offset and end > self.fin_offset.value():
+            raise Error("h3 client: bytes beyond QUIC final size")
         if end > self.next_offset:
             if offset <= self.next_offset:
                 var skip = Int(self.next_offset - offset)
@@ -359,41 +366,141 @@ struct Http3ClientConnection(Movable):
         :meth:`poll_responses` and collect with
         :meth:`take_if_complete`. When ``early`` the request is emitted
         at 0-RTT (EarlyData)."""
+        if not early:
+            var sid = self.send_request_open(
+                method, scheme, authority, path, headers
+            )
+            self.send_request_body(sid, body, True)
+            return sid
         var sid = self.send_request(
             method, scheme, authority, path, headers, body, early
         )
         self._pending[sid] = _PendingRequest(
-            _StreamReasm(), Http3ResponseReader(self.max_field_section_size)
+            _StreamReasm(),
+            Http3ResponseReader(self.max_field_section_size, method),
         )
         return sid
+
+    def send_request_open(
+        mut self,
+        method: String,
+        scheme: String,
+        authority: String,
+        path: String,
+        headers: List[QpackHeader],
+        timeout_ms: Int = 30000,
+    ) raises -> UInt64:
+        """Send request headers without FIN and register its response reader."""
+        self.open_streams()
+        var sid = self.quic.open_bidi_stream()
+        self._pending[sid] = _PendingRequest(
+            _StreamReasm(),
+            Http3ResponseReader(self.max_field_section_size, method),
+        )
+        var wire = List[UInt8]()
+        encode_request_headers(method, scheme, authority, path, headers, wire)
+        self._send_request_wire(sid, wire, timeout_ms)
+        return sid
+
+    def send_request_body(
+        mut self,
+        sid: UInt64,
+        body: List[UInt8],
+        fin: Bool,
+        timeout_ms: Int = 30000,
+    ) raises:
+        """Write bounded DATA frames, pumping peer flow-control updates as needed.
+        """
+        var pos = 0
+        while pos < len(body):
+            var count = min(16384, len(body) - pos)
+            var wire = List[UInt8]()
+            encode_request_data(Span(body)[pos : pos + count], wire)
+            self._send_request_wire(sid, wire, timeout_ms)
+            pos += count
+        if fin:
+            self.quic.send_stream(sid, List[UInt8](), True)
+
+    def _send_request_wire(
+        mut self, sid: UInt64, wire: List[UInt8], timeout_ms: Int
+    ) raises:
+        var pos = 0
+        var start = _monotonic_ms()
+        while pos < len(wire):
+            self._check_stream_error(sid)
+            var cap = self.quic.send_capacity(sid)
+            if cap == 0:
+                if timeout_ms > 0 and _monotonic_ms() - start >= UInt64(
+                    timeout_ms
+                ):
+                    raise Error("h3 client: upload flow-control timeout")
+                _ = self.poll_responses(100)
+                continue
+            var count = min(cap, len(wire) - pos)
+            var part = List[UInt8](Span(wire)[pos : pos + count])
+            self.quic.send_stream(sid, part, False)
+            pos += count
+            start = _monotonic_ms()
 
     def poll_responses(mut self, timeout_ms: Int = 100) raises -> Bool:
         """Poll one QUIC burst and fan its STREAM chunks out across
         every in-flight request registered by :meth:`request`.
         Returns whether at least one pending response is now
-        complete."""
+        complete or failed. Stream errors are retained for that request's
+        accessors; they do not interrupt delivery to other requests."""
         var events = self.quic.poll(timeout_ms)
         var sids = List[UInt64]()
+        var credits = List[UInt64]()
         for entry in self._pending.items():
             sids.append(entry.key)
         for s in range(len(sids)):
             var sid = sids[s]
             var pr = self._pending.pop(sid)
-            for i in range(len(events.stream_chunks)):
-                if events.stream_chunks[i].stream_id != sid:
-                    continue
-                pr.reasm.push(
-                    pr.reader,
-                    events.stream_chunks[i].offset,
-                    Span[UInt8, _](events.stream_chunks[i].data),
-                    events.stream_chunks[i].fin,
-                )
+            var before = pr.reasm.next_offset
+            if not pr.reader.has_error():
+                if self.quic.stream_reset(sid):
+                    pr.reader._fail("peer reset response stream")
+                else:
+                    try:
+                        for i in range(len(events.stream_chunks)):
+                            if events.stream_chunks[i].stream_id != sid:
+                                continue
+                            pr.reasm.push(
+                                pr.reader,
+                                events.stream_chunks[i].offset,
+                                Span[UInt8, _](events.stream_chunks[i].data),
+                                events.stream_chunks[i].fin,
+                            )
+                            if pr.reader.has_error():
+                                break
+                    except e:
+                        pr.reader._fail(String(e))
+            if events.connection_closed and not pr.reader.is_complete():
+                pr.reader._fail("connection closed before response FIN")
+            if pr.reader.has_error():
+                pr.reasm.pending = Dict[UInt64, List[UInt8]]()
+                pr.reader.body = List[UInt8]()
+                pr.reader.inbox = List[UInt8]()
+                credits.append(UInt64(0))
+            else:
+                credits.append(pr.reasm.next_offset - before)
             self._pending[sid] = pr^
+        # Preserve the entire already-ACKed burst before any outbound send
+        # can raise. Otherwise unrelated streams lose their delivered bytes.
+        for s in range(len(sids)):
+            self.quic.release_stream_credit(sids[s], credits[s])
         var any_done = False
         for entry in self._pending.items():
             if entry.value.reader.is_complete():
                 any_done = True
         return any_done
+
+    def _check_stream_error(self, stream_id: UInt64) raises:
+        if stream_id in self._pending:
+            if self._pending[stream_id].reader.has_error():
+                raise Error(
+                    "h3 client: " + self._pending[stream_id].reader.error
+                )
 
     def take_if_complete(
         mut self, stream_id: UInt64
@@ -416,6 +523,7 @@ struct Http3ClientConnection(Movable):
         before draining the body."""
         if stream_id not in self._pending:
             return False
+        self._check_stream_error(stream_id)
         var pr = self._pending.pop(stream_id)
         var ready = pr.reader.head_ready()
         self._pending[stream_id] = pr^
@@ -426,6 +534,7 @@ struct Http3ClientConnection(Movable):
         is parsed -- check :meth:`head_ready`)."""
         if stream_id not in self._pending:
             return 0
+        self._check_stream_error(stream_id)
         var pr = self._pending.pop(stream_id)
         var s = pr.reader.status_code()
         self._pending[stream_id] = pr^
@@ -436,6 +545,7 @@ struct Http3ClientConnection(Movable):
         request (valid once :meth:`head_ready`)."""
         if stream_id not in self._pending:
             return List[QpackHeader]()
+        self._check_stream_error(stream_id)
         var pr = self._pending.pop(stream_id)
         var h = pr.reader.headers_copy()
         self._pending[stream_id] = pr^
@@ -452,25 +562,15 @@ struct Http3ClientConnection(Movable):
         True the trailers / final response are still retrievable with
         :meth:`take_if_complete`. An unknown / already-taken stream id
         returns an empty, ``done=True`` chunk."""
-        var events = self.quic.poll(timeout_ms)
-        var sids = List[UInt64]()
-        for entry in self._pending.items():
-            sids.append(entry.key)
-        for s in range(len(sids)):
-            var sid = sids[s]
-            var pr = self._pending.pop(sid)
-            for i in range(len(events.stream_chunks)):
-                if events.stream_chunks[i].stream_id != sid:
-                    continue
-                pr.reasm.push(
-                    pr.reader,
-                    events.stream_chunks[i].offset,
-                    Span[UInt8, _](events.stream_chunks[i].data),
-                    events.stream_chunks[i].fin,
-                )
-            self._pending[sid] = pr^
         if stream_id not in self._pending:
             return Http3BodyChunk(List[UInt8](), True)
+        self._check_stream_error(stream_id)
+        if (
+            len(self._pending[stream_id].reader.body) == 0
+            and not self._pending[stream_id].reader.is_complete()
+        ):
+            _ = self.poll_responses(timeout_ms)
+        self._check_stream_error(stream_id)
         var target = self._pending.pop(stream_id)
         var chunk = target.reader.drain_body()
         var done = target.reader.is_complete()

@@ -15,15 +15,25 @@ chunks to the right reader.
 
 from std.collections import List
 from std.pathlib import Path
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_true, assert_raises
 
-from flare.http3 import Http3ClientConnection
+from flare.http3 import (
+    Http3ClientConnection,
+    encode_response_headers,
+    encode_response_data,
+)
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
 from flare.http.server import ok
 from flare.qpack import QpackHeader
 from flare.quic.client import QuicClientConnection
+from flare.quic.frame import (
+    ResetStreamFrame,
+    StreamFrame,
+    encode_reset_stream,
+    encode_stream,
+)
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import RustlsQuicConnector
 
@@ -171,6 +181,72 @@ def test_two_concurrent_requests() raises:
     h3.close()
 
 
+def test_stream_error_preserves_other_responses_in_same_packet() raises:
+    for reset in [False, True]:
+        var server = _bind_server()
+        var client = _drive_handshake(server)
+        var h3 = Http3ClientConnection(client^)
+        var a = h3.request(
+            "GET",
+            "https",
+            "example.com",
+            "/a",
+            List[QpackHeader](),
+            List[UInt8](),
+        )
+        var b = h3.request(
+            "GET",
+            "https",
+            "example.com",
+            "/b",
+            List[QpackHeader](),
+            List[UInt8](),
+        )
+        _ = server.tick(timeout_ms=50)
+        var frames = List[UInt8]()
+        if reset:
+            encode_reset_stream(ResetStreamFrame(a, UInt64(0x10C), 0), frames)
+        else:
+            # A valid QUIC stream carrying an invalid HTTP/3 response:
+            # DATA before final HEADERS, in the same packet as response B.
+            var bad: List[UInt8] = [0, 1, 97]
+            encode_stream(StreamFrame(a, 0, bad^, True), frames)
+        var response = List[UInt8]()
+        encode_response_headers(200, List[QpackHeader](), response)
+        var body = _body("bravo")
+        encode_response_data(Span(body), response)
+        encode_stream(StreamFrame(b, 0, response^, True), frames)
+        while len(frames) < 16:
+            frames.append(0)
+        var packet = server._build_1rtt_response(0, frames^)
+        assert_true(len(packet) > 0)
+        var peer = server.peer_addrs[0]
+        _ = server.send_to(Span(packet), peer)
+
+        assert_true(h3.poll_responses(timeout_ms=100))
+        var message = String("peer reset") if reset else String("DATA outside")
+        with assert_raises(contains=message):
+            _ = h3.head_ready(a)
+        with assert_raises(contains=message):
+            _ = h3.stream_status(a)
+        with assert_raises(contains=message):
+            _ = h3.stream_headers(a)
+        with assert_raises(contains=message):
+            _ = h3.poll_body(a)
+        # A second poll must retain both the failed request and B's bytes.
+        _ = h3.poll_responses(timeout_ms=10)
+        assert_true(h3.head_ready(b))
+        var got = h3.take_if_complete(b)
+        assert_true(Bool(got))
+        assert_equal(got.value().status, 200)
+        assert_equal(String(unsafe_from_utf8=Span(got.value().body)), "bravo")
+        with assert_raises(contains=message):
+            _ = h3.take_if_complete(a)
+        server.close()
+        h3.close()
+
+
 def main() raises:
     test_two_concurrent_requests()
-    print("test_h3_client_mux: 1 passed")
+    test_stream_error_preserves_other_responses_in_same_packet()
+    print("test_h3_client_mux: 2 passed")

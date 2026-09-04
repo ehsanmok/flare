@@ -47,17 +47,14 @@ HTTP/3 client needs:
   response retransmit. Those are tracked as a loss-recovery
   follow-up. During the handshake a dropped Finished is still
   recovered by the peer re-driving our flight.
-- One STREAM frame per :meth:`send_stream` call, capped
-  at the path MTU. A request body larger than one packet is
-  rejected rather than fragmented across packets. Upgrade path:
-  the same coalescing drain the server uses.
+- STREAM sends are fragmented into path-MTU-sized packets. The caller
+  pumps the connection when peer flow-control credit is exhausted.
 - The server's advertised transport parameters are decoded once the
   handshake completes (:meth:`QuicClientConnection._apply_peer_transport_
   params`): the client clamps its egress datagram size to the peer's
   ``max_udp_payload_size`` and gates STREAM sends on the peer's
-  per-stream / connection flow-control limits. The gate uses
-  the *initial* limits only -- it does not yet raise the ceiling from
-  inbound MAX_DATA / MAX_STREAM_DATA frames.
+  per-stream / connection flow-control limits, including subsequent
+  MAX_DATA / MAX_STREAM_DATA updates.
 
 References:
 - RFC 9000 §7 "Cryptographic and Transport Handshake".
@@ -86,6 +83,14 @@ from .frame import (
     PathResponseFrame,
     RetireConnectionIdFrame,
     StreamFrame,
+    ResetStreamFrame,
+    StopSendingFrame,
+    MaxDataFrame,
+    MaxStreamDataFrame,
+    encode_reset_stream,
+    encode_stop_sending,
+    encode_max_data,
+    encode_max_stream_data,
     encode_ack,
     encode_connection_close,
     encode_crypto,
@@ -122,6 +127,8 @@ from .state import (
     empty_events,
     handle_frame_buf,
     new_connection,
+    new_stream,
+    STREAM_STATE_RESET_RECVD,
 )
 from .transport_params import (
     DEFAULT_MAX_UDP_PAYLOAD_SIZE,
@@ -621,6 +628,7 @@ struct QuicClientConnection(Movable):
             var tp = decode_transport_parameters(Span[UInt8, _](raw))
             self._peer_limits = derive_peer_send_limits(tp)
             self._peer_limits_known = True
+            self.conn.max_data_send = self._peer_limits.max_data
             var peer_mtu = Int(self._peer_limits.max_udp_payload_size)
             if peer_mtu < self.max_udp_payload_size:
                 self.max_udp_payload_size = peer_mtu
@@ -691,14 +699,16 @@ struct QuicClientConnection(Movable):
             )
             self._send_padded_1rtt(payload^)
 
-    def _send_padded_1rtt(mut self, var payload: List[UInt8]) raises:
+    def _send_padded_1rtt(
+        mut self, var payload: List[UInt8], ack_eliciting: Bool = False
+    ) raises:
         """Pad a small frame buffer to the header-protection sample
         floor (RFC 9001 sec 5.4.2 needs 4 bytes past the pn offset +
         a 16-byte sample), wrap it in a 1-RTT packet, and send it to
         the current peer."""
         while len(payload) < 16:
             payload.append(UInt8(0))
-        var dg = self._build_1rtt(payload^)
+        var dg = self._build_1rtt(payload^, ack_eliciting=ack_eliciting)
         if len(dg) > 0:
             _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
@@ -1307,6 +1317,14 @@ struct QuicClientConnection(Movable):
         body-less request still closes its stream."""
         if not self.have_1rtt_keys:
             raise Error("quic client: send_stream before 1-RTT keys")
+        if stream_id not in self.conn.streams:
+            var s = new_stream(stream_id, self.conn.max_data_recv)
+            if self._peer_limits_known:
+                s.max_send_data = (
+                    self._peer_limits.max_stream_data_uni if stream_id % 4
+                    == 2 else self._peer_limits.max_stream_data_bidi_remote
+                )
+            self.conn.streams[stream_id] = s
         var cap = self._stream_chunk_cap()
         if cap < 1:
             raise Error("quic client: MTU too small for a STREAM frame")
@@ -1342,6 +1360,70 @@ struct QuicClientConnection(Movable):
         self.send_offsets[stream_id] = off
         self._conn_send_total += UInt64(total)
 
+    def cancel_stream(mut self, stream_id: UInt64) raises:
+        """Cancel both directions of an HTTP/3 request (H3_REQUEST_CANCELLED).
+        """
+        var final_size = UInt64(0)
+        if stream_id in self.send_offsets:
+            final_size = self.send_offsets[stream_id]
+        var payload = List[UInt8]()
+        encode_stop_sending(StopSendingFrame(stream_id, UInt64(0x10C)), payload)
+        encode_reset_stream(
+            ResetStreamFrame(stream_id, UInt64(0x10C), final_size), payload
+        )
+        self._send_padded_1rtt(payload^, ack_eliciting=True)
+
+    def send_capacity(self, stream_id: UInt64) raises -> Int:
+        """Current flow-control credit for a client-initiated stream."""
+        if not self._peer_limits_known:
+            return 16384
+        var limit = (
+            self._peer_limits.max_stream_data_uni if stream_id % 4
+            == 2 else self._peer_limits.max_stream_data_bidi_remote
+        )
+        if stream_id in self.conn.streams:
+            limit = max(limit, self.conn.streams[stream_id].max_send_data)
+        var offset = UInt64(0)
+        if stream_id in self.send_offsets:
+            offset = self.send_offsets[stream_id]
+        var total_limit = max(
+            self._peer_limits.max_data, self.conn.max_data_send
+        )
+        if offset >= limit or self._conn_send_total >= total_limit:
+            return 0
+        return Int(
+            min(
+                UInt64(16384),
+                min(limit - offset, total_limit - self._conn_send_total),
+            )
+        )
+
+    def stream_reset(self, stream_id: UInt64) raises -> Bool:
+        if stream_id in self.conn.streams:
+            return (
+                self.conn.streams[stream_id].state == STREAM_STATE_RESET_RECVD
+            )
+        return False
+
+    def release_stream_credit(
+        mut self, stream_id: UInt64, consumed: UInt64
+    ) raises:
+        """Replenish receive credit for newly consumed, ordered stream bytes."""
+        if consumed == 0 or stream_id not in self.conn.streams:
+            return
+        var s = self.conn.streams[stream_id]
+        s.max_recv_data += consumed
+        self.conn.max_data_recv += consumed
+        self.conn.streams[stream_id] = s
+        var payload = List[UInt8]()
+        encode_max_stream_data(
+            MaxStreamDataFrame(stream_id, s.max_recv_data), payload
+        )
+        encode_max_data(MaxDataFrame(self.conn.max_data_recv), payload)
+        # Credit updates must survive loss even when the peer has no credit
+        # left to send another STREAM frame and trigger a fresh update.
+        self._send_padded_1rtt(payload^, ack_eliciting=True)
+
     def _check_send_limits(
         mut self, stream_id: UInt64, off: UInt64, length: UInt64
     ) raises:
@@ -1349,15 +1431,11 @@ struct QuicClientConnection(Movable):
         (RFC 9000 §4.1). A no-op until the peer's transport parameters
         are decoded; once known, a send that would push the stream past
         the peer's per-stream limit or the connection past its
-        ``initial_max_data`` raises rather than emitting bytes the server
+        current MAX_DATA raises rather than emitting bytes the server
         is entitled to drop as a FLOW_CONTROL_ERROR.
 
-        This is a static initial-limits check -- it does not
-        track inbound MAX_DATA / MAX_STREAM_DATA frames that raise the
-        ceiling mid-connection. Ceiling: a long-lived connection that
-        legitimately exceeds the initial allowance is rejected locally.
-        Upgrade path: fold MAX_DATA / MAX_STREAM_DATA handling in
-        ``poll`` into a running credit and gate on that."""
+        The HTTP/3 upload driver checks send_capacity and polls for updated
+        credit before calling this method."""
         if not self._peer_limits_known:
             return
         var stream_limit: UInt64
@@ -1365,17 +1443,23 @@ struct QuicClientConnection(Movable):
             stream_limit = self._peer_limits.max_stream_data_uni
         else:
             stream_limit = self._peer_limits.max_stream_data_bidi_remote
+        if stream_id in self.conn.streams:
+            stream_limit = max(
+                stream_limit, self.conn.streams[stream_id].max_send_data
+            )
         if off + length > stream_limit:
             raise Error(
                 "quic client: stream "
                 + String(stream_id)
-                + " send exceeds peer initial_max_stream_data ("
+                + " send exceeds peer MAX_STREAM_DATA ("
                 + String(stream_limit)
                 + ")"
             )
-        if self._conn_send_total + length > self._peer_limits.max_data:
+        if self._conn_send_total + length > max(
+            self._peer_limits.max_data, self.conn.max_data_send
+        ):
             raise Error(
-                "quic client: connection send exceeds peer initial_max_data ("
+                "quic client: connection send exceeds peer MAX_DATA ("
                 + String(self._peer_limits.max_data)
                 + ")"
             )
