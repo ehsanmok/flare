@@ -28,6 +28,8 @@ from std.testing import (
 
 from flare.http2 import (
     Http2Connection,
+    Http2ClientConnection,
+    HpackHeader,
     H2_DEFAULT_FRAME_SIZE,
     H2_PREFACE,
     Http2Config,
@@ -293,6 +295,56 @@ def test_with_config_validates_inputs() raises:
     cfg.max_frame_size = 16383
     with assert_raises(contains="16384"):
         var _unused = Http2Connection.with_config(cfg^)
+
+
+def test_request_body_limit_resets_only_oversized_stream() raises:
+    var cfg = Http2Config()
+    cfg.max_body_size = 3
+    var server = Http2Connection.with_config(cfg^)
+    var client = Http2ClientConnection()
+    client.send_request_open(
+        1, "POST", "https", "example.test", "/", List[HpackHeader]()
+    )
+    var first = List[UInt8](String("abc").as_bytes())
+    client.send_data(1, Span(first), False)
+    var wire = client.drain()
+    server.feed(Span(wire))
+    assert_equal(len(server.conn.streams[1].data), 3)
+    assert_equal(len(server.take_completed_streams()), 0)
+    var reply = server.drain()
+    client.feed(Span(reply))
+    assert_false(Bool(client.stream_error(1)))
+
+    # No Content-Length is needed to enforce the cumulative limit.
+    var extra = List[UInt8](String("d").as_bytes())
+    client.send_data(1, Span(extra), True)
+    client.send_request(
+        3,
+        "POST",
+        "https",
+        "example.test",
+        "/",
+        List[HpackHeader](),
+        Span(first),
+    )
+    wire = client.drain()
+    server.feed(Span(wire))
+    assert_equal(len(server.conn.streams[1].data), 0)
+    var complete = server.take_completed_streams()
+    assert_equal(len(complete), 1)
+    assert_equal(complete[0], 3)
+    assert_equal(len(server.take_request(3).body), 3)
+    reply = server.drain()
+    client.feed(Span(reply))
+    assert_equal(client.stream_error(1).value(), 11)  # ENHANCE_YOUR_CALM.
+    assert_false(Bool(client.stream_error(3)))
+
+
+def test_request_body_limit_rejects_negative_config() raises:
+    var cfg = Http2Config()
+    cfg.max_body_size = -1
+    with assert_raises(contains="max_body_size"):
+        _ = Http2Connection.with_config(cfg^)
 
 
 def main() raises:

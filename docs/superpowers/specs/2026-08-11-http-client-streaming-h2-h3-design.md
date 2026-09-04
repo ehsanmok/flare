@@ -1,7 +1,28 @@
 # HttpClient streaming over h2/h3
 
 - Issue: https://github.com/ehsanmok/flare/issues/5
-- Status: approved, pending implementation plan
+- Status: implemented, pending review
+
+## Implementation outcome
+
+This section records the final implementation; the remainder of this document
+is the approved proposal and retains its original terminology.
+
+- The public response type is `HttpStreamResponse`. It owns one exclusive
+  connection and exposes final headers immediately, bounded `read_chunk`,
+  `read_all_limited`, explicit cancellation via `close`, and trailers after EOS.
+- `send_streaming(req)` supports arbitrary methods, headers, and a buffered
+  request body. `send_chunked` keeps a streamed request body and buffered reply.
+- Cleartext streaming supports HTTP/1.1, h2 prior knowledge, and h2c upgrade;
+  TLS negotiates H2/H1, and eligible direct HTTPS origins can select H3.
+- Trailers are surfaced. Automatic decompression is disabled for streamed
+  responses unless the caller buffers and decodes explicitly.
+- The implementation required protocol hardening omitted by the initial plan:
+  deferred H2 stream credit, an H2 request-body cap, H2 response ordering checks,
+  incremental H3 DATA parsing, per-stream H3 error isolation, and reliable QUIC
+  retransmission of flow-control and cancellation frames.
+- Full duplex, connection pooling, upload retries, and upload redirects remain
+  outside this API.
 
 ## Problem
 

@@ -25,8 +25,6 @@ Connection-level concerns *not* implemented :
 - Priority dependency tree (deprecated by RFC 9113 §5.3.2 — frames
   are accepted and ignored).
 - Server push (we never originate PUSH_PROMISE).
-- Per-stream flow control beyond the basic window accounting; we
-  emit WINDOW_UPDATE eagerly so default-sized requests don't stall.
 """
 
 from std.collections import Dict, Optional
@@ -185,7 +183,13 @@ struct Stream(Copyable, Defaultable, Movable):
     var id: StreamId
     var state: StreamState
     var headers: List[HpackHeader]
+    var initial_header_count: Int
     var data: List[UInt8]
+    var received_body_bytes: Int
+    var response_body_allowed: Bool
+    var defer_body_credit: Bool
+    """Return DATA credit on body drains for a streaming response reader."""
+    var pending_body_credit: Int
     var send_window: Int
     var recv_window: Int
     var headers_complete: Bool
@@ -214,7 +218,12 @@ struct Stream(Copyable, Defaultable, Movable):
         self.id = 0
         self.state = StreamState()
         self.headers = List[HpackHeader]()
+        self.initial_header_count = 0
         self.data = List[UInt8]()
+        self.received_body_bytes = 0
+        self.response_body_allowed = True
+        self.defer_body_credit = False
+        self.pending_body_credit = 0
         self.send_window = 65535
         self.recv_window = 65535
         self.headers_complete = False
@@ -240,6 +249,12 @@ struct Connection(Copyable, Defaultable, Movable):
     var hpack_encoder: HpackEncoder
     var max_frame_size: Int
     var max_concurrent_streams: Int
+    var max_request_body_size: Int
+    """Maximum buffered request bytes per stream; defaults to 10 MiB.
+
+    Server requests are buffered until END_STREAM, so receive credit alone
+    cannot bound them. This limit does not apply to client response bodies.
+    """
     var initial_window_size: Int
     var max_header_list_size: Int
     """SETTINGS_MAX_HEADER_LIST_SIZE (RFC 9113 §6.5.2). ``0`` means
@@ -326,6 +341,7 @@ struct Connection(Copyable, Defaultable, Movable):
         self.hpack_encoder = HpackEncoder()
         self.max_frame_size = H2_DEFAULT_FRAME_SIZE
         self.max_concurrent_streams = 100
+        self.max_request_body_size = 10 * 1024 * 1024
         self.initial_window_size = 65535
         self.max_header_list_size = 0  # unset / unbounded (RFC default)
         self.send_window = 65535
@@ -448,6 +464,18 @@ struct Connection(Copyable, Defaultable, Movable):
         p.append(UInt8(error_code & 0xFF))
         f.payload = p^
         f.header.length = len(f.payload)
+        return f^
+
+    @staticmethod
+    def _window_update_frame(sid: Int, credit: Int) -> Frame:
+        var f = Frame()
+        f.header.type = FrameType.WINDOW_UPDATE()
+        f.header.stream_id = sid
+        f.payload.append(UInt8((credit >> 24) & 0x7F))
+        f.payload.append(UInt8((credit >> 16) & 0xFF))
+        f.payload.append(UInt8((credit >> 8) & 0xFF))
+        f.payload.append(UInt8(credit & 0xFF))
+        f.header.length = 4
         return f^
 
     def _goaway_frame(self, last_stream_id: Int, error_code: Int) -> Frame:
@@ -688,6 +716,65 @@ struct Connection(Copyable, Defaultable, Movable):
                 self._put_stream(s^)
                 return out^
 
+        if self.is_client:
+            var status = 0
+            var regular = False
+            for field in hdrs:
+                if (
+                    field.name.byte_length() == 0
+                    or field.name != field.name.lower()
+                    or Connection._is_connection_specific(field.name)
+                ):
+                    raise Error("h2: invalid response field")
+                if field.name == ":status":
+                    if (
+                        is_trailers
+                        or status != 0
+                        or regular
+                        or field.value.byte_length() != 3
+                    ):
+                        raise Error("h2: unexpected response :status")
+                    for b in field.value.as_bytes():
+                        if b < 48 or b > 57:
+                            raise Error("h2: invalid response status")
+                    status = Int(field.value)
+                elif field.name.startswith(":"):
+                    raise Error("h2: unexpected response pseudo-header")
+                else:
+                    regular = True
+                    if is_trailers and field.name == "content-length":
+                        raise Error("h2: forbidden trailer field")
+            var declared = -1
+            for field in hdrs:
+                if field.name == "content-length":
+                    var n = 0
+                    var bytes = field.value.as_bytes()
+                    if len(bytes) == 0:
+                        raise Error("h2: empty Content-Length")
+                    for b in bytes:
+                        if (
+                            b < 48
+                            or b > 57
+                            or n > (Int.MAX - Int(b - 48)) // 10
+                        ):
+                            raise Error("h2: invalid Content-Length")
+                        n = n * 10 + Int(b - 48)
+                    if declared >= 0 and n != declared:
+                        raise Error("h2: conflicting Content-Length")
+                    declared = n
+            if not is_trailers:
+                if status < 100 or status > 599 or status == 101:
+                    raise Error("h2: invalid response status")
+                if status < 200:
+                    if end_stream:
+                        raise Error("h2: informational response ended stream")
+                    self._put_stream(s^)
+                    return out^
+                if status == 204 or status == 304:
+                    s.response_body_allowed = False
+            elif not end_stream:
+                raise Error("h2: response trailers must end stream")
+
         for j in range(len(hdrs)):
             s.headers.append(hdrs[j].copy())
             # RFC 8441 sec 4: capture ``:protocol`` on Extended CONNECT
@@ -696,12 +783,18 @@ struct Connection(Copyable, Defaultable, Movable):
                 s.extended_connect_protocol = hdrs[j].value
         if not is_trailers:
             s.content_length = Connection._declared_content_length(hdrs)
+            s.initial_header_count = len(s.headers)
+            if self.is_client and not s.response_body_allowed:
+                s.content_length = -1
         s.headers_complete = True
 
         if end_stream:
             # sec 8.1.2.6: a declared content-length must match the DATA
             # actually delivered.
-            if s.content_length >= 0 and len(s.data) != s.content_length:
+            if (
+                s.content_length >= 0
+                and s.received_body_bytes != s.content_length
+            ):
                 out.append(
                     self._rst_stream_frame(
                         sid, Http2ErrorCode.PROTOCOL_ERROR().value
@@ -1073,6 +1166,8 @@ struct Connection(Copyable, Defaultable, Movable):
                     )
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
             var s = self.streams[sid].copy()
+            if self.is_client and not s.headers_complete:
+                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             var st = s.state.value
             if (
                 st == StreamState.CLOSED().value
@@ -1098,11 +1193,38 @@ struct Connection(Copyable, Defaultable, Movable):
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
                 return out^
+            if self.is_client and not s.response_body_allowed and len(body) > 0:
+                raise Error("h2: DATA on a bodyless response")
+            if not self.is_client and len(body) > (
+                self.max_request_body_size - len(s.data)
+            ):
+                out.append(
+                    self._rst_stream_frame(
+                        sid, Http2ErrorCode.ENHANCE_YOUR_CALM().value
+                    )
+                )
+                s.data = List[UInt8]()
+                s.state = StreamState.CLOSED()
+                self._put_stream(s^)
+                if len(f.payload) > 0:
+                    out.append(Self._window_update_frame(0, len(f.payload)))
+                return out^
             for j in range(len(body)):
                 s.data.append(body[j])
+            s.received_body_bytes += len(body)
+            # Padding is immediately consumed. Streaming DATA credit is
+            # returned by drain_body, not merely by pumping the socket.
+            var credit = len(f.payload)
+            if s.defer_body_credit:
+                credit -= len(body)
+                s.pending_body_credit += len(body)
+            s.recv_window += credit
             if f.header.flags.has(FrameFlags.END_STREAM()):
                 # sec 8.1.2.6: content-length must match what arrived.
-                if s.content_length >= 0 and len(s.data) != s.content_length:
+                if (
+                    s.content_length >= 0
+                    and s.received_body_bytes != s.content_length
+                ):
                     out.append(
                         self._rst_stream_frame(
                             sid, Http2ErrorCode.PROTOCOL_ERROR().value
@@ -1122,18 +1244,12 @@ struct Connection(Copyable, Defaultable, Movable):
                 else:
                     s.state = StreamState.HALF_CLOSED_REMOTE()
             self._put_stream(s^)
-            # Send a generous WINDOW_UPDATE to keep things flowing.
+            # Connection credit lets unrelated streams progress; each
+            # streaming response remains bounded by its own receive window.
             if len(f.payload) > 0:
-                var wu = Frame()
-                wu.header.type = FrameType.WINDOW_UPDATE()
-                wu.header.stream_id = 0
-                var n = len(f.payload)
-                wu.payload = List[UInt8]()
-                wu.payload.append(UInt8((n >> 24) & 0x7F))
-                wu.payload.append(UInt8((n >> 16) & 0xFF))
-                wu.payload.append(UInt8((n >> 8) & 0xFF))
-                wu.payload.append(UInt8(n & 0xFF))
-                out.append(wu^)
+                if credit > 0:
+                    out.append(Self._window_update_frame(sid, credit))
+                out.append(Self._window_update_frame(0, len(f.payload)))
             return out^
 
         if ft == FrameType.GOAWAY().value:
