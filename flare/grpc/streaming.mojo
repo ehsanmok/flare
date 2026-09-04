@@ -33,9 +33,9 @@ from ..http2.client import Http2ClientConnection
 from ..http2.hpack import HpackHeader
 from ..http.url import Url
 from ..net import NetworkError
-from ..runtime.pool import Pool
 from ..tcp import TcpStream
 from ..tls import TlsStream
+from ..http._client.h2_transport import _H2Transport
 from .framing import decode_grpc_message, encode_grpc_message
 from .metadata import GrpcMetadata
 from .status import GRPC_STATUS_OK, GRPC_STATUS_UNKNOWN, GrpcStatus
@@ -43,60 +43,6 @@ from .status import GRPC_STATUS_OK, GRPC_STATUS_UNKNOWN, GrpcStatus
 comptime _READ_BUF_SIZE: Int = 16384
 """Per-syscall recv buffer for the streaming read pump (RFC 9113
 §6.5.2 default max_frame_size)."""
-
-
-# ── _H2Transport ──────────────────────────────────────────────────────────
-
-
-struct _H2Transport(Movable):
-    """A live HTTP/2 transport: either a cleartext ``TcpStream`` or a
-    TLS ``TlsStream``, stored in a heap cell (:class:`Pool`) so the
-    move-only stream can be re-borrowed mutably for each read/write.
-
-    Exactly one of ``_tcp_addr`` / ``_tls_addr`` is non-zero. The cell
-    is freed (closing the socket) by :meth:`close` or, as a backstop,
-    by the destructor.
-    """
-
-    var _tcp_addr: Int
-    var _tls_addr: Int
-
-    def __init__(out self, tcp_addr: Int, tls_addr: Int):
-        self._tcp_addr = tcp_addr
-        self._tls_addr = tls_addr
-
-    def __deinit__(deinit self):
-        Pool[TcpStream].free(self._tcp_addr)
-        Pool[TlsStream].free(self._tls_addr)
-
-    @staticmethod
-    def from_tcp(var s: TcpStream) raises -> _H2Transport:
-        return _H2Transport(Pool[TcpStream].alloc_move(s^), 0)
-
-    @staticmethod
-    def from_tls(var s: TlsStream) raises -> _H2Transport:
-        return _H2Transport(0, Pool[TlsStream].alloc_move(s^))
-
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
-        if self._tcp_addr != 0:
-            return Pool[TcpStream].get_ptr(self._tcp_addr)[].read(buf, size)
-        return Pool[TlsStream].get_ptr(self._tls_addr)[].read(buf, size)
-
-    def write_all(self, data: Span[UInt8, _]) raises:
-        if self._tcp_addr != 0:
-            Pool[TcpStream].get_ptr(self._tcp_addr)[].write_all(data)
-        else:
-            Pool[TlsStream].get_ptr(self._tls_addr)[].write_all(data)
-
-    def close(mut self):
-        if self._tcp_addr != 0:
-            Pool[TcpStream].get_ptr(self._tcp_addr)[].close()
-            Pool[TcpStream].free(self._tcp_addr)
-            self._tcp_addr = 0
-        if self._tls_addr != 0:
-            Pool[TlsStream].get_ptr(self._tls_addr)[].close()
-            Pool[TlsStream].free(self._tls_addr)
-            self._tls_addr = 0
 
 
 # ── header helpers ──────────────────────────────────────────────────────────
