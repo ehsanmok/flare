@@ -22,7 +22,9 @@ This module exposes:
   on macOS. The upper bound on what
   :func:`fill_sockaddr_un` will accept.
 - :func:`fill_sockaddr_un` — populate a caller-allocated
-  :data:`SOCKADDR_UN_SIZE`-byte buffer for a given path.
+  :data:`SOCKADDR_UN_SIZE`-byte buffer for a given path (a
+  filesystem pathname, or ``@name`` for the Linux abstract
+  namespace).
 - :func:`unlink_path` — wrapper around ``unlink(2)``.
 
 These names are package-internal (single-leading-underscore module
@@ -66,21 +68,88 @@ def fill_sockaddr_un(
     SOCKADDR_UN_SIZE`` is the conventional shape (BSD compatibility,
     abstract-namespace forward compat).
 
+    Abstract namespace — the ``@name`` convention (Linux only):
+
+    When ``path`` starts with ASCII ``@`` (0x40), the buffer is
+    encoded as a Linux *abstract namespace* address instead of a
+    filesystem pathname: the family bytes are written as usual,
+    then ``sun_path[0]`` is set to the NUL marker (0x00) that
+    tells the kernel "abstract, not pathname", and the name octets
+    (every byte after the ``@``) follow immediately. **No trailing
+    NUL is written** for abstract names: the Linux kernel treats
+    ``sun_path[0] == 0`` as the abstract flag and takes the name
+    length from ``addrlen`` alone, so ``addrlen`` must cover
+    exactly the name::
+
+        abstract:   addrlen = 2 (family bytes) + 1 (0x00 marker) + len(name)
+        pathname:   addrlen = 2 (family bytes) + len(path) + 1 (NUL)
+
+    e.g. ``@hyrxmq`` (6 name bytes) → ``addrlen = 9``; the same
+    string without the ``@`` would give ``addrlen = 9`` too, but
+    with a trailing NUL and no marker byte. No socket file is
+    created (or unlinked) for an abstract name — the kernel keeps
+    it only while a listening socket holds it.
+
+    A NUL byte inside an abstract name is rejected by the same
+    embedded-NUL check as for pathname sockets. A name that does
+    not fit ``sun_path`` minus the 1-byte marker raises
+    ``Error("sockaddr_un: abstract name too long (...)")``.
+
+    Portability rows:
+
+    - Linux: ``SOCKADDR_UN_SIZE`` = 110, ``SUN_PATH_MAX`` = 108;
+      ``@name`` binds in the abstract namespace (kernel rule
+      ``sun_path[0] == 0``).
+    - macOS / BSD: ``SOCKADDR_UN_SIZE`` = 106, ``SUN_PATH_MAX`` =
+      104; abstract sockets do not exist there (``sun_path[0]``
+      is ``sun_len``, and the kernel has no abstract rule), so an
+      ``@name`` path raises :class:`Error` before any buffer
+      write.
+
     Raises :class:`Error` (with ``"sockaddr_un: path too long"``) if
-    the encoded path doesn't fit the platform's ``sun_path`` field.
+    the encoded path doesn't fit the platform's ``sun_path`` field,
+    (with ``"sockaddr_un: abstract name too long"``) if an abstract
+    name doesn't fit ``sun_path`` minus the 1-byte marker, and (on
+    non-Linux targets) for any ``@name`` path.
     """
     var path_bytes = path.byte_length()
-    if path_bytes >= SUN_PATH_MAX:
-        raise Error(
-            "sockaddr_un: path too long ("
-            + String(path_bytes)
-            + " bytes, limit "
-            + String(SUN_PATH_MAX - 1)
-            + ")"
-        )
-    # Reject embedded NUL (would terminate the C string early and
-    # bind to a shorter prefix path silently).
     var pp = path.unsafe_ptr()
+    var is_abstract = path_bytes > 0 and pp[0] == 0x40  # '@'
+    # The name octets are everything after the '@' marker byte.
+    var name_bytes = path_bytes - (1 if is_abstract else 0)
+
+    comptime if CompilationTarget.is_macos():
+        if is_abstract:
+            raise Error(
+                "sockaddr_un: abstract namespace (@name) requires"
+                + " Linux; macOS/BSD sockaddr_un has no abstract sockets"
+            )
+    if is_abstract:
+        # Marker (sun_path[0] = 0x00) + name must fit sun_path:
+        # name_bytes + 1 <= SUN_PATH_MAX, i.e. the same
+        # SUN_PATH_MAX - 1 usable-byte budget as the NUL-terminated
+        # pathname branch.
+        if name_bytes >= SUN_PATH_MAX:
+            raise Error(
+                "sockaddr_un: abstract name too long ("
+                + String(name_bytes)
+                + " bytes, limit "
+                + String(SUN_PATH_MAX - 1)
+                + ")"
+            )
+    else:
+        if path_bytes >= SUN_PATH_MAX:
+            raise Error(
+                "sockaddr_un: path too long ("
+                + String(path_bytes)
+                + " bytes, limit "
+                + String(SUN_PATH_MAX - 1)
+                + ")"
+            )
+    # Reject embedded NUL (would terminate the C string early and
+    # bind to a shorter prefix path silently; for abstract names it
+    # would make the kernel-visible name ambiguous for the
+    # String-based API). Covers the abstract name octets too.
     for i in range(path_bytes):
         if pp[i] == 0:
             raise Error("sockaddr_un: embedded NUL in path")
@@ -96,6 +165,14 @@ def fill_sockaddr_un(
         (buf + 0).unsafe_write(UInt8(1))
         (buf + 1).unsafe_write(UInt8(0))
         path_offset = 2
+
+    if is_abstract:
+        # Linux abstract: sun_path[0] = 0x00 marker, then the name
+        # octets, NO trailing NUL (addrlen carries the length).
+        (buf + path_offset).unsafe_write(UInt8(0))
+        for i in range(name_bytes):
+            (buf + path_offset + 1 + i).unsafe_write(pp[1 + i])
+        return c_uint(path_offset + 1 + name_bytes)
 
     for i in range(path_bytes):
         (buf + path_offset + i).unsafe_write(pp[i])
