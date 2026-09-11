@@ -70,7 +70,7 @@ def _timed_read(mut s: TcpStream, max_ms: Int) -> String:
     return String("")
 
 
-def main() raises:
+def test_admission_h1() raises:
     var cfg = ServerConfig(idle_timeout_ms=30_000, max_connections=2)
     var srv = HttpServer.bind(SocketAddr.localhost(0), config=cfg^)
     var port = srv.local_addr().port
@@ -121,3 +121,7 @@ def main() raises:
         "c3 expected 200 after a slot freed, got: " + recovered,
     )
     print("test_admission_h1: passed (cap=2, backpressure + recovery)")
+
+
+def main() raises:
+    test_admission_h1()

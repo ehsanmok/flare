@@ -70,12 +70,16 @@ jobs:
       # Persist the Mojo compile cache across runs.
       #
       # setup-pixi runs with ``cache: false``, so every ``mojo`` invocation
-      # in this job compiled cold: the test chain is 274 invocations and
-      # measured ~10.3s each in CI against a ~2.0s warm local mean. The
-      # cache is content-addressed on the toolchain and stdlib
-      # instantiation rather than on flare's own sources, so it still hits
-      # on branches that touch flare -- and both this job and the ASan job
-      # populate the same entries.
+      # in this job compiled cold. The cache is content-addressed on the
+      # toolchain and stdlib instantiation rather than on flare's own
+      # sources, so it still hits on branches that touch flare.
+      #
+      # Measured effect is smaller than hoped: 48min cold vs 42min warm on
+      # this image. It is kept because it is nearly free, but the real fix
+      # for the test job's wall clock was aggregating the per-file test
+      # chain into one binary per area (`pixi run tests`), not this.
+      # This job and the ASan job use different cache keys and so do not
+      # share entries.
       #
       # It normally lives under ``$MODULAR_HOME/cache`` inside
       # ``.pixi/envs``, which setup-pixi owns and replaces; ``env:`` below
@@ -150,7 +154,7 @@ jobs:
         if: matrix.os == 'macos-15'
         # macos-15 has an intermittent full-suite hang (confirmed running
         # to GitHub's 6h default job timeout instead of the normal
-        # 20-45 min baseline; root cause not yet identified). A plain
+        # baseline; root cause not yet identified). A plain
         # bash watchdog (this image has no GNU coreutils ``timeout``)
         # SIGTERMs the run at 90 min so a hang surfaces as an ordinary
         # step failure instead of burning 6h. `continue-on-error` then
@@ -184,12 +188,16 @@ jobs:
       # Persist the Mojo compile cache across runs.
       #
       # setup-pixi runs with ``cache: false``, so every ``mojo`` invocation
-      # in this job compiled cold: the test chain is 274 invocations and
-      # measured ~10.3s each in CI against a ~2.0s warm local mean. The
-      # cache is content-addressed on the toolchain and stdlib
-      # instantiation rather than on flare's own sources, so it still hits
-      # on branches that touch flare -- and both this job and the ASan job
-      # populate the same entries.
+      # in this job compiled cold. The cache is content-addressed on the
+      # toolchain and stdlib instantiation rather than on flare's own
+      # sources, so it still hits on branches that touch flare.
+      #
+      # Measured effect is smaller than hoped: 48min cold vs 42min warm on
+      # this image. It is kept because it is nearly free, but the real fix
+      # for the test job's wall clock was aggregating the per-file test
+      # chain into one binary per area (`pixi run tests`), not this.
+      # This job and the ASan job use different cache keys and so do not
+      # share entries.
       #
       # It normally lives under ``$MODULAR_HOME/cache`` inside
       # ``.pixi/envs``, which setup-pixi owns and replaces; ``env:`` below

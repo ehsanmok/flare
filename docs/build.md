@@ -53,6 +53,64 @@ many call-frames away from the actual cause.
 
 ---
 
+## Running the test suite
+
+`pixi run tests` does **not** run one `mojo` invocation per
+test file. Each file is a standalone Mojo program, so the
+per-file chain re-elaborated flare's ~90k-line source graph
+274 times over: one representative file measured 1.70s to
+compile against 0.31s to run. Instead, the tests of each
+area under `tests/` are compiled into a single binary:
+
+```bash
+pixi run tests        # aggregate build + run (the CI gate)
+pixi run tests-gen    # regenerate tests/_agg after adding a test file
+pixi run tests-per-file   # the old one-invocation-per-file chain
+```
+
+`tests/_agg/agg_<area>.mojo` is **generated** by
+[`tools/gen_test_aggregates.py`](../tools/gen_test_aggregates.py)
+and committed. It imports every module-level `def test_*` in
+the area under an alias and registers each one explicitly on
+a `TestSuite`.
+
+Two consequences for anyone adding a test:
+
+- **Every test must be a module-level `def test_<name>() raises:`.**
+  A file whose tests live only inside `main()` has nothing to
+  import; the generator refuses to run rather than silently
+  dropping it. Keep `main()` as a thin delegator so the file
+  still runs standalone.
+- **Re-run `pixi run tests-gen` and commit the result.**
+  `pixi run tests` re-checks the aggregates against the tree
+  first and fails if they have drifted, because an aggregate
+  that is out of date just stops running whatever was added
+  and still exits 0.
+
+Registration is explicit rather than via `discover_tests`
+for the same reason: inside an aggregate, `discover_tests`
+finds the *aggregate's* own functions -- of which there are
+none -- and prints `Running 0 tests ... 0 failed`, a green
+run that executed nothing.
+
+Nine tests are excluded from the aggregates and keep their
+own process: they mutate process-global state (environment
+variables, named semaphores, `io_uring` registrations) or are
+runtime-bound rather than compile-bound, so sharing a process
+with their neighbours is either unsound or buys nothing. They
+are listed in `EXCLUDE` in the generator and `STANDALONE` in
+[`tools/run_test_aggregates.sh`](../tools/run_test_aggregates.sh);
+the two lists must agree. Examples under `examples/` are
+programs rather than test functions, so they also stay one
+invocation each -- `pixi run tests` still runs all of them.
+
+The aggregate builds are independent compiler invocations and
+run concurrently, capped at four (`AGG_JOBS` overrides). The
+cap is deliberate: each job is a full elaboration of the
+source graph and the macOS runner has 7GB across 3 cores.
+
+---
+
 ## Sanitizers
 
 Two sanitizers ship with the Mojo toolchain:

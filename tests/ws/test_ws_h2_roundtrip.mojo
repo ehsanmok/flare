@@ -38,7 +38,7 @@ def _shuttle(
             return
 
 
-def main() raises:
+def test_ws_h2_roundtrip() raises:
     print("test_ws_h2_roundtrip")
     var ccfg = Http2ClientConfig()
     ccfg.enable_connect_protocol = True
@@ -92,3 +92,7 @@ def main() raises:
     assert_equal(back.value().text_payload(), "pong")
 
     print("test_ws_h2_roundtrip: 1 passed")
+
+
+def main() raises:
+    test_ws_h2_roundtrip()

@@ -85,7 +85,7 @@ def _read_all(mut s: TcpStream) raises -> String:
     return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
-def main() raises:
+def test_streaming_upstream() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     var port = srv.local_addr().port
     var handler = PipeFront("STREAM-FROM-UPSTREAM")
@@ -116,3 +116,7 @@ def main() raises:
     assert_equal(got1, expected)
     assert_equal(got2, expected)
     print("test_streaming_upstream: 2 passed")
+
+
+def main() raises:
+    test_streaming_upstream()

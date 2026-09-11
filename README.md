@@ -425,6 +425,7 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 
 ```bash
 pixi run tests                                          # full suite + every example under examples/
+pixi run tests-gen                                      # regenerate tests/_agg after adding a test file
 pixi run --environment fuzz fuzz-all                    # 62 harnesses
 pixi run --environment bench bench-vs-baseline-quick    # ~7 min
 ```

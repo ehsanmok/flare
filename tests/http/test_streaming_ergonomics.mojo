@@ -153,6 +153,10 @@ def _test_relay_e2e() raises:
     print("test_streaming_ergonomics: relay e2e passed (", n_tokens, "tokens)")
 
 
-def main() raises:
+def test_streaming_ergonomics() raises:
     _test_send_overloads()
     _test_relay_e2e()
+
+
+def main() raises:
+    test_streaming_ergonomics()

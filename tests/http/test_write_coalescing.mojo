@@ -17,7 +17,7 @@ from flare.net import SocketAddr
 from flare.tcp import TcpListener, TcpStream
 
 
-def main() raises:
+def test_write_coalescing() raises:
     var lst = TcpListener.bind(SocketAddr.localhost(0))
     var port = lst.local_addr().port
     var client = TcpStream.connect(SocketAddr.localhost(port))
@@ -61,3 +61,7 @@ def main() raises:
     peer.close()
     # ``conn`` drops here -> client socket closed.
     print("test_write_coalescing: passed (", K, "chunks -> 1 syscall)")
+
+
+def main() raises:
+    test_write_coalescing()

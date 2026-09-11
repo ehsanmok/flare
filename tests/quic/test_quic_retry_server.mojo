@@ -96,7 +96,7 @@ def _bind_validating_listener() raises -> QuicListener:
     return QuicListener.bind(cfg)
 
 
-def main() raises:
+def test_quic_retry_server() raises:
     print("test_quic_retry_server")
     var listener = _bind_validating_listener()
     var server_addr = listener.local_addr()
@@ -157,3 +157,7 @@ def main() raises:
     listener.shutdown()
     listener.close()
     print("test_quic_retry_server: 1 passed")
+
+
+def main() raises:
+    test_quic_retry_server()

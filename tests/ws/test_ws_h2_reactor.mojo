@@ -95,7 +95,7 @@ def _pull(mut client: Http2ClientConnection, mut s: TcpStream) raises -> Bool:
         return False  # recv timeout -- nothing more this round
 
 
-def main() raises:
+def test_ws_h2_reactor() raises:
     print("test_ws_h2_reactor")
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     var port = srv.local_addr().port
@@ -151,3 +151,7 @@ def main() raises:
     assert_equal(got.value().opcode, WsOpcode.TEXT)
     assert_equal(got.value().text_payload(), "echo:ping")
     print("test_ws_h2_reactor: 1 passed")
+
+
+def main() raises:
+    test_ws_h2_reactor()

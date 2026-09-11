@@ -52,7 +52,7 @@ def _read_once(mut s: TcpStream) raises -> String:
     return String(unsafe_from_utf8=Span[UInt8, _](buf)[0:n])
 
 
-def main() raises:
+def test_admission() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     var port = srv.local_addr().port
 
@@ -102,3 +102,7 @@ def main() raises:
     )
     assert_equal(g4, "HELLO")
     print("test_admission: passed (cap=2, 1 shed with 503+Retry-After)")
+
+
+def main() raises:
+    test_admission()

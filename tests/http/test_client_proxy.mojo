@@ -58,7 +58,7 @@ def _serve_proxy(mut listener: TcpListener) raises -> None:
     c.close()
 
 
-def main() raises:
+def test_client_proxy() raises:
     print("test_client_proxy")
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = UInt16(listener.local_addr().port)
@@ -89,3 +89,7 @@ def main() raises:
     assert_equal(status, 200)
     assert_equal(text, "via-proxy")
     print("test_client_proxy: 1 passed")
+
+
+def main() raises:
+    test_client_proxy()

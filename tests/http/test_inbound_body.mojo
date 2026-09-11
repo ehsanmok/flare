@@ -84,7 +84,7 @@ def _read_all(mut s: TcpStream) raises -> String:
     return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
-def main() raises:
+def test_inbound_body() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     var port = srv.local_addr().port
 
@@ -135,3 +135,7 @@ def main() raises:
         got_max,
         ")",
     )
+
+
+def main() raises:
+    test_inbound_body()

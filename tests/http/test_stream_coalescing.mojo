@@ -84,7 +84,7 @@ def _dechunk(body: String) -> String:
     return acc^
 
 
-def main() raises:
+def test_stream_coalescing() raises:
     var listener = TcpListener.bind(SocketAddr.localhost(0))
     var port = listener.local_addr().port
     var client = TcpStream.connect(SocketAddr.localhost(port))
@@ -148,3 +148,7 @@ def main() raises:
 
     client.close()
     print("test_stream_coalescing: passed (", _CHUNKS, "chunks -> 1 edge)")
+
+
+def main() raises:
+    test_stream_coalescing()

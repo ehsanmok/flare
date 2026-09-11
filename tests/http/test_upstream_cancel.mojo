@@ -65,7 +65,7 @@ struct CancelRelay(Movable, StreamHandler):
             _ = self.sources.pop(conn.id())
 
 
-def main() raises:
+def test_upstream_cancel() raises:
     var sentinel = String("/tmp/flare_upstream_cancel_seen")
     _ = unlink_path(sentinel)
     var wpath = String("/tmp/flare_upcancel_worker.sock")
@@ -145,3 +145,7 @@ def main() raises:
         seen, "backend did not receive a CANCEL frame after client disconnect"
     )
     print("test_upstream_cancel: passed (CANCEL reached backend)")
+
+
+def main() raises:
+    test_upstream_cancel()

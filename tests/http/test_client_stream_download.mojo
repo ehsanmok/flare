@@ -157,7 +157,7 @@ def _run_case(response: List[UInt8], body: List[UInt8]) raises -> Bool:
     return ok
 
 
-def main() raises:
+def test_client_stream_download() raises:
     print("test_client_stream_download")
     var body = _body(200_000)  # ~195 KiB, spans many read buffers
 
@@ -171,3 +171,7 @@ def main() raises:
     assert_true(ok_close, "close-delimited download mismatch")
 
     print("test_client_stream_download: 3 passed")
+
+
+def main() raises:
+    test_client_stream_download()

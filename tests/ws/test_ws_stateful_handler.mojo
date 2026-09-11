@@ -38,7 +38,7 @@ struct _CountingEcho(Copyable, Movable, WsHandler):
                 conn.send_text(String("count=") + String(self.total))
 
 
-def main() raises:
+def test_ws_stateful_handler() raises:
     print("test_ws_stateful_handler")
     var srv = WsServer.bind(SocketAddr.localhost(0))
     var port = srv.local_addr().port
@@ -76,3 +76,7 @@ def main() raises:
     assert_equal(replies[1], "count=2")
     assert_equal(replies[2], "count=3")
     print("test_ws_stateful_handler: 1 passed")
+
+
+def main() raises:
+    test_ws_stateful_handler()
