@@ -39,7 +39,6 @@ STANDALONE=(
   tests/runtime/test_closure_send_contract.mojo
   tests/runtime/test_handoff.mojo
   tests/runtime/test_uring_bufring_dispatch.mojo
-  tests/runtime/test_io_uring_sqe.mojo
   tests/runtime/test_reuseport.mojo
   tests/http/test_uring_serve_handler.mojo
   tests/http/test_uring_serve_handler_load.mojo

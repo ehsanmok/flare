@@ -42,7 +42,7 @@ range offsets / fds (see
 ``.cursor/rules/sanitizers-and-bounds-checking.mdc``).
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 from std.testing import assert_equal, assert_true, assert_false
 
 from flare.runtime.io_uring_sqe import (
@@ -121,21 +121,19 @@ def test_sqe_construction_zeros_buffer() raises:
     var sqe = IoUringSqe()
     var buf = sqe.as_bytes()
     for i in range(IO_URING_SQE_BYTES):
-        assert_equal(Int(buf[i]), 0)
+        assert_equal(Int(buf[unsafe_offset=i]), 0)
 
 
 def test_encode_sqe_zero_clears_dirty_buffer() raises:
     """``encode_sqe_zero`` rewrites every byte to 0."""
-    var raw = alloc[UInt8](IO_URING_SQE_BYTES)
+    var raw = alloc(Layout[UInt8](count=IO_URING_SQE_BYTES)).unsafe_leak()
     for i in range(IO_URING_SQE_BYTES):
-        (raw + i).unsafe_write(UInt8(0xAB))
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(raw)
-    )
+        raw.unsafe_offset(i).unsafe_write(UInt8(0xAB))
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(raw))
     encode_sqe_zero(p)
     for i in range(IO_URING_SQE_BYTES):
-        assert_equal(Int(p[i]), 0)
-    p.free()
+        assert_equal(Int(p[unsafe_offset=i]), 0)
+    p.unsafe_free()
 
 
 # ── prep helpers ──────────────────────────────────────────────────────────────
@@ -333,24 +331,24 @@ def test_cqe_buffer_id_decodes_high_bits_when_buffer_flag_set() raises:
 def test_decode_cqe_at_round_trips_through_byte_buffer() raises:
     """Write a 16-byte CQE slot manually + ``decode_cqe_at``
     must reproduce the same fields."""
-    var raw = alloc[UInt8](IO_URING_CQE_BYTES)
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(raw)
-    )
+    var raw = alloc(Layout[UInt8](count=IO_URING_CQE_BYTES)).unsafe_leak()
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(raw))
     # user_data = 0x1122334455667788 (LE).
     var ud = UInt64(0x1122334455667788)
     for k in range(8):
-        (p + k).unsafe_write(UInt8(Int((ud >> UInt64(k * 8)) & UInt64(0xFF))))
+        p.unsafe_offset(k).unsafe_write(
+            UInt8(Int((ud >> UInt64(k * 8)) & UInt64(0xFF)))
+        )
     # res = 1500 (LE 32-bit).
     var res_v = UInt32(1500)
     for k in range(4):
-        (p + 8 + k).unsafe_write(
+        p.unsafe_offset(8).unsafe_offset(k).unsafe_write(
             UInt8(Int((res_v >> UInt32(k * 8)) & UInt32(0xFF)))
         )
     # flags = IORING_CQE_F_MORE | IORING_CQE_F_SOCK_NONEMPTY (LE 32-bit).
     var fl = IORING_CQE_F_MORE | IORING_CQE_F_SOCK_NONEMPTY
     for k in range(4):
-        (p + 12 + k).unsafe_write(
+        p.unsafe_offset(12).unsafe_offset(k).unsafe_write(
             UInt8(Int((fl >> UInt32(k * 8)) & UInt32(0xFF)))
         )
     var cqe = decode_cqe_at(p)
@@ -358,29 +356,27 @@ def test_decode_cqe_at_round_trips_through_byte_buffer() raises:
     assert_equal(cqe.res(), 1500)
     assert_true(cqe.has_more())
     assert_equal(Int(cqe.flags()), Int(fl))
-    p.free()
+    p.unsafe_free()
 
 
 def test_decode_cqe_at_sign_extends_negative_res() raises:
     """A CQE with res = -125 (ECANCELED) round-trips as -125,
     not 0xFFFFFF83."""
-    var raw = alloc[UInt8](IO_URING_CQE_BYTES)
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(raw)
-    )
+    var raw = alloc(Layout[UInt8](count=IO_URING_CQE_BYTES)).unsafe_leak()
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(raw))
     for i in range(IO_URING_CQE_BYTES):
-        (p + i).unsafe_write(UInt8(0))
+        p.unsafe_offset(i).unsafe_write(UInt8(0))
     # res = -125 (two's complement 32-bit = 0xFFFFFF83).
     var res_raw: UInt32 = UInt32(0xFFFFFF83)
     for k in range(4):
-        (p + 8 + k).unsafe_write(
+        p.unsafe_offset(8).unsafe_offset(k).unsafe_write(
             UInt8(Int((res_raw >> UInt32(k * 8)) & UInt32(0xFF)))
         )
     var cqe = decode_cqe_at(p)
     assert_equal(cqe.res(), -125)
     assert_equal(cqe.errno(), 125)
     assert_true(cqe.is_error())
-    p.free()
+    p.unsafe_free()
 
 
 # ── prep_* fault-tolerance: zeros prior dirty bytes ───────────────────────────

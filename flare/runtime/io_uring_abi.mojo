@@ -12,7 +12,7 @@ every other constant / helper) call site keeps resolving unchanged.
 References: ``include/uapi/linux/io_uring.h`` (canonical layout).
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 # ── opcode constants (subset; full list in linux/io_uring.h) ─────────────────
 # Stable since the kernel version listed; the numeric values must
@@ -464,7 +464,7 @@ def _load_u32_le(buf: Pointer[UInt8, _], offset: Int) -> UInt32:
 
 
 @always_inline
-def _load_u16_le(buf: UnsafePointer[UInt8, _], offset: Int) -> UInt16:
+def _load_u16_le(buf: Pointer[UInt8, _], offset: Int) -> UInt16:
     """Read a u16 little-endian out of ``buf[offset..offset+2]``."""
     debug_assert[assert_mode="safe"](
         Int(buf) != 0, "io_uring CQE buffer must be non-NULL"
@@ -474,8 +474,8 @@ def _load_u16_le(buf: UnsafePointer[UInt8, _], offset: Int) -> UInt16:
         "_load_u16_le offset out of range; got ",
         offset,
     )
-    var lo = UInt16(Int(buf[offset]))
-    var hi = UInt16(Int(buf[offset + 1]))
+    var lo = UInt16(Int(buf[unsafe_offset=offset]))
+    var hi = UInt16(Int(buf[unsafe_offset=offset + 1]))
     return lo | (hi << UInt16(8))
 
 

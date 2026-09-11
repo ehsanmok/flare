@@ -60,7 +60,7 @@ Bounds checking
 
 All field accessors and prep helpers assert:
 
-1. The buffer pointer is non-NULL (``buf != UnsafePointer()``).
+1. The buffer pointer is non-NULL (``buf != Pointer()``).
 2. Reads / writes stay inside the 64-byte SQE / 16-byte CQE
    window (``offset + width <= 64`` / ``<= 16``).
 3. Opcodes stay within the documented kernel set.
@@ -84,7 +84,7 @@ References
   the field offsets match because they have to).
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 
 
 from .io_uring_abi import (
@@ -206,25 +206,25 @@ struct IoUringSqe(Movable):
     ``liburing``.
     """
 
-    var _buf: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _buf: Pointer[UInt8, MutUntrackedOrigin]
     """Owning pointer to the 64-byte SQE buffer."""
 
     def __init__(out self) raises:
         """Allocate a 64-byte SQE buffer, zero-initialised."""
-        var raw = alloc[UInt8](IO_URING_SQE_BYTES)
+        var raw = alloc(Layout[UInt8](count=IO_URING_SQE_BYTES)).unsafe_leak()
         for i in range(IO_URING_SQE_BYTES):
-            (raw + i).unsafe_write(UInt8(0))
-        self._buf = UnsafePointer[UInt8, MutUntrackedOrigin](
+            raw.unsafe_offset(i).unsafe_write(UInt8(0))
+        self._buf = Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(raw)
         )
 
     def __deinit__(deinit self):
         """Free the 64-byte buffer."""
         if Int(self._buf) != 0:
-            self._buf.free()
+            self._buf.unsafe_free()
 
     @always_inline
-    def as_bytes(self) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+    def as_bytes(self) -> Pointer[UInt8, MutUntrackedOrigin]:
         """Return the raw 64-byte buffer pointer.
 
         The pointer's lifetime is tied to the SQE. Callers may
@@ -236,12 +236,12 @@ struct IoUringSqe(Movable):
     @always_inline
     def opcode(self) -> Int:
         """Read the opcode byte."""
-        return Int(self._buf[_SQE_OFF_OPCODE])
+        return Int(self._buf[unsafe_offset=_SQE_OFF_OPCODE])
 
     @always_inline
     def flags(self) -> Int:
         """Read the SQE-level flags byte."""
-        return Int(self._buf[_SQE_OFF_FLAGS])
+        return Int(self._buf[unsafe_offset=_SQE_OFF_FLAGS])
 
     @always_inline
     def fd(self) -> Int:
@@ -327,7 +327,7 @@ def encode_sqe_zero(buf: Pointer[UInt8, MutUntrackedOrigin]) -> None:
 
 @always_inline
 def prep_nop(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin], user_data: UInt64
+    buf: Pointer[UInt8, MutUntrackedOrigin], user_data: UInt64
 ) -> None:
     """Write an ``IORING_OP_NOP`` SQE at ``buf``.
 
@@ -432,7 +432,7 @@ def prep_multishot_accept(
 
 @always_inline
 def prep_recv(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     rx_buf: UInt64,
     rx_len: Int,
@@ -486,7 +486,7 @@ def prep_recv(
 
 @always_inline
 def prep_provide_buffers(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     addr: UInt64,
     nbytes_per_buf: Int,
     nbufs: Int,
@@ -660,7 +660,7 @@ def prep_read(
 
 @always_inline
 def prep_poll_add(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     poll_mask: UInt32,
     user_data: UInt64,
@@ -717,7 +717,7 @@ def prep_poll_add(
 
 @always_inline
 def prep_poll_remove(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     target_user_data: UInt64,
     user_data: UInt64,
 ) -> None:
@@ -785,7 +785,7 @@ def prep_send(
 
 @always_inline
 def prep_writev(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     iovec_addr: UInt64,
     iovec_count: Int,
@@ -826,7 +826,7 @@ def prep_writev(
 
 @always_inline
 def prep_close(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin], fd: Int, user_data: UInt64
+    buf: Pointer[UInt8, MutUntrackedOrigin], fd: Int, user_data: UInt64
 ) -> None:
     """Write an ``IORING_OP_CLOSE`` SQE at ``buf``.
 
