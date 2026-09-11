@@ -147,8 +147,24 @@ if [ "${#EXAMPLES[@]}" -lt 50 ]; then
   exit 1
 fi
 echo "   ${#EXAMPLES[@]} examples"
+# Examples cannot share a process -- each is its own `main` -- but they can
+# share the *build* phase. Measured on ubuntu-latest, 68 `mojo -I .`
+# invocations cost 12.5min of a 20.5min job, and that is compilation, not
+# run time. Building them concurrently and then running the binaries keeps
+# one process per example while cutting the wall clock by ~$JOBS.
+build_example() {
+  local src="$1" out="$BUILD_DIR/ex_${1//\//_}"
+  out="${out%.mojo}"
+  if ! mojo build -I . "$src" -o "$out" 2>"$out.log"; then
+    echo "BUILD FAILED: $src"; sed -n '1,20p' "$out.log"; return 1
+  fi
+}
+export -f build_example
+printf '%s\n' "${EXAMPLES[@]}" | xargs -P "$JOBS" -n1 -I FF bash -c 'build_example FF'
 for e in "${EXAMPLES[@]}"; do
-  if ! mojo -I . "$e" >/dev/null; then failed+=("$e"); fi
+  bin="$BUILD_DIR/ex_${e//\//_}"; bin="${bin%.mojo}"
+  if [ ! -x "$bin" ]; then failed+=("$e (build)"); continue; fi
+  if ! "$bin" >/dev/null; then failed+=("$e"); fi
 done
 
 if [ "${#failed[@]}" -ne 0 ]; then

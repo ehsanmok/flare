@@ -108,6 +108,11 @@ The aggregate builds are independent compiler invocations and
 run concurrently, capped at four (`AGG_JOBS` overrides). The
 cap is deliberate: each job is a full elaboration of the
 source graph and the macOS runner has 7GB across 3 cores.
+The examples get the same treatment -- they are built
+concurrently and then run one binary at a time, so each keeps
+its own process while the compile cost is shared. On
+ubuntu-latest the 68 example compilations were 12.5min of a
+20.5min job, all of it compilation rather than run time.
 
 ---
 
