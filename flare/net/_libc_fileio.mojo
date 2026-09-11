@@ -107,9 +107,7 @@ struct FlareRawIO(Movable):
         ](self._lib, "flare_write")
 
     @always_inline
-    def read(
-        self, fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t
-    ) -> c_ssize_t:
+    def read(self, fd: c_int, buf: Pointer[UInt8, _], n: c_size_t) -> c_ssize_t:
         """Read up to ``n`` bytes from ``fd`` into ``buf`` via the cached
         ``flare_read`` pointer.
 
@@ -120,7 +118,7 @@ struct FlareRawIO(Movable):
 
     @always_inline
     def write(
-        self, fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t
+        self, fd: c_int, buf: Pointer[UInt8, _], n: c_size_t
     ) -> c_ssize_t:
         """Write up to ``n`` bytes from ``buf`` to ``fd`` via the cached
         ``flare_write`` pointer.
@@ -153,9 +151,9 @@ struct FlareRawIO(Movable):
 
 
 def _do_read_fd(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     fd: c_int,
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     n: c_size_t,
 ) raises -> c_ssize_t:
     """Inner helper: resolve ``flare_read`` on the borrowed ``lib`` and
@@ -169,9 +167,9 @@ def _do_read_fd(
 
 
 def _do_write_fd(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     fd: c_int,
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     n: c_size_t,
 ) raises -> c_ssize_t:
     """Inner helper: resolve ``flare_write`` on the borrowed ``lib``
@@ -185,7 +183,7 @@ def _do_write_fd(
 
 @always_inline
 def _read_fd(
-    fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t
+    fd: c_int, buf: Pointer[UInt8, _], n: c_size_t
 ) raises -> c_ssize_t:
     """Read from any fd (socket, pipe, eventfd) via ``libflare_tls.so``.
 
@@ -201,7 +199,7 @@ def _read_fd(
 
 @always_inline
 def _write_fd(
-    fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t
+    fd: c_int, buf: Pointer[UInt8, _], n: c_size_t
 ) raises -> c_ssize_t:
     """Write to any fd (socket, pipe, eventfd) via ``libflare_tls.so``.
 

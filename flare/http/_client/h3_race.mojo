@@ -47,7 +47,7 @@ how long the slower leg holds up the return; the upgrade path is
 ships an ``Atomic`` type.
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 
 from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 
@@ -114,7 +114,7 @@ def _race_worker(arg: _OpaquePtr) -> _OpaquePtr:
     stored ``leg`` function and stash the outcome. Never raises across
     the FFI boundary -- every error is captured into the cell."""
     var a = arg.unsafe_bitcast[_RaceArg]()
-    var result = UnsafePointer[_RaceResult, MutUntrackedOrigin](
+    var result = Pointer[_RaceResult, MutUntrackedOrigin](
         unsafe_from_address=a[].result_addr
     )
     try:
@@ -135,20 +135,20 @@ def race_http3_h2_connect(
     supplied by the caller (so this module needs no ``HttpClient``
     import). Never raises for a failed connect -- the caller decides how
     to handle :data:`RACE_NONE`."""
-    var h3_res = alloc[_RaceResult](1)
+    var h3_res = alloc(Layout[_RaceResult](count=1)).unsafe_leak()
     h3_res.unsafe_write(_RaceResult())
-    var h2_res = alloc[_RaceResult](1)
+    var h2_res = alloc(Layout[_RaceResult](count=1)).unsafe_leak()
     h2_res.unsafe_write(_RaceResult())
 
-    var h3_arg = alloc[_RaceArg](1)
+    var h3_arg = alloc(Layout[_RaceArg](count=1)).unsafe_leak()
     h3_arg.unsafe_write(_RaceArg(leg, client_addr, Int(h3_res), True, url))
-    var h2_arg = alloc[_RaceArg](1)
+    var h2_arg = alloc(Layout[_RaceArg](count=1)).unsafe_leak()
     h2_arg.unsafe_write(_RaceArg(leg, client_addr, Int(h2_res), False, url))
 
-    var h3_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var h3_ptr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(h3_arg)
     )
-    var h2_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var h2_ptr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(h2_arg)
     )
 

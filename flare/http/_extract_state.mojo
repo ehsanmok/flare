@@ -9,7 +9,7 @@ from ._extract_core import Extractor
 from .request import Request
 
 
-struct State[T: Copyable & Defaultable & Deinitable & Movable](
+struct State[T: Copyable & Defaultable & Deinitable](
     Copyable, Defaultable, Extractor, Movable
 ):
     """A handler field carrying registration-time state, not request data.

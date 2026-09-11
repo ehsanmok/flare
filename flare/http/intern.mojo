@@ -171,7 +171,7 @@ def _bytes_equal_static(slice: Span[UInt8, _], s: StaticString) -> Bool:
     var sp = slice.unsafe_ptr()
     var bp = s.unsafe_ptr()
     for i in range(n):
-        if sp[i] != bp[i]:
+        if sp[unsafe_offset=i] != bp[unsafe_offset=i]:
             return False
     return True
 

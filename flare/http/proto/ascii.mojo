@@ -113,10 +113,10 @@ def ascii_eq_ignore_case(s: String, lowercase_literal: StringSlice) -> Bool:
     var sp = s.unsafe_ptr()
     var lp = lowercase_literal.unsafe_ptr()
     for i in range(n):
-        var c = sp[i]
+        var c = sp[unsafe_offset=i]
         if c >= 65 and c <= 90:
             c += 32
-        if c != lp[i]:
+        if c != lp[unsafe_offset=i]:
             return False
     return True
 
@@ -150,7 +150,7 @@ def ascii_lower(s: String) -> String:
     var src = s.unsafe_ptr()
     var has_upper = False
     for i in range(n):
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         if c >= 65 and c <= 90:
             has_upper = True
             break
@@ -159,9 +159,9 @@ def ascii_lower(s: String) -> String:
     var out = String(unsafe_uninit_length=n)
     var dst = out.unsafe_ptr_mut()
     for i in range(n):
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         if c >= 65 and c <= 90:
-            dst[i] = c + 32
+            dst[unsafe_offset=i] = c + 32
         else:
-            dst[i] = c
+            dst[unsafe_offset=i] = c
     return out^

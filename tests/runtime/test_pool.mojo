@@ -60,7 +60,7 @@ struct _Counted(Deinitable, Movable):
     def __deinit__(deinit self):
         if self.counter_addr == 0:
             return
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self.counter_addr
         )
         p[] = p[] + 1
@@ -76,14 +76,14 @@ def _new_counter() raises -> Int:
 
 
 def _read_counter(addr: Int) -> Int:
-    var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
     return p[]
 
 
 def _free_counter(addr: Int):
-    var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
     p.unsafe_deinit_pointee()
-    p.free()
+    p.unsafe_free()
 
 
 # ── Happy path ─────────────────────────────────────────────────────────────

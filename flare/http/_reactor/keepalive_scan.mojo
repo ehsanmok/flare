@@ -169,10 +169,10 @@ def _is_content_length(k: String) -> Bool:
     var target = "content-length"
     var t = target.unsafe_ptr()
     for i in range(14):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= 65 and c <= 90:
             c = c + 32
-        if c != t[i]:
+        if c != t[unsafe_offset=i]:
             return False
     return True
 
@@ -194,10 +194,10 @@ def _is_date(k: String) -> Bool:
     var target = "date"
     var t = target.unsafe_ptr()
     for i in range(4):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= 65 and c <= 90:
             c = c + 32
-        if c != t[i]:
+        if c != t[unsafe_offset=i]:
             return False
     return True
 
@@ -222,16 +222,16 @@ def _connection_is_keepalive(s: String) -> Bool:
         return False
     var p = s.unsafe_ptr()
     return (
-        p[0] == UInt8(ord("k"))
-        and p[1] == UInt8(ord("e"))
-        and p[2] == UInt8(ord("e"))
-        and p[3] == UInt8(ord("p"))
-        and p[4] == UInt8(ord("-"))
-        and p[5] == UInt8(ord("a"))
-        and p[6] == UInt8(ord("l"))
-        and p[7] == UInt8(ord("i"))
-        and p[8] == UInt8(ord("v"))
-        and p[9] == UInt8(ord("e"))
+        p[unsafe_offset=0] == UInt8(ord("k"))
+        and p[unsafe_offset=1] == UInt8(ord("e"))
+        and p[unsafe_offset=2] == UInt8(ord("e"))
+        and p[unsafe_offset=3] == UInt8(ord("p"))
+        and p[unsafe_offset=4] == UInt8(ord("-"))
+        and p[unsafe_offset=5] == UInt8(ord("a"))
+        and p[unsafe_offset=6] == UInt8(ord("l"))
+        and p[unsafe_offset=7] == UInt8(ord("i"))
+        and p[unsafe_offset=8] == UInt8(ord("v"))
+        and p[unsafe_offset=9] == UInt8(ord("e"))
     )
 
 
@@ -248,14 +248,14 @@ def _connection_is_close(s: String) -> Bool:
     if s.byte_length() != 5:
         return False
     var p = s.unsafe_ptr()
-    var c0 = p[0]
+    var c0 = p[unsafe_offset=0]
     if c0 != UInt8(ord("c")) and c0 != UInt8(ord("C")):
         return False
     return (
-        p[1] == UInt8(ord("l"))
-        and p[2] == UInt8(ord("o"))
-        and p[3] == UInt8(ord("s"))
-        and p[4] == UInt8(ord("e"))
+        p[unsafe_offset=1] == UInt8(ord("l"))
+        and p[unsafe_offset=2] == UInt8(ord("o"))
+        and p[unsafe_offset=3] == UInt8(ord("s"))
+        and p[unsafe_offset=4] == UInt8(ord("e"))
     )
 
 
@@ -268,10 +268,10 @@ def _is_connection(k: String) -> Bool:
     var target = "connection"
     var t = target.unsafe_ptr()
     for i in range(10):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= 65 and c <= 90:
             c = c + 32
-        if c != t[i]:
+        if c != t[unsafe_offset=i]:
             return False
     return True
 
@@ -289,10 +289,10 @@ def _is_transfer_encoding(k: String) -> Bool:
     var target = "transfer-encoding"
     var t = target.unsafe_ptr()
     for i in range(17):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= 65 and c <= 90:
             c = c + 32
-        if c != t[i]:
+        if c != t[unsafe_offset=i]:
             return False
     return True
 
@@ -338,7 +338,7 @@ def _compact_read_buf_drop_prefix(
     leftover.resize(keep, UInt8(0))
     unsafe_memcpy(
         dest=leftover.unsafe_ptr(),
-        src=read_buf.unsafe_ptr() + drop_n,
+        src=read_buf.unsafe_ptr().unsafe_offset(drop_n),
         count=keep,
     )
     read_buf = leftover^
@@ -420,7 +420,7 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
             break
         var is_match = True
         for j in range(hn):
-            if data[i + j] != hp[j]:
+            if data[i + j] != hp[unsafe_offset=j]:
                 is_match = False
                 break
         if is_match:
@@ -440,7 +440,7 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
             var c = data[i + j]
             if c >= 65 and c <= 90:
                 c = c + 32
-            if c != np[j]:
+            if c != np[unsafe_offset=j]:
                 found = False
                 break
         if found:

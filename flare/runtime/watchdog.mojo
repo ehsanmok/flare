@@ -24,7 +24,7 @@ reactor cannot deliver by itself.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 
 from ._libc_time import libc_nanosleep_ms, monotonic_now_ms
 from ._thread import ThreadHandle, _OpaquePtr
@@ -56,17 +56,17 @@ def _slot_addr_idx(slot: Int) -> Int:
 
 @always_inline
 def _atomic_load(block: Int, idx: Int) -> Int64:
-    var p = UnsafePointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
     return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](
-        (p + idx).unsafe_bitcast[Scalar[DType.int64]]()
+        (p.unsafe_offset(idx)).unsafe_bitcast[Scalar[DType.int64]]()
     )
 
 
 @always_inline
 def _atomic_store(block: Int, idx: Int, v: Int64):
-    var p = UnsafePointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
     Atomic[DType.int64].store[ordering=Ordering.RELEASE](
-        (p + idx).unsafe_bitcast[Scalar[DType.int64]](), v
+        (p.unsafe_offset(idx)).unsafe_bitcast[Scalar[DType.int64]](), v
     )
 
 
@@ -120,7 +120,7 @@ def _watchdog_main(arg: _OpaquePtr) -> _OpaquePtr:
                 var addr = _atomic_load(block, _slot_addr_idx(slot))
                 if addr != 0:
                     # Flip the Cancel cell (release store of TIMEOUT).
-                    var cp = UnsafePointer[Int64, MutUntrackedOrigin](
+                    var cp = Pointer[Int64, MutUntrackedOrigin](
                         unsafe_from_address=Int(addr)
                     )
                     Atomic[DType.int64].store[ordering=Ordering.RELEASE](
@@ -152,9 +152,9 @@ struct DeadlineWatchdog(Movable):
 
     def __init__(out self, poll_ms: Int = 1) raises:
         """Allocate the control block and spawn the watchdog thread."""
-        var raw = alloc[Int64](_BLOCK_LEN)
+        var raw = alloc(Layout[Int64](count=_BLOCK_LEN)).unsafe_leak()
         for i in range(_BLOCK_LEN):
-            (raw + i).unsafe_write(Int64(0))
+            (raw.unsafe_offset(i)).unsafe_write(Int64(0))
         self._block = Int(raw)
         _atomic_store(
             self._block, _IDX_POLL_MS, Int64(poll_ms if poll_ms > 0 else 1)
@@ -178,8 +178,8 @@ struct DeadlineWatchdog(Movable):
             return
         _atomic_store(self._block, _IDX_RUNNING, 0)
         self._thread.join()
-        var p = UnsafePointer[Int64, MutUntrackedOrigin](
+        var p = Pointer[Int64, MutUntrackedOrigin](
             unsafe_from_address=self._block
         )
-        p.free()
+        p.unsafe_free()
         self._block = 0

@@ -136,9 +136,9 @@ def _conn_free_addr(addr: Int):
 
 def _conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[ConnHandle, MutUntrackedOrigin]:
+) -> Pointer[ConnHandle, MutUntrackedOrigin]:
     """Reverse of ``_conn_alloc_addr``: reconstruct a typed pointer."""
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
+    return Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[ConnHandle]()
 
@@ -149,7 +149,7 @@ def _apply_step(
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
-    conn_ptr: UnsafePointer[ConnHandle, MutUntrackedOrigin],
+    conn_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
 ) raises:
     """Translate a ``StepResult`` into reactor + timer-wheel operations.
 
@@ -377,7 +377,7 @@ def _run_handler_loop_impl[
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()

@@ -150,22 +150,22 @@ def _parse_q(value: String) -> Int:
         return 1000
     var src = value.unsafe_ptr()
     var i = 0
-    while i < n and (src[i] == 32 or src[i] == 9):
+    while i < n and (src[unsafe_offset=i] == 32 or src[unsafe_offset=i] == 9):
         i += 1
     if i >= n:
         return 1000
-    if src[i] == 49:  # '1'
+    if src[unsafe_offset=i] == 49:  # '1'
         return 1000
-    if src[i] != 48:  # '0'
+    if src[unsafe_offset=i] != 48:  # '0'
         return 1000
     i += 1
-    if i >= n or src[i] != 46:  # '.'
+    if i >= n or src[unsafe_offset=i] != 46:  # '.'
         return 0
     i += 1
     var places = 0
     var q = 0
     while i < n and places < 3:
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         if c < 48 or c > 57:
             break
         q = q * 10 + (Int(c) - 48)
@@ -204,7 +204,7 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
     while pos < n:
         var end = n
         for i in range(pos, n):
-            if src[i] == 44:  # ','
+            if src[unsafe_offset=i] == 44:  # ','
                 end = i
                 break
         var entry = String(unsafe_from_utf8=accept.as_bytes()[pos:end]).strip()
@@ -216,13 +216,13 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
         var sp = entry.unsafe_ptr()
         var semi = sc
         for i in range(sc):
-            if sp[i] == 59:  # ';'
+            if sp[unsafe_offset=i] == 59:  # ';'
                 semi = i
                 break
         var name = String(unsafe_from_utf8=entry.as_bytes()[:semi]).strip()
         var lower = String(capacity=name.byte_length() + 1)
         for i in range(name.byte_length()):
-            var c = name.unsafe_ptr()[i]
+            var c = name.unsafe_ptr()[unsafe_offset=i]
             if c >= 65 and c <= 90:
                 lower += chr(Int(c) + 32)
             else:
@@ -232,11 +232,11 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
             var rest = String(unsafe_from_utf8=entry.as_bytes()[semi + 1 :])
             var pos_q = -1
             for i in range(rest.byte_length()):
-                var c = rest.unsafe_ptr()[i]
+                var c = rest.unsafe_ptr()[unsafe_offset=i]
                 if c == 113 or c == 81:  # 'q' or 'Q'
                     if (
                         i + 1 < rest.byte_length()
-                        and rest.unsafe_ptr()[i + 1] == 61
+                        and rest.unsafe_ptr()[unsafe_offset=i + 1] == 61
                     ):
                         pos_q = i + 2
                         break
@@ -283,7 +283,7 @@ def _brotli_available() -> Bool:
     return _file_exists(find_flare_lib("brotli"))
 
 
-def _flare_fs_access(read lib: OwnedDLHandle, addr: Int) raises -> c_int:
+def _flare_fs_access(imm lib: OwnedDLHandle, addr: Int) raises -> c_int:
     """Invoke ``flare_fs_access`` while ``lib`` is borrowed by the caller.
 
     Taking ``lib`` as ``read`` ties the dylib's lifetime to the caller's
@@ -313,7 +313,7 @@ def _file_exists(path: String) -> Bool:
         var c = List[UInt8](length=n + 1, fill=UInt8(0))
         var src = path.unsafe_ptr()
         for i in range(n):
-            c[i] = src[i]
+            c[i] = src[unsafe_offset=i]
         var addr = Int(c.unsafe_ptr())
         var rc = Int(_flare_fs_access(lib, addr))
         _ = c^

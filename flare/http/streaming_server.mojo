@@ -77,7 +77,7 @@ method's docstring.
 
 from std.collections import Optional
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 from .async_body import ChunkPoll, UpstreamChunkSource
 from .cancel import Cancel, CancelCell, CancelReason
@@ -494,8 +494,8 @@ struct StreamConn(Movable):
             return
         var old = len(self.out_buf)
         self.out_buf.resize(old + n, UInt8(0))
-        memcpy(
-            dest=self.out_buf.unsafe_ptr() + old,
+        unsafe_memcpy(
+            dest=self.out_buf.unsafe_ptr().unsafe_offset(old),
             src=data.unsafe_ptr(),
             count=n,
         )
@@ -593,7 +593,7 @@ struct StreamConn(Movable):
             return
         var nb = List[UInt8](capacity=rem)
         nb.resize(rem, UInt8(0))
-        memcpy(
+        unsafe_memcpy(
             dest=nb.unsafe_ptr(),
             src=self.out_buf.unsafe_ptr() + self.out_pos,
             count=rem,
@@ -606,7 +606,9 @@ struct StreamConn(Movable):
         single-connection driver."""
         if self.out_pos < len(self.out_buf):
             var rem = Span[UInt8, _](
-                unsafe_ptr=self.out_buf.unsafe_ptr() + self.out_pos,
+                unsafe_ptr=self.out_buf.unsafe_ptr().unsafe_offset(
+                    self.out_pos
+                ),
                 length=len(self.out_buf) - self.out_pos,
             )
             self.client.write_all(rem)

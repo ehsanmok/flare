@@ -45,7 +45,7 @@ The pre-encoded buffer is a plain ``List[UInt8]`` rather than an
 as a ``stack_allocation`` source.
 """
 
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 from .headers import HeaderMap
 
@@ -96,7 +96,9 @@ def _append_str(mut buf: List[UInt8], s: String):
         return
     var old = len(buf)
     buf.resize(old + n, UInt8(0))
-    memcpy(dest=buf.unsafe_ptr() + old, src=s.unsafe_ptr(), count=n)
+    unsafe_memcpy(
+        dest=buf.unsafe_ptr().unsafe_offset(old), src=s.unsafe_ptr(), count=n
+    )
 
 
 def _status_reason(code: Int) -> String:
@@ -169,8 +171,8 @@ def _encode(
     if body_n > 0:
         var old = len(buf)
         buf.resize(old + body_n, UInt8(0))
-        memcpy(
-            dest=buf.unsafe_ptr() + old,
+        unsafe_memcpy(
+            dest=buf.unsafe_ptr().unsafe_offset(old),
             src=body.unsafe_ptr(),
             count=body_n,
         )

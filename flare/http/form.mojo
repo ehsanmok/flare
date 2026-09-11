@@ -70,15 +70,15 @@ def urldecode(s: String) raises -> String:
     out.reserve(n)
     var i = 0
     while i < n:
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         if c == 43:  # '+'
             out.append(UInt8(32))
             i += 1
         elif c == 37:  # '%'
             if i + 2 >= n:
                 raise Error("urldecode: truncated percent-escape")
-            var hi = _hex_nibble(src[i + 1])
-            var lo = _hex_nibble(src[i + 2])
+            var hi = _hex_nibble(src[unsafe_offset=i + 1])
+            var lo = _hex_nibble(src[unsafe_offset=i + 2])
             out.append(UInt8(hi * 16 + lo))
             i += 3
         else:
@@ -108,7 +108,7 @@ def urlencode(s: String) -> String:
     var out = List[UInt8]()
     out.reserve(n)
     for i in range(n):
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         var unreserved = (
             (c >= 48 and c <= 57)
             or (c >= 65 and c <= 90)
@@ -124,8 +124,8 @@ def urlencode(s: String) -> String:
             out.append(UInt8(43))
         else:
             out.append(UInt8(37))  # '%'
-            out.append(hex_p[Int(c) >> 4])
-            out.append(hex_p[Int(c) & 15])
+            out.append(hex_p[unsafe_offset=Int(c) >> 4])
+            out.append(hex_p[unsafe_offset=Int(c) & 15])
     return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
@@ -241,14 +241,14 @@ def parse_form_urlencoded(body: String) raises -> FormData:
     while pos < n:
         var pair_end = n
         for i in range(pos, n):
-            var c = src[i]
+            var c = src[unsafe_offset=i]
             if c == 38 or c == 59:  # '&' or ';'
                 pair_end = i
                 break
         if pair_end > pos:
             var eq = pair_end
             for i in range(pos, pair_end):
-                if src[i] == 61:  # '='
+                if src[unsafe_offset=i] == 61:  # '='
                     eq = i
                     break
             var raw_name = String(unsafe_from_utf8=body.as_bytes()[pos:eq])

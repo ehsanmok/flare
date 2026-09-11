@@ -79,7 +79,7 @@ the single owning thread; the only cross-thread hook is
 
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, c_uint, c_size_t, external_call, get_errno
-from std.memory import UnsafePointer, alloc, stack_allocation
+from std.memory import Layout, UnsafePointer, alloc, stack_allocation
 from std.os import getenv
 from std.sys.info import CompilationTarget
 
@@ -192,7 +192,7 @@ struct UringReactor(Movable):
     # stays valid. Stored under ``MutUntrackedOrigin`` to match
     # the ``prep_recv`` buf-pointer convention used everywhere
     # in :mod:`flare.runtime.io_uring_sqe`.
-    var _wake_buf: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _wake_buf: Pointer[UInt8, MutUntrackedOrigin]
     var _io: FlareRawIO
     var _wake_armed: Bool
     var _cross_thread_wakeup: Bool
@@ -286,10 +286,10 @@ struct UringReactor(Movable):
             # 8 bytes is the eventfd read width; we keep the buffer
             # pinned for the reactor's lifetime so the multishot recv
             # arming SQE keeps a stable pointer.
-            var raw = alloc[UInt8](8)
+            var raw = alloc(Layout[UInt8](count=8)).unsafe_leak()
             for i in range(8):
                 raw.unsafe_offset(i).unsafe_write(UInt8(0))
-            self._wake_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
+            self._wake_buf = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=Int(raw)
             )
         else:
@@ -301,7 +301,7 @@ struct UringReactor(Movable):
             self._wake_fd = INVALID_FD
             # UnsafePointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
-            self._wake_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
+            self._wake_buf = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=null_addr
             )
         self._wake_armed = False
@@ -607,7 +607,7 @@ struct UringReactor(Movable):
     def submit_send(
         mut self,
         fd: Int,
-        buf: UnsafePointer[UInt8, _],
+        buf: Pointer[UInt8, _],
         buf_len: Int,
         conn_id: UInt64,
     ) raises -> None:

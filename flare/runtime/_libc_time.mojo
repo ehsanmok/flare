@@ -60,18 +60,18 @@ def monotonic_now_ms() -> Int:
         Milliseconds since an unspecified but fixed epoch.
     """
     var ts = stack_allocation[2, Int64]()
-    ts[0] = Int64(0)
-    ts[1] = Int64(0)
-    var ts_ext = UnsafePointer[Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(ts)
-    )
+    ts[unsafe_offset=0] = Int64(0)
+    ts[unsafe_offset=1] = Int64(0)
+    var ts_ext = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=Int(ts))
     _ = external_call[
         "clock_gettime",
         Int32,
         Int32,
-        UnsafePointer[Int64, MutUntrackedOrigin],
+        Pointer[Int64, MutUntrackedOrigin],
     ](_CLOCK_MONOTONIC, ts_ext)
-    return Int(ts[0]) * 1000 + Int(ts[1]) // 1_000_000
+    return (
+        Int(ts[unsafe_offset=0]) * 1000 + Int(ts[unsafe_offset=1]) // 1_000_000
+    )
 
 
 @always_inline
@@ -114,24 +114,22 @@ def libc_nanosleep_ms(ms: Int) -> Int:
     if ms <= 0:
         return 0
     var ts = stack_allocation[2, Int64]()
-    ts[0] = Int64(ms // 1000)
-    ts[1] = Int64((ms % 1000) * 1_000_000)
+    ts[unsafe_offset=0] = Int64(ms // 1000)
+    ts[unsafe_offset=1] = Int64((ms % 1000) * 1_000_000)
     # ``rem`` argument is NULL — we discard interrupt remainders.
     # Use the same MutUntrackedOrigin we already use elsewhere for
     # libc-facing pointers; this keeps the optimiser from reordering
     # loads through the ``ts`` page across the syscall boundary.
     # UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    var null_rem = UnsafePointer[Int64, MutUntrackedOrigin](
+    var null_rem = Pointer[Int64, MutUntrackedOrigin](
         unsafe_from_address=null_addr
     )
-    var ts_ext = UnsafePointer[Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(ts)
-    )
+    var ts_ext = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=Int(ts))
     var rc = external_call[
         "nanosleep",
         Int32,
-        UnsafePointer[Int64, MutUntrackedOrigin],
-        UnsafePointer[Int64, MutUntrackedOrigin],
+        Pointer[Int64, MutUntrackedOrigin],
+        Pointer[Int64, MutUntrackedOrigin],
     ](ts_ext, null_rem)
     return Int(rc)

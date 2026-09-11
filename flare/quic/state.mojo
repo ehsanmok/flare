@@ -608,16 +608,16 @@ struct _ConnFrameHandler(FrameHandler):
     var now_us: UInt64
 
     @always_inline
-    def _conn(self) -> UnsafePointer[Connection, MutUntrackedOrigin]:
-        return UnsafePointer[Connection, MutUntrackedOrigin](
+    def _conn(self) -> Pointer[Connection, MutUntrackedOrigin]:
+        return Pointer[Connection, MutUntrackedOrigin](
             unsafe_from_address=self.conn_addr
         )
 
     @always_inline
     def _events(
         self,
-    ) -> UnsafePointer[ConnectionEvents, MutUntrackedOrigin]:
-        return UnsafePointer[ConnectionEvents, MutUntrackedOrigin](
+    ) -> Pointer[ConnectionEvents, MutUntrackedOrigin]:
+        return Pointer[ConnectionEvents, MutUntrackedOrigin](
             unsafe_from_address=self.events_addr
         )
 
@@ -743,8 +743,8 @@ def handle_frame_buf(
         # Drop bytes silently — caller will advance past closed
         # connections in its packet drain.
         return len(buf)
-    var conn_addr = Int(UnsafePointer[Connection, _](to=conn))
-    var events_addr = Int(UnsafePointer[ConnectionEvents, _](to=events))
+    var conn_addr = Int(Pointer[Connection, _](to=conn))
+    var events_addr = Int(Pointer[ConnectionEvents, _](to=events))
     var h = _ConnFrameHandler(
         conn_addr=conn_addr, events_addr=events_addr, now_us=now_us
     )

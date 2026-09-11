@@ -60,7 +60,11 @@ def _put_str(mut buf: List[UInt8], off: Int, s: StringSlice) -> Int:
     """
     var n = s.byte_length()
     if n > 0:
-        unsafe_memcpy(dest=buf.unsafe_ptr() + off, src=s.unsafe_ptr(), count=n)
+        unsafe_memcpy(
+            dest=buf.unsafe_ptr().unsafe_offset(off),
+            src=s.unsafe_ptr(),
+            count=n,
+        )
     return off + n
 
 
@@ -74,7 +78,7 @@ def _put_int(mut buf: List[UInt8], off: Int, n: Int) -> Int:
     """
     var p = buf.unsafe_ptr()
     if n == 0:
-        p[off] = 48
+        p[unsafe_offset=off] = 48
         return off + 1
     var d = _decimal_digits(n)
     var end = off + d
@@ -82,18 +86,20 @@ def _put_int(mut buf: List[UInt8], off: Int, n: Int) -> Int:
     var x = n
     while x > 0:
         k -= 1
-        p[k] = UInt8(48 + (x % 10))
+        p[unsafe_offset=k] = UInt8(48 + (x % 10))
         x //= 10
     return end
 
 
 @always_inline
 def _put_bytes(
-    mut buf: List[UInt8], off: Int, src: UnsafePointer[UInt8, _], n: Int
+    mut buf: List[UInt8], off: Int, src: Pointer[UInt8, _], n: Int
 ) -> Int:
     """memcpy ``n`` bytes from ``src`` into ``buf`` at ``off``."""
     if n > 0:
-        unsafe_memcpy(dest=buf.unsafe_ptr() + off, src=src, count=n)
+        unsafe_memcpy(
+            dest=buf.unsafe_ptr().unsafe_offset(off), src=src, count=n
+        )
     return off + n
 
 

@@ -58,10 +58,10 @@ struct CookieStore(Copyable, Movable):
         """Return ``True`` when the jar is allocated."""
         return self._addr != 0
 
-    def _state(imm self) -> UnsafePointer[_CookieState, MutUntrackedOrigin]:
+    def _state(imm self) -> Pointer[_CookieState, MutUntrackedOrigin]:
         """Re-materialise a typed pointer from :attr:`_addr` (mirrors the
         :class:`flare.http._client.alt_svc.AltSvcStore._state` pattern)."""
-        return UnsafePointer[UInt8, MutUntrackedOrigin](
+        return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[_CookieState]()
 

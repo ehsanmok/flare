@@ -59,7 +59,7 @@ struct _NopFrontend(Copyable, Frontend, Movable):
         stats_addr: Int,
         extra_fds: List[Int] = List[Int](),
     ):
-        var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+        var stopping_addr = Int(Pointer[Bool, _](to=stopping))
         while not load_stop_flag(stopping_addr):
             store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, 0)
             _ = libc_nanosleep_ms(50)

@@ -96,7 +96,11 @@ def _append_str(mut buf: List[UInt8], s: String):
         return
     var old_len = len(buf)
     buf.resize(old_len + n, UInt8(0))
-    unsafe_memcpy(dest=buf.unsafe_ptr() + old_len, src=s.unsafe_ptr(), count=n)
+    unsafe_memcpy(
+        dest=buf.unsafe_ptr().unsafe_offset(old_len),
+        src=s.unsafe_ptr(),
+        count=n,
+    )
 
 
 @always_inline

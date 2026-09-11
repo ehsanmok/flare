@@ -76,7 +76,7 @@ Known limitations:
 
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, external_call
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 
 from std.os import getenv
 from std.sys.info import CompilationTarget
@@ -163,7 +163,7 @@ def _scheduler_free_raw(raw: _OpaquePtr):
     raw.unsafe_free()
 
 
-def _scheduler_free_ctxs[F: Frontend & Copyable](addrs: List[Int]):
+def _scheduler_free_ctxs[F: Frontend](addrs: List[Int]):
     """Destroy each ``_WorkerCtx[F]`` at the given address then free it."""
     for i in range(len(addrs)):
         var raw = _OpaquePtr(unsafe_from_address=addrs[i])
@@ -175,7 +175,7 @@ def _scheduler_free_ctxs[F: Frontend & Copyable](addrs: List[Int]):
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
 
-struct Scheduler[F: Frontend & Copyable](Movable):
+struct Scheduler[F: Frontend](Movable):
     """Owns ``num_workers`` pthread workers, each running a frontend's
     serving loop sharing a single listener fd (or its own
     SO_REUSEPORT listener when the strategy demands).
@@ -232,7 +232,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
     # (freshly constructed or post-shutdown); ``_workers_len`` tracks
     # how many slots hold a live ``ThreadHandle`` that still needs
     # joining + destroying.
-    var _workers_ptr: UnsafePointer[ThreadHandle, MutUntrackedOrigin]
+    var _workers_ptr: Pointer[ThreadHandle, MutUntrackedOrigin]
     var _workers_len: Int
     # Heap-allocated ``TcpListener`` shared by all workers. Address is
     # stable across struct moves so worker ctxs can carry the fd as a
@@ -273,7 +273,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         """Build an empty scheduler; use ``Scheduler.start`` instead."""
         # UnsafePointer is non-nullable; build C NULL from a runtime 0.
         var null_addr = 0
-        self._workers_ptr = UnsafePointer[ThreadHandle, MutUntrackedOrigin](
+        self._workers_ptr = Pointer[ThreadHandle, MutUntrackedOrigin](
             unsafe_from_address=null_addr
         )
         self._workers_len = 0
@@ -347,7 +347,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         # writes through it. The heap cell is allocated here and
         # freed in ``shutdown()`` after every worker joins. Uses the
         # native Mojo allocator (see ``_scheduler_free_raw``).
-        var stop_ptr = alloc[Bool](1)
+        var stop_ptr = alloc(Layout[Bool](count=1)).unsafe_leak()
         stop_ptr.unsafe_write(False)
         var stop_raw = stop_ptr.unsafe_bitcast[UInt8]()
         var stopping_addr = Int(stop_ptr)
@@ -400,7 +400,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         var listener_fd: Int = -1
         # UnsafePointer is non-nullable; build C NULL from a runtime 0.
         var null_addr = 0
-        var listener_ptr = UnsafePointer[TcpListener, MutUntrackedOrigin](
+        var listener_ptr = Pointer[TcpListener, MutUntrackedOrigin](
             unsafe_from_address=null_addr
         )
         # Both the io_uring buffer-ring path and the opt-in epoll
@@ -456,7 +456,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
             # when the local ``bound`` goes out of scope at the end
             # of this function. ``shutdown()`` destroys+frees this
             # allocation *after* joining every worker.
-            var lp = alloc[TcpListener](1)
+            var lp = alloc(Layout[TcpListener](count=1)).unsafe_leak()
             lp.unsafe_write(bound^)
             listener_ptr = lp
             s._shared_listener_addr = Int(lp)
@@ -464,7 +464,9 @@ struct Scheduler[F: Frontend & Copyable](Movable):
 
         # Preallocate the worker slot array once; grow is not needed
         # because ``num_workers`` is bounded above (<= 256) and fixed.
-        s._workers_ptr = alloc[ThreadHandle](num_workers)
+        s._workers_ptr = alloc(
+            Layout[ThreadHandle](count=num_workers)
+        ).unsafe_leak()
         s._workers_len = 0
 
         # Per-worker stats cells (in-flight snapshot + exit status).
@@ -472,9 +474,9 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         # writes them, ``drain`` reads them after join, teardown frees
         # them. Native Mojo allocator (see _scheduler_free_raw).
         for _ in range(num_workers):
-            var sp = alloc[Int64](WORKER_STAT_SLOTS)
-            sp[WORKER_STAT_INFLIGHT] = Int64(0)
-            sp[WORKER_STAT_STATUS] = Int64(WORKER_STATUS_RUNNING)
+            var sp = alloc(Layout[Int64](count=WORKER_STAT_SLOTS)).unsafe_leak()
+            sp[unsafe_offset=WORKER_STAT_INFLIGHT] = Int64(0)
+            sp[unsafe_offset=WORKER_STAT_STATUS] = Int64(WORKER_STATUS_RUNNING)
             s._stats_addrs.append(Int(sp))
 
         # If we need per-worker listeners (io_uring buffer-ring
@@ -494,7 +496,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
                 try:
                     var pwl = bind_reuseport(addr)
                     pwl._socket.set_nonblocking(True)
-                    var ptr = alloc[TcpListener](1)
+                    var ptr = alloc(Layout[TcpListener](count=1)).unsafe_leak()
                     ptr.unsafe_write(pwl^)
                     s._per_worker_listener_addrs.append(Int(ptr))
                 except:
@@ -513,7 +515,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
                     var xl = bind_reuseport(extra_addrs[j])
                     xl._socket.set_nonblocking(True)
                     var xfd = Int(xl.as_raw_fd())
-                    var xptr = alloc[TcpListener](1)
+                    var xptr = alloc(Layout[TcpListener](count=1)).unsafe_leak()
                     xptr.unsafe_write(xl^)
                     s._per_worker_listener_addrs.append(Int(xptr))
                     per_worker.append(xfd)
@@ -528,7 +530,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
             # listener (pre-bound on this thread above).
             var worker_listener_fd: Int = listener_fd
             if prebind_per_worker and i < len(s._per_worker_listener_addrs):
-                var pwl_ptr = UnsafePointer[TcpListener, MutUntrackedOrigin](
+                var pwl_ptr = Pointer[TcpListener, MutUntrackedOrigin](
                     unsafe_from_address=s._per_worker_listener_addrs[i]
                 )
                 worker_listener_fd = Int(pwl_ptr[].as_raw_fd())
@@ -549,7 +551,9 @@ struct Scheduler[F: Frontend & Copyable](Movable):
                 worker_extra_fds^,
             )
             # Native Mojo allocator (see _scheduler_free_raw for why).
-            var ctx_ptr = alloc[_WorkerCtx[Self.F]](1)
+            var ctx_ptr = alloc(
+                Layout[_WorkerCtx[Self.F]](count=1)
+            ).unsafe_leak()
             ctx_ptr.unsafe_write(ctx^)
             var arg = ctx_ptr.unsafe_bitcast[UInt8]()
             var ctx_addr = Int(ctx_ptr)
@@ -578,9 +582,9 @@ struct Scheduler[F: Frontend & Copyable](Movable):
                 _scheduler_free_raw(s._workers_ptr.unsafe_bitcast[UInt8]())
                 # UnsafePointer is non-nullable; C NULL from a runtime 0.
                 var null_addr = 0
-                s._workers_ptr = UnsafePointer[
-                    ThreadHandle, MutUntrackedOrigin
-                ](unsafe_from_address=null_addr)
+                s._workers_ptr = Pointer[ThreadHandle, MutUntrackedOrigin](
+                    unsafe_from_address=null_addr
+                )
                 s._workers_len = 0
                 # Destroy + free EVERY ctx (the ones that workers claimed
                 # + this one that never got claimed).
@@ -642,7 +646,7 @@ struct Scheduler[F: Frontend & Copyable](Movable):
         if self._workers_len > 0:
             _scheduler_free_raw(self._workers_ptr.unsafe_bitcast[UInt8]())
             var null_addr = 0
-            self._workers_ptr = UnsafePointer[ThreadHandle, MutUntrackedOrigin](
+            self._workers_ptr = Pointer[ThreadHandle, MutUntrackedOrigin](
                 unsafe_from_address=null_addr
             )
             self._workers_len = 0

@@ -443,7 +443,7 @@ struct HpackEncoder(Copyable, Defaultable, Movable):
                 return
         encode_integer(out_buf, n, 7, UInt8(0))  # H=0
         for i in range(n):
-            out_buf.append(src[i])
+            out_buf.append(src[unsafe_offset=i])
 
     def encode(self, headers: Span[HpackHeader, _]) -> List[UInt8]:
         var out = List[UInt8]()

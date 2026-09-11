@@ -59,22 +59,22 @@ def base64_encode(data: Span[UInt8, _]) -> String:
         var a = Int(data[i])
         var b = Int(data[i + 1])
         var c = Int(data[i + 2])
-        out += chr(Int(tbl[a >> 2]))
-        out += chr(Int(tbl[((a & 3) << 4) | (b >> 4)]))
-        out += chr(Int(tbl[((b & 0xF) << 2) | (c >> 6)]))
-        out += chr(Int(tbl[c & 0x3F]))
+        out += chr(Int(tbl[unsafe_offset=a >> 2]))
+        out += chr(Int(tbl[unsafe_offset=((a & 3) << 4) | (b >> 4)]))
+        out += chr(Int(tbl[unsafe_offset=((b & 0xF) << 2) | (c >> 6)]))
+        out += chr(Int(tbl[unsafe_offset=c & 0x3F]))
         i += 3
     if n - i == 1:
         var a = Int(data[i])
-        out += chr(Int(tbl[a >> 2]))
-        out += chr(Int(tbl[(a & 3) << 4]))
+        out += chr(Int(tbl[unsafe_offset=a >> 2]))
+        out += chr(Int(tbl[unsafe_offset=(a & 3) << 4]))
         out += "=="
     elif n - i == 2:
         var a = Int(data[i])
         var b = Int(data[i + 1])
-        out += chr(Int(tbl[a >> 2]))
-        out += chr(Int(tbl[((a & 3) << 4) | (b >> 4)]))
-        out += chr(Int(tbl[(b & 0xF) << 2]))
+        out += chr(Int(tbl[unsafe_offset=a >> 2]))
+        out += chr(Int(tbl[unsafe_offset=((a & 3) << 4) | (b >> 4)]))
+        out += chr(Int(tbl[unsafe_offset=(b & 0xF) << 2]))
         out += "="
     return out^
 
@@ -117,7 +117,7 @@ def base64_decode(s: String) raises -> List[UInt8]:
     """
     var n = s.byte_length()
     var src = s.unsafe_ptr()
-    while n > 0 and src[n - 1] == 61:  # strip trailing '='
+    while n > 0 and src[unsafe_offset=n - 1] == 61:  # strip trailing '='
         n -= 1
     if n == 0:
         return List[UInt8]()
@@ -128,23 +128,23 @@ def base64_decode(s: String) raises -> List[UInt8]:
     out.reserve((n * 3) // 4)
     var i = 0
     while i + 4 <= n:
-        var b0 = _decode_byte(src[i])
-        var b1 = _decode_byte(src[i + 1])
-        var b2 = _decode_byte(src[i + 2])
-        var b3 = _decode_byte(src[i + 3])
+        var b0 = _decode_byte(src[unsafe_offset=i])
+        var b1 = _decode_byte(src[unsafe_offset=i + 1])
+        var b2 = _decode_byte(src[unsafe_offset=i + 2])
+        var b3 = _decode_byte(src[unsafe_offset=i + 3])
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 0xFF))
         out.append(UInt8(((b1 << 4) | (b2 >> 2)) & 0xFF))
         out.append(UInt8(((b2 << 6) | b3) & 0xFF))
         i += 4
     var rem = n - i
     if rem == 2:
-        var b0 = _decode_byte(src[i])
-        var b1 = _decode_byte(src[i + 1])
+        var b0 = _decode_byte(src[unsafe_offset=i])
+        var b1 = _decode_byte(src[unsafe_offset=i + 1])
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 0xFF))
     elif rem == 3:
-        var b0 = _decode_byte(src[i])
-        var b1 = _decode_byte(src[i + 1])
-        var b2 = _decode_byte(src[i + 2])
+        var b0 = _decode_byte(src[unsafe_offset=i])
+        var b1 = _decode_byte(src[unsafe_offset=i + 1])
+        var b2 = _decode_byte(src[unsafe_offset=i + 2])
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 0xFF))
         out.append(UInt8(((b1 << 4) | (b2 >> 2)) & 0xFF))
     return out^

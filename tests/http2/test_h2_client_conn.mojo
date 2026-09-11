@@ -94,7 +94,7 @@ def test_preface_emitted_on_construction() raises:
     var pp = preface.unsafe_ptr()
     assert_true(len(bytes) >= 24)
     for i in range(24):
-        assert_equal(Int(bytes[i]), Int(pp[i]))
+        assert_equal(Int(bytes[i]), Int(pp[unsafe_offset=i]))
     # Then a SETTINGS frame on stream 0.
     var rest = List[UInt8](capacity=len(bytes) - 24)
     for i in range(24, len(bytes)):

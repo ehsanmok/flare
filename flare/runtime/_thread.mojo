@@ -37,7 +37,7 @@ from std.ffi import (
     OwnedDLHandle,
     get_errno,
 )
-from std.memory import UnsafePointer, alloc, memcpy, unsafe_memset_zero
+from std.memory import Layout, UnsafePointer, alloc, memcpy, unsafe_memset_zero
 from std.sys.info import CompilationTarget
 
 
@@ -49,7 +49,7 @@ from std.sys.info import CompilationTarget
 # is ABI-compatible with what pthread expects. The function must not
 # raise (pthread has no exception channel); convert any error to a
 # sentinel pointer value before returning.
-comptime _OpaquePtr = UnsafePointer[UInt8, MutUntrackedOrigin]
+comptime _OpaquePtr = Pointer[UInt8, MutUntrackedOrigin]
 
 
 # Shortcut for making a NULL pointer of the flavour we use throughout.
@@ -122,8 +122,8 @@ struct ThreadHandle(Movable):
                 human-readable message).
         """
         var tid = UInt64(0)
-        var tid_addr = Int(UnsafePointer[UInt64, _](to=tid))
-        var tid_ptr = UnsafePointer[UInt64, MutUntrackedOrigin](
+        var tid_addr = Int(Pointer[UInt64, _](to=tid))
+        var tid_ptr = Pointer[UInt64, MutUntrackedOrigin](
             unsafe_from_address=tid_addr
         )
 
@@ -133,7 +133,7 @@ struct ThreadHandle(Movable):
         var rc = external_call[
             "pthread_create",
             c_int,
-            UnsafePointer[UInt64, MutUntrackedOrigin],  # thread*
+            Pointer[UInt64, MutUntrackedOrigin],  # thread*
             _OpaquePtr,  # attr*
             def(_OpaquePtr) thin -> _OpaquePtr,  # start routine
             _OpaquePtr,  # arg
@@ -201,14 +201,16 @@ struct ThreadHandle(Movable):
             # own ``free`` declaration at MLIR legalization time when
             # this module is pulled into a fuzz-environment compile
             # (mozz harness).
-            var cpuset_ptr = alloc[UInt8](_CPUSET_SIZE)
+            var cpuset_ptr = alloc(
+                Layout[UInt8](count=_CPUSET_SIZE)
+            ).unsafe_leak()
             unsafe_memset_zero(cpuset_ptr, _CPUSET_SIZE)
             var byte_idx = cpu // 8
             var bit_idx = cpu % 8
             if byte_idx < _CPUSET_SIZE:
-                cpuset_ptr[byte_idx] = cpuset_ptr[byte_idx] | UInt8(
-                    1 << bit_idx
-                )
+                cpuset_ptr[unsafe_offset=byte_idx] = cpuset_ptr[
+                    unsafe_offset=byte_idx
+                ] | UInt8(1 << bit_idx)
             var rc = external_call[
                 "pthread_setaffinity_np",
                 c_int,

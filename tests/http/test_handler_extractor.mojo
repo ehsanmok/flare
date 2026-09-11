@@ -61,7 +61,7 @@ def _accept_handler[H: Handler](handler: H) raises -> Int:
 
 
 def _accept_extracted[
-    H: Copyable & Defaultable & Handler & Movable
+    H: Copyable & Defaultable & Handler
 ](extracted: Extracted[H]) -> Int:
     """Helper generic over the bound that ``Extracted`` declares.
     The fact that ``Extracted[EchoUser]`` flows through this

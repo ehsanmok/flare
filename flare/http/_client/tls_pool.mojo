@@ -29,7 +29,7 @@ multiplexed and handled on the h2 path, never returned to this pool.
 
 from std.collections import Dict, List, Optional
 from std.ffi import c_int, external_call
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 
 from ...tls import TlsStream
@@ -114,8 +114,8 @@ struct TlsConnectionPool(Copyable, Movable):
 
     def _state(
         imm self,
-    ) -> UnsafePointer[_TlsPoolState, MutUntrackedOrigin]:
-        return UnsafePointer[UInt8, MutUntrackedOrigin](
+    ) -> Pointer[_TlsPoolState, MutUntrackedOrigin]:
+        return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[_TlsPoolState]()
 
@@ -150,7 +150,7 @@ struct TlsConnectionPool(Copyable, Movable):
                 Pool[TlsStream].free(addr)
                 continue
             var cell = Pool[TlsStream].get_ptr(addr)
-            var stream = cell.take_pointee()
+            var stream = cell.unsafe_take_pointee()
             cell.unsafe_free()
             sp[].entries[key] = deque^
             return Optional(stream^)
@@ -210,14 +210,14 @@ struct TlsConnectionPool(Copyable, Movable):
 def _monotonic_ms() -> Int:
     """``CLOCK_MONOTONIC`` in milliseconds; ``0`` on FFI failure
     (which makes idle-timeout eviction a conservative no-op)."""
-    var ts_buf = alloc[Int](2)
-    ts_buf[0] = 0
-    ts_buf[1] = 0
+    var ts_buf = alloc(Layout[Int](count=2)).unsafe_leak()
+    ts_buf[unsafe_offset=0] = 0
+    ts_buf[unsafe_offset=1] = 0
     var rc = external_call["clock_gettime", c_int](_CLOCK_MONOTONIC, ts_buf)
     if Int(rc) != 0:
         ts_buf.unsafe_free()
         return 0
-    var sec = ts_buf[0]
-    var nsec = ts_buf[1]
+    var sec = ts_buf[unsafe_offset=0]
+    var nsec = ts_buf[unsafe_offset=1]
     ts_buf.unsafe_free()
     return sec * 1000 + nsec // 1_000_000

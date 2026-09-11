@@ -137,11 +137,11 @@ def _safe_join(root: String, url_path: String) -> String:
     if url_path.byte_length() == 0:
         return ""
     var src = url_path.unsafe_ptr()
-    if src[0] != 47:  # '/'
+    if src[unsafe_offset=0] != 47:  # '/'
         return ""
     # Reject NULs.
     for i in range(url_path.byte_length()):
-        if src[i] == 0:
+        if src[unsafe_offset=i] == 0:
             return ""
     # Reject ``..`` components.
     var n = url_path.byte_length()
@@ -149,10 +149,14 @@ def _safe_join(root: String, url_path: String) -> String:
     while i < n:
         var end = n
         for j in range(i, n):
-            if src[j] == 47:
+            if src[unsafe_offset=j] == 47:
                 end = j
                 break
-        if end - i == 2 and src[i] == 46 and src[i + 1] == 46:
+        if (
+            end - i == 2
+            and src[unsafe_offset=i] == 46
+            and src[unsafe_offset=i + 1] == 46
+        ):
             return ""
         i = end + 1
     var out = String("")
@@ -167,13 +171,13 @@ def _ext(path: String) -> String:
     var src = path.unsafe_ptr()
     var i = n - 1
     while i >= 0:
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         if c == 47:  # '/'
             return ""
         if c == 46:  # '.'
             var out = String(capacity=n - i)
             for j in range(i + 1, n):
-                var ec = src[j]
+                var ec = src[unsafe_offset=j]
                 if ec >= 65 and ec <= 90:
                     out += chr(Int(ec) + 32)
                 else:
@@ -254,15 +258,15 @@ def parse_range(value: String, file_size: Int) raises -> Optional[ByteRange]:
     if n < 6:
         raise Error("parse_range: invalid header")
     for i in range(6):
-        if src[i] != prefix.unsafe_ptr()[i]:
+        if src[unsafe_offset=i] != prefix.unsafe_ptr()[unsafe_offset=i]:
             raise Error("parse_range: not bytes-unit")
     var rest = String(unsafe_from_utf8=value.as_bytes()[6:])
     for i in range(rest.byte_length()):
-        if rest.unsafe_ptr()[i] == 44:
+        if rest.unsafe_ptr()[unsafe_offset=i] == 44:
             raise Error("parse_range: multi-range unsupported")
     var dash = -1
     for i in range(rest.byte_length()):
-        if rest.unsafe_ptr()[i] == 45:  # '-'
+        if rest.unsafe_ptr()[unsafe_offset=i] == 45:  # '-'
             dash = i
             break
     if dash < 0:
@@ -333,7 +337,7 @@ struct FileServer(Copyable, Defaultable, Handler, Movable):
         if path.byte_length() == 0:
             return ""
         # Trailing slash -> append index file.
-        if path.unsafe_ptr()[path.byte_length() - 1] == 47:
+        if path.unsafe_ptr()[unsafe_offset=path.byte_length() - 1] == 47:
             return path + self.index_file
         return path^
 

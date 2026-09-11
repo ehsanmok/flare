@@ -398,7 +398,7 @@ struct _FakeStream(Readable):
         self._data = data.copy()
         self._pos = 0
 
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
         """Satisfy the ``Readable`` trait by copying data into ``buf``."""
         var available = len(self._data) - self._pos
         if available <= 0:
@@ -407,7 +407,7 @@ struct _FakeStream(Readable):
         # Use C memcpy via external_call to bypass Mojo's origin-mutability
         # tracking on the parameter pointer.
         _ = external_call["memcpy", NoneType, Int, Int, Int](
-            Int(buf), Int(self._data.unsafe_ptr() + self._pos), n
+            Int(buf), Int(self._data.unsafe_ptr().unsafe_offset(self._pos)), n
         )
         self._pos += n
         return n

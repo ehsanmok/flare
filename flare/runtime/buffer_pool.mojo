@@ -328,8 +328,8 @@ struct BufferPool(Movable):
         if len(self._buckets[idx]) > 0:
             var addr = self._buckets[idx].pop()
             var ptr = Pool[BufferHandle].get_ptr(addr)
-            var h = ptr.take_pointee()
-            ptr.free()
+            var h = ptr.unsafe_take_pointee()
+            ptr.unsafe_free()
             h.reset()
             return h^
         return BufferHandle.for_class(idx)

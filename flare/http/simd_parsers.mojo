@@ -153,10 +153,10 @@ def simd_memmem(haystack: Span[UInt8, _], needle: Span[UInt8, _]) -> Int:
     var stop = nh - nn
     while i <= stop:
         # Common case: the first byte mismatches and we skip.
-        if hp[i] == np[0]:
+        if hp[unsafe_offset=i] == np[unsafe_offset=0]:
             var matched = True
             for j in range(1, nn):
-                if hp[i + j] != np[j]:
+                if hp[unsafe_offset=i + j] != np[unsafe_offset=j]:
                     matched = False
                     break
             if matched:
@@ -213,12 +213,12 @@ def simd_percent_decode(
     var p = input.unsafe_ptr()
     var i = 0
     while i < n:
-        var b = p[i]
+        var b = p[unsafe_offset=i]
         if b == UInt8(37):  # '%'
             if i + 2 >= n:
                 raise HttpParseError(HttpParseError.TRAILING_PERCENT)
-            var hi = _hex_digit(p[i + 1])
-            var lo = _hex_digit(p[i + 2])
+            var hi = _hex_digit(p[unsafe_offset=i + 1])
+            var lo = _hex_digit(p[unsafe_offset=i + 2])
             if hi < 0 or lo < 0:
                 raise HttpParseError(HttpParseError.INVALID_HEX)
             output.append(UInt8(hi * 16 + lo))
@@ -255,5 +255,5 @@ def simd_cookie_scan(input: Span[UInt8, _], mut offsets: List[Int]):
     )
     var p = input.unsafe_ptr()
     for i in range(n):
-        if p[i] == UInt8(59):  # ';'
+        if p[unsafe_offset=i] == UInt8(59):  # ';'
             offsets.append(i)

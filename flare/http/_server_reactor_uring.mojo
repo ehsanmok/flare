@@ -15,7 +15,7 @@ guard themselves with a ``comptime if not is_linux(): raise``.
 from std.collections import Dict
 from std.ffi import c_int
 from std.os import getenv
-from std.memory import UnsafePointer, alloc, stack_allocation
+from std.memory import Layout, UnsafePointer, alloc, stack_allocation
 from std.sys.info import CompilationTarget
 
 from flare.http.handler import Handler
@@ -519,7 +519,7 @@ def _alloc_recv_buffer_pool() raises -> Int:
     ``_free_recv_buffer_pool``).
     """
     var size = _URING_BR_NBUFS * _URING_BR_BUF_SIZE
-    var raw = alloc[UInt8](size)
+    var raw = alloc(Layout[UInt8](count=size)).unsafe_leak()
     # Zero-init defensively; kernel will overwrite the prefix of
     # each buffer on every recv, but a stale read of an unused
     # slot (e.g. dump-on-error) shouldn't trip on uninitialised
@@ -533,7 +533,7 @@ def _free_recv_buffer_pool(addr: Int):
     """Release the pool previously returned by ``_alloc_recv_buffer_pool``."""
     if addr == 0:
         return
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
     p.unsafe_free()
 
 
@@ -587,7 +587,7 @@ def _drive_handler_with_submit_send[
     bytes: Span[UInt8, _],
     config: ServerConfig,
     ref handler: H,
-    ch_ptr: UnsafePointer[ConnHandle, MutUntrackedOrigin],
+    ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
     mut ureactor: UringReactor,
 ) raises -> Bool:
     """Drive one request via parse → handler → submit_send.
@@ -641,7 +641,11 @@ def _drive_handler_with_submit_send[
             and ch_ptr[].state == STATE_WRITING
             and len(ch_ptr[].write_buf) > ch_ptr[].write_pos
         ):
-            var write_ptr = ch_ptr[].write_buf.unsafe_ptr() + ch_ptr[].write_pos
+            var write_ptr = (
+                ch_ptr[]
+                .write_buf.unsafe_ptr()
+                .unsafe_offset(ch_ptr[].write_pos)
+            )
             var write_len = len(ch_ptr[].write_buf) - ch_ptr[].write_pos
             try:
                 ureactor.submit_send(fd, write_ptr, write_len, conn_id)
@@ -662,7 +666,7 @@ def _on_send_cqe_complete[
     conn_id: UInt64,
     config: ServerConfig,
     ref handler: H,
-    ch_ptr: UnsafePointer[ConnHandle, MutUntrackedOrigin],
+    ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
     mut ureactor: UringReactor,
 ) raises -> Bool:
     """Handle a ``URING_OP_SEND`` CQE: clear the send-in-flight
@@ -706,7 +710,7 @@ def _drive_handler_after_buf_recv[
     bytes: Span[UInt8, _],
     config: ServerConfig,
     ref handler: H,
-    ch_ptr: UnsafePointer[ConnHandle, MutUntrackedOrigin],
+    ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
 ) raises -> Bool:
     """Sync-send variant kept as a fallback / reference -- see
     ``_drive_handler_with_submit_send`` for the production io_uring
@@ -840,7 +844,7 @@ def run_uring_bufring_reactor_loop_shared[
 
     var completions = List[UringCompletion]()
     var exit_status = WORKER_STATUS_CLEAN
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         completions.clear()
@@ -914,10 +918,10 @@ def run_uring_bufring_reactor_loop_shared[
             var fd = _br_unpack_fd(conn_id)
             var bid = Int(comp.flags >> UInt32(16))
             var n = Int(comp.res)
-            var pool_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+            var pool_ptr = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=pool_addr
             )
-            var buf = pool_ptr + (bid * _URING_BR_BUF_SIZE)
+            var buf = pool_ptr.unsafe_offset((bid * _URING_BR_BUF_SIZE))
             var ch_ptr = _conn_ptr_from_int(conns[conn_id])
 
             # Stage the kernel bytes into the conn's ``read_buf``

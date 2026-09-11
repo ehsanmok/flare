@@ -17,8 +17,8 @@ def _eq_icase(a: String, b: String) -> Bool:
     var ap = a.unsafe_ptr()
     var bp = b.unsafe_ptr()
     for i in range(a.byte_length()):
-        var ac = ap[i]
-        var bc = bp[i]
+        var ac = ap[unsafe_offset=i]
+        var bc = bp[unsafe_offset=i]
         if ac >= 65 and ac <= 90:
             ac = ac + 32
         if bc >= 65 and bc <= 90:
@@ -76,11 +76,11 @@ struct HeaderInjectionError(Copyable, Movable, Writable):
 def _check_injection(key: String, value: String) raises:
     """Raise ``HeaderInjectionError`` if key or value contain CR/LF."""
     for i in range(key.byte_length()):
-        var c = key.unsafe_ptr()[i]
+        var c = key.unsafe_ptr()[unsafe_offset=i]
         if c == 13 or c == 10:
             raise HeaderInjectionError(key, value)
     for i in range(value.byte_length()):
-        var c = value.unsafe_ptr()[i]
+        var c = value.unsafe_ptr()[unsafe_offset=i]
         if c == 13 or c == 10:
             raise HeaderInjectionError(key, value)
 

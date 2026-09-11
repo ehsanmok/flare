@@ -91,10 +91,10 @@ def _eq_icase_bytes(
     if len(a) != b_len:
         return False
     var ap = a.unsafe_ptr()
-    var bp = buf.unsafe_ptr() + b_start
+    var bp = buf.unsafe_ptr().unsafe_offset(b_start)
     for i in range(b_len):
-        var ac = ap[i]
-        var bc = bp[i]
+        var ac = ap[unsafe_offset=i]
+        var bc = bp[unsafe_offset=i]
         if ac >= 65 and ac <= 90:
             ac = ac + 32
         if bc >= 65 and bc <= 90:
@@ -246,12 +246,12 @@ def parse_header_view[
         # Find end of line (LF). RFC 7230 mandates CRLF but some
         # tooling sends bare LF; we accept either.
         var line_end = i
-        while line_end < n and p[line_end] != _LF:
+        while line_end < n and p[unsafe_offset=line_end] != _LF:
             line_end += 1
 
         # Empty line marks end of headers.
         var stripped_end = line_end
-        if stripped_end > i and p[stripped_end - 1] == _CR:
+        if stripped_end > i and p[unsafe_offset=stripped_end - 1] == _CR:
             stripped_end -= 1
         if stripped_end == i:
             break
@@ -260,7 +260,7 @@ def parse_header_view[
         var colon = -1
         var j = i
         while j < stripped_end:
-            if p[j] == _COLON:
+            if p[unsafe_offset=j] == _COLON:
                 colon = j
                 break
             j += 1
@@ -277,15 +277,17 @@ def parse_header_view[
         # smuggling attempts that chain a malformed header into the
         # next request boundary.
         for k in range(nstart, nstart + nlen):
-            if not _is_token_char(p[k]):
+            if not _is_token_char(p[unsafe_offset=k]):
                 raise Error("invalid character in header name")
 
         # Trim OWS on the value side.
         var vstart = colon + 1
-        while vstart < stripped_end and _is_ascii_space(p[vstart]):
+        while vstart < stripped_end and _is_ascii_space(
+            p[unsafe_offset=vstart]
+        ):
             vstart += 1
         var vend = stripped_end
-        while vend > vstart and _is_ascii_space(p[vend - 1]):
+        while vend > vstart and _is_ascii_space(p[unsafe_offset=vend - 1]):
             vend -= 1
         var vlen = vend - vstart
 
@@ -294,7 +296,7 @@ def parse_header_view[
         # response-splitting / header-injection vector. NUL is an
         # implementation-defined-behaviour foot-gun.
         for k in range(vstart, vend):
-            var vc = p[k]
+            var vc = p[unsafe_offset=k]
             if vc == 0 or vc == _LF or vc == _CR:
                 raise Error("invalid byte in header value")
 

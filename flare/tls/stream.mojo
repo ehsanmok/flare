@@ -82,7 +82,7 @@ def _c_err(imm lib: OwnedDLHandle) raises -> String:
         Human-readable error string (empty if no error).
     """
     var fn_err = dl_sym[
-        def() thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
+        def() thin abi("C") -> Pointer[UInt8, MutUntrackedOrigin]
     ](lib, "flare_ssl_last_error")
     var p = fn_err()
     return String(
@@ -146,7 +146,7 @@ def _do_ssl_ctx_load_ca_bundle(
 
 
 def _do_ssl_ctx_load_cert_key(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     ctx: Int,
     var cert_path: String,
     var key_path: String,
@@ -166,7 +166,7 @@ def _do_ssl_ctx_load_cert_key(
 
 
 def _do_ssl_ctx_set_alpn_protos(
-    read lib: OwnedDLHandle, ctx: Int, blob: List[UInt8]
+    imm lib: OwnedDLHandle, ctx: Int, blob: List[UInt8]
 ) raises -> Int:
     var f = dl_sym[def(Int, Int, c_int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_set_alpn_protos"
@@ -208,7 +208,7 @@ def _do_ssl_connect(
 def _do_ssl_read(
     imm lib: OwnedDLHandle,
     ssl: Int,
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     size: Int,
 ) raises -> Int:
     var f = dl_sym[def(Int, Int, c_int) thin abi("C") -> c_int](
@@ -231,9 +231,9 @@ def _do_ssl_shutdown(imm lib: OwnedDLHandle, ssl: Int) raises -> Int:
     return Int(f(ssl))
 
 
-def _do_ssl_get_version(read lib: OwnedDLHandle, ssl: Int) raises -> String:
+def _do_ssl_get_version(imm lib: OwnedDLHandle, ssl: Int) raises -> String:
     var f = dl_sym[
-        def(Int) thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
+        def(Int) thin abi("C") -> Pointer[UInt8, MutUntrackedOrigin]
     ](lib, "flare_ssl_get_version")
     var p = f(ssl)
     return String(
@@ -245,9 +245,9 @@ def _do_ssl_get_version(read lib: OwnedDLHandle, ssl: Int) raises -> String:
     )
 
 
-def _do_ssl_get_cipher(read lib: OwnedDLHandle, ssl: Int) raises -> String:
+def _do_ssl_get_cipher(imm lib: OwnedDLHandle, ssl: Int) raises -> String:
     var f = dl_sym[
-        def(Int) thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
+        def(Int) thin abi("C") -> Pointer[UInt8, MutUntrackedOrigin]
     ](lib, "flare_ssl_get_cipher")
     var p = f(ssl)
     return String(
@@ -260,7 +260,7 @@ def _do_ssl_get_cipher(read lib: OwnedDLHandle, ssl: Int) raises -> String:
 
 
 def _do_ssl_get_peer_cert_subject(
-    read lib: OwnedDLHandle, ssl: Int, buf: UnsafePointer[UInt8, _], size: Int
+    imm lib: OwnedDLHandle, ssl: Int, buf: Pointer[UInt8, _], size: Int
 ) raises -> Int:
     var f = dl_sym[def(Int, Int, c_int) thin abi("C") -> c_int](
         lib, "flare_ssl_get_peer_cert_subject"
@@ -269,7 +269,7 @@ def _do_ssl_get_peer_cert_subject(
 
 
 def _do_ssl_get_alpn_selected(
-    imm lib: OwnedDLHandle, ssl: Int, buf: UnsafePointer[UInt8, _], size: Int
+    imm lib: OwnedDLHandle, ssl: Int, buf: Pointer[UInt8, _], size: Int
 ) raises -> Int:
     var f = dl_sym[def(Int, Int, c_int) thin abi("C") -> c_int](
         lib, "flare_ssl_get_alpn_selected"
@@ -602,7 +602,7 @@ struct TlsStream(Movable, Readable):
                 blob.append(UInt8(n))
                 var pp = p.unsafe_ptr()
                 for j in range(n):
-                    blob.append(pp[j])
+                    blob.append(pp[unsafe_offset=j])
             if len(blob) > 255:
                 _do_ssl_ctx_free(lib, ctx)
                 raise TlsHandshakeError(
@@ -731,7 +731,7 @@ struct TlsStream(Movable, Readable):
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
         """Decrypt and read up to ``size`` bytes into ``buf``.
 
         Returns 0 on clean TLS closure (``close_notify`` received).
@@ -802,7 +802,7 @@ struct TlsStream(Movable, Readable):
         var ptr = data.unsafe_ptr()
         while sent < total:
             var chunk = Span[UInt8, _](
-                unsafe_ptr=ptr + sent, length=total - sent
+                unsafe_ptr=ptr.unsafe_offset(sent), length=total - sent
             )
             sent += self.write(chunk)
 

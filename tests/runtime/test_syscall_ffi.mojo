@@ -144,7 +144,7 @@ def test_epoll_event_set_and_read_back() raises:
     var buf = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
     # Zero-initialise for cleanliness
     for i in range(EPOLL_EVENT_SIZE):
-        (buf + i).unsafe_write(UInt8(0))
+        (buf.unsafe_offset(i)).unsafe_write(UInt8(0))
     # Re-use the buffer via _set (which reinitialises bytes)
     _epoll_event_set(buf, EPOLLIN | EPOLLET, UInt64(0xDEADBEEFCAFEBABE))
     assert_equal(_epoll_event_read_events(buf), EPOLLIN | EPOLLET)
@@ -188,7 +188,7 @@ def test_epoll_ctl_add_then_del_ok() raises:
     assert_true(epfd >= 0)
     var ev = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
     for i in range(EPOLL_EVENT_SIZE):
-        (ev + i).unsafe_write(UInt8(0))
+        (ev.unsafe_offset(i)).unsafe_write(UInt8(0))
     _epoll_event_set(ev, EPOLLIN, UInt64(42))
     var add = _epoll_ctl(epfd, EPOLL_CTL_ADD, a._socket.fd, ev)
     assert_equal(add, c_int(0), "EPOLL_CTL_ADD returned " + String(add))
@@ -226,7 +226,7 @@ def test_epoll_wait_detects_readable() raises:
     assert_true(epfd >= 0)
     var ev = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
     for i in range(EPOLL_EVENT_SIZE):
-        (ev + i).unsafe_write(UInt8(0))
+        (ev.unsafe_offset(i)).unsafe_write(UInt8(0))
     var token = UInt64(0xCAFEBABE00000001)
     _epoll_event_set(ev, EPOLLIN, token)
     var rc = _epoll_ctl(epfd, EPOLL_CTL_ADD, a._socket.fd, ev)
@@ -279,7 +279,7 @@ def test_kevent_set_and_read_back_positive_fields() raises:
     """Write all fields, read back identical values."""
     var buf = stack_allocation[KEVENT_SIZE, UInt8]()
     for i in range(KEVENT_SIZE):
-        (buf + i).unsafe_write(UInt8(0))
+        (buf.unsafe_offset(i)).unsafe_write(UInt8(0))
     _kevent_set(
         buf,
         ident=UInt64(7),
@@ -300,7 +300,7 @@ def test_kevent_set_filter_negative_roundtrip() raises:
     """Negative filter values (EVFILT_USER = -10) round-trip correctly."""
     var buf = stack_allocation[KEVENT_SIZE, UInt8]()
     for i in range(KEVENT_SIZE):
-        (buf + i).unsafe_write(UInt8(0))
+        (buf.unsafe_offset(i)).unsafe_write(UInt8(0))
     _kevent_set(
         buf,
         ident=UInt64(0),
@@ -337,7 +337,7 @@ def test_kevent_zero_changes_zero_events_timeout_returns_zero() raises:
     # 16-byte timespec: tv_sec=0, tv_nsec=0
     var ts = stack_allocation[16, UInt8]()
     for i in range(16):
-        (ts + i).unsafe_write(UInt8(0))
+        (ts.unsafe_offset(i)).unsafe_write(UInt8(0))
     var dummy = stack_allocation[KEVENT_SIZE, UInt8]()
     var out = stack_allocation[KEVENT_SIZE * 4, UInt8]()
     var n = _kevent(kq, dummy, c_int(0), out, c_int(4), ts)
@@ -360,7 +360,7 @@ def test_kevent_detects_readable() raises:
     # Register a for read
     var changes = stack_allocation[KEVENT_SIZE, UInt8]()
     for i in range(KEVENT_SIZE):
-        (changes + i).unsafe_write(UInt8(0))
+        (changes.unsafe_offset(i)).unsafe_write(UInt8(0))
     var token = UInt64(0xCAFEBABE00000002)
     _kevent_set(
         changes,
@@ -374,7 +374,7 @@ def test_kevent_detects_readable() raises:
     # Install the change (zero out wait).
     var ts_zero = stack_allocation[16, UInt8]()
     for i in range(16):
-        (ts_zero + i).unsafe_write(UInt8(0))
+        (ts_zero.unsafe_offset(i)).unsafe_write(UInt8(0))
     var out = stack_allocation[KEVENT_SIZE * 4, UInt8]()
     var installed = _kevent(kq, changes, c_int(1), out, c_int(0), ts_zero)
     assert_true(installed >= c_int(0))
@@ -384,9 +384,9 @@ def test_kevent_detects_readable() raises:
     _ = _write_fd(b._socket.fd, payload, c_size_t(1))
     # Wait up to 1s
     var ts_1s = stack_allocation[16, UInt8]()
-    (ts_1s + 0).unsafe_write(UInt8(1))  # tv_sec low byte = 1
+    (ts_1s.unsafe_offset(0)).unsafe_write(UInt8(1))  # tv_sec low byte = 1
     for i in range(1, 16):
-        (ts_1s + i).unsafe_write(UInt8(0))
+        (ts_1s.unsafe_offset(i)).unsafe_write(UInt8(0))
     var n = _kevent(kq, changes, c_int(0), out, c_int(4), ts_1s)
     assert_true(n >= c_int(1), "expected at least 1 event")
     assert_equal(_kevent_read_filter(out), EVFILT_READ)
@@ -410,7 +410,9 @@ def test_eventfd_write_then_read_counts() raises:
     # Write one u64 LE.
     var buf = stack_allocation[8, UInt8]()
     for i in range(8):
-        (buf + i).unsafe_write(UInt8((counter >> UInt64(8 * i)) & 0xFF))
+        (buf.unsafe_offset(i)).unsafe_write(
+            UInt8((counter >> UInt64(8 * i)) & 0xFF)
+        )
     var w = _write_fd(efd, buf, c_size_t(8))
     assert_equal(w, 8, "write to eventfd must be 8 bytes")
     # Read it back (counter value, then resets to 0)
@@ -419,7 +421,7 @@ def test_eventfd_write_then_read_counts() raises:
     assert_equal(r, 8, "read from eventfd must be 8 bytes")
     var value: UInt64 = 0
     for i in range(8):
-        value |= UInt64((rbuf + i).load()) << UInt64(8 * i)
+        value |= UInt64((rbuf.unsafe_offset(i)).unsafe_load()) << UInt64(8 * i)
     assert_equal(value, counter)
     _ = _close(efd)
 
@@ -428,11 +430,11 @@ def test_pipe_round_trip_byte() raises:
     """Write a byte to pipe[1], read it from pipe[0]."""
     var fds = stack_allocation[2, c_int]()
     fds.unsafe_write(INVALID_FD)
-    (fds + 1).unsafe_write(INVALID_FD)
+    (fds.unsafe_offset(1)).unsafe_write(INVALID_FD)
     var rc = _pipe(fds)
     assert_equal(rc, c_int(0), "pipe must return 0 on success")
-    var read_end = fds.load()
-    var write_end = (fds + 1).load()
+    var read_end = fds.unsafe_load()
+    var write_end = (fds.unsafe_offset(1)).unsafe_load()
     assert_true(read_end >= 0)
     assert_true(write_end >= 0)
     # Write a byte.
@@ -445,7 +447,7 @@ def test_pipe_round_trip_byte() raises:
     rbuf.unsafe_write(UInt8(0))
     var rn = _read_fd(read_end, rbuf, c_size_t(1))
     assert_equal(rn, 1)
-    assert_equal(rbuf.load(), UInt8(ord("Z")))
+    assert_equal(rbuf.unsafe_load(), UInt8(ord("Z")))
     _ = _close(read_end)
     _ = _close(write_end)
 
@@ -470,7 +472,7 @@ def test_kevent_on_invalid_fd_returns_negative() raises:
         return
     var ts = stack_allocation[16, UInt8]()
     for i in range(16):
-        (ts + i).unsafe_write(UInt8(0))
+        (ts.unsafe_offset(i)).unsafe_write(UInt8(0))
     var dummy = stack_allocation[KEVENT_SIZE, UInt8]()
     var out = stack_allocation[KEVENT_SIZE * 4, UInt8]()
     var n = _kevent(c_int(-1), dummy, c_int(0), out, c_int(4), ts)

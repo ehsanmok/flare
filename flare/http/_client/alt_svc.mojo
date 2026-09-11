@@ -35,7 +35,7 @@ References:
 
 from std.collections import Dict, List, Optional
 from std.ffi import c_int, external_call
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 
 from flare.http.proto.ascii import ascii_lower
@@ -55,14 +55,14 @@ def monotonic_now_s() -> UInt64:
     required and it is immune to wall-clock jumps. Falls back to 0
     on FFI failure (every entry then reads as fresh, which is
     conservative)."""
-    var ts_buf = alloc[Int](2)
-    ts_buf[0] = 0
-    ts_buf[1] = 0
+    var ts_buf = alloc(Layout[Int](count=2)).unsafe_leak()
+    ts_buf[unsafe_offset=0] = 0
+    ts_buf[unsafe_offset=1] = 0
     var rc = external_call["clock_gettime", c_int](_CLOCK_MONOTONIC, ts_buf)
     if Int(rc) != 0:
         ts_buf.unsafe_free()
         return UInt64(0)
-    var sec = ts_buf[0]
+    var sec = ts_buf[unsafe_offset=0]
     ts_buf.unsafe_free()
     return UInt64(sec)
 
@@ -304,7 +304,7 @@ struct AltSvcStore(Copyable, Movable):
     @staticmethod
     def new() -> AltSvcStore:
         """Allocate a fresh, empty store."""
-        var p = alloc[_AltSvcState](1)
+        var p = alloc(Layout[_AltSvcState](count=1)).unsafe_leak()
         p.unsafe_write(_AltSvcState(AltSvcCache()))
         return AltSvcStore(Int(p))
 
@@ -317,10 +317,10 @@ struct AltSvcStore(Copyable, Movable):
         """Return ``True`` when the store is allocated."""
         return self._addr != 0
 
-    def _state(imm self) -> UnsafePointer[_AltSvcState, MutUntrackedOrigin]:
+    def _state(imm self) -> Pointer[_AltSvcState, MutUntrackedOrigin]:
         """Re-materialise a typed pointer from :attr:`_addr` (mirrors
         the :class:`ClientPool._state` pattern)."""
-        return UnsafePointer[UInt8, MutUntrackedOrigin](
+        return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[_AltSvcState]()
 

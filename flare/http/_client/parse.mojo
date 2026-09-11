@@ -174,14 +174,14 @@ def _split_lines(s: String) -> List[String]:
     var n = s.byte_length()
     while i < n:
         if (
-            s.unsafe_ptr()[i] == 13
+            s.unsafe_ptr()[unsafe_offset=i] == 13
             and i + 1 < n
-            and s.unsafe_ptr()[i + 1] == 10
+            and s.unsafe_ptr()[unsafe_offset=i + 1] == 10
         ):
             lines.append(String(String(unsafe_from_utf8=s.as_bytes()[start:i])))
             start = i + 2
             i += 2
-        elif s.unsafe_ptr()[i] == 10:
+        elif s.unsafe_ptr()[unsafe_offset=i] == 10:
             lines.append(String(String(unsafe_from_utf8=s.as_bytes()[start:i])))
             start = i + 1
             i += 1
@@ -228,7 +228,7 @@ def _parse_status_line(line: String) raises -> _StatusLine:
     # Parse 3-digit code
     var code = 0
     for i in range(3):
-        var c = Int(rest.unsafe_ptr()[i])
+        var c = Int(rest.unsafe_ptr()[unsafe_offset=i])
         if c < 48 or c > 57:
             raise NetworkError("non-numeric HTTP status code in: " + line)
         code = code * 10 + (c - 48)
@@ -247,7 +247,10 @@ def _str_find(s: String, sub: String) -> Int:
     for i in range(n - m + 1):
         var ok = True
         for j in range(m):
-            if s.unsafe_ptr()[i + j] != sub.unsafe_ptr()[j]:
+            if (
+                s.unsafe_ptr()[unsafe_offset=i + j]
+                != sub.unsafe_ptr()[unsafe_offset=j]
+            ):
                 ok = False
                 break
         if ok:
@@ -259,7 +262,7 @@ def _lower_str(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
     var out = String(capacity=s.byte_length())
     for i in range(s.byte_length()):
-        var c = s.unsafe_ptr()[i]
+        var c = s.unsafe_ptr()[unsafe_offset=i]
         if c >= 65 and c <= 90:
             out += chr(Int(c) + 32)
         else:
@@ -482,7 +485,7 @@ def _parse_int(s: String) -> Int:
         return 0  # overflow guard
     var result = 0
     for i in range(trimmed.byte_length()):
-        var c = Int(trimmed.unsafe_ptr()[i])
+        var c = Int(trimmed.unsafe_ptr()[unsafe_offset=i])
         if c < 48 or c > 57:
             break
         result = result * 10 + (c - 48)
@@ -511,7 +514,7 @@ def _parse_hex(s: String) raises -> Int:
         raise NetworkError("chunk-size too large in chunked encoding: " + s)
     var result = 0
     for i in range(s.byte_length()):
-        var c = Int(s.unsafe_ptr()[i])
+        var c = Int(s.unsafe_ptr()[unsafe_offset=i])
         var digit: Int
         if c >= 48 and c <= 57:
             digit = c - 48

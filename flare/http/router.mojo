@@ -119,11 +119,11 @@ def _split_path(path: String) -> List[String]:
         return out^
     var p = path.unsafe_ptr()
     var start = 0
-    if p[0] == _SLASH:
+    if p[unsafe_offset=0] == _SLASH:
         start = 1
     var i = start
     while i < n:
-        if p[i] == _SLASH:
+        if p[unsafe_offset=i] == _SLASH:
             if i > start:
                 out.append(ascii_unchecked_string(path.as_bytes()[start:i]))
             start = i + 1
@@ -145,11 +145,11 @@ def _compile_segments(path: String) raises -> List[_Segment]:
         if sn == 0:
             continue
         var sp = s.unsafe_ptr()
-        if sn == 1 and sp[0] == _STAR:
+        if sn == 1 and sp[unsafe_offset=0] == _STAR:
             if i != len(raw) - 1:
                 raise Error("wildcard '*' must be the last segment in a route")
             segs.append(_Segment(2, "*"))
-        elif sn >= 2 and sp[0] == _COLON:
+        elif sn >= 2 and sp[unsafe_offset=0] == _COLON:
             segs.append(_Segment(1, ascii_unchecked_string(s.as_bytes()[1:sn])))
         else:
             segs.append(_Segment(0, s))
@@ -234,7 +234,7 @@ struct _Mount(Copyable, Movable):
 
 
 def _struct_serve_thunk[
-    H: Handler & Copyable & Movable
+    H: Handler & Copyable
 ](addr: Int, req: Request) raises -> Response:
     """Thunk that materialises the boxed ``H`` from its address
     and forwards to ``H.serve``.
@@ -251,7 +251,7 @@ def _struct_serve_thunk[
     return ptr[].serve(req).lower()
 
 
-def _struct_destroy_thunk[H: Handler & Copyable & Movable](addr: Int) -> None:
+def _struct_destroy_thunk[H: Handler & Copyable](addr: Int) -> None:
     """Thunk that destroys + frees the heap-allocated ``H`` at
     ``addr``. Called once per route from ``Router.__deinit__`` via
     the parallel ``_struct_destroy_thunks`` list.
@@ -500,7 +500,7 @@ struct Router(Copyable, Defaultable, Handler, Movable):
     # ── Registration per method (Handler-struct overloads, ) ──
 
     def get[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``GET path``.
 
@@ -524,63 +524,63 @@ struct Router(Copyable, Defaultable, Handler, Movable):
         self._add_struct[H](Method.GET, path, handler^)
 
     def post[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``POST path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.POST, path, handler^)
 
     def put[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``PUT path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.PUT, path, handler^)
 
     def patch[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``PATCH path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.PATCH, path, handler^)
 
     def delete[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``DELETE path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.DELETE, path, handler^)
 
     def head[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``HEAD path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.HEAD, path, handler^)
 
     def options[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``OPTIONS path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.OPTIONS, path, handler^)
 
     def trace[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``TRACE path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.TRACE, path, handler^)
 
     def connect[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, path: String, var handler: H) raises:
         """Register ``handler`` (a Handler struct) for ``CONNECT path``.
         See ``get[H]`` for the type-erasure shape."""
         self._add_struct[H](Method.CONNECT, path, handler^)
 
     def _add_struct[
-        H: Handler & Copyable & Movable
+        H: Handler & Copyable
     ](mut self, method: String, path: String, var handler: H) raises:
         """Heap-allocate ``handler`` via ``Pool[H]`` (which gates
         on ``size_of[H]() > 0`` internally for ZST handlers like
@@ -905,7 +905,7 @@ def _query_of(url: String) -> String:
     var n = url.byte_length()
     var p = url.unsafe_ptr()
     for i in range(n):
-        if p[i] == _QMARK:
+        if p[unsafe_offset=i] == _QMARK:
             return ascii_unchecked_string(url.as_bytes()[i + 1 : n])
     return String("")
 
@@ -916,7 +916,7 @@ def _path_only(url: String) -> String:
     var n = url.byte_length()
     var p = url.unsafe_ptr()
     for i in range(n):
-        if p[i] == _QMARK:
+        if p[unsafe_offset=i] == _QMARK:
             return ascii_unchecked_string(url.as_bytes()[0:i])
     return url
 

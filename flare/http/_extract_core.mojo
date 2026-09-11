@@ -25,14 +25,14 @@ def _parse_int_param(s: String) raises -> Int:
     var p = s.unsafe_ptr()
     var i = 0
     var neg = False
-    if p[0] == 45:  # '-'
+    if p[unsafe_offset=0] == 45:  # '-'
         neg = True
         i = 1
     if i == n:
         raise Error("expected integer, got '" + s + "'")
     var acc = 0
     while i < n:
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c < 48 or c > 57:
             raise Error("expected integer, got '" + s + "'")
         acc = acc * 10 + (c - 48)
@@ -69,7 +69,7 @@ def _parse_bool_param(s: String) raises -> Bool:
     var lower = String(capacity=n)
     var p = s.unsafe_ptr()
     for i in range(n):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= 65 and c <= 90:
             c = c + 32
         lower += chr(Int(c))

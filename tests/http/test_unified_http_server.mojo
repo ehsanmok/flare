@@ -57,12 +57,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
         raise Error("socket() failed: " + _strerror(get_errno().value))
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, port, ip)
     if _connect(c, sa, c_int(16).cast[DType.uint32]()) < c_int(0):
         var msg = _strerror(get_errno().value)
@@ -114,7 +114,7 @@ def test_unified_server_http1_request() raises:
             if Int(n) <= 0:
                 break
             for i in range(Int(n)):
-                got += chr(Int(buf[i]))
+                got += chr(Int(buf[unsafe_offset=i]))
         _ = _close(fd)
     except:
         raised = True
@@ -222,7 +222,7 @@ def test_unified_server_router_dispatch_both_protocols() raises:
             if Int(n) <= 0:
                 break
             for i in range(Int(n)):
-                got_a_h1 += chr(Int(buf[i]))
+                got_a_h1 += chr(Int(buf[unsafe_offset=i]))
         _ = _close(fd)
     except:
         pass

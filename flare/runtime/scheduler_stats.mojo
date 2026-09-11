@@ -27,7 +27,7 @@ def store_stop_flag(addr: Int, value: Bool):
     """Release-store ``value`` into the heap stop-flag byte at ``addr``."""
     if addr == 0:
         return
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var p = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[Scalar[DType.uint8]]()
     Atomic[DType.uint8].store[ordering=Ordering.RELEASE](
@@ -40,7 +40,7 @@ def load_stop_flag(addr: Int) -> Bool:
     """Acquire-load the heap stop-flag byte at ``addr``."""
     if addr == 0:
         return False
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var p = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[Scalar[DType.uint8]]()
     return Atomic[DType.uint8].load[ordering=Ordering.ACQUIRE](p) != UInt8(0)
@@ -74,7 +74,7 @@ def store_worker_stat(base_addr: Int, slot: Int, value: Int):
     """Release-store ``value`` into ``slot`` of the worker stats cell."""
     if base_addr == 0:
         return
-    var p = UnsafePointer[Int, MutUntrackedOrigin](
+    var p = Pointer[Int, MutUntrackedOrigin](
         unsafe_from_address=base_addr + slot * 8
     ).unsafe_bitcast[Scalar[DType.int64]]()
     Atomic[DType.int64].store[ordering=Ordering.RELEASE](p, Int64(value))
@@ -85,7 +85,7 @@ def load_worker_stat(base_addr: Int, slot: Int) -> Int:
     """Acquire-load ``slot`` of the worker stats cell (0 when disabled)."""
     if base_addr == 0:
         return 0
-    var p = UnsafePointer[Int, MutUntrackedOrigin](
+    var p = Pointer[Int, MutUntrackedOrigin](
         unsafe_from_address=base_addr + slot * 8
     ).unsafe_bitcast[Scalar[DType.int64]]()
     return Int(Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p))

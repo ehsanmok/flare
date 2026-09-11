@@ -16,7 +16,7 @@ Key performance characteristics:
 # are reworked into the reactor-backed path and this struct shrinks to a
 # thin facade. Allowlisted in tools/check_reactor_size.sh until then.
 
-from std.memory import memcpy, stack_allocation
+from std.memory import unsafe_memcpy, stack_allocation
 from std.ffi import c_int, c_uint, external_call
 
 from json import dumps, Value as JsonValue
@@ -157,7 +157,7 @@ struct HttpServer(Movable):
         the server owns instead of cloning it.
         """
         if self._tls_ctx:
-            return Int(UnsafePointer(to=self._tls_ctx.value()))
+            return Int(Pointer(to=self._tls_ctx.value()))
         return 0
 
     def __init__(
@@ -1448,7 +1448,7 @@ struct HttpServer(Movable):
         :class:`flare.http.StaticHttpFrontend`, each running
         ``run_reactor_loop_static_shared``. Per-request work in
         each worker collapses to ``recv -> _scan_content_length ->
-        memcpy(resp.bytes) -> send`` -- no parser, no handler, no
+        unsafe_memcpy(resp.bytes) -> send`` -- no parser, no handler, no
         Response struct allocation, no header lookups, no body
         re-serialisation. This is the fastest path flare exposes for
         the gate-defining TFB plaintext bench; it scales near-linearly
@@ -1563,9 +1563,6 @@ struct HttpServer(Movable):
             elapse, the reactor closes outstanding connections.
         """
         from std.ffi import c_int, c_uint, external_call
-
-        # Clamp negative to zero; treat as hard stop.
-        var deadline_ms = timeout_ms if timeout_ms > 0 else 0
 
         # Step 1: close the listener so new accepts fail.
         self._listener.close()

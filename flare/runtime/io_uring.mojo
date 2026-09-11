@@ -115,7 +115,7 @@ from std.ffi import (
     get_errno,
     ErrNo,
 )
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 
 
@@ -249,7 +249,7 @@ struct IoUringParams(Movable):
 
 
 @always_inline
-def io_uring_setup(entries: Int, params: UnsafePointer[UInt8, _]) -> Int:
+def io_uring_setup(entries: Int, params: Pointer[UInt8, _]) -> Int:
     """Wrap ``SYS_io_uring_setup(2)`` via the libc ``syscall(2)``
     multiplexer.
 
@@ -358,7 +358,7 @@ fields + 40-byte sq_off + 40-byte cq_off = 120 bytes).
 
 
 @always_inline
-def _read_u32_le(buf: UnsafePointer[UInt8, _], offset: Int) -> Int:
+def _read_u32_le(buf: Pointer[UInt8, _], offset: Int) -> Int:
     """Read a 32-bit little-endian value out of the params
     buffer at ``offset``.
 
@@ -377,7 +377,7 @@ def _read_u32_le(buf: UnsafePointer[UInt8, _], offset: Int) -> Int:
     )
     var v = UInt32(0)
     for k in range(4):
-        v = v | (UInt32(Int(buf[offset + k])) << UInt32(k * 8))
+        v = v | (UInt32(Int(buf[unsafe_offset=offset + k])) << UInt32(k * 8))
     return Int(v)
 
 
@@ -402,7 +402,7 @@ struct IoUringRing(Movable):
     """
 
     var _fd: Int
-    var _params_buf: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _params_buf: Pointer[UInt8, MutUntrackedOrigin]
 
     def __init__(
         out self,
@@ -451,7 +451,9 @@ struct IoUringRing(Movable):
             raise Error(
                 "io_uring is a Linux-only feature; this build is not Linux"
             )
-        var raw = alloc[UInt8](_IO_URING_PARAMS_BYTES)
+        var raw = alloc(
+            Layout[UInt8](count=_IO_URING_PARAMS_BYTES)
+        ).unsafe_leak()
         for i in range(_IO_URING_PARAMS_BYTES):
             raw.unsafe_offset(i).unsafe_write(UInt8(0))
         # Write setup_flags (offset 8, u32 LE), sq_thread_cpu
@@ -473,7 +475,7 @@ struct IoUringRing(Movable):
             raw.unsafe_free()
             raise Error("io_uring_setup failed: errno=" + String(-rc))
         self._fd = rc
-        self._params_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
+        self._params_buf = Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(raw)
         )
 
@@ -523,7 +525,7 @@ def is_io_uring_available() -> Bool:
     """
     comptime if not CompilationTarget.is_linux():
         return False
-    var raw = alloc[UInt8](_IO_URING_PARAMS_BYTES)
+    var raw = alloc(Layout[UInt8](count=_IO_URING_PARAMS_BYTES)).unsafe_leak()
     for i in range(_IO_URING_PARAMS_BYTES):
         raw.unsafe_offset(i).unsafe_write(UInt8(0))
     var rc = io_uring_setup(1, raw)

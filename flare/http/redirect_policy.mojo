@@ -168,7 +168,7 @@ def _resolve_location(base_url: String, location: String) raises -> String:
         return location
     var base = Url.parse(base_url)
     var origin = base.scheme + "://" + base.host + ":" + String(Int(base.port))
-    if Int(location.unsafe_ptr()[0]) == ord("/"):
+    if Int(location.unsafe_ptr()[unsafe_offset=0]) == ord("/"):
         return origin + location
     # Relative without leading slash — resolve against base's
     # request-target without the trailing filename segment.
@@ -176,12 +176,12 @@ def _resolve_location(base_url: String, location: String) raises -> String:
     var slash = target.byte_length()
     var p = target.unsafe_ptr()
     for i in range(target.byte_length()):
-        if Int(p[target.byte_length() - 1 - i]) == ord("/"):
+        if Int(p[unsafe_offset=target.byte_length() - 1 - i]) == ord("/"):
             slash = target.byte_length() - i
             break
     var dir = String(capacity=slash + 1)
     for i in range(slash):
-        dir += chr(Int(p[i]))
+        dir += chr(Int(p[unsafe_offset=i]))
     return origin + dir + location
 
 

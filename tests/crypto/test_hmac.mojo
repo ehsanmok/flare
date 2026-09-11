@@ -31,8 +31,8 @@ def _hex(s: String) -> List[UInt8]:
     var out = List[UInt8](capacity=n // 2)
     var i = 0
     while i + 2 <= n:
-        var hi = _hex_byte(src[i])
-        var lo = _hex_byte(src[i + 1])
+        var hi = _hex_byte(src[unsafe_offset=i])
+        var lo = _hex_byte(src[unsafe_offset=i + 1])
         out.append(UInt8((Int(hi) << 4) | Int(lo)))
         i += 2
     return out^

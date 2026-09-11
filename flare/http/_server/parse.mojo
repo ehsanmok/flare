@@ -43,17 +43,21 @@ def _is_valid_http_version(v: String) raises -> Bool:
         return False
     var p = v.unsafe_ptr()
     if (
-        p[0] != UInt8(ord("H"))
-        or p[1] != UInt8(ord("T"))
-        or p[2] != UInt8(ord("T"))
-        or p[3] != UInt8(ord("P"))
-        or p[4] != UInt8(ord("/"))
-        or p[6] != UInt8(ord("."))
+        p[unsafe_offset=0] != UInt8(ord("H"))
+        or p[unsafe_offset=1] != UInt8(ord("T"))
+        or p[unsafe_offset=2] != UInt8(ord("T"))
+        or p[unsafe_offset=3] != UInt8(ord("P"))
+        or p[unsafe_offset=4] != UInt8(ord("/"))
+        or p[unsafe_offset=6] != UInt8(ord("."))
     ):
         return False
-    if p[5] < UInt8(ord("0")) or p[5] > UInt8(ord("9")):
+    if p[unsafe_offset=5] < UInt8(ord("0")) or p[unsafe_offset=5] > UInt8(
+        ord("9")
+    ):
         return False
-    if p[7] < UInt8(ord("0")) or p[7] > UInt8(ord("9")):
+    if p[unsafe_offset=7] < UInt8(ord("0")) or p[unsafe_offset=7] > UInt8(
+        ord("9")
+    ):
         return False
     return True
 
@@ -122,7 +126,7 @@ def _parse_http_request_bytes(
 
     var sp1 = -1
     for i in range(req_line.byte_length()):
-        if req_line.unsafe_ptr()[i] == 32:
+        if req_line.unsafe_ptr()[unsafe_offset=i] == 32:
             sp1 = i
             break
     if sp1 < 0:
@@ -145,7 +149,7 @@ def _parse_http_request_bytes(
     # leniency flag normalises mixed-case methods to upper-case.
     var has_lowercase = False
     for i in range(method.byte_length()):
-        var mc = method.unsafe_ptr()[i]
+        var mc = method.unsafe_ptr()[unsafe_offset=i]
         if mc >= UInt8(ord("a")) and mc <= UInt8(ord("z")):
             has_lowercase = True
             break
@@ -160,7 +164,7 @@ def _parse_http_request_bytes(
             )
         var all_letters = method.byte_length() > 0
         for i in range(method.byte_length()):
-            var mc = method.unsafe_ptr()[i]
+            var mc = method.unsafe_ptr()[unsafe_offset=i]
             if not (
                 (mc >= UInt8(ord("A")) and mc <= UInt8(ord("Z")))
                 or (mc >= UInt8(ord("a")) and mc <= UInt8(ord("z")))
@@ -172,7 +176,7 @@ def _parse_http_request_bytes(
 
     var sp2 = -1
     for i in range(sp1 + 1, req_line.byte_length()):
-        if req_line.unsafe_ptr()[i] == 32:
+        if req_line.unsafe_ptr()[unsafe_offset=i] == 32:
             sp2 = i
             break
     var path: String
@@ -224,7 +228,7 @@ def _parse_http_request_bytes(
         # SP / HTAB and folds into the previous header value.
         # Strict rejects (smuggling primitive); the leniency flag
         # appends the trimmed continuation to the prior value.
-        var first = line.unsafe_ptr()[0]
+        var first = line.unsafe_ptr()[unsafe_offset=0]
         if first == 32 or first == 9:
             if not leniency.allow_obs_fold or not have_prev:
                 raise Error("obs-fold rejected (request smuggling vector)")
@@ -235,7 +239,7 @@ def _parse_http_request_bytes(
 
         var colon = -1
         for i in range(line.byte_length()):
-            if line.unsafe_ptr()[i] == 58:
+            if line.unsafe_ptr()[unsafe_offset=i] == 58:
                 colon = i
                 break
         if colon < 0:
@@ -247,7 +251,7 @@ def _parse_http_request_bytes(
         var name_end = colon
         if leniency.allow_ows_around_colon:
             while name_end > 0:
-                var nc = line.unsafe_ptr()[name_end - 1]
+                var nc = line.unsafe_ptr()[unsafe_offset=name_end - 1]
                 if nc == 32 or nc == 9:
                     name_end -= 1
                 else:
@@ -255,7 +259,7 @@ def _parse_http_request_bytes(
 
         var name_valid = True
         for i in range(name_end):
-            if not _is_token_char(line.unsafe_ptr()[i]):
+            if not _is_token_char(line.unsafe_ptr()[unsafe_offset=i]):
                 name_valid = False
                 break
         if not name_valid:
@@ -269,7 +273,7 @@ def _parse_http_request_bytes(
         # gated on the leniency flag — strict rejects; lenient
         # treats the bytes as opaque.
         for i in range(v.byte_length()):
-            var vc = v.unsafe_ptr()[i]
+            var vc = v.unsafe_ptr()[unsafe_offset=i]
             if vc == 0 or vc == 10 or vc == 13:
                 raise Error("invalid control character in header value")
             if vc >= 128 and not leniency.accept_obs_text_in_field_value:
@@ -335,7 +339,7 @@ def _parse_http_request_bytes(
                 body.resize(n2, UInt8(0))
                 unsafe_memcpy(
                     dest=body.unsafe_ptr(),
-                    src=data.unsafe_ptr() + pos,
+                    src=data.unsafe_ptr().unsafe_offset(pos),
                     count=n2,
                 )
 
@@ -407,7 +411,7 @@ def _parse_http_request_bytes_minimal(
 
     var sp1 = -1
     for i in range(req_line.byte_length()):
-        if req_line.unsafe_ptr()[i] == 32:
+        if req_line.unsafe_ptr()[unsafe_offset=i] == 32:
             sp1 = i
             break
     if sp1 < 0:
@@ -421,7 +425,7 @@ def _parse_http_request_bytes_minimal(
 
     var sp2 = -1
     for i in range(sp1 + 1, req_line.byte_length()):
-        if req_line.unsafe_ptr()[i] == 32:
+        if req_line.unsafe_ptr()[unsafe_offset=i] == 32:
             sp2 = i
             break
     var path: String
@@ -463,7 +467,7 @@ def _parse_http_request_bytes_minimal(
             body.resize(n, UInt8(0))
             unsafe_memcpy(
                 dest=body.unsafe_ptr(),
-                src=data.unsafe_ptr() + body_start,
+                src=data.unsafe_ptr().unsafe_offset(body_start),
                 count=n,
             )
 

@@ -37,7 +37,7 @@ sequential same-origin requests, proving reuse.
 
 from std.collections import Dict, List, Optional
 from std.ffi import c_int, external_call
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 
 from flare.http3.client import Http3ClientConnection
@@ -99,7 +99,7 @@ struct QuicConnectionPool(Copyable, Movable):
         """Allocate an enabled pool. Non-raising (the allocation +
         moves can't raise) so it can initialize a ``read self``
         ``HttpClient`` field eagerly, like the Alt-Svc store."""
-        var p = alloc[_QuicPoolState](1)
+        var p = alloc(Layout[_QuicPoolState](count=1)).unsafe_leak()
         p.unsafe_write(
             _QuicPoolState(
                 Dict[String, List[Int]](),
@@ -121,8 +121,8 @@ struct QuicConnectionPool(Copyable, Movable):
 
     def _state(
         imm self,
-    ) -> UnsafePointer[_QuicPoolState, MutUntrackedOrigin]:
-        return UnsafePointer[UInt8, MutUntrackedOrigin](
+    ) -> Pointer[_QuicPoolState, MutUntrackedOrigin]:
+        return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[_QuicPoolState]()
 
@@ -172,7 +172,7 @@ struct QuicConnectionPool(Copyable, Movable):
                 Pool[Http3ClientConnection].free(addr)
                 continue
             var cell = Pool[Http3ClientConnection].get_ptr(addr)
-            var h3 = cell.take_pointee()
+            var h3 = cell.unsafe_take_pointee()
             cell.unsafe_free()
             sp[].entries[key] = deque^
             return Optional(h3^)
@@ -236,14 +236,14 @@ struct QuicConnectionPool(Copyable, Movable):
 def _monotonic_ms() -> Int:
     """``CLOCK_MONOTONIC`` in milliseconds; ``0`` on FFI failure
     (which makes idle-timeout eviction a conservative no-op)."""
-    var ts_buf = alloc[Int](2)
-    ts_buf[0] = 0
-    ts_buf[1] = 0
+    var ts_buf = alloc(Layout[Int](count=2)).unsafe_leak()
+    ts_buf[unsafe_offset=0] = 0
+    ts_buf[unsafe_offset=1] = 0
     var rc = external_call["clock_gettime", c_int](_CLOCK_MONOTONIC, ts_buf)
     if Int(rc) != 0:
         ts_buf.unsafe_free()
         return 0
-    var sec = ts_buf[0]
-    var nsec = ts_buf[1]
+    var sec = ts_buf[unsafe_offset=0]
+    var nsec = ts_buf[unsafe_offset=1]
     ts_buf.unsafe_free()
     return sec * 1000 + nsec // 1_000_000

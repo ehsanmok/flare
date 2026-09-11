@@ -341,7 +341,7 @@ struct ConnHandle(Movable):
                 var old_len = len(self.read_buf)
                 var got_int = Int(got)
                 self.read_buf.resize(old_len + got_int, UInt8(0))
-                var dst = self.read_buf.unsafe_ptr() + old_len
+                var dst = self.read_buf.unsafe_ptr().unsafe_offset(old_len)
                 unsafe_memcpy(dest=dst, src=chunk, count=got_int)
                 if (
                     len(self.read_buf)
@@ -418,7 +418,7 @@ struct ConnHandle(Movable):
             var old_len = len(self.read_buf)
             var add = len(bytes)
             self.read_buf.resize(old_len + add, UInt8(0))
-            var dst = self.read_buf.unsafe_ptr() + old_len
+            var dst = self.read_buf.unsafe_ptr().unsafe_offset(old_len)
             unsafe_memcpy(dest=dst, src=bytes.unsafe_ptr(), count=add)
             if (
                 len(self.read_buf)
@@ -1000,7 +1000,9 @@ struct ConnHandle(Movable):
             else:
                 while self.write_pos < len(self.write_buf):
                     var remaining = len(self.write_buf) - self.write_pos
-                    var ptr = self.write_buf.unsafe_ptr() + self.write_pos
+                    var ptr = self.write_buf.unsafe_ptr().unsafe_offset(
+                        self.write_pos
+                    )
                     var n = _send(
                         self.fd(), ptr, c_size_t(remaining), c_int(MSG_NOSIGNAL)
                     )

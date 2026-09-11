@@ -67,7 +67,7 @@ struct WsHandshakeError(Copyable, Movable, Writable):
 
 
 def _do_sha1(
-    read lib: OwnedDLHandle, data_bytes: Span[UInt8, _]
+    imm lib: OwnedDLHandle, data_bytes: Span[UInt8, _]
 ) raises -> List[UInt8]:
     """Invoke SHA-1 with ``lib`` borrowed across both the symbol lookup
     and the call.
@@ -242,7 +242,10 @@ def _str_find_local(s: String, sub: String) -> Int:
     for i in range(n - m + 1):
         var ok = True
         for j in range(m):
-            if s.unsafe_ptr()[i + j] != sub.unsafe_ptr()[j]:
+            if (
+                s.unsafe_ptr()[unsafe_offset=i + j]
+                != sub.unsafe_ptr()[unsafe_offset=j]
+            ):
                 ok = False
                 break
         if ok:
@@ -254,7 +257,7 @@ def _lower_local(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
     var out = String(capacity=s.byte_length())
     for i in range(s.byte_length()):
-        var c = s.unsafe_ptr()[i]
+        var c = s.unsafe_ptr()[unsafe_offset=i]
         if c >= 65 and c <= 90:
             out += chr(Int(c) + 32)
         else:
@@ -297,7 +300,7 @@ struct _WsStream(Movable):
         else:
             self._tcp.write_all(data)
 
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
         """Read up to ``size`` bytes from the underlying stream.
 
         Args:

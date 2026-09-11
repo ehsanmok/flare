@@ -399,7 +399,7 @@ struct TcpStream(Movable, Readable):
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
         """Read up to ``size`` bytes from the stream into ``buf``.
 
         Retries transparently on ``EINTR``. Returns 0 on EOF (the peer
@@ -444,7 +444,7 @@ struct TcpStream(Movable, Readable):
                 raise ConnectionReset(String(self._peer), Int(e.value))
             raise NetworkError(_strerror(e.value) + " (recv)", Int(e.value))
 
-    def read_exact(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises:
+    def read_exact(mut self, buf: Pointer[UInt8, _], size: Int) raises:
         """Read exactly ``size`` bytes into ``buf``.
 
         Loops over ``read()`` until ``size`` bytes have been received.
@@ -466,7 +466,7 @@ struct TcpStream(Movable, Readable):
         """
         var received = 0
         while received < size:
-            var n = self.read(buf + received, size - received)
+            var n = self.read(buf.unsafe_offset(received), size - received)
             if n == 0:
                 raise NetworkError(
                     "read_exact: EOF after "
@@ -541,7 +541,7 @@ struct TcpStream(Movable, Readable):
         var sent = 0
         while sent < total:
             var chunk = Span[UInt8, _](
-                unsafe_ptr=ptr + sent, length=total - sent
+                unsafe_ptr=ptr.unsafe_offset(sent), length=total - sent
             )
             var n = self.write(chunk)
             sent += n

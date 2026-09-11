@@ -34,7 +34,7 @@ comptime _SHA1_LEN: Int = 20
 
 
 def _do_sha1_srv(
-    read lib: OwnedDLHandle, data_bytes: Span[UInt8, _]
+    imm lib: OwnedDLHandle, data_bytes: Span[UInt8, _]
 ) raises -> List[UInt8]:
     """Invoke the SHA-1 C function with ``lib`` borrowed.
 
@@ -134,7 +134,7 @@ def _lower_srv(s: String) -> String:
     """Return ASCII-lowercase of ``s``."""
     var out = String(capacity=s.byte_length())
     for i in range(s.byte_length()):
-        var c = s.unsafe_ptr()[i]
+        var c = s.unsafe_ptr()[unsafe_offset=i]
         if c >= 65 and c <= 90:
             out += chr(Int(c) + 32)
         else:
@@ -151,7 +151,10 @@ def _str_find_srv(s: String, sub: String) -> Int:
     for i in range(n - m + 1):
         var ok = True
         for j in range(m):
-            if s.unsafe_ptr()[i + j] != sub.unsafe_ptr()[j]:
+            if (
+                s.unsafe_ptr()[unsafe_offset=i + j]
+                != sub.unsafe_ptr()[unsafe_offset=j]
+            ):
                 ok = False
                 break
         if ok:

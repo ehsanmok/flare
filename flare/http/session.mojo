@@ -137,7 +137,7 @@ def signed_cookie_decode(
     var src = cookie.unsafe_ptr()
     var n = cookie.byte_length()
     for i in range(n):
-        if src[i] == 46:  # '.'
+        if src[unsafe_offset=i] == 46:  # '.'
             dot = i
             break
     if dot < 0:
@@ -555,9 +555,7 @@ struct MemorySessionBackend(Copyable, Defaultable, Movable, SessionBackend):
 # ── BackedSessionStore: signed-id cookie + pluggable backend + TTL ────────
 
 
-struct BackedSessionStore[B: SessionBackend & Copyable & Movable](
-    Copyable, Movable
-):
+struct BackedSessionStore[B: SessionBackend](Copyable, Movable):
     """Server-side session store over a pluggable :trait:`SessionBackend`.
 
     The cookie carries only a CSPRNG session id (signed, so a client

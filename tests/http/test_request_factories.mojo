@@ -84,7 +84,7 @@ def test_factories_carry_default_peer() raises:
 
 
 def test_optional_accessors_uniform_miss() raises:
-    """param_opt / query_param_opt / cookie_opt give one uniform
+    """``param_opt`` / ``query_param_opt`` / ``cookie_opt`` give one uniform
     Optional miss semantics across the three sources."""
     var req = Request.test_get("/search?q=mojo&empty=")
     # query: present, present-empty, absent.
@@ -106,7 +106,7 @@ def test_optional_accessors_uniform_miss() raises:
 
 
 def test_or_accessors_uniform_default() raises:
-    """param_or / query_param_or / cookie_or return the supplied
+    """``param_or`` / ``query_param_or`` / ``cookie_or`` return the supplied
     default on absence, uniformly across the three sources."""
     var req = Request.test_get("/search?q=mojo")
     # query: present -> value; absent -> default.

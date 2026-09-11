@@ -20,7 +20,7 @@ from .scheduler_stats import load_stop_flag, store_worker_stat
 # ── Per-worker context ───────────────────────────────────────────────────────
 
 
-struct _WorkerCtx[F: Frontend & Copyable](Movable):
+struct _WorkerCtx[F: Frontend](Movable):
     """Heap-allocated context passed to a pthread start routine.
 
     Carries a *borrowed* listener fd (the underlying ``TcpListener``
@@ -91,7 +91,7 @@ struct _WorkerCtx[F: Frontend & Copyable](Movable):
 # ── Worker entry point (comptime-specialised per F) ─────────────────────────
 
 
-def _worker_entry[F: Frontend & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
+def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     """Pthread start routine for one reactor worker.
 
     Casts ``arg`` back to a ``_WorkerCtx[F]`` pointer, optionally
@@ -103,12 +103,10 @@ def _worker_entry[F: Frontend & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     frees it after joining this worker.
     """
     var ctx_addr = Int(arg)
-    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=ctx_addr
-    )
+    var raw = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=ctx_addr)
     var ctx_ptr = raw.unsafe_bitcast[_WorkerCtx[F]]()
 
-    var stopping_ptr = UnsafePointer[Bool, MutUntrackedOrigin](
+    var stopping_ptr = Pointer[Bool, MutUntrackedOrigin](
         unsafe_from_address=ctx_ptr[].stopping_addr
     )
 
@@ -150,6 +148,4 @@ def _worker_entry[F: Frontend & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     # ctx AFTER joining the worker, so we don't touch it here.
     # UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=null_addr
-    )
+    return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)

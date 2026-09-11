@@ -662,8 +662,8 @@ def _hpack_table_length(symbol: Int) -> Int:
     if symbol < 0 or symbol > 256:
         return 30
     var off = symbol * 2
-    var hi = Int(_LEN_TABLE.unsafe_ptr()[off])
-    var lo = Int(_LEN_TABLE.unsafe_ptr()[off + 1])
+    var hi = Int(_LEN_TABLE.unsafe_ptr()[unsafe_offset=off])
+    var lo = Int(_LEN_TABLE.unsafe_ptr()[unsafe_offset=off + 1])
     return _hex_digit_value(hi) * 16 + _hex_digit_value(lo)
 
 

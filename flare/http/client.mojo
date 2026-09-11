@@ -156,7 +156,7 @@ def _race_connect_leg(
     module needs no HttpClient import. Only the h3 leg mutates client
     state (the QUIC pool), so the two concurrent legs have a single
     writer. Returns ``True`` when the connection established."""
-    var client = UnsafePointer[HttpClient, MutUntrackedOrigin](
+    var client = Pointer[HttpClient, MutUntrackedOrigin](
         unsafe_from_address=client_addr
     )
     var u = Url.parse(url)
@@ -1948,7 +1948,7 @@ struct HttpClient(Movable):
                     # duplicated on the wire.
                     var winner = race_http3_h2_connect(
                         _race_connect_leg,
-                        Int(UnsafePointer(to=self)),
+                        Int(Pointer(to=self)),
                         url,
                     )
                     if winner == RACE_H3:

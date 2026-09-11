@@ -53,7 +53,7 @@ def _ascii_safe(s: String) -> String:
     var p = s.unsafe_ptr()
     var out = String(capacity=n)
     for i in range(n):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= 32 and c <= 126:
             out += chr(Int(c))
         else:
@@ -267,7 +267,7 @@ def _parse_int_str(s: String) -> Int:
     var result = 0
     var trimmed = s.strip()
     for i in range(trimmed.byte_length()):
-        var c = Int(trimmed.unsafe_ptr()[i])
+        var c = Int(trimmed.unsafe_ptr()[unsafe_offset=i])
         if c < 48 or c > 57:
             break
         result = result * 10 + (c - 48)

@@ -238,7 +238,7 @@ def _do_take_crypto(
     for _ in range(cap):
         out.append(UInt8(0))
     var written: Int = 0
-    var written_ptr = UnsafePointer(to=written)
+    var written_ptr = Pointer(to=written)
     var rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
     if rc != 0:
         raise Error(
@@ -370,7 +370,7 @@ def _do_peer_transport_params(
     for _ in range(cap):
         buf.append(UInt8(0))
     var written: Int = 0
-    var written_addr = Int(UnsafePointer(to=written))
+    var written_addr = Int(Pointer(to=written))
     var rc = Int(f(session, Int(buf.unsafe_ptr()), cap, written_addr))
     if rc < 0:
         raise Error(
@@ -488,7 +488,7 @@ def _do_packet_encrypt(
             len(payload),
             Int(tag.unsafe_ptr()),
             len(tag),
-            Int(UnsafePointer(to=written)),
+            Int(Pointer(to=written)),
         )
     )
     if rc != 0:
@@ -523,7 +523,7 @@ def _do_packet_decrypt(
     # optimizer treat ``plaintext_len`` as non-escaping and fold the
     # write-back to the initial 0. Dereferencing the live pointer
     # forces a reload of the value rustls actually wrote.
-    var len_ptr = UnsafePointer(to=plaintext_len)
+    var len_ptr = Pointer(to=plaintext_len)
     var rc = Int(
         f(
             session,
@@ -624,9 +624,9 @@ def _do_last_error(imm lib: OwnedDLHandle) raises -> String:
     rustls FFI. Returns an empty string when no message is
     recorded.
     """
-    var f = dl_sym[
-        def() thin abi("C") -> UnsafePointer[UInt8, MutUntrackedOrigin]
-    ](lib, "flare_rustls_quic_last_error")
+    var f = dl_sym[def() thin abi("C") -> Pointer[UInt8, MutUntrackedOrigin]](
+        lib, "flare_rustls_quic_last_error"
+    )
     var p = f()
     return String(
         StringSlice(

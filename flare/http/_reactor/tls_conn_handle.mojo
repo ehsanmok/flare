@@ -215,8 +215,8 @@ def _tls_conn_free_addr(addr: Int):
 
 def _tls_conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[TlsConnHandle, MutUntrackedOrigin]:
+) -> Pointer[TlsConnHandle, MutUntrackedOrigin]:
     """Reverse of :func:`_tls_conn_alloc_addr`: rebuild a typed pointer."""
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
+    return Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[TlsConnHandle]()

@@ -557,10 +557,10 @@ struct Connection(Copyable, Defaultable, Movable):
             # sec 8.2.1: field names are lowercase on the wire.
             var np = name.unsafe_ptr()
             for k in range(name.byte_length()):
-                var c = np[k]
+                var c = np[unsafe_offset=k]
                 if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
                     return False
-            if name.unsafe_ptr()[0] == UInt8(ord(":")):
+            if name.unsafe_ptr()[unsafe_offset=0] == UInt8(ord(":")):
                 # sec 8.3: pseudo-headers never appear in trailers, and
                 # sec 8.1.2.1 puts them all before the regular fields.
                 if is_trailers or seen_regular:
@@ -616,7 +616,7 @@ struct Connection(Copyable, Defaultable, Movable):
                 var acc = 0
                 var p = v.unsafe_ptr()
                 for k in range(v.byte_length()):
-                    var c = Int(p[k])
+                    var c = Int(p[unsafe_offset=k])
                     if c < 48 or c > 57:
                         return -1
                     acc = acc * 10 + (c - 48)

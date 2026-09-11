@@ -597,7 +597,7 @@ def _append_masked(
     # SIMD path for large chunks
     var i = 0
     while i + _SIMD_W <= n:
-        var chunk = (src + i).load[width=_SIMD_W]()
+        var chunk = (src.unsafe_offset(i)).unsafe_load[width=_SIMD_W]()
         var masked = chunk ^ tiled
         for j in range(_SIMD_W):
             out.append(masked[j])
@@ -605,5 +605,5 @@ def _append_masked(
 
     # Scalar tail
     while i < n:
-        out.append(src[i] ^ key[i & 3])
+        out.append(src[unsafe_offset=i] ^ key[i & 3])
         i += 1

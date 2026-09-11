@@ -53,7 +53,7 @@ def _build_h2_request_headers(
         var lk = String(capacity=k.byte_length() + 1)
         var kp = k.unsafe_ptr()
         for j in range(k.byte_length()):
-            var c = Int(kp[j])
+            var c = Int(kp[unsafe_offset=j])
             if c >= 65 and c <= 90:
                 lk += chr(c + 32)
             else:
@@ -454,7 +454,7 @@ def _parse_status_line(raw: List[UInt8]) raises -> Int:
     var code_str = String("")
     var slp = sl.unsafe_ptr()
     for i in range(sp1 + 1, code_end):
-        code_str += chr(Int(slp[i]))
+        code_str += chr(Int(slp[unsafe_offset=i]))
     try:
         return Int(code_str)
     except:

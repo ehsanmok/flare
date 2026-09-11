@@ -497,9 +497,7 @@ trait ViewHandler(Deinitable, Movable):
 
 
 @fieldwise_init
-struct WithViewCancel[H: Handler & Copyable & Movable](
-    Copyable, Movable, ViewHandler
-):
+struct WithViewCancel[H: Handler & Copyable](Copyable, Movable, ViewHandler):
     """Adapter that lets a plain ``Handler`` plug into the
     view-aware reactor path.
 
@@ -568,9 +566,7 @@ struct WithViewCancel[H: Handler & Copyable & Movable](
 
 
 @fieldwise_init
-struct WithCancel[H: Handler & Copyable & Movable](
-    CancelHandler, Copyable, Movable
-):
+struct WithCancel[H: Handler & Copyable](CancelHandler, Copyable, Movable):
     """Adapter that lets a plain ``Handler`` plug into the
     cancel-aware reactor path.
 
@@ -635,7 +631,7 @@ struct WithCancel[H: Handler & Copyable & Movable](
 
 
 @fieldwise_init
-struct WithRaises[Inner: HandlerInfallible & Copyable & Movable](
+struct WithRaises[Inner: HandlerInfallible & Copyable](
     Copyable, Handler, Movable
 ):
     """Adapt a :trait:`HandlerInfallible` so it fits the regular

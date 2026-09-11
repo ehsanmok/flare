@@ -624,7 +624,7 @@ def test_decompress_brotli_cap_rejects_bomb() raises:
 
 
 def test_decode_content_cap_rejects_bomb() raises:
-    """decode_content threads the cap through to the codec."""
+    """``decode_content`` threads the cap through to the codec."""
     from flare.http.encoding import compress_gzip, decode_content
 
     var big = List[UInt8]()

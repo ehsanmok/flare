@@ -1,7 +1,7 @@
 """Tests for the DeadlineWatchdog (K2 preemptive-deadline mechanism)."""
 
 from std.atomic import Atomic, Ordering
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.testing import assert_equal
 
 from flare.runtime._libc_time import libc_nanosleep_ms
@@ -9,13 +9,13 @@ from flare.runtime.watchdog import DeadlineWatchdog
 
 
 def _new_cell() -> Int:
-    var p = alloc[Int64](1)
+    var p = alloc(Layout[Int64](count=1)).unsafe_leak()
     p.unsafe_write(Int64(0))
     return Int(p)
 
 
 def _read_cell(addr: Int) -> Int:
-    var p = UnsafePointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
     return Int(
         Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](
             p.unsafe_bitcast[Scalar[DType.int64]]()
@@ -24,8 +24,8 @@ def _read_cell(addr: Int) -> Int:
 
 
 def _free_cell(addr: Int):
-    var p = UnsafePointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
-    p.free()
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    p.unsafe_free()
 
 
 def test_watchdog_flips_cell_on_deadline() raises:

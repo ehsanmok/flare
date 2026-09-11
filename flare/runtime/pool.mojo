@@ -45,7 +45,7 @@ Why is this in ``flare/runtime/`` rather than each call site?
   (``Request._params``, future ``StreamingBody`` chunk pools).
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import size_of
 
 
@@ -94,7 +94,7 @@ struct Pool[T: Deinitable & Movable]:
         """
 
         comptime if size_of[Self.T]() > 0:
-            var p = alloc[Self.T](1)
+            var p = alloc(Layout[Self.T](count=1)).unsafe_leak()
             p.unsafe_write(value^)
             return Int(p)
         else:
@@ -102,7 +102,7 @@ struct Pool[T: Deinitable & Movable]:
             # bitcast. ``init_pointee_move`` writes 0 bytes
             # through the bitcast pointer; reads / dereferences
             # also touch 0 bytes.
-            var raw = alloc[UInt8](1)
+            var raw = alloc(Layout[UInt8](count=1)).unsafe_leak()
             raw.unsafe_bitcast[Self.T]().unsafe_write(value^)
             return Int(raw)
 
@@ -125,7 +125,7 @@ struct Pool[T: Deinitable & Movable]:
             return
 
         comptime if size_of[Self.T]() > 0:
-            var ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+            var ptr = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=addr
             ).unsafe_bitcast[Self.T]()
             ptr.unsafe_deinit_pointee()
@@ -135,7 +135,7 @@ struct Pool[T: Deinitable & Movable]:
             # allocated. Still run T's destructor for symmetry —
             # it touches 0 bytes for a zero-sized type but keeps
             # the contract identical to the non-ZST case.
-            var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
+            var raw = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=addr
             )
             raw.unsafe_bitcast[Self.T]().unsafe_deinit_pointee()
@@ -143,7 +143,7 @@ struct Pool[T: Deinitable & Movable]:
 
     @staticmethod
     @always_inline
-    def get_ptr(addr: Int) -> UnsafePointer[Self.T, MutUntrackedOrigin]:
+    def get_ptr(addr: Int) -> Pointer[Self.T, MutUntrackedOrigin]:
         """Re-materialise a typed pointer from an address.
 
         For callers that need to dereference the cell (e.g. read /
@@ -155,6 +155,6 @@ struct Pool[T: Deinitable & Movable]:
         Caller is responsible for ensuring ``addr`` is a valid
         live pool allocation.
         """
-        return UnsafePointer[UInt8, MutUntrackedOrigin](
+        return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=addr
         ).unsafe_bitcast[Self.T]()

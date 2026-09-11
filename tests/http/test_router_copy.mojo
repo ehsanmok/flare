@@ -102,7 +102,7 @@ def test_drop_original_first_keeps_copy_alive() raises:
     assert_equal(resp.status, Status.OK)
 
 
-def _make_and_drop_clone(read original: Router) raises -> None:
+def _make_and_drop_clone(imm original: Router) raises -> None:
     """Take a copy of ``original``, then let it drop on return.
 
     Mirrors the multi-worker shape where each worker thread owns

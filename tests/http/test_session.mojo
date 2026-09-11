@@ -59,7 +59,7 @@ def test_tampered_mac_rejected() raises:
     var cookie = signed_cookie_encode(_bytes("hello"), key)
     var dot = -1
     for i in range(cookie.byte_length()):
-        if cookie.unsafe_ptr()[i] == 46:
+        if cookie.unsafe_ptr()[unsafe_offset=i] == 46:
             dot = i
             break
     assert_true(dot > 0)
@@ -189,7 +189,7 @@ def test_new_session_id_is_unique_hex() raises:
     assert_equal(a.byte_length(), 64)  # 32 bytes -> 64 hex chars
     assert_true(a != b)  # CSPRNG: collision would be astronomically rare
     for i in range(a.byte_length()):
-        var c = Int(a.unsafe_ptr()[i])
+        var c = Int(a.unsafe_ptr()[unsafe_offset=i])
         var is_hex = (c >= 48 and c <= 57) or (c >= 97 and c <= 102)
         assert_true(is_hex)
 

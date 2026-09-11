@@ -90,7 +90,7 @@ struct _PlainHandler(Copyable, Handler, Movable):
 
 
 def _drive[
-    VH: ViewHandler & Copyable & Movable
+    VH: ViewHandler & Copyable
 ](
     var handler: VH,
     raw: String,

@@ -48,7 +48,7 @@ different offsets, branching the comptime offsets on pointer width.
 """
 
 from std.ffi import c_int, c_uint, get_errno, ErrNo
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 from std.format import Writable, Writer
 
@@ -119,7 +119,7 @@ struct UdpBatchUnsupported(Copyable, Movable, Writable):
 
 
 @always_inline
-def _poke_u64(p: UnsafePointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt64):
+def _poke_u64(p: Pointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt64):
     for k in range(8):
         p.unsafe_offset(off + k).unsafe_write(
             UInt8(Int((v >> UInt64(k * 8)) & 0xFF))
@@ -127,7 +127,7 @@ def _poke_u64(p: UnsafePointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt64):
 
 
 @always_inline
-def _poke_u32(p: UnsafePointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt32):
+def _poke_u32(p: Pointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt32):
     for k in range(4):
         p.unsafe_offset(off + k).unsafe_write(
             UInt8(Int((v >> UInt32(k * 8)) & 0xFF))
@@ -135,13 +135,13 @@ def _poke_u32(p: UnsafePointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt32):
 
 
 @always_inline
-def _poke_u16(p: UnsafePointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt16):
+def _poke_u16(p: Pointer[UInt8, MutUntrackedOrigin], off: Int, v: UInt16):
     p.unsafe_offset(off).unsafe_write(UInt8(Int(v & 0xFF)))
     p.unsafe_offset(off + 1).unsafe_write(UInt8(Int((v >> 8) & 0xFF)))
 
 
 @always_inline
-def _peek_u32(p: UnsafePointer[UInt8, MutUntrackedOrigin], off: Int) -> UInt32:
+def _peek_u32(p: Pointer[UInt8, MutUntrackedOrigin], off: Int) -> UInt32:
     var v = UInt32(0)
     for k in range(4):
         v = v | (UInt32(Int(p.unsafe_offset(off + k)[])) << UInt32(k * 8))
@@ -165,10 +165,10 @@ struct BatchReceiver(Movable):
         ```
     """
 
-    var _mmsg: UnsafePointer[UInt8, MutUntrackedOrigin]
-    var _iov: UnsafePointer[UInt8, MutUntrackedOrigin]
-    var _names: UnsafePointer[UInt8, MutUntrackedOrigin]
-    var _data: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var _mmsg: Pointer[UInt8, MutUntrackedOrigin]
+    var _iov: Pointer[UInt8, MutUntrackedOrigin]
+    var _names: Pointer[UInt8, MutUntrackedOrigin]
+    var _data: Pointer[UInt8, MutUntrackedOrigin]
     var _capacity: Int
     var _max_payload: Int
     var _count: Int
@@ -196,8 +196,8 @@ struct BatchReceiver(Movable):
         # Wire the static pointers once: each msghdr points at its own
         # name slot + a one-cell iovec into its data slot.
         for i in range(capacity):
-            var hdr = self._mmsg + i * _MMSGHDR
-            var iov = self._iov + i * _IOVEC
+            var hdr = self._mmsg.unsafe_offset(i * _MMSGHDR)
+            var iov = self._iov.unsafe_offset(i * _IOVEC)
             _poke_u64(iov, 0, UInt64(Int(self._data) + i * max_payload))
             _poke_u64(iov, 8, UInt64(max_payload))
             _poke_u64(hdr, _OFF_NAME, UInt64(Int(self._names) + i * _NAME))
@@ -230,7 +230,11 @@ struct BatchReceiver(Movable):
         # cell; iov_len is read-only to the kernel so it stays put.
         for i in range(self._capacity):
             _poke_u32(
-                self._mmsg + i * _MMSGHDR + _OFF_NAMELEN, 0, UInt32(_NAME)
+                self._mmsg.unsafe_offset(i * _MMSGHDR).unsafe_offset(
+                    _OFF_NAMELEN
+                ),
+                0,
+                UInt32(_NAME),
             )
         var ret = _recvmmsg(
             c_int(fd),
@@ -265,11 +269,18 @@ struct BatchReceiver(Movable):
             i >= 0 and i < self._count,
             "BatchReceiver.message: index out of range",
         )
-        var n = Int(_peek_u32(self._mmsg + i * _MMSGHDR + _OFF_MSGLEN, 0))
+        var n = Int(
+            _peek_u32(
+                self._mmsg.unsafe_offset(i * _MMSGHDR).unsafe_offset(
+                    _OFF_MSGLEN
+                ),
+                0,
+            )
+        )
         if n > self._max_payload:
             n = self._max_payload  # MSG_TRUNC guard
         return Span[UInt8, MutUntrackedOrigin](
-            unsafe_ptr=self._data + i * self._max_payload, length=n
+            unsafe_ptr=self._data.unsafe_offset(i * self._max_payload), length=n
         )
 
     def sender(self, i: Int) raises -> SocketAddr:
@@ -278,16 +289,14 @@ struct BatchReceiver(Movable):
             i >= 0 and i < self._count,
             "BatchReceiver.sender: index out of range",
         )
-        return _sockaddr_to_socket_addr(self._names + i * _NAME)
+        return _sockaddr_to_socket_addr(self._names.unsafe_offset(i * _NAME))
 
 
-def _alloc_zeroed(n: Int) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    var raw = alloc[UInt8](n)
+def _alloc_zeroed(n: Int) -> Pointer[UInt8, MutUntrackedOrigin]:
+    var raw = alloc(Layout[UInt8](count=n)).unsafe_leak()
     for i in range(n):
         raw.unsafe_offset(i).unsafe_write(UInt8(0))
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(raw)
-    )
+    return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(raw))
 
 
 def send_batch(
@@ -327,10 +336,10 @@ def send_batch(
             var sa_ptr = Int(sa[0])
             var sa_len = Int(sa[1])
             sas.append(sa[0])
-            var cell_iov = iov + i * _IOVEC
+            var cell_iov = iov.unsafe_offset(i * _IOVEC)
             _poke_u64(cell_iov, 0, UInt64(Int(payloads[i].unsafe_ptr())))
             _poke_u64(cell_iov, 8, UInt64(len(payloads[i])))
-            var hdr = mmsg + i * _MMSGHDR
+            var hdr = mmsg.unsafe_offset(i * _MMSGHDR)
             _poke_u64(hdr, _OFF_NAME, UInt64(sa_ptr))
             _poke_u32(hdr, _OFF_NAMELEN, UInt32(sa_len))
             _poke_u64(hdr, _OFF_IOV, UInt64(Int(iov) + i * _IOVEC))

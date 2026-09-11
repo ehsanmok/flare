@@ -227,7 +227,10 @@ def _find(s: String, sub: String) -> Int:
     for i in range(n - m + 1):
         var ok = True
         for j in range(m):
-            if s.unsafe_ptr()[i + j] != sub.unsafe_ptr()[j]:
+            if (
+                s.unsafe_ptr()[unsafe_offset=i + j]
+                != sub.unsafe_ptr()[unsafe_offset=j]
+            ):
                 ok = False
                 break
         if ok:
@@ -247,7 +250,10 @@ def _rfind(s: String, sub: String) -> Int:
     for i in range(n - m, -1, -1):
         var ok = True
         for j in range(m):
-            if s.unsafe_ptr()[i + j] != sub.unsafe_ptr()[j]:
+            if (
+                s.unsafe_ptr()[unsafe_offset=i + j]
+                != sub.unsafe_ptr()[unsafe_offset=j]
+            ):
                 ok = False
                 break
         if ok:
@@ -284,7 +290,7 @@ def _parse_port(s: String, raw: String) raises -> Int:
         raise UrlParseError("port too long in URL: " + raw)
     var result = 0
     for i in range(s.byte_length()):
-        var c = Int(s.unsafe_ptr()[i])
+        var c = Int(s.unsafe_ptr()[unsafe_offset=i])
         if c < 48 or c > 57:  # '0'..'9'
             raise UrlParseError("invalid port '" + s + "' in URL: " + raw)
         result = result * 10 + (c - 48)

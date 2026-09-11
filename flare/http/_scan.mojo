@@ -41,15 +41,15 @@ site with the explicit ``[W=64]`` parameter on AVX-512 hosts.
 
 
 @always_inline
-def _check_crlfcrlf(p: UnsafePointer[UInt8, _], pos: Int, n: Int) -> Bool:
+def _check_crlfcrlf(p: Pointer[UInt8, _], pos: Int, n: Int) -> Bool:
     """Check whether ``p[pos:pos+4]`` is CRLFCRLF, bounds-safe against ``n``."""
     if pos + 3 >= n:
         return False
     return (
-        p[pos] == 13
-        and p[pos + 1] == 10
-        and p[pos + 2] == 13
-        and p[pos + 3] == 10
+        p[unsafe_offset=pos] == 13
+        and p[unsafe_offset=pos + 1] == 10
+        and p[unsafe_offset=pos + 2] == 13
+        and p[unsafe_offset=pos + 3] == 10
     )
 
 
@@ -81,7 +81,7 @@ def find_crlfcrlf[
 
     comptime if W == 32:
         while i + W + 3 <= n:
-            var chunk = p.unsafe_offset(i).load[width=W]()
+            var chunk = p.unsafe_offset(i).unsafe_load[width=W]()
             var cr_mask = chunk.eq(13)
             if cr_mask.reduce_or():
                 var bits = pack_bits[dtype=DType.uint32](cr_mask)
@@ -94,7 +94,7 @@ def find_crlfcrlf[
             i += W
     elif W == 64:
         while i + W + 3 <= n:
-            var chunk = p.unsafe_offset(i).load[width=W]()
+            var chunk = p.unsafe_offset(i).unsafe_load[width=W]()
             var cr_mask = chunk.eq(13)
             if cr_mask.reduce_or():
                 var bits = pack_bits[dtype=DType.uint64](cr_mask)
@@ -127,7 +127,12 @@ def _scalar_find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
         return -1
     var p = data.unsafe_ptr()
     for i in range(start, n - 3):
-        if p[i] == 13 and p[i + 1] == 10 and p[i + 2] == 13 and p[i + 3] == 10:
+        if (
+            p[unsafe_offset=i] == 13
+            and p[unsafe_offset=i + 1] == 10
+            and p[unsafe_offset=i + 2] == 13
+            and p[unsafe_offset=i + 3] == 10
+        ):
             return i + 4
     return -1
 
@@ -137,7 +142,7 @@ def _scalar_find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
 
 @always_inline
 def _match_content_length_prefix(
-    p: UnsafePointer[UInt8, _], pos: Int, header_end: Int
+    p: Pointer[UInt8, _], pos: Int, header_end: Int
 ) -> Bool:
     """Case-insensitive compare against ``"content-length:"`` at ``pos``.
 
@@ -147,10 +152,10 @@ def _match_content_length_prefix(
     var needle = "content-length:"
     var np = needle.unsafe_ptr()
     for j in range(15):
-        var c = p[pos + j]
+        var c = p[unsafe_offset=pos + j]
         if c >= 65 and c <= 90:
             c = c + 32
-        if c != np[j]:
+        if c != np[unsafe_offset=j]:
             return False
     return True
 
@@ -189,7 +194,7 @@ def scan_content_length[
 
     comptime if W == 32:
         while i + W <= end:
-            var chunk = p.unsafe_offset(i).load[width=W]()
+            var chunk = p.unsafe_offset(i).unsafe_load[width=W]()
             # Candidate if byte == 'c' (0x63) or 'C' (0x43).
             var lc = chunk.eq(99)
             var uc = chunk.eq(67)
@@ -207,7 +212,7 @@ def scan_content_length[
             i += W
     elif W == 64:
         while i + W <= end:
-            var chunk = p.unsafe_offset(i).load[width=W]()
+            var chunk = p.unsafe_offset(i).unsafe_load[width=W]()
             var lc = chunk.eq(99)
             var uc = chunk.eq(67)
             var cand = lc | uc
@@ -232,13 +237,17 @@ def scan_content_length[
 
 
 @always_inline
-def _parse_decimal(p: UnsafePointer[UInt8, _], start: Int, end: Int) -> Int:
+def _parse_decimal(p: Pointer[UInt8, _], start: Int, end: Int) -> Int:
     """Skip leading SP / HTAB, parse an unsigned decimal up to ``end``."""
     var pos = start
-    while pos < end and (p[pos] == 32 or p[pos] == 9):
+    while pos < end and (
+        p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
+    ):
         pos += 1
     var result = 0
-    while pos < end and p[pos] >= 48 and p[pos] <= 57:
-        result = result * 10 + Int(p[pos]) - 48
+    while (
+        pos < end and p[unsafe_offset=pos] >= 48 and p[unsafe_offset=pos] <= 57
+    ):
+        result = result * 10 + Int(p[unsafe_offset=pos]) - 48
         pos += 1
     return result

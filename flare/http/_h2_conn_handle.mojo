@@ -476,7 +476,7 @@ struct Http2ConnHandle(Movable):
                         got_int,
                     )
                     for i in range(got_int):
-                        inbound.append(chunk[i])
+                        inbound.append(chunk[unsafe_offset=i])
                 elif got == 0:
                     # Peer FIN observed mid-connection. Mark closed
                     # so the reactor unregisters the fd after any
@@ -743,7 +743,7 @@ struct Http2ConnHandle(Movable):
         for entry in self.stream_cells.items():
             var addr = entry.value
             if addr != 0:
-                var p = UnsafePointer[Int, MutUntrackedOrigin](
+                var p = Pointer[Int, MutUntrackedOrigin](
                     unsafe_from_address=addr
                 )
                 p.unsafe_deinit_pointee()
@@ -793,7 +793,7 @@ struct Http2ConnHandle(Movable):
         for entry in self.stream_cells.items():
             var addr = entry.value
             if addr != 0:
-                var p = UnsafePointer[Int, MutUntrackedOrigin](
+                var p = Pointer[Int, MutUntrackedOrigin](
                     unsafe_from_address=addr
                 )
                 p[] = reason
@@ -1019,7 +1019,9 @@ struct Http2ConnHandle(Movable):
         else:
             while self.write_pos < len(self.write_buf):
                 var remaining = len(self.write_buf) - self.write_pos
-                var ptr = self.write_buf.unsafe_ptr() + self.write_pos
+                var ptr = self.write_buf.unsafe_ptr().unsafe_offset(
+                    self.write_pos
+                )
                 debug_assert[assert_mode="safe"](
                     remaining > 0 and Int(ptr) != 0,
                     (
@@ -1142,13 +1144,13 @@ def _h2_conn_free_addr(addr: Int):
 
 def _h2_conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[Http2ConnHandle, MutUntrackedOrigin]:
+) -> Pointer[Http2ConnHandle, MutUntrackedOrigin]:
     """Reverse of :func:`_h2_conn_alloc_addr`: typed pointer from an Int."""
     debug_assert[assert_mode="safe"](
         addr != 0,
         "_h2_conn_ptr_from_int: cannot reconstruct from null addr",
     )
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
+    return Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[Http2ConnHandle]()
 
@@ -1187,7 +1189,7 @@ def _h2_preface_byte(i: Int) -> UInt8:
     """Return the i-th byte of the H2 client connection preface
     (``"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n"``)."""
     var s = String("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
-    return s.unsafe_ptr()[i]
+    return s.unsafe_ptr()[unsafe_offset=i]
 
 
 struct PendingConnHandle(Movable):
@@ -1290,7 +1292,7 @@ struct PendingConnHandle(Movable):
                     got_int,
                 )
                 for i in range(got_int):
-                    var b = chunk[i]
+                    var b = chunk[unsafe_offset=i]
                     var pos = len(self.preface_buf)
                     debug_assert[assert_mode="safe"](
                         pos >= 0 and pos < _H2_PREFACE_BYTES_LEN,
@@ -1361,12 +1363,12 @@ def _pending_conn_free_addr(addr: Int):
 
 def _pending_conn_ptr_from_int(
     addr: Int,
-) -> UnsafePointer[PendingConnHandle, MutUntrackedOrigin]:
+) -> Pointer[PendingConnHandle, MutUntrackedOrigin]:
     """Reverse of :func:`_pending_conn_alloc_addr`."""
     debug_assert[assert_mode="safe"](
         addr != 0,
         "_pending_conn_ptr_from_int: cannot reconstruct from null addr",
     )
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
+    return Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[PendingConnHandle]()

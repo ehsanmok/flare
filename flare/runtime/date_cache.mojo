@@ -276,7 +276,7 @@ def _month_short(m: Int) -> SIMD[DType.uint8, 4]:
 
 @always_inline
 def _write_two_digits(
-    p: UnsafePointer[UInt8, _], offset: Int, n: Int
+    p: Pointer[UInt8, _], offset: Int, n: Int
 ) where type_of(p).mut:
     """Write a zero-padded two-digit decimal at ``p + offset``.
 
@@ -301,7 +301,7 @@ def _write_two_digits(
 
 @always_inline
 def _write_four_digits(
-    p: UnsafePointer[UInt8, _], offset: Int, n: Int
+    p: Pointer[UInt8, _], offset: Int, n: Int
 ) where type_of(p).mut:
     """Write a zero-padded four-digit decimal at ``p + offset``.
 
@@ -362,7 +362,7 @@ def _realtime_seconds() -> Int:
 
 
 def _format_imf_fixdate(
-    unix_secs: Int, p: UnsafePointer[UInt8, _]
+    unix_secs: Int, p: Pointer[UInt8, _]
 ) where type_of(p).mut:
     """Format ``unix_secs`` as a 29-byte IMF-fixdate at ``p[0:29]``.
 

@@ -43,7 +43,7 @@ var frame = w.take()  # List[UInt8]
 ```
 """
 
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 
 # ── UTF-8 validation ───────────────────────────────────────────────────────
@@ -254,7 +254,7 @@ struct ByteReader[origin: Origin](Movable):
         if n == 0:
             return String("")
         var out = String(unsafe_uninit_length=n)
-        memcpy(dest=out.unsafe_ptr_mut(), src=s.unsafe_ptr(), count=n)
+        unsafe_memcpy(dest=out.unsafe_ptr_mut(), src=s.unsafe_ptr(), count=n)
         return out^
 
     def skip(mut self, n: Int) raises:
@@ -346,7 +346,11 @@ struct ByteWriter(Movable):
             return
         var old = len(self.buf)
         self.buf.resize(old + n, UInt8(0))
-        memcpy(dest=self.buf.unsafe_ptr() + old, src=b.unsafe_ptr(), count=n)
+        unsafe_memcpy(
+            dest=self.buf.unsafe_ptr().unsafe_offset(old),
+            src=b.unsafe_ptr(),
+            count=n,
+        )
 
     def write_str(mut self, s: StringSlice):
         """Append the UTF-8 bytes of ``s``."""

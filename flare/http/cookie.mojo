@@ -112,23 +112,27 @@ def parse_cookie_header(header: String) -> List[Cookie]:
 
     while pos < n:
         # Skip leading whitespace
-        while pos < n and (ptr[pos] == 32 or ptr[pos] == 9):
+        while pos < n and (
+            ptr[unsafe_offset=pos] == 32 or ptr[unsafe_offset=pos] == 9
+        ):
             pos += 1
 
         # Find '='
         var eq = -1
         var scan = pos
         while scan < n:
-            if ptr[scan] == 61:  # '='
+            if ptr[unsafe_offset=scan] == 61:  # '='
                 eq = scan
                 break
-            if ptr[scan] == 59:  # ';' before '=' means malformed, skip
+            if (
+                ptr[unsafe_offset=scan] == 59
+            ):  # ';' before '=' means malformed, skip
                 break
             scan += 1
 
         if eq < 0:
             # Skip to next ';'
-            while pos < n and ptr[pos] != 59:
+            while pos < n and ptr[unsafe_offset=pos] != 59:
                 pos += 1
             pos += 1
             continue
@@ -140,7 +144,7 @@ def parse_cookie_header(header: String) -> List[Cookie]:
         # Find end of value (';' or end of string)
         var val_start = eq + 1
         var val_end = val_start
-        while val_end < n and ptr[val_end] != 59:
+        while val_end < n and ptr[unsafe_offset=val_end] != 59:
             val_end += 1
 
         var value = String(
@@ -170,14 +174,14 @@ def parse_set_cookie_header(header: String) -> Cookie:
     # Split on first ';' to get name=value
     var semi = n
     for i in range(n):
-        if ptr[i] == 59:
+        if ptr[unsafe_offset=i] == 59:
             semi = i
             break
 
     var nv = String(String(unsafe_from_utf8=header.as_bytes()[:semi]).strip())
     var eq = -1
     for i in range(nv.byte_length()):
-        if nv.unsafe_ptr()[i] == 61:
+        if nv.unsafe_ptr()[unsafe_offset=i] == 61:
             eq = i
             break
 
@@ -195,11 +199,13 @@ def parse_set_cookie_header(header: String) -> Cookie:
     # Parse attributes
     var pos = semi + 1
     while pos < n:
-        while pos < n and (ptr[pos] == 32 or ptr[pos] == 9):
+        while pos < n and (
+            ptr[unsafe_offset=pos] == 32 or ptr[unsafe_offset=pos] == 9
+        ):
             pos += 1
 
         var attr_end = pos
-        while attr_end < n and ptr[attr_end] != 59:
+        while attr_end < n and ptr[unsafe_offset=attr_end] != 59:
             attr_end += 1
 
         var attr = String(
@@ -210,7 +216,7 @@ def parse_set_cookie_header(header: String) -> Cookie:
         # from attr's -- attr_eq below must stay a valid index into attr).
         var attr_lower_bytes = List[UInt8](capacity=attr.byte_length())
         for i in range(attr.byte_length()):
-            var c = attr.unsafe_ptr()[i]
+            var c = attr.unsafe_ptr()[unsafe_offset=i]
             if c >= 65 and c <= 90:
                 attr_lower_bytes.append(c + 32)
             else:
@@ -222,7 +228,7 @@ def parse_set_cookie_header(header: String) -> Cookie:
         # Check for attribute=value pairs
         var attr_eq = -1
         for i in range(attr_lower.byte_length()):
-            if attr_lower.unsafe_ptr()[i] == 61:
+            if attr_lower.unsafe_ptr()[unsafe_offset=i] == 61:
                 attr_eq = i
                 break
 
@@ -241,7 +247,7 @@ def parse_set_cookie_header(header: String) -> Cookie:
             elif akey == "max-age":
                 var age = 0
                 for i in range(aval.byte_length()):
-                    var c = Int(aval.unsafe_ptr()[i])
+                    var c = Int(aval.unsafe_ptr()[unsafe_offset=i])
                     if c >= 48 and c <= 57:
                         age = age * 10 + (c - 48)
                 cookie.max_age = age

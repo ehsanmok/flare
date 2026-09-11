@@ -135,7 +135,7 @@ struct UnixStream(Movable):
                 raise ConnectionReset(self._peer_path, Int(e.value))
             raise NetworkError(_strerror(e.value) + " (recv)", Int(e.value))
 
-    def write(self, buf: UnsafePointer[UInt8, _], n: Int) raises -> Int:
+    def write(self, buf: Pointer[UInt8, _], n: Int) raises -> Int:
         """Write at most ``n`` bytes from ``buf``. Returns the byte
         count actually written (may be less than ``n``).
 
@@ -159,7 +159,7 @@ struct UnixStream(Movable):
         var remaining = len(data)
         while remaining > 0:
             var got = self.write(p, remaining)
-            p = p + got
+            p = p.unsafe_offset(got)
             remaining -= got
 
     def shutdown_read(self) raises:

@@ -66,7 +66,7 @@ cancel infrastructure.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 
 
 # ── Reason codes ─────────────────────────────────────────────────────────────
@@ -132,13 +132,13 @@ struct CancelCell(Movable):
 
     def __init__(out self) raises:
         """Allocate a fresh cell initialised to ``NONE``."""
-        var p = alloc[Int](1)
+        var p = alloc(Layout[Int](count=1)).unsafe_leak()
         p.unsafe_write(CancelReason.NONE)
         self._addr = Int(p)
 
     def __deinit__(deinit self):
         if self._addr != 0:
-            var p = UnsafePointer[Int, MutUntrackedOrigin](
+            var p = Pointer[Int, MutUntrackedOrigin](
                 unsafe_from_address=self._addr
             )
             p.unsafe_deinit_pointee()
@@ -153,7 +153,7 @@ struct CancelCell(Movable):
         """
         if self._addr == 0:
             return
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
         Atomic[DType.int64].store[ordering=Ordering.RELEASE](p, Int64(reason))
@@ -162,7 +162,7 @@ struct CancelCell(Movable):
         """Reset the cell to ``NONE`` with a release store."""
         if self._addr == 0:
             return
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
         Atomic[DType.int64].store[ordering=Ordering.RELEASE](
@@ -226,18 +226,18 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
         """Return True once the cell is non-zero (acquire load)."""
         if self._addr == 0:
             return False
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
         return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p) != Int64(
             CancelReason.NONE
         )
 
-    def reason(read self) -> Int:
+    def reason(imm self) -> Int:
         """Return the reason code currently in the cell (acquire load)."""
         if self._addr == 0:
             return CancelReason.NONE
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
         return Int(Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p))

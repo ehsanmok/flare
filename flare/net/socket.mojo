@@ -20,7 +20,7 @@ from std.ffi import (
     get_errno,
     ErrNo,
 )
-from std.memory import UnsafePointer, stack_allocation, alloc
+from std.memory import Layout, UnsafePointer, stack_allocation, alloc
 from std.os import getenv
 from std.sys.info import CompilationTarget
 
@@ -514,7 +514,7 @@ struct RawSocket(Movable):
 
 def _build_sockaddr_in(
     addr: SocketAddr,
-) raises -> Tuple[type_of(alloc[UInt8](0)), c_uint]:
+) raises -> Tuple[type_of(alloc(Layout[UInt8](count=0)).unsafe_leak()), c_uint]:
     """Allocate and populate a heap ``sockaddr_in`` or ``sockaddr_in6`` buffer.
 
     Branches on ``addr.ip.is_v6()`` to build the correct sockaddr type.
@@ -529,28 +529,28 @@ def _build_sockaddr_in(
         AddressParseError: If the IP string is not a valid address.
     """
     if addr.ip.is_v6():
-        var ip_buf = alloc[UInt8](16)
+        var ip_buf = alloc(Layout[UInt8](count=16)).unsafe_leak()
         for i in range(16):
             ip_buf.unsafe_offset(i).unsafe_write(0)
         var rc = _inet_pton(AF_INET6, String(addr.ip), ip_buf)
         if rc != 1:
             ip_buf.unsafe_free()
             raise AddressParseError(String(addr.ip))
-        var sa = alloc[UInt8](28)
+        var sa = alloc(Layout[UInt8](count=28)).unsafe_leak()
         for i in range(28):
             sa.unsafe_offset(i).unsafe_write(0)
         _fill_sockaddr_in6(sa, addr.port, ip_buf)
         ip_buf.unsafe_free()
         return Tuple(sa, SOCKADDR_IN6_SIZE)
     else:
-        var ip_buf = alloc[UInt8](4)
+        var ip_buf = alloc(Layout[UInt8](count=4)).unsafe_leak()
         for i in range(4):
             ip_buf.unsafe_offset(i).unsafe_write(0)
         var rc = _inet_pton(AF_INET, String(addr.ip), ip_buf)
         if rc != 1:
             ip_buf.unsafe_free()
             raise AddressParseError(String(addr.ip))
-        var sa = alloc[UInt8](16)
+        var sa = alloc(Layout[UInt8](count=16)).unsafe_leak()
         for i in range(16):
             sa.unsafe_offset(i).unsafe_write(0)
         _fill_sockaddr_in(sa, addr.port, ip_buf)
@@ -558,7 +558,7 @@ def _build_sockaddr_in(
         return Tuple(sa, SOCKADDR_IN_SIZE)
 
 
-def _sockaddr_to_socket_addr(buf: UnsafePointer[UInt8, _]) raises -> SocketAddr:
+def _sockaddr_to_socket_addr(buf: Pointer[UInt8, _]) raises -> SocketAddr:
     """Extract a ``SocketAddr`` from a ``sockaddr_in`` or ``sockaddr_in6`` buffer.
 
     Reads the address family from the buffer to determine the format.

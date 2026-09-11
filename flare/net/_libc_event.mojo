@@ -105,7 +105,7 @@ comptime KEVENT_UDATA_OFF: Int = 24  # void*, 8 bytes
 
 @always_inline
 def _epoll_event_set(
-    buf: UnsafePointer[UInt8, _], events: UInt32, data_u64: UInt64
+    buf: Pointer[UInt8, _], events: UInt32, data_u64: UInt64
 ) where type_of(buf).mut:
     """Populate one ``struct epoll_event`` in-place.
 
@@ -143,7 +143,7 @@ def _epoll_event_set(
 
 
 @always_inline
-def _epoll_event_read_events(buf: UnsafePointer[UInt8, _]) -> UInt32:
+def _epoll_event_read_events(buf: Pointer[UInt8, _]) -> UInt32:
     """Read the ``events`` field from an ``epoll_event`` buffer."""
     debug_assert[assert_mode="safe"](
         Int(buf) != 0, "_epoll_event_read_events: null epoll_event buffer"
@@ -157,7 +157,7 @@ def _epoll_event_read_events(buf: UnsafePointer[UInt8, _]) -> UInt32:
 
 
 @always_inline
-def _epoll_event_read_data(buf: UnsafePointer[UInt8, _]) -> UInt64:
+def _epoll_event_read_data(buf: Pointer[UInt8, _]) -> UInt64:
     """Read ``data.u64`` from an ``epoll_event`` buffer."""
     debug_assert[assert_mode="safe"](
         Int(buf) != 0, "_epoll_event_read_data: null epoll_event buffer"
@@ -176,7 +176,7 @@ def _epoll_event_read_data(buf: UnsafePointer[UInt8, _]) -> UInt64:
 
 @always_inline
 def _kevent_set(
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     ident: UInt64,
     filter: Int16,
     flags: UInt16,
@@ -234,16 +234,18 @@ def _kevent_set(
 
 
 @always_inline
-def _kevent_read_ident(buf: UnsafePointer[UInt8, _]) -> UInt64:
+def _kevent_read_ident(buf: Pointer[UInt8, _]) -> UInt64:
     """Read the ``ident`` field from a ``kevent`` buffer."""
     var v: UInt64 = 0
     for i in range(8):
-        v |= UInt64((buf + KEVENT_IDENT_OFF + i).load()) << UInt64(8 * i)
+        v |= UInt64(
+            (buf.unsafe_offset(KEVENT_IDENT_OFF).unsafe_offset(i)).unsafe_load()
+        ) << UInt64(8 * i)
     return v
 
 
 @always_inline
-def _kevent_read_filter(buf: UnsafePointer[UInt8, _]) -> Int16:
+def _kevent_read_filter(buf: Pointer[UInt8, _]) -> Int16:
     """Read the ``filter`` field from a ``kevent`` buffer."""
     var lo = UInt16(buf.unsafe_offset(KEVENT_FILTER_OFF + 0).unsafe_load())
     var hi = UInt16(buf.unsafe_offset(KEVENT_FILTER_OFF + 1).unsafe_load())
@@ -252,7 +254,7 @@ def _kevent_read_filter(buf: UnsafePointer[UInt8, _]) -> Int16:
 
 
 @always_inline
-def _kevent_read_flags(buf: UnsafePointer[UInt8, _]) -> UInt16:
+def _kevent_read_flags(buf: Pointer[UInt8, _]) -> UInt16:
     """Read the ``flags`` field from a ``kevent`` buffer."""
     return UInt16(buf.unsafe_offset(KEVENT_FLAGS_OFF + 0).unsafe_load()) | (
         UInt16(buf.unsafe_offset(KEVENT_FLAGS_OFF + 1).unsafe_load()) << 8
@@ -260,7 +262,7 @@ def _kevent_read_flags(buf: UnsafePointer[UInt8, _]) -> UInt16:
 
 
 @always_inline
-def _kevent_read_fflags(buf: UnsafePointer[UInt8, _]) -> UInt32:
+def _kevent_read_fflags(buf: Pointer[UInt8, _]) -> UInt32:
     """Read the ``fflags`` field from a ``kevent`` buffer."""
     var v: UInt32 = 0
     for i in range(4):
@@ -271,11 +273,13 @@ def _kevent_read_fflags(buf: UnsafePointer[UInt8, _]) -> UInt32:
 
 
 @always_inline
-def _kevent_read_udata(buf: UnsafePointer[UInt8, _]) -> UInt64:
+def _kevent_read_udata(buf: Pointer[UInt8, _]) -> UInt64:
     """Read the ``udata`` field from a ``kevent`` buffer."""
     var v: UInt64 = 0
     for i in range(8):
-        v |= UInt64((buf + KEVENT_UDATA_OFF + i).unsafe_load()) << UInt64(8 * i)
+        v |= UInt64(
+            (buf.unsafe_offset(KEVENT_UDATA_OFF).unsafe_offset(i)).unsafe_load()
+        ) << UInt64(8 * i)
     return v
 
 
@@ -299,7 +303,7 @@ def _epoll_create1(flags: c_int) -> c_int:
 
 @always_inline
 def _epoll_ctl(
-    epfd: c_int, op: c_int, fd: c_int, event: UnsafePointer[UInt8, _]
+    epfd: c_int, op: c_int, fd: c_int, event: Pointer[UInt8, _]
 ) -> c_int:
     """Wrapper around ``epoll_ctl(2)``.
 
@@ -322,7 +326,7 @@ def _epoll_ctl(
 @always_inline
 def _epoll_wait(
     epfd: c_int,
-    events: UnsafePointer[UInt8, _],
+    events: Pointer[UInt8, _],
     maxevents: c_int,
     timeout_ms: c_int,
 ) -> c_int:
@@ -371,11 +375,11 @@ def _kqueue() -> c_int:
 @always_inline
 def _kevent(
     kq: c_int,
-    changelist: UnsafePointer[UInt8, _],
+    changelist: Pointer[UInt8, _],
     nchanges: c_int,
-    eventlist: UnsafePointer[UInt8, _],
+    eventlist: Pointer[UInt8, _],
     nevents: c_int,
-    timeout: UnsafePointer[UInt8, _],
+    timeout: Pointer[UInt8, _],
 ) -> c_int:
     """Wrapper around ``kevent(2)``.
 
@@ -443,7 +447,7 @@ def _eventfd(initval: c_uint, flags: c_int) -> c_int:
 
 
 @always_inline
-def _pipe(fds: UnsafePointer[c_int, _]) -> c_int:
+def _pipe(fds: Pointer[c_int, _]) -> c_int:
     """Wrapper around ``pipe(2)``.
 
     Creates a pair of connected fds: ``fds[0]`` is the read end, ``fds[1]``

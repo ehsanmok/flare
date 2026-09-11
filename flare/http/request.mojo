@@ -1,7 +1,7 @@
 """HTTP request type."""
 
 from std.collections import Dict, Optional
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from json import loads, Value
 from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_cookie_header
@@ -83,9 +83,7 @@ struct Request(Movable):
     Default False; the reactor copies
     ``ServerConfig.expose_error_messages`` onto every parsed request.
     See struct docstring."""
-    var _params: Optional[
-        UnsafePointer[Dict[String, String], MutUntrackedOrigin]
-    ]
+    var _params: Optional[Pointer[Dict[String, String], MutUntrackedOrigin]]
     """Lazily-allocated path-params table. ``None`` by default; ``Router``
     allocates the underlying ``Dict`` on the first path-parameter
     extraction via ``params_mut()``. The plaintext-bench fast path
@@ -225,7 +223,7 @@ struct Request(Movable):
             # conflicts with the stdlib's own ``free`` declaration at
             # MLIR legalization time when this module is pulled into a
             # fuzz-environment compile (mozz harness).
-            var ptr = alloc[Dict[String, String]](1)
+            var ptr = alloc(Layout[Dict[String, String]](count=1)).unsafe_leak()
             ptr.unsafe_write(Dict[String, String]())
             self._params = ptr
         return self._params.value()[]
@@ -297,7 +295,7 @@ struct Request(Movable):
         var p = self.url.unsafe_ptr()
         var q = -1
         for i in range(n):
-            if p[i] == 63:  # '?'
+            if p[unsafe_offset=i] == 63:  # '?'
                 q = i + 1
                 break
         if q < 0:
@@ -305,7 +303,7 @@ struct Request(Movable):
         # Strip fragment.
         var end = n
         for i in range(q, n):
-            if p[i] == 35:  # '#'
+            if p[unsafe_offset=i] == 35:  # '#'
                 end = i
                 break
         var key_n = name.byte_length()
@@ -315,20 +313,20 @@ struct Request(Movable):
             # Find end of this pair.
             var pair_end = end
             for i in range(cursor, end):
-                if p[i] == 38:  # '&'
+                if p[unsafe_offset=i] == 38:  # '&'
                     pair_end = i
                     break
             # Find '=' within the pair.
             var eq = pair_end
             for i in range(cursor, pair_end):
-                if p[i] == 61:  # '='
+                if p[unsafe_offset=i] == 61:  # '='
                     eq = i
                     break
             var this_key_n = eq - cursor
             if this_key_n == key_n:
                 var matched = True
                 for j in range(key_n):
-                    if p[cursor + j] != kp[j]:
+                    if p[unsafe_offset=cursor + j] != kp[unsafe_offset=j]:
                         matched = False
                         break
                 if matched:
@@ -353,14 +351,14 @@ struct Request(Movable):
         var p = self.url.unsafe_ptr()
         var q = -1
         for i in range(n):
-            if p[i] == 63:  # '?'
+            if p[unsafe_offset=i] == 63:  # '?'
                 q = i + 1
                 break
         if q < 0:
             return False
         var end = n
         for i in range(q, n):
-            if p[i] == 35:  # '#'
+            if p[unsafe_offset=i] == 35:  # '#'
                 end = i
                 break
         var key_n = name.byte_length()
@@ -369,19 +367,19 @@ struct Request(Movable):
         while cursor < end:
             var pair_end = end
             for i in range(cursor, end):
-                if p[i] == 38:
+                if p[unsafe_offset=i] == 38:
                     pair_end = i
                     break
             var eq = pair_end
             for i in range(cursor, pair_end):
-                if p[i] == 61:
+                if p[unsafe_offset=i] == 61:
                     eq = i
                     break
             var this_key_n = eq - cursor
             if this_key_n == key_n:
                 var matched = True
                 for j in range(key_n):
-                    if p[cursor + j] != kp[j]:
+                    if p[unsafe_offset=cursor + j] != kp[unsafe_offset=j]:
                         matched = False
                         break
                 if matched:

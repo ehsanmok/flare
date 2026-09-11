@@ -444,7 +444,7 @@ struct Reactor(Movable):
                 udata=UInt64(0),
             )
             _kevent_set(
-                ch + KEVENT_SIZE,
+                ch.unsafe_offset(KEVENT_SIZE),
                 ident=ident,
                 filter=EVFILT_WRITE,
                 flags=EV_DELETE,
@@ -505,7 +505,7 @@ struct Reactor(Movable):
                     return 0
                 raise _os_error("epoll_wait")
             for i in range(Int(n)):
-                var entry = buf_ptr + (i * EPOLL_EVENT_SIZE)
+                var entry = buf_ptr.unsafe_offset((i * EPOLL_EVENT_SIZE))
                 var bits = _epoll_event_read_events(entry)
                 var tok = _epoll_event_read_data(entry)
                 # If this was a wakeup, drain the eventfd so it stops firing.
@@ -553,7 +553,7 @@ struct Reactor(Movable):
             else:
                 # UnsafePointer is non-nullable; C NULL from a runtime 0.
                 var null_addr = 0
-                var null_ts = UnsafePointer[UInt8, MutUntrackedOrigin](
+                var null_ts = Pointer[UInt8, MutUntrackedOrigin](
                     unsafe_from_address=null_addr
                 )
                 n = _kevent(
@@ -570,7 +570,7 @@ struct Reactor(Movable):
                     return 0
                 raise _os_error("kevent")
             for i in range(Int(n)):
-                var entry = buf_ptr + (i * KEVENT_SIZE)
+                var entry = buf_ptr.unsafe_offset((i * KEVENT_SIZE))
                 var filter = _kevent_read_filter(entry)
                 var flags = _kevent_read_flags(entry)
                 var udata = _kevent_read_udata(entry)
@@ -605,9 +605,9 @@ struct Reactor(Movable):
         """
         comptime if CompilationTarget.is_linux():
             var one = stack_allocation[8, UInt8]()
-            (one + 0).unsafe_write(UInt8(1))
+            (one.unsafe_offset(0)).unsafe_write(UInt8(1))
             for k in range(1, 8):
-                (one + k).unsafe_write(UInt8(0))
+                (one.unsafe_offset(k)).unsafe_write(UInt8(0))
             _ = self._io.write(self._wake_write, one, c_size_t(8))
         else:
             var b = stack_allocation[1, UInt8]()
@@ -671,7 +671,7 @@ struct Reactor(Movable):
         var n_changes = 0
         if (interest & INTEREST_READ) != 0:
             _kevent_set(
-                ch + (n_changes * KEVENT_SIZE),
+                ch.unsafe_offset((n_changes * KEVENT_SIZE)),
                 ident=ident,
                 filter=EVFILT_READ,
                 flags=EV_ADD | EV_ENABLE,
@@ -682,7 +682,7 @@ struct Reactor(Movable):
             n_changes += 1
         elif delete_absent:
             _kevent_set(
-                ch + (n_changes * KEVENT_SIZE),
+                ch.unsafe_offset((n_changes * KEVENT_SIZE)),
                 ident=ident,
                 filter=EVFILT_READ,
                 flags=EV_DELETE,
@@ -693,7 +693,7 @@ struct Reactor(Movable):
             n_changes += 1
         if (interest & INTEREST_WRITE) != 0:
             _kevent_set(
-                ch + (n_changes * KEVENT_SIZE),
+                ch.unsafe_offset((n_changes * KEVENT_SIZE)),
                 ident=ident,
                 filter=EVFILT_WRITE,
                 flags=EV_ADD | EV_ENABLE,
@@ -704,7 +704,7 @@ struct Reactor(Movable):
             n_changes += 1
         elif delete_absent:
             _kevent_set(
-                ch + (n_changes * KEVENT_SIZE),
+                ch.unsafe_offset((n_changes * KEVENT_SIZE)),
                 ident=ident,
                 filter=EVFILT_WRITE,
                 flags=EV_DELETE,
@@ -731,7 +731,7 @@ struct Reactor(Movable):
         # ENOENT (2) on DELETE is not a fatal error — the filter just
         # wasn't there, which is fine.
         for i in range(Int(rc)):
-            var entry = out + (i * KEVENT_SIZE)
+            var entry = out.unsafe_offset((i * KEVENT_SIZE))
             var flags = _kevent_read_flags(entry)
             if (flags & EV_ERROR) != 0:
                 var data = _kevent_read_fflags(entry)

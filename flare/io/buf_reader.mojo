@@ -37,7 +37,7 @@ trait Readable(Deinitable, Movable):
         ```
     """
 
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
         """Read up to ``size`` bytes into the buffer at ``buf``.
 
         Args:

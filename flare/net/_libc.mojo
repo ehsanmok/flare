@@ -201,9 +201,9 @@ def _htonl(x: UInt32) -> UInt32:
 
 @always_inline
 def _fill_sockaddr_in(
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     port: UInt16,
-    ip_bytes: UnsafePointer[UInt8, _],
+    ip_bytes: Pointer[UInt8, _],
 ) where type_of(buf).mut:
     """Populate a 16-byte IPv4 ``sockaddr_in`` buffer in-place.
 
@@ -242,9 +242,9 @@ def _fill_sockaddr_in(
 
 @always_inline
 def _fill_sockaddr_in6(
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     port: UInt16,
-    ip_bytes: UnsafePointer[UInt8, _],
+    ip_bytes: Pointer[UInt8, _],
 ) where type_of(buf).mut:
     """Populate a 28-byte IPv6 ``sockaddr_in6`` buffer in-place.
 
@@ -293,7 +293,7 @@ def _fill_sockaddr_in6(
 
 
 @always_inline
-def _read_port_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> UInt16:
+def _read_port_from_sockaddr(buf: Pointer[UInt8, _]) -> UInt16:
     """Extract and byte-swap the port from a ``sockaddr_in`` buffer.
 
     Args:
@@ -311,11 +311,11 @@ def _read_port_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> UInt16:
     # as (high << 8 | low) already yields the host-byte-order value on
     # little-endian platforms (x86-64, ARM64). Applying _ntohs here would
     # byte-swap a second time and produce a wrong result.
-    return UInt16(buf[2]) << 8 | UInt16(buf[3])
+    return UInt16(buf[unsafe_offset=2]) << 8 | UInt16(buf[unsafe_offset=3])
 
 
 @always_inline
-def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
+def _read_ip_from_sockaddr(buf: Pointer[UInt8, _]) raises -> String:
     """Extract the IPv4 address string from a ``sockaddr_in`` buffer.
 
     Args:
@@ -338,13 +338,13 @@ def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
         ntop_buf.unsafe_offset(i).unsafe_write(0)
 
     # inet_ntop(AF_INET, &sin_addr, dst, dst_len) — sin_addr is at offset 4
-    _ = external_call["inet_ntop", UnsafePointer[UInt8, MutUntrackedOrigin]](
+    _ = external_call["inet_ntop", Pointer[UInt8, MutUntrackedOrigin]](
         AF_INET,
         buf.unsafe_offset(4).unsafe_bitcast[NoneType](),
         ntop_buf.unsafe_bitcast[c_char](),
         c_uint(64),
     )
-    if ntop_buf[0] == 0:
+    if ntop_buf[unsafe_offset=0] == 0:
         raise Error("inet_ntop failed: errno " + String(get_errno()))
     return String(
         StringSlice(
@@ -356,7 +356,7 @@ def _read_ip_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
 
 
 @always_inline
-def _read_ipv6_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
+def _read_ipv6_from_sockaddr(buf: Pointer[UInt8, _]) raises -> String:
     """Extract the IPv6 address string from a ``sockaddr_in6`` buffer.
 
     Args:
@@ -376,13 +376,13 @@ def _read_ipv6_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
         ntop_buf.unsafe_offset(i).unsafe_write(0)
 
     # inet_ntop(AF_INET6, &sin6_addr, dst, dst_len) — sin6_addr at offset 8
-    _ = external_call["inet_ntop", UnsafePointer[UInt8, MutUntrackedOrigin]](
+    _ = external_call["inet_ntop", Pointer[UInt8, MutUntrackedOrigin]](
         AF_INET6,
         buf.unsafe_offset(8).unsafe_bitcast[NoneType](),
         ntop_buf.unsafe_bitcast[c_char](),
         c_uint(64),
     )
-    if ntop_buf[0] == 0:
+    if ntop_buf[unsafe_offset=0] == 0:
         raise Error("inet_ntop (IPv6) failed: errno " + String(get_errno()))
     return String(
         StringSlice(
@@ -394,7 +394,7 @@ def _read_ipv6_from_sockaddr(buf: UnsafePointer[UInt8, _]) raises -> String:
 
 
 @always_inline
-def _get_family_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> c_int:
+def _get_family_from_sockaddr(buf: Pointer[UInt8, _]) -> c_int:
     """Read the address family from a sockaddr buffer.
 
     Handles both Linux (sa_family at offset 0, 2 bytes LE) and macOS/BSD
@@ -404,9 +404,11 @@ def _get_family_from_sockaddr(buf: UnsafePointer[UInt8, _]) -> c_int:
         ``AF_INET`` or ``AF_INET6``.
     """
     comptime if CompilationTarget.is_macos():
-        return c_int(Int(buf[1]))
+        return c_int(Int(buf[unsafe_offset=1]))
     else:
-        return c_int(Int(buf[0]) | (Int(buf[1]) << 8))
+        return c_int(
+            Int(buf[unsafe_offset=0]) | (Int(buf[unsafe_offset=1]) << 8)
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -424,10 +426,10 @@ def _strerror(code: c_int) -> String:
     Returns:
         The human-readable error string.
     """
-    var ptr = external_call[
-        "strerror", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ](code)
-    if ptr[0] == 0:
+    var ptr = external_call["strerror", Pointer[UInt8, MutUntrackedOrigin]](
+        code
+    )
+    if ptr[unsafe_offset=0] == 0:
         return "unknown error " + String(code)
     return String(
         StringSlice(
@@ -474,7 +476,7 @@ def _close(fd: c_int) -> c_int:
 
 
 @always_inline
-def _bind(fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint) -> c_int:
+def _bind(fd: c_int, addr: Pointer[UInt8, _], addrlen: c_uint) -> c_int:
     """Wrapper around ``bind(2)``."""
     debug_assert[assert_mode="safe"](
         Int(addr) != 0 and Int(addrlen) > 0,
@@ -494,8 +496,8 @@ def _listen(fd: c_int, backlog: c_int) -> c_int:
 @always_inline
 def _accept(
     fd: c_int,
-    addr: UnsafePointer[UInt8, _],
-    addrlen: UnsafePointer[c_uint, _],
+    addr: Pointer[UInt8, _],
+    addrlen: Pointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``accept(2)``."""
     debug_assert[assert_mode="safe"](
@@ -508,9 +510,7 @@ def _accept(
 
 
 @always_inline
-def _connect(
-    fd: c_int, addr: UnsafePointer[UInt8, _], addrlen: c_uint
-) -> c_int:
+def _connect(fd: c_int, addr: Pointer[UInt8, _], addrlen: c_uint) -> c_int:
     """Wrapper around ``connect(2)``."""
     debug_assert[assert_mode="safe"](
         Int(addr) != 0 and Int(addrlen) > 0,
@@ -524,8 +524,8 @@ def _connect(
 @always_inline
 def _getsockname(
     fd: c_int,
-    addr: UnsafePointer[UInt8, _],
-    addrlen: UnsafePointer[c_uint, _],
+    addr: Pointer[UInt8, _],
+    addrlen: Pointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getsockname(2)``."""
     debug_assert[assert_mode="safe"](
@@ -555,7 +555,7 @@ def _getpeername(
 
 @always_inline
 def _send(
-    fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
+    fd: c_int, buf: Pointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``send(2)``."""
     debug_assert[assert_mode="safe"](
@@ -567,9 +567,7 @@ def _send(
 
 
 @always_inline
-def _writev(
-    fd: c_int, iov: UnsafePointer[UInt8, _], iovcnt: c_int
-) -> c_ssize_t:
+def _writev(fd: c_int, iov: Pointer[UInt8, _], iovcnt: c_int) -> c_ssize_t:
     """Wrapper around ``writev(2)``.
 
     ``iov`` is a pointer to a contiguous array of ``iovcnt``
@@ -595,7 +593,7 @@ def _writev(
 
 @always_inline
 def _recv(
-    fd: c_int, buf: UnsafePointer[UInt8, _], n: c_size_t, flags: c_int
+    fd: c_int, buf: Pointer[UInt8, _], n: c_size_t, flags: c_int
 ) -> c_ssize_t:
     """Wrapper around ``recv(2)``."""
     debug_assert[assert_mode="safe"](
@@ -609,10 +607,10 @@ def _recv(
 @always_inline
 def _sendto(
     fd: c_int,
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     n: c_size_t,
     flags: c_int,
-    addr: UnsafePointer[UInt8, _],
+    addr: Pointer[UInt8, _],
     addrlen: c_uint,
 ) -> c_ssize_t:
     """Wrapper around ``sendto(2)``."""
@@ -629,11 +627,11 @@ def _sendto(
 @always_inline
 def _recvfrom(
     fd: c_int,
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     n: c_size_t,
     flags: c_int,
-    addr: UnsafePointer[UInt8, _],
-    addrlen: UnsafePointer[c_uint, _],
+    addr: Pointer[UInt8, _],
+    addrlen: Pointer[c_uint, _],
 ) -> c_ssize_t:
     """Wrapper around ``recvfrom(2)``."""
     return external_call["recvfrom", c_ssize_t](
@@ -649,7 +647,7 @@ def _recvfrom(
 @always_inline
 def _recvmmsg(
     fd: c_int,
-    msgvec: UnsafePointer[UInt8, _],
+    msgvec: Pointer[UInt8, _],
     vlen: c_uint,
     flags: c_int,
     timeout: Int,
@@ -690,7 +688,7 @@ def _recvmmsg(
 @always_inline
 def _sendmmsg(
     fd: c_int,
-    msgvec: UnsafePointer[UInt8, _],
+    msgvec: Pointer[UInt8, _],
     vlen: c_uint,
     flags: c_int,
 ) -> c_int:
@@ -720,7 +718,7 @@ def _sendmmsg(
 @always_inline
 def _sendmsg(
     fd: c_int,
-    msg: UnsafePointer[UInt8, _],
+    msg: Pointer[UInt8, _],
     flags: c_int,
 ) -> c_ssize_t:
     """Wrapper around ``sendmsg(2)``.
@@ -743,7 +741,7 @@ def _setsockopt(
     fd: c_int,
     level: c_int,
     optname: c_int,
-    optval: UnsafePointer[UInt8, _],
+    optval: Pointer[UInt8, _],
     optlen: c_uint,
 ) -> c_int:
     """Wrapper around ``setsockopt(2)``."""
@@ -769,8 +767,8 @@ def _getsockopt(
     fd: c_int,
     level: c_int,
     optname: c_int,
-    optval: UnsafePointer[UInt8, _],
-    optlen: UnsafePointer[c_uint, _],
+    optval: Pointer[UInt8, _],
+    optlen: Pointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getsockopt(2)``."""
     return external_call["getsockopt", c_int](
@@ -779,9 +777,7 @@ def _getsockopt(
 
 
 @always_inline
-def _poll(
-    fds: UnsafePointer[UInt8, _], nfds: c_uint, timeout_ms: c_int
-) -> c_int:
+def _poll(fds: Pointer[UInt8, _], nfds: c_uint, timeout_ms: c_int) -> c_int:
     """Wrapper around ``poll(2)``.
 
     Args:
@@ -800,8 +796,8 @@ def _poll(
 @always_inline
 def _getaddrinfo(
     host: String,
-    hints: UnsafePointer[UInt8, _],
-    res_slot: UnsafePointer[UInt8, _],
+    hints: Pointer[UInt8, _],
+    res_slot: Pointer[UInt8, _],
 ) -> c_int:
     """Wrapper around ``getaddrinfo(3)``.
 
@@ -822,7 +818,7 @@ def _getaddrinfo(
     var host_copy = host
     return external_call["getaddrinfo", c_int](
         host_copy.as_c_string_slice(),
-        Optional[UnsafePointer[UInt8, MutUntrackedOrigin]](None),
+        Optional[Pointer[UInt8, MutUntrackedOrigin]](None),
         hints.unsafe_bitcast[NoneType](),
         res_slot.unsafe_bitcast[NoneType](),
     )
@@ -839,7 +835,7 @@ def _freeaddrinfo(head: Int):
     if head == 0:
         return
     _ = external_call["freeaddrinfo", NoneType](
-        UnsafePointer[NoneType, MutUntrackedOrigin](unsafe_from_address=head)
+        Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=head)
     )
 
 
@@ -853,10 +849,10 @@ def _gai_strerror(code: c_int) -> String:
     Returns:
         The error description string.
     """
-    var ptr = external_call[
-        "gai_strerror", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ](code)
-    if ptr[0] == 0:
+    var ptr = external_call["gai_strerror", Pointer[UInt8, MutUntrackedOrigin]](
+        code
+    )
+    if ptr[unsafe_offset=0] == 0:
         return "unknown getaddrinfo error " + String(code)
     return String(
         StringSlice(
@@ -868,9 +864,7 @@ def _gai_strerror(code: c_int) -> String:
 
 
 @always_inline
-def _inet_pton(
-    family: c_int, src: String, dst: UnsafePointer[UInt8, _]
-) -> c_int:
+def _inet_pton(family: c_int, src: String, dst: Pointer[UInt8, _]) -> c_int:
     """Convert a text IP address to its binary form.
 
     Args:

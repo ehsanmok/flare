@@ -106,7 +106,7 @@ inside ``work()``.
 """
 
 from std.ffi import external_call
-from std.memory import UnsafePointer, alloc, memcpy
+from std.memory import Layout, UnsafePointer, alloc, unsafe_memcpy
 from std.sys.info import CompilationTarget
 
 from ..http.cancel import Cancel, CancelReason
@@ -183,9 +183,9 @@ def _pool_try_acquire() -> Bool:
     still runs (the cap is best-effort, never a hard dependency).
     """
     var name = _pool_sem_name()
-    var sem = external_call[
-        "sem_open", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ](name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE))
+    var sem = external_call["sem_open", Pointer[UInt8, MutUntrackedOrigin]](
+        name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE)
+    )
     if Int(sem) == -1:
         return True
     var rc = external_call["sem_trywait", Int32](sem)
@@ -197,9 +197,9 @@ def _pool_try_acquire() -> Bool:
 def _pool_release():
     """Return one pool slot claimed by ``_pool_try_acquire``."""
     var name = _pool_sem_name()
-    var sem = external_call[
-        "sem_open", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ](name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE))
+    var sem = external_call["sem_open", Pointer[UInt8, MutUntrackedOrigin]](
+        name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE)
+    )
     if Int(sem) == -1:
         return
     _ = external_call["sem_post", Int32](sem)
@@ -254,7 +254,7 @@ struct _Task[T: Deinitable & Movable](Movable):
 
 def _block_thunk[
     T: Deinitable & Movable
-](arg: UnsafePointer[UInt8, MutUntrackedOrigin]) -> UnsafePointer[
+](arg: Pointer[UInt8, MutUntrackedOrigin]) -> Pointer[
     UInt8, MutUntrackedOrigin
 ]:
     """pthread start routine. Per-T monomorphisation.
@@ -271,51 +271,47 @@ def _block_thunk[
     6. Always free the ``_Task`` allocation we own; the buffers
        it points at are freed-or-not based on step 5.
     """
-    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(arg)
-    )
+    var raw = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(arg))
     var task_ptr = raw.unsafe_bitcast[_Task[T]]()
-    var task = task_ptr.take_pointee()
+    var task = task_ptr.unsafe_take_pointee()
 
-    var result_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var result_ptr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.result_addr
     ).unsafe_bitcast[T]()
-    var err_buf = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var err_buf = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.err_buf_addr
     )
-    var err_len_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var err_len_ptr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.err_len_addr
     ).unsafe_bitcast[Int]()
-    var success_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var success_ptr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=task.success_addr
     )
 
     try:
         var result = task.work()
         result_ptr.unsafe_write(result^)
-        success_ptr[0] = UInt8(1)
-        err_len_ptr[0] = 0
+        success_ptr[unsafe_offset=0] = UInt8(1)
+        err_len_ptr[unsafe_offset=0] = 0
     except e:
         var msg = String(e)
         var msg_span = msg.as_bytes()
         var n = msg.byte_length()
         if n > _ERR_BUF_CAP - 1:
             n = _ERR_BUF_CAP - 1
-        memcpy(dest=err_buf, src=msg_span.unsafe_ptr(), count=n)
-        err_buf[n] = UInt8(0)  # NUL terminator
-        err_len_ptr[0] = n
-        success_ptr[0] = UInt8(0)
+        unsafe_memcpy(dest=err_buf, src=msg_span.unsafe_ptr(), count=n)
+        err_buf[unsafe_offset=n] = UInt8(0)  # NUL terminator
+        err_len_ptr[unsafe_offset=0] = n
+        success_ptr[unsafe_offset=0] = UInt8(0)
 
     # The submitter owns the result / err / success buffers; it
     # frees them after pthread_join returns. We only own the
     # _Task allocation itself.
-    task_ptr.free()
+    task_ptr.unsafe_free()
 
     # UnsafePointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=null_addr
-    )
+    return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)
 
 
 # ── Cancel-reason error formatting ──────────────────────────────────────────
@@ -393,17 +389,17 @@ def block_in_pool[
     # allocations. Splitting them across allocs (rather than one big
     # block) keeps the per-T parametric step (the result slot) cleanly
     # separate from the type-erased flag bytes.
-    var result_ptr = alloc[T](1)
-    var err_buf = alloc[UInt8](_ERR_BUF_CAP)
-    var err_len_ptr = alloc[Int](1)
-    var success_ptr = alloc[UInt8](1)
+    var result_ptr = alloc(Layout[T](count=1)).unsafe_leak()
+    var err_buf = alloc(Layout[UInt8](count=_ERR_BUF_CAP)).unsafe_leak()
+    var err_len_ptr = alloc(Layout[Int](count=1)).unsafe_leak()
+    var success_ptr = alloc(Layout[UInt8](count=1)).unsafe_leak()
 
     # Initialise flags to 0. (T's slot is uninitialised; the worker
     # init_pointee_move's into it on success.)
-    err_len_ptr[0] = 0
-    success_ptr[0] = UInt8(0)
+    err_len_ptr[unsafe_offset=0] = 0
+    success_ptr[unsafe_offset=0] = UInt8(0)
 
-    var task_ptr = alloc[_Task[T]](1)
+    var task_ptr = alloc(Layout[_Task[T]](count=1)).unsafe_leak()
     task_ptr.unsafe_write(
         _Task[T](
             work=work,
@@ -422,7 +418,7 @@ def block_in_pool[
     # libc_usleep, which hits the documented 1000-1500x multiplier
     # in multi-threaded contexts and inflates
     # per-call latency from ~50 us to ~1 s.
-    var task_opaque = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var task_opaque = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(task_ptr)
     )
     try:
@@ -434,16 +430,16 @@ def block_in_pool[
     _pool_release()
 
     # ── Worker finished. Read result + free buffers. ───────────────────────
-    var success = success_ptr[0] == UInt8(1)
+    var success = success_ptr[unsafe_offset=0] == UInt8(1)
     var post_cancelled = cancel.cancelled()
     var post_reason = cancel.reason() if post_cancelled else CancelReason.NONE
 
     if success:
-        var out = result_ptr.take_pointee()
-        result_ptr.free()
-        err_buf.free()
-        err_len_ptr.free()
-        success_ptr.free()
+        var out = result_ptr.unsafe_take_pointee()
+        result_ptr.unsafe_free()
+        err_buf.unsafe_free()
+        err_len_ptr.unsafe_free()
+        success_ptr.unsafe_free()
 
         # Post-flight cancel check: if the cell flipped while
         # work() ran, raise rather than return a now-stale result.
@@ -453,18 +449,18 @@ def block_in_pool[
         return out^
 
     # Failure path: copy the error message out and raise.
-    var n = err_len_ptr[0]
+    var n = err_len_ptr[unsafe_offset=0]
     var msg_bytes = List[UInt8]()
     msg_bytes.resize(n, UInt8(0))
     if n > 0:
-        memcpy(dest=msg_bytes.unsafe_ptr(), src=err_buf, count=n)
+        unsafe_memcpy(dest=msg_bytes.unsafe_ptr(), src=err_buf, count=n)
     var msg = String(
         unsafe_from_utf8=Span[UInt8, origin_of(msg_bytes)](msg_bytes)
     )
 
-    result_ptr.free()
-    err_buf.free()
-    err_len_ptr.free()
-    success_ptr.free()
+    result_ptr.unsafe_free()
+    err_buf.unsafe_free()
+    err_len_ptr.unsafe_free()
+    success_ptr.unsafe_free()
 
     raise Error(msg)

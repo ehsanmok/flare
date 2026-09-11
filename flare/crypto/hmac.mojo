@@ -157,25 +157,25 @@ def base64url_encode(data: List[UInt8]) -> String:
     var src = data.unsafe_ptr()
     var i = 0
     while i + 3 <= n:
-        var b0 = Int(src[i])
-        var b1 = Int(src[i + 1])
-        var b2 = Int(src[i + 2])
-        out.append(alpha[(b0 >> 2) & 63])
-        out.append(alpha[((b0 << 4) | (b1 >> 4)) & 63])
-        out.append(alpha[((b1 << 2) | (b2 >> 6)) & 63])
-        out.append(alpha[b2 & 63])
+        var b0 = Int(src[unsafe_offset=i])
+        var b1 = Int(src[unsafe_offset=i + 1])
+        var b2 = Int(src[unsafe_offset=i + 2])
+        out.append(alpha[unsafe_offset=(b0 >> 2) & 63])
+        out.append(alpha[unsafe_offset=((b0 << 4) | (b1 >> 4)) & 63])
+        out.append(alpha[unsafe_offset=((b1 << 2) | (b2 >> 6)) & 63])
+        out.append(alpha[unsafe_offset=b2 & 63])
         i += 3
     var rem = n - i
     if rem == 1:
-        var b0 = Int(src[i])
-        out.append(alpha[(b0 >> 2) & 63])
-        out.append(alpha[(b0 << 4) & 63])
+        var b0 = Int(src[unsafe_offset=i])
+        out.append(alpha[unsafe_offset=(b0 >> 2) & 63])
+        out.append(alpha[unsafe_offset=(b0 << 4) & 63])
     elif rem == 2:
-        var b0 = Int(src[i])
-        var b1 = Int(src[i + 1])
-        out.append(alpha[(b0 >> 2) & 63])
-        out.append(alpha[((b0 << 4) | (b1 >> 4)) & 63])
-        out.append(alpha[(b1 << 2) & 63])
+        var b0 = Int(src[unsafe_offset=i])
+        var b1 = Int(src[unsafe_offset=i + 1])
+        out.append(alpha[unsafe_offset=(b0 >> 2) & 63])
+        out.append(alpha[unsafe_offset=((b0 << 4) | (b1 >> 4)) & 63])
+        out.append(alpha[unsafe_offset=(b1 << 2) & 63])
     return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
@@ -215,7 +215,7 @@ def base64url_decode(s: String) raises -> List[UInt8]:
     """
     var n = s.byte_length()
     var src = s.unsafe_ptr()
-    while n > 0 and src[n - 1] == 61:  # strip '='
+    while n > 0 and src[unsafe_offset=n - 1] == 61:  # strip '='
         n -= 1
     if n == 0:
         return List[UInt8]()
@@ -226,23 +226,23 @@ def base64url_decode(s: String) raises -> List[UInt8]:
     out.reserve((n * 3) // 4)
     var i = 0
     while i + 4 <= n:
-        var b0 = _b64_decode_byte(src[i])
-        var b1 = _b64_decode_byte(src[i + 1])
-        var b2 = _b64_decode_byte(src[i + 2])
-        var b3 = _b64_decode_byte(src[i + 3])
+        var b0 = _b64_decode_byte(src[unsafe_offset=i])
+        var b1 = _b64_decode_byte(src[unsafe_offset=i + 1])
+        var b2 = _b64_decode_byte(src[unsafe_offset=i + 2])
+        var b3 = _b64_decode_byte(src[unsafe_offset=i + 3])
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 255))
         out.append(UInt8(((b1 << 4) | (b2 >> 2)) & 255))
         out.append(UInt8(((b2 << 6) | b3) & 255))
         i += 4
     var rem = n - i
     if rem == 2:
-        var b0 = _b64_decode_byte(src[i])
-        var b1 = _b64_decode_byte(src[i + 1])
+        var b0 = _b64_decode_byte(src[unsafe_offset=i])
+        var b1 = _b64_decode_byte(src[unsafe_offset=i + 1])
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 255))
     elif rem == 3:
-        var b0 = _b64_decode_byte(src[i])
-        var b1 = _b64_decode_byte(src[i + 1])
-        var b2 = _b64_decode_byte(src[i + 2])
+        var b0 = _b64_decode_byte(src[unsafe_offset=i])
+        var b1 = _b64_decode_byte(src[unsafe_offset=i + 1])
+        var b2 = _b64_decode_byte(src[unsafe_offset=i + 2])
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 255))
         out.append(UInt8(((b1 << 4) | (b2 >> 2)) & 255))
     return out^

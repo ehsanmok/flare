@@ -42,7 +42,7 @@ freed and any remaining fds are closed.
 
 from std.collections import Dict
 from std.ffi import c_int, external_call
-from std.memory import UnsafePointer, alloc
+from std.memory import Layout, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 
 from flare.net._libc import _close
@@ -175,14 +175,14 @@ struct ClientPool(Copyable, Movable):
 
     def _state(
         imm self,
-    ) -> UnsafePointer[_ClientPoolState, MutUntrackedOrigin]:
+    ) -> Pointer[_ClientPoolState, MutUntrackedOrigin]:
         """Re-materialise a typed pointer from :attr:`_addr`.
 
         Mirrors the :class:`flare.http.cancel.Cancel` pattern --
         the typed pointer is rebuilt per access so Mojo's optimiser
         cannot hoist a stale load across function boundaries.
         """
-        return UnsafePointer[UInt8, MutUntrackedOrigin](
+        return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[_ClientPoolState]()
 
@@ -328,14 +328,14 @@ def _monotonic_ms() -> Int:
     a no-op (every entry's age computes to 0), which is
     conservative.
     """
-    var ts_buf = alloc[Int](2)
-    ts_buf[0] = 0
-    ts_buf[1] = 0
+    var ts_buf = alloc(Layout[Int](count=2)).unsafe_leak()
+    ts_buf[unsafe_offset=0] = 0
+    ts_buf[unsafe_offset=1] = 0
     var rc = external_call["clock_gettime", c_int](_CLOCK_MONOTONIC, ts_buf)
     if Int(rc) != 0:
         ts_buf.unsafe_free()
         return 0
-    var sec = ts_buf[0]
-    var nsec = ts_buf[1]
+    var sec = ts_buf[unsafe_offset=0]
+    var nsec = ts_buf[unsafe_offset=1]
     ts_buf.unsafe_free()
     return sec * 1000 + nsec // 1_000_000

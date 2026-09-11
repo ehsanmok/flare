@@ -256,7 +256,7 @@ def _apply_step_h2(
     mut reactor: Reactor,
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
-    h2_ptr: UnsafePointer[Http2ConnHandle, MutUntrackedOrigin],
+    h2_ptr: Pointer[Http2ConnHandle, MutUntrackedOrigin],
 ) raises:
     """Translate an :class:`Http2ConnHandle` step into reactor + timer ops.
 
@@ -676,7 +676,7 @@ def _accept_loop_unified_fd(
         var addr: Int
         var kind: Int
         if tls_ctx_addr != 0:
-            var ctx_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+            var ctx_ptr = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=tls_ctx_addr
             ).unsafe_bitcast[ServerCtx]()
             try:
@@ -973,7 +973,7 @@ def _drain_remaining_conns_unified(
         # Resolve the entry first: the dict lookup raises DictKeyError
         # while signal_drain raises Error, and one `try` cannot cover
         # both error types.
-        var packed = 0
+        var packed: Int
         try:
             packed = conns[fd]
         except:
@@ -1046,7 +1046,7 @@ def _run_unified_loop_for_fd[
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
@@ -1224,7 +1224,7 @@ def run_unified_reactor_loop_multi[
         reactor.register(f, UInt64(Int(f)), INTEREST_READ)
 
     var events = List[Event]()
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         events.clear()
         try:

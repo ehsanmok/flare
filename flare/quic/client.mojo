@@ -904,7 +904,7 @@ struct QuicClientConnection(Movable):
         var pn_local = List[UInt8]()
         for i in range(4):
             pn_local.append(datagram[pn_offset + i])
-        var first_addr = Int(UnsafePointer(to=first_local))
+        var first_addr = Int(Pointer(to=first_local))
         self.session.header_decrypt(
             level,
             sample,
@@ -1259,7 +1259,7 @@ struct QuicClientConnection(Movable):
         var pn_local = List[UInt8]()
         for i in range(pn_length):
             pn_local.append(protected[pn_offset + i])
-        var first_addr = Int(UnsafePointer(to=first_local))
+        var first_addr = Int(Pointer(to=first_local))
         self.session.header_encrypt(
             level,
             sample,

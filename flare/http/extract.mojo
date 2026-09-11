@@ -852,7 +852,7 @@ struct Json(Copyable, Defaultable, Extractor, Movable):
 # ── Extracted adapter ───────────────────────────────────────────────────────
 
 
-struct Extracted[H: Copyable & Defaultable & Handler & Movable](
+struct Extracted[H: Copyable & Defaultable & Handler](
     Copyable, Handler, Movable
 ):
     """Reflective auto-injection adapter: ``H``'s fields are its extractor set.

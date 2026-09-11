@@ -5,7 +5,7 @@ backed by ``StaticScheduler`` in :mod:`flare.runtime.scheduler` and
 :mod:`flare.http._server_reactor_impl`).
 
 The per-request work collapses to ``recv ->
-_scan_content_length -> memcpy(resp.bytes) -> send`` -- no
+_scan_content_length -> unsafe_memcpy(resp.bytes) -> send`` -- no
 parser, no handler, no Response struct allocation, no header
 lookups, no body re-serialisation. With N pthread workers
 each running this fast path under EPOLLEXCLUSIVE accept
@@ -29,7 +29,7 @@ the static fast path lives in the epoll/kqueue reactor).
 """
 
 from std.ffi import c_int, c_size_t, c_uint
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import unsafe_memcpy, UnsafePointer, stack_allocation
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, TestSuite
 

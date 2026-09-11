@@ -117,13 +117,13 @@ def test_decode_literal_with_indexing_grows_dynamic() raises:
     var name = String("x-foo")
     var np = name.unsafe_ptr()
     for i in range(5):
-        b.append(np[i])
+        b.append(np[unsafe_offset=i])
     # Value "bar" length 3.
     b.append(UInt8(0x03))
     var v = String("bar")
     var vp = v.unsafe_ptr()
     for i in range(3):
-        b.append(vp[i])
+        b.append(vp[unsafe_offset=i])
     var hdrs = dec.decode(Span[UInt8, _](b))
     assert_equal(len(hdrs), 1)
     assert_equal(hdrs[0].name, "x-foo")
@@ -142,12 +142,12 @@ def test_decode_literal_without_indexing() raises:
     var name = String("foo")
     var np = name.unsafe_ptr()
     for i in range(3):
-        b.append(np[i])
+        b.append(np[unsafe_offset=i])
     b.append(UInt8(0x03))
     var v = String("baz")
     var vp = v.unsafe_ptr()
     for i in range(3):
-        b.append(vp[i])
+        b.append(vp[unsafe_offset=i])
     var hdrs = dec.decode(Span[UInt8, _](b))
     assert_equal(len(hdrs), 1)
     assert_equal(hdrs[0].name, "foo")

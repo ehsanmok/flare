@@ -49,7 +49,7 @@ Example:
 """
 
 from std.collections import Dict
-from std.memory import memcpy
+from std.memory import unsafe_memcpy
 
 from .header_view import HeaderMapView, parse_header_view
 from .headers import HeaderMap
@@ -74,7 +74,7 @@ def _find_byte(data: Span[UInt8, _], start: Int, target: UInt8) -> Int:
     var p = data.unsafe_ptr()
     var i = start
     while i < n:
-        if p[i] == target:
+        if p[unsafe_offset=i] == target:
             return i
         i += 1
     return -1
@@ -91,7 +91,7 @@ def _scan_content_length(view: HeaderMapView) -> Int:
     var p = v.unsafe_ptr()
     var acc = 0
     for i in range(n):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         if c < 48 or c > 57:
             return 0
         acc = acc * 10 + (c - 48)
@@ -206,9 +206,9 @@ struct RequestView[origin: Origin](Movable):
         var body_owned = List[UInt8](capacity=self.body_len)
         body_owned.resize(self.body_len, UInt8(0))
         if self.body_len > 0:
-            memcpy(
+            unsafe_memcpy(
                 dest=body_owned.unsafe_ptr(),
-                src=self.buf.unsafe_ptr() + self.body_start,
+                src=self.buf.unsafe_ptr().unsafe_offset(self.body_start),
                 count=self.body_len,
             )
         var url_owned = String(
@@ -390,20 +390,24 @@ def _find_crlfcrlf(data: Span[UInt8, _], start: Int) -> Int:
     var p = data.unsafe_ptr()
     var i = start
     while i < n:
-        if p[i] == _LF:
+        if p[unsafe_offset=i] == _LF:
             var prev = i - 1
-            if prev >= start and p[prev] == _LF:
+            if prev >= start and p[unsafe_offset=prev] == _LF:
                 # ...\\n\\n at (prev, i): body starts at i + 1.
                 return i + 1
-            if prev - 1 >= start and p[prev] == _CR and p[prev - 1] == _LF:
+            if (
+                prev - 1 >= start
+                and p[unsafe_offset=prev] == _CR
+                and p[unsafe_offset=prev - 1] == _LF
+            ):
                 # ...\\n\\r\\n at (prev-1, prev, i): body starts
                 # at i + 1.
                 return i + 1
             if (
                 prev - 2 >= start
-                and p[prev] == _CR
-                and p[prev - 1] == _LF
-                and p[prev - 2] == _CR
+                and p[unsafe_offset=prev] == _CR
+                and p[unsafe_offset=prev - 1] == _LF
+                and p[unsafe_offset=prev - 2] == _CR
             ):
                 # ...\\r\\n\\r\\n at (prev-2, prev-1, prev, i):
                 # body starts at i + 1.

@@ -103,11 +103,11 @@ def _split_static(path: StaticString) -> List[String]:
         return out^
     var p = s.unsafe_ptr()
     var start = 0
-    if p[0] == _SLASH:
+    if p[unsafe_offset=0] == _SLASH:
         start = 1
     var i = start
     while i < n:
-        if p[i] == _SLASH:
+        if p[unsafe_offset=i] == _SLASH:
             if i > start:
                 out.append(ascii_unchecked_string(s.as_bytes()[start:i]))
             start = i + 1
@@ -123,7 +123,7 @@ def _path_only(url: String) -> String:
     var n = url.byte_length()
     var p = url.unsafe_ptr()
     for i in range(n):
-        if p[i] == _QMARK:
+        if p[unsafe_offset=i] == _QMARK:
             return ascii_unchecked_string(url.as_bytes()[0:i])
     return url
 
@@ -137,11 +137,11 @@ def _split_path(path: String) -> List[String]:
         return out^
     var p = path.unsafe_ptr()
     var start = 0
-    if p[0] == _SLASH:
+    if p[unsafe_offset=0] == _SLASH:
         start = 1
     var i = start
     while i < n:
-        if p[i] == _SLASH:
+        if p[unsafe_offset=i] == _SLASH:
             if i > start:
                 out.append(ascii_unchecked_string(path.as_bytes()[start:i]))
             start = i + 1
@@ -157,13 +157,15 @@ def _split_path(path: String) -> List[String]:
 @always_inline
 def _seg_is_param(seg: String) -> Bool:
     """Return True if ``seg`` is a ``:name`` capture."""
-    return seg.byte_length() >= 2 and seg.unsafe_ptr()[0] == _COLON
+    return (
+        seg.byte_length() >= 2 and seg.unsafe_ptr()[unsafe_offset=0] == _COLON
+    )
 
 
 @always_inline
 def _seg_is_wildcard(seg: String) -> Bool:
     """Return True if ``seg`` is a bare ``*`` wildcard tail."""
-    return seg.byte_length() == 1 and seg.unsafe_ptr()[0] == _STAR
+    return seg.byte_length() == 1 and seg.unsafe_ptr()[unsafe_offset=0] == _STAR
 
 
 @always_inline

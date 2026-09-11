@@ -310,7 +310,7 @@ struct IoUringSqe(Movable):
 
 
 @always_inline
-def encode_sqe_zero(buf: UnsafePointer[UInt8, MutUntrackedOrigin]) -> None:
+def encode_sqe_zero(buf: Pointer[UInt8, MutUntrackedOrigin]) -> None:
     """Zero the 64-byte SQE buffer at ``buf`` in preparation for
     a ``prep_*`` helper.
 
@@ -347,7 +347,7 @@ def prep_nop(
 
 @always_inline
 def prep_accept(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     addr: UInt64,
     addrlen_ptr: UInt64,
@@ -386,7 +386,7 @@ def prep_accept(
 
 @always_inline
 def prep_multishot_accept(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     addr: UInt64,
     addrlen_ptr: UInt64,
@@ -555,7 +555,7 @@ def prep_provide_buffers(
 
 @always_inline
 def prep_recv_buffer_select(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     bgid: UInt16,
     recv_flags: UInt32,
@@ -618,7 +618,7 @@ def prep_recv_buffer_select(
 
 @always_inline
 def prep_read(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     rx_buf: UInt64,
     rx_len: Int,
@@ -750,7 +750,7 @@ def prep_poll_remove(
 
 @always_inline
 def prep_send(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     fd: Int,
     tx_buf: UInt64,
     tx_len: Int,
@@ -846,7 +846,7 @@ def prep_close(
 
 @always_inline
 def prep_async_cancel(
-    buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+    buf: Pointer[UInt8, MutUntrackedOrigin],
     target_user_data: UInt64,
     user_data: UInt64,
 ) -> None:
@@ -959,7 +959,7 @@ struct IoUringCqe(Copyable, ImplicitlyCopyable, Movable):
 
 
 @always_inline
-def decode_cqe_at(buf: UnsafePointer[UInt8, _]) -> IoUringCqe:
+def decode_cqe_at(buf: Pointer[UInt8, _]) -> IoUringCqe:
     """Read a CQE out of the 16-byte slot at ``buf``.
 
     Args:

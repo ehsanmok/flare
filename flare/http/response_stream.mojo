@@ -163,7 +163,11 @@ def frame_chunk_into(mut buf: List[UInt8], chunk: List[UInt8]):
     # hot path's dominant cost.
     var off = len(buf)
     buf.resize(unsafe_uninit_length=off + n)
-    unsafe_memcpy(dest=buf.unsafe_ptr() + off, src=chunk.unsafe_ptr(), count=n)
+    unsafe_memcpy(
+        dest=buf.unsafe_ptr().unsafe_offset(off),
+        src=chunk.unsafe_ptr(),
+        count=n,
+    )
     buf.append(13)
     buf.append(10)
 

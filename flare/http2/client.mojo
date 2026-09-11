@@ -317,7 +317,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         var preface = String(H2_PREFACE)
         var pp = preface.unsafe_ptr()
         for i in range(24):
-            self.outbox.append(pp[i])
+            self.outbox.append(pp[unsafe_offset=i])
         # Client SETTINGS frame: emit each (id, value) pair that
         # differs from the RFC 9113 / RFC 7541 protocol default.
         # The high-level facade then waits for the server's
