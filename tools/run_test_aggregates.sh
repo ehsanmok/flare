@@ -32,12 +32,14 @@ BUILD_DIR="${BUILD_DIR:-build/agg}"
 
 # Tests that mutate process-global state (env vars, named semaphores,
 # io_uring registrations) or are runtime-bound rather than compile-bound.
-# Kept as their own processes; must match EXCLUDE in the generator.
+# Kept as their own processes; must match EXCLUDE in the generator, which
+# documents why each one is here.
 STANDALONE=(
   tests/runtime/test_block_in_pool.mojo
   tests/runtime/test_closure_send_contract.mojo
   tests/runtime/test_handoff.mojo
   tests/runtime/test_uring_bufring_dispatch.mojo
+  tests/runtime/test_io_uring_sqe.mojo
   tests/runtime/test_reuseport.mojo
   tests/http/test_uring_serve_handler.mojo
   tests/http/test_uring_serve_handler_load.mojo
@@ -126,11 +128,26 @@ for t in "${STANDALONE[@]}"; do
 done
 
 # Examples are programs, not test functions, so they cannot be aggregated
-# the same way -- they stay one invocation each, as today. They are 59 of
+# the same way -- they stay one invocation each, as today. They are 68 of
 # the chain's invocations and are part of what `tests` covers, so leaving
 # them out would quietly drop that coverage.
+#
+# `git ls-files` already emits sorted paths, so do NOT pipe through `sort`:
+# under `pixi run`, LD_LIBRARY_PATH points at the env's newer libssl and the
+# system `/usr/bin/sort` fails to load on ubuntu-latest ("version
+# `OPENSSL_3.3.0' not found"). Inside `$(...)` that failure is silent -- the
+# list comes back empty and all 68 examples are skipped with a green run.
+# The count check below is the backstop for that class of bug.
 echo "── running examples ──"
-for e in $(git ls-files 'examples/**/*.mojo' | sort); do
+EXAMPLES=()
+while IFS= read -r e; do [ -n "$e" ] && EXAMPLES+=("$e"); done < <(git ls-files 'examples/**/*.mojo')
+if [ "${#EXAMPLES[@]}" -lt 50 ]; then
+  echo "ERROR: found only ${#EXAMPLES[@]} examples; expected 68." >&2
+  echo "       Refusing to report a pass over a truncated list." >&2
+  exit 1
+fi
+echo "   ${#EXAMPLES[@]} examples"
+for e in "${EXAMPLES[@]}"; do
   if ! mojo -I . "$e" >/dev/null; then failed+=("$e"); fi
 done
 
