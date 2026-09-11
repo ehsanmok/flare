@@ -237,8 +237,36 @@ def test_pool_cap_enforced_and_recovers() raises:
     # drained total, never the pass/fail.
     _pool_reset()
     var got = 0
-    while _pool_try_acquire():
+    # Bounded, not `while _pool_try_acquire()`. That loop relied on the
+    # claim eventually being refused, but `_pool_try_acquire` fails *open*
+    # -- it returns True when `sem_open` fails, by design, so the cap stays
+    # best-effort and never blocks real work. When the semaphore is
+    # persistently unavailable the unbounded form therefore spins forever:
+    # it hung for 115 minutes locally, and on the macOS CI runner it is what
+    # strands this chain until the 5400s watchdog kills the job.
+    #
+    # Draining past the cap means the cap is not being enforced, which is a
+    # real failure of what this test checks -- so stop and report it instead
+    # of spinning. The bound is cap + 1: enough to observe the refusal that
+    # the assertion below depends on.
+    var limit = MAX_POOL_SIZE + 1
+    var refused = False
+    while got < limit:
+        if not _pool_try_acquire():
+            refused = True
+            break
         got += 1
+    assert_true(
+        refused,
+        String(
+            "pool cap not enforced: drained "
+        )
+        + String(got)
+        + " slots without a refusal (cap is "
+        + String(MAX_POOL_SIZE)
+        + "). The named semaphore is most likely unavailable, and"
+        + " _pool_try_acquire fails open.",
+    )
     # Admitted at least the full cap, and the loop exited precisely because
     # the next claim was refused once the pool drained to empty.
     assert_true(got >= MAX_POOL_SIZE)
