@@ -258,9 +258,7 @@ def test_pool_cap_enforced_and_recovers() raises:
         got += 1
     assert_true(
         refused,
-        String(
-            "pool cap not enforced: drained "
-        )
+        String("pool cap not enforced: drained ")
         + String(got)
         + " slots without a refusal (cap is "
         + String(MAX_POOL_SIZE)
