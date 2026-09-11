@@ -37,7 +37,7 @@ Run:
 Expected behaviour: ``0 failed, 0 slow`` across every iteration.
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.os import getenv
 
 from flare.http._server_reactor_impl import _monotonic_ms
@@ -72,7 +72,7 @@ struct _NopFrontend(Copyable, Frontend, Movable):
         stats_addr: Int,
         extra_fds: List[Int] = List[Int](),
     ):
-        var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+        var stopping_addr = Int(Pointer[Bool, _](to=stopping))
         while not load_stop_flag(stopping_addr):
             _ = libc_nanosleep_ms(50)
 

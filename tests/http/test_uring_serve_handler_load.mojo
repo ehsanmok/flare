@@ -15,7 +15,7 @@ regressions but does not police absolute throughput.
 """
 
 from std.ffi import c_int, c_size_t, c_uint, external_call
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, TestSuite
 
@@ -68,12 +68,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
     this as a skip rather than a failure)."""
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        sa.unsafe_offset(i).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    ip.unsafe_offset(0).unsafe_write(UInt8(127))
+    ip.unsafe_offset(1).unsafe_write(UInt8(0))
+    ip.unsafe_offset(2).unsafe_write(UInt8(0))
+    ip.unsafe_offset(3).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, port, ip)
     for _ in range(100):
         var c = _socket(AF_INET, SOCK_STREAM, c_int(0))
@@ -110,7 +110,7 @@ def _send_request_and_recv_response(
         if Int(rc_recv) <= 0:
             raise Error("recv() returned " + String(Int(rc_recv)))
         for i in range(Int(rc_recv)):
-            got += chr(Int(buf[i]))
+            got += chr(Int(buf[unsafe_offset=i]))
     if body not in got:
         raise Error("response missing body")
 
