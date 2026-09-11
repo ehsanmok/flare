@@ -182,7 +182,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[b658a2be] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[1e42936b] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[3d0e83a1] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       linux-aarch64:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_go_select-2.3.0-cgo.tar.bz2
@@ -319,7 +319,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[8bac8400] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[68be87bf] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[5419a508] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
@@ -439,7 +439,7 @@ environments:
       - conda: https://conda.modular.com/max/osx-arm64/max-core-26.5.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-1.0.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda
-      - conda_source: json[9e21f758] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[423127ec] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[da6137b7] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
   default:
     channels:
@@ -533,7 +533,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[b658a2be] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[1e42936b] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       linux-aarch64:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/binutils_impl_linux-aarch64-2.46.1-default_h5f4c503_102.conda
@@ -619,7 +619,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[8bac8400] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[68be87bf] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.7.22-hbd8a1cb_0.conda
@@ -690,7 +690,7 @@ environments:
       - conda: https://conda.modular.com/max/osx-arm64/max-core-26.5.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-1.0.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda
-      - conda_source: json[9e21f758] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[423127ec] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
   dev:
     channels:
     - url: https://conda.modular.com/max/
@@ -830,7 +830,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[b658a2be] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[1e42936b] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[3d0e83a1] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       linux-aarch64:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
@@ -938,7 +938,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[8bac8400] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[68be87bf] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[5419a508] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
@@ -1031,7 +1031,7 @@ environments:
       - conda: https://conda.modular.com/max/osx-arm64/max-core-26.5.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-1.0.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda
-      - conda_source: json[9e21f758] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[423127ec] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[da6137b7] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
   fuzz:
     channels:
@@ -1172,7 +1172,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[b658a2be] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[1e42936b] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[3d0e83a1] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       - conda_source: mozz[7989abd3] @ git+https://github.com/ehsanmok/mozz?branch=main#982eb293a21be9137ec780ad7401df336eeb4eac
       linux-aarch64:
@@ -1281,7 +1281,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[8bac8400] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[68be87bf] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[5419a508] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       - conda_source: mozz[d343df7d] @ git+https://github.com/ehsanmok/mozz?branch=main#982eb293a21be9137ec780ad7401df336eeb4eac
       osx-arm64:
@@ -1375,7 +1375,7 @@ environments:
       - conda: https://conda.modular.com/max/osx-arm64/max-core-26.5.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-1.0.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda
-      - conda_source: json[9e21f758] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[423127ec] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - conda_source: mojodoc[da6137b7] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
       - conda_source: mozz[1fc034e4] @ git+https://github.com/ehsanmok/mozz?branch=main#982eb293a21be9137ec780ad7401df336eeb4eac
   metrics:
@@ -1472,7 +1472,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[b658a2be] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[1e42936b] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - pypi: https://files.pythonhosted.org/packages/3b/d9/25e62cbb9c4077a2dabc73e5f34dc947887f4fe1526f53d2c0489abfc186/lizard-1.23.0-py2.py3-none-any.whl
       linux-aarch64:
       - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
@@ -1559,7 +1559,7 @@ environments:
       - conda: https://conda.modular.com/max/linux-aarch64/mojo-compiler-1.0.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mblack-26.5.0-release.conda
       - conda: https://conda.modular.com/max/noarch/mojo-python-1.0.0-release.conda
-      - conda_source: json[8bac8400] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[68be87bf] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - pypi: https://files.pythonhosted.org/packages/3b/d9/25e62cbb9c4077a2dabc73e5f34dc947887f4fe1526f53d2c0489abfc186/lizard-1.23.0-py2.py3-none-any.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
@@ -1631,7 +1631,7 @@ environments:
       - conda: https://conda.modular.com/max/osx-arm64/max-core-26.5.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-1.0.0-release.conda
       - conda: https://conda.modular.com/max/osx-arm64/mojo-compiler-1.0.0-release.conda
-      - conda_source: json[9e21f758] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+      - conda_source: json[423127ec] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
       - pypi: https://files.pythonhosted.org/packages/3b/d9/25e62cbb9c4077a2dabc73e5f34dc947887f4fe1526f53d2c0489abfc186/lizard-1.23.0-py2.py3-none-any.whl
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_go_select-2.3.0-cgo.tar.bz2
@@ -8228,12 +8228,12 @@ packages:
   run_exports: {}
   size: 61221085
   timestamp: 1786294690001
-- conda_source: json[8bac8400] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+- conda_source: json[1e42936b] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
   version: 0.3.1
-  build: he8cfe8b_0
-  subdir: linux-aarch64
+  build: hb0f4dca_0
+  subdir: linux-64
   variants:
-    target_platform: linux-aarch64
+    target_platform: linux-64
   depends:
   - mojo >=1.0.0,<1.1.0
   - max >=26.5.0
@@ -8243,32 +8243,32 @@ packages:
   - libgcc >=16
   license: Apache-2.0
   build_packages:
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/binutils_impl_linux-aarch64-2.46.1-default_h5f4c503_102.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/binutils_linux-aarch64-2.46.1-default_hf1166c9_102.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gcc_impl_linux-aarch64-16.2.0-hc438ef3_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gcc_linux-aarch64-16.2.0-h25cc031_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gxx_impl_linux-aarch64-16.2.0-h1e3c31f_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gxx_linux-aarch64-16.2.0-h6eb44ee_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ld_impl_linux-aarch64-2.46.1-default_h1979696_102.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgomp-16.2.0-h8acb6b2_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libsanitizer-16.2.0-h73cac2c_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.2-hdc9db2a_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/zstd-1.5.7-h9d15635_7.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/kernel-headers_linux-aarch64-4.18.0-h05a177a_9.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/libgcc-devel_linux-aarch64-16.2.0-hc0c2482_104.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/libstdcxx-devel_linux-aarch64-16.2.0-h082e5f6_104.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-aarch64-2.28-h585391f_9.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils_impl_linux-64-2.46.1-default_hfdba357_102.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils_linux-64-2.46.1-default_h4852527_102.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_impl_linux-64-16.2.0-h176d5d0_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_linux-64-16.2.0-h0ab548f_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx_impl_linux-64-16.2.0-h0d273dc_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx_linux-64-16.2.0-h38dc33c_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-default_hbd61a6d_102.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libsanitizer-16.2.0-h3048135_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/kernel-headers_linux-64-4.18.0-he073ed8_9.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/libgcc-devel_linux-64-16.2.0-he3ce08f_104.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/libstdcxx-devel_linux-64-16.2.0-h86e191b_104.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-64-2.28-h4ee821c_9.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
   host_packages:
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgomp-16.2.0-h8acb6b2_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/simdjson-4.6.11-h45ce4d5_0.conda
-- conda_source: json[9e21f758] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/simdjson-4.6.11-h4dbf13b_0.conda
+- conda_source: json[423127ec] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
   version: 0.3.1
   build: h60d57d3_0
   subdir: osx-arm64
@@ -8321,12 +8321,12 @@ packages:
   host_packages:
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/libcxx-23.1.1-h55c6f16_0.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/simdjson-4.6.11-hfbe1efa_0.conda
-- conda_source: json[b658a2be] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#2ee8c7fdd13895217cd8d34c36b26ba4f31ec24b
+- conda_source: json[68be87bf] @ git+https://github.com/ehsanmok/json?tag=v0.3.1#bc2c0e8378aa5eb8c61f40dd16b4f3b1473cfd34
   version: 0.3.1
-  build: hb0f4dca_0
-  subdir: linux-64
+  build: he8cfe8b_0
+  subdir: linux-aarch64
   variants:
-    target_platform: linux-64
+    target_platform: linux-aarch64
   depends:
   - mojo >=1.0.0,<1.1.0
   - max >=26.5.0
@@ -8336,31 +8336,31 @@ packages:
   - libgcc >=16
   license: Apache-2.0
   build_packages:
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils_impl_linux-64-2.46.1-default_hfdba357_102.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils_linux-64-2.46.1-default_h4852527_102.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_impl_linux-64-16.2.0-h176d5d0_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_linux-64-16.2.0-h0ab548f_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx_impl_linux-64-16.2.0-h0d273dc_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx_linux-64-16.2.0-h38dc33c_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.46.1-default_hbd61a6d_102.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libsanitizer-16.2.0-h3048135_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/kernel-headers_linux-64-4.18.0-he073ed8_9.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/libgcc-devel_linux-64-16.2.0-he3ce08f_104.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/libstdcxx-devel_linux-64-16.2.0-h86e191b_104.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-64-2.28-h4ee821c_9.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/binutils_impl_linux-aarch64-2.46.1-default_h5f4c503_102.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/binutils_linux-aarch64-2.46.1-default_hf1166c9_102.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gcc_impl_linux-aarch64-16.2.0-hc438ef3_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gcc_linux-aarch64-16.2.0-h25cc031_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gxx_impl_linux-aarch64-16.2.0-h1e3c31f_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/gxx_linux-aarch64-16.2.0-h6eb44ee_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/ld_impl_linux-aarch64-2.46.1-default_h1979696_102.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgomp-16.2.0-h8acb6b2_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libsanitizer-16.2.0-h73cac2c_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libzlib-1.3.2-hdc9db2a_3.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/zstd-1.5.7-h9d15635_7.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/kernel-headers_linux-aarch64-4.18.0-h05a177a_9.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/libgcc-devel_linux-aarch64-16.2.0-hc0c2482_104.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/libstdcxx-devel_linux-aarch64-16.2.0-h082e5f6_104.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-aarch64-2.28-h585391f_9.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
   host_packages:
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.2.0-ha9f2e26_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/simdjson-4.6.11-h4dbf13b_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/_openmp_mutex-4.5-20_gnu.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgcc-16.2.0-h205dda4_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libgomp-16.2.0-h8acb6b2_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-16.2.0-hef695bb_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-aarch64/simdjson-4.6.11-h45ce4d5_0.conda
 - conda_source: mojodoc[3d0e83a1] @ git+https://github.com/ehsanmok/mojodoc?branch=main#60b7ec9f0b9ae883b7bc56d4f44b36bdb9754f87
   version: 0.1.0
   build: hb0f4dca_0
