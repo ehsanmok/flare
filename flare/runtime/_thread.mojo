@@ -174,6 +174,32 @@ struct ThreadHandle(Movable):
         # further pthread_join on the stale id is UB per POSIX.
         self._thread_id = UInt64(0)
 
+    def detach(mut self) raises:
+        """Detach the thread so the OS reclaims it when it exits.
+
+        Wraps ``pthread_detach``. A detached thread runs to completion
+        on its own and must NOT be ``join()``ed. This is what a
+        fire-and-forget worker that outlives the spawning call frame
+        needs -- one pthread per offloaded WebSocket connection, say;
+        a joinable thread nobody ever joins holds its kernel
+        bookkeeping until the process exits.
+
+        ``_thread_id`` is zeroed on success, so a later ``join()`` on
+        this handle short-circuits instead of joining a detached
+        thread (undefined per POSIX).
+
+        Raises:
+            Error: If ``pthread_detach`` returns non-zero. The handle
+                is left untouched so the caller can retry or
+                propagate.
+        """
+        if self._thread_id == 0:
+            return
+        var rc = external_call["pthread_detach", c_int, UInt64](self._thread_id)
+        if rc != c_int(0):
+            raise Error("pthread_detach failed with rc=" + String(Int(rc)))
+        self._thread_id = UInt64(0)
+
     def pin_to_cpu(self, cpu: Int) raises:
         """Pin the thread to CPU ``cpu``.
 

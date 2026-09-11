@@ -337,10 +337,41 @@ struct WsConnection(Movable):
 
     var _stream: TcpStream
     var _peer: SocketAddr
+    var _prebuf: List[UInt8]
+    """Bytes already drained from the socket before this
+    ``WsConnection`` took ownership of the fd. Non-empty only on the
+    shared-listener upgrade path (``HttpServer.serve(handler,
+    ws_handler)``), where the HTTP/1.1 reactor may have buffered
+    post-handshake WebSocket frame bytes in the same ``recv`` that
+    delivered the upgrade request (TCP coalescing). ``_recv_one``
+    consumes this prefix before issuing any socket ``read``, so a
+    client that pipelines its first frame immediately after the
+    handshake is never dropped. Empty (the common case) for the
+    standalone ``WsServer`` path, which reads the handshake
+    byte-at-a-time and leaves nothing buffered."""
 
     def __init__(out self, var stream: TcpStream, peer: SocketAddr):
         self._stream = stream^
         self._peer = peer
+        self._prebuf = List[UInt8]()
+
+    def __init__(
+        out self,
+        var stream: TcpStream,
+        peer: SocketAddr,
+        var prebuf: List[UInt8],
+    ):
+        """Construct a ``WsConnection`` seeded with already-buffered
+        post-handshake bytes.
+
+        Used by the ``HttpServer`` WebSocket-upgrade seam to hand off
+        any frame bytes the HTTP reactor had already read past the
+        upgrade request. ``prebuf`` is consumed by the first
+        ``recv``/``_recv_one`` before any socket read.
+        """
+        self._stream = stream^
+        self._peer = peer
+        self._prebuf = prebuf^
 
     def __deinit__(deinit self):
         self._stream.close()
@@ -414,6 +445,13 @@ struct WsConnection(Movable):
     def _recv_one(mut self) raises -> WsFrame:
         """Read bytes from stream and decode one complete frame."""
         var buf = List[UInt8](capacity=4096)
+        # Drain any bytes the HTTP reactor pre-buffered past the
+        # handshake (shared-listener upgrade path) before touching the
+        # socket. Empty for the standalone WsServer path.
+        if len(self._prebuf) > 0:
+            for i in range(len(self._prebuf)):
+                buf.append(self._prebuf[i])
+            self._prebuf.clear()
         var tmp = List[UInt8](capacity=4096)
         tmp.resize(4096, 0)
 
@@ -675,6 +713,83 @@ def _handle_ws_connection(
         handler(conn)
     except e:
         print("[ws] connection error: " + String(e))
+
+
+# ── Off-reactor connection offload ─────────────────────────────────────────
+# With ``ServerConfig.ws_offload`` set, the HTTP/1.1 reactor hands each
+# upgraded WebSocket to a fresh detached pthread instead of running
+# ``ws_handler(conn)`` inline and parking the worker for the connection's
+# lifetime. By this point the fd is already detached from the reactor and
+# back in blocking mode, so the connection's whole lifecycle -- every
+# ``recv`` / ``send_text`` / ``close``, and the final socket close in
+# ``WsConnection.__del__`` -- happens on that one thread. No fd is ever
+# touched from two threads, so nothing has to marshal writes across them.
+
+
+@fieldwise_init
+struct _WsOffloadCtx(Movable):
+    """Heap hand-off carrying one upgraded connection and its handler onto
+    the offload thread. ``WsConnection`` is move-only because it owns the
+    fd; the ``def`` handler is a trivially-copyable function pointer. Same
+    Int-address stash :func:`_ws_serve_multicore` and ``block_in_pool`` use
+    to cross a pthread boundary."""
+
+    var conn: WsConnection
+    var handler: def(mut WsConnection) raises thin -> None
+
+
+def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
+    """``pthread`` start routine for one offloaded WebSocket connection.
+
+    Rebuilds the ``_WsOffloadCtx`` from the opaque argument, frees the heap
+    slot, and runs the handler to completion. The handler may raise; a
+    start routine may not, so errors are reported and swallowed -- the same
+    contract :func:`_handle_ws_connection` follows. When this returns,
+    ``ctx`` and the ``WsConnection`` it owns are destroyed, closing the
+    socket.
+    """
+    var ctx_addr = Int(arg)
+    debug_assert[assert_mode="safe"](
+        ctx_addr != 0,
+        "_ws_offload_entry: ctx pointer must be non-NULL",
+    )
+    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
+        unsafe_from_address=ctx_addr
+    )
+    var ctx_ptr = raw.bitcast[_WsOffloadCtx]()
+    var ctx = ctx_ptr.take_pointee()
+    ctx_ptr.free()
+    try:
+        ctx.handler(ctx.conn)
+    except e:
+        print("[ws] offloaded connection error: " + String(e))
+    return UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(0))
+
+
+def spawn_ws_offload(
+    var conn: WsConnection,
+    handler: def(mut WsConnection) raises thin -> None,
+) raises:
+    """Run ``handler(conn)`` on a fresh detached pthread, fire-and-forget.
+
+    Heap-allocates a ``_WsOffloadCtx``, spawns a thread that takes
+    ownership of it, and detaches so the OS reclaims the thread when it
+    exits -- it outlives this call frame and is never joined. Returns as
+    soon as the thread is spawned, which is what lets the reactor move on.
+    """
+    from std.memory import alloc
+
+    var ctx_ptr = alloc[_WsOffloadCtx](1)
+    debug_assert[assert_mode="safe"](
+        Int(ctx_ptr) != 0,
+        "spawn_ws_offload: alloc[_WsOffloadCtx] returned NULL",
+    )
+    ctx_ptr.init_pointee_move(_WsOffloadCtx(conn^, handler))
+    var arg = UnsafePointer[UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(ctx_ptr)
+    )
+    var th = ThreadHandle.spawn[_ws_offload_entry](arg)
+    th.detach()
 
 
 # ── Multi-worker WsServer ──────────────────────────────────────────────────
