@@ -41,7 +41,7 @@ source:
   # json source (inlined).
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    tag: v0.3.0
+    tag: v0.4.0
 
 build:
   script:
