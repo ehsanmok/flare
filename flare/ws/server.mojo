@@ -235,9 +235,6 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> _WsUpgradeRequest:
         if k == "sec-websocket-key":
             ws_key = v
         elif k == "origin":
-            # Retained verbatim, not validated: the library has no way to
-            # know which origins a given deployment trusts. Handlers get
-            # it via ``WsConnection.origin`` and apply their own policy.
             ws_origin = v
         elif k == "upgrade" and _lower_srv(v) == "websocket":
             found_upgrade = True
@@ -257,7 +254,7 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> _WsUpgradeRequest:
 
 
 def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
-    """Read an HTTP upgrade request and return the ``Sec-WebSocket-Key``.
+    """Read an HTTP upgrade request and return the retained fields.
 
     Reads until the blank line terminating HTTP headers.
 
@@ -298,9 +295,6 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
         if k == "sec-websocket-key":
             ws_key = v
         elif k == "origin":
-            # Retained verbatim, not validated: the library has no way to
-            # know which origins a given deployment trusts. Handlers get
-            # it via ``WsConnection.origin`` and apply their own policy.
             ws_origin = v
         elif k == "upgrade" and _lower_srv(v) == "websocket":
             found_upgrade = True
@@ -383,6 +377,17 @@ struct WsConnection(Movable):
     it and script cannot forge it, but a non-browser client sends
     whatever it likes (or nothing at all). It authenticates the *page*,
     never the user.
+
+    Three cases an allow-list check has to handle: an absent header and
+    a present-but-empty ``Origin:`` both yield ``""``; a repeated
+    ``Origin`` header keeps the last value seen; and a browser sends the
+    literal ``"null"`` for an opaque origin (sandboxed iframe, ``data:``
+    URL, some redirect chains), which matches no real origin and is not
+    the same as absent.
+
+    Both accept paths send the ``101`` before the handler runs, so a
+    ``close`` here is a policy close on a live WebSocket, not a refused
+    handshake:
 
     Example:
         ```mojo

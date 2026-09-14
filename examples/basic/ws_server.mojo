@@ -3,6 +3,7 @@
 Demonstrates:
   - Binding a WsServer on an OS-assigned port
   - The connection handler callback receives a WsConnection
+  - Reading the handshake ``Origin`` off the WsConnection
   - Receiving a masked TEXT frame from the client
   - Sending an unmasked TEXT frame back (server → client direction)
   - Receiving a masked BINARY frame and echoing it
@@ -59,6 +60,7 @@ def send_upgrade_request(mut stream: TcpStream) raises:
         + "Host: localhost\r\n"
         + "Upgrade: websocket\r\n"
         + "Connection: Upgrade\r\n"
+        + "Origin: http://localhost\r\n"
         + "Sec-WebSocket-Key: "
         + TEST_KEY
         + "\r\n"
@@ -179,6 +181,7 @@ def main() raises:
     var conn1 = accept_and_upgrade(srv, client1)
     var status_line = drain_101(client1)
     print(" Server response: " + status_line)
+    print(" Handshake Origin: " + conn1.origin)
     print()
 
     # ── 3. Server receives masked TEXT, echoes back ───────────────────────────
