@@ -152,10 +152,10 @@ def accept_and_upgrade(
     """
     var server_stream = srv._listener.accept()
     var peer = server_stream.peer_addr()
-    var key = _read_upgrade_request(server_stream)
-    var accept = _compute_accept_srv(key)
+    var upgrade = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(upgrade.key)
     _send_upgrade_response(server_stream, accept)
-    return WsConnection(server_stream^, peer)
+    return WsConnection(server_stream^, peer, upgrade.origin.copy())
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

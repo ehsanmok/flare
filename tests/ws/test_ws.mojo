@@ -415,9 +415,18 @@ def test_ws_echo_roundtrip() raises:
 # 4. Exchanges raw WsFrame wire bytes on the client side.
 
 
-def _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:
-    """Send a minimal HTTP/1.1 upgrade request from a raw TCP stream."""
+def _send_upgrade_request_raw(
+    mut stream: TcpStream, host: String, origin: String = ""
+) raises:
+    """Send a minimal HTTP/1.1 upgrade request from a raw TCP stream.
+
+    ``origin`` is omitted from the request entirely when empty, matching
+    a non-browser client.
+    """
     var key = "dGhlIHNhbXBsZSBub25jZQ=="  # well-known test key
+    var origin_line = String("")
+    if origin != "":
+        origin_line = "Origin: " + origin + "\r\n"
     var req = (
         "GET / HTTP/1.1\r\n"
         + "Host: "
@@ -429,6 +438,7 @@ def _send_upgrade_request_raw(mut stream: TcpStream, host: String) raises:
         + key
         + "\r\n"
         + "Sec-WebSocket-Version: 13\r\n"
+        + origin_line
         + "\r\n"
     )
     var b = req.as_bytes()
@@ -483,10 +493,10 @@ def test_ws_server_text_echo_loopback() raises:
     # ── Server: accept + handshake
     var server_stream = srv._listener.accept()
     var srv_peer = server_stream.peer_addr()
-    var key = _read_upgrade_request(server_stream)
-    var accept = _compute_accept_srv(key)
+    var upgrade = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(upgrade.key)
     _send_upgrade_response(server_stream, accept)
-    var conn = WsConnection(server_stream^, srv_peer)
+    var conn = WsConnection(server_stream^, srv_peer, upgrade.origin.copy())
 
     # ── Client: discard 101, then send masked TEXT frame
     _drain_101(raw_client)
@@ -533,10 +543,10 @@ def test_ws_server_binary_echo_loopback() raises:
 
     var server_stream = srv._listener.accept()
     var srv_peer2 = server_stream.peer_addr()
-    var key = _read_upgrade_request(server_stream)
-    var accept = _compute_accept_srv(key)
+    var upgrade = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(upgrade.key)
     _send_upgrade_response(server_stream, accept)
-    var conn = WsConnection(server_stream^, srv_peer2)
+    var conn = WsConnection(server_stream^, srv_peer2, upgrade.origin.copy())
 
     _drain_101(raw_client)
 
@@ -581,10 +591,10 @@ def test_ws_server_unmasked_frame_rejected() raises:
 
     var server_stream = srv._listener.accept()
     var srv_peer3 = server_stream.peer_addr()
-    var key = _read_upgrade_request(server_stream)
-    var accept = _compute_accept_srv(key)
+    var upgrade = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(upgrade.key)
     _send_upgrade_response(server_stream, accept)
-    var conn = WsConnection(server_stream^, srv_peer3)
+    var conn = WsConnection(server_stream^, srv_peer3, upgrade.origin.copy())
 
     _drain_101(raw_client)
 
@@ -602,6 +612,93 @@ def test_ws_server_unmasked_frame_rejected() raises:
     with assert_raises():
         _ = conn.recv()
 
+    raw_client.close()
+    srv.close()
+
+
+# ── Handshake Origin ──────────────────────────────────────────────────────────
+
+
+def _upgrade_bytes(origin_line: String) -> List[UInt8]:
+    """A well-formed upgrade request, optionally carrying an Origin."""
+    var req = (
+        "GET /chat HTTP/1.1\r\n"
+        + "Host: localhost\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Connection: Upgrade\r\n"
+        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        + "Sec-WebSocket-Version: 13\r\n"
+        + origin_line
+        + "\r\n"
+    )
+    var out = List[UInt8]()
+    var b = req.as_bytes()
+    for i in range(len(b)):
+        out.append(b[i])
+    return out^
+
+
+def test_upgrade_parse_captures_origin() raises:
+    """A present Origin header is retained verbatim."""
+    from flare.ws.server import _parse_ws_upgrade_bytes
+
+    var raw = _upgrade_bytes("Origin: https://app.example.com\r\n")
+    var up = _parse_ws_upgrade_bytes(Span[UInt8, _](raw))
+    assert_equal(up.origin, "https://app.example.com")
+    assert_equal(up.key, "dGhlIHNhbXBsZSBub25jZQ==")
+
+
+def test_upgrade_parse_origin_absent_is_empty() raises:
+    """A request without an Origin yields the empty string, not an error.
+
+    Non-browser clients routinely omit it, so this must stay a
+    successful parse.
+    """
+    from flare.ws.server import _parse_ws_upgrade_bytes
+
+    var up = _parse_ws_upgrade_bytes(Span[UInt8, _](_upgrade_bytes("")))
+    assert_equal(up.origin, "")
+    assert_equal(up.key, "dGhlIHNhbXBsZSBub25jZQ==")
+
+
+def test_upgrade_parse_origin_header_name_case_insensitive() raises:
+    """HTTP field names are case-insensitive (RFC 9110 5.1)."""
+    from flare.ws.server import _parse_ws_upgrade_bytes
+
+    var raw = _upgrade_bytes("ORIGIN: https://Example.COM\r\n")
+    var up = _parse_ws_upgrade_bytes(Span[UInt8, _](raw))
+    # Name matched case-insensitively; the value keeps its own case,
+    # since origin comparison is the handler's policy to define.
+    assert_equal(up.origin, "https://Example.COM")
+
+
+def test_ws_connection_carries_handshake_origin() raises:
+    """End-to-end: the Origin reaches the handler on WsConnection."""
+    from flare.ws import WsServer, WsConnection
+    from flare.ws.server import (
+        _read_upgrade_request,
+        _send_upgrade_response,
+        _compute_accept_srv,
+    )
+    from flare.net import SocketAddr
+    from flare.tcp import TcpStream
+
+    var srv = WsServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+
+    var raw_client = TcpStream.connect(SocketAddr.localhost(port))
+    _send_upgrade_request_raw(raw_client, "localhost", "https://evil.test")
+
+    var server_stream = srv._listener.accept()
+    var srv_peer = server_stream.peer_addr()
+    var upgrade = _read_upgrade_request(server_stream)
+    var accept = _compute_accept_srv(upgrade.key)
+    _send_upgrade_response(server_stream, accept)
+    var conn = WsConnection(server_stream^, srv_peer, upgrade.origin.copy())
+
+    assert_equal(conn.origin, "https://evil.test")
+
+    _drain_101(raw_client)
     raw_client.close()
     srv.close()
 

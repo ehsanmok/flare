@@ -162,7 +162,22 @@ def _str_find_srv(s: String, sub: String) -> Int:
     return -1
 
 
-def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
+@fieldwise_init
+struct _WsUpgradeRequest(Movable):
+    """The handshake fields the server keeps from an Upgrade request.
+
+    Fields:
+        key: The ``Sec-WebSocket-Key`` header value (always present; the
+            parsers raise when it is missing).
+        origin: The ``Origin`` header value, or empty when the client
+            sent none. Non-browser clients routinely omit it.
+    """
+
+    var key: String
+    var origin: String
+
+
+def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> _WsUpgradeRequest:
     """Parse an HTTP WebSocket Upgrade request from a byte buffer.
 
     Identical logic to ``_read_upgrade_request`` but reads from a
@@ -173,7 +188,7 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
         data: Raw HTTP/1.1 Upgrade request bytes.
 
     Returns:
-        The ``Sec-WebSocket-Key`` header value.
+        The retained handshake fields (``Sec-WebSocket-Key`` + ``Origin``).
 
     Raises:
         NetworkError: If the request is malformed or missing required headers.
@@ -196,6 +211,7 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
     _ = read_line(data, pos)
 
     var ws_key = String("")
+    var ws_origin = String("")
     var found_upgrade = False
     var found_connection = False
 
@@ -218,6 +234,11 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
         )
         if k == "sec-websocket-key":
             ws_key = v
+        elif k == "origin":
+            # Retained verbatim, not validated: the library has no way to
+            # know which origins a given deployment trusts. Handlers get
+            # it via ``WsConnection.origin`` and apply their own policy.
+            ws_origin = v
         elif k == "upgrade" and _lower_srv(v) == "websocket":
             found_upgrade = True
         elif k == "connection" and "upgrade" in _lower_srv(v):
@@ -232,10 +253,10 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> String:
         raise NetworkError(
             "WebSocket upgrade request missing Sec-WebSocket-Key"
         )
-    return ws_key^
+    return _WsUpgradeRequest(ws_key^, ws_origin^)
 
 
-def _read_upgrade_request(mut stream: TcpStream) raises -> String:
+def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
     """Read an HTTP upgrade request and return the ``Sec-WebSocket-Key``.
 
     Reads until the blank line terminating HTTP headers.
@@ -244,7 +265,7 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> String:
         stream: Accepted TCP stream.
 
     Returns:
-        The ``Sec-WebSocket-Key`` header value.
+        The retained handshake fields (``Sec-WebSocket-Key`` + ``Origin``).
 
     Raises:
         NetworkError: If the upgrade request is malformed or missing the key.
@@ -253,6 +274,7 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> String:
     _ = _read_line_srv(stream)
 
     var ws_key = String("")
+    var ws_origin = String("")
     var found_upgrade = False
     var found_connection = False
 
@@ -275,6 +297,11 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> String:
         )
         if k == "sec-websocket-key":
             ws_key = v
+        elif k == "origin":
+            # Retained verbatim, not validated: the library has no way to
+            # know which origins a given deployment trusts. Handlers get
+            # it via ``WsConnection.origin`` and apply their own policy.
+            ws_origin = v
         elif k == "upgrade" and _lower_srv(v) == "websocket":
             found_upgrade = True
         elif k == "connection" and "upgrade" in _lower_srv(v):
@@ -289,7 +316,7 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> String:
         raise NetworkError(
             "WebSocket upgrade request missing Sec-WebSocket-Key"
         )
-    return ws_key^
+    return _WsUpgradeRequest(ws_key^, ws_origin^)
 
 
 def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
@@ -326,6 +353,7 @@ struct WsConnection(Movable):
     Fields:
         _stream: The underlying TCP stream.
         _peer: The remote socket address.
+        origin: The handshake ``Origin`` header (empty when absent).
 
     Example:
         ```mojo
@@ -340,10 +368,40 @@ struct WsConnection(Movable):
 
     var _stream: TcpStream
     var _peer: SocketAddr
+    var origin: String
+    """The ``Origin`` header sent with the upgrade handshake, or empty
+    when the client sent none.
 
-    def __init__(out self, var stream: TcpStream, peer: SocketAddr):
+    Exposed so a handler can enforce a same-origin (or allow-list)
+    policy of its own. Browsers do NOT apply the same-origin policy to
+    ``ws://`` connects and send no preflight, so **any** page a user
+    visits can open a WebSocket to a server this process is running --
+    including one bound to loopback. ``Origin`` is the only signal in
+    the handshake that says which site opened the socket.
+
+    Trust it only as far as browsers make it trustworthy: a browser sets
+    it and script cannot forge it, but a non-browser client sends
+    whatever it likes (or nothing at all). It authenticates the *page*,
+    never the user.
+
+    Example:
+        ```mojo
+        def on_connect(mut conn: WsConnection) raises:
+            if conn.origin != "https://app.example.com":
+                conn.close(WsCloseCode.POLICY_VIOLATION)
+                return
+        ```
+    """
+
+    def __init__(
+        out self,
+        var stream: TcpStream,
+        peer: SocketAddr,
+        var origin: String = String(""),
+    ):
         self._stream = stream^
         self._peer = peer
+        self.origin = origin^
 
     def __deinit__(deinit self):
         self._stream.close()
@@ -640,10 +698,10 @@ struct WsServer(Movable):
             var stream = self._listener.accept()
             var peer = stream.peer_addr()
             try:
-                var key = _read_upgrade_request(stream)
-                var accept = _compute_accept_srv(key)
+                var upgrade = _read_upgrade_request(stream)
+                var accept = _compute_accept_srv(upgrade.key)
                 _send_upgrade_response(stream, accept)
-                var conn = WsConnection(stream^, peer)
+                var conn = WsConnection(stream^, peer, upgrade.origin.copy())
                 handler.on_connection(conn)
             except e:
                 print("[ws] connection error: " + String(e))
@@ -671,10 +729,10 @@ def _handle_ws_connection(
     Upgrade errors are swallowed so the accept loop continues.
     """
     try:
-        var key = _read_upgrade_request(stream)
-        var accept = _compute_accept_srv(key)
+        var upgrade = _read_upgrade_request(stream)
+        var accept = _compute_accept_srv(upgrade.key)
         _send_upgrade_response(stream, accept)
-        var conn = WsConnection(stream^, peer)
+        var conn = WsConnection(stream^, peer, upgrade.origin.copy())
         handler(conn)
     except e:
         print("[ws] connection error: " + String(e))
