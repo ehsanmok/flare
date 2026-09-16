@@ -21,7 +21,7 @@ from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream
 from ..net import SocketAddr, NetworkError, _find_flare_lib
-from ..runtime._thread import ThreadHandle, _OpaquePtr
+from ..runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 from ..runtime.reuseport import bind_reuseport
 from ..utils.dylib import dl_sym
 
@@ -802,6 +802,102 @@ def _handle_ws_connection(
         handler(conn)
     except e:
         print("[ws] connection error: " + String(e))
+
+
+# ── Off-reactor connection offload ─────────────────────────────────────────
+# With ``ServerConfig.ws_offload`` set, the HTTP/1.1 reactor hands each
+# upgraded WebSocket to a fresh detached pthread instead of running
+# ``ws_handler(conn)`` inline and parking the worker for the connection's
+# lifetime. By this point the fd is already detached from the reactor and
+# back in blocking mode, so the connection's whole lifecycle -- every
+# ``recv`` / ``send_text`` / ``close``, and the final socket close in
+# ``WsConnection.__del__`` -- happens on that one thread. No fd is ever
+# touched from two threads, so nothing has to marshal writes across them.
+
+
+@fieldwise_init
+struct _WsOffloadCtx(Movable):
+    """Heap hand-off carrying one upgraded connection and its handler onto
+    the offload thread. ``WsConnection`` is move-only because it owns the
+    fd; the ``def`` handler is a trivially-copyable function pointer. Same
+    Int-address stash :func:`_ws_serve_multicore` and ``block_in_pool`` use
+    to cross a pthread boundary."""
+
+    var conn: WsConnection
+    var handler: def(mut WsConnection) raises thin -> None
+
+
+def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
+    """``pthread`` start routine for one offloaded WebSocket connection.
+
+    Rebuilds the ``_WsOffloadCtx`` from the opaque argument, frees the heap
+    slot, and runs the handler to completion. The handler may raise; a
+    start routine may not, so errors are reported and swallowed -- the same
+    contract :func:`_handle_ws_connection` follows. When this returns,
+    ``ctx`` and the ``WsConnection`` it owns are destroyed, closing the
+    socket.
+    """
+    var ctx_addr = Int(arg)
+    debug_assert[assert_mode="safe"](
+        ctx_addr != 0,
+        "_ws_offload_entry: ctx pointer must be non-NULL",
+    )
+    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
+        unsafe_from_address=ctx_addr
+    )
+    var ctx_ptr = raw.bitcast[_WsOffloadCtx]()
+    var ctx = ctx_ptr.take_pointee()
+    ctx_ptr.free()
+    try:
+        ctx.handler(ctx.conn)
+    except e:
+        print("[ws] offloaded connection error: " + String(e))
+    return _null_ptr()
+
+
+def _spawn_ws_offload(
+    var conn: WsConnection,
+    handler: def(mut WsConnection) raises thin -> None,
+) raises:
+    """Run ``handler(conn)`` on a fresh detached pthread, fire-and-forget.
+
+    Heap-allocates a ``_WsOffloadCtx``, spawns a thread that takes
+    ownership of it, and detaches so the OS reclaims the thread when it
+    exits -- it outlives this call frame and is never joined. Returns as
+    soon as the thread is spawned, which is what lets the reactor move on.
+
+    Raises:
+        Error: If ``pthread_create`` fails. The context is destroyed and
+            freed first, which closes the socket: by this point the
+            reactor has already zeroed its own copy of the fd, so this
+            function is the only owner left and dropping it on the floor
+            would leak a live socket per failed handshake. ``EAGAIN`` at
+            the process thread limit is the reachable case, and it is
+            reachable on demand while there is no cap on offloaded
+            threads.
+    """
+    from std.memory import alloc
+
+    var ctx_ptr = alloc[_WsOffloadCtx](1)
+    debug_assert[assert_mode="safe"](
+        Int(ctx_ptr) != 0,
+        "_spawn_ws_offload: alloc[_WsOffloadCtx] returned NULL",
+    )
+    ctx_ptr.init_pointee_move(_WsOffloadCtx(conn^, handler))
+    var arg = UnsafePointer[UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(ctx_ptr)
+    )
+    var th: ThreadHandle
+    try:
+        th = ThreadHandle.spawn[_ws_offload_entry](arg)
+    except e:
+        ctx_ptr.unsafe_deinit_pointee()
+        ctx_ptr.free()
+        raise e
+    # No free on this path even if it raises: the thread is already
+    # running and owns the context, so a free here would be a double
+    # free once `_ws_offload_entry` takes the pointee.
+    th.detach()
 
 
 # ── Multi-worker WsServer ──────────────────────────────────────────────────
