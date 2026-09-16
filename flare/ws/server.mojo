@@ -398,6 +398,20 @@ struct WsConnection(Movable):
         ```
     """
 
+    var _prebuf: List[UInt8]
+    """Bytes already read off the socket before this ``WsConnection``
+    took ownership of the fd, plus whatever a decode leaves behind.
+
+    It starts non-empty only on the shared-listener upgrade path
+    (``HttpServer.serve_ws_upgrade``), where the HTTP/1.1 reactor may
+    have buffered post-handshake WebSocket frame bytes in the same
+    ``recv`` that delivered the upgrade request (TCP coalescing).
+    ``_recv_one`` drains it before issuing any socket ``read`` and puts
+    back whatever the decoded frame did not consume, so a client that
+    pipelines several frames behind the handshake loses none of them.
+    Empty throughout for the standalone ``WsServer`` path, which reads
+    the handshake byte-at-a-time and leaves nothing buffered."""
+
     def __init__(
         out self,
         var stream: TcpStream,
@@ -407,6 +421,35 @@ struct WsConnection(Movable):
         self._stream = stream^
         self._peer = peer
         self.origin = origin^
+        self._prebuf = List[UInt8]()
+
+    def __init__(
+        out self,
+        var stream: TcpStream,
+        peer: SocketAddr,
+        var prebuf: List[UInt8],
+    ):
+        """Construct a ``WsConnection`` seeded with already-buffered
+        post-handshake bytes.
+
+        Used by the ``HttpServer`` WebSocket-upgrade seam to hand off
+        any frame bytes the HTTP reactor had already read past the
+        upgrade request. ``prebuf`` is consumed by the first
+        ``recv``/``_recv_one`` before any socket read.
+
+        :attr:`origin` is left empty on this path -- populating it needs
+        the same decision :class:`WsServer` already made, so it is not
+        made here.
+
+        Args:
+            stream: The upgraded connection, already in blocking mode.
+            peer: Remote address, for :attr:`peer`.
+            prebuf: Bytes the reactor read past the upgrade request.
+        """
+        self._stream = stream^
+        self._peer = peer
+        self.origin = String("")
+        self._prebuf = prebuf^
 
     def __deinit__(deinit self):
         self._stream.close()
@@ -480,6 +523,15 @@ struct WsConnection(Movable):
     def _recv_one(mut self) raises -> WsFrame:
         """Read bytes from stream and decode one complete frame."""
         var buf = List[UInt8](capacity=4096)
+        # Drain the carry-over before touching the socket: bytes the
+        # HTTP reactor pre-buffered past the handshake on the
+        # shared-listener path, and, on every later call, whatever the
+        # previous decode left behind. Empty throughout for the
+        # standalone WsServer path.
+        if len(self._prebuf) > 0:
+            for i in range(len(self._prebuf)):
+                buf.append(self._prebuf[i])
+            self._prebuf.clear()
         var tmp = List[UInt8](capacity=4096)
         tmp.resize(4096, 0)
 
@@ -491,6 +543,15 @@ struct WsConnection(Movable):
                     raise WsProtocolError(
                         "client sent unmasked frame (RFC 6455 §5.1)"
                     )
+                # `buf` dies with this call, so anything past the frame
+                # has to be handed back to the connection or it is lost.
+                # Two frames in one segment used to mean the second was
+                # dropped and the next recv() blocked on a socket with
+                # nothing left to send -- a hang, with no error. Reached
+                # by a client that pipelines frames behind the
+                # handshake, and by recv()'s own PING loop.
+                for i in range(result.consumed, len(buf)):
+                    self._prebuf.append(buf[i])
                 return result^.take_frame()
             except e:
                 var msg = String(e)
