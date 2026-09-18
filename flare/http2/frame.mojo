@@ -28,6 +28,7 @@ state, frame ordering, or the SETTINGS/window math. Those checks
 live in :mod:`flare.http2.state`.
 """
 
+from std.memory import unsafe_memcpy
 from std.collections import Optional
 
 
@@ -250,6 +251,14 @@ def encode_frame(f: Frame) -> List[UInt8]:
     out.append(UInt8((sid >> 16) & 0xFF))
     out.append(UInt8((sid >> 8) & 0xFF))
     out.append(UInt8(sid & 0xFF))
-    for i in range(n):
-        out.append(f.payload[i])
+    if n > 0:
+        # One copy. A DATA frame's payload is up to SETTINGS_MAX_FRAME_SIZE,
+        # and a large response is nothing but these, so a byte at a time here
+        # is a scalar pass over everything the connection sends.
+        out.resize(unsafe_uninit_length=9 + n)
+        unsafe_memcpy(
+            dest=out.unsafe_ptr().unsafe_offset(9),
+            src=f.payload.unsafe_ptr(),
+            count=n,
+        )
     return out^

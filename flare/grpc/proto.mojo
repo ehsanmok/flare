@@ -27,7 +27,7 @@ descriptors -- those live in :mod:`flare.grpc.reflection`.
 """
 
 from std.collections import List
-from std.memory import stack_allocation
+from std.memory import stack_allocation, unsafe_memcpy
 from std.collections.span import Span
 
 
@@ -158,10 +158,25 @@ struct ProtoWriter(Copyable):
         self.write_fixed32(field, UInt32(value.to_bits()))
 
     def write_bytes(mut self, field: Int, value: Span[UInt8, _]):
+        """A length-delimited field: the tag, the length, then the bytes.
+
+        The bytes are copied in one go. A byte at a time is invisible on a
+        string field and is the whole cost of a large one — Arrow Flight puts
+        a record batch in `data_body`, so this copy is as big as the data the
+        server is sending.
+        """
         self._tag(field, WIRE_LEN)
         self._raw_varint(UInt64(len(value)))
-        for i in range(len(value)):
-            self.buf.append(value[i])
+        var n = len(value)
+        if n == 0:
+            return
+        var base = len(self.buf)
+        self.buf.resize(unsafe_uninit_length=base + n)
+        unsafe_memcpy(
+            dest=self.buf.unsafe_ptr().unsafe_offset(base),
+            src=value.unsafe_ptr(),
+            count=n,
+        )
 
     def write_string(mut self, field: Int, value: String):
         self.write_bytes(field, value.as_bytes())
@@ -194,10 +209,20 @@ struct ProtoReader(Copyable):
     var pos: Int
 
     def __init__(out self, buf: Span[UInt8, _]):
-        self.data = List[UInt8](capacity=len(buf))
-        for i in range(len(buf)):
-            self.data.append(buf[i])
+        """Takes its own copy, so the reader outlives the span it was given.
+
+        One copy, for the same reason `write_bytes` makes one: a response
+        being decoded is as large as the payload in it.
+        """
+        self.data = List[UInt8]()
         self.pos = 0
+        var n = len(buf)
+        if n == 0:
+            return
+        self.data.resize(unsafe_uninit_length=n)
+        unsafe_memcpy(
+            dest=self.data.unsafe_ptr(), src=buf.unsafe_ptr(), count=n
+        )
 
     def has_more(self) -> Bool:
         return self.pos < len(self.data)
