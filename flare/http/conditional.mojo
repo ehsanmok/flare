@@ -282,9 +282,7 @@ def fnv1a_etag(body: Span[UInt8, _]) -> String:
 # ── Conditional[Inner] ─────────────────────────────────────────────────────
 
 
-struct Conditional[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct Conditional[Inner: Handler & Copyable](Copyable, Handler):
     """Honour RFC 9110 §13 precondition headers around ``Inner``.
 
     Wraps any ``Handler``-shaped inner. For each request, calls
@@ -313,10 +311,6 @@ struct Conditional[Inner: Handler & Copyable & Defaultable](
 
     var inner: Self.Inner
     var auto_etag: Bool
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.auto_etag = False
 
     def __init__(out self, var inner: Self.Inner):
         self.inner = inner^

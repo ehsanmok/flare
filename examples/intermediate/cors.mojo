@@ -24,14 +24,11 @@ from flare.http import (
 )
 
 
-@fieldwise_init
 struct ApiHandler(Copyable, Defaultable, Handler):
     """Tiny JSON API; returns a constant payload."""
 
-    var _placeholder: UInt8
-
     def __init__(out self):
-        self._placeholder = UInt8(0)
+        pass
 
     def serve(self, req: Request) raises -> Response:
         var resp = Response(status=200)

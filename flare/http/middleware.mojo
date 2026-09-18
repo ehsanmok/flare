@@ -40,9 +40,7 @@ from ..utils.dylib import find_flare_lib, dl_sym
 # ── Logger ─────────────────────────────────────────────────────────────────
 
 
-struct Logger[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct Logger[Inner: Handler & Copyable](Copyable, Handler):
     """Log method, url, status, and latency around the inner handler.
 
     Output goes to stdout via ``print``. The format is intentionally
@@ -55,10 +53,6 @@ struct Logger[Inner: Handler & Copyable & Defaultable](
 
     var prefix: String
     """Prefix prepended to every log line; defaults to ``"[flare]"``."""
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.prefix = "[flare]"
 
     def __init__(out self, var inner: Self.Inner, prefix: String = "[flare]"):
         self.inner = inner^
@@ -95,9 +89,7 @@ struct Logger[Inner: Handler & Copyable & Defaultable](
 # ── RequestId ──────────────────────────────────────────────────────────────
 
 
-struct RequestId[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct RequestId[Inner: Handler & Copyable](Copyable, Handler):
     """Echo the inbound ``X-Request-Id`` header back on the response.
 
     If absent on the inbound side, a deterministic id derived from
@@ -106,9 +98,6 @@ struct RequestId[Inner: Handler & Copyable & Defaultable](
     """
 
     var inner: Self.Inner
-
-    def __init__(out self):
-        self.inner = Self.Inner()
 
     def __init__(out self, var inner: Self.Inner):
         self.inner = inner^
@@ -322,9 +311,7 @@ def _file_exists(path: String) -> Bool:
         return False
 
 
-struct Compress[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct Compress[Inner: Handler & Copyable](Copyable, Handler):
     """Negotiate ``Content-Encoding`` per RFC 9110 paragraph 12.5.3.
 
     Inspects the inbound ``Accept-Encoding`` header, picks the
@@ -342,12 +329,6 @@ struct Compress[Inner: Handler & Copyable & Defaultable](
     var min_size_bytes: Int
     var brotli_quality: Int
     var gzip_level: Int
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.min_size_bytes = 1024
-        self.brotli_quality = 5
-        self.gzip_level = 6
 
     def __init__(
         out self,
@@ -395,9 +376,7 @@ struct Compress[Inner: Handler & Copyable & Defaultable](
 # ── CatchPanic ─────────────────────────────────────────────────────────────
 
 
-struct CatchPanic[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct CatchPanic[Inner: Handler & Copyable](Copyable, Handler):
     """Convert any ``raise`` from the inner handler into a 500.
 
     Useful when stacking middleware below the server's own
@@ -408,10 +387,6 @@ struct CatchPanic[Inner: Handler & Copyable & Defaultable](
 
     var inner: Self.Inner
     var body: String
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.body = "Internal Server Error"
 
     def __init__(
         out self, var inner: Self.Inner, body: String = "Internal Server Error"

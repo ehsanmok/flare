@@ -107,18 +107,12 @@ def _join(parts: List[String], sep: String) -> String:
     return out^
 
 
-struct Cors[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct Cors[Inner: Handler & Copyable](Copyable, Handler):
     """CORS middleware. Wraps ``Inner`` with the spec'd preflight +
     response-header machinery."""
 
     var inner: Self.Inner
     var config: CorsConfig
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.config = CorsConfig()
 
     def __init__(out self, var inner: Self.Inner, config: CorsConfig):
         self.inner = inner^

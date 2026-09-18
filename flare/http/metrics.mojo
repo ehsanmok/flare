@@ -478,9 +478,7 @@ def _format_seconds(micros: UInt64) -> String:
 # ── Metrics middleware ─────────────────────────────────────────────────────
 
 
-struct Metrics[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct Metrics[Inner: Handler & Copyable](Copyable, Handler):
     """Prometheus-text-exposition middleware around an inner
     handler.
 
@@ -512,10 +510,6 @@ struct Metrics[Inner: Handler & Copyable & Defaultable](
     """Heap address of the shared :class:`MetricsRegistry` cell.
     Allocated in ``__init__``; intentionally leaked at process
     exit (see struct doc)."""
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.registry_addr = _alloc_registry_or_zero()
 
     def __init__(out self, var inner: Self.Inner):
         self.inner = inner^

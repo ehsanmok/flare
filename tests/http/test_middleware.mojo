@@ -232,6 +232,31 @@ def test_catch_panic_passthrough_when_ok() raises:
     assert_equal(resp.text(), "hi")
 
 
+struct _NoDefault(Copyable, Handler):
+    """A handler with required state and no default constructor.
+
+    Before middleware dropped its ``Defaultable`` bound, a handler like
+    this could not be wrapped by any of the stock middleware, and the
+    workaround was a dummy ``var _placeholder: UInt8`` field.
+    """
+
+    var greeting: String
+
+    def __init__(out self, greeting: String):
+        self.greeting = greeting
+
+    def serve(self, req: Request) raises -> Response:
+        return ok(self.greeting)
+
+
+def test_middleware_wraps_a_handler_without_a_default() raises:
+    var stack = CatchPanic(Logger(RequestId(_NoDefault("hi there"))))
+    var req = Request(method=String("GET"), url=String("/"))
+    var resp = stack.serve(req)
+    assert_equal(resp.status, 200)
+    assert_equal(String(unsafe_from_utf8=Span(resp.body)), "hi there")
+
+
 def main() raises:
     test_negotiate_empty_header_identity()
     test_negotiate_gzip_only()
@@ -250,4 +275,5 @@ def main() raises:
     test_compress_already_encoded_skipped()
     test_catch_panic_returns_500()
     test_catch_panic_passthrough_when_ok()
-    print("test_middleware: 17 passed")
+    test_middleware_wraps_a_handler_without_a_default()
+    print("test_middleware: 18 passed")

@@ -206,9 +206,9 @@ def _alloc_store_or_zero_move[
 
 
 struct Cache[
-    Inner: Handler & Copyable & Defaultable,
+    Inner: Handler & Copyable,
     S: CacheStore & Deinitable & Movable,
-](Copyable, Defaultable, Handler):
+](Copyable, Handler):
     """RFC 9111 HTTP cache middleware.
 
     The middleware composes on top of any :class:`CacheStore`
@@ -252,10 +252,6 @@ struct Cache[
     """Heap address of the shared :class:`CacheStore` cell.
     Allocated in ``__init__``; intentionally leaked at process
     exit (see struct doc)."""
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.store_addr = _alloc_store_or_zero[Self.S]()
 
     def __init__(out self, var inner: Self.Inner, var store: Self.S):
         self.inner = inner^

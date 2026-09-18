@@ -1716,6 +1716,9 @@ from test_middleware import (
 from test_middleware import (
     test_catch_panic_passthrough_when_ok as test_middleware__test_catch_panic_passthrough_when_ok,
 )
+from test_middleware import (
+    test_middleware_wraps_a_handler_without_a_default as test_middleware__test_middleware_wraps_a_handler_without_a_default,
+)
 from test_multi_listener import (
     test_bind_many_two_ports_serve_both as test_multi_listener__test_bind_many_two_ports_serve_both,
 )
@@ -4556,6 +4559,9 @@ def main() raises:
     suite.test[test_middleware__test_compress_already_encoded_skipped]()
     suite.test[test_middleware__test_catch_panic_returns_500]()
     suite.test[test_middleware__test_catch_panic_passthrough_when_ok]()
+    suite.test[
+        test_middleware__test_middleware_wraps_a_handler_without_a_default
+    ]()
     # tests/http/test_multi_listener.mojo
     suite.test[test_multi_listener__test_bind_many_two_ports_serve_both]()
     suite.test[

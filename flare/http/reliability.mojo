@@ -179,9 +179,7 @@ def _backoff_sleep_ms(policy: RetryPolicy, attempt: Int) -> Int:
     return Int(random_ui64(0, UInt64(capped)))
 
 
-struct Retry[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct Retry[Inner: Handler & Copyable](Copyable, Handler):
     """Retry the inner handler on transient failure.
 
     A response with status >= 500 triggers a retry; a raised
@@ -203,10 +201,6 @@ struct Retry[Inner: Handler & Copyable & Defaultable](
 
     var inner: Self.Inner
     var policy: RetryPolicy
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.policy = RetryPolicy()
 
     def __init__(
         out self, var inner: Self.Inner, var policy: RetryPolicy = RetryPolicy()
@@ -255,9 +249,7 @@ struct Retry[Inner: Handler & Copyable & Defaultable](
         return self.inner.serve(req).lower()
 
 
-struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct PostHocDeadline[Inner: Handler & Copyable](Copyable, Handler):
     """Post-hoc wall-clock deadline check.
 
     The middleware records the entry timestamp, runs the inner
@@ -287,10 +279,6 @@ struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
     var inner: Self.Inner
     var budget_ms: Int
 
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.budget_ms = 30_000
-
     def __init__(out self, var inner: Self.Inner, budget_ms: Int = 30_000):
         self.inner = inner^
         self.budget_ms = budget_ms
@@ -313,9 +301,7 @@ struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
         return resp^
 
 
-struct RateLimit[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct RateLimit[Inner: Handler & Copyable](Copyable, Handler):
     """Token-bucket rate limiter.
 
     Admits up to ``rate_per_sec`` requests per second with a bucket
@@ -334,12 +320,6 @@ struct RateLimit[Inner: Handler & Copyable & Defaultable](
     var burst: Int
     var _cell: Int
     """Leaked 2-slot cell: [0] = milli-tokens, [1] = last-refill ns."""
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.rate_per_sec = 0
-        self.burst = 0
-        self._cell = _alloc_cell(2)
 
     def __init__(
         out self, var inner: Self.Inner, rate_per_sec: Int, burst: Int = 0
@@ -383,9 +363,7 @@ comptime _CB_OPEN: Int64 = 1
 comptime _CB_HALF_OPEN: Int64 = 2
 
 
-struct CircuitBreaker[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct CircuitBreaker[Inner: Handler & Copyable](Copyable, Handler):
     """Trip open after consecutive failures, fast-fail during cooldown.
 
     Counts consecutive failures (a raised exception or a ``>= 500``
@@ -405,12 +383,6 @@ struct CircuitBreaker[Inner: Handler & Copyable & Defaultable](
     var _cell: Int
     """Leaked 3-slot cell: [0] = state, [1] = consecutive fails,
     [2] = opened-at ns."""
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        self.failure_threshold = 0
-        self.cooldown_ms = 0
-        self._cell = _alloc_cell(3)
 
     def __init__(
         out self,

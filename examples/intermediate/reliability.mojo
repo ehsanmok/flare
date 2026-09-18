@@ -50,14 +50,11 @@ from flare.http.reliability import (
 )
 
 
-@fieldwise_init
 struct OkHandler(Copyable, Defaultable, Handler):
     """Always returns 200 OK — fast-path for both middlewares."""
 
-    var _placeholder: UInt8
-
     def __init__(out self):
-        self._placeholder = UInt8(0)
+        pass
 
     def serve(self, req: Request) raises -> Response:
         var resp = Response(status=200)
@@ -66,14 +63,11 @@ struct OkHandler(Copyable, Defaultable, Handler):
         return resp^
 
 
-@fieldwise_init
 struct FlakyHandler(Copyable, Defaultable, Handler):
     """Always returns 503 — used to demonstrate retry exhaustion."""
 
-    var _placeholder: UInt8
-
     def __init__(out self):
-        self._placeholder = UInt8(0)
+        pass
 
     def serve(self, req: Request) raises -> Response:
         return Response(status=503, reason=String("Service Unavailable"))

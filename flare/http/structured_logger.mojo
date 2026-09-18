@@ -159,9 +159,7 @@ def _pad(n: Int, width: Int) -> String:
 # ── StructuredLogger ────────────────────────────────────────────────────────
 
 
-struct StructuredLogger[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler
-):
+struct StructuredLogger[Inner: Handler & Copyable](Copyable, Handler):
     """JSON-per-line request logger around the inner handler.
 
     Emits one line of JSON per request to stdout:
@@ -195,18 +193,6 @@ struct StructuredLogger[Inner: Handler & Copyable & Defaultable](
     single ``StructuredLogger`` instance — typically a worker
     pthread — and a 1-second drift on a 24-hour soak is OK for
     log-line resolution."""
-
-    def __init__(out self):
-        self.inner = Self.Inner()
-        # perf_counter_ns is monotonic; we'd ideally subtract it
-        # from a wall-clock read here. The stdlib doesn't expose
-        # gettimeofday or clock_gettime(REALTIME), so the offset
-        # stays 0 and the ``ts`` field is "ns since
-        # the worker started" presented as ISO-8601. The line
-        # shape is forward-compatible -- when wall-clock support
-        # lands the offset can be back-filled without consumers
-        # noticing.
-        self._epoch_offset_ns = 0
 
     def __init__(out self, var inner: Self.Inner):
         self.inner = inner^

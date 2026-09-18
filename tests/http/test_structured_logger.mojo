@@ -129,7 +129,7 @@ struct _Raises500(Copyable, Defaultable, Handler):
 def test_serve_success_returns_inner_response() raises:
     """Just confirm the wrapper preserves the inner response on
     success — the line emit is a side effect to stdout."""
-    var lg = StructuredLogger[_OK200]()
+    var lg = StructuredLogger(_OK200())
     var req = Request(method=String("GET"), url=String("/x"))
     var resp = lg.serve(req)
     assert_equal(resp.status, 200)
@@ -139,7 +139,7 @@ def test_serve_success_returns_inner_response() raises:
 def test_serve_error_re_raises() raises:
     """The wrapper logs the error then re-raises so upstream
     middleware can ``CatchPanic`` if it wants."""
-    var lg = StructuredLogger[_Raises500]()
+    var lg = StructuredLogger(_Raises500())
     var req = Request(method=String("GET"), url=String("/x"))
     var raised = False
     try:
