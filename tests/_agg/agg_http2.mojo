@@ -318,6 +318,12 @@ from test_h2_streaming_state import (
 from test_h2_streaming_state import (
     test_h2_window_update_before_rejection_does_not_resume_upload as test_h2_streaming_state__test_h2_window_update_before_rejection_does_not_resume_upload,
 )
+from test_h2_streaming_state import (
+    test_h2_malformed_response_does_not_kill_sibling_streams as test_h2_streaming_state__test_h2_malformed_response_does_not_kill_sibling_streams,
+)
+from test_h2_streaming_state import (
+    test_h2_goaway_marks_unprocessed_streams_refused as test_h2_streaming_state__test_h2_goaway_marks_unprocessed_streams_refused,
+)
 from test_stream_slab import (
     test_empty_slab_is_empty as test_stream_slab__test_empty_slab_is_empty,
 )
@@ -539,6 +545,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_streaming_state__test_h2_window_update_before_rejection_does_not_resume_upload
+    ]()
+    suite.test[
+        test_h2_streaming_state__test_h2_malformed_response_does_not_kill_sibling_streams
+    ]()
+    suite.test[
+        test_h2_streaming_state__test_h2_goaway_marks_unprocessed_streams_refused
     ]()
     # tests/http2/test_stream_slab.mojo
     suite.test[test_stream_slab__test_empty_slab_is_empty]()

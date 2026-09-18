@@ -478,7 +478,20 @@ struct Http2ClientConnection(Defaultable, Movable):
                     | Int(frame.payload[7])
                 )
                 for entry in self.conn.streams.items():
-                    if entry[0] > last or code != 0:
+                    if entry[0] > last:
+                        # RFC 9113 sec 6.8: streams above last_stream_id
+                        # were never processed, so they are safe to retry
+                        # on a fresh connection. On a graceful GOAWAY
+                        # (code 0) recording 0 for them made
+                        # stream_error(sid) indistinguishable from the
+                        # clean RST_STREAM(NO_ERROR)-after-a-complete-
+                        # response case. REFUSED_STREAM is the code that
+                        # carries the retry-safe meaning, and retry logic
+                        # reads this.
+                        self._stream_errors[
+                            entry[0]
+                        ] = Http2ErrorCode.REFUSED_STREAM().value
+                    elif code != 0:
                         self._stream_errors[entry[0]] = code
             if frame.header.type.value == FrameType.WINDOW_UPDATE().value:
                 window_updated = True
@@ -589,7 +602,17 @@ struct Http2ClientConnection(Defaultable, Movable):
         if sid not in self._pending_body:
             return
         if self.response_ready(sid) or sid in self._stream_errors:
+            # Dropping the stashed body is right, but the stream has to
+            # be closed out as well. Discarding alone left our half open
+            # with no END_STREAM and no RST_STREAM on the wire: the peer
+            # kept counting it against SETTINGS_MAX_CONCURRENT_STREAMS
+            # and the request was truncated at whatever frame boundary
+            # we reached, with nothing recorded anywhere. finish_upload
+            # already handles the CLOSED / HALF_CLOSED_LOCAL case that
+            # `sid in self._stream_errors` implies, so it is a no-op when
+            # the stream really is finished.
             self._discard_pending_body(sid)
+            self.finish_upload(sid)
             return
         var rem = self._pending_body[sid].copy()
         var fin = self._pending_body_fin[sid]

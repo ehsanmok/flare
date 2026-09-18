@@ -279,5 +279,109 @@ def test_h2_window_update_before_rejection_does_not_resume_upload() raises:
     assert_equal(len(conn.drain()), 0)
 
 
+def _h2_head_on(
+    mut conn: Http2ClientConnection,
+    mut encoder: HpackEncoder,
+    sid: Int,
+    fields: List[HpackHeader],
+    end: Bool = False,
+) raises:
+    """``_h2_head``, but for an arbitrary stream id."""
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.stream_id = sid
+    f.header.flags = FrameFlags(
+        FrameFlags.END_HEADERS()
+        | (FrameFlags.END_STREAM() if end else UInt8(0))
+    )
+    f.payload = encoder.encode(Span(fields))
+    f.header.length = len(f.payload)
+    var wire = encode_frame(f^)
+    conn.feed(Span(wire))
+
+
+def test_h2_malformed_response_does_not_kill_sibling_streams() raises:
+    """A bad response on one stream is a stream error, not a connection
+    error.
+
+    RFC 9113 sec 8.1.1. These checks used to raise, and a raise out of
+    feed means the caller GOAWAYs and closes the socket, so a duplicate
+    :status on one stream took every other in-flight request with it.
+    """
+    var conn = Http2ClientConnection()
+    var empty = List[UInt8]()
+    for sid in [1, 3]:
+        conn.send_request(
+            sid,
+            "GET",
+            "https",
+            "example.test",
+            "/",
+            List[HpackHeader](),
+            Span(empty),
+        )
+    var encoder = HpackEncoder()
+
+    # Stream 1 gets a malformed head: two :status fields.
+    _h2_head_on(
+        conn,
+        encoder,
+        1,
+        [
+            HpackHeader(":status", "200"),
+            HpackHeader(":status", "404"),
+        ],
+        True,
+    )
+    assert_true(
+        Bool(conn.stream_error(1)), "stream 1 should carry a stream error"
+    )
+
+    # Stream 3 must still be usable and must still complete.
+    assert_false(
+        Bool(conn.stream_error(3)), "stream 3 must not inherit the error"
+    )
+    _h2_head_on(conn, encoder, 3, [HpackHeader(":status", "200")], True)
+    assert_false(Bool(conn.stream_error(3)), "stream 3 should be clean")
+    assert_true(conn.response_ready(3), "stream 3 should have completed")
+
+
+def test_h2_goaway_marks_unprocessed_streams_refused() raises:
+    """A graceful GOAWAY must mark streams above last_stream_id retry-safe.
+
+    Recording 0 for them made stream_error(sid) read the same as a clean
+    RST_STREAM(NO_ERROR) after a complete response, which is the one
+    case that must not be retried.
+    """
+    var conn = Http2ClientConnection()
+    var empty = List[UInt8]()
+    for sid in [1, 3]:
+        conn.send_request(
+            sid,
+            "GET",
+            "https",
+            "example.test",
+            "/",
+            List[HpackHeader](),
+            Span(empty),
+        )
+    # GOAWAY(last_stream_id=1, error_code=0): stream 3 was never seen.
+    var f = Frame()
+    f.header.type = FrameType.GOAWAY()
+    f.header.stream_id = 0
+    for _ in range(4):
+        f.payload.append(0)
+    f.payload[3] = 1
+    for _ in range(4):
+        f.payload.append(0)
+    f.header.length = len(f.payload)
+    var wire = encode_frame(f^)
+    conn.feed(Span(wire))
+
+    var refused = conn.stream_error(3)
+    assert_true(Bool(refused), "stream 3 should be marked errored")
+    assert_equal(refused.value(), 7, "expected REFUSED_STREAM (7)")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

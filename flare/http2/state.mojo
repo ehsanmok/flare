@@ -717,6 +717,21 @@ struct Connection(Copyable, Defaultable):
                 return out^
 
         if self.is_client:
+            # RFC 9113 sec 8.1.1: a malformed response "MUST be treated
+            # as a stream error of type PROTOCOL_ERROR". These checks
+            # used to raise, and Connection.handle_frame raises straight
+            # out through Http2ClientConnection.feed, whose contract is
+            # for the caller to GOAWAY and close the socket. So one bad
+            # response on stream 5 tore down streams 1, 3 and 7 with it.
+            # Raising also skipped _put_stream below, discarding the
+            # recv_window decrement taken for this frame and leaving a
+            # caller that recovers with flow-control accounting the peer
+            # does not share.
+            #
+            # The same function already answers three other violations
+            # this way: the header-list cap and the server-side request
+            # check above, and the content-length mismatch below.
+            var bad = False
             var status = 0
             var regular = False
             for field in hdrs:
@@ -725,7 +740,8 @@ struct Connection(Copyable, Defaultable):
                     or field.name != field.name.lower()
                     or Connection._is_connection_specific(field.name)
                 ):
-                    raise Error("h2: invalid response field")
+                    bad = True
+                    break
                 if field.name == ":status":
                     if (
                         is_trailers
@@ -733,47 +749,79 @@ struct Connection(Copyable, Defaultable):
                         or regular
                         or field.value.byte_length() != 3
                     ):
-                        raise Error("h2: unexpected response :status")
+                        bad = True
+                        break
+                    var digits_ok = True
                     for b in field.value.as_bytes():
                         if b < 48 or b > 57:
-                            raise Error("h2: invalid response status")
+                            digits_ok = False
+                            break
+                    if not digits_ok:
+                        bad = True
+                        break
                     status = Int(field.value)
                 elif field.name.startswith(":"):
-                    raise Error("h2: unexpected response pseudo-header")
+                    bad = True
+                    break
                 else:
                     regular = True
                     if is_trailers and field.name == "content-length":
-                        raise Error("h2: forbidden trailer field")
-            var declared = -1
-            for field in hdrs:
-                if field.name == "content-length":
-                    var n = 0
-                    var bytes = field.value.as_bytes()
-                    if len(bytes) == 0:
-                        raise Error("h2: empty Content-Length")
-                    for b in bytes:
-                        if (
-                            b < 48
-                            or b > 57
-                            or n > (Int.MAX - Int(b - 48)) // 10
-                        ):
-                            raise Error("h2: invalid Content-Length")
-                        n = n * 10 + Int(b - 48)
-                    if declared >= 0 and n != declared:
-                        raise Error("h2: conflicting Content-Length")
-                    declared = n
-            if not is_trailers:
-                if status < 100 or status > 599 or status == 101:
-                    raise Error("h2: invalid response status")
-                if status < 200:
-                    if end_stream:
-                        raise Error("h2: informational response ended stream")
-                    self._put_stream(s^)
-                    return out^
-                if status == 204 or status == 304:
-                    s.response_body_allowed = False
-            elif not end_stream:
-                raise Error("h2: response trailers must end stream")
+                        bad = True
+                        break
+            if not bad:
+                var declared = -1
+                for field in hdrs:
+                    if field.name == "content-length":
+                        var n = 0
+                        var bytes = field.value.as_bytes()
+                        if len(bytes) == 0:
+                            bad = True
+                            break
+                        var num_ok = True
+                        for b in bytes:
+                            if (
+                                b < 48
+                                or b > 57
+                                or n > (Int.MAX - Int(b - 48)) // 10
+                            ):
+                                num_ok = False
+                                break
+                            n = n * 10 + Int(b - 48)
+                        if not num_ok:
+                            bad = True
+                            break
+                        if declared >= 0 and n != declared:
+                            bad = True
+                            break
+                        declared = n
+            var informational = False
+            if not bad:
+                if not is_trailers:
+                    if status < 100 or status > 599 or status == 101:
+                        bad = True
+                    elif status < 200:
+                        if end_stream:
+                            bad = True
+                        else:
+                            informational = True
+                    elif status == 204 or status == 304:
+                        s.response_body_allowed = False
+                elif not end_stream:
+                    bad = True
+            if bad:
+                out.append(
+                    self._rst_stream_frame(
+                        sid, Http2ErrorCode.PROTOCOL_ERROR().value
+                    )
+                )
+                s.state = StreamState.CLOSED()
+                s.data = List[UInt8]()
+                s.headers = List[HpackHeader]()
+                self._put_stream(s^)
+                return out^
+            if informational:
+                self._put_stream(s^)
+                return out^
 
         for j in range(len(hdrs)):
             s.headers.append(hdrs[j].copy())
@@ -1194,7 +1242,21 @@ struct Connection(Copyable, Defaultable):
                 self._put_stream(s^)
                 return out^
             if self.is_client and not s.response_body_allowed and len(body) > 0:
-                raise Error("h2: DATA on a bodyless response")
+                # Stream error, for the same reason as the response-head
+                # checks above: one peer sending DATA on its own 204 must
+                # not close every other stream on the connection.
+                out.append(
+                    self._rst_stream_frame(
+                        sid, Http2ErrorCode.PROTOCOL_ERROR().value
+                    )
+                )
+                s.state = StreamState.CLOSED()
+                s.data = List[UInt8]()
+                s.headers = List[HpackHeader]()
+                self._put_stream(s^)
+                if len(f.payload) > 0:
+                    out.append(Self._window_update_frame(0, len(f.payload)))
+                return out^
             if not self.is_client and len(body) > (
                 self.max_request_body_size - len(s.data)
             ):
@@ -1204,6 +1266,18 @@ struct Connection(Copyable, Defaultable):
                     )
                 )
                 s.data = List[UInt8]()
+                # Drop the header list too. Nothing in the tree removes a
+                # CLOSED stream from Connection.streams, and
+                # _active_stream_count skips closed streams, so the peer
+                # is not throttled by the concurrency limit either. It
+                # could otherwise open stream after stream, each with a
+                # header list up to the cap and one oversized DATA frame,
+                # and keep every one of those lists alive for the life of
+                # the connection -- trading a bounded body buffer for
+                # unbounded header retention. Safe here:
+                # take_completed_streams skips CLOSED streams and
+                # take_request is never reached for one.
+                s.headers = List[HpackHeader]()
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
                 if len(f.payload) > 0:
