@@ -14,7 +14,7 @@ for ``String`` / ``List[UInt8]`` allocation. The strict contract:
 - No imports from ``flare.net`` (socket address resolution).
 
 The contract is enforced statically by ``pixi run check-sans-io``
-which scans every file registered in ``tools/check_sans_io.sh``
+which scans every file registered in ``tests/tools/check_sans_io.sh``
 for the forbidden import prefixes. Adding a file to the sans-I/O
 list is a one-line change in that script.
 

@@ -374,7 +374,7 @@ enforcement, gzip message-compression negotiation
 (`grpc-accept-encoding` / `grpc-encoding`, request decompress + response
 compress), and chainable interceptors (`Intercepted[I, H]`). A proto3
 wire codec (`ProtoWriter` / `ProtoReader`) is the serializer handlers
-target, and `tools/proto_gen.py` generates Mojo message structs
+target, and `tests/tools/proto_gen.py` generates Mojo message structs
 (encode/decode) from a `.proto` for the supported subset (messages,
 nested messages, enums, scalars, repeated, singular message fields).
 The standard `grpc.health.v1.Health` ships both `Check` (unary) and
@@ -388,7 +388,7 @@ client-streaming / bidirectional. All four **server** shapes ship as
 reactor-mounted adapters: `GrpcService` (unary), `GrpcStreamingService`
 (server-streaming, now **incrementally flushed** -- one DATA frame per
 message via the K1 body-stream path), `GrpcClientStreamingService`, and
-`GrpcBidiService`. `tools/proto_gen.py` now also emits **`service`-block
+`GrpcBidiService`. `tests/tools/proto_gen.py` now also emits **`service`-block
 codegen**: `PATH_*` consts, a typed `<Service>Server` trait, per-RPC byte
 adapters, a typed `<Service>Client` stub, and a serialized
 `FileDescriptorProto`. Still deferred: maps / oneof in the message
@@ -578,7 +578,7 @@ Tests under [`tests/`](../tests/) mirror the package layout:
 | Examples (each part of `pixi run tests`) | 67 under [`examples/`](../examples/) |
 | Fuzz harnesses | 62 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes |
 | Sanitizer harnesses | `tests-asan` / `tests-tsan` / `tests-asserts-all` (see [`build.md`](build.md)) |
-| Conformance corpora | RFC 7230 HTTP/1 wire shapes under [`conformance/h1/`](../conformance/h1/) (runner: `test-conformance-h1`); RFC 6455 WebSocket frames under [`conformance/ws/`](../conformance/ws/) (runner: `test-conformance-ws`, 13 fixtures; Autobahn-anchored case ids 1.x / 2.x / 3.x / 5.x / 7.x) |
+| Conformance corpora | RFC 7230 HTTP/1 wire shapes under [`tests/conformance/h1/`](../tests/conformance/h1/) (runner: `test-conformance-h1`); RFC 6455 WebSocket frames under [`tests/conformance/ws/`](../tests/conformance/ws/) (runner: `test-conformance-ws`, 13 fixtures; Autobahn-anchored case ids 1.x / 2.x / 3.x / 5.x / 7.x) |
 
 Per-harness breakdown (input → fuzzer):
 

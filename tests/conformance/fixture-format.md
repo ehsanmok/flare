@@ -46,12 +46,12 @@ Each fixture is a JSON file. Naming convention:
 6. If the fixture is sensitive to a leniency flag, document the flag
    under `leniency`.
 
-The runner loads every `*.json` in `conformance/h1/` automatically;
+The runner loads every `*.json` in `tests/conformance/h1/` automatically;
 new fixtures need no test-code change.
 
-## WebSocket schema (`conformance/ws/`)
+## WebSocket schema (`tests/conformance/ws/`)
 
-WebSocket fixtures live in `conformance/ws/` and follow the same
+WebSocket fixtures live in `tests/conformance/ws/` and follow the same
 `accept`/`reject` shape with WS-specific expected-* fields. The
 runner is `tests/conformance/test_conformance_ws.mojo`; new
 fixtures are picked up automatically.

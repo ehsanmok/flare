@@ -1,7 +1,7 @@
 # h2spec cases flare knowingly does not pass.
 #
 # One entry per line: the case id as h2spec numbers it. Blank lines and
-# `#` comments ignored. tools/run_conformance.sh fails the run when a
+# `#` comments ignored. tests/tools/run_conformance.sh fails the run when a
 # case outside this list fails, so the suite gates on "no new
 # failures" while these stay documented rather than silent.
 #

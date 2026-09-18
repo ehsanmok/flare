@@ -11,7 +11,7 @@
 # Locally, `tests/http` (110 files, 1229 tests) builds in ~72s and runs in
 # ~15s as one binary.
 #
-# Aggregates are generated -- see tools/gen_test_aggregates.py. `--check`
+# Aggregates are generated -- see tests/tools/gen_test_aggregates.py. `--check`
 # below is the drift gate: an aggregate that is out of date with the tree
 # silently stops running whatever was added, and because an aggregate with
 # no registered tests still exits 0, nothing downstream would notice.
@@ -47,13 +47,13 @@ STANDALONE=(
 )
 
 # Excluded from the aggregates *and* not run here: flaky, and not in the
-# `tests` chain today either. See EXCLUDE in tools/gen_test_aggregates.py.
+# `tests` chain today either. See EXCLUDE in tests/tools/gen_test_aggregates.py.
 
 # Prerequisites the per-file chain interleaved into its `&&` sequence.
 # Hoisted here so they run once rather than being rediscovered mid-run.
 echo "── prerequisites ──"
 mkdir -p build/gen
-python tools/proto_gen.py tests/grpc/proto/sample.proto \
+python tests/tools/proto_gen.py tests/grpc/proto/sample.proto \
   -o build/gen/sample_pb.mojo \
   --doc 'Sample proto3 messages for the codegen round-trip test.' \
   || { echo "ERROR: proto_gen failed" >&2; exit 1; }
@@ -63,8 +63,8 @@ cargo build --release --locked \
   || { echo "ERROR: rustls wrapper build failed" >&2; exit 1; }
 
 echo "── checking aggregates are up to date ──"
-python3 tools/gen_test_aggregates.py --check || {
-  echo "ERROR: aggregates are stale; run python3 tools/gen_test_aggregates.py" >&2
+python3 tests/tools/gen_test_aggregates.py --check || {
+  echo "ERROR: aggregates are stale; run python3 tests/tools/gen_test_aggregates.py" >&2
   exit 1
 }
 
@@ -81,8 +81,11 @@ echo "── building ${#AGGS[@]} aggregates (jobs=$JOBS) ──"
 build_one() {
   local src="$1" out="$BUILD_DIR/$(basename "${1%.mojo}")"
   # Each aggregate imports bare module names, resolved against its own
-  # area directory -- `-I tests` would let the repo's top-level
-  # `conformance/` shadow `tests/conformance/`.
+  # area directory. Before the conformance fixtures moved under
+  # `tests/conformance/`, `-I tests` would have let the repo's
+  # then-existing top-level `conformance/` shadow `tests/conformance/`;
+  # per-area scoping stays the default to sidestep that class of
+  # collision uniformly.
   local area="${src##*/agg_}"; area="${area%.mojo}"
   local inc="tests/$area"
   [ "$area" = "_root" ] && inc="tests"

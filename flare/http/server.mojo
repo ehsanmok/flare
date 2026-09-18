@@ -14,7 +14,7 @@ Key performance characteristics:
 # surface). Mojo cannot split one struct's methods across files, so the
 # file stays over the 1000-line bar until the blocking serve loops here
 # are reworked into the reactor-backed path and this struct shrinks to a
-# thin facade. Allowlisted in tools/check_reactor_size.sh until then.
+# thin facade. Allowlisted in tests/tools/check_reactor_size.sh until then.
 
 from std.memory import unsafe_memcpy, stack_allocation
 from std.ffi import c_int, c_uint, external_call

@@ -39,7 +39,7 @@ Public surface:
 * :data:`QPACK_STATIC_TABLE_SIZE` -- the 99 of the static table.
 
 Sans-I/O contract: zero I/O imports; registered in
-``tools/check_sans_io.sh``.
+``tests/tools/check_sans_io.sh``.
 
 References:
 - RFC 9204 "QPACK: Field Compression for HTTP/3".

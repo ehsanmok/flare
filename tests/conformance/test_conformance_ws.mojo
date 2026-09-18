@@ -1,6 +1,6 @@
-"""Conformance runner for ``conformance/ws/`` fixtures.
+"""Conformance runner for ``tests/conformance/ws/`` fixtures.
 
-Loads every ``*.json`` fixture under ``conformance/ws/``, decodes
+Loads every ``*.json`` fixture under ``tests/conformance/ws/``, decodes
 the hex bytes, and validates the schema:
 
 - accept-fixtures declare the expected opcode + FIN bit + (when
@@ -37,7 +37,7 @@ def _digit(c: UInt8) raises -> Int:
         return Int(c) - ord("a") + 10
     if c >= UInt8(ord("A")) and c <= UInt8(ord("F")):
         return Int(c) - ord("A") + 10
-    raise Error("conformance/ws: invalid hex digit")
+    raise Error("conformance: invalid hex digit")
 
 
 def _decode_hex(s: String) raises -> List[UInt8]:
@@ -57,7 +57,7 @@ def _decode_hex(s: String) raises -> List[UInt8]:
             i += 1
             continue
         if i + 1 >= n:
-            raise Error("conformance/ws: dangling hex digit")
+            raise Error("conformance: dangling hex digit")
         var c2 = p[i + 1]
         var hi = _digit(c)
         var lo = _digit(c2)
@@ -174,7 +174,7 @@ def _validate_fixture(j: Value) raises:
 
 
 def _conformance_dir() -> Path:
-    return Path("conformance") / "ws"
+    return Path("tests") / "conformance" / "ws"
 
 
 def test_directory_exists() raises:

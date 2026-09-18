@@ -45,7 +45,7 @@ not currently handled and is skipped on decode like any other
 unknown id. Adding it is a strict superset change.
 
 Sans-I/O contract: zero I/O imports; registered in
-``tools/check_sans_io.sh`` so the contract is lint-enforced.
+``tests/tools/check_sans_io.sh`` so the contract is lint-enforced.
 
 References:
 - RFC 9000 §18 "Transport Parameter Encoding".

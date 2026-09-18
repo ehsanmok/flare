@@ -64,7 +64,7 @@ flare.http     HTTP/1.1 client + reactor server + Handler / Router
                with _ExperimentalH1LeniencyConfig (future-policy
                knobs; the strict default is the only wire shape
                currently enforced); conformance corpora under
-               conformance/h1/ + conformance/ws/. Template
+               tests/conformance/h1/ + tests/conformance/ws/. Template
                engine with single-level inheritance via {% block %}
                + {% extends %}. RFC 9111 cache primitives --
                CacheControl directive parser, CacheKey + Vary-

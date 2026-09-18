@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/run_sanitizer_tests.sh — flare sanitizer harness.
+# tests/tools/run_sanitizer_tests.sh — flare sanitizer harness.
 #
 # AOT-compiles a curated list of test files with `mojo build
 # --sanitize <kind>` (asan or tsan) and runs the resulting
@@ -13,9 +13,9 @@
 # Driven by `pixi run tests-asan` / `pixi run tests-tsan` from
 # `pixi.toml`. Standalone usage:
 #
-#   tools/run_sanitizer_tests.sh asan
-#   tools/run_sanitizer_tests.sh tsan
-#   tools/run_sanitizer_tests.sh asan tests/runtime/test_iovec.mojo  # single file
+#   tests/tools/run_sanitizer_tests.sh asan
+#   tests/tools/run_sanitizer_tests.sh tsan
+#   tests/tools/run_sanitizer_tests.sh asan tests/runtime/test_iovec.mojo  # single file
 #
 set -euo pipefail
 

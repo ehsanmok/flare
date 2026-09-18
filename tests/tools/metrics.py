@@ -17,7 +17,7 @@ lean on two open-source proxies that work on Mojo's overwhelmingly
   makes those explicit. Real coverage will need to wait until the Mojo
   toolchain emits instrumentation.
 
-Usage: ``python tools/metrics.py [complexity|coverage|all]``  (default: all)
+Usage: ``python tests/tools/metrics.py [complexity|coverage|all]``  (default: all)
 """
 
 import os
@@ -26,7 +26,7 @@ import sys
 
 import lizard
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.join(ROOT, "flare")
 TEST_DIR = os.path.join(ROOT, "tests")
 CCN_WARN = 15  # functions at/above this cyclomatic complexity are flagged

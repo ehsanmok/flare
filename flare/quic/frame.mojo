@@ -49,7 +49,7 @@ Sans-I/O contract
 -----------------
 
 This file holds zero I/O imports. It is registered in
-``tools/check_sans_io.sh`` so the contract is lint-enforced.
+``tests/tools/check_sans_io.sh`` so the contract is lint-enforced.
 
 References
 ----------

@@ -28,7 +28,7 @@ Flags are consumed by the H1 request parser
 through :attr:`flare.http.server.ServerConfig.h1_leniency`. The
 ten request-message flags (every flag except the two chunked-
 extension flags below) flip parser behaviour today; the
-conformance corpus under ``conformance/h1/`` carries one accept
+conformance corpus under ``tests/conformance/h1/`` carries one accept
 + one reject fixture per flag.
 
 The two chunked-extension flags --

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/check_reactor_size.sh -- enforce file-size discipline across the
+# tests/tools/check_reactor_size.sh -- enforce file-size discipline across the
 # library, with a tight bar on the reactor sub-packages and a looser
 # regression bar on the rest.
 #
@@ -39,7 +39,7 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 # Pass A: tight bar on the reactor / server sub-packages.
@@ -135,7 +135,7 @@ if (( total_violations > 0 )); then
     echo "  1. Split the offending file under its threshold (the" >&2
     echo "     preferred fix; restores the v0.8 decomposition gain), or" >&2
     echo "  2. Add the file to the matching allowlist in" >&2
-    echo "     tools/check_reactor_size.sh with a dated" >&2
+    echo "     tests/tools/check_reactor_size.sh with a dated" >&2
     echo "     '# TODO(YYYY-MM-DD ...)' split comment in the source file" >&2
     echo "     (only when a split is blocked, e.g. a Mojo struct that" >&2
     echo "     cannot span files)." >&2

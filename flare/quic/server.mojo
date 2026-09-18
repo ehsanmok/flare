@@ -40,7 +40,7 @@ References:
 # types (QuicServerConfig / QuicConnection / ConnectionIdTable) and pure
 # helpers already moved to ``_server_types`` / ``_server_support``.
 # Further shrinking needs the cold dispatch methods reworked into free
-# functions. Allowlisted in tools/check_reactor_size.sh until then.
+# functions. Allowlisted in tests/tools/check_reactor_size.sh until then.
 
 from std.collections import Dict, List
 from std.collections.span import Span

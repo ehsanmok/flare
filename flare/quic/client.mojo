@@ -70,7 +70,7 @@ References:
 # recovery + 0-RTT EarlyData + migration). Mojo cannot split one struct's
 # methods across files, so the file sits over the 1000-line Pass-B cap.
 # Planned decomposition tracks the same struct-method-split language support
-# as the listener. Allowlisted in tools/check_reactor_size.sh until then.
+# as the listener. Allowlisted in tests/tools/check_reactor_size.sh until then.
 from std.collections import Dict, List, Optional
 from std.memory import UnsafePointer
 from std.collections.span import Span

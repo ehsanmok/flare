@@ -49,7 +49,7 @@ Sans-I/O contract
 
 This file holds zero I/O imports (no ``flare.runtime`` /
 ``flare.io`` / socket / TLS surface). It is registered in
-``tools/check_sans_io.sh`` so the contract is lint-enforced.
+``tests/tools/check_sans_io.sh`` so the contract is lint-enforced.
 """
 
 from flare.http.hpack_huffman import (

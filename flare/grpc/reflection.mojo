@@ -13,7 +13,7 @@ This module ships the wire codec for the request / response messages
 and a :class:`ReflectionService` that answers ``list_services`` from a
 registered service-name list and ``file_by_filename`` /
 ``file_containing_symbol`` from a registered ``FileDescriptorProto``
-registry (the blobs ``tools/proto_gen.py`` emits per ``.proto`` file).
+registry (the blobs ``tests/tools/proto_gen.py`` emits per ``.proto`` file).
 Lookups that miss return ``NOT_FOUND``. As a result ``grpcurl list``,
 ``grpcurl describe``, and reflection-driven calls all work once the
 generated descriptors are registered.

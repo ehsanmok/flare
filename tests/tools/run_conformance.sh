@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/run_conformance.sh -- external protocol conformance harness.
+# tests/tools/run_conformance.sh -- external protocol conformance harness.
 #
 # Wires the three standard third-party conformance suites against a
 # running flare server:
@@ -19,8 +19,8 @@
 # automatically once a runner image ships the binaries.
 #
 # Usage:
-#   tools/run_conformance.sh              # run every provisioned suite
-#   tools/run_conformance.sh h2spec       # run one suite by name
+#   tests/tools/run_conformance.sh              # run every provisioned suite
+#   tests/tools/run_conformance.sh h2spec       # run one suite by name
 #
 # Provisioning (documented host blocker):
 #   h2spec:       https://github.com/summerwind/h2spec/releases
@@ -28,7 +28,7 @@
 #   quic-interop: https://github.com/quic-interop/quic-interop-runner
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 SUITES="${*:-h2spec autobahn quic-interop}"
@@ -109,7 +109,7 @@ run_h2spec() {
 # report's indented section headings.
 _h2spec_verdict() {
   local report="target/conformance/h2spec.txt"
-  local allow="tools/conformance/h2spec-known-fail.txt"
+  local allow="tests/tools/conformance/h2spec-known-fail.txt"
   [ -f "${report}" ] || return 1
 
   local failed
@@ -151,8 +151,8 @@ run_autobahn() {
     SKIP=$((SKIP + 1))
     return 0
   fi
-  if [ ! -f "${REPO_ROOT}/tools/conformance/autobahn.json" ]; then
-    echo "── autobahn: wstest present but tools/conformance/autobahn.json is"
+  if [ ! -f "${REPO_ROOT}/tests/tools/conformance/autobahn.json" ]; then
+    echo "── autobahn: wstest present but tests/tools/conformance/autobahn.json is"
     echo "   missing; cannot run. Skipping."
     SKIP=$((SKIP + 1))
     return 0
@@ -161,7 +161,7 @@ run_autobahn() {
   pixi run mojo -I . examples/basic/websocket_echo.mojo &
   local srv=$!
   sleep 2
-  wstest -m fuzzingclient -s tools/conformance/autobahn.json
+  wstest -m fuzzingclient -s tests/tools/conformance/autobahn.json
   local rc=$?
   kill "${srv}" 2>/dev/null || true
   RAN=$((RAN + 1))

@@ -227,7 +227,7 @@ jobs:
       - name: Run ASan sanitizer suite
         # AOT-builds the curated FFI / streaming / QUIC / TLS test
         # inventory with ``mojo build --sanitize address`` and runs
-        # each (tools/run_sanitizer_tests.sh). The same
+        # each (tests/tools/run_sanitizer_tests.sh). The same
         # runtime-crash retry wrapper the test job uses guards the
         # transient libKGENCompilerRTShared fresh-process segfault.
         run: |
@@ -260,7 +260,7 @@ jobs:
     # h2spec is provisioned below and runs for real. autobahn (wstest)
     # and quic-interop are still not bundled; run_conformance.sh probes
     # for each and skips the leg when absent, so they contribute no
-    # false signal either way (see tools/run_conformance.sh header).
+    # false signal either way (see tests/tools/run_conformance.sh header).
     steps:
       - uses: actions/checkout@v5
       - name: Setup Pixi
@@ -282,7 +282,7 @@ jobs:
       - name: Install h2spec (pinned release)
         run: pixi run install-h2spec
       # Gating. h2spec is at 146/147; the one exception is documented
-      # with its reasoning in tools/conformance/h2spec-known-fail.txt
+      # with its reasoning in tests/tools/conformance/h2spec-known-fail.txt
       # and the harness fails on any case outside that list, so a
       # conformance regression goes red.
       - name: Run provisioned conformance suites

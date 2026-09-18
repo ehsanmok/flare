@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/check_sans_io.sh -- enforce the sans-I/O parser-sublayer contract.
+# tests/tools/check_sans_io.sh -- enforce the sans-I/O parser-sublayer contract.
 #
 # The files listed in ``SANS_IO_FILES`` form the canonical pure-function
 # parser surface re-exported by ``flare.http.proto``. They MUST NOT import
@@ -23,7 +23,7 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 # Files that publish the sans-I/O contract. New sans-I/O modules join
@@ -107,7 +107,7 @@ if [[ $violations -gt 0 ]]; then
     echo "check-sans-io: $violations violation(s) found." >&2
     echo "  Either:" >&2
     echo "  1. Remove the I/O import from the parser file (preferred), or" >&2
-    echo "  2. Remove the file from SANS_IO_FILES in tools/check_sans_io.sh" >&2
+    echo "  2. Remove the file from SANS_IO_FILES in tests/tools/check_sans_io.sh" >&2
     echo "     (signals that the file is no longer pure-function)." >&2
     exit 1
 fi

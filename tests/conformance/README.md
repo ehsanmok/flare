@@ -1,4 +1,4 @@
-# `conformance/` — cross-validation corpora for the sans-I/O sublayer
+# `tests/conformance/` — cross-validation corpora for the sans-I/O sublayer
 
 This directory holds wire-format test corpora that the `flare.http.proto.*`
 sans-I/O sublayer is cross-validated against. The goal is the same one
@@ -29,7 +29,7 @@ both are wrong". `pixi run conformance` covers that half:
 | Suite | Provisioned | What it drives |
 |---|---|---|
 | h2spec (RFC 9113 + 7541) | yes, `pixi run install-h2spec` | the h2c server |
-| autobahn (RFC 6455 + 7692) | no — needs `wstest` and a `tools/conformance/autobahn.json` that does not exist yet | the WsServer |
+| autobahn (RFC 6455 + 7692) | no — needs `wstest` and a `tests/tools/conformance/autobahn.json` that does not exist yet | the WsServer |
 | quic-interop | no — flare has no runner integration yet | the QuicListener |
 
 The in-house fixtures under `h1/` are the bootstrap set: they cover the
@@ -54,7 +54,7 @@ Vendoring policy:
    instead.
 2. **Verbatim copies, no edits.** Fixture data files are mirrored
    bit-exact from upstream. Format conversions (e.g. Python `pytest`
-   parametrize → flat JSON) belong in a `tools/conformance_*.py`
+   parametrize → flat JSON) belong in a `tests/tools/conformance_*.py`
    script run at vendoring time, not at test time. No such script
    exists yet; the first corpus to need one writes it.
 3. **Snapshot the commit hash.** `ORIGIN.md` records the exact upstream
@@ -94,8 +94,8 @@ Each fixture is a JSON file with a flat top-level structure:
 - `expected_*` — fields the parser must produce when `expect == "accept"`.
 
 The conformance runner (`tests/conformance/test_conformance_h1.mojo`)
-loads every `*.json` file under `conformance/h1/`, runs flare's parser
+loads every `*.json` file under `tests/conformance/h1/`, runs flare's parser
 on the hex bytes, and asserts the expected outcome. The WebSocket
 runner (`tests/conformance/test_conformance_ws.mojo`) does the same for
-`conformance/ws/` through `WsFrame.decode_one`, asserting opcode, FIN,
+`tests/conformance/ws/` through `WsFrame.decode_one`, asserting opcode, FIN,
 post-unmask payload and close code on accept and a raise on reject.

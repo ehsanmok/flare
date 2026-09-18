@@ -34,7 +34,7 @@ across ``flare/http/``, ``flare/http2/``, ``flare/runtime/``, tests,
 and the fuzz corpus.
 
 # TODO(2026-08-31, track-h1-dispatch): this module still exceeds the
-# 600-line reactor cap (``tools/check_reactor_size.sh`` allowlists it
+# 600-line reactor cap (``tests/tools/check_reactor_size.sh`` allowlists it
 # for that reason). The natural seam left to extract is
 # :mod:`flare.http._reactor.h1_dispatch`: the parse-and-dispatch step
 # of each ``on_readable_*`` reader (minimal / view / cancel-aware /
@@ -42,7 +42,7 @@ and the fuzz corpus.
 # only its trait binding. Until that lands, every entry added to the
 # allowlist (this module or otherwise) MUST carry a dated TODO and a
 # deadline; the lint hygiene rule in
-# ``tools/check_reactor_size.sh`` enforces the policy.
+# ``tests/tools/check_reactor_size.sh`` enforces the policy.
 """
 
 from std.collections import List, Optional

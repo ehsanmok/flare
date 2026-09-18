@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/install_h2spec.sh
+# tests/tools/install_h2spec.sh
 #
 # Fetch h2spec (RFC 9113 / RFC 7541 server conformance suite) at a
 # pinned release. Mirrors benchmark/scripts/_install_wrk2.sh: the
@@ -7,7 +7,7 @@
 # fixed path, and the version is pinned so a conformance result means
 # the same thing across machines.
 #
-# Output: $H2SPEC_DIR/h2spec. tools/run_conformance.sh looks there
+# Output: $H2SPEC_DIR/h2spec. tests/tools/run_conformance.sh looks there
 # first, then falls back to an h2spec already on PATH.
 #
 # Prebuilt release rather than `go install`: h2spec's module path has
@@ -22,7 +22,7 @@ set -euo pipefail
 # turn a green run red for reasons unrelated to any flare change.
 H2SPEC_VERSION="${H2SPEC_VERSION:-v2.6.0}"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 H2SPEC_DIR="${H2SPEC_DIR:-${REPO_ROOT}/build/h2spec}"
 
 mkdir -p "$H2SPEC_DIR"

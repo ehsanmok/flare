@@ -42,7 +42,7 @@ Example:
 # file sits over the 1000-line Pass-B cap. Planned decomposition: move the
 # free helpers + per-wire dial bodies into ``flare/http/_client/`` once the
 # struct-method-split language support lands. Allowlisted in
-# tools/check_reactor_size.sh until then.
+# tests/tools/check_reactor_size.sh until then.
 from .request import Request, Method
 from .response import Response, Status
 from .headers import HeaderMap

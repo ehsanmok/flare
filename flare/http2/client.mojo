@@ -72,7 +72,7 @@ plumbing) lives here.
 # ``Http2ClientConnection`` struct (frame codec drive + stream state + flow
 # control + HPACK + request/response pump). Mojo cannot split one struct's
 # methods across files, so the file sits over the 1000-line Pass-B cap.
-# Allowlisted in tools/check_reactor_size.sh until then.
+# Allowlisted in tests/tools/check_reactor_size.sh until then.
 from std.collections import Dict, Optional
 
 from .frame import (

@@ -203,4 +203,4 @@ Mirrors existing test file conventions:
 - Exact file layout for the two new backend structs (new files vs.
   folding into `flare/http/_client/download.mojo`) -- guided by
   keeping files under the existing size conventions
-  (`tools/check_reactor_size.sh`).
+  (`tests/tools/check_reactor_size.sh`).

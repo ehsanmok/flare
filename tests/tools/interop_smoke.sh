@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/interop_smoke.sh — talk to flare with a foreign client.
+# tests/tools/interop_smoke.sh — talk to flare with a foreign client.
 #
 # Why this exists: flare's HTTP/2 server spent several releases unable
 # to complete a request from curl, a browser, or h2load, while every
@@ -15,7 +15,7 @@
 # Uses curl (and h2load when present). No wrk, no benchmark harness,
 # a few seconds total, safe to run on a shared box.
 #
-#   bash tools/interop_smoke.sh
+#   bash tests/tools/interop_smoke.sh
 #   pixi run interop-smoke
 #
 # Exit 0 iff every checked path returns the expected status on the
@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 PORT="${INTEROP_PORT:-18690}"

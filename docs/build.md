@@ -69,7 +69,7 @@ pixi run tests-per-file   # the old one-invocation-per-file chain
 ```
 
 `tests/_agg/agg_<area>.mojo` is **generated** by
-[`tools/gen_test_aggregates.py`](../tools/gen_test_aggregates.py)
+[`tests/tools/gen_test_aggregates.py`](../tests/tools/gen_test_aggregates.py)
 and committed. It imports every module-level `def test_*` in
 the area under an alias and registers each one explicitly on
 a `TestSuite`.
@@ -99,7 +99,7 @@ variables, named semaphores, `io_uring` registrations) or are
 runtime-bound rather than compile-bound, so sharing a process
 with their neighbours is either unsound or buys nothing. They
 are listed in `EXCLUDE` in the generator and `STANDALONE` in
-[`tools/run_test_aggregates.sh`](../tools/run_test_aggregates.sh);
+[`tests/tools/run_test_aggregates.sh`](../tests/tools/run_test_aggregates.sh);
 the two lists must agree. Examples under `examples/` are
 programs rather than test functions, so they also stay one
 invocation each -- `pixi run tests` still runs all of them.
@@ -226,7 +226,7 @@ Rules of thumb:
    Catches the move-out-then-drop double-free.
 
 Adding a new FFI-touching test? Append it to the test
-inventory in [`tools/run_sanitizer_tests.sh`](../tools/run_sanitizer_tests.sh)
+inventory in [`tests/tools/run_sanitizer_tests.sh`](../tests/tools/run_sanitizer_tests.sh)
 (the `ASAN_TESTS` array at the top) so `pixi run tests-asan`
 picks it up.
 

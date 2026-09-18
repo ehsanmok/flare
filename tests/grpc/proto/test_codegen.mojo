@@ -1,15 +1,15 @@
-"""Round-trip test for tools/proto_gen.py generated code.
+"""Round-trip test for tests/tools/proto_gen.py generated code.
 
 Run with the generated module's directory on the import path::
 
     mkdir -p build/gen
-    python tools/proto_gen.py tests/grpc/proto/sample.proto \
+    python tests/tools/proto_gen.py tests/grpc/proto/sample.proto \
         -o build/gen/sample_pb.mojo
     mojo -I . -I build/gen tests/grpc/proto/test_codegen.mojo
 
 (the ``test-grpc-codegen`` pixi alias does exactly this). The module
 ``sample_pb`` is generated from ``sample.proto`` by
-``tools/proto_gen.py`` into the gitignored ``build/gen`` so a stale or
+``tests/tools/proto_gen.py`` into the gitignored ``build/gen`` so a stale or
 unformatted fixture never lands in the tree; this test encodes a
 populated message, decodes
 it back, and asserts every field survived -- proving the generator

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/check_no_http_http2_cycle.sh -- enforce the http <-> http2 layering.
+# tests/tools/check_no_http_http2_cycle.sh -- enforce the http <-> http2 layering.
 #
 # The shared handler-facing types -- Request, Response, HeaderMap, Method,
 # Status -- are factored into the leaf ``flare.http.wire`` package so the
@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 # Allowed import prefixes from inside ``flare/http2/**`` and ``flare/http3/**``
