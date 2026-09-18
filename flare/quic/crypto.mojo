@@ -228,7 +228,7 @@ def hkdf_expand_label_empty_context(
 
 
 @fieldwise_init
-struct InitialSecrets(Copyable, Movable):
+struct InitialSecrets(Copyable):
     """Per-direction initial-secret pair derived from the client's
     Destination Connection ID per RFC 9001 §5.2.
 
@@ -304,7 +304,7 @@ struct QuicAead:
     """RFC 8439 ChaCha20-Poly1305 AEAD construction."""
 
 
-trait QuicCrypto(Copyable, Movable):
+trait QuicCrypto(Copyable):
     """Pluggable QUIC v1 AEAD + header-protection backend.
 
     The QUIC server reactor drives one carrier per
@@ -380,7 +380,7 @@ trait QuicCrypto(Copyable, Movable):
 # replaces it once the AEAD FFI wiring lands.
 
 
-struct StubQuicCrypto(Copyable, Movable, QuicCrypto):
+struct StubQuicCrypto(Copyable, QuicCrypto):
     """Typed sentinel that raises ``NotImplemented`` on every
     AEAD operation.
 
@@ -443,7 +443,7 @@ def aead_key_length(aead: Int) raises -> Int:
 
 
 @fieldwise_init
-struct PacketKeys(Copyable, Movable):
+struct PacketKeys(Copyable):
     """Per-direction packet-protection keys derived from a 32-byte
     secret per RFC 9001 §5.1.
 
@@ -656,7 +656,7 @@ def _do_hp_mask(
         )
 
 
-struct OpenSslQuicCrypto(Copyable, Movable, QuicCrypto):
+struct OpenSslQuicCrypto(Copyable, QuicCrypto):
     """Production QUIC v1 AEAD + header-protection backend backed
     by OpenSSL via the ``flare_quic_aead_*`` / ``flare_quic_hp_mask``
     FFI thunks.

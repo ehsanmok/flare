@@ -103,7 +103,7 @@ def _build_post_request(path: String, body: List[UInt8]) raises -> List[UInt8]:
 
 
 @fieldwise_init
-struct _OkHandler(Copyable, Handler, Movable):
+struct _OkHandler(Copyable, Handler):
     """Handler that responds with 200 + a fixed body."""
 
     var body: String
@@ -113,7 +113,7 @@ struct _OkHandler(Copyable, Handler, Movable):
 
 
 @fieldwise_init
-struct _EchoHandler(Copyable, Handler, Movable):
+struct _EchoHandler(Copyable, Handler):
     """Handler that echoes the request body verbatim with a 200."""
 
     def serve(self, req: Request) raises -> Response:
@@ -124,7 +124,7 @@ struct _EchoHandler(Copyable, Handler, Movable):
 
 
 @fieldwise_init
-struct _ListSource(ChunkSource, Copyable, Movable):
+struct _ListSource(ChunkSource, Copyable):
     """Chunk source that yields a fixed list of chunks, then EOS.
 
     Drives the streaming-response tests: each ``next`` returns the

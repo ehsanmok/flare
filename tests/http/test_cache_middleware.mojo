@@ -37,7 +37,7 @@ from flare.http.cache import (
 )
 
 
-struct _CountingHandler(Copyable, Defaultable, Handler, Movable):
+struct _CountingHandler(Copyable, Defaultable, Handler):
     """Handler that increments a per-test counter via a heap
     address (mirrors how ``Metrics[Inner]`` shares state across
     middleware copies). The counter lets each test assert how

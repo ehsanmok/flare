@@ -31,7 +31,7 @@ Public surface:
 from .permessage_deflate import PermessageDeflateConfig
 
 
-struct ExtensionParameter(Copyable, Defaultable, Movable):
+struct ExtensionParameter(Copyable, Defaultable):
     """One ``;``-separated parameter inside an
     :class:`ExtensionOffer`."""
 
@@ -50,7 +50,7 @@ struct ExtensionParameter(Copyable, Defaultable, Movable):
         self.value = value
 
 
-struct ExtensionOffer(Copyable, Defaultable, Movable):
+struct ExtensionOffer(Copyable, Defaultable):
     """One comma-separated extension offer + its parameters."""
 
     var name: String

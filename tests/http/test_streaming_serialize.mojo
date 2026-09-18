@@ -47,7 +47,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct _OneShot(ChunkSource, Copyable, Movable):
+struct _OneShot(ChunkSource, Copyable):
     """Yields a single chunk then None."""
 
     var bytes: List[UInt8]
@@ -61,7 +61,7 @@ struct _OneShot(ChunkSource, Copyable, Movable):
 
 
 @fieldwise_init
-struct _Multi(ChunkSource, Copyable, Movable):
+struct _Multi(ChunkSource, Copyable):
     """Yields ``n`` chunks each containing the bytes ``b'A' + i``."""
 
     var i: Int

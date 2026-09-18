@@ -46,7 +46,7 @@ def _pattern(n: Int) -> List[UInt8]:
 
 
 @fieldwise_init
-struct _Chunks(ChunkSource, Copyable, Movable):
+struct _Chunks(ChunkSource, Copyable):
     var remaining: Int
 
     def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:

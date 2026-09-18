@@ -66,7 +66,7 @@ def test_never_cancel_after_repeated_polls() raises:
 
 
 @fieldwise_init
-struct _SlowHandler(CancelHandler, Copyable, Movable):
+struct _SlowHandler(CancelHandler, Copyable):
     """A cancel-aware handler that polls cancel between fake-DB-call
     steps and short-circuits on the first observed cancellation.
     """
@@ -141,7 +141,7 @@ def test_cell_atomic_reason_roundtrip() raises:
 
 
 @fieldwise_init
-struct _PlainGreeter(Copyable, Defaultable, Handler, Movable):
+struct _PlainGreeter(Copyable, Defaultable, Handler):
     var greeting: String
 
     def __init__(out self):

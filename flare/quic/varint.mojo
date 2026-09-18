@@ -37,7 +37,7 @@ the codec boundary."""
 
 
 @fieldwise_init
-struct Varint(Copyable, Movable):
+struct Varint(Copyable):
     """A decoded QUIC varint together with the number of wire bytes
     that produced it.
 

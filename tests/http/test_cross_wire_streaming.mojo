@@ -51,7 +51,7 @@ def _bytes(s: String) -> List[UInt8]:
 
 
 @fieldwise_init
-struct _ListSource(ChunkSource, Copyable, Movable):
+struct _ListSource(ChunkSource, Copyable):
     """Canonical source: yields a fixed list of chunks, then EOS."""
 
     var chunks: List[List[UInt8]]

@@ -140,7 +140,7 @@ def test_file_descriptor_emitted() raises:
 
 
 @fieldwise_init
-struct _MyGreeter(Copyable, GreeterServer, Movable):
+struct _MyGreeter(Copyable, GreeterServer):
     """Minimal GreeterServer impl for the codegen e2e check."""
 
     var _seed: Int

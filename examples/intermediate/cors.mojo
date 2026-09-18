@@ -25,7 +25,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct ApiHandler(Copyable, Defaultable, Handler, Movable):
+struct ApiHandler(Copyable, Defaultable, Handler):
     """Tiny JSON API; returns a constant payload."""
 
     var _placeholder: UInt8

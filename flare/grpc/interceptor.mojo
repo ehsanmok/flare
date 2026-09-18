@@ -28,7 +28,7 @@ from std.collections.span import Span
 from .server import GrpcCallContext, GrpcUnary, GrpcUnaryReply
 
 
-trait GrpcInterceptor(Copyable, Movable):
+trait GrpcInterceptor(Copyable):
     """A unary server interceptor: a ``before`` gate + an ``after``
     post-processor around a wrapped :trait:`GrpcUnary` handler."""
 
@@ -56,7 +56,7 @@ trait GrpcInterceptor(Copyable, Movable):
 struct Intercepted[
     I: Copyable & GrpcInterceptor & Deinitable,
     H: Copyable & GrpcUnary & Deinitable,
-](Copyable, GrpcUnary, Movable):
+](Copyable, GrpcUnary):
     """Wrap ``handler`` with ``interceptor`` to form a new
     :trait:`GrpcUnary`. Nest to chain multiple interceptors.
 

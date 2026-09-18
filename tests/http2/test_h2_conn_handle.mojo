@@ -37,7 +37,7 @@ from flare.tcp import TcpListener, TcpStream
 
 
 @fieldwise_init
-struct _TaggedSource(ChunkSource, Copyable, Movable):
+struct _TaggedSource(ChunkSource, Copyable):
     """Test chunk source: yields ``count`` chunks of four ``tag`` bytes
     each, then end-of-stream. Distinct tags per concurrent stream let the
     test assert each stream received exactly its own body (no cross-stream

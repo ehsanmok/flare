@@ -65,7 +65,7 @@ from .status import (
 
 
 @fieldwise_init
-struct GrpcServerStreamReply(Copyable, Movable):
+struct GrpcServerStreamReply(Copyable):
     """Typed return value for a server-streaming gRPC handler.
 
     ``messages`` is the ordered list of response bodies the handler
@@ -314,7 +314,7 @@ def _streaming_response_from_reply(
 
 @fieldwise_init
 struct GrpcStreamingService[H: Copyable & GrpcServerStreaming & Deinitable](
-    Copyable, Handler, Movable
+    Copyable, Handler
 ):
     """Adapt a :class:`GrpcServerStreaming` handler into a plain
     :trait:`Handler` so it serves over the unified

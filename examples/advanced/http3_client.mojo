@@ -39,7 +39,7 @@ comptime _FIXDIR: String = "tests/tls/fixtures/rustls-quic-client/"
 
 
 @fieldwise_init
-struct SharedHandler(Copyable, Handler, Movable):
+struct SharedHandler(Copyable, Handler):
     """One handler, reached here over h3 (and over h1/h2/h2c elsewhere)."""
 
     def serve(self, req: Request) raises -> Response:

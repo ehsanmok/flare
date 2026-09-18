@@ -80,7 +80,7 @@ from flare.runtime.io_uring_sqe import (
 
 
 @fieldwise_init
-struct _Listener(Copyable, Movable):
+struct _Listener(Copyable):
     """Pair of (listener fd, kernel-picked port) returned by
     :func:`_make_loopback_listener`."""
 

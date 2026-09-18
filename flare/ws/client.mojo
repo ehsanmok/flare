@@ -44,7 +44,7 @@ comptime _WS_GUID: String = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 comptime _SHA1_LEN: Int = 20
 
 
-struct WsHandshakeError(Copyable, Movable, Writable):
+struct WsHandshakeError(Copyable, Writable):
     """Raised when the WebSocket opening handshake fails."""
 
     var message: String

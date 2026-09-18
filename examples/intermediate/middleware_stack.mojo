@@ -28,7 +28,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct LargePage(Copyable, Defaultable, Handler, Movable):
+struct LargePage(Copyable, Defaultable, Handler):
     """Returns a 4 KiB HTML body so ``Compress`` will engage."""
 
     var _placeholder: UInt8

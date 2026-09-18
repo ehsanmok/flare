@@ -150,7 +150,7 @@ def _drive_client_stream_reply[
 @fieldwise_init
 struct GrpcClientStreamingService[
     H: Copyable & GrpcClientStreaming & Deinitable
-](Copyable, Handler, Movable):
+](Copyable, Handler):
     """Adapt a :class:`GrpcClientStreaming` handler into a
     :trait:`Handler` for the unified H2 reactor. One H2 stream = one
     client-streaming call; the reply is a single buffered LPM frame."""
@@ -241,7 +241,7 @@ def _drive_bidi_reply[
 
 @fieldwise_init
 struct GrpcBidiService[H: Copyable & GrpcBidiStreaming & Deinitable](
-    Copyable, Handler, Movable
+    Copyable, Handler
 ):
     """Adapt a :class:`GrpcBidiStreaming` handler into a
     :trait:`Handler`. Responses stream incrementally via the K1

@@ -61,7 +61,7 @@ def _bind_server() raises -> QuicListener:
 
 
 @fieldwise_init
-struct _EchoOrOk(Copyable, Handler, Movable):
+struct _EchoOrOk(Copyable, Handler):
     """200 handler: echoes a non-empty request body, else 'ok'."""
 
     def serve(self, req: Request) raises -> Response:

@@ -19,7 +19,7 @@ from flare.grpc.status import GRPC_STATUS_OK
 from flare.http.encoding import compress_gzip, decompress_gzip
 
 
-struct BigEchoHandler(Copyable, GrpcUnary, Movable):
+struct BigEchoHandler(Copyable, GrpcUnary):
     """Echoes the request bytes back -- used to drive the response
     compression path with a large, compressible body."""
 

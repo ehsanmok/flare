@@ -75,7 +75,7 @@ trait Auth:
 # ── BasicAuth ─────────────────────────────────────────────────────────────────
 
 
-struct BasicAuth(Auth, Copyable, Movable):
+struct BasicAuth(Auth, Copyable):
     """HTTP Basic authentication (RFC 7617).
 
     Encodes ``username:password`` as base64 and sets the ``Authorization``
@@ -122,7 +122,7 @@ struct BasicAuth(Auth, Copyable, Movable):
 # ── BearerAuth ────────────────────────────────────────────────────────────────
 
 
-struct BearerAuth(Auth, Copyable, Movable):
+struct BearerAuth(Auth, Copyable):
     """HTTP Bearer token authentication (RFC 6750).
 
     Sets ``Authorization: Bearer <token>``.

@@ -26,7 +26,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct _Echo(Copyable, Defaultable, Handler, Movable):
+struct _Echo(Copyable, Defaultable, Handler):
     var _p: UInt8
 
     def __init__(out self):

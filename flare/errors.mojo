@@ -60,8 +60,8 @@ error type" guidance.
   classified errno). Carries ``op`` + ``code`` (errno) +
   ``detail``.
 
-Both types are ``Copyable``, ``Movable``, ``Writable``, and
-shaped per the Mojo typed-errors guidance.
+Both types are ``Copyable`` (which implies ``Movable``) and
+``Writable``, and shaped per the Mojo typed-errors guidance.
 """
 
 from std.collections import Optional
@@ -78,7 +78,7 @@ both the renderer (:meth:`HttpStatusError.write_to`) and the parser
 
 
 @fieldwise_init
-struct ValidationError(Copyable, Movable, Writable):
+struct ValidationError(Copyable, Writable):
     """Generic input / argument-validation failure.
 
     Use when a function rejects an argument value that fails a
@@ -166,7 +166,7 @@ def http_reason_phrase(status: Int) -> String:
 
 
 @fieldwise_init
-struct HttpStatusError(Copyable, Movable, Writable):
+struct HttpStatusError(Copyable, Writable):
     """An error that names the exact HTTP status a handler wants returned.
 
     Raise this from a handler (or anything it calls) to short-circuit
@@ -216,7 +216,7 @@ struct HttpStatusError(Copyable, Movable, Writable):
 
 
 @fieldwise_init
-struct MappedHandlerError(Copyable, Movable):
+struct MappedHandlerError(Copyable):
     """The (status, reason) an uncaught handler error maps to.
 
     Returned by :func:`map_handler_error`; the reactor feeds it to its
@@ -289,7 +289,7 @@ def map_handler_error(error_str: String, expose: Bool) -> MappedHandlerError:
 
 
 @fieldwise_init
-struct IoError(Copyable, Movable, Writable):
+struct IoError(Copyable, Writable):
     """Generic I/O failure not covered by the more specific
     :class:`flare.net.NetworkError` family.
 

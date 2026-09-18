@@ -873,7 +873,7 @@ def prep_async_cancel(
 # ── CQE wrapper + decoder ────────────────────────────────────────────────────
 
 
-struct IoUringCqe(Copyable, ImplicitlyCopyable, Movable):
+struct IoUringCqe(Copyable, ImplicitlyCopyable):
     """A 16-byte ``io_uring_cqe`` wrapper.
 
     Constructed by :func:`decode_cqe_at` from a 16-byte byte

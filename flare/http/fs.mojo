@@ -108,7 +108,7 @@ def _fs_size(lib: OwnedDLHandle, path: String) raises -> Int:
 # buffer and offset-load. The values lie at conservative offsets
 # common to all three on x86_64 / aarch64; on systems where this
 # isn't true the resulting nonsense is benign (file size 0 -> 404).
-struct _StatBuf(Copyable, Defaultable, Movable):
+struct _StatBuf(Copyable, Defaultable):
     var data: List[UInt8]
 
     def __init__(out self):
@@ -223,7 +223,7 @@ def _content_type_from_ext(ext: String) -> String:
 # ── Range parsing ──────────────────────────────────────────────────────
 
 
-struct ByteRange(Copyable, Defaultable, Movable):
+struct ByteRange(Copyable, Defaultable):
     """One ``Range: bytes=start-end`` request.
 
     Fields are 0-indexed inclusive, matching RFC 9110 paragraph
@@ -301,7 +301,7 @@ def parse_range(value: String, file_size: Int) raises -> Optional[ByteRange]:
 # ── FileServer handler ─────────────────────────────────────────────────
 
 
-struct FileServer(Copyable, Defaultable, Handler, Movable):
+struct FileServer(Copyable, Defaultable, Handler):
     """Serve files from ``root`` under the request URL path.
 
     Construction:

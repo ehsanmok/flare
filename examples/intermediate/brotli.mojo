@@ -23,7 +23,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct LargeText(Copyable, Defaultable, Handler, Movable):
+struct LargeText(Copyable, Defaultable, Handler):
     var _placeholder: UInt8
 
     def __init__(out self):

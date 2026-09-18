@@ -122,7 +122,7 @@ def home(req: Request) raises -> Response:
     return ok("home")
 
 @fieldwise_init
-struct GetUser(Copyable, Defaultable, Handler, Movable):
+struct GetUser(Copyable, Defaultable, Handler):
     var id: PathInt["id"]
 
     def __init__(out self):
@@ -150,7 +150,7 @@ Three independent patterns. Pick the ones your workload needs.
 from flare.http import CancelHandler, Cancel, Request, Response, ok
 
 @fieldwise_init
-struct SlowHandler(CancelHandler, Copyable, Movable):
+struct SlowHandler(CancelHandler, Copyable):
     def serve(self, req: Request, cancel: Cancel) raises -> Response:
         for i in range(100):
             if cancel.cancelled():
@@ -195,7 +195,7 @@ from flare.http import Router, Request, Response, Handler, ok, HttpServer
 from flare.net import SocketAddr
 
 @fieldwise_init
-struct Counters(Copyable, Movable):
+struct Counters(Copyable):
     var hits: Int
 
 def home(req: Request) raises -> Response:

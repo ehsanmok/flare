@@ -30,7 +30,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct _StressHandler(Copyable, Defaultable, Handler, Movable):
+struct _StressHandler(Copyable, Defaultable, Handler):
     """A handler with one of every extractor kind so a single fuzz run
     exercises path + query + header + optional variants at once.
     """

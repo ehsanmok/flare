@@ -22,7 +22,7 @@ from flare.net import SocketAddr
 
 
 @fieldwise_init
-struct _CountingEcho(Copyable, Movable, WsHandler):
+struct _CountingEcho(Copyable, WsHandler):
     """Replies ``count=N`` where N is the running message count held on
     the handler (exercises mut-self state through the trait)."""
 

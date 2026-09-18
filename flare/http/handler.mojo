@@ -159,32 +159,32 @@ trait Handler(Deinitable, Movable):
 # ── HandlerExtractor: convenience trait composition ──────────────────────────
 
 
-trait HandlerExtractor(Copyable, Defaultable, Handler, Movable):
+trait HandlerExtractor(Copyable, Defaultable, Handler):
     """Convenience trait composition for typed-extractor handler structs.
 
     .. note::
 
        **Internal adapter.** Not part of the curated public surface;
        import explicitly via ``from flare.http.handler import
-       HandlerExtractor``. Plain ``(Copyable, Defaultable, Handler,
-       Movable)`` is the documented public shape.
+       HandlerExtractor``. Plain ``(Copyable, Defaultable, Handler)``
+       is the documented public shape.
 
-    Equivalent to declaring ``(Copyable, Defaultable, Handler,
-    Movable)`` directly -- no new methods, no new behaviour.
-    Collapses the four-trait conformance line that every
-    ``Extracted[H]``-mounted handler ends up writing into one
-    name.
+    Equivalent to declaring ``(Copyable, Defaultable, Handler)``
+    directly -- no new methods, no new behaviour. Collapses the
+    three-trait conformance line that every ``Extracted[H]``-mounted
+    handler ends up writing into one name.
 
-    The four conformances are required by :class:`Extracted[H]`:
+    The three conformances are required by :class:`Extracted[H]`:
 
     * ``Defaultable`` -- ``Extracted`` default-constructs ``H``
       once per request before walking its fields with the
       reflection step.
     * ``Handler`` -- ``H.serve(req)`` is the actual user code
       that runs after extractor population.
-    * ``Copyable & Movable`` -- the same bound the parametric
-      ``Router.get[H: Handler & Copyable & Movable]`` overload
-      requires for boxed-handler registration.
+    * ``Copyable`` -- the same bound the parametric
+      ``Router.get[H: Handler & Copyable]`` overload requires for
+      boxed-handler registration (``Copyable`` already implies
+      ``Movable``, so it is not spelled out separately).
 
     Use as the trait-conformance line on any handler struct
     intended for ``Extracted[H]`` auto-injection::
@@ -394,7 +394,7 @@ trait CancelHandler(Deinitable, Movable):
         from flare.http import CancelHandler, Cancel, Request, Response, ok
 
         @fieldwise_init
-        struct SlowHandler(CancelHandler, Copyable, Movable):
+        struct SlowHandler(CancelHandler, Copyable):
             def serve(self, req: Request, cancel: Cancel) raises -> Response:
                 for i in range(100):
                     if cancel.cancelled():
@@ -458,7 +458,7 @@ trait ViewHandler(Deinitable, Movable):
         )
 
         @fieldwise_init
-        struct UploadEcho(ViewHandler, Copyable, Movable):
+        struct UploadEcho(ViewHandler, Copyable):
             def serve_view[
                 origin: Origin
             ](self, req: RequestView[origin], cancel: Cancel) raises -> Response:
@@ -497,7 +497,7 @@ trait ViewHandler(Deinitable, Movable):
 
 
 @fieldwise_init
-struct WithViewCancel[H: Handler & Copyable](Copyable, Movable, ViewHandler):
+struct WithViewCancel[H: Handler & Copyable](Copyable, ViewHandler):
     """Adapter that lets a plain ``Handler`` plug into the
     view-aware reactor path.
 
@@ -566,7 +566,7 @@ struct WithViewCancel[H: Handler & Copyable](Copyable, Movable, ViewHandler):
 
 
 @fieldwise_init
-struct WithCancel[H: Handler & Copyable](CancelHandler, Copyable, Movable):
+struct WithCancel[H: Handler & Copyable](CancelHandler, Copyable):
     """Adapter that lets a plain ``Handler`` plug into the
     cancel-aware reactor path.
 
@@ -631,9 +631,7 @@ struct WithCancel[H: Handler & Copyable](CancelHandler, Copyable, Movable):
 
 
 @fieldwise_init
-struct WithRaises[Inner: HandlerInfallible & Copyable](
-    Copyable, Handler, Movable
-):
+struct WithRaises[Inner: HandlerInfallible & Copyable](Copyable, Handler):
     """Adapt a :trait:`HandlerInfallible` so it fits the regular
     :trait:`Handler` constraint.
 

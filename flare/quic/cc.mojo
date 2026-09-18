@@ -69,7 +69,7 @@ will conclude the delay has risen and exit slow start early."""
 
 
 @fieldwise_init
-struct CcChoice(Copyable, Movable):
+struct CcChoice(Copyable):
     """Which congestion controller a connection uses.
 
     ``CcChoice.reno()`` / ``CcChoice.cubic()`` are the two values; the
@@ -101,7 +101,7 @@ struct CcChoice(Copyable, Movable):
 # -- Controller contract ------------------------------------------------------
 
 
-trait CongestionController(Copyable, Movable):
+trait CongestionController(Copyable):
     """The window-management contract the QUIC send path consults.
 
     A controller owns the congestion window (in bytes) and updates it on
@@ -132,7 +132,7 @@ trait CongestionController(Copyable, Movable):
 # -- Reno ---------------------------------------------------------------------
 
 
-struct RenoController(CongestionController, Copyable, Movable):
+struct RenoController(CongestionController, Copyable):
     """RFC 9002 section 7.3 NewReno: slow start until ``cwnd`` reaches
     ``ssthresh``, then additive-increase / multiplicative-decrease.
     """
@@ -180,7 +180,7 @@ struct RenoController(CongestionController, Copyable, Movable):
 # -- CUBIC (HyStart++) --------------------------------------------------------
 
 
-struct CubicController(CongestionController, Copyable, Movable):
+struct CubicController(CongestionController, Copyable):
     """RFC 9438 CUBIC with the RFC 9406 HyStart++ slow-start exit.
 
     In slow start the window grows exponentially (like Reno) but

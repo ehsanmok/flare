@@ -46,7 +46,7 @@ comptime GRPC_STATUS_UNAUTHENTICATED: Int = 16
 
 
 @fieldwise_init
-struct GrpcStatus(Copyable, Movable):
+struct GrpcStatus(Copyable):
     """An RPC outcome: numeric code + optional human message + optional binary detail.
 
     Status codes are stable across implementations -- a Mojo

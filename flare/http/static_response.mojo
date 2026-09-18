@@ -50,7 +50,7 @@ from std.memory import unsafe_memcpy
 from .headers import HeaderMap
 
 
-struct StaticResponse(Copyable, Movable):
+struct StaticResponse(Copyable):
     """A pair of pre-encoded HTTP/1.1 response buffers.
 
     ``keepalive_bytes`` is emitted when the connection will stay open

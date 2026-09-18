@@ -23,7 +23,7 @@ from std.collections import List
 
 
 @fieldwise_init
-struct OpenApiInfo(Copyable, Movable):
+struct OpenApiInfo(Copyable):
     """Top-level ``info`` object."""
 
     var title: String
@@ -32,7 +32,7 @@ struct OpenApiInfo(Copyable, Movable):
 
 
 @fieldwise_init
-struct OpenApiParameter(Copyable, Movable):
+struct OpenApiParameter(Copyable):
     """A single parameter (path / query / header)."""
 
     var name: String
@@ -42,7 +42,7 @@ struct OpenApiParameter(Copyable, Movable):
 
 
 @fieldwise_init
-struct OpenApiResponse(Copyable, Movable):
+struct OpenApiResponse(Copyable):
     """A single response variant."""
 
     var status: String  # "200", "default", ...
@@ -51,7 +51,7 @@ struct OpenApiResponse(Copyable, Movable):
 
 
 @fieldwise_init
-struct OpenApiOperation(Copyable, Movable):
+struct OpenApiOperation(Copyable):
     """A single ``<method> <path>`` operation."""
 
     var method: String  # "get", "post", ...
@@ -62,7 +62,7 @@ struct OpenApiOperation(Copyable, Movable):
 
 
 @fieldwise_init
-struct OpenApiPath(Copyable, Movable):
+struct OpenApiPath(Copyable):
     """All operations registered under one URI template."""
 
     var template: String
@@ -70,7 +70,7 @@ struct OpenApiPath(Copyable, Movable):
 
 
 @fieldwise_init
-struct OpenApiSpec(Copyable, Movable):
+struct OpenApiSpec(Copyable):
     """Root OpenAPI 3.1 document."""
 
     var info: OpenApiInfo

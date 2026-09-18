@@ -65,7 +65,7 @@ from .server import not_found
 # ── Internal path compilation ────────────────────────────────────────────────
 
 
-struct _Segment(Copyable, Movable):
+struct _Segment(Copyable):
     """A single compiled path segment.
 
     ``kind`` is 0 for literal, 1 for parameter (``":name"``), 2 for
@@ -172,7 +172,7 @@ heap-allocated opaque pointer with monomorphised serve / destroy
 thunks (see ``_StructHandler``)."""
 
 
-struct _Route(Copyable, Movable):
+struct _Route(Copyable):
     """Compiled pattern + method + handler index into the router's
     handler storage.
     """
@@ -196,7 +196,7 @@ struct _Route(Copyable, Movable):
         self.handler_idx = handler_idx
 
 
-struct _Mount(Copyable, Movable):
+struct _Mount(Copyable):
     """A mounted sub-router: a literal path prefix plus an index into
     the shared struct-handler registry where the boxed
     ``_MountedRouter`` wrapper lives.
@@ -336,13 +336,13 @@ struct _StructHandlerRegistry(Movable):
 # ── Router ───────────────────────────────────────────────────────────────────
 
 
-struct Router(Copyable, Defaultable, Handler, Movable):
+struct Router(Copyable, Defaultable, Handler):
     """HTTP router with method dispatch, path parameters, and nesting.
 
     Accepts both plain ``def(Request) raises -> Response`` functions
     (wrapped internally in ``FnHandler``) **and** arbitrary
-    ``H: Handler & Copyable & Movable`` structs (boxed via
-    ``_StructHandler`` with monomorphised serve / destroy thunks).
+    ``H: Handler & Copyable`` structs (boxed via ``_StructHandler``
+    with monomorphised serve / destroy thunks).
     Use the latter to register
     ``Extracted[H]()``, app-state-bearing handlers, middleware
     wrappers, and any other stateful Handler.
@@ -516,7 +516,7 @@ struct Router(Copyable, Defaultable, Handler, Movable):
 
         Args:
             path: Route pattern (e.g. ``"/users/:id"``).
-            handler: A ``Handler & Copyable & Movable`` instance;
+            handler: A ``Handler & Copyable`` instance;
                      ownership transfers into the Router (the
                      Router owns the heap allocation and frees it
                      in its destructor).
@@ -773,7 +773,7 @@ struct Router(Copyable, Defaultable, Handler, Movable):
 # ── Mounted sub-router wrapper ───────────────────────────────────────────────
 
 
-struct _MountedRouter(Copyable, Handler, Movable):
+struct _MountedRouter(Copyable, Handler):
     """Boxed wrapper that strips a mount prefix and forwards to a
     nested ``Router``.
 

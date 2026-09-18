@@ -14,7 +14,7 @@ from std.ffi import external_call, c_int, c_uint, c_char, CStringSlice
 from ._libc import AF_INET, AF_INET6, _inet_pton
 
 
-struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
+struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
     """An IP address: either IPv4 or IPv6.
 
     The address is stored as a validated string produced by ``inet_ntop``
@@ -326,7 +326,7 @@ def _find_char_from(s: String, ch: UInt8, start: Int) -> Int:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
+struct SocketAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
     """A socket address: an IP address combined with a port number.
 
     Fields:

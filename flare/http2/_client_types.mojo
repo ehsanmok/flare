@@ -80,7 +80,7 @@ list. Emitted only when ``> 0``."""
 
 
 @fieldwise_init
-struct Http2ClientConfig(Copyable, Defaultable, Movable):
+struct Http2ClientConfig(Copyable, Defaultable):
     """Client-advertised SETTINGS for an :class:`Http2ClientConnection`.
 
     Symmetric counterpart to

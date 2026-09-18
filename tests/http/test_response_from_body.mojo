@@ -23,7 +23,7 @@ from flare.http import (
 )
 
 
-struct _CountSource(ChunkSource, Copyable, Movable):
+struct _CountSource(ChunkSource, Copyable):
     """Yields ``n`` single-byte ``x`` chunks then end-of-stream."""
 
     var n: Int

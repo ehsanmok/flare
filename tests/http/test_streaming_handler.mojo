@@ -43,7 +43,7 @@ struct _CountSource(ChunkSource, Movable):
 
 
 @fieldwise_init
-struct _StreamGreeter(Copyable, Handler, Movable):
+struct _StreamGreeter(Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         var resp = stream_response[_CountSource](_CountSource(3))
         resp.headers.set("Content-Type", "text/plain")

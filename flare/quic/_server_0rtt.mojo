@@ -49,7 +49,7 @@ replay and rejected (it cannot be distinguished from one we already
 forgot)."""
 
 
-struct EarlyDataReplayGuard(Copyable, Movable):
+struct EarlyDataReplayGuard(Copyable):
     """Per-connection 0-RTT admission control: anti-replay window +
     byte budget.
 

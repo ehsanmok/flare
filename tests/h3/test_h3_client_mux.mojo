@@ -59,7 +59,7 @@ def _bind_server() raises -> QuicListener:
 
 
 @fieldwise_init
-struct _EchoBody(Copyable, Handler, Movable):
+struct _EchoBody(Copyable, Handler):
     """200 handler that echoes the request body verbatim."""
 
     def serve(self, req: Request) raises -> Response:

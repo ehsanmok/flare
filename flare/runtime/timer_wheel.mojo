@@ -39,7 +39,7 @@ comptime _WHEEL_SLOTS: Int = 512
 comptime _WHEEL_MASK: Int = 511
 
 
-struct _TimerEntry(Copyable, ImplicitlyCopyable, Movable):
+struct _TimerEntry(Copyable, ImplicitlyCopyable):
     """One timer bookkeeping entry.
 
     Stored in ``TimerWheel._entries`` (dict by id) and referenced by ID

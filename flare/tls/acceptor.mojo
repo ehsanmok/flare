@@ -85,7 +85,7 @@ def _set_fd_recv_send_timeout(fd: Int, ms: Int):
 # ── Server-side errors ─────────────────────────────────────────────────────
 
 
-struct TlsServerError(Copyable, Movable, Writable):
+struct TlsServerError(Copyable, Writable):
     """Generic server-side TLS failure (handshake, cert load, etc.).
 
     ``message`` describes the failure in human-readable form;
@@ -110,7 +110,7 @@ struct TlsServerError(Copyable, Movable, Writable):
         )
 
 
-struct TlsServerNotImplemented(Copyable, Movable, Writable):
+struct TlsServerNotImplemented(Copyable, Writable):
     """Marker raised to signal that the reactor-side handshake
     state machine is not available. Distinct type so callers can
     match on it for graceful degradation and fall back to the
@@ -132,7 +132,7 @@ struct TlsServerNotImplemented(Copyable, Movable, Writable):
 # ── TlsServerConfig ────────────────────────────────────────────────────────
 
 
-struct TlsServerConfig(Copyable, Movable):
+struct TlsServerConfig(Copyable):
     """Server-side TLS policy.
 
     Fields:
@@ -245,7 +245,7 @@ comptime TLS_PROTOCOL_TLS13: Int = 0x0304
 # ── TlsInfo ────────────────────────────────────────────────────────────────
 
 
-struct TlsInfo(Copyable, Movable):
+struct TlsInfo(Copyable):
     """Per-connection TLS metadata returned by
     :meth:`TlsAcceptor.handshake_fd`.
 

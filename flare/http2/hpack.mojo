@@ -43,7 +43,7 @@ from flare.http.hpack_huffman import (
 # ── Integer codec (§5.1) ─────────────────────────────────────────────────
 
 
-struct StringPair(Copyable, Defaultable, Movable):
+struct StringPair(Copyable, Defaultable):
     """Tuple of (string, new_offset)."""
 
     var value: String
@@ -58,7 +58,7 @@ struct StringPair(Copyable, Defaultable, Movable):
         self.offset = offset
 
 
-struct IntPair(Copyable, Defaultable, Movable):
+struct IntPair(Copyable, Defaultable):
     """Tuple of (value, new_offset) used by :func:`decode_integer`."""
 
     var value: Int
@@ -133,7 +133,7 @@ def encode_integer(
 # ── HpackHeader ─────────────────────────────────────────────────────────
 
 
-struct HpackHeader(Copyable, Defaultable, Movable):
+struct HpackHeader(Copyable, Defaultable):
     """A decoded ``(name, value)`` header pair."""
 
     var name: String
@@ -224,7 +224,7 @@ comptime STATIC_TABLE_LEN = 61
 # ── HpackDecoder ─────────────────────────────────────────────────────────
 
 
-struct HpackDecoder(Copyable, Defaultable, Movable):
+struct HpackDecoder(Copyable, Defaultable):
     """Stateful HPACK decoder.
 
     A decoder must be reused across all HEADERS frames on a single
@@ -398,7 +398,7 @@ struct HpackDecoder(Copyable, Defaultable, Movable):
 # ── HpackEncoder ─────────────────────────────────────────────────────────
 
 
-struct HpackEncoder(Copyable, Defaultable, Movable):
+struct HpackEncoder(Copyable, Defaultable):
     """Stateless-ish HPACK encoder.
 
     Every header is emitted as a Literal-without-Indexing field

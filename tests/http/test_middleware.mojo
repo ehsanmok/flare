@@ -34,7 +34,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct _Echo(Copyable, Defaultable, Handler, Movable):
+struct _Echo(Copyable, Defaultable, Handler):
     var status: Int
     var body: String
 
@@ -51,7 +51,7 @@ struct _Echo(Copyable, Defaultable, Handler, Movable):
 
 
 @fieldwise_init
-struct _BigEcho(Copyable, Defaultable, Handler, Movable):
+struct _BigEcho(Copyable, Defaultable, Handler):
     """Returns a 4 KiB body so Compress will actually compress it."""
 
     var _placeholder: UInt8
@@ -71,7 +71,7 @@ struct _BigEcho(Copyable, Defaultable, Handler, Movable):
 
 
 @fieldwise_init
-struct _Boom(Copyable, Defaultable, Handler, Movable):
+struct _Boom(Copyable, Defaultable, Handler):
     var _placeholder: UInt8
 
     def __init__(out self):
@@ -82,7 +82,7 @@ struct _Boom(Copyable, Defaultable, Handler, Movable):
 
 
 @fieldwise_init
-struct _PreEncoded(Copyable, Defaultable, Handler, Movable):
+struct _PreEncoded(Copyable, Defaultable, Handler):
     """Returns a 2 KiB body already tagged ``Content-Encoding: br``."""
 
     var _placeholder: UInt8

@@ -46,7 +46,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct _Counter(ChunkSource, Copyable, Movable):
+struct _Counter(ChunkSource, Copyable):
     """Yields N single-byte chunks ('x' * 1) then ``None``."""
 
     var n: Int

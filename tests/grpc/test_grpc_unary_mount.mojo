@@ -37,7 +37,7 @@ from flare.utils import usleep
 
 
 @fieldwise_init
-struct EchoUnary(Copyable, GrpcUnary, Movable):
+struct EchoUnary(Copyable, GrpcUnary):
     """Echoes the request payload back as the reply."""
 
     var fail: Bool
@@ -58,7 +58,7 @@ struct EchoUnary(Copyable, GrpcUnary, Movable):
 
 
 @fieldwise_init
-struct SlowUnary(Copyable, GrpcUnary, Movable):
+struct SlowUnary(Copyable, GrpcUnary):
     """Sleeps past any tight deadline before replying."""
 
     def serve_unary(

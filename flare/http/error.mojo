@@ -20,7 +20,7 @@ Example:
 from std.format import Writable, Writer
 
 
-struct HttpError(Copyable, Movable, Writable):
+struct HttpError(Copyable, Writable):
     """Raised by ``Response.raise_for_status()`` on non-2xx responses.
 
     Fields:
@@ -63,7 +63,7 @@ struct HttpError(Copyable, Movable, Writable):
             writer.write(" (", self.url, ")")
 
 
-struct TooManyRedirects(Copyable, Movable, Writable):
+struct TooManyRedirects(Copyable, Writable):
     """Raised when a redirect chain exceeds the configured maximum.
 
     Fields:

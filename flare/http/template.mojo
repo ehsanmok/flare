@@ -91,9 +91,7 @@ from .request import Request
 
 
 @fieldwise_init
-struct TemplateError(
-    Copyable, Equatable, ImplicitlyCopyable, Movable, Writable
-):
+struct TemplateError(Copyable, Equatable, ImplicitlyCopyable, Writable):
     """Typed error raised by :func:`Template.compile` /
     :func:`Template.render`.
 
@@ -246,7 +244,7 @@ child did not override the block."""
 
 
 @fieldwise_init
-struct TemplateNode(Copyable, Deinitable, Movable):
+struct TemplateNode(Copyable, Deinitable):
     """Single node in the parsed template tree.
 
     ``kind`` is one of the ``_NODE_*`` constants above. The other
@@ -286,7 +284,7 @@ struct TemplateNode(Copyable, Deinitable, Movable):
 
 
 @fieldwise_init
-struct TemplateContext(Copyable, Defaultable, Movable):
+struct TemplateContext(Copyable, Defaultable):
     """Variable bag for :func:`Template.render`.
 
     Two flat maps:
@@ -847,7 +845,7 @@ def _truthy(ctx: TemplateContext, name: String) raises TemplateError -> Bool:
 
 
 @fieldwise_init
-struct Template(Copyable, Movable):
+struct Template(Copyable):
     """Compiled template ready to render against a
     :class:`TemplateContext`.
 

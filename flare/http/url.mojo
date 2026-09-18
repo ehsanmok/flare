@@ -20,7 +20,7 @@ Example:
 from std.format import Writable, Writer
 
 
-struct UrlParseError(Copyable, Movable, Writable):
+struct UrlParseError(Copyable, Writable):
     """Raised when a URL string cannot be parsed."""
 
     var message: String

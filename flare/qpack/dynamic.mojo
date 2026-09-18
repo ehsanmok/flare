@@ -72,7 +72,7 @@ def entry_size(h: QpackHeader) -> UInt64:
 # -- Dynamic table ------------------------------------------------------------
 
 
-struct QpackDynamicTable(Copyable, Movable):
+struct QpackDynamicTable(Copyable):
     """Insert-ordered, capacity-bounded dynamic table (RFC 9204 3.2).
 
     ``entries[0]`` is the oldest live entry. ``dropped`` counts entries
@@ -339,7 +339,7 @@ def encode_insert_count_increment(mut out: List[UInt8], increment: Int):
 
 
 @fieldwise_init
-struct DecoderInstruction(Copyable, Movable):
+struct DecoderInstruction(Copyable):
     """A parsed decoder-stream instruction: ``kind`` is one of the
     ``DEC_INSTR_*`` constants, ``value`` is the stream id or increment,
     ``offset`` is the cursor past the instruction."""
@@ -531,7 +531,7 @@ def decode_field_section_dynamic(
 # -- Owners -------------------------------------------------------------------
 
 
-struct QpackDecoder(Copyable, Movable):
+struct QpackDecoder(Copyable):
     """Owns the inbound dynamic table + the Insert Count Increment owed
     back to the peer on the decoder stream."""
 
@@ -563,7 +563,7 @@ struct QpackDecoder(Copyable, Movable):
         return decode_field_section_dynamic(buf, self.table)
 
 
-struct QpackEncoder(Copyable, Movable):
+struct QpackEncoder(Copyable):
     """Owns the outbound dynamic table; ``insert`` appends an
     encoder-stream instruction and updates the local table mirror."""
 

@@ -208,7 +208,7 @@ def _alloc_store_or_zero_move[
 struct Cache[
     Inner: Handler & Copyable & Defaultable,
     S: CacheStore & Deinitable & Movable,
-](Copyable, Defaultable, Handler, Movable):
+](Copyable, Defaultable, Handler):
     """RFC 9111 HTTP cache middleware.
 
     The middleware composes on top of any :class:`CacheStore`

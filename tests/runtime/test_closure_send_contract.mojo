@@ -12,7 +12,7 @@ here:
 1. ``def(...) raises thin -> ...`` — top-level / nested functions
    with no captures. Materialise as runtime values; bind into
    ``def(...) raises thin -> ...`` and ``FnHandler`` slots.
-2. ``H: Handler & Copyable & Movable`` structs — first-class
+2. ``H: Handler & Copyable`` structs — first-class
    handler shape; compose by struct wrapping
    (``Logger[Inner]`` / ``WithCancel[H]`` / ...).
 3. ``FnHandlerCT[F]`` with ``F: def(Request) raises thin -> Response``
@@ -82,7 +82,7 @@ def test_shape_thin_top_level_via_fnhandler_ct() raises:
 
 
 @fieldwise_init
-struct _ShapeHandlerStruct(Copyable, Handler, Movable):
+struct _ShapeHandlerStruct(Copyable, Handler):
     """A ``Handler`` struct that closes over per-handler state via
     fields. The canonical shape for handlers that need to capture
     state — replaces what would have been an inline closure with

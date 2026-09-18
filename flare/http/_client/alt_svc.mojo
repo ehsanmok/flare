@@ -68,7 +68,7 @@ def monotonic_now_s() -> UInt64:
 
 
 @fieldwise_init
-struct AltSvcEntry(Copyable, Movable):
+struct AltSvcEntry(Copyable):
     """A single parsed ``Alt-Svc`` advertisement.
 
     ``protocol`` is the ALPN id (``"h3"``, ``"h2"``, ``"h3-29"``,
@@ -87,7 +87,7 @@ struct AltSvcEntry(Copyable, Movable):
 
 
 @fieldwise_init
-struct AltSvcParse(Copyable, Movable):
+struct AltSvcParse(Copyable):
     """The result of parsing one ``Alt-Svc`` header value.
 
     ``cleared`` is True when the header was the literal ``clear``
@@ -185,7 +185,7 @@ def _unquote(s: String) -> String:
 
 
 @fieldwise_init
-struct _CachedH3(Copyable, Movable):
+struct _CachedH3(Copyable):
     """A cached h3 endpoint with an absolute expiry timestamp."""
 
     var host: String
@@ -193,7 +193,7 @@ struct _CachedH3(Copyable, Movable):
     var expires_at: UInt64
 
 
-struct AltSvcCache(Copyable, Movable):
+struct AltSvcCache(Copyable):
     """Per-origin cache of advertised h3 endpoints.
 
     Keyed by the origin ``host:port`` (the authority the response
@@ -271,7 +271,7 @@ struct _AltSvcState(Movable):
     var cache: AltSvcCache
 
 
-struct AltSvcStore(Copyable, Movable):
+struct AltSvcStore(Copyable):
     """Pointer-backed, interior-mutable ``Alt-Svc`` cache handle.
 
     Mirrors :class:`flare.http.client_pool.ClientPool`: the struct is

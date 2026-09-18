@@ -68,7 +68,6 @@ struct HuffmanError(
     Copyable,
     Equatable,
     ImplicitlyCopyable,
-    Movable,
     Writable,
 ):
     """RFC 7541 §5.2 / §C-conformant decode failures.

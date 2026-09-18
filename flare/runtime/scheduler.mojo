@@ -109,7 +109,7 @@ from ._worker import _WorkerCtx, _worker_entry
 
 
 @fieldwise_init
-struct ShutdownReport(Copyable, ImplicitlyCopyable, Movable):
+struct ShutdownReport(Copyable, ImplicitlyCopyable):
     """Per-worker drain summary returned by :meth:`Scheduler.drain`.
 
     Originally defined under ``flare.http.server`` and imported back

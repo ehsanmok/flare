@@ -33,7 +33,7 @@ def test_fork_server_bare_function_overload() raises:
 
 
 @fieldwise_init
-struct _StaticHandler(Copyable, Handler, Movable):
+struct _StaticHandler(Copyable, Handler):
     """Tiny Copyable Handler struct for the parametric-overload test."""
 
     var greeting: String

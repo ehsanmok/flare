@@ -23,7 +23,7 @@ from flare.http.server import ok
 # independent.
 
 
-struct AlwaysFiveHundredHandler(Copyable, Defaultable, Handler, Movable):
+struct AlwaysFiveHundredHandler(Copyable, Defaultable, Handler):
     """Always returns a 500; bumps a shared counter every call."""
 
     var calls_ptr: Int  # raw address; bitcast to UnsafePointer at use
@@ -43,7 +43,7 @@ struct AlwaysFiveHundredHandler(Copyable, Defaultable, Handler, Movable):
         return Response(status=500, reason=String("Internal Server Error"))
 
 
-struct AlwaysOkHandler(Copyable, Defaultable, Handler, Movable):
+struct AlwaysOkHandler(Copyable, Defaultable, Handler):
     """Returns a fixed 200 OK response."""
 
     def __init__(out self):
@@ -53,7 +53,7 @@ struct AlwaysOkHandler(Copyable, Defaultable, Handler, Movable):
         return ok(String("ok"))
 
 
-struct EventuallyOkHandler(Copyable, Defaultable, Handler, Movable):
+struct EventuallyOkHandler(Copyable, Defaultable, Handler):
     """Returns 503 for the first ``fail_count`` calls, then 200."""
 
     var counter_ptr: Int

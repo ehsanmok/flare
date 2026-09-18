@@ -28,7 +28,7 @@ comptime WsHandlerFn = def(mut WsConnection) raises thin -> None
 ``WsServer`` plugs into ``HttpServer.serve_ws_upgrade`` unchanged."""
 
 
-struct ServerConfig(Copyable, Movable):
+struct ServerConfig(Copyable):
     """Configuration for the HTTP server.
 
     Fields:

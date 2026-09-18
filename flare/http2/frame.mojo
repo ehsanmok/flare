@@ -43,7 +43,7 @@ comptime H2_MAX_FRAME_SIZE: Int = 16777215
 """24-bit length field upper bound."""
 
 
-struct FrameType(Copyable, Defaultable, Movable):
+struct FrameType(Copyable, Defaultable):
     """RFC 9113 §6 frame type codes (Table 1)."""
 
     var value: UInt8
@@ -118,7 +118,7 @@ struct FrameType(Copyable, Defaultable, Movable):
         return "UNKNOWN"
 
 
-struct FrameFlags(Copyable, Defaultable, Movable):
+struct FrameFlags(Copyable, Defaultable):
     """RFC 9113 §6 per-type flag bits."""
 
     var bits: UInt8
@@ -156,7 +156,7 @@ struct FrameFlags(Copyable, Defaultable, Movable):
 # ── FrameHeader ─────────────────────────────────────────────────────────
 
 
-struct FrameHeader(Copyable, Defaultable, Movable):
+struct FrameHeader(Copyable, Defaultable):
     """The 9-octet HTTP/2 frame header (RFC 9113 §4.1).
 
     Stream id is unsigned 31-bit. The reserved high bit is masked
@@ -178,7 +178,7 @@ struct FrameHeader(Copyable, Defaultable, Movable):
 # ── Frame ──────────────────────────────────────────────────────────────
 
 
-struct Frame(Copyable, Defaultable, Movable):
+struct Frame(Copyable, Defaultable):
     """A complete frame: header + owned payload bytes.
 
     The payload is verbatim from the wire — it has *not* been

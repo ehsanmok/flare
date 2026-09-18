@@ -103,7 +103,7 @@ def encode_timer_token(kind: Int, slot: Int) raises -> UInt64:
 
 
 @fieldwise_init
-struct DecodedTimerToken(Copyable, Movable):
+struct DecodedTimerToken(Copyable):
     """``(kind, slot)`` pair returned by :func:`decode_timer_token`.
 
     Kept as a named struct so callers can destructure cleanly and

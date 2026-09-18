@@ -51,7 +51,7 @@ def _load_pem(path: String) raises -> String:
 
 
 @fieldwise_init
-struct _PlaintextHandler(Copyable, Handler, Movable):
+struct _PlaintextHandler(Copyable, Handler):
     """13-byte ``"Hello, World!"`` responder -- matches the
     Rust pack's ``/plaintext`` route shape exactly so the bench
     comparison is honest (no asymmetric response sizes).

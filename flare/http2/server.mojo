@@ -96,7 +96,7 @@ comptime _H2_DEFAULT_HEADER_TABLE_SIZE: Int = 4096
 
 
 @fieldwise_init
-struct Http2Config(Copyable, Defaultable, Movable):
+struct Http2Config(Copyable, Defaultable):
     """Tunable HTTP/2 SETTINGS for an :class:`Http2Connection`.
 
     All five fields map 1:1 to RFC 9113 §6.5.2 SETTINGS identifiers

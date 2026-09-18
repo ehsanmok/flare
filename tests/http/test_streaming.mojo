@@ -48,7 +48,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct _Counter(ChunkSource, Copyable, Movable):
+struct _Counter(ChunkSource, Copyable):
     """Yields ``"chunk-0"``, ``"chunk-1"``, ..., ``"chunk-(N-1)"``
     then ends. ``cancel.cancelled()`` short-circuits between
     chunks."""
@@ -70,13 +70,13 @@ struct _Counter(ChunkSource, Copyable, Movable):
 
 
 @fieldwise_init
-struct _Empty(ChunkSource, Copyable, Movable):
+struct _Empty(ChunkSource, Copyable):
     def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:
         return Optional[List[UInt8]]()
 
 
 @fieldwise_init
-struct _CancelAfter(ChunkSource, Copyable, Movable):
+struct _CancelAfter(ChunkSource, Copyable):
     """Yields a few chunks, then expects the test to flip Cancel
     so the source ends mid-stream."""
 

@@ -105,7 +105,7 @@ def udp_batch_supported() -> Bool:
     return CompilationTarget.is_linux()
 
 
-struct UdpBatchUnsupported(Copyable, Movable, Writable):
+struct UdpBatchUnsupported(Copyable, Writable):
     """Raised when the running kernel lacks ``recvmmsg`` / ``sendmmsg``
     (``ENOSYS``). The caller falls back to per-datagram I/O."""
 

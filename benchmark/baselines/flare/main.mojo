@@ -55,7 +55,7 @@ def _payload(n: Int) -> List[UInt8]:
 
 
 @fieldwise_init
-struct _FixedChunks(ChunkSource, Copyable, Movable):
+struct _FixedChunks(ChunkSource, Copyable):
     """Emits a fixed number of equal chunks, then end-of-stream."""
 
     var remaining: Int

@@ -153,7 +153,7 @@ def _parse_grpc_timeout(value: String) raises -> UInt64:
 
 
 @fieldwise_init
-struct GrpcRequestHeaders(Copyable, Movable):
+struct GrpcRequestHeaders(Copyable):
     """Typed carrier for the H2 request-HEADERS field set the gRPC
     adapter consumes.
 
@@ -186,7 +186,7 @@ struct GrpcRequestHeaders(Copyable, Movable):
 
 
 @fieldwise_init
-struct GrpcCallContext(Copyable, Movable):
+struct GrpcCallContext(Copyable):
     """View of the per-call HTTP/2 request state visible to the
     application handler.
 
@@ -208,7 +208,7 @@ struct GrpcCallContext(Copyable, Movable):
 
 
 @fieldwise_init
-struct GrpcUnaryReply(Copyable, Movable):
+struct GrpcUnaryReply(Copyable):
     """Typed return value for a unary gRPC handler.
 
     Replaces the prior ``Tuple[List[UInt8], GrpcStatus, GrpcMetadata]``
@@ -285,7 +285,7 @@ trait GrpcUnary(Movable):
 
 
 @fieldwise_init
-struct GrpcCallOutcome(Copyable, Movable):
+struct GrpcCallOutcome(Copyable):
     """Output of one full unary call -- the bytes the H2 driver
     queues onto the response stream.
 
@@ -739,9 +739,7 @@ def _response_from_outcome(var outcome: GrpcCallOutcome) raises -> Response:
 
 
 @fieldwise_init
-struct GrpcService[H: Copyable & GrpcUnary & Deinitable](
-    Copyable, Handler, Movable
-):
+struct GrpcService[H: Copyable & GrpcUnary & Deinitable](Copyable, Handler):
     """Adapt a :class:`GrpcUnary` handler into a plain :trait:`Handler`
     so it serves over the unified :class:`flare.http.HttpServer` H2
     reactor path -- no bespoke per-RPC glue.

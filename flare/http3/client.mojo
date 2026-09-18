@@ -78,7 +78,7 @@ def is_idempotent_method(method: String) -> Bool:
     )
 
 
-struct Http3ZeroRttOutcome(Copyable, Movable):
+struct Http3ZeroRttOutcome(Copyable):
     """Result of :meth:`Http3ClientConnection.fetch_0rtt`: the response
     plus how the request was actually carried.
 
@@ -99,7 +99,7 @@ struct Http3ZeroRttOutcome(Copyable, Movable):
         self.replayed = replayed
 
 
-struct _StreamReasm(Copyable, Movable):
+struct _StreamReasm(Copyable):
     """Per-stream offset-ordered byte reassembler.
 
     QUIC STREAM frames carry a per-stream byte ``offset`` and may
@@ -189,7 +189,7 @@ struct _StreamReasm(Copyable, Movable):
             self.fin_signaled = True
 
 
-struct _PendingRequest(Copyable, Movable):
+struct _PendingRequest(Copyable):
     """An in-flight multiplexed request: its offset-ordered
     reassembler plus the response reader that owns the decoded
     state. One per concurrent request stream, keyed by stream id in

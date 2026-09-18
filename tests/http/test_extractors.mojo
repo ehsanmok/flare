@@ -81,7 +81,7 @@ def test_json_malformed_raises() raises:
 
 
 @fieldwise_init
-struct _OneH(Copyable, Defaultable, Handler, Movable):
+struct _OneH(Copyable, Defaultable, Handler):
     var id: PathInt["id"]
 
     def __init__(out self):
@@ -117,7 +117,7 @@ def test_extracted_one_field_bad_parse_returns_400() raises:
 
 
 @fieldwise_init
-struct _TwoH(Copyable, Defaultable, Handler, Movable):
+struct _TwoH(Copyable, Defaultable, Handler):
     var id: PathInt["id"]
     var page: OptionalQueryInt["page"]
 

@@ -39,7 +39,7 @@ from flare.runtime.scheduler import (
 
 
 @fieldwise_init
-struct _NopFrontend(Copyable, Frontend, Movable):
+struct _NopFrontend(Copyable, Frontend):
     """Test-only frontend: spin in 50 ms sleeps until ``stopping``.
 
     No socket reads, no protocol logic -- the lifecycle tests

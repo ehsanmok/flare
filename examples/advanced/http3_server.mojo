@@ -58,7 +58,7 @@ from flare.quic import QuicServerConfig
 
 
 @fieldwise_init
-struct SharedHandler(Copyable, Handler, Movable):
+struct SharedHandler(Copyable, Handler):
     """One handler reachable from every wire (h1 / h2c / h2 / h3).
 
     The handler doesn't look at the wire shape -- it doesn't

@@ -32,7 +32,7 @@ struct TlsVerify:
     """Verify peer certificate against the trusted CA bundle. Default."""
 
 
-struct TlsConfig(Copyable, Movable):
+struct TlsConfig(Copyable):
     """Configuration for a TLS connection.
 
     Fields:

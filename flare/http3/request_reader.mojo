@@ -133,7 +133,7 @@ trait Http3RequestEventHandler(Deinitable, Movable):
 
 
 @fieldwise_init
-struct Http3RequestReader(Copyable, Movable):
+struct Http3RequestReader(Copyable):
     """Per-stream H3 request-side reader.
 
     The reader is stateful: it tracks whether the initial HEADERS

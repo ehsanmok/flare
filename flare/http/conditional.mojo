@@ -74,7 +74,7 @@ from ..runtime.date_cache import civil_to_unix_seconds
 
 
 @fieldwise_init
-struct _StrippedEtag(Copyable, Movable):
+struct _StrippedEtag(Copyable):
     """Decomposed ETag token: ``is_weak`` flag + opaque body
     (without the surrounding double quotes).
 
@@ -283,7 +283,7 @@ def fnv1a_etag(body: Span[UInt8, _]) -> String:
 
 
 struct Conditional[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Honour RFC 9110 §13 precondition headers around ``Inner``.
 

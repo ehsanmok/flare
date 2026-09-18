@@ -51,7 +51,7 @@ from flare.http.reliability import (
 
 
 @fieldwise_init
-struct OkHandler(Copyable, Defaultable, Handler, Movable):
+struct OkHandler(Copyable, Defaultable, Handler):
     """Always returns 200 OK — fast-path for both middlewares."""
 
     var _placeholder: UInt8
@@ -67,7 +67,7 @@ struct OkHandler(Copyable, Defaultable, Handler, Movable):
 
 
 @fieldwise_init
-struct FlakyHandler(Copyable, Defaultable, Handler, Movable):
+struct FlakyHandler(Copyable, Defaultable, Handler):
     """Always returns 503 — used to demonstrate retry exhaustion."""
 
     var _placeholder: UInt8

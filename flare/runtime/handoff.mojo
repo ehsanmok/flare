@@ -204,7 +204,7 @@ struct HandoffQueue(Defaultable, Movable):
 # ── HandoffPolicy ───────────────────────────────────────────────────────
 
 
-struct HandoffPolicy(Copyable, Defaultable, Movable):
+struct HandoffPolicy(Copyable, Defaultable):
     """Knobs for the work-stealing strategy.
 
     * ``enabled`` — master switch. When ``False`` the scheduler skips

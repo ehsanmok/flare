@@ -89,7 +89,7 @@ struct WsWireChoice:
 # ── Configuration carrier ──────────────────────────────────────────────
 
 
-struct WsAutoClientConfig(Copyable, Defaultable, Movable):
+struct WsAutoClientConfig(Copyable, Defaultable):
     """Inputs to :class:`WsAutoClient`'s wire-selection.
 
     The carrier holds the URL + the protocol preferences; the

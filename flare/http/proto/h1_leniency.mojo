@@ -62,7 +62,7 @@ forward is :class:`H1LeniencyConfig`.
 """
 
 
-struct H1LeniencyConfig(Copyable, Movable):
+struct H1LeniencyConfig(Copyable):
     """HTTP/1.1 parser leniency configuration.
 
     Strict by default. Each field maps to one RFC 9112

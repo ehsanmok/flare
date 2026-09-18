@@ -43,7 +43,7 @@ from flare.runtime.frontend import Frontend
 from flare.runtime.uring_reactor import use_uring_backend
 
 
-struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
+struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
     """Dynamic-handler HTTP frontend for the multicore scheduler.
 
     Carries the per-worker HTTP state (handler, request config,
@@ -183,7 +183,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend, Movable):
             pass
 
 
-struct StreamFrontend[H: StreamHandler & Copyable](Copyable, Frontend, Movable):
+struct StreamFrontend[H: StreamHandler & Copyable](Copyable, Frontend):
     """Typed-streaming frontend for the multicore scheduler.
 
     The :trait:`StreamHandler` twin of :class:`HttpFrontend`: carries a
@@ -243,7 +243,7 @@ struct StreamFrontend[H: StreamHandler & Copyable](Copyable, Frontend, Movable):
             pass
 
 
-struct StaticHttpFrontend(Copyable, Frontend, Movable):
+struct StaticHttpFrontend(Copyable, Frontend):
     """Pre-encoded :class:`StaticResponse` frontend.
 
     Replaces the prior runtime-side ``StaticScheduler`` type. The

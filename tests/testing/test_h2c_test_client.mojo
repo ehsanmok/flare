@@ -19,7 +19,7 @@ from flare.testing import H2cTestClient
 
 
 @fieldwise_init
-struct EchoMethodHandler(Copyable, Handler, Movable):
+struct EchoMethodHandler(Copyable, Handler):
     """Returns the request method + path in the body, echoes body
     length and a custom header, so the h2c round trip can be asserted."""
 

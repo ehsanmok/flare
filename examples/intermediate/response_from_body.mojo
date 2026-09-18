@@ -34,7 +34,7 @@ from flare.net import SocketAddr
 from flare.testing import fork_server, kill_forked_server
 
 
-struct _Lines(ChunkSource, Copyable, Movable):
+struct _Lines(ChunkSource, Copyable):
     """Open-ended body: yields ``n`` ``line k\\n`` chunks (no fixed length)."""
 
     var i: Int

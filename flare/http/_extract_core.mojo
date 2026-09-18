@@ -83,7 +83,7 @@ def _parse_bool_param(s: String) raises -> Bool:
 # ── Extractor trait ─────────────────────────────────────────────────────────
 
 
-trait Extractor(Copyable, Defaultable, Deinitable, Movable):
+trait Extractor(Copyable, Defaultable, Deinitable):
     """Anything that can extract itself from a ``Request`` in place.
 
     ``Extracted[H]`` default-constructs the handler struct ``H`` and then

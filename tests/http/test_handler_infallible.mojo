@@ -27,7 +27,7 @@ from flare.http.handler import HandlerInfallible, WithRaises
 
 
 @fieldwise_init
-struct StaticOk(Copyable, HandlerInfallible, Movable):
+struct StaticOk(Copyable, HandlerInfallible):
     """The simplest possible infallible handler: always returns 200 OK
     with a fixed body, no I/O, no parsing, no allocation paths that
     can fail."""
@@ -40,7 +40,7 @@ struct StaticOk(Copyable, HandlerInfallible, Movable):
 
 
 @fieldwise_init
-struct HealthHandler(Copyable, HandlerInfallible, Movable):
+struct HealthHandler(Copyable, HandlerInfallible):
     """A health-check handler that always returns 200 with a fixed
     JSON body. Provably infallible -- no body allocation that can
     OOM in the reactor's hot path, no header munging that can

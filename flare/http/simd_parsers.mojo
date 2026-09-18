@@ -77,7 +77,6 @@ struct HttpParseError(
     Copyable,
     Equatable,
     ImplicitlyCopyable,
-    Movable,
     Writable,
 ):
     """Typed error for byte-level parser primitives in this

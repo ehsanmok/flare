@@ -96,7 +96,7 @@ from .request import Request
 
 
 @fieldwise_init
-struct AuthError(Copyable, Equatable, ImplicitlyCopyable, Movable, Writable):
+struct AuthError(Copyable, Equatable, ImplicitlyCopyable, Writable):
     """Typed error raised by the ``Authorization`` header parsers
     in this module (``parse_bearer_token``,
     ``parse_basic_credentials``, ``_b64_decode``).
@@ -306,7 +306,7 @@ def parse_bearer_token(authz: String) raises AuthError -> String:
 
 
 @fieldwise_init
-struct BasicCredentials(Copyable, Movable):
+struct BasicCredentials(Copyable):
     """Decoded RFC 7617 Basic credentials."""
 
     var username: String
@@ -379,7 +379,7 @@ def parse_basic_credentials(authz: String) raises AuthError -> BasicCredentials:
 
 
 @fieldwise_init
-struct BearerExtract(Copyable, Defaultable, Extractor, Movable):
+struct BearerExtract(Copyable, Defaultable, Extractor):
     """Extracts the Bearer token from the inbound
     ``Authorization`` header.
 
@@ -415,7 +415,7 @@ struct BearerExtract(Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct BasicExtract(Copyable, Defaultable, Extractor, Movable):
+struct BasicExtract(Copyable, Defaultable, Extractor):
     """Extracts RFC 7617 Basic credentials from the inbound
     ``Authorization`` header.
 
@@ -513,7 +513,7 @@ def csrf_token_compare(a: String, b: String) -> Bool:
 
 
 @fieldwise_init
-struct CsrfToken(Copyable, Movable):
+struct CsrfToken(Copyable):
     """A CSRF token pair (cookie value + form value) ready for
     constant-time comparison.
 

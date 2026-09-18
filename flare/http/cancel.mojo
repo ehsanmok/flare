@@ -177,7 +177,7 @@ struct CancelCell(Movable):
 # ── Cancel handle ────────────────────────────────────────────────────────────
 
 
-struct Cancel(Copyable, ImplicitlyCopyable, Movable):
+struct Cancel(Copyable, ImplicitlyCopyable):
     """A handle to a per-request cancel cell owned by the reactor.
 
     Passed to ``CancelHandler.serve(req, cancel)`` by the reactor.
@@ -193,7 +193,7 @@ struct Cancel(Copyable, ImplicitlyCopyable, Movable):
         from flare.http import CancelHandler, Cancel, Request, Response, ok
 
         @fieldwise_init
-        struct SlowHandler(CancelHandler, Copyable, Movable):
+        struct SlowHandler(CancelHandler, Copyable):
             def serve(self, req: Request, cancel: Cancel) raises -> Response:
                 for i in range(100):
                     if cancel.cancelled():

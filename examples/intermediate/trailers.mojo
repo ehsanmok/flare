@@ -35,7 +35,7 @@ from flare.http.streaming_serialize import serialize_streaming_response
 
 
 @fieldwise_init
-struct GreetingBody(Body, Copyable, Movable):
+struct GreetingBody(Body, Copyable):
     """Minimal one-shot ``Body`` -- one chunk then EOF."""
 
     var bytes: List[UInt8]

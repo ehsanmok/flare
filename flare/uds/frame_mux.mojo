@@ -73,7 +73,7 @@ struct FrameKind:
     """Caller abandoned the stream; peer should stop producing."""
 
 
-struct Frame(Copyable, Movable):
+struct Frame(Copyable):
     """One decoded frame: ``request_id`` + ``kind`` + owned ``payload``."""
 
     var request_id: UInt64

@@ -274,7 +274,7 @@ def test_optional_header_bool_present() raises:
 
 
 @fieldwise_init
-struct GetUserSingleDot(Copyable, Defaultable, Handler, Movable):
+struct GetUserSingleDot(Copyable, Defaultable, Handler):
     """Handler whose extractors expose primitive ``.value`` directly
     — no ``.value.value`` chain. The headline use case for the
     concrete extractors.

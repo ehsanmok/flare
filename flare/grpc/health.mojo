@@ -65,7 +65,7 @@ def encode_health_response(status: Int) -> List[UInt8]:
     return w.take()
 
 
-struct HealthService(Copyable, GrpcUnary, Movable):
+struct HealthService(Copyable, GrpcUnary):
     """In-memory ``grpc.health.v1.Health`` Check handler.
 
     Holds a per-service status map; ``set_status`` registers / updates a
@@ -113,7 +113,7 @@ struct HealthService(Copyable, GrpcUnary, Movable):
         )
 
 
-struct HealthWatchHandler(Copyable, GrpcServerStreaming, Movable):
+struct HealthWatchHandler(Copyable, GrpcServerStreaming):
     """The streaming ``grpc.health.v1.Health/Watch`` RPC.
 
     Watch is a server-streaming RPC: the client sends one

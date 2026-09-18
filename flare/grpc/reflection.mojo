@@ -49,7 +49,7 @@ comptime REFLECT_ERROR_RESPONSE: Int = 7
 
 
 @fieldwise_init
-struct ReflectionRequest(Copyable, Movable):
+struct ReflectionRequest(Copyable):
     """Decoded ``ServerReflectionRequest`` -- which oneof arm is set
     plus its string argument.
 
@@ -84,7 +84,7 @@ struct ReflectionRequest(Copyable, Movable):
         return Self(kind=kind, arg=arg^)
 
 
-struct ReflectionService(Copyable, Movable):
+struct ReflectionService(Copyable):
     """Answers ``ServerReflectionInfo`` requests.
 
     Register every gRPC service path (``package.Service``) for
@@ -205,7 +205,7 @@ struct ReflectionService(Copyable, Movable):
 
 
 @fieldwise_init
-struct ReflectionBidiHandler(Copyable, GrpcBidiStreaming, Movable):
+struct ReflectionBidiHandler(Copyable, GrpcBidiStreaming):
     """Bidi adapter that runs every inbound ``ServerReflectionRequest``
     through :meth:`ReflectionService.answer`, framing each response as
     its own LPM frame. Mount via

@@ -49,7 +49,7 @@ from flare.grpc import (
 
 
 @fieldwise_init
-struct EchoHandler(Copyable, GrpcUnary, Movable):
+struct EchoHandler(Copyable, GrpcUnary):
     """Tiny handler that echoes the request bytes back, or fails
     with the configured error status when ``fail`` is set.
     """

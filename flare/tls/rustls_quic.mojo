@@ -114,7 +114,7 @@ struct QuicEncryptionLevel:
 # ── Configuration carrier ──────────────────────────────────────────────
 
 
-struct RustlsQuicConfig(Copyable, Defaultable, Movable):
+struct RustlsQuicConfig(Copyable, Defaultable):
     """Server-side rustls QUIC configuration carrier.
 
     Mirrors the shape of :class:`flare.tls.config.TlsConfig` but
@@ -169,7 +169,7 @@ struct RustlsQuicConfig(Copyable, Defaultable, Movable):
 # ── Error carrier ──────────────────────────────────────────────────────
 
 
-struct RustlsQuicError(Copyable, Movable):
+struct RustlsQuicError(Copyable):
     """Typed error carrier for the rustls QUIC binding.
 
     The reactor distinguishes these cases for connection-close

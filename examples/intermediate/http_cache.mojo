@@ -46,7 +46,7 @@ from flare.http.cache import (
 
 
 @fieldwise_init
-struct DemoApp(Copyable, Defaultable, Handler, Movable):
+struct DemoApp(Copyable, Defaultable, Handler):
     """Tiny app that serves two cacheable JSON endpoints + one
     no-store endpoint. The inner handler is intentionally
     self-describing: every response carries a fresh timestamp in

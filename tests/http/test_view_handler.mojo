@@ -42,7 +42,7 @@ from flare.http.handler import WithViewCancel
 
 
 @fieldwise_init
-struct _BodyEcho(Copyable, Movable, ViewHandler):
+struct _BodyEcho(Copyable, ViewHandler):
     """Reads the body via the borrowed slice and echoes its
     length. Demonstrates the zero-copy contract — the body
     pointer should equal the buffer pointer + body_start."""
@@ -57,7 +57,7 @@ struct _BodyEcho(Copyable, Movable, ViewHandler):
 
 
 @fieldwise_init
-struct _UrlEcho(Copyable, Movable, ViewHandler):
+struct _UrlEcho(Copyable, ViewHandler):
     """Reads the URL via the borrowed slice and echoes it."""
 
     def serve_view[
@@ -67,7 +67,7 @@ struct _UrlEcho(Copyable, Movable, ViewHandler):
 
 
 @fieldwise_init
-struct _CancelAware(Copyable, Movable, ViewHandler):
+struct _CancelAware(Copyable, ViewHandler):
     """Observes Cancel and short-circuits if pre-flipped."""
 
     def serve_view[
@@ -79,7 +79,7 @@ struct _CancelAware(Copyable, Movable, ViewHandler):
 
 
 @fieldwise_init
-struct _PlainHandler(Copyable, Handler, Movable):
+struct _PlainHandler(Copyable, Handler):
     """A -shape Handler used to test the WithViewCancel
     adapter."""
 

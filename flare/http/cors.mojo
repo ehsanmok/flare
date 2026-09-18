@@ -28,7 +28,7 @@ from .request import Request
 from .response import Response
 
 
-struct CorsConfig(Copyable, Defaultable, Movable):
+struct CorsConfig(Copyable, Defaultable):
     """Configuration knobs for ``Cors[Inner]``.
 
     Default policy: deny everything (every list empty,
@@ -108,7 +108,7 @@ def _join(parts: List[String], sep: String) -> String:
 
 
 struct Cors[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """CORS middleware. Wraps ``Inner`` with the spec'd preflight +
     response-header machinery."""

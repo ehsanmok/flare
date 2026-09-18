@@ -80,7 +80,7 @@ def test_handler_extractor_satisfies_handler_bound() raises:
 def test_handler_extractor_flows_through_extracted() raises:
     """``Extracted[H]`` accepts a ``HandlerExtractor`` struct as
     its type argument because ``HandlerExtractor`` transitively
-    satisfies ``Copyable & Defaultable & Handler & Movable``."""
+    satisfies ``Copyable & Defaultable & Handler``."""
     var ex = Extracted[EchoUser]()
     assert_equal(_accept_extracted(ex), 2)
 

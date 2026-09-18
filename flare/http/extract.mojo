@@ -38,7 +38,7 @@ from flare.http import (
 )
 
 @fieldwise_init
-struct GetUser(Copyable, Defaultable, Handler, Movable):
+struct GetUser(Copyable, Defaultable, Handler):
     var id: PathInt["id"]
     var page: OptionalQueryInt["page"]
 
@@ -79,9 +79,7 @@ extractors (``PathInt`` ... ``OptionalHeaderBool``) are the canonical
 templates::
 
     @fieldwise_init
-    struct PathUuid[name: StaticString](
-        Copyable, Defaultable, Extractor, Movable
-    ):
+    struct PathUuid[name: StaticString](Copyable, Defaultable, Extractor):
         var value: Uuid
 
         def __init__(out self):
@@ -176,7 +174,7 @@ from ..net import IpAddr, SocketAddr
 
 
 @fieldwise_init
-struct PathInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct PathInt[name: StaticString](Copyable, Defaultable, Extractor):
     """Required path parameter named ``name``, parsed as ``Int``.
 
     ``apply`` raises if the route did not capture ``name`` or if the
@@ -202,7 +200,7 @@ struct PathInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct PathStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct PathStr[name: StaticString](Copyable, Defaultable, Extractor):
     """Required path parameter named ``name``, exposed as ``String``."""
 
     var value: String
@@ -223,7 +221,7 @@ struct PathStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct PathFloat[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct PathFloat[name: StaticString](Copyable, Defaultable, Extractor):
     """Required path parameter named ``name``, parsed as ``Float64``."""
 
     var value: Float64
@@ -244,7 +242,7 @@ struct PathFloat[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct PathBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct PathBool[name: StaticString](Copyable, Defaultable, Extractor):
     """Required path parameter named ``name``, parsed as ``Bool``."""
 
     var value: Bool
@@ -275,7 +273,7 @@ struct PathBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct QueryInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct QueryInt[name: StaticString](Copyable, Defaultable, Extractor):
     """Required query-string parameter named ``name``, parsed as ``Int``."""
 
     var value: Int
@@ -296,7 +294,7 @@ struct QueryInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct QueryStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct QueryStr[name: StaticString](Copyable, Defaultable, Extractor):
     """Required query-string parameter named ``name``, exposed as ``String``."""
 
     var value: String
@@ -317,9 +315,7 @@ struct QueryStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct QueryFloat[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct QueryFloat[name: StaticString](Copyable, Defaultable, Extractor):
     """Required query parameter named ``name``, parsed as ``Float64``."""
 
     var value: Float64
@@ -340,7 +336,7 @@ struct QueryFloat[name: StaticString](
 
 
 @fieldwise_init
-struct QueryBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct QueryBool[name: StaticString](Copyable, Defaultable, Extractor):
     """Required query parameter named ``name``, parsed as ``Bool``."""
 
     var value: Bool
@@ -364,9 +360,7 @@ struct QueryBool[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct OptionalQueryInt[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalQueryInt[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional query parameter as ``Optional[Int]``. ``value`` is
     ``None`` when absent."""
 
@@ -391,9 +385,7 @@ struct OptionalQueryInt[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalQueryStr[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalQueryStr[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional query parameter as ``Optional[String]``."""
 
     var value: Optional[String]
@@ -415,9 +407,7 @@ struct OptionalQueryStr[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalQueryFloat[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalQueryFloat[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional query parameter as ``Optional[Float64]``."""
 
     var value: Optional[Float64]
@@ -441,9 +431,7 @@ struct OptionalQueryFloat[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalQueryBool[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalQueryBool[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional query parameter as ``Optional[Bool]``."""
 
     var value: Optional[Bool]
@@ -470,7 +458,7 @@ struct OptionalQueryBool[name: StaticString](
 
 
 @fieldwise_init
-struct HeaderInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct HeaderInt[name: StaticString](Copyable, Defaultable, Extractor):
     """Required header named ``name``, parsed as ``Int``."""
 
     var value: Int
@@ -491,7 +479,7 @@ struct HeaderInt[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct HeaderStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
+struct HeaderStr[name: StaticString](Copyable, Defaultable, Extractor):
     """Required header named ``name``, exposed as ``String``."""
 
     var value: String
@@ -512,9 +500,7 @@ struct HeaderStr[name: StaticString](Copyable, Defaultable, Extractor, Movable):
 
 
 @fieldwise_init
-struct HeaderFloat[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct HeaderFloat[name: StaticString](Copyable, Defaultable, Extractor):
     """Required header named ``name``, parsed as ``Float64``."""
 
     var value: Float64
@@ -535,9 +521,7 @@ struct HeaderFloat[name: StaticString](
 
 
 @fieldwise_init
-struct HeaderBool[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct HeaderBool[name: StaticString](Copyable, Defaultable, Extractor):
     """Required header named ``name``, parsed as ``Bool``."""
 
     var value: Bool
@@ -561,9 +545,7 @@ struct HeaderBool[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalHeaderInt[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalHeaderInt[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional header as ``Optional[Int]``."""
 
     var value: Optional[Int]
@@ -587,9 +569,7 @@ struct OptionalHeaderInt[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalHeaderStr[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalHeaderStr[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional header as ``Optional[String]``."""
 
     var value: Optional[String]
@@ -612,7 +592,7 @@ struct OptionalHeaderStr[name: StaticString](
 
 @fieldwise_init
 struct OptionalHeaderFloat[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
+    Copyable, Defaultable, Extractor
 ):
     """Optional header as ``Optional[Float64]``."""
 
@@ -637,9 +617,7 @@ struct OptionalHeaderFloat[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalHeaderBool[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalHeaderBool[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional header as ``Optional[Bool]``."""
 
     var value: Optional[Bool]
@@ -665,7 +643,7 @@ struct OptionalHeaderBool[name: StaticString](
 # ── Peer extractor ──────────────────────────────────────────────────────────
 
 
-struct Peer(Copyable, Defaultable, Extractor, Movable):
+struct Peer(Copyable, Defaultable, Extractor):
     """Kernel-reported peer ``SocketAddr`` of the connection.
 
     The reactor captures ``TcpStream.peer_addr()`` at accept time and
@@ -706,7 +684,7 @@ struct Peer(Copyable, Defaultable, Extractor, Movable):
 # ── Body extractors ──────────────────────────────────────────────────────────
 
 
-struct BodyBytes(Copyable, Defaultable, Extractor, Movable):
+struct BodyBytes(Copyable, Defaultable, Extractor):
     """Extracts the raw request body as ``List[UInt8]``.
 
     Always succeeds; the body is a byte copy so ownership is clean
@@ -728,7 +706,7 @@ struct BodyBytes(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
-struct BodyText(Copyable, Defaultable, Extractor, Movable):
+struct BodyText(Copyable, Defaultable, Extractor):
     """Extracts the request body decoded as a UTF-8 ``String``.
 
     Non-ASCII bytes are preserved verbatim by ``Request.text``; callers
@@ -751,7 +729,7 @@ struct BodyText(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
-struct Cookies(Copyable, Defaultable, Extractor, Movable):
+struct Cookies(Copyable, Defaultable, Extractor):
     """Extracts the request cookies as a ``CookieJar``.
 
     Equivalent to ``req.cookies()`` but registerable as a field on a
@@ -774,7 +752,7 @@ struct Cookies(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
-struct Form(Copyable, Defaultable, Extractor, Movable):
+struct Form(Copyable, Defaultable, Extractor):
     """Extracts the request body as ``application/x-www-form-urlencoded``.
 
     Raises if the request body is empty or contains a malformed
@@ -799,7 +777,7 @@ struct Form(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
-struct Multipart(Copyable, Defaultable, Extractor, Movable):
+struct Multipart(Copyable, Defaultable, Extractor):
     """Extracts the request body as ``multipart/form-data`` (RFC 7578).
 
     Reads the boundary parameter from the request's ``Content-Type``
@@ -825,7 +803,7 @@ struct Multipart(Copyable, Defaultable, Extractor, Movable):
         return out^
 
 
-struct Json(Copyable, Defaultable, Extractor, Movable):
+struct Json(Copyable, Defaultable, Extractor):
     """Extracts the request body as a parsed ``json.Value``.
 
     ``apply`` raises if the body is empty or not valid JSON; pair with
@@ -852,9 +830,7 @@ struct Json(Copyable, Defaultable, Extractor, Movable):
 # ── Extracted adapter ───────────────────────────────────────────────────────
 
 
-struct Extracted[H: Copyable & Defaultable & Handler](
-    Copyable, Handler, Movable
-):
+struct Extracted[H: Copyable & Defaultable & Handler](Copyable, Handler):
     """Reflective auto-injection adapter: ``H``'s fields are its extractor set.
 
     Per request: copy the prototype ``H``; for each field downcast the

@@ -44,7 +44,7 @@ based gRPC framing) and must be zero on the wire."""
 
 
 @fieldwise_init
-struct GrpcCompressionFlag(Copyable, Movable):
+struct GrpcCompressionFlag(Copyable):
     """Typed wrapper around the LPM flag byte. ``is_compressed()``
     returns True when bit 0 is set; ``raw`` exposes the byte for
     callers that need to forward greased / extension bits without
@@ -64,7 +64,7 @@ struct GrpcCompressionFlag(Copyable, Movable):
 
 
 @fieldwise_init
-struct GrpcMessage(Copyable, Movable):
+struct GrpcMessage(Copyable):
     """A decoded LPM frame: flag + opaque payload bytes."""
 
     var flag: GrpcCompressionFlag
@@ -72,7 +72,7 @@ struct GrpcMessage(Copyable, Movable):
 
 
 @fieldwise_init
-struct GrpcDecodeResult(Copyable, Movable):
+struct GrpcDecodeResult(Copyable):
     """Outcome of an LPM decode attempt.
 
     The decoder operates on a streaming buffer where the message

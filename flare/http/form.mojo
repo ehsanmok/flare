@@ -129,7 +129,7 @@ def urlencode(s: String) -> String:
     return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
-struct FormData(Copyable, Defaultable, Movable):
+struct FormData(Copyable, Defaultable):
     """A name → value(s) multimap, in insertion order.
 
     Backs the ``Form`` extractor; mirrors the API of ``HeaderMap`` so

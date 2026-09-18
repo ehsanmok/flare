@@ -80,7 +80,7 @@ def _hello(req: Request) raises -> Response:
 
 
 @fieldwise_init
-struct _ThreeChunks(ChunkSource, Copyable, Movable):
+struct _ThreeChunks(ChunkSource, Copyable):
     var idx: Int
 
     def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:

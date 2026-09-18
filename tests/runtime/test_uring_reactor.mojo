@@ -141,7 +141,7 @@ def test_idle_poll_returns_zero() raises:
 
 
 @fieldwise_init
-struct _Listener(Copyable, Movable):
+struct _Listener(Copyable):
     var fd: c_int
     var port: UInt16
 

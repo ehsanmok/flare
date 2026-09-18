@@ -45,7 +45,7 @@ def _payload(n: Int) -> List[UInt8]:
 
 
 @fieldwise_init
-struct _FixedChunks(ChunkSource, Copyable, Movable):
+struct _FixedChunks(ChunkSource, Copyable):
     var remaining: Int
 
     def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:

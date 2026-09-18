@@ -31,7 +31,7 @@ struct _CookieState(Movable):
     var jar: CookieJar
 
 
-struct CookieStore(Copyable, Movable):
+struct CookieStore(Copyable):
     """Pointer-backed, interior-mutable client cookie jar handle."""
 
     var _addr: Int

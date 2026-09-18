@@ -74,9 +74,7 @@ from std.collections import Dict, Optional
 comptime FAST_CAPACITY: Int = 256
 
 
-struct StreamSlab[S: Copyable & Deinitable](
-    Copyable, Defaultable, Movable, Sized
-):
+struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
     """Dense small-int stream table parametric over the value
     type ``S``.
 

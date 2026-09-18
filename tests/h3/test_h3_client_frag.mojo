@@ -59,7 +59,7 @@ def _bind_server() raises -> QuicListener:
 
 
 @fieldwise_init
-struct _Digest(Copyable, Handler, Movable):
+struct _Digest(Copyable, Handler):
     """200 handler returning ``<len>:<bytesum>`` for the request body
     so a large upload is verified by a tiny response."""
 

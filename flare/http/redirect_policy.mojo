@@ -119,7 +119,7 @@ struct RedirectAction:
 
 
 @fieldwise_init
-struct RedirectDecision(Copyable, Movable):
+struct RedirectDecision(Copyable):
     """The full output of :meth:`RedirectPolicy.decide`.
 
     Fields:
@@ -202,7 +202,7 @@ def _same_origin(a_url: String, b_url: String) raises -> Bool:
 
 
 @fieldwise_init
-struct RedirectPolicy(Copyable, Defaultable, Movable):
+struct RedirectPolicy(Copyable, Defaultable):
     """Configurable redirect-following policy.
 
     Fields:

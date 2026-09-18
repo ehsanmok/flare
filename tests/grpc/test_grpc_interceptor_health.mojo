@@ -27,7 +27,7 @@ from flare.grpc.status import (
 # ── Test handlers / interceptors ──────────────────────────────────────────────
 
 
-struct EchoHandler(Copyable, GrpcUnary, Movable):
+struct EchoHandler(Copyable, GrpcUnary):
     def __init__(out self):
         pass
 
@@ -40,7 +40,7 @@ struct EchoHandler(Copyable, GrpcUnary, Movable):
         return GrpcUnaryReply.ok(body^)
 
 
-struct AuthInterceptor(Copyable, GrpcInterceptor, Movable):
+struct AuthInterceptor(Copyable, GrpcInterceptor):
     var required: String
 
     def __init__(out self, required: String):
@@ -64,7 +64,7 @@ struct AuthInterceptor(Copyable, GrpcInterceptor, Movable):
         return reply^
 
 
-struct TagInterceptor(Copyable, GrpcInterceptor, Movable):
+struct TagInterceptor(Copyable, GrpcInterceptor):
     def __init__(out self):
         pass
 

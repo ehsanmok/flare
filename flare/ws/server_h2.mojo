@@ -18,7 +18,7 @@ from ..http2.server import Http2Connection
 from ..runtime.pool import Pool
 
 
-struct WsOverH2ServerStream(Copyable, Movable):
+struct WsOverH2ServerStream(Copyable):
     """Stream-keyed server adapter turning one h2 stream into a WS tunnel.
 
     Owns the per-stream receive buffer. Unlike the client carrier it does
@@ -103,7 +103,7 @@ struct WsOverH2ServerStream(Copyable, Movable):
 # handler never blocks -- it reacts to one edge and returns.
 
 
-trait WsH2Handler(Copyable, Deinitable, Movable):
+trait WsH2Handler(Copyable, Deinitable):
     """Edge-driven handler for WebSocket-over-HTTP/2 tunnels (RFC 8441).
 
     One handler instance is shared across every tunnel on the worker (like
@@ -186,7 +186,7 @@ def _ws_h2_destroy_thunk[W: WsH2Handler](addr: Int) -> None:
     Pool[W].free(addr)
 
 
-struct WsH2Hooks(Copyable, Movable):
+struct WsH2Hooks(Copyable):
     """Opaque, non-owning boxed WS-over-h2 handler + its thunks.
 
     Carries the heap address of the boxed ``W`` and its monomorphised

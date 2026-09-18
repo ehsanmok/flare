@@ -78,7 +78,7 @@ def _cell_set(addr: Int, i: Int, v: Int64):
 
 
 @fieldwise_init
-struct RetryPolicy(Copyable, Defaultable, Movable):
+struct RetryPolicy(Copyable, Defaultable):
     """Tunable retry policy.
 
     - ``max_attempts``: total number of inner-handler invocations
@@ -180,7 +180,7 @@ def _backoff_sleep_ms(policy: RetryPolicy, attempt: Int) -> Int:
 
 
 struct Retry[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Retry the inner handler on transient failure.
 
@@ -256,7 +256,7 @@ struct Retry[Inner: Handler & Copyable & Defaultable](
 
 
 struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Post-hoc wall-clock deadline check.
 
@@ -314,7 +314,7 @@ struct PostHocDeadline[Inner: Handler & Copyable & Defaultable](
 
 
 struct RateLimit[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Token-bucket rate limiter.
 
@@ -384,7 +384,7 @@ comptime _CB_HALF_OPEN: Int64 = 2
 
 
 struct CircuitBreaker[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Trip open after consecutive failures, fast-fail during cooldown.
 

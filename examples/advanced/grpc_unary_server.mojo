@@ -31,7 +31,7 @@ from flare.utils import usleep
 
 
 @fieldwise_init
-struct Greeter(Copyable, GrpcUnary, Movable):
+struct Greeter(Copyable, GrpcUnary):
     """Replies ``hello, <request>``; sleeps if asked (deadline demo)."""
 
     var slow: Bool

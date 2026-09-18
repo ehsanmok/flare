@@ -220,7 +220,7 @@ def _encode_client_transport_params(
     return encode_transport_parameters(tp)
 
 
-struct _EarlySend(Copyable, Movable):
+struct _EarlySend(Copyable):
     """One application STREAM send made at 0-RTT (EarlyData).
 
     Buffered so the flight can be replayed at 1-RTT if the server

@@ -23,7 +23,7 @@ from flare.ws.frame import WsFrame, WsOpcode
 from flare.ws.server_h2 import WsH2Handler, WsOverH2ServerStream
 
 
-struct _OkHandler(Copyable, Handler, Movable):
+struct _OkHandler(Copyable, Handler):
     """Trivial HTTP handler; the WS tunnel never reaches it."""
 
     def __init__(out self):
@@ -33,7 +33,7 @@ struct _OkHandler(Copyable, Handler, Movable):
         return Response(200)
 
 
-struct _EchoWsH2(Copyable, Movable, WsH2Handler):
+struct _EchoWsH2(Copyable, WsH2Handler):
     """Echoes each client TEXT frame back prefixed with ``echo:``."""
 
     def __init__(out self):

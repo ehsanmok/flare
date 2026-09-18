@@ -196,7 +196,7 @@ comptime _DEFAULT_QUIC_SNDBUF: Int = 0
 # -- Per-stream streaming egress state ----------------------------------
 
 
-struct _H3StreamOut(Copyable, Movable):
+struct _H3StreamOut(Copyable):
     """Per-stream state for an incrementally-streamed HTTP/3 response.
 
     A streaming :class:`Response` (one carrying a ``body_stream``

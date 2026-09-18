@@ -31,7 +31,7 @@ from std.testing import assert_equal, assert_raises, assert_true
 from flare.http2.stream_slab import StreamSlab, FAST_CAPACITY
 
 
-struct StreamLike(Copyable, Defaultable, Movable):
+struct StreamLike(Copyable, Defaultable):
     """Minimal stand-in for ``Stream`` so the slab tests don't have
     to construct full ``HpackHeader`` lists or flow-control state.
     """

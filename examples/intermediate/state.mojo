@@ -22,7 +22,7 @@ from flare.http import (
 # Application state - a tiny counter, Copyable so the wrapping
 # handler can hand a snapshot to each layer.
 @fieldwise_init
-struct Counters(Copyable, Movable):
+struct Counters(Copyable):
     var hits: Int
     var misses: Int
 

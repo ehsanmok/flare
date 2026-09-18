@@ -18,7 +18,7 @@ from flare.tcp import TcpStream
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 
-struct PushFront(Copyable, Movable, StreamHandler):
+struct PushFront(Copyable, StreamHandler):
     """Copyable streaming handler: one copy per worker. Per-connection
     write counters live in a worker-local dict keyed by conn id."""
 

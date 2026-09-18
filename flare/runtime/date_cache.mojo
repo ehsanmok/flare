@@ -100,7 +100,7 @@ def civil_to_unix_seconds(
 
 
 @fieldwise_init
-struct CivilTime(Copyable, Movable):
+struct CivilTime(Copyable):
     """Civil (Gregorian) date-time + day-of-week derived from a
     Unix epoch second.
 

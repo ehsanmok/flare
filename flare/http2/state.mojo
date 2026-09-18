@@ -46,7 +46,7 @@ from .stream_slab import StreamSlab
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
 
 
-struct Http2ErrorCode(Copyable, Defaultable, Movable):
+struct Http2ErrorCode(Copyable, Defaultable):
     """One of the 14 RFC 9113 §7 error codes."""
 
     var value: Int
@@ -121,7 +121,7 @@ ponytail: lifetime cap, not a time-windowed token bucket --
 upgrade path is a clock-fed bucket if that ever bites."""
 
 
-struct Http2Error(Copyable, Defaultable, Movable):
+struct Http2Error(Copyable, Defaultable):
     """A typed HTTP/2 error. ``stream_id == 0`` means connection error."""
 
     var code: Http2ErrorCode
@@ -144,7 +144,7 @@ struct Http2Error(Copyable, Defaultable, Movable):
 # ── Stream state machine (RFC 9113 §5.1) ────────────────────────────────
 
 
-struct StreamState(Copyable, Defaultable, Movable):
+struct StreamState(Copyable, Defaultable):
     """Stream lifecycle states. Numeric values are intentional."""
 
     var value: Int
@@ -179,7 +179,7 @@ struct StreamState(Copyable, Defaultable, Movable):
 comptime StreamId = Int
 
 
-struct Stream(Copyable, Defaultable, Movable):
+struct Stream(Copyable, Defaultable):
     """Per-stream record."""
 
     var id: StreamId
@@ -228,7 +228,7 @@ struct Stream(Copyable, Defaultable, Movable):
 # ── Connection ──────────────────────────────────────────────────────────
 
 
-struct Connection(Copyable, Defaultable, Movable):
+struct Connection(Copyable, Defaultable):
     """Per-connection HTTP/2 state."""
 
     var streams: StreamSlab[Stream]

@@ -18,7 +18,7 @@ from .key import CacheKey
 
 
 @fieldwise_init
-struct CacheEntry(Copyable, Movable):
+struct CacheEntry(Copyable):
     """A stored cache entry.
 
     Bodies are owned by the entry so the store can outlive the
@@ -81,7 +81,7 @@ struct CacheEntry(Copyable, Movable):
         )
 
 
-trait CacheStore(Copyable, Defaultable, Movable):
+trait CacheStore(Copyable, Defaultable):
     """Persistence interface for cached responses.
 
     Implementations must accept concurrent reads/writes from the
@@ -103,7 +103,7 @@ trait CacheStore(Copyable, Defaultable, Movable):
         ...
 
 
-struct InMemoryCacheStore(CacheStore, Copyable, Defaultable, Movable):
+struct InMemoryCacheStore(CacheStore, Copyable, Defaultable):
     """Bounded LRU-style in-memory cache store.
 
     Eviction is approximate: when ``len() >= capacity`` a new put

@@ -69,7 +69,7 @@ from .varint import decode_varint
 
 
 @fieldwise_init
-struct UnprotectedPacket(Copyable, Movable):
+struct UnprotectedPacket(Copyable):
     """The output of :func:`unprotect_initial_packet`.
 
     ``header`` is the unprotected packet header (first byte plus

@@ -46,7 +46,7 @@ from flare.tcp import TcpListener, TcpStream
 
 
 @fieldwise_init
-struct _RecordingCancelHandler(CancelHandler, Copyable, Movable):
+struct _RecordingCancelHandler(CancelHandler, Copyable):
     """``CancelHandler`` that returns 200 + the cell's cancelled-state
     so the test can assert what the handler observed at dispatch time.
     """

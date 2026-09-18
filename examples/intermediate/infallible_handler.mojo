@@ -75,7 +75,7 @@ def echo_method(req: Request) -> Response:
 
 
 @fieldwise_init
-struct GreetingProbe(Copyable, HandlerInfallible, Movable):
+struct GreetingProbe(Copyable, HandlerInfallible):
     """A health probe that carries a configurable greeting in
     struct state. The body still literally cannot fail (no parsing,
     no I/O, no allocation that can raise) but the handler needs to

@@ -66,7 +66,7 @@ comptime H3_RESPONSE_STATE_DONE: Int = 3
 
 
 @fieldwise_init
-struct Http3Response(Copyable, Movable):
+struct Http3Response(Copyable):
     """An assembled HTTP/3 response.
 
     ``status`` is the ``:status`` pseudo-header (RFC 9114 §4.3.2);
@@ -82,7 +82,7 @@ struct Http3Response(Copyable, Movable):
 
 
 @fieldwise_init
-struct Http3BodyChunk(Copyable, Movable):
+struct Http3BodyChunk(Copyable):
     """One incremental slice of a streaming HTTP/3 response body.
 
     Returned by :meth:`flare.http3.client.Http3ClientConnection.poll_body`.
@@ -96,7 +96,7 @@ struct Http3BodyChunk(Copyable, Movable):
     var done: Bool
 
 
-struct Http3ResponseReader(Copyable, Movable):
+struct Http3ResponseReader(Copyable):
     """Per-stream stateful HTTP/3 response decoder.
 
     Feed reassembled request-stream bytes via :meth:`feed`; the

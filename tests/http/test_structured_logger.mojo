@@ -99,7 +99,7 @@ def test_iso8601_handles_fractional_milliseconds() raises:
 # ── StructuredLogger.serve via fixed inner ───────────────────────────────
 
 
-struct _OK200(Copyable, Defaultable, Handler, Movable):
+struct _OK200(Copyable, Defaultable, Handler):
     """Inner handler that always returns 200 with body 'hello'
     and an X-Request-Id echo."""
 
@@ -115,7 +115,7 @@ struct _OK200(Copyable, Defaultable, Handler, Movable):
         return resp^
 
 
-struct _Raises500(Copyable, Defaultable, Handler, Movable):
+struct _Raises500(Copyable, Defaultable, Handler):
     """Inner handler that raises a known exception so the error
     path is exercised."""
 

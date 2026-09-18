@@ -160,7 +160,7 @@ def _pad(n: Int, width: Int) -> String:
 
 
 struct StructuredLogger[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """JSON-per-line request logger around the inner handler.
 

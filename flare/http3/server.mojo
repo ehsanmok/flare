@@ -122,7 +122,7 @@ struct Http3StreamType:
 # ── Configuration carrier ──────────────────────────────────────────────
 
 
-struct Http3Config(Copyable, Defaultable, Movable):
+struct Http3Config(Copyable, Defaultable):
     """Per-connection HTTP/3 settings.
 
     The server advertises these via the control stream's SETTINGS
@@ -169,7 +169,7 @@ struct Http3Config(Copyable, Defaultable, Movable):
 # ── Per-stream accumulator + event collector ──────────────────────────
 
 
-struct _Http3StreamState(Copyable, Defaultable, Movable):
+struct _Http3StreamState(Copyable, Defaultable):
     """Per-bidirectional-stream H3 server state.
 
     Carries everything that accumulates over the lifetime of a
@@ -348,7 +348,7 @@ struct _Http3EventCollector(Http3RequestEventHandler, Movable):
 # ── Per-connection driver ──────────────────────────────────────────────
 
 
-struct Http3Connection(Copyable, Defaultable, Movable):
+struct Http3Connection(Copyable, Defaultable):
     """Per-connection HTTP/3 server driver.
 
     Owned by the QUIC reactor. One instance per QUIC connection

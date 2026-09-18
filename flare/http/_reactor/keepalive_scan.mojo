@@ -70,7 +70,7 @@ def _detect_h2c_upgrade_inline(headers: HeaderMap) -> Bool:
 # ── Step result ───────────────────────────────────────────────────────────────
 
 
-struct StepResult(Copyable, ImplicitlyCopyable, Movable):
+struct StepResult(Copyable, ImplicitlyCopyable):
     """Outcome of one state-machine step.
 
     The reactor wrapper uses these fields to update its registration for

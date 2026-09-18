@@ -65,7 +65,7 @@ from flare.net import IpAddr, SocketAddr
 
 
 @fieldwise_init
-struct ProxyParseError(Copyable, Movable, Writable):
+struct ProxyParseError(Copyable, Writable):
     """Typed parse error raised by :func:`parse_proxy_v1` /
     :func:`parse_proxy_v2` / :func:`parse_proxy_protocol`.
 
@@ -98,7 +98,7 @@ struct ProxyParseError(Copyable, Movable, Writable):
 
 
 @fieldwise_init
-struct ProxyHeader(Copyable, Movable):
+struct ProxyHeader(Copyable):
     """A parsed PROXY protocol header.
 
     Fields:

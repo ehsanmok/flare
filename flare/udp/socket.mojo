@@ -46,7 +46,7 @@ from ..net._libc import (
 comptime UDP_MAX_PAYLOAD: Int = 65507
 
 
-struct DatagramTooLarge(Copyable, Movable, Writable):
+struct DatagramTooLarge(Copyable, Writable):
     """Raised when a UDP datagram exceeds the maximum allowed payload size.
 
     Fields:

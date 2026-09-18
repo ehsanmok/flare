@@ -77,7 +77,7 @@ struct WsCloseCode:
     """Server encountered an internal error."""
 
 
-struct WsProtocolError(Copyable, Movable, Writable):
+struct WsProtocolError(Copyable, Writable):
     """Raised when an incoming frame violates RFC 6455."""
 
     var message: String

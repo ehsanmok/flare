@@ -351,7 +351,7 @@ def default_literal(f: Field, res: Resolver) -> str:
 
 def emit_message(m: Message, res: Resolver) -> str:
     lines: list[str] = []
-    lines.append(f"struct {m.name}(Copyable, Movable):")
+    lines.append(f"struct {m.name}(Copyable):")
     lines.append(f'    """Generated proto3 message ``{m.name}``."""')
     lines.append("")
     for f in m.fields:
@@ -681,7 +681,7 @@ def emit_service_paths(s: Service, package: str) -> str:
 
 def emit_server_trait(s: Service, res: Resolver) -> str:
     lines: list[str] = []
-    lines.append(f"trait {s.name}Server(Copyable, Movable):")
+    lines.append(f"trait {s.name}Server(Copyable):")
     lines.append(
         f'    """Typed server surface for the ``{s.name}`` gRPC service."""'
     )
@@ -736,7 +736,7 @@ def emit_rpc_adapter(s: Service, r: Rpc, res: Resolver) -> str:
         base = "GrpcServerStreaming"
     else:
         base = "GrpcUnary"
-    lines.append(f"struct {name}[{hb}]({base}, Copyable, Movable):")
+    lines.append(f"struct {name}[{hb}]({base}, Copyable):")
     lines.append(
         f'    """Byte adapter mapping ``{s.name}.{r.name}`` onto the'
         f' runtime {base} trait."""'
@@ -795,7 +795,7 @@ def emit_rpc_adapter(s: Service, r: Rpc, res: Resolver) -> str:
 def emit_client_stub(s: Service, res: Resolver) -> str:
     lines: list[str] = []
     lines.append("@fieldwise_init")
-    lines.append(f"struct {s.name}Client(Copyable, Movable):")
+    lines.append(f"struct {s.name}Client(Copyable):")
     lines.append(
         f'    """Typed client stub for ``{s.name}``; wraps GrpcClient."""'
     )

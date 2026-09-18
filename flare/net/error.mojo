@@ -13,7 +13,7 @@ port wherever relevant.
 from std.format import Writable, Writer
 
 
-struct NetworkError(Copyable, Movable, Writable):
+struct NetworkError(Copyable, Writable):
     """Generic network error — a catch-all for OS errors without a more
     specific typed variant.
 
@@ -52,7 +52,7 @@ struct NetworkError(Copyable, Movable, Writable):
         writer.write(": ", self.message)
 
 
-struct ConnectionRefused(Copyable, Movable, Writable):
+struct ConnectionRefused(Copyable, Writable):
     """Raised when a TCP ``connect()`` fails with ``ECONNREFUSED``.
 
     Fields:
@@ -81,7 +81,7 @@ struct ConnectionRefused(Copyable, Movable, Writable):
         writer.write("ConnectionRefused: ", self.addr)
 
 
-struct ConnectionTimeout(Copyable, Movable, Writable):
+struct ConnectionTimeout(Copyable, Writable):
     """Raised when a TCP ``connect()`` times out (``ETIMEDOUT``).
 
     Fields:
@@ -110,7 +110,7 @@ struct ConnectionTimeout(Copyable, Movable, Writable):
         writer.write("ConnectionTimeout: ", self.addr)
 
 
-struct ConnectionReset(Copyable, Movable, Writable):
+struct ConnectionReset(Copyable, Writable):
     """Raised when the peer forcibly closes a connection (``ECONNRESET``).
 
     Fields:
@@ -134,7 +134,7 @@ struct ConnectionReset(Copyable, Movable, Writable):
         writer.write("ConnectionReset: ", self.addr)
 
 
-struct AddressInUse(Copyable, Movable, Writable):
+struct AddressInUse(Copyable, Writable):
     """Raised when ``bind()`` fails because the port is in use (``EADDRINUSE``).
 
     Fields:
@@ -163,7 +163,7 @@ struct AddressInUse(Copyable, Movable, Writable):
         writer.write("AddressInUse: ", self.addr)
 
 
-struct AddressParseError(Copyable, Movable, Writable):
+struct AddressParseError(Copyable, Writable):
     """Raised when an address string cannot be parsed.
 
     Fields:
@@ -189,7 +189,7 @@ struct AddressParseError(Copyable, Movable, Writable):
         writer.write("AddressParseError: invalid address '", self.input, "'")
 
 
-struct BrokenPipe(Copyable, Movable, Writable):
+struct BrokenPipe(Copyable, Writable):
     """Raised on write to a connection whose read end is closed (``EPIPE``).
 
     Fields:
@@ -215,7 +215,7 @@ struct BrokenPipe(Copyable, Movable, Writable):
             writer.write(": ", self.addr)
 
 
-struct Timeout(Copyable, Movable, Writable):
+struct Timeout(Copyable, Writable):
     """Raised when a blocking I/O operation exceeds its timeout.
 
     Fields:
@@ -252,7 +252,7 @@ struct Timeout(Copyable, Movable, Writable):
             writer.write(" (", self.ms, " ms)")
 
 
-struct DnsError(Copyable, Movable, Writable):
+struct DnsError(Copyable, Writable):
     """Raised when DNS resolution fails.
 
     Fields:

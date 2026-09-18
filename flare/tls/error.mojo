@@ -1,13 +1,14 @@
 """TLS-specific error types for ``flare.tls``.
 
-All error types implement ``Copyable``, ``Movable``, and ``Writable``
-so they can be raised, caught, printed, and logged uniformly.
+All error types implement ``Copyable`` (which implies ``Movable``) and
+``Writable`` so they can be raised, caught, printed, and logged
+uniformly.
 """
 
 from std.format import Writable, Writer
 
 
-struct TlsHandshakeError(Copyable, Movable, Writable):
+struct TlsHandshakeError(Copyable, Writable):
     """The TLS handshake failed (generic failure not covered by cert errors).
 
     Fields:
@@ -33,7 +34,7 @@ struct TlsHandshakeError(Copyable, Movable, Writable):
         writer.write("TlsHandshakeError: ", self.message)
 
 
-struct CertificateExpired(Copyable, Movable, Writable):
+struct CertificateExpired(Copyable, Writable):
     """The server certificate has passed its ``notAfter`` date.
 
     Fields:
@@ -59,7 +60,7 @@ struct CertificateExpired(Copyable, Movable, Writable):
         writer.write("CertificateExpired: subject=", self.subject)
 
 
-struct CertificateHostnameMismatch(Copyable, Movable, Writable):
+struct CertificateHostnameMismatch(Copyable, Writable):
     """The server certificate's CN/SAN does not match the target hostname.
 
     Fields:
@@ -94,7 +95,7 @@ struct CertificateHostnameMismatch(Copyable, Movable, Writable):
         )
 
 
-struct CertificateUntrusted(Copyable, Movable, Writable):
+struct CertificateUntrusted(Copyable, Writable):
     """The server certificate is not trusted by any CA in the bundle.
 
     Raised for self-signed certs, expired CAs, or missing CA chains.

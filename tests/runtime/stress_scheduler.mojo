@@ -51,7 +51,7 @@ from flare.runtime.scheduler import load_stop_flag
 
 
 @fieldwise_init
-struct _NopFrontend(Copyable, Frontend, Movable):
+struct _NopFrontend(Copyable, Frontend):
     """Test-only frontend: spin in 50 ms sleeps until ``stopping``.
 
     Mirrors the production ``HttpFrontend`` lifecycle (run_worker

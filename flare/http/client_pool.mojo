@@ -104,7 +104,7 @@ struct _ClientPoolState(Movable):
 # ── ClientPool ───────────────────────────────────────────────────────────────
 
 
-struct ClientPool(Copyable, Movable):
+struct ClientPool(Copyable):
     """Idle-connection pool handle.
 
     ``Copyable`` because the wrapped state is heap-allocated and

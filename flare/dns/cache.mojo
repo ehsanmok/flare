@@ -33,7 +33,7 @@ from .resolver import resolve
 
 
 @fieldwise_init
-struct _CachedAddrs(Copyable, Movable):
+struct _CachedAddrs(Copyable):
     """One cached resolution: the address list + its absolute expiry
     (monotonic ms)."""
 

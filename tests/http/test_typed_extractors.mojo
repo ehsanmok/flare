@@ -67,7 +67,7 @@ def test_optional_path_str_present() raises:
 
 
 @fieldwise_init
-struct _CreateUser(Copyable, Defaultable, FromJson, Movable):
+struct _CreateUser(Copyable, Defaultable, FromJson):
     var name: String
     var age: Int
 
@@ -105,7 +105,7 @@ def test_json_as_malformed_raises() raises:
 
 
 @fieldwise_init
-struct _CreateHandler(Copyable, Defaultable, Handler, Movable):
+struct _CreateHandler(Copyable, Defaultable, Handler):
     var body: JsonAs[_CreateUser]
 
     def __init__(out self):

@@ -18,7 +18,7 @@ from std.collections.span import Span
 
 
 @fieldwise_init
-struct CacheKey(Copyable, Movable):
+struct CacheKey(Copyable):
     """Opaque cache key. ``raw`` is the deterministic string used
     by store implementations."""
 

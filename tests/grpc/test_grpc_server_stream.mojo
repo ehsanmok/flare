@@ -15,7 +15,7 @@ from flare.grpc.server_stream import (
 from flare.grpc.status import GRPC_STATUS_INTERNAL, GRPC_STATUS_OK
 
 
-struct CountHandler(Copyable, GrpcServerStreaming, Movable):
+struct CountHandler(Copyable, GrpcServerStreaming):
     """Yields ``n`` messages where the request body's first byte is
     ``n`` -- the i-th message body is the single byte ``i``."""
 
@@ -36,7 +36,7 @@ struct CountHandler(Copyable, GrpcServerStreaming, Movable):
         return GrpcServerStreamReply.ok(msgs^)
 
 
-struct BoomHandler(Copyable, GrpcServerStreaming, Movable):
+struct BoomHandler(Copyable, GrpcServerStreaming):
     """Always raises -- exercises the INTERNAL fold."""
 
     def __init__(out self):

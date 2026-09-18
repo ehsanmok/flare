@@ -28,7 +28,7 @@ from flare.http.response import Response
 # ── Reusable inner handler that emits a fixed ETag + Last-Modified ────────
 
 
-struct _Etag200(Copyable, Defaultable, Handler, Movable):
+struct _Etag200(Copyable, Defaultable, Handler):
     """Inner handler that always returns 200 with a configured ETag
     + Last-Modified pair. Body is the literal ``"hello"`` (5 bytes)
     so we can assert the 304 path drops it."""
@@ -56,7 +56,7 @@ struct _Etag200(Copyable, Defaultable, Handler, Movable):
         return resp^
 
 
-struct _NoMetadata200(Copyable, Defaultable, Handler, Movable):
+struct _NoMetadata200(Copyable, Defaultable, Handler):
     """Inner handler that returns 200 without ETag / Last-Modified.
     Drives the auto-ETag path."""
 

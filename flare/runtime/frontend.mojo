@@ -41,8 +41,8 @@ with:
   iteration; when it becomes ``True`` the loop exits and the
   worker thread returns.
 
-The frontend is :class:`Movable` + :class:`Copyable` so the
-scheduler can ``H.copy()`` it once per worker before spawning;
+The frontend is :class:`Copyable` (which implies :class:`Movable`) so
+the scheduler can ``H.copy()`` it once per worker before spawning;
 each worker then owns its own copy. Frontend implementations that
 want to share expensive state across workers should put that
 state behind an :class:`UnsafePointer` or a similar shared-
@@ -50,7 +50,7 @@ reference holder so the per-worker copy stays cheap.
 """
 
 
-trait Frontend(Copyable, Deinitable, Movable):
+trait Frontend(Copyable, Deinitable):
     """Multicore-scheduler worker-target trait.
 
     Implementations bridge the scheduler's lifecycle (pthread

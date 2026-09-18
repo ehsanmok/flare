@@ -306,7 +306,7 @@ def _random_bytes(n: Int) -> List[UInt8]:
 
 
 @fieldwise_init
-struct _SessionSlot(Copyable, Movable):
+struct _SessionSlot(Copyable):
     """Per-slot rustls QUIC session state.
 
     Non-owning carrier: the per-listener slab
@@ -331,7 +331,7 @@ struct _SessionSlot(Copyable, Movable):
     treats 0 as the silent-drop path per RFC 9001 §5.2."""
 
 
-struct _CryptoStream(Copyable, Defaultable, Movable):
+struct _CryptoStream(Copyable, Defaultable):
     """Per-level inbound CRYPTO reassembly buffer.
 
     QUIC delivers CRYPTO frames carrying an offset into a
@@ -392,7 +392,7 @@ struct _CryptoStream(Copyable, Defaultable, Movable):
         _ = self.frag_data.pop()
 
 
-struct _CryptoReasm(Copyable, Defaultable, Movable):
+struct _CryptoReasm(Copyable, Defaultable):
     """Per-slot CRYPTO reassembly across encryption levels.
 
     Indexed by :class:`QuicEncryptionLevel` codepoint (INITIAL=0,

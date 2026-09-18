@@ -52,7 +52,7 @@ def _lower(s: String) -> String:
     return ascii_unchecked_string(Span[UInt8, _](buf))
 
 
-struct HeaderInjectionError(Copyable, Movable, Writable):
+struct HeaderInjectionError(Copyable, Writable):
     """Raised when a header key or value contains CR or LF bytes."""
 
     var field: String

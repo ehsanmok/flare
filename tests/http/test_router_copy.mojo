@@ -41,7 +41,7 @@ def _hello(req: Request) raises -> Response:
 
 
 @fieldwise_init
-struct _StructEcho(Copyable, Handler, Movable):
+struct _StructEcho(Copyable, Handler):
     var label: String
 
     def serve(self, req: Request) raises -> Response:

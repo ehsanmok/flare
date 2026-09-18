@@ -32,7 +32,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct NewArticle(Copyable, Defaultable, FromJson, Movable):
+struct NewArticle(Copyable, Defaultable, FromJson):
     """Typed request body for ``POST /articles``."""
 
     var title: String
@@ -48,7 +48,7 @@ struct NewArticle(Copyable, Defaultable, FromJson, Movable):
 
 
 @fieldwise_init
-struct CreateArticle(Copyable, Defaultable, Handler, Movable):
+struct CreateArticle(Copyable, Defaultable, Handler):
     var body: JsonAs[NewArticle]
 
     def __init__(out self):
@@ -65,7 +65,7 @@ struct CreateArticle(Copyable, Defaultable, Handler, Movable):
 
 
 @fieldwise_init
-struct ListOrGetItem(Copyable, Defaultable, Handler, Movable):
+struct ListOrGetItem(Copyable, Defaultable, Handler):
     """Serves both ``/items`` (list) and ``/items/:id`` (single)."""
 
     var id: OptionalPathInt["id"]

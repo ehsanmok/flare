@@ -53,7 +53,7 @@ Example:
     from std.collections import Optional
 
     @fieldwise_init
-    struct CountingSource(ChunkSource, Copyable, Movable):
+    struct CountingSource(ChunkSource, Copyable):
         var n: Int
 
         def next(mut self, cancel: Cancel) raises -> Optional[List[UInt8]]:

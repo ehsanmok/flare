@@ -71,7 +71,7 @@ def _bind_server() raises -> QuicListener:
 
 
 @fieldwise_init
-struct _OkHandler(Copyable, Handler, Movable):
+struct _OkHandler(Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         return ok(String("h3-server"))
 

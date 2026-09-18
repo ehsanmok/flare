@@ -45,7 +45,7 @@ from flare.http import (
 
 
 @fieldwise_init
-struct SlowHandler(CancelHandler, Copyable, Movable):
+struct SlowHandler(CancelHandler, Copyable):
     """Polls cancel between fake-DB-call steps; short-circuits on
     the first observed cancellation with a partial result.
 
@@ -70,7 +70,7 @@ struct SlowHandler(CancelHandler, Copyable, Movable):
 
 
 @fieldwise_init
-struct PlainGreeter(Copyable, Defaultable, Handler, Movable):
+struct PlainGreeter(Copyable, Defaultable, Handler):
     """A plain ``Handler`` that does not observe cancellation.
 
     Used below to demonstrate the ``WithCancel[H]`` adapter that

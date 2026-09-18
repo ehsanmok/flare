@@ -41,7 +41,7 @@ from ..utils.dylib import find_flare_lib, dl_sym
 
 
 struct Logger[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Log method, url, status, and latency around the inner handler.
 
@@ -96,7 +96,7 @@ struct Logger[Inner: Handler & Copyable & Defaultable](
 
 
 struct RequestId[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Echo the inbound ``X-Request-Id`` header back on the response.
 
@@ -125,7 +125,7 @@ struct RequestId[Inner: Handler & Copyable & Defaultable](
 # ── Compress ───────────────────────────────────────────────────────────────
 
 
-struct _AcceptEncodingPick(Copyable, Defaultable, Movable):
+struct _AcceptEncodingPick(Copyable, Defaultable):
     """Result of parsing an ``Accept-Encoding`` header."""
 
     var encoding: String
@@ -323,7 +323,7 @@ def _file_exists(path: String) -> Bool:
 
 
 struct Compress[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Negotiate ``Content-Encoding`` per RFC 9110 paragraph 12.5.3.
 
@@ -396,7 +396,7 @@ struct Compress[Inner: Handler & Copyable & Defaultable](
 
 
 struct CatchPanic[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Convert any ``raise`` from the inner handler into a 500.
 

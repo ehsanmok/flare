@@ -103,7 +103,7 @@ def test_peer_extractor_default() raises:
 
 
 @fieldwise_init
-struct PeerEcho(Copyable, Defaultable, Handler, Movable):
+struct PeerEcho(Copyable, Defaultable, Handler):
     var who: Peer
 
     def __init__(out self):

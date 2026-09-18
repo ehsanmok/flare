@@ -16,7 +16,7 @@ from flare.testing import TestClient
 
 
 @fieldwise_init
-struct EchoMethodHandler(Copyable, Handler, Movable):
+struct EchoMethodHandler(Copyable, Handler):
     """Returns the request method in the body so tests can
     confirm the TestClient dispatched correctly."""
 

@@ -32,7 +32,7 @@ from ..http.proto.ascii import ascii_unchecked_string
 
 
 @fieldwise_init
-struct GrpcMetadataEntry(Copyable, Movable):
+struct GrpcMetadataEntry(Copyable):
     """Single metadata key-value pair. ``is_binary`` is derived
     from the key suffix (``-bin``) but cached for fast access."""
 
@@ -75,7 +75,7 @@ def _is_reserved(key: String) -> Bool:
     )
 
 
-struct GrpcMetadata(Copyable, Defaultable, Movable):
+struct GrpcMetadata(Copyable, Defaultable):
     """Ordered list of metadata entries.
 
     The list preserves insertion order so trailers like

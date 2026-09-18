@@ -106,7 +106,7 @@ def test_bad_request_reason_always_fixed() raises:
 
 
 @fieldwise_init
-struct _IdHandler(Copyable, Defaultable, Handler, Movable):
+struct _IdHandler(Copyable, Defaultable, Handler):
     var id: PathInt["id"]
 
     def __init__(out self):

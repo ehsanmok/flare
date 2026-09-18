@@ -153,7 +153,7 @@ def test_thousand_sequential_calls() raises:
 
 
 @fieldwise_init
-struct _SideEffect(Copyable, Movable):
+struct _SideEffect(Copyable):
     var addr: Int
 
 

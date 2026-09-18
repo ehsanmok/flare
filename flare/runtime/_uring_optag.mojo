@@ -94,7 +94,7 @@ def unpack_conn_id(user_data: UInt64) -> UInt64:
 
 
 @fieldwise_init
-struct UringCompletion(Copyable, ImplicitlyCopyable, Movable):
+struct UringCompletion(Copyable, ImplicitlyCopyable):
     """A decoded io_uring completion, suitable for the
     server reactor's hot-path dispatch.
 

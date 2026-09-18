@@ -362,7 +362,7 @@ def test_forbidden_builder() raises:
 
 
 @fieldwise_init
-struct _NeedsBearer(Copyable, Defaultable, Handler, Movable):
+struct _NeedsBearer(Copyable, Defaultable, Handler):
     var token: BearerExtract
 
     def __init__(out self):

@@ -38,7 +38,7 @@ from flare.http.streaming_serialize import serialize_streaming_response
 
 
 @fieldwise_init
-struct _OneShot(Body, Copyable, Movable):
+struct _OneShot(Body, Copyable):
     """Minimal ``Body`` impl: emits one fixed chunk then EOF.
 
     Used to drive the chunked emission path without pulling in

@@ -64,7 +64,7 @@ from .response import Response, Status
 
 
 @fieldwise_init
-struct ComptimeRoute(Copyable, Movable):
+struct ComptimeRoute(Copyable):
     """A comptime-known ``(method, pattern, handler)`` triple.
 
     All three fields share a common function-pointer signature
@@ -177,7 +177,7 @@ def _param_name(seg: String) -> String:
 # ── ComptimeRouter ──────────────────────────────────────────────────────────
 
 
-struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler, Movable):
+struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler):
     """A ``Handler`` whose route table is comptime-parametric.
 
     Parameters:

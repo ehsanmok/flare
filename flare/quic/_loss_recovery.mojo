@@ -65,7 +65,7 @@ comptime _DEFAULT_INITIAL_RTT_MS: UInt64 = 250
 
 
 @fieldwise_init
-struct SentPacket(Copyable, Movable):
+struct SentPacket(Copyable):
     """One ack-eliciting 1-RTT packet we sent and have not yet had
     acknowledged: its packet number, the exact plaintext frame bytes
     (so a retransmit re-sends the same frames under a fresh packet

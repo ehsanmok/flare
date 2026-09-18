@@ -67,7 +67,7 @@ struct _TlsPoolState(Movable):
     :meth:`acquire`. ``0`` disables timeout eviction."""
 
 
-struct TlsConnectionPool(Copyable, Movable):
+struct TlsConnectionPool(Copyable):
     """Idle TLS h1-connection pool handle (pointer-backed).
 
     ``Copyable`` because the wrapped state is heap-allocated and every

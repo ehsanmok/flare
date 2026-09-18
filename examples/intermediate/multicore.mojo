@@ -108,7 +108,7 @@ def main() raises:
     print()
     print("Production `main()` — what a real multicore server runs:")
     print("")
-    print(" # ``Router`` is now Handler & Copyable & Movable, so the")
+    print(" # ``Router`` is now Handler & Copyable, so the")
     print(" # multi-worker overload accepts it directly. Each worker")
     print(" # gets its own ``router.copy()``; the boxed handler structs")
     print(" # are shared via an internal refcount, so the per-copy cost")

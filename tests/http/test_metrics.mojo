@@ -260,7 +260,7 @@ def test_render_includes_in_flight_value() raises:
 # ── Metrics[Inner] middleware ─────────────────────────────────────────────
 
 
-struct _OK200(Copyable, Defaultable, Handler, Movable):
+struct _OK200(Copyable, Defaultable, Handler):
     def __init__(out self):
         pass
 
@@ -268,7 +268,7 @@ struct _OK200(Copyable, Defaultable, Handler, Movable):
         return Response(status=200)
 
 
-struct _Created201(Copyable, Defaultable, Handler, Movable):
+struct _Created201(Copyable, Defaultable, Handler):
     def __init__(out self):
         pass
 
@@ -276,7 +276,7 @@ struct _Created201(Copyable, Defaultable, Handler, Movable):
         return Response(status=201)
 
 
-struct _Boom(Copyable, Defaultable, Handler, Movable):
+struct _Boom(Copyable, Defaultable, Handler):
     def __init__(out self):
         pass
 

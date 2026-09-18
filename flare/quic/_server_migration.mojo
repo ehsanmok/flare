@@ -48,7 +48,7 @@ comptime _PATH_CHALLENGE_LEN: Int = 8
 """RFC 9000 sec 19.17: PATH_CHALLENGE carries exactly 8 bytes."""
 
 
-struct MigrationProbe(Copyable, Movable):
+struct MigrationProbe(Copyable):
     """Per-connection path-validation + anti-amplification state.
 
     Tracks the address currently being probed (the candidate), whether

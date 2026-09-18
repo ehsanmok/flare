@@ -227,7 +227,7 @@ from flare.http import (
 from flare.net import SocketAddr
 
 @fieldwise_init
-struct GetUser(Copyable, Defaultable, Handler, Movable):
+struct GetUser(Copyable, Defaultable, Handler):
     var id: PathInt["id"]
     var page: OptionalQueryInt["page"]
     var auth: HeaderStr["Authorization"]
@@ -301,7 +301,7 @@ from flare.http import Router, Request, Response, Handler, ok, HttpServer
 from flare.net import SocketAddr
 
 @fieldwise_init
-struct Counters(Copyable, Movable):
+struct Counters(Copyable):
     var hits: Int
 
 def home(req: Request) raises -> Response:

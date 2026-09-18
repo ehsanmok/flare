@@ -41,9 +41,9 @@ bytes consumed. The caller advances its cursor and re-invokes the
 dispatcher on the remainder until the buffer drains or a parse
 error fires.
 
-Every typed payload struct is ``Copyable`` + ``Movable`` so the
-handler can stash the dispatched value (or move it into a queue)
-without lifetime gymnastics.
+Every typed payload struct is ``Copyable`` (which implies ``Movable``)
+so the handler can stash the dispatched value (or move it into a
+queue) without lifetime gymnastics.
 
 Sans-I/O contract
 -----------------
@@ -116,7 +116,7 @@ comptime FRAME_TYPE_DATAGRAM_LEN: Int = 0x31
 
 
 @fieldwise_init
-struct DatagramFrame(Copyable, Movable):
+struct DatagramFrame(Copyable):
     """DATAGRAM (RFC 9221 §4) -- unreliable application datagram.
 
     ``has_length`` carries the wire-type distinction: ``True`` for type
@@ -131,7 +131,7 @@ struct DatagramFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct AckRange(Copyable, ImplicitlyCopyable, Movable):
+struct AckRange(Copyable, ImplicitlyCopyable):
     """One ACK range (RFC 9000 §19.3.1): ``gap`` + ``length``.
 
     The first range in an ACK frame is implicit and uses
@@ -146,7 +146,7 @@ struct AckRange(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct EcnCounts(Copyable, ImplicitlyCopyable, Movable):
+struct EcnCounts(Copyable, ImplicitlyCopyable):
     """ECN counts (§19.3.2): per-codepoint cumulative counts. Only
     present in ACK_ECN frames (type 0x03)."""
 
@@ -156,7 +156,7 @@ struct EcnCounts(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct AckFrame(Copyable, Movable):
+struct AckFrame(Copyable):
     """ACK / ACK-ECN frame payload (§19.3).
 
     ``ecn`` is populated only when the wire type is ``0x03``
@@ -173,7 +173,7 @@ struct AckFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct ResetStreamFrame(Copyable, ImplicitlyCopyable, Movable):
+struct ResetStreamFrame(Copyable, ImplicitlyCopyable):
     """RESET_STREAM (§19.4)."""
 
     var stream_id: UInt64
@@ -182,7 +182,7 @@ struct ResetStreamFrame(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct StopSendingFrame(Copyable, ImplicitlyCopyable, Movable):
+struct StopSendingFrame(Copyable, ImplicitlyCopyable):
     """STOP_SENDING (§19.5)."""
 
     var stream_id: UInt64
@@ -190,7 +190,7 @@ struct StopSendingFrame(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct CryptoFrame(Copyable, Movable):
+struct CryptoFrame(Copyable):
     """CRYPTO (§19.6) -- TLS handshake bytes carried in-band on the
     Initial / Handshake / 1-RTT crypto streams."""
 
@@ -199,7 +199,7 @@ struct CryptoFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct NewTokenFrame(Copyable, Movable):
+struct NewTokenFrame(Copyable):
     """NEW_TOKEN (§19.7) -- server-issued address-validation token
     delivered to the client for use on a future 0-RTT handshake."""
 
@@ -207,7 +207,7 @@ struct NewTokenFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct StreamFrame(Copyable, Movable):
+struct StreamFrame(Copyable):
     """STREAM (§19.8) -- payload bytes carried on a logical stream.
 
     The wire type (0x08..0x0f) encodes three flag bits:
@@ -225,14 +225,14 @@ struct StreamFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct MaxDataFrame(Copyable, ImplicitlyCopyable, Movable):
+struct MaxDataFrame(Copyable, ImplicitlyCopyable):
     """MAX_DATA (§19.9)."""
 
     var maximum_data: UInt64
 
 
 @fieldwise_init
-struct MaxStreamDataFrame(Copyable, ImplicitlyCopyable, Movable):
+struct MaxStreamDataFrame(Copyable, ImplicitlyCopyable):
     """MAX_STREAM_DATA (§19.10)."""
 
     var stream_id: UInt64
@@ -240,7 +240,7 @@ struct MaxStreamDataFrame(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct MaxStreamsFrame(Copyable, ImplicitlyCopyable, Movable):
+struct MaxStreamsFrame(Copyable, ImplicitlyCopyable):
     """MAX_STREAMS (§19.11). ``unidirectional`` carries the wire-type
     distinction (0x12 = bidi, 0x13 = uni)."""
 
@@ -249,14 +249,14 @@ struct MaxStreamsFrame(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct DataBlockedFrame(Copyable, ImplicitlyCopyable, Movable):
+struct DataBlockedFrame(Copyable, ImplicitlyCopyable):
     """DATA_BLOCKED (§19.12)."""
 
     var maximum_data: UInt64
 
 
 @fieldwise_init
-struct StreamDataBlockedFrame(Copyable, ImplicitlyCopyable, Movable):
+struct StreamDataBlockedFrame(Copyable, ImplicitlyCopyable):
     """STREAM_DATA_BLOCKED (§19.13)."""
 
     var stream_id: UInt64
@@ -264,7 +264,7 @@ struct StreamDataBlockedFrame(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct StreamsBlockedFrame(Copyable, ImplicitlyCopyable, Movable):
+struct StreamsBlockedFrame(Copyable, ImplicitlyCopyable):
     """STREAMS_BLOCKED (§19.14). ``unidirectional`` carries the wire
     distinction (0x16 = bidi, 0x17 = uni)."""
 
@@ -273,7 +273,7 @@ struct StreamsBlockedFrame(Copyable, ImplicitlyCopyable, Movable):
 
 
 @fieldwise_init
-struct NewConnectionIdFrame(Copyable, Movable):
+struct NewConnectionIdFrame(Copyable):
     """NEW_CONNECTION_ID (§19.15)."""
 
     var sequence_number: UInt64
@@ -283,21 +283,21 @@ struct NewConnectionIdFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct RetireConnectionIdFrame(Copyable, ImplicitlyCopyable, Movable):
+struct RetireConnectionIdFrame(Copyable, ImplicitlyCopyable):
     """RETIRE_CONNECTION_ID (§19.16)."""
 
     var sequence_number: UInt64
 
 
 @fieldwise_init
-struct PathChallengeFrame(Copyable, Movable):
+struct PathChallengeFrame(Copyable):
     """PATH_CHALLENGE (§19.17) -- 8 bytes of unpredictable data."""
 
     var data: List[UInt8]
 
 
 @fieldwise_init
-struct PathResponseFrame(Copyable, Movable):
+struct PathResponseFrame(Copyable):
     """PATH_RESPONSE (§19.18) -- echoes a prior PATH_CHALLENGE
     payload to confirm reachability on the new path."""
 
@@ -305,7 +305,7 @@ struct PathResponseFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct ConnectionCloseFrame(Copyable, Movable):
+struct ConnectionCloseFrame(Copyable):
     """CONNECTION_CLOSE (§19.19).
 
     ``application`` distinguishes the wire type: ``False`` is the
@@ -321,7 +321,7 @@ struct ConnectionCloseFrame(Copyable, Movable):
 
 
 @fieldwise_init
-struct HandshakeDoneFrame(Copyable, ImplicitlyCopyable, Movable):
+struct HandshakeDoneFrame(Copyable, ImplicitlyCopyable):
     """HANDSHAKE_DONE (§19.20) -- one-byte type with no payload."""
 
     pass

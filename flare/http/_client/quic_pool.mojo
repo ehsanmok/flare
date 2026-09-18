@@ -79,7 +79,7 @@ struct _QuicPoolState(Movable):
     :meth:`note_dial` -- observability + reuse assertions."""
 
 
-struct QuicConnectionPool(Copyable, Movable):
+struct QuicConnectionPool(Copyable):
     """Idle h3-connection pool handle (pointer-backed)."""
 
     var _addr: Int

@@ -25,7 +25,7 @@ from ..headers import HeaderMap
 
 
 @fieldwise_init
-struct CacheControl(Copyable, Defaultable, Movable):
+struct CacheControl(Copyable, Defaultable):
     """Parsed Cache-Control directive set.
 
     Boolean directives are True when present; numeric directives

@@ -56,7 +56,7 @@ codec boundary."""
 
 
 @fieldwise_init
-struct ConnectionId(Copyable, Movable):
+struct ConnectionId(Copyable):
     """A QUIC connection identifier (0..20 octets per §5.1.1)."""
 
     var bytes: List[UInt8]
@@ -72,7 +72,7 @@ struct ConnectionId(Copyable, Movable):
 
 
 @fieldwise_init
-struct _CidRead(Copyable, Movable):
+struct _CidRead(Copyable):
     """Internal pair: CID plus the number of wire bytes it
     occupied (length prefix + payload). Wraps the values in a
     struct so callers can transfer-move the CID out cleanly."""
@@ -105,7 +105,7 @@ def _read_cid(buf: Span[UInt8, _], offset: Int) raises -> _CidRead:
 
 
 @fieldwise_init
-struct LongHeader(Copyable, Movable):
+struct LongHeader(Copyable):
     """Parsed long-header fields.
 
     The ``payload_offset`` is the byte index inside the original
@@ -169,7 +169,7 @@ def parse_long_header(buf: Span[UInt8, _]) raises -> LongHeader:
 
 
 @fieldwise_init
-struct InitialExtras(Copyable, Movable):
+struct InitialExtras(Copyable):
     """Initial-specific extras that follow the long-header common
     prefix (§17.2.2): a length-prefixed token, then a varint
     declaring the protected payload length."""
@@ -211,7 +211,7 @@ def parse_initial_extras(
 
 
 @fieldwise_init
-struct ShortHeader(Copyable, Movable):
+struct ShortHeader(Copyable):
     """Parsed short-header (1-RTT) public fields.
 
     The DCID length is *not* on the wire; the caller passes it

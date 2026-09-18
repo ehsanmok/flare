@@ -74,7 +74,7 @@ def _f32_from_bits(bits: UInt32) -> Float32:
 # ── Writer ─────────────────────────────────────────────────────────────────────
 
 
-struct ProtoWriter(Copyable, Movable):
+struct ProtoWriter(Copyable):
     """Accumulates proto3-encoded fields into an owned byte buffer.
 
     Example:
@@ -174,7 +174,7 @@ struct ProtoWriter(Copyable, Movable):
 # ── Reader ─────────────────────────────────────────────────────────────────────
 
 
-struct ProtoReader(Copyable, Movable):
+struct ProtoReader(Copyable):
     """Walks a proto3-encoded buffer field by field.
 
     Typical loop::

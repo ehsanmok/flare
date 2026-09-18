@@ -54,7 +54,7 @@ from ..tls.rustls_quic import RustlsQuicConfig
 # -- Configuration carrier ----------------------------------------------
 
 
-struct QuicServerConfig(Copyable, Defaultable, Movable):
+struct QuicServerConfig(Copyable, Defaultable):
     """Bind-time configuration for the QUIC server reactor.
 
     Most fields have sensible production defaults; the user
@@ -152,7 +152,7 @@ struct QuicServerConfig(Copyable, Defaultable, Movable):
 # -- Per-connection driver ----------------------------------------------
 
 
-struct QuicConnection(Copyable, Movable):
+struct QuicConnection(Copyable):
     """Per-connection driver wrapping :class:`flare.quic.state.Connection`.
 
     Owned by the reactor; one instance per active connection.
@@ -511,7 +511,7 @@ struct QuicConnection(Copyable, Movable):
 # -- Connection ID table ------------------------------------------------
 
 
-struct ConnectionIdTable(Copyable, Defaultable, Movable, Sized):
+struct ConnectionIdTable(Copyable, Defaultable, Sized):
     """Per-listener routing table from Connection ID to connection.
 
     QUIC routes inbound datagrams to the right connection via

@@ -87,7 +87,7 @@ comptime STREAM_STATE_CLOSED: Int = 6
 
 
 @fieldwise_init
-struct Stream(Copyable, ImplicitlyCopyable, Movable):
+struct Stream(Copyable, ImplicitlyCopyable):
     """Per-stream state for one bidi or uni QUIC stream.
 
     The state field uses the seven STREAM_STATE_* constants;
@@ -139,7 +139,7 @@ comptime _PATH_DATA_LEN: Int = 8
 
 
 @fieldwise_init
-struct _PeerConnId(Copyable, Movable):
+struct _PeerConnId(Copyable):
     """One entry in the peer's connection-ID table (RFC 9000
     §5.1.1): a Source CID the peer issued via NEW_CONNECTION_ID
     plus its stateless-reset token. Keyed by sequence number in
@@ -151,7 +151,7 @@ struct _PeerConnId(Copyable, Movable):
 
 
 @fieldwise_init
-struct ConnectionEvents(Copyable, Movable):
+struct ConnectionEvents(Copyable):
     """Per-tick output of the connection state machine.
 
     The driver calls :func:`handle_frame_buf` (one or more times)
@@ -234,7 +234,7 @@ def empty_events() -> ConnectionEvents:
 
 
 @fieldwise_init
-struct Connection(Copyable, Movable):
+struct Connection(Copyable):
     """Top-level connection state.
 
     Holds the connection-level state, the per-stream map, and the

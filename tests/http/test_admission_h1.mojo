@@ -26,7 +26,7 @@ from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 
 @fieldwise_init
-struct OkHandler(Copyable, Handler, Movable):
+struct OkHandler(Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         return ok("OK")
 

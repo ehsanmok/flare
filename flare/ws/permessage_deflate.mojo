@@ -105,7 +105,7 @@ comptime _SYNC_FLUSH_TRAILER: List[UInt8] = [
 removes and the decoder appends back."""
 
 
-struct PermessageDeflateConfig(Copyable, Defaultable, Movable):
+struct PermessageDeflateConfig(Copyable, Defaultable):
     """Per-side knobs for the permessage-deflate extension.
 
     All four RFC 7692 §7.1 parameters are surfaced for negotiation

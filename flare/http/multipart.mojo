@@ -195,7 +195,7 @@ def _parse_disposition_param(disp: String, name: String) -> String:
     return ""
 
 
-struct MultipartPart(Copyable, Movable):
+struct MultipartPart(Copyable):
     """A single part inside a ``multipart/form-data`` body.
 
     Fields:
@@ -267,7 +267,7 @@ struct MultipartPart(Copyable, Movable):
         return ""
 
 
-struct MultipartForm(Copyable, Defaultable, Movable):
+struct MultipartForm(Copyable, Defaultable):
     """All parts of a parsed ``multipart/form-data`` body in receive order."""
 
     var parts: List[MultipartPart]

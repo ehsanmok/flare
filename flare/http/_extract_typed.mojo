@@ -32,9 +32,7 @@ from .request import Request
 
 
 @fieldwise_init
-struct OptionalPathInt[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalPathInt[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional path parameter as ``Optional[Int]``. ``value`` is
     ``None`` when the route did not capture ``name``."""
 
@@ -59,9 +57,7 @@ struct OptionalPathInt[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalPathStr[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalPathStr[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional path parameter as ``Optional[String]``."""
 
     var value: Optional[String]
@@ -83,9 +79,7 @@ struct OptionalPathStr[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalPathFloat[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalPathFloat[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional path parameter as ``Optional[Float64]``."""
 
     var value: Optional[Float64]
@@ -109,9 +103,7 @@ struct OptionalPathFloat[name: StaticString](
 
 
 @fieldwise_init
-struct OptionalPathBool[name: StaticString](
-    Copyable, Defaultable, Extractor, Movable
-):
+struct OptionalPathBool[name: StaticString](Copyable, Defaultable, Extractor):
     """Optional path parameter as ``Optional[Bool]``."""
 
     var value: Optional[Bool]
@@ -137,7 +129,7 @@ struct OptionalPathBool[name: StaticString](
 # ── Typed JSON body extraction ──────────────────────────────────────────────
 
 
-trait FromJson(Copyable, Defaultable, Deinitable, Movable):
+trait FromJson(Copyable, Defaultable, Deinitable):
     """A type that can populate itself from a parsed JSON ``Value``.
 
     Implement ``parse_json`` to read the decoded document into ``self``
@@ -151,7 +143,7 @@ trait FromJson(Copyable, Defaultable, Deinitable, Movable):
         from flare.http import FromJson
 
         @fieldwise_init
-        struct CreateUser(Copyable, Defaultable, FromJson, Movable):
+        struct CreateUser(Copyable, Defaultable, FromJson):
             var name: String
             var age: Int
 
@@ -169,7 +161,7 @@ trait FromJson(Copyable, Defaultable, Deinitable, Movable):
         ...
 
 
-struct JsonAs[T: FromJson](Copyable, Defaultable, Extractor, Movable):
+struct JsonAs[T: FromJson](Copyable, Defaultable, Extractor):
     """Extracts + deserializes the request body into a typed ``T: FromJson``.
 
     The typed counterpart to :struct:`Json` (which yields a dynamic
@@ -180,7 +172,7 @@ struct JsonAs[T: FromJson](Copyable, Defaultable, Extractor, Movable):
     Example:
         ```mojo
         @fieldwise_init
-        struct Create(Copyable, Defaultable, Handler, Movable):
+        struct Create(Copyable, Defaultable, Handler):
             var body: JsonAs[CreateUser]
 
             def __init__(out self):

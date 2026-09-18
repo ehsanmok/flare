@@ -53,7 +53,7 @@ comptime H3_SETTINGS_ENABLE_CONNECT_PROTOCOL: UInt64 = 0x08
 
 
 @fieldwise_init
-struct Http3FrameType(Copyable, Movable):
+struct Http3FrameType(Copyable):
     """Wraps a varint-encoded frame type. ``raw`` is the wire
     value; ``is_known()`` checks whether the type is one of the
     seven core types defined by RFC 9114. Receivers must ignore
@@ -84,7 +84,7 @@ struct Http3FrameType(Copyable, Movable):
 
 
 @fieldwise_init
-struct Http3Frame(Copyable, Movable):
+struct Http3Frame(Copyable):
     """Parsed HTTP/3 frame: type + payload bytes.
 
     ``payload`` is a deep copy of the wire bytes that follow the
@@ -162,7 +162,7 @@ def decode_http3_frame(buf: Span[UInt8, _]) raises -> Http3Frame:
 
 
 @fieldwise_init
-struct Http3Setting(Copyable, Movable):
+struct Http3Setting(Copyable):
     """A single ``identifier: value`` pair inside a SETTINGS
     frame's payload."""
 

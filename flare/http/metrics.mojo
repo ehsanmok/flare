@@ -288,7 +288,7 @@ def _bucket_le_label(idx: Int) -> String:
 # ── MetricsRegistry ─────────────────────────────────────────────────────────
 
 
-struct MetricsRegistry(Copyable, Defaultable, Movable):
+struct MetricsRegistry(Copyable, Defaultable):
     """Counter / gauge / histogram aggregate.
 
     The registry is the storage backing one ``Metrics[Inner]``
@@ -479,7 +479,7 @@ def _format_seconds(micros: UInt64) -> String:
 
 
 struct Metrics[Inner: Handler & Copyable & Defaultable](
-    Copyable, Defaultable, Handler, Movable
+    Copyable, Defaultable, Handler
 ):
     """Prometheus-text-exposition middleware around an inner
     handler.

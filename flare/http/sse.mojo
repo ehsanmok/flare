@@ -67,7 +67,7 @@ comptime SSE_HEARTBEAT_MS: Int = 15_000
 
 
 @fieldwise_init
-struct SseEvent(Copyable, Movable):
+struct SseEvent(Copyable):
     """A single Server-Sent Event.
 
     Fields:
@@ -164,7 +164,7 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
 # ── SseChannel ──────────────────────────────────────────────────────────────
 
 
-struct SseChannel(ChunkSource, Copyable, Movable):
+struct SseChannel(ChunkSource, Copyable):
     """An in-memory FIFO of :class:`SseEvent` values + a closed flag.
 
     Pattern:

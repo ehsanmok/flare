@@ -315,7 +315,7 @@ def test_router_is_handler() raises:
 
 
 @fieldwise_init
-struct _StatefulGreeter(Copyable, Handler, Movable):
+struct _StatefulGreeter(Copyable, Handler):
     """Handler with state that shows the boxed value survives
     registration + dispatch."""
 
@@ -396,7 +396,7 @@ def test_router_405_with_struct_handler_present() raises:
     assert_true(allow.find("GET") >= 0)
 
 
-struct _IdEcho(Copyable, Defaultable, Handler, Movable):
+struct _IdEcho(Copyable, Defaultable, Handler):
     """Stateless Handler used by
     ``test_router_struct_handler_path_param_capture``. Echoes the
     captured ``:id`` path param.

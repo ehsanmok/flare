@@ -35,7 +35,7 @@ comptime EVENT_HUP: Int = 8
 comptime WAKEUP_TOKEN: UInt64 = 0xFFFF_FFFF_FFFF_FFFF
 
 
-struct Event(Copyable, ImplicitlyCopyable, Movable):
+struct Event(Copyable, ImplicitlyCopyable):
     """A readiness event for a single registered fd.
 
     Fields:

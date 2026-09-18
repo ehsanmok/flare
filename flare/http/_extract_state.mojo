@@ -10,7 +10,7 @@ from .request import Request
 
 
 struct State[T: Copyable & Defaultable & Deinitable](
-    Copyable, Defaultable, Extractor, Movable
+    Copyable, Defaultable, Extractor
 ):
     """A handler field carrying registration-time state, not request data.
 
@@ -21,7 +21,7 @@ struct State[T: Copyable & Defaultable & Deinitable](
     DB pool, config, a cache handle -- next to the request-derived
     extractor fields. The direct analogue of axum's ``State(db)``.
 
-    ``T`` must be ``Copyable & Defaultable & Movable`` (the same bound
+    ``T`` must be ``Copyable & Defaultable & Deinitable`` (the same bound
     the enclosing handler struct needs). See :class:`Extracted` for a
     full registration example.
     """
