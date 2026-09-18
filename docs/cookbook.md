@@ -55,6 +55,7 @@ basics.
 | [`forms.mojo`](../examples/intermediate/forms.mojo) | `application/x-www-form-urlencoded` parsing + the `Form` extractor |
 | [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo) | `multipart/form-data` (file uploads) + the `Multipart` extractor |
 | [`sessions.mojo`](../examples/intermediate/sessions.mojo) | Typed `Session[T]` over `CookieSessionStore` (HMAC-SHA256 signed) |
+| [`http_ws_one_port.mojo`](../examples/intermediate/http_ws_one_port.mojo) | HTTP and WebSocket served by one `HttpServer` on one port, via `ServerConfig.ws_handler` / `serve_ws_upgrade` |
 | [`cors.mojo`](../examples/intermediate/cors.mojo) | `Cors` permissive vs allowlist + preflight + credentials |
 | [`static_files.mojo`](../examples/intermediate/static_files.mojo) | `FileServer` with HEAD + Range + path safety |
 | [`brotli.mojo`](../examples/intermediate/brotli.mojo) | `compress_brotli` / `decompress_brotli` + `Compress` middleware emitting `br` |
@@ -147,6 +148,8 @@ natural.
 | Tune HTTP/2 SETTINGS | [`http2_config.mojo`](../examples/advanced/http2_config.mojo) |
 | Make HTTP/2 client requests (h2c via prior knowledge; `https://` auto-negotiates h2 vs h1.1 via ALPN) | [`http2_client.mojo`](../examples/advanced/http2_client.mojo) |
 | Serve HTTP/1.1 + HTTP/2 from one port | [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
+| Serve HTTP and WebSocket from one port | [`http_ws_one_port.mojo`](../examples/intermediate/http_ws_one_port.mojo) -- set `ServerConfig.ws_handler` (and `ws_offload=True` to give each socket its own thread), or call `serve_ws_upgrade` |
+| Bound a slow or silent peer on the client | `HttpClient.with_read_timeout(ms)` arms `SO_RCVTIMEO` for each read; the `timeout_ms` constructor argument bounds the connect and, on `https://`, the TLS handshake. There is no whole-request deadline yet |
 | AF_UNIX sidecar IPC | [`uds_sidecar.mojo`](../examples/advanced/uds_sidecar.mojo) |
 | Proxy an external producer's stream with end-to-end backpressure | [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) |
 | Even out skewed-keepalive load | [`work_stealing.mojo`](../examples/advanced/work_stealing.mojo) |

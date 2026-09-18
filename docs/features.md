@@ -535,7 +535,23 @@ request id but never echoed to the client. See
 `ServerConfig` defaults (override per-server): `max_header_size` (8192 B),
 `max_body_size` (10 MiB), `max_keepalive_requests` (100), `idle_timeout_ms`
 (500), `read_body_timeout_ms` (30_000), plus `request_timeout_ms` /
-`handler_timeout_ms`. Build-time invariants (e.g. `max_body_size >=
+`handler_timeout_ms`.
+
+WebSocket on the same port: set `ServerConfig.ws_handler` to a
+`WsHandlerFn` and any request that arrives with a valid RFC 6455
+upgrade is handed to it, while everything else goes to the ordinary
+`Handler`. `ServerConfig.ws_offload` (default `False`) moves each
+upgraded socket onto its own detached thread, which suits long-lived
+connections that would otherwise occupy a reactor slot. `HttpServer
+.serve_ws_upgrade(fn, ws_fn)` wires the same two fields for you.
+
+Client-side timeouts: `HttpClient(timeout_ms=...)` bounds the TCP
+connect and, on `https://`, the TLS handshake. `with_read_timeout(ms)`
+arms `SO_RCVTIMEO` so a peer that goes silent mid-body cannot park the
+caller. Both are per-phase bounds; there is no whole-request deadline
+yet. Cleartext pooled sockets are re-armed on checkout, pooled TLS
+connections keep whatever was armed when they were dialled, and
+lowering the value to `0` clears neither. Build-time invariants (e.g. `max_body_size >=
 max_header_size`) are checked by Mojo `comptime assert` when used with
 `serve_comptime[handler, config]`.
 

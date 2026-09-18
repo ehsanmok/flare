@@ -145,7 +145,7 @@ echo "── running examples ──"
 EXAMPLES=()
 while IFS= read -r e; do [ -n "$e" ] && EXAMPLES+=("$e"); done < <(git ls-files 'examples/**/*.mojo')
 if [ "${#EXAMPLES[@]}" -lt 50 ]; then
-  echo "ERROR: found only ${#EXAMPLES[@]} examples; expected 68." >&2
+  echo "ERROR: found only ${#EXAMPLES[@]} examples; expected at least 50." >&2
   echo "       Refusing to report a pass over a truncated list." >&2
   exit 1
 fi

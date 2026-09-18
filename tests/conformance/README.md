@@ -49,7 +49,7 @@ fixture files in the format the conformance runner consumes (see
 Vendoring policy:
 
 1. **License audit first.** The corpus license must be compatible with
-   flare's Apache 2.0. Acceptable upstream licenses: Apache 2.0, MIT,
+   flare's MIT licence. Acceptable upstream licenses: Apache 2.0, MIT,
    BSD, ISC, CC0. If unsure, hand-write the fixtures from the RFC text
    instead.
 2. **Verbatim copies, no edits.** Fixture data files are mirrored

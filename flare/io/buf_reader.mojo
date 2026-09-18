@@ -32,7 +32,7 @@ trait Readable(Deinitable, Movable):
     Example:
         ```mojo
         struct MyStream(Readable):
-            def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+            def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
                 ...
         ```
     """

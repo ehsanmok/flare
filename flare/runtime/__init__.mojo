@@ -1,9 +1,20 @@
 """``flare.runtime`` — event-loop primitives for the Stage 1 reactor.
 
-Public exports:
-    Reactor, Event, INTEREST_READ, INTEREST_WRITE,
-    EVENT_READABLE, EVENT_WRITABLE, EVENT_ERROR, EVENT_HUP,
-    WAKEUP_TOKEN, num_cpus, default_worker_count
+Public exports, by area:
+
+- Reactor: ``Reactor``, ``Event``, ``INTEREST_READ``,
+  ``INTEREST_WRITE``, ``EVENT_READABLE``, ``EVENT_WRITABLE``,
+  ``EVENT_ERROR``, ``EVENT_HUP``, ``WAKEUP_TOKEN``.
+- Scheduling: ``Scheduler``, ``Frontend``, ``TimerWheel``,
+  ``num_cpus``, ``default_worker_count``, ``block_in_pool``.
+- Buffers and memory: ``Pool``, ``BufferPool``, ``BufferHandle``,
+  ``IoVecBuf``, ``writev_buf``.
+- Cross-worker handoff: ``HandoffQueue``, ``WorkerHandoffPool``,
+  ``HandoffPolicy``.
+- Misc: ``DateCache``, the io_uring block, and the time helpers.
+
+Read the module source for the authoritative list; names here that are
+not re-exported from this barrel carry no stability guarantee.
 
 ``Reactor`` wraps ``epoll`` (Linux) and ``kqueue`` (macOS) behind a uniform
 API. Use it to build single-threaded servers that handle many concurrent

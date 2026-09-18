@@ -8,7 +8,7 @@ accepted connection and dispatches HTTP/1.1 or HTTP/2 to the
 same handler. ``HttpClient.get("https://...")`` advertises ALPN
 ``["h2", "http/1.1"]`` and switches wires from what the server
 picks. The application surface (``Router``,
-middleware, typed extractors, ``Auth``, ``Session[T]``) doesn't
+middleware, typed extractors, ``Auth``, ``Session``) doesn't
 know which wire is talking to it.
 
 Small FFI footprint: libc syscalls, OpenSSL for TLS, zlib +
@@ -62,7 +62,7 @@ extractors (``PathInt`` / ``QueryInt`` /
 generic middleware (``Logger`` / ``RequestId`` / ``Compress`` /
 ``CatchPanic``), ``Cors``, ``FileServer`` with HEAD + Range,
 gzip + brotli content negotiation, RFC 6265 cookie jars,
-HMAC-SHA256 signed cookies, and typed ``Session[T]`` stores.
+HMAC-SHA256 signed cookies, and signed ``Session`` stores.
 
 ## Architecture
 
@@ -242,7 +242,7 @@ struct GetUser(Copyable, Defaultable, Handler):
 
 def main() raises:
     var r = Router()
-    r.get[Extracted[GetUser]]("/users/:id", Extracted[GetUser]())
+    r.get("/users/:id", Extracted[GetUser]())
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve(r^)
 ```
@@ -596,8 +596,8 @@ def main() raises:
 # flare application reaches for. Lower-level codecs (HTTP/2 frames,
 # QUIC varints, HPACK Huffman, gRPC LPM internals, runtime advanced
 # primitives, internal SIMD / intern helpers) live behind their
-# respective submodules. For an "everything at the top level" feel,
-# use ``from flare.prelude import *``.
+# respective submodules. ``flare.prelude`` exports this same list --
+# it is a single-import alias for it, not a wider surface.
 # ─────────────────────────────────────────────────────────────────────────
 
 # Errors

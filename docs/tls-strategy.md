@@ -7,7 +7,7 @@ reload, session resumption, and ALPN dispatch, with new
 features layered on top -- ``WsAutoClient`` advertises ALPN on
 ``wss://``, the ``HttpClient`` over ``https://`` advertises
 ``["h2", "http/1.1"]``. This page documents the rationale, the
-boundaries, and the planned rustls-for-QUIC direction that lands
+boundaries, and the rustls-for-QUIC direction that landed
 alongside the QUIC server.
 
 ## Current posture
@@ -96,7 +96,7 @@ of conformance suites (NIST SP 800-52, BoringSSL test vectors).
 That is the same investment as the rest of flare's HTTP/2 + WS
 + runtime layers combined. The cost is not justified.
 
-## Why rustls for QUIC (planned)
+## Why rustls for QUIC
 
 QUIC has a different TLS shape than TLS-over-TCP: the handshake
 runs inside QUIC frames, the keys are derived per-encryption-

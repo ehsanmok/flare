@@ -18,8 +18,9 @@ provides:
   wire bytes.
 - :class:`InMemoryCacheStore` — minimal LRU-bounded store.
 
-The middleware shim that *uses* this layer (``Cache[Inner, S]``)
-lands once the store + key derivation surface stabilises.
+The middleware shim that *uses* this layer, ``Cache[Inner, S]``,
+ships and is exported from the root package alongside
+:class:`InMemoryCacheStore`.
 """
 
 from .control import (
