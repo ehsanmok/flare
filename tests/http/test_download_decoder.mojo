@@ -16,11 +16,13 @@ struct Pieces(Movable, Readable):
         self.pos = 0
         self.cap = cap
 
-    def read(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises -> Int:
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
         var n = min(self.cap, min(size, len(self.bytes) - self.pos))
         if n > 0:
             _ = external_call["memcpy", NoneType, Int, Int, Int](
-                Int(buf), Int(self.bytes.unsafe_ptr() + self.pos), n
+                Int(buf),
+                Int(self.bytes.unsafe_ptr().unsafe_offset(self.pos)),
+                n,
             )
         self.pos += n
         return n
