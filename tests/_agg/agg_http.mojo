@@ -612,6 +612,24 @@ from test_download_decoder import (
 from test_download_decoder import (
     test_h1_header_limit_and_invalid_cap as test_download_decoder__test_h1_header_limit_and_invalid_cap,
 )
+from test_download_decoder import (
+    test_h1_rejects_smuggling_shaped_heads as test_download_decoder__test_h1_rejects_smuggling_shaped_heads,
+)
+from test_download_decoder import (
+    test_h1_rejects_whitespace_in_chunk_size as test_download_decoder__test_h1_rejects_whitespace_in_chunk_size,
+)
+from test_download_decoder import (
+    test_h1_connect_2xx_has_no_body as test_download_decoder__test_h1_connect_2xx_has_no_body,
+)
+from test_download_decoder import (
+    test_h1_eof_delimited_body as test_download_decoder__test_h1_eof_delimited_body,
+)
+from test_download_decoder import (
+    test_h1_rejects_upgrade_and_out_of_range_status as test_download_decoder__test_h1_rejects_upgrade_and_out_of_range_status,
+)
+from test_download_decoder import (
+    test_h1_rejects_oversized_chunk_size_and_bad_trailers as test_download_decoder__test_h1_rejects_oversized_chunk_size_and_bad_trailers,
+)
 from test_ergonomics import (
     test_b64_encode_empty as test_ergonomics__test_b64_encode_empty,
 )
@@ -4022,6 +4040,18 @@ def main() raises:
     ]()
     suite.test[test_download_decoder__test_h1_bodyless_and_invalid_framing]()
     suite.test[test_download_decoder__test_h1_header_limit_and_invalid_cap]()
+    suite.test[test_download_decoder__test_h1_rejects_smuggling_shaped_heads]()
+    suite.test[
+        test_download_decoder__test_h1_rejects_whitespace_in_chunk_size
+    ]()
+    suite.test[test_download_decoder__test_h1_connect_2xx_has_no_body]()
+    suite.test[test_download_decoder__test_h1_eof_delimited_body]()
+    suite.test[
+        test_download_decoder__test_h1_rejects_upgrade_and_out_of_range_status
+    ]()
+    suite.test[
+        test_download_decoder__test_h1_rejects_oversized_chunk_size_and_bad_trailers
+    ]()
     # tests/http/test_ergonomics.mojo
     suite.test[test_ergonomics__test_b64_encode_empty]()
     suite.test[test_ergonomics__test_b64_encode_short]()

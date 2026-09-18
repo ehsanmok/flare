@@ -115,18 +115,36 @@ struct HttpDownload[R: Readable & Movable](Movable):
                 break
             self.headers = HeaderMap()
 
-        if method.upper() == "HEAD" or self.status == 204 or self.status == 304:
+        # RFC 9110 sec 9.3.6: a 2xx to CONNECT has no body either -- the
+        # connection becomes a tunnel. Without this arm such a response
+        # carries neither Content-Length nor Transfer-Encoding, falls
+        # through to _DL_MODE_CLOSE below, and the reader starts handing
+        # back tunnel bytes as though they were a response body.
+        var verb = method.upper()
+        if (
+            verb == "HEAD"
+            or self.status == 204
+            or self.status == 304
+            or (verb == "CONNECT" and self.status >= 200 and self.status < 300)
+        ):
             self._done = True
             self._buf = List[UInt8]()
             return
 
         var content_length = -1
         var lengths = self.headers.get_all("content-length")
+        # Any repeat is refused, even when the values agree. RFC 9112
+        # sec 6.3 allows a single value; the server side of this tree
+        # refuses duplicates by default
+        # (allow_multiple_content_length in flare.http.proto.h1_leniency,
+        # whose docstring records that the canonical answer is 400 even
+        # when the values match). One answer per repo: a client that
+        # agrees with the origin about framing is worth more than one
+        # extra accepted response.
+        if len(lengths) > 1:
+            raise NetworkError("HTTP download: duplicate Content-Length")
         for i in range(len(lengths)):
-            var value = _parse_decimal(lengths[i])
-            if content_length >= 0 and value != content_length:
-                raise NetworkError("HTTP download: conflicting Content-Length")
-            content_length = value
+            content_length = _parse_decimal(lengths[i])
         var encodings = self.headers.get_all("transfer-encoding")
         if len(encodings) > 0:
             if len(encodings) != 1 or encodings[0].lower() != "chunked":
@@ -155,14 +173,33 @@ struct HttpDownload[R: Readable & Movable](Movable):
 
         for li in range(1, len(lines)):
             var ln = lines[li]
+            var raw = ln.as_bytes()
+            # RFC 9112 sec 5.2: a line starting with SP or HTAB is an
+            # obs-fold continuation of the previous field. It is not a
+            # field line, and it must not become one -- a folded
+            # "X-Foo: bar\r\n evil: value" would otherwise appear
+            # downstream as a genuine "evil" header, indistinguishable
+            # from one the origin sent. The server side refuses obs-fold
+            # by default (allow_obs_fold in flare.http.proto.h1_leniency)
+            # and so does this reader.
+            if len(raw) > 0 and (raw[0] == 32 or raw[0] == 9):
+                raise NetworkError(
+                    "HTTP download: obs-fold continuation line rejected"
+                )
             var colon = ln.find(":")
             if colon <= 0:
                 raise NetworkError("HTTP download: malformed response header")
-            var k = (
-                String(String(unsafe_from_utf8=ln.as_bytes()[:colon]))
-                .strip()
-                .lower()
-            )
+            # RFC 9112 sec 5.1: no whitespace is allowed between the
+            # field name and the colon. "Content-Length : 5" stripped to
+            # "content-length" is the classic smuggling vector, named as
+            # such by allow_whitespace_before_colon on the server side.
+            if raw[colon - 1] == 32 or raw[colon - 1] == 9:
+                raise NetworkError(
+                    "HTTP download: whitespace before header colon"
+                )
+            var k = String(
+                String(unsafe_from_utf8=ln.as_bytes()[:colon])
+            ).lower()
             var v = String(
                 String(unsafe_from_utf8=ln.as_bytes()[colon + 1 :])
             ).strip()
@@ -279,7 +316,14 @@ struct HttpDownload[R: Readable & Movable](Movable):
             var size_str = line if semi < 0 else String(
                 unsafe_from_utf8=line.as_bytes()[:semi]
             )
-            var size = _parse_hex(String(String(size_str).strip()))
+            # No strip(). Leading or trailing whitespace in a chunk-size
+            # line is a request-smuggling primitive: " 3" and "3 " must
+            # not both mean 3. _parse_hex rejects any byte outside
+            # [0-9a-fA-F], which matches scan_chunked_end in
+            # flare.http.proto.chunked -- the repo's other chunked
+            # decoder -- and matches the strict chunk terminator this
+            # layer enforces just above.
+            var size = _parse_hex(String(size_str))
             if size == 0:
                 self._read_trailers()
                 self._done = True
