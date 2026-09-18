@@ -33,6 +33,7 @@ from flare.net._libc import (
     _strerror,
     get_errno,
 )
+from flare.tcp import TcpStream
 from flare.tls import TlsConfig, TlsStream
 from flare.http import (
     FnHandler,
@@ -491,6 +492,91 @@ def test_https_alpn_negotiates_h2() raises:
         cfg.alpn.append("h2")
         cfg.alpn.append("http/1.1")
         var s = TlsStream.connect("localhost", port, cfg^)
+        negotiated = s.alpn_selected()
+        s.close()
+    except:
+        pass
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(negotiated, "h2")
+
+
+def test_alpn_is_offered_by_connect_timeout() raises:
+    """``connect_timeout`` must offer ALPN, like ``connect`` does.
+
+    Only ``TlsStream.connect`` set the ALPN protocol list; the three
+    other entry points built their ``SSL_CTX`` without it, so anything
+    dialled through them silently negotiated nothing. ``HttpClient``
+    reaches TLS through ``connect_timeout`` and ``connect_over_tcp``,
+    never ``connect``, so on the pre-fix build the HTTP client could not
+    negotiate HTTP/2 over TLS at all regardless of what it advertised.
+    """
+    var srv = HttpServer.bind_tls(
+        SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
+        _SERVER_CRT,
+        _SERVER_KEY,
+        alpn=_alpn_h2_first(),
+    )
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_hello)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var negotiated = String("")
+    try:
+        var cfg = TlsConfig(ca_bundle=_CA_CRT)
+        cfg.alpn = List[String]()
+        cfg.alpn.append("h2")
+        cfg.alpn.append("http/1.1")
+        var s = TlsStream.connect_timeout("localhost", port, cfg^, 5000)
+        negotiated = s.alpn_selected()
+        s.close()
+    except:
+        pass
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(negotiated, "h2")
+
+
+def test_alpn_is_offered_by_connect_over_tcp() raises:
+    """``connect_over_tcp`` must offer ALPN too.
+
+    This is the path a proxied HTTPS request takes after the CONNECT
+    tunnel is established, and the gRPC client's TLS path.
+    """
+    var srv = HttpServer.bind_tls(
+        SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
+        _SERVER_CRT,
+        _SERVER_KEY,
+        alpn=_alpn_h2_first(),
+    )
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_hello)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var negotiated = String("")
+    try:
+        var cfg = TlsConfig(ca_bundle=_CA_CRT)
+        cfg.alpn = List[String]()
+        cfg.alpn.append("h2")
+        cfg.alpn.append("http/1.1")
+        var tcp = TcpStream.connect(SocketAddr(IpAddr.parse("127.0.0.1"), port))
+        var s = TlsStream.connect_over_tcp(tcp^, "localhost", cfg^)
         negotiated = s.alpn_selected()
         s.close()
     except:

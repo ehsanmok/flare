@@ -31,6 +31,12 @@ from test_https_reactor import (
     test_https_alpn_negotiates_h2 as test_https_reactor__test_https_alpn_negotiates_h2,
 )
 from test_https_reactor import (
+    test_alpn_is_offered_by_connect_timeout as test_https_reactor__test_alpn_is_offered_by_connect_timeout,
+)
+from test_https_reactor import (
+    test_alpn_is_offered_by_connect_over_tcp as test_https_reactor__test_alpn_is_offered_by_connect_over_tcp,
+)
+from test_https_reactor import (
     test_https_alpn_h2_is_served as test_https_reactor__test_https_alpn_h2_is_served,
 )
 from test_https_reactor import (
@@ -380,6 +386,8 @@ def main() raises:
         test_https_reactor__test_https_single_worker_explicit_never_answers_cleartext
     ]()
     suite.test[test_https_reactor__test_https_alpn_negotiates_h2]()
+    suite.test[test_https_reactor__test_alpn_is_offered_by_connect_timeout]()
+    suite.test[test_https_reactor__test_alpn_is_offered_by_connect_over_tcp]()
     suite.test[test_https_reactor__test_https_alpn_h2_is_served]()
     suite.test[
         test_https_reactor__test_stalled_handshake_does_not_block_other_clients
