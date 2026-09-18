@@ -78,6 +78,9 @@ from test_prelude_surface import (
 from test_prelude_surface import (
     test_prelude_is_not_the_wide_surface as test_prelude_surface__test_prelude_is_not_the_wide_surface,
 )
+from test_prelude_surface import (
+    test_exported_symbols_can_be_written_with as test_prelude_surface__test_exported_symbols_can_be_written_with,
+)
 
 
 def main() raises:
@@ -117,4 +120,7 @@ def main() raises:
         test_prelude_surface__test_request_roundtrips_through_either_import
     ]()
     suite.test[test_prelude_surface__test_prelude_is_not_the_wide_surface]()
+    suite.test[
+        test_prelude_surface__test_exported_symbols_can_be_written_with
+    ]()
     suite^.run()

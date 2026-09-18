@@ -626,12 +626,20 @@ from .http.request_view import RequestView
 from .http.url import Url, UrlParseError
 from .http.headers import HeaderMap, HeaderInjectionError
 from .http.cancel import Cancel
-from .http.handler import Handler, CancelHandler, ViewHandler, WithCancel
+from .http.handler import (
+    Handler,
+    CancelHandler,
+    ViewHandler,
+    WithCancel,
+    WithViewCancel,
+    HandlerInfallible,
+    WithRaises,
+)
 from .http.router import Router
 from .http.routes import ComptimeRoute, ComptimeRouter
 from .http.auth import Auth, BasicAuth, BearerAuth
 from .http.error import HttpError, TooManyRedirects
-from .http.static_response import precompute_response
+from .http.static_response import precompute_response, StaticResponse
 from .http.cookie import Cookie, CookieJar, parse_set_cookie_header
 
 # Streaming-proxy surface (typed streaming server + reactor-integrated
@@ -696,7 +704,7 @@ from .http.middleware import (
     RequestId,
 )
 from .http.cors import Cors, CorsConfig
-from .http.cache import Cache
+from .http.cache import Cache, InMemoryCacheStore
 from .http.fs import FileServer
 from .http.reliability import Retry, RetryPolicy, PostHocDeadline
 
@@ -715,10 +723,12 @@ from .tls.acceptor import TlsAcceptor, TlsServerConfig
 from .net.address import IpAddr, SocketAddr
 from .tcp.stream import TcpStream
 from .tcp.listener import TcpListener
+from .uds.listener import UnixListener
+from .uds.stream import UnixStream
 
 # WebSocket (high-level only; frame codec lives in flare.ws)
 from .ws.client import WsClient, WsMessage
-from .ws.server import WsServer
+from .ws.server import WsServer, WsConnection
 
 # Testing
 from .testing import TestClient

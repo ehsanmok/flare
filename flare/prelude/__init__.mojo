@@ -2,11 +2,29 @@
 
     from flare.prelude import *
 
-Exports exactly what the root :mod:`flare` package exports: 125
-symbols covering the server, client, routing, handlers and
-extractors, middleware, TLS, sockets, WebSocket and the test client.
-One rule, so there is no second list to keep in sync and no argument
-about where a given symbol belongs.
+Exports exactly what the root :mod:`flare` package exports, covering
+the server, client, routing, handlers and extractors, middleware, TLS,
+sockets, WebSocket and the test client. One list, so there is no second
+one to keep in sync.
+
+**What is on the list.** A symbol belongs here if either:
+
+1. another listed symbol's signature names it -- the *closure rule*, so
+   anything you can reach you can also write down; or
+2. the README's basic or intermediate examples need it.
+
+**What never is:** wire-format codecs, anything in a ``_``-prefixed
+module, ``flare.runtime`` primitives, protocol-specific types beyond
+their configuration structs, and test helpers other than
+``TestClient``.
+
+The closure rule is what v0.11 added, after seven symbols were found to
+break it: ``precompute_response`` returned a ``StaticResponse`` callers
+could not name, ``Cache[Inner, S]`` needed a store they could not name,
+``UnixListener`` / ``UnixStream`` were absent while their TCP peers and
+the frame-mux codec layered over them were both present, the WebSocket
+handler's argument type was absent, and the README documented
+``HandlerInfallible`` that neither barrel exported.
 
 **Changed in v0.10 (breaking).** This used to re-export every stable
 public symbol in the library -- 454 of them, including protocol
@@ -62,12 +80,20 @@ from ..http.request_view import RequestView
 from ..http.url import Url, UrlParseError
 from ..http.headers import HeaderMap, HeaderInjectionError
 from ..http.cancel import Cancel
-from ..http.handler import Handler, CancelHandler, ViewHandler, WithCancel
+from ..http.handler import (
+    Handler,
+    CancelHandler,
+    ViewHandler,
+    WithCancel,
+    WithViewCancel,
+    HandlerInfallible,
+    WithRaises,
+)
 from ..http.router import Router
 from ..http.routes import ComptimeRoute, ComptimeRouter
 from ..http.auth import Auth, BasicAuth, BearerAuth
 from ..http.error import HttpError, TooManyRedirects
-from ..http.static_response import precompute_response
+from ..http.static_response import precompute_response, StaticResponse
 from ..http.cookie import Cookie, CookieJar, parse_set_cookie_header
 from ..io import ByteReader, ByteWriter
 from ..http.streaming_server import StreamHandler, StreamConn
@@ -124,7 +150,7 @@ from ..http.middleware import (
     RequestId,
 )
 from ..http.cors import Cors, CorsConfig
-from ..http.cache import Cache
+from ..http.cache import Cache, InMemoryCacheStore
 from ..http.fs import FileServer
 from ..http.reliability import Retry, RetryPolicy, PostHocDeadline
 from ..http.session import (
@@ -137,8 +163,10 @@ from ..tls.acceptor import TlsAcceptor, TlsServerConfig
 from ..net.address import IpAddr, SocketAddr
 from ..tcp.stream import TcpStream
 from ..tcp.listener import TcpListener
+from ..uds.listener import UnixListener
+from ..uds.stream import UnixStream
 from ..ws.client import WsClient, WsMessage
-from ..ws.server import WsServer
+from ..ws.server import WsServer, WsConnection
 from ..testing import TestClient
 from ..runtime._thread import num_cpus
 from ..runtime.scheduler import default_worker_count
