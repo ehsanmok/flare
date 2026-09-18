@@ -233,6 +233,9 @@ struct Http3ClientConnection(Movable):
     var _ext_reasms: Dict[UInt64, _StreamReasm]
     """Per-stream reassemblers for the external-reader
     :meth:`read_response` API, keyed by stream id."""
+    var _cancelled: Dict[UInt64, Bool]
+    """Stream ids already told to stop, so STOP_SENDING is sent once and
+    not once per poll."""
 
     def __init__(
         out self,
@@ -244,6 +247,7 @@ struct Http3ClientConnection(Movable):
         self.max_field_section_size = max_field_section_size
         self._pending = Dict[UInt64, _PendingRequest]()
         self._ext_reasms = Dict[UInt64, _StreamReasm]()
+        self._cancelled = Dict[UInt64, Bool]()
 
     def _send_stream(
         mut self,
@@ -482,6 +486,22 @@ struct Http3ClientConnection(Movable):
                 pr.reader.body = List[UInt8]()
                 pr.reader.inbox = List[UInt8]()
                 credits.append(UInt64(0))
+                # Releasing zero credit is right for bytes we are
+                # discarding, but on its own it strands the connection.
+                # The entry stays in _pending, the skip at the top of
+                # the loop means we never read another byte of this
+                # stream, and the peer is never told: its max_recv_data
+                # stops moving while recv_offset keeps climbing, and
+                # once it passes, flare.quic.state raises a
+                # flow-control violation that the client swallows by
+                # dropping the whole packet -- healthy streams' frames
+                # and the ACK with it. With the default 1 MiB
+                # initial_max_data a server mid-body reaches that
+                # quickly, and the isolation this layer is for stops
+                # holding. Tell the peer once, on the first transition.
+                if sid not in self._cancelled:
+                    self._cancelled[sid] = True
+                    self.quic.cancel_stream(sid)
             else:
                 credits.append(pr.reasm.next_offset - before)
             self._pending[sid] = pr^

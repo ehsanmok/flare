@@ -443,6 +443,13 @@ struct Http3ResponseReader(Copyable):
             self.headers = List[QpackHeader]()
             self._content_length = -1
             self.status = 0
+            # SETTINGS_MAX_FIELD_SECTION_SIZE is a *per-section* limit
+            # (RFC 9114 sec 4.2), so the interim section's bytes must
+            # come off the books with the rest of its state. Otherwise a
+            # couple of large 103 Early Hints followed by an ordinary
+            # final head trip the 64 KiB default with no single section
+            # anywhere near it.
+            self._header_bytes = 0
             return
         if self.status == 204 or self.status == 304:
             self._body_allowed = False

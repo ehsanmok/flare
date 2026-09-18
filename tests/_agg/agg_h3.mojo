@@ -169,6 +169,12 @@ from test_h3_response_reader import (
 from test_h3_response_reader import (
     test_h3_head_and_missing_final_headers as test_h3_response_reader__test_h3_head_and_missing_final_headers,
 )
+from test_h3_response_reader import (
+    test_h3_field_section_budget_is_per_section as test_h3_response_reader__test_h3_field_section_budget_is_per_section,
+)
+from test_h3_response_reader import (
+    test_h3_oversized_single_section_still_fails as test_h3_response_reader__test_h3_oversized_single_section_still_fails,
+)
 from test_h3_uni_streams import (
     test_peer_control_stream_settings_round_trip as test_h3_uni_streams__test_peer_control_stream_settings_round_trip,
 )
@@ -384,6 +390,12 @@ def main() raises:
     ]()
     suite.test[
         test_h3_response_reader__test_h3_head_and_missing_final_headers
+    ]()
+    suite.test[
+        test_h3_response_reader__test_h3_field_section_budget_is_per_section
+    ]()
+    suite.test[
+        test_h3_response_reader__test_h3_oversized_single_section_still_fails
     ]()
     # tests/h3/test_h3_uni_streams.mojo
     suite.test[

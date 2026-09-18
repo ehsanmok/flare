@@ -202,9 +202,51 @@ def test_stream_control_frames_are_retransmitted_on_pto() raises:
     client.close()
 
 
+def test_cancel_stream_forbids_further_stream_frames() raises:
+    """RFC 9000 sec 3.1: no STREAM frames after the sender resets.
+
+    cancel_stream sent RESET_STREAM but changed nothing locally, so a
+    later send_stream on the same id happily emitted more data and kept
+    advancing send_offsets. A PTO retransmit of that RESET_STREAM would
+    then carry a final size different from the one the peer first saw,
+    which is a FINAL_SIZE_ERROR on their side.
+    """
+    var server = _bind_server()
+    var connector = _make_connector()
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+    for _ in range(40):
+        _ = server.tick(timeout_ms=50)
+        _ = client.poll(timeout_ms=50)
+        if client.is_established():
+            break
+    assert_true(client.is_established(), "handshake must complete first")
+
+    var sid = client.open_bidi_stream()
+    var body = List[UInt8]()
+    for b in String("partial").as_bytes():
+        body.append(b)
+    client.send_stream(sid, body, fin=False)
+    client.cancel_stream(sid)
+
+    var raised = False
+    try:
+        var more = List[UInt8]()
+        more.append(120)
+        client.send_stream(sid, more, fin=True)
+    except:
+        raised = True
+    assert_true(raised, "send_stream after cancel_stream must raise")
+
+    server.close()
+    client.close()
+
+
 def main() raises:
     test_client_handshake_completes()
     test_client_send_stream_after_handshake()
     test_client_handshake_through_retry()
     test_stream_control_frames_are_retransmitted_on_pto()
-    print("test_quic_client: 4 passed")
+    test_cancel_stream_forbids_further_stream_frames()
+    print("test_quic_client: 5 passed")

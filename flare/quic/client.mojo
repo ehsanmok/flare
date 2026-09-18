@@ -129,6 +129,7 @@ from .state import (
     new_connection,
     new_stream,
     STREAM_STATE_RESET_RECVD,
+    STREAM_STATE_RESET_SENT,
 )
 from .transport_params import (
     DEFAULT_MAX_UDP_PAYLOAD_SIZE,
@@ -1317,6 +1318,12 @@ struct QuicClientConnection(Movable):
         body-less request still closes its stream."""
         if not self.have_1rtt_keys:
             raise Error("quic client: send_stream before 1-RTT keys")
+        # RFC 9000 sec 3.1: no STREAM frames after the sender resets.
+        if (
+            stream_id in self.conn.streams
+            and self.conn.streams[stream_id].state == STREAM_STATE_RESET_SENT
+        ):
+            raise Error("quic client: send_stream on a reset stream")
         if stream_id not in self.conn.streams:
             var s = new_stream(stream_id, self.conn.max_data_recv)
             if self._peer_limits_known:
@@ -1366,6 +1373,17 @@ struct QuicClientConnection(Movable):
         var final_size = UInt64(0)
         if stream_id in self.send_offsets:
             final_size = self.send_offsets[stream_id]
+        # Mark the stream reset *before* the frame goes out. RFC 9000
+        # sec 3.1 forbids STREAM frames once the sender has reset, and
+        # nothing here changed local state, so a later send_stream on
+        # the same id happily emitted more data and kept advancing
+        # send_offsets. A PTO retransmit of this RESET_STREAM would then
+        # carry a final size different from the one the peer first saw,
+        # which is a FINAL_SIZE_ERROR on their side.
+        if stream_id in self.conn.streams:
+            var s = self.conn.streams[stream_id]
+            s.state = STREAM_STATE_RESET_SENT
+            self.conn.streams[stream_id] = s
         var payload = List[UInt8]()
         encode_stop_sending(StopSendingFrame(stream_id, UInt64(0x10C)), payload)
         encode_reset_stream(
