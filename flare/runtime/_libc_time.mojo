@@ -32,6 +32,7 @@ POSIX semantics:
 """
 
 from std.ffi import external_call
+from std.time import sleep
 from std.memory import UnsafePointer, stack_allocation
 from std.sys.info import CompilationTarget
 
@@ -96,40 +97,33 @@ def libc_usleep(microseconds: Int) -> Int:
 
 @always_inline
 def libc_nanosleep_ms(ms: Int) -> Int:
-    """Sleep for at least ``ms`` milliseconds via ``nanosleep``.
+    """Sleep for at least ``ms`` milliseconds.
 
-    More flexible than ``usleep``: no 1-second ceiling,
-    nanosecond-resolution semantics, signal-interrupt remainder
-    preservation (which we discard — callers needing
-    interrupt-aware sleeps go through ``nanosleep`` directly).
+    More flexible than ``usleep``: no 1-second ceiling and
+    nanosecond-resolution semantics. Interrupt remainders are
+    discarded; callers needing interrupt-aware sleeps go through
+    ``nanosleep`` directly.
 
     Args:
         ms: Number of milliseconds to sleep. Negative values are
             treated as 0.
 
     Returns:
-        0 on success; -1 on signal interruption (with the
-        remaining time discarded).
+        Always 0. Kept as ``Int`` so the signature matches
+        :func:`libc_usleep` and existing ``_ =`` call sites.
     """
     if ms <= 0:
         return 0
-    var ts = stack_allocation[2, Int64]()
-    ts[unsafe_offset=0] = Int64(ms // 1000)
-    ts[unsafe_offset=1] = Int64((ms % 1000) * 1_000_000)
-    # ``rem`` argument is NULL — we discard interrupt remainders.
-    # Use the same MutUntrackedOrigin we already use elsewhere for
-    # libc-facing pointers; this keeps the optimiser from reordering
-    # loads through the ``ts`` page across the syscall boundary.
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
-    var null_addr = 0
-    var null_rem = Pointer[Int64, MutUntrackedOrigin](
-        unsafe_from_address=null_addr
-    )
-    var ts_ext = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=Int(ts))
-    var rc = external_call[
-        "nanosleep",
-        Int32,
-        Pointer[Int64, MutUntrackedOrigin],
-        Pointer[Int64, MutUntrackedOrigin],
-    ](ts_ext, null_rem)
-    return Int(rc)
+    # ``std.time.sleep``, not our own ``nanosleep`` extern. The stdlib
+    # already declares ``nanosleep`` with a different signature, and Mojo
+    # declares one extern per signature, so any binary that reaches both
+    # refuses to lower with "existing function with conflicting
+    # signature". Nothing in flare imports ``std.time.sleep`` today, so
+    # flare alone never hit it -- but anything linked alongside flare that
+    # does, directly or through a dependency, could not build at all.
+    #
+    # The remainder was already being discarded here and the stdlib's
+    # sleep is the same ``nanosleep`` underneath, so only the linkage
+    # changes.
+    sleep(Float64(ms) / 1000.0)
+    return 0
