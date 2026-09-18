@@ -77,12 +77,6 @@ struct RelayFront(Movable, StreamHandler):
     def on_upstream(mut self, mut conn: StreamConn) raises:
         conn.relay_upstream()
 
-    def on_writable(mut self, mut conn: StreamConn) raises:
-        pass
-
-    def on_close(mut self, mut conn: StreamConn) raises:
-        pass
-
 
 def _run_backend(mut listener: UnixListener, n_tokens: Int) raises:
     var conn = listener.accept()

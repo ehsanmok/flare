@@ -36,9 +36,6 @@ struct CountBody(Movable, StreamHandler):
         self.totals[conn.id()] = 0
         self.max_chunk[conn.id()] = 0
 
-    def on_upstream(mut self, mut conn: StreamConn) raises:
-        pass
-
     def on_writable(mut self, mut conn: StreamConn) raises:
         var id = conn.id()
         var total = self.totals[id]

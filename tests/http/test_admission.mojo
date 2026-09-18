@@ -33,15 +33,6 @@ struct HoldHandler(Movable, StreamHandler):
     def on_open(mut self, mut conn: StreamConn) raises:
         conn.send(String("HELLO").as_bytes())
 
-    def on_upstream(mut self, mut conn: StreamConn) raises:
-        pass
-
-    def on_writable(mut self, mut conn: StreamConn) raises:
-        pass
-
-    def on_close(mut self, mut conn: StreamConn) raises:
-        pass
-
 
 def _read_once(mut s: TcpStream) raises -> String:
     var buf = List[UInt8](capacity=512)

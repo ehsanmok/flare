@@ -63,9 +63,6 @@ struct PipeFront(Movable, StreamHandler):
             conn.detach_upstream()
             conn.request_close()
 
-    def on_writable(mut self, mut conn: StreamConn) raises:
-        pass
-
     def on_close(mut self, mut conn: StreamConn) raises:
         if conn.id() in self.up_read:
             var rfd = self.up_read.pop(conn.id())

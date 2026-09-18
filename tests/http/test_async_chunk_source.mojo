@@ -119,9 +119,6 @@ struct RelayFront(Movable, StreamHandler):
             else:
                 break  # pending: park until the next readable edge
 
-    def on_writable(mut self, mut conn: StreamConn) raises:
-        pass
-
     def on_close(mut self, mut conn: StreamConn) raises:
         if conn.id() in self.sources:
             _ = self.sources.pop(conn.id())

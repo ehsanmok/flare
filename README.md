@@ -242,9 +242,6 @@ struct Proxy(Movable, StreamHandler):
     def on_upstream(mut self, mut conn: StreamConn) raises:
         conn.relay_upstream()
 
-    def on_writable(mut self, mut conn: StreamConn) raises: pass
-    def on_close(mut self, mut conn: StreamConn) raises: pass
-
 def main() raises:
     var srv = HttpServer.bind(SocketAddr.localhost(8080))
     srv.serve_streaming(Proxy("/run/backend.sock"))

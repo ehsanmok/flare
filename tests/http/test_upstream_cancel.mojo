@@ -51,9 +51,6 @@ struct CancelRelay(Movable, StreamHandler):
         elif p.is_eof():
             conn.request_close()
 
-    def on_writable(mut self, mut conn: StreamConn) raises:
-        pass
-
     def on_close(mut self, mut conn: StreamConn) raises:
         if conn.id() in self.sources:
             ref src = self.sources[conn.id()]

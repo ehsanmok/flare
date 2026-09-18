@@ -43,9 +43,6 @@ struct ChunkFront(Movable, StreamHandler):
         self.per_conn_writes[conn.id()] = 0
         conn.send("open\n".as_bytes())
 
-    def on_upstream(mut self, mut conn: StreamConn) raises:
-        pass
-
     def on_writable(mut self, mut conn: StreamConn) raises:
         var sent = self.per_conn_writes[conn.id()]
         if sent < 3:

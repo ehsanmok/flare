@@ -731,7 +731,10 @@ trait StreamHandler(Deinitable, Movable):
 
     def on_open(mut self, mut conn: StreamConn) raises:
         """Called once when the connection is accepted. Parse the
-        request, attach an upstream, begin the response."""
+        request, attach an upstream, begin the response.
+
+        The one required method: a front that implements nothing here
+        has no way to start a response."""
         ...
 
     def on_upstream(mut self, mut conn: StreamConn) raises:
@@ -739,20 +742,30 @@ trait StreamHandler(Deinitable, Movable):
         attached via ``conn.attach_upstream(UpstreamChunkSource)`` the
         whole body is ``conn.relay_upstream()`` (drain ready chunks to
         the client with backpressure, close on EOF). A front that
-        attached a raw fd reads it itself and calls ``conn.send``."""
-        ...
+        attached a raw fd reads it itself and calls ``conn.send``.
+
+        Defaults to doing nothing: a front with no upstream attached
+        never sees this edge."""
+        pass
 
     def on_writable(mut self, mut conn: StreamConn) raises:
         """Called on a writable edge. Emit the next chunk of the
         response; call ``conn.request_close()`` when the stream is
-        complete."""
-        ...
+        complete.
+
+        Defaults to doing nothing, which is right for a pure relay: the
+        upstream edge drives the body and the framework handles
+        backpressure."""
+        pass
 
     def on_close(mut self, mut conn: StreamConn) raises:
         """Called once as the connection is torn down (front FIN,
         deadline, or ``request_close``). Release per-connection
-        resources."""
-        ...
+        resources.
+
+        Defaults to doing nothing: a front whose state is all owned by
+        the framework has nothing to release."""
+        pass
 
 
 # ── Single-connection blocking driver ──────────────────────────────────────

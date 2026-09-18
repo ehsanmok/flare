@@ -31,9 +31,6 @@ struct PushFront(Movable, StreamHandler):
         self.writes[conn.id()] = 0
         conn.send("HELLO\n".as_bytes())
 
-    def on_upstream(mut self, mut conn: StreamConn) raises:
-        pass
-
     def on_writable(mut self, mut conn: StreamConn) raises:
         var w = self.writes[conn.id()]
         if w < self.n_chunks:
