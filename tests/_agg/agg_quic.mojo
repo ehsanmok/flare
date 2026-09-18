@@ -321,6 +321,9 @@ from test_quic_client import (
 from test_quic_client import (
     test_client_handshake_through_retry as test_quic_client__test_client_handshake_through_retry,
 )
+from test_quic_client import (
+    test_stream_control_frames_are_retransmitted_on_pto as test_quic_client__test_stream_control_frames_are_retransmitted_on_pto,
+)
 from test_quic_handle_packet import (
     test_decode_packet_number_rfc_a3 as test_quic_handle_packet__test_decode_packet_number_rfc_a3,
 )
@@ -887,6 +890,9 @@ def main() raises:
     suite.test[test_quic_client__test_client_handshake_completes]()
     suite.test[test_quic_client__test_client_send_stream_after_handshake]()
     suite.test[test_quic_client__test_client_handshake_through_retry]()
+    suite.test[
+        test_quic_client__test_stream_control_frames_are_retransmitted_on_pto
+    ]()
     # tests/quic/test_quic_handle_packet.mojo
     suite.test[test_quic_handle_packet__test_decode_packet_number_rfc_a3]()
     suite.test[test_quic_handle_packet__test_decode_packet_number_no_wrap]()
