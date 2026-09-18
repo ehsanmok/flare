@@ -3,9 +3,13 @@
 The reactor used to pull exactly one chunk per writable edge, so an
 N-chunk streaming response cost N trips through the event loop and N
 sends. This drives a ``ConnHandle`` over a real loopback pair and counts
-``on_writable`` calls: a 16-chunk response must complete in ONE edge, not
-16. The de-chunked body is asserted too, so a coalescing bug that merges
-frames incorrectly fails here rather than on the wire.
+``on_writable`` calls: a 16-chunk response must complete in at most ONE
+edge, not 16. The de-chunked body is asserted too, so a coalescing bug
+that merges frames incorrectly fails here rather than on the wire.
+
+The readable edge that dispatches the request is retried. A non-blocking
+server socket can see the request bytes arrive late, and that is a
+property of the loopback pair, not of the coalescing path being measured.
 """
 
 from std.collections import Optional
@@ -23,6 +27,7 @@ from flare.http.response import Response, stream_response
 from flare.http.server import ServerConfig
 from flare.net import SocketAddr
 from flare.tcp import TcpListener, TcpStream
+from flare.utils import usleep
 
 comptime _CHUNKS: Int = 16
 comptime _CHUNK_BYTES: Int = 256
@@ -101,8 +106,25 @@ def test_stream_coalescing() raises:
     _ = client.write(req.as_bytes())
 
     # Dispatch: builds the response and queues the chunked headers.
+    #
+    # Retried, because one readable edge is not guaranteed to dispatch.
+    # The server socket is non-blocking, so if the request bytes written
+    # above have not landed in its receive buffer yet, ``on_readable``
+    # takes the incomplete-request path and returns with the handle still
+    # in STATE_READING, having written nothing. That is a loopback timing
+    # detail, not the behaviour under test.
     var h = FnHandler(_stream_handler)
-    _ = ch.on_readable(h, cfg)
+    var reads = 0
+    while ch.state == STATE_READING and reads < 64:
+        reads += 1
+        _ = ch.on_readable(h, cfg)
+        if ch.state != STATE_READING:
+            break
+        usleep(2000)
+    assert_true(
+        ch.state != STATE_READING,
+        "request never dispatched after " + String(reads) + " readable edge(s)",
+    )
 
     # Drive writable edges until the stream finishes. The whole point of
     # the change under test is that this takes one pass, not _CHUNKS.
@@ -113,11 +135,14 @@ def test_stream_coalescing() raises:
         if step.done:
             break
 
-    assert_equal(
-        edges,
-        1,
+    # A bound, not an equality: zero would mean the send buffer took the
+    # whole 4 KB response inline during dispatch, which is better still.
+    # What this guards is the regression -- before coalescing, an N-chunk
+    # response cost N edges.
+    assert_true(
+        edges <= 1,
         String(_CHUNKS)
-        + " chunks should cost 1 writable edge, took "
+        + " chunks should cost at most 1 writable edge, took "
         + String(edges),
     )
 
@@ -147,7 +172,13 @@ def test_stream_coalescing() raises:
             raise Error("payload corrupted at byte " + String(i))
 
     client.close()
-    print("test_stream_coalescing: passed (", _CHUNKS, "chunks -> 1 edge)")
+    print(
+        "test_stream_coalescing: passed (",
+        _CHUNKS,
+        "chunks ->",
+        edges,
+        "edge(s))",
+    )
 
 
 def main() raises:
