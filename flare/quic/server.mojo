@@ -154,6 +154,7 @@ from ._server_support import (
     _ready_sentinel,
     _stream_id_from_key,
 )
+from ._loss_recovery import LossRecovery
 from ._server_types import (
     ConnectionIdTable,
     QuicConnection,
@@ -322,6 +323,12 @@ struct QuicListener(Movable):
     sec 8 / sec 9): the candidate address under validation plus the
     anti-amplification byte counters. Default (no migration) is an
     idle probe that costs nothing."""
+    var loss: List[LossRecovery]
+    """Per-slot RFC 9002 loss-recovery state. Parallel slab to
+    :attr:`connections`, grown in :meth:`_accept_initial` alongside the
+    others. ``LossRecovery`` is Movable but not Copyable, so this slab
+    is read through ``self.loss[slot].method()`` or a ``ref`` binding --
+    never the ``.copy()`` idiom the Copyable slabs use."""
     var rx_1rtt_ranges: List[List[UInt64]]
     """Per-slot received 1-RTT packet numbers, stored as disjoint
     ranges (flat [low, high] pairs, descending by high). The ACK
@@ -459,6 +466,7 @@ struct QuicListener(Movable):
         self.tls_1rtt_egress_queues = List[List[UInt8]]()
         self.peer_addrs = List[SocketAddr]()
         self.migration_probe = List[MigrationProbe]()
+        self.loss = List[LossRecovery]()
         self.rx_1rtt_ranges = List[List[UInt64]]()
         self.rx_1rtt_ack_pending = List[Bool]()
         self.handshake_done_sent = List[Bool]()
@@ -828,6 +836,7 @@ struct QuicListener(Movable):
         if not ok:
             return
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
+        self._consume_acks(slot, events)
         self._route_http3_stream_chunks(slot, events)
         self._stash_migration_egress(slot, events)
         # The client echoed our server-initiated PATH_CHALLENGE: the
@@ -1641,6 +1650,7 @@ struct QuicListener(Movable):
         self.rx_stream_bytes.append(UInt64(0))
         self.rx_bidi_stream_count.append(UInt64(0))
         self.http3_connections.append(Http3Connection())
+        self.loss.append(LossRecovery())
         self.cid_table.register(cid_to_hex(local_cid), slot)
         _ = self.schedule_idle_timeout(slot)
         return slot
@@ -1936,6 +1946,11 @@ struct QuicListener(Movable):
             )
             if not self.migration_probe[slot].amplification_allows(est):
                 return False
+        # Not tracked for loss recovery: this goes to the *candidate*
+        # address under an anti-amplification budget, and RFC 9002
+        # keeps congestion and loss state per path. Folding probe
+        # packets into the established path's LossRecovery would
+        # conflate two paths' RTT samples.
         var dg = self._build_1rtt_response(slot, frames^)
         if len(dg) == 0:
             return False
@@ -2047,7 +2062,9 @@ struct QuicListener(Movable):
             while off < n:
                 var room = budget - len(plaintext) - _STREAM_HDR_MAX
                 if room <= 0:
-                    var dg = self._build_1rtt_response(slot, plaintext^)
+                    var dg = self._build_1rtt_response(
+                        slot, plaintext^, ack_eliciting=True
+                    )
                     if len(dg) > 0:
                         _ = self.send_to(Span[UInt8, _](dg), peer)
                         emitted = True
@@ -2109,7 +2126,9 @@ struct QuicListener(Movable):
             if n == 0 and is_done:
                 var room = budget - len(plaintext) - _STREAM_HDR_MAX_S
                 if room <= 0:
-                    var dg = self._build_1rtt_response(slot, plaintext^)
+                    var dg = self._build_1rtt_response(
+                        slot, plaintext^, ack_eliciting=True
+                    )
                     if len(dg) > 0:
                         _ = self.send_to(Span[UInt8, _](dg), peer)
                         emitted = True
@@ -2130,7 +2149,9 @@ struct QuicListener(Movable):
             while off < n:
                 var room = budget - len(plaintext) - _STREAM_HDR_MAX_S
                 if room <= 0:
-                    var dg = self._build_1rtt_response(slot, plaintext^)
+                    var dg = self._build_1rtt_response(
+                        slot, plaintext^, ack_eliciting=True
+                    )
                     if len(dg) > 0:
                         _ = self.send_to(Span[UInt8, _](dg), peer)
                         emitted = True
@@ -2156,7 +2177,9 @@ struct QuicListener(Movable):
                 st.send_off = UInt64(start_off + n)
 
         if len(plaintext) > 0:
-            var dg = self._build_1rtt_response(slot, plaintext^)
+            var dg = self._build_1rtt_response(
+                slot, plaintext^, ack_eliciting=True
+            )
             if len(dg) > 0:
                 _ = self.send_to(Span[UInt8, _](dg), peer)
                 emitted = True
@@ -2402,6 +2425,7 @@ struct QuicListener(Movable):
         slot: Int,
         var plaintext: List[UInt8],
         pn_length: Int = 2,
+        ack_eliciting: Bool = False,
     ) raises -> List[UInt8]:
         """Wrap an arbitrary 1-RTT plaintext payload (CRYPTO
         bytes from rustls's post-handshake KeyChange::OneRtt
@@ -2429,6 +2453,14 @@ struct QuicListener(Movable):
         # the dominant egress-side CPU cost under concurrency.
         if len(self.connections[slot].tx_1rtt_secret) == 0:
             return List[UInt8]()
+        # Snapshot before the protection step consumes ``plaintext``.
+        # Only ack-eliciting packets are tracked: RFC 9002 sec 2 defines
+        # a packet as ack-eliciting iff it carries anything other than
+        # ACK, PADDING and CONNECTION_CLOSE, and only those are
+        # retransmittable.
+        var tracked_frames = List[UInt8]()
+        if ack_eliciting:
+            tracked_frames = plaintext.copy()
         if slot >= len(self.tls_sessions):
             return List[UInt8]()
         var handle = self.tls_sessions[slot].handle
@@ -2511,6 +2543,15 @@ struct QuicListener(Movable):
         # 1-RTT -- per-stream offsets live on each STREAM frame
         # encoded into the plaintext).
         self.connections[slot].tx_1rtt_pn = pn + UInt64(1)
+        if ack_eliciting and slot < len(self.loss):
+            # Account the true on-wire size, not len(plaintext): the
+            # congestion window is a bound on bytes the path carries.
+            self.loss[slot].on_sent(
+                pn,
+                tracked_frames^,
+                _monotonic_ms(),
+                size=UInt64(len(protected)),
+            )
         return protected^
 
     def _build_1rtt_handshake_crypto(
@@ -2543,7 +2584,9 @@ struct QuicListener(Movable):
         var crypto = CryptoFrame(offset=UInt64(0), data=qbytes^)
         var plaintext = List[UInt8]()
         encode_crypto(crypto, plaintext)
-        return self._build_1rtt_response(slot, plaintext^, pn_length)
+        return self._build_1rtt_response(
+            slot, plaintext^, pn_length, ack_eliciting=True
+        )
 
     def run(mut self) raises:
         """Run the listener's event loop. Blocks until
@@ -2648,45 +2691,124 @@ struct QuicListener(Movable):
     def _on_pto_expired(mut self, slot: Int) raises:
         """RFC 9002 sec 6.2 probe-timeout action for ``slot``.
 
-        Server-side 1-RTT retransmit is not wired. A fired PTO
-        re-flushes whatever 1-RTT egress is still pending, so an owed
-        ACK or response that never reached the wire gets another
-        chance -- strictly better than dropping the timer, but not
-        loss recovery.
+        Re-sends the frames of the oldest unacked packet under a fresh
+        packet number, then re-arms. When nothing is tracked -- a PTO
+        armed before any ack-eliciting packet went out -- it falls back
+        to re-flushing whatever 1-RTT egress is still pending, which is
+        what this handler did before loss recovery was wired.
 
-        Scoped properly during v0.10 and found larger than the
-        "wire up LossRecovery" one-liner it looks like. The server
-        does not parse inbound ACK frames **at all**: ``on_ack`` and
-        ``acked_packets`` appear only in ``flare/quic/client.mojo``,
-        and nothing on the server side reads an ACK range off the
-        wire. So the work is not "attach a controller", it is, in
-        order:
+        Gives up once ``pto_count`` passes
+        :attr:`QuicServerConfig.max_pto_count`: ``LossRecovery`` bounds
+        the backoff at 64x the base interval, but nothing bounds how
+        long the server keeps probing a peer that has gone dark.
 
-        1. inbound 1-RTT frame ingestion on the server, at minimum
-           ACK-range extraction;
-        2. a per-slot ``LossRecovery`` slab parallel to
-           :attr:`connections`;
-        3. ``on_sent`` at datagram emit in
-           :meth:`_build_1rtt_response`, which also needs an
-           ack-eliciting determination (a packet carrying only ACK and
-           PADDING must not be tracked);
-        4. RTT sampling plus real PTO scheduling here;
-        5. retransmission of the oldest unacked frames.
-
-        Only after (1)-(5) is there a congestion budget to gate egress
-        on, which is what QUIC GSO needs to cap a bundle against --
-        ``send_segmented`` exists and is tested in
-        ``flare/udp/batch.mojo``, but shipping it without a budget is
-        the naked-GSO shape that gets whole bundles tail-dropped.
-
-        Deliberately not started rather than half-landed: HTTP/3 works
-        today precisely because the server never tracks or retransmits,
-        and a partial loss-recovery path would regress it.
+        Send pacing (RFC 9002 sec 7.7) remains out of scope. The
+        congestion window gates burst size without an inter-packet
+        timer, which is also the budget QUIC GSO would need before
+        ``send_segmented`` could be wired into egress.
         """
         if slot < 0 or slot >= len(self.peer_addrs):
             return
+        if slot >= len(self.loss):
+            return
+        # A peer that has gone completely dark would otherwise be probed
+        # forever: LossRecovery caps the backoff at 64x but nothing caps
+        # the attempt count. Past the configured limit, close the slot
+        # and let the normal retire path reclaim it.
+        if self.loss[slot].pto_count > self.config.max_pto_count:
+            self.connections[slot].alive = False
+            self._cancel_pto_timer(slot)
+            return
         var peer = self.peer_addrs[slot]
-        _ = self._drain_1rtt_coalesced(slot, peer)
+        var frames = self.loss[slot].fire_pto()
+        if len(frames) > 0:
+            var dg = self._build_1rtt_response(
+                slot, frames^, ack_eliciting=True
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), peer)
+        else:
+            # Nothing tracked to probe with: fall back to re-flushing
+            # whatever 1-RTT egress is still pending, which is what this
+            # handler did before loss recovery was wired.
+            _ = self._drain_1rtt_coalesced(slot, peer)
+        self._rearm_pto_timer(slot)
+
+    def _consume_acks(mut self, slot: Int, events: ConnectionEvents) raises:
+        """Feed inbound ACK ranges to this slot's loss recovery.
+
+        ``flare.quic.state.handle_frame_buf`` already decodes ACK frames
+        into ``events.acked_packets`` for both peers; the server simply
+        never read the field, so a dropped response sat unretransmitted
+        until the idle timeout killed the connection. Mirrors the
+        client's per-poll order: ack, then detect-and-resend, then
+        re-arm.
+        """
+        if slot < 0 or slot >= len(self.loss):
+            return
+        if len(events.acked_packets) == 0:
+            return
+        _ = self.loss[slot].on_ack(events.acked_packets, _monotonic_ms())
+        self._retransmit_lost(slot)
+        self._rearm_pto_timer(slot)
+
+    def _retransmit_lost(mut self, slot: Int) raises:
+        """Re-send the frames of every packet now declared lost.
+
+        RFC 9002: frames are retransmitted, packets are not -- each
+        rides a fresh packet number via :meth:`_build_1rtt_response`.
+        """
+        if slot < 0 or slot >= len(self.loss):
+            return
+        if slot >= len(self.peer_addrs):
+            return
+        var peer = self.peer_addrs[slot]
+        var lost = self.loss[slot].detect_lost(_monotonic_ms())
+        for i in range(len(lost)):
+            var frames = lost[i].copy()
+            if len(frames) == 0:
+                continue
+            var dg = self._build_1rtt_response(
+                slot, frames^, ack_eliciting=True
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), peer)
+
+    def _cancel_pto_timer(mut self, slot: Int) raises:
+        """Drop this slot's armed PTO entry, if any."""
+        if slot < 0 or slot >= len(self.connections):
+            return
+        var old_id = self.connections[slot].pto_timer_id
+        if old_id != UInt64(0):
+            _ = self.timer_wheel.cancel(old_id)
+            self.connections[slot].pto_timer_id = UInt64(0)
+
+    def _rearm_pto_timer(mut self, slot: Int) raises:
+        """Re-schedule this slot's PTO from the current deadline.
+
+        Mirrors :meth:`schedule_idle_timeout`: cancel the old entry,
+        then schedule a fresh one. Called once per dispatch tick rather
+        than once per sent packet, matching the cadence at which the
+        client calls ``_check_pto`` -- a cancel plus reschedule for
+        every packet in a burst is pure overhead when the deadline only
+        moves with the oldest in-flight packet.
+        """
+        if slot < 0 or slot >= len(self.connections):
+            return
+        if slot >= len(self.loss):
+            return
+        self._cancel_pto_timer(slot)
+        if self.loss[slot].outstanding() == 0:
+            return
+        var deadline = self.loss[slot].pto_deadline()
+        if deadline == UInt64(0):
+            return
+        var now = _monotonic_ms()
+        var after_ms = 1 if deadline <= now else Int(deadline - now)
+        var token = encode_timer_token(TIMER_KIND_PTO, slot)
+        self.connections[slot].pto_timer_id = self.timer_wheel.schedule(
+            after_ms=after_ms, token=token
+        )
 
     def _retire_slot_cids(mut self, slot: Int) raises:
         """Drop every CID -> slot mapping that points at this

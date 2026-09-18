@@ -133,6 +133,18 @@ struct QuicServerConfig(Copyable, Defaultable):
     short enough to bound replay. Only consulted when
     :attr:`require_address_validation` is set."""
 
+    var max_pto_count: Int
+    """Consecutive probe timeouts before the connection is given up on.
+
+    ``LossRecovery`` bounds the PTO *backoff* at 64x the base interval
+    but nothing bounds how long the server keeps probing a peer that has
+    gone dark. Past this count the slot is closed with CONNECTION_CLOSE
+    instead of re-arming, which bounds both the wall-clock and the
+    in-flight packet list a dead connection can hold.
+
+    Default 10: comfortably past the 6-shift backoff cap, so a slow but
+    live path is not punished, and well short of forever."""
+
     def __init__(out self):
         self.host = String("0.0.0.0")
         self.port = UInt16(0)
@@ -147,6 +159,7 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.early_data_strike_window_ms = UInt64(10_000)
         self.require_address_validation = False
         self.retry_token_max_age_ms = UInt64(10_000)
+        self.max_pto_count = 10
 
 
 # -- Per-connection driver ----------------------------------------------
@@ -201,6 +214,10 @@ struct QuicConnection(Copyable):
     entry (0 if none). Each `handle_packet` call cancels the
     previous idle timer and schedules a fresh one. Stored here
     so the reactor can find and cancel it on connection close."""
+    var pto_timer_id: UInt64
+    """Timer-wheel id of this slot's armed PTO, or 0 when nothing is
+    in flight. Mirrors ``idle_timer_id``; ``_rearm_pto_timer`` cancels
+    the old entry before scheduling a new one."""
 
     var rx_handshake_secret: List[UInt8]
     """Inbound Handshake-level readiness marker (RFC 9001 §5.1).
@@ -272,6 +289,7 @@ struct QuicConnection(Copyable):
         self.peer_cid = peer_cid.copy()
         self.alive = True
         self.idle_timer_id = UInt64(0)
+        self.pto_timer_id = UInt64(0)
         self.rx_handshake_secret = List[UInt8]()
         self.tx_handshake_secret = List[UInt8]()
         self.rx_1rtt_secret = List[UInt8]()
@@ -324,6 +342,7 @@ struct QuicConnection(Copyable):
         self.alive = False
         self.conn.state = CONN_STATE_CLOSED
         self.idle_timer_id = UInt64(0)
+        self.pto_timer_id = UInt64(0)
 
     def handle_packet(
         mut self,

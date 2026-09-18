@@ -2,7 +2,17 @@
 
 - Tracked in `flare/quic/server.mojo`'s `_on_pto_expired` docstring
   ("scoped properly during v0.10").
-- Status: approved, pending implementation plan.
+- Status: **implemented in v0.11.0.** Items 1-5 and 7 landed as
+  described. Item 6, the congestion-window gate on the fresh-egress H3
+  DATA pump, is deferred with send pacing to v0.12: the window is now
+  live and correct, but nothing reads it on that path yet.
+- Resolved from "Open implementation decisions": `_rearm_pto_timer`
+  batches once per dispatch tick rather than once per `on_sent`,
+  matching the cadence at which the client calls `_check_pto`. Of the
+  six `_build_1rtt_response` call sites, five are ack-eliciting and are
+  tracked; the migration-probe site is deliberately not, because it
+  sends to a candidate address under an anti-amplification budget and
+  RFC 9002 keeps congestion state per path.
 
 ## Problem
 

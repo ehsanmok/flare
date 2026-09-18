@@ -113,8 +113,9 @@ flare.quic     Sans-I/O QUIC v1 codec primitives + pure state
                buffer; transport-parameter codec (RFC 9000 §18);
                connection + stream state machines (RFC 9000 §3,
                §10, §13); CUBIC + HyStart++ congestion
-               controller + RFC 9002 §7.7 pacing budget as pure
-               functions over a `CcState` value. The
+               controller as pure functions over a `CcState`
+               value. The congestion window gates egress on both
+               peers; RFC 9002 §7.7 pacing is not wired. The
                `CongestionController` trait pairs a CUBIC default
                (production) with a Reno fallback (deterministic
                tests) per RFC 9002 Appendix B.
