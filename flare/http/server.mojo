@@ -69,9 +69,21 @@ from flare.runtime.scheduler import ShutdownReport
 
 
 struct HttpServer(Movable):
-    """A blocking HTTP/1.1 server with buffered reads and keep-alive support.
+    """A non-blocking reactor HTTP server: HTTP/1.1, HTTP/2, HTTP/3, TLS.
 
-    Each accepted connection is handled in the calling thread.
+    One ``serve`` call runs an event loop over ``kqueue`` / ``epoll``
+    (opt-in ``io_uring`` on Linux), so many connections are in flight at
+    once rather than one per calling thread. Each accepted cleartext
+    connection is dispatched by peeking its first 24 bytes: the RFC 9113
+    §3.4 client preface selects the HTTP/2 handle, anything else the
+    HTTP/1.1 one. A server built by :meth:`bind_tls` handshakes on the
+    reactor and dispatches by ALPN instead. HTTP/3 has its own listener
+    and its own entry point, :meth:`serve_http3`.
+
+    ``num_workers >= 2`` runs one reactor per worker thread, each with
+    its own copy of the handler, which is why that arity additionally
+    requires ``Copyable``.
+
     Reads are buffered (default 8KB chunks) for efficient I/O.
     HTTP/1.1 keep-alive is enabled by default.
     Recv/send timeouts are set on accepted sockets to prevent DoS.
@@ -350,13 +362,14 @@ struct HttpServer(Movable):
           :class:`ConnHandle`.
         * h2c upgrade hint -> H2C (TCP path only).
 
-        Calling :meth:`serve` on a server returned by this method
-        runs the TCP + UDP reactors side by side; the UDP listener
-        is also reachable via :meth:`local_http3_addr` /
-        :meth:`tick_http3_once` for tests that want to drive the
-        h3 path without spinning up the full reactor. Closing
-        the server (via :meth:`close` or ``__deinit__``) closes
-        both listeners.
+        The two wires have two entry points. :meth:`serve` drives the
+        TCP reactor only; the UDP listener is driven by
+        :meth:`serve_http3`, so a caller serving both spawns one OS
+        thread per loop. The UDP listener is also reachable via
+        :meth:`local_http3_addr` / :meth:`tick_http3_once` for tests
+        that want to drive the h3 path without spinning up the full
+        reactor. Closing the server (via :meth:`close` or
+        ``__deinit__``) closes both listeners.
 
         Args:
             tcp_addr: Local TCP address for h1 / h2c / h2.
@@ -406,14 +419,13 @@ struct HttpServer(Movable):
             cert_file: Path to the PEM server certificate (chain).
             key_file: Path to the PEM server private key.
             alpn: ALPN protocol identifiers to advertise, in preference
-                order (e.g. ``["http/1.1"]``). Empty (the default)
-                advertises no ALPN and serves HTTP/1.1. Note: the current
-                synchronous ``serve_tls`` path frames HTTP/1.1 only; if a
-                client negotiates ``h2`` the connection is closed cleanly
-                (h2-over-TLS is the reactor-integration follow-up).
+                order (e.g. ``["h2", "http/1.1"]``). Empty (the default)
+                advertises no ALPN and serves HTTP/1.1. Offering ``h2``
+                is served: the connection is handshaken on the reactor
+                and the negotiated identifier selects the HTTP/2 or
+                HTTP/1.1 handle.
             config: HTTP/1.1 server configuration (optional).
-            h2_config: HTTP/2 SETTINGS (stored for parity; unused by the
-                current h1-only ``serve_tls``).
+            h2_config: HTTP/2 SETTINGS, applied when ALPN selects ``h2``.
 
         Returns:
             An ``HttpServer`` ready to call :meth:`serve_tls`.
