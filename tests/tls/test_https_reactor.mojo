@@ -27,13 +27,21 @@ from flare.net._libc import (
     _close,
     _connect,
     _fill_sockaddr_in,
+    _recv,
     _send,
     _socket,
     _strerror,
     get_errno,
 )
 from flare.tls import TlsConfig, TlsStream
-from flare.http import HttpClient, HttpServer, Request, Response, ok
+from flare.http import (
+    FnHandler,
+    HttpClient,
+    HttpServer,
+    Request,
+    Response,
+    ok,
+)
 from flare.http.body import ChunkSource
 from flare.http.cancel import Cancel
 from flare.http.response import stream_response
@@ -321,6 +329,133 @@ def test_https_multi_worker() raises:
     _ = kill(pid, SIGKILL)
     waitpid(pid)
     assert_equal(ok_count, 4)
+
+
+def test_https_single_worker_explicit_serves_tls() raises:
+    """Regression: ``serve_tls(handler, 1)`` used to serve plaintext.
+
+    An explicit worker count routes ``serve_tls`` into
+    ``serve[H: Handler & Copyable]``, whose ``num_workers <= 1`` branch
+    called the unified reactor loop without passing
+    ``self._tls_ctx_addr()``. That parameter defaults to ``0``, so every
+    accepted connection was registered as a plaintext ``ConnHandle`` and
+    an HTTPS port answered ClientHello bytes in cleartext.
+
+    The arity-1 ``serve_tls`` and the ``num_workers >= 2`` path both
+    passed the context, which is why nothing caught it: before this test
+    no call site in the repo had ever given ``serve_tls`` a worker count.
+    """
+    var srv = HttpServer.bind_tls(
+        SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
+        _SERVER_CRT,
+        _SERVER_KEY,
+        alpn=_alpn_h1(),
+    )
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve_tls(FnHandler(_hello), 1)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var got = String("")
+    var raised = False
+    try:
+        var cfg = TlsConfig(ca_bundle=_CA_CRT)
+        var s = TlsStream.connect("localhost", port, cfg)
+        s.write_all(
+            Span[UInt8, _](
+                _bytes(
+                    "GET / HTTP/1.1\r\nHost: localhost\r\nConnection:"
+                    " close\r\n\r\n"
+                )
+            )
+        )
+        got = _read_until_close(s)
+        s.close()
+    except:
+        raised = True
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(not raised, "TLS handshake against serve_tls(h, 1) raised")
+    assert_true("200" in got, "expected 200, got: " + got)
+    assert_true("hello https" in got, "expected body, got: " + got)
+
+
+def test_https_single_worker_explicit_never_answers_cleartext() raises:
+    """The same port must not answer a cleartext HTTP request.
+
+    The direct assertion of the downgrade. Against the unfixed build a
+    plaintext ``GET`` on the TLS port came back as an ASCII ``HTTP/1.1``
+    status line. A real TLS listener cannot read that as a ClientHello,
+    so it answers with an alert record or closes without replying; the
+    short idle timeout bounds the read in the closing case.
+    """
+    var cfg_srv = ServerConfig(idle_timeout_ms=500)
+    var srv = HttpServer.bind_tls(
+        SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
+        _SERVER_CRT,
+        _SERVER_KEY,
+        alpn=_alpn_h1(),
+        config=cfg_srv^,
+    )
+    var port = UInt16(srv.local_addr().port)
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve_tls(FnHandler(_hello), 1)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var n = 0
+    var first = UInt8(0)
+    var reply = List[UInt8]()
+    try:
+        var c = _connect_loopback(port)
+        var req = _bytes(
+            "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        )
+        var out = stack_allocation[128, UInt8]()
+        for i in range(len(req)):
+            (out + i).unsafe_write(req[i])
+        _ = _send(c, out, c_size_t(len(req)), c_int(MSG_NOSIGNAL))
+
+        var buf = stack_allocation[64, UInt8]()
+        n = Int(_recv(c, buf, c_size_t(64), c_int(0)))
+        if n > 0:
+            first = buf[0]
+            for i in range(n):
+                reply.append(buf[i])
+        _ = _close(c)
+    except:
+        pass
+
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+
+    var text = String(unsafe_from_utf8=Span[UInt8, _](reply))
+    assert_true(
+        not text.startswith("HTTP/1.1"),
+        "TLS port answered cleartext HTTP: " + text,
+    )
+    # ``n <= 0`` covers both an orderly close and the abrupt reset that
+    # OpenSSL produces when it gives up on the record layer; ``recv``
+    # reports the latter as -1 (ECONNRESET), not 0.
+    assert_true(
+        n <= 0 or first == UInt8(0x15) or first == UInt8(0x16),
+        "expected a TLS record or a close, got "
+        + String(n)
+        + " bytes starting with "
+        + String(Int(first)),
+    )
 
 
 def test_https_alpn_negotiates_h2() raises:

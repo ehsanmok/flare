@@ -730,6 +730,7 @@ struct HttpServer(Movable):
             # the HTTP/2 Http2ConnHandle based on whether its first
             # 24 bytes match the RFC 9113 §3.4 client preface.
             if len(self._extra_listener_fds) > 0:
+                self._reject_tls_with_extra_listeners()
                 run_unified_reactor_loop_multi(
                     self._listener,
                     self._extra_listener_fds,
@@ -874,6 +875,7 @@ struct HttpServer(Movable):
                 )
                 return
         if len(self._extra_listener_fds) > 0:
+            self._reject_tls_with_extra_listeners()
             run_unified_reactor_loop_multi[H](
                 self._listener,
                 self._extra_listener_fds,
@@ -947,6 +949,26 @@ struct HttpServer(Movable):
             raise Error(
                 "HttpServer.serve_tls: no TLS context bound; construct the"
                 " server via HttpServer.bind_tls(addr, cert, key)"
+            )
+
+    @always_inline
+    def _reject_tls_with_extra_listeners(self) raises:
+        """Raise when TLS is bound alongside :meth:`bind_many` listeners.
+
+        ``run_unified_reactor_loop_multi`` takes no TLS context, so the
+        extra-listener path can only serve cleartext. The combination is
+        not reachable today -- :meth:`bind_tls` binds exactly one address
+        and never populates ``_extra_listener_fds`` -- so this guards a
+        future wiring mistake rather than a live one. It fails loudly
+        because the alternative is a silent downgrade to plaintext on a
+        port the caller asked to be HTTPS, which is the shape of the bug
+        this guard was added with.
+        """
+        if self._tls_ctx:
+            raise Error(
+                "HttpServer.serve: TLS is not supported alongside"
+                " bind_many extra listeners; bind a single TLS listener"
+                " instead"
             )
 
     def serve[
@@ -1175,6 +1197,7 @@ struct HttpServer(Movable):
                     use_uring_backend()
                     and self.config.use_bufring
                     and len(self._extra_listener_fds) == 0
+                    and not self._tls_ctx
                 ):
                     run_uring_bufring_reactor_loop[H](
                         self._listener, self.config, handler, self._stopping
@@ -1186,6 +1209,7 @@ struct HttpServer(Movable):
             # bytes (RFC 9113 §3.4 preface peek). Same handler
             # callback is used for both wires.
             if len(self._extra_listener_fds) > 0:
+                self._reject_tls_with_extra_listeners()
                 run_unified_reactor_loop_multi[H](
                     self._listener,
                     self._extra_listener_fds,
@@ -1201,6 +1225,8 @@ struct HttpServer(Movable):
                     self.h2_config.copy(),
                     handler,
                     self._stopping,
+                    None,
+                    self._tls_ctx_addr(),
                 )
         else:
             self._serve_multicore[H](handler^, num_workers, pin_cores)

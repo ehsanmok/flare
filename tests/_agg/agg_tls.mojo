@@ -22,6 +22,12 @@ from test_https_reactor import (
     test_https_multi_worker as test_https_reactor__test_https_multi_worker,
 )
 from test_https_reactor import (
+    test_https_single_worker_explicit_serves_tls as test_https_reactor__test_https_single_worker_explicit_serves_tls,
+)
+from test_https_reactor import (
+    test_https_single_worker_explicit_never_answers_cleartext as test_https_reactor__test_https_single_worker_explicit_never_answers_cleartext,
+)
+from test_https_reactor import (
     test_https_alpn_negotiates_h2 as test_https_reactor__test_https_alpn_negotiates_h2,
 )
 from test_https_reactor import (
@@ -367,6 +373,12 @@ def main() raises:
     suite.test[test_https_reactor__test_https_concurrent_connections]()
     suite.test[test_https_reactor__test_https_reactor_streaming]()
     suite.test[test_https_reactor__test_https_multi_worker]()
+    suite.test[
+        test_https_reactor__test_https_single_worker_explicit_serves_tls
+    ]()
+    suite.test[
+        test_https_reactor__test_https_single_worker_explicit_never_answers_cleartext
+    ]()
     suite.test[test_https_reactor__test_https_alpn_negotiates_h2]()
     suite.test[test_https_reactor__test_https_alpn_h2_is_served]()
     suite.test[
