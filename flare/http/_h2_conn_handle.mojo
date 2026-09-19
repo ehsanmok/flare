@@ -421,9 +421,12 @@ struct Http2ConnHandle(Movable):
         """
         self.h2.feed(bytes)
         var ack = self.h2.drain()
-        if len(ack) > 0:
-            for i in range(len(ack)):
-                self.write_buf.append(ack[i])
+
+        # One copy: this is every outbound byte of the connection, and
+
+        # for a streaming response it runs once per window's worth.
+
+        self.write_buf.extend(Span(ack))
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
@@ -553,9 +556,12 @@ struct Http2ConnHandle(Movable):
                 self.should_close = True
         # Drain everything the driver wants to send.
         var out = self.h2.drain()
-        if len(out) > 0:
-            for i in range(len(out)):
-                self.write_buf.append(out[i])
+
+        # One copy: this is every outbound byte of the connection, and
+
+        # for a streaming response it runs once per window's worth.
+
+        self.write_buf.extend(Span(out))
         if self.h2.conn.goaway_received:
             self.should_close = True
         if self.h2.conn.goaway_sent:
@@ -691,10 +697,13 @@ struct Http2ConnHandle(Movable):
         var addr = self._stream_out[sid]
         var st = Pool[H2StreamOut].get_ptr(addr)
         if st[].ppos < len(st[].pending):
-            var rem = List[UInt8](capacity=len(st[].pending) - st[].ppos)
-            for k in range(st[].ppos, len(st[].pending)):
-                rem.append(st[].pending[k])
-            var n = self.h2.queue_stream_data(sid, Span[UInt8, _](rem))
+            # Only what the window will take — see `queue_parked_body`, which
+            # the buffered path uses for the same reason: re-copying the whole
+            # stash on every pump, and a pump is what a WINDOW_UPDATE
+            # triggers, is quadratic in the response.
+            var n = self.h2.queue_parked_body(
+                sid, Span(st[].pending), st[].ppos
+            )
             st[].ppos += n
             if st[].ppos < len(st[].pending):
                 return  # window exhausted; wait for WINDOW_UPDATE
@@ -716,9 +725,11 @@ struct Http2ConnHandle(Movable):
             queued += n
             if n < clen:
                 # Window exhausted mid-chunk: stash the tail and stop.
-                var tail = List[UInt8](capacity=clen - n)
-                for k in range(n, clen):
-                    tail.append(nxt.value()[k])
+                # The tail is stashed once per chunk, so this is linear —
+                # but it is the same bytes, and a byte at a time is a byte at
+                # a time.
+                var tail = List[UInt8]()
+                tail.extend(Span(nxt.value())[n:clen])
                 st[].pending = tail^
                 st[].ppos = 0
                 return
@@ -957,9 +968,12 @@ struct Http2ConnHandle(Movable):
             except:
                 self.should_close = True
         var out = self.h2.drain()
-        if len(out) > 0:
-            for i in range(len(out)):
-                self.write_buf.append(out[i])
+
+        # One copy: this is every outbound byte of the connection, and
+
+        # for a streaming response it runs once per window's worth.
+
+        self.write_buf.extend(Span(out))
         if self.h2.conn.goaway_received:
             self.should_close = True
         var has_outbound = len(self.write_buf) > self.write_pos

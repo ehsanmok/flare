@@ -586,8 +586,13 @@ struct Http2Connection(Defaultable, Movable):
             self.pump_pending()
 
     def drain(mut self) -> List[UInt8]:
-        """Return all queued outbound bytes and clear the buffer."""
-        var out = self.outbox.copy()
+        """Return all queued outbound bytes and clear the buffer.
+
+        The buffer is handed over rather than copied: it holds whatever was
+        framed since the last drain, which for a streaming response is a
+        window's worth of body.
+        """
+        var out = self.outbox^
         self.outbox = List[UInt8]()
         return out^
 
@@ -773,17 +778,18 @@ struct Http2Connection(Defaultable, Movable):
             sids.append(entry.key)
         for i in range(len(sids)):
             var sid = sids[i]
-            var body = self.pending_body[sid].copy()
             var pos = self.pending_pos[sid]
-            var rest = List[UInt8](capacity=len(body) - pos)
-            for k in range(pos, len(body)):
-                rest.append(body[k])
-            var n = self.queue_stream_data(sid, Span[UInt8, _](rest))
-            if pos + n >= len(body):
-                _ = self.pending_body.pop(sid)
+            # Moved out and back rather than borrowed: the body lives in
+            # `self` and the call below takes `self` mutably. A `List` move is
+            # a pointer transfer, so this costs nothing per pump.
+            var body = self.pending_body.pop(sid)
+            var total = len(body)
+            var n = self.queue_parked_body(sid, Span(body), pos)
+            if pos + n >= total:
                 _ = self.pending_pos.pop(sid)
                 self.end_stream_response(sid, List[String](), List[String]())
             else:
+                self.pending_body[sid] = body^
                 self.pending_pos[sid] = pos + n
 
     # ── WebSocket-over-HTTP/2 bridge (RFC 8441) ────────────────────────────
@@ -869,6 +875,51 @@ struct Http2Connection(Defaultable, Movable):
         for j in range(len(bytes)):
             self.outbox.append(bytes[j])
 
+    def _send_budget(self, sid: Int) raises -> Int:
+        """How many body bytes may go out on `sid` right now.
+
+        The min of the connection and stream send windows — the same bound
+        `queue_stream_data` applies, asked before the copy rather than after.
+        """
+        if sid not in self.conn.streams:
+            return 0
+        var s = self.conn.streams[sid].copy()
+        return (
+            self.conn.send_window if self.conn.send_window
+            < s.send_window else s.send_window
+        )
+
+    def queue_parked_body(
+        mut self, sid: Int, body: Span[UInt8, _], pos: Int
+    ) raises -> Int:
+        """Frame as much of `body[pos:]` as the send windows will take.
+
+        The point of it is what it does *not* copy. A body too large for the
+        window is parked and re-pumped on every WINDOW_UPDATE, so handing the
+        whole remainder over each time and letting `queue_stream_data` use a
+        window's worth of it is quadratic in the body: at a 64 KiB window a
+        28 MiB response copies about 6 GB to send 28 MB. Asking the window
+        first makes each pump cost a window, not a body.
+
+        Returns the bytes consumed, which the caller adds to its own offset.
+        Both pump paths — a buffered response here and a streaming one in
+        `Http2ConnHandle` — go through this rather than repeating it.
+        """
+        var budget = self._send_budget(sid)
+        if budget <= 0:
+            return 0
+        var take = len(body) - pos
+        if take > budget:
+            take = budget
+        if take <= 0:
+            return 0
+        # A copy rather than a span of the caller's buffer, because
+        # `queue_stream_data` takes `self` mutably and the parked body may
+        # live in it. Bounded by the window, which is what makes it cheap.
+        var chunk = List[UInt8]()
+        chunk.extend(body[pos : pos + take])
+        return self.queue_stream_data(sid, Span(chunk))
+
     def queue_stream_data(
         mut self, sid: Int, data: Span[UInt8, _]
     ) raises -> Int:
@@ -902,13 +953,15 @@ struct Http2Connection(Defaultable, Movable):
             df.header.type = FrameType.DATA()
             df.header.stream_id = sid
             df.header.flags = FrameFlags()
-            var pl = List[UInt8](capacity=take)
-            for i in range(take):
-                pl.append(data[sent + i])
+            # Two copies of the payload, both in one go: `data` into the
+            # frame, and the encoded frame into the outbox. A byte at a time
+            # they are the whole cost of a large response — every byte of it
+            # appended twice, individually.
+            var pl = List[UInt8]()
+            pl.extend(data[sent : sent + take])
             df.payload = pl^
             var bytes = encode_frame(df)
-            for j in range(len(bytes)):
-                self.outbox.append(bytes[j])
+            self.outbox.extend(Span(bytes))
             sent += take
             budget -= take
         self.conn.send_window -= sent

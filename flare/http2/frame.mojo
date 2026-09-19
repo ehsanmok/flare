@@ -250,6 +250,8 @@ def encode_frame(f: Frame) -> List[UInt8]:
     out.append(UInt8((sid >> 16) & 0xFF))
     out.append(UInt8((sid >> 8) & 0xFF))
     out.append(UInt8(sid & 0xFF))
-    for i in range(n):
-        out.append(f.payload[i])
+    # One copy. A DATA frame's payload is up to SETTINGS_MAX_FRAME_SIZE, and a
+    # large response is nothing but these, so a byte at a time here is a scalar
+    # pass over everything the connection sends.
+    out.extend(Span(f.payload))
     return out^
