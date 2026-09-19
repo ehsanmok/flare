@@ -202,3 +202,4 @@ from flare.http.proto.ascii import (
 # Both ``flare.http2.server.detect_h2c_upgrade`` and the unified
 # reactor's per-conn helper delegate to this canonical surface.
 from flare.http.proto.h2c_upgrade import detect_h2c_upgrade
+from flare.http.proto.h2_config import Http2Config
