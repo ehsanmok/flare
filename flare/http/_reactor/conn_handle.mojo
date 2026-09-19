@@ -635,13 +635,13 @@ struct ConnHandle(Movable):
         # the entire upgrade-handling branch.
         if req.headers.get("upgrade").byte_length() != 0:
             # WebSocket upgrade (RFC 6455), opt-in via
-            # ``config.ws_handler``. Checked inside the same guard the
+            # ``config.ws.handler``. Checked inside the same guard the
             # h2c path already pays for, so non-upgrade traffic is
             # unaffected. On success the fd belongs to the
             # WsConnection, so the reactor is told to drop this
             # connection -- with `ws_offload` set that happens while
             # the handler is still running on its own thread.
-            if config.ws_handler:
+            if config.ws.handler:
                 var upgraded: Bool
                 try:
                     upgraded = self._handle_ws_upgrade(req, config)
@@ -1230,7 +1230,7 @@ struct ConnHandle(Movable):
         3. Put the socket back into blocking mode, because the WS
            handler uses blocking ``recv`` exactly as
            :class:`flare.ws.WsServer` does.
-        4. With ``config.ws_offload`` unset, run ``ws_handler(conn)``
+        4. With ``config.ws.offload`` unset, run the handler
            to completion on this thread. With it set, moved the
            connection onto a detached thread and returned while the
            handler is still running.
@@ -1290,15 +1290,15 @@ struct ConnHandle(Movable):
 
         _send_upgrade_response(stream, accept)
         var conn = WsConnection(stream^, peer, prebuf^)
-        if config.ws_offload:
+        if config.ws.offload:
             # Off-reactor: the connection gets its own detached thread so
             # this worker returns now and keeps serving every other fd,
             # instead of parking for the WebSocket's whole lifetime. The
             # fd is already detached from the reactor and back in
             # blocking mode, so that thread owns it end to end.
-            _spawn_ws_offload(conn^, config.ws_handler.value())
+            _spawn_ws_offload(conn^, config.ws.handler.value())
             return True
-        config.ws_handler.value()(conn)
+        config.ws.handler.value()(conn)
         return True
 
     def _queue_error(mut self, status: Int, reason: String) -> None:

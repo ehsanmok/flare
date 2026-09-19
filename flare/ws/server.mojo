@@ -805,7 +805,7 @@ def _handle_ws_connection(
 
 
 # ── Off-reactor connection offload ─────────────────────────────────────────
-# With ``ServerConfig.ws_offload`` set, the HTTP/1.1 reactor hands each
+# With ``ServerConfig.ws.offload`` set, the HTTP/1.1 reactor hands each
 # upgraded WebSocket to a fresh detached pthread instead of running
 # ``ws_handler(conn)`` inline and parking the worker for the connection's
 # lifetime. By this point the fd is already detached from the reactor and

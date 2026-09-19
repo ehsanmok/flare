@@ -37,6 +37,7 @@ from .static_response import StaticResponse
 from ._server.config import (
     ServerConfig,
     WsHandlerFn,
+    WsUpgrade,
     _DEFAULT_SERVER_CONFIG,
     _resolve_bufring_handler_env,
 )
@@ -122,18 +123,6 @@ struct HttpServer(Movable):
     in the same order. Lets ``local_addrs()`` enumerate every
     bound address without an extra ``getsockname(2)`` syscall."""
     var config: ServerConfig
-    var h2_config: Http2Config
-    """HTTP/2 SETTINGS the server advertises to peers that speak h2.
-
-    The unified reactor loop auto-dispatches every accepted
-    connection to either an HTTP/1.1 ``ConnHandle`` or an
-    HTTP/2 ``Http2ConnHandle`` based on the first 24 bytes
-    (RFC 9113 §3.4 client connection preface). The h2 path
-    uses these SETTINGS verbatim. Defaulted to
-    :class:`Http2Config()` -- the same production-shape numbers
-    the standalone HTTP/2 driver used. Tune via
-    ``HttpServer.bind(addr, config, h2_config=Http2Config(...))``.
-    """
     var _stopping: Bool
     """Set by ``close()`` to break the reactor loop. Read from the loop
     itself each iteration."""
@@ -177,13 +166,11 @@ struct HttpServer(Movable):
         out self,
         var listener: TcpListener,
         var config: ServerConfig = ServerConfig(),
-        var h2_config: Http2Config = Http2Config(),
     ):
         self._listener = listener^
         self._extra_listener_fds = List[Int]()
         self._extra_local_addrs = List[SocketAddr]()
         self.config = config^
-        self.h2_config = h2_config^
         self._stopping = False
         self._http3_listener = None
         self._tls_ctx = None
@@ -216,20 +203,12 @@ struct HttpServer(Movable):
     def bind(
         addr: SocketAddr,
         var config: ServerConfig = ServerConfig(),
-        var h2_config: Http2Config = Http2Config(),
     ) raises -> HttpServer:
         """Bind an HTTP server on ``addr``.
 
         Args:
             addr: Local address to listen on.
             config: HTTP/1.1 server configuration (optional).
-            h2_config: HTTP/2 SETTINGS the server advertises to
-                peers that speak h2 (optional). The unified
-                reactor loop auto-dispatches every accepted
-                connection to either the HTTP/1.1 or HTTP/2
-                state machine based on the RFC 9113 §3.4
-                client connection preface; ``h2_config`` is
-                only consulted when a peer is detected as h2.
 
         Returns:
             An ``HttpServer`` ready to call ``serve()``.
@@ -239,13 +218,12 @@ struct HttpServer(Movable):
             NetworkError: For any other OS error.
         """
         var listener = TcpListener.bind(addr)
-        return HttpServer(listener^, config^, h2_config^)
+        return HttpServer(listener^, config^)
 
     @staticmethod
     def bind_many(
         var addrs: List[SocketAddr],
         var config: ServerConfig = ServerConfig(),
-        var h2_config: Http2Config = Http2Config(),
     ) raises -> HttpServer:
         """Bind an HTTP server on multiple addresses simultaneously.
 
@@ -282,7 +260,6 @@ struct HttpServer(Movable):
             addrs: One or more local addresses to listen on.
                 Order matters: ``addrs[0]`` is the primary.
             config: HTTP/1.1 server configuration (optional).
-            h2_config: HTTP/2 SETTINGS for h2 peers (optional).
 
         Returns:
             An ``HttpServer`` whose ``serve()`` accepts on every
@@ -322,7 +299,7 @@ struct HttpServer(Movable):
             # equivalent contract used elsewhere (e.g. the move
             # constructor) so the destructor sees "already closed".
             l._socket.fd = INVALID_FD
-        var srv = HttpServer(primary^, config^, h2_config^)
+        var srv = HttpServer(primary^, config^)
         srv._extra_listener_fds = extra_fds^
         srv._extra_local_addrs = extra_addrs^
         return srv^
@@ -343,7 +320,6 @@ struct HttpServer(Movable):
         tcp_addr: SocketAddr,
         var udp_cfg: QuicServerConfig,
         var config: ServerConfig = ServerConfig(),
-        var h2_config: Http2Config = Http2Config(),
     ) raises -> HttpServer:
         """Bind an HTTP server that speaks h1 / h2c / h2 over TCP
         on ``tcp_addr`` AND h3 over QUIC/UDP on the address in
@@ -379,8 +355,6 @@ struct HttpServer(Movable):
                 (CC choice, idle timeout, ...) is passed
                 through.
             config: HTTP/1.1 server configuration (optional).
-            h2_config: HTTP/2 SETTINGS the server advertises to
-                h2 peers (optional).
 
         Returns:
             An ``HttpServer`` holding both listeners.
@@ -391,7 +365,7 @@ struct HttpServer(Movable):
         """
         var tcp_listener = TcpListener.bind(tcp_addr)
         var quic_listener = QuicListener.bind(udp_cfg^)
-        var srv = HttpServer(tcp_listener^, config^, h2_config^)
+        var srv = HttpServer(tcp_listener^, config^)
         srv._http3_listener = quic_listener^
         return srv^
 
@@ -402,7 +376,6 @@ struct HttpServer(Movable):
         key_file: String,
         var alpn: List[String] = List[String](),
         var config: ServerConfig = ServerConfig(),
-        var h2_config: Http2Config = Http2Config(),
     ) raises -> HttpServer:
         """Bind an HTTPS (TLS-terminated HTTP/1.1) server on ``addr``.
 
@@ -425,7 +398,6 @@ struct HttpServer(Movable):
                 and the negotiated identifier selects the HTTP/2 or
                 HTTP/1.1 handle.
             config: HTTP/1.1 server configuration (optional).
-            h2_config: HTTP/2 SETTINGS, applied when ALPN selects ``h2``.
 
         Returns:
             An ``HttpServer`` ready to call :meth:`serve_tls`.
@@ -449,7 +421,7 @@ struct HttpServer(Movable):
                 for b in p.as_bytes():
                     wire.append(b)
             ctx.set_alpn(wire)
-        var srv = HttpServer(listener^, config^, h2_config^)
+        var srv = HttpServer(listener^, config^)
         srv._tls_ctx = Optional[ServerCtx](ctx^)
         return srv^
 
@@ -747,7 +719,7 @@ struct HttpServer(Movable):
                     self._listener,
                     self._extra_listener_fds,
                     self.config,
-                    self.h2_config.copy(),
+                    self.config.h2.copy(),
                     h,
                     self._stopping,
                 )
@@ -755,7 +727,7 @@ struct HttpServer(Movable):
                 run_unified_reactor_loop(
                     self._listener,
                     self.config,
-                    self.h2_config.copy(),
+                    self.config.h2.copy(),
                     h,
                     self._stopping,
                     None,
@@ -802,7 +774,7 @@ struct HttpServer(Movable):
         Cleartext only: a ``wss://`` connection is terminated by the
         TLS connection handler, which has no upgrade seam.
 
-        Equivalent to setting :attr:`ServerConfig.ws_handler` and then
+        Equivalent to setting :attr:`ServerConfig.ws` and then
         calling ``serve(handler)``; this just wires the field for you.
 
         Args:
@@ -816,7 +788,7 @@ struct HttpServer(Movable):
             ws_offload: Give each upgraded connection its own detached
                 thread instead of running it inline on the reactor
                 worker. Turn this on when WebSocket connections are
-                long-lived; see :attr:`ServerConfig.ws_offload` for the
+                long-lived; see :attr:`WsUpgrade.offload` for the
                 trade-off.
 
         Raises:
@@ -836,8 +808,7 @@ struct HttpServer(Movable):
             srv.serve_ws_upgrade(hello, echo)
             ```
         """
-        self.config.ws_handler = Optional[WsHandlerFn](ws_handler)
-        self.config.ws_offload = ws_offload
+        self.config.ws = WsUpgrade(ws_handler, ws_offload)
         self.serve(handler, num_workers, pin_cores)
 
     def serve[H: Handler](mut self, var handler: H) raises:
@@ -892,7 +863,7 @@ struct HttpServer(Movable):
                 self._listener,
                 self._extra_listener_fds,
                 self.config,
-                self.h2_config.copy(),
+                self.config.h2.copy(),
                 handler,
                 self._stopping,
             )
@@ -900,7 +871,7 @@ struct HttpServer(Movable):
             run_unified_reactor_loop(
                 self._listener,
                 self.config,
-                self.h2_config.copy(),
+                self.config.h2.copy(),
                 handler,
                 self._stopping,
                 None,
@@ -1012,13 +983,13 @@ struct HttpServer(Movable):
                 " bind_many is not supported with a ws_handler yet."
             )
         self._stopping = False
-        self.h2_config.enable_connect_protocol = True
+        self.config.h2.enable_connect_protocol = True
         var hooks = make_ws_h2_hooks[W](ws_handler^)
         try:
             run_unified_reactor_loop(
                 self._listener,
                 self.config,
-                self.h2_config.copy(),
+                self.config.h2.copy(),
                 handler,
                 self._stopping,
                 Optional[WsH2Hooks](hooks.copy()),
@@ -1226,7 +1197,7 @@ struct HttpServer(Movable):
                     self._listener,
                     self._extra_listener_fds,
                     self.config,
-                    self.h2_config.copy(),
+                    self.config.h2.copy(),
                     handler,
                     self._stopping,
                 )
@@ -1234,7 +1205,7 @@ struct HttpServer(Movable):
                 run_unified_reactor_loop(
                     self._listener,
                     self.config,
-                    self.h2_config.copy(),
+                    self.config.h2.copy(),
                     handler,
                     self._stopping,
                     None,
@@ -1274,7 +1245,7 @@ struct HttpServer(Movable):
         var frontend = HttpFrontend[H](
             handler^,
             self.config.copy(),
-            self.h2_config.copy(),
+            self.config.h2.copy(),
             auto_protocol=True,
             tls_ctx_addr=self._tls_ctx_addr(),
         )
