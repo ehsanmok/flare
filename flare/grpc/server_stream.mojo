@@ -83,17 +83,31 @@ struct GrpcServerStreamReply(Copyable):
     var messages: List[List[UInt8]]
     var status: GrpcStatus
     var trailing_metadata: GrpcMetadata
+    var compress: Bool
+    """Whether these messages may be compressed, when the client accepts it.
+
+    Every gRPC client advertises ``grpc-accept-encoding: gzip``, so without
+    an opt-out a handler has no way to decline -- and for a payload that is
+    already compact, or already compressed, gzip is pure cost. Arrow record
+    batches are the case that forced this: deflating one ran at about 25 MB/s
+    and was 98% of what the client waited for, against a handler that took
+    16 ms to produce the bytes.
+
+    Defaults to ``True``, which is what every existing handler gets.
+    """
 
     @staticmethod
     def ok(
         var messages: List[List[UInt8]],
         var trailing_metadata: GrpcMetadata = GrpcMetadata(),
+        compress: Bool = True,
     ) -> Self:
         """Build an OK server-streaming reply yielding ``messages``."""
         return Self(
             messages=messages^,
             status=GrpcStatus.ok(),
             trailing_metadata=trailing_metadata^,
+            compress=compress,
         )
 
     @staticmethod
@@ -106,6 +120,7 @@ struct GrpcServerStreamReply(Copyable):
             messages=List[List[UInt8]](),
             status=status^,
             trailing_metadata=trailing_metadata^,
+            compress=True,
         )
 
 
@@ -147,6 +162,8 @@ def _outcome_from_stream_reply(
     var response_data = List[UInt8]()
     var status = reply.status.copy()
     var used_encoding = _negotiate_response_encoding(accept_encoding)
+    if not reply.compress:
+        used_encoding = String("")
     try:
         for i in range(len(reply.messages)):
             encode_unary_response(
@@ -287,6 +304,8 @@ def _streaming_response_from_reply(
     reactor emits at END_STREAM.
     """
     var used_encoding = _negotiate_response_encoding(accept_encoding)
+    if not reply.compress:
+        used_encoding = String("")
     var resp = Response(200)
     resp.headers.set("content-type", "application/grpc")
     if used_encoding != "":
