@@ -34,7 +34,6 @@ client preface arrives flushes both the SETTINGS and the
 SETTINGS-ACK in one syscall.
 """
 
-from std.memory import unsafe_memcpy
 from std.builtin.debug_assert import debug_assert
 from std.collections import Dict, Optional
 from std.ffi import c_int, c_size_t, ErrNo, get_errno
@@ -423,27 +422,11 @@ struct Http2ConnHandle(Movable):
         self.h2.feed(bytes)
         var ack = self.h2.drain()
 
-        if len(ack) > 0:
+        # One copy: this is every outbound byte of the connection, and
 
-            # One copy: this is every outbound byte of the
+        # for a streaming response it runs once per window's worth.
 
-            # connection, and for a streaming response it runs once
-
-            # per window's worth of body.
-
-            var base = len(self.write_buf)
-
-            self.write_buf.resize(unsafe_uninit_length=base + len(ack))
-
-            unsafe_memcpy(
-
-                dest=self.write_buf.unsafe_ptr().unsafe_offset(base),
-
-                src=ack.unsafe_ptr(),
-
-                count=len(ack),
-
-            )
+        self.write_buf.extend(Span(ack))
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
@@ -574,27 +557,11 @@ struct Http2ConnHandle(Movable):
         # Drain everything the driver wants to send.
         var out = self.h2.drain()
 
-        if len(out) > 0:
+        # One copy: this is every outbound byte of the connection, and
 
-            # One copy: this is every outbound byte of the
+        # for a streaming response it runs once per window's worth.
 
-            # connection, and for a streaming response it runs once
-
-            # per window's worth of body.
-
-            var base = len(self.write_buf)
-
-            self.write_buf.resize(unsafe_uninit_length=base + len(out))
-
-            unsafe_memcpy(
-
-                dest=self.write_buf.unsafe_ptr().unsafe_offset(base),
-
-                src=out.unsafe_ptr(),
-
-                count=len(out),
-
-            )
+        self.write_buf.extend(Span(out))
         if self.h2.conn.goaway_received:
             self.should_close = True
         if self.h2.conn.goaway_sent:
@@ -730,26 +697,13 @@ struct Http2ConnHandle(Movable):
         var addr = self._stream_out[sid]
         var st = Pool[H2StreamOut].get_ptr(addr)
         if st[].ppos < len(st[].pending):
-            # Hand over only what the window will take. Copying the whole
-            # stashed remainder here — on every pump, and a pump is what a
-            # WINDOW_UPDATE triggers — is quadratic in the response: a large
-            # chunk advancing a window at a time copies the tail once per
-            # window. For a 28 MiB message that is gigabytes of
-            # byte-at-a-time copying to send megabytes.
-            var budget = self.h2._send_budget(sid)
-            if budget <= 0:
-                return  # window exhausted; wait for WINDOW_UPDATE
-            var take = len(st[].pending) - st[].ppos
-            if take > budget:
-                take = budget
-            var rem = List[UInt8]()
-            rem.resize(unsafe_uninit_length=take)
-            unsafe_memcpy(
-                dest=rem.unsafe_ptr(),
-                src=st[].pending.unsafe_ptr().unsafe_offset(st[].ppos),
-                count=take,
+            # Only what the window will take — see `queue_parked_body`, which
+            # the buffered path uses for the same reason: re-copying the whole
+            # stash on every pump, and a pump is what a WINDOW_UPDATE
+            # triggers, is quadratic in the response.
+            var n = self.h2.queue_parked_body(
+                sid, Span(st[].pending), st[].ppos
             )
-            var n = self.h2.queue_stream_data(sid, Span[UInt8, _](rem))
             st[].ppos += n
             if st[].ppos < len(st[].pending):
                 return  # window exhausted; wait for WINDOW_UPDATE
@@ -775,12 +729,7 @@ struct Http2ConnHandle(Movable):
                 # but it is the same bytes, and a byte at a time is a byte at
                 # a time.
                 var tail = List[UInt8]()
-                tail.resize(unsafe_uninit_length=clen - n)
-                unsafe_memcpy(
-                    dest=tail.unsafe_ptr(),
-                    src=nxt.value().unsafe_ptr().unsafe_offset(n),
-                    count=clen - n,
-                )
+                tail.extend(Span(nxt.value())[n:clen])
                 st[].pending = tail^
                 st[].ppos = 0
                 return
@@ -1020,27 +969,11 @@ struct Http2ConnHandle(Movable):
                 self.should_close = True
         var out = self.h2.drain()
 
-        if len(out) > 0:
+        # One copy: this is every outbound byte of the connection, and
 
-            # One copy: this is every outbound byte of the
+        # for a streaming response it runs once per window's worth.
 
-            # connection, and for a streaming response it runs once
-
-            # per window's worth of body.
-
-            var base = len(self.write_buf)
-
-            self.write_buf.resize(unsafe_uninit_length=base + len(out))
-
-            unsafe_memcpy(
-
-                dest=self.write_buf.unsafe_ptr().unsafe_offset(base),
-
-                src=out.unsafe_ptr(),
-
-                count=len(out),
-
-            )
+        self.write_buf.extend(Span(out))
         if self.h2.conn.goaway_received:
             self.should_close = True
         var has_outbound = len(self.write_buf) > self.write_pos

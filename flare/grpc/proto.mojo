@@ -27,7 +27,7 @@ descriptors -- those live in :mod:`flare.grpc.reflection`.
 """
 
 from std.collections import List
-from std.memory import stack_allocation, unsafe_memcpy
+from std.memory import stack_allocation
 from std.collections.span import Span
 
 
@@ -167,16 +167,7 @@ struct ProtoWriter(Copyable):
         """
         self._tag(field, WIRE_LEN)
         self._raw_varint(UInt64(len(value)))
-        var n = len(value)
-        if n == 0:
-            return
-        var base = len(self.buf)
-        self.buf.resize(unsafe_uninit_length=base + n)
-        unsafe_memcpy(
-            dest=self.buf.unsafe_ptr().unsafe_offset(base),
-            src=value.unsafe_ptr(),
-            count=n,
-        )
+        self.buf.extend(value)
 
     def write_string(mut self, field: Int, value: String):
         self.write_bytes(field, value.as_bytes())
@@ -215,14 +206,8 @@ struct ProtoReader(Copyable):
         being decoded is as large as the payload in it.
         """
         self.data = List[UInt8]()
+        self.data.extend(buf)
         self.pos = 0
-        var n = len(buf)
-        if n == 0:
-            return
-        self.data.resize(unsafe_uninit_length=n)
-        unsafe_memcpy(
-            dest=self.data.unsafe_ptr(), src=buf.unsafe_ptr(), count=n
-        )
 
     def has_more(self) -> Bool:
         return self.pos < len(self.data)
