@@ -54,13 +54,32 @@ a browser, or h2load (fixed in v0.10 -- see
 guard against that class of bug returning.
 
 Cleartext picks the protocol with the RFC 9113 §3.4 preface peek; TLS
-picks it from the ALPN the handshake negotiated. `bind_many` (several
+picks it from the ALPN the handshake negotiated. `bind` with a list (several
 distinct addresses) is single-worker only -- multi-worker uses
 `SO_REUSEPORT` on one address, and the N x M cross product is not built.
 The io_uring buffer-ring path is HTTP/1.1 cleartext only and stays
 opt-in.
 
 ## HTTP server
+
+**Changed in v0.11 (breaking, with shims).** The server surface went
+from nineteen entry points to four names.
+
+| Before | Now |
+|---|---|
+| `bind(addr, config, h2_config)` | `bind(addr, config)`; HTTP/2 settings live at `config.h2` |
+| `bind_many(addrs, config)` | `bind(addrs, config)` -- `bind` takes an address or a list |
+| `serve(handler, ws_handler)` | `attach_ws_h2(ws_handler)` then `serve(handler)` |
+| `serve_tls(h)` / `serve_tls(h, n)` | `serve(h)` / `serve(h, n)` on a `bind_tls` server |
+| `serve_ws_upgrade(h, ws_fn, ...)` | `ServerConfig.ws = WsUpgrade(ws_fn, offload)`, then `serve(h)` |
+| `serve_static_multicore(resp, n)` | `serve_static(resp, n)` |
+| `ServerConfig.ws_handler` / `.ws_offload` | `ServerConfig.ws.handler` / `.ws.offload` |
+| asserts inside `serve_comptime` | `ServerConfig.check[cfg]()`, callable anywhere |
+
+`bind_many`, `serve_tls`, `serve_ws_upgrade` and `serve_static_multicore`
+remain as delegating shims and are removed in 0.12. `serve_cancellable`,
+`serve_view` and `serve_static` now raise when a TLS context or extra
+listeners are bound, instead of silently ignoring both.
 
 | Surface | Where |
 |---|---|
@@ -79,6 +98,13 @@ opt-in.
 | `precompute_response(status, content_type, body) -> StaticResponse` — keep-alive + `Connection: close` wire forms both pre-encoded | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
 
 ## HTTP client
+
+**Added in v0.11.** `with_h2c(prior_knowledge, upgrade)` is the builder
+spelling for the `prefer_h2c` / `h2c_upgrade` constructor arguments,
+which still work. `pool_stats()` returns one snapshot across all three
+connection pools rather than four separate accessors. The default
+`User-Agent` is derived from the library version; it had been the
+literal `flare/0.1.0` for nine releases.
 
 | Surface | Where |
 |---|---|
@@ -376,6 +402,10 @@ serves a single `Handler` over HTTP/1.1 + HTTP/2 + HTTP/3 simultaneously.
 | QPACK dynamic table (RFC 9204 §3-4): `QpackDynamicTable` (capacity-bounded eviction, absolute / relative indexing), encoder-stream instruction codec (Set Capacity, Insert With Name Reference, Insert With Literal Name, Duplicate) via `apply_encoder_instructions` / `apply_encoder_instructions_partial`, decoder-stream instructions (Section Ack, Stream Cancel, Insert Count Increment), dynamic field-section codec `encode_field_section_dynamic` / `decode_field_section_dynamic`, owners `QpackEncoder` / `QpackDecoder`; fuzz-clean (`fuzz-qpack-dynamic`) | `flare.qpack.dynamic` |
 
 ## gRPC
+
+**Changed in v0.11.** The seventeen status codes are namespaced on the
+struct: `GrpcStatus.NOT_FOUND` rather than `GRPC_STATUS_NOT_FOUND`. The
+module-level names remain as aliases.
 
 gRPC primitives on top of HTTP/2. The bottom two wire layers (LPM
 framing, canonical Status codes, Metadata carrier) ship as sans-I/O

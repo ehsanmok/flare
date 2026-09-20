@@ -219,7 +219,7 @@ def main() raises:
     srv.serve(WithHits(inner=router^, counters=Counters(hits=37)))
 ```
 
-For `serve_static`, `serve_comptime[handler, config]` (build-time invariant checks), shared-listener multi-worker mode, and the cross-worker `WorkerHandoffPool`, see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
+For `serve_static`, `ServerConfig.check[config]()` (build-time invariant checks), shared-listener multi-worker mode, and the cross-worker `WorkerHandoffPool`, see [`docs/cookbook.md`](docs/cookbook.md) and the linked examples.
 
 ### Streaming proxy: relay an upstream with backpressure
 
