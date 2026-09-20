@@ -429,6 +429,9 @@ from test_client_ux import (
 from test_client_ux import (
     test_retry_recovers_flaky_origin as test_client_ux__test_retry_recovers_flaky_origin,
 )
+from test_client_ux import (
+    test_pool_stats_reports_every_pool as test_client_ux__test_pool_stats_reports_every_pool,
+)
 from test_conditional import (
     test_passthrough_when_no_precondition_headers as test_conditional__test_passthrough_when_no_precondition_headers,
 )
@@ -3942,6 +3945,7 @@ def main() raises:
     suite.test[test_client_ux__test_auto_decompress_opt_out_keeps_raw]()
     suite.test[test_client_ux__test_cookie_jar_captures_and_replays]()
     suite.test[test_client_ux__test_retry_recovers_flaky_origin]()
+    suite.test[test_client_ux__test_pool_stats_reports_every_pool]()
     # tests/http/test_conditional.mojo
     suite.test[
         test_conditional__test_passthrough_when_no_precondition_headers
