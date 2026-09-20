@@ -56,6 +56,15 @@ ALLOWLISTED_REACTOR_BRIDGES=(
     # here and in flare/__init__.mojo rather than hidden.
     "flare/http/server.mojo"
     "flare/http/client.mojo"
+    # The buffered h2 send path. This has imported ...http2.client
+    # since it was split out of client.mojo; the two-dot pattern above
+    # never saw it, so it is being registered now rather than newly
+    # permitted.
+    "flare/http/_client/h2_send.mojo"
+    # The streaming readers drive Http2ClientConnection and the h3
+    # client for one response each; same reason as client.mojo above.
+    "flare/http/_client/h2_download.mojo"
+    "flare/http/_client/h3_download.mojo"
 )
 
 violations=0
@@ -112,7 +121,10 @@ while IFS= read -r -d '' file; do
     # ``..http2`` form (inside flare/http, ``..http2`` resolves to the
     # absolute ``flare.http2``). The relative form previously slipped
     # past this lint -- see flare/http/server.mojo + client.mojo.
-    matches="$(grep -nE '^(from|import)[[:space:]]+(flare\.http2|\.\.http2)\b' "$file" || true)"
+    # ``\.{2,}`` rather than ``\.\.``: a file at flare/http/_client/x.mojo
+    # spells the same import ``...http2``, and the two-dot pattern let
+    # every such file through unchecked.
+    matches="$(grep -nE '^(from|import)[[:space:]]+(flare\.http2|\.{2,}http2)\b' "$file" || true)"
     if [[ -n "$matches" ]]; then
         echo "check-no-http-http2-cycle: $file: forbidden import (not on reactor-bridge allowlist):" >&2
         while IFS= read -r line; do
