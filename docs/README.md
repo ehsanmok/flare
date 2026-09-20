@@ -16,7 +16,6 @@ directory carry the detail.
 | [`operations.md`](operations.md) | Production runbook -- topology choices, TLS posture, health endpoints, graceful shutdown, observability, resource limits, common failure modes, container deployment, soak harness. |
 | [`concurrency.md`](concurrency.md) | The Mojo closure-binding rules flare relies on, the cross-thread primitive surface (`Cancel`, `HandoffQueue`, `block_in_pool`), and the owned-by-one-thread invariant. |
 | [`cookbook.md`](cookbook.md) | Index of files under `examples/{basic,intermediate,advanced}/` mapped to use cases. |
-| [`superpowers/specs/`](superpowers/specs/) | Design specs written before implementation: QUIC server-side loss recovery (RFC 9002), implemented in v0.11.0, and HTTP client streaming over HTTP/2 and HTTP/3, still pending. |
 
 The public Mojo API is stable within a minor: patch releases never
 break source for the same minor. Breaking changes only land at minor

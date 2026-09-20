@@ -63,7 +63,7 @@ runs at every release tag.
 
 ## Fuzz / property-test budget
 
-62 harnesses today (58 fuzz + 4 property), covering:
+63 harnesses today (59 fuzz + 4 property), covering:
 
 - HTTP parsing (request, response, headers, URL, cookies, auth)
 - WebSocket frames (mask, opcode, close codes)
@@ -76,10 +76,24 @@ runs at every release tag.
 - Multicore scheduler shutdown
 - Typed extractors
 - SIMD header scanner
+- QUIC and HTTP/3: varint, long header, packet decrypt, initial
+  handshake, transport parameters, connection id, migration and its
+  amplification limit, retry, early-data length and replay strike,
+  h3 frame, h3 server, h3 response reader, QPACK decode and its
+  dynamic table
+- HTTP/2 denial of service: the CONTINUATION flood and the
+  rapid-reset shape of CVE-2023-44487
 - Property tests on the timer wheel, headers, auth, WebSocket
   round-trip
 
-62 harnesses, 9M+ runs combined, zero crashes to date.
+63 harnesses, 9M+ runs combined, zero crashes to date.
+
+**All 63 run nightly.** Until v0.11 the scheduled job ran ten of
+them by name, so the entire QUIC, HTTP/3 and QPACK family and both
+HTTP/2 denial-of-service harnesses had never run on a schedule --
+only when someone ran `fuzz-all` by hand. The corpus is cached
+between runs, so each night starts from what the last one found
+rather than rediscovering it.
 
 ---
 

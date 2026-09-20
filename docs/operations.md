@@ -16,7 +16,7 @@ users.
 | Single worker | < 5 k req/s, or you genuinely care about ordering across requests. | `HttpServer.serve(handler)` |
 | Multi worker, `SO_REUSEPORT` | Default for > 5 k req/s. Each worker has its own listener + reactor; kernel hashes accepts across them. Best p99 / p99.99 in heterogeneous workloads. | `HttpServer.serve(handler, num_workers=N)` |
 | Multi worker, shared listener (`EPOLLEXCLUSIVE`) | When you want a single accept queue and willing to tolerate a small p99.99 bump under skewed keep-alive. | `HttpServer.serve_shared_listener(...)` |
-| Multi listener | Same handler exposed on multiple addresses (IPv4 + IPv6, public + UDS, etc). | `HttpServer.bind_many([SocketAddr.localhost(80), ...])` |
+| Multi listener | Same handler exposed on multiple addresses (IPv4 + IPv6, public + UDS, etc). | `HttpServer.bind([SocketAddr.localhost(80), ...])` |
 
 Sizing rule of thumb: start with `num_workers =
 runtime.scheduler.physical_core_count()` and *do not* oversubscribe.

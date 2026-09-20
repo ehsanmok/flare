@@ -21,9 +21,6 @@ reactor would route an inbound connection to its driver.
 """
 
 from flare.http.alpn_dispatch import (
-    ALPN_HTTP_1_1,
-    ALPN_HTTP_2,
-    ALPN_HTTP_3,
     WireProtocol,
     dispatch_alpn,
     dispatch_h2c_upgrade,
@@ -54,9 +51,15 @@ def main() raises:
     # The four canonical input shapes the reactor sees.
     print("Direct ALPN -> wire mapping:")
     _print_dispatch(String(""), dispatch_alpn(String("")))
-    _print_dispatch(ALPN_HTTP_1_1, dispatch_alpn(ALPN_HTTP_1_1))
-    _print_dispatch(ALPN_HTTP_2, dispatch_alpn(ALPN_HTTP_2))
-    _print_dispatch(ALPN_HTTP_3, dispatch_alpn(ALPN_HTTP_3))
+    _print_dispatch(
+        WireProtocol.ALPN_HTTP_1_1, dispatch_alpn(WireProtocol.ALPN_HTTP_1_1)
+    )
+    _print_dispatch(
+        WireProtocol.ALPN_HTTP_2, dispatch_alpn(WireProtocol.ALPN_HTTP_2)
+    )
+    _print_dispatch(
+        WireProtocol.ALPN_HTTP_3, dispatch_alpn(WireProtocol.ALPN_HTTP_3)
+    )
     _print_dispatch(
         String("h1.5-experimental"),
         dispatch_alpn(String("h1.5-experimental")),
@@ -73,14 +76,14 @@ def main() raises:
     # the server lists the three in preference order, and the server's
     # order wins (RFC 7301 paragraph 3.2).
     var client_advertised = List[String]()
-    client_advertised.append(ALPN_HTTP_1_1)
-    client_advertised.append(ALPN_HTTP_2)
-    client_advertised.append(ALPN_HTTP_3)
+    client_advertised.append(WireProtocol.ALPN_HTTP_1_1)
+    client_advertised.append(WireProtocol.ALPN_HTTP_2)
+    client_advertised.append(WireProtocol.ALPN_HTTP_3)
 
     var server_supports = List[String]()
-    server_supports.append(ALPN_HTTP_3)
-    server_supports.append(ALPN_HTTP_2)
-    server_supports.append(ALPN_HTTP_1_1)
+    server_supports.append(WireProtocol.ALPN_HTTP_3)
+    server_supports.append(WireProtocol.ALPN_HTTP_2)
+    server_supports.append(WireProtocol.ALPN_HTTP_1_1)
 
     var negotiated = negotiate_alpn(client_advertised, server_supports)
     print(
@@ -110,11 +113,13 @@ def main() raises:
     )
     print(
         "    tcp-only route_alpn('h2') ->",
-        wire_protocol_name(tcp_only.route_alpn(String(ALPN_HTTP_2))),
+        wire_protocol_name(
+            tcp_only.route_alpn(String(WireProtocol.ALPN_HTTP_2))
+        ),
     )
     var raised_on_h3 = False
     try:
-        var _w = tcp_only.route_alpn(String(ALPN_HTTP_3))
+        var _w = tcp_only.route_alpn(String(WireProtocol.ALPN_HTTP_3))
     except _:
         raised_on_h3 = True
     print("    tcp-only route_alpn('h3') raises:", raised_on_h3)
@@ -128,5 +133,5 @@ def main() raises:
     print("    h3 server advertises:", h3_srv.advertised_alpn_protocols())
     print(
         "    h3 server route_alpn('h3') ->",
-        wire_protocol_name(h3_srv.route_alpn(String(ALPN_HTTP_3))),
+        wire_protocol_name(h3_srv.route_alpn(String(WireProtocol.ALPN_HTTP_3))),
     )

@@ -84,7 +84,7 @@ listeners are bound, instead of silently ignoring both.
 | Surface | Where |
 |---|---|
 | `HttpServer.bind(addr)` / `serve(handler)` / `serve(handler, num_workers=N)` — version-aware listener that dispatches HTTP/1.1, HTTP/2 over TLS (ALPN), and h2c (RFC 9113 §3.4 preface peek, no `Upgrade` dance) to the same handler | [`http_server.mojo`](../examples/basic/http_server.mojo), [`http2.mojo`](../examples/advanced/http2.mojo), [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
-| `HttpServer.bind_many(addrs: List[SocketAddr])` — single-worker listener over multiple distinct addresses; the accept loop walks every fd and demuxes onto the same handler | [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) |
+| `HttpServer.bind(addrs: List[SocketAddr])` — single-worker listener over multiple distinct addresses; the accept loop walks every fd and demuxes onto the same handler. `bind` takes one address or a list; `bind_many` is the pre-0.11 spelling and goes away in 0.12 | [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) |
 | HTTP/1.1 trailer fields (RFC 7230 §4.1.2 / §4.4) — `StreamingResponse[B].trailers: HeaderMap` on the outbound side (buffered `Response` uses `Content-Length` and never carries trailers), automatic `Trailer:` header, smuggling guard rejects trailers when `Content-Length` is present or when forbidden trailer names are listed; `HttpClient` parses inbound trailers off the chunked decoder and lands them on `Response.trailers` (also a `HeaderMap`) | [`trailers.mojo`](../examples/intermediate/trailers.mojo), [`tests/http/test_h1_trailers.mojo`](../tests/http/test_h1_trailers.mojo) |
 | `HttpServer.serve_static(StaticResponse)` — pre-encoded static-response fast path that skips parsing and handler dispatch (used by `flare_mc_static` bench row) | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
 | `HttpServer.serve_comptime[handler, config]()` — comptime-specialised reactor with build-time invariant checks on `ServerConfig` | `flare.http.server` |
@@ -289,7 +289,7 @@ source) + `on_upstream` (`conn.relay_upstream()`).
 | Watermark backpressure: `conn.set_watermarks(hi, lo)`, `write_buffer_full()`, `apply_backpressure()` — hi/lo hysteresis gates upstream read interest so a slow client cannot force unbounded buffering | `flare.http.streaming_server` |
 | Incremental inbound body: `conn.enable_inbound()`, `conn.read_body(max_bytes)` returning `ChunkPoll` — bounded-memory consumption of a large request body | `flare.http.streaming_server` |
 | Write coalescing: K `send` calls in one tick flush in one `send(2)`; `conn.write_syscalls()` observes it | `flare.http.streaming_server` |
-| `FrameMux` — multiplexes many logical streams over one owned `UnixStream` (`open` / `send_chunk` / `done` / `cancel` / `flush` / `pump` / `poll`); frame `\| u32 len \| u64 request_id \| u8 kind \| payload \|` via `encode_frame` / `decode_frame`, `Frame`, `FrameKind`, `FrameDemux`; fuzz-clean | `flare.uds.frame_mux`, `flare` |
+| `FrameMux` — multiplexes many logical streams over one owned `UnixStream` (`open` / `send_chunk` / `done` / `cancel` / `flush` / `pump` / `poll`); frame `\| u32 len \| u64 request_id \| u8 kind \| payload \|` via `encode_frame` / `decode_frame`, `Frame`, `FrameKind`, `FrameDemux`; fuzz-clean | `flare.uds.frame_mux` |
 | `ByteReader[origin]` / `ByteWriter` — bounds-checked, endian-aware byte cursors (checked u8/u16/u32/u64 be+le, `read_utf8`); replace raw `UnsafePointer` frame parsing | `flare.io`, `flare` |
 
 ## Observability
@@ -325,7 +325,7 @@ own dispatch loop.
 | CONTINUATION-flood / RAPID-RESET (CVE-2023-44487) state-machine fuzz coverage | `fuzz/fuzz_h2_continuation.mojo`, `fuzz/fuzz_h2_rapid_reset.mojo` |
 | RFC 8441 Extended CONNECT (client side — `WsClient` over h2): `Http2ClientConnection.send_extended_connect` + `WsOverH2Stream` adapter + `bootstrap_ws_over_h2` | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo), `flare.ws.client_h2` |
 | RFC 8441 Extended CONNECT (server side — WS-over-h2 bridge): `Http2Connection.take_extended_connect_streams` / `accept_ws_over_h2` (200 without END_STREAM) / `drain_stream_data` + `WsOverH2ServerStream` (unmasked server frames, unmasks client frames); full paired-driver round-trip | [`tests/ws/test_ws_h2_roundtrip.mojo`](../tests/ws/test_ws_h2_roundtrip.mojo), `flare.ws.server_h2` |
-| RFC 8441 Extended CONNECT (server side — reactor sidecar dispatch): edge-driven `WsH2Handler` (`on_open`/`on_message`/`on_close`) + `HttpServer.serve[H: Handler, W: WsH2Handler](handler, ws_handler)` route a live CONNECT stream to the handler over the unified reactor (boxed `WsH2Hooks`, zero-cost when no ws_handler); forked h2c e2e | [`tests/ws/test_ws_h2_reactor.mojo`](../tests/ws/test_ws_h2_reactor.mojo), `flare.ws.server_h2`, `flare.http.server` |
+| RFC 8441 Extended CONNECT (server side — reactor sidecar dispatch): edge-driven `WsH2Handler` (`on_open`/`on_message`/`on_close`) + `HttpServer.attach_ws_h2(ws_handler)` then `serve(handler)` route a live CONNECT stream to the handler over the unified reactor (boxed `WsH2Hooks`, zero-cost when none is attached; the `serve[H, W]` overload this replaces went away in v0.11); forked h2c e2e | [`tests/ws/test_ws_h2_reactor.mojo`](../tests/ws/test_ws_h2_reactor.mojo), `flare.ws.server_h2`, `flare.http.server` |
 | HTTP/2 concurrent multiplexed server streaming (K1): a handler returning `stream_response` / `stream_sse_response` ships a bounded batch of DATA frames per writable edge; **many** streaming responses run concurrently on one connection with a fair per-stream pump, `min(conn, stream)` send-window bounding, and WINDOW_UPDATE re-pump (no single-active-stream ceiling); trailers close each stream — the same body-stream path as H1 chunked | [`tests/http2/test_h2_conn_handle.mojo`](../tests/http2/test_h2_conn_handle.mojo), [`tests/http2/test_h2_server_handler.mojo`](../tests/http2/test_h2_server_handler.mojo), `flare.http._h2_conn_handle`, `flare.http2.server` |
 | Per-stream `Cancel` propagation (peer RST_STREAM → handler `cancel.cancelled()`): `Http2ConnHandle` carries a `Dict[StreamId, Cancel]`, RST_STREAM / GOAWAY / drain all signal the matching cell | `flare.http._h2_conn_handle`, [`tests/http2/test_h2_per_stream_cancel.mojo`](../tests/http2/test_h2_per_stream_cancel.mojo) |
 | h1.1 client connection pool: `HttpClient.with_pool(...)` keyed on `(scheme, host, port)`, idle reuse + per-origin caps + stale-conn retry | [`client_pool.mojo`](../examples/advanced/client_pool.mojo), `flare.http.client_pool` |
@@ -579,13 +579,24 @@ request id but never echoed to the client. See
 (500), `read_body_timeout_ms` (30_000), plus `request_timeout_ms` /
 `handler_timeout_ms`.
 
-WebSocket on the same port: set `ServerConfig.ws_handler` to a
-`WsHandlerFn` and any request that arrives with a valid RFC 6455
-upgrade is handed to it, while everything else goes to the ordinary
-`Handler`. `ServerConfig.ws_offload` (default `False`) moves each
+WebSocket on the same port: set `ServerConfig.ws` to a
+`WsUpgrade(ws_fn)` and any request that arrives with a valid RFC 6455
+upgrade is handed to `ws_fn`, while everything else goes to the
+ordinary `Handler`. `WsUpgrade(ws_fn, offload=True)` moves each
 upgraded socket onto its own detached thread, which suits long-lived
-connections that would otherwise occupy a reactor slot. `HttpServer
-.serve_ws_upgrade(fn, ws_fn)` wires the same two fields for you.
+connections that would otherwise occupy a reactor slot.
+
+**Changed in v0.11.** These were two loose fields, `ws_handler` and
+`ws_offload`, which made it easy to set the handler and never learn
+the offload flag existed. `serve_ws_upgrade(fn, ws_fn)` wired both and
+is now a shim that goes away in 0.12.
+
+```mojo
+var cfg = ServerConfig()
+cfg.ws = WsUpgrade(ws_fn)                  # was: cfg.ws_handler = ws_fn
+var srv = HttpServer.bind(addr, cfg.copy())
+srv.serve(http_fn)                         # was: srv.serve_ws_upgrade(http_fn, ws_fn)
+```
 
 Client-side timeouts: `HttpClient(timeout_ms=...)` bounds the TCP
 connect and, on `https://`, the TLS handshake. `with_read_timeout(ms)`
@@ -708,11 +719,11 @@ Tests under [`tests/`](../tests/) mirror the package layout:
 
 | | Count |
 |---|---|
-| Unit + integration tests | 600+ across `tests/` |
-| Examples (each part of `pixi run tests`) | 67 under [`examples/`](../examples/) |
-| Fuzz harnesses | 62 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes |
-| Sanitizer harnesses | `tests-asan` / `tests-tsan` / `tests-asserts-all` (see [`build.md`](build.md)) |
-| Conformance corpora | RFC 7230 HTTP/1 wire shapes under [`tests/conformance/h1/`](../tests/conformance/h1/) (runner: `test-conformance-h1`); RFC 6455 WebSocket frames under [`tests/conformance/ws/`](../tests/conformance/ws/) (runner: `test-conformance-ws`, 13 fixtures; Autobahn-anchored case ids 1.x / 2.x / 3.x / 5.x / 7.x) |
+| Unit + integration tests | 2499 across `tests/`, run as 20 per-area aggregate binaries |
+| Examples (each part of `pixi run tests`) | 73 under [`examples/`](../examples/); `check-example-tasks` keeps the files, the `example-*` tasks and the `examples` aggregate in step |
+| Fuzz harnesses | 63 under [`fuzz/`](../fuzz/), 9M+ runs combined, zero known crashes; all 63 run nightly since v0.11 |
+| Sanitizer harnesses | `tests-asan` / `tests-tsan` on Linux, `tests-asserts-all` everywhere. The Mojo toolchain ships no arm64 sanitizer runtime, so the first two exit 0 with an explanation on macOS (see [`build.md`](build.md)) |
+| Conformance corpora | RFC 7230 HTTP/1 wire shapes under [`tests/conformance/h1/`](../tests/conformance/h1/) (runner: `test-conformance-h1`); RFC 6455 WebSocket frames under [`tests/conformance/ws/`](../tests/conformance/ws/) (runner: `test-conformance-ws`, 13 fixtures; Autobahn-anchored case ids 1.x / 2.x / 3.x / 5.x / 7.x). External suites run through `pixi run conformance`: h2spec, and since v0.11 the full Autobahn fuzzing client against [`websocket_echo_server.mojo`](../examples/basic/websocket_echo_server.mojo), each gated against a documented known-fail list |
 
 Per-harness breakdown (input → fuzzer):
 

@@ -15,8 +15,10 @@ RFC 6455 requests to WebSocket on the SAME listener:
                 break
             conn.send_text("echo: " + frame.text_payload())
 
-    var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve_ws_upgrade(http_handler, ws_handler)  # one port, both protocols
+    var cfg = ServerConfig()
+    cfg.ws = WsUpgrade(ws_handler)   # one port, both protocols
+    var srv = HttpServer.bind(SocketAddr.localhost(8080), cfg)
+    srv.serve(http_handler)
 
 This example forks a child running exactly that, then drives both a
 plain HTTP GET and a WebSocket echo from the parent over the same port,
@@ -31,7 +33,14 @@ from std.memory import stack_allocation
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
-from flare.http import HttpServer, Request, Response, ok
+from flare.http import (
+    HttpServer,
+    Request,
+    Response,
+    ServerConfig,
+    WsUpgrade,
+    ok,
+)
 from flare.net import SocketAddr
 from flare.net._libc import (
     AF_INET,
@@ -86,7 +95,15 @@ def main() raises:
     print("=== flare: HTTP + WebSocket on one port ===")
     print()
 
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    # `ServerConfig.ws` is what makes the one-port shape work. Setting
+    # it is the whole opt-in: `serve` routes a valid RFC 6455 upgrade to
+    # `ws_handler` and everything else to `http_handler`. Before v0.11
+    # this was `serve_ws_upgrade(http_handler, ws_handler)`, which still
+    # works this release and goes away in 0.12.
+    var cfg = ServerConfig()
+    cfg.ws = WsUpgrade(ws_handler)
+
+    var srv = HttpServer.bind(SocketAddr.localhost(0), cfg.copy())
     var port = UInt16(srv.local_addr().port)
     print("── Bound HttpServer on 127.0.0.1:" + String(Int(port)) + " ──")
 
@@ -94,8 +111,8 @@ def main() raises:
     if pid == 0:
         try:
             # ONE server, ONE port, BOTH the unary HTTP handler and the
-            # opt-in WebSocket upgrade handler.
-            srv.serve_ws_upgrade(http_handler, ws_handler)
+            # opt-in WebSocket upgrade handler from `cfg.ws`.
+            srv.serve(http_handler)
         except:
             pass
         exit()

@@ -11,13 +11,14 @@ shape is one call to bind, one to serve::
         key_file="server.key",
         alpn=["h2", "http/1.1"],
     )
-    srv.serve_tls(router^, num_workers=4)
+    srv.serve(router^, num_workers=4)
 
 `bind_tls` loads the PEM cert/key into a server `SSL_CTX` and advertises
-the given ALPN protocols. `serve_tls` is `serve` on a TLS-bound server:
-the handshake runs on the reactor as its own connection kind, so many
-TLS connections are in flight at once and `num_workers > 1` spreads them
-across cores. When the handshake completes, the negotiated ALPN picks
+the given ALPN protocols. TLS is a property of the bind, not of serving,
+so the serve call is the ordinary one: the handshake runs on the reactor
+as its own connection kind, so many TLS connections are in flight at
+once and `num_workers > 1` spreads them across cores. (`serve_tls` was
+the v0.10 spelling of that line. It still works and goes away in 0.12.) When the handshake completes, the negotiated ALPN picks
 the protocol -- `h2` gets an HTTP/2 connection, anything else gets
 HTTP/1.1 -- and from there it is the same parsing and serialisation the
 plaintext path uses, just through `SSL_read` / `SSL_write`.
@@ -121,7 +122,7 @@ def main() raises:
 
     # 3) The real bind: load the cert/key and bind an HTTPS listener on an
     #    ephemeral port, advertising h2 ahead of http/1.1 so a modern
-    #    client negotiates HTTP/2 over the same socket. `serve_tls(r^)`
+    #    client negotiates HTTP/2 over the same socket. `serve(r^)`
     #    would then run the reactor (omitted here so the example exits).
     print("[3] HttpServer.bind_tls (real cert load + socket bind):")
     try:
@@ -136,7 +137,7 @@ def main() raises:
         )
         print("    bound HTTPS listener at", String(srv.local_addr()))
         print("    advertising ALPN: h2, http/1.1")
-        print("    -> srv.serve_tls(r^, num_workers=4) runs the reactor")
+        print("    -> srv.serve(r^, num_workers=4) runs the reactor")
     except e:
         print("    (skipped live bind:", String(e), ")")
 

@@ -211,6 +211,8 @@ from ._client.download import HttpDownload
 from ._client.stream_response import HttpStreamResponse
 from ._client.shortcuts import get, post, put, patch, delete, head
 from .frontend import HttpFrontend, StaticHttpFrontend
+from ._server.config import WsUpgrade
+from .proto.h2_config import Http2Config
 from .server import (
     HttpServer,
     ServerConfig,

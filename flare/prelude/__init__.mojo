@@ -58,9 +58,11 @@ regrow.
 """
 
 from ..errors import HttpStatusError, IoError, ValidationError
+from ..http.proto.h2_config import Http2Config
 from ..http.server import (
     HttpServer,
     ServerConfig,
+    WsUpgrade,
     ShutdownReport,
     ok,
     ok_json,

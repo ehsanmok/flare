@@ -434,6 +434,9 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 |---|---|---|
 | `tests` | `default` | Full unit + integration suite plus every example under [`examples/`](examples/) |
 | `format-check` / `format` | `default` / `dev` | `mojo format` over `flare`, `tests`, `benchmark`, `examples`, `fuzz` |
+| `check-sans-io` / `check-no-http-http2-cycle` / `check-reactor-size` / `check-example-tasks` | `default` | The four structural lints CI runs on a bare checkout: the sans-io core imports no I/O, `flare.http` and `flare.http2` stay acyclic, per-file size caps with a dated allowlist, and every example is run by something. A few seconds each, no toolchain needed |
+| `interop-smoke` | `default` | Talk to flare with software we did not write: curl and h2load on every wire, plus flare's own streaming client pulling a megabyte on each |
+| `conformance` | `default` | h2spec and the Autobahn WebSocket suite, each gated against a documented known-fail list; a leg whose binary is not provisioned skips rather than passing |
 | `docs` / `docs-build` | `dev` | mojodoc-rendered package docstring (live or static) |
 | `fuzz-all` | `fuzz` | Every harness in [`fuzz/`](fuzz/) (63 harnesses, 9M+ runs combined) |
 | `fuzz-<name>` / `prop-<name>` | `fuzz` | Single harness - see [`pixi.toml`](pixi.toml) for the full list |
@@ -448,6 +451,7 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 ```bash
 pixi run tests                                          # full suite + every example under examples/
 pixi run tests-gen                                      # regenerate tests/_agg after adding a test file
+pixi run mojo -I . tests/http/test_router.mojo          # one test file on its own
 pixi run --environment fuzz fuzz-all                    # 63 harnesses
 pixi run --environment bench bench-vs-baseline-quick    # ~7 min
 ```

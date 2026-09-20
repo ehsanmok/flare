@@ -58,7 +58,7 @@ flare.http     HTTP/1.1 client + reactor server + Handler / Router
                + content-encoding (gzip + brotli)
                + signed cookies + typed Session[T] stores
                + HTTP/1.1 trailers (parse + emit) + multi-listener
-               HttpServer.bind_many + HttpClient.with_pool
+               HttpServer.bind(addrs) + HttpClient.with_pool
                connection pool + h2c-via-Upgrade client.
                Sans-I/O parser sublayer under flare.http.proto.*
                with _ExperimentalH1LeniencyConfig (future-policy

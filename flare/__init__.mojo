@@ -604,6 +604,11 @@ def main() raises:
 from .errors import HttpStatusError, IoError, ValidationError
 
 # HTTP core types + builders
+# `WsUpgrade` and `Http2Config` are the types of `ServerConfig.ws` and
+# `ServerConfig.h2`, so the closure rule above puts them here: you
+# cannot configure an exported struct's field without naming its type.
+from .http._server.config import WsUpgrade
+from .http.proto.h2_config import Http2Config
 from .http.server import (
     HttpServer,
     ServerConfig,

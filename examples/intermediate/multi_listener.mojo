@@ -1,12 +1,12 @@
-"""HttpServer.bind_many -- one process, multiple listening addresses.
+"""One process, multiple listening addresses.
 
-The default :func:`HttpServer.bind` listens on a single
-``SocketAddr``. Real deployments often want one process to accept
-on **multiple** addresses simultaneously: an internal admin port
+:func:`HttpServer.bind` takes a single ``SocketAddr`` or a list of
+them. Real deployments often want one process to accept on
+**multiple** addresses simultaneously: an internal admin port
 alongside the public service port; an IPv4 address paired with an
 IPv6 address; the public TCP socket plus a UNIX socket.
 
-``HttpServer.bind_many(addrs)`` opens one listener fd per address,
+Passing a list opens one listener fd per address,
 hands all of them to a single-worker reactor, and accepts new
 connections on every fd through the same handler. This is
 complementary to the multi-worker ``SO_REUSEPORT`` mode -- that
@@ -40,13 +40,15 @@ def hello(req: Request) raises -> Response:
 
 
 def main() raises:
-    print("=== HttpServer.bind_many demo ===\n")
+    print("=== HttpServer.bind(addrs) demo ===\n")
 
     var addrs = List[SocketAddr]()
     addrs.append(SocketAddr.localhost(0))
     addrs.append(SocketAddr.localhost(0))
     addrs.append(SocketAddr.localhost(0))
-    var srv = HttpServer.bind_many(addrs^)
+    # `bind` takes either shape; `bind_many` is the pre-0.11
+    # spelling of this line and goes away in 0.12.
+    var srv = HttpServer.bind(addrs^)
 
     var bound = srv.local_addrs()
     print("Server is bound on", len(bound), "addresses:")

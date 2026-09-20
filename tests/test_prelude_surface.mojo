@@ -40,8 +40,11 @@ from flare import (
     ok_json as root_ok_json,
     stream_response as root_stream_response,
     HandlerInfallible as RootHandlerInfallible,
+    Http2Config as RootHttp2Config,
     InMemoryCacheStore as RootInMemoryCacheStore,
+    ServerConfig as RootServerConfig,
     StaticResponse as RootStaticResponse,
+    WsUpgrade as RootWsUpgrade,
     UnixListener as RootUnixListener,
     UnixStream as RootUnixStream,
     WithRaises as RootWithRaises,
@@ -53,7 +56,10 @@ from flare.prelude import (
     Handler,
     HeaderMap,
     HttpClient,
+    Http2Config,
     HttpServer,
+    ServerConfig,
+    WsUpgrade,
     Request,
     Response,
     Router,
@@ -150,6 +156,12 @@ def test_exported_symbols_can_be_written_with() raises:
     WebSocket handler argument type was missing; and the README
     documented ``HandlerInfallible`` while neither barrel exported it.
 
+    v0.11 added two more of the same shape and they are pinned here
+    too. Nesting the protocol configs gave ``ServerConfig`` the fields
+    ``ws: WsUpgrade`` and ``h2: Http2Config``, neither of whose types
+    was exported, so the one thing you must do with them -- construct a
+    value to assign -- could not be written from the public import.
+
     The import block at the top of this file is most of the assertion:
     it does not compile if any of them stops being exported from both.
     What is left is to show the two barrels hand back the same entity.
@@ -162,6 +174,18 @@ def test_exported_symbols_can_be_written_with() raises:
     var store = InMemoryCacheStore()
     var same_store: RootInMemoryCacheStore = store^
     _ = same_store^
+
+    # The v0.11 pair. Assigning into a ServerConfig is the whole point
+    # of exporting them, so do exactly that rather than just naming the
+    # types.
+    var cfg = ServerConfig()
+    cfg.ws = WsUpgrade()
+    cfg.h2 = Http2Config()
+    var same_cfg: RootServerConfig = cfg.copy()
+    var same_ws: RootWsUpgrade = same_cfg.ws.copy()
+    var same_h2: RootHttp2Config = same_cfg.h2.copy()
+    assert_true(not same_ws.handler)
+    assert_true(same_h2.max_concurrent_streams > 0)
 
 
 def main() raises:

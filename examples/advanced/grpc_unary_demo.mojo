@@ -33,8 +33,6 @@ from std.collections import List
 from std.collections.span import Span
 
 from flare.grpc import (
-    GRPC_STATUS_OK,
-    GRPC_STATUS_RESOURCE_EXHAUSTED,
     GrpcCallContext,
     GrpcCallOutcome,
     GrpcMessage,
@@ -64,7 +62,7 @@ struct EchoHandler(Copyable, GrpcUnary):
         if self.fail:
             return GrpcUnaryReply.err(
                 GrpcStatus.err(
-                    GRPC_STATUS_RESOURCE_EXHAUSTED, String("quota exhausted")
+                    GrpcStatus.RESOURCE_EXHAUSTED, String("quota exhausted")
                 )
             )
         var echoed = List[UInt8](capacity=len(request_bytes))
