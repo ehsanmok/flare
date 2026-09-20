@@ -4,10 +4,127 @@
 # so the question it answers is "no new failures", not "no failures" --
 # the same posture as h2spec-known-fail.txt.
 #
-# Every entry needs a reason. An entry with no reason is a bug that
-# someone silenced.
+# Measured on 2026-09-20, the first run of this suite against flare
+# (CI run 35521608297, commit 8a62187). 63 of roughly 450 cases. They
+# are not noise and they are not the fixture's fault: the echo server
+# under test is an ordinary use of the public API.
 #
-# Empty today: the suite has never been run against flare, so there is
-# no measured baseline to record. The first CI run that provisions
-# wstest establishes one, and anything it reports gets triaged into
-# either a fix or a line here with its reasoning.
+# Every entry below has a reason, and the reasons reduce to three
+# gaps in flare.ws's server side. Fixing them is 0.12 work tracked in
+# the "Known gaps" section of docs/features.md; each fix should delete
+# its block from this file.
+#
+# Sections 12 and 13, permessage-deflate, are excluded in
+# autobahn.json rather than listed here -- the standalone WsServer
+# handshake does not negotiate the extension, so those cases would be
+# measuring the fixture. See autobahn-README.md.
+
+# Section 4 -- reserved opcodes and reserved bits.
+#
+# A frame carrying a reserved opcode, or a reserved bit set with no
+# extension negotiated, must fail the connection with 1002
+# (RFC 6455 sec 5.2). WsConnection.recv returns the frame to the
+# handler instead, so the echo server answers it as data.
+#
+4.1.1
+4.1.2
+4.1.3
+4.1.4
+4.1.5
+4.2.1
+4.2.2
+4.2.3
+4.2.4
+4.2.5
+
+# Section 5 -- fragmentation.
+#
+# The root cause of most of this file. The server side has no
+# fragment reassembly: WsConnection.recv returns one frame at a
+# time and there is no recv_message, which the client side does
+# have (flare/ws/client.mojo). A CONTINUATION sequence therefore
+# reaches the handler as separate frames, and an unexpected
+# CONTINUATION is not rejected as a protocol error.
+#
+5.3
+5.4
+5.5
+5.6
+5.7
+5.8
+5.9
+5.10
+5.11
+5.12
+5.13
+5.14
+5.15
+5.16
+5.17
+5.18
+5.19
+5.20
+
+# Section 6 -- UTF-8 handling in TEXT frames.
+#
+# A TEXT payload that is not valid UTF-8 must fail the connection
+# with 1007. Validation would also have to run across a reassembled
+# message rather than per frame, so this one waits on section 5.
+#
+6.1.3
+6.2.2
+6.2.3
+6.2.4
+6.4.1
+6.4.2
+
+# Section 7 -- close handling and close codes.
+#
+# Several of these report WRONG CODE rather than FAILED: the
+# connection does close, with the wrong status. A reserved or
+# out-of-range close code must be rejected with 1002, and an invalid
+# UTF-8 close reason with 1007.
+#
+7.1.5
+7.3.2
+7.5.1
+7.9.1
+7.9.2
+7.9.3
+7.9.4
+7.9.5
+7.9.6
+7.9.7
+7.9.8
+7.9.9
+
+# Section 9 -- large and fragmented payloads.
+#
+# 9.1 and 9.2 pass, which is the unfragmented half. 9.3 and 9.4 are
+# the same messages delivered fragmented, so they fail for the
+# section 5 reason and will pass with it.
+#
+9.3.1
+9.3.2
+9.3.3
+9.3.4
+9.3.5
+9.3.6
+9.3.7
+9.3.8
+9.4.1
+9.4.2
+9.4.3
+9.4.4
+9.4.5
+9.4.6
+9.4.7
+9.4.8
+
+# Section 10 -- auto-fragmentation.
+#
+# The server never fragments what it sends, so the peer's
+# auto-fragmentation expectation is not met. Same dependency as
+# section 5.
+#
+10.1.1

@@ -125,8 +125,33 @@ _h2spec_verdict() {
       next
     }
     /^ *[0-9]+(\.[0-9]+)*\. / { sec = $1; sub(/\.$/, "", sec); next }
-    /^ *× [0-9]+:/ { n = $2; sub(/:$/, "", n); print suite "/" sec "/" n }
-  ' "${report}" | sort -u)"
+    /^ *× [0-9]+:/ {
+      n = $2; sub(/:$/, "", n)
+      id = suite "/" sec "/" n
+      # Dedupe in awk. This used to pipe through `sort -u`, and under
+      # `pixi run` LD_LIBRARY_PATH points at the newer libssl in the
+      # pixi env, so system /usr/bin/sort fails to load on ubuntu-latest,
+      # wanting an OPENSSL_3.3.0 symbol version it cannot find. Inside
+      # a command substitution that failure is silent: failed came
+      # back empty and this function reported
+      # "all cases passed" on a run h2spec had scored 146/147. The gate
+      # was not gating. Same trap is documented at the example loop in
+      # run_test_aggregates.sh.
+      if (!seen[id]++) print id
+    }
+  ' "${report}")"
+
+  # Cross-check the parse against h2spec's own tally, so a report whose
+  # shape changes cannot silently yield an empty failure list again.
+  local reported
+  reported="$(awk '/[0-9]+ tests, / { for (i = 1; i <= NF; i++) if ($i == "failed") print $(i-1) }' "${report}" | tail -1)"
+  local parsed
+  parsed="$(printf '%s' "${failed}" | grep -c . || true)"
+  if [ -n "${reported}" ] && [ "${reported}" != "${parsed}" ]; then
+    echo "── h2spec: report says ${reported} failure(s), parsed ${parsed};" >&2
+    echo "   refusing to grade a report this harness cannot read" >&2
+    return 1
+  fi
 
   if [ -z "${failed}" ]; then
     echo "── h2spec: all cases passed"

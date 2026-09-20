@@ -670,6 +670,21 @@ of what you might reasonably assume from the surrounding feature.
   schemas from extractors. Treat it as experimental.
 - WebSocket payloads declared with a 64-bit length above the 32-bit
   range are rejected.
+- **The server side of WebSocket is not RFC 6455 conformant yet.** The
+  Autobahn suite ran against flare for the first time in v0.11 and 63
+  of roughly 450 cases fail. Three gaps account for nearly all of
+  them. `WsConnection` has no fragment reassembly and no
+  `recv_message`, which the client side does have, so a CONTINUATION
+  sequence reaches the handler as separate frames. A reserved opcode
+  or reserved bit is handed to the handler instead of failing the
+  connection with 1002. And a TEXT payload that is not valid UTF-8, or
+  a reserved close code, is not rejected with the status the RFC asks
+  for. The measured baseline is recorded case by case in
+  [`tests/tools/conformance/autobahn-known-fail.txt`](../tests/tools/conformance/autobahn-known-fail.txt),
+  so CI catches a regression against it; closing the gaps is 0.12
+  work. Sections 12 and 13 are excluded rather than failing: the
+  standalone handshake does not negotiate permessage-deflate, so they
+  would measure the test fixture.
 - Batch UDP is Linux-only, and the `sendmmsg` / GSO egress path is
   built and measured but not wired into QUIC.
 - `is_private()` does not recognise IPv6 unique local addresses.
