@@ -26,23 +26,6 @@ from flare.crypto.base64 import base64_encode
 # Canonical status code constants. The numeric values are stable
 # across all gRPC implementations and clients depend on the
 # specific integers; do not renumber.
-comptime GRPC_STATUS_OK: Int = 0
-comptime GRPC_STATUS_CANCELLED: Int = 1
-comptime GRPC_STATUS_UNKNOWN: Int = 2
-comptime GRPC_STATUS_INVALID_ARGUMENT: Int = 3
-comptime GRPC_STATUS_DEADLINE_EXCEEDED: Int = 4
-comptime GRPC_STATUS_NOT_FOUND: Int = 5
-comptime GRPC_STATUS_ALREADY_EXISTS: Int = 6
-comptime GRPC_STATUS_PERMISSION_DENIED: Int = 7
-comptime GRPC_STATUS_RESOURCE_EXHAUSTED: Int = 8
-comptime GRPC_STATUS_FAILED_PRECONDITION: Int = 9
-comptime GRPC_STATUS_ABORTED: Int = 10
-comptime GRPC_STATUS_OUT_OF_RANGE: Int = 11
-comptime GRPC_STATUS_UNIMPLEMENTED: Int = 12
-comptime GRPC_STATUS_INTERNAL: Int = 13
-comptime GRPC_STATUS_UNAVAILABLE: Int = 14
-comptime GRPC_STATUS_DATA_LOSS: Int = 15
-comptime GRPC_STATUS_UNAUTHENTICATED: Int = 16
 
 
 @fieldwise_init
@@ -61,6 +44,33 @@ struct GrpcStatus(Copyable):
     ``google.rpc.Status`` proto, a typed error envelope, or any
     other binary frame the client knows how to parse).
     """
+
+    # ── Canonical status codes (grpc-status wire values) ───────────────
+    #
+    # Namespaced onto the struct in v0.11 so they read as
+    # ``GrpcStatus.NOT_FOUND`` rather than as seventeen bare
+    # module-level names -- matching Status, Method, WsOpcode and
+    # WireProtocol, which already do this. The module-level
+    # ``GRPC_STATUS_*`` spellings remain as aliases below and are used
+    # at roughly 155 call sites; they are not going away this release.
+
+    comptime OK: Int = 0
+    comptime CANCELLED: Int = 1
+    comptime UNKNOWN: Int = 2
+    comptime INVALID_ARGUMENT: Int = 3
+    comptime DEADLINE_EXCEEDED: Int = 4
+    comptime NOT_FOUND: Int = 5
+    comptime ALREADY_EXISTS: Int = 6
+    comptime PERMISSION_DENIED: Int = 7
+    comptime RESOURCE_EXHAUSTED: Int = 8
+    comptime FAILED_PRECONDITION: Int = 9
+    comptime ABORTED: Int = 10
+    comptime OUT_OF_RANGE: Int = 11
+    comptime UNIMPLEMENTED: Int = 12
+    comptime INTERNAL: Int = 13
+    comptime UNAVAILABLE: Int = 14
+    comptime DATA_LOSS: Int = 15
+    comptime UNAUTHENTICATED: Int = 16
 
     var code: Int
     var message: String
@@ -129,3 +139,24 @@ struct GrpcStatus(Copyable):
         if self.code == GRPC_STATUS_UNAUTHENTICATED:
             return String("UNAUTHENTICATED")
         return String("UNKNOWN_CODE_") + String(self.code)
+
+
+# ── Module-level aliases (pre-0.11 spelling) ──────────────────────────
+
+comptime GRPC_STATUS_OK: Int = GrpcStatus.OK
+comptime GRPC_STATUS_CANCELLED: Int = GrpcStatus.CANCELLED
+comptime GRPC_STATUS_UNKNOWN: Int = GrpcStatus.UNKNOWN
+comptime GRPC_STATUS_INVALID_ARGUMENT: Int = GrpcStatus.INVALID_ARGUMENT
+comptime GRPC_STATUS_DEADLINE_EXCEEDED: Int = GrpcStatus.DEADLINE_EXCEEDED
+comptime GRPC_STATUS_NOT_FOUND: Int = GrpcStatus.NOT_FOUND
+comptime GRPC_STATUS_ALREADY_EXISTS: Int = GrpcStatus.ALREADY_EXISTS
+comptime GRPC_STATUS_PERMISSION_DENIED: Int = GrpcStatus.PERMISSION_DENIED
+comptime GRPC_STATUS_RESOURCE_EXHAUSTED: Int = GrpcStatus.RESOURCE_EXHAUSTED
+comptime GRPC_STATUS_FAILED_PRECONDITION: Int = GrpcStatus.FAILED_PRECONDITION
+comptime GRPC_STATUS_ABORTED: Int = GrpcStatus.ABORTED
+comptime GRPC_STATUS_OUT_OF_RANGE: Int = GrpcStatus.OUT_OF_RANGE
+comptime GRPC_STATUS_UNIMPLEMENTED: Int = GrpcStatus.UNIMPLEMENTED
+comptime GRPC_STATUS_INTERNAL: Int = GrpcStatus.INTERNAL
+comptime GRPC_STATUS_UNAVAILABLE: Int = GrpcStatus.UNAVAILABLE
+comptime GRPC_STATUS_DATA_LOSS: Int = GrpcStatus.DATA_LOSS
+comptime GRPC_STATUS_UNAUTHENTICATED: Int = GrpcStatus.UNAUTHENTICATED

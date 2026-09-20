@@ -73,18 +73,33 @@ struct WireProtocol:
     Routed to the :class:`flare.http3.Http3Connection` driver on
     the UDP listener side."""
 
+    # ── ALPN identifiers (RFC 7301) ────────────────────────────────────
+    #
+    # Hosted on the struct in v0.11 so the codepoint and the wire string
+    # for a protocol sit together. The module-level ``ALPN_*`` names
+    # remain as aliases.
+
+    comptime ALPN_HTTP_1_1: String = "http/1.1"
+    """RFC 7301-registered identifier for HTTP/1.1."""
+
+    comptime ALPN_HTTP_2: String = "h2"
+    """RFC 7540 sec 3.3 identifier for HTTP/2 over TLS."""
+
+    comptime ALPN_HTTP_3: String = "h3"
+    """RFC 9114 sec 3.1 identifier for HTTP/3 over QUIC."""
+
 
 # ── ALPN identifiers ───────────────────────────────────────────────────
 
 
-comptime ALPN_HTTP_1_1: String = "http/1.1"
-"""RFC 7301-registered identifier for HTTP/1.1."""
+comptime ALPN_HTTP_1_1: String = WireProtocol.ALPN_HTTP_1_1
+"""Alias for :attr:`WireProtocol.ALPN_HTTP_1_1` (pre-0.11 spelling)."""
 
-comptime ALPN_HTTP_2: String = "h2"
-"""RFC 7540 §3.3 identifier for HTTP/2 over TLS."""
+comptime ALPN_HTTP_2: String = WireProtocol.ALPN_HTTP_2
+"""Alias for :attr:`WireProtocol.ALPN_HTTP_2` (pre-0.11 spelling)."""
 
-comptime ALPN_HTTP_3: String = "h3"
-"""RFC 9114 §3.1 identifier for HTTP/3 over QUIC."""
+comptime ALPN_HTTP_3: String = WireProtocol.ALPN_HTTP_3
+"""Alias for :attr:`WireProtocol.ALPN_HTTP_3` (pre-0.11 spelling)."""
 
 
 # ── Decision functions ─────────────────────────────────────────────────

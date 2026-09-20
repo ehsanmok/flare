@@ -44,6 +44,22 @@ error type" guidance.
    typed-error types. Use sequential / nested ``try`` blocks
    instead.
 
+5. **Two-tier naming.** A type whose name ends ``Error`` names a
+   *category* of failure the caller may want to branch on as a group:
+   ``HttpError``, ``IoError``, ``NetworkError``, ``ValidationError``,
+   ``TlsHandshakeError``, ``TemplateError``. A type named as a bare
+   noun names one specific *condition*: ``ConnectionRefused``,
+   ``AddressInUse``, ``BrokenPipe``, ``CertificateExpired``,
+   ``DatagramTooLarge``, ``TooManyRedirects``. The split mirrors Rust's
+   ``io::Error`` versus ``io::ErrorKind``, and it is why
+   ``ConnectionTimeout`` (a condition during the connect phase) and
+   ``Timeout`` (a condition during any I/O) can both exist in
+   :mod:`flare.net.error` without either being redundant.
+
+   Written down in v0.11. The existing names already follow it in the
+   main, but not everywhere, and the deviations are what a future
+   renaming pass should target -- not the convention.
+
 ## What's in this module
 
 - :class:`ValidationError` — invalid input / argument validation
