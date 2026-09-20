@@ -165,6 +165,32 @@ def _race_connect_leg(
     return client[]._connect_h2(u)
 
 
+@fieldwise_init
+struct PoolStats(Copyable):
+    """A point-in-time view of an ``HttpClient``'s connection pools."""
+
+    var h1_idle: Int
+    """Idle cleartext HTTP/1.1 connections."""
+    var tls_idle: Int
+    """Idle HTTPS HTTP/1.1 connections."""
+    var quic_idle: Int
+    """Idle QUIC connections available for HTTP/3."""
+    var quic_dials: Int
+    """QUIC connections dialled over this client's lifetime."""
+
+
+comptime FLARE_VERSION: String = "0.11.0"
+"""The library version, as reported in the default ``User-Agent``.
+
+Bump alongside ``pixi.toml`` and ``recipe.yaml`` at release."""
+
+comptime DEFAULT_USER_AGENT: String = "flare/" + FLARE_VERSION
+"""Default ``User-Agent`` sent when the caller does not set one.
+
+Was the literal ``"flare/0.1.0"`` through v0.10, which had been wrong
+for nine releases because nothing derived it from the version."""
+
+
 struct HttpClient(Movable):
     """A blocking HTTP client (HTTP/1.1, HTTP/2, and HTTP/3).
 
@@ -320,7 +346,7 @@ struct HttpClient(Movable):
         base_url: String = "",
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
-        user_agent: String = "flare/0.1.0",
+        user_agent: String = DEFAULT_USER_AGENT,
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_http3: Bool = False,
@@ -378,7 +404,7 @@ struct HttpClient(Movable):
         base_url: String = "",
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
-        user_agent: String = "flare/0.1.0",
+        user_agent: String = DEFAULT_USER_AGENT,
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_http3: Bool = False,
@@ -415,7 +441,7 @@ struct HttpClient(Movable):
         base_url: String = "",
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
-        user_agent: String = "flare/0.1.0",
+        user_agent: String = DEFAULT_USER_AGENT,
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_http3: Bool = False,
@@ -454,7 +480,7 @@ struct HttpClient(Movable):
         auth: A,
         max_redirects: Int = 10,
         timeout_ms: Int = 30_000,
-        user_agent: String = "flare/0.1.0",
+        user_agent: String = DEFAULT_USER_AGENT,
         prefer_h2c: Bool = False,
         h2c_upgrade: Bool = False,
         prefer_http3: Bool = False,
@@ -610,6 +636,49 @@ struct HttpClient(Movable):
         """
         self._prefer_http3 = enabled
         return self^
+
+    def with_h2c(
+        var self, prior_knowledge: Bool = True, upgrade: Bool = False
+    ) -> HttpClient:
+        """Choose how cleartext HTTP/2 is reached.
+
+        Added in v0.11 as the spelling for what the ``prefer_h2c`` and
+        ``h2c_upgrade`` constructor arguments set. Those still work and
+        are not going away this release, but a knob reachable two ways
+        is a knob that drifts.
+
+        Args:
+            prior_knowledge: Open with the HTTP/2 preface directly, no
+                negotiation. Correct when you already know the origin
+                speaks h2c.
+            upgrade: Offer ``Upgrade: h2c`` on an HTTP/1.1 request and
+                switch on a 101. Costs a round trip; works against an
+                origin you have not probed.
+
+        Returns:
+            The client, for chaining.
+        """
+        self._prefer_h2c = prior_knowledge
+        self._h2c_upgrade = upgrade
+        return self^
+
+    def pool_stats(read self) -> PoolStats:
+        """Idle-connection counts and dial totals across all three pools.
+
+        Added in v0.11. Replaces reading ``idle_count`` /
+        ``tls_idle_count`` / ``quic_idle_count`` / ``quic_dials``
+        separately, which made it easy to check one pool and believe you
+        had checked them all. Those four accessors still work.
+
+        Returns:
+            A snapshot; the pools keep moving after it is taken.
+        """
+        return PoolStats(
+            h1_idle=self._pool.idle_count(),
+            tls_idle=self._tls_pool.idle_count(),
+            quic_idle=self._quic_pool.idle_count(),
+            quic_dials=self._quic_pool.dials(),
+        )
 
     def with_read_timeout(var self, ms: Int) -> HttpClient:
         """Bound body reads, not just ``connect(2)`` (move-in /
