@@ -249,6 +249,31 @@ def main() raises:
 
 `set_watermarks` couples the two pipes: when the relay buffer crosses the high mark the reactor stops reading upstream until it drains to the low mark, so a slow consumer cannot force unbounded buffering. A client disconnect propagates a `CANCEL` upstream. Runnable version: [`examples/advanced/streaming_proxy.mojo`](examples/advanced/streaming_proxy.mojo).
 
+### Streaming client: a body larger than memory, in one call
+
+The client side of the same idea, new in v0.11. One entry point covers every wire: ALPN settles HTTP/2 against HTTP/1.1 on `https://`, and `http://` speaks HTTP/1.1, or prior-knowledge h2c when asked. Nothing buffers the body.
+
+```mojo
+from flare.http import HttpClient
+
+def main() raises:
+    var c = HttpClient()
+    var r = c.get_streaming("https://example.com/big.bin")
+    r.raise_for_status()
+    print(r.status, "on", r.protocol())
+
+    var total = 0
+    while True:
+        var chunk = r.read_chunk(65536)
+        if len(chunk) == 0:
+            break
+        total += len(chunk)
+    r.close()
+    print("read", total, "bytes")
+```
+
+Uploads go the other way through `send_chunked`, pulling from a `ChunkSource` with an optional known `body_size` and a real `Cancel`. Runnable: [`examples/advanced/http_stream_client.mojo`](examples/advanced/http_stream_client.mojo) and [`examples/advanced/streaming_upload.mojo`](examples/advanced/streaming_upload.mojo). HTTP/3 has a reader but no entry point wires to it yet; see the known gaps in [`docs/features.md`](docs/features.md).
+
 ## Performance
 
 TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), Linux x86_64 dev-box. Each row is the highest rate that survives the bench harness's sustainable-peak finder; latency cells are `median ± σ` over five 30 s measurement rounds at that rate. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` / `cargo build --release --locked`). Full methodology in [`docs/benchmark.md`](docs/benchmark.md#methodology).

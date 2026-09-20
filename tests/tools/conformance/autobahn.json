@@ -1,20 +1,4 @@
 {
-  "_comment": [
-    "Autobahn fuzzingclient spec for the flare WebSocket echo server.",
-    "Driven by tests/tools/run_conformance.sh, which starts",
-    "examples/basic/websocket_echo_server.mojo on FLARE_WS_ECHO_PORT with an",
-    "unlimited connection budget and then gates on the index.json this",
-    "run writes. The url below must match that port.",
-    "",
-    "Cases 12.* and 13.* are permessage-deflate. flare implements the",
-    "extension (flare.ws.permessage_deflate, fuzzed by fuzz-ws-deflate",
-    "and fuzz-pmd-context), but the standalone WsServer handshake does",
-    "not negotiate it, so the echo server would answer every one of",
-    "those cases uncompressed. Excluding them reports nothing; running",
-    "them would report a failure that is about this fixture rather",
-    "than about the library. They come back when the handshake",
-    "negotiates the extension."
-  ],
   "outdir": "./target/conformance/autobahn",
   "servers": [
     {
