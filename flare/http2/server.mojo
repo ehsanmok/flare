@@ -397,6 +397,18 @@ struct Http2Connection(Defaultable, Movable):
         self.outbox = List[UInt8]()
         return out^
 
+    def _mark_response_started(mut self, sid: Int) raises:
+        """Record that ``sid`` has had a response scheduled.
+
+        Called by both response paths. Idempotent, and a no-op on a
+        stream that is already gone.
+        """
+        if sid not in self.conn.streams:
+            return
+        var s = self.conn.streams[sid].copy()
+        s.response_started = True
+        self.conn.streams[sid] = s^
+
     def take_completed_streams(self) -> List[Int]:
         """Return stream ids whose request is fully buffered."""
         var ids = List[Int]()
@@ -406,15 +418,29 @@ struct Http2Connection(Defaultable, Movable):
             # eagerly inside ``items()`` so this loop never aliases the
             # slab's owned storage.
             var s = entry[1].copy()
-            # Skip streams already dispatched: ``emit_response`` moves a
-            # served stream to ``CLOSED``, but ``headers_complete`` /
-            # ``data_complete`` stay set. Without this guard a second
-            # ``on_readable`` (e.g. an EAGAIN re-pump on macOS loopback,
-            # or any later readable event in the live reactor) would
-            # re-return the same id and double-dispatch the handler.
+            # Skip streams already dispatched. Two things can mark a
+            # stream as served. ``emit_response`` moves a fully written
+            # one to ``CLOSED`` while ``headers_complete`` /
+            # ``data_complete`` stay set, so without the state check a
+            # second ``on_readable`` (an EAGAIN re-pump on macOS
+            # loopback, or any later readable event in the live reactor)
+            # re-returns the id and double-dispatches the handler.
+            #
+            # ``response_started`` covers the case the state check
+            # cannot: a response whose body is larger than the peer's
+            # send window is parked in ``pending_body`` and its stream
+            # stays open until the remainder drains. Every WINDOW_UPDATE
+            # from that peer arrives as a readable event, so a
+            # state-only guard re-ran the handler and re-sent the
+            # response head on each one -- which the peer is right to
+            # reject, a second HEADERS block without END_STREAM being a
+            # protocol error (RFC 9113 sec 8.1). Any client advertising
+            # the default 65535-byte window hit this on the first
+            # response larger than that.
             if (
                 s.headers_complete
                 and s.data_complete
+                and not s.response_started
                 and s.state.value != StreamState.CLOSED().value
             ):
                 ids.append(s.id)
@@ -483,6 +509,7 @@ struct Http2Connection(Defaultable, Movable):
         """
         if sid not in self.conn.streams:
             raise Error("h2: emit_response on unknown stream")
+        self._mark_response_started(sid)
         # Window-aware buffered response (RFC 9113 sec 6.9 / sec 4.2): a
         # peer that advertised a 1-byte window gets 1 byte now and the
         # rest on its WINDOW_UPDATE, and a body past max_frame_size is
@@ -657,6 +684,7 @@ struct Http2Connection(Defaultable, Movable):
         """
         if sid not in self.conn.streams:
             raise Error("h2: begin_stream_response on unknown stream")
+        self._mark_response_started(sid)
         var hdrs = List[HpackHeader]()
         for i in range(len(resp.headers._keys)):
             var lk = _lower_ascii(resp.headers._keys[i])

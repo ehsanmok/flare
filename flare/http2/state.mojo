@@ -206,6 +206,15 @@ struct Stream(Copyable, Defaultable):
     """Declared ``content-length``, or ``-1`` when absent. RFC 9113
     sec 8.1.2.6 makes a mismatch against the DATA actually received a
     malformed request."""
+    var response_started: Bool
+    """Set once a response has been scheduled for this stream.
+
+    ``take_completed_streams`` uses it to decide whether a stream still
+    needs dispatching. The stream state alone is not enough: a response
+    whose body does not fit the peer's send window is parked and the
+    stream stays open, so a state-only guard re-dispatches the handler
+    on every WINDOW_UPDATE and re-sends the whole response head."""
+
     var extended_connect_protocol: String
     """RFC 8441 ``:protocol`` pseudo-header value when the stream
     was opened with ``:method = CONNECT``. Empty string otherwise.
@@ -231,6 +240,7 @@ struct Stream(Copyable, Defaultable):
         self.header_list_bytes = 0
         self.continuation_count = 0
         self.content_length = -1
+        self.response_started = False
         self.extended_connect_protocol = ""
 
 
