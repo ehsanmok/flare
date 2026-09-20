@@ -103,7 +103,8 @@ def test_ws_h2_reactor() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve(_OkHandler(), _EchoWsH2())
+            srv.attach_ws_h2(_EchoWsH2())
+            srv.serve(_OkHandler())
         except:
             pass
         exit()

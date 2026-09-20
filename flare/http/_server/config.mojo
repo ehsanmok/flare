@@ -234,6 +234,87 @@ struct ServerConfig(Copyable):
         self.ws = ws^
         self.h2 = h2^
 
+    @staticmethod
+    def check[cfg: ServerConfig]() -> None:
+        """Validate a comptime ``ServerConfig`` at compile time.
+
+        Every invariant is a ``comptime assert``, so a configuration
+        that violates one fails the build with the message below rather
+        than misbehaving at run time. The deadline ordering is the one
+        worth stating out loud: when ``request_timeout_ms`` is enabled it
+        must bound both ``handler_timeout_ms`` and
+        ``read_body_timeout_ms``, or the handler could keep working past
+        the request deadline -- the bug these checks exist to prevent.
+
+        Added in v0.11. These lived inside ``HttpServer.serve_comptime``,
+        which meant the only way to get them was to also accept that
+        method's single-worker, single-listener, no-TLS reactor. They are
+        reusable now.
+
+        Parameters:
+            cfg: The configuration to validate.
+
+        Example:
+            ```mojo
+            comptime CFG = ServerConfig(max_body_size=1 << 20)
+            ServerConfig.check[CFG]()
+            ```
+        """
+        comptime assert (
+            cfg.read_buffer_size > 0
+        ), "ServerConfig.read_buffer_size must be > 0"
+        comptime assert (
+            cfg.max_header_size > 0
+        ), "ServerConfig.max_header_size must be > 0"
+        comptime assert (
+            cfg.max_uri_length > 0
+        ), "ServerConfig.max_uri_length must be > 0"
+        comptime assert (
+            cfg.max_body_size >= cfg.max_header_size
+        ), "ServerConfig.max_body_size must be >= ServerConfig.max_header_size"
+        comptime assert (
+            cfg.max_keepalive_requests >= 1
+        ), "ServerConfig.max_keepalive_requests must be >= 1"
+        comptime assert (
+            cfg.idle_timeout_ms >= 0
+        ), "ServerConfig.idle_timeout_ms must be >= 0"
+        comptime assert (
+            cfg.write_timeout_ms >= 0
+        ), "ServerConfig.write_timeout_ms must be >= 0"
+        comptime assert (
+            cfg.read_body_timeout_ms >= 0
+        ), "ServerConfig.read_body_timeout_ms must be >= 0 (0 disables)"
+        comptime assert (
+            cfg.handler_timeout_ms >= 0
+        ), "ServerConfig.handler_timeout_ms must be >= 0 (0 disables)"
+        comptime assert (
+            cfg.request_timeout_ms >= 0
+        ), "ServerConfig.request_timeout_ms must be >= 0 (0 disables)"
+        # When request_timeout_ms is non-zero (enabled), it must
+        # bound the per-handler and per-body deadlines so the
+        # outer-most reactor deadline is the last to fire. A
+        # request_timeout_ms shorter than handler_timeout_ms would
+        # let the handler keep working past the request deadline,
+        # which is the bug we're trying to prevent.
+        comptime assert (
+            cfg.request_timeout_ms == 0
+            or cfg.handler_timeout_ms == 0
+            or cfg.request_timeout_ms >= cfg.handler_timeout_ms
+        ), (
+            "ServerConfig.request_timeout_ms must be >="
+            " ServerConfig.handler_timeout_ms (or one must be 0 to"
+            " disable)"
+        )
+        comptime assert (
+            cfg.request_timeout_ms == 0
+            or cfg.read_body_timeout_ms == 0
+            or cfg.request_timeout_ms >= cfg.read_body_timeout_ms
+        ), (
+            "ServerConfig.request_timeout_ms must be >="
+            " ServerConfig.read_body_timeout_ms (or one must be 0 to"
+            " disable)"
+        )
+
 
 def _resolve_bufring_handler_env() -> Bool:
     """Read ``FLARE_BUFRING_HANDLER`` once at startup.
