@@ -150,6 +150,8 @@ natural.
 | Serve HTTP/1.1 + HTTP/2 from one port | [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
 | Serve HTTP and WebSocket from one port | [`http_ws_one_port.mojo`](../examples/intermediate/http_ws_one_port.mojo) -- set `ServerConfig.ws_handler` (and `ws_offload=True` to give each socket its own thread), or call `serve_ws_upgrade` |
 | Bound a slow or silent peer on the client | `HttpClient.with_read_timeout(ms)` arms `SO_RCVTIMEO` for each read; the `timeout_ms` constructor argument bounds the connect and, on `https://`, the TLS handshake. There is no whole-request deadline yet |
+| Stream a response too large to buffer | [`http_stream_client.mojo`](../examples/advanced/http_stream_client.mojo) -- `get_streaming(url)` on either scheme, then loop `read_chunk(n)` until it returns empty |
+| Upload a body too large to buffer | [`streaming_upload.mojo`](../examples/advanced/streaming_upload.mojo) -- `send_chunked` from a `ChunkSource`; pass `body_size` when the length is known |
 | AF_UNIX sidecar IPC | [`uds_sidecar.mojo`](../examples/advanced/uds_sidecar.mojo) |
 | Proxy an external producer's stream with end-to-end backpressure | [`streaming_proxy.mojo`](../examples/advanced/streaming_proxy.mojo) |
 | Even out skewed-keepalive load | [`work_stealing.mojo`](../examples/advanced/work_stealing.mojo) |

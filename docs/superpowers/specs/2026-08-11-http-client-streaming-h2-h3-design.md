@@ -1,7 +1,21 @@
 # HttpClient streaming over h2/h3
 
 - Issue: https://github.com/ehsanmok/flare/issues/5
-- Status: approved, pending implementation plan
+- Status: **implemented in v0.11.0**, with two deviations from the plan
+  below, both recorded here rather than silently.
+
+  1. The type is `HttpStreamResponse`, not `HttpStreamDownload`. It
+     carries a response head as well as a reader, and `StreamingResponse`
+     already exists on the server side, so `...Download` would have been
+     the odd name of the three.
+  2. Three backends, not four. `HttpDownload[_H2Transport]` covers
+     HTTP/1.1 over both TCP and TLS, because `_H2Transport` already
+     erases that distinction one level down.
+
+  HTTP/3 streaming has a reader (`Http3Download`) but no entry point
+  wires to it yet: `_stream_tls` offers only `h2` and `http/1.1` in its
+  ALPN list. Closing that is a follow-up, tracked separately from this
+  spec.
 
 ## Problem
 
