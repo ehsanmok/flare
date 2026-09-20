@@ -32,7 +32,7 @@ def _sanitize_op_id(method: String, template: String) -> String:
     var out = method
     var p = template.unsafe_ptr()
     for i in range(template.byte_length()):
-        var c = Int(p[i])
+        var c = Int(p[unsafe_offset=i])
         var alnum = (
             (c >= 48 and c <= 57)
             or (c >= 65 and c <= 90)

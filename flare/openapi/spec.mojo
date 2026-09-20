@@ -93,7 +93,7 @@ def _json_escape(s: String) -> String:
     var out = String('"')
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c == UInt8(ord('"')):
             out += '\\"'
         elif c == UInt8(ord("\\")):

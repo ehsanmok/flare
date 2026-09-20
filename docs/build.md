@@ -232,6 +232,51 @@ picks it up.
 
 ---
 
+## Platform support
+
+`pixi.toml` declares three platforms. What each one actually
+gives you differs, and the differences are not obvious from the
+platform list alone.
+
+| | linux-64 | linux-aarch64 | osx-arm64 |
+|---|---|---|---|
+| Build | yes | yes | yes |
+| Test suite | yes, in CI on `ubuntu-latest` | yes, locally | yes, in CI on `macos-15` (advisory) |
+| Reactor backend | io_uring, epoll fallback | io_uring, epoll fallback | kqueue |
+| io_uring buffer rings | yes, opt-in | yes, opt-in | no |
+| Sanitizers (ASan / TSan) | yes | yes | **no runtime shipped** |
+| QUIC / HTTP/3 TLS (rustls FFI) | yes | yes | yes |
+| Batch UDP (`recvmmsg` / `sendmmsg`) | yes | yes | no, falls back to one datagram per call |
+| Named POSIX semaphores | yes | yes | **unavailable** |
+| Benchmark harness (`wrk`, `wrk2`) | conda-provided | conda-provided | system `wrk`, build `wrk2` from source |
+| Profilers (`heaptrack`, `valgrind`, `perf`) | conda-provided | partial | no |
+
+Three of these bite often enough to state plainly.
+
+**No ASan on Apple silicon.** The Mojo toolchain ships no
+arm64 AddressSanitizer runtime, so `pixi run tests-asan` cannot
+run on an M-series Mac at all -- not slowly, not at reduced
+coverage. `pixi run tests-asserts-all` is the local stand-in: it
+runs the same tests with every `debug_assert` armed, which
+catches contract violations but not use-after-free. The real
+ASan pass runs in CI on `ubuntu-latest`, and that is the only
+memory-safety signal this repo has. Treat a macOS-only green
+suite accordingly.
+
+**No named POSIX semaphores on macOS.** `sem_open` is present
+but the semantics flare's blocking pool needs are not, so
+`_pool_try_acquire` fails open and `tests/runtime/test_block_in_pool.mojo`
+fails locally on a Mac. It passes on Linux in CI. This one
+failure in an otherwise green local run is expected.
+
+**io_uring is Linux-only.** macOS runs the same reactor over
+kqueue, so the code paths are shared but the buffer-ring
+handler (`FLARE_BUFRING_HANDLER=1`) and the multishot-accept
+paths are exercised only on Linux. `FLARE_DISABLE_IO_URING=1`
+forces the epoll path on Linux when you want to compare.
+
+---
+
 ## Cross-references
 
 - [`docs/benchmark.md`](benchmark.md) -- the bench numbers

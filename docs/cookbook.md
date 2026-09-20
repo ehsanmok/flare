@@ -58,6 +58,7 @@ basics.
 | [`http_ws_one_port.mojo`](../examples/intermediate/http_ws_one_port.mojo) | HTTP and WebSocket served by one `HttpServer` on one port, via `ServerConfig.ws_handler` / `serve_ws_upgrade` |
 | [`cors.mojo`](../examples/intermediate/cors.mojo) | `Cors` permissive vs allowlist + preflight + credentials |
 | [`static_files.mojo`](../examples/intermediate/static_files.mojo) | `FileServer` with HEAD + Range + path safety |
+| [`openapi.mojo`](../examples/intermediate/openapi.mojo) | Derive an OpenAPI 3.1 document from a live `Router` with `spec_from_router` |
 | [`brotli.mojo`](../examples/intermediate/brotli.mojo) | `compress_brotli` / `decompress_brotli` + `Compress` middleware emitting `br` |
 | [`ok_json_typed.mojo`](../examples/intermediate/ok_json_typed.mojo) | Typed JSON request → typed JSON response via `ok_json_value` |
 | [`infallible_handler.mojo`](../examples/intermediate/infallible_handler.mojo) | `HandlerInfallible` + `WithRaises` adapter for provably no-`raises` paths |
@@ -137,6 +138,7 @@ natural.
 | Use signed-cookie sessions | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
 | Configure CORS | [`cors.mojo`](../examples/intermediate/cors.mojo) |
 | Serve static files (with `Range`) | [`static_files.mojo`](../examples/intermediate/static_files.mojo) |
+| Publish an OpenAPI spec for my routes | [`openapi.mojo`](../examples/intermediate/openapi.mojo) -- `spec_from_router(router, title, version)` then `emit_openapi_json`; body schemas are hand-written, the router cannot supply them |
 | Send `Content-Encoding: br` | [`brotli.mojo`](../examples/intermediate/brotli.mojo) |
 | Return a typed JSON response | [`ok_json_typed.mojo`](../examples/intermediate/ok_json_typed.mojo) |
 | Use a no-`raises` handler | [`infallible_handler.mojo`](../examples/intermediate/infallible_handler.mojo) |

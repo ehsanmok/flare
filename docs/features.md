@@ -597,6 +597,82 @@ lowering the value to `0` clears neither. Build-time invariants (e.g. `max_body_
 max_header_size`) are checked by Mojo `comptime assert` when used with
 `serve_comptime[handler, config]`.
 
+## Known gaps
+
+Caveats that would otherwise be buried inside a table cell. Nothing
+here is a bug; each is a place where the shipped surface stops short
+of what you might reasonably assume from the surrounding feature.
+
+**HTTP client**
+
+- Streaming over HTTP/3 is not reachable. `Http3Download` exists and is
+  tested, but no entry point wires to it, so `get_streaming` settles on
+  HTTP/1.1 or h2. Buffered h3 requests are unaffected.
+- The streaming calls do not take the `Upgrade: h2c` path. They use
+  prior knowledge when `with_h2c` asks for it and HTTP/1.1 otherwise. A
+  streaming response cannot be re-read if the origin declines the
+  upgrade, so the handshake is not attempted rather than guessed at.
+- `send_chunked` skips the connection pool, redirects and retries. The
+  body comes from a `ChunkSource` and cannot be replayed, so none of
+  the three is safe. It does apply auth and the cookie jar.
+- A streaming download owns its connection and does not return it to a
+  pool. h2-negotiated TLS connections are not pooled at all.
+- `with_read_timeout` bounds each read, not the whole request. There is
+  no end-to-end deadline.
+- `Expect: 100-continue` is rejected on the streaming path rather than
+  handled.
+- Request HEADERS are not split into CONTINUATION frames, so a header
+  block larger than the peer's maximum frame size fails rather than
+  spanning frames.
+
+**HTTP server**
+
+- `bind_tls` takes a certificate, a key and an ALPN list. mTLS, a
+  minimum protocol version and session tickets are configurable on
+  `TlsAcceptor` but are not reachable through `HttpServer`; the reactor
+  builds its own context.
+- HTTP/3 serves single-worker only. The other three wires serve at any
+  worker count, cleartext or TLS.
+- `bind_many` is single-worker only for its address cross product.
+- The io_uring buffer-ring handler path (`FLARE_BUFRING_HANDLER=1`) is
+  HTTP/1.1 cleartext only and cannot stream.
+
+**QUIC and HTTP/3**
+
+- Send pacing is built but not wired, and the congestion window is not
+  gated on the HTTP/3 DATA pump. Loss recovery, the window itself and
+  the ack-eliciting accounting are live and correct; nothing reads the
+  window on that one path. Deferred to 0.12 together with pacing.
+- The QPACK dynamic table is dormant. Both ends work, statically.
+- The h3 client rejects a request body larger than one packet.
+
+**gRPC**
+
+- The code generator covers messages, nested messages, enums, scalars,
+  repeated and singular message fields. Maps and `oneof` are not
+  generated.
+- `deflate` egress compression is not wired; gzip is.
+
+**Elsewhere**
+
+- `flare.openapi` emits a spec from a router but derives no body
+  schemas from extractors. Treat it as experimental.
+- WebSocket payloads declared with a 64-bit length above the 32-bit
+  range are rejected.
+- Batch UDP is Linux-only, and the `sendmmsg` / GSO egress path is
+  built and measured but not wired into QUIC.
+- `is_private()` does not recognise IPv6 unique local addresses.
+- A crashed worker still reports `is_running() == True`.
+
+**Platform**
+
+- io_uring is Linux-only; macOS runs the same reactor over kqueue.
+- Sanitizer builds are Linux-only. The Mojo toolchain ships no arm64
+  ASan runtime, so `tests-asserts-all` is the local stand-in on Apple
+  silicon and the real thing runs in CI.
+- Named POSIX semaphores are unavailable on macOS, so `block_in_pool`
+  fails open there.
+
 ## Stability
 
 The public Mojo API is stable within a minor version: patch releases

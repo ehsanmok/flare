@@ -674,6 +674,7 @@ example-reactor     = "mojo -I . examples/advanced/reactor.mojo"       # flare.r
 example-http-stream-client = "mojo -I . examples/advanced/http_stream_client.mojo"  # streamed download, any wire
 example-streaming-upload = "mojo -I . examples/advanced/streaming_upload.mojo"      # streamed upload from a ChunkSource
 example-http-ws-one-port = "mojo -I . examples/intermediate/http_ws_one_port.mojo"  # HTTP + WebSocket on one port
+example-openapi = "mojo -I . examples/intermediate/openapi.mojo"                      # derive an OpenAPI 3.1 document from a live Router
 example-router      = "mojo -I . examples/basic/router.mojo"        # v0.4.0 — Router paths + methods
 example-state       = "mojo -I . examples/intermediate/state.mojo"         # shared state via captured handler
 example-multicore   = "mojo -I . examples/intermediate/multicore.mojo"     # v0.4.0 — Multicore primitives

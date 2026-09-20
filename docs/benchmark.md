@@ -614,72 +614,60 @@ framework has at its calibrated rate.
 | hyper (tokio multi-thread) | 4 | 217,036 | 0.21 | 1.24 ± 0.01 | 2.83 ± 0.02 | 3.28 ± 0.08 | 3.66 ± 2.72 |
 | axum (tokio multi-thread) | 4 | 201,216 | 0.35 | 1.29 ± 0.00 | 2.82 ± 0.03 | 3.25 ± 2.50 | 3.64 ± 29.52 |
 
-Source data:
-[`benchmark/results/2026-06-18T0322-ehsan-dev-6439147/`](../benchmark/results/2026-06-18T0322-ehsan-dev-6439147/)
-(all 4-worker rows, single multi-worker run with the
-calibration harness, hot-path UTF-8 validation bypass
-included; see [Hot-path measurement
-notes](#hot-path-measurement-notes) below).
+Source data: run `2026-06-18T0322` at `6439147` (all 4-worker
+rows, single multi-worker run with the calibration harness,
+hot-path UTF-8 validation bypass included; see [Hot-path
+measurement notes](#hot-path-measurement-notes) below). The raw
+run directory is not tracked in the repo -- reproduce locally
+with the harness described above.
 
 What jumps out:
 
-- **flare_mc** (handler path) posts the best median p99 of
-  the 4-worker pack at `2.63 ms`, edging hyper (`2.83 ms`)
-  and matching axum (`2.80 ms`). The σ on flare_mc's tail
-  (`17–50 ms` across the 5×30 s runs at p99 / p99.9 /
-  p99.99) is larger than axum's flat σ but smaller than
-  hyper's at p99.99 — one of the five measurement runs
-  brushed the working-envelope edge while the other four
-  landed clean. The headline tightened by `+1.1 %` over
-  the prior baseline (`212,246` → `214,567` req/s) after
-  eliminating a redundant UTF-8 validation pass on the H1
-  parser's ASCII artifacts (`Method` / `Path` / `Version`
-  / header names + values are already RFC 7230-validated
-  by the byte-level parser before string materialisation).
-  This is the row we hand operators when steady-state
-  tail predictability matters more than headline
-  throughput.
-- **flare_mc_static** still leads on req/s of the
-  multi-worker fixed-response fast paths (`247k req/s`,
-  ~13 % under actix_web's new headline). Its p99 median is
-  `2.68 ms` — tight when the harness lands inside the
-  working envelope. The `~660 ms` σ at every tail
-  percentile is the **honesty meter** firing: at this rate
-  the fixed-response path occasionally tips off the
-  saturation cliff, and the σ tells you that's where the
-  next 10 % of throughput goes. Use this row when the
-  headline matters and the workload tolerates occasional
-  tail expansion; use `flare_mc` when you want a uniformly
-  tight tail under sustained load.
-- **actix_web** posts the highest headline (`253k req/s`)
-  but its p99 median is `10.04 ms` and p99.99 is
-  `37.41 ms` — the same cliff dynamic flare_mc_static
-  shows, just at a higher rate. The σ on actix's p99 /
-  p99.9 (`4.55 ms` / `4.31 ms`) is tight enough that this
-  isn't measurement noise; it's a steady-state shape at
-  that rate. The harness's calibration gate accepted the
-  rate (the 20 s probe landed below the absolute-p99 limit
-  the gate enforces) but the 5×30 s measurement rounds
-  caught the steady-state shape underneath.
-- **axum** is the steadiest of the pack: `195k req/s` with
-  `σ ≤ 0.02 ms` at every tail percentile — flat at the
-  cost of being the lowest headline of the four. Use it
-  as the reference for what an in-envelope p99
-  distribution looks like at this load.
-- **hyper** is the reference baseline — its current
-  numbers (`216k req/s`, `2.83 ms` p99 median) move within
-  `±0.5 %` of the prior measurement, so the same Rust
-  binary under the same Linux kernel returns the same
-  throughput run-over-run.
-- The harness's σ% column shows req/s itself is rock-steady
-  at the 90 %-of-peak sustain rate (0.17-0.69 % across the
-  5 runs for every framework), so the tail numbers are
-  measuring real latency variance, not load-gen drift.
+- **flare_mc_static** leads the pack twice over: the highest
+  req/s (`242,384`) and the tightest tail of the five, with σ
+  at or under `0.16 ms` at every percentile. All five runs
+  landed inside the working envelope, so the `3.34 ms` p99.99
+  is a rate this row sustains rather than a rate it reaches.
+- **actix_web** is second on throughput (`239,108`, within
+  1.4 % of flare_mc_static) and its medians track the pack
+  (`2.73 ms` p99). Its tails are where the two separate: σ of
+  `11.28 ms` at p99.9 and `12.05 ms` at p99.99, against a
+  `5.21 ms` p99.99 median. That is the honesty meter firing --
+  at least one of the five runs brushed the saturation cliff.
+- **flare_mc** (handler path) posts `237,761` req/s with
+  medians in line with the pack at p50 and p99 (`1.20 ms` /
+  `2.74 ms`), and then comes apart at the tail: a `64.86 ms`
+  p99.99 median and σ between `320 ms` and `359 ms` at every
+  tail percentile. A σ two orders of magnitude above the
+  median is not a distribution with a long tail, it is runs
+  that disagree about which regime they were in. Read this
+  row as "the handler path has not been calibrated to a
+  sustainable rate here", not as a latency figure. It is the
+  open item in this table.
+- **hyper** is the reference baseline and behaves like one:
+  `217,036` req/s, `2.83 ms` p99 median, and the flattest
+  tail after flare_mc_static (σ `0.08 ms` at p99.9, `2.72 ms`
+  at p99.99).
+- **axum** is the lowest headline of the five (`201,216`) and
+  does not buy tail flatness with it -- σ `2.50 ms` at p99.9
+  and `29.52 ms` at p99.99 put it third on tail stability
+  behind flare_mc_static and hyper.
+- The σ% column is the load generator's own steadiness, and
+  it is uniform: `0.21 %` to `0.35 %` of req/s across all
+  five frameworks. The tail σ above is measuring real latency
+  variance, not load-gen drift.
+
+Two cautions on reading this table. The flare_mc row's tail σ
+means its p99.9 and p99.99 medians carry no useful precision,
+so no conclusion in this section rests on them. And every row
+is one five-run measurement on one box; the run-to-run deltas
+against earlier baselines that previous revisions of this
+section quoted are not reproducible from anything tracked in
+the repo, so they have been dropped rather than restated.
 
 #### Hot-path measurement notes
 
-The `+1.1 %` flare_mc tightening between the prior baseline
-and the HEAD numbers above comes from a targeted hot-path
+The flare_mc rows above include a targeted hot-path
 optimisation surfaced by the repeatable allocation +
 CPU-profile harness shipped under `pixi run -e dev
 perf-server-alloc` (Linux only;
@@ -708,9 +696,11 @@ The harness composes three measurements on the same
    its name. Replacing the seven hot-path call sites with
    a non-validating helper that uses
    `String(unsafe_uninit_length=N)` + `memcpy` over
-   pre-validated ASCII bytes recovers that 5 %, and the
-   `+1.1 %` throughput delta is what's left after the
-   reactor / syscall layer absorbs most of the win.
+   pre-validated ASCII bytes recovers that 5 % of CPU. Most
+   of it is absorbed by the reactor and syscall layer rather
+   than showing up as throughput; the profile, not a req/s
+   delta, is the evidence here, since the before-and-after
+   runs are not tracked in the repo.
 
 Both `valgrind` (`callgrind` / `massif` / `dhat`) and
 `heaptrack` are pixi-managed via conda-forge on Linux-64
@@ -761,9 +751,10 @@ prior measurement) with comparable tail medians (Go's
 `3.21 / 3.60 / 4.40 ms` at p99 / p99.9 / p99.99 vs flare's
 `3.23 / 3.84 / 4.30 ms`).
 
-Source data: [`benchmark/results/2026-05-27T2256-ehsan-dev-03e55f2/`](../benchmark/results/2026-05-27T2256-ehsan-dev-03e55f2/).
-Prior baseline (earlier numbers carried through until this
-HEAD): [`benchmark/results/2026-05-11T1821-ehsan-dev-944de73/`](../benchmark/results/2026-05-11T1821-ehsan-dev-944de73/).
+Source data: run `2026-05-27T2256` at `03e55f2`; prior baseline
+(the earlier numbers carried through until that HEAD) run
+`2026-05-11T1821` at `944de73`. Neither run directory is tracked
+in the repo.
 
 ##### Feature-pass no-regression check (HTTP/3 + QUIC additive surfaces)
 
@@ -850,8 +841,8 @@ cycle's additive surfaces.
 
 Full ``pixi run -e bench bench-vs-baseline`` sweep on the EPYC
 7R32 dev-box, 5x30s runs per target, ``mojo build -D
-ASSERT=none``, ``cargo build --release --locked``. Source:
-[`benchmark/results/2026-06-03T0331-ehsan-dev-65b3282/`](../benchmark/results/2026-06-03T0331-ehsan-dev-65b3282/).
+ASSERT=none``, ``cargo build --release --locked``. Source: run
+`2026-06-03T0331` at `65b3282`, not tracked in the repo.
 
 Single-worker plaintext (``throughput`` config, ``flare`` vs
 ``nginx`` 1-worker vs ``go_nethttp`` ``GOMAXPROCS=1``):
