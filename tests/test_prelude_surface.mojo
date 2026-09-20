@@ -122,6 +122,15 @@ def test_prelude_is_not_the_wide_surface() raises:
     reader who misses ``encode_varint`` in the prelude knows
     immediately where it went.
     """
+    # v0.11 removed the flare.uds frame-mux codec from both barrels. It
+    # is a codec, so it failed the closure rule the same way the HTTP/2
+    # and QUIC codecs do -- and because `Frame` / `encode_frame` /
+    # `decode_frame` collide by name with flare.http2.frame, a
+    # `from flare.prelude import *` was quietly shadowing the h2 symbols
+    # for anyone who did both. Every real consumer already imported from
+    # flare.uds.
+    from flare.uds import Frame, FrameMux, encode_frame, decode_frame
+
     var v = encode_varint(UInt64(42))
     assert_true(len(v) > 0, "encode_varint reachable from flare.quic")
 

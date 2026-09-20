@@ -98,14 +98,6 @@ from ..http.cookie import Cookie, CookieJar, parse_set_cookie_header
 from ..io import ByteReader, ByteWriter
 from ..http.streaming_server import StreamHandler, StreamConn
 from ..http.async_body import AsyncChunkSource, ChunkPoll, UpstreamChunkSource
-from ..uds.frame_mux import (
-    Frame,
-    FrameDemux,
-    FrameKind,
-    FrameMux,
-    encode_frame,
-    decode_frame,
-)
 from ..http.extract import (
     Extractor,
     PathInt,
