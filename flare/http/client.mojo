@@ -65,6 +65,7 @@ from ..net import SocketAddr
 from ..dns import resolve
 
 from ..http2.client import Http2ClientConnection
+from ..http2.hpack import HpackHeader
 from ..quic.client import QuicClientConnection
 from ..http3.client import Http3ClientConnection
 from ..tls.rustls_quic import RustlsQuicConnector
@@ -82,6 +83,11 @@ from ._client.parse import (
     _read_http_response_tls,
 )
 from ._client.download import HttpDownload
+from ..runtime.pool import Pool
+from ._client.stream_request import prepare_stream_headers
+from ._client.stream_response import HttpStreamResponse
+from ._client.h2_download import Http2Download
+from ._client.h2_transport import _H2Transport
 from ._client.h2_send import (
     _build_h2_request_headers,
     _send_h2_over_tcp,
@@ -1496,91 +1502,138 @@ struct HttpClient(Movable):
         var req = Request(method=Method.GET, url=self._resolve_url(url))
         return self.send(req)
 
-    def get_streaming(self, url: String) raises -> HttpDownload[TcpStream]:
-        """GET a response and stream its body incrementally.
+    def get_streaming(self, url: String) raises -> HttpStreamResponse:
+        """Stream a GET response body without buffering it.
 
-        Parses only the status line + headers up front and returns an
-        :class:`HttpDownload`; the caller pulls the body with
-        ``read_chunk()`` in bounded memory (Content-Length, chunked, and
-        close-delimited framings decoded on the fly). The connection is
-        not pooled (``Connection: close``).
+        Works on ``http://`` and ``https://`` alike. The wire is chosen
+        the way :meth:`send` chooses it: ALPN settles h2 versus
+        HTTP/1.1 on TLS, and cleartext uses HTTP/1.1 unless
+        :meth:`with_h2c` asked for prior-knowledge h2c.
 
-        For ``https://`` use :meth:`get_streaming_tls`. Mojo cannot
-        return two different concrete types from one function and
-        ``HttpDownload`` is parametric over its transport, so the two
-        schemes are two entry points rather than one with a branch.
+        The response head is parsed before this returns; the body is
+        pulled by :meth:`HttpStreamResponse.read_chunk`, so a
+        multi-gigabyte download costs one buffer rather than one
+        allocation the size of the body. The connection is exclusive to
+        this response and is not pooled.
+
+        **Changed in v0.11.** This used to be cleartext-only and raised
+        on ``https://``, with ``get_streaming_tls`` as its TLS twin
+        pinned to HTTP/1.1. One entry point covers both now and the
+        return type changed from ``HttpDownload[TcpStream]`` to
+        ``HttpStreamResponse``.
+
+        Args:
+            url: Absolute URL, or a path when the client has a base URL.
+
+        Returns:
+            The response head plus an incremental body reader.
+
+        Raises:
+            NetworkError: On a connect, TLS or read failure.
+            Error: On an unparseable URL.
         """
-        var u = Url.parse(self._resolve_url(url))
+        var req = Request(method=String("GET"), url=self._resolve_url(url))
+        return self.send_streaming(req^)
+
+    def post_streaming(
+        self, url: String, body: String
+    ) raises -> HttpStreamResponse:
+        """POST a JSON body and stream the response.
+
+        The shape server-sent events and JSON-lines APIs want: a small
+        request, then a response read incrementally for as long as the
+        server keeps writing.
+
+        Args:
+            url: Absolute URL, or a path when the client has a base URL.
+            body: Request body, sent as ``application/json``.
+
+        Returns:
+            The response head plus an incremental body reader.
+
+        Raises:
+            NetworkError: On a connect, TLS or read failure.
+        """
+        var req = Request(method=String("POST"), url=self._resolve_url(url))
+        req.headers.set("content-type", "application/json")
+        req.body = List[UInt8](body.as_bytes())
+        return self.send_streaming(req^)
+
+    def send_streaming(self, var req: Request) raises -> HttpStreamResponse:
+        """Send ``req`` and stream the response body.
+
+        The primitive the other two are written in terms of. Redirects,
+        retries and cookie handling apply only up to the point the head
+        is parsed; after that the body belongs to the caller and cannot
+        be replayed, so nothing re-sends it.
+
+        Args:
+            req: The request (ownership transferred). Framing headers on
+                it are ignored -- the writer owns framing.
+
+        Returns:
+            The response head plus an incremental body reader.
+
+        Raises:
+            NetworkError: On a connect, TLS or read failure.
+            Error: On an unparseable URL or an unusable header.
+        """
+        var u = Url.parse(self._resolve_url(req.url))
+        var headers = prepare_stream_headers(
+            req.method, u, req.headers, self._user_agent
+        )
+        if self._auth_header != "":
+            headers.set("authorization", self._auth_header)
+        if self._cookies.enabled():
+            var cookie = self._cookies.request_header()
+            if cookie != "":
+                headers.set("cookie", cookie)
+
         if u.is_tls():
-            raise Error(
-                "get_streaming: cleartext http:// only; use"
-                " get_streaming_tls() for https"
-            )
-        var wire = self._streaming_get_wire(u, 80)
-        var proxy = self._resolve_proxy(u)
-        var stream: TcpStream
-        if proxy.byte_length() > 0:
-            stream = self._connect_tunnel(proxy, u.host, u.port)
-        else:
-            stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
-        self._arm_read_timeout(stream)
-        var wb = wire.as_bytes()
-        stream.write_all(Span[UInt8, _](wb))
-        return HttpDownload[TcpStream](stream^)
+            return self._stream_tls(u, req.method, headers^)
+        return self._stream_cleartext(u, req.method, headers^)
 
-    def _streaming_get_wire(self, u: Url, default_port: Int) -> String:
-        """Build the HTTP/1.1 GET head shared by both streaming paths.
-
-        ``Accept-Encoding: identity`` on purpose: a streaming download
-        pulls bounded chunks, and a compressed body would have to be
-        fully buffered to inflate, which is the opposite of the point.
-        """
+    def _stream_head_wire(
+        self, method: String, u: Url, headers: HeaderMap, default_port: Int
+    ) -> String:
+        """Serialise an HTTP/1.1 request head for a streaming request."""
         var host_header = u.host
         if Int(u.port) != default_port:
-            host_header = host_header + ":" + String(Int(u.port))
-        var wire = String("GET ") + u.request_target() + " HTTP/1.1\r\n"
+            host_header += ":" + String(u.port)
+        var wire = method.upper() + " " + u.request_target() + " HTTP/1.1\r\n"
         wire += "Host: " + host_header + "\r\n"
-        wire += "User-Agent: " + self._user_agent + "\r\n"
-        wire += "Accept: */*\r\n"
-        wire += "Accept-Encoding: identity\r\n"
+        for i in range(headers.len()):
+            wire += headers._keys[i] + ": " + headers._values[i] + "\r\n"
+        # Exclusive connection: the reader owns it until the body ends.
         wire += "Connection: close\r\n\r\n"
         return wire^
 
-    def get_streaming_tls(self, url: String) raises -> HttpDownload[TlsStream]:
-        """GET an ``https://`` response and stream its body incrementally.
+    def _stream_cleartext(
+        self, u: Url, method: String, var headers: HeaderMap
+    ) raises -> HttpStreamResponse:
+        """Open a cleartext streaming response over HTTP/1.1."""
+        var wire = self._stream_head_wire(method, u, headers, 80)
+        var proxy = self._resolve_proxy(u)
+        var tcp: TcpStream
+        if proxy.byte_length() > 0:
+            tcp = self._connect_tunnel(proxy, u.host, u.port)
+        else:
+            tcp = _connect_with_fallback(u.host, u.port, self._timeout_ms)
+        self._arm_read_timeout(tcp)
+        var wb = wire.as_bytes()
+        tcp.write_all(Span[UInt8, _](wb))
+        var t = _H2Transport.from_tcp(tcp^)
+        var dl = HttpDownload[_H2Transport](t^, method.upper())
+        return self._wrap_h1(dl^, String("http/1.1"))
 
-        The TLS twin of :meth:`get_streaming`. ``HttpDownload`` is
-        already generic over :trait:`flare.io.Readable` and ``TlsStream``
-        already satisfies it, so this is the same reader driven over a
-        different transport -- a 1 GB HTTPS response no longer costs
-        1 GB of client memory.
-
-        ALPN is pinned to ``http/1.1``: ``HttpDownload`` decodes HTTP/1.1
-        framing (Content-Length, chunked, close-delimited), so letting
-        the handshake settle on ``h2`` would hand it frame bytes. HTTP/2
-        and HTTP/3 streaming downloads need a reader over their
-        multiplexed streams and remain a follow-up.
-
-        The connection is not pooled (``Connection: close``).
-
-        Args:
-            url: The target URL (absolute or relative to ``base_url``).
-
-        Returns:
-            An :class:`HttpDownload` positioned at the first body byte.
-
-        Raises:
-            Error: If ``url`` is not ``https://``.
-            NetworkError: On connection, TLS or I/O failure.
-        """
-        var u = Url.parse(self._resolve_url(url))
-        if not u.is_tls():
-            raise Error(
-                "get_streaming_tls: https:// only; use get_streaming() for http"
-            )
-        var wire = self._streaming_get_wire(u, 443)
+    def _stream_tls(
+        self, u: Url, method: String, var headers: HeaderMap
+    ) raises -> HttpStreamResponse:
+        """Open a streaming response over TLS, h2 or HTTP/1.1 by ALPN."""
+        var wire = self._stream_head_wire(method, u, headers, 443)
         var tls_cfg = self._config.copy()
         tls_cfg.alpn = List[String]()
+        tls_cfg.alpn.append("h2")
         tls_cfg.alpn.append("http/1.1")
         var stream: TlsStream
         var proxy = self._resolve_proxy(u)
@@ -1592,9 +1645,91 @@ struct HttpClient(Movable):
                 u.host, u.port, tls_cfg^, self._timeout_ms
             )
         self._arm_read_timeout(stream)
+        var negotiated = stream.alpn_selected()
+        if negotiated == "h2":
+            return self._stream_h2(stream^, u, method, headers^)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
-        return HttpDownload[TlsStream](stream^)
+        var t = _H2Transport.from_tls(stream^)
+        var dl = HttpDownload[_H2Transport](t^, method.upper())
+        return self._wrap_h1(dl^, String("http/1.1"))
+
+    def _wrap_h1(
+        self, var dl: HttpDownload[_H2Transport], var wire: String
+    ) raises -> HttpStreamResponse:
+        """Move a finished HTTP/1.1 head into an HttpStreamResponse."""
+        var status = dl.status
+        var reason = dl.reason
+        var headers = dl.headers.copy()
+        var addr = Pool[HttpDownload[_H2Transport]].alloc_move(dl^)
+        return HttpStreamResponse(status, reason, headers^, wire^, h1_addr=addr)
+
+    def _stream_h2(
+        self,
+        var stream: TlsStream,
+        u: Url,
+        method: String,
+        var headers: HeaderMap,
+    ) raises -> HttpStreamResponse:
+        """Open an h2 stream and read its head, leaving the body unread."""
+        var conn = Http2ClientConnection()
+        var t = _H2Transport.from_tls(stream^)
+        var preface = conn.drain()
+        if len(preface) > 0:
+            t.write_all(Span[UInt8, _](preface))
+        var sid = conn.next_stream_id()
+        var extra = List[HpackHeader]()
+        for i in range(headers.len()):
+            extra.append(HpackHeader(headers._keys[i], headers._values[i]))
+        var empty = List[UInt8]()
+        conn.send_request_open(
+            sid,
+            method.upper(),
+            String("https"),
+            u.host,
+            u.request_target(),
+            extra,
+        )
+        conn.finish_upload(sid)
+        conn.enable_response_streaming(sid)
+        var out = conn.drain()
+        if len(out) > 0:
+            t.write_all(Span[UInt8, _](out))
+
+        # Read until the response head lands, leaving the body for the
+        # reader to pull.
+        var buf = List[UInt8](capacity=16384)
+        buf.resize(16384, 0)
+        while not conn.headers_received(sid):
+            var err = conn.stream_error(sid)
+            if err:
+                raise NetworkError(
+                    "h2 streaming request: stream reset with code "
+                    + String(err.value())
+                )
+            var n = t.read(Pointer(to=buf[0]), 16384)
+            if n <= 0:
+                raise NetworkError(
+                    "h2 streaming request: peer closed before response headers"
+                )
+            conn.feed(Span[UInt8, _](buf)[0:n])
+            var pending = conn.drain()
+            if len(pending) > 0:
+                t.write_all(Span[UInt8, _](pending))
+
+        var hdrs = conn.initial_response_headers(sid)
+        var status = 0
+        var rh = HeaderMap()
+        for i in range(len(hdrs)):
+            if hdrs[i].name == ":status":
+                status = Int(hdrs[i].value)
+            elif not hdrs[i].name.startswith(":"):
+                rh.append(hdrs[i].name, hdrs[i].value)
+        var dl = Http2Download(t^, conn^, sid)
+        var addr = Pool[Http2Download].alloc_move(dl^)
+        return HttpStreamResponse(
+            status, String(""), rh^, String("h2"), h2_addr=addr
+        )
 
     def post(self, url: String, body: String) raises -> Response:
         """Perform a POST request with a JSON string body.

@@ -90,7 +90,7 @@ struct Http3Download(Movable):
         while True:
             var chunk = self._conn.poll_body(self._sid, _H3_POLL_MS)
             if len(chunk.data) > 0:
-                return chunk.data^
+                return chunk.data.copy()
             if chunk.done:
                 self._eos = True
                 return List[UInt8]()

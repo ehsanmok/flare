@@ -75,7 +75,7 @@ def _drain(port: UInt16, path: String) raises -> Tuple[Int, Int]:
     """
     var url = String("https://localhost:") + String(Int(port)) + path
     with HttpClient(TlsConfig(ca_bundle=_CA_CRT)) as c:
-        var dl = c.get_streaming_tls(url)
+        var dl = c.get_streaming(url)
         var total = 0
         var largest = 0
         while True:
@@ -154,23 +154,6 @@ def test_https_streaming_download_chunked() raises:
     waitpid(pid)
     assert_equal(total, _STREAM_CHUNKS * _STREAM_CHUNK_BYTES)
     assert_true(largest <= _PULL_CAP, "pull exceeded the cap")
-
-
-def test_get_streaming_rejects_https() raises:
-    """The cleartext entry point still refuses https, with a pointer."""
-    var raised = False
-    var msg = String("")
-    try:
-        with HttpClient() as c:
-            _ = c.get_streaming("https://example.invalid/x")
-    except e:
-        raised = True
-        msg = String(e)
-    assert_true(raised, "get_streaming must reject https")
-    assert_true(
-        "get_streaming_tls" in msg,
-        "the error should name the right entry point; got: " + msg,
-    )
 
 
 def main() raises:

@@ -399,9 +399,6 @@ from test_client_stream_download_tls import (
 from test_client_stream_download_tls import (
     test_https_streaming_download_chunked as test_client_stream_download_tls__test_https_streaming_download_chunked,
 )
-from test_client_stream_download_tls import (
-    test_get_streaming_rejects_https as test_client_stream_download_tls__test_get_streaming_rejects_https,
-)
 from test_client_stream_upload import (
     test_streamed_upload_round_trips_full_body as test_client_stream_upload__test_streamed_upload_round_trips_full_body,
 )
@@ -3920,9 +3917,6 @@ def main() raises:
     ]()
     suite.test[
         test_client_stream_download_tls__test_https_streaming_download_chunked
-    ]()
-    suite.test[
-        test_client_stream_download_tls__test_get_streaming_rejects_https
     ]()
     # tests/http/test_client_stream_upload.mojo
     suite.test[
