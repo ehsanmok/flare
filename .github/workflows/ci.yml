@@ -20,6 +20,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Three shell lints that need no toolchain at all: ~15 s against a
+  # bare checkout, versus several minutes for anything that installs
+  # pixi. They guard structure rather than behaviour, so they are worth
+  # having answer before the test matrix finishes.
+  #
+  #   check-sans-io            the sans-io core imports no I/O
+  #   check-no-http-http2-cycle  flare.http and flare.http2 stay acyclic
+  #   check-reactor-size       per-file size caps, with a dated allowlist
+  #   check_example_tasks.py   every example is run by something
+  #
+  # None of them ran in CI before. check-reactor-size in particular
+  # could not run on a developer's Mac either -- it used bash 4.3
+  # namerefs against macOS's bash 3.2 -- so its one real violation went
+  # unnoticed on both sides.
+  lint:
+    name: Lints (no toolchain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Layering, cycles and file size
+        run: |
+          bash tests/tools/check_sans_io.sh
+          bash tests/tools/check_no_http_http2_cycle.sh
+          bash tests/tools/check_reactor_size.sh
+          python3 tests/tools/check_example_tasks.py
+
   test:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -257,10 +283,13 @@ jobs:
   conformance:
     name: Conformance (interop smoke + h2spec / autobahn / quic-interop)
     runs-on: ubuntu-latest
-    # h2spec is provisioned below and runs for real. autobahn (wstest)
-    # and quic-interop are still not bundled; run_conformance.sh probes
-    # for each and skips the leg when absent, so they contribute no
-    # false signal either way (see tests/tools/run_conformance.sh header).
+    # h2spec and autobahn both run for real here. h2spec is provisioned
+    # by the pinned-release installer below; autobahn runs through the
+    # crossbario/autobahn-testsuite image, which the runner already has
+    # a daemon for, because `pip install autobahntestsuite` is Python 2
+    # only. quic-interop is still not bundled; run_conformance.sh probes
+    # for it and skips the leg when absent, so it contributes no false
+    # signal either way (see tests/tools/run_conformance.sh header).
     steps:
       - uses: actions/checkout@v5
       - name: Setup Pixi
@@ -285,12 +314,16 @@ jobs:
       # with its reasoning in tests/tools/conformance/h2spec-known-fail.txt
       # and the harness fails on any case outside that list, so a
       # conformance regression goes red.
+      - name: Pre-pull the Autobahn image
+        run: docker pull crossbario/autobahn-testsuite:latest
       - name: Run provisioned conformance suites
         run: pixi run conformance
-      - name: Upload h2spec report
+      - name: Upload conformance reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: h2spec-report
-          path: target/conformance/h2spec.txt
+          name: conformance-reports
+          path: |
+            target/conformance/h2spec.txt
+            target/conformance/autobahn/
           if-no-files-found: warn

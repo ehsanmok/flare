@@ -229,6 +229,33 @@ def test_retry_recovers_flaky_origin() raises:
     assert_equal(text, "recovered")
 
 
+def test_pool_stats_reports_every_pool() raises:
+    """`pool_stats` must compile and agree with the accessors it replaces.
+
+    This exists because it did neither. `pool_stats` called
+    `ClientPool.idle_count`, a method that does not exist -- the pool's
+    accessor is `total_idle` -- and nothing in the suite called
+    `pool_stats`, so `mojo build` never instantiated it and the error
+    only surfaced under `mojo doc`. A method no test calls is a method
+    the compiler has not checked.
+    """
+    var c = HttpClient().with_pool()
+    var before = c.pool_stats()
+    assert_equal(before.h1_idle, 0)
+    assert_equal(before.tls_idle, 0)
+    assert_equal(before.quic_idle, 0)
+    assert_equal(before.quic_dials, 0)
+
+    # The one behavioural claim the docstring makes: the old
+    # `idle_count()` is the sum of the two HTTP/1.1 fields, not `h1_idle`
+    # alone. A migration that reads `h1_idle` instead is a silent change
+    # of meaning on a TLS-only client, so pin it.
+    assert_equal(c.idle_count(), before.h1_idle + before.tls_idle)
+    assert_equal(c.tls_idle_count(), before.tls_idle)
+    assert_equal(c.quic_idle_count(), before.quic_idle)
+    assert_equal(c.quic_dials(), before.quic_dials)
+
+
 def main() raises:
     test_redirect_follow_all_lands()
     test_redirect_deny_surfaces_3xx()
@@ -237,4 +264,5 @@ def main() raises:
     test_auto_decompress_opt_out_keeps_raw()
     test_cookie_jar_captures_and_replays()
     test_retry_recovers_flaky_origin()
-    print("test_client_ux: 7 passed")
+    test_pool_stats_reports_every_pool()
+    print("test_client_ux: 8 passed")

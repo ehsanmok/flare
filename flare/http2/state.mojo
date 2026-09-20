@@ -27,6 +27,14 @@ Connection-level concerns *not* implemented :
 - Server push (we never originate PUSH_PROMISE).
 """
 
+# TODO(2026-12-31, track-http2-state): this module is dominated by the
+# single ``Connection`` struct -- frame validation, stream state,
+# per-stream and connection flow control, header-block assembly, and the
+# GOAWAY / RST_STREAM machinery, all reached through ``handle_frame``.
+# Mojo cannot split one struct's methods across files, so the file sits
+# over the 1000-line Pass-B cap. The enums and the ``Stream`` record
+# could move out, but they are only ~200 lines and would not bring it
+# under. Allowlisted in tests/tools/check_reactor_size.sh until then.
 from std.collections import Dict, Optional
 
 from .frame import (

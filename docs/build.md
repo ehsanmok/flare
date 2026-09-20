@@ -65,8 +65,14 @@ area under `tests/` are compiled into a single binary:
 ```bash
 pixi run tests        # aggregate build + run (the CI gate)
 pixi run tests-gen    # regenerate tests/_agg after adding a test file
-pixi run tests-per-file   # the old one-invocation-per-file chain
+pixi run mojo -I . tests/http/test_router.mojo   # one file on its own
 ```
+
+There used to be a `tests-per-file` task holding a
+hand-maintained chain of ~300 invocations. It was removed in
+0.11: the aggregates replaced it, and unlike them it had no
+drift gate, so it had rotted to the point of naming a test file
+that did not exist. Run a single file directly, as above.
 
 `tests/_agg/agg_<area>.mojo` is **generated** by
 [`tests/tools/gen_test_aggregates.py`](../tests/tools/gen_test_aggregates.py)

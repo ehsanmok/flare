@@ -31,7 +31,11 @@ jobs:
         # glibc 2.34 hosts. Revisit when the Mojo nightly grows a
         # fix, or when a future GHA image rolls a kernel that
         # doesn't trip the crash.
-        os: [ubuntu-22.04, macos-14]
+        #
+        # macOS: ``macos-15``, matching ci.yml. This sat on
+        # ``macos-14`` while ci.yml moved on, so the nightly fuzz run
+        # and the per-push test run were on different macOS images.
+        os: [ubuntu-22.04, macos-15]
 
     steps:
       - uses: actions/checkout@v5
@@ -47,35 +51,27 @@ jobs:
           cache: false
           post-cleanup: false
 
-      - name: Fuzz WS frame parser
-        run: pixi run --environment fuzz fuzz-ws
+      # The corpus is what makes a fuzz run cumulative: mozz keeps every
+      # input that reached new coverage under fuzz/corpus/<target>/, and
+      # a run starting from an empty corpus spends its whole budget
+      # rediscovering what last night already found. The key rolls per
+      # run so each night writes a fresh entry; restore-keys walks back
+      # to the most recent one for this OS.
+      - name: Restore fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ matrix.os }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.os }}-
 
-      - name: Fuzz URL parser
-        run: pixi run --environment fuzz fuzz-url
-
-      - name: Fuzz HTTP headers parser
-        run: pixi run --environment fuzz fuzz-headers
-
-      - name: Fuzz HTTP response parser
-        run: pixi run --environment fuzz fuzz-http-response
-
-      - name: Fuzz HTTP server
-        run: pixi run --environment fuzz fuzz-http-server
-
-      - name: Fuzz WS server
-        run: pixi run --environment fuzz fuzz-ws-server
-
-      - name: Fuzz encoding
-        run: pixi run --environment fuzz fuzz-encoding
-
-      - name: Property tests — WS roundtrip
-        run: pixi run --environment fuzz prop-ws
-
-      - name: Property tests — HTTP headers
-        run: pixi run --environment fuzz prop-headers
-
-      - name: Property tests — Auth
-        run: pixi run --environment fuzz prop-auth
+      # One step, all 63 targets. This was ten hand-listed steps
+      # covering ten of them: the entire QUIC, HTTP/3 and QPACK family
+      # never ran, nor did either HTTP/2 denial-of-service harness --
+      # the CONTINUATION flood and the rapid-reset (CVE-2023-44487)
+      # cases, which are exactly the ones worth fuzzing nightly.
+      - name: Fuzz and property tests (all targets)
+        run: pixi run --environment fuzz fuzz-all
 
       - name: Upload crash artifacts
         if: failure()

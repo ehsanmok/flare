@@ -679,11 +679,17 @@ struct HttpClient(Movable):
         separately, which made it easy to check one pool and believe you
         had checked them all. Those four accessors still work.
 
+        One difference worth knowing when migrating: ``idle_count()``
+        returns the cleartext and TLS pools *added together*, while
+        :attr:`PoolStats.h1_idle` is the cleartext pool alone and
+        :attr:`PoolStats.tls_idle` the TLS one. ``h1_idle + tls_idle``
+        is the old number.
+
         Returns:
             A snapshot; the pools keep moving after it is taken.
         """
         return PoolStats(
-            h1_idle=self._pool.idle_count(),
+            h1_idle=self._pool.total_idle(),
             tls_idle=self._tls_pool.idle_count(),
             quic_idle=self._quic_pool.idle_count(),
             quic_dials=self._quic_pool.dials(),

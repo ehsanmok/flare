@@ -1,17 +1,19 @@
 name: Docs
 
+# The paths-ignore here used to list '**/*.md' and 'docs/**', which
+# meant a docs-only change rebuilt nothing: CI skipped it by design and
+# this workflow skipped it too, so the published site could sit stale
+# behind main indefinitely. mojodoc reads docstrings out of the .mojo
+# sources, so almost any change can move the output; only LICENSE
+# genuinely cannot.
 on:
   push:
     branches: [main]
     paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
       - 'LICENSE'
   pull_request:
     branches: [main]
     paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
       - 'LICENSE'
   workflow_dispatch:
 

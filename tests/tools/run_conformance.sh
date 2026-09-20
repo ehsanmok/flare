@@ -24,7 +24,9 @@
 #
 # Provisioning (documented host blocker):
 #   h2spec:       https://github.com/summerwind/h2spec/releases
-#   autobahn:     pip install autobahntestsuite  (provides `wstest`)
+#   autobahn:     `wstest` on PATH, or a running Docker daemon (the
+#                 harness falls back to crossbario/autobahn-testsuite;
+#                 pip install autobahntestsuite is Python 2 only)
 #   quic-interop: https://github.com/quic-interop/quic-interop-runner
 set -uo pipefail
 
@@ -145,9 +147,113 @@ _h2spec_verdict() {
   [ "${unexpected}" -eq 0 ]
 }
 
+WS_ECHO_PORT="${WS_ECHO_PORT:-19001}"
+WS_ECHO_BIN="target/conformance/flare_ws_echo"
+
+# Block until the WebSocket port accepts a TCP connection. The old code
+# slept two seconds, which is both too long when the server is up and
+# too short when the machine is loaded -- and a fuzzingclient that
+# starts early reports every case as a connection failure, which reads
+# like several hundred protocol bugs.
+_wait_for_ws_port() {
+  local port="$1" tries=0
+  while [ "$tries" -lt 150 ]; do
+    if _have nc; then
+      nc -z 127.0.0.1 "${port}" >/dev/null 2>&1 && return 0
+    elif python3 -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(0.2)
+sys.exit(0 if s.connect_ex(('127.0.0.1', ${port})) == 0 else 1)
+" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  return 1
+}
+
+# wstest as a binary if it is on PATH, otherwise the maintained Docker
+# image. pip install autobahntestsuite only works on Python 2, so the
+# image is the realistic route on a CI runner.
+_wstest_available() {
+  _have wstest && return 0
+  # `docker info` blocks indefinitely when the CLI is installed but the
+  # daemon is not answering -- the common state on a developer laptop.
+  # Ask the daemon's own API with a deadline instead.
+  if _have docker; then
+    if curl -s --max-time 3 --unix-socket /var/run/docker.sock \
+         http://localhost/_ping >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+_run_wstest() {
+  if _have wstest; then
+    wstest -m fuzzingclient -s tests/tools/conformance/autobahn.json
+    return $?
+  fi
+  docker run --rm --network host \
+    -v "${REPO_ROOT}:/mnt" -w /mnt \
+    crossbario/autobahn-testsuite:latest \
+    wstest -m fuzzingclient -s tests/tools/conformance/autobahn.json
+}
+
+# Fail on any case whose behavior is not OK / NON-STRICT /
+# INFORMATIONAL and is not on the documented allowlist.
+_autobahn_verdict() {
+  local index="target/conformance/autobahn/index.json"
+  local allow="tests/tools/conformance/autobahn-known-fail.txt"
+  if [ ! -f "${index}" ]; then
+    echo "── autobahn: no index.json written; treating as a failure" >&2
+    return 1
+  fi
+  python3 - "${index}" "${allow}" <<'PYEOF'
+import json, sys
+
+index_path, allow_path = sys.argv[1], sys.argv[2]
+with open(index_path) as f:
+    report = json.load(f)
+
+allowed = set()
+try:
+    with open(allow_path) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line:
+                allowed.add(line)
+except FileNotFoundError:
+    pass
+
+ok = {"OK", "NON-STRICT", "INFORMATIONAL"}
+bad, silenced = [], []
+for agent, cases in report.items():
+    for case_id, result in sorted(cases.items()):
+        behavior = result.get("behavior", "MISSING")
+        close = result.get("behaviorClose", "OK")
+        if behavior in ok and close in ok:
+            continue
+        (silenced if case_id in allowed else bad).append(
+            "%s  %s (behavior=%s close=%s)" % (agent, case_id, behavior, close)
+        )
+
+for line in silenced:
+    print("   known-fail: " + line)
+for line in bad:
+    print("   FAIL: " + line)
+print("── autobahn: %d case(s) failed outside the allowlist, %d known"
+      % (len(bad), len(silenced)))
+sys.exit(1 if bad else 0)
+PYEOF
+}
+
 run_autobahn() {
-  if ! _have wstest; then
-    echo "── autobahn: NOT PROVISIONED (pip install autobahntestsuite); skipping"
+  if ! _wstest_available; then
+    echo "── autobahn: NOT PROVISIONED (need wstest on PATH, or a running"
+    echo "   Docker daemon for crossbario/autobahn-testsuite); skipping"
     SKIP=$((SKIP + 1))
     return 0
   fi
@@ -157,15 +263,31 @@ run_autobahn() {
     SKIP=$((SKIP + 1))
     return 0
   fi
-  echo "── autobahn: starting flare WsServer + running fuzzingclient"
-  pixi run mojo -I . examples/basic/websocket_echo.mojo &
+  echo "── autobahn: starting flare echo server + running fuzzingclient"
+  mkdir -p target/conformance
+  if ! pixi run mojo build -I . examples/basic/websocket_echo_server.mojo \
+       -o "${WS_ECHO_BIN}" > target/conformance/ws-build.log 2>&1; then
+    echo "   echo server BUILD FAILED"
+    cat target/conformance/ws-build.log
+    FAIL=$((FAIL + 1))
+    return 0
+  fi
+  # Budget 0: serve until killed. The fuzzingclient opens one
+  # connection per case, several hundred of them.
+  FLARE_WS_ECHO_PORT="${WS_ECHO_PORT}" FLARE_WS_ECHO_MAX_CONNS=0 \
+    "${WS_ECHO_BIN}" > target/conformance/ws-echo.log 2>&1 &
   local srv=$!
-  sleep 2
-  wstest -m fuzzingclient -s tests/tools/conformance/autobahn.json
-  local rc=$?
-  kill "${srv}" 2>/dev/null || true
+  if ! _wait_for_ws_port "${WS_ECHO_PORT}"; then
+    echo "   echo server never came up on ${WS_ECHO_PORT}"
+    cat target/conformance/ws-echo.log
+    kill -9 "${srv}" 2>/dev/null || true
+    FAIL=$((FAIL + 1))
+    return 0
+  fi
+  _run_wstest
+  kill -9 "${srv}" 2>/dev/null || true
   RAN=$((RAN + 1))
-  [ $rc -ne 0 ] && FAIL=$((FAIL + 1))
+  _autobahn_verdict || FAIL=$((FAIL + 1))
   return 0
 }
 

@@ -67,6 +67,7 @@ pass_b_allowlist=(
     "flare/http/client.mojo"
     "flare/quic/client.mojo"
     "flare/http2/client.mojo"
+    "flare/http2/state.mojo"
     "flare/http/_unified_reactor_impl.mojo"
     "flare/http/_reactor/conn_handle.mojo"
     "flare/http/_h2_conn_handle.mojo"
@@ -76,14 +77,29 @@ total_violations=0
 total_allowlisted=0
 total_clean=0
 
-# run_pass THRESHOLD DIRS_ARRAY_NAME ALLOWLIST_ARRAY_NAME
+# run_pass THRESHOLD dir... -- allowlisted-file...
 #
-# Uses bash namerefs (declare -n) to receive the dir + allowlist arrays
-# by name so the two passes share one implementation.
+# The two lists arrive as positional arguments split by a literal
+# ``--``. This used ``declare -n`` namerefs, which need bash >= 4.3;
+# macOS ships bash 3.2, so the lint could not run at all on a
+# developer machine and only ever failed in CI.
 run_pass() {
     local threshold="$1"
-    local -n dirs_ref="$2"
-    local -n allow_ref="$3"
+    shift
+
+    local dirs_ref=()
+    local allow_ref=()
+    local past_sep=0
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--" ]]; then
+            past_sep=1
+        elif (( past_sep == 1 )); then
+            allow_ref+=("$arg")
+        else
+            dirs_ref+=("$arg")
+        fi
+    done
 
     local scan_dir
     for scan_dir in "${dirs_ref[@]}"; do
@@ -123,8 +139,10 @@ run_pass() {
     done < <(find "${dirs_ref[@]}" -name '*.mojo' -print0)
 }
 
-run_pass "$pass_a_threshold" pass_a_dirs pass_a_allowlist
-run_pass "$pass_b_threshold" pass_b_dirs pass_b_allowlist
+run_pass "$pass_a_threshold" \
+    "${pass_a_dirs[@]}" -- "${pass_a_allowlist[@]}"
+run_pass "$pass_b_threshold" \
+    "${pass_b_dirs[@]}" -- "${pass_b_allowlist[@]}"
 
 total=$((total_clean + total_allowlisted + total_violations))
 

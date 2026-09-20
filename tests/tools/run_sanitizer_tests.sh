@@ -19,6 +19,24 @@
 #
 set -euo pipefail
 
+# The Mojo toolchain ships no arm64 sanitizer runtime, so on Apple
+# silicon every one of the builds below fails at link time -- 85 of
+# them, several minutes, one identical error. Skip with an explanation
+# and exit 0: this harness is a Linux gate, and pretending otherwise
+# wastes a developer's time without telling them why.
+#
+# `pixi run tests-asserts-all` is the local stand-in. It arms every
+# `debug_assert` instead, which catches contract violations but not
+# use-after-free. The real pass runs in CI on ubuntu-latest.
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "run_sanitizer_tests: sanitizers are Linux-only here."
+  echo "  $(uname -s) $(uname -m): the Mojo toolchain ships no"
+  echo "  sanitizer runtime for this target, so nothing would link."
+  echo "  Local stand-in:  pixi run tests-asserts-all"
+  echo "  Real pass:       CI, ASan job on ubuntu-latest."
+  exit 0
+fi
+
 KIND="${1:-asan}"
 shift || true
 
@@ -411,7 +429,7 @@ is_flaky_forked() {
 PASS=0
 FAIL=0
 FLAKED=0
-START_NS=$(date +%s%N)
+START_S=${SECONDS}
 
 for test_file in "${TESTS[@]}"; do
   base=$(basename "${test_file}" .mojo)
@@ -463,11 +481,10 @@ for test_file in "${TESTS[@]}"; do
   fi
 done
 
-END_NS=$(date +%s%N)
-ELAPSED_S=$(( (END_NS - START_NS) / 1000000000 ))
+ELAPSED_S=$(( SECONDS - START_S ))
 
 echo
-echo "── ${KIND^^} summary: ${PASS} passed, ${FAIL} failed in ${ELAPSED_S}s"
+echo "── $(echo "${KIND}" | tr "[:lower:]" "[:upper:]") summary: ${PASS} passed, ${FAIL} failed in ${ELAPSED_S}s"
 if [[ ${FLAKED} -gt 0 ]]; then
   echo "── ${FLAKED} forked-loopback test(s) needed a retry (see S8)"
 fi

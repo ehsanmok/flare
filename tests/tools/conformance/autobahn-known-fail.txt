@@ -1,0 +1,13 @@
+# Autobahn cases that are expected to report something other than OK
+# or NON-STRICT, one case id per line. The gate in
+# tests/tools/run_conformance.sh fails on any case outside this list,
+# so the question it answers is "no new failures", not "no failures" --
+# the same posture as h2spec-known-fail.txt.
+#
+# Every entry needs a reason. An entry with no reason is a bug that
+# someone silenced.
+#
+# Empty today: the suite has never been run against flare, so there is
+# no measured baseline to record. The first CI run that provisions
+# wstest establishes one, and anything it reports gets triaged into
+# either a fix or a line here with its reasoning.

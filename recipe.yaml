@@ -22,10 +22,21 @@
 # it's easy to update (a one-line bump in this recipe), not embedded in
 # a binary blob.
 #
-# json source is inlined at the v0.1.5 git tag (whose own recipe pins
-# the same Mojo version) until json publishes to a public conda channel;
-# at that point the inline ``json`` source step + the ``cp -r json-src/json``
-# can be replaced with a ``host: [json]`` requirement.
+# json source is inlined at the git tag named in the ``source:`` block
+# below (whose own recipe pins the same Mojo version) until json
+# publishes to a public conda channel; at that point the inline ``json``
+# source step + the ``cp -r json-src/json`` can be replaced with a
+# ``host: [json]`` requirement.
+#
+# What this package does NOT ship: ``libflare_rustls_quic.so``, the
+# rustls cdylib that backs QUIC and therefore HTTP/3 TLS. Building it
+# needs a Rust toolchain and a crates.io fetch, and a conda build runs
+# offline, so a vendored-crate step has to come first. Until it does, a
+# conda-installed flare serves and speaks HTTP/1.1, HTTP/2 and
+# WebSocket over OpenSSL TLS, and HTTP/3 is unavailable: the FFI lookup
+# fails at first use with a clear error rather than silently
+# downgrading. Build from source (``pixi run build-rustls-quic``) if
+# you need h3.
 
 context:
   name: flare
@@ -59,6 +70,18 @@ build:
         -L$PREFIX/lib
         -lssl -lcrypto
         -Wl,-rpath,$PREFIX/lib
+    # ── flare: zlib FFI wrapper (Content-Encoding gzip / deflate) ────────
+    # Loaded at runtime by flare.http.encoding, the compression
+    # middleware and the file server. Its absence is not a build error,
+    # only a runtime one at the first compressed response, so it went
+    # unnoticed here.
+    - $CC -O2 -fPIC -shared
+        -o $PREFIX/lib/libflare_zlib.so
+        flare/http/ffi/zlib_wrapper.c
+        -I$PREFIX/include
+        -L$PREFIX/lib
+        -lz
+        -Wl,-rpath,$PREFIX/lib
     # ── json: simdjson FFI wrapper (loaded at runtime by json) ───────────
     - $CXX -O3 -std=c++17 -fPIC -DNDEBUG -shared
         -o $PREFIX/lib/libsimdjson_wrapper.so
@@ -69,29 +92,45 @@ build:
 
 requirements:
   build:
-    - ${{ compiler('cxx') }}
+    - ${{ compiler('c') }}     # zlib wrapper
+    - ${{ compiler('cxx') }}   # OpenSSL + simdjson wrappers
     - git   # needed to clone json source
   host:
-    - openssl >=3.0,<4
+    # Matches the pin in pixi.toml. This read `>=3.0,<4`, which would
+    # solve to an OpenSSL the library has never been built against.
+    - openssl >=3.6.1,<4
     - ca-certificates
+    - zlib >=1.3.1,<2        # flare's gzip / deflate wrapper
     - simdjson >=4.2.4,<5    # json's simdjson FFI wrapper
   run:
     - mojo >=1.0.0,<2.0.0
-    - openssl >=3.0,<4
+    - openssl >=3.6.1,<4
     - ca-certificates
+    - zlib >=1.3.1,<2        # libflare_zlib.so is loaded at runtime
     - simdjson >=4.2.4,<5    # libsimdjson_wrapper.so is loaded at runtime
 
 about:
   homepage: https://github.com/ehsanmok/flare
   license: MIT
-  summary: Async-ready networking library for Mojo — TCP, UDP, TLS, HTTP and WebSocket
+  summary: Networking library for Mojo — HTTP/1.1, HTTP/2, HTTP/3, WebSocket, gRPC and TLS
   description: |
-    flare is a networking library for Mojo providing:
-    - IP/socket address types (IPv4, IPv6, dual-stack)
-    - DNS resolution (A/AAAA records via getaddrinfo)
-    - TCP streams with connect-timeout support
-    - UDP sockets (unicast and broadcast)
-    - TLS 1.2+ streams via OpenSSL FFI (forward-secret AEAD ciphers only)
-    - HTTP/1.1 client (GET, POST, PUT, DELETE) with gzip/deflate decompression
-    - WebSocket client (RFC 6455) with TLS support
-    - Ergonomic high-level API (http.get, http.post, http.ws_connect)
+    flare is a networking library for Mojo. Servers and clients on
+    every wire, over one epoll / kqueue / io_uring reactor:
+
+    - HTTP/1.1, HTTP/2 (RFC 9113) and HTTP/3 over QUIC (RFC 9000/9114)
+    - A router, typed extractors, middleware, sessions, cookies,
+      server-sent events, templates, static files and RFC 9111 caching
+    - An HTTP client with connection pooling, redirects, retries,
+      a cookie jar, and streaming request and response bodies on
+      every wire
+    - WebSocket (RFC 6455), including permessage-deflate and
+      Extended CONNECT over HTTP/2 (RFC 8441)
+    - gRPC: unary and all three streaming shapes, interceptors,
+      reflection and health
+    - TLS 1.2+ via OpenSSL FFI, with mTLS, session resumption and
+      ALPN
+    - TCP, UDP, Unix sockets, DNS resolution and address types
+
+    This package does not include the rustls cdylib that backs QUIC,
+    so HTTP/3 is unavailable from a conda install. Everything else
+    works. Build from source if you need it.
