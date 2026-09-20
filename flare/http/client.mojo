@@ -1244,6 +1244,8 @@ struct HttpClient(Movable):
         url: String,
         mut source: B,
         content_type: String = "application/octet-stream",
+        body_size: Int = -1,
+        cancel: Cancel = Cancel.never(),
     ) raises -> Response:
         """Send a request whose body is streamed from a ``ChunkSource``
         using ``Transfer-Encoding: chunked``, without materializing the
@@ -1287,24 +1289,35 @@ struct HttpClient(Movable):
         wire += "User-Agent: " + self._user_agent + "\r\n"
         wire += "Accept: */*\r\n"
         wire += "Content-Type: " + content_type + "\r\n"
-        wire += "Transfer-Encoding: chunked\r\n"
+        if body_size >= 0:
+            # Known length: Content-Length is cheaper on the wire than
+            # chunk framing and lets the origin size its buffer up front.
+            wire += "Content-Length: " + String(body_size) + "\r\n"
+        else:
+            wire += "Transfer-Encoding: chunked\r\n"
         # Streaming uploads do not pool the connection.
         wire += "Connection: close\r\n"
         wire += "\r\n"
 
         if u.is_tls():
-            return self._send_chunked_tls(u, wire, source)
-        return self._send_chunked_tcp(u, wire, source)
+            return self._send_chunked_tls(u, wire, source, body_size, cancel)
+        return self._send_chunked_tcp(u, wire, source, body_size, cancel)
 
     def _send_chunked_tcp[
         B: ChunkSource
-    ](self, u: Url, wire: String, mut source: B) raises -> Response:
+    ](
+        self,
+        u: Url,
+        wire: String,
+        mut source: B,
+        body_size: Int,
+        cancel: Cancel,
+    ) raises -> Response:
         var stream = _connect_with_fallback(u.host, u.port, self._timeout_ms)
         self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         # One chunk in flight at a time -- the body is never materialized.
-        var cancel = Cancel.never()
         while True:
             var chunk_opt = source.next(cancel)
             if not chunk_opt:
@@ -1312,23 +1325,39 @@ struct HttpClient(Movable):
             var chunk = chunk_opt.take()
             if len(chunk) == 0:
                 continue
-            var frame = _chunk_frame_prefix(len(chunk))
-            var fb = frame.as_bytes()
-            stream.write_all(Span[UInt8, _](fb))
-            stream.write_all(Span[UInt8, _](chunk))
-            var crlf = String("\r\n")
-            var cb = crlf.as_bytes()
-            stream.write_all(Span[UInt8, _](cb))
-        var last = String("0\r\n\r\n")
-        var lb = last.as_bytes()
-        stream.write_all(Span[UInt8, _](lb))
+            if body_size >= 0:
+                stream.write_all(Span[UInt8, _](chunk))
+            else:
+                var frame = _chunk_frame_prefix(len(chunk))
+                var fb = frame.as_bytes()
+                stream.write_all(Span[UInt8, _](fb))
+                stream.write_all(Span[UInt8, _](chunk))
+                var crlf = String("\r\n")
+                var cb = crlf.as_bytes()
+                stream.write_all(Span[UInt8, _](cb))
+        if body_size < 0:
+            # Chunked only: a Content-Length body ends at its length.
+            # Reaching here means the source completed, so the
+            # terminator is owed. A source that raised never gets here,
+            # which is deliberate -- a truncated body must not be framed
+            # as a complete one.
+            var last = String("0\r\n\r\n")
+            var lb = last.as_bytes()
+            stream.write_all(Span[UInt8, _](lb))
         var resp = _read_http_response_tcp(stream)
         stream.close()
         return resp^
 
     def _send_chunked_tls[
         B: ChunkSource
-    ](self, u: Url, wire: String, mut source: B) raises -> Response:
+    ](
+        self,
+        u: Url,
+        wire: String,
+        mut source: B,
+        body_size: Int,
+        cancel: Cancel,
+    ) raises -> Response:
         # Force http/1.1 -- a chunked upload is an h1 construct.
         var tls_cfg = self._config.copy()
         tls_cfg.alpn = List[String]()
@@ -1339,7 +1368,6 @@ struct HttpClient(Movable):
         self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
-        var cancel = Cancel.never()
         while True:
             var chunk_opt = source.next(cancel)
             if not chunk_opt:
@@ -1347,16 +1375,25 @@ struct HttpClient(Movable):
             var chunk = chunk_opt.take()
             if len(chunk) == 0:
                 continue
-            var frame = _chunk_frame_prefix(len(chunk))
-            var fb = frame.as_bytes()
-            stream.write_all(Span[UInt8, _](fb))
-            stream.write_all(Span[UInt8, _](chunk))
-            var crlf = String("\r\n")
-            var cb = crlf.as_bytes()
-            stream.write_all(Span[UInt8, _](cb))
-        var last = String("0\r\n\r\n")
-        var lb = last.as_bytes()
-        stream.write_all(Span[UInt8, _](lb))
+            if body_size >= 0:
+                stream.write_all(Span[UInt8, _](chunk))
+            else:
+                var frame = _chunk_frame_prefix(len(chunk))
+                var fb = frame.as_bytes()
+                stream.write_all(Span[UInt8, _](fb))
+                stream.write_all(Span[UInt8, _](chunk))
+                var crlf = String("\r\n")
+                var cb = crlf.as_bytes()
+                stream.write_all(Span[UInt8, _](cb))
+        if body_size < 0:
+            # Chunked only: a Content-Length body ends at its length.
+            # Reaching here means the source completed, so the
+            # terminator is owed. A source that raised never gets here,
+            # which is deliberate -- a truncated body must not be framed
+            # as a complete one.
+            var last = String("0\r\n\r\n")
+            var lb = last.as_bytes()
+            stream.write_all(Span[UInt8, _](lb))
         var resp = _read_http_response_tls(stream)
         stream.close()
         return resp^

@@ -402,6 +402,12 @@ from test_client_stream_download_tls import (
 from test_client_stream_upload import (
     test_streamed_upload_round_trips_full_body as test_client_stream_upload__test_streamed_upload_round_trips_full_body,
 )
+from test_client_stream_upload import (
+    test_known_length_upload_uses_content_length as test_client_stream_upload__test_known_length_upload_uses_content_length,
+)
+from test_client_stream_upload import (
+    test_raising_source_does_not_terminate_the_body as test_client_stream_upload__test_raising_source_does_not_terminate_the_body,
+)
 from test_client_ux import (
     test_redirect_follow_all_lands as test_client_ux__test_redirect_follow_all_lands,
 )
@@ -3921,6 +3927,12 @@ def main() raises:
     # tests/http/test_client_stream_upload.mojo
     suite.test[
         test_client_stream_upload__test_streamed_upload_round_trips_full_body
+    ]()
+    suite.test[
+        test_client_stream_upload__test_known_length_upload_uses_content_length
+    ]()
+    suite.test[
+        test_client_stream_upload__test_raising_source_does_not_terminate_the_body
     ]()
     # tests/http/test_client_ux.mojo
     suite.test[test_client_ux__test_redirect_follow_all_lands]()
