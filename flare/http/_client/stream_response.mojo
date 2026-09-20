@@ -172,7 +172,7 @@ struct HttpStreamResponse(Movable):
             HttpError: Carrying the status and reason.
         """
         if not self.ok():
-            raise HttpError("HTTP " + String(self.status) + " " + self.reason)
+            raise HttpError(self.status, self.reason)
 
     def done(self) -> Bool:
         """Whether the body has reached end of stream.

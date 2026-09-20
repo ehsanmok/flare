@@ -659,7 +659,10 @@ struct HttpClient(Movable):
                 speaks h2c.
             upgrade: Offer ``Upgrade: h2c`` on an HTTP/1.1 request and
                 switch on a 101. Costs a round trip; works against an
-                origin you have not probed.
+                origin you have not probed. The streaming calls
+                (:meth:`get_streaming` and friends) do not take this
+                path -- they use prior knowledge when it is set and
+                HTTP/1.1 otherwise.
 
         Returns:
             The client, for chaining.
@@ -1543,9 +1546,12 @@ struct HttpClient(Movable):
         """Stream a GET response body without buffering it.
 
         Works on ``http://`` and ``https://`` alike. The wire is chosen
-        the way :meth:`send` chooses it: ALPN settles h2 versus
-        HTTP/1.1 on TLS, and cleartext uses HTTP/1.1 unless
-        :meth:`with_h2c` asked for prior-knowledge h2c.
+        the way :meth:`send` chooses it, with one exception: ALPN
+        settles h2 versus HTTP/1.1 on TLS, and cleartext uses HTTP/1.1
+        unless :meth:`with_h2c` asked for prior-knowledge h2c. The
+        ``Upgrade: h2c`` handshake is the exception -- a streaming
+        response cannot be re-read if the origin declines the upgrade,
+        so this path stays on HTTP/1.1 rather than guessing.
 
         The response head is parsed before this returns; the body is
         pulled by :meth:`HttpStreamResponse.read_chunk`, so a
@@ -1648,7 +1654,7 @@ struct HttpClient(Movable):
     def _stream_cleartext(
         self, u: Url, method: String, var headers: HeaderMap
     ) raises -> HttpStreamResponse:
-        """Open a cleartext streaming response over HTTP/1.1."""
+        """Open a cleartext streaming response, h2c or HTTP/1.1."""
         var wire = self._stream_head_wire(method, u, headers, 80)
         var proxy = self._resolve_proxy(u)
         var tcp: TcpStream
@@ -1657,6 +1663,18 @@ struct HttpClient(Movable):
         else:
             tcp = _connect_with_fallback(u.host, u.port, self._timeout_ms)
         self._arm_read_timeout(tcp)
+        if self._prefer_h2c:
+            # Prior knowledge (RFC 9113 sec 3.4): the preface goes out
+            # first and the whole exchange is h2 from byte one. The
+            # ``Upgrade: h2c`` dance is deliberately not taken here --
+            # see the note on :meth:`with_h2c`.
+            return self._stream_h2(
+                _H2Transport.from_tcp(tcp^),
+                u,
+                method,
+                headers^,
+                String("http"),
+            )
         var wb = wire.as_bytes()
         tcp.write_all(Span[UInt8, _](wb))
         var t = _H2Transport.from_tcp(tcp^)
@@ -1684,7 +1702,13 @@ struct HttpClient(Movable):
         self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
         if negotiated == "h2":
-            return self._stream_h2(stream^, u, method, headers^)
+            return self._stream_h2(
+                _H2Transport.from_tls(stream^),
+                u,
+                method,
+                headers^,
+                String("https"),
+            )
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
         var t = _H2Transport.from_tls(stream^)
@@ -1703,14 +1727,22 @@ struct HttpClient(Movable):
 
     def _stream_h2(
         self,
-        var stream: TlsStream,
+        var t: _H2Transport,
         u: Url,
         method: String,
         var headers: HeaderMap,
+        scheme: String,
     ) raises -> HttpStreamResponse:
-        """Open an h2 stream and read its head, leaving the body unread."""
+        """Open an h2 stream and read its head, leaving the body unread.
+
+        Args:
+            t: The transport, TLS or cleartext (ownership transferred).
+            u: The parsed request URL.
+            method: Request method.
+            headers: Request headers, already vetted.
+            scheme: ``"https"`` after ALPN, ``"http"`` for h2c.
+        """
         var conn = Http2ClientConnection()
-        var t = _H2Transport.from_tls(stream^)
         var preface = conn.drain()
         if len(preface) > 0:
             t.write_all(Span[UInt8, _](preface))
@@ -1718,11 +1750,10 @@ struct HttpClient(Movable):
         var extra = List[HpackHeader]()
         for i in range(headers.len()):
             extra.append(HpackHeader(headers._keys[i], headers._values[i]))
-        var empty = List[UInt8]()
         conn.send_request_open(
             sid,
             method.upper(),
-            String("https"),
+            scheme,
             u.host,
             u.request_target(),
             extra,
