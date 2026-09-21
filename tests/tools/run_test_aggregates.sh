@@ -98,7 +98,7 @@ build_one() {
 export -f build_one; export BUILD_DIR
 build_failed=()
 if [ "$JOBS" -gt 1 ]; then
-  printf '%s\n' "${AGGS[@]}" | xargs -P "$JOBS" -n1 -I FF bash -c 'build_one FF'
+  printf '%s\n' "${AGGS[@]}" | xargs -P "$JOBS" -I FF bash -c 'build_one FF'
   # xargs hides which item failed, so re-check the artifacts.
   for a in "${AGGS[@]}"; do
     [ -x "$BUILD_DIR/$(basename "${a%.mojo}")" ] || build_failed+=("$a")
@@ -163,7 +163,7 @@ build_example() {
   fi
 }
 export -f build_example
-printf '%s\n' "${EXAMPLES[@]}" | xargs -P "$JOBS" -n1 -I FF bash -c 'build_example FF'
+printf '%s\n' "${EXAMPLES[@]}" | xargs -P "$JOBS" -I FF bash -c 'build_example FF'
 for e in "${EXAMPLES[@]}"; do
   bin="$BUILD_DIR/ex_${e//\//_}"; bin="${bin%.mojo}"
   if [ ! -x "$bin" ]; then failed+=("$e (build)"); continue; fi
