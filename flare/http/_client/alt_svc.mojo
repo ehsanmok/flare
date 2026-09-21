@@ -35,7 +35,7 @@ References:
 
 from std.collections import Dict, List, Optional
 from std.ffi import c_int, external_call
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 from std.sys.info import CompilationTarget
 
 from flare.http.proto.ascii import ascii_lower
@@ -341,7 +341,7 @@ struct AltSvcStore(Copyable):
         return self._state()[].cache.has_fresh_h3(origin, now_s)
 
     def h3_endpoint(
-        read self, origin: String, now_s: UInt64
+        imm self, origin: String, now_s: UInt64
     ) -> Optional[Tuple[String, UInt16]]:
         """The cached ``(host, port)`` h3 endpoint for ``origin`` if
         fresh, else ``None`` (also ``None`` on the empty handle)."""

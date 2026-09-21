@@ -1055,7 +1055,7 @@ struct QuicListener(Movable):
         var pn_local = List[UInt8]()
         for i in range(4):
             pn_local.append(datagram[pn_offset + i])
-        var first_addr = Int(UnsafePointer(to=first_local))
+        var first_addr = Int(Pointer(to=first_local))
         _do_header_decrypt(
             self.tls_acceptor._lib,
             handle,
@@ -2399,7 +2399,7 @@ struct QuicListener(Movable):
         var pn_local = List[UInt8]()
         for i in range(pn_length):
             pn_local.append(protected[pn_offset + i])
-        var first_addr = Int(UnsafePointer(to=first_local))
+        var first_addr = Int(Pointer(to=first_local))
         _do_header_encrypt(
             self.tls_acceptor._lib,
             handle,
@@ -2526,7 +2526,7 @@ struct QuicListener(Movable):
         var pn_local = List[UInt8](capacity=pn_length)
         for i in range(pn_length):
             pn_local.append(protected[pn_offset + i])
-        var first_addr = Int(UnsafePointer(to=first_local))
+        var first_addr = Int(Pointer(to=first_local))
         _do_header_encrypt(
             self.tls_acceptor._lib,
             handle,

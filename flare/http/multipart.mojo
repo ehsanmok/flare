@@ -95,7 +95,7 @@ def _extract_boundary(content_type: String) raises -> String:
     var n = content_type.byte_length()
     if n == 0:
         raise Error("multipart: missing Content-Type")
-    var lower = String(capacity=n)
+    var lower = String(capacity_bytes=n)
     var src = content_type.unsafe_ptr()
     for i in range(n):
         var c = src[unsafe_offset=i]
@@ -424,7 +424,7 @@ def parse_multipart_form_data(
             )
             part.header_keys.append(key)
             part.header_values.append(value)
-            var key_lower = String(capacity=key.byte_length())
+            var key_lower = String(capacity_bytes=key.byte_length())
             for k in range(key.byte_length()):
                 var c = key.unsafe_ptr()[unsafe_offset=k]
                 if c >= 65 and c <= 90:

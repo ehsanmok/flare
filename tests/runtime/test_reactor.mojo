@@ -1,7 +1,7 @@
 """Tests for ``flare.runtime.Reactor`` (Phase 1.2).
 
 Both the Linux epoll backend and the macOS kqueue backend are exercised via
-the same uniform API; the struct itself uses ``@parameter if
+the same uniform API; the struct itself uses ``comptime if
 CompilationTarget.is_linux()`` internally so callers never see the platform
 split.
 

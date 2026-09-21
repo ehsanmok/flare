@@ -8,7 +8,7 @@ worker's execution, and neither touches ``Scheduler`` internals.
 """
 
 from std.ffi import c_int, external_call
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 
 from ..net import SocketAddr
 
@@ -99,7 +99,7 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     until the shared stopping flag is observed.
 
     The context was allocated on the main thread with libc ``malloc``
-    plus ``init_pointee_move``; the Scheduler main thread destroys and
+    plus ``unsafe_write``; the Scheduler main thread destroys and
     frees it after joining this worker.
     """
     var ctx_addr = Int(arg)
@@ -146,6 +146,6 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
 
     # Ctx ownership: the Scheduler main thread destroys + frees every
     # ctx AFTER joining the worker, so we don't touch it here.
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+    # Pointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
     return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)

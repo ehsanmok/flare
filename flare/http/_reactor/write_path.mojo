@@ -20,7 +20,7 @@ match the byte-fast-path / keep-alive helpers in
 """
 
 from std.collections import List
-from std.memory import unsafe_memcpy, UnsafePointer
+from std.memory import unsafe_memcpy, Pointer
 
 from flare.http.response import Response
 from flare.http.server import (

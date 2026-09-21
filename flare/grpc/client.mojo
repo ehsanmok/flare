@@ -141,7 +141,9 @@ struct GrpcClient(Movable):
         encode_grpc_message(request, body)
 
         var path = service_method
-        if path.byte_length() == 0 or path.unsafe_ptr()[0] != UInt8(ord("/")):
+        if path.byte_length() == 0 or path.unsafe_ptr()[
+            unsafe_offset=0
+        ] != UInt8(ord("/")):
             path = String("/") + path
         var req = Request(
             method=Method.POST, url=self._base_url + path, body=body^
@@ -198,7 +200,7 @@ struct GrpcClient(Movable):
 
     def _normalize_path(self, service_method: String) -> String:
         if service_method.byte_length() == 0 or service_method.unsafe_ptr()[
-            0
+            unsafe_offset=0
         ] != UInt8(ord("/")):
             return String("/") + service_method
         return service_method

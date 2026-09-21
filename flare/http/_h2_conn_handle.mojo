@@ -37,7 +37,8 @@ SETTINGS-ACK in one syscall.
 from std.builtin.debug_assert import debug_assert
 from std.collections import Dict, Optional
 from std.ffi import c_int, c_size_t, ErrNo, get_errno
-from std.memory import UnsafePointer, alloc, stack_allocation
+from std.memory import Pointer, stack_allocation
+from std.memory.alloc import unsafe_alloc
 
 from flare.errors import map_handler_error
 from flare.http.cancel import Cancel, CancelCell, CancelReason
@@ -161,7 +162,7 @@ struct Http2ConnHandle(Movable):
     isn't -- it owns a heap-allocated ``Int`` whose lifetime is
     tied to the cell). The address is allocated when a stream is
     first dispatched to a :trait:`flare.http.CancelHandler` and
-    freed (``destroy_pointee`` + ``free``) once
+    freed (``unsafe_deinit_pointee`` + ``free``) once
     :meth:`emit_response` queues that stream's response.
 
     Flipped on inbound RST_STREAM(stream_id) so a handler in
@@ -773,7 +774,7 @@ struct Http2ConnHandle(Movable):
         """
         if sid in self.stream_cells:
             return self.stream_cells[sid]
-        var p = alloc[Int](1)
+        var p = unsafe_alloc[Int](1)
         p.unsafe_write(CancelReason.NONE)
         var addr = Int(p)
         self.stream_cells[sid] = addr
@@ -786,11 +787,9 @@ struct Http2ConnHandle(Movable):
             return
         var addr = self.stream_cells.pop(sid)
         if addr != 0:
-            var p = UnsafePointer[Int, MutUntrackedOrigin](
-                unsafe_from_address=addr
-            )
+            var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
             p.unsafe_deinit_pointee()
-            p.free()
+            p.unsafe_free()
 
     def _flip_all_stream_cells(mut self, reason: Int) raises -> None:
         """Flip every live per-stream cell + the connection-level cell.
@@ -823,12 +822,10 @@ struct Http2ConnHandle(Movable):
             _ = self._alloc_stream_cell(sid)
         var addr = self.stream_cells[sid]
         if addr != 0:
-            var p = UnsafePointer[Int, MutUntrackedOrigin](
-                unsafe_from_address=addr
-            )
+            var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
             p[] = reason
 
-    def _stream_cell_cancelled(read self, sid: Int) raises -> Bool:
+    def _stream_cell_cancelled(imm self, sid: Int) raises -> Bool:
         """Return ``True`` if the cell bound to ``sid`` has been
         flipped to a non-zero reason. False (and stream not
         cancelled) if no cell is allocated for ``sid``.
@@ -838,7 +835,7 @@ struct Http2ConnHandle(Movable):
         var addr = self.stream_cells[sid]
         if addr == 0:
             return False
-        var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+        var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
         return p[] != CancelReason.NONE
 
     def on_readable_cancel[
@@ -895,7 +892,7 @@ struct Http2ConnHandle(Movable):
                 if got > 0:
                     var got_int = Int(got)
                     for i in range(got_int):
-                        inbound.append(chunk[i])
+                        inbound.append(chunk[unsafe_offset=i])
                 elif got == 0:
                     # Peer FIN -- flip every live cell so in-flight
                     # handlers short-circuit cooperatively.

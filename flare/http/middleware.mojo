@@ -209,7 +209,7 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
                 semi = i
                 break
         var name = String(unsafe_from_utf8=entry.as_bytes()[:semi]).strip()
-        var lower = String(capacity=name.byte_length() + 1)
+        var lower = String(capacity_bytes=name.byte_length() + 1)
         for i in range(name.byte_length()):
             var c = name.unsafe_ptr()[unsafe_offset=i]
             if c >= 65 and c <= 90:

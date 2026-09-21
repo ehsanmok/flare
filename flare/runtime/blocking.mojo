@@ -106,7 +106,7 @@ inside ``work()``.
 """
 
 from std.ffi import external_call
-from std.memory import Layout, UnsafePointer, alloc, unsafe_memcpy
+from std.memory import Layout, Pointer, alloc, unsafe_memcpy
 from std.sys.info import CompilationTarget
 
 from ..http.cancel import Cancel, CancelReason
@@ -218,7 +218,7 @@ struct _Task[T: Deinitable & Movable](Movable):
     """Heap-allocated task delivered to the worker pthread.
 
     Address fields are stored as ``Int`` rather than typed
-    pointers because ``UnsafePointer[T, MutUntrackedOrigin]``
+    pointers because ``Pointer[T, MutUntrackedOrigin]``
     survives the cross-function-call boundary unreliably on
     Linux x86_64 (the same anomaly that gates the
     ``test_pre_flipped_cancel_skips_work_*`` sub-tests in
@@ -232,7 +232,7 @@ struct _Task[T: Deinitable & Movable](Movable):
 
     var result_addr: Int
     """Address of the heap slot the worker writes the success
-    result into via ``init_pointee_move``."""
+    result into via ``unsafe_write``."""
 
     var err_buf_addr: Int
     """Address of a ``UInt8`` buffer of size ``_ERR_BUF_CAP``
@@ -309,7 +309,7 @@ def _block_thunk[
     # _Task allocation itself.
     task_ptr.unsafe_free()
 
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+    # Pointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
     return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)
 
@@ -395,7 +395,7 @@ def block_in_pool[
     var success_ptr = alloc(Layout[UInt8](count=1)).unsafe_leak()
 
     # Initialise flags to 0. (T's slot is uninitialised; the worker
-    # init_pointee_move's into it on success.)
+    # unsafe_write's into it on success.)
     err_len_ptr[unsafe_offset=0] = 0
     success_ptr[unsafe_offset=0] = UInt8(0)
 

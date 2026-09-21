@@ -33,16 +33,16 @@ Implementation
 
 A ``CancelCell`` heap-allocates a single ``Int`` and owns its
 lifetime. ``Cancel`` carries the cell's address as an ``Int`` and
-rebuilds a fresh ``UnsafePointer[Int, MutUntrackedOrigin]`` per access
+rebuilds a fresh ``Pointer[Int, MutUntrackedOrigin]`` per access
 — the same pattern the multicore ``Scheduler`` uses for the
 ``stopping`` flag, and the only one that survives Mojo's origin /
 aliasing model when passing the cancel handle across function-call
 boundaries. Reads / writes go
-through ``Atomic[DType.int64]`` acquire-load / release-store (the
+through ``Atomic[Int64]`` acquire-load / release-store (the
 cell can be flipped from a peer thread on shutdown), which lowers to
 a plain ``mov`` on x86-64 (TSO) and to ``ldar`` / ``stlr`` on ARM64:
 
-- Storing a typed ``UnsafePointer[Int, MutUntrackedOrigin]`` as a
+- Storing a typed ``Pointer[Int, MutUntrackedOrigin]`` as a
   struct field in ``Cancel`` produces stale reads after the struct is
   passed through a function (verified empirically: reads at a
   numerically-correct address returned the pointer struct size,
@@ -66,7 +66,7 @@ cancel infrastructure.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 
 
 # ── Reason codes ─────────────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ struct CancelCell(Movable):
         var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
-        Atomic[DType.int64].store[ordering=Ordering.RELEASE](p, Int64(reason))
+        Atomic[Int64].store[ordering=Ordering.RELEASE](p, Int64(reason))
 
     def reset(mut self) -> None:
         """Reset the cell to ``NONE`` with a release store."""
@@ -165,7 +165,7 @@ struct CancelCell(Movable):
         var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
-        Atomic[DType.int64].store[ordering=Ordering.RELEASE](
+        Atomic[Int64].store[ordering=Ordering.RELEASE](
             p, Int64(CancelReason.NONE)
         )
 
@@ -206,7 +206,7 @@ struct Cancel(Copyable, ImplicitlyCopyable):
     var _addr: Int
     """Raw address of the cell ``Int`` (or 0 for ``never()``).
     Re-materialised into a fresh
-    ``UnsafePointer[Int, MutUntrackedOrigin]`` on every access so
+    ``Pointer[Int, MutUntrackedOrigin]`` on every access so
     the Mojo optimiser cannot hoist the load out of a polling
     loop. Same idiom the reactor uses for the ``stopping`` flag."""
 
@@ -229,7 +229,7 @@ struct Cancel(Copyable, ImplicitlyCopyable):
         var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
-        return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p) != Int64(
+        return Atomic[Int64].load[ordering=Ordering.ACQUIRE](p) != Int64(
             CancelReason.NONE
         )
 
@@ -240,9 +240,9 @@ struct Cancel(Copyable, ImplicitlyCopyable):
         var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self._addr
         ).unsafe_bitcast[Scalar[DType.int64]]()
-        return Int(Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p))
+        return Int(Atomic[Int64].load[ordering=Ordering.ACQUIRE](p))
 
-    def addr(read self) -> Int:
+    def addr(imm self) -> Int:
         """Return the raw address of the backing cell (0 for the
         ``never()`` sentinel). Used by the deadline watchdog to flip
         this cell from another thread."""

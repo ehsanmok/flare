@@ -42,7 +42,8 @@ freed and any remaining fds are closed.
 
 from std.collections import Dict
 from std.ffi import c_int, external_call
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
+from std.memory.alloc import unsafe_alloc
 from std.sys.info import CompilationTarget
 
 from flare.net._libc import _close
@@ -63,7 +64,7 @@ struct _ClientPoolState(Movable):
 
     Heap-allocated (one per ``ClientPool`` instance). Holds the
     per-origin idle fd deques + the policy knobs. All access goes
-    through the typed UnsafePointer materialised by
+    through the typed Pointer materialised by
     :meth:`ClientPool._state` -- the struct is never moved
     in-place after the initial allocation.
     """
@@ -152,7 +153,7 @@ struct ClientPool(Copyable):
                 before it's evicted on the next acquire(key).
                 0 disables timeout eviction.
         """
-        var p = alloc[_ClientPoolState](1)
+        var p = unsafe_alloc[_ClientPoolState](1)
         p.unsafe_write(
             _ClientPoolState(
                 Dict[String, List[Int]](),
@@ -291,7 +292,7 @@ struct ClientPool(Copyable):
             total += len(entry.value)
         return total
 
-    def total_idle(read self) -> Int:
+    def total_idle(imm self) -> Int:
         """Public mirror of :meth:`_total_idle` for tests + the
         :meth:`HttpClient.idle_count` accessor."""
         return self._total_idle()

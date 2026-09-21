@@ -58,7 +58,7 @@ def _stream_handler(req: Request) raises -> Response:
 def _hex_to_int(s: String) -> Int:
     var acc = 0
     for i in range(s.byte_length()):
-        var c = Int(s.unsafe_ptr()[i])
+        var c = Int(s.unsafe_ptr()[unsafe_offset=i])
         var d = -1
         if c >= 48 and c <= 57:
             d = c - 48
@@ -168,7 +168,7 @@ def test_stream_coalescing() raises:
     var decoded = _dechunk(body)
     assert_equal(decoded.byte_length(), _CHUNKS * _CHUNK_BYTES)
     for i in range(decoded.byte_length()):
-        if decoded.unsafe_ptr()[i] != 97:
+        if decoded.unsafe_ptr()[unsafe_offset=i] != 97:
             raise Error("payload corrupted at byte " + String(i))
 
     client.close()

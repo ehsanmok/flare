@@ -33,7 +33,7 @@ POSIX semantics:
 
 from std.ffi import external_call
 from std.time import sleep
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.sys.info import CompilationTarget
 
 # ``CLOCK_MONOTONIC`` clock id is NOT portable: it is ``1`` on Linux but

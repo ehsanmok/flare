@@ -154,7 +154,7 @@ def _bytes_to_str(data: List[UInt8]) -> String:
     NUL (0x00) is replaced because Mojo strings are NUL-terminated internally
     and embedded NULs can cause panics in string operations.
     """
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for b in data:
         var c = Int(b)
         if c == 0:
@@ -260,7 +260,7 @@ def _str_find(s: String, sub: String) -> Int:
 
 def _lower_str(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
-    var out = String(capacity=s.byte_length())
+    var out = String(capacity_bytes=s.byte_length())
     for i in range(s.byte_length()):
         var c = s.unsafe_ptr()[unsafe_offset=i]
         if c >= 65 and c <= 90:
@@ -409,7 +409,7 @@ def _decode_chunked(
         if line_end < 0:
             break
         # Parse hex chunk size
-        var size_hex = String(capacity=16)
+        var size_hex = String(capacity_bytes=16)
         for i in range(pos, line_end):
             size_hex += chr(Int(raw[i]))
         # Strip extensions (;...)
@@ -430,7 +430,7 @@ def _decode_chunked(
                 if t_end == pos:
                     # Empty line -- end of trailers.
                     break
-                var line = String(capacity=t_end - pos + 1)
+                var line = String(capacity_bytes=t_end - pos + 1)
                 for i in range(pos, t_end):
                     line += chr(Int(raw[i]))
                 var colon = _str_find(line, ":")

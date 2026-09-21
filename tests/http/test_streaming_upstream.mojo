@@ -37,12 +37,12 @@ struct PipeFront(Movable, StreamHandler):
 
     def on_open(mut self, mut conn: StreamConn) raises:
         var fds = stack_allocation[2, c_int]()
-        fds[0] = c_int(-1)
-        fds[1] = c_int(-1)
+        fds[unsafe_offset=0] = c_int(-1)
+        fds[unsafe_offset=1] = c_int(-1)
         if external_call["pipe", c_int](fds) != 0:
             raise Error("pipe() failed")
-        var rfd = Int(fds[0])
-        var wfd = Int(fds[1])
+        var rfd = Int(fds[unsafe_offset=0])
+        var wfd = Int(fds[unsafe_offset=1])
         # Push the whole payload, then close the write end so a later
         # read sees EOF.
         var bytes = self.payload.as_bytes()

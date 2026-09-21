@@ -19,7 +19,8 @@ session; the upgrade path is per-(domain, path) scoping keyed on the
 request URL when a multi-origin jar is needed.
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 
 from ..cookie import Cookie, CookieJar, parse_set_cookie_header
 
@@ -45,7 +46,7 @@ struct CookieStore(Copyable):
     @staticmethod
     def new() -> CookieStore:
         """Allocate a fresh, empty jar."""
-        var p = alloc[_CookieState](1)
+        var p = unsafe_alloc[_CookieState](1)
         p.unsafe_write(_CookieState(CookieJar()))
         return CookieStore(Int(p))
 
@@ -88,7 +89,7 @@ struct CookieStore(Copyable):
             return String("")
         return self._state()[].jar.to_request_header()
 
-    def count(read self) raises -> Int:
+    def count(imm self) raises -> Int:
         """Number of stored cookies (``0`` on the empty handle)."""
         if not self.enabled():
             return 0

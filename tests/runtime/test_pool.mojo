@@ -1,6 +1,6 @@
 """Tests for ``flare.runtime.Pool[T]``.
 
-Closes the user-visible portion of criticism §2.9: ``UnsafePointer``
+Closes the user-visible portion of criticism §2.9: ``Pointer``
 plumbing is confined to ``flare/runtime/`` (``Pool[T]``); the rest
 of the library calls ``Pool[T].alloc_move`` / ``Pool[T].free`` and
 stays at the typed-``Int``-address layer.
@@ -42,7 +42,8 @@ from flare.runtime import Pool
 # calls and assert the destructor ran exactly once.
 
 
-from std.memory import UnsafePointer, alloc as _raw_alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc as _raw_alloc
 
 
 struct _Counted(Deinitable, Movable):

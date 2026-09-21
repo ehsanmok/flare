@@ -66,7 +66,7 @@ def b64_length(data: List[UInt8]) -> Bool:
 def _bytes_to_ascii(data: List[UInt8], start: Int, end: Int) -> String:
     """Convert ``data[start:end]`` to a String, masking non-ASCII bytes as '?'.
     """
-    var s = String(capacity=end - start + 1)
+    var s = String(capacity_bytes=end - start + 1)
     for i in range(start, end):
         var c = Int(data[i])
         if c < 128:

@@ -154,7 +154,7 @@ struct _DemoHandler(FrameHandler, Movable):
 
 
 def _hex(bytes: List[UInt8]) -> String:
-    var s = String(capacity=len(bytes) * 3)
+    var s = String(capacity_bytes=len(bytes) * 3)
     for i in range(len(bytes)):
         var b = Int(bytes[i])
         var hi = b // 16

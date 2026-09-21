@@ -125,7 +125,7 @@ def test_drop_clone_first_keeps_original_alive() raises:
     assert_equal(resp.status, Status.OK)
 
 
-@parameter
+@__parameter
 def _compile_check_router_into_multiworker_serve():
     """Compile-only contract: ``Router`` satisfies
     ``Handler & Copyable`` so the multi-worker overload of

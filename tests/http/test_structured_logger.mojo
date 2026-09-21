@@ -63,7 +63,7 @@ def test_json_escape_carriage_return() raises:
 
 def test_json_escape_low_control_byte() raises:
     """0x07 (BEL) → ``\\u0007`` per RFC 8259 §7."""
-    var s = String(capacity=2)
+    var s = String(capacity_bytes=2)
     s += chr(7)
     assert_equal(_json_escape(s), "\\u0007")
 

@@ -23,7 +23,7 @@ from std.testing import (
     TestSuite,
 )
 from std.sys.info import CompilationTarget
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.ffi import c_int, c_uint, c_size_t, get_errno
 
 from flare.net._libc import (

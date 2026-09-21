@@ -103,7 +103,7 @@ def drain_101(mut stream: TcpStream) raises -> String:
                     and acc[i + 3] == 10
                 ):
                     # Extract status line
-                    var line = String(capacity=32)
+                    var line = String(capacity_bytes=32)
                     for j in range(len(acc)):
                         if acc[j] == 13 or acc[j] == 10:
                             break
@@ -129,7 +129,7 @@ def recv_raw(mut stream: TcpStream, n: Int) raises -> List[UInt8]:
     buf.resize(n, 0)
     var total = 0
     while total < n:
-        var got = stream.read(buf.unsafe_ptr() + total, n - total)
+        var got = stream.read(buf.unsafe_ptr().unsafe_offset(total), n - total)
         if got == 0:
             break
         total += got

@@ -906,7 +906,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         if sent < n_body:
             self._stash_pending(sid, body, sent, end_stream)
 
-    def peer_supports_extended_connect(read self) -> Bool:
+    def peer_supports_extended_connect(imm self) -> Bool:
         """Return ``True`` once the peer has advertised
         ``SETTINGS_ENABLE_CONNECT_PROTOCOL = 1`` (RFC 8441 §3).
 

@@ -47,7 +47,7 @@ def main() raises:
 
     # Decode the keep-alive wire form as ASCII so the example output
     # makes the byte layout obvious.
-    var preview = String(capacity=len(hello.keepalive_bytes) + 1)
+    var preview = String(capacity_bytes=len(hello.keepalive_bytes) + 1)
     for b in hello.keepalive_bytes:
         if b == 13:
             preview += "\\r"

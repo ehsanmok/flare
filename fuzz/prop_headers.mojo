@@ -30,7 +30,7 @@ def _contains_crlf(data: List[UInt8]) -> Bool:
 
 def _bytes_to_str(data: List[UInt8]) -> String:
     """Convert raw bytes to a ``String`` via chr() (Latin-1 safe)."""
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for i in range(len(data)):
         s += chr(Int(data[i]))
     return s^

@@ -1,21 +1,21 @@
 """Typed heap-allocator wrapper.
 
-``Pool[T]`` confines ``UnsafePointer.alloc`` / ``free`` /
-``init_pointee_move`` / ``destroy_pointee`` plumbing to one place
+``Pool[T]`` confines ``Pointer.alloc`` / ``free`` /
+``unsafe_write`` / ``unsafe_deinit_pointee`` plumbing to one place
 so the rest of ``flare/http`` and ``flare/runtime`` can stay
 pointer-free at the source level. This keeps raw pointers out
 of the hot path by giving callers a typed API that owns the
 pointer arithmetic.
 
-Today's callers go through ``UnsafePointer[T].alloc(1)`` directly:
+Today's callers go through ``Pointer[T].alloc(1)`` directly:
 
-    var p = alloc[ConnHandle](1)
+    var p = unsafe_alloc[ConnHandle](1)
     if Int(p) == 0:
         raise Error("alloc failed")
     p.unsafe_write(ConnHandle(stream^))
     var addr = Int(p)
     ...
-    var ptr = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var ptr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[ConnHandle]()
     ptr.unsafe_deinit_pointee()
@@ -38,19 +38,20 @@ public API doesn't need to change for that upgrade.
 
 Why is this in ``flare/runtime/`` rather than each call site?
 
-- Per the criticism: "no ``UnsafePointer`` reaches outside
+- Per the criticism: "no ``Pointer`` reaches outside
   ``flare/runtime/``." Concentrating the unsafe primitives here
   means the rest of the library can stay safe code.
 - ``Pool[T]`` is generic enough to serve other modules
   (``Request._params``, future ``StreamingBody`` chunk pools).
 """
 
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer
+from std.memory.alloc import unsafe_alloc
 from std.sys.info import size_of
 
 
 struct Pool[T: Deinitable & Movable]:
-    """Typed heap allocator over ``UnsafePointer[T].alloc(1)``.
+    """Typed heap allocator over ``Pointer[T].alloc(1)``.
 
     Stateless — every method is ``@staticmethod``. The struct
     exists only to pin the type parameter; instantiating it is
@@ -65,7 +66,7 @@ struct Pool[T: Deinitable & Movable]:
     ZST handling: when ``size_of[T]() == 0``, ``alloc[T](1)`` is
     rejected by Mojo's stdlib ("size must be greater than zero").
     Pool transparently allocates a single placeholder byte via
-    ``alloc[UInt8](1)`` and bitcasts to ``UnsafePointer[T]`` for
+    ``alloc[UInt8](1)`` and bitcasts to ``Pointer[T]`` for
     the move-in / dereference pattern (which is a no-op for a
     zero-byte type). Callers see the same API regardless of
     whether ``T`` is ZST.
@@ -115,7 +116,7 @@ struct Pool[T: Deinitable & Movable]:
         Idempotent on ``addr == 0`` (no-op). Calling ``free``
         twice on the same non-zero ``addr`` is undefined
         behaviour — the caller must own the address exactly
-        once, just as with raw ``UnsafePointer``.
+        once, just as with raw ``Pointer``.
 
         Args:
             addr: Address returned by ``Pool[T].alloc_move``, or
@@ -148,7 +149,7 @@ struct Pool[T: Deinitable & Movable]:
 
         For callers that need to dereference the cell (e.g. read /
         write a field) without allocating their own
-        ``UnsafePointer`` arithmetic. Returned pointer carries
+        ``Pointer`` arithmetic. Returned pointer carries
         ``MutUntrackedOrigin`` so the Mojo optimiser cannot hoist
         loads through it.
 

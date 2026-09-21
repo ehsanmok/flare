@@ -16,7 +16,7 @@ from flare.http.template import Template, TemplateContext
 
 def target(data: List[UInt8]) raises:
     """Compile ``data`` as a template, then render it."""
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for i in range(len(data)):
         s += chr(Int(data[i]))
     try:

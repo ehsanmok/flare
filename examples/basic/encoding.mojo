@@ -66,7 +66,7 @@ def main() raises:
 
     # ── 4. Repeated content compresses well ──────────────────────────────────
     print("── 4. Highly compressible content ──")
-    var rep = String(capacity=1024)
+    var rep = String(capacity_bytes=1024)
     for _ in range(100):
         rep += "AAAA"
     var rep_bytes = rep.as_bytes()

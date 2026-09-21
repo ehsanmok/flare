@@ -48,7 +48,8 @@ def _decode_all(body: List[UInt8]) raises -> List[List[UInt8]]:
     var pos = 0
     while pos + 5 <= len(body):
         var sub = Span[UInt8, _](
-            unsafe_ptr=body.unsafe_ptr() + pos, length=len(body) - pos
+            unsafe_ptr=body.unsafe_ptr().unsafe_offset(pos),
+            length=len(body) - pos,
         )
         var dec = decode_grpc_message(sub)
         if dec.needs_more:

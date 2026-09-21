@@ -35,7 +35,7 @@ comptime AEAD_NONCE_LEN: Int = 12
 
 
 def _do_build_nonce(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     iv: List[UInt8],
     pn: UInt64,
     mut out: List[UInt8],
@@ -49,7 +49,7 @@ def _do_build_nonce(
 
 
 def _do_seal(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     cipher_id: Int,
     key: List[UInt8],
     iv: List[UInt8],
@@ -95,7 +95,7 @@ def _do_seal(
 
 
 def _do_open(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     cipher_id: Int,
     key: List[UInt8],
     iv: List[UInt8],
@@ -188,7 +188,7 @@ def test_build_nonce_xor_low_bytes() raises:
 
 
 def _round_trip(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     cipher_id: Int,
     key_len: Int,
 ) raises:

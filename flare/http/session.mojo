@@ -75,7 +75,7 @@ def new_session_id(n_bytes: Int = 32) raises -> String:
         raw = f.read_bytes(n_bytes)
     if len(raw) < n_bytes:
         raise Error("new_session_id: short read from /dev/urandom")
-    var hex = String(capacity=n_bytes * 2 + 1)
+    var hex = String(capacity_bytes=n_bytes * 2 + 1)
     comptime digits = "0123456789abcdef"
     for i in range(n_bytes):
         var b = Int(raw[i])
@@ -226,7 +226,7 @@ struct StringSessionCodec(Copyable, Defaultable, SessionCodec):
     def decode(data: List[UInt8]) raises -> String:
         if len(data) == 0:
             return ""
-        var out = String(capacity=len(data) + 1)
+        var out = String(capacity_bytes=len(data) + 1)
         for b in data:
             out += chr(Int(b))
         return out^
@@ -348,7 +348,7 @@ struct CookieSessionStore(Copyable, Defaultable, SessionStore):
             keys.append(k.copy())
         try:
             var payload = signed_cookie_decode_keys(cookie_value, keys)
-            var out = String(capacity=len(payload) + 1)
+            var out = String(capacity_bytes=len(payload) + 1)
             for b in payload:
                 out += chr(Int(b))
             return Session(out^)
@@ -438,7 +438,7 @@ struct InMemorySessionStore(Copyable, Defaultable, SessionStore):
             keys.append(k.copy())
         try:
             var payload = signed_cookie_decode_keys(cookie_value, keys)
-            var id_str = String(capacity=len(payload) + 1)
+            var id_str = String(capacity_bytes=len(payload) + 1)
             for b in payload:
                 id_str += chr(Int(b))
             for i in range(len(self._ids)):
@@ -595,7 +595,7 @@ struct BackedSessionStore[B: SessionBackend](Copyable):
             return Optional[String]()
         try:
             var payload = signed_cookie_decode(cv, self._key)
-            var id = String(capacity=len(payload) + 1)
+            var id = String(capacity_bytes=len(payload) + 1)
             for b in payload:
                 id += chr(Int(b))
             return Optional[String](id^)

@@ -115,7 +115,7 @@ from std.ffi import (
     get_errno,
     ErrNo,
 )
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 from std.sys.info import CompilationTarget
 
 

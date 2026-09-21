@@ -263,7 +263,7 @@ def test_on_readable_cancel_dispatches_through_cancel_handler() raises:
         var got_n = _recv(client_fd, buf, c_size_t(8192), c_int(0))
         if Int(got_n) > 0:
             for i in range(Int(got_n)):
-                got.append(buf[i])
+                got.append(buf[unsafe_offset=i])
             client.feed(Span[UInt8, _](got))
             got.clear()
         else:

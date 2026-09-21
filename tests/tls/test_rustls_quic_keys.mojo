@@ -144,7 +144,7 @@ def test_header_encrypt_raises_when_keys_not_installed() raises:
     var session = acceptor.accept(_dcid_4())
     var sample = _zeros(16)
     var first_byte: UInt8 = 0
-    var first_addr = Int(UnsafePointer(to=first_byte))
+    var first_addr = Int(Pointer(to=first_byte))
     var pn = _zeros(4)
     with assert_raises():
         session.header_encrypt(
@@ -162,7 +162,7 @@ def test_header_decrypt_raises_when_keys_not_installed() raises:
     var session = acceptor.accept(_dcid_4())
     var sample = _zeros(16)
     var first_byte: UInt8 = 0
-    var first_addr = Int(UnsafePointer(to=first_byte))
+    var first_addr = Int(Pointer(to=first_byte))
     var pn = _zeros(4)
     with assert_raises():
         session.header_decrypt(
@@ -217,7 +217,7 @@ def test_null_session_header_encrypt_raises() raises:
     var session = RustlsQuicSession(dcid)
     var sample = _zeros(16)
     var first_byte: UInt8 = 0
-    var first_addr = Int(UnsafePointer(to=first_byte))
+    var first_addr = Int(Pointer(to=first_byte))
     var pn = _zeros(4)
     with assert_raises():
         session.header_encrypt(
@@ -234,7 +234,7 @@ def test_null_session_header_decrypt_raises() raises:
     var session = RustlsQuicSession(dcid)
     var sample = _zeros(16)
     var first_byte: UInt8 = 0
-    var first_addr = Int(UnsafePointer(to=first_byte))
+    var first_addr = Int(Pointer(to=first_byte))
     var pn = _zeros(4)
     with assert_raises():
         session.header_decrypt(

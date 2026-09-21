@@ -26,9 +26,9 @@ from std.ffi import (
     get_errno,
     ErrNo,
     OwnedDLHandle,
-    CStringSlice,
+    CStringSpan,
 )
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.sys.info import CompilationTarget, platform_map
 from std.os import getenv
 
@@ -348,7 +348,7 @@ def _read_ip_from_sockaddr(buf: Pointer[UInt8, _]) raises -> String:
         raise Error("inet_ntop failed: errno " + String(get_errno()))
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=ntop_buf.unsafe_bitcast[Int8]()
             )
         )
@@ -386,7 +386,7 @@ def _read_ipv6_from_sockaddr(buf: Pointer[UInt8, _]) raises -> String:
         raise Error("inet_ntop (IPv6) failed: errno " + String(get_errno()))
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=ntop_buf.unsafe_bitcast[Int8]()
             )
         )
@@ -433,7 +433,7 @@ def _strerror(code: c_int) -> String:
         return "unknown error " + String(code)
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=ptr.unsafe_bitcast[Int8]()
             )
         )
@@ -540,8 +540,8 @@ def _getsockname(
 @always_inline
 def _getpeername(
     fd: c_int,
-    addr: UnsafePointer[UInt8, _],
-    addrlen: UnsafePointer[c_uint, _],
+    addr: Pointer[UInt8, _],
+    addrlen: Pointer[c_uint, _],
 ) -> c_int:
     """Wrapper around ``getpeername(2)``."""
     debug_assert[assert_mode="safe"](
@@ -817,7 +817,7 @@ def _getaddrinfo(
     """
     var host_copy = host
     return external_call["getaddrinfo", c_int](
-        host_copy.as_c_string_slice(),
+        host_copy.as_c_string_span(),
         Optional[Pointer[UInt8, MutUntrackedOrigin]](None),
         hints.unsafe_bitcast[NoneType](),
         res_slot.unsafe_bitcast[NoneType](),
@@ -856,7 +856,7 @@ def _gai_strerror(code: c_int) -> String:
         return "unknown getaddrinfo error " + String(code)
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=ptr.unsafe_bitcast[Int8]()
             )
         )
@@ -875,10 +875,10 @@ def _inet_pton(family: c_int, src: String, dst: Pointer[UInt8, _]) -> c_int:
     Returns:
         1 on success, 0 if the input is not valid, -1 on error.
     """
-    # as_c_string_slice() is mutating; copy into a local var first.
+    # as_c_string_span() is mutating; copy into a local var first.
     var src_copy = src
     return external_call["inet_pton", c_int](
-        family, src_copy.as_c_string_slice(), dst.unsafe_bitcast[NoneType]()
+        family, src_copy.as_c_string_span(), dst.unsafe_bitcast[NoneType]()
     )
 
 

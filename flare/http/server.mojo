@@ -25,7 +25,7 @@ from ..runtime._libc_time import libc_nanosleep_ms
 
 from std.collections import Optional
 
-from .handler import Handler, CancelHandler
+from .handler import Handler, CancelHandler, ViewHandler
 from .cancel import Cancel
 from .streaming_server import StreamHandler
 from .intern import intern_method_bytes

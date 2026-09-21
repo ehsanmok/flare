@@ -273,7 +273,7 @@ def test_auto_etag_synthesises_weak_tag() raises:
     var resp = c.serve(req)
     var et = resp.headers.get("etag")
     assert_true(et.byte_length() >= 4)
-    assert_equal(chr(Int(et.unsafe_ptr()[0])), "W")
+    assert_equal(chr(Int(et.unsafe_ptr()[unsafe_offset=0])), "W")
 
 
 def test_fnv1a_etag_is_deterministic() raises:

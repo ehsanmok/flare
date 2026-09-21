@@ -49,11 +49,10 @@ def _encode(input: List[UInt8]) -> List[UInt8]:
     return out^
 
 
-def _bench_scalar_16(mut b: Bencher) capturing:
+def _bench_scalar_16(mut b: Bencher):
     var raw = _alloc_pattern(16)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -62,14 +61,13 @@ def _bench_scalar_16(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_16(mut b: Bencher) capturing:
+def _bench_simd_16(mut b: Bencher):
     var raw = _alloc_pattern(16)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -78,14 +76,13 @@ def _bench_simd_16(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_256(mut b: Bencher) capturing:
+def _bench_scalar_256(mut b: Bencher):
     var raw = _alloc_pattern(256)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -94,14 +91,13 @@ def _bench_scalar_256(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_256(mut b: Bencher) capturing:
+def _bench_simd_256(mut b: Bencher):
     var raw = _alloc_pattern(256)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -110,14 +106,13 @@ def _bench_simd_256(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_4k(mut b: Bencher) capturing:
+def _bench_scalar_4k(mut b: Bencher):
     var raw = _alloc_pattern(4096)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -126,14 +121,13 @@ def _bench_scalar_4k(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_4k(mut b: Bencher) capturing:
+def _bench_simd_4k(mut b: Bencher):
     var raw = _alloc_pattern(4096)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -142,14 +136,13 @@ def _bench_simd_4k(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_64k(mut b: Bencher) capturing:
+def _bench_scalar_64k(mut b: Bencher):
     var raw = _alloc_pattern(65536)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -158,14 +151,13 @@ def _bench_scalar_64k(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_64k(mut b: Bencher) capturing:
+def _bench_simd_64k(mut b: Bencher):
     var raw = _alloc_pattern(65536)
     var enc = _encode(raw)
 
-    @parameter
     def call_fn():
         var out = List[UInt8]()
         try:
@@ -174,7 +166,7 @@ def _bench_simd_64k(mut b: Bencher) capturing:
             pass
         keep(len(out))
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 def main() raises:
@@ -188,28 +180,28 @@ def main() raises:
     m64k.append(ThroughputMeasure(BenchMetric.bytes, 65536))
 
     var bench = Bench(BenchConfig(max_iters=500))
-    bench.bench_function[_bench_scalar_16](
-        BenchId("huffman scalar", "  16 B"), m16
+    bench.bench_function(
+        _bench_scalar_16, BenchId("huffman scalar", "  16 B"), m16
     )
-    bench.bench_function[_bench_simd_16](
-        BenchId("huffman simd  ", "  16 B"), m16
+    bench.bench_function(
+        _bench_simd_16, BenchId("huffman simd  ", "  16 B"), m16
     )
-    bench.bench_function[_bench_scalar_256](
-        BenchId("huffman scalar", " 256 B"), m256
+    bench.bench_function(
+        _bench_scalar_256, BenchId("huffman scalar", " 256 B"), m256
     )
-    bench.bench_function[_bench_simd_256](
-        BenchId("huffman simd  ", " 256 B"), m256
+    bench.bench_function(
+        _bench_simd_256, BenchId("huffman simd  ", " 256 B"), m256
     )
-    bench.bench_function[_bench_scalar_4k](
-        BenchId("huffman scalar", "  4 KB"), m4k
+    bench.bench_function(
+        _bench_scalar_4k, BenchId("huffman scalar", "  4 KB"), m4k
     )
-    bench.bench_function[_bench_simd_4k](
-        BenchId("huffman simd  ", "  4 KB"), m4k
+    bench.bench_function(
+        _bench_simd_4k, BenchId("huffman simd  ", "  4 KB"), m4k
     )
-    bench.bench_function[_bench_scalar_64k](
-        BenchId("huffman scalar", " 64 KB"), m64k
+    bench.bench_function(
+        _bench_scalar_64k, BenchId("huffman scalar", " 64 KB"), m64k
     )
-    bench.bench_function[_bench_simd_64k](
-        BenchId("huffman simd  ", " 64 KB"), m64k
+    bench.bench_function(
+        _bench_simd_64k, BenchId("huffman simd  ", " 64 KB"), m64k
     )
     print(bench)

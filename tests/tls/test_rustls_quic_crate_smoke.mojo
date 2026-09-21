@@ -33,7 +33,7 @@ def _find_rustls_lib() -> String:
     return find_flare_lib("rustls_quic")
 
 
-def _call_abi_version(read lib: OwnedDLHandle) raises -> Int:
+def _call_abi_version(imm lib: OwnedDLHandle) raises -> Int:
     """Wrap the FFI thunk in a `read lib` function so Mojo's ASAP
     destructor doesn't unmap the .so between `get_function` and the
     actual call (the same defensive pattern documented in
@@ -48,7 +48,7 @@ def _call_abi_version(read lib: OwnedDLHandle) raises -> Int:
 
 
 def _call_acceptor_new(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     cert_ptr: Int,
     cert_len: Int,
     key_ptr: Int,

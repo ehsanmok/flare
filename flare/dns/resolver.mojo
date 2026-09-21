@@ -18,7 +18,7 @@ from std.ffi import (
     c_char,
     get_errno,
     external_call,
-    CStringSlice,
+    CStringSpan,
 )
 from std.memory import stack_allocation
 from std.sys.info import CompilationTarget, platform_map
@@ -255,7 +255,7 @@ def _ipv4_from_sockaddr(sa_ptr: Int) -> String:
         return ""
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
             )
         )
@@ -291,7 +291,7 @@ def _ipv6_from_sockaddr(sa_ptr: Int) -> String:
         return ""
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
             )
         )

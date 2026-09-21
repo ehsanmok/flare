@@ -55,7 +55,7 @@ def _hex_nibble(c: UInt8) -> UInt8:
 
 
 def _do_mask(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     cipher_id: Int,
     hp_key: List[UInt8],
     sample: List[UInt8],

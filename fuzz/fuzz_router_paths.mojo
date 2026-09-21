@@ -61,7 +61,7 @@ def _bytes_to_path(data: List[UInt8]) -> String:
     cases (empty segments, mid-path ``:``, stray ``*``, trailing ``/``),
     not hitting legitimate routes.
     """
-    var out = String(capacity=len(data) + 2)
+    var out = String(capacity_bytes=len(data) + 2)
     out += "/"
     for i in range(len(data)):
         var b = data[i]

@@ -71,7 +71,7 @@ def _window_update(sid: Int, inc: Int) -> List[UInt8]:
 
 
 @fieldwise_init
-struct _Tally(Copyable, Movable):
+struct _Tally(Copyable):
     """What one drain contained, by frame type."""
 
     var headers: Int

@@ -17,7 +17,7 @@ from std.builtin.debug_assert import debug_assert
 from std.collections import Dict, Optional
 from std.ffi import c_int, c_size_t, external_call, get_errno, ErrNo
 from std.os import getenv
-from std.memory import UnsafePointer, alloc, memcpy, stack_allocation
+from std.memory import Pointer, alloc, stack_allocation
 from std.sys.info import CompilationTarget
 
 from flare.crypto.hmac import base64url_decode
@@ -577,7 +577,7 @@ def _run_static_loop_impl[
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
@@ -774,7 +774,7 @@ def run_reactor_loop_cancel[
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()
@@ -896,7 +896,7 @@ def run_reactor_loop_view[
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         events.clear()

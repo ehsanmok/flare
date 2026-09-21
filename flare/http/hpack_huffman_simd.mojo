@@ -55,8 +55,6 @@ input; the unit test suite covers RFC 7541 Appendix C.4 fixtures
 plus the three error variants.
 """
 
-from std.collections import InlineArray
-
 from .hpack_huffman import (
     HuffmanError,
     _build_decode_lookup,
@@ -109,17 +107,17 @@ def _build_fast_table() -> List[UInt16]:
     return table^
 
 
-def _make_root_table() -> InlineArray[UInt16, 256]:
+def _make_root_table() -> Array[UInt16, 256]:
     """Comptime-foldable twin of :func:`_build_fast_table`.
 
     Returns the same 256-entry 8-bit fast lookup as an
-    ``InlineArray`` so it can be materialized once into the
+    ``Array`` so it can be materialized once into the
     :data:`_ROOT_TABLE` alias at compile time -- the decoder then
     pays zero per-call table-build cost (the build was previously
     ~256 iterations of canonical-table accessors on every header
     string, which dominated QPACK decode under load).
     """
-    var table = InlineArray[UInt16, 256](fill=UInt16(0))
+    var table = Array[UInt16, 256](fill=UInt16(0))
     for sym in range(256):
         var clen = _hpack_table_length(sym)
         if clen <= 8:

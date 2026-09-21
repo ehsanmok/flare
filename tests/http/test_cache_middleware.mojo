@@ -22,7 +22,8 @@ Cases cover the four paths the middleware decides between:
 """
 
 from std.collections import List
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from std.testing import assert_equal, assert_false, assert_true
 
 from flare.http import (
@@ -64,8 +65,8 @@ struct _CountingHandler(Copyable, Defaultable, Handler):
     """Emit a ``Set-Cookie`` header (for the opacity test)."""
 
     def __init__(out self):
-        var p = alloc[Int](1)
-        p[0] = 0
+        var p = unsafe_alloc[Int](1)
+        p[unsafe_offset=0] = 0
         self.counter_addr = Int(p)
         self.status = 200
         self.cache_control = String("max-age=60")
@@ -74,10 +75,10 @@ struct _CountingHandler(Copyable, Defaultable, Handler):
         self.set_cookie = False
 
     def serve(self, req: Request) raises -> Response:
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self.counter_addr
         )
-        p[0] = p[0] + 1
+        p[unsafe_offset=0] = p[unsafe_offset=0] + 1
         var resp = Response(self.status)
         var body_bytes = List[UInt8]()
         for b in self.body.as_bytes():
@@ -92,10 +93,10 @@ struct _CountingHandler(Copyable, Defaultable, Handler):
         return resp^
 
     def _count(self) -> Int:
-        var p = UnsafePointer[Int, MutUntrackedOrigin](
+        var p = Pointer[Int, MutUntrackedOrigin](
             unsafe_from_address=self.counter_addr
         )
-        return p[0]
+        return p[unsafe_offset=0]
 
 
 def _req(method: String, url: String) -> Request:

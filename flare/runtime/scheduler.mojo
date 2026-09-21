@@ -41,7 +41,7 @@ This module is :trait:`Frontend`-generic: every worker calls
 and the shared stopping flag. The frontend value is moved
 (per-worker copies are made via ``F.copy()``; if that's expensive
 users should wrap their handler's expensive state behind an
-``UnsafePointer`` or a similar shared-reference holder).
+``Pointer`` or a similar shared-reference holder).
 
 The scheduler used to import directly from
 :mod:`flare.http._server_reactor_impl`,
@@ -58,7 +58,7 @@ where their protocol does
 Known limitations:
 
 - The stopping flag is a heap-allocated byte written from the main
-  thread and read from each worker through ``Atomic[DType.uint8]``
+  thread and read from each worker through ``Atomic[UInt8]``
   release-store / acquire-load (``store_stop_flag`` /
   ``load_stop_flag``). This gives the workers a proper happens-before
   edge on shutdown and lowers to a plain ``mov`` on x86-64 (TSO) and
@@ -76,7 +76,7 @@ Known limitations:
 
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, external_call
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 
 from std.os import getenv
 from std.sys.info import CompilationTarget
@@ -150,7 +150,7 @@ struct ShutdownReport(Copyable, ImplicitlyCopyable):
 
 @always_inline
 def _scheduler_free_raw(raw: _OpaquePtr):
-    """Release a heap cell allocated via ``UnsafePointer[...].alloc``.
+    """Release a heap cell allocated via ``Pointer[...].alloc``.
 
     Uses Mojo's native allocator pair (``.alloc`` / ``.free``) rather than
     libc ``malloc``/``free`` via FFI: ``external_call["free", ...]``
@@ -271,7 +271,7 @@ struct Scheduler[F: Frontend](Movable):
 
     def __init__(out self):
         """Build an empty scheduler; use ``Scheduler.start`` instead."""
-        # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+        # Pointer is non-nullable; build C NULL from a runtime 0.
         var null_addr = 0
         self._workers_ptr = Pointer[ThreadHandle, MutUntrackedOrigin](
             unsafe_from_address=null_addr
@@ -398,7 +398,7 @@ struct Scheduler[F: Frontend](Movable):
             use_reuseport_workers = False
 
         var listener_fd: Int = -1
-        # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+        # Pointer is non-nullable; build C NULL from a runtime 0.
         var null_addr = 0
         var listener_ptr = Pointer[TcpListener, MutUntrackedOrigin](
             unsafe_from_address=null_addr
@@ -580,7 +580,7 @@ struct Scheduler[F: Frontend](Movable):
                         pass
                     s._workers_ptr.unsafe_offset(j).unsafe_deinit_pointee()
                 _scheduler_free_raw(s._workers_ptr.unsafe_bitcast[UInt8]())
-                # UnsafePointer is non-nullable; C NULL from a runtime 0.
+                # Pointer is non-nullable; C NULL from a runtime 0.
                 var null_addr = 0
                 s._workers_ptr = Pointer[ThreadHandle, MutUntrackedOrigin](
                     unsafe_from_address=null_addr

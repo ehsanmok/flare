@@ -10,7 +10,7 @@ the reactor loops keep working unchanged.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ── Atomic stop-flag helpers ─────────────────────────────────────────────────
@@ -30,7 +30,7 @@ def store_stop_flag(addr: Int, value: Bool):
     var p = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[Scalar[DType.uint8]]()
-    Atomic[DType.uint8].store[ordering=Ordering.RELEASE](
+    Atomic[UInt8].store[ordering=Ordering.RELEASE](
         p, UInt8(1) if value else UInt8(0)
     )
 
@@ -43,7 +43,7 @@ def load_stop_flag(addr: Int) -> Bool:
     var p = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=addr
     ).unsafe_bitcast[Scalar[DType.uint8]]()
-    return Atomic[DType.uint8].load[ordering=Ordering.ACQUIRE](p) != UInt8(0)
+    return Atomic[UInt8].load[ordering=Ordering.ACQUIRE](p) != UInt8(0)
 
 
 # ── Per-worker stats cell (D6 drain accounting + D9 crash visibility) ─────────
@@ -77,7 +77,7 @@ def store_worker_stat(base_addr: Int, slot: Int, value: Int):
     var p = Pointer[Int, MutUntrackedOrigin](
         unsafe_from_address=base_addr + slot * 8
     ).unsafe_bitcast[Scalar[DType.int64]]()
-    Atomic[DType.int64].store[ordering=Ordering.RELEASE](p, Int64(value))
+    Atomic[Int64].store[ordering=Ordering.RELEASE](p, Int64(value))
 
 
 @always_inline
@@ -88,4 +88,4 @@ def load_worker_stat(base_addr: Int, slot: Int) -> Int:
     var p = Pointer[Int, MutUntrackedOrigin](
         unsafe_from_address=base_addr + slot * 8
     ).unsafe_bitcast[Scalar[DType.int64]]()
-    return Int(Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](p))
+    return Int(Atomic[Int64].load[ordering=Ordering.ACQUIRE](p))

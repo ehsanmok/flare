@@ -47,7 +47,7 @@ how long the slower leg holds up the return; the upgrade path is
 ships an ``Atomic`` type.
 """
 
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 
 from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 

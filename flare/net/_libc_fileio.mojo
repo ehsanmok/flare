@@ -36,7 +36,7 @@ from std.ffi import (
     c_ssize_t,
     OwnedDLHandle,
 )
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from ..utils.dylib import find_flare_lib, dl_sym
 

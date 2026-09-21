@@ -8,8 +8,8 @@ on both IPv4 and IPv6; formatting uses ``inet_ntop(3)``.
 """
 
 from std.format import Writable, Writer
-from std.memory import UnsafePointer, stack_allocation
-from std.ffi import external_call, c_int, c_uint, c_char, CStringSlice
+from std.memory import Pointer, stack_allocation
+from std.ffi import external_call, c_int, c_uint, c_char, CStringSpan
 
 from ._libc import AF_INET, AF_INET6, _inet_pton
 
@@ -111,7 +111,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
             return IpAddr(
                 String(
                     StringSlice(
-                        unsafe_from_utf8=CStringSlice(
+                        unsafe_from_utf8=CStringSpan(
                             unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
                         )
                     )
@@ -138,7 +138,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
             return IpAddr(
                 String(
                     StringSlice(
-                        unsafe_from_utf8=CStringSlice(
+                        unsafe_from_utf8=CStringSpan(
                             unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
                         )
                     )

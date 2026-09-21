@@ -15,7 +15,7 @@ guard themselves with a ``comptime if not is_linux(): raise``.
 from std.collections import Dict
 from std.ffi import c_int
 from std.os import getenv
-from std.memory import Layout, UnsafePointer, alloc, stack_allocation
+from std.memory import Layout, Pointer, alloc, stack_allocation
 from std.sys.info import CompilationTarget
 
 from flare.http.handler import Handler
@@ -195,7 +195,7 @@ def run_uring_reactor_loop_static(
     ureactor.arm_listener_multishot(listener_fd, UInt64(0))
 
     var completions = List[UringCompletion]()
-    var stopping_addr = Int(UnsafePointer[Bool, _](to=stopping))
+    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
     while not load_stop_flag(stopping_addr):
         completions.clear()
         try:

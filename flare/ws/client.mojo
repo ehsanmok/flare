@@ -186,7 +186,7 @@ def _read_line_tls(
     Raises:
         NetworkError: On I/O error.
     """
-    var line = String(capacity=256)
+    var line = String(capacity_bytes=256)
     var b_buf = List[UInt8](capacity=1)
     b_buf.append(UInt8(0))
     while True:
@@ -217,7 +217,7 @@ def _read_line_tcp(
     Raises:
         NetworkError: On I/O error.
     """
-    var line = String(capacity=256)
+    var line = String(capacity_bytes=256)
     var b_buf = List[UInt8](capacity=1)
     b_buf.append(UInt8(0))
     while True:
@@ -255,7 +255,7 @@ def _str_find_local(s: String, sub: String) -> Int:
 
 def _lower_local(s: String) -> String:
     """Return ASCII-lowercase copy of ``s``."""
-    var out = String(capacity=s.byte_length())
+    var out = String(capacity_bytes=s.byte_length())
     for i in range(s.byte_length()):
         var c = s.unsafe_ptr()[unsafe_offset=i]
         if c >= 65 and c <= 90:

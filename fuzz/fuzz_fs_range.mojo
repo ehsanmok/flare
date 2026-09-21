@@ -24,7 +24,7 @@ def target(data: List[UInt8]) raises:
     plausible ``(file_size, start, end)`` triple in its first few
     bytes.
     """
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for i in range(len(data)):
         s += chr(Int(data[i]))
 

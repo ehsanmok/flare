@@ -65,7 +65,7 @@ def _printable_ascii(data: List[UInt8]) -> String:
     var n = len(data)
     if n == 0:
         return ""
-    var out = String(capacity=n)
+    var out = String(capacity_bytes=n)
     for i in range(n):
         var b = data[i]
         # Restrict to ASCII letters, digits, comma, equals, dash,

@@ -54,7 +54,7 @@ trait GrpcInterceptor(Copyable):
 
 
 struct Intercepted[
-    I: Copyable & GrpcInterceptor & Deinitable,
+    I: GrpcInterceptor & Deinitable,
     H: Copyable & GrpcUnary & Deinitable,
 ](Copyable, GrpcUnary):
     """Wrap ``handler`` with ``interceptor`` to form a new

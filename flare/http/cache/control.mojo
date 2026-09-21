@@ -86,7 +86,7 @@ def _lower(s: String) -> String:
     var out = String()
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
             out += chr(Int(c) + 32)
         else:
@@ -101,23 +101,23 @@ def _trim(s: String) -> String:
     var p = s.unsafe_ptr()
     var lo = 0
     while lo < n and (
-        p[lo] == UInt8(ord(" "))
-        or p[lo] == UInt8(ord("\t"))
-        or p[lo] == UInt8(ord("\r"))
-        or p[lo] == UInt8(ord("\n"))
+        p[unsafe_offset=lo] == UInt8(ord(" "))
+        or p[unsafe_offset=lo] == UInt8(ord("\t"))
+        or p[unsafe_offset=lo] == UInt8(ord("\r"))
+        or p[unsafe_offset=lo] == UInt8(ord("\n"))
     ):
         lo += 1
     var hi = n
     while hi > lo and (
-        p[hi - 1] == UInt8(ord(" "))
-        or p[hi - 1] == UInt8(ord("\t"))
-        or p[hi - 1] == UInt8(ord("\r"))
-        or p[hi - 1] == UInt8(ord("\n"))
+        p[unsafe_offset=hi - 1] == UInt8(ord(" "))
+        or p[unsafe_offset=hi - 1] == UInt8(ord("\t"))
+        or p[unsafe_offset=hi - 1] == UInt8(ord("\r"))
+        or p[unsafe_offset=hi - 1] == UInt8(ord("\n"))
     ):
         hi -= 1
     var out = String()
     for i in range(lo, hi):
-        out += chr(Int(p[i]))
+        out += chr(Int(p[unsafe_offset=i]))
     return out^
 
 
@@ -128,7 +128,7 @@ def _parse_int(s: String) -> Optional[Int]:
     var p = s.unsafe_ptr()
     var acc = 0
     for i in range(n):
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if c < UInt8(ord("0")) or c > UInt8(ord("9")):
             return Optional[Int]()
         acc = acc * 10 + (Int(c) - ord("0"))
@@ -146,20 +146,22 @@ def _split_directives(value: String) -> List[String]:
     var start = 0
     var in_quotes = False
     while i < n:
-        var c = p[i]
-        if c == UInt8(ord('"')) and (i == 0 or p[i - 1] != UInt8(ord("\\"))):
+        var c = p[unsafe_offset=i]
+        if c == UInt8(ord('"')) and (
+            i == 0 or p[unsafe_offset=i - 1] != UInt8(ord("\\"))
+        ):
             in_quotes = not in_quotes
         elif c == UInt8(ord(",")) and not in_quotes:
             var piece = String()
             for j in range(start, i):
-                piece += chr(Int(p[j]))
+                piece += chr(Int(p[unsafe_offset=j]))
             out.append(_trim(piece))
             start = i + 1
         i += 1
     if start < n:
         var piece = String()
         for j in range(start, n):
-            piece += chr(Int(p[j]))
+            piece += chr(Int(p[unsafe_offset=j]))
         out.append(_trim(piece))
     return out^
 
@@ -185,7 +187,7 @@ def parse_cache_control(value: String) -> CacheControl:
         var p = directive.unsafe_ptr()
         var n = directive.byte_length()
         for j in range(n):
-            if p[j] == UInt8(ord("=")):
+            if p[unsafe_offset=j] == UInt8(ord("=")):
                 eq_at = j
                 break
         var name: String
@@ -196,21 +198,21 @@ def parse_cache_control(value: String) -> CacheControl:
         else:
             var k = String()
             for j in range(eq_at):
-                k += chr(Int(p[j]))
+                k += chr(Int(p[unsafe_offset=j]))
             name = _lower(_trim(k))
             var v = String()
             for j in range(eq_at + 1, n):
-                v += chr(Int(p[j]))
+                v += chr(Int(p[unsafe_offset=j]))
             val = _trim(v)
             # Strip surrounding quotes on the value, if any.
             if val.byte_length() >= 2:
                 var vp = val.unsafe_ptr()
-                if vp[0] == UInt8(ord('"')) and vp[
-                    val.byte_length() - 1
+                if vp[unsafe_offset=0] == UInt8(ord('"')) and vp[
+                    unsafe_offset=val.byte_length() - 1
                 ] == UInt8(ord('"')):
                     var unq = String()
                     for j in range(1, val.byte_length() - 1):
-                        unq += chr(Int(vp[j]))
+                        unq += chr(Int(vp[unsafe_offset=j]))
                     val = unq^
         if name == String("no-cache"):
             cc.no_cache = True

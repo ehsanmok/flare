@@ -45,7 +45,7 @@ The frontend is :class:`Copyable` (which implies :class:`Movable`) so
 the scheduler can ``H.copy()`` it once per worker before spawning;
 each worker then owns its own copy. Frontend implementations that
 want to share expensive state across workers should put that
-state behind an :class:`UnsafePointer` or a similar shared-
+state behind an :class:`Pointer` or a similar shared-
 reference holder so the per-worker copy stays cheap.
 """
 
@@ -62,7 +62,7 @@ trait Frontend(Copyable, Deinitable):
 
     Frontends are copied per worker via the trait's
     :class:`Copyable` super-trait; implementations should keep
-    expensive shared state behind an :class:`UnsafePointer` or a
+    expensive shared state behind an :class:`Pointer` or a
     similar shared-reference holder so the per-worker copy is
     cheap.
     """

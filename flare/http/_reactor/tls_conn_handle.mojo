@@ -37,7 +37,7 @@ write their bytes through :meth:`send` (ciphertext) instead of ``_send``.
 from std.builtin.debug_assert import debug_assert
 from std.ffi import c_int
 from std.collections import List
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from flare.net import SocketAddr
 from flare.runtime import Pool

@@ -19,7 +19,7 @@ def target(data: List[UInt8]) raises:
     """
     # Convert bytes to String — invalid UTF-8 will produce replacement chars,
     # which is fine: we want to see how the parser handles them.
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for i in range(len(data)):
         s += chr(Int(data[i]))
     _ = Url.parse(s)

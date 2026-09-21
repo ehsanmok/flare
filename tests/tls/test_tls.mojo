@@ -19,8 +19,8 @@ Test certificates (tests/certs/):
 """
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
-from std.ffi import OwnedDLHandle, c_int, CStringSlice
-from std.memory import UnsafePointer, stack_allocation
+from std.ffi import OwnedDLHandle, c_int, CStringSpan
+from std.memory import Pointer, stack_allocation
 
 
 from flare.utils import (
@@ -61,7 +61,7 @@ def _tls_err(lib: OwnedDLHandle) raises -> String:
     var p = fn_e()
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=p.unsafe_bitcast[Int8]()
             )
         )

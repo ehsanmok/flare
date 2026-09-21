@@ -36,7 +36,7 @@ References:
 """
 
 from std.collections import List, Optional
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from ..http.url import Url
 from ..http2.client import Http2ClientConnection

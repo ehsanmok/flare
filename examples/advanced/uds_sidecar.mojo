@@ -48,7 +48,7 @@ def main() raises:
     var rbuf = List[UInt8](capacity=16)
     rbuf.resize(16, 0)
     var n = server.read(rbuf.unsafe_ptr(), 16)
-    var got = String(capacity=n + 1)
+    var got = String(capacity_bytes=n + 1)
     for i in range(n):
         got += chr(Int(rbuf[i]))
     print("[example 38] server received:", got)
@@ -60,7 +60,7 @@ def main() raises:
     var rbuf2 = List[UInt8](capacity=16)
     rbuf2.resize(16, 0)
     var n2 = client.read(rbuf2.unsafe_ptr(), 16)
-    var got2 = String(capacity=n2 + 1)
+    var got2 = String(capacity_bytes=n2 + 1)
     for i in range(n2):
         got2 += chr(Int(rbuf2[i]))
     print("[example 38] client received:", got2)

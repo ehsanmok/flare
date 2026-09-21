@@ -22,7 +22,8 @@ Run:
     pixi run fuzz-io-uring-sqe
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 
 from mozz import fuzz, FuzzConfig
 
@@ -194,12 +195,10 @@ def _fuzz_cqe_decode(data: List[UInt8]) raises:
     """
     if len(data) < IO_URING_CQE_BYTES:
         return
-    var raw = alloc[UInt8](IO_URING_CQE_BYTES)
-    var p = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(raw)
-    )
+    var raw = unsafe_alloc[UInt8](IO_URING_CQE_BYTES)
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=Int(raw))
     for i in range(IO_URING_CQE_BYTES):
-        (p + i).unsafe_write(data[i])
+        p.unsafe_offset(i).unsafe_write(data[i])
     var cqe = decode_cqe_at(p)
     # Exercise every accessor so the optimiser can't elide the
     # decode -- the fuzzer wants the full code path covered.
@@ -210,7 +209,7 @@ def _fuzz_cqe_decode(data: List[UInt8]) raises:
     _ = cqe.errno()
     _ = cqe.has_more()
     _ = cqe.buffer_id()
-    p.free()
+    p.unsafe_free()
 
 
 def target(data: List[UInt8]) raises:

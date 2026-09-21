@@ -6,7 +6,7 @@ returned ``Event`` to the per-connection state machine.
 
 Design:
 - **One struct, comptime-dispatched backend.** No traits, no dynamic
-  dispatch, no generic parameter. ``@parameter if
+  dispatch, no generic parameter. ``comptime if
   CompilationTarget.is_linux()`` picks between epoll and kqueue at compile
   time. The caller writes backend-agnostic code.
 - **Level-triggered semantics on both platforms** for Stage 1. Edge-triggered
@@ -30,7 +30,7 @@ Not handled here (by design):
 
 from std.collections import Dict
 from std.ffi import c_int, c_uint, c_size_t, c_ssize_t, get_errno
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.sys.info import CompilationTarget
 
 from flare.net._libc import (
@@ -551,7 +551,7 @@ struct Reactor(Movable):
                     ts,
                 )
             else:
-                # UnsafePointer is non-nullable; C NULL from a runtime 0.
+                # Pointer is non-nullable; C NULL from a runtime 0.
                 var null_addr = 0
                 var null_ts = Pointer[UInt8, MutUntrackedOrigin](
                     unsafe_from_address=null_addr

@@ -374,7 +374,7 @@ def test_tls_server_not_implemented_default_message() raises:
 # byte-slice (the idiom Url.parse and the config builders use) is not
 # NUL-terminated under unsafe_ptr, so the C-side file open reads past it.
 # These drive the loaders with slice-derived paths and assert the load
-# still succeeds, guarding the as_c_string_slice hardening in
+# still succeeds, guarding the as_c_string_span hardening in
 # flare/tls/_server_ffi.mojo and flare/tls/stream.mojo.
 
 

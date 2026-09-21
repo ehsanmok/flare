@@ -112,7 +112,7 @@ def test_method_intern_round_trip_byte_identical() raises:
     var op = out.unsafe_ptr()
     var sp = src.unsafe_ptr()
     for i in range(out.byte_length()):
-        assert_equal(Int(op[i]), Int(sp[i]))
+        assert_equal(Int(op[unsafe_offset=i]), Int(sp[unsafe_offset=i]))
 
 
 def test_value_intern_common_content_types() raises:

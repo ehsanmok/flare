@@ -338,7 +338,7 @@ struct CookieJar(Copyable, Defaultable):
         Returns:
             ``"name1=value1; name2=value2; ..."`` format string.
         """
-        var out = String(capacity=256)
+        var out = String(capacity_bytes=256)
         for i in range(len(self._cookies)):
             if i > 0:
                 out += "; "

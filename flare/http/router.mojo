@@ -244,7 +244,7 @@ def _struct_serve_thunk[
     dispatch.
 
     Routes through ``Pool[H].get_ptr`` rather than reconstructing
-    the ``UnsafePointer`` arithmetic in-line — keeps the unsafe
+    the ``Pointer`` arithmetic in-line — keeps the unsafe
     pointer plumbing confined to ``flare/runtime/``.
     """
     var ptr = Pool[H].get_ptr(addr)

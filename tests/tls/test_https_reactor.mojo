@@ -56,12 +56,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
         raise Error("socket() failed: " + _strerror(get_errno().value))
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, port, ip)
     if _connect(c, sa, c_int(16).cast[DType.uint32]()) < c_int(0):
         var msg = _strerror(get_errno().value)
@@ -135,7 +135,7 @@ def _read_until_close(mut stream: TlsStream) -> String:
         if n <= 0:
             break
         for i in range(n):
-            acc.append(tmp[i])
+            acc.append(tmp[unsafe_offset=i])
     return String(unsafe_from_utf8=Span[UInt8, _](acc))
 
 
@@ -426,15 +426,15 @@ def test_https_single_worker_explicit_never_answers_cleartext() raises:
         )
         var out = stack_allocation[128, UInt8]()
         for i in range(len(req)):
-            (out + i).unsafe_write(req[i])
+            (out.unsafe_offset(i)).unsafe_write(req[i])
         _ = _send(c, out, c_size_t(len(req)), c_int(MSG_NOSIGNAL))
 
         var buf = stack_allocation[64, UInt8]()
         n = Int(_recv(c, buf, c_size_t(64), c_int(0)))
         if n > 0:
-            first = buf[0]
+            first = buf[unsafe_offset=0]
             for i in range(n):
-                reply.append(buf[i])
+                reply.append(buf[unsafe_offset=i])
         _ = _close(c)
     except:
         pass
@@ -663,7 +663,7 @@ def test_stalled_handshake_does_not_block_other_clients() raises:
         # Raw TCP: one byte of a TLS record header, then silence.
         var stalled = _connect_loopback(port)
         var one = stack_allocation[1, UInt8]()
-        one[0] = UInt8(0x16)  # TLS handshake content type
+        one[unsafe_offset=0] = UInt8(0x16)  # TLS handshake content type
         _ = _send(stalled, one, c_size_t(1), c_int(MSG_NOSIGNAL))
 
         # A real client on the same server still completes.

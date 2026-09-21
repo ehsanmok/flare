@@ -71,7 +71,7 @@ from ..http3.client import Http3ClientConnection
 from ..tls.rustls_quic import RustlsQuicConnector
 from ..qpack import QpackHeader
 from std.os import getenv
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from .client_pool import ClientPool
 from ._client.parse import (
     _decode_chunked,
@@ -602,25 +602,25 @@ struct HttpClient(Movable):
         )
         return self^
 
-    def idle_count(read self) -> Int:
+    def idle_count(imm self) -> Int:
         """Return the total number of connections currently sitting idle
         across both keep-alive pools (cleartext HTTP/1.1 fds + HTTPS
         ``TlsStream`` connections). Returns 0 when pooling is disabled.
         """
         return self._pool.total_idle() + self._tls_pool.idle_count()
 
-    def tls_idle_count(read self) -> Int:
+    def tls_idle_count(imm self) -> Int:
         """Return the number of idle HTTPS (TLS HTTP/1.1) connections in
         the pool. Returns 0 when pooling is disabled."""
         return self._tls_pool.idle_count()
 
-    def quic_dials(read self) -> Int:
+    def quic_dials(imm self) -> Int:
         """Number of fresh HTTP/3 (QUIC) connections this client has
         had to dial (pool misses). Stays at 1 across repeated
         same-origin h3 requests when reuse is working."""
         return self._quic_pool.dials()
 
-    def quic_idle_count(read self) -> Int:
+    def quic_idle_count(imm self) -> Int:
         """Number of established HTTP/3 connections currently idle in
         the QUIC pool."""
         return self._quic_pool.idle_count()
@@ -671,7 +671,7 @@ struct HttpClient(Movable):
         self._h2c_upgrade = upgrade
         return self^
 
-    def pool_stats(read self) -> PoolStats:
+    def pool_stats(imm self) -> PoolStats:
         """Idle-connection counts and dial totals across all three pools.
 
         Added in v0.11. Replaces reading ``idle_count`` /
@@ -861,7 +861,7 @@ struct HttpClient(Movable):
         self._cookies = CookieStore.new()
         return self^
 
-    def cookie_header(read self) raises -> String:
+    def cookie_header(imm self) raises -> String:
         """The ``Cookie`` request header value the jar would send, or
         ``""`` when cookies are disabled / the jar is empty. Useful for
         tests and introspection."""

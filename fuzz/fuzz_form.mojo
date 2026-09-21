@@ -22,7 +22,7 @@ def target(data: List[UInt8]) raises:
     Also exercises ``urlencode``/``urldecode`` round-trip on the same
     bytes (well-formed string roundtrip must be a no-op).
     """
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for i in range(len(data)):
         s += chr(Int(data[i]))
 

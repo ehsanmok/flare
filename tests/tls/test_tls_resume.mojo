@@ -35,7 +35,7 @@ Cases:
 """
 
 from std.ffi import OwnedDLHandle, c_int
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from flare.net.socket import _find_flare_lib

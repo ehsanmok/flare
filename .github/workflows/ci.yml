@@ -113,7 +113,7 @@ jobs:
       # ``github.run_id`` suffix makes each run save a superset while
       # ``restore-keys`` picks up the most recent prior cache.
       - name: Cache Mojo compile cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.mojo-cache
           key: mojo-cache-${{ matrix.os }}-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}
@@ -231,7 +231,7 @@ jobs:
       # ``github.run_id`` suffix makes each run save a superset while
       # ``restore-keys`` picks up the most recent prior cache.
       - name: Cache Mojo compile cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.mojo-cache
           key: mojo-cache-asan-ubuntu-latest-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}
@@ -320,7 +320,7 @@ jobs:
         run: pixi run conformance
       - name: Upload conformance reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-reports
           path: |

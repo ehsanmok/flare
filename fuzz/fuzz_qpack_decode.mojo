@@ -50,7 +50,7 @@ def target(data: List[UInt8]) raises:
         return
     var span = Span[UInt8, _](data)
 
-    var headers_opt: Optional[List[QpackHeader]] = None
+    var headers_opt: Optional[List[QpackHeader]]
     try:
         var headers = decode_field_section(span)
         headers_opt = Optional[List[QpackHeader]](headers^)

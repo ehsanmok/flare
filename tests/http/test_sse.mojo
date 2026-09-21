@@ -50,7 +50,7 @@ from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
 
 def _bytes_to_str(b: List[UInt8]) -> String:
-    var out = String(capacity=len(b) + 1)
+    var out = String(capacity_bytes=len(b) + 1)
     for i in range(len(b)):
         out += chr(Int(b[i]))
     return out^

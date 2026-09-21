@@ -52,7 +52,7 @@ def _assert(cond: Bool, msg: String) raises:
 def target(data: List[UInt8]) raises:
     var span = Span[UInt8, _](data)
 
-    var tp_opt: Optional[TransportParameters] = None
+    var tp_opt: Optional[TransportParameters]
     try:
         var tp = decode_transport_parameters(span)
         tp_opt = Optional[TransportParameters](tp^)

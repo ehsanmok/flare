@@ -73,14 +73,14 @@ On every supported target (64-bit Linux + macOS), the C
         size_t iov_len;   // 8 bytes
     };
 
-This module models the array as a flat ``UnsafePointer[UInt8]``
+This module models the array as a flat ``Pointer[UInt8]``
 buffer of ``n * 16`` bytes, with ``set(i, ptr, len)`` writing
 the two 8-byte words at the right offset. Reading the buffer
 back via ``writev(2)`` gets the layout the kernel expects.
 """
 
 from std.ffi import c_int, c_size_t, get_errno, ErrNo
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 
 from ..net._libc import _writev, _strerror
 from ..net.error import NetworkError, BrokenPipe, Timeout, ConnectionReset
@@ -203,7 +203,7 @@ struct IoVecBuf(Movable):
         )
         var off = i * _IOVEC_BYTES
         # Write the 8-byte iov_base pointer as a little-endian
-        # Int. Mojo's UnsafePointer assignment + init_pointee_copy
+        # Int. Mojo's Pointer assignment + unsafe_write(copy=...)
         # writes one byte at a time, so we manually pack.
         var p = self._buf.unsafe_offset(off)
         var ptr_u64 = UInt64(ptr)

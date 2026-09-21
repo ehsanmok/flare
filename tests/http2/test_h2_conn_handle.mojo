@@ -17,7 +17,7 @@ from std.collections import Optional
 from std.ffi import c_int, c_size_t, c_uint
 
 from flare.utils import usleep
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 from std.testing import assert_equal, assert_true
 
 from flare.http import Request, Response, ServerConfig, ok, stream_response

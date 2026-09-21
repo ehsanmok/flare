@@ -244,7 +244,7 @@ struct WsOverH2Stream(Movable):
         self.read_buffer = rest^
         return got^
 
-    def is_closed(read self) -> Bool:
+    def is_closed(imm self) -> Bool:
         """Return ``True`` once a CLOSE frame has been sent or
         received on this stream. Used by the caller to stop
         pumping after the close handshake completes."""

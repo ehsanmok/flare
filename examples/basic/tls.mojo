@@ -59,7 +59,7 @@ def main() raises:
         var buf = zero_buf(256)
         var n = tls.read(buf.unsafe_ptr(), 256)
         if n > 0:
-            var line = String(capacity=32)
+            var line = String(capacity_bytes=32)
             for i in range(n):
                 var c = buf[i]
                 if c == 13 or c == 10:

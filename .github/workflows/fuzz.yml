@@ -58,7 +58,7 @@ jobs:
       # run so each night writes a fresh entry; restore-keys walks back
       # to the most recent one for this OS.
       - name: Restore fuzz corpus
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: fuzz/corpus
           key: fuzz-corpus-${{ matrix.os }}-${{ github.run_id }}
@@ -75,7 +75,7 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashes-${{ matrix.os }}-${{ github.run_id }}
           path: .mozz_crashes/

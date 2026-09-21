@@ -31,7 +31,7 @@ name); the public surface lives in :class:`UnixListener` /
 """
 
 from std.ffi import c_char, c_int, c_uint, external_call, get_errno, ErrNo
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.sys.info import CompilationTarget
 
 
@@ -53,7 +53,7 @@ are rejected before any libc call."""
 
 
 def fill_sockaddr_un(
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     path: String,
 ) raises -> c_uint where type_of(buf).mut:
     """Populate a :data:`SOCKADDR_UN_SIZE`-byte buffer with a
@@ -82,31 +82,33 @@ def fill_sockaddr_un(
     # bind to a shorter prefix path silently).
     var pp = path.unsafe_ptr()
     for i in range(path_bytes):
-        if pp[i] == 0:
+        if pp[unsafe_offset=i] == 0:
             raise Error("sockaddr_un: embedded NUL in path")
 
     var path_offset: Int
     comptime if CompilationTarget.is_macos():
         # BSD: [0]=sun_len, [1]=sun_family, [2..]=sun_path
-        (buf + 0).unsafe_write(UInt8(Int(SOCKADDR_UN_SIZE)))  # sun_len
-        (buf + 1).unsafe_write(UInt8(Int(AF_UNIX)))  # sun_family
+        buf.unsafe_offset(0).unsafe_write(
+            UInt8(Int(SOCKADDR_UN_SIZE))
+        )  # sun_len
+        buf.unsafe_offset(1).unsafe_write(UInt8(Int(AF_UNIX)))  # sun_family
         path_offset = 2
     else:
         # Linux: sa_family_t is uint16 little-endian (AF_UNIX=1)
-        (buf + 0).unsafe_write(UInt8(1))
-        (buf + 1).unsafe_write(UInt8(0))
+        buf.unsafe_offset(0).unsafe_write(UInt8(1))
+        buf.unsafe_offset(1).unsafe_write(UInt8(0))
         path_offset = 2
 
     for i in range(path_bytes):
-        (buf + path_offset + i).unsafe_write(pp[i])
+        buf.unsafe_offset(path_offset + i).unsafe_write(pp[unsafe_offset=i])
     # NUL terminator
-    (buf + path_offset + path_bytes).unsafe_write(UInt8(0))
+    buf.unsafe_offset(path_offset + path_bytes).unsafe_write(UInt8(0))
 
     return c_uint(path_offset + path_bytes + 1)
 
 
 def read_path_from_sockaddr_un(
-    buf: UnsafePointer[UInt8, _],
+    buf: Pointer[UInt8, _],
     used_len: c_uint,
 ) raises -> String:
     """Decode a ``sockaddr_un`` buffer back into a Python-style
@@ -123,9 +125,9 @@ def read_path_from_sockaddr_un(
         return String("")
     if max_len > SUN_PATH_MAX:
         max_len = SUN_PATH_MAX
-    var out = String(capacity=max_len + 1)
+    var out = String(capacity_bytes=max_len + 1)
     for i in range(max_len):
-        var b = (buf + path_offset + i).load()
+        var b = buf.unsafe_offset(path_offset + i).unsafe_load()
         if b == 0:
             break
         out += chr(Int(b))
@@ -136,6 +138,6 @@ def unlink_path(var path: String) -> c_int:
     """Wrapper around ``unlink(2)``. Returns 0 on success, -1 on
     failure (errno set; check ``get_errno()``).
 
-    ``as_c_string_slice`` is mutating, so we ask for an owning
+    ``as_c_string_span`` is mutating, so we ask for an owning
     ``var`` to avoid silently mutating the caller's string."""
-    return external_call["unlink", c_int](path.as_c_string_slice())
+    return external_call["unlink", c_int](path.as_c_string_span())

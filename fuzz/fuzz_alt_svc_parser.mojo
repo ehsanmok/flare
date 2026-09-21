@@ -35,7 +35,7 @@ def _printable_ascii(data: List[UInt8]) -> String:
     var n = len(data)
     if n == 0:
         return ""
-    var out = String(capacity=n)
+    var out = String(capacity_bytes=n)
     for i in range(n):
         var c = Int(data[i]) % 64 + 32  # printable [32, 95]
         out += chr(c)

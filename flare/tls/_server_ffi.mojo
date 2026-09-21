@@ -39,7 +39,7 @@ struct-field handles when the JIT can prove no further field reads
 follow within a method.
 
 The discipline this file follows: every FFI call goes through a
-``_do_*(read lib: OwnedDLHandle, ...)`` borrow helper that does
+``_do_*(imm lib: OwnedDLHandle, ...)`` borrow helper that does
 both ``get_function`` and the invocation inside the borrow. Public
 methods open the handle (or read it from ``self._lib``) and
 delegate. Same idiom as ``flare.http.encoding._do_compress`` and
@@ -47,7 +47,7 @@ delegate. Same idiom as ``flare.http.encoding._do_compress`` and
 """
 
 from std.ffi import c_int, OwnedDLHandle
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from ..net import _find_flare_lib
 from ..utils.dylib import dl_sym
@@ -76,9 +76,9 @@ def _do_ssl_ctx_new_server(
     var f = dl_sym[def(Int, Int) thin abi("C") -> Int](
         lib, "flare_ssl_ctx_new_server"
     )
-    var cert_c = cert_path.as_c_string_slice()
-    var key_c = key_path.as_c_string_slice()
-    var addr = f(Int(cert_c.unsafe_ptr()), Int(key_c.unsafe_ptr()))
+    var cert_c = cert_path.as_c_string_span()
+    var key_c = key_path.as_c_string_span()
+    var addr = f(Int(cert_c.ptr()), Int(key_c.ptr()))
     # The C-string pointers escape as raw Int, so the compiler does not
     # see that the owned path buffers must stay live across the call.
     # as_c_string_slice may reallocate (a slice-derived, exact-length
@@ -107,9 +107,9 @@ def _do_ssl_ctx_reload(
     var f = dl_sym[def(Int, Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_reload"
     )
-    var cert_c = cert_path.as_c_string_slice()
-    var key_c = key_path.as_c_string_slice()
-    var rc = Int(f(addr, Int(cert_c.unsafe_ptr()), Int(key_c.unsafe_ptr())))
+    var cert_c = cert_path.as_c_string_span()
+    var key_c = key_path.as_c_string_span()
+    var rc = Int(f(addr, Int(cert_c.ptr()), Int(key_c.ptr())))
     # Anchor the owned buffers past the call (see _do_ssl_ctx_new_server).
     _ = cert_path^
     _ = key_path^
@@ -133,8 +133,8 @@ def _do_ssl_ctx_set_verify_client_cert(
     var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_set_verify_client_cert"
     )
-    var ca_c = ca_path.as_c_string_slice()
-    var rc = Int(f(addr, Int(ca_c.unsafe_ptr())))
+    var ca_c = ca_path.as_c_string_span()
+    var rc = Int(f(addr, Int(ca_c.ptr())))
     # Anchor the owned buffer past the call (see _do_ssl_ctx_new_server).
     _ = ca_path^
     if rc != 0:

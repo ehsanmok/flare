@@ -25,10 +25,9 @@ from flare.http import Response, HeaderMap, Url
 # ── Benchmark functions ───────────────────────────────────────────────────────
 
 
-def _bench_header_set_get(mut b: Bencher) capturing raises:
+def _bench_header_set_get(mut b: Bencher) raises:
     """Set 10 headers and perform 3 case-insensitive lookups."""
 
-    @parameter
     @always_inline
     def call_fn() raises:
         var hm = HeaderMap()
@@ -47,13 +46,12 @@ def _bench_header_set_get(mut b: Bencher) capturing raises:
         _ = hm.get("user-agent")
         keep(hm)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_response_construction(mut b: Bencher) capturing raises:
+def _bench_response_construction(mut b: Bencher) raises:
     """Build a Response with status and 2 headers."""
 
-    @parameter
     @always_inline
     def call_fn() raises:
         var r = Response(status=200)
@@ -61,25 +59,23 @@ def _bench_response_construction(mut b: Bencher) capturing raises:
         r.headers.set("Content-Length", "42")
         keep(r)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_url_parse_simple(mut b: Bencher) capturing raises:
+def _bench_url_parse_simple(mut b: Bencher) raises:
     """Parse a simple HTTP URL with a query string."""
 
-    @parameter
     @always_inline
     def call_fn() raises:
         var u = Url.parse("http://example.com/path/to/resource?foo=bar&baz=1")
         keep(u)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_url_parse_https(mut b: Bencher) capturing raises:
+def _bench_url_parse_https(mut b: Bencher) raises:
     """Parse an HTTPS URL with a non-default port and query."""
 
-    @parameter
     @always_inline
     def call_fn() raises:
         var u = Url.parse(
@@ -87,7 +83,7 @@ def _bench_url_parse_https(mut b: Bencher) capturing raises:
         )
         keep(u)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -107,12 +103,12 @@ def main() raises:
     cfg.verbose_metric_names = False
 
     var m = Bench(cfg^)
-    m.bench_function[_bench_header_set_get](BenchId("HeaderMap 10set+3get"))
-    m.bench_function[_bench_response_construction](
-        BenchId("Response construction")
+    m.bench_function(_bench_header_set_get, BenchId("HeaderMap 10set+3get"))
+    m.bench_function(
+        _bench_response_construction, BenchId("Response construction")
     )
-    m.bench_function[_bench_url_parse_simple](BenchId("Url.parse simple"))
-    m.bench_function[_bench_url_parse_https](BenchId("Url.parse https+port"))
+    m.bench_function(_bench_url_parse_simple, BenchId("Url.parse simple"))
+    m.bench_function(_bench_url_parse_https, BenchId("Url.parse https+port"))
     m.dump_report()
     print()
     print("Done.")

@@ -135,7 +135,7 @@ struct UnixListener(Movable):
 
         var sa = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
         for i in range(Int(SOCKADDR_UN_SIZE)):
-            (sa + i).unsafe_write(0)
+            (sa.unsafe_offset(i)).unsafe_write(0)
         var used = fill_sockaddr_un(sa, path)
 
         var rc = _bind(sock.fd, sa, used)
@@ -166,7 +166,7 @@ struct UnixListener(Movable):
         """
         var peer_buf = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
         for i in range(Int(SOCKADDR_UN_SIZE)):
-            (peer_buf + i).unsafe_write(0)
+            (peer_buf.unsafe_offset(i)).unsafe_write(0)
         var peer_len = stack_allocation[1, c_uint]()
         peer_len.unsafe_write(SOCKADDR_UN_SIZE)
 
@@ -192,7 +192,7 @@ struct UnixListener(Movable):
         :meth:`local_path` instead."""
         var sa = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
         for i in range(Int(SOCKADDR_UN_SIZE)):
-            (sa + i).unsafe_write(0)
+            (sa.unsafe_offset(i)).unsafe_write(0)
         var len_buf = stack_allocation[1, c_uint]()
         len_buf.unsafe_write(SOCKADDR_UN_SIZE)
         var rc = _getsockname(self._socket.fd, sa, len_buf)
@@ -231,7 +231,7 @@ def accept_uds_fd(listener_fd: c_int) raises -> UnixStream:
     """
     var peer_buf = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
     for i in range(Int(SOCKADDR_UN_SIZE)):
-        (peer_buf + i).unsafe_write(0)
+        (peer_buf.unsafe_offset(i)).unsafe_write(0)
     var peer_len = stack_allocation[1, c_uint]()
     peer_len.unsafe_write(SOCKADDR_UN_SIZE)
 

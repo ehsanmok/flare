@@ -57,7 +57,7 @@ def test_drop_prefix_keeps_trailing() raises:
     var buf = List[UInt8]()
     var p = data.unsafe_ptr()
     for i in range(data.byte_length()):
-        buf.append(p[i])
+        buf.append(p[unsafe_offset=i])
     var first_end = 19  # length of "GET /a HTTP/1.1\r\n\r\n"
     _compact_read_buf_drop_prefix(buf, first_end)
     assert_equal(len(buf), data.byte_length() - first_end)

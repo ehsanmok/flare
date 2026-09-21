@@ -2,7 +2,7 @@
 
 A front that pumps an external producer's framed output to a client,
 with end-to-end backpressure, in a handful of safe lines on top of
-flare. Zero ``UnsafePointer``, zero ``alloc`` slot tables, zero
+flare. Zero ``Pointer``, zero ``alloc`` slot tables, zero
 ``external_call`` clock, zero manual reactor-token math -- and zero
 file descriptors, byte ``Span`` wrapping, or per-connection tables in
 the front itself.

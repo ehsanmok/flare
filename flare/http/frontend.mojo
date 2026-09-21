@@ -63,7 +63,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
     The frontend is :class:`Copyable` so the scheduler can clone
     it once per worker before pthread spawn; expensive shared
     state inside the user handler should be wrapped behind an
-    :class:`UnsafePointer` so per-worker copies stay cheap.
+    :class:`Pointer` so per-worker copies stay cheap.
     """
 
     var handler: Self.H
@@ -191,7 +191,7 @@ struct StreamFrontend[H: StreamHandler & Copyable](Copyable, Frontend):
     :func:`run_stream_reactor_loop_shared` on each worker's listener fd.
     Copied once per worker before pthread spawn (the ``H: Copyable``
     bound); expensive shared state should sit behind an
-    :class:`UnsafePointer` so the per-worker copy stays cheap.
+    :class:`Pointer` so the per-worker copy stays cheap.
     """
 
     var handler: Self.H

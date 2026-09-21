@@ -3,7 +3,7 @@
 A custom multiplexing / streaming front -- the shape a streaming
 proxy needs -- used to drop to the raw reactor and smuggle every live
 object (the reactor, the streams, the buffers) as an ``Int`` address,
-rebuilding it with ``UnsafePointer(unsafe_from_address=...)``, plus
+rebuilding it with ``Pointer(unsafe_from_address=...)``, plus
 hand-rolled ``alloc`` per-slot tables and a free list. This module
 removes that: the framework owns the connection lifecycle and the
 reactor; the handler is a typed struct whose fields are its shared
@@ -595,7 +595,7 @@ struct StreamConn(Movable):
         nb.resize(rem, UInt8(0))
         unsafe_memcpy(
             dest=nb.unsafe_ptr(),
-            src=self.out_buf.unsafe_ptr() + self.out_pos,
+            src=self.out_buf.unsafe_ptr().unsafe_offset(self.out_pos),
             count=rem,
         )
         self.out_buf = nb^
@@ -625,7 +625,7 @@ struct StreamConn(Movable):
         ECONNRESET) so the reactor closes the connection.
         """
         while self.out_pos < len(self.out_buf):
-            var ptr = self.out_buf.unsafe_ptr() + self.out_pos
+            var ptr = self.out_buf.unsafe_ptr().unsafe_offset(self.out_pos)
             var n_to = len(self.out_buf) - self.out_pos
             self._write_syscalls += 1
             var sent = _send(
@@ -653,7 +653,7 @@ struct StreamConn(Movable):
         ``buf``. Returns the count read (0 on peer EOF)."""
         var old = len(buf)
         buf.resize(old + max_bytes, UInt8(0))
-        var n = self.client.read(buf.unsafe_ptr() + old, max_bytes)
+        var n = self.client.read(buf.unsafe_ptr().unsafe_offset(old), max_bytes)
         buf.resize(old + n, UInt8(0))
         return n
 

@@ -20,7 +20,8 @@ reactor to its loop while the lookup runs would need reactor-side
 completion wiring (eventfd/pipe wakeup) instead.
 """
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 
 from ..http.cancel import Cancel
 from ..net import IpAddr
@@ -107,9 +108,9 @@ def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
         )
 
     var host_addr = Pool[String].alloc_move(host)
-    var ctx_ptr = alloc[_ResolveCtx](1)
+    var ctx_ptr = unsafe_alloc[_ResolveCtx](1)
     ctx_ptr.unsafe_write(_ResolveCtx(host_addr, 0, 0, 0))
-    var ctx_opaque = UnsafePointer[UInt8, MutUntrackedOrigin](
+    var ctx_opaque = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(ctx_ptr)
     )
 
@@ -119,7 +120,7 @@ def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
     except e:
         Pool[String].free(host_addr)
         ctx_ptr.unsafe_deinit_pointee()
-        ctx_ptr.free()
+        ctx_ptr.unsafe_free()
         _pool_release()
         raise e^
     _pool_release()
@@ -129,7 +130,7 @@ def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
     var err_addr = ctx_ptr[].err_addr
     Pool[String].free(host_addr)
     ctx_ptr.unsafe_deinit_pointee()
-    ctx_ptr.free()
+    ctx_ptr.unsafe_free()
 
     if ok:
         var out = Pool[List[IpAddr]].get_ptr(res_addr)[].copy()

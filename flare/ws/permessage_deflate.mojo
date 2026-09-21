@@ -166,7 +166,7 @@ struct PermessageDeflateConfig(Copyable, Defaultable):
 
 
 def _do_compress_raw_deflate(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     data: Span[UInt8, _],
     level: c_int,
 ) raises -> List[UInt8]:
@@ -267,7 +267,7 @@ def compress_message(
 
 
 def _do_decompress_raw_inflate_capped(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     data: Span[UInt8, _],
     max_out: Int,
 ) raises -> List[UInt8]:
@@ -370,7 +370,7 @@ def decompress_message(
 
 
 def _do_pmd_compressor_new(
-    read lib: OwnedDLHandle, level: c_int, window_bits: c_int
+    imm lib: OwnedDLHandle, level: c_int, window_bits: c_int
 ) raises -> Int:
     """Allocate a persistent deflate z_stream via FFI. Returns the
     opaque handle (an ``intptr_t``-encoded ``z_stream*``)."""
@@ -381,7 +381,7 @@ def _do_pmd_compressor_new(
 
 
 def _do_pmd_compress_chunk(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     handle: Int,
     in_buf: Int,
     in_len: c_int,
@@ -395,9 +395,7 @@ def _do_pmd_compress_chunk(
     return fn_chunk(handle, in_buf, in_len, out_buf, out_cap)
 
 
-def _do_pmd_compressor_free(
-    read lib: OwnedDLHandle, handle: Int
-) raises -> None:
+def _do_pmd_compressor_free(imm lib: OwnedDLHandle, handle: Int) raises -> None:
     """Release a persistent deflate context."""
     var fn_free = dl_sym[def(Int) thin abi("C") -> None](
         lib, "flare_pmd_compressor_free"
@@ -406,7 +404,7 @@ def _do_pmd_compressor_free(
 
 
 def _do_pmd_decompressor_new(
-    read lib: OwnedDLHandle, window_bits: c_int
+    imm lib: OwnedDLHandle, window_bits: c_int
 ) raises -> Int:
     """Allocate a persistent inflate z_stream via FFI."""
     var fn_new = dl_sym[def(c_int) thin abi("C") -> Int](
@@ -416,7 +414,7 @@ def _do_pmd_decompressor_new(
 
 
 def _do_pmd_decompress_chunk(
-    read lib: OwnedDLHandle,
+    imm lib: OwnedDLHandle,
     handle: Int,
     in_buf: Int,
     in_len: c_int,
@@ -430,7 +428,7 @@ def _do_pmd_decompress_chunk(
 
 
 def _do_pmd_decompressor_free(
-    read lib: OwnedDLHandle, handle: Int
+    imm lib: OwnedDLHandle, handle: Int
 ) raises -> None:
     var fn_free = dl_sym[def(Int) thin abi("C") -> None](
         lib, "flare_pmd_decompressor_free"
@@ -549,15 +547,15 @@ struct PermessageDeflateContext(Movable):
         self._level = level
         self._window_bits = window_bits
 
-    def __init__(out self, *, deinit take: Self):
+    def __init__(out self, *, deinit move: Self):
         """Transfer ownership; the source is consumed via
         ``deinit`` so its destructor is never invoked."""
-        self._comp_handle = take._comp_handle
-        self._decomp_handle = take._decomp_handle
-        self.max_decompressed_bytes = take.max_decompressed_bytes
-        self._level = take._level
-        self._window_bits = take._window_bits
-        self._lib = take._lib^
+        self._comp_handle = move._comp_handle
+        self._decomp_handle = move._decomp_handle
+        self.max_decompressed_bytes = move.max_decompressed_bytes
+        self._level = move._level
+        self._window_bits = move._window_bits
+        self._lib = move._lib^
 
     def __deinit__(deinit self):
         """Release both z_streams through the FFI; safe to call

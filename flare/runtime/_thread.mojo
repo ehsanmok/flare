@@ -5,7 +5,7 @@ for the multicore ``Scheduler`` to spawn + join N worker threads, each
 pinned to a specific core. The API is intentionally small and unsafe:
 
 - ``ThreadHandle.spawn(start, arg)`` wraps ``pthread_create``. The
-  start routine is a ``def(UnsafePointer[None]) thin abi("C") -> UnsafePointer[None]``
+  start routine is a ``def(Pointer[None]) thin abi("C") -> Pointer[None]``
   that never raises; the reactor loop inside the worker is responsible
   for converting Mojo exceptions into a sentinel pointer.
 - ``ThreadHandle.join()`` wraps ``pthread_join``. Returns the worker's
@@ -38,7 +38,7 @@ from std.ffi import (
     OwnedDLHandle,
     get_errno,
 )
-from std.memory import Layout, UnsafePointer, alloc, memcpy, unsafe_memset_zero
+from std.memory import Layout, Pointer, alloc, unsafe_memset_zero
 from std.sys.info import CompilationTarget
 
 
@@ -46,7 +46,7 @@ from std.sys.info import CompilationTarget
 
 # C pthread_create expects `void *(*)(void *)`. On both Linux x86_64 and
 # macOS arm64 Mojo's plain ``fn`` type uses the platform C calling
-# convention, so a bare ``fn(UnsafePointer[UInt8, _]) -> UnsafePointer[UInt8, _]``
+# convention, so a bare ``fn(Pointer[UInt8, _]) -> Pointer[UInt8, _]``
 # is ABI-compatible with what pthread expects. The function must not
 # raise (pthread has no exception channel); convert any error to a
 # sentinel pointer value before returning.
@@ -54,11 +54,11 @@ comptime _OpaquePtr = Pointer[UInt8, MutUntrackedOrigin]
 
 
 # Shortcut for making a NULL pointer of the flavour we use throughout.
-# UnsafePointer is non-nullable and rejects a comptime-literal address
+# Pointer is non-nullable and rejects a comptime-literal address
 # of 0, but pthread genuinely needs a C NULL here (NULL attr arg, NULL
 # retval slot, NULL start-routine return). Build it from a runtime
 # zero so the non-null constraint doesn't fire. A cleaner fix would
-# model these as Optional[UnsafePointer], which marshals as NULL
+# model these as Optional[Pointer], which marshals as NULL
 # across FFI with identical layout (the null address is the None niche).
 @always_inline
 def _null_ptr() -> _OpaquePtr:
@@ -91,7 +91,7 @@ struct ThreadHandle(Movable):
     that specific handle short-circuits rather than double-joining.
 
     Because ``List[T]`` requires ``T: Copyable``, ``Scheduler`` stores
-    its workers in an ``UnsafePointer[ThreadHandle]`` instead of a
+    its workers in an ``Pointer[ThreadHandle]`` instead of a
     ``List`` — see ``flare.runtime.scheduler``.
     """
 
@@ -107,7 +107,7 @@ struct ThreadHandle(Movable):
 
         Parameters:
             start: Entry function. Signature
-                ``fn(UnsafePointer[UInt8]) thin abi("C") -> UnsafePointer[UInt8]``.
+                ``fn(Pointer[UInt8]) thin abi("C") -> Pointer[UInt8]``.
                 Must not raise; convert errors into a sentinel return
                 value before returning.
 

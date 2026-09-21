@@ -14,7 +14,7 @@ def _slice_str(s: String, start: Int, end: Int) -> String:
     var buf = List[UInt8]()
     buf.resize(end - start, UInt8(0))
     for i in range(end - start):
-        buf[i] = sp[start + i]
+        buf[i] = sp[unsafe_offset=start + i]
     return String(unsafe_from_utf8=Span[UInt8, _](buf))
 
 
@@ -150,7 +150,10 @@ def test_refresh_advances_after_one_second() raises:
     assert_true(after > before)
     var changed = False
     for i in range(17, 25):
-        if before_str.unsafe_ptr()[i] != after_str.unsafe_ptr()[i]:
+        if (
+            before_str.unsafe_ptr()[unsafe_offset=i]
+            != after_str.unsafe_ptr()[unsafe_offset=i]
+        ):
             changed = True
             break
     assert_true(changed)
@@ -166,7 +169,7 @@ def test_current_bytes_and_string_agree() raises:
     assert_equal(len(bytes), s.byte_length())
     var sp = s.unsafe_ptr()
     for i in range(len(bytes)):
-        assert_equal(Int(bytes[i]), Int(sp[i]))
+        assert_equal(Int(bytes[i]), Int(sp[unsafe_offset=i]))
 
 
 def test_format_known_unix_seconds() raises:

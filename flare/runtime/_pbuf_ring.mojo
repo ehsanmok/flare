@@ -12,7 +12,7 @@ reactor, tests) call sites keep resolving unchanged.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from flare.runtime.io_uring_driver import libc_mmap, libc_munmap
 
@@ -132,4 +132,4 @@ def _pbuf_ring_set_tail(ring_addr: Int, new_tail: UInt16) -> None:
     # ordering. On x86 this compiles to a regular mov + compiler
     # barrier; on ARM it emits the proper release-store instruction.
     var typed = tail_ptr.unsafe_bitcast[Scalar[DType.uint16]]()
-    Atomic[DType.uint16].store[ordering=Ordering.RELEASE](typed, new_tail)
+    Atomic[UInt16].store[ordering=Ordering.RELEASE](typed, new_tail)

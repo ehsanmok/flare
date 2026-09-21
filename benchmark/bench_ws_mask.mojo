@@ -31,7 +31,7 @@ from std.benchmark import (
     BenchMetric,
     keep,
 )
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 # ── SIMD width ────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ def _alloc_zeroed(n: Int) -> List[UInt8]:
 # that the output pointer comes from a `var` List (mutable).
 
 
-def _bench_scalar_32(mut b: Bencher) capturing:
+def _bench_scalar_32(mut b: Bencher):
     """Scalar mask, 32-byte payload — below one SIMD chunk."""
     var payload = _alloc_payload(32)
     var output = _alloc_zeroed(32)
@@ -86,17 +86,16 @@ def _bench_scalar_32(mut b: Bencher) capturing:
     var src = payload.unsafe_ptr()
     var dst = output.unsafe_ptr()
 
-    @parameter
     @always_inline
     def call_fn():
         for i in range(32):
-            (dst + i).store(src[i] ^ key[i & 3])
+            dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_32(mut b: Bencher) capturing:
+def _bench_simd_32(mut b: Bencher):
     """SIMD mask, 32-byte payload — exactly one SIMD chunk."""
     var payload = _alloc_payload(32)
     var output = _alloc_zeroed(32)
@@ -110,17 +109,16 @@ def _bench_simd_32(mut b: Bencher) capturing:
     comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
-    @parameter
     @always_inline
     def call_fn():
-        var chunk = src.load[width=SIMD_WIDTH]()
-        dst.store[width=SIMD_WIDTH](chunk ^ tiled)
+        var chunk = src.unsafe_load[width=SIMD_WIDTH]()
+        dst.unsafe_store[width=SIMD_WIDTH](chunk ^ tiled)
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_128(mut b: Bencher) capturing:
+def _bench_scalar_128(mut b: Bencher):
     """Scalar mask, 128-byte payload — 4 SIMD chunks."""
     var payload = _alloc_payload(128)
     var output = _alloc_zeroed(128)
@@ -128,17 +126,16 @@ def _bench_scalar_128(mut b: Bencher) capturing:
     var src = payload.unsafe_ptr()
     var dst = output.unsafe_ptr()
 
-    @parameter
     @always_inline
     def call_fn():
         for i in range(128):
-            (dst + i).store(src[i] ^ key[i & 3])
+            dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_128(mut b: Bencher) capturing:
+def _bench_simd_128(mut b: Bencher):
     """SIMD mask, 128-byte payload — 4 SIMD chunks."""
     var payload = _alloc_payload(128)
     var output = _alloc_zeroed(128)
@@ -150,20 +147,19 @@ def _bench_simd_128(mut b: Bencher) capturing:
     comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
-    @parameter
     @always_inline
     def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 128:
-            var chunk = (src + i).load[width=SIMD_WIDTH]()
-            (dst + i).store[width=SIMD_WIDTH](chunk ^ tiled)
+            var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
+            dst.unsafe_offset(i).unsafe_store[width=SIMD_WIDTH](chunk ^ tiled)
             i += SIMD_WIDTH
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_1k(mut b: Bencher) capturing:
+def _bench_scalar_1k(mut b: Bencher):
     """Scalar mask, 1 KB payload."""
     var payload = _alloc_payload(1024)
     var output = _alloc_zeroed(1024)
@@ -171,17 +167,16 @@ def _bench_scalar_1k(mut b: Bencher) capturing:
     var src = payload.unsafe_ptr()
     var dst = output.unsafe_ptr()
 
-    @parameter
     @always_inline
     def call_fn():
         for i in range(1024):
-            (dst + i).store(src[i] ^ key[i & 3])
+            dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_1k(mut b: Bencher) capturing:
+def _bench_simd_1k(mut b: Bencher):
     """SIMD mask, 1 KB payload."""
     var payload = _alloc_payload(1024)
     var output = _alloc_zeroed(1024)
@@ -193,20 +188,19 @@ def _bench_simd_1k(mut b: Bencher) capturing:
     comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
-    @parameter
     @always_inline
     def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 1024:
-            var chunk = (src + i).load[width=SIMD_WIDTH]()
-            (dst + i).store[width=SIMD_WIDTH](chunk ^ tiled)
+            var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
+            dst.unsafe_offset(i).unsafe_store[width=SIMD_WIDTH](chunk ^ tiled)
             i += SIMD_WIDTH
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_64k(mut b: Bencher) capturing:
+def _bench_scalar_64k(mut b: Bencher):
     """Scalar mask, 64 KB payload."""
     var payload = _alloc_payload(65536)
     var output = _alloc_zeroed(65536)
@@ -214,17 +208,16 @@ def _bench_scalar_64k(mut b: Bencher) capturing:
     var src = payload.unsafe_ptr()
     var dst = output.unsafe_ptr()
 
-    @parameter
     @always_inline
     def call_fn():
         for i in range(65536):
-            (dst + i).store(src[i] ^ key[i & 3])
+            dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_64k(mut b: Bencher) capturing:
+def _bench_simd_64k(mut b: Bencher):
     """SIMD mask, 64 KB payload."""
     var payload = _alloc_payload(65536)
     var output = _alloc_zeroed(65536)
@@ -236,20 +229,19 @@ def _bench_simd_64k(mut b: Bencher) capturing:
     comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
-    @parameter
     @always_inline
     def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 65536:
-            var chunk = (src + i).load[width=SIMD_WIDTH]()
-            (dst + i).store[width=SIMD_WIDTH](chunk ^ tiled)
+            var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
+            dst.unsafe_offset(i).unsafe_store[width=SIMD_WIDTH](chunk ^ tiled)
             i += SIMD_WIDTH
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_scalar_1m(mut b: Bencher) capturing:
+def _bench_scalar_1m(mut b: Bencher):
     """Scalar mask, 1 MB payload."""
     var payload = _alloc_payload(1048576)
     var output = _alloc_zeroed(1048576)
@@ -257,17 +249,16 @@ def _bench_scalar_1m(mut b: Bencher) capturing:
     var src = payload.unsafe_ptr()
     var dst = output.unsafe_ptr()
 
-    @parameter
     @always_inline
     def call_fn():
         for i in range(1048576):
-            (dst + i).store(src[i] ^ key[i & 3])
+            dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def _bench_simd_1m(mut b: Bencher) capturing:
+def _bench_simd_1m(mut b: Bencher):
     """SIMD mask, 1 MB payload."""
     var payload = _alloc_payload(1048576)
     var output = _alloc_zeroed(1048576)
@@ -279,17 +270,16 @@ def _bench_simd_1m(mut b: Bencher) capturing:
     comptime for i in range(SIMD_WIDTH):
         tiled[i] = key[i & 3]
 
-    @parameter
     @always_inline
     def call_fn():
         var i = 0
         while i + SIMD_WIDTH <= 1048576:
-            var chunk = (src + i).load[width=SIMD_WIDTH]()
-            (dst + i).store[width=SIMD_WIDTH](chunk ^ tiled)
+            var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
+            dst.unsafe_offset(i).unsafe_store[width=SIMD_WIDTH](chunk ^ tiled)
             i += SIMD_WIDTH
         keep(dst[0])
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -323,24 +313,24 @@ def main() raises:
 
     var bench = Bench(BenchConfig(max_iters=500))
 
-    bench.bench_function[_bench_scalar_32](BenchId("mask scalar", " 32 B"), m32)
-    bench.bench_function[_bench_simd_32](BenchId("mask SIMD-32", " 32 B"), m32)
-    bench.bench_function[_bench_scalar_128](
-        BenchId("mask scalar", "128 B"), m128
+    bench.bench_function(_bench_scalar_32, BenchId("mask scalar", " 32 B"), m32)
+    bench.bench_function(_bench_simd_32, BenchId("mask SIMD-32", " 32 B"), m32)
+    bench.bench_function(
+        _bench_scalar_128, BenchId("mask scalar", "128 B"), m128
     )
-    bench.bench_function[_bench_simd_128](
-        BenchId("mask SIMD-32", "128 B"), m128
+    bench.bench_function(
+        _bench_simd_128, BenchId("mask SIMD-32", "128 B"), m128
     )
-    bench.bench_function[_bench_scalar_1k](BenchId("mask scalar", " 1 KB"), m1k)
-    bench.bench_function[_bench_simd_1k](BenchId("mask SIMD-32", " 1 KB"), m1k)
-    bench.bench_function[_bench_scalar_64k](
-        BenchId("mask scalar", "64 KB"), m64k
+    bench.bench_function(_bench_scalar_1k, BenchId("mask scalar", " 1 KB"), m1k)
+    bench.bench_function(_bench_simd_1k, BenchId("mask SIMD-32", " 1 KB"), m1k)
+    bench.bench_function(
+        _bench_scalar_64k, BenchId("mask scalar", "64 KB"), m64k
     )
-    bench.bench_function[_bench_simd_64k](
-        BenchId("mask SIMD-32", "64 KB"), m64k
+    bench.bench_function(
+        _bench_simd_64k, BenchId("mask SIMD-32", "64 KB"), m64k
     )
-    bench.bench_function[_bench_scalar_1m](BenchId("mask scalar", " 1 MB"), m1m)
-    bench.bench_function[_bench_simd_1m](BenchId("mask SIMD-32", " 1 MB"), m1m)
+    bench.bench_function(_bench_scalar_1m, BenchId("mask scalar", " 1 MB"), m1m)
+    bench.bench_function(_bench_simd_1m, BenchId("mask SIMD-32", " 1 MB"), m1m)
 
     print(bench)
 

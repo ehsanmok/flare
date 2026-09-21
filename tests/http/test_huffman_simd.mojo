@@ -60,7 +60,7 @@ def test_simd_parity_on_appendix_c4_www_example_com() raises:
     assert_equal(len(simd_out), len(scalar_out))
     for i in range(len(simd_out)):
         assert_equal(Int(simd_out[i]), Int(scalar_out[i]))
-    var got = String(capacity=len(simd_out) + 1)
+    var got = String(capacity_bytes=len(simd_out) + 1)
     for b in simd_out:
         got += chr(Int(b))
     assert_equal(got, "www.example.com")
@@ -81,7 +81,7 @@ def test_simd_round_trip_on_random_ascii() raises:
         huffman_encode(Span[UInt8, _](_bytes(s)), enc)
         var dec = List[UInt8]()
         huffman_decode_simd(Span[UInt8, _](enc), dec)
-        var got = String(capacity=len(dec) + 1)
+        var got = String(capacity_bytes=len(dec) + 1)
         for b in dec:
             got += chr(Int(b))
         assert_equal(got, s)
@@ -114,7 +114,7 @@ def test_dispatch_threshold_picks_scalar_below_threshold() raises:
     assert_true(len(enc) < SIMD_HUFFMAN_THRESHOLD_BYTES)
     var dec = List[UInt8]()
     huffman_decode_dispatch(Span[UInt8, _](enc), dec, use_table=True)
-    var got = String(capacity=len(dec) + 1)
+    var got = String(capacity_bytes=len(dec) + 1)
     for b in dec:
         got += chr(Int(b))
     assert_equal(got, "hi")

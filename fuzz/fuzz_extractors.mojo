@@ -62,7 +62,7 @@ def _to_ascii(data: List[UInt8], start: Int, end: Int) -> String:
     var n = end - start
     if n <= 0:
         return ""
-    var out = String(capacity=n)
+    var out = String(capacity_bytes=n)
     for i in range(start, end):
         var b = data[i]
         if (

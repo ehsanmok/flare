@@ -26,7 +26,7 @@ without leaking a transport type parameter through the public API.
 """
 
 from std.collections import List, Optional
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.collections.span import Span
 
 from ..http2.client import Http2ClientConnection

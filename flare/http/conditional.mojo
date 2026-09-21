@@ -97,24 +97,28 @@ def _strip_etag(s: String) -> _StrippedEtag:
     var p = s.unsafe_ptr()
     var is_weak = False
     var i = 0
-    if n >= 2 and Int(p[0]) == ord("W") and Int(p[1]) == ord("/"):
+    if (
+        n >= 2
+        and Int(p[unsafe_offset=0]) == ord("W")
+        and Int(p[unsafe_offset=1]) == ord("/")
+    ):
         is_weak = True
         i = 2
-    if i >= n or Int(p[i]) != ord('"'):
+    if i >= n or Int(p[unsafe_offset=i]) != ord('"'):
         return _StrippedEtag(False, String(""))
     var start = i + 1
     var end = -1
     var j = start
     while j < n:
-        if Int(p[j]) == ord('"'):
+        if Int(p[unsafe_offset=j]) == ord('"'):
             end = j
             break
         j += 1
     if end < 0:
         return _StrippedEtag(False, String(""))
-    var out = String(capacity=end - start + 1)
+    var out = String(capacity_bytes=end - start + 1)
     for k in range(start, end):
-        out += chr(Int(p[k]))
+        out += chr(Int(p[unsafe_offset=k]))
     return _StrippedEtag(is_weak, out^)
 
 
@@ -151,22 +155,26 @@ def _split_csv(s: String) -> List[String]:
     var i = 0
     while i < n:
         # Skip leading OWS.
-        while i < n and (Int(p[i]) == ord(" ") or Int(p[i]) == ord("\t")):
+        while i < n and (
+            Int(p[unsafe_offset=i]) == ord(" ")
+            or Int(p[unsafe_offset=i]) == ord("\t")
+        ):
             i += 1
         var start = i
         # Find next comma OR end-of-string.
-        while i < n and Int(p[i]) != ord(","):
+        while i < n and Int(p[unsafe_offset=i]) != ord(","):
             i += 1
         # Trim trailing OWS.
         var end = i
         while end > start and (
-            Int(p[end - 1]) == ord(" ") or Int(p[end - 1]) == ord("\t")
+            Int(p[unsafe_offset=end - 1]) == ord(" ")
+            or Int(p[unsafe_offset=end - 1]) == ord("\t")
         ):
             end -= 1
         if end > start:
-            var entry = String(capacity=end - start + 1)
+            var entry = String(capacity_bytes=end - start + 1)
             for k in range(start, end):
-                entry += chr(Int(p[k]))
+                entry += chr(Int(p[unsafe_offset=k]))
             out.append(entry^)
         if i < n:
             i += 1  # skip the comma
@@ -193,29 +201,33 @@ def _any_etag_matches(csv: String, server_etag: String, strong: Bool) -> Bool:
 # ── HTTP-date comparator ────────────────────────────────────────────────────
 
 
-def _parse_int_at(p: UnsafePointer[UInt8, _], off: Int, length: Int) -> Int:
+def _parse_int_at(p: Pointer[UInt8, _], off: Int, length: Int) -> Int:
     """Read ``length`` decimal digits at ``p[off:off+length]``.
     Returns -1 on a non-digit byte."""
     var v = 0
     for k in range(length):
-        var c = Int(p[off + k])
+        var c = Int(p[unsafe_offset=off + k])
         if c < ord("0") or c > ord("9"):
             return -1
         v = v * 10 + (c - ord("0"))
     return v
 
 
-def _month_index_at(p: UnsafePointer[UInt8, _], off: Int) -> Int:
+def _month_index_at(p: Pointer[UInt8, _], off: Int) -> Int:
     """Match a 3-byte month abbreviation at ``p[off:off+3]``
     against ``"JanFebMarAprMayJunJulAugSepOctNovDec"``. Returns
     -1 on a non-match."""
     comptime months = StaticString("JanFebMarAprMayJunJulAugSepOctNovDec")
     var mp = months.unsafe_ptr()
-    var c0 = p[off]
-    var c1 = p[off + 1]
-    var c2 = p[off + 2]
+    var c0 = p[unsafe_offset=off]
+    var c1 = p[unsafe_offset=off + 1]
+    var c2 = p[unsafe_offset=off + 2]
     for k in range(12):
-        if mp[k * 3] == c0 and mp[k * 3 + 1] == c1 and mp[k * 3 + 2] == c2:
+        if (
+            mp[unsafe_offset=k * 3] == c0
+            and mp[unsafe_offset=k * 3 + 1] == c1
+            and mp[unsafe_offset=k * 3 + 2] == c2
+        ):
             return k
     return -1
 
@@ -232,7 +244,7 @@ def _httpdate_to_unix(s: String) -> Int:
         # in practice ~all modern caches emit IMF-fixdate.
         return -1
     var p = s.unsafe_ptr()
-    if Int(p[3]) != ord(","):
+    if Int(p[unsafe_offset=3]) != ord(","):
         return -1
 
     var day = _parse_int_at(p, 5, 2)
@@ -266,7 +278,7 @@ def fnv1a_etag(body: Span[UInt8, _]) -> String:
     var h: UInt64 = _FNV_OFFSET
     var p = body.unsafe_ptr()
     for i in range(len(body)):
-        h ^= UInt64(Int(p[i]))
+        h ^= UInt64(Int(p[unsafe_offset=i]))
         h = h * _FNV_PRIME
     var hex_chars = String("0123456789abcdef")
     var hp = hex_chars.unsafe_ptr()
@@ -274,7 +286,7 @@ def fnv1a_etag(body: Span[UInt8, _]) -> String:
     for i in range(16):
         var shift = (15 - i) * 4
         var nibble = Int((h >> UInt64(shift)) & UInt64(0xF))
-        out += chr(Int(hp[nibble]))
+        out += chr(Int(hp[unsafe_offset=nibble]))
     out += '"'
     return out^
 

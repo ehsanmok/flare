@@ -132,7 +132,7 @@ def _hex_len_into(mut buf: List[UInt8], n: Int):
         return
     # A chunk size is at most 16 hex digits (64-bit). Emit into a stack
     # scratch, least-significant first, then copy it out reversed.
-    var digits = InlineArray[UInt8, 16](uninitialized=True)
+    var digits = Array[UInt8, 16](uninitialized=True)
     var ndigits = 0
     var x = n
     while x > 0:

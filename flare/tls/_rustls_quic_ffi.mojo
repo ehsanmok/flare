@@ -16,7 +16,7 @@ defensive pattern is documented at length in
 """
 
 from std.collections import List
-from std.ffi import OwnedDLHandle, c_int, CStringSlice
+from std.ffi import OwnedDLHandle, c_int, CStringSpan
 
 from ..utils.dylib import find_flare_lib, dl_sym
 
@@ -308,7 +308,7 @@ def _do_is_handshake_complete(
     return Int(f(session)) == 1
 
 
-def _do_alpn(read lib: OwnedDLHandle, session: Int) raises -> String:
+def _do_alpn(imm lib: OwnedDLHandle, session: Int) raises -> String:
     """Return the negotiated ALPN identifier (empty if none).
     Raises on the FFI's bad-pointer / out-cap-too-small codes."""
     if session == 0:
@@ -324,7 +324,7 @@ def _do_alpn(read lib: OwnedDLHandle, session: Int) raises -> String:
     for _ in range(256):
         buf.append(UInt8(0))
     var written: Int = 0
-    var written_addr = Int(UnsafePointer(to=written))
+    var written_addr = Int(Pointer(to=written))
     # The FFI returns the ALPN byte count as its return value (and
     # also writes it through ``written``). Use the return value as
     # the length: the ``written`` out-parameter readback is folded to
@@ -427,7 +427,7 @@ def _do_install_early_keys(imm lib: OwnedDLHandle, session: Int) raises -> Int:
 
 
 def _do_is_early_data_accepted(
-    read lib: OwnedDLHandle, session: Int
+    imm lib: OwnedDLHandle, session: Int
 ) raises -> Int:
     """``flare_rustls_quic_is_early_data_accepted``: 1 if the server
     accepted the client's 0-RTT data, 0 if not (or not a resumed
@@ -519,7 +519,7 @@ def _do_packet_decrypt(
     ](lib, "flare_rustls_quic_packet_decrypt")
     var plaintext_len: Int = 0
     # Keep the pointer in a named variable across the FFI call:
-    # a throwaway ``Int(UnsafePointer(to=...))`` temporary lets the
+    # a throwaway ``Int(Pointer(to=...))`` temporary lets the
     # optimizer treat ``plaintext_len`` as non-escaping and fold the
     # write-back to the initial 0. Dereferencing the live pointer
     # forces a reload of the value rustls actually wrote.
@@ -630,7 +630,7 @@ def _do_last_error(imm lib: OwnedDLHandle) raises -> String:
     var p = f()
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=p.unsafe_bitcast[Int8]()
             )
         )

@@ -79,7 +79,7 @@ the single owning thread; the only cross-thread hook is
 
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, c_uint, c_size_t, external_call, get_errno
-from std.memory import Layout, UnsafePointer, alloc, stack_allocation
+from std.memory import Layout, Pointer, alloc, stack_allocation
 from std.os import getenv
 from std.sys.info import CompilationTarget
 
@@ -299,7 +299,7 @@ struct UringReactor(Movable):
             # free() when these are sentinel) so the no-wakeup
             # mode is fully no-op on shutdown too.
             self._wake_fd = INVALID_FD
-            # UnsafePointer is non-nullable; C NULL from a runtime 0.
+            # Pointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
             self._wake_buf = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=null_addr
@@ -362,7 +362,7 @@ struct UringReactor(Movable):
     def arm_recv_multishot(
         mut self,
         fd: Int,
-        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+        buf: Pointer[UInt8, MutUntrackedOrigin],
         buf_len: Int,
         conn_id: UInt64,
     ) raises -> None:
@@ -644,8 +644,10 @@ struct UringReactor(Movable):
         # The IoUringSqe wrapper exposes set_flags but we're
         # writing a raw slot here; use the helper directly.
         # Offset 1 is _SQE_OFF_FLAGS; we OR in the skip-success bit.
-        var flag_byte = (slot + 1).load()
-        (slot + 1).unsafe_write(flag_byte | UInt8(Int(IOSQE_CQE_SKIP_SUCCESS)))
+        var flag_byte = slot.unsafe_offset(1).unsafe_load()
+        slot.unsafe_offset(1).unsafe_write(
+            flag_byte | UInt8(Int(IOSQE_CQE_SKIP_SUCCESS))
+        )
         self._driver.commit_sqe()
 
     def arm_poll_readable_multishot(

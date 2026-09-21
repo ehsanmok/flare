@@ -104,7 +104,7 @@ struct UnixStream(Movable):
         var sock = RawSocket(AF_UNIX, SOCK_STREAM)
         var sa = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
         for i in range(Int(SOCKADDR_UN_SIZE)):
-            (sa + i).unsafe_write(0)
+            (sa.unsafe_offset(i)).unsafe_write(0)
         var used = fill_sockaddr_un(sa, path)
         var rc = _connect(sock.fd, sa, used)
         if rc < 0:
@@ -117,7 +117,7 @@ struct UnixStream(Movable):
 
     # ── I/O ──────────────────────────────────────────────────────────────
 
-    def read(self, buf: UnsafePointer[UInt8, _], n: Int) raises -> Int:
+    def read(self, buf: Pointer[UInt8, _], n: Int) raises -> Int:
         """Read up to ``n`` bytes into ``buf``. Returns 0 on EOF.
 
         Retries transparently on ``EINTR``. Raises

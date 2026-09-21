@@ -30,7 +30,7 @@ def _bytes_of(s: String) -> List[UInt8]:
     var out = List[UInt8]()
     var p = s.unsafe_ptr()
     for i in range(s.byte_length()):
-        out.append(p[i])
+        out.append(p[unsafe_offset=i])
     return out^
 
 

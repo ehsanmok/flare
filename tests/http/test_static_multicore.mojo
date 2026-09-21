@@ -29,7 +29,7 @@ the static fast path lives in the epoll/kqueue reactor).
 """
 
 from std.ffi import c_int, c_size_t, c_uint
-from std.memory import unsafe_memcpy, UnsafePointer, stack_allocation
+from std.memory import unsafe_memcpy, Pointer, stack_allocation
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, TestSuite
 
@@ -77,12 +77,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
         raise Error("client socket() failed: " + _strerror(get_errno().value))
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, port, ip)
     if _connect(c, sa, c_uint(16)) < c_int(0):
         var msg = _strerror(get_errno().value)
@@ -104,7 +104,7 @@ def _send_request_and_recv_response(
         raise Error("send() short-write")
 
     var buf = stack_allocation[4096, UInt8]()
-    var got = String(capacity=4096)
+    var got = String(capacity_bytes=4096)
     var attempts = 0
     while attempts < 16 and (body not in got or "\r\n\r\n" not in got):
         attempts += 1
@@ -112,7 +112,7 @@ def _send_request_and_recv_response(
         if Int(rc_recv) <= 0:
             raise Error("recv() returned " + String(Int(rc_recv)))
         for i in range(Int(rc_recv)):
-            got += chr(Int(buf[i]))
+            got += chr(Int(buf[unsafe_offset=i]))
     if body not in got:
         raise Error("response missing body; got prefix: " + got)
 

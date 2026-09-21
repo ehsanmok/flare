@@ -5,7 +5,7 @@ activation via ``flare/tls/ffi/build.sh`` and installed to
 ``$CONDA_PREFIX/lib/`` when using the packaged distribution.
 
 Opaque C pointers (SSL_CTX*, SSL*) are held as ``Int`` values since Mojo
-requires all ``UnsafePointer`` type parameters to have an explicit
+requires all ``Pointer`` type parameters to have an explicit
 ``mut`` parameter which is not inferable for ``NoneType``. Using ``Int``
 (64-bit on all supported platforms) stores pointer values safely.
 
@@ -37,7 +37,7 @@ before ``fn`` is invoked, leaving the cached function pointer
 dangling into freed memory.
 
 Discipline this file follows: every FFI call goes through a
-``_do_ssl_*(read lib: OwnedDLHandle, ...)`` borrow helper that
+``_do_ssl_*(imm lib: OwnedDLHandle, ...)`` borrow helper that
 does both ``get_function`` and the invocation inside the borrow.
 Public methods open ``lib`` once and pass it through to a chain
 of helpers; the borrow keeps the dylib mapped across the whole
@@ -48,8 +48,8 @@ sequence. Same idiom as
 """
 
 from std.sys import stderr
-from std.ffi import OwnedDLHandle, c_int, CStringSlice
-from std.memory import UnsafePointer, stack_allocation
+from std.ffi import OwnedDLHandle, c_int, CStringSpan
+from std.memory import Pointer, stack_allocation
 from ..dns import resolve
 from ..net import SocketAddr, NetworkError, _find_flare_lib
 from ..utils.dylib import dl_sym
@@ -89,7 +89,7 @@ def _c_err(imm lib: OwnedDLHandle) raises -> String:
     var p = fn_err()
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=p.unsafe_bitcast[Int8]()
             )
         )
@@ -137,8 +137,8 @@ def _do_ssl_ctx_load_ca_bundle(
     # file open would read past it (same defect as the SNI host fixed in
     # _do_ssl_connect). `ca_path` is owned and outlives the call; `ca_c`
     # views its now-terminated buffer.
-    var ca_c = ca_path.as_c_string_slice()
-    var rc = Int(f(ctx, Int(ca_c.unsafe_ptr())))
+    var ca_c = ca_path.as_c_string_span()
+    var rc = Int(f(ctx, Int(ca_c.ptr())))
     # The C-string pointer escapes as raw Int; anchor the owned buffer
     # past the synchronous call so it is not ASAP-destroyed before
     # OpenSSL reads the path (heap-use-after-free under asan when
@@ -158,9 +158,9 @@ def _do_ssl_ctx_load_cert_key(
     )
     # See _do_ssl_ctx_load_ca_bundle: NUL-terminate slice-derived paths
     # in place. Both owned args outlive the single FFI call.
-    var cert_c = cert_path.as_c_string_slice()
-    var key_c = key_path.as_c_string_slice()
-    var rc = Int(f(ctx, Int(cert_c.unsafe_ptr()), Int(key_c.unsafe_ptr())))
+    var cert_c = cert_path.as_c_string_span()
+    var key_c = key_path.as_c_string_span()
+    var rc = Int(f(ctx, Int(cert_c.ptr()), Int(key_c.ptr())))
     # Anchor the owned buffers past the call (see _do_ssl_ctx_load_ca_bundle).
     _ = cert_path^
     _ = key_path^
@@ -199,8 +199,8 @@ def _do_ssl_connect(
     # `unsafe_ptr`, so OpenSSL's SSL_set_tlsext_host_name would read past the
     # hostname and send a corrupted SNI (some servers reply handshake_failure).
     # `as_c_string_slice` is mutating and `sni` is owned + lives across the call.
-    var cstr = sni.as_c_string_slice()
-    var rc = Int(f(ssl, Int(cstr.unsafe_ptr())))
+    var cstr = sni.as_c_string_span()
+    var rc = Int(f(ssl, Int(cstr.ptr())))
     # Anchor the owned SNI buffer past the call (see
     # _do_ssl_ctx_load_ca_bundle); Url.parse(...).host is slice-derived.
     _ = sni^
@@ -220,8 +220,8 @@ def _do_ssl_connect_ex(
         lib, "flare_ssl_connect_ex"
     )
     # Same NUL-termination dance as _do_ssl_connect; see the note there.
-    var cstr = sni.as_c_string_slice()
-    var rc = Int(f(ssl, Int(cstr.unsafe_ptr())))
+    var cstr = sni.as_c_string_span()
+    var rc = Int(f(ssl, Int(cstr.ptr())))
     _ = sni^
     return rc
 
@@ -264,7 +264,7 @@ def _do_ssl_get_version(imm lib: OwnedDLHandle, ssl: Int) raises -> String:
     var p = f(ssl)
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=p.unsafe_bitcast[Int8]()
             )
         )
@@ -278,7 +278,7 @@ def _do_ssl_get_cipher(imm lib: OwnedDLHandle, ssl: Int) raises -> String:
     var p = f(ssl)
     return String(
         StringSlice(
-            unsafe_from_utf8=CStringSlice(
+            unsafe_from_utf8=CStringSpan(
                 unsafe_from_ptr=p.unsafe_bitcast[Int8]()
             )
         )
@@ -315,14 +315,14 @@ def _do_ssl_ctx_enable_client_session_cache(
     return Int(f(ctx))
 
 
-def _do_ssl_ctx_take_session(read lib: OwnedDLHandle, ctx: Int) raises -> Int:
+def _do_ssl_ctx_take_session(imm lib: OwnedDLHandle, ctx: Int) raises -> Int:
     var f = dl_sym[def(Int) thin abi("C") -> Int](
         lib, "flare_ssl_ctx_take_session"
     )
     return f(ctx)
 
 
-def _do_ssl_session_free(read lib: OwnedDLHandle, sess: Int) raises:
+def _do_ssl_session_free(imm lib: OwnedDLHandle, sess: Int) raises:
     if sess == 0:
         return
     var f = dl_sym[def(Int) thin abi("C") -> None](
@@ -332,7 +332,7 @@ def _do_ssl_session_free(read lib: OwnedDLHandle, sess: Int) raises:
 
 
 def _do_ssl_set_session(
-    read lib: OwnedDLHandle, ssl: Int, sess: Int
+    imm lib: OwnedDLHandle, ssl: Int, sess: Int
 ) raises -> Int:
     var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_set_session"
@@ -340,7 +340,7 @@ def _do_ssl_set_session(
     return Int(f(ssl, sess))
 
 
-def _do_ssl_session_reused(read lib: OwnedDLHandle, ssl: Int) raises -> Int:
+def _do_ssl_session_reused(imm lib: OwnedDLHandle, ssl: Int) raises -> Int:
     var f = dl_sym[def(Int) thin abi("C") -> c_int](
         lib, "flare_ssl_session_reused"
     )
@@ -821,7 +821,7 @@ struct TlsStream(Movable, Readable):
             raise Timeout("send")
         raise NetworkError("TLS read error: " + _c_err(self._lib))
 
-    def read_exact(mut self, buf: UnsafePointer[UInt8, _], size: Int) raises:
+    def read_exact(mut self, buf: Pointer[UInt8, _], size: Int) raises:
         """Read exactly ``size`` bytes into ``buf``.
 
         Args:
@@ -938,7 +938,7 @@ struct TlsStream(Movable, Readable):
             raise NetworkError("peer_cert_subject: " + _c_err(self._lib))
         return String(
             StringSlice(
-                unsafe_from_utf8=CStringSlice(
+                unsafe_from_utf8=CStringSpan(
                     unsafe_from_ptr=buf.unsafe_bitcast[Int8]()
                 )
             )
@@ -971,7 +971,7 @@ struct TlsStream(Movable, Readable):
             return String("")
         return String(
             StringSlice(
-                unsafe_from_utf8=CStringSlice(
+                unsafe_from_utf8=CStringSpan(
                     unsafe_from_ptr=buf.unsafe_bitcast[Int8]()
                 )
             )

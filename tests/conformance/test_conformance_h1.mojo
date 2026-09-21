@@ -42,7 +42,7 @@ def _decode_hex(s: String) raises -> List[UInt8]:
     var n = s.byte_length()
     var i = 0
     while i < n:
-        var c = p[i]
+        var c = p[unsafe_offset=i]
         if (
             c == UInt8(ord(" "))
             or c == UInt8(ord("\t"))
@@ -53,7 +53,7 @@ def _decode_hex(s: String) raises -> List[UInt8]:
             continue
         if i + 1 >= n:
             raise Error("conformance: dangling hex digit")
-        var c2 = p[i + 1]
+        var c2 = p[unsafe_offset=i + 1]
         var hi = _digit(c)
         var lo = _digit(c2)
         out.append(UInt8((hi << 4) | lo))

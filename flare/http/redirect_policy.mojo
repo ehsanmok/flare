@@ -179,7 +179,7 @@ def _resolve_location(base_url: String, location: String) raises -> String:
         if Int(p[unsafe_offset=target.byte_length() - 1 - i]) == ord("/"):
             slash = target.byte_length() - i
             break
-    var dir = String(capacity=slash + 1)
+    var dir = String(capacity_bytes=slash + 1)
     for i in range(slash):
         dir += chr(Int(p[unsafe_offset=i]))
     return origin + dir + location

@@ -70,7 +70,7 @@ def _build_runtime_router() raises -> Router:
 
 @always_inline
 def _bytes_to_path(data: List[UInt8]) -> String:
-    var out = String(capacity=len(data) + 2)
+    var out = String(capacity_bytes=len(data) + 2)
     out += "/"
     for i in range(len(data)):
         var b = data[i]

@@ -78,12 +78,12 @@ def _json_escape(s: String) -> String:
     var n = s.byte_length()
     if n == 0:
         return String("")
-    var out = String(capacity=n + 8)
+    var out = String(capacity_bytes=n + 8)
     var p = s.unsafe_ptr()
     var hex_chars = String("0123456789abcdef")
     var hp = hex_chars.unsafe_ptr()
     for i in range(n):
-        var b = Int(p[i])
+        var b = Int(p[unsafe_offset=i])
         if b == ord('"'):
             out += '\\"'
         elif b == ord("\\"):
@@ -100,8 +100,8 @@ def _json_escape(s: String) -> String:
             out += "\\r"
         elif b < 0x20:
             out += "\\u00"
-            out += chr(Int(hp[(b >> 4) & 0xF]))
-            out += chr(Int(hp[b & 0xF]))
+            out += chr(Int(hp[unsafe_offset=(b >> 4) & 0xF]))
+            out += chr(Int(hp[unsafe_offset=b & 0xF]))
         else:
             out += chr(b)
     return out^
@@ -126,7 +126,7 @@ def _format_iso8601_utc(unix_ns: Int) -> String:
     var unix_secs = Int(unix_ms_total // 1000)
     var ct = unix_seconds_to_civil(unix_secs)
 
-    var out = String(capacity=24)
+    var out = String(capacity_bytes=24)
     out += _pad(ct.year, 4)
     out += "-"
     out += _pad(ct.month, 2)
@@ -149,7 +149,7 @@ def _pad(n: Int, width: Int) -> String:
     var s = String(n)
     if s.byte_length() >= width:
         return s
-    var out = String(capacity=width + 1)
+    var out = String(capacity_bytes=width + 1)
     for _ in range(width - s.byte_length()):
         out += "0"
     out += s
@@ -222,7 +222,7 @@ struct StructuredLogger[Inner: Handler & Copyable](Copyable, Handler):
         latency_ms: Int,
         start_ns: Int,
     ) -> String:
-        var line = String(capacity=192)
+        var line = String(capacity_bytes=192)
         line += '{"ts":"'
         line += _format_iso8601_utc(start_ns + self._epoch_offset_ns)
         line += '","method":"'
@@ -253,7 +253,7 @@ struct StructuredLogger[Inner: Handler & Copyable](Copyable, Handler):
         latency_ms: Int,
         start_ns: Int,
     ) -> String:
-        var line = String(capacity=192)
+        var line = String(capacity_bytes=192)
         line += '{"ts":"'
         line += _format_iso8601_utc(start_ns + self._epoch_offset_ns)
         line += '","method":"'

@@ -128,7 +128,7 @@ def _append_int(mut buf: List[UInt8], var n: Int):
     var old_len = len(buf)
     var sign = 1 if negative else 0
     buf.resize(old_len + sign + i, UInt8(0))
-    var p = buf.unsafe_ptr() + old_len
+    var p = buf.unsafe_ptr().unsafe_offset(old_len)
     if negative:
         p[0] = UInt8(45)  # '-'
         p += 1

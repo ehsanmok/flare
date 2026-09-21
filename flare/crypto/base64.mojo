@@ -52,7 +52,7 @@ def base64_encode(data: Span[UInt8, _]) -> String:
         Base64-encoded string (with ``=`` padding).
     """
     var n = len(data)
-    var out = String(capacity=((n + 2) // 3) * 4 + 1)
+    var out = String(capacity_bytes=((n + 2) // 3) * 4 + 1)
     var tbl = _BASE64_TABLE.unsafe_ptr()
     var i = 0
     while i + 3 <= n:

@@ -424,7 +424,7 @@ def _ieq_static(slice: Span[UInt8, _], s: StaticString) -> Bool:
     var sp = slice.unsafe_ptr()
     var bp = s.unsafe_ptr()
     for i in range(n):
-        if _ascii_lower(sp[i]) != bp[i]:
+        if _ascii_lower(sp[unsafe_offset=i]) != bp[unsafe_offset=i]:
             return False
     return True
 

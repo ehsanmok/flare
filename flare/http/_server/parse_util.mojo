@@ -51,7 +51,7 @@ def _ascii_safe(s: String) -> String:
     if n == 0:
         return String("")
     var p = s.unsafe_ptr()
-    var out = String(capacity=n)
+    var out = String(capacity_bytes=n)
     for i in range(n):
         var c = p[unsafe_offset=i]
         if c >= 32 and c <= 126:
@@ -252,7 +252,7 @@ def _read_line_buf(data: Span[UInt8, _], mut pos: Int) -> String:
         return _ascii_unchecked_string(data[start:stop])
 
     # Slow path: copy bytes, replacing bad ones with '?'.
-    var out = String(capacity=stop - start)
+    var out = String(capacity_bytes=stop - start)
     for k in range(start, stop):
         var c = data[k]
         if c == 0 or c >= 128:

@@ -24,7 +24,7 @@ reactor cannot deliver by itself.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 
 from ._libc_time import libc_nanosleep_ms, monotonic_now_ms
 from ._thread import ThreadHandle, _OpaquePtr
@@ -57,7 +57,7 @@ def _slot_addr_idx(slot: Int) -> Int:
 @always_inline
 def _atomic_load(block: Int, idx: Int) -> Int64:
     var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
-    return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](
+    return Atomic[Int64].load[ordering=Ordering.ACQUIRE](
         (p.unsafe_offset(idx)).unsafe_bitcast[Scalar[DType.int64]]()
     )
 
@@ -65,7 +65,7 @@ def _atomic_load(block: Int, idx: Int) -> Int64:
 @always_inline
 def _atomic_store(block: Int, idx: Int, v: Int64):
     var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
-    Atomic[DType.int64].store[ordering=Ordering.RELEASE](
+    Atomic[Int64].store[ordering=Ordering.RELEASE](
         (p.unsafe_offset(idx)).unsafe_bitcast[Scalar[DType.int64]](), v
     )
 
@@ -123,7 +123,7 @@ def _watchdog_main(arg: _OpaquePtr) -> _OpaquePtr:
                     var cp = Pointer[Int64, MutUntrackedOrigin](
                         unsafe_from_address=Int(addr)
                     )
-                    Atomic[DType.int64].store[ordering=Ordering.RELEASE](
+                    Atomic[Int64].store[ordering=Ordering.RELEASE](
                         cp.unsafe_bitcast[Scalar[DType.int64]](),
                         _TIMEOUT_REASON,
                     )

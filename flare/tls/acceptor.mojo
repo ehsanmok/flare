@@ -46,7 +46,7 @@ from std.format import Writable, Writer
 
 from std.collections import Optional
 from std.ffi import c_int, c_uint
-from std.memory import UnsafePointer, stack_allocation
+from std.memory import Pointer, stack_allocation
 
 from ..net._libc import _setsockopt, SOL_SOCKET, SO_RCVTIMEO, SO_SNDTIMEO
 from ._server_ffi import (

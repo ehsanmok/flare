@@ -94,7 +94,7 @@ struct TlsTransport(Movable):
         """Take ownership of an ``SSL*`` released by another transport.
 
         The reactor cannot ``^``-move a transport out of an
-        ``UnsafePointer`` deref (no tracked origin), so promotion from
+        ``Pointer`` deref (no tracked origin), so promotion from
         the handshake handle to the protocol handle goes through
         :meth:`release` + ``adopt``, mirroring how the fd is detached
         and rewrapped as a ``RawSocket``. The fresh ``OwnedDLHandle``

@@ -54,7 +54,8 @@ struct GetUser(Copyable, Defaultable, Handler):
 ```
 
 ``Extracted[H]`` is itself a ``Handler`` and reflects on ``H``'s field
-list via ``reflect[H].field_count()`` + ``trait_downcast``:
+list via ``reflect[H].field_count()`` + a `comptime assert
+conforms_to(...)` per field:
 per request, it default-constructs ``H``, walks each field with a
 ``comptime for`` loop, calls ``field.apply(req)`` through the
 ``Extractor`` trait, and invokes ``h.serve(req)``. No per-arity
@@ -108,7 +109,6 @@ Bad Request** with the error message in the body; the handler's
 
 # reflect[T] is auto-imported via the prelude; field access is
 # reflect[T].field_ref[idx].
-from std.builtin.rebind import trait_downcast
 from std.collections import Optional
 from json import loads, Value, Null
 
@@ -871,9 +871,10 @@ struct Extracted[H: Copyable & Defaultable & Handler](Copyable, Handler):
         var expose = req.expose_errors
         comptime for idx in range(n):
             try:
-                ref field = trait_downcast[Extractor](
-                    reflect[Self.H].field_ref[idx](h)
-                )
+                ref field = reflect[Self.H].field_ref[idx](h)
+                comptime assert conforms_to(
+                    type_of(field), Extractor
+                ), "flare: every Handler field must implement Extractor"
                 field.apply(req)
             except e:
                 return _extractor_error_response(e, expose)

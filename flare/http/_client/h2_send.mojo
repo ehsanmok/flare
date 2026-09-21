@@ -50,7 +50,7 @@ def _build_h2_request_headers(
     for i in range(extra_headers.len()):
         var k = extra_headers._keys[i]
         var v = extra_headers._values[i]
-        var lk = String(capacity=k.byte_length() + 1)
+        var lk = String(capacity_bytes=k.byte_length() + 1)
         var kp = k.unsafe_ptr()
         for j in range(k.byte_length()):
             var c = Int(kp[unsafe_offset=j])

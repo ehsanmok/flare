@@ -121,7 +121,7 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
     ``data:`` line — that is intentional and matches what every
     other SSE library does (Tornado, Sanic, axum-extra).
     """
-    var out = String(capacity=event.data.byte_length() + 64)
+    var out = String(capacity_bytes=event.data.byte_length() + 64)
 
     if event.id.byte_length() > 0:
         out += "id: "
@@ -144,10 +144,10 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
     var line_start = 0
     var i = 0
     while i <= n:
-        if i == n or Int(p[i]) == ord("\n"):
+        if i == n or Int(p[unsafe_offset=i]) == ord("\n"):
             out += "data: "
             for k in range(line_start, i):
-                out += chr(Int(p[k]))
+                out += chr(Int(p[unsafe_offset=k]))
             out += "\n"
             line_start = i + 1
         i += 1
@@ -157,7 +157,7 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
     var bytes = List[UInt8](capacity=out.byte_length())
     var op = out.unsafe_ptr()
     for k in range(out.byte_length()):
-        bytes.append(op[k])
+        bytes.append(op[unsafe_offset=k])
     return bytes^
 
 
@@ -268,7 +268,7 @@ struct SseChannel(ChunkSource, Copyable):
             var bytes = List[UInt8](capacity=heartbeat.byte_length())
             var p = heartbeat.unsafe_ptr()
             for k in range(heartbeat.byte_length()):
-                bytes.append(p[k])
+                bytes.append(p[unsafe_offset=k])
             return Optional[List[UInt8]](bytes^)
 
         var event = self._events[self._next_idx].copy()

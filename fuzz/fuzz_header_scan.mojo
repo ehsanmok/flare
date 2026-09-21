@@ -28,7 +28,12 @@ def _scalar_find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
         return -1
     var p = data.unsafe_ptr()
     for i in range(start, n - 3):
-        if p[i] == 13 and p[i + 1] == 10 and p[i + 2] == 13 and p[i + 3] == 10:
+        if (
+            p[unsafe_offset=i] == 13
+            and p[unsafe_offset=i + 1] == 10
+            and p[unsafe_offset=i + 2] == 13
+            and p[unsafe_offset=i + 3] == 10
+        ):
             return i + 4
     return -1
 
@@ -43,19 +48,25 @@ def _scalar_scan_content_length(data: List[UInt8], header_end: Int) -> Int:
     while i + nl <= header_end:
         var found = True
         for j in range(nl):
-            var c = p[i + j]
+            var c = p[unsafe_offset=i + j]
             if c >= 65 and c <= 90:
                 c = c + 32
-            if c != np[j]:
+            if c != np[unsafe_offset=j]:
                 found = False
                 break
         if found:
             var pos = i + nl
-            while pos < header_end and (p[pos] == 32 or p[pos] == 9):
+            while pos < header_end and (
+                p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
+            ):
                 pos += 1
             var result = 0
-            while pos < header_end and p[pos] >= 48 and p[pos] <= 57:
-                result = result * 10 + Int(p[pos]) - 48
+            while (
+                pos < header_end
+                and p[unsafe_offset=pos] >= 48
+                and p[unsafe_offset=pos] <= 57
+            ):
+                result = result * 10 + Int(p[unsafe_offset=pos]) - 48
                 pos += 1
             return result
         i += 1

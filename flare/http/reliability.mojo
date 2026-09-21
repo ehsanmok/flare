@@ -38,7 +38,8 @@ chain stays monomorphised -- no virtual dispatch.
 """
 
 from std.atomic import Atomic, Ordering
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from std.time import perf_counter_ns
 from std.random import random_ui64
 
@@ -57,24 +58,24 @@ def _alloc_cell(n: Int) -> Int:
     double-free across worker copies. One small cell per middleware
     instance (created once at setup) is a negligible, bounded leak.
     """
-    var p = alloc[Int](n)
+    var p = unsafe_alloc[Int](n)
     for i in range(n):
-        (p + i).unsafe_write(0)
+        (p.unsafe_offset(i)).unsafe_write(0)
     return Int(p)
 
 
 @always_inline
 def _cell_get(addr: Int, i: Int) -> Int64:
-    var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
-    var slot = (p + i).unsafe_bitcast[Scalar[DType.int64]]()
-    return Atomic[DType.int64].load[ordering=Ordering.ACQUIRE](slot)
+    var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var slot = (p.unsafe_offset(i)).unsafe_bitcast[Scalar[DType.int64]]()
+    return Atomic[Int64].load[ordering=Ordering.ACQUIRE](slot)
 
 
 @always_inline
 def _cell_set(addr: Int, i: Int, v: Int64):
-    var p = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
-    var slot = (p + i).unsafe_bitcast[Scalar[DType.int64]]()
-    Atomic[DType.int64].store[ordering=Ordering.RELEASE](slot, v)
+    var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var slot = (p.unsafe_offset(i)).unsafe_bitcast[Scalar[DType.int64]]()
+    Atomic[Int64].store[ordering=Ordering.RELEASE](slot, v)
 
 
 @fieldwise_init

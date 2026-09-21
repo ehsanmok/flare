@@ -37,10 +37,10 @@ def target(data: List[UInt8]) raises:
     var mid = len(data) // 2
 
     # ── HeaderMap path ────────────────────────────────────────────────────────
-    var key = String(capacity=mid + 1)
+    var key = String(capacity_bytes=mid + 1)
     for i in range(mid):
         key += chr(Int(data[i]))
-    var val = String(capacity=len(data) - mid + 1)
+    var val = String(capacity_bytes=len(data) - mid + 1)
     for i in range(mid, len(data)):
         val += chr(Int(data[i]))
 
@@ -52,7 +52,7 @@ def target(data: List[UInt8]) raises:
 
     # ── URL port path ─────────────────────────────────────────────────────────
     # Craft `http://host:<port>/` where <port> comes from the first 8 bytes
-    var port_str = String(capacity=8 + 1)
+    var port_str = String(capacity_bytes=8 + 1)
     var port_len = min(8, len(data))
     for i in range(port_len):
         port_str += chr(Int(data[i]))

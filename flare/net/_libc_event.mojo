@@ -12,7 +12,7 @@ Platform struct-layout quirks are documented inline below.
 """
 
 from std.ffi import external_call, c_int, c_uint
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.sys.info import CompilationTarget
 
 # ──────────────────────────────────────────────────────────────────────────────

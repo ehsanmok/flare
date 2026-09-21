@@ -26,7 +26,7 @@ from flare.http.cookie import (
 
 def target_cookie_header(data: List[UInt8]) raises:
     """Fuzz target: parse a Cookie request header from arbitrary bytes."""
-    var s = String(capacity=len(data))
+    var s = String(capacity_bytes=len(data))
     for b in data:
         s += chr(Int(b))
     var cookies = parse_cookie_header(s)
@@ -38,7 +38,7 @@ def target_cookie_header(data: List[UInt8]) raises:
 
 def target_set_cookie(data: List[UInt8]) raises:
     """Fuzz target: parse a Set-Cookie header from arbitrary bytes."""
-    var s = String(capacity=len(data))
+    var s = String(capacity_bytes=len(data))
     for b in data:
         s += chr(Int(b))
     var cookie = parse_set_cookie_header(s)
@@ -61,8 +61,8 @@ def prop_cookie_roundtrip(data: List[UInt8]) raises -> Bool:
             break
         var name_len = Int(data[pos]) % 10 + 1
         pos += 1
-        var name = String(capacity=name_len)
-        for j in range(name_len):
+        var name = String(capacity_bytes=name_len)
+        for _ in range(name_len):
             if pos < len(data):
                 var c = data[pos]
                 # Only use printable ASCII for cookie names (avoid = and ;)

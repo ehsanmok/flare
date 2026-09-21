@@ -175,7 +175,7 @@ def _ext(path: String) -> String:
         if c == 47:  # '/'
             return ""
         if c == 46:  # '.'
-            var out = String(capacity=n - i)
+            var out = String(capacity_bytes=n - i)
             for j in range(i + 1, n):
                 var ec = src[unsafe_offset=j]
                 if ec >= 65 and ec <= 90:

@@ -47,7 +47,7 @@ Skip semantics
 """
 
 from std.ffi import c_int, c_uint, c_size_t, get_errno, external_call
-from std.memory import UnsafePointer, alloc, stack_allocation
+from std.memory import Pointer, alloc, stack_allocation
 from std.testing import assert_equal, assert_true, assert_false
 
 from flare.net._libc import (
@@ -105,20 +105,20 @@ def _make_loopback_listener() raises -> _Listener:
         )
     # Allow rapid rebinding for the next test in the suite.
     var one = stack_allocation[4, UInt8]()
-    (one + 0).unsafe_write(UInt8(1))
+    (one.unsafe_offset(0)).unsafe_write(UInt8(1))
     for k in range(1, 4):
-        (one + k).unsafe_write(UInt8(0))
+        (one.unsafe_offset(k)).unsafe_write(UInt8(0))
     _ = _setsockopt(s, SOL_SOCKET, SO_REUSEADDR, one, c_uint(4))
 
     # Build sockaddr_in for 127.0.0.1:0
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, UInt16(0), ip)
 
     if _bind(s, sa, c_uint(16)) < c_int(0):
@@ -133,7 +133,7 @@ def _make_loopback_listener() raises -> _Listener:
     # Read the kernel-picked port back via getsockname.
     var sa2 = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa2 + i).unsafe_write(UInt8(0))
+        (sa2.unsafe_offset(i)).unsafe_write(UInt8(0))
     var alen = stack_allocation[1, c_uint]()
     alen.unsafe_write(c_uint(16))
     if _getsockname(s, sa2, alen) < c_int(0):
@@ -141,8 +141,8 @@ def _make_loopback_listener() raises -> _Listener:
         _ = _close(s)
         raise Error("getsockname failed: " + msg)
     # sin_port lives at offset 2, big-endian.
-    var hi = Int((sa2 + 2).load())
-    var lo = Int((sa2 + 3).load())
+    var hi = Int((sa2.unsafe_offset(2)).unsafe_load())
+    var lo = Int((sa2.unsafe_offset(3)).unsafe_load())
     return _Listener(s, UInt16((hi << 8) | lo))
 
 
@@ -154,12 +154,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
         raise Error("client socket() failed: " + _strerror(get_errno().value))
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, port, ip)
     if _connect(c, sa, c_uint(16)) < c_int(0):
         var msg = _strerror(get_errno().value)

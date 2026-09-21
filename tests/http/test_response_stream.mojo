@@ -40,7 +40,7 @@ struct _ListSource(ChunkSource, Movable):
 
 
 def _to_str(buf: List[UInt8]) -> String:
-    var out = String(capacity=len(buf) + 1)
+    var out = String(capacity_bytes=len(buf) + 1)
     for b in buf:
         out += chr(Int(b))
     return out^

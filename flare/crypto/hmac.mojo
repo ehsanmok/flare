@@ -21,7 +21,7 @@ JSON Web Signature compact serialisation).
 """
 
 from std.ffi import c_int, OwnedDLHandle
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from ..net.socket import _find_flare_lib
 from ..utils.dylib import dl_sym

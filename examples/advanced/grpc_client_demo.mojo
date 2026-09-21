@@ -9,7 +9,7 @@ request frame, echo the payload back as an LPM reply, set
 ``GrpcClient`` composes on the same ``HttpClient`` HTTP/2 path the rest
 of the library uses -- a unary RPC is one POST whose body is the LPM
 request frame; the reply frame and ``grpc-status`` come back on the same
-H2 stream. No new transport, no ``UnsafePointer`` in user code, and the
+H2 stream. No new transport, no ``Pointer`` in user code, and the
 ``/package.Service/Method`` path is the only gRPC-specific thing the
 caller types.
 

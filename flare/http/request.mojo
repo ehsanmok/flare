@@ -1,7 +1,7 @@
 """HTTP request type."""
 
 from std.collections import Dict, Optional
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
 from json import loads, Value
 from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_cookie_header
@@ -96,7 +96,7 @@ struct Request(Movable):
     ``params()`` / ``param()`` / ``has_param()``, never through the
     raw pointer.
 
-    Modeled as ``Optional[UnsafePointer[...]]`` (pointers are non-null
+    Modeled as ``Optional[Pointer[...]]`` (pointers are non-null
     by design; nullable storage uses ``Optional`` with the null
     address as the niche value)."""
 
@@ -439,7 +439,7 @@ struct Request(Movable):
             return 0
         var result = 0
         for i in range(cl.byte_length()):
-            var c = Int(cl.unsafe_ptr()[i])
+            var c = Int(cl.unsafe_ptr()[unsafe_offset=i])
             if c < 48 or c > 57:
                 break
             result = result * 10 + (c - 48)
@@ -508,9 +508,9 @@ struct Request(Movable):
         var conn = self.headers.get("connection")
         if conn.byte_length() == 0:
             return False
-        var lower = String(capacity=conn.byte_length())
+        var lower = String(capacity_bytes=conn.byte_length())
         for i in range(conn.byte_length()):
-            var c = conn.unsafe_ptr()[i]
+            var c = conn.unsafe_ptr()[unsafe_offset=i]
             if c >= 65 and c <= 90:
                 lower += chr(Int(c) + 32)
             else:

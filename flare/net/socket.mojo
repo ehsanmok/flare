@@ -20,7 +20,7 @@ from std.ffi import (
     get_errno,
     ErrNo,
 )
-from std.memory import Layout, UnsafePointer, stack_allocation, alloc
+from std.memory import Layout, Pointer, stack_allocation, alloc
 from std.os import getenv
 from std.sys.info import CompilationTarget
 

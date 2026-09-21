@@ -40,7 +40,7 @@ References:
 """
 
 from std.collections import List, Optional
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.time import perf_counter_ns
 
 from .control import (
@@ -195,7 +195,7 @@ def _alloc_store_or_zero[
 
 
 def _alloc_store_or_zero_move[
-    S: CacheStore & Deinitable & Movable,
+    S: CacheStore & Deinitable,
 ](var store: S) -> Int:
     """Same as :func:`_alloc_store_or_zero` but moves an
     already-built ``S`` value into the heap cell."""
@@ -207,7 +207,7 @@ def _alloc_store_or_zero_move[
 
 struct Cache[
     Inner: Handler & Copyable,
-    S: CacheStore & Deinitable & Movable,
+    S: CacheStore & Deinitable,
 ](Copyable, Handler):
     """RFC 9111 HTTP cache middleware.
 
@@ -257,7 +257,7 @@ struct Cache[
         self.inner = inner^
         self.store_addr = _alloc_store_or_zero_move[Self.S](store^)
 
-    def _store_ptr(self) -> UnsafePointer[Self.S, MutUntrackedOrigin]:
+    def _store_ptr(self) -> Pointer[Self.S, MutUntrackedOrigin]:
         return Pool[Self.S].get_ptr(self.store_addr)
 
     def _build_key(self, req: Request) raises -> CacheKey:

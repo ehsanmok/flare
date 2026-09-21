@@ -14,7 +14,7 @@ actually ran and saw the argument pointer.
 """
 
 from std.testing import assert_true, assert_equal, TestSuite
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.sys.info import CompilationTarget
 from std.ffi import c_int
 
@@ -30,7 +30,7 @@ from flare.runtime._thread import (
 
 @always_inline
 def _null_out() -> Pointer[UInt8, MutUntrackedOrigin]:
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+    # Pointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
     return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)
 
@@ -38,7 +38,7 @@ def _null_out() -> Pointer[UInt8, MutUntrackedOrigin]:
 def _write_42(
     arg: Pointer[UInt8, MutUntrackedOrigin],
 ) -> Pointer[UInt8, MutUntrackedOrigin]:
-    """Treat ``arg`` as a ``UnsafePointer[Int]`` and write 42 to it."""
+    """Treat ``arg`` as a ``Pointer[Int]`` and write 42 to it."""
     var as_int_ptr = arg.unsafe_bitcast[Int]()
     as_int_ptr[] = 42
     return _null_out()
@@ -47,7 +47,7 @@ def _write_42(
 def _increment_counter(
     arg: Pointer[UInt8, MutUntrackedOrigin],
 ) -> Pointer[UInt8, MutUntrackedOrigin]:
-    """Treat ``arg`` as ``UnsafePointer[Int]``; non-atomic increment,
+    """Treat ``arg`` as ``Pointer[Int]``; non-atomic increment,
     fine because each test thread has its own counter.
     """
     var p = arg.unsafe_bitcast[Int]()

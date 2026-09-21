@@ -37,7 +37,7 @@ def _preface_byte(i: Int) -> UInt8:
     The fuzz harness can't import private symbols directly so we
     keep an in-test copy of the 24-byte H2 preface."""
     var s = String(H2_PREFACE)
-    return s.unsafe_ptr()[i]
+    return s.unsafe_ptr()[unsafe_offset=i]
 
 
 def _classify(data: List[UInt8]) -> Int:

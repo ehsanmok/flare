@@ -49,13 +49,19 @@ def _ends_with_bin(key: String) -> Bool:
     if n < 4:
         return False
     var p = key.unsafe_ptr()
-    if p[n - 4] != UInt8(ord("-")):
+    if p[unsafe_offset=n - 4] != UInt8(ord("-")):
         return False
-    if p[n - 3] != UInt8(ord("b")) and p[n - 3] != UInt8(ord("B")):
+    if p[unsafe_offset=n - 3] != UInt8(ord("b")) and p[
+        unsafe_offset=n - 3
+    ] != UInt8(ord("B")):
         return False
-    if p[n - 2] != UInt8(ord("i")) and p[n - 2] != UInt8(ord("I")):
+    if p[unsafe_offset=n - 2] != UInt8(ord("i")) and p[
+        unsafe_offset=n - 2
+    ] != UInt8(ord("I")):
         return False
-    if p[n - 1] != UInt8(ord("n")) and p[n - 1] != UInt8(ord("N")):
+    if p[unsafe_offset=n - 1] != UInt8(ord("n")) and p[
+        unsafe_offset=n - 1
+    ] != UInt8(ord("N")):
         return False
     return True
 
@@ -67,11 +73,11 @@ def _is_reserved(key: String) -> Bool:
         return False
     var p = key.unsafe_ptr()
     return (
-        p[0] == UInt8(ord("g"))
-        and p[1] == UInt8(ord("r"))
-        and p[2] == UInt8(ord("p"))
-        and p[3] == UInt8(ord("c"))
-        and p[4] == UInt8(ord("-"))
+        p[unsafe_offset=0] == UInt8(ord("g"))
+        and p[unsafe_offset=1] == UInt8(ord("r"))
+        and p[unsafe_offset=2] == UInt8(ord("p"))
+        and p[unsafe_offset=3] == UInt8(ord("c"))
+        and p[unsafe_offset=4] == UInt8(ord("-"))
     )
 
 
@@ -132,7 +138,7 @@ struct GrpcMetadata(Copyable, Defaultable):
         var bytes = List[UInt8]()
         var p = value.unsafe_ptr()
         for i in range(value.byte_length()):
-            bytes.append(p[i])
+            bytes.append(p[unsafe_offset=i])
         self._entries.append(
             GrpcMetadataEntry(key=key, value=bytes^, is_binary=False)
         )

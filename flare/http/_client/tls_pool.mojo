@@ -29,7 +29,8 @@ multiplexed and handled on the h2 path, never returned to this pool.
 
 from std.collections import Dict, List, Optional
 from std.ffi import c_int, external_call
-from std.memory import Layout, UnsafePointer, alloc
+from std.memory import Layout, Pointer, alloc
+from std.memory.alloc import unsafe_alloc
 from std.sys.info import CompilationTarget
 
 from ...tls import TlsStream
@@ -93,7 +94,7 @@ struct TlsConnectionPool(Copyable):
         """Allocate an enabled pool. Non-raising so it can initialize a
         ``read self`` ``HttpClient`` field eagerly, like the QUIC pool
         and the Alt-Svc store."""
-        var p = alloc[_TlsPoolState](1)
+        var p = unsafe_alloc[_TlsPoolState](1)
         p.unsafe_write(
             _TlsPoolState(
                 Dict[String, List[Int]](),
@@ -182,7 +183,7 @@ struct TlsConnectionPool(Copyable):
         sp[].entries[key] = deque^
         sp[].ts_ms[addr] = _monotonic_ms()
 
-    def idle_count(read self) -> Int:
+    def idle_count(imm self) -> Int:
         """Total idle TLS streams across all origins."""
         if not self.enabled():
             return 0

@@ -32,10 +32,10 @@ contract — Caddy, nginx-prometheus-exporter, Envoy stats):
 
 Concurrency note:
 
-Mojo's ``Atomic[DType.*]`` cells are NOT ``Copyable``, so they
-can't live inside a ``List`` / ``InlineArray``. Putting 160
+Mojo's ``Atomic`` cells are NOT ``Copyable``, so they
+can't live inside a ``List`` / ``Array``. Putting 160
 ``Atomic`` cells as separate struct fields would explode the
-declaration; an ``UnsafePointer[Atomic, ...]`` heap allocation
+declaration; an ``Pointer[Atomic, ...]`` heap allocation
 would re-introduce the lifetime-management surface that the
 ``Movable``-only registry is trying to avoid.
 
@@ -50,7 +50,7 @@ For multi-worker aggregation (i.e. exposing a process-wide
 every worker's registry and concatenates the rendered text. A
 follow-up will swap the per-cell type to ``Atomic`` once it
 drops the ``Copyable`` requirement (or once we land an
-``UnsafePointer``-backed ``AtomicArray``).
+``Pointer``-backed ``AtomicArray``).
 
 Cardinality discipline:
 
@@ -380,7 +380,7 @@ struct MetricsRegistry(Copyable, Defaultable):
     def render(self) -> String:
         """Snapshot the registry as a Prometheus text-format
         exposition body."""
-        var out = String(capacity=4096)
+        var out = String(capacity_bytes=4096)
 
         # ── flare_http_requests_total ──
         out += (

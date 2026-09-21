@@ -40,7 +40,7 @@ What this module provides
 
 * **High-level submit/reap API**:
 
-  - ``next_sqe() -> UnsafePointer[UInt8, MutUntrackedOrigin]``
+  - ``next_sqe() -> Pointer[UInt8, MutUntrackedOrigin]``
     — return a writable pointer to the next free SQE slot
     (caller fills via ``prep_*`` helpers from
     :mod:`flare.runtime.io_uring_sqe`).
@@ -88,7 +88,7 @@ References
 
 from std.atomic import Atomic, Ordering
 from std.ffi import external_call, c_int, c_uint, c_size_t, c_long, get_errno
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.sys.info import CompilationTarget
 
 from flare.runtime.io_uring import (
@@ -176,7 +176,7 @@ def libc_mmap(
     debug_assert[assert_mode="safe"](
         fd >= -1, "libc_mmap: fd must be >= -1; got ", fd
     )
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+    # Pointer is non-nullable; build C NULL from a runtime 0.
     var null_addr_int = 0
     var null_addr = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=null_addr_int
@@ -212,7 +212,7 @@ def _atomic_load_u32_acquire(
     """Acquire-load a 32-bit value out of the kernel-shared SQ/CQ
     ring region.
 
-    Uses Mojo's ``Atomic[DType.uint32].load`` with
+    Uses Mojo's ``Atomic[UInt32].load`` with
     ``Ordering.ACQUIRE``, which lowers to a plain ``mov`` +
     compiler fence on x86-64 (TSO) and to ``ldar`` on ARM64
     (the proper acquire load).
@@ -224,7 +224,7 @@ def _atomic_load_u32_acquire(
         Int(ptr) != 0, "_atomic_load_u32_acquire: ptr must be non-NULL"
     )
     var typed = ptr.unsafe_bitcast[Scalar[DType.uint32]]()
-    return Atomic[DType.uint32].load[ordering=Ordering.ACQUIRE](typed)
+    return Atomic[UInt32].load[ordering=Ordering.ACQUIRE](typed)
 
 
 @always_inline
@@ -238,7 +238,7 @@ def _atomic_load_u32_relaxed(
         Int(ptr) != 0, "_atomic_load_u32_relaxed: ptr must be non-NULL"
     )
     var typed = ptr.unsafe_bitcast[Scalar[DType.uint32]]()
-    return Atomic[DType.uint32].load[ordering=Ordering.RELAXED](typed)
+    return Atomic[UInt32].load[ordering=Ordering.RELAXED](typed)
 
 
 @always_inline
@@ -252,7 +252,7 @@ def _atomic_store_u32_release(
         Int(ptr) != 0, "_atomic_store_u32_release: ptr must be non-NULL"
     )
     var typed = ptr.unsafe_bitcast[Scalar[DType.uint32]]()
-    Atomic[DType.uint32].store[ordering=Ordering.RELEASE](typed, value)
+    Atomic[UInt32].store[ordering=Ordering.RELEASE](typed, value)
 
 
 @always_inline
@@ -267,7 +267,7 @@ def _atomic_store_u32_relaxed(
         Int(ptr) != 0, "_atomic_store_u32_relaxed: ptr must be non-NULL"
     )
     var typed = ptr.unsafe_bitcast[Scalar[DType.uint32]]()
-    Atomic[DType.uint32].store[ordering=Ordering.RELAXED](typed, value)
+    Atomic[UInt32].store[ordering=Ordering.RELAXED](typed, value)
 
 
 # ── params-buffer field offsets (echoes io_uring.mojo IoUringParams) ────────
@@ -532,14 +532,14 @@ struct IoUringDriver(Movable):
         interleaved before ``submit_and_wait`` flushes them to
         the kernel.
 
-        Returns ``UnsafePointer()`` (NULL) if the SQ is full
+        Returns ``Pointer()`` (NULL) if the SQ is full
         (cached tail - kernel head == sq_entries).
         """
         # SQ-full check: cached_tail - kernel_head must be < sq_entries.
         var k_head = _atomic_load_u32_acquire(self._sq_head_ptr)
         var pending = Int(self._sq_local_tail) - Int(k_head)
         if pending >= self.sq_entries():
-            # UnsafePointer is non-nullable; C NULL from a runtime 0.
+            # Pointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
             return Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=null_addr

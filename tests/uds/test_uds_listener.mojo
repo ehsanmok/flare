@@ -118,7 +118,7 @@ def test_round_trip_bytes() raises:
     rbuf.resize(64, 0)
     var n = server.read(rbuf.unsafe_ptr(), 64)
     assert_equal(n, 9)
-    var got = String(capacity=10)
+    var got = String(capacity_bytes=10)
     for i in range(9):
         got += chr(Int(rbuf[i]))
     assert_equal(got, "hello uds")
@@ -130,7 +130,7 @@ def test_round_trip_bytes() raises:
     rbuf2.resize(64, 0)
     var n2 = client.read(rbuf2.unsafe_ptr(), 64)
     assert_equal(n2, 5)
-    var got2 = String(capacity=6)
+    var got2 = String(capacity_bytes=6)
     for i in range(5):
         got2 += chr(Int(rbuf2[i]))
     assert_equal(got2, "ack 7")

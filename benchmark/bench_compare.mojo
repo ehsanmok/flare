@@ -43,14 +43,13 @@ comptime _RESPONSE_RAW = "HTTP/1.1 200 OK\r\nserver: flare\r\ncontent-type: appl
 # ── HeaderEncode ──────────────────────────────────────────────────────────────
 
 
-def bench_header_encode(mut b: Bencher) capturing raises:
+def bench_header_encode(mut b: Bencher) raises:
     # Pre-compute wire bytes as a comptime string for maximum throughput.
     comptime wire_str = (
         "Content-Type: application/json\r\nContent-Length: 1234\r\nConnection:"
         " close\r\nDate: some-datetime\r\nSomeHeader: SomeValue\r\n"
     )
 
-    @parameter
     @always_inline
     def call_fn() raises:
         var wire = List[UInt8](capacity=256)
@@ -60,12 +59,11 @@ def bench_header_encode(mut b: Bencher) capturing raises:
             wire.append(ptr[i])
         keep(wire)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
-def bench_header_encode_rt(mut b: Bencher) capturing raises:
+def bench_header_encode_rt(mut b: Bencher) raises:
     # Runtime header construction + serialisation (realistic server path).
-    @parameter
     @always_inline
     def call_fn() raises:
         var hm = HeaderMap()
@@ -78,28 +76,26 @@ def bench_header_encode_rt(mut b: Bencher) capturing raises:
         hm.encode_to(wire)
         keep(wire)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── HeaderParse ───────────────────────────────────────────────────────────────
 
 
-def bench_header_parse(mut b: Bencher) capturing raises:
-    @parameter
+def bench_header_parse(mut b: Bencher) raises:
     @always_inline
     def call_fn() raises:
         var data = _HEADERS_RAW.as_bytes()
         var req = _parse_http_request_bytes(Span[UInt8, _](data))
         keep(req)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── RequestEncode ─────────────────────────────────────────────────────────────
 
 
-def bench_request_encode(mut b: Bencher) capturing raises:
-    @parameter
+def bench_request_encode(mut b: Bencher) raises:
     @always_inline
     def call_fn() raises:
         var req = Request(method=Method.GET, url="/index.html")
@@ -130,28 +126,26 @@ def bench_request_encode(mut b: Bencher) capturing raises:
             wire.append(req.body[i])
         keep(wire)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── RequestParse ──────────────────────────────────────────────────────────────
 
 
-def bench_request_parse(mut b: Bencher) capturing raises:
-    @parameter
+def bench_request_parse(mut b: Bencher) raises:
     @always_inline
     def call_fn() raises:
         var data = _REQUEST_RAW.as_bytes()
         var req = _parse_http_request_bytes(Span[UInt8, _](data))
         keep(req)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── ResponseEncode ────────────────────────────────────────────────────────────
 
 
-def bench_response_encode(mut b: Bencher) capturing raises:
-    @parameter
+def bench_response_encode(mut b: Bencher) raises:
     @always_inline
     def call_fn() raises:
         var resp = Response(status=200, reason="OK")
@@ -191,14 +185,13 @@ def bench_response_encode(mut b: Bencher) capturing raises:
             wire.append(body_bytes[i])
         keep(wire)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── ResponseParse ─────────────────────────────────────────────────────────────
 
 
-def bench_response_parse(mut b: Bencher) capturing raises:
-    @parameter
+def bench_response_parse(mut b: Bencher) raises:
     @always_inline
     def call_fn() raises:
         var data = _RESPONSE_RAW.as_bytes()
@@ -219,7 +212,7 @@ def bench_response_parse(mut b: Bencher) capturing raises:
             return
 
         var pos = 0
-        var status_line = String(capacity=64)
+        var status_line = String(capacity_bytes=64)
         while pos < header_end:
             if data[pos] == 10:
                 pos += 1
@@ -230,7 +223,7 @@ def bench_response_parse(mut b: Bencher) capturing raises:
 
         var headers = HeaderMap()
         while pos < header_end:
-            var line = String(capacity=128)
+            var line = String(capacity_bytes=128)
             while pos < header_end:
                 if data[pos] == 10:
                     pos += 1
@@ -264,7 +257,7 @@ def bench_response_parse(mut b: Bencher) capturing raises:
         resp.headers = headers^
         keep(resp)
 
-    b.iter[call_fn]()
+    b.iter(call_fn)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -280,13 +273,13 @@ def main() raises:
     cfg.verbose_timing = True
 
     var m = Bench(cfg^)
-    m.bench_function[bench_header_encode](BenchId("HeaderEncode"))
-    m.bench_function[bench_header_encode_rt](BenchId("HeaderEncode_rt"))
-    m.bench_function[bench_header_parse](BenchId("HeaderParse"))
-    m.bench_function[bench_request_encode](BenchId("RequestEncode"))
-    m.bench_function[bench_request_parse](BenchId("RequestParse"))
-    m.bench_function[bench_response_encode](BenchId("ResponseEncode"))
-    m.bench_function[bench_response_parse](BenchId("ResponseParse"))
+    m.bench_function(bench_header_encode, BenchId("HeaderEncode"))
+    m.bench_function(bench_header_encode_rt, BenchId("HeaderEncode_rt"))
+    m.bench_function(bench_header_parse, BenchId("HeaderParse"))
+    m.bench_function(bench_request_encode, BenchId("RequestEncode"))
+    m.bench_function(bench_request_parse, BenchId("RequestParse"))
+    m.bench_function(bench_response_encode, BenchId("ResponseEncode"))
+    m.bench_function(bench_response_parse, BenchId("ResponseParse"))
     m.dump_report()
 
     print()

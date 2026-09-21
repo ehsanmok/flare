@@ -29,7 +29,8 @@ Coverage:
 """
 
 from std.ffi import c_int, c_uint, c_size_t, get_errno
-from std.memory import UnsafePointer, alloc, stack_allocation
+from std.memory import Pointer, stack_allocation
+from std.memory.alloc import unsafe_alloc
 from std.testing import assert_equal, assert_true, assert_false
 
 from flare.net._libc import (
@@ -151,18 +152,18 @@ def _make_listener() raises -> _Listener:
     if s < c_int(0):
         raise Error("socket: " + _strerror(get_errno().value))
     var one = stack_allocation[4, UInt8]()
-    (one + 0).unsafe_write(UInt8(1))
+    (one.unsafe_offset(0)).unsafe_write(UInt8(1))
     for k in range(1, 4):
-        (one + k).unsafe_write(UInt8(0))
+        (one.unsafe_offset(k)).unsafe_write(UInt8(0))
     _ = _setsockopt(s, SOL_SOCKET, SO_REUSEADDR, one, c_uint(4))
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, UInt16(0), ip)
     if _bind(s, sa, c_uint(16)) < c_int(0):
         var e = _strerror(get_errno().value)
@@ -174,12 +175,12 @@ def _make_listener() raises -> _Listener:
         raise Error("listen: " + e)
     var sa2 = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa2 + i).unsafe_write(UInt8(0))
+        (sa2.unsafe_offset(i)).unsafe_write(UInt8(0))
     var alen = stack_allocation[1, c_uint]()
     alen.unsafe_write(c_uint(16))
     _ = _getsockname(s, sa2, alen)
-    var hi = Int((sa2 + 2).load())
-    var lo = Int((sa2 + 3).load())
+    var hi = Int((sa2.unsafe_offset(2)).unsafe_load())
+    var lo = Int((sa2.unsafe_offset(3)).unsafe_load())
     return _Listener(s, UInt16((hi << 8) | lo))
 
 
@@ -189,12 +190,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
         raise Error("client socket: " + _strerror(get_errno().value))
     var sa = stack_allocation[16, UInt8]()
     for i in range(16):
-        (sa + i).unsafe_write(UInt8(0))
+        (sa.unsafe_offset(i)).unsafe_write(UInt8(0))
     var ip = stack_allocation[4, UInt8]()
-    (ip + 0).unsafe_write(UInt8(127))
-    (ip + 1).unsafe_write(UInt8(0))
-    (ip + 2).unsafe_write(UInt8(0))
-    (ip + 3).unsafe_write(UInt8(1))
+    (ip.unsafe_offset(0)).unsafe_write(UInt8(127))
+    (ip.unsafe_offset(1)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(2)).unsafe_write(UInt8(0))
+    (ip.unsafe_offset(3)).unsafe_write(UInt8(1))
     _fill_sockaddr_in(sa, port, ip)
     if _connect(c, sa, c_uint(16)) < c_int(0):
         var e = _strerror(get_errno().value)
@@ -284,19 +285,19 @@ def test_submit_send_round_trip() raises:
 
     # Allocate a small recv buffer (32 bytes) and arm a
     # multishot recv on the accepted fd.
-    var rx = alloc[UInt8](32)
+    var rx = unsafe_alloc[UInt8](32)
     for i in range(32):
-        (rx + i).unsafe_write(UInt8(0))
+        (rx.unsafe_offset(i)).unsafe_write(UInt8(0))
     r.arm_recv_multishot(accepted_fd, rx, 32, UInt64(0x42))
 
     # Have the client write 4 bytes via libc send (we're not
     # exercising UringReactor.submit_send for the client side
     # since the client isn't on the ring).
     var tx = stack_allocation[4, UInt8]()
-    (tx + 0).unsafe_write(UInt8(ord("p")))
-    (tx + 1).unsafe_write(UInt8(ord("i")))
-    (tx + 2).unsafe_write(UInt8(ord("n")))
-    (tx + 3).unsafe_write(UInt8(ord("g")))
+    (tx.unsafe_offset(0)).unsafe_write(UInt8(ord("p")))
+    (tx.unsafe_offset(1)).unsafe_write(UInt8(ord("i")))
+    (tx.unsafe_offset(2)).unsafe_write(UInt8(ord("n")))
+    (tx.unsafe_offset(3)).unsafe_write(UInt8(ord("g")))
     var w = _send(client, tx, c_size_t(4), c_int(0))
     assert_equal(Int(w), 4)
 
@@ -309,10 +310,10 @@ def test_submit_send_round_trip() raises:
             var comp = out[i]
             if comp.op == URING_OP_RECV and Int(comp.conn_id) == 0x42:
                 assert_equal(comp.res, 4)
-                assert_equal(Int((rx + 0).load()), ord("p"))
-                assert_equal(Int((rx + 1).load()), ord("i"))
-                assert_equal(Int((rx + 2).load()), ord("n"))
-                assert_equal(Int((rx + 3).load()), ord("g"))
+                assert_equal(Int((rx.unsafe_offset(0)).unsafe_load()), ord("p"))
+                assert_equal(Int((rx.unsafe_offset(1)).unsafe_load()), ord("i"))
+                assert_equal(Int((rx.unsafe_offset(2)).unsafe_load()), ord("n"))
+                assert_equal(Int((rx.unsafe_offset(3)).unsafe_load()), ord("g"))
                 saw_recv = True
                 break
         if saw_recv:
@@ -323,10 +324,10 @@ def test_submit_send_round_trip() raises:
     # Now use UringReactor.submit_send to write a response back
     # over the accepted fd; the client reads it via libc recv.
     var resp = stack_allocation[4, UInt8]()
-    (resp + 0).unsafe_write(UInt8(ord("p")))
-    (resp + 1).unsafe_write(UInt8(ord("o")))
-    (resp + 2).unsafe_write(UInt8(ord("n")))
-    (resp + 3).unsafe_write(UInt8(ord("g")))
+    (resp.unsafe_offset(0)).unsafe_write(UInt8(ord("p")))
+    (resp.unsafe_offset(1)).unsafe_write(UInt8(ord("o")))
+    (resp.unsafe_offset(2)).unsafe_write(UInt8(ord("n")))
+    (resp.unsafe_offset(3)).unsafe_write(UInt8(ord("g")))
     r.submit_send(accepted_fd, resp, 4, UInt64(0x99))
 
     out.clear()
@@ -345,7 +346,7 @@ def test_submit_send_round_trip() raises:
         out.clear()
     assert_true(saw_send, "never saw send completion")
 
-    rx.free()
+    rx.unsafe_free()
     _ = _close(c_int(accepted_fd))
     _ = _close(client)
     _ = _close(listener.fd)
@@ -422,7 +423,7 @@ def test_arm_poll_readable_multishot_round_trip() raises:
     # Now write 8 bytes from the client side.
     var tx = stack_allocation[8, UInt8]()
     for k in range(8):
-        (tx + k).unsafe_write(UInt8(ord("a") + k))
+        (tx.unsafe_offset(k)).unsafe_write(UInt8(ord("a") + k))
     var w = _send(client, tx, c_size_t(8), c_int(0))
     assert_equal(Int(w), 8)
 
@@ -580,9 +581,9 @@ def test_buffer_ring_recv_round_trip() raises:
     comptime BUFS = 4
     comptime BUF_SIZE = 1024
     comptime BGID: UInt16 = 7
-    var pool = alloc[UInt8](BUFS * BUF_SIZE)
+    var pool = unsafe_alloc[UInt8](BUFS * BUF_SIZE)
     for i in range(BUFS * BUF_SIZE):
-        (pool + i).unsafe_write(UInt8(0))
+        (pool.unsafe_offset(i)).unsafe_write(UInt8(0))
     r.arm_provide_buffers(
         addr=UInt64(Int(pool)),
         nbytes_per_buf=BUF_SIZE,
@@ -627,10 +628,10 @@ def test_buffer_ring_recv_round_trip() raises:
 
     # Have the client write 4 bytes.
     var tx = stack_allocation[4, UInt8]()
-    (tx + 0).unsafe_write(UInt8(ord("p")))
-    (tx + 1).unsafe_write(UInt8(ord("o")))
-    (tx + 2).unsafe_write(UInt8(ord("n")))
-    (tx + 3).unsafe_write(UInt8(ord("g")))
+    (tx.unsafe_offset(0)).unsafe_write(UInt8(ord("p")))
+    (tx.unsafe_offset(1)).unsafe_write(UInt8(ord("o")))
+    (tx.unsafe_offset(2)).unsafe_write(UInt8(ord("n")))
+    (tx.unsafe_offset(3)).unsafe_write(UInt8(ord("g")))
     var w = _send(client, tx, c_size_t(4), c_int(0))
     assert_equal(Int(w), 4)
 
@@ -657,11 +658,17 @@ def test_buffer_ring_recv_round_trip() raises:
                 var bid = Int(c.flags >> UInt32(16))
                 assert_true(bid >= 0 and bid < BUFS)
                 # The kernel wrote at pool + bid * BUF_SIZE.
-                var slot = pool + (bid * BUF_SIZE)
-                assert_equal(Int(slot.load()), ord("p"))
-                assert_equal(Int((slot + 1).load()), ord("o"))
-                assert_equal(Int((slot + 2).load()), ord("n"))
-                assert_equal(Int((slot + 3).load()), ord("g"))
+                var slot = pool.unsafe_offset((bid * BUF_SIZE))
+                assert_equal(Int(slot.unsafe_load()), ord("p"))
+                assert_equal(
+                    Int((slot.unsafe_offset(1)).unsafe_load()), ord("o")
+                )
+                assert_equal(
+                    Int((slot.unsafe_offset(2)).unsafe_load()), ord("n")
+                )
+                assert_equal(
+                    Int((slot.unsafe_offset(3)).unsafe_load()), ord("g")
+                )
                 saw_recv = True
                 break
         if saw_recv:
@@ -671,7 +678,7 @@ def test_buffer_ring_recv_round_trip() raises:
     _ = _close(client)
     _ = _close(c_int(accepted_fd))
     _ = _close(listener.fd)
-    pool.free()
+    pool.unsafe_free()
 
 
 # ── PBUF_RING substrate (kernel-mapped buffer ring; 5.19+) ──────────────────
@@ -712,9 +719,9 @@ def test_register_pbuf_ring_recv_round_trip() raises:
     # Allocate the actual buffer storage (independent of the
     # ring; the ring just holds {addr, len, bid} entries that
     # point into this buffer pool).
-    var pool = alloc[UInt8](RING_ENTRIES * BUF_BYTES)
+    var pool = unsafe_alloc[UInt8](RING_ENTRIES * BUF_BYTES)
     for i in range(RING_ENTRIES * BUF_BYTES):
-        (pool + i).unsafe_write(UInt8(0))
+        (pool.unsafe_offset(i)).unsafe_write(UInt8(0))
 
     # Seed the ring: write 4 entries (one per buffer), then
     # release-store the new tail = 4.
@@ -752,10 +759,10 @@ def test_register_pbuf_ring_recv_round_trip() raises:
 
     # Have the client write 4 bytes.
     var tx = stack_allocation[4, UInt8]()
-    (tx + 0).unsafe_write(UInt8(ord("p")))
-    (tx + 1).unsafe_write(UInt8(ord("b")))
-    (tx + 2).unsafe_write(UInt8(ord("u")))
-    (tx + 3).unsafe_write(UInt8(ord("f")))
+    (tx.unsafe_offset(0)).unsafe_write(UInt8(ord("p")))
+    (tx.unsafe_offset(1)).unsafe_write(UInt8(ord("b")))
+    (tx.unsafe_offset(2)).unsafe_write(UInt8(ord("u")))
+    (tx.unsafe_offset(3)).unsafe_write(UInt8(ord("f")))
     var w = _send(client, tx, c_size_t(4), c_int(0))
     assert_equal(Int(w), 4)
 
@@ -788,11 +795,17 @@ def test_register_pbuf_ring_recv_round_trip() raises:
                 )
                 var bid = Int(c.flags >> UInt32(16))
                 assert_true(bid >= 0 and bid < RING_ENTRIES)
-                var slot = pool + (bid * BUF_BYTES)
-                assert_equal(Int(slot.load()), ord("p"))
-                assert_equal(Int((slot + 1).load()), ord("b"))
-                assert_equal(Int((slot + 2).load()), ord("u"))
-                assert_equal(Int((slot + 3).load()), ord("f"))
+                var slot = pool.unsafe_offset((bid * BUF_BYTES))
+                assert_equal(Int(slot.unsafe_load()), ord("p"))
+                assert_equal(
+                    Int((slot.unsafe_offset(1)).unsafe_load()), ord("b")
+                )
+                assert_equal(
+                    Int((slot.unsafe_offset(2)).unsafe_load()), ord("u")
+                )
+                assert_equal(
+                    Int((slot.unsafe_offset(3)).unsafe_load()), ord("f")
+                )
                 saw_recv = True
                 break
         if saw_recv:
@@ -802,7 +815,7 @@ def test_register_pbuf_ring_recv_round_trip() raises:
     _ = _close(client)
     _ = _close(c_int(accepted_fd))
     _ = _close(listener.fd)
-    pool.free()
+    pool.unsafe_free()
     r.unregister_pbuf_ring(BGID, ring_addr, RING_ENTRIES)
 
 
@@ -835,9 +848,9 @@ def test_register_pbuf_ring_multishot_continues() raises:
     comptime BGID: UInt16 = 11
 
     var ring_addr = r.register_pbuf_ring(BGID, RING_ENTRIES)
-    var pool = alloc[UInt8](RING_ENTRIES * BUF_BYTES)
+    var pool = unsafe_alloc[UInt8](RING_ENTRIES * BUF_BYTES)
     for i in range(RING_ENTRIES * BUF_BYTES):
-        (pool + i).unsafe_write(UInt8(0))
+        (pool.unsafe_offset(i)).unsafe_write(UInt8(0))
 
     for i in range(RING_ENTRIES):
         var buf_ptr = Int(pool) + i * BUF_BYTES
@@ -875,8 +888,8 @@ def test_register_pbuf_ring_multishot_continues() raises:
     for i in range(num_writes):
         # Send "Xn" where X='a'+i
         var tx = stack_allocation[2, UInt8]()
-        (tx + 0).unsafe_write(UInt8(ord("a") + i))
-        (tx + 1).unsafe_write(UInt8(ord("0") + i))
+        (tx.unsafe_offset(0)).unsafe_write(UInt8(ord("a") + i))
+        (tx.unsafe_offset(1)).unsafe_write(UInt8(ord("0") + i))
         var w = _send(client, tx, c_size_t(2), c_int(0))
         assert_equal(Int(w), 2)
 
@@ -906,9 +919,11 @@ def test_register_pbuf_ring_multishot_continues() raises:
                     )
                     var bid = Int(c.flags >> UInt32(16))
                     assert_true(bid >= 0 and bid < RING_ENTRIES)
-                    var slot = pool + (bid * BUF_BYTES)
-                    assert_equal(Int(slot.load()), ord("a") + i)
-                    assert_equal(Int((slot + 1).load()), ord("0") + i)
+                    var slot = pool.unsafe_offset((bid * BUF_BYTES))
+                    assert_equal(Int(slot.unsafe_load()), ord("a") + i)
+                    assert_equal(
+                        Int((slot.unsafe_offset(1)).unsafe_load()), ord("0") + i
+                    )
                     seen += 1
                     got_this_round = True
                     # Refill the same bid back so the ring
@@ -934,7 +949,7 @@ def test_register_pbuf_ring_multishot_continues() raises:
     _ = _close(client)
     _ = _close(c_int(accepted_fd))
     _ = _close(listener.fd)
-    pool.free()
+    pool.unsafe_free()
     r.unregister_pbuf_ring(BGID, ring_addr, RING_ENTRIES)
 
 

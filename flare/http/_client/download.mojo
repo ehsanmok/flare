@@ -37,7 +37,7 @@ comptime _DL_MODE_CHUNKED: Int = 1
 comptime _DL_MODE_CLOSE: Int = 2
 
 
-struct HttpDownload[R: Readable & Movable](Movable):
+struct HttpDownload[R: Readable](Movable):
     """Incremental HTTP/1.1 response body reader over a ``Readable``.
 
     Construct by moving a transport that has already had the request
@@ -400,7 +400,7 @@ def _parse_hex(s: String) raises -> Int:
     if s.byte_length() == 0:
         raise NetworkError("HTTP download: empty chunk size")
     for i in range(s.byte_length()):
-        var c = Int(s.unsafe_ptr()[i])
+        var c = Int(s.unsafe_ptr()[unsafe_offset=i])
         var d: Int
         if c >= 48 and c <= 57:
             d = c - 48

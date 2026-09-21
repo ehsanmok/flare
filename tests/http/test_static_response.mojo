@@ -36,7 +36,7 @@ from flare.net import SocketAddr
 @always_inline
 def _bytes_to_string(buf: List[UInt8]) -> String:
     """Decode a wire-form buffer back into a ``String`` for regex-ish checks."""
-    var out = String(capacity=len(buf) + 1)
+    var out = String(capacity_bytes=len(buf) + 1)
     for b in buf:
         out += chr(Int(b))
     return out^

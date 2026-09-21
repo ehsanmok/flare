@@ -21,7 +21,7 @@ def target(data: List[UInt8]) raises:
     must decode back to the original payload (with the test
     fixed key).
     """
-    var s = String(capacity=len(data) + 1)
+    var s = String(capacity_bytes=len(data) + 1)
     for i in range(len(data)):
         s += chr(Int(data[i]))
 

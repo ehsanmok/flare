@@ -59,7 +59,7 @@ struct GreetingBody(Body, Copyable):
 
 
 def _wire_str(wire: List[UInt8]) -> String:
-    var s = String(capacity=len(wire) + 1)
+    var s = String(capacity_bytes=len(wire) + 1)
     for b in wire:
         s += chr(Int(b))
     return s^

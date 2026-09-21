@@ -252,13 +252,13 @@ struct HeaderMap(Movable, Writable):
             var kp = k.unsafe_ptr()
             var kn = k.byte_length()
             for j in range(kn):
-                buf.append(kp[j])
+                buf.append(kp[unsafe_offset=j])
             buf.append(58)
             buf.append(32)
             var v = self._values[i]
             var vp = v.unsafe_ptr()
             var vn = v.byte_length()
             for j in range(vn):
-                buf.append(vp[j])
+                buf.append(vp[unsafe_offset=j])
             buf.append(13)
             buf.append(10)

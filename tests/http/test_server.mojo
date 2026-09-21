@@ -661,7 +661,7 @@ def test_server_response_with_keepalive() raises:
     var n = client.read(resp_buf.unsafe_ptr(), 4096)
     assert_true(n > 0)
 
-    var resp_str = String(capacity=n)
+    var resp_str = String(capacity_bytes=n)
     for i in range(n):
         resp_str += chr(Int(resp_buf[i]))
     assert_true("keep-alive" in resp_str)
@@ -693,7 +693,7 @@ def test_server_response_with_close() raises:
     resp_buf.resize(4096, 0)
     var n = client.read(resp_buf.unsafe_ptr(), 4096)
 
-    var resp_str = String(capacity=n)
+    var resp_str = String(capacity_bytes=n)
     for i in range(n):
         resp_str += chr(Int(resp_buf[i]))
     assert_true("close" in resp_str)
@@ -765,7 +765,7 @@ def test_server_response_content_length() raises:
     resp_buf.resize(4096, 0)
     var n = client.read(resp_buf.unsafe_ptr(), 4096)
 
-    var resp_str = String(capacity=n)
+    var resp_str = String(capacity_bytes=n)
     for i in range(n):
         resp_str += chr(Int(resp_buf[i]))
     assert_true("Content-Length: 12" in resp_str)
@@ -794,7 +794,7 @@ def test_server_empty_body_response() raises:
     resp_buf.resize(4096, 0)
     var n = client.read(resp_buf.unsafe_ptr(), 4096)
 
-    var resp_str = String(capacity=n)
+    var resp_str = String(capacity_bytes=n)
     for i in range(n):
         resp_str += chr(Int(resp_buf[i]))
     assert_true("Content-Length: 0" in resp_str)

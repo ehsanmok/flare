@@ -64,13 +64,13 @@ def target(data: List[UInt8]) raises:
     if len(data) < 4:
         return
     var split = (Int(data[0]) % (len(data) - 1)) + 1
-    var name = String(capacity=split + 1)
+    var name = String(capacity_bytes=split + 1)
     for i in range(split):
         var c = Int(data[i]) & 0x7F
         if c < 0x20:
             c += 0x20
         name += chr(c)
-    var value = String(capacity=len(data) - split + 1)
+    var value = String(capacity_bytes=len(data) - split + 1)
     for i in range(split, len(data)):
         var c = Int(data[i]) & 0x7F
         if c < 0x20:

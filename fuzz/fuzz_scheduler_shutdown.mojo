@@ -17,7 +17,7 @@ under the lean default env. Earlier versions of flare (<= ) could
 not import ``flare.runtime.scheduler`` from a mozz harness at all
 because the scheduler's libc ``free`` FFI conflicted with the stdlib's
 own ``free`` declaration at MLIR lowering time; switched every
-flare alloc/free pair to the native ``UnsafePointer.alloc`` / ``.free``
+flare alloc/free pair to the native ``Pointer.alloc`` / ``.free``
 pair, so that build conflict no longer exists.
 
 Run:
@@ -37,14 +37,14 @@ from flare.net import SocketAddr
 
 @always_inline
 def _null_arg() -> _OpaquePtr:
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+    # Pointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
     return _OpaquePtr(unsafe_from_address=null_addr)
 
 
 def _increment(arg: _OpaquePtr) -> _OpaquePtr:
     """Increment the int at ``arg`` and return NULL."""
-    # UnsafePointer dropped __bool__; check the address explicitly.
+    # Pointer dropped __bool__; check the address explicitly.
     if Int(arg) != 0:
         var p = arg.unsafe_bitcast[Int]()
         p[] = p[] + 1

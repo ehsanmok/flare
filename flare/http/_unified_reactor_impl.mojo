@@ -58,7 +58,7 @@ kernel wakes one worker per accept event.
 from std.builtin.debug_assert import debug_assert
 from std.collections import Dict, Optional
 from std.ffi import c_int, get_errno
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from flare.http.cancel import CancelReason
 from flare.http.handler import Handler
@@ -466,7 +466,7 @@ def _migrate_tls(
 
     Both halves of the connection move: the fd is detached and rewrapped
     exactly as ``_migrate_pending`` does, and the ``SSL*`` is passed via
-    ``TlsTransport.release`` / ``adopt`` because an ``UnsafePointer``
+    ``TlsTransport.release`` / ``adopt`` because an ``Pointer``
     deref has no tracked origin to ``^``-move a field out of.
 
     Returns ``True`` on success; ``False`` means the entry was already
@@ -572,7 +572,7 @@ def _migrate_pending(
     )
     var pending_ptr = _pending_conn_ptr_from_int(pending_addr)
     # Snapshot what we need OUT of the pending handle before
-    # destroying it. UnsafePointer dereference does not give
+    # destroying it. Pointer dereference does not give
     # Mojo a tracked origin, so we cannot ``^`` -move the
     # ``_stream`` field directly out of ``pending_ptr[]``.
     var prefaced = pending_ptr[].take_stream_and_buf()
@@ -1132,7 +1132,7 @@ def run_unified_reactor_loop[
             preface peek decides a connection is h2).
         handler: User's request handler.
         stopping: External stop flag; checked each loop iteration
-            via a fresh :class:`UnsafePointer` so the optimiser
+            via a fresh :class:`Pointer` so the optimiser
             cannot LICM-hoist the load (the multicore Scheduler
             mutates it from another thread).
 

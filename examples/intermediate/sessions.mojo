@@ -95,7 +95,7 @@ def main() raises:
     # ── 5. Manual decode ───────────────────────────────────────────────────
     print("── 5. Manual signed_cookie_decode ──")
     var decoded = signed_cookie_decode(token, key)
-    var as_string = String(capacity=len(decoded) + 1)
+    var as_string = String(capacity_bytes=len(decoded) + 1)
     for b in decoded:
         as_string += chr(Int(b))
     print(" payload :", as_string)

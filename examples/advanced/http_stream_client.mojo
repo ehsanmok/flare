@@ -47,7 +47,7 @@ def main() raises:
     var url = "http://127.0.0.1:" + String(port) + "/"
     var total = 0
     var pulls = 0
-    var wire = String("")
+    var wire: String
     try:
         var c = HttpClient()
         var r = c.get_streaming(url)

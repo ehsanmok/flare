@@ -102,7 +102,10 @@ def test_writev_delivers_concatenated_bytes_to_peer() raises:
     var expected = part1 + part2 + part3
     var ep = expected.as_bytes()
     for i in range(total):
-        assert_equal(Int(buf.unsafe_ptr()[i]), Int(ep.unsafe_ptr()[i]))
+        assert_equal(
+            Int(buf.unsafe_ptr()[unsafe_offset=i]),
+            Int(ep.unsafe_ptr()[unsafe_offset=i]),
+        )
 
     server_side.close()
     client.close()
@@ -137,7 +140,10 @@ def test_writev_with_zero_length_cells_skips_them() raises:
     assert_equal(n, 7)
     var dp = data.as_bytes()
     for i in range(7):
-        assert_equal(Int(buf.unsafe_ptr()[i]), Int(dp.unsafe_ptr()[i]))
+        assert_equal(
+            Int(buf.unsafe_ptr()[unsafe_offset=i]),
+            Int(dp.unsafe_ptr()[unsafe_offset=i]),
+        )
 
     server_side.close()
     client.close()
@@ -166,7 +172,10 @@ def test_writev_single_cell_matches_send_semantics() raises:
     assert_equal(n, data.byte_length())
     var dp = data.as_bytes()
     for i in range(data.byte_length()):
-        assert_equal(Int(buf.unsafe_ptr()[i]), Int(dp.unsafe_ptr()[i]))
+        assert_equal(
+            Int(buf.unsafe_ptr()[unsafe_offset=i]),
+            Int(dp.unsafe_ptr()[unsafe_offset=i]),
+        )
 
     server_side.close()
     client.close()

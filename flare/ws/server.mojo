@@ -14,7 +14,7 @@ The upgrade handshake (§4.2):
 
 from std.builtin.debug_assert import debug_assert
 from std.ffi import OwnedDLHandle, c_int
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from .frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
 from ..crypto.base64 import base64_encode as _b64_encode_srv
@@ -115,7 +115,7 @@ def _read_line_srv(mut stream: TcpStream) raises -> String:
     Returns:
         Line content without the terminator.
     """
-    var line = String(capacity=256)
+    var line = String(capacity_bytes=256)
     var buf = List[UInt8](capacity=1)
     buf.append(UInt8(0))
     while True:
@@ -132,7 +132,7 @@ def _read_line_srv(mut stream: TcpStream) raises -> String:
 
 def _lower_srv(s: String) -> String:
     """Return ASCII-lowercase of ``s``."""
-    var out = String(capacity=s.byte_length())
+    var out = String(capacity_bytes=s.byte_length())
     for i in range(s.byte_length()):
         var c = s.unsafe_ptr()[unsafe_offset=i]
         if c >= 65 and c <= 90:
@@ -196,7 +196,7 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> _WsUpgradeRequest:
     var pos = 0
 
     def read_line(data: Span[UInt8, _], mut pos: Int) -> String:
-        var line = String(capacity=256)
+        var line = String(capacity_bytes=256)
         while pos < len(data):
             var c = data[pos]
             pos += 1
@@ -842,12 +842,10 @@ def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
         ctx_addr != 0,
         "_ws_offload_entry: ctx pointer must be non-NULL",
     )
-    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=ctx_addr
-    )
-    var ctx_ptr = raw.bitcast[_WsOffloadCtx]()
-    var ctx = ctx_ptr.take_pointee()
-    ctx_ptr.free()
+    var raw = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=ctx_addr)
+    var ctx_ptr = raw.unsafe_bitcast[_WsOffloadCtx]()
+    var ctx = ctx_ptr.unsafe_take_pointee()
+    ctx_ptr.unsafe_free()
     try:
         ctx.handler(ctx.conn)
     except e:
@@ -876,15 +874,15 @@ def _spawn_ws_offload(
             reachable on demand while there is no cap on offloaded
             threads.
     """
-    from std.memory import alloc
+    from std.memory.alloc import unsafe_alloc
 
-    var ctx_ptr = alloc[_WsOffloadCtx](1)
+    var ctx_ptr = unsafe_alloc[_WsOffloadCtx](1)
     debug_assert[assert_mode="safe"](
         Int(ctx_ptr) != 0,
-        "_spawn_ws_offload: alloc[_WsOffloadCtx] returned NULL",
+        "_spawn_ws_offload: unsafe_alloc[_WsOffloadCtx] returned NULL",
     )
-    ctx_ptr.init_pointee_move(_WsOffloadCtx(conn^, handler))
-    var arg = UnsafePointer[UInt8, MutUntrackedOrigin](
+    ctx_ptr.unsafe_write(_WsOffloadCtx(conn^, handler))
+    var arg = Pointer[UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(ctx_ptr)
     )
     var th: ThreadHandle
@@ -892,7 +890,7 @@ def _spawn_ws_offload(
         th = ThreadHandle.spawn[_ws_offload_entry](arg)
     except e:
         ctx_ptr.unsafe_deinit_pointee()
-        ctx_ptr.free()
+        ctx_ptr.unsafe_free()
         raise e
     # No free on this path even if it raises: the thread is already
     # running and owns the context, so a free here would be a double
@@ -936,9 +934,7 @@ def _ws_worker_entry(arg: _OpaquePtr) -> _OpaquePtr:
         ctx_addr != 0,
         "_ws_worker_entry: ctx pointer must be non-NULL",
     )
-    var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=ctx_addr
-    )
+    var raw = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=ctx_addr)
     var ctx_ptr = raw.unsafe_bitcast[_WsWorkerCtx]()
     try:
         while True:
@@ -947,11 +943,9 @@ def _ws_worker_entry(arg: _OpaquePtr) -> _OpaquePtr:
             _handle_ws_connection(stream^, peer, ctx_ptr[].handler)
     except:
         pass
-    # UnsafePointer is non-nullable; build C NULL from a runtime 0.
+    # Pointer is non-nullable; build C NULL from a runtime 0.
     var null_addr = 0
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=null_addr
-    )
+    return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)
 
 
 def _ws_serve_multicore(
@@ -981,29 +975,32 @@ def _ws_serve_multicore(
     if num_workers <= 1:
         raise Error("_ws_serve_multicore: num_workers must be >= 2")
 
-    from std.memory import alloc
+    from std.memory.alloc import unsafe_alloc
 
     # Heap-allocate one _WsWorkerCtx per worker via the native
     # Mojo allocator. We keep the ctx addresses in a List[Int]
     # since List[ThreadHandle] is not legal (ThreadHandle is
     # Movable-only by design -- POSIX forbids double-join, so
     # the type is non-Copyable; see flare/runtime/_thread.mojo).
-    # ThreadHandles themselves live in an UnsafePointer-backed
+    # ThreadHandles themselves live in an Pointer-backed
     # array we walk by index.
     var ctx_addrs = List[Int]()
-    var threads_ptr = alloc[ThreadHandle](num_workers)
+    var threads_ptr = unsafe_alloc[ThreadHandle](num_workers)
     debug_assert[assert_mode="safe"](
         Int(threads_ptr) != 0,
-        "_ws_serve_multicore: alloc[ThreadHandle] returned NULL",
+        "_ws_serve_multicore: unsafe_alloc[ThreadHandle] returned NULL",
     )
 
     for i in range(num_workers):
         var listener = bind_reuseport(addr)
         var ctx = _WsWorkerCtx(listener^, handler)
-        var ctx_ptr = alloc[_WsWorkerCtx](1)
+        var ctx_ptr = unsafe_alloc[_WsWorkerCtx](1)
         debug_assert[assert_mode="safe"](
             Int(ctx_ptr) != 0,
-            "_ws_serve_multicore: alloc[_WsWorkerCtx] returned NULL on worker ",
+            (
+                "_ws_serve_multicore: unsafe_alloc[_WsWorkerCtx] returned NULL"
+                " on worker "
+            ),
             i,
         )
         ctx_ptr.unsafe_write(ctx^)
@@ -1011,11 +1008,9 @@ def _ws_serve_multicore(
         var addr_int = Int(arg)
         ctx_addrs.append(addr_int)
         var th = ThreadHandle.spawn[_ws_worker_entry](
-            UnsafePointer[UInt8, MutUntrackedOrigin](
-                unsafe_from_address=addr_int
-            )
+            Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr_int)
         )
-        (threads_ptr + i).unsafe_write(th^)
+        (threads_ptr.unsafe_offset(i)).unsafe_write(th^)
 
     # Workers run forever; this join blocks until each pthread
     # exits (normally never, since the per-worker listener
@@ -1023,7 +1018,7 @@ def _ws_serve_multicore(
     # would unblock the worker's accept call -- the intended
     # graceful-shutdown handle once WsServer grows a drain API.
     for i in range(num_workers):
-        (threads_ptr + i)[].join()
+        (threads_ptr.unsafe_offset(i))[].join()
     # Free per-worker contexts now the threads are joined.
     for i in range(len(ctx_addrs)):
         debug_assert[assert_mode="safe"](
@@ -1031,9 +1026,9 @@ def _ws_serve_multicore(
             "_ws_serve_multicore: ctx_addrs[i] is null on free; i=",
             i,
         )
-        var raw = UnsafePointer[UInt8, MutUntrackedOrigin](
+        var raw = Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=ctx_addrs[i]
         )
         raw.unsafe_bitcast[_WsWorkerCtx]().unsafe_deinit_pointee()
-        raw.free()
-    threads_ptr.free()
+        raw.unsafe_free()
+    threads_ptr.unsafe_free()

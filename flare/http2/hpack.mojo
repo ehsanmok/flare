@@ -322,11 +322,11 @@ struct HpackDecoder(Copyable, Defaultable):
                 huffman_decode(encoded, decoded)
             except e:
                 raise Error("hpack: Huffman decode failed: " + String(e))
-            var s = String(capacity=len(decoded) + 1)
+            var s = String(capacity_bytes=len(decoded) + 1)
             for i in range(len(decoded)):
                 s += chr(Int(decoded[i]))
             return StringPair(s^, off + slen)
-        var s = String(capacity=slen + 1)
+        var s = String(capacity_bytes=slen + 1)
         for i in range(slen):
             s += chr(Int(buf[off + i]))
         return StringPair(s^, off + slen)

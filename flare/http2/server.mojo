@@ -57,7 +57,7 @@ from .state import Connection, Http2ErrorCode, Stream, StreamState
 def _lower_ascii(k: String) -> String:
     """Lowercase ASCII ``A-Z`` in a header name (HTTP/2 requires
     lowercase field names, RFC 9113 8.2.1)."""
-    var out = String(capacity=k.byte_length() + 1)
+    var out = String(capacity_bytes=k.byte_length() + 1)
     var kp = k.unsafe_ptr()
     for j in range(k.byte_length()):
         var c = Int(kp[unsafe_offset=j])
@@ -545,7 +545,7 @@ struct Http2Connection(Defaultable, Movable):
         for i in range(len(resp.headers._keys)):
             var k = resp.headers._keys[i]
             var v = resp.headers._values[i]
-            var lk = String(capacity=k.byte_length() + 1)
+            var lk = String(capacity_bytes=k.byte_length() + 1)
             var kp = k.unsafe_ptr()
             for j in range(k.byte_length()):
                 var c = Int(kp[unsafe_offset=j])
@@ -570,7 +570,7 @@ struct Http2Connection(Defaultable, Movable):
         for i in range(len(resp.trailers._keys)):
             var tk = resp.trailers._keys[i]
             var tv = resp.trailers._values[i]
-            var ltk = String(capacity=tk.byte_length() + 1)
+            var ltk = String(capacity_bytes=tk.byte_length() + 1)
             var tkp = tk.unsafe_ptr()
             for j in range(tk.byte_length()):
                 var tc = Int(tkp[unsafe_offset=j])

@@ -26,7 +26,7 @@ Masking (§5.3):
 """
 
 from std.format import Writable, Writer
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 # SIMD chunk width for XOR masking (matches bench_ws_mask.mojo)
 comptime _SIMD_W: Int = 32

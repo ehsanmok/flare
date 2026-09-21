@@ -136,7 +136,7 @@ def _send_request_and_recv_response(
 
     # Drain the response. Loop until we have the full body.
     var buf = stack_allocation[4096, UInt8]()
-    var got = String(capacity=4096)
+    var got = String(capacity_bytes=4096)
     var attempts = 0
     while attempts < 16 and (body not in got or "\r\n\r\n" not in got):
         attempts += 1

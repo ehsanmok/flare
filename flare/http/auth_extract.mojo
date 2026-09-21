@@ -208,18 +208,18 @@ def _b64_decode(s: String) raises AuthError -> List[UInt8]:
     out.reserve(n // 4 * 3)
     var p = s.unsafe_ptr()
     var pad = 0
-    if n >= 1 and Int(p[n - 1]) == ord("="):
+    if n >= 1 and Int(p[unsafe_offset=n - 1]) == ord("="):
         pad = 1
-    if n >= 2 and Int(p[n - 2]) == ord("="):
+    if n >= 2 and Int(p[unsafe_offset=n - 2]) == ord("="):
         pad = 2
     if pad > 2:
         raise AuthError(_variant=7, detail=String(""))
     var blocks = n // 4
     for blk in range(blocks):
-        var v0 = _b64_value(Int(p[blk * 4 + 0]))
-        var v1 = _b64_value(Int(p[blk * 4 + 1]))
-        var v2_byte = Int(p[blk * 4 + 2])
-        var v3_byte = Int(p[blk * 4 + 3])
+        var v0 = _b64_value(Int(p[unsafe_offset=blk * 4 + 0]))
+        var v1 = _b64_value(Int(p[unsafe_offset=blk * 4 + 1]))
+        var v2_byte = Int(p[unsafe_offset=blk * 4 + 2])
+        var v3_byte = Int(p[unsafe_offset=blk * 4 + 3])
         var v2 = -1 if v2_byte == ord("=") else _b64_value(v2_byte)
         var v3 = -1 if v3_byte == ord("=") else _b64_value(v3_byte)
         if v0 < 0 or v1 < 0:
@@ -279,29 +279,47 @@ def parse_bearer_token(authz: String) raises AuthError -> String:
     var p = authz.unsafe_ptr()
     var n = authz.byte_length()
     var i = 0
-    while i < n and Int(p[i]) == ord(" "):
+    while i < n and Int(p[unsafe_offset=i]) == ord(" "):
         i += 1
     if i + 7 > n:
         raise AuthError(_variant=3, detail=String("need 7 bytes for 'Bearer '"))
     var scheme_match = (
-        (Int(p[i]) == ord("B") or Int(p[i]) == ord("b"))
-        and (Int(p[i + 1]) == ord("E") or Int(p[i + 1]) == ord("e"))
-        and (Int(p[i + 2]) == ord("A") or Int(p[i + 2]) == ord("a"))
-        and (Int(p[i + 3]) == ord("R") or Int(p[i + 3]) == ord("r"))
-        and (Int(p[i + 4]) == ord("E") or Int(p[i + 4]) == ord("e"))
-        and (Int(p[i + 5]) == ord("R") or Int(p[i + 5]) == ord("r"))
-        and Int(p[i + 6]) == ord(" ")
+        (
+            Int(p[unsafe_offset=i]) == ord("B")
+            or Int(p[unsafe_offset=i]) == ord("b")
+        )
+        and (
+            Int(p[unsafe_offset=i + 1]) == ord("E")
+            or Int(p[unsafe_offset=i + 1]) == ord("e")
+        )
+        and (
+            Int(p[unsafe_offset=i + 2]) == ord("A")
+            or Int(p[unsafe_offset=i + 2]) == ord("a")
+        )
+        and (
+            Int(p[unsafe_offset=i + 3]) == ord("R")
+            or Int(p[unsafe_offset=i + 3]) == ord("r")
+        )
+        and (
+            Int(p[unsafe_offset=i + 4]) == ord("E")
+            or Int(p[unsafe_offset=i + 4]) == ord("e")
+        )
+        and (
+            Int(p[unsafe_offset=i + 5]) == ord("R")
+            or Int(p[unsafe_offset=i + 5]) == ord("r")
+        )
+        and Int(p[unsafe_offset=i + 6]) == ord(" ")
     )
     if not scheme_match:
         raise AuthError(_variant=4, detail=String("expected Bearer"))
     i += 7
-    while i < n and Int(p[i]) == ord(" "):
+    while i < n and Int(p[unsafe_offset=i]) == ord(" "):
         i += 1
     if i >= n:
         raise AuthError(_variant=5, detail=String(""))
-    var out = String(capacity=n - i)
+    var out = String(capacity_bytes=n - i)
     for j in range(i, n):
-        out += chr(Int(p[j]))
+        out += chr(Int(p[unsafe_offset=j]))
     return out^
 
 
@@ -335,28 +353,43 @@ def parse_basic_credentials(authz: String) raises AuthError -> BasicCredentials:
     var p = authz.unsafe_ptr()
     var n = authz.byte_length()
     var i = 0
-    while i < n and Int(p[i]) == ord(" "):
+    while i < n and Int(p[unsafe_offset=i]) == ord(" "):
         i += 1
     if i + 6 > n:
         raise AuthError(_variant=3, detail=String("need 6 bytes for 'Basic '"))
     var scheme_match = (
-        (Int(p[i]) == ord("B") or Int(p[i]) == ord("b"))
-        and (Int(p[i + 1]) == ord("A") or Int(p[i + 1]) == ord("a"))
-        and (Int(p[i + 2]) == ord("S") or Int(p[i + 2]) == ord("s"))
-        and (Int(p[i + 3]) == ord("I") or Int(p[i + 3]) == ord("i"))
-        and (Int(p[i + 4]) == ord("C") or Int(p[i + 4]) == ord("c"))
-        and Int(p[i + 5]) == ord(" ")
+        (
+            Int(p[unsafe_offset=i]) == ord("B")
+            or Int(p[unsafe_offset=i]) == ord("b")
+        )
+        and (
+            Int(p[unsafe_offset=i + 1]) == ord("A")
+            or Int(p[unsafe_offset=i + 1]) == ord("a")
+        )
+        and (
+            Int(p[unsafe_offset=i + 2]) == ord("S")
+            or Int(p[unsafe_offset=i + 2]) == ord("s")
+        )
+        and (
+            Int(p[unsafe_offset=i + 3]) == ord("I")
+            or Int(p[unsafe_offset=i + 3]) == ord("i")
+        )
+        and (
+            Int(p[unsafe_offset=i + 4]) == ord("C")
+            or Int(p[unsafe_offset=i + 4]) == ord("c")
+        )
+        and Int(p[unsafe_offset=i + 5]) == ord(" ")
     )
     if not scheme_match:
         raise AuthError(_variant=4, detail=String("expected Basic"))
     i += 6
-    while i < n and Int(p[i]) == ord(" "):
+    while i < n and Int(p[unsafe_offset=i]) == ord(" "):
         i += 1
     if i >= n:
         raise AuthError(_variant=5, detail=String(""))
-    var b64 = String(capacity=n - i)
+    var b64 = String(capacity_bytes=n - i)
     for j in range(i, n):
-        b64 += chr(Int(p[j]))
+        b64 += chr(Int(p[unsafe_offset=j]))
     var raw = _b64_decode(b64)
     var raw_n = len(raw)
     var split = -1
@@ -366,10 +399,10 @@ def parse_basic_credentials(authz: String) raises AuthError -> BasicCredentials:
             break
     if split < 0:
         raise AuthError(_variant=10, detail=String(""))
-    var user = String(capacity=split)
+    var user = String(capacity_bytes=split)
     for k in range(split):
         user += chr(Int(raw[k]))
-    var pw = String(capacity=raw_n - split - 1)
+    var pw = String(capacity_bytes=raw_n - split - 1)
     for k in range(split + 1, raw_n):
         pw += chr(Int(raw[k]))
     return BasicCredentials(user^, pw^)
@@ -463,7 +496,7 @@ def csrf_token_b64url(token_bytes: List[UInt8]) -> String:
     CSRF cookie shape).
     """
     var n = len(token_bytes)
-    var out = String(capacity=((n + 2) // 3) * 4)
+    var out = String(capacity_bytes=((n + 2) // 3) * 4)
     var alphabet = String(
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     )
@@ -473,21 +506,21 @@ def csrf_token_b64url(token_bytes: List[UInt8]) -> String:
         var a = Int(token_bytes[i])
         var b = Int(token_bytes[i + 1])
         var c = Int(token_bytes[i + 2])
-        out += chr(Int(ap[a >> 2]))
-        out += chr(Int(ap[((a & 3) << 4) | (b >> 4)]))
-        out += chr(Int(ap[((b & 0xF) << 2) | (c >> 6)]))
-        out += chr(Int(ap[c & 0x3F]))
+        out += chr(Int(ap[unsafe_offset=a >> 2]))
+        out += chr(Int(ap[unsafe_offset=((a & 3) << 4) | (b >> 4)]))
+        out += chr(Int(ap[unsafe_offset=((b & 0xF) << 2) | (c >> 6)]))
+        out += chr(Int(ap[unsafe_offset=c & 0x3F]))
         i += 3
     if n - i == 1:
         var a = Int(token_bytes[i])
-        out += chr(Int(ap[a >> 2]))
-        out += chr(Int(ap[(a & 3) << 4]))
+        out += chr(Int(ap[unsafe_offset=a >> 2]))
+        out += chr(Int(ap[unsafe_offset=(a & 3) << 4]))
     elif n - i == 2:
         var a = Int(token_bytes[i])
         var b = Int(token_bytes[i + 1])
-        out += chr(Int(ap[a >> 2]))
-        out += chr(Int(ap[((a & 3) << 4) | (b >> 4)]))
-        out += chr(Int(ap[(b & 0xF) << 2]))
+        out += chr(Int(ap[unsafe_offset=a >> 2]))
+        out += chr(Int(ap[unsafe_offset=((a & 3) << 4) | (b >> 4)]))
+        out += chr(Int(ap[unsafe_offset=(b & 0xF) << 2]))
     return out^
 
 
@@ -508,7 +541,7 @@ def csrf_token_compare(a: String, b: String) -> Bool:
     var bp = b.unsafe_ptr()
     var diff = UInt8(0)
     for i in range(n):
-        diff |= ap[i] ^ bp[i]
+        diff |= ap[unsafe_offset=i] ^ bp[unsafe_offset=i]
     return diff == UInt8(0)
 
 
