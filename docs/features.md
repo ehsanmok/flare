@@ -410,6 +410,44 @@ machine, and congestion controller round-trips end-to-end. The
 runnable server example at [`http3_server.mojo`](../examples/advanced/http3_server.mojo)
 serves a single `Handler` over HTTP/1.1 + HTTP/2 + HTTP/3 simultaneously.
 
+**Limits and checks the server now enforces.** These came in with the
+v0.11 audit fixes; before them the server accepted what follows.
+
+- A handler that raises, or a request the h3 layer cannot build, now
+  ends only that stream: `400` for a malformed request, `500` for a
+  handler error (its text only with `expose_errors`). It used to stop
+  `serve_http3` for every connection.
+- Requests are validated like h2 ones. A missing or duplicated pseudo
+  header, or a connection-specific field (`Connection`, `TE` other than
+  `trailers`, ...), is refused instead of defaulting to `GET /`.
+  Connection-specific fields are no longer emitted in responses.
+- An Initial in a datagram under 1200 bytes is dropped (RFC 9000 sec
+  14.1). Until the client's address is validated, the server sends at
+  most three times what it received, and the handshake flight goes out
+  in packets that fit a 1200-byte datagram.
+- The server picks its own connection ID rather than adopting the
+  client's, sets `retry_source_connection_id` after a Retry, and keeps
+  `active_connection_id_limit` at 2. The flare client validates the
+  connection IDs in the server's transport parameters.
+- Only CRYPTO, ACK, PADDING, PING and CONNECTION_CLOSE are accepted in
+  Initial and Handshake packets, Initial keys are dropped once the
+  handshake moves on, and HTTP/3 is dispatched only on 1-RTT or 0-RTT
+  data.
+- Stream ids, the bidi stream count and connection flow control are
+  enforced, and credit is granted as the application consumes data
+  rather than as the peer sends it. A request body is capped at
+  10 MiB (`Http3RequestReader.max_body_bytes`); the QPACK encoder stream
+  may not set a table capacity beyond what was advertised.
+- CRYPTO reassembly holds at most 64 KiB ahead of the next expected
+  byte, and a request stream at most 2 MiB ahead of a gap.
+- Duplicate packets are dropped, ACKs for packet numbers never sent
+  close the connection with `PROTOCOL_VIOLATION`, and a connection's
+  slot is reclaimed when it dies. `QuicServerConfig.max_connections`
+  (10,000 by default) caps live connections; an Initial past it is
+  dropped.
+
+The bench figure above predates these checks and has not been re-run.
+
 | Surface | Where |
 |---|---|
 | QUIC variable-length integer codec (RFC 9000 §16): `QuicVarint`, `quic_encode_varint`, `quic_decode_varint`, `quic_varint_encoded_length`, `QUIC_VARINT_MAX` | `flare.quic.varint` |
