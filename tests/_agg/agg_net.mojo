@@ -173,6 +173,9 @@ from test_net import (
 from test_net import (
     test_socketaddr_parse_rejects_ports_out_of_range as test_net__test_socketaddr_parse_rejects_ports_out_of_range,
 )
+from test_net import (
+    test_sockets_are_close_on_exec as test_net__test_sockets_are_close_on_exec,
+)
 
 
 def main() raises:
@@ -236,4 +239,5 @@ def main() raises:
     suite.test[test_net__test_dns_error_str]()
     suite.test[test_net__test_dns_error_zero_code]()
     suite.test[test_net__test_socketaddr_parse_rejects_ports_out_of_range]()
+    suite.test[test_net__test_sockets_are_close_on_exec]()
     suite^.run()

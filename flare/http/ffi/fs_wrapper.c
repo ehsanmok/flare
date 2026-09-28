@@ -25,7 +25,7 @@
 #endif
 
 int flare_fs_open_rdonly(const char* path) {
-    return open(path, O_RDONLY);
+    return open(path, O_RDONLY | O_CLOEXEC);
 }
 
 int flare_fs_close(int fd) {
@@ -33,7 +33,7 @@ int flare_fs_close(int fd) {
 }
 
 int64_t flare_fs_size(const char* path) {
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return -1;
     off_t s = lseek(fd, 0, SEEK_END);
     close(fd);

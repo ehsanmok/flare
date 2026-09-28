@@ -196,7 +196,9 @@ def test_shutdown_closes_the_shared_listener_once() raises:
     var alive = True
     if reused >= c_int(0):
         # F_GETFD fails with EBADF on a closed fd.
-        alive = external_call["fcntl", c_int](reused, c_int(1)) >= c_int(0)
+        alive = external_call["fcntl", c_int](
+            reused, c_int(1), c_int(0)
+        ) >= c_int(0)
     for i in range(len(opened)):
         _ = external_call["close", c_int](opened[i])
     s.shutdown()

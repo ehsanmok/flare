@@ -354,8 +354,10 @@ struct UringReactor(Movable):
         if Int(slot) == 0:
             raise Error("UringReactor.arm_listener_multishot: SQ is full")
         var ud = pack_user_data(URING_OP_ACCEPT, conn_id)
+        # SOCK_CLOEXEC (0o2000000): accepted fds are close-on-exec, the
+        # same as the accept4 path.
         prep_multishot_accept(
-            slot, listener_fd, UInt64(0), UInt64(0), UInt32(0), ud
+            slot, listener_fd, UInt64(0), UInt64(0), UInt32(0o2000000), ud
         )
         self._driver.commit_sqe()
 

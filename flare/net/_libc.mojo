@@ -20,6 +20,7 @@ from std.ffi import (
     external_call,
     c_int,
     c_uint,
+    c_ulong,
     c_size_t,
     c_ssize_t,
     c_char,
@@ -72,6 +73,12 @@ comptime TCP_NODELAY: c_int = 1
 # ── fcntl ─────────────────────────────────────────────────────────────────────
 comptime F_GETFL: c_int = 3
 comptime F_SETFL: c_int = 4
+comptime F_GETFD: c_int = 1
+comptime F_SETFD: c_int = 2
+comptime FD_CLOEXEC: c_int = 1
+comptime _SOCK_CLOEXEC_LINUX: c_int = 0o2000000
+"""``SOCK_CLOEXEC`` on Linux: or-ed into the socket type, and the flag
+``accept4`` takes. macOS has neither and sets ``FD_CLOEXEC`` after."""
 comptime O_NONBLOCK: c_int = c_int(_pm["O_NONBLOCK", linux=2048, macos=4]())
 
 # ── Sentinel ──────────────────────────────────────────────────────────────────
@@ -459,14 +466,48 @@ def _os_error(op: String) -> String:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+comptime _FIOCLEX_MACOS: c_ulong = 0x20006601
+"""``FIOCLEX`` on macOS: ``_IO('f', 1)``."""
+
+
+def _set_cloexec(fd: c_int) -> None:
+    """Set ``FD_CLOEXEC`` on ``fd``; a no-op for an invalid fd.
+
+    macOS uses ``ioctl(fd, FIOCLEX)`` rather than ``fcntl(F_SETFD)``:
+    ``fcntl`` is variadic, and ``external_call`` corrupts the third
+    argument of a variadic call on macOS/arm64 (the reason
+    ``RawSocket.set_nonblocking`` goes through the C wrapper there).
+    ``FIOCLEX`` takes no third argument.
+    """
+    if fd < c_int(0):
+        return
+    comptime if CompilationTarget.is_linux():
+        _ = _fcntl2(fd, F_SETFD, FD_CLOEXEC)
+    else:
+        _ = external_call["ioctl", c_int](fd, _FIOCLEX_MACOS)
+
+
 @always_inline
 def _socket(family: c_int, kind: c_int, protocol: c_int) -> c_int:
-    """Wrapper around ``socket(2)``.
+    """Wrapper around ``socket(2)``. The socket is close-on-exec.
+
+    Every flare socket used to be inherited by any child the process
+    exec'd: listeners kept a port bound past a restart, and client
+    connections stayed open in a subprocess. On Linux the flag is
+    set atomically with ``SOCK_CLOEXEC``, so a fork+exec on another
+    thread cannot slip in between; macOS sets it right after.
 
     Returns:
         File descriptor on success, ``INVALID_FD`` on failure (errno set).
     """
-    return external_call["socket", c_int](family, kind, protocol)
+    comptime if CompilationTarget.is_linux():
+        return external_call["socket", c_int](
+            family, kind | _SOCK_CLOEXEC_LINUX, protocol
+        )
+    else:
+        var fd = external_call["socket", c_int](family, kind, protocol)
+        _set_cloexec(fd)
+        return fd
 
 
 @always_inline
@@ -499,14 +540,22 @@ def _accept(
     addr: Pointer[UInt8, _],
     addrlen: Pointer[c_uint, _],
 ) -> c_int:
-    """Wrapper around ``accept(2)``."""
+    """Wrapper around ``accept(2)``; the accepted fd is close-on-exec
+    (``accept4`` with ``SOCK_CLOEXEC`` on Linux)."""
     debug_assert[assert_mode="safe"](
         Int(addr) != 0 and Int(addrlen) != 0,
         "_accept: null addr / addrlen out-parameter",
     )
-    return external_call["accept", c_int](
-        fd, addr.unsafe_bitcast[NoneType](), addrlen
-    )
+    comptime if CompilationTarget.is_linux():
+        return external_call["accept4", c_int](
+            fd, addr.unsafe_bitcast[NoneType](), addrlen, _SOCK_CLOEXEC_LINUX
+        )
+    else:
+        var cfd = external_call["accept", c_int](
+            fd, addr.unsafe_bitcast[NoneType](), addrlen
+        )
+        _set_cloexec(cfd)
+        return cfd
 
 
 @always_inline
