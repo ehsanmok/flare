@@ -7,6 +7,7 @@ from .headers import HeaderMap
 from .cookie import Cookie, CookieJar, parse_cookie_header
 from .proto.ascii import ascii_unchecked_string
 from .proto.utf8 import utf8_lossy_string
+from ._scan import parse_content_length
 from ..net import IpAddr, SocketAddr
 
 
@@ -433,17 +434,13 @@ struct Request(Movable):
         return loads(self.text())
 
     def content_length(self) -> Int:
-        """Return the Content-Length header value, or 0 if absent."""
+        """Return the Content-Length header value, or 0 if absent or not
+        a plain decimal of at most 18 digits."""
         var cl = self.headers.get("content-length")
         if cl.byte_length() == 0:
             return 0
-        var result = 0
-        for i in range(cl.byte_length()):
-            var c = Int(cl.unsafe_ptr()[unsafe_offset=i])
-            if c < 48 or c > 57:
-                break
-            result = result * 10 + (c - 48)
-        return result
+        var n = parse_content_length(cl)
+        return n if n > 0 else 0
 
     def cookies(self) -> CookieJar:
         """Parse the ``Cookie`` request header(s) into a ``CookieJar``.

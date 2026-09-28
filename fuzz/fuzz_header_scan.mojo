@@ -63,14 +63,32 @@ def _scalar_scan_content_length(data: List[UInt8], header_end: Int) -> Int:
                 p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
             ):
                 pos += 1
+            # 1-18 digits, optional trailing whitespace, then the end of
+            # the line; anything else is -1 (invalid).
             var result = 0
+            var digits = 0
             while (
                 pos < header_end
                 and p[unsafe_offset=pos] >= 48
                 and p[unsafe_offset=pos] <= 57
             ):
                 result = result * 10 + Int(p[unsafe_offset=pos]) - 48
+                digits += 1
+                if digits > 18:
+                    return -1
                 pos += 1
+            if digits == 0:
+                return -1
+            while pos < header_end and (
+                p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
+            ):
+                pos += 1
+            if (
+                pos < header_end
+                and p[unsafe_offset=pos] != 13
+                and p[unsafe_offset=pos] != 10
+            ):
+                return -1
             return result
         i += 1
     return 0

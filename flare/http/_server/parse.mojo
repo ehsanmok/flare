@@ -17,6 +17,7 @@ from ..headers import HeaderMap
 from ..proto.ascii import ascii_eq_ignore_case
 from ..proto.h1_leniency import H1LeniencyConfig
 from ..proto.chunked import TE_CHUNKED, classify_transfer_coding
+from .._scan import parse_content_length
 from ...net import IpAddr, SocketAddr
 from ...tcp import TcpStream
 
@@ -287,7 +288,9 @@ def _parse_http_request_bytes(
         # treats the second occurrence as malformed; the leniency
         # flag accepts when the values match.
         if ascii_eq_ignore_case(k, "content-length"):
-            var n = _parse_int_str(v)
+            var n = parse_content_length(v)
+            if n < 0:
+                raise Error("malformed Content-Length: " + v)
             if content_length_seen >= 0 and n != content_length_seen:
                 raise Error(
                     "duplicate Content-Length headers with conflicting values"
@@ -540,6 +543,8 @@ def _parse_http_request(
         var hdr_end = _find_crlfcrlf(buf, 0)
         if hdr_end >= 0:
             var cl = _scan_content_length(buf, hdr_end)
+            if cl < 0:
+                raise Error("malformed Content-Length")
             var total = hdr_end + cl
             while len(buf) < total:
                 n = stream.read(read_buf.unsafe_ptr(), 8192)

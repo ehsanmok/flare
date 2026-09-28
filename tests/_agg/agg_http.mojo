@@ -1038,6 +1038,21 @@ from test_h1_smuggling import (
     test_x_content_length_does_not_smuggle as test_h1_smuggling__test_x_content_length_does_not_smuggle,
 )
 from test_h1_smuggling import (
+    test_parse_content_length_accepts_plain_decimals as test_h1_smuggling__test_parse_content_length_accepts_plain_decimals,
+)
+from test_h1_smuggling import (
+    test_parse_content_length_rejects_everything_else as test_h1_smuggling__test_parse_content_length_rejects_everything_else,
+)
+from test_h1_smuggling import (
+    test_scan_reports_an_overflowing_value_as_invalid as test_h1_smuggling__test_scan_reports_an_overflowing_value_as_invalid,
+)
+from test_h1_smuggling import (
+    test_overflowing_content_length_is_refused as test_h1_smuggling__test_overflowing_content_length_is_refused,
+)
+from test_h1_smuggling import (
+    test_content_length_with_trailing_garbage_is_refused as test_h1_smuggling__test_content_length_with_trailing_garbage_is_refused,
+)
+from test_h1_smuggling import (
     test_classify_transfer_coding as test_h1_smuggling__test_classify_transfer_coding,
 )
 from test_h1_smuggling import (
@@ -4296,6 +4311,19 @@ def main() raises:
         test_h1_smuggling__test_content_length_in_target_does_not_smuggle
     ]()
     suite.test[test_h1_smuggling__test_x_content_length_does_not_smuggle]()
+    suite.test[
+        test_h1_smuggling__test_parse_content_length_accepts_plain_decimals
+    ]()
+    suite.test[
+        test_h1_smuggling__test_parse_content_length_rejects_everything_else
+    ]()
+    suite.test[
+        test_h1_smuggling__test_scan_reports_an_overflowing_value_as_invalid
+    ]()
+    suite.test[test_h1_smuggling__test_overflowing_content_length_is_refused]()
+    suite.test[
+        test_h1_smuggling__test_content_length_with_trailing_garbage_is_refused
+    ]()
     suite.test[test_h1_smuggling__test_classify_transfer_coding]()
     suite.test[test_h1_smuggling__test_te_framing_reads_every_line]()
     suite.test[

@@ -186,9 +186,10 @@ def scan_content_length[
             impossible.
 
     Returns:
-        The parsed ``Content-Length`` integer, or ``0`` when no header
-        is found. Ignores malformed values (matches legacy scalar
-        behaviour — the caller treats 0 as "no body").
+        The parsed ``Content-Length`` integer, ``0`` when no header is
+        found, or ``CONTENT_LENGTH_INVALID`` (-1) when the value is not
+        a plain decimal that fits in 18 digits. Callers must reject a
+        negative result with 400 rather than treat it as "no body".
     """
     var needle_len = 15  # "content-length:"
     if header_end < needle_len:
@@ -246,18 +247,61 @@ def scan_content_length[
     return 0
 
 
+comptime CONTENT_LENGTH_INVALID: Int = -1
+"""Returned by the ``Content-Length`` parsers for a value that is not
+1-18 ASCII digits surrounded by optional whitespace."""
+
+comptime _CONTENT_LENGTH_MAX_DIGITS: Int = 18
+"""18 decimal digits always fit in a signed 64-bit Int; 19 may not."""
+
+
 @always_inline
-def _parse_decimal(p: Pointer[UInt8, _], start: Int, end: Int) -> Int:
-    """Skip leading SP / HTAB, parse an unsigned decimal up to ``end``."""
+def parse_content_length_bytes(
+    p: Pointer[UInt8, _], start: Int, end: Int
+) -> Int:
+    """Parse a ``Content-Length`` field value in ``p[start:end]``.
+
+    The value runs to the end of its line: parsing stops at CR, LF or
+    ``end``. RFC 9110 sec 8.6 allows only ``1*DIGIT``, so a sign, a
+    trailing letter, an empty value or more than 18 digits is
+    ``CONTENT_LENGTH_INVALID``. Accumulating without a digit cap let
+    ``18446744073709551606`` wrap to ``-10`` and slip under every
+    ``> max_body_size`` check.
+    """
     var pos = start
     while pos < end and (
         p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
     ):
         pos += 1
     var result = 0
+    var digits = 0
     while (
         pos < end and p[unsafe_offset=pos] >= 48 and p[unsafe_offset=pos] <= 57
     ):
         result = result * 10 + Int(p[unsafe_offset=pos]) - 48
+        digits += 1
+        if digits > _CONTENT_LENGTH_MAX_DIGITS:
+            return CONTENT_LENGTH_INVALID
         pos += 1
+    if digits == 0:
+        return CONTENT_LENGTH_INVALID
+    while pos < end and (
+        p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
+    ):
+        pos += 1
+    if pos < end and p[unsafe_offset=pos] != 13 and p[unsafe_offset=pos] != 10:
+        return CONTENT_LENGTH_INVALID
     return result
+
+
+def parse_content_length(value: String) -> Int:
+    """``parse_content_length_bytes`` over a whole field value."""
+    return parse_content_length_bytes(
+        value.unsafe_ptr(), 0, value.byte_length()
+    )
+
+
+@always_inline
+def _parse_decimal(p: Pointer[UInt8, _], start: Int, end: Int) -> Int:
+    """Strict ``Content-Length`` value; see ``parse_content_length_bytes``."""
+    return parse_content_length_bytes(p, start, end)

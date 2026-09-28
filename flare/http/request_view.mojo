@@ -54,6 +54,7 @@ from std.memory import unsafe_memcpy
 from .header_view import HeaderMapView, parse_header_view
 from .headers import HeaderMap
 from .proto.ascii import ascii_unchecked_string
+from ._scan import parse_content_length_bytes
 from .request import Request
 from ..net import IpAddr, SocketAddr
 
@@ -82,20 +83,13 @@ def _find_byte(data: Span[UInt8, _], start: Int, target: UInt8) -> Int:
 
 @always_inline
 def _scan_content_length(view: HeaderMapView) -> Int:
-    """Return the ``Content-Length`` value, or 0 if absent /
-    malformed. Defensive — out-of-range values floor to 0."""
+    """Return the ``Content-Length`` value, 0 if absent, or -1 when it
+    is not a plain decimal of at most 18 digits (the caller rejects)."""
     var v = view.get("Content-Length")
     var n = v.byte_length()
     if n == 0:
         return 0
-    var p = v.unsafe_ptr()
-    var acc = 0
-    for i in range(n):
-        var c = Int(p[unsafe_offset=i])
-        if c < 48 or c > 57:
-            return 0
-        acc = acc * 10 + (c - 48)
-    return acc
+    return parse_content_length_bytes(v.unsafe_ptr(), 0, n)
 
 
 # ── RequestView ─────────────────────────────────────────────────────────────
@@ -350,6 +344,8 @@ def parse_request_view[
     var body_start = headers_end
 
     var content_length = _scan_content_length(hv)
+    if content_length < 0:
+        raise Error("malformed Content-Length")
     if content_length > max_body_size:
         raise Error(
             "request body exceeds limit of " + String(max_body_size) + " bytes"

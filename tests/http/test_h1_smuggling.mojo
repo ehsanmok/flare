@@ -16,7 +16,12 @@ from std.ffi import c_int, c_size_t
 from std.memory import stack_allocation
 
 from flare.http import HttpServer, Request, Response, ok
-from flare.http._scan import find_crlfcrlf, scan_content_length
+from flare.http._scan import (
+    CONTENT_LENGTH_INVALID,
+    find_crlfcrlf,
+    parse_content_length,
+    scan_content_length,
+)
 from flare.http.proto.chunked import (
     TE_ABSENT,
     TE_CHUNKED,
@@ -174,6 +179,59 @@ def test_x_content_length_does_not_smuggle() raises:
     var got = _exchange(raw)
     assert_false("GET /admin" in got, "smuggled request was served: " + got)
     assert_equal(_count(got, "HTTP/1.1 200"), 1)
+
+
+# ── Content-Length is 1-18 digits and nothing else ─────────────────────────
+
+
+def test_parse_content_length_accepts_plain_decimals() raises:
+    assert_equal(parse_content_length("0"), 0)
+    assert_equal(parse_content_length("42"), 42)
+    assert_equal(parse_content_length(" \t42 "), 42)
+    assert_equal(parse_content_length("999999999999999999"), 999999999999999999)
+
+
+def test_parse_content_length_rejects_everything_else() raises:
+    for bad in [
+        "",
+        " ",
+        "-1",
+        "+5",
+        "5abc",
+        "5 6",
+        "0x10",
+        "1234567890123456789",
+        "18446744073709551606",
+    ]:
+        assert_equal(
+            parse_content_length(bad), CONTENT_LENGTH_INVALID, "accepted " + bad
+        )
+
+
+def test_scan_reports_an_overflowing_value_as_invalid() raises:
+    var buf = _b(
+        "POST / HTTP/1.1\r\nContent-Length: 18446744073709551606\r\n\r\n"
+    )
+    assert_equal(
+        scan_content_length(buf, find_crlfcrlf(buf, 0)), CONTENT_LENGTH_INVALID
+    )
+
+
+def test_overflowing_content_length_is_refused() raises:
+    var got = _exchange(
+        "POST /u HTTP/1.1\r\nHost: x\r\n"
+        "Content-Length: 18446744073709551606\r\n\r\n"
+        "GET /admin HTTP/1.1\r\nHost: x\r\n\r\n"
+    )
+    assert_false("GET /admin" in got, "smuggled request was served: " + got)
+    assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
+
+
+def test_content_length_with_trailing_garbage_is_refused() raises:
+    var got = _exchange(
+        "POST /u HTTP/1.1\r\nHost: x\r\nContent-Length: 5abc\r\n\r\nhello"
+    )
+    assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
 
 
 # ── Transfer-Encoding is a list across every line ──────────────────────────

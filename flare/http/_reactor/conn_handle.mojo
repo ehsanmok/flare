@@ -483,6 +483,9 @@ struct ConnHandle(Movable):
                 self.content_length = _scan_content_length(
                     self.read_buf, self.headers_end
                 )
+                if self.content_length < 0:
+                    self._queue_error(400, "Bad Request")
+                    return Optional[StepResult](self._transition_to_writing())
                 if self.content_length > config.max_body_size:
                     self._queue_error(413, "Content Too Large")
                     return Optional[StepResult](self._transition_to_writing())
