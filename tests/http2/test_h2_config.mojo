@@ -233,8 +233,10 @@ def test_with_config_propagates_to_connection_fields() raises:
     var conn = Http2Connection.with_config(cfg^)
     assert_equal(conn.conn.max_concurrent_streams, 200)
     assert_equal(conn.conn.initial_window_size, 131072)
-    assert_equal(conn.conn.send_window, 131072)
-    assert_equal(conn.conn.recv_window, 131072)
+    # Connection-level windows are not SETTINGS-controlled (RFC 9113
+    # sec 6.9.2): both start at 65535.
+    assert_equal(conn.conn.send_window, 65535)
+    assert_equal(conn.conn.recv_window, 65535)
     assert_equal(conn.conn.max_frame_size, 32768)
     assert_equal(conn.conn.hpack_decoder.max_size, 8192)
     assert_equal(conn.config.max_header_list_size, 16384)

@@ -293,6 +293,13 @@ struct Connection(Copyable, Defaultable):
     cannot bound them. This limit does not apply to client response bodies.
     """
     var initial_window_size: Int
+    """Our SETTINGS_INITIAL_WINDOW_SIZE: the receive window each new
+    stream starts with, and what we advertise."""
+    var peer_initial_window_size: Int
+    """The peer's SETTINGS_INITIAL_WINDOW_SIZE: the *send* window each
+    new stream starts with. One field used to serve both, so the peer's
+    value overwrote ours (and vice versa), and the two ends disagreed
+    about every stream's window."""
     var max_header_list_size: Int
     """SETTINGS_MAX_HEADER_LIST_SIZE (RFC 9113 §6.5.2). ``0`` means
     unset / advertise no cap (the RFC default). ``Http2Config``
@@ -396,6 +403,7 @@ struct Connection(Copyable, Defaultable):
         self.max_concurrent_streams = 100
         self.max_request_body_size = 10 * 1024 * 1024
         self.initial_window_size = 65535
+        self.peer_initial_window_size = 65535
         self.max_header_list_size = 0  # unset / unbounded (RFC default)
         self.send_window = 65535
         self.recv_window = 65535
@@ -493,7 +501,7 @@ struct Connection(Copyable, Defaultable):
         var s = Stream()
         s.id = sid
         s.state = StreamState.IDLE()
-        s.send_window = self.initial_window_size
+        s.send_window = self.peer_initial_window_size
         s.recv_window = self.initial_window_size
         return s^
 
@@ -1104,8 +1112,8 @@ struct Connection(Copyable, Defaultable):
                     # existing stream's send window, and the result may
                     # legitimately go negative (the peer over-sent
                     # against the older, larger window).
-                    var delta = v - self.initial_window_size
-                    self.initial_window_size = v
+                    var delta = v - self.peer_initial_window_size
+                    self.peer_initial_window_size = v
                     if delta != 0:
                         var ids = List[Int]()
                         for entry in self.streams.items():

@@ -80,7 +80,12 @@ def test_from_h2c_upgrade_applies_settings_payload() raises:
         Http2Config(), req, settings_payload^
     )
 
-    assert_equal(conn.conn.initial_window_size, 131072)
+    # The client's INITIAL_WINDOW_SIZE is *its* receive window: what we
+    # may send on a stream. Our own advertised window is unchanged.
+    assert_equal(conn.conn.peer_initial_window_size, 131072)
+    assert_equal(
+        conn.conn.initial_window_size, Http2Config().initial_window_size
+    )
 
 
 def test_from_h2c_upgrade_seeds_outbox_with_server_settings() raises:

@@ -262,7 +262,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         var out = Http2ClientConnection.with_config(config^)
         var s = Stream()
         s.id = 1
-        s.send_window = out.conn.initial_window_size
+        s.send_window = out.conn.peer_initial_window_size
         s.recv_window = out.conn.initial_window_size
         s.state = StreamState.HALF_CLOSED_LOCAL()
         out.conn.streams[1] = s^
@@ -283,8 +283,9 @@ struct Http2ClientConnection(Defaultable, Movable):
         var out = Http2ClientConnection()
         out.config = config^
         out.conn.initial_window_size = out.config.initial_window_size
-        out.conn.send_window = out.config.initial_window_size
-        out.conn.recv_window = out.config.initial_window_size
+        # Connection windows start at 65535 (RFC 9113 sec 6.9.2).
+        out.conn.send_window = 65535
+        out.conn.recv_window = 65535
         out.conn.max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         out.conn.hpack_decoder.max_size = out.config.header_table_size
@@ -787,7 +788,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         # works for subsequent inbound frames.
         var s = Stream()
         s.id = sid
-        s.send_window = self.conn.initial_window_size
+        s.send_window = self.conn.peer_initial_window_size
         s.recv_window = self.conn.initial_window_size
         if len(body) == 0:
             s.state = StreamState.HALF_CLOSED_LOCAL()
@@ -860,7 +861,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             self.outbox.append(hb[i])
         var s = Stream()
         s.id = sid
-        s.send_window = self.conn.initial_window_size
+        s.send_window = self.conn.peer_initial_window_size
         s.recv_window = self.conn.initial_window_size
         s.state = StreamState.OPEN()
         self.conn.streams[sid] = s^
@@ -1133,7 +1134,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 pos += chunk
         var s = Stream()
         s.id = sid
-        s.send_window = self.conn.initial_window_size
+        s.send_window = self.conn.peer_initial_window_size
         s.recv_window = self.conn.initial_window_size
         s.state = StreamState.OPEN()
         s.response_body_allowed = method.upper() != "HEAD"

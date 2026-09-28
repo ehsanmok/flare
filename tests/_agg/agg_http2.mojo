@@ -318,6 +318,9 @@ from test_h2_state import (
 from test_h2_state import (
     test_refused_stream_block_still_updates_hpack as test_h2_state__test_refused_stream_block_still_updates_hpack,
 )
+from test_h2_state import (
+    test_local_and_peer_initial_windows_are_separate as test_h2_state__test_local_and_peer_initial_windows_are_separate,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -562,6 +565,9 @@ def main() raises:
         test_h2_state__test_peer_header_table_size_does_not_resize_our_decoder
     ]()
     suite.test[test_h2_state__test_refused_stream_block_still_updates_hpack]()
+    suite.test[
+        test_h2_state__test_local_and_peer_initial_windows_are_separate
+    ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains

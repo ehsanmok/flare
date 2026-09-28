@@ -423,6 +423,20 @@ def test_refused_stream_block_still_updates_hpack() raises:
     assert_equal(c.hpack_decoder.dynamic_size, before + 3 + 1 + 32)
 
 
+def test_local_and_peer_initial_windows_are_separate() raises:
+    """The peer's INITIAL_WINDOW_SIZE sets how much we may *send* on a
+    new stream; ours sets how much it may send us. One field used to
+    serve both, so each overwrote the other."""
+    var c = Connection()
+    c.initial_window_size = 1 << 20  # we advertise 1 MiB
+    _ = c.handle_frame(_settings_frame(0x4, 1000))
+    assert_equal(c.initial_window_size, 1 << 20)
+    assert_equal(c.peer_initial_window_size, 1000)
+    var s = c._ensure_stream(1)
+    assert_equal(s.send_window, 1000)
+    assert_equal(s.recv_window, 1 << 20)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -442,4 +456,5 @@ def main() raises:
     test_oversized_continuation_frame_is_a_frame_size_error()
     test_peer_header_table_size_does_not_resize_our_decoder()
     test_refused_stream_block_still_updates_hpack()
-    print("test_h2_state: 18 passed")
+    test_local_and_peer_initial_windows_are_separate()
+    print("test_h2_state: 19 passed")

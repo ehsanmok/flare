@@ -179,8 +179,12 @@ struct Http2Connection(Defaultable, Movable):
         out.conn.max_concurrent_streams = out.config.max_concurrent_streams
         out.conn.max_request_body_size = out.config.max_body_size
         out.conn.initial_window_size = out.config.initial_window_size
-        out.conn.send_window = out.config.initial_window_size
-        out.conn.recv_window = out.config.initial_window_size
+        # RFC 9113 sec 6.9.2: the connection-level windows start at
+        # 65535 whatever SETTINGS say; only WINDOW_UPDATE on stream 0
+        # moves them. Seeding the send window from *our* setting let us
+        # overrun a peer that advertised the default.
+        out.conn.send_window = 65535
+        out.conn.recv_window = 65535
         out.conn.max_frame_size = out.config.max_frame_size
         # What we advertise is also the largest frame we accept; the
         # peer's SETTINGS may later move max_frame_size but must not
@@ -285,7 +289,7 @@ struct Http2Connection(Defaultable, Movable):
             if id == 0x1:
                 out.conn.peer_header_table_size = v
             elif id == 0x4:
-                out.conn.initial_window_size = v
+                out.conn.peer_initial_window_size = v
             elif id == 0x5:
                 out.conn.max_frame_size = v
             elif id == 0x8:
@@ -298,7 +302,7 @@ struct Http2Connection(Defaultable, Movable):
         var s = Stream()
         s.id = 1
         s.state = StreamState.HALF_CLOSED_REMOTE()
-        s.send_window = out.conn.initial_window_size
+        s.send_window = out.conn.peer_initial_window_size
         s.recv_window = out.conn.initial_window_size
         s.headers.append(HpackHeader(":method", req.method))
         s.headers.append(HpackHeader(":scheme", "http"))
