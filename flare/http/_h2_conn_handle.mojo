@@ -695,6 +695,12 @@ struct Http2ConnHandle(Movable):
         """
         if sid not in self._stream_out:
             return
+        if not self.h2._stream_still_sendable(sid):
+            # Reset by the peer: stop pulling the source and free it,
+            # rather than framing into a dead stream until its window
+            # runs out and then holding the source forever.
+            self._clear_stream(sid)
+            return
         var addr = self._stream_out[sid]
         var st = Pool[H2StreamOut].get_ptr(addr)
         if st[].ppos < len(st[].pending):

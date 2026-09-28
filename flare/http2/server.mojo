@@ -659,6 +659,13 @@ struct Http2Connection(Defaultable, Movable):
         self.conn.send_window -= len(resp.body)
         self.conn.streams[sid] = s^
 
+    def _stream_still_sendable(self, sid: Int) raises -> Bool:
+        """``sid`` exists and is not CLOSED, so response frames for it
+        can still go out."""
+        if sid not in self.conn.streams:
+            return False
+        return self.conn.streams[sid].state.value != StreamState.CLOSED().value
+
     def pump_pending(mut self) raises:
         """Flush response bytes parked by a closed send window.
 
@@ -671,6 +678,18 @@ struct Http2Connection(Defaultable, Movable):
             sids.append(entry.key)
         for i in range(len(sids)):
             var sid = sids[i]
+            if not self._stream_still_sendable(sid):
+                # The peer reset it (or it closed some other way): the
+                # parked bytes can never be sent. Holding them kept the
+                # whole body in memory for the life of the connection,
+                # and closed streams do not count against the
+                # concurrency limit, so a client could pile them up.
+                _ = self.pending_body.pop(sid)
+                _ = self.pending_pos.pop(sid)
+                if sid in self.pending_trailers_k:
+                    _ = self.pending_trailers_k.pop(sid)
+                    _ = self.pending_trailers_v.pop(sid)
+                continue
             var pos = self.pending_pos[sid]
             # Moved out and back rather than borrowed: the body lives in
             # `self` and the call below takes `self` mutably. A `List` move is

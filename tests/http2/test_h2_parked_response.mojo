@@ -252,5 +252,22 @@ def test_frames_after_a_connection_error_are_not_processed() raises:
     assert_equal(len(c.take_completed_streams()), 0)
 
 
+def test_parked_body_is_released_when_the_peer_resets() raises:
+    var c = _served_connection()
+    _ = c.drain()
+    assert_equal(len(c.pending_body), 1)
+    var rst = Frame()
+    rst.header.type = FrameType.RST_STREAM()
+    rst.header.stream_id = 1
+    rst.payload = List[UInt8](length=4, fill=UInt8(0))
+    rst.payload[3] = UInt8(0x8)  # CANCEL
+    rst.header.length = 4
+    c.feed(Span[UInt8, _](encode_frame(rst)))
+    c.feed(Span[UInt8, _](_window_update(0, 65535)))
+    c.pump_pending()
+    assert_equal(len(c.pending_body), 0, "parked bytes outlived the stream")
+    assert_equal(_tally(c.drain()).data_bytes, 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
