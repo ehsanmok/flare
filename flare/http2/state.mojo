@@ -52,6 +52,20 @@ from .stream_slab import StreamSlab
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
 
 
+def h2_setting_error(id: Int, v: Int) -> Int:
+    """The RFC 9113 sec 6.5.2 error code for SETTINGS pair ``(id, v)``,
+    or 0 when it is valid. Every place a peer's settings are applied --
+    a SETTINGS frame and the h2c ``HTTP2-Settings`` header -- goes
+    through this one check."""
+    if id == 0x2 and v != 0 and v != 1:  # SETTINGS_ENABLE_PUSH
+        return Http2ErrorCode.PROTOCOL_ERROR().value
+    if id == 0x4 and v > 0x7FFFFFFF:  # SETTINGS_INITIAL_WINDOW_SIZE
+        return Http2ErrorCode.FLOW_CONTROL_ERROR().value
+    if id == 0x5 and (v < H2_DEFAULT_FRAME_SIZE or v > 16777215):
+        return Http2ErrorCode.PROTOCOL_ERROR().value  # SETTINGS_MAX_FRAME_SIZE
+    return 0
+
+
 struct Http2ErrorCode(Copyable, Defaultable):
     """One of the 14 RFC 9113 §7 error codes."""
 
@@ -1023,21 +1037,9 @@ struct Connection(Copyable, Defaultable):
                 # RFC 9113 sec 6.5.2 bounds. Out-of-range values are
                 # connection errors, not values to clamp: accepting one
                 # silently desynchronises both ends' idea of the window.
-                if id == 0x2:  # SETTINGS_ENABLE_PUSH
-                    if v != 0 and v != 1:
-                        return self._conn_error(
-                            Http2ErrorCode.PROTOCOL_ERROR().value
-                        )
-                elif id == 0x4:  # SETTINGS_INITIAL_WINDOW_SIZE
-                    if v > 0x7FFFFFFF:
-                        return self._conn_error(
-                            Http2ErrorCode.FLOW_CONTROL_ERROR().value
-                        )
-                elif id == 0x5:  # SETTINGS_MAX_FRAME_SIZE
-                    if v < H2_DEFAULT_FRAME_SIZE or v > 16777215:
-                        return self._conn_error(
-                            Http2ErrorCode.PROTOCOL_ERROR().value
-                        )
+                var bad = h2_setting_error(id, v)
+                if bad != 0:
+                    return self._conn_error(bad)
 
                 if id == 0x4:  # SETTINGS_INITIAL_WINDOW_SIZE
                     # sec 6.9.2: the change is a delta applied to every

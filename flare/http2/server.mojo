@@ -51,7 +51,13 @@ from flare.http.proto.h2_config import (
     _H2_DEFAULT_MAX_FRAME_SIZE,
     _H2_DEFAULT_MAX_HEADER_LIST_SIZE,
 )
-from .state import Connection, Http2ErrorCode, Stream, StreamState
+from .state import (
+    Connection,
+    Http2ErrorCode,
+    Stream,
+    StreamState,
+    h2_setting_error,
+)
 
 
 def _lower_ascii(k: String) -> String:
@@ -267,6 +273,15 @@ struct Http2Connection(Defaultable, Movable):
                 | (Int(settings_payload[i + 4]) << 8)
                 | Int(settings_payload[i + 5])
             )
+            # Same bounds as a SETTINGS frame. This path applied the
+            # header's values unchecked, and MAX_FRAME_SIZE=0 then made
+            # every response body loop forever emitting empty DATA
+            # frames.
+            if h2_setting_error(id, v) != 0:
+                raise Error(
+                    "h2c upgrade: invalid HTTP2-Settings value for setting "
+                    + String(id)
+                )
             if id == 0x1:
                 out.conn.hpack_decoder.max_size = v
             elif id == 0x4:
@@ -770,6 +785,10 @@ struct Http2Connection(Defaultable, Movable):
         if budget <= 0:
             return 0
         var mfs = self.conn.max_frame_size
+        if mfs < H2_DEFAULT_FRAME_SIZE:
+            # Settings are validated on the way in; this only keeps a
+            # bad value from turning the loop below into a spin.
+            mfs = H2_DEFAULT_FRAME_SIZE
         var total = len(data)
         var sent = 0
         while sent < total and budget > 0:

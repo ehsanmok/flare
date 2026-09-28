@@ -191,6 +191,46 @@ def test_h2c_upgrade_header_decoder_accepts_well_formed_request() raises:
         assert_equal(decoded[i], raw[i])
 
 
+def _setting(id: Int, v: Int) -> List[UInt8]:
+    var p = List[UInt8]()
+    p.append(UInt8((id >> 8) & 0xFF))
+    p.append(UInt8(id & 0xFF))
+    p.append(UInt8((v >> 24) & 0xFF))
+    p.append(UInt8((v >> 16) & 0xFF))
+    p.append(UInt8((v >> 8) & 0xFF))
+    p.append(UInt8(v & 0xFF))
+    return p^
+
+
+def test_from_h2c_upgrade_rejects_out_of_range_settings() raises:
+    """MAX_FRAME_SIZE=0 in the HTTP2-Settings header used to be applied
+    as is, after which any response body looped forever emitting empty
+    DATA frames. The header gets the same bounds as a SETTINGS frame."""
+    var req = Request(method="GET", url="/", version="HTTP/1.1")
+    for pair in [
+        (0x5, 0),
+        (0x5, 16383),
+        (0x5, 16777216),
+        (0x4, 0x80000000),
+        (0x2, 2),
+    ]:
+        var raised = False
+        try:
+            _ = Http2Connection.from_h2c_upgrade(
+                Http2Config(), req, _setting(pair[0], pair[1])
+            )
+        except:
+            raised = True
+        assert_true(
+            raised,
+            "accepted setting " + String(pair[0]) + "=" + String(pair[1]),
+        )
+    # In range is fine.
+    _ = Http2Connection.from_h2c_upgrade(
+        Http2Config(), req, _setting(0x5, 32768)
+    )
+
+
 def main() raises:
     test_from_h2c_upgrade_creates_stream_1_with_request_headers()
     test_from_h2c_upgrade_applies_settings_payload()
@@ -198,5 +238,6 @@ def main() raises:
     test_from_h2c_upgrade_rejects_misaligned_settings_payload()
     test_from_h2c_upgrade_stream_1_state_is_half_closed_remote()
     test_from_h2c_upgrade_carries_request_body()
+    test_from_h2c_upgrade_rejects_out_of_range_settings()
     test_h2c_upgrade_header_decoder_accepts_well_formed_request()
-    print("test_h2c_upgrade: 7 passed")
+    print("test_h2c_upgrade: 8 passed")
