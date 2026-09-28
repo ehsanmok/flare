@@ -20,7 +20,6 @@ from std.ffi import (
     external_call,
     c_int,
     c_uint,
-    c_ulong,
     c_size_t,
     c_ssize_t,
     c_char,
@@ -34,6 +33,13 @@ from std.sys.info import CompilationTarget, platform_map
 from std.os import getenv
 
 from ..utils.dylib import find_flare_lib
+from ._libc_cloexec import (
+    F_GETFD,
+    F_SETFD,
+    FD_CLOEXEC,
+    _SOCK_CLOEXEC_LINUX,
+    _set_cloexec,
+)
 
 # ── platform_map shorthand ────────────────────────────────────────────────────
 comptime _pm = platform_map[T=Int, ...]
@@ -73,12 +79,6 @@ comptime TCP_NODELAY: c_int = 1
 # ── fcntl ─────────────────────────────────────────────────────────────────────
 comptime F_GETFL: c_int = 3
 comptime F_SETFL: c_int = 4
-comptime F_GETFD: c_int = 1
-comptime F_SETFD: c_int = 2
-comptime FD_CLOEXEC: c_int = 1
-comptime _SOCK_CLOEXEC_LINUX: c_int = 0o2000000
-"""``SOCK_CLOEXEC`` on Linux: or-ed into the socket type, and the flag
-``accept4`` takes. macOS has neither and sets ``FD_CLOEXEC`` after."""
 comptime O_NONBLOCK: c_int = c_int(_pm["O_NONBLOCK", linux=2048, macos=4]())
 
 # ── Sentinel ──────────────────────────────────────────────────────────────────
@@ -464,27 +464,6 @@ def _os_error(op: String) -> String:
 # ──────────────────────────────────────────────────────────────────────────────
 # Core socket system calls
 # ──────────────────────────────────────────────────────────────────────────────
-
-
-comptime _FIOCLEX_MACOS: c_ulong = 0x20006601
-"""``FIOCLEX`` on macOS: ``_IO('f', 1)``."""
-
-
-def _set_cloexec(fd: c_int) -> None:
-    """Set ``FD_CLOEXEC`` on ``fd``; a no-op for an invalid fd.
-
-    macOS uses ``ioctl(fd, FIOCLEX)`` rather than ``fcntl(F_SETFD)``:
-    ``fcntl`` is variadic, and ``external_call`` corrupts the third
-    argument of a variadic call on macOS/arm64 (the reason
-    ``RawSocket.set_nonblocking`` goes through the C wrapper there).
-    ``FIOCLEX`` takes no third argument.
-    """
-    if fd < c_int(0):
-        return
-    comptime if CompilationTarget.is_linux():
-        _ = _fcntl2(fd, F_SETFD, FD_CLOEXEC)
-    else:
-        _ = external_call["ioctl", c_int](fd, _FIOCLEX_MACOS)
 
 
 @always_inline
