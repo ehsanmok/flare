@@ -89,14 +89,17 @@ def test_empty_value_after_colon() raises:
     assert_equal(String(view.get("X")), "")
 
 
-def test_lf_only_terminator_accepted() raises:
-    """Bare LF (no CR) between header lines is accepted."""
+def test_lf_only_terminator_rejected() raises:
+    """Bare LF (no CR) between header lines is rejected, as in the
+    owning parser (RFC 9112 sec 2.2)."""
     var raw = "X-A: 1\nX-B: 2\n\n"
     var bytes = raw.as_bytes()
-    var view = parse_header_view(Span[UInt8, _](bytes))
-    assert_equal(view.len(), 2)
-    assert_equal(String(view.get("X-A")), "1")
-    assert_equal(String(view.get("X-B")), "2")
+    var raised = False
+    try:
+        _ = parse_header_view(Span[UInt8, _](bytes))
+    except:
+        raised = True
+    assert_true(raised)
 
 
 def test_first_match_wins_on_duplicate() raises:

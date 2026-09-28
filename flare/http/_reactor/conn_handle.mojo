@@ -836,24 +836,30 @@ struct ConnHandle(Movable):
         if pending:
             return pending.value()
 
-        # Use the view-based parser then materialise an owned
-        # ``Request`` so the existing ``Handler.serve(req: Request)``
-        # shape still applies. Per-header String allocation is
-        # eliminated during parse -- headers stay as offsets into
-        # the shared buffer until ``into_owned`` copies them out.
-        from flare.http.request_view import parse_request_view
-
+        # The handler takes an owned ``Request``, so this path parses
+        # with the same validating parser as ``on_readable`` and decodes
+        # a chunked body the same way. It used the view parser and then
+        # copied out, which skipped chunked decoding altogether: a
+        # chunked upload reached a CancelHandler as an empty body, or as
+        # the raw chunk framing.
         var req: Request
         try:
-            var view = parse_request_view(
+            req = _parse_http_request_bytes(
                 Span[UInt8, _](self.read_buf)[: self.body_total],
                 config.max_header_size,
                 config.max_body_size,
                 config.max_uri_length,
                 self.peer,
                 config.expose_error_messages,
+                config.h1_leniency,
             )
-            req = view.into_owned()
+            if self.is_chunked:
+                req.body = List[UInt8]()
+                _ = decode_chunked_body(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.body,
+                )
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
@@ -906,6 +912,20 @@ struct ConnHandle(Movable):
 
         var resp: Response
         try:
+            # A chunked body is decoded in place: the decoded bytes are
+            # never longer than the framing they came from, so they fit
+            # at ``headers_end`` and the view borrows them from there.
+            var body_override = -1
+            if self.is_chunked:
+                var decoded = List[UInt8]()
+                _ = decode_chunked_body(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    decoded,
+                )
+                for i in range(len(decoded)):
+                    self.read_buf[self.headers_end + i] = decoded[i]
+                body_override = len(decoded)
             var view = parse_request_view(
                 Span[UInt8, _](self.read_buf)[: self.body_total],
                 config.max_header_size,
@@ -913,6 +933,7 @@ struct ConnHandle(Movable):
                 config.max_uri_length,
                 self.peer,
                 config.expose_error_messages,
+                body_override,
             )
 
             # Connection-disposition from the borrowed header view --

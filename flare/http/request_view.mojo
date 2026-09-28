@@ -51,7 +51,7 @@ Example:
 from std.collections import Dict
 from std.memory import unsafe_memcpy
 
-from .header_view import HeaderMapView, parse_header_view
+from .header_view import HeaderMapView, _is_token_char, parse_header_view
 from .headers import HeaderMap
 from .proto.ascii import ascii_unchecked_string
 from ._scan import parse_content_length_bytes
@@ -79,6 +79,20 @@ def _find_byte(data: Span[UInt8, _], start: Int, target: UInt8) -> Int:
             return i
         i += 1
     return -1
+
+
+def _is_http_version(v: String) -> Bool:
+    """``HTTP/<DIGIT>.<DIGIT>`` and nothing else (RFC 9112 sec 2.3)."""
+    if v.byte_length() != 8 or not v.startswith("HTTP/"):
+        return False
+    var p = v.unsafe_ptr()
+    return (
+        p[unsafe_offset=5] >= 48
+        and p[unsafe_offset=5] <= 57
+        and p[unsafe_offset=6] == 46
+        and p[unsafe_offset=7] >= 48
+        and p[unsafe_offset=7] <= 57
+    )
 
 
 @always_inline
@@ -234,6 +248,7 @@ def parse_request_view[
     max_uri_length: Int = 8_192,
     peer: SocketAddr = SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
     expose_errors: Bool = False,
+    body_len_override: Int = -1,
 ) raises -> RequestView[origin]:
     """Parse an HTTP/1.1 request from a byte buffer into a
     ``RequestView`` borrowing into the buffer.
@@ -253,6 +268,11 @@ def parse_request_view[
                          the view.
         expose_errors: Whether 4xx response bodies may echo handler
                          error messages.
+        body_len_override: When non-negative, the body is the
+                         ``body_len_override`` bytes that start right
+                         after the header block, whatever
+                         ``Content-Length`` says. The reactor uses this
+                         after decoding a chunked body in place.
 
     Returns:
         A ``RequestView`` borrowing every byte-range field from
@@ -276,10 +296,17 @@ def parse_request_view[
     var line_end_excl = line_end
     if line_end_excl > 0 and data[line_end_excl - 1] == _CR:
         line_end_excl -= 1
+    else:
+        raise Error("bare LF request line terminator")
 
     var sp1 = _find_byte(data, 0, _SP)
-    if sp1 < 0 or sp1 >= line_end_excl:
+    if sp1 <= 0 or sp1 >= line_end_excl:
         raise Error("malformed request line: missing METHOD/URL space")
+    # Same request-line rules as the owning parser: the method is a
+    # token, the target is visible ASCII, the version is HTTP/d.d.
+    for i in range(sp1):
+        if not _is_token_char(data[i]):
+            raise Error("invalid character in request method")
     var sp2 = _find_byte(data, sp1 + 1, _SP)
 
     var url_start: Int
@@ -298,6 +325,13 @@ def parse_request_view[
         raise Error(
             "request URI exceeds limit of " + String(max_uri_length) + " bytes"
         )
+    if url_len <= 0:
+        raise Error("empty request target")
+    for i in range(url_start, url_start + url_len):
+        if data[i] < 33 or data[i] > 126:
+            raise Error("invalid character in request target")
+    if not _is_http_version(version):
+        raise Error("malformed HTTP version in request line")
 
     var method = ascii_unchecked_string(data[0:sp1])
 
@@ -343,6 +377,25 @@ def parse_request_view[
     # therefore IS body_start; no extra advance needed.
     var body_start = headers_end
 
+    if hv.count("host") > 1:
+        raise Error("more than one Host header")
+
+    if body_len_override >= 0:
+        if body_start + body_len_override > n:
+            raise Error("body override past the end of the buffer")
+        return RequestView[origin](
+            method=method,
+            version=version,
+            peer=peer,
+            expose_errors=expose_errors,
+            buf=data,
+            url_start=url_start,
+            url_len=url_len,
+            body_start=body_start,
+            body_len=body_len_override,
+            header_offsets=header_offsets^,
+        )
+
     var content_length = _scan_content_length(hv)
     if content_length < 0:
         raise Error("malformed Content-Length")
@@ -353,7 +406,9 @@ def parse_request_view[
 
     var body_end = body_start + content_length
     if body_end > n:
-        body_end = n
+        # As in the owning parser: a truncated body would leave its
+        # remainder in the buffer to be parsed as the next request.
+        raise Error("request body shorter than its Content-Length")
 
     return RequestView[origin](
         method=method,

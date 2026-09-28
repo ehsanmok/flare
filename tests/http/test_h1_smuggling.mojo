@@ -15,7 +15,17 @@ from std.testing import assert_equal, assert_true, assert_false, TestSuite
 from std.ffi import c_int, c_size_t
 from std.memory import stack_allocation
 
-from flare.http import HttpServer, Request, Response, ServerConfig, ok
+from flare.http import (
+    Cancel,
+    CancelHandler,
+    HttpServer,
+    Request,
+    RequestView,
+    Response,
+    ServerConfig,
+    ViewHandler,
+    ok,
+)
 from flare.http.proto import H1LeniencyConfig
 from flare.http._scan import (
     CONTENT_LENGTH_INVALID,
@@ -438,6 +448,105 @@ def test_h1_leniency_is_honoured_by_the_reactor() raises:
         "get /m HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n", cfg^
     )
     assert_true("GET /m 0" in got, "leniency flag was ignored: " + got)
+
+
+# ── The cancel and view readers get the same parsing ───────────────────────
+
+
+@fieldwise_init
+struct _CancelEcho(CancelHandler, Copyable):
+    def serve(self, req: Request, cancel: Cancel) raises -> Response:
+        return ok(
+            req.method
+            + " "
+            + req.url
+            + " "
+            + String(len(req.body))
+            + ":"
+            + req.text()
+        )
+
+
+@fieldwise_init
+struct _ViewEcho(Copyable, ViewHandler):
+    def serve_view[
+        origin: Origin
+    ](self, req: RequestView[origin], cancel: Cancel) raises -> Response:
+        var body = req.body()
+        var s = String("")
+        for b in body:
+            s += chr(Int(b))
+        return ok("view " + String(len(body)) + ":" + s)
+
+
+def _exchange_kind(raw: String, kind: Int) raises -> String:
+    """``kind`` 1 serves a CancelHandler, 2 a ViewHandler."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            if kind == 1:
+                srv.serve_cancellable(_CancelEcho())
+            else:
+                srv.serve_view(_ViewEcho())
+        except:
+            pass
+        exit()
+    usleep(250000)
+    var got = String("")
+    try:
+        var fd = _connect_loopback(port)
+        var bytes = _b(raw)
+        _ = _send(
+            fd, bytes.unsafe_ptr(), c_size_t(len(bytes)), c_int(MSG_NOSIGNAL)
+        )
+        var buf = stack_allocation[4096, UInt8]()
+        var tries = 0
+        while tries < 50:
+            tries += 1
+            var n = _recv(fd, buf, c_size_t(4096), c_int(0))
+            if Int(n) <= 0:
+                break
+            for i in range(Int(n)):
+                got += chr(Int(buf[unsafe_offset=i]))
+        _ = _close(fd)
+    except:
+        pass
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    return got
+
+
+comptime _CHUNKED_POST = (
+    "POST /u HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"
+    "Connection: close\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+)
+
+
+def test_cancel_handler_gets_the_decoded_chunked_body() raises:
+    var got = _exchange_kind(_CHUNKED_POST, 1)
+    assert_true("POST /u 11:hello world" in got, "got: " + got)
+
+
+def test_view_handler_gets_the_decoded_chunked_body() raises:
+    var got = _exchange_kind(_CHUNKED_POST, 2)
+    assert_true("view 11:hello world" in got, "got: " + got)
+
+
+def test_view_path_rejects_what_the_owning_parser_rejects() raises:
+    var got = _exchange_kind(
+        "GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\nConnection: close\r\n\r\n", 2
+    )
+    assert_true("HTTP/1.1 400" in got, "duplicate Host: " + got)
+    got = _exchange_kind(
+        "GET /a\x01 HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n", 2
+    )
+    assert_true("HTTP/1.1 400" in got, "control byte in target: " + got)
+    got = _exchange_kind(
+        "GET / HTTP/1.1\r\nHost: a\r\nX: a\x01b\r\nConnection: close\r\n\r\n", 2
+    )
+    assert_true("HTTP/1.1 400" in got, "control byte in value: " + got)
 
 
 def main() raises:

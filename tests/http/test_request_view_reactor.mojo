@@ -150,14 +150,17 @@ def test_dual_many_headers() raises:
 
 
 def test_dual_lf_only_terminators() raises:
-    """Bare-LF (no CR) wire is rejected by the strict oracle parser
-    (RFC 9112 §2.2 requires CRLF) but currently accepted by the
-    view parser. The view parser will pick up
-    H1LeniencyConfig.allow_lf_only_line_endings in a follow-up audit
-    pass; this test documents the divergence until then."""
+    """Bare-LF (no CR) wire is rejected by both the strict oracle
+    parser and the view parser (RFC 9112 §2.2 requires CRLF). The
+    view parser used to accept it, which let the two readers disagree
+    about where the headers end."""
     var raw = "GET / HTTP/1.1\nHost: x\nX-A: 1\n\n"
-    var view_req = _parse_via_view(raw)
-    assert_equal(view_req.method, "GET")
+    var view_raised = False
+    try:
+        _ = _parse_via_view(raw)
+    except:
+        view_raised = True
+    assert_true(view_raised)
     var oracle_raised = False
     try:
         _ = _parse_via_oracle(raw)

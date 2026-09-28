@@ -176,6 +176,20 @@ struct HeaderMapView[origin: Origin](Movable):
                 )
         return StringSlice[Self.origin](unsafe_from_utf8=self.buf[0:0])
 
+    def count(self, name: String) -> Int:
+        """Number of header lines named ``name``, case-insensitive."""
+        var name_bytes = name.as_bytes()
+        var c = 0
+        for i in range(self.len()):
+            if _eq_icase_bytes(
+                name_bytes,
+                self._offsets[i * 4],
+                self._offsets[i * 4 + 1],
+                self.buf,
+            ):
+                c += 1
+        return c
+
     def contains(self, name: String) -> Bool:
         """True if a header named ``name`` is present
         (case-insensitive)."""
@@ -249,6 +263,14 @@ def parse_header_view[
         while line_end < n and p[unsafe_offset=line_end] != _LF:
             line_end += 1
 
+        # RFC 9112 sec 2.2: every line, including the empty one that
+        # ends the block, is terminated by CRLF. A bare LF is where a
+        # parser and a proxy stop agreeing on where the headers end.
+        if line_end < n and (
+            line_end == i or p[unsafe_offset=line_end - 1] != _CR
+        ):
+            raise Error("bare LF line terminator")
+
         # Empty line marks end of headers.
         var stripped_end = line_end
         if stripped_end > i and p[unsafe_offset=stripped_end - 1] == _CR:
@@ -295,9 +317,13 @@ def parse_header_view[
         # CR / LF / NUL. CR / LF embedded in the value is the classic
         # response-splitting / header-injection vector. NUL is an
         # implementation-defined-behaviour foot-gun.
+        # The other control bytes and obs-text are refused as well, the
+        # same default the owning parser applies (RFC 9110 sec 5.5).
         for k in range(vstart, vend):
             var vc = p[unsafe_offset=k]
             if vc == 0 or vc == _LF or vc == _CR:
+                raise Error("invalid byte in header value")
+            if (vc < 32 and vc != 9) or vc >= 127:
                 raise Error("invalid byte in header value")
 
         offsets.append(nstart)

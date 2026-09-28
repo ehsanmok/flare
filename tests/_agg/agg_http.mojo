@@ -1106,6 +1106,15 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_h1_leniency_is_honoured_by_the_reactor as test_h1_smuggling__test_h1_leniency_is_honoured_by_the_reactor,
 )
+from test_h1_smuggling import (
+    test_cancel_handler_gets_the_decoded_chunked_body as test_h1_smuggling__test_cancel_handler_gets_the_decoded_chunked_body,
+)
+from test_h1_smuggling import (
+    test_view_handler_gets_the_decoded_chunked_body as test_h1_smuggling__test_view_handler_gets_the_decoded_chunked_body,
+)
+from test_h1_smuggling import (
+    test_view_path_rejects_what_the_owning_parser_rejects as test_h1_smuggling__test_view_path_rejects_what_the_owning_parser_rejects,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -1380,7 +1389,7 @@ from test_header_view import (
     test_empty_value_after_colon as test_header_view__test_empty_value_after_colon,
 )
 from test_header_view import (
-    test_lf_only_terminator_accepted as test_header_view__test_lf_only_terminator_accepted,
+    test_lf_only_terminator_rejected as test_header_view__test_lf_only_terminator_rejected,
 )
 from test_header_view import (
     test_first_match_wins_on_duplicate as test_header_view__test_first_match_wins_on_duplicate,
@@ -2346,7 +2355,7 @@ from test_request_view import (
     test_headers_too_large_raises as test_request_view__test_headers_too_large_raises,
 )
 from test_request_view import (
-    test_lf_only_terminators_accepted as test_request_view__test_lf_only_terminators_accepted,
+    test_lf_only_terminators_rejected as test_request_view__test_lf_only_terminators_rejected,
 )
 from test_request_view import (
     test_empty_buffer_raises as test_request_view__test_empty_buffer_raises,
@@ -4388,6 +4397,15 @@ def main() raises:
         test_h1_smuggling__test_default_config_rejects_lowercase_method
     ]()
     suite.test[test_h1_smuggling__test_h1_leniency_is_honoured_by_the_reactor]()
+    suite.test[
+        test_h1_smuggling__test_cancel_handler_gets_the_decoded_chunked_body
+    ]()
+    suite.test[
+        test_h1_smuggling__test_view_handler_gets_the_decoded_chunked_body
+    ]()
+    suite.test[
+        test_h1_smuggling__test_view_path_rejects_what_the_owning_parser_rejects
+    ]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte
@@ -4538,7 +4556,7 @@ def main() raises:
     suite.test[test_header_view__test_contains_case_insensitive]()
     suite.test[test_header_view__test_value_ows_trimmed]()
     suite.test[test_header_view__test_empty_value_after_colon]()
-    suite.test[test_header_view__test_lf_only_terminator_accepted]()
+    suite.test[test_header_view__test_lf_only_terminator_rejected]()
     suite.test[test_header_view__test_first_match_wins_on_duplicate]()
     suite.test[test_header_view__test_missing_colon_raises]()
     suite.test[test_header_view__test_empty_header_name_raises]()
@@ -4979,7 +4997,7 @@ def main() raises:
     suite.test[test_request_view__test_uri_too_long_raises]()
     suite.test[test_request_view__test_body_too_large_raises]()
     suite.test[test_request_view__test_headers_too_large_raises]()
-    suite.test[test_request_view__test_lf_only_terminators_accepted]()
+    suite.test[test_request_view__test_lf_only_terminators_rejected]()
     suite.test[test_request_view__test_empty_buffer_raises]()
     # tests/http/test_request_view_reactor.mojo
     suite.test[test_request_view_reactor__test_dual_get_no_body]()

@@ -207,12 +207,11 @@ def test_headers_too_large_raises() raises:
 # ── Edge cases ──────────────────────────────────────────────────────────────
 
 
-def test_lf_only_terminators_accepted() raises:
+def test_lf_only_terminators_rejected() raises:
     var raw = "GET / HTTP/1.1\nHost: x\n\n"
     var bytes = raw.as_bytes()
-    var view = parse_request_view(Span[UInt8, _](bytes))
-    assert_equal(view.method, "GET")
-    assert_equal(String(view.headers().get("Host")), "x")
+    with assert_raises():
+        _ = parse_request_view(Span[UInt8, _](bytes))
 
 
 def test_empty_buffer_raises() raises:
