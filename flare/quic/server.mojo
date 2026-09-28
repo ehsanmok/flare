@@ -1532,21 +1532,25 @@ struct QuicListener(Movable):
         if slot >= 0:
             return slot
         if lh.packet_type == PACKET_TYPE_INITIAL:
+            var retry_odcid = Optional[ConnectionId]()
             if self.config.require_address_validation:
-                if self._retry_gate(lh, datagram, peer):
+                retry_odcid = self._retry_gate(lh, datagram, peer)
+                if not retry_odcid:
                     # A Retry was issued, or the token was absent/invalid:
                     # do not commit handshake state for this datagram.
                     return -1
-            return self._accept_initial(lh, peer)
+            return self._accept_initial(lh, peer, retry_odcid)
         return -1
 
     def _retry_gate(
         mut self, lh: LongHeader, datagram: Span[UInt8, _], peer: SocketAddr
-    ) raises -> Bool:
+    ) raises -> Optional[ConnectionId]:
         """RFC 9000 sec 8.1 address-validation gate for an unknown-DCID
-        Initial. Returns ``True`` when the caller must NOT accept
-        (a Retry was sent, or the token was missing / invalid); ``False``
-        when a valid token cleared the client to be accepted.
+        Initial. Returns the client's original DCID, recovered from a
+        valid token, when the client may be accepted; ``None`` when the
+        caller must NOT accept (a Retry was sent, or the token was
+        missing / invalid). The ODCID used to be thrown away here, so
+        the transport parameters named the wrong one.
 
         Token-less Initial -> mint an HMAC token bound to the peer address
         + original DCID and answer with a Retry (the client re-sends its
@@ -1562,7 +1566,7 @@ struct QuicListener(Movable):
         try:
             extras = parse_initial_extras(datagram, lh.payload_offset)
         except:
-            return True  # malformed Initial -> drop
+            return None  # malformed Initial -> drop
         if len(extras.token) == 0:
             try:
                 var token = mint_retry_token(
@@ -1577,7 +1581,7 @@ struct QuicListener(Movable):
                 _ = self.send_to(Span[UInt8, _](retry), peer)
             except:
                 pass  # best-effort; a failed Retry just drops the Initial
-            return True
+            return None
         var odcid = validate_retry_token(
             self._retry_key,
             extras.token,
@@ -1585,7 +1589,7 @@ struct QuicListener(Movable):
             now,
             self.config.retry_token_max_age_ms,
         )
-        return not odcid  # valid token -> accept (False); else drop (True)
+        return odcid^  # the recovered ODCID, or None to drop
 
     def _dispatch_short(
         mut self, datagram: Span[UInt8, _], peer: SocketAddr
@@ -1627,7 +1631,10 @@ struct QuicListener(Movable):
             pass
 
     def _accept_initial(
-        mut self, lh: LongHeader, peer: SocketAddr
+        mut self,
+        lh: LongHeader,
+        peer: SocketAddr,
+        retry_odcid: Optional[ConnectionId] = Optional[ConnectionId](),
     ) raises -> Int:
         """Allocate a new connection slot for an Initial packet
         with an unknown DCID.
@@ -1659,7 +1666,16 @@ struct QuicListener(Movable):
         qc.initial_dcid = lh.dcid.copy()
         var slot = len(self.connections)
         self.connections.append(qc^)
-        self.tls_sessions.append(self._new_session_slot(local_cid, lh.dcid))
+        # After a Retry the client's current DCID is the Retry's SCID;
+        # the original DCID came back in the token.
+        var original_dcid = lh.dcid.copy()
+        var retry_scid = List[UInt8]()
+        if retry_odcid:
+            original_dcid = retry_odcid.value().copy()
+            retry_scid = lh.dcid.bytes.copy()
+        self.tls_sessions.append(
+            self._new_session_slot(local_cid, original_dcid, retry_scid)
+        )
         self.tls_egress_queues.append(List[UInt8]())
         self.tls_handshake_egress_queues.append(List[UInt8]())
         self.crypto_reasm.append(_CryptoReasm())
@@ -1681,7 +1697,10 @@ struct QuicListener(Movable):
         return slot
 
     def _new_session_slot(
-        mut self, local_cid: ConnectionId, original_dcid: ConnectionId
+        mut self,
+        local_cid: ConnectionId,
+        original_dcid: ConnectionId,
+        retry_scid: List[UInt8] = List[UInt8](),
     ) -> _SessionSlot:
         """Materialize a per-slot rustls QUIC session.
 
@@ -1702,7 +1721,7 @@ struct QuicListener(Movable):
         var tp_blob: List[UInt8]
         try:
             tp_blob = _encode_server_transport_params(
-                self.config, local_cid, original_dcid
+                self.config, local_cid, original_dcid, retry_scid
             )
         except:
             return _SessionSlot(handle=0)

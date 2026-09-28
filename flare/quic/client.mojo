@@ -261,6 +261,15 @@ struct QuicClientConnection(Movable):
     §5.2); it is the AEAD ``dcid`` for every Initial packet
     regardless of any later CID change."""
 
+    var first_dcid: ConnectionId
+    """The DCID of our very first Initial, before any Retry. The
+    server must echo it as ``original_destination_connection_id``."""
+    var retry_scid: List[UInt8]
+    """Source CID of the Retry we followed, empty if none."""
+    var server_scid: List[UInt8]
+    """Source CID of the server's first Initial; the server must echo
+    it as ``initial_source_connection_id``."""
+
     var dcid: ConnectionId
     """Outbound Destination CID for routing. Starts equal to
     :attr:`initial_dcid`; switches to the server's Source CID once
@@ -374,6 +383,9 @@ struct QuicClientConnection(Movable):
         self.sock = sock^
         self.peer = peer
         self.dcid = initial_dcid.copy()
+        self.first_dcid = initial_dcid.copy()
+        self.retry_scid = List[UInt8]()
+        self.server_scid = List[UInt8]()
         self.initial_dcid = initial_dcid^
         self.scid = scid^
         self.aead_choice = aead_choice
@@ -589,6 +601,7 @@ struct QuicClientConnection(Movable):
             self.established = True
             if not self._peer_limits_known:
                 self._apply_peer_transport_params()
+                self._check_peer_cids()
         return events^
 
     def _apply_peer_transport_params(mut self):
@@ -622,6 +635,36 @@ struct QuicClientConnection(Movable):
             # Malformed peer params: keep defaults rather than fail the
             # established connection (the handshake already succeeded).
             pass
+
+    def _check_peer_cids(mut self) raises:
+        """RFC 9000 sec 7.3: the server's transport parameters must name
+        the CIDs this handshake actually used, or a middlebox that
+        rewrote them goes undetected. The client never checked, which is
+        also why the server's wrong ODCID after a Retry went unnoticed
+        in flare's own tests. A missing extension (the NULL-session test
+        path) is skipped, like the limits in
+        :meth:`_apply_peer_transport_params`."""
+        var raw: List[UInt8]
+        try:
+            raw = self.session.peer_transport_params()
+        except:
+            return
+        if len(raw) == 0:
+            return
+        var tp = decode_transport_parameters(Span[UInt8, _](raw))
+        var why = String("")
+        if tp.original_destination_connection_id != self.first_dcid.bytes:
+            why = "original_destination_connection_id"
+        elif (
+            len(self.server_scid) > 0
+            and tp.initial_source_connection_id != self.server_scid
+        ):
+            why = "initial_source_connection_id"
+        elif tp.retry_source_connection_id != self.retry_scid:
+            why = "retry_source_connection_id"
+        if why != "":
+            self.established = False
+            raise Error("QUIC TRANSPORT_PARAMETER_ERROR: server " + why)
 
     def _retransmit_lost(mut self) raises:
         """Retransmit frames from packets the ACK-based loss detector
@@ -717,10 +760,13 @@ struct QuicClientConnection(Movable):
             return  # nothing cached to re-send (shouldn't happen)
         self.retry_token = token^
         self.retried = True
-        # The server's SCID becomes the new DCID + Initial-key source.
+        # The Retry's SCID becomes the new DCID + Initial-key source,
+        # until the server's first Initial names its own CID (RFC 9000
+        # sec 7.2).
         self.initial_dcid = lh.scid.copy()
         self.dcid = lh.scid.copy()
-        self.got_server_cid = True
+        self.retry_scid = lh.scid.bytes.copy()
+        self.got_server_cid = False
         # Re-send the ClientHello at CRYPTO offset 0 with the token.
         self.tx_initial_offset = UInt64(0)
         var ch = self.first_initial_crypto.copy()
@@ -805,6 +851,7 @@ struct QuicClientConnection(Movable):
                 if not self.got_server_cid:
                     var lh = parse_long_header(packet)
                     self.dcid = lh.scid.copy()
+                    self.server_scid = lh.scid.bytes.copy()
                     self.got_server_cid = True
                 var up = unprotect_initial_packet(
                     packet,

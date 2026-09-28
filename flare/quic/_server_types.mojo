@@ -607,6 +607,7 @@ def _encode_server_transport_params(
     config: QuicServerConfig,
     local_cid: ConnectionId,
     original_dcid: ConnectionId,
+    retry_scid: List[UInt8] = List[UInt8](),
 ) raises -> List[UInt8]:
     """Encode the server's QUIC transport parameters for the TLS
     handshake.
@@ -614,7 +615,12 @@ def _encode_server_transport_params(
     ``original_destination_connection_id`` is the client's
     first-Initial DCID (``original_dcid``) and
     ``initial_source_connection_id`` the server's own CID
-    (``local_cid``), which RFC 9000 sec 7.2 has the server choose. The flow-control + stream limits come from
+    (``local_cid``), which RFC 9000 sec 7.2 has the server choose.
+    After a Retry, ``original_dcid`` is the DCID the client first sent
+    (recovered from the token) and ``retry_scid`` the Retry's Source CID,
+    sent as ``retry_source_connection_id``. Both were wrong: the ODCID
+    was the post-Retry DCID and the retry CID was never sent, so an
+    RFC-compliant client aborted with TRANSPORT_PARAMETER_ERROR. The flow-control + stream limits come from
     ``config``; per-stream data windows mirror the connection-level
     ``initial_max_data``. The peer rejects a handshake whose
     transport parameters omit the source-CID (RFC 9000 sec 7.3), so
@@ -627,6 +633,7 @@ def _encode_server_transport_params(
     var tp = empty_transport_parameters()
     tp.original_destination_connection_id = original_dcid.bytes.copy()
     tp.initial_source_connection_id = local_cid.bytes.copy()
+    tp.retry_source_connection_id = retry_scid.copy()
     tp.max_idle_timeout = Optional(config.max_idle_timeout_ms)
     tp.initial_max_data = Optional(config.initial_max_data)
     tp.initial_max_stream_data_bidi_local = Optional(config.initial_max_data)

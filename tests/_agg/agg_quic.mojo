@@ -522,6 +522,9 @@ from test_quic_resumption import (
 from test_quic_retry_server import (
     test_quic_retry_server as test_quic_retry_server__test_quic_retry_server,
 )
+from test_quic_retry_server import (
+    test_retry_transport_params_name_the_original_dcid as test_quic_retry_server__test_retry_transport_params_name_the_original_dcid,
+)
 from test_quic_server_loss_recovery import (
     test_loss_slab_starts_empty_and_parallels_connections as test_quic_server_loss_recovery__test_loss_slab_starts_empty_and_parallels_connections,
 )
@@ -1087,6 +1090,9 @@ def main() raises:
     suite.test[test_quic_resumption__test_resumption_installs_early_keys]()
     # tests/quic/test_quic_retry_server.mojo
     suite.test[test_quic_retry_server__test_quic_retry_server]()
+    suite.test[
+        test_quic_retry_server__test_retry_transport_params_name_the_original_dcid
+    ]()
     # tests/quic/test_quic_server_loss_recovery.mojo
     suite.test[
         test_quic_server_loss_recovery__test_loss_slab_starts_empty_and_parallels_connections
