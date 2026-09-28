@@ -489,6 +489,36 @@ def test_io_loop_tick_drives_recv_dispatch_drain() raises:
     listener.close()
 
 
+def test_server_chooses_its_own_connection_id() raises:
+    """The server adopted the client's DCID as its own CID but parsed
+    short headers with its configured 8-byte length. A client that
+    picked a 16-byte DCID then had every 1-RTT packet misparsed, and
+    the server answered its own connection with a stateless reset."""
+    var listener = _bind_listener()
+    var dcid = _make_cid(UInt8(0x70), 16)
+    var scid = _make_cid(UInt8(0x90), 8)
+    var dg = _build_synth_initial(dcid, scid, UInt64(0))
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(40404))
+    var slot = listener.dispatch_datagram(Span[UInt8, _](dg), peer)
+    assert_equal(slot, 0)
+    var ours = listener.connections[slot].local_cid.copy()
+    assert_equal(ours.length(), 8)
+    assert_true(
+        cid_to_hex(ours) != cid_to_hex(dcid), "server kept the client DCID"
+    )
+    # The client's Initial DCID still routes (Initial retransmits) ...
+    assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), slot)
+    # ... and a short header addressed to our CID reaches the slot.
+    var sh = List[UInt8]()
+    sh.append(UInt8(0x40))
+    for b in ours.bytes:
+        sh.append(b)
+    for _ in range(24):
+        sh.append(UInt8(0))
+    assert_equal(listener._dispatch_short(Span[UInt8, _](sh), peer), slot)
+    listener.close()
+
+
 def main() raises:
     test_loopback_initial_handshake_round_trip()
     test_loopback_retransmit_routes_to_existing_slot()
@@ -498,4 +528,5 @@ def main() raises:
     test_egress_drain_clears_queue_and_advances_counters()
     test_egress_no_op_when_queue_empty()
     test_io_loop_tick_drives_recv_dispatch_drain()
-    print("test_quic_loopback_integration: 8 passed")
+    test_server_chooses_its_own_connection_id()
+    print("test_quic_loopback_integration: 9 passed")

@@ -167,7 +167,9 @@ def test_dispatch_initial_creates_new_slot() raises:
     var slot = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
     assert_equal(slot, 0)
     assert_equal(listener.connection_count(), 1)
-    assert_equal(len(listener.cid_table), 1)
+    # Two routes to the slot: the server's own CID and the client's
+    # Initial DCID (for its Initial retransmits).
+    assert_equal(len(listener.cid_table), 2)
     assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), 0)
 
 

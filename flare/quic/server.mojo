@@ -823,7 +823,9 @@ struct QuicListener(Movable):
                     var admit_ok = True
                     if not self.connections[slot].early_guard.any_seen:
                         var now_ms = now_us // UInt64(1000)
-                        var odcid = cid_to_hex(self.connections[slot].local_cid)
+                        var odcid = cid_to_hex(
+                            self.connections[slot].initial_dcid
+                        )
                         if not self.early_strike.strike(odcid, now_ms):
                             admit_ok = False
                     # Anti-replay + byte-budget admission (RFC 9001
@@ -1641,7 +1643,12 @@ struct QuicListener(Movable):
         egress drain can :meth:`send_to` without re-parsing), and
         arms the per-connection idle timeout.
         """
-        var local_cid = lh.dcid.copy()
+        # Our own CID, of the length the short-header parser assumes
+        # (RFC 9000 sec 7.2). The client's DCID stays registered too,
+        # for its Initial retransmits and for Initial keys.
+        var local_cid = ConnectionId(
+            bytes=_random_bytes(self.config.local_cid_length)
+        )
         var peer_cid = lh.scid.copy()
         var qc = QuicConnection(
             local_cid,
@@ -1649,9 +1656,10 @@ struct QuicListener(Movable):
             self.config.max_idle_timeout_ms * UInt64(1_000),
             self.config.initial_max_data,
         )
+        qc.initial_dcid = lh.dcid.copy()
         var slot = len(self.connections)
         self.connections.append(qc^)
-        self.tls_sessions.append(self._new_session_slot(local_cid))
+        self.tls_sessions.append(self._new_session_slot(local_cid, lh.dcid))
         self.tls_egress_queues.append(List[UInt8]())
         self.tls_handshake_egress_queues.append(List[UInt8]())
         self.crypto_reasm.append(_CryptoReasm())
@@ -1668,10 +1676,13 @@ struct QuicListener(Movable):
         self.http3_connections.append(Http3Connection())
         self.loss.append(LossRecovery())
         self.cid_table.register(cid_to_hex(local_cid), slot)
+        self.cid_table.register(cid_to_hex(lh.dcid), slot)
         _ = self.schedule_idle_timeout(slot)
         return slot
 
-    def _new_session_slot(mut self, local_cid: ConnectionId) -> _SessionSlot:
+    def _new_session_slot(
+        mut self, local_cid: ConnectionId, original_dcid: ConnectionId
+    ) -> _SessionSlot:
         """Materialize a per-slot rustls QUIC session.
 
         Empty-PEM configurations (the default
@@ -1690,7 +1701,9 @@ struct QuicListener(Movable):
             return _SessionSlot(handle=0)
         var tp_blob: List[UInt8]
         try:
-            tp_blob = _encode_server_transport_params(self.config, local_cid)
+            tp_blob = _encode_server_transport_params(
+                self.config, local_cid, original_dcid
+            )
         except:
             return _SessionSlot(handle=0)
         try:
@@ -2275,7 +2288,7 @@ struct QuicListener(Movable):
             packet_number=pn,
             pn_length=pn_length,
             plaintext=Span[UInt8, _](payload),
-            dcid=conn.local_cid,
+            dcid=conn.initial_dcid,
             is_server=True,
         )
         # Advance the connection's outbound Initial-level
@@ -2834,6 +2847,7 @@ struct QuicListener(Movable):
             return
         var cid_hex = cid_to_hex(self.connections[slot].local_cid)
         self.cid_table.retire(cid_hex)
+        self.cid_table.retire(cid_to_hex(self.connections[slot].initial_dcid))
 
     def close(mut self):
         """Close the underlying UDP socket. Idempotent. The

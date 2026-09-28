@@ -200,6 +200,15 @@ struct QuicConnection(Copyable):
     (RFC 9000 §5.1). Routed-on by the reactor's CID->connection
     dispatch table."""
 
+    var initial_dcid: ConnectionId
+    """The Destination CID of the client's first Initial. The Initial
+    keys are derived from it in both directions (RFC 9001 sec 5.2) and
+    it is the ``original_destination_connection_id`` transport
+    parameter. The server's own CID is separate: it used to *be* this
+    value, so a client that picked a 16- or 20-byte DCID had its short
+    headers parsed with the server's 8-byte CID length and got a
+    stateless reset for its own connection."""
+
     var peer_cid: ConnectionId
     """The Connection ID the client picked for incoming
     server-to-client packets."""
@@ -293,6 +302,7 @@ struct QuicConnection(Copyable):
     ):
         self.conn = new_connection(idle_timeout_us, initial_max_data)
         self.local_cid = local_cid.copy()
+        self.initial_dcid = local_cid.copy()
         self.peer_cid = peer_cid.copy()
         self.alive = True
         self.idle_timer_id = UInt64(0)
@@ -415,7 +425,7 @@ struct QuicConnection(Copyable):
         var events = empty_events()
         var up = unprotect_initial_packet(
             datagram,
-            self.local_cid,
+            self.initial_dcid,
             is_server=True,
             largest_received_pn=self.conn.largest_received_packet,
             aead_choice=aead_choice,
@@ -594,16 +604,17 @@ def cid_to_hex(cid: ConnectionId) -> String:
 
 
 def _encode_server_transport_params(
-    config: QuicServerConfig, local_cid: ConnectionId
+    config: QuicServerConfig,
+    local_cid: ConnectionId,
+    original_dcid: ConnectionId,
 ) raises -> List[UInt8]:
     """Encode the server's QUIC transport parameters for the TLS
     handshake.
 
-    ``original_destination_connection_id`` + ``initial_source_
-    connection_id`` are both the client's first-Initial DCID: the
-    server reuses that CID as its own source CID (see
-    :meth:`QuicListener._accept_initial`), so both equal
-    ``local_cid``. The flow-control + stream limits come from
+    ``original_destination_connection_id`` is the client's
+    first-Initial DCID (``original_dcid``) and
+    ``initial_source_connection_id`` the server's own CID
+    (``local_cid``), which RFC 9000 sec 7.2 has the server choose. The flow-control + stream limits come from
     ``config``; per-stream data windows mirror the connection-level
     ``initial_max_data``. The peer rejects a handshake whose
     transport parameters omit the source-CID (RFC 9000 sec 7.3), so
@@ -614,7 +625,7 @@ def _encode_server_transport_params(
     method on the hot reactor loop.
     """
     var tp = empty_transport_parameters()
-    tp.original_destination_connection_id = local_cid.bytes.copy()
+    tp.original_destination_connection_id = original_dcid.bytes.copy()
     tp.initial_source_connection_id = local_cid.bytes.copy()
     tp.max_idle_timeout = Optional(config.max_idle_timeout_ms)
     tp.initial_max_data = Optional(config.initial_max_data)

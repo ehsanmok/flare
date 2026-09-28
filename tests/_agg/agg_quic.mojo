@@ -417,6 +417,9 @@ from test_quic_loopback_integration import (
 from test_quic_loopback_integration import (
     test_io_loop_tick_drives_recv_dispatch_drain as test_quic_loopback_integration__test_io_loop_tick_drives_recv_dispatch_drain,
 )
+from test_quic_loopback_integration import (
+    test_server_chooses_its_own_connection_id as test_quic_loopback_integration__test_server_chooses_its_own_connection_id,
+)
 from test_quic_migration import (
     test_client_migrates_to_new_path as test_quic_migration__test_client_migrates_to_new_path,
 )
@@ -1005,6 +1008,9 @@ def main() raises:
     ]()
     suite.test[
         test_quic_loopback_integration__test_io_loop_tick_drives_recv_dispatch_drain
+    ]()
+    suite.test[
+        test_quic_loopback_integration__test_server_chooses_its_own_connection_id
     ]()
     # tests/quic/test_quic_migration.mojo
     suite.test[test_quic_migration__test_client_migrates_to_new_path]()
