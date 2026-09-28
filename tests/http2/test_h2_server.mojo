@@ -268,6 +268,39 @@ def test_partial_feed_buffers_frames() raises:
     assert_equal(len(ids2), 1)
 
 
+def test_repeated_fields_and_cookie_crumbs_survive() raises:
+    """Browsers split cookies into one field per crumb (RFC 9113 sec
+    8.2.3); take_request used ``set`` and kept only the last one."""
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    var enc = HpackEncoder()
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":method", "GET"))
+    hdrs.append(HpackHeader(":scheme", "https"))
+    hdrs.append(HpackHeader(":path", "/"))
+    hdrs.append(HpackHeader(":authority", "example.com"))
+    hdrs.append(HpackHeader("cookie", "a=1"))
+    hdrs.append(HpackHeader("x-a", "one"))
+    hdrs.append(HpackHeader("cookie", "b=2"))
+    hdrs.append(HpackHeader("x-a", "two"))
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.stream_id = 1
+    f.header.flags = FrameFlags(
+        FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
+    )
+    f.payload = enc.encode(Span[HpackHeader, _](hdrs))
+    c.feed(Span[UInt8, _](encode_frame(f)))
+    var ready = c.take_completed_streams()
+    assert_equal(len(ready), 1)
+    var req = c.take_request(1)
+    assert_equal(req.headers.get("cookie"), "a=1; b=2")
+    assert_equal(len(req.headers.get_all("x-a")), 2)
+    var jar = req.cookies()
+    assert_equal(jar.get("a"), "1")
+    assert_equal(jar.get("b"), "2")
+
+
 def main() raises:
     test_alpn_dispatch()
     test_h2c_upgrade_detection()
@@ -278,4 +311,5 @@ def main() raises:
     test_stream_response_no_trailers_ends_with_empty_data()
     test_stream_data_bounded_by_send_window()
     test_partial_feed_buffers_frames()
-    print("test_h2_server: 9 passed")
+    test_repeated_fields_and_cookie_crumbs_survive()
+    print("test_h2_server: 10 passed")

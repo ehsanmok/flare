@@ -258,6 +258,9 @@ from test_h2_server import (
 from test_h2_server import (
     test_partial_feed_buffers_frames as test_h2_server__test_partial_feed_buffers_frames,
 )
+from test_h2_server import (
+    test_repeated_fields_and_cookie_crumbs_survive as test_h2_server__test_repeated_fields_and_cookie_crumbs_survive,
+)
 from test_h2_server_handler import (
     test_h2_server_simple_handler as test_h2_server_handler__test_h2_server_simple_handler,
 )
@@ -544,6 +547,7 @@ def main() raises:
     ]()
     suite.test[test_h2_server__test_stream_data_bounded_by_send_window]()
     suite.test[test_h2_server__test_partial_feed_buffers_frames]()
+    suite.test[test_h2_server__test_repeated_fields_and_cookie_crumbs_survive]()
     # tests/http2/test_h2_server_handler.mojo
     suite.test[test_h2_server_handler__test_h2_server_simple_handler]()
     suite.test[test_h2_server_handler__test_h2_server_router_dispatch]()

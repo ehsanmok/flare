@@ -508,7 +508,11 @@ struct Http2Connection(Defaultable, Movable):
             raise Error("h2: take_request on unknown stream")
         var s = self.conn.streams[sid].copy()
         var req = Request(method="GET", url="/", version="HTTP/2")
-        # Pseudo headers come first per RFC 9113 §8.1.2.1.
+        # Fields are appended, not set: a repeated field keeps every
+        # value, as on HTTP/1.1. ``set`` kept only the last, and browsers
+        # send cookies as one field per crumb (RFC 9113 sec 8.2.3), so a
+        # handler behind h2 saw only the last cookie.
+        var cookie = String("")
         for i in range(len(s.headers)):
             var n = s.headers[i].name
             var v = s.headers[i].value
@@ -520,8 +524,18 @@ struct Http2Connection(Defaultable, Movable):
                 req.headers.set("Host", v)
             elif n == ":scheme":
                 pass  # the reactor knows the scheme already
+            elif n == "cookie":
+                # sec 8.2.3: concatenate crumbs with "; " before handing
+                # them to an HTTP/1.1-shaped consumer.
+                if cookie.byte_length() > 0:
+                    cookie += "; "
+                cookie += v
+            elif n == "host" and req.headers.contains("Host"):
+                pass  # :authority wins (sec 8.3.1)
             else:
-                req.headers.set(n, v)
+                req.headers.append(n, v)
+        if cookie.byte_length() > 0:
+            req.headers.append("cookie", cookie)
         for i in range(len(s.data)):
             req.body.append(s.data[i])
         return req^

@@ -719,16 +719,28 @@ struct Http3Connection(Copyable, Defaultable):
             elif name == ":path":
                 path = String(value)
         var req = Request(method=method^, url=path^, body=state.body.copy())
+        # Same rules as h2's take_request: repeated fields are appended,
+        # cookie crumbs are joined (RFC 9114 sec 4.2.1), and :authority
+        # becomes Host -- it used to be dropped, leaving Host-based
+        # routing blind on h3.
+        var cookie = String("")
         for i in range(len(state.headers)):
             var name = state.headers[i].name
-            if (
-                name == ":method"
-                or name == ":path"
-                or name == ":scheme"
-                or name == ":authority"
-            ):
+            if name == ":authority":
+                req.headers.set("Host", String(state.headers[i].value))
                 continue
-            req.headers.set(state.headers[i].name, state.headers[i].value)
+            if name == ":method" or name == ":path" or name == ":scheme":
+                continue
+            if name == "cookie":
+                if cookie.byte_length() > 0:
+                    cookie += "; "
+                cookie += String(state.headers[i].value)
+                continue
+            if name == "host" and req.headers.contains("Host"):
+                continue
+            req.headers.append(state.headers[i].name, state.headers[i].value)
+        if cookie.byte_length() > 0:
+            req.headers.append("cookie", cookie)
         state.request_taken = True
         return req^
 

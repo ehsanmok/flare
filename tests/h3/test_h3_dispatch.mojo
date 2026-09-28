@@ -259,6 +259,27 @@ def test_partial_chunk_needs_more_then_completes() raises:
     assert_equal(req.url, String("/split"))
 
 
+def test_take_request_keeps_repeats_and_joins_cookies() raises:
+    """take_request used ``set`` (last value wins) and dropped
+    :authority entirely, so an h3 handler had no Host and one cookie."""
+    var headers = List[QpackHeader]()
+    headers.append(QpackHeader(":method", "GET"))
+    headers.append(QpackHeader(":scheme", "https"))
+    headers.append(QpackHeader(":authority", "example.com"))
+    headers.append(QpackHeader(":path", "/"))
+    headers.append(QpackHeader("cookie", "a=1"))
+    headers.append(QpackHeader("accept", "x"))
+    headers.append(QpackHeader("cookie", "b=2"))
+    headers.append(QpackHeader("accept", "y"))
+    var c = Http3Connection()
+    c.feed_stream_chunk(0, _encode_headers_frame(headers))
+    c.signal_end_of_stream(0)
+    var req = c.take_request(0)
+    assert_equal(req.headers.get("host"), String("example.com"))
+    assert_equal(req.headers.get("cookie"), String("a=1; b=2"))
+    assert_equal(len(req.headers.get_all("accept")), 2)
+
+
 def main() raises:
     test_feed_stream_chunk_implicit_open()
     test_get_request_surfaces_after_fin()
@@ -270,4 +291,5 @@ def main() raises:
     test_emit_response_is_idempotent_guarded()
     test_garbled_chunk_sets_protocol_error()
     test_partial_chunk_needs_more_then_completes()
-    print("test_h3_dispatch: 10 passed")
+    test_take_request_keeps_repeats_and_joins_cookies()
+    print("test_h3_dispatch: 11 passed")

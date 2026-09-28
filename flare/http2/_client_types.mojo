@@ -243,9 +243,11 @@ def _h2_response_to_http(var h2: Http2Response) raises -> Response:
     # body bytes once -- one-time per response, in the noise.
     var body_copy = h2.body.copy()
     var resp = Response(status=h2.status, body=body_copy^)
+    # Appended: a response carries one set-cookie field per cookie, and
+    # ``set`` kept only the last.
     for i in range(len(h2.headers)):
         try:
-            resp.headers.set(h2.headers[i].name, h2.headers[i].value)
+            resp.headers.append(h2.headers[i].name, h2.headers[i].value)
         except:
             pass
     return resp^

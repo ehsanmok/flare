@@ -127,6 +127,9 @@ from test_h3_dispatch import (
 from test_h3_dispatch import (
     test_partial_chunk_needs_more_then_completes as test_h3_dispatch__test_partial_chunk_needs_more_then_completes,
 )
+from test_h3_dispatch import (
+    test_take_request_keeps_repeats_and_joins_cookies as test_h3_dispatch__test_take_request_keeps_repeats_and_joins_cookies,
+)
 from test_h3_end_to_end import (
     test_get_request_dispatches_through_handler as test_h3_end_to_end__test_get_request_dispatches_through_handler,
 )
@@ -354,6 +357,9 @@ def main() raises:
     suite.test[test_h3_dispatch__test_emit_response_is_idempotent_guarded]()
     suite.test[test_h3_dispatch__test_garbled_chunk_sets_protocol_error]()
     suite.test[test_h3_dispatch__test_partial_chunk_needs_more_then_completes]()
+    suite.test[
+        test_h3_dispatch__test_take_request_keeps_repeats_and_joins_cookies
+    ]()
     # tests/h3/test_h3_end_to_end.mojo
     suite.test[
         test_h3_end_to_end__test_get_request_dispatches_through_handler
