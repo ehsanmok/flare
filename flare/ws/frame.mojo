@@ -25,6 +25,7 @@ Masking (§5.3):
     This implementation uses SIMD-32 masking for payloads ≥ 64 bytes.
 """
 
+from flare.crypto.random import random_bytes
 from std.format import Writable, Writer
 from std.memory import Pointer
 
@@ -221,13 +222,16 @@ struct WsFrame(Movable, Writable):
     def encode(self, mask: Bool = False) raises -> List[UInt8]:
         """Encode this frame to its RFC 6455 wire representation.
 
-        Masking is applied with a deterministic all-zero key when ``mask=True``
-        in test builds; production code should pass a cryptographically random
-        4-byte key via ``encode_with_key``.
+        With ``mask=True`` the frame is masked with a fresh 4-byte key from
+        the OS CSPRNG, as RFC 6455 sec 5.3 requires of every client frame.
+        This used to be an all-zero key "for testing", and every client
+        frame flare sent went out that way: masking with zeros leaves the
+        payload unchanged on the wire, which is exactly what the mask exists
+        to prevent (intermediary cache poisoning). Tests that need fixed
+        bytes call ``encode_with_key``.
 
         Args:
-            mask: True to apply a zero mask key (for testing; use
-                  ``encode_with_key`` for real client→server frames).
+            mask: True for a client-to-server frame.
 
         Returns:
             The complete frame bytes ready to write to the socket.
@@ -248,6 +252,9 @@ struct WsFrame(Movable, Writable):
                 + ")"
             )
         var key = SIMD[DType.uint8, 4](0, 0, 0, 0)
+        if mask:
+            var r = random_bytes(4)
+            key = SIMD[DType.uint8, 4](r[0], r[1], r[2], r[3])
         return self.encode_with_key(mask, key)
 
     def encode_with_key(

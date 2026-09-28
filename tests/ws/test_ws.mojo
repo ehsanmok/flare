@@ -703,6 +703,38 @@ def test_ws_connection_carries_handshake_origin() raises:
     srv.close()
 
 
+def test_client_frames_are_masked_with_a_fresh_random_key() raises:
+    """encode(mask=True) used an all-zero key, so the payload crossed the
+    wire unmasked -- the thing RFC 6455 sec 5.3 masking exists to stop."""
+    var f = WsFrame.text("hello hello hello")
+    var a = f.encode(mask=True)
+    var b = f.encode(mask=True)
+    # Short frame: 2-byte header, then the 4-byte key.
+    var key_a = List[UInt8](Span[UInt8, _](a)[2:6])
+    var key_b = List[UInt8](Span[UInt8, _](b)[2:6])
+    var zero = True
+    for k in key_a:
+        if k != 0:
+            zero = False
+    assert_false(zero, "mask key is all zeros")
+    var same = True
+    for k in range(4):
+        if key_a[k] != key_b[k]:
+            same = False
+    assert_false(same, "two frames shared a mask key")
+    # The payload is not on the wire in the clear, and still decodes.
+    var clear = String(unsafe_from_utf8=Span[UInt8, _](a)[6:])
+    assert_false(clear == "hello hello hello")
+    var back = WsFrame.decode_one(Span[UInt8, _](a))
+    assert_equal(back.frame.text_payload(), "hello hello hello")
+
+
+def test_handshake_nonce_is_random() raises:
+    from flare.ws.client import _generate_ws_key
+
+    assert_true(_generate_ws_key() != _generate_ws_key())
+
+
 def main() raises:
     print("=" * 60)
     print("test_ws.mojo — WsFrame codec + WsClient + WsServer")

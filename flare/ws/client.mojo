@@ -113,26 +113,19 @@ def _sha1(data: String) raises -> List[UInt8]:
 # ── HTTP upgrade helpers ──────────────────────────────────────────────────────
 
 
-def _generate_ws_key() -> String:
+def _generate_ws_key() raises -> String:
     """Generate a random 16-byte nonce encoded as base64.
 
-    Reads from ``/dev/urandom`` for cryptographically secure randomness.
-    Falls back to a time-seeded deterministic generator if urandom is
-    unavailable (should not happen on Linux/macOS).
+    From the OS CSPRNG. There is no fallback: the one this replaced was a
+    constant, the same key for every handshake whenever /dev/urandom
+    could not be opened -- which is what running out of fds looks like.
 
     Returns:
         24-character base64 string suitable for ``Sec-WebSocket-Key``.
     """
-    var nonce = List[UInt8](capacity=16)
-    try:
-        with open("/dev/urandom", "r") as f:
-            var raw = f.read_bytes(16)
-            for i in range(16):
-                nonce.append(raw[i])
-    except:
-        # Fallback: use external_call to get some entropy from the clock
-        for i in range(16):
-            nonce.append(UInt8((i * 37 + 0x42) & 0xFF))
+    from flare.crypto.random import random_bytes
+
+    var nonce = random_bytes(16)
     return _base64_encode(Span[UInt8, _](nonce))
 
 

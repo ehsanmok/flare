@@ -103,6 +103,12 @@ from test_ws import (
 from test_ws import (
     test_ws_connection_carries_handshake_origin as test_ws__test_ws_connection_carries_handshake_origin,
 )
+from test_ws import (
+    test_client_frames_are_masked_with_a_fresh_random_key as test_ws__test_client_frames_are_masked_with_a_fresh_random_key,
+)
+from test_ws import (
+    test_handshake_nonce_is_random as test_ws__test_handshake_nonce_is_random,
+)
 from test_ws_autoclient import (
     test_wire_choice_codepoints as test_ws_autoclient__test_wire_choice_codepoints,
 )
@@ -268,6 +274,8 @@ def main() raises:
         test_ws__test_upgrade_parse_origin_header_name_case_insensitive
     ]()
     suite.test[test_ws__test_ws_connection_carries_handshake_origin]()
+    suite.test[test_ws__test_client_frames_are_masked_with_a_fresh_random_key]()
+    suite.test[test_ws__test_handshake_nonce_is_random]()
     # tests/ws/test_ws_autoclient.mojo
     suite.test[test_ws_autoclient__test_wire_choice_codepoints]()
     suite.test[test_ws_autoclient__test_config_defaults]()
