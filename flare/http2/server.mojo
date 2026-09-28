@@ -392,6 +392,14 @@ struct Http2Connection(Defaultable, Movable):
 
         # Drain frames until we run out of complete ones.
         while True:
+            # A connection error ends the connection (RFC 9113 sec
+            # 5.4.1). Frames after the GOAWAY used to keep being applied,
+            # so streams above its last-stream-id were still dispatched
+            # -- work the peer will retry elsewhere -- and a flood the
+            # GOAWAY answered was still being processed.
+            if self.conn.goaway_sent:
+                self.inbox = List[UInt8]()
+                return
             var span = Span[UInt8, _](self.inbox)
             var got = parse_frame(span)
             if not got:

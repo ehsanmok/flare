@@ -973,6 +973,12 @@ struct Http2ConnHandle(Movable):
         self.write_buf.extend(Span(out))
         if self.h2.conn.goaway_received:
             self.should_close = True
+        if self.h2.conn.goaway_sent:
+            # As in on_readable: a connection error is GOAWAY and then
+            # close. This path lacked the check, so on a CancelHandler
+            # server the RST-flood and CONTINUATION-flood GOAWAYs were
+            # sent and the connection kept going.
+            self.should_close = True
         var has_outbound = len(self.write_buf) > self.write_pos
         if has_outbound:
             self.state = STATE_WRITING

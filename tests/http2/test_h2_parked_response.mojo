@@ -232,5 +232,25 @@ def test_small_responses_spend_the_window() raises:
     assert_equal(c.conn.send_window, before - 1000)
 
 
+def test_frames_after_a_connection_error_are_not_processed() raises:
+    """After GOAWAY the connection is over. A request that arrived in the
+    same read as the error used to be dispatched anyway."""
+    var c = Http2Connection()
+    var buf = List[UInt8](String(H2_PREFACE).as_bytes())
+    var settings = Frame()
+    settings.header.type = FrameType.SETTINGS()
+    buf.extend(Span[UInt8, _](encode_frame(settings)))
+    var ping = Frame()  # PING on a stream is a connection error
+    ping.header.type = FrameType.PING()
+    ping.header.stream_id = 1
+    ping.payload = List[UInt8](length=8, fill=UInt8(0))
+    ping.header.length = 8
+    buf.extend(Span[UInt8, _](encode_frame(ping)))
+    buf.extend(Span[UInt8, _](_get_frame(3)))
+    c.feed(Span[UInt8, _](buf))
+    assert_true(c.conn.goaway_sent)
+    assert_equal(len(c.take_completed_streams()), 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

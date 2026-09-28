@@ -210,6 +210,9 @@ from test_h2_parked_response import (
 from test_h2_parked_response import (
     test_small_responses_spend_the_window as test_h2_parked_response__test_small_responses_spend_the_window,
 )
+from test_h2_parked_response import (
+    test_frames_after_a_connection_error_are_not_processed as test_h2_parked_response__test_frames_after_a_connection_error_are_not_processed,
+)
 from test_h2_per_stream_cancel import (
     test_rst_stream_flips_only_target_cell as test_h2_per_stream_cancel__test_rst_stream_flips_only_target_cell,
 )
@@ -511,6 +514,9 @@ def main() raises:
         test_h2_parked_response__test_response_with_trailers_is_flow_controlled
     ]()
     suite.test[test_h2_parked_response__test_small_responses_spend_the_window]()
+    suite.test[
+        test_h2_parked_response__test_frames_after_a_connection_error_are_not_processed
+    ]()
     # tests/http2/test_h2_per_stream_cancel.mojo
     suite.test[
         test_h2_per_stream_cancel__test_rst_stream_flips_only_target_cell
