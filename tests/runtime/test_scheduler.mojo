@@ -162,6 +162,49 @@ def test_scheduler_pin_cores_flag_default_no_crash() raises:
     s.shutdown()
 
 
+def test_shutdown_closes_the_shared_listener_once() raises:
+    """Shutdown closed the shared listener fd to wake the workers, then
+    freed the TcpListener, whose destructor closed the same number
+    again. Anything that reused the number in between was closed."""
+    from std.ffi import c_int, external_call
+    from std.os import setenv, unsetenv
+
+    # The shared listener is the opt-out shape; per-worker SO_REUSEPORT
+    # listeners are the default and are closed once, by their owners.
+    _ = setenv("FLARE_REUSEPORT_WORKERS", "0")
+    var s = Scheduler[_NopFrontend].start(
+        addr=SocketAddr.localhost(0),
+        frontend=_NopFrontend(0),
+        num_workers=1,
+        pin_cores=False,
+    )
+    var listener_fd = s._shared_listener_fd
+    assert_true(listener_fd >= 0)
+    s._signal_and_close_listener()
+    # Reuse the freed number: the kernel hands out the lowest free fd.
+    var opened = List[c_int]()
+    var reused = c_int(-1)
+    for _ in range(64):
+        var fd = external_call["socket", c_int](c_int(2), c_int(1), c_int(0))
+        opened.append(fd)
+        if Int(fd) == listener_fd:
+            reused = fd
+            break
+    s._join_workers()
+    s._record_crash_count()
+    s._free_resources()
+    var alive = True
+    if reused >= c_int(0):
+        # F_GETFD fails with EBADF on a closed fd.
+        alive = external_call["fcntl", c_int](reused, c_int(1)) >= c_int(0)
+    for i in range(len(opened)):
+        _ = external_call["close", c_int](opened[i])
+    s.shutdown()
+    _ = unsetenv("FLARE_REUSEPORT_WORKERS")
+    assert_true(reused >= c_int(0), "could not reuse the listener's fd")
+    assert_true(alive, "shutdown closed an fd it no longer owned")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────
 
 

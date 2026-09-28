@@ -676,6 +676,12 @@ struct Scheduler[F: Frontend](Movable):
         if self._shared_listener_addr != 0:
             var raw = _OpaquePtr(unsafe_from_address=self._shared_listener_addr)
             var typed = raw.unsafe_bitcast[TcpListener]()
+            if self._shared_listener_fd < 0:
+                # _signal_and_close_listener already closed this fd, and
+                # by now its number can belong to a socket or file the
+                # application opened since. The listener's destructor
+                # closed it a second time, and took that one down.
+                typed[]._socket.fd = c_int(-1)
             typed.unsafe_deinit_pointee()
             _scheduler_free_raw(raw)
             self._shared_listener_addr = 0
