@@ -121,14 +121,19 @@ def hmac_sha256_verify(
 
     Returns:
         ``True`` if ``mac`` is a valid HMAC-SHA256 tag for
-        ``(key, msg)``. ``False`` for length mismatch or any byte
-        difference (the comparison is constant-time over the full
-        32-byte width).
+        ``(key, msg)``. ``False`` for length mismatch, an empty
+        ``key``, or any byte difference (the comparison is
+        constant-time over the full 32-byte width).
 
     Raises:
         Error: If the underlying FFI call fails.
     """
     if len(mac) != 32:
+        return False
+    # An empty key makes the tag a public function of the message:
+    # anyone can compute it. A caller whose key failed to load passed
+    # ``[]`` and every forged tag verified.
+    if len(key) == 0:
         return False
     var lib = OwnedDLHandle(_find_flare_lib())
     return _do_hmac_sha256_verify(lib, key, msg, mac)
@@ -215,8 +220,15 @@ def base64url_decode(s: String) raises -> List[UInt8]:
     """
     var n = s.byte_length()
     var src = s.unsafe_ptr()
-    while n > 0 and src[unsafe_offset=n - 1] == 61:  # strip '='
+    # Padding is optional, but when present it is one or two '=' that
+    # complete the last quantum. Any run of '=' used to be stripped, so
+    # "QQ=====" decoded like "QQ==".
+    var total = n
+    while n > 0 and src[unsafe_offset=n - 1] == 61:
         n -= 1
+    var pad = total - n
+    if pad > 2 or (pad > 0 and total % 4 != 0):
+        raise Error("base64url_decode: invalid padding")
     if n == 0:
         return List[UInt8]()
     if n % 4 == 1:
@@ -235,14 +247,21 @@ def base64url_decode(s: String) raises -> List[UInt8]:
         out.append(UInt8(((b2 << 6) | b3) & 255))
         i += 4
     var rem = n - i
+    # The bits past the last whole byte must be zero (RFC 4648 sec 3.5).
+    # They were ignored, so "QR==" and "QQ==" both decoded to "A": two
+    # spellings of one value, which a signed token must not have.
     if rem == 2:
         var b0 = _b64_decode_byte(src[unsafe_offset=i])
         var b1 = _b64_decode_byte(src[unsafe_offset=i + 1])
+        if (b1 & 0xF) != 0:
+            raise Error("base64url_decode: non-canonical trailing bits")
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 255))
     elif rem == 3:
         var b0 = _b64_decode_byte(src[unsafe_offset=i])
         var b1 = _b64_decode_byte(src[unsafe_offset=i + 1])
         var b2 = _b64_decode_byte(src[unsafe_offset=i + 2])
+        if (b2 & 0x3) != 0:
+            raise Error("base64url_decode: non-canonical trailing bits")
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 255))
         out.append(UInt8(((b1 << 4) | (b2 >> 2)) & 255))
     return out^

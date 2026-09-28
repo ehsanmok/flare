@@ -117,8 +117,15 @@ def base64_decode(s: String) raises -> List[UInt8]:
     """
     var n = s.byte_length()
     var src = s.unsafe_ptr()
-    while n > 0 and src[unsafe_offset=n - 1] == 61:  # strip trailing '='
+    # Padding is optional, but when present it is one or two '=' that
+    # complete the last quantum. Any run of '=' used to be stripped, so
+    # "QQ=====" decoded like "QQ==".
+    var total = n
+    while n > 0 and src[unsafe_offset=n - 1] == 61:
         n -= 1
+    var pad = total - n
+    if pad > 2 or (pad > 0 and total % 4 != 0):
+        raise Error("base64_decode: invalid padding")
     if n == 0:
         return List[UInt8]()
     if n % 4 == 1:
@@ -137,14 +144,21 @@ def base64_decode(s: String) raises -> List[UInt8]:
         out.append(UInt8(((b2 << 6) | b3) & 0xFF))
         i += 4
     var rem = n - i
+    # The bits past the last whole byte must be zero (RFC 4648 sec 3.5).
+    # They were ignored, so "QR==" and "QQ==" both decoded to "A": two
+    # spellings of one value, which a signed token must not have.
     if rem == 2:
         var b0 = _decode_byte(src[unsafe_offset=i])
         var b1 = _decode_byte(src[unsafe_offset=i + 1])
+        if (b1 & 0xF) != 0:
+            raise Error("base64_decode: non-canonical trailing bits")
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 0xFF))
     elif rem == 3:
         var b0 = _decode_byte(src[unsafe_offset=i])
         var b1 = _decode_byte(src[unsafe_offset=i + 1])
         var b2 = _decode_byte(src[unsafe_offset=i + 2])
+        if (b2 & 0x3) != 0:
+            raise Error("base64_decode: non-canonical trailing bits")
         out.append(UInt8(((b0 << 2) | (b1 >> 4)) & 0xFF))
         out.append(UInt8(((b1 << 4) | (b2 >> 2)) & 0xFF))
     return out^

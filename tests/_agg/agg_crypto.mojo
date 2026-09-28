@@ -21,6 +21,9 @@ from test_base64 import (
 from test_base64 import (
     test_base64_decode_rejects_invalid_byte as test_base64__test_base64_decode_rejects_invalid_byte,
 )
+from test_base64 import (
+    test_decode_rejects_non_canonical_input as test_base64__test_decode_rejects_non_canonical_input,
+)
 from test_hmac import (
     test_rfc4231_test_case_1 as test_hmac__test_rfc4231_test_case_1,
 )
@@ -85,6 +88,7 @@ def main() raises:
     suite.test[test_base64__test_base64_round_trip_byte_range]()
     suite.test[test_base64__test_base64_decode_tolerates_missing_padding]()
     suite.test[test_base64__test_base64_decode_rejects_invalid_byte]()
+    suite.test[test_base64__test_decode_rejects_non_canonical_input]()
     # tests/crypto/test_hmac.mojo
     suite.test[test_hmac__test_rfc4231_test_case_1]()
     suite.test[test_hmac__test_rfc4231_test_case_2]()

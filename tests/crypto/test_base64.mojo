@@ -83,9 +83,34 @@ def test_base64_decode_rejects_invalid_byte() raises:
     assert_true(raised)
 
 
+def test_decode_rejects_non_canonical_input() raises:
+    """Trailing bits and padding runs were ignored, so one value had
+    several spellings. Missing padding is still fine."""
+    from flare.crypto.hmac import base64url_decode
+
+    assert_equal(len(base64_decode("QQ==")), 1)
+    assert_equal(len(base64_decode("QQ")), 1)
+    assert_equal(len(base64url_decode("QUI")), 2)
+    for bad in ["QR==", "QQ=====", "QUJ=", "Q===", "QQ="]:
+        var raised = False
+        try:
+            _ = base64_decode(String(bad))
+        except:
+            raised = True
+        assert_true(raised, "base64_decode accepted " + String(bad))
+    for bad in ["QR", "QUJ", "QQ====="]:
+        var raised = False
+        try:
+            _ = base64url_decode(String(bad))
+        except:
+            raised = True
+        assert_true(raised, "base64url_decode accepted " + String(bad))
+
+
 def main() raises:
     test_base64_rfc4648_test_vectors()
     test_base64_round_trip_byte_range()
     test_base64_decode_tolerates_missing_padding()
     test_base64_decode_rejects_invalid_byte()
-    print("test_base64: 4 passed")
+    test_decode_rejects_non_canonical_input()
+    print("test_base64: 5 passed")

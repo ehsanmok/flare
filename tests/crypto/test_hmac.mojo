@@ -124,9 +124,13 @@ def test_verify_short_mac_rejects() raises:
 
 
 def test_empty_key_and_msg() raises:
+    """Computing with an empty key still works (RFC 2104 allows it);
+    verifying with one is refused, since anyone can compute that tag.
+    A caller whose key failed to load passed ``[]`` and every forged tag
+    verified."""
     var got = hmac_sha256(List[UInt8](), List[UInt8]())
     assert_equal(len(got), 32)
-    assert_true(hmac_sha256_verify(List[UInt8](), List[UInt8](), got))
+    assert_false(hmac_sha256_verify(List[UInt8](), List[UInt8](), got))
 
 
 # ── base64url ──────────────────────────────────────────────────────────────
