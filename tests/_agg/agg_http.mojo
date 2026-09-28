@@ -3378,6 +3378,9 @@ from test_server_ws_upgrade import (
 from test_server_ws_upgrade import (
     test_unsupported_ws_version_gets_426 as test_server_ws_upgrade__test_unsupported_ws_version_gets_426,
 )
+from test_server_ws_upgrade import (
+    test_shared_listener_upgrade_carries_origin as test_server_ws_upgrade__test_shared_listener_upgrade_carries_origin,
+)
 from test_session import (
     test_signed_cookie_roundtrip as test_session__test_signed_cookie_roundtrip,
 )
@@ -5833,6 +5836,9 @@ def main() raises:
     ]()
     suite.test[test_server_ws_upgrade__test_ws_upgrade_offloads_by_default]()
     suite.test[test_server_ws_upgrade__test_unsupported_ws_version_gets_426]()
+    suite.test[
+        test_server_ws_upgrade__test_shared_listener_upgrade_carries_origin
+    ]()
     # tests/http/test_session.mojo
     suite.test[test_session__test_signed_cookie_roundtrip]()
     suite.test[test_session__test_tampered_mac_rejected]()

@@ -1554,7 +1554,14 @@ struct ConnHandle(Movable):
         var stream = TcpStream(raw^, peer)
 
         _send_upgrade_response(stream, accept)
-        var conn = WsConnection(stream^, peer, prebuf^)
+        # Same rule as WsServer's handshake reader: a repeated Origin
+        # keeps the last value. This path used to pass nothing, so an
+        # allow-list check in the handler saw "" for every client.
+        var origins = req.headers.get_all("origin")
+        var origin = String("")
+        if len(origins) > 0:
+            origin = origins[len(origins) - 1].copy()
+        var conn = WsConnection(stream^, peer, prebuf^, origin^)
         if config.ws.offload:
             # Off-reactor: the connection gets its own detached thread so
             # this worker returns now and keeps serving every other fd,

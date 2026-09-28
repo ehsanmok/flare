@@ -443,6 +443,7 @@ struct WsConnection(Movable):
         var stream: TcpStream,
         peer: SocketAddr,
         var prebuf: List[UInt8],
+        var origin: String = String(""),
     ):
         """Construct a ``WsConnection`` seeded with already-buffered
         post-handshake bytes.
@@ -452,18 +453,15 @@ struct WsConnection(Movable):
         upgrade request. ``prebuf`` is consumed by the first
         ``recv``/``_recv_one`` before any socket read.
 
-        :attr:`origin` is left empty on this path -- populating it needs
-        the same decision :class:`WsServer` already made, so it is not
-        made here.
-
         Args:
             stream: The upgraded connection, already in blocking mode.
             peer: Remote address, for :attr:`peer`.
             prebuf: Bytes the reactor read past the upgrade request.
+            origin: The handshake's ``Origin``, for :attr:`origin`.
         """
         self._stream = stream^
         self._peer = peer
-        self.origin = String("")
+        self.origin = origin^
         self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
         self._prebuf = prebuf^
 

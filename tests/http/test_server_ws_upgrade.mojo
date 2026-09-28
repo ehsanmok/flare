@@ -438,10 +438,56 @@ def test_unsupported_ws_version_gets_426() raises:
     assert_false("hello http" in got, "reached the HTTP handler: " + got)
 
 
+def _origin_ws_handler(mut conn: WsConnection) raises -> None:
+    conn.send_text("origin=[" + conn.origin + "]")
+
+
+def test_shared_listener_upgrade_carries_origin() raises:
+    """The shared-listener seam built its ``WsConnection`` with no
+    origin, so a handler's allow-list check saw "" for every client."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve_ws_upgrade(_http_handler, _origin_ws_handler)
+        except:
+            pass
+        exit()
+    usleep(300000)
+    var got = String("")
+    try:
+        var fd = _connect_loopback(port)
+        _set_recv_timeout(fd, 3000)
+        var handshake = String(
+            "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade:"
+            " websocket\r\nConnection: Upgrade\r\nOrigin:"
+            " https://app.test\r\nSec-WebSocket-Key:"
+            " dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        )
+        _send_all(fd, handshake.as_bytes())
+        var buf = stack_allocation[4096, UInt8]()
+        var attempts = 0
+        while attempts < 20 and "]" not in got:
+            attempts += 1
+            var n = _recv(fd, buf, c_size_t(4096), c_int(0))
+            if Int(n) <= 0:
+                break
+            for i in range(Int(n)):
+                got += chr(Int(buf[unsafe_offset=i]))
+        _ = _close(fd)
+    except:
+        pass
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true("origin=[https://app.test]" in got, "got: " + got)
+
+
 def main() raises:
     test_http_and_ws_on_one_port()
     test_upgrade_request_is_ordinary_traffic_without_a_ws_handler()
     test_frames_pipelined_with_the_handshake_are_all_delivered()
     test_ws_upgrade_offloads_by_default()
     test_unsupported_ws_version_gets_426()
-    print("test_server_ws_upgrade: 5 passed")
+    test_shared_listener_upgrade_carries_origin()
+    print("test_server_ws_upgrade: 6 passed")
