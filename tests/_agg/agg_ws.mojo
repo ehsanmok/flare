@@ -115,6 +115,9 @@ from test_ws import (
 from test_ws import (
     test_server_answers_an_oversized_frame_with_1009 as test_ws__test_server_answers_an_oversized_frame_with_1009,
 )
+from test_ws import (
+    test_client_keeps_frames_that_share_a_segment as test_ws__test_client_keeps_frames_that_share_a_segment,
+)
 from test_ws_autoclient import (
     test_wire_choice_codepoints as test_ws_autoclient__test_wire_choice_codepoints,
 )
@@ -301,6 +304,7 @@ def main() raises:
         test_ws__test_decode_refuses_an_oversized_frame_from_its_header
     ]()
     suite.test[test_ws__test_server_answers_an_oversized_frame_with_1009]()
+    suite.test[test_ws__test_client_keeps_frames_that_share_a_segment]()
     # tests/ws/test_ws_autoclient.mojo
     suite.test[test_ws_autoclient__test_wire_choice_codepoints]()
     suite.test[test_ws_autoclient__test_config_defaults]()

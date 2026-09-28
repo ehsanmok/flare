@@ -823,6 +823,28 @@ def test_server_answers_an_oversized_frame_with_1009() raises:
     srv.close()
 
 
+def test_client_keeps_frames_that_share_a_segment() raises:
+    """Two server frames in one write: the client's ``_recv_one`` read
+    both into a local buffer, returned the first and dropped the second,
+    so the next recv() waited for bytes it had already thrown away."""
+    from flare.ws.client import _WsStream
+
+    var ln = TcpListener.bind(SocketAddr.localhost(0))
+    var port = ln.local_addr().port
+    var c = TcpStream.connect(SocketAddr.localhost(port))
+    # The pre-fix failure is a hang; a timeout turns it into a raise.
+    c.set_recv_timeout(3000)
+    var s = ln.accept()
+    var wire = WsFrame.text("one").encode(mask=False)
+    wire.extend(Span[UInt8, _](WsFrame.text("two").encode(mask=False)))
+    s.write_all(Span[UInt8, _](wire))
+    var ws = WsClient(_WsStream(c^), "k")
+    assert_equal(ws.recv().text_payload(), "one")
+    assert_equal(ws.recv().text_payload(), "two")
+    s.close()
+    ln.close()
+
+
 def main() raises:
     print("=" * 60)
     print("test_ws.mojo — WsFrame codec + WsClient + WsServer")

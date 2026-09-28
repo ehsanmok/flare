@@ -437,11 +437,16 @@ struct WsClient(Movable):
     declares more is answered with CLOSE 1009 (MESSAGE_TOO_BIG) and
     :meth:`recv` raises, before any of the payload is buffered.
     Defaults to :data:`DEFAULT_MAX_FRAME_BYTES`."""
+    var _prebuf: List[UInt8]
+    """Bytes read off the socket past the last decoded frame. A read can
+    carry more than one frame; ``_recv_one`` starts from these before it
+    reads again."""
 
     def __init__(out self, var stream: _WsStream, key: String):
         self._stream = stream^
         self._key = key
         self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
+        self._prebuf = List[UInt8]()
 
     def __deinit__(deinit self):
         self._stream.close()
@@ -711,8 +716,10 @@ struct WsClient(Movable):
 
     def _recv_one(mut self) raises -> WsFrame:
         """Read raw bytes from the stream and decode one frame."""
-        # Read bytes incrementally until we have a full frame
-        var buf = List[UInt8](capacity=4096)
+        # Read bytes incrementally until we have a full frame, starting
+        # from whatever the previous read carried past its frame.
+        var buf = self._prebuf.copy()
+        self._prebuf.clear()
         var tmp = List[UInt8](capacity=4096)
         tmp.resize(4096, 0)
 
@@ -721,6 +728,11 @@ struct WsClient(Movable):
                 var result = WsFrame.decode_one(
                     Span[UInt8, _](buf), max_payload=self.max_frame_size
                 )
+                # A server may send several frames in one segment. They
+                # used to die with ``buf``: the second was lost and the
+                # next recv() waited for bytes already consumed.
+                for i in range(result.consumed, len(buf)):
+                    self._prebuf.append(buf[i])
                 return result^.take_frame()
             except e:
                 var msg = String(e)
