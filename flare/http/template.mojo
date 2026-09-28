@@ -85,6 +85,7 @@ except e:
 from std.format import Writable, Writer
 
 from .request import Request
+from .proto.utf8 import utf8_lossy_string
 
 
 # ── TemplateError ──────────────────────────────────────────────────────────
@@ -207,23 +208,26 @@ def html_escape(s: String) -> String:
     var n = s.byte_length()
     if n == 0:
         return String("")
-    var out = String(capacity_bytes=n + 8)
+    # Built as bytes: ``chr(b)`` of a UTF-8 byte >= 0x80 is the code
+    # point U+00XX, so every non-ASCII character came out double-encoded
+    # ("é" rendered as "Ã©").
+    var out = List[UInt8](capacity=n + 8)
     var p = s.unsafe_ptr()
     for i in range(n):
         var b = Int(p[unsafe_offset=i])
         if b == ord("&"):
-            out += "&amp;"
+            out.extend(String("&amp;").as_bytes())
         elif b == ord("<"):
-            out += "&lt;"
+            out.extend(String("&lt;").as_bytes())
         elif b == ord(">"):
-            out += "&gt;"
+            out.extend(String("&gt;").as_bytes())
         elif b == ord('"'):
-            out += "&quot;"
+            out.extend(String("&quot;").as_bytes())
         elif b == ord("'"):
-            out += "&#x27;"
+            out.extend(String("&#x27;").as_bytes())
         else:
-            out += chr(b)
-    return out^
+            out.append(UInt8(b))
+    return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
 # ── Node types ──────────────────────────────────────────────────────────────
@@ -425,9 +429,7 @@ def _parse_segment(
             i += 1
         if open_pos < 0:
             if pos < n:
-                var t = String(capacity_bytes=n - pos)
-                for j in range(pos, n):
-                    t += chr(Int(p[unsafe_offset=j]))
+                var t = _slice(src, pos, n)
                 out.append(
                     TemplateNode(
                         _NODE_TEXT,
@@ -440,9 +442,7 @@ def _parse_segment(
             pos = n
             return out^
         if open_pos > pos:
-            var t = String(capacity_bytes=open_pos - pos)
-            for j in range(pos, open_pos):
-                t += chr(Int(p[unsafe_offset=j]))
+            var t = _slice(src, pos, open_pos)
             out.append(
                 TemplateNode(
                     _NODE_TEXT,
@@ -619,11 +619,8 @@ def _find_byte(s: String, target: Int) -> Int:
 
 
 def _slice(s: String, start: Int, end: Int) -> String:
-    var p = s.unsafe_ptr()
-    var out = String(capacity_bytes=end - start)
-    for i in range(start, end):
-        out += chr(Int(p[unsafe_offset=i]))
-    return out^
+    """Byte slice of ``s``; lossy only if the cut falls mid-character."""
+    return utf8_lossy_string(s.as_bytes()[start:end])
 
 
 def _strip(s: String) -> String:

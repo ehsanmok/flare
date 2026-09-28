@@ -314,6 +314,16 @@ def test_session_store_trait_generic_over_impls() raises:
     assert_equal(s.value, "z")
 
 
+def test_cookie_store_keeps_utf8_values() raises:
+    var store = CookieSessionStore(key=_make_key("k"))
+    var enc = store.encode(String("名前=Zoë"))
+    var req = Request(method=Method.GET, url="/")
+    req.headers.set("Cookie", "flare_session=" + enc)
+    var s = store.load(req)
+    assert_true(s.present)
+    assert_equal(s.value, String("名前=Zoë"))
+
+
 def main() raises:
     test_signed_cookie_roundtrip()
     test_tampered_mac_rejected()
@@ -341,4 +351,5 @@ def main() raises:
     test_backed_store_expired_session_is_empty()
     test_backed_store_forged_cookie_is_empty()
     test_session_store_trait_generic_over_impls()
-    print("test_session: 26 passed")
+    test_cookie_store_keeps_utf8_values()
+    print("test_session: 27 passed")

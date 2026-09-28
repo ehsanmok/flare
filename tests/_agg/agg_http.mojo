@@ -204,6 +204,9 @@ from test_auth_extract import (
 from test_auth_extract import (
     test_extracted_bearer_present_succeeds as test_auth_extract__test_extracted_bearer_present_succeeds,
 )
+from test_auth_extract import (
+    test_basic_credentials_are_utf8 as test_auth_extract__test_basic_credentials_are_utf8,
+)
 from test_backpressure import (
     test_watermark_hysteresis as test_backpressure__test_watermark_hysteresis,
 )
@@ -3322,6 +3325,9 @@ from test_session import (
 from test_session import (
     test_session_store_trait_generic_over_impls as test_session__test_session_store_trait_generic_over_impls,
 )
+from test_session import (
+    test_cookie_store_keeps_utf8_values as test_session__test_cookie_store_keeps_utf8_values,
+)
 from test_simd_parsers import (
     test_memmem_finds_at_start as test_simd_parsers__test_memmem_finds_at_start,
 )
@@ -3443,6 +3449,9 @@ from test_sse import (
 )
 from test_sse import (
     test_stream_sse_response_carries_stream_and_headers as test_sse__test_stream_sse_response_carries_stream_and_headers,
+)
+from test_sse import (
+    test_format_keeps_utf8_intact as test_sse__test_format_keeps_utf8_intact,
 )
 from test_static_multicore import (
     test_static_multicore_sequential_keepalive_churn as test_static_multicore__test_static_multicore_sequential_keepalive_churn,
@@ -3792,6 +3801,12 @@ from test_template import (
 from test_template import (
     test_block_inside_for_loop_renders_default_per_iteration as test_template__test_block_inside_for_loop_renders_default_per_iteration,
 )
+from test_template import (
+    test_html_escape_keeps_utf8_intact as test_template__test_html_escape_keeps_utf8_intact,
+)
+from test_template import (
+    test_render_keeps_utf8_in_literal_text as test_template__test_render_keeps_utf8_in_literal_text,
+)
 from test_tls_client_pool import (
     test_release_acquire_keeps_live_connection as test_tls_client_pool__test_release_acquire_keeps_live_connection,
 )
@@ -4018,6 +4033,7 @@ def main() raises:
     suite.test[test_auth_extract__test_forbidden_builder]()
     suite.test[test_auth_extract__test_extracted_bearer_missing_header_is_401]()
     suite.test[test_auth_extract__test_extracted_bearer_present_succeeds]()
+    suite.test[test_auth_extract__test_basic_credentials_are_utf8]()
     # tests/http/test_backpressure.mojo
     suite.test[test_backpressure__test_watermark_hysteresis]()
     # tests/http/test_bodyless_responses.mojo
@@ -5621,6 +5637,7 @@ def main() raises:
     suite.test[test_session__test_backed_store_expired_session_is_empty]()
     suite.test[test_session__test_backed_store_forged_cookie_is_empty]()
     suite.test[test_session__test_session_store_trait_generic_over_impls]()
+    suite.test[test_session__test_cookie_store_keeps_utf8_values]()
     # tests/http/test_simd_parsers.mojo
     suite.test[test_simd_parsers__test_memmem_finds_at_start]()
     suite.test[test_simd_parsers__test_memmem_finds_at_middle]()
@@ -5669,6 +5686,7 @@ def main() raises:
     suite.test[test_sse__test_streaming_response_has_spec_headers]()
     suite.test[test_sse__test_streaming_response_body_drains_via_chunked_body]()
     suite.test[test_sse__test_stream_sse_response_carries_stream_and_headers]()
+    suite.test[test_sse__test_format_keeps_utf8_intact]()
     # tests/http/test_static_multicore.mojo
     suite.test[
         test_static_multicore__test_static_multicore_sequential_keepalive_churn
@@ -5881,6 +5899,8 @@ def main() raises:
     suite.test[
         test_template__test_block_inside_for_loop_renders_default_per_iteration
     ]()
+    suite.test[test_template__test_html_escape_keeps_utf8_intact]()
+    suite.test[test_template__test_render_keeps_utf8_in_literal_text]()
     # tests/http/test_tls_client_pool.mojo
     suite.test[
         test_tls_client_pool__test_release_acquire_keeps_live_connection

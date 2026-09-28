@@ -411,5 +411,17 @@ def test_extracted_bearer_present_succeeds() raises:
     assert_equal(resp.text(), String("token=abc.def"))
 
 
+def test_basic_credentials_are_utf8() raises:
+    """RFC 7617: "jörg:pässwörd" base64-encoded as UTF-8 bytes."""
+    from flare.crypto.base64 import base64_encode
+
+    var raw = String("jörg:pässwörd")
+    var creds = parse_basic_credentials(
+        "Basic " + base64_encode(Span[UInt8, _](raw.as_bytes()))
+    )
+    assert_equal(creds.username, String("jörg"))
+    assert_equal(creds.password, String("pässwörd"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

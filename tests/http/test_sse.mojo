@@ -300,6 +300,12 @@ def _sse_router_e2e() raises:
     assert_equal(got_ct, "text/event-stream")
 
 
+def test_format_keeps_utf8_intact() raises:
+    var wire = format_sse_event(SseEvent.message(String("héllo 世界")))
+    var s = String(unsafe_from_utf8=Span[UInt8, _](wire))
+    assert_true("data: héllo 世界\n" in s, s)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
     _sse_router_e2e()

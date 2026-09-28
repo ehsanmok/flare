@@ -146,8 +146,9 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
     while i <= n:
         if i == n or Int(p[unsafe_offset=i]) == ord("\n"):
             out += "data: "
-            for k in range(line_start, i):
-                out += chr(Int(p[unsafe_offset=k]))
+            # Lines are cut at "\n", an ASCII byte, so each slice is
+            # whole UTF-8; copying bytes via chr() double-encoded them.
+            out += String(unsafe_from_utf8=event.data.as_bytes()[line_start:i])
             out += "\n"
             line_start = i + 1
         i += 1

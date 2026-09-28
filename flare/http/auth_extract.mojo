@@ -90,6 +90,7 @@ from std.format import Writable, Writer
 
 from .extract import Extractor
 from .request import Request
+from .proto.utf8 import utf8_lossy_string
 
 
 # ── AuthError ─────────────────────────────────────────────────────────────
@@ -399,12 +400,10 @@ def parse_basic_credentials(authz: String) raises AuthError -> BasicCredentials:
             break
     if split < 0:
         raise AuthError(_variant=10, detail=String(""))
-    var user = String(capacity_bytes=split)
-    for k in range(split):
-        user += chr(Int(raw[k]))
-    var pw = String(capacity_bytes=raw_n - split - 1)
-    for k in range(split + 1, raw_n):
-        pw += chr(Int(raw[k]))
+    # RFC 7617 sec 2.1: credentials are UTF-8. chr() per byte
+    # double-encoded them, so a non-ASCII password never matched.
+    var user = utf8_lossy_string(Span[UInt8, _](raw)[:split])
+    var pw = utf8_lossy_string(Span[UInt8, _](raw)[split + 1 : raw_n])
     return BasicCredentials(user^, pw^)
 
 

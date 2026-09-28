@@ -450,5 +450,21 @@ def test_block_inside_for_loop_renders_default_per_iteration() raises:
     assert_equal(t.render(ctx), String("<li>a</li><li>b</li>"))
 
 
+# ── Non-ASCII text survives escaping and rendering ─────────────────────────
+
+
+def test_html_escape_keeps_utf8_intact() raises:
+    assert_equal(
+        html_escape(String("<café & naïve>")),
+        String("&lt;café &amp; naïve&gt;"),
+    )
+
+
+def test_render_keeps_utf8_in_literal_text() raises:
+    var t = Template.compile(String("Grüße, 世界!"))
+    var ctx = TemplateContext()
+    assert_equal(t.render(ctx), String("Grüße, 世界!"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

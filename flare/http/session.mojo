@@ -48,6 +48,7 @@ from std.collections import Optional
 from std.time import perf_counter_ns
 
 from .request import Request
+from .proto.utf8 import utf8_lossy_string
 from ..crypto import (
     base64url_decode,
     base64url_encode,
@@ -250,10 +251,7 @@ struct StringSessionCodec(Copyable, Defaultable, SessionCodec):
     def decode(data: List[UInt8]) raises -> String:
         if len(data) == 0:
             return ""
-        var out = String(capacity_bytes=len(data) + 1)
-        for b in data:
-            out += chr(Int(b))
-        return out^
+        return utf8_lossy_string(Span[UInt8, _](data))
 
 
 # ── Session[T] + SessionStore ─────────────────────────────────────────────
@@ -376,9 +374,7 @@ struct CookieSessionStore(Copyable, SessionStore):
             keys.append(k.copy())
         try:
             var payload = signed_cookie_decode_keys(cookie_value, keys)
-            var out = String(capacity_bytes=len(payload) + 1)
-            for b in payload:
-                out += chr(Int(b))
+            var out = utf8_lossy_string(Span[UInt8, _](payload))
             return Session(out^)
         except:
             return Session.empty()
@@ -462,9 +458,7 @@ struct InMemorySessionStore(Copyable, SessionStore):
             keys.append(k.copy())
         try:
             var payload = signed_cookie_decode_keys(cookie_value, keys)
-            var id_str = String(capacity_bytes=len(payload) + 1)
-            for b in payload:
-                id_str += chr(Int(b))
+            var id_str = utf8_lossy_string(Span[UInt8, _](payload))
             for i in range(len(self._ids)):
                 if self._ids[i] == id_str:
                     return Session(self._values[i])
@@ -620,9 +614,7 @@ struct BackedSessionStore[B: SessionBackend](Copyable):
             return Optional[String]()
         try:
             var payload = signed_cookie_decode(cv, self._key)
-            var id = String(capacity_bytes=len(payload) + 1)
-            for b in payload:
-                id += chr(Int(b))
+            var id = utf8_lossy_string(Span[UInt8, _](payload))
             return Optional[String](id^)
         except:
             return Optional[String]()
