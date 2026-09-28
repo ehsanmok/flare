@@ -261,5 +261,53 @@ def test_padding_too_long_raises() raises:
     assert_true(raised)
 
 
+def test_every_byte_round_trips_through_both_decoders() raises:
+    """Checks the canonical-code assumption the O(1) lookup relies on:
+    every one of the 256 symbols decodes back to itself, alone and in a
+    run of all of them."""
+    from flare.http.hpack_huffman import huffman_decode, huffman_encode
+    from flare.http.hpack_huffman_simd import huffman_decode_simd
+
+    var all = List[UInt8]()
+    for b in range(256):
+        all.append(UInt8(b))
+        var one = List[UInt8]()
+        one.append(UInt8(b))
+        var enc1 = List[UInt8]()
+        huffman_encode(Span[UInt8, _](one), enc1)
+        var d1 = List[UInt8]()
+        huffman_decode(Span[UInt8, _](enc1), d1)
+        assert_equal(len(d1), 1)
+        assert_equal(Int(d1[0]), b)
+    var enc = List[UInt8]()
+    huffman_encode(Span[UInt8, _](all), enc)
+    var d2 = List[UInt8]()
+    huffman_decode_simd(Span[UInt8, _](enc), d2)
+    assert_equal(len(d2), 256)
+    for b in range(256):
+        assert_equal(Int(d2[b]), b)
+
+
+def test_long_codes_decode_in_linear_time() raises:
+    """16 KiB of bytes whose codes are 13-28 bits long. With the old
+    linear symbol scan this took on the order of seconds; it must now
+    be a few milliseconds."""
+    from std.time import perf_counter_ns
+    from flare.http.hpack_huffman import huffman_encode
+    from flare.http.hpack_huffman_simd import huffman_decode_simd
+
+    var src = List[UInt8]()
+    for i in range(16384):
+        src.append(UInt8(i % 32))
+    var enc = List[UInt8]()
+    huffman_encode(Span[UInt8, _](src), enc)
+    var out = List[UInt8]()
+    var t0 = perf_counter_ns()
+    huffman_decode_simd(Span[UInt8, _](enc), out)
+    var ms = (perf_counter_ns() - t0) // 1_000_000
+    assert_equal(len(out), 16384)
+    assert_true(ms < 250, "decode took " + String(ms) + " ms")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -741,19 +741,70 @@ def huffman_encode(input: Span[UInt8, _], mut output: List[UInt8]):
 
 
 @always_inline
+def _make_canon_table() -> Array[Int32, 93]:
+    """Per code length L in 0..30: ``[L]`` first code, ``[31 + L]``
+    count, ``[62 + L]`` index of its first symbol in
+    :data:`_CANON_SYMS`. The HPACK code is canonical (RFC 7541
+    Appendix B): the codes of one length are consecutive."""
+    var t = Array[Int32, 93](fill=Int32(0))
+    var base = 0
+    for L in range(31):
+        var first = -1
+        var count = 0
+        for sym in range(257):
+            if _hpack_table_length(sym) == L:
+                var c = _hpack_table_code(sym)
+                if first < 0 or c < first:
+                    first = c
+                count += 1
+        t[L] = Int32(first if first >= 0 else 0)
+        t[31 + L] = Int32(count)
+        t[62 + L] = Int32(base)
+        base += count
+    return t^
+
+
+def _make_canon_syms() -> Array[Int16, 257]:
+    """Symbols ordered by (length, code), matching the offsets in
+    :data:`_CANON_TABLE`."""
+    var out = Array[Int16, 257](fill=Int16(-1))
+    var t = _make_canon_table()
+    for sym in range(257):
+        var L = _hpack_table_length(sym)
+        var idx = Int(t[62 + L]) + (_hpack_table_code(sym) - Int(t[L]))
+        out[idx] = Int16(sym)
+    return out^
+
+
+comptime _CANON_TABLE = _make_canon_table()
+comptime _CANON_SYMS = _make_canon_syms()
+
+
 def _build_decode_lookup(target_code: Int, target_len: Int) -> Int:
     """Helper for the canonical decoder — for a given prefix
     ``(code, len)`` accumulated by the bit-walker, return the
     matching symbol or -1 if no match.
 
-    Implemented as a linear scan over [0, 256]. Slow but correct;
-    SIMD acceleration is a follow-up commit.
+    O(1): canonical codes of one length are consecutive, so the symbol
+    is an offset from that length's first code. This was a linear scan
+    over all 257 symbols (each a branchy table lookup) for every
+    candidate length, and the bit-walker tries up to 26 lengths per
+    symbol. A header of 30-bit codes cost on the order of 10^5
+    operations per decoded byte, which made one HEADERS frame worth
+    seconds of CPU.
     """
-    for sym in range(257):
-        if _hpack_table_length(sym) == target_len:
-            if _hpack_table_code(sym) == target_code:
-                return sym
-    return -1
+    if target_len < 5 or target_len > 30:
+        return -1
+    var first = Int(materialize[_CANON_TABLE]()[target_len])
+    var count = Int(materialize[_CANON_TABLE]()[31 + target_len])
+    var off = target_code - first
+    if off < 0 or off >= count:
+        return -1
+    return Int(
+        materialize[_CANON_SYMS]()[
+            Int(materialize[_CANON_TABLE]()[62 + target_len]) + off
+        ]
+    )
 
 
 def huffman_decoded_length(input: Span[UInt8, _]) -> Int:

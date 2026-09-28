@@ -33,6 +33,7 @@ inserts evict the oldest entry until ``size <= max_size``.
 
 from std.collections import Optional
 
+from flare.http.hpack_huffman_simd import huffman_decode_simd
 from flare.http.hpack_huffman import (
     huffman_decode,
     huffman_encode,
@@ -319,7 +320,7 @@ struct HpackDecoder(Copyable, Defaultable):
             var encoded = buf[off : off + slen]
             var decoded = List[UInt8]()
             try:
-                huffman_decode(encoded, decoded)
+                huffman_decode_simd(encoded, decoded)
             except e:
                 raise Error("hpack: Huffman decode failed: " + String(e))
             var s = String(capacity_bytes=len(decoded) + 1)

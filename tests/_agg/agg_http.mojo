@@ -1631,6 +1631,12 @@ from test_hpack_huffman import (
 from test_hpack_huffman import (
     test_padding_too_long_raises as test_hpack_huffman__test_padding_too_long_raises,
 )
+from test_hpack_huffman import (
+    test_every_byte_round_trips_through_both_decoders as test_hpack_huffman__test_every_byte_round_trips_through_both_decoders,
+)
+from test_hpack_huffman import (
+    test_long_codes_decode_in_linear_time as test_hpack_huffman__test_long_codes_decode_in_linear_time,
+)
 from test_http import test_ok_2xx as test_http__test_ok_2xx
 from test_http import test_not_ok_non2xx as test_http__test_not_ok_non2xx
 from test_http import (
@@ -4946,6 +4952,10 @@ def main() raises:
     suite.test[test_hpack_huffman__test_decoded_length_is_upper_bound]()
     suite.test[test_hpack_huffman__test_invalid_padding_raises]()
     suite.test[test_hpack_huffman__test_padding_too_long_raises]()
+    suite.test[
+        test_hpack_huffman__test_every_byte_round_trips_through_both_decoders
+    ]()
+    suite.test[test_hpack_huffman__test_long_codes_decode_in_linear_time]()
     # tests/http/test_http.mojo
     suite.test[test_http__test_ok_2xx]()
     suite.test[test_http__test_not_ok_non2xx]()
