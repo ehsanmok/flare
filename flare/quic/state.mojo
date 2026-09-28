@@ -267,6 +267,9 @@ struct Connection(Copyable):
     var active_dcid_seq: UInt64
     """Sequence number of the peer CID currently used as the active
     Destination CID. ``0`` is the handshake CID (§5.1.1)."""
+    var peer_retire_prior_to: UInt64
+    """Highest ``retire_prior_to`` the peer has sent; every sequence
+    number below it is retired for good."""
     var outgoing_path_challenge: List[UInt8]
     """The 8-byte PATH_CHALLENGE payload we last sent while probing
     a new path; an inbound PATH_RESPONSE must echo it to validate
@@ -297,6 +300,7 @@ def new_connection(
         close_reason=List[UInt8](),
         peer_cids=Dict[UInt64, _PeerConnId](),
         active_dcid_seq=UInt64(0),
+        peer_retire_prior_to=UInt64(0),
         outgoing_path_challenge=List[UInt8](),
         path_validated=False,
     )
@@ -523,10 +527,33 @@ def apply_new_connection_id(
         raise Error(
             "quic state: NEW_CONNECTION_ID retire_prior_to > sequence_number"
         )
-    conn.peer_cids[ncid.sequence_number] = _PeerConnId(
+    var seq = ncid.sequence_number
+    if seq in conn.peer_cids:
+        # A retransmit repeats the frame exactly. Anything else reuses
+        # a sequence number, which used to overwrite the stored CID.
+        ref have = conn.peer_cids[seq]
+        if (
+            have.cid != ncid.connection_id
+            or have.reset_token != ncid.stateless_reset_token
+        ):
+            connection_close(
+                conn,
+                QUIC_PROTOCOL_VIOLATION,
+                "NEW_CONNECTION_ID reuses a sequence number",
+            )
+            raise Error("quic state: NEW_CONNECTION_ID sequence reused")
+        return
+    if seq < conn.peer_retire_prior_to:
+        # Already retired by an earlier retire_prior_to (a late
+        # frame): retire it again instead of storing it.
+        events.retire_connection_ids.append(seq)
+        return
+    conn.peer_cids[seq] = _PeerConnId(
         cid=ncid.connection_id.copy(),
         reset_token=ncid.stateless_reset_token.copy(),
     )
+    if ncid.retire_prior_to > conn.peer_retire_prior_to:
+        conn.peer_retire_prior_to = ncid.retire_prior_to
     if ncid.retire_prior_to > UInt64(0):
         var to_retire = List[UInt64]()
         for entry in conn.peer_cids.items():
@@ -537,6 +564,19 @@ def apply_new_connection_id(
             events.retire_connection_ids.append(to_retire[i])
         if conn.active_dcid_seq < ncid.retire_prior_to:
             conn.active_dcid_seq = ncid.sequence_number
+    # RFC 9000 sec 5.1.1: more active CIDs than we allow (the
+    # handshake CID counts until it is retired) is a
+    # CONNECTION_ID_LIMIT_ERROR. They were stored without limit.
+    var active = len(conn.peer_cids)
+    if UInt64(0) not in conn.peer_cids and conn.peer_retire_prior_to == 0:
+        active += 1
+    if active > LOCAL_ACTIVE_CONNECTION_ID_LIMIT:
+        connection_close(
+            conn,
+            QUIC_CONNECTION_ID_LIMIT_ERROR,
+            "peer issued more connection IDs than active_connection_id_limit",
+        )
+        raise Error("quic state: CONNECTION_ID_LIMIT_ERROR")
 
 
 def apply_retire_connection_id(
@@ -753,6 +793,9 @@ def handle_frame_buf(
 
 comptime QUIC_PROTOCOL_VIOLATION: UInt64 = 0x0A
 """RFC 9000 sec 20.1 transport error code."""
+comptime QUIC_CONNECTION_ID_LIMIT_ERROR: UInt64 = 0x09
+comptime LOCAL_ACTIVE_CONNECTION_ID_LIMIT: Int = 2
+"""The ``active_connection_id_limit`` both flare endpoints advertise."""
 
 
 def frame_allowed_before_1rtt(buf: Span[UInt8, _]) -> Bool:

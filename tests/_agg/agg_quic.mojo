@@ -744,6 +744,9 @@ from test_state import (
 from test_state import (
     test_path_response_mismatch_ignored as test_state__test_path_response_mismatch_ignored,
 )
+from test_state import (
+    test_new_connection_id_is_bounded_and_not_overwritten as test_state__test_new_connection_id_is_bounded_and_not_overwritten,
+)
 from test_transport_params import (
     test_round_trip_full_set as test_transport_params__test_round_trip_full_set,
 )
@@ -1251,6 +1254,9 @@ def main() raises:
     suite.test[test_state__test_path_challenge_queues_response]()
     suite.test[test_state__test_path_response_validates_matching_challenge]()
     suite.test[test_state__test_path_response_mismatch_ignored]()
+    suite.test[
+        test_state__test_new_connection_id_is_bounded_and_not_overwritten
+    ]()
     # tests/quic/test_transport_params.mojo
     suite.test[test_transport_params__test_round_trip_full_set]()
     suite.test[test_transport_params__test_empty_params_roundtrip]()

@@ -367,6 +367,37 @@ def test_path_response_mismatch_ignored() raises:
     assert_equal(len(conn.outgoing_path_challenge), 8)
 
 
+def test_new_connection_id_is_bounded_and_not_overwritten() raises:
+    """Every NEW_CONNECTION_ID was stored, past the
+    active_connection_id_limit of 2 we advertise, and a repeated
+    sequence number replaced the CID stored under it."""
+    var conn = new_connection()
+    var events = empty_events()
+    var b1 = _ncid_bytes(UInt64(1), UInt64(0), UInt8(0x21))
+    _ = handle_frame_buf(conn, Span[UInt8, _](b1), UInt64(100), events)
+    # An exact retransmit is fine.
+    _ = handle_frame_buf(conn, Span[UInt8, _](b1), UInt64(100), events)
+    var clash = _ncid_bytes(UInt64(1), UInt64(0), UInt8(0x99))
+    var raised = False
+    try:
+        _ = handle_frame_buf(conn, Span[UInt8, _](clash), UInt64(100), events)
+    except:
+        raised = True
+    assert_true(raised, "a reused sequence number was accepted")
+    assert_equal(conn.peer_cids.get(UInt64(1)).value().cid[0], UInt8(0x21))
+    var conn2 = new_connection()
+    var ev2 = empty_events()
+    var n1 = _ncid_bytes(UInt64(1), UInt64(0), UInt8(0x31))
+    _ = handle_frame_buf(conn2, Span[UInt8, _](n1), UInt64(100), ev2)
+    var n2 = _ncid_bytes(UInt64(2), UInt64(0), UInt8(0x32))
+    var over = False
+    try:
+        _ = handle_frame_buf(conn2, Span[UInt8, _](n2), UInt64(100), ev2)
+    except:
+        over = True
+    assert_true(over, "a third active CID was accepted")
+
+
 def main() raises:
     test_initial_connection_state()
     test_handshake_done_advances_state()
@@ -388,4 +419,5 @@ def main() raises:
     test_path_challenge_queues_response()
     test_path_response_validates_matching_challenge()
     test_path_response_mismatch_ignored()
-    print("test_quic_state: 20 passed")
+    test_new_connection_id_is_bounded_and_not_overwritten()
+    print("test_quic_state: 21 passed")
