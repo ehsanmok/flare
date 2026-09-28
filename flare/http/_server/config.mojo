@@ -55,12 +55,16 @@ struct WsUpgrade(Copyable, Defaultable):
         self.handler = None
         self.offload = False
 
-    def __init__(out self, handler: WsHandlerFn, offload: Bool = False):
+    def __init__(out self, handler: WsHandlerFn, offload: Bool = True):
         """Handle WebSocket upgrades with ``handler``.
 
         Args:
             handler: Called once per upgraded connection.
-            offload: Give each socket its own detached thread.
+            offload: Give each socket its own detached thread (the
+                default since v0.11). With ``False`` the handler runs on
+                the reactor thread for the socket's whole lifetime, so
+                one WebSocket client stalls every other connection on
+                that worker.
         """
         self.handler = Optional[WsHandlerFn](handler)
         self.offload = offload

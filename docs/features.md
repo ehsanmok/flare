@@ -609,9 +609,16 @@ loops are unchanged.
 WebSocket on the same port: set `ServerConfig.ws` to a
 `WsUpgrade(ws_fn)` and any request that arrives with a valid RFC 6455
 upgrade is handed to `ws_fn`, while everything else goes to the
-ordinary `Handler`. `WsUpgrade(ws_fn, offload=True)` moves each
-upgraded socket onto its own detached thread, which suits long-lived
-connections that would otherwise occupy a reactor slot.
+ordinary `Handler`. Each upgraded socket runs on its own detached
+thread; `WsUpgrade(ws_fn, offload=False)` runs the handler on the
+reactor thread instead, which blocks every other connection on that
+worker until the WebSocket closes.
+
+**Changed in v0.11 (breaking).** `offload` defaults to `True`; it was
+`False`, so one WebSocket client stalled its whole worker by default. A
+handshake whose `Sec-WebSocket-Version` is not 13 is answered 426 with
+`Sec-WebSocket-Version: 13` (RFC 6455 sec 4.4); the version used to go
+unchecked, so any draft was upgraded. There is still no cap on offload threads.
 
 **Changed in v0.11.** These were two loose fields, `ws_handler` and
 `ws_offload`, which made it easy to set the handler and never learn

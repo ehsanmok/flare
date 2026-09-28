@@ -140,6 +140,18 @@ ceiling, after which the connection re-arms and yields to its peers."""
 # ── Connection handle ─────────────────────────────────────────────────────────
 
 
+def _is_ws_version_mismatch(req: Request) -> Bool:
+    """A WebSocket handshake (GET, ``Upgrade: websocket``, a key) whose
+    ``Sec-WebSocket-Version`` is not 13."""
+    if req.method != "GET":
+        return False
+    if req.headers.get("upgrade").lower() != "websocket":
+        return False
+    if req.headers.get("sec-websocket-key").byte_length() == 0:
+        return False
+    return String(req.headers.get("sec-websocket-version").strip()) != "13"
+
+
 def _head_expects_continue(buf: Span[UInt8, _], headers_end: Int) -> Bool:
     """The request line says HTTP/1.1 and a header line is
     ``Expect: 100-continue`` (names anchored at a line start, value
@@ -831,6 +843,17 @@ struct ConnHandle(Movable):
             # WsConnection, so the reactor is told to drop this
             # connection -- with `ws_offload` set that happens while
             # the handler is still running on its own thread.
+            if config.ws.handler and _is_ws_version_mismatch(req):
+                # RFC 6455 sec 4.4: a handshake for a version we do not
+                # speak gets 426 with the version we do, rather than
+                # falling through to the HTTP handler as if it were a
+                # plain GET.
+                var r426 = build_error_response(426, "Upgrade Required")
+                try:
+                    r426.headers.set("Sec-WebSocket-Version", "13")
+                except:
+                    pass
+                return self._finalise_response(r426^, True)
             if config.ws.handler:
                 var upgraded: Bool
                 try:

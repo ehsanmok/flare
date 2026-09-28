@@ -22,7 +22,7 @@ instead, which is the only way to reach the prebuf with real data.
 
 from std.ffi import c_int, c_size_t
 from std.memory import stack_allocation
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
@@ -379,8 +379,69 @@ def test_frames_pipelined_with_the_handshake_are_all_delivered() raises:
     )
 
 
+# ── Defaults and version negotiation ───────────────────────────────────────
+
+
+def test_ws_upgrade_offloads_by_default() raises:
+    from flare.http import WsUpgrade
+
+    assert_true(WsUpgrade(_ws_handler).offload)
+    assert_false(WsUpgrade(_ws_handler, offload=False).offload)
+
+
+def test_unsupported_ws_version_gets_426() raises:
+    from flare.http import ServerConfig, WsUpgrade
+
+    var cfg = ServerConfig()
+    cfg.ws = WsUpgrade(_ws_handler)
+    var srv = HttpServer.bind(SocketAddr.localhost(0), cfg^)
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_http_handler)
+        except:
+            pass
+        exit()
+    usleep(300000)
+    var got = String("")
+    try:
+        var fd = _connect_loopback(port)
+        var req = String(
+            "GET /chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade:"
+            " websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key:"
+            " dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 8\r\n\r\n"
+        )
+        var rb = req.as_bytes()
+        _ = _send(
+            fd,
+            rb.unsafe_ptr(),
+            c_size_t(req.byte_length()),
+            c_int(MSG_NOSIGNAL),
+        )
+        var buf = stack_allocation[4096, UInt8]()
+        var attempts = 0
+        while attempts < 20:
+            attempts += 1
+            var n = _recv(fd, buf, c_size_t(4096), c_int(0))
+            if Int(n) <= 0:
+                break
+            for i in range(Int(n)):
+                got += chr(Int(buf[unsafe_offset=i]))
+        _ = _close(fd)
+    except:
+        pass
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(got.startswith("HTTP/1.1 426"), "got: " + got)
+    assert_true("Sec-WebSocket-Version: 13" in got, "got: " + got)
+    assert_false("hello http" in got, "reached the HTTP handler: " + got)
+
+
 def main() raises:
     test_http_and_ws_on_one_port()
     test_upgrade_request_is_ordinary_traffic_without_a_ws_handler()
     test_frames_pipelined_with_the_handshake_are_all_delivered()
-    print("test_server_ws_upgrade: 3 passed")
+    test_ws_upgrade_offloads_by_default()
+    test_unsupported_ws_version_gets_426()
+    print("test_server_ws_upgrade: 5 passed")
