@@ -274,6 +274,8 @@ def test_listener_dispatch_routes_into_handle_packet() raises:
         dcid=dcid,
         is_server=False,
     )
+    while len(protected) < 1200:  # RFC 9000 sec 14.1 datagram floor
+        protected.append(UInt8(0))
     var peer = SocketAddr(IpAddr.localhost(), UInt16(54321))
     var slot = listener.dispatch_datagram(Span[UInt8, _](protected), peer)
     assert_equal(slot, 0)
@@ -315,6 +317,8 @@ def test_dispatch_garbled_initial_drops_silently() raises:
     var dcid_offset = 5 + 1
     for i in range(len(dcid_b.bytes)):
         mutated[dcid_offset + i] = dcid_b.bytes[i]
+    while len(mutated) < 1200:  # RFC 9000 sec 14.1 datagram floor
+        mutated.append(UInt8(0))
     var peer = SocketAddr(IpAddr.localhost(), UInt16(54321))
     var slot = listener.dispatch_datagram(Span[UInt8, _](mutated), peer)
     assert_equal(slot, 0)
@@ -363,6 +367,30 @@ def test_handle_packet_drops_handshake_long_silently() raises:
     assert_equal(len(events.new_streams), 0)
 
 
+def test_listener_drops_an_initial_under_1200_bytes() raises:
+    """The server accepted an Initial of any size, so a 60-byte spoofed
+    packet bought a full handshake flight (RFC 9000 sec 14.1)."""
+    var listener = _bind_loopback()
+    var dcid = _make_cid(UInt8(0x52), 8)
+    var scid = _make_cid(UInt8(0x62), 8)
+    var ping = List[UInt8]()
+    ping.append(UInt8(0x01))
+    var plaintext = _padded_plaintext(ping, 64)
+    var prefix = _build_initial_prefix(dcid, scid, 1, len(plaintext))
+    var protected = protect_initial_packet(
+        Span[UInt8, _](prefix),
+        packet_number=UInt64(0),
+        pn_length=1,
+        plaintext=Span[UInt8, _](plaintext),
+        dcid=dcid,
+        is_server=False,
+    )
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(54321))
+    var slot = listener.dispatch_datagram(Span[UInt8, _](protected), peer)
+    assert_equal(slot, -1)
+    assert_equal(listener.connection_count(), 0)
+
+
 def main() raises:
     test_decode_packet_number_rfc_a3()
     test_decode_packet_number_no_wrap()
@@ -370,7 +398,8 @@ def main() raises:
     test_initial_carrying_a_stream_frame_is_a_protocol_violation()
     test_handle_packet_applies_a_permitted_initial()
     test_listener_dispatch_routes_into_handle_packet()
+    test_listener_drops_an_initial_under_1200_bytes()
     test_dispatch_garbled_initial_drops_silently()
     test_handle_packet_drops_short_header_silently()
     test_handle_packet_drops_handshake_long_silently()
-    print("test_quic_handle_packet: 9 passed")
+    print("test_quic_handle_packet: 10 passed")

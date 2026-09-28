@@ -147,7 +147,7 @@ def _build_synth_initial(
     ping.append(UInt8(0x01))
     var plaintext = _padded_plaintext(ping, 64)
     var prefix = _build_initial_prefix(dcid, scid, 1, len(plaintext))
-    return protect_initial_packet(
+    var dg = protect_initial_packet(
         Span[UInt8, _](prefix),
         packet_number=packet_number,
         pn_length=1,
@@ -155,6 +155,11 @@ def _build_synth_initial(
         dcid=dcid,
         is_server=False,
     )
+    # RFC 9000 sec 14.1: the server drops an Initial in a datagram
+    # under 1200 bytes. Trailing zeros are datagram padding.
+    while len(dg) < 1200:
+        dg.append(UInt8(0))
+    return dg^
 
 
 def _bind_listener(idle_ms: UInt64 = UInt64(30_000)) raises -> QuicListener:
@@ -519,6 +524,47 @@ def test_server_chooses_its_own_connection_id() raises:
     listener.close()
 
 
+def test_handshake_flight_is_chunked_and_held_to_3x() raises:
+    """The whole queued handshake flight went out as one packet, however
+    large, and to an unvalidated address with no limit: a 1200-byte
+    spoofed Initial could have the server send a certificate chain's
+    worth of bytes at a victim. Now each packet carries at most 1100
+    CRYPTO bytes, and the total stays within 3x what the address sent
+    (RFC 9000 sec 8.1). The rest waits in the queue."""
+    var listener = _bind_listener()
+    var dcid = _make_cid(UInt8(0xCE), 8)
+    var scid = _make_cid(UInt8(0xDE), 8)
+    var first = _build_synth_initial(dcid, scid, UInt64(0))
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(54321))
+    _ = listener.dispatch_datagram(Span[UInt8, _](first), peer)
+    listener.tls_egress_queues[0] = List[UInt8](length=10_000, fill=UInt8(7))
+    var sink = UdpSocket.bind(SocketAddr(IpAddr.localhost(), UInt16(0)))
+    listener.peer_addrs[0] = sink.local_addr()
+    _ = listener._drain_and_send(0)
+    sink.set_recv_timeout(300)
+    var buf = List[UInt8](length=65536, fill=UInt8(0))
+    var total = 0
+    var count = 0
+    while True:
+        var got: Int
+        try:
+            got = sink.recv_from(Span[UInt8, _](buf))[0]
+        except:
+            break
+        assert_true(got <= 1200, "a datagram of " + String(got) + " bytes")
+        total += got
+        count += 1
+    var received = len(first)
+    assert_true(count >= 2, "the flight was not split")
+    assert_true(total <= 3 * received, "sent past the 3x budget")
+    assert_true(
+        len(listener.tls_egress_queues[0]) > 0,
+        "the over-budget remainder was not held back",
+    )
+    listener.shutdown()
+    listener.close()
+
+
 def main() raises:
     test_loopback_initial_handshake_round_trip()
     test_loopback_retransmit_routes_to_existing_slot()
@@ -529,4 +575,5 @@ def main() raises:
     test_egress_no_op_when_queue_empty()
     test_io_loop_tick_drives_recv_dispatch_drain()
     test_server_chooses_its_own_connection_id()
-    print("test_quic_loopback_integration: 9 passed")
+    test_handshake_flight_is_chunked_and_held_to_3x()
+    print("test_quic_loopback_integration: 10 passed")

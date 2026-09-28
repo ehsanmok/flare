@@ -354,6 +354,9 @@ from test_quic_handle_packet import (
 from test_quic_handle_packet import (
     test_handle_packet_drops_handshake_long_silently as test_quic_handle_packet__test_handle_packet_drops_handshake_long_silently,
 )
+from test_quic_handle_packet import (
+    test_listener_drops_an_initial_under_1200_bytes as test_quic_handle_packet__test_listener_drops_an_initial_under_1200_bytes,
+)
 from test_quic_handshake_bridge import (
     test_events_crypto_frames_starts_empty as test_quic_handshake_bridge__test_events_crypto_frames_starts_empty,
 )
@@ -419,6 +422,9 @@ from test_quic_loopback_integration import (
 )
 from test_quic_loopback_integration import (
     test_server_chooses_its_own_connection_id as test_quic_loopback_integration__test_server_chooses_its_own_connection_id,
+)
+from test_quic_loopback_integration import (
+    test_handshake_flight_is_chunked_and_held_to_3x as test_quic_loopback_integration__test_handshake_flight_is_chunked_and_held_to_3x,
 )
 from test_quic_migration import (
     test_client_migrates_to_new_path as test_quic_migration__test_client_migrates_to_new_path,
@@ -948,6 +954,9 @@ def main() raises:
     suite.test[
         test_quic_handle_packet__test_handle_packet_drops_handshake_long_silently
     ]()
+    suite.test[
+        test_quic_handle_packet__test_listener_drops_an_initial_under_1200_bytes
+    ]()
     # tests/quic/test_quic_handshake_bridge.mojo
     suite.test[
         test_quic_handshake_bridge__test_events_crypto_frames_starts_empty
@@ -1014,6 +1023,9 @@ def main() raises:
     ]()
     suite.test[
         test_quic_loopback_integration__test_server_chooses_its_own_connection_id
+    ]()
+    suite.test[
+        test_quic_loopback_integration__test_handshake_flight_is_chunked_and_held_to_3x
     ]()
     # tests/quic/test_quic_migration.mojo
     suite.test[test_quic_migration__test_client_migrates_to_new_path]()

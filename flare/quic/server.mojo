@@ -168,6 +168,18 @@ from ._server_types import (
 # never blocks mid-run (RFC 9000 sec 19.9 / 19.11). 64 MiB of
 # connection credit and 4096 extra bidi streams comfortably cover a
 # 30 s h2load run at the documented HTTP/3 rate.
+comptime _MIN_INITIAL_DATAGRAM: Int = 1200
+"""RFC 9000 sec 14.1: a server discards an Initial carried in a datagram
+smaller than this. The floor is what keeps the 3x anti-amplification
+budget worth something."""
+comptime _HANDSHAKE_CHUNK: Int = 1100
+"""Most CRYPTO bytes per Initial / Handshake packet, so every packet
+fits a 1200-byte datagram with its header and AEAD tag."""
+comptime _LONG_PACKET_OVERHEAD: Int = 80
+"""Upper bound on a long-header packet's bytes beyond its CRYPTO data:
+header with two 20-byte CIDs, length and packet-number fields, frame
+header, AEAD tag."""
+
 comptime _MAX_DATA_WINDOW: UInt64 = 64 * 1024 * 1024
 comptime _MAX_STREAMS_BIDI_WINDOW: UInt64 = 4096
 
@@ -669,6 +681,8 @@ struct QuicListener(Movable):
         :meth:`_dispatch_crypto_frames` and the idle timer re-arms.
         """
         var now_us = UInt64(0)
+        if slot >= 0 and slot < len(self.connections):
+            self.connections[slot].amp_rx += len(datagram)
         # A datagram may carry several coalesced QUIC packets
         # (RFC 9000 sec 12.2): e.g. an Initial-level ACK ahead of a
         # Handshake packet carrying the client Finished, or a
@@ -774,6 +788,9 @@ struct QuicListener(Movable):
                         Span[UInt8, _](dec[0]), now_us, dec[1], True
                     )
                     self.connections[slot].initial_keys_discarded = True
+                    # A Handshake packet proves the peer holds the
+                    # address (RFC 9000 sec 8.1).
+                    self.connections[slot].addr_validated = True
                 except:
                     ok = False
         elif inbound_lvl == QuicEncryptionLevel.APPLICATION:
@@ -1527,6 +1544,11 @@ struct QuicListener(Movable):
             lh = parse_long_header(datagram)
         except:
             return -1
+        if (
+            lh.packet_type == PACKET_TYPE_INITIAL
+            and len(datagram) < _MIN_INITIAL_DATAGRAM
+        ):
+            return -1  # RFC 9000 sec 14.1
         var dcid_hex = cid_to_hex(lh.dcid)
         var slot = self.cid_table.lookup(dcid_hex)
         if slot >= 0:
@@ -1664,6 +1686,8 @@ struct QuicListener(Movable):
             self.config.initial_max_data,
         )
         qc.initial_dcid = lh.dcid.copy()
+        if retry_odcid:
+            qc.addr_validated = True  # the Retry token proved it
         var slot = len(self.connections)
         self.connections.append(qc^)
         # After a Retry the client's current DCID is the Retry's SCID;
@@ -1894,27 +1918,49 @@ struct QuicListener(Movable):
             return False
         var emitted = False
         var peer = self.peer_addrs[slot]
+        # The handshake flight goes out in packets of at most
+        # _HANDSHAKE_CHUNK CRYPTO bytes (a whole certificate chain in
+        # one packet overran any path MTU), and, until the peer's
+        # address is validated, only as far as 3x the bytes received
+        # from it (RFC 9000 sec 8.1). What does not fit stays queued
+        # for the next drain, after the peer sends more.
         # Initial-level (legacy OpenSSL path).
-        if (
+        while (
             slot < len(self.tls_egress_queues)
             and len(self.tls_egress_queues[slot]) > 0
         ):
-            var initial_dg = self._build_initial_response(slot)
-            if len(initial_dg) > 0:
-                _ = self.send_to(Span[UInt8, _](initial_dg), peer)
-                self.tls_egress_queues[slot] = List[UInt8]()
-                emitted = True
+            var take = min(len(self.tls_egress_queues[slot]), _HANDSHAKE_CHUNK)
+            if not self._amplification_allows(slot, take):
+                break
+            var initial_dg = self._build_initial_response(slot, max_bytes=take)
+            if len(initial_dg) == 0:
+                break
+            _ = self.send_to(Span[UInt8, _](initial_dg), peer)
+            self.connections[slot].amp_tx += len(initial_dg)
+            self.tls_egress_queues[slot] = _queue_rest(
+                self.tls_egress_queues[slot], take
+            )
+            emitted = True
         # Handshake-level (rustls path; gated on the readiness
         # sentinel via _build_handshake_response).
-        if (
+        while (
             slot < len(self.tls_handshake_egress_queues)
             and len(self.tls_handshake_egress_queues[slot]) > 0
         ):
-            var hs_dg = self._build_handshake_response(slot)
-            if len(hs_dg) > 0:
-                _ = self.send_to(Span[UInt8, _](hs_dg), peer)
-                self.tls_handshake_egress_queues[slot] = List[UInt8]()
-                emitted = True
+            var take = min(
+                len(self.tls_handshake_egress_queues[slot]), _HANDSHAKE_CHUNK
+            )
+            if not self._amplification_allows(slot, take):
+                break
+            var hs_dg = self._build_handshake_response(slot, max_bytes=take)
+            if len(hs_dg) == 0:
+                break
+            _ = self.send_to(Span[UInt8, _](hs_dg), peer)
+            self.connections[slot].amp_tx += len(hs_dg)
+            self.tls_handshake_egress_queues[slot] = _queue_rest(
+                self.tls_handshake_egress_queues[slot], take
+            )
+            emitted = True
         # 1-RTT-level CRYPTO (rustls post-handshake; gated on
         # the 1-RTT readiness sentinel).
         if (
@@ -2007,6 +2053,14 @@ struct QuicListener(Movable):
         if probing:
             self.migration_probe[slot].note_tx(len(dg))
         return True
+
+    def _amplification_allows(self, slot: Int, crypto_bytes: Int) -> Bool:
+        """Whether a long-header packet carrying ``crypto_bytes`` fits
+        the slot's 3x anti-amplification budget (RFC 9000 sec 8.1)."""
+        ref c = self.connections[slot]
+        if c.addr_validated:
+            return True
+        return c.amp_tx + crypto_bytes + _LONG_PACKET_OVERHEAD <= 3 * c.amp_rx
 
     def _has_1rtt_keys(self, slot: Int) -> Bool:
         """True if the slot has installed 1-RTT traffic secrets
@@ -2251,7 +2305,7 @@ struct QuicListener(Movable):
             _ = self.connections[slot].conn.streams.pop(UInt64(sid))
 
     def _build_initial_response(
-        mut self, slot: Int, pn_length: Int = 2
+        mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
     ) raises -> List[UInt8]:
         """Materialize a server-side Initial packet that carries
         the slot's pending egress CRYPTO bytes.
@@ -2268,7 +2322,7 @@ struct QuicListener(Movable):
         once long-running connections cross the 2-byte pn
         window.
         """
-        var qbytes = self.tls_egress_queues[slot].copy()
+        var qbytes = _queue_prefix(self.tls_egress_queues[slot], max_bytes)
         var conn = self.connections[slot].copy()
         var crypto = CryptoFrame(
             offset=conn.tx_initial_offset, data=qbytes.copy()
@@ -2320,7 +2374,7 @@ struct QuicListener(Movable):
     # -- Handshake + 1-RTT egress via rustls --------------------------------
 
     def _build_handshake_response(
-        mut self, slot: Int, pn_length: Int = 2
+        mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
     ) raises -> List[UInt8]:
         """Wrap the slot's pending Handshake-level CRYPTO bytes
         into a long-header Handshake packet, AEAD-protected via
@@ -2379,7 +2433,9 @@ struct QuicListener(Movable):
             )
         # 1. Encode the CRYPTO frame body that wraps the
         # rustls take_crypto output at Handshake level.
-        var qbytes = self.tls_handshake_egress_queues[slot].copy()
+        var qbytes = _queue_prefix(
+            self.tls_handshake_egress_queues[slot], max_bytes
+        )
         var crypto = CryptoFrame(
             offset=conn.tx_handshake_offset, data=qbytes.copy()
         )
@@ -2874,3 +2930,17 @@ struct QuicListener(Movable):
         explicit calls are only required when callers want to
         free the port before the listener goes out of scope."""
         self._socket.close()
+
+
+def _queue_prefix(q: List[UInt8], max_bytes: Int) -> List[UInt8]:
+    """The first ``max_bytes`` of ``q`` (all of it when ``max_bytes`` is
+    0 or larger than ``q``)."""
+    var n = len(q) if max_bytes <= 0 or max_bytes > len(q) else max_bytes
+    return List[UInt8](Span[UInt8, _](q)[:n])
+
+
+def _queue_rest(q: List[UInt8], sent: Int) -> List[UInt8]:
+    """``q`` without its first ``sent`` bytes."""
+    if sent >= len(q):
+        return List[UInt8]()
+    return List[UInt8](Span[UInt8, _](q)[sent:])

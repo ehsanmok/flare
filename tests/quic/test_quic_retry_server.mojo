@@ -68,7 +68,7 @@ def _synth_initial(
     var plen = encode_varint(UInt64(payload_total))
     for i in range(len(plen)):
         prefix.append(plen[i])
-    return protect_initial_packet(
+    var dg = protect_initial_packet(
         Span[UInt8, _](prefix),
         packet_number=UInt64(0),
         pn_length=1,
@@ -76,6 +76,11 @@ def _synth_initial(
         dcid=dcid,
         is_server=False,
     )
+    # RFC 9000 sec 14.1: the server drops an Initial in a datagram
+    # under 1200 bytes. Trailing zeros are datagram padding.
+    while len(dg) < 1200:
+        dg.append(UInt8(0))
+    return dg^
 
 
 def _extract_retry_token(retry: List[UInt8]) raises -> List[UInt8]:

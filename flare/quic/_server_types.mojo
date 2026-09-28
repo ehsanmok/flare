@@ -282,6 +282,17 @@ struct QuicConnection(Copyable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var amp_rx: Int
+    """Bytes received from the peer's address while it is unvalidated."""
+    var amp_tx: Int
+    """Bytes sent to it in that time. Until :attr:`addr_validated`, the
+    server may send at most three times :attr:`amp_rx` (RFC 9000 sec
+    8.1), so a spoofed Initial cannot turn the server into an
+    amplifier aimed at the address it forged."""
+    var addr_validated: Bool
+    """Set by a valid Retry token or the first decrypted Handshake
+    packet; lifts the 3x limit."""
+
     var initial_keys_discarded: Bool
     """Set once a Handshake packet has decrypted: from then on the
     server drops Initial packets (RFC 9001 sec 4.9.1). Initial keys
@@ -317,6 +328,9 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.amp_rx = 0
+        self.amp_tx = 0
+        self.addr_validated = False
         self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()
 

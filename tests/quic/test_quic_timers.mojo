@@ -86,7 +86,12 @@ def _make_initial_datagram(
     for i in range(len(payload_len)):
         out.append(payload_len[i])
     out.append(UInt8(0))
-    return out^
+    var dg = out^
+    # RFC 9000 sec 14.1: the server drops an Initial in a datagram
+    # under 1200 bytes. Trailing zeros are datagram padding.
+    while len(dg) < 1200:
+        dg.append(UInt8(0))
+    return dg^
 
 
 def test_token_round_trip() raises:
