@@ -254,7 +254,9 @@ def test_loopback_idle_close_retires_cid() raises:
     assert_equal(listener.connection_count(), 1)
     # Advance the wheel past the idle window to fire the idle
     # timer + sweep the slot.
-    var fired = listener.advance_timers(now_ms=UInt64(200))
+    var fired = listener.advance_timers(
+        now_ms=listener.timer_wheel.now_ms() + UInt64(200)
+    )
     assert_true(fired >= 1, "at least the idle timer must have fired")
     var qc = listener.connections[0].copy()
     assert_false(qc.alive, "idle expiry flips alive=False")

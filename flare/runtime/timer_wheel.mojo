@@ -184,12 +184,27 @@ struct TimerWheel(Movable):
         ``now_ms`` must be monotonically non-decreasing across calls.
         Regressing it is undefined behaviour.
 
+        A gap longer than one rotation is not walked tick by tick: the
+        wheel jumps to ``now_ms`` and re-buckets what is left, so the
+        cost follows the number of timers, not the length of the gap.
+        Timers due within one rotation are reported in fire order;
+        overflow timers due in the same jump come after them.
+
         Args:
             now_ms: Current absolute millisecond time (same clock as
                 ``now_ms`` passed to ``__init__``).
             fired: Output list; fired tokens are appended. The caller
                 does not need to clear it first.
         """
+        if (
+            now_ms > self._current_tick_ms
+            and now_ms - self._current_tick_ms > UInt64(_WHEEL_SLOTS)
+        ):
+            # A wheel anchored at 0 and advanced on the monotonic clock
+            # walked about 10^9 ticks on its first call; a reactor that
+            # slept for a minute walked 60000. Jump instead.
+            self._jump(now_ms, fired)
+            return
         while self._current_tick_ms < now_ms:
             # Advance the clock FIRST, then process the slot that
             # corresponds to the new tick. This matches ``schedule``'s
@@ -213,8 +228,11 @@ struct TimerWheel(Movable):
 
             # Promote overflow entries whose fire time is within one
             # rotation of the new current tick, or whose fire time has
-            # already passed.
-            if len(self._overflow) > 0:
+            # already passed. Once per rotation is enough: an entry
+            # went to overflow at least a rotation early, so the next
+            # boundary finds it with under a rotation to go. Scanning
+            # every tick made each millisecond cost O(overflow).
+            if self._current_slot == 0 and len(self._overflow) > 0:
                 var new_overflow = List[UInt64]()
                 for i in range(len(self._overflow)):
                     var eid = self._overflow[i]
@@ -236,6 +254,43 @@ struct TimerWheel(Movable):
                     else:
                         new_overflow.append(eid)
                 self._overflow = new_overflow^
+
+    def _jump(mut self, now_ms: UInt64, mut fired: List[UInt64]) raises:
+        """Move the clock straight to ``now_ms``: fire what is due, then
+        re-bucket every live timer against the new tick."""
+        var ids = List[UInt64]()
+        # From the next slot round to the current one is fire order for
+        # everything in the wheel (all of it is under a rotation away).
+        for d in range(1, _WHEEL_SLOTS + 1):
+            var slot = (self._current_slot + d) & _WHEEL_MASK
+            for i in range(len(self._wheel[slot])):
+                ids.append(self._wheel[slot][i])
+            self._wheel[slot] = List[UInt64]()
+        for i in range(len(self._overflow)):
+            ids.append(self._overflow[i])
+        self._overflow = List[UInt64]()
+        self._current_tick_ms = now_ms
+        var later = List[UInt64]()
+        for i in range(len(ids)):
+            var eid = ids[i]
+            if eid not in self._entries:
+                continue
+            var entry = self._entries[eid]
+            if not entry.active:
+                _ = self._entries.pop(eid)
+            elif entry.fire_at_ms <= now_ms:
+                fired.append(entry.token)
+                _ = self._entries.pop(eid)
+            else:
+                later.append(eid)
+        for i in range(len(later)):
+            var eid = later[i]
+            var dt = self._entries[eid].fire_at_ms - now_ms
+            if dt < UInt64(_WHEEL_SLOTS):
+                var target = (self._current_slot + Int(dt)) & _WHEEL_MASK
+                self._wheel[target].append(eid)
+            else:
+                self._overflow.append(eid)
 
     def now_ms(self) -> UInt64:
         """Return the current tick time tracked by the wheel."""

@@ -580,6 +580,15 @@ from test_timer_wheel import (
 from test_timer_wheel import (
     test_next_fire_ms_cancel_is_lower_bound as test_timer_wheel__test_next_fire_ms_cancel_is_lower_bound,
 )
+from test_timer_wheel import (
+    test_a_long_gap_jumps_instead_of_walking as test_timer_wheel__test_a_long_gap_jumps_instead_of_walking,
+)
+from test_timer_wheel import (
+    test_overflow_timer_fires_on_time_after_a_jump as test_timer_wheel__test_overflow_timer_fires_on_time_after_a_jump,
+)
+from test_timer_wheel import (
+    test_overflow_promoted_once_per_rotation_still_fires_on_time as test_timer_wheel__test_overflow_promoted_once_per_rotation_still_fires_on_time,
+)
 from test_uring_reactor import (
     test_pack_unpack_round_trip as test_uring_reactor__test_pack_unpack_round_trip,
 )
@@ -907,6 +916,13 @@ def main() raises:
     ]()
     suite.test[test_timer_wheel__test_next_fire_ms_recovers_after_advance]()
     suite.test[test_timer_wheel__test_next_fire_ms_cancel_is_lower_bound]()
+    suite.test[test_timer_wheel__test_a_long_gap_jumps_instead_of_walking]()
+    suite.test[
+        test_timer_wheel__test_overflow_timer_fires_on_time_after_a_jump
+    ]()
+    suite.test[
+        test_timer_wheel__test_overflow_promoted_once_per_rotation_still_fires_on_time
+    ]()
     # tests/runtime/test_uring_reactor.mojo
     suite.test[test_uring_reactor__test_pack_unpack_round_trip]()
     suite.test[test_uring_reactor__test_pack_op_does_not_clobber_conn_id]()

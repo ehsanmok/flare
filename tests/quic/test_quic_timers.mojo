@@ -163,7 +163,9 @@ def test_advance_idle_closes_connection() raises:
     var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
     _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
     assert_true(listener.connections[0].alive)
-    var fired = listener.advance_timers(now_ms=UInt64(200))
+    var fired = listener.advance_timers(
+        now_ms=listener.timer_wheel.now_ms() + UInt64(200)
+    )
     assert_equal(fired, 1, "expected exactly one timer to fire")
     assert_false(listener.connections[0].alive)
     assert_equal(listener.connections[0].conn.state, CONN_STATE_CLOSED)
@@ -203,6 +205,23 @@ def test_on_idle_callback_is_idempotent_to_double_fire() raises:
     assert_false(qc.alive)
 
 
+def test_idle_timer_is_relative_to_the_real_clock() raises:
+    """The wheel was anchored at 0 but advanced on the monotonic clock,
+    so a 50 ms idle timer armed at accept was already days overdue and
+    the first real advance closed every connection."""
+    from flare.quic._server_support import _monotonic_ms
+
+    var listener = _bind_loopback(idle_ms=UInt64(50))
+    var dcid = _make_cid(UInt8(0x71), 8)
+    var scid = _make_cid(UInt8(0x81), 8)
+    var datagram = _make_initial_datagram(dcid, scid)
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
+    _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
+    var fired = listener.advance_timers(now_ms=_monotonic_ms())
+    assert_equal(fired, 0, "idle timer fired at once")
+    assert_true(listener.connections[0].alive)
+
+
 def main() raises:
     test_token_round_trip()
     test_encode_rejects_invalid_kind()
@@ -213,4 +232,5 @@ def main() raises:
     test_advance_idle_closes_connection()
     test_dispatch_arms_idle_timer_on_accept()
     test_on_idle_callback_is_idempotent_to_double_fire()
-    print("test_quic_timers: 9 passed")
+    test_idle_timer_is_relative_to_the_real_clock()
+    print("test_quic_timers: 10 passed")

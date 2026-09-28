@@ -258,6 +258,64 @@ def test_next_fire_ms_cancel_is_lower_bound() raises:
     assert_equal(tw.next_fire_ms(), UInt64(400))
 
 
+def test_a_long_gap_jumps_instead_of_walking() raises:
+    """A wheel anchored at 0 and advanced on the monotonic clock walked
+    every millisecond since boot. The jump fires what is due, keeps
+    what is not, and leaves the wheel on the new tick."""
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(10, UInt64(1))
+    _ = tw.schedule(2_000, UInt64(2))
+    var keep = tw.schedule(2_000_000_000_000, UInt64(3))
+    var cancelled = tw.schedule(20, UInt64(4))
+    _ = tw.cancel(cancelled)
+    var fired = List[UInt64]()
+    # About 31 years in ms. Walked a tick at a time this does not
+    # finish; the jump makes it one pass over three timers.
+    var now = UInt64(1_000_000_000_000)
+    tw.advance(now, fired)
+    assert_equal(len(fired), 2)
+    assert_equal(fired[0], UInt64(1))
+    assert_equal(fired[1], UInt64(2))
+    assert_equal(tw.now_ms(), now)
+    assert_equal(tw.active_count(), 1)
+    # A timer armed after the jump still fires on time.
+    _ = tw.schedule(5, UInt64(5))
+    fired.clear()
+    tw.advance(now + UInt64(5), fired)
+    assert_equal(len(fired), 1)
+    assert_equal(fired[0], UInt64(5))
+    _ = keep
+
+
+def test_overflow_timer_fires_on_time_after_a_jump() raises:
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(700, UInt64(9))  # overflow at schedule time
+    var fired = List[UInt64]()
+    tw.advance(UInt64(600), fired)  # jump: 600 > one rotation
+    assert_equal(len(fired), 0)
+    tw.advance(UInt64(699), fired)
+    assert_equal(len(fired), 0)
+    tw.advance(UInt64(700), fired)
+    assert_equal(len(fired), 1)
+
+
+def test_overflow_promoted_once_per_rotation_still_fires_on_time() raises:
+    """Overflow is now scanned at each rotation boundary instead of on
+    every tick. Stepped in under-a-rotation advances, a far timer still
+    fires on its exact tick."""
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(5_003, UInt64(7))
+    var fired = List[UInt64]()
+    var t = UInt64(0)
+    while t + UInt64(500) < UInt64(5_003):
+        t += UInt64(500)
+        tw.advance(t, fired)
+    tw.advance(UInt64(5_002), fired)
+    assert_equal(len(fired), 0)
+    tw.advance(UInt64(5_003), fired)
+    assert_equal(len(fired), 1)
+
+
 def main() raises:
     print("=" * 60)
     print("test_timer_wheel.mojo — Phase 1.3 TimerWheel")

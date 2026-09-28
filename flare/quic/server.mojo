@@ -480,7 +480,10 @@ struct QuicListener(Movable):
         self.early_strike = EarlyDataStrikeSet(
             window_ms=config.early_data_strike_window_ms
         )
-        self.timer_wheel = TimerWheel(now_ms=UInt64(0))
+        # Anchored at the clock advance_timers is driven by. At 0, the
+        # first advance walked every millisecond since boot (about 10^9
+        # ticks at a day's uptime) and fired every armed timer at once.
+        self.timer_wheel = TimerWheel(now_ms=_monotonic_ms())
         self._reset_key = _random_bytes(32)
         self._retry_key = _random_bytes(32)
         self._socket = sock^
