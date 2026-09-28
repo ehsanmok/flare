@@ -35,6 +35,7 @@ from flare.quic import (
 )
 from flare.tls import QuicEncryptionLevel, RustlsQuicConfig
 from flare.quic.server import _ack_record, _ack_from_ranges
+from flare.quic._server_support import _ACK_MAX_RANGES, _ack_contains
 
 
 def _load_fixture_pem() raises -> Tuple[String, String]:
@@ -254,6 +255,42 @@ def test_ack_ranges_duplicate_pn_is_idempotent() raises:
     assert_equal(len(ack.ranges), 0)
 
 
+def test_duplicate_packet_numbers_are_recognised() raises:
+    """1-RTT packets were dispatched without a duplicate check, so a
+    retransmit that crossed our ACK ran its request a second time."""
+    var flat = List[UInt64]()
+    for pn in [0, 1, 2, 5]:
+        _ack_record(flat, UInt64(pn))
+    assert_true(_ack_contains(flat, UInt64(1)))
+    assert_true(_ack_contains(flat, UInt64(5)))
+    assert_false(_ack_contains(flat, UInt64(3)))
+    assert_false(_ack_contains(flat, UInt64(6)))
+    # Once the range list is full, anything older than it counts as
+    # seen: it can no longer be told apart from a replay.
+    var full = List[UInt64]()
+    for k in range(_ACK_MAX_RANGES + 4):
+        _ack_record(full, UInt64(100 + 2 * k))
+    assert_true(_ack_contains(full, UInt64(1)))
+
+
+def test_packet_number_spaces_are_separate() raises:
+    """One largest-received counter served Initial, Handshake and 1-RTT,
+    so each space's truncated numbers were expanded against another
+    space's largest (RFC 9000 sec 12.3)."""
+    from flare.quic import QuicConnection
+    from flare.quic.packet import ConnectionId
+
+    var qc = QuicConnection(
+        ConnectionId(bytes=List[UInt8](length=8, fill=UInt8(1))),
+        ConnectionId(bytes=List[UInt8](length=8, fill=UInt8(2))),
+    )
+    qc._note_received(0, UInt64(900))
+    qc._note_received(2, UInt64(3))
+    assert_equal(Int(qc.rx_largest[0]), 900)
+    assert_equal(Int(qc.rx_largest[1]), 0)
+    assert_equal(Int(qc.rx_largest[2]), 3)
+
+
 def main() raises:
     test_decrypt_post_initial_raises_slot_out_of_range()
     test_decrypt_post_initial_raises_on_truncated_handshake()
@@ -262,4 +299,6 @@ def main() raises:
     test_ack_ranges_exclude_skipped_pn()
     test_ack_ranges_contiguous_single_range()
     test_ack_ranges_duplicate_pn_is_idempotent()
-    print("test_quic_post_initial_decrypt: 7 passed")
+    test_duplicate_packet_numbers_are_recognised()
+    test_packet_number_spaces_are_separate()
+    print("test_quic_post_initial_decrypt: 9 passed")

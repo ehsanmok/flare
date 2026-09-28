@@ -293,6 +293,13 @@ struct QuicConnection(Copyable):
     """Set by a valid Retry token or the first decrypted Handshake
     packet; lifts the 3x limit."""
 
+    var rx_largest: List[UInt64]
+    """Largest packet number received per packet-number space: [0]
+    Initial, [1] Handshake, [2] application (0-RTT and 1-RTT share it,
+    RFC 9000 sec 12.3). Truncated packet numbers are expanded against
+    their own space's largest. There was one counter for all three, so
+    a space's numbers were decoded against another space's largest."""
+
     var initial_keys_discarded: Bool
     """Set once a Handshake packet has decrypted: from then on the
     server drops Initial packets (RFC 9001 sec 4.9.1). Initial keys
@@ -331,6 +338,7 @@ struct QuicConnection(Copyable):
         self.amp_rx = 0
         self.amp_tx = 0
         self.addr_validated = False
+        self.rx_largest = List[UInt64](length=3, fill=UInt64(0))
         self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()
 
@@ -441,14 +449,13 @@ struct QuicConnection(Copyable):
             datagram,
             self.initial_dcid,
             is_server=True,
-            largest_received_pn=self.conn.largest_received_packet,
+            largest_received_pn=self.rx_largest[0],
             aead_choice=aead_choice,
         )
         dispatch_frames(
             self.conn, Span[UInt8, _](up.payload), now_us, events, True
         )
-        if up.packet_number > self.conn.largest_received_packet:
-            self.conn.largest_received_packet = up.packet_number
+        self._note_received(0, up.packet_number)
         return events^
 
     def _handle_handshake_packet(
@@ -470,14 +477,13 @@ struct QuicConnection(Copyable):
         var up = unprotect_handshake_packet(
             datagram,
             Span[UInt8, _](self.rx_handshake_secret),
-            self.conn.largest_received_packet,
+            self.rx_largest[1],
             aead_choice=aead_choice,
         )
         dispatch_frames(
             self.conn, Span[UInt8, _](up.payload), now_us, events, True
         )
-        if up.packet_number > self.conn.largest_received_packet:
-            self.conn.largest_received_packet = up.packet_number
+        self._note_received(1, up.packet_number)
         return events^
 
     def _handle_1rtt_packet(
@@ -501,16 +507,24 @@ struct QuicConnection(Copyable):
         var up = unprotect_1rtt_packet(
             datagram,
             Span[UInt8, _](self.rx_1rtt_secret),
-            self.conn.largest_received_packet,
+            self.rx_largest[2],
             self.local_cid.length(),
             aead_choice=aead_choice,
         )
         dispatch_frames(
             self.conn, Span[UInt8, _](up.payload), now_us, events, False
         )
-        if up.packet_number > self.conn.largest_received_packet:
-            self.conn.largest_received_packet = up.packet_number
+        self._note_received(2, up.packet_number)
         return events^
+
+    def _note_received(mut self, space: Int, pn: UInt64):
+        """Record ``pn`` as received in ``space`` (see
+        :attr:`rx_largest`); ``conn.largest_received_packet`` stays
+        the largest across all spaces."""
+        if pn > self.rx_largest[space]:
+            self.rx_largest[space] = pn
+        if pn > self.conn.largest_received_packet:
+            self.conn.largest_received_packet = pn
 
     def dispatch_plaintext(
         mut self,
@@ -518,6 +532,7 @@ struct QuicConnection(Copyable):
         now_us: UInt64,
         packet_number: UInt64,
         before_1rtt: Bool = False,
+        space: Int = 2,
     ) raises -> ConnectionEvents:
         """Drive already-decrypted frame bytes through the
         sans-I/O state machine.
@@ -530,8 +545,7 @@ struct QuicConnection(Copyable):
         """
         var events = empty_events()
         dispatch_frames(self.conn, plaintext, now_us, events, before_1rtt)
-        if packet_number > self.conn.largest_received_packet:
-            self.conn.largest_received_packet = packet_number
+        self._note_received(space, packet_number)
         return events^
 
 

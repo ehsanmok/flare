@@ -477,6 +477,12 @@ from test_quic_post_initial_decrypt import (
 from test_quic_post_initial_decrypt import (
     test_ack_ranges_duplicate_pn_is_idempotent as test_quic_post_initial_decrypt__test_ack_ranges_duplicate_pn_is_idempotent,
 )
+from test_quic_post_initial_decrypt import (
+    test_duplicate_packet_numbers_are_recognised as test_quic_post_initial_decrypt__test_duplicate_packet_numbers_are_recognised,
+)
+from test_quic_post_initial_decrypt import (
+    test_packet_number_spaces_are_separate as test_quic_post_initial_decrypt__test_packet_number_spaces_are_separate,
+)
 from test_quic_post_initial_egress import (
     test_handshake_response_empty_when_slot_out_of_range as test_quic_post_initial_egress__test_handshake_response_empty_when_slot_out_of_range,
 )
@@ -1076,6 +1082,12 @@ def main() raises:
     ]()
     suite.test[
         test_quic_post_initial_decrypt__test_ack_ranges_duplicate_pn_is_idempotent
+    ]()
+    suite.test[
+        test_quic_post_initial_decrypt__test_duplicate_packet_numbers_are_recognised
+    ]()
+    suite.test[
+        test_quic_post_initial_decrypt__test_packet_number_spaces_are_separate
     ]()
     # tests/quic/test_quic_post_initial_egress.mojo
     suite.test[

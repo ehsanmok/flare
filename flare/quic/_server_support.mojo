@@ -57,6 +57,22 @@ def _bufsize_from_env(name: String, default: Int) -> Int:
 comptime _ACK_MAX_RANGES: Int = 32
 
 
+def _ack_contains(flat: List[UInt64], pn: UInt64) -> Bool:
+    """Whether ``pn`` was already received, per the ranges
+    :func:`_ack_record` keeps. A number below every tracked range once
+    the range list is full is too old to tell and counts as seen, so a
+    replay of an old packet is dropped rather than run again."""
+    var lowest = UInt64.MAX
+    var i = 0
+    while i + 1 < len(flat):
+        if flat[i] <= pn and pn <= flat[i + 1]:
+            return True
+        if flat[i] < lowest:
+            lowest = flat[i]
+        i += 2
+    return len(flat) >= 2 * _ACK_MAX_RANGES and pn < lowest
+
+
 def _ack_record(mut flat: List[UInt64], pn: UInt64):
     """Insert ``pn`` into the disjoint received-pn ranges held in
     ``flat`` (a [low, high] pair list kept descending by ``high``).

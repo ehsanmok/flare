@@ -143,6 +143,7 @@ from ._server_migration import MigrationProbe, new_path_challenge
 from ._server_support import (
     QUIC_CRYPTO_BUFFER_EXCEEDED,
     _ACK_MAX_RANGES,
+    _ack_contains,
     _CryptoReasm,
     _CryptoStream,
     _SessionSlot,
@@ -791,7 +792,7 @@ struct QuicListener(Movable):
                         slot, packet, inbound_lvl, local_cid_len
                     )
                     events = self.connections[slot].dispatch_plaintext(
-                        Span[UInt8, _](dec[0]), now_us, dec[1], True
+                        Span[UInt8, _](dec[0]), now_us, dec[1], True, 1
                     )
                     self.connections[slot].initial_keys_discarded = True
                     # A Handshake packet proves the peer holds the
@@ -807,6 +808,12 @@ struct QuicListener(Movable):
                     var dec = self._decrypt_post_initial(
                         slot, packet, inbound_lvl, local_cid_len
                     )
+                    # A packet number already received is a duplicate
+                    # (a retransmit that crossed our ACK, or a replay):
+                    # drop it. It was dispatched again, so a request
+                    # in it ran twice.
+                    if _ack_contains(self.rx_1rtt_ranges[slot], dec[1]):
+                        raise Error("duplicate packet")
                     # Clear the state-machine ack-eliciting marker so
                     # it reflects only THIS packet after dispatch.
                     self.connections[slot].conn.ack_pending = False
@@ -870,7 +877,12 @@ struct QuicListener(Movable):
         if not ok:
             return
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
-        self._consume_acks(slot, events)
+        # LossRecovery tracks the 1-RTT packets we send, so only
+        # application-space ACKs name its packet numbers. An Initial or
+        # Handshake ACK counts in its own space and was misread as
+        # acknowledging 1-RTT packets with those numbers.
+        if inbound_lvl == QuicEncryptionLevel.APPLICATION:
+            self._consume_acks(slot, events)
         # Requests only from 1-RTT, or 0-RTT the early guard admitted.
         # Dispatch used to happen at every level, so a request in an
         # Initial reached the handler before any handshake.
@@ -1110,10 +1122,11 @@ struct QuicListener(Movable):
         var truncated_pn = UInt64(0)
         for i in range(pn_length):
             truncated_pn = (truncated_pn << 8) | UInt64(pn_local[i])
+        var space = 1 if level == QuicEncryptionLevel.HANDSHAKE else 2
         var packet_number = decode_packet_number(
             truncated_pn,
             pn_length,
-            self.connections[slot].conn.largest_received_packet,
+            self.connections[slot].rx_largest[space],
         )
         # AAD is the unprotected header: first byte + bytes up to
         # the pn field + the pn_length real pn bytes.
