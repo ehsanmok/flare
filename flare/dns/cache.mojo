@@ -16,6 +16,13 @@ var b = cache.resolve("example.com")   # served from cache, no syscall
 print(cache.resolve_count())            # 1
 ```
 
+Entries live for the cache's own ``ttl_ms``. ``getaddrinfo(3)`` does
+not report the record's DNS TTL, so a record whose TTL is shorter than
+``ttl_ms`` is served past it; pick ``ttl_ms`` with that in mind. Host
+names are matched case-insensitively and without a trailing dot, as DNS
+matches them. The cache holds at most ``max_entries`` hosts; when it is
+full, expired entries go first, then the one closest to expiry.
+
 This is a single-threaded value type (the owner serializes access); it
 has no internal lock. A shared cache across reactor workers could reuse
 the same pointer-backed interior-mutable handle pattern as
@@ -57,15 +64,59 @@ struct DnsCache(Movable):
     hit the resolver."""
     var _hits: Int
     """Count of lookups served from a fresh cache entry."""
+    var _max_entries: Int
 
-    def __init__(out self, ttl_ms: Int = 30_000):
+    def __init__(out self, ttl_ms: Int = 30_000, max_entries: Int = 1024):
         """Create a cache with the given per-entry TTL in milliseconds
-        (default 30 s). ``ttl_ms <= 0`` makes every entry immediately
-        stale (every lookup re-resolves)."""
+        (default 30 s) holding at most ``max_entries`` hosts. ``ttl_ms
+        <= 0`` makes every entry immediately stale (every lookup
+        re-resolves). The bound is new: a process that looked up many
+        distinct names grew the cache without limit."""
         self._by_host = Dict[String, _CachedAddrs]()
         self._ttl_ms = ttl_ms
         self._resolves = 0
         self._hits = 0
+        self._max_entries = max_entries if max_entries > 0 else 1
+
+    @staticmethod
+    def _key(host: String) -> String:
+        """``Example.COM.`` and ``example.com`` are one name."""
+        var b = host.as_bytes()
+        var n = len(b)
+        if n > 1 and b[n - 1] == UInt8(ord(".")):
+            n -= 1
+        var out = List[UInt8](capacity=n)
+        for i in range(n):
+            var c = b[i]
+            if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
+                c += 32
+            out.append(c)
+        return String(unsafe_from_utf8=Span[UInt8, _](out))
+
+    def _store(mut self, key: String, var addrs: List[IpAddr], now: Int):
+        if key not in self._by_host and len(self._by_host) >= self._max_entries:
+            var expired = List[String]()
+            var oldest = String("")
+            var oldest_at = Int.MAX
+            for kv in self._by_host.items():
+                if kv.value.expires_at_ms <= now:
+                    expired.append(kv.key)
+                elif kv.value.expires_at_ms < oldest_at:
+                    oldest_at = kv.value.expires_at_ms
+                    oldest = kv.key
+            for i in range(len(expired)):
+                try:
+                    _ = self._by_host.pop(expired[i])
+                except:
+                    pass
+            if len(self._by_host) >= self._max_entries and oldest != "":
+                try:
+                    _ = self._by_host.pop(oldest)
+                except:
+                    pass
+        self._by_host[key] = _CachedAddrs(
+            addrs=addrs^, expires_at_ms=now + self._ttl_ms
+        )
 
     def resolve(mut self, host: String) raises -> List[IpAddr]:
         """Return the addresses for ``host``, served from cache when a
@@ -77,8 +128,9 @@ struct DnsCache(Movable):
                 resolver on a miss; failures are not cached.
         """
         var now = monotonic_now_ms()
+        var key = DnsCache._key(host)
         try:
-            var hit = self._by_host[host].copy()
+            var hit = self._by_host[key].copy()
             if now < hit.expires_at_ms:
                 self._hits += 1
                 return hit.addrs.copy()
@@ -86,9 +138,7 @@ struct DnsCache(Movable):
             pass  # miss / absent: fall through to a fresh resolve
         var fresh = resolve(host)
         self._resolves += 1
-        self._by_host[host] = _CachedAddrs(
-            addrs=fresh.copy(), expires_at_ms=now + self._ttl_ms
-        )
+        self._store(key, fresh.copy(), now)
         return fresh^
 
     def resolve_async(
@@ -101,8 +151,9 @@ struct DnsCache(Movable):
         Same caching semantics as :meth:`resolve`; only the miss path
         differs (off-thread, cancellable). Failures are not cached."""
         var now = monotonic_now_ms()
+        var key = DnsCache._key(host)
         try:
-            var hit = self._by_host[host].copy()
+            var hit = self._by_host[key].copy()
             if now < hit.expires_at_ms:
                 self._hits += 1
                 return hit.addrs.copy()
@@ -110,9 +161,7 @@ struct DnsCache(Movable):
             pass
         var fresh = resolve_async(host, cancel)
         self._resolves += 1
-        self._by_host[host] = _CachedAddrs(
-            addrs=fresh.copy(), expires_at_ms=now + self._ttl_ms
-        )
+        self._store(key, fresh.copy(), now)
         return fresh^
 
     def resolve_ordered(mut self, host: String) raises -> List[IpAddr]:
@@ -125,7 +174,7 @@ struct DnsCache(Movable):
         """Drop any cached entry for ``host`` (e.g. after a dial to the
         cached address failed). No-op if absent."""
         try:
-            _ = self._by_host.pop(host)
+            _ = self._by_host.pop(DnsCache._key(host))
         except:
             pass
 

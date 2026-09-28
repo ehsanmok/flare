@@ -1,12 +1,16 @@
-"""Off-reactor DNS resolution + happy-eyeballs ordering.
+"""DNS resolution on a separate thread + happy-eyeballs ordering.
 
 ``getaddrinfo(3)`` is a blocking syscall with no async variant on the
-platforms flare targets. :func:`resolve_async` offloads it to a fresh
-pool thread (via the same pthread mechanism :func:`block_in_pool` uses)
-so the call runs off the reactor's stack and is bounded by a
-:class:`Cancel` token at the call boundary, rather than running inline.
-The synchronous :func:`flare.dns.resolve` is untouched; callers that do
-not need the off-thread variant pay nothing.
+platforms flare targets. :func:`resolve_async` runs it on a fresh pool
+thread (the pthread mechanism :func:`block_in_pool` uses) **and waits
+for that thread**: the caller is blocked for the whole lookup, exactly
+as with :func:`flare.dns.resolve`. What it adds is a separate stack and
+a :class:`Cancel` check before the lookup starts and after it returns.
+It does not free a reactor thread to serve other connections while the
+lookup runs, and a cancel that arrives mid-lookup takes effect only
+when ``getaddrinfo`` returns. Errors come back with the resolver's
+message (``DnsError(host): reason``) as a plain ``Error``, which is
+what a raised ``DnsError`` is by the time any caller sees it.
 
 :func:`order_happy_eyeballs` reorders a resolved address list into the
 RFC 8305 connection-attempt order (interleave IPv6 / IPv4) so a dialer
@@ -73,11 +77,12 @@ def _resolve_start(arg: _OpaquePtr) -> _OpaquePtr:
 
 
 def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
-    """Resolve ``host`` on a pool thread, off the reactor stack.
+    """Resolve ``host`` on a pool thread and wait for it.
 
-    Same result as :func:`flare.dns.resolve` but the ``getaddrinfo``
-    call runs on a fresh kernel thread; a flipped ``cancel`` aborts the
-    call at the pre-flight / post-flight boundary.
+    Same result as :func:`flare.dns.resolve`, and it blocks the caller
+    just as long: the ``getaddrinfo`` call runs on a fresh kernel thread
+    that this function joins. A flipped ``cancel`` is honoured before
+    the thread starts and after it finishes, not during the lookup.
 
     Args:
         host: Hostname or numeric IP string.

@@ -93,6 +93,12 @@ from test_dns_cache import (
 from test_dns_cache import (
     test_clear_drops_all as test_dns_cache__test_clear_drops_all,
 )
+from test_dns_cache import (
+    test_names_match_case_insensitively as test_dns_cache__test_names_match_case_insensitively,
+)
+from test_dns_cache import (
+    test_cache_is_bounded as test_dns_cache__test_cache_is_bounded,
+)
 
 
 def main() raises:
@@ -130,4 +136,6 @@ def main() raises:
     suite.test[test_dns_cache__test_distinct_hosts_each_resolve]()
     suite.test[test_dns_cache__test_invalidate_forces_resolve]()
     suite.test[test_dns_cache__test_clear_drops_all]()
+    suite.test[test_dns_cache__test_names_match_case_insensitively]()
+    suite.test[test_dns_cache__test_cache_is_bounded]()
     suite^.run()

@@ -55,10 +55,29 @@ def test_clear_drops_all() raises:
     assert_equal(cache.resolve_count(), 2)
 
 
+def test_names_match_case_insensitively() raises:
+    var c = DnsCache(ttl_ms=60_000)
+    _ = c.resolve("localhost")
+    _ = c.resolve("LocalHost.")
+    assert_equal(c.resolve_count(), 1)
+    assert_equal(c.hit_count(), 1)
+
+
+def test_cache_is_bounded() raises:
+    """Every distinct name used to add an entry for good."""
+    var c = DnsCache(ttl_ms=60_000, max_entries=2)
+    _ = c.resolve("127.0.0.1")
+    _ = c.resolve("127.0.0.2")
+    _ = c.resolve("127.0.0.3")
+    assert_equal(c.size(), 2)
+
+
 def main() raises:
     test_within_ttl_no_second_syscall()
     test_zero_ttl_always_resolves()
     test_distinct_hosts_each_resolve()
     test_invalidate_forces_resolve()
     test_clear_drops_all()
-    print("test_dns_cache: 5 passed")
+    test_names_match_case_insensitively()
+    test_cache_is_bounded()
+    print("test_dns_cache: 7 passed")
