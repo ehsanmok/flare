@@ -1090,6 +1090,26 @@ struct ConnHandle(Movable):
             )
         return Optional[StepResult]()
 
+    def has_buffered_request(self) -> Bool:
+        """True when ``read_buf`` already holds a whole request that has
+        not been dispatched.
+
+        The reactor is level-triggered on readability, and pipelined
+        requests that arrived in one segment raise no further readable
+        event once they are in ``read_buf``. The loops use this to drive
+        the connection again after the inline cycle cap or after a
+        response finishes flushing, instead of leaving those requests to
+        the idle timer. A partial request is never "buffered", so this
+        cannot make a loop spin while it waits for bytes.
+        """
+        if self.state != STATE_READING or len(self.read_buf) == 0:
+            return False
+        if self.headers_end < 0:
+            return _find_crlfcrlf(self.read_buf, 0) >= 0
+        if self.body_total < 0:
+            return False
+        return len(self.read_buf) >= self.body_total
+
     def on_writable(mut self, config: ServerConfig) raises -> StepResult:
         """Drive the state machine on a writable event.
 

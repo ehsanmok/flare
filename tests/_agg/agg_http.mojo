@@ -3087,6 +3087,12 @@ from test_server_lifecycle import (
 from test_server_lifecycle import (
     test_trickled_head_hits_the_request_deadline as test_server_lifecycle__test_trickled_head_hits_the_request_deadline,
 )
+from test_server_lifecycle import (
+    test_six_pipelined_requests_in_one_segment as test_server_lifecycle__test_six_pipelined_requests_in_one_segment,
+)
+from test_server_lifecycle import (
+    test_request_pipelined_behind_a_partial_write as test_server_lifecycle__test_request_pipelined_behind_a_partial_write,
+)
 from test_server_multicore import (
     test_server_bind_with_short_config as test_server_multicore__test_server_bind_with_short_config,
 )
@@ -5400,6 +5406,12 @@ def main() raises:
     ]()
     suite.test[
         test_server_lifecycle__test_trickled_head_hits_the_request_deadline
+    ]()
+    suite.test[
+        test_server_lifecycle__test_six_pipelined_requests_in_one_segment
+    ]()
+    suite.test[
+        test_server_lifecycle__test_request_pipelined_behind_a_partial_write
     ]()
     # tests/http/test_server_multicore.mojo
     suite.test[test_server_multicore__test_server_bind_with_short_config]()

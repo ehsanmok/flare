@@ -75,6 +75,13 @@ def _connect_loopback(port: UInt16) raises -> c_int:
 
 
 def _hello(req: Request) raises -> Response:
+    if req.url == "/big":
+        # Big enough to overflow the socket send buffer, so the write
+        # goes partial and completes on later writable edges.
+        var body = String(capacity_bytes=4 * 1024 * 1024)
+        for _ in range(4 * 1024):
+            body += "x" * 1024
+        return ok(body)
     return ok("hi " + req.url)
 
 
@@ -103,12 +110,12 @@ def _send_str(fd: c_int, s: String):
 
 
 def _read_until_close(fd: c_int) -> String:
+    # Bounded by the socket's 2 s receive timeout, not a read count:
+    # some responses here are megabytes.
     var got = String("")
-    var buf = stack_allocation[4096, UInt8]()
-    var tries = 0
-    while tries < 50:
-        tries += 1
-        var n = _recv(fd, buf, c_size_t(4096), c_int(0))
+    var buf = stack_allocation[65536, UInt8]()
+    while True:
+        var n = _recv(fd, buf, c_size_t(65536), c_int(0))
         if Int(n) <= 0:
             break
         for i in range(Int(n)):
@@ -208,6 +215,61 @@ def test_trickled_head_hits_the_request_deadline() raises:
         pass
     _stop(srv[0])
     assert_true("HTTP/1.1 408" in got, "trickled head was not cut off: " + got)
+
+
+# ── Pipelined requests already in the buffer are served ────────────────────
+
+
+def _count(hay: String, needle: String) -> Int:
+    var n = 0
+    var i = hay.find(needle)
+    while i >= 0:
+        n += 1
+        i = hay.find(needle, i + needle.byte_length())
+    return n
+
+
+def test_six_pipelined_requests_in_one_segment() raises:
+    var srv = _spawn(ServerConfig())
+    var got = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        var raw = String("")
+        for i in range(5):
+            raw += "GET /p" + String(i) + " HTTP/1.1\r\nHost: x\r\n\r\n"
+        raw += "GET /last HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        _send_str(c, raw)
+        got = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_equal(_count(got, "HTTP/1.1 200"), 6, "got: " + got)
+    assert_true("hi /last" in got, "last pipelined request lost")
+
+
+def test_request_pipelined_behind_a_partial_write() raises:
+    var srv = _spawn(ServerConfig(idle_timeout_ms=2000))
+    var got = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        _send_str(
+            c,
+            (
+                "GET /big HTTP/1.1\r\nHost: x\r\n\r\n"
+                "GET /after HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        # Do not read yet: the 4 MB response fills the socket buffers
+        # and the server's write goes partial.
+        usleep(200000)
+        got = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_equal(_count(got, "HTTP/1.1 200"), 2)
+    assert_true("hi /after" in got, "request behind the big response lost")
 
 
 def main() raises:

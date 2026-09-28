@@ -223,6 +223,16 @@ def _drive_h1[
                     )
                     return done_h2
             return False
+        if (
+            not step_done
+            and last_step.want_read
+            and ch_ptr[].has_buffered_request()
+        ):
+            # Cycle cap hit with a whole request still buffered: a
+            # writable edge (immediate on a level-triggered socket)
+            # brings the connection back through the writable branch,
+            # which re-parses. See ConnHandle.has_buffered_request.
+            last_step.want_write = True
         if not step_done:
             _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
     except:
@@ -819,6 +829,29 @@ def _unified_handle_conn_event[
                 wheel,
                 timers,
             )
+            # The flush finished with a pipelined request already in
+            # read_buf: serve it now rather than wait for a readable
+            # event that will not come.
+            if (
+                not done3
+                and fd in conns
+                and _kind(conns[fd]) == KIND_H1
+                and _conn_ptr_from_int(
+                    _addr(conns[fd])
+                )[].has_buffered_request()
+            ):
+                done3 = _drive_h1(
+                    fd,
+                    _addr(conns[fd]),
+                    handler,
+                    config,
+                    h2_config,
+                    conns,
+                    reactor,
+                    wheel,
+                    timers,
+                    ws_hooks.copy(),
+                )
         if done3:
             _cleanup_conn_unified(fd, conns, timers, reactor, wheel)
         return

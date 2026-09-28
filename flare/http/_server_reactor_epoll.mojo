@@ -489,6 +489,22 @@ def _run_handler_loop_impl[
                 elif evt.is_writable():
                     last_step = ch_ptr[].on_writable(config)
                     step_done = last_step.done
+                    # A response just finished flushing; any pipelined
+                    # request behind it is already in read_buf and will
+                    # raise no readable event of its own.
+                    if not step_done and ch_ptr[].has_buffered_request():
+                        last_step = ch_ptr[].on_readable(handler, config)
+                        step_done = last_step.done
+                if (
+                    not step_done
+                    and last_step.want_read
+                    and ch_ptr[].has_buffered_request()
+                ):
+                    # The cycle cap stopped us with a whole request still
+                    # buffered: ask for a writable edge, which a
+                    # level-triggered socket raises at once, so the
+                    # branch above serves it on the next poll.
+                    last_step.want_write = True
                 if not step_done:
                     _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
             except:
@@ -690,6 +706,22 @@ def _run_static_loop_impl[
                 elif evt.is_writable():
                     last_step = ch_ptr[].on_writable(config)
                     step_done = last_step.done
+                    # A response just finished flushing; any pipelined
+                    # request behind it is already in read_buf and will
+                    # raise no readable event of its own.
+                    if not step_done and ch_ptr[].has_buffered_request():
+                        last_step = ch_ptr[].on_readable_static(resp, config)
+                        step_done = last_step.done
+                if (
+                    not step_done
+                    and last_step.want_read
+                    and ch_ptr[].has_buffered_request()
+                ):
+                    # The cycle cap stopped us with a whole request still
+                    # buffered: ask for a writable edge, which a
+                    # level-triggered socket raises at once, so the
+                    # branch above serves it on the next poll.
+                    last_step.want_write = True
                 if not step_done:
                     _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
             except:
@@ -893,6 +925,22 @@ def run_reactor_loop_cancel[
                 elif evt.is_writable():
                     last_step = ch_ptr[].on_writable(config)
                     step_done = last_step.done
+                    # A response just finished flushing; any pipelined
+                    # request behind it is already in read_buf and will
+                    # raise no readable event of its own.
+                    if not step_done and ch_ptr[].has_buffered_request():
+                        last_step = ch_ptr[].on_readable_cancel(handler, config)
+                        step_done = last_step.done
+                if (
+                    not step_done
+                    and last_step.want_read
+                    and ch_ptr[].has_buffered_request()
+                ):
+                    # The cycle cap stopped us with a whole request still
+                    # buffered: ask for a writable edge, which a
+                    # level-triggered socket raises at once, so the
+                    # branch above serves it on the next poll.
+                    last_step.want_write = True
                 if not step_done:
                     _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
             except:
@@ -1023,6 +1071,22 @@ def run_reactor_loop_view[
                 elif evt.is_writable():
                     last_step = ch_ptr[].on_writable(config)
                     step_done = last_step.done
+                    # A response just finished flushing; any pipelined
+                    # request behind it is already in read_buf and will
+                    # raise no readable event of its own.
+                    if not step_done and ch_ptr[].has_buffered_request():
+                        last_step = ch_ptr[].on_readable_view(handler, config)
+                        step_done = last_step.done
+                if (
+                    not step_done
+                    and last_step.want_read
+                    and ch_ptr[].has_buffered_request()
+                ):
+                    # The cycle cap stopped us with a whole request still
+                    # buffered: ask for a writable edge, which a
+                    # level-triggered socket raises at once, so the
+                    # branch above serves it on the next poll.
+                    last_step.want_write = True
                 if not step_done:
                     _apply_step(fd, last_step, reactor, wheel, timers, ch_ptr)
             except:
