@@ -81,6 +81,8 @@ from flare.http3.response_writer import (
 )
 from flare.http.wire import Request, Response
 from flare.qpack import QpackHeader
+from flare.http2.hpack import HpackHeader
+from flare.http2.state import validate_request_fields
 from flare.qpack.dynamic import (
     QpackDynamicTable,
     apply_encoder_instructions_partial,
@@ -709,8 +711,25 @@ struct Http3Connection(Copyable, Defaultable):
                 " stream "
                 + String(stream_id)
             )
-        var method = String("GET")
-        var path = String("/")
+        # RFC 9114 sec 4.3.1: exactly one :method, :scheme and :path
+        # (CONNECT aside), pseudo-headers first, no connection-specific
+        # fields, clean values -- the rules h2 applies, shared through
+        # validate_request_fields. A request with no pseudo-headers used
+        # to be served as GET /. Malformed raises; the dispatcher
+        # answers 400.
+        var as_hpack = List[HpackHeader]()
+        for i in range(len(state.headers)):
+            as_hpack.append(
+                HpackHeader(state.headers[i].name, state.headers[i].value)
+            )
+        if not validate_request_fields(as_hpack, False, False):
+            state.request_taken = True
+            raise Error(
+                "Http3Connection.take_request: malformed request on stream "
+                + String(stream_id)
+            )
+        var method = String("")
+        var path = String("")
         for i in range(len(state.headers)):
             var name = state.headers[i].name
             var value = state.headers[i].value
@@ -771,6 +790,19 @@ struct Http3Connection(Copyable, Defaultable):
         for i in range(response.headers.len()):
             var name = response.headers._keys[i]
             var value = response.headers._values[i]
+            # RFC 9114 sec 4.2: connection-specific fields are malformed
+            # in HTTP/3, and a client must reject a response carrying
+            # one. They were copied through from handlers written for
+            # h1 (Connection: close, Transfer-Encoding: chunked).
+            var lower = String(name).lower()
+            if (
+                lower == "connection"
+                or lower == "keep-alive"
+                or lower == "proxy-connection"
+                or lower == "transfer-encoding"
+                or lower == "upgrade"
+            ):
+                continue
             headers.append(QpackHeader(String(name), String(value)))
         encode_response_headers(response.status, headers, state.outbox)
         if len(response.body) != 0:

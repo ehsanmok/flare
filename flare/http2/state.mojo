@@ -740,109 +740,10 @@ struct Connection(Copyable, Defaultable):
     def _validate_request_headers(
         self, hdrs: List[HpackHeader], is_trailers: Bool
     ) -> Bool:
-        """Return ``True`` when ``hdrs`` is a well-formed HTTP/2 request
-        header list (RFC 9113 sec 8.1.2 and sec 8.3).
-
-        A ``False`` return is a malformed request: the caller answers
-        with RST_STREAM(PROTOCOL_ERROR) rather than serving it."""
-        var seen_regular = False
-        var n_method = 0
-        var n_scheme = 0
-        var n_path = 0
-        var n_authority = 0
-        var path_empty = False
-        var path_value = String("")
-        var method_value = String("")
-        var authority = String("")
-        var host = String("")
-        var is_connect = False
-        var has_protocol = False
-        for i in range(len(hdrs)):
-            var name = hdrs[i].name
-            if name.byte_length() == 0:
-                return False
-            # sec 8.2.1: field names are lowercase on the wire, and no
-            # name or value may hold NUL, CR or LF; a name holds no
-            # whitespace or controls, a value no leading or trailing
-            # whitespace. CR / LF in a value used to reach take_request,
-            # where HeaderMap raised and took the whole connection down.
-            var np = name.unsafe_ptr()
-            for k in range(name.byte_length()):
-                var c = np[unsafe_offset=k]
-                if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
-                    return False
-                if c <= 32 or c == 127:
-                    return False
-            if not _is_valid_field_value(hdrs[i].value):
-                return False
-            if name.unsafe_ptr()[unsafe_offset=0] == UInt8(ord(":")):
-                # sec 8.3: pseudo-headers never appear in trailers, and
-                # sec 8.1.2.1 puts them all before the regular fields.
-                if is_trailers or seen_regular:
-                    return False
-                if not Connection._is_request_pseudo(name):
-                    return False
-                if name == ":method":
-                    n_method += 1
-                    method_value = hdrs[i].value
-                    is_connect = hdrs[i].value == "CONNECT"
-                elif name == ":scheme":
-                    n_scheme += 1
-                elif name == ":path":
-                    n_path += 1
-                    path_value = hdrs[i].value
-                    path_empty = hdrs[i].value.byte_length() == 0
-                elif name == ":authority":
-                    n_authority += 1
-                    authority = hdrs[i].value
-                elif name == ":protocol":
-                    has_protocol = True
-            else:
-                seen_regular = True
-                if name == "host":
-                    host = hdrs[i].value
-                if Connection._is_connection_specific(name):
-                    return False
-                # sec 8.2.2: TE is allowed, but only as "trailers".
-                if name == "te" and hdrs[i].value != "trailers":
-                    return False
-        if is_trailers:
-            return True
-        if n_method != 1:
-            return False
-        # RFC 8441 sec 4: :protocol only on CONNECT, and only once we
-        # have advertised SETTINGS_ENABLE_CONNECT_PROTOCOL.
-        if has_protocol and (
-            not is_connect or not self.enable_connect_protocol
-        ):
-            return False
-        # sec 8.3.1: a host field that disagrees with :authority is
-        # malformed. Routing on one while a proxy checked the other is
-        # the usual confusion.
-        if (
-            authority.byte_length() > 0
-            and host.byte_length() > 0
-            and host != authority
-        ):
-            return False
-        if n_scheme > 1 or n_path > 1 or n_authority > 1:
-            return False
-        if is_connect and not has_protocol:
-            # sec 8.5: a classic CONNECT carries :authority only, and
-            # omitting :scheme / :path is required rather than a fault.
-            return n_scheme == 0 and n_path == 0 and n_authority == 1
-        # Extended CONNECT (RFC 8441) and every other method need the
-        # full request triple.
-        if n_scheme != 1 or n_path != 1:
-            return False
-        if path_empty:
-            return False
-        # sec 8.3.1: origin-form, or "*" for OPTIONS.
-        if not path_value.startswith("/") and not (
-            path_value == "*" and method_value == "OPTIONS"
-        ):
-            return False
-        return True
+        """See :func:`validate_request_fields`."""
+        return validate_request_fields(
+            hdrs, is_trailers, self.enable_connect_protocol
+        )
 
     @staticmethod
     def _declared_content_length(hdrs: List[HpackHeader]) -> Int:
@@ -1791,3 +1692,110 @@ struct Connection(Copyable, Defaultable):
         )
         tf.payload = tenc^
         return tf^
+
+
+def validate_request_fields(
+    hdrs: List[HpackHeader], is_trailers: Bool, allow_extended_connect: Bool
+) -> Bool:
+    """Return ``True`` when ``hdrs`` is a well-formed request header
+    list: HTTP/2 (RFC 9113 sec 8.1.2 and sec 8.3), and HTTP/3, whose
+    rules are the same (RFC 9114 sec 4.2 and sec 4.3.1).
+
+    A ``False`` return is a malformed request: the caller answers
+    with RST_STREAM(PROTOCOL_ERROR) rather than serving it."""
+    var seen_regular = False
+    var n_method = 0
+    var n_scheme = 0
+    var n_path = 0
+    var n_authority = 0
+    var path_empty = False
+    var path_value = String("")
+    var method_value = String("")
+    var authority = String("")
+    var host = String("")
+    var is_connect = False
+    var has_protocol = False
+    for i in range(len(hdrs)):
+        var name = hdrs[i].name
+        if name.byte_length() == 0:
+            return False
+        # sec 8.2.1: field names are lowercase on the wire, and no
+        # name or value may hold NUL, CR or LF; a name holds no
+        # whitespace or controls, a value no leading or trailing
+        # whitespace. CR / LF in a value used to reach take_request,
+        # where HeaderMap raised and took the whole connection down.
+        var np = name.unsafe_ptr()
+        for k in range(name.byte_length()):
+            var c = np[unsafe_offset=k]
+            if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
+                return False
+            if c <= 32 or c == 127:
+                return False
+        if not _is_valid_field_value(hdrs[i].value):
+            return False
+        if name.unsafe_ptr()[unsafe_offset=0] == UInt8(ord(":")):
+            # sec 8.3: pseudo-headers never appear in trailers, and
+            # sec 8.1.2.1 puts them all before the regular fields.
+            if is_trailers or seen_regular:
+                return False
+            if not Connection._is_request_pseudo(name):
+                return False
+            if name == ":method":
+                n_method += 1
+                method_value = hdrs[i].value
+                is_connect = hdrs[i].value == "CONNECT"
+            elif name == ":scheme":
+                n_scheme += 1
+            elif name == ":path":
+                n_path += 1
+                path_value = hdrs[i].value
+                path_empty = hdrs[i].value.byte_length() == 0
+            elif name == ":authority":
+                n_authority += 1
+                authority = hdrs[i].value
+            elif name == ":protocol":
+                has_protocol = True
+        else:
+            seen_regular = True
+            if name == "host":
+                host = hdrs[i].value
+            if Connection._is_connection_specific(name):
+                return False
+            # sec 8.2.2: TE is allowed, but only as "trailers".
+            if name == "te" and hdrs[i].value != "trailers":
+                return False
+    if is_trailers:
+        return True
+    if n_method != 1:
+        return False
+    # RFC 8441 sec 4: :protocol only on CONNECT, and only once we
+    # have advertised SETTINGS_ENABLE_CONNECT_PROTOCOL.
+    if has_protocol and (not is_connect or not allow_extended_connect):
+        return False
+    # sec 8.3.1: a host field that disagrees with :authority is
+    # malformed. Routing on one while a proxy checked the other is
+    # the usual confusion.
+    if (
+        authority.byte_length() > 0
+        and host.byte_length() > 0
+        and host != authority
+    ):
+        return False
+    if n_scheme > 1 or n_path > 1 or n_authority > 1:
+        return False
+    if is_connect and not has_protocol:
+        # sec 8.5: a classic CONNECT carries :authority only, and
+        # omitting :scheme / :path is required rather than a fault.
+        return n_scheme == 0 and n_path == 0 and n_authority == 1
+    # Extended CONNECT (RFC 8441) and every other method need the
+    # full request triple.
+    if n_scheme != 1 or n_path != 1:
+        return False
+    if path_empty:
+        return False
+    # sec 8.3.1: origin-form, or "*" for OPTIONS.
+    if not path_value.startswith("/") and not (
+        path_value == "*" and method_value == "OPTIONS"
+    ):
+        return False
+    return True

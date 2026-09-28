@@ -130,6 +130,12 @@ from test_h3_dispatch import (
 from test_h3_dispatch import (
     test_take_request_keeps_repeats_and_joins_cookies as test_h3_dispatch__test_take_request_keeps_repeats_and_joins_cookies,
 )
+from test_h3_dispatch import (
+    test_request_without_pseudo_headers_is_refused as test_h3_dispatch__test_request_without_pseudo_headers_is_refused,
+)
+from test_h3_dispatch import (
+    test_response_drops_connection_specific_fields as test_h3_dispatch__test_response_drops_connection_specific_fields,
+)
 from test_h3_end_to_end import (
     test_get_request_dispatches_through_handler as test_h3_end_to_end__test_get_request_dispatches_through_handler,
 )
@@ -362,6 +368,12 @@ def main() raises:
     suite.test[test_h3_dispatch__test_partial_chunk_needs_more_then_completes]()
     suite.test[
         test_h3_dispatch__test_take_request_keeps_repeats_and_joins_cookies
+    ]()
+    suite.test[
+        test_h3_dispatch__test_request_without_pseudo_headers_is_refused
+    ]()
+    suite.test[
+        test_h3_dispatch__test_response_drops_connection_specific_fields
     ]()
     # tests/h3/test_h3_end_to_end.mojo
     suite.test[

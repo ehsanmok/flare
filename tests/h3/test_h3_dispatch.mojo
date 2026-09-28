@@ -260,7 +260,7 @@ def test_partial_chunk_needs_more_then_completes() raises:
 
 
 def test_take_request_keeps_repeats_and_joins_cookies() raises:
-    """take_request used ``set`` (last value wins) and dropped
+    """``take_request`` used ``set`` (last value wins) and dropped
     :authority entirely, so an h3 handler had no Host and one cookie."""
     var headers = List[QpackHeader]()
     headers.append(QpackHeader(":method", "GET"))
@@ -280,6 +280,49 @@ def test_take_request_keeps_repeats_and_joins_cookies() raises:
     assert_equal(len(req.headers.get_all("accept")), 2)
 
 
+def test_request_without_pseudo_headers_is_refused() raises:
+    """``take_request`` defaulted a missing :method and :path to GET /, so a
+    HEADERS frame of regular fields alone was served (RFC 9114 sec
+    4.3.1 makes it malformed)."""
+    var headers = List[QpackHeader]()
+    headers.append(QpackHeader("user-agent", "x"))
+    var c = Http3Connection()
+    c.feed_stream_chunk(0, _encode_headers_frame(headers))
+    c.signal_end_of_stream(0)
+    var raised = False
+    try:
+        _ = c.take_request(0)
+    except:
+        raised = True
+    assert_true(raised, "a request with no pseudo-headers was served")
+
+
+def test_response_drops_connection_specific_fields() raises:
+    """Connection / Transfer-Encoding from an h1-minded handler went out
+    on h3, where a client must treat the response as malformed."""
+    from flare.http3.frame import decode_http3_frame
+    from flare.qpack import decode_field_section
+
+    var c = Http3Connection()
+    c.feed_stream_chunk(0, _build_get_request_bytes("/"))
+    c.signal_end_of_stream(0)
+    _ = c.take_request(0)
+    var resp = ok("hi")
+    resp.headers.set("Connection", "close")
+    resp.headers.set("Transfer-Encoding", "chunked")
+    resp.headers.set("X-Keep", "yes")
+    c.emit_response(0, resp^)
+    var out = c.take_response_frames(0)
+    var f = decode_http3_frame(Span[UInt8, _](out))
+    var fields = decode_field_section(Span[UInt8, _](f.payload))
+    var names = List[String]()
+    for h in fields:
+        names.append(String(h.name).lower())
+    assert_false("connection" in names)
+    assert_false("transfer-encoding" in names)
+    assert_true("x-keep" in names)
+
+
 def main() raises:
     test_feed_stream_chunk_implicit_open()
     test_get_request_surfaces_after_fin()
@@ -292,4 +335,6 @@ def main() raises:
     test_garbled_chunk_sets_protocol_error()
     test_partial_chunk_needs_more_then_completes()
     test_take_request_keeps_repeats_and_joins_cookies()
-    print("test_h3_dispatch: 11 passed")
+    test_request_without_pseudo_headers_is_refused()
+    test_response_drops_connection_specific_fields()
+    print("test_h3_dispatch: 13 passed")
