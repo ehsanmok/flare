@@ -14,7 +14,11 @@ from ..net import SocketAddr
 
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .frontend import Frontend
-from .scheduler_stats import load_stop_flag, store_worker_stat
+from .scheduler_stats import (
+    WORKER_STAT_DONE,
+    load_stop_flag,
+    store_worker_stat,
+)
 
 
 # ── Per-worker context ───────────────────────────────────────────────────────
@@ -143,6 +147,7 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
         ctx_ptr[].stats_addr,
         ctx_ptr[].extra_fds.copy(),
     )
+    store_worker_stat(ctx_ptr[].stats_addr, WORKER_STAT_DONE, 1)
 
     # Ctx ownership: the Scheduler main thread destroys + frees every
     # ctx AFTER joining the worker, so we don't touch it here.

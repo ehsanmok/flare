@@ -58,7 +58,11 @@ comptime WORKER_STAT_INFLIGHT: Int = 0
 """Slot index: connections still registered on this worker."""
 comptime WORKER_STAT_STATUS: Int = 1
 """Slot index: worker exit status (see ``WORKER_STATUS_*``)."""
-comptime WORKER_STAT_SLOTS: Int = 2
+comptime WORKER_STAT_DONE: Int = 2
+"""Slot index: 1 once the worker's thread has returned from
+``run_worker``, whatever the frontend reported. ``Scheduler.drain``
+waits on it with a deadline instead of blocking in ``pthread_join``."""
+comptime WORKER_STAT_SLOTS: Int = 3
 """Number of Int64 slots per worker cell."""
 
 comptime WORKER_STATUS_RUNNING: Int = 0

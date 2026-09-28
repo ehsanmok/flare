@@ -207,6 +207,79 @@ def test_shutdown_closes_the_shared_listener_once() raises:
     assert_true(alive, "shutdown closed an fd it no longer owned")
 
 
+@fieldwise_init
+struct _StubbornFrontend(Copyable, Frontend):
+    """Ignores the stop flag for ``hold_ms``, like a worker stuck in a
+    handler, then exits."""
+
+    var hold_ms: Int
+
+    def requires_per_worker_listener(self) -> Bool:
+        return False
+
+    def run_worker(
+        mut self,
+        listener_fd: Int,
+        mut stopping: Bool,
+        stats_addr: Int,
+        extra_fds: List[Int] = List[Int](),
+    ):
+        _ = libc_nanosleep_ms(self.hold_ms)
+        store_worker_stat(stats_addr, WORKER_STAT_STATUS, WORKER_STATUS_CLEAN)
+
+
+def test_drain_returns_at_its_deadline() raises:
+    """``drain(timeout_ms)`` joined every worker without a bound, so one
+    stuck worker held it for as long as the handler took."""
+    from flare.runtime._libc_time import monotonic_now_ms
+
+    var s = Scheduler[_StubbornFrontend].start(
+        addr=SocketAddr.localhost(0),
+        frontend=_StubbornFrontend(3000),
+        num_workers=1,
+        pin_cores=False,
+    )
+    var t0 = monotonic_now_ms()
+    var reports = s.drain(timeout_ms=200)
+    var took = monotonic_now_ms() - t0
+    assert_true(took < 2000, "drain took " + String(took) + " ms")
+    assert_equal(len(reports), 1)
+    assert_equal(reports[0].drained, 0)
+
+
+def test_start_raises_when_a_worker_listener_cannot_bind() raises:
+    """A failed per-worker bind was skipped, leaving later workers on fd
+    -1 or on another address's listener. The fd limit is lowered so the
+    probe bind succeeds and the per-worker binds run out."""
+    from std.ffi import c_int, external_call
+    from std.memory import stack_allocation
+    from std.sys.info import CompilationTarget
+
+    # RLIMIT_NOFILE is 7 on Linux, 8 on macOS.
+    var res = c_int(7) if CompilationTarget.is_linux() else c_int(8)
+    var lim = stack_allocation[2, UInt64]()
+    _ = external_call["getrlimit", c_int](res, lim)
+    var soft = lim[unsafe_offset=0]
+    var probe = external_call["socket", c_int](c_int(2), c_int(1), c_int(0))
+    _ = external_call["close", c_int](probe)
+    lim[unsafe_offset=0] = UInt64(Int(probe) + 2)
+    _ = external_call["setrlimit", c_int](res, lim)
+    var raised = False
+    try:
+        var s = Scheduler[_NopFrontend].start(
+            addr=SocketAddr.localhost(0),
+            frontend=_NopFrontend(0),
+            num_workers=4,
+            pin_cores=False,
+        )
+        s.shutdown()
+    except:
+        raised = True
+    lim[unsafe_offset=0] = soft
+    _ = external_call["setrlimit", c_int](res, lim)
+    assert_true(raised, "start ran with workers missing their listeners")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────
 
 

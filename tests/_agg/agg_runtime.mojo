@@ -427,6 +427,12 @@ from test_scheduler import (
 from test_scheduler import (
     test_shutdown_closes_the_shared_listener_once as test_scheduler__test_shutdown_closes_the_shared_listener_once,
 )
+from test_scheduler import (
+    test_drain_returns_at_its_deadline as test_scheduler__test_drain_returns_at_its_deadline,
+)
+from test_scheduler import (
+    test_start_raises_when_a_worker_listener_cannot_bind as test_scheduler__test_start_raises_when_a_worker_listener_cannot_bind,
+)
 from test_syscall_ffi import (
     test_epoll_constants_distinct_bits as test_syscall_ffi__test_epoll_constants_distinct_bits,
 )
@@ -858,6 +864,10 @@ def main() raises:
     suite.test[test_scheduler__test_scheduler_multiple_start_cycles]()
     suite.test[test_scheduler__test_scheduler_pin_cores_flag_default_no_crash]()
     suite.test[test_scheduler__test_shutdown_closes_the_shared_listener_once]()
+    suite.test[test_scheduler__test_drain_returns_at_its_deadline]()
+    suite.test[
+        test_scheduler__test_start_raises_when_a_worker_listener_cannot_bind
+    ]()
     # tests/runtime/test_syscall_ffi.mojo
     suite.test[test_syscall_ffi__test_epoll_constants_distinct_bits]()
     suite.test[test_syscall_ffi__test_epoll_ctl_op_constants]()
