@@ -11,6 +11,7 @@ readers) so existing imports keep resolving unchanged.
 """
 
 from ..response import Response
+from .._scan import parse_content_length
 from ..headers import HeaderMap
 from ...tcp import TcpStream
 from ...tls import TlsStream
@@ -63,72 +64,180 @@ def _read_all_tcp(mut stream: TcpStream) raises -> List[UInt8]:
     return out^
 
 
-def _parse_http_response(raw: List[UInt8]) raises -> Response:
+comptime _FRAME_NONE: Int = 0
+"""No body: HEAD, 1xx, 204, 304, or a 2xx to CONNECT."""
+comptime _FRAME_LENGTH: Int = 1
+"""Body delimited by ``Content-Length``."""
+comptime _FRAME_CHUNKED: Int = 2
+"""Body delimited by chunked framing."""
+comptime _FRAME_CLOSE: Int = 3
+"""Body runs to the end of the connection."""
+
+
+@fieldwise_init
+struct _ResponseHead(Movable):
+    var status: Int
+    var reason: String
+    var headers: HeaderMap
+
+
+def _parse_response_head(head: List[UInt8]) raises -> _ResponseHead:
+    """Parse a response head (status line + fields, no final CRLFCRLF).
+
+    One set of rules for every HTTP/1.1 reader in the client, buffered
+    and streaming alike. They used to disagree: the buffered parser
+    skipped colonless lines and accepted obs-fold (``" evil: v"``
+    became a header named ``evil``) and whitespace before the colon
+    (``Content-Length : 5``), all of which the streaming reader already
+    refused.
+    """
+    var lines = _split_lines(_bytes_to_str(head))
+    if len(lines) == 0:
+        raise NetworkError("HTTP response empty")
+    var sl = _parse_status_line(lines[0])
+    if sl.code < 100 or sl.code > 599:
+        raise NetworkError("HTTP response: invalid status code")
+    var headers = HeaderMap()
+    for li in range(1, len(lines)):
+        var ln = lines[li]
+        var raw = ln.as_bytes()
+        if len(raw) == 0:
+            continue
+        # RFC 9112 sec 5.2: obs-fold is not a field line.
+        if raw[0] == 32 or raw[0] == 9:
+            raise NetworkError("HTTP response: obs-fold line rejected")
+        var colon = ln.find(":")
+        if colon <= 0:
+            raise NetworkError("HTTP response: malformed header line")
+        # RFC 9112 sec 5.1: no whitespace between name and colon.
+        if raw[colon - 1] == 32 or raw[colon - 1] == 9:
+            raise NetworkError("HTTP response: whitespace before header colon")
+        var k = String(String(unsafe_from_utf8=ln.as_bytes()[:colon]))
+        var v = String(
+            String(unsafe_from_utf8=ln.as_bytes()[colon + 1 :]).strip()
+        )
+        headers.append(k, v)
+    return _ResponseHead(sl.code, sl.reason, headers^)
+
+
+def _response_framing(
+    method: String, status: Int, headers: HeaderMap
+) raises -> Tuple[Int, Int]:
+    """``(mode, content_length)`` for a final (non-1xx) response.
+
+    RFC 9112 sec 6.3, in the order it gives: HEAD, 1xx, 204, 304 and a
+    2xx to CONNECT have no body; then Transfer-Encoding, which must be
+    exactly ``chunked`` and may not come with Content-Length; then a
+    single Content-Length; else read to close. A repeated
+    Content-Length is refused even when the values agree, as the server
+    side refuses it by default.
+    """
+    var verb = method.upper()
+    if (
+        verb == "HEAD"
+        or status < 200
+        or status == 204
+        or status == 304
+        or (verb == "CONNECT" and status < 300)
+    ):
+        return (_FRAME_NONE, 0)
+    var lengths = headers.get_all("content-length")
+    if len(lengths) > 1:
+        raise NetworkError("HTTP response: duplicate Content-Length")
+    var content_length = -1
+    if len(lengths) == 1:
+        content_length = parse_content_length(lengths[0])
+        if content_length < 0:
+            raise NetworkError("HTTP response: invalid Content-Length")
+    var encodings = headers.get_all("transfer-encoding")
+    if len(encodings) > 0:
+        if len(encodings) != 1 or _lower_str(encodings[0]) != "chunked":
+            raise NetworkError("HTTP response: unsupported Transfer-Encoding")
+        if content_length >= 0:
+            raise NetworkError(
+                "response carries both Transfer-Encoding: chunked and"
+                " Content-Length (RFC 9112 sec 6.3 forbids; would enable"
+                " response smuggling)"
+            )
+        return (_FRAME_CHUNKED, -1)
+    if content_length >= 0:
+        return (_FRAME_LENGTH, content_length)
+    return (_FRAME_CLOSE, -1)
+
+
+def _parse_http_response(
+    raw: List[UInt8], method: String = "GET"
+) raises -> Response:
     """Parse a raw HTTP/1.1 response byte buffer.
 
-    Supports:
-    - ``Content-Length`` delimited bodies
-    - ``Transfer-Encoding: chunked`` bodies
-    - Connection-close bodies (all bytes after double-CRLF)
+    Informational 1xx heads before the final response are skipped (a
+    ``103 Early Hints`` used to be returned as the response). 101 is
+    returned as is, for the h2c upgrade path. The body follows
+    :func:`_response_framing`: ``method`` matters, since a response to
+    HEAD has a Content-Length and no body.
 
     Args:
         raw: All bytes received from the server.
+        method: The request method.
 
     Returns:
         Parsed ``Response``.
 
     Raises:
-        NetworkError: If the status line is malformed or truncated.
+        NetworkError: If the head is malformed, the framing is
+            ambiguous, or a ``Content-Length`` body is truncated.
     """
-    # Find the end of headers (\r\n\r\n)
-    var header_end = _find_crlf2(raw)
-    if header_end < 0:
-        raise NetworkError("HTTP response missing header terminator")
-
-    # Convert header section to string
-    var header_bytes = List[UInt8](capacity=header_end)
-    for i in range(header_end):
-        header_bytes.append(raw[i])
-    var header_str = _bytes_to_str(header_bytes)
-
-    # Parse status line
-    var lines = _split_lines(header_str)
-    if len(lines) == 0:
-        raise NetworkError("HTTP response empty")
-    var sl = _parse_status_line(lines[0])
-    var status_code = sl.code
-    var reason = sl.reason
-
-    # Parse headers
-    var headers = HeaderMap()
-    for i in range(1, len(lines)):
-        var line = lines[i]
-        if line.byte_length() == 0:
+    var start = 0
+    while True:
+        var header_end = _find_crlf2_from(raw, start)
+        if header_end < 0:
+            raise NetworkError("HTTP response missing header terminator")
+        var head_bytes = List[UInt8](capacity=header_end - start)
+        for i in range(start, header_end):
+            head_bytes.append(raw[i])
+        var head = _parse_response_head(head_bytes)
+        var body_start = header_end + 4
+        if head.status >= 100 and head.status < 200 and head.status != 101:
+            start = body_start
             continue
-        var colon = _str_find(line, ":")
-        if colon < 0:
-            continue
-        var k = String(
-            String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
-        )
-        var v = String(
-            String(
-                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
-            ).strip()
-        )
-        headers.append(k, v)
+        var framing = _response_framing(method, head.status, head.headers)
+        var trailers = HeaderMap()
+        var body = List[UInt8]()
+        if framing[0] == _FRAME_CHUNKED:
+            body = _decode_chunked(raw, body_start, trailers)
+        elif framing[0] == _FRAME_LENGTH:
+            var cl = framing[1]
+            if len(raw) - body_start < cl:
+                raise NetworkError(
+                    "HTTP response: body shorter than its Content-Length"
+                )
+            body = List[UInt8](capacity=cl)
+            for i in range(body_start, body_start + cl):
+                body.append(raw[i])
+        elif framing[0] == _FRAME_CLOSE:
+            body = List[UInt8](capacity=len(raw) - body_start)
+            for i in range(body_start, len(raw)):
+                body.append(raw[i])
+        var resp = Response(status=head.status, reason=head.reason)
+        resp.headers = head.headers.copy()
+        resp.body = body^
+        resp.trailers = trailers^
+        return resp^
 
-    # Extract body (everything after \r\n\r\n) plus any trailer
-    # fields the chunked decoder pulled off after the zero chunk.
-    var body_start = header_end + 4
-    var trailers = HeaderMap()
-    var body = _extract_body_and_trailers(raw, body_start, headers, trailers)
 
-    var resp = Response(status=status_code, reason=reason^)
-    resp.headers = headers^
-    resp.body = body^
-    resp.trailers = trailers^
-    return resp^
+def _find_crlf2_from(data: List[UInt8], start: Int) -> Int:
+    """``_find_crlf2`` from offset ``start``."""
+    var i = start
+    while i + 3 < len(data):
+        if (
+            data[i] == 13
+            and data[i + 1] == 10
+            and data[i + 2] == 13
+            and data[i + 3] == 10
+        ):
+            return i
+        i += 1
+    return -1
 
 
 def _find_crlf2(data: List[UInt8]) -> Int:

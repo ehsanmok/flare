@@ -24,11 +24,14 @@ from ...io.buf_reader import Readable
 from ...net import NetworkError
 
 from .parse import (
+    _FRAME_CHUNKED,
+    _FRAME_LENGTH,
+    _FRAME_NONE,
     _READ_BUF_SIZE,
     _bytes_to_str,
     _find_crlf2,
-    _parse_status_line,
-    _split_lines,
+    _parse_response_head,
+    _response_framing,
 )
 
 
@@ -115,95 +118,30 @@ struct HttpDownload[R: Readable](Movable):
                 break
             self.headers = HeaderMap()
 
-        # RFC 9110 sec 9.3.6: a 2xx to CONNECT has no body either -- the
-        # connection becomes a tunnel. Without this arm such a response
-        # carries neither Content-Length nor Transfer-Encoding, falls
-        # through to _DL_MODE_CLOSE below, and the reader starts handing
-        # back tunnel bytes as though they were a response body.
-        var verb = method.upper()
-        if (
-            verb == "HEAD"
-            or self.status == 204
-            or self.status == 304
-            or (verb == "CONNECT" and self.status >= 200 and self.status < 300)
-        ):
+        # Framing rules are shared with the buffered reader
+        # (``_response_framing``): HEAD / 1xx / 204 / 304 / a 2xx to
+        # CONNECT are bodyless (the last one becomes a tunnel), a
+        # repeated Content-Length is refused, and Transfer-Encoding must
+        # be exactly ``chunked`` and alone.
+        var framing = _response_framing(method, self.status, self.headers)
+        if framing[0] == _FRAME_NONE:
             self._done = True
             self._buf = List[UInt8]()
             return
-
-        var content_length = -1
-        var lengths = self.headers.get_all("content-length")
-        # Any repeat is refused, even when the values agree. RFC 9112
-        # sec 6.3 allows a single value; the server side of this tree
-        # refuses duplicates by default
-        # (allow_multiple_content_length in flare.http.proto.h1_leniency,
-        # whose docstring records that the canonical answer is 400 even
-        # when the values match). One answer per repo: a client that
-        # agrees with the origin about framing is worth more than one
-        # extra accepted response.
-        if len(lengths) > 1:
-            raise NetworkError("HTTP download: duplicate Content-Length")
-        for i in range(len(lengths)):
-            content_length = _parse_decimal(lengths[i])
-        var encodings = self.headers.get_all("transfer-encoding")
-        if len(encodings) > 0:
-            if len(encodings) != 1 or encodings[0].lower() != "chunked":
-                raise NetworkError(
-                    "HTTP download: unsupported Transfer-Encoding"
-                )
-            if content_length >= 0:
-                raise NetworkError("HTTP download: ambiguous response framing")
+        if framing[0] == _FRAME_CHUNKED:
             self._mode = _DL_MODE_CHUNKED
-        elif content_length >= 0:
+        elif framing[0] == _FRAME_LENGTH:
             self._mode = _DL_MODE_CONTENT_LENGTH
-            self._cl_remaining = content_length
-            self._done = content_length == 0
+            self._cl_remaining = framing[1]
+            self._done = framing[1] == 0
         else:
             self._mode = _DL_MODE_CLOSE
 
     def _parse_head(mut self, head: List[UInt8]) raises:
-        var lines = _split_lines(_bytes_to_str(head))
-        if len(lines) == 0:
-            raise NetworkError("HTTP download: empty response")
-        var sl = _parse_status_line(lines[0])
-        self.status = sl.code
-        self.reason = sl.reason
-        if self.status < 100 or self.status > 599:
-            raise NetworkError("HTTP download: invalid status code")
-
-        for li in range(1, len(lines)):
-            var ln = lines[li]
-            var raw = ln.as_bytes()
-            # RFC 9112 sec 5.2: a line starting with SP or HTAB is an
-            # obs-fold continuation of the previous field. It is not a
-            # field line, and it must not become one -- a folded
-            # "X-Foo: bar\r\n evil: value" would otherwise appear
-            # downstream as a genuine "evil" header, indistinguishable
-            # from one the origin sent. The server side refuses obs-fold
-            # by default (allow_obs_fold in flare.http.proto.h1_leniency)
-            # and so does this reader.
-            if len(raw) > 0 and (raw[0] == 32 or raw[0] == 9):
-                raise NetworkError(
-                    "HTTP download: obs-fold continuation line rejected"
-                )
-            var colon = ln.find(":")
-            if colon <= 0:
-                raise NetworkError("HTTP download: malformed response header")
-            # RFC 9112 sec 5.1: no whitespace is allowed between the
-            # field name and the colon. "Content-Length : 5" stripped to
-            # "content-length" is the classic smuggling vector, named as
-            # such by allow_whitespace_before_colon on the server side.
-            if raw[colon - 1] == 32 or raw[colon - 1] == 9:
-                raise NetworkError(
-                    "HTTP download: whitespace before header colon"
-                )
-            var k = String(
-                String(unsafe_from_utf8=ln.as_bytes()[:colon])
-            ).lower()
-            var v = String(
-                String(unsafe_from_utf8=ln.as_bytes()[colon + 1 :])
-            ).strip()
-            self.headers.append(String(k), String(v))
+        var parsed = _parse_response_head(head)
+        self.status = parsed.status
+        self.reason = parsed.reason
+        self.headers = parsed.headers.copy()
 
     def _compact(mut self):
         """Drop consumed prefix so the buffer stays bounded."""
@@ -413,16 +351,4 @@ def _parse_hex(s: String) raises -> Int:
         if acc > (Int.MAX - d) // 16:
             raise NetworkError("HTTP download: chunk size overflow")
         acc = acc * 16 + d
-    return acc
-
-
-def _parse_decimal(s: String) raises -> Int:
-    var acc = 0
-    if s.byte_length() == 0:
-        raise NetworkError("HTTP download: empty Content-Length")
-    for byte in s.as_bytes():
-        var digit = Int(byte) - 48
-        if digit < 0 or digit > 9 or acc > (Int.MAX - digit) // 10:
-            raise NetworkError("HTTP download: invalid Content-Length")
-        acc = acc * 10 + digit
     return acc
