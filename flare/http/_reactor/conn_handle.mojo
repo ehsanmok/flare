@@ -140,6 +140,56 @@ ceiling, after which the connection re-arms and yields to its peers."""
 # ── Connection handle ─────────────────────────────────────────────────────────
 
 
+def _head_expects_continue(buf: Span[UInt8, _], headers_end: Int) -> Bool:
+    """The request line says HTTP/1.1 and a header line is
+    ``Expect: 100-continue`` (names anchored at a line start, value
+    compared case-insensitively)."""
+    var n = headers_end
+    var i = 0
+    while i + 1 < n and not (buf[i] == 13 and buf[i + 1] == 10):
+        i += 1
+    if i < 8:
+        return False
+    var v = String("HTTP/1.1").as_bytes()
+    for k in range(8):
+        if buf[i - 8 + k] != v[k]:
+            return False
+    i += 2
+    var name = String("expect:").as_bytes()
+    var want = String("100-continue").as_bytes()
+    while i < n:
+        var e = i
+        while e + 1 < n and not (buf[e] == 13 and buf[e + 1] == 10):
+            e += 1
+        if e - i >= len(name):
+            var hit = True
+            for k in range(len(name)):
+                var c = buf[i + k]
+                if c >= 65 and c <= 90:
+                    c += 32
+                if c != name[k]:
+                    hit = False
+                    break
+            if hit:
+                var p = i + len(name)
+                while p < e and (buf[p] == 32 or buf[p] == 9):
+                    p += 1
+                var q = e
+                while q > p and (buf[q - 1] == 32 or buf[q - 1] == 9):
+                    q -= 1
+                if q - p != len(want):
+                    return False
+                for k in range(len(want)):
+                    var c = buf[p + k]
+                    if c >= 65 and c <= 90:
+                        c += 32
+                    if c != want[k]:
+                        return False
+                return True
+        i = e + 2
+    return False
+
+
 struct ConnHandle(Movable):
     """State + buffers for a single reactor-managed HTTP connection.
 
@@ -267,6 +317,9 @@ struct ConnHandle(Movable):
     pending connection to HTTP/1.1. Every other loop, and every TLS
     connection, serves ``Upgrade: h2c`` requests as plain HTTP/1.1."""
 
+    var continue_sent: Bool
+    """``100 Continue`` has been written for the request being read."""
+
     var peer_eof: Bool
     """The peer has half-closed (FIN / close_notify) with a request still
     buffered. That request is served, with ``Connection: close``."""
@@ -314,6 +367,7 @@ struct ConnHandle(Movable):
         self.request_started_ms = 0
         self.peer_eof = False
         self.h2c_upgrade_allowed = False
+        self.continue_sent = False
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -475,6 +529,40 @@ struct ConnHandle(Movable):
                 return Optional[StepResult](self._transition_to_writing())
         return Optional[StepResult]()
 
+    def _maybe_send_continue(mut self):
+        """Write ``HTTP/1.1 100 Continue`` once for a request that asked
+        for it and whose head is in but whose body is not.
+
+        curl and most other clients send ``Expect: 100-continue`` for
+        larger uploads and hold the body until they see the interim
+        response, falling back after about a second. Without one, the
+        default 500 ms idle timer won that race and the upload failed.
+        RFC 9110 sec 10.1.1: never sent to an HTTP/1.0 client. The write
+        is best effort and not resumed on a partial send; the client's
+        own fallback covers that case.
+        """
+        if self.continue_sent or self.headers_end < 0:
+            return
+        if not _head_expects_continue(
+            Span[UInt8, _](self.read_buf), self.headers_end
+        ):
+            return
+        self.continue_sent = True
+        var interim = String("HTTP/1.1 100 Continue\r\n\r\n")
+        var bytes = interim.as_bytes()
+        if self.tls:
+            try:
+                _ = self.tls.value().send(bytes)
+            except:
+                pass
+        else:
+            _ = _send(
+                self.fd(),
+                bytes.unsafe_ptr(),
+                c_size_t(len(bytes)),
+                c_int(MSG_NOSIGNAL),
+            )
+
     @always_inline
     def _check_request_complete(
         mut self, config: ServerConfig, body_timeout_ms: Int = -1
@@ -505,6 +593,7 @@ struct ConnHandle(Movable):
                 return Optional[StepResult](self._transition_to_writing())
         if self.headers_end < 0:
             self.head_request = False
+            self.continue_sent = False
             var end = _find_crlfcrlf(self.read_buf, 0)
             if end < 0:
                 if len(self.read_buf) > config.max_header_size:
@@ -562,6 +651,7 @@ struct ConnHandle(Movable):
                 self._queue_error(400, "Bad Request")
                 return Optional[StepResult](self._transition_to_writing())
             if cend == CHUNKED_INCOMPLETE:
+                self._maybe_send_continue()
                 var t2 = (
                     body_timeout_ms if body_timeout_ms
                     > 0 else config.idle_timeout_ms
@@ -575,6 +665,7 @@ struct ConnHandle(Movable):
                 )
             self.body_total = cend
         if len(self.read_buf) < self.body_total:
+            self._maybe_send_continue()
             var timeout = (
                 body_timeout_ms if body_timeout_ms
                 > 0 else config.idle_timeout_ms
@@ -678,7 +769,9 @@ struct ConnHandle(Movable):
         var drained = self._drain_recv[flips_cancel_on_close=False](config)
         if drained:
             return drained.value()
-        var pending = self._check_request_complete(config)
+        var pending = self._check_request_complete(
+            config, body_timeout_ms=config.read_body_timeout_ms
+        )
         if pending:
             return pending.value()
 
@@ -835,7 +928,9 @@ struct ConnHandle(Movable):
         var appended = self._append_pre_recv_bytes(bytes, config)
         if appended:
             return appended.value()
-        var pending = self._check_request_complete(config)
+        var pending = self._check_request_complete(
+            config, body_timeout_ms=config.read_body_timeout_ms
+        )
         if pending:
             return pending.value()
 

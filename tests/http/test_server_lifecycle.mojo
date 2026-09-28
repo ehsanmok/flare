@@ -355,6 +355,61 @@ def test_h2c_upgrade_still_switches_on_the_unified_loop() raises:
     )
 
 
+# ── Uploads: 100-continue, and bodies slower than the idle timeout ─────────
+
+
+def test_expect_continue_gets_an_interim_response() raises:
+    var srv = _spawn(ServerConfig())
+    var first = String("")
+    var rest = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        _send_str(
+            c,
+            (
+                "POST /up HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
+                "Content-Length: 5\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        # curl waits for this before it sends the body.
+        first = _read_some(c)
+        _send_str(c, "hello")
+        rest = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true(
+        first.startswith("HTTP/1.1 100 Continue\r\n\r\n"),
+        "no interim response: " + first,
+    )
+    assert_true("hi /up" in (first + rest), "upload not served: " + rest)
+
+
+def test_body_gap_longer_than_idle_timeout_is_tolerated() raises:
+    # Default config: idle 500 ms, body 30 s. A pause mid-body is a body
+    # timeout matter, not an idle one.
+    var srv = _spawn(ServerConfig())
+    var got = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        _send_str(
+            c,
+            (
+                "POST /slow-body HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n"
+                "Connection: close\r\n\r\nhello"
+            ),
+        )
+        usleep(900000)
+        _send_str(c, "world")
+        got = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true("hi /slow-body" in got, "slow body was cut off: " + got)
+
+
 def main() raises:
     print("=" * 60)
     print("test_server_lifecycle.mojo — reactor connection lifecycle")

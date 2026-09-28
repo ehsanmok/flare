@@ -3102,6 +3102,12 @@ from test_server_lifecycle import (
 from test_server_lifecycle import (
     test_h2c_upgrade_still_switches_on_the_unified_loop as test_server_lifecycle__test_h2c_upgrade_still_switches_on_the_unified_loop,
 )
+from test_server_lifecycle import (
+    test_expect_continue_gets_an_interim_response as test_server_lifecycle__test_expect_continue_gets_an_interim_response,
+)
+from test_server_lifecycle import (
+    test_body_gap_longer_than_idle_timeout_is_tolerated as test_server_lifecycle__test_body_gap_longer_than_idle_timeout_is_tolerated,
+)
 from test_server_multicore import (
     test_server_bind_with_short_config as test_server_multicore__test_server_bind_with_short_config,
 )
@@ -5430,6 +5436,12 @@ def main() raises:
     ]()
     suite.test[
         test_server_lifecycle__test_h2c_upgrade_still_switches_on_the_unified_loop
+    ]()
+    suite.test[
+        test_server_lifecycle__test_expect_continue_gets_an_interim_response
+    ]()
+    suite.test[
+        test_server_lifecycle__test_body_gap_longer_than_idle_timeout_is_tolerated
     ]()
     # tests/http/test_server_multicore.mojo
     suite.test[test_server_multicore__test_server_bind_with_short_config]()
