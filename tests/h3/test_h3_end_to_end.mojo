@@ -526,6 +526,49 @@ def test_buffered_response_not_registered_as_stream() raises:
     assert_equal(len(body), 5)  # "hello" emitted as DATA up front
 
 
+@fieldwise_init
+struct _RaisingHandler(Copyable, Handler):
+    """Raises on ``/boom``, answers everything else."""
+
+    def serve(self, req: Request) raises -> Response:
+        if req.url == "/boom":
+            raise Error("handler blew up with a secret: hunter2")
+        return ok("fine")
+
+
+def test_a_raising_handler_is_contained_to_its_stream() raises:
+    """A handler raise escaped pump_http3_handler_once and serve_http3,
+    which stopped the server for every connection. Now it becomes a 500
+    on that stream (without the exception text) and the next stream on
+    the same connection is still answered."""
+    var tcp_addr = SocketAddr(IpAddr.localhost(), UInt16(0))
+    var udp_cfg = QuicServerConfig()
+    udp_cfg.host = String("127.0.0.1")
+    udp_cfg.port = UInt16(0)
+    var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
+    var listener_borrow = srv._http3_listener.take()
+    var slot = _seed_slot(listener_borrow)
+    var ev0 = _make_stream_event(UInt64(0), _build_get_request("/boom"))
+    listener_borrow._route_http3_stream_chunks(slot, ev0)
+    var ev4 = _make_stream_event(UInt64(4), _build_get_request("/ok"))
+    listener_borrow._route_http3_stream_chunks(slot, ev4)
+    srv._http3_listener = listener_borrow^
+
+    var handler = _RaisingHandler()
+    var dispatched = srv.pump_http3_handler_once[_RaisingHandler](handler)
+    assert_equal(dispatched, 2)
+    var listener_reborrow = srv._http3_listener.take()
+    var boom = listener_reborrow.take_http3_response_egress(slot, 0)
+    var fine = listener_reborrow.take_http3_response_egress(slot, 4)
+    srv._http3_listener = listener_reborrow^
+    assert_true(len(boom) > 0, "the raising stream got no response")
+    assert_true(len(fine) > 0, "the next stream was not answered")
+    var text = String("")
+    for b in boom:
+        text += chr(Int(b))
+    assert_false("hunter2" in text, "exception text reached the client")
+
+
 def main() raises:
     test_get_request_dispatches_through_handler()
     test_post_request_body_echo()
@@ -533,6 +576,7 @@ def main() raises:
     test_multiple_connections_dispatch_independently()
     test_pump_http3_handler_once_drives_handler()
     test_pump_http3_handler_once_zero_when_no_streams_ready()
+    test_a_raising_handler_is_contained_to_its_stream()
     test_streaming_response_incremental_data()
     test_buffered_response_not_registered_as_stream()
-    print("test_h3_end_to_end: 8 passed")
+    print("test_h3_end_to_end: 9 passed")

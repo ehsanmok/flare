@@ -195,6 +195,9 @@ from test_h2_hpack import (
 from test_h2_hpack import (
     test_decode_keeps_non_ascii_octets_exact as test_h2_hpack__test_decode_keeps_non_ascii_octets_exact,
 )
+from test_h2_hpack import (
+    test_default_decoder_accepts_a_real_servers_huffman_headers as test_h2_hpack__test_default_decoder_accepts_a_real_servers_huffman_headers,
+)
 from test_h2_parked_response import (
     test_parked_response_is_not_redispatched as test_h2_parked_response__test_parked_response_is_not_redispatched,
 )
@@ -534,6 +537,9 @@ def main() raises:
     suite.test[test_h2_hpack__test_encoder_decoder_roundtrip]()
     suite.test[test_h2_hpack__test_encoder_status_uses_static_name_index]()
     suite.test[test_h2_hpack__test_decode_keeps_non_ascii_octets_exact]()
+    suite.test[
+        test_h2_hpack__test_default_decoder_accepts_a_real_servers_huffman_headers
+    ]()
     # tests/http2/test_h2_parked_response.mojo
     suite.test[
         test_h2_parked_response__test_parked_response_is_not_redispatched

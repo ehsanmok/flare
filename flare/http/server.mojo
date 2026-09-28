@@ -50,6 +50,7 @@ from .alpn_dispatch import (
 )
 from ..http2.server import Http2Config
 from ..ws.server_h2 import WsH2Handler, WsH2Hooks
+from ..errors import map_handler_error
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 from ..quic.server import QuicListener, QuicServerConfig
@@ -67,6 +68,36 @@ from flare.runtime.scheduler import ShutdownReport
 
 
 # ── HttpServer ────────────────────────────────────────────────────────────────
+
+
+def _serve_h3_stream[
+    H: Handler & Copyable
+](mut listener: QuicListener, slot: Int, stream_id: Int, mut handler: H):
+    """Answer one completed HTTP/3 request stream, whatever happens.
+
+    Both h3 dispatch loops used to call take / serve / emit bare, so a
+    request the h3 layer could not build or a handler that raised
+    propagated out of ``serve_http3`` and stopped the server for every
+    connection. Now a request that cannot be built gets a 400, a handler
+    error is mapped the way the h1 and h2 paths map it (``500``, the
+    text only with ``expose_errors``), and a response that cannot be
+    framed ends just that stream.
+    """
+    var resp: Response
+    try:
+        var req = listener.take_http3_request(slot, stream_id)
+        var expose = req.expose_errors
+        try:
+            resp = handler.serve(req^).lower()
+        except e:
+            var mapped = map_handler_error(String(e), expose)
+            resp = Response(status=mapped.status, reason=mapped.reason)
+    except:
+        resp = Response(status=400, reason="Bad Request")
+    try:
+        listener.emit_http3_response(slot, stream_id, resp^)
+    except:
+        pass
 
 
 struct HttpServer(Movable):
@@ -540,9 +571,7 @@ struct HttpServer(Movable):
             var ready = listener.take_http3_completed_streams(slot)
             for j in range(len(ready)):
                 var stream_id = ready[j]
-                var req = listener.take_http3_request(slot, stream_id)
-                var resp = handler.serve(req^).lower()
-                listener.emit_http3_response(slot, stream_id, resp^)
+                _serve_h3_stream[H](listener, slot, stream_id, handler)
                 dispatched += 1
         self._http3_listener = listener^
         return dispatched
@@ -619,9 +648,7 @@ struct HttpServer(Movable):
             var ready = listener.take_http3_completed_streams(slot)
             for j in range(len(ready)):
                 var stream_id = ready[j]
-                var req = listener.take_http3_request(slot, stream_id)
-                var resp = handler.serve(req^).lower()
-                listener.emit_http3_response(slot, stream_id, resp^)
+                _serve_h3_stream[H](listener, slot, stream_id, handler)
                 dispatched += 1
         return dispatched
 
