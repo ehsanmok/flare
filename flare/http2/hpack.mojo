@@ -34,6 +34,8 @@ inserts evict the oldest entry until ``size <= max_size``.
 from std.collections import Optional
 
 from flare.http.hpack_huffman_simd import huffman_decode_simd
+from flare.http.proto.ascii import ascii_unchecked_string
+from flare.http.proto.utf8 import utf8_lossy_string
 from flare.http.hpack_huffman import (
     huffman_decode,
     huffman_encode,
@@ -42,6 +44,23 @@ from flare.http.hpack_huffman import (
 
 
 # ── Integer codec (§5.1) ─────────────────────────────────────────────────
+
+
+def _octets_to_string(b: Span[UInt8, _]) -> String:
+    """A header string's octets as a ``String``, byte for byte.
+
+    Building it with ``s += chr(byte)`` turned every byte >= 0x80 into a
+    two-byte code point: non-ASCII values reached handlers mangled, and
+    the dynamic table's ``name + value + 32`` accounting counted more
+    bytes than the peer did, so the two ends evicted at different times
+    and the connection died with COMPRESSION_ERROR. ASCII (nearly every
+    header) takes the unchecked fast path; anything else keeps valid
+    UTF-8 exactly and replaces only malformed sequences.
+    """
+    for i in range(len(b)):
+        if b[i] >= 0x80:
+            return utf8_lossy_string(b)
+    return ascii_unchecked_string(b)
 
 
 struct StringPair(Copyable, Defaultable):
@@ -323,14 +342,10 @@ struct HpackDecoder(Copyable, Defaultable):
                 huffman_decode_simd(encoded, decoded)
             except e:
                 raise Error("hpack: Huffman decode failed: " + String(e))
-            var s = String(capacity_bytes=len(decoded) + 1)
-            for i in range(len(decoded)):
-                s += chr(Int(decoded[i]))
-            return StringPair(s^, off + slen)
-        var s = String(capacity_bytes=slen + 1)
-        for i in range(slen):
-            s += chr(Int(buf[off + i]))
-        return StringPair(s^, off + slen)
+            return StringPair(
+                _octets_to_string(Span[UInt8, _](decoded)), off + slen
+            )
+        return StringPair(_octets_to_string(buf[off : off + slen]), off + slen)
 
     def decode(mut self, buf: Span[UInt8, _]) raises -> List[HpackHeader]:
         """Decode a HEADERS / CONTINUATION block into header pairs."""

@@ -192,6 +192,9 @@ from test_h2_hpack import (
 from test_h2_hpack import (
     test_encoder_status_uses_static_name_index as test_h2_hpack__test_encoder_status_uses_static_name_index,
 )
+from test_h2_hpack import (
+    test_decode_keeps_non_ascii_octets_exact as test_h2_hpack__test_decode_keeps_non_ascii_octets_exact,
+)
 from test_h2_parked_response import (
     test_parked_response_is_not_redispatched as test_h2_parked_response__test_parked_response_is_not_redispatched,
 )
@@ -476,6 +479,7 @@ def main() raises:
     suite.test[test_h2_hpack__test_decode_size_update_above_cap_raises]()
     suite.test[test_h2_hpack__test_encoder_decoder_roundtrip]()
     suite.test[test_h2_hpack__test_encoder_status_uses_static_name_index]()
+    suite.test[test_h2_hpack__test_decode_keeps_non_ascii_octets_exact]()
     # tests/http2/test_h2_parked_response.mojo
     suite.test[
         test_h2_parked_response__test_parked_response_is_not_redispatched

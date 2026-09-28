@@ -312,6 +312,28 @@ def test_encoder_status_uses_static_name_index() raises:
     assert_true(len(wire) <= 6)
 
 
+def test_decode_keeps_non_ascii_octets_exact() raises:
+    """UTF-8 values used to be rebuilt byte by byte through chr(), which
+    double-encoded them and made the dynamic table count more bytes
+    than the peer's."""
+    var dec = HpackDecoder()
+    var b = List[UInt8]()
+    b.append(UInt8(0x40))  # literal with incremental indexing, new name
+    var name = String("x-name")
+    b.append(UInt8(name.byte_length()))
+    for c in name.as_bytes():
+        b.append(c)
+    var v = String("café 世界")
+    b.append(UInt8(v.byte_length()))
+    for c in v.as_bytes():
+        b.append(c)
+    var hdrs = dec.decode(Span[UInt8, _](b))
+    assert_equal(hdrs[0].value, v)
+    assert_equal(hdrs[0].value.byte_length(), v.byte_length())
+    # RFC 7541 sec 4.1: entry size is name + value octets + 32.
+    assert_equal(dec.dynamic_size, name.byte_length() + v.byte_length() + 32)
+
+
 def main() raises:
     test_decode_integer_short()
     test_rfc_7541_c1_5bit_1337()
@@ -328,4 +350,5 @@ def main() raises:
     test_encoder_decoder_roundtrip_with_huffman()
     test_encoder_huffman_picks_shorter_form()
     test_encoder_status_uses_static_name_index()
-    print("test_h2_hpack: 15 passed")
+    test_decode_keeps_non_ascii_octets_exact()
+    print("test_h2_hpack: 16 passed")
