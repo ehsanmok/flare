@@ -73,6 +73,9 @@ from test_random import (
 from test_random import (
     test_random_bytes_rejects_negative_length as test_random__test_random_bytes_rejects_negative_length,
 )
+from test_random import (
+    test_quic_ids_and_keys_come_from_the_csprng as test_random__test_quic_ids_and_keys_come_from_the_csprng,
+)
 
 
 def main() raises:
@@ -102,4 +105,5 @@ def main() raises:
     suite.test[test_random__test_random_bytes_differ_between_calls]()
     suite.test[test_random__test_fill_random_writes_past_the_chunk_boundary]()
     suite.test[test_random__test_random_bytes_rejects_negative_length]()
+    suite.test[test_random__test_quic_ids_and_keys_come_from_the_csprng]()
     suite^.run()

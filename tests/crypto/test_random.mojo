@@ -54,9 +54,27 @@ def test_random_bytes_rejects_negative_length() raises:
     assert_true(raised)
 
 
+def test_quic_ids_and_keys_come_from_the_csprng() raises:
+    """The QUIC helpers read /dev/urandom with a clock-derived fallback.
+    They go through random_bytes now, so they share its contract."""
+    from flare.quic._server_support import _random_bytes
+    from flare.quic.client import _random_cid
+
+    assert_equal(len(_random_bytes(32)), 32)
+    var a = _random_cid(8)
+    var b = _random_cid(8)
+    assert_equal(len(a.bytes), 8)
+    var same = True
+    for i in range(8):
+        if a.bytes[i] != b.bytes[i]:
+            same = False
+    assert_false(same, "two connection IDs were identical")
+
+
 def main() raises:
     test_random_bytes_exact_lengths()
     test_random_bytes_differ_between_calls()
     test_fill_random_writes_past_the_chunk_boundary()
     test_random_bytes_rejects_negative_length()
-    print("test_random: 4 passed")
+    test_quic_ids_and_keys_come_from_the_csprng()
+    print("test_random: 5 passed")

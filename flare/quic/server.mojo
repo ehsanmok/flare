@@ -452,7 +452,7 @@ struct QuicListener(Movable):
         var sock: UdpSocket,
         addr: SocketAddr,
         var tls_acceptor: RustlsQuicAcceptor,
-    ):
+    ) raises:
         """Wrap an already-bound :class:`UdpSocket`. Internal --
         callers use :meth:`bind`."""
         self.config = config.copy()

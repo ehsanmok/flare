@@ -172,31 +172,16 @@ comptime _POLL_BATCH: Int = 16
 comptime _AEAD_TAG_LEN: Int = 16
 
 
-def _random_cid(n: Int) -> ConnectionId:
+def _random_cid(n: Int) raises -> ConnectionId:
     """Return a fresh random Connection ID of ``n`` bytes.
 
-    Reads ``/dev/urandom`` for unpredictability (a guessable CID
-    would let an off-path attacker spoof packets, RFC 9000 §5.1).
-    Falls back to a clock-mixed deterministic fill only when
-    urandom is unavailable, which should not happen on Linux /
-    macOS.
+    Drawn from the OS CSPRNG: a guessable CID lets an off-path
+    attacker spoof packets (RFC 9000 sec 5.1). The old clock-derived
+    fallback for a failed ``/dev/urandom`` read is gone; this raises.
     """
-    var bytes = List[UInt8](capacity=n)
-    try:
-        with open("/dev/urandom", "r") as f:
-            var raw = f.read_bytes(n)
-            for i in range(n):
-                bytes.append(raw[i])
-    except:
-        var seed = _monotonic_ms()
-        for i in range(n):
-            bytes.append(
-                UInt8(
-                    Int((seed >> UInt64(i * 8)) & UInt64(0xFF))
-                    ^ (i * 31 + 0x5A)
-                )
-            )
-    return ConnectionId(bytes=bytes^)
+    from flare.crypto.random import random_bytes
+
+    return ConnectionId(bytes=random_bytes(n))
 
 
 def _encode_client_transport_params(

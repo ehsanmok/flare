@@ -276,30 +276,19 @@ def _monotonic_ms() -> UInt64:
     return UInt64(Int(sec) * 1000 + Int(nsec) // 1_000_000)
 
 
-def _random_bytes(n: Int) -> List[UInt8]:
-    """Return ``n`` unpredictable bytes from ``/dev/urandom``.
+def _random_bytes(n: Int) raises -> List[UInt8]:
+    """Return ``n`` bytes from the OS CSPRNG.
 
-    Used for server-issued Connection IDs + stateless-reset tokens
-    (RFC 9000 sec 5.1.1 / 10.3: both must be unguessable). Falls
-    back to a clock-mixed deterministic fill only if urandom is
-    unavailable (should not happen on Linux / macOS).
+    Used for server-issued Connection IDs, stateless-reset tokens and
+    the reset / Retry keys (RFC 9000 sec 5.1.1 / 10.3: all must be
+    unguessable). It read ``/dev/urandom`` and, if that failed, fell
+    back to a fill derived from the millisecond clock, which an
+    attacker can guess to within a few values; a short read also left
+    it indexing past the bytes it got. It raises instead now.
     """
-    var out = List[UInt8](capacity=n)
-    try:
-        with open("/dev/urandom", "r") as f:
-            var raw = f.read_bytes(n)
-            for i in range(n):
-                out.append(raw[i])
-    except:
-        var seed = _monotonic_ms()
-        for i in range(n):
-            out.append(
-                UInt8(
-                    Int((seed >> UInt64(i * 8)) & UInt64(0xFF))
-                    ^ (i * 31 + 0x5A)
-                )
-            )
-    return out^
+    from flare.crypto.random import random_bytes
+
+    return random_bytes(n)
 
 
 # -- Per-slot rustls QUIC session carrier ------------------------------

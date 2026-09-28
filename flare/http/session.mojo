@@ -61,8 +61,8 @@ from ..crypto import (
 
 
 def new_session_id(n_bytes: Int = 32) raises -> String:
-    """Return a fresh unguessable session id: ``n_bytes`` from
-    ``/dev/urandom`` rendered as lowercase hex.
+    """Return a fresh unguessable session id: ``n_bytes`` from the OS
+    CSPRNG rendered as lowercase hex.
 
     32 bytes (256 bits) is the default -- well above the 128-bit floor
     for a session identifier that a signed cookie carries opaquely. The
@@ -71,11 +71,9 @@ def new_session_id(n_bytes: Int = 32) raises -> String:
     raises if the entropy source is unavailable (which should not happen
     on Linux / macOS).
     """
-    var raw: List[UInt8]
-    with open("/dev/urandom", "r") as f:
-        raw = f.read_bytes(n_bytes)
-    if len(raw) < n_bytes:
-        raise Error("new_session_id: short read from /dev/urandom")
+    from flare.crypto.random import random_bytes
+
+    var raw = random_bytes(n_bytes)
     var hex = String(capacity_bytes=n_bytes * 2 + 1)
     comptime digits = "0123456789abcdef"
     for i in range(n_bytes):
