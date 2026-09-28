@@ -256,6 +256,10 @@ struct ConnHandle(Movable):
     var chunk_decoded: Int
     """Payload bytes in the chunks before ``chunk_scan_pos``."""
 
+    var head_request: Bool
+    """The request being answered is HEAD, so its response carries a
+    head and no content."""
+
     var tls_cross_interest: Bool
     """Set when the TLS session asked for the *opposite* readiness to
     the direction being driven -- ``SSL_read`` returning ``WANT_WRITE``
@@ -290,6 +294,7 @@ struct ConnHandle(Movable):
         self.body_total = -1
         self.chunk_scan_pos = 0
         self.chunk_decoded = 0
+        self.head_request = False
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -457,6 +462,7 @@ struct ConnHandle(Movable):
         ``config.idle_timeout_ms``.
         """
         if self.headers_end < 0:
+            self.head_request = False
             var end = _find_crlfcrlf(self.read_buf, 0)
             if end < 0:
                 if len(self.read_buf) > config.max_header_size:
@@ -577,11 +583,27 @@ struct ConnHandle(Movable):
         # Response carries a chunk source. Take it onto the connection,
         # emit chunked-framed headers, and let ``on_writable`` pull the
         # body chunk-by-chunk. The buffered path is unchanged.
-        if resp.body_stream:
+        var bodyless = (
+            self.head_request
+            or resp.status < 200
+            or resp.status == 204
+            or resp.status == 304
+        )
+        if resp.body_stream and not bodyless:
             self.body_src = resp.body_stream.take()
             self._serialize_response_chunked(resp^, not close_after)
         else:
-            self._serialize_response(resp^, not close_after)
+            # A bodyless answer to a streaming handler sends its head
+            # only; the chunk source is dropped with ``resp``, unread.
+            serialize_response_into(
+                self.write_buf,
+                self._date_cache,
+                resp,
+                not close_after,
+                self.head_request,
+                not resp.body_stream,
+            )
+            self.write_pos = 0
         return self._transition_to_writing()
 
     # ── Event handlers ────────────────────────────────────────────────────────
@@ -641,6 +663,7 @@ struct ConnHandle(Movable):
                     config.h1_leniency,
                 )
                 close_after = _compute_close_after(req.headers, req.version)
+            self.head_request = req.method == "HEAD"
             if self.is_chunked:
                 # The parsers deliberately do not decode chunked bodies
                 # (they only use TE to resolve the CL/TE ambiguity), so
@@ -790,6 +813,7 @@ struct ConnHandle(Movable):
                     config.h1_leniency,
                 )
                 close_after = _compute_close_after(req.headers, req.version)
+            self.head_request = req.method == "HEAD"
             if self.is_chunked:
                 # The parsers deliberately do not decode chunked bodies
                 # (they only use TE to resolve the CL/TE ambiguity), so
@@ -865,6 +889,7 @@ struct ConnHandle(Movable):
                 config.expose_error_messages,
                 config.h1_leniency,
             )
+            self.head_request = req.method == "HEAD"
             if self.is_chunked:
                 req.body = List[UInt8]()
                 _ = decode_chunked_body(
@@ -947,6 +972,7 @@ struct ConnHandle(Movable):
                 config.expose_error_messages,
                 body_override,
             )
+            self.head_request = view.method == "HEAD"
 
             # Connection-disposition from the borrowed header view --
             # no allocation, just an offsets-based lookup.
