@@ -373,10 +373,9 @@ struct RustlsQuicAcceptor(Movable):
             var detail = _do_last_error(self._lib)
             raise Error(String("RustlsQuicAcceptor.accept failed: ") + detail)
         # Each session opens its own OwnedDLHandle. The .so
-        # itself stays mapped via LD_PRELOAD (set by the
-        # build_rustls.sh activation script on Linux) and via
-        # the acceptor's own handle, so opening multiple times
-        # is just a refcount bump.
+        # itself stays mapped via the acceptor's own handle (and,
+        # on Linux, its -z nodelete link flag), so opening
+        # multiple times is just a refcount bump.
         var session_lib = OwnedDLHandle(_find_rustls_quic_lib())
         return RustlsQuicSession._wrap(
             session_lib^, session_handle, dst_cid.copy()
@@ -604,7 +603,7 @@ struct RustlsQuicSession(Movable):
 
         Each session gets its own ``OwnedDLHandle`` so the .so
         refcount stays high until the session drops; on Linux the
-        ``LD_PRELOAD`` from ``build_rustls.sh`` is the additional
+        ``-z nodelete`` link flag is the additional
         belt-and-suspenders pin.
         """
         self._lib = lib^

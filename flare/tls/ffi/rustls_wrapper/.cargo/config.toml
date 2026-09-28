@@ -1,0 +1,5 @@
+# Never unmap the cdylib once loaded (the guard flare/tls/ffi/build.sh
+# describes). Applies to every cargo invocation on this crate, the
+# activation script's and tests/tools/run_test_aggregates.sh's alike.
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "link-arg=-Wl,-z,nodelete"]

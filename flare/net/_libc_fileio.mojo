@@ -139,9 +139,10 @@ struct FlareRawIO(Movable):
 # return fn(...)`` pattern is the ``get_function`` call, not the actual
 # ``fn(...)`` invocation. ASAP then ``dlclose``s the library and unmaps
 # it *before* the function pointer is called, crashing the JIT on both
-# macOS ARM64 and Linux. (This was hidden earlier on Linux by the pixi
-# activation script ``LD_PRELOAD``ing ``libflare_tls.so``, which kept
-# the library mapped regardless of ``dlclose``.)
+# macOS ARM64 and Linux. (This was hidden on Linux while the pixi
+# activation script ``LD_PRELOAD``ed ``libflare_tls.so``, which kept the
+# library mapped regardless of ``dlclose``; the ``-z nodelete`` link flag
+# does that now.)
 #
 # The fix, lifted from ``flare/http/encoding.mojo``: each public entry
 # point opens ``lib`` itself, then delegates to a private helper that

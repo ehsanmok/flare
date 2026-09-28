@@ -12,7 +12,7 @@ ASAP destructor cannot unmap the .so between the
 ``get_function`` call and the actual invocation. The same
 defensive pattern is documented at length in
 ``flare/tls/stream.mojo`` for the OpenSSL FFI surface and in
-``flare/tls/ffi/build_rustls.sh`` for the LD_PRELOAD safety net.
+``flare/tls/ffi/build.sh`` for the ``-z nodelete`` safety net.
 """
 
 from std.collections import List

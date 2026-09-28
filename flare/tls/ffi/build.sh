@@ -15,24 +15,21 @@
 # anything pixi launches finds it automatically without FLARE_LIB-style
 # env-var indirection.
 #
-# Why also LD_PRELOAD on Linux (same .so path as the install)?
-#   All of flare's FFI entry points now route through ``_do_*(read lib:
-#   OwnedDLHandle, ...)`` borrow helpers (see flare/tls/stream.mojo,
-#   flare/tls/_server_ffi.mojo, flare/ws/{client,server}.mojo,
-#   flare/crypto/hmac.mojo, flare/net/_libc.mojo, flare/net/socket.mojo,
-#   flare/tcp/stream.mojo, flare/http/{encoding,middleware,fs}.mojo).
-#   That's the load-bearing fix for Mojo's ASAP destruction policy:
-#   the borrow keeps ``lib`` alive across both ``get_function`` and the
-#   call, so ``dlclose`` cannot fire between them and the cached
-#   function pointer cannot dangle.
+# Keeping the library mapped:
+#   All of flare's FFI entry points route through ``_do_*(read lib:
+#   OwnedDLHandle, ...)`` borrow helpers, which keep ``lib`` alive across
+#   both the symbol lookup and the call, so ``dlclose`` cannot fire
+#   between them. As a second guard, the library is linked with
+#   ``-z nodelete`` on Linux: once loaded it is never unmapped, so even
+#   a call site that forgot the borrow cannot leave a dangling pointer.
 #
-#   LD_PRELOAD remains as belt-and-suspenders defense: it pins the .so
-#   refcount above zero so even a hypothetical regression to the naive
-#   pattern (e.g. a contributor adding a new FFI call site that forgets
-#   the borrow helper) cannot dlclose the library. Critically we
-#   LD_PRELOAD the *same .so file* Mojo dlopens (both resolve to
-#   $INSTALLED), so there is exactly one mapping in the process —
-#   no "two copies, one unmapped" hazard.
+#   This used to be done by exporting LD_PRELOAD from the activation
+#   script, which injected libflare_tls.so, and with it conda's libssl,
+#   into every process pixi started, system tools included.
+#
+# A failed build removes the installed copy and says so on stderr.
+# It used to leave the previous library in place, so everything after
+# ran the old code without a sign that the new source had not built.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../../../build"
@@ -63,9 +60,6 @@ _needs_rebuild() {
 }
 
 if ! _needs_rebuild; then
-    if [[ "$(uname)" != "Darwin" ]]; then
-        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
-    fi
     return 0 2>/dev/null || true
 fi
 
@@ -89,10 +83,12 @@ fi
 mkdir -p "$BUILD_DIR"
 
 # Use clang++ on macOS (matches the system libc++ ABI), g++ on Linux
+NODELETE=""
 if [[ "$(uname)" == "Darwin" ]]; then
     CXX="clang++"
 else
     CXX="g++"
+    NODELETE="-Wl,-z,nodelete"
 fi
 
 echo "Building libflare_tls.so..."
@@ -103,13 +99,15 @@ if $CXX -O2 -std=c++17 -fPIC -DNDEBUG -shared \
     -I"$CONDA_PREFIX/include" \
     -L"$CONDA_PREFIX/lib" \
     -lssl -lcrypto \
+    $NODELETE \
     -Wl,-rpath,"$CONDA_PREFIX/lib"; then
     echo ""
     echo "Build complete!"
     echo "Library: $TARGET"
     ls -la "$TARGET"
 else
-    echo "Build failed!"
+    echo "ERROR: libflare_tls.so failed to build; removed the stale copy" >&2
+    rm -f "$TARGET" "$INSTALLED"
     return 1 2>/dev/null || true
 fi
 
@@ -117,10 +115,3 @@ fi
 mkdir -p "$CONDA_PREFIX/lib"
 cp "$TARGET" "$INSTALLED"
 echo "Installed: $INSTALLED"
-
-# ── Keep the library mapped on Linux so ASAP-destroyed OwnedDLHandles ────────
-# don't tear it down under the JIT's feet (see the long comment at the top
-# of this file). Always LD_PRELOAD the same path Mojo dlopens: $INSTALLED.
-if [[ "$(uname)" != "Darwin" ]]; then
-    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
-fi

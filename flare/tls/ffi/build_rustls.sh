@@ -18,16 +18,10 @@
 #   3. Copy to $CONDA_PREFIX/lib/libflare_rustls_quic.so -- the CANONICAL
 #      location flare.utils.dylib.find_flare_lib("rustls_quic") resolves.
 #
-# Why also LD_PRELOAD on Linux (same .so path as the install)?
-#   Mojo's OwnedDLHandle dlopens the rustls .so. flare's FFI surfaces
-#   route every call through `read lib: OwnedDLHandle` borrow helpers
-#   so dlclose cannot fire between get_function and the call. The
-#   LD_PRELOAD here pins the .so refcount above zero as belt-and-suspenders
-#   defense: a hypothetical regression to the naive pattern (e.g. a new
-#   FFI call site that forgets the borrow helper) still can't unmap the
-#   library mid-call. Same .so path that Mojo dlopens (both resolve to
-#   $INSTALLED), so there is exactly one mapping in the process -- no
-#   "two copies, one unmapped" hazard.
+# On Linux the cdylib is linked with ``-z nodelete`` (see
+# rustls_wrapper/.cargo/config.toml), the guard flare/tls/ffi/build.sh
+# describes; it used to be pushed into LD_PRELOAD. A failed build removes
+# the installed copy and says so on stderr.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER_DIR="$SCRIPT_DIR/rustls_wrapper"
@@ -76,9 +70,6 @@ _needs_rebuild() {
 }
 
 if ! _needs_rebuild; then
-    if [[ "$(uname)" != "Darwin" ]]; then
-        export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
-    fi
     return 0 2>/dev/null || true
 fi
 
@@ -92,7 +83,8 @@ echo ""
 # `--locked` requires Cargo.lock to be exactly what's tracked in-tree,
 # pinning the rustls + ring + dependency graph for reproducibility.
 if ! ( cd "$WRAPPER_DIR" && cargo build --release --locked ); then
-    echo "Build failed!"
+    echo "ERROR: libflare_rustls_quic.so failed to build; removed the stale copy" >&2
+    rm -f "$TARGET" "$INSTALLED"
     return 1 2>/dev/null || true
 fi
 
@@ -105,18 +97,10 @@ ls -la "$TARGET"
 mkdir -p "$CONDA_PREFIX/lib"
 # Atomic install: copy to a temp then rename over $INSTALLED. A plain
 # `cp -f` overwrites the file in place, which corrupts the running
-# image whenever $INSTALLED is the LD_PRELOADed path (this script
-# exports it below) -- the loader's mapped pages get truncated and any
-# process holding the mapping (including cp itself) takes a SIGSEGV.
+# image of any process that has it mapped -- the loader's mapped pages
+# get truncated and that process takes a SIGSEGV.
 # rename() swaps the directory entry to a fresh inode and leaves the
 # old mapped inode intact, so in-flight mappings stay valid.
 cp -f "$TARGET" "$INSTALLED.tmp.$$"
 mv -f "$INSTALLED.tmp.$$" "$INSTALLED"
 echo "Installed: $INSTALLED"
-
-# ── Keep the library mapped on Linux so ASAP-destroyed OwnedDLHandles ────────
-# don't tear it down under the JIT's feet (see the long comment at the top
-# of this file). Always LD_PRELOAD the same path Mojo dlopens: $INSTALLED.
-if [[ "$(uname)" != "Darwin" ]]; then
-    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
-fi

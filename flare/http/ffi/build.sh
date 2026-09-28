@@ -14,16 +14,13 @@
 # Mojo's _find_flare_zlib_lib resolves via CONDA_PREFIX, so anything pixi
 # launches finds it automatically without env-var indirection.
 #
-# LD_PRELOAD on Linux: belt-and-suspenders defense for the
-# OwnedDLHandle / ASAP-destruction class of bug. The Mojo-side fix —
-# routing every FFI call through a ``_do_*(read lib: OwnedDLHandle, ...)``
-# borrow helper — is now applied at every call site (see
-# flare/http/encoding.mojo, flare/http/middleware.mojo, flare/http/fs.mojo,
-# flare/tls/stream.mojo, flare/tls/_server_ffi.mojo, flare/ws/{client,server}.mojo,
-# flare/crypto/hmac.mojo, flare/net/{socket,_libc}.mojo, flare/tcp/stream.mojo).
-# LD_PRELOAD pins the .so refcount above zero so even a hypothetical
-# regression to the naive pattern cannot dlclose the library mid-call.
-# See the sibling flare/tls/ffi/build.sh for the full rationale.
+# The libraries are linked with ``-z nodelete`` on Linux, for the reason
+# flare/tls/ffi/build.sh gives; they used to be pushed into LD_PRELOAD.
+# A failed build removes the installed copy and says so on stderr.
+#
+# Each of the three libraries is checked on its own. The zlib check used
+# to return from the script when zlib was up to date, so a change to
+# brotli_wrapper.c or fs_wrapper.c was never rebuilt.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/../../../build"
@@ -51,22 +48,17 @@ _needs_rebuild() {
     return 1
 }
 
-_install_preloads() {
-    # Add every flare-built FFI shim into LD_PRELOAD on Linux so that
-    # ASAP-destroyed OwnedDLHandles don't dlclose them under the JIT.
-    if [[ "$(uname)" == "Darwin" ]]; then
-        return 0
-    fi
-    [ -f "$INSTALLED" ] && export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
-    [ -f "$BROTLI_INSTALLED" ] && export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${BROTLI_INSTALLED}"
-    [ -f "$CONDA_PREFIX/lib/libflare_fs.so" ] && export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${CONDA_PREFIX}/lib/libflare_fs.so"
-}
+NODELETE=""
+[[ "$(uname)" != "Darwin" ]] && NODELETE="-Wl,-z,nodelete"
 
-if ! _needs_rebuild; then
-    _install_preloads
-    return 0 2>/dev/null || true
+# Use clang on macOS, gcc on Linux
+if [[ "$(uname)" == "Darwin" ]]; then
+    CC="clang"
+else
+    CC="gcc"
 fi
 
+if _needs_rebuild; then
 # ── Build ────────────────────────────────────────────────────────────────────
 echo "========================================"
 echo "Building flare zlib FFI wrapper"
@@ -86,13 +78,6 @@ fi
 
 mkdir -p "$BUILD_DIR"
 
-# Use clang on macOS, gcc on Linux
-if [[ "$(uname)" == "Darwin" ]]; then
-    CC="clang"
-else
-    CC="gcc"
-fi
-
 echo "Building libflare_zlib.so..."
 
 if $CC -O2 -fPIC -shared \
@@ -101,13 +86,15 @@ if $CC -O2 -fPIC -shared \
     -I"$CONDA_PREFIX/include" \
     -L"$CONDA_PREFIX/lib" \
     -lz \
+    $NODELETE \
     -Wl,-rpath,"$CONDA_PREFIX/lib"; then
     echo ""
     echo "Build complete!"
     echo "Library: $TARGET"
     ls -la "$TARGET"
 else
-    echo "Build failed!"
+    echo "ERROR: libflare_zlib.so failed to build; removed the stale copy" >&2
+    rm -f "$TARGET" "$INSTALLED"
     return 1 2>/dev/null || true
 fi
 
@@ -115,11 +102,7 @@ fi
 mkdir -p "$CONDA_PREFIX/lib"
 cp "$TARGET" "$INSTALLED"
 echo "Installed: $INSTALLED"
-
-# ── Keep the library mapped on Linux (same reasoning as flare/tls/ffi/build.sh) ──
-if [[ "$(uname)" != "Darwin" ]]; then
-    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${INSTALLED}"
-fi
+fi  # _needs_rebuild (zlib)
 
 # ── flare brotli FFI wrapper ────────────────────────────────────────────────
 # Build is conditional on libbrotli being present; flare's [dependencies]
@@ -144,11 +127,13 @@ if [ -f "$CONDA_PREFIX/lib/libbrotlienc.so" ] \
             "$BROTLI_SOURCE" \
             -L"$CONDA_PREFIX/lib" \
             -lbrotlienc -lbrotlidec -lbrotlicommon \
+            $NODELETE \
             -Wl,-rpath,"$CONDA_PREFIX/lib"; then
             cp "$BROTLI_TARGET" "$BROTLI_INSTALLED"
             echo "Installed: $BROTLI_INSTALLED"
         else
-            echo "Brotli build failed (continuing without br codec)"
+            echo "ERROR: libflare_brotli.so failed to build; removed the stale copy (continuing without br)" >&2
+            rm -f "$BROTLI_TARGET" "$BROTLI_INSTALLED"
         fi
     fi
 else
@@ -174,13 +159,13 @@ if _fs_needs_rebuild; then
     echo "Building libflare_fs.so..."
     if $CC -O2 -fPIC -shared \
         -o "$FS_TARGET" \
-        "$FS_SOURCE"; then
+        "$FS_SOURCE" \
+        $NODELETE; then
         cp "$FS_TARGET" "$FS_INSTALLED"
         echo "Installed: $FS_INSTALLED"
     else
-        echo "fs wrapper build failed!"
+        echo "ERROR: libflare_fs.so failed to build; removed the stale copy" >&2
+        rm -f "$FS_TARGET" "$FS_INSTALLED"
         return 1 2>/dev/null || true
     fi
 fi
-
-_install_preloads
