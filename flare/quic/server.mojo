@@ -88,6 +88,7 @@ from .varint import decode_varint, encode_varint
 from .state import (
     Connection,
     ConnectionEvents,
+    connection_close,
     empty_events,
 )
 from ..http3.server import Http3Connection
@@ -140,6 +141,7 @@ from ._server_0rtt import (
 )
 from ._server_migration import MigrationProbe, new_path_challenge
 from ._server_support import (
+    QUIC_CRYPTO_BUFFER_EXCEEDED,
     _ACK_MAX_RANGES,
     _CryptoReasm,
     _CryptoStream,
@@ -164,10 +166,6 @@ from ._server_types import (
 )
 
 
-# Flow-control grant windows kept ahead of consumption so the peer
-# never blocks mid-run (RFC 9000 sec 19.9 / 19.11). 64 MiB of
-# connection credit and 4096 extra bidi streams comfortably cover a
-# 30 s h2load run at the documented HTTP/3 rate.
 comptime _MIN_INITIAL_DATAGRAM: Int = 1200
 """RFC 9000 sec 14.1: a server discards an Initial carried in a datagram
 smaller than this. The floor is what keeps the 3x anti-amplification
@@ -180,6 +178,10 @@ comptime _LONG_PACKET_OVERHEAD: Int = 80
 header with two 20-byte CIDs, length and packet-number fields, frame
 header, AEAD tag."""
 
+# Flow-control grant windows kept ahead of consumption so the peer
+# never blocks mid-run (RFC 9000 sec 19.9 / 19.11). 64 MiB of
+# connection credit and 4096 extra bidi streams comfortably cover a
+# 30 s h2load run at the documented HTTP/3 rate.
 comptime _MAX_DATA_WINDOW: UInt64 = 64 * 1024 * 1024
 comptime _MAX_STREAMS_BIDI_WINDOW: UInt64 = 4096
 
@@ -1197,11 +1199,20 @@ struct QuicListener(Movable):
             and inbound_lvl < 4
         ):
             ref reasm = self.crypto_reasm[slot]
-            for i in range(len(events.crypto_frames)):
-                reasm.levels[inbound_lvl].insert(
-                    events.crypto_frames[i].offset,
-                    events.crypto_frames[i].data,
+            try:
+                for i in range(len(events.crypto_frames)):
+                    reasm.levels[inbound_lvl].insert(
+                        events.crypto_frames[i].offset,
+                        events.crypto_frames[i].data,
+                    )
+            except:
+                connection_close(
+                    self.connections[slot].conn,
+                    QUIC_CRYPTO_BUFFER_EXCEEDED,
+                    "CRYPTO data too far ahead of the handshake",
                 )
+                self.connections[slot].alive = False
+                return
             var ordered = reasm.levels[inbound_lvl].drain_contiguous()
             if len(ordered) > 0:
                 _ = _do_feed_crypto(

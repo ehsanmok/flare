@@ -991,6 +991,8 @@ struct QuicClientConnection(Movable):
         queues, and flip the per-level key-readiness flags once
         rustls installs Handshake / 1-RTT keys."""
         if 0 <= inbound_lvl < 4 and len(events.crypto_frames) > 0:
+            # Raises CRYPTO_BUFFER_EXCEEDED past the reassembly window,
+            # which ends the connection attempt.
             for i in range(len(events.crypto_frames)):
                 self.reasm.levels[inbound_lvl].insert(
                     events.crypto_frames[i].offset,

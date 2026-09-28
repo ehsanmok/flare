@@ -320,6 +320,14 @@ struct _SessionSlot(Copyable):
     treats 0 as the silent-drop path per RFC 9001 §5.2."""
 
 
+comptime CRYPTO_REASM_WINDOW: Int = 65536
+"""Most CRYPTO bytes buffered ahead of the contiguous prefix, per level.
+A TLS 1.3 flight with a long certificate chain fits comfortably."""
+comptime CRYPTO_REASM_MAX_FRAGMENTS: Int = 256
+"""Most out-of-order CRYPTO fragments held at once, per level."""
+comptime QUIC_CRYPTO_BUFFER_EXCEEDED: UInt64 = 0x0D
+
+
 struct _CryptoStream(Copyable, Defaultable):
     """Per-level inbound CRYPTO reassembly buffer.
 
@@ -335,16 +343,39 @@ struct _CryptoStream(Copyable, Defaultable):
     var expected: UInt64
     var frag_offsets: List[UInt64]
     var frag_data: List[List[UInt8]]
+    var buffered: Int
+    """Bytes held in out-of-order fragments."""
 
     def __init__(out self):
         self.expected = UInt64(0)
         self.frag_offsets = List[UInt64]()
         self.frag_data = List[List[UInt8]]()
+        self.buffered = 0
 
-    def insert(mut self, offset: UInt64, data: List[UInt8]):
-        """Buffer one CRYPTO fragment for later contiguous drain."""
+    def insert(mut self, offset: UInt64, data: List[UInt8]) raises:
+        """Buffer one CRYPTO fragment for later contiguous drain.
+
+        Raises ``CRYPTO_BUFFER_EXCEEDED`` (RFC 9000 sec 20.1) for a
+        fragment that ends more than :data:`CRYPTO_REASM_WINDOW` bytes
+        past the contiguous prefix, or once that many bytes or
+        :data:`CRYPTO_REASM_MAX_FRAGMENTS` fragments are held. Any offset
+        used to be buffered, and the drain rescans every fragment per
+        step, so an unauthenticated peer could grow both memory and CPU
+        without limit before any handshake. A fragment wholly below the
+        prefix (a retransmit) is dropped without being stored.
+        """
+        var end = offset + UInt64(len(data))
+        if end <= self.expected:
+            return
+        if (
+            end > self.expected + UInt64(CRYPTO_REASM_WINDOW)
+            or self.buffered + len(data) > CRYPTO_REASM_WINDOW
+            or len(self.frag_offsets) >= CRYPTO_REASM_MAX_FRAGMENTS
+        ):
+            raise Error("QUIC CRYPTO_BUFFER_EXCEEDED")
         self.frag_offsets.append(offset)
         self.frag_data.append(data.copy())
+        self.buffered += len(data)
 
     def drain_contiguous(mut self) -> List[UInt8]:
         """Pop and concatenate every buffered fragment that
@@ -373,6 +404,7 @@ struct _CryptoStream(Copyable, Defaultable):
         return out^
 
     def _swap_remove(mut self, idx: Int):
+        self.buffered -= len(self.frag_data[idx])
         var last = len(self.frag_offsets) - 1
         if idx != last:
             self.frag_offsets[idx] = self.frag_offsets[last]
