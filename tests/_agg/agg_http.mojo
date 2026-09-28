@@ -3081,6 +3081,12 @@ from test_server_handler import (
 from test_server_lifecycle import (
     test_stale_idle_timer_does_not_kill_the_next_connection as test_server_lifecycle__test_stale_idle_timer_does_not_kill_the_next_connection,
 )
+from test_server_lifecycle import (
+    test_silent_connection_is_closed_by_the_idle_timer as test_server_lifecycle__test_silent_connection_is_closed_by_the_idle_timer,
+)
+from test_server_lifecycle import (
+    test_trickled_head_hits_the_request_deadline as test_server_lifecycle__test_trickled_head_hits_the_request_deadline,
+)
 from test_server_multicore import (
     test_server_bind_with_short_config as test_server_multicore__test_server_bind_with_short_config,
 )
@@ -5388,6 +5394,12 @@ def main() raises:
     # tests/http/test_server_lifecycle.mojo
     suite.test[
         test_server_lifecycle__test_stale_idle_timer_does_not_kill_the_next_connection
+    ]()
+    suite.test[
+        test_server_lifecycle__test_silent_connection_is_closed_by_the_idle_timer
+    ]()
+    suite.test[
+        test_server_lifecycle__test_trickled_head_hits_the_request_deadline
     ]()
     # tests/http/test_server_multicore.mojo
     suite.test[test_server_multicore__test_server_bind_with_short_config]()

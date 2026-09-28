@@ -110,6 +110,7 @@ from ._server_reactor_impl import (
     _monotonic_ms,
     _poll_timeout_ms,
     _accept_errno_is_retry,
+    _arm_accept_timer,
 )
 
 
@@ -648,6 +649,9 @@ def _accept_loop_unified_fd(
     listener_fd: Int,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+    idle_timeout_ms: Int,
     max_connections: Int = 0,
     tls_ctx_addr: Int = 0,
 ):
@@ -712,6 +716,8 @@ def _accept_loop_unified_fd(
                 _ = conns.pop(client_fd)
             except:
                 pass
+            continue
+        _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
 
 
 # ── Shared per-event dispatch + lifecycle helpers ──────────────────────────
@@ -1079,6 +1085,9 @@ def _run_unified_loop_for_fd[
                     listener_fd,
                     reactor,
                     conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
                     config.max_connections,
                     tls_ctx_addr,
                 )
@@ -1089,6 +1098,9 @@ def _run_unified_loop_for_fd[
                     fd,
                     reactor,
                     conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
                     config.max_connections,
                     tls_ctx_addr,
                 )
@@ -1255,7 +1267,13 @@ def run_unified_reactor_loop_multi[
             var fd = Int(evt.token)
             if fd in listener_fds:
                 _accept_loop_unified_fd(
-                    fd, reactor, conns, config.max_connections
+                    fd,
+                    reactor,
+                    conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
+                    config.max_connections,
                 )
                 continue
             if fd not in conns:

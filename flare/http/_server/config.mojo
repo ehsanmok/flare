@@ -77,7 +77,8 @@ struct ServerConfig(Copyable):
         keep_alive: Enable HTTP/1.1 keep-alive (default True).
         max_keepalive_requests: Max requests per connection before forcing close (default 100).
         idle_timeout_ms: Max ms a connection may stay idle before the
-            reactor closes it (default 500). 0 disables.
+            reactor closes it (default 500), including a connection
+            that has not sent its first byte yet. 0 disables.
         write_timeout_ms: Max ms allowed for a partial write to complete
             (default 5000). 0 disables.
         shutdown_timeout_ms: Max ms graceful shutdown waits for in-flight
@@ -92,19 +93,21 @@ struct ServerConfig(Copyable):
             last body byte (default 30_000). 0 disables. Guards the
             slow-body-upload variant of the slow-client DoS surface.
             Mirrors nginx's ``client_body_timeout``.
-        handler_timeout_ms: Max ms ``Handler.serve`` (or
-            ``CancelHandler.serve``) is allowed to run before the
-            reactor flips ``Cancel.TIMEOUT`` (default 30_000). 0
-            disables. Cooperative — the handler observes the flip on
-            its next ``cancel.cancelled()`` poll. Guards the
-            handler-watchdog variant of the slow-client DoS surface.
-        request_timeout_ms: Max ms wall-time from request line in to
-            response bytes out (default 60_000). 0 disables. The
-            reactor enforces this as the outermost deadline; the
-            other two cooperate via ``Cancel``. Must be >=
-            ``handler_timeout_ms`` and >=
-            ``read_body_timeout_ms`` (checked at compile time in
-            ``serve_comptime``).
+        handler_timeout_ms: Intended cap on ``Handler.serve`` (or
+            ``CancelHandler.serve``) wall time (default 30_000). **Not
+            enforced yet**: handlers run synchronously on the worker
+            thread and nothing flips ``Cancel.TIMEOUT`` while one is
+            running. Kept so configs that set it stay valid, and still
+            checked against ``request_timeout_ms`` by
+            ``serve_comptime``.
+        request_timeout_ms: Max ms to read one whole request, head and
+            body, from its first byte (default 60_000); the reactor
+            answers 408 and closes when it runs out. 0 disables. It
+            bounds the peer that trickles bytes just inside
+            ``idle_timeout_ms``, which re-arms on every read. It does
+            not interrupt a running handler. Must be >=
+            ``handler_timeout_ms`` and >= ``read_body_timeout_ms``
+            (checked at compile time in ``serve_comptime``).
         use_bufring: Opt into the io_uring buffer-ring single-worker
             reactor (HTTP/1.1-only, single-listener-only) on Linux
             ``>= 6.0``. When ``False`` (default), every entry point

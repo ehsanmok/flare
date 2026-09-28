@@ -260,6 +260,11 @@ struct ConnHandle(Movable):
     """The request being answered is HEAD, so its response carries a
     head and no content."""
 
+    var request_started_ms: Int
+    """Monotonic ms at which the first byte of the request being read
+    was seen; 0 between requests. Bounds the whole read phase (head and
+    body) by ``ServerConfig.request_timeout_ms``."""
+
     var tls_cross_interest: Bool
     """Set when the TLS session asked for the *opposite* readiness to
     the direction being driven -- ``SSL_read`` returning ``WANT_WRITE``
@@ -295,6 +300,7 @@ struct ConnHandle(Movable):
         self.chunk_scan_pos = 0
         self.chunk_decoded = 0
         self.head_request = False
+        self.request_started_ms = 0
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -461,6 +467,18 @@ struct ConnHandle(Movable):
         arriving; a negative value falls back to
         ``config.idle_timeout_ms``.
         """
+        # The idle timer is re-armed by every readable event, so a peer
+        # that sends one byte just inside it could keep a request open
+        # forever. request_timeout_ms is an absolute budget for reading
+        # the whole request, head and body, from its first byte.
+        if len(self.read_buf) > 0 and config.request_timeout_ms > 0:
+            var now = _monotonic_ms()
+            if self.request_started_ms == 0:
+                self.request_started_ms = now
+            elif now - self.request_started_ms > config.request_timeout_ms:
+                self.request_started_ms = 0
+                self._queue_error(408, "Request Timeout")
+                return Optional[StepResult](self._transition_to_writing())
         if self.headers_end < 0:
             self.head_request = False
             var end = _find_crlfcrlf(self.read_buf, 0)
@@ -544,6 +562,8 @@ struct ConnHandle(Movable):
                     idle_timeout_ms=timeout,
                 )
             )
+        # Complete: the next request's clock starts at its first byte.
+        self.request_started_ms = 0
         return Optional[StepResult]()
 
     @always_inline

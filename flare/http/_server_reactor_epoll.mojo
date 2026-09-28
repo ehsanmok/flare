@@ -234,10 +234,34 @@ def _accept_errno_is_retry(ev: Int) -> Bool:
     return ev == _ECONNABORTED_LINUX or ev == _ECONNABORTED_MACOS
 
 
+def _arm_accept_timer(
+    client_fd: Int,
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+    idle_timeout_ms: Int,
+):
+    """Arm the idle timer for a connection that has just been accepted.
+
+    Timers used to be armed only by the first readable event, so a
+    connection that never sent a byte was never timed out: enough of
+    them exhaust the fd table and the worker stops accepting. Shared by
+    every accept loop, HTTP/1.1 and unified.
+    """
+    if idle_timeout_ms <= 0:
+        return
+    try:
+        timers[client_fd] = wheel.schedule(idle_timeout_ms, UInt64(client_fd))
+    except:
+        pass
+
+
 def _accept_loop(
     mut listener: TcpListener,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+    idle_timeout_ms: Int,
     max_connections: Int = 0,
 ):
     """Accept every connection available on ``listener`` (until EAGAIN).
@@ -282,12 +306,17 @@ def _accept_loop(
                 _ = conns.pop(client_fd)
             except:
                 pass
+            continue
+        _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
 
 
 def _accept_loop_fd(
     listener_fd: Int,
     mut reactor: Reactor,
     mut conns: Dict[Int, Int],
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+    idle_timeout_ms: Int,
     max_connections: Int = 0,
 ):
     """Accept every available connection on a *borrowed* listener fd.
@@ -333,6 +362,8 @@ def _accept_loop_fd(
                 _ = conns.pop(client_fd)
             except:
                 pass
+            continue
+        _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
 
 
 def _run_handler_loop_impl[
@@ -411,7 +442,13 @@ def _run_handler_loop_impl[
                 continue
             if evt.token == UInt64(0):
                 _accept_loop_fd(
-                    listener_fd, reactor, conns, config.max_connections
+                    listener_fd,
+                    reactor,
+                    conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
+                    config.max_connections,
                 )
                 continue
             var fd = Int(evt.token)
@@ -611,7 +648,13 @@ def _run_static_loop_impl[
                 continue
             if evt.token == UInt64(0):
                 _accept_loop_fd(
-                    listener_fd, reactor, conns, config.max_connections
+                    listener_fd,
+                    reactor,
+                    conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
+                    config.max_connections,
                 )
                 continue
             var fd = Int(evt.token)
@@ -807,7 +850,15 @@ def run_reactor_loop_cancel[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop(listener, reactor, conns, config.max_connections)
+                _accept_loop(
+                    listener,
+                    reactor,
+                    conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
+                    config.max_connections,
+                )
                 continue
             var fd = Int(evt.token)
             if fd not in conns:
@@ -929,7 +980,15 @@ def run_reactor_loop_view[
             if evt.is_wakeup():
                 continue
             if evt.token == UInt64(0):
-                _accept_loop(listener, reactor, conns, config.max_connections)
+                _accept_loop(
+                    listener,
+                    reactor,
+                    conns,
+                    wheel,
+                    timers,
+                    config.idle_timeout_ms,
+                    config.max_connections,
+                )
                 continue
             var fd = Int(evt.token)
             if fd not in conns:

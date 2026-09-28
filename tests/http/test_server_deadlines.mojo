@@ -19,17 +19,14 @@ non-zero:
   end-to-end on the cancel-aware reactor path
   (``HttpServer.serve_cancellable``).
 
-- ``handler_timeout_ms`` — handler wall time. The reactor flips
-  ``Cancel.TIMEOUT`` cooperatively when the deadline fires; the
-  handler observes the flip on its next ``cancel.cancelled()``
-  poll. The cooperative observation point is wired here; the
-  multi-threaded "external thread flips the cell" enforcement
-  needs the drain coordination that lands in commit 6.
+- ``handler_timeout_ms`` — handler wall time. Not enforced yet:
+  handlers run synchronously on the worker thread and nothing flips
+  ``Cancel.TIMEOUT`` while one runs. The field and its comptime
+  bound are what is tested here.
 
-- ``request_timeout_ms`` — outermost wall-time deadline. Same
-  story as ``handler_timeout_ms``: the field exists and the
-  comptime asserts enforce it bounds the inner deadlines; the
-  reactor enforcement lands in commit 6.
+- ``request_timeout_ms`` — the reactor answers 408 when reading one
+  request, head and body, takes longer than this from its first
+  byte. End-to-end coverage is in ``test_server_lifecycle.mojo``.
 
 Comptime asserts on these fields are tested via
 ``serve_comptime[handler, config]()`` (a server can't be built

@@ -163,6 +163,53 @@ def test_stale_idle_timer_does_not_kill_the_next_connection() raises:
     assert_true("hi /b" in got, "B was closed by A's stale timer: " + got)
 
 
+# ── Connections that send nothing, or almost nothing ───────────────────────
+
+
+def test_silent_connection_is_closed_by_the_idle_timer() raises:
+    var srv = _spawn(ServerConfig())
+    var closed = False
+    try:
+        var c = _connect_loopback(srv[1])
+        # Send nothing. The 500 ms idle timer is armed at accept, so the
+        # server closes well inside the client's 2 s receive timeout:
+        # recv returns 0 (EOF) rather than -1 (timed out).
+        var buf = stack_allocation[64, UInt8]()
+        var n = _recv(c, buf, c_size_t(64), c_int(0))
+        closed = Int(n) == 0
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true(closed, "a connection that never sent a byte stayed open")
+
+
+def test_trickled_head_hits_the_request_deadline() raises:
+    var srv = _spawn(
+        ServerConfig(
+            idle_timeout_ms=500,
+            request_timeout_ms=1200,
+            handler_timeout_ms=0,
+            read_body_timeout_ms=0,
+        )
+    )
+    var got = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        _send_str(c, "GET /slow HTTP/1.1\r\n")
+        # One header line every 300 ms: inside the idle timeout every
+        # time, but the whole head never completes.
+        for i in range(8):
+            usleep(300000)
+            _send_str(c, "X-" + String(i) + ": v\r\n")
+        got = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true("HTTP/1.1 408" in got, "trickled head was not cut off: " + got)
+
+
 def main() raises:
     print("=" * 60)
     print("test_server_lifecycle.mojo — reactor connection lifecycle")

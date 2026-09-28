@@ -593,8 +593,18 @@ request id but never echoed to the client. See
 
 `ServerConfig` defaults (override per-server): `max_header_size` (8192 B),
 `max_body_size` (10 MiB), `max_keepalive_requests` (100), `idle_timeout_ms`
-(500), `read_body_timeout_ms` (30_000), plus `request_timeout_ms` /
-`handler_timeout_ms`.
+(500), `read_body_timeout_ms` (30_000), `request_timeout_ms` (60_000),
+and `handler_timeout_ms`.
+
+**Changed in v0.11 (breaking).** `idle_timeout_ms` now also applies to
+a connection that has not sent its first byte: it is armed at accept,
+where before a silent connection was never timed out. `request_timeout_ms`
+is enforced: reading one request, head and body, may take at most that
+long from its first byte, and the answer to a peer that trickles bytes
+just inside the idle timeout is a 408. `handler_timeout_ms` is still not
+enforced -- handlers run synchronously on the worker thread -- and its
+docstring now says so. The streaming (`serve_streaming`) and io_uring
+loops are unchanged.
 
 WebSocket on the same port: set `ServerConfig.ws` to a
 `WsUpgrade(ws_fn)` and any request that arrives with a valid RFC 6455
