@@ -28,7 +28,7 @@ Coverage:
 from std.testing import assert_equal, assert_true, assert_false
 
 from flare.runtime.io_uring import is_io_uring_available
-from flare.runtime.io_uring_driver import IoUringDriver
+from flare.runtime.io_uring_driver import IoUringDriver, _ring_distance
 
 
 # ── Smoke ─────────────────────────────────────────────────────────────────────
@@ -176,7 +176,20 @@ def test_next_sqe_advances_sequentially() raises:
 # ── Test runner ───────────────────────────────────────────────────────────────
 
 
+def test_ring_distance_wraps_at_2_pow_32() raises:
+    """Ring indices are free-running u32 counters. Taking the distance
+    in Int broke at the wrap: tail 3, head 2^32 - 2 read as about
+    -4.29e9 instead of 5. Pure arithmetic, so it runs on every host."""
+    var near = UInt32(0xFFFF_FFFE)
+    assert_equal(_ring_distance(UInt32(3), near), 5)
+    assert_equal(_ring_distance(near, near), 0)
+    assert_equal(_ring_distance(near + UInt32(8), near), 8)
+    assert_equal(_ring_distance(UInt32(10), UInt32(4)), 6)
+
+
 def main() raises:
+    test_ring_distance_wraps_at_2_pow_32()
+    print("    PASS test_ring_distance_wraps_at_2_pow_32")
     if not is_io_uring_available():
         print(
             "test_io_uring_driver: io_uring not available on host;"

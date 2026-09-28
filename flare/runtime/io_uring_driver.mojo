@@ -294,6 +294,19 @@ comptime _CQ_OFF_CQES_OFF: Int = 100  # u32
 # ── IoUringDriver ────────────────────────────────────────────────────────────
 
 
+def _ring_distance(tail: UInt32, head: UInt32) -> Int:
+    """Entries between ``head`` and ``tail`` on an io_uring ring.
+
+    The kernel's ring indices are free-running ``u32`` counters that
+    wrap at 2^32, so the distance has to be taken in wrapping ``UInt32``
+    arithmetic. Widening both to ``Int`` first gave a huge negative
+    number once the tail had wrapped and the head had not: the SQ read
+    as never full (slots were handed out over live SQEs) and
+    ``submit_and_wait`` submitted nothing, for good.
+    """
+    return Int(tail - head)
+
+
 struct IoUringDriver(Movable):
     """High-level driver for one io_uring ring (one fd, one
     SQ/CQ pair, one SQE array).
@@ -537,7 +550,7 @@ struct IoUringDriver(Movable):
         """
         # SQ-full check: cached_tail - kernel_head must be < sq_entries.
         var k_head = _atomic_load_u32_acquire(self._sq_head_ptr)
-        var pending = Int(self._sq_local_tail) - Int(k_head)
+        var pending = _ring_distance(self._sq_local_tail, k_head)
         if pending >= self.sq_entries():
             # Pointer is non-nullable; C NULL from a runtime 0.
             var null_addr = 0
@@ -584,7 +597,7 @@ struct IoUringDriver(Movable):
         # release-store the new tail so the kernel sees the
         # SQEs we wrote.
         var k_tail = _atomic_load_u32_relaxed(self._sq_tail_ptr)
-        var to_submit = Int(self._sq_local_tail) - Int(k_tail)
+        var to_submit = _ring_distance(self._sq_local_tail, k_tail)
         if to_submit > 0:
             _atomic_store_u32_release(self._sq_tail_ptr, self._sq_local_tail)
         # IORING_ENTER_GETEVENTS = 0x1. Always set, even for
@@ -608,7 +621,7 @@ struct IoUringDriver(Movable):
         tail - userspace head)."""
         var k_tail = _atomic_load_u32_acquire(self._cq_tail_ptr)
         var u_head = _atomic_load_u32_relaxed(self._cq_head_ptr)
-        return Int(k_tail) - Int(u_head)
+        return _ring_distance(k_tail, u_head)
 
     def reap_cqe(mut self) -> Optional[IoUringCqe]:
         """Return the next pending CQE, or ``None`` if the CQ

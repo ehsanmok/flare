@@ -174,6 +174,9 @@ from test_io_uring_driver import (
 from test_io_uring_driver import (
     test_next_sqe_advances_sequentially as test_io_uring_driver__test_next_sqe_advances_sequentially,
 )
+from test_io_uring_driver import (
+    test_ring_distance_wraps_at_2_pow_32 as test_io_uring_driver__test_ring_distance_wraps_at_2_pow_32,
+)
 from test_io_uring_multishot_accept import (
     test_multishot_accept_round_trip as test_io_uring_multishot_accept__test_multishot_accept_round_trip,
 )
@@ -714,6 +717,7 @@ def main() raises:
     ]()
     suite.test[test_io_uring_driver__test_reap_cqe_drains_then_returns_none]()
     suite.test[test_io_uring_driver__test_next_sqe_advances_sequentially]()
+    suite.test[test_io_uring_driver__test_ring_distance_wraps_at_2_pow_32]()
     # tests/runtime/test_io_uring_multishot_accept.mojo
     suite.test[
         test_io_uring_multishot_accept__test_multishot_accept_round_trip
