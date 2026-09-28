@@ -63,6 +63,11 @@ def _octets_to_string(b: Span[UInt8, _]) -> String:
     return ascii_unchecked_string(b)
 
 
+comptime HPACK_BUDGET_ERROR: String = (
+    "hpack: header block exceeds decode budget"
+)
+
+
 struct StringPair(Copyable, Defaultable):
     """Tuple of (string, new_offset)."""
 
@@ -347,12 +352,36 @@ struct HpackDecoder(Copyable, Defaultable):
             )
         return StringPair(_octets_to_string(buf[off : off + slen]), off + slen)
 
-    def decode(mut self, buf: Span[UInt8, _]) raises -> List[HpackHeader]:
-        """Decode a HEADERS / CONTINUATION block into header pairs."""
+    def decode(
+        mut self, buf: Span[UInt8, _], budget: Int = 0
+    ) raises -> List[HpackHeader]:
+        """Decode a HEADERS / CONTINUATION block into header pairs.
+
+        Args:
+            buf: The complete header block.
+            budget: When positive, the most decoded bytes (RFC 7541
+                entry size: name + value + 32, summed) the block may
+                expand to. Past it decoding stops with
+                ``HPACK_BUDGET_ERROR``. A one-byte indexed field can name
+                a 4 KiB table entry, so 16 KiB of block is 64 MiB of
+                headers; checking the size only after a full decode let
+                that be allocated first. Stopping midway leaves the
+                dynamic table out of step with the peer, so the caller
+                must end the connection.
+        """
         var static = _static_table()
         var headers = List[HpackHeader]()
         var off = 0
+        var decoded = 0
         while off < len(buf):
+            if budget > 0 and len(headers) > 0:
+                decoded += (
+                    headers[len(headers) - 1].name.byte_length()
+                    + headers[len(headers) - 1].value.byte_length()
+                    + 32
+                )
+                if decoded > budget:
+                    raise Error(HPACK_BUDGET_ERROR)
             var b0 = Int(buf[off])
             if (b0 & 0x80) != 0:
                 # 6.1 Indexed Header Field

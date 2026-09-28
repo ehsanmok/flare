@@ -45,7 +45,12 @@ from .frame import (
     H2_DEFAULT_FRAME_SIZE,
     encode_frame,
 )
-from .hpack import HpackDecoder, HpackEncoder, HpackHeader
+from .hpack import (
+    HPACK_BUDGET_ERROR,
+    HpackDecoder,
+    HpackEncoder,
+    HpackHeader,
+)
 from .stream_slab import StreamSlab
 
 
@@ -483,6 +488,15 @@ struct Connection(Copyable, Defaultable):
             return self.max_header_list_size
         return _DEFAULT_HARD_HEADER_CAP
 
+    def _header_block_ceiling(self) -> Int:
+        """Hard ceiling on a header block, both as raw bytes accumulated
+        across CONTINUATION frames and as decoded list size. Lists
+        between the negotiated cap and this ceiling are decoded in full
+        and refused with RST_STREAM, which keeps HPACK in step; past it
+        the connection is closed."""
+        var c = self._header_list_cap() * 4
+        return c if c > 262144 else 262144
+
     def _rst_stream_frame(self, sid: Int, error_code: Int) -> Frame:
         """Build a RST_STREAM frame (RFC 9113 6.4)."""
         var f = Frame()
@@ -711,8 +725,16 @@ struct Connection(Copyable, Defaultable):
 
         var hdrs: List[HpackHeader]
         try:
-            hdrs = self.hpack_decoder.decode(Span[UInt8, _](block))
-        except:
+            hdrs = self.hpack_decoder.decode(
+                Span[UInt8, _](block), self._header_block_ceiling()
+            )
+        except e:
+            # A block expanding past the ceiling is a decode bomb, and
+            # the decode stopped midway: the table is out of step.
+            if HPACK_BUDGET_ERROR in String(e):
+                return self._conn_error(
+                    Http2ErrorCode.ENHANCE_YOUR_CALM().value
+                )
             # sec 4.3: the HPACK context is connection-wide, so a
             # decode failure poisons every later block.
             return self._conn_error(Http2ErrorCode.COMPRESSION_ERROR().value)
@@ -933,13 +955,21 @@ struct Connection(Copyable, Defaultable):
                     Http2ErrorCode.ENHANCE_YOUR_CALM().value
                 )
             self._put_stream(cs^)
-            var cfrag: List[UInt8]
-            try:
-                cfrag = self._strip_pad_and_priority(f, False)
-            except:
-                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
-            for i in range(len(cfrag)):
-                self.header_block.append(cfrag[i])
+            # This branch returns before the frame-size check below, so
+            # each CONTINUATION was accepted at up to 16 MiB: 64 of them
+            # buffered a gigabyte. It also stripped padding, a flag
+            # CONTINUATION does not have (RFC 9113 sec 6.10).
+            if plen > self.local_max_frame_size:
+                self.continuing_stream = 0
+                self.header_block = List[UInt8]()
+                return self._conn_error(Http2ErrorCode.FRAME_SIZE_ERROR().value)
+            if len(self.header_block) + plen > self._header_block_ceiling():
+                self.continuing_stream = 0
+                self.header_block = List[UInt8]()
+                return self._conn_error(
+                    Http2ErrorCode.ENHANCE_YOUR_CALM().value
+                )
+            self.header_block.extend(Span[UInt8, _](f.payload))
             if not f.header.flags.has(FrameFlags.END_HEADERS()):
                 return out^
             self.continuing_stream = 0

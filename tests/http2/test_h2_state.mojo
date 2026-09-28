@@ -298,6 +298,63 @@ def test_priority_accepted_and_ignored() raises:
     assert_equal(len(out), 0)
 
 
+def _goaway_code(frames: List[Frame]) -> Int:
+    for j in range(len(frames)):
+        if Int(frames[j].header.type.value) == 0x7:
+            return Int(frames[j].payload[7])
+    return -1
+
+
+def test_hpack_decode_bomb_is_stopped_before_it_expands() raises:
+    """One ~4 KiB literal indexed into the dynamic table, then thousands
+    of one-byte references to it: 16 KiB of block, ~40 MiB of headers.
+    The list-size cap used to be checked only after the whole list had
+    been allocated."""
+    var c = Connection()
+    var b = List[UInt8]()
+    b.append(UInt8(0x40))  # literal w/ incremental indexing, new name
+    b.append(UInt8(0x01))
+    b.append(UInt8(ord("x")))
+    # value length 4000: 0x7F then 4000-127 = 3873 as 7-bit varint
+    b.append(UInt8(0x7F))
+    var rest = 4000 - 127
+    while rest >= 128:
+        b.append(UInt8((rest % 128) + 128))
+        rest //= 128
+    b.append(UInt8(rest))
+    for _ in range(4000):
+        b.append(UInt8(ord("v")))
+    for _ in range(10000):
+        b.append(UInt8(0xBE))  # indexed: dynamic entry 62
+    var hf = Frame()
+    hf.header.type = FrameType.HEADERS()
+    hf.header.stream_id = 1
+    hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+    hf.payload = b^
+    var out = c.handle_frame(hf^)
+    assert_equal(_goaway_code(out), 0xB)  # ENHANCE_YOUR_CALM
+
+
+def test_oversized_continuation_frame_is_a_frame_size_error() raises:
+    var c = Connection()
+    var hf = Frame()
+    hf.header.type = FrameType.HEADERS()
+    hf.header.stream_id = 1
+    hf.header.flags = FrameFlags(UInt8(0))
+    hf.payload = List[UInt8]()
+    hf.payload.append(UInt8(0x82))  # :method GET
+    _ = c.handle_frame(hf^)
+    var cf = Frame()
+    cf.header.type = FrameType.CONTINUATION()
+    cf.header.stream_id = 1
+    cf.header.flags = FrameFlags(UInt8(0))
+    cf.payload = List[UInt8](
+        length=c.local_max_frame_size + 1, fill=UInt8(0x82)
+    )
+    var out = c.handle_frame(cf^)
+    assert_equal(_goaway_code(out), 0x6)  # FRAME_SIZE_ERROR
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -313,4 +370,6 @@ def main() raises:
     test_continuation_flood_rsts()
     test_rst_flood_triggers_goaway()
     test_priority_accepted_and_ignored()
-    print("test_h2_state: 14 passed")
+    test_hpack_decode_bomb_is_stopped_before_it_expands()
+    test_oversized_continuation_frame_is_a_frame_size_error()
+    print("test_h2_state: 16 passed")

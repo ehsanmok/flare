@@ -306,6 +306,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_priority_accepted_and_ignored as test_h2_state__test_priority_accepted_and_ignored,
 )
+from test_h2_state import (
+    test_hpack_decode_bomb_is_stopped_before_it_expands as test_h2_state__test_hpack_decode_bomb_is_stopped_before_it_expands,
+)
+from test_h2_state import (
+    test_oversized_continuation_frame_is_a_frame_size_error as test_h2_state__test_oversized_continuation_frame_is_a_frame_size_error,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -540,6 +546,12 @@ def main() raises:
     suite.test[test_h2_state__test_continuation_flood_rsts]()
     suite.test[test_h2_state__test_rst_flood_triggers_goaway]()
     suite.test[test_h2_state__test_priority_accepted_and_ignored]()
+    suite.test[
+        test_h2_state__test_hpack_decode_bomb_is_stopped_before_it_expands
+    ]()
+    suite.test[
+        test_h2_state__test_oversized_continuation_frame_is_a_frame_size_error
+    ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains
