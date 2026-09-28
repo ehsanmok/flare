@@ -28,6 +28,8 @@ from flare.http import (
     ok,
     Peer,
     Extracted,
+    ComptimeRoute,
+    ComptimeRouter,
 )
 from flare.http.server import _parse_http_request_bytes
 from flare.net import IpAddr, SocketAddr
@@ -156,6 +158,70 @@ def test_server_observes_kernel_peer_port() raises:
     server_stream.close()
     client.close()
     srv.close()
+
+
+# ── Routers carry the peer (and expose_errors) through to the handler ──────
+
+
+def _peer_echo(req: Request) raises -> Response:
+    return ok(
+        String(req.peer.ip)
+        + ":"
+        + String(req.peer.port)
+        + " expose="
+        + String(req.expose_errors)
+    )
+
+
+def _client_req(url: String) -> Request:
+    return Request(
+        method="GET",
+        url=url,
+        peer=SocketAddr(IpAddr("203.0.113.9", False), UInt16(4242)),
+        expose_errors=True,
+    )
+
+
+def test_router_passes_the_peer_to_the_handler() raises:
+    """Router used to rebuild the request without ``peer``, so every
+    handler behind it saw 127.0.0.1:0 -- and "loopback only" admin
+    routes let the whole internet in."""
+    from flare.http import Router
+
+    var r = Router()
+    r.get("/p", _peer_echo)
+    var resp = r.serve(_client_req("/p"))
+    assert_equal(resp.text(), "203.0.113.9:4242 expose=True")
+
+
+def test_router_passes_the_peer_through_a_param_route_and_a_mount() raises:
+    from flare.http import Router
+
+    var r = Router()
+    r.get("/u/:id", _peer_echo)
+    assert_equal(
+        r.serve(_client_req("/u/7")).text(), "203.0.113.9:4242 expose=True"
+    )
+    var sub = Router()
+    sub.get("/q", _peer_echo)
+    var outer = Router()
+    outer.mount("/api", sub^)
+    assert_equal(
+        outer.serve(_client_req("/api/q")).text(),
+        "203.0.113.9:4242 expose=True",
+    )
+
+
+comptime _PEER_ROUTES: List[ComptimeRoute] = [
+    ComptimeRoute(Method.GET, "/p/:id", _peer_echo),
+]
+
+
+def test_comptime_router_passes_the_peer_to_the_handler() raises:
+    var r = ComptimeRouter[_PEER_ROUTES]()
+    assert_equal(
+        r.serve(_client_req("/p/1")).text(), "203.0.113.9:4242 expose=True"
+    )
 
 
 def main() raises:

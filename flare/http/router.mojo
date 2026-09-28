@@ -696,6 +696,8 @@ struct Router(Copyable, Defaultable, Handler):
                 url=req.url,
                 body=req.body.copy(),
                 version=req.version,
+                peer=req.peer,
+                expose_errors=req.expose_errors,
             )
             child.headers = req.headers.copy()
             # Copy any params already on the parent (e.g. nested routers
@@ -746,6 +748,8 @@ struct Router(Copyable, Defaultable, Handler):
                     url=req.url,
                     body=req.body.copy(),
                     version=req.version,
+                    peer=req.peer,
+                    expose_errors=req.expose_errors,
                 )
                 child.headers = req.headers.copy()
                 if req.has_params():
@@ -761,6 +765,8 @@ struct Router(Copyable, Defaultable, Handler):
                 url=req.url,
                 body=req.body.copy(),
                 version=req.version,
+                peer=req.peer,
+                expose_errors=req.expose_errors,
             )
             child.headers = req.headers.copy()
             if req.has_params():
@@ -807,6 +813,8 @@ struct _MountedRouter(Copyable, Handler):
             url=rebuilt,
             body=req.body.copy(),
             version=req.version,
+            peer=req.peer,
+            expose_errors=req.expose_errors,
         )
         child.headers = req.headers.copy()
         if req.has_params():

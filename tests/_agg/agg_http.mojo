@@ -2348,6 +2348,15 @@ from test_request_peer import (
 from test_request_peer import (
     test_server_observes_kernel_peer_port as test_request_peer__test_server_observes_kernel_peer_port,
 )
+from test_request_peer import (
+    test_router_passes_the_peer_to_the_handler as test_request_peer__test_router_passes_the_peer_to_the_handler,
+)
+from test_request_peer import (
+    test_router_passes_the_peer_through_a_param_route_and_a_mount as test_request_peer__test_router_passes_the_peer_through_a_param_route_and_a_mount,
+)
+from test_request_peer import (
+    test_comptime_router_passes_the_peer_to_the_handler as test_request_peer__test_comptime_router_passes_the_peer_to_the_handler,
+)
 from test_request_view import (
     test_parse_get_no_body as test_request_view__test_parse_get_no_body,
 )
@@ -5081,6 +5090,13 @@ def main() raises:
     suite.test[test_request_peer__test_peer_extractor_default]()
     suite.test[test_request_peer__test_peer_via_extracted_handler]()
     suite.test[test_request_peer__test_server_observes_kernel_peer_port]()
+    suite.test[test_request_peer__test_router_passes_the_peer_to_the_handler]()
+    suite.test[
+        test_request_peer__test_router_passes_the_peer_through_a_param_route_and_a_mount
+    ]()
+    suite.test[
+        test_request_peer__test_comptime_router_passes_the_peer_to_the_handler
+    ]()
     # tests/http/test_request_view.mojo
     suite.test[test_request_view__test_parse_get_no_body]()
     suite.test[test_request_view__test_parse_post_with_body]()
