@@ -14,6 +14,7 @@ from std.testing import (
     assert_true,
 )
 
+from flare.http import Request, Response
 from flare.http.redirect_policy import (
     RedirectAction,
     RedirectDecision,
@@ -276,6 +277,56 @@ def test_origin_relative_location_resolves_against_base_origin() raises:
         0,
     )
     assert_equal(d.next_url, "https://api.example.com:443/new")
+
+
+# ── Caller credentials stay with the origin they were meant for ────────────
+
+
+def _bounce(req: Request) raises -> Response:
+    from flare.http import redirect
+
+    return redirect(req.headers.get("x-next"))
+
+
+def _echo_creds(req: Request) raises -> Response:
+    from flare.http import ok
+
+    return ok(
+        "cookie=["
+        + req.headers.get("cookie")
+        + "] proxy=["
+        + req.headers.get("proxy-authorization")
+        + "]"
+    )
+
+
+def test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth() raises:
+    from flare.http import HttpClient, HttpServer
+    from flare.net import SocketAddr
+    from flare.testing import fork_server, kill_forked_server
+
+    var a = HttpServer.bind(SocketAddr.localhost(0))
+    var a_port = Int(a.local_addr().port)
+    var b = HttpServer.bind(SocketAddr.localhost(0))
+    var b_port = Int(b.local_addr().port)
+    var pa = fork_server(a^, _bounce)
+    var pb = fork_server(b^, _echo_creds)
+    var got: String
+    try:
+        var req = Request(
+            method="GET", url="http://127.0.0.1:" + String(a_port) + "/"
+        )
+        req.headers.set("Cookie", "sid=secret")
+        req.headers.set("Proxy-Authorization", "Basic c2VjcmV0")
+        req.headers.set(
+            "X-Next", "http://127.0.0.1:" + String(b_port) + "/landing"
+        )
+        got = HttpClient().send(req^).text()
+    except e:
+        got = String(e)
+    kill_forked_server(pa)
+    kill_forked_server(pb)
+    assert_equal(got, "cookie=[] proxy=[]")
 
 
 def main() raises:

@@ -663,6 +663,21 @@ from test_cookie_store import (
 from test_cookie_store import (
     test_unparseable_set_cookie_ignored as test_cookie_store__test_unparseable_set_cookie_ignored,
 )
+from test_cookie_store import (
+    test_host_only_cookie_is_not_sent_to_another_host as test_cookie_store__test_host_only_cookie_is_not_sent_to_another_host,
+)
+from test_cookie_store import (
+    test_domain_cookie_covers_subdomains_only as test_cookie_store__test_domain_cookie_covers_subdomains_only,
+)
+from test_cookie_store import (
+    test_cookie_for_a_foreign_domain_is_refused as test_cookie_store__test_cookie_for_a_foreign_domain_is_refused,
+)
+from test_cookie_store import (
+    test_secure_cookie_needs_https_both_ways as test_cookie_store__test_secure_cookie_needs_https_both_ways,
+)
+from test_cookie_store import (
+    test_path_scoping as test_cookie_store__test_path_scoping,
+)
 from test_cors import (
     test_permissive_config as test_cors__test_permissive_config,
 )
@@ -2245,6 +2260,9 @@ from test_redirect_policy import (
 )
 from test_redirect_policy import (
     test_origin_relative_location_resolves_against_base_origin as test_redirect_policy__test_origin_relative_location_resolves_against_base_origin,
+)
+from test_redirect_policy import (
+    test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth as test_redirect_policy__test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth,
 )
 from test_reliability import (
     test_retry_succeeds_on_first_attempt as test_reliability__test_retry_succeeds_on_first_attempt,
@@ -4426,6 +4444,13 @@ def main() raises:
     suite.test[test_cookie_store__test_max_age_zero_deletes]()
     suite.test[test_cookie_store__test_overwrite_same_name]()
     suite.test[test_cookie_store__test_unparseable_set_cookie_ignored]()
+    suite.test[
+        test_cookie_store__test_host_only_cookie_is_not_sent_to_another_host
+    ]()
+    suite.test[test_cookie_store__test_domain_cookie_covers_subdomains_only]()
+    suite.test[test_cookie_store__test_cookie_for_a_foreign_domain_is_refused]()
+    suite.test[test_cookie_store__test_secure_cookie_needs_https_both_ways]()
+    suite.test[test_cookie_store__test_path_scoping]()
     # tests/http/test_cors.mojo
     suite.test[test_cors__test_permissive_config]()
     suite.test[test_cors__test_simple_request_attaches_origin]()
@@ -5182,6 +5207,9 @@ def main() raises:
     suite.test[test_redirect_policy__test_absolute_http_location_resolves]()
     suite.test[
         test_redirect_policy__test_origin_relative_location_resolves_against_base_origin
+    ]()
+    suite.test[
+        test_redirect_policy__test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth
     ]()
     # tests/http/test_reliability.mojo
     suite.test[test_reliability__test_retry_succeeds_on_first_attempt]()

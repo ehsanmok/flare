@@ -135,6 +135,21 @@ def _chunk_frame_prefix(n: Int) -> String:
     return out + "\r\n"
 
 
+def _same_origin(a: String, b: String) -> Bool:
+    """Scheme, host and port all equal (RFC 6454). Unparseable means
+    not the same."""
+    try:
+        var ua = Url.parse(a)
+        var ub = Url.parse(b)
+        return (
+            ua.scheme.lower() == ub.scheme.lower()
+            and ua.host.lower() == ub.host.lower()
+            and ua.port == ub.port
+        )
+    except:
+        return False
+
+
 def _is_idempotent(method: String) -> Bool:
     """Whether ``method`` is idempotent per RFC 9110 sec 9.2.2 (safe to
     send more than once with the same effect). Only idempotent requests
@@ -862,11 +877,11 @@ struct HttpClient(Movable):
         self._cookies = CookieStore.new()
         return self^
 
-    def cookie_header(imm self) raises -> String:
-        """The ``Cookie`` request header value the jar would send, or
-        ``""`` when cookies are disabled / the jar is empty. Useful for
-        tests and introspection."""
-        return self._cookies.request_header()
+    def cookie_header(imm self, url: String) raises -> String:
+        """The ``Cookie`` request header value the jar would send to
+        ``url``, or ``""`` when cookies are disabled / none match.
+        Useful for tests and introspection."""
+        return self._cookies.request_header(self._resolve_url(url))
 
     def record_alt_svc(self, origin: String, alt_svc_header: String) raises:
         """Record an origin's ``Alt-Svc`` response header (RFC 7838)
@@ -1639,7 +1654,9 @@ struct HttpClient(Movable):
         if self._auth_header != "":
             headers.set("authorization", self._auth_header)
         if self._cookies.enabled():
-            var cookie = self._cookies.request_header()
+            var cookie = self._cookies.request_header(
+                self._resolve_url(req.url)
+            )
             if cookie != "":
                 headers.set("cookie", cookie)
 
@@ -2119,7 +2136,9 @@ struct HttpClient(Movable):
         while True:
             # Attach session cookies for this hop (jar wins over a stale
             # caller-supplied Cookie since it carries the live session).
-            var cookie_hdr = self._cookies.request_header()
+            var cookie_hdr = self._cookies.request_header(
+                self._resolve_url(current_url)
+            )
             if cookie_hdr.byte_length() > 0:
                 headers.set("Cookie", cookie_hdr)
 
@@ -2131,7 +2150,9 @@ struct HttpClient(Movable):
             if self._cookies.enabled():
                 var set_cookies = resp.headers.get_all("Set-Cookie")
                 for i in range(len(set_cookies)):
-                    self._cookies.record_set_cookie(set_cookies[i])
+                    self._cookies.record_set_cookie(
+                        set_cookies[i], self._resolve_url(current_url)
+                    )
 
             # Transparent Alt-Svc discovery (RFC 7838).
             var alt_svc = resp.headers.get("Alt-Svc")
@@ -2152,6 +2173,17 @@ struct HttpClient(Movable):
             )
 
             if decision.action == RedirectAction.FOLLOW:
+                # Credentials the *caller* attached were meant for the
+                # origin they asked for. Authorization is handled by the
+                # policy below; Cookie and Proxy-Authorization used to
+                # ride along to any origin a 3xx pointed at. Jar cookies
+                # are re-selected per hop by URL, so they stay scoped.
+                if not _same_origin(
+                    self._resolve_url(current_url),
+                    self._resolve_url(decision.next_url),
+                ):
+                    _ = headers.remove("Cookie")
+                    _ = headers.remove("Proxy-Authorization")
                 current_url = decision.next_url
                 method = decision.next_method
                 if decision.next_body_dropped:
