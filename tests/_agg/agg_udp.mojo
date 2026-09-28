@@ -42,6 +42,9 @@ from test_udp_batch import (
 from test_udp_batch import (
     test_gso_segmented_send as test_udp_batch__test_gso_segmented_send,
 )
+from test_udp_batch import (
+    test_send_batch_failure_frees_its_buffers_once as test_udp_batch__test_send_batch_failure_frees_its_buffers_once,
+)
 
 
 def main() raises:
@@ -61,4 +64,5 @@ def main() raises:
     suite.test[test_udp_batch__test_recvmmsg_batch_round_trip]()
     suite.test[test_udp_batch__test_sendmmsg_batch_round_trip]()
     suite.test[test_udp_batch__test_gso_segmented_send]()
+    suite.test[test_udp_batch__test_send_batch_failure_frees_its_buffers_once]()
     suite^.run()

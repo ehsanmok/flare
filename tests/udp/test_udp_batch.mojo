@@ -165,6 +165,27 @@ def test_gso_segmented_send() raises:
     rx.close()
 
 
+def test_send_batch_failure_frees_its_buffers_once() raises:
+    """A failed sendmmsg freed the header, iovec and sockaddr buffers in
+    its error branch, raised, and the enclosing except freed them all
+    again. Runs everywhere: off Linux the shim returns -1, which takes
+    the same branch."""
+    var payloads = List[List[UInt8]]()
+    var addrs = List[SocketAddr]()
+    for i in range(4):
+        var d = List[UInt8]()
+        d.append(UInt8(i))
+        payloads.append(d^)
+        addrs.append(SocketAddr.localhost(9))
+    for _ in range(8):
+        var raised = False
+        try:
+            _ = send_batch(-1, payloads, addrs)  # EBADF on Linux
+        except:
+            raised = True
+        assert_true(raised, "send_batch on a bad fd did not raise")
+
+
 def main() raises:
     print("=" * 60)
     print("test_udp_batch.mojo -- recvmmsg / sendmmsg / GSO")

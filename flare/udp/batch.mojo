@@ -344,31 +344,28 @@ def send_batch(
             _poke_u32(hdr, _OFF_NAMELEN, UInt32(sa_len))
             _poke_u64(hdr, _OFF_IOV, UInt64(Int(iov) + i * _IOVEC))
             _poke_u64(hdr, _OFF_IOVLEN, UInt64(1))
-        var ret = _sendmmsg(c_int(fd), mmsg, c_uint(n), c_int(0))
-        if ret < 0:
-            var e = get_errno()
-            mmsg.unsafe_free()
-            iov.unsafe_free()
-            for j in range(len(sas)):
-                sas[j].unsafe_free()
-            if e == ErrNo.ENOSYS:
-                raise UdpBatchUnsupported("sendmmsg")
-            raise NetworkError(_strerror(e.value) + " (sendmmsg)", Int(e.value))
+    except e:
+        # A raise from _build_sockaddr_in mid-loop: free what is built.
         mmsg.unsafe_free()
         iov.unsafe_free()
         for j in range(len(sas)):
             sas[j].unsafe_free()
-        return Int(ret)
-    except e:
-        # Defensive: free anything still owned on an unexpected raise
-        # from _build_sockaddr_in mid-loop.
-        if Int(mmsg) != 0:
-            mmsg.unsafe_free()
-        if Int(iov) != 0:
-            iov.unsafe_free()
-        for j in range(len(sas)):
-            sas[j].unsafe_free()
         raise e^
+    # The send stays outside the try. Its error branch used to free the
+    # buffers and raise inside it, and the except above then freed all
+    # of them a second time: every sendmmsg failure (EAGAIN on a full
+    # socket buffer, ENETUNREACH) was a double free.
+    var ret = _sendmmsg(c_int(fd), mmsg, c_uint(n), c_int(0))
+    var e = get_errno()
+    mmsg.unsafe_free()
+    iov.unsafe_free()
+    for j in range(len(sas)):
+        sas[j].unsafe_free()
+    if ret < 0:
+        if e == ErrNo.ENOSYS:
+            raise UdpBatchUnsupported("sendmmsg")
+        raise NetworkError(_strerror(e.value) + " (sendmmsg)", Int(e.value))
+    return Int(ret)
 
 
 def send_segmented(
