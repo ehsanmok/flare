@@ -331,7 +331,17 @@ def _parse_http_request_bytes(
         if content_length > 0:
             var end = pos + content_length
             if end > len(data):
-                end = len(data)
+                # The caller framed fewer bytes than this request
+                # declares. Truncating silently would leave the rest
+                # of the body in the connection's buffer, where it is
+                # parsed as the next request.
+                raise Error(
+                    "request body shorter than its Content-Length ("
+                    + String(len(data) - pos)
+                    + " of "
+                    + String(content_length)
+                    + " bytes)"
+                )
             # Bulk-copy the body in one resize + memcpy. Per-byte
             # ``body.append`` was a measurable hot-path cost on POSTs.
             var n2 = end - pos
@@ -461,7 +471,9 @@ def _parse_http_request_bytes_minimal(
         var body_start = header_end
         var body_end = body_start + content_length
         if body_end > len(data):
-            body_end = len(data)
+            # Same rule as the full parser: never serve a truncated
+            # body, the remainder would be read as the next request.
+            raise Error("request body shorter than its Content-Length")
         var n = body_end - body_start
         if n > 0:
             body.resize(n, UInt8(0))

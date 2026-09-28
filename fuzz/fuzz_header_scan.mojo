@@ -46,8 +46,11 @@ def _scalar_scan_content_length(data: List[UInt8], header_end: Int) -> Int:
     var p = data.unsafe_ptr()
     var i = 0
     while i + nl <= header_end:
-        var found = True
+        # Header lines only: the byte before the name must be LF.
+        var found = i > 0 and p[unsafe_offset=i - 1] == 10
         for j in range(nl):
+            if not found:
+                break
             var c = p[unsafe_offset=i + j]
             if c >= 65 and c <= 90:
                 c = c + 32

@@ -146,9 +146,19 @@ def _match_content_length_prefix(
 ) -> Bool:
     """Case-insensitive compare against ``"content-length:"`` at ``pos``.
 
+    Matches only at the start of a header line, i.e. when the byte
+    before ``pos`` is LF. The request line always precedes the first
+    header, so ``pos == 0`` never matches either. Without the anchor a
+    ``content-length:`` inside the request target, inside another
+    field's name (``X-Content-Length:``) or inside a value decided the
+    framing, and the bytes the real header declared were dispatched as
+    a second request.
+
     ``pos + 15 <= header_end`` is assumed by the caller; this function
     does not re-check the bound.
     """
+    if pos == 0 or p[unsafe_offset=pos - 1] != 10:
+        return False
     var needle = "content-length:"
     var np = needle.unsafe_ptr()
     for j in range(15):
