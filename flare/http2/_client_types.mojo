@@ -105,12 +105,14 @@ struct Http2ClientConfig(Copyable, Defaultable):
         max_header_list_size: SETTINGS_MAX_HEADER_LIST_SIZE
             (RFC 9113 §6.5.2). Header-list size cap (uncompressed,
             including 32-byte per-entry overhead).
-        allow_huffman_decode: When ``True``, the HPACK decoder
-            accepts H=1 literals (Huffman-encoded) in inbound
-            HEADERS via the RFC 7541 Appendix B codec. Defaults
-            to ``False`` -- reject-by-default until a soak proves
-            the scalar Huffman path is CRIME-class-side-channel-
-            safe under client load.
+        allow_huffman_decode: When ``True`` (the default), the HPACK
+            decoder accepts H=1 literals (Huffman-encoded) in inbound
+            HEADERS via the RFC 7541 Appendix B codec. It defaulted to
+            ``False``, so the client met any real server's first
+            response, whose headers are Huffman-coded, with
+            COMPRESSION_ERROR: every HTTPS request that negotiated h2
+            failed. Decoding carries no CRIME-class risk; that concern
+            is about what an encoder compresses.
         allow_huffman_encode: When ``True``, the HPACK encoder
             picks the shorter of raw vs Huffman per emitted
             literal on outbound HEADERS. Defaults to ``False`` --
@@ -138,7 +140,7 @@ struct Http2ClientConfig(Copyable, Defaultable):
         self.max_frame_size = _DEFAULT_CLIENT_MAX_FRAME_SIZE
         self.header_table_size = _DEFAULT_CLIENT_HEADER_TABLE_SIZE
         self.max_header_list_size = _DEFAULT_CLIENT_MAX_HEADER_LIST_SIZE
-        self.allow_huffman_decode = False
+        self.allow_huffman_decode = True
         self.allow_huffman_encode = False
         self.enable_connect_protocol = False
 

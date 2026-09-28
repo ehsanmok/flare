@@ -334,6 +334,41 @@ def test_decode_keeps_non_ascii_octets_exact() raises:
     assert_equal(dec.dynamic_size, name.byte_length() + v.byte_length() + 32)
 
 
+def test_default_decoder_accepts_a_real_servers_huffman_headers() raises:
+    """A response header block captured from httpbin.org over h2. It is
+    Huffman-coded, as every real server's is; the default decoder
+    rejected it with "Huffman-coded string not supported", which the
+    HTTP client turned into COMPRESSION_ERROR."""
+    from flare.http2.client import Http2ClientConfig
+
+    var hx = String(
+        "886196d07abe9413ca6e2d6a080271410ae09fb80754c5a37f5f8b1d75d0620d"
+        "263d4c7441ea5c033432390085416cee5b3f8b9ada8c43d953017d77d707"
+    )
+    var b = hx.as_bytes()
+    var blk = List[UInt8]()
+    var i = 0
+    while i + 1 < len(b):
+        var hi = Int(b[i])
+        var lo = Int(b[i + 1])
+        hi = hi - 48 if hi < 58 else hi - 87
+        lo = lo - 48 if lo < 58 else lo - 87
+        blk.append(UInt8(hi * 16 + lo))
+        i += 2
+    var dec = HpackDecoder()
+    var hs = dec.decode(Span[UInt8, _](blk))
+    var ct = String("")
+    var server = String("")
+    for h in hs:
+        if h.name == "content-type":
+            ct = h.value.copy()
+        if h.name == "server":
+            server = h.value.copy()
+    assert_equal(ct, "application/json")
+    assert_equal(server, "gunicorn/19.9.0")
+    assert_true(Http2ClientConfig().allow_huffman_decode)
+
+
 def main() raises:
     test_decode_integer_short()
     test_rfc_7541_c1_5bit_1337()
@@ -351,4 +386,5 @@ def main() raises:
     test_encoder_huffman_picks_shorter_form()
     test_encoder_status_uses_static_name_index()
     test_decode_keeps_non_ascii_octets_exact()
-    print("test_h2_hpack: 16 passed")
+    test_default_decoder_accepts_a_real_servers_huffman_headers()
+    print("test_h2_hpack: 17 passed")

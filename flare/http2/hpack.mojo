@@ -255,13 +255,14 @@ struct HpackDecoder(Copyable, Defaultable):
     A decoder must be reused across all HEADERS frames on a single
     connection so the dynamic table tracks the peer's encoder.
 
-    ``allow_huffman`` gates ``H=1`` literal decoding: when ``False``
-    (default) the decoder raises on Huffman-coded strings, matching
-    the legacy raw-literal-only behaviour byte-for-byte. When
-    ``True`` the decoder routes ``H=1`` literals through the
-    RFC 7541 Appendix B codec in ``flare.http.hpack_huffman``.
-    ``Http2Config.with_config`` plumbs the flag through from user
-    config; tests can flip it directly.
+    ``allow_huffman`` gates ``H=1`` literal decoding. It defaults to
+    ``True``: RFC 7541 sec 5.2 lets any encoder Huffman-code any
+    literal, and real peers (curl, browsers, every CDN front end) do,
+    so a decoder that refuses them cannot talk to them. It used to
+    default to ``False``, which left every ``HpackDecoder()`` -- the
+    HTTP client's among them -- answering a real server's first
+    response with COMPRESSION_ERROR. Setting it ``False`` still makes
+    the decoder raise on ``H=1`` strings, for tests.
     """
 
     var dynamic: List[HpackHeader]
@@ -281,7 +282,7 @@ struct HpackDecoder(Copyable, Defaultable):
         self.dynamic_size = 0
         self.max_size = 4096
         self.settings_max_size = 4096
-        self.allow_huffman = False
+        self.allow_huffman = True
 
     def _entry_size(self, h: HpackHeader) -> Int:
         return h.name.byte_length() + h.value.byte_length() + 32
