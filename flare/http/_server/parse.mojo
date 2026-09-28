@@ -23,6 +23,7 @@ from ...tcp import TcpStream
 
 from .parse_util import (
     _ascii_safe,
+    _is_valid_http_version,
     _ascii_strip_slice,
     _ascii_unchecked_string,
     _find_crlfcrlf,
@@ -33,36 +34,6 @@ from .parse_util import (
     _read_line_buf_lenient,
     _scan_content_length,
 )
-
-
-def _is_valid_http_version(v: String) raises -> Bool:
-    """RFC 9112 sec 2.3: ``HTTP/<DIGIT>.<DIGIT>`` and nothing else.
-
-    Without this any third token parses as a version, so a garbage
-    request line is answered 404 instead of 400 -- and a peer that
-    opened with something like an invalid HTTP/2 preface is left
-    holding a keep-alive connection it cannot interpret."""
-    if v.byte_length() != 8:
-        return False
-    var p = v.unsafe_ptr()
-    if (
-        p[unsafe_offset=0] != UInt8(ord("H"))
-        or p[unsafe_offset=1] != UInt8(ord("T"))
-        or p[unsafe_offset=2] != UInt8(ord("T"))
-        or p[unsafe_offset=3] != UInt8(ord("P"))
-        or p[unsafe_offset=4] != UInt8(ord("/"))
-        or p[unsafe_offset=6] != UInt8(ord("."))
-    ):
-        return False
-    if p[unsafe_offset=5] < UInt8(ord("0")) or p[unsafe_offset=5] > UInt8(
-        ord("9")
-    ):
-        return False
-    if p[unsafe_offset=7] < UInt8(ord("0")) or p[unsafe_offset=7] > UInt8(
-        ord("9")
-    ):
-        return False
-    return True
 
 
 def _parse_http_request_bytes(
