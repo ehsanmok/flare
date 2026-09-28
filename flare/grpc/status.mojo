@@ -21,6 +21,7 @@ from std.collections import List, Optional
 from std.collections.span import Span
 
 from flare.crypto.base64 import base64_encode
+from flare.http.proto.utf8 import utf8_lossy_string
 
 
 # Canonical status code constants. The numeric values are stable
@@ -160,3 +161,62 @@ comptime GRPC_STATUS_INTERNAL: Int = GrpcStatus.INTERNAL
 comptime GRPC_STATUS_UNAVAILABLE: Int = GrpcStatus.UNAVAILABLE
 comptime GRPC_STATUS_DATA_LOSS: Int = GrpcStatus.DATA_LOSS
 comptime GRPC_STATUS_UNAUTHENTICATED: Int = GrpcStatus.UNAUTHENTICATED
+
+
+# ── grpc-message percent-encoding (PROTOCOL-HTTP2) ────────────────────
+
+
+comptime _HEX: String = "0123456789ABCDEF"
+
+
+def grpc_message_encode(message: String) -> String:
+    """Percent-encode ``message`` for the ``grpc-message`` field.
+
+    gRPC's PROTOCOL-HTTP2 carries the message as percent-encoded UTF-8:
+    every byte outside ``0x20..0x7E``, and ``%`` itself, becomes
+    ``%XX``. Sent raw, a non-ASCII message reached clients as mojibake
+    and a CR or LF in it was a field-injection vector on any transport
+    that did not reject it.
+    """
+    var out = List[UInt8](capacity=message.byte_length())
+    for b in message.as_bytes():
+        if b < 0x20 or b > 0x7E or b == UInt8(ord("%")):
+            out.append(UInt8(ord("%")))
+            out.append(_HEX.as_bytes()[Int(b >> 4)])
+            out.append(_HEX.as_bytes()[Int(b & 0x0F)])
+        else:
+            out.append(b)
+    return String(unsafe_from_utf8=Span[UInt8, _](out))
+
+
+def _hex_val(b: UInt8) -> Int:
+    if b >= UInt8(ord("0")) and b <= UInt8(ord("9")):
+        return Int(b) - ord("0")
+    if b >= UInt8(ord("a")) and b <= UInt8(ord("f")):
+        return Int(b) - ord("a") + 10
+    if b >= UInt8(ord("A")) and b <= UInt8(ord("F")):
+        return Int(b) - ord("A") + 10
+    return -1
+
+
+def grpc_message_decode(value: String) -> String:
+    """Undo :func:`grpc_message_encode` on a received ``grpc-message``.
+
+    The spec asks a receiver not to fail on a malformed value, so a
+    ``%`` not followed by two hex digits is kept as it is, and bytes
+    that do not decode to valid UTF-8 are replaced, not raised on.
+    """
+    var src = value.as_bytes()
+    var out = List[UInt8](capacity=len(src))
+    var i = 0
+    while i < len(src):
+        if src[i] == UInt8(ord("%")) and i + 2 < len(src):
+            var hi = _hex_val(src[i + 1])
+            var lo = _hex_val(src[i + 2])
+            if hi >= 0 and lo >= 0:
+                out.append(UInt8(hi * 16 + lo))
+                i += 3
+                continue
+        out.append(src[i])
+        i += 1
+    return utf8_lossy_string(Span[UInt8, _](out))

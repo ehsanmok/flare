@@ -36,7 +36,7 @@ def _grpc(req: Request) raises -> Response:
         var resp = Response(200, "", List[UInt8]())
         resp.headers.set("content-type", "application/grpc+proto")
         resp.headers.set("grpc-status", "5")
-        resp.headers.set("grpc-message", "nope")
+        resp.headers.set("grpc-message", "nope%3A caf%C3%A9")
         return resp^
 
     # Echo: LPM-decode the request frame and re-frame the payload.
@@ -110,7 +110,8 @@ def test_unary_non_ok_status() raises:
     kill_forked_server(pid)
     assert_true(not raised, "non-ok call raised")
     assert_equal(code, 5)
-    assert_equal(msg, "nope")
+    # Percent-decoded (gRPC PROTOCOL-HTTP2); it used to come back raw.
+    assert_equal(msg, "nope: caf\u00e9")
 
 
 def test_unary_metadata_forwarded() raises:

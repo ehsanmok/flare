@@ -471,6 +471,15 @@ adapters, a typed `<Service>Client` stub, and a serialized
 `FileDescriptorProto`. Still deferred: maps / oneof in the message
 codegen.
 
+A handler that raises now ends its call with `INTERNAL` and the fixed
+message `handler raised`. The raise text used to be sent to the client
+as `grpc-message`. To give the client a reason, return
+`GrpcUnaryReply.err(GrpcStatus.err(code, reason))`. `grpc-message` is
+percent-encoded on the way out and decoded by both clients
+(`grpc_message_encode` / `grpc_message_decode`). Compressed request
+frames share one 16 MiB inflate budget per call instead of 16 MiB
+each.
+
 | Surface | Where |
 |---|---|
 | Length-prefixed message framing (gRPC wire format): `GrpcMessage`, `GrpcDecodeResult`, `GrpcCompressionFlag`, `encode_grpc_message`, `decode_grpc_message`, `GRPC_COMPRESSION_NONE`, `GRPC_COMPRESSION_COMPRESSED` | `flare.grpc.framing` |

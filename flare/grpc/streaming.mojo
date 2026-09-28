@@ -38,7 +38,12 @@ from ..tls import TlsStream
 from ..http._client.h2_transport import _H2Transport
 from .framing import decode_grpc_message, encode_grpc_message
 from .metadata import GrpcMetadata
-from .status import GRPC_STATUS_OK, GRPC_STATUS_UNKNOWN, GrpcStatus
+from .status import (
+    GRPC_STATUS_OK,
+    GRPC_STATUS_UNKNOWN,
+    GrpcStatus,
+    grpc_message_decode,
+)
 
 comptime _READ_BUF_SIZE: Int = 16384
 """Per-syscall recv buffer for the streaming read pump (RFC 9113
@@ -61,7 +66,7 @@ def _status_from_headers(hdrs: List[HpackHeader]) -> GrpcStatus:
     """Build a :class:`GrpcStatus` from the ``grpc-status`` /
     ``grpc-message`` header (or trailer) values."""
     var code_str = _hdr_value(hdrs, "grpc-status")
-    var msg = _hdr_value(hdrs, "grpc-message")
+    var msg = grpc_message_decode(_hdr_value(hdrs, "grpc-message"))
     var code = GRPC_STATUS_UNKNOWN
     if code_str.byte_length() > 0:
         try:

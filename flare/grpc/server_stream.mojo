@@ -45,6 +45,7 @@ from .server import (
     GrpcCallContext,
     GrpcCallOutcome,
     GrpcRequestHeaders,
+    _HANDLER_RAISED,
     _grpc_headers_from_request,
     _negotiate_response_encoding,
     emit_trailing_headers_status,
@@ -225,7 +226,7 @@ def _drive_stream_reply[
         )
     except e:
         return GrpcServerStreamReply.err(
-            GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))
+            GrpcStatus.err(GRPC_STATUS_INTERNAL, _HANDLER_RAISED)
         )
 
 

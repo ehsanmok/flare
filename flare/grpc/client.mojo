@@ -38,7 +38,12 @@ from ..tls import TlsStream
 from ..tls.config import TlsConfig
 from .framing import decode_grpc_message, encode_grpc_message
 from .metadata import GrpcMetadata
-from .status import GRPC_STATUS_OK, GRPC_STATUS_UNKNOWN, GrpcStatus
+from .status import (
+    GRPC_STATUS_OK,
+    GRPC_STATUS_UNKNOWN,
+    GrpcStatus,
+    grpc_message_decode,
+)
 from .streaming import (
     GrpcBidiStream,
     GrpcServerStream,
@@ -177,7 +182,7 @@ struct GrpcClient(Movable):
                 payload = dec.message.payload.copy()
 
         var status_str = resp.headers.get("grpc-status")
-        var msg = resp.headers.get("grpc-message")
+        var msg = grpc_message_decode(resp.headers.get("grpc-message"))
         var code = GRPC_STATUS_UNKNOWN
         if status_str.byte_length() > 0:
             try:

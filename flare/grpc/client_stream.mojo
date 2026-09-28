@@ -38,6 +38,7 @@ from .server import (
     GrpcRequestHeaders,
     GrpcUnaryReply,
     _decompress_payload,
+    _HANDLER_RAISED,
     _grpc_headers_from_request,
     _outcome_from_reply,
     _parse_grpc_timeout,
@@ -150,7 +151,7 @@ def _drive_client_stream_reply[
         return handler.serve_client_streaming(ctx, messages^)
     except e:
         return GrpcUnaryReply.err(
-            GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))
+            GrpcStatus.err(GRPC_STATUS_INTERNAL, _HANDLER_RAISED)
         )
 
 
@@ -242,7 +243,7 @@ def _drive_bidi_reply[
         return handler.serve_bidi(ctx, messages^)
     except e:
         return GrpcServerStreamReply.err(
-            GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))
+            GrpcStatus.err(GRPC_STATUS_INTERNAL, _HANDLER_RAISED)
         )
 
 

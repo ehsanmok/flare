@@ -263,6 +263,9 @@ from test_server import (
     test_run_unary_call_handler_raise_emits_internal as test_server__test_run_unary_call_handler_raise_emits_internal,
 )
 from test_server import (
+    test_grpc_message_is_percent_encoded_and_decoded as test_server__test_grpc_message_is_percent_encoded_and_decoded,
+)
+from test_server import (
     test_emit_trailing_headers_status_ok_minimal as test_server__test_emit_trailing_headers_status_ok_minimal,
 )
 from test_server import (
@@ -413,6 +416,7 @@ def main() raises:
         test_server__test_run_unary_call_truncated_lpm_emits_invalid_argument
     ]()
     suite.test[test_server__test_run_unary_call_handler_raise_emits_internal]()
+    suite.test[test_server__test_grpc_message_is_percent_encoded_and_decoded]()
     suite.test[test_server__test_emit_trailing_headers_status_ok_minimal]()
     suite.test[
         test_server__test_emit_trailing_headers_status_err_with_message

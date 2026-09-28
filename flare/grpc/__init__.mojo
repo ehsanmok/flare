@@ -155,4 +155,6 @@ from .status import (
     GRPC_STATUS_DATA_LOSS,
     GRPC_STATUS_UNAUTHENTICATED,
     GrpcStatus,
+    grpc_message_decode,
+    grpc_message_encode,
 )

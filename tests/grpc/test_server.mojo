@@ -469,6 +469,27 @@ def test_run_unary_call_handler_raise_emits_internal() raises:
     )
     assert_equal(outcome.status.code, GRPC_STATUS_INTERNAL)
     assert_equal(len(outcome.response_data), 0)
+    # The raise text used to reach the client verbatim.
+    assert_true(
+        "simulated" not in outcome.status.message, outcome.status.message
+    )
+
+
+def test_grpc_message_is_percent_encoded_and_decoded() raises:
+    """``grpc-message`` went out raw: non-ASCII as mojibake, CR/LF as
+    field injection. The clients did not decode it either."""
+    from flare.grpc import grpc_message_decode, grpc_message_encode
+
+    var trailers = emit_trailing_headers_status(
+        GrpcStatus.err(GRPC_STATUS_NOT_FOUND, String("caf\u00e9 100%\r\nx: y"))
+    )
+    assert_equal(trailers[1][1], String("caf%C3%A9 100%25%0D%0Ax: y"))
+    assert_equal(
+        grpc_message_decode(trailers[1][1]), String("caf\u00e9 100%\r\nx: y")
+    )
+    # A malformed escape is kept, not raised on.
+    assert_equal(grpc_message_decode(String("50%zz%4")), String("50%zz%4"))
+    assert_equal(grpc_message_encode(String("plain")), String("plain"))
 
 
 def test_emit_trailing_headers_status_ok_minimal() raises:
@@ -558,4 +579,5 @@ def main() raises:
     test_emit_trailing_headers_status_ok_minimal()
     test_emit_trailing_headers_status_err_with_message()
     test_emit_trailing_headers_status_with_details_bin()
-    print("test_grpc_server: 22 passed")
+    test_grpc_message_is_percent_encoded_and_decoded()
+    print("test_grpc_server: 23 passed")

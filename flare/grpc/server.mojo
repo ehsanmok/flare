@@ -79,6 +79,7 @@ from .status import (
     GRPC_STATUS_INTERNAL,
     GRPC_STATUS_INVALID_ARGUMENT,
     GrpcStatus,
+    grpc_message_encode,
 )
 
 
@@ -389,6 +390,13 @@ def _negotiate_response_encoding(accept_encoding: String) -> String:
     return String("")
 
 
+comptime _HANDLER_RAISED: String = "handler raised"
+"""``grpc-message`` for a handler that raised. The raise text used to go
+to the client verbatim: file paths, SQL, whatever the exception held.
+A handler that wants the client to see a reason returns it in a
+``GrpcStatus`` instead."""
+
+
 def _decompress_payload(
     payload: Span[UInt8, _],
     encoding: String,
@@ -539,7 +547,9 @@ def emit_trailing_headers_status(
     )
     if status.message.byte_length() > 0:
         trailers.append(
-            Tuple[String, String](String("grpc-message"), status.message.copy())
+            Tuple[String, String](
+                String("grpc-message"), grpc_message_encode(status.message)
+            )
         )
     if Bool(status.details):
         var details_bytes = status.details.value().copy()
@@ -619,10 +629,10 @@ def run_unary_call[
       malformed input to this code).
     * LPM stitch failure (truncated frame, compressed without a
       negotiated encoding) -> ``GRPC_STATUS_INVALID_ARGUMENT``.
-    * Handler ``raises`` -> ``GRPC_STATUS_INTERNAL`` with the
-      raise message (clients see ``grpc-message`` for diagnostics
-      only; the failure mode is "server side bug, not client
-      input").
+    * Handler ``raises`` -> ``GRPC_STATUS_INTERNAL`` with the fixed
+      message ``"handler raised"``. The raise text stays on the
+      server: the failure is a server-side bug, not client input,
+      and the text can carry anything the exception held.
     """
     var accept = String("")
     if Bool(headers.accept_encoding):
@@ -655,7 +665,9 @@ def run_unary_call[
         reply = handler.serve_unary(ctx, Span[UInt8, _](request_bytes))
     except e:
         return _outcome_from_reply(
-            GrpcUnaryReply.err(GrpcStatus.err(GRPC_STATUS_INTERNAL, String(e))),
+            GrpcUnaryReply.err(
+                GrpcStatus.err(GRPC_STATUS_INTERNAL, _HANDLER_RAISED)
+            ),
             accept,
         )
     return _outcome_from_reply(reply^, accept)
