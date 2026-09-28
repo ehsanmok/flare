@@ -283,7 +283,7 @@ struct Http2Connection(Defaultable, Movable):
                     + String(id)
                 )
             if id == 0x1:
-                out.conn.hpack_decoder.max_size = v
+                out.conn.peer_header_table_size = v
             elif id == 0x4:
                 out.conn.initial_window_size = v
             elif id == 0x5:

@@ -321,6 +321,13 @@ struct Connection(Copyable, Defaultable):
     speak; flipped to ``True`` by the unified
     :class:`flare.http.HttpServer` once the unified
     :class:`flare.ws.WsServer` is wired in (Phase 6)."""
+    var peer_header_table_size: Int
+    """The peer's SETTINGS_HEADER_TABLE_SIZE: the dynamic table limit
+    for *our encoder*. Our encoder never indexes, so this is recorded
+    only. Applying it to our decoder -- as this code once did -- made a
+    peer's 0 evict entries its own encoder still referenced, and its
+    2^32-1 lift our decoder's memory bound."""
+
     var peer_enable_connect_protocol: Bool
     """When ``True``, the *peer* advertised
     ``SETTINGS_ENABLE_CONNECT_PROTOCOL = 1`` in its initial
@@ -388,6 +395,7 @@ struct Connection(Copyable, Defaultable):
         self.settings_acked = False
         self.is_client = False
         self.enable_connect_protocol = False
+        self.peer_header_table_size = 4096
         self.peer_enable_connect_protocol = False
         self.rst_stream_count = 0
         self.goaway_sent = False
@@ -1093,7 +1101,10 @@ struct Connection(Copyable, Defaultable):
                 elif id == 0x5:  # SETTINGS_MAX_FRAME_SIZE
                     self.max_frame_size = v
                 elif id == 0x1:  # SETTINGS_HEADER_TABLE_SIZE
-                    self.hpack_decoder.max_size = v
+                    # The *peer's* decoder limit: it bounds what our
+                    # encoder may index (RFC 9113 sec 6.5.2), never our
+                    # decoder, whose size only an in-band update changes.
+                    self.peer_header_table_size = v
                 elif id == 0x8:  # SETTINGS_ENABLE_CONNECT_PROTOCOL (RFC 8441)
                     # Peer is advertising whether Extended CONNECT
                     # is allowed. RFC 8441 §3: on the server side

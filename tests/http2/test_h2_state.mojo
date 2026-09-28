@@ -355,6 +355,35 @@ def test_oversized_continuation_frame_is_a_frame_size_error() raises:
     assert_equal(_goaway_code(out), 0x6)  # FRAME_SIZE_ERROR
 
 
+def _settings_frame(id: Int, v: Int) -> Frame:
+    var f = Frame()
+    f.header.type = FrameType.SETTINGS()
+    f.header.stream_id = 0
+    f.header.flags = FrameFlags(UInt8(0))
+    f.payload = List[UInt8]()
+    f.payload.append(UInt8((id >> 8) & 0xFF))
+    f.payload.append(UInt8(id & 0xFF))
+    f.payload.append(UInt8((v >> 24) & 0xFF))
+    f.payload.append(UInt8((v >> 16) & 0xFF))
+    f.payload.append(UInt8((v >> 8) & 0xFF))
+    f.payload.append(UInt8(v & 0xFF))
+    f.header.length = 6
+    return f^
+
+
+def test_peer_header_table_size_does_not_resize_our_decoder() raises:
+    """The setting bounds the peer's decoder (our encoder). Applied to our
+    decoder, 0 evicted entries the peer still referenced and 2^32-1
+    removed the decoder's memory bound."""
+    var c = Connection()
+    var before = c.hpack_decoder.max_size
+    _ = c.handle_frame(_settings_frame(0x1, 0))
+    assert_equal(c.hpack_decoder.max_size, before)
+    assert_equal(c.peer_header_table_size, 0)
+    _ = c.handle_frame(_settings_frame(0x1, 0xFFFFFFFF))
+    assert_equal(c.hpack_decoder.max_size, before)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -372,4 +401,5 @@ def main() raises:
     test_priority_accepted_and_ignored()
     test_hpack_decode_bomb_is_stopped_before_it_expands()
     test_oversized_continuation_frame_is_a_frame_size_error()
-    print("test_h2_state: 16 passed")
+    test_peer_header_table_size_does_not_resize_our_decoder()
+    print("test_h2_state: 17 passed")
