@@ -481,6 +481,12 @@ struct Http2ConnHandle(Movable):
                     )
                     for i in range(got_int):
                         inbound.append(chunk[unsafe_offset=i])
+                    # Bound one event's read. A peer that keeps the socket
+                    # full was read until EAGAIN into one list; the
+                    # level-triggered reactor raises another event for the
+                    # rest, after other fds have had their turn.
+                    if len(inbound) >= 1024 * 1024:
+                        break
                 elif got == 0:
                     # Peer FIN observed mid-connection. Mark closed
                     # so the reactor unregisters the fd after any
@@ -899,6 +905,12 @@ struct Http2ConnHandle(Movable):
                     var got_int = Int(got)
                     for i in range(got_int):
                         inbound.append(chunk[unsafe_offset=i])
+                    # Bound one event's read. A peer that keeps the socket
+                    # full was read until EAGAIN into one list; the
+                    # level-triggered reactor raises another event for the
+                    # rest, after other fds have had their turn.
+                    if len(inbound) >= 1024 * 1024:
+                        break
                 elif got == 0:
                     # Peer FIN -- flip every live cell so in-flight
                     # handlers short-circuit cooperatively.

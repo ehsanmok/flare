@@ -390,7 +390,12 @@ struct Http2Connection(Defaultable, Movable):
             self.conn.preface_seen = True
             self._emit_initial_settings()
 
-        # Drain frames until we run out of complete ones.
+        # Drain frames until we run out of complete ones. Frames are
+        # read from a cursor and the inbox is compacted once at the end:
+        # copying the rest of the inbox after every frame made a burst of
+        # small frames quadratic (1 MiB of 9-byte frames is ~60 GiB of
+        # copying).
+        var off = 0
         while True:
             # A connection error ends the connection (RFC 9113 sec
             # 5.4.1). Frames after the GOAWAY used to keep being applied,
@@ -400,16 +405,29 @@ struct Http2Connection(Defaultable, Movable):
             if self.conn.goaway_sent:
                 self.inbox = List[UInt8]()
                 return
-            var span = Span[UInt8, _](self.inbox)
+            var avail = len(self.inbox) - off
+            # sec 4.2: refuse an oversized frame from its header, before
+            # buffering up to 16 MiB of payload we will reject anyway.
+            if avail >= 9:
+                var declared = (
+                    (Int(self.inbox[off]) << 16)
+                    | (Int(self.inbox[off + 1]) << 8)
+                    | Int(self.inbox[off + 2])
+                )
+                if declared > self.conn.local_max_frame_size:
+                    var gerr = self.conn._conn_error(
+                        Http2ErrorCode.FRAME_SIZE_ERROR().value
+                    )
+                    for gi in range(len(gerr)):
+                        self.outbox.extend(Span(encode_frame(gerr[gi])))
+                    self.inbox = List[UInt8]()
+                    return
+            var span = Span[UInt8, _](self.inbox)[off:]
             var got = parse_frame(span)
             if not got:
-                return
+                break
             var frame = got.value().copy()
-            var consumed = 9 + frame.header.length
-            var rest = List[UInt8](capacity=len(self.inbox) - consumed)
-            for i in range(consumed, len(self.inbox)):
-                rest.append(self.inbox[i])
-            self.inbox = rest^
+            off += 9 + frame.header.length
             var reply = self.conn.handle_frame(frame^)
             for i in range(len(reply)):
                 var rb = encode_frame(reply[i])
@@ -418,6 +436,10 @@ struct Http2Connection(Defaultable, Movable):
             # A WINDOW_UPDATE in that frame may have unparked response
             # bytes; nothing else re-drives them.
             self.pump_pending()
+        if off > 0:
+            var rest = List[UInt8](capacity=len(self.inbox) - off)
+            rest.extend(Span[UInt8, _](self.inbox)[off:])
+            self.inbox = rest^
 
     def drain(mut self) -> List[UInt8]:
         """Return all queued outbound bytes and clear the buffer.
@@ -536,8 +558,15 @@ struct Http2Connection(Defaultable, Movable):
                 req.headers.append(n, v)
         if cookie.byte_length() > 0:
             req.headers.append("cookie", cookie)
-        for i in range(len(s.data)):
-            req.body.append(s.data[i])
+        req.body = s.data.copy()
+        # Hand the buffer over: the stream no longer needs it, and it
+        # counted against the connection's buffered-request budget.
+        var released = len(s.data)
+        s.data = List[UInt8]()
+        self.conn.streams[sid] = s^
+        var credit = self.conn.release_request_credit(released)
+        for i in range(len(credit)):
+            self.outbox.extend(Span(encode_frame(credit[i])))
         return req^
 
     def emit_response(mut self, sid: Int, var resp: Response) raises:

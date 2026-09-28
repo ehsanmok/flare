@@ -288,5 +288,86 @@ def test_closed_streams_do_not_accumulate() raises:
     )
 
 
+def test_many_small_frames_in_one_read() raises:
+    """feed copied the rest of the inbox after every frame; a burst of
+    small frames was quadratic. 3000 PINGs in one read must all be
+    answered."""
+    var c = Http2Connection()
+    var buf = List[UInt8](String(H2_PREFACE).as_bytes())
+    for _ in range(3000):
+        var p = Frame()
+        p.header.type = FrameType.PING()
+        p.payload = List[UInt8](length=8, fill=UInt8(1))
+        p.header.length = 8
+        buf.extend(Span[UInt8, _](encode_frame(p)))
+    c.feed(Span[UInt8, _](buf))
+    var out = c.drain()
+    var acks = 0
+    var rest = out^
+    var off = 0
+    while off + 9 <= len(rest):
+        var ln = (
+            (Int(rest[off]) << 16)
+            | (Int(rest[off + 1]) << 8)
+            | Int(rest[off + 2])
+        )
+        if Int(rest[off + 3]) == 0x6:
+            acks += 1
+        off += 9 + ln
+    assert_equal(acks, 3000)
+
+
+def test_oversized_frame_is_refused_from_its_header() raises:
+    """The size check ran after the whole declared payload had been
+    buffered, up to 16 MiB of it."""
+    var c = Http2Connection()
+    var buf = List[UInt8](String(H2_PREFACE).as_bytes())
+    # DATA header declaring 1 MiB, with no payload sent at all.
+    buf.append(UInt8(0x10))
+    buf.append(UInt8(0x00))
+    buf.append(UInt8(0x00))
+    buf.append(UInt8(0x0))
+    buf.append(UInt8(0x0))
+    for _ in range(4):
+        buf.append(UInt8(0))
+    c.feed(Span[UInt8, _](buf))
+    assert_true(c.conn.goaway_sent, "waited for 1 MiB before refusing it")
+
+
+def test_content_length_overrun_is_caught_on_the_frame() raises:
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    var enc = HpackEncoder()
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":method", "POST"))
+    hdrs.append(HpackHeader(":scheme", "https"))
+    hdrs.append(HpackHeader(":path", "/"))
+    hdrs.append(HpackHeader(":authority", "example.com"))
+    hdrs.append(HpackHeader("content-length", "5"))
+    var h = Frame()
+    h.header.type = FrameType.HEADERS()
+    h.header.stream_id = 1
+    h.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+    h.payload = enc.encode(Span[HpackHeader, _](hdrs))
+    c.feed(Span[UInt8, _](encode_frame(h)))
+    var d = Frame()
+    d.header.type = FrameType.DATA()
+    d.header.stream_id = 1
+    d.payload = List[UInt8](length=50, fill=UInt8(0x61))
+    d.header.length = 50
+    c.feed(Span[UInt8, _](encode_frame(d)))
+    var out = c.drain()
+    var rst = False
+    var off = 0
+    while off + 9 <= len(out):
+        var ln = (
+            (Int(out[off]) << 16) | (Int(out[off + 1]) << 8) | Int(out[off + 2])
+        )
+        if Int(out[off + 3]) == 0x3:
+            rst = True
+        off += 9 + ln
+    assert_true(rst, "50 bytes against content-length 5 were accepted")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

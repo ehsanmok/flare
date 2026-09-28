@@ -219,6 +219,15 @@ from test_h2_parked_response import (
 from test_h2_parked_response import (
     test_closed_streams_do_not_accumulate as test_h2_parked_response__test_closed_streams_do_not_accumulate,
 )
+from test_h2_parked_response import (
+    test_many_small_frames_in_one_read as test_h2_parked_response__test_many_small_frames_in_one_read,
+)
+from test_h2_parked_response import (
+    test_oversized_frame_is_refused_from_its_header as test_h2_parked_response__test_oversized_frame_is_refused_from_its_header,
+)
+from test_h2_parked_response import (
+    test_content_length_overrun_is_caught_on_the_frame as test_h2_parked_response__test_content_length_overrun_is_caught_on_the_frame,
+)
 from test_h2_per_stream_cancel import (
     test_rst_stream_flips_only_target_cell as test_h2_per_stream_cancel__test_rst_stream_flips_only_target_cell,
 )
@@ -542,6 +551,13 @@ def main() raises:
         test_h2_parked_response__test_parked_body_is_released_when_the_peer_resets
     ]()
     suite.test[test_h2_parked_response__test_closed_streams_do_not_accumulate]()
+    suite.test[test_h2_parked_response__test_many_small_frames_in_one_read]()
+    suite.test[
+        test_h2_parked_response__test_oversized_frame_is_refused_from_its_header
+    ]()
+    suite.test[
+        test_h2_parked_response__test_content_length_overrun_is_caught_on_the_frame
+    ]()
     # tests/http2/test_h2_per_stream_cancel.mojo
     suite.test[
         test_h2_per_stream_cancel__test_rst_stream_flips_only_target_cell

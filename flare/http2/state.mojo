@@ -57,6 +57,10 @@ from .stream_slab import StreamSlab
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
 
 
+comptime _MAX_BUFFERED_REQUEST_BYTES: Int = 64 * 1024 * 1024
+"""Request body bytes one server connection buffers before it stops
+returning connection-level flow-control credit."""
+
 comptime _RESET_BY_US_REMEMBERED: Int = 1024
 """How many of our own RST_STREAMs are remembered for ignoring the
 peer's in-flight frames. Bounded so a reset flood cannot grow it."""
@@ -399,6 +403,12 @@ struct Connection(Copyable, Defaultable):
     boundary and per-fragment decoding corrupts it."""
     var header_block_end_stream: Bool
     """END_STREAM seen on the HEADERS that opened ``header_block``."""
+    var buffered_request_bytes: Int
+    """Request body bytes buffered on streams whose request has not been
+    taken yet (server side)."""
+    var withheld_conn_credit: Int
+    """Connection-level WINDOW_UPDATE credit held back while
+    ``buffered_request_bytes`` is over the cap."""
     var reset_by_us: List[Int]
     """Streams we sent RST_STREAM on, most recent last, bounded. DATA the
     peer had in flight for them is dropped quietly; it used to be a
@@ -451,6 +461,8 @@ struct Connection(Copyable, Defaultable):
         self.header_block_refuse = 0
         self.header_block_continuations = 0
         self.reset_by_us = List[Int]()
+        self.buffered_request_bytes = 0
+        self.withheld_conn_credit = 0
         self.reset_streams = List[Int]()
 
     def _make_settings(self, ack: Bool) -> Frame:
@@ -591,6 +603,34 @@ struct Connection(Copyable, Defaultable):
         f.payload = p^
         f.header.length = len(f.payload)
         return f^
+
+    def _recount_buffered_request_bytes(mut self) -> Int:
+        """Exact buffered total, from the streams still open. The running
+        counter only goes down when a request is taken; resets and
+        pruning drop bodies too, so it is recomputed whenever it claims
+        the cap is reached. O(streams), and only near the cap."""
+        var n = 0
+        for entry in self.streams.items():
+            if entry[1].state.value != StreamState.CLOSED().value:
+                n += len(entry[1].data)
+        self.buffered_request_bytes = n
+        return n
+
+    def release_request_credit(mut self, released: Int) -> List[Frame]:
+        """Account ``released`` body bytes as handed to a handler, and
+        return the withheld connection credit once buffering is back
+        under the cap."""
+        var out = List[Frame]()
+        self.buffered_request_bytes -= released
+        if self.buffered_request_bytes < 0:
+            self.buffered_request_bytes = 0
+        if (
+            self.withheld_conn_credit > 0
+            and self.buffered_request_bytes <= _MAX_BUFFERED_REQUEST_BYTES
+        ):
+            out.append(Self._window_update_frame(0, self.withheld_conn_credit))
+            self.withheld_conn_credit = 0
+        return out^
 
     def _close_if_known(mut self, sid: Int):
         if sid in self.streams:
@@ -1485,6 +1525,27 @@ struct Connection(Copyable, Defaultable):
             for j in range(len(body)):
                 s.data.append(body[j])
             s.received_body_bytes += len(body)
+            # sec 8.1.1: more DATA than content-length declared is
+            # malformed on the frame that goes over, not only at
+            # END_STREAM -- waiting let a peer buffer past its own claim.
+            if (
+                not self.is_client
+                and s.content_length >= 0
+                and s.received_body_bytes > s.content_length
+            ):
+                out.append(
+                    self._rst_stream_frame(
+                        sid, Http2ErrorCode.PROTOCOL_ERROR().value
+                    )
+                )
+                s.data = List[UInt8]()
+                s.state = StreamState.CLOSED()
+                self._put_stream(s^)
+                if len(f.payload) > 0:
+                    out.append(Self._window_update_frame(0, len(f.payload)))
+                return out^
+            if not self.is_client:
+                self.buffered_request_bytes += len(body)
             # Padding is immediately consumed. Streaming DATA credit is
             # returned by drain_body, not merely by pumping the socket.
             var credit = len(f.payload)
@@ -1519,10 +1580,34 @@ struct Connection(Copyable, Defaultable):
             self._put_stream(s^)
             # Connection credit lets unrelated streams progress; each
             # streaming response remains bounded by its own receive window.
+            #
+            # Server side, request bodies are buffered until END_STREAM
+            # and every DATA frame was credited straight back, so the
+            # only bound was max_request_body_size per stream: 100
+            # streams of 10 MiB, 1 GiB per connection. Past
+            # _MAX_BUFFERED_REQUEST_BYTES the connection-level credit is
+            # withheld, which stalls the peer, until handlers take their
+            # bodies (release_request_credit).
             if len(f.payload) > 0:
                 if credit > 0:
                     out.append(Self._window_update_frame(sid, credit))
-                out.append(Self._window_update_frame(0, len(f.payload)))
+                if (
+                    not self.is_client
+                    and self.buffered_request_bytes
+                    > _MAX_BUFFERED_REQUEST_BYTES
+                    and self._recount_buffered_request_bytes()
+                    > _MAX_BUFFERED_REQUEST_BYTES
+                ):
+                    self.withheld_conn_credit += len(f.payload)
+                else:
+                    # Back under the cap (bodies taken or dropped): return
+                    # whatever was held along with this frame's credit.
+                    out.append(
+                        Self._window_update_frame(
+                            0, len(f.payload) + self.withheld_conn_credit
+                        )
+                    )
+                    self.withheld_conn_credit = 0
             return out^
 
         if ft == FrameType.GOAWAY().value:
