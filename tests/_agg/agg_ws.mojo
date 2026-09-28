@@ -226,6 +226,9 @@ from test_ws_permessage_deflate import (
 from test_ws_permessage_deflate import (
     test_context_takeover_respects_max_decompressed_bytes as test_ws_permessage_deflate__test_context_takeover_respects_max_decompressed_bytes,
 )
+from test_ws_permessage_deflate import (
+    test_context_takeover_survives_messages_that_expand_a_lot as test_ws_permessage_deflate__test_context_takeover_survives_messages_that_expand_a_lot,
+)
 from test_ws_stateful_handler import (
     test_ws_stateful_handler as test_ws_stateful_handler__test_ws_stateful_handler,
 )
@@ -371,6 +374,9 @@ def main() raises:
     ]()
     suite.test[
         test_ws_permessage_deflate__test_context_takeover_respects_max_decompressed_bytes
+    ]()
+    suite.test[
+        test_ws_permessage_deflate__test_context_takeover_survives_messages_that_expand_a_lot
     ]()
     # tests/ws/test_ws_stateful_handler.mojo
     suite.test[test_ws_stateful_handler__test_ws_stateful_handler]()

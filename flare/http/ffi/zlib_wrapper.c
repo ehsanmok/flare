@@ -415,6 +415,69 @@ int flare_pmd_decompress_chunk(intptr_t handle, const void *in_buf, int in_len,
 }
 
 /**
+ * Run a persistent stream over all of ``in_buf`` with Z_SYNC_FLUSH,
+ * draining output into a buffer that grows as needed.
+ *
+ * The *_chunk functions above hand zlib one caller-sized output buffer.
+ * When it filled, the Mojo side doubled it and called again *with the
+ * same input* -- but zlib had already consumed that input and advanced
+ * the stream, so with context takeover the second call corrupted the
+ * compression state: garbage or Z_DATA_ERROR for any message that
+ * expanded past the first guess (repetitive JSON does). Here the input
+ * is fed once and the output drained until zlib has flushed everything.
+ *
+ * @return output length, FLARE_INFLATE_TOO_LARGE past ``max_out``,
+ *         FLARE_INFLATE_NO_MEMORY, or a negative zlib error. On success
+ *         the caller frees ``*out`` with flare_zlib_free().
+ */
+static int64_t flare_pmd_run(z_stream *strm, int inflating,
+                             const void *in_buf, size_t in_len,
+                             void **out, size_t max_out) {
+    *out = NULL;
+    if (strm == NULL) return Z_STREAM_ERROR;
+    size_t cap = in_len * 2 + 64;
+    if (cap > max_out) cap = max_out;
+    if (cap == 0) cap = 1;
+    unsigned char *buf = (unsigned char *)malloc(cap);
+    if (!buf) return FLARE_INFLATE_NO_MEMORY;
+    size_t used = 0;
+    strm->next_in = (Bytef *)in_buf;
+    strm->avail_in = (uInt)in_len;
+    for (;;) {
+        if (used == cap) {
+            if (cap >= max_out) { free(buf); return FLARE_INFLATE_TOO_LARGE; }
+            size_t ncap = cap * 2 > max_out ? max_out : cap * 2;
+            unsigned char *nb = (unsigned char *)realloc(buf, ncap);
+            if (!nb) { free(buf); return FLARE_INFLATE_NO_MEMORY; }
+            buf = nb; cap = ncap;
+        }
+        strm->next_out = buf + used;
+        strm->avail_out = (uInt)(cap - used);
+        int rc = inflating ? inflate(strm, Z_SYNC_FLUSH)
+                           : deflate(strm, Z_SYNC_FLUSH);
+        used = cap - strm->avail_out;
+        if (rc == Z_STREAM_END) break;
+        if (rc != Z_OK && rc != Z_BUF_ERROR) { free(buf); return rc; }
+        /* Done once all input is consumed and zlib left room unused:
+         * everything the flush produced has been written. */
+        if (strm->avail_in == 0 && strm->avail_out > 0) break;
+    }
+    *out = buf;
+    return (int64_t)used;
+}
+
+int64_t flare_pmd_deflate_all(intptr_t handle, const void *in_buf,
+                              size_t in_len, void **out) {
+    return flare_pmd_run((z_stream *)handle, 0, in_buf, in_len, out,
+                         (size_t)1 << 62);
+}
+
+int64_t flare_pmd_inflate_all(intptr_t handle, const void *in_buf,
+                              size_t in_len, void **out, size_t max_out) {
+    return flare_pmd_run((z_stream *)handle, 1, in_buf, in_len, out, max_out);
+}
+
+/**
  * Release a persistent inflate context. Mirrors
  * :func:`flare_pmd_compressor_free`.
  */

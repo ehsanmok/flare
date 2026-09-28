@@ -245,6 +245,28 @@ def test_context_takeover_respects_max_decompressed_bytes() raises:
         var _ = ctx_dec.decompress(Span[UInt8, _](packed))
 
 
+def test_context_takeover_survives_messages_that_expand_a_lot() raises:
+    """A message expanding past the decoder's first output guess (4x) used
+    to be re-fed to an inflate stream that had already consumed it;
+    with context takeover that corrupted this message and every later
+    one."""
+    var ctx_enc = PermessageDeflateContext()
+    var ctx_dec = PermessageDeflateContext()
+    var big = ('{"k":"v","n":1234567890},' * 4000).as_bytes()
+    for _ in range(3):
+        var packed = ctx_enc.compress(Span[UInt8, _](big))
+        assert_true(len(packed) * 4 < len(big))
+        var back = ctx_dec.decompress(Span[UInt8, _](packed))
+        assert_equal(len(back), len(big))
+        for j in range(len(big)):
+            assert_equal(back[j], big[j])
+    var small = String("after").as_bytes()
+    var back2 = ctx_dec.decompress(
+        Span[UInt8, _](ctx_enc.compress(Span[UInt8, _](small)))
+    )
+    assert_equal(len(back2), 5)
+
+
 def main() raises:
     test_parse_simple_offer_round_trips()
     test_parse_handles_flags_kv_quoted_values_multi_offer()
@@ -258,4 +280,5 @@ def main() raises:
     test_context_takeover_compresses_repeated_payload_better_than_no_context()
     test_context_takeover_empty_payload_round_trips()
     test_context_takeover_respects_max_decompressed_bytes()
-    print("test_ws_permessage_deflate: 12 passed")
+    test_context_takeover_survives_messages_that_expand_a_lot()
+    print("test_ws_permessage_deflate: 13 passed")

@@ -63,6 +63,7 @@ review only needs to scrutinise this single file.
 """
 
 from std.ffi import OwnedDLHandle, c_int
+from std.memory import Pointer, unsafe_memcpy
 
 from ..utils.dylib import find_flare_lib, dl_sym
 
@@ -395,6 +396,58 @@ def _do_pmd_compress_chunk(
     return fn_chunk(handle, in_buf, in_len, out_buf, out_cap)
 
 
+def _pmd_run_all(
+    imm lib: OwnedDLHandle,
+    handle: Int,
+    data: Span[UInt8, _],
+    inflating: Bool,
+    max_out: Int,
+) raises -> List[UInt8]:
+    """Feed ``data`` once through a persistent stream and return all of
+    its Z_SYNC_FLUSH output (``flare_pmd_*_all``)."""
+    var out_ptr = List[Int](length=1, fill=0)
+    var n: Int64
+    if inflating:
+        var fn_i = dl_sym[def(Int, Int, Int, Int, Int) thin abi("C") -> Int64](
+            lib, "flare_pmd_inflate_all"
+        )
+        n = fn_i(
+            handle,
+            Int(data.unsafe_ptr()),
+            len(data),
+            Int(out_ptr.unsafe_ptr()),
+            max_out,
+        )
+    else:
+        var fn_d = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> Int64](
+            lib, "flare_pmd_deflate_all"
+        )
+        n = fn_d(
+            handle, Int(data.unsafe_ptr()), len(data), Int(out_ptr.unsafe_ptr())
+        )
+    if n < 0:
+        if n == -101:
+            raise Error(
+                "permessage-deflate: decompressed output exceeded"
+                " max_decompressed_bytes ("
+                + String(max_out)
+                + " bytes)"
+            )
+        raise Error("permessage-deflate: zlib error " + String(n))
+    var out = List[UInt8](length=Int(n), fill=0)
+    if n > 0:
+        unsafe_memcpy(
+            dest=out.unsafe_ptr(),
+            src=Pointer[UInt8, MutUntrackedOrigin](
+                unsafe_from_address=out_ptr[0]
+            ),
+            count=Int(n),
+        )
+    var fn_free = dl_sym[def(Int) thin abi("C") -> None](lib, "flare_zlib_free")
+    fn_free(out_ptr[0])
+    return out^
+
+
 def _do_pmd_compressor_free(imm lib: OwnedDLHandle, handle: Int) raises -> None:
     """Release a persistent deflate context."""
     var fn_free = dl_sym[def(Int) thin abi("C") -> None](
@@ -598,52 +651,21 @@ struct PermessageDeflateContext(Movable):
             var out = List[UInt8]()
             out.append(UInt8(0x00))
             return out^
-        var n = len(data)
-        # Worst-case bound from zlib: srclen + (srclen >> 12) +
-        # (srclen >> 14) + (srclen >> 25) + 13. Add slack for the
-        # sync marker + headroom for the rare expansion case.
-        var cap = n + (n >> 11) + 32 + 64
-        while True:
-            var out = List[UInt8](capacity=cap)
-            out.resize(cap, 0)
-            var written = _do_pmd_compress_chunk(
-                self._lib,
-                self._comp_handle,
-                Int(data.unsafe_ptr()),
-                c_int(n),
-                Int(out.unsafe_ptr()),
-                c_int(cap),
-            )
-            if Int(written) < 0:
-                raise Error(
-                    "permessage-deflate: deflate chunk returned zlib error "
-                    + String(written)
-                )
-            if Int(written) < cap:
-                # Fits; strip the sync marker (RFC 7692 §7.2.1).
-                var w = Int(written)
-                if (
-                    w >= 4
-                    and out[w - 4] == UInt8(0x00)
-                    and out[w - 3] == UInt8(0x00)
-                    and out[w - 2] == UInt8(0xFF)
-                    and out[w - 1] == UInt8(0xFF)
-                ):
-                    out.resize(w - 4, 0)
-                else:
-                    out.resize(w, 0)
-                return out^
-            # Output buffer entirely filled -- doubling is the
-            # only safe response since ``deflate(Z_SYNC_FLUSH)``
-            # may have produced exactly ``cap`` bytes without
-            # reaching the end. The zlib internal state is
-            # already advanced, so we must NOT call deflate
-            # again with the same input; instead grow the buffer
-            # and retry from scratch with a fresh input
-            # iteration. In practice this never triggers for
-            # realistic payloads because the worst-case bound
-            # above is correct; the loop is defensive.
-            cap *= 2
+        # One pass over the persistent stream (see _pmd_run_all): the
+        # output buffer grows in C instead of the input being re-fed to
+        # a stream that had already consumed it.
+        var out = _pmd_run_all(self._lib, self._comp_handle, data, False, 0)
+        # Strip the sync marker (RFC 7692 sec 7.2.1).
+        var w = len(out)
+        if (
+            w >= 4
+            and out[w - 4] == UInt8(0x00)
+            and out[w - 3] == UInt8(0x00)
+            and out[w - 2] == UInt8(0xFF)
+            and out[w - 1] == UInt8(0xFF)
+        ):
+            out.resize(w - 4, 0)
+        return out^
 
     def decompress(mut self, data: Span[UInt8, _]) raises -> List[UInt8]:
         """Decompress one message fragment with context-takeover.
@@ -681,35 +703,14 @@ struct PermessageDeflateContext(Movable):
         with_trailer.append(UInt8(0x00))
         with_trailer.append(UInt8(0xFF))
         with_trailer.append(UInt8(0xFF))
-        var cap = max(n * 4, 4096)
-        if cap > self.max_decompressed_bytes:
-            cap = self.max_decompressed_bytes
-        while True:
-            var out = List[UInt8](capacity=cap)
-            out.resize(cap, 0)
-            var written = _do_pmd_decompress_chunk(
-                self._lib,
-                self._decomp_handle,
-                Int(with_trailer.unsafe_ptr()),
-                c_int(len(with_trailer)),
-                Int(out.unsafe_ptr()),
-                c_int(cap),
-            )
-            if Int(written) < 0:
-                raise Error(
-                    "permessage-deflate: inflate chunk returned zlib error "
-                    + String(written)
-                )
-            if Int(written) < cap:
-                out.resize(Int(written), 0)
-                return out^
-            if cap >= self.max_decompressed_bytes:
-                raise Error(
-                    "permessage-deflate: decompressed output"
-                    " exceeded max_decompressed_bytes ("
-                    + String(self.max_decompressed_bytes)
-                    + " bytes)"
-                )
-            cap *= 2
-            if cap > self.max_decompressed_bytes:
-                cap = self.max_decompressed_bytes
+        # One pass: when a message expanded past the first output guess,
+        # the old loop re-fed the same input to an inflate stream that had
+        # already consumed it, which with context takeover corrupted every
+        # later message too.
+        return _pmd_run_all(
+            self._lib,
+            self._decomp_handle,
+            Span[UInt8, _](with_trailer),
+            True,
+            self.max_decompressed_bytes,
+        )
