@@ -83,12 +83,17 @@ struct QpackDynamicTable(Copyable):
 
     var entries: List[QpackHeader]
     var capacity: UInt64
+    var max_capacity: UInt64
+    """The ceiling :meth:`set_capacity` may raise ``capacity`` to: the
+    SETTINGS_QPACK_MAX_TABLE_CAPACITY this side advertised (RFC 9204
+    sec 3.2.3)."""
     var size: UInt64
     var dropped: UInt64
 
     def __init__(out self, capacity: UInt64 = 0):
         self.entries = List[QpackHeader]()
         self.capacity = capacity
+        self.max_capacity = capacity
         self.size = 0
         self.dropped = 0
 
@@ -100,9 +105,21 @@ struct QpackDynamicTable(Copyable):
         """RFC 9204 section 3.2.2 MaxEntries = floor(capacity / 32)."""
         return self.capacity // _ENTRY_OVERHEAD
 
-    def set_capacity(mut self, cap: UInt64):
+    def set_capacity(mut self, cap: UInt64) raises:
         """Set the table capacity, evicting the oldest entries until the
-        size fits (RFC 9204 section 4.3.1)."""
+        size fits (RFC 9204 section 4.3.1).
+
+        Raises ``QPACK_ENCODER_STREAM_ERROR`` above :attr:`max_capacity`
+        (sec 4.3.1). Any value was accepted, so a peer could grow our
+        dynamic table past the limit we advertised, which is 0 by
+        default, and fill it with inserts of any size."""
+        if cap > self.max_capacity:
+            raise Error(
+                "QPACK_ENCODER_STREAM_ERROR: capacity "
+                + String(cap)
+                + " above the advertised "
+                + String(self.max_capacity)
+            )
         self.capacity = cap
         self._evict_to(cap)
 
@@ -265,7 +282,13 @@ def apply_encoder_instructions_partial(
             var step = _apply_one_encoder_instruction(table, buf, instr_start)
             inserts += step[0]
             consumed = step[1]
-        except:
+        except e:
+            # A real encoder-stream error is a connection error, not a
+            # truncated instruction to retry. It was treated as one, so
+            # a bad instruction stalled the stream while its bytes piled
+            # up in the caller's carry.
+            if "QPACK_ENCODER_STREAM_ERROR" in String(e):
+                raise e^
             # Roll back any partial table mutation is not needed: a single
             # instruction either fully applies (advancing consumed) or
             # raises before mutating. Stop at the instruction boundary.
@@ -288,20 +311,22 @@ def _apply_one_encoder_instruction(
         var name: String
         if is_static:
             if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
-                raise Error("qpack: insert static name index out of range")
+                raise Error(
+                    "QPACK_ENCODER_STREAM_ERROR: static name index out of range"
+                )
             name = stbl[ip.value].name
         else:
             var abs_idx = table.insert_count() - 1 - UInt64(ip.value)
             name = table.get_abs(abs_idx).name
         var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
         if not table.insert(QpackHeader(name, lit[0])):
-            raise Error("qpack: insert exceeds table capacity")
+            raise Error("QPACK_ENCODER_STREAM_ERROR: insert exceeds capacity")
         return Tuple[Int, Int](1, lit[1])
     elif (b0 & UInt8(0x40)) != UInt8(0):
         var name_lit = _decode_string_literal(buf, pos, 5, UInt8(0x20))
         var value_lit = _decode_string_literal(buf, name_lit[1], 7, UInt8(0x80))
         if not table.insert(QpackHeader(name_lit[0], value_lit[0])):
-            raise Error("qpack: insert exceeds table capacity")
+            raise Error("QPACK_ENCODER_STREAM_ERROR: insert exceeds capacity")
         return Tuple[Int, Int](1, value_lit[1])
     elif (b0 & UInt8(0x20)) != UInt8(0):
         var ip = decode_integer(buf, pos, 5)
@@ -312,7 +337,9 @@ def _apply_one_encoder_instruction(
         var abs_idx = table.insert_count() - 1 - UInt64(ip.value)
         var dup = table.get_abs(abs_idx)
         if not table.insert(dup^):
-            raise Error("qpack: duplicate exceeds table capacity")
+            raise Error(
+                "QPACK_ENCODER_STREAM_ERROR: duplicate exceeds capacity"
+            )
         return Tuple[Int, Int](1, ip.offset)
 
 
@@ -572,7 +599,7 @@ struct QpackEncoder(Copyable):
     def __init__(out self, capacity: UInt64 = 0):
         self.table = QpackDynamicTable(capacity)
 
-    def set_capacity(mut self, cap: UInt64, mut enc_stream: List[UInt8]):
+    def set_capacity(mut self, cap: UInt64, mut enc_stream: List[UInt8]) raises:
         encode_set_capacity(enc_stream, cap)
         self.table.set_capacity(cap)
 

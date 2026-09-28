@@ -979,6 +979,14 @@ struct Http3Connection(Copyable, Defaultable):
         )
         self.pending_qpack_increment += result[0]
         var consumed = result[1]
+        # An unfinished instruction is at most one insert, which cannot
+        # exceed the table capacity. More than that waiting is not a
+        # partial instruction.
+        if len(bytes) - consumed > Int(self.qpack_table[].max_capacity) + 64:
+            raise Error(
+                "QPACK_ENCODER_STREAM_ERROR: unparsed encoder-stream bytes"
+                " past the table capacity"
+            )
         if consumed < len(bytes):
             var carry = List[UInt8](capacity=len(bytes) - consumed)
             for k in range(consumed, len(bytes)):

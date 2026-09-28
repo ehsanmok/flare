@@ -97,7 +97,9 @@ def test_apply_encoder_instructions_literal() raises:
     var enc = List[UInt8]()
     encode_set_capacity(enc, 4096)
     encode_insert_with_literal_name(enc, "x-custom", "hello")
-    var t = QpackDynamicTable(0)
+    # Advertised 4096. This built the table with 0 and still accepted
+    # the 4096 capacity, which is the bug test_capacity_above_... pins.
+    var t = QpackDynamicTable(4096)
     var n = apply_encoder_instructions(t, Span[UInt8, _](enc))
     assert_equal(n, 1)
     assert_equal(t.capacity, UInt64(4096))
@@ -193,6 +195,34 @@ def test_blocked_section_raises() raises:
     assert_true(threw)
 
 
+def test_capacity_above_the_advertised_limit_is_refused() raises:
+    """Set Dynamic Table Capacity took any value, so a peer could size
+    our table past the limit we advertised (0 by default) and fill it.
+    It is an encoder-stream error now, and the partial parser no longer
+    swallows it as a truncated instruction."""
+    from flare.qpack.dynamic import (
+        apply_encoder_instructions_partial,
+        encode_set_capacity,
+    )
+
+    var t = QpackDynamicTable(UInt64(0))
+    var stream = List[UInt8]()
+    encode_set_capacity(stream, UInt64(1 << 20))
+    var raised = False
+    try:
+        _ = apply_encoder_instructions_partial(t, Span[UInt8, _](stream))
+    except e:
+        raised = "QPACK_ENCODER_STREAM_ERROR" in String(e)
+    assert_true(raised, "a capacity above the advertised 0 was accepted")
+    assert_equal(Int(t.capacity), 0)
+    # Within the advertised limit is fine.
+    var t2 = QpackDynamicTable(UInt64(4096))
+    var ok_stream = List[UInt8]()
+    encode_set_capacity(ok_stream, UInt64(1024))
+    _ = apply_encoder_instructions_partial(t2, Span[UInt8, _](ok_stream))
+    assert_equal(Int(t2.capacity), 1024)
+
+
 def main() raises:
     test_entry_size()
     test_table_insert_and_index()
@@ -204,4 +234,5 @@ def main() raises:
     test_decoder_stream_instructions()
     test_field_section_dynamic_roundtrip()
     test_blocked_section_raises()
+    test_capacity_above_the_advertised_limit_is_refused()
     print("test_qpack_dynamic: all dynamic-table tests passed")

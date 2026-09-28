@@ -78,6 +78,9 @@ from test_qpack_dynamic import (
 from test_qpack_dynamic import (
     test_blocked_section_raises as test_qpack_dynamic__test_blocked_section_raises,
 )
+from test_qpack_dynamic import (
+    test_capacity_above_the_advertised_limit_is_refused as test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused,
+)
 
 
 def main() raises:
@@ -113,4 +116,7 @@ def main() raises:
     suite.test[test_qpack_dynamic__test_decoder_stream_instructions]()
     suite.test[test_qpack_dynamic__test_field_section_dynamic_roundtrip]()
     suite.test[test_qpack_dynamic__test_blocked_section_raises]()
+    suite.test[
+        test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused
+    ]()
     suite^.run()
