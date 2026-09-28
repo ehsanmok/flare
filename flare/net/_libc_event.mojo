@@ -83,6 +83,9 @@ comptime EV_ONESHOT: UInt16 = 0x0010
 comptime EV_CLEAR: UInt16 = 0x0020
 comptime EV_EOF: UInt16 = 0x8000
 comptime EV_ERROR: UInt16 = 0x4000
+comptime EV_RECEIPT: UInt16 = 0x0040
+"""Report every change back as an EV_ERROR entry whose ``data`` is its
+errno (0 for success), and return no pending events from that call."""
 
 # ``fflags`` bits for EVFILT_USER (cross-thread wakeup).
 comptime NOTE_TRIGGER: UInt32 = 0x01000000
@@ -270,6 +273,18 @@ def _kevent_read_fflags(buf: Pointer[UInt8, _]) -> UInt32:
             buf.unsafe_offset(KEVENT_FFLAGS_OFF + i).unsafe_load()
         ) << UInt32(8 * i)
     return v
+
+
+@always_inline
+def _kevent_read_data(buf: Pointer[UInt8, _]) -> Int64:
+    """Read the ``data`` field from a ``kevent`` buffer: the errno of a
+    change reported with EV_ERROR."""
+    var v: UInt64 = 0
+    for i in range(8):
+        v |= UInt64(
+            buf.unsafe_offset(KEVENT_DATA_OFF + i).unsafe_load()
+        ) << UInt64(8 * i)
+    return Int64(v)
 
 
 @always_inline

@@ -489,6 +489,29 @@ def test_event_flag_helpers() raises:
     assert_true(wake.is_wakeup())
 
 
+def test_many_wakeups_never_block() raises:
+    """The macOS wakeup pipe was blocking: once about 64 KiB of wakeups
+    sat unread, the next wakeup() blocked its caller for good. Linux
+    uses an eventfd, which never fills."""
+    var r = Reactor()
+    for _ in range(100_000):
+        r.wakeup()
+    var out = List[Event]()
+    _ = r.poll(0, out)
+
+
+def test_register_of_a_bad_fd_raises() raises:
+    """The kqueue backend reported a failed EV_ADD in the result list and the result
+    was dropped, so registering a closed fd looked like it worked."""
+    var r = Reactor()
+    var raised = False
+    try:
+        r.register(c_int(100_000), UInt64(7), INTEREST_READ)
+    except:
+        raised = True
+    assert_true(raised, "registered an fd that is not open")
+
+
 def main() raises:
     print("=" * 60)
     print("test_reactor.mojo — Phase 1.2 Reactor abstraction")

@@ -328,6 +328,12 @@ from test_reactor import (
 from test_reactor import (
     test_event_flag_helpers as test_reactor__test_event_flag_helpers,
 )
+from test_reactor import (
+    test_many_wakeups_never_block as test_reactor__test_many_wakeups_never_block,
+)
+from test_reactor import (
+    test_register_of_a_bad_fd_raises as test_reactor__test_register_of_a_bad_fd_raises,
+)
 from test_reactor_shutdown import (
     test_server_config_shutdown_timeout_default as test_reactor_shutdown__test_server_config_shutdown_timeout_default,
 )
@@ -788,6 +794,8 @@ def main() raises:
     suite.test[test_reactor__test_poll_reuses_event_buffer_across_calls]()
     suite.test[test_reactor__test_poll_honors_max_events_cap]()
     suite.test[test_reactor__test_event_flag_helpers]()
+    suite.test[test_reactor__test_many_wakeups_never_block]()
+    suite.test[test_reactor__test_register_of_a_bad_fd_raises]()
     # tests/runtime/test_reactor_shutdown.mojo
     suite.test[
         test_reactor_shutdown__test_server_config_shutdown_timeout_default
