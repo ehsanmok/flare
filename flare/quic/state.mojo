@@ -751,6 +751,67 @@ def handle_frame_buf(
     return parse_frame_into(buf, h)
 
 
+comptime QUIC_PROTOCOL_VIOLATION: UInt64 = 0x0A
+"""RFC 9000 sec 20.1 transport error code."""
+
+
+def frame_allowed_before_1rtt(buf: Span[UInt8, _]) -> Bool:
+    """Whether the frame at the start of ``buf`` may appear in an
+    Initial or Handshake packet (RFC 9000 sec 12.4, table 3).
+
+    Only PADDING, PING, ACK, CRYPTO and the transport CONNECTION_CLOSE
+    are permitted there. Every frame type flare knows fits in one varint
+    byte, so the first byte is the type.
+    """
+    if len(buf) == 0:
+        return True
+    var t = buf[0]
+    return (
+        t == 0x00  # PADDING
+        or t == 0x01  # PING
+        or t == 0x02  # ACK
+        or t == 0x03  # ACK with ECN counts
+        or t == 0x06  # CRYPTO
+        or t == 0x1C  # CONNECTION_CLOSE (transport)
+    )
+
+
+def dispatch_frames(
+    mut conn: Connection,
+    payload: Span[UInt8, _],
+    now_us: UInt64,
+    mut events: ConnectionEvents,
+    before_1rtt: Bool,
+) raises:
+    """Apply every frame in a decrypted packet payload.
+
+    ``before_1rtt`` is set for Initial and Handshake packets. A frame
+    those levels do not permit is a PROTOCOL_VIOLATION connection
+    error (RFC 9000 sec 12.4): the connection is closed and this
+    raises, so the caller drops the packet. The Initial keys come
+    from the public DCID, so without this rule anyone who saw a
+    client's first packet could send STREAM frames at Initial and
+    have the server run them as a request, no handshake needed.
+    """
+    var cursor = 0
+    while cursor < len(payload):
+        if before_1rtt and not frame_allowed_before_1rtt(payload[cursor:]):
+            connection_close(
+                conn,
+                QUIC_PROTOCOL_VIOLATION,
+                "frame type not permitted in Initial or Handshake packets",
+            )
+            raise Error(
+                "QUIC PROTOCOL_VIOLATION: frame type "
+                + String(Int(payload[cursor]))
+                + " before 1-RTT"
+            )
+        var consumed = handle_frame_buf(conn, payload[cursor:], now_us, events)
+        if consumed <= 0:
+            break
+        cursor += consumed
+
+
 def mark_handshake_complete(
     mut conn: Connection, now_us: UInt64, mut events: ConnectionEvents
 ):

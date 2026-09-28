@@ -198,10 +198,14 @@ def test_protect_unprotect_round_trip() raises:
         )
 
 
-def test_handle_packet_drives_state_machine_through_stream_frame() raises:
-    """Build a synth Initial whose plaintext is a STREAM frame
-    on a fresh stream; assert the connection's stream slab grew
-    and the largest-received packet number advanced."""
+def test_initial_carrying_a_stream_frame_is_a_protocol_violation() raises:
+    """An Initial is protected with keys anyone can derive from its
+    DCID, so RFC 9000 sec 12.4 allows only PADDING, PING, ACK, CRYPTO
+    and CONNECTION_CLOSE in it. This test used to assert the opposite:
+    a STREAM frame in an Initial grew the stream slab, which is how a
+    request could run without a handshake."""
+    from flare.quic.state import CONN_STATE_CLOSING
+
     var dcid = _make_cid(UInt8(0x30), 8)
     var scid = _make_cid(UInt8(0x40), 8)
     var stream_bytes = _stream_frame_bytes(UInt64(4), _bytes(72, 73))
@@ -216,29 +220,55 @@ def test_handle_packet_drives_state_machine_through_stream_frame() raises:
         is_server=False,
     )
     var qc = QuicConnection(dcid, scid)
-    var events = qc.handle_packet(
-        Span[UInt8, _](protected), now_us=UInt64(1_000_000)
+    var raised = False
+    try:
+        _ = qc.handle_packet(
+            Span[UInt8, _](protected), now_us=UInt64(1_000_000)
+        )
+    except:
+        raised = True
+    assert_true(raised, "a STREAM frame in an Initial was accepted")
+    assert_equal(len(qc.conn.streams), 0)
+    assert_equal(qc.conn.state, CONN_STATE_CLOSING)
+
+
+def test_handle_packet_applies_a_permitted_initial() raises:
+    """PING + PADDING is what an Initial may carry: it is processed and
+    the largest received packet number advances."""
+    var dcid = _make_cid(UInt8(0x31), 8)
+    var scid = _make_cid(UInt8(0x41), 8)
+    var ping = List[UInt8]()
+    ping.append(UInt8(0x01))
+    var plaintext = _padded_plaintext(ping, 64)
+    var prefix = _build_initial_prefix(dcid, scid, 1, len(plaintext))
+    var protected = protect_initial_packet(
+        Span[UInt8, _](prefix),
+        packet_number=UInt64(5),
+        pn_length=1,
+        plaintext=Span[UInt8, _](plaintext),
+        dcid=dcid,
+        is_server=False,
     )
-    assert_equal(qc.conn.largest_received_packet, UInt64(0))
-    assert_equal(len(events.new_streams), 1)
-    assert_equal(events.new_streams[0], UInt64(4))
-    assert_equal(len(qc.conn.streams), 1)
+    var qc = QuicConnection(dcid, scid)
+    _ = qc.handle_packet(Span[UInt8, _](protected), now_us=UInt64(1_000_000))
+    assert_equal(qc.conn.largest_received_packet, UInt64(5))
 
 
 def test_listener_dispatch_routes_into_handle_packet() raises:
     """End-to-end: dispatch_datagram allocates a new slot for an
     unknown Initial *and* feeds the same datagram through
-    handle_packet on the new slot, so the stream-slab grows in
-    one call."""
+    handle_packet on the new slot, so its packet number is recorded
+    in one call."""
     var listener = _bind_loopback()
     var dcid = _make_cid(UInt8(0x50), 8)
     var scid = _make_cid(UInt8(0x60), 8)
-    var stream_bytes = _stream_frame_bytes(UInt64(0), _bytes(0x41))
-    var plaintext = _padded_plaintext(stream_bytes, 64)
+    var ping = List[UInt8]()
+    ping.append(UInt8(0x01))
+    var plaintext = _padded_plaintext(ping, 64)
     var prefix = _build_initial_prefix(dcid, scid, 1, len(plaintext))
     var protected = protect_initial_packet(
         Span[UInt8, _](prefix),
-        packet_number=UInt64(0),
+        packet_number=UInt64(7),
         pn_length=1,
         plaintext=Span[UInt8, _](plaintext),
         dcid=dcid,
@@ -250,10 +280,9 @@ def test_listener_dispatch_routes_into_handle_packet() raises:
     assert_equal(listener.connection_count(), 1)
     assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), 0)
     var qc = listener.connections[0].copy()
-    assert_equal(qc.conn.largest_received_packet, UInt64(0))
     assert_equal(
-        len(qc.conn.streams),
-        1,
+        qc.conn.largest_received_packet,
+        UInt64(7),
         "dispatch_datagram must drive handle_packet, not just route",
     )
 
@@ -338,9 +367,10 @@ def main() raises:
     test_decode_packet_number_rfc_a3()
     test_decode_packet_number_no_wrap()
     test_protect_unprotect_round_trip()
-    test_handle_packet_drives_state_machine_through_stream_frame()
+    test_initial_carrying_a_stream_frame_is_a_protocol_violation()
+    test_handle_packet_applies_a_permitted_initial()
     test_listener_dispatch_routes_into_handle_packet()
     test_dispatch_garbled_initial_drops_silently()
     test_handle_packet_drops_short_header_silently()
     test_handle_packet_drops_handshake_long_silently()
-    print("test_quic_handle_packet: 8 passed")
+    print("test_quic_handle_packet: 9 passed")

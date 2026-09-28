@@ -753,10 +753,15 @@ struct QuicListener(Movable):
         var events = empty_events()
         var ok = True
         if inbound_lvl == QuicEncryptionLevel.INITIAL:
-            try:
-                events = self.connections[slot].handle_packet(packet, now_us)
-            except:
-                ok = False
+            if self.connections[slot].initial_keys_discarded:
+                ok = False  # RFC 9001 sec 4.9.1
+            else:
+                try:
+                    events = self.connections[slot].handle_packet(
+                        packet, now_us
+                    )
+                except:
+                    ok = False
         elif inbound_lvl == QuicEncryptionLevel.HANDSHAKE:
             if len(self.connections[slot].rx_handshake_secret) == 0:
                 ok = False  # keys not installed yet; drop
@@ -766,8 +771,9 @@ struct QuicListener(Movable):
                         slot, packet, inbound_lvl, local_cid_len
                     )
                     events = self.connections[slot].dispatch_plaintext(
-                        Span[UInt8, _](dec[0]), now_us, dec[1]
+                        Span[UInt8, _](dec[0]), now_us, dec[1], True
                     )
+                    self.connections[slot].initial_keys_discarded = True
                 except:
                     ok = False
         elif inbound_lvl == QuicEncryptionLevel.APPLICATION:
@@ -840,7 +846,14 @@ struct QuicListener(Movable):
             return
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
         self._consume_acks(slot, events)
-        self._route_http3_stream_chunks(slot, events)
+        # Requests only from 1-RTT, or 0-RTT the early guard admitted.
+        # Dispatch used to happen at every level, so a request in an
+        # Initial reached the handler before any handshake.
+        if (
+            inbound_lvl == QuicEncryptionLevel.APPLICATION
+            or inbound_lvl == QuicEncryptionLevel.EARLY_DATA
+        ):
+            self._route_http3_stream_chunks(slot, events)
         self._stash_migration_egress(slot, events)
         # The client echoed our server-initiated PATH_CHALLENGE: the
         # candidate path is validated (RFC 9000 sec 8.2). Promote it to

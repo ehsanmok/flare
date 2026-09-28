@@ -40,6 +40,7 @@ from .state import (
     CONN_STATE_CLOSED,
     Connection,
     ConnectionEvents,
+    dispatch_frames,
     empty_events,
     handle_frame_buf,
     new_connection,
@@ -272,6 +273,12 @@ struct QuicConnection(Copyable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var initial_keys_discarded: Bool
+    """Set once a Handshake packet has decrypted: from then on the
+    server drops Initial packets (RFC 9001 sec 4.9.1). Initial keys
+    come from the public DCID, so accepting Initial for the life of
+    the connection let anyone who had seen that DCID inject into it."""
+
     var early_guard: EarlyDataReplayGuard
     """Per-connection 0-RTT admission control (anti-replay window +
     byte budget). Disabled (budget 0) until the listener installs
@@ -300,6 +307,7 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()
 
     def install_handshake_keys(
@@ -412,15 +420,9 @@ struct QuicConnection(Copyable):
             largest_received_pn=self.conn.largest_received_packet,
             aead_choice=aead_choice,
         )
-        var cursor = 0
-        var payload = Span[UInt8, _](up.payload)
-        while cursor < len(payload):
-            var consumed = handle_frame_buf(
-                self.conn, payload[cursor:], now_us, events
-            )
-            if consumed <= 0:
-                break
-            cursor += consumed
+        dispatch_frames(
+            self.conn, Span[UInt8, _](up.payload), now_us, events, True
+        )
         if up.packet_number > self.conn.largest_received_packet:
             self.conn.largest_received_packet = up.packet_number
         return events^
@@ -447,15 +449,9 @@ struct QuicConnection(Copyable):
             self.conn.largest_received_packet,
             aead_choice=aead_choice,
         )
-        var cursor = 0
-        var payload = Span[UInt8, _](up.payload)
-        while cursor < len(payload):
-            var consumed = handle_frame_buf(
-                self.conn, payload[cursor:], now_us, events
-            )
-            if consumed <= 0:
-                break
-            cursor += consumed
+        dispatch_frames(
+            self.conn, Span[UInt8, _](up.payload), now_us, events, True
+        )
         if up.packet_number > self.conn.largest_received_packet:
             self.conn.largest_received_packet = up.packet_number
         return events^
@@ -485,15 +481,9 @@ struct QuicConnection(Copyable):
             self.local_cid.length(),
             aead_choice=aead_choice,
         )
-        var cursor = 0
-        var payload = Span[UInt8, _](up.payload)
-        while cursor < len(payload):
-            var consumed = handle_frame_buf(
-                self.conn, payload[cursor:], now_us, events
-            )
-            if consumed <= 0:
-                break
-            cursor += consumed
+        dispatch_frames(
+            self.conn, Span[UInt8, _](up.payload), now_us, events, False
+        )
         if up.packet_number > self.conn.largest_received_packet:
             self.conn.largest_received_packet = up.packet_number
         return events^
@@ -503,6 +493,7 @@ struct QuicConnection(Copyable):
         plaintext: Span[UInt8, _],
         now_us: UInt64,
         packet_number: UInt64,
+        before_1rtt: Bool = False,
     ) raises -> ConnectionEvents:
         """Drive already-decrypted frame bytes through the
         sans-I/O state machine.
@@ -514,14 +505,7 @@ struct QuicConnection(Copyable):
         the per-level handlers minus the decrypt step.
         """
         var events = empty_events()
-        var cursor = 0
-        while cursor < len(plaintext):
-            var consumed = handle_frame_buf(
-                self.conn, plaintext[cursor:], now_us, events
-            )
-            if consumed <= 0:
-                break
-            cursor += consumed
+        dispatch_frames(self.conn, plaintext, now_us, events, before_1rtt)
         if packet_number > self.conn.largest_received_packet:
             self.conn.largest_received_packet = packet_number
         return events^

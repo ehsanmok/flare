@@ -337,7 +337,10 @@ from test_quic_handle_packet import (
     test_protect_unprotect_round_trip as test_quic_handle_packet__test_protect_unprotect_round_trip,
 )
 from test_quic_handle_packet import (
-    test_handle_packet_drives_state_machine_through_stream_frame as test_quic_handle_packet__test_handle_packet_drives_state_machine_through_stream_frame,
+    test_initial_carrying_a_stream_frame_is_a_protocol_violation as test_quic_handle_packet__test_initial_carrying_a_stream_frame_is_a_protocol_violation,
+)
+from test_quic_handle_packet import (
+    test_handle_packet_applies_a_permitted_initial as test_quic_handle_packet__test_handle_packet_applies_a_permitted_initial,
 )
 from test_quic_handle_packet import (
     test_listener_dispatch_routes_into_handle_packet as test_quic_handle_packet__test_listener_dispatch_routes_into_handle_packet,
@@ -922,7 +925,10 @@ def main() raises:
     suite.test[test_quic_handle_packet__test_decode_packet_number_no_wrap]()
     suite.test[test_quic_handle_packet__test_protect_unprotect_round_trip]()
     suite.test[
-        test_quic_handle_packet__test_handle_packet_drives_state_machine_through_stream_frame
+        test_quic_handle_packet__test_initial_carrying_a_stream_frame_is_a_protocol_violation
+    ]()
+    suite.test[
+        test_quic_handle_packet__test_handle_packet_applies_a_permitted_initial
     ]()
     suite.test[
         test_quic_handle_packet__test_listener_dispatch_routes_into_handle_packet
