@@ -243,7 +243,7 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 
 | Surface | Where |
 |---|---|
-| `Cookie`, `CookieJar`, `SameSite` | [`cookies.mojo`](../examples/basic/cookies.mojo) |
+| `Cookie`, `CookieJar`, `SameSite`; `Cookie.session(name, value)` for a session cookie with `Path=/`, `Secure`, `HttpOnly`, `SameSite=Lax` | [`cookies.mojo`](../examples/basic/cookies.mojo) |
 | `parse_cookie_header`, `parse_set_cookie_header` (RFC 6265) | [`cookies.mojo`](../examples/basic/cookies.mojo) |
 | `signed_cookie_encode(value, key)` / `signed_cookie_decode(cookie, key)` — HMAC-SHA256 over base64url payload + tag | `flare.http.session` |
 | `signed_cookie_decode_keys(cookie, keys)` — accept any of N keys, for graceful key rotation | `flare.http.session` |
@@ -252,6 +252,14 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 | `BackedSessionStore[B: SessionBackend]` — CSPRNG-id signed cookie + a pluggable `SessionBackend` (`get`/`set`/`delete`/`sweep`) with TTL expiry + `destroy` revocation; `MemorySessionBackend` reference impl; `new_session_id()` (256-bit `/dev/urandom` id) | [`tests/http/test_session.mojo`](../tests/http/test_session.mojo) |
 | `Auth`, `BasicAuth`, `BearerAuth`, `AuthError` | `flare.http.{auth,auth_extract}` |
 | HAProxy PROXY v1 + v2 parser, `ProxyParseError` | `flare.http.proxy_protocol` |
+
+**Changed in v0.11 (breaking).** `Cookie.to_set_cookie_header()` raises
+(and so `Response.set_cookie` does) on a name that is not a token, a value
+outside RFC 6265 cookie-octets -- above all a `;`, which injected attributes
+-- a `Domain` / `Path` with a control byte or `;`, or an unknown `SameSite`.
+`SameSite=None` now also emits `Secure`. `parse_set_cookie_header` reads a
+negative `Max-Age` as "expire now" instead of dropping the sign, and ignores
+a malformed one.
 
 **Changed in v0.11 (breaking).** Every session store now needs a key of
 at least 16 bytes (`MIN_SESSION_KEY_BYTES`) and raises at construction

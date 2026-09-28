@@ -132,6 +132,59 @@ def test_cookies_extractor_empty() raises:
     assert_equal(ck.value.len(), 0)
 
 
+# ── Set-Cookie serialisation is validated ──────────────────────────────────
+
+
+def test_semicolon_in_value_cannot_inject_attributes() raises:
+    from flare.http.cookie import Cookie
+
+    var raised = False
+    try:
+        _ = Cookie("sid", "x; Domain=.evil.com").to_set_cookie_header()
+    except:
+        raised = True
+    assert_true(raised, "a ';' in the value added an attribute")
+
+
+def test_invalid_names_and_paths_are_refused() raises:
+    from flare.http.cookie import Cookie
+
+    for bad in [
+        Cookie("", "v"),
+        Cookie("a b", "v"),
+        Cookie("a", "v", path="/x;y"),
+    ]:
+        var raised = False
+        try:
+            _ = bad.to_set_cookie_header()
+        except:
+            raised = True
+        assert_true(raised, "accepted " + bad.name + "=" + bad.value)
+
+
+def test_samesite_none_implies_secure() raises:
+    from flare.http.cookie import Cookie, SameSite
+
+    var h = Cookie("a", "1", same_site=SameSite.NONE).to_set_cookie_header()
+    assert_true("; Secure" in h, h)
+
+
+def test_session_cookie_has_secure_defaults() raises:
+    from flare.http.cookie import Cookie
+
+    var h = Cookie.session("sid", "abc").to_set_cookie_header()
+    assert_equal(h, "sid=abc; Path=/; Secure; HttpOnly; SameSite=Lax")
+
+
+def test_negative_max_age_means_delete() raises:
+    from flare.http.cookie import parse_set_cookie_header
+
+    var c = parse_set_cookie_header("sid=x; Max-Age=-5")
+    assert_equal(c.max_age, 0)
+    var d = parse_set_cookie_header("sid=x; Max-Age=12abc")
+    assert_equal(d.max_age, -1)
+
+
 def main() raises:
     test_request_cookies_empty()
     test_request_cookies_single_header()
@@ -144,4 +197,9 @@ def main() raises:
     test_response_cookies_roundtrip()
     test_cookies_extractor()
     test_cookies_extractor_empty()
-    print("test_request_cookies: 11 passed")
+    test_semicolon_in_value_cannot_inject_attributes()
+    test_invalid_names_and_paths_are_refused()
+    test_samesite_none_implies_secure()
+    test_session_cookie_has_secure_defaults()
+    test_negative_max_age_means_delete()
+    print("test_request_cookies: 16 passed")

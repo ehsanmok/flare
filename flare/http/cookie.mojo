@@ -68,12 +68,58 @@ struct Cookie(Copyable):
         self.http_only = http_only
         self.same_site = same_site
 
-    def to_set_cookie_header(self) -> String:
+    @staticmethod
+    def session(name: String, value: String) -> Cookie:
+        """A cookie with the attributes a session cookie should have:
+        ``Path=/``, ``Secure``, ``HttpOnly``, ``SameSite=Lax``.
+
+        The plain constructor leaves all three flags off, which is the
+        RFC 6265 default but the wrong one for anything that
+        authenticates a user.
+        """
+        return Cookie(
+            name,
+            value,
+            path="/",
+            secure=True,
+            http_only=True,
+            same_site=SameSite.LAX,
+        )
+
+    def to_set_cookie_header(self) raises -> String:
         """Serialise this cookie as a ``Set-Cookie`` header value.
+
+        Validates against RFC 6265 sec 4.1.1 first. ``;`` is the
+        attribute separator, so a value or path holding one used to
+        inject attributes of the sender's choosing -- ``value =
+        "x; Domain=.evil.com"`` widened the cookie's scope.
+        ``SameSite=None`` implies ``Secure``, which browsers require.
 
         Returns:
             The full ``Set-Cookie`` value string.
+
+        Raises:
+            Error: On an empty or non-token name, a value outside
+                cookie-octet, a ``Domain`` or ``Path`` with a control
+                byte or ``;``, or an unknown ``SameSite``.
         """
+        if self.name.byte_length() == 0 or not _all_token(self.name):
+            raise Error("Set-Cookie: invalid cookie name")
+        if not _is_cookie_value(self.value):
+            raise Error("Set-Cookie: invalid cookie value for " + self.name)
+        if not _is_av_value(self.domain) or not _is_av_value(self.path):
+            raise Error("Set-Cookie: invalid Domain or Path for " + self.name)
+        var same_site = self.same_site
+        if same_site.byte_length() > 0:
+            var ss = same_site.lower()
+            if ss == "strict":
+                same_site = SameSite.STRICT
+            elif ss == "lax":
+                same_site = SameSite.LAX
+            elif ss == "none":
+                same_site = SameSite.NONE
+            else:
+                raise Error("Set-Cookie: invalid SameSite " + same_site)
         var out = self.name + "=" + self.value
         if self.domain.byte_length() > 0:
             out += "; Domain=" + self.domain
@@ -81,17 +127,89 @@ struct Cookie(Copyable):
             out += "; Path=" + self.path
         if self.max_age >= 0:
             out += "; Max-Age=" + String(self.max_age)
-        if self.secure:
+        if self.secure or same_site == SameSite.NONE:
             out += "; Secure"
         if self.http_only:
             out += "; HttpOnly"
-        if self.same_site.byte_length() > 0:
-            out += "; SameSite=" + self.same_site
+        if same_site.byte_length() > 0:
+            out += "; SameSite=" + same_site
         return out^
 
     def to_request_pair(self) -> String:
         """Serialise as ``name=value`` for a ``Cookie`` request header."""
         return self.name + "=" + self.value
+
+
+comptime _MAX_AGE_IGNORED: Int = -(1 << 62)
+
+
+def _parse_max_age(v: String) -> Int:
+    var n = v.byte_length()
+    if n == 0:
+        return _MAX_AGE_IGNORED
+    var p = v.unsafe_ptr()
+    var i = 0
+    var neg = False
+    if p[unsafe_offset=0] == 45:  # '-'
+        neg = True
+        i = 1
+    if i >= n or n - i > 18:
+        return _MAX_AGE_IGNORED
+    var acc = 0
+    while i < n:
+        var c = Int(p[unsafe_offset=i])
+        if c < 48 or c > 57:
+            return _MAX_AGE_IGNORED
+        acc = acc * 10 + (c - 48)
+        i += 1
+    return -acc if neg else acc
+
+
+def _is_token_byte(c: UInt8) -> Bool:
+    if c <= 32 or c >= 127:
+        return False
+    # RFC 9110 separators.
+    for s in String('()<>@,;:\\"/[]?={}').as_bytes():
+        if c == s:
+            return False
+    return True
+
+
+def _all_token(s: String) -> Bool:
+    for c in s.as_bytes():
+        if not _is_token_byte(c):
+            return False
+    return True
+
+
+def _is_cookie_value(s: String) -> Bool:
+    """RFC 6265 cookie-value: cookie-octets, optionally in DQUOTEs."""
+    var b = s.as_bytes()
+    var start = 0
+    var end = len(b)
+    if end >= 2 and b[0] == 34 and b[end - 1] == 34:
+        start = 1
+        end -= 1
+    for i in range(start, end):
+        var c = b[i]
+        if (
+            c == 0x21
+            or (c >= 0x23 and c <= 0x2B)
+            or (c >= 0x2D and c <= 0x3A)
+            or (c >= 0x3C and c <= 0x5B)
+            or (c >= 0x5D and c <= 0x7E)
+        ):
+            continue
+        return False
+    return True
+
+
+def _is_av_value(s: String) -> Bool:
+    """Attribute value: any CHAR except controls and ';'."""
+    for c in s.as_bytes():
+        if c < 32 or c == 127 or c == 59:
+            return False
+    return True
 
 
 def parse_cookie_header(header: String) -> List[Cookie]:
@@ -245,12 +363,13 @@ def parse_set_cookie_header(header: String) -> Cookie:
             elif akey == "path":
                 cookie.path = aval
             elif akey == "max-age":
-                var age = 0
-                for i in range(aval.byte_length()):
-                    var c = Int(aval.unsafe_ptr()[unsafe_offset=i])
-                    if c >= 48 and c <= 57:
-                        age = age * 10 + (c - 48)
-                cookie.max_age = age
+                # RFC 6265 sec 5.2.2: an optional '-' then digits, else
+                # the attribute is ignored; zero or negative means
+                # "expire now". The old loop skipped the sign, so
+                # ``Max-Age=-5`` (a delete) was stored as 5 seconds.
+                var age = _parse_max_age(aval)
+                if age != _MAX_AGE_IGNORED:
+                    cookie.max_age = age if age > 0 else 0
             elif akey == "samesite":
                 cookie.same_site = aval
         else:

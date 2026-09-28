@@ -2315,6 +2315,21 @@ from test_request_cookies import (
 from test_request_cookies import (
     test_cookies_extractor_empty as test_request_cookies__test_cookies_extractor_empty,
 )
+from test_request_cookies import (
+    test_semicolon_in_value_cannot_inject_attributes as test_request_cookies__test_semicolon_in_value_cannot_inject_attributes,
+)
+from test_request_cookies import (
+    test_invalid_names_and_paths_are_refused as test_request_cookies__test_invalid_names_and_paths_are_refused,
+)
+from test_request_cookies import (
+    test_samesite_none_implies_secure as test_request_cookies__test_samesite_none_implies_secure,
+)
+from test_request_cookies import (
+    test_session_cookie_has_secure_defaults as test_request_cookies__test_session_cookie_has_secure_defaults,
+)
+from test_request_cookies import (
+    test_negative_max_age_means_delete as test_request_cookies__test_negative_max_age_means_delete,
+)
 from test_request_factories import (
     test_test_get_basic as test_request_factories__test_test_get_basic,
 )
@@ -5131,6 +5146,13 @@ def main() raises:
     suite.test[test_request_cookies__test_response_cookies_roundtrip]()
     suite.test[test_request_cookies__test_cookies_extractor]()
     suite.test[test_request_cookies__test_cookies_extractor_empty]()
+    suite.test[
+        test_request_cookies__test_semicolon_in_value_cannot_inject_attributes
+    ]()
+    suite.test[test_request_cookies__test_invalid_names_and_paths_are_refused]()
+    suite.test[test_request_cookies__test_samesite_none_implies_secure]()
+    suite.test[test_request_cookies__test_session_cookie_has_secure_defaults]()
+    suite.test[test_request_cookies__test_negative_max_age_means_delete]()
     # tests/http/test_request_factories.mojo
     suite.test[test_request_factories__test_test_get_basic]()
     suite.test[test_request_factories__test_test_get_with_query_string]()
