@@ -37,6 +37,11 @@ from flare.http import (
     Extracted,
 )
 from flare.http.extract import _bad_request_from_error
+from flare.http._reactor.write_path import (
+    build_error_response,
+    serialize_response_into,
+)
+from flare.runtime import DateCache
 from flare.http.server import _parse_http_request_bytes
 from flare.net import SocketAddr
 
@@ -161,6 +166,51 @@ def test_http_server_with_explicit_policy() raises:
     )
     assert_true(srv.config.expose_error_messages)
     srv.close()
+
+
+# ── Nothing caller-authored reaches the status line ────────────────────────
+
+
+def _wire(resp: Response) -> String:
+    var buf = List[UInt8]()
+    var dc = DateCache()
+    serialize_response_into(buf, dc, resp, True)
+    var out = String("")
+    for b in buf:
+        out += chr(Int(b))
+    return out
+
+
+def _head(wire: String) -> String:
+    var end = wire.find("\r\n\r\n")
+    return String(wire[byte = : end + 4])
+
+
+def test_error_message_stays_in_the_body() raises:
+    var resp = build_error_response(400, "bad name\r\nSet-Cookie: pwned=1")
+    var wire = _wire(resp)
+    assert_true(wire.startswith("HTTP/1.1 400 Bad Request\r\n"), wire)
+    assert_false("Set-Cookie" in _head(wire), "header injected: " + wire)
+
+
+def test_handler_reason_with_crlf_is_replaced() raises:
+    var resp = ok("x")
+    resp.reason = "OK\r\nX-Injected: 1"
+    var wire = _wire(resp)
+    assert_true(wire.startswith("HTTP/1.1 200 OK\r\n"), wire)
+    assert_false("X-Injected" in wire, "header injected: " + wire)
+
+
+def test_handler_reason_that_is_clean_is_kept() raises:
+    var resp = ok("x")
+    resp.reason = "Fine Thanks"
+    assert_true(_wire(resp).startswith("HTTP/1.1 200 Fine Thanks\r\n"))
+
+
+def test_out_of_range_status_goes_out_as_500() raises:
+    var resp = ok("x")
+    resp.status = 1000
+    assert_true(_wire(resp).startswith("HTTP/1.1 500 "), _wire(resp))
 
 
 def main() raises:

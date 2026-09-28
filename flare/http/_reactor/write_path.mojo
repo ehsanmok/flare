@@ -148,6 +148,32 @@ def serialize_static_into(
         )
 
 
+def _wire_status(status: Int) -> Int:
+    """A status code fit for the status line: 100-599, else 500."""
+    if status < 100 or status > 599:
+        return 500
+    return status
+
+
+def _wire_reason(resp: Response, status: Int) -> String:
+    """The reason phrase to put on the wire.
+
+    RFC 9112 sec 4 allows only HTAB, SP, VCHAR and obs-text there. A
+    handler-set reason holding anything else -- above all CR or LF, which
+    end the status line -- is replaced by the standard phrase instead of
+    being written verbatim, where it split the response.
+    """
+    var reason = resp.reason
+    if reason.byte_length() == 0 or status != resp.status:
+        return _status_reason(status)
+    var p = reason.unsafe_ptr()
+    for i in range(reason.byte_length()):
+        var c = p[unsafe_offset=i]
+        if (c < 32 and c != 9) or c == 127:
+            return _status_reason(status)
+    return reason
+
+
 def _declared_length(resp: Response) -> Int:
     """The handler's own ``Content-Length``, or -1 when it set none (or
     set one that is not a plain decimal)."""
@@ -193,12 +219,11 @@ def serialize_response_into(
             unknown; ``Content-Length`` is then written only if the
             handler set it.
     """
-    var reason = resp.reason
-    if reason.byte_length() == 0:
-        reason = _status_reason(resp.status)
+    var status = _wire_status(resp.status)
+    var reason = _wire_reason(resp, status)
     var body_len = len(resp.body)
-    var no_length_field = resp.status < 200 or resp.status == 204
-    var no_content = no_length_field or head_request or resp.status == 304
+    var no_length_field = status < 200 or status == 204
+    var no_content = no_length_field or head_request or status == 304
     var length_value = body_len
     if no_content:
         var declared = _declared_length(resp)
@@ -231,7 +256,7 @@ def serialize_response_into(
     #   "Date: " = 6, date_bytes, "\r\n" = 2
     #   "Connection: keep-alive\r\n" = 24  /  "Connection: close\r\n" = 19
     #   "\r\n" = 2 (header terminator), then body
-    var total = 9 + _decimal_digits(resp.status) + 1 + reason.byte_length() + 2
+    var total = 9 + _decimal_digits(status) + 1 + reason.byte_length() + 2
     for i in range(resp.headers.len()):
         var k = resp.headers._keys[i]
         # Case-insensitive skip of Content-Length, Connection, and Date
@@ -254,7 +279,7 @@ def serialize_response_into(
     var off = 0
 
     off = _put_str(write_buf, off, "HTTP/1.1 ")
-    off = _put_int(write_buf, off, resp.status)
+    off = _put_int(write_buf, off, status)
     off = _put_str(write_buf, off, " ")
     off = _put_str(write_buf, off, reason)
     off = _put_str(write_buf, off, "\r\n")
@@ -305,16 +330,15 @@ def serialize_response_headers_chunked_into(
     so it uses the append-based writer rather than the single-pass
     exact-size writer ``serialize_response_into`` uses.
     """
-    var reason = resp.reason
-    if reason.byte_length() == 0:
-        reason = _status_reason(resp.status)
+    var status = _wire_status(resp.status)
+    var reason = _wire_reason(resp, status)
     date_cache.refresh()
     var date_bytes = date_cache.current_bytes()
 
     write_buf.clear()
     var wire = write_buf^
     _append_str(wire, "HTTP/1.1 ")
-    _append_str(wire, String(resp.status))
+    _append_str(wire, String(status))
     _append_str(wire, " ")
     _append_str(wire, reason)
     _append_str(wire, "\r\n")
@@ -350,9 +374,13 @@ def build_error_response(status: Int, reason: String) -> Response:
     """Build a minimal text/plain error response. The caller threads
     the result through :func:`serialize_response_into` to queue it
     onto the wire.
+
+    ``reason`` may be handler-authored text (``HttpStatusError`` or, with
+    ``expose_error_messages``, any error string), so it goes in the body
+    only. The status line carries the standard phrase for ``status``.
     """
     var body_str = String(status) + " " + reason
-    var resp = Response(status=status, reason=reason)
+    var resp = Response(status=status)
     var body_bytes = body_str.as_bytes()
     for i in range(len(body_bytes)):
         resp.body.append(body_bytes[i])

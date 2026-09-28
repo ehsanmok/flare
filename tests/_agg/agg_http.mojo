@@ -3048,6 +3048,18 @@ from test_server_error_sanitisation import (
 from test_server_error_sanitisation import (
     test_http_server_with_explicit_policy as test_server_error_sanitisation__test_http_server_with_explicit_policy,
 )
+from test_server_error_sanitisation import (
+    test_error_message_stays_in_the_body as test_server_error_sanitisation__test_error_message_stays_in_the_body,
+)
+from test_server_error_sanitisation import (
+    test_handler_reason_with_crlf_is_replaced as test_server_error_sanitisation__test_handler_reason_with_crlf_is_replaced,
+)
+from test_server_error_sanitisation import (
+    test_handler_reason_that_is_clean_is_kept as test_server_error_sanitisation__test_handler_reason_that_is_clean_is_kept,
+)
+from test_server_error_sanitisation import (
+    test_out_of_range_status_goes_out_as_500 as test_server_error_sanitisation__test_out_of_range_status_goes_out_as_500,
+)
 from test_server_handler import (
     test_serve_with_struct_handler as test_server_handler__test_serve_with_struct_handler,
 )
@@ -5350,6 +5362,18 @@ def main() raises:
     ]()
     suite.test[
         test_server_error_sanitisation__test_http_server_with_explicit_policy
+    ]()
+    suite.test[
+        test_server_error_sanitisation__test_error_message_stays_in_the_body
+    ]()
+    suite.test[
+        test_server_error_sanitisation__test_handler_reason_with_crlf_is_replaced
+    ]()
+    suite.test[
+        test_server_error_sanitisation__test_handler_reason_that_is_clean_is_kept
+    ]()
+    suite.test[
+        test_server_error_sanitisation__test_out_of_range_status_goes_out_as_500
     ]()
     # tests/http/test_server_handler.mojo
     suite.test[test_server_handler__test_serve_with_struct_handler]()
