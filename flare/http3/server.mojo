@@ -356,6 +356,93 @@ struct _Http3EventCollector(Http3RequestEventHandler, Movable):
 # ── Per-connection driver ──────────────────────────────────────────────
 
 
+comptime _MAX_OUT_OF_ORDER_BYTES: Int = 1 << 21
+"""Most stream bytes held ahead of a gap, per stream (2 MiB)."""
+
+
+struct _StreamReassembly(Copyable, Defaultable):
+    """Offset-ordered reassembly for one peer stream.
+
+    QUIC STREAM frames carry an offset and may arrive out of order,
+    duplicated or overlapping (retransmits). The server fed each one
+    straight to the h3 reader as if it followed the last, so a reordered
+    request was parsed from scrambled bytes and a duplicate was parsed
+    twice. :meth:`push` hands back only the bytes that now follow the
+    contiguous prefix, holding anything past a gap until it fills.
+    """
+
+    var next_offset: UInt64
+    var pending: Dict[UInt64, List[UInt8]]
+    var pending_bytes: Int
+    var fin_offset: Optional[UInt64]
+    var fin_signaled: Bool
+
+    def __init__(out self):
+        self.next_offset = 0
+        self.pending = Dict[UInt64, List[UInt8]]()
+        self.pending_bytes = 0
+        self.fin_offset = None
+        self.fin_signaled = False
+
+    def push(
+        mut self, offset: UInt64, data: Span[UInt8, _], fin: Bool
+    ) raises -> List[UInt8]:
+        """Take one STREAM frame; return the bytes that are now
+        contiguous, in order. Raises on an inconsistent final size, on
+        bytes past it, or past :data:`_MAX_OUT_OF_ORDER_BYTES` held."""
+        var end = offset + UInt64(len(data))
+        if fin:
+            if (
+                self.fin_offset and end != self.fin_offset.value()
+            ) or end < self.next_offset:
+                raise Error("h3: inconsistent QUIC final size")
+            self.fin_offset = Optional(end)
+        if self.fin_offset and end > self.fin_offset.value():
+            raise Error("h3: stream bytes beyond the final size")
+        var out = List[UInt8]()
+        if end <= self.next_offset:
+            return out^  # wholly a duplicate
+        if offset > self.next_offset:
+            if offset not in self.pending:
+                if self.pending_bytes + len(data) > _MAX_OUT_OF_ORDER_BYTES:
+                    raise Error("h3: too many out-of-order stream bytes")
+                self.pending[offset] = List[UInt8](data)
+                self.pending_bytes += len(data)
+            return out^
+        out.extend(data[Int(self.next_offset - offset) :])
+        self.next_offset = end
+        var progressed = True
+        while progressed:
+            progressed = False
+            var chosen = Optional[UInt64](None)
+            for entry in self.pending.items():
+                if entry.key <= self.next_offset:
+                    chosen = Optional(entry.key)
+                    break
+            if chosen:
+                var key = chosen.value()
+                var chunk = self.pending.pop(key)
+                self.pending_bytes -= len(chunk)
+                var cend = key + UInt64(len(chunk))
+                if cend > self.next_offset:
+                    out.extend(
+                        Span[UInt8, _](chunk)[Int(self.next_offset - key) :]
+                    )
+                    self.next_offset = cend
+                progressed = True
+        return out^
+
+    def take_fin(mut self) -> Bool:
+        """``True`` exactly once, when every byte up to the final size
+        has been delivered."""
+        if self.fin_signaled or not self.fin_offset:
+            return False
+        if self.next_offset < self.fin_offset.value():
+            return False
+        self.fin_signaled = True
+        return True
+
+
 struct Http3Connection(Copyable, Defaultable):
     """Per-connection HTTP/3 server driver.
 
@@ -453,6 +540,20 @@ struct Http3Connection(Copyable, Defaultable):
     holds the maximum stream id the peer will accept. Stream ids
     >= this value are aborted by the H3 layer."""
 
+    var reassembly: Dict[Int, _StreamReassembly]
+    """Per-stream offset reassembly in front of the readers; see
+    :meth:`feed_stream_frame`."""
+
+    var closed_request_streams: Dict[Int, Bool]
+    """Client request streams answered and closed above
+    :attr:`closed_request_floor`. A retransmitted STREAM frame for a
+    stream the server had already answered found no state, opened it
+    afresh and ran the request a second time."""
+
+    var closed_request_floor: Int
+    """Every client bidi stream id below this is closed. Advanced as
+    streams close in order, so the tombstone set stays small."""
+
     var peer_uni_buffers: Dict[Int, List[UInt8]]
     """Per-uni-stream inbound buffer. The stream-type varint may
     span multiple chunks (it's at most 8 bytes but the QUIC
@@ -495,6 +596,9 @@ struct Http3Connection(Copyable, Defaultable):
         self.peer_settings_qpack_blocked_streams = UInt64(0)
         self.peer_settings_enable_connect_protocol = False
         self.peer_goaway_max_stream_id = UInt64((1 << 63) - 1)
+        self.reassembly = Dict[Int, _StreamReassembly]()
+        self.closed_request_streams = Dict[Int, Bool]()
+        self.closed_request_floor = 0
         self.peer_uni_buffers = Dict[Int, List[UInt8]]()
         self.peer_uni_kinds = Dict[Int, Int]()
         self.qpack_table = ArcPointer[QpackDynamicTable](
@@ -538,6 +642,56 @@ struct Http3Connection(Copyable, Defaultable):
         keep parser state around for a stream that's done)."""
         if stream_id in self.streams:
             _ = self.streams.pop(stream_id)
+        if stream_id in self.reassembly:
+            _ = self.reassembly.pop(stream_id)
+        if (stream_id & 0x3) == 0 and stream_id >= self.closed_request_floor:
+            self.closed_request_streams[stream_id] = True
+            while self.closed_request_floor in self.closed_request_streams:
+                _ = self.closed_request_streams.pop(self.closed_request_floor)
+                self.closed_request_floor += 4
+
+    def is_closed_request_stream(self, stream_id: Int) -> Bool:
+        """Whether ``stream_id`` is a client request stream the server
+        has already answered and closed."""
+        if (stream_id & 0x3) != 0:
+            return False
+        return (
+            stream_id < self.closed_request_floor
+            or stream_id in self.closed_request_streams
+        )
+
+    def feed_stream_frame(
+        mut self,
+        stream_id: Int,
+        offset: UInt64,
+        data: Span[UInt8, _],
+        fin: Bool,
+    ) raises:
+        """Feed one QUIC STREAM frame, by offset.
+
+        Bytes reach the h3 readers in order, once each; FIN is signalled
+        only when every byte up to the final size has arrived. Frames
+        for a request stream already answered are dropped. Uni streams
+        go to :meth:`feed_uni_stream_chunk`, bidi streams to
+        :meth:`feed_stream_chunk` and :meth:`signal_end_of_stream`.
+        """
+        var is_uni = (stream_id & 0x2) != 0
+        if not is_uni and self.is_closed_request_stream(stream_id):
+            return
+        if stream_id not in self.reassembly:
+            self.reassembly[stream_id] = _StreamReassembly()
+        var ready: List[UInt8]
+        var fin_now: Bool
+        ref r = self.reassembly[stream_id]
+        ready = r.push(offset, data, fin)
+        fin_now = r.take_fin()
+        if len(ready) > 0:
+            if is_uni:
+                self.feed_uni_stream_chunk(stream_id, ready^)
+            else:
+                self.feed_stream_chunk(stream_id, ready^)
+        if fin_now and not is_uni:
+            self.signal_end_of_stream(stream_id)
 
     def has_stream(self, stream_id: Int) -> Bool:
         """Whether the driver currently tracks a carrier for

@@ -136,6 +136,12 @@ from test_h3_dispatch import (
 from test_h3_dispatch import (
     test_response_drops_connection_specific_fields as test_h3_dispatch__test_response_drops_connection_specific_fields,
 )
+from test_h3_dispatch import (
+    test_stream_frames_are_reassembled_by_offset as test_h3_dispatch__test_stream_frames_are_reassembled_by_offset,
+)
+from test_h3_dispatch import (
+    test_retransmit_after_the_response_does_not_rerun_the_request as test_h3_dispatch__test_retransmit_after_the_response_does_not_rerun_the_request,
+)
 from test_h3_end_to_end import (
     test_get_request_dispatches_through_handler as test_h3_end_to_end__test_get_request_dispatches_through_handler,
 )
@@ -383,6 +389,10 @@ def main() raises:
     ]()
     suite.test[
         test_h3_dispatch__test_response_drops_connection_specific_fields
+    ]()
+    suite.test[test_h3_dispatch__test_stream_frames_are_reassembled_by_offset]()
+    suite.test[
+        test_h3_dispatch__test_retransmit_after_the_response_does_not_rerun_the_request
     ]()
     # tests/h3/test_h3_end_to_end.mojo
     suite.test[

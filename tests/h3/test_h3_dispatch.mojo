@@ -323,6 +323,40 @@ def test_response_drops_connection_specific_fields() raises:
     assert_true("x-keep" in names)
 
 
+def test_stream_frames_are_reassembled_by_offset() raises:
+    """STREAM data was fed to the reader in arrival order, whatever its
+    offset, so a reordered request was parsed from scrambled bytes and
+    FIN could land before the bytes it ends."""
+    var c = Http3Connection()
+    var req = _build_get_request_bytes("/reordered")
+    var cut = len(req) // 2
+    var tail = List[UInt8](Span[UInt8, _](req)[cut:])
+    var head = List[UInt8](Span[UInt8, _](req)[:cut])
+    c.feed_stream_frame(0, UInt64(cut), Span[UInt8, _](tail), True)
+    assert_equal(len(c.take_completed_streams()), 0, "completed early")
+    c.feed_stream_frame(0, UInt64(0), Span[UInt8, _](head), False)
+    c.feed_stream_frame(0, UInt64(0), Span[UInt8, _](head), False)  # dup
+    var ready = c.take_completed_streams()
+    assert_equal(len(ready), 1)
+    assert_equal(c.take_request(0).url, String("/reordered"))
+
+
+def test_retransmit_after_the_response_does_not_rerun_the_request() raises:
+    """Closing a stream forgot it, so a retransmitted STREAM frame that
+    crossed our ACK opened it again and the handler ran twice."""
+    var c = Http3Connection()
+    var req = _build_get_request_bytes("/once")
+    c.feed_stream_frame(0, UInt64(0), Span[UInt8, _](req), True)
+    assert_equal(len(c.take_completed_streams()), 1)
+    _ = c.take_request(0)
+    c.emit_response(0, ok("done"))
+    _ = c.take_response_frames(0)
+    c.close_request_stream(0)
+    c.feed_stream_frame(0, UInt64(0), Span[UInt8, _](req), True)
+    assert_false(c.has_stream(0), "a closed stream was reopened")
+    assert_equal(len(c.take_completed_streams()), 0)
+
+
 def main() raises:
     test_feed_stream_chunk_implicit_open()
     test_get_request_surfaces_after_fin()
@@ -337,4 +371,6 @@ def main() raises:
     test_take_request_keeps_repeats_and_joins_cookies()
     test_request_without_pseudo_headers_is_refused()
     test_response_drops_connection_specific_fields()
-    print("test_h3_dispatch: 13 passed")
+    test_stream_frames_are_reassembled_by_offset()
+    test_retransmit_after_the_response_does_not_rerun_the_request()
+    print("test_h3_dispatch: 15 passed")

@@ -1405,17 +1405,16 @@ struct QuicListener(Movable):
         # per-request CPU cost under stream concurrency.
         ref h3 = self.http3_connections[slot]
         for i in range(len(events.stream_chunks)):
-            var sid = Int(events.stream_chunks[i].stream_id)
-            var is_uni = (sid & 0x2) != 0
-            var is_fin = events.stream_chunks[i].fin
-            var payload = events.stream_chunks[i].data.copy()
-            if len(payload) > 0:
-                if is_uni:
-                    h3.feed_uni_stream_chunk(sid, payload^)
-                else:
-                    h3.feed_stream_chunk(sid, payload^)
-            if is_fin and not is_uni:
-                h3.signal_end_of_stream(sid)
+            # By offset: the reassembler orders, dedupes and holds back
+            # FIN until the stream is whole, and drops frames for a
+            # request stream already answered (a retransmit crossing
+            # our ACK used to run the request again).
+            h3.feed_stream_frame(
+                Int(events.stream_chunks[i].stream_id),
+                events.stream_chunks[i].offset,
+                Span[UInt8, _](events.stream_chunks[i].data),
+                events.stream_chunks[i].fin,
+            )
 
     def take_http3_completed_streams(self, slot: Int) raises -> List[Int]:
         """Return the stream ids ready for handler dispatch on
