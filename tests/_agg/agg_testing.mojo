@@ -18,6 +18,9 @@ from test_fork_server import (
 from test_fork_server import (
     test_fork_server_router_handler_only as test_fork_server__test_fork_server_router_handler_only,
 )
+from test_fork_server import (
+    test_kill_refuses_group_and_broadcast_pids as test_fork_server__test_kill_refuses_group_and_broadcast_pids,
+)
 from test_h2c_test_client import (
     test_get_round_trips_over_h2 as test_h2c_test_client__test_get_round_trips_over_h2,
 )
@@ -53,6 +56,7 @@ def main() raises:
     suite.test[test_fork_server__test_fork_server_bare_function_overload]()
     suite.test[test_fork_server__test_fork_server_handler_struct_overload]()
     suite.test[test_fork_server__test_fork_server_router_handler_only]()
+    suite.test[test_fork_server__test_kill_refuses_group_and_broadcast_pids]()
     # tests/testing/test_h2c_test_client.mojo
     suite.test[test_h2c_test_client__test_get_round_trips_over_h2]()
     suite.test[test_h2c_test_client__test_post_body_flows_over_h2]()

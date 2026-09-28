@@ -101,9 +101,17 @@ def kill(pid: Int, sig: Int) -> Int:
         sig: Signal number; pass :data:`SIGKILL` / :data:`SIGTERM`
              / :data:`SIGINT`.
 
+    Only a single process is signalled. ``pid <= 0`` returns ``-1``
+    without calling ``kill(2)``: there ``0`` means the caller's process
+    group and ``-1`` every process the user may signal, and the usual
+    way to reach them is a failed ``fork()``'s ``-1`` passed straight
+    through.
+
     Returns:
         ``0`` on success, ``-1`` on failure.
     """
+    if pid <= 0:
+        return -1
     return Int(external_call["kill", c_int](c_int(pid), c_int(sig)))
 
 

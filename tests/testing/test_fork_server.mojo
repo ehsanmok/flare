@@ -80,7 +80,22 @@ def test_fork_server_router_handler_only() raises:
     kill_forked_server(pid)
 
 
+def test_kill_refuses_group_and_broadcast_pids() raises:
+    """A failed fork's -1 reached kill(-1, SIGKILL), which signals every
+    process the user owns. Signal 0 only checks permission, so this
+    probes the guard without sending anything."""
+    from flare.utils import kill
+
+    assert_equal(kill(-1, 0), -1)
+    assert_equal(kill(0, 0), -1)
+    # kill_forked_server(-1) goes through the same guard. It is not
+    # called here: on the unguarded code it SIGKILLs the whole session.
+
+
 def main() raises:
+    test_kill_refuses_group_and_broadcast_pids()
+    print("OK test_kill_refuses_group_and_broadcast_pids")
+
     test_fork_server_bare_function_overload()
     print("OK test_fork_server_bare_function_overload")
 

@@ -83,6 +83,10 @@ def fork_server(
             parent only ever sees the PID.
     """
     var pid = fork()
+    if pid < 0:
+        # It returned -1 to the caller, whose kill_forked_server(-1) then
+        # sent SIGKILL to every process the user could signal.
+        raise Error("fork_server: fork() failed")
     if pid == 0:
         try:
             srv.serve(handler)
@@ -121,6 +125,10 @@ def fork_server[
         Error: If ``fork(2)`` fails.
     """
     var pid = fork()
+    if pid < 0:
+        # It returned -1 to the caller, whose kill_forked_server(-1) then
+        # sent SIGKILL to every process the user could signal.
+        raise Error("fork_server: fork() failed")
     if pid == 0:
         try:
             srv.serve(handler^)
@@ -137,5 +145,7 @@ def kill_forked_server(pid: Int):
     Args:
         pid: The PID returned by :func:`fork_server`.
     """
+    if pid <= 0:
+        return
     _ = kill(pid, SIGKILL)
     waitpid(pid)
