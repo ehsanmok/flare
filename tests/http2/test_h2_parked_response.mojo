@@ -168,5 +168,69 @@ def test_whole_body_survives_the_park() raises:
     assert_equal(sent, _BODY)
 
 
+def _connection_with_stream(sid: Int) raises -> Http2Connection:
+    var c = Http2Connection()
+    var preface = List[UInt8](String(H2_PREFACE).as_bytes())
+    c.feed(Span[UInt8, _](preface))
+    var settings = Frame()
+    settings.header.type = FrameType.SETTINGS()
+    c.feed(Span[UInt8, _](encode_frame(settings)))
+    c.feed(Span[UInt8, _](_get_frame(sid)))
+    _ = c.take_completed_streams()
+    _ = c.drain()
+    return c^
+
+
+def _largest_data_frame(bytes: List[UInt8]) raises -> Int:
+    var rest = bytes.copy()
+    var biggest = 0
+    while True:
+        var got = parse_frame(Span[UInt8, _](rest))
+        if not got:
+            break
+        var f = got.value().copy()
+        if f.header.type.value == FrameType.DATA().value:
+            biggest = max(biggest, f.header.length)
+        var consumed = 9 + f.header.length
+        var tail = List[UInt8](capacity=len(rest) - consumed)
+        for k in range(consumed, len(rest)):
+            tail.append(rest[k])
+        rest = tail^
+    return biggest
+
+
+def test_response_with_trailers_is_flow_controlled() raises:
+    """Every gRPC response has trailers, and trailers used to force the
+    one-shot framing: one oversized DATA frame, window ignored."""
+    var c = _connection_with_stream(1)
+    var resp = Response(Status.OK)
+    resp.body = List[UInt8](length=_BODY, fill=UInt8(0x61))
+    resp.trailers.set("grpc-status", "0")
+    c.emit_response(1, resp^)
+    var first = c.drain()
+    var t1 = _tally(first)
+    assert_equal(t1.data_bytes, 65535, "sent more than the window allowed")
+    assert_true(_largest_data_frame(first) <= 16384, "oversized DATA frame")
+    assert_true(not t1.end_stream)
+    c.feed(Span[UInt8, _](_window_update(1, 65535)))
+    c.feed(Span[UInt8, _](_window_update(0, 65535)))
+    c.pump_pending()
+    var t2 = _tally(c.drain())
+    assert_equal(t2.data_bytes, _BODY - 65535)
+    assert_equal(t2.headers, 1, "the trailers go out after the body")
+    assert_true(t2.end_stream)
+
+
+def test_small_responses_spend_the_window() raises:
+    """A body that fits still consumes the window; otherwise concurrent
+    responses all passed against the same stale budget."""
+    var c = _connection_with_stream(1)
+    var before = c.conn.send_window
+    var resp = Response(Status.OK)
+    resp.body = List[UInt8](length=1000, fill=UInt8(0x61))
+    c.emit_response(1, resp^)
+    assert_equal(c.conn.send_window, before - 1000)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

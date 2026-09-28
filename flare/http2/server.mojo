@@ -136,6 +136,10 @@ struct Http2Connection(Defaultable, Movable):
     is re-pumped when a WINDOW_UPDATE arrives."""
     var pending_pos: Dict[Int, Int]
     """Offset already flushed out of the matching ``pending_body``."""
+    var pending_trailers_k: Dict[Int, List[String]]
+    """Trailer names to send once the matching ``pending_body`` drains."""
+    var pending_trailers_v: Dict[Int, List[String]]
+    """Trailer values, parallel to ``pending_trailers_k``."""
 
     def __init__(out self):
         """Default-construct with :class:`Http2Config` defaults.
@@ -152,6 +156,8 @@ struct Http2Connection(Defaultable, Movable):
         self.config = Http2Config()
         self.pending_body = Dict[Int, List[UInt8]]()
         self.pending_pos = Dict[Int, Int]()
+        self.pending_trailers_k = Dict[Int, List[String]]()
+        self.pending_trailers_v = Dict[Int, List[String]]()
 
     @staticmethod
     def with_config(var config: Http2Config) raises -> Http2Connection:
@@ -537,7 +543,13 @@ struct Http2Connection(Defaultable, Movable):
         # Only taken when the body does not fit; the common case keeps
         # the one-shot framing below, END_STREAM riding the single DATA
         # frame, so the wire shape is unchanged for ordinary responses.
-        if len(resp.trailers._keys) == 0 and len(resp.body) > 0:
+        #
+        # Trailers ride the same path, sent once the body has drained.
+        # They used to force the one-shot framing whatever the body size,
+        # and every gRPC response has trailers, so a gRPC body over 16 KiB
+        # went out as one oversized DATA frame (FRAME_SIZE_ERROR) and
+        # ignored the peer's window (FLOW_CONTROL_ERROR).
+        if len(resp.body) > 0:
             var st = self.conn.streams[sid].copy()
             var budget = (
                 self.conn.send_window if self.conn.send_window
@@ -549,13 +561,18 @@ struct Http2Connection(Defaultable, Movable):
             )
             if too_big:
                 var body = resp.body.copy()
+                var tk = resp.trailers._keys.copy()
+                var tv = resp.trailers._values.copy()
                 self.begin_stream_response(sid, resp^)
                 var n = self.queue_stream_data(sid, Span[UInt8, _](body))
                 if n < len(body):
                     self.pending_body[sid] = body^
                     self.pending_pos[sid] = n
+                    if len(tk) > 0:
+                        self.pending_trailers_k[sid] = tk^
+                        self.pending_trailers_v[sid] = tv^
                     return  # open until the remainder drains
-                self.end_stream_response(sid, List[String](), List[String]())
+                self.end_stream_response(sid, tk, tv)
                 return
         # Build HpackHeader list from the response's HeaderMap.
         # HTTP/2 forbids ``Connection`` / ``Transfer-Encoding`` / ``Keep-Alive``
@@ -611,6 +628,13 @@ struct Http2Connection(Defaultable, Movable):
                 self.outbox.append(bytes[j])
         var s = self.conn.streams[sid].copy()
         s.state = StreamState.CLOSED()
+        # The body fit the window, and it still spends it: without this
+        # the windows never shrank, so concurrent small responses each
+        # passed the check against the same stale budget, and after ~2
+        # GiB the peer's WINDOW_UPDATEs pushed the counter past 2^31-1
+        # and we sent GOAWAY to a healthy peer.
+        s.send_window -= len(resp.body)
+        self.conn.send_window -= len(resp.body)
         self.conn.streams[sid] = s^
 
     def pump_pending(mut self) raises:
@@ -634,7 +658,12 @@ struct Http2Connection(Defaultable, Movable):
             var n = self.queue_parked_body(sid, Span(body), pos)
             if pos + n >= total:
                 _ = self.pending_pos.pop(sid)
-                self.end_stream_response(sid, List[String](), List[String]())
+                var tk = List[String]()
+                var tv = List[String]()
+                if sid in self.pending_trailers_k:
+                    tk = self.pending_trailers_k.pop(sid)
+                    tv = self.pending_trailers_v.pop(sid)
+                self.end_stream_response(sid, tk, tv)
             else:
                 self.pending_body[sid] = body^
                 self.pending_pos[sid] = pos + n

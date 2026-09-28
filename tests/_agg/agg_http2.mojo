@@ -204,6 +204,12 @@ from test_h2_parked_response import (
 from test_h2_parked_response import (
     test_whole_body_survives_the_park as test_h2_parked_response__test_whole_body_survives_the_park,
 )
+from test_h2_parked_response import (
+    test_response_with_trailers_is_flow_controlled as test_h2_parked_response__test_response_with_trailers_is_flow_controlled,
+)
+from test_h2_parked_response import (
+    test_small_responses_spend_the_window as test_h2_parked_response__test_small_responses_spend_the_window,
+)
 from test_h2_per_stream_cancel import (
     test_rst_stream_flips_only_target_cell as test_h2_per_stream_cancel__test_rst_stream_flips_only_target_cell,
 )
@@ -501,6 +507,10 @@ def main() raises:
     ]()
     suite.test[test_h2_parked_response__test_parked_response_sends_one_head]()
     suite.test[test_h2_parked_response__test_whole_body_survives_the_park]()
+    suite.test[
+        test_h2_parked_response__test_response_with_trailers_is_flow_controlled
+    ]()
+    suite.test[test_h2_parked_response__test_small_responses_spend_the_window]()
     # tests/http2/test_h2_per_stream_cancel.mojo
     suite.test[
         test_h2_per_stream_cancel__test_rst_stream_flips_only_target_cell
