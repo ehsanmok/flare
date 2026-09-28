@@ -183,6 +183,64 @@ def test_fileserver_index_html_for_dir() raises:
     assert_equal(resp.headers.get("content-type"), "text/html; charset=utf-8")
 
 
+# ── Paths, not path-plus-query; regular files under root only ─────────────
+
+
+def test_fileserver_ignores_the_query_string() raises:
+    var dir = _tmpdir("q1")
+    _write(dir + "/app.js", "js")
+    var fs = FileServer.new(dir)
+    var resp = fs.serve(Request(method=Method.GET, url="/app.js?v=3#x"))
+    assert_equal(resp.status, 200)
+    assert_equal(resp.text(), "js")
+
+
+def test_fileserver_directory_is_404_not_500() raises:
+    var dir = _tmpdir("q2")
+    var sub = dir + "/sub"
+    if not os_path.exists(sub):
+        mkdir(sub)
+    var fs = FileServer.new(dir)
+    assert_equal(fs.serve(Request(method=Method.GET, url="/sub")).status, 404)
+
+
+def test_fileserver_symlink_out_of_root_is_404() raises:
+    from std.ffi import external_call, c_int
+
+    var outside = _tmpdir("q3_outside")
+    _write(outside + "/secret.txt", "secret")
+    var dir = _tmpdir("q3")
+    var link = dir + "/leak.txt"
+    if not os_path.exists(link):
+        var target = outside + "/secret.txt"
+        _ = external_call["symlink", c_int](
+            target.as_c_string_span().unsafe_ptr(),
+            link.as_c_string_span().unsafe_ptr(),
+        )
+    var fs = FileServer.new(dir)
+    assert_equal(
+        fs.serve(Request(method=Method.GET, url="/leak.txt")).status, 404
+    )
+
+
+def test_fileserver_empty_root_serves_nothing() raises:
+    var fs = FileServer.new("")
+    assert_equal(
+        fs.serve(Request(method=Method.GET, url="/etc/passwd")).status, 404
+    )
+
+
+def test_fileserver_sets_last_modified() raises:
+    var dir = _tmpdir("q4")
+    _write(dir + "/m.txt", "m")
+    var fs = FileServer.new(dir)
+    var lm = fs.serve(Request(method=Method.GET, url="/m.txt")).headers.get(
+        "last-modified"
+    )
+    assert_equal(lm.byte_length(), 29)
+    assert_true(lm.endswith(" GMT"), lm)
+
+
 def main() raises:
     test_parse_range_simple()
     test_parse_range_open_ended()
@@ -198,7 +256,12 @@ def main() raises:
     test_fileserver_range_returns_206()
     test_fileserver_traversal_blocked()
     test_fileserver_nul_byte_blocked()
+    test_fileserver_ignores_the_query_string()
+    test_fileserver_directory_is_404_not_500()
+    test_fileserver_symlink_out_of_root_is_404()
+    test_fileserver_empty_root_serves_nothing()
+    test_fileserver_sets_last_modified()
     test_fileserver_method_not_allowed()
     test_fileserver_invalid_range_returns_416()
     test_fileserver_index_html_for_dir()
-    print("test_fs: 17 passed")
+    print("test_fs: 22 passed")

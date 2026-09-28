@@ -67,17 +67,6 @@ def _cstr(path: String) -> List[UInt8]:
     return buf^
 
 
-def _fs_open_rdonly(lib: OwnedDLHandle, path: String) raises -> Int:
-    var fn_open = dl_sym[def(Int) thin abi("C") -> c_int](
-        lib, "flare_fs_open_rdonly"
-    )
-    var c = _cstr(path)
-    var addr = Int(c.unsafe_ptr())
-    var rc = Int(fn_open(addr))
-    _ = c^  # keep alive until after fn_open returns
-    return rc
-
-
 def _fs_close(lib: OwnedDLHandle, fd: Int) raises:
     var fn_close = dl_sym[def(c_int) thin abi("C") -> c_int](
         lib, "flare_fs_close"
@@ -94,30 +83,36 @@ def _fs_pread(
     return Int(fn_read(c_int(fd), buf_addr, n, Int64(offset)))
 
 
-def _fs_size(lib: OwnedDLHandle, path: String) raises -> Int:
-    var fn_size = dl_sym[def(Int) thin abi("C") -> Int64](lib, "flare_fs_size")
-    var c = _cstr(path)
-    var addr = Int(c.unsafe_ptr())
-    var rc = Int(fn_size(addr))
-    _ = c^
-    return rc
+def _fs_open_regular(
+    lib: OwnedDLHandle, path: String, root: String
+) raises -> Tuple[Int, Int, Int]:
+    """``(fd, size, mtime)`` for a regular file under ``root``; fd -1
+    otherwise (missing, a directory, or a symlink that leaves root)."""
+    var fn_open = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_fs_open_regular"
+    )
+    var cp = _cstr(path)
+    var cr = _cstr(root)
+    var out = List[Int64](length=2, fill=Int64(0))
+    var fd = Int(
+        fn_open(
+            Int(cp.unsafe_ptr()),
+            Int(cr.unsafe_ptr()),
+            Int(out.unsafe_ptr()),
+            Int(out.unsafe_ptr()) + 8,
+        )
+    )
+    _ = cp^
+    _ = cr^
+    return (fd, Int(out[0]), Int(out[1]))
 
 
-# ``struct stat`` layout differs across glibc / musl / Darwin. We
-# only need the size + mtime fields, so allocate a generous 256-byte
-# buffer and offset-load. The values lie at conservative offsets
-# common to all three on x86_64 / aarch64; on systems where this
-# isn't true the resulting nonsense is benign (file size 0 -> 404).
-struct _StatBuf(Copyable, Defaultable):
-    var data: List[UInt8]
+def _http_date(unix_secs: Int) -> String:
+    from flare.runtime.date_cache import _format_imf_fixdate
 
-    def __init__(out self):
-        self.data = List[UInt8](length=256, fill=UInt8(0))
-
-
-def _stat_size(lib: OwnedDLHandle, path: String) raises -> Int:
-    """Return ``st_size`` for ``path``, or -1 on error."""
-    return _fs_size(lib, path)
+    var buf = List[UInt8](length=29, fill=UInt8(0))
+    _format_imf_fixdate(unix_secs, buf.unsafe_ptr())
+    return String(unsafe_from_utf8=Span[UInt8, _](buf))
 
 
 # ── Path safety + MIME ──────────────────────────────────────────────────
@@ -332,8 +327,24 @@ struct FileServer(Copyable, Defaultable, Handler):
         return fs^
 
     def _resolve(self, url: String) -> String:
-        """Resolve the URL path under ``root``, applying ``index_file``."""
-        var path = _safe_join(self.root, url)
+        """Resolve the URL path under ``root``, applying ``index_file``.
+
+        The query and fragment are not part of the path: ``/app.js?v=3``
+        used to look for a file literally named ``app.js?v=3``. An empty
+        ``root`` would make every URL an absolute path, so it serves
+        nothing.
+        """
+        if self.root.byte_length() == 0:
+            return ""
+        var cut = url.byte_length()
+        var up = url.unsafe_ptr()
+        for i in range(url.byte_length()):
+            if up[unsafe_offset=i] == 63 or up[unsafe_offset=i] == 35:
+                cut = i
+                break
+        var path = _safe_join(
+            self.root, String(unsafe_from_utf8=url.as_bytes()[:cut])
+        )
         if path.byte_length() == 0:
             return ""
         # Trailing slash -> append index file.
@@ -352,13 +363,14 @@ struct FileServer(Copyable, Defaultable, Handler):
             return Response(status=404)
 
         var lib = OwnedDLHandle(_find_flare_fs_lib())
-        var size = _stat_size(lib, path)
-        if size < 0:
-            return Response(status=404)
-
-        var fd = _fs_open_rdonly(lib, path)
+        # One open that also checks the file is regular and, after
+        # resolving every symlink, still under root.
+        var opened = _fs_open_regular(lib, path, self.root)
+        var fd = opened[0]
         if fd < 0:
             return Response(status=404)
+        var size = opened[1]
+        var mtime = opened[2]
 
         # Range handling.
         var range_value = req.headers.get("range")
@@ -383,8 +395,13 @@ struct FileServer(Copyable, Defaultable, Handler):
             partial = True
 
         var slice_len = end - start + 1
-        var body = List[UInt8](length=slice_len, fill=UInt8(0))
+        # HEAD needs the length, not the bytes: allocating (and zeroing)
+        # the whole slice first made ``HEAD /big.iso`` cost its size in
+        # memory.
+        var body = List[UInt8]()
+        var body_len = slice_len
         if req.method == "GET" and slice_len > 0:
+            body = List[UInt8](length=slice_len, fill=UInt8(0))
             var got = _fs_pread(
                 lib, fd, Int(body.unsafe_ptr()), slice_len, start
             )
@@ -393,13 +410,15 @@ struct FileServer(Copyable, Defaultable, Handler):
                 return Response(status=500)
             if got < slice_len:
                 body.resize(got, 0)
+            body_len = len(body)
         _fs_close(lib, fd)
 
         var resp = Response(status=status)
         var ext = _ext(path)
         resp.headers.set("Content-Type", _content_type_from_ext(ext))
         resp.headers.set("Accept-Ranges", "bytes")
-        resp.headers.set("Content-Length", String(len(body)))
+        resp.headers.set("Content-Length", String(body_len))
+        resp.headers.set("Last-Modified", _http_date(mtime))
         if partial:
             var hdr = String("bytes ")
             hdr += String(start)
@@ -408,7 +427,5 @@ struct FileServer(Copyable, Defaultable, Handler):
             hdr += "/"
             hdr += String(size)
             resp.headers.set("Content-Range", hdr)
-        if req.method == "HEAD":
-            body.clear()
         resp.body = body^
         return resp^

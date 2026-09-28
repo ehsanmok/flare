@@ -1049,6 +1049,21 @@ from test_fs import (
 from test_fs import (
     test_fileserver_index_html_for_dir as test_fs__test_fileserver_index_html_for_dir,
 )
+from test_fs import (
+    test_fileserver_ignores_the_query_string as test_fs__test_fileserver_ignores_the_query_string,
+)
+from test_fs import (
+    test_fileserver_directory_is_404_not_500 as test_fs__test_fileserver_directory_is_404_not_500,
+)
+from test_fs import (
+    test_fileserver_symlink_out_of_root_is_404 as test_fs__test_fileserver_symlink_out_of_root_is_404,
+)
+from test_fs import (
+    test_fileserver_empty_root_serves_nothing as test_fs__test_fileserver_empty_root_serves_nothing,
+)
+from test_fs import (
+    test_fileserver_sets_last_modified as test_fs__test_fileserver_sets_last_modified,
+)
 from test_h1_client_pool import (
     test_two_requests_reuse_single_connection as test_h1_client_pool__test_two_requests_reuse_single_connection,
 )
@@ -4514,6 +4529,11 @@ def main() raises:
     suite.test[test_fs__test_fileserver_method_not_allowed]()
     suite.test[test_fs__test_fileserver_invalid_range_returns_416]()
     suite.test[test_fs__test_fileserver_index_html_for_dir]()
+    suite.test[test_fs__test_fileserver_ignores_the_query_string]()
+    suite.test[test_fs__test_fileserver_directory_is_404_not_500]()
+    suite.test[test_fs__test_fileserver_symlink_out_of_root_is_404]()
+    suite.test[test_fs__test_fileserver_empty_root_serves_nothing]()
+    suite.test[test_fs__test_fileserver_sets_last_modified]()
     # tests/http/test_h1_client_pool.mojo
     suite.test[test_h1_client_pool__test_two_requests_reuse_single_connection]()
     suite.test[test_h1_client_pool__test_disabled_pool_never_keeps_idle]()
