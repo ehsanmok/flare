@@ -106,6 +106,18 @@ struct SseEvent(Copyable):
         return SseEvent(payload, event_type, String(""), -1)
 
 
+def _single_line(s: String, drop_nul: Bool) -> String:
+    """``s`` without CR, LF (and optionally NUL). Byte-exact otherwise."""
+    var bytes = List[UInt8](capacity=s.byte_length())
+    var p = s.unsafe_ptr()
+    for i in range(s.byte_length()):
+        var c = p[unsafe_offset=i]
+        if c == 13 or c == 10 or (drop_nul and c == 0):
+            continue
+        bytes.append(c)
+    return String(unsafe_from_utf8=Span[UInt8, _](bytes))
+
+
 def format_sse_event(event: SseEvent) -> List[UInt8]:
     """Serialise ``event`` to its on-wire byte representation.
 
@@ -123,14 +135,19 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
     """
     var out = String(capacity_bytes=event.data.byte_length() + 64)
 
-    if event.id.byte_length() > 0:
+    # ``id`` and ``event`` are single-line fields: a CR or LF in either
+    # ends the line early and starts a field of the sender's choosing,
+    # so both are dropped (and NUL from ``id``, which WHATWG ignores).
+    var id = _single_line(event.id, True)
+    if id.byte_length() > 0:
         out += "id: "
-        out += event.id
+        out += id
         out += "\n"
 
-    if event.event_type.byte_length() > 0:
+    var event_type = _single_line(event.event_type, False)
+    if event_type.byte_length() > 0:
         out += "event: "
-        out += event.event_type
+        out += event_type
         out += "\n"
 
     if event.retry_ms >= 0:
@@ -138,18 +155,28 @@ def format_sse_event(event: SseEvent) -> List[UInt8]:
         out += String(event.retry_ms)
         out += "\n"
 
-    # Split data on \n; each line gets its own "data:" prefix.
+    # Split data into lines the way the WHATWG parser does -- at CRLF,
+    # LF, *and a lone CR* -- and give each its own "data:" prefix.
+    # Splitting on LF only left a lone CR in the output, which the
+    # client treats as a line break: "hi\revent: admin" injected an
+    # event field. Lines are cut at ASCII bytes, so each slice is
+    # whole UTF-8.
     var n = event.data.byte_length()
     var p = event.data.unsafe_ptr()
     var line_start = 0
     var i = 0
     while i <= n:
-        if i == n or Int(p[unsafe_offset=i]) == ord("\n"):
+        var c = Int(p[unsafe_offset=i]) if i < n else -1
+        if i == n or c == ord("\n") or c == ord("\r"):
             out += "data: "
-            # Lines are cut at "\n", an ASCII byte, so each slice is
-            # whole UTF-8; copying bytes via chr() double-encoded them.
             out += String(unsafe_from_utf8=event.data.as_bytes()[line_start:i])
             out += "\n"
+            if (
+                c == ord("\r")
+                and i + 1 < n
+                and Int(p[unsafe_offset=i + 1]) == ord("\n")
+            ):
+                i += 1
             line_start = i + 1
         i += 1
 
@@ -274,6 +301,20 @@ struct SseChannel(ChunkSource, Copyable):
 
         var event = self._events[self._next_idx].copy()
         self._next_idx += 1
+        # Drop what has been sent. The list used to keep every event
+        # for the life of the channel, so a long-lived stream grew
+        # without bound.
+        if self._next_idx == len(self._events):
+            self._events.clear()
+            self._next_idx = 0
+        elif self._next_idx >= 256:
+            var rest = List[SseEvent](
+                capacity=len(self._events) - self._next_idx
+            )
+            for k in range(self._next_idx, len(self._events)):
+                rest.append(self._events[k].copy())
+            self._events = rest^
+            self._next_idx = 0
         return Optional[List[UInt8]](format_sse_event(event))
 
 

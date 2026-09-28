@@ -306,6 +306,43 @@ def test_format_keeps_utf8_intact() raises:
     assert_true("data: héllo 世界\n" in s, s)
 
 
+def _wire(ev: SseEvent) -> String:
+    var w = format_sse_event(ev)
+    return String(unsafe_from_utf8=Span[UInt8, _](w))
+
+
+def test_lone_cr_in_data_cannot_inject_a_field() raises:
+    var s = _wire(SseEvent.message(String("hi\revent: admin\rdata: pwned")))
+    assert_equal(
+        s, String("data: hi\ndata: event: admin\ndata: data: pwned\n\n")
+    )
+
+
+def test_crlf_in_data_is_one_line_break() raises:
+    var s = _wire(SseEvent.message(String("a\r\nb")))
+    assert_equal(s, String("data: a\ndata: b\n\n"))
+
+
+def test_newlines_in_id_and_event_are_dropped() raises:
+    var ev = SseEvent(
+        String("x"), String("tick\nevent: admin"), String("7\r\nid: 9"), -1
+    )
+    var s = _wire(ev)
+    assert_true(s.startswith("id: 7id: 9\nevent: tickevent: admin\n"), s)
+    assert_equal(s.count("\n"), 4)
+
+
+def test_channel_releases_sent_events() raises:
+    var ch = SseChannel()
+    var never = Cancel.never()
+    for _ in range(300):
+        ch.push(SseEvent.message(String("x")))
+    for _ in range(300):
+        _ = ch.next(never)
+    assert_equal(len(ch._events), 0)
+    assert_equal(ch.pending(), 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
     _sse_router_e2e()

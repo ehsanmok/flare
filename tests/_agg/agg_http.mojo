@@ -3453,6 +3453,18 @@ from test_sse import (
 from test_sse import (
     test_format_keeps_utf8_intact as test_sse__test_format_keeps_utf8_intact,
 )
+from test_sse import (
+    test_lone_cr_in_data_cannot_inject_a_field as test_sse__test_lone_cr_in_data_cannot_inject_a_field,
+)
+from test_sse import (
+    test_crlf_in_data_is_one_line_break as test_sse__test_crlf_in_data_is_one_line_break,
+)
+from test_sse import (
+    test_newlines_in_id_and_event_are_dropped as test_sse__test_newlines_in_id_and_event_are_dropped,
+)
+from test_sse import (
+    test_channel_releases_sent_events as test_sse__test_channel_releases_sent_events,
+)
 from test_static_multicore import (
     test_static_multicore_sequential_keepalive_churn as test_static_multicore__test_static_multicore_sequential_keepalive_churn,
 )
@@ -5687,6 +5699,10 @@ def main() raises:
     suite.test[test_sse__test_streaming_response_body_drains_via_chunked_body]()
     suite.test[test_sse__test_stream_sse_response_carries_stream_and_headers]()
     suite.test[test_sse__test_format_keeps_utf8_intact]()
+    suite.test[test_sse__test_lone_cr_in_data_cannot_inject_a_field]()
+    suite.test[test_sse__test_crlf_in_data_is_one_line_break]()
+    suite.test[test_sse__test_newlines_in_id_and_event_are_dropped]()
+    suite.test[test_sse__test_channel_releases_sent_events]()
     # tests/http/test_static_multicore.mojo
     suite.test[
         test_static_multicore__test_static_multicore_sequential_keepalive_churn
