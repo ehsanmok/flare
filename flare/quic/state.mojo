@@ -794,6 +794,9 @@ def handle_frame_buf(
 comptime QUIC_PROTOCOL_VIOLATION: UInt64 = 0x0A
 """RFC 9000 sec 20.1 transport error code."""
 comptime QUIC_CONNECTION_ID_LIMIT_ERROR: UInt64 = 0x09
+comptime QUIC_FLOW_CONTROL_ERROR: UInt64 = 0x03
+comptime QUIC_STREAM_LIMIT_ERROR: UInt64 = 0x04
+comptime QUIC_STREAM_STATE_ERROR: UInt64 = 0x05
 comptime LOCAL_ACTIVE_CONNECTION_ID_LIMIT: Int = 2
 """The ``active_connection_id_limit`` both flare endpoints advertise."""
 

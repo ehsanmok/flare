@@ -569,6 +569,52 @@ def test_a_raising_handler_is_contained_to_its_stream() raises:
     assert_false("hunter2" in text, "exception text reached the client")
 
 
+def _chunk_event(
+    sid: UInt64, offset: UInt64, n: Int
+) raises -> ConnectionEvents:
+    var events = empty_events()
+    events.stream_chunks.append(
+        StreamFrame(
+            stream_id=sid,
+            offset=offset,
+            data=List[UInt8](length=n, fill=UInt8(0x21)),
+            fin=False,
+        )
+    )
+    return events^
+
+
+def test_stream_limits_and_flow_control_are_enforced() raises:
+    """Any stream id, any number of streams and any amount of data were
+    accepted, and credit was granted from what the peer had sent."""
+    # A stream id only the server may open.
+    var l1 = _bind_listener()
+    var s1 = _seed_slot(l1)
+    l1._route_http3_stream_chunks(s1, _chunk_event(UInt64(1), UInt64(0), 10))
+    assert_false(l1.connections[s1].alive, "server-initiated id accepted")
+    # More client bidi streams than advertised (100 by default).
+    var l2 = _bind_listener()
+    var s2 = _seed_slot(l2)
+    l2._route_http3_stream_chunks(
+        s2, _chunk_event(UInt64(4 * 100), UInt64(0), 10)
+    )
+    assert_false(l2.connections[s2].alive, "stream past MAX_STREAMS accepted")
+    # Data past the connection's MAX_DATA (1 MiB initially).
+    var l3 = _bind_listener()
+    var s3 = _seed_slot(l3)
+    l3._route_http3_stream_chunks(
+        s3, _chunk_event(UInt64(0), UInt64(2 * 1024 * 1024), 10)
+    )
+    assert_false(l3.connections[s3].alive, "data past MAX_DATA accepted")
+    # A retransmit counts once.
+    var l4 = _bind_listener()
+    var s4 = _seed_slot(l4)
+    l4._route_http3_stream_chunks(s4, _chunk_event(UInt64(0), UInt64(0), 1000))
+    l4._route_http3_stream_chunks(s4, _chunk_event(UInt64(0), UInt64(0), 1000))
+    assert_true(l4.connections[s4].alive)
+    assert_equal(Int(l4.connections[s4].fc_received), 1000)
+
+
 def main() raises:
     test_get_request_dispatches_through_handler()
     test_post_request_body_echo()
@@ -579,4 +625,5 @@ def main() raises:
     test_a_raising_handler_is_contained_to_its_stream()
     test_streaming_response_incremental_data()
     test_buffered_response_not_registered_as_stream()
-    print("test_h3_end_to_end: 9 passed")
+    test_stream_limits_and_flow_control_are_enforced()
+    print("test_h3_end_to_end: 10 passed")

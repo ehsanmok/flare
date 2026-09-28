@@ -293,6 +293,25 @@ struct QuicConnection(Copyable):
     """Set by a valid Retry token or the first decrypted Handshake
     packet; lifts the 3x limit."""
 
+    var fc_adv_max_data: UInt64
+    """Connection-level stream data we have allowed the peer to send:
+    the initial_max_data transport parameter, then each MAX_DATA sent."""
+    var fc_adv_max_bidi: UInt64
+    """Client bidi streams we have allowed: initial_max_streams_bidi,
+    then each MAX_STREAMS sent."""
+    var fc_stream_end: Dict[Int, UInt64]
+    """Highest byte offset seen per open stream. Flow control counts
+    offsets, not bytes (RFC 9000 sec 4.1), so a retransmit is not
+    counted twice."""
+    var fc_received: UInt64
+    """Sum of :attr:`fc_stream_end` over every stream ever opened."""
+    var fc_consumed: UInt64
+    """Stream bytes the application is done with: answered request
+    streams, and control / QPACK stream bytes as they are read. Credit
+    is granted from this, not from what was received."""
+    var fc_closed_bidi: UInt64
+    """Client request streams answered and closed."""
+
     var rx_largest: List[UInt64]
     """Largest packet number received per packet-number space: [0]
     Initial, [1] Handshake, [2] application (0-RTT and 1-RTT share it,
@@ -338,6 +357,12 @@ struct QuicConnection(Copyable):
         self.amp_rx = 0
         self.amp_tx = 0
         self.addr_validated = False
+        self.fc_adv_max_data = initial_max_data
+        self.fc_adv_max_bidi = UInt64(100)
+        self.fc_stream_end = Dict[Int, UInt64]()
+        self.fc_received = 0
+        self.fc_consumed = 0
+        self.fc_closed_bidi = 0
         self.rx_largest = List[UInt64](length=3, fill=UInt64(0))
         self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()

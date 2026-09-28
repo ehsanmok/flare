@@ -86,7 +86,10 @@ from .protection import (
 )
 from .varint import decode_varint, encode_varint
 from .state import (
+    QUIC_FLOW_CONTROL_ERROR,
     QUIC_PROTOCOL_VIOLATION,
+    QUIC_STREAM_LIMIT_ERROR,
+    QUIC_STREAM_STATE_ERROR,
     Connection,
     ConnectionEvents,
     connection_close,
@@ -1389,16 +1392,47 @@ struct QuicListener(Movable):
         # so the peer never blocks over a long run. Done first so the
         # in-place H3 feed below can hold one mutable ref into the
         # slab without aliasing these rx_* counters.
+        #
+        # Limits are enforced here too (RFC 9000 sec 4). Any stream id
+        # was accepted, any number of streams, and any amount of data:
+        # the grants below were computed from what the peer had sent,
+        # so its credit grew with its own sending.
         for i in range(len(events.stream_chunks)):
             var sid = Int(events.stream_chunks[i].stream_id)
             var is_uni = (sid & 0x2) != 0
             var plen = len(events.stream_chunks[i].data)
+            if (sid & 0x1) != 0:
+                # Server-initiated: we open no bidi streams, and our uni
+                # streams are send-only (sec 19.8).
+                self._close_for(slot, QUIC_STREAM_STATE_ERROR, "stream id")
+                return
             if slot < len(self.rx_stream_bytes):
                 self.rx_stream_bytes[slot] += UInt64(plen)
-            if not is_uni and slot < len(self.rx_bidi_stream_count):
+            ref qc = self.connections[slot]
+            if not is_uni:
                 var count = UInt64((sid >> 2) + 1)
-                if count > self.rx_bidi_stream_count[slot]:
+                if count > qc.fc_adv_max_bidi:
+                    self._close_for(
+                        slot, QUIC_STREAM_LIMIT_ERROR, "too many streams"
+                    )
+                    return
+                if (
+                    slot < len(self.rx_bidi_stream_count)
+                    and count > self.rx_bidi_stream_count[slot]
+                ):
                     self.rx_bidi_stream_count[slot] = count
+            var end = events.stream_chunks[i].offset + UInt64(plen)
+            var prev = qc.fc_stream_end.get(sid, UInt64(0))
+            if end > prev:
+                qc.fc_stream_end[sid] = end
+                qc.fc_received += end - prev
+                if is_uni:
+                    qc.fc_consumed += end - prev
+            if qc.fc_received > qc.fc_adv_max_data:
+                self._close_for(
+                    slot, QUIC_FLOW_CONTROL_ERROR, "stream data past MAX_DATA"
+                )
+                return
         # Pass 2: feed H3 in place. Mutating the slot through a ref
         # avoids deep-copying the whole Http3Connection (its per-stream
         # state Dict) on every inbound datagram -- the dominant
@@ -1733,6 +1767,8 @@ struct QuicListener(Movable):
             self.config.initial_max_data,
         )
         qc.initial_dcid = lh.dcid.copy()
+        qc.fc_adv_max_data = self.config.initial_max_data
+        qc.fc_adv_max_bidi = self.config.initial_max_streams_bidi
         if retry_odcid:
             qc.addr_validated = True  # the Retry token proved it
         var slot = len(self.connections)
@@ -2101,6 +2137,23 @@ struct QuicListener(Movable):
             self.migration_probe[slot].note_tx(len(dg))
         return True
 
+    def _close_for(mut self, slot: Int, code: UInt64, reason: String):
+        """Close ``slot`` with transport error ``code``."""
+        connection_close(self.connections[slot].conn, code, reason)
+        self.connections[slot].alive = False
+
+    def _note_stream_consumed(mut self, slot: Int, sid: Int):
+        """A request stream was answered: its bytes and its stream slot
+        count toward the next grant."""
+        ref qc = self.connections[slot]
+        if sid in qc.fc_stream_end:
+            try:
+                qc.fc_consumed += qc.fc_stream_end.pop(sid)
+            except:
+                pass
+        if (sid & 0x3) == 0:
+            qc.fc_closed_bidi += 1
+
     def _amplification_allows(self, slot: Int, crypto_bytes: Int) -> Bool:
         """Whether a long-header packet carrying ``crypto_bytes`` fits
         the slot's 3x anti-amplification budget (RFC 9000 sec 8.1)."""
@@ -2156,14 +2209,21 @@ struct QuicListener(Movable):
             encode_ack(ack, plaintext)
             if not self.handshake_done_sent[slot]:
                 encode_handshake_done(plaintext)
-            var max_data = MaxDataFrame(
-                maximum_data=self.rx_stream_bytes[slot] + _MAX_DATA_WINDOW
-            )
+            # Credit from consumption: at most _MAX_DATA_WINDOW bytes
+            # and _MAX_STREAMS_BIDI_WINDOW streams outstanding beyond
+            # what has been answered. Never lowered (sec 4.1).
+            ref qc = self.connections[slot]
+            var want_data = qc.fc_consumed + _MAX_DATA_WINDOW
+            if want_data > qc.fc_adv_max_data:
+                qc.fc_adv_max_data = want_data
+            var want_bidi = qc.fc_closed_bidi + _MAX_STREAMS_BIDI_WINDOW
+            if want_bidi > qc.fc_adv_max_bidi:
+                qc.fc_adv_max_bidi = want_bidi
+            var max_data = MaxDataFrame(maximum_data=qc.fc_adv_max_data)
             encode_max_data(max_data, plaintext)
             var max_streams = MaxStreamsFrame(
                 unidirectional=False,
-                maximum_streams=self.rx_bidi_stream_count[slot]
-                + _MAX_STREAMS_BIDI_WINDOW,
+                maximum_streams=qc.fc_adv_max_bidi,
             )
             encode_max_streams(max_streams, plaintext)
             if not self.handshake_done_sent[slot]:
@@ -2239,6 +2299,7 @@ struct QuicListener(Movable):
             # degrades to O(streams-ever-opened) -- quadratic over a
             # long run.
             self.http3_connections[slot].close_request_stream(sid)
+            self._note_stream_consumed(slot, sid)
             if UInt64(sid) in self.connections[slot].conn.streams:
                 _ = self.connections[slot].conn.streams.pop(UInt64(sid))
 
@@ -2348,6 +2409,7 @@ struct QuicListener(Movable):
                 Pool[ChunkSourceBox].free(addr)
             _ = self.http3_streams.pop(key)
         self.http3_connections[slot].close_request_stream(sid)
+        self._note_stream_consumed(slot, sid)
         if UInt64(sid) in self.connections[slot].conn.streams:
             _ = self.connections[slot].conn.streams.pop(UInt64(sid))
 

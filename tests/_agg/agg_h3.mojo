@@ -169,6 +169,9 @@ from test_h3_end_to_end import (
 from test_h3_end_to_end import (
     test_a_raising_handler_is_contained_to_its_stream as test_h3_end_to_end__test_a_raising_handler_is_contained_to_its_stream,
 )
+from test_h3_end_to_end import (
+    test_stream_limits_and_flow_control_are_enforced as test_h3_end_to_end__test_stream_limits_and_flow_control_are_enforced,
+)
 from test_h3_qpack_dynamic import (
     test_encoder_stream_inserts_owe_increment as test_h3_qpack_dynamic__test_encoder_stream_inserts_owe_increment,
 )
@@ -415,6 +418,9 @@ def main() raises:
     ]()
     suite.test[
         test_h3_end_to_end__test_a_raising_handler_is_contained_to_its_stream
+    ]()
+    suite.test[
+        test_h3_end_to_end__test_stream_limits_and_flow_control_are_enforced
     ]()
     # tests/h3/test_h3_qpack_dynamic.mojo
     suite.test[
