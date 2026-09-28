@@ -86,6 +86,102 @@ int flare_decompress_deflate(const void *in_buf, int in_len,
     return flare_decompress(in_buf, in_len, out_buf, out_cap, -15);
 }
 
+/* ── One-pass decompression with an owned, growing buffer ─────────────────── */
+
+#define FLARE_INFLATE_TRUNCATED   (-100) /* input ended before the stream did */
+#define FLARE_INFLATE_TOO_LARGE   (-101) /* output would exceed max_out */
+#define FLARE_INFLATE_NO_MEMORY   (-102)
+#define FLARE_INFLATE_NEED_DICT   (-103) /* preset dictionary required */
+
+/**
+ * Inflate all of ``in_buf`` into a malloc'ed buffer returned in ``*out``.
+ *
+ * The single-shot functions above call inflate() once into a
+ * caller-sized buffer and report Z_OK / Z_BUF_ERROR as success, so a
+ * truncated stream decoded to a partial body with no error, Z_NEED_DICT
+ * (2) was returned as "2 bytes written", and the Mojo side re-inflated
+ * the whole input from scratch each time it doubled the buffer. This
+ * one feeds the input once, grows the output as needed, and succeeds
+ * only on Z_STREAM_END.
+ *
+ * @return decompressed length (>= 0), or one of the negative codes above
+ *         or a negative zlib error. On success the caller frees ``*out``
+ *         with flare_zlib_free().
+ */
+int64_t flare_inflate_all(const void *in_buf, size_t in_len, void **out,
+                          size_t max_out, int window_bits) {
+    *out = NULL;
+    z_stream strm;
+    memset(&strm, 0, sizeof(z_stream));
+    int rc = inflateInit2(&strm, window_bits);
+    if (rc != Z_OK) return rc;
+
+    size_t cap = in_len * 4 < 4096 ? 4096 : in_len * 4;
+    if (cap > max_out) cap = max_out;
+    if (cap == 0) cap = 1;
+    unsigned char *buf = (unsigned char *)malloc(cap);
+    if (!buf) { inflateEnd(&strm); return FLARE_INFLATE_NO_MEMORY; }
+    size_t used = 0;
+    const unsigned char *src = (const unsigned char *)in_buf;
+    size_t fed = 0;
+
+    for (;;) {
+        if (strm.avail_in == 0 && fed < in_len) {
+            size_t take = in_len - fed;
+            if (take > 0x40000000u) take = 0x40000000u; /* uInt chunks */
+            strm.next_in = (Bytef *)(src + fed);
+            strm.avail_in = (uInt)take;
+            fed += take;
+        }
+        if (used == cap) {
+            if (cap >= max_out) {
+                free(buf); inflateEnd(&strm);
+                return FLARE_INFLATE_TOO_LARGE;
+            }
+            size_t ncap = cap * 2 > max_out ? max_out : cap * 2;
+            unsigned char *nb = (unsigned char *)realloc(buf, ncap);
+            if (!nb) { free(buf); inflateEnd(&strm); return FLARE_INFLATE_NO_MEMORY; }
+            buf = nb; cap = ncap;
+        }
+        size_t room = cap - used;
+        if (room > 0x40000000u) room = 0x40000000u;
+        strm.next_out = buf + used;
+        strm.avail_out = (uInt)room;
+        rc = inflate(&strm, Z_NO_FLUSH);
+        used += room - strm.avail_out;
+        if (rc == Z_STREAM_END) break;
+        if (rc == Z_NEED_DICT) { free(buf); inflateEnd(&strm); return FLARE_INFLATE_NEED_DICT; }
+        if (rc == Z_BUF_ERROR) {
+            /* No progress possible: out of input (truncated) unless the
+             * output is simply full, which the loop head grows. */
+            if (strm.avail_in == 0 && fed >= in_len) {
+                free(buf); inflateEnd(&strm);
+                return FLARE_INFLATE_TRUNCATED;
+            }
+            continue;
+        }
+        if (rc != Z_OK) { free(buf); inflateEnd(&strm); return rc; }
+        if (strm.avail_in == 0 && fed >= in_len && strm.avail_out > 0) {
+            /* Consumed everything, room left, and still no end. */
+            free(buf); inflateEnd(&strm);
+            return FLARE_INFLATE_TRUNCATED;
+        }
+    }
+    inflateEnd(&strm);
+    *out = buf;
+    return (int64_t)used;
+}
+
+/** Deflate: zlib-wrapped first, then raw (browser behaviour). */
+int64_t flare_inflate_all_deflate(const void *in_buf, size_t in_len,
+                                  void **out, size_t max_out) {
+    int64_t n = flare_inflate_all(in_buf, in_len, out, max_out, 15);
+    if (n >= 0 || n == FLARE_INFLATE_TOO_LARGE) return n;
+    return flare_inflate_all(in_buf, in_len, out, max_out, -15);
+}
+
+void flare_zlib_free(void *p) { free(p); }
+
 /* ── Compress (deflate) ────────────────────────────────────────────────────── */
 
 /**

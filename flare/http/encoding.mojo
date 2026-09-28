@@ -33,6 +33,7 @@ Public API surface:
 
 from std.os import getenv
 from std.ffi import OwnedDLHandle, c_int
+from std.memory import Pointer, unsafe_memcpy
 
 from ..utils.dylib import find_flare_lib, dl_sym
 
@@ -84,6 +85,41 @@ struct Encoding:
     """Brotli encoding (libbrotlidec / libbrotlienc via libflare_brotli)."""
 
 
+def _take_inflated(
+    imm lib: OwnedDLHandle, n: Int64, addr: Int, max_out: Int
+) raises -> List[UInt8]:
+    """Copy ``n`` bytes out of a buffer ``flare_inflate_all`` malloc'ed at
+    ``addr`` and free it, or raise for a negative ``n``.
+
+    Decoding happens in one pass in C and succeeds only at the end of
+    the compressed stream: a truncated body used to come back as a
+    partial one with no error, ``Z_NEED_DICT`` was read as a length of 2,
+    and every buffer doubling re-inflated the input from the start.
+    """
+    if n < 0:
+        if n == -100:
+            raise Error("compressed body is truncated")
+        if n == -101:
+            raise Error(
+                "decompressed output exceeded max_decompressed_bytes ("
+                + String(max_out)
+                + " bytes)"
+            )
+        if n == -103:
+            raise Error("compressed body needs a preset dictionary")
+        raise Error("decompression failed: " + String(n))
+    var out = List[UInt8](length=Int(n), fill=0)
+    if n > 0:
+        unsafe_memcpy(
+            dest=out.unsafe_ptr(),
+            src=Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr),
+            count=Int(n),
+        )
+    var fn_free = dl_sym[def(Int) thin abi("C") -> None](lib, "flare_zlib_free")
+    fn_free(addr)
+    return out^
+
+
 def _do_decompress(
     imm lib: OwnedDLHandle,
     data: Span[UInt8, _],
@@ -107,44 +143,18 @@ def _do_decompress(
     Raises:
         Error: If zlib reports a non-recoverable error.
     """
-    var fn_decomp = dl_sym[
-        def(Int, c_int, Int, c_int, c_int) thin abi("C") -> c_int
-    ](lib, "flare_decompress")
-
-    var cap = max(len(data) * 4, 4096)
-    if cap > max_out:
-        cap = max_out
-    while True:
-        var out = List[UInt8](capacity=cap)
-        out.resize(cap, 0)
-
-        var written = fn_decomp(
-            Int(data.unsafe_ptr()),
-            c_int(len(data)),
-            Int(out.unsafe_ptr()),
-            c_int(cap),
-            window_bits,
-        )
-
-        if Int(written) < 0:
-            raise Error("flare_decompress failed: " + String(written))
-
-        if Int(written) < cap:
-            # Buffer was large enough; trim to actual output.
-            out.resize(Int(written), 0)
-            return out^
-
-        # Output buffer was completely filled — might be truncated. Bail
-        # if we have hit the decompressed-size cap, else double and retry.
-        if cap >= max_out:
-            raise Error(
-                "decompressed output exceeded max_decompressed_bytes ("
-                + String(max_out)
-                + " bytes)"
-            )
-        cap *= 2
-        if cap > max_out:
-            cap = max_out
+    var fn_inflate = dl_sym[
+        def(Int, Int, Int, Int, c_int) thin abi("C") -> Int64
+    ](lib, "flare_inflate_all")
+    var out_ptr = List[Int](length=1, fill=0)
+    var n = fn_inflate(
+        Int(data.unsafe_ptr()),
+        len(data),
+        Int(out_ptr.unsafe_ptr()),
+        max_out,
+        window_bits,
+    )
+    return _take_inflated(lib, n, out_ptr[0], max_out)
 
 
 def _decompress_impl(
@@ -190,40 +200,14 @@ def _do_decompress_deflate(
     Raises:
         Error: If neither zlib-wrapped nor raw deflate succeeds.
     """
-    var fn_decomp = dl_sym[def(Int, c_int, Int, c_int) thin abi("C") -> c_int](
-        lib, "flare_decompress_deflate"
+    var fn_inflate = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> Int64](
+        lib, "flare_inflate_all_deflate"
     )
-
-    var cap = max(len(data) * 4, 4096)
-    if cap > max_out:
-        cap = max_out
-    while True:
-        var out = List[UInt8](capacity=cap)
-        out.resize(cap, 0)
-
-        var written = fn_decomp(
-            Int(data.unsafe_ptr()),
-            c_int(len(data)),
-            Int(out.unsafe_ptr()),
-            c_int(cap),
-        )
-
-        if Int(written) < 0:
-            raise Error("flare_decompress_deflate failed: " + String(written))
-
-        if Int(written) < cap:
-            out.resize(Int(written), 0)
-            return out^
-
-        if cap >= max_out:
-            raise Error(
-                "decompressed output exceeded max_decompressed_bytes ("
-                + String(max_out)
-                + " bytes)"
-            )
-        cap *= 2
-        if cap > max_out:
-            cap = max_out
+    var out_ptr = List[Int](length=1, fill=0)
+    var n = fn_inflate(
+        Int(data.unsafe_ptr()), len(data), Int(out_ptr.unsafe_ptr()), max_out
+    )
+    return _take_inflated(lib, n, out_ptr[0], max_out)
 
 
 def _decompress_deflate_impl(
