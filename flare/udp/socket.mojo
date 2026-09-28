@@ -24,6 +24,7 @@ from ..net import (
 from ..net.socket import (
     RawSocket,
     AF_INET,
+    AF_INET6,
     SOCK_DGRAM,
     _build_sockaddr_in,
     _sockaddr_to_socket_addr,
@@ -162,8 +163,12 @@ struct UdpSocket(Movable):
             var s = UdpSocket.bind(SocketAddr.localhost(5000))
             ```
         """
-        var sock = RawSocket(AF_INET, SOCK_DGRAM)
-        sock.set_reuse_addr(True)
+        # The family follows the address: it was always AF_INET, so
+        # binding an IPv6 address failed. And no SO_REUSEADDR: for UDP it
+        # lets a second socket bind the same port and take a share of
+        # its datagrams (all of them, for unicast, on some kernels).
+        var family = AF_INET6 if addr.ip.is_v6() else AF_INET
+        var sock = RawSocket(family, SOCK_DGRAM)
 
         var sa = _build_sockaddr_in(addr)
         var rc = _bind(sock.fd, sa[0], sa[1])
@@ -182,10 +187,12 @@ struct UdpSocket(Movable):
         return UdpSocket(sock^, local)
 
     @staticmethod
-    def unbound() raises -> UdpSocket:
+    def unbound(ipv6: Bool = False) raises -> UdpSocket:
         """Create a send-only UDP socket without binding to a specific port.
 
         The OS assigns an ephemeral source port on the first ``send_to()``.
+        ``ipv6`` picks an AF_INET6 socket, needed to send to IPv6
+        destinations.
 
         Returns:
             An unbound ``UdpSocket``.
@@ -201,7 +208,7 @@ struct UdpSocket(Movable):
         """
         from ..net.address import IpAddr, SocketAddr as SA
 
-        var sock = RawSocket(AF_INET, SOCK_DGRAM)
+        var sock = RawSocket(AF_INET6 if ipv6 else AF_INET, SOCK_DGRAM)
         var unspec = SA(IpAddr.unspecified(), 0)
         return UdpSocket(sock^, unspec)
 

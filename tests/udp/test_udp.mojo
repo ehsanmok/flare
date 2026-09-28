@@ -4,7 +4,13 @@ All tests use loopback (127.0.0.1) with OS-assigned ports. No external
 network access is required.
 """
 
-from std.testing import assert_equal, assert_not_equal, assert_raises, TestSuite
+from std.testing import (
+    assert_equal,
+    assert_not_equal,
+    assert_raises,
+    assert_true,
+    TestSuite,
+)
 from flare.udp import UdpSocket, DatagramTooLarge
 from flare.net import SocketAddr
 
@@ -199,6 +205,28 @@ def test_recv_timeout_raises() raises:
         raised = True
     assert_equal(raised, True, "recv_from must raise on timeout")
     s.close()
+
+
+def test_bind_ipv6_and_refuse_a_second_bind() raises:
+    """UDP sockets were always AF_INET, so an IPv6 bind failed, and set
+    SO_REUSEADDR, so a second socket could bind a port already in use
+    and take its datagrams."""
+    var a = UdpSocket.bind(SocketAddr.localhost(0))
+    var port = a.local_addr().port
+    var raised = False
+    try:
+        _ = UdpSocket.bind(SocketAddr.localhost(port))
+    except:
+        raised = True
+    assert_true(raised, "a second socket bound a UDP port in use")
+    _ = a^  # held until here: the port is only in use while it lives
+    var v6 = UdpSocket.bind(SocketAddr.parse("[::1]:0"))
+    var tx = UdpSocket.unbound(ipv6=True)
+    var msg = String("six")
+    _ = tx.send_to(msg.as_bytes(), v6.local_addr())
+    var buf = List[UInt8](length=16, fill=UInt8(0))
+    var got = v6.recv_from(Span[UInt8, _](buf))
+    assert_equal(got[0], 3)
 
 
 def main() raises:

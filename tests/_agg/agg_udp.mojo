@@ -33,6 +33,9 @@ from test_udp import (
 from test_udp import (
     test_recv_timeout_raises as test_udp__test_recv_timeout_raises,
 )
+from test_udp import (
+    test_bind_ipv6_and_refuse_a_second_bind as test_udp__test_bind_ipv6_and_refuse_a_second_bind,
+)
 from test_udp_batch import (
     test_recvmmsg_batch_round_trip as test_udp_batch__test_recvmmsg_batch_round_trip,
 )
@@ -60,6 +63,7 @@ def main() raises:
     suite.test[test_udp__test_datagram_too_large_raises]()
     suite.test[test_udp__test_datagram_large_payload]()
     suite.test[test_udp__test_recv_timeout_raises]()
+    suite.test[test_udp__test_bind_ipv6_and_refuse_a_second_bind]()
     # tests/udp/test_udp_batch.mojo
     suite.test[test_udp_batch__test_recvmmsg_batch_round_trip]()
     suite.test[test_udp_batch__test_sendmmsg_batch_round_trip]()
