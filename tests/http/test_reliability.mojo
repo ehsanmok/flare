@@ -313,6 +313,25 @@ def test_ratelimit_allows_burst_then_429() raises:
     assert_equal(rl.serve(req).status, 429)
 
 
+def test_ratelimit_refills_under_a_steady_stream_of_requests() raises:
+    """Requests closer together than one milli-token of refill used to
+    reset the clock with nothing credited, so under load the bucket
+    never refilled. 100/s is one token per 10 ms; a 40 ms hot loop must
+    admit a few more after the burst."""
+    from std.time import perf_counter_ns
+
+    var rl = RateLimit(AlwaysOkHandler(), rate_per_sec=100, burst=1)
+    var req = Request(method=String("GET"), url=String("/"))
+    assert_equal(rl.serve(req).status, 200)
+    var admitted = 0
+    var start = perf_counter_ns()
+    while perf_counter_ns() - start < 40_000_000:
+        if rl.serve(req).status == 200:
+            admitted += 1
+    assert_true(admitted >= 2, "refills lost: admitted " + String(admitted))
+    assert_true(admitted <= 6, "over-admitted: " + String(admitted))
+
+
 def test_ratelimit_disabled_passthrough() raises:
     """Disabled when rate_per_sec <= 0 (pass-through)."""
     var rl = RateLimit(AlwaysOkHandler(), rate_per_sec=0)
@@ -353,6 +372,7 @@ def main() raises:
     test_timeout_passes_through_fast_handler()
     test_timeout_returns_504_on_zero_budget()
     test_ratelimit_allows_burst_then_429()
+    test_ratelimit_refills_under_a_steady_stream_of_requests()
     test_ratelimit_disabled_passthrough()
     test_circuitbreaker_opens_after_threshold()
     test_circuitbreaker_disabled_passthrough()
