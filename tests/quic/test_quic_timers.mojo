@@ -227,6 +227,49 @@ def test_idle_timer_is_relative_to_the_real_clock() raises:
     assert_true(listener.connections[0].alive)
 
 
+def test_dead_slots_are_reclaimed_and_reused() raises:
+    """A closed connection's slot stayed allocated for good, so every
+    per-slot table grew with each connection ever accepted and every
+    tick scanned them all. It is now reclaimed when its timer sweeps
+    it, and the next connection gets the slot back."""
+    var listener = _bind_loopback(idle_ms=UInt64(50))
+    var dcid = _make_cid(UInt8(0x71), 8)
+    var scid = _make_cid(UInt8(0x81), 8)
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
+    _ = listener.dispatch_datagram(
+        Span[UInt8, _](_make_initial_datagram(dcid, scid)), peer
+    )
+    assert_equal(listener.connection_count(), 1)
+    _ = listener.advance_timers(
+        now_ms=listener.timer_wheel.now_ms() + UInt64(200)
+    )
+    assert_false(listener.connections[0].alive)
+    assert_equal(len(listener.free_slots), 1)
+    assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), -1)
+    var dcid2 = _make_cid(UInt8(0x72), 8)
+    var slot = listener.dispatch_datagram(
+        Span[UInt8, _](_make_initial_datagram(dcid2, scid)), peer
+    )
+    assert_equal(slot, 0, "the reclaimed slot was not reused")
+    assert_equal(listener.connection_count(), 1)
+    assert_true(listener.connections[0].alive)
+
+
+def test_live_connections_are_capped() raises:
+    var listener = _bind_loopback()
+    listener.config.max_connections = 2
+    var scid = _make_cid(UInt8(0x90), 8)
+    var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
+    for k in range(3):
+        _ = listener.dispatch_datagram(
+            Span[UInt8, _](
+                _make_initial_datagram(_make_cid(UInt8(0x10 + k), 8), scid)
+            ),
+            peer,
+        )
+    assert_equal(listener.connection_count(), 2)
+
+
 def main() raises:
     test_token_round_trip()
     test_encode_rejects_invalid_kind()
@@ -238,4 +281,6 @@ def main() raises:
     test_dispatch_arms_idle_timer_on_accept()
     test_on_idle_callback_is_idempotent_to_double_fire()
     test_idle_timer_is_relative_to_the_real_clock()
-    print("test_quic_timers: 10 passed")
+    test_dead_slots_are_reclaimed_and_reused()
+    test_live_connections_are_capped()
+    print("test_quic_timers: 12 passed")

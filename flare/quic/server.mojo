@@ -290,6 +290,11 @@ struct QuicListener(Movable):
     silent-drop branch -- existing tests that bind a listener
     purely to exercise the UDP / routing / timer surfaces
     continue to work without supplying real PEM material."""
+    var free_slots: List[Int]
+    """Reclaimed slots ready for the next accepted connection; see
+    :meth:`_reclaim_slot`."""
+    var slot_free: List[Bool]
+    """Per-slot: on :attr:`free_slots`, so never reclaimed twice."""
     var tls_sessions: List[_SessionSlot]
     """Parallel slab to :attr:`connections`: one rustls QUIC
     session carrier per :class:`QuicConnection` slot. Each
@@ -493,6 +498,8 @@ struct QuicListener(Movable):
         self.pending_migration_tx = List[List[UInt8]]()
         self.rx_stream_bytes = List[UInt64]()
         self.rx_bidi_stream_count = List[UInt64]()
+        self.free_slots = List[Int]()
+        self.slot_free = List[Bool]()
         self.http3_connections = List[Http3Connection]()
         self.http3_response_egress = Dict[String, List[UInt8]]()
         self.http3_streams = Dict[String, _H3StreamOut]()
@@ -1771,8 +1778,19 @@ struct QuicListener(Movable):
         qc.fc_adv_max_bidi = self.config.initial_max_streams_bidi
         if retry_odcid:
             qc.addr_validated = True  # the Retry token proved it
-        var slot = len(self.connections)
-        self.connections.append(qc^)
+        var live = len(self.connections) - len(self.free_slots)
+        if live >= self.config.max_connections:
+            return -1
+        var reuse = len(self.free_slots) > 0
+        var slot: Int
+        if reuse:
+            slot = self.free_slots.pop()
+            self.slot_free[slot] = False
+            self.connections[slot] = qc^
+        else:
+            slot = len(self.connections)
+            self.connections.append(qc^)
+            self.slot_free.append(False)
         # After a Retry the client's current DCID is the Retry's SCID;
         # the original DCID came back in the token.
         var original_dcid = lh.dcid.copy()
@@ -1780,24 +1798,43 @@ struct QuicListener(Movable):
         if retry_odcid:
             original_dcid = retry_odcid.value().copy()
             retry_scid = lh.dcid.bytes.copy()
-        self.tls_sessions.append(
-            self._new_session_slot(local_cid, original_dcid, retry_scid)
+        var session = self._new_session_slot(
+            local_cid, original_dcid, retry_scid
         )
-        self.tls_egress_queues.append(List[UInt8]())
-        self.tls_handshake_egress_queues.append(List[UInt8]())
-        self.crypto_reasm.append(_CryptoReasm())
-        self.tls_1rtt_egress_queues.append(List[UInt8]())
-        self.peer_addrs.append(peer)
-        self.migration_probe.append(MigrationProbe())
-        self.rx_1rtt_ranges.append(List[UInt64]())
-        self.rx_1rtt_ack_pending.append(False)
-        self.handshake_done_sent.append(False)
-        self.next_local_cid_seq.append(UInt64(1))
-        self.pending_migration_tx.append(List[UInt8]())
-        self.rx_stream_bytes.append(UInt64(0))
-        self.rx_bidi_stream_count.append(UInt64(0))
-        self.http3_connections.append(Http3Connection())
-        self.loss.append(LossRecovery())
+        if reuse:
+            self.tls_sessions[slot] = session^
+            self.tls_egress_queues[slot] = List[UInt8]()
+            self.tls_handshake_egress_queues[slot] = List[UInt8]()
+            self.crypto_reasm[slot] = _CryptoReasm()
+            self.tls_1rtt_egress_queues[slot] = List[UInt8]()
+            self.peer_addrs[slot] = peer
+            self.migration_probe[slot] = MigrationProbe()
+            self.rx_1rtt_ranges[slot] = List[UInt64]()
+            self.rx_1rtt_ack_pending[slot] = False
+            self.handshake_done_sent[slot] = False
+            self.next_local_cid_seq[slot] = UInt64(1)
+            self.pending_migration_tx[slot] = List[UInt8]()
+            self.rx_stream_bytes[slot] = UInt64(0)
+            self.rx_bidi_stream_count[slot] = UInt64(0)
+            self.http3_connections[slot] = Http3Connection()
+            self.loss[slot] = LossRecovery()
+        else:
+            self.tls_sessions.append(session^)
+            self.tls_egress_queues.append(List[UInt8]())
+            self.tls_handshake_egress_queues.append(List[UInt8]())
+            self.crypto_reasm.append(_CryptoReasm())
+            self.tls_1rtt_egress_queues.append(List[UInt8]())
+            self.peer_addrs.append(peer)
+            self.migration_probe.append(MigrationProbe())
+            self.rx_1rtt_ranges.append(List[UInt64]())
+            self.rx_1rtt_ack_pending.append(False)
+            self.handshake_done_sent.append(False)
+            self.next_local_cid_seq.append(UInt64(1))
+            self.pending_migration_tx.append(List[UInt8]())
+            self.rx_stream_bytes.append(UInt64(0))
+            self.rx_bidi_stream_count.append(UInt64(0))
+            self.http3_connections.append(Http3Connection())
+            self.loss.append(LossRecovery())
         self.cid_table.register(cid_to_hex(local_cid), slot)
         self.cid_table.register(cid_to_hex(lh.dcid), slot)
         _ = self.schedule_idle_timeout(slot)
@@ -2898,7 +2935,7 @@ struct QuicListener(Movable):
             elif decoded.kind == TIMER_KIND_PTO:
                 self._on_pto_expired(slot)
             if not self.connections[slot].alive:
-                self._retire_slot_cids(slot)
+                self._reclaim_slot(slot)
         return len(fired)
 
     def _on_pto_expired(mut self, slot: Int) raises:
@@ -3036,6 +3073,49 @@ struct QuicListener(Movable):
         self.connections[slot].pto_timer_id = self.timer_wheel.schedule(
             after_ms=after_ms, token=token
         )
+
+    def _reclaim_slot(mut self, slot: Int) raises:
+        """Retire a dead slot's CIDs, cancel its timers, free its
+        rustls session and streaming sources, and put the slot on
+        :attr:`free_slots` for the next accepted connection. A slot
+        used to stay allocated for the life of the listener, so every
+        per-slot table grew with every connection ever accepted, and
+        each tick scanned all of them."""
+        if slot < 0 or slot >= len(self.connections):
+            return
+        if slot < len(self.slot_free) and self.slot_free[slot]:
+            return
+        self._retire_slot_cids(slot)
+        # A timer left armed would fire into the next connection given
+        # this slot; the idle one would close it.
+        if self.connections[slot].idle_timer_id != UInt64(0):
+            _ = self.timer_wheel.cancel(self.connections[slot].idle_timer_id)
+            self.connections[slot].idle_timer_id = UInt64(0)
+        self._cancel_pto_timer(slot)
+        if slot < len(self.tls_sessions):
+            var h = self.tls_sessions[slot].handle
+            if h != 0:
+                self.tls_acceptor.free_session(h)
+                self.tls_sessions[slot] = _SessionSlot(handle=0)
+        var prefix = String(slot) + ":"
+        var dead_keys = List[String]()
+        for entry in self.http3_streams.items():
+            if entry.key.startswith(prefix):
+                dead_keys.append(entry.key)
+        for i in range(len(dead_keys)):
+            var addr = self.http3_streams[dead_keys[i]].src_addr
+            if addr != 0:
+                Pool[ChunkSourceBox].free(addr)
+            _ = self.http3_streams.pop(dead_keys[i])
+        var dead_egress = List[String]()
+        for entry in self.http3_response_egress.items():
+            if entry.key.startswith(prefix):
+                dead_egress.append(entry.key)
+        for i in range(len(dead_egress)):
+            _ = self.http3_response_egress.pop(dead_egress[i])
+        if slot < len(self.slot_free):
+            self.slot_free[slot] = True
+        self.free_slots.append(slot)
 
     def _retire_slot_cids(mut self, slot: Int) raises:
         """Drop every CID -> slot mapping that points at this

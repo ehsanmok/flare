@@ -105,6 +105,10 @@ struct QuicServerConfig(Copyable, Defaultable):
     """RFC 9000 §4.6 client-initiated uni streams limit. Default:
     3 -- H3 needs control + qpack-encoder + qpack-decoder."""
 
+    var max_connections: Int
+    """Most live connection slots. An Initial for a new connection past
+    it is dropped. Slots were never reused, so a flood of Initials with
+    random DCIDs grew every per-slot table without bound."""
     var local_cid_length: Int
     """Length in bytes of the Connection IDs this server issues
     to peers. RFC 9000 §5.1 caps at 20; 8 is the aioquic /
@@ -157,6 +161,7 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.initial_max_streams_bidi = UInt64(100)
         self.initial_max_streams_uni = UInt64(3)
         self.local_cid_length = 8
+        self.max_connections = 10_000
         self.early_data_strike_window_ms = UInt64(10_000)
         self.require_address_validation = False
         self.retry_token_max_age_ms = UInt64(10_000)

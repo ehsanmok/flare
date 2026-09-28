@@ -600,6 +600,12 @@ from test_quic_timers import (
 from test_quic_timers import (
     test_idle_timer_is_relative_to_the_real_clock as test_quic_timers__test_idle_timer_is_relative_to_the_real_clock,
 )
+from test_quic_timers import (
+    test_dead_slots_are_reclaimed_and_reused as test_quic_timers__test_dead_slots_are_reclaimed_and_reused,
+)
+from test_quic_timers import (
+    test_live_connections_are_capped as test_quic_timers__test_live_connections_are_capped,
+)
 from test_retry import (
     test_retry_integrity_tag_rfc9001_a4 as test_retry__test_retry_integrity_tag_rfc9001_a4,
 )
@@ -1184,6 +1190,8 @@ def main() raises:
     suite.test[
         test_quic_timers__test_idle_timer_is_relative_to_the_real_clock
     ]()
+    suite.test[test_quic_timers__test_dead_slots_are_reclaimed_and_reused]()
+    suite.test[test_quic_timers__test_live_connections_are_capped]()
     # tests/quic/test_retry.mojo
     suite.test[test_retry__test_retry_integrity_tag_rfc9001_a4]()
     suite.test[test_retry__test_verify_retry_integrity_round_trip]()
