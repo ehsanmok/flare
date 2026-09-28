@@ -548,6 +548,13 @@ it runs a full handshake. It used to offer the session to whatever host
 it was given. Sessions from `connect_over_tcp` carry no origin and are
 never offered.
 
+Breaking: an HTTPS response whose body runs to the end of the stream
+(no `Content-Length`, not chunked) now raises `NetworkError` if the
+server closes without a TLS `close_notify`, because nothing else shows
+whether the body arrived whole. It used to be returned as complete.
+Responses framed by length or chunking are unaffected.
+`TlsStream.eof_was_unclean()` exposes the signal to other readers.
+
 ## TCP, UDP, Unix sockets, DNS, addressing
 
 | Surface | Where |

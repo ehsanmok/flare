@@ -173,6 +173,9 @@ comptime SSL_IO_WANT_READ: Int = -1
 comptime SSL_IO_WANT_WRITE: Int = -2
 comptime SSL_IO_CLOSED: Int = -3
 comptime SSL_IO_FATAL: Int = -4
+comptime SSL_IO_EOF_UNCLEAN: Int = -5
+"""The peer closed without close_notify (``flare_ssl_read_blocking``
+only). A close-delimited body cannot tell this from truncation."""
 
 
 def _do_ssl_read_ex(

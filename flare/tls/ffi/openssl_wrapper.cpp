@@ -325,14 +325,17 @@ int flare_ssl_read_blocking(flare_ssl_t ssl, uint8_t* buf, int len) {
      * SO_SNDTIMEO expired -- recv/send returned EAGAIN mid-record. */
     if (err == SSL_ERROR_WANT_READ)  return FLARE_SSL_IO_WANT_READ;
     if (err == SSL_ERROR_WANT_WRITE) return FLARE_SSL_IO_WANT_WRITE;
-    /* Every other zero return is end of stream. Deliberately wider than
-     * flare_ssl_read_ex's CLOSED, which only covers close_notify and
-     * SSL_ERROR_SYSCALL: OpenSSL 3.x reports a peer that vanished
-     * without close_notify as SSL_ERROR_SSL / "unexpected eof while
-     * reading", and a blocking reader has always seen that as a plain
-     * 0 from flare_ssl_read. Turning it into an error here would break
-     * every caller that reads a body until EOF. */
-    if (n == 0) return 0;
+    /* close_notify is a clean end of stream. Any other zero return is
+     * the peer going away without one: OpenSSL 3.x reports that as
+     * SSL_ERROR_SSL / "unexpected eof while reading", older releases as
+     * SSL_ERROR_SYSCALL. It is reported separately, so a reader whose
+     * framing is the end of the stream can tell a finished body from a
+     * truncated one. Readers that do not care treat both as EOF. */
+    if (n == 0) {
+        if (err == SSL_ERROR_ZERO_RETURN) return 0;
+        ERR_clear_error();
+        return FLARE_SSL_IO_EOF_UNCLEAN;
+    }
     capture_openssl_errors();
     return FLARE_SSL_IO_FATAL;
 }

@@ -58,7 +58,11 @@ from ..tcp.stream import _connect_with_fallback
 from ..io import Readable
 from .config import TlsConfig, TlsVerify
 from ..net.error import Timeout
-from ._server_ffi import SSL_IO_WANT_READ, SSL_IO_WANT_WRITE
+from ._server_ffi import (
+    SSL_IO_EOF_UNCLEAN,
+    SSL_IO_WANT_READ,
+    SSL_IO_WANT_WRITE,
+)
 from .error import (
     TlsHandshakeError,
     CertificateExpired,
@@ -549,6 +553,9 @@ struct TlsStream(Movable, Readable):
     var _tcp: TcpStream  # owns the TCP fd
     var _origin: String
     """``host:port`` this stream verified; see :attr:`TlsSession.origin`."""
+    var _unclean_eof: Bool
+    """Set when :meth:`read` reached end of stream without the peer's
+    close_notify; see :meth:`eof_was_unclean`."""
     var _lib: OwnedDLHandle
     """Cached handle to the OpenSSL FFI wrapper, opened once per
     connection instead of per ``read`` / ``write`` (the per-write
@@ -579,6 +586,7 @@ struct TlsStream(Movable, Readable):
         self._ssl = ssl
         self._lib = OwnedDLHandle(_find_flare_lib())
         self._origin = origin^
+        self._unclean_eof = False
 
     def __deinit__(deinit self):
         """Send ``close_notify`` and free OpenSSL objects (best-effort)."""
@@ -831,6 +839,9 @@ struct TlsStream(Movable, Readable):
         var n = _do_ssl_read_blocking(self._lib, self._ssl, buf, size)
         if n >= 0:
             return n
+        if n == SSL_IO_EOF_UNCLEAN:
+            self._unclean_eof = True
+            return 0
         if n == SSL_IO_WANT_READ:
             raise Timeout("recv")
         if n == SSL_IO_WANT_WRITE:
@@ -838,6 +849,18 @@ struct TlsStream(Movable, Readable):
             # update) and SO_SNDTIMEO expired on it.
             raise Timeout("send")
         raise NetworkError("TLS read error: " + _c_err(self._lib))
+
+    def eof_was_unclean(self) -> Bool:
+        """Whether :meth:`read` returned end of stream without the peer's
+        close_notify.
+
+        TLS signs the end of a stream with close_notify so that an
+        attacker who can reset the TCP connection cannot cut a message
+        short and have it pass for complete. Only a caller whose framing
+        is the end of the stream needs this: a length or chunked body
+        already fails when it stops early.
+        """
+        return self._unclean_eof
 
     def read_exact(mut self, buf: Pointer[UInt8, _], size: Int) raises:
         """Read exactly ``size`` bytes into ``buf``.

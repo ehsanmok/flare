@@ -78,6 +78,7 @@ int flare_ssl_write(flare_ssl_t ssl, const uint8_t* buf, int len);
 #define FLARE_SSL_IO_WANT_WRITE (-2)
 #define FLARE_SSL_IO_CLOSED     (-3)  /* peer close_notify (clean EOF) */
 #define FLARE_SSL_IO_FATAL      (-4)
+#define FLARE_SSL_IO_EOF_UNCLEAN (-5)  /* EOF with no close_notify (blocking read) */
 
 /**
  * Non-blocking ``SSL_read``. Returns the number of plaintext bytes

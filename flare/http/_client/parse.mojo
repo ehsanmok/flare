@@ -642,7 +642,9 @@ def _parse_hex(s: String) raises -> Int:
     return result
 
 
-def _read_http_response_tls(mut stream: TlsStream) raises -> Response:
+def _read_http_response_tls(
+    mut stream: TlsStream, method: String = "GET"
+) raises -> Response:
     """Read and parse a full HTTP response from a TLS stream.
 
     Args:
@@ -655,7 +657,30 @@ def _read_http_response_tls(mut stream: TlsStream) raises -> Response:
         NetworkError: On I/O or parse error.
     """
     var raw = _read_all_tls(stream)
-    return _parse_http_response(raw)
+    var resp = _parse_http_response(raw, method)
+    _refuse_truncated_tls(stream, method, resp)
+    return resp^
+
+
+def _refuse_truncated_tls(
+    stream: TlsStream, method: String, resp: Response
+) raises:
+    """Raise when a close-delimited body ended without close_notify.
+
+    Such a body is framed by the end of the stream alone, and TLS makes
+    that end trustworthy only through close_notify. Without it an
+    attacker who resets the TCP connection cuts the body short and the
+    client returns it as complete. A length or chunked body already
+    fails on a short read, so only the close-delimited case is checked.
+    """
+    if not stream.eof_was_unclean():
+        return
+    var framing = _response_framing(method, resp.status, resp.headers)
+    if framing[0] == _FRAME_CLOSE:
+        raise NetworkError(
+            "TLS connection closed without close_notify; the response body"
+            " may be truncated"
+        )
 
 
 def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
@@ -717,7 +742,9 @@ def _read_http_response_framed_tls(
 ) raises -> Response:
     """Read one framed HTTP/1.1 response from a TLS stream, for HTTPS
     keep-alive pooling. See :func:`_read_http_response_framed`."""
-    return _read_http_response_framed(stream, can_reuse, method)
+    var resp = _read_http_response_framed(stream, can_reuse, method)
+    _refuse_truncated_tls(stream, method, resp)
+    return resp^
 
 
 def _fill[

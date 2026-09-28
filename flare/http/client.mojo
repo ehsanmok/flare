@@ -1280,7 +1280,7 @@ struct HttpClient(Movable):
             else:
                 stream.close()
             return resp_f^
-        var resp = _read_http_response_tls(stream)
+        var resp = _read_http_response_tls(stream, method)
         stream.close()
         return resp^
 
