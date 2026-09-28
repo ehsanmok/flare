@@ -340,10 +340,12 @@ def is_fresh(
     5. ``immutable`` (RFC 8246) -> always fresh while
        freshness lifetime is non-zero.
 
-    This implementation treats the cache as a *private* cache
-    (per-handler in-process store); ``s-maxage`` is honoured only
-    when ``max-age`` is absent. Shared-cache semantics land with
-    the proxy adapter in a later release.
+    Freshness is computed as for a private cache: ``s-maxage`` is
+    honoured only when ``max-age`` is absent. *What gets stored* is
+    decided with shared-cache rules, since one ``Cache`` store serves
+    every client of the process: ``private`` responses, and responses
+    to Authorization- or Cookie-bearing requests that do not opt in,
+    are never stored (see ``Cache._store_response``).
 
     The function does not consult the ``Expires`` header
     (RFC 9110 §5.3) because ``Cache-Control: max-age`` always

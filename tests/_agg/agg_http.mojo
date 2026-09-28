@@ -327,6 +327,18 @@ from test_cache_middleware import (
 from test_cache_middleware import (
     test_vary_segregates_entries as test_cache_middleware__test_vary_segregates_entries,
 )
+from test_cache_middleware import (
+    test_private_response_not_cached as test_cache_middleware__test_private_response_not_cached,
+)
+from test_cache_middleware import (
+    test_authorised_response_not_served_to_another_client as test_cache_middleware__test_authorised_response_not_served_to_another_client,
+)
+from test_cache_middleware import (
+    test_authorised_response_marked_public_is_cached as test_cache_middleware__test_authorised_response_marked_public_is_cached,
+)
+from test_cache_middleware import (
+    test_cookie_request_not_cached_unless_vary_cookie as test_cache_middleware__test_cookie_request_not_cached_unless_vary_cookie,
+)
 from test_cancel import (
     test_never_cancel_always_false as test_cancel__test_never_cancel_always_false,
 )
@@ -4059,6 +4071,16 @@ def main() raises:
     suite.test[test_cache_middleware__test_post_invalidates_stored_entry]()
     suite.test[test_cache_middleware__test_non_cacheable_status_skipped]()
     suite.test[test_cache_middleware__test_vary_segregates_entries]()
+    suite.test[test_cache_middleware__test_private_response_not_cached]()
+    suite.test[
+        test_cache_middleware__test_authorised_response_not_served_to_another_client
+    ]()
+    suite.test[
+        test_cache_middleware__test_authorised_response_marked_public_is_cached
+    ]()
+    suite.test[
+        test_cache_middleware__test_cookie_request_not_cached_unless_vary_cookie
+    ]()
     # tests/http/test_cancel.mojo
     suite.test[test_cancel__test_never_cancel_always_false]()
     suite.test[test_cancel__test_never_cancel_after_repeated_polls]()

@@ -211,6 +211,78 @@ def test_vary_segregates_entries() raises:
     assert_equal(cache.inner._count(), 2)
 
 
+# ── Shared-cache rules: private and authorised responses stay out ─────────
+
+
+def test_private_response_not_cached() raises:
+    var inner = _CountingHandler()
+    inner.cache_control = String("private, max-age=60")
+    var cache = Cache[_CountingHandler, InMemoryCacheStore](
+        inner^, InMemoryCacheStore()
+    )
+    _ = cache.serve(_req(String("GET"), String("/me")))
+    var r2 = cache.serve(_req(String("GET"), String("/me")))
+    assert_false(r2.headers.get(String("X-Cache")) == String("HIT"))
+    assert_equal(cache.inner._count(), 2)
+
+
+def test_authorised_response_not_served_to_another_client() raises:
+    var inner = _CountingHandler()
+    inner.body = String("alice's data")
+    var cache = Cache[_CountingHandler, InMemoryCacheStore](
+        inner^, InMemoryCacheStore()
+    )
+    var alice = _req(String("GET"), String("/me"))
+    alice.headers.set(String("Authorization"), String("Bearer alice"))
+    _ = cache.serve(alice^)
+    var bob = _req(String("GET"), String("/me"))
+    bob.headers.set(String("Authorization"), String("Bearer bob"))
+    _ = cache.serve(bob^)
+    assert_equal(cache.inner._count(), 2)
+
+
+def test_authorised_response_marked_public_is_cached() raises:
+    var inner = _CountingHandler()
+    inner.cache_control = String("public, max-age=60")
+    var cache = Cache[_CountingHandler, InMemoryCacheStore](
+        inner^, InMemoryCacheStore()
+    )
+    var a = _req(String("GET"), String("/pub"))
+    a.headers.set(String("Authorization"), String("Bearer a"))
+    _ = cache.serve(a^)
+    var b = _req(String("GET"), String("/pub"))
+    b.headers.set(String("Authorization"), String("Bearer b"))
+    _ = cache.serve(b^)
+    assert_equal(cache.inner._count(), 1)
+
+
+def test_cookie_request_not_cached_unless_vary_cookie() raises:
+    var inner = _CountingHandler()
+    var cache = Cache[_CountingHandler, InMemoryCacheStore](
+        inner^, InMemoryCacheStore()
+    )
+    var a = _req(String("GET"), String("/c"))
+    a.headers.set(String("Cookie"), String("sid=a"))
+    _ = cache.serve(a^)
+    var b = _req(String("GET"), String("/c"))
+    b.headers.set(String("Cookie"), String("sid=b"))
+    _ = cache.serve(b^)
+    assert_equal(cache.inner._count(), 2)
+
+    var inner2 = _CountingHandler()
+    inner2.vary = String("Cookie")
+    var cache2 = Cache[_CountingHandler, InMemoryCacheStore](
+        inner2^, InMemoryCacheStore()
+    )
+    var c = _req(String("GET"), String("/c"))
+    c.headers.set(String("Cookie"), String("sid=a"))
+    _ = cache2.serve(c^)
+    var d = _req(String("GET"), String("/c"))
+    d.headers.set(String("Cookie"), String("sid=a"))
+    _ = cache2.serve(d^)
+    assert_equal(cache2.inner._count(), 1)
+
+
 def main() raises:
     test_miss_then_hit()
     test_no_store_response_not_cached()
@@ -220,4 +292,8 @@ def main() raises:
     test_post_invalidates_stored_entry()
     test_non_cacheable_status_skipped()
     test_vary_segregates_entries()
+    test_private_response_not_cached()
+    test_authorised_response_not_served_to_another_client()
+    test_authorised_response_marked_public_is_cached()
+    test_cookie_request_not_cached_unless_vary_cookie()
     print("test_cache_middleware: OK")
