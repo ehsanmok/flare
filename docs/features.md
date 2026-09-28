@@ -92,6 +92,9 @@ because a front end could read the same bytes as a different request:
   transfer codings.
 - A bare LF ending the header block, a field line without a colon, an
   empty field name, and more than one `Host` field.
+- A method that is not a token, a request target with anything other
+  than visible ASCII, and a control byte other than HTAB in a field
+  value.
 - Repeated fields are all kept: `headers.get(name)` returns the first
   value and `get_all(name)` every one. Previously the last line won.
 

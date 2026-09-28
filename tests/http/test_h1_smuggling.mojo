@@ -385,6 +385,36 @@ def test_duplicate_host_is_answered_400() raises:
     assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
 
 
+# ── Field values, method and target are validated ──────────────────────────
+
+
+def test_control_bytes_in_field_values_are_rejected() raises:
+    for c in [1, 8, 11, 12, 27, 31, 127]:
+        assert_false(
+            _parses("GET / HTTP/1.1\r\nHost: a\r\nX: a" + chr(c) + "b\r\n\r\n"),
+            "accepted byte " + String(c),
+        )
+    # HTAB inside a value is fine.
+    assert_true(_parses("GET / HTTP/1.1\r\nHost: a\r\nX: a\tb\r\n\r\n"))
+
+
+def test_method_must_be_a_token() raises:
+    assert_false(
+        _parses("TRANSFER-ENCODING:CHUNKED / HTTP/1.1\r\nHost: a\r\n\r\n")
+    )
+    assert_false(_parses("G\x01T / HTTP/1.1\r\nHost: a\r\n\r\n"))
+    assert_false(_parses(" / HTTP/1.1\r\nHost: a\r\n\r\n"))
+    assert_true(_parses("M-SEARCH * HTTP/1.1\r\nHost: a\r\n\r\n"))
+
+
+def test_target_must_be_visible_ascii() raises:
+    assert_false(_parses("GET /a\x01b HTTP/1.1\r\nHost: a\r\n\r\n"))
+    assert_false(_parses("GET /a\x7fb HTTP/1.1\r\nHost: a\r\n\r\n"))
+    assert_true(
+        _parses("GET /a%20b?x=1&y=%E2%82%AC HTTP/1.1\r\nHost: a\r\n\r\n")
+    )
+
+
 def main() raises:
     print("=" * 60)
     print("test_h1_smuggling.mojo — h1 framing disagreements")

@@ -26,6 +26,7 @@ from .parse_util import (
     _ascii_strip_slice,
     _ascii_unchecked_string,
     _find_crlfcrlf,
+    _is_field_value_char,
     _is_token_char,
     _parse_int_str,
     _read_line_buf,
@@ -131,8 +132,14 @@ def _parse_http_request_bytes(
         if req_line.unsafe_ptr()[unsafe_offset=i] == 32:
             sp1 = i
             break
-    if sp1 < 0:
+    if sp1 <= 0:
         raise Error("malformed request line: " + _ascii_safe(req_line))
+    # RFC 9110 sec 9.1: a method is a token. Without this a request
+    # line such as ``TRANSFER-ENCODING:CHUNKED / HTTP/1.1`` or one with
+    # control bytes in the method reached routing and the handler.
+    for i in range(sp1):
+        if not _is_token_char(req_line.unsafe_ptr()[unsafe_offset=i]):
+            raise Error("invalid character in request method")
     # B3: try the StaticString intern table first — covers the 9
     # RFC 7231 method names (~99 % of real-world traffic is GET /
     # POST). On a hit, the returned String's backing comes from
@@ -192,6 +199,17 @@ def _parse_http_request_bytes(
 
     if not _is_valid_http_version(version):
         raise Error("malformed HTTP version in request line: " + version)
+
+    # RFC 9112 sec 3.2: the request-target is visible ASCII. A CR, a
+    # control byte or a high byte here reached ``req.url`` wrapped by
+    # ``_ascii_unchecked_string``, i.e. as a String that need not be
+    # valid UTF-8, and from there any log line or redirect built from it.
+    if path.byte_length() == 0:
+        raise Error("empty request target")
+    for i in range(path.byte_length()):
+        var tc = path.unsafe_ptr()[unsafe_offset=i]
+        if tc < 33 or tc > 126:
+            raise Error("invalid character in request target")
 
     if (
         not leniency.allow_oversized_request_uri
@@ -282,12 +300,18 @@ def _parse_http_request_bytes(
         # are the smuggling-class bytes). High-bit obs-text is
         # gated on the leniency flag — strict rejects; lenient
         # treats the bytes as opaque.
+        # Every other control byte (0x01-0x08, 0x0B-0x1F, DEL) is
+        # outside field-vchar too (RFC 9110 sec 5.5) and is rejected
+        # in every mode.
         for i in range(v.byte_length()):
             var vc = v.unsafe_ptr()[unsafe_offset=i]
             if vc == 0 or vc == 10 or vc == 13:
                 raise Error("invalid control character in header value")
-            if vc >= 128 and not leniency.accept_obs_text_in_field_value:
-                raise Error("obs-text byte in header value rejected")
+            if vc >= 128:
+                if not leniency.accept_obs_text_in_field_value:
+                    raise Error("obs-text byte in header value rejected")
+            elif not _is_field_value_char(vc):
+                raise Error("invalid control character in header value")
 
         # RFC 9112 §6.3.5: duplicate ``Content-Length`` headers are
         # smuggling vectors unless every value agrees. Strict

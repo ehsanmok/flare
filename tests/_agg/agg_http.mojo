@@ -1091,6 +1091,15 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_duplicate_host_is_answered_400 as test_h1_smuggling__test_duplicate_host_is_answered_400,
 )
+from test_h1_smuggling import (
+    test_control_bytes_in_field_values_are_rejected as test_h1_smuggling__test_control_bytes_in_field_values_are_rejected,
+)
+from test_h1_smuggling import (
+    test_method_must_be_a_token as test_h1_smuggling__test_method_must_be_a_token,
+)
+from test_h1_smuggling import (
+    test_target_must_be_visible_ascii as test_h1_smuggling__test_target_must_be_visible_ascii,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4364,6 +4373,11 @@ def main() raises:
     suite.test[test_h1_smuggling__test_duplicate_host_is_rejected]()
     suite.test[test_h1_smuggling__test_repeated_fields_keep_every_value]()
     suite.test[test_h1_smuggling__test_duplicate_host_is_answered_400]()
+    suite.test[
+        test_h1_smuggling__test_control_bytes_in_field_values_are_rejected
+    ]()
+    suite.test[test_h1_smuggling__test_method_must_be_a_token]()
+    suite.test[test_h1_smuggling__test_target_must_be_visible_ascii]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte
