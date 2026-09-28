@@ -1082,6 +1082,15 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_well_formed_request_still_parses as test_h1_smuggling__test_well_formed_request_still_parses,
 )
+from test_h1_smuggling import (
+    test_duplicate_host_is_rejected as test_h1_smuggling__test_duplicate_host_is_rejected,
+)
+from test_h1_smuggling import (
+    test_repeated_fields_keep_every_value as test_h1_smuggling__test_repeated_fields_keep_every_value,
+)
+from test_h1_smuggling import (
+    test_duplicate_host_is_answered_400 as test_h1_smuggling__test_duplicate_host_is_answered_400,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4352,6 +4361,9 @@ def main() raises:
     suite.test[test_h1_smuggling__test_header_line_without_colon_is_rejected]()
     suite.test[test_h1_smuggling__test_empty_header_name_is_rejected]()
     suite.test[test_h1_smuggling__test_well_formed_request_still_parses]()
+    suite.test[test_h1_smuggling__test_duplicate_host_is_rejected]()
+    suite.test[test_h1_smuggling__test_repeated_fields_keep_every_value]()
+    suite.test[test_h1_smuggling__test_duplicate_host_is_answered_400]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte

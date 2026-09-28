@@ -81,6 +81,20 @@ remain as delegating shims and are removed in 0.12. `serve_cancellable`,
 `serve_view` and `serve_static` now raise when a TLS context or extra
 listeners are bound, instead of silently ignoring both.
 
+**Changed in v0.11 (breaking): stricter HTTP/1.1 request parsing.**
+Each of these used to be accepted and is now answered 400 (or 501),
+because a front end could read the same bytes as a different request:
+
+- `Content-Length` counts only as a header line of its own; the value
+  must be 1-18 digits. `Transfer-Encoding` is read across every line,
+  must end in `chunked`, and may not appear alongside `Content-Length`.
+  Any coding before `chunked` is a 501, since flare does not decode
+  transfer codings.
+- A bare LF ending the header block, a field line without a colon, an
+  empty field name, and more than one `Host` field.
+- Repeated fields are all kept: `headers.get(name)` returns the first
+  value and `get_all(name)` every one. Previously the last line won.
+
 | Surface | Where |
 |---|---|
 | `HttpServer.bind(addr)` / `serve(handler)` / `serve(handler, num_workers=N)` — version-aware listener that dispatches HTTP/1.1, HTTP/2 over TLS (ALPN), and h2c (RFC 9113 §3.4 preface peek, no `Upgrade` dance) to the same handler | [`http_server.mojo`](../examples/basic/http_server.mojo), [`http2.mojo`](../examples/advanced/http2.mojo), [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |

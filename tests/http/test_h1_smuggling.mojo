@@ -355,6 +355,36 @@ def test_well_formed_request_still_parses() raises:
     assert_true(_parses("GET / HTTP/1.1\r\nHost: a\r\nX-A: b\r\n\r\n"))
 
 
+# ── Repeated fields keep every value; Host may not repeat ──────────────────
+
+
+def test_duplicate_host_is_rejected() raises:
+    assert_false(_parses("GET / HTTP/1.1\r\nHost: good\r\nHost: evil\r\n\r\n"))
+
+
+def test_repeated_fields_keep_every_value() raises:
+    from flare.http._server.parse import _parse_http_request_bytes
+
+    var b = _b(
+        "GET / HTTP/1.1\r\nHost: a\r\nCookie: a=1\r\nCookie: b=2\r\n"
+        "Accept: x\r\nAccept: y\r\n\r\n"
+    )
+    var req = _parse_http_request_bytes(Span[UInt8, _](b))
+    assert_equal(len(req.headers.get_all("cookie")), 2)
+    assert_equal(req.headers.get("accept"), "x")
+    var jar = req.cookies()
+    assert_equal(jar.get("a"), "1")
+    assert_equal(jar.get("b"), "2")
+
+
+def test_duplicate_host_is_answered_400() raises:
+    var got = _exchange(
+        "GET / HTTP/1.1\r\nHost: good\r\nHost: evil\r\n"
+        "Connection: close\r\n\r\n"
+    )
+    assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
+
+
 def main() raises:
     print("=" * 60)
     print("test_h1_smuggling.mojo — h1 framing disagreements")

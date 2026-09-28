@@ -226,6 +226,8 @@ def _parse_http_request_bytes(
                 + " bytes"
             )
         if line.byte_length() == 0:
+            if have_prev:
+                headers.append(prev_header_name, prev_header_value)
             break
 
         # RFC 9112 §5.2 obs-fold: a continuation line starts with
@@ -238,7 +240,6 @@ def _parse_http_request_bytes(
                 raise Error("obs-fold rejected (request smuggling vector)")
             var folded = _ascii_strip_slice(line.as_bytes())
             prev_header_value = prev_header_value + " " + folded
-            headers.set(prev_header_name, prev_header_value)
             continue
 
         var colon = -1
@@ -313,10 +314,22 @@ def _parse_http_request_bytes(
             te_joined += v
             te_seen = True
 
-        headers.set(k, v)
+        # Fields are appended, not set: a repeated field keeps every
+        # value (Cookie, Accept, ...), and ``get`` still answers with the
+        # first one. The previous field is committed only now, once we
+        # know this line is not an obs-fold continuation of it.
+        if have_prev:
+            headers.append(prev_header_name, prev_header_value)
         prev_header_name = k
         prev_header_value = v
         have_prev = True
+
+    # RFC 9112 sec 3.2: a request with more than one Host field gets a
+    # 400. With last-wins storage the second Host silently replaced the
+    # first, and a proxy that routed on the first sent flare a request
+    # for a different virtual host than the one it checked.
+    if len(headers.get_all("host")) > 1:
+        raise Error("more than one Host header")
 
     # RFC 9112 §6.3: ``Transfer-Encoding`` + ``Content-Length`` is
     # ambiguous. Strict rejects (smuggling-safe); the leniency
