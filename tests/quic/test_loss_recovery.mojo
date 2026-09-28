@@ -186,6 +186,19 @@ def test_cc_reduces_window_on_loss() raises:
     assert_true(lr.window() < w0)
 
 
+def test_ack_of_an_unsent_packet_declares_nothing_lost() raises:
+    """An ACK naming packet 2^60 raised largest_acked to it, and every
+    packet in flight then counted as lost by the packet-number gap."""
+    var lr = LossRecovery(base_pto_ms=UInt64(100))
+    lr.on_sent(UInt64(0), _frames(0xA0), UInt64(2000))
+    lr.on_sent(UInt64(1), _frames(0xA1), UInt64(2000))
+    var acked = List[UInt64]()
+    acked.append(UInt64(1) << 60)
+    _ = lr.on_ack(acked, UInt64(2001), next_pn=UInt64(2))
+    assert_equal(len(lr.detect_lost(UInt64(2001))), 0)
+    assert_equal(lr.outstanding(), 2)
+
+
 def main() raises:
     test_ack_retires_and_resets_backoff()
     test_ack_gap_leaves_lost_packet_outstanding()
@@ -196,4 +209,5 @@ def main() raises:
     test_rtt_sample_drives_pto()
     test_ack_based_loss_detection_packet_threshold()
     test_cc_reduces_window_on_loss()
-    print("test_loss_recovery: 9 passed")
+    test_ack_of_an_unsent_packet_declares_nothing_lost()
+    print("test_loss_recovery: 10 passed")

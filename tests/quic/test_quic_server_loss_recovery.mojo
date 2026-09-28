@@ -86,7 +86,7 @@ def test_slab_tracks_sent_packets_and_retires_them_on_ack() raises:
 
 
 def test_pto_fires_frames_for_retransmission() raises:
-    """fire_pto hands back the frames of the oldest unacked packet.
+    """``fire_pto`` hands back the frames of the oldest unacked packet.
 
     That list is what _on_pto_expired re-sends, under a fresh packet
     number: RFC 9002 retransmits frames, not packets.
@@ -118,10 +118,43 @@ def test_ack_of_everything_disarms_the_timer() raises:
     listener.close()
 
 
+def test_ack_for_a_packet_never_sent_closes_the_connection() raises:
+    """RFC 9000 sec 13.1: acknowledging a packet that was never sent is
+    a PROTOCOL_VIOLATION. It was accepted, and a large enough number
+    declared everything in flight lost."""
+    from flare.quic.packet import (
+        ConnectionId,
+        LongHeader,
+        PACKET_TYPE_INITIAL,
+        QUIC_VERSION_1,
+    )
+    from flare.quic.state import CONN_STATE_CLOSING, empty_events
+
+    var listener = _bind_listener()
+    var lh = LongHeader(
+        packet_type=PACKET_TYPE_INITIAL,
+        version=QUIC_VERSION_1,
+        dcid=ConnectionId(bytes=List[UInt8](length=8, fill=UInt8(0xA1))),
+        scid=ConnectionId(bytes=List[UInt8](length=8, fill=UInt8(0xB1))),
+        payload_offset=0,
+    )
+    var slot = listener._accept_initial(
+        lh, SocketAddr(IpAddr.localhost(), UInt16(9))
+    )
+    listener.connections[slot].tx_1rtt_pn = UInt64(5)
+    var events = empty_events()
+    events.acked_packets.append(UInt64(1_000_000))
+    listener._consume_acks(slot, events)
+    assert_false(listener.connections[slot].alive)
+    assert_equal(listener.connections[slot].conn.state, CONN_STATE_CLOSING)
+    listener.close()
+
+
 def main() raises:
     test_loss_slab_starts_empty_and_parallels_connections()
     test_max_pto_count_has_a_bounded_default()
     test_slab_tracks_sent_packets_and_retires_them_on_ack()
     test_pto_fires_frames_for_retransmission()
     test_ack_of_everything_disarms_the_timer()
-    print("test_quic_server_loss_recovery: 5 passed")
+    test_ack_for_a_packet_never_sent_closes_the_connection()
+    print("test_quic_server_loss_recovery: 6 passed")

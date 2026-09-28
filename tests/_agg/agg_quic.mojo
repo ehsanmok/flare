@@ -203,6 +203,9 @@ from test_loss_recovery import (
 from test_loss_recovery import (
     test_cc_reduces_window_on_loss as test_loss_recovery__test_cc_reduces_window_on_loss,
 )
+from test_loss_recovery import (
+    test_ack_of_an_unsent_packet_declares_nothing_lost as test_loss_recovery__test_ack_of_an_unsent_packet_declares_nothing_lost,
+)
 from test_openssl_quic_crypto import (
     test_derive_packet_keys_rfc9001_a5_chacha20 as test_openssl_quic_crypto__test_derive_packet_keys_rfc9001_a5_chacha20,
 )
@@ -561,6 +564,9 @@ from test_quic_server_loss_recovery import (
 from test_quic_server_loss_recovery import (
     test_ack_of_everything_disarms_the_timer as test_quic_server_loss_recovery__test_ack_of_everything_disarms_the_timer,
 )
+from test_quic_server_loss_recovery import (
+    test_ack_for_a_packet_never_sent_closes_the_connection as test_quic_server_loss_recovery__test_ack_for_a_packet_never_sent_closes_the_connection,
+)
 from test_quic_timers import (
     test_token_round_trip as test_quic_timers__test_token_round_trip,
 )
@@ -891,6 +897,9 @@ def main() raises:
         test_loss_recovery__test_ack_based_loss_detection_packet_threshold
     ]()
     suite.test[test_loss_recovery__test_cc_reduces_window_on_loss]()
+    suite.test[
+        test_loss_recovery__test_ack_of_an_unsent_packet_declares_nothing_lost
+    ]()
     # tests/quic/test_openssl_quic_crypto.mojo
     suite.test[
         test_openssl_quic_crypto__test_derive_packet_keys_rfc9001_a5_chacha20
@@ -1147,6 +1156,9 @@ def main() raises:
     ]()
     suite.test[
         test_quic_server_loss_recovery__test_ack_of_everything_disarms_the_timer
+    ]()
+    suite.test[
+        test_quic_server_loss_recovery__test_ack_for_a_packet_never_sent_closes_the_connection
     ]()
     # tests/quic/test_quic_timers.mojo
     suite.test[test_quic_timers__test_token_round_trip]()

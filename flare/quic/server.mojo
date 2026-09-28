@@ -86,6 +86,7 @@ from .protection import (
 )
 from .varint import decode_varint, encode_varint
 from .state import (
+    QUIC_PROTOCOL_VIOLATION,
     Connection,
     ConnectionEvents,
     connection_close,
@@ -2880,7 +2881,21 @@ struct QuicListener(Movable):
             return
         if len(events.acked_packets) == 0:
             return
-        _ = self.loss[slot].on_ack(events.acked_packets, _monotonic_ms())
+        # RFC 9000 sec 13.1: acknowledging a packet never sent is a
+        # PROTOCOL_VIOLATION.
+        var next_pn = self.connections[slot].tx_1rtt_pn
+        for i in range(len(events.acked_packets)):
+            if events.acked_packets[i] >= next_pn:
+                connection_close(
+                    self.connections[slot].conn,
+                    QUIC_PROTOCOL_VIOLATION,
+                    "ACK for a packet that was never sent",
+                )
+                self.connections[slot].alive = False
+                return
+        _ = self.loss[slot].on_ack(
+            events.acked_packets, _monotonic_ms(), next_pn
+        )
         self._retransmit_lost(slot)
         self._rearm_pto_timer(slot)
 

@@ -172,16 +172,29 @@ struct LossRecovery(Movable):
 
     # ── ACK handling ────────────────────────────────────────────────
 
-    def on_ack(mut self, acked: List[UInt64], now_ms: UInt64 = 0) -> Bool:
+    def on_ack(
+        mut self,
+        acked: List[UInt64],
+        now_ms: UInt64 = 0,
+        next_pn: UInt64 = UInt64.MAX,
+    ) -> Bool:
         """Retire every in-flight packet whose number appears in
         ``acked``. Samples the RTT from the largest newly-acked packet,
         feeds the congestion controller, resets the PTO backoff on
         forward progress (RFC 9002 section 6.2). Returns whether
-        anything was retired."""
+        anything was retired.
+
+        ``next_pn`` is the next packet number the sender will use. An
+        acknowledged number at or past it names a packet never sent,
+        and is ignored here. It used to raise ``largest_acked``, and an
+        ACK claiming 2^60 then declared every packet in flight lost:
+        a retransmission storm on demand."""
         if len(acked) == 0 or len(self.sent) == 0:
             return False
         # Track the largest acked packet number seen.
         for j in range(len(acked)):
+            if acked[j] >= next_pn:
+                continue
             if not self.has_largest_acked or acked[j] > self.largest_acked:
                 self.largest_acked = acked[j]
                 self.has_largest_acked = True
