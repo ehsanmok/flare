@@ -526,12 +526,32 @@ struct Connection(Copyable, Defaultable):
     def _ensure_stream(mut self, sid: StreamId) raises -> Stream:
         if sid in self.streams:
             return self.streams[sid].copy()
+        # A connection that serves many requests used to keep every
+        # stream it ever saw: memory grew with the connection's age, and
+        # every HEADERS walked the whole table to count active streams.
+        # Once the table passes the threshold, drop every CLOSED entry.
+        # That is amortised O(1) per stream, and it keeps recently
+        # closed streams around for late frames.
+        if len(self.streams) >= self._prune_threshold():
+            self._prune_closed_streams()
         var s = Stream()
         s.id = sid
         s.state = StreamState.IDLE()
         s.send_window = self.peer_initial_window_size
         s.recv_window = self.initial_window_size
         return s^
+
+    def _prune_threshold(self) -> Int:
+        var t = self.max_concurrent_streams * 2
+        return t if t > 256 else 256
+
+    def _prune_closed_streams(mut self) raises:
+        var dead = List[Int]()
+        for entry in self.streams.items():
+            if entry[1].state.value == StreamState.CLOSED().value:
+                dead.append(entry[0])
+        for k in range(len(dead)):
+            _ = self.streams.pop(dead[k])
 
     def _put_stream(mut self, var s: Stream):
         self.streams[s.id] = s^
@@ -1200,6 +1220,11 @@ struct Connection(Copyable, Defaultable):
                             ids.append(entry[0])
                         for k in range(len(ids)):
                             var st2 = self.streams[ids[k]].copy()
+                            # A closed stream has no window to adjust; its
+                            # stale one could otherwise trip
+                            # FLOW_CONTROL_ERROR on a healthy connection.
+                            if st2.state.value == StreamState.CLOSED().value:
+                                continue
                             if st2.send_window + delta > _MAX_WINDOW:
                                 return self._conn_error(
                                     Http2ErrorCode.FLOW_CONTROL_ERROR().value

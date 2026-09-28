@@ -269,5 +269,24 @@ def test_parked_body_is_released_when_the_peer_resets() raises:
     assert_equal(_tally(c.drain()).data_bytes, 0)
 
 
+def test_closed_streams_do_not_accumulate() raises:
+    """Every stream a connection served used to stay in its table for the
+    connection's life; memory and per-HEADERS work grew with its age."""
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    for k in range(400):
+        var sid = 2 * k + 1
+        c.feed(Span[UInt8, _](_get_frame(sid)))
+        var ready = c.take_completed_streams()
+        assert_equal(len(ready), 1)
+        _ = c.take_request(sid)
+        c.emit_response(sid, Response(Status.OK))
+        _ = c.drain()
+    assert_true(
+        len(c.conn.streams) <= 257,
+        "stream table grew to " + String(len(c.conn.streams)),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
