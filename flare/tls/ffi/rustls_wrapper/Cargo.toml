@@ -26,11 +26,11 @@ rustls-pemfile = "2"
 # (RustlsQuicConnector.with_system_roots): reads the platform CA
 # bundle at runtime so callers don't have to ship a PEM.
 rustls-native-certs = "0.8"
-# Pinned: panics over the FFI boundary are UB. Catch every panic at
-# the C ABI surface, convert to a -1 return + thread-local error
-# message via the std::panic::catch_unwind path.
-once_cell = "1"
 
+# A panic must not unwind across the C ABI: that is undefined behaviour.
+# Both profiles abort instead. Nothing in src/ calls catch_unwind; the
+# rustls calls return Result, so a panic means a rustls bug, and a hard
+# stop is the intended outcome (see the crate doc in src/lib.rs).
 [profile.release]
 opt-level = 3
 lto = "fat"
