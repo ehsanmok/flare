@@ -92,6 +92,24 @@ def session_now_s() -> Int:
 # ── SignedCookie: stateless payload carrier ───────────────────────────────
 
 
+comptime MIN_SESSION_KEY_BYTES: Int = 16
+"""Shortest HMAC key a session store or signed cookie will use, for
+signing or for verifying. A shorter key -- above all an empty one, which
+is what an unset environment variable produces -- makes every cookie
+forgeable by anyone who knows the payload format."""
+
+
+def _require_session_key(key: List[UInt8], who: String) raises:
+    if len(key) < MIN_SESSION_KEY_BYTES:
+        raise Error(
+            who
+            + ": signing key must be at least "
+            + String(MIN_SESSION_KEY_BYTES)
+            + " bytes, got "
+            + String(len(key))
+        )
+
+
 def signed_cookie_encode(
     payload: List[UInt8], key: List[UInt8]
 ) raises -> String:
@@ -133,6 +151,12 @@ def signed_cookie_decode(
         Error: When the cookie is malformed or the MAC fails to
                verify under ``key``.
     """
+    # Verifying under a short key is how the bypass worked: the stores
+    # kept an empty key as an "invalid" marker, refused to *sign* with
+    # it, and happily *verified* with it. HMAC under an empty key is
+    # computable by anyone.
+    if len(key) < MIN_SESSION_KEY_BYTES:
+        raise Error("signed_cookie_decode: key shorter than 16 bytes")
     var dot = -1
     var src = cookie.unsafe_ptr()
     var n = cookie.byte_length()
@@ -292,7 +316,7 @@ struct Session(Copyable, Defaultable):
 # ── CookieSessionStore: encode payload directly into a signed cookie ──────
 
 
-struct CookieSessionStore(Copyable, Defaultable, SessionStore):
+struct CookieSessionStore(Copyable, SessionStore):
     """Stateless store: the entire session is encoded into the
     signed cookie. Suitable for small payloads (< 4 KiB).
 
@@ -305,28 +329,32 @@ struct CookieSessionStore(Copyable, Defaultable, SessionStore):
     var _previous_keys: List[List[UInt8]]
     var _cookie_name: String
 
-    def __init__(out self):
-        self._key = List[UInt8]()
-        self._previous_keys = List[List[UInt8]]()
-        self._cookie_name = "flare_session"
-
     def __init__(
         out self, key: List[UInt8], cookie_name: String = "flare_session"
-    ):
-        if len(key) < 16:
-            self._key = List[UInt8]()  # marker for invalid
-        else:
-            self._key = key.copy()
+    ) raises:
+        """Sign and verify with ``key``.
+
+        Raises:
+            Error: If ``key`` is shorter than ``MIN_SESSION_KEY_BYTES``.
+                There is no default constructor: a store without a real
+                key cannot be made.
+        """
+        _require_session_key(key, "CookieSessionStore")
+        self._key = key.copy()
         self._previous_keys = List[List[UInt8]]()
         self._cookie_name = cookie_name
 
-    def add_previous_key(mut self, key: List[UInt8]):
+    def add_previous_key(mut self, key: List[UInt8]) raises:
         """Accept ``key`` as a valid signing key for inbound cookies.
 
         Used during key rotation: set ``self._key`` to the new key,
         keep the old key here so existing browsers' cookies still
         verify until their natural expiry.
+
+        Raises:
+            Error: If ``key`` is shorter than ``MIN_SESSION_KEY_BYTES``.
         """
+        _require_session_key(key, "CookieSessionStore.add_previous_key")
         self._previous_keys.append(key.copy())
 
     def cookie_name(self) -> String:
@@ -365,7 +393,7 @@ struct CookieSessionStore(Copyable, Defaultable, SessionStore):
 # ── InMemorySessionStore: signed cookie carries an opaque id ──────────────
 
 
-struct InMemorySessionStore(Copyable, Defaultable, SessionStore):
+struct InMemorySessionStore(Copyable, SessionStore):
     """Server-side session table keyed by signed session id.
 
     Concurrency note: the implementation is single-worker; for
@@ -380,20 +408,16 @@ struct InMemorySessionStore(Copyable, Defaultable, SessionStore):
     var _ids: List[String]
     var _values: List[String]
 
-    def __init__(out self):
-        self._key = List[UInt8]()
-        self._previous_keys = List[List[UInt8]]()
-        self._cookie_name = "flare_session"
-        self._ids = List[String]()
-        self._values = List[String]()
-
     def __init__(
         out self, key: List[UInt8], cookie_name: String = "flare_session"
-    ):
-        if len(key) < 16:
-            self._key = List[UInt8]()
-        else:
-            self._key = key.copy()
+    ) raises:
+        """Sign and verify session ids with ``key``.
+
+        Raises:
+            Error: If ``key`` is shorter than ``MIN_SESSION_KEY_BYTES``.
+        """
+        _require_session_key(key, "InMemorySessionStore")
+        self._key = key.copy()
         self._previous_keys = List[List[UInt8]]()
         self._cookie_name = cookie_name
         self._ids = List[String]()
@@ -580,9 +604,10 @@ struct BackedSessionStore[B: SessionBackend](Copyable):
         key: List[UInt8],
         cookie_name: String = "flare_session",
         ttl_s: Int = 0,
-    ):
+    ) raises:
+        _require_session_key(key, "BackedSessionStore")
         self._backend = backend^
-        self._key = key.copy() if len(key) >= 16 else List[UInt8]()
+        self._key = key.copy()
         self._cookie_name = cookie_name
         self._ttl_s = ttl_s
 

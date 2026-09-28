@@ -138,9 +138,31 @@ def test_cookie_store_missing_returns_empty() raises:
 
 def test_cookie_store_short_key_raises() raises:
     var bad_key = List[UInt8](length=8, fill=UInt8(1))
-    var store = CookieSessionStore(key=bad_key)
     with assert_raises():
-        _ = store.encode("oops")
+        _ = CookieSessionStore(key=bad_key)
+    with assert_raises():
+        _ = InMemorySessionStore(key=List[UInt8]())
+
+
+def test_cookie_forged_under_an_empty_key_is_rejected() raises:
+    """The bypass: a store built from an unset env var got an empty key,
+    refused to sign, and verified anything HMAC'd under the empty key.
+    """
+    var forged = signed_cookie_encode(
+        List[UInt8](String('{"user":"admin"}').as_bytes()), List[UInt8]()
+    )
+    with assert_raises():
+        _ = signed_cookie_decode(forged, List[UInt8]())
+    var store = CookieSessionStore(key=_make_key("k"))
+    var req = Request(method=Method.GET, url="/")
+    req.headers.set("Cookie", "flare_session=" + forged)
+    assert_false(store.load(req).present)
+
+
+def test_short_rotation_key_is_refused() raises:
+    var store = CookieSessionStore(key=_make_key("k"))
+    with assert_raises():
+        store.add_previous_key(List[UInt8]())
 
 
 def test_cookie_store_tampered_returns_empty() raises:
@@ -304,6 +326,8 @@ def main() raises:
     test_cookie_store_encode_load()
     test_cookie_store_missing_returns_empty()
     test_cookie_store_short_key_raises()
+    test_cookie_forged_under_an_empty_key_is_rejected()
+    test_short_rotation_key_is_refused()
     test_cookie_store_tampered_returns_empty()
     test_in_memory_store_insert_load()
     test_in_memory_store_remove()
@@ -317,4 +341,4 @@ def main() raises:
     test_backed_store_expired_session_is_empty()
     test_backed_store_forged_cookie_is_empty()
     test_session_store_trait_generic_over_impls()
-    print("test_session: 24 passed")
+    print("test_session: 26 passed")

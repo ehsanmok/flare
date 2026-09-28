@@ -252,6 +252,15 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 | `Auth`, `BasicAuth`, `BearerAuth`, `AuthError` | `flare.http.{auth,auth_extract}` |
 | HAProxy PROXY v1 + v2 parser, `ProxyParseError` | `flare.http.proxy_protocol` |
 
+**Changed in v0.11 (breaking).** Every session store now needs a key of
+at least 16 bytes (`MIN_SESSION_KEY_BYTES`) and raises at construction
+without one; the zero-argument constructors, and `Defaultable`, are
+gone from `CookieSessionStore` and `InMemorySessionStore`.
+`add_previous_key` raises on a short key too, and `signed_cookie_decode`
+refuses to verify under one. A short key used to be kept as an empty
+"invalid" marker that could not sign but did verify, so a store built
+from an unset environment variable accepted cookies anyone could forge.
+
 ## Forms and content-encoding
 
 | Surface | Where |

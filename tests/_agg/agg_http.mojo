@@ -3244,6 +3244,12 @@ from test_session import (
     test_cookie_store_short_key_raises as test_session__test_cookie_store_short_key_raises,
 )
 from test_session import (
+    test_cookie_forged_under_an_empty_key_is_rejected as test_session__test_cookie_forged_under_an_empty_key_is_rejected,
+)
+from test_session import (
+    test_short_rotation_key_is_refused as test_session__test_short_rotation_key_is_refused,
+)
+from test_session import (
     test_cookie_store_tampered_returns_empty as test_session__test_cookie_store_tampered_returns_empty,
 )
 from test_session import (
@@ -5538,6 +5544,10 @@ def main() raises:
     suite.test[test_session__test_cookie_store_encode_load]()
     suite.test[test_session__test_cookie_store_missing_returns_empty]()
     suite.test[test_session__test_cookie_store_short_key_raises]()
+    suite.test[
+        test_session__test_cookie_forged_under_an_empty_key_is_rejected
+    ]()
+    suite.test[test_session__test_short_rotation_key_is_refused]()
     suite.test[test_session__test_cookie_store_tampered_returns_empty]()
     suite.test[test_session__test_in_memory_store_insert_load]()
     suite.test[test_session__test_in_memory_store_remove]()
