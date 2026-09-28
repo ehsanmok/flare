@@ -13,6 +13,7 @@
 #include <openssl/err.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
+#include <openssl/pem.h>
 #include <string.h>
 #include <string>
 
@@ -526,16 +527,53 @@ int flare_ssl_ctx_reload(
         set_error("flare_ssl_ctx_reload: ctx / cert / key required");
         return -1;
     }
-    if (SSL_CTX_use_certificate_chain_file(c, cert_path) != 1) {
-        capture_openssl_errors(); return -1;
+    /* Load and check everything before the live context is touched. The
+     * old code installed the chain, then the key, then checked them, all
+     * on the live SSL_CTX. A key that did not match the new chain failed
+     * the reload but had already replaced the key (OpenSSL drops the
+     * certificate when it does), so every later handshake failed. Now a
+     * failed reload leaves the context serving what it served before,
+     * and a good one installs chain and key in one call. */
+    X509* leaf = nullptr;
+    STACK_OF(X509)* chain = sk_X509_new_null();
+    EVP_PKEY* pkey = nullptr;
+    int rc = -1;
+    BIO* cb = BIO_new_file(cert_path, "r");
+    BIO* kb = BIO_new_file(key_path, "r");
+    if (!chain || !cb || !kb) { capture_openssl_errors(); goto done; }
+    leaf = PEM_read_bio_X509_AUX(cb, nullptr, nullptr, nullptr);
+    if (!leaf) { capture_openssl_errors(); goto done; }
+    for (;;) {
+        X509* extra = PEM_read_bio_X509(cb, nullptr, nullptr, nullptr);
+        if (!extra) break;
+        if (!sk_X509_push(chain, extra)) {
+            X509_free(extra); capture_openssl_errors(); goto done;
+        }
     }
-    if (SSL_CTX_use_PrivateKey_file(c, key_path, SSL_FILETYPE_PEM) != 1) {
-        capture_openssl_errors(); return -1;
+    ERR_clear_error();  /* the loop ends on a benign "no start line" */
+    pkey = PEM_read_bio_PrivateKey(kb, nullptr, nullptr, nullptr);
+    if (!pkey) { capture_openssl_errors(); goto done; }
+    if (X509_check_private_key(leaf, pkey) != 1) {
+        capture_openssl_errors(); goto done;
     }
-    if (SSL_CTX_check_private_key(c) != 1) {
-        capture_openssl_errors(); return -1;
+    if (SSL_CTX_use_cert_and_key(c, leaf, pkey, chain, 1) != 1) {
+        capture_openssl_errors(); goto done;
     }
-    return 0;
+    rc = 0;
+done:
+    if (cb) BIO_free(cb);
+    if (kb) BIO_free(kb);
+    if (leaf) X509_free(leaf);
+    if (pkey) EVP_PKEY_free(pkey);
+    if (chain) sk_X509_pop_free(chain, X509_free);
+    return rc;
+}
+
+int flare_ssl_ctx_check_private_key(flare_ssl_ctx_t ctx) {
+    ERR_clear_error();
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) return 0;
+    return SSL_CTX_check_private_key(c) == 1 ? 1 : 0;
 }
 
 /* ALPN selection callback. ``arg`` carries our wire-format

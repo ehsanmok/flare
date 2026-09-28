@@ -212,6 +212,9 @@ int flare_ssl_ctx_reload(
     flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
 );
 
+/* 1 when the context's certificate and private key match, else 0. */
+int flare_ssl_ctx_check_private_key(flare_ssl_ctx_t ctx);
+
 /**
  * Set ALPN protocols for server-side selection.
  *

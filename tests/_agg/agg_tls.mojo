@@ -292,6 +292,9 @@ from test_tls_acceptor import (
 from test_tls_acceptor import (
     test_tls_setup_stops_sigpipe_from_killing_the_process as test_tls_acceptor__test_tls_setup_stops_sigpipe_from_killing_the_process,
 )
+from test_tls_acceptor import (
+    test_failed_reload_keeps_the_serving_pair as test_tls_acceptor__test_failed_reload_keeps_the_serving_pair,
+)
 from test_tls_conn_handle import (
     test_tls_conn_handle_handshake_alpn_sni_roundtrip as test_tls_conn_handle__test_tls_conn_handle_handshake_alpn_sni_roundtrip,
 )
@@ -520,6 +523,7 @@ def main() raises:
     suite.test[
         test_tls_acceptor__test_tls_setup_stops_sigpipe_from_killing_the_process
     ]()
+    suite.test[test_tls_acceptor__test_failed_reload_keeps_the_serving_pair]()
     # tests/tls/test_tls_conn_handle.mojo
     suite.test[
         test_tls_conn_handle__test_tls_conn_handle_handshake_alpn_sni_roundtrip

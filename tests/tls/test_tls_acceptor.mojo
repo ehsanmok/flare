@@ -459,5 +459,23 @@ def test_tls_setup_stops_sigpipe_from_killing_the_process() raises:
     assert_equal(_sigpipe_handler_word(), 1)
 
 
+def test_failed_reload_keeps_the_serving_pair() raises:
+    """Reload installed the chain and the key on the live context before
+    checking them. A key that did not match failed the reload, but the
+    context was left with the new key and no usable certificate."""
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY)
+    var acc = TlsAcceptor(cfg^)
+    assert_true(acc._ctx.key_matches())
+    var raised = False
+    try:
+        acc._ctx.reload(_CERT, "tests/tls/fixtures/rustls-quic-cert/key.pem")
+    except:
+        raised = True
+    assert_true(raised, "a mismatched key reloaded")
+    assert_true(acc._ctx.key_matches(), "failed reload broke the context")
+    acc.reload()  # the good pair still reloads
+    assert_true(acc._ctx.key_matches())
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

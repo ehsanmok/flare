@@ -268,8 +268,16 @@ struct ServerCtx(Movable):
 
     def reload(self, cert_path: String, key_path: String) raises:
         """Reload cert + key without restarting. Raises on file
-        load error / key mismatch."""
+        load error / key mismatch, and leaves the context serving the
+        pair it had when it does."""
         _do_ssl_ctx_reload(self._lib, self._addr, cert_path, key_path)
+
+    def key_matches(self) raises -> Bool:
+        """Whether the context's certificate and private key match."""
+        var f = dl_sym[def(Int) thin abi("C") -> c_int](
+            self._lib, "flare_ssl_ctx_check_private_key"
+        )
+        return Int(f(self._addr)) == 1
 
     def set_alpn(self, protos: List[UInt8]) raises:
         """Set the wire-format ALPN protocols list.
