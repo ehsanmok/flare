@@ -369,6 +369,15 @@ struct Connection(Copyable, Defaultable):
     boundary and per-fragment decoding corrupts it."""
     var header_block_end_stream: Bool
     """END_STREAM seen on the HEADERS that opened ``header_block``."""
+    var header_block_refuse: Int
+    """Non-zero: the open block belongs to a stream being refused, with
+    this RST_STREAM error code. The block is still decoded when it
+    completes -- RFC 9113 sec 4.3: every header block updates the
+    connection-wide HPACK context, refused or not."""
+    var header_block_continuations: Int
+    """CONTINUATION frames seen on the open block (flood guard). Kept on
+    the connection: at most one block is open (sec 6.10), and a refused
+    stream has no entry in ``streams`` to count on."""
     var reset_streams: List[Int]
     """Stream ids that received an inbound RST_STREAM since the
     last :meth:`take_reset_streams` call (RFC 9113 §6.4). Drained
@@ -404,6 +413,8 @@ struct Connection(Copyable, Defaultable):
         self.continuing_stream = 0
         self.header_block = List[UInt8]()
         self.header_block_end_stream = False
+        self.header_block_refuse = 0
+        self.header_block_continuations = 0
         self.reset_streams = List[Int]()
 
     def _make_settings(self, ack: Bool) -> Frame:
@@ -747,6 +758,17 @@ struct Connection(Copyable, Defaultable):
             # decode failure poisons every later block.
             return self._conn_error(Http2ErrorCode.COMPRESSION_ERROR().value)
 
+        var refuse = self.header_block_refuse
+        self.header_block_refuse = 0
+        if refuse != 0:
+            # Decoded only to keep HPACK in step; the fields are dropped.
+            out.append(self._rst_stream_frame(sid, refuse))
+            if sid in self.streams:
+                var rs = self.streams[sid].copy()
+                rs.state = StreamState.CLOSED()
+                self._put_stream(rs^)
+            return out^
+
         var s = self._ensure_stream(sid)
         var is_trailers = s.headers_complete
 
@@ -953,16 +975,14 @@ struct Connection(Copyable, Defaultable):
                 self.continuing_stream
             ):
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
-            var cs = self.streams[sid].copy()
-            cs.continuation_count += 1
-            if cs.continuation_count > _CONTINUATION_FRAME_CAP:
+            self.header_block_continuations += 1
+            if self.header_block_continuations > _CONTINUATION_FRAME_CAP:
                 # CONTINUATION flood (CVE-2024-27316).
                 self.continuing_stream = 0
                 self.header_block = List[UInt8]()
                 return self._conn_error(
                     Http2ErrorCode.ENHANCE_YOUR_CALM().value
                 )
-            self._put_stream(cs^)
             # This branch returns before the frame-size check below, so
             # each CONTINUATION was accepted at up to 16 MiB: 64 of them
             # buffered a gigabyte. It also stripped padding, a flag
@@ -1183,6 +1203,11 @@ struct Connection(Copyable, Defaultable):
             # sec 5.1: a stream the peer already ended, or one it has
             # closed, must not carry another HEADERS. A second HEADERS
             # on an open stream is trailers and must end the stream.
+            # Refusals below record a code rather than returning at
+            # once: the block must still be decoded (sec 4.3), or its
+            # dynamic-table inserts are lost and every later block on the
+            # connection decodes against the wrong table.
+            var refuse = 0
             if f.header.stream_id in self.streams:
                 var prev = self.streams[f.header.stream_id].copy()
                 var st = prev.state.value
@@ -1203,30 +1228,17 @@ struct Connection(Copyable, Defaultable):
                     and not f.header.flags.has(FrameFlags.END_STREAM())
                 ):
                     # sec 8.1: trailers must carry END_STREAM.
-                    out.append(
-                        self._rst_stream_frame(
-                            f.header.stream_id,
-                            Http2ErrorCode.PROTOCOL_ERROR().value,
-                        )
-                    )
-                    prev.state = StreamState.CLOSED()
-                    self._put_stream(prev^)
-                    return out^
+                    refuse = Http2ErrorCode.PROTOCOL_ERROR().value
             # sec 5.1.2: refuse a stream past the concurrency limit we
             # advertised instead of serving it.
             if (
-                not self.is_client
+                refuse == 0
+                and not self.is_client
                 and f.header.stream_id not in self.streams
                 and self.max_concurrent_streams > 0
                 and self._active_stream_count() >= self.max_concurrent_streams
             ):
-                out.append(
-                    self._rst_stream_frame(
-                        f.header.stream_id,
-                        Http2ErrorCode.REFUSED_STREAM().value,
-                    )
-                )
-                return out^
+                refuse = Http2ErrorCode.REFUSED_STREAM().value
             # sec 5.3.1: the priority prefix must not name this stream.
             if f.header.flags.has(FrameFlags.PRIORITY()):
                 var off = 1 if f.header.flags.has(FrameFlags.PADDED()) else 0
@@ -1250,9 +1262,12 @@ struct Connection(Copyable, Defaultable):
             self.header_block_end_stream = f.header.flags.has(
                 FrameFlags.END_STREAM()
             )
-            var s = self._ensure_stream(f.header.stream_id)
-            s.continuation_count = 0
-            self._put_stream(s^)
+            self.header_block_refuse = refuse
+            self.header_block_continuations = 0
+            if refuse == 0:
+                var s = self._ensure_stream(f.header.stream_id)
+                s.continuation_count = 0
+                self._put_stream(s^)
             if not f.header.flags.has(FrameFlags.END_HEADERS()):
                 # Block stays open; only CONTINUATION on this stream may
                 # follow (sec 6.10).

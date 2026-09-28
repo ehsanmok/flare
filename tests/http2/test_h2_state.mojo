@@ -384,6 +384,45 @@ def test_peer_header_table_size_does_not_resize_our_decoder() raises:
     assert_equal(c.hpack_decoder.max_size, before)
 
 
+def test_refused_stream_block_still_updates_hpack() raises:
+    """A block on a stream refused for concurrency was dropped undecoded,
+    losing its dynamic-table inserts; every later block then decoded
+    against the wrong table."""
+    var c = Connection()
+    c.max_concurrent_streams = 1
+    var h1 = Frame()
+    h1.header.type = FrameType.HEADERS()
+    h1.header.stream_id = 1
+    h1.header.flags = FrameFlags(FrameFlags.END_HEADERS())  # stays open
+    h1.payload = List[UInt8]()
+    # A complete request head, so stream 1 stays open and takes the one
+    # concurrency slot: :method GET, :scheme http, :path /, :authority x.
+    h1.payload.append(UInt8(0x82))
+    h1.payload.append(UInt8(0x86))
+    h1.payload.append(UInt8(0x84))
+    h1.payload.append(UInt8(0x01))
+    h1.payload.append(UInt8(0x01))
+    h1.payload.append(UInt8(ord("x")))
+    _ = c.handle_frame(h1^)
+    var before = c.hpack_decoder.dynamic_size
+    var h3 = Frame()
+    h3.header.type = FrameType.HEADERS()
+    h3.header.stream_id = 3
+    h3.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+    h3.payload = List[UInt8]()
+    h3.payload.append(UInt8(0x40))  # literal, incremental indexing
+    h3.payload.append(UInt8(0x03))
+    for ch in String("x-a").as_bytes():
+        h3.payload.append(ch)
+    h3.payload.append(UInt8(0x01))
+    h3.payload.append(UInt8(ord("1")))
+    var out = c.handle_frame(h3^)
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+    assert_equal(Int(out[0].payload[3]), 0x7)  # REFUSED_STREAM
+    assert_equal(c.hpack_decoder.dynamic_size, before + 3 + 1 + 32)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -402,4 +441,5 @@ def main() raises:
     test_hpack_decode_bomb_is_stopped_before_it_expands()
     test_oversized_continuation_frame_is_a_frame_size_error()
     test_peer_header_table_size_does_not_resize_our_decoder()
-    print("test_h2_state: 17 passed")
+    test_refused_stream_block_still_updates_hpack()
+    print("test_h2_state: 18 passed")
