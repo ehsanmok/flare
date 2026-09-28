@@ -16,6 +16,7 @@ so timing leaks don't reveal which byte of a forged tag differs.
 from flare.crypto import (
     hmac_sha256, hmac_sha256_verify,
     base64url_encode, base64url_decode,
+    random_bytes, fill_random,
 )
 ```
 
@@ -26,6 +27,9 @@ from flare.crypto import (
 - ``base64url_encode`` / ``base64url_decode`` — URL-safe base64
   with no padding (``-`` / ``_`` for ``+`` / ``/``). Used by
   ``SignedCookie`` to keep cookies cookie-safe.
+- ``random_bytes(n)`` / ``fill_random(buf)`` -- bytes from the OS
+  CSPRNG (``getentropy``). Raises rather than falling back to a
+  weaker source.
 
 ## Threat model
 
@@ -43,3 +47,4 @@ from .hmac import (
     base64url_encode,
     base64url_decode,
 )
+from .random import random_bytes, fill_random
