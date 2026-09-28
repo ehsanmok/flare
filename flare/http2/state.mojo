@@ -57,6 +57,11 @@ from .stream_slab import StreamSlab
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
 
 
+comptime _RESET_BY_US_REMEMBERED: Int = 1024
+"""How many of our own RST_STREAMs are remembered for ignoring the
+peer's in-flight frames. Bounded so a reset flood cannot grow it."""
+
+
 def _is_valid_field_value(v: String) -> Bool:
     """RFC 9113 sec 8.2.1: no NUL / CR / LF, no leading or trailing SP
     or HTAB."""
@@ -394,6 +399,10 @@ struct Connection(Copyable, Defaultable):
     boundary and per-fragment decoding corrupts it."""
     var header_block_end_stream: Bool
     """END_STREAM seen on the HEADERS that opened ``header_block``."""
+    var reset_by_us: List[Int]
+    """Streams we sent RST_STREAM on, most recent last, bounded. DATA the
+    peer had in flight for them is dropped quietly; it used to be a
+    connection-level STREAM_CLOSED that tore down every other stream."""
     var header_block_refuse: Int
     """Non-zero: the open block belongs to a stream being refused, with
     this RST_STREAM error code. The block is still decoded when it
@@ -441,6 +450,7 @@ struct Connection(Copyable, Defaultable):
         self.header_block_end_stream = False
         self.header_block_refuse = 0
         self.header_block_continuations = 0
+        self.reset_by_us = List[Int]()
         self.reset_streams = List[Int]()
 
     def _make_settings(self, ack: Bool) -> Frame:
@@ -542,8 +552,13 @@ struct Connection(Copyable, Defaultable):
         var c = self._header_list_cap() * 4
         return c if c > 262144 else 262144
 
-    def _rst_stream_frame(self, sid: Int, error_code: Int) -> Frame:
-        """Build a RST_STREAM frame (RFC 9113 6.4)."""
+    def _rst_stream_frame(mut self, sid: Int, error_code: Int) -> Frame:
+        """Build a RST_STREAM frame (RFC 9113 6.4), and remember that we
+        reset ``sid``: frames the peer sent before our RST arrived must
+        be ignored, not treated as errors (sec 5.1, "closed")."""
+        self.reset_by_us.append(sid)
+        if len(self.reset_by_us) > _RESET_BY_US_REMEMBERED:
+            _ = self.reset_by_us.pop(0)
         var f = Frame()
         f.header.type = FrameType.RST_STREAM()
         f.header.stream_id = sid
@@ -556,6 +571,15 @@ struct Connection(Copyable, Defaultable):
         f.payload = p^
         f.header.length = len(f.payload)
         return f^
+
+    def _close_if_known(mut self, sid: Int):
+        if sid in self.streams:
+            try:
+                var s = self.streams[sid].copy()
+                s.state = StreamState.CLOSED()
+                self._put_stream(s^)
+            except:
+                pass
 
     @staticmethod
     def _window_update_frame(sid: Int, credit: Int) -> Frame:
@@ -1103,6 +1127,7 @@ struct Connection(Copyable, Defaultable):
                         sid, Http2ErrorCode.PROTOCOL_ERROR().value
                     )
                 )
+                self._close_if_known(sid)
                 return out^
         elif ft == FrameType.RST_STREAM().value:
             if sid == 0:
@@ -1230,6 +1255,9 @@ struct Connection(Copyable, Defaultable):
                         sid, Http2ErrorCode.PROTOCOL_ERROR().value
                     )
                 )
+                # A reset stream is closed (sec 5.1). Leaving it open let
+                # the handler run and keep sending on it.
+                self._close_if_known(sid)
                 return out^
             if sid == 0:
                 # sec 6.9.1: a window may not grow past 2^31-1.
@@ -1344,6 +1372,13 @@ struct Connection(Copyable, Defaultable):
             return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
 
         if ft == FrameType.DATA().value:
+            if sid in self.reset_by_us:
+                # In flight before our RST_STREAM reached the peer:
+                # ignore it, but hand back the connection-level credit it
+                # used, or the connection window drains away.
+                if plen > 0:
+                    out.append(Connection._window_update_frame(0, plen))
+                return out^
             if sid not in self.streams:
                 # sec 5.1: DATA on a stream that was never opened is
                 # PROTOCOL_ERROR; on one already gone, STREAM_CLOSED.

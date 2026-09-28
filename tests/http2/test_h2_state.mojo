@@ -491,6 +491,61 @@ def test_pseudo_header_forms_are_checked() raises:
     assert_equal(_request_verdict(List[HpackHeader]()), -1)
 
 
+def _open_request(
+    mut c: Connection, sid: Int, end_stream: Bool
+) raises -> List[Frame]:
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":method", "POST"))
+    hdrs.append(HpackHeader(":scheme", "https"))
+    hdrs.append(HpackHeader(":path", "/"))
+    hdrs.append(HpackHeader(":authority", "example.com"))
+    var enc = HpackEncoder()
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.stream_id = sid
+    var flags = FrameFlags.END_HEADERS()
+    if end_stream:
+        flags = flags | FrameFlags.END_STREAM()
+    f.header.flags = FrameFlags(flags)
+    f.payload = enc.encode(Span[HpackHeader, _](hdrs))
+    return c.handle_frame(f^)
+
+
+def test_data_in_flight_for_a_refused_stream_is_ignored() raises:
+    """The client sent a body behind a HEADERS we refused. That DATA was
+    a connection-level STREAM_CLOSED, killing every other stream."""
+    var c = Connection()
+    c.max_concurrent_streams = 1
+    _ = _open_request(c, 1, False)
+    var refused = _open_request(c, 3, False)
+    assert_equal(Int(refused[0].payload[3]), 0x7)  # REFUSED_STREAM
+    var d = Frame()
+    d.header.type = FrameType.DATA()
+    d.header.stream_id = 3
+    d.payload = List[UInt8](length=100, fill=UInt8(0x61))
+    d.header.length = 100
+    var out = c.handle_frame(d^)
+    assert_equal(
+        _goaway_code(out), -1, "a refused stream's DATA killed the connection"
+    )
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].header.type.value), 0x8)  # WINDOW_UPDATE
+    assert_equal(out[0].header.stream_id, 0)
+
+
+def test_zero_window_update_closes_the_stream_it_resets() raises:
+    var c = Connection()
+    _ = _open_request(c, 1, False)
+    var w = Frame()
+    w.header.type = FrameType.WINDOW_UPDATE()
+    w.header.stream_id = 1
+    w.payload = List[UInt8](length=4, fill=UInt8(0))
+    w.header.length = 4
+    var out = c.handle_frame(w^)
+    assert_equal(Int(out[0].header.type.value), 0x3)
+    assert_equal(c.streams[1].state.value, StreamState.CLOSED().value)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -513,4 +568,6 @@ def main() raises:
     test_local_and_peer_initial_windows_are_separate()
     test_malformed_field_values_are_refused()
     test_pseudo_header_forms_are_checked()
-    print("test_h2_state: 21 passed")
+    test_data_in_flight_for_a_refused_stream_is_ignored()
+    test_zero_window_update_closes_the_stream_it_resets()
+    print("test_h2_state: 23 passed")
