@@ -836,6 +836,9 @@ struct TlsStream(Movable, Readable):
                 mid-record.
             NetworkError: On I/O or decryption error.
         """
+        if self._ssl == 0:
+            # close() freed the SSL; OpenSSL was handed NULL and crashed.
+            raise NetworkError("TLS read on a closed stream")
         var n = _do_ssl_read_blocking(self._lib, self._ssl, buf, size)
         if n >= 0:
             return n
@@ -909,8 +912,15 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: On I/O or encryption error.
         """
+        if self._ssl == 0:
+            raise NetworkError("TLS write on a closed stream")
+        if len(data) == 0:
+            return 0
         var n = _do_ssl_write(self._lib, self._ssl, data)
-        if n < 0:
+        # SSL_write reports failure as 0 as well as below it. A 0 used to
+        # come back as "wrote nothing", and write_all looped on it for
+        # ever.
+        if n <= 0:
             raise NetworkError("TLS write error: " + _c_err(self._lib))
         return n
 
@@ -943,6 +953,8 @@ struct TlsStream(Movable, Readable):
             E.g. ``"TLSv1.3"`` or ``"TLSv1.2"``. Returns ``"unknown"`` if
             called before the handshake or if the library cannot be loaded.
         """
+        if self._ssl == 0:
+            return "unknown"
         try:
             return _do_ssl_get_version(self._lib, self._ssl)
         except:
@@ -954,6 +966,8 @@ struct TlsStream(Movable, Readable):
         Returns:
             E.g. ``"TLS_AES_256_GCM_SHA384"`` or ``"unknown"``.
         """
+        if self._ssl == 0:
+            return "unknown"
         try:
             return _do_ssl_get_cipher(self._lib, self._ssl)
         except:
@@ -971,6 +985,8 @@ struct TlsStream(Movable, Readable):
         Raises:
             NetworkError: If no peer certificate is available.
         """
+        if self._ssl == 0:
+            raise NetworkError("peer_cert_subject: stream is closed")
         var buf = stack_allocation[_CERT_SUBJ_LEN, UInt8]()
         var rc = _do_ssl_get_peer_cert_subject(
             self._lib, self._ssl, buf, _CERT_SUBJ_LEN
@@ -1050,6 +1066,8 @@ struct TlsStream(Movable, Readable):
                 refuses (almost always means the SSL session is
                 already closed).
         """
+        if self._ctx == 0:
+            raise NetworkError("session: stream is closed")
         var lib = OwnedDLHandle(_find_flare_lib())
         var addr = _do_ssl_ctx_take_session(lib, self._ctx)
         return TlsSession(lib^, addr, self._origin.copy())
@@ -1060,6 +1078,8 @@ struct TlsStream(Movable, Readable):
         handshake skipped). Mirrors OpenSSL's
         ``SSL_session_reused``.
         """
+        if self._ssl == 0:
+            return False
         try:
             return _do_ssl_session_reused(self._lib, self._ssl) == 1
         except:

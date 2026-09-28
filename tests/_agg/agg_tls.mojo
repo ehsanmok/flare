@@ -211,6 +211,9 @@ from test_tls import (
 from test_tls import (
     test_tls_close_idempotent as test_tls__test_tls_close_idempotent,
 )
+from test_tls import (
+    test_tls_use_after_close_raises as test_tls__test_tls_use_after_close_raises,
+)
 from test_tls_acceptor import (
     test_config_minimal as test_tls_acceptor__test_config_minimal,
 )
@@ -494,6 +497,7 @@ def main() raises:
     suite.test[test_tls__test_tls_peer_cert_subject_non_empty]()
     suite.test[test_tls__test_tls_write_read_echo]()
     suite.test[test_tls__test_tls_close_idempotent]()
+    suite.test[test_tls__test_tls_use_after_close_raises]()
     # tests/tls/test_tls_acceptor.mojo
     suite.test[test_tls_acceptor__test_config_minimal]()
     suite.test[test_tls_acceptor__test_config_with_alpn_and_mtls]()

@@ -398,6 +398,34 @@ def test_tls_close_idempotent() raises:
     waitpid(pid)
 
 
+def test_tls_use_after_close_raises() raises:
+    """``close()`` frees the SSL and zeroes the handle; read and write then
+    passed NULL into OpenSSL and crashed the process."""
+    var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
+    var port = srv.port()
+    var pid = _spawn_echo_server(srv)
+    usleep(80000)
+    var cfg = TlsConfig(ca_bundle=_CA_CRT)
+    var stream = TlsStream.connect("localhost", UInt16(port), cfg)
+    stream.close()
+    var buf = List[UInt8](length=8, fill=UInt8(0))
+    var read_raised = False
+    try:
+        _ = stream.read(buf.unsafe_ptr(), 8)
+    except:
+        read_raised = True
+    var write_raised = False
+    try:
+        stream.write_all(String("x").as_bytes())
+    except:
+        write_raised = True
+    assert_true(read_raised, "read on a closed stream did not raise")
+    assert_true(write_raised, "write on a closed stream did not raise")
+    assert_equal(stream.tls_version(), "unknown")
+    assert_false(stream.was_session_reused())
+    waitpid(pid)
+
+
 def main() raises:
     print("=" * 60)
     print("test_tls.mojo — TlsConfig + TlsStream")
