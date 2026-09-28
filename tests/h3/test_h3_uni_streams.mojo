@@ -326,6 +326,57 @@ def test_emit_goaway_flips_flag_and_double_emit_raises() raises:
     assert_true(raised, "double emit_goaway must raise")
 
 
+def _settings_prefix() raises -> List[UInt8]:
+    var settings = List[Http3Setting]()
+    settings.append(
+        Http3Setting(
+            identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
+            value=UInt64(1024),
+        )
+    )
+    return _build_peer_control_prefix(settings^)
+
+
+def test_control_frame_header_split_across_chunks() raises:
+    """A frame whose length varint straddled two chunks made
+    decode_varint raise out of the control-stream parser, ending the
+    connection. It now waits for the rest."""
+    var c = Http3Connection()
+    c.feed_uni_stream_chunk(3, _settings_prefix())
+    # A reserved (grease) frame type with a 100-byte payload: its length
+    # is a two-byte varint, 0x40 0x64.
+    var frame = List[UInt8]()
+    frame.append(UInt8(0x21))
+    frame.append(UInt8(0x40))
+    frame.append(UInt8(0x64))
+    for _ in range(100):
+        frame.append(UInt8(0))
+    var head = List[UInt8](Span[UInt8, _](frame)[:2])  # splits the length
+    var tail = List[UInt8](Span[UInt8, _](frame)[2:])
+    c.feed_uni_stream_chunk(3, head^)
+    c.feed_uni_stream_chunk(3, tail^)
+    c.feed_uni_stream_chunk(3, _build_goaway_frame(UInt64(16)))
+    assert_equal(c.peer_goaway_max_stream_id, UInt64(16))
+
+
+def test_oversized_control_frame_is_refused_from_its_header() raises:
+    """The control-stream carry grew for as long as a declared frame
+    length stayed unmet."""
+    var c = Http3Connection()
+    c.feed_uni_stream_chunk(3, _settings_prefix())
+    var frame = List[UInt8]()
+    frame.append(UInt8(0x21))
+    var ln = encode_varint(UInt64(1 << 30))
+    for b in ln:
+        frame.append(b)
+    var raised = False
+    try:
+        c.feed_uni_stream_chunk(3, frame^)
+    except:
+        raised = True
+    assert_true(raised, "a 1 GiB control frame header was accepted")
+
+
 def main() raises:
     test_peer_control_stream_settings_round_trip()
     test_uni_stream_type_varint_split_across_chunks()
@@ -338,4 +389,6 @@ def main() raises:
     test_second_peer_control_stream_raises()
     test_emit_initial_settings_round_trips()
     test_emit_goaway_flips_flag_and_double_emit_raises()
-    print("test_h3_uni_streams: 11 passed")
+    test_control_frame_header_split_across_chunks()
+    test_oversized_control_frame_is_refused_from_its_header()
+    print("test_h3_uni_streams: 13 passed")

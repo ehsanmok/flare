@@ -88,10 +88,16 @@ from flare.qpack.dynamic import (
     apply_encoder_instructions_partial,
     encode_insert_count_increment,
 )
-from flare.quic.varint import decode_varint, encode_varint
+from flare.quic.varint import Varint, decode_varint, encode_varint
 
 
 # ── Unidirectional stream type codepoints (RFC 9114 §6.2) ───────────────
+
+
+comptime _MAX_CONTROL_FRAME_BYTES: Int = 16384
+"""Largest frame accepted on the peer's control stream. SETTINGS,
+GOAWAY and MAX_PUSH_ID are a few bytes; anything declaring more is
+treated as an excessive load (RFC 9114 sec 8.1)."""
 
 
 struct Http3StreamType:
@@ -917,13 +923,34 @@ struct Http3Connection(Copyable, Defaultable):
         var cursor = 0
         while cursor < len(bytes):
             var view = Span[UInt8, _](bytes[cursor:])
-            var type_var = decode_varint(view)
+            # A varint split across chunks is "need more", not an
+            # error. decode_varint raises on a short buffer, which
+            # propagated out and tore the connection down whenever a
+            # frame header straddled two QUIC packets.
+            var type_var: Varint
+            try:
+                type_var = decode_varint(view)
+            except:
+                break
             if type_var.consumed >= len(view):
                 break
             var rest = view[type_var.consumed :]
-            var len_var = decode_varint(rest)
+            var len_var: Varint
+            try:
+                len_var = decode_varint(rest)
+            except:
+                break
             var header_size = type_var.consumed + len_var.consumed
             var payload_size = Int(len_var.value)
+            # Checked from the header, before any payload is held: the
+            # carry below grew for as long as the peer kept a declared
+            # frame length unmet.
+            if len_var.value > UInt64(_MAX_CONTROL_FRAME_BYTES):
+                raise Error(
+                    "H3_EXCESSIVE_LOAD: control frame of "
+                    + String(len_var.value)
+                    + " bytes"
+                )
             if header_size + payload_size > len(view):
                 break
             var payload_start = cursor + header_size

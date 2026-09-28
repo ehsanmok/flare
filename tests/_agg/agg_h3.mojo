@@ -220,6 +220,12 @@ from test_h3_uni_streams import (
 from test_h3_uni_streams import (
     test_emit_goaway_flips_flag_and_double_emit_raises as test_h3_uni_streams__test_emit_goaway_flips_flag_and_double_emit_raises,
 )
+from test_h3_uni_streams import (
+    test_control_frame_header_split_across_chunks as test_h3_uni_streams__test_control_frame_header_split_across_chunks,
+)
+from test_h3_uni_streams import (
+    test_oversized_control_frame_is_refused_from_its_header as test_h3_uni_streams__test_oversized_control_frame_is_refused_from_its_header,
+)
 from test_request_reader import (
     test_initial_state as test_request_reader__test_initial_state,
 )
@@ -442,6 +448,12 @@ def main() raises:
     suite.test[test_h3_uni_streams__test_emit_initial_settings_round_trips]()
     suite.test[
         test_h3_uni_streams__test_emit_goaway_flips_flag_and_double_emit_raises
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_control_frame_header_split_across_chunks
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_oversized_control_frame_is_refused_from_its_header
     ]()
     # tests/h3/test_request_reader.mojo
     suite.test[test_request_reader__test_initial_state]()
