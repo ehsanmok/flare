@@ -205,5 +205,66 @@ def test_connect_to_nonexistent_path_raises_refused() raises:
         var _u = UnixStream.connect(p)
 
 
+def test_bind_leaves_a_live_socket_and_a_plain_file_alone() raises:
+    """Bind unlinked whatever sat at the path: a regular file was
+    deleted, and a running server's socket was replaced under it."""
+    from flare.net import AddressInUse
+
+    var p = _tmp_uds_path("live_guard")
+    _maybe_unlink(p)
+    var first = UnixListener.bind(p)
+    var raised = False
+    try:
+        _ = UnixListener.bind(p)
+    except e:
+        raised = True
+    assert_true(raised, "bound over a live listener")
+    # The first listener still owns the path.
+    var c = UnixStream.connect(p)
+    _ = first.accept()
+    c.close()
+    first.close()
+    _maybe_unlink(p)
+
+    # A stale socket, left by a listener that did not clean up, is
+    # still replaced.
+    var gone = UnixListener.bind_with_options(p, cleanup_path=False)
+    gone.close()
+    _ = gone^
+    var again = UnixListener.bind(p)
+    assert_equal(again.local_path(), p)
+    again.close()
+    _ = again^
+
+    var f = _tmp_uds_path("plain_file")
+    _maybe_unlink(f)
+    with open(f, "w") as fh:
+        fh.write("keep me")
+    var raised2 = False
+    try:
+        _ = UnixListener.bind(f)
+    except:
+        raised2 = True
+    assert_true(raised2, "bound over a regular file")
+    assert_true(os.path.exists(f), "the regular file was deleted")
+    os.remove(f)
+
+
+def test_destructor_removes_only_its_own_socket() raises:
+    """An old listener's destructor unlinked by path, taking the socket
+    file of whatever server had bound the path since."""
+    var p = _tmp_uds_path("own_socket")
+    _maybe_unlink(p)
+    var old = UnixListener.bind(p)
+    _maybe_unlink(p)  # an operator clears the path
+    var new = UnixListener.bind(p)
+    old.close()
+    _ = old^
+    assert_true(os.path.exists(p), "old listener removed the new socket")
+    var c = UnixStream.connect(p)
+    _ = new.accept()
+    c.close()
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

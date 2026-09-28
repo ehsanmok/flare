@@ -34,6 +34,9 @@ from ..net._libc import (
 )
 
 from ._libc import (
+    PATH_OTHER,
+    PATH_SOCKET,
+    lstat_kind,
     AF_UNIX,
     SOCKADDR_UN_SIZE,
     fill_sockaddr_un,
@@ -61,6 +64,10 @@ struct UnixListener(Movable):
     var _socket: RawSocket
     var _path: String
     var _cleanup_path: Bool
+    var _dev: UInt64
+    var _ino: UInt64
+    """Device and inode of the socket file this listener created, so
+    the destructor removes that file and not one that replaced it."""
 
     def __init__(
         out self,
@@ -76,6 +83,15 @@ struct UnixListener(Movable):
         self._socket = socket^
         self._path = path
         self._cleanup_path = cleanup_path
+        self._dev = 0
+        self._ino = 0
+        try:
+            var k = lstat_kind(path)
+            if k[0] == PATH_SOCKET:
+                self._dev = k[1]
+                self._ino = k[2]
+        except:
+            pass
 
     def __deinit__(deinit self):
         """Close the socket. If ``cleanup_path`` is ``True`` (the
@@ -85,7 +101,20 @@ struct UnixListener(Movable):
         have been moved / deleted by an admin)."""
         self._socket.close()
         if self._cleanup_path and self._path.byte_length() > 0:
-            _ = unlink_path(self._path)
+            # Only the file this listener made. It was unlinked by
+            # path, so a server that had since taken the path over lost
+            # its socket file when an old listener went away.
+            try:
+                var k = lstat_kind(self._path)
+                if (
+                    k[0] == PATH_SOCKET
+                    and k[1] == self._dev
+                    and k[2] == self._ino
+                    and self._ino != 0
+                ):
+                    _ = unlink_path(self._path)
+            except:
+                pass
 
     # ── Factory ───────────────────────────────────────────────────────────
 
@@ -114,8 +143,11 @@ struct UnixListener(Movable):
                 Linux, 104 on macOS, including NUL); paths longer
                 than that raise ``Error``.
             backlog: ``listen(2)`` backlog.
-            unlink_existing: ``unlink(path)`` before ``bind(2)``.
-                Defaults ``True`` so a crashed-then-restarted
+            unlink_existing: Remove a stale socket at ``path`` before
+                ``bind(2)``: one no process is listening on. A live
+                socket raises ``AddressInUse`` and anything that is
+                not a socket raises ``NetworkError``; neither is
+                touched. Defaults ``True`` so a crashed-then-restarted
                 process recovers cleanly. Set ``False`` if you
                 want a hard ``EADDRINUSE`` when a previous
                 instance is still running.
@@ -130,8 +162,26 @@ struct UnixListener(Movable):
         """
         var sock = RawSocket(AF_UNIX, SOCK_STREAM)
         if unlink_existing:
-            # Best-effort: ignore failure (file might not exist).
-            _ = unlink_path(path)
+            # Remove only a stale socket. The path used to be unlinked
+            # whatever it was: a regular file was deleted, and a live
+            # server's socket vanished from under it, so the new bind
+            # "succeeded" and the old server stopped getting clients.
+            var k = lstat_kind(path)
+            if k[0] == PATH_OTHER:
+                raise NetworkError(
+                    "bind " + path + ": path exists and is not a socket"
+                )
+            if k[0] == PATH_SOCKET:
+                var live = False
+                try:
+                    var probe = UnixStream.connect(path)
+                    probe.close()
+                    live = True
+                except:
+                    pass
+                if live:
+                    raise AddressInUse(path, Int(ErrNo.EADDRINUSE.value))
+                _ = unlink_path(path)
 
         var sa = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
         for i in range(Int(SOCKADDR_UN_SIZE)):

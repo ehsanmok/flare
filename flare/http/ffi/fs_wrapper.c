@@ -87,3 +87,15 @@ int flare_fs_open_regular(const char* path, const char* root,
 int flare_fs_access(const char* path) {
     return access(path, F_OK);
 }
+
+/* What is at ``path``, without following a final symlink: 0 nothing,
+ * 1 a socket (its device and inode written out), 2 anything else, -1
+ * any other lstat failure. Used by the UDS listener to tell a stale
+ * socket from a live one or from a file that is not a socket at all. */
+int flare_fs_lstat_kind(const char* path, uint64_t* dev, uint64_t* ino) {
+    struct stat st;
+    if (lstat(path, &st) != 0) return errno == ENOENT ? 0 : -1;
+    if (dev) *dev = (uint64_t)st.st_dev;
+    if (ino) *ino = (uint64_t)st.st_ino;
+    return S_ISSOCK(st.st_mode) ? 1 : 2;
+}

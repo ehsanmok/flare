@@ -57,6 +57,12 @@ from test_uds_listener import (
 from test_uds_listener import (
     test_connect_to_nonexistent_path_raises_refused as test_uds_listener__test_connect_to_nonexistent_path_raises_refused,
 )
+from test_uds_listener import (
+    test_bind_leaves_a_live_socket_and_a_plain_file_alone as test_uds_listener__test_bind_leaves_a_live_socket_and_a_plain_file_alone,
+)
+from test_uds_listener import (
+    test_destructor_removes_only_its_own_socket as test_uds_listener__test_destructor_removes_only_its_own_socket,
+)
 
 
 def main() raises:
@@ -81,4 +87,8 @@ def main() raises:
     suite.test[
         test_uds_listener__test_connect_to_nonexistent_path_raises_refused
     ]()
+    suite.test[
+        test_uds_listener__test_bind_leaves_a_live_socket_and_a_plain_file_alone
+    ]()
+    suite.test[test_uds_listener__test_destructor_removes_only_its_own_socket]()
     suite^.run()

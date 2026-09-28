@@ -565,6 +565,12 @@ Responses framed by length or chunking are unaffected.
 | `IpAddr.parse(...)`, `IpAddr.is_v4()`/`is_v6()`, `is_private()`, `is_loopback()`, `SocketAddr.parse(...)`, `SocketAddr.localhost(port)`, `RawSocket` | [`addresses.mojo`](../examples/basic/addresses.mojo) |
 | `resolve()`, `resolve_v4()`, `resolve_v6()` — getaddrinfo, dual-stack, numeric-IP passthrough | [`dns_resolution.mojo`](../examples/basic/dns_resolution.mojo) |
 
+`UnixListener.bind` removes only a stale socket file, one that nothing
+is listening on. A path with a live listener raises `AddressInUse`, and
+a path that is not a socket raises `NetworkError`. Neither is touched.
+It used to unlink whatever was at the path. On destruction a listener
+removes its socket file only if the file is still the one it created.
+
 ## Crypto
 
 | Surface | Where |

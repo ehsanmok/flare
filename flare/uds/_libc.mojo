@@ -141,3 +141,44 @@ def unlink_path(var path: String) -> c_int:
     ``as_c_string_span`` is mutating, so we ask for an owning
     ``var`` to avoid silently mutating the caller's string."""
     return external_call["unlink", c_int](path.as_c_string_span())
+
+
+comptime PATH_NONE: Int = 0
+comptime PATH_SOCKET: Int = 1
+comptime PATH_OTHER: Int = 2
+
+
+def lstat_kind(path: String) raises -> Tuple[Int, UInt64, UInt64]:
+    """``(kind, dev, ino)`` for ``path`` without following a final
+    symlink. ``kind`` is :data:`PATH_NONE`, :data:`PATH_SOCKET` or
+    :data:`PATH_OTHER`; ``dev`` / ``ino`` are set for a socket.
+
+    Raises:
+        Error: When ``lstat(2)`` fails for a reason other than ENOENT.
+    """
+    from std.ffi import OwnedDLHandle
+    from ..utils.dylib import dl_sym, find_flare_lib
+
+    var lib = OwnedDLHandle(find_flare_lib("fs"))
+    var f = dl_sym[def(Int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_fs_lstat_kind"
+    )
+    var bytes = path.as_bytes()
+    var cpath = List[UInt8](length=len(bytes) + 1, fill=UInt8(0))
+    for i in range(len(bytes)):
+        cpath[i] = bytes[i]
+    var out = List[UInt64](length=2, fill=UInt64(0))
+    var rc = Int(
+        f(
+            Int(cpath.unsafe_ptr()),
+            Int(out.unsafe_ptr()),
+            Int(out.unsafe_ptr().unsafe_offset(1)),
+        )
+    )
+    # Both held past the call: an OwnedDLHandle dropped after its last
+    # use closes the library before f runs.
+    _ = cpath^
+    _ = lib^
+    if rc < 0:
+        raise Error("lstat failed for " + path)
+    return (rc, out[0], out[1])
