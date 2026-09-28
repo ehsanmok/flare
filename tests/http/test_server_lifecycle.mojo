@@ -24,6 +24,7 @@ from flare.net._libc import (
     _fill_sockaddr_in,
     _recv,
     _setsockopt,
+    _shutdown,
     _send,
     _socket,
     _strerror,
@@ -270,6 +271,28 @@ def test_request_pipelined_behind_a_partial_write() raises:
     _stop(srv[0])
     assert_equal(_count(got, "HTTP/1.1 200"), 2)
     assert_true("hi /after" in got, "request behind the big response lost")
+
+
+# ── A half-close after a complete request still gets its response ──────────
+
+
+def test_half_close_after_a_request_still_gets_a_response() raises:
+    var srv = _spawn(ServerConfig())
+    var got = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        # What ``printf 'GET ...' | nc -N host port`` does: send the
+        # request, then shutdown(SHUT_WR). Request and FIN can land in
+        # the same drain.
+        _send_str(c, "GET /hc HTTP/1.1\r\nHost: x\r\n\r\n")
+        _ = _shutdown(c, c_int(1))
+        got = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true("hi /hc" in got, "half-closed request was dropped: " + got)
+    assert_true("Connection: close" in got, "should announce close: " + got)
 
 
 def main() raises:

@@ -260,6 +260,10 @@ struct ConnHandle(Movable):
     """The request being answered is HEAD, so its response carries a
     head and no content."""
 
+    var peer_eof: Bool
+    """The peer has half-closed (FIN / close_notify) with a request still
+    buffered. That request is served, with ``Connection: close``."""
+
     var request_started_ms: Int
     """Monotonic ms at which the first byte of the request being read
     was seen; 0 between requests. Bounds the whole read phase (head and
@@ -301,6 +305,7 @@ struct ConnHandle(Movable):
         self.chunk_decoded = 0
         self.head_request = False
         self.request_started_ms = 0
+        self.peer_eof = False
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -373,9 +378,15 @@ struct ConnHandle(Movable):
                     self._queue_error(413, "Content Too Large")
                     return Optional[StepResult](self._transition_to_writing())
             elif got == 0:
+                self.should_close = True
+                # A FIN after a complete request is a half-close: the
+                # peer (``nc -N``, ``shutdown(SHUT_WR)``) is done sending
+                # and still reading. Serve what is buffered, then close.
+                if self.has_buffered_request():
+                    self.peer_eof = True
+                    break
                 comptime if flips_cancel_on_close:
                     self.cancel_cell.flip(CancelReason.PEER_CLOSED)
-                self.should_close = True
                 return Optional[StepResult](
                     StepResult(want_read=False, want_write=False, done=True)
                 )
@@ -421,9 +432,14 @@ struct ConnHandle(Movable):
                 return Optional[StepResult](
                     StepResult(want_read=True, want_write=True)
                 )
+            self.should_close = True
+            # close_notify after a complete request: serve it first,
+            # exactly as the cleartext half-close path does.
+            if self.has_buffered_request():
+                self.peer_eof = True
+                break
             comptime if flips_cancel_on_close:
                 self.cancel_cell.flip(CancelReason.PEER_CLOSED)
-            self.should_close = True
             return Optional[StepResult](
                 StepResult(want_read=False, want_write=False, done=True)
             )
@@ -581,6 +597,8 @@ struct ConnHandle(Movable):
         if self.keepalive_count >= config.max_keepalive_requests:
             final = True
         if not config.keep_alive:
+            final = True
+        if self.peer_eof:
             final = True
         self.should_close = final
         return final
