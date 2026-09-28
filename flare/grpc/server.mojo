@@ -55,6 +55,7 @@ from std.time import perf_counter_ns
 
 from flare.crypto.base64 import base64_decode, base64_encode
 from flare.http.encoding import (
+    DEFAULT_MAX_DECOMPRESSED_BYTES,
     compress_gzip,
     decompress_deflate,
     decompress_gzip,
@@ -389,16 +390,21 @@ def _negotiate_response_encoding(accept_encoding: String) -> String:
 
 
 def _decompress_payload(
-    payload: Span[UInt8, _], encoding: String
+    payload: Span[UInt8, _],
+    encoding: String,
+    max_out: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
 ) raises -> List[UInt8]:
     """Decompress a compressed LPM payload per the request's
     ``grpc-encoding``. Supports ``gzip`` and ``deflate``; any other
-    (or empty) encoding on a compressed frame is a protocol error."""
+    (or empty) encoding on a compressed frame is a protocol error.
+    Raises before the output passes ``max_out`` bytes."""
+    if max_out <= 0:
+        raise Error("grpc adapter: decompressed request exceeds the limit")
     var enc = ascii_lower(encoding)
     if enc == "gzip":
-        return decompress_gzip(payload)
+        return decompress_gzip(payload, max_out)
     if enc == "deflate":
-        return decompress_deflate(payload)
+        return decompress_deflate(payload, max_out)
     raise Error(
         "grpc adapter: compressed LPM frame with unsupported / missing "
         "grpc-encoding '"
@@ -410,6 +416,7 @@ def _decompress_payload(
 def stitch_request_data(
     request_data: Span[UInt8, _],
     encoding: String = String(""),
+    max_decompressed_bytes: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
 ) raises -> List[UInt8]:
     """Stitch one or more LPM frames out of the accumulated
     request DATA bytes into a single contiguous payload.
@@ -424,10 +431,16 @@ def stitch_request_data(
     call's ``grpc-encoding`` (``gzip`` / ``deflate``). A compressed
     frame with no / unsupported ``grpc-encoding`` raises.
 
+    ``max_decompressed_bytes`` bounds the whole call, not each frame:
+    it was a per-frame cap, so a body of many small compressed frames,
+    each inflating to just under 16 MiB, stitched into one payload of
+    any size.
+
     Raises on:
     * truncated LPM frame (need-more-data at the end of the
       request body),
-    * compressed flag set with no negotiated / supported encoding.
+    * compressed flag set with no negotiated / supported encoding,
+    * decompressed output past ``max_decompressed_bytes``.
     """
     var out = List[UInt8]()
     var pos = 0
@@ -441,7 +454,9 @@ def stitch_request_data(
             )
         if dec.message.flag.is_compressed():
             var plain = _decompress_payload(
-                Span[UInt8, _](dec.message.payload), encoding
+                Span[UInt8, _](dec.message.payload),
+                encoding,
+                max_decompressed_bytes - len(out),
             )
             for i in range(len(plain)):
                 out.append(plain[i])

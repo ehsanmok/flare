@@ -132,6 +132,55 @@ def test_compressed_request_without_encoding_raises() raises:
     assert_true(raised)
 
 
+def _compressed_frames(count: Int, each: Int) raises -> List[UInt8]:
+    var lpm = List[UInt8]()
+    for _ in range(count):
+        var body = _compressible_body(each)
+        var compressed = compress_gzip(Span[UInt8, _](body))
+        encode_grpc_message(Span[UInt8, _](compressed), lpm, compressed=True)
+    return lpm^
+
+
+def test_decompression_cap_covers_the_whole_call() raises:
+    """The cap was per frame: many small frames, each inflating to just
+    under it, stitched into a payload of any size."""
+    var lpm = _compressed_frames(3, 512)
+    var raised = False
+    try:
+        _ = stitch_request_data(
+            Span[UInt8, _](lpm), String("gzip"), max_decompressed_bytes=1200
+        )
+    except:
+        raised = True
+    assert_true(raised, "three 512-byte frames passed a 1200-byte call cap")
+    var ok = stitch_request_data(
+        Span[UInt8, _](lpm), String("gzip"), max_decompressed_bytes=1536
+    )
+    assert_equal(len(ok), 1536)
+
+
+def test_streaming_decompression_cap_covers_the_whole_call() raises:
+    from flare.grpc.client_stream import decode_request_messages
+
+    var lpm = _compressed_frames(3, 512)
+    var raised = False
+    try:
+        _ = decode_request_messages(
+            Span[UInt8, _](lpm), String("gzip"), max_decompressed_bytes=1200
+        )
+    except:
+        raised = True
+    assert_true(raised, "three 512-byte messages passed a 1200-byte call cap")
+    assert_equal(
+        len(
+            decode_request_messages(
+                Span[UInt8, _](lpm), String("gzip"), max_decompressed_bytes=1536
+            )
+        ),
+        3,
+    )
+
+
 def main() raises:
     print("=" * 60)
     print("test_grpc_compression.mojo -- gzip negotiation")

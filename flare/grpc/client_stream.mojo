@@ -30,6 +30,8 @@ from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
 
+from flare.http.encoding import DEFAULT_MAX_DECOMPRESSED_BYTES
+
 from .framing import decode_grpc_message
 from .server import (
     GrpcCallContext,
@@ -57,6 +59,7 @@ from .status import (
 def decode_request_messages(
     request_data: Span[UInt8, _],
     encoding: String = String(""),
+    max_decompressed_bytes: Int = DEFAULT_MAX_DECOMPRESSED_BYTES,
 ) raises -> List[List[UInt8]]:
     """Decode every back-to-back LPM frame into its own payload list.
 
@@ -69,6 +72,9 @@ def decode_request_messages(
     var msgs = List[List[UInt8]]()
     var pos = 0
     var n = len(request_data)
+    # Every message is held at once, so the inflate budget is the
+    # call's, not each frame's.
+    var budget = max_decompressed_bytes
     while pos < n:
         var dec = decode_grpc_message(request_data[pos:])
         if dec.needs_more:
@@ -78,8 +84,9 @@ def decode_request_messages(
         var payload = List[UInt8]()
         if dec.message.flag.is_compressed():
             var plain = _decompress_payload(
-                Span[UInt8, _](dec.message.payload), encoding
+                Span[UInt8, _](dec.message.payload), encoding, budget
             )
+            budget -= len(plain)
             for i in range(len(plain)):
                 payload.append(plain[i])
         else:

@@ -82,6 +82,12 @@ from test_grpc_compression import (
 from test_grpc_compression import (
     test_compressed_request_without_encoding_raises as test_grpc_compression__test_compressed_request_without_encoding_raises,
 )
+from test_grpc_compression import (
+    test_decompression_cap_covers_the_whole_call as test_grpc_compression__test_decompression_cap_covers_the_whole_call,
+)
+from test_grpc_compression import (
+    test_streaming_decompression_cap_covers_the_whole_call as test_grpc_compression__test_streaming_decompression_cap_covers_the_whole_call,
+)
 from test_grpc_interceptor_health import (
     test_interceptor_passthrough_and_after as test_grpc_interceptor_health__test_interceptor_passthrough_and_after,
 )
@@ -304,6 +310,12 @@ def main() raises:
     suite.test[test_grpc_compression__test_request_decompression_gzip]()
     suite.test[
         test_grpc_compression__test_compressed_request_without_encoding_raises
+    ]()
+    suite.test[
+        test_grpc_compression__test_decompression_cap_covers_the_whole_call
+    ]()
+    suite.test[
+        test_grpc_compression__test_streaming_decompression_cap_covers_the_whole_call
     ]()
     # tests/grpc/test_grpc_interceptor_health.mojo
     suite.test[
