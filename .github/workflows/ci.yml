@@ -63,10 +63,9 @@ jobs:
         # passed on the same image, then ``6b36981`` crashed; the
         # fuzz workflow on the same image hit the same offsets at run
         # 25351119595. Rather than repinning the matrix again, the
-        # ``Run tests`` step re-uses the retry-up-to-3x wrapper that
-        # was added in ``bcd107d2`` and inadvertently dropped in
-        # ``0a14f15`` — the same wrapper the workflow used to
-        # absorb the same crash family before. Toolchain side
+        # ``Run tests`` step retries through
+        # ``tests/tools/retry_on_runtime_crash.sh``, which reruns only
+        # when the log shows that crash and no test failure. Toolchain side
         # (``flare/tls/ffi`` C++ wrapper, every rust-built bench
         # baseline) builds against the conda-forge sysroot pinned at
         # glibc ``>=2.34`` (see
@@ -152,29 +151,14 @@ jobs:
 
       - name: Run tests
         if: matrix.os == 'ubuntu-latest'
-        # The Mojo nightly's ``libKGENCompilerRTShared.so`` segfaults
+        # The Mojo runtime's ``libKGENCompilerRTShared.so`` segfaults
         # transiently on a fresh process before any user code runs
-        # (same per-frame offsets the workflow header documents).
-        # ~1-in-3 invocation rate on the current ``ubuntu-latest``
-        # image; the next run always succeeds. Retry up to three
-        # times so the build only fails if the runtime crash is
-        # stable, not flaky. The shell ``set -e`` is intentionally
-        # not used inside the loop body so the retry can observe the
-        # non-zero exit.
-        run: |
-          set +e
-          for attempt in 1 2 3; do
-            echo "── tests attempt $attempt/3 ──"
-            pixi run tests
-            rc=$?
-            if [ $rc -eq 0 ]; then
-              exit 0
-            fi
-            echo "── attempt $attempt failed (rc=$rc), retrying ──"
-            sleep 5
-          done
-          echo "── all 3 attempts failed (rc=$rc) ──"
-          exit $rc
+        # (same per-frame offsets the workflow header documents). The
+        # wrapper retries only that crash: a run with a failing test,
+        # or one that failed without the crash signature, fails at
+        # once. It used to rerun on any failure, so a test that failed
+        # one run in three went green.
+        run: bash tests/tools/retry_on_runtime_crash.sh pixi run tests
 
       - name: Run tests (macOS)
         if: matrix.os == 'macos-15'
@@ -254,22 +238,10 @@ jobs:
         # AOT-builds the curated FFI / streaming / QUIC / TLS test
         # inventory with ``mojo build --sanitize address`` and runs
         # each (tests/tools/run_sanitizer_tests.sh). The same
-        # runtime-crash retry wrapper the test job uses guards the
-        # transient libKGENCompilerRTShared fresh-process segfault.
-        run: |
-          set +e
-          for attempt in 1 2 3; do
-            echo "── asan attempt $attempt/3 ──"
-            pixi run tests-asan
-            rc=$?
-            if [ $rc -eq 0 ]; then
-              exit 0
-            fi
-            echo "── attempt $attempt failed (rc=$rc), retrying ──"
-            sleep 5
-          done
-          echo "── all 3 attempts failed (rc=$rc) ──"
-          exit $rc
+        # runtime-crash-only retry the test job uses guards the
+        # transient libKGENCompilerRTShared fresh-process segfault; an
+        # ASan report is never retried.
+        run: bash tests/tools/retry_on_runtime_crash.sh pixi run tests-asan
 
   # No CI TSan leg: the Mojo runtime links tcmalloc, which aborts under
   # ThreadSanitizer's allocator interception before user code runs --

@@ -91,6 +91,10 @@ build_one() {
   [ "$area" = "_root" ] && inc="tests"
   # build/gen holds the generated sample_pb that
   # tests/grpc/proto/test_codegen.mojo imports.
+  # Remove last run's binary first. The parallel path detects a failed
+  # build by the missing artifact, so a failure used to leave the old
+  # binary in place, pass that check, and run stale code as this run.
+  rm -f "$out"
   if ! mojo build -I . -I "$inc" -I build/gen "$src" -o "$out" 2>"$out.log"; then
     echo "BUILD FAILED: $src"; sed -n '1,20p' "$out.log"; return 1
   fi
@@ -158,6 +162,7 @@ echo "   ${#EXAMPLES[@]} examples"
 build_example() {
   local src="$1" out="$BUILD_DIR/ex_${1//\//_}"
   out="${out%.mojo}"
+  rm -f "$out"  # same reason as build_one: never run a stale example
   if ! mojo build -I . "$src" -o "$out" 2>"$out.log"; then
     echo "BUILD FAILED: $src"; sed -n '1,20p' "$out.log"; return 1
   fi
