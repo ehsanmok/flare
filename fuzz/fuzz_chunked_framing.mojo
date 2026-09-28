@@ -28,6 +28,7 @@ from flare.http.proto.chunked import (
     CHUNKED_MALFORMED,
     decode_chunked_body,
     header_says_chunked,
+    request_te_framing,
     scan_chunked_end,
 )
 
@@ -64,6 +65,7 @@ def target(data: List[UInt8]) raises:
     # The header scanner shares the same byte-walking shape; run it on
     # the same input so malformed header blocks are covered too.
     _ = header_says_chunked(span, len(data))
+    _ = request_te_framing(span, len(data))
 
 
 def main() raises:

@@ -48,52 +48,124 @@ def _matches_at(
     return True
 
 
-def header_says_chunked(buf: Span[UInt8, _], headers_end: Int) -> Bool:
-    """True when the header block declares ``Transfer-Encoding: chunked``.
+comptime TE_ABSENT: Int = 0
+"""``request_te_framing``: no ``Transfer-Encoding`` field; frame by
+``Content-Length`` (or no body)."""
+comptime TE_CHUNKED: Int = 1
+"""``request_te_framing``: exactly ``chunked``; frame by chunk size lines."""
+comptime TE_INVALID: Int = -1
+"""``request_te_framing``: the framing is ambiguous or malformed; 400."""
+comptime TE_UNSUPPORTED: Int = -2
+"""``request_te_framing``: a transfer coding other than ``chunked`` was
+applied; flare does not decode those, so 501 (RFC 9112 sec 6.1)."""
 
-    A raw byte scan rather than a ``HeaderMap`` lookup: the reactor has
-    to answer this *before* it parses, and the minimal-parser path
-    (``skip_header_decode_for_short_requests``) never builds a
-    ``HeaderMap`` at all.
 
-    Matches the field name case-insensitively and looks for ``chunked``
-    anywhere in the value. RFC 9112 sec 7.1 requires chunked to be the
-    final encoding, so any list containing it means chunked framing on
-    the wire.
+def classify_transfer_coding(value: String) -> Int:
+    """Classify a ``Transfer-Encoding`` value as a request framing.
+
+    ``value`` is every ``Transfer-Encoding`` field of the message joined
+    with ``,`` -- RFC 9110 sec 5.3 makes repeated fields and a comma
+    list the same thing, so the decision must look at all of them, not
+    the first or the last.
+
+    Returns:
+        ``TE_CHUNKED`` when the list is exactly ``chunked``;
+        ``TE_UNSUPPORTED`` when ``chunked`` is last but another coding
+        precedes it; ``TE_INVALID`` when ``chunked`` is not the final
+        coding, appears twice, or the list is empty. RFC 9112 sec 6.3
+        requires a 400 for a request whose final coding is not chunked,
+        since its length cannot be determined.
     """
-    var name = String("transfer-encoding").as_bytes()
-    var want = String("chunked").as_bytes()
+    var tokens = List[String]()
+    for part in value.split(","):
+        var t = String(part).strip(" \t").lower()
+        if t.byte_length() > 0:
+            tokens.append(t)
+    if len(tokens) == 0:
+        return TE_INVALID
+    if tokens[len(tokens) - 1] != "chunked":
+        return TE_INVALID
+    for i in range(len(tokens) - 1):
+        if tokens[i] == "chunked":
+            return TE_INVALID
+    if len(tokens) > 1:
+        return TE_UNSUPPORTED
+    return TE_CHUNKED
+
+
+def request_te_framing(
+    buf: Span[UInt8, _], headers_end: Int, allow_content_length: Bool = False
+) -> Int:
+    """Decide ``Transfer-Encoding`` framing from the raw header block.
+
+    A byte scan rather than a ``HeaderMap`` lookup, because the reactor
+    has to answer this *before* it parses and the minimal-parser path
+    never builds a ``HeaderMap``. It reads header lines the way the
+    parser does -- field name anchored at the start of a line and
+    followed directly by ``:`` -- and it reads *every*
+    ``Transfer-Encoding`` line, so it cannot disagree with the parser
+    about which one counts.
+
+    Args:
+        buf: Buffer holding the request head.
+        headers_end: Offset one past the ``CRLFCRLF`` terminator.
+        allow_content_length: When False (strict), a ``Content-Length``
+            alongside ``Transfer-Encoding`` is ``TE_INVALID``: the two
+            framings disagree and a front end may have used the other.
+
+    Returns:
+        One of ``TE_ABSENT``, ``TE_CHUNKED``, ``TE_INVALID``,
+        ``TE_UNSUPPORTED``.
+    """
+    var te_name = String("transfer-encoding").as_bytes()
+    var cl_name = String("content-length").as_bytes()
     var n = headers_end
+    var joined = String("")
+    var saw_te = False
+    var saw_cl = False
+    # Skip the request line: header names only start after a CRLF.
     var i = 0
+    while i + 1 < n and not (buf[i] == UInt8(13) and buf[i + 1] == UInt8(10)):
+        i += 1
+    i += 2
     while i < n:
-        if _matches_at(buf, i, name, n):
-            var p = i + len(name)
-            if p < n and buf[p] == UInt8(58):  # ':'
-                var line_end = p
-                while line_end + 1 < n:
-                    if buf[line_end] == UInt8(13) and buf[
-                        line_end + 1
-                    ] == UInt8(10):
-                        break
-                    line_end += 1
-                var q = p + 1
-                while q + len(want) <= line_end:
-                    if _matches_at(buf, q, want, line_end):
-                        return True
-                    q += 1
-                return False
-        # Advance to the next header line.
         var e = i
-        var found = False
-        while e + 1 < n:
-            if buf[e] == UInt8(13) and buf[e + 1] == UInt8(10):
-                found = True
-                break
+        while e + 1 < n and not (
+            buf[e] == UInt8(13) and buf[e + 1] == UInt8(10)
+        ):
             e += 1
-        if not found:
-            return False
+        if e + 1 >= n:
+            break
+        if _matches_at(buf, i, te_name, e):
+            var p = i + len(te_name)
+            if p < e and buf[p] == UInt8(58):  # ':'
+                saw_te = True
+                var v = String(capacity_bytes=e - p)
+                for k in range(p + 1, e):
+                    v += chr(Int(buf[k]))
+                if joined.byte_length() > 0:
+                    joined += ","
+                joined += v
+        elif _matches_at(buf, i, cl_name, e):
+            var p = i + len(cl_name)
+            if p < e and buf[p] == UInt8(58):
+                saw_cl = True
         i = e + 2
-    return False
+    if not saw_te:
+        return TE_ABSENT
+    if saw_cl and not allow_content_length:
+        return TE_INVALID
+    return classify_transfer_coding(joined)
+
+
+def header_says_chunked(buf: Span[UInt8, _], headers_end: Int) -> Bool:
+    """True when the request is framed by ``Transfer-Encoding: chunked``.
+
+    Kept for callers that only need the yes/no answer. Anything that
+    must also reject a malformed or unsupported coding should call
+    :func:`request_te_framing` instead.
+    """
+    return request_te_framing(buf, headers_end, True) == TE_CHUNKED
 
 
 @always_inline

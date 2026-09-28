@@ -1037,6 +1037,24 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_x_content_length_does_not_smuggle as test_h1_smuggling__test_x_content_length_does_not_smuggle,
 )
+from test_h1_smuggling import (
+    test_classify_transfer_coding as test_h1_smuggling__test_classify_transfer_coding,
+)
+from test_h1_smuggling import (
+    test_te_framing_reads_every_line as test_h1_smuggling__test_te_framing_reads_every_line,
+)
+from test_h1_smuggling import (
+    test_te_framing_rejects_te_with_content_length as test_h1_smuggling__test_te_framing_rejects_te_with_content_length,
+)
+from test_h1_smuggling import (
+    test_te_framing_ignores_lookalike_names as test_h1_smuggling__test_te_framing_ignores_lookalike_names,
+)
+from test_h1_smuggling import (
+    test_te_gzip_then_chunked_is_refused_not_smuggled as test_h1_smuggling__test_te_gzip_then_chunked_is_refused_not_smuggled,
+)
+from test_h1_smuggling import (
+    test_te_chunked_then_identity_with_cl_is_refused as test_h1_smuggling__test_te_chunked_then_identity_with_cl_is_refused,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4278,6 +4296,18 @@ def main() raises:
         test_h1_smuggling__test_content_length_in_target_does_not_smuggle
     ]()
     suite.test[test_h1_smuggling__test_x_content_length_does_not_smuggle]()
+    suite.test[test_h1_smuggling__test_classify_transfer_coding]()
+    suite.test[test_h1_smuggling__test_te_framing_reads_every_line]()
+    suite.test[
+        test_h1_smuggling__test_te_framing_rejects_te_with_content_length
+    ]()
+    suite.test[test_h1_smuggling__test_te_framing_ignores_lookalike_names]()
+    suite.test[
+        test_h1_smuggling__test_te_gzip_then_chunked_is_refused_not_smuggled
+    ]()
+    suite.test[
+        test_h1_smuggling__test_te_chunked_then_identity_with_cl_is_refused
+    ]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte

@@ -20,8 +20,10 @@ from std.memory import stack_allocation
 from flare.http.proto.chunked import (
     CHUNKED_INCOMPLETE,
     CHUNKED_MALFORMED,
+    TE_UNSUPPORTED,
     decode_chunked_body,
     header_says_chunked,
+    request_te_framing,
     scan_chunked_end,
 )
 from flare.http import HttpServer, Request, Response, ok
@@ -108,10 +110,15 @@ def test_header_scan_detects_chunked() raises:
         "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n"
     )
     assert_true(header_says_chunked(Span[UInt8, _](h), len(h)))
+    # A coding before chunked is one flare cannot undo, so the request
+    # is refused (501) rather than handed over as gzip bytes.
     var mixed = _b(
         "POST / HTTP/1.1\r\ntransfer-encoding: gzip, chunked\r\n\r\n"
     )
-    assert_true(header_says_chunked(Span[UInt8, _](mixed), len(mixed)))
+    assert_true(not header_says_chunked(Span[UInt8, _](mixed), len(mixed)))
+    assert_equal(
+        request_te_framing(Span[UInt8, _](mixed), len(mixed)), TE_UNSUPPORTED
+    )
     var plain = _b("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\n")
     assert_true(not header_says_chunked(Span[UInt8, _](plain), len(plain)))
 

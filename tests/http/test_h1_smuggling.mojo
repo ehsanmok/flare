@@ -17,6 +17,14 @@ from std.memory import stack_allocation
 
 from flare.http import HttpServer, Request, Response, ok
 from flare.http._scan import find_crlfcrlf, scan_content_length
+from flare.http.proto.chunked import (
+    TE_ABSENT,
+    TE_CHUNKED,
+    TE_INVALID,
+    TE_UNSUPPORTED,
+    classify_transfer_coding,
+    request_te_framing,
+)
 from flare.net import SocketAddr
 from flare.net._libc import (
     AF_INET,
@@ -166,6 +174,88 @@ def test_x_content_length_does_not_smuggle() raises:
     var got = _exchange(raw)
     assert_false("GET /admin" in got, "smuggled request was served: " + got)
     assert_equal(_count(got, "HTTP/1.1 200"), 1)
+
+
+# ── Transfer-Encoding is a list across every line ──────────────────────────
+
+
+def test_classify_transfer_coding() raises:
+    assert_equal(classify_transfer_coding("chunked"), TE_CHUNKED)
+    assert_equal(classify_transfer_coding(" Chunked "), TE_CHUNKED)
+    assert_equal(classify_transfer_coding("gzip, chunked"), TE_UNSUPPORTED)
+    assert_equal(classify_transfer_coding("gzip,chunked"), TE_UNSUPPORTED)
+    assert_equal(classify_transfer_coding("chunked, gzip"), TE_INVALID)
+    assert_equal(classify_transfer_coding("chunked,chunked"), TE_INVALID)
+    assert_equal(classify_transfer_coding("xchunkedx"), TE_INVALID)
+    assert_equal(classify_transfer_coding("identity"), TE_INVALID)
+    assert_equal(classify_transfer_coding(""), TE_INVALID)
+
+
+def _te(raw: String) -> Int:
+    var b = _b(raw)
+    return request_te_framing(Span[UInt8, _](b), find_crlfcrlf(b, 0))
+
+
+def test_te_framing_reads_every_line() raises:
+    # The first line alone says gzip; the last alone says chunked.
+    # Together they are gzip-then-chunked, which flare cannot decode.
+    assert_equal(
+        _te(
+            "POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n"
+            "Transfer-Encoding: chunked\r\n\r\n"
+        ),
+        TE_UNSUPPORTED,
+    )
+    # chunked then identity: chunked is not final, so no length.
+    assert_equal(
+        _te(
+            "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n"
+            "Transfer-Encoding: identity\r\n\r\n"
+        ),
+        TE_INVALID,
+    )
+
+
+def test_te_framing_rejects_te_with_content_length() raises:
+    assert_equal(
+        _te(
+            "POST / HTTP/1.1\r\nContent-Length: 5\r\n"
+            "Transfer-Encoding: chunked\r\n\r\n"
+        ),
+        TE_INVALID,
+    )
+
+
+def test_te_framing_ignores_lookalike_names() raises:
+    assert_equal(
+        _te(
+            "POST /?transfer-encoding:chunked HTTP/1.1\r\n"
+            "X-Transfer-Encoding: chunked\r\nContent-Length: 0\r\n\r\n"
+        ),
+        TE_ABSENT,
+    )
+
+
+def test_te_gzip_then_chunked_is_refused_not_smuggled() raises:
+    var got = _exchange(
+        "POST /u HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n"
+        "Transfer-Encoding: chunked\r\n\r\n"
+        "1d\r\nGET /admin HTTP/1.1\r\nHost: x\r\n\r\n\r\n0\r\n\r\n"
+    )
+    assert_false("GET /admin" in got, "smuggled request was served: " + got)
+    assert_true("HTTP/1.1 501" in got, "expected 501, got: " + got)
+
+
+def test_te_chunked_then_identity_with_cl_is_refused() raises:
+    var inner = "GET /admin HTTP/1.1\r\nHost: x\r\n\r\n"
+    var got = _exchange(
+        "POST /u HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"
+        "Transfer-Encoding: identity\r\nContent-Length: 5\r\n\r\n"
+        "0\r\n\r\n"
+        + inner
+    )
+    assert_false("GET /admin" in got, "smuggled request was served: " + got)
+    assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
 
 
 def main() raises:

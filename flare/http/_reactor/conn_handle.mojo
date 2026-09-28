@@ -95,8 +95,11 @@ from .keepalive_scan import (
 from flare.http.proto.chunked import (
     CHUNKED_INCOMPLETE,
     CHUNKED_MALFORMED,
+    TE_ABSENT,
+    TE_CHUNKED,
+    TE_UNSUPPORTED,
     decode_chunked_body,
-    header_says_chunked,
+    request_te_framing,
     scan_chunked_end,
 )
 
@@ -458,9 +461,16 @@ struct ConnHandle(Movable):
                     )
                 )
             self.headers_end = end
-            self.is_chunked = header_says_chunked(
+            var te = request_te_framing(
                 Span[UInt8, _](self.read_buf), self.headers_end
             )
+            if te == TE_UNSUPPORTED:
+                self._queue_error(501, "Not Implemented")
+                return Optional[StepResult](self._transition_to_writing())
+            if te != TE_ABSENT and te != TE_CHUNKED:
+                self._queue_error(400, "Bad Request")
+                return Optional[StepResult](self._transition_to_writing())
+            self.is_chunked = te == TE_CHUNKED
             if self.is_chunked:
                 # RFC 9112 sec 7.1: chunked framing supersedes any
                 # Content-Length. Length is not known up front, so the

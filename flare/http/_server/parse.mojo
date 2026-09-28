@@ -16,6 +16,7 @@ from ..request import Request
 from ..headers import HeaderMap
 from ..proto.ascii import ascii_eq_ignore_case
 from ..proto.h1_leniency import H1LeniencyConfig
+from ..proto.chunked import TE_CHUNKED, classify_transfer_coding
 from ...net import IpAddr, SocketAddr
 from ...tcp import TcpStream
 
@@ -206,6 +207,8 @@ def _parse_http_request_bytes(
     var prev_header_value = String("")
     var have_prev = False
     var content_length_seen: Int = -1
+    var te_joined = String("")
+    var te_seen = False
 
     while True:
         var line = _read_line_buf_lenient(
@@ -296,6 +299,12 @@ def _parse_http_request_bytes(
                 raise Error("duplicate Content-Length headers rejected")
             content_length_seen = n
 
+        if ascii_eq_ignore_case(k, "transfer-encoding"):
+            if te_seen:
+                te_joined += ","
+            te_joined += v
+            te_seen = True
+
         headers.set(k, v)
         prev_header_name = k
         prev_header_value = v
@@ -308,8 +317,17 @@ def _parse_http_request_bytes(
     # chunked request bodies, so the lenient path produces a
     # zero-body request; the flag still has parser-time effect
     # because it controls whether the request is rejected at all.
-    var te = headers.get("Transfer-Encoding").lower()
-    if "chunked" in te:
+    #
+    # Every Transfer-Encoding line counts (RFC 9110 sec 5.3), not the
+    # last one ``headers.set`` happened to keep: the reactor frames on
+    # the same joined list, and a parser that saw only the last line
+    # could be talked into CL.TE with ``TE: chunked`` + ``TE: identity``.
+    if te_seen:
+        var framing = classify_transfer_coding(te_joined)
+        if framing != TE_CHUNKED:
+            raise Error(
+                "unsupported or malformed Transfer-Encoding: " + te_joined
+            )
         if content_length_seen >= 0:
             if not leniency.allow_te_chunked_when_cl_present:
                 raise Error(
