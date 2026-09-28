@@ -316,6 +316,45 @@ def test_te_chunked_then_identity_with_cl_is_refused() raises:
     assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
 
 
+# ── Header lines the parser used to skip or misread ────────────────────────
+
+
+def _parses(raw: String) -> Bool:
+    from flare.http._server.parse import _parse_http_request_bytes
+
+    var b = _b(raw)
+    try:
+        _ = _parse_http_request_bytes(Span[UInt8, _](b))
+        return True
+    except:
+        return False
+
+
+def test_bare_lf_cannot_end_the_header_block() raises:
+    assert_false(
+        _parses(
+            "GET / HTTP/1.1\r\nHost: a\r\n\nGET /admin HTTP/1.1\r\nX: y\r\n\r\n"
+        )
+    )
+
+
+def test_header_line_without_colon_is_rejected() raises:
+    assert_false(
+        _parses(
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding chunked\r\n"
+            "Content-Length: 0\r\n\r\n"
+        )
+    )
+
+
+def test_empty_header_name_is_rejected() raises:
+    assert_false(_parses("GET / HTTP/1.1\r\nHost: a\r\n: x\r\n\r\n"))
+
+
+def test_well_formed_request_still_parses() raises:
+    assert_true(_parses("GET / HTTP/1.1\r\nHost: a\r\nX-A: b\r\n\r\n"))
+
+
 def main() raises:
     print("=" * 60)
     print("test_h1_smuggling.mojo — h1 framing disagreements")

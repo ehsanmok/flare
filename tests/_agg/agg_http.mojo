@@ -1070,6 +1070,18 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_te_chunked_then_identity_with_cl_is_refused as test_h1_smuggling__test_te_chunked_then_identity_with_cl_is_refused,
 )
+from test_h1_smuggling import (
+    test_bare_lf_cannot_end_the_header_block as test_h1_smuggling__test_bare_lf_cannot_end_the_header_block,
+)
+from test_h1_smuggling import (
+    test_header_line_without_colon_is_rejected as test_h1_smuggling__test_header_line_without_colon_is_rejected,
+)
+from test_h1_smuggling import (
+    test_empty_header_name_is_rejected as test_h1_smuggling__test_empty_header_name_is_rejected,
+)
+from test_h1_smuggling import (
+    test_well_formed_request_still_parses as test_h1_smuggling__test_well_formed_request_still_parses,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4336,6 +4348,10 @@ def main() raises:
     suite.test[
         test_h1_smuggling__test_te_chunked_then_identity_with_cl_is_refused
     ]()
+    suite.test[test_h1_smuggling__test_bare_lf_cannot_end_the_header_block]()
+    suite.test[test_h1_smuggling__test_header_line_without_colon_is_rejected]()
+    suite.test[test_h1_smuggling__test_empty_header_name_is_rejected]()
+    suite.test[test_h1_smuggling__test_well_formed_request_still_parses]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte

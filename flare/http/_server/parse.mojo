@@ -247,7 +247,10 @@ def _parse_http_request_bytes(
                 colon = i
                 break
         if colon < 0:
-            continue
+            # A field line with no colon is malformed (RFC 9112 sec 5).
+            # Skipping it let `Transfer-Encoding chunked` vanish here
+            # while a more forgiving front end honoured it.
+            raise Error("header line without a colon")
 
         # RFC 9112 §5.1: no whitespace before the colon. Strict
         # rejects; lenient strips trailing whitespace from the
@@ -261,6 +264,8 @@ def _parse_http_request_bytes(
                 else:
                     break
 
+        if name_end == 0:
+            raise Error("empty header field name")
         var name_valid = True
         for i in range(name_end):
             if not _is_token_char(line.unsafe_ptr()[unsafe_offset=i]):

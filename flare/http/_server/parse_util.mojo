@@ -189,7 +189,11 @@ def _read_line_buf_lenient(
     if end < 0:
         end = n
 
-    if not allow_lf_only and end < n and end > start and not saw_cr_before_lf:
+    # ``end == start`` is the empty line that ends the header block.
+    # It needs the same CRLF as any other line: a lone LF there made
+    # this parser end the headers while the reactor, which frames on
+    # CRLFCRLF, kept reading them.
+    if not allow_lf_only and end < n and end >= start and not saw_cr_before_lf:
         raise Error("bare LF line terminator (RFC 9112 §2.2 requires CRLF)")
 
     pos = end + 1 if end < n else end
