@@ -287,6 +287,9 @@ def test_listener_dispatch_routes_into_handle_packet() raises:
         UInt64(7),
         "dispatch_datagram must drive handle_packet, not just route",
     )
+    # Inbound processing ran on a clock stuck at 0, so activity time
+    # never moved and the 0-RTT strike set never aged.
+    assert_true(qc.conn.last_activity_us > UInt64(0), "clock was 0")
 
 
 def test_dispatch_garbled_initial_drops_silently() raises:

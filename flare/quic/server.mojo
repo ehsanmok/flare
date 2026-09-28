@@ -682,7 +682,11 @@ struct QuicListener(Movable):
         On success, inbound CRYPTO bytes feed rustls via
         :meth:`_dispatch_crypto_frames` and the idle timer re-arms.
         """
-        var now_us = UInt64(0)
+        # The real clock. This was 0, so last_activity_us never moved
+        # and the 0-RTT strike set, keyed on now_us // 1000, never let
+        # an entry age out: once it filled, 0-RTT was refused for the
+        # life of the listener.
+        var now_us = _monotonic_ms() * UInt64(1000)
         if slot >= 0 and slot < len(self.connections):
             self.connections[slot].amp_rx += len(datagram)
         # A datagram may carry several coalesced QUIC packets
