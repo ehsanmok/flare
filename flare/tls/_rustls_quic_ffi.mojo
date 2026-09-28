@@ -27,8 +27,8 @@ def _find_rustls_quic_lib() -> String:
     Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
     pinned to the ``"rustls_quic"`` shim name. The activation
     script ``flare/tls/ffi/build_rustls.sh`` populates
-    ``$CONDA_PREFIX/lib/libflare_rustls_quic.so``; the bare-checkout
-    fallback resolves ``build/libflare_rustls_quic.so``.
+    ``$CONDA_PREFIX/lib/libflare_rustls_quic.so``; see
+    :func:`flare.utils.dylib.find_flare_lib` for the full order.
     """
     return find_flare_lib("rustls_quic")
 

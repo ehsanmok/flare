@@ -644,6 +644,14 @@ request id but never echoed to the client. See
 | `FLARE_SOAK_WORKERS=on` | Enable cross-worker `WorkerHandoffPool` for skewed-keepalive workloads |
 | `FLARE_QUIC_NO_BATCH=1` | Force the QUIC reactor's per-datagram `recvfrom` drain instead of the default batched `recvmmsg` burst drain (Linux); use to A/B the syscall-batching win |
 | `SOAK_DURATION_SECS=<n>` | Override default soak harness duration (`pixi run --environment bench bench-soak-*`) |
+| `FLARE_LIB_DIR=<abs path>` | Directory holding the `libflare_*.so` FFI shims when running outside pixi. Checked before `$CONDA_PREFIX/lib`; ignored unless absolute |
+
+**Changed (breaking).** With neither `FLARE_LIB_DIR` nor `CONDA_PREFIX`
+set, the FFI shims are looked up by bare name on the system library
+path. They used to be loaded from `build/` under the working directory,
+so a program started in a directory someone else could write to ran
+their `libflare_tls.so`. A bare checkout run outside pixi now needs
+`FLARE_LIB_DIR=$PWD/build`.
 
 `ServerConfig` defaults (override per-server): `max_header_size` (8192 B),
 `max_body_size` (10 MiB), `max_keepalive_requests` (100), `idle_timeout_ms`

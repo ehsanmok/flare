@@ -27,8 +27,7 @@ def _find_rustls_lib() -> String:
     Delegates to ``flare.utils.dylib.find_flare_lib("rustls_quic")``
     which the activation script (``flare/tls/ffi/build_rustls.sh``)
     populates at ``$CONDA_PREFIX/lib/libflare_rustls_quic.so``.
-    Falls back to ``build/libflare_rustls_quic.so`` for bare
-    checkouts that haven't run the activation script yet.
+    Outside pixi, set ``FLARE_LIB_DIR`` to the directory holding it.
     """
     return find_flare_lib("rustls_quic")
 
