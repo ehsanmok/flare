@@ -166,10 +166,16 @@ from test_auth_extract import (
     test_csrf_compare_length_mismatch_returns_false as test_auth_extract__test_csrf_compare_length_mismatch_returns_false,
 )
 from test_auth_extract import (
-    test_csrf_compare_empty_pair_returns_true as test_auth_extract__test_csrf_compare_empty_pair_returns_true,
+    test_csrf_compare_empty_pair_returns_false as test_auth_extract__test_csrf_compare_empty_pair_returns_false,
+)
+from test_auth_extract import (
+    test_csrf_compare_short_tokens_return_false as test_auth_extract__test_csrf_compare_short_tokens_return_false,
 )
 from test_auth_extract import (
     test_csrf_token_verify_pair as test_auth_extract__test_csrf_token_verify_pair,
+)
+from test_auth_extract import (
+    test_new_csrf_token_is_long_and_fresh as test_auth_extract__test_new_csrf_token_is_long_and_fresh,
 )
 from test_auth_extract import (
     test_auth_error_eq_compares_on_variant_only as test_auth_extract__test_auth_error_eq_compares_on_variant_only,
@@ -3965,8 +3971,10 @@ def main() raises:
     suite.test[
         test_auth_extract__test_csrf_compare_length_mismatch_returns_false
     ]()
-    suite.test[test_auth_extract__test_csrf_compare_empty_pair_returns_true]()
+    suite.test[test_auth_extract__test_csrf_compare_empty_pair_returns_false]()
+    suite.test[test_auth_extract__test_csrf_compare_short_tokens_return_false]()
     suite.test[test_auth_extract__test_csrf_token_verify_pair]()
+    suite.test[test_auth_extract__test_new_csrf_token_is_long_and_fresh]()
     suite.test[test_auth_extract__test_auth_error_eq_compares_on_variant_only]()
     suite.test[
         test_auth_extract__test_auth_error_write_to_renders_variant_and_detail

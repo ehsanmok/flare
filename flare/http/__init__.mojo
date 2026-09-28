@@ -279,6 +279,7 @@ from .auth_extract import (
     CsrfToken,
     csrf_token_b64url,
     csrf_token_compare,
+    new_csrf_token,
     parse_basic_credentials,
     parse_bearer_token,
 )
