@@ -477,5 +477,48 @@ def test_failed_reload_keeps_the_serving_pair() raises:
     assert_true(acc._ctx.key_matches())
 
 
+def _sni_seen_for(connect_host: String) raises -> String:
+    """Handshake a forked client that dials ``connect_host`` and return
+    the SNI this side received."""
+    from flare.tls import TlsConfig, TlsStream
+    from flare.tls._server_ffi import server_ssl_free
+
+    var lis = TcpListener.bind(SocketAddr.localhost(0))
+    var port = lis.local_addr().port
+    var pid = fork()
+    if pid == 0:
+        try:
+            var c = TlsStream.connect(connect_host, port, TlsConfig.insecure())
+            c.close()
+        except:
+            pass
+        exit()
+    var stream = lis.accept()
+    var cfg = TlsServerConfig(
+        cert_file="tests/certs/server.crt", key_file="tests/certs/server.key"
+    )
+    var acc = TlsAcceptor(cfg^)
+    var sni = String("?")
+    try:
+        var r = acc.handshake_fd(Int(stream._socket.fd))
+        sni = r[1].sni_host.copy()
+        server_ssl_free(acc._ctx, r[0])
+    except:
+        pass
+    # Held to here: the fd is only borrowed by the handshake, and the
+    # stream would otherwise close it straight after its last use.
+    _ = stream^
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    return sni^
+
+
+def test_client_sends_no_sni_for_an_ip_literal() raises:
+    """RFC 6066 sec 3: a literal IP address is not permitted in SNI. The
+    client sent one whenever it dialled an IP."""
+    assert_equal(_sni_seen_for("localhost"), "localhost")
+    assert_equal(_sni_seen_for("127.0.0.1"), "")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -13,6 +13,7 @@
 #include <openssl/err.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
+#include <openssl/x509v3.h>
 #include <openssl/pem.h>
 #include <string.h>
 #include <string>
@@ -184,16 +185,44 @@ void flare_ssl_free(flare_ssl_t ssl) {
     if (ssl) SSL_free(static_cast<SSL*>(ssl));
 }
 
-/* Set SNI + the verification hostname and drive the handshake. Returns
- * SSL_connect's raw return so callers can classify it themselves. */
-static int flare_ssl_connect_raw(SSL* s, const char* server_name) {
-    ERR_clear_error();
-    /* Always send SNI when a hostname (not IP) is given */
-    if (server_name && server_name[0] != '\0') {
-        SSL_set_tlsext_host_name(s, server_name);
-        /* Also set hostname for certificate verification */
-        SSL_set1_host(s, server_name);
+/* Set SNI and the name the certificate is checked against. Returns 0,
+ * or -1 with last_error_msg set.
+ *
+ * Both return values used to be ignored. A failed SSL_set1_host left the
+ * handshake verifying the chain but no name, so any trusted certificate
+ * for any host was accepted: fail-open. An IP literal was sent as SNI,
+ * which RFC 6066 sec 3 forbids, and matched against DNS names instead of
+ * the certificate's IP addresses. */
+static int flare_ssl_set_peer_name(SSL* s, const char* server_name) {
+    if (!server_name || server_name[0] == '\0') return 0;
+    ASN1_OCTET_STRING* ip = a2i_IPADDRESS(server_name);
+    if (ip) {
+        ASN1_OCTET_STRING_free(ip);
+        if (X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(s), server_name)
+            != 1) {
+            capture_openssl_errors();
+            set_error("cannot set the IP address to verify");
+            return -1;
+        }
+        return 0;
     }
+    if (SSL_set_tlsext_host_name(s, server_name) != 1) {
+        capture_openssl_errors();
+        set_error("cannot set SNI");
+        return -1;
+    }
+    if (SSL_set1_host(s, server_name) != 1) {
+        capture_openssl_errors();
+        set_error("cannot set the hostname to verify");
+        return -1;
+    }
+    return 0;
+}
+
+/* Drive the handshake. Returns SSL_connect's raw return so callers can
+ * classify it themselves. */
+static int flare_ssl_connect_raw(SSL* s) {
+    ERR_clear_error();
     return SSL_connect(s);
 }
 
@@ -211,7 +240,8 @@ static void flare_ssl_connect_capture(SSL* s) {
 
 int flare_ssl_connect(flare_ssl_t ssl, const char* server_name) {
     SSL* s = static_cast<SSL*>(ssl);
-    if (flare_ssl_connect_raw(s, server_name) != 1) {
+    if (flare_ssl_set_peer_name(s, server_name) != 0) return -1;
+    if (flare_ssl_connect_raw(s) != 1) {
         flare_ssl_connect_capture(s);
         return -1;
     }
@@ -220,7 +250,12 @@ int flare_ssl_connect(flare_ssl_t ssl, const char* server_name) {
 
 int flare_ssl_connect_ex(flare_ssl_t ssl, const char* server_name) {
     SSL* s = static_cast<SSL*>(ssl);
-    int ret = flare_ssl_connect_raw(s, server_name);
+    /* Idempotent (set1 replaces), so a retry after WANT_READ /
+     * WANT_WRITE may run it again. */
+    if (flare_ssl_set_peer_name(s, server_name) != 0) {
+        return FLARE_SSL_IO_FATAL;
+    }
+    int ret = flare_ssl_connect_raw(s);
     if (ret == 1) return 0;
     /* Classify first: capture_openssl_errors() empties the queue that
      * SSL_get_error reads. A blocking fd with SO_RCVTIMEO armed reports

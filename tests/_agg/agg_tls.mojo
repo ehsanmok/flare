@@ -45,6 +45,9 @@ from test_https_reactor import (
 from test_https_reactor import (
     test_bind_tls_constructs as test_https_reactor__test_bind_tls_constructs,
 )
+from test_https_reactor import (
+    test_https_connect_by_ip_verifies_the_ip_san as test_https_reactor__test_https_connect_by_ip_verifies_the_ip_san,
+)
 from test_rustls_quic import (
     test_config_defaults as test_rustls_quic__test_config_defaults,
 )
@@ -295,6 +298,9 @@ from test_tls_acceptor import (
 from test_tls_acceptor import (
     test_failed_reload_keeps_the_serving_pair as test_tls_acceptor__test_failed_reload_keeps_the_serving_pair,
 )
+from test_tls_acceptor import (
+    test_client_sends_no_sni_for_an_ip_literal as test_tls_acceptor__test_client_sends_no_sni_for_an_ip_literal,
+)
 from test_tls_conn_handle import (
     test_tls_conn_handle_handshake_alpn_sni_roundtrip as test_tls_conn_handle__test_tls_conn_handle_handshake_alpn_sni_roundtrip,
 )
@@ -399,6 +405,9 @@ def main() raises:
         test_https_reactor__test_stalled_handshake_does_not_block_other_clients
     ]()
     suite.test[test_https_reactor__test_bind_tls_constructs]()
+    suite.test[
+        test_https_reactor__test_https_connect_by_ip_verifies_the_ip_san
+    ]()
     # tests/tls/test_rustls_quic.mojo
     suite.test[test_rustls_quic__test_config_defaults]()
     suite.test[test_rustls_quic__test_config_holds_alpn_list]()
@@ -524,6 +533,7 @@ def main() raises:
         test_tls_acceptor__test_tls_setup_stops_sigpipe_from_killing_the_process
     ]()
     suite.test[test_tls_acceptor__test_failed_reload_keeps_the_serving_pair]()
+    suite.test[test_tls_acceptor__test_client_sends_no_sni_for_an_ip_literal]()
     # tests/tls/test_tls_conn_handle.mojo
     suite.test[
         test_tls_conn_handle__test_tls_conn_handle_handshake_alpn_sni_roundtrip

@@ -701,6 +701,49 @@ def test_bind_tls_constructs() raises:
     assert_true(addrs[0].port > 0, "ephemeral port must be assigned")
 
 
+def test_https_connect_by_ip_verifies_the_ip_san() raises:
+    """Connecting to an IP literal set it as SNI, which RFC 6066 forbids,
+    and as a DNS name to match. It is now checked against the
+    certificate's IP addresses: ``tests/certs/server.crt`` carries
+    127.0.0.1 and localhost."""
+    var srv = HttpServer.bind_tls(
+        SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
+        _SERVER_CRT,
+        _SERVER_KEY,
+        alpn=_alpn_h1(),
+    )
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_hello)
+        except:
+            pass
+        exit()
+    usleep(300000)
+    var got = String("")
+    var err = String("")
+    try:
+        var cfg = TlsConfig(ca_bundle=_CA_CRT)
+        var s = TlsStream.connect("127.0.0.1", port, cfg)
+        s.write_all(
+            Span[UInt8, _](
+                _bytes(
+                    "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection:"
+                    " close\r\n\r\n"
+                )
+            )
+        )
+        got = _read_until_close(s)
+        s.close()
+    except e:
+        err = String(e)
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(err, "")
+    assert_true("hello https" in got, "expected body, got: " + got)
+
+
 def main() raises:
     print("=" * 60)
     print("test_https_reactor.mojo — HTTPS on the unified reactor")
