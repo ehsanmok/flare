@@ -24,6 +24,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <errno.h>
+#include <pthread.h>
+#include <signal.h>
 
 /* Compile-time version gate */
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
@@ -58,9 +60,41 @@ static const char* FORWARD_SECRET_CIPHERS =
     "ECDHE-ECDSA-CHACHA20-POLY1305:"
     "ECDHE-RSA-CHACHA20-POLY1305";
 
+// ── SIGPIPE ──────────────────────────────────────────────────────────────────
+//
+// SSL_set_fd gives OpenSSL a socket BIO, and the socket BIO writes with
+// plain write(2): no MSG_NOSIGNAL. A write after the peer has gone raises
+// SIGPIPE, and its default action ends the process, so one client that
+// disconnected mid-response killed the whole server. The cleartext paths
+// already pass MSG_NOSIGNAL; this closes the TLS one.
+//
+// The disposition is changed only if it is still SIG_DFL, so a handler
+// or an explicit SIG_IGN the application installed is left alone. With
+// SIGPIPE ignored the write fails with EPIPE, which the caller already
+// reports as an error.
+
+static pthread_once_t flare_sigpipe_once = PTHREAD_ONCE_INIT;
+
+static void flare_ignore_default_sigpipe(void) {
+    struct sigaction cur;
+    if (sigaction(SIGPIPE, nullptr, &cur) != 0) return;
+    if ((cur.sa_flags & SA_SIGINFO) == 0 && cur.sa_handler == SIG_DFL) {
+        struct sigaction ign;
+        memset(&ign, 0, sizeof(ign));
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        sigaction(SIGPIPE, &ign, nullptr);
+    }
+}
+
+static void flare_sigpipe_guard(void) {
+    pthread_once(&flare_sigpipe_once, flare_ignore_default_sigpipe);
+}
+
 // ── Context lifecycle ────────────────────────────────────────────────────────
 
 flare_ssl_ctx_t flare_ssl_ctx_new(void) {
+    flare_sigpipe_guard();
     ERR_clear_error();
     SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx) {
@@ -135,6 +169,7 @@ int flare_ssl_ctx_load_cert_key(flare_ssl_ctx_t ctx,
 // ── Session lifecycle ────────────────────────────────────────────────────────
 
 flare_ssl_t flare_ssl_new(flare_ssl_ctx_t ctx, int fd) {
+    flare_sigpipe_guard();
     ERR_clear_error();
     SSL* ssl = SSL_new(static_cast<SSL_CTX*>(ctx));
     if (!ssl) { capture_openssl_errors(); return nullptr; }
@@ -452,6 +487,7 @@ const char* flare_ssl_last_error(void) {
 flare_ssl_ctx_t flare_ssl_ctx_new_server(
     const char* cert_path, const char* key_path
 ) {
+    flare_sigpipe_guard();
     ERR_clear_error();
     if (!cert_path || !key_path) {
         set_error("flare_ssl_ctx_new_server: cert_path / key_path required");
@@ -618,6 +654,7 @@ int flare_ssl_ctx_set_verify_client_cert(
 // ── Server-side session lifecycle ─────────────────────────────────────────
 
 flare_ssl_t flare_ssl_new_accept(flare_ssl_ctx_t ctx, int fd) {
+    flare_sigpipe_guard();
     ERR_clear_error();
     SSL* ssl = SSL_new(static_cast<SSL_CTX*>(ctx));
     if (!ssl) { capture_openssl_errors(); return nullptr; }

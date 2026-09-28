@@ -289,6 +289,9 @@ from test_tls_acceptor import (
 from test_tls_acceptor import (
     test_slice_derived_missing_cert_still_raises as test_tls_acceptor__test_slice_derived_missing_cert_still_raises,
 )
+from test_tls_acceptor import (
+    test_tls_setup_stops_sigpipe_from_killing_the_process as test_tls_acceptor__test_tls_setup_stops_sigpipe_from_killing_the_process,
+)
 from test_tls_conn_handle import (
     test_tls_conn_handle_handshake_alpn_sni_roundtrip as test_tls_conn_handle__test_tls_conn_handle_handshake_alpn_sni_roundtrip,
 )
@@ -513,6 +516,9 @@ def main() raises:
     suite.test[test_tls_acceptor__test_acceptor_mtls_slice_derived_ca]()
     suite.test[
         test_tls_acceptor__test_slice_derived_missing_cert_still_raises
+    ]()
+    suite.test[
+        test_tls_acceptor__test_tls_setup_stops_sigpipe_from_killing_the_process
     ]()
     # tests/tls/test_tls_conn_handle.mojo
     suite.test[

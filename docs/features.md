@@ -534,6 +534,14 @@ Router erases the handler type at registration).
 | Session resumption (RFC 5077 / RFC 8446 §4.6.1) — server-side ticket cache (opt-in via `TlsServerConfig.enable_session_tickets`) + client-side reconnect (opt-in via `TlsConfig.enable_session_resumption`) | [`tests/tls/test_tls_resume.mojo`](../tests/tls/test_tls_resume.mojo), `flare.tls.acceptor`, `flare.tls.config` |
 | Errors: `TlsHandshakeError`, `CertificateExpired`, `CertificateHostnameMismatch`, `CertificateUntrusted`, `TlsServerError`, `TlsServerNotImplemented` | `flare.tls.error` |
 
+The first TLS context or connection flare creates sets `SIGPIPE` to
+`SIG_IGN`, if its disposition is still the default. OpenSSL writes to
+the socket without `MSG_NOSIGNAL`, so writing to a peer that had
+disconnected raised `SIGPIPE` and ended the process. With the signal
+ignored, the write fails with `EPIPE` and raises `NetworkError`. A
+handler or `SIG_IGN` that the application installed itself is left
+alone.
+
 ## TCP, UDP, Unix sockets, DNS, addressing
 
 | Surface | Where |

@@ -433,5 +433,31 @@ def test_slice_derived_missing_cert_still_raises() raises:
         _ = TlsAcceptor(cfg^)
 
 
+def _sigpipe_handler_word() raises -> Int:
+    """First word of ``struct sigaction`` for SIGPIPE: the handler, on
+    both Linux and macOS. ``SIG_DFL`` is 0, ``SIG_IGN`` is 1."""
+    from std.ffi import c_int, external_call
+    from std.memory import stack_allocation
+
+    var buf = stack_allocation[256, UInt8]()
+    for i in range(256):
+        buf.unsafe_offset(i).unsafe_write(UInt8(0))
+    var null_addr = 0
+    var none = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=null_addr)
+    if external_call["sigaction", c_int](c_int(13), none, buf) != c_int(0):
+        raise Error("sigaction failed")
+    return Int(buf.unsafe_bitcast[Int64]()[])
+
+
+def test_tls_setup_stops_sigpipe_from_killing_the_process() raises:
+    """OpenSSL's socket BIO writes without MSG_NOSIGNAL, so writing to a
+    peer that had gone raised SIGPIPE, whose default action ends the
+    process. Setting up TLS now ignores SIGPIPE when nobody has claimed
+    it; the write fails with EPIPE instead."""
+    var cfg = TlsServerConfig(cert_file=_CERT, key_file=_KEY)
+    _ = TlsAcceptor(cfg^)
+    assert_equal(_sigpipe_handler_word(), 1)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
