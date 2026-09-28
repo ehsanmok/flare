@@ -12,6 +12,11 @@ readers) so existing imports keep resolving unchanged.
 
 from ..response import Response
 from .._scan import parse_content_length
+from ..proto.chunked import (
+    CHUNKED_INCOMPLETE,
+    CHUNKED_MALFORMED,
+    scan_chunked_resume,
+)
 from ..headers import HeaderMap
 from ...tcp import TcpStream
 from ...tls import TlsStream
@@ -669,9 +674,27 @@ def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
     return _parse_http_response(raw)
 
 
+comptime MAX_BUFFERED_RESPONSE_BYTES: Int = 256 * 1024 * 1024
+"""Largest response the buffered client will hold in memory: head,
+body and framing together. A larger one raises instead of growing the
+buffer until the process runs out of memory; stream it instead."""
+
+comptime _MAX_RESPONSE_HEAD_BYTES: Int = 64 * 1024
+"""Largest response head (1xx heads included) accepted."""
+
+
+def _wire_method(wire: String) -> String:
+    """The method token of a serialised request line."""
+    var sp = wire.find(" ")
+    if sp <= 0:
+        return "GET"
+    return String(String(unsafe_from_utf8=wire.as_bytes()[:sp]))
+
+
 def _read_http_response_framed_tcp(
     mut stream: TcpStream,
     mut can_reuse: Bool,
+    method: String = "GET",
 ) raises -> Response:
     """Read one framed HTTP/1.1 response from a cleartext TCP stream.
 
@@ -679,157 +702,143 @@ def _read_http_response_framed_tcp(
     over any ``Readable``); kept for the existing cleartext pool call
     site and its name.
     """
-    return _read_http_response_framed(stream, can_reuse)
+    return _read_http_response_framed(stream, can_reuse, method)
 
 
 def _read_http_response_framed_tls(
     mut stream: TlsStream,
     mut can_reuse: Bool,
+    method: String = "GET",
 ) raises -> Response:
     """Read one framed HTTP/1.1 response from a TLS stream, for HTTPS
     keep-alive pooling. See :func:`_read_http_response_framed`."""
-    return _read_http_response_framed(stream, can_reuse)
+    return _read_http_response_framed(stream, can_reuse, method)
+
+
+def _fill[
+    R: Readable
+](mut stream: R, mut buf: List[UInt8], mut raw: List[UInt8]) raises -> Bool:
+    var n = stream.read(buf.unsafe_ptr(), len(buf))
+    if n == 0:
+        return False
+    if len(raw) + n > MAX_BUFFERED_RESPONSE_BYTES:
+        raise NetworkError(
+            "HTTP response larger than the buffered limit; stream it"
+        )
+    for i in range(n):
+        raw.append(buf[i])
+    return True
 
 
 def _read_http_response_framed[
     R: Readable
-](mut stream: R, mut can_reuse: Bool,) raises -> Response:
+](
+    mut stream: R, mut can_reuse: Bool, method: String = "GET"
+) raises -> Response:
     """Read one framed HTTP/1.1 response and return whether the
     connection is in a reusable state.
 
-    Unlike :func:`_read_http_response_tcp`, this reader stops at the
-    end of the framed body (``Content-Length`` or
-    ``Transfer-Encoding: chunked``) instead of reading until EOF, so
-    the underlying socket can be returned to a connection pool for
-    keep-alive reuse. Generic over any ``Readable`` so the cleartext
-    (``TcpStream``) and TLS (``TlsStream``) pools share one parser.
+    Stops at the end of the framed body instead of reading until EOF,
+    so the socket can go back to a connection pool. The framing follows
+    :func:`_response_framing`, and so depends on ``method``: a response
+    to HEAD has a Content-Length and no body, and waiting for that body
+    hung the request. Informational 1xx heads are read past.
+
+    A chunked body is walked chunk by chunk (``scan_chunked_resume``).
+    It used to be found by searching the raw bytes for ``\r\n0\r\n``,
+    which stopped early when the *payload* contained that pattern --
+    leaving body bytes in the socket for the next pooled request to read
+    as its response -- and never matched an empty chunked body at all.
 
     Returns:
-        ``(response, can_reuse)``: ``can_reuse`` is ``True`` when no
-        ``Connection: close`` header is present, the response is
-        properly framed, and the body was read cleanly.
+        The response. ``can_reuse`` is set when the connection is
+        cleanly at a message boundary and not marked ``close``.
 
     Raises:
-        NetworkError: On I/O or parse error.
+        NetworkError: On I/O or parse error, EOF inside a message, or a
+            response over ``MAX_BUFFERED_RESPONSE_BYTES``.
     """
+    can_reuse = False
     var buf = List[UInt8](capacity=_READ_BUF_SIZE)
     buf.resize(_READ_BUF_SIZE, 0)
     var raw = List[UInt8](capacity=4096)
-    var hdr_end = -1
 
-    while hdr_end < 0:
-        var n = stream.read(buf.unsafe_ptr(), len(buf))
-        if n == 0:
-            if len(raw) == 0:
-                raise NetworkError("HTTP response: peer closed before reply")
-            raise NetworkError("HTTP response: missing header terminator")
-        for i in range(n):
-            raw.append(buf[i])
-        hdr_end = _find_crlf2(raw)
-
-    var header_bytes = List[UInt8](capacity=hdr_end)
-    for i in range(hdr_end):
-        header_bytes.append(raw[i])
-    var header_str = _bytes_to_str(header_bytes)
-    var lines = _split_lines(header_str)
-    if len(lines) == 0:
-        raise NetworkError("Empty HTTP response")
-
-    var content_length = -1
-    var is_chunked = False
-    var conn_close = False
-    for li in range(1, len(lines)):
-        var ln = lines[li]
-        var colon = ln.find(":")
-        if colon < 0:
+    # Heads, skipping 1xx.
+    var start = 0
+    var hdr_end: Int
+    var status: Int
+    var headers: HeaderMap
+    while True:
+        hdr_end = _find_crlf2_from(raw, start)
+        while hdr_end < 0:
+            if len(raw) - start > _MAX_RESPONSE_HEAD_BYTES:
+                raise NetworkError("HTTP response head too large")
+            if not _fill(stream, buf, raw):
+                if len(raw) == 0:
+                    raise NetworkError(
+                        "HTTP response: peer closed before reply"
+                    )
+                raise NetworkError("HTTP response: missing header terminator")
+            hdr_end = _find_crlf2_from(raw, start)
+        var head_bytes = List[UInt8](capacity=hdr_end - start)
+        for i in range(start, hdr_end):
+            head_bytes.append(raw[i])
+        var head = _parse_response_head(head_bytes)
+        status = head.status
+        if status >= 100 and status < 200 and status != 101:
+            start = hdr_end + 4
             continue
-        var k_str = (
-            String(String(unsafe_from_utf8=ln.as_bytes()[:colon]))
-            .strip()
-            .lower()
-        )
-        var v_str = String(
-            String(unsafe_from_utf8=ln.as_bytes()[colon + 1 :])
-        ).strip()
-        if k_str == "content-length":
-            try:
-                content_length = atol(v_str)
-            except:
-                raise NetworkError("invalid Content-Length")
-        elif k_str == "transfer-encoding":
-            if v_str.lower() == "chunked":
-                is_chunked = True
-        elif k_str == "connection":
-            if v_str.lower() == "close":
+        headers = head.headers.copy()
+        break
+
+    var conn_close = False
+    for v in headers.get_all("connection"):
+        for tok in v.split(","):
+            if String(tok).strip().lower() == "close":
                 conn_close = True
 
+    var framing = _response_framing(method, status, headers)
     var body_start = hdr_end + 4
-
-    if is_chunked:
-        # Drain chunks until we see the final ``0\r\n`` chunk
-        # followed by optional trailers and the closing ``\r\n``.
-        # We scan for ``\r\n0\r\n`` (start of last chunk) and then
-        # for the next ``\r\n\r\n`` (end of trailers / message).
-        while True:
-            var pos = body_start
-            var found_terminator = False
-            while pos + 4 < len(raw):
-                if (
-                    raw[pos] == 13
-                    and raw[pos + 1] == 10
-                    and raw[pos + 2] == 48  # '0'
-                    and raw[pos + 3] == 13
-                    and raw[pos + 4] == 10
-                ):
-                    var t = pos + 5
-                    while t + 3 < len(raw):
-                        if (
-                            raw[t] == 13
-                            and raw[t + 1] == 10
-                            and raw[t + 2] == 13
-                            and raw[t + 3] == 10
-                        ):
-                            found_terminator = True
-                            break
-                        t += 1
-                    if found_terminator:
-                        break
-                    if (
-                        t + 1 == len(raw)
-                        or t + 2 == len(raw)
-                        or t + 3 == len(raw)
-                    ):
-                        break
-                pos += 1
-            if found_terminator:
-                break
-            var n2 = stream.read(buf.unsafe_ptr(), len(buf))
-            if n2 == 0:
-                raise NetworkError("Unexpected EOF in chunked body")
-            for j in range(n2):
-                raw.append(buf[j])
-    elif content_length >= 0:
-        var have = len(raw) - body_start
-        var need = content_length - have
-        while need > 0:
-            var to_read = need if need < len(buf) else len(buf)
-            var n3 = stream.read(buf.unsafe_ptr(), to_read)
-            if n3 == 0:
+    var end = body_start
+    if framing[0] == _FRAME_LENGTH:
+        end = body_start + framing[1]
+        if end > MAX_BUFFERED_RESPONSE_BYTES:
+            raise NetworkError(
+                "HTTP response larger than the buffered limit; stream it"
+            )
+        while len(raw) < end:
+            if not _fill(stream, buf, raw):
                 raise NetworkError("Unexpected EOF in body")
-            for j in range(n3):
-                raw.append(buf[j])
-            need -= n3
-    else:
-        # No content-length and not chunked: must read to EOF;
-        # cannot reuse the connection.
-        conn_close = True
+    elif framing[0] == _FRAME_CHUNKED:
+        var cursor = body_start
+        var decoded = 0
         while True:
-            var n4 = stream.read(buf.unsafe_ptr(), len(buf))
-            if n4 == 0:
+            var r = scan_chunked_resume(
+                Span[UInt8, _](raw),
+                cursor,
+                decoded,
+                MAX_BUFFERED_RESPONSE_BYTES,
+            )
+            if r == CHUNKED_MALFORMED:
+                raise NetworkError("HTTP response: malformed chunked body")
+            if r != CHUNKED_INCOMPLETE:
+                end = r
                 break
-            for j in range(n4):
-                raw.append(buf[j])
+            if not _fill(stream, buf, raw):
+                raise NetworkError("Unexpected EOF in chunked body")
+    elif framing[0] == _FRAME_CLOSE:
+        # No length and not chunked: read to EOF; not reusable.
+        conn_close = True
+        while _fill(stream, buf, raw):
+            pass
+        end = len(raw)
 
-    var resp = _parse_http_response(raw)
-    can_reuse = not conn_close
+    # Bytes past the end of the message on a connection we did not
+    # pipeline on mean the peer and we disagree about framing: never
+    # hand that connection to the next request.
+    var clean = len(raw) == end
+    if len(raw) > end:
+        raw.resize(end, 0)
+    var resp = _parse_http_response(raw, method)
+    can_reuse = clean and not conn_close
     return resp^

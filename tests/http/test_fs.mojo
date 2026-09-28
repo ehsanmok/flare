@@ -213,9 +213,9 @@ def test_fileserver_symlink_out_of_root_is_404() raises:
     var link = dir + "/leak.txt"
     if not os_path.exists(link):
         var target = outside + "/secret.txt"
+        var link_c = link.copy()
         _ = external_call["symlink", c_int](
-            target.as_c_string_span().unsafe_ptr(),
-            link.as_c_string_span().unsafe_ptr(),
+            target.as_c_string_span(), link_c.as_c_string_span()
         )
     var fs = FileServer.new(dir)
     assert_equal(

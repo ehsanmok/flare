@@ -78,6 +78,7 @@ from ._client.parse import (
     _extract_body_and_trailers,
     _parse_http_response,
     _read_http_response_framed_tcp,
+    _wire_method,
     _read_http_response_framed_tls,
     _read_http_response_tcp,
     _read_http_response_tls,
@@ -1192,7 +1193,9 @@ struct HttpClient(Movable):
         if pool_on:
             # Framed read so the connection can return to the pool.
             var can_reuse2 = False
-            var resp_f = _read_http_response_framed_tls(stream, can_reuse2)
+            var resp_f = _read_http_response_framed_tls(
+                stream, can_reuse2, method
+            )
             if can_reuse2:
                 self._tls_pool.release(key, stream^)
             else:
@@ -1230,7 +1233,9 @@ struct HttpClient(Movable):
             var parsed = True
             var resp = Response(0, "", List[UInt8]())
             try:
-                resp = _read_http_response_framed_tls(st, can_reuse)
+                resp = _read_http_response_framed_tls(
+                    st, can_reuse, _wire_method(wire)
+                )
             except:
                 parsed = False
             if parsed:
@@ -2432,7 +2437,9 @@ struct HttpClient(Movable):
         if not io_failed:
             var can_reuse = False
             try:
-                var resp = _read_http_response_framed_tcp(stream, can_reuse)
+                var resp = _read_http_response_framed_tcp(
+                    stream, can_reuse, _wire_method(wire)
+                )
                 if can_reuse:
                     # Release fd to pool: capture fd, neutralise the
                     # RawSocket so its destructor is a no-op, then
@@ -2459,7 +2466,9 @@ struct HttpClient(Movable):
         if len(body) > 0:
             fresh.write_all(Span[UInt8, _](body))
         var can_reuse2 = False
-        var resp2 = _read_http_response_framed_tcp(fresh, can_reuse2)
+        var resp2 = _read_http_response_framed_tcp(
+            fresh, can_reuse2, _wire_method(wire)
+        )
         if can_reuse2:
             var fd2 = Int(fresh._socket.fd)
             fresh._socket.fd = INVALID_FD
