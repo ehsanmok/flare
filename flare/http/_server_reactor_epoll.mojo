@@ -185,11 +185,21 @@ def _cleanup_conn(
     mut conns: Dict[Int, Int],
     mut timers: Dict[Int, UInt64],
     mut reactor: Reactor,
+    mut wheel: TimerWheel,
 ):
     """Unregister, cancel timers, and free the ConnHandle for ``fd``."""
+    # Cancel, not just forget. A timer left in the wheel fires later
+    # with this fd number as its payload; if the kernel has handed the
+    # number to a new connection by then, the expiry closed *that*
+    # connection mid-request.
     if fd in timers:
+        var tid = UInt64(0)
         try:
-            _ = timers.pop(fd)
+            tid = timers.pop(fd)
+        except:
+            pass
+        try:
+            _ = wheel.cancel(tid)
         except:
             pass
     try:
@@ -393,7 +403,7 @@ def _run_handler_loop_impl[
         for i in range(len(fired)):
             var fd_tok = Int(fired[i])
             if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor)
+                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -447,7 +457,7 @@ def _run_handler_loop_impl[
             except:
                 step_done = True
             if step_done:
-                _cleanup_conn(fd, conns, timers, reactor)
+                _cleanup_conn(fd, conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -459,7 +469,7 @@ def _run_handler_loop_impl[
     for kv in conns.items():
         leftover.append(kv.key)
     for i in range(len(leftover)):
-        _cleanup_conn(leftover[i], conns, timers, reactor)
+        _cleanup_conn(leftover[i], conns, timers, reactor, wheel)
 
 
 def run_reactor_loop[
@@ -593,7 +603,7 @@ def _run_static_loop_impl[
         for i in range(len(fired)):
             var fd_tok = Int(fired[i])
             if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor)
+                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -642,7 +652,7 @@ def _run_static_loop_impl[
             except:
                 step_done = True
             if step_done:
-                _cleanup_conn(fd, conns, timers, reactor)
+                _cleanup_conn(fd, conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -661,10 +671,10 @@ def _run_static_loop_impl[
         for i in range(len(leftover)):
             var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
             ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
-            _cleanup_conn(leftover[i], conns, timers, reactor)
+            _cleanup_conn(leftover[i], conns, timers, reactor, wheel)
     else:
         for i in range(len(leftover)):
-            _cleanup_conn(leftover[i], conns, timers, reactor)
+            _cleanup_conn(leftover[i], conns, timers, reactor, wheel)
 
 
 def run_reactor_loop_static(
@@ -790,7 +800,7 @@ def run_reactor_loop_cancel[
         for i in range(len(fired)):
             var fd_tok = Int(fired[i])
             if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor)
+                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -837,7 +847,7 @@ def run_reactor_loop_cancel[
             except:
                 step_done = True
             if step_done:
-                _cleanup_conn(fd, conns, timers, reactor)
+                _cleanup_conn(fd, conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -856,7 +866,7 @@ def run_reactor_loop_cancel[
     for i in range(len(leftover)):
         var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
         ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
-        _cleanup_conn(leftover[i], conns, timers, reactor)
+        _cleanup_conn(leftover[i], conns, timers, reactor, wheel)
 
 
 def run_reactor_loop_view[
@@ -912,7 +922,7 @@ def run_reactor_loop_view[
         for i in range(len(fired)):
             var fd_tok = Int(fired[i])
             if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor)
+                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -959,7 +969,7 @@ def run_reactor_loop_view[
             except:
                 step_done = True
             if step_done:
-                _cleanup_conn(fd, conns, timers, reactor)
+                _cleanup_conn(fd, conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -975,4 +985,4 @@ def run_reactor_loop_view[
     for i in range(len(leftover)):
         var ch_ptr = _conn_ptr_from_int(conns[leftover[i]])
         ch_ptr[].cancel_cell.flip(CancelReason.SHUTDOWN)
-        _cleanup_conn(leftover[i], conns, timers, reactor)
+        _cleanup_conn(leftover[i], conns, timers, reactor, wheel)
