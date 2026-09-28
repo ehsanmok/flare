@@ -84,6 +84,45 @@ def test_new_path_challenge_encoding() raises:
     assert_true(raised, "non-8-byte challenge must raise")
 
 
+def test_unauthenticated_packet_does_not_start_a_probe() raises:
+    """Path validation started on the short header alone, before
+    decryption: a spoofed packet with a known DCID from any address
+    restarted it and aimed PATH_CHALLENGEs at that address."""
+    from flare.net import IpAddr
+    from flare.quic import QuicListener, QuicServerConfig
+    from flare.quic.packet import (
+        ConnectionId,
+        LongHeader,
+        PACKET_TYPE_INITIAL,
+        QUIC_VERSION_1,
+    )
+
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    var listener = QuicListener.bind(cfg^)
+    var lh = LongHeader(
+        packet_type=PACKET_TYPE_INITIAL,
+        version=QUIC_VERSION_1,
+        dcid=ConnectionId(bytes=List[UInt8](length=8, fill=UInt8(0xC1))),
+        scid=ConnectionId(bytes=List[UInt8](length=8, fill=UInt8(0xD1))),
+        payload_offset=0,
+    )
+    var slot = listener._accept_initial(
+        lh, SocketAddr(IpAddr.localhost(), UInt16(1111))
+    )
+    var dg = List[UInt8]()
+    dg.append(UInt8(0x40))
+    for b in listener.connections[slot].local_cid.bytes:
+        dg.append(b)
+    for _ in range(40):
+        dg.append(UInt8(0x5A))  # not a valid 1-RTT packet
+    var spoofed = SocketAddr(IpAddr.localhost(), UInt16(2222))
+    _ = listener.dispatch_datagram(Span[UInt8, _](dg), spoofed)
+    assert_false(listener.migration_probe[slot].probing, "probe started")
+    listener.close()
+
+
 def main() raises:
     test_idle_probe_allows_and_should_start()
     test_amplification_budget_3x()
@@ -91,4 +130,5 @@ def main() raises:
     test_validation_lifts_cap()
     test_should_start_on_candidate_change()
     test_new_path_challenge_encoding()
-    print("test_quic_migration_probe: 6 passed")
+    test_unauthenticated_packet_does_not_start_a_probe()
+    print("test_quic_migration_probe: 7 passed")

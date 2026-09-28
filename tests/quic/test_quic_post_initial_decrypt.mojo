@@ -181,7 +181,7 @@ def test_handle_inbound_drops_handshake_without_sentinel() raises:
     for i in range(40):
         dg.append(UInt8(i))
     # Must not raise (silent drop).
-    listener._handle_inbound(0, Span[UInt8, _](dg))
+    _ = listener._handle_inbound(0, Span[UInt8, _](dg))
     assert_true(listener.connections[0].alive)
     assert_equal(len(listener.connections[0].conn.streams), 0)
     listener.shutdown()
@@ -205,7 +205,7 @@ def test_handle_inbound_drops_1rtt_without_sentinel() raises:
         dg.append(dcid.bytes[i])
     for i in range(40):
         dg.append(UInt8(i))
-    listener._handle_inbound(0, Span[UInt8, _](dg))
+    _ = listener._handle_inbound(0, Span[UInt8, _](dg))
     assert_true(listener.connections[0].alive)
     assert_equal(len(listener.connections[0].conn.streams), 0)
     listener.shutdown()

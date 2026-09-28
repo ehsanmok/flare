@@ -658,17 +658,27 @@ struct QuicListener(Movable):
             # :meth:`_process_one_packet`). Probe egress to the
             # unvalidated candidate is bounded at 3x received bytes
             # (sec 8.1 / sec 21.5.4) by :meth:`_drain_migration_probe`.
-            if (
-                slot >= 0
-                and slot < len(self.peer_addrs)
-                and self.peer_addrs[slot] != peer
-            ):
-                self._begin_path_validation(slot, peer, len(datagram))
+            #
+            # Only once the datagram has authenticated. The probe
+            # used to start on the header alone, before decryption, so
+            # a spoofed short-header packet with a known DCID restarted
+            # validation and aimed PATH_CHALLENGEs at any address.
+            if slot >= 0 and slot < len(self.connections):
+                var authed = self._handle_inbound(slot, datagram)
+                if (
+                    authed
+                    and slot < len(self.peer_addrs)
+                    and self.peer_addrs[slot] != peer
+                ):
+                    self._begin_path_validation(slot, peer, len(datagram))
+            return slot
         if slot >= 0 and slot < len(self.connections):
-            self._handle_inbound(slot, datagram)
+            _ = self._handle_inbound(slot, datagram)
         return slot
 
-    def _handle_inbound(mut self, slot: Int, datagram: Span[UInt8, _]) raises:
+    def _handle_inbound(
+        mut self, slot: Int, datagram: Span[UInt8, _]
+    ) raises -> Bool:
         """Decrypt + dispatch one inbound datagram by encryption
         level.
 
@@ -683,6 +693,9 @@ struct QuicListener(Movable):
         RFC 9001 sec 5.2; the slot stays alive for retransmits.
         On success, inbound CRYPTO bytes feed rustls via
         :meth:`_dispatch_crypto_frames` and the idle timer re-arms.
+
+        Returns whether a 1-RTT packet in the datagram decrypted, which
+        is what lets the caller trust the datagram's source address.
         """
         # The real clock. This was 0, so last_activity_us never moved
         # and the 0-RTT strike set, keyed on now_us // 1000, never let
@@ -701,6 +714,7 @@ struct QuicListener(Movable):
         var n = len(datagram)
         var offset = 0
         var processed_any = False
+        var authed_1rtt = False
         while offset < n:
             var first = Int(datagram[offset])
             # A zero first byte is PADDING that trails the last real
@@ -746,13 +760,16 @@ struct QuicListener(Movable):
                     break
             else:
                 packet_len = n - offset
-            self._process_one_packet(
+            var ok = self._process_one_packet(
                 slot, datagram[offset : offset + packet_len], lvl, now_us
             )
+            if ok and lvl == QuicEncryptionLevel.APPLICATION:
+                authed_1rtt = True
             processed_any = True
             offset += packet_len
         if processed_any:
             _ = self.schedule_idle_timeout(slot)
+        return authed_1rtt
 
     def _process_one_packet(
         mut self,
@@ -760,11 +777,12 @@ struct QuicListener(Movable):
         packet: Span[UInt8, _],
         inbound_lvl: Int,
         now_us: UInt64,
-    ) raises:
+    ) raises -> Bool:
         """Decrypt + dispatch a single (already de-coalesced) QUIC
         packet at ``inbound_lvl``. Initial decrypts in the sans-I/O
         connection; Handshake + 1-RTT decrypt through the slot's
         rustls session. Failures drop silently per RFC 9001 sec 5.2.
+        Returns whether the packet decrypted and was dispatched.
         """
         # Read the local CID length up front so the rustls decrypt
         # helper (which takes ``mut self``) doesn't have to alias a
@@ -876,7 +894,7 @@ struct QuicListener(Movable):
         else:
             ok = False  # Retry not handled here
         if not ok:
-            return
+            return False
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
         # LossRecovery tracks the 1-RTT packets we send, so only
         # application-space ACKs name its packet numbers. An Initial or
@@ -905,6 +923,7 @@ struct QuicListener(Movable):
             ):
                 self.peer_addrs[slot] = self.migration_probe[slot].candidate
             self.migration_probe[slot].on_validated()
+        return True
 
     def _begin_path_validation(
         mut self, slot: Int, peer: SocketAddr, datagram_len: Int

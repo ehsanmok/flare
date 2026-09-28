@@ -459,6 +459,9 @@ from test_quic_migration_probe import (
 from test_quic_migration_probe import (
     test_new_path_challenge_encoding as test_quic_migration_probe__test_new_path_challenge_encoding,
 )
+from test_quic_migration_probe import (
+    test_unauthenticated_packet_does_not_start_a_probe as test_quic_migration_probe__test_unauthenticated_packet_does_not_start_a_probe,
+)
 from test_quic_post_initial_decrypt import (
     test_decrypt_post_initial_raises_slot_out_of_range as test_quic_post_initial_decrypt__test_decrypt_post_initial_raises_slot_out_of_range,
 )
@@ -1070,6 +1073,9 @@ def main() raises:
         test_quic_migration_probe__test_should_start_on_candidate_change
     ]()
     suite.test[test_quic_migration_probe__test_new_path_challenge_encoding]()
+    suite.test[
+        test_quic_migration_probe__test_unauthenticated_packet_does_not_start_a_probe
+    ]()
     # tests/quic/test_quic_post_initial_decrypt.mojo
     suite.test[
         test_quic_post_initial_decrypt__test_decrypt_post_initial_raises_slot_out_of_range
