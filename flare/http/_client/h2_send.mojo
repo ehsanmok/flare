@@ -361,7 +361,7 @@ def _send_h2c_via_upgrade(
             for i in range(n):
                 rest.append(body_buf[i])
         stream.close()
-        return _parse_http_response(rest)
+        return _parse_http_response(rest, method)
 
     var h2_conn = Http2ClientConnection.from_h2c_upgrade(h2_cfg^)
     var preface_bytes = h2_conn.drain()

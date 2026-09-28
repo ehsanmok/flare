@@ -2502,7 +2502,7 @@ struct HttpClient(Movable):
             stream.write_all(Span[UInt8, _](wire_bytes))
             if len(body) > 0:
                 stream.write_all(Span[UInt8, _](body))
-            var resp = _read_http_response_tcp(stream)
+            var resp = _read_http_response_tcp(stream, method)
             stream.close()
             return resp^
 

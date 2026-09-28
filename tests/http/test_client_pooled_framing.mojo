@@ -261,5 +261,27 @@ def test_pooled_requests_share_one_connection() raises:
     assert_equal(b, "1")
 
 
+def test_head_without_the_pool_does_not_ask_for_a_body() raises:
+    """The default, unpooled client read a HEAD response without telling
+    the parser the method, so the Content-Length of the resource it
+    described was taken as a body still owed: "body shorter than its
+    Content-Length"."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork_server(srv^, _hello)
+    var url = "http://127.0.0.1:" + String(Int(port)) + "/"
+    var status = -1
+    var err = String("")
+    try:
+        var r = HttpClient().with_read_timeout(1500).head(url)
+        status = r.status
+        assert_equal(len(r.body), 0)
+    except e:
+        err = String(e)
+    kill_forked_server(pid)
+    assert_equal(err, "")
+    assert_equal(status, 200)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

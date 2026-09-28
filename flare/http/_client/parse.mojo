@@ -683,11 +683,15 @@ def _refuse_truncated_tls(
         )
 
 
-def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
+def _read_http_response_tcp(
+    mut stream: TcpStream, method: String = "GET"
+) raises -> Response:
     """Read and parse a full HTTP response from a TCP stream.
 
     Args:
         stream: Open ``TcpStream``.
+        method: The request's method. Framing depends on it: a HEAD
+            response has a Content-Length and no body.
 
     Returns:
         Parsed ``Response``.
@@ -696,7 +700,7 @@ def _read_http_response_tcp(mut stream: TcpStream) raises -> Response:
         NetworkError: On I/O or parse error.
     """
     var raw = _read_all_tcp(stream)
-    return _parse_http_response(raw)
+    return _parse_http_response(raw, method)
 
 
 comptime MAX_BUFFERED_RESPONSE_BYTES: Int = 256 * 1024 * 1024
