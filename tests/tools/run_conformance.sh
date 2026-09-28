@@ -25,7 +25,8 @@
 # Provisioning (documented host blocker):
 #   h2spec:       https://github.com/summerwind/h2spec/releases
 #   autobahn:     `wstest` on PATH, or a running Docker daemon (the
-#                 harness falls back to crossbario/autobahn-testsuite;
+#                 harness falls back to the pinned
+#                 crossbario/autobahn-testsuite image;
 #                 pip install autobahntestsuite is Python 2 only)
 #   quic-interop: https://github.com/quic-interop/quic-interop-runner
 set -uo pipefail
@@ -216,6 +217,11 @@ _wstest_available() {
   return 1
 }
 
+# Pinned by digest (the tag `latest` pointed at on 2026-09-28). With
+# `:latest` a new upstream image changed the case set and verdicts under
+# the known-fail list with no change in this repository.
+_AUTOBAHN_IMAGE="crossbario/autobahn-testsuite:25.10.1@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074"
+
 _run_wstest() {
   if _have wstest; then
     wstest -m fuzzingclient -s tests/tools/conformance/autobahn.json
@@ -223,7 +229,7 @@ _run_wstest() {
   fi
   docker run --rm --network host \
     -v "${REPO_ROOT}:/mnt" -w /mnt \
-    crossbario/autobahn-testsuite:latest \
+    "$_AUTOBAHN_IMAGE" \
     wstest -m fuzzingclient -s tests/tools/conformance/autobahn.json
 }
 
