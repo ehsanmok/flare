@@ -352,6 +352,15 @@ from test_chunked_request import (
     test_header_scan_detects_chunked as test_chunked_request__test_header_scan_detects_chunked,
 )
 from test_chunked_request import (
+    test_resume_skips_chunks_already_scanned as test_chunked_request__test_resume_skips_chunks_already_scanned,
+)
+from test_chunked_request import (
+    test_resume_agrees_with_a_fresh_scan as test_chunked_request__test_resume_agrees_with_a_fresh_scan,
+)
+from test_chunked_request import (
+    test_endless_chunk_size_line_is_malformed as test_chunked_request__test_endless_chunk_size_line_is_malformed,
+)
+from test_chunked_request import (
     test_chunked_upload_reaches_the_handler as test_chunked_request__test_chunked_upload_reaches_the_handler,
 )
 from test_client_h3_policy import (
@@ -3985,6 +3994,11 @@ def main() raises:
     ]()
     suite.test[test_chunked_request__test_decode_concatenates_chunks]()
     suite.test[test_chunked_request__test_header_scan_detects_chunked]()
+    suite.test[test_chunked_request__test_resume_skips_chunks_already_scanned]()
+    suite.test[test_chunked_request__test_resume_agrees_with_a_fresh_scan]()
+    suite.test[
+        test_chunked_request__test_endless_chunk_size_line_is_malformed
+    ]()
     suite.test[test_chunked_request__test_chunked_upload_reaches_the_handler]()
     # tests/http/test_client_h3_policy.mojo
     suite.test[test_client_h3_policy__test_default_no_h3]()

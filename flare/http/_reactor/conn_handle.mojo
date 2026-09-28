@@ -100,7 +100,7 @@ from flare.http.proto.chunked import (
     TE_UNSUPPORTED,
     decode_chunked_body,
     request_te_framing,
-    scan_chunked_end,
+    scan_chunked_resume,
 )
 
 from .tls_transport import TlsTransport
@@ -249,6 +249,13 @@ struct ConnHandle(Movable):
     its length comes from the chunk framing rather than
     ``Content-Length`` and the body needs decoding before dispatch."""
 
+    var chunk_scan_pos: Int
+    """Where the chunk-framing scan resumes for the current request:
+    the first chunk that has not fully arrived yet."""
+
+    var chunk_decoded: Int
+    """Payload bytes in the chunks before ``chunk_scan_pos``."""
+
     var tls_cross_interest: Bool
     """Set when the TLS session asked for the *opposite* readiness to
     the direction being driven -- ``SSL_read`` returning ``WANT_WRITE``
@@ -281,6 +288,8 @@ struct ConnHandle(Movable):
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
+        self.chunk_scan_pos = 0
+        self.chunk_decoded = 0
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -481,6 +490,8 @@ struct ConnHandle(Movable):
                 # dispatched a chunked upload as an empty body.
                 self.content_length = 0
                 self.body_total = -1
+                self.chunk_scan_pos = self.headers_end
+                self.chunk_decoded = 0
             else:
                 self.content_length = _scan_content_length(
                     self.read_buf, self.headers_end
@@ -493,9 +504,10 @@ struct ConnHandle(Movable):
                     return Optional[StepResult](self._transition_to_writing())
                 self.body_total = self.headers_end + self.content_length
         if self.is_chunked and self.body_total < 0:
-            var cend = scan_chunked_end(
+            var cend = scan_chunked_resume(
                 Span[UInt8, _](self.read_buf),
-                self.headers_end,
+                self.chunk_scan_pos,
+                self.chunk_decoded,
                 config.max_body_size,
             )
             if cend == CHUNKED_MALFORMED:

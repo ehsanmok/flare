@@ -180,6 +180,12 @@ def _hex_val(b: UInt8) -> Int:
     return -1
 
 
+comptime CHUNK_LINE_MAX: Int = 4096
+"""Longest chunk-size line (size plus extensions) accepted. Without a
+cap, a peer can send extension bytes that never reach CRLF and keep a
+request incomplete for as long as the connection lives."""
+
+
 def scan_chunked_end(buf: Span[UInt8, _], start: Int, max_body: Int) -> Int:
     """Return the offset one past a complete chunked body.
 
@@ -193,10 +199,41 @@ def scan_chunked_end(buf: Span[UInt8, _], start: Int, max_body: Int) -> Int:
     wire total, and is checked *during* the walk -- a chunked upload
     must not be allowed to grow the read buffer past the configured
     limit before anyone notices.
+
+    Stateless: every call walks from ``start``. A caller that polls
+    the same growing buffer should use :func:`scan_chunked_resume`.
+    """
+    var cursor = start
+    var decoded_total = 0
+    return scan_chunked_resume(buf, cursor, decoded_total, max_body)
+
+
+def scan_chunked_resume(
+    buf: Span[UInt8, _], mut cursor: Int, mut decoded_total: Int, max_body: Int
+) -> Int:
+    """``scan_chunked_end`` that remembers how far it got.
+
+    ``cursor`` and ``decoded_total`` are advanced past every chunk that
+    has fully arrived, so the next call starts at the first incomplete
+    chunk instead of at the top of the body. The reactor re-polls
+    after every read; restarting from the top made a body of many
+    small chunks, delivered in many small segments, quadratic in its
+    length.
+
+    Args:
+        buf: Buffer holding the request.
+        cursor: On entry, where the next unscanned chunk-size line
+            starts (``headers_end`` for a fresh request). Advanced in
+            place.
+        decoded_total: Payload bytes in the chunks before ``cursor``.
+            Advanced in place.
+        max_body: Cap on the decoded body.
+
+    Returns:
+        As for :func:`scan_chunked_end`.
     """
     var n = len(buf)
-    var pos = start
-    var decoded_total = 0
+    var pos = cursor
     while True:
         # chunk-size [ chunk-ext ] CRLF
         var line_end = -1
@@ -207,7 +244,11 @@ def scan_chunked_end(buf: Span[UInt8, _], start: Int, max_body: Int) -> Int:
                 break
             i += 1
         if line_end < 0:
+            if n - pos > CHUNK_LINE_MAX:
+                return CHUNKED_MALFORMED
             return CHUNKED_INCOMPLETE
+        if line_end - pos > CHUNK_LINE_MAX:
+            return CHUNKED_MALFORMED
         var size = 0
         var digits = 0
         var j = pos
@@ -243,10 +284,11 @@ def scan_chunked_end(buf: Span[UInt8, _], start: Int, max_body: Int) -> Int:
                         break
                     k += 1
                 if found < 0:
+                    if n - t > CHUNK_LINE_MAX:
+                        return CHUNKED_MALFORMED
                     return CHUNKED_INCOMPLETE
                 t = found + 2
-        decoded_total += size
-        if decoded_total > max_body:
+        if decoded_total + size > max_body:
             return CHUNKED_MALFORMED
         # data CRLF
         var next_pos = data_start + size + 2
@@ -257,6 +299,8 @@ def scan_chunked_end(buf: Span[UInt8, _], start: Int, max_body: Int) -> Int:
         ] != UInt8(10):
             return CHUNKED_MALFORMED
         pos = next_pos
+        cursor = pos
+        decoded_total += size
 
 
 def decode_chunked_body(

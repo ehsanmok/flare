@@ -21,9 +21,11 @@ from flare.http.proto.chunked import (
     CHUNKED_INCOMPLETE,
     CHUNKED_MALFORMED,
     TE_UNSUPPORTED,
+    CHUNK_LINE_MAX,
     decode_chunked_body,
     header_says_chunked,
     request_te_framing,
+    scan_chunked_resume,
     scan_chunked_end,
 )
 from flare.http import HttpServer, Request, Response, ok
@@ -121,6 +123,47 @@ def test_header_scan_detects_chunked() raises:
     )
     var plain = _b("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\n")
     assert_true(not header_says_chunked(Span[UInt8, _](plain), len(plain)))
+
+
+def test_resume_skips_chunks_already_scanned() raises:
+    """Bytes arrive in pieces; each poll starts at the first chunk that
+    has not fully arrived, so the walk is linear in the body."""
+    var full = _b("5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
+    var cursor = 0
+    var decoded = 0
+    # First chunk complete, second partial.
+    var part = List[UInt8](full[:14])
+    assert_equal(
+        scan_chunked_resume(Span[UInt8, _](part), cursor, decoded, 1024),
+        CHUNKED_INCOMPLETE,
+    )
+    assert_equal(cursor, 10)
+    assert_equal(decoded, 5)
+    # Rest arrives: resuming from the cursor finds the end.
+    var end = scan_chunked_resume(Span[UInt8, _](full), cursor, decoded, 1024)
+    assert_equal(end, len(full))
+    assert_equal(decoded, 11)
+
+
+def test_resume_agrees_with_a_fresh_scan() raises:
+    var full = _b("3\r\nabc\r\n1;x=y\r\nd\r\n0\r\nT: v\r\n\r\n")
+    var cursor = 0
+    var decoded = 0
+    for cut in range(1, len(full) + 1):
+        var part = List[UInt8](full[:cut])
+        var r = scan_chunked_resume(Span[UInt8, _](part), cursor, decoded, 1024)
+        var fresh = scan_chunked_end(Span[UInt8, _](part), 0, 1024)
+        assert_equal(r, fresh)
+
+
+def test_endless_chunk_size_line_is_malformed() raises:
+    var s = String("5;ext=")
+    for _ in range(CHUNK_LINE_MAX):
+        s += "a"
+    var buf = _b(s)
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](buf), 0, 1 << 30), CHUNKED_MALFORMED
+    )
 
 
 # ── End to end through the reactor ──────────────────────────────────────────
