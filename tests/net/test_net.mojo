@@ -420,6 +420,28 @@ def test_dns_error_zero_code() raises:
     assert_true(String(e).find("no addresses returned") != -1)
 
 
+def test_socketaddr_parse_rejects_ports_out_of_range() raises:
+    """``UInt16(atol(...))`` wrapped: 70000 became 4464, -1 became
+    65535."""
+    assert_equal(Int(SocketAddr.parse("127.0.0.1:65535").port), 65535)
+    assert_equal(Int(SocketAddr.parse("[::1]:0").port), 0)
+    for bad in [
+        "127.0.0.1:70000",
+        "127.0.0.1:-1",
+        "127.0.0.1:+80",
+        "127.0.0.1: 80",
+        "127.0.0.1:",
+        "127.0.0.1:080000",
+        "[::1]:65536",
+    ]:
+        var raised = False
+        try:
+            _ = SocketAddr.parse(String(bad))
+        except:
+            raised = True
+        assert_true(raised, "parsed " + String(bad))
+
+
 def main() raises:
     print("=" * 60)
     print("test_net.mojo — IpAddr, SocketAddr, error types")

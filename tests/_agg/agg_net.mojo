@@ -170,6 +170,9 @@ from test_net import test_dns_error_str as test_net__test_dns_error_str
 from test_net import (
     test_dns_error_zero_code as test_net__test_dns_error_zero_code,
 )
+from test_net import (
+    test_socketaddr_parse_rejects_ports_out_of_range as test_net__test_socketaddr_parse_rejects_ports_out_of_range,
+)
 
 
 def main() raises:
@@ -232,4 +235,5 @@ def main() raises:
     suite.test[test_net__test_broken_pipe_with_addr]()
     suite.test[test_net__test_dns_error_str]()
     suite.test[test_net__test_dns_error_zero_code]()
+    suite.test[test_net__test_socketaddr_parse_rejects_ports_out_of_range]()
     suite^.run()
