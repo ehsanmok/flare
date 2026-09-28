@@ -116,6 +116,27 @@ def test_decide_policy_table() raises:
     )
 
 
+def test_client_dials_the_advertised_endpoint() raises:
+    """The recorded advert decides where QUIC packets go; with none the
+    origin itself is the target."""
+    from flare.http import HttpClient
+    from flare.http.url import Url
+
+    var c = HttpClient()
+    var u = Url.parse("https://example.com/x")
+    var plain = c._h3_dial_target(u)
+    assert_equal(plain[0], "example.com")
+    assert_equal(Int(plain[1]), 443)
+    c.record_alt_svc("example.com:443", 'h3=":8443"; ma=3600')
+    var port_only = c._h3_dial_target(u)
+    assert_equal(port_only[0], "example.com")
+    assert_equal(Int(port_only[1]), 8443)
+    c.record_alt_svc("example.com:443", 'h3="alt.example.net:9443"; ma=3600')
+    var other = c._h3_dial_target(u)
+    assert_equal(other[0], "alt.example.net")
+    assert_equal(Int(other[1]), 9443)
+
+
 def main() raises:
     test_parse_single_h3()
     test_parse_multi_advert()
@@ -126,5 +147,6 @@ def main() raises:
     test_cache_expiry()
     test_cache_clear_evicts()
     test_cache_ignores_non_h3()
+    test_client_dials_the_advertised_endpoint()
     test_decide_policy_table()
-    print("test_alt_svc: 10 passed")
+    print("test_alt_svc: 11 passed")

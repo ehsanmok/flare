@@ -980,7 +980,10 @@ struct HttpClient(Movable):
         ``localhost`` on a typical Linux ``/etc/hosts``) may put the
         family the server isn't listening on first.
         """
-        var addrs = resolve(u.host)
+        var target = self._h3_dial_target(u)
+        var dial_host = target[0]
+        var dial_port = target[1]
+        var addrs = resolve(dial_host)
         var alpn = List[String]()
         alpn.append("h3")
         # Empty ca_bundle parity with the OpenSSL h1/h2 path: fall back
@@ -993,16 +996,36 @@ struct HttpClient(Movable):
             connector = RustlsQuicConnector.with_system_roots(alpn^)
         var last_err = String("")
         for i in range(len(addrs)):
-            var peer = SocketAddr(addrs[i], u.port)
+            var peer = SocketAddr(addrs[i], dial_port)
             try:
+                # SNI and certificate checks stay on the *origin* host:
+                # RFC 7838 sec 2.1 requires the alternative to be
+                # authoritative for the origin, not for itself.
                 var quic = QuicClientConnection.connect(peer, connector, u.host)
                 self._quic_pool.note_dial()
                 return Http3ClientConnection(quic^)
             except e:
                 last_err = String(e)
         raise NetworkError(
-            "h3: all addresses failed for " + u.host + ": " + last_err
+            "h3: all addresses failed for " + dial_host + ": " + last_err
         )
+
+    def _h3_dial_target(self, u: Url) -> Tuple[String, UInt16]:
+        """Where to send QUIC packets for ``u``'s origin: the endpoint
+        its fresh ``Alt-Svc`` advert names, else the origin itself.
+
+        ``Alt-Svc: h3=":8443"`` or ``h3="alt.example.net:443"`` was
+        recorded and then ignored -- the client dialed the origin's own
+        port, which for a non-idempotent request cost a handshake timeout
+        on every call before falling back.
+        """
+        var origin = u.host + ":" + String(Int(u.port))
+        var ep = self._alt_svc.h3_endpoint(origin, monotonic_now_s())
+        if ep:
+            var hp = ep.value().copy()
+            var host = hp[0] if hp[0].byte_length() > 0 else u.host
+            return (host, hp[1])
+        return (u.host, u.port)
 
     def _run_http3_request(
         self,

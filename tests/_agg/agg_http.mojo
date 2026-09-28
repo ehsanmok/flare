@@ -72,6 +72,9 @@ from test_alt_svc import (
 from test_alt_svc import (
     test_decide_policy_table as test_alt_svc__test_decide_policy_table,
 )
+from test_alt_svc import (
+    test_client_dials_the_advertised_endpoint as test_alt_svc__test_client_dials_the_advertised_endpoint,
+)
 from test_async_chunk_source import (
     test_chunk_poll_tristate as test_async_chunk_source__test_chunk_poll_tristate,
 )
@@ -4077,6 +4080,7 @@ def main() raises:
     suite.test[test_alt_svc__test_cache_clear_evicts]()
     suite.test[test_alt_svc__test_cache_ignores_non_h3]()
     suite.test[test_alt_svc__test_decide_policy_table]()
+    suite.test[test_alt_svc__test_client_dials_the_advertised_endpoint]()
     # tests/http/test_async_chunk_source.mojo
     suite.test[test_async_chunk_source__test_chunk_poll_tristate]()
     suite.test[test_async_chunk_source__test_chunk_poll_consume]()
