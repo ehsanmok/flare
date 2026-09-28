@@ -30,22 +30,48 @@ struct WsOverH2ServerStream(Copyable):
     var stream_id: Int
     var read_buffer: List[UInt8]
     var closed: Bool
+    var pending_out: List[UInt8]
+    """Encoded frame bytes the stream's send window has not taken yet, in
+    order. Flushed by :meth:`flush` and on every :meth:`try_pull_frame`."""
 
     def __init__(out self, stream_id: Int):
         self.stream_id = stream_id
         self.read_buffer = List[UInt8]()
         self.closed = False
+        self.pending_out = List[UInt8]()
+
+    def flush(mut self, mut conn: Http2Connection) raises -> Int:
+        """Push parked outbound bytes as far as the window allows; return
+        how many are still waiting."""
+        if len(self.pending_out) == 0:
+            return 0
+        var n = conn.queue_stream_data(
+            self.stream_id, Span[UInt8, _](self.pending_out)
+        )
+        if n > 0:
+            var rest = List[UInt8](capacity=len(self.pending_out) - n)
+            rest.extend(Span[UInt8, _](self.pending_out)[n:])
+            self.pending_out = rest^
+        return len(self.pending_out)
 
     def send_frame(
         mut self, mut conn: Http2Connection, frame: WsFrame
     ) raises -> None:
         """Encode ``frame`` UNMASKED and queue it as DATA on this stream.
-        A CLOSE frame ends the tunnel (subsequent sends raise)."""
+        A CLOSE frame ends the tunnel (subsequent sends raise).
+
+        ``queue_stream_data`` sends only what the stream's send window
+        takes. The rest used to be discarded (``_ = ...``): any message
+        larger than the window -- 65535 bytes by default -- was cut off
+        mid-frame and every later frame on the tunnel was misframed. The
+        remainder now waits in ``pending_out``, and later frames queue
+        behind it so order is kept."""
         if self.closed:
             raise Error("WsOverH2ServerStream: send on closed stream")
         var zero = SIMD[DType.uint8, 4](0, 0, 0, 0)
         var wire = frame.encode_with_key(False, zero)
-        _ = conn.queue_stream_data(self.stream_id, Span[UInt8, _](wire))
+        self.pending_out.extend(Span[UInt8, _](wire))
+        _ = self.flush(conn)
         if frame.opcode == WsOpcode.CLOSE:
             self.closed = True
 
@@ -55,6 +81,9 @@ struct WsOverH2ServerStream(Copyable):
         """Drain inbound DATA and decode at most one WS frame; ``None``
         when the buffer doesn't yet hold a complete frame. Client frames
         are masked; :meth:`WsFrame.decode_one` unmasks them."""
+        # Readable edges (a WINDOW_UPDATE among them) come through here,
+        # so this is where parked outbound bytes get their next chance.
+        _ = self.flush(conn)
         var data = conn.drain_stream_data(self.stream_id)
         for i in range(len(data)):
             self.read_buffer.append(data[i])
@@ -70,6 +99,12 @@ struct WsOverH2ServerStream(Copyable):
             raise e^
         var consumed = dr.consumed
         var got = dr^.take_frame()
+        # RFC 6455 sec 5.1: a server MUST close the connection on an
+        # unmasked client frame. The h1 server enforces it; this path did
+        # not.
+        if not got.masked:
+            self.closed = True
+            raise Error("WsOverH2ServerStream: unmasked client frame")
         if got.opcode == WsOpcode.CLOSE:
             self.closed = True
         var rest = List[UInt8]()

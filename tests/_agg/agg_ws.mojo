@@ -187,6 +187,12 @@ from test_ws_h2_reactor import (
 from test_ws_h2_roundtrip import (
     test_ws_h2_roundtrip as test_ws_h2_roundtrip__test_ws_h2_roundtrip,
 )
+from test_ws_h2_roundtrip import (
+    test_ws_h2_message_larger_than_the_window as test_ws_h2_roundtrip__test_ws_h2_message_larger_than_the_window,
+)
+from test_ws_h2_roundtrip import (
+    test_ws_h2_unmasked_client_frame_is_refused as test_ws_h2_roundtrip__test_ws_h2_unmasked_client_frame_is_refused,
+)
 from test_ws_multicore import (
     test_ws_multicore_serve_4_workers_echo_round_trip as test_ws_multicore__test_ws_multicore_serve_4_workers_echo_round_trip,
 )
@@ -334,6 +340,12 @@ def main() raises:
     suite.test[test_ws_h2_reactor__test_ws_h2_reactor]()
     # tests/ws/test_ws_h2_roundtrip.mojo
     suite.test[test_ws_h2_roundtrip__test_ws_h2_roundtrip]()
+    suite.test[
+        test_ws_h2_roundtrip__test_ws_h2_message_larger_than_the_window
+    ]()
+    suite.test[
+        test_ws_h2_roundtrip__test_ws_h2_unmasked_client_frame_is_refused
+    ]()
     # tests/ws/test_ws_multicore.mojo
     suite.test[
         test_ws_multicore__test_ws_multicore_serve_4_workers_echo_round_trip
