@@ -340,6 +340,9 @@ from test_tls_resume import (
 from test_tls_resume import (
     test_session_addr_zero_when_not_yet_arrived as test_tls_resume__test_session_addr_zero_when_not_yet_arrived,
 )
+from test_tls_resume import (
+    test_session_is_not_offered_to_another_origin as test_tls_resume__test_session_is_not_offered_to_another_origin,
+)
 from test_tls_server_ffi import (
     test_server_ctx_new_succeeds_with_real_cert as test_tls_server_ffi__test_server_ctx_new_succeeds_with_real_cert,
 )
@@ -566,6 +569,7 @@ def main() raises:
         test_tls_resume__test_resume_with_empty_session_falls_back_to_full
     ]()
     suite.test[test_tls_resume__test_session_addr_zero_when_not_yet_arrived]()
+    suite.test[test_tls_resume__test_session_is_not_offered_to_another_origin]()
     # tests/tls/test_tls_server_ffi.mojo
     suite.test[
         test_tls_server_ffi__test_server_ctx_new_succeeds_with_real_cert

@@ -542,6 +542,12 @@ ignored, the write fails with `EPIPE` and raises `NetworkError`. A
 handler or `SIG_IGN` that the application installed itself is left
 alone.
 
+A `TlsSession` records the `host:port` it came from (`TlsSession.origin`),
+and `connect_resumed` offers it only to that origin. For any other host
+it runs a full handshake. It used to offer the session to whatever host
+it was given. Sessions from `connect_over_tcp` carry no origin and are
+never offered.
+
 ## TCP, UDP, Unix sockets, DNS, addressing
 
 | Surface | Where |

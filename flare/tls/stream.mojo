@@ -481,10 +481,17 @@ struct TlsSession(Movable):
 
     var _addr: Int
     var _lib: OwnedDLHandle
+    var origin: String
+    """``host:port`` of the connection the session came from, the name
+    that connection verified. :meth:`TlsStream.connect_resumed` offers
+    the session only to that same origin."""
 
-    def __init__(out self, var lib: OwnedDLHandle, addr: Int):
+    def __init__(
+        out self, var lib: OwnedDLHandle, addr: Int, var origin: String = ""
+    ):
         self._lib = lib^
         self._addr = addr
+        self.origin = origin^
 
     def __deinit__(deinit self):
         if self._addr != 0:
@@ -540,6 +547,8 @@ struct TlsStream(Movable, Readable):
     var _ctx: Int  # SSL_CTX* as Int (0 = null / closed)
     var _ssl: Int  # SSL* as Int (0 = null / closed)
     var _tcp: TcpStream  # owns the TCP fd
+    var _origin: String
+    """``host:port`` this stream verified; see :attr:`TlsSession.origin`."""
     var _lib: OwnedDLHandle
     """Cached handle to the OpenSSL FFI wrapper, opened once per
     connection instead of per ``read`` / ``write`` (the per-write
@@ -549,18 +558,27 @@ struct TlsStream(Movable, Readable):
     dlclose-on-ASAP-destruction use-after-free (the hazard was
     function-local handles reclaimed mid-call, not owned fields)."""
 
-    def __init__(out self, var tcp: TcpStream, ctx: Int, ssl: Int) raises:
+    def __init__(
+        out self,
+        var tcp: TcpStream,
+        ctx: Int,
+        ssl: Int,
+        var origin: String = "",
+    ) raises:
         """Internal constructor — use ``TlsStream.connect`` instead.
 
         Args:
             tcp: Connected TCP stream (fd used by ssl after handshake).
             ctx: SSL_CTX* stored as Int.
             ssl: SSL* stored as Int (handshake already complete).
+            origin: ``host:port`` the handshake verified, stamped on
+                the sessions :meth:`session` hands out.
         """
         self._tcp = tcp^
         self._ctx = ctx
         self._ssl = ssl
         self._lib = OwnedDLHandle(_find_flare_lib())
+        self._origin = origin^
 
     def __deinit__(deinit self):
         """Send ``close_notify`` and free OpenSSL objects (best-effort)."""
@@ -651,7 +669,7 @@ struct TlsStream(Movable, Readable):
             # _classify_tls_error always raises; unreachable:
             raise TlsHandshakeError(err)
 
-        return TlsStream(tcp^, ctx, ssl)
+        return TlsStream(tcp^, ctx, ssl, sni + ":" + String(port))
 
     @staticmethod
     def connect_timeout(
@@ -738,7 +756,7 @@ struct TlsStream(Movable, Readable):
         if timeout_ms > 0:
             tcp.set_recv_timeout(0)
 
-        return TlsStream(tcp^, ctx, ssl)
+        return TlsStream(tcp^, ctx, ssl, sni + ":" + String(port))
 
     @staticmethod
     def connect_over_tcp(
@@ -1011,7 +1029,7 @@ struct TlsStream(Movable, Readable):
         """
         var lib = OwnedDLHandle(_find_flare_lib())
         var addr = _do_ssl_ctx_take_session(lib, self._ctx)
-        return TlsSession(lib^, addr)
+        return TlsSession(lib^, addr, self._origin.copy())
 
     def was_session_reused(self) -> Bool:
         """Return True if the most recent handshake on this
@@ -1096,7 +1114,15 @@ struct TlsStream(Movable, Readable):
         # Apply the saved session BEFORE flare_ssl_connect so
         # SSL_connect reuses it. Empty handles (addr == 0) are
         # tolerated -- the server falls back to full handshake.
+        #
+        # Only to the origin it came from. A resumed handshake skips
+        # the certificate, so a session from host A offered to host B
+        # let B's server, if it held A's ticket key, stand in for A
+        # without ever proving it was B.
+        var sni = config.server_name if config.server_name != "" else host
         var sess_addr = session.session_addr()
+        if session.origin != sni + ":" + String(port):
+            sess_addr = 0
         if sess_addr != 0:
             if _do_ssl_set_session(lib, ssl, sess_addr) != 0:
                 var err = _c_err(lib)
@@ -1104,7 +1130,6 @@ struct TlsStream(Movable, Readable):
                 _do_ssl_ctx_free(lib, ctx)
                 raise TlsHandshakeError("SSL_set_session failed: " + err)
 
-        var sni = config.server_name if config.server_name != "" else host
         if _do_ssl_connect(lib, ssl, sni) != 0:
             var err = _c_err(lib)
             _do_ssl_free(lib, ssl)
@@ -1116,7 +1141,7 @@ struct TlsStream(Movable, Readable):
         # was up-ref'd by SSL_set_session, our destructor will
         # release the original.
         _ = session^
-        return TlsStream(tcp^, ctx, ssl)
+        return TlsStream(tcp^, ctx, ssl, sni + ":" + String(port))
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 

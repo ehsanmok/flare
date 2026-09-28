@@ -254,6 +254,42 @@ def test_session_addr_zero_when_not_yet_arrived() raises:
     assert_true(not raised, "session()-before-IO raised")
 
 
+def test_session_is_not_offered_to_another_origin() raises:
+    """A resumed handshake skips the certificate, so a session is only
+    good for the origin that verified one. It was offered to any host
+    ``connect_resumed`` was given. Same server here, reached by a second
+    name its certificate also covers: the session must not be reused."""
+    var srv = _TlsTestServer(_SERVER_CRT, _SERVER_KEY)
+    var port = UInt16(srv.port())
+    var pid = _spawn_echo_n(srv, 2)
+    usleep(120_000)
+    var raised = False
+    var second_reused = True
+    var session_addr_before = 0
+    var origin = String("")
+    try:
+        var cfg = TlsConfig(ca_bundle=_CA_CRT)
+        var s1 = TlsStream.connect("localhost", port, cfg)
+        _ = _drive_round_trip(s1)
+        var sess = s1.session()
+        session_addr_before = sess.session_addr()
+        origin = sess.origin.copy()
+        s1.close()
+        var s2 = TlsStream.connect_resumed("127.0.0.1", port, cfg, sess^)
+        second_reused = s2.was_session_reused()
+        _ = _drive_round_trip(s2)
+        s2.close()
+    except e:
+        print("test_session_is_not_offered_to_another_origin raised:", e)
+        raised = True
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(not raised, "round trip raised")
+    assert_equal(origin, "localhost:" + String(port))
+    if session_addr_before != 0:
+        assert_false(second_reused, "session crossed origins")
+
+
 def main() raises:
     print("=" * 60)
     print("test_tls_resume.mojo -- TLS session resumption (v0.7)")
