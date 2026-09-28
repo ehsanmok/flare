@@ -64,6 +64,8 @@ var app = Conditional[Router](Router())  # wraps any Handler-shaped Inner
 ```
 """
 
+from std.collections import Optional
+
 from .handler import Handler
 from .request import Request
 from .response import Response
@@ -294,13 +296,90 @@ def fnv1a_etag(body: Span[UInt8, _]) -> String:
 # ── Conditional[Inner] ─────────────────────────────────────────────────────
 
 
+@fieldwise_init
+struct Validators(Copyable):
+    """The current validators of the resource a request targets, as
+    returned by a :data:`ValidatorLookup`. Either field may be empty."""
+
+    var etag: String
+    """Current ``ETag`` (e.g. ``'"v7"'``), or empty if none."""
+    var last_modified: String
+    """Current ``Last-Modified`` as an HTTP-date, or empty if none."""
+
+
+comptime ValidatorLookup = def(Request) raises thin -> Validators
+"""Looks up the current validators for the resource ``req`` targets,
+without changing it. Lets :class:`Conditional` evaluate preconditions
+on an unsafe method *before* the handler runs."""
+
+comptime _PRE_PASS: Int = 0
+comptime _PRE_304: Int = 304
+comptime _PRE_412: Int = 412
+
+
+def _evaluate_preconditions(
+    req: Request, server_etag: String, server_last_modified: String
+) -> Int:
+    """RFC 9110 sec 13.2.2 evaluation order. Returns ``_PRE_PASS``,
+    ``_PRE_304`` or ``_PRE_412``."""
+    var if_match = req.headers.get("if-match")
+    var if_unmodified_since = req.headers.get("if-unmodified-since")
+    var if_none_match = req.headers.get("if-none-match")
+    var if_modified_since = req.headers.get("if-modified-since")
+    var method = req.method  # already uppercase per the parser
+    var is_safe = method == "GET" or method == "HEAD"
+
+    # 1. If-Match (strong comparison).
+    if if_match.byte_length() > 0:
+        if not _any_etag_matches(if_match, server_etag, True):
+            return _PRE_412
+    elif if_unmodified_since.byte_length() > 0:
+        # 2. If-Unmodified-Since (only honoured when If-Match absent).
+        var client_t = _httpdate_to_unix(if_unmodified_since)
+        var server_t = _httpdate_to_unix(server_last_modified)
+        if client_t > 0 and server_t > 0 and server_t > client_t:
+            return _PRE_412
+
+    # 3. If-None-Match: weak comparison for safe methods, strong otherwise.
+    if if_none_match.byte_length() > 0:
+        if _any_etag_matches(if_none_match, server_etag, not is_safe):
+            return _PRE_304 if is_safe else _PRE_412
+    elif is_safe and if_modified_since.byte_length() > 0:
+        # 4. If-Modified-Since (only honoured when If-None-Match absent
+        #    AND the request is GET/HEAD).
+        var client_t = _httpdate_to_unix(if_modified_since)
+        var server_t = _httpdate_to_unix(server_last_modified)
+        if client_t > 0 and server_t > 0 and server_t <= client_t:
+            return _PRE_304
+    return _PRE_PASS
+
+
+def _has_preconditions(req: Request) -> Bool:
+    return (
+        req.headers.contains("if-match")
+        or req.headers.contains("if-unmodified-since")
+        or req.headers.contains("if-none-match")
+        or req.headers.contains("if-modified-since")
+    )
+
+
 struct Conditional[Inner: Handler & Copyable](Copyable, Handler):
     """Honour RFC 9110 §13 precondition headers around ``Inner``.
 
-    Wraps any ``Handler``-shaped inner. For each request, calls
-    ``inner.serve(req)`` first (we need the response's ``ETag`` /
-    ``Last-Modified`` to evaluate preconditions), then rewrites
-    the outbound status to 304 / 412 if a precondition fails.
+    **Safe methods** (GET, HEAD): calls ``inner.serve(req)`` first, since
+    the response's ``ETag`` / ``Last-Modified`` are the validators, then
+    rewrites a 2xx to 304 / 412 when a precondition fails. Error
+    responses are passed through untouched.
+
+    **Unsafe methods** (PUT, POST, DELETE, ...): preconditions exist to
+    stop a lost update, so they must be checked *before* the handler
+    changes anything. With a :data:`ValidatorLookup` (see
+    :meth:`with_validators`) the current validators are looked up
+    first and a failing request gets 412 without reaching ``Inner``.
+    Without one this middleware cannot know the current state, and it
+    passes the request and response through unchanged: the handler must
+    check ``If-Match`` itself. Evaluating afterwards -- what this used
+    to do -- ran the write and then told the client it had failed.
 
     The middleware never mutates the ``Inner`` response when all
     preconditions pass — pass-through is byte-identical so a cache
@@ -318,15 +397,18 @@ struct Conditional[Inner: Handler & Copyable](Copyable, Handler):
         ```mojo
         var c = Conditional[Router](Router())
         var c2 = Conditional[Router].with_auto_etag(Router())
+        var c3 = Conditional[Router].with_validators(Router(), lookup_doc)
         ```
     """
 
     var inner: Self.Inner
     var auto_etag: Bool
+    var lookup: Optional[ValidatorLookup]
 
     def __init__(out self, var inner: Self.Inner):
         self.inner = inner^
         self.auto_etag = False
+        self.lookup = None
 
     @staticmethod
     def with_auto_etag(var inner: Self.Inner) -> Conditional[Self.Inner]:
@@ -336,55 +418,49 @@ struct Conditional[Inner: Handler & Copyable](Copyable, Handler):
         out.auto_etag = True
         return out^
 
+    @staticmethod
+    def with_validators(
+        var inner: Self.Inner, lookup: ValidatorLookup
+    ) -> Conditional[Self.Inner]:
+        """Construct a ``Conditional[Inner]`` that evaluates
+        preconditions on unsafe methods before dispatch, using
+        ``lookup`` for the resource's current validators."""
+        var out = Conditional[Self.Inner](inner^)
+        out.lookup = Optional[ValidatorLookup](lookup)
+        return out^
+
     def serve(self, req: Request) raises -> Response:
+        var is_safe = req.method == "GET" or req.method == "HEAD"
+        if not is_safe:
+            if self.lookup and _has_preconditions(req):
+                var v = self.lookup.value()(req)
+                if (
+                    _evaluate_preconditions(req, v.etag, v.last_modified)
+                    != _PRE_PASS
+                ):
+                    var failed = Response(status=412)
+                    failed.reason = String("Precondition Failed")
+                    return failed^
+            return self.inner.serve(req).lower()
+
         var resp = self.inner.serve(req).lower()
+        # Only a successful representation has validators worth
+        # comparing; a 404 must stay a 404, not become a 304.
+        if resp.status < 200 or resp.status >= 300:
+            return resp^
 
         # Auto-ETag: only synthesise if the inner didn't set one.
         if self.auto_etag and not resp.headers.contains("etag"):
             if len(resp.body) > 0:
                 resp.headers.set("ETag", fnv1a_etag(Span[UInt8, _](resp.body)))
 
-        var server_etag = resp.headers.get("etag")
-        var server_last_modified_str = resp.headers.get("last-modified")
-
-        var if_match = req.headers.get("if-match")
-        var if_unmodified_since = req.headers.get("if-unmodified-since")
-        var if_none_match = req.headers.get("if-none-match")
-        var if_modified_since = req.headers.get("if-modified-since")
-
-        var method = req.method  # already uppercase per the parser
-        var is_safe = method == "GET" or method == "HEAD"
-
-        # ── Precedence per RFC 9110 §13.2.2 ────────────────────────────
-
-        # 1. If-Match (strong comparison).
-        if if_match.byte_length() > 0:
-            var ok = _any_etag_matches(if_match, server_etag, True)
-            if not ok:
-                return _make_412(resp^)
-        elif if_unmodified_since.byte_length() > 0:
-            # 2. If-Unmodified-Since (only honoured when If-Match absent).
-            var client_t = _httpdate_to_unix(if_unmodified_since)
-            var server_t = _httpdate_to_unix(server_last_modified_str)
-            if client_t > 0 and server_t > 0 and server_t > client_t:
-                return _make_412(resp^)
-
-        # 3. If-None-Match.
-        if if_none_match.byte_length() > 0:
-            # Weak comparison for safe methods, strong otherwise.
-            var ok = _any_etag_matches(if_none_match, server_etag, not is_safe)
-            if ok:
-                if is_safe:
-                    return _make_304(resp^)
-                return _make_412(resp^)
-        elif is_safe and if_modified_since.byte_length() > 0:
-            # 4. If-Modified-Since (only honoured when If-None-Match absent
-            #    AND the request is GET/HEAD).
-            var client_t = _httpdate_to_unix(if_modified_since)
-            var server_t = _httpdate_to_unix(server_last_modified_str)
-            if client_t > 0 and server_t > 0 and server_t <= client_t:
-                return _make_304(resp^)
-
+        var verdict = _evaluate_preconditions(
+            req, resp.headers.get("etag"), resp.headers.get("last-modified")
+        )
+        if verdict == _PRE_304:
+            return _make_304(resp^)
+        if verdict == _PRE_412:
+            return _make_412(resp^)
         return resp^
 
 

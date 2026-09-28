@@ -20,6 +20,9 @@ from flare.http.conditional import (
     fnv1a_etag,
 )
 from flare.http.handler import Handler
+from flare.http.conditional import Validators
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from flare.http.headers import HeaderMap
 from flare.http.request import Request
 from flare.http.response import Response
@@ -71,6 +74,30 @@ struct _NoMetadata200(Copyable, Defaultable, Handler):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _lookup_v1(req: Request) raises -> Validators:
+    """The current validators of ``_Etag200()``'s resource, looked up
+    without running the handler."""
+    return Validators(String('"v1"'), String("Sun, 06 Nov 1994 08:49:37 GMT"))
+
+
+def _lookup_lm_only(req: Request) raises -> Validators:
+    return Validators(String(""), String("Sun, 06 Nov 1994 08:49:37 GMT"))
+
+
+@fieldwise_init
+struct _Writes(Copyable, Handler):
+    """Unsafe-method handler that records whether it ran."""
+
+    var ran_addr: Int
+
+    def serve(self, req: Request) raises -> Response:
+        var p = Pointer[Int, MutUntrackedOrigin](
+            unsafe_from_address=self.ran_addr
+        )
+        p[unsafe_offset=0] = p[unsafe_offset=0] + 1
+        return Response(status=200)
 
 
 def _req(method: String) -> Request:
@@ -139,7 +166,7 @@ def test_if_none_match_no_match_passes_through() raises:
 def test_if_none_match_match_returns_412_for_put() raises:
     """Per RFC 9110 §13.1.2: state-changing methods that match
     If-None-Match get 412 Precondition Failed instead of 304."""
-    var c = Conditional[_Etag200](_Etag200())
+    var c = Conditional[_Etag200].with_validators(_Etag200(), _lookup_v1)
     var req = _req("PUT")
     req.headers.set("If-None-Match", '"v1"')
     var resp = c.serve(req)
@@ -172,7 +199,7 @@ def test_weak_etag_does_not_match_strong_for_if_match() raises:
 
 
 def test_if_match_no_match_returns_412() raises:
-    var c = Conditional[_Etag200](_Etag200())
+    var c = Conditional[_Etag200].with_validators(_Etag200(), _lookup_v1)
     var req = _req("PUT")
     req.headers.set("If-Match", '"v9"')
     var resp = c.serve(req)
@@ -181,7 +208,7 @@ def test_if_match_no_match_returns_412() raises:
 
 def test_if_match_wildcard_passes_when_resource_exists() raises:
     """``If-Match: *`` matches any current representation."""
-    var c = Conditional[_Etag200](_Etag200())
+    var c = Conditional[_Etag200].with_validators(_Etag200(), _lookup_v1)
     var req = _req("PUT")
     req.headers.set("If-Match", "*")
     var resp = c.serve(req)
@@ -189,7 +216,7 @@ def test_if_match_wildcard_passes_when_resource_exists() raises:
 
 
 def test_if_match_match_passes_through() raises:
-    var c = Conditional[_Etag200](_Etag200())
+    var c = Conditional[_Etag200].with_validators(_Etag200(), _lookup_v1)
     var req = _req("PUT")
     req.headers.set("If-Match", '"v1"')
     var resp = c.serve(req)
@@ -237,8 +264,9 @@ def test_if_modified_since_ignored_when_if_none_match_present() raises:
 
 def test_if_unmodified_since_modified_returns_412() raises:
     """Server Last-Modified > client If-Unmodified-Since → 412."""
-    var c = Conditional[_Etag200](
-        _Etag200(String(""), String("Sun, 06 Nov 1994 08:49:37 GMT"))
+    var c = Conditional[_Etag200].with_validators(
+        _Etag200(String(""), String("Sun, 06 Nov 1994 08:49:37 GMT")),
+        _lookup_lm_only,
     )
     var req = _req("PUT")
     req.headers.set("If-Unmodified-Since", "Sat, 05 Nov 1994 00:00:00 GMT")
@@ -247,8 +275,9 @@ def test_if_unmodified_since_modified_returns_412() raises:
 
 
 def test_if_unmodified_since_not_modified_passes_through() raises:
-    var c = Conditional[_Etag200](
-        _Etag200(String(""), String("Sun, 06 Nov 1994 08:49:37 GMT"))
+    var c = Conditional[_Etag200].with_validators(
+        _Etag200(String(""), String("Sun, 06 Nov 1994 08:49:37 GMT")),
+        _lookup_lm_only,
     )
     var req = _req("PUT")
     req.headers.set("If-Unmodified-Since", "Mon, 07 Nov 1994 00:00:00 GMT")
@@ -290,6 +319,49 @@ def test_fnv1a_etag_changes_with_body() raises:
     var t1 = fnv1a_etag(Span[UInt8, _](b1))
     var t2 = fnv1a_etag(Span[UInt8, _](b2))
     assert_true(t1 != t2)
+
+
+# ── Unsafe methods are checked before the handler runs ────────────────────
+
+
+def test_failed_if_match_does_not_run_the_write() raises:
+    """The lost-update case: If-Match names v0, the resource is at v1.
+    The PUT must be refused before the handler touches anything."""
+    var cell = unsafe_alloc[Int](1)
+    cell[unsafe_offset=0] = 0
+    var c = Conditional[_Writes].with_validators(_Writes(Int(cell)), _lookup_v1)
+    var req = _req("PUT")
+    req.headers.set("If-Match", '"v0"')
+    var resp = c.serve(req)
+    assert_equal(resp.status, 412)
+    assert_equal(cell[unsafe_offset=0], 0, "the write ran anyway")
+    req.headers.set("If-Match", '"v1"')
+    assert_equal(c.serve(req).status, 200)
+    assert_equal(cell[unsafe_offset=0], 1)
+
+
+def test_unsafe_method_without_a_lookup_is_passed_through() raises:
+    """Without a lookup the current state is unknowable before the write,
+    so the response is left alone rather than rewritten after it."""
+    var c = Conditional[_Etag200](_Etag200())
+    var req = _req("PUT")
+    req.headers.set("If-Match", '"v9"')
+    assert_equal(c.serve(req).status, 200)
+
+
+@fieldwise_init
+struct _NotFound(Copyable, Handler):
+    def serve(self, req: Request) raises -> Response:
+        var r = Response(status=404)
+        r.headers.set("ETag", '"v1"')
+        return r^
+
+
+def test_error_responses_are_never_rewritten() raises:
+    var c = Conditional[_NotFound](_NotFound())
+    var req = _req("GET")
+    req.headers.set("If-None-Match", "*")
+    assert_equal(c.serve(req).status, 404)
 
 
 def main() raises:

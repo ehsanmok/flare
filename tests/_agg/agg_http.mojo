@@ -534,6 +534,15 @@ from test_conditional import (
 from test_conditional import (
     test_fnv1a_etag_changes_with_body as test_conditional__test_fnv1a_etag_changes_with_body,
 )
+from test_conditional import (
+    test_failed_if_match_does_not_run_the_write as test_conditional__test_failed_if_match_does_not_run_the_write,
+)
+from test_conditional import (
+    test_unsafe_method_without_a_lookup_is_passed_through as test_conditional__test_unsafe_method_without_a_lookup_is_passed_through,
+)
+from test_conditional import (
+    test_error_responses_are_never_rewritten as test_conditional__test_error_responses_are_never_rewritten,
+)
 from test_connection_keepalive_fastpath import (
     test_keepalive_exact_lowercase_matches as test_connection_keepalive_fastpath__test_keepalive_exact_lowercase_matches,
 )
@@ -4210,6 +4219,11 @@ def main() raises:
     suite.test[test_conditional__test_auto_etag_synthesises_weak_tag]()
     suite.test[test_conditional__test_fnv1a_etag_is_deterministic]()
     suite.test[test_conditional__test_fnv1a_etag_changes_with_body]()
+    suite.test[test_conditional__test_failed_if_match_does_not_run_the_write]()
+    suite.test[
+        test_conditional__test_unsafe_method_without_a_lookup_is_passed_through
+    ]()
+    suite.test[test_conditional__test_error_responses_are_never_rewritten]()
     # tests/http/test_connection_keepalive_fastpath.mojo
     suite.test[
         test_connection_keepalive_fastpath__test_keepalive_exact_lowercase_matches
