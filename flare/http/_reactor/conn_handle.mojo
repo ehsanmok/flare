@@ -260,6 +260,13 @@ struct ConnHandle(Movable):
     """The request being answered is HEAD, so its response carries a
     head and no content."""
 
+    var h2c_upgrade_allowed: Bool
+    """This connection may be upgraded to h2c. Only the unified loop can
+    migrate a connection to an ``Http2ConnHandle``, and only for
+    cleartext, so it alone sets this -- when it promotes a cleartext
+    pending connection to HTTP/1.1. Every other loop, and every TLS
+    connection, serves ``Upgrade: h2c`` requests as plain HTTP/1.1."""
+
     var peer_eof: Bool
     """The peer has half-closed (FIN / close_notify) with a request still
     buffered. That request is served, with ``Connection: close``."""
@@ -306,6 +313,7 @@ struct ConnHandle(Movable):
         self.head_request = False
         self.request_started_ms = 0
         self.peer_eof = False
+        self.h2c_upgrade_allowed = False
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -749,13 +757,18 @@ struct ConnHandle(Movable):
                         done=True,
                         idle_timeout_ms=0,
                     )
-            var settings_payload: Optional[List[UInt8]]
-            try:
-                settings_payload = self._h2c_upgrade_decode_settings(
-                    req.headers
-                )
-            except:
-                settings_payload = Optional[List[UInt8]]()
+            # RFC 9113 sec 3.1: h2c is never used over TLS. A loop that
+            # cannot migrate the connection would leave it write-armed
+            # forever re-announcing the upgrade (a busy spin), so both
+            # cases serve the request as HTTP/1.1 and ignore Upgrade.
+            var settings_payload = Optional[List[UInt8]]()
+            if self.h2c_upgrade_allowed and not self.tls:
+                try:
+                    settings_payload = self._h2c_upgrade_decode_settings(
+                        req.headers
+                    )
+                except:
+                    settings_payload = Optional[List[UInt8]]()
             if settings_payload:
                 self._start_h2c_upgrade(req^, settings_payload.value().copy())
                 if self.body_total > 0 and self.body_total <= len(

@@ -640,6 +640,9 @@ def _migrate_pending(
         var addr = _conn_alloc_addr(stream^)
         conns[fd] = _pack(KIND_H1, addr)
         var ch_ptr = _conn_ptr_from_int(addr)
+        # Cleartext, and this loop can migrate to h2: the one case
+        # where Upgrade: h2c may be honoured.
+        ch_ptr[].h2c_upgrade_allowed = True
         if len(prefaced) > 0:
             for i in range(len(prefaced)):
                 ch_ptr[].read_buf.append(prefaced[i])

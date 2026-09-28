@@ -9,7 +9,14 @@ from std.testing import assert_equal, assert_true, assert_false, TestSuite
 from std.ffi import c_int, c_size_t
 from std.memory import stack_allocation
 
-from flare.http import HttpServer, Request, Response, ServerConfig, ok
+from flare.http import (
+    FnHandler,
+    HttpServer,
+    Request,
+    Response,
+    ServerConfig,
+    ok,
+)
 from flare.net import SocketAddr
 from flare.net._libc import (
     AF_INET,
@@ -293,6 +300,59 @@ def test_half_close_after_a_request_still_gets_a_response() raises:
     _stop(srv[0])
     assert_true("hi /hc" in got, "half-closed request was dropped: " + got)
     assert_true("Connection: close" in got, "should announce close: " + got)
+
+
+# ── Upgrade: h2c only where the connection can actually migrate ────────────
+
+
+comptime _CT_HELLO: FnHandler = FnHandler(_hello)
+
+comptime _H2C_UPGRADE = (
+    "GET /u HTTP/1.1\r\nHost: x\r\nConnection: Upgrade, HTTP2-Settings,"
+    " close\r\nUpgrade: h2c\r\nHTTP2-Settings: AAMAAABkAAQAAP__\r\n\r\n"
+)
+
+
+def test_h2c_upgrade_on_a_loop_that_cannot_migrate_is_served_as_h1() raises:
+    """serve_comptime runs the HTTP/1.1-only loop. It used to send the
+    101 and then spin on the write-armed fd forever."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve_comptime[_CT_HELLO]()
+        except:
+            pass
+        exit()
+    usleep(250000)
+    var got = String("")
+    try:
+        var c = _connect_loopback(port)
+        _send_str(c, _H2C_UPGRADE)
+        got = _read_until_close(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(Int(pid))
+    assert_false("101" in got, "offered an upgrade it cannot carry out: " + got)
+    assert_true("hi /u" in got, "request not served as HTTP/1.1: " + got)
+
+
+def test_h2c_upgrade_still_switches_on_the_unified_loop() raises:
+    var srv = _spawn(ServerConfig())
+    var got = String("")
+    try:
+        var c = _connect_loopback(srv[1])
+        _send_str(c, _H2C_UPGRADE)
+        got = _read_some(c)
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true(
+        got.startswith("HTTP/1.1 101"), "upgrade no longer offered: " + got
+    )
 
 
 def main() raises:

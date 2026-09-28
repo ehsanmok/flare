@@ -3096,6 +3096,12 @@ from test_server_lifecycle import (
 from test_server_lifecycle import (
     test_half_close_after_a_request_still_gets_a_response as test_server_lifecycle__test_half_close_after_a_request_still_gets_a_response,
 )
+from test_server_lifecycle import (
+    test_h2c_upgrade_on_a_loop_that_cannot_migrate_is_served_as_h1 as test_server_lifecycle__test_h2c_upgrade_on_a_loop_that_cannot_migrate_is_served_as_h1,
+)
+from test_server_lifecycle import (
+    test_h2c_upgrade_still_switches_on_the_unified_loop as test_server_lifecycle__test_h2c_upgrade_still_switches_on_the_unified_loop,
+)
 from test_server_multicore import (
     test_server_bind_with_short_config as test_server_multicore__test_server_bind_with_short_config,
 )
@@ -5418,6 +5424,12 @@ def main() raises:
     ]()
     suite.test[
         test_server_lifecycle__test_half_close_after_a_request_still_gets_a_response
+    ]()
+    suite.test[
+        test_server_lifecycle__test_h2c_upgrade_on_a_loop_that_cannot_migrate_is_served_as_h1
+    ]()
+    suite.test[
+        test_server_lifecycle__test_h2c_upgrade_still_switches_on_the_unified_loop
     ]()
     # tests/http/test_server_multicore.mojo
     suite.test[test_server_multicore__test_server_bind_with_short_config]()
