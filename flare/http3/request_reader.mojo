@@ -145,6 +145,10 @@ struct Http3RequestReader(Copyable):
 
     var state: Int
     var max_field_section_bytes: UInt64
+    var max_body_bytes: UInt64
+    """Most request-body bytes accepted across all DATA frames."""
+    var body_bytes: UInt64
+    """Request-body bytes delivered so far."""
     var qpack_table: ArcPointer[QpackDynamicTable]
     """RFC 9204 dynamic table shared (by ``ArcPointer``) from the
     owning :class:`Http3Connection`. Defaults to an empty (capacity-0)
@@ -154,10 +158,15 @@ struct Http3RequestReader(Copyable):
     references resolve."""
 
     @staticmethod
-    def new(max_field_section_bytes: UInt64 = UInt64(8192)) -> Self:
+    def new(
+        max_field_section_bytes: UInt64 = UInt64(8192),
+        max_body_bytes: UInt64 = UInt64(10 * 1024 * 1024),
+    ) -> Self:
         return Self(
             state=H3_REQUEST_STATE_INIT,
             max_field_section_bytes=max_field_section_bytes,
+            max_body_bytes=max_body_bytes,
+            body_bytes=UInt64(0),
             qpack_table=ArcPointer[QpackDynamicTable](
                 QpackDynamicTable(UInt64(0))
             ),
@@ -228,6 +237,23 @@ def feed_into[
         header_size = t[2]
     except:
         return 0
+    # Limits are checked from the frame header, before the payload is
+    # waited for. They used to come after the NEEDS_MORE return, so a
+    # HEADERS or DATA frame declaring gigabytes had its bytes buffered
+    # by the caller for as long as the peer cared to send them.
+    if ftype == H3_FRAME_TYPE_HEADERS and flen > reader.max_field_section_bytes:
+        reader.state = H3_REQUEST_STATE_DONE
+        handler.on_protocol_error(
+            String("h3 reader: HEADERS field section above limit")
+        )
+        return header_size
+    if (
+        ftype == H3_FRAME_TYPE_DATA
+        and reader.body_bytes + flen > reader.max_body_bytes
+    ):
+        reader.state = H3_REQUEST_STATE_DONE
+        handler.on_protocol_error(String("h3 reader: request body above limit"))
+        return header_size
     var total = header_size + Int(flen)
     if total > len(buf):
         return 0
@@ -275,6 +301,7 @@ def feed_into[
         var data = List[UInt8](capacity=Int(flen))
         for i in range(header_size, total):
             data.append(buf[i])
+        reader.body_bytes += flen
         handler.on_data(data^)
         return total
 

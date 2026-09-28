@@ -240,6 +240,40 @@ def test_repeat_headers_after_trailers_is_protocol_error() raises:
     assert_equal(rec.error_count, 1)
 
 
+def _header_only(ftype: UInt64, declared: UInt64) raises -> List[UInt8]:
+    """A frame header declaring ``declared`` payload bytes, and none of
+    the payload."""
+    from flare.quic.varint import encode_varint
+
+    var out = List[UInt8]()
+    for b in encode_varint(ftype):
+        out.append(b)
+    for b in encode_varint(declared):
+        out.append(b)
+    return out^
+
+
+def test_limits_are_checked_before_the_payload_arrives() raises:
+    """The HEADERS limit ran only once the whole frame was buffered, and
+    DATA had no limit: a frame declaring a gigabyte had the caller
+    buffer towards it. Both fail from the header now."""
+    var r = Http3RequestReader.new(max_field_section_bytes=UInt64(8192))
+    var rec = _Recorder.new()
+    var h = _header_only(H3_FRAME_TYPE_HEADERS, UInt64(1) << 30)
+    var n = feed_into(r, Span[UInt8, _](h), rec)
+    assert_true(n > 0, "an oversized HEADERS header was NEEDS_MORE")
+    assert_equal(rec.error_count, 1)
+
+    var r2 = Http3RequestReader.new(max_body_bytes=UInt64(1000))
+    var rec2 = _Recorder.new()
+    var hf = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
+    _ = feed_into(r2, Span[UInt8, _](hf), rec2)
+    var d = _header_only(H3_FRAME_TYPE_DATA, UInt64(1) << 30)
+    var n2 = feed_into(r2, Span[UInt8, _](d), rec2)
+    assert_true(n2 > 0, "an oversized DATA header was NEEDS_MORE")
+    assert_equal(rec2.error_count, 1)
+
+
 def main() raises:
     test_initial_state()
     test_headers_only()
@@ -251,4 +285,5 @@ def main() raises:
     test_unknown_frame_type_is_skipped()
     test_oversized_headers_is_protocol_error()
     test_repeat_headers_after_trailers_is_protocol_error()
-    print("test_h3_request_reader: 10 passed")
+    test_limits_are_checked_before_the_payload_arrives()
+    print("test_h3_request_reader: 11 passed")

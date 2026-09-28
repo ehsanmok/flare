@@ -608,9 +608,10 @@ struct Http3Connection(Copyable, Defaultable):
         var cursor = 0
         while cursor < len(state.inbox):
             var collector = _Http3EventCollector.new()
-            var view = state.inbox[cursor:]
+            # A span, not a slice: slicing the List copied the rest of
+            # the inbox for every frame, quadratic in frames per chunk.
             var consumed = feed_into(
-                state.reader, Span[UInt8, _](view), collector
+                state.reader, Span[UInt8, _](state.inbox)[cursor:], collector
             )
             if consumed == 0:
                 break

@@ -256,6 +256,9 @@ from test_request_reader import (
 from test_request_reader import (
     test_repeat_headers_after_trailers_is_protocol_error as test_request_reader__test_repeat_headers_after_trailers_is_protocol_error,
 )
+from test_request_reader import (
+    test_limits_are_checked_before_the_payload_arrives as test_request_reader__test_limits_are_checked_before_the_payload_arrives,
+)
 from test_response_writer import (
     test_status_only as test_response_writer__test_status_only,
 )
@@ -471,6 +474,9 @@ def main() raises:
     suite.test[test_request_reader__test_oversized_headers_is_protocol_error]()
     suite.test[
         test_request_reader__test_repeat_headers_after_trailers_is_protocol_error
+    ]()
+    suite.test[
+        test_request_reader__test_limits_are_checked_before_the_payload_arrives
     ]()
     # tests/h3/test_response_writer.mojo
     suite.test[test_response_writer__test_status_only]()
