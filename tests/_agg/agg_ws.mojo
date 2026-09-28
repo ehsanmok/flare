@@ -193,6 +193,9 @@ from test_ws_h2_roundtrip import (
 from test_ws_h2_roundtrip import (
     test_ws_h2_unmasked_client_frame_is_refused as test_ws_h2_roundtrip__test_ws_h2_unmasked_client_frame_is_refused,
 )
+from test_ws_h2_roundtrip import (
+    test_ws_h2_client_mask_keys_are_not_a_counter as test_ws_h2_roundtrip__test_ws_h2_client_mask_keys_are_not_a_counter,
+)
 from test_ws_multicore import (
     test_ws_multicore_serve_4_workers_echo_round_trip as test_ws_multicore__test_ws_multicore_serve_4_workers_echo_round_trip,
 )
@@ -345,6 +348,9 @@ def main() raises:
     ]()
     suite.test[
         test_ws_h2_roundtrip__test_ws_h2_unmasked_client_frame_is_refused
+    ]()
+    suite.test[
+        test_ws_h2_roundtrip__test_ws_h2_client_mask_keys_are_not_a_counter
     ]()
     # tests/ws/test_ws_multicore.mojo
     suite.test[

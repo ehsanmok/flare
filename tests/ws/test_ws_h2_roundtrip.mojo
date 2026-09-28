@@ -169,7 +169,31 @@ def test_ws_h2_unmasked_client_frame_is_refused() raises:
     print("test_ws_h2_unmasked_client_frame_is_refused: passed")
 
 
+def test_ws_h2_client_mask_keys_are_not_a_counter() raises:
+    """The h2 client masked with 1, 2, 3, ... -- a key the RFC requires
+    to be unpredictable."""
+    print("test_ws_h2_client_mask_keys_are_not_a_counter")
+    var ccfg = Http2ClientConfig()
+    ccfg.enable_connect_protocol = True
+    var client = Http2ClientConnection.with_config(ccfg^)
+    var scfg = Http2Config()
+    scfg.enable_connect_protocol = True
+    var server = Http2Connection.with_config(scfg^)
+    var sid = _open_tunnel(client, server)
+    var client_ws = WsOverH2Stream(sid)
+    client_ws.send_frame(client, WsFrame.text("a"))
+    var wire = client.drain()
+    # Last DATA frame's payload: 2-byte WS header, then the key.
+    var ws = List[UInt8](Span[UInt8, _](wire)[len(wire) - 7 :])
+    var key = (
+        (Int(ws[2]) << 24) | (Int(ws[3]) << 16) | (Int(ws[4]) << 8) | Int(ws[5])
+    )
+    assert_true(key > 16, "mask key looks like the old counter: " + String(key))
+    print("test_ws_h2_client_mask_keys_are_not_a_counter: passed")
+
+
 def main() raises:
     test_ws_h2_roundtrip()
     test_ws_h2_message_larger_than_the_window()
     test_ws_h2_unmasked_client_frame_is_refused()
+    test_ws_h2_client_mask_keys_are_not_a_counter()
