@@ -704,7 +704,7 @@ def test_ws_connection_carries_handshake_origin() raises:
 
 
 def test_client_frames_are_masked_with_a_fresh_random_key() raises:
-    """encode(mask=True) used an all-zero key, so the payload crossed the
+    """``encode(mask=True)`` used an all-zero key, so the payload crossed the
     wire unmasked -- the thing RFC 6455 sec 5.3 masking exists to stop."""
     var f = WsFrame.text("hello hello hello")
     var a = f.encode(mask=True)
@@ -733,6 +733,94 @@ def test_handshake_nonce_is_random() raises:
     from flare.ws.client import _generate_ws_key
 
     assert_true(_generate_ws_key() != _generate_ws_key())
+
+
+def _huge_masked_header(declared: Int) -> List[UInt8]:
+    """A masked BINARY frame header declaring ``declared`` payload bytes
+    (64-bit length form) and nothing after it."""
+    var h = List[UInt8]()
+    h.append(0x82)
+    h.append(0x80 | 127)
+    for i in range(8):
+        h.append(UInt8((declared >> (8 * (7 - i))) & 0xFF))
+    for _ in range(4):
+        h.append(0x11)
+    return h^
+
+
+def test_decode_refuses_an_oversized_frame_from_its_header() raises:
+    """``decode_one`` read the length and then asked for more bytes, so the
+    readers buffered towards any declared size up to 4 GiB. It now
+    fails as soon as the header is in, with nothing of the payload."""
+    from flare.ws.frame import WS_TOO_BIG_MARKER
+
+    var h = _huge_masked_header(0x7FFF_FFFF)
+    var msg = String("")
+    try:
+        _ = WsFrame.decode_one(Span[UInt8, _](h))
+    except e:
+        msg = String(e)
+    assert_true(WS_TOO_BIG_MARKER in msg, msg)
+    # The limit is the caller's: 11 bytes over a 10-byte cap fails,
+    # 10 bytes passes.
+    var over = WsFrame.binary(List[UInt8](length=11, fill=UInt8(1))).encode(
+        mask=True
+    )
+    var raised = False
+    try:
+        _ = WsFrame.decode_one(Span[UInt8, _](over), max_payload=10)
+    except:
+        raised = True
+    assert_true(raised, "an 11-byte payload passed a 10-byte cap")
+    var fits = WsFrame.binary(List[UInt8](length=10, fill=UInt8(1))).encode(
+        mask=True
+    )
+    var r = WsFrame.decode_one(Span[UInt8, _](fits), max_payload=10)
+    assert_equal(len(r.frame.payload), 10)
+
+
+def test_server_answers_an_oversized_frame_with_1009() raises:
+    """The server read towards a declared 2 GiB frame; now recv() raises
+    and the client is told why with CLOSE 1009."""
+    from flare.ws.server import (
+        _read_upgrade_request,
+        _send_upgrade_response,
+        _compute_accept_srv,
+    )
+
+    var srv = WsServer.bind(SocketAddr.localhost(0))
+    var port = srv.local_addr().port
+    var raw_client = TcpStream.connect(SocketAddr.localhost(port))
+    _send_upgrade_request_raw(raw_client, "localhost")
+    var server_stream = srv._listener.accept()
+    var srv_peer = server_stream.peer_addr()
+    var upgrade = _read_upgrade_request(server_stream)
+    _send_upgrade_response(server_stream, _compute_accept_srv(upgrade.key))
+    var conn = WsConnection(server_stream^, srv_peer)
+    _drain_101(raw_client)
+
+    var h = _huge_masked_header(0x7FFF_FFFF)
+    raw_client.write_all(Span[UInt8, _](h))
+    var raised = False
+    try:
+        _ = conn.recv()
+    except:
+        raised = True
+    assert_true(raised, "recv() accepted a 2 GiB frame header")
+
+    var buf = List[UInt8](length=4, fill=UInt8(0))
+    var got = 0
+    while got < 4:
+        var n = raw_client.read(buf.unsafe_ptr().unsafe_offset(got), 4 - got)
+        if n == 0:
+            break
+        got += n
+    assert_equal(got, 4)
+    assert_equal(Int(buf[0]), 0x88)  # FIN + CLOSE, unmasked
+    assert_equal(Int(buf[1]), 2)
+    assert_equal((Int(buf[2]) << 8) | Int(buf[3]), 1009)
+    raw_client.close()
+    srv.close()
 
 
 def main() raises:

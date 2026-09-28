@@ -109,6 +109,12 @@ from test_ws import (
 from test_ws import (
     test_handshake_nonce_is_random as test_ws__test_handshake_nonce_is_random,
 )
+from test_ws import (
+    test_decode_refuses_an_oversized_frame_from_its_header as test_ws__test_decode_refuses_an_oversized_frame_from_its_header,
+)
+from test_ws import (
+    test_server_answers_an_oversized_frame_with_1009 as test_ws__test_server_answers_an_oversized_frame_with_1009,
+)
 from test_ws_autoclient import (
     test_wire_choice_codepoints as test_ws_autoclient__test_wire_choice_codepoints,
 )
@@ -195,6 +201,9 @@ from test_ws_h2_roundtrip import (
 )
 from test_ws_h2_roundtrip import (
     test_ws_h2_client_mask_keys_are_not_a_counter as test_ws_h2_roundtrip__test_ws_h2_client_mask_keys_are_not_a_counter,
+)
+from test_ws_h2_roundtrip import (
+    test_ws_h2_oversized_frame_is_closed_with_1009 as test_ws_h2_roundtrip__test_ws_h2_oversized_frame_is_closed_with_1009,
 )
 from test_ws_multicore import (
     test_ws_multicore_serve_4_workers_echo_round_trip as test_ws_multicore__test_ws_multicore_serve_4_workers_echo_round_trip,
@@ -288,6 +297,10 @@ def main() raises:
     suite.test[test_ws__test_ws_connection_carries_handshake_origin]()
     suite.test[test_ws__test_client_frames_are_masked_with_a_fresh_random_key]()
     suite.test[test_ws__test_handshake_nonce_is_random]()
+    suite.test[
+        test_ws__test_decode_refuses_an_oversized_frame_from_its_header
+    ]()
+    suite.test[test_ws__test_server_answers_an_oversized_frame_with_1009]()
     # tests/ws/test_ws_autoclient.mojo
     suite.test[test_ws_autoclient__test_wire_choice_codepoints]()
     suite.test[test_ws_autoclient__test_config_defaults]()
@@ -351,6 +364,9 @@ def main() raises:
     ]()
     suite.test[
         test_ws_h2_roundtrip__test_ws_h2_client_mask_keys_are_not_a_counter
+    ]()
+    suite.test[
+        test_ws_h2_roundtrip__test_ws_h2_oversized_frame_is_closed_with_1009
     ]()
     # tests/ws/test_ws_multicore.mojo
     suite.test[

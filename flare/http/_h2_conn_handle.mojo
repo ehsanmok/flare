@@ -59,6 +59,7 @@ from flare.runtime import Pool
 from flare.tcp import TcpStream
 from flare.tls._server_ffi import SSL_IO_WANT_READ, SSL_IO_WANT_WRITE
 from flare.ws.server_h2 import WsH2Hooks, WsOverH2ServerStream
+from flare.ws.frame import WsFrame
 
 from ._reactor.tls_transport import TlsTransport
 
@@ -620,7 +621,16 @@ struct Http2ConnHandle(Movable):
             var sid = sids[i]
             var carrier = self._ws_tunnels[sid].copy()
             while True:
-                var f = carrier.try_pull_frame(self.h2)
+                var f: Optional[WsFrame]
+                try:
+                    f = carrier.try_pull_frame(self.h2)
+                except:
+                    # A bad frame on one tunnel (oversized, unmasked)
+                    # ends that tunnel; the carrier has queued its CLOSE.
+                    # Letting it raise took down every other stream on
+                    # the connection with it.
+                    carrier.closed = True
+                    break
                 if not f:
                     break
                 hooks.msg_thunk(hooks.addr, carrier, self.h2, f.take())

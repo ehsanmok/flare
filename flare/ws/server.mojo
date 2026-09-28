@@ -16,7 +16,14 @@ from std.builtin.debug_assert import debug_assert
 from std.ffi import OwnedDLHandle, c_int
 from std.memory import Pointer
 
-from .frame import WsFrame, WsOpcode, WsCloseCode, WsProtocolError
+from .frame import (
+    DEFAULT_MAX_FRAME_BYTES,
+    WS_TOO_BIG_MARKER,
+    WsFrame,
+    WsOpcode,
+    WsCloseCode,
+    WsProtocolError,
+)
 from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream
@@ -398,6 +405,13 @@ struct WsConnection(Movable):
         ```
     """
 
+    var max_frame_size: Int
+    """Largest frame payload :meth:`recv` accepts. A client frame that
+    declares more is answered with CLOSE 1009 (MESSAGE_TOO_BIG) and
+    :meth:`recv` raises, before any of the payload is buffered.
+    Defaults to :data:`DEFAULT_MAX_FRAME_BYTES`; set it in the handler
+    before the first ``recv`` to change it."""
+
     var _prebuf: List[UInt8]
     """Bytes already read off the socket before this ``WsConnection``
     took ownership of the fd, plus whatever a decode leaves behind.
@@ -421,6 +435,7 @@ struct WsConnection(Movable):
         self._stream = stream^
         self._peer = peer
         self.origin = origin^
+        self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
         self._prebuf = List[UInt8]()
 
     def __init__(
@@ -449,6 +464,7 @@ struct WsConnection(Movable):
         self._stream = stream^
         self._peer = peer
         self.origin = String("")
+        self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
         self._prebuf = prebuf^
 
     def __deinit__(deinit self):
@@ -537,7 +553,9 @@ struct WsConnection(Movable):
 
         while True:
             try:
-                var result = WsFrame.decode_one(Span[UInt8, _](buf))
+                var result = WsFrame.decode_one(
+                    Span[UInt8, _](buf), max_payload=self.max_frame_size
+                )
                 # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
                 if not result.frame.masked:
                     raise WsProtocolError(
@@ -568,6 +586,16 @@ struct WsConnection(Movable):
                     for i in range(n):
                         buf.append(tmp[i])
                 else:
+                    if WS_TOO_BIG_MARKER in msg:
+                        # RFC 6455 sec 7.4.1: 1009 tells the client why.
+                        # Best effort: the raise below is what matters.
+                        try:
+                            var wire = WsFrame.close(
+                                WsCloseCode.MESSAGE_TOO_BIG
+                            ).encode(mask=False)
+                            self._stream.write_all(Span[UInt8, _](wire))
+                        except:
+                            pass
                     raise e^
 
     def close(

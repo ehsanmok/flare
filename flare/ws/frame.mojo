@@ -78,6 +78,20 @@ struct WsCloseCode:
     """Server encountered an internal error."""
 
 
+comptime DEFAULT_MAX_FRAME_BYTES: Int = 16 * 1024 * 1024
+"""Largest frame payload a receiver accepts by default (16 MiB), the
+same bound :data:`DEFAULT_MAX_DECOMPRESSED_BYTES` puts on an inflated
+message. :meth:`WsFrame.decode_one` checks the declared length before
+any payload is buffered, so a header announcing a 4 GiB frame fails
+at once instead of having the reader grow its buffer towards it."""
+
+comptime WS_TOO_BIG_MARKER: String = "frame too big"
+"""Text in the :class:`WsProtocolError` that :meth:`WsFrame.decode_one`
+raises for a frame over its ``max_payload``. Readers look for it to
+answer with CLOSE :data:`WsCloseCode.MESSAGE_TOO_BIG` (1009) before
+they drop the connection."""
+
+
 struct WsProtocolError(Copyable, Writable):
     """Raised when an incoming frame violates RFC 6455."""
 
@@ -345,7 +359,9 @@ struct WsFrame(Movable, Writable):
 
     @staticmethod
     def decode_one(
-        data: Span[UInt8, _], allow_rsv1: Bool = False
+        data: Span[UInt8, _],
+        allow_rsv1: Bool = False,
+        max_payload: Int = DEFAULT_MAX_FRAME_BYTES,
     ) raises -> _DecodeResult:
         """Parse one frame from ``data``.
 
@@ -357,6 +373,9 @@ struct WsFrame(Movable, Writable):
                 per RFC 6455 sec 5.2, which requires a receiver to fail
                 the connection on a reserved bit no negotiated extension
                 gives meaning to.
+            max_payload: Largest payload accepted, checked against the
+                declared length as soon as it is parsed, before the
+                payload has arrived.
 
         Returns:
             A ``_DecodeResult`` with the parsed frame and bytes consumed.
@@ -428,6 +447,18 @@ struct WsFrame(Movable, Writable):
                 | Int(data[pos + 7])
             )
             pos += 8
+
+        # Checked from the header alone: the readers loop on "need more
+        # bytes", so without this a declared 4 GiB length had them
+        # buffer the whole thing before anything looked at it.
+        if plen > max_payload:
+            raise WsProtocolError(
+                WS_TOO_BIG_MARKER
+                + ": "
+                + String(plen)
+                + " bytes declared, limit "
+                + String(max_payload)
+            )
 
         # ── Parse masking key ─────────────────────────────────────────────────
         var key = SIMD[DType.uint8, 4](0, 0, 0, 0)

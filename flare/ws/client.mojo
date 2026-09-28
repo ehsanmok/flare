@@ -19,6 +19,8 @@ encoders).
 
 from std.ffi import OwnedDLHandle, c_int
 from .frame import (
+    DEFAULT_MAX_FRAME_BYTES,
+    WS_TOO_BIG_MARKER,
     WsFrame,
     WsOpcode,
     WsCloseCode,
@@ -430,10 +432,16 @@ struct WsClient(Movable):
 
     var _stream: _WsStream
     var _key: String
+    var max_frame_size: Int
+    """Largest frame payload :meth:`recv` accepts. A server frame that
+    declares more is answered with CLOSE 1009 (MESSAGE_TOO_BIG) and
+    :meth:`recv` raises, before any of the payload is buffered.
+    Defaults to :data:`DEFAULT_MAX_FRAME_BYTES`."""
 
     def __init__(out self, var stream: _WsStream, key: String):
         self._stream = stream^
         self._key = key
+        self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
 
     def __deinit__(deinit self):
         self._stream.close()
@@ -710,7 +718,9 @@ struct WsClient(Movable):
 
         while True:
             try:
-                var result = WsFrame.decode_one(Span[UInt8, _](buf))
+                var result = WsFrame.decode_one(
+                    Span[UInt8, _](buf), max_payload=self.max_frame_size
+                )
                 return result^.take_frame()
             except e:
                 var msg = String(e)
@@ -728,6 +738,16 @@ struct WsClient(Movable):
                     for i in range(n):
                         buf.append(tmp[i])
                 else:
+                    if WS_TOO_BIG_MARKER in msg:
+                        # RFC 6455 sec 7.4.1: 1009 tells the server why.
+                        # Best effort: the raise below is what matters.
+                        try:
+                            var wire = WsFrame.close(
+                                WsCloseCode.MESSAGE_TOO_BIG
+                            ).encode(mask=True)
+                            self._stream.write_all(Span[UInt8, _](wire))
+                        except:
+                            pass
                     raise e^
 
     def recv_message(mut self) raises -> WsMessage:

@@ -110,7 +110,7 @@ def _open_tunnel(
 
 
 def test_ws_h2_message_larger_than_the_window() raises:
-    """send_frame discarded whatever queue_stream_data refused, so a
+    """``send_frame`` discarded whatever queue_stream_data refused, so a
     message over the 65535-byte window arrived cut off and every later
     frame was misframed."""
     print("test_ws_h2_message_larger_than_the_window")
@@ -192,8 +192,48 @@ def test_ws_h2_client_mask_keys_are_not_a_counter() raises:
     print("test_ws_h2_client_mask_keys_are_not_a_counter: passed")
 
 
+def test_ws_h2_oversized_frame_is_closed_with_1009() raises:
+    """A tunnel frame header declaring 20 MiB is refused from the header
+    alone, and the client gets CLOSE 1009 back."""
+    print("test_ws_h2_oversized_frame_is_closed_with_1009")
+    var ccfg = Http2ClientConfig()
+    ccfg.enable_connect_protocol = True
+    var client = Http2ClientConnection.with_config(ccfg^)
+    var scfg = Http2Config()
+    scfg.enable_connect_protocol = True
+    var server = Http2Connection.with_config(scfg^)
+    var sid = _open_tunnel(client, server)
+    var h = List[UInt8]()
+    h.append(0x82)
+    h.append(0x80 | 127)
+    var declared = 20 * 1024 * 1024
+    for i in range(8):
+        h.append(UInt8((declared >> (8 * (7 - i))) & 0xFF))
+    for _ in range(4):
+        h.append(0x11)
+    client.send_data(sid, Span[UInt8, _](h), False)
+    _shuttle(client, server)
+    var server_ws = WsOverH2ServerStream(sid)
+    var raised = False
+    try:
+        _ = server_ws.try_pull_frame(server)
+    except:
+        raised = True
+    assert_true(raised, "a 20 MiB frame header was accepted")
+    assert_true(server_ws.is_closed())
+    _shuttle(client, server)
+    var client_ws = WsOverH2Stream(sid)
+    var f = client_ws.try_pull_frame(client)
+    assert_true(Bool(f), "no CLOSE reached the client")
+    var close = f.take()
+    assert_equal(close.opcode, WsOpcode.CLOSE)
+    assert_equal((Int(close.payload[0]) << 8) | Int(close.payload[1]), 1009)
+    print("test_ws_h2_oversized_frame_is_closed_with_1009: passed")
+
+
 def main() raises:
     test_ws_h2_roundtrip()
     test_ws_h2_message_larger_than_the_window()
     test_ws_h2_unmasked_client_frame_is_refused()
     test_ws_h2_client_mask_keys_are_not_a_counter()
+    test_ws_h2_oversized_frame_is_closed_with_1009()

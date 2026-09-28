@@ -720,8 +720,12 @@ of what you might reasonably assume from the surrounding feature.
 
 - `flare.openapi` emits a spec from a router but derives no body
   schemas from extractors. Treat it as experimental.
-- WebSocket payloads declared with a 64-bit length above the 32-bit
-  range are rejected.
+- WebSocket frames are capped at `max_frame_size`, 16 MiB by default,
+  on `WsConnection`, `WsClient` and both h2 carriers. A frame whose
+  header declares more is answered with CLOSE 1009 and the receive
+  raises; it used to be buffered towards any size up to 4 GiB. Raise
+  the field before the first receive to accept larger frames.
+  Messages arrive frame by frame, so this bounds a message too.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of
