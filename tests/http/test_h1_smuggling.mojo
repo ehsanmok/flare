@@ -15,7 +15,8 @@ from std.testing import assert_equal, assert_true, assert_false, TestSuite
 from std.ffi import c_int, c_size_t
 from std.memory import stack_allocation
 
-from flare.http import HttpServer, Request, Response, ok
+from flare.http import HttpServer, Request, Response, ServerConfig, ok
+from flare.http.proto import H1LeniencyConfig
 from flare.http._scan import (
     CONTENT_LENGTH_INVALID,
     find_crlfcrlf,
@@ -81,7 +82,11 @@ def _connect_loopback(port: UInt16) raises -> c_int:
 def _exchange(raw: String) raises -> String:
     """Send ``raw`` to a fresh reactor and return everything it wrote
     back until it closed the connection (idle timeout or close)."""
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    return _exchange_with(raw, ServerConfig())
+
+
+def _exchange_with(raw: String, var config: ServerConfig) raises -> String:
+    var srv = HttpServer.bind(SocketAddr.localhost(0), config^)
     var port = UInt16(srv.local_addr().port)
     var pid = fork()
     if pid == 0:
@@ -413,6 +418,26 @@ def test_target_must_be_visible_ascii() raises:
     assert_true(
         _parses("GET /a%20b?x=1&y=%E2%82%AC HTTP/1.1\r\nHost: a\r\n\r\n")
     )
+
+
+# ── ServerConfig.h1_leniency reaches the parser ────────────────────────────
+
+
+def test_default_config_rejects_lowercase_method() raises:
+    var got = _exchange(
+        "get /m HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n"
+    )
+    assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
+
+
+def test_h1_leniency_is_honoured_by_the_reactor() raises:
+    var cfg = ServerConfig(
+        h1_leniency=H1LeniencyConfig(allow_mixed_case_method=True)
+    )
+    var got = _exchange_with(
+        "get /m HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n", cfg^
+    )
+    assert_true("GET /m 0" in got, "leniency flag was ignored: " + got)
 
 
 def main() raises:

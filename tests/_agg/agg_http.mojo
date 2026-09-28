@@ -1100,6 +1100,12 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_target_must_be_visible_ascii as test_h1_smuggling__test_target_must_be_visible_ascii,
 )
+from test_h1_smuggling import (
+    test_default_config_rejects_lowercase_method as test_h1_smuggling__test_default_config_rejects_lowercase_method,
+)
+from test_h1_smuggling import (
+    test_h1_leniency_is_honoured_by_the_reactor as test_h1_smuggling__test_h1_leniency_is_honoured_by_the_reactor,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4378,6 +4384,10 @@ def main() raises:
     ]()
     suite.test[test_h1_smuggling__test_method_must_be_a_token]()
     suite.test[test_h1_smuggling__test_target_must_be_visible_ascii]()
+    suite.test[
+        test_h1_smuggling__test_default_config_rejects_lowercase_method
+    ]()
+    suite.test[test_h1_smuggling__test_h1_leniency_is_honoured_by_the_reactor]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte

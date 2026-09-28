@@ -148,6 +148,12 @@ struct ServerConfig(Copyable):
     ignore headers (TFB plaintext, fixed health-checks,
     low-latency micro-services).
 
+    The fast path also skips header *validation*: field names, field
+    values and the request target are not checked, and
+    ``h1_leniency`` has no effect. Framing (``Content-Length`` and
+    ``Transfer-Encoding``) is still decided strictly. Do not enable
+    it behind a proxy that forwards whatever it is sent.
+
     Default ``False`` -- the standard full-parse behaviour.
     Set ``True`` on production servers whose handler shape
     doesn't depend on headers."""

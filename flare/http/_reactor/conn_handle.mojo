@@ -462,7 +462,9 @@ struct ConnHandle(Movable):
                 )
             self.headers_end = end
             var te = request_te_framing(
-                Span[UInt8, _](self.read_buf), self.headers_end
+                Span[UInt8, _](self.read_buf),
+                self.headers_end,
+                config.h1_leniency.allow_te_chunked_when_cl_present,
             )
             if te == TE_UNSUPPORTED:
                 self._queue_error(501, "Not Implemented")
@@ -624,6 +626,7 @@ struct ConnHandle(Movable):
                     config.max_uri_length,
                     self.peer,
                     config.expose_error_messages,
+                    config.h1_leniency,
                 )
                 close_after = _compute_close_after(req.headers, req.version)
             if self.is_chunked:
@@ -772,6 +775,7 @@ struct ConnHandle(Movable):
                     config.max_uri_length,
                     self.peer,
                     config.expose_error_messages,
+                    config.h1_leniency,
                 )
                 close_after = _compute_close_after(req.headers, req.version)
             if self.is_chunked:
