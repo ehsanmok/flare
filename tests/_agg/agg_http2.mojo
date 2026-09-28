@@ -333,6 +333,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_local_and_peer_initial_windows_are_separate as test_h2_state__test_local_and_peer_initial_windows_are_separate,
 )
+from test_h2_state import (
+    test_malformed_field_values_are_refused as test_h2_state__test_malformed_field_values_are_refused,
+)
+from test_h2_state import (
+    test_pseudo_header_forms_are_checked as test_h2_state__test_pseudo_header_forms_are_checked,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -588,6 +594,8 @@ def main() raises:
     suite.test[
         test_h2_state__test_local_and_peer_initial_windows_are_separate
     ]()
+    suite.test[test_h2_state__test_malformed_field_values_are_refused]()
+    suite.test[test_h2_state__test_pseudo_header_forms_are_checked]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains

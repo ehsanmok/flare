@@ -437,6 +437,60 @@ def test_local_and_peer_initial_windows_are_separate() raises:
     assert_equal(s.recv_window, 1 << 20)
 
 
+def _request_verdict(
+    var extra: List[HpackHeader], path: String = "/"
+) raises -> Int:
+    """Send one request on stream 1; return the RST_STREAM code, or -1
+    when it was accepted."""
+    var c = Connection()
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(":method", "GET"))
+    hdrs.append(HpackHeader(":scheme", "https"))
+    hdrs.append(HpackHeader(":path", path))
+    hdrs.append(HpackHeader(":authority", "example.com"))
+    for h in extra:
+        hdrs.append(h.copy())
+    var enc = HpackEncoder()
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.stream_id = 1
+    f.header.flags = FrameFlags(
+        FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
+    )
+    f.payload = enc.encode(Span[HpackHeader, _](hdrs))
+    var out = c.handle_frame(f^)
+    for j in range(len(out)):
+        if Int(out[j].header.type.value) == 0x3:
+            return Int(out[j].payload[3])
+    return -1
+
+
+def test_malformed_field_values_are_refused() raises:
+    var cr = List[HpackHeader]()
+    cr.append(HpackHeader("x-a", "one\r\nx-b: two"))
+    assert_equal(_request_verdict(cr^), 0x1)
+    var lead = List[HpackHeader]()
+    lead.append(HpackHeader("x-a", " padded"))
+    assert_equal(_request_verdict(lead^), 0x1)
+    var name_sp = List[HpackHeader]()
+    name_sp.append(HpackHeader("x a", "v"))
+    assert_equal(_request_verdict(name_sp^), 0x1)
+
+
+def test_pseudo_header_forms_are_checked() raises:
+    assert_equal(_request_verdict(List[HpackHeader](), "index.html"), 0x1)
+    var host = List[HpackHeader]()
+    host.append(HpackHeader("host", "other.example"))
+    assert_equal(_request_verdict(host^), 0x1)
+    var proto = List[HpackHeader]()
+    proto.append(HpackHeader(":protocol", "websocket"))
+    assert_equal(_request_verdict(proto^), 0x1)
+    var ok_host = List[HpackHeader]()
+    ok_host.append(HpackHeader("host", "example.com"))
+    assert_equal(_request_verdict(ok_host^), -1)
+    assert_equal(_request_verdict(List[HpackHeader]()), -1)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -457,4 +511,6 @@ def main() raises:
     test_peer_header_table_size_does_not_resize_our_decoder()
     test_refused_stream_block_still_updates_hpack()
     test_local_and_peer_initial_windows_are_separate()
-    print("test_h2_state: 19 passed")
+    test_malformed_field_values_are_refused()
+    test_pseudo_header_forms_are_checked()
+    print("test_h2_state: 21 passed")

@@ -96,8 +96,13 @@ def test_extended_connect_headers_landed_on_stream() raises:
     """Feeding a HEADERS frame with ``:method=CONNECT`` +
     ``:protocol=websocket`` (RFC 8441 §4) leaves the stream in
     a state where ``stream.extended_connect_protocol == "websocket"``.
+
+    The server must have advertised SETTINGS_ENABLE_CONNECT_PROTOCOL:
+    RFC 8441 sec 3 forbids ``:protocol`` otherwise, and it is refused.
     """
-    var c = Http2Connection()
+    var cfg = Http2Config()
+    cfg.enable_connect_protocol = True
+    var c = Http2Connection.with_config(cfg^)
     c.feed(Span[UInt8, _](_preface_bytes()))
     _ = c.drain()  # discard server SETTINGS
 

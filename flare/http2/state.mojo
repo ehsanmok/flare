@@ -57,6 +57,24 @@ from .stream_slab import StreamSlab
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
 
 
+def _is_valid_field_value(v: String) -> Bool:
+    """RFC 9113 sec 8.2.1: no NUL / CR / LF, no leading or trailing SP
+    or HTAB."""
+    var n = v.byte_length()
+    if n == 0:
+        return True
+    var p = v.unsafe_ptr()
+    var first = p[unsafe_offset=0]
+    var last = p[unsafe_offset=n - 1]
+    if first == 32 or first == 9 or last == 32 or last == 9:
+        return False
+    for k in range(n):
+        var c = p[unsafe_offset=k]
+        if c == 0 or c == 10 or c == 13:
+            return False
+    return True
+
+
 def h2_setting_error(id: Int, v: Int) -> Int:
     """The RFC 9113 sec 6.5.2 error code for SETTINGS pair ``(id, v)``,
     or 0 when it is valid. Every place a peer's settings are applied --
@@ -649,18 +667,30 @@ struct Connection(Copyable, Defaultable):
         var n_path = 0
         var n_authority = 0
         var path_empty = False
+        var path_value = String("")
+        var method_value = String("")
+        var authority = String("")
+        var host = String("")
         var is_connect = False
         var has_protocol = False
         for i in range(len(hdrs)):
             var name = hdrs[i].name
             if name.byte_length() == 0:
                 return False
-            # sec 8.2.1: field names are lowercase on the wire.
+            # sec 8.2.1: field names are lowercase on the wire, and no
+            # name or value may hold NUL, CR or LF; a name holds no
+            # whitespace or controls, a value no leading or trailing
+            # whitespace. CR / LF in a value used to reach take_request,
+            # where HeaderMap raised and took the whole connection down.
             var np = name.unsafe_ptr()
             for k in range(name.byte_length()):
                 var c = np[unsafe_offset=k]
                 if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
                     return False
+                if c <= 32 or c == 127:
+                    return False
+            if not _is_valid_field_value(hdrs[i].value):
+                return False
             if name.unsafe_ptr()[unsafe_offset=0] == UInt8(ord(":")):
                 # sec 8.3: pseudo-headers never appear in trailers, and
                 # sec 8.1.2.1 puts them all before the regular fields.
@@ -670,18 +700,23 @@ struct Connection(Copyable, Defaultable):
                     return False
                 if name == ":method":
                     n_method += 1
+                    method_value = hdrs[i].value
                     is_connect = hdrs[i].value == "CONNECT"
                 elif name == ":scheme":
                     n_scheme += 1
                 elif name == ":path":
                     n_path += 1
+                    path_value = hdrs[i].value
                     path_empty = hdrs[i].value.byte_length() == 0
                 elif name == ":authority":
                     n_authority += 1
+                    authority = hdrs[i].value
                 elif name == ":protocol":
                     has_protocol = True
             else:
                 seen_regular = True
+                if name == "host":
+                    host = hdrs[i].value
                 if Connection._is_connection_specific(name):
                     return False
                 # sec 8.2.2: TE is allowed, but only as "trailers".
@@ -690,6 +725,21 @@ struct Connection(Copyable, Defaultable):
         if is_trailers:
             return True
         if n_method != 1:
+            return False
+        # RFC 8441 sec 4: :protocol only on CONNECT, and only once we
+        # have advertised SETTINGS_ENABLE_CONNECT_PROTOCOL.
+        if has_protocol and (
+            not is_connect or not self.enable_connect_protocol
+        ):
+            return False
+        # sec 8.3.1: a host field that disagrees with :authority is
+        # malformed. Routing on one while a proxy checked the other is
+        # the usual confusion.
+        if (
+            authority.byte_length() > 0
+            and host.byte_length() > 0
+            and host != authority
+        ):
             return False
         if n_scheme > 1 or n_path > 1 or n_authority > 1:
             return False
@@ -702,6 +752,11 @@ struct Connection(Copyable, Defaultable):
         if n_scheme != 1 or n_path != 1:
             return False
         if path_empty:
+            return False
+        # sec 8.3.1: origin-form, or "*" for OPTIONS.
+        if not path_value.startswith("/") and not (
+            path_value == "*" and method_value == "OPTIONS"
+        ):
             return False
         return True
 
