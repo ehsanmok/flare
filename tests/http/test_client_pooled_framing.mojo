@@ -42,6 +42,13 @@ def _canned_server(var responses: List[String]) raises -> Tuple[Int, UInt16]:
                     var n = conn.read(buf.unsafe_ptr(), 4096)
                     if n <= 0:
                         break
+                    # "|CLOSE|": take the request, answer nothing, and
+                    # drop the connection (a keep-alive the server gave
+                    # up on, or a crash after processing).
+                    if responses[i] == "|CLOSE|":
+                        i += 1
+                        conn.close()
+                        break
                     # "|PAUSE|" splits a response into separate writes
                     # with a gap, so the reader sees it arrive in parts.
                     var parts = responses[i].split("|PAUSE|")
@@ -153,6 +160,51 @@ def test_informational_response_is_read_past() raises:
     waitpid(srv[0])
     assert_equal(status, 200)
     assert_equal(text, "ok")
+
+
+# ── Replays: only what cannot repeat an effect ─────────────────────────────
+
+
+def _two_requests(
+    var script: List[String], second_method: String
+) raises -> String:
+    var srv = _canned_server(script^)
+    var url = "http://127.0.0.1:" + String(Int(srv[1])) + "/"
+    var out: String
+    try:
+        var c = HttpClient().with_pool().with_read_timeout(1500)
+        _ = c.get(url)
+        var req = Request(method=second_method, url=url)
+        out = c.send(req^).text()
+    except e:
+        out = "raised: " + String(e)
+    _ = kill(srv[0], SIGKILL)
+    waitpid(srv[0])
+    return out
+
+
+def test_post_is_not_replayed_after_the_connection_drops() raises:
+    """The server read the POST and then closed without answering: it may
+    have processed it. Re-sending on a fresh connection could apply it
+    twice, so the client must surface the error."""
+    var script = List[String]()
+    script.append(String("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na"))
+    script.append(String("|CLOSE|"))
+    script.append(
+        String("HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nreplayed")
+    )
+    var got = _two_requests(script^, "POST")
+    assert_true(got.startswith("raised: "), "POST was replayed: " + got)
+
+
+def test_get_is_replayed_after_the_connection_drops() raises:
+    var script = List[String]()
+    script.append(String("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na"))
+    script.append(String("|CLOSE|"))
+    script.append(
+        String("HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nreplayed")
+    )
+    assert_equal(_two_requests(script^, "GET"), "replayed")
 
 
 def main() raises:

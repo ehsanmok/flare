@@ -79,6 +79,7 @@ from ._client.parse import (
     _parse_http_response,
     _read_http_response_framed_tcp,
     _wire_method,
+    NO_REPLY_ERROR,
     _read_http_response_framed_tls,
     _read_http_response_tcp,
     _read_http_response_tls,
@@ -135,6 +136,11 @@ def _chunk_frame_prefix(n: Int) -> String:
     return out + "\r\n"
 
 
+comptime _H3_SENT_ERROR: String = "HTTP/3 request failed after sending: "
+"""Prefix marking an h3 failure after the request reached a connection:
+the caller must not fall back to another wire and send it again."""
+
+
 def _same_origin(a: String, b: String) -> Bool:
     """Scheme, host and port all equal (RFC 6454). Unparseable means
     not the same."""
@@ -152,18 +158,28 @@ def _same_origin(a: String, b: String) -> Bool:
 
 def _is_idempotent(method: String) -> Bool:
     """Whether ``method`` is idempotent per RFC 9110 sec 9.2.2 (safe to
-    send more than once with the same effect). Only idempotent requests
-    are eligible for the happy-eyeballs race, which dispatches the
-    request on both the h3 and h2 wires concurrently."""
-    var m = method.upper()
-    return (
-        m == "GET"
-        or m == "HEAD"
-        or m == "OPTIONS"
-        or m == "PUT"
-        or m == "DELETE"
-        or m == "TRACE"
-    )
+    send more than once with the same effect). Gates the happy-eyeballs
+    race and every automatic replay. One definition for the tree: the
+    ``Retry`` middleware uses the same set."""
+    from flare.http.reliability import _is_idempotent_method
+
+    return _is_idempotent_method(method.upper())
+
+
+def _may_replay(method: String, write_failed: Bool, err: String) -> Bool:
+    """Whether a request that failed on a reused connection may be sent
+    again on a fresh one (RFC 9112 sec 9.3.1).
+
+    A failed write is the stale-connection signature before the
+    request reached the server. A read that failed before any reply
+    byte is the other (the peer closed an idle keep-alive), but the
+    request may have been processed, so only an idempotent one is
+    re-sent. Once reply bytes have arrived, nothing is re-sent.
+    """
+    if write_failed:
+        return True
+    # ``in``, not ``startswith``: String(e) prefixes the error type.
+    return NO_REPLY_ERROR in err and _is_idempotent(method)
 
 
 def _race_connect_leg(
@@ -1099,27 +1115,52 @@ struct HttpClient(Movable):
         fallback to h2/h1.
         """
         var key = QuicConnectionPool.build_key(u.host, Int(u.port))
+        var idempotent = _is_idempotent(method)
         var pooled = self._quic_pool.acquire(key)
         if pooled:
             var h3 = pooled.take()
             var failed = False
+            var err = String("")
             var resp = Response(0, "", List[UInt8]())
             try:
                 resp = self._run_http3_request(
                     h3, u, method, extra_headers, body, auth_header
                 )
-            except:
+            except e:
                 failed = True
+                err = String(e)
             if not failed:
                 if h3.is_established():
                     self._quic_pool.release(key, h3^)
                 else:
                     h3.close()
                 return resp^
-            # Stale reused connection: drop it and dial fresh below.
             h3.close()
+            # The request went out on an established connection and may
+            # have been processed; only an idempotent one is re-sent.
+            if not idempotent:
+                raise Error(_H3_SENT_ERROR + err)
 
         var fresh = self._dial_http3(u)
+        if not idempotent:
+            # From here on the request reaches the server: a failure must
+            # not fall back to h2/h1 and send it a second time.
+            var resp_ni = Response(0, "", List[UInt8]())
+            var err_ni = String("")
+            try:
+                resp_ni = self._run_http3_request(
+                    fresh, u, method, extra_headers, body, auth_header
+                )
+            except e:
+                err_ni = String(e)
+            if err_ni.byte_length() > 0:
+                fresh.close()
+                raise Error(_H3_SENT_ERROR + err_ni)
+            if fresh.is_established():
+                self._quic_pool.release(key, fresh^)
+            else:
+                fresh.close()
+            return resp_ni^
         var resp = self._run_http3_request(
             fresh, u, method, extra_headers, body, auth_header
         )
@@ -1243,6 +1284,7 @@ struct HttpClient(Movable):
                 st.write_all(Span[UInt8, _](body))
         except:
             io_failed = True
+        var read_err = String("")
         if not io_failed:
             var can_reuse = False
             var parsed = True
@@ -1251,16 +1293,20 @@ struct HttpClient(Movable):
                 resp = _read_http_response_framed_tls(
                     st, can_reuse, _wire_method(wire)
                 )
-            except:
+            except e:
                 parsed = False
+                read_err = String(e)
             if parsed:
                 if can_reuse:
                     self._tls_pool.release(key, st^)
                 else:
                     st.close()
                 return Optional(resp^)
-        # Stale connection: close and signal a pool miss.
         st.close()
+        # Signal a pool miss (the caller dials fresh and re-sends) only
+        # when re-sending cannot repeat the request's effect.
+        if not _may_replay(_wire_method(wire), io_failed, read_err):
+            raise NetworkError("HTTPS/1.1 request failed: " + read_err)
         return None
 
     # ── Streaming request body ────────────────────────────────────────────────
@@ -2363,8 +2409,12 @@ struct HttpClient(Movable):
                     return self._send_http3(
                         u, method, extra_headers, body, auth_header
                     )
-                except:
-                    pass  # transparent fallback to h2/h1
+                except e:
+                    # Fall back to h2/h1 only when the request never
+                    # reached an h3 connection; otherwise that would send
+                    # a non-idempotent request twice.
+                    if _H3_SENT_ERROR in String(e):
+                        raise e^
             return self._send_h2_or_h1_tls(
                 u, method, extra_headers, body, wire, auth_header
             )
@@ -2466,6 +2516,7 @@ struct HttpClient(Movable):
         except:
             io_failed = True
 
+        var read_err = String("")
         if not io_failed:
             var can_reuse = False
             try:
@@ -2482,15 +2533,19 @@ struct HttpClient(Movable):
                 else:
                     stream.close()
                 return resp^
-            except:
-                pass
+            except e:
+                read_err = String(e)
 
-        # IO or parse failure on a *pooled* fd is the canonical
-        # stale-conn signature. Retry once with a fresh connection.
+        # A failure on a *pooled* fd may be a stale keep-alive, and the
+        # request is re-sent on a fresh connection only when that cannot
+        # repeat its effect (see _may_replay). A read timeout after a
+        # POST was processed used to be replayed like any other error.
         # Failure on a *fresh* fd is a real error.
         stream.close()
         if not attempted_pooled:
-            raise NetworkError("HTTP/1.1 pooled request failed")
+            raise NetworkError("HTTP/1.1 pooled request failed: " + read_err)
+        if not _may_replay(_wire_method(wire), io_failed, read_err):
+            raise NetworkError("HTTP/1.1 request failed: " + read_err)
 
         var fresh = _connect_with_fallback(host, port, self._timeout_ms)
         self._arm_read_timeout(fresh)

@@ -426,6 +426,12 @@ from test_client_pooled_framing import (
 from test_client_pooled_framing import (
     test_informational_response_is_read_past as test_client_pooled_framing__test_informational_response_is_read_past,
 )
+from test_client_pooled_framing import (
+    test_post_is_not_replayed_after_the_connection_drops as test_client_pooled_framing__test_post_is_not_replayed_after_the_connection_drops,
+)
+from test_client_pooled_framing import (
+    test_get_is_replayed_after_the_connection_drops as test_client_pooled_framing__test_get_is_replayed_after_the_connection_drops,
+)
 from test_client_proxy import (
     test_client_proxy as test_client_proxy__test_client_proxy,
 )
@@ -4262,6 +4268,12 @@ def main() raises:
     ]()
     suite.test[
         test_client_pooled_framing__test_informational_response_is_read_past
+    ]()
+    suite.test[
+        test_client_pooled_framing__test_post_is_not_replayed_after_the_connection_drops
+    ]()
+    suite.test[
+        test_client_pooled_framing__test_get_is_replayed_after_the_connection_drops
     ]()
     # tests/http/test_client_proxy.mojo
     suite.test[test_client_proxy__test_client_proxy]()

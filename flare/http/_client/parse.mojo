@@ -679,6 +679,11 @@ comptime MAX_BUFFERED_RESPONSE_BYTES: Int = 256 * 1024 * 1024
 body and framing together. A larger one raises instead of growing the
 buffer until the process runs out of memory; stream it instead."""
 
+comptime NO_REPLY_ERROR: String = "HTTP response: no reply"
+"""Prefix of every error the framed reader raises before receiving a
+single response byte. The request may never have been processed, which
+is the one case where retrying on a fresh connection can be safe."""
+
 comptime _MAX_RESPONSE_HEAD_BYTES: Int = 64 * 1024
 """Largest response head (1xx heads included) accepted."""
 
@@ -773,11 +778,16 @@ def _read_http_response_framed[
         while hdr_end < 0:
             if len(raw) - start > _MAX_RESPONSE_HEAD_BYTES:
                 raise NetworkError("HTTP response head too large")
-            if not _fill(stream, buf, raw):
+            var more: Bool
+            try:
+                more = _fill(stream, buf, raw)
+            except e:
                 if len(raw) == 0:
-                    raise NetworkError(
-                        "HTTP response: peer closed before reply"
-                    )
+                    raise NetworkError(NO_REPLY_ERROR + ": " + String(e))
+                raise e^
+            if not more:
+                if len(raw) == 0:
+                    raise NetworkError(NO_REPLY_ERROR + ": peer closed")
                 raise NetworkError("HTTP response: missing header terminator")
             hdr_end = _find_crlf2_from(raw, start)
         var head_bytes = List[UInt8](capacity=hdr_end - start)
