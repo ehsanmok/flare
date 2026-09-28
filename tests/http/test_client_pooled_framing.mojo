@@ -207,5 +207,59 @@ def test_get_is_replayed_after_the_connection_drops() raises:
     assert_equal(_two_requests(script^, "GET"), "replayed")
 
 
+# ── One connection for a pooled origin, not one per request ────────────────
+
+
+def _counting_server() raises -> Tuple[Int, UInt16]:
+    """Answer every request with the number of connections accepted
+    so far."""
+    var ln = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(ln.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        var accepted = 0
+        var buf = List[UInt8](length=4096, fill=UInt8(0))
+        while True:
+            try:
+                var conn = ln.accept()
+                accepted += 1
+                while True:
+                    var n = conn.read(buf.unsafe_ptr(), 4096)
+                    if n <= 0:
+                        break
+                    var body = String(accepted)
+                    var r = (
+                        String("HTTP/1.1 200 OK\r\nContent-Length: ")
+                        + String(body.byte_length())
+                        + "\r\n\r\n"
+                        + body
+                    )
+                    conn.write_all(Span[UInt8, _](r.as_bytes()))
+            except:
+                pass
+    usleep(200000)
+    return (Int(pid), port)
+
+
+def test_pooled_requests_share_one_connection() raises:
+    """The cleartext pooled path dialed a connection, closed it unused,
+    and then took the pool's: the server saw two connections for one
+    request."""
+    var srv = _counting_server()
+    var url = "http://127.0.0.1:" + String(Int(srv[1])) + "/"
+    var a: String
+    var b = String("")
+    try:
+        var c = HttpClient().with_pool().with_read_timeout(1500)
+        a = c.get(url).text()
+        b = c.get(url).text()
+    except e:
+        a = String(e)
+    _ = kill(srv[0], SIGKILL)
+    waitpid(srv[0])
+    assert_equal(a, "1")
+    assert_equal(b, "1")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

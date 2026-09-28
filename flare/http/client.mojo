@@ -2420,6 +2420,21 @@ struct HttpClient(Movable):
             )
         else:
             var proxy = self._resolve_proxy(u)
+            if (
+                pool_enabled
+                and proxy.byte_length() == 0
+                and not self._prefer_h2c
+                and not self._h2c_upgrade
+            ):
+                # Pooled keep-alive path with one stale-conn retry
+                # (RFC 9112 sec 9.3.1; see _may_replay). Decided before
+                # dialing: this branch used to open a fresh connection
+                # first and close it unused, so every pooled request
+                # paid a TCP handshake and the server saw twice the
+                # connections. Skipped when a proxy tunnel is active
+                # (pooled direct connections would bypass the proxy).
+                var key = ClientPool.build_key(u.scheme, u.host, Int(u.port))
+                return self._send_h1_pooled(key, u.host, u.port, wire, body)
             var stream: TcpStream
             if proxy.byte_length() > 0:
                 stream = self._connect_tunnel(proxy, u.host, u.port)
@@ -2460,16 +2475,6 @@ struct HttpClient(Movable):
                     auth_header,
                 )
                 return resp_upg^
-            if pool_enabled and proxy.byte_length() == 0:
-                # Pooled keep-alive path with one stale-conn retry.
-                # If the first attempt was on a pooled fd and the
-                # peer FIN'd the idle keep-alive while we were
-                # writing, retry once with a fresh connection (RFC
-                # 7230 §6.3.1). Skipped when a proxy tunnel is active
-                # (pooled direct connections would bypass the proxy).
-                stream.close()  # discard the fresh stream we just opened
-                var key = ClientPool.build_key(u.scheme, u.host, Int(u.port))
-                return self._send_h1_pooled(key, u.host, u.port, wire, body)
             var wire_bytes = wire.as_bytes()
             stream.write_all(Span[UInt8, _](wire_bytes))
             if len(body) > 0:
