@@ -649,6 +649,9 @@ from test_watchdog import (
 from test_watchdog import (
     test_watchdog_disarm_prevents_flip as test_watchdog__test_watchdog_disarm_prevents_flip,
 )
+from test_watchdog import (
+    test_rearm_right_after_a_fire_keeps_its_deadline as test_watchdog__test_rearm_right_after_a_fire_keeps_its_deadline,
+)
 
 
 def main() raises:
@@ -967,4 +970,7 @@ def main() raises:
     # tests/runtime/test_watchdog.mojo
     suite.test[test_watchdog__test_watchdog_flips_cell_on_deadline]()
     suite.test[test_watchdog__test_watchdog_disarm_prevents_flip]()
+    suite.test[
+        test_watchdog__test_rearm_right_after_a_fire_keeps_its_deadline
+    ]()
     suite^.run()

@@ -24,6 +24,7 @@ reactor cannot deliver by itself.
 """
 
 from std.atomic import Atomic, Ordering
+from std.ffi import c_int, external_call
 from std.memory import Layout, Pointer, alloc
 
 from ._libc_time import libc_nanosleep_ms, monotonic_now_ms
@@ -42,6 +43,10 @@ comptime _IDX_RUNNING: Int = 0
 comptime _IDX_POLL_MS: Int = 1
 comptime _BLOCK_LEN: Int = 2 + 2 * WATCHDOG_MAX_SLOTS
 comptime _TIMEOUT_REASON: Int64 = 2  # CancelReason.TIMEOUT
+comptime _FIRING: Int64 = -1
+"""Deadline-slot value while the poller is writing the cancel cell.
+``arm`` and ``disarm`` wait it out, so a fire that has begun always
+lands on the request it was meant for."""
 
 
 @always_inline
@@ -63,6 +68,26 @@ def _atomic_load(block: Int, idx: Int) -> Int64:
 
 
 @always_inline
+def _atomic_cas(block: Int, idx: Int, expected: Int64, desired: Int64) -> Bool:
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
+    var e = expected
+    return Atomic[Int64].compare_exchange(
+        (p.unsafe_offset(idx)).unsafe_bitcast[Scalar[DType.int64]](),
+        e,
+        desired,
+    )
+
+
+def _settle(block: Int, slot: Int) -> Int64:
+    """Wait out a fire in progress on ``slot`` and return its value."""
+    while True:
+        var v = _atomic_load(block, _slot_deadline_idx(slot))
+        if v != _FIRING:
+            return v
+        _ = external_call["sched_yield", c_int]()
+
+
+@always_inline
 def _atomic_store(block: Int, idx: Int, v: Int64):
     var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=block)
     Atomic[Int64].store[ordering=Ordering.RELEASE](
@@ -77,20 +102,34 @@ def watchdog_arm(block: Int, slot: Int, budget_ms: Int, cancel_addr: Int):
     target."""
     if block == 0 or slot < 0 or slot >= WATCHDOG_MAX_SLOTS:
         return
+    _ = _settle(block, slot)
     _atomic_store(block, _slot_addr_idx(slot), Int64(cancel_addr))
-    _atomic_store(
-        block, _slot_deadline_idx(slot), Int64(monotonic_now_ms() + budget_ms)
-    )
+    var deadline = Int64(monotonic_now_ms() + budget_ms)
+    while True:
+        var v = _settle(block, slot)
+        if _atomic_cas(block, _slot_deadline_idx(slot), v, deadline):
+            return
 
 
-def watchdog_disarm(block: Int, slot: Int):
-    """Disarm ``slot`` (deadline -> 0). After this the poller will not
-    fire the slot until it is re-armed. A poll already past its
-    deadline check may still write once; the reactor resets the cancel
-    cell between requests so a late write cannot bleed across."""
+def watchdog_disarm(block: Int, slot: Int) -> Bool:
+    """Disarm ``slot`` and return whether the watchdog fired on it.
+
+    When this returns, the poller is done with the slot: either it was
+    disarmed first and will not fire, or it has already written the
+    cancel cell. A late fire can no longer land after a re-arm. The
+    old disarm was a plain store: a poll past its deadline check still
+    wrote TIMEOUT into the cell afterwards, cancelling the next request
+    that reused it, and its own "fire once" store then wiped that
+    request's deadline.
+    """
     if block == 0 or slot < 0 or slot >= WATCHDOG_MAX_SLOTS:
-        return
-    _atomic_store(block, _slot_deadline_idx(slot), 0)
+        return False
+    while True:
+        var v = _settle(block, slot)
+        if v == 0:
+            return True  # fired (or was never armed)
+        if _atomic_cas(block, _slot_deadline_idx(slot), v, 0):
+            return False
 
 
 def spawn_leaked_watchdog(poll_ms: Int = 1) raises -> Int:
@@ -116,7 +155,14 @@ def _watchdog_main(arg: _OpaquePtr) -> _OpaquePtr:
         var now = Int64(monotonic_now_ms())
         for slot in range(WATCHDOG_MAX_SLOTS):
             var d = _atomic_load(block, _slot_deadline_idx(slot))
-            if d != 0 and now >= d:
+            # Claim the slot before touching the cell. If a disarm or a
+            # re-arm got there first the CAS fails and nothing is
+            # written.
+            if (
+                d > 0
+                and now >= d
+                and _atomic_cas(block, _slot_deadline_idx(slot), d, _FIRING)
+            ):
                 var addr = _atomic_load(block, _slot_addr_idx(slot))
                 if addr != 0:
                     # Flip the Cancel cell (release store of TIMEOUT).
@@ -127,7 +173,7 @@ def _watchdog_main(arg: _OpaquePtr) -> _OpaquePtr:
                         cp.unsafe_bitcast[Scalar[DType.int64]](),
                         _TIMEOUT_REASON,
                     )
-                # Fire once: disarm the slot.
+                # Fire once: release the claim.
                 _atomic_store(block, _slot_deadline_idx(slot), 0)
         var poll = Int(_atomic_load(block, _IDX_POLL_MS))
         if poll < 1:
@@ -168,9 +214,10 @@ struct DeadlineWatchdog(Movable):
         ``budget_ms`` from now."""
         watchdog_arm(self._block, slot, budget_ms, cancel_addr)
 
-    def disarm(self, slot: Int):
-        """Disarm ``slot`` (the handler finished within budget)."""
-        watchdog_disarm(self._block, slot)
+    def disarm(self, slot: Int) -> Bool:
+        """Disarm ``slot``; ``True`` if the watchdog had already fired
+        it. See :func:`watchdog_disarm`."""
+        return watchdog_disarm(self._block, slot)
 
     def stop(mut self) raises:
         """Stop the watchdog thread, join it, and free the block."""
