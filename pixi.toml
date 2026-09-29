@@ -480,6 +480,7 @@ test-router-copy     = "mojo -I . tests/http/test_router_copy.mojo"        # v0.
 test-server-handler  = "mojo -I . tests/http/test_server_handler.mojo"     # v0.4.0 Track 1 — HttpServer.serve[H: Handler & Copyable] single-worker (~6 tests)
 test-serve-comptime  = "mojo -I . tests/http/test_server_serve_comptime.mojo" # v0.4.0 Track 1 — comptime serve overload (~6 tests)
 test-thread-ffi      = "mojo -I . tests/runtime/test_thread_ffi.mojo"         # v0.4.0 Track 3 — pthread + CPU pinning FFI (~10 tests)
+test-thread-asyncrt  = "mojo -I . tests/runtime/test_thread_asyncrt.mojo && mojo -D FLARE_ASYNCRT -I . tests/runtime/test_thread_asyncrt.mojo"  # thread-engine switch, run on pthreads then on AsyncRT (~10 tests each)
 test-reuseport       = "mojo -I . tests/runtime/test_reuseport.mojo"          # v0.4.0 Track 3 — SO_REUSEPORT helper (~6 tests)
 test-scheduler       = "mojo -I . tests/runtime/test_scheduler.mojo"          # v0.4.0 Track 3 — multicore Scheduler lifecycle (~6 tests)
 test-server-multicore = "mojo -I . tests/http/test_server_multicore.mojo"  # v0.4.0 Track 3 — HttpServer multicore (~7 tests)

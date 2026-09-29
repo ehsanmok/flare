@@ -14,7 +14,8 @@ everywhere, see ``_scheduler_free_raw``).
 
 Each iteration:
 
-1. Samples ``num_workers`` uniformly in ``1..=16`` (kept well below
+1. Samples ``num_workers`` uniformly in ``1..=16`` (capped at the
+   AsyncRT pool capacity under ``-D FLARE_ASYNCRT``; kept well below
    the 256 guard so we don't spend minutes just spawning threads),
    ``pin_cores`` as a random Bool, and an ``extra_churn`` count in
    ``0..=3`` for how many extra idempotent ``shutdown()`` calls to
@@ -43,6 +44,7 @@ from std.os import getenv
 from flare.http._server_reactor_impl import _monotonic_ms
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler
+from flare.runtime._asyncrt import FLARE_USE_ASYNCRT, asyncrt_worker_capacity
 from flare.runtime._libc_time import libc_nanosleep_ms
 from flare.runtime.scheduler import load_stop_flag
 
@@ -113,7 +115,11 @@ def _run_one(mut rng: UInt64, iter_idx: Int) raises -> Int:
     var r1 = _xorshift64(rng)
     var r2 = _xorshift64(rng)
 
-    var num_workers = 1 + Int(r0 % UInt64(16))  # 1..=16
+    var max_workers = 16
+    comptime if FLARE_USE_ASYNCRT:
+        # Scheduler.start refuses more workers than the pool can hold.
+        max_workers = min(16, asyncrt_worker_capacity())
+    var num_workers = 1 + Int(r0 % UInt64(max_workers))  # 1..=16
     var pin_cores = (r1 & UInt64(1)) == UInt64(1)
     var extra_churn = Int(r2 % UInt64(4))  # 0..=3
 

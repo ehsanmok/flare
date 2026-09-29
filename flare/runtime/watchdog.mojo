@@ -207,7 +207,10 @@ struct DeadlineWatchdog(Movable):
         )
         _atomic_store(self._block, _IDX_RUNNING, Int64(1))
         var arg = _OpaquePtr(unsafe_from_address=self._block)
-        self._thread = ThreadHandle.spawn[_watchdog_main](arg)
+        # A dedicated OS thread even under -D FLARE_ASYNCRT: callers
+        # leak the watchdog for the process lifetime, and a task that
+        # never returns would hang the AsyncRT pool shutdown at exit.
+        self._thread = ThreadHandle.spawn_os[_watchdog_main](arg)
 
     def arm(self, slot: Int, budget_ms: Int, cancel_addr: Int):
         """Arm ``slot`` to flip the cell at ``cancel_addr`` in

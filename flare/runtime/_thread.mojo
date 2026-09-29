@@ -27,8 +27,14 @@ Platform notes:
 - macOS bundles pthread into ``libSystem.dylib``; symbols there are
   reachable from the default dynamic link namespace.
 
-This file is *internal* — it is used by
-``flare.runtime.scheduler`` and nothing else.
+Thread engine. By default ``spawn`` creates a pthread. Built with
+``-D FLARE_ASYNCRT`` it enqueues a task on Mojo's AsyncRT pool instead
+(``flare.runtime._asyncrt``); ``spawn_os`` always creates a pthread,
+for threads that never return or that live as long as a connection.
+Both kinds share ``join`` / ``detach`` / the move-only handle.
+
+This file is *internal* — it is used by the runtime, the WebSocket
+server, async DNS and the H3/H2 connect race.
 """
 
 from std.ffi import (
@@ -41,6 +47,15 @@ from std.ffi import (
 from std.memory import Layout, Pointer, alloc, unsafe_memset_zero
 from std.sys.info import CompilationTarget
 
+from ._asyncrt import (
+    FLARE_USE_ASYNCRT,
+    asyncrt_detach,
+    asyncrt_join,
+    asyncrt_pool_alive,
+    asyncrt_spawn,
+    asyncrt_wait_started,
+)
+
 
 # ── Start routine signature ──────────────────────────────────────────────────
 
@@ -51,6 +66,12 @@ from std.sys.info import CompilationTarget
 # raise (pthread has no exception channel); convert any error to a
 # sentinel pointer value before returning.
 comptime _OpaquePtr = Pointer[UInt8, MutUntrackedOrigin]
+
+comptime _KIND_OS: UInt8 = 0
+"""``ThreadHandle`` owns a pthread (``_thread_id`` is a ``pthread_t``)."""
+comptime _KIND_ASYNCRT: UInt8 = 1
+"""``ThreadHandle`` owns an AsyncRT task (``_thread_id`` is its task
+cell address, see ``flare.runtime._asyncrt``)."""
 
 
 # Shortcut for making a NULL pointer of the flavour we use throughout.
@@ -69,9 +90,8 @@ def _null_ptr() -> _OpaquePtr:
 # ── ThreadHandle ─────────────────────────────────────────────────────────────
 
 
-@fieldwise_init
 struct ThreadHandle(Movable):
-    """Owning handle to a live OS thread.
+    """Owning handle to a live OS thread or AsyncRT task.
 
     Stores ``pthread_t`` as a ``UInt64`` — on Linux x86_64 it is
     ``unsigned long`` and on macOS arm64 it is an opaque pointer;
@@ -96,14 +116,55 @@ struct ThreadHandle(Movable):
     """
 
     var _thread_id: UInt64
-    """Opaque pthread_t handle. Zeroed by ``join()`` on success so
-    a second call on *the same handle* is a no-op."""
+    """Opaque pthread_t handle, or the AsyncRT task cell address when
+    ``_kind == _KIND_ASYNCRT``. Zeroed by ``join()`` on success so a
+    second call on *the same handle* is a no-op."""
+
+    var _kind: UInt8
+    """``_KIND_OS`` or ``_KIND_ASYNCRT``."""
+
+    def __init__(out self, *, _thread_id: UInt64, _kind: UInt8 = _KIND_OS):
+        self._thread_id = _thread_id
+        self._kind = _kind
 
     @staticmethod
     def spawn[
         start: def(_OpaquePtr) thin -> _OpaquePtr
     ](arg: _OpaquePtr,) raises -> ThreadHandle:
-        """Spawn a thread that runs ``start(arg)``.
+        """Run ``start(arg)`` on the configured thread engine.
+
+        A pthread by default. Built with ``-D FLARE_ASYNCRT``, a task
+        on the AsyncRT pool: it runs once a pool worker is free, and
+        holds that worker until ``start`` returns. In a process whose
+        pool has no workers (a forked child) it is a pthread anyway. Use ``spawn_os`` for
+        work that never returns or lives as long as a connection.
+
+        Parameters:
+            start: Entry function; same contract as ``spawn_os``.
+
+        Args:
+            arg: Opaque pointer delivered to the start function.
+
+        Returns:
+            A handle the caller must ``join()`` or ``detach()``.
+
+        Raises:
+            Error: If ``pthread_create`` fails (pthread engine only).
+        """
+        comptime if FLARE_USE_ASYNCRT:
+            # A forked child has no pool workers; see asyncrt_pool_alive.
+            if asyncrt_pool_alive():
+                return ThreadHandle(
+                    _thread_id=asyncrt_spawn[start](arg), _kind=_KIND_ASYNCRT
+                )
+        return ThreadHandle.spawn_os[start](arg)
+
+    @staticmethod
+    def spawn_os[
+        start: def(_OpaquePtr) thin -> _OpaquePtr
+    ](arg: _OpaquePtr,) raises -> ThreadHandle:
+        """Spawn a dedicated OS thread (pthread) that runs ``start(arg)``,
+        whatever engine ``spawn`` is configured for.
 
         Parameters:
             start: Entry function. Signature
@@ -165,6 +226,10 @@ struct ThreadHandle(Movable):
             # Already joined (successfully) — redundant call is a
             # no-op rather than an undefined second pthread_join.
             return
+        if self._kind == _KIND_ASYNCRT:
+            asyncrt_join(self._thread_id)
+            self._thread_id = UInt64(0)
+            return
         var rc = external_call[
             "pthread_join",
             c_int,
@@ -199,10 +264,27 @@ struct ThreadHandle(Movable):
         """
         if self._thread_id == 0:
             return
+        if self._kind == _KIND_ASYNCRT:
+            asyncrt_detach(self._thread_id)
+            self._thread_id = UInt64(0)
+            return
         var rc = external_call["pthread_detach", c_int, UInt64](self._thread_id)
         if rc != c_int(0):
             raise Error("pthread_detach failed with rc=" + String(Int(rc)))
         self._thread_id = UInt64(0)
+
+    def wait_started(self):
+        """Block until the thread has begun running its start routine.
+
+        A no-op for a pthread, which is running as soon as ``spawn``
+        returns. An AsyncRT task sits in the pool's queue until a worker
+        takes it, and a joiner elsewhere that donates its worker while
+        waiting could take a queued task. Spawners of tasks that never
+        return on their own (serving loops) call this for each one so
+        none is left in the queue for a donating waiter to run inline.
+        """
+        if self._kind == _KIND_ASYNCRT and self._thread_id != 0:
+            asyncrt_wait_started(self._thread_id)
 
     def pin_to_cpu(self, cpu: Int) raises:
         """Pin the thread to CPU ``cpu``.
@@ -216,10 +298,16 @@ struct ThreadHandle(Movable):
         Args:
             cpu: Zero-based CPU index.
 
+        A no-op for an AsyncRT task: the pool owns its workers'
+        affinity (``MODULAR_ENABLE_AFFINITY``), and the thread a task
+        lands on is shared with every other task.
+
         Raises:
             Error: If ``pthread_setaffinity_np`` returns non-zero on
                 Linux. Never raises on macOS.
         """
+        if self._kind == _KIND_ASYNCRT:
+            return
         comptime if CompilationTarget.is_linux():
             # cpu_set_t on glibc is 1024 bits = 128 bytes by default.
             # Allocate and zero-fill a 128-byte buffer, then set the bit

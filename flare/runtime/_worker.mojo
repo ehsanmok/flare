@@ -12,6 +12,7 @@ from std.memory import Pointer, alloc
 
 from ..net import SocketAddr
 
+from ._asyncrt import FLARE_USE_ASYNCRT, asyncrt_pool_alive
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .frontend import Frontend
 from .scheduler_stats import (
@@ -118,8 +119,13 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     # Linux an overly-ambitious CPU index might raise. Pinning
     # happens from the worker itself via pthread_self, so we
     # re-wrap the current thread id into a ThreadHandle just to
-    # reuse the ``pin_to_cpu`` helper.
-    if ctx_ptr[].pin_cores:
+    # reuse the ``pin_to_cpu`` helper. Under ``-D FLARE_ASYNCRT`` this
+    # thread is a shared AsyncRT pool worker, so pinning it would pin
+    # every task that later lands on it; the pool owns affinity.
+    var shared_worker = False
+    comptime if FLARE_USE_ASYNCRT:
+        shared_worker = asyncrt_pool_alive()
+    if ctx_ptr[].pin_cores and not shared_worker:
         try:
             var cpu = ctx_ptr[].worker_idx % num_cpus()
             var self_handle = ThreadHandle(

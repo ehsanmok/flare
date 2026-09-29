@@ -18,6 +18,7 @@ from std.memory import Pointer
 from std.sys.info import CompilationTarget
 from std.ffi import c_int
 
+from flare.runtime._asyncrt import FLARE_USE_ASYNCRT
 from flare.runtime._thread import (
     ThreadHandle,
     num_cpus,
@@ -187,6 +188,10 @@ def _write_tid(
 def test_thread_id_unique_across_workers() raises:
     """Each spawned thread writes its pthread_self into a slot; the
     two slots differ from each other and from the main thread.
+
+    Under ``-D FLARE_ASYNCRT`` the two are pool tasks, and two short
+    tasks may run one after the other on the same pool worker, so only
+    "not the main thread" is guaranteed there.
     """
     var t1 = UInt64(0)
     var t2 = UInt64(0)
@@ -196,7 +201,8 @@ def test_thread_id_unique_across_workers() raises:
     h2.join()
     assert_true(t1 != UInt64(0))
     assert_true(t2 != UInt64(0))
-    assert_true(t1 != t2)
+    comptime if not FLARE_USE_ASYNCRT:
+        assert_true(t1 != t2)
     var main_tid = current_thread_id()
     assert_true(t1 != main_tid)
     assert_true(t2 != main_tid)

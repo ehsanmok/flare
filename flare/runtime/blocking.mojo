@@ -340,6 +340,10 @@ def block_in_pool[
     """Run ``work()`` on a fresh kernel thread; wait for its
     result on the calling thread.
 
+    Built with ``-D FLARE_ASYNCRT`` the "thread" is a task on the
+    AsyncRT pool instead (see ``flare.runtime._asyncrt``): cheaper to
+    start, but it holds a pool worker for as long as ``work()`` blocks.
+
     Pre-flight: if ``cancel`` is already flipped at entry, raise
     without spawning anything.
 
