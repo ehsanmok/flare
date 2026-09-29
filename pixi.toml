@@ -660,6 +660,9 @@ stress-scheduler = "mojo -I . tests/runtime/stress_scheduler.mojo"
 # `pixi run mojo -I . tests/<area>/<file>.mojo`.
 tests     = "bash tests/tools/run_test_aggregates.sh"
 tests-gen = "python3 tests/tools/gen_test_aggregates.py"   # regenerate tests/_agg after adding a test file
+# Same suite on the experimental AsyncRT thread engine (-D FLARE_ASYNCRT,
+# see docs/asyncrt.md). Separate build dir so it doesn't clobber `tests`.
+tests-asyncrt = { cmd = "bash tests/tools/run_test_aggregates.sh", env = { MOJO_DEFINES = "-D FLARE_ASYNCRT", BUILD_DIR = "build/agg-asyncrt" } }
 
 # `tests-per-file` used to live here: a hand-maintained `&&` chain of
 # ~300 `mojo -I .` invocations covering tests and examples together.
