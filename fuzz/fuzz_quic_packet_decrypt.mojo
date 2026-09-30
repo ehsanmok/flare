@@ -221,7 +221,7 @@ def main() raises:
     # Exactly the 17-byte minimum (1-byte AEAD + 16-byte tag).
     var minimal = List[UInt8]()
     minimal.append(UInt8(0))
-    for i in range(16):
+    for _ in range(16):
         minimal.append(UInt8(0))
     seeds.append(minimal^)
 
