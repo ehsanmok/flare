@@ -1875,3 +1875,22 @@ Functional parity is covered by the unchanged QUIC/H3 suites
 which stay green after these changes. Run `bench-vs-baseline` /
 `bench-h3*` on a quiet host to confirm throughput/tail parity with the
 headline numbers above before a release.
+
+## v0.11.0 Linux re-validation
+
+Re-run on the same EPYC 7R32 box with Mojo 1.1.0 (the tables above used
+1.0.0rc0). Single calibrated runs vary about `+/- 5 %`, so regressions were
+judged on paired, interleaved `wrk2 -R400000` runs.
+
+- **1 worker:** flare `73.7k`, nginx `77.1k`, Go `40.3k req/s`. nginx and Go
+  match their published numbers; flare is inside its historical `70-79k`
+  peak-finder range, and a paired run against a Mojo-1.0-era tree is equal.
+- **4 workers** (paired overdrive, req/s): `flare_mc_static` ~299k,
+  `flare_mc` ~266k, actix ~269k, hyper ~226k, axum ~203k.
+- **AsyncRT (`-D FLARE_ASYNCRT`)** equals pthreads within noise in every case.
+- **Fixed in this cycle:** `serve_static(num_workers=N)` ran one worker
+  (58k to 268k req/s at 4 workers); a per-call dict in the QPACK encoder halved
+  h3 throughput (41.6k to 75k req/s).
+- **h3:** `74-76k req/s` with `--log-file` off. The harness passes
+  `--log-file`, which slows the h2load client: flare `61.9k`, quiche `73.2k`
+  with it on.

@@ -1,6 +1,6 @@
 """Flare multicore HTTP server plaintext baseline -- STATIC fast path.
 
-Drives ``HttpServer.serve_static_multicore(resp, num_workers=N)``
+Drives ``HttpServer.serve_static(resp, num_workers=N)``
 so N pthread workers share a single listener fd via
 ``EPOLLEXCLUSIVE`` (Linux) or fall back to plain accept (macOS),
 AND every request is answered with a pre-encoded
@@ -70,4 +70,4 @@ def main() raises:
         content_type="text/plain; charset=utf-8",
         body="Hello, World!",
     )
-    srv.serve_static_multicore(resp^, num_workers=workers, pin_cores=pin)
+    srv.serve_static(resp^, num_workers=workers, pin_cores=pin)

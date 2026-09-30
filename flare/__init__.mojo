@@ -44,7 +44,7 @@ trades 7-22 % req/s (handler vs static fast path) for a
 uniformly tighter p99.99 tail under sustained load. See
 ``docs/benchmark.md`` for the head-to-head numbers. Static
 endpoints can skip the parser entirely with
-``serve_static(resp)``.
+``serve_static(resp, num_workers=N)``.
 
 The operational core: per-request / handler / body-read deadlines,
 ``HttpServer.drain(timeout_ms)`` for graceful shutdown, sanitised
@@ -54,7 +54,7 @@ streaming response primitives (``Body`` / ``ChunkSource`` /
 ``StreamingResponse[B]``; ``stream_response(source)`` streams the same
 handler byte-identically over h1 / h2 / h3 / https), and server-side
 TLS (``TlsAcceptor`` over OpenSSL, plus in-process HTTPS termination
-via ``HttpServer.bind_tls`` / ``serve_tls``).
+via ``HttpServer.bind_tls`` + ``serve``).
 
 The application layer: ``Router`` with path params, typed
 extractors (``PathInt`` / ``QueryInt`` /
@@ -389,14 +389,14 @@ def main() raises:
 
 Keep-alive and ``Connection: close`` wire forms are both pre-encoded;
 the reactor picks the right one per request from the parsed Connection
-header.
+header. ``serve_static(resp, num_workers=N)`` fans the same fast path
+out across ``N`` worker threads, each with its own listener.
 
-## Comptime handler + config
+## Comptime config checks
 
-For single-handler servers, ``serve_comptime[handler, config]`` specialises
-the reactor loop at compile time and enforces configuration invariants via
-Mojo ``comptime assert`` so misconfigured servers fail the build rather
-than the first request:
+``ServerConfig.check[config]()`` validates a comptime ``ServerConfig``
+through Mojo ``comptime assert`` so misconfigured servers fail the
+build rather than the first request:
 
 ```mojo
 from flare.http import HttpServer, Request, Response, ok
@@ -407,7 +407,6 @@ from flare.net import SocketAddr
 def hello(req: Request) raises -> Response:
     return ok("hello")
 
-comptime HELLO: FnHandler = FnHandler(hello)
 comptime CONFIG: ServerConfig = ServerConfig(
     max_header_size=4096,
     max_body_size=64 * 1024, # must be >= max_header_size (compile time)
@@ -416,8 +415,9 @@ comptime CONFIG: ServerConfig = ServerConfig(
 )
 
 def main() raises:
-    var srv = HttpServer.bind(SocketAddr.localhost(8080))
-    srv.serve_comptime[HELLO, CONFIG]()
+    ServerConfig.check[CONFIG]()
+    var srv = HttpServer.bind(SocketAddr.localhost(8080), materialize[CONFIG]())
+    srv.serve(FnHandler(hello))
 ```
 
 Break any invariant (e.g. ``max_body_size < max_header_size``) and Mojo

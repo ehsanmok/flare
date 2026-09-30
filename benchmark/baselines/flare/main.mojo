@@ -133,7 +133,7 @@ def main() raises:
             config=cfg^,
         )
         print("flare listening (TLS) on 127.0.0.1:", port)
-        tls_srv.serve_tls(h^)
+        tls_srv.serve(h^)
         return
 
     print("flare listening on 127.0.0.1:", port)

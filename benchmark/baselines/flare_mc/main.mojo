@@ -145,7 +145,7 @@ def main() raises:
         )
         print("flare multicore listening (TLS) on 127.0.0.1:", port)
         var th = BenchHandler()
-        tls_srv.serve_tls(th^, num_workers=workers)
+        tls_srv.serve(th^, num_workers=workers)
         return
 
     var srv = HttpServer.bind(
