@@ -723,8 +723,8 @@ def test_client_frames_are_masked_with_a_fresh_random_key() raises:
             same = False
     assert_false(same, "two frames shared a mask key")
     # The payload is not on the wire in the clear, and still decodes.
-    var clear = String(unsafe_from_utf8=Span[UInt8, _](a)[6:])
-    assert_false(clear == "hello hello hello")
+    var wire = List[UInt8](Span[UInt8, _](a)[6:])
+    assert_false(wire == List[UInt8]("hello hello hello".as_bytes()))
     var back = WsFrame.decode_one(Span[UInt8, _](a))
     assert_equal(back.frame.text_payload(), "hello hello hello")
 
