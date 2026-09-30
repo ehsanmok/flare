@@ -30,6 +30,7 @@ the static fast path lives in the epoll/kqueue reactor).
 
 from std.ffi import c_int, c_size_t, c_uint
 from std.memory import unsafe_memcpy, Pointer, stack_allocation
+from std.os import listdir
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, TestSuite
 
@@ -231,6 +232,34 @@ def test_static_multicore_concurrent_fanout() raises:
     assert_equal(total_ok, 8 * 30, "expected 240 successful round-trips")
 
 
+def test_serve_static_with_workers_spawns_them() raises:
+    """``serve_static(resp, num_workers=4)`` once fell through to the
+    single-worker loop; the process must hold the main thread plus 4."""
+    comptime if not CompilationTarget.is_linux():
+        return
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+
+    var pid = fork()
+    if pid == 0:
+        try:
+            var resp = precompute_response(
+                status=200,
+                content_type="text/plain; charset=utf-8",
+                body="Hello, static workers!",
+            )
+            srv.serve_static(resp^, num_workers=4, pin_cores=False)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var threads = len(listdir("/proc/" + String(pid) + "/task"))
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+
+    assert_true(threads >= 5, "expected >= 5 threads, got " + String(threads))
+
+
 def main() raises:
     print("=" * 60)
     print("test_static_multicore.mojo - static multi-worker")
@@ -238,4 +267,5 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_static_multicore_sequential_keepalive_churn]()
     suite.test[test_static_multicore_concurrent_fanout]()
+    suite.test[test_serve_static_with_workers_spawns_them]()
     suite^.run()

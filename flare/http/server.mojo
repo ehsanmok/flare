@@ -1492,9 +1492,6 @@ struct HttpServer(Movable):
         pin_cores: Bool = True,
     ) raises:
         """Run the reactor loop in static-response mode.
-        if num_workers > 1:
-            self._serve_static_multicore(resp.copy(), num_workers, pin_cores)
-            return
 
         Every parsed request — regardless of path, method, or body — is
         answered with the pre-encoded ``resp`` bytes. The reactor:
@@ -1515,6 +1512,9 @@ struct HttpServer(Movable):
         Args:
             resp: Pre-encoded static response from
                 ``precompute_response(...)``.
+            num_workers: Reactor workers. Above 1 the response is served by
+                ``num_workers`` threads, each with its own listener.
+            pin_cores: Pin worker N to core N % num_cpus (Linux only).
 
         Raises:
             NetworkError: On fatal listener errors; per-connection
@@ -1526,6 +1526,9 @@ struct HttpServer(Movable):
                 " serve() on a bind_tls server"
             )
         self._reject_tls_with_extra_listeners()
+        if num_workers > 1:
+            self._serve_static_multicore(resp.copy(), num_workers, pin_cores)
+            return
         from ._server_reactor_impl import (
             run_reactor_loop_static,
             run_uring_reactor_loop_static,

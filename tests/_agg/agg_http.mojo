@@ -3606,6 +3606,9 @@ from test_static_multicore import (
 from test_static_multicore import (
     test_static_multicore_concurrent_fanout as test_static_multicore__test_static_multicore_concurrent_fanout,
 )
+from test_static_multicore import (
+    test_serve_static_with_workers_spawns_them as test_static_multicore__test_serve_static_with_workers_spawns_them,
+)
 from test_static_response import (
     test_precompute_200_hello_world as test_static_response__test_precompute_200_hello_world,
 )
@@ -5933,6 +5936,9 @@ def main() raises:
         test_static_multicore__test_static_multicore_sequential_keepalive_churn
     ]()
     suite.test[test_static_multicore__test_static_multicore_concurrent_fanout]()
+    suite.test[
+        test_static_multicore__test_serve_static_with_workers_spawns_them
+    ]()
     # tests/http/test_static_response.mojo
     suite.test[test_static_response__test_precompute_200_hello_world]()
     suite.test[
