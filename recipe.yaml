@@ -40,7 +40,7 @@
 
 context:
   name: flare
-  version: "0.10.0"
+  version: "0.11.0"
 
 package:
   name: ${{ name }}
@@ -55,7 +55,7 @@ source:
   # with no change here. Bump together with pixi.lock.
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    rev: 5c59ef988498ba6f7a820070454fbdcf8e818e27
+    rev: 0bae1f3815d249efa6cb0a3483eb6658700635e5
 
 build:
   script:

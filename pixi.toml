@@ -3,12 +3,12 @@ authors = ["ehsanmok <ehsanmok@users.noreply.github.com>"]
 channels = ["https://conda.modular.com/max", "conda-forge"]
 name = "flare"
 platforms = ["osx-arm64", "linux-aarch64", "linux-64"]
-version = "0.10.0"
+version = "0.11.0"
 preview = ["pixi-build"]
 
 [package]
 name = "flare"
-version = "0.10.0"
+version = "0.11.0"
 
 [package.build]
 # Lower bound only, deliberately.
@@ -46,7 +46,7 @@ zlib             = ">=1.3.1,<2"    # HTTP: Content-Encoding gzip/deflate decompr
 libbrotlicommon  = ">=1,<2"        # HTTP: Content-Encoding br (shared brotli tables)
 libbrotlidec     = ">=1,<2"        # HTTP: brotli decoder
 libbrotlienc     = ">=1,<2"        # HTTP: brotli encoder
-json             = { git = "https://github.com/ehsanmok/json.git", branch = "main" }
+json             = { git = "https://github.com/ehsanmok/json.git", tag = "v0.4.1" }
 
 # g++ is a BUILD-time dep on Linux: the activation scripts
 # (flare/tls/ffi/build.sh, flare/http/ffi/build.sh) invoke g++ to compile
@@ -65,7 +65,7 @@ gxx = ">=13"
 # feature.dev automatically).
 [feature.dev.dependencies]
 pre-commit = ">=4.2.0,<5"
-mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", branch = "main" }
+mojodoc    = { git = "https://github.com/ehsanmok/mojodoc.git", tag = "v0.1.1" }
 
 # Linux-only: native debug + race-detection tooling for io_uring
 # root-causing and allocation profiling. gdb -- post-mortem on core
@@ -85,18 +85,15 @@ gdb        = ">=14"
 valgrind   = ">=3.22"
 heaptrack  = ">=1.5"
 
-# mozz tracks main directly, same as json/mojodoc above. A nightly fuzz
-# failure can in principle come from a dependency that moved rather than
-# from flare, but pinning to a specific commit re-pins its own transitive
-# mojo/build-backend constraints too, which is what forced this file's
-# json/mozz/mojodoc pins to be updated by hand on every upstream release.
-# Tracking main keeps all four repos moving together.
+# mozz is pinned to a release tag, same as json/mojodoc above, so a nightly
+# fuzz failure cannot come from a dependency that moved underneath flare.
+# Bump the three tags (and recipe.yaml's json rev) together on each release.
 #
 # (The flare-side fuzz-http-server crash -- raw wire bytes reflected
 # into Error messages -- is fixed in
 # flare/http/_server/parse_util.mojo::_ascii_safe.)
 [feature.fuzz.dependencies]
-mozz = { git = "https://github.com/ehsanmok/mozz.git", branch = "main" }
+mozz = { git = "https://github.com/ehsanmok/mozz.git", tag = "v0.2.1" }
 
 # ── Code-metrics tooling (complexity + coverage proxy) ───────────────────────
 # Opt in with: pixi run -e metrics metrics
