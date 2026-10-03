@@ -1,0 +1,10 @@
+name = "flare-formal"
+version = "0.1.0"
+defaultTargets = ["Flare"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+
+[[lean_lib]]
+name = "Flare"
