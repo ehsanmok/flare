@@ -55,3 +55,6 @@ benchmark/baselines/*/go.sum
 benchmark/baselines/*/nginx-rendered.conf
 benchmark/baselines/nginx/nginx.pid
 benchmark/baselines/nginx/logs/
+
+# Lean build output (formal/)
+.lake/

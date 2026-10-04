@@ -362,8 +362,8 @@ check-reactor-size = "bash tests/tools/check_reactor_size.sh"
 #                Request / Response / HeaderMap / Method back on the
 #                cyclic edge between h1 and h2.
 check-no-http-http2-cycle = "bash tests/tools/check_no_http_http2_cycle.sh"
-check-example-tasks = "python3 tests/tools/check_example_tasks.py"
-formal-repros = "bash formal/repro/run_all.sh"   # Mojo repros for Lean-found issues (exit != 0 while a bug is open)   # every example has a task, every task a file, all in the `examples` aggregate
+check-example-tasks = "python3 tests/tools/check_example_tasks.py"   # every example has a task, every task a file, all in the `examples` aggregate
+formal-repros = "bash formal/repro/run_all.sh"   # Mojo repros for Lean-found issues (exit != 0 while a bug is open)
 
 # ── Tests (flat files, one file per test suite) ───────────────────────────────
 # Each task runs a single test file; use 'pixi run tests' to run all.
