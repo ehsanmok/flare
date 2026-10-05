@@ -36,9 +36,11 @@ room) and does not track per-entry reference counts -- a decoder mirror
 trusts the peer encoder not to evict an entry a not-yet-acknowledged
 field section still references (RFC 9204 section 2.2 makes that the
 encoder's responsibility). Blocked-stream handling (a field section
-referencing inserts that have not arrived) is surfaced as a decode error
-for the caller to treat as "needs more inserts"; full stream-parking is
-the upgrade path.
+referencing inserts that have not arrived) is surfaced as a decode error;
+the HTTP/3 server advertises 0 blocked streams, so it treats that error
+(like every undecodable field section) as a connection error of type
+``QPACK_DECOMPRESSION_FAILED`` (RFC 9204 section 2.1.2). Stream-parking
+for a non-zero budget is the upgrade path.
 
 References: RFC 9204 sections 2-4; RFC 7541 Appendix B (Huffman).
 """

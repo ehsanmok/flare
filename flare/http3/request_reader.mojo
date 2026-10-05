@@ -24,8 +24,10 @@ bytes into a typed callback sequence on a caller-supplied
 * :meth:`Http3RequestEventHandler.on_protocol_error` -- the byte
   stream is malformed (truncated varint, oversize length, QPACK
   decode failure, repeated HEADERS); the caller surfaces this as
-  an H3_FRAME_UNEXPECTED / QPACK_DECOMPRESSION_FAILED stream-
-  level error to the QUIC peer.
+  an H3_FRAME_UNEXPECTED stream-level error to the QUIC peer. A
+  QPACK decode failure is tagged ``QPACK_DECOMPRESSION_FAILED``:
+  :class:`flare.http3.Http3Connection` raises it as a connection
+  error (RFC 9204 section 2.2.3).
 
 The dispatcher entry point :func:`feed_into[H]` returns the
 number of bytes consumed. A return of ``0`` means NEEDS_MORE --
@@ -280,7 +282,15 @@ def feed_into[
             )
         except:
             reader.state = H3_REQUEST_STATE_DONE
-            handler.on_protocol_error(String("h3 reader: QPACK decode failed"))
+            # An undecodable field section is a connection error of type
+            # QPACK_DECOMPRESSION_FAILED (RFC 9204 sec 2.2.3, 4.5.1.1);
+            # the tag lets Http3Connection raise it to the QUIC layer.
+            handler.on_protocol_error(
+                String(
+                    "h3 reader: QPACK decode failed"
+                    " (QPACK_DECOMPRESSION_FAILED)"
+                )
+            )
             return total
         if reader.state == H3_REQUEST_STATE_INIT:
             reader.state = H3_REQUEST_STATE_BODY

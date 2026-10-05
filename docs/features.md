@@ -438,6 +438,14 @@ v0.11 audit fixes; before them the server accepted what follows.
   rather than as the peer sends it. A request body is capped at
   10 MiB (`Http3RequestReader.max_body_bytes`); the QPACK encoder stream
   may not set a table capacity beyond what was advertised.
+- A request field section that cannot be decoded (a Required Insert
+  Count the table cannot satisfy, a reference outside it, or a truncated
+  prefix) is a connection error: the server closes the connection with
+  `QPACK_DECOMPRESSION_FAILED` (0x200) instead of leaving the request
+  unanswered. It advertises 0 blocked streams, so nothing waits for
+  inserts. Any other HTTP/3 or QPACK error the driver raises closes the
+  connection with its H3 code (`flare.http3.server.h3_error_code`) and
+  no longer stops `serve_http3`.
 - CRYPTO reassembly holds at most 64 KiB ahead of the next expected
   byte, and a request stream at most 2 MiB ahead of a gap.
 - Duplicate packets are dropped, ACKs for packet numbers never sent

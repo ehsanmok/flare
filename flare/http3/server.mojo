@@ -40,6 +40,13 @@ HTTP/3 over QUIC uses four families of streams:
 - :class:`Http3StreamType` -- the unidirectional-stream type
   codepoints from RFC 9114 §6.2.
 
+Connection errors: an undecodable request field section sets
+:attr:`Http3Connection.connection_error_code` to
+``QPACK_DECOMPRESSION_FAILED`` (0x200), and the driver raises the other
+H3 / QPACK connection errors with the code's name in the message
+(:func:`h3_error_code` maps it back). The QUIC reactor closes the
+connection with that code.
+
 The driver is sans-I/O: the QUIC reactor feeds reassembled stream
 chunks in via :meth:`Http3Connection.feed_stream_chunk` and drains
 pending outbound frames via :meth:`Http3Connection.take_response_frames`.
@@ -98,6 +105,53 @@ comptime _MAX_CONTROL_FRAME_BYTES: Int = 16384
 """Largest frame accepted on the peer's control stream. SETTINGS,
 GOAWAY and MAX_PUSH_ID are a few bytes; anything declaring more is
 treated as an excessive load (RFC 9114 sec 8.1)."""
+
+
+comptime H3_GENERAL_PROTOCOL_ERROR: UInt64 = 0x101
+"""RFC 9114 section 8.1: the default code for an error with no more
+specific H3 code."""
+comptime H3_STREAM_CREATION_ERROR: UInt64 = 0x103
+comptime H3_CLOSED_CRITICAL_STREAM: UInt64 = 0x104
+comptime H3_FRAME_UNEXPECTED: UInt64 = 0x105
+comptime H3_FRAME_ERROR: UInt64 = 0x106
+comptime H3_EXCESSIVE_LOAD: UInt64 = 0x107
+comptime H3_SETTINGS_ERROR: UInt64 = 0x109
+comptime H3_MISSING_SETTINGS: UInt64 = 0x10A
+comptime QPACK_DECOMPRESSION_FAILED: UInt64 = 0x200
+"""RFC 9204 section 6."""
+comptime QPACK_ENCODER_STREAM_ERROR: UInt64 = 0x201
+comptime QPACK_DECODER_STREAM_ERROR: UInt64 = 0x202
+
+
+def h3_error_code(message: String) -> UInt64:
+    """The HTTP/3 / QPACK error code (RFC 9114 section 8.1, RFC 9204
+    section 6) named by an error ``message``, or
+    :data:`H3_GENERAL_PROTOCOL_ERROR` when it names none.
+
+    The driver raises ``Error`` with the code's name in the text
+    (``"H3_FRAME_UNEXPECTED: ..."``); the QUIC layer maps that to the
+    CONNECTION_CLOSE error code through this function."""
+    if "QPACK_DECOMPRESSION_FAILED" in message:
+        return QPACK_DECOMPRESSION_FAILED
+    if "QPACK_ENCODER_STREAM_ERROR" in message:
+        return QPACK_ENCODER_STREAM_ERROR
+    if "QPACK_DECODER_STREAM_ERROR" in message:
+        return QPACK_DECODER_STREAM_ERROR
+    if "H3_STREAM_CREATION_ERROR" in message:
+        return H3_STREAM_CREATION_ERROR
+    if "H3_CLOSED_CRITICAL_STREAM" in message:
+        return H3_CLOSED_CRITICAL_STREAM
+    if "H3_FRAME_UNEXPECTED" in message:
+        return H3_FRAME_UNEXPECTED
+    if "H3_FRAME_ERROR" in message:
+        return H3_FRAME_ERROR
+    if "H3_EXCESSIVE_LOAD" in message:
+        return H3_EXCESSIVE_LOAD
+    if "H3_SETTINGS_ERROR" in message:
+        return H3_SETTINGS_ERROR
+    if "H3_MISSING_SETTINGS" in message:
+        return H3_MISSING_SETTINGS
+    return H3_GENERAL_PROTOCOL_ERROR
 
 
 struct Http3StreamType:
@@ -580,6 +634,15 @@ struct Http3Connection(Copyable, Defaultable):
     Increment we emitted on our QPACK decoder stream (RFC 9204
     §4.4.3). Drained by :meth:`take_qpack_decoder_frames`."""
 
+    var connection_error_code: UInt64
+    """Non-zero once the driver has hit an error that RFC 9114 / 9204
+    make a *connection* error (so far an undecodable field section,
+    ``QPACK_DECOMPRESSION_FAILED``). The QUIC layer reads it after each
+    feed and closes the connection with this code."""
+
+    var connection_error_reason: String
+    """Human-readable cause of :attr:`connection_error_code`."""
+
     def __init__(out self):
         self.config = Http3Config()
         self.peer_settings_received = False
@@ -605,6 +668,8 @@ struct Http3Connection(Copyable, Defaultable):
             QpackDynamicTable(UInt64(0))
         )
         self.pending_qpack_increment = 0
+        self.connection_error_code = 0
+        self.connection_error_reason = String("")
 
     @staticmethod
     def with_config(config: Http3Config) -> Self:
@@ -793,6 +858,16 @@ struct Http3Connection(Copyable, Defaultable):
                 state.unknown_frames.append(collector.unknown_frame_type)
             if collector.error_fired:
                 state.protocol_error = String(collector.error_message)
+                # The server advertises no blocked streams, so a field
+                # section that cannot be decoded now is a connection
+                # error, not a stream-local one that left the request
+                # unanswered (QPACK-05, RFC 9204 sec 2.1.2, 2.2.3).
+                if (
+                    "QPACK_DECOMPRESSION_FAILED" in state.protocol_error
+                    and self.connection_error_code == 0
+                ):
+                    self.connection_error_code = QPACK_DECOMPRESSION_FAILED
+                    self.connection_error_reason = String(state.protocol_error)
                 break
             if state.reader.state == H3_REQUEST_STATE_DONE:
                 break

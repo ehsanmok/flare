@@ -46,6 +46,13 @@ from flare.http3 import (
     Http3Config,
     encode_http3_frame,
 )
+from flare.http3.server import (
+    H3_FRAME_UNEXPECTED,
+    H3_GENERAL_PROTOCOL_ERROR,
+    QPACK_DECOMPRESSION_FAILED,
+    QPACK_ENCODER_STREAM_ERROR,
+    h3_error_code,
+)
 from flare.http.response import Response
 from flare.http.server import ok
 from flare.qpack import QpackHeader, encode_field_section
@@ -357,6 +364,63 @@ def test_retransmit_after_the_response_does_not_rerun_the_request() raises:
     assert_equal(len(c.take_completed_streams()), 0)
 
 
+def _headers_frame_with_section(section: List[UInt8]) raises -> List[UInt8]:
+    var out = List[UInt8]()
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](section), out)
+    return out^
+
+
+def test_undecodable_field_section_is_a_connection_error() raises:
+    """QPACK-05: the section ``01 00 80`` (encoded Required Insert Count
+    1, one indexed dynamic line) cannot be decoded by a server that
+    advertises table capacity 0 and 0 blocked streams. It only set a
+    flag on the stream, which nothing read, so the connection stayed up
+    and the request was never answered. It is a connection error of type
+    QPACK_DECOMPRESSION_FAILED (RFC 9204 sec 2.1.2, 2.2.3, 4.5.1.1)."""
+    var c = Http3Connection()
+    assert_equal(Int(c.connection_error_code), 0)
+    var section: List[UInt8] = [0x01, 0x00, 0x80]
+    c.feed_stream_chunk(0, _headers_frame_with_section(section))
+    assert_true(c.stream_protocol_error(0).byte_length() > 0)
+    assert_equal(Int(c.connection_error_code), Int(QPACK_DECOMPRESSION_FAILED))
+    assert_true(c.connection_error_reason.byte_length() > 0)
+
+
+def test_blocked_field_section_without_a_budget_is_a_connection_error() raises:
+    """QPACK-05: with a dynamic table but 0 blocked streams promised, a
+    section whose Required Insert Count is ahead of the inserts received
+    is a connection error too (RFC 9204 sec 2.1.2)."""
+    var cfg = Http3Config()
+    cfg.qpack_max_table_capacity = UInt64(4096)
+    cfg.qpack_blocked_streams = UInt64(0)
+    var c = Http3Connection.with_config(cfg)
+    # RIC 1 (MaxEntries 128 -> encoded 2), Base 1, relative index 0.
+    var section: List[UInt8] = [0x02, 0x00, 0x80]
+    c.feed_stream_chunk(0, _headers_frame_with_section(section))
+    assert_equal(Int(c.connection_error_code), Int(QPACK_DECOMPRESSION_FAILED))
+
+
+def test_a_decodable_request_is_not_a_connection_error() raises:
+    var c = Http3Connection()
+    c.feed_stream_chunk(0, _build_get_request_bytes("/ok"))
+    assert_equal(Int(c.connection_error_code), 0)
+    assert_equal(c.stream_protocol_error(0).byte_length(), 0)
+
+
+def test_h3_error_codes_are_named_in_error_messages() raises:
+    assert_equal(
+        Int(h3_error_code("x QPACK_ENCODER_STREAM_ERROR: y")),
+        Int(QPACK_ENCODER_STREAM_ERROR),
+    )
+    assert_equal(
+        Int(h3_error_code("h3 server: (RFC 9114 7.2.4 H3_FRAME_UNEXPECTED)")),
+        Int(H3_FRAME_UNEXPECTED),
+    )
+    assert_equal(
+        Int(h3_error_code("something else")), Int(H3_GENERAL_PROTOCOL_ERROR)
+    )
+
+
 def main() raises:
     test_feed_stream_chunk_implicit_open()
     test_get_request_surfaces_after_fin()
@@ -373,4 +437,8 @@ def main() raises:
     test_response_drops_connection_specific_fields()
     test_stream_frames_are_reassembled_by_offset()
     test_retransmit_after_the_response_does_not_rerun_the_request()
-    print("test_h3_dispatch: 15 passed")
+    test_undecodable_field_section_is_a_connection_error()
+    test_blocked_field_section_without_a_budget_is_a_connection_error()
+    test_a_decodable_request_is_not_a_connection_error()
+    test_h3_error_codes_are_named_in_error_messages()
+    print("test_h3_dispatch: 19 passed")

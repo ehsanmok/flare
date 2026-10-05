@@ -142,6 +142,18 @@ from test_h3_dispatch import (
 from test_h3_dispatch import (
     test_retransmit_after_the_response_does_not_rerun_the_request as test_h3_dispatch__test_retransmit_after_the_response_does_not_rerun_the_request,
 )
+from test_h3_dispatch import (
+    test_undecodable_field_section_is_a_connection_error as test_h3_dispatch__test_undecodable_field_section_is_a_connection_error,
+)
+from test_h3_dispatch import (
+    test_blocked_field_section_without_a_budget_is_a_connection_error as test_h3_dispatch__test_blocked_field_section_without_a_budget_is_a_connection_error,
+)
+from test_h3_dispatch import (
+    test_a_decodable_request_is_not_a_connection_error as test_h3_dispatch__test_a_decodable_request_is_not_a_connection_error,
+)
+from test_h3_dispatch import (
+    test_h3_error_codes_are_named_in_error_messages as test_h3_dispatch__test_h3_error_codes_are_named_in_error_messages,
+)
 from test_h3_end_to_end import (
     test_get_request_dispatches_through_handler as test_h3_end_to_end__test_get_request_dispatches_through_handler,
 )
@@ -171,6 +183,9 @@ from test_h3_end_to_end import (
 )
 from test_h3_end_to_end import (
     test_stream_limits_and_flow_control_are_enforced as test_h3_end_to_end__test_stream_limits_and_flow_control_are_enforced,
+)
+from test_h3_end_to_end import (
+    test_undecodable_field_section_closes_the_connection as test_h3_end_to_end__test_undecodable_field_section_closes_the_connection,
 )
 from test_h3_qpack_dynamic import (
     test_encoder_stream_inserts_owe_increment as test_h3_qpack_dynamic__test_encoder_stream_inserts_owe_increment,
@@ -397,6 +412,18 @@ def main() raises:
     suite.test[
         test_h3_dispatch__test_retransmit_after_the_response_does_not_rerun_the_request
     ]()
+    suite.test[
+        test_h3_dispatch__test_undecodable_field_section_is_a_connection_error
+    ]()
+    suite.test[
+        test_h3_dispatch__test_blocked_field_section_without_a_budget_is_a_connection_error
+    ]()
+    suite.test[
+        test_h3_dispatch__test_a_decodable_request_is_not_a_connection_error
+    ]()
+    suite.test[
+        test_h3_dispatch__test_h3_error_codes_are_named_in_error_messages
+    ]()
     # tests/h3/test_h3_end_to_end.mojo
     suite.test[
         test_h3_end_to_end__test_get_request_dispatches_through_handler
@@ -421,6 +448,9 @@ def main() raises:
     ]()
     suite.test[
         test_h3_end_to_end__test_stream_limits_and_flow_control_are_enforced
+    ]()
+    suite.test[
+        test_h3_end_to_end__test_undecodable_field_section_closes_the_connection
     ]()
     # tests/h3/test_h3_qpack_dynamic.mojo
     suite.test[

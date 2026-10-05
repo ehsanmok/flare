@@ -1,8 +1,9 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
 # fixtures in tests/tls/fixtures/rustls-quic-client/)
+# RESOLVED: QPACK-05 fixed on fix/formal-findings
 """QPACK-05: an undecodable (or blocked) field section is not a connection error.
 
-Lean: Flare.Bugs.QPACK_05.impl_counterexample (impl),
+Lean: Flare.Bugs.QPACK_05.implOld_counterexample (pre-fix),
       Flare.Bugs.QPACK_05.fixed_spec (fix).
 flare/qpack/dynamic.mojo:473-498 @59bda50 raises for a Required Insert Count
 it cannot decode or that exceeds the insert count;
@@ -24,7 +25,8 @@ Inconclusive if the handshake does not complete, or if the connection is
 neither closed with 0x200 nor still serving stream 4.
 
 Expected: the server closes the connection with QPACK_DECOMPRESSION_FAILED
-(0x200). Actual: the connection stays open and answers stream 4; stream 0 is
+(0x200).
+Before the fix: Actual: the connection stays open and answers stream 4; stream 0 is
 never answered or reset.
 
 Minimal fix: in QuicListener._route_http3_stream_chunks, after feeding the
@@ -133,7 +135,10 @@ def main() raises:
         for i in range(len(ev.stream_chunks)):
             if ev.stream_chunks[i].stream_id == UInt64(0):
                 s0 = True
-            if ev.stream_chunks[i].stream_id == UInt64(4) and ev.stream_chunks[i].fin:
+            if (
+                ev.stream_chunks[i].stream_id == UInt64(4)
+                and ev.stream_chunks[i].fin
+            ):
                 s4 = True
         if s4 and not server.connections[slot].alive:
             break
@@ -141,11 +146,20 @@ def main() raises:
     var code = server.connections[slot].conn.close_error_code
     server.close()
     print(
-        "stream 4 answered:", s4, "| stream 0 answered:", s0,
-        "| connection alive:", alive, "| close code:", code,
+        "stream 4 answered:",
+        s4,
+        "| stream 0 answered:",
+        s0,
+        "| connection alive:",
+        alive,
+        "| close code:",
+        code,
     )
     if not alive and code == UInt64(0x200):
-        print("OK: undecodable field section closed the connection with QPACK_DECOMPRESSION_FAILED (0x200)")
+        print(
+            "OK: undecodable field section closed the connection with"
+            " QPACK_DECOMPRESSION_FAILED (0x200)"
+        )
         return
     if alive and s4 and not s0:
         print(
@@ -154,5 +168,8 @@ def main() raises:
             " stream 0 was never answered or reset"
         )
         raise Error("QPACK-05")
-    print("inconclusive: connection neither closed with 0x200 nor serving stream 4")
+    print(
+        "inconclusive: connection neither closed with 0x200 nor serving"
+        " stream 4"
+    )
     raise Error("QPACK-05 inconclusive")

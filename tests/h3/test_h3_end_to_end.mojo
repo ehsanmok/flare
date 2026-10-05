@@ -615,6 +615,31 @@ def test_stream_limits_and_flow_control_are_enforced() raises:
     assert_equal(Int(l4.connections[s4].fc_received), 1000)
 
 
+def test_undecodable_field_section_closes_the_connection() raises:
+    """QPACK-05: a HEADERS frame whose section cannot be decoded
+    (``01 00 80``: Required Insert Count 1, table capacity 0, 0 blocked
+    streams) is a connection error QPACK_DECOMPRESSION_FAILED; the
+    listener closes the slot with 0x200 instead of leaving the request
+    unanswered on a connection that stays up."""
+    var listener = _bind_listener()
+    var slot = _seed_slot(listener)
+    var section: List[UInt8] = [0x01, 0x00, 0x80]
+    var frame = List[UInt8]()
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](section), frame)
+    listener._route_http3_stream_chunks(
+        slot, _make_stream_event(UInt64(0), frame^)
+    )
+    assert_false(listener.connections[slot].alive, "connection stayed up")
+    assert_equal(Int(listener.connections[slot].conn.close_error_code), 0x200)
+    # A valid request on a sibling connection is unaffected.
+    var other = _seed_slot(listener)
+    listener._route_http3_stream_chunks(
+        other, _make_stream_event(UInt64(0), _build_get_request("/fine"))
+    )
+    assert_true(listener.connections[other].alive)
+    assert_equal(len(listener.take_http3_completed_streams(other)), 1)
+
+
 def main() raises:
     test_get_request_dispatches_through_handler()
     test_post_request_body_echo()
@@ -626,4 +651,5 @@ def main() raises:
     test_streaming_response_incremental_data()
     test_buffered_response_not_registered_as_stream()
     test_stream_limits_and_flow_control_are_enforced()
-    print("test_h3_end_to_end: 10 passed")
+    test_undecodable_field_section_closes_the_connection()
+    print("test_h3_end_to_end: 11 passed")

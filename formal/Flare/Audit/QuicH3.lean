@@ -65,10 +65,10 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QPACK_04.counterexample
 #print axioms Flare.Bugs.QPACK_04.fixed_meets_spec
 #print axioms Flare.Bugs.QPACK_03.huffman_counterexample
-#print axioms Flare.Bugs.QPACK_05.impl_never_connErr
+#print axioms Flare.Bugs.QPACK_05.implOld_never_connErr
 #print axioms Flare.Bugs.QPACK_05.shipped_rejects
-#print axioms Flare.Bugs.QPACK_05.impl_counterexample
-#print axioms Flare.Bugs.QPACK_05.impl_drops_blockable
+#print axioms Flare.Bugs.QPACK_05.implOld_counterexample
+#print axioms Flare.Bugs.QPACK_05.implOld_drops_blockable
 #print axioms Flare.Bugs.QPACK_05.fixed_spec
 #print axioms Flare.Bugs.QPACK_06.impl_references_unacked
 #print axioms Flare.Bugs.QPACK_06.impl_evicts_unacked

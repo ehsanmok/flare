@@ -95,7 +95,7 @@ from .state import (
     connection_close,
     empty_events,
 )
-from ..http3.server import Http3Connection
+from ..http3.server import Http3Connection, h3_error_code
 from ..http3.response_writer import (
     encode_response_data,
     encode_response_trailers,
@@ -1445,17 +1445,35 @@ struct QuicListener(Movable):
         # state Dict) on every inbound datagram -- the dominant
         # per-request CPU cost under stream concurrency.
         ref h3 = self.http3_connections[slot]
+        var h3_code = UInt64(0)
+        var h3_reason = String("")
         for i in range(len(events.stream_chunks)):
             # By offset: the reassembler orders, dedupes and holds back
             # FIN until the stream is whole, and drops frames for a
             # request stream already answered (a retransmit crossing
             # our ACK used to run the request again).
-            h3.feed_stream_frame(
-                Int(events.stream_chunks[i].stream_id),
-                events.stream_chunks[i].offset,
-                Span[UInt8, _](events.stream_chunks[i].data),
-                events.stream_chunks[i].fin,
-            )
+            try:
+                h3.feed_stream_frame(
+                    Int(events.stream_chunks[i].stream_id),
+                    events.stream_chunks[i].offset,
+                    Span[UInt8, _](events.stream_chunks[i].data),
+                    events.stream_chunks[i].fin,
+                )
+            except e:
+                # An H3 / QPACK connection error from the driver. It
+                # used to propagate out of ``tick`` and stop the serve
+                # loop; it closes this connection instead.
+                h3_reason = String(e)
+                h3_code = h3_error_code(h3_reason)
+                break
+        # A field section the driver could not decode (QPACK-05): the
+        # request stream is dead and the peer must be told, not left
+        # waiting on a connection that otherwise stays up.
+        if h3_code == 0 and h3.connection_error_code != 0:
+            h3_code = h3.connection_error_code
+            h3_reason = h3.connection_error_reason
+        if h3_code != 0:
+            self._close_for(slot, h3_code, h3_reason)
 
     def take_http3_completed_streams(self, slot: Int) raises -> List[Int]:
         """Return the stream ids ready for handler dispatch on
