@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62829 lines) |
-| Theorems | 3293 |
-| Headline theorems in the axiom audit | 1090 |
+| Lean files | 298 (62844 lines) |
+| Theorems | 3294 |
+| Headline theorems in the axiom audit | 1091 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 96 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 97 of 138 |
 
 Six findings are rated high:
 
@@ -1384,7 +1384,7 @@ Files: `Quic/Wire.lean`, `Quic/Frame.lean`, `Quic/FrameProps.lean`.
 - `kindOf` is the type-test chain of `parse_frame_into` (`frame.mojo:753-957`), in source order.
 - `body` dispatches on the resulting `Kind` to one small parser per frame type. Each parser mirrors its branch of `frame.mojo`.
 - `parsePayload` mirrors the `dispatch_frames` loop (`state.mojo:842-858`).
-- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01 and QUIC-02 fixed), `Fixes.all` has all three.
+- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01, QUIC-02 and QUIC-03 fixed, so it equals `Fixes.all`), `Fixes.all` has all three.
 
 Proofs are per-branch lemmas combined with `cases` on `Kind`; there is no case split over the whole parser.
 
@@ -3073,7 +3073,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | HPACK-03 | Medium | open | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
 | QUIC-01 | Medium | resolved | an unknown frame's body is parsed as further frames | `Flare/Bugs/QUIC_01.lean` | `repro/QUIC-01_unknown_frame_body_reparsed.mojo` (any) |
 | QUIC-02 | Low | resolved | MAX_STREAMS and STREAMS_BLOCKED above 2^60 are accepted | `Flare/Bugs/QUIC_02.lean` | `repro/QUIC-02_max_streams_over_2p60_accepted.mojo` (any) |
-| QUIC-03 | Low | open | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
+| QUIC-03 | Low | resolved | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
 | QUIC-04 | Medium | resolved | HANDSHAKE_DONE moves a closing or draining connection back to ESTABLISHED | `Flare/Bugs/QUIC_04.lean` | `repro/QUIC-04_handshake_done_reopens_closed_connection.mojo` (any) |
 | QUIC-09 | Low | open | the server accepts HANDSHAKE_DONE from the client | `Flare/Bugs/QUIC_09.lean` | `repro/QUIC-09_server_accepts_handshake_done.mojo` (any) |
 | QUIC-10 | Low | open | initial_max_streams_* above 2^60 accepted in transport parameters | `Flare/Bugs/QUIC_10.lean` | `repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo` (any) |
@@ -4309,11 +4309,13 @@ Status: resolved. MAX_STREAMS / STREAMS_BLOCKED values above 2^60 are now a FRAM
 
 #### QUIC-03: an ACK reaching below packet number 0 is clamped, not rejected
 
+Status: resolved. An ACK whose first or later range computes a negative packet number is now a FRAME_ENCODING_ERROR (frame.mojo).
+
 - **Severity:** Low. `AckExpand.expand_sound` shows the clamped expansion only retires packets the ACK claims, so flare never retires a packet the peer did not claim. The defect is a missing connection error.
 - **RFC:** RFC 9000 §19.3.1: "If any computed packet number is negative, an endpoint MUST generate a connection error of type FRAME_ENCODING_ERROR."
 - **What goes wrong:** `frame.mojo:765-792` builds the AckFrame without checking the ranges. `expand_ack_ranges` (`state.mojo:400-427`) then clamps the lowest packet number to 0, and stops early when a gap would go negative.
 - **Counterexample:** `Bugs.QUIC_03.accepted`: `02 00 00 00 05` (largest 0, first range 5) parses. `violates_spec` shows it breaks `RfcFrameOk`.
-- **Fix:** in the parser, raise if `first > largest`, and for each range raise if `gap + 2 > smallest` or `length > next_largest`. In Lean this is `ackOk` in `ackFinish`. `fixed_rejects` and `fixed_meets_spec` show it suffices.
+- **Fix:** in the parser, raise if `first > largest`, and for each range raise if `gap + 2 > smallest` or `length > next_largest`. In Lean this is `ackOk` in `ackFinish`. `fixed_rejects`, `shipped_rejects` (the shipped parser) and `fixed_meets_spec` show it suffices. The counterexample now runs against `parseOld`, the parser before the fix.
 - **Repro:** `formal/repro/QUIC-03_ack_negative_range_clamped.mojo`
 - **Observed:** `BUG REPRODUCED: ACK with largest=0, first_ack_range=5 accepted (packets reported acked: 1 )`
 - **Flip:** `OK: ACK with a negative computed packet number rejected`, exit 0.

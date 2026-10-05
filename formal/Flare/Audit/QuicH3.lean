@@ -58,6 +58,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_02.shipped_rejects
 #print axioms Flare.Bugs.QUIC_03.violates_spec
 #print axioms Flare.Bugs.QUIC_03.fixed_meets_spec
+#print axioms Flare.Bugs.QUIC_03.shipped_rejects
 #print axioms Flare.Bugs.QUIC_04.violates_spec
 #print axioms Flare.Bugs.QUIC_04.fixed_refines
 #print axioms Flare.Bugs.QUIC_09.violates_spec

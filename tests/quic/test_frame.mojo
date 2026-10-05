@@ -776,6 +776,36 @@ def test_stream_count_frames_above_2p60_rejected() raises:
         assert_equal(n, 9)
 
 
+def _ack_rejected(wire: List[UInt8]) raises -> Bool:
+    var rec = _empty_recorder()
+    try:
+        _ = parse_frame_into(Span[UInt8, _](wire), rec)
+    except e:
+        assert_true("FRAME_ENCODING_ERROR" in String(e))
+        return True
+    return False
+
+
+def test_ack_reaching_below_zero_rejected() raises:
+    """QUIC-03 (RFC 9000 sec 19.3.1): an ACK whose first range or any
+    later range computes a negative packet number is a
+    FRAME_ENCODING_ERROR; a range ending exactly at 0 is valid."""
+    # largest 0, first range 5 -> smallest -5.
+    assert_true(_ack_rejected(_bytes(0x02, 0, 0, 0, 5)))
+    assert_true(_ack_rejected(_bytes(0x03, 0, 0, 0, 5, 0, 0, 0)))
+    # largest 5, first range 5 -> smallest 0: valid.
+    assert_false(_ack_rejected(_bytes(0x02, 5, 0, 0, 5)))
+    # largest 10, first 2 (smallest 8), one range: next largest = 6 - gap.
+    # gap 0 / len 6 ends at 0; len 7 would end at -1.
+    assert_false(_ack_rejected(_bytes(0x02, 10, 0, 1, 2, 0, 6)))
+    assert_true(_ack_rejected(_bytes(0x02, 10, 0, 1, 2, 0, 7)))
+    # gap 6 puts the next largest at 0 (valid with len 0); gap 7 at -1.
+    assert_false(_ack_rejected(_bytes(0x02, 10, 0, 1, 2, 6, 0)))
+    assert_true(_ack_rejected(_bytes(0x02, 10, 0, 1, 2, 7, 0)))
+    # A second range that dips below 0 after a valid first one.
+    assert_true(_ack_rejected(_bytes(0x02, 20, 0, 2, 0, 0, 3, 0, 20)))
+
+
 def test_truncated_crypto_rejected() raises:
     # 0x06 (CRYPTO) + offset varint 0 + length varint 8, then only
     # 2 payload bytes -- parser must reject.
@@ -846,7 +876,8 @@ def main() raises:
     test_unknown_frame_type_rejected()
     test_unknown_frame_type_rejected_for_every_codepoint()
     test_stream_count_frames_above_2p60_rejected()
+    test_ack_reaching_below_zero_rejected()
     test_truncated_crypto_rejected()
     test_datagram_with_length_round_trip()
     test_datagram_no_length_runs_to_end()
-    print("test_quic_frame: 30 passed")
+    print("test_quic_frame: 31 passed")

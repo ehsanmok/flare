@@ -159,6 +159,9 @@ from test_frame import (
     test_stream_count_frames_above_2p60_rejected as test_frame__test_stream_count_frames_above_2p60_rejected,
 )
 from test_frame import (
+    test_ack_reaching_below_zero_rejected as test_frame__test_ack_reaching_below_zero_rejected,
+)
+from test_frame import (
     test_truncated_crypto_rejected as test_frame__test_truncated_crypto_rejected,
 )
 from test_frame import (
@@ -983,6 +986,7 @@ def main() raises:
         test_frame__test_unknown_frame_type_rejected_for_every_codepoint
     ]()
     suite.test[test_frame__test_stream_count_frames_above_2p60_rejected]()
+    suite.test[test_frame__test_ack_reaching_below_zero_rejected]()
     suite.test[test_frame__test_truncated_crypto_rejected]()
     suite.test[test_frame__test_datagram_with_length_round_trip]()
     suite.test[test_frame__test_datagram_no_length_runs_to_end]()

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-03 fixed on fix/formal-findings
 """QUIC-03: an ACK whose ranges reach below packet number 0 is clamped,
 not rejected.
 
@@ -13,7 +14,7 @@ RFC 9000 sec 19.3.1: "If any computed packet number is negative, an
 endpoint MUST generate a connection error of type FRAME_ENCODING_ERROR."
 
 Expected: 02 00 00 00 05 (largest 0, first range 5) raises.
-Actual: accepted; packet 0 reported acknowledged.
+Before the fix: accepted; packet 0 reported acknowledged.
 
 Minimal fix: in parse_frame_into's ACK branch, raise if first > largest,
 and for each range if gap + 2 > previous_smallest or length > that largest.

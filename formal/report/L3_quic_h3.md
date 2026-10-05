@@ -23,7 +23,7 @@ Files: `Quic/Wire.lean`, `Quic/Frame.lean`, `Quic/FrameProps.lean`.
 - `kindOf` is the type-test chain of `parse_frame_into` (`frame.mojo:753-957`), in source order.
 - `body` dispatches on the resulting `Kind` to one small parser per frame type. Each parser mirrors its branch of `frame.mojo`.
 - `parsePayload` mirrors the `dispatch_frames` loop (`state.mojo:842-858`).
-- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01 and QUIC-02 fixed), `Fixes.all` has all three.
+- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01, QUIC-02 and QUIC-03 fixed, so it equals `Fixes.all`), `Fixes.all` has all three.
 
 Proofs are per-branch lemmas combined with `cases` on `Kind`; there is no case split over the whole parser.
 
@@ -345,11 +345,13 @@ Status: resolved. MAX_STREAMS / STREAMS_BLOCKED values above 2^60 are now a FRAM
 
 ### QUIC-03: an ACK reaching below packet number 0 is clamped, not rejected
 
+Status: resolved. An ACK whose first or later range computes a negative packet number is now a FRAME_ENCODING_ERROR (frame.mojo).
+
 - **Severity:** Low. `AckExpand.expand_sound` shows the clamped expansion only retires packets the ACK claims, so flare never retires a packet the peer did not claim. The defect is a missing connection error.
 - **RFC:** RFC 9000 §19.3.1: "If any computed packet number is negative, an endpoint MUST generate a connection error of type FRAME_ENCODING_ERROR."
 - **What goes wrong:** `frame.mojo:765-792` builds the AckFrame without checking the ranges. `expand_ack_ranges` (`state.mojo:400-427`) then clamps the lowest packet number to 0, and stops early when a gap would go negative.
 - **Counterexample:** `Bugs.QUIC_03.accepted`: `02 00 00 00 05` (largest 0, first range 5) parses. `violates_spec` shows it breaks `RfcFrameOk`.
-- **Fix:** in the parser, raise if `first > largest`, and for each range raise if `gap + 2 > smallest` or `length > next_largest`. In Lean this is `ackOk` in `ackFinish`. `fixed_rejects` and `fixed_meets_spec` show it suffices.
+- **Fix:** in the parser, raise if `first > largest`, and for each range raise if `gap + 2 > smallest` or `length > next_largest`. In Lean this is `ackOk` in `ackFinish`. `fixed_rejects`, `shipped_rejects` (the shipped parser) and `fixed_meets_spec` show it suffices. The counterexample now runs against `parseOld`, the parser before the fix.
 - **Repro:** `formal/repro/QUIC-03_ack_negative_range_clamped.mojo`
 - **Observed:** `BUG REPRODUCED: ACK with largest=0, first_ack_range=5 accepted (packets reported acked: 1 )`
 - **Flip:** `OK: ACK with a negative computed packet number rejected`, exit 0.

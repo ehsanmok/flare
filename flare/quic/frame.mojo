@@ -777,6 +777,16 @@ def parse_frame_into[
             var ect1 = _read_varint(buf, pos)
             var ce = _read_varint(buf, pos)
             ecn.append(EcnCounts(ect0=ect0, ect1=ect1, ce=ce))
+        # RFC 9000 sec 19.3.1: every computed packet number must be >= 0.
+        # Varints are below 2^62, so the Int arithmetic cannot overflow.
+        var smallest = Int(largest) - Int(first)
+        if smallest < 0:
+            raise Error("FRAME_ENCODING_ERROR: negative ack range")
+        for i in range(len(ranges)):
+            var next_largest = smallest - Int(ranges[i].gap) - 2
+            smallest = next_largest - Int(ranges[i].length)
+            if smallest < 0:
+                raise Error("FRAME_ENCODING_ERROR: negative ack range")
         handler.on_ack(
             AckFrame(
                 largest_acknowledged=largest,

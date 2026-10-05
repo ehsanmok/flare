@@ -3,7 +3,13 @@ import Flare.L3_Protocol.Quic.FrameProps
 /-!
 # QUIC-03: an ACK reaching below packet number 0 is clamped, not rejected
 
-flare/quic/frame.mojo:765-792 @59bda50 builds the AckFrame without checking
+Status: resolved. `parse_frame_into` computes the smallest packet number of
+the first range and of every further range and raises FRAME_ENCODING_ERROR when
+one is negative (flare/quic/frame.mojo, ACK branch). The counterexample below is
+about the pre-fix parser, `parseOld`; `parseFrame` is the shipped one, which is
+now `Fixes.all`.
+
+Pre-fix behaviour: flare/quic/frame.mojo:765-792 @59bda50 builds the AckFrame without checking
 the ranges; flare/quic/state.mojo:400-427 (`expand_ack_ranges`) then clamps
 `largest - first_ack_range` to 0 and `break`s when a gap would go negative.
 
@@ -22,15 +28,23 @@ def errOf {α : Type} : Except Err α → Option Err
   | .error e => some e
   | .ok _ => none
 
+/-- The parser before this fix (QUIC-01 and QUIC-02 in, QUIC-03 out). -/
+def parseOld : Bytes → Except Err (Frame × Nat) := parseFrameWith ⟨true, true, false⟩
+
 def wire : Bytes := [0x02, 0x00, 0x00, 0x00, 0x05]
 
-theorem accepted : (parseFrame wire).toOption = some (.ack 0 0 5 [] false, 5) := by native_decide
+theorem accepted : (parseOld wire).toOption = some (.ack 0 0 5 [] false, 5) := by native_decide
 
 theorem violates_spec : ¬ RfcFrameOk (.ack 0 0 5 [] false) := by
   simp only [RfcFrameOk]; decide
 
 theorem fixed_rejects :
     errOf (parseFrameFixed wire) = some (.raise "FRAME_ENCODING_ERROR: negative ack range") := by
+  native_decide
+
+/-- **The shipped parser rejects it.** -/
+theorem shipped_rejects :
+    errOf (parseFrame wire) = some (.raise "FRAME_ENCODING_ERROR: negative ack range") := by
   native_decide
 
 /-- The minimal fix meets the spec on every input. -/
