@@ -114,7 +114,9 @@ struct Http2Config(Copyable, Defaultable):
             (RFC 9113 §6.5.2). Header-list size cap (uncompressed,
             including 32-byte per-entry overhead).
         header_table_size: SETTINGS_HEADER_TABLE_SIZE (RFC 7541
-            §4.2). HPACK dynamic-table size budget.
+            §4.2). HPACK dynamic-table size budget. It is advertised
+            and caps the peer's table-size update; the decoder stays
+            at the 4096 default until that update arrives.
         allow_huffman_decode: When ``True``, the HPACK decoder
             accepts H=1 literals (Huffman-encoded) via the RFC
             7541 Appendix B codec. Defaults to ``False`` --

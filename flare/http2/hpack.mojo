@@ -280,7 +280,13 @@ struct HpackDecoder(Copyable, Defaultable):
     RFC 7541 sec 6.3 bounds an update by the value the decoder
     advertised in SETTINGS_HEADER_TABLE_SIZE, not by the current
     ``max_size``. Comparing against ``max_size`` alone would reject the
-    legal shrink-then-restore pair (``0`` followed by ``4096``)."""
+    legal shrink-then-restore pair (``0`` followed by ``4096``).
+
+    A connection sets this to the SETTINGS_HEADER_TABLE_SIZE it
+    advertises but leaves ``max_size`` at 4096: the peer's encoder keeps
+    that table until it has received the SETTINGS and sent a size update
+    (RFC 7541 sec 4.2, RFC 9113 sec 6.5.3), and only that update lowers
+    ``max_size``."""
     var allow_huffman: Bool
 
     def __init__(out self):

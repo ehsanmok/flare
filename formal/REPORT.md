@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63311 lines) |
-| Theorems | 3325 |
-| Headline theorems in the axiom audit | 1115 |
+| Lean files | 298 (63336 lines) |
+| Theorems | 3327 |
+| Headline theorems in the axiom audit | 1117 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 114 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 115 of 138 |
 
 Six findings are rated high:
 
@@ -3075,7 +3075,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-20 | Low | open | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
 | HPACK-01 | Medium | resolved | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
 | HPACK-02 | Low | open | the decode budget never counts the last header | `Flare/Bugs/HPACK_02.lean` | `repro/HPACK-02_budget_skips_last_header.mojo` (any) |
-| HPACK-03 | Medium | open | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
+| HPACK-03 | Medium | resolved | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
 | QUIC-01 | Medium | resolved | an unknown frame's body is parsed as further frames | `Flare/Bugs/QUIC_01.lean` | `repro/QUIC-01_unknown_frame_body_reparsed.mojo` (any) |
 | QUIC-02 | Low | resolved | MAX_STREAMS and STREAMS_BLOCKED above 2^60 are accepted | `Flare/Bugs/QUIC_02.lean` | `repro/QUIC-02_max_streams_over_2p60_accepted.mojo` (any) |
 | QUIC-03 | Low | resolved | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
@@ -4275,6 +4275,8 @@ Status: resolved. Fixed: `_octets_to_string` (`hpack.mojo:48-76`) stores the oct
 - **Flip:** OK, exit 0.
 
 #### HPACK-03: the decoder shrinks its table before the peer can know
+
+Status: resolved. Fixed: `with_config` (server and client) sets only `settings_max_size` and leaves the decoder's `max_size` at 4096 until the peer's size update; the SETTINGS frame advertises `settings_max_size`. Tests: `test_h2_server.mojo::test_reduced_table_size_applies_only_after_the_peers_size_update`, `test_peer_size_update_to_the_advertised_size_is_honoured`, `test_h2_client_conn.mojo::test_reduced_table_size_is_a_ceiling_not_an_immediate_resize`. Model: `fixedInit` is the shipped start state (`shipped_init`, `shipped_size_update`); `counterexample` and `bug_real` stay about the pre-fix `implInit`.
 
 - **Severity:** Medium for servers configured with `header_table_size` below 4096. Every connection from a conforming client that indexes headers before our SETTINGS arrives fails with COMPRESSION_ERROR. The default configuration is not affected.
 - **RFC:** RFC 9113 §6.5.3 and RFC 7541 §4.2: a new SETTINGS_HEADER_TABLE_SIZE takes effect only after the encoder receives it, and the encoder signals the change with a size update. Until then the decoder must keep using 4096.

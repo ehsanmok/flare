@@ -14,6 +14,7 @@ from flare.http2 import (
     Frame,
     FrameFlags,
     FrameType,
+    Http2Config,
     Http2Connection,
     H2_PREFACE,
     HpackEncoder,
@@ -301,6 +302,127 @@ def test_repeated_fields_and_cookie_crumbs_survive() raises:
     assert_equal(jar.get("b"), "2")
 
 
+def _raw_headers_frame(sid: Int, block: List[UInt8]) -> List[UInt8]:
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.stream_id = sid
+    f.header.flags = FrameFlags(
+        FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
+    )
+    f.payload = block.copy()
+    return encode_frame(f)
+
+
+def _get_block(tail: List[UInt8]) -> List[UInt8]:
+    """``GET http /`` as indexed static fields, followed by ``tail``."""
+    var b = List[UInt8]()
+    b.append(0x82)
+    b.append(0x86)
+    b.append(0x84)
+    for x in tail:
+        b.append(x)
+    return b^
+
+
+def _insert_xa_b() -> List[UInt8]:
+    """Literal with incremental indexing, new name: ``x-a: b``."""
+    var t = List[UInt8]()
+    t.append(0x40)
+    t.append(0x03)
+    t.append(UInt8(ord("x")))
+    t.append(UInt8(ord("-")))
+    t.append(UInt8(ord("a")))
+    t.append(0x01)
+    t.append(UInt8(ord("b")))
+    return t^
+
+
+def _goaway_code(bytes: List[UInt8]) raises -> Int:
+    for f in _walk_frames(bytes):
+        if f.header.type.value == 7:
+            return (
+                (Int(f.payload[4]) << 24)
+                | (Int(f.payload[5]) << 16)
+                | (Int(f.payload[6]) << 8)
+                | Int(f.payload[7])
+            )
+    return -1
+
+
+def _stream_has(
+    c: Http2Connection, sid: Int, name: String, value: String
+) raises -> Bool:
+    if sid not in c.conn.streams:
+        return False
+    for h in c.conn.streams[sid].headers:
+        if h.name == name and h.value == value:
+            return True
+    return False
+
+
+def _small_table_server() raises -> Http2Connection:
+    var cfg = Http2Config()
+    cfg.header_table_size = 0
+    var c = Http2Connection.with_config(cfg^)
+    c.feed(Span[UInt8, _](_preface_bytes()))
+    var settings = Frame()
+    settings.header.type = FrameType.SETTINGS()
+    c.feed(Span[UInt8, _](encode_frame(settings)))
+    return c^
+
+
+def test_reduced_table_size_applies_only_after_the_peers_size_update() raises:
+    """HPACK-03: we advertise SETTINGS_HEADER_TABLE_SIZE = 0, but the peer's
+    encoder keeps its 4096-octet table until it has seen the SETTINGS and
+    sent a size update (RFC 7541 sec 4.2). Shrinking our decoder at
+    construction discarded the first insert, so the peer's next index was
+    out of range and a legal connection died with COMPRESSION_ERROR."""
+    var c = _small_table_server()
+    # We still tell the peer 0, so its encoder will shrink and signal it.
+    var first = _walk_frames(c.drain())
+    var advertised = False
+    for f in first:
+        if f.header.type.value == 4 and len(f.payload) >= 6:
+            if Int(f.payload[0]) == 0 and Int(f.payload[1]) == 1:
+                advertised = True
+    assert_true(advertised)
+    # Before the peer has applied it: insert on stream 1, index on stream 3.
+    c.feed(Span[UInt8, _](_raw_headers_frame(1, _get_block(_insert_xa_b()))))
+    var idx = List[UInt8]()
+    idx.append(UInt8(0x80 | 62))
+    c.feed(Span[UInt8, _](_raw_headers_frame(3, _get_block(idx))))
+    assert_equal(_goaway_code(c.drain()), -1)
+    assert_true(_stream_has(c, 3, "x-a", "b"))
+
+
+def test_peer_size_update_to_the_advertised_size_is_honoured() raises:
+    """After the peer's size update to 0 the table is empty and capped at the
+    advertised size: the earlier entry is gone and a larger update is a
+    COMPRESSION_ERROR."""
+    var c = _small_table_server()
+    c.feed(Span[UInt8, _](_raw_headers_frame(1, _get_block(_insert_xa_b()))))
+    var upd = List[UInt8]()
+    upd.append(0x20)  # dynamic table size update to 0
+    upd.append(0x82)
+    upd.append(0x86)
+    upd.append(0x84)
+    upd.append(UInt8(0x80 | 62))  # nothing left to index
+    _ = c.drain()
+    c.feed(Span[UInt8, _](_raw_headers_frame(3, upd)))
+    assert_equal(_goaway_code(c.drain()), 9)  # COMPRESSION_ERROR
+
+    var c2 = _small_table_server()
+    var big = List[UInt8]()
+    big.append(0x3F)  # size update, prefix 31 saturated
+    big.append(0x01)  # 31 + 1 = 32 > advertised 0
+    big.append(0x82)
+    big.append(0x86)
+    big.append(0x84)
+    _ = c2.drain()
+    c2.feed(Span[UInt8, _](_raw_headers_frame(1, big)))
+    assert_equal(_goaway_code(c2.drain()), 9)
+
+
 def main() raises:
     test_alpn_dispatch()
     test_h2c_upgrade_detection()
@@ -312,4 +434,6 @@ def main() raises:
     test_stream_data_bounded_by_send_window()
     test_partial_feed_buffers_frames()
     test_repeated_fields_and_cookie_crumbs_survive()
-    print("test_h2_server: 10 passed")
+    test_reduced_table_size_applies_only_after_the_peers_size_update()
+    test_peer_size_update_to_the_advertised_size_is_honoured()
+    print("test_h2_server: 12 passed")

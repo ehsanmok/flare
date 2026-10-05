@@ -51,6 +51,9 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_late_frame_on_a_stream_never_opened_is_a_protocol_error as test_h2_client_conn__test_late_frame_on_a_stream_never_opened_is_a_protocol_error,
 )
+from test_h2_client_conn import (
+    test_reduced_table_size_is_a_ceiling_not_an_immediate_resize as test_h2_client_conn__test_reduced_table_size_is_a_ceiling_not_an_immediate_resize,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -291,6 +294,12 @@ from test_h2_server import (
 from test_h2_server import (
     test_repeated_fields_and_cookie_crumbs_survive as test_h2_server__test_repeated_fields_and_cookie_crumbs_survive,
 )
+from test_h2_server import (
+    test_reduced_table_size_applies_only_after_the_peers_size_update as test_h2_server__test_reduced_table_size_applies_only_after_the_peers_size_update,
+)
+from test_h2_server import (
+    test_peer_size_update_to_the_advertised_size_is_honoured as test_h2_server__test_peer_size_update_to_the_advertised_size_is_honoured,
+)
 from test_h2_server_handler import (
     test_h2_server_simple_handler as test_h2_server_handler__test_h2_server_simple_handler,
 )
@@ -491,6 +500,9 @@ def main() raises:
     suite.test[
         test_h2_client_conn__test_late_frame_on_a_stream_never_opened_is_a_protocol_error
     ]()
+    suite.test[
+        test_h2_client_conn__test_reduced_table_size_is_a_ceiling_not_an_immediate_resize
+    ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()
     suite.test[test_h2_config__test_default_config_validates]()
@@ -643,6 +655,12 @@ def main() raises:
     suite.test[test_h2_server__test_stream_data_bounded_by_send_window]()
     suite.test[test_h2_server__test_partial_feed_buffers_frames]()
     suite.test[test_h2_server__test_repeated_fields_and_cookie_crumbs_survive]()
+    suite.test[
+        test_h2_server__test_reduced_table_size_applies_only_after_the_peers_size_update
+    ]()
+    suite.test[
+        test_h2_server__test_peer_size_update_to_the_advertised_size_is_honoured
+    ]()
     # tests/http2/test_h2_server_handler.mojo
     suite.test[test_h2_server_handler__test_h2_server_simple_handler]()
     suite.test[test_h2_server_handler__test_h2_server_router_dispatch]()

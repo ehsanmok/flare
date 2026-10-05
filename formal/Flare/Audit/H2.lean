@@ -111,6 +111,8 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.HPACK_02.fixed
 #print axioms Flare.Bugs.HPACK_03.counterexample
 #print axioms Flare.Bugs.HPACK_03.fixed
+#print axioms Flare.Bugs.HPACK_03.shipped_init
+#print axioms Flare.Bugs.HPACK_03.shipped_size_update
 #print axioms Flare.Bugs.HPACK_01.bug_real
 #print axioms Flare.Bugs.HPACK_02.bug_real
 #print axioms Flare.Bugs.HPACK_02.fixed_trace_real

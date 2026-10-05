@@ -6,7 +6,7 @@ import Flare.L3_Protocol.H2.HpackCodec
 # HPACK-03: the decoder shrinks its table before the peer can know
 
 `Http2Connection.with_config` (flare/http2/server.mojo:200-203 @59bda50)
-sets the decoder's `max_size` and `settings_max_size` to
+used to set the decoder's `max_size` and `settings_max_size` to
 `header_table_size` at construction, before our SETTINGS has even been
 sent. With `header_table_size = 0`, every insert the peer's encoder makes
 under the default 4096 octets is discarded (hpack.mojo:299-316), and the
@@ -16,6 +16,12 @@ RFC 9113 §6.5.3 and RFC 7541 §4.2: a new SETTINGS_HEADER_TABLE_SIZE takes
 effect for the encoder only once it has received our SETTINGS, and the
 encoder signals the change with a dynamic table size update; until then
 the decoder must keep decoding against the 4096-octet table.
+
+Status: resolved. `with_config` (server and client) now sets only
+`settings_max_size` (the ceiling for the peer's size update) and leaves
+`max_size` at 4096; the SETTINGS frame advertises `settings_max_size`.
+`fixedInit` is the shipped start state (`shipped_init`); `implInit` is
+the pre-fix one that `bug` / `counterexample` / `bug_real` still use.
 
 Witness: before our SETTINGS is acknowledged, the peer sends one block:
 literal with incremental indexing `x-a: b`, then indexed field 62.
@@ -27,10 +33,13 @@ def xa : Entry := ⟨Bytes.ofString "x-a", Bytes.ofString "b"⟩
 
 def blk : Bytes := 0x40 :: str xa.name ++ str xa.value ++ [0xBE]
 
-/-- flare's decoder after `with_config(header_table_size = 0)`. -/
+/-- Pre-fix: flare's decoder after `with_config(header_table_size = 0)`
+(server.mojo:200-203 @59bda50). -/
 def implInit : Table := { Table.init with maxSize := 0, settingsMax := 0 }
 
-/-- The fix: keep the 4096 default until the peer's first size update. -/
+/-- The fix (shipped): keep the 4096 default until the peer's first size
+update. mirrors flare/http2/server.mojo `with_config` and client.mojo
+`with_config`, which now set only `settings_max_size`. -/
 def fixedInit : Table := { Table.init with settingsMax := 0 }
 
 /-- The peer's encoder table (RFC 7541) after the insert. -/
@@ -43,6 +52,20 @@ theorem counterexample : ∀ t hs, decode toy false implInit blk 0 ≠ .ok (t, h
   have := bug; rw [h] at this; cases this
 
 theorem fixed_trace : result (decode toy false fixedInit blk 0) = .inr [xa, xa] := by native_decide
+
+/-- The shipped start state: current size 4096, ceiling = advertised 0. -/
+theorem shipped_init : fixedInit.maxSize = 4096 ∧ fixedInit.settingsMax = 0 := ⟨rfl, rfl⟩
+
+/-- The peer's size update is honoured up to the advertised size and not
+beyond it (RFC 7541 §6.3). -/
+theorem shipped_size_update :
+    (match sizeUpdate fixedInit 0 0 with | .ok t => t.maxSize = 0 | _ => False) ∧
+    sizeUpdate fixedInit 1 0 = .exceedsCap := by
+  refine ⟨?_, rfl⟩
+  have h : sizeUpdate fixedInit 0 0 = .ok (evictToFit { fixedInit with maxSize := 0 } 0) := by
+    simp [sizeUpdate, fixedInit, Table.init]
+  rw [h]
+  exact (evict_maxSize { fixedInit with maxSize := 0 } 0 rfl).1
 
 def jfix : Joint := { peer := [], peerMax := 4096, dec := fixedInit }
 

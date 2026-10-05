@@ -718,6 +718,17 @@ def test_late_frame_on_a_stream_never_opened_is_a_protocol_error() raises:
         assert_equal(_goaway_code(client.drain()), 1)
 
 
+def test_reduced_table_size_is_a_ceiling_not_an_immediate_resize() raises:
+    """HPACK-03: advertising SETTINGS_HEADER_TABLE_SIZE = 0 must not shrink
+    the client's decoder before the server has seen it and sent a size
+    update (RFC 7541 sec 4.2); the setting only caps that update."""
+    var cfg = Http2ClientConfig()
+    cfg.header_table_size = 0
+    var client = Http2ClientConnection.with_config(cfg^)
+    assert_equal(client.conn.hpack_decoder.max_size, 4096)
+    assert_equal(client.conn.hpack_decoder.settings_max_size, 0)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -733,4 +744,5 @@ def main() raises:
     test_late_frames_on_a_taken_stream_are_ignored()
     test_late_frame_on_a_stream_never_opened_is_a_protocol_error()
     test_push_promise_block_cannot_desync_later_responses()
-    print("test_h2_client_conn: 14 passed")
+    test_reduced_table_size_is_a_ceiling_not_an_immediate_resize()
+    print("test_h2_client_conn: 15 passed")

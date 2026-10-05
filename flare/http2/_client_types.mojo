@@ -101,7 +101,9 @@ struct Http2ClientConfig(Copyable, Defaultable):
             accept. Must be in ``[16384, 16777215]``.
         header_table_size: SETTINGS_HEADER_TABLE_SIZE (RFC 7541
             §4.2). HPACK dynamic-table size budget for the
-            decoder we run on inbound HEADERS.
+            decoder we run on inbound HEADERS. It is advertised and
+            caps the server's size update; the decoder stays at the
+            4096 default until that update arrives (RFC 7541 §4.2).
         max_header_list_size: SETTINGS_MAX_HEADER_LIST_SIZE
             (RFC 9113 §6.5.2). Header-list size cap (uncompressed,
             including 32-byte per-entry overhead).

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: HPACK-03 fixed on fix/formal-findings
 """HPACK-03: a reduced SETTINGS_HEADER_TABLE_SIZE is applied to flare's
 HPACK decoder before the peer has acknowledged it.
 
@@ -19,7 +20,7 @@ Trace: Http2Config with header_table_size = 0. In one read the client
 sends preface, SETTINGS, a GET on stream 1 that inserts "x-a: b" with
 incremental indexing, and a GET on stream 3 that references index 62.
 
-Expected: stream 3 decodes with "x-a: b". Actual: flare's decoder runs at
+Expected: stream 3 decodes with "x-a: b". Before the fix: flare's decoder runs at
 max_size 0 from construction, the insert empties the table, and index 62
 draws GOAWAY(COMPRESSION_ERROR).
 

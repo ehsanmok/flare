@@ -289,9 +289,11 @@ struct Http2ClientConnection(Defaultable, Movable):
         out.conn.recv_window = 65535
         out.conn.max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
-        out.conn.hpack_decoder.max_size = out.config.header_table_size
-        # The ceiling a peer size update may restore to is what we
-        # advertise, not the table's current size.
+        # What we advertise is the ceiling for a peer size update
+        # (RFC 7541 sec 6.3). The decoder's *current* size stays at the
+        # 4096 default: the peer's encoder keeps that table until it has
+        # received our SETTINGS and sent a size update (sec 4.2), so
+        # shrinking now would drop entries it still indexes (HPACK-03).
         out.conn.hpack_decoder.settings_max_size = out.config.header_table_size
         out.conn.hpack_decoder.allow_huffman = out.config.allow_huffman_decode
         out.conn.hpack_encoder.allow_huffman = out.config.allow_huffman_encode

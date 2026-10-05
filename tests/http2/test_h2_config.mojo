@@ -238,7 +238,11 @@ def test_with_config_propagates_to_connection_fields() raises:
     assert_equal(conn.conn.send_window, 65535)
     assert_equal(conn.conn.recv_window, 65535)
     assert_equal(conn.conn.max_frame_size, 32768)
-    assert_equal(conn.conn.hpack_decoder.max_size, 8192)
+    # The advertised size is the ceiling for the peer's size update; the
+    # decoder itself stays at the 4096 default until that update arrives
+    # (RFC 7541 sec 4.2).
+    assert_equal(conn.conn.hpack_decoder.settings_max_size, 8192)
+    assert_equal(conn.conn.hpack_decoder.max_size, 4096)
     assert_equal(conn.config.max_header_list_size, 16384)
     assert_false(conn.config.allow_huffman_decode)
     assert_false(conn.config.allow_huffman_encode)

@@ -497,8 +497,10 @@ struct Connection(Copyable, Defaultable):
         var p = List[UInt8]()
 
         # SETTINGS_HEADER_TABLE_SIZE = 0x1 — only when != RFC 7541 default.
-        if self.hpack_decoder.max_size != 4096:
-            self._append_setting(p, 0x1, self.hpack_decoder.max_size)
+        # The advertised value, not the decoder's current size: the
+        # latter stays at 4096 until the peer's size update (HPACK-03).
+        if self.hpack_decoder.settings_max_size != 4096:
+            self._append_setting(p, 0x1, self.hpack_decoder.settings_max_size)
 
         # SETTINGS_MAX_CONCURRENT_STREAMS = 0x3 — flare always
         # advertises its bound (RFC 9113 §6.5.2 has no protocol
