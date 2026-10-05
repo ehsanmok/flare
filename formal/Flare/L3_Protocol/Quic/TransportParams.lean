@@ -58,6 +58,8 @@ structure Fixes where
 
 def Fixes.none : Fixes := ⟨false, false⟩
 def Fixes.all : Fixes := ⟨true, true⟩
+/-- The fixes present in `flare/quic/transport_params.mojo` now. -/
+def Fixes.shipped : Fixes := Fixes.none
 
 /-- mirrors flare/quic/transport_params.mojo:70-87 @59bda50 -/
 inductive PK

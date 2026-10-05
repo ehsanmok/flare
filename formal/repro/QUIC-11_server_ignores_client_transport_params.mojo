@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
+# RESOLVED: QUIC-11 fixed on fix/formal-findings
 # fixtures in tests/tls/fixtures/rustls-quic-client/)
 """QUIC-11: the server never decodes or validates the client's transport
 parameters.
@@ -20,7 +21,7 @@ TRANSPORT_PARAMETER_ERROR or PROTOCOL_VIOLATION.
 
 Expected: for each of the six client parameter blobs below the server
 closes the connection (a seventh, valid blob is the control and must
-establish). Actual: every handshake completes and the server
+establish). Before the fix: every handshake completes and the server
 keeps the connection alive.
 
 Minimal fix: once the 1-RTT keys are installed, read the peer parameters,

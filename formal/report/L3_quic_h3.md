@@ -294,7 +294,7 @@ Files: `Quic/TransportParams.lean`, `Quic/PeerParams.lean`.
 - `decode` / `decodeLoop` mirror `decode_transport_parameters` (`quic/transport_params.mojo:410-525`): the `varint(id) varint(len) value` loop, its truncation checks, the duplicate list and the per-id branches. `readVar` mirrors `_read_param_varint` (401-407).
 - `Fixes` switches on the QUIC-10 bound (initial_max_streams_* ≤ 2^60) and the QUIC-13 preferred_address layout check.
 - The spec `specDecode` is RFC 9000 §7.4 and §18: a TLV sequence with pairwise distinct ids, each value valid by §18.2, folded into the record.
-- `clientCheck` mirrors `_check_peer_cids` (`quic/client.mojo:641-669`); `serverImpl` is the server, which never reads the client's blob (`quic/server.mojo:1199-1368`). `clientSpec` and `serverSpec` are RFC 9000 §7.3 and §18.2, stated over the raw TLV list so that an absent parameter differs from a zero-length one.
+- `clientCheck` mirrors `_check_peer_cids` (`quic/client.mojo:641-669`); `serverCheckWith` is the server's check of the client's blob, run once the 1-RTT keys are installed (`quic/transport_params.mojo:531-608`, `quic/server.mojo:1354, 1377-1396`; fixed, QUIC-11; it used to read nothing). `clientSpec` and `serverSpec` are RFC 9000 §7.3 and §18.2, stated over the raw TLV list so that an absent parameter differs from a zero-length one.
 - `encode`, `params` and `wire` mirror `encode_transport_parameters` and its three emitters (`transport_params.mojo:237-395`), for any varint encoder `enc` with `VarintCodec enc` (the same hypothesis as the H3 frame round trips; L1 discharges it for flare's `encode_varint`).
 
 | Lean name | Statement | Status |
@@ -303,7 +303,8 @@ Files: `Quic/TransportParams.lean`, `Quic/PeerParams.lean`.
 | `TransportParams.tlvs_wire` | The wire form of any parameter list (ids and lengths below 2^62) parses back into that list. | proved |
 | `TransportParams.encode_roundtrip` | For every `Sendable` parameter set the encoder does not raise, and `specDecode` (hence the fixed decoder) accepts the blob and returns the same parameters. | proved |
 | `PeerParams.clientCheckFixed_spec` | Presence scans for 0x00 / 0x0f / 0x10 / 0x0d next to flare's comparisons give exactly the client-side spec. | proved |
-| `PeerParams.serverCheck_spec` | Decoding the client's blob and checking server-only ids and the ISCID gives exactly the server-side spec. | proved |
+| `PeerParams.serverCheck_spec`, `PeerParams.serverCheckWith_agree` | Decoding the client's blob and checking server-only ids and the ISCID gives exactly the server-side spec, wherever the decoder agrees with the spec decoder (`Fixes.all`: every input). | proved |
+| `PeerParams.serverCheck_sound` | Any blob the server's check accepts decodes, has no server-only parameter, and has the client's Source CID as initial_source_connection_id, whatever the decoder fixes. | proved |
 
 ## Findings
 
@@ -387,6 +388,8 @@ Status: resolved. Fixed: `apply_handshake_done` (`flare/quic/state.mojo`) acts o
 - **Flip:** `OK: max_streams > 2^60 rejected`, exit 0.
 
 ### QUIC-11: the server never validates the client's transport parameters
+
+Status: resolved. Fixed: once the 1-RTT keys are installed the server decodes the client parameters and closes with TRANSPORT_PARAMETER_ERROR (0x08) for a blob that does not decode, a server-only parameter (0x00, 0x02, 0x0d, 0x10), or an absent or wrong `initial_source_connection_id` (`check_client_transport_params` in `quic/transport_params.mojo`, called from `QuicListener._client_params_ok`). Tests: `tests/quic/test_quic_server_peer_params.mojo` (unit and loopback). Lean: `Bugs.QUIC_11.fixed_rejects` / `fixed_meets_spec` / `fixed_sound` about the shipped `serverCheck`; the counterexample is about the pre-fix `serverOld`.
 
 - **Severity:** Medium. A client can send server-only parameters, duplicates, invalid values, or no or a wrong initial_source_connection_id, and the server keeps the connection. The ISCID check is the one RFC 9000 relies on to detect a middlebox that rewrote the client's Source CID.
 - **RFC:** RFC 9000 §18.2 (a server MUST treat receipt of original_destination_connection_id, stateless_reset_token, preferred_address or retry_source_connection_id as TRANSPORT_PARAMETER_ERROR); §7.3 (an absent or mismatched initial_source_connection_id is a connection error); §7.4 and §18 (duplicates and invalid values).
@@ -796,3 +799,6 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `H3.Control.goaway` | http3/server.mojo:1322-1353 (fixed, H3-06) | `H3_06.trace_implOld`, `H3_06.trace_shipped`, `goawayFixed_spec` | resolved (H3-06) |
 | `Bugs.H3_07.implOldOut` | quic/server.mojo:2210-2433 @59bda50 (pre-fix) | `H3_07.implOld_no_control`, `implOld_observed` | counterexample (H3-07) |
 | `Bugs.H3_07.implOut`, `emitInitialSettings`, `settingsList`, `Config` | quic/server.mojo:2288-2310, http3/server.mojo:136-175, 1316-1380 (fixed, H3-07) | `emit_control_start`, `H3_07.fixed_spec`, `fixed_stream_sendable`, `fixed_classified` | proved |
+| `Quic.PeerParams.serverCheckWith` | quic/transport_params.mojo:531-608, quic/server.mojo:1354, 1377-1396 (fixed, QUIC-11) | `QUIC_11.impl_accepts` (pre-fix `serverOld`), `fixed_rejects`, `fixed_meets_spec`, `fixed_sound`, `serverCheck_spec`, `serverCheck_sound` | proved (QUIC-11 resolved) |
+| `Bugs.H3_07.implOut` | quic/server.mojo:2210-2433 | `H3_07.impl_no_control`, `impl_observed` | counterexample (H3-07) |
+| `Bugs.H3_07.emitInitialSettings`, `settingsList`, `Config` | http3/server.mojo:136-175, 1230-1275 | `emit_control_start`, `H3_07.fixed_spec`, `fixed_stream_sendable`, `fixed_classified` | proved |

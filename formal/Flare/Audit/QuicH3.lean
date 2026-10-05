@@ -105,10 +105,13 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.TransportParams.specFrom_eq
 #print axioms Flare.L3.Quic.PeerParams.clientCheckFixed_spec
 #print axioms Flare.L3.Quic.PeerParams.serverCheck_spec
+#print axioms Flare.L3.Quic.PeerParams.serverCheckWith_agree
+#print axioms Flare.L3.Quic.PeerParams.serverCheck_sound
 #print axioms Flare.Bugs.QUIC_10.impl_accepts
 #print axioms Flare.Bugs.QUIC_10.decodeFixed_spec
 #print axioms Flare.Bugs.QUIC_11.impl_accepts
 #print axioms Flare.Bugs.QUIC_11.serverCheck_spec
+#print axioms Flare.Bugs.QUIC_11.fixed_meets_spec
 #print axioms Flare.Bugs.QUIC_12.impl_accepts_absent_iscid
 #print axioms Flare.Bugs.QUIC_12.impl_accepts_empty_rscid
 #print axioms Flare.Bugs.QUIC_12.impl_accepts_pa_with_empty_cid

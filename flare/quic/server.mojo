@@ -85,6 +85,7 @@ from .protection import (
     protect_initial_packet,
 )
 from .varint import decode_varint, encode_varint
+from .transport_params import check_client_transport_params
 from .state import (
     QUIC_FLOW_CONTROL_ERROR,
     QUIC_PROTOCOL_VIOLATION,
@@ -133,6 +134,7 @@ from ..tls._rustls_quic_ffi import (
     _do_is_handshake_complete,
     _do_packet_decrypt,
     _do_packet_encrypt,
+    _do_peer_transport_params,
     _do_session_free,
     _do_take_crypto,
 )
@@ -150,6 +152,7 @@ from ._server_0rtt import (
 from ._server_migration import MigrationProbe, new_path_challenge
 from ._server_support import (
     QUIC_CRYPTO_BUFFER_EXCEEDED,
+    QUIC_TRANSPORT_PARAMETER_ERROR,
     _ACK_MAX_RANGES,
     _ack_contains,
     _CryptoReasm,
@@ -1350,6 +1353,10 @@ struct QuicListener(Movable):
             self.connections[slot].install_1rtt_keys(
                 _ready_sentinel(), _ready_sentinel()
             )
+            # The client's transport parameters are in the ClientHello
+            # rustls has just processed (RFC 9000 sec 7.4, 18.2).
+            if not self._client_params_ok(slot, handle):
+                return
 
         # 0-RTT (EarlyData) keys: only when the listener is configured
         # for early data (budget > 0) and we have not already installed
@@ -1370,6 +1377,27 @@ struct QuicListener(Movable):
                 self.connections[slot].early_guard = EarlyDataReplayGuard(
                     max_bytes=UInt64(Int(early_budget))
                 )
+
+    def _client_params_ok(mut self, slot: Int, handle: Int) -> Bool:
+        """Validate the client's ``quic_transport_parameters`` once the
+        1-RTT keys exist (RFC 9000 sec 7.3, 7.4, 18.2): they must decode,
+        carry no server-only parameter, and name the Source Connection ID
+        of the client's Initial as ``initial_source_connection_id``.
+        Closes the slot with TRANSPORT_PARAMETER_ERROR and returns
+        ``False`` otherwise."""
+        var raw = List[UInt8]()
+        try:
+            raw = _do_peer_transport_params(self.tls_acceptor._lib, handle)
+        except:
+            pass
+        try:
+            check_client_transport_params(
+                Span[UInt8, _](raw), self.connections[slot].peer_cid.bytes
+            )
+        except e:
+            self._close_for(slot, QUIC_TRANSPORT_PARAMETER_ERROR, String(e))
+            return False
+        return True
 
     # -- H3 dispatch surface ----------------------------------------------
 

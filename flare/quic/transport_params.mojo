@@ -523,3 +523,86 @@ def decode_transport_parameters(
             )
         # Any other id is silently dropped (RFC 9000 §7.4.2).
     return out^
+
+
+# ── Peer-parameter checks (RFC 9000 §7.3, §18.2) ───────────────────────────
+
+
+def transport_parameter_present(buf: Span[UInt8, _], id: Int) -> Bool:
+    """Whether parameter ``id`` occurs in the TLV list ``buf``.
+
+    :func:`decode_transport_parameters` stores a CID parameter as a list
+    that is empty both when the parameter is absent and when it is present
+    with length 0, so a check that must tell the two apart (RFC 9000 §7.3,
+    §18.2) scans the raw bytes instead. A malformed list reports ``False``:
+    the caller has already run (or will run) the decoder, which raises on it.
+    """
+    var pos = 0
+    var n = len(buf)
+    var found = False
+    try:
+        while pos < n:
+            var id_var = decode_varint(buf[pos:])
+            pos += id_var.consumed
+            if pos >= n:
+                return False
+            var len_var = decode_varint(buf[pos:])
+            pos += len_var.consumed
+            var value_len = Int(len_var.value)
+            if value_len < 0 or pos + value_len > n:
+                return False
+            pos += value_len
+            if Int(id_var.value) == id:
+                found = True
+    except:
+        return False
+    return found
+
+
+def check_client_transport_params(
+    buf: Span[UInt8, _], client_scid: List[UInt8]
+) raises:
+    """Validate the transport parameters a server received from a client.
+
+    Raises ``TRANSPORT_PARAMETER_ERROR`` (RFC 9000 §18.2, §7.3, §7.4) when
+    the blob does not decode (truncation, duplicates, invalid values), when
+    it carries a server-only parameter (``original_destination_connection_id``,
+    ``stateless_reset_token``, ``preferred_address`` or
+    ``retry_source_connection_id``), or when ``initial_source_connection_id``
+    is absent or differs from ``client_scid``, the Source Connection ID of
+    the client's Initial packet (which may legitimately be zero-length).
+    """
+    var tp: TransportParameters
+    try:
+        tp = decode_transport_parameters(buf)
+    except e:
+        raise Error("QUIC TRANSPORT_PARAMETER_ERROR: client " + String(e))
+    if transport_parameter_present(buf, TP_ID_ORIGINAL_DCID):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: client sent"
+            " original_destination_connection_id"
+        )
+    if transport_parameter_present(buf, TP_ID_STATELESS_RESET_TOKEN):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: client sent stateless_reset_token"
+        )
+    if transport_parameter_present(buf, TP_ID_PREFERRED_ADDRESS):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: client sent preferred_address"
+        )
+    if transport_parameter_present(buf, TP_ID_RETRY_SCID):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: client sent"
+            " retry_source_connection_id"
+        )
+    if not transport_parameter_present(buf, TP_ID_INITIAL_SCID):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: client sent no"
+            " initial_source_connection_id"
+        )
+    if tp.initial_source_connection_id != client_scid:
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: client"
+            " initial_source_connection_id does not match its Initial"
+            " Source Connection ID"
+        )

@@ -342,6 +342,7 @@ A TLS 1.3 flight with a long certificate chain fits comfortably."""
 comptime CRYPTO_REASM_MAX_FRAGMENTS: Int = 256
 """Most out-of-order CRYPTO fragments held at once, per level."""
 comptime QUIC_CRYPTO_BUFFER_EXCEEDED: UInt64 = 0x0D
+comptime QUIC_TRANSPORT_PARAMETER_ERROR: UInt64 = 0x08
 
 
 struct _CryptoStream(Copyable, Defaultable):

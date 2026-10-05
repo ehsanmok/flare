@@ -430,7 +430,11 @@ v0.11 audit fixes; before them the server accepted what follows.
 - The server picks its own connection ID rather than adopting the
   client's, sets `retry_source_connection_id` after a Retry, and keeps
   `active_connection_id_limit` at 2. The flare client validates the
-  connection IDs in the server's transport parameters.
+  connection IDs in the server's transport parameters, and the server
+  validates the client's once the handshake reaches 1-RTT keys: a blob
+  that does not decode, carries a server-only parameter, or lacks the
+  client's `initial_source_connection_id` closes the connection with
+  TRANSPORT_PARAMETER_ERROR (RFC 9000 sec 7.3, 18.2).
 - Only CRYPTO, ACK, PADDING, PING and CONNECTION_CLOSE are accepted in
   Initial and Handshake packets, Initial keys are dropped once the
   handshake moves on, and HTTP/3 is dispatched only on 1-RTT or 0-RTT
