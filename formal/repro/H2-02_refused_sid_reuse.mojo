@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-02 fixed on fix/formal-findings
 """H2-02: a stream id flare refused with REFUSED_STREAM can be opened again
 by a second HEADERS on the same id.
 
@@ -20,7 +21,7 @@ last_peer_stream_id is now 3; the peer resets stream 1; HEADERS on stream
 3 again. sid == last_peer_stream_id, so the `<` test passes it, the slot
 is free, and stream 3 opens as a new request.
 
-Expected: GOAWAY(PROTOCOL_ERROR). Actual: stream 3 is accepted as a fresh
+Expected: GOAWAY(PROTOCOL_ERROR). Before the fix: stream 3 is accepted as a fresh
 request (half-closed remote, ready for dispatch).
 
 The suspected trigger via pruning does not occur: _prune_closed_streams

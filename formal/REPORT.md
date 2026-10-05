@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63336 lines) |
-| Theorems | 3327 |
-| Headline theorems in the axiom audit | 1117 |
+| Lean files | 298 (63374 lines) |
+| Theorems | 3329 |
+| Headline theorems in the axiom audit | 1119 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 115 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 116 of 138 |
 
 Six findings are rated high:
 
@@ -3054,7 +3054,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | WS-06 | Medium | resolved | `WsConnection` does not take part in the closing handshake | `Flare/Bugs/WS_06.lean` | `repro/WS-06_close_handshake_not_answered.mojo` (any) |
 | WS-07 | Low | resolved | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
 | H2-01 | High | resolved | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
-| H2-02 | Low | open | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
+| H2-02 | Low | resolved | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
 | H2-03 | Medium | resolved | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
 | H2-04 | Low | open | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
 | H2-05 | Medium | resolved | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
@@ -4006,6 +4006,8 @@ Status: resolved. Fixed in `state.mojo`: `Connection.recv_window` is debited by 
 - **Flip:** `OK: frame 4100 with W = -1 was answered with frame type 7`, exit 0.
 
 #### H2-02: a refused stream id can be reused to open a new request
+
+Status: resolved. Fixed: the server's stream-id check is now `last_peer_stream_id > 0 and sid <= last_peer_stream_id and sid not in streams` (state.mojo), so a refused id is a connection error; the `> 0` guard keeps the stream-0 case with H2-06. Tests: `test_h2_state.mojo::test_a_refused_stream_id_cannot_be_opened_again`, `test_first_stream_id_is_still_accepted`. Model: `Fix.shipped` carries `h2_02` (`idCheck` adds the `0 < lastPeer` guard; `handle_reuse` takes it as a hypothesis); `Bugs.H2_02.fixed_shipped`, `shipped_first_stream`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. A peer can reopen an id the server already refused, which breaks the monotonic-id rule. It gains no capacity, because the limit is still checked for the new request.
 - **RFC:** RFC 9113 §5.1.1: new stream ids "MUST be numerically greater than all streams that the initiating endpoint has opened or reserved", and an unexpected id is a connection error of type PROTOCOL_ERROR.

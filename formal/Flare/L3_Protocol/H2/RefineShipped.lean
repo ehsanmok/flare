@@ -121,7 +121,8 @@ theorem idCheck_eq (c : Conn) (f : Fr) (h : g02 c f = false) : idCheck Fix.none 
   split
   · rename_i hh
     simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hh
-    have hc : (decide (f.sid < c.lastPeer) && !mem c f.sid) = (decide (f.sid ≤ c.lastPeer) && !mem c f.sid) := by
+    have hc : (decide (f.sid < c.lastPeer) && !mem c f.sid) =
+        (decide (f.sid ≤ c.lastPeer) && decide (0 < c.lastPeer) && !mem c f.sid) := by
       by_cases hs : f.sid = c.lastPeer
       · have : mem c f.sid = true := by
           cases hm : mem c f.sid
@@ -130,9 +131,13 @@ theorem idCheck_eq (c : Conn) (f : Fr) (h : g02 c f = false) : idCheck Fix.none 
             rw [h] at this; cases this
           · rfl
         simp [this]
-      · have : decide (f.sid < c.lastPeer) = decide (f.sid ≤ c.lastPeer) := by
+      · have h1 : decide (f.sid < c.lastPeer) = decide (f.sid ≤ c.lastPeer) := by
           simp only [decide_eq_decide]; omega
-        rw [this]
+        by_cases hlt : f.sid < c.lastPeer
+        · have h3 : decide (0 < c.lastPeer) = true := by simp; omega
+          rw [h1, h3]; simp
+        · have h3 : decide (f.sid ≤ c.lastPeer) = false := by simp; omega
+          rw [h1, h3]; simp
     rw [show Fix.none.h2_02 = false from rfl, show F.h2_02 = true from rfl]
     simp only [Bool.false_eq_true, if_false, if_true]
     rw [hc]

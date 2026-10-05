@@ -3,7 +3,7 @@ import Flare.Bugs.H2_Fixtures
 /-!
 # H2-02: a refused stream id can be reused to open a new request
 
-flare/http2/state.mojo:1123 @59bda50 rejects a HEADERS frame whose id is
+flare/http2/state.mojo:1123 @59bda50 rejected a HEADERS frame whose id is
 *below* `last_peer_stream_id` and not in the table (`sid < last`), but
 not one *equal* to it. A stream refused with RST_STREAM(REFUSED_STREAM)
 is not kept in the table, so a second HEADERS with the same id is
@@ -19,6 +19,12 @@ Trace (`max_concurrent_streams = 1`): SETTINGS; HEADERS(1) without
 END_STREAM; HEADERS(3, END_STREAM) is refused (`RST_STREAM(3,
 REFUSED_STREAM)`); RST_STREAM(1); HEADERS(3, END_STREAM) again. flare
 answers nothing and stream 3 is a fresh half-closed (remote) request.
+
+Status: resolved. The check is now `last_peer_stream_id > 0 and
+sid <= last_peer_stream_id and sid not in streams` (the `> 0` keeps the
+fresh-connection stream-0 case with H2-06). `Fix.shipped` carries `h2_02`;
+`fixed_shipped` / `shipped_first_stream` state the shipped behaviour and
+`counterexample` stays about `Fix.none` (the pre-fix code).
 -/
 namespace Flare.Bugs.H2_02
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -40,13 +46,27 @@ theorem counterexample : ∀ o, lastOut Fix.none init tr = some o → ¬ IsConnE
 theorem fixed_trace : lastOut { h2_02 := true } init tr = some [.goaway 3 ePROTOCOL] ∧
     IsConnError [.goaway 3 ePROTOCOL] ePROTOCOL := ⟨by native_decide, ⟨3, rfl⟩⟩
 
-/-- **Fixed** (`sid ≤ last` at line 1123): for every server state, a
-HEADERS frame whose id is at most the highest one seen and that is not a
-live stream is answered with GOAWAY(PROTOCOL_ERROR). -/
+/-- **Fixed** (`sid ≤ last` once an id has been seen, state.mojo H2-02): for
+every server state, a HEADERS frame whose id is at most the highest one
+seen and that is not a live stream is answered with GOAWAY(PROTOCOL_ERROR). -/
 theorem fixed (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (hfx : fx.h2_02 = true)
     (hc : c.continuing = 0) (hs : c.isClient = false) (ht : f.ty = tHEADERS)
-    (hl : f.plen ≤ c.localMaxFrame) (hle : f.sid ≤ c.lastPeer) (hm : mem c f.sid = false) :
+    (hl : f.plen ≤ c.localMaxFrame) (hle : f.sid ≤ c.lastPeer) (hpos : 0 < c.lastPeer)
+    (hm : mem c f.sid = false) :
     handle fx dec c f = .ok (connErr c ePROTOCOL) :=
-  handle_reuse fx dec c f hfx hc hs ht hl hle hm
+  handle_reuse fx dec c f hfx hc hs ht hl hle hpos hm
+
+theorem fixed_shipped : lastOut Fix.shipped init tr = some [.goaway 3 ePROTOCOL] := by
+  native_decide
+
+/-- The first stream id on a fresh connection is not "reused" (the `> 0`
+guard): the shipped model still accepts it. -/
+theorem shipped_first_stream :
+    ∀ o, lastOut Fix.shipped init [.frame settings0, .frame (hdrs 1 true 1)] = some o →
+      ¬ IsConnError o ePROTOCOL := by
+  intro o h
+  have e : lastOut Fix.shipped init [.frame settings0, .frame (hdrs 1 true 1)] = some [] := by
+    native_decide
+  rw [e] at h; cases h; exact not_connError_nil _
 
 end Flare.Bugs.H2_02

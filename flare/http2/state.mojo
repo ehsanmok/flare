@@ -1184,13 +1184,20 @@ struct Connection(Copyable, Defaultable):
         if plen > self.local_max_frame_size:
             return self._conn_error(Http2ErrorCode.FRAME_SIZE_ERROR().value)
 
-        # sec 5.1.1: peer-initiated stream ids are odd and must only
-        # increase. A lower id that is not still in the table refers to
-        # a stream the peer already finished with.
+        # sec 5.1.1: peer-initiated stream ids are odd and must strictly
+        # increase. An id at or below the highest one seen that is not
+        # still in the table was used up already: finished, or refused
+        # (a refused stream is never stored but still consumes its id).
+        # Before any stream id has been seen there is nothing to reuse;
+        # stream 0 is rejected further down.
         if ft == FrameType.HEADERS().value and not self.is_client:
             if sid != 0 and (sid % 2) == 0:
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
-            if sid < self.last_peer_stream_id and sid not in self.streams:
+            if (
+                self.last_peer_stream_id > 0
+                and sid <= self.last_peer_stream_id
+                and sid not in self.streams
+            ):
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             if sid > self.last_peer_stream_id:
                 self.last_peer_stream_id = sid

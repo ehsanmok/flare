@@ -210,9 +210,10 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-03, H2-05, H2-09, H2-10, H2-17. -/
+finding): H2-01, H2-02, H2-03, H2-05, H2-09, H2-10, H2-17. -/
 def Fix.shipped : Fix :=
-  { h2_01 := true, h2_03 := true, h2_05 := true, h2_09 := true, h2_10 := true, h2_17 := true }
+  { h2_01 := true, h2_02 := true, h2_03 := true, h2_05 := true, h2_09 := true, h2_10 := true,
+    h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -519,11 +520,13 @@ def shapeCheck (fx : Fix) (c : Conn) (f : Fr) : Option (Conn × List Out) :=
 
 /-- Server-side stream-id monotonicity (`state.mojo:1117-1126`);
 `.inl` returns early.
-mirrors flare/http2/state.mojo:1117-1126 @59bda50 -/
+mirrors flare/http2/state.mojo:1117-1126 @59bda50; with `h2_02`: `last_peer_stream_id > 0 and
+sid <= last_peer_stream_id` (state.mojo, H2-02 fix) -/
 def idCheck (fx : Fix) (c : Conn) (f : Fr) : (Conn × List Out) ⊕ Conn :=
   if f.ty = tHEADERS && !c.isClient then
     if f.sid ≠ 0 && f.sid % 2 = 0 then .inl (connErr c ePROTOCOL)
-    else if (if fx.h2_02 then decide (f.sid ≤ c.lastPeer) else decide (f.sid < c.lastPeer)) && !mem c f.sid then
+    else if (if fx.h2_02 then decide (f.sid ≤ c.lastPeer) && decide (0 < c.lastPeer)
+              else decide (f.sid < c.lastPeer)) && !mem c f.sid then
       .inl (connErr c ePROTOCOL)
     else .inr (if f.sid > c.lastPeer then { c with lastPeer := f.sid } else c)
   else .inr c

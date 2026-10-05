@@ -545,8 +545,13 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     · have hn : needProtoH c f = true := by simp [needProtoH, h0, hsid, hHDR, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
       rw [hs]; simp only [if_neg hsz']
       cases hcl : c.isClient
-      · have hid : idCheck F c f = .inl (connErr c ePROTOCOL) := by
-          unfold idCheck; simp [hHDR, hcl, hsid, hm0, F]
+      · by_cases hlp : c.lastPeer = 0
+        · have hid : idCheck F c f = .inr c := by unfold idCheck; simp [hHDR, hcl, hsid, hlp, F]
+          have hh : headersH F dec c f = .ok (connErr c ePROTOCOL) := by simp [headersH, hsid, F]
+          rw [hid]; simp only [dispatch_headers dec c f F hHDR, hh]
+          exact ⟨_, rfl, hco _ (by rw [hl0 hsid]) (fun _ => rfl)⟩
+        have hid : idCheck F c f = .inl (connErr c ePROTOCOL) := by
+          unfold idCheck; simp [hHDR, hcl, hsid, hm0, F, hlp]
         rw [hid]; exact ⟨_, rfl, hco _ (by rw [hl0 hsid]) (fun _ => rfl)⟩
       · have hid : idCheck F c f = .inr c := by unfold idCheck; simp [hcl]
         have hh : headersH F dec c f = .ok (connErr c ePROTOCOL) := by simp [headersH, hsid, F]

@@ -717,7 +717,8 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
   cases hc : c0.isClient
   · have hid : idCheck F c0 f =
         (if f.sid ≠ 0 && f.sid % 2 = 0 then .inl (connErr c0 ePROTOCOL)
-         else if decide (f.sid ≤ c0.lastPeer) && !mem c0 f.sid then .inl (connErr c0 ePROTOCOL)
+         else if decide (f.sid ≤ c0.lastPeer) && decide (0 < c0.lastPeer) && !mem c0 f.sid then
+           .inl (connErr c0 ePROTOCOL)
          else .inr (if f.sid > c0.lastPeer then { c0 with lastPeer := f.sid } else c0)) := by
       unfold idCheck; simp [hty, hc, F]
     rw [hid] at h
@@ -731,13 +732,14 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
       rw [abs_none hn]; unfold idleAbs; rw [hc]; simp [hev]; cases f.eh <;> simp [connCodes]
     rw [if_neg (by simp [hev])] at h
     by_cases hle : f.sid ≤ c0.lastPeer ∧ mem c0 f.sid = false
-    · rw [if_pos (by simp [hle.1, hle.2])] at h; simp only [Except.ok.injEq] at h; subst h
+    · have hlp : 0 < c0.lastPeer := by omega
+      rw [if_pos (by simp [hle.1, hle.2, hlp])] at h; simp only [Except.ok.injEq] at h; subst h
       apply hconn _ _ hg
       have hn : get c0 f.sid = none := by simpa [mem] using hle.2
       rw [abs_none hn]; unfold idleAbs; rw [hc]
       have : (decide (f.sid > c0.lastPeer) || f.sid % 2 == 0) = false := by simp; omega
       rw [this]; simp only [Bool.false_eq_true, if_false]; cases f.eh <;> rfl
-    rw [if_neg (by simpa using hle)] at h
+    rw [if_neg (by intro hb; apply hle; simp at hb; exact ⟨hb.1.1, hb.2⟩)] at h
     simp only [] at h
     rw [dispatch_headers dec _ f F hty] at h
     by_cases hgt : f.sid > c0.lastPeer

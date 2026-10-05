@@ -93,11 +93,12 @@ theorem handle_goaway_short (fx : Fix) (dec : Dec) (c : Conn) (f : Fr)
 
 theorem handle_reuse (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (hfx : fx.h2_02 = true)
     (hc : c.continuing = 0) (hs : c.isClient = false) (ht : f.ty = tHEADERS)
-    (hl : f.plen ≤ c.localMaxFrame) (hle : f.sid ≤ c.lastPeer) (hm : mem c f.sid = false) :
+    (hl : f.plen ≤ c.localMaxFrame) (hle : f.sid ≤ c.lastPeer) (hpos : 0 < c.lastPeer)
+    (hm : mem c f.sid = false) :
     handle fx dec c f = .ok (connErr c ePROTOCOL) := by
   have hid : idCheck fx c f = .inl (connErr c ePROTOCOL) := by
     unfold idCheck
-    simp only [ht, hs, hfx, hle, hm]
+    simp only [ht, hs, hfx, hle, hpos, hm]
     by_cases h2 : f.sid ≠ 0 ∧ f.sid % 2 = 0 <;> simp_all
   simp [handle, hc, shape_headers fx c f ht, Nat.not_lt.mpr hl, hid]
 

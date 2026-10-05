@@ -783,6 +783,35 @@ def test_validate_request_fields_rejects_bad_name_octets() raises:
         assert_false(validate_request_fields(h, True, False))
 
 
+def test_a_refused_stream_id_cannot_be_opened_again() raises:
+    """H2-02: a stream refused with REFUSED_STREAM never enters the table,
+    but its id is used up. A second HEADERS on it, even once capacity is
+    free, is a connection error (RFC 9113 sec 5.1.1)."""
+    var c = Connection()
+    c.max_concurrent_streams = 1
+    _ = _open_request(c, 1, False)
+    var refused = _open_request(c, 3, True)
+    assert_equal(Int(refused[0].payload[3]), 0x7)  # REFUSED_STREAM
+    assert_false(3 in c.streams)
+    var rst = Frame()
+    rst.header.type = FrameType.RST_STREAM()
+    rst.header.stream_id = 1
+    rst.payload = _bytes([0, 0, 0, 8])  # CANCEL, frees the slot
+    rst.header.length = 4
+    _ = c.handle_frame(rst^)
+    var again = _open_request(c, 3, True)
+    assert_equal(_goaway_code(again), 1, "a used-up stream id was reopened")
+    assert_false(3 in c.streams)
+
+
+def test_first_stream_id_is_still_accepted() raises:
+    """The id check only applies once a stream id has been used."""
+    var c = Connection()
+    var out = _open_request(c, 1, True)
+    assert_equal(_goaway_code(out), -1)
+    assert_true(1 in c.streams)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -816,4 +845,6 @@ def main() raises:
     test_stream_window_overrun_reset_returns_connection_credit()
     test_field_names_follow_rfc_9113_8_2_1()
     test_validate_request_fields_rejects_bad_name_octets()
-    print("test_h2_state: 32 passed")
+    test_a_refused_stream_id_cannot_be_opened_again()
+    test_first_stream_id_is_still_accepted()
+    print("test_h2_state: 34 passed")

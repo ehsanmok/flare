@@ -411,6 +411,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_validate_request_fields_rejects_bad_name_octets as test_h2_state__test_validate_request_fields_rejects_bad_name_octets,
 )
+from test_h2_state import (
+    test_a_refused_stream_id_cannot_be_opened_again as test_h2_state__test_a_refused_stream_id_cannot_be_opened_again,
+)
+from test_h2_state import (
+    test_first_stream_id_is_still_accepted as test_h2_state__test_first_stream_id_is_still_accepted,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -730,6 +736,8 @@ def main() raises:
     suite.test[
         test_h2_state__test_validate_request_fields_rejects_bad_name_octets
     ]()
+    suite.test[test_h2_state__test_a_refused_stream_id_cannot_be_opened_again]()
+    suite.test[test_h2_state__test_first_stream_id_is_still_accepted]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains
