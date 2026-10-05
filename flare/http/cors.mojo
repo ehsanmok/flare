@@ -4,7 +4,8 @@ Implements the algorithmic core of the CORS protocol (Fetch
 Living Standard paragraph 3.2 / RFC 6454):
 
 - Inbound ``Origin`` is checked against ``allowed_origins``; mismatches
-  produce a plain inner-handler response with no CORS headers.
+  produce a plain inner-handler response with no CORS headers. Every
+  response, stamped or not, carries ``Vary: Origin`` (Fetch 3.2.5).
 - ``OPTIONS`` preflight requests with ``Access-Control-Request-Method``
   short-circuit before reaching the inner handler and respond
   with ``Access-Control-Allow-Methods`` /
@@ -103,6 +104,22 @@ def _origin_allowed(origin: String, config: CorsConfig) -> Bool:
     return False
 
 
+def _ensure_vary_origin(mut resp: Response) raises:
+    """Make sure ``resp`` carries ``Vary: Origin``.
+
+    The ``Access-Control-Allow-Origin`` value depends on the request's
+    ``Origin``, so Fetch 3.2.5 ("CORS protocol and HTTP caches") wants
+    ``Vary: Origin`` on every response of the resource, including those the
+    middleware does not stamp (no ``Origin``, rejected origin, rejected
+    preflight); otherwise a shared cache can hand an ACAO-less response to a
+    CORS request, or one origin's ACAO to another (APP-22).
+    """
+    for v in resp.headers.get_all("vary"):
+        if v == "Origin":
+            return
+    resp.headers.append("Vary", "Origin")
+
+
 def _join(parts: List[String], sep: String) -> String:
     var out = String("")
     for i in range(len(parts)):
@@ -163,8 +180,11 @@ struct Cors[Inner: Handler & Copyable](Copyable, Handler):
         )
 
         if origin.byte_length() == 0:
-            # Same-origin or non-CORS request; pass through unchanged.
-            return self.inner.serve(req).lower()
+            # Same-origin or non-CORS request; pass through, only adding
+            # ``Vary: Origin`` so caches keep it apart from CORS responses.
+            var plain = self.inner.serve(req).lower()
+            _ensure_vary_origin(plain)
+            return plain^
 
         if not _origin_allowed(origin, self.config):
             if is_preflight:
@@ -172,8 +192,11 @@ struct Cors[Inner: Handler & Copyable](Copyable, Handler):
                 # headers is also accepted; we go with 403 so curl
                 # users see the rejection.
                 var resp = Response(status=403)
+                _ensure_vary_origin(resp)
                 return resp^
-            return self.inner.serve(req).lower()
+            var rejected = self.inner.serve(req).lower()
+            _ensure_vary_origin(rejected)
+            return rejected^
 
         if is_preflight:
             var resp = Response(status=204)

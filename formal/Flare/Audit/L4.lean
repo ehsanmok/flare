@@ -68,7 +68,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Cors.originAllowedOld_sound
 #print axioms Flare.L4.Cors.acao_not_star_with_creds
 #print axioms Flare.L4.Cors.attach_has_vary
-#print axioms Flare.L4.Cors.serveFixed_vary
+#print axioms Flare.L4.Cors.serve_vary
 #print axioms Flare.L4.Cookie.toSetCookie_noCRLF
 #print axioms Flare.L4.Cookie.toSetCookie_none_secure
 #print axioms Flare.L4.Cookie.parseMaxAge_sound

@@ -159,6 +159,68 @@ def test_wildcard_without_credentials_still_first_match() raises:
     )
 
 
+def _vary_origin_count(resp: Response) raises -> Int:
+    var n = 0
+    for v in resp.headers.get_all("vary"):
+        if v == "Origin":
+            n += 1
+    return n
+
+
+def _allowlist_cors() raises -> CorsConfig:
+    var cfg = CorsConfig()
+    cfg.allowed_origins.append("https://a.example")
+    cfg.allowed_origins.append("https://b.example")
+    return cfg^
+
+
+def test_vary_origin_on_response_without_origin() raises:
+    """APP-22: the ACAO value depends on ``Origin``, so the response to a
+    request with no ``Origin`` carries ``Vary: Origin`` too."""
+    var mw = Cors(_Echo(), _allowlist_cors())
+    var resp = mw.serve(Request(method=Method.GET, url="/api"))
+    assert_equal(resp.status, 200)
+    assert_false(resp.headers.contains("access-control-allow-origin"))
+    assert_equal(_vary_origin_count(resp), 1)
+
+
+def test_vary_origin_on_rejected_origin_and_preflight() raises:
+    """APP-22: rejected simple requests and rejected preflights (403) carry
+    ``Vary: Origin`` as well."""
+    var mw = Cors(_Echo(), _allowlist_cors())
+    var req = Request(method=Method.GET, url="/api")
+    req.headers.set("Origin", "https://evil.example")
+    var resp = mw.serve(req)
+    assert_false(resp.headers.contains("access-control-allow-origin"))
+    assert_equal(_vary_origin_count(resp), 1)
+
+    var pre = Request(method=Method.OPTIONS, url="/api")
+    pre.headers.set("Origin", "https://evil.example")
+    pre.headers.set("Access-Control-Request-Method", "GET")
+    var presp = mw.serve(pre)
+    assert_equal(presp.status, 403)
+    assert_equal(_vary_origin_count(presp), 1)
+
+
+def test_vary_origin_single_on_allowed_and_not_duplicated() raises:
+    """APP-22: stamped responses still carry exactly one ``Vary: Origin``."""
+    var mw = Cors(_Echo(), _allowlist_cors())
+    var req = Request(method=Method.GET, url="/api")
+    req.headers.set("Origin", "https://a.example")
+    var resp = mw.serve(req)
+    assert_equal(
+        resp.headers.get("access-control-allow-origin"), "https://a.example"
+    )
+    assert_equal(_vary_origin_count(resp), 1)
+
+    var pre = Request(method=Method.OPTIONS, url="/api")
+    pre.headers.set("Origin", "https://b.example")
+    pre.headers.set("Access-Control-Request-Method", "GET")
+    var presp = mw.serve(pre)
+    assert_equal(presp.status, 204)
+    assert_equal(_vary_origin_count(presp), 1)
+
+
 def test_exposed_headers_attached() raises:
     var cfg = CorsConfig.permissive()
     cfg.exposed_headers.append("X-Total-Count")
@@ -192,6 +254,9 @@ def main() raises:
     test_credentials_disables_wildcard()
     test_credentials_allowlist_is_order_independent()
     test_wildcard_without_credentials_still_first_match()
+    test_vary_origin_on_response_without_origin()
+    test_vary_origin_on_rejected_origin_and_preflight()
+    test_vary_origin_single_on_allowed_and_not_duplicated()
     test_exposed_headers_attached()
     test_no_origin_passes_through()
-    print("test_cors: 11 passed")
+    print("test_cors: 14 passed")

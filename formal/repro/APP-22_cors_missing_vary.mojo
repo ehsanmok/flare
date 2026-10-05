@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-22 fixed on fix/formal-findings
 """APP-22: Cors omits `Vary: Origin` on responses it does not stamp.
 
 Lean: Flare.Bugs.APP_22.violates_spec, Flare.Bugs.APP_22.missing_vary
@@ -10,7 +11,7 @@ Access-Control-Allow-Origin value depends on the request's Origin, every
 response for the resource carries `Vary: Origin`, including the response to
 a request without Origin, so a shared cache does not hand an ACAO-less
 response to a CORS request (or one origin's ACAO to another).
-Actual: with allowed_origins = [a, b], a request from a gets ACAO a plus
+Before the fix: with allowed_origins = [a, b], a request from a gets ACAO a plus
 Vary: Origin, but a request with no Origin (and one from a rejected
 origin) gets the inner response with no Vary at all.
 

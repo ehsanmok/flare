@@ -12,6 +12,14 @@ caches"): if ACAO is not a constant `*` / static origin sent on every
 response, `Vary: Origin` is to be used, "in all responses (including the
 non-CORS one)"; otherwise a cache can store the ACAO-less response and
 serve it to a CORS request (or vice versa).
+
+Status: resolved. The pass-through paths (no `Origin`, rejected origin,
+rejected preflight) now go through `_ensure_vary_origin`, which appends
+`Vary: Origin` unless the response already has it. The model `serve` is the
+shipped one, `serveOld` the pre-fix one. Regression tests:
+`tests/http/test_cors.mojo::test_vary_origin_on_response_without_origin`,
+`::test_vary_origin_on_rejected_origin_and_preflight` and
+`::test_vary_origin_single_on_allowed_and_not_duplicated`.
 -/
 namespace Flare.Bugs.APP_22
 
@@ -31,22 +39,22 @@ def VaryConsistent (f : Req → Resp) : Prop :=
   ∀ o1 o2, acao (f (reqFrom o1)) ≠ acao (f (reqFrom o2)) →
     hasVaryOrigin (f (reqFrom o1)) ∧ hasVaryOrigin (f (reqFrom o2))
 
-/-- Counterexample: ACAO differs between no-`Origin` and an allowed origin,
+/-- Counterexample (pre-fix `serveOld`): ACAO differs between no-`Origin` and an allowed origin,
 yet the no-`Origin` response has no `Vary: Origin`. -/
 theorem missing_vary :
-    acao (serve cfg inner (reqFrom "")) = none ∧
-    acao (serve cfg inner (reqFrom "https://a.example")) = some "https://a.example" ∧
-    ¬ hasVaryOrigin (serve cfg inner (reqFrom "")) := by
+    acao (serveOld cfg inner (reqFrom "")) = none ∧
+    acao (serveOld cfg inner (reqFrom "https://a.example")) = some "https://a.example" ∧
+    ¬ hasVaryOrigin (serveOld cfg inner (reqFrom "")) := by
   refine ⟨by decide, by decide, by decide⟩
 
-theorem violates_spec : ¬ VaryConsistent (serve cfg inner) := by
+theorem violates_spec : ¬ VaryConsistent (serveOld cfg inner) := by
   intro h
   have := h "" "https://a.example" (by decide)
   exact absurd this.1 (by decide)
 
-/-- Fix: append `Vary: Origin` on every response; meets the spec for every
-configuration, inner response and request. -/
-theorem fixed_meets_spec (c : Config) (i : Resp) : VaryConsistent (serveFixed c i) :=
-  fun _ _ _ => ⟨serveFixed_vary c i _, serveFixed_vary c i _⟩
+/-- The shipped `serve` (appends `Vary: Origin` on every response) meets the
+spec for every configuration, inner response and request. -/
+theorem fixed_meets_spec (c : Config) (i : Resp) : VaryConsistent (serve c i) :=
+  fun _ _ _ => ⟨serve_vary c i _, serve_vary c i _⟩
 
 end Flare.Bugs.APP_22

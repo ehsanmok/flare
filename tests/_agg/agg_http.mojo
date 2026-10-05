@@ -781,6 +781,15 @@ from test_cors import (
     test_wildcard_without_credentials_still_first_match as test_cors__test_wildcard_without_credentials_still_first_match,
 )
 from test_cors import (
+    test_vary_origin_on_response_without_origin as test_cors__test_vary_origin_on_response_without_origin,
+)
+from test_cors import (
+    test_vary_origin_on_rejected_origin_and_preflight as test_cors__test_vary_origin_on_rejected_origin_and_preflight,
+)
+from test_cors import (
+    test_vary_origin_single_on_allowed_and_not_duplicated as test_cors__test_vary_origin_single_on_allowed_and_not_duplicated,
+)
+from test_cors import (
     test_exposed_headers_attached as test_cors__test_exposed_headers_attached,
 )
 from test_cors import (
@@ -4778,6 +4787,11 @@ def main() raises:
     suite.test[test_cors__test_credentials_disables_wildcard]()
     suite.test[test_cors__test_credentials_allowlist_is_order_independent]()
     suite.test[test_cors__test_wildcard_without_credentials_still_first_match]()
+    suite.test[test_cors__test_vary_origin_on_response_without_origin]()
+    suite.test[test_cors__test_vary_origin_on_rejected_origin_and_preflight]()
+    suite.test[
+        test_cors__test_vary_origin_single_on_allowed_and_not_duplicated
+    ]()
     suite.test[test_cors__test_exposed_headers_attached]()
     suite.test[test_cors__test_no_origin_passes_through]()
     # tests/http/test_cross_wire_streaming.mojo

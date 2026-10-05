@@ -264,7 +264,7 @@ depends on `Origin`, every response carries `Vary: Origin`.
 | `Flare.L4.Cors.acao_not_star_with_creds`, `acao_origin_or_star` | with credentials, ACAO is never `*` and equals the request origin | proved |
 | `Flare.L4.Cors.attach_has_vary` | every response the middleware stamps carries `Vary: Origin` | proved |
 | `Flare.L4.Cors.preflight_ignores_inner` | an allowed preflight is a 204 that does not call the inner handler | proved |
-| `Flare.L4.Cors.serveFixed_vary` | the fixed `serve` puts `Vary: Origin` on every response | proved |
+| `Flare.L4.Cors.serve_vary` | the shipped `serve` (fixed, APP-22) puts `Vary: Origin` on every response | proved |
 
 ### 8. Cookies (`Flare.L4.Cookie`)
 
@@ -843,8 +843,9 @@ Status: resolved. `_origin_allowed` now `continue`s past a `*` entry when creden
 **What goes wrong.** `cors.mojo:160-171` returns the inner response unchanged
 when `Origin` is absent or rejected, without adding `Vary`.
 
-**Lean.** `Flare.Bugs.APP_22.missing_vary` and `violates_spec`. The fix is
-proved sufficient by `fixed_meets_spec`.
+**Lean.** `Flare.Bugs.APP_22.missing_vary` and `violates_spec` (about the
+pre-fix `serveOld`). The shipped `serve` is proved to meet the spec by
+`fixed_meets_spec`.
 
 **Fix.** Append `Vary: Origin` on every path.
 
@@ -852,6 +853,8 @@ proved sufficient by `fixed_meets_spec`.
 
 - Observed: `BUG REPRODUCED: ACAO varies with Origin ('https://a.example' for https://a.example, absent otherwise) but Vary: Origin is missing on the no-Origin response (False) / rejected-origin response (False)`
 - Flip: `OK: Vary: Origin present on all responses`
+
+Status: resolved. The pass-through paths of `Cors.serve` (no `Origin`, rejected origin, rejected preflight 403) now go through `_ensure_vary_origin`, which appends `Vary: Origin` unless the response already has it, so every response carries it. Tests: `tests/http/test_cors.mojo::test_vary_origin_on_response_without_origin`, `::test_vary_origin_on_rejected_origin_and_preflight`, `::test_vary_origin_single_on_allowed_and_not_duplicated`. The model `serve` is the shipped one; `serveOld` the pre-fix one.
 
 ### APP-23: `Url.parse` does not end the authority at `?` (host confusion)
 
@@ -1437,7 +1440,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
 | `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compressFixed_vary` | APP-26, APP-27 |
 | `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decideOld_eq_spec_of_noStar`, `decide'_eq_spec` | APP-20 |
-| `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-204 | `originAllowed_sound`, `acao_not_star_with_creds`, `serveFixed_vary` | APP-21, APP-22 |
+| `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-228 | `originAllowed_sound`, `acao_not_star_with_creds`, `serve_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
 | `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-270 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
 | `Flare.L4.Url.parse`, `parseWith`, `parsePort` | http/url.mojo:73-299 | `parsePort_iff`, `parse_port`, `parseFixed_spec` | APP-23, APP-25 |
