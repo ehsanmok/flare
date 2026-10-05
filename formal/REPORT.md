@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60855 lines) |
+| Lean files | 298 (60865 lines) |
 | Theorems | 3212 |
 | Headline theorems in the axiom audit | 1020 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 7 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 8 of 138 |
 
 Six findings are rated high:
 
@@ -897,18 +897,20 @@ root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 
 #### UNIX listener takeover and destructor guard (`UdsListener.lean`)
 
-uds/listener.mojo:72-184. `bind_with_options(unlink_existing=True)` lstat's
-the path, probes a socket with `UnixStream.connect` and unlinks it as stale
-when the probe fails; `__deinit__` unlinks only if the path still names the
+uds/listener.mojo:50-146, 193-210. `bind_with_options(unlink_existing=True)`
+lstat's the path, probes a socket with a throwaway `connect(2)`
+(`_socket_path_is_stale`) and unlinks it as stale only when the probe is
+refused (fixed, NET-07; before, any probe failure counted as stale);
+`__deinit__` unlinks only if the path still names the
 socket file whose `(dev, ino)` was recorded after `bind`. What `connect(2)`
 may return is a hypothesis (`ConnectFacts`): `ECONNREFUSED` only when nobody
 listens, success when somebody listens and the caller may write the file.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `takeover_unlinks_live` | A live listener whose socket file the caller may not write (probe `EACCES`) is unlinked and taken over. | proved (NET-07) |
-| `prep_agrees` | flare and the fix agree whenever the probe succeeds or is refused. | proved |
-| `prepFixed_safe` | The fix unlinks only after a refusal, so never a live socket, and still takes over stale ones. | proved |
+| `takeover_unlinks_live` | Pre-fix (`prepOld`): a live listener whose socket file the caller may not write (probe `EACCES`) is unlinked and taken over. | proved (NET-07) |
+| `prep_agrees` | The pre-fix code and the shipped `prep` agree whenever the probe succeeds or is refused. | proved |
+| `prep_safe` | The shipped `prep` unlinks only after a refusal, so never a live socket, and still takes over stale ones. | proved |
 | `deinit_spec` | Without interleaving, the destructor unlinks exactly when the path still names its own socket. | proved |
 | `deinit_no_record`, `deinit_no_cleanup` | No recorded inode, or `cleanup_path=False`: the destructor never unlinks. | proved |
 | `deinit_race` | Another process binding the path between `close` and `lstat` and getting the freed inode passes the check. | proved (note) |
@@ -2730,7 +2732,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo:177-206 | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.fixed_never_crashes` | counterexample (RT-06, RT-07, RT-08) |
 | `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
 | `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:68-107 | `validate_sound`, `validate_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | counterexample (NET-08, NET-09) |
-| `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:72-184 | `takeover_unlinks_live`, `prepFixed_safe`, `deinit_spec`, `deinit_race` | counterexample (NET-07) |
+| `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
 | `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:400-408 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |
 | `Flare.L2.UdpBatch.allocSize`, `accepts` | flare/udp/batch.mojo:185-195 | `slots_disjoint`, `NET_11.allocSize_wraps`, `covers_fixed` | counterexample (NET-11) |
@@ -2986,7 +2988,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-04 | Medium | resolved | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
 | NET-05 | Info | open | accepted fd leaks if the peer address fails to decode | `Flare/Bugs/NET_05.lean` | `repro/NET-05_accept_fd_leak_on_decode_error.mojo` (any) |
 | NET-06 | Low | open | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
-| NET-07 | Medium | open | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
+| NET-07 | Medium | resolved | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
 | NET-08 | Low | open | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
 | NET-09 | Low | open | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
 | NET-10 | Low | open | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
@@ -3374,12 +3376,13 @@ failure counts as stale, including `EACCES`, which says nothing about
 liveness.
 Lean: `Flare.Bugs.NET_07.takeover_unlinks_live`. Fix: unlink only after
 `ConnectionRefused` (`ECONNREFUSED` or `ENOENT`) and raise `AddressInUse`
-otherwise; `prepFixed_safe`.
+otherwise; `prep_safe` (about the shipped `prep`).
 Repro: `formal/repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macOS
 only: on Linux the container runs as root, which bypasses the permission
 check), observed
 `BUG REPRODUCED: second bind() unlinked the live listener's socket file (its probe failed with EACCES) and bound the path itself`.
 Flip: `OK: second bind() refused while the first listener is live: AddressInUse: /tmp/flare_net07.sock`, exit 0.
+Status: resolved. `bind_with_options` probes with the new `_socket_path_is_stale` (a throwaway `connect(2)`): only `ECONNREFUSED`/`ENOENT` mark the socket stale, any other outcome raises `AddressInUse` and leaves the file; the model's `prep` mirrors it (old: `prepOld`). Tests: `tests/uds/test_uds_listener.mojo::test_bind_refuses_when_liveness_probe_is_inconclusive` (a live datagram socket, `EPROTOTYPE`, runs for any user) and `::test_bind_refuses_unwritable_live_listener` (the EACCES trigger, non-root only).
 
 #### NET-08: `resolve` rejects valid 254-byte absolute hostnames
 

@@ -23,6 +23,8 @@ Round-trips real bytes through real UDS socket pairs (no mocks):
 """
 
 import std.os as os
+from std.ffi import c_int, external_call
+from std.memory import stack_allocation
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -31,9 +33,16 @@ from std.testing import (
     assert_true,
 )
 
-from flare.net import ConnectionRefused
+from flare.net import AddressInUse, ConnectionRefused
+from flare.net.socket import RawSocket, SOCK_DGRAM
+from flare.net._libc import _bind
 from flare.uds import UnixListener, UnixStream, accept_uds_fd
-from flare.uds._libc import AF_UNIX, SUN_PATH_MAX
+from flare.uds._libc import (
+    AF_UNIX,
+    SOCKADDR_UN_SIZE,
+    SUN_PATH_MAX,
+    fill_sockaddr_un,
+)
 
 
 def _tmp_uds_path(suffix: String) raises -> String:
@@ -248,6 +257,74 @@ def test_bind_leaves_a_live_socket_and_a_plain_file_alone() raises:
     assert_true(raised2, "bound over a regular file")
     assert_true(os.path.exists(f), "the regular file was deleted")
     os.remove(f)
+
+
+def _chmod(var path: String, mode: Int) -> c_int:
+    return external_call["chmod", c_int](path.as_c_string_span(), c_int(mode))
+
+
+def _getuid() -> c_int:
+    return external_call["getuid", c_int]()
+
+
+def _bind_dgram(path: String) raises -> RawSocket:
+    """Bind an AF_UNIX *datagram* socket at ``path``: a live socket file
+    that a stream ``connect`` answers with ``EPROTOTYPE`` (neither a
+    success nor a refusal, whoever the caller is)."""
+    var sock = RawSocket(AF_UNIX, SOCK_DGRAM)
+    var sa = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
+    for i in range(Int(SOCKADDR_UN_SIZE)):
+        (sa.unsafe_offset(i)).unsafe_write(0)
+    var used = fill_sockaddr_un(sa, path)
+    if _bind(sock.fd, sa, used) < 0:
+        raise Error("test setup: bind of the datagram socket failed")
+    return sock^
+
+
+def test_bind_refuses_when_liveness_probe_is_inconclusive() raises:
+    """NET-07: the probe's ``except: pass`` treated every connect failure as
+    "stale", so a live socket the caller could not connect to (EACCES, a
+    different socket type, ...) was unlinked and taken over. Only a refusal
+    proves a socket stale."""
+    # A live datagram socket: connect(SOCK_STREAM) fails with EPROTOTYPE.
+    var p = _tmp_uds_path("probe_dgram")
+    _maybe_unlink(p)
+    var live = _bind_dgram(p)
+    var raised = False
+    var in_use = False
+    try:
+        _ = UnixListener.bind(p)
+    except e:
+        raised = True
+        in_use = String(e).startswith("AddressInUse")
+    assert_true(raised, "bound over a socket whose liveness is unknown")
+    assert_true(in_use, "expected AddressInUse")
+    assert_true(os.path.exists(p), "the live socket file was unlinked")
+    live.close()
+    _maybe_unlink(p)
+
+
+def test_bind_refuses_unwritable_live_listener() raises:
+    """NET-07 (the original trigger): a live listener whose socket file the
+    caller may not write answers the probe with EACCES. root bypasses the
+    permission check, so this part only runs for a non-root user."""
+    if _getuid() == 0:
+        return
+    var p = _tmp_uds_path("probe_eacces")
+    _maybe_unlink(p)
+    var a = UnixListener.bind(p)
+    assert_equal(Int(_chmod(p, 0)), 0)
+    var raised = False
+    try:
+        _ = UnixListener.bind(p)
+    except:
+        raised = True
+    assert_true(raised, "took over a live listener it could not probe")
+    assert_true(os.path.exists(p), "the live socket file was unlinked")
+    assert_equal(a.local_path(), p)
+    a.close()
+    _ = a^
+    _maybe_unlink(p)
 
 
 def test_destructor_removes_only_its_own_socket() raises:

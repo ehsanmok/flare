@@ -64,6 +64,12 @@ from test_uds_listener import (
     test_bind_leaves_a_live_socket_and_a_plain_file_alone as test_uds_listener__test_bind_leaves_a_live_socket_and_a_plain_file_alone,
 )
 from test_uds_listener import (
+    test_bind_refuses_when_liveness_probe_is_inconclusive as test_uds_listener__test_bind_refuses_when_liveness_probe_is_inconclusive,
+)
+from test_uds_listener import (
+    test_bind_refuses_unwritable_live_listener as test_uds_listener__test_bind_refuses_unwritable_live_listener,
+)
+from test_uds_listener import (
     test_destructor_removes_only_its_own_socket as test_uds_listener__test_destructor_removes_only_its_own_socket,
 )
 
@@ -96,5 +102,9 @@ def main() raises:
     suite.test[
         test_uds_listener__test_bind_leaves_a_live_socket_and_a_plain_file_alone
     ]()
+    suite.test[
+        test_uds_listener__test_bind_refuses_when_liveness_probe_is_inconclusive
+    ]()
+    suite.test[test_uds_listener__test_bind_refuses_unwritable_live_listener]()
     suite.test[test_uds_listener__test_destructor_removes_only_its_own_socket]()
     suite^.run()

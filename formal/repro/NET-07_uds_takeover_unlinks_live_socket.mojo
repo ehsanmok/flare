@@ -1,14 +1,15 @@
 # PLATFORM: macos
+# RESOLVED: NET-07 fixed on fix/formal-findings
 """NET-07: UnixListener.bind unlinks a live socket whose probe fails with EACCES.
 
 Lean: Flare.Bugs.NET_07.takeover_unlinks_live (counterexample) and
-Flare.Bugs.NET_07.prepFixed_safe (fix meets spec).
+Flare.Bugs.NET_07.prep_safe (fix meets spec).
 flare/uds/listener.mojo:163-184 @59bda50.
 
 Expected (docstring 146-153): a stale socket is "one no process is
 listening on"; "a live socket raises AddressInUse". Here listener A is
 alive and listening at the path, so a second bind must fail.
-Actual: the liveness probe UnixStream.connect fails with EACCES (the
+Before the fix: the liveness probe UnixStream.connect fails with EACCES (the
 socket file is not writable by the caller: mode 0 here, or another user's
 0600 socket in a shared directory), the bare `except: pass` treats every
 failure as "stale", the path is unlinked and the second bind succeeds.

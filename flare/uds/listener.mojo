@@ -28,6 +28,7 @@ from ..net.socket import RawSocket, SOCK_STREAM
 from ..net._libc import (
     _accept,
     _bind,
+    _connect,
     _getsockname,
     _listen,
     _strerror,
@@ -44,6 +45,32 @@ from ._libc import (
     unlink_path,
 )
 from .stream import UnixStream
+
+
+def _socket_path_is_stale(path: String) raises -> Bool:
+    """Probe the socket file at ``path`` with a throwaway ``connect(2)``.
+
+    Returns ``True`` only when the probe proves nobody is listening:
+    ``ECONNREFUSED`` (a leftover file) or ``ENOENT`` (already gone).
+    Every other outcome keeps the file: a successful connect means a live
+    server, and any other errno (``EACCES`` on a socket file the caller
+    may not write, ``EAGAIN`` on a full backlog, ``EPROTOTYPE`` for a
+    socket of another type, ...) says nothing about liveness, so the
+    socket must be treated as in use rather than taken over.
+    """
+    var sock = RawSocket(AF_UNIX, SOCK_STREAM)
+    var sa = stack_allocation[Int(SOCKADDR_UN_SIZE), UInt8]()
+    for i in range(Int(SOCKADDR_UN_SIZE)):
+        (sa.unsafe_offset(i)).unsafe_write(0)
+    var used = fill_sockaddr_un(sa, path)
+    var rc = _connect(sock.fd, sa, used)
+    var e = get_errno()
+    # Close explicitly: without a later use Mojo may destroy ``sock`` before
+    # the connect runs, and the probe would see EBADF.
+    sock.close()
+    if rc >= 0:
+        return False  # connected: a live server
+    return e == ErrNo.ECONNREFUSED or e == ErrNo.ENOENT
 
 
 struct UnixListener(Movable):
@@ -144,9 +171,12 @@ struct UnixListener(Movable):
                 than that raise ``Error``.
             backlog: ``listen(2)`` backlog.
             unlink_existing: Remove a stale socket at ``path`` before
-                ``bind(2)``: one no process is listening on. A live
-                socket raises ``AddressInUse`` and anything that is
-                not a socket raises ``NetworkError``; neither is
+                ``bind(2)``: one a probe ``connect(2)`` proves nobody
+                is listening on (``ECONNREFUSED``). A live socket, or
+                one the probe cannot judge (``EACCES`` on a socket
+                file the caller may not write, a socket of another
+                type, ...), raises ``AddressInUse`` and anything that
+                is not a socket raises ``NetworkError``; neither is
                 touched. Defaults ``True`` so a crashed-then-restarted
                 process recovers cleanly. Set ``False`` if you
                 want a hard ``EADDRINUSE`` when a previous
@@ -172,14 +202,10 @@ struct UnixListener(Movable):
                     "bind " + path + ": path exists and is not a socket"
                 )
             if k[0] == PATH_SOCKET:
-                var live = False
-                try:
-                    var probe = UnixStream.connect(path)
-                    probe.close()
-                    live = True
-                except:
-                    pass
-                if live:
+                # Only a refused probe proves the socket stale: any other
+                # failure (EACCES, ...) says nothing about liveness and
+                # used to be swallowed, unlinking a live server's socket.
+                if not _socket_path_is_stale(path):
                     raise AddressInUse(path, Int(ErrNo.EADDRINUSE.value))
                 _ = unlink_path(path)
 

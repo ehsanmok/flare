@@ -135,11 +135,11 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.Hostname.validateFixed_iff
 #print axioms Flare.L2.Hostname.tooLongTailFixed_wf
 #print axioms Flare.L2.UdsListener.prep_agrees
-#print axioms Flare.L2.UdsListener.prepFixed_safe
+#print axioms Flare.L2.UdsListener.prep_safe
 #print axioms Flare.L2.UdsListener.deinit_spec
 #print axioms Flare.L2.UdsListener.deinit_race
 #print axioms Flare.Bugs.NET_07.takeover_unlinks_live
-#print axioms Flare.Bugs.NET_07.prepFixed_safe
+#print axioms Flare.Bugs.NET_07.prep_safe
 #print axioms Flare.Bugs.NET_08.valid_but_rejected
 #print axioms Flare.Bugs.NET_08.validateFixed_spec
 #print axioms Flare.Bugs.NET_09.message_not_wf

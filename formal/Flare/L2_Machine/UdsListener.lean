@@ -4,12 +4,14 @@ import Flare.Core
 # UnixListener: stale-socket takeover and the destructor guard
 
 Model of `flare/uds/listener.mojo`:
-* `bind_with_options(unlink_existing=True)` (lines 163-184): `lstat` the
-  path; a non-socket raises; a socket is probed with `UnixStream.connect`;
-  if the probe succeeds the path is live (`AddressInUse`), otherwise the
-  file is unlinked as stale;
-* `__init__` (72-94) records `(dev, ino)` of the socket file right after
-  `bind`; `__deinit__` (96-117) closes the socket and unlinks the path only
+* `bind_with_options(unlink_existing=True)` (lines 193-210, with the probe
+  `_socket_path_is_stale` at 50-70): `lstat` the path; a non-socket raises;
+  a socket is probed with a throwaway `connect(2)`; only a refusal
+  (`ECONNREFUSED`/`ENOENT`) makes it stale and unlinks it, any other probe
+  outcome is `AddressInUse` (fixed, NET-07; before, every failed probe
+  counted as stale);
+* `__init__` (99-121) records `(dev, ino)` of the socket file right after
+  `bind`; `__deinit__` (123-146) closes the socket and unlinks the path only
   if it still names a socket with that `(dev, ino)` and `ino ≠ 0`.
 
 Spec (docstring at 146-153): "Remove a stale socket at `path` before
@@ -28,10 +30,10 @@ Environment facts are Prop hypotheses:
   distinct `(dev, ino)`; a bound socket keeps its inode allocated until
   its fd is closed.
 
-Proved: flare's takeover unlinks a live socket when the probe fails with
-anything but a refusal (`takeover_unlinks_live`, NET-07); the fix
-(`prepFixed`) only unlinks after `ECONNREFUSED` and never removes a live
-socket (`prepFixed_safe`). The destructor guard is exact when the
+Proved: the pre-fix takeover (`prepOld`) unlinks a live socket when the probe
+fails with anything but a refusal (`takeover_unlinks_live`, NET-07); the
+shipped `prep` only unlinks after `ECONNREFUSED` and never removes a live
+socket (`prep_safe`). The destructor guard is exact when the
 close-lstat-unlink sequence is not interleaved with another process
 (`deinit_spec`); `deinit_race` shows the interleaving that defeats it,
 which no POSIX call can close (there is no unlink-if-inode).
@@ -45,8 +47,9 @@ inductive Kind where
   | other
   deriving DecidableEq, Repr
 
-/-- outcome of the probe `UnixStream.connect(path)` (uds/stream.mojo:97-115):
-success, `ConnectionRefused` (ECONNREFUSED / ENOENT) or another errno -/
+/-- outcome of the probe `connect(2)` (`_socket_path_is_stale`,
+uds/listener.mojo:50-70): success, a refusal (ECONNREFUSED / ENOENT) or
+another errno -/
 inductive Conn where
   | ok
   | refused
@@ -63,8 +66,17 @@ inductive Prep where
   | bind        -- nothing there, bind
   deriving DecidableEq, Repr
 
-/-- mirrors flare/uds/listener.mojo:164-184 @59bda50 -/
+/-- mirrors flare/uds/listener.mojo:193-210 (fixed, NET-07): only a refused
+probe proves the socket stale; any other probe outcome raises `AddressInUse`. -/
 def prep (k : Kind) (c : Conn) : Prep :=
+  match k with
+  | .other => .notSocket
+  | .none => .bind
+  | .sock _ _ => if c = .refused then .unlinkBind else .inUse
+
+/-- Pre-fix `bind_with_options` (listener.mojo:164-184 @59bda50): a probe
+that failed in any way counted as stale. -/
+def prepOld (k : Kind) (c : Conn) : Prep :=
   match k with
   | .other => .notSocket
   | .none => .bind
@@ -81,31 +93,23 @@ def ConnectFacts (p : Peer) (c : Conn) : Prop :=
   (c = .refused → p.listening = false) ∧
   (p.listening = true ∧ p.writable = true → c = .ok)
 
-/-- **Counterexample (NET-07)**: a live listener whose socket file we may
-not write (mode 0, or another user's 0600 socket in a shared directory)
+/-- **Counterexample (NET-07, pre-fix)**: a live listener whose socket file we
+may not write (mode 0, or another user's 0600 socket in a shared directory)
 answers the probe with `EACCES`; that is consistent with `ConnectFacts`,
-and flare unlinks the live socket. -/
+and the pre-fix code unlinks the live socket. -/
 theorem takeover_unlinks_live :
     let p : Peer := ⟨true, false⟩
-    ConnectFacts p (.err EACCES) ∧ prep (.sock 1 2) (.err EACCES) = .unlinkBind ∧
+    ConnectFacts p (.err EACCES) ∧ prepOld (.sock 1 2) (.err EACCES) = .unlinkBind ∧
       p.listening = true := by
   refine ⟨⟨by simp, by simp⟩, by decide, rfl⟩
 
-/-- the fix: only a refused probe proves the socket stale; any other
-probe error raises -/
-def prepFixed (k : Kind) (c : Conn) : Prep :=
-  match k with
-  | .other => .notSocket
-  | .none => .bind
-  | .sock _ _ => if c = .refused then .unlinkBind else .inUse
-
-/-- **Fix meets spec**: the fixed takeover never unlinks a socket somebody
+/-- **Fix meets spec** (shipped `prep`): it never unlinks a socket somebody
 listens on, and still recovers every stale socket that refuses. -/
-theorem prepFixed_safe (k : Kind) (p : Peer) (c : Conn) (hc : ConnectFacts p c) :
-    (prepFixed k c = .unlinkBind → p.listening = false) ∧
-    (∀ d i, k = .sock d i → c = .refused → prepFixed k c = .unlinkBind) := by
+theorem prep_safe (k : Kind) (p : Peer) (c : Conn) (hc : ConnectFacts p c) :
+    (prep k c = .unlinkBind → p.listening = false) ∧
+    (∀ d i, k = .sock d i → c = .refused → prep k c = .unlinkBind) := by
   refine ⟨fun h => ?_, fun d i hk hr => by subst hk; subst hr; rfl⟩
-  unfold prepFixed at h
+  unfold prep at h
   split at h
   · cases h
   · cases h
@@ -113,10 +117,11 @@ theorem prepFixed_safe (k : Kind) (p : Peer) (c : Conn) (hc : ConnectFacts p c) 
     · rename_i hr; exact hc.1 hr
     · cases h
 
-/-- flare and the fix agree whenever the probe succeeds or is refused -/
+/-- the pre-fix code and the shipped one agree whenever the probe succeeds or
+is refused -/
 theorem prep_agrees (k : Kind) (c : Conn) (hc : c = .ok ∨ c = .refused) :
-    prep k c = prepFixed k c := by
-  unfold prep prepFixed
+    prepOld k c = prep k c := by
+  unfold prepOld prep
   rcases hc with rfl | rfl <;> cases k <;> rfl
 
 /-! ## The destructor guard -/
@@ -126,14 +131,14 @@ abbrev FS := Option (Nat × Nat)
 
 /-- `(dev, ino)` recorded by `__init__`: `lstat` right after `bind`, zero
 if it is not a socket or `lstat` fails.
-mirrors flare/uds/listener.mojo:83-94 @59bda50 -/
+mirrors flare/uds/listener.mojo:113-121 -/
 def record (fs : FS) : Nat × Nat :=
   match fs with
   | some (d, i) => (d, i)
   | none => (0, 0)
 
 /-- does `__deinit__` unlink the path.
-mirrors flare/uds/listener.mojo:96-117 @59bda50 -/
+mirrors flare/uds/listener.mojo:123-146 -/
 def deinitUnlinks (cleanup : Bool) (rec : Nat × Nat) (fs : FS) : Bool :=
   cleanup && match fs with
     | some (d, i) => d == rec.1 && i == rec.2 && rec.2 != 0
