@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60730 lines) |
-| Theorems | 3208 |
-| Headline theorems in the axiom audit | 1017 |
+| Lean files | 298 (60774 lines) |
+| Theorems | 3211 |
+| Headline theorems in the axiom audit | 1019 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 0 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 1 of 138 |
 
 Six findings are rated high:
 
@@ -350,12 +350,15 @@ Model: `Reader` holds `buf` plus an Int64 `pos`.
   endiannesses, plus `read_bytes`, `read_utf8` and `skip`.
 - `PReader` is the gRPC `ProtoReader`: `_raw_varint`, `read_tag`, and the
   length-delimited `read_bytes`/`skip`.
-- `guardFixed`, `skipFixed` and `skipLenFixed` are the fixed checks.
+- `guardFixed` and `skipFixed` are the fixed `ByteReader` checks (ENC-04
+  pending). `PReader.skipLen` and `PReader.readBytes` already use
+  `guardFixed` (fixed, ENC-03); `skipLenOld` and `readBytesOld` keep the
+  pre-fix wrapping check for the counterexample.
 
 Mojo:
 
 - flare/io/byte_cursor.mojo:144-340
-- flare/grpc/proto.mojo:207-302
+- flare/grpc/proto.mojo:212-303
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -366,8 +369,8 @@ Mojo:
 | `skip_inv_of_small`, `skipFixed_inv` | `0 ≤ pos ≤ len` is preserved (small `n`; any `n` once fixed) | proved |
 | `readBytesFixed_spec` | fixed `read_bytes(n)` returns exactly `buf[pos:pos+n]` | proved |
 | `readUtf8_wf` | `read_utf8` only returns well-formed UTF-8 | proved |
-| `rawVarint_inv`, `skipLenFixed_inv` | the varint reader and the fixed length skip preserve the invariant | proved |
-| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the unfixed checks accept a length that moves `pos` negative | counterexample |
+| `rawVarint_inv`, `skipLen_inv`, `readBytes_inv` | the varint reader and the shipped (fixed) length skip and `read_bytes` preserve the invariant | proved |
+| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the pre-fix checks (`skipLenOld`; `guard`) accept a length that moves `pos` negative | counterexample |
 
 The varint round trip is in `ProtoVarint.lean`, below.
 
@@ -2662,7 +2665,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo:24-139 | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff` | proved |
 | `Flare.L1.ByteCursor.guard`, `Reader.*` | flare/io/byte_cursor.mojo:144-304 | `guard_iff`, `guard_iff_of_small`, `readU64le_write`, `readUtf8_wf`, `Bugs.ENC_04.counterexample` | proved; counterexample (ENC-04) |
 | `Flare.L1.ByteCursor.writeU16be` … `writeU64le` | flare/io/byte_cursor.mojo:307-340 | `readU16be_write` … `readU64le_write` | proved |
-| `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:207-302 | `rawVarint_inv`, `skipLenFixed_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
+| `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:212-303 | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
 | `Flare.L1.ProtoVarint.writeVarint` | flare/grpc/proto.mojo:108-117 | `writeVarint_length`, `writeVarint_canonical`, `rawVarint_writeVarint` | proved |
 | `Flare.L1.ByteCursor.PReader.rawVarint` | flare/grpc/proto.mojo:212-226 | `rawVarint_writeVarint`, `rawVarint_eleven`, `tenth_byte_truncates` | proved |
 | `Flare.L1.CivilTime.daysFromCivil`, `civilToUnix` | flare/runtime/date_cache.mojo:71-98 | `daysFromCivil_eq_floor`, `daysFromCivil_next`, `Bugs.ENC_02.counterexample` | proved (year ≥ 0); counterexample (ENC-02) |
@@ -2974,7 +2977,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 |---|---|---|---|---|---|
 | ENC-01 | Low | open | `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group | `Flare/Bugs/ENC_01.lean` | `repro/ENC-01_ipv6_multicast_short_group.mojo` (any) |
 | ENC-02 | Low | open | civil-time conversion is one day off before 0000-03-01 | `Flare/Bugs/ENC_02.lean` | `repro/ENC-02_civil_time_negative_years.mojo` (any) |
-| ENC-03 | High | open | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
+| ENC-03 | High | resolved | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
 | ENC-04 | Medium | open | `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length | `Flare/Bugs/ENC_04.lean` | `repro/ENC-04_byte_reader_need_overflow.mojo` (any) |
 | NET-01 | High | open | `UdpSocket.recv_from` reports the wrong sender for IPv6 peers | `Flare/Bugs/NET_01.lean` | `repro/NET-01_udp_recvfrom_ipv6_sender.mojo` (any) |
 | NET-02 | Low | open | `write_all` livelocks if `send` returns 0 | `Flare/Bugs/NET_02.lean` | `repro/NET-02_write_all_zero_send_livelock.mojo` (any) |
@@ -3192,6 +3195,7 @@ input, and `fixed_rejects` proves it rejects the trace.
 Repro: `formal/repro/ENC-03_proto_length_overflow.mojo`, observed
 `BUG REPRODUCED: skip() accepted a length of 2^63-1 in an 11-byte message; pos = -9223372036854775799 has_more() = True`.
 Flip (both sites): `OK: skip() rejects a length-delimited field longer than the message`, exit 0.
+Status: resolved. Both sites in `flare/grpc/proto.mojo` now test `n > len(self.data) - self.pos`; the model's `PReader.skipLen` / `readBytes` mirror the fixed code (the old ones are `skipLenOld` / `readBytesOld`, used by `Bugs.ENC_03.counterexample`). Tests: `tests/grpc/test_grpc_proto.mojo::test_skip_rejects_length_beyond_message`, `::test_read_bytes_rejects_length_beyond_message`, `::test_skip_len_exact_remaining_ok` and `tests/grpc/test_grpc_interceptor_health.mojo::test_health_request_huge_length_raises`.
 
 #### ENC-04: `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length
 

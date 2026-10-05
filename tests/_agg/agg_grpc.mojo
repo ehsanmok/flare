@@ -110,6 +110,9 @@ from test_grpc_interceptor_health import (
     test_health_request_roundtrip as test_grpc_interceptor_health__test_health_request_roundtrip,
 )
 from test_grpc_interceptor_health import (
+    test_health_request_huge_length_raises as test_grpc_interceptor_health__test_health_request_huge_length_raises,
+)
+from test_grpc_interceptor_health import (
     test_watch_replays_status_transitions as test_grpc_interceptor_health__test_watch_replays_status_transitions,
 )
 from test_grpc_interceptor_health import (
@@ -132,6 +135,15 @@ from test_grpc_proto import (
 )
 from test_grpc_proto import (
     test_skip_unknown_field as test_grpc_proto__test_skip_unknown_field,
+)
+from test_grpc_proto import (
+    test_skip_rejects_length_beyond_message as test_grpc_proto__test_skip_rejects_length_beyond_message,
+)
+from test_grpc_proto import (
+    test_read_bytes_rejects_length_beyond_message as test_grpc_proto__test_read_bytes_rejects_length_beyond_message,
+)
+from test_grpc_proto import (
+    test_skip_len_exact_remaining_ok as test_grpc_proto__test_skip_len_exact_remaining_ok,
 )
 from test_grpc_reflection import (
     test_request_decode_list_services as test_grpc_reflection__test_request_decode_list_services,
@@ -331,6 +343,9 @@ def main() raises:
     suite.test[test_grpc_interceptor_health__test_health_unknown_service]()
     suite.test[test_grpc_interceptor_health__test_health_request_roundtrip]()
     suite.test[
+        test_grpc_interceptor_health__test_health_request_huge_length_raises
+    ]()
+    suite.test[
         test_grpc_interceptor_health__test_watch_replays_status_transitions
     ]()
     suite.test[
@@ -343,6 +358,9 @@ def main() raises:
     suite.test[test_grpc_proto__test_fixed_and_float]()
     suite.test[test_grpc_proto__test_embedded_message]()
     suite.test[test_grpc_proto__test_skip_unknown_field]()
+    suite.test[test_grpc_proto__test_skip_rejects_length_beyond_message]()
+    suite.test[test_grpc_proto__test_read_bytes_rejects_length_beyond_message]()
+    suite.test[test_grpc_proto__test_skip_len_exact_remaining_ok]()
     # tests/grpc/test_grpc_reflection.mojo
     suite.test[test_grpc_reflection__test_request_decode_list_services]()
     suite.test[test_grpc_reflection__test_list_services_response]()

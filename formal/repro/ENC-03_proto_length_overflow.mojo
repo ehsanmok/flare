@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: ENC-03 fixed on fix/formal-findings
 """ENC-03: ProtoReader accepts a length-delimited field of length 2^63-1;
 the cursor wraps negative and the next read is out of bounds.
 
@@ -10,7 +11,7 @@ flare/grpc/proto.mojo:282-283 and :299-300 @59bda50.
 
 Expected: skip()/read_bytes() raise "truncated" when the declared length
 exceeds the remaining bytes (protobuf length-delimited records must fit).
-Actual: the check `self.pos + n > len(self.data)` is evaluated in wrapping
+Before the fix: the check `self.pos + n > len(self.data)` is evaluated in wrapping
 Int arithmetic; with n = 2^63 - 1 the sum is negative, the check passes and
 pos becomes negative. decode_health_request (grpc/health.mojo:47-55) runs
 exactly this loop on the request body, so the 11-byte health-check request
@@ -27,7 +28,17 @@ from flare.grpc.proto import ProtoReader
 def main() raises:
     # field 2, wire type LEN (0x12), length varint 0x7FFFFFFFFFFFFFFF
     var msg: List[UInt8] = [
-        0x12, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x00
+        0x12,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0x7F,
+        0x00,
     ]
     var r = ProtoReader(Span[UInt8, _](msg))
     var t = r.read_tag()
@@ -40,8 +51,10 @@ def main() raises:
         skipped = False
     if skipped:
         print(
-            "BUG REPRODUCED: skip() accepted a length of 2^63-1 in an 11-byte"
-            " message; pos =",
+            (
+                "BUG REPRODUCED: skip() accepted a length of 2^63-1 in an"
+                " 11-byte message; pos ="
+            ),
             r.pos,
             "has_more() =",
             r.has_more(),

@@ -183,12 +183,15 @@ Model: `Reader` holds `buf` plus an Int64 `pos`.
   endiannesses, plus `read_bytes`, `read_utf8` and `skip`.
 - `PReader` is the gRPC `ProtoReader`: `_raw_varint`, `read_tag`, and the
   length-delimited `read_bytes`/`skip`.
-- `guardFixed`, `skipFixed` and `skipLenFixed` are the fixed checks.
+- `guardFixed` and `skipFixed` are the fixed `ByteReader` checks (ENC-04
+  pending). `PReader.skipLen` and `PReader.readBytes` already use
+  `guardFixed` (fixed, ENC-03); `skipLenOld` and `readBytesOld` keep the
+  pre-fix wrapping check for the counterexample.
 
 Mojo:
 
 - flare/io/byte_cursor.mojo:144-340
-- flare/grpc/proto.mojo:207-302
+- flare/grpc/proto.mojo:212-303
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -199,8 +202,8 @@ Mojo:
 | `skip_inv_of_small`, `skipFixed_inv` | `0 ≤ pos ≤ len` is preserved (small `n`; any `n` once fixed) | proved |
 | `readBytesFixed_spec` | fixed `read_bytes(n)` returns exactly `buf[pos:pos+n]` | proved |
 | `readUtf8_wf` | `read_utf8` only returns well-formed UTF-8 | proved |
-| `rawVarint_inv`, `skipLenFixed_inv` | the varint reader and the fixed length skip preserve the invariant | proved |
-| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the unfixed checks accept a length that moves `pos` negative | counterexample |
+| `rawVarint_inv`, `skipLen_inv`, `readBytes_inv` | the varint reader and the shipped (fixed) length skip and `read_bytes` preserve the invariant | proved |
+| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the pre-fix checks (`skipLenOld`; `guard`) accept a length that moves `pos` negative | counterexample |
 
 The varint round trip is in `ProtoVarint.lean`, below.
 
@@ -467,6 +470,7 @@ input, and `fixed_rejects` proves it rejects the trace.
 Repro: `formal/repro/ENC-03_proto_length_overflow.mojo`, observed
 `BUG REPRODUCED: skip() accepted a length of 2^63-1 in an 11-byte message; pos = -9223372036854775799 has_more() = True`.
 Flip (both sites): `OK: skip() rejects a length-delimited field longer than the message`, exit 0.
+Status: resolved. Both sites in `flare/grpc/proto.mojo` now test `n > len(self.data) - self.pos`; the model's `PReader.skipLen` / `readBytes` mirror the fixed code (the old ones are `skipLenOld` / `readBytesOld`, used by `Bugs.ENC_03.counterexample`). Tests: `tests/grpc/test_grpc_proto.mojo::test_skip_rejects_length_beyond_message`, `::test_read_bytes_rejects_length_beyond_message`, `::test_skip_len_exact_remaining_ok` and `tests/grpc/test_grpc_interceptor_health.mojo::test_health_request_huge_length_raises`.
 
 ### ENC-04: `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length
 
@@ -561,7 +565,7 @@ Flip: `OK: skip(Int.MAX) raises; pos stays 1`, exit 0.
 | `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo:24-139 | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff` | proved |
 | `Flare.L1.ByteCursor.guard`, `Reader.*` | flare/io/byte_cursor.mojo:144-304 | `guard_iff`, `guard_iff_of_small`, `readU64le_write`, `readUtf8_wf`, `Bugs.ENC_04.counterexample` | proved; counterexample (ENC-04) |
 | `Flare.L1.ByteCursor.writeU16be` … `writeU64le` | flare/io/byte_cursor.mojo:307-340 | `readU16be_write` … `readU64le_write` | proved |
-| `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:207-302 | `rawVarint_inv`, `skipLenFixed_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
+| `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:212-303 | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
 | `Flare.L1.ProtoVarint.writeVarint` | flare/grpc/proto.mojo:108-117 | `writeVarint_length`, `writeVarint_canonical`, `rawVarint_writeVarint` | proved |
 | `Flare.L1.ByteCursor.PReader.rawVarint` | flare/grpc/proto.mojo:212-226 | `rawVarint_writeVarint`, `rawVarint_eleven`, `tenth_byte_truncates` | proved |
 | `Flare.L1.CivilTime.daysFromCivil`, `civilToUnix` | flare/runtime/date_cache.mojo:71-98 | `daysFromCivil_eq_floor`, `daysFromCivil_next`, `Bugs.ENC_02.counterexample` | proved (year ≥ 0); counterexample (ENC-02) |

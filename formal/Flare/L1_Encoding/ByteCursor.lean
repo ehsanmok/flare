@@ -8,8 +8,10 @@ length-delimited guard (`grpc/proto.mojo`)
 `ByteReader` is `{buf, pos : Int}`; every read calls `_need(n)`, which
 raises unless `n ≥ 0 ∧ pos + n ≤ len(buf)`. The check is computed in Mojo
 `Int` (`Int64`, wrapping), so `pos + n` can wrap negative and pass the check.
-The same expression guards `ProtoReader.read_bytes` / `ProtoReader.skip` in
-`grpc/proto.mojo`, where `n` is a 64-bit varint taken from the wire.
+The same expression guarded `ProtoReader.read_bytes` / `ProtoReader.skip` in
+`grpc/proto.mojo`, where `n` is a 64-bit varint taken from the wire; that
+reader is fixed (ENC-03) and uses `guardFixed` (`n > len - pos`), the
+pre-fix versions are `PReader.skipLenOld` / `readBytesOld`.
 
 * `need_iff` gives the exact acceptance set of `_need`: in-bounds requests
   **or** requests whose sum `pos + n` overflows `Int64`.
@@ -53,8 +55,8 @@ theorem lenI_toInt (b : Bytes) (h : b.length < 2 ^ 63) : (lenI b).toInt = b.leng
 /-! ## The bounds guard -/
 
 /-- `n < 0 or pos + n > len` is *false* (the guard does not raise).
-mirrors flare/io/byte_cursor.mojo:144-155 @59bda50 and
-flare/grpc/proto.mojo:283,300 @59bda50 -/
+mirrors flare/io/byte_cursor.mojo:144-155 @59bda50 (the same expression in
+flare/grpc/proto.mojo was replaced by `guardFixed`, ENC-03) -/
 def guard (pos n : Int64) (len : Nat) : Bool :=
   !(decide (n < 0) || decide (pos + n > Int64.ofNat len))
 
@@ -443,16 +445,36 @@ def readTag (r : PReader) : Option ((Int64 × Int64) × PReader) :=
     let wire := (key &&& 7).toInt64
     if field ≤ 0 then none else some ((field, wire), r)
 
-/-- mirrors flare/grpc/proto.mojo:298-302 @59bda50 (`skip`, `WIRE_LEN` branch) -/
+/-- mirrors flare/grpc/proto.mojo:300-303 (fixed, ENC-03) (`skip`, `WIRE_LEN` branch):
+`n < 0 or n > len(data) - pos` raises, otherwise `pos += n`. -/
 def skipLen (r : PReader) : Option PReader :=
+  match rawVarint r with
+  | none => none
+  | some (v, r) =>
+    let n := v.toInt64
+    if guardFixed r.pos n r.data.length then some { r with pos := r.pos + n } else none
+
+/-- mirrors flare/grpc/proto.mojo:275-285 (fixed, ENC-03) (`read_bytes`) -/
+def readBytes (r : PReader) : Option (Bytes × PReader) :=
+  match rawVarint r with
+  | none => none
+  | some (v, r) =>
+    let n := v.toInt64
+    if guardFixed r.pos n r.data.length then
+      some ((r.data.drop r.pos.toInt.toNat).take n.toInt.toNat, { r with pos := r.pos + n })
+    else none
+
+/-- Pre-fix `skip` (`WIRE_LEN`), kept so `Flare.Bugs.ENC_03` stays checkable:
+guarded by the wrapping `pos + n > len` test. -/
+def skipLenOld (r : PReader) : Option PReader :=
   match rawVarint r with
   | none => none
   | some (v, r) =>
     let n := v.toInt64
     if guard r.pos n r.data.length then some { r with pos := r.pos + n } else none
 
-/-- mirrors flare/grpc/proto.mojo:281-289 @59bda50 (`read_bytes`) -/
-def readBytes (r : PReader) : Option (Bytes × PReader) :=
+/-- Pre-fix `read_bytes` (same wrapping guard). -/
+def readBytesOld (r : PReader) : Option (Bytes × PReader) :=
   match rawVarint r with
   | none => none
   | some (v, r) =>
@@ -460,14 +482,6 @@ def readBytes (r : PReader) : Option (Bytes × PReader) :=
     if guard r.pos n r.data.length then
       some ((r.data.drop r.pos.toInt.toNat).take n.toInt.toNat, { r with pos := r.pos + n })
     else none
-
-/-- The fix: `n < 0 or n > len(data) - pos`. -/
-def skipLenFixed (r : PReader) : Option PReader :=
-  match rawVarint r with
-  | none => none
-  | some (v, r) =>
-    let n := v.toInt64
-    if guardFixed r.pos n r.data.length then some { r with pos := r.pos + n } else none
 
 def Inv (r : PReader) : Prop := PosInv r.pos r.data.length
 
@@ -501,10 +515,25 @@ theorem rawVarint_inv (r : PReader) (v : UInt64) (r' : PReader) (hI : r.Inv)
     (h : r.rawVarint = some (v, r')) : r'.data = r.data ∧ r'.Inv :=
   rawVarint_go_inv r 0 r.pos 0 v r' hI h
 
-/-- With the fixed guard, skipping a length-delimited field preserves
+/-- Skipping a length-delimited field preserves
 `0 ≤ pos ≤ len(data)` for every wire input. -/
-theorem skipLenFixed_inv (r r' : PReader) (hI : r.Inv) (h : r.skipLenFixed = some r') : r'.Inv := by
-  unfold PReader.skipLenFixed at h
+theorem skipLen_inv (r r' : PReader) (hI : r.Inv) (h : r.skipLen = some r') : r'.Inv := by
+  unfold PReader.skipLen at h
+  split at h
+  · cases h
+  · next v r1 hv =>
+    obtain ⟨hd, hI1⟩ := rawVarint_inv r v r1 hI hv
+    dsimp only at h
+    split at h
+    · next hg =>
+      cases h
+      exact (advance_inv _ _ _ hI1 hg).1
+    · cases h
+
+/-- Likewise for the shipped `read_bytes`: the cursor stays in `[0, len(data)]`. -/
+theorem readBytes_inv (r r' : PReader) (b : Bytes) (hI : r.Inv) (h : r.readBytes = some (b, r')) :
+    r'.Inv := by
+  unfold PReader.readBytes at h
   split at h
   · cases h
   · next v r1 hv =>

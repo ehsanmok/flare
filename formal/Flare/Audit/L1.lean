@@ -39,7 +39,8 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.ByteCursor.skipFixed_inv
 #print axioms Flare.L1.ByteCursor.readBytesFixed_spec
 #print axioms Flare.L1.ByteCursor.readUtf8_wf
-#print axioms Flare.L1.ByteCursor.skipLenFixed_inv
+#print axioms Flare.L1.ByteCursor.skipLen_inv
+#print axioms Flare.L1.ByteCursor.readBytes_inv
 -- Civil time
 #print axioms Flare.L1.CivilTime.daysFloor_spec
 #print axioms Flare.L1.CivilTime.civilFloor_daysFloor
@@ -130,5 +131,6 @@ import Flare.L1_Encoding
 #print axioms Flare.Bugs.ENC_02.fixed_spec
 #print axioms Flare.Bugs.ENC_03.counterexample
 #print axioms Flare.Bugs.ENC_03.fixed_preserves_inv
+#print axioms Flare.Bugs.ENC_03.fixed_read_bytes_preserves_inv
 #print axioms Flare.Bugs.ENC_04.counterexample
 #print axioms Flare.Bugs.ENC_04.fixed_preserves_inv

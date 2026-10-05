@@ -129,6 +129,59 @@ def test_skip_unknown_field() raises:
     assert_equal(found, Int64(7))
 
 
+def _huge_len_msg() -> List[UInt8]:
+    # field 2, wire type LEN (0x12), length varint 0x7FFFFFFFFFFFFFFF.
+    return [0x12, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x00]
+
+
+def test_skip_rejects_length_beyond_message() raises:
+    """ENC-03: ``pos + n`` used to wrap negative for n = 2^63-1."""
+    var msg = _huge_len_msg()
+    var r = ProtoReader(Span[UInt8, _](msg))
+    var t = r.read_tag()
+    assert_equal(t[0], 2)
+    assert_equal(t[1], WIRE_LEN)
+    var raised = False
+    try:
+        r.skip(t[1])
+    except:
+        raised = True
+    assert_true(raised)
+    assert_equal(r.pos, 10)  # cursor stays within [0, len]
+
+
+def test_read_bytes_rejects_length_beyond_message() raises:
+    """ENC-03: ``read_bytes`` must not allocate/read for n = 2^63-1."""
+    var msg = _huge_len_msg()
+    var r = ProtoReader(Span[UInt8, _](msg))
+    _ = r.read_tag()
+    var raised = False
+    try:
+        _ = r.read_bytes()
+    except:
+        raised = True
+    assert_true(raised)
+    assert_equal(r.pos, 10)
+
+
+def test_skip_len_exact_remaining_ok() raises:
+    """A length equal to the remaining bytes is accepted (boundary)."""
+    var msg: List[UInt8] = [0x12, 0x02, 0xAA, 0xBB]
+    var r = ProtoReader(Span[UInt8, _](msg))
+    var t = r.read_tag()
+    r.skip(t[1])
+    assert_true(not r.has_more())
+    var short: List[UInt8] = [0x12, 0x03, 0xAA, 0xBB]
+    var r2 = ProtoReader(Span[UInt8, _](short))
+    var t2 = r2.read_tag()
+    var raised = False
+    try:
+        r2.skip(t2[1])
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def main() raises:
     print("=" * 60)
     print("test_grpc_proto.mojo -- proto3 wire codec")

@@ -181,6 +181,49 @@ def test_health_request_roundtrip() raises:
     assert_equal(decode_health_request(Span[UInt8, _](req)), "svc.A")
 
 
+def test_health_request_huge_length_raises() raises:
+    """ENC-03: the 11-byte request used to abort the decoder (OOB read)."""
+    var req: List[UInt8] = [
+        0x12,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0x7F,
+        0x00,
+    ]
+    var raised = False
+    try:
+        _ = decode_health_request(Span[UInt8, _](req))
+    except:
+        raised = True
+    assert_true(raised)
+    # Same shape on field 1 (read_bytes path).
+    var req1: List[UInt8] = [
+        0x0A,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0x7F,
+        0x00,
+    ]
+    raised = False
+    try:
+        _ = decode_health_request(Span[UInt8, _](req1))
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def test_watch_replays_status_transitions() raises:
     # Each set_status is a transition; Watch streams the current status
     # plus every change as its own HealthCheckResponse message.

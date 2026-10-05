@@ -274,7 +274,9 @@ struct ProtoReader(Copyable):
 
     def read_bytes(mut self) raises -> List[UInt8]:
         var n = Int(self._raw_varint())
-        if n < 0 or self.pos + n > len(self.data):
+        # Compare against the remaining length: ``self.pos + n`` wraps for
+        # a wire length near 2**63 and would move ``pos`` negative.
+        if n < 0 or n > len(self.data) - self.pos:
             raise Error("proto: truncated length-delimited field")
         var out = List[UInt8](capacity=n)
         for i in range(n):
@@ -297,7 +299,7 @@ struct ProtoReader(Copyable):
             _ = self._raw_fixed(4)
         elif wire == WIRE_LEN:
             var n = Int(self._raw_varint())
-            if n < 0 or self.pos + n > len(self.data):
+            if n < 0 or n > len(self.data) - self.pos:
                 raise Error("proto: truncated skipped field")
             self.pos += n
         else:

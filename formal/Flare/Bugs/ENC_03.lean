@@ -3,8 +3,13 @@ import Flare.L1_Encoding.ByteCursor
 # ENC-03: `ProtoReader` length check overflows; a 64-bit length field moves
 the cursor negative and the next read is out of bounds
 
-flare/grpc/proto.mojo:282-283 and :299-300 @59bda50 (`read_bytes`, `skip`
-for `WIRE_LEN`):
+Status: resolved. `ProtoReader.read_bytes` / `skip` now test
+`n > len(data) - pos`; the model's `PReader.skipLen` / `readBytes` mirror
+the fixed code and the counterexample below is about the pre-fix
+`PReader.skipLenOld`.
+
+Pre-fix code, flare/grpc/proto.mojo:282-283 and :299-300 @59bda50
+(`read_bytes`, `skip` for `WIRE_LEN`):
 
     var n = Int(self._raw_varint())
     if n < 0 or self.pos + n > len(self.data):
@@ -29,10 +34,12 @@ health-check request aborts the server (bounds assertion) or reads wild
 memory in an unchecked build. `read_bytes` passes the same check and then
 calls `List(capacity=n)` with `n ≈ 2^63`.
 
-* `counterexample`: the trace above, in the model.
-* Fix: `if n < 0 or n > len(self.data) - self.pos` (`guardFixed`);
-  `fixed_preserves_inv` shows it keeps `0 ≤ pos ≤ len` for every input,
-  and `fixed_rejects` that it rejects this message.
+* `counterexample`: the trace above, in the pre-fix model (`skipLenOld`).
+* Fix: `if n < 0 or n > len(self.data) - self.pos` (`guardFixed`), now the
+  shipped `PReader.skipLen`; `fixed_preserves_inv` shows it keeps
+  `0 ≤ pos ≤ len` for every input, and `fixed_rejects` that it rejects this
+  message (`read_bytes` likewise: `fixed_read_bytes_preserves_inv`,
+  `fixed_read_bytes_rejects`).
 -/
 namespace Flare.Bugs.ENC_03
 open Flare.L1.ByteCursor
@@ -50,15 +57,15 @@ def r1 : PReader := ⟨payload, 1⟩
 theorem r1_inv : r1.Inv := by
   simp only [PReader.Inv, PosInv, r1, payload]; decide
 
-/-- `skip` succeeds and leaves the cursor at a negative position while
+/-- The pre-fix `skip` succeeds and leaves the cursor at a negative position while
 `has_more()` still holds. -/
 theorem skip_result :
-    (r1.skipLen).map (fun r => (r.pos, r.hasMore)) = some (-9223372036854775799, true) := by
+    (r1.skipLenOld).map (fun r => (r.pos, r.hasMore)) = some (-9223372036854775799, true) := by
   native_decide
 
-theorem counterexample : ∃ r', r1.Inv ∧ r1.skipLen = some r' ∧ ¬ r'.Inv ∧ r'.hasMore = true := by
+theorem counterexample : ∃ r', r1.Inv ∧ r1.skipLenOld = some r' ∧ ¬ r'.Inv ∧ r'.hasMore = true := by
   have h := skip_result
-  cases e : r1.skipLen with
+  cases e : r1.skipLenOld with
   | none => rw [e] at h; cases h
   | some r' =>
     rw [e] at h
@@ -70,9 +77,15 @@ theorem counterexample : ∃ r', r1.Inv ∧ r1.skipLen = some r' ∧ ¬ r'.Inv �
     exact absurd this (by decide)
 
 /-- The fix keeps the cursor invariant for every wire input. -/
-theorem fixed_preserves_inv (r r' : PReader) (hI : r.Inv) (h : r.skipLenFixed = some r') : r'.Inv :=
-  skipLenFixed_inv r r' hI h
+theorem fixed_preserves_inv (r r' : PReader) (hI : r.Inv) (h : r.skipLen = some r') : r'.Inv :=
+  skipLen_inv r r' hI h
 
-theorem fixed_rejects : r1.skipLenFixed = none := by native_decide
+theorem fixed_read_bytes_preserves_inv (r r' : PReader) (b : Bytes) (hI : r.Inv)
+    (h : r.readBytes = some (b, r')) : r'.Inv :=
+  readBytes_inv r r' b hI h
+
+theorem fixed_rejects : r1.skipLen = none := by native_decide
+
+theorem fixed_read_bytes_rejects : (PReader.readBytes ⟨payload, 1⟩) = none := by native_decide
 
 end Flare.Bugs.ENC_03
