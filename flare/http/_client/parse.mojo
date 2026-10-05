@@ -390,6 +390,10 @@ def _parse_status_line(line: String) raises -> _StatusLine:
         if c < 48 or c > 57:
             raise NetworkError("non-numeric HTTP status code in: " + line)
         code = code * 10 + (c - 48)
+    # status-code is exactly 3DIGIT (RFC 9112 sec 4): only SP, or the end of
+    # the line, may follow it. "2041" is not a 204.
+    if rest.byte_length() > 3 and rest.unsafe_ptr()[unsafe_offset=3] != 32:
+        raise NetworkError("HTTP status code not three digits: " + line)
     var reason = String("")
     if rest.byte_length() > 4:
         reason = String(String(unsafe_from_utf8=rest.as_bytes()[4:]))

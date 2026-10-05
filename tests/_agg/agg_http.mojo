@@ -481,6 +481,12 @@ from test_client_response_parse import (
     test_crlf_head_is_still_parsed as test_client_response_parse__test_crlf_head_is_still_parsed,
 )
 from test_client_response_parse import (
+    test_status_code_of_more_than_three_digits_is_refused as test_client_response_parse__test_status_code_of_more_than_three_digits_is_refused,
+)
+from test_client_response_parse import (
+    test_status_line_with_and_without_reason_is_parsed as test_client_response_parse__test_status_line_with_and_without_reason_is_parsed,
+)
+from test_client_response_parse import (
     test_whitespace_before_colon_is_refused as test_client_response_parse__test_whitespace_before_colon_is_refused,
 )
 from test_client_response_parse import (
@@ -4477,6 +4483,12 @@ def main() raises:
     ]()
     suite.test[test_client_response_parse__test_bare_lf_in_head_is_refused]()
     suite.test[test_client_response_parse__test_crlf_head_is_still_parsed]()
+    suite.test[
+        test_client_response_parse__test_status_code_of_more_than_three_digits_is_refused
+    ]()
+    suite.test[
+        test_client_response_parse__test_status_line_with_and_without_reason_is_parsed
+    ]()
     suite.test[
         test_client_response_parse__test_whitespace_before_colon_is_refused
     ]()

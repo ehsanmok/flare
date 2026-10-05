@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61666 lines) |
+| Lean files | 298 (61674 lines) |
 | Theorems | 3245 |
 | Headline theorems in the axiom audit | 1044 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 54 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 55 of 138 |
 
 Six findings are rated high:
 
@@ -1068,7 +1068,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 
 **Model.**
 - `respFraming` mirrors `_response_framing` (`_client/parse.mojo:128-170`), shared by the buffered, framed and streaming readers.
-- `parseStatus` mirrors `_parse_status_line` (`318-352`).
+- `parseStatusOld` mirrors `_parse_status_line` (`318-352`) before the H1-08 fix; `parseStatus` is the shipped parser (`362-403`).
 - `san`, `findCRLF2`, `splitGo`/`splitLines` and `headOld` mirror `_bytes_to_str`, `_find_crlf2_from`, `_split_lines` and the line loop of `_parse_response_head` (`89-125`, `233-306`). `lfHead` is an RFC 9112 §2.2 recipient that ends lines at LF.
 - `cDec` mirrors `_decode_chunked` (`497-578`); `cHex`, `cTr`, `trailerOk` its size and trailer lines.
 - `canReuse` mirrors the keep-alive decision of the pooled reader (`836-884`).
@@ -1081,7 +1081,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 | `framing_chunked_iff`, `framing_length_iff`, `framing_close_iff` | Exactly: chunked iff a single TE value `chunked` and no CL; length n iff no TE and a single valid CL = n; close-delimited iff neither (§6.3 points 4-8). | proved |
 | `cDec_agree`, `framed_chunked_agrees` | On any buffer the shipped scanner accepts at `e`, the client decoder either raises or returns exactly the server decoder's bytes, reading nothing past `e`. So the pooled reader's chunked path is right. | proved |
 | `cRead_complete` | With the scan on the read-to-EOF path (`cRead`), a returned body is always a complete chunked body. | proved (H1-06 fix) |
-| `parseStatusFixed_delimited` | With the delimiter check, the code is three digits followed by SP or the end of the line (`CodeDelimited`). | proved (H1-08 fix) |
+| `parseStatus_delimited` | With the delimiter check, the code is three digits followed by SP or the end of the line (`CodeDelimited`). | proved (H1-08 fix) |
 | `splitGo_join`, `lfGo_join`, `headImpl_agrees` | With bare LF and empty lines refused, the head lines and body start equal those of the LF-recognising recipient. | proved (H1-07 fix) |
 | `canReuseFixed_ok` | With the version check, reuse implies HTTP/1.1 without `close` (RFC 9112 §9.3). | proved (H1-09 fix) |
 | `bufferedClose_safe` | The buffered guard never returns a close-delimited TLS body that ended without close_notify. | proved |
@@ -2782,7 +2782,7 @@ advances the wheel to `now` at the top of every iteration
 | `ObsFold.isSPHT`, `aStrip`, `colonAt`, `fields` | `_server/parse.mojo:203-320`, `parse_util.mojo:65-90` | `fold_unfold`, `strict_no_fold`, `fields_ok_strict`, `fieldsFixed_valid`, `Bugs.H1_10.*` | proved (strict) / counterexample (H1-10) / fix proved |
 | `ClientResponse.bodyless`, `respFraming` | `_client/parse.mojo:128-170` | `framing_bodyless`, `framing_te_cl_reject`, `framing_dup_cl`, `framing_*_iff` | proved |
 | `ClientChunked.isSWS`, `pyStrip`, `hexAcc`, `cHex`, `trailerOk`, `cTr`, `cDec`, `cRead` (`cReadOld` = pre-fix) | `_client/parse.mojo:497-578`, `600-630` | `cDec_agree`, `framed_chunked_agrees`, `cRead_complete`, `Bugs.H1_06.*` | proved (framed path) / counterexample (read-to-EOF path, H1-06) / fix proved |
-| `ClientResponse.parseStatus` | `_client/parse.mojo:318-352` | `parseStatusFixed_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
+| `ClientResponse.parseStatusOld`, `parseStatus` | `_client/parse.mojo:318-352` | `parseStatus_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
 | `ClientResponse.san`, `findCRLF2`, `splitGo`, `splitLines`, `headOld` | `_client/parse.mojo:89-125`, `233-306` | `headImpl_agrees`, `Bugs.H1_07.*` | counterexample (H1-07) / fix proved |
 | `ClientResponse.canReuse` | `_client/parse.mojo:836-884` | `canReuseFixed_ok`, `Bugs.H1_09.*` | counterexample (H1-09) / fix proved |
 | `ClientResponse.dlCloseOld`, `dlClose`, `bufferedClose` | `_client/download.mojo:215-220`, `_client/parse.mojo:665-683` | `bufferedClose_safe`, `Bugs.H1_11.*` | counterexample (H1-11) / proved (buffered) |
@@ -3024,7 +3024,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-05 | Low | resolved | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
 | H1-06 | Medium | resolved | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
 | H1-07 | Low | resolved | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
-| H1-08 | Low | open | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
+| H1-08 | Low | resolved | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
 | H1-09 | Low | open | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
 | H1-10 | Low | open | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
 | H1-11 | Medium | resolved | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
@@ -3816,11 +3816,13 @@ Status: resolved. `_parse_response_head` now refuses a head that holds a bare LF
 
 #### H1-08: the client takes the first three digits of a longer status code
 
+Status: resolved. `_parse_status_line` now requires SP, or the end of the line, after the three status digits and raises otherwise. The counterexample is about `parseStatusOld`; `Bugs.H1_08.fixed_delimited` is about the shipped `parseStatus`.
+
 - **Severity:** Low. A malformed status line `HTTP/1.1 2041 OK` is read as 204. Status 204 has no body, so on a pooled connection the real body is parsed as the next response.
 - **RFC:** RFC 9112 §4: `status-line = HTTP-version SP status-code SP [reason-phrase]`, with `status-code = 3DIGIT`.
 - **What goes wrong:** `_parse_status_line` (`_client/parse.mojo:318-352`) checks three digits after the first SP and ignores the next byte.
-- **Counterexample:** `Bugs.H1_08.counterexample`: `shipped_parses` gives `parseStatus "HTTP/1.1 2041 OK" = some 204`, and `not_delimited` proves no decomposition of the line has 204 as a delimited three-digit code.
-- **Fix:** require SP or the end of the line after the third digit. `Bugs.H1_08.fixed_delimited` (= `parseStatusFixed_delimited`).
+- **Counterexample:** `Bugs.H1_08.counterexample`: `old_parses` gives `parseStatusOld "HTTP/1.1 2041 OK" = some 204`, and `not_delimited` proves no decomposition of the line has 204 as a delimited three-digit code.
+- **Fix:** require SP or the end of the line after the third digit. `Bugs.H1_08.fixed_delimited` (= `parseStatus_delimited`).
 - **Repro:** `formal/repro/H1-08_status_code_extra_digits.mojo`
 - **Observed (3 runs):** `BUG REPRODUCED: four-digit status code accepted (accepted status=204 body_len=0)`
 - **Flip:** `OK: four-digit status code refused (raised: NetworkError: HTTP status code not three digits: HTTP/1.1 2041 OK)`; `flare/http/_client/parse.mojo` restored.

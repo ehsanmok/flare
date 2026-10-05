@@ -9,7 +9,8 @@ import Flare.L3_Protocol.H1.ClientChunked
   buffered, framed and streaming readers; the `*_iff` theorems prove it
   implements §6.3 (with flare's stricter choices: TE + CL and a repeated
   CL are refused).
-* `parseStatus` mirrors `_parse_status_line` (finding H1-08).
+* `parseStatusOld` mirrors `_parse_status_line` before the H1-08 fix;
+  `parseStatus` is the shipped parser (finding H1-08).
 * `canReuse` mirrors the keep-alive decision of the framed reader
   (finding H1-09).
 * `splitGo`/`headOld` mirror `_find_crlf2_from`, `_split_lines` and the
@@ -125,9 +126,10 @@ def isDig (c : UInt8) : Bool := 48 ≤ c && c ≤ 57
 def HTTP_ : Bytes := Bytes.ofString "HTTP/"
 
 /-- `_parse_status_line`: `HTTP/` prefix, first SP, `lstrip`, three digits;
-the reason is whatever follows byte 4.
+the reason is whatever follows byte 4. This is the parser before the H1-08
+fix; kept for the counterexample.
 mirrors flare/http/_client/parse.mojo:318-352 @59bda50 -/
-def parseStatus (line : Bytes) : Option Nat :=
+def parseStatusOld (line : Bytes) : Option Nat :=
   if line.take 5 ≠ HTTP_ then none else
   match findB 32 line with
   | none => none
@@ -139,8 +141,10 @@ def parseStatus (line : Bytes) : Option Nat :=
       else none
     | _ => none
 
-/-- The H1-08 fix: the code must be followed by SP or the end of line. -/
-def parseStatusFixed (line : Bytes) : Option Nat :=
+/-- The shipped `_parse_status_line` (H1-08 fix): the code must be followed by
+SP or the end of line.
+mirrors flare/http/_client/parse.mojo:362-403 (fixed, H1-08) -/
+def parseStatus (line : Bytes) : Option Nat :=
   if line.take 5 ≠ HTTP_ then none else
   match findB 32 line with
   | none => none
@@ -172,9 +176,9 @@ theorem split_at_findB {line : Bytes} {sp : Nat} (h : findB 32 line = some sp) :
 theorem takeWhile_dropWhile (p : UInt8 → Bool) (l : Bytes) : l = l.takeWhile p ++ l.dropWhile p :=
   (List.takeWhile_append_dropWhile).symm
 
-theorem parseStatusFixed_delimited (line : Bytes) (code : Nat) (h : parseStatusFixed line = some code) :
+theorem parseStatus_delimited (line : Bytes) (code : Nat) (h : parseStatus line = some code) :
     CodeDelimited line code := by
-  unfold parseStatusFixed at h
+  unfold parseStatus at h
   split at h; · cases h
   split at h; · cases h
   rename_i sp hsp

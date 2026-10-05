@@ -630,6 +630,10 @@ to run to the first CRLFCRLF with empty lines skipped, so an
 LF-recognising cache in front of the client could see header-shaped bytes
 as body.
 
+HTTP/1.1 client: a status line whose code is longer than three digits
+(`HTTP/1.1 2041 OK`) is refused. It used to be read as its first three
+digits, so a 2041 became a bodyless 204.
+
 Breaking: the streaming download (`get_streaming` over HTTPS) now applies
 the same close_notify rule to a close-delimited body: if the server resets
 the connection without `close_notify`, the read raises `NetworkError`

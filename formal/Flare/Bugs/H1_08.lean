@@ -9,9 +9,13 @@ import Flare.L3_Protocol.H1.ClientResponse
 * What goes wrong: `HTTP/1.1 2041 OK` is read as 204, a bodyless status,
   so the bytes after the head are taken as the next response on a pooled
   connection.
-* Fix (`parseStatusFixed`): require SP or end of line after the three
-  digits. `parseStatusFixed_delimited` proves every fixed result is a
+* Fix (`parseStatus`): require SP or end of line after the three
+  digits. `parseStatus_delimited` proves every fixed result is a
   delimited three-digit code (`CodeDelimited`).
+
+Status: resolved. The counterexample is about the pre-fix parser
+`parseStatusOld`; `fixed_delimited` and `fixed_rejects` are about the shipped
+`parseStatus`.
 -/
 namespace Flare.Bugs.H1_08
 open Flare Flare.L3.H1.ClientResponse
@@ -44,14 +48,14 @@ theorem not_delimited : ¬ CodeDelimited line 204 := by
   · subst hr; simp at this
   · simp [hr] at this
 
-theorem shipped_parses : parseStatus line = some 204 := by native_decide
+theorem old_parses : parseStatusOld line = some 204 := by native_decide
 
-theorem counterexample : ¬ ∀ l c, parseStatus l = some c → CodeDelimited l c :=
-  fun h => not_delimited (h _ _ shipped_parses)
+theorem counterexample : ¬ ∀ l c, parseStatusOld l = some c → CodeDelimited l c :=
+  fun h => not_delimited (h _ _ old_parses)
 
-theorem fixed_delimited (l : Bytes) (c : Nat) (h : parseStatusFixed l = some c) :
-    CodeDelimited l c := parseStatusFixed_delimited l c h
+theorem fixed_delimited (l : Bytes) (c : Nat) (h : parseStatus l = some c) :
+    CodeDelimited l c := parseStatus_delimited l c h
 
-theorem fixed_rejects : parseStatusFixed line = none := by native_decide
+theorem fixed_rejects : parseStatus line = none := by native_decide
 
 end Flare.Bugs.H1_08

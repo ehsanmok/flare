@@ -72,6 +72,32 @@ def test_crlf_head_is_still_parsed() raises:
     assert_equal(resp.headers.get("x"), "a")
 
 
+def test_status_code_of_more_than_three_digits_is_refused() raises:
+    """H1-08: ``HTTP/1.1 2041 OK`` is not a 204 with a stray digit.
+
+    status-code is exactly 3DIGIT (RFC 9112 sec 4). A 204 has no body, so
+    reading the code as 204 left the real body on the connection.
+    """
+    assert_true(_refused("HTTP/1.1 2041 OK\r\nContent-Length: 5\r\n\r\nhello"))
+    assert_true(_refused("HTTP/1.1 1004 Hm\r\nContent-Length: 0\r\n\r\n"))
+    assert_true(_refused("HTTP/1.1 20x OK\r\nContent-Length: 0\r\n\r\n"))
+
+
+def test_status_line_with_and_without_reason_is_parsed() raises:
+    var with_reason = _parse_http_response(
+        _b("HTTP/1.1 204 No Content\r\n\r\n"), "GET"
+    )
+    assert_equal(with_reason.status, 204)
+    var bare = _parse_http_response(
+        _b("HTTP/1.1 200\r\nContent-Length: 2\r\n\r\nhi"), "GET"
+    )
+    assert_equal(bare.status, 200)
+    var empty_reason = _parse_http_response(
+        _b("HTTP/1.1 200 \r\nContent-Length: 2\r\n\r\nhi"), "GET"
+    )
+    assert_equal(empty_reason.status, 200)
+
+
 def test_whitespace_before_colon_is_refused() raises:
     assert_true(_refused("HTTP/1.1 200 OK\r\nContent-Length : 2\r\n\r\nhi"))
 

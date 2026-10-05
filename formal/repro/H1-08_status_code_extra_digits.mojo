@@ -1,8 +1,9 @@
 # PLATFORM: any
+# RESOLVED: H1-08 fixed on fix/formal-findings
 """H1-08: the client truncates a status code of more than three digits.
 
-Lean: Flare.Bugs.H1_08.counterexample (parseStatus "HTTP/1.1 2041 OK" =
-some 204) and Flare.L3.H1.ClientResponse.parseStatusFixed_delimited (fix
+Lean: Flare.Bugs.H1_08.counterexample (parseStatusOld "HTTP/1.1 2041 OK" =
+some 204) and Flare.L3.H1.ClientResponse.parseStatus_delimited (fix
 meets spec: an accepted code is three digits between SP and SP or end).
 flare/http/_client/parse.mojo:318-352 (_parse_status_line reads
 rest[0:3] and takes the reason from rest[4:] without checking rest[3])
@@ -10,7 +11,7 @@ rest[0:3] and takes the reason from rest[4:] without checking rest[3])
 
 Expected (RFC 9112 §4): status-line = HTTP-version SP 3DIGIT SP
 reason-phrase; "HTTP/1.1 2041 OK" is malformed and must be refused.
-Actual: it parses as 204, and 204 means no body (RFC 9112 §6.3), so the
+Before the fix: Actual: it parses as 204, and 204 means no body (RFC 9112 §6.3), so the
 "hello" that follows is left on the connection. A 1004 is read as 100
 and skipped as an interim response.
 
