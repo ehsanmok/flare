@@ -123,6 +123,12 @@ from test_date_cache import (
 from test_date_cache import (
     test_format_unix_epoch as test_date_cache__test_format_unix_epoch,
 )
+from test_date_cache import (
+    test_civil_known_days_before_year_zero as test_date_cache__test_civil_known_days_before_year_zero,
+)
+from test_date_cache import (
+    test_civil_day_walk_matches_calendar_across_year_zero as test_date_cache__test_civil_day_walk_matches_calendar_across_year_zero,
+)
 from test_io_uring import (
     test_syscall_numbers_match_linux_abi as test_io_uring__test_syscall_numbers_match_linux_abi,
 )
@@ -770,6 +776,10 @@ def main() raises:
     suite.test[test_date_cache__test_format_distant_future]()
     suite.test[test_date_cache__test_format_leap_day_2024]()
     suite.test[test_date_cache__test_format_unix_epoch]()
+    suite.test[test_date_cache__test_civil_known_days_before_year_zero]()
+    suite.test[
+        test_date_cache__test_civil_day_walk_matches_calendar_across_year_zero
+    ]()
     # tests/runtime/test_io_uring.mojo
     suite.test[test_io_uring__test_syscall_numbers_match_linux_abi]()
     suite.test[

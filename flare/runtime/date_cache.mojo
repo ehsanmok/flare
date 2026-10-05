@@ -90,7 +90,7 @@ def civil_to_unix_seconds(
         1970-01-01).
     """
     var year = y - (1 if m <= 2 else 0)
-    var era = (year if year >= 0 else year - 399) // 400
+    var era = year // 400  # floor division: no negative-year adjustment
     var yoe = year - era * 400  # [0, 399]
     var month_shifted = m + (9 if m <= 2 else -3)  # [0, 11]
     var doy = (153 * month_shifted + 2) // 5 + d - 1  # [0, 365]
@@ -152,7 +152,7 @@ def unix_seconds_to_civil(unix_secs: Int) -> CivilTime:
         dow_raw += 7
 
     days = days + 719468
-    var era = (days if days >= 0 else days - 146096) // 146097
+    var era = days // 146097  # floor division: no negative-day adjustment
     var doe = days - era * 146097  # [0, 146096]
     var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
     var y = yoe + era * 400

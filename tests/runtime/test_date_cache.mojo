@@ -3,6 +3,10 @@
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 
 from flare.runtime import DateCache, libc_nanosleep_ms
+from flare.runtime.date_cache import (
+    civil_to_unix_seconds,
+    unix_seconds_to_civil,
+)
 
 
 def _slice_str(s: String, start: Int, end: Int) -> String:
@@ -248,6 +252,106 @@ def test_format_unix_epoch() raises:
     _format_imf_fixdate(0, buf.unsafe_ptr())
     var s = String(unsafe_from_utf8=Span[UInt8, _](buf))
     assert_equal(s, String("Thu, 01 Jan 1970 00:00:00 GMT"))
+
+
+def _is_leap(y: Int) -> Bool:
+    return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+
+def _month_len(y: Int, m: Int) -> Int:
+    if m == 2:
+        return 29 if _is_leap(y) else 28
+    if m == 4 or m == 6 or m == 9 or m == 11:
+        return 30
+    return 31
+
+
+def test_civil_known_days_before_year_zero() raises:
+    """ENC-02: the era step used truncating-division semantics under
+    floor ``//``, so every day before 0000-03-01 was off by one."""
+    var day = 86400
+    # 0000-03-01 is 719468 days before the epoch (Hinnant); year 0 is
+    # a leap year, so 0000-02-29 is the day before.
+    assert_equal(civil_to_unix_seconds(0, 3, 1, 0, 0, 0), -719468 * day)
+    assert_equal(civil_to_unix_seconds(0, 2, 29, 0, 0, 0), -719469 * day)
+    assert_equal(civil_to_unix_seconds(0, 1, 1, 0, 0, 0), -719528 * day)
+    assert_equal(civil_to_unix_seconds(-1, 12, 31, 0, 0, 0), -719529 * day)
+    # The ENC-02 counterexample: 28 Feb and 1 Mar of year -1 are one day
+    # apart (year -1 is not a leap year), and 1 Mar -1 is 366 days before
+    # 0000-03-01 (it spans 0000-02-29).
+    assert_equal(civil_to_unix_seconds(-1, 3, 1, 0, 0, 0), -719834 * day)
+    assert_equal(
+        civil_to_unix_seconds(-1, 3, 1, 0, 0, 0)
+        - civil_to_unix_seconds(-1, 2, 28, 0, 0, 0),
+        day,
+    )
+    # One whole 400-year era earlier.
+    assert_equal(civil_to_unix_seconds(-400, 3, 1, 0, 0, 0), -865565 * day)
+    assert_equal(civil_to_unix_seconds(1970, 1, 1, 0, 0, 0), 0)
+    assert_equal(civil_to_unix_seconds(1969, 12, 31, 23, 59, 59), -1)
+
+    var c = unix_seconds_to_civil(-719834 * day)
+    assert_equal(c.year, -1)
+    assert_equal(c.month, 3)
+    assert_equal(c.day, 1)
+    c = unix_seconds_to_civil(-719469 * day + 3661)
+    assert_equal(c.year, 0)
+    assert_equal(c.month, 2)
+    assert_equal(c.day, 29)
+    assert_equal(c.hour, 1)
+    assert_equal(c.minute, 1)
+    assert_equal(c.second, 1)
+
+
+def test_civil_day_walk_matches_calendar_across_year_zero() raises:
+    """ENC-02: every day from year -2900 to 2900 follows the previous one
+    on the Gregorian calendar (independent leap-year rule) and the forward
+    and inverse helpers agree on it."""
+    var day = 86400
+    var start = civil_to_unix_seconds(-2900, 1, 1, 0, 0, 0)
+    var end = civil_to_unix_seconds(2900, 1, 1, 0, 0, 0)
+    var y = -2900
+    var m = 1
+    var d = 1
+    var t = start
+    var steps = 0
+    while t < end:
+        # forward: the walked calendar date maps to the walked second
+        assert_equal(civil_to_unix_seconds(y, m, d, 0, 0, 0), t)
+        # inverse: the walked second decodes to the walked date
+        var c = unix_seconds_to_civil(t)
+        if c.year != y or c.month != m or c.day != d:
+            raise Error(
+                "day "
+                + String(steps)
+                + ": expected "
+                + String(y)
+                + "-"
+                + String(m)
+                + "-"
+                + String(d)
+                + " got "
+                + String(c.year)
+                + "-"
+                + String(c.month)
+                + "-"
+                + String(c.day)
+            )
+        # advance one calendar day
+        if d < _month_len(y, m):
+            d += 1
+        elif m < 12:
+            m += 1
+            d = 1
+        else:
+            y += 1
+            m = 1
+            d = 1
+        t += day
+        steps += 1
+    assert_equal(y, 2900)
+    assert_equal(m, 1)
+    assert_equal(d, 1)
 
 
 def main() raises:

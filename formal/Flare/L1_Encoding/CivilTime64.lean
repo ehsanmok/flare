@@ -18,8 +18,8 @@ Results:
   representable exactly for years `-292277022656 .. 292277026596`;
   `civilToUnix64_wraps`: year `2^39` wraps.
 * `httpdate_exact`: the only in-tree forward caller (`_httpdate_to_unix`,
-  4-digit year, 2-digit fields) never overflows; with
-  `daysFromCivil_eq_floor_of_year_nonneg` it is also outside ENC-02.
+  4-digit year, 2-digit fields) never overflows. (Before the ENC-02 fix it
+  was already unaffected: `daysFromCivilOld_eq_of_year_nonneg`.)
 * `unixToCivil64_eq`: the inverse equals the unbounded model for every
   64-bit input, although `days * 86400` wraps near `-2^63`
   (`inverse_intermediate_wraps`).
@@ -55,10 +55,10 @@ theorem W_mul_W (a c : Int) : W (W a * c) = W (a * c) := by
 
 /-- `civil_to_unix_seconds` on 64-bit `Int`: every `+`, `-` and `*` wraps;
 `//` by a positive constant cannot overflow.
-mirrors flare/runtime/date_cache.mojo:71-98 @59bda50 -/
+mirrors flare/runtime/date_cache.mojo:71-98 (fixed, ENC-02) -/
 def civilToUnix64 (y m d hh mm ss : Int) : Int :=
   let year := W (y - (if m ≤ 2 then 1 else 0))
-  let era := (if 0 ≤ year then year else W (year - 399)) / 400
+  let era := year / 400
   let yoe := W (year - W (era * 400))
   let ms := W (m + (if m ≤ 2 then 9 else -3))
   let doy := W (W (W (W (153 * ms) + 2) / 5 + d) - 1)
@@ -78,9 +78,7 @@ theorem civilToUnix64_eq (y m d hh mm ss : Int) (hy1 : -2 ^ 63 + 400 ≤ y) (hy2
   simp only [civilToUnix64, civilToUnix, daysFromCivil, shiftYear, shiftMonth, mStart, startOf]
   by_cases hm : m ≤ 2 <;> simp only [hm, ↓reduceIte, Int.sub_zero] <;>
   simp (disch := omega) only [W_of_le] <;>
-  by_cases hy : 0 ≤ y - (if m ≤ 2 then 1 else 0) <;> simp only [hm, ↓reduceIte, Int.sub_zero] at hy <;>
-  simp only [hy, ↓reduceIte] <;>
-  (try simp (disch := omega) only [W_of_le, W_add_W, W_add_W', W_sub_W, W_sub_W', W_mul_W]) <;>
+  (try simp (disch := omega) only [W_add_W, W_add_W', W_sub_W, W_mul_W]) <;>
   congr 1 <;> omega
 
 theorem civilToUnix64_eq_iff (y m d hh mm ss : Int) (hy1 : -2 ^ 63 + 400 ≤ y) (hy2 : y < 2 ^ 63)
@@ -95,9 +93,7 @@ theorem civilToUnix_inRange (y m d hh mm ss : Int) (hy : -2 ^ 38 ≤ y ∧ y ≤
     (hh' : -2 ^ 30 ≤ hh ∧ hh ≤ 2 ^ 30) (hmm : -2 ^ 30 ≤ mm ∧ mm ≤ 2 ^ 30)
     (hss : -2 ^ 30 ≤ ss ∧ ss ≤ 2 ^ 30) : InRange (civilToUnix y m d hh mm ss) := by
   simp only [InRange, civilToUnix, daysFromCivil, shiftYear, shiftMonth, mStart, startOf]
-  by_cases h1 : m ≤ 2 <;> simp only [h1, ↓reduceIte] <;>
-  by_cases h2 : 0 ≤ y - (if m ≤ 2 then 1 else 0) <;> simp only [h1, ↓reduceIte] at h2 <;>
-  simp only [h2, ↓reduceIte] <;> omega
+  by_cases h1 : m ≤ 2 <;> simp only [h1, ↓reduceIte] <;> omega
 
 theorem civilToUnix64_exact (y m d hh mm ss : Int) (hy : -2 ^ 38 ≤ y ∧ y ≤ 2 ^ 38)
     (hm : -2 ^ 30 ≤ m ∧ m ≤ 2 ^ 30) (hd : -2 ^ 30 ≤ d ∧ d ≤ 2 ^ 30)
@@ -114,7 +110,7 @@ theorem jan1_inRange_iff (y : Int) (hy : -2 ^ 50 ≤ y ∧ y ≤ 2 ^ 50) :
     InRange (civilToUnix y 1 1 0 0 0) ↔ -292277022656 ≤ y ∧ y ≤ 292277026596 := by
   simp only [InRange, civilToUnix, daysFromCivil, shiftYear, shiftMonth, mStart, startOf]
   simp only [show (1 : Int) ≤ 2 from by decide, ↓reduceIte]
-  by_cases h2 : 0 ≤ y - 1 <;> simp only [h2, ↓reduceIte] <;> omega
+  omega
 
 /-- Overflow past the range: 1 January of year 2^39 wraps. -/
 theorem civilToUnix64_wraps : civilToUnix64 (2 ^ 39) 1 1 0 0 0 ≠ civilToUnix (2 ^ 39) 1 1 0 0 0 := by
@@ -131,10 +127,10 @@ theorem httpdate_exact (y mon d hh mm ss : Int) (hy : 0 ≤ y ∧ y ≤ 9999) (h
   civilToUnix64_exact _ _ _ _ _ _ (by omega) (by omega) (by omega) (by omega) (by omega) (by omega)
 
 /-- Day-number to date part of `unix_seconds_to_civil` on 64-bit `Int`.
-mirrors flare/runtime/date_cache.mojo:152-163 @59bda50 -/
+mirrors flare/runtime/date_cache.mojo:152-163 (fixed, ENC-02) -/
 def civilFromDays64 (z : Int) : Int × Int × Int :=
   let days := W (z + 719468)
-  let era := (if 0 ≤ days then days else W (days - 146096)) / 146097
+  let era := days / 146097
   let doe := W (days - W (era * 146097))
   let yoe := W (W (W (doe - doe / 1460) + doe / 36524) - doe / 146096) / 365
   let y := W (yoe + W (era * 400))
@@ -145,7 +141,7 @@ def civilFromDays64 (z : Int) : Int × Int × Int :=
   (if m ≤ 2 then W (y + 1) else y, m, d)
 
 /-- `unix_seconds_to_civil` on 64-bit `Int`.
-mirrors flare/runtime/date_cache.mojo:130-174 @59bda50 -/
+mirrors flare/runtime/date_cache.mojo:130-174 (fixed, ENC-02) -/
 def unixToCivil64 (s : Int) : Civil :=
   let days := s / 86400
   let sod := W (s - W (days * 86400))
@@ -163,46 +159,25 @@ theorem civilFromDays64_eq (z : Int) (hz1 : -2 ^ 50 ≤ z) (hz2 : z ≤ 2 ^ 50) 
   generalize hd : z + 719468 = days
   have hd1 : -2 ^ 51 ≤ days := by omega
   have hd2 : days ≤ 2 ^ 51 := by omega
-  by_cases h0 : 0 ≤ days
-  · simp only [h0, ↓reduceIte]
-    generalize he : days / 146097 = era
-    have : era * 146097 ≤ days ∧ days < era * 146097 + 146097 := by omega
-    rw_W_exact (era * 146097); rw_W_exact (days - era * 146097)
-    generalize hdoe : days - era * 146097 = doe
-    have : 0 ≤ doe ∧ doe ≤ 300000 := by omega
-    rw_W_exact (doe - doe / 1460); rw_W_exact (doe - doe / 1460 + doe / 36524); rw_W_exact (doe - doe / 1460 + doe / 36524 - doe / 146096)
-    generalize hy : (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 = yoe
-    have : 0 ≤ yoe ∧ yoe ≤ 1000 := by omega
-    rw_W_exact (era * 400); rw_W_exact (yoe + era * 400)
-    rw_W_exact (365 * yoe); rw_W_exact (365 * yoe + yoe / 4); rw_W_exact (365 * yoe + yoe / 4 - yoe / 100)
-    rw_W_exact (doe - (365 * yoe + yoe / 4 - yoe / 100))
-    generalize hdoy : doe - (365 * yoe + yoe / 4 - yoe / 100) = doy
-    have : -400000 ≤ doy ∧ doy ≤ 400000 := by omega
-    rw_W_exact (5 * doy); rw_W_exact (5 * doy + 2)
-    generalize hmp : (5 * doy + 2) / 153 = mp
-    have : -20000 ≤ mp ∧ mp ≤ 20000 := by omega
-    rw_W_exact (153 * mp); rw_W_exact (153 * mp + 2); rw_W_exact (doy - (153 * mp + 2) / 5); rw_W_exact (doy - (153 * mp + 2) / 5 + 1)
-    rw_W_exact (mp + 3); rw_W_exact (mp - 9); rw_W_exact (yoe + era * 400 + 1)
-  · simp only [h0, ↓reduceIte]
-    rw_W_exact (days - 146096)
-    generalize he : (days - 146096) / 146097 = era
-    have : era * 146097 ≤ days - 146096 ∧ days - 146096 < era * 146097 + 146097 := by omega
-    rw_W_exact (era * 146097); rw_W_exact (days - era * 146097)
-    generalize hdoe : days - era * 146097 = doe
-    have : 0 ≤ doe ∧ doe ≤ 300000 := by omega
-    rw_W_exact (doe - doe / 1460); rw_W_exact (doe - doe / 1460 + doe / 36524); rw_W_exact (doe - doe / 1460 + doe / 36524 - doe / 146096)
-    generalize hy : (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 = yoe
-    have : 0 ≤ yoe ∧ yoe ≤ 1000 := by omega
-    rw_W_exact (era * 400); rw_W_exact (yoe + era * 400)
-    rw_W_exact (365 * yoe); rw_W_exact (365 * yoe + yoe / 4); rw_W_exact (365 * yoe + yoe / 4 - yoe / 100)
-    rw_W_exact (doe - (365 * yoe + yoe / 4 - yoe / 100))
-    generalize hdoy : doe - (365 * yoe + yoe / 4 - yoe / 100) = doy
-    have : -400000 ≤ doy ∧ doy ≤ 400000 := by omega
-    rw_W_exact (5 * doy); rw_W_exact (5 * doy + 2)
-    generalize hmp : (5 * doy + 2) / 153 = mp
-    have : -20000 ≤ mp ∧ mp ≤ 20000 := by omega
-    rw_W_exact (153 * mp); rw_W_exact (153 * mp + 2); rw_W_exact (doy - (153 * mp + 2) / 5); rw_W_exact (doy - (153 * mp + 2) / 5 + 1)
-    rw_W_exact (mp + 3); rw_W_exact (mp - 9); rw_W_exact (yoe + era * 400 + 1)
+  generalize he : days / 146097 = era
+  have : era * 146097 ≤ days ∧ days < era * 146097 + 146097 := by omega
+  rw_W_exact (era * 146097); rw_W_exact (days - era * 146097)
+  generalize hdoe : days - era * 146097 = doe
+  have : 0 ≤ doe ∧ doe ≤ 300000 := by omega
+  rw_W_exact (doe - doe / 1460); rw_W_exact (doe - doe / 1460 + doe / 36524); rw_W_exact (doe - doe / 1460 + doe / 36524 - doe / 146096)
+  obtain ⟨yoe, hy⟩ : ∃ yoe, (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 = yoe := ⟨_, rfl⟩
+  simp only [hy]
+  have : 0 ≤ yoe ∧ yoe ≤ 1000 := by omega
+  rw_W_exact (era * 400); rw_W_exact (yoe + era * 400)
+  rw_W_exact (365 * yoe); rw_W_exact (365 * yoe + yoe / 4); rw_W_exact (365 * yoe + yoe / 4 - yoe / 100)
+  rw_W_exact (doe - (365 * yoe + yoe / 4 - yoe / 100))
+  generalize hdoy : doe - (365 * yoe + yoe / 4 - yoe / 100) = doy
+  have : -400000 ≤ doy ∧ doy ≤ 400000 := by omega
+  rw_W_exact (5 * doy); rw_W_exact (5 * doy + 2)
+  generalize hmp : (5 * doy + 2) / 153 = mp
+  have : -20000 ≤ mp ∧ mp ≤ 20000 := by omega
+  rw_W_exact (153 * mp); rw_W_exact (153 * mp + 2); rw_W_exact (doy - (153 * mp + 2) / 5); rw_W_exact (doy - (153 * mp + 2) / 5 + 1)
+  rw_W_exact (mp + 3); rw_W_exact (mp - 9); rw_W_exact (yoe + era * 400 + 1)
 
 theorem unixToCivil64_eq (s : Int) (hs : InRange s) : unixToCivil64 s = unixToCivil s := by
   unfold InRange at hs
@@ -215,19 +190,20 @@ theorem unixToCivil64_eq (s : Int) (hs : InRange s) : unixToCivil64 s = unixToCi
 theorem inverse_intermediate_wraps : ¬ InRange ((-2 ^ 63) / 86400 * 86400) := by
   unfold InRange; omega
 
-/-- Any non-negative civil year (so every HTTP-date year, including
-0000-01/02 whose March-based year is -1) is on the exact side of ENC-02. -/
-theorem daysFromCivil_eq_floor_of_year_nonneg (y m d : Int) (hy : 0 ≤ y) :
-    daysFromCivil y m d = daysFromCivilFloor y m d := by
+/-- Before the ENC-02 fix, any non-negative civil year (so every HTTP-date
+year, including 0000-01/02 whose March-based year is -1) was already on the
+exact side: the pre-fix day count equals the shipped one. -/
+theorem daysFromCivilOld_eq_of_year_nonneg (y m d : Int) (hy : 0 ≤ y) :
+    daysFromCivilOld y m d = daysFromCivil y m d := by
   by_cases hs : 0 ≤ shiftYear y m
-  · exact daysFromCivil_eq_floor _ _ _ hs
+  · exact daysFromCivilOld_eq _ _ _ hs
   have hm : m ≤ 2 := by
     by_cases hm : m ≤ 2
     · exact hm
     · simp only [shiftYear, hm, ↓reduceIte] at hs; omega
   have hy0 : y = 0 := by simp only [shiftYear, hm, ↓reduceIte] at hs; omega
   subst hy0
-  simp only [daysFromCivil, daysFromCivilFloor, shiftYear, hm, ↓reduceIte, startOf]
+  simp only [daysFromCivilOld, daysFromCivil, shiftYear, hm, ↓reduceIte, startOf]
   rw [if_neg (by decide)]
   omega
 

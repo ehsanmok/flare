@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61426 lines) |
-| Theorems | 3231 |
+| Lean files | 298 (61393 lines) |
+| Theorems | 3230 |
 | Headline theorems in the axiom audit | 1032 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 36 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 37 of 138 |
 
 Six findings are rated high:
 
@@ -402,18 +402,19 @@ Model: the spec is the proleptic Gregorian calendar:
 
 The impl defines `daysFromCivil`, `civilToUnix`, `civilFromDays` and
 `unixToCivil`, with Hinnant's era formulas evaluated with floor division (Mojo
-`//`). `daysFromCivilFloor` and `civilFromDaysFloor` are the fixed forms.
+`//`, era `year // 400` and `days // 146097`; fixed, ENC-02). The pre-fix
+truncating-era forms are `daysFromCivilOld` and `civilFromDaysOld`.
 Mojo: flare/runtime/date_cache.mojo:71-174.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `daysFloor_spec` | the fixed forward function is the Gregorian day numbering | proved |
-| `civilFloor_daysFloor`, `daysFloor_civilFloor`, `civilFloor_valid` | the fixed pair is a bijection between valid dates and all of `Int` | proved |
-| `daysFromCivil_eq_floor`, `civilFromDays_eq_floor` | flare equals the fixed form for March-based year ≥ 0 and day ≥ -719468 (0000-03-01) | proved |
-| `daysFromCivil_next` | flare's forward function steps by one per day for March-based year ≥ 0 | proved |
-| `civilFromDays_daysFromCivil`, `daysFromCivil_civilFromDays` | flare's pair is mutually inverse from 0000-03-01 on | proved |
+| `daysFloor_spec` | flare's forward function is the Gregorian day numbering | proved |
+| `civilFloor_daysFloor`, `daysFloor_civilFloor`, `civilFloor_valid` | flare's pair is a bijection between valid dates and all of `Int` | proved |
+| `daysFromCivilOld_eq`, `civilFromDaysOld_eq` | the pre-fix functions equal the shipped ones for March-based year ≥ 0 and day ≥ -719468 (0000-03-01) | proved |
+| `daysFromCivil_next` | flare's forward function steps by one per day for every valid date | proved |
+| `civilFromDays_daysFromCivil`, `daysFromCivil_civilFromDays` | flare's pair is mutually inverse on all of `Int` | proved |
 | `civilToUnix_unixToCivil`, `unixToCivil_civilToUnix`, `unixToCivil_fields` | the same at second resolution; h/m/s are in range | proved |
-| `Bugs.ENC_02.counterexample` | flare's forward function is not a day numbering | counterexample (ENC-02) |
+| `Bugs.ENC_02.counterexample` | the pre-fix forward function is not a day numbering | counterexample (ENC-02, resolved) |
 
 #### Civil time on 64-bit `Int` (`CivilTime64.lean`)
 
@@ -435,7 +436,7 @@ flare/http/conditional.mojo:207-216.
 | `parseDigits_range`, `parseDigits_two`, `parseDigits_four` | the digit reader returns -1 or a value below 10^n | proved |
 | `unixToCivil64_eq` | the 64-bit inverse equals the unbounded model for every 64-bit input | proved |
 | `inverse_intermediate_wraps` | `days * 86400` does wrap near `-2^63`; the final result is still exact | proved |
-| `daysFromCivil_eq_floor_of_year_nonneg` | every non-negative civil year, including 0000-01 and 0000-02 (March-based year -1), is on the exact side of ENC-02 | proved |
+| `daysFromCivilOld_eq_of_year_nonneg` | before the fix, every non-negative civil year (including 0000-01 and 0000-02, March-based year -1) was already on the exact side of ENC-02 | proved |
 
 #### QUIC variable-length integer (`QuicVarint.lean`)
 
@@ -2677,8 +2678,8 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:212-303 | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
 | `Flare.L1.ProtoVarint.writeVarint` | flare/grpc/proto.mojo:108-117 | `writeVarint_length`, `writeVarint_canonical`, `rawVarint_writeVarint` | proved |
 | `Flare.L1.ByteCursor.PReader.rawVarint` | flare/grpc/proto.mojo:212-226 | `rawVarint_writeVarint`, `rawVarint_eleven`, `tenth_byte_truncates` | proved |
-| `Flare.L1.CivilTime.daysFromCivil`, `civilToUnix` | flare/runtime/date_cache.mojo:71-98 | `daysFromCivil_eq_floor`, `daysFromCivil_next`, `Bugs.ENC_02.counterexample` | proved (year ≥ 0); counterexample (ENC-02) |
-| `Flare.L1.CivilTime.civilFromDays`, `unixToCivil` | flare/runtime/date_cache.mojo:130-174 | `civilFromDays_daysFromCivil`, `civilToUnix_unixToCivil`, `Bugs.ENC_02.inverse_counterexample` | proved (from 0000-03-01); counterexample (ENC-02) |
+| `Flare.L1.CivilTime.daysFromCivil`, `civilToUnix` | flare/runtime/date_cache.mojo:71-98 | `daysFloor_spec`, `daysFromCivil_next`, `Bugs.ENC_02.counterexample` | proved (all years; ENC-02 resolved) |
+| `Flare.L1.CivilTime.civilFromDays`, `unixToCivil` | flare/runtime/date_cache.mojo:130-174 | `civilFromDays_daysFromCivil`, `civilToUnix_unixToCivil`, `Bugs.ENC_02.inverse_counterexample` | proved (all of `Int`; ENC-02 resolved) |
 | `Flare.L1.CivilTime.civilToUnix64` | flare/runtime/date_cache.mojo:71-98 | `civilToUnix64_eq`, `civilToUnix64_exact`, `jan1_inRange_iff`, `httpdate_exact` | proved |
 | `Flare.L1.CivilTime.civilFromDays64`, `unixToCivil64` | flare/runtime/date_cache.mojo:130-174 | `civilFromDays64_eq`, `unixToCivil64_eq` | proved |
 | `Flare.L1.CivilTime.parseDigits` | flare/http/conditional.mojo:207-216 | `parseDigits_range`, `parseDigits_four` | proved |
@@ -2985,7 +2986,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | ID | Severity | Status | Finding | Lean | Repro (platform) |
 |---|---|---|---|---|---|
 | ENC-01 | Low | resolved | `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group | `Flare/Bugs/ENC_01.lean` | `repro/ENC-01_ipv6_multicast_short_group.mojo` (any) |
-| ENC-02 | Low | open | civil-time conversion is one day off before 0000-03-01 | `Flare/Bugs/ENC_02.lean` | `repro/ENC-02_civil_time_negative_years.mojo` (any) |
+| ENC-02 | Low | resolved | civil-time conversion is one day off before 0000-03-01 | `Flare/Bugs/ENC_02.lean` | `repro/ENC-02_civil_time_negative_years.mojo` (any) |
 | ENC-03 | High | resolved | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
 | ENC-04 | Medium | resolved | `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length | `Flare/Bugs/ENC_04.lean` | `repro/ENC-04_byte_reader_need_overflow.mojo` (any) |
 | NET-01 | High | resolved | `UdpSocket.recv_from` reports the wrong sender for IPv6 peers | `Flare/Bugs/NET_01.lean` | `repro/NET-01_udp_recvfrom_ipv6_sender.mojo` (any) |
@@ -3151,7 +3152,7 @@ Status: resolved. `IpAddr.is_multicast` now requires `startswith("ff")` and the 
 #### ENC-02: civil-time conversion is one day off before 0000-03-01
 
 Severity: low. In-tree inputs are HTTP-dates with a 4-digit year, which are
-exact (`daysFromCivil_eq_floor`), and clock seconds after 1970. The defect is
+exact (`daysFromCivilOld_eq`), and clock seconds after 1970. The defect is
 inside the public helpers' documented domain: the comments say "exact across
 the proleptic Gregorian calendar" (date_cache.mojo:69-70) and "negative is
 fine" (:138).
@@ -3167,17 +3168,18 @@ for truncating division; Mojo `//` floors. The consequences:
 
 Lean:
 
-- `Flare.Bugs.ENC_02.counterexample`: -1-02-28 and -1-03-01 map to -719836 and
-  -719834.
+- `Flare.Bugs.ENC_02.counterexample`: before the fix -1-02-28 and -1-03-01
+  map to -719836 and -719834 (`daysFromCivilOld`).
 - `inverse_counterexample`: the true day number of -1-03-01 decodes as
-  -1-03-02.
+  -1-03-02 (`civilFromDaysOld`).
 
 Fix: `era = year // 400` and `era = days // 146097`. `fixed_spec`,
-`fixed_left_inverse` and `fixed_right_inverse` prove the fixed pair is the
+`fixed_left_inverse` and `fixed_right_inverse` prove the shipped pair is the
 Gregorian numbering and a bijection on all of `Int`.
 Repro: `formal/repro/ENC-02_civil_time_negative_years.mojo`, observed
 `BUG REPRODUCED: civil_to_unix_seconds(-1-02-28 -> -1-03-01) gap = 172800 s (want 86400); unix_seconds_to_civil(-719834 days) = -1 3 2 (want -1 3 1)`.
 Flip (both lines): `OK: consecutive days before year 0 differ by 86400 s and round-trip`, exit 0.
+Status: resolved. `civil_to_unix_seconds` and `unix_seconds_to_civil` now use the floor era (`year // 400`, `days // 146097`); `Flare.L1.CivilTime.daysFromCivil` / `civilFromDays` mirror the shipped code (the pre-fix forms are `daysFromCivilOld` / `civilFromDaysOld`, used by `Bugs.ENC_02.counterexample`), and the 64-bit mirrors `civilToUnix64` / `civilFromDays64` lost their sign branch. Tests: `tests/runtime/test_date_cache.mojo::test_civil_known_days_before_year_zero`, `::test_civil_day_walk_matches_calendar_across_year_zero`.
 
 #### ENC-03: `ProtoReader` length check overflows; one gRPC health request crashes the server
 

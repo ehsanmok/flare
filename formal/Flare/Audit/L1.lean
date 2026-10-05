@@ -115,7 +115,7 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.CivilTime.civilToUnix64_wraps
 #print axioms Flare.L1.CivilTime.httpdate_exact
 #print axioms Flare.L1.CivilTime.unixToCivil64_eq
-#print axioms Flare.L1.CivilTime.daysFromCivil_eq_floor_of_year_nonneg
+#print axioms Flare.L1.CivilTime.daysFromCivilOld_eq_of_year_nonneg
 #print axioms Flare.L1.CivilTime.parseDigits_four
 -- Protobuf varint
 #print axioms Flare.L1.ProtoVarint.writeVarint_length

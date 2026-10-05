@@ -18,15 +18,15 @@ Model. Mojo `Int` arithmetic is modeled in unbounded `Int`; Mojo `//` and
 `Int.%` for the positive divisors used here. 64-bit overflow is not modeled
 (all intermediates stay below `2^40` for years in `[-10^6, 10^6]`).
 
-The era step in flare is Hinnant's C++ formula written for *truncating*
-division, `(year if year >= 0 else year - 399) // 400`, but Mojo `//`
-floors. The two agree for `year ≥ 0`, i.e. dates from 0000-03-01 on
-(`daysFromCivil_eq_floor`, `civilFromDays_eq_floor`); before that the
-result is off by one day. That is finding ENC-02 (`Flare.Bugs.ENC_02`).
-The `…Floor` variants below (era = `year // 400`, `days // 146097`) are the
-fixed functions; all calendar theorems are proved for them over all of
-`Int`, and transferred to the flare functions on the range where they
-coincide.
+The era step was Hinnant's C++ formula written for *truncating* division,
+`(year if year >= 0 else year - 399) // 400`, but Mojo `//` floors. The two
+agree for `year ≥ 0`, i.e. dates from 0000-03-01 on
+(`daysFromCivilOld_eq`, `civilFromDaysOld_eq`); before that the result was off
+by one day. That was finding ENC-02 (`Flare.Bugs.ENC_02`), now fixed: flare
+uses the floor era (`year // 400`, `days // 146097`) and `daysFromCivil` /
+`civilFromDays` below mirror the shipped code. The pre-fix functions are kept
+as `daysFromCivilOld` / `civilFromDaysOld` for the counterexample; all
+calendar theorems are proved for the shipped functions over all of `Int`.
 -/
 namespace Flare.L1.CivilTime
 
@@ -77,9 +77,9 @@ def yoeOf (doe : Int) : Int := (doe - doe / 1460 + doe / 36524 - doe / 146096) /
 /-- mirrors flare/runtime/date_cache.mojo:158 @59bda50 -/
 def mpOf (doy : Int) : Int := (5 * doy + 2) / 153
 
-/-- `civil_to_unix_seconds` day part.
-mirrors flare/runtime/date_cache.mojo:91-97 @59bda50 -/
-def daysFromCivil (y m d : Int) : Int :=
+/-- Pre-fix `civil_to_unix_seconds` day part (truncating-division era under
+floor `//`; flare/runtime/date_cache.mojo:92 @59bda50). -/
+def daysFromCivilOld (y m d : Int) : Int :=
   let year := shiftYear y m
   let era := (if 0 ≤ year then year else year - 399) / 400
   let yoe := year - era * 400
@@ -87,15 +87,39 @@ def daysFromCivil (y m d : Int) : Int :=
   let doe := startOf yoe + doy
   era * 146097 + doe - 719468
 
-/-- mirrors flare/runtime/date_cache.mojo:71-98 @59bda50 -/
+/-- Pre-fix day part of `unix_seconds_to_civil` (flare/runtime/date_cache.mojo:153
+@59bda50). -/
+def civilFromDaysOld (z : Int) : Int × Int × Int :=
+  let days := z + 719468
+  let era := (if 0 ≤ days then days else days - 146096) / 146097
+  let doe := days - era * 146097
+  let yoe := yoeOf doe
+  let y := yoe + era * 400
+  let doy := doe - startOf yoe
+  let mp := mpOf doy
+  let d := doy - mStart mp + 1
+  let m := if mp < 10 then mp + 3 else mp - 9
+  (if m ≤ 2 then y + 1 else y, m, d)
+
+/-- `civil_to_unix_seconds` day part, floor era (`year // 400`).
+mirrors flare/runtime/date_cache.mojo:91-97 (fixed, ENC-02) -/
+def daysFromCivil (y m d : Int) : Int :=
+  let year := shiftYear y m
+  let era := year / 400
+  let yoe := year - era * 400
+  let doy := mStart (shiftMonth m) + d - 1
+  let doe := startOf yoe + doy
+  era * 146097 + doe - 719468
+
+/-- mirrors flare/runtime/date_cache.mojo:71-98 (fixed, ENC-02) -/
 def civilToUnix (y m d hh mm ss : Int) : Int :=
   daysFromCivil y m d * 86400 + hh * 3600 + mm * 60 + ss
 
-/-- The day part of `unix_seconds_to_civil`.
-mirrors flare/runtime/date_cache.mojo:152-163 @59bda50 -/
+/-- The day part of `unix_seconds_to_civil`, floor era (`days // 146097`).
+mirrors flare/runtime/date_cache.mojo:152-163 (fixed, ENC-02) -/
 def civilFromDays (z : Int) : Int × Int × Int :=
   let days := z + 719468
-  let era := (if 0 ≤ days then days else days - 146096) / 146097
+  let era := days / 146097
   let doe := days - era * 146097
   let yoe := yoeOf doe
   let y := yoe + era * 400
@@ -114,7 +138,7 @@ structure Civil where
   second : Int
   dow : Int
 
-/-- mirrors flare/runtime/date_cache.mojo:130-174 @59bda50 -/
+/-- mirrors flare/runtime/date_cache.mojo:130-174 (fixed, ENC-02) -/
 def unixToCivil (s : Int) : Civil :=
   let days := s / 86400
   let sod := s - days * 86400
@@ -123,46 +147,24 @@ def unixToCivil (s : Int) : Civil :=
   let c := civilFromDays days
   ⟨c.1, c.2.1, c.2.2, sod / 3600, (sod % 3600) / 60, sod % 60, dow⟩
 
-/-- `daysFromCivil` with a floor era (`year // 400`): the fixed function. -/
-def daysFromCivilFloor (y m d : Int) : Int :=
-  let year := shiftYear y m
-  let era := year / 400
-  let yoe := year - era * 400
-  let doy := mStart (shiftMonth m) + d - 1
-  let doe := startOf yoe + doy
-  era * 146097 + doe - 719468
+/-! ## Where the pre-fix functions agree with the shipped ones -/
 
-/-- `civilFromDays` with a floor era (`days // 146097`): the fixed function. -/
-def civilFromDaysFloor (z : Int) : Int × Int × Int :=
-  let days := z + 719468
-  let era := days / 146097
-  let doe := days - era * 146097
-  let yoe := yoeOf doe
-  let y := yoe + era * 400
-  let doy := doe - startOf yoe
-  let mp := mpOf doy
-  let d := doy - mStart mp + 1
-  let m := if mp < 10 then mp + 3 else mp - 9
-  (if m ≤ 2 then y + 1 else y, m, d)
+theorem daysFromCivilOld_eq (y m d : Int) (h : 0 ≤ shiftYear y m) :
+    daysFromCivilOld y m d = daysFromCivil y m d := by
+  simp only [daysFromCivilOld, daysFromCivil, if_pos h]
 
-/-! ## Where flare agrees with the floor form -/
-
-theorem daysFromCivil_eq_floor (y m d : Int) (h : 0 ≤ shiftYear y m) :
-    daysFromCivil y m d = daysFromCivilFloor y m d := by
-  simp only [daysFromCivil, daysFromCivilFloor, if_pos h]
-
-theorem civilFromDays_eq_floor (z : Int) (h : -719468 ≤ z) :
-    civilFromDays z = civilFromDaysFloor z := by
-  simp only [civilFromDays, civilFromDaysFloor, if_pos (show 0 ≤ z + 719468 by omega)]
+theorem civilFromDaysOld_eq (z : Int) (h : -719468 ≤ z) :
+    civilFromDaysOld z = civilFromDays z := by
+  simp only [civilFromDaysOld, civilFromDays, if_pos (show 0 ≤ z + 719468 by omega)]
 
 /-! ## Arithmetic lemmas -/
 
 /-- The era decomposition collapses to the closed Gregorian day count. -/
 theorem daysFloor_closed (y m d : Int) :
-    daysFromCivilFloor y m d =
+    daysFromCivil y m d =
       365 * shiftYear y m + shiftYear y m / 4 - shiftYear y m / 100 + shiftYear y m / 400 +
         mStart (shiftMonth m) + d - 1 - 719468 := by
-  simp only [daysFromCivilFloor, startOf]
+  simp only [daysFromCivil, startOf]
   generalize shiftYear y m = Y
   omega
 
@@ -233,11 +235,11 @@ theorem mpOf_mStart (mp k : Int) (_h0 : 0 ≤ mp) (_h1 : mp ≤ 11) (h2 : 0 ≤ 
 
 /-! ## The floor form is a day numbering -/
 
-theorem daysFloor_epoch : daysFromCivilFloor 1970 1 1 = 0 := by decide
+theorem daysFloor_epoch : daysFromCivil 1970 1 1 = 0 := by decide
 
 theorem daysFloor_next (y m d : Int) (h : Valid y m d) :
-    daysFromCivilFloor (next y m d).1 (next y m d).2.1 (next y m d).2.2 =
-      daysFromCivilFloor y m d + 1 := by
+    daysFromCivil (next y m d).1 (next y m d).2.1 (next y m d).2.2 =
+      daysFromCivil y m d + 1 := by
   obtain ⟨h1, h2, h3, h4⟩ := h
   simp only [next]
   by_cases hd : d < monthLen y m
@@ -263,7 +265,7 @@ theorem daysFloor_next (y m d : Int) (h : Valid y m d) :
         if_true, if_false] at hd' ⊢
       omega
 
-theorem daysFloor_spec : DayNumbering daysFromCivilFloor :=
+theorem daysFloor_spec : DayNumbering daysFromCivil :=
   ⟨daysFloor_epoch, daysFloor_next⟩
 
 /-! ## The floor forms are mutually inverse -/
@@ -294,7 +296,7 @@ theorem valid_month (y m d : Int) (h : Valid y m d) :
     | (split at h4 <;> omega)
 
 theorem civilFloor_daysFloor (y m d : Int) (h : Valid y m d) :
-    civilFromDaysFloor (daysFromCivilFloor y m d) = (y, m, d) := by
+    civilFromDays (daysFromCivil y m d) = (y, m, d) := by
   obtain ⟨h1, h2, h3, h4⟩ := h
   obtain ⟨hs0, hs1, hsm, hsy⟩ := shift_inv y m h1 h2
   -- month length in March-based terms
@@ -328,7 +330,7 @@ theorem civilFloor_daysFloor (y m d : Int) (h : Valid y m d) :
       exact this (by rw [show Y / 400 * 400 + (Y - Y / 400 * 400 + 1) = Y + 1 by omega]; exact hl))
   have hst : 0 ≤ startOf (Y - Y / 400 * 400) ∧ startOf (Y - Y / 400 * 400) ≤ 145731 := by
     unfold startOf; omega
-  unfold civilFromDaysFloor daysFromCivilFloor
+  unfold civilFromDays daysFromCivil
   simp only [hY]
   have hera : (Y / 400 * 146097 + (startOf (Y - Y / 400 * 400) + (mStart (shiftMonth m) + d - 1))
       - 719468 + 719468) / 146097 = Y / 400 := by omega
@@ -347,8 +349,8 @@ theorem civilFloor_daysFloor (y m d : Int) (h : Valid y m d) :
   omega
 
 theorem civilFloor_valid (z : Int) :
-    Valid (civilFromDaysFloor z).1 (civilFromDaysFloor z).2.1 (civilFromDaysFloor z).2.2 := by
-  unfold civilFromDaysFloor
+    Valid (civilFromDays z).1 (civilFromDays z).2.1 (civilFromDays z).2.2 := by
+  unfold civilFromDays
   simp only
   generalize hE : (z + 719468) / 146097 = era
   generalize hD : z + 719468 - era * 146097 = doe
@@ -384,9 +386,9 @@ theorem civilFloor_valid (z : Int) :
         omega
 
 theorem daysFloor_civilFloor (z : Int) :
-    daysFromCivilFloor (civilFromDaysFloor z).1 (civilFromDaysFloor z).2.1
-      (civilFromDaysFloor z).2.2 = z := by
-  unfold civilFromDaysFloor
+    daysFromCivil (civilFromDays z).1 (civilFromDays z).2.1
+      (civilFromDays z).2.2 = z := by
+  unfold civilFromDays
   simp only
   generalize hE : (z + 719468) / 146097 = era
   generalize hD : z + 719468 - era * 146097 = doe
@@ -407,20 +409,13 @@ theorem daysFloor_civilFloor (z : Int) :
     by_cases h : mp < 10
     · simp only [if_pos h]; rw [if_neg (by omega), if_neg (by omega)]; omega
     · simp only [if_neg h]; rw [if_pos (by omega), if_pos (by omega)]; omega
-  unfold daysFromCivilFloor
+  unfold daysFromCivil
   simp only
   rw [hsy, hsm, show (yoe + era * 400) / 400 = era by omega,
     show yoe + era * 400 - era * 400 = yoe by omega]
   omega
 
-/-! ## Transfer to the flare functions (dates from 0000-03-01 on) -/
-
-theorem shiftYear_nonneg_of_days (y m d : Int) (h : Valid y m d)
-    (hz : -719468 ≤ daysFromCivilFloor y m d) : 0 ≤ shiftYear y m := by
-  have := valid_month y m d h
-  have := h.2.2.1
-  rw [daysFloor_closed] at hz
-  omega
+/-! ## The shipped functions (all of `Int`) -/
 
 theorem next_valid (y m d : Int) (h : Valid y m d) :
     Valid (next y m d).1 (next y m d).2.1 (next y m d).2.2 := by
@@ -437,31 +432,21 @@ theorem next_valid (y m d : Int) (h : Valid y m d) :
       refine ⟨by omega, by omega, by omega, ?_⟩
       unfold monthLen; split <;> (try split) <;> omega
 
-theorem daysFromCivil_next (y m d : Int) (h : Valid y m d) (hy : 0 ≤ shiftYear y m) :
-    daysFromCivil (next y m d).1 (next y m d).2.1 (next y m d).2.2 = daysFromCivil y m d + 1 := by
-  have hn := daysFloor_next y m d h
-  have hz : -719468 ≤ daysFromCivilFloor y m d := by
-    have := valid_month y m d h; have := h.2.2.1; rw [daysFloor_closed]; omega
-  rw [daysFromCivil_eq_floor y m d hy, daysFromCivil_eq_floor _ _ _
-    (shiftYear_nonneg_of_days _ _ _ (next_valid y m d h) (by rw [hn]; omega)), hn]
+theorem daysFromCivil_next (y m d : Int) (h : Valid y m d) :
+    daysFromCivil (next y m d).1 (next y m d).2.1 (next y m d).2.2 = daysFromCivil y m d + 1 :=
+  daysFloor_next y m d h
 
-theorem civilFromDays_daysFromCivil (y m d : Int) (h : Valid y m d) (hy : 0 ≤ shiftYear y m) :
-    civilFromDays (daysFromCivil y m d) = (y, m, d) := by
-  have := valid_month y m d h
-  have := h.2.2.1
-  have hz : -719468 ≤ daysFromCivilFloor y m d := by rw [daysFloor_closed]; omega
-  rw [daysFromCivil_eq_floor y m d hy, civilFromDays_eq_floor _ hz, civilFloor_daysFloor y m d h]
+theorem civilFromDays_daysFromCivil (y m d : Int) (h : Valid y m d) :
+    civilFromDays (daysFromCivil y m d) = (y, m, d) :=
+  civilFloor_daysFloor y m d h
 
-theorem civilFromDays_valid (z : Int) (hz : -719468 ≤ z) :
-    Valid (civilFromDays z).1 (civilFromDays z).2.1 (civilFromDays z).2.2 := by
-  rw [civilFromDays_eq_floor z hz]; exact civilFloor_valid z
+theorem civilFromDays_valid (z : Int) :
+    Valid (civilFromDays z).1 (civilFromDays z).2.1 (civilFromDays z).2.2 :=
+  civilFloor_valid z
 
-theorem daysFromCivil_civilFromDays (z : Int) (hz : -719468 ≤ z) :
-    daysFromCivil (civilFromDays z).1 (civilFromDays z).2.1 (civilFromDays z).2.2 = z := by
-  rw [civilFromDays_eq_floor z hz]
-  have h1 := daysFloor_civilFloor z
-  rw [daysFromCivil_eq_floor _ _ _
-    (shiftYear_nonneg_of_days _ _ _ (civilFloor_valid z) (by rw [h1]; exact hz)), h1]
+theorem daysFromCivil_civilFromDays (z : Int) :
+    daysFromCivil (civilFromDays z).1 (civilFromDays z).2.1 (civilFromDays z).2.2 = z :=
+  daysFloor_civilFloor z
 
 /-! ## Seconds -/
 
@@ -474,26 +459,26 @@ theorem unixToCivil_fields (s : Int) :
   refine ⟨by omega, by omega, by omega, by omega, by omega, by omega, ?_⟩
   rw [if_neg (by omega)]
 
-theorem unixToCivil_valid (s : Int) (hs : -719468 * 86400 ≤ s) :
+theorem unixToCivil_valid (s : Int) :
     Valid (unixToCivil s).year (unixToCivil s).month (unixToCivil s).day :=
-  civilFromDays_valid (s / 86400) (by omega)
+  civilFromDays_valid (s / 86400)
 
-theorem civilToUnix_unixToCivil (s : Int) (hs : -719468 * 86400 ≤ s) :
+theorem civilToUnix_unixToCivil (s : Int) :
     let c := unixToCivil s
     civilToUnix c.year c.month c.day c.hour c.minute c.second = s := by
   simp only [unixToCivil, civilToUnix]
-  rw [daysFromCivil_civilFromDays _ (by omega)]
+  rw [daysFromCivil_civilFromDays _]
   omega
 
 theorem unixToCivil_civilToUnix (y m d hh mm ss : Int) (h : Valid y m d)
-    (hy : 0 ≤ shiftYear y m) (hh0 : 0 ≤ hh) (hh1 : hh < 24) (hm0 : 0 ≤ mm) (hm1 : mm < 60)
+    (hh0 : 0 ≤ hh) (hh1 : hh < 24) (hm0 : 0 ≤ mm) (hm1 : mm < 60)
     (hs0 : 0 ≤ ss) (hs1 : ss < 60) :
     let c := unixToCivil (civilToUnix y m d hh mm ss)
     c.year = y ∧ c.month = m ∧ c.day = d ∧ c.hour = hh ∧ c.minute = mm ∧ c.second = ss := by
   simp only [unixToCivil, civilToUnix]
   have e : (daysFromCivil y m d * 86400 + hh * 3600 + mm * 60 + ss) / 86400 = daysFromCivil y m d := by
     omega
-  rw [e, civilFromDays_daysFromCivil y m d h hy]
+  rw [e, civilFromDays_daysFromCivil y m d h]
   refine ⟨rfl, rfl, rfl, by omega, by omega, by omega⟩
 
 end Flare.L1.CivilTime

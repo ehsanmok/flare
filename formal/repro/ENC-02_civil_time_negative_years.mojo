@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: ENC-02 fixed on fix/formal-findings
 """ENC-02: civil_to_unix_seconds / unix_seconds_to_civil are one day off
 before 0000-03-01.
 
@@ -12,7 +13,7 @@ flare/runtime/date_cache.mojo:92 and :153 @59bda50.
 Expected (date_cache.mojo:69-70: "exact across the proleptic Gregorian
 calendar"; :138 "negative is fine"): consecutive days differ by 86400 s and
 unix_seconds_to_civil inverts civil_to_unix_seconds.
-Actual: Hinnant's era formula `(year if year >= 0 else year - 399) // 400`
+Before the fix: Hinnant's era formula `(year if year >= 0 else year - 399) // 400`
 assumes truncating division; Mojo `//` floors, so the era is one too small
 for negative March-based years and the result is one day early.
 
@@ -21,7 +22,10 @@ Minimal fix:
     var era = days // 146097       (line 153)
 """
 
-from flare.runtime.date_cache import civil_to_unix_seconds, unix_seconds_to_civil
+from flare.runtime.date_cache import (
+    civil_to_unix_seconds,
+    unix_seconds_to_civil,
+)
 
 
 def main() raises:
@@ -31,7 +35,9 @@ def main() raises:
     # -1-03-01 is 719834 days before the epoch (0000-03-01 is 719468 days
     # before it, and year -1 from March has 365 days + 1 day for 0000-02-29).
     var back = unix_seconds_to_civil(-719834 * 86400)
-    var bad = gap != 86400 or back.year != -1 or back.month != 3 or back.day != 1
+    var bad = (
+        gap != 86400 or back.year != -1 or back.month != 3 or back.day != 1
+    )
     if bad:
         print(
             "BUG REPRODUCED: civil_to_unix_seconds(-1-02-28 -> -1-03-01) gap =",
