@@ -84,6 +84,12 @@ theorem hexLower_no13 (n : Nat) : 13 ∉ hexLower n := fun h => by
   obtain ⟨d, hd, e⟩ := mem_hexLower n 13 h
   exact (hexDigit_ok ⟨d, hd⟩).2.1 e.symm
 
+theorem hexDigit_ne_10 : ∀ d : Fin 16, hexDigit d.val ≠ 10 := by decide
+
+theorem hexLower_no10 (n : Nat) : 10 ∉ hexLower n := fun h => by
+  obtain ⟨d, hd, e⟩ := mem_hexLower n 10 h
+  exact hexDigit_ne_10 ⟨d, hd⟩ e.symm
+
 theorem hexLower_no59 (n : Nat) : ∀ c ∈ hexLower n, c ≠ 59 := fun c h => by
   obtain ⟨d, hd, rfl⟩ := mem_hexLower n c h
   exact (hexDigit_ok ⟨d, hd⟩).2.2.1
@@ -224,8 +230,9 @@ theorem decTr_line (L X : Bytes) (h13 : 13 ∉ L) (h2 : 2 ≤ L.length) :
   · rename_i k2 hk2; rw [hk] at hk2; cases hk2
     simp
 
-/-- No trailer line holds a CR (`HeaderMap` refuses CR/LF in names and values). -/
-def TrailersOK (tr : List (Bytes × Bytes)) : Prop := ∀ kv ∈ tr, 13 ∉ trailerLine kv
+/-- No trailer line holds a CR or an LF (`HeaderMap` refuses CR/LF in names and
+values). The LF half is what the scanner's H1-02 check needs. -/
+def TrailersOK (tr : List (Bytes × Bytes)) : Prop := ∀ kv ∈ tr, 13 ∉ trailerLine kv ∧ 10 ∉ trailerLine kv
 
 theorem trailerLine_len (kv : Bytes × Bytes) : 2 ≤ (trailerLine kv).length := by
   simp [trailerLine]; omega
@@ -236,7 +243,7 @@ theorem decTr_trailers : ∀ (tr : List (Bytes × Bytes)) (X : Bytes), TrailersO
   | kv :: tr, X, h => by
     have e : encTrailers (kv :: tr) ++ 13 :: 10 :: X = trailerLine kv ++ 13 :: 10 :: (encTrailers tr ++ 13 :: 10 :: X) := by
       simp [encTrailers]
-    rw [e, decTr_line _ _ (h kv (by simp)) (trailerLine_len kv),
+    rw [e, decTr_line _ _ (h kv (by simp)).1 (trailerLine_len kv),
       decTr_trailers tr X (fun x hx => h x (by simp [hx]))]
     simp [Except.map, encTrailers]; omega
 
@@ -292,7 +299,8 @@ theorem SRes.shift_zero (r : SRes) : r.shift 0 = r := by cases r <;> rfl
 theorem SRes.shift_shift (r : SRes) (a b : Nat) : (r.shift a).shift b = r.shift (a + b) := by
   cases r <;> simp [SRes.shift]; omega
 
-theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L) (h2 : 2 ≤ L.length) :
+theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L) (h10 : 10 ∉ L)
+    (h2 : 2 ≤ L.length) :
     scanTr P (L ++ 13 :: 10 :: X) = (scanTr P X).shift (L.length + 2) := by
   subst hP
   obtain ⟨a, b, t, rfl⟩ : ∃ a b t, L = a :: b :: t := by
@@ -305,7 +313,7 @@ theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L)
   split
   · simp_all
   · rename_i k2 hk2; rw [hk] at hk2; cases hk2
-    simp [implP]
+    simp [implP, CAP, List.take_left' rfl, h10]
 
 theorem scanTr_trailers : ∀ (tr : List (Bytes × Bytes)) (X : Bytes), TrailersOK tr →
     scanTr implP (encTrailers tr ++ 13 :: 10 :: X) = .done ((encTrailers tr).length + 2)
@@ -313,7 +321,7 @@ theorem scanTr_trailers : ∀ (tr : List (Bytes × Bytes)) (X : Bytes), Trailers
   | kv :: tr, X, h => by
     have e : encTrailers (kv :: tr) ++ 13 :: 10 :: X = trailerLine kv ++ 13 :: 10 :: (encTrailers tr ++ 13 :: 10 :: X) := by
       simp [encTrailers]
-    rw [e, scanTr_line implP rfl _ _ (h kv (by simp)) (trailerLine_len kv),
+    rw [e, scanTr_line implP rfl _ _ (h kv (by simp)).1 (h kv (by simp)).2 (trailerLine_len kv),
       scanTr_trailers tr X (fun x hx => h x (by simp [hx]))]
     simp [SRes.shift, encTrailers]; omega
 
@@ -334,7 +342,8 @@ theorem scan_chunk (mb tot : Nat) (c R : Bytes) (hc : c ≠ []) (hsz : c.length 
   have hcr := chunk_crlf (hexLower c.length) c R
   simp only [CAP, implP, show ¬ (hexLower c.length).length > 4096 by omega, if_false, Bool.false_eq_true,
     false_and, Nat.zero_add, show (hexLower c.length).length ≠ 0 by omega, show c.length ≠ 0 by omega,
-    show ¬ tot + c.length > mb by omega, hcr, ne_eq, not_true_eq_false, or_self]
+    show ¬ tot + c.length > mb by omega, hcr, ne_eq, not_true_eq_false, or_self,
+    hexLower_no10, not_false_eq_true, and_false]
   rw [if_neg (by rw [chunk_len]; omega), chunk_rest, encChunk_length]
 
 theorem scan_encChunks (mb : Nat) : ∀ (cs : List Bytes) (T : Bytes) (tot : Nat),

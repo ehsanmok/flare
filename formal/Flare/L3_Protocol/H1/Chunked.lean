@@ -3,7 +3,7 @@ import Flare.Core
 /-!
 # HTTP/1.1 chunked transfer coding (RFC 9112 §7.1)
 
-Model of `flare/http/proto/chunked.mojo` @59bda50: the completeness scanner
+Model of `flare/http/proto/chunked.mojo` (fixed, H1-02): the completeness scanner
 `scan_chunked_resume` / `scan_chunked_end`, the decoder
 `decode_chunked_body`, and the response-side encoder in
 `flare/http/streaming_serialize.mojo`.
@@ -17,7 +17,8 @@ chunk size bounded by `max_body`, so `Nat` is faithful as long as
 that bound is exhibited in `parseSize_wraps_unbounded`.
 
 The scanner is parameterised by a `Policy` so that the shipped behaviour
-(`implP`) and the minimal fix (`fixedP`, finding H1-01) share every lemma.
+(`implP`, which includes the H1-02 fix; `oldP` is the pre-fix scanner) and the
+minimal fix for H1-01 (`fixedP`, `fullFixP`) share every lemma.
 -/
 namespace Flare.L3.H1.Chunked
 open Flare
@@ -25,7 +26,7 @@ open Flare
 /-! ## Byte-level helpers -/
 
 /-- First `CR LF` in `l`, as an index.
-mirrors flare/http/proto/chunked.mojo:239-245 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo:257-263 (fixed, H1-02) -/
 def findCRLF : Bytes → Option Nat
   | [] => none
   | [_] => none
@@ -114,19 +115,22 @@ def CAP : Nat := 4096
 /-- `slack`: the incomplete-line test is `n - pos > CAP + slack`
 (shipped: 0). `capTrailer`: complete trailer lines are also capped
 (shipped: false). `rejectLF`: a chunk-size or trailer line whose content
-holds a bare LF is MALFORMED (shipped: false). -/
+holds a bare LF is MALFORMED (shipped since H1-02: true). -/
 structure Policy where
   slack : Nat
   capTrailer : Bool
   rejectLF : Bool
 
-/-- The shipped behaviour. -/
-def implP : Policy := ⟨0, false, false⟩
-/-- Minimal fix for H1-01 (segmentation-dependent line cap). -/
+/-- The scanner as it was at 59bda50, before the H1-02 fix. Kept only so that
+`Bugs.H1_02.counterexample` stays checkable. -/
+def oldP : Policy := ⟨0, false, false⟩
+/-- The shipped behaviour: a size or trailer line containing LF is MALFORMED
+(H1-02). -/
+def implP : Policy := ⟨0, false, true⟩
+/-- Minimal fix for H1-01 (segmentation-dependent line cap), without the
+H1-02 check. -/
 def fixedP : Policy := ⟨1, true, false⟩
-/-- Minimal fix for H1-02 (bare LF inside chunk lines). -/
-def fixedLFP : Policy := ⟨0, false, true⟩
-/-- Both fixes. -/
+/-- The H1-01 fix on top of the shipped scanner. -/
 def fullFixP : Policy := ⟨1, true, true⟩
 
 theorem findCRLF_lt : ∀ {l : Bytes} {k : Nat}, findCRLF l = some k → k + 2 ≤ l.length
@@ -143,7 +147,7 @@ theorem findCRLF_lt : ∀ {l : Bytes} {k : Nat}, findCRLF l = some k → k + 2 �
         have := findCRLF_lt h'; simp at this ⊢; omega
 
 /-- Trailer section after the last chunk: lines until an empty one.
-mirrors flare/http/proto/chunked.mojo:270-290 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo:290-314 (fixed, H1-02) -/
 def scanTr (P : Policy) (l : Bytes) : SRes :=
   match l with
   | [] => .incomplete
@@ -161,7 +165,7 @@ decreasing_by simp only [List.length_drop, List.length_cons]; omega
 
 /-- The main scan loop over the suffix `l = buf[pos:]`. Returns the
 verdict (offsets relative to `l`), how far the cursor advanced, and the
-decoded total. mirrors flare/http/proto/chunked.mojo:235-303 @59bda50 -/
+decoded total. mirrors flare/http/proto/chunked.mojo:253-325 (fixed, H1-02) -/
 def scanL (P : Policy) (maxBody : Nat) (l : Bytes) (tot : Nat) : SRes × Nat × Nat :=
   match hf : findCRLF l with
   | none => (if l.length > CAP + P.slack then .malformed else .incomplete, 0, tot)
@@ -184,12 +188,12 @@ decreasing_by have := findCRLF_lt hf; simp only [List.length_drop]; omega
 
 /-- `scan_chunked_resume(buf, cursor, decoded_total, max_body)`: verdict,
 new cursor, new decoded total.
-mirrors flare/http/proto/chunked.mojo:211-303 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo:229-325 (fixed, H1-02) -/
 def scanResume (P : Policy) (buf : Bytes) (cursor tot maxBody : Nat) : SRes × Nat × Nat :=
   let r := scanL P maxBody (buf.drop cursor) tot
   (r.1.shift cursor, cursor + r.2.1, r.2.2)
 
-/-- mirrors flare/http/proto/chunked.mojo:189-208 @59bda50 -/
+/-- mirrors flare/http/proto/chunked.mojo:207-226 (fixed, H1-02) -/
 def scanEnd (P : Policy) (buf : Bytes) (start maxBody : Nat) : SRes :=
   (scanResume P buf start 0 maxBody).1
 
@@ -197,8 +201,8 @@ def scanEnd (P : Policy) (buf : Bytes) (start maxBody : Nat) : SRes :=
 abbrev scanImpl := scanEnd implP
 /-- The minimal fix for H1-01. -/
 abbrev scanFixed := scanEnd fixedP
-/-- The minimal fix for H1-02. -/
-abbrev scanFixedLF := scanEnd fixedLFP
+/-- The scanner before the H1-02 fix. -/
+abbrev scanOld := scanEnd oldP
 
 /-! ## Decoder -/
 

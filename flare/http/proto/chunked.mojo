@@ -17,7 +17,9 @@ transport code. No sockets, no allocation beyond the output buffer.
 Chunk-size lines are hex, optionally followed by ``;ext=val``
 parameters, which are skipped per RFC 9112 sec 7.1.1. Trailer fields
 after the terminating chunk are walked over so the end offset is
-correct, but not surfaced -- no inbound caller needs them yet.
+correct, but not surfaced -- no inbound caller needs them yet. A size
+line or trailer line that contains a bare LF is malformed: an LF-splitting
+front end would end the line (and so the body) somewhere else.
 """
 
 from std.collections import List
@@ -186,6 +188,22 @@ cap, a peer can send extension bytes that never reach CRLF and keep a
 request incomplete for as long as the connection lives."""
 
 
+@always_inline
+def _has_lf(buf: Span[UInt8, _], lo: Int, hi: Int) -> Bool:
+    """True when ``buf[lo:hi]`` holds an LF byte.
+
+    A chunk-size line (extensions included) or a trailer line is a
+    token/quoted-string sequence (RFC 9112 sec 7.1.1) and never holds
+    LF. A bare LF is a line end to a recipient that accepts it
+    (RFC 9112 sec 2.2), so a line that contains one is framed
+    differently by such a front end -- request smuggling.
+    """
+    for k in range(lo, hi):
+        if buf[k] == UInt8(10):
+            return True
+    return False
+
+
 def scan_chunked_end(buf: Span[UInt8, _], start: Int, max_body: Int) -> Int:
     """Return the offset one past a complete chunked body.
 
@@ -249,6 +267,8 @@ def scan_chunked_resume(
             return CHUNKED_INCOMPLETE
         if line_end - pos > CHUNK_LINE_MAX:
             return CHUNKED_MALFORMED
+        if _has_lf(buf, pos, line_end):
+            return CHUNKED_MALFORMED
         var size = 0
         var digits = 0
         var j = pos
@@ -287,6 +307,8 @@ def scan_chunked_resume(
                     if n - t > CHUNK_LINE_MAX:
                         return CHUNKED_MALFORMED
                     return CHUNKED_INCOMPLETE
+                if _has_lf(buf, t, found):
+                    return CHUNKED_MALFORMED
                 t = found + 2
         if decoded_total + size > max_body:
             return CHUNKED_MALFORMED

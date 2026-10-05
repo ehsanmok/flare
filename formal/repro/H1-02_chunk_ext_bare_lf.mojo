@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H1-02 fixed on fix/formal-findings
 """H1-02: a bare LF inside a chunk extension or trailer line is accepted.
 
 Lean: Flare.Bugs.H1_02.counterexample (counterexample) and
@@ -14,7 +15,7 @@ chunk-extension rules apply.
 
 Expected: scan_chunked_end(b"0;\\n\\r\\nX: y\\r\\n\\r\\n") is
 CHUNKED_MALFORMED.
-Actual: flare looks only for CRLF and skips everything after ``;``. It reads
+Before the fix: Actual: flare looks only for CRLF and skips everything after ``;``. It reads
 "0;\\n" as the last-chunk line, "X: y" as a trailer, and ends the body at
 13, while an LF-splitting front end reads "0;" LF and the empty line CRLF,
 ends the body at 5, and reads the remaining bytes as the next request.

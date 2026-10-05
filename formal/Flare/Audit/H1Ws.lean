@@ -18,7 +18,7 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.H1.Chunked.fullFix_poll_eq_oneShot
 #print axioms Flare.L3.H1.Chunked.impl_done_stable
 #print axioms Flare.L3.H1.Chunked.scanEnd_lfSafe
-#print axioms Flare.L3.H1.Chunked.fixedLF_agrees_lfTolerant
+#print axioms Flare.L3.H1.Chunked.impl_agrees_lfTolerant
 -- Header text and Content-Length grammar
 #print axioms Flare.L3.H1.Text.tokens_strip
 #print axioms Flare.L3.H1.Text.classify_strip

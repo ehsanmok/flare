@@ -8,7 +8,7 @@ import Flare.L3_Protocol.H1.Chunked
   `poll_eq_oneShot`: under the H1-01 fix the verdict equals a one-shot scan
   of the final buffer, however the bytes were segmented.
 * `lfScan`: a recipient that uses RFC 9112 §2.2's permission to treat a bare
-  LF as a line terminator. `fixedLF_agrees_lfTolerant`: under the H1-02 fix
+  LF as a line terminator. `impl_agrees_lfTolerant`: since the H1-02 fix
   every body flare accepts is framed identically by such a recipient.
 -/
 namespace Flare.L3.H1.Chunked
@@ -337,11 +337,11 @@ theorem scanEnd_lfSafe (P : Policy) (hP : P.rejectLF = true) (buf : Bytes) (star
   obtain ⟨out, hd, hl⟩ := lfScan_of_scanL P hP mb _ 0 e' adv t hr
   exact ⟨out, by rw [decodeBody, hd]; rfl, by simp [hl]⟩
 
-theorem fixedLF_agrees_lfTolerant (buf : Bytes) (start mb e : Nat)
-    (h : scanFixedLF buf start mb = .done e) :
+theorem impl_agrees_lfTolerant (buf : Bytes) (start mb e : Nat)
+    (h : scanImpl buf start mb = .done e) :
     ∃ out, decodeBody buf start = .ok (out, e) ∧
       (lfScan (buf.drop start)).map (fun r => (r.1, r.2 + start)) = some (out, e) :=
-  scanEnd_lfSafe fixedLFP rfl buf start mb e h
+  scanEnd_lfSafe implP rfl buf start mb e h
 
 /-- **Scan acceptance implies decode agreement** (any policy, including the
 shipped one): when the reactor's scanner says the body ends at `e`,

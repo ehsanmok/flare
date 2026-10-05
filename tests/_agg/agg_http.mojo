@@ -385,6 +385,9 @@ from test_chunked_request import (
     test_scan_accepts_chunk_extensions_and_trailers as test_chunked_request__test_scan_accepts_chunk_extensions_and_trailers,
 )
 from test_chunked_request import (
+    test_scan_rejects_bare_lf_in_chunk_lines as test_chunked_request__test_scan_rejects_bare_lf_in_chunk_lines,
+)
+from test_chunked_request import (
     test_decode_concatenates_chunks as test_chunked_request__test_decode_concatenates_chunks,
 )
 from test_chunked_request import (
@@ -4285,6 +4288,7 @@ def main() raises:
     suite.test[
         test_chunked_request__test_scan_accepts_chunk_extensions_and_trailers
     ]()
+    suite.test[test_chunked_request__test_scan_rejects_bare_lf_in_chunk_lines]()
     suite.test[test_chunked_request__test_decode_concatenates_chunks]()
     suite.test[test_chunked_request__test_header_scan_detects_chunked]()
     suite.test[test_chunked_request__test_resume_skips_chunks_already_scanned]()

@@ -170,7 +170,9 @@ struct H1LeniencyConfig(Copyable):
     ``;ext=value`` portion of a chunk-size line. RFC 9112
     §7.1.1 defines the grammar strictly. Defaults off; flip
     only if you trust the upstream's chunk-extension
-    formatting.
+    formatting. A bare ``LF`` inside a chunk-size or trailer line is
+    never accepted, whatever this flag says: an LF-splitting front
+    end would end the body somewhere else (request smuggling).
 
     .. note::
 

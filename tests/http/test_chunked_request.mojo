@@ -100,6 +100,55 @@ def test_scan_accepts_chunk_extensions_and_trailers() raises:
     assert_equal(scan_chunked_end(Span[UInt8, _](buf), 0, 1024), len(buf))
 
 
+def test_scan_rejects_bare_lf_in_chunk_lines() raises:
+    """H1-02: LF inside a size line or trailer line is malformed.
+
+    An LF-splitting front end ends ``0;\\n`` at the LF and the body at
+    offset 5; flare used to read on to offset 13.
+    """
+    var ext = _b("0;\n\r\nX: y\r\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](ext), 0, 1 << 20), CHUNKED_MALFORMED
+    )
+    # In a size line of a data chunk, before and after the ';'.
+    var data_ext = _b("5;a\nb\r\nhello\r\n0\r\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](data_ext), 0, 1 << 20),
+        CHUNKED_MALFORMED,
+    )
+    var lead = _b("\n5\r\nhello\r\n0\r\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](lead), 0, 1 << 20), CHUNKED_MALFORMED
+    )
+    # In a trailer line.
+    var trailer = _b("0\r\nX: a\nY: b\r\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](trailer), 0, 1 << 20),
+        CHUNKED_MALFORMED,
+    )
+    # A bare LF where the trailer section should end.
+    var empty_lf = _b("0\r\n\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](empty_lf), 0, 1 << 20),
+        CHUNKED_MALFORMED,
+    )
+    # The same verdict through the resumable scanner, one byte at a time.
+    var cursor = 0
+    var decoded = 0
+    var last = CHUNKED_INCOMPLETE
+    for cut in range(1, len(ext) + 1):
+        var part = List[UInt8](ext[:cut])
+        last = scan_chunked_resume(
+            Span[UInt8, _](part), cursor, decoded, 1 << 20
+        )
+    assert_equal(last, CHUNKED_MALFORMED)
+    # Well-formed bodies are unchanged.
+    var ok_body = _b("5;a=b\r\nhello\r\n0\r\nX: y\r\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](ok_body), 0, 1 << 20), len(ok_body)
+    )
+
+
 def test_decode_concatenates_chunks() raises:
     var buf = _b("5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
     var out = List[UInt8]()

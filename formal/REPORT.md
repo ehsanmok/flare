@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60901 lines) |
-| Theorems | 3213 |
+| Lean files | 298 (60924 lines) |
+| Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 11 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 12 of 138 |
 
 Six findings are rated high:
 
@@ -949,7 +949,7 @@ Files: `H1/Chunked.lean`, `H1/ChunkedSpec.lean`.
 - `scanL`/`scanTr`/`scanResume`/`scanEnd` mirror `scan_chunked_resume`/`scan_chunked_end` (`chunked.mojo:183-303`), including the 4096-byte line cap `CAP` and the resume cursor.
 - `poll` mirrors the reactor's loop: rescan from the saved cursor after each read.
 - `decodeBody` mirrors `decode_chunked` (`chunked.mojo:306-360`).
-- A `Policy` parameterises the three places the fixes change: the slack in the incomplete-line test, the cap on complete trailer lines, and rejection of LF inside a line. `implP` is the shipped code; `fixedP`, `fixedLFP` and `fullFixP` are the H1-01 fix, the H1-02 fix and both together.
+- A `Policy` parameterises the three places the fixes change: the slack in the incomplete-line test, the cap on complete trailer lines, and rejection of LF inside a line. `oldP` is the scanner as it was at 59bda50, `implP` is the shipped code (it includes the H1-02 fix); `fixedP` and `fullFixP` are the H1-01 fix without and with the H1-02 check.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -962,7 +962,7 @@ Files: `H1/Chunked.lean`, `H1/ChunkedSpec.lean`.
 | `scanEnd_segmentation_independent` | With slack ≥ 1 and capped trailers, a definite verdict on a prefix equals the verdict on every extension. | proved |
 | `poll_eq_oneShot`, `fixed_poll_eq_oneShot`, `fullFix_poll_eq_oneShot` | Under the same conditions, polling any segmentation equals one scan of the concatenation. | proved (fixed policies only; the shipped policy fails, H1-01) |
 | `decL_of_scanL`, `scanEnd_decode` | Termination and agreement: if the scanner accepts at `e`, `decode_chunked` succeeds on the same buffer, consumes exactly to `e` and produces at most `max_body` bytes. | proved |
-| `scanEnd_lfSafe`, `fixedLF_agrees_lfTolerant` | If the policy rejects LF inside lines, an accepting scan agrees with an LF-tolerant recipient (`lfScan`) on both the body and its end. | proved (fixed policy; the shipped policy fails, H1-02) |
+| `scanEnd_lfSafe`, `impl_agrees_lfTolerant` | If the policy rejects LF inside lines, an accepting scan agrees with an LF-tolerant recipient (`lfScan`) on both the body and its end. The shipped `implP` rejects it. | proved (the pre-fix `oldP` fails, H1-02) |
 
 `scanL`, `scanTr` and `decL` are structurally recursive, so termination is by construction.
 
@@ -1133,7 +1133,7 @@ File: `Ws/Close.lean`.
 - **SHA-1 is a black box.** The handshake theorems quantify over every function `Bytes → Bytes`; SHA-1 itself is not modelled. Base64 and the key/GUID concatenation are.
 - **Handshake fields are modelled after the line split.** The three handshake loops split lines (dropping CR, ending at LF) and then split each line at its first colon and strip both halves; the model starts from those pairs. The client's own response-head splitting is modelled separately (`ClientResponse.splitGo`).
 - **The 101 status check** in `ClientOK` is flare's prefix test `HTTP/1.1 101`. A `HTTP/1.1 1010` status line is the H1-08 class and is not filed again.
-- **Encoder trailers.** The encoder does not filter forbidden trailer names; trailers are chosen by the application, and flare's own client refuses them. `cDec_roundtrip` therefore assumes `ClientTrailersOK`, and every round trip assumes trailer lines without CR (which `HeaderMap` guarantees).
+- **Encoder trailers.** The encoder does not filter forbidden trailer names; trailers are chosen by the application, and flare's own client refuses them. `cDec_roundtrip` therefore assumes `ClientTrailersOK`, and every round trip assumes trailer lines without CR or LF (which `HeaderMap` guarantees).
 - **`scan_roundtrip`** assumes chunks below 2^60 bytes, because the scanner caps size lines at 16 hex digits (deliberate, see "Checked").
 - **The close model** works at the level of the application API: frames are values, and their encoding is covered by `Ws/Frame.lean`. The peer is arbitrary, since `CloseOK` quantifies over every trace.
 - **permessage-deflate is not modelled because flare does not implement it.** No handshake sends or accepts `Sec-WebSocket-Extensions`, and RSV1 is always refused, so there is no code to model.
@@ -3002,7 +3002,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | RT-08 | Medium | resolved | a failed `sem_open` crashes the process on Linux | `Flare/Bugs/RT_08.lean` | `repro/RT-08_sem_open_failure_null_deref_linux.mojo` (linux) |
 | NET-11 | Low | open | `BatchReceiver` sizes its data region with an unchecked `Int` product | `Flare/Bugs/NET_11.lean` | `repro/NET-11_batch_receiver_size_overflow.mojo` (any) |
 | H1-01 | Low | open | the chunk-line cap gives a verdict that depends on TCP segmentation | `Flare/Bugs/H1_01.lean` | `repro/H1-01_chunk_line_cap_segmentation.mojo` (any) |
-| H1-02 | Medium | open | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
+| H1-02 | Medium | resolved | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
 | H1-03 | Medium | open | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
 | H1-04 | Medium | open | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
 | H1-05 | Low | open | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
@@ -3653,6 +3653,8 @@ Flip (make `__init__` raise on the overflowing product), on macOS and Linux:
 
 #### H1-02: a bare LF inside a chunk extension or trailer line is accepted
 
+Status: resolved. Fixed in `scan_chunked_resume` (`flare/http/proto/chunked.mojo`): a size line or trailer line that contains an LF is `CHUNKED_MALFORMED` (new helper `_has_lf`). Regression test `tests/http/test_chunked_request.mojo::test_scan_rejects_bare_lf_in_chunk_lines`; the repro prints `OK:`. Lean: `oldP` keeps the counterexample, `implP` is the shipped policy and `impl_agrees_lfTolerant` proves it LF-safe.
+
 - **Severity:** Medium. Request smuggling becomes possible behind any front end that treats a bare LF as a line terminator, which RFC 9112 §2.2 allows. This applies in the default (strict) configuration.
 - **RFC:**
   - RFC 9112 §7.1.1: `chunk-ext` is tokens and quoted strings, which never contain LF.
@@ -3660,8 +3662,8 @@ Flip (make `__init__` raise on the overflowing product), on macOS and Linux:
 - **What goes wrong:** the scanner looks only for CRLF and skips everything after `;` (`chunked.mojo:239-266`, `270-290`). For `0;\n\r\nX: y\r\n\r\n`:
   - flare reads `0;\n` as the last-chunk line and `X: y` as a trailer, and ends the body at 13;
   - an LF-splitting front end ends the body at 5 and forwards the rest as the next request.
-- **Counterexample:** `Bugs.H1_02.counterexample` (`¬ LfSafe implP`), with `impl_accepts` (`done 13`) and `lf_recipient_ends_at_5`.
-- **Fix:** a chunk line whose content contains LF is MALFORMED. `Bugs.H1_02.fixed_agrees_lfTolerant` (from `scanEnd_lfSafe`) proves the scanner then agrees with an LF-tolerant recipient on both the body and its end. `fixed_rejects` shows the witness is rejected.
+- **Counterexample:** `Bugs.H1_02.counterexample` (`¬ LfSafe oldP`, the pre-fix scanner), with `old_accepts` (`done 13`) and `lf_recipient_ends_at_5`.
+- **Fix:** a chunk line whose content contains LF is MALFORMED. `Bugs.H1_02.fixed_agrees_lfTolerant` (`LfSafe implP`, from `scanEnd_lfSafe`) proves the shipped scanner agrees with an LF-tolerant recipient on both the body and its end. `fixed_rejects` shows the shipped scanner rejects the witness.
 - **Repro:** `formal/repro/H1-02_chunk_ext_bare_lf.mojo`
 - **Observed:** `BUG REPRODUCED: scan_chunked_end accepted a chunk extension with a bare LF, body end 13 (an LF-splitting recipient ends the body at 5)`
 - **Flip:** `OK: bare LF inside a chunk line is rejected`; `flare/http/proto/chunked.mojo` restored.
