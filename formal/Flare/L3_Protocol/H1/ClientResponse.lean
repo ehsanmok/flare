@@ -11,8 +11,8 @@ import Flare.L3_Protocol.H1.ClientChunked
   CL are refused).
 * `parseStatusOld` mirrors `_parse_status_line` before the H1-08 fix;
   `parseStatus` is the shipped parser (finding H1-08).
-* `canReuse` mirrors the keep-alive decision of the framed reader
-  (finding H1-09).
+* `canReuseOld` mirrors the keep-alive decision of the framed reader before
+  the H1-09 fix; `canReuse` is the shipped decision (HTTP/1.1 only).
 * `splitGo`/`headOld` mirror `_find_crlf2_from`, `_split_lines` and the
   line loop of `_parse_response_head` before the H1-07 fix; `headImpl` is the
   shipped head parser (bare LF and empty lines refused); `lfHead` is an RFC 9112 §2.2
@@ -212,16 +212,19 @@ def HTTP10 : Bytes := Bytes.ofString "HTTP/1.0"
 def hasTok (tok : Bytes) (vals : List Bytes) : Bool :=
   vals.any fun v => (splitComma v).any fun t => lowerB (pyStrip t) == tok
 
-/-- The framed reader's verdict: `clean` (no bytes past the message),
+/-- The framed reader's verdict before the H1-09 fix: `clean` (no bytes past the message),
 no `close` token, and not close-delimited. The response's HTTP version is
 never consulted.
 mirrors flare/http/_client/parse.mojo:836-884 @59bda50 -/
-def canReuse (_version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
+def canReuseOld (_version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
   clean && !(hasTok CLOSE conn) && fr != .close
 
-/-- The H1-09 fix: only an HTTP/1.1 response leaves the connection open. -/
-def canReuseFixed (version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
-  canReuse version clean conn fr && version == HTTP11
+/-- The shipped decision (finding H1-09): only an HTTP/1.1 response leaves the
+connection open. An HTTP/1.0 response with `keep-alive` is not pooled either,
+which is stricter than RFC 9112 §9.3 allows and still meets `PersistOK`.
+mirrors flare/http/_client/parse.mojo `can_reuse = clean and not conn_close and http11` -/
+def canReuse (version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
+  canReuseOld version clean conn fr && version == HTTP11
 
 /-- RFC 9112 §9.3: the connection persists after a response only if it is
 HTTP/1.1 without `close`, or HTTP/1.0 with `keep-alive`. -/
@@ -229,9 +232,9 @@ def PersistOK (reuse : Bytes → Bool → List Bytes → RFraming → Bool) : Pr
   ∀ v clean conn fr, reuse v clean conn fr = true →
     ¬ hasTok CLOSE conn = true ∧ (v = HTTP11 ∨ (v = HTTP10 ∧ hasTok KEEPALIVE conn = true))
 
-theorem canReuseFixed_ok : PersistOK canReuseFixed := by
+theorem canReuse_ok : PersistOK canReuse := by
   intro v clean conn fr h
-  simp only [canReuseFixed, canReuse, Bool.and_eq_true, Bool.not_eq_true', beq_iff_eq,
+  simp only [canReuse, canReuseOld, Bool.and_eq_true, Bool.not_eq_true', beq_iff_eq,
     bne_iff_ne, ne_eq] at h
   exact ⟨by simp [h.1.1.2], Or.inl h.2⟩
 

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H1-09 fixed on fix/formal-findings
 """H1-09: the pooled client keeps a connection open after an HTTP/1.0
 response that did not ask for keep-alive.
 
@@ -12,7 +13,7 @@ the pooled paths in flare/http/client.mojo:1275, 1316, 2551, 2584.
 Expected (RFC 9112 §9.3): an HTTP/1.0 response without
 "Connection: keep-alive" closes the connection after the response; the
 client must not send another request on it.
-Actual: `_read_http_response_framed_tcp` sets can_reuse = True, so the
+Before the fix: Actual: `_read_http_response_framed_tcp` sets can_reuse = True, so the
 pool hands the connection to the next request, which the HTTP/1.0 server
 (or the proxy in between) then drops or misreads.
 

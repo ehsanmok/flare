@@ -85,6 +85,8 @@ struct _ResponseHead(Movable):
     var status: Int
     var reason: String
     var headers: HeaderMap
+    var http11: Bool
+    """Whether the status line names exactly ``HTTP/1.1``."""
 
 
 def _has_bare_lf(data: List[UInt8]) -> Bool:
@@ -142,7 +144,7 @@ def _parse_response_head(head: List[UInt8]) raises -> _ResponseHead:
             String(unsafe_from_utf8=ln.as_bytes()[colon + 1 :]).strip()
         )
         headers.append(k, v)
-    return _ResponseHead(sl.code, sl.reason, headers^)
+    return _ResponseHead(sl.code, sl.reason, headers^, sl.http11)
 
 
 def _response_framing(
@@ -353,10 +355,12 @@ def _split_lines(s: String) -> List[String]:
 struct _StatusLine:
     var code: Int
     var reason: String
+    var http11: Bool
 
-    def __init__(out self, code: Int, reason: String):
+    def __init__(out self, code: Int, reason: String, http11: Bool = True):
         self.code = code
         self.reason = reason
+        self.http11 = http11
 
 
 def _parse_status_line(line: String) raises -> _StatusLine:
@@ -397,7 +401,11 @@ def _parse_status_line(line: String) raises -> _StatusLine:
     var reason = String("")
     if rest.byte_length() > 4:
         reason = String(String(unsafe_from_utf8=rest.as_bytes()[4:]))
-    return _StatusLine(code, reason^)
+    return _StatusLine(
+        code,
+        reason^,
+        String(unsafe_from_utf8=line.as_bytes()[:sp1]) == "HTTP/1.1",
+    )
 
 
 def _str_find(s: String, sub: String) -> Int:
@@ -839,7 +847,8 @@ def _read_http_response_framed[
 
     Returns:
         The response. ``can_reuse`` is set when the connection is
-        cleanly at a message boundary and not marked ``close``.
+        cleanly at a message boundary, the response is HTTP/1.1 and it is
+        not marked ``close``.
 
     Raises:
         NetworkError: On I/O or parse error, EOF inside a message, or a
@@ -855,6 +864,7 @@ def _read_http_response_framed[
     var hdr_end: Int
     var status: Int
     var headers: HeaderMap
+    var http11 = False
     while True:
         hdr_end = _find_crlf2_from(raw, start)
         while hdr_end < 0:
@@ -881,6 +891,7 @@ def _read_http_response_framed[
             start = hdr_end + 4
             continue
         headers = head.headers.copy()
+        http11 = head.http11
         break
 
     var conn_close = False
@@ -932,5 +943,9 @@ def _read_http_response_framed[
     if len(raw) > end:
         raw.resize(end, 0)
     var resp = _parse_http_response(raw, method)
-    can_reuse = clean and not conn_close
+    # RFC 9112 sec 9.3: only HTTP/1.1 persists by default. An HTTP/1.0
+    # response closes the connection unless it said keep-alive, and a peer
+    # that answers 1.0 is not trusted to hold the connection open, so the
+    # keep-alive form is not pooled either.
+    can_reuse = clean and not conn_close and http11
     return resp^

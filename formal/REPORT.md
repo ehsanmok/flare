@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61674 lines) |
+| Lean files | 298 (61682 lines) |
 | Theorems | 3245 |
 | Headline theorems in the axiom audit | 1044 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 55 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 56 of 138 |
 
 Six findings are rated high:
 
@@ -1071,7 +1071,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 - `parseStatusOld` mirrors `_parse_status_line` (`318-352`) before the H1-08 fix; `parseStatus` is the shipped parser (`362-403`).
 - `san`, `findCRLF2`, `splitGo`/`splitLines` and `headOld` mirror `_bytes_to_str`, `_find_crlf2_from`, `_split_lines` and the line loop of `_parse_response_head` (`89-125`, `233-306`). `lfHead` is an RFC 9112 §2.2 recipient that ends lines at LF.
 - `cDec` mirrors `_decode_chunked` (`497-578`); `cHex`, `cTr`, `trailerOk` its size and trailer lines.
-- `canReuse` mirrors the keep-alive decision of the pooled reader (`836-884`).
+- `canReuseOld` mirrors the keep-alive decision of the pooled reader (`836-884`) before the H1-09 fix; `canReuse` is the shipped decision.
 - `dlCloseOld` mirrors `HttpDownload._read_close` (`download.mojo:215-220`) over the pre-fix transport; `dlClose` (= `bufferedClose`) is the close_notify guard, in the buffered readers (`parse.mojo:665-683`) and now in `_H2Transport.read` (`h2_transport.mojo:69-96`).
 
 | Lean name | Statement | Status |
@@ -1083,7 +1083,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 | `cRead_complete` | With the scan on the read-to-EOF path (`cRead`), a returned body is always a complete chunked body. | proved (H1-06 fix) |
 | `parseStatus_delimited` | With the delimiter check, the code is three digits followed by SP or the end of the line (`CodeDelimited`). | proved (H1-08 fix) |
 | `splitGo_join`, `lfGo_join`, `headImpl_agrees` | With bare LF and empty lines refused, the head lines and body start equal those of the LF-recognising recipient. | proved (H1-07 fix) |
-| `canReuseFixed_ok` | With the version check, reuse implies HTTP/1.1 without `close` (RFC 9112 §9.3). | proved (H1-09 fix) |
+| `canReuse_ok` | With the version check, reuse implies HTTP/1.1 without `close` (RFC 9112 §9.3). | proved (H1-09 fix) |
 | `bufferedClose_safe` | The buffered guard never returns a close-delimited TLS body that ended without close_notify. | proved |
 | `Bugs.H1_06/07/08/09/11.counterexample` | The shipped code violates each of the above. | counterexample |
 
@@ -2784,7 +2784,7 @@ advances the wheel to `now` at the top of every iteration
 | `ClientChunked.isSWS`, `pyStrip`, `hexAcc`, `cHex`, `trailerOk`, `cTr`, `cDec`, `cRead` (`cReadOld` = pre-fix) | `_client/parse.mojo:497-578`, `600-630` | `cDec_agree`, `framed_chunked_agrees`, `cRead_complete`, `Bugs.H1_06.*` | proved (framed path) / counterexample (read-to-EOF path, H1-06) / fix proved |
 | `ClientResponse.parseStatusOld`, `parseStatus` | `_client/parse.mojo:318-352` | `parseStatus_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
 | `ClientResponse.san`, `findCRLF2`, `splitGo`, `splitLines`, `headOld` | `_client/parse.mojo:89-125`, `233-306` | `headImpl_agrees`, `Bugs.H1_07.*` | counterexample (H1-07) / fix proved |
-| `ClientResponse.canReuse` | `_client/parse.mojo:836-884` | `canReuseFixed_ok`, `Bugs.H1_09.*` | counterexample (H1-09) / fix proved |
+| `ClientResponse.canReuse` | `_client/parse.mojo:836-884` | `canReuse_ok`, `Bugs.H1_09.*` | fix proved; `canReuseOld` keeps the counterexample (H1-09) |
 | `ClientResponse.dlCloseOld`, `dlClose`, `bufferedClose` | `_client/download.mojo:215-220`, `_client/parse.mojo:665-683` | `bufferedClose_safe`, `Bugs.H1_11.*` | counterexample (H1-11) / proved (buffered) |
 | `ChunkedEncode.hexDigit`, `hexLower`, `encChunk`, `encChunks`, `trailerLine`, `encTrailers`, `encodeBody`, `encodeUpload` | `streaming_serialize.mojo:116-140`, `162-166`, `258-300`; `client.mojo:121-135`, `1420-1445`, `1470-1495` | `decL_roundtrip`, `decodeBody_roundtrip`, `scan_roundtrip`, `cDec_roundtrip`, `upload_roundtrip` | proved |
 | `Handshake.acceptOf`, `genKey` | `ws/client.mojo:118-148`, `ws/server.mojo:100-111` | `genKey_valid`, `handshake_complete` | proved |
@@ -3025,7 +3025,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-06 | Medium | resolved | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
 | H1-07 | Low | resolved | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
 | H1-08 | Low | resolved | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
-| H1-09 | Low | open | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
+| H1-09 | Low | resolved | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
 | H1-10 | Low | open | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
 | H1-11 | Medium | resolved | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
 | WS-01 | Low | open | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
@@ -3829,11 +3829,13 @@ Status: resolved. `_parse_status_line` now requires SP, or the end of the line, 
 
 #### H1-09: an HTTP/1.0 response without keep-alive goes back to the pool
 
+Status: resolved. The framed reader records whether the status line names exactly `HTTP/1.1` (`_ResponseHead.http11`) and pools the connection only then. An HTTP/1.0 response with `keep-alive` is not pooled either (stricter than RFC 9112 §9.3, still meets `PersistOK`). The counterexample is about `canReuseOld`; `canReuse` is the shipped decision (`canReuse_ok`). Test: `test_only_an_http11_response_keeps_the_connection`.
+
 - **Severity:** Low. The next request on that connection goes to a socket the server is closing. It fails, or is retried, and the failure is timing-dependent. No cross-response desync results, because the server closes.
 - **RFC:** RFC 9112 §9.3: an HTTP/1.0 response keeps the connection open only with `Connection: keep-alive`.
 - **What goes wrong:** the pooled reader's reuse decision (`_client/parse.mojo:836-884`) checks `Connection: close` and close-delimited framing, but never the version.
-- **Counterexample:** `Bugs.H1_09.counterexample` (`¬ PersistOK canReuse`): `canReuse HTTP10 true [] (.length 2) = true`.
-- **Fix:** reuse only an HTTP/1.1 response, or an HTTP/1.0 one with `keep-alive`; the minimal fix is HTTP/1.1 only. `Bugs.H1_09.fixed_ok` (= `canReuseFixed_ok`).
+- **Counterexample:** `Bugs.H1_09.counterexample` (`¬ PersistOK canReuseOld`): `canReuseOld HTTP10 true [] (.length 2) = true`.
+- **Fix:** reuse only an HTTP/1.1 response, or an HTTP/1.0 one with `keep-alive`; the minimal fix is HTTP/1.1 only. `Bugs.H1_09.fixed_ok` (= `canReuse_ok`).
 - **Repro:** `formal/repro/H1-09_http10_response_pooled.mojo`
 - **Observed (3 runs):** `BUG REPRODUCED: HTTP/1.0 response without keep-alive marked reusable (status=200 body=hi can_reuse=True)`
 - **Flip:** `OK: HTTP/1.0 response closes the connection (status=200 body=hi can_reuse=False)`; `flare/http/_client/parse.mojo` restored.

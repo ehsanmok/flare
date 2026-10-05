@@ -11,10 +11,14 @@ of it; now both use ``_parse_response_head`` / ``_response_framing``.
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 
+from std.ffi import external_call
+
 from flare.http._client.parse import (
     _extract_body_and_trailers,
     _parse_http_response,
+    _read_http_response_framed,
 )
+from flare.io.buf_reader import Readable
 from flare.http.headers import HeaderMap
 
 
@@ -96,6 +100,66 @@ def test_status_line_with_and_without_reason_is_parsed() raises:
         _b("HTTP/1.1 200 \r\nContent-Length: 2\r\n\r\nhi"), "GET"
     )
     assert_equal(empty_reason.status, 200)
+
+
+struct _Wire(Movable, Readable):
+    """A readable that serves ``text`` and then reports end of stream."""
+
+    var bytes: List[UInt8]
+    var pos: Int
+
+    def __init__(out self, text: String):
+        self.bytes = List[UInt8](text.as_bytes())
+        self.pos = 0
+
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
+        var n = min(size, len(self.bytes) - self.pos)
+        if n > 0:
+            _ = external_call["memcpy", NoneType, Int, Int, Int](
+                Int(buf),
+                Int(self.bytes.unsafe_ptr().unsafe_offset(self.pos)),
+                n,
+            )
+        self.pos += n
+        return n
+
+
+def _reusable(wire: String) raises -> Bool:
+    var s = _Wire(wire)
+    var reuse = False
+    _ = _read_http_response_framed(s, reuse, "GET")
+    return reuse
+
+
+def test_only_an_http11_response_keeps_the_connection() raises:
+    """H1-09: RFC 9112 sec 9.3 -- HTTP/1.0 closes unless it says keep-alive.
+
+    The reuse decision ignored the response version, so an HTTP/1.0 answer
+    sent the connection back to the pool and the next request went to a
+    socket the server was closing.
+    """
+    assert_true(
+        _reusable("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"),
+        "HTTP/1.1 stays reusable",
+    )
+    assert_false(
+        _reusable("HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nhi"),
+        "HTTP/1.0 must not be reused",
+    )
+    assert_false(
+        _reusable(
+            "HTTP/1.0 200 OK\r\nContent-Length: 2\r\nConnection:"
+            " keep-alive\r\n\r\nhi"
+        ),
+        "HTTP/1.0 keep-alive is not pooled either",
+    )
+    assert_false(
+        _reusable(
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection:"
+            " close\r\n\r\nhi"
+        ),
+        "Connection: close still closes",
+    )
 
 
 def test_whitespace_before_colon_is_refused() raises:

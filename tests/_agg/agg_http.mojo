@@ -487,6 +487,9 @@ from test_client_response_parse import (
     test_status_line_with_and_without_reason_is_parsed as test_client_response_parse__test_status_line_with_and_without_reason_is_parsed,
 )
 from test_client_response_parse import (
+    test_only_an_http11_response_keeps_the_connection as test_client_response_parse__test_only_an_http11_response_keeps_the_connection,
+)
+from test_client_response_parse import (
     test_whitespace_before_colon_is_refused as test_client_response_parse__test_whitespace_before_colon_is_refused,
 )
 from test_client_response_parse import (
@@ -4488,6 +4491,9 @@ def main() raises:
     ]()
     suite.test[
         test_client_response_parse__test_status_line_with_and_without_reason_is_parsed
+    ]()
+    suite.test[
+        test_client_response_parse__test_only_an_http11_response_keeps_the_connection
     ]()
     suite.test[
         test_client_response_parse__test_whitespace_before_colon_is_refused

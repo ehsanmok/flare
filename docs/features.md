@@ -634,6 +634,12 @@ HTTP/1.1 client: a status line whose code is longer than three digits
 (`HTTP/1.1 2041 OK`) is refused. It used to be read as its first three
 digits, so a 2041 became a bodyless 204.
 
+HTTP/1.1 client pool: a connection is returned to the pool only after an
+`HTTP/1.1` response that did not say `Connection: close`. An `HTTP/1.0`
+response (even with `Connection: keep-alive`) now closes the connection,
+so the next request opens a new one instead of writing to a socket the
+server is closing.
+
 Breaking: the streaming download (`get_streaming` over HTTPS) now applies
 the same close_notify rule to a close-delimited body: if the server resets
 the connection without `close_notify`, the read raises `NetworkError`

@@ -77,7 +77,7 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.H1.ClientResponse.framing_length_iff
 #print axioms Flare.L3.H1.ClientResponse.framing_close_iff
 #print axioms Flare.L3.H1.ClientResponse.parseStatus_delimited
-#print axioms Flare.L3.H1.ClientResponse.canReuseFixed_ok
+#print axioms Flare.L3.H1.ClientResponse.canReuse_ok
 #print axioms Flare.L3.H1.ClientResponse.splitGo_join
 #print axioms Flare.L3.H1.ClientResponse.lfGo_join
 #print axioms Flare.L3.H1.ClientResponse.headImpl_agrees
