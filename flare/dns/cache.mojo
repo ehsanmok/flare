@@ -16,7 +16,8 @@ var b = cache.resolve("example.com")   # served from cache, no syscall
 print(cache.resolve_count())            # 1
 ```
 
-Entries live for the cache's own ``ttl_ms``. ``getaddrinfo(3)`` does
+Entries live for the cache's own ``ttl_ms`` (``Int.MAX`` means "until
+evicted": the expiry saturates instead of wrapping). ``getaddrinfo(3)`` does
 not report the record's DNS TTL, so a record whose TTL is shorter than
 ``ttl_ms`` is served past it; pick ``ttl_ms`` with that in mind. Host
 names are matched case-insensitively and without a trailing dot, as DNS
@@ -101,7 +102,9 @@ struct DnsCache(Movable):
             for kv in self._by_host.items():
                 if kv.value.expires_at_ms <= now:
                     expired.append(kv.key)
-                elif kv.value.expires_at_ms < oldest_at:
+                elif kv.value.expires_at_ms <= oldest_at:
+                    # ``<=``: a saturated expiry equals the ``Int.MAX``
+                    # seed and must still be a candidate victim.
                     oldest_at = kv.value.expires_at_ms
                     oldest = kv.key
             for i in range(len(expired)):
@@ -114,8 +117,14 @@ struct DnsCache(Movable):
                     _ = self._by_host.pop(oldest)
                 except:
                     pass
+        # Saturate: ``now + ttl_ms`` wraps negative for a "cache forever"
+        # TTL (``Int.MAX``) and the entry would be born expired. ``now`` is
+        # a monotonic reading (>= 0), so ``Int.MAX - now`` cannot overflow.
+        var expires_at = (
+            Int.MAX if self._ttl_ms > Int.MAX - now else now + self._ttl_ms
+        )
         self._by_host[key] = _CachedAddrs(
-            addrs=addrs^, expires_at_ms=now + self._ttl_ms
+            addrs=addrs^, expires_at_ms=expires_at
         )
 
     def resolve(mut self, host: String) raises -> List[IpAddr]:

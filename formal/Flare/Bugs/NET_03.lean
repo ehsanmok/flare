@@ -3,7 +3,11 @@ import Flare.L2_Machine.DnsCache
 /-!
 # NET-03: `DnsCache` with a very large `ttl_ms` never serves a hit
 
-flare/dns/cache.mojo:96-142 @59bda50.
+Status: resolved. `_store` now saturates the expiry and the eviction scan
+uses `<=`; `Flare.L2.DnsCache.store` / `resolve` mirror the shipped code and
+the counterexamples below are about the pre-fix `storeOld` / `resolveOld`.
+
+Pre-fix code: flare/dns/cache.mojo:96-142 @59bda50.
 
 Spec (`DnsCache` docstring): an entry is served from memory until
 `ttl_ms` has elapsed since it was stored, and the cache holds at most
@@ -30,15 +34,15 @@ open Flare.L2.DnsCache
 `now ≥ 1`, a lookup at any `now' ≥ 0` misses. -/
 theorem huge_ttl_never_hits (c : Cache) (k : Nat) (now now' : Int64)
     (hn : 1 ≤ now.toInt) (hn' : 0 ≤ now'.toInt) (httl : c.ttl = Int64.maxValue) :
-    (resolve (store c k now) k now').2 = false :=
+    (resolveOld (storeOld c k now) k now').2 = false :=
   resolve_store_miss c k now now' hn hn' httl
 
 /-- The repro's trace: two lookups of one host at t = 1000 and 1001 ms
 resolve twice and hit never. -/
 theorem huge_ttl_trace :
     let c0 := Cache.new Int64.maxValue 1024
-    let r1 := resolve c0 0 1000
-    let r2 := resolve r1.1 0 1001
+    let r1 := resolveOld c0 0 1000
+    let r2 := resolveOld r1.1 0 1001
     r2.2 = false ∧ r2.1.resolves = 2 ∧ r2.1.hits = 0 := by
   native_decide
 
@@ -46,7 +50,7 @@ theorem huge_ttl_trace :
 `ttl = Int.MAX` into a 1-entry cache both stay. -/
 theorem store_exceeds_max_at_INT_MAX :
     let c0 := Cache.new Int64.maxValue 1
-    ((store (store c0 0 0) 1 0).byHost.length = 2) := by
+    ((storeOld (storeOld c0 0 0) 1 0).byHost.length = 2) := by
   native_decide
 
 /-- Saturating the expiry without changing the scan's `<` breaks the bound
@@ -59,18 +63,18 @@ theorem saturation_alone_exceeds_max :
     ((storeSatOnly (storeSatOnly c0 0 1000) 1 1001).byHost.length = 2) := by
   native_decide
 
-/-- **Fix meets spec (TTL)**: after the fixed store at `now ≥ 0`, a lookup
+/-- **Fix meets spec (TTL)**: after the shipped store at `now ≥ 0`, a lookup
 strictly inside the TTL window is a hit (for every `ttl`, including
 `Int.MAX`). -/
 theorem storeFixed_hits_within_ttl (c : Cache) (k : Nat) (now now' : Int64)
     (hn : 0 ≤ now.toInt) (h1 : now.toInt ≤ now'.toInt)
     (h2 : now'.toInt < now.toInt + c.ttl.toInt) (h3 : now'.toInt < Int64.maxValue.toInt) :
-    (resolveFixed (storeFixed c k now) k now').2 = true :=
-  Flare.L2.DnsCache.storeFixed_hits_within_ttl c k now now' hn h1 h2 h3
+    (resolve (store c k now) k now').2 = true :=
+  Flare.L2.DnsCache.store_hits_within_ttl c k now now' hn h1 h2 h3
 
-/-- **Fix meets spec (size)**: the fixed store keeps `size() ≤ max_entries`. -/
+/-- **Fix meets spec (size)**: the shipped store keeps `size() ≤ max_entries`. -/
 theorem storeFixed_size_bound (c : Cache) (k : Nat) (now : Int64) (hmax : 1 ≤ c.maxEntries)
-    (h : c.byHost.length ≤ c.maxEntries) : (storeFixed c k now).byHost.length ≤ c.maxEntries :=
-  Flare.L2.DnsCache.storeFixed_size_bound c k now hmax h
+    (h : c.byHost.length ≤ c.maxEntries) : (store c k now).byHost.length ≤ c.maxEntries :=
+  Flare.L2.DnsCache.store_size_bound c k now hmax h
 
 end Flare.Bugs.NET_03

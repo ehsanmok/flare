@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-03 fixed on fix/formal-findings
 """NET-03: DnsCache with a very large ttl_ms never serves a hit.
 
 Lean: Flare.Bugs.NET_03.huge_ttl_never_hits (counterexample),
@@ -8,7 +9,7 @@ flare/dns/cache.mojo:96-142 @59bda50.
 
 Expected: DnsCache(ttl_ms=Int.MAX) ("cache forever") serves the second
 lookup of a host from memory: resolve_count() == 1, hit_count() == 1.
-Actual: _store computes expires_at_ms = now + ttl_ms in wrapping Int
+Before the fix: _store computes expires_at_ms = now + ttl_ms in wrapping Int
 arithmetic. now (monotonic ms) + Int.MAX wraps to a negative number, so
 every entry is already expired and every lookup calls getaddrinfo:
 resolve_count() == 2, hit_count() == 0.

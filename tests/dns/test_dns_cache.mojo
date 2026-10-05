@@ -72,6 +72,42 @@ def test_cache_is_bounded() raises:
     assert_equal(c.size(), 2)
 
 
+def test_int_max_ttl_means_cache_forever() raises:
+    """NET-03: ``now + ttl_ms`` wrapped negative for ``ttl_ms = Int.MAX``,
+    so every entry was born expired and nothing was ever served."""
+    var c = DnsCache(ttl_ms=Int.MAX)
+    _ = c.resolve("localhost")
+    _ = c.resolve("localhost")
+    assert_equal(c.resolve_count(), 1)
+    assert_equal(c.hit_count(), 1)
+
+
+def test_ttl_that_overflows_the_expiry_still_caches() raises:
+    """NET-03: any TTL with ``now + ttl > Int.MAX`` must saturate rather
+    than wrap (the monotonic clock is far above 1 ms)."""
+    var c = DnsCache(ttl_ms=Int.MAX - 1)
+    _ = c.resolve("localhost")
+    _ = c.resolve("localhost")
+    assert_equal(c.resolve_count(), 1)
+    assert_equal(c.hit_count(), 1)
+
+
+def test_saturated_expiries_are_still_evicted() raises:
+    """NET-03: with saturated expiries (all equal to ``Int.MAX``) the
+    eviction scan must still pick a victim, or the cache outgrows
+    ``max_entries``."""
+    var c = DnsCache(ttl_ms=Int.MAX, max_entries=2)
+    _ = c.resolve("127.0.0.1")
+    _ = c.resolve("127.0.0.2")
+    _ = c.resolve("127.0.0.3")
+    _ = c.resolve("127.0.0.4")
+    assert_equal(c.size(), 2)
+    # The newest entry survives and is served from cache.
+    var before = c.resolve_count()
+    _ = c.resolve("127.0.0.4")
+    assert_equal(c.resolve_count(), before)
+
+
 def main() raises:
     test_within_ttl_no_second_syscall()
     test_zero_ttl_always_resolves()
@@ -80,4 +116,7 @@ def main() raises:
     test_clear_drops_all()
     test_names_match_case_insensitively()
     test_cache_is_bounded()
-    print("test_dns_cache: 7 passed")
+    test_int_max_ttl_means_cache_forever()
+    test_ttl_that_overflows_the_expiry_still_caches()
+    test_saturated_expiries_are_still_evicted()
+    print("test_dns_cache: 10 passed")

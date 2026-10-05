@@ -80,8 +80,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.Uds.readPathFixed_fill
 #print axioms Flare.L2.Uds.readPath_fill_iff_ascii
 -- DnsCache
-#print axioms Flare.L2.DnsCache.storeFixed_size_bound
-#print axioms Flare.L2.DnsCache.storeFixed_hits_within_ttl
+#print axioms Flare.L2.DnsCache.store_size_bound
+#print axioms Flare.L2.DnsCache.store_hits_within_ttl
 #print axioms Flare.L2.DnsCache.huge_ttl_expiry_wraps
 -- BufferPool
 #print axioms Flare.L2.BufferPool.classIndex_fits

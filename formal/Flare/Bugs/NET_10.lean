@@ -4,7 +4,7 @@ import Flare.L2_Machine.HappyEyeballs
 # NET-10: `order_happy_eyeballs` always tries IPv6 first
 
 flare/dns/async_resolve.mojo:154-177 @59bda50 (used by
-`DnsCache.resolve_ordered`, flare/dns/cache.mojo:167-171).
+`DnsCache.resolve_ordered`, flare/dns/cache.mojo:176-180).
 
 Spec (RFC 8305 §4, which the docstring cites): the input is the resolver's
 RFC 6724-sorted list; interleaving must keep its first address first —

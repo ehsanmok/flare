@@ -99,6 +99,15 @@ from test_dns_cache import (
 from test_dns_cache import (
     test_cache_is_bounded as test_dns_cache__test_cache_is_bounded,
 )
+from test_dns_cache import (
+    test_int_max_ttl_means_cache_forever as test_dns_cache__test_int_max_ttl_means_cache_forever,
+)
+from test_dns_cache import (
+    test_ttl_that_overflows_the_expiry_still_caches as test_dns_cache__test_ttl_that_overflows_the_expiry_still_caches,
+)
+from test_dns_cache import (
+    test_saturated_expiries_are_still_evicted as test_dns_cache__test_saturated_expiries_are_still_evicted,
+)
 
 
 def main() raises:
@@ -138,4 +147,9 @@ def main() raises:
     suite.test[test_dns_cache__test_clear_drops_all]()
     suite.test[test_dns_cache__test_names_match_case_insensitively]()
     suite.test[test_dns_cache__test_cache_is_bounded]()
+    suite.test[test_dns_cache__test_int_max_ttl_means_cache_forever]()
+    suite.test[
+        test_dns_cache__test_ttl_that_overflows_the_expiry_still_caches
+    ]()
+    suite.test[test_dns_cache__test_saturated_expiries_are_still_evicted]()
     suite^.run()

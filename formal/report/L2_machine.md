@@ -254,15 +254,15 @@ for Linux (108-byte path) and macOS (104).
 
 ### DNS cache (`DnsCache.lean`)
 
-dns/cache.mojo:69-142. The dictionary is an insertion-ordered association
+dns/cache.mojo:70-151. The dictionary is an insertion-ordered association
 list; host keys are abstracted to `Nat`; times are `Int64` with wrapping `+`;
 the resolver always succeeds.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `huge_ttl_expiry_wraps` | With `ttl = Int.MAX` and `now ≥ 1`, the stored expiry is below every non-negative time. | proved (NET-03) |
-| `storeFixed_size_bound` | The fixed store keeps `size ≤ max_entries`. | proved |
-| `storeFixed_hits_within_ttl` | After the fixed store at `now ≥ 0`, any lookup strictly inside the TTL window is a hit. | proved |
+| `huge_ttl_expiry_wraps` | With `ttl = Int.MAX` and `now ≥ 1`, the pre-fix stored expiry `now + ttl` is below every non-negative time. | proved (NET-03, resolved) |
+| `store_size_bound` | The shipped store keeps `size ≤ max_entries`. | proved |
+| `store_hits_within_ttl` | After the shipped store at `now ≥ 0`, any lookup strictly inside the TTL window is a hit. | proved |
 | `key_fqdn_case`, `key_not_idempotent` | `_key` merges case and one trailing dot, but is not idempotent (`a..` vs `a.`). | proved (note) |
 
 ### Buffer pool (`BufferPool.lean`)
@@ -442,11 +442,13 @@ expiring at `Int.MAX` are never evicted and the cache grows past
 (`store_exceeds_max_at_INT_MAX`, at `now = 0`), and
 `saturation_alone_exceeds_max` shows the half-fix makes it the common case.
 Lean: `Flare.Bugs.NET_03.huge_ttl_never_hits` (all `now ≥ 1`, `now' ≥ 0`),
-`huge_ttl_trace`. Fix: saturate the expiry and use `<=` in the scan;
-`storeFixed_hits_within_ttl`, `storeFixed_size_bound`.
+`huge_ttl_trace` (about the pre-fix `storeOld` / `resolveOld`). Fix: saturate
+the expiry and use `<=` in the scan; `Bugs.NET_03.storeFixed_hits_within_ttl`,
+`storeFixed_size_bound` (the shipped `store`).
 Repro: `formal/repro/NET-03_dns_cache_ttl_overflow.mojo`, observed
 `BUG REPRODUCED: DnsCache(ttl_ms=Int.MAX) resolved 2 times with 0 hits for two lookups of the same host`.
 Flip (both changes): `OK: second lookup served from cache`, exit 0.
+Status: resolved. `DnsCache._store` saturates the expiry (`Int.MAX` when `ttl_ms > Int.MAX - now`) and the eviction scan uses `<=`; the model's `store` / `resolve` mirror it (pre-fix: `storeOld`, `resolveOld`; shipped: `store_size_bound`, `store_hits_within_ttl`). Tests: `tests/dns/test_dns_cache.mojo::test_int_max_ttl_means_cache_forever`, `::test_ttl_that_overflows_the_expiry_still_caches`, `::test_saturated_expiries_are_still_evicted`.
 
 ### NET-04: `FrameDemux.feed` re-delivers frames after a protocol error
 
@@ -877,8 +879,8 @@ lists record ids, not tokens.
 | `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-285, 332-338 | `impl_addr6`, `old_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | proved; counterexample (NET-01) |
 | `Flare.L2.Uds.fill` | flare/uds/_libc.mojo:55-107 | `fill_len_le` | proved |
 | `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-133 | `readPath_fill_iff_ascii`, `NET_06.decode_encode_not_id` | counterexample (NET-06) |
-| `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:81-94 | `key_fqdn_case`, `key_not_idempotent` | proved |
-| `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:96-142 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `storeFixed_size_bound` | counterexample (NET-03) |
+| `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:82-95 | `key_fqdn_case`, `key_not_idempotent` | proved |
+| `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:97-151 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `store_size_bound` | proved; counterexample (NET-03, resolved) |
 | `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo:130-161 | `classIndex_fits`, `classIndex_least` | proved |
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |

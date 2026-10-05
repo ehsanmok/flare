@@ -3,7 +3,7 @@ import Flare.Core
 /-!
 # DnsCache: TTL-bounded resolution cache
 
-`flare/dns/cache.mojo:51-142`. The `Dict[String, _CachedAddrs]` is an
+`flare/dns/cache.mojo:51-151`. The `Dict[String, _CachedAddrs]` is an
 association list in insertion order (Mojo's `Dict` iterates in insertion
 order and `d[k] = v` on an existing key updates in place). Host keys are
 abstracted to `Nat` (already normalised by `_key`); the address lists are
@@ -26,13 +26,13 @@ structure Cache where
   hits : Nat
 
 /-- `__init__` (clamps `max_entries` to at least 1).
-mirrors flare/dns/cache.mojo:69-79 @59bda50 -/
+mirrors flare/dns/cache.mojo:70-80 @59bda50 -/
 def Cache.new (ttl : Int64) (maxEntries : Nat) : Cache :=
   ⟨[], ttl, if maxEntries > 0 then maxEntries else 1, 0, 0⟩
 
 /-- Host normalisation: drop one trailing `.` (if the name is longer than
 one byte) and ASCII-lowercase.
-mirrors flare/dns/cache.mojo:81-94 @59bda50 -/
+mirrors flare/dns/cache.mojo:82-95 @59bda50 -/
 def key (b : Bytes) : Bytes :=
   let n := if b.length > 1 ∧ b.getLast? = some 46 then b.length - 1 else b.length
   (b.take n).map fun c => if 65 ≤ c ∧ c ≤ 90 then c + 32 else c
@@ -61,8 +61,9 @@ def better (le : Bool) (e best : Int64) : Bool :=
   if le then decide (e ≤ best) else decide (e < best)
 
 /-- The eviction scan over live entries, starting from `best = Int.MAX`;
-`le = false` is flare's strict `<`, `le = true` the fixed `<=`.
-mirrors flare/dns/cache.mojo:99-106 @59bda50 -/
+`le = true` is the shipped `<=` (fixed, NET-03), `le = false` the pre-fix
+strict `<`.
+mirrors flare/dns/cache.mojo:101-109 (fixed, NET-03) -/
 def oldestGo (le : Bool) (now : Int64) : Dict → Int64 → Option Nat → Option Nat
   | [], _, o => o
   | (k, e) :: rest, best, o =>
@@ -71,7 +72,8 @@ def oldestGo (le : Bool) (now : Int64) : Dict → Int64 → Option Nat → Optio
     else oldestGo le now rest best o
 
 /-- Make room for a new key (the `if key not in ... and len >= max` block).
-mirrors flare/dns/cache.mojo:96-116 @59bda50 -/
+mirrors flare/dns/cache.mojo:98-120 (fixed, NET-03) when `le = true`; with
+`le = false` it is the pre-fix scan. -/
 def evict (le : Bool) (c : Cache) (k : Nat) (now : Int64) : Dict :=
   if (lookup c.byHost k).isNone ∧ c.byHost.length ≥ c.maxEntries then
     let oldest := oldestGo le now c.byHost Int64.maxValue none
@@ -81,21 +83,24 @@ def evict (le : Bool) (c : Cache) (k : Nat) (now : Int64) : Dict :=
     | none => L1
   else c.byHost
 
-/-- mirrors flare/dns/cache.mojo:96-119 @59bda50 -/
-def store (c : Cache) (k : Nat) (now : Int64) : Cache :=
-  { c with byHost := setKey (evict false c k now) k (now + c.ttl) }
-
-/-- `now + ttl`, saturating at `Int.MAX` (valid for `now ≥ 0`). -/
+/-- `now + ttl`, saturating at `Int.MAX` (valid for `now ≥ 0`).
+mirrors flare/dns/cache.mojo:123-128 (fixed, NET-03) -/
 def satAdd (now ttl : Int64) : Int64 :=
   if ttl > Int64.maxValue - now then Int64.maxValue else now + ttl
 
-/-- The minimal fix: saturate the expiry and use `<=` in the eviction scan. -/
-def storeFixed (c : Cache) (k : Nat) (now : Int64) : Cache :=
+/-- `_store`: saturating expiry and the `<=` eviction scan.
+mirrors flare/dns/cache.mojo:97-128 (fixed, NET-03) -/
+def store (c : Cache) (k : Nat) (now : Int64) : Cache :=
   { c with byHost := setKey (evict true c k now) k (satAdd now c.ttl) }
+
+/-- Pre-fix `_store`: wrapping `now + ttl_ms` and the strict-`<` scan
+(flare/dns/cache.mojo:96-119 @59bda50). -/
+def storeOld (c : Cache) (k : Nat) (now : Int64) : Cache :=
+  { c with byHost := setKey (evict false c k now) k (now + c.ttl) }
 
 /-- `resolve`: serve a fresh entry, else resolve and `_store`. Returns
 whether the lookup was a hit.
-mirrors flare/dns/cache.mojo:121-142 @59bda50 -/
+mirrors flare/dns/cache.mojo:130-151 (fixed, NET-03) -/
 def resolveWith (st : Cache → Nat → Int64 → Cache) (c : Cache) (k : Nat) (now : Int64) :
     Cache × Bool :=
   match lookup c.byHost k with
@@ -105,7 +110,8 @@ def resolveWith (st : Cache → Nat → Int64 → Cache) (c : Cache) (k : Nat) (
   | none => ({ st c k now with resolves := c.resolves + 1 }, false)
 
 def resolve := resolveWith store
-def resolveFixed := resolveWith storeFixed
+/-- pre-fix `resolve` (with `storeOld`) -/
+def resolveOld := resolveWith storeOld
 
 /-! ## Lemmas -/
 
@@ -196,12 +202,12 @@ theorem oldestGo_le_finds (now : Int64) :
         · obtain ⟨o, e'', h1, h2, h3⟩ := oldestGo_le_finds now rest best acc ⟨k', e', hm, hl, hb⟩
           exact ⟨o, e'', h1, List.mem_cons_of_mem _ h2, h3⟩
 
-/-! ## The fixed store: size bound and TTL -/
+/-! ## The shipped store: size bound and TTL -/
 
-/-- **Size bound (fix)**: `storeFixed` keeps `size() ≤ max_entries`. -/
-theorem storeFixed_size_bound (c : Cache) (k : Nat) (now : Int64) (hmax : 1 ≤ c.maxEntries)
-    (h : c.byHost.length ≤ c.maxEntries) : (storeFixed c k now).byHost.length ≤ c.maxEntries := by
-  unfold storeFixed evict
+/-- **Size bound (fix)**: `store` keeps `size() ≤ max_entries`. -/
+theorem store_size_bound (c : Cache) (k : Nat) (now : Int64) (hmax : 1 ≤ c.maxEntries)
+    (h : c.byHost.length ≤ c.maxEntries) : (store c k now).byHost.length ≤ c.maxEntries := by
+  unfold store evict
   dsimp only
   split
   · rename_i hfull
@@ -270,17 +276,17 @@ theorem satAdd_toInt (now ttl : Int64) (hn : 0 ≤ now.toInt) :
 
 /-- **TTL (fix)**: after a fixed store at `now ≥ 0`, a lookup at any later
 `now'` strictly inside the TTL window (and below `Int.MAX`) is a hit. -/
-theorem storeFixed_hits_within_ttl (c : Cache) (k : Nat) (now now' : Int64)
+theorem store_hits_within_ttl (c : Cache) (k : Nat) (now now' : Int64)
     (hn : 0 ≤ now.toInt) (_h1 : now.toInt ≤ now'.toInt)
     (h2 : now'.toInt < now.toInt + c.ttl.toInt) (h3 : now'.toInt < Int64.maxValue.toInt) :
-    (resolveFixed (storeFixed c k now) k now').2 = true := by
-  unfold resolveFixed resolveWith storeFixed
+    (resolve (store c k now) k now').2 = true := by
+  unfold resolve resolveWith store
   dsimp only
   rw [lookup_setKey]
   dsimp only
   rw [if_pos (by rw [Int64.lt_iff_toInt_lt, satAdd_toInt now c.ttl hn]; omega)]
 
-/-! ## flare's store: the wrapping expiry -/
+/-! ## The pre-fix store: the wrapping expiry -/
 
 /-- With `ttl = Int.MAX` and any clock reading `now ≥ 1`, the stored expiry
 `now + ttl` wraps negative, so no lookup at a non-negative time is ever a
@@ -298,8 +304,8 @@ theorem huge_ttl_expiry_wraps (now now' : Int64) (hn : 1 ≤ now.toInt) (hn' : 0
 
 theorem resolve_store_miss (c : Cache) (k : Nat) (now now' : Int64)
     (hn : 1 ≤ now.toInt) (hn' : 0 ≤ now'.toInt) (httl : c.ttl = Int64.maxValue) :
-    (resolve (store c k now) k now').2 = false := by
-  unfold resolve resolveWith store
+    (resolveOld (storeOld c k now) k now').2 = false := by
+  unfold resolveOld resolveWith storeOld
   dsimp only
   rw [lookup_setKey]
   dsimp only
