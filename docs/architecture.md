@@ -252,7 +252,7 @@ small `StepResult` per call telling the reactor how to update its
 interest mask, whether to re-arm the idle timer, and whether the
 connection is finished. The reactor owns the lifecycle.
 
-A 3-cycle inline fast path in `run_reactor_loop` lets a single
+A 3-cycle inline fast path in the HTTP reactor loop lets a single
 readable event drive the next writable + the next readable in
 sequence (without going back through `kqueue.kevent` / `epoll_wait`)
 when the buffers permit. This is the single biggest win on the

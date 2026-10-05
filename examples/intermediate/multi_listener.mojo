@@ -46,8 +46,8 @@ def main() raises:
     addrs.append(SocketAddr.localhost(0))
     addrs.append(SocketAddr.localhost(0))
     addrs.append(SocketAddr.localhost(0))
-    # `bind` takes either shape; `bind_many` is the pre-0.11
-    # spelling of this line and goes away in 0.12.
+    # `bind` takes either shape; `bind_many` was the pre-0.11
+    # spelling of this line and was removed in v0.12.
     var srv = HttpServer.bind(addrs^)
 
     var bound = srv.local_addrs()

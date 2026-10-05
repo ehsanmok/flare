@@ -66,9 +66,9 @@ wire is an implementation detail). See
 Scope today: TLS is terminated on the unified reactor. Many TLS
 connections are in flight on one event loop, ``num_workers > 1``
 scales them across cores, and the negotiated ALPN selects HTTP/1.1 or
-HTTP/2 -- an ``h2`` connection is served, not closed. ``serve_tls`` is
-a deprecated alias for ``serve`` on a TLS-bound server (removed in
-0.12); there is one TLS code path.
+HTTP/2 -- an ``h2`` connection is served, not closed. ``serve_tls`` was a
+deprecated alias for ``serve`` on a TLS-bound server and was removed in
+v0.12; there is one TLS code path.
 
 ## Why OpenSSL + FFI rather than a Mojo-native stack
 

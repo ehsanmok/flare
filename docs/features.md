@@ -64,10 +64,12 @@ and `shutdown()` / `drain` return without traffic.
 
 ## HTTP server
 
-**Changed in v0.11 (breaking, with shims).** The server surface went
-from nineteen entry points to four names.
+**Changed in v0.11 (breaking, with shims); shims removed in v0.12.** The
+server surface went from nineteen entry points to four names. v0.11 kept
+some of the old spellings as delegating shims; v0.12 removed them. The
+table is the migration guide.
 
-| Before | Now |
+| Before (removed in v0.12) | Now |
 |---|---|
 | `bind(addr, config, h2_config)` | `bind(addr, config)`; HTTP/2 settings live at `config.h2` |
 | `bind_many(addrs, config)` | `bind(addrs, config)` -- `bind` takes an address or a list |
@@ -78,8 +80,8 @@ from nineteen entry points to four names.
 | `ServerConfig.ws_handler` / `.ws_offload` | `ServerConfig.ws.handler` / `.ws.offload` |
 | asserts inside `serve_comptime` | `ServerConfig.check[cfg]()`, callable anywhere |
 
-`bind_many`, `serve_tls`, `serve_ws_upgrade` and `serve_static_multicore`
-remain as delegating shims and are removed in 0.12. `serve_cancellable`,
+`bind_many`, `serve_tls`, `serve_ws_upgrade`, `serve_static_multicore`
+and `serve_comptime` were removed in v0.12. `serve_cancellable`,
 `serve_view` and `serve_static` now raise when a TLS context or extra
 listeners are bound, instead of silently ignoring both. They run one
 reactor over the first address; to serve several addresses
@@ -106,10 +108,10 @@ because a front end could read the same bytes as a different request:
 | Surface | Where |
 |---|---|
 | `HttpServer.bind(addr)` / `serve(handler)` / `serve(handler, num_workers=N)` — version-aware listener that dispatches HTTP/1.1, HTTP/2 over TLS (ALPN), and h2c (RFC 9113 §3.4 preface peek, no `Upgrade` dance) to the same handler | [`http_server.mojo`](../examples/basic/http_server.mojo), [`http2.mojo`](../examples/advanced/http2.mojo), [`http2_server_router.mojo`](../examples/advanced/http2_server_router.mojo) |
-| `HttpServer.bind(addrs: List[SocketAddr])` — single-worker listener over multiple distinct addresses; the accept loop walks every fd and demuxes onto the same handler. `bind` takes one address or a list; `bind_many` is the pre-0.11 spelling and goes away in 0.12 | [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) |
+| `HttpServer.bind(addrs: List[SocketAddr])` — single-worker listener over multiple distinct addresses; the accept loop walks every fd and demuxes onto the same handler. `bind` takes one address or a list; `bind_many`, the pre-0.11 spelling, was removed in v0.12 | [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) |
 | HTTP/1.1 trailer fields (RFC 7230 §4.1.2 / §4.4) — `StreamingResponse[B].trailers: HeaderMap` on the outbound side (buffered `Response` uses `Content-Length` and never carries trailers), automatic `Trailer:` header, smuggling guard rejects trailers when `Content-Length` is present or when forbidden trailer names are listed; `HttpClient` parses inbound trailers off the chunked decoder and lands them on `Response.trailers` (also a `HeaderMap`) | [`trailers.mojo`](../examples/intermediate/trailers.mojo), [`tests/http/test_h1_trailers.mojo`](../tests/http/test_h1_trailers.mojo) |
 | `HttpServer.serve_static(StaticResponse, num_workers=1)` — pre-encoded static-response fast path that skips parsing and handler dispatch; `num_workers > 1` runs one listener per worker thread (used by `flare_mc_static` bench row) | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
-| `ServerConfig.check[config]()` — build-time invariant checks on a comptime `ServerConfig`; `serve_comptime[handler, config]()` is the deprecated pre-0.11 spelling (removed in 0.12) | `flare.http.server` |
+| `ServerConfig.check[config]()` — build-time invariant checks on a comptime `ServerConfig`; `serve_comptime[handler, config]()`, the pre-0.11 spelling, was removed in v0.12 | `flare.http.server` |
 | Per-worker `SO_REUSEPORT` listeners by default (`num_workers >= 2`); `FLARE_REUSEPORT_WORKERS=0` switches to single-listener `EPOLLEXCLUSIVE` shape | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
 | `pin_cores=True` (default): worker N pinned to core `N % num_cpus()` on Linux, no-op on macOS | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
 | `HttpServer.drain(timeout_ms) -> ShutdownReport` per worker: closes the listener, keeps the reactor serving for the full `timeout_ms` (in-flight responses finish), then stops it; `drain(0)` is a hard stop | [`drain.mojo`](../examples/intermediate/drain.mojo) |
@@ -850,8 +852,8 @@ unchecked, so any draft was upgraded. There is still no cap on offload threads.
 
 **Changed in v0.11.** These were two loose fields, `ws_handler` and
 `ws_offload`, which made it easy to set the handler and never learn
-the offload flag existed. `serve_ws_upgrade(fn, ws_fn)` wired both and
-is now a shim that goes away in 0.12.
+the offload flag existed. `serve_ws_upgrade(fn, ws_fn)` wired both; it
+was a shim in v0.11 and was removed in v0.12.
 
 ```mojo
 var cfg = ServerConfig()
@@ -868,7 +870,7 @@ yet. Cleartext pooled sockets are re-armed on checkout, pooled TLS
 connections keep whatever was armed when they were dialled, and
 lowering the value to `0` clears neither. Build-time invariants (e.g. `max_body_size >=
 max_header_size`) are checked by Mojo `comptime assert` when used with
-`serve_comptime[handler, config]`.
+`ServerConfig.check[config]()`.
 
 ## Known gaps
 
@@ -906,7 +908,7 @@ of what you might reasonably assume from the surrounding feature.
   builds its own context.
 - HTTP/3 serves single-worker only. The other three wires serve at any
   worker count, cleartext or TLS.
-- `bind_many` is single-worker only for its address cross product.
+- `bind(List[SocketAddr])` is single-worker only for its address cross product.
 - The io_uring buffer-ring handler path (`FLARE_BUFRING_HANDLER=1`) is
   HTTP/1.1 cleartext only and cannot stream.
 

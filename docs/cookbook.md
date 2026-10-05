@@ -63,7 +63,7 @@ basics.
 | [`ok_json_typed.mojo`](../examples/intermediate/ok_json_typed.mojo) | Typed JSON request → typed JSON response via `ok_json_value` |
 | [`infallible_handler.mojo`](../examples/intermediate/infallible_handler.mojo) | `HandlerInfallible` + `WithRaises` adapter for provably no-`raises` paths |
 | [`trailers.mojo`](../examples/intermediate/trailers.mojo) | HTTP/1.1 trailer fields (gRPC-style status trailer): `Response.trailers`, `Trailer:` header, smuggling guard |
-| [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) | `HttpServer.bind_many` over multiple distinct addresses, single accept loop |
+| [`multi_listener.mojo`](../examples/intermediate/multi_listener.mojo) | `HttpServer.bind(List[SocketAddr])` over multiple distinct addresses, single accept loop |
 | [`reliability.mojo`](../examples/intermediate/reliability.mojo) | `Retry[Inner]` + `PostHocDeadline[Inner]` + `RetryPolicy` -- RFC 9110 §9.2.2 idempotent-method gate (GET / HEAD / PUT / DELETE / OPTIONS), opt-in exponential backoff with jitter (`backoff_base_ms` / `backoff_max_ms` / `backoff_jitter_ms`), post-hoc 504 wall-clock guard |
 | [`http_cache.mojo`](../examples/intermediate/http_cache.mojo) | `Cache[Inner, S]` middleware over an `InMemoryCacheStore` -- RFC 9111 freshness check on `CacheEntry.is_fresh`, `Vary`-aware secondary key, conditional revalidation (`If-None-Match` / `If-Modified-Since` + 304 folding back into the cached entry) |
 | [`template_inheritance.mojo`](../examples/intermediate/template_inheritance.mojo) | Single-level template inheritance: parent layout + child overrides via `{% block %}` / `{% extends %}` / `Template.render_extending` |

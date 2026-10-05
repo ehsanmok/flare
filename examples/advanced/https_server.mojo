@@ -18,10 +18,11 @@ the given ALPN protocols. TLS is a property of the bind, not of serving,
 so the serve call is the ordinary one: the handshake runs on the reactor
 as its own connection kind, so many TLS connections are in flight at
 once and `num_workers > 1` spreads them across cores. (`serve_tls` was
-the v0.10 spelling of that line. It still works and goes away in 0.12.) When the handshake completes, the negotiated ALPN picks
-the protocol -- `h2` gets an HTTP/2 connection, anything else gets
-HTTP/1.1 -- and from there it is the same parsing and serialisation the
-plaintext path uses, just through `SSL_read` / `SSL_write`.
+the v0.10 spelling of that line; it was removed in v0.12.) When the
+handshake completes, the negotiated ALPN picks the protocol -- `h2` gets
+an HTTP/2 connection, anything else gets HTTP/1.1 -- and from there it is
+the same parsing and serialisation the plaintext path uses, just through
+`SSL_read` / `SSL_write`.
 
 Streaming composes for free: a handler that returns `stream_response(src)`
 is emitted with `Transfer-Encoding: chunked` framing, pulled chunk by

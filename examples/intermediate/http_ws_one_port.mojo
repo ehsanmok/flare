@@ -98,8 +98,8 @@ def main() raises:
     # `ServerConfig.ws` is what makes the one-port shape work. Setting
     # it is the whole opt-in: `serve` routes a valid RFC 6455 upgrade to
     # `ws_handler` and everything else to `http_handler`. Before v0.11
-    # this was `serve_ws_upgrade(http_handler, ws_handler)`, which still
-    # works this release and goes away in 0.12.
+    # this was `serve_ws_upgrade(http_handler, ws_handler)`, which was
+    # removed in v0.12.
     var cfg = ServerConfig()
     cfg.ws = WsUpgrade(ws_handler)
 
