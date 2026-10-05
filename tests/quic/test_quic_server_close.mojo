@@ -21,6 +21,7 @@ from flare.quic import (
     QUIC_VERSION_1,
     QuicListener,
     QuicServerConfig,
+    TIMER_KIND_IDLE,
     TIMER_KIND_PTO,
     encode_long_header,
     encode_timer_token,
@@ -143,14 +144,22 @@ def test_closing_state_answers_packets_and_lasts_three_ptos() raises:
         client.poll(timeout_ms=200).connection_closed,
         "a packet in the closing state was not answered",
     )
+    # The measured closing period (three PTOs) can be a few ms on loopback,
+    # shorter than this test's own polling. Re-arm the closing timer far in
+    # the future so scheduling jitter cannot end the period; the length of
+    # the period is covered by the _enter_closing arithmetic, not here.
+    var old_id = server.connections[slot].idle_timer_id
+    if old_id != UInt64(0):
+        _ = server.timer_wheel.cancel(old_id)
+    server.connections[slot].idle_timer_id = server.timer_wheel.schedule(
+        after_ms=5000, token=encode_timer_token(TIMER_KIND_IDLE, slot)
+    )
     # A PTO or ACK-delay timer of the slot firing now must not end the
     # closing state (it used to reclaim the slot at once).
     _ = server.timer_wheel.schedule(
         after_ms=1, token=encode_timer_token(TIMER_KIND_PTO, slot)
     )
-    # (+10 ms: the PTO timer is due after 1 ms, while the closing period
-    # is three measured PTOs, which on loopback can be well under 100 ms.)
-    _ = server.advance_timers(_monotonic_ms() + UInt64(10))
+    _ = server.advance_timers(server.timer_wheel.now_ms() + UInt64(10))
     assert_false(server.slot_free[slot], "closing ended before 3 PTOs")
     # Past the closing period the slot is reclaimed.
     _ = server.advance_timers(_monotonic_ms() + UInt64(20_000))
