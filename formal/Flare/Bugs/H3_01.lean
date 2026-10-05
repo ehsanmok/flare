@@ -3,8 +3,8 @@ import Flare.L3_Protocol.H3.RequestReader
 /-!
 # H3-01: the request reader buffers non-HEADERS/DATA frames without bound
 
-flare/http3/request_reader.mojo:240-259 @59bda50: HEADERS and DATA frames
-are checked against `max_field_section_bytes` / `max_body_bytes` from the
+flare/http3/request_reader.mojo:240-259 @59bda50 (before the fix): HEADERS and DATA frames
+were checked against `max_field_section_bytes` / `max_body_bytes` from the
 frame header alone, but every other type (unknown / grease types, and the
 control types that are rejected anyway) reaches `if total > len(buf):
 return 0` and reports NEEDS_MORE until the whole declared payload, up to
@@ -25,7 +25,13 @@ below 2^62 - 1 works.
 Fix: a frame of any other type whose declared length exceeds
 `max_field_section_bytes` is rejected from its header (H3_EXCESSIVE_LOAD).
 Then `B(r) = 16 + max_field_section_bytes + max_body_bytes` suffices
-(`feedFixed_bounded`).
+(`feed_bounded`).
+
+Status: resolved. `feedOld` below is the pre-fix reader (the counterexample is
+about it); the shipped `Flare.L3.H3.feed` has the check and satisfies
+`BoundedNeed` (`feed_bounded`); `feed_eq_feedOld` shows nothing else changed.
+Regression test: tests/h3/test_request_reader.mojo
+`test_oversized_unknown_frame_is_refused_from_its_header`.
 -/
 namespace Flare.Bugs.H3_01
 open Flare.L3.H3
@@ -37,12 +43,30 @@ def hdr : Bytes := [0x21, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
 
 theorem hdr_parses : parseHeader hdr = some (0x21, 2 ^ 62 - 1, 9) := by decide
 
+/-- The pre-fix reader (flare @59bda50): no limit for types other than
+HEADERS and DATA.
+mirrors flare/http3/request_reader.mojo:197-327 @59bda50 -/
+def feedOld (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
+    Nat × Reader × Option (Ev Hdrs) :=
+  if r.st = .done then (0, r, none)
+  else if buf.length = 0 then (0, r, none)
+  else match parseHeader buf with
+    | none => (0, r, none)
+    | some (t, l, hs) =>
+      if t = T_HEADERS ∧ l > r.maxField then (hs, {r with st := .done}, some (.error .fieldTooBig))
+      else if t = T_DATA ∧ r.bodyBytes + l > r.maxBody then
+        (hs, {r with st := .done}, some (.error .bodyTooBig))
+      else if hs + l > buf.length then (0, r, none)
+      else
+        let res := stepFrame qd r t ((buf.drop hs).take l)
+        (hs + l, res.1, some res.2)
+
 /-- **Counterexample.** However many payload bytes are buffered (below the
 declared 2^62 - 1), the reader asks for more and fires no event. -/
 theorem unknown_needs_unbounded_buffer (qd : Bytes → Option Hdrs) (r : Reader)
     (hr : r.st ≠ .done) (n : Nat) (hn : n < 2 ^ 62 - 1) :
-    feed qd r (hdr ++ List.replicate n 0) = (0, r, none) := by
-  unfold feed
+    feedOld qd r (hdr ++ List.replicate n 0) = (0, r, none) := by
+  unfold feedOld
   have hlen : (hdr ++ List.replicate n (0 : UInt8)).length = 9 + n := by simp [hdr]; omega
   rw [if_neg hr, if_neg (by omega), parseHeader_append hdr_parses]
   simp only [T_HEADERS, T_DATA, hlen]
@@ -53,33 +77,13 @@ def BoundedNeed (step : Reader → Bytes → Nat × Reader × Option (Ev Hdrs))
     (bound : Reader → Nat) : Prop :=
   ∀ r buf, r.st ≠ .done → bound r ≤ buf.length → 0 < (step r buf).1
 
-/-- No bound below 2^62 - 1 (for any live reader) works for flare. -/
+/-- No bound below 2^62 - 1 (for any live reader) works for the pre-fix reader. -/
 theorem violates_spec (qd : Bytes → Option Hdrs) (bound : Reader → Nat) (r : Reader)
-    (hr : r.st ≠ .done) (hb : bound r < 2 ^ 62 - 1) : ¬ BoundedNeed (feed qd) bound := by
+    (hr : r.st ≠ .done) (hb : bound r < 2 ^ 62 - 1) : ¬ BoundedNeed (feedOld qd) bound := by
   intro h
   have := h r (hdr ++ List.replicate (bound r) 0) hr (by simp)
   rw [unknown_needs_unbounded_buffer qd r hr (bound r) hb] at this
   exact Nat.lt_irrefl 0 this
-
-/-- flare's `feed_into` plus the minimal fix (marked).
-mirrors flare/http3/request_reader.mojo:197-327 @59bda50 -/
-def feedFixed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
-    Nat × Reader × Option (Ev Hdrs) :=
-  if r.st = .done then (0, r, none)
-  else if buf.length = 0 then (0, r, none)
-  else match parseHeader buf with
-    | none => (0, r, none)
-    | some (t, l, hs) =>
-      if t = T_HEADERS ∧ l > r.maxField then (hs, {r with st := .done}, some (.error .fieldTooBig))
-      else if t = T_DATA ∧ r.bodyBytes + l > r.maxBody then
-        (hs, {r with st := .done}, some (.error .bodyTooBig))
-      -- fix (H3-01)
-      else if t ≠ T_HEADERS ∧ t ≠ T_DATA ∧ l > r.maxField then
-        (hs, {r with st := .done}, some (.error .excessiveLoad))
-      else if hs + l > buf.length then (0, r, none)
-      else
-        let res := stepFrame qd r t ((buf.drop hs).take l)
-        (hs + l, res.1, some res.2)
 
 theorem decVarint_some_of_len (b : Bytes) (h : 8 ≤ b.length) : ∃ v k, decVarint b = some (v, k) := by
   cases b with
@@ -101,15 +105,15 @@ theorem parseHeader_some_of_len (b : Bytes) (h : 16 ≤ b.length) :
   simp only
   rw [if_neg (by simp; omega), h2]
 
-/-- **The fix meets the spec**: `16 + max_field_section_bytes +
+/-- **The shipped reader meets the spec**: `16 + max_field_section_bytes +
 max_body_bytes` buffered bytes always make the reader act. -/
-theorem feedFixed_bounded (qd : Bytes → Option Hdrs) :
-    BoundedNeed (feedFixed qd) (fun r => 16 + r.maxField + r.maxBody) := by
+theorem feed_bounded (qd : Bytes → Option Hdrs) :
+    BoundedNeed (feed qd) (fun r => 16 + r.maxField + r.maxBody) := by
   intro r buf hr hb
   simp only at hb
   obtain ⟨t, l, hs, hh⟩ := parseHeader_some_of_len buf (by omega)
   have hp := parseHeader_some hh
-  unfold feedFixed
+  unfold feed
   rw [if_neg hr, if_neg (by omega), hh]
   simp only
   split; · simp; omega
@@ -130,11 +134,11 @@ theorem feedFixed_bounded (qd : Bytes → Option Hdrs) :
         omega
 
 /-- The fix changes nothing for frames within the limits. -/
-theorem feedFixed_eq_feed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes)
+theorem feed_eq_feedOld (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes)
     (h : ∀ t l hs, parseHeader buf = some (t, l, hs) → t ≠ T_HEADERS → t ≠ T_DATA →
       l ≤ r.maxField) :
-    feedFixed qd r buf = feed qd r buf := by
-  unfold feedFixed feed
+    feed qd r buf = feedOld qd r buf := by
+  unfold feed feedOld
   by_cases h0 : r.st = .done
   · rw [if_pos h0, if_pos h0]
   rw [if_neg h0, if_neg h0]

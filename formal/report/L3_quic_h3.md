@@ -621,11 +621,12 @@ Status: resolved. `Http3Connection.feed_stream_chunk` records `connection_error_
   - `request_reader.mojo:240-259` checks HEADERS and DATA against their limits using the frame header alone.
   - Every other type returns NEEDS_MORE until the whole declared payload, up to 2^62 - 1 bytes, is buffered.
   - `feed_stream_chunk` (`server.mojo:732-807`) keeps appending to the per-stream inbox while this happens.
-- **Counterexample:** `Bugs.H3_01.unknown_needs_unbounded_buffer`: type 0x21 with declared length 2^62 - 1, followed by any `n < 2^62 - 1` bytes, returns `(0, r, none)`. `violates_spec` shows that no bound below 2^62 - 1 satisfies `BoundedNeed`.
-- **Fix:** reject a frame of any other type whose declared length exceeds `max_field_section_bytes`, using H3_EXCESSIVE_LOAD. `feedFixed_bounded` shows the reader then acts once `16 + max_field_section_bytes + max_body_bytes` bytes are buffered, and `feedFixed_eq_feed` shows nothing else changes.
+- **Counterexample:** `Bugs.H3_01.unknown_needs_unbounded_buffer`: type 0x21 with declared length 2^62 - 1, followed by any `n < 2^62 - 1` bytes, returns `(0, r, none)`. `violates_spec` shows that no bound below 2^62 - 1 satisfies `BoundedNeed` for the pre-fix reader `feedOld`.
+- **Fix:** reject a frame of any other type whose declared length exceeds `max_field_section_bytes`, using H3_EXCESSIVE_LOAD. `feed_bounded` shows the shipped reader `feed` then acts once `16 + max_field_section_bytes + max_body_bytes` bytes are buffered, and `feed_eq_feedOld` shows nothing else changes.
 - **Repro:** `formal/repro/H3-01_unknown_frame_unbounded_buffering.mojo`
 - **Observed:** `BUG REPRODUCED: feed_into returned NEEDS_MORE with 1048585 bytes buffered for an unknown frame declaring 2^62-1 bytes; the caller must keep buffering`
 - **Flip:** `OK: reader acted on the oversized unknown frame from its header`, exit 0.
+Status: resolved. `feed_into` now refuses a frame of any type other than HEADERS and DATA that declares more than `max_field_section_bytes` from its header (`H3_EXCESSIVE_LOAD`, stream-level protocol error). Test: `tests/h3/test_request_reader.mojo::test_oversized_unknown_frame_is_refused_from_its_header`. The repro prints `OK`.
 
 ### H3-02: HTTP/2-reserved frame types are ignored on request streams
 
@@ -763,9 +764,9 @@ Status: resolved. `Http3Connection.feed_stream_chunk` records `connection_error_
 | `Qpack.FieldSection.implDynRef` | qpack/dynamic.mojo:281-343 | `QPACK_04.counterexample`, `implFixedDynRef_eq_spec` | counterexample |
 | `Qpack.FieldSection.decodeInt` | http2/hpack.mojo:101-132 | `decodeInt_offset_le` | proved |
 | `H3.decodeFrame`, `encodeFrame`, `decodeSettings`, `encodeSettings` | http3/frame.mojo:95-218 | `decodeFrame_encode`, `decodeSettings_encode`, `decodeFrame_bounds` | proved |
-| `H3.feed`, `stepFrame` | http3/request_reader.mojo:197-327 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | counterexample |
+| `H3.feed` (fixed, H3-01), `stepFrame` | http3/request_reader.mojo:197-345 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | counterexample |
 | `H3.drain`, `feedChunks` | http3/server.mojo:732-807 | `feedChunks_chunking_independent` | proved |
-| `Bugs.H3_01.feedFixed` | http3/request_reader.mojo:240-259 with fix | `feedFixed_bounded`, `feedFixed_eq_feed` | proved |
+| `Bugs.H3_01.feedOld` (pre-fix), `H3.feed` | http3/request_reader.mojo:240-278 (fixed, H3-01) | `feed_bounded`, `feed_eq_feedOld`, `unknown_needs_unbounded_buffer` | resolved |
 | `Bugs.H3_02.stepFrameFixed` | http3/request_reader.mojo:308-327 with fix | `runFixed_spec` | proved |
 | `H3.Control.applySettings` | http3/server.mojo:1213-1228 | `H3_04.trace_impl`, `applySettingsFixed_eq_spec` | counterexample |
 | `H3.Control.dispatchControl` | http3/server.mojo:1170-1211 | `H3_03.trace_impl`, `dispatchControlFixed_eq_spec` | counterexample |

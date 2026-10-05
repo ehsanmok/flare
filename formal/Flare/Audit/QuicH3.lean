@@ -75,7 +75,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QPACK_06.fixedInsert_noEvict
 #print axioms Flare.Bugs.QPACK_06.fixed_spec
 #print axioms Flare.Bugs.H3_01.violates_spec
-#print axioms Flare.Bugs.H3_01.feedFixed_bounded
+#print axioms Flare.Bugs.H3_01.feed_bounded
 #print axioms Flare.Bugs.H3_02.violates_spec
 #print axioms Flare.Bugs.H3_02.runFixed_spec
 #print axioms Flare.Bugs.H3_03.spec_rejects

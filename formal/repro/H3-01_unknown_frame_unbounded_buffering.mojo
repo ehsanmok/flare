@@ -1,15 +1,16 @@
 # PLATFORM: any
+# RESOLVED: H3-01 fixed on fix/formal-findings
 """H3-01: the HTTP/3 request reader buffers unknown frames without bound.
 
-Lean: Flare.Bugs.H3_01.unknown_needs_unbounded_buffer (impl),
-      Flare.Bugs.H3_01.feedFixed_bounded (fix).
+Lean: Flare.Bugs.H3_01.unknown_needs_unbounded_buffer (pre-fix),
+      Flare.Bugs.H3_01.feed_bounded (fix).
 flare/http3/request_reader.mojo:240-259 @59bda50.
 
 Expected: like HEADERS (max_field_section_bytes) and DATA (max_body_bytes),
 a frame whose declared length can never be accepted is acted on from its
 header alone (rejected, or its payload discarded as it arrives), so the
 caller never has to hold more than a bounded number of bytes.
-Actual: for an unknown / grease frame type, feed_into returns 0
+Before the fix: Actual: for an unknown / grease frame type, feed_into returns 0
 (NEEDS_MORE) until the whole declared payload (up to 2^62-1 bytes) sits in
 the caller's buffer. Http3Connection.feed_stream_chunk keeps appending to
 the per-stream inbox; only QUIC flow control bounds it (1 MiB per stream,
@@ -64,8 +65,10 @@ def main() raises:
         print(
             "BUG REPRODUCED: feed_into returned NEEDS_MORE with",
             len(buf),
-            "bytes buffered for an unknown frame declaring 2^62-1 bytes;"
-            " the caller must keep buffering",
+            (
+                "bytes buffered for an unknown frame declaring 2^62-1 bytes;"
+                " the caller must keep buffering"
+            ),
         )
         raise Error("H3-01")
     print("OK: reader acted on the oversized unknown frame from its header")

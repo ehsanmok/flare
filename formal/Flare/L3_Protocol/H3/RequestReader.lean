@@ -47,7 +47,7 @@ def isH2Reserved (t : Nat) : Bool := t == 0x02 || t == 0x06 || t == 0x08 || t ==
 inductive RState | init | body | trailers | done
   deriving DecidableEq, Repr
 
-/-- `excessiveLoad` is only raised by the H3-01 fix (`Flare.Bugs.H3_01`). -/
+/-- `excessiveLoad` is raised by the H3-01 check on non-HEADERS/DATA frames. -/
 inductive Err | fieldTooBig | bodyTooBig | headersAfterTrailers | qpack | dataOutside
   | controlType | excessiveLoad
   deriving DecidableEq, Repr
@@ -90,8 +90,10 @@ def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
   else if isControlType t then ({r with st := .done}, .error .controlType)
   else (r, .unknown t)
 
-/-- One `feed_into` call.
-mirrors flare/http3/request_reader.mojo:197-327 @59bda50 -/
+/-- One `feed_into` call. A frame of any type other than HEADERS and DATA
+declaring more than `max_field_section_bytes` is refused from its header
+(`excessiveLoad`, H3-01); the pre-fix reader is `Flare.Bugs.H3_01.feedOld`.
+mirrors flare/http3/request_reader.mojo:197-345 (fixed, H3-01) -/
 def feed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
     Nat × Reader × Option (Ev Hdrs) :=
   if r.st = .done then (0, r, none)
@@ -102,6 +104,8 @@ def feed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
       if t = T_HEADERS ∧ l > r.maxField then (hs, {r with st := .done}, some (.error .fieldTooBig))
       else if t = T_DATA ∧ r.bodyBytes + l > r.maxBody then
         (hs, {r with st := .done}, some (.error .bodyTooBig))
+      else if t ≠ T_HEADERS ∧ t ≠ T_DATA ∧ l > r.maxField then
+        (hs, {r with st := .done}, some (.error .excessiveLoad))
       else if hs + l > buf.length then (0, r, none)
       else
         let res := stepFrame qd r t ((buf.drop hs).take l)
@@ -116,6 +120,7 @@ theorem feed_le (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
   · simp
   · rename_i t l hs hh
     have := parseHeader_some hh
+    split; · simp; omega
     split; · simp; omega
     split; · simp; omega
     split
@@ -143,8 +148,9 @@ theorem feed_append (qd : Bytes → Option Hdrs) (r : Reader) (buf c : Bytes)
         simp only
         split; · rfl
         split; · rfl
-        rename_i h1 h2
-        rw [if_neg h1, if_neg h2] at h
+        split; · rfl
+        rename_i h1 h2 h3
+        rw [if_neg h1, if_neg h2, if_neg h3] at h
         split at h
         · simp at h
         · rename_i hle

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61008 lines) |
+| Lean files | 298 (61018 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 20 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 21 of 138 |
 
 Six findings are rated high:
 
@@ -2865,9 +2865,9 @@ advances the wheel to `now` at the top of every iteration
 | `Qpack.FieldSection.implDynRef` | qpack/dynamic.mojo:281-343 | `QPACK_04.counterexample`, `implFixedDynRef_eq_spec` | counterexample |
 | `Qpack.FieldSection.decodeInt` | http2/hpack.mojo:101-132 | `decodeInt_offset_le` | proved |
 | `H3.decodeFrame`, `encodeFrame`, `decodeSettings`, `encodeSettings` | http3/frame.mojo:95-218 | `decodeFrame_encode`, `decodeSettings_encode`, `decodeFrame_bounds` | proved |
-| `H3.feed`, `stepFrame` | http3/request_reader.mojo:197-327 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | counterexample |
+| `H3.feed` (fixed, H3-01), `stepFrame` | http3/request_reader.mojo:197-345 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | counterexample |
 | `H3.drain`, `feedChunks` | http3/server.mojo:732-807 | `feedChunks_chunking_independent` | proved |
-| `Bugs.H3_01.feedFixed` | http3/request_reader.mojo:240-259 with fix | `feedFixed_bounded`, `feedFixed_eq_feed` | proved |
+| `Bugs.H3_01.feedOld` (pre-fix), `H3.feed` | http3/request_reader.mojo:240-278 (fixed, H3-01) | `feed_bounded`, `feed_eq_feedOld`, `unknown_needs_unbounded_buffer` | resolved |
 | `Bugs.H3_02.stepFrameFixed` | http3/request_reader.mojo:308-327 with fix | `runFixed_spec` | proved |
 | `H3.Control.applySettings` | http3/server.mojo:1213-1228 | `H3_04.trace_impl`, `applySettingsFixed_eq_spec` | counterexample |
 | `H3.Control.dispatchControl` | http3/server.mojo:1170-1211 | `H3_03.trace_impl`, `dispatchControlFixed_eq_spec` | counterexample |
@@ -3068,7 +3068,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QPACK-04 | Low | open | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
 | QPACK-05 | Medium | resolved | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QPACK-06 | Low | open | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
-| H3-01 | Medium | open | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
+| H3-01 | Medium | resolved | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
 | H3-02 | Low | open | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
 | H3-03 | Low | open | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
 | H3-04 | Low | open | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
@@ -4489,11 +4489,12 @@ Status: resolved. `Http3Connection.feed_stream_chunk` records `connection_error_
   - `request_reader.mojo:240-259` checks HEADERS and DATA against their limits using the frame header alone.
   - Every other type returns NEEDS_MORE until the whole declared payload, up to 2^62 - 1 bytes, is buffered.
   - `feed_stream_chunk` (`server.mojo:732-807`) keeps appending to the per-stream inbox while this happens.
-- **Counterexample:** `Bugs.H3_01.unknown_needs_unbounded_buffer`: type 0x21 with declared length 2^62 - 1, followed by any `n < 2^62 - 1` bytes, returns `(0, r, none)`. `violates_spec` shows that no bound below 2^62 - 1 satisfies `BoundedNeed`.
-- **Fix:** reject a frame of any other type whose declared length exceeds `max_field_section_bytes`, using H3_EXCESSIVE_LOAD. `feedFixed_bounded` shows the reader then acts once `16 + max_field_section_bytes + max_body_bytes` bytes are buffered, and `feedFixed_eq_feed` shows nothing else changes.
+- **Counterexample:** `Bugs.H3_01.unknown_needs_unbounded_buffer`: type 0x21 with declared length 2^62 - 1, followed by any `n < 2^62 - 1` bytes, returns `(0, r, none)`. `violates_spec` shows that no bound below 2^62 - 1 satisfies `BoundedNeed` for the pre-fix reader `feedOld`.
+- **Fix:** reject a frame of any other type whose declared length exceeds `max_field_section_bytes`, using H3_EXCESSIVE_LOAD. `feed_bounded` shows the shipped reader `feed` then acts once `16 + max_field_section_bytes + max_body_bytes` bytes are buffered, and `feed_eq_feedOld` shows nothing else changes.
 - **Repro:** `formal/repro/H3-01_unknown_frame_unbounded_buffering.mojo`
 - **Observed:** `BUG REPRODUCED: feed_into returned NEEDS_MORE with 1048585 bytes buffered for an unknown frame declaring 2^62-1 bytes; the caller must keep buffering`
 - **Flip:** `OK: reader acted on the oversized unknown frame from its header`, exit 0.
+Status: resolved. `feed_into` now refuses a frame of any type other than HEADERS and DATA that declares more than `max_field_section_bytes` from its header (`H3_EXCESSIVE_LOAD`, stream-level protocol error). Test: `tests/h3/test_request_reader.mojo::test_oversized_unknown_frame_is_refused_from_its_header`. The repro prints `OK`.
 
 #### H3-02: HTTP/2-reserved frame types are ignored on request streams
 

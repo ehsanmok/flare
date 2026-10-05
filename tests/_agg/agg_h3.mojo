@@ -283,6 +283,9 @@ from test_request_reader import (
 from test_request_reader import (
     test_limits_are_checked_before_the_payload_arrives as test_request_reader__test_limits_are_checked_before_the_payload_arrives,
 )
+from test_request_reader import (
+    test_oversized_unknown_frame_is_refused_from_its_header as test_request_reader__test_oversized_unknown_frame_is_refused_from_its_header,
+)
 from test_response_writer import (
     test_status_only as test_response_writer__test_status_only,
 )
@@ -523,6 +526,9 @@ def main() raises:
     ]()
     suite.test[
         test_request_reader__test_limits_are_checked_before_the_payload_arrives
+    ]()
+    suite.test[
+        test_request_reader__test_oversized_unknown_frame_is_refused_from_its_header
     ]()
     # tests/h3/test_response_writer.mojo
     suite.test[test_response_writer__test_status_only]()

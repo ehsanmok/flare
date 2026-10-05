@@ -274,6 +274,38 @@ def test_limits_are_checked_before_the_payload_arrives() raises:
     assert_equal(rec2.error_count, 1)
 
 
+def test_oversized_unknown_frame_is_refused_from_its_header() raises:
+    """H3-01: an unknown / grease frame was only checked once its whole
+    declared payload (up to 2^62 - 1 bytes) was buffered, so the caller
+    kept appending to the stream inbox for as long as the peer sent.
+    Like HEADERS and DATA it is acted on from the header alone."""
+    var r = Http3RequestReader.new(max_field_section_bytes=UInt64(8192))
+    var rec = _Recorder.new()
+    var h = _header_only(UInt64(0x21), (UInt64(1) << 62) - 1)
+    var n = feed_into(r, Span[UInt8, _](h), rec)
+    assert_equal(n, len(h), "an oversized unknown frame was NEEDS_MORE")
+    assert_equal(rec.error_count, 1)
+    assert_equal(rec.unknown_count, 0)
+    assert_true("H3_EXCESSIVE_LOAD" in rec.last_error)
+    assert_equal(r.state, H3_REQUEST_STATE_DONE)
+    # One byte past the cap is refused, the cap itself is skipped.
+    var r2 = Http3RequestReader.new(max_field_section_bytes=UInt64(16))
+    var rec2 = _Recorder.new()
+    var over = _header_only(UInt64(0x21), UInt64(17))
+    assert_equal(feed_into(r2, Span[UInt8, _](over), rec2), len(over))
+    assert_equal(rec2.error_count, 1)
+    var r3 = Http3RequestReader.new(max_field_section_bytes=UInt64(16))
+    var rec3 = _Recorder.new()
+    var at_cap = _header_only(UInt64(0x21), UInt64(16))
+    # Header alone: the payload has not arrived, NEEDS_MORE, no error.
+    assert_equal(feed_into(r3, Span[UInt8, _](at_cap), rec3), 0)
+    for _ in range(16):
+        at_cap.append(0)
+    assert_equal(feed_into(r3, Span[UInt8, _](at_cap), rec3), len(at_cap))
+    assert_equal(rec3.unknown_count, 1)
+    assert_equal(rec3.error_count, 0)
+
+
 def main() raises:
     test_initial_state()
     test_headers_only()
@@ -286,4 +318,5 @@ def main() raises:
     test_oversized_headers_is_protocol_error()
     test_repeat_headers_after_trailers_is_protocol_error()
     test_limits_are_checked_before_the_payload_arrives()
-    print("test_h3_request_reader: 11 passed")
+    test_oversized_unknown_frame_is_refused_from_its_header()
+    print("test_h3_request_reader: 12 passed")

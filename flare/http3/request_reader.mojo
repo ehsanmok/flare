@@ -23,7 +23,8 @@ bytes into a typed callback sequence on a caller-supplied
   callback so the caller can log it.
 * :meth:`Http3RequestEventHandler.on_protocol_error` -- the byte
   stream is malformed (truncated varint, oversize length, QPACK
-  decode failure, repeated HEADERS); the caller surfaces this as
+  decode failure, repeated HEADERS, an unknown frame declaring more than
+  ``max_field_section_bytes``); the caller surfaces this as
   an H3_FRAME_UNEXPECTED stream-level error to the QUIC peer. A
   QPACK decode failure is tagged ``QPACK_DECOMPRESSION_FAILED``:
   :class:`flare.http3.Http3Connection` raises it as a connection
@@ -255,6 +256,25 @@ def feed_into[
     ):
         reader.state = H3_REQUEST_STATE_DONE
         handler.on_protocol_error(String("h3 reader: request body above limit"))
+        return header_size
+    # Every other type (unknown / grease, and the control types that are
+    # rejected anyway) was NEEDS_MORE until its whole declared payload,
+    # up to 2^62 - 1 bytes, was buffered (H3-01). Its payload would be
+    # discarded, so a frame that large is refused from the header: the
+    # most the caller ever holds is bounded (RFC 9114 sec 10.5).
+    if (
+        ftype != H3_FRAME_TYPE_HEADERS
+        and ftype != H3_FRAME_TYPE_DATA
+        and flen > reader.max_field_section_bytes
+    ):
+        reader.state = H3_REQUEST_STATE_DONE
+        handler.on_protocol_error(
+            String(
+                "h3 reader: H3_EXCESSIVE_LOAD: frame of "
+                + String(flen)
+                + " bytes above the limit"
+            )
+        )
         return header_size
     var total = header_size + Int(flen)
     if total > len(buf):

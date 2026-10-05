@@ -446,6 +446,10 @@ v0.11 audit fixes; before them the server accepted what follows.
   inserts. Any other HTTP/3 or QPACK error the driver raises closes the
   connection with its H3 code (`flare.http3.server.h3_error_code`) and
   no longer stops `serve_http3`.
+- A request-stream frame other than HEADERS and DATA (an unknown or
+  grease type) that declares more than `max_field_section_size` bytes
+  (default 8192) is refused from its header with `H3_EXCESSIVE_LOAD`
+  rather than buffered up to the QUIC flow-control window.
 - CRYPTO reassembly holds at most 64 KiB ahead of the next expected
   byte, and a request stream at most 2 MiB ahead of a gap.
 - Duplicate packets are dropped, ACKs for packet numbers never sent
