@@ -12,7 +12,9 @@ Framing is decoded incrementally on the read side:
 - ``Content-Length``: exactly N body bytes.
 - ``Transfer-Encoding: chunked``: RFC 9112 sec 7.1 chunks decoded on the
   fly (size line -> data -> CRLF, terminated by the ``0`` chunk).
-- neither (``Connection: close`` / HTTP/1.0): read until EOF.
+- neither (``Connection: close`` / HTTP/1.0): read until EOF. Over TLS
+  the transport raises if that EOF came without close_notify, since a
+  reset would otherwise pass for the end of the body (RFC 8446 sec 6.1).
 
 Generic over any :trait:`flare.io.buf_reader.Readable` transport so the
 cleartext (``TcpStream``) path shares the reader; the owning

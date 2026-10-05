@@ -15,7 +15,9 @@ import Flare.L3_Protocol.H1.ClientChunked
 * `splitGo`/`headImpl` mirror `_find_crlf2_from`, `_split_lines` and the
   line loop of `_parse_response_head`; `lfHead` is an RFC 9112 §2.2
   recipient that recognises a bare LF as a line terminator (finding H1-07).
-* `dlClose` mirrors `HttpDownload._read_close` (finding H1-11).
+* `dlCloseOld` mirrors `HttpDownload._read_close` over the pre-fix transport,
+  `dlClose` the shipped transport read with the close_notify guard
+  (finding H1-11).
 -/
 namespace Flare.L3.H1.ClientResponse
 open Flare Flare.L3.H1.Text Flare.L3.H1.ClientChunked
@@ -526,10 +528,11 @@ theorem headFixed_agrees : HeadAgrees headFixed := by
 
 /-! ## TLS end of stream (finding H1-11) -/
 
-/-- `HttpDownload._read_close`: a close-delimited body ends at the first
-`read` returning 0, clean or not.
+/-- `HttpDownload._read_close` over the pre-fix transport: a close-delimited
+body ends at the first `read` returning 0, clean or not. Kept for the
+H1-11 counterexample.
 mirrors flare/http/_client/download.mojo:215-220 @59bda50 -/
-def dlClose (reads : List Bytes) (_unclean : Bool) : Except String Bytes := .ok reads.flatten
+def dlCloseOld (reads : List Bytes) (_unclean : Bool) : Except String Bytes := .ok reads.flatten
 
 /-- The buffered readers' guard: a close-delimited body that ended without
 close_notify raises.
@@ -537,8 +540,10 @@ mirrors flare/http/_client/parse.mojo:665-683 @59bda50 -/
 def bufferedClose (reads : List Bytes) (unclean : Bool) : Except String Bytes :=
   if unclean then .error "TLS connection closed without close_notify" else .ok reads.flatten
 
-/-- The H1-11 fix: the streaming reader applies the same guard. -/
-abbrev dlCloseFixed := bufferedClose
+/-- The shipped streaming reader: `_H2Transport.read` raises when a TLS read
+returns 0 without close_notify, so `_read_close` never sees that end.
+mirrors flare/http/_client/h2_transport.mojo:69-96 (fixed, H1-11) -/
+abbrev dlClose := bufferedClose
 
 /-- A close-delimited TLS body is complete only if the stream ended with
 close_notify (RFC 8446 §6.1, RFC 9112 §8). -/

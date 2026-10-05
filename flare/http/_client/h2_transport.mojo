@@ -3,6 +3,7 @@
 from ...io.buf_reader import Readable
 from ...runtime.pool import Pool
 from ...tcp import TcpStream
+from ...net import NetworkError
 from ...tls import TlsStream
 
 
@@ -73,14 +74,28 @@ struct _H2Transport(Movable, Readable):
             size: Maximum number of bytes to read.
 
         Returns:
-            Bytes written into ``buf``; 0 means EOF.
+            Bytes written into ``buf``; 0 means a clean EOF.
 
         Raises:
-            NetworkError: On any I/O error.
+            NetworkError: On any I/O error, or when a TLS stream ends
+                without the peer's close_notify. TLS signs the end of a
+                stream with close_notify so that a TCP reset cannot cut a
+                message short and pass for a complete one (RFC 8446 sec
+                6.1). A reader whose framing is the end of the stream (a
+                close-delimited HTTP/1.1 body) would otherwise take the
+                cut for the end; length, chunked and HTTP/2 framing
+                notice the cut themselves, and the error says the same.
         """
         if self._tcp_addr != 0:
             return Pool[TcpStream].get_ptr(self._tcp_addr)[].read(buf, size)
-        return Pool[TlsStream].get_ptr(self._tls_addr)[].read(buf, size)
+        var tls = Pool[TlsStream].get_ptr(self._tls_addr)
+        var n = tls[].read(buf, size)
+        if n == 0 and tls[].eof_was_unclean():
+            raise NetworkError(
+                "TLS connection closed without close_notify; the response"
+                " body may be truncated"
+            )
+        return n
 
     def write_all(self, data: Span[UInt8, _]) raises:
         """Write every byte of ``data``, retrying short writes.

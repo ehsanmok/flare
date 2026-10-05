@@ -151,7 +151,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 - `san`, `findCRLF2`, `splitGo`/`splitLines` and `headImpl` mirror `_bytes_to_str`, `_find_crlf2_from`, `_split_lines` and the line loop of `_parse_response_head` (`89-125`, `233-306`). `lfHead` is an RFC 9112 §2.2 recipient that ends lines at LF.
 - `cDec` mirrors `_decode_chunked` (`497-578`); `cHex`, `cTr`, `trailerOk` its size and trailer lines.
 - `canReuse` mirrors the keep-alive decision of the pooled reader (`836-884`).
-- `dlClose` mirrors `HttpDownload._read_close` (`download.mojo:215-220`); `bufferedClose` the buffered readers' close_notify guard (`parse.mojo:665-683`).
+- `dlCloseOld` mirrors `HttpDownload._read_close` (`download.mojo:215-220`) over the pre-fix transport; `dlClose` (= `bufferedClose`) is the close_notify guard, in the buffered readers (`parse.mojo:665-683`) and now in `_H2Transport.read` (`h2_transport.mojo:69-96`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -370,10 +370,12 @@ Status: resolved. The read-to-EOF readers now run `scan_chunked_end` first (`_re
 
 ### H1-11: a streamed TLS download that ends without close_notify is complete
 
+Status: resolved. `_H2Transport.read` now raises `NetworkError` when a TLS read returns 0 and `eof_was_unclean()`, so `HttpDownload._read_close` never sees an unclean end. The counterexample is about `dlCloseOld`; `Bugs.H1_11.fixed_safe` is about the shipped `dlClose`.
+
 - **Severity:** Medium. `HttpDownload` on a close-delimited TLS body reports success for a body cut at any point by a TCP reset, which is the truncation attack TLS close_notify exists to stop. The buffered readers have the guard.
 - **RFC:** RFC 8446 §6.1 (a close without close_notify is a truncation) and RFC 9112 §8 (a close-delimited body ends at a clean close).
 - **What goes wrong:** `HttpDownload._read_close` (`_client/download.mojo:215-220`) reads until `read` returns 0. The TLS transport's `read` (`_client/h2_transport.mojo`) returns 0 on an unclean EOF as well, and nobody calls `eof_was_unclean()`. Compare `_client/parse.mojo:665-683`.
-- **Counterexample:** `Bugs.H1_11.counterexample` (`¬ TruncSafe dlClose`).
+- **Counterexample:** `Bugs.H1_11.counterexample` (`¬ TruncSafe dlCloseOld`).
 - **Fix:** raise in the transport `read` when it returns 0 and `eof_was_unclean()`, as the buffered path does. `Bugs.H1_11.fixed_safe` (= `bufferedClose_safe`).
 - **Repro:** `formal/repro/H1-11_download_tls_truncated_close_body.mojo` (forked TLS server that writes `partial` and closes without close_notify)
 - **Observed (3 runs):** `BUG REPRODUCED: close-delimited TLS body without close_notify returned as complete (status=200 body=partial)`
@@ -485,7 +487,7 @@ After every flip, `git status --short flare/` showed none of my files. Other age
 - **A bare CR in a response field** is refused by `HeaderMap` (`headers.mojo:75-85`).
 - **The 16-hex-digit chunk-size cap** in both client readers is deliberate. It is what bounds the size accumulator.
 - **Encoder trailers.** The streaming serializer writes application-chosen trailers without filtering forbidden names (RFC 9110 §6.5.1). flare's own client refuses them (`ClientTrailersOK`). This is an application responsibility, listed under limitations.
-- **Buffered TLS reads** refuse a close-delimited body without close_notify (`bufferedClose_safe`). Only the streaming download lacks the guard (H1-11).
+- **Buffered TLS reads** refuse a close-delimited body without close_notify (`bufferedClose_safe`). The streaming download has the same guard in `_H2Transport.read` (H1-11, fixed).
 
 **WebSocket**
 - **Close-code validation on receive** was an open question in the previous round. It is now part of WS-06, whose fix answers an invalid body with 1002.
@@ -534,7 +536,7 @@ After every flip, `git status --short flare/` showed none of my files. Other age
 | `ClientResponse.parseStatus` | `_client/parse.mojo:318-352` | `parseStatusFixed_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
 | `ClientResponse.san`, `findCRLF2`, `splitGo`, `splitLines`, `headImpl` | `_client/parse.mojo:89-125`, `233-306` | `headFixed_agrees`, `Bugs.H1_07.*` | counterexample (H1-07) / fix proved |
 | `ClientResponse.canReuse` | `_client/parse.mojo:836-884` | `canReuseFixed_ok`, `Bugs.H1_09.*` | counterexample (H1-09) / fix proved |
-| `ClientResponse.dlClose`, `bufferedClose` | `_client/download.mojo:215-220`, `_client/parse.mojo:665-683` | `bufferedClose_safe`, `Bugs.H1_11.*` | counterexample (H1-11) / proved (buffered) |
+| `ClientResponse.dlCloseOld`, `dlClose`, `bufferedClose` | `_client/download.mojo:215-220`, `_client/parse.mojo:665-683` | `bufferedClose_safe`, `Bugs.H1_11.*` | counterexample (H1-11) / proved (buffered) |
 | `ChunkedEncode.hexDigit`, `hexLower`, `encChunk`, `encChunks`, `trailerLine`, `encTrailers`, `encodeBody`, `encodeUpload` | `streaming_serialize.mojo:116-140`, `162-166`, `258-300`; `client.mojo:121-135`, `1420-1445`, `1470-1495` | `decL_roundtrip`, `decodeBody_roundtrip`, `scan_roundtrip`, `cDec_roundtrip`, `upload_roundtrip` | proved |
 | `Handshake.acceptOf`, `genKey` | `ws/client.mojo:118-148`, `ws/server.mojo:100-111` | `genKey_valid`, `handshake_complete` | proved |
 | `Handshake.clientAccepts`, `clientRequest` | `ws/client.mojo:536-550`, `562-603`, `609-646` | `clientFixed_ok`, `Bugs.WS_04.*` | counterexample (WS-04) / fix proved |

@@ -598,6 +598,11 @@ response ends before its last chunk and the empty line after the
 trailers, on TCP and on TLS. It used to return the bytes read so far as
 the whole body.
 
+Breaking: the streaming download (`get_streaming` over HTTPS) now applies
+the same close_notify rule to a close-delimited body: if the server resets
+the connection without `close_notify`, the read raises `NetworkError`
+instead of reporting the end of the body.
+
 ## TCP, UDP, Unix sockets, DNS, addressing
 
 | Surface | Where |

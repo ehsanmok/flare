@@ -1,9 +1,10 @@
 # PLATFORM: any
+# RESOLVED: H1-11 fixed on fix/formal-findings
 """H1-11: the streaming download reader returns a close-delimited TLS body
 cut short by a TCP reset (no close_notify) as complete.
 
-Lean: Flare.Bugs.H1_11.counterexample (dlClose accepts an unclean end)
-and Flare.L3.H1.ClientResponse.bufferedClose_safe (the fixed reader, the
+Lean: Flare.Bugs.H1_11.counterexample (dlCloseOld accepts an unclean end)
+and Flare.L3.H1.ClientResponse.bufferedClose_safe (the shipped reader, the
 same guard the buffered readers apply, never accepts one).
 flare/http/_client/download.mojo:215-220 (`_read_close`: EOF sets
 _done and returns end of body) with flare/http/_client/h2_transport.mojo
@@ -15,7 +16,7 @@ case (_refuse_truncated_tls, parse.mojo:665-683).
 Expected (RFC 8446 §6.1, RFC 9112 §8): a body delimited by connection
 close over TLS is complete only if the stream ends with close_notify;
 otherwise the reader must raise.
-Actual: read_all returns "partial" with no error.
+Before the fix: Actual: read_all returns "partial" with no error.
 
 Minimal fix: in _H2Transport.read, when the TLS read returns 0 and
 `eof_was_unclean()` is true, raise NetworkError (or have
