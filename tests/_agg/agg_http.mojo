@@ -3475,6 +3475,9 @@ from test_server_reactor_state import (
     test_static_head_queues_head_only as test_server_reactor_state__test_static_head_queues_head_only,
 )
 from test_server_reactor_state import (
+    test_ws_426_closes_connection as test_server_reactor_state__test_ws_426_closes_connection,
+)
+from test_server_reactor_state import (
     test_response_includes_date_header_from_cache as test_server_reactor_state__test_response_includes_date_header_from_cache,
 )
 from test_server_serve_comptime import (
@@ -6060,6 +6063,7 @@ def main() raises:
     suite.test[test_server_reactor_state__test_peer_close_marks_done]()
     suite.test[test_server_reactor_state__test_step_result_defaults]()
     suite.test[test_server_reactor_state__test_static_head_queues_head_only]()
+    suite.test[test_server_reactor_state__test_ws_426_closes_connection]()
     suite.test[
         test_server_reactor_state__test_response_includes_date_header_from_cache
     ]()

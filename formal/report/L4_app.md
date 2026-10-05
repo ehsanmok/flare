@@ -52,7 +52,7 @@ Several inputs are parameters instead of being modelled here:
 
 - HTTP framing is an abstract oracle `frame : Bytes -> needMore | complete r n | error s`. `Oracle.WF` requires that a complete request occupies `0 < n <= len` bytes and is determined by those bytes. The framing itself belongs to L3.
 - Serialisation, the handler outcome, the per-request close verdict and the WebSocket version check are also parameters.
-- A flag `fix` selects the APP-01 fix.
+- A flag `fix` selects the APP-01 fix (`fix = true` is the shipped code, `fix = false` the pre-fix code).
 
 The invariant `Inv` has nine clauses:
 
@@ -76,8 +76,8 @@ the static fast path (`conn_handle.mojo:1174-1211`).
 | `Flare.L4.ConnSM.timeout_closes` | `on_timeout` always yields CLOSING with `should_close` and `done` | proved |
 | `Flare.L4.ConnSM.segs_frozen`, `run_segs_frozen` | once `should_close` is set, no later step or run dispatches another request | proved |
 | `Flare.L4.ConnSM.ka_bound` | `keepalive_count <= max_keepalive_requests` in every reachable state, when `max_keepalive_requests >= 1` (which `ServerConfig.check` enforces) | proved |
-| `Flare.L4.ConnSM.closeHonoured_step`, `fixed_no_request_after_close_header` | with the APP-01 fix: once a `Connection: close` response is queued, no further request is ever dispatched | proved (fixed machine) |
-| `Flare.Bugs.APP_01.violates_spec` | without the fix, a reachable state violates `CloseHonoured` | counterexample |
+| `Flare.L4.ConnSM.closeHonoured_step`, `fixed_no_request_after_close_header` | with the APP-01 fix (shipped): once a `Connection: close` response is queued, no further request is ever dispatched | proved (shipped machine) |
+| `Flare.Bugs.APP_01.violates_spec` | in the pre-fix machine (`ltsOld`), a reachable state violates `CloseHonoured` | counterexample |
 | `Flare.L4.ConnSM.Framing.serialize_spec` | no body for HEAD, 1xx, 204 or 304; no `Content-Length` on 1xx or 204; otherwise the body is sent with its length | proved |
 | `Flare.L4.ConnSM.Framing.headFlagFixed_spec`, `staticBytesFixed_spec` | with the APP-05 and APP-04 fixes, every response to HEAD has no body | proved (fixed) |
 
@@ -88,7 +88,7 @@ The original plan asked for six properties:
 - No read after `should_close` is covered by `run_segs_frozen`.
 - The keep-alive bound is covered by `ka_bound`.
 - Bodyless HEAD, 1xx, 204 and 304 responses hold only for `serialize_response_into`. On two paths HEAD does get a body: the static path (APP-04) and the error path (APP-05).
-- "A close response implies close" is false for the shipped code (APP-01). It is restated for the fixed machine.
+- "A close response implies close" was false for the pre-fix code (APP-01). It holds for the shipped machine (`fix = true`).
 
 `closeHonoured_parse` needed an extra hypothesis, `should_close -> peer_eof`, which `closeHonoured_step` carries as part of its induction.
 
@@ -616,8 +616,8 @@ the flush, `on_writable` returns to READING, and the next request is served.
 
 **Lean.** `Flare.Bugs.APP_01.ws426_close_header_but_kept_open` and
 `violates_spec` give a reachable state with a close-header response and
-`should_close = false`. The fix is proved sufficient by
-`Flare.L4.ConnSM.fixed_no_request_after_close_header`.
+`should_close = false` in the pre-fix machine. The shipped machine is
+proved to satisfy the spec by `Flare.L4.ConnSM.fixed_no_request_after_close_header`.
 
 **Fix.** Set `self.should_close = True` before the `return`.
 
@@ -625,6 +625,8 @@ the flush, `on_writable` returns to READING, and the next request is served.
 
 - Observed: `BUG REPRODUCED: 426 sent 'Connection: close' but on_writable returned done=False, want_read= True state_reading= True`
 - Flip: `OK: the 426 response closes the connection (done=True)`
+
+Status: resolved. The 426 branch of on_readable sets `should_close = True` before `_finalise_response`, so the flush ends the connection and a pipelined request behind the 426 is never served. Test: `tests/http/test_server_reactor_state.mojo::test_ws_426_closes_connection` (deterministic: Reactor readiness wait, no sleeps). The model flag `fix = true` is the shipped machine.
 
 ### APP-02: `_wants_close` matches `connection:` mid-line and stops at the first hit
 
@@ -1401,7 +1403,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | Lean definition | Mojo file:line (@59bda50) | Theorems | Status |
 |---|---|---|---|
 | `Flare.L4.ConnSM.init`, `queueError`, `finalise`, `applyKA` | http/_reactor/conn_handle.mojo:354-398, 1576-1580, 718-756, 697-715 | `inv_init`, `inv_queueError`, `ka_bound` | proved |
-| `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | conn_handle.mojo:846-856, 907-916, 579-695, 760-916 | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo` | proved; APP-01 |
+| `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | conn_handle.mojo:846-860, 911-920, 579-695, 760-920 | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo` | proved; APP-01 |
 | `Flare.L4.ConnSM.onWritable`, `onTimeout`, `step`, `lts` | conn_handle.mojo:1262-1375, 1403-1411 | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
 | `Flare.L4.ConnSM.Framing.serialize` | http/_reactor/write_path.mojo:151-155, 222-235 | `serialize_spec` | proved |
 | `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1220 | `headFlagFixed_spec`, `staticBytes_spec` | APP-04, APP-05 |

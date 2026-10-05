@@ -802,7 +802,9 @@ because the upgrade path writes on the raw socket. Use a separate
 **Changed in v0.11 (breaking).** `offload` defaults to `True`; it was
 `False`, so one WebSocket client stalled its whole worker by default. A
 handshake whose `Sec-WebSocket-Version` is not 13 is answered 426 with
-`Sec-WebSocket-Version: 13` (RFC 6455 sec 4.4); the version used to go
+`Sec-WebSocket-Version: 13` (RFC 6455 sec 4.4) and `Connection: close`; the
+connection is closed after that response and a pipelined request behind it is
+not served. The version used to go
 unchecked, so any draft was upgraded. There is still no cap on offload threads.
 
 **Changed in v0.11.** These were two loose fields, `ws_handler` and

@@ -19,7 +19,7 @@ from flare.net import SocketAddr
 from flare.tcp import TcpStream, TcpListener
 from flare.http.request import Request
 from flare.http.response import Response
-from flare.http import precompute_response
+from flare.http import precompute_response, WsUpgrade
 from flare.http.server import ServerConfig
 from flare.http._server_reactor_impl import (
     ConnHandle,
@@ -28,6 +28,7 @@ from flare.http._server_reactor_impl import (
     STATE_WRITING,
     STATE_CLOSING,
 )
+from flare.ws import WsConnection
 from flare.runtime import (
     Reactor,
     Event,
@@ -555,6 +556,47 @@ def test_static_head_queues_head_only() raises:
     _wait_readable(ch, r)
     _ = ch.on_readable_static(resp, cfg)
     assert_equal(len(ch.write_buf), len(resp.keepalive_bytes))
+    client.close()
+
+
+def _ws_noop(mut c: WsConnection) raises -> None:
+    pass
+
+
+def test_ws_426_closes_connection() raises:
+    """APP-01: the 426 for a bad Sec-WebSocket-Version says
+    ``Connection: close`` and then actually closes: ``should_close`` is set,
+    the flush ends the connection, and a pipelined request behind it is
+    never served."""
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = listener.local_addr().port
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server = listener.accept()
+    server._socket.set_nonblocking(True)
+    listener.close()
+    var ch = ConnHandle(server^)
+    var cfg = _default_config()
+    cfg.ws = WsUpgrade(_ws_noop)
+    var req = _bytes_of(
+        "GET /chat HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\n"
+        "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "Sec-WebSocket-Version: 8\r\n\r\n"
+        "GET /after HTTP/1.1\r\nHost: a\r\n\r\n"
+    )
+    _ = client.write(Span[UInt8](req))
+    _ = _drive_readable(ch, r, _echo_handler, cfg)
+    assert_equal(ch.state, STATE_WRITING)
+    var wire = String(unsafe_from_utf8=Span[UInt8](ch.write_buf))
+    assert_true(wire.startswith("HTTP/1.1 426"))
+    assert_true("Connection: close" in wire)
+    assert_true("Sec-WebSocket-Version: 13" in wire)
+    # Only the 426 is queued: the pipelined GET is not dispatched.
+    assert_false("200 OK" in wire)
+    assert_true(ch.should_close)
+    var step = ch.on_writable(cfg)
+    assert_true(step.done)
+    assert_false(step.want_read)
     client.close()
 
 

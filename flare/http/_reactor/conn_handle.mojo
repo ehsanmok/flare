@@ -900,6 +900,10 @@ struct ConnHandle(Movable):
                     r426.headers.set("Sec-WebSocket-Version", "13")
                 except:
                     pass
+                # The 426 says ``Connection: close``, so the connection
+                # must close after it (RFC 9112 sec 9.6): without this
+                # a pipelined request behind it would still be served.
+                self.should_close = True
                 return self._finalise_response(r426^, True)
             if ws_here:
                 var upgraded: Bool

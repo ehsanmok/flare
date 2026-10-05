@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-01 fixed on fix/formal-findings
 """APP-01: the 426 answer to a bad WebSocket version says "Connection: close"
 but the connection stays open and keeps serving requests.
 
@@ -14,7 +15,7 @@ option MUST initiate closure after that response and MUST NOT process
 further requests on the connection.
 
 Expected: after the 426 flushes, ``on_writable`` returns ``done=True``.
-Actual: the 426 carries ``Connection: close`` but ``should_close`` is
+Before the fix: the 426 carries ``Connection: close`` but ``should_close`` is
 still False, so ``on_writable`` returns to STATE_READING with
 ``want_read=True``, and a following request on the same connection is
 dispatched to the HTTP handler. The 426 path also skips
@@ -97,8 +98,10 @@ def main() raises:
             repr(String(wire2[byte=0:shown])),
         )
         print(
-            "BUG REPRODUCED: 426 sent 'Connection: close' but on_writable"
-            " returned done=False, want_read=",
+            (
+                "BUG REPRODUCED: 426 sent 'Connection: close' but on_writable"
+                " returned done=False, want_read="
+            ),
             step.want_read,
             "state_reading=",
             reading_after,

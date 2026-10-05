@@ -153,9 +153,11 @@ def applyKA (P : Params Req) (s : St Req) (closeAfter : Bool) : St Req × Bool :
 
 /-- Dispatch of a complete request in `on_readable`: the WebSocket
 version-mismatch branch (426), else keep-alive policy then handler, with a
-raising handler mapped through `_queue_error`. `fix = true` is the APP-01
-fix (`should_close = True` on the 426 branch).
-mirrors flare/http/_reactor/conn_handle.mojo:846-856,907-916 @59bda50 -/
+raising handler mapped through `_queue_error`. `fix = true` is the shipped
+code (`should_close = True` on the 426 branch, APP-01 fixed); `fix = false` is
+the pre-fix code, kept so the counterexample in `Flare.Bugs.APP_01` stays
+checkable.
+mirrors flare/http/_reactor/conn_handle.mojo:846-860,911-920 (fixed, APP-01) -/
 def dispatch (fix : Bool) (P : Params Req) (s : St Req) (r : Req) (n : Nat) : St Req :=
   if P.wsMismatch r then
     finalise P (if fix then { s with shouldClose := true } else s) r n ⟨some r, .ws426, false⟩
