@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61877 lines) |
-| Theorems | 3249 |
-| Headline theorems in the axiom audit | 1056 |
+| Lean files | 298 (61898 lines) |
+| Theorems | 3250 |
+| Headline theorems in the axiom audit | 1058 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 69 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 70 of 138 |
 
 Six findings are rated high:
 
@@ -1632,7 +1632,7 @@ File: `H3/Control.lean`.
 - `applySettings` mirrors `server.mojo:1338-1365` (fixed, H3-04).
 - `dispatchControl` mirrors `_dispatch_control_frame` (1272-1337, fixed H3-03).
 - `feedControlLoop` mirrors the control-stream frame loop, including the 16384-byte carry cap (1071-1120).
-- `classify` mirrors `_classify_uni_kind` (1045-1068), and `route` / `feedUni` mirror 975-1043.
+- `classify` mirrors `_classify_uni_kind` (1152-1191, fixed H3-05), and `route` / `feedUni` mirror 975-1043.
 - `Fixes` switches the H3-03..H3-06 fixes on individually: `Fixes.none` is flare at 59bda50, `Fixes.shipped` is flare as shipped on this branch, `Fixes.all` has every fix.
 
 | Lean name | Statement | Status |
@@ -2894,7 +2894,7 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.TransportParams.encode`, `params`, `wire` | quic/transport_params.mojo:237-395 | `tlvs_wire`, `encode_roundtrip` | proved |
 | `Quic.PeerParams.clientCheck` | quic/client.mojo:641-669 | `QUIC_12.impl_accepts_*`, `clientCheckFixed_spec` | counterexample (QUIC-12) |
 | `Quic.PeerParams.serverImpl` | quic/server.mojo:1199-1368 | `QUIC_11.impl_accepts`, `serverCheck_spec` | counterexample (QUIC-11) |
-| `H3.Control.goaway` | http3/server.mojo:1198-1211 | `H3_06.impl_accepts_trailing`, `goawayFixed_spec` | counterexample (H3-06) |
+| `H3.Control.goaway` | http3/server.mojo:1322-1353 (fixed, H3-06) | `H3_06.trace_implOld`, `H3_06.trace_shipped`, `goawayFixed_spec` | resolved (H3-06) |
 | `Bugs.H3_07.implOldOut` | quic/server.mojo:2210-2433 @59bda50 (pre-fix) | `H3_07.implOld_no_control`, `implOld_observed` | counterexample (H3-07) |
 | `Bugs.H3_07.implOut`, `emitInitialSettings`, `settingsList`, `Config` | quic/server.mojo:2288-2310, http3/server.mojo:136-175, 1316-1380 (fixed, H3-07) | `emit_control_start`, `H3_07.fixed_spec`, `fixed_stream_sendable`, `fixed_classified` | proved |
 
@@ -3090,7 +3090,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H3-03 | Low | resolved | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
 | H3-04 | Low | resolved | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
 | H3-05 | Low | resolved | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
-| H3-06 | Low | open | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
+| H3-06 | Low | resolved | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
 | H3-07 | Medium | resolved | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | APP-01 | Low | open | 426 response says `Connection: close` but the connection stays open | `Flare/Bugs/APP_01.lean` | `repro/APP-01_ws426_keeps_connection_open.mojo` (any) |
 | APP-02 | Low | open | `_wants_close` matches `connection:` mid-line and stops at the first hit | `Flare/Bugs/APP_02.lean` | `repro/APP-02_wants_close_substring_match.mojo` (any) |
@@ -4644,11 +4644,12 @@ Status: resolved. `_classify_uni_kind` raises H3_STREAM_CREATION_ERROR for a cli
 - **Severity:** Low. The extra bytes are ignored; the recorded id is the first varint.
 - **RFC:** RFC 9114 §7.2.6 defines the GOAWAY payload as one varint, and §7.1 requires H3_FRAME_ERROR for bytes after the identified fields.
 - **What goes wrong:** the GOAWAY branch of `_dispatch_control_frame` (`http3/server.mojo:1198-1211`) decodes one varint and never compares `goaway_id.consumed` with `len(payload)`.
-- **Counterexample:** `Bugs.H3_06.impl_accepts_trailing` (after SETTINGS, any one-byte id followed by a non-empty tail is accepted), `spec_rejects_trailing`, and `trace_impl` for the control stream `00 | 04 03 06 60 00 | 07 02 00 ff`.
+- **Counterexample:** `Bugs.H3_06.implOld_accepts_trailing` (after SETTINGS, any one-byte id followed by a non-empty tail is accepted), `spec_rejects_trailing`, and `trace_implOld` for the control stream `00 | 04 03 06 60 00 | 07 02 00 ff`.
 - **Fix:** raise when `goaway_id.consumed != len(payload)`. `goawayFixed_spec` and `dispatchFixed_spec` show the fixed dispatch equals the spec.
 - **Repro:** `formal/repro/H3-06_goaway_trailing_bytes_accepted.mojo`
 - **Observed:** `BUG REPRODUCED: GOAWAY payload 00 ff accepted (no H3_FRAME_ERROR); peer_goaway_max_stream_id = 0`
 - **Flip:** `OK: GOAWAY with trailing bytes rejected`, exit 0.
+Status: resolved. The GOAWAY branch raises H3_FRAME_ERROR when `goaway_id.consumed != len(payload)`; the empty-payload and truncated-varint errors now carry the same tag (before, they mapped to H3_GENERAL_PROTOCOL_ERROR). Tests: `tests/h3/test_h3_uni_streams.mojo::test_goaway_with_bytes_after_the_id_is_a_frame_error`, `tests/h3/test_h3_uni_streams.mojo::test_goaway_exactly_one_varint_is_still_accepted`. The repro prints `OK` (three runs).
 
 #### H3-07: the server never opens its control stream or sends SETTINGS
 

@@ -15,7 +15,18 @@ connection error of type H3_FRAME_ERROR."
 
 Counterexample: control stream `00 | 04 03 06 60 00` (stream type, SETTINGS)
 followed by `07 02 00 ff` (GOAWAY, length 2, id 0, one extra byte 0xff) is
-accepted and records GOAWAY id 0.
+accepted and records GOAWAY id 0 (`implOld_*` / `trace_implOld`, which use
+`Fixes.none`).
+
+Status: resolved. The GOAWAY branch of `_dispatch_control_frame` raises
+H3_FRAME_ERROR when `goaway_id.consumed != len(payload)` (and also tags the
+empty-payload and truncated-varint errors H3_FRAME_ERROR, which the model
+already treated as `frameError`). `Fixes.shipped` models flare with this fix
+(`impl_rejects_trailing`, `trace_shipped`); `goawayFixed_spec` and
+`dispatchFixed_spec` show it equals the spec. Regression tests:
+tests/h3/test_h3_uni_streams.mojo
+`test_goaway_with_bytes_after_the_id_is_a_frame_error` and
+`test_goaway_exactly_one_varint_is_still_accepted`.
 -/
 namespace Flare.Bugs.H3_06
 open Flare.L3.H3 Flare.L3.H3.Control
@@ -31,7 +42,7 @@ theorem dec_small (id : Nat) (hid : id < 64) (tl : Bytes) :
 
 /-- **Counterexample** (step level): after SETTINGS, any one-byte varint
 followed by any non-empty tail is accepted. -/
-theorem impl_accepts_trailing (s : CtlState) (hs : s.settingsReceived = true)
+theorem implOld_accepts_trailing (s : CtlState) (hs : s.settingsReceived = true)
     (hm : s.goawayMax = none) (id : Nat) (hid : id < 64) (tl : Bytes) (htl : tl ≠ []) :
     dispatchControl Fixes.none s 0x07 (UInt8.ofNat id :: tl) =
       .ok { s with goawayMax := some id } := by
@@ -47,12 +58,20 @@ theorem spec_rejects_trailing (s : CtlState) (hs : s.settingsReceived = true)
   exact fun h => absurd h htl
 
 /-- Trace level, mirroring the repro. -/
-theorem trace_impl :
+theorem trace_implOld :
     errOf (feedUnis Fixes.none {} [(2, ctrlPrefix), (2, [0x07, 0x02, 0x00, 0xff])]) = none := by
   native_decide
 
-theorem trace_fixed :
-    errOf (feedUnis Fixes.all {} [(2, ctrlPrefix), (2, [0x07, 0x02, 0x00, 0xff])]) =
+/-- Shipped: the same payloads raise H3_FRAME_ERROR, step level and trace level. -/
+theorem impl_rejects_trailing (s : CtlState) (hs : s.settingsReceived = true)
+    (id : Nat) (hid : id < 64) (tl : Bytes) (htl : tl ≠ []) :
+    dispatchControl Fixes.shipped s 0x07 (UInt8.ofNat id :: tl) = .error .frameError := by
+  have hv := dec_small id hid tl
+  simp [dispatchControl, hs, goaway, hv, Fixes.shipped]
+  exact fun h => absurd h htl
+
+theorem trace_shipped :
+    errOf (feedUnis Fixes.shipped {} [(2, ctrlPrefix), (2, [0x07, 0x02, 0x00, 0xff])]) =
       some .frameError := by
   native_decide
 

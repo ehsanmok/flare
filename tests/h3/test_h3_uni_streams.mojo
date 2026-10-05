@@ -61,6 +61,7 @@ from flare.http3 import (
     encode_http3_settings,
 )
 from flare.http3.server import (
+    H3_FRAME_ERROR,
     H3_FRAME_UNEXPECTED,
     H3_SETTINGS_ERROR,
     H3_STREAM_CREATION_ERROR,
@@ -541,6 +542,74 @@ def test_unknown_and_known_setting_identifiers_are_still_accepted() raises:
     assert_equal(Int(c.peer_settings_max_field_section_size), 2048)
 
 
+def _goaway_payload_frame(var payload: List[UInt8]) raises -> List[UInt8]:
+    var out = List[UInt8]()
+    encode_http3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
+    return out^
+
+
+def test_goaway_with_bytes_after_the_id_is_a_frame_error() raises:
+    """RFC 9114 §7.2.6 / §7.1: the GOAWAY payload is exactly one varint;
+    bytes after it, an empty payload and a truncated varint are all
+    ``H3_FRAME_ERROR`` (H3-06), and the recorded id is left alone."""
+    # id 0 followed by one byte, id 4 followed by two, a 2-byte varint
+    # (0x40 0x10 = 16) followed by one byte.
+    var cases = List[List[Int]]()
+    cases.append([0x00, 0xFF])
+    cases.append([0x04, 0x00, 0x00])
+    cases.append([0x40, 0x10, 0x00])
+    for i in range(len(cases)):
+        var c = Http3Connection()
+        c.feed_uni_stream_chunk(
+            3, _build_peer_control_prefix(List[Http3Setting]())
+        )
+        var msg = _raises_with(
+            c, 3, _goaway_payload_frame(_bytes_from_list(cases[i]))
+        )
+        assert_true(
+            msg.byte_length() > 0, "GOAWAY with trailing bytes must raise"
+        )
+        assert_equal(h3_error_code(msg), H3_FRAME_ERROR)
+        assert_equal(c.peer_goaway_max_stream_id, UInt64((1 << 63) - 1))
+    # Empty and truncated payloads.
+    var bad = List[List[Int]]()
+    bad.append([])
+    bad.append([0x40])
+    for i in range(len(bad)):
+        var c = Http3Connection()
+        c.feed_uni_stream_chunk(
+            3, _build_peer_control_prefix(List[Http3Setting]())
+        )
+        var msg = _raises_with(
+            c, 3, _goaway_payload_frame(_bytes_from_list(bad[i]))
+        )
+        assert_true(msg.byte_length() > 0, "malformed GOAWAY must raise")
+        assert_equal(h3_error_code(msg), H3_FRAME_ERROR)
+
+
+def test_goaway_exactly_one_varint_is_still_accepted() raises:
+    var one: List[Int] = [0x00]
+    var two: List[Int] = [0x40, 0x10]
+    var four: List[Int] = [0x80, 0x00, 0x01, 0x00]
+    var want = List[UInt64]()
+    want.append(UInt64(0))
+    want.append(UInt64(16))
+    want.append(UInt64(256))
+    var all = List[List[Int]]()
+    all.append(one^)
+    all.append(two^)
+    all.append(four^)
+    for i in range(len(all)):
+        var c = Http3Connection()
+        c.feed_uni_stream_chunk(
+            3, _build_peer_control_prefix(List[Http3Setting]())
+        )
+        c.feed_uni_stream_chunk(
+            3, _goaway_payload_frame(_bytes_from_list(all[i]))
+        )
+        assert_equal(c.peer_goaway_max_stream_id, want[i])
+
+
 def main() raises:
     test_peer_control_stream_settings_round_trip()
     test_uni_stream_type_varint_split_across_chunks()
@@ -561,4 +630,6 @@ def main() raises:
     test_allowed_control_frames_are_still_accepted()
     test_http2_reserved_setting_identifiers_are_refused()
     test_unknown_and_known_setting_identifiers_are_still_accepted()
-    print("test_h3_uni_streams: 19 passed")
+    test_goaway_with_bytes_after_the_id_is_a_frame_error()
+    test_goaway_exactly_one_varint_is_still_accepted()
+    print("test_h3_uni_streams: 21 passed")

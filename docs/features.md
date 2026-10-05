@@ -468,6 +468,9 @@ v0.11 audit fixes; before them the server accepted what follows.
   grease type) that declares more than `max_field_section_size` bytes
   (default 8192) is refused from its header with `H3_EXCESSIVE_LOAD`
   rather than buffered up to the QUIC flow-control window.
+- A GOAWAY frame must carry exactly one varint: bytes after the stream id,
+  an empty payload or a truncated id are `H3_FRAME_ERROR` (RFC 9114 §7.2.6,
+  §7.1), not ignored.
 - CRYPTO reassembly holds at most 64 KiB ahead of the next expected
   byte, and a request stream at most 2 MiB ahead of a gap.
 - Duplicate packets are dropped, ACKs for packet numbers never sent

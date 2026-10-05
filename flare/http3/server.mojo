@@ -1321,8 +1321,26 @@ struct Http3Connection(Copyable, Defaultable):
             )
         if frame_type == H3_FRAME_TYPE_GOAWAY:
             if len(payload) == 0:
-                raise Error("h3 server: empty GOAWAY payload")
-            var goaway_id = decode_varint(payload)
+                raise Error(
+                    "h3 server: empty GOAWAY payload "
+                    "(RFC 9114 7.2.6 H3_FRAME_ERROR)"
+                )
+            var goaway_id: Varint
+            try:
+                goaway_id = decode_varint(payload)
+            except:
+                raise Error(
+                    "h3 server: truncated GOAWAY stream id "
+                    "(RFC 9114 7.2.6 H3_FRAME_ERROR)"
+                )
+            # The payload is exactly one varint (RFC 9114 sec 7.2.6);
+            # bytes after it are H3_FRAME_ERROR (sec 7.1). They were
+            # ignored (H3-06).
+            if goaway_id.consumed != len(payload):
+                raise Error(
+                    "h3 server: GOAWAY payload has bytes after the stream "
+                    "id (RFC 9114 7.1 H3_FRAME_ERROR)"
+                )
             if (
                 self.peer_goaway_max_stream_id != UInt64((1 << 63) - 1)
                 and goaway_id.value > self.peer_goaway_max_stream_id

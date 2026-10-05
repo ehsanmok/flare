@@ -65,7 +65,7 @@ def Fixes.none : Fixes := ⟨false, false, false, false⟩
 def Fixes.all : Fixes := ⟨true, true, true, true⟩
 /-- flare as shipped: one field flips to `true` with each of H3-03 (frames),
 H3-04 (settings), H3-05 (streams) and H3-06 (goawayLen). -/
-def Fixes.shipped : Fixes := ⟨true, true, true, false⟩
+def Fixes.shipped : Fixes := ⟨true, true, true, true⟩
 
 /-! ## SETTINGS -/
 
@@ -147,9 +147,9 @@ def specGoaway (s : CtlState) (p : Bytes) : Except H3Err CtlState :=
   | none => .error .frameError
   | some (id, k) => if k = p.length then goawayId s id else .error .frameError
 
-/-- mirrors flare/http3/server.mojo:1197-1211 @59bda50: one varint is
-decoded and `goaway_id.consumed` is never compared with `len(payload)`;
-`fx.goawayLen` adds that comparison (H3-06). -/
+/-- mirrors flare/http3/server.mojo:1322-1353 (fixed, H3-06): one varint is
+decoded; `fx.goawayLen` is the `goaway_id.consumed != len(payload)` check
+(absent at 59bda50, where the bytes after the id were ignored). -/
 def goaway (fx : Fixes) (s : CtlState) (p : Bytes) : Except H3Err CtlState :=
   if p.length = 0 then .error .frameError
   else match decVarint p with

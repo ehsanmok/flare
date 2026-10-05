@@ -277,6 +277,12 @@ from test_h3_uni_streams import (
 from test_h3_uni_streams import (
     test_unknown_and_known_setting_identifiers_are_still_accepted as test_h3_uni_streams__test_unknown_and_known_setting_identifiers_are_still_accepted,
 )
+from test_h3_uni_streams import (
+    test_goaway_with_bytes_after_the_id_is_a_frame_error as test_h3_uni_streams__test_goaway_with_bytes_after_the_id_is_a_frame_error,
+)
+from test_h3_uni_streams import (
+    test_goaway_exactly_one_varint_is_still_accepted as test_h3_uni_streams__test_goaway_exactly_one_varint_is_still_accepted,
+)
 from test_request_reader import (
     test_initial_state as test_request_reader__test_initial_state,
 )
@@ -563,6 +569,12 @@ def main() raises:
     ]()
     suite.test[
         test_h3_uni_streams__test_unknown_and_known_setting_identifiers_are_still_accepted
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_goaway_with_bytes_after_the_id_is_a_frame_error
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_goaway_exactly_one_varint_is_still_accepted
     ]()
     # tests/h3/test_request_reader.mojo
     suite.test[test_request_reader__test_initial_state]()

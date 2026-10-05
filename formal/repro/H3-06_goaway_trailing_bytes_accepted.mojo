@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: H3-06 fixed on fix/formal-findings
 """H3-06: bytes after the GOAWAY stream id are accepted.
 
-Lean: Flare.Bugs.H3_06.impl_accepts_trailing (impl),
+Lean: Flare.Bugs.H3_06.implOld_accepts_trailing (pre-fix),
       Flare.Bugs.H3_06.goawayFixed_spec (fix).
 flare/http3/server.mojo:1197-1211 @59bda50 (`_dispatch_control_frame`).
 
 RFC 9114 §7.2.6: the GOAWAY payload is one variable-length integer; §7.1:
 additional bytes after the identified fields MUST be treated as a
 connection error of type H3_FRAME_ERROR. Expected: feeding GOAWAY with
-payload `00 ff` raises. Actual: `decode_varint(payload)` reads the id 0
+payload `00 ff` raises. Before the fix: Actual: `decode_varint(payload)` reads the id 0
 and `goaway_id.consumed` is never compared with `len(payload)`, so the
 frame is accepted and `peer_goaway_max_stream_id` becomes 0.
 

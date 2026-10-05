@@ -113,9 +113,11 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_13.decodeFixed_spec
 
 -- H3 GOAWAY payload
-#print axioms Flare.Bugs.H3_06.impl_accepts_trailing
+#print axioms Flare.Bugs.H3_06.implOld_accepts_trailing
 #print axioms Flare.Bugs.H3_06.spec_rejects_trailing
-#print axioms Flare.Bugs.H3_06.trace_impl
+#print axioms Flare.Bugs.H3_06.trace_implOld
+#print axioms Flare.Bugs.H3_06.impl_rejects_trailing
+#print axioms Flare.Bugs.H3_06.trace_shipped
 #print axioms Flare.Bugs.H3_06.goawayFixed_spec
 #print axioms Flare.Bugs.H3_06.dispatchFixed_spec
 
