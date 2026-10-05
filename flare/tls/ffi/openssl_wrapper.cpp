@@ -515,6 +515,23 @@ int flare_ssl_ctx_enable_session_tickets(flare_ssl_ctx_t ctx, int lifetime_s) {
     return 0;
 }
 
+int flare_ssl_ctx_disable_session_tickets(flare_ssl_ctx_t ctx) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) { set_error("ctx is null"); return -1; }
+    /* TLS 1.2: no stateless (RFC 5077) tickets. TLS 1.3: with
+     * SSL_OP_NO_TICKET OpenSSL would fall back to stateful tickets that
+     * point into the server cache, so also send zero NewSessionTicket
+     * messages. SSL_SESS_CACHE_OFF stops the server caching sessions, so
+     * a session-id resumption (TLS 1.2) has nothing to find either. */
+    SSL_CTX_set_options(c, SSL_OP_NO_TICKET);
+    if (SSL_CTX_set_num_tickets(c, 0) != 1) {
+        capture_openssl_errors();
+        return -1;
+    }
+    SSL_CTX_set_session_cache_mode(c, SSL_SESS_CACHE_OFF);
+    return 0;
+}
+
 // ── Error ────────────────────────────────────────────────────────────────────
 
 const char* flare_ssl_last_error(void) {

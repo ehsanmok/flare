@@ -19,7 +19,7 @@ alongside the QUIC server.
 | Cipher policy | Forward-secret AEAD whitelist. RC4 / 3DES / CBC chains absent from the negotiated set. |
 | ALPN | Advertised on both sides; refusal-to-downgrade enforced. |
 | Cert reload | ``TlsAcceptor.reload()`` atomic swap (no in-flight drop; a failed reload keeps the old cert). Also rotates the session-ticket key. |
-| Session resumption | RFC 5077 tickets + RFC 8446 §4.6.1 ``NewSessionTicket`` capture/replay. Server-side opt-in via ``TlsServerConfig.enable_session_tickets``; client-side opt-in via ``TlsConfig.enable_session_resumption``. |
+| Session resumption | RFC 5077 tickets + RFC 8446 §4.6.1 ``NewSessionTicket`` capture/replay. Server-side opt-in via ``TlsServerConfig.enable_session_tickets`` (default ``False``; off sends no tickets and keeps no session cache); client-side opt-in via ``TlsConfig.enable_session_resumption``. |
 | mTLS | Construction-time CA chain validation; ``TlsAcceptor.with_client_cert_verification`` enforces presence + chain. |
 | HTTPS server termination | In-process, non-blocking, reactor-multiplexed. ``HttpServer.bind_tls`` + ``serve`` terminate TLS on a ``TlsConnHandle`` and serve HTTP/1.1 or HTTP/2 by ALPN (buffered + chunked-streaming) over ``SSL_read`` / ``SSL_write``. See below. |
 | OCSP stapling | Not in-tree. Most production deployments terminate TLS at a proxy with stapling enabled. |

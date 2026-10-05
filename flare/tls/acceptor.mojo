@@ -172,15 +172,16 @@ struct TlsServerConfig(Copyable):
     var client_ca_bundle: String
     var min_protocol: Int
     var enable_session_tickets: Bool
-    """When True (default), the acceptor's ``SSL_CTX`` is
-    configured to issue RFC 5077 session tickets (TLS 1.2) /
+    """Opt-in; default ``False``. When True the acceptor's
+    ``SSL_CTX`` issues RFC 5077 session tickets (TLS 1.2) /
     RFC 8446 §4.6.1 NewSessionTicket frames (TLS 1.3) so peers
-    can resume on subsequent connects. The ticket key lives as
-    long as the ``SSL_CTX``; :meth:`TlsAcceptor.reload` builds a
-    new context, so it rotates the key and invalidates every
-    ticket and cached session issued before it. Turn this off
-    if you never reload and do not want a long-lived ticket
-    key."""
+    can resume on subsequent connects. When False the context
+    sends no tickets and keeps no server session cache, so no
+    session is issued and none can be resumed (every connection
+    is a full handshake). The ticket key lives as long as the
+    ``SSL_CTX``; :meth:`TlsAcceptor.reload` builds a new context,
+    so it rotates the key and invalidates every ticket and cached
+    session issued before it."""
     var ticket_lifetime_s: Int
     """Session ticket lifetime in seconds. Default 7200 (two
     hours). Maps to ``SSL_CTX_set_timeout`` and the embedded TLS
@@ -204,7 +205,7 @@ struct TlsServerConfig(Copyable):
         require_client_cert: Bool = False,
         client_ca_bundle: String = "",
         min_protocol: Int = TLS_PROTOCOL_TLS12,
-        enable_session_tickets: Bool = True,
+        enable_session_tickets: Bool = False,
         ticket_lifetime_s: Int = 7200,
         handshake_timeout_ms: Int = 10_000,
     ) raises:
@@ -357,13 +358,14 @@ struct TlsAcceptor(Movable):
         if config.require_client_cert:
             self._ctx.set_verify_client_cert(config.client_ca_bundle)
 
-        # Session resumption (RFC 5077 / RFC 8446 §4.6.1).
-        # Default-on; cheap to keep enabled because the inner
-        # SSL_CTX_set_options only clears the no-ticket bit, and
-        # SSL_CTX_set_session_id_context is a one-shot at ctx
-        # construction time.
+        # Session resumption (RFC 5077 / RFC 8446 §4.6.1) is opt-in.
+        # Either way the context is configured explicitly: leaving it
+        # alone would keep OpenSSL's defaults, where tickets and the
+        # server session cache are on.
         if config.enable_session_tickets:
             self._ctx.enable_session_tickets(config.ticket_lifetime_s)
+        else:
+            self._ctx.disable_session_tickets()
 
         self.config = config^
 

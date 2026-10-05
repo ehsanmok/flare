@@ -394,6 +394,18 @@ from test_tls_ticket_rotation import (
 from test_tls_ticket_rotation import (
     test_reload_rotates_the_ticket_key as test_tls_ticket_rotation__test_reload_rotates_the_ticket_key,
 )
+from test_tls_ticket_rotation import (
+    test_session_tickets_are_opt_in_by_default as test_tls_ticket_rotation__test_session_tickets_are_opt_in_by_default,
+)
+from test_tls_ticket_rotation import (
+    test_explicit_tickets_issue_a_resumable_session as test_tls_ticket_rotation__test_explicit_tickets_issue_a_resumable_session,
+)
+from test_tls_ticket_rotation import (
+    test_tickets_off_issues_no_session as test_tls_ticket_rotation__test_tickets_off_issues_no_session,
+)
+from test_tls_ticket_rotation import (
+    test_default_config_issues_no_session as test_tls_ticket_rotation__test_default_config_issues_no_session,
+)
 from test_tls_truncation import (
     test_close_delimited_body_without_close_notify_is_refused as test_tls_truncation__test_close_delimited_body_without_close_notify_is_refused,
 )
@@ -614,6 +626,16 @@ def main() raises:
     # tests/tls/test_tls_ticket_rotation.mojo
     suite.test[test_tls_ticket_rotation__test_ticket_resumes_without_reload]()
     suite.test[test_tls_ticket_rotation__test_reload_rotates_the_ticket_key]()
+    suite.test[
+        test_tls_ticket_rotation__test_session_tickets_are_opt_in_by_default
+    ]()
+    suite.test[
+        test_tls_ticket_rotation__test_explicit_tickets_issue_a_resumable_session
+    ]()
+    suite.test[test_tls_ticket_rotation__test_tickets_off_issues_no_session]()
+    suite.test[
+        test_tls_ticket_rotation__test_default_config_issues_no_session
+    ]()
     # tests/tls/test_tls_truncation.mojo
     suite.test[
         test_tls_truncation__test_close_delimited_body_without_close_notify_is_refused

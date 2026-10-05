@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63544 lines) |
+| Lean files | 298 (63562 lines) |
 | Theorems | 3344 |
 | Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 134 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 135 of 138 |
 
 Six findings are rated high:
 
@@ -3149,7 +3149,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
 | DOC-06 | Medium | resolved | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
 | DOC-07 | Medium | resolved | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
-| DOC-08 | Medium | open | server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off | `Flare/Bugs/DOC_08.lean` | `repro/DOC-08_tls_session_tickets_not_opt_in.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
+| DOC-08 | Medium | resolved | server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off | `Flare/Bugs/DOC_08.lean` | `repro/DOC-08_tls_session_tickets_not_opt_in.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
 
 ### 5.1 L1: Pure encodings (ENC)
 
@@ -5792,6 +5792,8 @@ Status: resolved. `TlsAcceptor.reload` now builds a fresh `TlsAcceptor` from `co
 - **Flip** (`flare/tls/acceptor.mojo`, `reload` body becomes `self = TlsAcceptor(self.config.copy())`): `OK: after reload() the old ticket no longer resumes (full handshake)`, exit 0.
 
 #### DOC-08: server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off
+
+Status: resolved. `TlsServerConfig.enable_session_tickets` now defaults to `False`, and `TlsAcceptor` honours `False`: it calls the new `ServerCtx.disable_session_tickets` (C `flare_ssl_ctx_disable_session_tickets`, which sets `SSL_OP_NO_TICKET`, `SSL_CTX_set_num_tickets(ctx, 0)` and `SSL_SESS_CACHE_OFF`), so no session is issued and none resumes. `True` is unchanged. Regression tests in `tests/tls/test_tls_ticket_rotation.mojo` (`test_session_tickets_are_opt_in_by_default`, `test_tickets_off_issues_no_session`, `test_default_config_issues_no_session`). Docs: `features.md`, `threat-model.md`, `tls-strategy.md`.
 
 - **Severity:** Medium. Resumption cannot be disabled. An operator who sets `enable_session_tickets=False`, which is what the field's docstring advises when ticket keys are not rotated out of band (and with DOC-07 they never are), still gets resumable tickets under a key that lives as long as the process.
 - **Doc:** `docs/features.md:572` says "server-side ticket cache (opt-in via `TlsServerConfig.enable_session_tickets`)". The docstring at `flare/tls/acceptor.mojo:175-182` says "turn off only for environments where ticket-key rotation is not handled".

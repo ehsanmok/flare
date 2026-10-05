@@ -178,6 +178,16 @@ int flare_ssl_session_reused(flare_ssl_t ssl);
  */
 int flare_ssl_ctx_enable_session_tickets(flare_ssl_ctx_t ctx, int lifetime_s);
 
+/**
+ * Server-side: turn resumption off. Sets ``SSL_OP_NO_TICKET``, sends zero
+ * TLS 1.3 NewSessionTicket messages (``SSL_CTX_set_num_tickets(ctx, 0)``) and
+ * disables the server session cache (``SSL_SESS_CACHE_OFF``), so no session
+ * is issued and none can be resumed.
+ *
+ * @return 0 on success, -1 on failure.
+ */
+int flare_ssl_ctx_disable_session_tickets(flare_ssl_ctx_t ctx);
+
 /* ── Error ─────────────────────────────────────────────────────────────────── */
 
 const char* flare_ssl_last_error(void);

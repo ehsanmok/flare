@@ -1,4 +1,5 @@
-"""``TlsAcceptor`` session tickets: rotation on ``reload()`` (DOC-07).
+"""``TlsAcceptor`` session tickets: rotation on ``reload()`` (DOC-07) and the
+opt-in switch (DOC-08).
 
 ``docs/threat-model.md`` says the ticket key "is part of the TlsAcceptor and
 rotates with ``reload``". A ticket (or cached session) issued before a
@@ -7,8 +8,12 @@ the reload resume as usual.
 
 Each scenario forks a server child that runs one ``TlsAcceptor`` over a
 loopback listener (ephemeral port) and serves three blocking handshakes with
-a one-byte echo; the parent drives three client connections, each offering
-the session captured on the one before.
+a one-byte echo; the parent drives client connections, each offering the
+session captured on the one before.
+
+DOC-08: ``TlsServerConfig.enable_session_tickets`` defaults to ``False``
+(``docs/features.md`` calls resumption opt-in) and ``False`` really turns tickets
+and the server session cache off, so a client never gets a session to replay.
 """
 
 from std.testing import assert_equal, assert_false, assert_true, TestSuite
@@ -48,9 +53,14 @@ def _serve_round(mut acc: TlsAcceptor, mut ln: TcpListener) raises:
     s.close()
 
 
-def _serve_three(mut ln: TcpListener, reload_after_round: Int) raises:
-    var acc = TlsAcceptor(TlsServerConfig(_CRT, _KEY))
-    for round in range(3):
+def _serve_rounds(
+    mut ln: TcpListener,
+    var cfg: TlsServerConfig,
+    rounds: Int,
+    reload_after_round: Int,
+) raises:
+    var acc = TlsAcceptor(cfg^)
+    for round in range(rounds):
         _serve_round(acc, ln)
         if round == reload_after_round:
             acc.reload()
@@ -64,7 +74,9 @@ def _round_trip(mut s: TlsStream) raises -> Bool:
     return n == 1 and buf[0] == 0x70
 
 
-def _resumption_chain(reload_after_round: Int) raises -> Tuple[Bool, Bool]:
+def _resumption_chain(
+    var cfg: TlsServerConfig, reload_after_round: Int
+) raises -> Tuple[Bool, Bool]:
     """Connect three times, each offering the previous connection's
     session. Returns ``(connection 2 reused, connection 3 reused)``; the
     server reloads after ``reload_after_round`` (-1 = never)."""
@@ -73,7 +85,7 @@ def _resumption_chain(reload_after_round: Int) raises -> Tuple[Bool, Bool]:
     var pid = fork()
     if pid == 0:
         try:
-            _serve_three(ln, reload_after_round)
+            _serve_rounds(ln, cfg^, 3, reload_after_round)
         except:
             exit(7)
         exit(0)
@@ -119,10 +131,52 @@ def _resumption_chain(reload_after_round: Int) raises -> Tuple[Bool, Bool]:
     return (r2, r3)
 
 
+def _session_probe(var cfg: TlsServerConfig) raises -> Tuple[Bool, Bool]:
+    """Connect twice to a server built from ``cfg``. Returns ``(a session
+    was issued on connection 1, connection 2 resumed it)``."""
+    var ln = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(ln.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            _serve_rounds(ln, cfg^, 2, -1)
+        except:
+            exit(7)
+        exit(0)
+    ln.close()
+    usleep(150000)
+
+    var failure = String("")
+    var issued = False
+    var resumed = False
+    try:
+        var tcfg = TlsConfig(ca_bundle=_CA)
+        var s1 = TlsStream.connect("localhost", port, tcfg)
+        if not _round_trip(s1):
+            failure = "connection 1 echo failed"
+        var sess1 = s1.session()
+        issued = sess1.session_addr() != 0
+        s1.close()
+        usleep(100000)
+        var s2 = TlsStream.connect_resumed("localhost", port, tcfg, sess1^)
+        resumed = s2.was_session_reused()
+        _ = _round_trip(s2)
+        s2.close()
+    except e:
+        failure = "client raised: " + String(e)
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    if failure != "":
+        raise Error(failure)
+    return (issued, resumed)
+
+
 def test_ticket_resumes_without_reload() raises:
     """Control: the harness can see a resumption (and the acceptor issues
     tickets), so the reload test below is not vacuous."""
-    var r = _resumption_chain(-1)
+    var r = _resumption_chain(
+        TlsServerConfig(_CRT, _KEY, enable_session_tickets=True), -1
+    )
     assert_true(r[0], "connection 2 should resume connection 1")
     assert_true(r[1], "connection 3 should resume connection 2")
 
@@ -130,11 +184,44 @@ def test_ticket_resumes_without_reload() raises:
 def test_reload_rotates_the_ticket_key() raises:
     """DOC-07: a ticket issued before ``reload()`` no longer resumes
     after it."""
-    var r = _resumption_chain(1)
+    var r = _resumption_chain(
+        TlsServerConfig(_CRT, _KEY, enable_session_tickets=True), 1
+    )
     assert_true(r[0], "connection 2 should resume connection 1")
     assert_false(
         r[1], "a ticket issued before reload() must not resume after it"
     )
+
+
+def test_session_tickets_are_opt_in_by_default() raises:
+    """DOC-08: the config default is off."""
+    assert_false(TlsServerConfig(_CRT, _KEY).enable_session_tickets)
+
+
+def test_explicit_tickets_issue_a_resumable_session() raises:
+    """Control: opting in still issues a session and resumes it."""
+    var r = _session_probe(
+        TlsServerConfig(_CRT, _KEY, enable_session_tickets=True)
+    )
+    assert_true(r[0], "an opted-in server should issue a session")
+    assert_true(r[1], "an opted-in server should resume it")
+
+
+def test_tickets_off_issues_no_session() raises:
+    """DOC-08: ``enable_session_tickets=False`` issues nothing to replay and
+    resumes nothing."""
+    var r = _session_probe(
+        TlsServerConfig(_CRT, _KEY, enable_session_tickets=False)
+    )
+    assert_false(r[0], "no session may be issued with tickets off")
+    assert_false(r[1], "no resumption with tickets off")
+
+
+def test_default_config_issues_no_session() raises:
+    """DOC-08: a server built from the default config does not resume."""
+    var r = _session_probe(TlsServerConfig(_CRT, _KEY))
+    assert_false(r[0], "default config must not issue a session")
+    assert_false(r[1], "default config must not resume")
 
 
 def main() raises:

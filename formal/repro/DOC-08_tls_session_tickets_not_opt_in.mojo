@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP + OpenSSL, forked server child; uses tests/certs)
+# RESOLVED: DOC-08 fixed on fix/formal-findings
 """DOC-08: server session tickets are on by default, and
 `enable_session_tickets=False` does not turn resumption off.
 
@@ -19,7 +20,8 @@ resume the first, or the harness cannot tell), then two on a fresh
 acceptor built with `enable_session_tickets=False`. The parent offers the
 third connection's session on the fourth. Expected for an opt-in switch
 that is off: no session, or a full handshake. Also checked: the default
-value of the field.
+value of the field. Before the fix: the default was True and the off
+acceptor still issued and resumed a session.
 
 Minimal fix: default `enable_session_tickets` to False, and when it is
 False set SSL_OP_NO_TICKET, `SSL_CTX_set_num_tickets(ctx, 0)` and
@@ -61,7 +63,9 @@ def _serve_one(mut acc: TlsAcceptor, mut ln: TcpListener) raises:
 
 
 def _serve(mut ln: TcpListener) raises:
-    var on = TlsAcceptor(TlsServerConfig(_CRT, _KEY, enable_session_tickets=True))
+    var on = TlsAcceptor(
+        TlsServerConfig(_CRT, _KEY, enable_session_tickets=True)
+    )
     _serve_one(on, ln)
     _serve_one(on, ln)
     var off = TlsAcceptor(
@@ -114,9 +118,13 @@ def main() raises:
             _ = _round_trip(s2)
             s2.close()
             if r1 or not r2:
-                verdict = "inconclusive: control failed (conn 1 reused " + String(
-                    r1
-                ) + ", conn 2 reused " + String(r2) + ")"
+                verdict = (
+                    "inconclusive: control failed (conn 1 reused "
+                    + String(r1)
+                    + ", conn 2 reused "
+                    + String(r2)
+                    + ")"
+                )
         if verdict == "":
             usleep(100000)
             var s3 = TlsStream.connect("localhost", port, cfg)

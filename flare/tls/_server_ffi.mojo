@@ -151,6 +151,16 @@ def _do_ssl_ctx_enable_session_tickets(
         raise Error("flare_ssl_ctx_enable_session_tickets failed")
 
 
+def _do_ssl_ctx_disable_session_tickets(
+    imm lib: OwnedDLHandle, addr: Int
+) raises:
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_ssl_ctx_disable_session_tickets"
+    )
+    if Int(f(addr)) != 0:
+        raise Error("flare_ssl_ctx_disable_session_tickets failed")
+
+
 def _do_ssl_new_accept(
     imm lib: OwnedDLHandle, ctx_addr: Int, fd: Int
 ) raises -> Int:
@@ -307,6 +317,12 @@ struct ServerCtx(Movable):
         session.
         """
         _do_ssl_ctx_enable_session_tickets(self._lib, self._addr, lifetime_s)
+
+    def disable_session_tickets(self) raises:
+        """Turn session resumption off: no RFC 5077 tickets, no TLS 1.3
+        NewSessionTicket messages and no server-side session cache, so no
+        session is issued and none can be resumed."""
+        _do_ssl_ctx_disable_session_tickets(self._lib, self._addr)
 
     def addr(self) -> Int:
         """Underlying ``SSL_CTX*`` as an Int."""
