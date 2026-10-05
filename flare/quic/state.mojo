@@ -488,7 +488,16 @@ def apply_stop_sending(mut conn: Connection, ss: StopSendingFrame):
 
 def apply_handshake_done(mut conn: Connection, mut events: ConnectionEvents):
     """Apply a HANDSHAKE_DONE frame: flip the connection to
-    ESTABLISHED and surface the event."""
+    ESTABLISHED and surface the event.
+
+    Acts only in HANDSHAKE (as :func:`mark_handshake_complete` does).
+    CLOSING, DRAINING and CLOSED only lead to closed (RFC 9000 §10.2),
+    so a HANDSHAKE_DONE that arrives after CONNECTION_CLOSE must not
+    make the connection usable again; an ESTABLISHED connection has
+    nothing left to change.
+    """
+    if conn.state != CONN_STATE_HANDSHAKE:
+        return
     conn.handshake_complete = True
     conn.state = CONN_STATE_ESTABLISHED
     events.handshake_done = True

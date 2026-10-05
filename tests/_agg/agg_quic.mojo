@@ -703,6 +703,9 @@ from test_state import (
     test_unknown_frame_body_is_not_reparsed as test_state__test_unknown_frame_body_is_not_reparsed,
 )
 from test_state import (
+    test_handshake_done_does_not_reopen_closed_connection as test_state__test_handshake_done_does_not_reopen_closed_connection,
+)
+from test_state import (
     test_mark_handshake_complete_explicit_hook as test_state__test_mark_handshake_complete_explicit_hook,
 )
 from test_state import (
@@ -1252,6 +1255,9 @@ def main() raises:
     suite.test[test_state__test_initial_connection_state]()
     suite.test[test_state__test_handshake_done_advances_state]()
     suite.test[test_state__test_unknown_frame_body_is_not_reparsed]()
+    suite.test[
+        test_state__test_handshake_done_does_not_reopen_closed_connection
+    ]()
     suite.test[test_state__test_mark_handshake_complete_explicit_hook]()
     suite.test[test_state__test_stream_frame_opens_stream]()
     suite.test[test_state__test_stream_frame_with_fin_finishes_stream]()

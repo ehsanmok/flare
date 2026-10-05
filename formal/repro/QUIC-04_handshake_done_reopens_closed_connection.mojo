@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-04 fixed on fix/formal-findings
 """QUIC-04: HANDSHAKE_DONE moves a CLOSING/DRAINING connection back to
 ESTABLISHED.
 
@@ -13,7 +14,7 @@ connection that has received CONNECTION_CLOSE never becomes usable again.
 
 Expected: after the payload 1c 00 00 00 1e (CONNECTION_CLOSE then
 HANDSHAKE_DONE) the connection stays DRAINING.
-Actual: conn.state is ESTABLISHED again.
+Before the fix: conn.state is ESTABLISHED again.
 
 Minimal fix: in apply_handshake_done, only change state when it is
 CONN_STATE_HANDSHAKE (as mark_handshake_complete already does).

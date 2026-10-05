@@ -68,16 +68,17 @@ File: `Quic/Conn.lean`.
 - `implStep` mirrors three pieces of `state.mojo`:
   - `handle_frame_buf`, which drops frames only once the state is CLOSED (766-791);
   - `apply_connection_close`, which moves to DRAINING (430-445);
-  - `apply_handshake_done`, which moves to ESTABLISHED (489-494).
+  - `apply_handshake_done`, which moves to ESTABLISHED, and (fixed, QUIC-04) acts only in HANDSHAKE (489-503).
 - `markHandshakeComplete` mirrors 861-873 and `localClose` mirrors 890-911.
 - `specStep` follows RFC 9000 §10.2 and §19.20: closing and draining lead only to closed or draining, and the server rejects HANDSHAKE_DONE.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `Conn.spec_closing_absorbing`, `Conn.specRun_absorbing` | Under the spec, once closing or draining, every run stays terminal. | proved |
-| `Conn.implStep_frame_spec` | flare agrees with the spec on every frame other than HANDSHAKE_DONE. | proved |
+| `Conn.implStep_frame_spec`, `Conn.implStep_client_eq_spec` | flare agrees with the spec on every frame other than a server's HANDSHAKE_DONE (QUIC-09), hence on every step for the client role. | proved |
+| `Conn.implStep_absorbing` | In flare, once closing, draining or closed, every step stays terminal, for both roles (QUIC-04 fixed). | proved |
 | `Conn.markHandshakeComplete_spec`, `Conn.localClose_spec` | flare agrees with the spec on TLS completion and local close. | proved |
-| `Conn.implStepFixed_eq_spec`, `Conn.runFixed_eq_spec` | With the QUIC-04 and QUIC-09 fixes, every step and every run equals the spec. | proved |
+| `Conn.implStepFixed_eq_spec`, `Conn.runFixed_eq_spec` | With the QUIC-09 fix on top of the shipped QUIC-04 fix, every step and every run equals the spec. | proved |
 
 Limitations:
 - This model has no clock. The idle timeout and the closing/draining period are modelled separately, in `Quic/Timers.lean` (next section).
@@ -349,6 +350,8 @@ Status: resolved. Fixed: `parse_frame_into` raises `FRAME_ENCODING_ERROR` for a 
 - **Flip:** `OK: ACK with a negative computed packet number rejected`, exit 0.
 
 ### QUIC-04: HANDSHAKE_DONE moves a closing or draining connection back to ESTABLISHED
+
+Status: resolved. Fixed: `apply_handshake_done` (`flare/quic/state.mojo`) acts only in HANDSHAKE, as `mark_handshake_complete` does. Test: `tests/quic/test_state.mojo::test_handshake_done_does_not_reopen_closed_connection`. Lean: `Bugs.QUIC_04.fixed_refines` / `fixed_absorbing` about the shipped `Conn.implStep` (`implStep_client_eq_spec`, `implStep_absorbing`); the counterexample is about the pre-fix `implStepOld`.
 
 - **Severity:** Medium. After CONNECTION_CLOSE, a peer can put the connection back in ESTABLISHED. The `connection_closed` event has already fired at that point, so the application and the transport disagree about whether the connection is alive.
 - **RFC:** RFC 9000 §10.2: the closing and draining states lead only to closed. An endpoint in the draining state MUST NOT send packets.
@@ -747,9 +750,9 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `Quic.Frame.ackBody`, `ackFinish` | quic/frame.mojo:765-792 | `QUIC_03.violates_spec`, `fixed_meets_spec` | counterexample |
 | `Quic.Frame.parseFrameFixed` | quic/frame.mojo:753-958 with the three fixes | `parseFrameFixed_ok`, `parsePayloadFixed_ok` | proved |
 | `Quic.PacketNumber.decodePnImpl` | quic/protection.mojo:93-115 | `decodePnImpl_eq_rfc`, `decodePnImpl_window` | proved |
-| `Quic.Conn.implStep`, `frameEffect` | quic/state.mojo:430-445, 489-494, 640-760, 766-791 | `implStep_frame_spec`, `QUIC_04.reopens`, `QUIC_09.server_accepts` | counterexample |
+| `Quic.Conn.implStep`, `frameEffect` | quic/state.mojo:430-445, 489-503 (fixed, QUIC-04), 640-760, 766-791 | `implStep_frame_spec`, `implStep_client_eq_spec`, `implStep_absorbing`, `QUIC_04.fixed_refines`, `QUIC_09.server_accepts` | proved (QUIC-04 resolved); counterexample (QUIC-09) |
 | `Quic.Conn.markHandshakeComplete`, `localClose` | quic/state.mojo:861-873, 890-911 | `markHandshakeComplete_spec`, `localClose_spec` | proved |
-| `Quic.Conn.implStepFixed` | quic/state.mojo:489-494, quic/_server_types.mojo:559-578 with fixes | `runFixed_eq_spec`, `QUIC_04.fixed_refines`, `QUIC_09.fixed_meets_spec` | proved |
+| `Quic.Conn.implStepFixed` | quic/state.mojo:489-503, quic/_server_types.mojo:559-578 with the QUIC-09 fix | `runFixed_eq_spec`, `QUIC_04.fixed_refines`, `QUIC_09.fixed_meets_spec` | proved |
 | `Quic.AckExpand.expand` | quic/state.mojo:380, 388-427 | `expand_sound`, `expand_len_le`, `expand_eq_take`, `expand_complete`, `expand_length` | proved |
 | `Quic.AckGen.record`, `isort`, `mergeAcc` | quic/_server_support.mojo:76-124 | `record_canon`, `record_sound`, `record_exact`, `record_drops_lowest` | proved |
 | `Quic.AckGen.contains` | quic/_server_support.mojo:60-73 | `QUIC_14.impl_reaccepts`, `QUIC_14.fixed_never_reaccepts` | counterexample (QUIC-14) |

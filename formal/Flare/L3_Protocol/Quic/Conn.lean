@@ -24,11 +24,14 @@ The spec `specStep` is written from RFC 9000 and is role-aware:
 Results:
 * `spec_closing_absorbing` / `specRun_absorbing`: in the spec, once the
   connection is closing, draining or closed it never becomes usable again.
-* `implStep` (flare): role-unaware, HANDSHAKE_DONE always sets ESTABLISHED.
-  `Flare.Bugs.QUIC_04` (closed connection reopened) and `Flare.Bugs.QUIC_09`
-  (server accepts HANDSHAKE_DONE) are counterexamples.
-* `implStepFixed_eq_spec`: the minimal fix (guard on HANDSHAKE, reject on
-  the server) equals the spec on every state, role and event.
+* `implStep` (flare): role-unaware. HANDSHAKE_DONE used to set ESTABLISHED in
+  every state (`Flare.Bugs.QUIC_04`, closed connection reopened; fixed, it now acts
+  only in HANDSHAKE). `Flare.Bugs.QUIC_09` (server accepts HANDSHAKE_DONE) is
+  still a counterexample.
+* `implStep_client_eq_spec`, `implStep_absorbing`: the shipped step equals the spec
+  for the client role, and closing / draining / closed are absorbing for both roles.
+* `implStepFixed_eq_spec`: the remaining fix (reject on the server, QUIC-09)
+  makes the step equal the spec on every state, role and event.
 * `markHandshakeComplete_spec`, `localClose_spec`: flare's two other
   transitions already match the spec.
 -/
@@ -55,18 +58,18 @@ def CState.terminal : CState → Bool
 
 /-! ## flare -/
 
-/-- Connection-state effect of one decoded frame.
-mirrors flare/quic/state.mojo:430-445 (apply_connection_close: DRAINING),
-489-494 (apply_handshake_done: ESTABLISHED, no state or role test),
-640-760 (every other callback leaves `conn.state` alone) @59bda50 -/
-def frameEffect (s : CState) : Frame → CState
-  | .connectionClose .. => .draining
-  | .handshakeDone => .established
-  | _ => s
-
 /-- mirrors flare/quic/state.mojo:861-873 @59bda50 -/
 def markHandshakeComplete (s : CState) : CState :=
   if s = .handshake then .established else s
+
+/-- Connection-state effect of one decoded frame.
+mirrors flare/quic/state.mojo:430-445 (apply_connection_close: DRAINING),
+489-503 (apply_handshake_done: acts only in HANDSHAKE, no role test; fixed, QUIC-04),
+640-760 (every other callback leaves `conn.state` alone) @59bda50 -/
+def frameEffect (s : CState) : Frame → CState
+  | .connectionClose .. => .draining
+  | .handshakeDone => markHandshakeComplete s
+  | _ => s
 
 /-- mirrors flare/quic/state.mojo:890-911 @59bda50 -/
 def localClose (s : CState) : CState :=
@@ -132,9 +135,9 @@ theorem specRun_absorbing (role : Role) (es : List Ev) :
 
 /-! ## The minimal fix -/
 
-/-- `apply_handshake_done` only acts in HANDSHAKE (as
-`mark_handshake_complete` already does), and the server-side driver treats
-HANDSHAKE_DONE as PROTOCOL_VIOLATION. -/
+/-- The remaining fix (QUIC-09): the server-side driver treats HANDSHAKE_DONE
+as PROTOCOL_VIOLATION. (`apply_handshake_done` already acts only in HANDSHAKE,
+QUIC-04.) -/
 def frameEffectFixed (role : Role) (s : CState) : Frame → Option CState
   | .connectionClose .. => some .draining
   | .handshakeDone =>
@@ -172,10 +175,33 @@ theorem localClose_spec (role : Role) (s : CState) :
     implStep role s .localClose = specStep role s .localClose := by
   cases s <;> rfl
 
-/-- flare already agrees with the spec on every frame other than
-HANDSHAKE_DONE (for either role). -/
+/-- flare agrees with the spec on every frame other than a server's
+HANDSHAKE_DONE (QUIC-09). -/
 theorem implStep_frame_spec (role : Role) (s : CState) (f : Frame)
-    (hf : f ≠ .handshakeDone) : implStep role s (.frame f) = specStep role s (.frame f) := by
-  cases s <;> cases f <;> first | exact absurd rfl hf | rfl
+    (hf : f ≠ .handshakeDone ∨ role = .client) :
+    implStep role s (.frame f) = specStep role s (.frame f) := by
+  cases s <;> cases f <;> cases role <;> first | rfl | (exfalso; simp at hf)
+
+/-- **The shipped step equals the spec for the client role** (QUIC-04 fixed). -/
+theorem implStep_client_eq_spec (s : CState) (e : Ev) :
+    implStep .client s e = specStep .client s e := by
+  cases e with
+  | frame f => exact implStep_frame_spec .client s f (Or.inr rfl)
+  | tlsDone => exact markHandshakeComplete_spec .client s
+  | localClose => exact localClose_spec .client s
+
+/-- **Closing, draining and closed are absorbing in flare**, for both roles. -/
+theorem implStep_absorbing (role : Role) (s s' : CState) (e : Ev)
+    (hs : s.terminal = true) (h : implStep role s e = some s') : s'.terminal = true := by
+  cases role
+  · rw [implStep_client_eq_spec] at h
+    exact spec_closing_absorbing .client s s' e hs h
+  · cases e with
+    | frame f =>
+      cases s <;> simp [CState.terminal] at hs <;>
+        cases f <;> simp [implStep, frameEffect, markHandshakeComplete] at h <;>
+        subst h <;> rfl
+    | tlsDone => cases s <;> simp [CState.terminal] at hs <;> simp [implStep, markHandshakeComplete] at h <;> subst h <;> rfl
+    | localClose => cases s <;> simp [CState.terminal] at hs <;> simp [implStep, localClose] at h <;> subst h <;> rfl
 
 end Flare.L3.Quic.Conn

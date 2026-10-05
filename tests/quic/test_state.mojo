@@ -15,6 +15,7 @@ from std.collections import List
 from std.collections.span import Span
 
 from flare.quic import (
+    CONN_STATE_CLOSING,
     CONN_STATE_DRAINING,
     CONN_STATE_ESTABLISHED,
     CONN_STATE_HANDSHAKE,
@@ -141,6 +142,35 @@ def test_unknown_frame_body_is_not_reparsed() raises:
     assert_true(raised, "unknown frame type was accepted")
     assert_false(events.connection_closed)
     assert_equal(conn.state, CONN_STATE_HANDSHAKE)
+
+
+def test_handshake_done_does_not_reopen_closed_connection() raises:
+    """QUIC-04: CONNECTION_CLOSE then HANDSHAKE_DONE in one payload leaves
+    the connection DRAINING, and HANDSHAKE_DONE after a local close leaves it
+    CLOSING (RFC 9000 sec 10.2: closing / draining only lead to closed)."""
+    var conn = new_connection()
+    var events = empty_events()
+    var payload = List[UInt8]()
+    payload.append(0x1C)  # CONNECTION_CLOSE (transport)
+    payload.append(0x00)
+    payload.append(0x00)
+    payload.append(0x00)
+    encode_handshake_done(payload)
+    dispatch_frames(conn, Span[UInt8, _](payload), UInt64(100), events, False)
+    assert_true(events.connection_closed)
+    assert_equal(conn.state, CONN_STATE_DRAINING)
+    assert_false(events.handshake_done)
+    assert_false(conn.handshake_complete)
+
+    var conn2 = new_connection()
+    var ev2 = empty_events()
+    connection_close(conn2, UInt64(0), "bye")
+    assert_equal(conn2.state, CONN_STATE_CLOSING)
+    var hd = List[UInt8]()
+    encode_handshake_done(hd)
+    _ = handle_frame_buf(conn2, Span[UInt8, _](hd), UInt64(200), ev2)
+    assert_equal(conn2.state, CONN_STATE_CLOSING)
+    assert_false(ev2.handshake_done)
 
 
 def test_mark_handshake_complete_explicit_hook() raises:
@@ -428,6 +458,7 @@ def main() raises:
     test_initial_connection_state()
     test_handshake_done_advances_state()
     test_unknown_frame_body_is_not_reparsed()
+    test_handshake_done_does_not_reopen_closed_connection()
     test_mark_handshake_complete_explicit_hook()
     test_stream_frame_opens_stream()
     test_stream_frame_with_fin_finishes_stream()
@@ -447,4 +478,4 @@ def main() raises:
     test_path_response_validates_matching_challenge()
     test_path_response_mismatch_ignored()
     test_new_connection_id_is_bounded_and_not_overwritten()
-    print("test_quic_state: 22 passed")
+    print("test_quic_state: 23 passed")

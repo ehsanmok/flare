@@ -15,6 +15,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.Conn.specRun_absorbing
 #print axioms Flare.L3.Quic.Conn.runFixed_eq_spec
 #print axioms Flare.L3.Quic.Conn.implStep_frame_spec
+#print axioms Flare.L3.Quic.Conn.implStep_client_eq_spec
+#print axioms Flare.L3.Quic.Conn.implStep_absorbing
 #print axioms Flare.L3.Quic.AckExpand.expand_sound
 #print axioms Flare.L3.Quic.AckExpand.expand_len_le
 #print axioms Flare.L3.Quic.LossRecovery.inv_run
