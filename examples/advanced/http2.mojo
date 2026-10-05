@@ -1,7 +1,7 @@
 """Example 35: HTTP/2 + h2c upgrade detection.
 
 Drives :class:`flare.http2.Http2Connection` end-to-end without a
-network: feeds the connection preface + a HEADERS frame, takes the
+network: feeds the connection preface, an empty SETTINGS frame and a HEADERS frame, takes the
 parsed :class:`flare.http.Request`, builds a
 :class:`flare.http.Response`, calls :meth:`emit_response`, and
 prints the encoded response frames.
@@ -60,6 +60,13 @@ def main() raises:
     c.feed(Span[UInt8, _](_preface_bytes()))
     var settings_bytes = c.drain()
     print(" bytes after preface :", len(settings_bytes), "(SETTINGS frame)")
+
+    # RFC 9113 sec 3.4: the client's first frame after the preface must be
+    # SETTINGS (an empty one keeps every default).
+    var client_settings = Frame()
+    client_settings.header.type = FrameType.SETTINGS()
+    c.feed(Span[UInt8, _](encode_frame(client_settings)))
+    _ = c.drain()
 
     var enc = HpackEncoder()
     var hdrs = List[HpackHeader]()
