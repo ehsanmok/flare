@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: RT-01 fixed on fix/formal-findings
 """RT-01: TimerWheel.next_fire_ms is not a lower bound once an overflow
 timer is within a rotation of firing.
 
 Lean: Flare.Bugs.RT_01.nextFire_not_lower_bound (counterexample) and
-Flare.Bugs.RT_01.nextFireFixed_lower_bound (fix meets spec).
+Flare.Bugs.RT_01.nextFire_lower_bound (shipped code meets spec).
 flare/runtime/timer_wheel.mojo:310-333 @59bda50.
 
 Expected (docstring): next_fire_ms() "is never later than the true next
 fire, so a timer can never be missed".
-Actual: overflow entries are only re-examined at slot-0 boundaries, so
+Before the fix: overflow entries are only re-examined at slot-0 boundaries, so
 between boundaries an overflow timer can be due in fewer than 512 ms.
 With an empty wheel next_fire_ms() still returns now + 512. Here a timer
 due at 512 is reported as due at 1012 after advancing to 500, and the

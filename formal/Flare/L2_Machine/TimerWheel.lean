@@ -178,19 +178,25 @@ def scan (s : TW) : Nat → Nat → Option Nat
   | 0, _ => none
   | n + 1, d => if s.wheel ((s.slot + d) % 512) ≠ [] then some d else scan s n (d + 1)
 
-/-- mirrors flare/runtime/timer_wheel.mojo:310-333 @59bda50 -/
-def nextFire (s : TW) : Nat :=
+/-- Pre-fix `next_fire_ms` (flare/runtime/timer_wheel.mojo:310-333 @59bda50), kept for the
+RT-01 counterexample: it scans a full rotation and falls back to `tick + 512`
+when only overflow timers remain. -/
+def nextFireOld (s : TW) : Nat :=
   match scan s 512 1 with
   | some d => s.tick + d
   | none => if s.overflow ≠ [] then s.tick + 512 else s.tick + 0xFFFFFFFF
 
-/-- The fix for RT-01: an overflow timer can fire at the next slot-0
-boundary `tick + (512 - slot)`, so the hint must not exceed it. -/
-def nextFireFixed (s : TW) : Nat :=
-  let w := match scan s 512 1 with
-    | some d => s.tick + d
-    | none => s.tick + 0xFFFFFFFF
-  if s.overflow ≠ [] then min w (s.tick + (512 - s.slot)) else w
+/-- How far `next_fire_ms` scans, and its fallback when only overflow timers
+remain: an overflow timer is promoted (and can fire) at the next slot-0
+boundary `tick + (512 - slot)`, so while the overflow list is non-empty the
+scan and the fallback stop there. -/
+def hintLimit (s : TW) : Nat := if s.overflow ≠ [] then 512 - s.slot else 512
+
+/-- mirrors flare/runtime/timer_wheel.mojo `next_fire_ms` (fixed, RT-01) -/
+def nextFire (s : TW) : Nat :=
+  match scan s (hintLimit s) 1 with
+  | some d => s.tick + d
+  | none => if s.overflow ≠ [] then s.tick + hintLimit s else s.tick + 0xFFFFFFFF
 
 /-! ## Invariant -/
 
@@ -1334,56 +1340,55 @@ theorem scan_finds (s : TW) (k : Nat) (hk : s.wheel ((s.slot + k) % 512) ≠ [])
       have hdk : d ≠ k := by rintro rfl; exact hne hk
       exact scan_finds s k hk n (d + 1) (by omega) (by omega)
 
-/-- the fixed hint is a lower bound on every pending fire time -/
-theorem nextFireFixed_lower_bound {s : TW} (h : Inv s) {x : Nat} {e : Entry} (hx : Act s x e) :
-    nextFireFixed s ≤ e.fireAt := by
+/-- the shipped hint is a lower bound on every pending fire time -/
+theorem nextFire_lower_bound {s : TW} (h : Inv s) {x : Nat} {e : Entry} (hx : Act s x e) :
+    nextFire s ≤ e.fireAt := by
   have hs := h.slot_lt
-  have hw : (match scan s 512 1 with
-      | some d => s.tick + d
-      | none => s.tick + 0xFFFFFFFF) ≤ e.fireAt ∨ x ∈ s.overflow := by
+  by_cases hov : s.overflow ≠ []
+  · have hl : hintLimit s = 512 - s.slot := by simp [hintLimit, hov]
+    have hbound : nextFire s ≤ s.tick + (512 - s.slot) := by
+      unfold nextFire
+      rw [hl]
+      cases hh : scan s (512 - s.slot) 1 with
+      | some d => have := (scan_some s _ 1 d hh).2.1; simp; omega
+      | none => simp [hov]
     rcases h.complete x e hx.1 with ⟨j, hj⟩ | ho
-    · left
-      obtain ⟨hlt, hd, hjd⟩ := (h.wheel_ok j x hj).2 e hx.1
+    · obtain ⟨hlt, hd, hjd⟩ := (h.wheel_ok j x hj).2 e hx.1
+      by_cases hk : e.fireAt - s.tick ≤ 512 - s.slot
+      · have hne : s.wheel ((s.slot + (e.fireAt - s.tick)) % 512) ≠ [] := by
+          rw [← hjd]; exact List.ne_nil_of_mem hj
+        obtain ⟨d', hs', hle⟩ := scan_finds s _ hne (512 - s.slot) 1 (by omega) (by omega)
+        unfold nextFire
+        rw [hl, hs']
+        simp only
+        omega
+      · omega
+    · have := (h.ov_ok x ho).2 e hx.1
+      omega
+  · have hov' : s.overflow = [] := by simpa using hov
+    have hl : hintLimit s = 512 := by simp [hintLimit, hov']
+    rcases h.complete x e hx.1 with ⟨j, hj⟩ | ho
+    · obtain ⟨hlt, hd, hjd⟩ := (h.wheel_ok j x hj).2 e hx.1
       have hne : s.wheel ((s.slot + (e.fireAt - s.tick)) % 512) ≠ [] := by
         rw [← hjd]; exact List.ne_nil_of_mem hj
       obtain ⟨d', hs', hle⟩ := scan_finds s _ hne 512 1 (by omega) (by omega)
-      rw [hs']
-      exact Nat.le_trans (Nat.add_le_add_left hle _) (by omega)
-    · exact Or.inr ho
-  unfold nextFireFixed
-  dsimp only
-  split
-  · rename_i hne
-    rcases hw with hw | ho
-    · exact Nat.le_trans (Nat.min_le_left _ _) hw
-    · have := (h.ov_ok x ho).2 e hx.1
-      exact Nat.le_trans (Nat.min_le_right _ _) this
-  · rename_i hne
-    rcases hw with hw | ho
-    · exact hw
-    · exact absurd (List.ne_nil_of_mem ho) hne
+      unfold nextFire
+      rw [hl, hs']
+      simp only
+      omega
+    · rw [hov'] at ho; cases ho
 
-/-- with an empty overflow list flare's own hint is already a lower bound;
+/-- with an empty overflow list the shipped hint is the pre-fix one -/
+theorem nextFire_eq_old_no_overflow (s : TW) (hov : s.overflow = []) : nextFire s = nextFireOld s := by
+  have hl : hintLimit s = 512 := by simp [hintLimit, hov]
+  unfold nextFire nextFireOld
+  rw [hl, hov]
+
+/-- with an empty overflow list the pre-fix hint is already a lower bound;
 RT-01 needs a non-empty overflow list -/
-theorem nextFire_lower_bound_no_overflow {s : TW} (h : Inv s) (hov : s.overflow = [])
-    {x : Nat} {e : Entry} (hx : Act s x e) : nextFire s ≤ e.fireAt := by
-  have := nextFireFixed_lower_bound h hx
-  unfold nextFireFixed at this; unfold nextFire
-  rw [hov] at this ⊢
-  simpa using this
-
-/-- the fixed hint never exceeds flare's hint (it only ever wakes earlier) -/
-theorem nextFireFixed_le (s : TW) : nextFireFixed s ≤ nextFire s := by
-  unfold nextFireFixed nextFire
-  dsimp only
-  by_cases hov : s.overflow ≠ []
-  · rw [if_pos hov, if_pos hov]
-    cases scan s 512 1 with
-    | some d => exact Nat.min_le_left _ _
-    | none => exact Nat.le_trans (Nat.min_le_right _ _) (Nat.add_le_add_left (Nat.sub_le _ _) _)
-  · rw [if_neg hov, if_neg hov]
-    cases scan s 512 1 with
-    | some d => exact Nat.le_refl _
-    | none => exact Nat.le_refl _
+theorem nextFireOld_lower_bound_no_overflow {s : TW} (h : Inv s) (hov : s.overflow = [])
+    {x : Nat} {e : Entry} (hx : Act s x e) : nextFireOld s ≤ e.fireAt := by
+  rw [← nextFire_eq_old_no_overflow s hov]
+  exact nextFire_lower_bound h hx
 
 end Flare.L2.TimerWheel

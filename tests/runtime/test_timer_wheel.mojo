@@ -228,6 +228,49 @@ def test_next_fire_ms_overflow_only_returns_rotation() raises:
     assert_true(nf <= UInt64(5000))
 
 
+def test_next_fire_ms_overflow_only_is_lower_bound_after_advance() raises:
+    """RT-01: overflow timers are promoted at the next slot-0 boundary, so
+    with an empty wheel and a non-empty overflow list the hint must not
+    exceed that boundary. A timer due at 512, observed at now=500, used to
+    be reported as due at 1012 (now + 512) although it fires at 512."""
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(512, UInt64(7))  # delay 512 -> overflow list
+    var fired = List[UInt64]()
+    tw.advance(UInt64(500), fired)
+    var hint = tw.next_fire_ms()
+    assert_equal(hint, UInt64(512))
+    # Ground truth: the wheel fires the timer at 512.
+    var fired_at = UInt64(0)
+    for t in range(501, 1100):
+        tw.advance(UInt64(t), fired)
+        if len(fired) > 0:
+            fired_at = UInt64(t)
+            break
+    assert_equal(fired_at, UInt64(512))
+    assert_true(hint <= fired_at)
+
+
+def test_next_fire_ms_wheel_hint_capped_at_promotion_boundary() raises:
+    """RT-01: a wheel timer further away than the next slot-0 boundary must
+    not push the hint past it while the overflow list is non-empty (the
+    overflow timer is promoted, and may fire, at the boundary)."""
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(700, UInt64(1))  # overflow, fires at 700
+    var fired = List[UInt64]()
+    tw.advance(UInt64(100), fired)
+    _ = tw.schedule(511, UInt64(2))  # wheel slot 99, fires at 611
+    # Boundary at 512 (= now 100 + (512 - slot 100)); wheel timer at 611.
+    assert_equal(tw.next_fire_ms(), UInt64(512))
+
+
+def test_next_fire_ms_overflow_hint_at_slot_zero() raises:
+    """RT-01: at slot 0 the boundary is a full rotation away, so the hint
+    for an overflow-only wheel stays now + 512 (no regression)."""
+    var tw = TimerWheel(now_ms=UInt64(0))
+    _ = tw.schedule(5000, UInt64(1))
+    assert_equal(tw.next_fire_ms(), UInt64(512))
+
+
 def test_next_fire_ms_recovers_after_advance() raises:
     """After the earliest timer fires, next_fire_ms tracks the next one
     (independent of active-timer count; bounded slot scan).

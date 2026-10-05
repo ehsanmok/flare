@@ -635,6 +635,15 @@ from test_timer_wheel import (
     test_next_fire_ms_overflow_only_returns_rotation as test_timer_wheel__test_next_fire_ms_overflow_only_returns_rotation,
 )
 from test_timer_wheel import (
+    test_next_fire_ms_overflow_only_is_lower_bound_after_advance as test_timer_wheel__test_next_fire_ms_overflow_only_is_lower_bound_after_advance,
+)
+from test_timer_wheel import (
+    test_next_fire_ms_wheel_hint_capped_at_promotion_boundary as test_timer_wheel__test_next_fire_ms_wheel_hint_capped_at_promotion_boundary,
+)
+from test_timer_wheel import (
+    test_next_fire_ms_overflow_hint_at_slot_zero as test_timer_wheel__test_next_fire_ms_overflow_hint_at_slot_zero,
+)
+from test_timer_wheel import (
     test_next_fire_ms_recovers_after_advance as test_timer_wheel__test_next_fire_ms_recovers_after_advance,
 )
 from test_timer_wheel import (
@@ -1019,6 +1028,13 @@ def main() raises:
     suite.test[
         test_timer_wheel__test_next_fire_ms_overflow_only_returns_rotation
     ]()
+    suite.test[
+        test_timer_wheel__test_next_fire_ms_overflow_only_is_lower_bound_after_advance
+    ]()
+    suite.test[
+        test_timer_wheel__test_next_fire_ms_wheel_hint_capped_at_promotion_boundary
+    ]()
+    suite.test[test_timer_wheel__test_next_fire_ms_overflow_hint_at_slot_zero]()
     suite.test[test_timer_wheel__test_next_fire_ms_recovers_after_advance]()
     suite.test[test_timer_wheel__test_next_fire_ms_cancel_is_lower_bound]()
     suite.test[test_timer_wheel__test_a_long_gap_jumps_instead_of_walking]()

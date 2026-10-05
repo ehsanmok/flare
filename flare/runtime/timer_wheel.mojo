@@ -321,13 +321,23 @@ struct TimerWheel(Movable):
         cancelled ids, in which case the reactor wakes one tick early
         and re-polls (harmless). It is never later than the true next
         fire, so a timer can never be missed.
+
+        Overflow timers (more than one rotation out) are only re-examined
+        -- promoted into the wheel, and fired if due -- at the next slot-0
+        boundary, ``_WHEEL_SLOTS - _current_slot`` ticks away. While the
+        overflow list is non-empty the hint is therefore capped at that
+        boundary, both for the slot scan and for the fallback (RT-01):
+        a full-rotation fallback would be up to 511 ms late.
         """
-        for d in range(1, _WHEEL_SLOTS + 1):
+        var limit = _WHEEL_SLOTS
+        if len(self._overflow) > 0:
+            limit = _WHEEL_SLOTS - self._current_slot
+        for d in range(1, limit + 1):
             var slot = (self._current_slot + d) & _WHEEL_MASK
             if len(self._wheel[slot]) > 0:
                 return self._current_tick_ms + UInt64(d)
-        # Nothing in the wheel; any overflow entry is at least one full
-        # rotation away, so a full-rotation hint is a safe lower bound.
+        # Nothing in the wheel up to ``limit``; any overflow entry can
+        # first fire at the slot-0 boundary, ``limit`` ticks away.
         if len(self._overflow) > 0:
-            return self._current_tick_ms + UInt64(_WHEEL_SLOTS)
+            return self._current_tick_ms + UInt64(limit)
         return self._current_tick_ms + UInt64(0xFFFFFFFF)

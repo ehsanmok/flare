@@ -308,11 +308,11 @@ def advance64 (s : TW) (now : UInt64) : TW × List Nat :=
   if now > u s.tick ∧ now - u s.tick > 512 then jump64 s now.toNat
   else ticks64 (if u s.tick < now then (now - u s.tick).toNat else 0) s
 
-/-- mirrors flare/runtime/timer_wheel.mojo:310-333 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo `next_fire_ms` (fixed, RT-01) -/
 def nextFire64 (s : TW) : UInt64 :=
-  match scan s 512 1 with
+  match scan s (hintLimit s) 1 with
   | some d => u s.tick + u d
-  | none => if s.overflow ≠ [] then u s.tick + 512 else u s.tick + 0xFFFFFFFF
+  | none => if s.overflow ≠ [] then u s.tick + u (hintLimit s) else u s.tick + 0xFFFFFFFF
 
 /-- every stored time is a `UInt64` value -/
 def Bnd (s : TW) : Prop := s.tick < 2 ^ 64 ∧ ∀ x e, s.entries x = some e → e.fireAt < 2 ^ 64
@@ -495,15 +495,16 @@ theorem scan_empty (s : TW) (h : ∀ j, s.wheel j = []) : ∀ n d, scan s n d = 
 theorem nextFire64_eq (s : TW) (h : s.tick + 0xFFFFFFFF < 2 ^ 64) :
     (nextFire64 s).toNat = nextFire s := by
   unfold nextFire64 nextFire
-  cases hs : scan s 512 1 with
+  cases hs : scan s (hintLimit s) 1 with
   | some d =>
-    dsimp only
-    have := (scan_some s 512 1 d hs).2.1
+    have := (scan_some s (hintLimit s) 1 d hs).2.1
+    have hl : hintLimit s ≤ 512 := by unfold hintLimit; split <;> omega
     exact u_add (by omega)
   | none =>
-    dsimp only
+    have hl : hintLimit s ≤ 512 := by unfold hintLimit; split <;> omega
+    simp only [hs]
     split
-    · exact (u_add (a := s.tick) (b := 512) (by omega) : _)
+    · exact (u_add (a := s.tick) (b := hintLimit s) (by omega) : _)
     · exact (u_add (a := s.tick) (b := 0xFFFFFFFF) (by omega) : _)
 
 /-- Without a bound the models part: near `2^64` the "no timer" hint wraps
@@ -511,10 +512,10 @@ to a time before `now` (the reactor would then poll with a zero timeout). -/
 theorem nextFire64_wraps :
     (nextFire64 (init (2 ^ 64 - 1))).toNat = 0xFFFFFFFE ∧
       nextFire (init (2 ^ 64 - 1)) = 2 ^ 64 - 1 + 0xFFFFFFFF := by
-  have he := scan_empty (init (2 ^ 64 - 1)) (fun _ => rfl) 512 1
+  have he := scan_empty (init (2 ^ 64 - 1)) (fun _ => rfl) (hintLimit (init (2 ^ 64 - 1))) 1
   unfold nextFire64 nextFire
   rw [he]
-  exact ⟨by decide, rfl⟩
+  exact ⟨by decide, by simp [init]⟩
 
 /-! ### Traces -/
 

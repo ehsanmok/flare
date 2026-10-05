@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61513 lines) |
+| Lean files | 298 (61528 lines) |
 | Theorems | 3241 |
-| Headline theorems in the axiom audit | 1039 |
+| Headline theorems in the axiom audit | 1041 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 45 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 46 of 138 |
 
 Six findings are rated high:
 
@@ -731,9 +731,9 @@ are fresh.
 | `advance_backwards_noop` | `advance` to an earlier time fires nothing and changes nothing. | proved |
 | `jump_equiv_ticks` | The `_jump` path fires a permutation of what ticking would fire and ends in the same active set. | proved |
 | `cancel_never_fires`, `run_nodup` | A cancelled timer never fires; no timer fires twice over any run. | proved |
-| `nextFire_lower_bound_no_overflow` | With an empty overflow list, `next_fire_ms` is a lower bound on every active timer. | proved |
-| `nextFireFixed_lower_bound` | With the fix, `next_fire_ms` is a lower bound in every reachable state. | proved |
-| `Flare.Bugs.RT_01.nextFire_not_lower_bound` | flare's hint exceeds a timer's fire time once the wheel has advanced. | counterexample (RT-01) |
+| `nextFire_eq_old_no_overflow`, `nextFireOld_lower_bound_no_overflow` | With an empty overflow list the shipped hint equals the pre-fix one, which is a lower bound on every active timer. | proved |
+| `nextFire_lower_bound` | The shipped `next_fire_ms` is a lower bound in every reachable state. | proved |
+| `Flare.Bugs.RT_01.nextFire_not_lower_bound` | The pre-fix hint (`nextFireOld`) exceeds a timer's fire time once the wheel has advanced. | counterexample (RT-01, resolved) |
 
 Limitations: time is `Nat` here; `TimerWheelTime.lean` (below) relates it to
 flare's `UInt64` and fixes the `_jump` firing order. Fired ids are recorded,
@@ -2725,7 +2725,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.UringWakeup.lazyArm`, `drain`, `poll` | flare/runtime/uring_reactor.mojo (`poll`, `_try_arm_wakeup`) | `poll_inv`, `poll_never_blocks_unarmed`, `RT_03.poll_blocks_unarmed` | proved; counterexample (RT-03, resolved) |
 | `Flare.L2.TimerWheel.init`, `schedule`, `cancel` | flare/runtime/timer_wheel.mojo:102-167 | `inv_schedule`, `schedule_spec`, `cancel_spec` | proved |
 | `Flare.L2.TimerWheel.stepTick`, `drainOne`, `jump`, `jumpIds`, `rebucketOne`, `advance` | flare/runtime/timer_wheel.mojo:169-293 | `advance_spec`, `jump_equiv_ticks`, `run_nodup` | proved |
-| `Flare.L2.TimerWheel.nextFire` | flare/runtime/timer_wheel.mojo:310-333 | `nextFire_lower_bound_no_overflow`, `RT_01.nextFire_not_lower_bound` | proved; counterexample (RT-01) |
+| `Flare.L2.TimerWheel.nextFire`, `hintLimit` | flare/runtime/timer_wheel.mojo (`next_fire_ms`) | `nextFire_lower_bound`, `RT_01.nextFire_not_lower_bound` | proved; counterexample (RT-01, resolved) |
 | `Flare.L2.Handoff.pushed`, `pop`, `drainGo` | flare/runtime/handoff.mojo:150-195 | `push_refines`, `pop_refines`, `drain_refines`, `cap_zero_safe` | proved |
 | `Flare.L2.Handoff.peekWith` | flare/runtime/handoff.mojo:312-334 | `RT_04.peek_returns_full_peer`, `peekFixed_below_capacity` | counterexample (RT-04) |
 | `Flare.L2.Handoff.chooseTarget` | flare/runtime/handoff.mojo:336-365 | `chooseTarget_spec` | proved |
@@ -3004,7 +3004,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-08 | Low | resolved | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
 | NET-09 | Low | resolved | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
 | NET-10 | Low | resolved | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
-| RT-01 | Low | open | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
+| RT-01 | Low | resolved | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
 | RT-02 | Low | open | `writev_buf_all` returns normally after a short write | `Flare/Bugs/RT_02.lean` | `repro/RT-02_writev_all_silent_short_write.mojo` (any) |
 | RT-03 | Medium | resolved | `UringReactor.poll` can block with no wakeup read armed | `Flare/Bugs/RT_03.lean` | `repro/RT-03_uring_poll_blocks_unarmed.mojo` (linux) |
 | RT-04 | Low | open | `peek_idle_worker` returns a peer whose queue is full | `Flare/Bugs/RT_04.lean` | `repro/RT-04_handoff_peek_returns_full_peer.mojo` (any) |
@@ -3475,13 +3475,19 @@ What goes wrong: with no wheel slot occupied and a non-empty overflow list the
 hint is `tick + 512`, but overflow timers are promoted at the next slot-0
 boundary `tick + (512 - slot)` and can fire there.
 Lean: `Flare.Bugs.RT_01.nextFire_not_lower_bound` (timer due at 512, hint
-1012 at t = 500). Fix: cap the scan and the fallback at `512 - slot` when
-overflow is non-empty; `nextFireFixed_lower_bound` for every state satisfying
-the wheel invariant. flare is correct when the overflow list is empty
-(`nextFire_ok_without_overflow`).
-Repro: `formal/repro/RT-01_timer_next_fire_overflow_hint.mojo`, observed
-`BUG REPRODUCED: next_fire_ms() = 1012 at now=500 but the timer fires at 512`.
-Flip: `OK: next_fire_ms() = 512 <= actual fire time 512`, exit 0.
+1012 at t = 500; about the pre-fix `nextFireOld`). Fix: cap the scan and the
+fallback at `512 - slot` when overflow is non-empty; `nextFire_lower_bound`
+for every state satisfying the wheel invariant. The pre-fix hint is correct
+when the overflow list is empty (`nextFire_ok_without_overflow`).
+Repro: `formal/repro/RT-01_timer_next_fire_overflow_hint.mojo`, observed before
+the fix `BUG REPRODUCED: next_fire_ms() = 1012 at now=500 but the timer fires at 512`.
+After the fix: `OK: next_fire_ms() = 512 <= actual fire time 512`, exit 0.
+
+Status: resolved. `next_fire_ms` caps its scan and fallback at the next slot-0
+boundary while overflow is non-empty; tests
+`tests/runtime/test_timer_wheel.mojo::test_next_fire_ms_overflow_only_is_lower_bound_after_advance`,
+`::test_next_fire_ms_wheel_hint_capped_at_promotion_boundary`,
+`::test_next_fire_ms_overflow_hint_at_slot_zero`.
 
 #### RT-02: `writev_buf_all` returns normally after a short write
 

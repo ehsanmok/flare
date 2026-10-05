@@ -57,8 +57,9 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.TimerWheel.jump_equiv_ticks
 #print axioms Flare.L2.TimerWheel.cancel_never_fires
 #print axioms Flare.L2.TimerWheel.run_nodup
-#print axioms Flare.L2.TimerWheel.nextFireFixed_lower_bound
-#print axioms Flare.L2.TimerWheel.nextFire_lower_bound_no_overflow
+#print axioms Flare.L2.TimerWheel.nextFire_lower_bound
+#print axioms Flare.L2.TimerWheel.nextFire_eq_old_no_overflow
+#print axioms Flare.L2.TimerWheel.nextFireOld_lower_bound_no_overflow
 -- Handoff queue
 #print axioms Flare.L2.Handoff.push_refines
 #print axioms Flare.L2.Handoff.pop_refines
@@ -112,7 +113,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.NET_06.decode_encode_not_id
 #print axioms Flare.Bugs.NET_06.decodeFixed_encode
 #print axioms Flare.Bugs.RT_01.nextFire_not_lower_bound
-#print axioms Flare.Bugs.RT_01.nextFireFixed_lower_bound
+#print axioms Flare.Bugs.RT_01.nextFire_ok_without_overflow
+#print axioms Flare.Bugs.RT_01.nextFire_lower_bound
 #print axioms Flare.Bugs.RT_02.writev_silent_short_write
 #print axioms Flare.Bugs.RT_02.writevAllFixed_spec
 #print axioms Flare.Bugs.RT_03.poll_blocks_unarmed
