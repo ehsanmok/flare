@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-46 fixed on fix/formal-findings
 """APP-46: single-worker HttpServer.drain(timeout_ms) ignores timeout_ms and
 cuts in-flight responses like close().
 
@@ -23,7 +24,7 @@ drain(timeout_ms=5000).
 
 Expected: drain gives the reactor up to 5 s to flush the response; the
 client receives all 32 MiB.
-Actual: drain returns within milliseconds, the reactor loop exits on its
+Before the fix: drain returns within milliseconds, the reactor loop exits on its
 next poll and closes the connection; the client receives a truncated body.
 
 Minimal fix: in drain, after closing the listener, wait up to timeout_ms

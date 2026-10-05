@@ -2,10 +2,11 @@
 
 ``HttpServer.close()`` is a hard stop that cuts in-flight handlers
 mid-write. ``HttpServer.drain(timeout_ms)`` closes the listener (no new
-connections accepted), then lets the reactor flip
-``CancelReason.SHUTDOWN`` on every live connection before closing it --
-so cancel-aware handlers and streaming bodies observe the shutdown at
-their next poll instead of losing the socket mid-chunk.
+connections accepted), keeps the reactor serving the connections already
+open for the full ``timeout_ms`` so in-flight responses finish, then lets
+the reactor flip ``CancelReason.SHUTDOWN`` on whatever is still live
+before closing it -- so cancel-aware handlers and streaming bodies observe
+the shutdown at their next poll instead of losing the socket mid-chunk.
 
 **flare installs no signal handler.** Mojo has no module-level mutable
 state, which is what an async-signal-safe handler needs to flip a
@@ -16,10 +17,9 @@ process-global flag, so the caller owns the ``signal(2)`` wiring:
     var report = srv.drain(timeout_ms=30_000)
 
 On the counts: the single-threaded path returns zeros, because
-``serve()`` owns the calling thread and ``drain`` can only signal the
-loop and return -- it has no vantage point from which to count
-anything. ``Scheduler.drain`` (multi-worker) joins its workers and
-reports measured per-worker numbers.
+``serve()`` owns the serving thread, so ``drain`` has no vantage point
+from which to count anything. ``Scheduler.drain`` (multi-worker) joins
+its workers and reports measured per-worker numbers.
 
 Run:
     pixi run example-drain
@@ -57,7 +57,7 @@ def main() raises:
     print()
 
     print("Counts are zero on the single-threaded path by design --")
-    print("serve() owns the calling thread, so drain can only signal.")
+    print("serve() owns the serving thread, so drain cannot count.")
     print("Scheduler.drain (multi-worker) reports measured counts.")
     print()
     print("In production:")

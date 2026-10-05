@@ -3238,6 +3238,12 @@ from test_server_drain import (
     test_drain_marks_stopping_idempotent as test_server_drain__test_drain_marks_stopping_idempotent,
 )
 from test_server_drain import (
+    test_drain_lets_an_in_flight_response_finish as test_server_drain__test_drain_lets_an_in_flight_response_finish,
+)
+from test_server_drain import (
+    test_drain_waits_out_the_timeout_before_stopping as test_server_drain__test_drain_waits_out_the_timeout_before_stopping,
+)
+from test_server_drain import (
     test_root_package_re_exports_shutdown_report as test_server_drain__test_root_package_re_exports_shutdown_report,
 )
 from test_server_drain import (
@@ -5784,6 +5790,12 @@ def main() raises:
         test_server_drain__test_drain_with_short_timeout_returns_report
     ]()
     suite.test[test_server_drain__test_drain_marks_stopping_idempotent]()
+    suite.test[
+        test_server_drain__test_drain_lets_an_in_flight_response_finish
+    ]()
+    suite.test[
+        test_server_drain__test_drain_waits_out_the_timeout_before_stopping
+    ]()
     suite.test[
         test_server_drain__test_root_package_re_exports_shutdown_report
     ]()

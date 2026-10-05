@@ -97,7 +97,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ClientPool.caps
 #print axioms Flare.L4.ClientPool.acquire_same_origin
 -- Drain (single worker)
-#print axioms Flare.L4.Drain.drain_ignores_timeout
+#print axioms Flare.L4.Drain.drainOld_ignores_timeout
 #print axioms Flare.L4.Drain.drain_report_zero
 
 -- Findings: counterexample and fix-meets-spec per issue
@@ -147,7 +147,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.Bugs.APP_45.resolveFixed_query_only
 
 -- Drain timeout, client pool leases, h2c hand-off, WebSocket over TLS
-#print axioms Flare.L4.Drain.drain_ignores_timeout
+#print axioms Flare.L4.Drain.drainOld_ignores_timeout
 #print axioms Flare.L4.Drain.fixed_graceful
 #print axioms Flare.L4.ClientLease.dispose_first
 #print axioms Flare.L4.ClientLease.dispose_second

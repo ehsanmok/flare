@@ -107,7 +107,7 @@ because a front end could read the same bytes as a different request:
 | `ServerConfig.check[config]()` — build-time invariant checks on a comptime `ServerConfig`; `serve_comptime[handler, config]()` is the deprecated pre-0.11 spelling (removed in 0.12) | `flare.http.server` |
 | Per-worker `SO_REUSEPORT` listeners by default (`num_workers >= 2`); `FLARE_REUSEPORT_WORKERS=0` switches to single-listener `EPOLLEXCLUSIVE` shape | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
 | `pin_cores=True` (default): worker N pinned to core `N % num_cpus()` on Linux, no-op on macOS | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
-| `HttpServer.drain(timeout_ms) -> ShutdownReport` per worker | [`drain.mojo`](../examples/intermediate/drain.mojo) |
+| `HttpServer.drain(timeout_ms) -> ShutdownReport` per worker: closes the listener, keeps the reactor serving for the full `timeout_ms` (in-flight responses finish), then stops it; `drain(0)` is a hard stop | [`drain.mojo`](../examples/intermediate/drain.mojo) |
 | `ServerConfig` (request / handler / `read_body_timeout_ms` deadlines, `max_header_size`, `max_body_size`, `max_keepalive_requests`, `idle_timeout_ms`) | `flare.http.server` |
 | Response builders: `ok(body)`, `ok_json(body)`, `bad_request(msg)`, `not_found(msg)`, `internal_error(msg)`, `redirect(url)` | `flare.http.server` |
 | `Method` enum, `Status` enum, `Response` with header / body / status, `ResponsePool` for response object reuse | `flare.http.{request,response,response_pool}` |

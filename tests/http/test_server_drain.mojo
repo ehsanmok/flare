@@ -20,15 +20,25 @@ Covers:
   still in flight.
 """
 
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
+from std.time import perf_counter_ns
 
 from flare import ShutdownReport as RootShutdownReport
-from flare.http import HttpServer, ServerConfig, ShutdownReport
+from flare.http import (
+    HttpServer,
+    Request,
+    Response,
+    ServerConfig,
+    ShutdownReport,
+)
 from flare.http._reactor.tagged_dispatch import KIND_H1, _pack
 from flare.http._server_reactor_epoll import _conn_alloc_addr
 from flare.http._unified_reactor_impl import _drain_remaining_conns_unified
 from flare.net import SocketAddr
 from flare.runtime import Reactor, TimerWheel
+from flare.runtime._libc_time import libc_nanosleep_ms
+from flare.runtime._thread import ThreadHandle
 from flare.tcp import TcpListener, TcpStream
 
 
@@ -96,6 +106,118 @@ def test_drain_marks_stopping_idempotent() raises:
     # Calling drain again is benign — the listener is already
     # closed and ``_stopping`` is already True.
     _ = srv.drain(0)
+    assert_true(srv._stopping)
+
+
+# ── drain(timeout_ms) is graceful, not a hard stop (APP-46) ─────────────────
+
+comptime _BIG_BODY = 16 * 1024 * 1024
+
+
+def _big_response(req: Request) raises -> Response:
+    var resp = Response(status=200)
+    resp.body = List[UInt8](length=_BIG_BODY, fill=UInt8(97))
+    return resp^
+
+
+def _null_ptr() -> Pointer[UInt8, MutUntrackedOrigin]:
+    var z = 0
+    return Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=z)
+
+
+def _serve_big_thread(
+    arg: Pointer[UInt8, MutUntrackedOrigin]
+) -> Pointer[UInt8, MutUntrackedOrigin]:
+    var srv = arg.unsafe_bitcast[HttpServer]()
+    try:
+        srv[].serve(_big_response)
+    except:
+        pass
+    return _null_ptr()
+
+
+struct _SlowReader(Movable):
+    var conn: TcpStream
+    var total: Int
+
+    def __init__(out self, var conn: TcpStream):
+        self.conn = conn^
+        self.total = 0
+
+
+def _slow_read_thread(
+    arg: Pointer[UInt8, MutUntrackedOrigin]
+) -> Pointer[UInt8, MutUntrackedOrigin]:
+    var r = arg.unsafe_bitcast[_SlowReader]()
+    var buf = List[UInt8](length=65536, fill=UInt8(0))
+    while True:
+        var n: Int
+        try:
+            n = r[].conn.read(buf.unsafe_ptr(), len(buf))
+        except:
+            break
+        if n <= 0:
+            break
+        r[].total += n
+        _ = libc_nanosleep_ms(5)  # a slow client, not a synchronisation
+    return _null_ptr()
+
+
+def test_drain_lets_an_in_flight_response_finish() raises:
+    """``drain(timeout_ms)`` ignored ``timeout_ms``: it set ``_stopping`` at
+    once, and the reactor closed every live connection on its next poll,
+    cutting a response still being written, exactly like ``close()``."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var addr = srv.local_addr()
+    var srv_addr = Int(Pointer[HttpServer, _](to=srv))
+    var th = ThreadHandle.spawn_os[_serve_big_thread](
+        Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=srv_addr)
+    )
+    var conn = TcpStream.connect(addr)
+    var req = String("GET /big HTTP/1.1\r\nHost: x\r\n\r\n")
+    conn.write_all(req.as_bytes())
+    conn.set_recv_timeout(10000)
+    var rd = _SlowReader(conn^)
+    var rd_addr = Int(Pointer[_SlowReader, _](to=rd))
+    var rt = ThreadHandle.spawn_os[_slow_read_thread](
+        Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=rd_addr)
+    )
+    # Drain only once the response is in flight, then a little into it.
+    for _ in range(250):
+        if rd.total > 0:
+            break
+        _ = libc_nanosleep_ms(20)
+    var started = rd.total > 0
+    _ = libc_nanosleep_ms(100)
+
+    var t0 = perf_counter_ns()
+    _ = srv.drain(timeout_ms=3000)
+    var drain_ms = Int((perf_counter_ns() - t0) // 1_000_000)
+
+    rt.join()
+    th.join()
+    var total = rd.total
+    rd.conn.close()
+    assert_true(started, "no response bytes reached the client before drain")
+    assert_true(
+        total >= _BIG_BODY,
+        "the in-flight response was cut after " + String(total) + " bytes",
+    )
+    assert_true(
+        drain_ms >= 2900,
+        "drain returned after " + String(drain_ms) + " ms, not the timeout",
+    )
+
+
+def test_drain_waits_out_the_timeout_before_stopping() raises:
+    """With nothing in flight, ``drain(timeout_ms)`` still holds the
+    window open for the full ``timeout_ms`` before it sets ``_stopping``."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var t0 = perf_counter_ns()
+    _ = srv.drain(timeout_ms=250)
+    var took = Int((perf_counter_ns() - t0) // 1_000_000)
+    assert_true(took >= 250, "drain returned after " + String(took) + " ms")
+    assert_true(took < 5000, "drain overshot: " + String(took) + " ms")
     assert_true(srv._stopping)
 
 

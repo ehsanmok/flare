@@ -3,18 +3,19 @@ import Flare.Core
 /-!
 # Single-worker `HttpServer.drain`
 
-Model of `HttpServer.drain(timeout_ms)` (flare/http/server.mojo:1694-1755)
+Model of `HttpServer.drain(timeout_ms)` (flare/http/server.mojo:1697-1760)
 and of what the single-worker reactor does once the stop flag is set
 (flare/http/_unified_reactor_impl.mojo:1103-1170 and 1000-1046).
 
-`drain` closes the listener, sets `_stopping` and returns a
-`ShutdownReport` with every count zero. There is no wait: the comment at
-:1743-1752 says the wait is "capped at 1ms", but no sleep call follows
-(`drain_ignores_timeout`, `drain_report_zero`). The zero counts are
-documented (the "Returns" paragraph, :1712-1718, and
-examples/intermediate/drain.mojo), so they are a documentation gap only.
+Before the fix (`drainOld`), `drain` closed the listener, set `_stopping`
+and returned a `ShutdownReport` with every count zero. There was no wait
+(`drainOld_ignores_timeout`, `drain_report_zero`). The zero counts are
+documented (the "Returns" paragraph and examples/intermediate/drain.mojo),
+so they are a documentation gap only.
 
-The ignored timeout is a bug (APP-46). `serve` runs on another thread, and
+The ignored timeout was a bug (APP-46, fixed: `stopDelayFixed`,
+`fixed_graceful`; `drain` now waits out `timeout_ms` before setting
+`_stopping`). `serve` runs on another thread, and
 the reactor re-reads the stop flag at least every 100 ms (the poll cap in
 `_poll_timeout_ms`, flare/http/_reactor/lifecycle.mojo:31). On exit it
 closes every live connection, whether or not its response is fully
@@ -45,17 +46,20 @@ structure Srv where
   listenerOpen : Bool
   stopping : Bool
 
-/-- `HttpServer.drain`.
+/-- `HttpServer.drain` before the APP-46 fix: no wait, `timeout_ms` unread.
+This is the pre-fix definition; the shipped wait is `stopDelayFixed`
+below. The end state (listener closed, `_stopping` set, zero report) is the
+same, only the moment `_stopping` is set differs.
 mirrors flare/http/server.mojo:1694-1755 @59bda50 -/
-def drain (s : Srv) (_timeoutMs : Int) : Srv × Report :=
+def drainOld (s : Srv) (_timeoutMs : Int) : Srv × Report :=
   ({ s with listenerOpen := false, stopping := true }, ⟨0, 0, 0, 0⟩)
 
-theorem drain_ignores_timeout (s : Srv) (t1 t2 : Int) : drain s t1 = drain s t2 := rfl
+theorem drainOld_ignores_timeout (s : Srv) (t1 t2 : Int) : drainOld s t1 = drainOld s t2 := rfl
 
-theorem drain_report_zero (s : Srv) (t : Int) : (drain s t).2 = ⟨0, 0, 0, 0⟩ := rfl
+theorem drain_report_zero (s : Srv) (t : Int) : (drainOld s t).2 = ⟨0, 0, 0, 0⟩ := rfl
 
 theorem drain_stops (s : Srv) (t : Int) :
-    (drain s t).1.listenerOpen = false ∧ (drain s t).1.stopping = true := ⟨rfl, rfl⟩
+    (drainOld s t).1.listenerOpen = false ∧ (drainOld s t).1.stopping = true := ⟨rfl, rfl⟩
 
 /-! ## Timed model -/
 
@@ -70,13 +74,14 @@ mirrors flare/http/_unified_reactor_impl.mojo:1103-1170,1000-1046 @59bda50 -/
 def delivered (stopDelay lag rate pending : Nat) : Nat :=
   min pending (rate * (stopDelay + lag))
 
-/-- Delay between the `drain` call and `_stopping := True` in the current
-code: none.
+/-- Delay between the `drain` call and `_stopping := True` before the fix:
+none (pre-fix definition).
 mirrors flare/http/server.mojo:1733-1755 @59bda50 -/
 def stopDelay (_timeoutMs : Int) : Nat := 0
 
-/-- Fix: after closing the listener, wait out `timeout_ms` (negative
-clamps to 0) before setting `_stopping`. -/
+/-- Shipped: after closing the listener, `drain` waits out `timeout_ms`
+(negative clamps to 0) before setting `_stopping`.
+mirrors flare/http/server.mojo:1739-1757 (fixed, APP-46) -/
 def stopDelayFixed (timeoutMs : Int) : Nat := timeoutMs.toNat
 
 /-- Graceful-drain contract: a response the peer can absorb within the
@@ -87,7 +92,7 @@ def GracefulSpec (delay : Int → Nat) : Prop :=
 
 theorem stopDelay_ignores_timeout (t1 t2 : Int) : stopDelay t1 = stopDelay t2 := rfl
 
-/-- Current code: whatever the timeout, at most `rate * pollCap` more
+/-- Pre-fix code: whatever the timeout, at most `rate * pollCap` more
 bytes go out. -/
 theorem delivered_le_pollCap (t : Int) (lag rate pending : Nat) (hl : lag ≤ pollCap) :
     delivered (stopDelay t) lag rate pending ≤ rate * pollCap := by
@@ -105,7 +110,7 @@ theorem fixed_graceful : GracefulSpec stopDelayFixed := by
   have : rate * t.toNat ≤ rate * (t.toNat + lag) := Nat.mul_le_mul_left _ (by omega)
   exact Nat.min_eq_left (Nat.le_trans hp this)
 
-/-- The fix never delivers less than the current code. -/
+/-- The shipped wait never delivers less than the current code. -/
 theorem fixed_ge (t : Int) (lag rate pending : Nat) :
     delivered (stopDelay t) lag rate pending ≤ delivered (stopDelayFixed t) lag rate pending := by
   unfold delivered stopDelay stopDelayFixed

@@ -1145,6 +1145,8 @@ The flip was re-run with 10 ms `usleep` steps and printed `OK: in-flight
 response fully delivered during drain (33554538 bytes, drain took 6798 ms)`,
 exit 0.
 
+Status: resolved. `HttpServer.drain` closes the listener, waits `timeout_ms` (negative clamps to 0; 1 ms sleeps bounded by `monotonic_now_ms`), then sets `_stopping`; `drain(0)` is still `close()`. Tests: `tests/http/test_server_drain.mojo::test_drain_lets_an_in_flight_response_finish`, `::test_drain_waits_out_the_timeout_before_stopping`; the repro now prints `OK:` (3 of 3 runs). The shipped delay is `Flare.L4.Drain.stopDelayFixed`; `Flare.Bugs.APP_46.fixed_meets_spec` is stated about it. Decision: the single-worker path always waits the full `timeout_ms`, since it publishes no live-connection count (idle keep-alive connections would count as live anyway); documented in the docstring and `docs/operations.md`.
+
 ### APP-47: an h2c upgrade whose 101 flushes on a writable edge never migrates
 
 **Severity.** Medium. The connection busy-spins on writability, the server

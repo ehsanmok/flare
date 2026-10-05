@@ -21,7 +21,7 @@ from std.ffi import c_int, c_uint, external_call
 
 from json import dumps, Value as JsonValue
 
-from ..runtime._libc_time import libc_nanosleep_ms
+from ..runtime._libc_time import libc_nanosleep_ms, monotonic_now_ms
 
 from std.collections import Optional
 
@@ -1698,61 +1698,63 @@ struct HttpServer(Movable):
         """Graceful shutdown.
 
         Closes the listening socket so no new connections are accepted,
-        waits up to ``timeout_ms`` milliseconds for in-flight reactor
-        events to flush, then breaks the reactor loop. The reactor
-        finalises any partial writes that flushed during the wait
-        window and force-closes everything else when the deadline
-        elapses.
+        keeps the reactor running for ``timeout_ms`` milliseconds so
+        in-flight requests and responses can finish, then breaks the
+        reactor loop. When the loop stops it flips ``Cancel.SHUTDOWN``
+        on whatever is still live and closes it.
 
         Wires ``ServerConfig.shutdown_timeout_ms`` into a real
         wait-for-drain loop.
 
         Args:
-            timeout_ms: Maximum ms to wait. ``0`` is a hard stop
-                (equivalent to ``close()``). Negative values are
-                clamped to ``0``.
+            timeout_ms: Milliseconds to keep serving in-flight
+                connections. ``0`` is a hard stop (equivalent to
+                ``close()``). Negative values are clamped to ``0``.
 
         Returns:
             A ``ShutdownReport``. On this single-threaded path the
-            counts are all zero: ``serve()`` owns the calling thread,
-            so ``drain`` can only signal the loop and return -- it has
-            no vantage point from which to observe per-connection
-            progress. ``Scheduler.drain`` (multi-worker) joins its
-            workers and reports measured counts per worker.
+            counts are all zero: ``serve()`` owns the serving thread,
+            so ``drain`` has no vantage point from which to observe
+            per-connection progress. ``Scheduler.drain`` (multi-worker)
+            joins its workers and reports measured counts per worker.
 
         Raises:
             NetworkError: If the listener cannot be closed.
 
         Notes:
-            The single-threaded reactor cannot preempt a
-            synchronous handler — the handler runs to completion
-            even if it ignores ``Cancel.SHUTDOWN``. Cancel-aware
-            handlers (``CancelHandler``) observe the
-            ``CancelReason.SHUTDOWN`` flip and short-circuit on
-            their next ``cancel.cancelled()`` poll. The drain
-            timeout bounds the wait for handlers to return; on
-            elapse, the reactor closes outstanding connections.
-        """
-        from std.ffi import c_int, c_uint, external_call
+            ``drain`` is called from another thread than the one
+            running ``serve()``, and it blocks the caller for the whole
+            ``timeout_ms`` -- it cannot return early when the last
+            connection finishes, because the reactor publishes no
+            live-connection count on this path (idle keep-alive
+            connections would also count as live). Pass the longest
+            wait you can tolerate.
 
+            The single-threaded reactor cannot preempt a synchronous
+            handler -- the handler runs to completion even if it
+            ignores ``Cancel.SHUTDOWN``. Cancel-aware handlers
+            (``CancelHandler``) observe the ``CancelReason.SHUTDOWN``
+            flip and short-circuit on their next ``cancel.cancelled()``
+            poll once the window has elapsed.
+        """
         # Step 1: close the listener so new accepts fail.
         self._listener.close()
 
-        # Step 2: signal the reactor loop to stop on its next poll
-        # iteration. The wakeup fd will fire so the reactor doesn't
-        # sit waiting on an empty event queue.
-        self._stopping = True
+        # Step 2: hold the reactor open for the grace window. The wait
+        # is bounded by the monotonic clock, with 1 ms sleeps, so a
+        # misbehaving sleep can only make it poll more often, never
+        # overshoot the deadline by a multiple.
+        var wait_ms = timeout_ms
+        if wait_ms < 0:
+            wait_ms = 0
+        var deadline = monotonic_now_ms() + wait_ms
+        while monotonic_now_ms() < deadline:
+            _ = libc_nanosleep_ms(1)
 
-        # Step 3: yield so the reactor observes ``_stopping`` on its
-        # next poll cycle, where it flips Cancel.SHUTDOWN on every live
+        # Step 3: signal the reactor loop to stop on its next poll
+        # iteration, where it flips Cancel.SHUTDOWN on every live
         # connection before closing it.
-        #
-        # Capped at 1ms deliberately: larger budgets hit the documented
-        # wall-clock multiplier that ``libc_nanosleep_ms`` exhibits in
-        # this call context (a 50ms sleep measures ~60s here, while the
-        # same call standalone measures 52ms). ``timeout_ms`` is
-        # therefore advisory on this path; callers who need a real
-        # multi-second budget use the multi-worker ``Scheduler.drain``.
+        self._stopping = True
         return ShutdownReport(
             drained=0, timed_out=0, in_flight_at_deadline=0, crashed=0
         )

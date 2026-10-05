@@ -11,13 +11,18 @@ closes every live connection (flare/http/_unified_reactor_impl.mojo:
 `close()`, which its docstring calls the hard stop and for which it
 recommends `drain(timeout_ms)` as the graceful alternative.
 
+Status: resolved. `drain` now closes the listener, waits out `timeout_ms`
+(1 ms sleeps against the monotonic clock), then sets `_stopping`; the
+shipped delay is `stopDelayFixed`. The counterexample is about the pre-fix
+`stopDelay`.
+
 Repro: formal/repro/APP-46_drain_is_hard_stop.mojo.
 -/
 namespace Flare.Bugs.APP_46
 
 open Flare.L4.Drain
 
-/-- Counterexample: 1000 bytes pending, peer takes 1 byte/ms, 5000 ms
+/-- Counterexample about the pre-fix `stopDelay`: 1000 bytes pending, peer takes 1 byte/ms, 5000 ms
 timeout, the reactor notices the flag after the full 100 ms poll cap. -/
 theorem cut_example : delivered (stopDelay 5000) 100 1 1000 = 100 := by native_decide
 
@@ -27,6 +32,7 @@ theorem violates_spec : ¬ GracefulSpec stopDelay := by
   rw [cut_example] at this
   exact absurd this (by decide)
 
+/-- Fix meets spec: the shipped delay `stopDelayFixed`. -/
 theorem fixed_meets_spec : GracefulSpec stopDelayFixed := fixed_graceful
 
 theorem fixed_on_example : delivered (stopDelayFixed 5000) 100 1 1000 = 1000 := by native_decide

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61309 lines) |
+| Lean files | 298 (61320 lines) |
 | Theorems | 3228 |
 | Headline theorems in the axiom audit | 1030 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 28 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 29 of 138 |
 
 Six findings are rated high:
 
@@ -3102,7 +3102,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-43 | Low | open | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
 | APP-44 | Low | open | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
 | APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
-| APP-46 | Medium | open | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
+| APP-46 | Medium | resolved | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
 | APP-47 | Medium | open | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
 | APP-48 | High | resolved | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
 | APP-49 | Medium | open | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
@@ -5146,6 +5146,8 @@ printed `BUG REPRODUCED` (3669108, 3930368 and 4758020 bytes received).
 The flip was re-run with 10 ms `usleep` steps and printed `OK: in-flight
 response fully delivered during drain (33554538 bytes, drain took 6798 ms)`,
 exit 0.
+
+Status: resolved. `HttpServer.drain` closes the listener, waits `timeout_ms` (negative clamps to 0; 1 ms sleeps bounded by `monotonic_now_ms`), then sets `_stopping`; `drain(0)` is still `close()`. Tests: `tests/http/test_server_drain.mojo::test_drain_lets_an_in_flight_response_finish`, `::test_drain_waits_out_the_timeout_before_stopping`; the repro now prints `OK:` (3 of 3 runs). The shipped delay is `Flare.L4.Drain.stopDelayFixed`; `Flare.Bugs.APP_46.fixed_meets_spec` is stated about it. Decision: the single-worker path always waits the full `timeout_ms`, since it publishes no live-connection count (idle keep-alive connections would count as live anyway); documented in the docstring and `docs/operations.md`.
 
 #### APP-47: an h2c upgrade whose 101 flushes on a writable edge never migrates
 

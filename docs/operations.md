@@ -72,11 +72,18 @@ the caller wires `signal(2)` and calls `drain`. See
 On `HttpServer.drain(timeout_ms)`:
 
 1. The listener is closed (no new accepts).
-2. The reactor flips `Cancel.SHUTDOWN` on every live connection before
-   closing it, so cancel-aware handlers and streaming bodies observe
-   the shutdown at their next poll instead of losing the socket
-   mid-chunk.
-3. `ServerConfig.shutdown_timeout_ms` (default 5 s) bounds the wait.
+2. The call blocks for the whole `timeout_ms` while the reactor keeps
+   serving the connections already open, so a response that is still
+   being written finishes. `drain(0)` skips the wait and is equivalent
+   to `close()`. The single-worker path publishes no live-connection
+   count, so it cannot return early when the last connection ends: pass
+   the longest wait you can tolerate. Call it from a thread other than
+   the one running `serve()`.
+3. When the window ends the reactor flips `Cancel.SHUTDOWN` on every
+   live connection before closing it, so cancel-aware handlers and
+   streaming bodies observe the shutdown at their next poll instead of
+   losing the socket mid-chunk.
+4. `ServerConfig.shutdown_timeout_ms` (default 5 s) is the value to pass.
 
 Multi-worker `Scheduler.drain(timeout_ms)` returns one
 `ShutdownReport` per worker. `in_flight_at_deadline` and `timed_out`
