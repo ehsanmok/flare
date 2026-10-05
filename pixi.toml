@@ -3,12 +3,12 @@ authors = ["ehsanmok <ehsanmok@users.noreply.github.com>"]
 channels = ["https://conda.modular.com/max", "conda-forge"]
 name = "flare"
 platforms = ["osx-arm64", "linux-aarch64", "linux-64"]
-version = "0.11.0"
+version = "0.12.0"
 preview = ["pixi-build"]
 
 [package]
 name = "flare"
-version = "0.11.0"
+version = "0.12.0"
 
 [package.build]
 # Lower bound only, deliberately.

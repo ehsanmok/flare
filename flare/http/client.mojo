@@ -217,7 +217,7 @@ struct PoolStats(Copyable):
     """QUIC connections dialled over this client's lifetime."""
 
 
-comptime FLARE_VERSION: String = "0.11.0"
+comptime FLARE_VERSION: String = "0.12.0"
 """The library version, as reported in the default ``User-Agent``.
 
 Bump alongside ``pixi.toml`` and ``recipe.yaml`` at release."""
