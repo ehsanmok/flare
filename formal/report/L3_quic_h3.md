@@ -470,6 +470,8 @@ Status: resolved. Fixed: `_ack_record` keeps a floor (one above the highest rang
 
 ### QUIC-18: one state for both stream halves loses a reset
 
+Status: resolved. Fixed: `Stream` records `peer_reset` (RESET_STREAM received) and `send_reset` (STOP_SENDING received or `cancel_stream`) separately; `stream_reset` and `send_stream` read those (`quic/state.mojo`, `quic/client.mojo`). Tests: `tests/quic/test_state.mojo` (`test_reset_and_stop_sending_are_recorded_independently`), `tests/quic/test_quic_client.mojo` (`test_stream_reset_survives_a_following_stop_sending`, `test_send_stays_refused_after_cancel_then_peer_reset`). Lean: `Bugs.QUIC_18.fixed_both` about the shipped `Halves`; the counterexample is about the pre-fix single state.
+
 - **Severity:** Medium. In case A an HTTP/3 request whose stream the server reset is never failed; the client waits for a response that will not come. In case B the client sends data on a stream it already reset, the situation the comment in `cancel_stream` says was fixed.
 - **RFC:** RFC 9000 §3: a bidirectional stream has a sending part (§3.1) and a receiving part (§3.2) with independent states. RESET_STREAM moves the receiving part to Reset Recvd; STOP_SENDING, or our own RESET_STREAM, moves the sending part to Reset Sent. §3.1: no STREAM frames once in Reset Sent.
 - **What goes wrong:** `apply_reset_stream` and `apply_stop_sending` (`state.mojo:467-486`) both overwrite the stream's single `state`, as does `cancel_stream` (`client.mojo:1406-1428`). `stream_reset` (1455-1460) reads RESET_RECVD and `send_stream` (1357-1362) refuses only in RESET_SENT, so the later event hides the earlier one.
@@ -765,7 +767,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `Quic.AckGen.recv`, `drain` | quic/server.mojo:844-863, 2240-2268 | `drain_after_recv` | proved |
 | `Quic.Streams.server` | quic/server.mojo:1407-1430, quic/state.mojo:454-486, 712-722 | `server_stream_conforms`, `QUIC_15.impl_accepts`, `QUIC_16.impl_accepts`, `serverFixed_eq_spec` | counterexample (QUIC-15, QUIC-16) |
 | `Quic.Streams.client` | quic/client.mojo:902-912 | `QUIC_17.impl_accepts`, `clientFixed_eq_spec` | counterexample (QUIC-17) |
-| `Quic.Streams.stepImpl`, `resetSeen`, `sendRefused` | quic/state.mojo:356-363, 467-486, quic/client.mojo:1357-1362, 1406-1428, 1455-1460 | `QUIC_18.impl_loses`, `halves_reset_iff`, `halves_stop_iff` | counterexample (QUIC-18) |
+| `Quic.Streams.stepHalves`, `resetSeenH`, `sendRefusedH` | quic/state.mojo `apply_reset_stream`, `apply_stop_sending`, quic/client.mojo `cancel_stream`, `stream_reset`, `send_stream` (fixed, QUIC-18) | `QUIC_18.impl_loses` (pre-fix `stepImpl`), `QUIC_18.fixed_both`, `halves_reset_iff`, `halves_stop_iff` | proved (QUIC-18 resolved) |
 | `Bugs.QUIC_19.replyImpl` | quic/client.mojo:902-912, quic/state.mojo:478-486 | `QUIC_19.impl_silent`, `QUIC_19.fixed_spec` | counterexample (QUIC-19) |
 | `Quic.Timers.serverStep`, `serverInit` | quic/server.mojo:724-782, 2874-2898, 2929-2930, runtime/timer_wheel.mojo:119-144 | `QUIC_20.impl_unauth_restarts`, `impl_ignores_peer`, `impl_zero_closes`, `impl_no_send_restart`, `impl_no_pto_floor` | counterexample (QUIC-20) |
 | `Quic.Timers.clientStep` | quic/client.mojo:557-608, 902-912 | `client_never`, `QUIC_21.impl_never_closes`, `impl_counterexample` | counterexample (QUIC-21) |

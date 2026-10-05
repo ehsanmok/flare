@@ -342,6 +342,12 @@ from test_quic_client import (
 from test_quic_client import (
     test_cancel_stream_forbids_further_stream_frames as test_quic_client__test_cancel_stream_forbids_further_stream_frames,
 )
+from test_quic_client import (
+    test_stream_reset_survives_a_following_stop_sending as test_quic_client__test_stream_reset_survives_a_following_stop_sending,
+)
+from test_quic_client import (
+    test_send_stays_refused_after_cancel_then_peer_reset as test_quic_client__test_send_stays_refused_after_cancel_then_peer_reset,
+)
 from test_quic_handle_packet import (
     test_decode_packet_number_rfc_a3 as test_quic_handle_packet__test_decode_packet_number_rfc_a3,
 )
@@ -789,6 +795,9 @@ from test_state import (
 from test_state import (
     test_new_connection_id_is_bounded_and_not_overwritten as test_state__test_new_connection_id_is_bounded_and_not_overwritten,
 )
+from test_state import (
+    test_reset_and_stop_sending_are_recorded_independently as test_state__test_reset_and_stop_sending_are_recorded_independently,
+)
 from test_transport_params import (
     test_round_trip_full_set as test_transport_params__test_round_trip_full_set,
 )
@@ -1012,6 +1021,12 @@ def main() raises:
     ]()
     suite.test[
         test_quic_client__test_cancel_stream_forbids_further_stream_frames
+    ]()
+    suite.test[
+        test_quic_client__test_stream_reset_survives_a_following_stop_sending
+    ]()
+    suite.test[
+        test_quic_client__test_send_stays_refused_after_cancel_then_peer_reset
     ]()
     # tests/quic/test_quic_handle_packet.mojo
     suite.test[test_quic_handle_packet__test_decode_packet_number_rfc_a3]()
@@ -1329,6 +1344,9 @@ def main() raises:
     suite.test[test_state__test_path_response_mismatch_ignored]()
     suite.test[
         test_state__test_new_connection_id_is_bounded_and_not_overwritten
+    ]()
+    suite.test[
+        test_state__test_reset_and_stop_sending_are_recorded_independently
     ]()
     # tests/quic/test_transport_params.mojo
     suite.test[test_transport_params__test_round_trip_full_set]()

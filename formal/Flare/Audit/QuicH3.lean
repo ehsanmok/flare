@@ -166,6 +166,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_17.impl_accepts
 #print axioms Flare.Bugs.QUIC_17.fixed_spec
 #print axioms Flare.Bugs.QUIC_18.impl_loses
+#print axioms Flare.Bugs.QUIC_18.fixed_both
 #print axioms Flare.Bugs.QUIC_18.fixed_spec
 #print axioms Flare.Bugs.QUIC_19.impl_silent
 #print axioms Flare.Bugs.QUIC_19.fixed_spec

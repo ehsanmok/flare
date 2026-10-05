@@ -105,6 +105,14 @@ struct Stream(Copyable, ImplicitlyCopyable):
     var max_recv_data: UInt64
     var fin_sent: Bool
     var fin_received: Bool
+    # The two halves of a bidirectional stream reset independently
+    # (RFC 9000 sec 3.1, 3.2), which the single ``state`` cannot show:
+    # RESET_STREAM and STOP_SENDING / our own reset overwrote each other.
+    # ``peer_reset``: the peer reset its send half (RESET_STREAM received).
+    # ``send_reset``: our send half is reset (STOP_SENDING received, or we
+    # reset it); no STREAM frames may follow.
+    var peer_reset: Bool
+    var send_reset: Bool
 
 
 def new_stream(id: UInt64, max_data: UInt64) -> Stream:
@@ -118,6 +126,8 @@ def new_stream(id: UInt64, max_data: UInt64) -> Stream:
         max_recv_data=max_data,
         fin_sent=False,
         fin_received=False,
+        peer_reset=False,
+        send_reset=False,
     )
 
 
@@ -466,23 +476,27 @@ def apply_max_stream_data(mut conn: Connection, m: MaxStreamDataFrame):
 
 def apply_reset_stream(mut conn: Connection, rs: ResetStreamFrame):
     """Apply a RESET_STREAM frame: transition the stream to
-    RESET_RECVD (no-op if the stream is unknown)."""
+    RESET_RECVD and record the receive-half reset in ``peer_reset``
+    (no-op if the stream is unknown)."""
     var sid = rs.stream_id
     var s_opt = conn.streams.get(sid)
     if Bool(s_opt):
         var s = s_opt.value()
         s.state = STREAM_STATE_RESET_RECVD
+        s.peer_reset = True
         conn.streams[sid] = s
 
 
 def apply_stop_sending(mut conn: Connection, ss: StopSendingFrame):
     """Apply a STOP_SENDING frame: transition the stream to
-    RESET_SENT (no-op if the stream is unknown)."""
+    RESET_SENT and record the send-half reset in ``send_reset``
+    (no-op if the stream is unknown)."""
     var sid = ss.stream_id
     var s_opt = conn.streams.get(sid)
     if Bool(s_opt):
         var s = s_opt.value()
         s.state = STREAM_STATE_RESET_SENT
+        s.send_reset = True
         conn.streams[sid] = s
 
 

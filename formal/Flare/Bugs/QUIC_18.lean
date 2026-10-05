@@ -3,7 +3,14 @@ import Flare.L3_Protocol.Quic.Streams
 /-!
 # QUIC-18: one state for both stream halves loses a reset
 
-flare/quic/state.mojo:467-486 @59bda50: `apply_reset_stream` sets the
+Status: resolved. `Stream` now records `peer_reset` (RESET_STREAM received)
+and `send_reset` (STOP_SENDING received, or `cancel_stream`) separately
+(flare/quic/state.mojo `apply_reset_stream`, `apply_stop_sending`;
+flare/quic/client.mojo `cancel_stream`, `stream_reset`, `send_stream`). The
+counterexample below is about the pre-fix single state (`runImpl`); `Halves`
+is the shipped record.
+
+Pre-fix behaviour (flare/quic/state.mojo:467-486 @59bda50): `apply_reset_stream` sets the
 stream's single `state` to RESET_RECVD and `apply_stop_sending` sets it to
 RESET_SENT, each overwriting the other; `cancel_stream`
 (flare/quic/client.mojo:1406-1428) also writes RESET_SENT. The client reads
@@ -34,6 +41,12 @@ theorem impl_loses :
     resetSeen (runImpl [.resetIn, .stopIn]) = false ∧ (runHalves [.resetIn, .stopIn]).recvReset = true ∧
     sendRefused (runImpl [.resetOut, .resetIn]) = false ∧
       (runHalves [.resetOut, .resetIn]).sendReset = true := by
+  native_decide
+
+/-- **The shipped readers see both resets** in the two orders that lost one. -/
+theorem fixed_both :
+    resetSeenH (runHalves [.resetIn, .stopIn]) = true ∧
+      sendRefusedH (runHalves [.resetOut, .resetIn]) = true := by
   native_decide
 
 /-- **Fix meets spec**: with the halves kept apart, a reset received is

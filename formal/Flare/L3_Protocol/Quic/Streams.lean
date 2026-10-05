@@ -25,12 +25,14 @@ spec, and `serverFixed_eq_spec` / `clientFixed_eq_spec` instantiate it.
 `server_stream_conforms` proves the server's existing STREAM check is
 already exact for bidirectional limits and stream direction.
 
-The second half models the per-stream state. flare keeps one `state` for
+The second half models the per-stream state. flare kept one `state` for
 both halves of a bidirectional stream (flare/quic/state.mojo:80-107), so
-RESET_STREAM (receive half) and STOP_SENDING (send half) overwrite each
-other. `Halves` is the RFC's split (§3.1 sending, §3.2 receiving) and
-`halves_reset_iff` / `halves_stop_iff` prove the fixed state records each
-event no matter what follows.
+RESET_STREAM (receive half) and STOP_SENDING (send half) overwrote each
+other (`stepImpl`, pre-fix, QUIC-18). `Halves` is the RFC's split (§3.1
+sending, §3.2 receiving) and is what the code now records, in the
+`peer_reset` / `send_reset` fields of `Stream`; the client reads those two
+(`resetSeenH`, `sendRefusedH`). `halves_reset_iff` / `halves_stop_iff` prove
+the state records each event no matter what follows.
 -/
 namespace Flare.L3.Quic.Streams
 
@@ -193,8 +195,8 @@ inductive Ev
   | resetOut
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/state.mojo:356-363, 467-486 and
-flare/quic/client.mojo:1406-1428 @59bda50 -/
+/-- The pre-fix single state (QUIC-18): mirrors flare/quic/state.mojo:356-363,
+467-486 and flare/quic/client.mojo:1406-1428 @59bda50 -/
 def stepImpl : St → Ev → St
   | _, .resetIn => .resetRecvd
   | _, .stopIn => .resetSent
@@ -204,12 +206,12 @@ def stepImpl : St → Ev → St
     | s => s
   | _, .resetOut => .resetSent
 
-/-- mirrors flare/quic/client.mojo:1455-1460 @59bda50 (`stream_reset`, which
-the HTTP/3 client polls at flare/http3/client.mojo:465) -/
+/-- Pre-fix reader (QUIC-18): mirrors flare/quic/client.mojo:1455-1460 @59bda50
+(`stream_reset`, which the HTTP/3 client polls at flare/http3/client.mojo:465) -/
 def resetSeen (s : St) : Bool := s == .resetRecvd
 
-/-- mirrors flare/quic/client.mojo:1357-1362 @59bda50 (`send_stream`
-refuses only in RESET_SENT) -/
+/-- Pre-fix reader (QUIC-18): mirrors flare/quic/client.mojo:1357-1362 @59bda50
+(`send_stream` refused only in RESET_SENT) -/
 def sendRefused (s : St) : Bool := s == .resetSent
 
 def runImpl (evs : List Ev) : St := evs.foldl stepImpl .open_
@@ -221,6 +223,9 @@ structure Halves where
   sendReset : Bool := false
   deriving DecidableEq, Repr
 
+/-- mirrors flare/quic/state.mojo `apply_reset_stream`, `apply_stop_sending` and
+flare/quic/client.mojo `cancel_stream` (fixed, QUIC-18: each sets only its own
+flag, `peer_reset` / `send_reset`) -/
 def stepHalves (h : Halves) : Ev → Halves
   | .resetIn => { h with recvReset := true }
   | .stopIn => { h with sendReset := true }
@@ -228,6 +233,12 @@ def stepHalves (h : Halves) : Ev → Halves
   | .resetOut => { h with sendReset := true }
 
 def runHalves (evs : List Ev) : Halves := evs.foldl stepHalves {}
+
+/-- mirrors flare/quic/client.mojo `stream_reset` (fixed, QUIC-18) -/
+def resetSeenH (h : Halves) : Bool := h.recvReset
+
+/-- mirrors flare/quic/client.mojo `send_stream`'s reset check (fixed, QUIC-18) -/
+def sendRefusedH (h : Halves) : Bool := h.sendReset
 
 theorem runHalves_go (evs : List Ev) : ∀ h : Halves,
     (evs.foldl stepHalves h).recvReset = (h.recvReset || evs.contains .resetIn) ∧

@@ -128,7 +128,6 @@ from .state import (
     handle_frame_buf,
     new_connection,
     new_stream,
-    STREAM_STATE_RESET_RECVD,
     STREAM_STATE_RESET_SENT,
 )
 from .transport_params import (
@@ -1357,7 +1356,7 @@ struct QuicClientConnection(Movable):
         # RFC 9000 sec 3.1: no STREAM frames after the sender resets.
         if (
             stream_id in self.conn.streams
-            and self.conn.streams[stream_id].state == STREAM_STATE_RESET_SENT
+            and self.conn.streams[stream_id].send_reset
         ):
             raise Error("quic client: send_stream on a reset stream")
         if stream_id not in self.conn.streams:
@@ -1419,6 +1418,7 @@ struct QuicClientConnection(Movable):
         if stream_id in self.conn.streams:
             var s = self.conn.streams[stream_id]
             s.state = STREAM_STATE_RESET_SENT
+            s.send_reset = True
             self.conn.streams[stream_id] = s
         var payload = List[UInt8]()
         encode_stop_sending(StopSendingFrame(stream_id, UInt64(0x10C)), payload)
@@ -1454,9 +1454,7 @@ struct QuicClientConnection(Movable):
 
     def stream_reset(self, stream_id: UInt64) raises -> Bool:
         if stream_id in self.conn.streams:
-            return (
-                self.conn.streams[stream_id].state == STREAM_STATE_RESET_RECVD
-            )
+            return self.conn.streams[stream_id].peer_reset
         return False
 
     def release_stream_credit(

@@ -20,7 +20,10 @@ from std.collections import List
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
+from std.collections.span import Span
+
 from flare.quic.client import QuicClientConnection
+from flare.quic.state import empty_events
 from flare.quic._loss_recovery import LossRecovery
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import RustlsQuicConfig, RustlsQuicConnector
@@ -243,10 +246,86 @@ def test_cancel_stream_forbids_further_stream_frames() raises:
     client.close()
 
 
+def _established_client_with_stream(
+    mut server: QuicListener, connector: RustlsQuicConnector
+) raises -> Tuple[QuicClientConnection, UInt64]:
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+    for _ in range(40):
+        _ = server.tick(timeout_ms=50)
+        _ = client.poll(timeout_ms=50)
+        if client.is_established():
+            break
+    assert_true(client.is_established(), "handshake must complete first")
+    var sid = client.open_bidi_stream()
+    var body: List[UInt8] = [0x41]
+    client.send_stream(sid, body, fin=False)
+    return (client^, sid)
+
+
+def _feed_frames(
+    mut client: QuicClientConnection, var payload: List[UInt8]
+) raises:
+    var ev = empty_events()
+    client._dispatch_frames(Span[UInt8, _](payload), ev)
+
+
+def test_stream_reset_survives_a_following_stop_sending() raises:
+    """QUIC-18 case A: a server abandoning a request sends RESET_STREAM and
+    STOP_SENDING; stream_reset (polled by the H3 client to fail the
+    response) must stay true after the STOP_SENDING."""
+    var server = _bind_server()
+    var connector = _make_connector()
+    var pair = _established_client_with_stream(server, connector)
+    ref client = pair[0]
+    var sid = pair[1]
+    assert_true(not client.stream_reset(sid))
+    # RESET_STREAM(sid, err 0, final size 0), STOP_SENDING(sid, err 0).
+    var frames: List[UInt8] = [
+        0x04,
+        UInt8(sid),
+        0x00,
+        0x00,
+        0x05,
+        UInt8(sid),
+        0x00,
+    ]
+    _feed_frames(client, frames^)
+    assert_true(client.stream_reset(sid), "RESET_STREAM hidden by STOP_SENDING")
+    server.close()
+    client.close()
+
+
+def test_send_stays_refused_after_cancel_then_peer_reset() raises:
+    """QUIC-18 case B: after cancel_stream the peer's RESET_STREAM must not
+    re-open the send half (RFC 9000 sec 3.1)."""
+    var server = _bind_server()
+    var connector = _make_connector()
+    var pair = _established_client_with_stream(server, connector)
+    ref client = pair[0]
+    var sid = pair[1]
+    client.cancel_stream(sid)
+    var frames: List[UInt8] = [0x04, UInt8(sid), 0x00, 0x00]
+    _feed_frames(client, frames^)
+    var raised = False
+    try:
+        var more: List[UInt8] = [0x42]
+        client.send_stream(sid, more, fin=False)
+    except e:
+        raised = "reset stream" in String(e)
+    assert_true(raised, "send_stream must stay refused after our reset")
+    assert_true(client.stream_reset(sid))
+    server.close()
+    client.close()
+
+
 def main() raises:
     test_client_handshake_completes()
     test_client_send_stream_after_handshake()
     test_client_handshake_through_retry()
     test_stream_control_frames_are_retransmitted_on_pto()
     test_cancel_stream_forbids_further_stream_frames()
-    print("test_quic_client: 5 passed")
+    test_stream_reset_survives_a_following_stop_sending()
+    test_send_stays_refused_after_cancel_then_peer_reset()
+    print("test_quic_client: 7 passed")

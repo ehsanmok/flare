@@ -34,7 +34,11 @@ from flare.quic import (
     new_connection,
     new_stream,
 )
-from flare.quic.state import dispatch_frames
+from flare.quic.state import (
+    apply_reset_stream,
+    apply_stop_sending,
+    dispatch_frames,
+)
 from flare.quic.frame import (
     AckFrame,
     AckRange,
@@ -51,7 +55,9 @@ from flare.quic.frame import (
     NewConnectionIdFrame,
     PathChallengeFrame,
     PathResponseFrame,
+    ResetStreamFrame,
     RetireConnectionIdFrame,
+    StopSendingFrame,
     StreamFrame,
     encode_ack,
     encode_connection_close,
@@ -454,11 +460,45 @@ def test_new_connection_id_is_bounded_and_not_overwritten() raises:
     assert_true(over, "a third active CID was accepted")
 
 
+def test_reset_and_stop_sending_are_recorded_independently() raises:
+    """QUIC-18: RESET_STREAM (receive half) and STOP_SENDING (send half)
+    used to overwrite one shared state, so whichever came second hid the
+    first (RFC 9000 sec 3.1, 3.2)."""
+    var rs = ResetStreamFrame(UInt64(0), UInt64(1), UInt64(0))
+    var ss = StopSendingFrame(UInt64(0), UInt64(2))
+
+    # RESET_STREAM then STOP_SENDING: both halves are reset.
+    var a = new_connection(UInt64(30_000_000), UInt64(1 << 20))
+    a.streams[UInt64(0)] = new_stream(UInt64(0), UInt64(1 << 20))
+    apply_reset_stream(a, rs)
+    apply_stop_sending(a, ss)
+    assert_true(a.streams[UInt64(0)].peer_reset, "RESET_STREAM was lost")
+    assert_true(a.streams[UInt64(0)].send_reset)
+
+    # STOP_SENDING then RESET_STREAM: same result in the other order.
+    var b = new_connection(UInt64(30_000_000), UInt64(1 << 20))
+    b.streams[UInt64(0)] = new_stream(UInt64(0), UInt64(1 << 20))
+    apply_stop_sending(b, ss)
+    assert_true(b.streams[UInt64(0)].send_reset)
+    assert_false(b.streams[UInt64(0)].peer_reset)
+    apply_reset_stream(b, rs)
+    assert_true(b.streams[UInt64(0)].peer_reset)
+    assert_true(b.streams[UInt64(0)].send_reset, "STOP_SENDING was lost")
+
+    # A lone frame touches only its own half.
+    var c = new_connection(UInt64(30_000_000), UInt64(1 << 20))
+    c.streams[UInt64(0)] = new_stream(UInt64(0), UInt64(1 << 20))
+    apply_reset_stream(c, rs)
+    assert_true(c.streams[UInt64(0)].peer_reset)
+    assert_false(c.streams[UInt64(0)].send_reset)
+
+
 def main() raises:
     test_initial_connection_state()
     test_handshake_done_advances_state()
     test_unknown_frame_body_is_not_reparsed()
     test_handshake_done_does_not_reopen_closed_connection()
+    test_reset_and_stop_sending_are_recorded_independently()
     test_mark_handshake_complete_explicit_hook()
     test_stream_frame_opens_stream()
     test_stream_frame_with_fin_finishes_stream()

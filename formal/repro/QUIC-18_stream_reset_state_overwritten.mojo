@@ -1,4 +1,5 @@
 # PLATFORM: any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)
+# RESOLVED: QUIC-18 fixed on fix/formal-findings
 """QUIC-18: one state for both stream halves loses a reset.
 
 Lean: Flare.Bugs.QUIC_18.impl_loses (impl), Flare.Bugs.QUIC_18.fixed_spec
@@ -22,7 +23,7 @@ Cases on the client's request stream 0:
 Control: RESET_STREAM alone makes stream_reset(0) True; cancel_stream alone
 makes send_stream refuse.
 
-Expected: A True, B refused. Actual: A False, B accepted (send_stream goes
+Expected: A True, B refused. Before the fix: A False, B accepted (send_stream goes
 on to build a packet).
 
 Minimal fix: keep the two halves apart (a per-stream "peer reset" and
