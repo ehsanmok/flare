@@ -250,8 +250,8 @@ middleware that handles RFC 9111 freshness and conditional revalidation.
 | `signed_cookie_encode(value, key)` / `signed_cookie_decode(cookie, key)` — HMAC-SHA256 over base64url payload + tag | `flare.http.session` |
 | `signed_cookie_decode_keys(cookie, keys)` — accept any of N keys, for graceful key rotation | `flare.http.session` |
 | `Session[T]`, `SessionCodec`, `StringSessionCodec` | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
-| `CookieSessionStore` (signed-cookie-backed), `InMemorySessionStore` (server-side); both satisfy the `SessionStore` read trait (`cookie_name` + `load`) | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
-| `BackedSessionStore[B: SessionBackend]` — CSPRNG-id signed cookie + a pluggable `SessionBackend` (`get`/`set`/`delete`/`sweep`) with TTL expiry + `destroy` revocation; `MemorySessionBackend` reference impl; `new_session_id()` (256-bit `/dev/urandom` id) | [`tests/http/test_session.mojo`](../tests/http/test_session.mojo) |
+| `CookieSessionStore` (signed-cookie-backed), `InMemorySessionStore` (server-side); both satisfy the `SessionStore` read trait (`cookie_name` + `load`); both expire sessions server-side after `ttl_s` (default `DEFAULT_SESSION_TTL_S`, one day; `0` = never) and have `*_at(..., now_s)` forms that take the clock | [`sessions.mojo`](../examples/intermediate/sessions.mojo) |
+| `BackedSessionStore[B: SessionBackend]` — CSPRNG-id signed cookie + a pluggable `SessionBackend` (`get`/`set`/`delete`/`sweep`) with TTL expiry (default one day) + `destroy` revocation; `MemorySessionBackend` reference impl; `new_session_id()` (256-bit `/dev/urandom` id) | [`tests/http/test_session.mojo`](../tests/http/test_session.mojo) |
 | `Auth`, `BasicAuth`, `BearerAuth`, `AuthError` | `flare.http.{auth,auth_extract}` |
 | HAProxy PROXY v1 + v2 parser, `ProxyParseError` | `flare.http.proxy_protocol` |
 
@@ -271,6 +271,23 @@ gone from `CookieSessionStore` and `InMemorySessionStore`.
 refuses to verify under one. A short key used to be kept as an empty
 "invalid" marker that could not sign but did verify, so a store built
 from an unset environment variable accepted cookies anyone could forge.
+
+**Changed in v0.11 (breaking): sessions expire server-side by default.**
+Before, a validly signed session cookie was accepted for as long as the
+signing key stayed in use, and `BackedSessionStore` defaulted to a TTL of
+0 (never). Now `CookieSessionStore`, `InMemorySessionStore` and
+`BackedSessionStore` take `ttl_s` and default it to
+`DEFAULT_SESSION_TTL_S` (86400 s, one day); pass `ttl_s=0` to opt out.
+`CookieSessionStore` signs an absolute expiry into the cookie
+(`"<expiry epoch second>|<value>"`, covered by the MAC) and `load` refuses
+an expired cookie, and a validly signed one that carries no expiry, so
+cookies issued before this change sign their holders out once. The
+expiry is compared with the wall clock, so it survives a restart and
+holds across workers whose clocks agree. `InMemorySessionStore.insert`
+stamps the entry (re-inserting restarts its lifetime) and gains
+`sweep(now_s)`. Each store has an `*_at` form (`encode_at`, `load_at`,
+`insert_at`) that takes the time as an argument, as
+`BackedSessionStore` already took `now_s`.
 
 ## Forms and content-encoding
 

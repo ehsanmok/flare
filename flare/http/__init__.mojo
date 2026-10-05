@@ -249,6 +249,7 @@ from .multipart import (
 from .session import (
     BackedSessionStore,
     CookieSessionStore,
+    DEFAULT_SESSION_TTL_S,
     InMemorySessionStore,
     MemorySessionBackend,
     Session,

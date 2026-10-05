@@ -1,4 +1,5 @@
 # PLATFORM: any (pure in-process)
+# RESOLVED: DOC-06 fixed on fix/formal-findings
 """DOC-06: sessions carry no server-side expiry by default, so a stolen
 session cookie replays for as long as the signing key lives.
 
@@ -27,7 +28,7 @@ Preconditions: `encode`/`load` and `save`/`load` at the same instant
 round-trip the value.
 
 Expected: A rejects a cookie that carries no expiry, and B's session is
-gone ten years later. Actual: both accept.
+gone ten years later. Before the fix: both accept.
 
 Minimal fix: CookieSessionStore embeds an absolute expiry in the signed
 payload ("<exp_unix>|<value>", default lifetime one day) and `load`
@@ -59,7 +60,9 @@ def main() raises:
     var cs = CookieSessionStore(key)
     var fresh = cs.load(_req(cs.encode(value)))
     if not fresh.present or fresh.value != value:
-        print("inconclusive: CookieSessionStore encode/load does not round-trip")
+        print(
+            "inconclusive: CookieSessionStore encode/load does not round-trip"
+        )
         raise Error("setup")
     var bare = signed_cookie_encode(List[UInt8](value.as_bytes()), key)
     var a = cs.load(_req(bare))

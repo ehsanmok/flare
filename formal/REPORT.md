@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63514 lines) |
+| Lean files | 298 (63534 lines) |
 | Theorems | 3344 |
 | Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 132 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 133 of 138 |
 
 Six findings are rated high:
 
@@ -3147,7 +3147,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | DOC-03 | Medium | resolved | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
 | DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
-| DOC-06 | Medium | open | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
+| DOC-06 | Medium | resolved | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
 | DOC-07 | Medium | open | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
 | DOC-08 | Medium | open | server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off | `Flare/Bugs/DOC_08.lean` | `repro/DOC-08_tls_session_tickets_not_opt_in.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
 
@@ -5767,11 +5767,13 @@ Status: resolved. `flare/http2/state.mojo` resets the stream with PROTOCOL_ERROR
 
 #### DOC-06: sessions have no server-side expiry by default
 
+Status: resolved. Fixed in code, not by correcting the docs. `CookieSessionStore` signs `"<expiry>|<value>"` and `load` refuses an expired cookie or a validly signed one without an expiry; `InMemorySessionStore` stamps each entry (`insert`, new `insert_at`/`load_at`/`sweep`); `BackedSessionStore` defaults `ttl_s` to the new `DEFAULT_SESSION_TTL_S` (86400). `ttl_s=0` opts out. The cookie stores read the wall clock (`CLOCK_REALTIME`, so the expiry survives a restart) and have `encode_at`/`load_at`/`insert_at` forms that take the time. Cookies issued before the change are refused once. Regression tests in `tests/http/test_session.mojo` (`test_cookie_store_cookie_expires_server_side`, `test_cookie_store_refuses_a_signed_value_without_expiry`, `test_in_memory_store_entry_expires_server_side`, `test_backed_store_default_ttl_expires_the_session`, and others); the repro prints `OK:`. Lean: `csEncode`/`csLoad`/`backedDefaultTtl` are the shipped model, the `Old` variants keep the counterexample. `InMemorySessionStore` is still not modelled (it has no clock input in the Lean model).
+
 - **Severity:** Medium. A stolen session cookie can be replayed for as long as the signing key is in use. With `BackedSessionStore`'s default TTL, that is indefinitely.
 - **Doc:** `docs/threat-model.md:73` (replay of a stolen session cookie) says "Session contents include a server-side expiry".
 - **What goes wrong:** `CookieSessionStore.encode` (`flare/http/session.mojo:380-384`) signs the raw value, and `load` (359-378) takes no clock, so a cookie with a valid HMAC is accepted forever. `InMemorySessionStore` (390-468) keeps no time either. `BackedSessionStore` defaults `ttl_s` to 0 (598), which the backend stores as "never expires".
 - **Counterexample:** `Bugs.DOC_06.bug`: a bare signed payload loads ten years later, and so does a backed-store save. `counterexample` shows neither store satisfies `Expires`.
-- **Fix:** `csEncodeFixed` and `csLoadFixed` sign an absolute expiry with the value and refuse a missing or past one. `backedDefaultTtlFixed` gives a positive default. `fixed` proves `Expires`, `fixed_rejects_bare` shows payloads without an expiry are refused, and `fixed_fresh` shows a fresh session still loads.
+- **Fix:** `csEncode` and `csLoad` (the shipped model; the `Old` variants are the pre-fix behaviour the counterexample is about) sign an absolute expiry with the value and refuse a missing or past one. `backedDefaultTtl` gives a positive default. `fixed` proves `Expires`, `fixed_rejects_bare` shows payloads without an expiry are refused, and `fixed_fresh` shows a fresh session still loads.
 - **Repro:** `formal/repro/DOC-06_session_no_server_side_expiry.mojo`
 - **Observed:** `BUG REPRODUCED: CookieSessionStore accepted a signed cookie with no expiry (no clock input exists): True ; BackedSessionStore with default ttl returned the session 10 years after save: True`
 - **Flip** (`flare/http/session.mojo`: encode `"<time+86400>|value"`, have `load` compare the prefix with `time(0)`, and default `ttl_s` to 86400): `OK: sessions expire server-side by default`, exit 0.

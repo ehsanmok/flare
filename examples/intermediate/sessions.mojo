@@ -6,8 +6,10 @@ Demonstrates the session surface end-to-end:
   (or use any 32-byte random secret you have).
 - ``signed_cookie_encode`` / ``decode`` — the JWS-shape primitive.
 - ``CookieSessionStore`` — stateless store; the entire session
-  travels in the signed cookie.
-- ``InMemorySessionStore`` — server-side table keyed by signed id.
+  travels in the signed cookie, together with a signed server-side
+  expiry (one day by default; ``ttl_s=`` changes it, ``0`` disables it).
+- ``InMemorySessionStore`` — server-side table keyed by signed id; its
+  entries expire after ``ttl_s`` too.
 
 Pure construction; no live network. Run:
     pixi run example-sessions
@@ -98,7 +100,7 @@ def main() raises:
     var as_string = String(capacity_bytes=len(decoded) + 1)
     for b in decoded:
         as_string += chr(Int(b))
-    print(" payload :", as_string)
+    print(" payload :", as_string, "(<expiry epoch second>|<value>)")
     print()
 
     print("=== Example 30 complete ===")

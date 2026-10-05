@@ -3715,6 +3715,42 @@ from test_session import (
 from test_session import (
     test_cookie_store_keeps_utf8_values as test_session__test_cookie_store_keeps_utf8_values,
 )
+from test_session import (
+    test_default_session_ttl_is_one_day as test_session__test_default_session_ttl_is_one_day,
+)
+from test_session import (
+    test_cookie_store_cookie_expires_server_side as test_session__test_cookie_store_cookie_expires_server_side,
+)
+from test_session import (
+    test_cookie_store_default_lifetime_is_bounded as test_session__test_cookie_store_default_lifetime_is_bounded,
+)
+from test_session import (
+    test_cookie_store_refuses_a_signed_value_without_expiry as test_session__test_cookie_store_refuses_a_signed_value_without_expiry,
+)
+from test_session import (
+    test_cookie_store_ttl_zero_opts_out_of_expiry as test_session__test_cookie_store_ttl_zero_opts_out_of_expiry,
+)
+from test_session import (
+    test_cookie_store_value_may_contain_the_separator as test_session__test_cookie_store_value_may_contain_the_separator,
+)
+from test_session import (
+    test_cookie_store_expiry_survives_key_rotation as test_session__test_cookie_store_expiry_survives_key_rotation,
+)
+from test_session import (
+    test_in_memory_store_entry_expires_server_side as test_session__test_in_memory_store_entry_expires_server_side,
+)
+from test_session import (
+    test_in_memory_store_reinsert_refreshes_the_expiry as test_session__test_in_memory_store_reinsert_refreshes_the_expiry,
+)
+from test_session import (
+    test_in_memory_store_default_lifetime_is_bounded as test_session__test_in_memory_store_default_lifetime_is_bounded,
+)
+from test_session import (
+    test_backed_store_default_ttl_expires_the_session as test_session__test_backed_store_default_ttl_expires_the_session,
+)
+from test_session import (
+    test_backed_store_ttl_zero_opts_out_of_expiry as test_session__test_backed_store_ttl_zero_opts_out_of_expiry,
+)
 from test_simd_parsers import (
     test_memmem_finds_at_start as test_simd_parsers__test_memmem_finds_at_start,
 )
@@ -6329,6 +6365,26 @@ def main() raises:
     suite.test[test_session__test_backed_store_forged_cookie_is_empty]()
     suite.test[test_session__test_session_store_trait_generic_over_impls]()
     suite.test[test_session__test_cookie_store_keeps_utf8_values]()
+    suite.test[test_session__test_default_session_ttl_is_one_day]()
+    suite.test[test_session__test_cookie_store_cookie_expires_server_side]()
+    suite.test[test_session__test_cookie_store_default_lifetime_is_bounded]()
+    suite.test[
+        test_session__test_cookie_store_refuses_a_signed_value_without_expiry
+    ]()
+    suite.test[test_session__test_cookie_store_ttl_zero_opts_out_of_expiry]()
+    suite.test[
+        test_session__test_cookie_store_value_may_contain_the_separator
+    ]()
+    suite.test[test_session__test_cookie_store_expiry_survives_key_rotation]()
+    suite.test[test_session__test_in_memory_store_entry_expires_server_side]()
+    suite.test[
+        test_session__test_in_memory_store_reinsert_refreshes_the_expiry
+    ]()
+    suite.test[test_session__test_in_memory_store_default_lifetime_is_bounded]()
+    suite.test[
+        test_session__test_backed_store_default_ttl_expires_the_session
+    ]()
+    suite.test[test_session__test_backed_store_ttl_zero_opts_out_of_expiry]()
     # tests/http/test_simd_parsers.mojo
     suite.test[test_simd_parsers__test_memmem_finds_at_start]()
     suite.test[test_simd_parsers__test_memmem_finds_at_middle]()
