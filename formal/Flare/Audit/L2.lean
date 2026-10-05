@@ -122,8 +122,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.RT_07.fixed_cap_invariant
 #print axioms Flare.Bugs.RT_08.linux_failure_crashes
 #print axioms Flare.Bugs.RT_08.macos_failure_fails_open
-#print axioms Flare.Bugs.RT_08.fixed_never_crashes
-#print axioms Flare.Bugs.RT_08.fixed_agrees
+#print axioms Flare.Bugs.RT_08.never_crashes
+#print axioms Flare.Bugs.RT_08.agrees_with_old
 
 -- Happy Eyeballs ordering, hostname validation, UDS bind takeover
 #print axioms Flare.L2.HappyEyeballs.order_perm

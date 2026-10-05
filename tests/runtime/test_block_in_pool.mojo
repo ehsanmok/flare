@@ -8,7 +8,8 @@ value flows back) plus a new "runs on a different kernel thread"
 contract that the ``test_runs_on_different_thread`` test pins.
 """
 
-from std.ffi import external_call
+from std.ffi import external_call, c_int
+from std.memory import stack_allocation
 from std.sys.info import CompilationTarget
 from std.testing import (
     assert_equal,
@@ -21,6 +22,7 @@ from std.testing import (
 from flare.runtime import block_in_pool, MAX_POOL_SIZE
 from flare.runtime.blocking import _pool_reset, _pool_try_acquire, _pool_release
 from flare.http import Cancel, CancelCell, CancelReason
+from flare.utils import exit, fork
 
 
 # ── Platform gate ──────────────────────────────────────────────────────────
@@ -303,6 +305,88 @@ def test_pool_cap_is_exactly_max_pool_size() raises:
     for _ in range(again):
         _pool_release()
     _pool_reset()
+
+
+# ── sem_open failure must not crash (RT-08) ─────────────────────────────────
+
+comptime _SIGSEGV = 11
+comptime _RLIMIT_NOFILE_LINUX = 7
+comptime _CHILD_ACQUIRED = 11
+comptime _CHILD_REFUSED = 10
+comptime _CHILD_NO_FILL = 12
+
+
+def _fill_fd_table() -> Bool:
+    """Shrink RLIMIT_NOFILE and dup until the fd table is full, so the
+    next ``sem_open`` fails with EMFILE."""
+    var rl = stack_allocation[2, UInt64]()
+    _ = external_call["getrlimit", c_int](c_int(_RLIMIT_NOFILE_LINUX), rl)
+    rl[unsafe_offset=0] = UInt64(128)
+    _ = external_call["setrlimit", c_int](c_int(_RLIMIT_NOFILE_LINUX), rl)
+    for _ in range(1000):
+        if external_call["dup", c_int](c_int(0)) < 0:
+            return True
+    return False
+
+
+def _sem_failure_child(open_before_fill: Bool) -> Int:
+    """Forked child: with ``sem_open`` failing (fd table full), run the
+    acquire (or the release of a slot acquired earlier) and report which
+    way it returned. A crash is reported by the parent as a signal."""
+    # Restore the default SIGSEGV action: the Mojo runtime's handler would
+    # otherwise turn the fault into exit(1).
+    _ = external_call["signal", Int](c_int(_SIGSEGV), Int(0))
+    _pool_reset()
+    if open_before_fill:
+        if not _pool_try_acquire():
+            return _CHILD_REFUSED
+        if not _fill_fd_table():
+            return _CHILD_NO_FILL
+        _pool_release()
+        return _CHILD_ACQUIRED
+    if not _fill_fd_table():
+        return _CHILD_NO_FILL
+    return _CHILD_ACQUIRED if _pool_try_acquire() else _CHILD_REFUSED
+
+
+def _run_sem_failure_child(open_before_fill: Bool) raises -> Int:
+    """Fork, run ``_sem_failure_child`` and return the child's exit code;
+    raise if it was killed by a signal."""
+    var pid = fork()
+    assert_true(pid >= 0, "fork failed")
+    if pid == 0:
+        exit(_sem_failure_child(open_before_fill))
+    var status = stack_allocation[1, c_int]()
+    status[0] = c_int(0)
+    _ = external_call["waitpid", c_int](c_int(pid), Int(status), c_int(0))
+    var sig = Int(status[0] & 0x7F)
+    assert_equal(
+        sig,
+        0,
+        "child killed by a signal (sem_open failure dereferenced SEM_FAILED?): "
+        + String(sig),
+    )
+    return Int((status[0] >> 8) & 0xFF)
+
+
+def test_acquire_survives_sem_open_failure() raises:
+    """RT-08: with the fd table full ``sem_open`` fails (EMFILE) and
+    returns ``SEM_FAILED`` -- NULL on glibc, -1 on Darwin. The acquire
+    must take its fail-open branch, not hand NULL to ``sem_trywait``
+    (SIGSEGV, which killed the whole server)."""
+    comptime if CompilationTarget.is_linux():
+        assert_equal(_run_sem_failure_child(False), _CHILD_ACQUIRED)
+    else:
+        print("    (skipped: fd-exhaustion child is Linux-only)")
+
+
+def test_release_survives_sem_open_failure() raises:
+    """RT-08: ``_pool_release`` has the same ``SEM_FAILED`` test; with
+    ``sem_open`` failing it must return instead of ``sem_post(NULL)``."""
+    comptime if CompilationTarget.is_linux():
+        assert_equal(_run_sem_failure_child(True), _CHILD_ACQUIRED)
+    else:
+        print("    (skipped: fd-exhaustion child is Linux-only)")
 
 
 def main() raises:

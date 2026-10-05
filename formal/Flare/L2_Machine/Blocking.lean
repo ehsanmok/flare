@@ -27,7 +27,7 @@ structure Sem where
 def Sem.init : Sem := ⟨MAX_POOL_SIZE, 0⟩
 
 /-- Fail-open: a failed `sem_open` returns `True` without decrementing.
-mirrors flare/runtime/blocking.mojo `_pool_try_acquire`, `_pool_sem_open` (fixed, RT-06) -/
+mirrors flare/runtime/blocking.mojo `_pool_try_acquire`, `_pool_sem_open` (fixed, RT-06, RT-08) -/
 def tryAcquire (openOk : Bool) (s : Sem) : Sem × Bool :=
   if !openOk then ({ s with held := s.held + 1 }, true)
   else if s.count > 0 then (⟨s.count - 1, s.held + 1⟩, true)
@@ -39,7 +39,7 @@ def tryAcquireFixed (openOk : Bool) (s : Sem) : Sem × Bool :=
   else if s.count > 0 then (⟨s.count - 1, s.held + 1⟩, true)
   else (s, false)
 
-/-- mirrors flare/runtime/blocking.mojo `_pool_release`, `_pool_sem_open` (fixed, RT-06) -/
+/-- mirrors flare/runtime/blocking.mojo `_pool_release`, `_pool_sem_open` (fixed, RT-06, RT-08) -/
 def release (openOk : Bool) (s : Sem) : Sem :=
   if s.held = 0 then s
   else ⟨if openOk then s.count + 1 else s.count, s.held - 1⟩

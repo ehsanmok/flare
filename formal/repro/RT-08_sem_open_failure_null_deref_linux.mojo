@@ -1,13 +1,14 @@
 # PLATFORM: linux
+# RESOLVED: RT-08 fixed on fix/formal-findings
 """RT-08: a failed sem_open crashes the process on Linux.
 
 Lean: Flare.Bugs.RT_08.linux_failure_crashes (counterexample) and
-Flare.Bugs.RT_08.fixed_never_crashes (fix meets spec).
+Flare.Bugs.RT_08.never_crashes (shipped code meets spec).
 flare/runtime/blocking.mojo:185-206 @59bda50.
 
 Expected: when the pool semaphore cannot be opened the cap is skipped
 and the call returns ("best-effort, never a hard dependency").
-Actual: _pool_try_acquire and _pool_release test `Int(sem) == -1`, which
+Before the fix: _pool_try_acquire and _pool_release test `Int(sem) == -1`, which
 is Darwin's SEM_FAILED. glibc's SEM_FAILED is NULL, so on Linux a failed
 sem_open (here EMFILE: the fd table is full) passes the check and NULL
 goes to sem_trywait, which faults. The process dies with SIGSEGV.

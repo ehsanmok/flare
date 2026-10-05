@@ -209,6 +209,20 @@ def _pool_sem_open(name: String) -> Pointer[UInt8, MutUntrackedOrigin]:
 
 
 @always_inline
+def _sem_open_failed(sem: Pointer[UInt8, MutUntrackedOrigin]) -> Bool:
+    """True when ``sem_open`` returned ``SEM_FAILED``.
+
+    ``SEM_FAILED`` is ``(sem_t *)-1`` on Darwin but ``(sem_t *)0`` on
+    glibc / musl. Testing only -1 let a failed open on Linux (for
+    example EMFILE once the fd table is full) through, and NULL then
+    reached ``sem_trywait`` / ``sem_post``: SIGSEGV (RT-08). Both values
+    are rejected; neither is ever a valid ``sem_t *``.
+    """
+    var addr = Int(sem)
+    return addr == -1 or addr == 0
+
+
+@always_inline
 def _pool_try_acquire() -> Bool:
     """Try to claim one pool slot. Returns True on success, False when
     the process is already at ``MAX_POOL_SIZE`` concurrent pool threads.
@@ -218,7 +232,7 @@ def _pool_try_acquire() -> Bool:
     """
     var name = _pool_sem_name()
     var sem = _pool_sem_open(name)
-    if Int(sem) == -1:
+    if _sem_open_failed(sem):
         return True
     var rc = external_call["sem_trywait", Int32](sem)
     _ = external_call["sem_close", Int32](sem)
@@ -230,7 +244,7 @@ def _pool_release():
     """Return one pool slot claimed by ``_pool_try_acquire``."""
     var name = _pool_sem_name()
     var sem = _pool_sem_open(name)
-    if Int(sem) == -1:
+    if _sem_open_failed(sem):
         return
     _ = external_call["sem_post", Int32](sem)
     _ = external_call["sem_close", Int32](sem)

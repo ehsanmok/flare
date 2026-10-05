@@ -3,7 +3,14 @@ import Flare.Core
 /-!
 # RT-08: a failed `sem_open` crashes the process on Linux
 
-flare/runtime/blocking.mojo:185-206 @59bda50.
+flare/runtime/blocking.mojo `_pool_try_acquire` / `_pool_release` (pre-fix lines 185-206).
+
+Status: resolved. Both functions now test the result with `_sem_open_failed`,
+which rejects both 0 and -1, so a failed `sem_open` takes the fail-open branch
+on Linux too (tests: tests/runtime/test_block_in_pool.mojo::
+test_acquire_survives_sem_open_failure and ::test_release_survives_sem_open_failure).
+The counterexample below is about the pre-fix definitions `tryAcquireOld` /
+`releaseOld`.
 
 Spec (docstring of `_pool_try_acquire`, comment at :130-132): if the
 semaphore cannot be opened, the cap is skipped and the work still runs
@@ -21,7 +28,7 @@ The platform's `SEM_FAILED` is a fact about the C headers, taken as an
 input here; the repro observes the crash.
 
 Repro: formal/repro/RT-08_sem_open_failure_null_deref_linux.mojo
-(PLATFORM linux).
+(PLATFORM linux; now prints OK in the Linux container).
 -/
 namespace Flare.Bugs.RT_08
 
@@ -53,60 +60,62 @@ inductive Outcome
 def semOp (sem : Int) (result : Outcome) : Outcome :=
   if sem = 0 ∨ sem = -1 then .crash else result
 
-/-- mirrors flare/runtime/blocking.mojo:185-193 @59bda50 -/
-def tryAcquireImpl (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool) : Outcome :=
+/-- Pre-fix `_pool_try_acquire`: only Darwin's `SEM_FAILED` (-1) is a failure.
+(pre-fix lines 185-193) -/
+def tryAcquireOld (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool) : Outcome :=
   let sem := semOpen p ok handle
   if sem = -1 then .acquired true else semOp sem (.acquired waitOk)
 
-/-- mirrors flare/runtime/blocking.mojo:199-206 @59bda50 -/
-def releaseImpl (p : Platform) (ok : Bool) (handle : Int) : Outcome :=
+/-- Pre-fix `_pool_release` (pre-fix lines 199-206). -/
+def releaseOld (p : Platform) (ok : Bool) (handle : Int) : Outcome :=
   let sem := semOpen p ok handle
   if sem = -1 then .released else semOp sem .released
 
-/-- Fix: compare against the platform's `SEM_FAILED`. (Fail-open is kept
-so this is independent of RT-07; RT-07's fail-closed fix uses the same
-test.) -/
-def tryAcquireFixed (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool) : Outcome :=
+/-- mirrors flare/runtime/blocking.mojo `_pool_try_acquire`, `_sem_open_failed` (fixed, RT-08)
+Both 0 and -1 count as a failed open, whatever the platform. (Fail-open is kept,
+independent of RT-07.) -/
+def tryAcquire (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool) : Outcome :=
   let sem := semOpen p ok handle
-  if sem = semFailed p then .acquired true else semOp sem (.acquired waitOk)
+  if sem = 0 ∨ sem = -1 then .acquired true else semOp sem (.acquired waitOk)
 
-def releaseFixed (p : Platform) (ok : Bool) (handle : Int) : Outcome :=
+/-- mirrors flare/runtime/blocking.mojo `_pool_release`, `_sem_open_failed` (fixed, RT-08) -/
+def release (p : Platform) (ok : Bool) (handle : Int) : Outcome :=
   let sem := semOpen p ok handle
-  if sem = semFailed p then .released else semOp sem .released
+  if sem = 0 ∨ sem = -1 then .released else semOp sem .released
 
-/-- **Counterexample**: on Linux, any failed `sem_open` makes both the
-acquire and the release crash, whatever the handle would have been. -/
+/-- **Counterexample** (pre-fix `tryAcquireOld` / `releaseOld`): on Linux, any
+failed `sem_open` makes both the acquire and the release crash, whatever the handle would have been. -/
 theorem linux_failure_crashes (handle : Int) (waitOk : Bool) :
-    tryAcquireImpl .linux false handle waitOk = .crash ∧
-      releaseImpl .linux false handle = .crash := by
-  simp [tryAcquireImpl, releaseImpl, semOpen, semFailed, semOp]
+    tryAcquireOld .linux false handle waitOk = .crash ∧
+      releaseOld .linux false handle = .crash := by
+  simp [tryAcquireOld, releaseOld, semOpen, semFailed, semOp]
 
 /-- The check is right on macOS: there a failed `sem_open` takes the
 fail-open branch. -/
 theorem macos_failure_fails_open (handle : Int) (waitOk : Bool) :
-    tryAcquireImpl .macos false handle waitOk = .acquired true ∧
-      releaseImpl .macos false handle = .released := by
-  simp [tryAcquireImpl, releaseImpl, semOpen, semFailed]
+    tryAcquireOld .macos false handle waitOk = .acquired true ∧
+      releaseOld .macos false handle = .released := by
+  simp [tryAcquireOld, releaseOld, semOpen, semFailed]
 
-/-- **Fix meets spec**: on either platform, with `sem_open` failing or
+/-- **Shipped code meets spec**: on either platform, with `sem_open` failing or
 returning a real handle, neither operation crashes. -/
-theorem fixed_never_crashes (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool)
+theorem never_crashes (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool)
     (hv : Valid handle) :
-    tryAcquireFixed p ok handle waitOk ≠ .crash ∧ releaseFixed p ok handle ≠ .crash := by
+    tryAcquire p ok handle waitOk ≠ .crash ∧ release p ok handle ≠ .crash := by
   obtain ⟨h0, h1⟩ := hv
-  cases p <;> cases ok <;> simp [tryAcquireFixed, releaseFixed, semOpen, semFailed, semOp, h0, h1]
+  cases p <;> cases ok <;> simp [tryAcquire, release, semOpen, semFailed, semOp, h0, h1]
 
 /-- The fix changes nothing where the original was right: on success, and
 on any macOS call. -/
-theorem fixed_agrees (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool)
+theorem agrees_with_old (p : Platform) (ok : Bool) (handle : Int) (waitOk : Bool)
     (hv : Valid handle) (h : ok = true ∨ p = .macos) :
-    tryAcquireFixed p ok handle waitOk = tryAcquireImpl p ok handle waitOk ∧
-      releaseFixed p ok handle = releaseImpl p ok handle := by
+    tryAcquire p ok handle waitOk = tryAcquireOld p ok handle waitOk ∧
+      release p ok handle = releaseOld p ok handle := by
   obtain ⟨h0, h1⟩ := hv
   rcases h with h | h <;> subst h
-  · cases p <;> simp [tryAcquireFixed, tryAcquireImpl, releaseFixed, releaseImpl, semOpen,
+  · cases p <;> simp [tryAcquire, tryAcquireOld, release, releaseOld, semOpen,
       semFailed, semOp, h0, h1]
-  · cases ok <;> simp [tryAcquireFixed, tryAcquireImpl, releaseFixed, releaseImpl, semOpen,
+  · cases ok <;> simp [tryAcquire, tryAcquireOld, release, releaseOld, semOpen,
       semFailed, semOp, h0, h1]
 
 end Flare.Bugs.RT_08
