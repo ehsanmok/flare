@@ -1775,7 +1775,10 @@ struct HttpServer(Movable):
         var wait_ms = timeout_ms
         if wait_ms < 0:
             wait_ms = 0
-        var deadline = monotonic_now_ms() + wait_ms
+        # The clock is truncated to whole milliseconds, so a deadline taken
+        # mid-millisecond arrives up to 1 ms early; one extra millisecond
+        # keeps "at least timeout_ms" true.
+        var deadline = monotonic_now_ms() + wait_ms + (1 if wait_ms > 0 else 0)
         while monotonic_now_ms() < deadline:
             _ = libc_nanosleep_ms(1)
 
