@@ -71,9 +71,9 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QPACK_05.implOld_counterexample
 #print axioms Flare.Bugs.QPACK_05.implOld_drops_blockable
 #print axioms Flare.Bugs.QPACK_05.fixed_spec
-#print axioms Flare.Bugs.QPACK_06.impl_references_unacked
-#print axioms Flare.Bugs.QPACK_06.impl_evicts_unacked
-#print axioms Flare.Bugs.QPACK_06.fixedInsert_noEvict
+#print axioms Flare.Bugs.QPACK_06.implOld_references_unacked
+#print axioms Flare.Bugs.QPACK_06.implOld_evicts_unacked
+#print axioms Flare.Bugs.QPACK_06.implInsert_noEvict
 #print axioms Flare.Bugs.QPACK_06.fixed_spec
 #print axioms Flare.Bugs.H3_01.violates_spec
 #print axioms Flare.Bugs.H3_01.feed_bounded

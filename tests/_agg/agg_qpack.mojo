@@ -91,6 +91,12 @@ from test_qpack_dynamic import (
     test_blocked_section_raises as test_qpack_dynamic__test_blocked_section_raises,
 )
 from test_qpack_dynamic import (
+    test_encoder_references_no_unacknowledged_entry as test_qpack_dynamic__test_encoder_references_no_unacknowledged_entry,
+)
+from test_qpack_dynamic import (
+    test_encoder_refuses_an_insert_that_would_evict as test_qpack_dynamic__test_encoder_refuses_an_insert_that_would_evict,
+)
+from test_qpack_dynamic import (
     test_capacity_above_the_advertised_limit_is_refused as test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused,
 )
 from test_qpack_dynamic import (
@@ -164,6 +170,12 @@ def main() raises:
     suite.test[test_qpack_dynamic__test_decoder_stream_instructions]()
     suite.test[test_qpack_dynamic__test_field_section_dynamic_roundtrip]()
     suite.test[test_qpack_dynamic__test_blocked_section_raises]()
+    suite.test[
+        test_qpack_dynamic__test_encoder_references_no_unacknowledged_entry
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_encoder_refuses_an_insert_that_would_evict
+    ]()
     suite.test[
         test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused
     ]()

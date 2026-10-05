@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61789 lines) |
+| Lean files | 298 (61804 lines) |
 | Theorems | 3247 |
 | Headline theorems in the axiom audit | 1046 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 64 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 65 of 138 |
 
 Six findings are rated high:
 
@@ -2876,8 +2876,8 @@ advances the wheel to `now` at the top of every iteration
 | `Qpack.FieldSection.implSignReadIndex`, `implOldSignReadIndex` | qpack/dynamic.mojo:518-542 (fixed, QPACK-02) | `QPACK_02.out_of_bounds`, `implSignReadIndex_inBounds` | resolved |
 | `Qpack.FieldSection.implLiteral`, `implOldLiteral` | qpack/codec.mojo:192-278 (fixed, QPACK-03) | `implOldLiteral_eq_spec`, `implOldLiteral_huffman`, `QPACK_03.not_string_ok`, `QPACK_03.huffman_counterexample`, `implLiteral_ok`, `implLiteral_eq_spec_of_ok` | resolved |
 | `Qpack.Encoder.findBy` | qpack/dynamic.mojo:160-175 | `findBy_some`, `findBy_none` | proved |
-| `Qpack.Encoder.ric` | qpack/dynamic.mojo:418-430 | `ric_bound`, `QPACK_06.impl_references_unacked`, `QPACK_06.fixed_spec` | counterexample (QPACK-06) |
-| `Qpack.Table.insert` (encoder use) | qpack/dynamic.mojo:138-148, 606-615 | `QPACK_06.impl_evicts_unacked`, `fixedInsert_noEvict` | counterexample (QPACK-06) |
+| `Qpack.Encoder.ric` (`QPACK_06.implOldRic` pre-fix, `implRic` shipped) | qpack/dynamic.mojo:418-430 @59bda50, 713-720 (fixed, QPACK-06) | `ric_bound`, `QPACK_06.implOld_references_unacked`, `QPACK_06.fixed_spec` | resolved (QPACK-06) |
+| `Qpack.Table.insert` (pre-fix encoder use), `QPACK_06.implInsert` (shipped) | qpack/dynamic.mojo:138-148 @59bda50, 700-711 (fixed, QPACK-06) | `QPACK_06.implOld_evicts_unacked`, `implInsert_noEvict` | resolved (QPACK-06) |
 | `Bugs.QPACK_05.impl`, `implOld` | http3/request_reader.mojo:283-296, http3/server.mojo:859-875, quic/server.mojo:1448-1476 (fixed, QPACK-05) | `QPACK_05.implOld_never_connErr`, `implOld_counterexample`, `implOld_drops_blockable`, `fixed_spec` | resolved |
 | `Qpack.FieldSection.implDynRef`, `implOldDynRef` | qpack/dynamic.mojo:281-370 (fixed, QPACK-04) | `QPACK_04.counterexample`, `implDynRef_eq_spec` | resolved |
 | `Qpack.FieldSection.decodeInt` | http2/hpack.mojo:101-132 | `decodeInt_offset_le` | proved |
@@ -3084,7 +3084,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QPACK-03 | Low | resolved | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
 | QPACK-04 | Low | resolved | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
 | QPACK-05 | Medium | resolved | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QPACK-06 | Low | open | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
+| QPACK-06 | Low | resolved | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
 | H3-01 | Medium | resolved | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
 | H3-02 | Low | open | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
 | H3-03 | Low | open | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
@@ -4567,11 +4567,12 @@ Status: resolved. `Http3Connection.feed_stream_chunk` records `connection_error_
 - **Severity:** Low. `QpackEncoder` is exported library API (`flare/qpack/__init__.mojo`); neither flare endpoint uses it, because both encode with the static-only `encode_field_section`. An application that uses it against a conforming peer produces streams that can block a decoder that allows none, and sections the decoder cannot decode once a referenced entry is evicted.
 - **RFC:** RFC 9204 §2.1.2: "An encoder MUST limit the number of streams that could become blocked to the value of SETTINGS_QPACK_BLOCKED_STREAMS at all times" (default 0). §2.1.1: "A dynamic table entry cannot be evicted immediately after insertion, even if it has never been referenced", and "the encoder MUST NOT insert that entry" if it would have to evict entries that are not evictable.
 - **What goes wrong:** `encode_field_section_dynamic` (`qpack/dynamic.mojo:405-470`, called by `QpackEncoder.encode`, 617-619) references every entry `find` / `find_name` return, whether or not the decoder has acknowledged it. `QpackEncoder.insert` (606-615) inserts through `QpackDynamicTable.insert` (138-148), which evicts the oldest entries. The encoder has no Known Received Count, no reference tracking, and no way to consume Section Acknowledgment or Insert Count Increment, and it is never told the peer's blocked-stream limit.
-- **Counterexample:** with entries of size 34 and capacity 40, `Bugs.QPACK_06.impl_references_unacked`: right after inserting `(1, 2)` a section for it has RIC 1 although nothing is acknowledged. `impl_evicts_unacked`: the next insert evicts that entry (`dropped = 1`, `getAbs 0 = none`).
-- **Fix:** until acknowledgments are tracked, encode against no dynamic entries and refuse an insert that would evict. `fixedRic_zero` shows that every section then has RIC 0, `fixedInsert_noEvict` shows an accepted insert keeps every earlier entry, and `fixed_spec` combines them: no stream can block, and nothing unacknowledged is evicted.
+- **Counterexample:** with entries of size 34 and capacity 40, `Bugs.QPACK_06.implOld_references_unacked`: right after inserting `(1, 2)` a section for it has RIC 1 although nothing is acknowledged. `implOld_evicts_unacked`: the next insert evicts that entry (`dropped = 1`, `getAbs 0 = none`).
+- **Fix:** until acknowledgments are tracked, encode against no dynamic entries and refuse an insert that would evict. `implRic_zero` shows that every section then has RIC 0, `implInsert_noEvict` shows an accepted insert keeps every earlier entry, and `fixed_spec` combines them: no stream can block, and nothing unacknowledged is evicted.
 - **Repro:** `formal/repro/QPACK-06_encoder_ignores_acknowledgments.mojo`: a `QpackEncoder` with capacity 40 inserts `("a", "b")`, encodes `a: b`, then inserts `("c", "d")`. A `QpackDecoder` with the same capacity applies the encoder stream and decodes the section. Inconclusive if the first insert is refused.
 - **Observed:** `BUG REPRODUCED: encoder referenced an unacknowledged entry (encoded Required Insert Count field 2 , non-zero) and then evicted it; the decoder cannot decode the section: qpack: field section blocked on missing inserts` (three runs, exit 1). The encoded value 2 means RIC 1 with MaxEntries 1. After the eviction the RFC decoding of that value against the decoder's insert count of 2 gives RIC 3, so the decoder reports the section as blocked.
 - **Flip** (`qpack/dynamic.mojo`: `QpackEncoder.encode` passes an empty `QpackDynamicTable(0)`, and `insert` refuses when `size + entry_size > capacity`): the RIC field is 0, the second insert is refused, and the section decodes: `OK: nothing unacknowledged referenced or evicted; section decodes`, exit 0.
+Status: resolved. That flip is the shipped fix: `QpackEncoder.encode` references no dynamic entry and `QpackEncoder.insert` refuses an entry that would evict, until acknowledgments are tracked. Tests: `tests/qpack/test_qpack_dynamic.mojo::test_encoder_references_no_unacknowledged_entry`, `tests/qpack/test_qpack_dynamic.mojo::test_encoder_refuses_an_insert_that_would_evict`; `test_blocked_section_raises` now builds its blocked section with `encode_field_section_dynamic` because `QpackEncoder.encode` can no longer produce one. The repro prints `OK` (three runs).
 
 #### H3-01: the request reader buffers non-HEADERS/DATA frames without bound
 

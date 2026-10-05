@@ -673,7 +673,20 @@ struct QpackDecoder(Copyable):
 
 struct QpackEncoder(Copyable):
     """Owns the outbound dynamic table; ``insert`` appends an
-    encoder-stream instruction and updates the local table mirror."""
+    encoder-stream instruction and updates the local table mirror.
+
+    The encoder does not track acknowledgments yet: it has no Known
+    Received Count, never sees Section Acknowledgment or Insert Count
+    Increment instructions, and is not told the peer's
+    ``SETTINGS_QPACK_BLOCKED_STREAMS``. Until it does, every entry is
+    unacknowledged, so (RFC 9204 sections 2.1.1 and 2.1.2):
+
+    * :meth:`encode` references no dynamic entry (Required Insert Count
+      0), so no stream can block a decoder that allows none; and
+    * :meth:`insert` never evicts: an entry that does not fit in the
+      free space is refused, so no entry a decoder may still need
+      disappears.
+    """
 
     var table: QpackDynamicTable
 
@@ -688,13 +701,18 @@ struct QpackEncoder(Copyable):
         mut self, name: String, value: String, mut enc_stream: List[UInt8]
     ) -> Bool:
         """Insert (name, value), emitting an Insert With Literal Name
-        instruction. Returns False if it does not fit the capacity."""
+        instruction. Returns False, emitting nothing, if the entry does
+        not fit in the table's free space: inserting it would evict an
+        entry that is not known to be unreferenced (QPACK-06)."""
         var h = QpackHeader(name, value)
-        if entry_size(h) > self.table.capacity:
+        if self.table.size + entry_size(h) > self.table.capacity:
             return False
         encode_insert_with_literal_name(enc_stream, name, value)
         return self.table.insert(h^)
 
     def encode(self, headers: List[QpackHeader], mut out: List[UInt8]) raises:
-        """Encode a field section referencing the local table."""
-        encode_field_section_dynamic(headers, self.table, out)
+        """Encode a field section against no dynamic entries (Required
+        Insert Count 0): static references and literals only, until
+        acknowledgments are tracked (QPACK-06)."""
+        var no_entries = QpackDynamicTable(UInt64(0))
+        encode_field_section_dynamic(headers, no_entries, out)

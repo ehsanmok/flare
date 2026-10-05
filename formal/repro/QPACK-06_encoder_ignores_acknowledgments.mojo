@@ -1,8 +1,9 @@
 # PLATFORM: any (pure Mojo, no I/O)
+# RESOLVED: QPACK-06 fixed on fix/formal-findings
 """QPACK-06: the dynamic-table encoder tracks no acknowledgments.
 
-Lean: Flare.Bugs.QPACK_06.impl_references_unacked,
-      Flare.Bugs.QPACK_06.impl_evicts_unacked (impl),
+Lean: Flare.Bugs.QPACK_06.implOld_references_unacked,
+      Flare.Bugs.QPACK_06.implOld_evicts_unacked (pre-fix),
       Flare.Bugs.QPACK_06.fixed_spec (fix).
 flare/qpack/dynamic.mojo:405-470 @59bda50 (encode_field_section_dynamic, via
 QpackEncoder.encode 617-619) references any entry find / find_name return;
@@ -24,7 +25,7 @@ Inconclusive if the first insert is refused.
 
 Expected: with nothing acknowledged the section references no dynamic entry
 (Required Insert Count 0) and the second insert is refused, so the decoder
-decodes the section. Actual: the section has Required Insert Count 1 (an
+decodes the section. Before the fix: Actual: the section has Required Insert Count 1 (an
 unacknowledged entry) and the second insert evicts that entry, so the
 decoder cannot decode the section.
 
@@ -64,14 +65,25 @@ def main() raises:
         decoded = False
         err = String(e)
     print(
-        "encoded RIC byte:", ric_enc, "| second insert accepted:", second,
-        "| decoder:", "ok" if decoded else "failed (" + err + ")",
+        "encoded RIC byte:",
+        ric_enc,
+        "| second insert accepted:",
+        second,
+        "| decoder:",
+        "ok" if decoded else "failed (" + err + ")",
     )
     if ric_enc != 0 or second or not decoded:
         print(
-            "BUG REPRODUCED: encoder referenced an unacknowledged entry"
-            " (encoded Required Insert Count field", ric_enc, ", non-zero) and then evicted it; the decoder"
-            " cannot decode the section:", err,
+            (
+                "BUG REPRODUCED: encoder referenced an unacknowledged entry"
+                " (encoded Required Insert Count field"
+            ),
+            ric_enc,
+            (
+                ", non-zero) and then evicted it; the decoder"
+                " cannot decode the section:"
+            ),
+            err,
         )
         raise Error("QPACK-06")
     print("OK: nothing unacknowledged referenced or evicted; section decodes")

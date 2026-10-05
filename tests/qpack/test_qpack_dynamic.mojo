@@ -178,14 +178,17 @@ def test_field_section_dynamic_roundtrip() raises:
 
 def test_blocked_section_raises() raises:
     # A field section whose Required Insert Count exceeds what the
-    # decoder has received must fail rather than mis-resolve.
-    var encoder = QpackEncoder(4096)
-    var es = List[UInt8]()
-    _ = encoder.insert("a", "1", es)
+    # decoder has received must fail rather than mis-resolve. The
+    # section is built with the low-level dynamic codec, because
+    # ``QpackEncoder.encode`` no longer references unacknowledged
+    # entries (QPACK-06), so it can no longer produce one.
+    var table = QpackDynamicTable(4096)
+    assert_true(table.insert(QpackHeader("a", "1")))
     var headers = List[QpackHeader]()
     headers.append(QpackHeader("a", "1"))
     var field = List[UInt8]()
-    encoder.encode(headers, field)
+    encode_field_section_dynamic(headers, table, field)
+    assert_true(field[0] != UInt8(0), "the section must have a RIC")
     # Fresh decoder that never saw the insert.
     var decoder = QpackDecoder(4096)
     var threw = False
@@ -194,6 +197,53 @@ def test_blocked_section_raises() raises:
     except:
         threw = True
     assert_true(threw)
+
+
+def test_encoder_references_no_unacknowledged_entry() raises:
+    """QPACK-06: ``QpackEncoder`` tracks no acknowledgments, so every
+    entry is unacknowledged. A section that referenced one could block a
+    decoder that allows 0 blocked streams (RFC 9204 sec 2.1.2); it must
+    carry Required Insert Count 0 and decode with no inserts at all."""
+    var enc_stream = List[UInt8]()
+    var encoder = QpackEncoder(4096)
+    encoder.set_capacity(4096, enc_stream)
+    assert_true(encoder.insert("x-trace", "abc", enc_stream))
+    var headers = List[QpackHeader]()
+    headers.append(QpackHeader("x-trace", "abc"))  # full match in the table
+    headers.append(QpackHeader("x-trace", "zzz"))  # name match in the table
+    var field = List[UInt8]()
+    encoder.encode(headers, field)
+    assert_equal(Int(field[0]), 0, "Required Insert Count must be 0")
+    # A decoder that has not received (or does not allow) any insert.
+    var decoder = QpackDecoder(0)
+    var got = decoder.decode(Span[UInt8, _](field))
+    assert_equal(len(got), 2)
+    assert_equal(got[0].value, String("abc"))
+    assert_equal(got[1].value, String("zzz"))
+
+
+def test_encoder_refuses_an_insert_that_would_evict() raises:
+    """QPACK-06: Insert evicted the oldest entry to make room, although
+    nothing is acknowledged and a section may still depend on it
+    (RFC 9204 sec 2.1.1: the encoder MUST NOT insert instead)."""
+    var enc_stream = List[UInt8]()
+    var encoder = QpackEncoder(40)  # room for exactly one 34-byte entry
+    assert_true(encoder.insert("a", "b", enc_stream))
+    var before = len(enc_stream)
+    assert_false(encoder.insert("c", "d", enc_stream))
+    assert_equal(len(enc_stream), before, "a refused insert emits nothing")
+    assert_equal(Int(encoder.table.dropped), 0)
+    assert_equal(encoder.table.insert_count(), 1)
+    # The mirror and the peer table stay in step.
+    var decoder = QpackDecoder(40)
+    assert_equal(decoder.feed_encoder_stream(Span[UInt8, _](enc_stream)), 1)
+    assert_equal(decoder.table.insert_count(), 1)
+    # An insert that fits alongside the existing entries is still fine.
+    var roomy = QpackEncoder(4096)
+    var s2 = List[UInt8]()
+    assert_true(roomy.insert("a", "b", s2))
+    assert_true(roomy.insert("c", "d", s2))
+    assert_equal(Int(roomy.table.dropped), 0)
 
 
 def test_capacity_above_the_advertised_limit_is_refused() raises:
@@ -434,6 +484,8 @@ def main() raises:
     test_decoder_stream_instructions()
     test_field_section_dynamic_roundtrip()
     test_blocked_section_raises()
+    test_encoder_references_no_unacknowledged_entry()
+    test_encoder_refuses_an_insert_that_would_evict()
     test_capacity_above_the_advertised_limit_is_refused()
     test_ric_zero_section_cannot_read_the_dynamic_table()
     test_sign_set_with_delta_base_not_below_ric_is_refused()
