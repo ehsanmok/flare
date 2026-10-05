@@ -243,14 +243,14 @@ memory past the buffer untouched.
 
 ### UDS sockaddr_un (`Uds.lean`)
 
-uds/_libc.mojo:43-133: `fill_sockaddr_un` and `read_path_from_sockaddr_un`,
+uds/_libc.mojo:43-140: `fill_sockaddr_un` and `read_path_from_sockaddr_un`,
 for Linux (108-byte path) and macOS (104).
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `fill_len_le` | The returned `addrlen` fits `SOCKADDR_UN_SIZE` and equals the bytes written. | proved |
-| `readPathFixed_fill` | Decoding the bytes as UTF-8 returns the bound path, whatever follows in the buffer. | proved |
-| `readPath_fill_iff_ascii` | flare's Latin-1 decoding returns the bound path if and only if it is ASCII. | proved (NET-06) |
+| `readPath_fill` | The shipped decoder (bytes taken as UTF-8) returns the bound path, whatever follows in the buffer. | proved |
+| `readPathOld_fill_iff_ascii` | The pre-fix Latin-1 decoding returned the bound path if and only if it was ASCII. | proved (NET-06, resolved) |
 
 ### DNS cache (`DnsCache.lean`)
 
@@ -502,6 +502,7 @@ Lean: `Flare.Bugs.NET_06.decode_encode_not_id` ("é" reads back as "Ã©"),
 Repro: `formal/repro/NET-06_uds_queried_path_latin1.mojo`, observed
 `BUG REPRODUCED: bound /tmp/flare_net06_é.sock ( 24 bytes) but queried_local_path() returned /tmp/flare_net06_Ã©.sock ( 26 bytes)`.
 Flip: `OK: queried_local_path() round-trips /tmp/flare_net06_é.sock`, exit 0.
+Status: resolved. `read_path_from_sockaddr_un` collects the bytes up to the NUL and builds the `String` from them as UTF-8; the model's `readPath` mirrors it (pre-fix: `readPathOld`; shipped: `readPath_fill`). Tests: `tests/uds/test_uds_listener.mojo::test_queried_local_path_round_trips_non_ascii`, `::test_sockaddr_un_round_trips_utf8`.
 
 ### NET-07: `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES`
 
@@ -878,7 +879,7 @@ lists record ids, not tokens.
 | `Flare.L2.Udp.readPort`, `readAddr4`, `readAddr6` | flare/net/_libc.mojo:303-397 | `impl_addr6`, `addr4_ok` | proved |
 | `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-285, 332-338 | `impl_addr6`, `old_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | proved; counterexample (NET-01) |
 | `Flare.L2.Uds.fill` | flare/uds/_libc.mojo:55-107 | `fill_len_le` | proved |
-| `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-133 | `readPath_fill_iff_ascii`, `NET_06.decode_encode_not_id` | counterexample (NET-06) |
+| `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-140 | `readPath_fill`, `readPathOld_fill_iff_ascii`, `NET_06.decode_encode_not_id` | proved; counterexample (NET-06, resolved) |
 | `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:82-95 | `key_fqdn_case`, `key_not_idempotent` | proved |
 | `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:97-151 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `store_size_bound` | proved; counterexample (NET-03, resolved) |
 | `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo:130-161 | `classIndex_fits`, `classIndex_least` | proved |

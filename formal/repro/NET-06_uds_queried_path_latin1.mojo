@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-06 fixed on fix/formal-findings
 """NET-06: UnixListener.queried_local_path() garbles non-ASCII paths.
 
 Lean: Flare.Bugs.NET_06.decode_encode_not_id (counterexample) and
@@ -6,7 +7,7 @@ Flare.Bugs.NET_06.decodeFixed_encode (fix meets spec).
 flare/uds/_libc.mojo:55-134 @59bda50.
 
 Expected: queried_local_path() == the path passed to bind().
-Actual: fill_sockaddr_un copies the path's UTF-8 bytes, but
+Before the fix: fill_sockaddr_un copies the path's UTF-8 bytes, but
 read_path_from_sockaddr_un turns every byte b into chr(b), i.e. decodes
 Latin-1 and re-encodes each byte >= 0x80 as two UTF-8 bytes. A path
 containing "é" (C3 A9) comes back as "Ã©".

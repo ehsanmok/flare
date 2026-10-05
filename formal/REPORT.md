@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61434 lines) |
+| Lean files | 298 (61442 lines) |
 | Theorems | 3232 |
 | Headline theorems in the axiom audit | 1034 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 39 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 40 of 138 |
 
 Six findings are rated high:
 
@@ -801,14 +801,14 @@ memory past the buffer untouched.
 
 #### UDS sockaddr_un (`Uds.lean`)
 
-uds/_libc.mojo:43-133: `fill_sockaddr_un` and `read_path_from_sockaddr_un`,
+uds/_libc.mojo:43-140: `fill_sockaddr_un` and `read_path_from_sockaddr_un`,
 for Linux (108-byte path) and macOS (104).
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `fill_len_le` | The returned `addrlen` fits `SOCKADDR_UN_SIZE` and equals the bytes written. | proved |
-| `readPathFixed_fill` | Decoding the bytes as UTF-8 returns the bound path, whatever follows in the buffer. | proved |
-| `readPath_fill_iff_ascii` | flare's Latin-1 decoding returns the bound path if and only if it is ASCII. | proved (NET-06) |
+| `readPath_fill` | The shipped decoder (bytes taken as UTF-8) returns the bound path, whatever follows in the buffer. | proved |
+| `readPathOld_fill_iff_ascii` | The pre-fix Latin-1 decoding returned the bound path if and only if it was ASCII. | proved (NET-06, resolved) |
 
 #### DNS cache (`DnsCache.lean`)
 
@@ -2733,7 +2733,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.Udp.readPort`, `readAddr4`, `readAddr6` | flare/net/_libc.mojo:303-397 | `impl_addr6`, `addr4_ok` | proved |
 | `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-285, 332-338 | `impl_addr6`, `old_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | proved; counterexample (NET-01) |
 | `Flare.L2.Uds.fill` | flare/uds/_libc.mojo:55-107 | `fill_len_le` | proved |
-| `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-133 | `readPath_fill_iff_ascii`, `NET_06.decode_encode_not_id` | counterexample (NET-06) |
+| `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-140 | `readPath_fill`, `readPathOld_fill_iff_ascii`, `NET_06.decode_encode_not_id` | proved; counterexample (NET-06, resolved) |
 | `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:82-95 | `key_fqdn_case`, `key_not_idempotent` | proved |
 | `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:97-151 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `store_size_bound` | proved; counterexample (NET-03, resolved) |
 | `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo:130-161 | `classIndex_fits`, `classIndex_least` | proved |
@@ -2996,7 +2996,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-03 | Low | resolved | `DnsCache` with a very large TTL never serves a hit | `Flare/Bugs/NET_03.lean` | `repro/NET-03_dns_cache_ttl_overflow.mojo` (any) |
 | NET-04 | Medium | resolved | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
 | NET-05 | Info | open | accepted fd leaks if the peer address fails to decode | `Flare/Bugs/NET_05.lean` | `repro/NET-05_accept_fd_leak_on_decode_error.mojo` (any) |
-| NET-06 | Low | open | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
+| NET-06 | Low | resolved | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
 | NET-07 | Medium | resolved | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
 | NET-08 | Low | open | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
 | NET-09 | Low | open | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
@@ -3375,6 +3375,7 @@ Lean: `Flare.Bugs.NET_06.decode_encode_not_id` ("é" reads back as "Ã©"),
 Repro: `formal/repro/NET-06_uds_queried_path_latin1.mojo`, observed
 `BUG REPRODUCED: bound /tmp/flare_net06_é.sock ( 24 bytes) but queried_local_path() returned /tmp/flare_net06_Ã©.sock ( 26 bytes)`.
 Flip: `OK: queried_local_path() round-trips /tmp/flare_net06_é.sock`, exit 0.
+Status: resolved. `read_path_from_sockaddr_un` collects the bytes up to the NUL and builds the `String` from them as UTF-8; the model's `readPath` mirrors it (pre-fix: `readPathOld`; shipped: `readPath_fill`). Tests: `tests/uds/test_uds_listener.mojo::test_queried_local_path_round_trips_non_ascii`, `::test_sockaddr_un_round_trips_utf8`.
 
 #### NET-07: `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES`
 

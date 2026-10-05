@@ -42,6 +42,7 @@ from flare.uds._libc import (
     SOCKADDR_UN_SIZE,
     SUN_PATH_MAX,
     fill_sockaddr_un,
+    read_path_from_sockaddr_un,
 )
 
 
@@ -85,6 +86,36 @@ def test_bind_then_query_local_path() raises:
     assert_equal(l.local_path(), p)
     var queried = l.queried_local_path()
     assert_equal(queried, p)
+
+
+def test_queried_local_path_round_trips_non_ascii() raises:
+    """NET-06: ``fill_sockaddr_un`` writes the path's UTF-8 bytes but the
+    reader turned every byte into ``chr(b)`` (Latin-1), so a path with
+    ``é`` (C3 A9) came back as ``Ã©``."""
+    var p = _tmp_uds_path("net06_é_日本")
+    _maybe_unlink(p)
+    var l = UnixListener.bind(p)
+    assert_equal(l.local_path(), p)
+    var queried = l.queried_local_path()
+    assert_equal(queried, p)
+    assert_equal(queried.byte_length(), p.byte_length())
+
+
+def test_sockaddr_un_round_trips_utf8() raises:
+    """NET-06: ``read_path_from_sockaddr_un`` inverts
+    ``fill_sockaddr_un`` for ASCII and non-ASCII paths, and ignores
+    whatever follows the NUL terminator."""
+    var paths = List[String]()
+    paths.append(String("/tmp/plain.sock"))
+    paths.append(String("/tmp/é.sock"))
+    paths.append(String("/tmp/日本語/ü.sock"))
+    for i in range(len(paths)):
+        var buf = stack_allocation[128, UInt8]()
+        for k in range(128):
+            buf.unsafe_offset(k).unsafe_write(UInt8(0x7F))  # junk after path
+        var used = fill_sockaddr_un(buf, paths[i])
+        var back = read_path_from_sockaddr_un(buf, used)
+        assert_equal(back, paths[i])
 
 
 def test_bind_unlinks_stale_socket_by_default() raises:

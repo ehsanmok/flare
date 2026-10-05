@@ -77,8 +77,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.Udp.impl_addr6
 #print axioms Flare.L2.Udp.addr4_ok
 #print axioms Flare.L2.Uds.fill_len_le
-#print axioms Flare.L2.Uds.readPathFixed_fill
-#print axioms Flare.L2.Uds.readPath_fill_iff_ascii
+#print axioms Flare.L2.Uds.readPath_fill
+#print axioms Flare.L2.Uds.readPathOld_fill_iff_ascii
 -- DnsCache
 #print axioms Flare.L2.DnsCache.store_size_bound
 #print axioms Flare.L2.DnsCache.store_hits_within_ttl

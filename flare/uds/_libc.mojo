@@ -117,7 +117,10 @@ def read_path_from_sockaddr_un(
 
     The path is read from offset 2 (past the family-prefix bytes
     on both Linux + macOS) up to the first NUL byte or
-    ``used_len - 2``, whichever comes first.
+    ``used_len - 2``, whichever comes first. The bytes are taken as
+    UTF-8 (what :func:`fill_sockaddr_un` wrote), so a non-ASCII path
+    round-trips exactly. Meant for addresses flare bound itself; a
+    foreign socket name that is not valid UTF-8 is not validated.
     """
     var path_offset: Int = 2
     var max_len = Int(used_len) - path_offset
@@ -125,13 +128,16 @@ def read_path_from_sockaddr_un(
         return String("")
     if max_len > SUN_PATH_MAX:
         max_len = SUN_PATH_MAX
-    var out = String(capacity_bytes=max_len + 1)
+    # Collect the raw bytes and build the String from them as UTF-8, the
+    # encoding ``fill_sockaddr_un`` wrote (``chr(b)`` per byte would decode
+    # Latin-1 and re-encode every byte >= 0x80 as two bytes).
+    var out = List[UInt8](capacity=max_len)
     for i in range(max_len):
         var b = buf.unsafe_offset(path_offset + i).unsafe_load()
         if b == 0:
             break
-        out += chr(Int(b))
-    return out^
+        out.append(b)
+    return String(unsafe_from_utf8=Span[UInt8, _](out))
 
 
 def unlink_path(var path: String) -> c_int:

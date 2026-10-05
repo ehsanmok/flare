@@ -40,7 +40,7 @@ which no POSIX call can close (there is no unlink-if-inode).
 -/
 namespace Flare.L2.UdsListener
 
-/-- what `lstat_kind` reports (uds/_libc.mojo:146-180) -/
+/-- what `lstat_kind` reports (uds/_libc.mojo:152-186) -/
 inductive Kind where
   | none
   | sock (dev ino : Nat)

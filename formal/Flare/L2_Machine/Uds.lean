@@ -3,12 +3,13 @@ import Flare.Core
 /-!
 # Unix-domain sockets: the `sockaddr_un` path codec
 
-`flare/uds/_libc.mojo:55-134`. `fill_sockaddr_un` writes a 2-byte family
+`flare/uds/_libc.mojo:55-140`. `fill_sockaddr_un` writes a 2-byte family
 prefix, the path's UTF-8 bytes and a NUL; `read_path_from_sockaddr_un`
 reads bytes from offset 2 up to the first NUL (at most
-`min(used_len - 2, SUN_PATH_MAX)` bytes) and appends `chr(b)` for each byte
-`b`, i.e. it decodes Latin-1 and re-encodes every byte `≥ 0x80` as a
-2-byte UTF-8 sequence.
+`min(used_len - 2, SUN_PATH_MAX)` bytes) and builds the `String` from them as
+UTF-8 (fixed, NET-06). Before the fix it appended `chr(b)` for each byte `b`
+(`readPathOld`), i.e. it decoded Latin-1 and re-encoded every byte `≥ 0x80`
+as a 2-byte UTF-8 sequence.
 
 A Mojo `String` is modelled by its UTF-8 bytes (`Bytes`); `out += chr(b)`
 appends the UTF-8 encoding of code point `b`. The family-prefix bytes are
@@ -42,13 +43,15 @@ def latin1ToUtf8 : Bytes → Bytes
 def rawPath (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
   ((buf.drop 2).take (min (usedLen - 2) (sunPathMax linux))).takeWhile (· != 0)
 
-/-- mirrors flare/uds/_libc.mojo:110-133 @59bda50 -/
-def readPath (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
+/-- Pre-fix decoder: `out += chr(Int(b))` per byte
+(flare/uds/_libc.mojo:110-133 @59bda50). -/
+def readPathOld (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
   latin1ToUtf8 (rawPath linux buf usedLen)
 
-/-- The minimal fix: build the `String` from the collected bytes as UTF-8
-(`String(unsafe_from_utf8=...)`), as `fill_sockaddr_un` encoded them. -/
-def readPathFixed (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
+/-- The shipped decoder: the collected bytes become the `String` as UTF-8
+(`String(unsafe_from_utf8=...)`), as `fill_sockaddr_un` encoded them.
+mirrors flare/uds/_libc.mojo:110-140 (fixed, NET-06) -/
+def readPath (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
   rawPath linux buf usedLen
 
 /-- the used length `fill` returns fits the buffer -/
@@ -80,9 +83,9 @@ theorem takeWhile_take_path (p rest : Bytes) (hp : ∀ b ∈ p, b ≠ 0) :
 /-- **Fix meets spec**: whatever `used_len` the kernel reports (at least the
 filled length) and whatever follows the NUL, the fixed decoder returns the
 bound path. -/
-theorem readPathFixed_fill (linux : Bool) (h0 h1 : UInt8) (p b rest : Bytes) (n usedLen : Nat)
+theorem readPath_fill (linux : Bool) (h0 h1 : UInt8) (p b rest : Bytes) (n usedLen : Nat)
     (h : fill linux h0 h1 p = some (b, n)) (hu : n ≤ usedLen) :
-    readPathFixed linux (b ++ rest) usedLen = p := by
+    readPath linux (b ++ rest) usedLen = p := by
   unfold fill at h
   split at h
   · cases h
@@ -91,7 +94,7 @@ theorem readPathFixed_fill (linux : Bool) (h0 h1 : UInt8) (p b rest : Bytes) (n 
     · cases h
     · rename_i hnul
       cases h
-      unfold readPathFixed rawPath
+      unfold readPath rawPath
       simp only [List.append_assoc, List.cons_append, List.nil_append, List.drop_succ_cons,
         List.drop_zero]
       exact takeWhile_take_path p rest (fun b hb hb0 => hnul (hb0 ▸ hb)) _
@@ -119,14 +122,14 @@ theorem latin1ToUtf8_ascii (p : Bytes) (h : ∀ b ∈ p, b < 0x80) : latin1ToUtf
     simp only [latin1ToUtf8, chrUtf8]
     rw [if_pos (h b (by simp)), ih (fun x hx => h x (by simp [hx]))]; rfl
 
-/-- **Characterisation of the defect**: flare's decoder returns the bound
+/-- **Characterisation of the defect**: the pre-fix decoder returns the bound
 path exactly when every byte of it is ASCII; any non-ASCII path comes back
 longer (each byte `≥ 0x80` becomes two). -/
-theorem readPath_fill_iff_ascii (linux : Bool) (h0 h1 : UInt8) (p b rest : Bytes) (n usedLen : Nat)
+theorem readPathOld_fill_iff_ascii (linux : Bool) (h0 h1 : UInt8) (p b rest : Bytes) (n usedLen : Nat)
     (h : fill linux h0 h1 p = some (b, n)) (hu : n ≤ usedLen) :
-    readPath linux (b ++ rest) usedLen = p ↔ ∀ x ∈ p, x < 0x80 := by
-  have hr : rawPath linux (b ++ rest) usedLen = p := readPathFixed_fill linux h0 h1 p b rest n usedLen h hu
-  unfold readPath; rw [hr]
+    readPathOld linux (b ++ rest) usedLen = p ↔ ∀ x ∈ p, x < 0x80 := by
+  have hr : rawPath linux (b ++ rest) usedLen = p := readPath_fill linux h0 h1 p b rest n usedLen h hu
+  unfold readPathOld; rw [hr]
   constructor
   · intro he x hx
     have hl := congrArg List.length he
