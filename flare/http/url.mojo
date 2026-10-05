@@ -10,7 +10,9 @@ but ignored for request purposes (not sent to server per RFC 7230 §5.1).
 Component boundaries follow RFC 3986 §3: the fragment starts at the
 first ``#``, and the authority ends at the first ``/``, ``?`` or ``#``,
 so ``http://evil.com?@good.com/`` has host ``evil.com`` and query
-``@good.com/`` (an ``@`` in the query is never userinfo).
+``@good.com/`` (an ``@`` in the query is never userinfo). Userinfo ends at the last
+``@`` of the authority, so ``http://a@evil.com@good.com/`` has host
+``good.com`` and no host ever contains ``@``.
 
 Example:
     ```mojo
@@ -157,7 +159,11 @@ struct Url(Movable):
 
         # ── 5. Host and port ──────────────────────────────────────────────────
         # Strip optional userinfo (user:pass@) — we don't support auth.
-        var at_pos = _find(authority, "@")
+        # Cut at the LAST ``@``: userinfo may not contain a raw ``@`` but
+        # lenient senders put one there, and no host form contains one
+        # (RFC 3986 sec 3.2.2; WHATWG and curl split at the last ``@``), so
+        # ``http://a@evil.com@good.com/`` has host ``good.com`` (APP-25).
+        var at_pos = _rfind(authority, "@")
         if at_pos >= 0:
             authority = String(
                 String(unsafe_from_utf8=authority.as_bytes()[at_pos + 1 :])

@@ -80,8 +80,8 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Form.urldecode_valid
 #print axioms Flare.L4.Url.parsePort_iff
 #print axioms Flare.L4.Url.parse_port
-#print axioms Flare.L4.Url.parseFixed_spec
-#print axioms Flare.L4.Url.parseOld_eq_parseFixed_of_clean
+#print axioms Flare.L4.Url.parse_spec
+#print axioms Flare.L4.Url.parseOld_eq_parse_of_clean
 -- Reliability: RateLimit / CircuitBreaker / Retry
 #print axioms Flare.L4.RateLimit.step_eq_spec
 #print axioms Flare.L4.RateLimit.step_inv

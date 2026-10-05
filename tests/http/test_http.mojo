@@ -287,6 +287,25 @@ def test_url_fragment_starts_at_first_hash() raises:
     assert_equal(v.fragment, "a#b")
 
 
+def test_url_userinfo_split_at_last_at() raises:
+    """APP-25: userinfo ends at the LAST '@' of the authority, so a second
+    '@' cannot leave an '@' in the host (WHATWG / curl pick ``good.com``)."""
+    var u = Url.parse("http://a@evil.com@good.com/")
+    assert_equal(u.host, "good.com")
+    assert_equal(Int(u.port), 80)
+    assert_equal(u.path, "/")
+    var v = Url.parse("https://user:p@ss@good.com:8443/x?y=1")
+    assert_equal(v.host, "good.com")
+    assert_equal(Int(v.port), 8443)
+    assert_equal(v.path, "/x")
+    assert_equal(v.query, "y=1")
+    # A single '@' and no '@' behave as before.
+    assert_equal(Url.parse("http://user:pw@example.com/").host, "example.com")
+    assert_equal(Url.parse("http://example.com/").host, "example.com")
+    # An '@' in the path or query is never userinfo.
+    assert_equal(Url.parse("http://example.com/a@b").host, "example.com")
+
+
 def test_url_empty_path() raises:
     """Url.parse() with no path component must use '/'."""
     var u = Url.parse("http://example.com")

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-25 fixed on fix/formal-findings
 """APP-25: Url.parse strips userinfo at the first '@', leaving '@' in the host.
 
 Lean: Flare.Bugs.APP_25.host_has_at (counterexample) and
@@ -12,7 +13,7 @@ cannot hold an unescaped '@').
 Expected: either a UrlParseError, or the host WHATWG browsers and curl
 pick, "good.com" (split at the LAST '@'). In no case a host containing
 '@' (RFC 3986 sec 3.2.2: no host form allows it).
-Actual: host "evil.com@good.com".
+Before the fix: host "evil.com@good.com".
 
 Minimal fix: `_rfind(authority, "@")` instead of `_find(authority, "@")`
 (or raise when more than one '@' is present).

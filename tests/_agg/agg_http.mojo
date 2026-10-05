@@ -1831,6 +1831,9 @@ from test_http import (
 from test_http import (
     test_url_fragment_starts_at_first_hash as test_http__test_url_fragment_starts_at_first_hash,
 )
+from test_http import (
+    test_url_userinfo_split_at_last_at as test_http__test_url_userinfo_split_at_last_at,
+)
 from test_http import test_url_empty_path as test_http__test_url_empty_path
 from test_http import (
     test_url_fragment_stripped as test_http__test_url_fragment_stripped,
@@ -5311,6 +5314,7 @@ def main() raises:
     suite.test[test_http__test_url_query_string]()
     suite.test[test_http__test_url_authority_ends_at_query]()
     suite.test[test_http__test_url_fragment_starts_at_first_hash]()
+    suite.test[test_http__test_url_userinfo_split_at_last_at]()
     suite.test[test_http__test_url_empty_path]()
     suite.test[test_http__test_url_fragment_stripped]()
     suite.test[test_http__test_url_no_scheme_raises]()

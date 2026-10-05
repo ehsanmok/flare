@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62224 lines) |
+| Lean files | 298 (62233 lines) |
 | Theorems | 3269 |
 | Headline theorems in the axiom audit | 1068 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 79 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 80 of 138 |
 
 Six findings are rated high:
 
@@ -1995,8 +1995,8 @@ other line. The spec is RFC 3986 §3.2:
 | `Flare.L4.Url.parsePort_iff`, `parsePort_fits` | `_parse_port` accepts exactly 1-5 digits with value 1..65535, and the accumulator cannot overflow | proved |
 | `Flare.L4.Url.parse_port` | every successful parse has `1 <= port <= 65535` | proved |
 | `Flare.L4.Url.hostPort_ipv6_port`, `hostPort_regname` | IPv6 brackets are stripped; a plain `host:port` is recovered exactly | proved |
-| `Flare.L4.Url.parseFixed_spec` | the fixed parser meets both host specs for all inputs | proved |
-| `Flare.L4.Url.parseOld_eq_parseFixed_of_clean` | the pre-fix parser (`parseOld`) equals the fully fixed one on inputs with no `?`, no `#` and at most one `@` | proved |
+| `Flare.L4.Url.parse_spec` | the shipped parser meets both host specs for all inputs | proved |
+| `Flare.L4.Url.parseOld_eq_parse_of_clean` | the pre-fix parser (`parseOld`) equals the shipped one on inputs with no `?`, no `#` and at most one `@` | proved |
 | `Flare.Bugs.APP_23.host_confusion`, `APP_25.host_has_at` | host-confusion witnesses | counterexample |
 
 #### 11. Reliability: RateLimit, CircuitBreaker, Retry
@@ -2920,9 +2920,10 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-228 | `originAllowed_sound`, `acao_not_star_with_creds`, `serve_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
 | `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-270 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
-| `Flare.L4.Url.parse`, `parseWith`, `parsePort` | http/url.mojo:73-299 | `parsePort_iff`, `parse_port`, `parseFixed_spec` | APP-23, APP-25 |
+| `Flare.L4.Url.parse`, `parseWith`, `parsePort` | http/url.mojo:73-299 | `parsePort_iff`, `parse_port`, `parse_spec` | APP-23, APP-25 |
 | `Flare.L4.RateLimit.step` (pre-fix: `stepOld`), `spec` | http/reliability.mojo:361-404 | `step_eq_spec`, `step_inv`, `overflow_iff` | resolved (APP-40) |
-| `Flare.L4.CircuitBreaker.stepG`, `step` | http/reliability.mojo:413-485 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
+| `Flare.L4.CircuitBreaker.stepG`, `step` | http/reliability.mojo:397-469 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
+| `Flare.L4.RateLimit.step`, `spec` | http/reliability.mojo:358-394 | `step_eq_spec`, `step_inv`, `overflow_iff` | APP-40 |
 | `Flare.L4.Retry.budget`, `sleep`, `serve` | http/reliability.mojo:164-271 | `budget_eq_spec`, `sleep_bounds`, `serve_calls_bounded` | proved |
 | `Flare.L4.Redirect.resolveLocation`, `sameOrigin`, `decideR`, `sendLoop` | http/redirect_policy.mojo:154-354; http/client.mojo:2196-2281 | `sendLoop_terminates`, `sendLoop_confined`, `decide_method_rfc` | APP-43, APP-44, APP-45 |
 | `Flare.L4.ClientPool.release`, `acquire`, `popLoop`, `total` | http/client_pool.mojo:86-102, 203-293 | `inv_inductive`, `caps`, `acquire_same_origin` | proved |
@@ -3105,7 +3106,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-22 | Low | resolved | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
 | APP-23 | Medium | resolved | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
 | APP-24 | Medium | resolved | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
-| APP-25 | Low | open | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
+| APP-25 | Low | resolved | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
 | APP-26 | Medium | resolved | Compress re-encodes a 206 Partial Content body and keeps its `Content-Range` | `Flare/Bugs/APP_26.lean` | `repro/APP-26_compress_encodes_partial_content.mojo` (any) |
 | APP-27 | Low | open | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
 | APP-40 | Medium | resolved | the RateLimit refill product wraps after a long idle period | `Flare/Bugs/APP_40.lean` | `repro/APP-40_ratelimit_refill_overflow.mojo` (any) |
@@ -5012,10 +5013,10 @@ differs from the one WHATWG and curl pick.
 
 **RFC clause.** RFC 3986 §3.2.2: no host form contains `@`.
 
-**What goes wrong.** `url.mojo:143-148` splits at the first `@`, so
+**What goes wrong.** `url.mojo:143-148` (before the fix) split at the first `@`, so
 `http://a@evil.com@good.com/` gives host `evil.com@good.com`.
 
-**Lean.** `Flare.Bugs.APP_25.host_has_at`. The fix is proved sufficient by
+**Lean.** `Flare.Bugs.APP_25.host_has_at` (on `stripUserinfoOld`). The fix is proved sufficient by
 `implFixed_meets_spec` and `Flare.L4.Url.parseWith_fixedStrip_noAt`.
 
 **Fix.** Use `_rfind(authority, "@")`.
@@ -5024,6 +5025,8 @@ differs from the one WHATWG and curl pick.
 
 - Observed: `BUG REPRODUCED: Url.parse('http://a@evil.com@good.com/').host = 'evil.com@good.com' contains '@' (WHATWG/curl host: 'good.com')`
 - Flip: `OK: host has no '@': good.com`
+
+Status: resolved. Url.parse strips userinfo through the last `@` (`_rfind(authority, "@")`), so `http://a@evil.com@good.com/` has host `good.com` and no host contains `@`. Tests: `tests/http/test_http.mojo::test_url_userinfo_split_at_last_at`. Decision: split at the last `@` (WHATWG/curl behaviour) rather than raise.
 
 #### APP-26: Compress re-encodes a 206 Partial Content body and keeps its `Content-Range`
 
