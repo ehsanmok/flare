@@ -70,6 +70,10 @@ from .varint import (
 )
 
 
+comptime _MAX_STREAM_COUNT: UInt64 = UInt64(1) << 60
+"""RFC 9000 sec 4.6: the largest valid MAX_STREAMS / STREAMS_BLOCKED value."""
+
+
 # ── Frame type constants (RFC 9000 §19 master table) ──────────────────────────
 
 
@@ -845,6 +849,10 @@ def parse_frame_into[
         return pos
     if t == FRAME_TYPE_MAX_STREAMS_BIDI or t == FRAME_TYPE_MAX_STREAMS_UNI:
         var v = _read_varint(buf, pos)
+        # RFC 9000 sec 4.6 / 19.11: a count above 2^60 cannot be a stream
+        # count (stream ids are below 2^62).
+        if v > _MAX_STREAM_COUNT:
+            raise Error("FRAME_ENCODING_ERROR: MAX_STREAMS > 2^60")
         handler.on_max_streams(
             MaxStreamsFrame(
                 unidirectional=t == FRAME_TYPE_MAX_STREAMS_UNI,
@@ -868,6 +876,9 @@ def parse_frame_into[
         or t == FRAME_TYPE_STREAMS_BLOCKED_UNI
     ):
         var v = _read_varint(buf, pos)
+        # RFC 9000 sec 19.14: the same bound as MAX_STREAMS.
+        if v > _MAX_STREAM_COUNT:
+            raise Error("FRAME_ENCODING_ERROR: STREAMS_BLOCKED > 2^60")
         handler.on_streams_blocked(
             StreamsBlockedFrame(
                 unidirectional=t == FRAME_TYPE_STREAMS_BLOCKED_UNI,

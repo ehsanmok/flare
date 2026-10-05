@@ -756,6 +756,26 @@ def test_unknown_frame_type_rejected_for_every_codepoint() raises:
         assert_equal(rec.handshake_done_count, 0)
 
 
+def test_stream_count_frames_above_2p60_rejected() raises:
+    """QUIC-02 (RFC 9000 sec 4.6, 19.11, 19.14): a MAX_STREAMS or
+    STREAMS_BLOCKED value above 2^60 is a FRAME_ENCODING_ERROR; 2^60
+    itself is the largest valid value."""
+    for t in [0x12, 0x13, 0x16, 0x17]:
+        var over = _bytes(t, 0xD0, 0, 0, 0, 0, 0, 0, 0x01)  # 2^60 + 1
+        var rec = _empty_recorder()
+        var raised = False
+        try:
+            _ = parse_frame_into(Span[UInt8, _](over), rec)
+        except e:
+            raised = True
+            assert_true("FRAME_ENCODING_ERROR" in String(e))
+        assert_true(raised, "2^60 + 1 accepted for frame type " + String(t))
+        var at = _bytes(t, 0xD0, 0, 0, 0, 0, 0, 0, 0x00)  # 2^60
+        var rec2 = _empty_recorder()
+        var n = parse_frame_into(Span[UInt8, _](at), rec2)
+        assert_equal(n, 9)
+
+
 def test_truncated_crypto_rejected() raises:
     # 0x06 (CRYPTO) + offset varint 0 + length varint 8, then only
     # 2 payload bytes -- parser must reject.
@@ -825,7 +845,8 @@ def main() raises:
     test_handshake_done_round_trip()
     test_unknown_frame_type_rejected()
     test_unknown_frame_type_rejected_for_every_codepoint()
+    test_stream_count_frames_above_2p60_rejected()
     test_truncated_crypto_rejected()
     test_datagram_with_length_round_trip()
     test_datagram_no_length_runs_to_end()
-    print("test_quic_frame: 29 passed")
+    print("test_quic_frame: 30 passed")

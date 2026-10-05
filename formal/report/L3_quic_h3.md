@@ -23,7 +23,7 @@ Files: `Quic/Wire.lean`, `Quic/Frame.lean`, `Quic/FrameProps.lean`.
 - `kindOf` is the type-test chain of `parse_frame_into` (`frame.mojo:753-957`), in source order.
 - `body` dispatches on the resulting `Kind` to one small parser per frame type. Each parser mirrors its branch of `frame.mojo`.
 - `parsePayload` mirrors the `dispatch_frames` loop (`state.mojo:842-858`).
-- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01 fixed), `Fixes.all` has all three.
+- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01 and QUIC-02 fixed), `Fixes.all` has all three.
 
 Proofs are per-branch lemmas combined with `cases` on `Kind`; there is no case split over the whole parser.
 
@@ -332,11 +332,13 @@ Status: resolved. Fixed: `parse_frame_into` raises `FRAME_ENCODING_ERROR` for a 
 
 ### QUIC-02: MAX_STREAMS and STREAMS_BLOCKED above 2^60 are accepted
 
+Status: resolved. MAX_STREAMS / STREAMS_BLOCKED values above 2^60 are now a FRAME_ENCODING_ERROR (frame.mojo).
+
 - **Severity:** Low. The value reaches the stream-limit bookkeeping unchecked; no memory-safety effect was found.
 - **RFC:** RFC 9000 §4.6 and §19.11 (MAX_STREAMS) and §19.14 (STREAMS_BLOCKED): a value greater than 2^60 MUST cause a FRAME_ENCODING_ERROR.
 - **What goes wrong:** `frame.mojo:853-861` and `873-884` pass the decoded varint to the handler without a bound check.
 - **Counterexample:** `Bugs.QUIC_02.max_streams_accepted` and `streams_blocked_accepted`: `12 d0 00 00 00 00 00 00 01` and the same wire with type `16` parse with value 2^60 + 1. `violates_spec` shows the result breaks `RfcFrameOk`.
-- **Fix:** raise when `v > 1 << 60` in both branches. `fixed_rejects`, `fixed_meets_spec` and `Frame.parseFrameFixed_ok` show this suffices.
+- **Fix:** raise when `v > 1 << 60` in both branches. `fixed_rejects`, `shipped_rejects` (the shipped parser), `fixed_meets_spec` and `Frame.parseFrameFixed_ok` show this suffices. The counterexamples now run against `parseOld`, the parser before the fix.
 - **Repro:** `formal/repro/QUIC-02_max_streams_over_2p60_accepted.mojo`
 - **Observed:** `BUG REPRODUCED: frame types 0x12 0x16 with value 2^60+1 accepted (FRAME_ENCODING_ERROR expected)`
 - **Flip:** `OK: MAX_STREAMS / STREAMS_BLOCKED above 2^60 rejected`, exit 0.

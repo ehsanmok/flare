@@ -3,7 +3,12 @@ import Flare.L3_Protocol.Quic.FrameProps
 /-!
 # QUIC-02: MAX_STREAMS / STREAMS_BLOCKED above 2^60 are accepted
 
-flare/quic/frame.mojo:853-861 and 873-884 @59bda50 decode the
+Status: resolved. `parse_frame_into` raises FRAME_ENCODING_ERROR when a
+MAX_STREAMS or STREAMS_BLOCKED value exceeds 2^60 (flare/quic/frame.mojo,
+`_MAX_STREAM_COUNT`). The counterexamples below are about the pre-fix parser,
+`parseOld`; `parseFrame` is the shipped one (`Fixes.shipped`).
+
+Pre-fix behaviour: flare/quic/frame.mojo:853-861 and 873-884 @59bda50 decode the
 `maximum_streams` varint and hand it to the handler with no bound.
 
 Spec clause: RFC 9000 §4.6 / §19.11, "If a max_streams transport parameter
@@ -23,15 +28,18 @@ def errOf {α : Type} : Except Err α → Option Err
   | .error e => some e
   | .ok _ => none
 
+/-- The parser before this fix (QUIC-01 in, QUIC-02 out). -/
+def parseOld : Bytes → Except Err (Frame × Nat) := parseFrameWith ⟨true, false, false⟩
+
 def maxStreamsWire : Bytes := [0x12, 0xD0, 0, 0, 0, 0, 0, 0, 0x01]
 def streamsBlockedWire : Bytes := [0x16, 0xD0, 0, 0, 0, 0, 0, 0, 0x01]
 
 theorem max_streams_accepted :
-    (parseFrame maxStreamsWire).toOption = some (.maxStreams false (2 ^ 60 + 1), 9) := by
+    (parseOld maxStreamsWire).toOption = some (.maxStreams false (2 ^ 60 + 1), 9) := by
   native_decide
 
 theorem streams_blocked_accepted :
-    (parseFrame streamsBlockedWire).toOption = some (.streamsBlocked false (2 ^ 60 + 1), 9) := by
+    (parseOld streamsBlockedWire).toOption = some (.streamsBlocked false (2 ^ 60 + 1), 9) := by
   native_decide
 
 theorem violates_spec :
@@ -43,6 +51,15 @@ theorem fixed_rejects :
     errOf (parseFrameFixed maxStreamsWire) =
       some (.raise "FRAME_ENCODING_ERROR: MAX_STREAMS > 2^60") ∧
     errOf (parseFrameFixed streamsBlockedWire) =
+      some (.raise "FRAME_ENCODING_ERROR: STREAMS_BLOCKED > 2^60") := by
+  constructor <;> native_decide
+
+/-- **The shipped parser rejects both** (and nothing above 2^60 gets through,
+for any input, once QUIC-03 lands: `parseFrameFixed_ok`). -/
+theorem shipped_rejects :
+    errOf (parseFrame maxStreamsWire) =
+      some (.raise "FRAME_ENCODING_ERROR: MAX_STREAMS > 2^60") ∧
+    errOf (parseFrame streamsBlockedWire) =
       some (.raise "FRAME_ENCODING_ERROR: STREAMS_BLOCKED > 2^60") := by
   constructor <;> native_decide
 

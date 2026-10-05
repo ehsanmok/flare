@@ -95,7 +95,7 @@ structure Fixes where
 def Fixes.none : Fixes := ⟨false, false, false⟩
 def Fixes.all : Fixes := ⟨true, true, true⟩
 /-- The fixes present in `flare/quic/frame.mojo` now. -/
-def Fixes.shipped : Fixes := ⟨true, false, false⟩
+def Fixes.shipped : Fixes := ⟨true, true, false⟩
 
 /-- The type tests of the dispatch, in source order.
 mirrors flare/quic/frame.mojo:753-957 @59bda50 -/

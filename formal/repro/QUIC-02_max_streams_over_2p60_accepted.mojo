@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-02 fixed on fix/formal-findings
 """QUIC-02: MAX_STREAMS / STREAMS_BLOCKED values above 2^60 are accepted.
 
 Lean: Flare.Bugs.QUIC_02.max_streams_accepted / violates_spec, and
@@ -10,7 +11,7 @@ close the connection with FRAME_ENCODING_ERROR; sec 19.14: the same for
 STREAMS_BLOCKED.
 
 Expected: 12 d0 00 00 00 00 00 00 01 (MAX_STREAMS bidi = 2^60 + 1) raises.
-Actual: accepted silently.
+Before the fix: accepted silently.
 
 Minimal fix: in parse_frame_into, raise when the MAX_STREAMS or
 STREAMS_BLOCKED value exceeds 1 << 60.
