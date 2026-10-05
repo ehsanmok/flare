@@ -156,6 +156,9 @@ def _resolve_location(base_url: String, location: String) raises -> String:
 
     Accepts:
     - Absolute URLs (``http://...`` / ``https://...``).
+    - Network-path references (``//host/path``, RFC 3986 §4.2): the
+      reference's authority replaces the base's, only the scheme is
+      inherited.
     - Origin-relative URLs (``/path?query``).
     - Relative URLs without a leading slash (resolved against
       base's directory — rare in practice but RFC-allowed).
@@ -169,6 +172,8 @@ def _resolve_location(base_url: String, location: String) raises -> String:
     var base = Url.parse(base_url)
     var origin = base.scheme + "://" + base.host + ":" + String(Int(base.port))
     if Int(location.unsafe_ptr()[unsafe_offset=0]) == ord("/"):
+        if location.startswith("//"):
+            return base.scheme + ":" + location
         return origin + location
     # Relative without leading slash — resolve against base's
     # request-target without the trailing filename segment.

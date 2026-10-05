@@ -2478,6 +2478,12 @@ from test_redirect_policy import (
     test_origin_relative_location_resolves_against_base_origin as test_redirect_policy__test_origin_relative_location_resolves_against_base_origin,
 )
 from test_redirect_policy import (
+    test_network_path_location_replaces_the_authority as test_redirect_policy__test_network_path_location_replaces_the_authority,
+)
+from test_redirect_policy import (
+    test_network_path_location_is_cross_origin_for_same_origin_only as test_redirect_policy__test_network_path_location_is_cross_origin_for_same_origin_only,
+)
+from test_redirect_policy import (
     test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth as test_redirect_policy__test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth,
 )
 from test_reliability import (
@@ -5642,6 +5648,12 @@ def main() raises:
     suite.test[test_redirect_policy__test_absolute_http_location_resolves]()
     suite.test[
         test_redirect_policy__test_origin_relative_location_resolves_against_base_origin
+    ]()
+    suite.test[
+        test_redirect_policy__test_network_path_location_replaces_the_authority
+    ]()
+    suite.test[
+        test_redirect_policy__test_network_path_location_is_cross_origin_for_same_origin_only
     ]()
     suite.test[
         test_redirect_policy__test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth

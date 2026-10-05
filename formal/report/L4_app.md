@@ -1088,6 +1088,8 @@ and `resolveFixed_other`.
 - Observed: `BUG REPRODUCED: '//cdn.example.net/img' against https://api.example.com/a resolved to https://api.example.com:443//cdn.example.net/img ; decide next_url https://api.example.com:443//cdn.example.net/img forward_authorization True`
 - Flip: `OK: network-path Location resolved to https://cdn.example.net/img`
 
+Status: resolved. `_resolve_location` returns `base.scheme + ":" + location` for a reference starting with `//`. Tests: `tests/http/test_redirect_policy.mojo::test_network_path_location_replaces_the_authority` and `::test_network_path_location_is_cross_origin_for_same_origin_only` (the second covers `same_origin_only` rejecting the hop and a `//` reference naming the same host staying same-origin). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation`; the counterexamples are about the pre-fix `resolveLocationOld`, and `Flare.Bugs.APP_43.resolveLocation_network_path` is stated about the shipped one.
+
 ### APP-44: `_same_origin` compares hosts case-sensitively
 
 **Severity: Low.** The failure is fail-safe: the redirect is refused

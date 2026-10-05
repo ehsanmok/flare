@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-43 fixed on fix/formal-findings
 """APP-43: a scheme-relative (network-path) Location such as
 "//cdn.example.net/img" is resolved as a path on the current origin.
 
@@ -17,7 +18,7 @@ Expected: _resolve_location("https://api.example.com/a",
 "//cdn.example.net/img") == "https://cdn.example.net/img", and
 RedirectPolicy.decide follows to that URL (cross-origin, so
 Authorization is not forwarded).
-Actual: "https://api.example.com:443//cdn.example.net/img"; decide
+Before the fix: "https://api.example.com:443//cdn.example.net/img"; decide
 treats the hop as same-origin, so the redirect lands on the wrong
 resource (and same_origin_only does not reject it).
 

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62269 lines) |
+| Lean files | 298 (62294 lines) |
 | Theorems | 3270 |
-| Headline theorems in the axiom audit | 1069 |
+| Headline theorems in the axiom audit | 1070 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 82 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 83 of 138 |
 
 Six findings are rated high:
 
@@ -3113,7 +3113,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-40 | Medium | resolved | the RateLimit refill product wraps after a long idle period | `Flare/Bugs/APP_40.lean` | `repro/APP-40_ratelimit_refill_overflow.mojo` (any) |
 | APP-41 | Medium | resolved | CircuitBreaker measures the cooldown from the start of the failing request | `Flare/Bugs/APP_41.lean` | `repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (any) |
 | APP-42 | Low | resolved | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
-| APP-43 | Low | open | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
+| APP-43 | Low | resolved | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
 | APP-44 | Low | open | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
 | APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
 | APP-46 | Medium | resolved | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
@@ -5183,6 +5183,8 @@ and `resolveFixed_other`.
 
 - Observed: `BUG REPRODUCED: '//cdn.example.net/img' against https://api.example.com/a resolved to https://api.example.com:443//cdn.example.net/img ; decide next_url https://api.example.com:443//cdn.example.net/img forward_authorization True`
 - Flip: `OK: network-path Location resolved to https://cdn.example.net/img`
+
+Status: resolved. `_resolve_location` returns `base.scheme + ":" + location` for a reference starting with `//`. Tests: `tests/http/test_redirect_policy.mojo::test_network_path_location_replaces_the_authority` and `::test_network_path_location_is_cross_origin_for_same_origin_only` (the second covers `same_origin_only` rejecting the hop and a `//` reference naming the same host staying same-origin). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation`; the counterexamples are about the pre-fix `resolveLocationOld`, and `Flare.Bugs.APP_43.resolveLocation_network_path` is stated about the shipped one.
 
 #### APP-44: `_same_origin` compares hosts case-sensitively
 

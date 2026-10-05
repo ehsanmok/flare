@@ -8,7 +8,8 @@ with characters on ASCII input):
 
 * `parse`: `Url.parse` (flare/http/url.mojo:73-197) including userinfo
   stripping, IPv6 brackets, default ports and `_parse_port`.
-* `resolveLocation`: `_resolve_location` (redirect_policy.mojo:154-185).
+* `resolveLocation`: `_resolve_location` (redirect_policy.mojo:154-188); `resolveLocationOld`
+  is the pre-fix code at 59bda50.
 * `sameOrigin`: `_same_origin` (redirect_policy.mojo:188-198).
 * `decideR`: `RedirectPolicy.decide` (redirect_policy.mojo:271-354).
 * `sendLoop`: the redirect-following loop of `HttpClient._send_once`
@@ -139,13 +140,26 @@ def dirOf (target : Str) : Str :=
   | some i => target.take (i + 1)
   | none => target
 
-/-- mirrors flare/http/redirect_policy.mojo:154-185 @59bda50 -/
+/-- The pre-fix `_resolve_location` (59bda50, before APP-43). -/
+def resolveLocationOld (base loc : Str) : Option Str := do
+  if loc = [] then none
+  if "http://".toList.isPrefixOf loc ∨ "https://".toList.isPrefixOf loc then return loc
+  let b ← parse base
+  let origin := originStr b
+  match loc with
+  | '/' :: _ => return origin ++ loc
+  | _ => return origin ++ dirOf b.requestTarget ++ loc
+
+/-- The shipped `_resolve_location`: APP-43 is fixed (a `//` reference keeps
+only the base scheme); APP-45 is not yet.
+mirrors flare/http/redirect_policy.mojo:154-188 (fixed, APP-43) -/
 def resolveLocation (base loc : Str) : Option Str := do
   if loc = [] then none
   if "http://".toList.isPrefixOf loc ∨ "https://".toList.isPrefixOf loc then return loc
   let b ← parse base
   let origin := originStr b
   match loc with
+  | '/' :: '/' :: _ => return b.scheme ++ ':' :: loc
   | '/' :: _ => return origin ++ loc
   | _ => return origin ++ dirOf b.requestTarget ++ loc
 
