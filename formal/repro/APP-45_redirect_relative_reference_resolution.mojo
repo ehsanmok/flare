@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-45 fixed on fix/formal-findings
 """APP-45: relative Location references are not resolved per RFC 3986
 §5.2: a query-only reference drops the last path segment.
 
@@ -8,8 +9,9 @@ but this repro checks only the query-only case so the fix stays small.
 
 Lean: Flare.Bugs.APP_45.query_only_reference_wrong,
 Flare.Bugs.APP_45.dot_segments_kept (counterexamples),
-Flare.Bugs.APP_45.resolveFixed_query_only (fix meets spec for the
-query-only case); model Flare.L4.Redirect.resolveLocation.
+Flare.Bugs.APP_45.resolveLocation_query_only (fix meets spec for the
+query-only case), Flare.Bugs.APP_45.rdsAux_no_dots and
+Flare.Bugs.APP_45.rfc_5_4_1_examples; model Flare.L4.Redirect.resolveLocation.
 flare/http/redirect_policy.mojo:173-185 @59bda50.
 
 Spec: RFC 3986 §5.2.2 (T.path = Base.path when R.path is empty;
@@ -19,7 +21,7 @@ base http://a/b/c/d;p?q, "?y" -> http://a/b/c/d;p?y,
 
 Expected: "?page=2" against http://h/list/items -> http://h:80/list/items?page=2
 (the redirect re-requests the same resource with a new query).
-Actual: http://h:80/list/?page=2 (a different resource).
+Before the fix: http://h:80/list/?page=2 (a different resource).
 
 Minimal fix: in _resolve_location, before the directory merge:
     if location.startswith("?"):

@@ -1078,8 +1078,7 @@ host, so nothing leaks.
 `origin + location` for any reference that starts with `/`.
 
 **Lean.** `Flare.Bugs.APP_43.network_path_resolved_as_path` and
-`violates_spec`. The fix is proved sufficient by `resolveFixed_network_path`
-and `resolveFixed_other`.
+`violates_spec`. The fix is proved sufficient by `resolveLocation_network_path`.
 
 **Fix.** For a reference starting with `//`, return `scheme + ":" + location`.
 
@@ -1101,7 +1100,7 @@ spuriously and credentials are dropped.
 `a.host != b.host`, and `Url.parse` keeps the host's case.
 
 **Lean.** `Flare.Bugs.APP_44.host_case_not_same_origin`. The fix is proved
-sufficient by `sameOriginFixed_case`.
+sufficient by `sameOrigin_case`.
 
 **Fix.** Compare lowercased hosts.
 
@@ -1125,7 +1124,8 @@ Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`
 
 **Lean.** `Flare.Bugs.APP_45.query_only_reference_wrong` and
 `dot_segments_kept`. The fix is proved sufficient by
-`resolveFixed_query_only`, which covers the query-only case.
+`resolveLocation_query_only` (the query-only case), `rdsAux_no_dots` and
+`rfc_5_4_1_examples`.
 
 **Fix.** For `?` references, return `origin + base.path + location`. The
 full fix also applies `remove_dot_segments`.
@@ -1134,6 +1134,8 @@ full fix also applies `remove_dot_segments`.
 
 - Observed: `BUG REPRODUCED: '?page=2' against http://h/list/items -> http://h:80/list/?page=2`
 - Flip: `OK: query-only reference resolved per RFC 3986: http://h:80/list/items?page=2`
+
+Status: resolved. `_resolve_location` now follows RFC 3986 §5.2.2: a `?` reference keeps the whole base path (the base query is replaced), a `#` reference keeps the base path and query, a relative path merges with the directory of the base *path* (a `/` inside the base query used to count as a separator), and the resolved path of a relative or origin-relative reference goes through the new `_remove_dot_segments` (§5.2.4); the query and fragment are not touched. Tests: `tests/http/test_redirect_policy.mojo::test_query_only_reference_keeps_the_base_path`, `::test_dot_segments_are_removed_from_a_relative_reference`, `::test_dot_segments_are_removed_from_an_origin_relative_reference`, `::test_merge_uses_the_base_path_not_its_query` and `::test_rfc3986_section_5_4_1_normal_examples` (29 of the RFC's normal examples). The repro (which checks the query-only case) now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation` with `removeDotSegments`; the counterexamples are about the pre-fix `resolveLocationOld`. `Flare.Bugs.APP_45.resolveLocation_query_only` is stated about the shipped resolver for every base and query, `rdsAux_no_dots` shows the dot-segment walk never leaves a `.` or `..` segment, and `rfc_5_4_1_examples` checks the RFC examples on the model. Decision: absolute `http(s)://` Locations are still returned as given (not normalised), as are network-path references; only references flare resolves itself are normalised.
 
 ### APP-46: single-worker `drain(timeout_ms)` is a hard stop
 

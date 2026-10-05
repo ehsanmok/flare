@@ -8,9 +8,9 @@ with characters on ASCII input):
 
 * `parse`: `Url.parse` (flare/http/url.mojo:73-197) including userinfo
   stripping, IPv6 brackets, default ports and `_parse_port`.
-* `resolveLocation`: `_resolve_location` (redirect_policy.mojo:154-188); `resolveLocationOld`
+* `resolveLocation`: `_resolve_location` (redirect_policy.mojo:191-250); `resolveLocationOld`
   is the pre-fix code at 59bda50.
-* `sameOrigin`: `_same_origin` (redirect_policy.mojo:193-209); `sameOriginOld` is the
+* `sameOrigin`: `_same_origin` (redirect_policy.mojo:253-266); `sameOriginOld` is the
   pre-fix code at 59bda50.
 * `decideR`: `RedirectPolicy.decide` (redirect_policy.mojo:271-354).
 * `sendLoop`: the redirect-following loop of `HttpClient._send_once`
@@ -134,9 +134,10 @@ def Url.requestTarget (u : Url) : Str := if u.query = [] then u.path else u.path
 
 def originStr (u : Url) : Str := u.scheme ++ "://".toList ++ u.host ++ [':'] ++ digitsOf u.port
 
-/-- Directory part of the request target: up to and including the last
-`/` (whole target when there is none).
-mirrors flare/http/redirect_policy.mojo:175-184 @59bda50 -/
+/-- Directory part of a path (or, in the pre-fix code, of the request
+target): up to and including the last `/` (the whole string when there is
+none).
+mirrors flare/http/redirect_policy.mojo:239-250 (fixed, APP-45) -/
 def dirOf (target : Str) : Str :=
   match rfindChar target '/' with
   | some i => target.take (i + 1)
@@ -152,9 +153,32 @@ def resolveLocationOld (base loc : Str) : Option Str := do
   | '/' :: _ => return origin ++ loc
   | _ => return origin ++ dirOf b.requestTarget ++ loc
 
-/-- The shipped `_resolve_location`: APP-43 is fixed (a `//` reference keeps
-only the base scheme); APP-45 is not yet.
-mirrors flare/http/redirect_policy.mojo:154-188 (fixed, APP-43) -/
+/-- Stack step of `_remove_dot_segments` (the stack is kept reversed, top
+first): `.` is dropped, `..` pops, anything else (including an empty segment)
+is pushed. The last segment, when it is `.` or `..`, also leaves a trailing
+empty segment (so the path ends in `/`).
+mirrors flare/http/redirect_policy.mojo:154-188 (fixed, APP-45) -/
+def rdsAux : List Str → List Str → List Str
+  | [], st => st
+  | [s], st =>
+    if s = ".".toList then [] :: st
+    else if s = "..".toList then [] :: st.tail
+    else s :: st
+  | s :: rest, st =>
+    rdsAux rest (if s = ".".toList then st else if s = "..".toList then st.tail else s :: st)
+
+/-- RFC 3986 §5.2.4 on an absolute path (it starts with `/`).
+mirrors flare/http/redirect_policy.mojo:154-188 (fixed, APP-45) -/
+def removeDotSegments (p : Str) : Str :=
+  '/' :: List.intercalate ['/'] (rdsAux (List.splitOn '/' p.tail) []).reverse
+
+/-- Split a reference at its first `?` or `#`: (path, query-and-fragment). -/
+def cutRef (l : Str) : Str × Str :=
+  (l.takeWhile (fun c => !(c == '?' || c == '#')), l.dropWhile (fun c => !(c == '?' || c == '#')))
+
+/-- The shipped `_resolve_location`: APP-43 (network-path), and APP-45 (query-only and fragment-only references keep the base path, the
+merge uses the base *path*, and dot segments are removed) are fixed.
+mirrors flare/http/redirect_policy.mojo:191-250 (fixed, APP-43, APP-45) -/
 def resolveLocation (base loc : Str) : Option Str := do
   if loc = [] then none
   if "http://".toList.isPrefixOf loc ∨ "https://".toList.isPrefixOf loc then return loc
@@ -162,8 +186,10 @@ def resolveLocation (base loc : Str) : Option Str := do
   let origin := originStr b
   match loc with
   | '/' :: '/' :: _ => return b.scheme ++ ':' :: loc
-  | '/' :: _ => return origin ++ loc
-  | _ => return origin ++ dirOf b.requestTarget ++ loc
+  | '?' :: _ => return origin ++ b.path ++ loc
+  | '#' :: _ => return origin ++ b.requestTarget ++ loc
+  | '/' :: _ => return origin ++ removeDotSegments (cutRef loc).1 ++ (cutRef loc).2
+  | _ => return origin ++ removeDotSegments (dirOf b.path ++ (cutRef loc).1) ++ (cutRef loc).2
 
 /-- ASCII lowercase (hosts are case-insensitive, RFC 3986 §3.2.2). -/
 def lowerStr (s : Str) : Str := s.map Char.toLower
@@ -181,7 +207,7 @@ def sameOriginOld (a b : Str) : Option Bool := do
   return (u.scheme = v.scheme ∧ u.host = v.host ∧ u.port = v.port : Bool)
 
 /-- The shipped `_same_origin`: APP-44 is fixed (hosts compare lowercased).
-mirrors flare/http/redirect_policy.mojo:193-209 (fixed, APP-44) -/
+mirrors flare/http/redirect_policy.mojo:253-266 (fixed, APP-44) -/
 def sameOrigin (a b : Str) : Option Bool := do
   let u ← parse a
   let v ← parse b

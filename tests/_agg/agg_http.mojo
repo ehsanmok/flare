@@ -2487,6 +2487,21 @@ from test_redirect_policy import (
     test_network_path_location_is_cross_origin_for_same_origin_only as test_redirect_policy__test_network_path_location_is_cross_origin_for_same_origin_only,
 )
 from test_redirect_policy import (
+    test_query_only_reference_keeps_the_base_path as test_redirect_policy__test_query_only_reference_keeps_the_base_path,
+)
+from test_redirect_policy import (
+    test_dot_segments_are_removed_from_a_relative_reference as test_redirect_policy__test_dot_segments_are_removed_from_a_relative_reference,
+)
+from test_redirect_policy import (
+    test_dot_segments_are_removed_from_an_origin_relative_reference as test_redirect_policy__test_dot_segments_are_removed_from_an_origin_relative_reference,
+)
+from test_redirect_policy import (
+    test_merge_uses_the_base_path_not_its_query as test_redirect_policy__test_merge_uses_the_base_path_not_its_query,
+)
+from test_redirect_policy import (
+    test_rfc3986_section_5_4_1_normal_examples as test_redirect_policy__test_rfc3986_section_5_4_1_normal_examples,
+)
+from test_redirect_policy import (
     test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth as test_redirect_policy__test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth,
 )
 from test_reliability import (
@@ -5658,6 +5673,21 @@ def main() raises:
     ]()
     suite.test[
         test_redirect_policy__test_network_path_location_is_cross_origin_for_same_origin_only
+    ]()
+    suite.test[
+        test_redirect_policy__test_query_only_reference_keeps_the_base_path
+    ]()
+    suite.test[
+        test_redirect_policy__test_dot_segments_are_removed_from_a_relative_reference
+    ]()
+    suite.test[
+        test_redirect_policy__test_dot_segments_are_removed_from_an_origin_relative_reference
+    ]()
+    suite.test[
+        test_redirect_policy__test_merge_uses_the_base_path_not_its_query
+    ]()
+    suite.test[
+        test_redirect_policy__test_rfc3986_section_5_4_1_normal_examples
     ]()
     suite.test[
         test_redirect_policy__test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62312 lines) |
-| Theorems | 3270 |
-| Headline theorems in the axiom audit | 1070 |
+| Lean files | 298 (62407 lines) |
+| Theorems | 3271 |
+| Headline theorems in the axiom audit | 1072 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 84 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 85 of 138 |
 
 Six findings are rated high:
 
@@ -3115,7 +3115,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-42 | Low | resolved | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
 | APP-43 | Low | resolved | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
 | APP-44 | Low | resolved | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
-| APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
+| APP-45 | Low | resolved | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
 | APP-46 | Medium | resolved | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
 | APP-47 | Medium | resolved | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
 | APP-48 | High | resolved | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
@@ -5174,8 +5174,7 @@ host, so nothing leaks.
 `origin + location` for any reference that starts with `/`.
 
 **Lean.** `Flare.Bugs.APP_43.network_path_resolved_as_path` and
-`violates_spec`. The fix is proved sufficient by `resolveFixed_network_path`
-and `resolveFixed_other`.
+`violates_spec`. The fix is proved sufficient by `resolveLocation_network_path`.
 
 **Fix.** For a reference starting with `//`, return `scheme + ":" + location`.
 
@@ -5197,7 +5196,7 @@ spuriously and credentials are dropped.
 `a.host != b.host`, and `Url.parse` keeps the host's case.
 
 **Lean.** `Flare.Bugs.APP_44.host_case_not_same_origin`. The fix is proved
-sufficient by `sameOriginFixed_case`.
+sufficient by `sameOrigin_case`.
 
 **Fix.** Compare lowercased hosts.
 
@@ -5221,7 +5220,8 @@ Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`
 
 **Lean.** `Flare.Bugs.APP_45.query_only_reference_wrong` and
 `dot_segments_kept`. The fix is proved sufficient by
-`resolveFixed_query_only`, which covers the query-only case.
+`resolveLocation_query_only` (the query-only case), `rdsAux_no_dots` and
+`rfc_5_4_1_examples`.
 
 **Fix.** For `?` references, return `origin + base.path + location`. The
 full fix also applies `remove_dot_segments`.
@@ -5230,6 +5230,8 @@ full fix also applies `remove_dot_segments`.
 
 - Observed: `BUG REPRODUCED: '?page=2' against http://h/list/items -> http://h:80/list/?page=2`
 - Flip: `OK: query-only reference resolved per RFC 3986: http://h:80/list/items?page=2`
+
+Status: resolved. `_resolve_location` now follows RFC 3986 §5.2.2: a `?` reference keeps the whole base path (the base query is replaced), a `#` reference keeps the base path and query, a relative path merges with the directory of the base *path* (a `/` inside the base query used to count as a separator), and the resolved path of a relative or origin-relative reference goes through the new `_remove_dot_segments` (§5.2.4); the query and fragment are not touched. Tests: `tests/http/test_redirect_policy.mojo::test_query_only_reference_keeps_the_base_path`, `::test_dot_segments_are_removed_from_a_relative_reference`, `::test_dot_segments_are_removed_from_an_origin_relative_reference`, `::test_merge_uses_the_base_path_not_its_query` and `::test_rfc3986_section_5_4_1_normal_examples` (29 of the RFC's normal examples). The repro (which checks the query-only case) now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation` with `removeDotSegments`; the counterexamples are about the pre-fix `resolveLocationOld`. `Flare.Bugs.APP_45.resolveLocation_query_only` is stated about the shipped resolver for every base and query, `rdsAux_no_dots` shows the dot-segment walk never leaves a `.` or `..` segment, and `rfc_5_4_1_examples` checks the RFC examples on the model. Decision: absolute `http(s)://` Locations are still returned as given (not normalised), as are network-path references; only references flare resolves itself are normalised.
 
 #### APP-46: single-worker `drain(timeout_ms)` is a hard stop
 

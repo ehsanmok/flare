@@ -152,11 +152,13 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.Bugs.APP_42.shipped_meets_spec
 #print axioms Flare.Bugs.APP_43.violates_spec
 #print axioms Flare.Bugs.APP_43.resolveLocation_network_path
-#print axioms Flare.Bugs.APP_43.resolveLocation_other
 #print axioms Flare.Bugs.APP_44.host_case_not_same_origin
 #print axioms Flare.Bugs.APP_44.sameOrigin_case
 #print axioms Flare.Bugs.APP_45.query_only_reference_wrong
-#print axioms Flare.Bugs.APP_45.resolveFixed_query_only
+#print axioms Flare.Bugs.APP_45.dot_segments_kept
+#print axioms Flare.Bugs.APP_45.resolveLocation_query_only
+#print axioms Flare.Bugs.APP_45.rdsAux_no_dots
+#print axioms Flare.Bugs.APP_45.rfc_5_4_1_examples
 
 -- Drain timeout, client pool leases, h2c hand-off, WebSocket over TLS
 #print axioms Flare.L4.Drain.drainOld_ignores_timeout

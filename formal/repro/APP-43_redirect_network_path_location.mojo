@@ -4,7 +4,7 @@
 "//cdn.example.net/img" is resolved as a path on the current origin.
 
 Lean: Flare.Bugs.APP_43.network_path_resolved_as_path (counterexample),
-Flare.Bugs.APP_43.resolveFixed_network_path (fix meets spec);
+Flare.Bugs.APP_43.resolveLocation_network_path (fix meets spec);
 model Flare.L4.Redirect.resolveLocation.
 flare/http/redirect_policy.mojo:171-172 @59bda50
 (`if location[0] == '/': return origin + location`).

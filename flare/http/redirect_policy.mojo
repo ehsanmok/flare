@@ -151,8 +151,45 @@ struct RedirectDecision(Copyable):
 # ── Origin helpers ──────────────────────────────────────────────────────────
 
 
+def _remove_dot_segments(path: String) -> String:
+    """RFC 3986 §5.2.4 on an absolute ``path`` (it starts with ``/``).
+
+    ``.`` segments are dropped, ``..`` pops the segment before it (and
+    stops at the root), and a path that ends in ``.`` or ``..`` keeps a
+    trailing ``/``. Empty segments are kept (``/a//b`` is unchanged).
+    """
+    var stack = List[String]()
+    var seg = String()
+    var p = path.unsafe_ptr()
+    var n = path.byte_length()
+    var i = 1
+    while i <= n:
+        if i == n or Int(p[unsafe_offset=i]) == ord("/"):
+            var last = i == n
+            if seg == ".":
+                if last:
+                    stack.append(String())
+            elif seg == "..":
+                if len(stack) > 0:
+                    _ = stack.pop()
+                if last:
+                    stack.append(String())
+            else:
+                stack.append(seg)
+            seg = String()
+        else:
+            seg += chr(Int(p[unsafe_offset=i]))
+        i += 1
+    var out = String("/")
+    for k in range(len(stack)):
+        if k > 0:
+            out += "/"
+        out += stack[k]
+    return out
+
+
 def _resolve_location(base_url: String, location: String) raises -> String:
-    """Resolve a Location header value to an absolute URL.
+    """Resolve a Location header value to an absolute URL (RFC 3986 §5.2.2).
 
     Accepts:
     - Absolute URLs (``http://...`` / ``https://...``).
@@ -160,8 +197,13 @@ def _resolve_location(base_url: String, location: String) raises -> String:
       reference's authority replaces the base's, only the scheme is
       inherited.
     - Origin-relative URLs (``/path?query``).
-    - Relative URLs without a leading slash (resolved against
-      base's directory — rare in practice but RFC-allowed).
+    - Query-only (``?query``) and fragment-only (``#frag``) references,
+      which keep the whole base path.
+    - Relative paths (``g``, ``../g``), merged with the base path's
+      directory.
+
+    Dot segments (``.`` / ``..``) in the resolved path are removed; the
+    query and fragment are left alone.
 
     Raises ``Error`` on a malformed Location.
     """
@@ -171,23 +213,41 @@ def _resolve_location(base_url: String, location: String) raises -> String:
         return location
     var base = Url.parse(base_url)
     var origin = base.scheme + "://" + base.host + ":" + String(Int(base.port))
-    if Int(location.unsafe_ptr()[unsafe_offset=0]) == ord("/"):
-        if location.startswith("//"):
-            return base.scheme + ":" + location
-        return origin + location
-    # Relative without leading slash — resolve against base's
-    # request-target without the trailing filename segment.
-    var target = base.request_target()
-    var slash = target.byte_length()
-    var p = target.unsafe_ptr()
-    for i in range(target.byte_length()):
-        if Int(p[unsafe_offset=target.byte_length() - 1 - i]) == ord("/"):
-            slash = target.byte_length() - i
+    var first = Int(location.unsafe_ptr()[unsafe_offset=0])
+    if first == ord("/") and location.startswith("//"):
+        return base.scheme + ":" + location
+    if first == ord("?"):
+        return origin + base.path + location
+    if first == ord("#"):
+        return origin + base.request_target() + location
+    # Split the reference into its path and its query / fragment tail.
+    var lp = location.unsafe_ptr()
+    var cut = location.byte_length()
+    for i in range(location.byte_length()):
+        var c = Int(lp[unsafe_offset=i])
+        if c == ord("?") or c == ord("#"):
+            cut = i
+            break
+    var ref_path = String(capacity_bytes=cut + 1)
+    for i in range(cut):
+        ref_path += chr(Int(lp[unsafe_offset=i]))
+    var tail = String()
+    for i in range(cut, location.byte_length()):
+        tail += chr(Int(lp[unsafe_offset=i]))
+    if first == ord("/"):
+        return origin + _remove_dot_segments(ref_path) + tail
+    # Relative path: merge with the base path up to and including its last
+    # "/" (RFC 3986 §5.2.3). The base query is not part of the path.
+    var bp = base.path.unsafe_ptr()
+    var slash = base.path.byte_length()
+    for i in range(base.path.byte_length()):
+        if Int(bp[unsafe_offset=base.path.byte_length() - 1 - i]) == ord("/"):
+            slash = base.path.byte_length() - i
             break
     var dir = String(capacity_bytes=slash + 1)
     for i in range(slash):
-        dir += chr(Int(p[unsafe_offset=i]))
-    return origin + dir + location
+        dir += chr(Int(bp[unsafe_offset=i]))
+    return origin + _remove_dot_segments(dir + ref_path) + tail
 
 
 def _same_origin(a_url: String, b_url: String) raises -> Bool:

@@ -5,7 +5,7 @@ http://API.example.com and http://api.example.com are different
 origins; same_origin_only then rejects a same-site redirect.
 
 Lean: Flare.Bugs.APP_44.host_case_not_same_origin (counterexample),
-Flare.Bugs.APP_44.sameOriginFixed_case (fix meets spec);
+Flare.Bugs.APP_44.sameOrigin_case (fix meets spec);
 model Flare.L4.Redirect.sameOrigin.
 flare/http/redirect_policy.mojo:188-198 @59bda50 (`a.host != b.host`),
 Url.parse keeps host case (flare/http/url.mojo:172-192).

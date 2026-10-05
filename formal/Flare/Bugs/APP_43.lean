@@ -54,21 +54,6 @@ theorem resolveLocation_network_path (b rest : Str) (u : Url) (hb : parse b = so
     resolveLocation b ('/' :: '/' :: rest) = some (u.scheme ++ ':' :: '/' :: '/' :: rest) := by
   simp [resolveLocation, hb]
 
-/-- On every other reference the shipped resolver agrees with the pre-fix
-one. -/
-theorem resolveLocation_other (b l : Str) (hl : ¬ ∃ rest, l = '/' :: '/' :: rest) :
-    resolveLocation b l = resolveLocationOld b l := by
-  rcases l with _ | ⟨c, _ | ⟨d, t⟩⟩
-  · rfl
-  · by_cases hc : c = '/'
-    · subst hc; simp [resolveLocation, resolveLocationOld]
-    · simp [resolveLocation, resolveLocationOld, hc]
-  · by_cases hc : c = '/'
-    · by_cases hd : d = '/'
-      · exact absurd ⟨t, by simp [hc, hd]⟩ hl
-      · simp [resolveLocation, resolveLocationOld, hc, hd]
-    · simp [resolveLocation, resolveLocationOld, hc]
-
 theorem fixed_on_example :
     (resolveLocation base loc).bind originOf = some ("https".toList, "cdn.example.net".toList, 443) := by
   native_decide
