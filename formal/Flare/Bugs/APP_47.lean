@@ -16,19 +16,23 @@ Counterexample: the 101 is queued behind a full send buffer; every
 writable edge after that leaves the connection `KIND_H1`, write-armed and
 re-reporting the upgrade, so it spins and never sends SETTINGS.
 
+Status: resolved. `_unified_handle_conn_event` also routes a writable edge
+to `_drive_h1` while `_h2c_upgrade_pending` is set. The counterexample is
+about the pre-fix routing `preFix`; the shipped routing is `shipped`.
+
 Repro: formal/repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo.
 -/
 namespace Flare.Bugs.APP_47
 open Flare.L4.ConnExt.H2c
 
-/-- **Counterexample**: for every backlog and every number of writable
+/-- **Counterexample** (pre-fix routing `preFix`): for every backlog and every number of writable
 edges, flare is still HTTP/1.1 and still armed for writing. -/
 theorem violates_spec :
-    (∀ q n, 0 < n → run false n (blocked q) = ⟨.h1, true, 0, true⟩) ∧ ¬ Spec false :=
+    (∀ q n, 0 < n → run preFix n (blocked q) = ⟨.h1, true, 0, true⟩) ∧ ¬ Spec preFix :=
   ⟨impl_spins, impl_violates⟩
 
-/-- **Fix meets spec**: routing the edge to `_drive_h1` while an upgrade
-is pending migrates on the first writable edge. -/
-theorem fixed_meets_spec : Spec true := fixed_spec
+/-- **Fix meets spec** (shipped routing): routing the edge to `_drive_h1`
+while an upgrade is pending migrates on the first writable edge. -/
+theorem fixed_meets_spec : Spec shipped := fixed_spec
 
 end Flare.Bugs.APP_47

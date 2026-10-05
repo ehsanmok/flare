@@ -806,11 +806,24 @@ def _unified_handle_conn_event[
         # returning WANT_WRITE only clears once the socket drains, and
         # only _drive_h1 carries the handler needed to finish the
         # request. Cleartext never sets the flag.
+        #
+        # A pending h2c upgrade also goes to the *read* driver on a
+        # writable edge: only `_drive_h1` migrates the connection once
+        # the 101 has flushed. `_drive_h1_writable` applies the step
+        # without migrating, so a 101 held back by a full send buffer
+        # would leave the connection write-armed and re-announcing the
+        # upgrade on every poll (APP-47). With the handle in
+        # STATE_WRITING, `on_readable` is a no-op that hands over to
+        # `on_writable` inside `_drive_h1`.
         var h1_ptr = _conn_ptr_from_int(_addr(packed))
         var tls_cross = h1_ptr[].tls_cross_interest
         if tls_cross:
             h1_ptr[].tls_cross_interest = False
-        if is_readable or (tls_cross and is_writable):
+        if (
+            is_readable
+            or (tls_cross and is_writable)
+            or h1_ptr[]._h2c_upgrade_pending
+        ):
             done3 = _drive_h1(
                 fd,
                 _addr(packed),

@@ -1,4 +1,5 @@
 # PLATFORM: any (kqueue or epoll, level-triggered writability)
+# RESOLVED: APP-47 fixed on fix/formal-findings
 """APP-47: an h2c upgrade whose 101 response finishes on a writable edge is
 never migrated; the connection spins on writability forever.
 
@@ -26,7 +27,7 @@ the writable edge flushes the 101 through `_drive_h1_writable`.
 
 Expected: the connection migrates to KIND_H2 and the server sends its
 SETTINGS frame after the 101.
-Actual: the connection stays KIND_H1; `_apply_step` sees no interest bits,
+Before the fix: the connection stays KIND_H1; `_apply_step` sees no interest bits,
 so the old write interest stays armed and every poll returns another
 writable edge that re-reports the upgrade; no SETTINGS frame is ever sent
 and the stream-1 request is never answered.
@@ -48,7 +49,13 @@ from std.ffi import c_int, c_size_t
 from flare.http import Request, Response, ServerConfig
 from flare.http.handler import FnHandler
 from flare.http2.server import Http2Config
-from flare.http._reactor.tagged_dispatch import KIND_H1, KIND_H2, _pack, _kind, _addr
+from flare.http._reactor.tagged_dispatch import (
+    KIND_H1,
+    KIND_H2,
+    _pack,
+    _kind,
+    _addr,
+)
 from flare.http._server_reactor_epoll import _conn_alloc_addr
 from flare.http._unified_reactor_impl import (
     _unified_handle_conn_event,
@@ -127,7 +134,17 @@ def _attempt() raises -> Attempt:
             break
         _ = libc_nanosleep_ms(20)
     _unified_handle_conn_event[FnHandler](
-        fd, conns[fd], True, False, handler, config, h2, conns, reactor, wheel, timers
+        fd,
+        conns[fd],
+        True,
+        False,
+        handler,
+        config,
+        h2,
+        conns,
+        reactor,
+        wheel,
+        timers,
     )
     # Precondition: the 101 is still queued behind the backlog.
     if fd not in conns or _kind(conns[fd]) != KIND_H1:

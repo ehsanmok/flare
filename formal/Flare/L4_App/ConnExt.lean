@@ -81,13 +81,21 @@ interest bits keeps the armed write interest.
 mirrors flare/http/_unified_reactor_impl.mojo:243-258 @59bda50 -/
 def driveH1Writable (s : St) : St := (onWritable s).1
 
-/-- Routing of a writable edge on a `KIND_H1` connection (`fix`: also send
-it to `_drive_h1` while an upgrade is pending).
-mirrors flare/http/_unified_reactor_impl.mojo:812-855 @59bda50 -/
+/-- Routing of a writable edge on a `KIND_H1` connection. `fix = false` is
+the pre-fix routing (`preFix`); `fix = true` (`shipped`) also sends the edge
+to `_drive_h1` while an upgrade is pending.
+mirrors flare/http/_unified_reactor_impl.mojo:812-855 @59bda50 (pre-fix);
+mirrors flare/http/_unified_reactor_impl.mojo:806-868 (fixed, APP-47) -/
 def route (fix : Bool) (s : St) : St :=
   match s.kind with
   | .h2 => s
   | .h1 => if fix && s.pending then driveH1 s else driveH1Writable s
+
+/-- The routing before the APP-47 fix. -/
+abbrev preFix : Bool := false
+
+/-- The routing flare ships: a pending upgrade goes to `_drive_h1`. -/
+abbrev shipped : Bool := true
 
 /-- `n` writable edges (each only while write interest is armed). -/
 def run (fix : Bool) : Nat → St → St

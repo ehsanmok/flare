@@ -1185,6 +1185,8 @@ on macOS and on Linux:
 at `_unified_reactor_impl.mojo:812`: 5 of 5 runs
 `OK: connection migrated (kind 2), client received 92 bytes after the backlog (101 + SETTINGS)`, exit 0.
 
+Status: resolved. A writable edge on a `KIND_H1` connection now goes to `_drive_h1` while `_h2c_upgrade_pending` is set (with the handle in `STATE_WRITING`, `on_readable` is a no-op that hands over to `on_writable`), so the flush migrates the connection. Test: `tests/http/test_h2c_upgrade.mojo::test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates` (drives `on_readable` directly so the 101 is queued and unwritten, then delivers one writable edge; no dependence on kernel buffer sizes). The repro now prints `OK:` (3 of 3 runs). The shipped routing is `Flare.L4.ConnExt.H2c.shipped`; `Flare.Bugs.APP_47.fixed_meets_spec` is stated about it.
+
 ### APP-48: a WebSocket upgrade on a TLS connection is served in cleartext
 
 **Severity.** High. With `bind_tls` and `ServerConfig.ws` set, a `wss://`

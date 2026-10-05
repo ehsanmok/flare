@@ -1376,6 +1376,9 @@ from test_h2c_upgrade import (
 from test_h2c_upgrade import (
     test_from_h2c_upgrade_rejects_out_of_range_settings as test_h2c_upgrade__test_from_h2c_upgrade_rejects_out_of_range_settings,
 )
+from test_h2c_upgrade import (
+    test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates as test_h2c_upgrade__test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates,
+)
 from test_h3_happy_eyeballs import (
     test_race_h3_wins_e2e as test_h3_happy_eyeballs__test_race_h3_wins_e2e,
 )
@@ -4938,6 +4941,9 @@ def main() raises:
     ]()
     suite.test[
         test_h2c_upgrade__test_from_h2c_upgrade_rejects_out_of_range_settings
+    ]()
+    suite.test[
+        test_h2c_upgrade__test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates
     ]()
     # tests/http/test_h3_happy_eyeballs.mojo
     suite.test[test_h3_happy_eyeballs__test_race_h3_wins_e2e]()

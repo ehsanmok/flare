@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61320 lines) |
+| Lean files | 298 (61332 lines) |
 | Theorems | 3228 |
 | Headline theorems in the axiom audit | 1030 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 29 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 30 of 138 |
 
 Six findings are rated high:
 
@@ -3103,7 +3103,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-44 | Low | open | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
 | APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
 | APP-46 | Medium | resolved | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
-| APP-47 | Medium | open | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
+| APP-47 | Medium | resolved | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
 | APP-48 | High | resolved | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
 | APP-49 | Medium | open | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
 | CONC-01 | Low | open | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
@@ -5186,6 +5186,8 @@ on macOS and on Linux:
 **Flip.** `if is_readable or (tls_cross and is_writable) or h1_ptr[]._h2c_upgrade_pending:`
 at `_unified_reactor_impl.mojo:812`: 5 of 5 runs
 `OK: connection migrated (kind 2), client received 92 bytes after the backlog (101 + SETTINGS)`, exit 0.
+
+Status: resolved. A writable edge on a `KIND_H1` connection now goes to `_drive_h1` while `_h2c_upgrade_pending` is set (with the handle in `STATE_WRITING`, `on_readable` is a no-op that hands over to `on_writable`), so the flush migrates the connection. Test: `tests/http/test_h2c_upgrade.mojo::test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates` (drives `on_readable` directly so the 101 is queued and unwritten, then delivers one writable edge; no dependence on kernel buffer sizes). The repro now prints `OK:` (3 of 3 runs). The shipped routing is `Flare.L4.ConnExt.H2c.shipped`; `Flare.Bugs.APP_47.fixed_meets_spec` is stated about it.
 
 #### APP-48: a WebSocket upgrade on a TLS connection is served in cleartext
 

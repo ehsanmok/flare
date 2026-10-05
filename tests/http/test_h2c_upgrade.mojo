@@ -20,13 +20,31 @@ unified port -- this file deliberately scopes to the deterministic
 unit-level paths that a fork-based loopback test would obscure.
 """
 
+from std.collections import Dict
+from std.ffi import c_int
 from std.testing import assert_equal, assert_false, assert_true
 
 from flare.crypto.hmac import base64url_encode
-from flare.http import Request
+from flare.http import Request, Response, ServerConfig
+from flare.http.handler import FnHandler
 from flare.http.headers import HeaderMap
 from flare.http2 import Http2Connection, Http2Config
 from flare.http2.state import StreamState
+from flare.http._reactor.tagged_dispatch import (
+    KIND_H1,
+    KIND_H2,
+    _addr,
+    _kind,
+    _pack,
+)
+from flare.http._server_reactor_epoll import _conn_alloc_addr
+from flare.http._unified_reactor_impl import (
+    _conn_ptr_from_int,
+    _unified_handle_conn_event,
+)
+from flare.net import SocketAddr
+from flare.runtime import INTEREST_READ, Reactor, TimerWheel
+from flare.tcp import TcpListener, TcpStream
 
 
 def _build_settings_payload(initial_window_size: Int) -> List[UInt8]:
@@ -236,6 +254,80 @@ def test_from_h2c_upgrade_rejects_out_of_range_settings() raises:
     )
 
 
+def _ok(req: Request) raises -> Response:
+    return Response(status=200)
+
+
+def test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates() raises:
+    """APP-47: a 101 that only flushes on a writable edge must still
+    migrate the connection to HTTP/2. The handle is driven to the
+    "101 queued, nothing written" state by calling ``on_readable``
+    directly, so the first socket write happens on the writable edge
+    itself -- no dependence on kernel buffer sizes."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var client = TcpStream.connect(listener.local_addr())
+    var accepted = listener.accept()
+    accepted._socket.set_nonblocking(True)
+    var fd = Int(accepted._socket.fd)
+
+    var reactor = Reactor()
+    reactor.register(c_int(fd), UInt64(fd), INTEREST_READ)
+    var conns = Dict[Int, Int]()
+    var timers = Dict[Int, UInt64]()
+    var wheel = TimerWheel(now_ms=UInt64(0))
+    conns[fd] = _pack(KIND_H1, _conn_alloc_addr(accepted^))
+    var handler = FnHandler(_ok)
+    var config = ServerConfig()
+    var h2 = Http2Config()
+
+    var req = String(
+        "GET / HTTP/1.1\r\nHost: x\r\nConnection: Upgrade, HTTP2-Settings\r\n"
+        "Upgrade: h2c\r\nHTTP2-Settings: AAMAAABkAAQAAP__\r\n\r\n"
+    )
+    client.write_all(req.as_bytes())
+    ref ch = _conn_ptr_from_int(_addr(conns[fd]))[]
+    ch.h2c_upgrade_allowed = True
+    # Wait (bounded by the socket, not a sleep) for the request bytes.
+    var step = ch.on_readable(handler, config)
+    for _ in range(1000):
+        if ch._h2c_upgrade_pending:
+            break
+        step = ch.on_readable(handler, config)
+    assert_true(ch._h2c_upgrade_pending, "upgrade request was not queued")
+    assert_true(len(ch.write_buf) > ch.write_pos, "101 should be unwritten")
+    assert_true(step.want_write)
+
+    # The writable edge flushes the 101 and must migrate to HTTP/2.
+    _unified_handle_conn_event[FnHandler](
+        fd,
+        conns[fd],
+        False,
+        True,
+        handler,
+        config,
+        h2,
+        conns,
+        reactor,
+        wheel,
+        timers,
+    )
+    assert_true(fd in conns)
+    assert_equal(_kind(conns[fd]), KIND_H2)
+
+    # The client sees the 101 and then the server's SETTINGS frame.
+    client.set_recv_timeout(2000)
+    var buf = List[UInt8](length=4096, fill=UInt8(0))
+    var got = 0
+    for _ in range(8):
+        var n = client.read(buf.unsafe_ptr(), len(buf))
+        if n <= 0:
+            break
+        got += n
+        if got > 71:
+            break
+    assert_true(got > 71, "no HTTP/2 SETTINGS after the 101")
+
+
 def main() raises:
     test_from_h2c_upgrade_creates_stream_1_with_request_headers()
     test_from_h2c_upgrade_applies_settings_payload()
@@ -245,4 +337,5 @@ def main() raises:
     test_from_h2c_upgrade_carries_request_body()
     test_from_h2c_upgrade_rejects_out_of_range_settings()
     test_h2c_upgrade_header_decoder_accepts_well_formed_request()
-    print("test_h2c_upgrade: 8 passed")
+    test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates()
+    print("test_h2c_upgrade: 9 passed")
