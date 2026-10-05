@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-14 fixed on fix/formal-findings
 """QUIC-14: once a gap fills, packet numbers from dropped ACK ranges are
 accepted again as new.
 
@@ -19,7 +20,7 @@ that it will not subsequently accept packets with numbers in that range."
 §12.3: a packet number MUST NOT be accepted twice ("Endpoints MUST discard
 ... duplicate packets", RFC 9001 §5.8 / RFC 9000 §21.4 replay). Expected:
 after receiving 0, 2, 4, ..., 64 and then 3, packet 0 still reads as
-received. Actual: `_ack_contains(flat, 0)` is False, so the server would
+received. Before the fix: `_ack_contains(flat, 0)` is False, so the server would
 dispatch packet 0 a second time.
 
 Minimal fix: when ranges are dropped, remember a floor (one past the

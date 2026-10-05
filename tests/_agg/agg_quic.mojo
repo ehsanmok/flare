@@ -490,6 +490,12 @@ from test_quic_post_initial_decrypt import (
     test_duplicate_packet_numbers_are_recognised as test_quic_post_initial_decrypt__test_duplicate_packet_numbers_are_recognised,
 )
 from test_quic_post_initial_decrypt import (
+    test_dropped_ack_ranges_are_not_forgotten as test_quic_post_initial_decrypt__test_dropped_ack_ranges_are_not_forgotten,
+)
+from test_quic_post_initial_decrypt import (
+    test_ack_floor_only_moves_up as test_quic_post_initial_decrypt__test_ack_floor_only_moves_up,
+)
+from test_quic_post_initial_decrypt import (
     test_packet_number_spaces_are_separate as test_quic_post_initial_decrypt__test_packet_number_spaces_are_separate,
 )
 from test_quic_post_initial_egress import (
@@ -1143,6 +1149,10 @@ def main() raises:
     suite.test[
         test_quic_post_initial_decrypt__test_duplicate_packet_numbers_are_recognised
     ]()
+    suite.test[
+        test_quic_post_initial_decrypt__test_dropped_ack_ranges_are_not_forgotten
+    ]()
+    suite.test[test_quic_post_initial_decrypt__test_ack_floor_only_moves_up]()
     suite.test[
         test_quic_post_initial_decrypt__test_packet_number_spaces_are_separate
     ]()

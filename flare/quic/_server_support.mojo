@@ -53,24 +53,38 @@ def _bufsize_from_env(name: String, default: Int) -> Int:
 
 # Cap on the number of disjoint ACK ranges tracked per connection.
 # Bounds the per-slot memory; the oldest (lowest) ranges are dropped
-# once the cap is hit (RFC 9000 sec 13.2.4 allows acking a subset).
+# once the cap is hit (RFC 9000 sec 13.2.4 allows acking a subset), and
+# a floor remembers them for duplicate detection (_ack_floor).
 comptime _ACK_MAX_RANGES: Int = 32
+
+
+def _ack_floor(flat: List[UInt64]) -> UInt64:
+    """The floor stored in ``flat``: one above the highest packet number
+    whose range :func:`_ack_record` ever dropped at the cap, or 0.
+
+    ``flat`` is a list of ``[low, high]`` pairs, so a trailing slot at an
+    odd index is free; the floor lives there (every pair reader loops on
+    ``i + 1 < len(flat)`` and never sees it)."""
+    if len(flat) % 2 == 1:
+        return flat[len(flat) - 1]
+    return UInt64(0)
 
 
 def _ack_contains(flat: List[UInt64], pn: UInt64) -> Bool:
     """Whether ``pn`` was already received, per the ranges
-    :func:`_ack_record` keeps. A number below every tracked range once
-    the range list is full is too old to tell and counts as seen, so a
-    replay of an old packet is dropped rather than run again."""
-    var lowest = UInt64.MAX
+    :func:`_ack_record` keeps. A number below the floor lies in a range
+    that was dropped at the cap: it was either received or too old to
+    tell, so it counts as seen and a replay of an old packet is dropped
+    rather than run again (RFC 9000 sec 13.2.3: a receiver may forget a
+    range only if it will not accept packets in it). The floor never
+    moves down, so a later merge of two ranges cannot make a dropped
+    number read as new."""
     var i = 0
     while i + 1 < len(flat):
         if flat[i] <= pn and pn <= flat[i + 1]:
             return True
-        if flat[i] < lowest:
-            lowest = flat[i]
         i += 2
-    return len(flat) >= 2 * _ACK_MAX_RANGES and pn < lowest
+    return pn < _ack_floor(flat)
 
 
 def _ack_record(mut flat: List[UInt64], pn: UInt64):
@@ -82,7 +96,12 @@ def _ack_record(mut flat: List[UInt64], pn: UInt64):
     to :data:`_ACK_MAX_RANGES` (keeping the highest), then storing
     back descending. The range count stays tiny so the cost is
     negligible per packet.
+
+    When the cap drops ranges, the floor (see :func:`_ack_floor`) rises
+    to one above the highest dropped number and is stored in the trailing
+    slot, so :func:`_ack_contains` keeps treating them as received.
     """
+    var floor = _ack_floor(flat)
     var lows = List[UInt64]()
     var highs = List[UInt64]()
     var i = 0
@@ -116,12 +135,17 @@ def _ack_record(mut flat: List[UInt64], pn: UInt64):
     var start = 0
     if len(ml) > _ACK_MAX_RANGES:
         start = len(ml) - _ACK_MAX_RANGES
+        # ml is ascending: the highest dropped range is ml[start - 1].
+        if mh[start - 1] + UInt64(1) > floor:
+            floor = mh[start - 1] + UInt64(1)
     flat.clear()
     var c = len(ml) - 1
     while c >= start:
         flat.append(ml[c])
         flat.append(mh[c])
         c -= 1
+    if floor > UInt64(0):
+        flat.append(floor)
 
 
 def _ack_from_ranges(flat: List[UInt64], ack_delay: UInt64) raises -> AckFrame:

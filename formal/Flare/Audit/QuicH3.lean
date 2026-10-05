@@ -149,6 +149,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.AckGen.ack_roundtrip
 #print axioms Flare.L3.Quic.AckGen.drain_after_recv
 #print axioms Flare.Bugs.QUIC_14.impl_reaccepts
+#print axioms Flare.Bugs.QUIC_14.fixed_trace
 #print axioms Flare.Bugs.QUIC_14.fixed_never_reaccepts
 
 -- Stream states

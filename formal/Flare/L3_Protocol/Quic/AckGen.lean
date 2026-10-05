@@ -10,8 +10,10 @@ Model of the receive-side ACK bookkeeping both drivers share
   `[pn, pn]`, insertion-sort ascending by `low` (`isort`), merge
   overlapping or adjacent ranges (`mergeAcc`), keep the 32 highest, store
   descending;
-* `contains` — `_ack_contains` (60-73), the duplicate filter at
-  flare/quic/server.mojo:844;
+* `contains` — `_ack_contains`, the duplicate filter at
+  flare/quic/server.mojo:844: a number is seen if it lies in a stored range
+  or below the floor, which `recordSt` raises past every range the cap drops
+  (QUIC-14; the floor is the odd trailing slot of the flat list);
 * `fromRanges` — `_ack_from_ranges` (127-157);
 * `Rx`, `recv`, `drain` — the 1-RTT receive path and ACK emission of the
   server driver (server.mojo:844-863, 2240-2268): record every packet,
@@ -76,10 +78,29 @@ def merged (flat : Ranges) (pn : Nat) : Ranges := mergeAcc [] (isort (flat ++ [(
 /-- mirrors flare/quic/_server_support.mojo:76-124 @59bda50 -/
 def record (flat : Ranges) (pn : Nat) : Ranges := (merged flat pn).take cap
 
-/-- mirrors flare/quic/_server_support.mojo:60-73 @59bda50 -/
-def contains (flat : Ranges) (pn : Nat) : Bool :=
-  flat.any (fun p => decide (p.1 ≤ pn ∧ pn ≤ p.2)) ||
-    (decide (cap ≤ flat.length) && flat.all (fun p => decide (pn < p.1)))
+/-- The tracked state (fixed, QUIC-14): the stored ranges plus the floor, one
+above the highest number whose range was ever dropped at the cap. In the
+Mojo code the floor is the odd trailing slot of the flat list. -/
+structure St where
+  flat : Ranges := []
+  floor : Nat := 0
+
+/-- The floor after recording `pn` (fixed, QUIC-14): it rises to one above
+the highest range the cap drops, and never falls. -/
+def floorAfter (s : St) (pn : Nat) : Nat :=
+  match (merged s.flat pn).drop cap with
+  | [] => s.floor
+  | q :: _ => max s.floor (q.2 + 1)
+
+/-- mirrors flare/quic/_server_support.mojo `_ack_record` incl. the floor
+slot (fixed, QUIC-14) -/
+def recordSt (s : St) (pn : Nat) : St :=
+  { flat := record s.flat pn, floor := floorAfter s pn }
+
+/-- mirrors flare/quic/_server_support.mojo `_ack_contains` (fixed, QUIC-14):
+in a stored range, or below the floor -/
+def contains (s : St) (pn : Nat) : Bool :=
+  s.flat.any (fun p => decide (p.1 ≤ pn ∧ pn ≤ p.2)) || decide (pn < s.floor)
 
 /-- mirrors flare/quic/_server_support.mojo:127-157 @59bda50 (the ranges
 below the first, as `(gap, length)`) -/
@@ -436,13 +457,15 @@ theorem ack_roundtrip (flat : Ranges) (hc : Canon flat) {largest first : Nat}
 `rx_1rtt_ack_pending`) -/
 structure Rx where
   flat : Ranges := []
+  floor : Nat := 0
   pending : Bool := false
 
 /-- mirrors flare/quic/server.mojo:844-863 @59bda50 (duplicates dropped,
 then record, then owe an ACK if the packet was ack-eliciting) -/
 def recv (s : Rx) (pn : Nat) (eliciting : Bool) : Rx :=
-  if contains s.flat pn then s
-  else { flat := record s.flat pn, pending := s.pending || eliciting }
+  if contains ⟨s.flat, s.floor⟩ pn then s
+  else { flat := record s.flat pn, floor := floorAfter ⟨s.flat, s.floor⟩ pn,
+         pending := s.pending || eliciting }
 
 /-- mirrors flare/quic/server.mojo:2240-2268 @59bda50 -/
 def drain (s : Rx) : Option (Nat × Nat × List (Nat × Nat)) × Rx :=
@@ -457,7 +480,7 @@ theorem recv_canon (s : Rx) (pn : Nat) (b : Bool) (hc : Canon s.flat) : Canon (r
 /-- After a new ack-eliciting packet, the next drain emits an ACK; when the
 packet's range is still stored it is claimed, and nothing unreceived is. -/
 theorem drain_after_recv (s : Rx) (pn : Nat) (hc : Canon s.flat)
-    (hnew : contains s.flat pn = false) :
+    (hnew : contains ⟨s.flat, s.floor⟩ pn = false) :
     ∃ largest first rs, (drain (recv s pn true)).1 = some (largest, first, rs) ∧
       (∀ n, Claimed largest first rs n → MemR n s.flat ∨ n = pn) ∧
       ((merged s.flat pn).length ≤ cap → Claimed largest first rs pn) := by

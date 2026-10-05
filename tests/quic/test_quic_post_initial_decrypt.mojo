@@ -273,6 +273,52 @@ def test_duplicate_packet_numbers_are_recognised() raises:
     assert_true(_ack_contains(full, UInt64(1)))
 
 
+def test_dropped_ack_ranges_are_not_forgotten() raises:
+    """QUIC-14: packets 0, 2, 4, ..., 64 make 33 ranges, so [0, 0] is
+    dropped at the cap. A later packet 3 merges [2,2], [3,3] and [4,4]
+    (31 ranges left); packet 0 must still read as received, or the
+    server would dispatch it a second time (RFC 9000 sec 13.2.3)."""
+    var flat = List[UInt64]()
+    for k in range(_ACK_MAX_RANGES + 1):
+        _ack_record(flat, UInt64(2 * k))
+    assert_true(_ack_contains(flat, UInt64(0)))
+    _ack_record(flat, UInt64(3))
+    assert_true(_ack_contains(flat, UInt64(0)), "packet 0 forgotten")
+    # Every packet that was received still reads as seen.
+    for k in range(_ACK_MAX_RANGES + 1):
+        assert_true(_ack_contains(flat, UInt64(2 * k)))
+    assert_true(_ack_contains(flat, UInt64(3)))
+    # A number above the floor that was never received is still new.
+    assert_false(_ack_contains(flat, UInt64(5)))
+    assert_false(_ack_contains(flat, UInt64(65)))
+    # The floor is not an ACK range: the frame claims only stored ranges.
+    var ack = _ack_from_ranges(flat, UInt64(0))
+    assert_equal(Int(ack.largest_acknowledged), 64)
+    assert_equal(len(ack.ranges), 30)
+
+
+def test_ack_floor_only_moves_up() raises:
+    """Dropping more ranges raises the floor; merging never lowers it."""
+    var flat = List[UInt64]()
+    for k in range(_ACK_MAX_RANGES + 10):
+        _ack_record(flat, UInt64(2 * k))
+    # Ten ranges ([0,0] .. [18,18]) were dropped: all read as seen, as
+    # does the gap number 17 below the floor (19), but 19 and 21 (kept
+    # gaps) are new.
+    for k in range(10):
+        assert_true(_ack_contains(flat, UInt64(2 * k)))
+    assert_true(_ack_contains(flat, UInt64(17)))
+    assert_false(_ack_contains(flat, UInt64(19)))
+    assert_false(_ack_contains(flat, UInt64(21)))
+    # Filling a kept gap and its neighbour merges ranges but keeps the floor.
+    _ack_record(flat, UInt64(21))
+    _ack_record(flat, UInt64(23))
+    assert_true(_ack_contains(flat, UInt64(0)))
+    assert_true(_ack_contains(flat, UInt64(18)))
+    assert_true(_ack_contains(flat, UInt64(17)))
+    assert_false(_ack_contains(flat, UInt64(19)))
+
+
 def test_packet_number_spaces_are_separate() raises:
     """One largest-received counter served Initial, Handshake and 1-RTT,
     so each space's truncated numbers were expanded against another
@@ -300,5 +346,7 @@ def main() raises:
     test_ack_ranges_contiguous_single_range()
     test_ack_ranges_duplicate_pn_is_idempotent()
     test_duplicate_packet_numbers_are_recognised()
+    test_dropped_ack_ranges_are_not_forgotten()
+    test_ack_floor_only_moves_up()
     test_packet_number_spaces_are_separate()
-    print("test_quic_post_initial_decrypt: 9 passed")
+    print("test_quic_post_initial_decrypt: 11 passed")

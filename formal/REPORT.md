@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62627 lines) |
+| Lean files | 298 (62651 lines) |
 | Theorems | 3286 |
-| Headline theorems in the axiom audit | 1082 |
+| Headline theorems in the axiom audit | 1083 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 90 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 91 of 138 |
 
 Six findings are rated high:
 
@@ -2860,7 +2860,7 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.Conn.implStepFixed` | quic/state.mojo:489-503, quic/_server_types.mojo:559-578 with the QUIC-09 fix | `runFixed_eq_spec`, `QUIC_04.fixed_refines`, `QUIC_09.fixed_meets_spec` | proved |
 | `Quic.AckExpand.expand` | quic/state.mojo:380, 388-427 | `expand_sound`, `expand_len_le`, `expand_eq_take`, `expand_complete`, `expand_length` | proved |
 | `Quic.AckGen.record`, `isort`, `mergeAcc` | quic/_server_support.mojo:76-124 | `record_canon`, `record_sound`, `record_exact`, `record_drops_lowest` | proved |
-| `Quic.AckGen.contains` | quic/_server_support.mojo:60-73 | `QUIC_14.impl_reaccepts`, `QUIC_14.fixed_never_reaccepts` | counterexample (QUIC-14) |
+| `Quic.AckGen.contains`, `recordSt`, `floorAfter` | quic/_server_support.mojo `_ack_floor`, `_ack_contains`, `_ack_record` (fixed, QUIC-14) | `QUIC_14.impl_reaccepts` (pre-fix `containsOld`), `QUIC_14.fixed_trace`, `QUIC_14.fixed_never_reaccepts` | proved (QUIC-14 resolved) |
 | `Quic.AckGen.fromRanges`, `gaps` | quic/_server_support.mojo:127-157 | `fromRanges_claimed`, `fromRanges_wellFormed`, `ack_roundtrip` | proved |
 | `Quic.AckGen.recv`, `drain` | quic/server.mojo:844-863, 2240-2268 | `drain_after_recv` | proved |
 | `Quic.Streams.server` | quic/server.mojo:1407-1430, quic/state.mojo:454-486, 712-722 | `server_stream_conforms`, `QUIC_15.impl_accepts`, `QUIC_16.impl_accepts`, `serverFixed_eq_spec` | counterexample (QUIC-15, QUIC-16) |
@@ -3077,7 +3077,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-11 | Medium | resolved | the server never validates the client's transport parameters | `Flare/Bugs/QUIC_11.lean` | `repro/QUIC-11_server_ignores_client_transport_params.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-12 | Low | open | the client's CID authentication confuses absent with empty | `Flare/Bugs/QUIC_12.lean` | `repro/QUIC-12_client_cid_auth_absent_vs_empty.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QUIC-13 | Low | open | preferred_address is not validated | `Flare/Bugs/QUIC_13.lean` | `repro/QUIC-13_preferred_address_not_validated.mojo` (any) |
-| QUIC-14 | Medium | open | ACK ranges forget dropped packets, which are then processed again | `Flare/Bugs/QUIC_14.lean` | `repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo` (any) |
+| QUIC-14 | Medium | resolved | ACK ranges forget dropped packets, which are then processed again | `Flare/Bugs/QUIC_14.lean` | `repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo` (any) |
 | QUIC-15 | Low | open | the server accepts stream frames that name the wrong direction | `Flare/Bugs/QUIC_15.lean` | `repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (any) |
 | QUIC-16 | Low | open | the server does not enforce its unidirectional stream limit | `Flare/Bugs/QUIC_16.lean` | `repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic)) |
 | QUIC-17 | Low | open | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
@@ -4387,11 +4387,13 @@ Status: resolved. Fixed: once the 1-RTT keys are installed the server decodes th
 
 #### QUIC-14: ACK ranges forget dropped packets, which are then processed again
 
+Status: resolved. Fixed: `_ack_record` keeps a floor (one above the highest range dropped at the 32-range cap) in an odd trailing slot of the flat list and `_ack_contains` treats every number below it as seen (`quic/_server_support.mojo`: `_ack_floor`, `_ack_record`, `_ack_contains`). Tests: `tests/quic/test_quic_post_initial_decrypt.mojo` (`test_dropped_ack_ranges_are_not_forgotten`, `test_ack_floor_only_moves_up`). Lean: `AckGen.contains` / `recordSt` are the shipped code; the counterexample is about the pre-fix `containsOld`.
+
 - **Severity:** Medium. A packet processed once (a request, a CONNECTION_CLOSE) can be processed a second time. An on-path attacker can replay a captured 1-RTT packet (it still decrypts, since the packet number is unchanged) once the receiver has had more than 32 gaps and a later packet has merged two ranges.
 - **RFC:** RFC 9000 §13.2.3: "A receiver MUST retain an ACK Range unless it can ensure that it will not subsequently accept packets with numbers in that range"; §12.3: packet numbers are not reused, so a duplicate must not be processed again.
 - **What goes wrong:** `_ack_record` (`quic/_server_support.mojo:76-124`) keeps the 32 highest ranges and drops the rest. `_ack_contains` (60-73) counts a number below every stored range as seen only while the list is full (`len(flat) >= 64`). When a later packet fills a gap and two ranges merge, 31 remain, the guard turns off, and a number from a dropped range reads as unseen; `server.mojo:844` then dispatches it.
 - **Counterexample:** `Bugs.QUIC_14.impl_reaccepts`: receive 0, 2, 4, ..., 64 (33 ranges, so [0,0] is dropped), then 3, which merges [2,2], [3,3] and [4,4]; `contains 0 = false`.
-- **Fix:** keep a floor, one above the highest number ever dropped, and count anything below it as seen. `fixed_never_reaccepts` shows that for every packet trace every received number reads as seen; `recordF_flat` shows the stored ranges, and so the ACKs sent, are unchanged.
+- **Fix:** keep a floor, one above the highest number ever dropped, and count anything below it as seen. `fixed_never_reaccepts` shows that for every packet trace every received number reads as seen; `recordSt_flat` shows the stored ranges, and so the ACKs sent, are unchanged.
 - **Repro:** `formal/repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo`
 - **Observed:** `BUG REPRODUCED: packet 0 was received, its range was dropped at the 32-range cap, and after packet 3 merged two ranges ( 31 ranges left) _ack_contains(0) = False, so it would be dispatched again`
 - **Flip** (`quic/_server_support.mojo`: the floor stored in an odd trailing slot, set from the highest dropped range in `_ack_record` and read in `_ack_contains`): `OK: packet 0 still reads as received after the merge ( 31 ranges )`, exit 0.
