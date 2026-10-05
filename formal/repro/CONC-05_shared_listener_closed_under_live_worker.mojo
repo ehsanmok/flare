@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: CONC-05 fixed on fix/formal-findings
 """CONC-05: in shared-listener mode the Scheduler closes (and frees) the
 shared listener fd while a worker can still accept on it.
 
@@ -20,7 +21,7 @@ Expected: the shared listener is the fd every worker accepts on. Per the
 drain docstring (scheduler.mojo:799-803) a detached worker's listeners
 "are left allocated, since the thread may still be using them", and no
 worker should ever accept on the fd after its number has been released.
-Actual: drain (and shutdown) close the shared fd in step 1, before any
+Before the fix: drain (and shutdown) close the shared fd in step 1, before any
 worker has stopped or been joined, and _free_resources frees the listener
 even when a worker was detached. The fd number is released while the
 worker still holds it; the next open() in the process reuses the number,
@@ -61,7 +62,9 @@ def _st(addr: Int, v: Int64):
 
 def _fd_open(fd: Int) -> Bool:
     # F_GETFD = 1 on Linux and macOS; -1 means the descriptor is closed.
-    return external_call["fcntl", c_int](c_int(fd), c_int(1), c_int(0)) >= c_int(0)
+    return external_call["fcntl", c_int](
+        c_int(fd), c_int(1), c_int(0)
+    ) >= c_int(0)
 
 
 @fieldwise_init

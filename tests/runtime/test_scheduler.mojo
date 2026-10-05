@@ -70,6 +70,13 @@ struct _NopFrontend(Copyable, Frontend):
         store_worker_stat(stats_addr, WORKER_STAT_STATUS, WORKER_STATUS_CLEAN)
 
 
+def _fd_open(fd: Int) -> Bool:
+    # F_GETFD is 1 on Linux and macOS; it fails with EBADF on a closed fd.
+    return external_call["fcntl", c_int](
+        c_int(fd), c_int(1), c_int(0)
+    ) >= c_int(0)
+
+
 # ── default_worker_count ───────────────────────────────────────────────────
 
 
@@ -166,11 +173,12 @@ def test_scheduler_pin_cores_flag_default_no_crash() raises:
     s.shutdown()
 
 
-def test_shutdown_closes_the_shared_listener_once() raises:
-    """Shutdown closed the shared listener fd to wake the workers, then
-    freed the TcpListener, whose destructor closed the same number
-    again. Anything that reused the number in between was closed."""
-    from std.ffi import c_int, external_call
+def test_shutdown_closes_the_shared_listener_after_the_workers_join() raises:
+    """The shared listener's number is held by every worker. It was closed
+    when the stop flag was stored, before any worker had seen the flag or
+    joined, so a worker mid-poll-batch accepted on whatever the number
+    named next. It must stay open until the workers have joined, then
+    close exactly once."""
     from std.os import setenv, unsetenv
 
     # The shared listener is the opt-out shape; per-worker SO_REUSEPORT
@@ -184,31 +192,18 @@ def test_shutdown_closes_the_shared_listener_once() raises:
     )
     var listener_fd = s._shared_listener_fd
     assert_true(listener_fd >= 0)
-    s._signal_and_close_listener()
-    # Reuse the freed number: the kernel hands out the lowest free fd.
-    var opened = List[c_int]()
-    var reused = c_int(-1)
-    for _ in range(64):
-        var fd = external_call["socket", c_int](c_int(2), c_int(1), c_int(0))
-        opened.append(fd)
-        if Int(fd) == listener_fd:
-            reused = fd
-            break
+    s._signal_stop()
+    var open_after_signal = _fd_open(listener_fd)
     s._join_workers()
     s._record_crash_count()
+    var open_after_join = _fd_open(listener_fd)
     s._free_resources()
-    var alive = True
-    if reused >= c_int(0):
-        # F_GETFD fails with EBADF on a closed fd.
-        alive = external_call["fcntl", c_int](
-            reused, c_int(1), c_int(0)
-        ) >= c_int(0)
-    for i in range(len(opened)):
-        _ = external_call["close", c_int](opened[i])
+    var open_after_free = _fd_open(listener_fd)
     s.shutdown()
     _ = unsetenv("FLARE_REUSEPORT_WORKERS")
-    assert_true(reused >= c_int(0), "could not reuse the listener's fd")
-    assert_true(alive, "shutdown closed an fd it no longer owned")
+    assert_true(open_after_signal, "closed before the workers saw the flag")
+    assert_true(open_after_join, "closed by the join, before the free")
+    assert_true(not open_after_free, "the shared listener was never closed")
 
 
 @fieldwise_init
@@ -437,13 +432,6 @@ struct _OneStuckFrontend(Copyable, Frontend):
             _ = libc_nanosleep_ms(1)
 
 
-def _fd_open(fd: Int) -> Bool:
-    # F_GETFD is 1 on Linux and macOS; it fails with EBADF on a closed fd.
-    return external_call["fcntl", c_int](
-        c_int(fd), c_int(1), c_int(0)
-    ) >= c_int(0)
-
-
 def _drain_with_one_stuck(extras: List[SocketAddr]) raises:
     var cells = Int(alloc(Layout[Int64](count=4)).unsafe_leak())
     _st(cells, 0)
@@ -505,6 +493,68 @@ def test_drain_closes_the_joined_workers_extra_listeners() raises:
     var extras = List[SocketAddr]()
     extras.append(SocketAddr.localhost(0))
     _drain_with_one_stuck(extras)
+
+
+# ── CONC-05: drain must not close the shared listener under a worker ────────
+
+
+@fieldwise_init
+struct _GateShared(Copyable, Frontend):
+    """One worker that records its (shared) listener fd and then stays
+    "in a handler" until the gate opens."""
+
+    var cells: Int  # [0] gate, [1] listener fd seen (+1), [2] done
+
+    def requires_per_worker_listener(self) -> Bool:
+        return False
+
+    def run_worker(
+        mut self,
+        listener_fd: Int,
+        mut stopping: Bool,
+        stats_addr: Int,
+        extra_fds: List[Int] = List[Int](),
+    ):
+        _st(self.cells + 8, Int64(listener_fd + 1))
+        while _ld(self.cells) == 0:  # the handler that overran drain
+            _ = libc_nanosleep_ms(1)
+        _st(self.cells + 16, 1)
+
+
+def test_drain_keeps_the_shared_listener_open_for_a_detached_worker() raises:
+    """``drain`` detaches a worker that outlives the deadline and then
+    freed the shared listener it still holds: the number named another
+    file the next time the process opened one."""
+    from std.os import setenv, unsetenv
+
+    _ = setenv("FLARE_REUSEPORT_WORKERS", "0")
+    var cells = Int(alloc(Layout[Int64](count=3)).unsafe_leak())
+    _st(cells, 0)
+    _st(cells + 8, 0)
+    _st(cells + 16, 0)
+    var s = Scheduler[_GateShared].start(
+        addr=SocketAddr.localhost(0),
+        frontend=_GateShared(cells),
+        num_workers=1,
+        pin_cores=False,
+    )
+    _ = unsetenv("FLARE_REUSEPORT_WORKERS")
+    assert_true(s._shared_listener_fd >= 0, "shared-listener mode not selected")
+    while _ld(cells + 8) == 0:
+        _ = libc_nanosleep_ms(1)
+    var lfd = Int(_ld(cells + 8)) - 1
+    assert_equal(lfd, s._shared_listener_fd)
+    var reports = s.drain(timeout_ms=50)
+    var detached = reports[0].drained == 0
+    var still_open = _fd_open(lfd)
+    _st(cells, 1)  # let the detached worker return
+    while _ld(cells + 16) == 0:
+        _ = libc_nanosleep_ms(1)
+    if still_open:
+        # The listener was deliberately leaked with the worker; close it.
+        _ = external_call["close", c_int](c_int(lfd))
+    assert_true(detached, "the worker was not detached")
+    assert_true(still_open, "drain closed the listener under a live worker")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────

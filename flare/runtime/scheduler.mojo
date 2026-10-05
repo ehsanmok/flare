@@ -25,16 +25,16 @@ Shutdown path: ``shutdown()`` flips a heap-allocated ``Bool`` that
 every worker polls on each reactor iteration. A stable heap address
 is used (instead of a field on the ``Scheduler`` struct) so the flag
 survives the NRVO-or-not move from ``Scheduler.start`` back to the
-caller. The main thread then closes the shared listener fd once
-and joins all workers before ``shutdown()`` returns.
+caller. The main thread joins all workers, and only then closes the
+shared listener fd (once), before ``shutdown()`` returns.
 
-Relying on ``close(listener_fd)`` alone to wake the workers is not
-enough on Linux: when the fd is also registered in the worker's
-``epoll`` instance, the kernel holds an extra reference to the
-underlying ``struct file``, so ``close()`` from another thread does
-not trigger an ``EPOLLHUP`` and the workers stay blocked in
-``epoll_wait`` until the 100 ms poll timeout fires. The heap flag is
-what actually breaks the loop.
+The listener is never closed to wake the workers. On Linux an fd that
+is also registered in a worker's ``epoll`` instance is kept alive by
+the kernel, so ``close()`` from another thread triggers no ``EPOLLHUP``
+and the workers stay blocked in ``epoll_wait`` until the 100 ms poll
+timeout fires; and closing it early let a worker that polled a batch
+before it saw the flag ``accept`` on a reused number (CONC-05). The
+heap flag is what breaks the loop.
 
 This module is :trait:`Frontend`-generic: every worker calls
 :meth:`Frontend.run_worker` once with its assigned listener fd
@@ -249,10 +249,10 @@ struct Scheduler[F: Frontend](Movable):
     # listener yet" (freshly constructed) or "already destroyed"
     # (post-shutdown).
     var _shared_listener_addr: Int
-    # Cached fd for the shared listener. Convenient for the shutdown
-    # path which closes the fd before destroying the heap struct;
-    # closing first ensures any in-flight ``accept(2)`` returns -1
-    # and the worker observes the stop flag promptly.
+    # Cached fd for the shared listener, for the workers' bare-number
+    # handles. It is closed once, by the listener's destructor in
+    # ``_free_resources``, after every worker has joined; never earlier,
+    # since a worker may still ``accept`` on it.
     var _shared_listener_fd: Int
     var _per_worker_listener_addrs: List[Int]
     """When the io_uring buffer-ring path is active, the
@@ -652,20 +652,23 @@ struct Scheduler[F: Frontend](Movable):
             )
         self._workers_len = 0
 
-    def _signal_and_close_listener(mut self):
-        """Flip the stop flag and close the shared listener fd.
+    def _signal_stop(mut self):
+        """Flip the stop flag.
 
         Idempotent. ``_stopping_addr == 0`` (never started / already
-        torn down) short-circuits the flip; the fd close is skipped
-        once the fd is -1.
+        torn down) makes it a no-op.
+
+        The shared listener is deliberately *not* closed here. Every
+        worker holds its bare fd number, and one that polled a batch
+        before it saw the flag still accepts on it, so closing it now
+        would let that ``accept`` land on whatever the number names next
+        (or let a worker still starting up register a reused number).
+        ``_free_resources`` closes it once, after every worker joined;
+        the stop flag, polled at least every 100 ms, is what ends the
+        loops (CONC-05).
         """
         if self._stopping_addr != 0:
             store_stop_flag(self._stopping_addr, True)
-        if self._shared_listener_fd >= 0:
-            _ = external_call["close", c_int, c_int](
-                c_int(self._shared_listener_fd)
-            )
-            self._shared_listener_fd = -1
 
     def _join_workers(mut self):
         """Join every worker thread and release the handle array.
@@ -713,15 +716,10 @@ struct Scheduler[F: Frontend](Movable):
         if self._shared_listener_addr != 0:
             var raw = _OpaquePtr(unsafe_from_address=self._shared_listener_addr)
             var typed = raw.unsafe_bitcast[TcpListener]()
-            if self._shared_listener_fd < 0:
-                # _signal_and_close_listener already closed this fd, and
-                # by now its number can belong to a socket or file the
-                # application opened since. The listener's destructor
-                # closed it a second time, and took that one down.
-                typed[]._socket.fd = c_int(-1)
             typed.unsafe_deinit_pointee()
             _scheduler_free_raw(raw)
             self._shared_listener_addr = 0
+            self._shared_listener_fd = -1
 
         for i in range(len(self._per_worker_listener_addrs)):
             var pwl_raw = _OpaquePtr(
@@ -746,15 +744,14 @@ struct Scheduler[F: Frontend](Movable):
     def shutdown(mut self) raises:
         """Signal every worker to stop and wait for them to join.
 
-        Flips the heap-allocated stopping flag, closes the shared
-        listener socket (useful on macOS kqueue; on Linux the
-        stopping flag is what actually breaks the loop), then joins
-        all worker threads, records the crash count, and frees every
-        worker context, listener, stats cell, and the stopping-flag
-        heap cell. Idempotent — a second call finds the state empty
+        Flips the heap-allocated stopping flag (what breaks the
+        workers' loops), joins all worker threads, records the crash
+        count, and frees every worker context, listener (the shared
+        one is closed here, after the join), stats cell, and the
+        stopping-flag heap cell. Idempotent — a second call finds the state empty
         and is a no-op.
         """
-        self._signal_and_close_listener()
+        self._signal_stop()
         self._join_workers()
         self._record_crash_count()
         self._free_resources()
@@ -799,8 +796,8 @@ struct Scheduler[F: Frontend](Movable):
         ``timeout_ms`` bounds the wait. A worker whose thread has not
         returned by then (a handler that will not finish) is detached
         and reported with ``drained == 0``; its context, stats cell and
-        listeners (its own, not the joined workers'), and the shared stop
-        flag, are left allocated, since the
+        listeners (its own, not the joined workers'), the shared listener
+        (opt-out shape), and the shared stop flag, are left allocated, since the
         thread may still be using them. ``timeout_ms <= 0`` is a hard stop: no drain window,
         and every worker is joined, as ``shutdown()`` does.
 
@@ -816,9 +813,9 @@ struct Scheduler[F: Frontend](Movable):
         var deadline_ms = timeout_ms if timeout_ms > 0 else 0
         var n_workers = len(self._stats_addrs)
 
-        # Step 1: signal stop + close the shared listener so a pending
-        # accept returns and the worker observes the flag promptly.
-        self._signal_and_close_listener()
+        # Step 1: signal stop. The shared listener stays open until
+        # every worker has joined (see _signal_stop).
+        self._signal_stop()
 
         # Step 2: wait, up to the deadline, for each worker's thread to
         # return (WORKER_STAT_DONE), then join the ones that did and
@@ -913,6 +910,11 @@ struct Scheduler[F: Frontend](Movable):
                 if not (owner < n and is_stuck[owner]):
                     kept.append(self._per_worker_listener_addrs[p])
             self._per_worker_listener_addrs = kept^
+            # The shared listener (opt-out shape) is held by every worker
+            # by its bare fd number, so it is leaked with the detached
+            # worker too rather than closed under it (CONC-05).
+            self._shared_listener_addr = 0
+            self._shared_listener_fd = -1
             # The detached worker re-reads the shared stop flag on every
             # serve-loop iteration, so the flag stays allocated too: it
             # is leaked like the stuck worker's context and stats cell.

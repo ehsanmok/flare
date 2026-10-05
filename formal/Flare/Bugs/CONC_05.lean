@@ -23,7 +23,13 @@ number after it stopped naming the listener. Drain's docstring (:799-803)
 promises that a detached worker's listeners "are left allocated, since the
 thread may still be using them".
 
-Fix (`cfgFixed`): no close in `_signal_and_close_listener`; close the number
+Status: resolved. The shipped teardown is `cfgFixed`; the counterexamples are
+about the explicitly pre-fix `cfgShutdown` and `cfgDrain`. Regression tests:
+tests/runtime/test_scheduler.mojo::
+test_shutdown_closes_the_shared_listener_after_the_workers_join and
+test_drain_keeps_the_shared_listener_open_for_a_detached_worker.
+
+Fix (`cfgFixed`): no close in `_signal_and_close_listener` (now `_signal_stop`); close the number
 once in `_free_resources`, after every worker was joined; when a worker was
 detached, leak the shared listener (`self._shared_listener_addr = 0` in the
 stuck-worker branch). Liveness does not need the early close: the poll
@@ -84,7 +90,7 @@ theorem drain_closes_live_listener :
     simp only [anyDet, List.any_eq_true]
     exact ⟨w, hw, hwd⟩
 
-/-- The fix suffices, for `shutdown` and `drain`, any number of workers and
+/-- Fix meets spec (shipped `cfgFixed`): it suffices, for `shutdown` and `drain`, any number of workers and
 every interleaving with unrelated fd allocations. -/
 theorem implFixed_safe (hard : Bool) (n : Nat) :
     ∀ s, (lts (cfgFixed hard) n).Reachable s → NoStaleUse s :=

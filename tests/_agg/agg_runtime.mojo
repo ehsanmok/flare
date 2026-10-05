@@ -425,7 +425,7 @@ from test_scheduler import (
     test_scheduler_pin_cores_flag_default_no_crash as test_scheduler__test_scheduler_pin_cores_flag_default_no_crash,
 )
 from test_scheduler import (
-    test_shutdown_closes_the_shared_listener_once as test_scheduler__test_shutdown_closes_the_shared_listener_once,
+    test_shutdown_closes_the_shared_listener_after_the_workers_join as test_scheduler__test_shutdown_closes_the_shared_listener_after_the_workers_join,
 )
 from test_scheduler import (
     test_drain_returns_at_its_deadline as test_scheduler__test_drain_returns_at_its_deadline,
@@ -441,6 +441,9 @@ from test_scheduler import (
 )
 from test_scheduler import (
     test_drain_closes_the_joined_workers_extra_listeners as test_scheduler__test_drain_closes_the_joined_workers_extra_listeners,
+)
+from test_scheduler import (
+    test_drain_keeps_the_shared_listener_open_for_a_detached_worker as test_scheduler__test_drain_keeps_the_shared_listener_open_for_a_detached_worker,
 )
 from test_syscall_ffi import (
     test_epoll_constants_distinct_bits as test_syscall_ffi__test_epoll_constants_distinct_bits,
@@ -908,7 +911,9 @@ def main() raises:
     suite.test[test_scheduler__test_scheduler_shutdown_idempotent]()
     suite.test[test_scheduler__test_scheduler_multiple_start_cycles]()
     suite.test[test_scheduler__test_scheduler_pin_cores_flag_default_no_crash]()
-    suite.test[test_scheduler__test_shutdown_closes_the_shared_listener_once]()
+    suite.test[
+        test_scheduler__test_shutdown_closes_the_shared_listener_after_the_workers_join
+    ]()
     suite.test[test_scheduler__test_drain_returns_at_its_deadline]()
     suite.test[
         test_scheduler__test_start_raises_when_a_worker_listener_cannot_bind
@@ -919,6 +924,9 @@ def main() raises:
     suite.test[test_scheduler__test_drain_closes_the_joined_workers_listeners]()
     suite.test[
         test_scheduler__test_drain_closes_the_joined_workers_extra_listeners
+    ]()
+    suite.test[
+        test_scheduler__test_drain_keeps_the_shared_listener_open_for_a_detached_worker
     ]()
     # tests/runtime/test_syscall_ffi.mojo
     suite.test[test_syscall_ffi__test_epoll_constants_distinct_bits]()

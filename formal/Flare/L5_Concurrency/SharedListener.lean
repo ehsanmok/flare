@@ -112,13 +112,19 @@ def wStep (stop : Bool) (w : W) : Option (W × Bool) :=
   | .acc => some ({ w with pc := .check }, true)
   | .done => none
 
-/-- mirrors flare/runtime/scheduler.mojo:655-668 @59bda50 -/
+/-- Storing the stop flag. Pre-fix (`fix = false`) `_signal_and_close_listener`
+also closed the shared fd; shipped (`fix = true`) `_signal_stop` does not.
+mirrors flare/runtime/scheduler.mojo:655-675 (fixed, CONC-05);
+pre-fix: flare/runtime/scheduler.mojo:655-668 @59bda50 -/
 def signalFd (c : Cfg) (fd : Fd) : Fd :=
   if c.fix then fd else if fd = .lis then .closed else fd
 
 def anyDet (s : St) : Bool := s.ws.any (·.detached)
 
-/-- mirrors flare/runtime/scheduler.mojo:703-724,890-900 @59bda50 -/
+/-- Freeing the shared listener: closed once after the join, leaked when a
+worker was detached (`fix = true`).
+mirrors flare/runtime/scheduler.mojo:706-725,907-918 (fixed, CONC-05);
+pre-fix: flare/runtime/scheduler.mojo:703-724,890-900 @59bda50 -/
 def freeFd (c : Cfg) (s : St) : Fd :=
   if c.fix then (if anyDet s then s.fd else if s.fd = .lis then .closed else s.fd)
   else s.fd
@@ -152,8 +158,11 @@ def step (c : Cfg) (s : St) : Lbl → Option St
 
 def lts (c : Cfg) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (step c)
 
+/-- Pre-fix `shutdown()` / `drain(timeout_ms <= 0)` (counterexamples). -/
 def cfgShutdown : Cfg := ⟨true, false⟩
+/-- Pre-fix `drain(timeout_ms > 0)` (counterexamples). -/
 def cfgDrain : Cfg := ⟨false, false⟩
+/-- The shipped teardown (CONC-05 fix); `hard` selects `shutdown` / hard drain. -/
 def cfgFixed (hard : Bool) : Cfg := ⟨hard, true⟩
 
 /-! ## Spec -/
