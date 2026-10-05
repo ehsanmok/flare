@@ -19,8 +19,12 @@ from std.testing import (
     assert_raises,
     TestSuite,
 )
+from std.ffi import external_call
+from std.memory import Layout, alloc
 from flare.tcp import TcpStream, TcpListener
-from flare.net import SocketAddr, IpAddr
+from flare.tcp.listener import _PeerDecoder, _adopt_accepted
+from flare.net import SocketAddr, IpAddr, NetworkError
+from flare.net.socket import AF_INET, SOCK_STREAM
 
 
 # ── Test helpers ──────────────────────────────────────────────────────────────
@@ -421,6 +425,72 @@ def test_v6_peer_addr() raises:
     server.close()
     client.close()
     listener.close()
+
+
+# ── accept ownership (NET-05) ─────────────────────────────────────────────────
+
+
+struct _FailingDecoder(_PeerDecoder):
+    """A peer decoder that always raises (``inet_ntop`` failing)."""
+
+    def __init__(out self):
+        pass
+
+    def decode(self, buf: Pointer[UInt8, _]) raises -> SocketAddr:
+        raise NetworkError("injected peer decode failure", 0)
+
+
+struct _FixedDecoder(_PeerDecoder):
+    var addr: SocketAddr
+
+    def __init__(out self, addr: SocketAddr):
+        self.addr = addr
+
+    def decode(self, buf: Pointer[UInt8, _]) raises -> SocketAddr:
+        return self.addr
+
+
+def _fd_is_open(fd: Int32) -> Bool:
+    # fcntl(fd, F_GETFD) is -1 (EBADF) for a closed descriptor.
+    return Int(external_call["fcntl", Int32](fd, Int32(1))) >= 0
+
+
+def _fresh_socket_fd() raises -> Int32:
+    var fd = external_call["socket", Int32](
+        Int32(AF_INET), Int32(SOCK_STREAM), Int32(0)
+    )
+    assert_true(fd >= 0, "socket(2) failed")
+    return fd
+
+
+def test_accept_closes_fd_when_peer_decode_fails() raises:
+    """NET-05: the accepted fd was decoded before it was wrapped, so a
+    failing decode left nothing owning it."""
+    var fd = _fresh_socket_fd()
+    var buf = alloc(Layout[UInt8](count=128)).unsafe_leak()
+    var raised = False
+    try:
+        _ = _adopt_accepted(fd, buf, _FailingDecoder())
+    except:
+        raised = True
+    buf.unsafe_free()
+    var still_open = _fd_is_open(fd)
+    if still_open:
+        _ = external_call["close", Int32](fd)  # do not leak from the test
+    assert_true(raised, "a failing decode must propagate")
+    assert_true(not still_open, "accepted fd leaked after a decode error")
+
+
+def test_accept_hands_fd_to_the_stream_on_success() raises:
+    var fd = _fresh_socket_fd()
+    var buf = alloc(Layout[UInt8](count=128)).unsafe_leak()
+    var peer = SocketAddr.parse("192.0.2.7:4242")
+    var stream = _adopt_accepted(fd, buf, _FixedDecoder(peer))
+    buf.unsafe_free()
+    assert_true(_fd_is_open(fd), "the stream must own an open fd")
+    assert_equal(String(stream.peer_addr()), "192.0.2.7:4242")
+    stream.close()
+    assert_true(not _fd_is_open(fd), "closing the stream closes the fd")
 
 
 def main() raises:

@@ -49,6 +49,7 @@ listener teardown (runtime/scheduler.mojo:655-668, 713-725), `_set_timeval_opt`
 | `sched_unpatched_double_close` | Without the patch the listener fd number is closed twice. | counterexample (shows the patch is needed; flare has it) |
 | `timeval_exact`, `timeval_fits` | `_set_timeval_opt` produces a normalised timeval equal to the millisecond value, with no Int64 overflow. | proved |
 | `timeval_negative` | A negative timeout gives a negative `tv_sec`. | proved (note) |
+| `accept_never_leaks` | The shipped accept (wrap, then decode) never leaks the fd, whatever the decode and `TCP_NODELAY` do. | proved |
 | `accept_nodelay_safe` | Once the accepted fd is wrapped, a `TCP_NODELAY` failure cannot leak it. | proved |
 
 Assumptions: Mojo runs no destructor on a moved-from value. Limitations: one fd
@@ -473,13 +474,14 @@ Status: resolved. `FrameDemux.feed` compacts the consumed prefix before raising 
 Severity: info (latent; reproduced by fault injection). Spec: once
 `accept(2)` returns an fd, a `TcpStream` owns it or it is closed before the
 error propagates.
-What goes wrong: tcp/listener.mojo:183-201 and 265-282 decode the peer
+What goes wrong: tcp/listener.mojo:183-201 and 265-282 @59bda50 decode the peer
 address before wrapping `client_fd`; a raise there leaks the fd. The decode
 cannot raise in practice: unknown families fall through to the AF_INET branch
 (net/socket.mojo:561-585) and `inet_ntop` does not fail for AF_INET/AF_INET6
 with flare's buffers.
-Lean: `Flare.Bugs.NET_05.accept_leaks_on_decode_error`. Fix: wrap first,
-then decode; `acceptFixed_spec`, `acceptFixed_agrees` (unchanged success path).
+Lean: `Flare.Bugs.NET_05.accept_leaks_on_decode_error` (about the pre-fix
+`acceptImplOld`). Fix: wrap first, then decode; `accept_spec`,
+`accept_agrees` (unchanged success path).
 Repro: `formal/repro/NET-05_accept_fd_leak_on_decode_error.mojo` (PLATFORM any,
 fault injection: `inet_ntop` returns NULL with ENOSPC, armed only around
 `accept()`; the repro learns the lowest free fd before `accept` and checks it
@@ -490,6 +492,7 @@ Flip (construct the `RawSocket` before decoding, then set its family), on
 macOS and Linux:
 `OK: accept raised ( inet_ntop failed: errno No space left on device ) and the accepted fd 8 was closed`
 (fd 7 on Linux), exit 0.
+Status: resolved. `accept` and `accept_fd` call `_adopt_accepted`, which builds the `RawSocket` first and decodes the peer address afterwards, so a raise runs the destructor and closes the fd; the model's `acceptImpl` mirrors it (pre-fix: `acceptImplOld`). Deterministic tests use a one-method internal seam (`_PeerDecoder`, not public API): `tests/tcp/test_tcp.mojo::test_accept_closes_fd_when_peer_decode_fails`, `::test_accept_hands_fd_to_the_stream_on_success`; the repro still exercises the real `accept` through the `inet_ntop` interposer.
 
 ### NET-06: `queried_local_path()` garbles non-ASCII Unix socket paths
 
@@ -858,7 +861,7 @@ lists record ids, not tokens.
 | `Flare.L2.Socket.close`, `deinit`, `fdStep` | flare/net/socket.mojo:143-220 | `close_idempotent`, `closes_then_deinit_exactly_once`, `fd_closed_once` | proved |
 | `Flare.L2.Socket.signalAndClose`, `freeResources` | flare/runtime/scheduler.mojo:655-668, 713-725 | `sched_patch_closes_once`, `sched_unpatched_double_close` | proved |
 | `Flare.L2.Socket.timeval` | flare/net/socket.mojo:481-509 | `timeval_exact`, `timeval_fits`, `timeval_negative` | proved |
-| `Flare.L2.Socket.acceptImpl` | flare/tcp/listener.mojo:165-201, 248-282 | `accept_nodelay_safe`, `NET_05.accept_leaks_on_decode_error` | proved; counterexample (NET-05) |
+| `Flare.L2.Socket.acceptImpl`, `acceptImplOld` | flare/tcp/listener.mojo:62-77, 238, 313 | `accept_never_leaks`, `accept_nodelay_safe`, `NET_05.accept_leaks_on_decode_error` | proved; counterexample (NET-05, resolved) |
 | `Flare.L2.WriteLoop.write` | flare/tcp/stream.mojo:481-523 | `writeAll_terminates_weak` | proved |
 | `Flare.L2.WriteLoop.writeAll` | flare/net/_write_loop.mojo:22-55 | `writeAll_terminates_weak`, `writeAll_terminates_strong`, `writeAll_no_overshoot`, `writeAllOld_livelock_weak` | proved; counterexample (NET-02, resolved) |
 | `Flare.L2.WriteLoop.udsWriteAll` | flare/uds/stream.mojo:140-170 | `udsWriteAll_eq` | proved |

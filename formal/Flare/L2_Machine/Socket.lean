@@ -204,7 +204,7 @@ theorem timeval_negative (ms : Int) (h : ms < 0) : (timeval ms).1 < 0 := by
 
 theorem timeval_minus_one : timeval (-1) = (-1, 999000) := by decide
 
-/-! ## accept: decode before wrap -/
+/-! ## accept: wrap before decode -/
 
 /-- What happened to the accepted fd. -/
 inductive AcceptOut where
@@ -214,21 +214,41 @@ inductive AcceptOut where
   | leaked   -- an error was raised before wrapping
   deriving DecidableEq, Repr
 
-/-- `TcpListener.accept` / `accept_fd`: `accept(2)`, then
+/-- Pre-fix `TcpListener.accept` / `accept_fd`: `accept(2)`, then
 `_sockaddr_to_socket_addr` (may raise), then wrap in `RawSocket`, then
 `set_tcp_nodelay` (may raise).
-mirrors flare/tcp/listener.mojo:165-201,248-282 @59bda50 -/
-def acceptImpl (fd : Int) (decodeOk nodelayOk : Bool) : AcceptOut :=
+(flare/tcp/listener.mojo:165-201,248-282 @59bda50) -/
+def acceptImplOld (fd : Int) (decodeOk nodelayOk : Bool) : AcceptOut :=
   if fd < 0 then .noFd
   else if ¬ decodeOk then .leaked
+  else if ¬ nodelayOk then .closed
+  else .owned
+
+/-- Shipped `TcpListener.accept` / `accept_fd` through `_adopt_accepted`:
+`accept(2)`, then wrap in `RawSocket`, then the peer decode (may raise; the
+socket's destructor closes the fd), then `set_tcp_nodelay` (may raise).
+mirrors flare/tcp/listener.mojo:62-77, 238, 313 (fixed, NET-05) -/
+def acceptImpl (fd : Int) (decodeOk nodelayOk : Bool) : AcceptOut :=
+  if fd < 0 then .noFd
+  else if ¬ decodeOk then .closed
   else if ¬ nodelayOk then .closed
   else .owned
 
 /-- Spec: the accepted fd is never leaked. -/
 def AcceptSpec (o : AcceptOut) : Prop := o ≠ .leaked
 
+/-- **The fd is never leaked** whatever the decode or `nodelay` do. -/
+theorem accept_never_leaks (fd : Int) (d n : Bool) : AcceptSpec (acceptImpl fd d n) := by
+  unfold AcceptSpec acceptImpl
+  repeat' split
+  all_goals simp
+
 /-- The fd is never leaked once it is wrapped (`nodelay` failures are safe). -/
-theorem accept_nodelay_safe (fd : Int) (b : Bool) : acceptImpl fd true b ≠ .leaked := by
-  unfold acceptImpl; split <;> simp; split <;> simp
+theorem accept_nodelay_safe (fd : Int) (b : Bool) : acceptImpl fd true b ≠ .leaked :=
+  accept_never_leaks fd true b
+
+/-- The reorder changes nothing on the success path. -/
+theorem acceptImpl_agrees (fd : Int) (n : Bool) : acceptImpl fd true n = acceptImplOld fd true n := by
+  simp [acceptImpl, acceptImplOld]
 
 end Flare.L2.Socket

@@ -36,6 +36,49 @@ from ..net._libc import (
 from .stream import TcpStream
 
 
+trait _PeerDecoder:
+    """Decodes the peer address ``accept(2)`` wrote into its sockaddr buffer.
+
+    The production decoder (:struct:`_SockaddrDecoder`) cannot fail for the
+    buffers ``accept(2)`` fills, so this one-method seam lets a test make the
+    decode raise and check that the accepted fd is still released. Internal;
+    see ``formal/Flare/Bugs/NET_05.lean``.
+    """
+
+    def decode(self, buf: Pointer[UInt8, _]) raises -> SocketAddr:
+        ...
+
+
+struct _SockaddrDecoder(_PeerDecoder):
+    """The real decoder: ``_sockaddr_to_socket_addr``."""
+
+    def __init__(out self):
+        pass
+
+    def decode(self, buf: Pointer[UInt8, _]) raises -> SocketAddr:
+        return _sockaddr_to_socket_addr(buf)
+
+
+def _adopt_accepted[
+    D: _PeerDecoder
+](
+    client_fd: c_int, peer_buf: Pointer[UInt8, _], decoder: D
+) raises -> TcpStream:
+    """Turn the fd ``accept(2)`` returned into a ``TcpStream``.
+
+    The fd is wrapped in a ``RawSocket`` *before* anything that can raise, so
+    a failing peer-address decode (or ``TCP_NODELAY``) runs the socket's
+    destructor and closes the fd instead of leaking it.
+    """
+    # AF_INET is a placeholder until the peer address says otherwise.
+    var client_sock = RawSocket(client_fd, AF_INET, SOCK_STREAM, True)
+    var peer = decoder.decode(peer_buf)
+    client_sock.family = AF_INET6 if peer.ip.is_v6() else AF_INET
+    client_sock.set_tcp_nodelay(True)
+
+    return TcpStream(client_sock^, peer)
+
+
 struct TcpListener(Movable):
     """A TCP socket in the listening state.
 
@@ -171,7 +214,9 @@ struct TcpListener(Movable):
             A connected ``TcpStream`` for the new client.
 
         Raises:
-            NetworkError: If ``accept(2)`` fails.
+            NetworkError: If ``accept(2)`` fails. If the peer address cannot
+                be decoded afterwards the accepted socket is closed before
+                the error propagates (it is never leaked).
 
         Example:
             ```mojo
@@ -192,13 +237,7 @@ struct TcpListener(Movable):
             var e = get_errno()
             raise NetworkError(_strerror(e.value) + " (accept)", Int(e.value))
 
-        var peer = _sockaddr_to_socket_addr(peer_buf)
-        var client_family = AF_INET6 if peer.ip.is_v6() else AF_INET
-
-        var client_sock = RawSocket(client_fd, client_family, SOCK_STREAM, True)
-        client_sock.set_tcp_nodelay(True)
-
-        return TcpStream(client_sock^, peer)
+        return _adopt_accepted(client_fd, peer_buf, _SockaddrDecoder())
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
@@ -273,10 +312,4 @@ def accept_fd(listener_fd: c_int) raises -> TcpStream:
         var e = get_errno()
         raise NetworkError(_strerror(e.value) + " (accept)", Int(e.value))
 
-    var peer = _sockaddr_to_socket_addr(peer_buf)
-    var client_family = AF_INET6 if peer.ip.is_v6() else AF_INET
-
-    var client_sock = RawSocket(client_fd, client_family, SOCK_STREAM, True)
-    client_sock.set_tcp_nodelay(True)
-
-    return TcpStream(client_sock^, peer)
+    return _adopt_accepted(client_fd, peer_buf, _SockaddrDecoder())

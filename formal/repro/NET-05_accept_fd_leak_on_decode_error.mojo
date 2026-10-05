@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-05 fixed on fix/formal-findings
 """NET-05: TcpListener.accept / accept_fd leak the accepted fd if the peer
 address fails to decode.
 
@@ -8,7 +9,7 @@ flare/tcp/listener.mojo:183-201 and 265-282 @59bda50.
 
 Expected: after accept(2) returns a client fd, either a TcpStream owns it
 or it is closed before the error propagates.
-Actual: _sockaddr_to_socket_addr(peer_buf) runs before client_fd is
+Before the fix: _sockaddr_to_socket_addr(peer_buf) runs before client_fd is
 wrapped in a RawSocket; when it raises, nothing owns the fd and it is
 never closed. The decode raises only if inet_ntop fails, which it never
 does for AF_INET/AF_INET6 with flare's 64-byte buffer, so the repro
@@ -84,8 +85,11 @@ def _sh(cmd: String) -> Int:
 
 
 def _parent() raises:
-    var dir = "/tmp/flare-repro-" + ID + "-" + String(
-        Int(external_call["getpid", Int32]())
+    var dir = (
+        "/tmp/flare-repro-"
+        + ID
+        + "-"
+        + String(Int(external_call["getpid", Int32]()))
     )
     if _sh("mkdir -p " + dir) != 0:
         print("inconclusive: cannot create", dir)
@@ -104,7 +108,11 @@ def _parent() raises:
         cc = "cc -shared -fPIC -o " + lib + " " + dir + "/fault.c -ldl"
         env = "LD_PRELOAD=" + lib
     if _sh(cc + " >" + dir + "/cc.log 2>&1") != 0:
-        print("inconclusive: no C compiler to build the fault injector (" + cc + ")")
+        print(
+            "inconclusive: no C compiler to build the fault injector ("
+            + cc
+            + ")"
+        )
         raise Error(ID + " inconclusive")
     # The conda linker's glibc stubs predate the versions Mojo's runtime
     # libraries reference; the real glibc resolves them at run time.
@@ -112,8 +120,26 @@ def _parent() raises:
     comptime if CompilationTarget.is_linux():
         flags = " -Xlinker --allow-shlib-undefined"
     var exe = dir + "/repro"
-    if _sh("mojo build -I ." + flags + " " + SELF + " -o " + exe + " >" + dir + "/build.log 2>&1") != 0:
-        print("inconclusive: mojo build of", SELF, "failed; see", dir + "/build.log")
+    if (
+        _sh(
+            "mojo build -I ."
+            + flags
+            + " "
+            + SELF
+            + " -o "
+            + exe
+            + " >"
+            + dir
+            + "/build.log 2>&1"
+        )
+        != 0
+    ):
+        print(
+            "inconclusive: mojo build of",
+            SELF,
+            "failed; see",
+            dir + "/build.log",
+        )
         raise Error(ID + " inconclusive")
     var rc = _sh(
         "FLARE_FAULT_CHILD=1 " + env + " " + exe + " >" + dir + "/out.log 2>&1"
@@ -173,7 +199,10 @@ def _child() raises:
     if hits <= 0 or not raised:
         print(
             "inconclusive: accept did not hit the inet_ntop fault (hits =",
-            hits, ", raised =", raised, ")",
+            hits,
+            ", raised =",
+            raised,
+            ")",
         )
         raise Error(ID + " inconclusive")
     var open_ = Int(external_call["fcntl", Int32](Int32(k), Int32(1))) >= 0
@@ -181,13 +210,25 @@ def _child() raises:
     _ = c.local_addr()
     if open_ and pp == cport:
         print(
-            "BUG REPRODUCED: accept raised (", err, ") but the accepted fd",
-            k, "is still open and connected to the client (peer port",
-            pp, "); nothing owns it, so it leaks",
+            "BUG REPRODUCED: accept raised (",
+            err,
+            ") but the accepted fd",
+            k,
+            "is still open and connected to the client (peer port",
+            pp,
+            "); nothing owns it, so it leaks",
         )
         raise Error(ID)
     if open_:
-        print("inconclusive: fd", k, "is open but not the accepted socket (peer port", pp, "vs", cport, ")")
+        print(
+            "inconclusive: fd",
+            k,
+            "is open but not the accepted socket (peer port",
+            pp,
+            "vs",
+            cport,
+            ")",
+        )
         raise Error(ID + " inconclusive")
     print("OK: accept raised (", err, ") and the accepted fd", k, "was closed")
 

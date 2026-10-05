@@ -63,6 +63,12 @@ from test_tcp import (
     test_v6_connect_loopback as test_tcp__test_v6_connect_loopback,
 )
 from test_tcp import test_v6_peer_addr as test_tcp__test_v6_peer_addr
+from test_tcp import (
+    test_accept_closes_fd_when_peer_decode_fails as test_tcp__test_accept_closes_fd_when_peer_decode_fails,
+)
+from test_tcp import (
+    test_accept_hands_fd_to_the_stream_on_success as test_tcp__test_accept_hands_fd_to_the_stream_on_success,
+)
 
 
 def main() raises:
@@ -90,4 +96,6 @@ def main() raises:
     suite.test[test_tcp__test_v6_listener_bind]()
     suite.test[test_tcp__test_v6_connect_loopback]()
     suite.test[test_tcp__test_v6_peer_addr]()
+    suite.test[test_tcp__test_accept_closes_fd_when_peer_decode_fails]()
+    suite.test[test_tcp__test_accept_hands_fd_to_the_stream_on_success]()
     suite^.run()
