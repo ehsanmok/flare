@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63429 lines) |
-| Theorems | 3335 |
-| Headline theorems in the axiom audit | 1125 |
+| Lean files | 298 (63435 lines) |
+| Theorems | 3336 |
+| Headline theorems in the axiom audit | 1126 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 122 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 123 of 138 |
 
 Six findings are rated high:
 
@@ -3065,7 +3065,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-10 | Medium | resolved | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
 | H2-11 | Low | resolved | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
 | H2-12 | Low | resolved | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
-| H2-13 | Low | open | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
+| H2-13 | Low | resolved | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
 | H2-14 | Low | open | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
 | H2-15 | Low | open | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
 | H2-16 | Low | open | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
@@ -4164,6 +4164,8 @@ Status: resolved. Fixed: `_emit_body_span` (`client.mojo`) sets CLOSED, not HALF
 - **Flip:** `OK: stream CLOSED; late DATA drew error code 5`. `test_h2_client_conn` (11), `test_h2_streaming_state` (10) and `test_h2_extended_connect` (5) passed.
 
 #### H2-13: the client's `send_data` sends on a closed stream and reopens it
+
+Status: resolved. Fixed: `send_data` (`client.mojo`) returns at once, sending nothing, when the stream is CLOSED (and drops any stashed body); this holds for non-final chunks too. Tests: `test_h2_client_conn.mojo::test_send_data_on_a_closed_stream_sends_nothing`, `test_send_data_on_an_open_stream_still_sends`. Model: `Fix.shipped` carries `h2_13`; `Bugs.H2_13.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. After the server resets a stream, or the client cancels it, an end-of-stream `send_data` queues DATA on the closed stream and moves its state back to half-closed (local). The server answers with STREAM_CLOSED. `send_data` is reached without a state check from `grpc/streaming.mojo:229,240`; `finish_upload` (650-667) does check.
 - **RFC:** RFC 9113 §5.1, closed: "An endpoint MUST NOT send frames other than PRIORITY on a closed stream." A closed stream never leaves "closed".

@@ -12,6 +12,8 @@ case; `send_data` is reached unguarded from `grpc/streaming.mojo:229,240`.
 
 RFC 9113 §5.1 closed: "An endpoint MUST NOT send frames other than
 PRIORITY on a closed stream." A closed stream never leaves "closed".
+
+Status: resolved. `send_data` returns without sending when the stream is closed (it also drops any stashed body). `Fix.shipped` carries `h2_13`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_13
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -33,5 +35,8 @@ theorem fixed_trace : stateOf { h2_13 := true } init tr 1 = some .closed := by n
 theorem fixed (fx : Fix) (c : Conn) (k : Nat) (s : Stream) (e : Bool) (hfx : fx.h2_13 = true)
     (hg : get c k = some s) (hs : s.state = .closed) : endLocal fx c k e = c := by
   simp [endLocal, hg, hs, hfx]
+
+/-- Shipped (`Fix.shipped` has `h2_13`): the stream stays closed. -/
+theorem fixed_shipped : stateOf Fix.shipped init tr 1 = some .closed := by native_decide
 
 end Flare.Bugs.H2_13

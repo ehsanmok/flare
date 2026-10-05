@@ -824,6 +824,70 @@ def test_last_body_chunk_on_an_open_stream_half_closes_local() raises:
     )
 
 
+def _data_frame_count(bytes: List[UInt8]) raises -> Int:
+    var off = 0
+    var n = 0
+    while off < len(bytes):
+        var got = parse_frame(Span[UInt8, _](bytes)[off:])
+        if not got:
+            break
+        var f = got.value().copy()
+        off += 9 + f.header.length
+        if Int(f.header.type.value) == 0:
+            n += 1
+    return n
+
+
+def test_send_data_on_a_closed_stream_sends_nothing() raises:
+    """H2-13: after the stream is closed (here by the server's RST_STREAM)
+    the client must not send DATA on it (RFC 9113 sec 5.1, closed) and the
+    stream stays closed. send_data used to queue the frame and move the
+    state back to half-closed (local)."""
+    var sizes = List[Int]()
+    sizes.append(0)  # the empty half-close marker
+    sizes.append(1)  # a final chunk
+    for k in range(len(sizes)):
+        var client = Http2ClientConnection()
+        _ = client.drain()
+        var sid = client.next_stream_id()
+        client.send_request_open(
+            sid, "POST", "http", "example.com", "/", List[HpackHeader]()
+        )
+        _ = client.drain()
+        client.feed(
+            Span[UInt8, _](_raw_frame(UInt8(0x3), UInt8(0), sid, _be32(8)))
+        )
+        _ = client.drain()
+        assert_equal(
+            client.conn.streams[sid].copy().state.value,
+            StreamState.CLOSED().value,
+        )
+        var body = List[UInt8](length=sizes[k], fill=UInt8(0x78))
+        client.send_data(sid, Span[UInt8, _](body), True)
+        assert_equal(_data_frame_count(client.drain()), 0)
+        assert_equal(
+            client.conn.streams[sid].copy().state.value,
+            StreamState.CLOSED().value,
+        )
+        # A non-final chunk is no different.
+        client.send_data(sid, Span[UInt8, _](body), False)
+        assert_equal(_data_frame_count(client.drain()), 0)
+
+
+def test_send_data_on_an_open_stream_still_sends() raises:
+    """H2-13: the guard does not affect a live stream."""
+    var client = Http2ClientConnection()
+    _ = client.drain()
+    var sid = client.next_stream_id()
+    client.send_request_open(
+        sid, "POST", "http", "example.com", "/", List[HpackHeader]()
+    )
+    _ = client.drain()
+    var body = List[UInt8](length=3, fill=UInt8(0x78))
+    client.send_data(sid, Span[UInt8, _](body), True)
+    assert_equal(_data_frame_count(client.drain()), 1)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -844,4 +908,6 @@ def main() raises:
     test_headers_on_an_opened_stream_are_still_a_response()
     test_last_body_chunk_closes_a_half_closed_remote_stream()
     test_last_body_chunk_on_an_open_stream_half_closes_local()
-    print("test_h2_client_conn: 19 passed")
+    test_send_data_on_a_closed_stream_sends_nothing()
+    test_send_data_on_an_open_stream_still_sends()
+    print("test_h2_client_conn: 21 passed")

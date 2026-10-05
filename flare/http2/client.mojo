@@ -881,6 +881,15 @@ struct Http2ClientConnection(Defaultable, Movable):
         :meth:`send_request`. Honours the negotiated send windows;
         raises if the body wouldn't fit.
         """
+        # sec 5.1, closed: "An endpoint MUST NOT send frames other than
+        # PRIORITY on a closed stream." A reset or finished stream stays
+        # closed; sending here would queue a DATA frame the peer answers
+        # with STREAM_CLOSED and would reopen the stream locally.
+        if sid in self.conn.streams and (
+            self.conn.streams[sid].state.value == StreamState.CLOSED().value
+        ):
+            self._discard_pending_body(sid)
+            return
         var n_body = len(body)
         if n_body == 0 and end_stream:
             # Empty DATA with END_STREAM is the half-close marker.

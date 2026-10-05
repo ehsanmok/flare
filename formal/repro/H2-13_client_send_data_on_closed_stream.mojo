@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-13 fixed on fix/formal-findings
 """H2-13: after the server resets a stream, the HTTP/2 client's
 `send_data` still puts DATA on that closed stream and flips the stream
 from CLOSED back to HALF_CLOSED_LOCAL.
@@ -21,7 +22,7 @@ grpc close_send does) and, on a second connection, sends a body chunk
 with send_data(1, b"x", end_stream=True).
 
 Expected: no frame is queued and stream 1 stays CLOSED (or send_data
-raises). Actual: a DATA(END_STREAM) frame for stream 1 is queued and the
+raises). Before the fix: a DATA(END_STREAM) frame for stream 1 is queued and the
 stream state becomes HALF_CLOSED_LOCAL.
 
 Minimal fix: in `send_data` / `_emit_body_span`, do nothing (or raise)
