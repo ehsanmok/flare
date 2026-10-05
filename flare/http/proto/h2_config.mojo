@@ -99,7 +99,8 @@ struct Http2Config(Copyable, Defaultable):
     Fields:
         max_concurrent_streams: SETTINGS_MAX_CONCURRENT_STREAMS
             (RFC 9113 §6.5.2). Bounds the per-connection live-stream
-            count.
+            count. ``0`` is not "unlimited": the server then refuses
+            every new request stream with REFUSED_STREAM.
         max_body_size: Maximum buffered request bytes per stream, default
             10 MiB. Exceeding the limit resets the stream and frees its body.
             Zero permits only empty bodies; this is not a SETTINGS value.

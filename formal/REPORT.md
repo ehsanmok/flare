@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63414 lines) |
-| Theorems | 3333 |
-| Headline theorems in the axiom audit | 1123 |
+| Lean files | 298 (63420 lines) |
+| Theorems | 3334 |
+| Headline theorems in the axiom audit | 1124 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 120 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 121 of 138 |
 
 Six findings are rated high:
 
@@ -3063,7 +3063,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-08 | Low | resolved | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
 | H2-09 | Medium | resolved | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
 | H2-10 | Medium | resolved | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
-| H2-11 | Low | open | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
+| H2-11 | Low | resolved | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
 | H2-12 | Low | open | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
 | H2-13 | Low | open | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
 | H2-14 | Low | open | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
@@ -4138,6 +4138,8 @@ Status: resolved. Fixed in `validate_request_fields`: the name loop also rejects
 - **Flip:** OK, exit 0.
 
 #### H2-11: SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited"
+
+Status: resolved. Fixed: the `max_concurrent_streams > 0` conjunct is removed from the refusal test in the HEADERS branch (`state.mojo`). Tests: `test_h2_state.mojo::test_zero_concurrent_streams_refuses_every_stream`, `test_a_positive_limit_still_admits_streams_up_to_it`. Model: `Fix.shipped` carries `h2_11`; `Bugs.H2_11.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. It only matters if an operator configures 0, for example to stop new requests during maintenance. Every stream is then accepted, the opposite of what was asked.
 - **RFC:** RFC 9113 §5.1.2 requires a stream error when the advertised limit is exceeded. §6.5.2: "A value of 0 for SETTINGS_MAX_CONCURRENT_STREAMS SHOULD NOT be treated as special by endpoints."

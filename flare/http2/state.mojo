@@ -1378,11 +1378,12 @@ struct Connection(Copyable, Defaultable):
                     refuse = Http2ErrorCode.PROTOCOL_ERROR().value
             # sec 5.1.2: refuse a stream past the concurrency limit we
             # advertised instead of serving it.
+            # A limit of 0 is not special (sec 6.5.2): it admits no stream,
+            # which is how an operator drains a server.
             if (
                 refuse == 0
                 and not self.is_client
                 and f.header.stream_id not in self.streams
-                and self.max_concurrent_streams > 0
                 and self._active_stream_count() >= self.max_concurrent_streams
             ):
                 refuse = Http2ErrorCode.REFUSED_STREAM().value

@@ -13,6 +13,8 @@ concurrent stream limit to be exceeded MUST treat this as a stream error
 (Section 5.4.2) of type PROTOCOL_ERROR or REFUSED_STREAM." §6.5.2: "A
 value of 0 for SETTINGS_MAX_CONCURRENT_STREAMS SHOULD NOT be treated as
 special by endpoints."
+
+Status: resolved. The `max_concurrent_streams > 0` conjunct is gone, so a limit of 0 refuses every new stream. `Fix.shipped` carries `h2_11`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_11
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -38,5 +40,8 @@ theorem fixed (fx : Fix) (c : Conn) (f : Fr) (h11 : fx.h2_11 = true)
     (hs : c.isClient = false) (hm : mem c f.sid = false) (hge : c.maxConcurrent ≤ activeCount c) :
     headersRefuse fx c f 0 = eREFUSED :=
   refuse_at_limit fx c f h11 hs hm hge
+
+/-- Shipped (`Fix.shipped` has `h2_11`): limit 0 refuses the stream. -/
+theorem fixed_shipped : lastOut Fix.shipped init tr = some [.rst 1 eREFUSED] := by native_decide
 
 end Flare.Bugs.H2_11

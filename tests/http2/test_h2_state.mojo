@@ -858,6 +858,30 @@ def test_well_formed_goaway_is_still_accepted() raises:
     assert_true(c2.goaway_received)
 
 
+def test_zero_concurrent_streams_refuses_every_stream() raises:
+    """H2-11: SETTINGS_MAX_CONCURRENT_STREAMS = 0 is not special (RFC 9113
+    sec 6.5.2); it admits no stream, so each request is refused with
+    REFUSED_STREAM (sec 5.1.2) instead of being served."""
+    var c = Connection()
+    c.max_concurrent_streams = 0
+    for sid in [1, 3]:
+        var out = _open_request(c, sid, True)
+        assert_equal(len(out), 1)
+        assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+        assert_equal(Int(out[0].payload[3]), 0x7)  # REFUSED_STREAM
+        assert_false(sid in c.streams)
+
+
+def test_a_positive_limit_still_admits_streams_up_to_it() raises:
+    var c = Connection()
+    c.max_concurrent_streams = 1
+    var first = _open_request(c, 1, False)
+    assert_equal(len(first), 0)
+    assert_true(1 in c.streams)
+    var second = _open_request(c, 3, False)
+    assert_equal(Int(second[0].payload[3]), 0x7)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -895,4 +919,6 @@ def main() raises:
     test_first_stream_id_is_still_accepted()
     test_goaway_shorter_than_eight_octets_is_a_frame_size_error()
     test_well_formed_goaway_is_still_accepted()
-    print("test_h2_state: 36 passed")
+    test_zero_concurrent_streams_refuses_every_stream()
+    test_a_positive_limit_still_admits_streams_up_to_it()
+    print("test_h2_state: 38 passed")

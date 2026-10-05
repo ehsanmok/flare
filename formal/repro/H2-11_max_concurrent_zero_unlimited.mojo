@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-11 fixed on fix/formal-findings
 """H2-11: SETTINGS_MAX_CONCURRENT_STREAMS = 0 is advertised but enforced as
 "unlimited".
 
@@ -18,7 +19,7 @@ PROTOCOL_ERROR or REFUSED_STREAM."
 Trace: Http2Config with max_concurrent_streams = 0; the server's initial
 SETTINGS carries (0x3, 0); a valid GET HEADERS arrives on stream 1.
 
-Expected: RST_STREAM(REFUSED_STREAM). Actual: the request is accepted and
+Expected: RST_STREAM(REFUSED_STREAM). Before the fix: the request is accepted and
 becomes ready for dispatch.
 
 Minimal fix: drop the `self.max_concurrent_streams > 0 and` conjunct.
