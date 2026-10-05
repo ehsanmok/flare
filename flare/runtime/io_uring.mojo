@@ -115,7 +115,7 @@ from std.ffi import (
     get_errno,
     ErrNo,
 )
-from std.memory import Layout, Pointer, alloc
+from std.memory import Layout, Pointer, alloc, stack_allocation
 from std.sys.info import CompilationTarget
 
 
@@ -311,6 +311,57 @@ def io_uring_enter(
         c_size_t(flags),
         c_size_t(0),
         c_size_t(0),
+    )
+    if rc < 0:
+        return -Int(get_errno().value)
+    return Int(rc)
+
+
+comptime _IORING_ENTER_EXT_ARG: Int = 0x08
+"""``IORING_ENTER_EXT_ARG`` (Linux 5.11+): the syscall's fifth argument is
+a ``struct io_uring_getevents_arg`` rather than a signal mask."""
+
+
+def io_uring_enter_timeout(
+    fd: Int, to_submit: Int, min_complete: Int, flags: Int, timeout_ms: Int
+) -> Int:
+    """``SYS_io_uring_enter(2)`` that waits at most ``timeout_ms``.
+
+    Passes ``IORING_ENTER_EXT_ARG`` with a ``struct
+    io_uring_getevents_arg`` (``sigmask``, ``sigmask_sz``, ``pad``, ``ts``;
+    24 bytes) whose ``ts`` points at a ``struct __kernel_timespec``. The
+    kernel copies both before it waits, so stack storage is enough.
+
+    Args:
+        fd: Ring file descriptor.
+        to_submit: Number of SQEs to submit from the SQ ring.
+        min_complete: Completions to wait for before returning.
+        flags: ``IORING_ENTER_*`` flags (``EXT_ARG`` is added here).
+        timeout_ms: Longest wait, in milliseconds (clamped to >= 0).
+
+    Returns:
+        Number of SQEs consumed on success; ``-errno`` on failure. A wait
+        that ran out of time reports ``-ETIME`` (-62); callers treat it as
+        "nothing arrived".
+    """
+    var ms = timeout_ms
+    if ms < 0:
+        ms = 0
+    var ts = stack_allocation[2, Int64]()
+    ts[unsafe_offset=0] = Int64(ms // 1000)
+    ts[unsafe_offset=1] = Int64((ms % 1000) * 1_000_000)
+    var arg = stack_allocation[3, UInt64]()
+    arg[unsafe_offset=0] = UInt64(0)  # sigmask
+    arg[unsafe_offset=1] = UInt64(0)  # sigmask_sz + pad
+    arg[unsafe_offset=2] = UInt64(Int(ts))  # ts
+    var rc = external_call["syscall", c_int](
+        c_int(SYS_IO_URING_ENTER),
+        c_size_t(fd),
+        c_size_t(to_submit),
+        c_size_t(min_complete),
+        c_size_t(flags | _IORING_ENTER_EXT_ARG),
+        c_size_t(Int(arg)),
+        c_size_t(24),
     )
     if rc < 0:
         return -Int(get_errno().value)

@@ -49,8 +49,9 @@ Under them every worker is `done` within `bound P = cap + ε + σ + η + σ + τ
 of the stop (`worker_done_by`), `shutdown` and `drain` finish within
 `bound P + (n + w + 2)·σ` (`teardown_done_by`, `w` = 1 for drain), and a
 drain whose deadline exceeds `bound P` detaches no worker (`drain_joins_all`).
-`Flare.Bugs.CONC_07` shows the io_uring buffer-ring loop does not satisfy
-`PollReturns` and that without it no bound exists.
+`Flare.Bugs.CONC_07` shows the pre-fix io_uring buffer-ring loop did not
+satisfy `PollReturns` and that without it no bound exists; the shipped loop
+bounds its wait with `io_uring_enter`'s timeout (`capped`).
 -/
 namespace Flare.L5.Timed
 
@@ -166,7 +167,8 @@ def mStep (c : Cfg) (s : TS) : Option TS :=
   | .fin _ => none
 
 /-- mirrors flare/http/_server_reactor_epoll.mojo:155-266,
-flare/http/_server_reactor_uring.mojo:842-981 and
+flare/http/_server_reactor_uring.mojo:856-998 (fixed, CONC-07: `poll` takes
+`URING_STOP_POLL_MS`) and
 flare/runtime/scheduler.mojo:655-668,746-760,815-901 @59bda50 -/
 def step (c : Cfg) (s : TS) : Lbl → Option TS
   | .tick => some { s with now := s.now + 1 }

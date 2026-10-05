@@ -323,6 +323,10 @@ comptime IORING_ENTER_SQ_WAKEUP: UInt32 = 0x02
 ``IORING_SETUP_SQPOLL``)."""
 comptime IORING_ENTER_SQ_WAIT: UInt32 = 0x04
 """Wait for the SQ to drain before returning."""
+comptime IORING_ENTER_EXT_ARG: UInt32 = 0x08
+"""5.11+. ``io_uring_enter``'s fifth argument points at an
+``io_uring_getevents_arg`` (carrying a wait timeout) instead of a
+signal mask."""
 
 
 # ── struct sizes ─────────────────────────────────────────────────────────────

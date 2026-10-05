@@ -1,4 +1,5 @@
 # PLATFORM: linux
+# RESOLVED: CONC-07 fixed on fix/formal-findings
 """CONC-07: an idle io_uring buffer-ring worker never sees the stop flag, so
 Scheduler.shutdown() hangs and drain(timeout_ms) detaches every idle worker.
 
@@ -25,7 +26,7 @@ this loop re-reads it only when some completion arrives.
 
 Expected: once the stop flag is set, an idle worker returns within about one
 poll cap, so drain(2000) joins it (drained == 1) and shutdown() returns.
-Actual: the idle worker stays in io_uring_enter; drain(2000) reports it
+Before the fix: the idle worker stays in io_uring_enter; drain(2000) reports it
 detached (drained == 0), and the worker returns only after a client
 connection produces an accept completion. shutdown() would block in
 pthread_join until such a connection arrives.
@@ -41,7 +42,14 @@ arrives, so poll(1) returns at least every 100 ms, as the epoll loop does.
 
 from std.ffi import c_int
 
-from flare.http import Handler, HttpFrontend, Request, Response, ServerConfig, ok
+from flare.http import (
+    Handler,
+    HttpFrontend,
+    Request,
+    Response,
+    ServerConfig,
+    ok,
+)
 from flare.net import SocketAddr
 from flare.runtime import Scheduler, is_io_uring_available
 from flare.runtime._libc_time import libc_nanosleep_ms, monotonic_now_ms

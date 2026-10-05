@@ -94,6 +94,7 @@ from std.sys.info import CompilationTarget
 from flare.runtime.io_uring import (
     IoUringRing,
     io_uring_enter,
+    io_uring_enter_timeout,
     _IO_URING_PARAMS_BYTES,
     _read_u32_le,
 )
@@ -613,6 +614,26 @@ struct IoUringDriver(Movable):
         # waiting for more.
         var flags: Int = 1
         return io_uring_enter(self.fd(), to_submit, min_complete, flags)
+
+    def submit_and_wait_timeout(
+        mut self, min_complete: Int, timeout_ms: Int
+    ) -> Int:
+        """Like :meth:`submit_and_wait`, but waits at most ``timeout_ms``.
+
+        Needs ``IORING_ENTER_EXT_ARG`` (Linux 5.11+), older than every
+        feature the buffer-ring path already requires.
+
+        Returns:
+            As :meth:`submit_and_wait`; a wait that timed out returns
+            ``-ETIME`` (-62), which callers treat as "nothing arrived".
+        """
+        var k_tail = _atomic_load_u32_relaxed(self._sq_tail_ptr)
+        var to_submit = _ring_distance(self._sq_local_tail, k_tail)
+        if to_submit > 0:
+            _atomic_store_u32_release(self._sq_tail_ptr, self._sq_local_tail)
+        return io_uring_enter_timeout(
+            self.fd(), to_submit, min_complete, 1, timeout_ms
+        )
 
     # ── Reap path ─────────────────────────────────────────────────────────────
 

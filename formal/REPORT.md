@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61394 lines) |
+| Lean files | 298 (61410 lines) |
 | Theorems | 3230 |
 | Headline theorems in the axiom audit | 1031 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 34 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 35 of 138 |
 
 Six findings are rated high:
 
@@ -3112,7 +3112,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | CONC-04 | Medium | resolved | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
 | CONC-05 | Medium | resolved | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
 | CONC-06 | Medium | resolved | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
-| CONC-07 | Medium | open | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
+| CONC-07 | Medium | resolved | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
 | MACH-01 | Low | open | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
 | DOC-01 | Medium | open | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-02 | Low | open | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
@@ -5413,6 +5413,8 @@ Status: resolved. The `start` rollback now frees every pre-bound per-worker list
   - Without io_uring it stops as inconclusive instead of printing OK.
   - Observed in 4 of 4 runs (the last one after the flip was restored): `BUG REPRODUCED: the idle io_uring worker ignored the stop flag for 2000 ms; drain detached it (still running: True), and it returned only after a client connected (returned: True)`.
 - **Flip:** in the container's copy of the repo, `run_uring_bufring_reactor_loop_shared` was changed to keep one 100 ms `IORING_OP_TIMEOUT` SQE armed and re-arm it on its completion. Result: `OK: the idle io_uring worker saw the stop and was joined after 14 ms` (then 111 ms and 3 ms) and exit 0, in 3 of 3 runs. The next synced run restored the copy, and the host's `flare/` was never edited.
+
+Status: resolved. Both io_uring loops (`run_uring_bufring_reactor_loop_shared`, which the single-worker loop delegates to, and the static-response loop) now call `ureactor.poll(1, completions, 64, URING_STOP_POLL_MS)`. The new `timeout_ms` argument makes the blocking phase an `io_uring_enter` with `IORING_ENTER_EXT_ARG` and a 100 ms timeout (`io_uring_enter_timeout`, Linux 5.11+, older than the buffer-ring features this path already needs). A timed-out wait (`-ETIME`) is not an error. No SQE or CQE tag is added, so the SQ and the completion handling are unchanged. Tests: `tests/runtime/test_uring_worker_stop.mojo::test_idle_uring_worker_is_joined_by_drain` (real `HttpFrontend`, one idle worker, `drain(2000)` joins it) and `tests/runtime/test_uring_reactor.mojo::test_blocking_poll_with_a_timeout_returns_on_its_own` (Linux only). The repro now prints `OK:` (3 of 3 runs). The shipped config is `Flare.Bugs.CONC_07.cfgUringShipped` and `fixed_meets_spec` is stated about it.
 
 ### 5.8 Worker-loop machine
 

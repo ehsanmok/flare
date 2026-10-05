@@ -94,6 +94,12 @@ reports how many workers exited on a reactor poll failure rather than
 a clean stop -- `is_running()` only tracks join state and cannot make
 that distinction.
 
+Every worker re-reads the stop flag at least every 100 ms, whichever
+reactor it runs on. The io_uring buffer-ring workers (`FLARE_BUFRING_HANDLER=1`)
+have no wakeup channel, so they bound their `io_uring_enter` wait with a
+100 ms timeout (Linux 5.11+); an idle server therefore joins in about that
+time on `shutdown()` and `drain`, without waiting for a client to connect.
+
 For zero-downtime deploys behind a load balancer:
 
 1. Stop sending traffic at the LB.

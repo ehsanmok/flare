@@ -741,6 +741,7 @@ struct UringReactor(Movable):
         min_complete: Int,
         mut out: List[UringCompletion],
         max_completions: Int = 64,
+        timeout_ms: Int = -1,
     ) raises -> Int:
         """Submit any pending SQEs, drain ready CQEs, then
         optionally block for more.
@@ -784,6 +785,13 @@ struct UringReactor(Movable):
             max_completions: Per-poll budget so one slow op
                 doesn't starve the reactor (matches epoll's
                 ``max_events``).
+            timeout_ms: Longest the blocking phase may wait. Negative
+                (the default) waits for ``min_complete`` completions
+                however long they take. Non-negative bounds the wait and
+                returns with whatever arrived (possibly nothing), so a
+                loop that blocks here can re-read its stop flag; a ring
+                with no wakeup channel needs this to be stoppable while
+                idle.
         """
         out.clear()
         # Lazy-arm the wakeup read on first poll so the eventfd
@@ -830,8 +838,13 @@ struct UringReactor(Movable):
         # until at least ``need`` more CQEs land.
         var need = min_complete - n
         if need > 0 and n < max_completions and raw_consumed == 0:
-            var rc1 = self._driver.submit_and_wait(need)
-            if rc1 < 0 and rc1 != -4:  # -EINTR
+            var rc1: Int
+            if timeout_ms >= 0:
+                rc1 = self._driver.submit_and_wait_timeout(need, timeout_ms)
+            else:
+                rc1 = self._driver.submit_and_wait(need)
+            # -EINTR: signal; -ETIME: the bounded wait ran out.
+            if rc1 < 0 and rc1 != -4 and rc1 != -62:
                 raise Error(
                     "UringReactor.poll: io_uring_enter("
                     + String(need)

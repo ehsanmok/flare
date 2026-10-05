@@ -3,7 +3,15 @@ import Flare.L5_Concurrency.Timed
 /-!
 # CONC-07: an idle io_uring worker never sees the stop flag
 
-The io_uring buffer-ring loop (flare/http/_server_reactor_uring.mojo:784-998
+Status: resolved. The io_uring loops wait with
+`ureactor.poll(1, completions, 64, URING_STOP_POLL_MS)` (100 ms), which
+blocks in `io_uring_enter` with `IORING_ENTER_EXT_ARG` and a timeout
+(flare/runtime/io_uring.mojo `io_uring_enter_timeout`), so the loop is
+`capped` and the shipped config is `cfgUringShipped`. The counterexamples
+below are about the pre-fix, uncapped configs `cfgUringShutdown` and
+`cfgUringDrain`; `fixed_meets_spec` is stated about `cfgUringShipped`.
+
+Before the fix, the io_uring buffer-ring loop (flare/http/_server_reactor_uring.mojo:784-998
 @59bda50), which `HttpFrontend` runs when io_uring is available and
 `config.use_bufring` is set (flare/http/frontend.mojo:126-160), builds its
 ring with `enable_wakeup=False` (:820-824) and waits with
@@ -39,8 +47,13 @@ relative) armed and re-arming it on its completion; the loop is then
 namespace Flare.Bugs.CONC_07
 open Flare.L5.Timed
 
+/-- Pre-fix: `poll(1)` with no timeout (not `capped`). -/
 def cfgUringShutdown : Cfg := ⟨false, none⟩
+/-- Pre-fix, `drain(D)`. -/
 def cfgUringDrain (D : Nat) : Cfg := ⟨false, some D⟩
+/-- Shipped: mirrors flare/http/_server_reactor_uring.mojo:856-998
+(fixed, CONC-07): the wait is capped at `URING_STOP_POLL_MS = 100`. -/
+def cfgUringShipped (dr : Option Nat) : Cfg := ⟨true, dr⟩
 
 /-- Every hypothesis of `Flare.L5.Timed.Hyp` except `PollReturns`. -/
 def HypNoPoll (P : Params) (c : Cfg) (s : TS) : Prop :=
@@ -141,15 +154,16 @@ theorem drain_detaches_idle (P : Params) (D : Nat) :
       (.nil _))))
   exact ⟨_, ⟨_, _, ⟨false, rfl⟩, run_append hr1 hr2⟩, rfl, rfl, rfl⟩
 
-/-- The fixed loop (a capped wait) meets the spec: every worker is done
-within `bound P` and `shutdown` / `drain` return within `mBound`, and a
-drain with `D > bound P` detaches nobody. -/
+/-- The shipped loop (`cfgUringShipped`, a capped wait) meets the spec: every
+worker is done within `bound P` and `shutdown` / `drain` return within
+`mBound`, and a drain with `D > bound P` detaches nobody. -/
 theorem fixed_meets_spec (P : Params) (dr : Option Nat) (n : Nat) (s : TS)
-    (hr : (ltsH ⟨true, dr⟩ (Hyp P ⟨true, dr⟩) n).Reachable s) {t0 : Nat} (hs : s.stop = some t0) :
+    (hr : (ltsH (cfgUringShipped dr) (Hyp P (cfgUringShipped dr)) n).Reachable s) {t0 : Nat}
+    (hs : s.stop = some t0) :
     (t0 + bound P < s.now → ∀ w ∈ s.ws, w.pc = .done) ∧
-    (t0 + mBound P ⟨true, dr⟩ n < s.now → ∃ t, s.m = .fin t) ∧
+    (t0 + mBound P (cfgUringShipped dr) n < s.now → ∃ t, s.m = .fin t) ∧
     (∀ D, dr = some D → bound P < D → (∀ t, s.m ≠ .wait t) → ∀ b ∈ s.snap, b = true) :=
   ⟨worker_done_by P _ n s hr hs, teardown_done_by P _ n s hr hs,
-    fun D hD hB hm => drain_joins_all P ⟨true, dr⟩ n D hD hB s hr hm⟩
+    fun D hD hB hm => drain_joins_all P (cfgUringShipped dr) n D hD hB s hr hm⟩
 
 end Flare.Bugs.CONC_07

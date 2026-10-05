@@ -58,7 +58,9 @@ picks it from the ALPN the handshake negotiated. `bind` with a list (several
 distinct addresses) is single-worker only -- multi-worker uses
 `SO_REUSEPORT` on one address, and the N x M cross product is not built.
 The io_uring buffer-ring path is HTTP/1.1 cleartext only and stays
-opt-in.
+opt-in. Its workers wait on the ring for at most 100 ms
+(`io_uring_enter` with a timeout), so an idle worker sees the stop flag
+and `shutdown()` / `drain` return without traffic.
 
 ## HTTP server
 

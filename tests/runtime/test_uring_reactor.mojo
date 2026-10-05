@@ -50,6 +50,7 @@ from flare.net._libc import (
     _send,
     _fill_sockaddr_in,
 )
+from flare.runtime._libc_time import monotonic_now_ms
 from flare.runtime.io_uring import is_io_uring_available
 from flare.runtime.io_uring_sqe import POLLIN, POLLRDHUP, prep_nop
 from flare.runtime.uring_reactor import (
@@ -136,6 +137,26 @@ def test_idle_poll_returns_zero() raises:
     # surface returns 0 (wakeup CQEs are filtered out).
     assert_equal(n, 0)
     assert_equal(len(out), 0)
+
+
+def test_blocking_poll_with_a_timeout_returns_on_its_own() raises:
+    # CONC-07: with min_complete=1 and nothing ever completing, a bounded
+    # poll must come back after about timeout_ms (it used to block
+    # forever), so an idle loop can re-read its stop flag.
+    if not is_io_uring_available():
+        print("test_blocking_poll_with_a_timeout: skipped (no io_uring)")
+        return
+    var r = UringReactor(16, enable_wakeup=False)
+    var out = List[UringCompletion]()
+    var t0 = monotonic_now_ms()
+    var n = r.poll(1, out, 64, 50)
+    var waited = monotonic_now_ms() - t0
+    assert_equal(n, 0)
+    assert_equal(len(out), 0)
+    assert_true(waited >= 40, "returned early: " + String(waited) + " ms")
+    assert_true(waited < 1000, "waited too long: " + String(waited) + " ms")
+    # The ring is still usable after a timed-out wait.
+    assert_equal(r.poll(0, out), 0)
 
 
 # ── live multishot accept via UringReactor ──────────────────────────────────
@@ -995,6 +1016,8 @@ def main() raises:
     print("    PASS test_construction_succeeds")
     test_idle_poll_returns_zero()
     print("    PASS test_idle_poll_returns_zero")
+    test_blocking_poll_with_a_timeout_returns_on_its_own()
+    print("    PASS test_blocking_poll_with_a_timeout_returns_on_its_own")
     test_arm_listener_multishot_round_trip()
     print("    PASS test_arm_listener_multishot_round_trip")
     test_submit_send_round_trip()
