@@ -55,6 +55,31 @@ def test_urldecode_bad_hex_raises() raises:
         _ = urldecode("%ZZ")
 
 
+def test_urldecode_rejects_ill_formed_utf8() raises:
+    """APP-24: escapes that decode to ill-formed UTF-8 are rejected, never
+    wrapped in a ``String`` (lone lead, stray continuation, overlong,
+    surrogate, truncated sequence, out-of-range lead)."""
+    var bad = List[String]()
+    bad.append("%F0")
+    bad.append("%80")
+    bad.append("%C0%80")
+    bad.append("%ED%A0%80")
+    bad.append("%F0%9F%98")
+    bad.append("%F5%80%80%80")
+    bad.append("ok%FF")
+    for i in range(len(bad)):
+        with assert_raises():
+            _ = urldecode(bad[i])
+
+
+def test_urldecode_accepts_well_formed_utf8() raises:
+    """APP-24: well-formed multi-byte escapes still decode."""
+    assert_equal(urldecode("%C3%A9"), "é")
+    assert_equal(urldecode("%E2%82%AC"), "€")
+    assert_equal(urldecode("%F0%9F%98%80"), "😀")
+    assert_equal(urldecode("a+%C3%A9"), "a é")
+
+
 def test_urlencode_unreserved() raises:
     assert_equal(urlencode("abcXYZ-._~123"), "abcXYZ-._~123")
 
@@ -142,6 +167,21 @@ def test_parse_bad_escape_raises() raises:
         _ = parse_form_urlencoded("a=%2")
 
 
+def test_parse_ill_formed_utf8_raises() raises:
+    """APP-24: an ill-formed name or value in a form body is an error
+    (reachable from any request body through ``Form``)."""
+    with assert_raises():
+        _ = parse_form_urlencoded("a=%F0")
+    with assert_raises():
+        _ = parse_form_urlencoded("%F0=a")
+    with assert_raises():
+        _ = parse_form_urlencoded("x=1&y=%C0%80")
+    var req = Request(method=Method.POST, url="/login")
+    req.body = List[UInt8]("a=%F0".as_bytes())
+    with assert_raises():
+        _ = Form.extract(req)
+
+
 def test_form_to_urlencoded_roundtrip() raises:
     var f = parse_form_urlencoded("name=alice+smith&age=30")
     var enc = f.to_urlencoded()
@@ -180,6 +220,8 @@ def main() raises:
     test_urldecode_lowercase_hex()
     test_urldecode_truncated_raises()
     test_urldecode_bad_hex_raises()
+    test_urldecode_rejects_ill_formed_utf8()
+    test_urldecode_accepts_well_formed_utf8()
     test_urlencode_unreserved()
     test_urlencode_space()
     test_urlencode_special()
@@ -194,6 +236,7 @@ def main() raises:
     test_parse_plus_in_value()
     test_parse_semicolon_separator()
     test_parse_bad_escape_raises()
+    test_parse_ill_formed_utf8_raises()
     test_form_to_urlencoded_roundtrip()
     test_form_extractor()
     test_form_extractor_empty_raises()

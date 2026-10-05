@@ -54,6 +54,11 @@ def urldecode(s: String) raises -> String:
     decode: each ``%XX`` triple becomes the byte ``XX``, each ``+``
     becomes a single 0x20, every other byte is preserved verbatim.
 
+    The decoded bytes must form well-formed UTF-8 (RFC 3629): a
+    ``String`` may not hold anything else, and the escapes come from
+    attacker-controlled input (``%F0`` alone is a lone 4-byte lead).
+    Ill-formed output is rejected rather than wrapped unchecked.
+
     Args:
         s: The encoded string (ASCII, possibly with percent-escapes).
 
@@ -62,7 +67,7 @@ def urldecode(s: String) raises -> String:
 
     Raises:
         Error: When a ``%`` escape is truncated or contains a non-hex
-               digit.
+               digit, or when the decoded bytes are not valid UTF-8.
     """
     var n = s.byte_length()
     var src = s.unsafe_ptr()
@@ -84,7 +89,10 @@ def urldecode(s: String) raises -> String:
         else:
             out.append(c)
             i += 1
-    return String(unsafe_from_utf8=Span[UInt8, _](out))
+    try:
+        return String(from_utf8=Span[UInt8, _](out))
+    except:
+        raise Error("urldecode: decoded bytes are not valid UTF-8")
 
 
 def urlencode(s: String) -> String:
@@ -230,7 +238,8 @@ def parse_form_urlencoded(body: String) raises -> FormData:
 
     Raises:
         Error: If a percent-escape is malformed inside a name or
-               value (delegated from ``urldecode``).
+               value, or a decoded name / value is not valid UTF-8
+               (delegated from ``urldecode``).
     """
     var out = FormData()
     var n = body.byte_length()

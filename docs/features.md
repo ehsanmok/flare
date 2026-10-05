@@ -274,7 +274,7 @@ from an unset environment variable accepted cookies anyone could forge.
 
 | Surface | Where |
 |---|---|
-| `FormData`, `parse_form_urlencoded`, `urldecode`, `urlencode`, `Form` extractor | [`forms.mojo`](../examples/intermediate/forms.mojo) |
+| `FormData`, `parse_form_urlencoded`, `urldecode`, `urlencode`, `Form` extractor (decoding raises on a malformed escape or when the decoded bytes are not valid UTF-8; the `Form` extractor then answers 400) | [`forms.mojo`](../examples/intermediate/forms.mojo) |
 | `MultipartPart`, `MultipartForm`, `parse_multipart_form_data`, `Multipart` extractor (server parse); `MultipartFormBuilder` (client build) | [`multipart_upload.mojo`](../examples/intermediate/multipart_upload.mojo) |
 | `Url`, `UrlParseError` — URL parser, percent decoding | `flare.http.url` |
 | `Encoding` enum, `compress_gzip` / `decompress_gzip`, `compress_brotli` / `decompress_brotli`, `decompress_deflate` | [`encoding.mojo`](../examples/basic/encoding.mojo), [`brotli.mojo`](../examples/intermediate/brotli.mojo) |

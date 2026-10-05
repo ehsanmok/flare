@@ -62,9 +62,11 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Cookie.toSetCookie_none_secure
 #print axioms Flare.L4.Cookie.parseMaxAge_sound
 #print axioms Flare.L4.Cookie.parseMaxAge_complete
+#print axioms Flare.L4.Form.urldecodeBytes_urlencode
 #print axioms Flare.L4.Form.urldecode_urlencode
+#print axioms Flare.L4.Form.parseFormOld_toUrlencoded
 #print axioms Flare.L4.Form.parseForm_toUrlencoded
-#print axioms Flare.L4.Form.urldecodeFixed_valid
+#print axioms Flare.L4.Form.urldecode_valid
 #print axioms Flare.L4.Url.parsePort_iff
 #print axioms Flare.L4.Url.parse_port
 #print axioms Flare.L4.Url.parseFixed_spec
@@ -118,6 +120,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.Bugs.APP_23.implFixed_meets_spec
 #print axioms Flare.Bugs.APP_24.urldecode_violates_spec
 #print axioms Flare.Bugs.APP_24.urldecodeFixed_meets_spec
+#print axioms Flare.Bugs.APP_24.parseForm_rejects_F0
 #print axioms Flare.Bugs.APP_25.host_has_at
 #print axioms Flare.Bugs.APP_25.implFixed_meets_spec
 #print axioms Flare.Bugs.APP_26.violates_spec

@@ -1061,6 +1061,12 @@ from test_form import (
     test_urldecode_bad_hex_raises as test_form__test_urldecode_bad_hex_raises,
 )
 from test_form import (
+    test_urldecode_rejects_ill_formed_utf8 as test_form__test_urldecode_rejects_ill_formed_utf8,
+)
+from test_form import (
+    test_urldecode_accepts_well_formed_utf8 as test_form__test_urldecode_accepts_well_formed_utf8,
+)
+from test_form import (
     test_urlencode_unreserved as test_form__test_urlencode_unreserved,
 )
 from test_form import test_urlencode_space as test_form__test_urlencode_space
@@ -1095,6 +1101,9 @@ from test_form import (
 )
 from test_form import (
     test_parse_bad_escape_raises as test_form__test_parse_bad_escape_raises,
+)
+from test_form import (
+    test_parse_ill_formed_utf8_raises as test_form__test_parse_ill_formed_utf8_raises,
 )
 from test_form import (
     test_form_to_urlencoded_roundtrip as test_form__test_form_to_urlencoded_roundtrip,
@@ -4722,6 +4731,8 @@ def main() raises:
     suite.test[test_form__test_urldecode_lowercase_hex]()
     suite.test[test_form__test_urldecode_truncated_raises]()
     suite.test[test_form__test_urldecode_bad_hex_raises]()
+    suite.test[test_form__test_urldecode_rejects_ill_formed_utf8]()
+    suite.test[test_form__test_urldecode_accepts_well_formed_utf8]()
     suite.test[test_form__test_urlencode_unreserved]()
     suite.test[test_form__test_urlencode_space]()
     suite.test[test_form__test_urlencode_special]()
@@ -4736,6 +4747,7 @@ def main() raises:
     suite.test[test_form__test_parse_plus_in_value]()
     suite.test[test_form__test_parse_semicolon_separator]()
     suite.test[test_form__test_parse_bad_escape_raises]()
+    suite.test[test_form__test_parse_ill_formed_utf8_raises]()
     suite.test[test_form__test_form_to_urlencoded_roundtrip]()
     suite.test[test_form__test_form_extractor]()
     suite.test[test_form__test_form_extractor_empty_raises]()

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61058 lines) |
-| Theorems | 3215 |
-| Headline theorems in the axiom audit | 1021 |
+| Lean files | 298 (61134 lines) |
+| Theorems | 3220 |
+| Headline theorems in the axiom audit | 1024 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 24 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 25 of 138 |
 
 Six findings are rated high:
 
@@ -1950,7 +1950,7 @@ The spec covers RFC 6265 §4.1.1, §4.2.1 and §5.2.2.
 | Mojo function | Lines |
 |---|---|
 | `_hex_nibble` | 28-47 |
-| `urldecode` | 50-87 |
+| `urldecode` | 50-95 (byte loop `urldecodeBytes`, then the UTF-8 check) |
 | `urlencode` | 90-129 |
 | `FormData.to_urlencoded` | 199-213 |
 | `parse_form_urlencoded` | 216-264 |
@@ -1960,11 +1960,14 @@ UTF-8 for anything passed to `String(unsafe_from_utf8=...)`.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.Form.urldecode_urlencode` | `urldecode (urlencode s) = s` for every byte string | proved |
+| `Flare.L4.Form.urldecodeBytes_urlencode` | the byte loop inverts `urlencode` for every byte string | proved |
+| `Flare.L4.Form.urldecode_urlencode` | the shipped `urldecode (urlencode s) = s` for every well-formed UTF-8 string | proved |
 | `Flare.L4.Form.urlencode_noSep` | encoded bytes contain no `&`, `;` or `=` | proved |
-| `Flare.L4.Form.parseForm_toUrlencoded` | `parse_form_urlencoded (to_urlencoded fd) = fd` for every list of byte-string pairs | proved |
-| `Flare.L4.Form.urldecodeFixed_valid`, `urldecodeFixed_urlencode` | the validating fix only returns well-formed UTF-8 and keeps the round trip on valid input | proved |
-| `Flare.Bugs.APP_24.urldecode_violates_spec` | `urldecode("%F0")` returns the lone byte `0xF0` | counterexample |
+| `Flare.L4.Form.parseFormOld_toUrlencoded` | the pre-fix parser round-trips every list of byte-string pairs (including ill-formed ones) | proved |
+| `Flare.L4.Form.parseForm_toUrlencoded` | the shipped `parse_form_urlencoded (to_urlencoded fd) = fd` for every list of well-formed UTF-8 pairs | proved |
+| `Flare.L4.Form.urldecode_valid`, `urldecode_urlencode` | the shipped decode only returns well-formed UTF-8 and keeps the round trip on valid input | proved |
+| `Flare.Bugs.APP_24.urldecode_violates_spec` | the pre-fix `urldecode("%F0")` returned the lone byte `0xF0` | counterexample |
+| `Flare.Bugs.APP_24.parseForm_rejects_F0` | the shipped `parse_form_urlencoded("a=%F0")` is rejected | proved (fixed) |
 
 #### 10. URL parser (`Flare.L4.Url`)
 
@@ -2901,7 +2904,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decide_eq_spec_of_noStar`, `decideFixed_eq_spec` | APP-20 |
 | `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-197 | `originAllowed_sound`, `acao_not_star_with_creds`, `serveFixed_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
-| `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-264 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
+| `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-270 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
 | `Flare.L4.Url.parse`, `parseWith`, `parsePort` | http/url.mojo:73-299 | `parsePort_iff`, `parse_port`, `parseFixed_spec` | APP-23, APP-25 |
 | `Flare.L4.RateLimit.step`, `spec` | http/reliability.mojo:358-394 | `step_eq_spec`, `step_inv`, `overflow_iff` | APP-40 |
 | `Flare.L4.CircuitBreaker.stepG`, `step` | http/reliability.mojo:397-469 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
@@ -3086,7 +3089,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-21 | Low | open | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
 | APP-22 | Low | open | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
 | APP-23 | Medium | resolved | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
-| APP-24 | Medium | open | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
+| APP-24 | Medium | resolved | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
 | APP-25 | Low | open | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
 | APP-26 | Medium | open | Compress re-encodes a 206 Partial Content body and keeps its `Content-Range` | `Flare/Bugs/APP_26.lean` | `repro/APP-26_compress_encodes_partial_content.mojo` (any) |
 | APP-27 | Low | open | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
@@ -4868,8 +4871,9 @@ observed here.
 `unsafe_from_utf8`. As a result, `%F0` yields the single byte `0xF0`.
 
 **Lean.** `Flare.Bugs.APP_24.urldecode_violates_spec` and `parseForm_F0`.
-The fix is proved sufficient by `urldecodeFixed_meets_spec` and
-`urldecodeFixed_roundtrip`.
+The shipped fix (about the pre-fix `urldecodeOld`) is proved to meet the
+spec by `urldecodeFixed_meets_spec` and `urldecodeFixed_roundtrip`;
+`parseForm_rejects_F0` shows the form path rejects `a=%F0`.
 
 **Fix.** Use `String(from_utf8=...)` (which raises) or the lossy decode.
 
@@ -4877,6 +4881,8 @@ The fix is proved sufficient by `urldecodeFixed_meets_spec` and
 
 - Observed: `BUG REPRODUCED: urldecode('%F0') / parse_form_urlencoded('a=%F0') produced a String that is not valid UTF-8 (direct: True , form: True )`
 - Flip: `OK: urldecode never yields ill-formed UTF-8 for '%F0'`
+
+Status: resolved. urldecode now builds its result with `String(from_utf8=...)` and raises when the decoded bytes are not valid UTF-8; `parse_form_urlencoded` and the `Form` extractor reject such bodies (400). Tests: `tests/http/test_form.mojo::test_urldecode_rejects_ill_formed_utf8`, `::test_urldecode_accepts_well_formed_utf8`, `::test_parse_ill_formed_utf8_raises`. Decision: raise (the Lean fix) rather than substitute U+FFFD, so callers never silently accept altered data.
 
 #### APP-25: userinfo is split at the first `@`
 
@@ -5747,8 +5753,8 @@ Suspicions that turned out not to be bugs, each with the theorem or argument tha
 - **Cookies.** `Set-Cookie` output never contains CR, LF or other controls.
   `SameSite=None` always carries `Secure`. Max-Age parsing cannot wrap.
 - **Form.** The round trips `urldecode(urlencode s) = s` and
-  `parse(to_urlencoded fd) = fd` hold for all byte strings; the only defect
-  is APP-24.
+  `parse(to_urlencoded fd) = fd` hold for all well-formed UTF-8 strings (for
+  all byte strings before the APP-24 fix, which was the only defect).
 - **Url.** These behaviours were checked and are not filed:
   - `HTTP://` in upper case is rejected (fail-closed).
   - An empty port raises.

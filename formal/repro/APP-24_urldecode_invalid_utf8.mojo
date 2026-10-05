@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-24 fixed on fix/formal-findings
 """APP-24: urldecode returns a String holding ill-formed UTF-8.
 
 Lean: Flare.Bugs.APP_24.urldecode_violates_spec (counterexample: "%F0"
@@ -12,7 +13,7 @@ Expected: decoding attacker-chosen escapes never yields a String that
 violates Mojo's String invariant (valid UTF-8). Either reject (raise, as
 urldecode already does for bad escapes) or substitute U+FFFD as WHATWG
 URL 5.1 ("UTF-8 decode without BOM") specifies.
-Actual: urldecode("%F0") returns a String whose single byte is 0xF0,
+Before the fix: urldecode("%F0") returns a String whose single byte is 0xF0,
 built with String(unsafe_from_utf8=...), whose Safety clause requires
 valid UTF-8. Codepoint iteration over it reads past the buffer.
 
@@ -48,8 +49,11 @@ def main() raises:
 
     if bad_direct or bad_form:
         print(
-            "BUG REPRODUCED: urldecode('%F0') / parse_form_urlencoded('a=%F0')"
-            " produced a String that is not valid UTF-8 (direct:",
+            (
+                "BUG REPRODUCED: urldecode('%F0') /"
+                " parse_form_urlencoded('a=%F0') produced a String that is not"
+                " valid UTF-8 (direct:"
+            ),
             bad_direct,
             ", form:",
             bad_form,
