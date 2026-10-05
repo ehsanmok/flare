@@ -12,6 +12,7 @@ from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import (
     assert_equal,
+    assert_false,
     assert_true,
     assert_raises,
     TestSuite,
@@ -274,6 +275,34 @@ def test_pool_cap_enforced_and_recovers() raises:
     # Restore the slots we still hold so later tests see a full pool.
     for _ in range(got):
         _pool_release()
+
+
+def test_pool_cap_is_exactly_max_pool_size() raises:
+    """RT-06: exactly ``MAX_POOL_SIZE`` slots can be held at once; the next
+    claim is refused. On macOS arm64 the variadic ``sem_open`` call used
+    to fail (garbage ``value`` argument) and the fail-open acquire then
+    admitted every claim, so the cap did not exist."""
+    _pool_reset()
+    var got = 0
+    for _ in range(MAX_POOL_SIZE):
+        if _pool_try_acquire():
+            got += 1
+    assert_equal(got, MAX_POOL_SIZE)
+    assert_false(
+        _pool_try_acquire(),
+        "the claim after MAX_POOL_SIZE slots must be refused",
+    )
+    for _ in range(got):
+        _pool_release()
+    # Fully released: the whole cap is available again, and not more.
+    var again = 0
+    for _ in range(MAX_POOL_SIZE + 1):
+        if _pool_try_acquire():
+            again += 1
+    assert_equal(again, MAX_POOL_SIZE)
+    for _ in range(again):
+        _pool_release()
+    _pool_reset()
 
 
 def main() raises:

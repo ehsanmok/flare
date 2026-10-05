@@ -3,10 +3,10 @@ import Flare.Core
 /-!
 # Blocking pool: the MAX_POOL_SIZE thread cap
 
-`flare/runtime/blocking.mojo:116-206`. The cap is a POSIX named semaphore
+`flare/runtime/blocking.mojo` (`MAX_POOL_SIZE`, `_pool_sem_open`, `_pool_try_acquire`, `_pool_release`). The cap is a POSIX named semaphore
 created at `MAX_POOL_SIZE`. Each `_pool_try_acquire` / `_pool_release`
 reopens it by name; whether that `sem_open` succeeds is an environment
-input (`openOk`) to every step. `count` is the semaphore value, `held` the
+input (`openOk`) to every step (on macOS arm64 it used to be `false` on every step because of the variadic-ABI bug, RT-06; `_pool_sem_open` now passes `mode`/`value` where the callee reads them, so `openOk` holds unless the system is out of fds or /dev/shm). `count` is the semaphore value, `held` the
 number of slots handed out (acquires that returned `True` and are not yet
 released). `sem_post` has no upper bound (POSIX), so a release always
 increments when its `sem_open` succeeds.
@@ -16,7 +16,7 @@ callers do this), modelled by ignoring a release when `held = 0`.
 -/
 namespace Flare.L2.Blocking
 
-/-- mirrors flare/runtime/blocking.mojo:123 @59bda50 -/
+/-- mirrors flare/runtime/blocking.mojo `MAX_POOL_SIZE` (fixed, RT-06) -/
 def MAX_POOL_SIZE : Nat := 32
 
 structure Sem where
@@ -27,7 +27,7 @@ structure Sem where
 def Sem.init : Sem := ⟨MAX_POOL_SIZE, 0⟩
 
 /-- Fail-open: a failed `sem_open` returns `True` without decrementing.
-mirrors flare/runtime/blocking.mojo:177-193 @59bda50 -/
+mirrors flare/runtime/blocking.mojo `_pool_try_acquire`, `_pool_sem_open` (fixed, RT-06) -/
 def tryAcquire (openOk : Bool) (s : Sem) : Sem × Bool :=
   if !openOk then ({ s with held := s.held + 1 }, true)
   else if s.count > 0 then (⟨s.count - 1, s.held + 1⟩, true)
@@ -39,7 +39,7 @@ def tryAcquireFixed (openOk : Bool) (s : Sem) : Sem × Bool :=
   else if s.count > 0 then (⟨s.count - 1, s.held + 1⟩, true)
   else (s, false)
 
-/-- mirrors flare/runtime/blocking.mojo:196-206 @59bda50 -/
+/-- mirrors flare/runtime/blocking.mojo `_pool_release`, `_pool_sem_open` (fixed, RT-06) -/
 def release (openOk : Bool) (s : Sem) : Sem :=
   if s.held = 0 then s
   else ⟨if openOk then s.count + 1 else s.count, s.held - 1⟩

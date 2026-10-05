@@ -1,4 +1,5 @@
 # PLATFORM: macos
+# RESOLVED: RT-06 fixed on fix/formal-findings
 """RT-06: the MAX_POOL_SIZE thread cap is never enforced on macOS arm64.
 
 Lean: Flare.Bugs.RT_06.persistentFailOpen_unbounded (counterexample) and
@@ -8,7 +9,7 @@ flare/runtime/blocking.mojo:177-206 @59bda50.
 
 Expected: at most MAX_POOL_SIZE (32) pool slots can be held at once, so
 block_in_pool / resolve_async refuse the 33rd concurrent call.
-Actual: _pool_try_acquire calls the variadic sem_open(name, O_CREAT,
+Before the fix: _pool_try_acquire calls the variadic sem_open(name, O_CREAT,
 mode, value) through external_call. On Apple arm64 variadic arguments go
 on the stack, external_call passes them in registers, sem_open reads a
 garbage initial value and fails with EINVAL every time (observed: errno

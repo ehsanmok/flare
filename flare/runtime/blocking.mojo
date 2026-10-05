@@ -175,6 +175,40 @@ def _pool_reset():
 
 
 @always_inline
+def _pool_sem_open(name: String) -> Pointer[UInt8, MutUntrackedOrigin]:
+    """Open (creating at ``MAX_POOL_SIZE`` on first use) the pool semaphore.
+
+    ``sem_open`` is variadic: ``mode`` and ``value`` are read from the
+    variadic area. On Apple arm64 that area is the stack, while
+    ``external_call`` passes every argument in registers (x2, x3), so
+    the callee read garbage and failed with ``EINVAL`` every time --
+    which, being fail-open, silently disabled the cap (RT-06). There six
+    dummy register arguments (x2..x7) push ``mode`` and ``value`` into
+    the first two 8-byte stack slots, as the callee expects; they are
+    passed as 64-bit values so each fills a whole slot (the same ABI
+    issue ``tcp/stream.mojo`` works around for ``fcntl``). Linux passes
+    variadic arguments in registers like any other, so no padding there.
+    """
+    comptime if CompilationTarget.is_macos():
+        return external_call["sem_open", Pointer[UInt8, MutUntrackedOrigin]](
+            name.unsafe_ptr(),
+            _o_creat(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Int(_SEM_MODE),
+            Int(MAX_POOL_SIZE),
+        )
+    else:
+        return external_call["sem_open", Pointer[UInt8, MutUntrackedOrigin]](
+            name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE)
+        )
+
+
+@always_inline
 def _pool_try_acquire() -> Bool:
     """Try to claim one pool slot. Returns True on success, False when
     the process is already at ``MAX_POOL_SIZE`` concurrent pool threads.
@@ -183,9 +217,7 @@ def _pool_try_acquire() -> Bool:
     still runs (the cap is best-effort, never a hard dependency).
     """
     var name = _pool_sem_name()
-    var sem = external_call["sem_open", Pointer[UInt8, MutUntrackedOrigin]](
-        name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE)
-    )
+    var sem = _pool_sem_open(name)
     if Int(sem) == -1:
         return True
     var rc = external_call["sem_trywait", Int32](sem)
@@ -197,9 +229,7 @@ def _pool_try_acquire() -> Bool:
 def _pool_release():
     """Return one pool slot claimed by ``_pool_try_acquire``."""
     var name = _pool_sem_name()
-    var sem = external_call["sem_open", Pointer[UInt8, MutUntrackedOrigin]](
-        name.unsafe_ptr(), _o_creat(), _SEM_MODE, Int32(MAX_POOL_SIZE)
-    )
+    var sem = _pool_sem_open(name)
     if Int(sem) == -1:
         return
     _ = external_call["sem_post", Int32](sem)

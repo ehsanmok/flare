@@ -279,7 +279,7 @@ public).
 
 ### Blocking-pool thread cap (`Blocking.lean`)
 
-runtime/blocking.mojo:123-206: the named semaphore as `count` plus `held`
+runtime/blocking.mojo (`MAX_POOL_SIZE`, `_pool_sem_open`, `_pool_try_acquire`, `_pool_release`): the named semaphore as `count` plus `held`
 slots; whether each `sem_open` succeeds is an environment input. Releases are
 paired with earlier successful acquires.
 
@@ -287,7 +287,7 @@ paired with earlier successful acquires.
 |---|---|---|
 | `paired_cap_invariant` | If every `sem_open` succeeds, `count + held = 32` throughout, so at most 32 slots are held. | proved |
 | `fixed_cap_invariant` | With a fail-closed acquire, `count + held ≤ 32` under any pattern of `sem_open` failures. | proved |
-| `Flare.Bugs.RT_06.persistentFailOpen_unbounded` | If `sem_open` always fails, `n` acquires succeed for every `n`. | counterexample (RT-06) |
+| `Flare.Bugs.RT_06.persistentFailOpen_unbounded` | If `sem_open` always fails (the pre-fix macOS arm64 behaviour), `n` acquires succeed for every `n`. | counterexample (RT-06, resolved) |
 | `Flare.Bugs.RT_07.failOpen_breaks_cap` | One failed-`sem_open` acquire and its normal release let 33 slots be held. | counterexample (RT-07) |
 | `Flare.Bugs.RT_08.linux_failure_crashes` | With glibc's `SEM_FAILED` (NULL), a failed `sem_open` passes the `== -1` test and both acquire and release crash. | counterexample (RT-08) |
 | `Flare.Bugs.RT_08.fixed_never_crashes` | Testing against the platform's `SEM_FAILED` never crashes on either platform; `fixed_agrees`: it changes nothing on success or on macOS. | proved |
@@ -678,8 +678,15 @@ pass `mode` and `value` where the variadic callee reads them;
 `Flare.Bugs.RT_06.fixed_cap` (from `Flare.L2.Blocking.paired_cap_invariant`).
 Repro: `formal/repro/RT-06_pool_cap_not_enforced_macos.mojo` (PLATFORM macos),
 observed `BUG REPRODUCED: 40 pool slots acquired at once; the cap is 32`.
-Flip (six dummy register arguments before mode and value, in both
-`_pool_try_acquire` and `_pool_release`): `OK: cap enforced, 32 slots acquired (cap 32 )`, exit 0.
+After the fix (six dummy register arguments before mode and value, in the new
+`_pool_sem_open` used by `_pool_try_acquire` and `_pool_release`):
+`OK: cap enforced, 32 slots acquired (cap 32 )`, exit 0.
+
+Status: resolved. `_pool_sem_open` pads the variadic call on macOS (mode and
+value as 64-bit values, one per stack slot); tests
+`tests/runtime/test_block_in_pool.mojo::test_pool_cap_is_exactly_max_pool_size`
+and `::test_pool_cap_enforced_and_recovers`. Decision: fix the code, not the
+docs, since the cap is a documented thread-bomb protection.
 
 ### RT-07: one fail-open acquire raises the thread cap permanently
 
@@ -865,7 +872,7 @@ lists record ids, not tokens.
 | `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:96-142 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `storeFixed_size_bound` | counterexample (NET-03) |
 | `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo:130-161 | `classIndex_fits`, `classIndex_least` | proved |
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
-| `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo:177-206 | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.fixed_never_crashes` | counterexample (RT-06, RT-07, RT-08) |
+| `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.fixed_never_crashes` | counterexample (RT-06, RT-07, RT-08) |
 | `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
 | `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:68-107 | `validate_sound`, `validate_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | counterexample (NET-08, NET-09) |
 | `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |

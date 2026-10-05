@@ -3,7 +3,15 @@ import Flare.L2_Machine.Blocking
 /-!
 # RT-06: the `MAX_POOL_SIZE` thread cap is never enforced on macOS arm64
 
-flare/runtime/blocking.mojo:177-206 @59bda50.
+flare/runtime/blocking.mojo `_pool_try_acquire` / `_pool_release` (pre-fix lines 177-206).
+
+Status: resolved. `_pool_sem_open` passes six dummy register arguments before
+`mode` and `value` on macOS, so they land in the stack slots the variadic
+callee reads; `sem_open` succeeds and the cap is enforced (tests:
+tests/runtime/test_block_in_pool.mojo::test_pool_cap_is_exactly_max_pool_size
+and ::test_pool_cap_enforced_and_recovers). The counterexample below stays
+true of the pre-fix platform behaviour (`sem_open` failing on every call),
+which the model takes as the input `openOk = false`.
 
 Spec (comment at :116-122): at most `MAX_POOL_SIZE` (32) pool threads run
 at once; the 33rd concurrent `block_in_pool` / `resolve_async` raises
@@ -20,7 +28,8 @@ false` on every step (the platform fact is outside Lean; the repro
 observes it). Once `sem_open` works, the cap holds
 (`Flare.L2.Blocking.paired_cap_invariant`).
 
-Repro: formal/repro/RT-06_pool_cap_not_enforced_macos.mojo (PLATFORM macos).
+Repro: formal/repro/RT-06_pool_cap_not_enforced_macos.mojo (PLATFORM macos;
+now prints OK on the host).
 -/
 namespace Flare.Bugs.RT_06
 open Flare.L2.Blocking
@@ -47,7 +56,7 @@ theorem persistentFailOpen_unbounded (n : Nat) (s : Sem) :
 theorem forty_slots : (acquireN 40 Sem.init).1.held = 40 ∧ MAX_POOL_SIZE < 40 :=
   ⟨by simpa [Sem.init] using (persistentFailOpen_unbounded 40 Sem.init).2, by decide⟩
 
-/-- **Fix meets spec**: with `sem_open` working (the ABI fix), the cap is
+/-- **Fix meets spec**: with `sem_open` working (shipped since the ABI fix), the cap is
 `count + held = 32`, so at most 32 slots are held. -/
 theorem fixed_cap (ops : List Op) (hok : ∀ op ∈ ops, op.ok = true) :
     (run Sem.init ops).held ≤ MAX_POOL_SIZE :=
