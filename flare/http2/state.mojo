@@ -1482,7 +1482,23 @@ struct Connection(Copyable, Defaultable):
                 # PROTOCOL_ERROR (RFC 9113 sec 5.1, H2-20).
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
             if self.is_client and not s.headers_complete:
-                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
+                # RFC 9113 sec 8.1 / 8.1.1: a response that starts with DATA
+                # is malformed, and a malformed response is a stream error
+                # (sec 5.4.2), so one bad stream cannot take its siblings
+                # down. Reset it, and return the frame's connection credit
+                # as the 204-body branch below does (DOC-03).
+                out.append(
+                    self._rst_stream_frame(
+                        sid, Http2ErrorCode.PROTOCOL_ERROR().value
+                    )
+                )
+                s.state = StreamState.CLOSED()
+                s.data = List[UInt8]()
+                s.headers = List[HpackHeader]()
+                self._put_stream(s^)
+                if plen > 0:
+                    out.append(self._conn_window_update(plen))
+                return out^
             var body: List[UInt8]
             try:
                 body = self._strip_pad_and_priority(f, False)

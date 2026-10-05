@@ -323,6 +323,7 @@ theorem d_dataH (fx : Fix) (c : Conn) (f : Fr) (hs : f.sid ≠ 0) (hg : c.goaway
     · repeat' split
       all_goals first
         | exact hce _
+        | exact d_rstCloseX _ _ _ _ _ _ _ (fun _ => wu0_wu0If _)
         | exact d_dataBody _ _ _ _ _ hs
 
 /-! ## One inbound frame -/

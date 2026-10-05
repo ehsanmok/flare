@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: DOC-03 fixed on fix/formal-findings
 """DOC-03: a response that starts with DATA instead of HEADERS is a
 malformed response, and the HTTP/2 client answers it with a connection
 error, taking every sibling stream down with it.
@@ -26,7 +27,7 @@ after the client's own HEADERS is valid for the stream state (half-closed
 Trace: GET on streams 1 and 3; the server sends DATA(1, END_STREAM, "x")
 before any HEADERS on stream 1, then a complete response on stream 3.
 Expected: RST_STREAM(1, PROTOCOL_ERROR), no GOAWAY, and stream 3's
-response delivered. Actual: GOAWAY(PROTOCOL_ERROR) at the DATA frame.
+response delivered. Before the fix: GOAWAY(PROTOCOL_ERROR) at the DATA frame.
 
 Minimal fix: replace that `_conn_error` with the stream error the other
 malformed-response checks use: RST_STREAM(sid, PROTOCOL_ERROR), mark the

@@ -208,7 +208,10 @@ def test_h2_rejects_data_before_final_response_headers() raises:
             var encoder = HpackEncoder()
             _h2_head(conn, encoder, [HpackHeader(":status", "103")])
         _h2_data(conn, 8192)
-        assert_true(conn.conn.goaway_sent)
+        # RFC 9113 sec 8.1.1 / 5.4.2: a malformed response is a stream
+        # error, not a connection error (DOC-03; this used to expect GOAWAY).
+        assert_false(conn.conn.goaway_sent)
+        assert_equal(conn.stream_error(1).value(), 1)  # PROTOCOL_ERROR.
         assert_equal(len(conn.conn.streams[1].data), 0)
 
 

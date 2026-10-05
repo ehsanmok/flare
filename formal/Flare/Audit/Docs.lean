@@ -13,6 +13,7 @@ import Flare.Docs
 #print axioms Flare.Bugs.DOC_03.counterexample
 #print axioms Flare.Bugs.DOC_03.fixed_example
 #print axioms Flare.Bugs.DOC_03.fixed
+#print axioms Flare.Bugs.DOC_03.fixed_shipped
 #print axioms Flare.Bugs.DOC_04.bug
 #print axioms Flare.Bugs.DOC_04.counterexample
 #print axioms Flare.Bugs.DOC_04.fixed

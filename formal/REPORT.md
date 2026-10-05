@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63497 lines) |
-| Theorems | 3343 |
-| Headline theorems in the axiom audit | 1133 |
+| Lean files | 298 (63506 lines) |
+| Theorems | 3344 |
+| Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 130 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 131 of 138 |
 
 Six findings are rated high:
 
@@ -3144,7 +3144,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | MACH-01 | Low | resolved | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
 | DOC-01 | Medium | open | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-02 | Low | open | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
-| DOC-03 | Medium | open | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
+| DOC-03 | Medium | resolved | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
 | DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
 | DOC-06 | Medium | open | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
@@ -5734,7 +5734,9 @@ fd 0 from a handler.
 - **Doc / RFC:** `docs/features.md:369` says "A malformed response is a stream error per RFC 9113 §8.1.1, never a connection error, so one bad stream cannot take its siblings down". RFC 9113 §8.1 and §8.1.1: a response that starts with DATA is malformed and "MUST be treated as a stream error (Section 5.4.2) of type PROTOCOL_ERROR".
 - **What goes wrong:** in the DATA branch of `Connection.handle_frame` (`flare/http2/state.mojo:1356-1358`), `if self.is_client and not s.headers_complete: return self._conn_error(PROTOCOL_ERROR)`. Every existing H2 fix flag (`Fix.all`) leaves this branch unchanged, and none of H2-01 to H2-18 covers it.
 - **Counterexample:** `Bugs.DOC_03.bug`: DATA on stream 1 before its HEADERS gives exactly `[.goaway 0 ePROTOCOL]`. `counterexample` shows `dataH Fix.all` violates `StreamScoped`.
-- **Fix:** `dataHFixed` sends RST_STREAM(sid, PROTOCOL_ERROR), closes the stream, and returns the frame's connection credit, as the 204-body branch already does. `fixed` proves `StreamScoped` for every fix configuration, and `fixed_example` gives `[.rst 1 ePROTOCOL, .wu 0 1]`.
+- **Fix:** the `doc_03` flag of `dataH` (set in `Fix.shipped`) sends RST_STREAM(sid, PROTOCOL_ERROR), closes the stream, and returns the frame's connection credit, as the 204-body branch already does. `fixed` proves `StreamScoped` for every fix configuration with the flag set (a stream that is already closed is the H2-20 case and is excluded), `fixed_shipped` proves it for the shipped model, and `fixed_example` gives `[.rst 1 ePROTOCOL, .wu 0 1]`.
+
+Status: resolved. `flare/http2/state.mojo` resets the stream with PROTOCOL_ERROR and returns the connection credit instead of sending GOAWAY. Tests: `test_h2_client_conn::test_data_before_the_response_head_is_a_stream_error` and `test_h2_streaming_state::test_h2_rejects_data_before_final_response_headers` (both used to expect GOAWAY). `docs/features.md` already promised this. Decision: the code changed, because the docs state an RFC 9113 requirement (8.1.1).
 - **Repro:** `formal/repro/DOC-03_h2_client_data_before_headers_conn_error.mojo`. Control: stream 3 is open alongside stream 1.
 - **Observed:** `BUG REPRODUCED: DATA on stream 1 before its HEADERS drew GOAWAY code 1 (connection error; RST_STREAM on stream 1: -1 ) instead of RST_STREAM(1, PROTOCOL_ERROR), so sibling stream 3 dies`
 - **Flip** (`flare/http2/state.mojo:1356-1358`: replace `_conn_error` with RST_STREAM(sid, PROTOCOL_ERROR), close the stream, and send a WINDOW_UPDATE for `plen` on stream 0): `OK: DATA before HEADERS reset stream 1 (RST_STREAM PROTOCOL_ERROR); stream 3's response was delivered`, exit 0.
@@ -6111,7 +6113,7 @@ Every security or correctness claim in `docs/security.md`, `docs/threat-model.md
 - **contradicted (wording)**: the code is safe, but the sentence describes behaviour the code does not have. Listed again under "Wording gaps".
 - **outside the model**: the claim is about cryptography, OpenSSL internals, timing, or fuzz/soak/CI cadence. The row gives the reason.
 
-The eight new findings are DOC-01 to DOC-08. Each has a counterexample theorem and a fix theorem in `Flare/Bugs/DOC_NN.lean`, aggregated by `Flare/Docs.lean`. `lake build Flare.Docs` succeeds. `Flare/Audit/Docs.lean` prints the axioms: only `propext`, `Quot.sound` and `Classical.choice`, plus the `native_decide` auxiliary axiom in DOC-01's `bad_not_utf8` and `counterexample` and DOC-03's `bug`, `counterexample` and `fixed_example`. No `sorry`, no new axioms, no `bv_decide`, and every `fixed` theorem is general. Each repro was run at least three times with the same line every run, and each flip was reverted immediately. An earlier PUSH_PROMISE finding was withdrawn as a duplicate of H2-17.
+The eight new findings are DOC-01 to DOC-08. Each has a counterexample theorem and a fix theorem in `Flare/Bugs/DOC_NN.lean`, aggregated by `Flare/Docs.lean`. `lake build Flare.Docs` succeeds. `Flare/Audit/Docs.lean` prints the axioms: only `propext`, `Quot.sound` and `Classical.choice`, plus the `native_decide` auxiliary axiom in DOC-01's `bad_not_utf8` and `counterexample` and DOC-03's `bug`, `counterexample`, `fixed_example` and `fixed_shipped`. No `sorry`, no new axioms, no `bv_decide`, and every `fixed` theorem is general. Each repro was run at least three times with the same line every run, and each flip was reverted immediately. An earlier PUSH_PROMISE finding was withdrawn as a duplicate of H2-17.
 
 Summary of the 131 claims:
 
@@ -6227,7 +6229,7 @@ There are 13 "contradicted (new)" rows for 8 findings because DOC-01 covers 3 ro
 | "h2c via Upgrade (mid-stream switch from h1 to h2 per RFC 7540 §3.2)" (`docs/features.md:350`) | `_unified_reactor_impl.mojo` (`_migrate_h1_to_h2`) | contradicted (existing): APP-47 | When the 101 flushes on a writable edge, the connection never migrates. |
 | "HPACK Huffman **decode on by default** (`Http2Config.allow_huffman_decode`)" (`docs/features.md:358`) | `flare/http/proto/h2_config.mojo:162, 185` | holds | The default is `True`. |
 | "`Http2Config.max_body_size` resets an over-large stream with `ENHANCE_YOUR_CALM` and drops both its body and its header list." (`docs/features.md:369`) | `flare/http/proto/h2_config.mojo:176`; `flare/http2/state.mojo:1398-1410` | holds | The DATA branch sends RST_STREAM(EYC) and closes the stream once the cumulative body passes the cap. |
-| "A malformed response is a stream error per RFC 9113 §8.1.1, never a connection error, so one bad stream cannot take its siblings down" (`docs/features.md:369`) | `flare/http2/state.mojo:1356-1358` | contradicted (new): DOC-03 | DATA before the response HEADERS gets GOAWAY(PROTOCOL_ERROR). |
+| "A malformed response is a stream error per RFC 9113 §8.1.1, never a connection error, so one bad stream cannot take its siblings down" (`docs/features.md:369`) | `flare/http2/state.mojo:1484-1500` | contradicted (new): DOC-03 (resolved) | DATA before the response HEADERS used to get GOAWAY(PROTOCOL_ERROR); it is now RST_STREAM(PROTOCOL_ERROR). |
 | "A handler that raises, or a request the h3 layer cannot build, now ends only that stream: `400` ... `500` ... (its text only with `expose_errors`)." (`docs/features.md:414-417`) | `flare/http/server.mojo:73-100` | holds | `_serve_h3_stream` catches both cases, and a framing failure ends only that stream. |
 | "A missing or duplicated pseudo header, or a connection-specific field ..., is refused instead of defaulting to `GET /`." (`docs/features.md:418-422`) | `flare/http3/server.mojo:875-891` | holds | `validate_request_fields` is shared with h2, and a malformed request raises and gets 400. The H2-10 gap in field-name characters is not claimed here. |
 | "Connection-specific fields are no longer emitted in responses." (`docs/features.md:422-423`) | `flare/http3/server.mojo:927, 954-966` | holds | `emit_response` drops `connection`, `keep-alive`, `proxy-connection`, `transfer-encoding` and `upgrade`. |

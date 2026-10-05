@@ -1060,15 +1060,31 @@ def test_data_on_a_stream_the_server_reset_is_stream_closed() raises:
     assert_equal(_goaway_code(client.drain()), 0x5)  # STREAM_CLOSED
 
 
-def test_data_before_the_response_head_is_still_a_protocol_error() raises:
-    """H2-20: on a live stream with no response head, DATA is still
-    PROTOCOL_ERROR (sec 8.1: a response starts with HEADERS)."""
+def test_data_before_the_response_head_is_a_stream_error() raises:
+    """DOC-03: on a live stream with no response head, DATA is a malformed
+    response (RFC 9113 sec 8.1, 8.1.1) and so a stream error: the stream is
+    reset with PROTOCOL_ERROR, the frame's connection credit is returned, no
+    GOAWAY is sent, and a sibling stream keeps working. It used to be a
+    connection error (and H2-20 had asserted that)."""
     var client = Http2ClientConnection()
     var sid = _bodiless_get(client, False)
+    var sibling = _bodiless_get(client, False)
     var body = List[UInt8]()
     body.append(UInt8(0x78))
     client.feed(Span[UInt8, _](_raw_frame(UInt8(0x0), UInt8(0x0), sid, body)))
-    assert_equal(_goaway_code(client.drain()), 0x1)  # PROTOCOL_ERROR
+    var out = client.drain()
+    assert_equal(_error_code_of(out, 7), -1)  # no GOAWAY
+    assert_equal(_rst_code(out), 0x1)  # RST_STREAM(PROTOCOL_ERROR)
+    assert_equal(_window_updates_on(out, 0), 1)
+    assert_equal(
+        client.conn.streams[sid].copy().state.value,
+        StreamState.CLOSED().value,
+    )
+    assert_false(client.conn.goaway_sent)
+    assert_equal(
+        client.conn.streams[sibling].copy().state.value,
+        StreamState.HALF_CLOSED_LOCAL().value,
+    )
 
 
 def main() raises:
@@ -1100,5 +1116,5 @@ def main() raises:
     test_no_stream_window_update_for_the_data_that_closes_a_stream()
     test_stream_window_update_is_still_sent_while_the_stream_is_open()
     test_data_on_a_stream_the_server_reset_is_stream_closed()
-    test_data_before_the_response_head_is_still_a_protocol_error()
+    test_data_before_the_response_head_is_a_stream_error()
     print("test_h2_client_conn: 29 passed")

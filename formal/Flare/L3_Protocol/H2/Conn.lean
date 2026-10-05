@@ -205,18 +205,21 @@ structure Fix where
   h2_18 : Bool := false
   h2_19 : Bool := false
   h2_20 : Bool := false
+  /-- DOC-03: DATA before the response HEADERS is a stream error. -/
+  doc_03 : Bool := false
 
 /-- The code before any fix (flare @59bda50). -/
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-11, H2-12, H2-13, H2-14, H2-15, H2-16, H2-17, H2-18, H2-19, H2-20. -/
+finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-11, H2-12, H2-13, H2-14, H2-15, H2-16, H2-17, H2-18, H2-19, H2-20, DOC-03. -/
 def Fix.shipped : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true, h2_06 := true,
     h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_11 := true, h2_12 := true,
     h2_13 := true, h2_14 := true, h2_15 := true, h2_16 := true, h2_17 := true, h2_18 := true,
-    h2_19 := true, h2_20 := true }
+    h2_19 := true, h2_20 := true, doc_03 := true }
 
+/-- Every H2-NN fix (not DOC-03). -/
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
     h2_06 := true, h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_11 := true, h2_12 := true,
@@ -707,15 +710,18 @@ def dataBody (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn × 
                                    buf := s.buf ++ f.frag } body
 
 /-- The H2-20 fix tests for a closed / half-closed (remote) stream before
-the client's headers-complete test.
-mirrors flare/http2/state.mojo:1340-1512 @59bda50 -/
+the client's headers-complete test; the DOC-03 fix answers DATA before the
+response HEADERS with a stream error.
+mirrors flare/http2/state.mojo:1446-1530 (fixed, H2-20, DOC-03) -/
 def dataH (fx : Fix) (c : Conn) (f : Fr) : Conn × List Out :=
   if f.sid ∈ c.resetByUs then (c, wu0If f.plen)
   else match get c f.sid with
   | none => if isIdleId fx c f.sid then connErr c ePROTOCOL else connErr c eSTREAM_CLOSED
   | some s =>
     if fx.h2_20 && (s.state == .closed || s.state == .hcr) then connErr c eSTREAM_CLOSED
-    else if c.isClient && !s.headersComplete then connErr c ePROTOCOL
+    else if c.isClient && !s.headersComplete then
+      if fx.doc_03 then rstCloseX c f.sid ePROTOCOL { s with dataLen := 0, buf := [] } (wu0If f.plen)
+      else connErr c ePROTOCOL
     else if s.state = .closed || s.state = .hcr then connErr c eSTREAM_CLOSED
     else match stripLen f false with
     | none => connErr c ePROTOCOL

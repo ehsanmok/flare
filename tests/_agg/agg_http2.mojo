@@ -94,7 +94,7 @@ from test_h2_client_conn import (
     test_data_on_a_stream_the_server_reset_is_stream_closed as test_h2_client_conn__test_data_on_a_stream_the_server_reset_is_stream_closed,
 )
 from test_h2_client_conn import (
-    test_data_before_the_response_head_is_still_a_protocol_error as test_h2_client_conn__test_data_before_the_response_head_is_still_a_protocol_error,
+    test_data_before_the_response_head_is_a_stream_error as test_h2_client_conn__test_data_before_the_response_head_is_a_stream_error,
 )
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
@@ -633,7 +633,7 @@ def main() raises:
         test_h2_client_conn__test_data_on_a_stream_the_server_reset_is_stream_closed
     ]()
     suite.test[
-        test_h2_client_conn__test_data_before_the_response_head_is_still_a_protocol_error
+        test_h2_client_conn__test_data_before_the_response_head_is_a_stream_error
     ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()

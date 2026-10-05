@@ -582,6 +582,7 @@ theorem gw_dataH (fx : Fix) (c : Conn) (f : Fr) (fr : Nat → Option Bytes) (hfr
       repeat' split
       all_goals first
         | exact gw_of_hw fr (hw_connErr _ _)
+        | exact gw_rstCloseX c f.sid _ s _ _ fr (mem_of_get hg) ⟨fun ht => ht, Or.inr (Or.inl rfl)⟩ (noDr_wu0If _)
         | (rename_i body hbody
            exact gw_dataBody fx c f s _ body fr (mem_of_get hg) hfr rfl rfl rfl (stripLen_le f false body hbody))
 

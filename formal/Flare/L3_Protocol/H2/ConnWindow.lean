@@ -368,6 +368,7 @@ theorem win_dataH (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinInv (dataH 
       repeat' split
       all_goals first
         | exact win_connErr _ _ h
+        | exact win_rstCloseX _ _ _ _ _ h hs
         | exact win_dataBody _ _ _ _ _ h hs
 
 theorem win_rstH (c : Conn) (f : Fr) (h : WinInv c) : WinInv (rstH c f).1 := by
