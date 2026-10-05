@@ -81,6 +81,18 @@ from test_qpack_dynamic import (
 from test_qpack_dynamic import (
     test_capacity_above_the_advertised_limit_is_refused as test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused,
 )
+from test_qpack_dynamic import (
+    test_ric_zero_section_cannot_read_the_dynamic_table as test_qpack_dynamic__test_ric_zero_section_cannot_read_the_dynamic_table,
+)
+from test_qpack_dynamic import (
+    test_sign_set_with_delta_base_not_below_ric_is_refused as test_qpack_dynamic__test_sign_set_with_delta_base_not_below_ric_is_refused,
+)
+from test_qpack_dynamic import (
+    test_post_base_reference_at_or_above_ric_is_refused as test_qpack_dynamic__test_post_base_reference_at_or_above_ric_is_refused,
+)
+from test_qpack_dynamic import (
+    test_pre_base_relative_index_beyond_base_is_refused as test_qpack_dynamic__test_pre_base_relative_index_beyond_base_is_refused,
+)
 
 
 def main() raises:
@@ -118,5 +130,17 @@ def main() raises:
     suite.test[test_qpack_dynamic__test_blocked_section_raises]()
     suite.test[
         test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_ric_zero_section_cannot_read_the_dynamic_table
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_sign_set_with_delta_base_not_below_ric_is_refused
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_post_base_reference_at_or_above_ric_is_refused
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_pre_base_relative_index_beyond_base_is_refused
     ]()
     suite^.run()

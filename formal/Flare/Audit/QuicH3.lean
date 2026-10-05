@@ -25,8 +25,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Qpack.Table.inv_setCapacity
 #print axioms Flare.L3.Qpack.Table.getAbs_insert
 #print axioms Flare.L3.Qpack.FieldSection.decodeInt_offset_le
-#print axioms Flare.L3.Qpack.FieldSection.implFixedResolve_eq_spec
-#print axioms Flare.L3.Qpack.FieldSection.spec_imp_impl
+#print axioms Flare.L3.Qpack.FieldSection.implResolve_eq_spec
+#print axioms Flare.L3.Qpack.FieldSection.spec_imp_implOld
 #print axioms Flare.L3.Qpack.FieldSection.implFixedSignReadIndex_inBounds
 #print axioms Flare.L3.Qpack.FieldSection.implFixedLiteral_ok
 #print axioms Flare.L3.Qpack.FieldSection.implFixedDynRef_eq_spec

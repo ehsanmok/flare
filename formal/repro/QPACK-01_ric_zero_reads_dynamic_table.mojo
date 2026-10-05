@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QPACK-01 fixed on fix/formal-findings
 """QPACK-01: a field section with Required Insert Count 0 resolves a
 dynamic-table entry (Base wraps; no `abs < RIC` check).
 
@@ -15,7 +16,8 @@ is invalid. Sec 4.5.1 / 4.5.3 / 4.5.5: a reference to an absolute index
 flare computes base = ric - delta - 1 = 0 - 0 - 1 = 2^64-1 (UInt64 wrap);
 post-base index 1 gives abs = base + 1 = 0, and get_abs(0) succeeds.
 
-Expected: decode raises. Actual: the section decodes to the dynamic entry.
+Expected: decode raises.
+Before the fix: Actual: the section decodes to the dynamic entry.
 Reachable only when the decoder's table capacity is non-zero
 (Http3Config.qpack_max_table_capacity > 0; default is 0).
 
@@ -48,8 +50,10 @@ def main() raises:
         raised = True
     if not raised:
         print(
-            "BUG REPRODUCED: field section with Required Insert Count 0"
-            " decoded dynamic entry abs 0 ->",
+            (
+                "BUG REPRODUCED: field section with Required Insert Count 0"
+                " decoded dynamic entry abs 0 ->"
+            ),
             got,
         )
         raise Error("QPACK-01")

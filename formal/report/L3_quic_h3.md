@@ -211,16 +211,16 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 
 **Field sections and the encoder stream.**
 - `decodeInt` is a local model of `decode_integer` (`http2/hpack.mojo:101-132`).
-- `implResolve` models the Base and the pre-base and post-base index arithmetic (`dynamic.mojo:489-555`).
+- `implResolve` models the shipped (fixed, QPACK-01) Base and pre-base and post-base index arithmetic (`dynamic.mojo:473-603`); `implOldResolve` is the pre-fix code the counterexamples are about.
 - `implSignReadIndex` models the read at line 489, and `implLiteral` models `codec.mojo:192-234`, both branches. The Huffman branch calls `Flare.L1.Huffman.okOnly (decodeSimdImpl payload)`, the L1 model of `huffman_decode_simd`; `specLiteral` uses the proved L1 decoder `Flare.L1.Huffman.decode`.
 - `implDynRef` models the encoder-stream references at `dynamic.mojo:319` and `:337`.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `FieldSection.decodeInt_offset_le` | On success the end offset `o` satisfies `off < o ≤ len`. | proved |
-| `FieldSection.implFixedResolve_eq_spec` | The fixed resolver equals RFC §4.5.1.2 and §4.5.2-4.5.5 for values below 2^62. | proved |
-| `FieldSection.implFixedResolve_safe` | Every index the fixed resolver returns is below RIC. | proved |
-| `FieldSection.spec_imp_impl` | flare accepts everything the spec accepts and resolves it to the same entry. | proved |
+| `FieldSection.implResolve_eq_spec` | The shipped (fixed) resolver equals RFC §4.5.1.2 and §4.5.2-4.5.5 for values below 2^62. | proved |
+| `FieldSection.implResolve_safe` | Every index the shipped resolver returns is below RIC. | proved |
+| `FieldSection.spec_imp_implOld` | The pre-fix resolver accepts everything the spec accepts and resolves it to the same entry. | proved |
 | `FieldSection.rel_roundtrip` | The decoder inverts the encoder's relative index. | proved |
 | `FieldSection.implSignReadIndex_le` | The sign-byte read index is at most `len`. | proved |
 | `FieldSection.implFixedSignReadIndex_inBounds`, `implFixedLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
@@ -551,6 +551,7 @@ The flip checks for QUIC-01..24, QPACK-05, QPACK-06 and H3-01..07 were run (QUIC
 - **Repro:** `formal/repro/QPACK-01_ric_zero_reads_dynamic_table.mojo`
 - **Observed:** `BUG REPRODUCED: field section with Required Insert Count 0 decoded dynamic entry abs 0 -> x-secret: dynamic-entry-0`
 - **Flip (QPACK agent):** `OK`, exit 0.
+Status: resolved. `decode_field_section_dynamic` now raises QPACK_DECOMPRESSION_FAILED when Sign is set with Delta Base >= RIC, when a pre-base relative index is >= Base, and when a resolved absolute index is >= RIC (`_pre_base_abs`, `_post_base_abs`). Tests: `tests/qpack/test_qpack_dynamic.mojo::test_ric_zero_section_cannot_read_the_dynamic_table` and three siblings. The repro prints `OK`.
 
 ### QPACK-02: reading the Sign byte goes one past the end and aborts the process
 
@@ -750,7 +751,7 @@ The flip checks for QUIC-01..24, QPACK-05, QPACK-06 and H3-01..07 were run (QUIC
 | `Quic.LossRecovery.onSent`, `onAck`, `detectLost`, `firePto` | quic/_loss_recovery.mojo:122-133, 175-234, 236-274, 311-328 | `inv_run`, `retire_noUnderflow`, `firePto_noUnderflow` | proved |
 | `Qpack.Ric.implEncode`, `implDecode` | qpack/dynamic.mojo:181-209 | `implDecode_eq_spec`, `implDecode_encode` | proved |
 | `Qpack.Table.*` | qpack/dynamic.mojo:93-158 | `inv_insert`, `inv_setCapacity`, `getAbs_insert` | proved |
-| `Qpack.FieldSection.implResolve` | qpack/dynamic.mojo:489-555 | `spec_imp_impl`, `QPACK_01.violates_safety`, `implFixedResolve_eq_spec` | counterexample |
+| `Qpack.FieldSection.implResolve`, `implOldResolve` | qpack/dynamic.mojo:473-603 (fixed, QPACK-01) | `spec_imp_implOld`, `QPACK_01.violates_safety`, `implResolve_eq_spec` | resolved |
 | `Qpack.FieldSection.implSignReadIndex` | qpack/dynamic.mojo:482-489 | `QPACK_02.out_of_bounds`, `implFixedSignReadIndex_inBounds` | counterexample |
 | `Qpack.FieldSection.implLiteral` | qpack/codec.mojo:192-234 | `implLiteral_eq_spec`, `implLiteral_huffman`, `QPACK_03.not_string_ok`, `QPACK_03.huffman_counterexample`, `implFixedLiteral_ok` | counterexample (QPACK-03) |
 | `Qpack.Encoder.findBy` | qpack/dynamic.mojo:160-175 | `findBy_some`, `findBy_none` | proved |

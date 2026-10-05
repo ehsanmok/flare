@@ -470,6 +470,43 @@ def encode_field_section_dynamic(
         _encode_string_literal(out, h.value, UInt8(0x00), 7, UInt8(0x80))
 
 
+def _pre_base_abs(base: UInt64, ric: UInt64, rel: Int) raises -> UInt64:
+    """Absolute index of a pre-base relative index (RFC 9204 4.5.2): it
+    must name an entry below Base and below the Required Insert Count.
+    ``base - 1 - rel`` wrapped for ``rel >= base`` (QPACK-01)."""
+    if rel < 0 or UInt64(rel) >= base:
+        raise Error(
+            "qpack: QPACK_DECOMPRESSION_FAILED: relative index "
+            + String(rel)
+            + " not below Base "
+            + String(base)
+        )
+    var abs_idx = base - 1 - UInt64(rel)
+    if abs_idx >= ric:
+        raise Error(
+            "qpack: QPACK_DECOMPRESSION_FAILED: absolute index "
+            + String(abs_idx)
+            + " not below Required Insert Count "
+            + String(ric)
+        )
+    return abs_idx
+
+
+def _post_base_abs(base: UInt64, ric: UInt64, ip: Int) raises -> UInt64:
+    """Absolute index of a post-base index (RFC 9204 4.5.3): ``base + ip``
+    must stay below the Required Insert Count (QPACK-01)."""
+    if ip < 0 or UInt64(ip) >= ric or base >= ric - UInt64(ip):
+        raise Error(
+            "qpack: QPACK_DECOMPRESSION_FAILED: post-base index "
+            + String(ip)
+            + " with Base "
+            + String(base)
+            + " reaches the Required Insert Count "
+            + String(ric)
+        )
+    return base + UInt64(ip)
+
+
 def decode_field_section_dynamic(
     buf: Span[UInt8, _],
     table: QpackDynamicTable,
@@ -477,7 +514,9 @@ def decode_field_section_dynamic(
     """Decode a field section against ``table``, resolving dynamic
     indexed / name-reference / post-base lines (RFC 9204 section 4.5).
     Static-only inputs (Required Insert Count 0) decode without touching
-    the table."""
+    the table: every dynamic reference must resolve to an absolute index
+    below the Required Insert Count (and a Sign-1 Delta Base below it),
+    otherwise the section is a ``QPACK_DECOMPRESSION_FAILED`` error."""
     var headers = List[QpackHeader]()
     if len(buf) < 2:
         raise Error("qpack: field section prefix truncated")
@@ -490,6 +529,15 @@ def decode_field_section_dynamic(
     var delta = decode_integer(buf, ric_enc.offset, 7)
     var base: UInt64
     if sign_set:
+        # RFC 9204 4.5.1.2: Sign 1 with Required Insert Count <= Delta
+        # Base is invalid. Unchecked, Base wrapped to 2^64 - 1 (QPACK-01).
+        if UInt64(delta.value) >= ric:
+            raise Error(
+                "qpack: QPACK_DECOMPRESSION_FAILED: Delta Base "
+                + String(delta.value)
+                + " not below Required Insert Count "
+                + String(ric)
+            )
         base = ric - UInt64(delta.value) - 1
     else:
         base = ric + UInt64(delta.value)
@@ -509,8 +557,9 @@ def decode_field_section_dynamic(
                     raise Error("qpack: static index out of range")
                 headers.append(stbl[ip.value].copy())
             else:
-                var abs_idx = base - 1 - UInt64(ip.value)
-                headers.append(table.get_abs(abs_idx))
+                headers.append(
+                    table.get_abs(_pre_base_abs(base, ric, ip.value))
+                )
             pos = ip.offset
             continue
         if (b0 & UInt8(0x40)) != UInt8(0):
@@ -523,8 +572,7 @@ def decode_field_section_dynamic(
                     raise Error("qpack: static name index out of range")
                 name = stbl[ip.value].name
             else:
-                var abs_idx = base - 1 - UInt64(ip.value)
-                name = table.get_abs(abs_idx).name
+                name = table.get_abs(_pre_base_abs(base, ric, ip.value)).name
             var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
             headers.append(QpackHeader(name, lit[0]))
             pos = lit[1]
@@ -541,14 +589,12 @@ def decode_field_section_dynamic(
         if (b0 & UInt8(0x10)) != UInt8(0):
             # Indexed Field Line With Post-Base Index: 0001xxxx
             var ip = decode_integer(buf, pos, 4)
-            var abs_idx = base + UInt64(ip.value)
-            headers.append(table.get_abs(abs_idx))
+            headers.append(table.get_abs(_post_base_abs(base, ric, ip.value)))
             pos = ip.offset
             continue
         # Literal Field Line With Post-Base Name Reference: 0000Nxxx
         var ip = decode_integer(buf, pos, 3)
-        var abs_idx = base + UInt64(ip.value)
-        var name = table.get_abs(abs_idx).name
+        var name = table.get_abs(_post_base_abs(base, ric, ip.value)).name
         var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
         headers.append(QpackHeader(name, lit[0]))
         pos = lit[1]

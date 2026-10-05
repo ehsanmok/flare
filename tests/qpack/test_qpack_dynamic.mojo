@@ -223,6 +223,80 @@ def test_capacity_above_the_advertised_limit_is_refused() raises:
     assert_equal(Int(t2.capacity), 1024)
 
 
+def _decode_raises(sec: List[UInt8], table: QpackDynamicTable) -> Bool:
+    try:
+        _ = decode_field_section_dynamic(Span[UInt8, _](sec), table)
+    except:
+        return True
+    return False
+
+
+def test_ric_zero_section_cannot_read_the_dynamic_table() raises:
+    """QPACK-01: RIC 0, Sign 1, Delta Base 0 made Base wrap to 2^64 - 1,
+    so post-base index 1 resolved to absolute index 0 although the
+    section declared no dynamic reference (RFC 9204 4.5.1.2, 4.5.1)."""
+    var t = QpackDynamicTable(4096)
+    assert_true(t.insert(QpackHeader("x-secret", "dynamic-entry-0")))
+    var sec = List[UInt8]()
+    sec.append(0x00)  # Required Insert Count 0
+    sec.append(0x80)  # Sign 1, Delta Base 0
+    sec.append(0x11)  # post-base indexed line, index 1
+    assert_true(_decode_raises(sec, t), "RIC 0 / Sign 1 section was decoded")
+
+
+def test_sign_set_with_delta_base_not_below_ric_is_refused() raises:
+    """QPACK-01: Sign 1 requires Delta Base < Required Insert Count."""
+    var t = QpackDynamicTable(4096)
+    assert_true(t.insert(QpackHeader("a", "1")))
+    assert_true(t.insert(QpackHeader("b", "2")))
+    # RIC 1 (encoded 2), Sign 1, Delta Base 1 -> RIC <= Delta Base.
+    var bad = List[UInt8]()
+    bad.append(0x02)
+    bad.append(0x81)
+    bad.append(0x80)
+    assert_true(_decode_raises(bad, t), "Sign 1 with Delta Base == RIC")
+    # Delta Base 0 is valid: Base = 0, so only post-base lines resolve.
+    var ok = List[UInt8]()
+    ok.append(0x02)
+    ok.append(0x80)
+    ok.append(0x10)  # post-base index 0 -> absolute 0 < RIC 1
+    var got = decode_field_section_dynamic(Span[UInt8, _](ok), t)
+    assert_equal(len(got), 1)
+    assert_equal(got[0].name, String("a"))
+
+
+def test_post_base_reference_at_or_above_ric_is_refused() raises:
+    """QPACK-01: an absolute index >= Required Insert Count is a
+    decompression failure even when the table holds that entry."""
+    var t = QpackDynamicTable(4096)
+    assert_true(t.insert(QpackHeader("a", "1")))
+    assert_true(t.insert(QpackHeader("b", "2")))
+    var sec = List[UInt8]()
+    sec.append(0x02)  # RIC 1 (MaxEntries 128)
+    sec.append(0x00)  # Base = 1
+    sec.append(0x10)  # post-base index 0 -> absolute 1 >= RIC
+    assert_true(_decode_raises(sec, t), "absolute index 1 with RIC 1")
+    # Pre-base relative index 0 -> absolute 0 is the legal reference.
+    var ok = List[UInt8]()
+    ok.append(0x02)
+    ok.append(0x00)
+    ok.append(0x80)
+    var got = decode_field_section_dynamic(Span[UInt8, _](ok), t)
+    assert_equal(len(got), 1)
+    assert_equal(got[0].value, String("1"))
+
+
+def test_pre_base_relative_index_beyond_base_is_refused() raises:
+    """QPACK-01: a relative index >= Base must not wrap around."""
+    var t = QpackDynamicTable(4096)
+    assert_true(t.insert(QpackHeader("a", "1")))
+    var sec = List[UInt8]()
+    sec.append(0x02)  # RIC 1
+    sec.append(0x00)  # Base = 1
+    sec.append(0x81)  # pre-base relative index 1 >= Base
+    assert_true(_decode_raises(sec, t), "relative index 1 with Base 1")
+
+
 def main() raises:
     test_entry_size()
     test_table_insert_and_index()
@@ -235,4 +309,8 @@ def main() raises:
     test_field_section_dynamic_roundtrip()
     test_blocked_section_raises()
     test_capacity_above_the_advertised_limit_is_refused()
+    test_ric_zero_section_cannot_read_the_dynamic_table()
+    test_sign_set_with_delta_base_not_below_ric_is_refused()
+    test_post_base_reference_at_or_above_ric_is_refused()
+    test_pre_base_relative_index_beyond_base_is_refused()
     print("test_qpack_dynamic: all dynamic-table tests passed")

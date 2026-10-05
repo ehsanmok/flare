@@ -14,10 +14,11 @@ Four small models of `flare/qpack/dynamic.mojo` and `flare/qpack/codec.mojo`:
 2. Field-line reference resolution (`decode_field_section_dynamic`): Base
    from Required Insert Count + Sign/Delta Base, pre-base / post-base
    absolute indices, and the table lookup. `specResolve` is RFC 9204
-   §4.5.1.2 + §4.5.2-§4.5.5 over `Nat`. `implResolve` is flare (UInt64 wrap).
-   `implFixedResolve` adds the three missing checks and is proved equal to
-   the spec (`implFixedResolve_eq_spec`); flare's code accepts everything the
-   spec accepts (`spec_imp_impl`) but also more (Bugs/QPACK_01).
+   §4.5.1.2 + §4.5.2-§4.5.5 over `Nat`. `implOldResolve` is flare (UInt64 wrap).
+   `implResolve` is the shipped (fixed) resolver with the three checks the
+   old one lacked, proved equal to the spec (`implResolve_eq_spec`);
+   `implOldResolve` is the pre-fix code, which accepts everything the spec
+   accepts (`spec_imp_implOld`) but also more (Bugs/QPACK_01).
 3. The prefix read at dynamic.mojo:489 (`buf[ric_enc.offset]`), see
    Bugs/QPACK_02.
 4. String literals (`_decode_string_literal`, both branches): the H flag,
@@ -104,14 +105,17 @@ structure Geo where
   ic : UInt64
   deriving DecidableEq, Repr
 
-/-- Base, as flare computes it (UInt64 wrap).
-mirrors flare/qpack/dynamic.mojo:489-495 @59bda50 -/
+/-- Base, as flare computes it (UInt64 wrap). The fixed decoder guards
+`delta < ric` before using the `sign` branch (`implResolve`); the pre-fix
+decoder did not (`implOldResolve`).
+mirrors flare/qpack/dynamic.mojo:473-543 (fixed, QPACK-01) -/
 def implBase (ric delta : UInt64) (sign : Bool) : UInt64 :=
   if sign then ric - delta - 1 else ric + delta
 
-/-- Absolute index a reference resolves to, or `none` when flare raises.
-mirrors flare/qpack/dynamic.mojo:496-498,512-513,526-527,544-545,550-551,150-158 @59bda50 -/
-def implResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
+/-- PRE-FIX absolute index a reference resolved to, or `none` when flare
+raised (flare/qpack/dynamic.mojo @59bda50: no `delta < ric`, `ip < base` or
+`abs < ric` checks). Kept so `Bugs/QPACK_01` stays checkable. -/
+def implOldResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
   let base := implBase ric delta sign
   if ric > g.ic then none
   else
@@ -150,8 +154,9 @@ def Ref.ip : Ref → UInt64
 def RefSafe (ric : UInt64) (res : Option UInt64) : Prop :=
   ∀ a, res = some a → a < ric
 
-/-- The minimal fix: reject Sign=1 with `delta ≥ ric`, reject a pre-base
-relative index `≥ base`, and reject any absolute index `≥ ric`. -/
+/-- The fix: reject Sign=1 with `delta ≥ ric`, reject a pre-base relative
+index `≥ base`, and reject any absolute index `≥ ric`.
+mirrors flare/qpack/dynamic.mojo:473-508 (fixed, QPACK-01) -/
 def fixedAbs (base : UInt64) : Ref → Option UInt64
   | .pre ip => if ip ≥ base then none else some (base - 1 - ip)
   | .post ip => some (base + ip)
@@ -160,7 +165,9 @@ def fixedCheck (ric : UInt64) (g : Geo) : Option UInt64 → Option UInt64
   | none => none
   | some abs => if abs ≥ ric ∨ abs < g.dropped ∨ abs ≥ g.ic then none else some abs
 
-def implFixedResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
+/-- The shipped resolver.
+mirrors flare/qpack/dynamic.mojo:473-603 (fixed, QPACK-01) -/
+def implResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
   if sign ∧ delta ≥ ric then none
   else if ric > g.ic then none
   else fixedCheck ric g (fixedAbs (implBase ric delta sign) r)
@@ -182,13 +189,13 @@ theorem u_sub (a b : UInt64) (h : b.toNat ≤ a.toNat) :
 theorem u_one : (1 : UInt64).toNat = 1 := rfl
 end toNatLemmas
 
-theorem implFixedResolve_eq_spec (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref)
+theorem implResolve_eq_spec (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref)
     (hb : Bounded ric delta g r) :
-    (implFixedResolve ric delta sign g r).map UInt64.toNat
+    (implResolve ric delta sign g r).map UInt64.toNat
       = specResolve ric.toNat delta.toNat sign g.dropped.toNat g.ic.toNat r.isPost r.ip.toNat := by
   obtain ⟨hr, hd, hic, hip, hdi⟩ := hb
   rw [u_le] at hdi
-  unfold implFixedResolve specResolve
+  unfold implResolve specResolve
   -- Sign guard
   by_cases hs : sign = true ∧ delta ≥ ric
   · have : sign = true ∧ ric.toNat ≤ delta.toNat := ⟨hs.1, (u_le _ _).mp hs.2⟩
@@ -255,10 +262,10 @@ theorem fixedCheck_safe (ric : UInt64) (g : Geo) (o : Option UInt64) (a : UInt64
     · rw [if_neg hc] at h; cases h
       exact Nat.lt_of_not_le (fun hh => hc (Or.inl hh))
 
-theorem implFixedResolve_safe (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) :
-    RefSafe ric (implFixedResolve ric delta sign g r) := by
+theorem implResolve_safe (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) :
+    RefSafe ric (implResolve ric delta sign g r) := by
   intro a h
-  unfold implFixedResolve at h
+  unfold implResolve at h
   by_cases h1 : sign = true ∧ delta ≥ ric
   · rw [if_pos h1] at h; cases h
   · rw [if_neg h1] at h
@@ -268,18 +275,18 @@ theorem implFixedResolve_safe (ric delta : UInt64) (sign : Bool) (g : Geo) (r : 
 
 /-- Completeness: whatever the RFC accepts, flare resolves to the same
 entry (flare's bug is accepting too much, not too little). -/
-theorem spec_imp_impl (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref)
+theorem spec_imp_implOld (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref)
     (hb : Bounded ric delta g r) (a : Nat)
     (hs : specResolve ric.toNat delta.toNat sign g.dropped.toNat g.ic.toNat r.isPost r.ip.toNat = some a) :
-    (implResolve ric delta sign g r).map UInt64.toNat = some a := by
-  have hf := implFixedResolve_eq_spec ric delta sign g r hb
+    (implOldResolve ric delta sign g r).map UInt64.toNat = some a := by
+  have hf := implResolve_eq_spec ric delta sign g r hb
   rw [hs] at hf
-  cases hfx : implFixedResolve ric delta sign g r with
+  cases hfx : implResolve ric delta sign g r with
   | none => rw [hfx] at hf; simp at hf
   | some v =>
     rw [hfx] at hf; simp at hf
-    unfold implFixedResolve at hfx
-    unfold implResolve
+    unfold implResolve at hfx
+    unfold implOldResolve
     by_cases h1 : sign = true ∧ delta ≥ ric
     · rw [if_pos h1] at hfx; cases hfx
     rw [if_neg h1] at hfx

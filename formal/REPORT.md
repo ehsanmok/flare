@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60781 lines) |
+| Lean files | 298 (60795 lines) |
 | Theorems | 3211 |
 | Headline theorems in the axiom audit | 1019 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 2 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 3 of 138 |
 
 Six findings are rated high:
 
@@ -1563,16 +1563,16 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 
 **Field sections and the encoder stream.**
 - `decodeInt` is a local model of `decode_integer` (`http2/hpack.mojo:101-132`).
-- `implResolve` models the Base and the pre-base and post-base index arithmetic (`dynamic.mojo:489-555`).
+- `implResolve` models the shipped (fixed, QPACK-01) Base and pre-base and post-base index arithmetic (`dynamic.mojo:473-603`); `implOldResolve` is the pre-fix code the counterexamples are about.
 - `implSignReadIndex` models the read at line 489, and `implLiteral` models `codec.mojo:192-234`, both branches. The Huffman branch calls `Flare.L1.Huffman.okOnly (decodeSimdImpl payload)`, the L1 model of `huffman_decode_simd`; `specLiteral` uses the proved L1 decoder `Flare.L1.Huffman.decode`.
 - `implDynRef` models the encoder-stream references at `dynamic.mojo:319` and `:337`.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `FieldSection.decodeInt_offset_le` | On success the end offset `o` satisfies `off < o ≤ len`. | proved |
-| `FieldSection.implFixedResolve_eq_spec` | The fixed resolver equals RFC §4.5.1.2 and §4.5.2-4.5.5 for values below 2^62. | proved |
-| `FieldSection.implFixedResolve_safe` | Every index the fixed resolver returns is below RIC. | proved |
-| `FieldSection.spec_imp_impl` | flare accepts everything the spec accepts and resolves it to the same entry. | proved |
+| `FieldSection.implResolve_eq_spec` | The shipped (fixed) resolver equals RFC §4.5.1.2 and §4.5.2-4.5.5 for values below 2^62. | proved |
+| `FieldSection.implResolve_safe` | Every index the shipped resolver returns is below RIC. | proved |
+| `FieldSection.spec_imp_implOld` | The pre-fix resolver accepts everything the spec accepts and resolves it to the same entry. | proved |
 | `FieldSection.rel_roundtrip` | The decoder inverts the encoder's relative index. | proved |
 | `FieldSection.implSignReadIndex_le` | The sign-byte read index is at most `len`. | proved |
 | `FieldSection.implFixedSignReadIndex_inBounds`, `implFixedLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
@@ -2852,7 +2852,7 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.LossRecovery.onSent`, `onAck`, `detectLost`, `firePto` | quic/_loss_recovery.mojo:122-133, 175-234, 236-274, 311-328 | `inv_run`, `retire_noUnderflow`, `firePto_noUnderflow` | proved |
 | `Qpack.Ric.implEncode`, `implDecode` | qpack/dynamic.mojo:181-209 | `implDecode_eq_spec`, `implDecode_encode` | proved |
 | `Qpack.Table.*` | qpack/dynamic.mojo:93-158 | `inv_insert`, `inv_setCapacity`, `getAbs_insert` | proved |
-| `Qpack.FieldSection.implResolve` | qpack/dynamic.mojo:489-555 | `spec_imp_impl`, `QPACK_01.violates_safety`, `implFixedResolve_eq_spec` | counterexample |
+| `Qpack.FieldSection.implResolve`, `implOldResolve` | qpack/dynamic.mojo:473-603 (fixed, QPACK-01) | `spec_imp_implOld`, `QPACK_01.violates_safety`, `implResolve_eq_spec` | resolved |
 | `Qpack.FieldSection.implSignReadIndex` | qpack/dynamic.mojo:482-489 | `QPACK_02.out_of_bounds`, `implFixedSignReadIndex_inBounds` | counterexample |
 | `Qpack.FieldSection.implLiteral` | qpack/codec.mojo:192-234 | `implLiteral_eq_spec`, `implLiteral_huffman`, `QPACK_03.not_string_ok`, `QPACK_03.huffman_counterexample`, `implFixedLiteral_ok` | counterexample (QPACK-03) |
 | `Qpack.Encoder.findBy` | qpack/dynamic.mojo:160-175 | `findBy_some`, `findBy_none` | proved |
@@ -3059,7 +3059,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-22 | Medium | open | the server closes connections without sending CONNECTION_CLOSE | `Flare/Bugs/QUIC_22.lean` | `repro/QUIC-22_server_close_never_sends_connection_close.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-23 | Low | open | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-24 | Low | open | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
-| QPACK-01 | High | open | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
+| QPACK-01 | High | resolved | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
 | QPACK-02 | Medium | open | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
 | QPACK-03 | Low | open | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
 | QPACK-04 | Low | open | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
@@ -4385,6 +4385,7 @@ The flip checks for QUIC-01..24, QPACK-05, QPACK-06 and H3-01..07 were run (QUIC
 - **Repro:** `formal/repro/QPACK-01_ric_zero_reads_dynamic_table.mojo`
 - **Observed:** `BUG REPRODUCED: field section with Required Insert Count 0 decoded dynamic entry abs 0 -> x-secret: dynamic-entry-0`
 - **Flip (QPACK agent):** `OK`, exit 0.
+Status: resolved. `decode_field_section_dynamic` now raises QPACK_DECOMPRESSION_FAILED when Sign is set with Delta Base >= RIC, when a pre-base relative index is >= Base, and when a resolved absolute index is >= RIC (`_pre_base_abs`, `_post_base_abs`). Tests: `tests/qpack/test_qpack_dynamic.mojo::test_ric_zero_section_cannot_read_the_dynamic_table` and three siblings. The repro prints `OK`.
 
 #### QPACK-02: reading the Sign byte goes one past the end and aborts the process
 
