@@ -20,7 +20,7 @@ only a send part at its initiator and only a receive part at the other end.
 
 `server` is the server's check (STREAM in `_route_http3_stream_chunks`; the other
 four frames in `check_stream_frame_id`, state.mojo, fixed QUIC-15;
-`ServerFixes.shipped` says which fixes are in); `client` is the client's (none). `checked`
+`ServerFixes.shipped` says which fixes are in); `client` is the client's (`clientShipped` says the check is on). `checked`
 is the bit-level check the fixes add; `checked_eq_spec` proves it is the
 spec, and `serverFixed_eq_spec` / `clientFixed_eq_spec` instantiate it.
 `server_stream_conforms` proves the server's existing STREAM check is
@@ -175,10 +175,14 @@ theorem serverFixed_eq_spec (c : Ctx) (hc : ServerOpensNone c) (k : Kind) (sid :
 /-! ## The client -/
 
 /-- mirrors flare/quic/client.mojo:902-912 @59bda50 (`_dispatch_frames`
-hands every frame to the shared state machine; nothing checks the stream
-id) -/
+hands every frame to the shared state machine; nothing checked the stream
+id; with `fixed`, `check_stream_frame_id` runs in the state machine's frame
+handlers, QUIC-17) -/
 def client (fixed : Bool) (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
   if fixed then checked .client c k sid else none
+
+/-- The client as shipped: the check is on (QUIC-17 fixed). -/
+def clientShipped : Bool := true
 
 theorem clientFixed_eq_spec (c : Ctx) (k : Kind) (sid : Nat) :
     client true c k sid = spec .client c k sid := checked_eq_spec _ _ _ _

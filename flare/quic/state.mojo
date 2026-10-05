@@ -297,6 +297,17 @@ struct Connection(Copyable):
     id above it is a STREAM_LIMIT_ERROR (RFC 9000 §4.6)."""
     var adv_max_streams_uni: UInt64
     """The same for peer-initiated unidirectional streams."""
+    var check_stream_ids: Bool
+    """Whether :func:`check_stream_frame_id` runs on received stream
+    frames. Set by the server (:class:`QuicConnection`) and the client
+    (:class:`QuicClientConnection`); off for a bare sans-I/O connection,
+    which has no notion of which streams its driver opened."""
+    var next_local_bidi: UInt64
+    """The next locally initiated bidirectional stream id that has not
+    been opened (client 0, 4, ...; server 1, 5, ...). The client advances
+    it in ``open_bidi_stream``; the server opens none."""
+    var next_local_uni: UInt64
+    """The same for unidirectional streams (client 2, 6, ...; server 3, ...)."""
 
 
 def new_connection(
@@ -305,6 +316,7 @@ def new_connection(
     is_server: Bool = False,
     adv_max_streams_bidi: UInt64 = UInt64(100),
     adv_max_streams_uni: UInt64 = UInt64(3),
+    check_stream_ids: Bool = False,
 ) -> Connection:
     """Build a fresh :class:`Connection` in the HANDSHAKE state."""
     return Connection(
@@ -329,24 +341,32 @@ def new_connection(
         is_server=is_server,
         adv_max_streams_bidi=adv_max_streams_bidi,
         adv_max_streams_uni=adv_max_streams_uni,
+        check_stream_ids=check_stream_ids,
+        next_local_bidi=UInt64(1) if is_server else UInt64(0),
+        next_local_uni=UInt64(3) if is_server else UInt64(2),
     )
 
 
-def check_stream_frame_id(
-    mut conn: Connection, sid: UInt64, targets_send_half: Bool
-) raises:
-    """RFC 9000 §4.6 / §19.4 / §19.5 / §19.10 / §19.13: check the stream
-    id of RESET_STREAM and STREAM_DATA_BLOCKED (``targets_send_half``
-    False: they concern the peer's sending half, our receiving half) or
-    of STOP_SENDING and MAX_STREAM_DATA (True: they concern our sending
-    half).
+comptime STREAM_FRAME_RECV_HALF: Int = 0
+"""RESET_STREAM / STREAM_DATA_BLOCKED: the frame concerns the sender's
+half, our receiving half."""
+comptime STREAM_FRAME_SEND_HALF: Int = 1
+"""STOP_SENDING / MAX_STREAM_DATA: the frame concerns our sending half."""
+comptime STREAM_FRAME_DATA: Int = 2
+"""STREAM: data for our receiving half."""
+
+
+def check_stream_frame_id(mut conn: Connection, sid: UInt64, kind: Int) raises:
+    """RFC 9000 §4.6 / §19.4 / §19.5 / §19.8 / §19.10 / §19.13: check the
+    stream id of a received stream frame (``kind`` is one of
+    ``STREAM_FRAME_*``).
 
     A peer-initiated stream above the stream limit we advertised is a
     STREAM_LIMIT_ERROR; a frame for a half the stream does not have (a
-    receive-only stream we initiated, a send-only one the peer
-    initiated) is a STREAM_STATE_ERROR, and so is STOP_SENDING /
-    MAX_STREAM_DATA for a stream we initiated and have not opened. Closes
-    the connection and raises on a violation.
+    send-only stream the peer initiated, a stream we initiated that is
+    receive-only) is a STREAM_STATE_ERROR, and so is STOP_SENDING /
+    MAX_STREAM_DATA / STREAM for a stream we initiated and have not
+    opened. Closes the connection and raises on a violation.
     """
     var server_initiated = (sid & UInt64(1)) != 0
     var mine = server_initiated == conn.is_server
@@ -362,9 +382,14 @@ def check_stream_frame_id(
                 "stream id above the stream limit",
             )
             raise Error("QUIC STREAM_LIMIT_ERROR: stream id above the limit")
+    var opened = sid in conn.streams or sid < (
+        conn.next_local_uni if uni else conn.next_local_bidi
+    )
     var bad: Bool
-    if targets_send_half:
-        bad = (uni and not mine) or (mine and sid not in conn.streams)
+    if kind == STREAM_FRAME_SEND_HALF:
+        bad = (uni and not mine) or (mine and not opened)
+    elif kind == STREAM_FRAME_DATA:
+        bad = (uni and mine) or (mine and not opened)
     else:
         bad = uni and mine
     if bad:
@@ -760,14 +785,18 @@ struct _ConnFrameHandler(FrameHandler):
             self._events()[].acked_packets.append(acked[i])
 
     def on_reset_stream(mut self, rs: ResetStreamFrame) raises:
-        if self._conn()[].is_server:
-            check_stream_frame_id(self._conn()[], rs.stream_id, False)
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], rs.stream_id, STREAM_FRAME_RECV_HALF
+            )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_reset_stream(self._conn()[], rs)
 
     def on_stop_sending(mut self, ss: StopSendingFrame) raises:
-        if self._conn()[].is_server:
-            check_stream_frame_id(self._conn()[], ss.stream_id, True)
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], ss.stream_id, STREAM_FRAME_SEND_HALF
+            )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_stop_sending(self._conn()[], ss)
 
@@ -787,6 +816,10 @@ struct _ConnFrameHandler(FrameHandler):
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
 
     def on_stream(mut self, sf: StreamFrame) raises:
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], sf.stream_id, STREAM_FRAME_DATA
+            )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_stream(self._conn()[], sf, self._events()[])
 
@@ -795,8 +828,10 @@ struct _ConnFrameHandler(FrameHandler):
         apply_max_data(self._conn()[], m)
 
     def on_max_stream_data(mut self, m: MaxStreamDataFrame) raises:
-        if self._conn()[].is_server:
-            check_stream_frame_id(self._conn()[], m.stream_id, True)
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], m.stream_id, STREAM_FRAME_SEND_HALF
+            )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_max_stream_data(self._conn()[], m)
 
@@ -807,8 +842,10 @@ struct _ConnFrameHandler(FrameHandler):
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
 
     def on_stream_data_blocked(mut self, sdb: StreamDataBlockedFrame) raises:
-        if self._conn()[].is_server:
-            check_stream_frame_id(self._conn()[], sdb.stream_id, False)
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], sdb.stream_id, STREAM_FRAME_RECV_HALF
+            )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
 
     def on_streams_blocked(mut self, sb: StreamsBlockedFrame) raises:

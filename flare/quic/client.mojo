@@ -122,6 +122,7 @@ from .protection import (
 )
 from .state import (
     CONN_STATE_CLOSED,
+    CONN_STATE_CLOSING,
     CONN_STATE_ESTABLISHED,
     Connection,
     ConnectionEvents,
@@ -210,10 +211,14 @@ def _encode_client_transport_params(
     tp.initial_max_stream_data_bidi_local = Optional(initial_max_data)
     tp.initial_max_stream_data_bidi_remote = Optional(initial_max_data)
     tp.initial_max_stream_data_uni = Optional(initial_max_data)
-    tp.initial_max_streams_bidi = Optional(UInt64(16))
-    tp.initial_max_streams_uni = Optional(UInt64(16))
+    tp.initial_max_streams_bidi = Optional(_CLIENT_MAX_STREAMS)
+    tp.initial_max_streams_uni = Optional(_CLIENT_MAX_STREAMS)
     tp.active_connection_id_limit = Optional(UInt64(2))
     return encode_transport_parameters(tp)
+
+
+comptime _CLIENT_MAX_STREAMS: UInt64 = UInt64(16)
+"""``initial_max_streams_bidi`` / ``_uni`` the client advertises."""
 
 
 struct _EarlySend(Copyable):
@@ -391,6 +396,11 @@ struct QuicClientConnection(Movable):
         max_udp_payload_size: Int,
     ):
         self.conn = conn^
+        # RFC 9000 sec 4.6 / 19: stream frames are checked against the
+        # stream limits this client advertises.
+        self.conn.check_stream_ids = True
+        self.conn.adv_max_streams_bidi = _CLIENT_MAX_STREAMS
+        self.conn.adv_max_streams_uni = _CLIENT_MAX_STREAMS
         self.session = session^
         self.sock = sock^
         self.peer = peer
@@ -916,6 +926,7 @@ struct QuicClientConnection(Movable):
                 _ack_record(self.rx_initial_ranges, up.packet_number)
                 self.rx_initial_ack_pending = True
             except:
+                self._fail_on_state_error(events)
                 return
         elif lvl == QuicEncryptionLevel.HANDSHAKE:
             if not self.have_hs_keys:
@@ -928,6 +939,7 @@ struct QuicClientConnection(Movable):
                 _ack_record(self.rx_handshake_ranges, dec[1])
                 self.rx_handshake_ack_pending = True
             except:
+                self._fail_on_state_error(events)
                 return
         elif lvl == QuicEncryptionLevel.APPLICATION:
             if not self.have_1rtt_keys:
@@ -942,10 +954,44 @@ struct QuicClientConnection(Movable):
                 if self.conn.ack_pending:
                     self.rx_1rtt_ack_pending = True
             except:
+                self._fail_on_state_error(events)
                 return
         else:
             return
         self._pump_crypto(lvl, events)
+
+    def _fail_on_state_error(mut self, mut events: ConnectionEvents):
+        """A frame the state machine rejected (STREAM_STATE_ERROR,
+        STREAM_LIMIT_ERROR, PROTOCOL_VIOLATION, ...) has already put the
+        connection into CLOSING: end it. Send a CONNECTION_CLOSE with the
+        error code when 1-RTT keys exist (RFC 9000 sec 10.2, 11.1), mark the
+        connection closed and report it through ``connection_closed``."""
+        if self.conn.state != CONN_STATE_CLOSING:
+            return
+        var code = self.conn.close_error_code
+        if self.have_1rtt_keys:
+            try:
+                var payload = List[UInt8]()
+                encode_connection_close(
+                    ConnectionCloseFrame(
+                        application=False,
+                        error_code=code,
+                        frame_type=UInt64(0),
+                        reason_phrase=List[UInt8](),
+                    ),
+                    payload,
+                )
+                while len(payload) < 16:
+                    payload.append(UInt8(0))
+                var dg = self._build_1rtt(payload^, ack_eliciting=False)
+                if len(dg) > 0:
+                    _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+            except:
+                pass
+        self.conn.state = CONN_STATE_CLOSED
+        self.established = False
+        events.connection_closed = True
+        events.error_code = code
 
     def _dispatch_frames(
         mut self, plaintext: Span[UInt8, _], mut events: ConnectionEvents
@@ -1385,6 +1431,7 @@ struct QuicClientConnection(Movable):
         opens one bidi stream per request."""
         var sid = self.next_bidi_stream
         self.next_bidi_stream += UInt64(4)
+        self.conn.next_local_bidi = self.next_bidi_stream
         return sid
 
     def open_uni_stream(mut self) -> UInt64:
@@ -1393,6 +1440,7 @@ struct QuicClientConnection(Movable):
         per connection (control + QPACK encoder/decoder)."""
         var sid = self.next_uni_stream
         self.next_uni_stream += UInt64(4)
+        self.conn.next_local_uni = self.next_uni_stream
         return sid
 
     def _stream_chunk_cap(self) -> Int:

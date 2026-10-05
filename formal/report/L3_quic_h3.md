@@ -163,7 +163,7 @@ File: `Quic/Streams.lean`.
 **Model.**
 - `spec` is the per-frame acceptance rule of RFC 9000: §4.6 (stream limit), §19.4 (RESET_STREAM), §19.5 (STOP_SENDING), §19.8 (STREAM), §19.10 (MAX_STREAM_DATA) and §19.13 (STREAM_DATA_BLOCKED), over the stream id's initiator and direction bits, the locally opened streams and the advertised limits.
 - `server` mirrors the server: STREAM is checked in `_route_http3_stream_chunks` (`quic/server.mojo:1407-1430`); the other four frames are checked in `check_stream_frame_id` (`quic/state.mojo`, fixed QUIC-15; they used to reach `state.mojo:454-486, 712-722` unchecked). `ServerFixes` switches on the QUIC-15 and QUIC-16 fixes; `ServerFixes.shipped` says which are in.
-- `client` mirrors `_dispatch_frames` (`quic/client.mojo:902-912`), which checks nothing.
+- `client` mirrors the client's stream-id check: `_dispatch_frames` (`quic/client.mojo:902-912`) used to check nothing; now `check_stream_frame_id` runs in the state machine's frame handlers (fixed, QUIC-17) and `clientShipped` says the check is on.
 - `checked` is the two-bit check the fixes add.
 - `stepImpl` mirrors the single per-stream state (`state.mojo:356-363, 467-486`, `client.mojo:1406-1428`); `resetSeen` and `sendRefused` mirror `stream_reset` and the check in `send_stream`. `Halves` is the RFC's split into a sending and a receiving part.
 
@@ -479,11 +479,13 @@ Status: resolved. The server closes with STREAM_LIMIT_ERROR for a client unidire
 
 ### QUIC-17: the client checks no stream id on any stream frame
 
+Status: resolved. The client checks the stream id of every stream frame (state.mojo: check_stream_frame_id, enabled by Connection.check_stream_ids) and closes on a violation.
+
 - **Severity:** Low. A server can write into the client's own control stream's receive state, pre-load data on a request stream the client has not opened yet (it is delivered as `stream_chunks` and the stream is created), and open server streams above the client's advertised 16.
 - **RFC:** RFC 9000 §19.8, §19.4, §19.5, §19.10, §19.13 (STREAM_STATE_ERROR) and §4.6 (STREAM_LIMIT_ERROR), as for QUIC-15 with the roles swapped.
 - **What goes wrong:** `_dispatch_frames` (`quic/client.mojo:902-912`) hands every frame to the shared state machine; `apply_stream` (`state.mojo:325-365`) creates a stream for any id.
 - **Counterexample:** `Bugs.QUIC_17.impl_accepts`: STREAM on stream 2 (the client's own control stream) and on stream 4 (not opened), RESET_STREAM on stream 2, STOP_SENDING on stream 3, STREAM on server stream 65 (the seventeenth). `spec_accepts` checks the legitimate cases stay accepted.
-- **Fix:** check each stream frame's id by direction, `next_bidi_stream` / `next_uni_stream` and the advertised limits in `_dispatch_frames`. `fixed_spec` (= `Streams.clientFixed_eq_spec`) shows it equals the spec.
+- **Fix:** check each stream frame's id by direction, `next_bidi_stream` / `next_uni_stream` (mirrored in `Connection.next_local_*`) and the advertised limits (`check_stream_frame_id`, run for STREAM and the four other frames; the client ends the connection with a CONNECTION_CLOSE on a rejected frame). `shipped_rejects` and `fixed_spec` (= `Streams.clientFixed_eq_spec`) show it equals the spec; the counterexample runs against `client false`, the client before the fix.
 - **Repro:** `formal/repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (NULL rustls session; controls: STREAM on 0 and on 3 accepted).
 - **Observed:** `BUG REPRODUCED: client accepted stream frames RFC 9000 requires it to reject: [STREAM 2] [STREAM 4] [RESET_STREAM 2] [STOP_SENDING 3] [STREAM 65]`
 - **Flip** (`quic/client.mojo`, the fix above): `OK: all five wrong-direction / unopened / over-limit stream frames rejected`, exit 0.

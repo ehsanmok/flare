@@ -3,7 +3,16 @@ import Flare.L3_Protocol.Quic.Streams
 /-!
 # QUIC-17: the client checks no stream id on any stream frame
 
-flare/quic/client.mojo:902-912 @59bda50 (`_dispatch_frames`) hands every
+Status: resolved. `check_stream_frame_id` (flare/quic/state.mojo) now runs in the
+frame handlers for STREAM, RESET_STREAM, STOP_SENDING, MAX_STREAM_DATA and
+STREAM_DATA_BLOCKED on connections that set `check_stream_ids` (the client and
+the server); the client advertises 16 streams of each kind (`_CLIENT_MAX_STREAMS`),
+advances `next_local_bidi` / `next_local_uni` in `open_*_stream`, and ends the
+connection on a rejected frame (`_fail_on_state_error`: CONNECTION_CLOSE,
+`connection_closed`). The counterexample below is about the client before the
+fix (`client false`); `clientShipped` is the shipped one.
+
+Pre-fix behaviour: flare/quic/client.mojo:902-912 @59bda50 (`_dispatch_frames`) hands every
 frame to the shared state machine (flare/quic/state.mojo:325-365,
 454-486), which creates a stream on the first STREAM frame for any id and
 applies RESET_STREAM / STOP_SENDING / MAX_STREAM_DATA to any known one.
@@ -44,6 +53,15 @@ on a server unidirectional stream, STOP_SENDING on the request stream. -/
 theorem spec_accepts :
     spec .client ctx .stream 0 = none ∧ spec .client ctx .stream 3 = none ∧
       spec .client ctx .stopSending 0 = none := by
+  native_decide
+
+/-- **The shipped client rejects all five** with the spec's error. -/
+theorem shipped_rejects :
+    client clientShipped ctx .stream 2 = some .state ∧
+    client clientShipped ctx .stream 4 = some .state ∧
+    client clientShipped ctx .resetStream 2 = some .state ∧
+    client clientShipped ctx .stopSending 3 = some .state ∧
+    client clientShipped ctx .stream 65 = some .limit := by
   native_decide
 
 /-- **Fix meets spec** -/

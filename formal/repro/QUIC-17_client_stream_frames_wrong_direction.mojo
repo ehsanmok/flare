@@ -1,4 +1,5 @@
 # PLATFORM: any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)
+# RESOLVED: QUIC-17 fixed on fix/formal-findings
 """QUIC-17: the client checks no stream id on any stream frame.
 
 Lean: Flare.Bugs.QUIC_17.impl_accepts (impl), Flare.Bugs.QUIC_17.fixed_spec
@@ -20,7 +21,7 @@ client does). Cases:
   STREAM 65        the 17th server bidi stream, 16 allowed
 Control: STREAM on 0 and on server uni stream 3 are accepted.
 
-Expected: each case raises. Actual: each is accepted (STREAM 2 / 4 / 65
+Expected: each case raises. Before the fix: each is accepted (STREAM 2 / 4 / 65
 even create a stream and surface the bytes as stream_chunks).
 
 Minimal fix: in _dispatch_frames, check each stream frame's id against

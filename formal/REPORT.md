@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62921 lines) |
-| Theorems | 3300 |
-| Headline theorems in the axiom audit | 1098 |
+| Lean files | 298 (62944 lines) |
+| Theorems | 3301 |
+| Headline theorems in the axiom audit | 1099 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 103 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 104 of 138 |
 
 Six findings are rated high:
 
@@ -1524,7 +1524,7 @@ File: `Quic/Streams.lean`.
 **Model.**
 - `spec` is the per-frame acceptance rule of RFC 9000: §4.6 (stream limit), §19.4 (RESET_STREAM), §19.5 (STOP_SENDING), §19.8 (STREAM), §19.10 (MAX_STREAM_DATA) and §19.13 (STREAM_DATA_BLOCKED), over the stream id's initiator and direction bits, the locally opened streams and the advertised limits.
 - `server` mirrors the server: STREAM is checked in `_route_http3_stream_chunks` (`quic/server.mojo:1407-1430`); the other four frames are checked in `check_stream_frame_id` (`quic/state.mojo`, fixed QUIC-15; they used to reach `state.mojo:454-486, 712-722` unchecked). `ServerFixes` switches on the QUIC-15 and QUIC-16 fixes; `ServerFixes.shipped` says which are in.
-- `client` mirrors `_dispatch_frames` (`quic/client.mojo:902-912`), which checks nothing.
+- `client` mirrors the client's stream-id check: `_dispatch_frames` (`quic/client.mojo:902-912`) used to check nothing; now `check_stream_frame_id` runs in the state machine's frame handlers (fixed, QUIC-17) and `clientShipped` says the check is on.
 - `checked` is the two-bit check the fixes add.
 - `stepImpl` mirrors the single per-stream state (`state.mojo:356-363, 467-486`, `client.mojo:1406-1428`); `resetSeen` and `sendRefused` mirror `stream_reset` and the check in `send_stream`. `Halves` is the RFC's split into a sending and a receiving part.
 
@@ -3084,7 +3084,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-14 | Medium | resolved | ACK ranges forget dropped packets, which are then processed again | `Flare/Bugs/QUIC_14.lean` | `repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo` (any) |
 | QUIC-15 | Low | resolved | the server accepts stream frames that name the wrong direction | `Flare/Bugs/QUIC_15.lean` | `repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (any) |
 | QUIC-16 | Low | resolved | the server does not enforce its unidirectional stream limit | `Flare/Bugs/QUIC_16.lean` | `repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic)) |
-| QUIC-17 | Low | open | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
+| QUIC-17 | Low | resolved | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
 | QUIC-18 | Medium | resolved | one state for both stream halves loses a reset | `Flare/Bugs/QUIC_18.lean` | `repro/QUIC-18_stream_reset_state_overwritten.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
 | QUIC-19 | Low | open | STOP_SENDING is never answered with RESET_STREAM | `Flare/Bugs/QUIC_19.lean` | `repro/QUIC-19_stop_sending_not_answered.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QUIC-20 | Medium | resolved | the server's idle timer does not follow RFC 9000 §10.1 | `Flare/Bugs/QUIC_20.lean` | `repro/QUIC-20_server_idle_timer.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
@@ -4442,11 +4442,13 @@ Status: resolved. The server closes with STREAM_LIMIT_ERROR for a client unidire
 
 #### QUIC-17: the client checks no stream id on any stream frame
 
+Status: resolved. The client checks the stream id of every stream frame (state.mojo: check_stream_frame_id, enabled by Connection.check_stream_ids) and closes on a violation.
+
 - **Severity:** Low. A server can write into the client's own control stream's receive state, pre-load data on a request stream the client has not opened yet (it is delivered as `stream_chunks` and the stream is created), and open server streams above the client's advertised 16.
 - **RFC:** RFC 9000 §19.8, §19.4, §19.5, §19.10, §19.13 (STREAM_STATE_ERROR) and §4.6 (STREAM_LIMIT_ERROR), as for QUIC-15 with the roles swapped.
 - **What goes wrong:** `_dispatch_frames` (`quic/client.mojo:902-912`) hands every frame to the shared state machine; `apply_stream` (`state.mojo:325-365`) creates a stream for any id.
 - **Counterexample:** `Bugs.QUIC_17.impl_accepts`: STREAM on stream 2 (the client's own control stream) and on stream 4 (not opened), RESET_STREAM on stream 2, STOP_SENDING on stream 3, STREAM on server stream 65 (the seventeenth). `spec_accepts` checks the legitimate cases stay accepted.
-- **Fix:** check each stream frame's id by direction, `next_bidi_stream` / `next_uni_stream` and the advertised limits in `_dispatch_frames`. `fixed_spec` (= `Streams.clientFixed_eq_spec`) shows it equals the spec.
+- **Fix:** check each stream frame's id by direction, `next_bidi_stream` / `next_uni_stream` (mirrored in `Connection.next_local_*`) and the advertised limits (`check_stream_frame_id`, run for STREAM and the four other frames; the client ends the connection with a CONNECTION_CLOSE on a rejected frame). `shipped_rejects` and `fixed_spec` (= `Streams.clientFixed_eq_spec`) show it equals the spec; the counterexample runs against `client false`, the client before the fix.
 - **Repro:** `formal/repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (NULL rustls session; controls: STREAM on 0 and on 3 accepted).
 - **Observed:** `BUG REPRODUCED: client accepted stream frames RFC 9000 requires it to reject: [STREAM 2] [STREAM 4] [RESET_STREAM 2] [STOP_SENDING 3] [STREAM 65]`
 - **Flip** (`quic/client.mojo`, the fix above): `OK: all five wrong-direction / unopened / over-limit stream frames rejected`, exit 0.
