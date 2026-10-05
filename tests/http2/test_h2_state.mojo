@@ -23,7 +23,11 @@ from flare.http2.frame import (
     parse_frame,
 )
 from flare.http2.hpack import HpackEncoder, HpackHeader
-from flare.http2.state import Connection, StreamState
+from flare.http2.state import (
+    Connection,
+    StreamState,
+    validate_request_fields,
+)
 
 
 def _bytes(b: List[Int]) -> List[UInt8]:
@@ -730,6 +734,55 @@ def test_stream_window_overrun_reset_returns_connection_credit() raises:
     assert_equal(c.recv_window, 65535)
 
 
+def test_field_names_follow_rfc_9113_8_2_1() raises:
+    """H2-10: a field name holds none of 0x00-0x20, 0x41-0x5a, 0x7f-0xff,
+    and no colon except as the pseudo-header prefix; a request carrying
+    one is malformed (RFC 9113 sec 8.1.1, sec 8.2.1)."""
+    var bad = List[String]()
+    bad.append("x\xc3\xa9")  # non-ASCII (x + U+00E9)
+    bad.append("a:b")  # colon inside a regular name
+    bad.append("x:")  # trailing colon
+    bad.append("x\x7f")  # DEL
+    bad.append("x\x80")  # first octet above DEL (invalid UTF-8)
+    for i in range(len(bad)):
+        var extra = List[HpackHeader]()
+        extra.append(HpackHeader(bad[i], "1"))
+        assert_equal(
+            _request_verdict(extra^),
+            0x1,
+            "accepted field name: case " + String(i),
+        )
+    var good = List[String]()
+    good.append("x-ok")
+    good.append("x_1")
+    good.append("a.b~c")
+    good.append("0")
+    for i in range(len(good)):
+        var extra = List[HpackHeader]()
+        extra.append(HpackHeader(good[i], "1"))
+        assert_equal(
+            _request_verdict(extra^), -1, "rejected valid name: " + good[i]
+        )
+
+
+def test_validate_request_fields_rejects_bad_name_octets() raises:
+    """H2-10: the shared validator (also used for HTTP/3) rejects the same
+    names, and still accepts the pseudo-header prefix colon."""
+    var base = List[HpackHeader]()
+    base.append(HpackHeader(":method", "GET"))
+    base.append(HpackHeader(":scheme", "http"))
+    base.append(HpackHeader(":path", "/"))
+    assert_true(validate_request_fields(base, False, False))
+    var bad = List[String]()
+    bad.append("x\xc3\xa9")
+    bad.append("a:b")
+    for i in range(len(bad)):
+        var h = base.copy()
+        h.append(HpackHeader(bad[i], "1"))
+        assert_false(validate_request_fields(h, False, False))
+        assert_false(validate_request_fields(h, True, False))
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -761,4 +814,6 @@ def main() raises:
     test_content_length_valid_forms_still_complete()
     test_content_length_reset_returns_connection_credit()
     test_stream_window_overrun_reset_returns_connection_credit()
-    print("test_h2_state: 30 passed")
+    test_field_names_follow_rfc_9113_8_2_1()
+    test_validate_request_fields_rejects_bad_name_octets()
+    print("test_h2_state: 32 passed")

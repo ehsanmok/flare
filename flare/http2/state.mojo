@@ -1808,15 +1808,20 @@ def validate_request_fields(
             return False
         # sec 8.2.1: field names are lowercase on the wire, and no
         # name or value may hold NUL, CR or LF; a name holds no
-        # whitespace or controls, a value no leading or trailing
-        # whitespace. CR / LF in a value used to reach take_request,
-        # where HeaderMap raised and took the whole connection down.
+        # whitespace, controls or octets >= 0x7f, and no colon except as
+        # the pseudo-header prefix (a name like ``a:b`` is a header
+        # injection once re-serialised as HTTP/1.1; H2-10). A value has no
+        # leading or trailing whitespace. CR / LF in a value used to reach
+        # take_request, where HeaderMap raised and took the whole
+        # connection down.
         var np = name.unsafe_ptr()
         for k in range(name.byte_length()):
             var c = np[unsafe_offset=k]
             if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
                 return False
-            if c <= 32 or c == 127:
+            if c <= 32 or c >= 127:
+                return False
+            if k > 0 and c == UInt8(ord(":")):
                 return False
         if not _is_valid_field_value(hdrs[i].value):
             return False

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-10 fixed on fix/formal-findings
 """H2-10: validate_request_fields accepts field names containing octets
 0x80-0xFF and regular field names containing a colon.
 
@@ -16,7 +17,7 @@ malformed, and the server must answer it with a stream error.
 Trace: a GET (:method, :scheme, :path) plus one regular field, named
 (a) "xé" (octets 78 C3 A9) and (b) "a:b", each with value "1".
 
-Expected: validate_request_fields returns False for both. Actual: True
+Expected: validate_request_fields returns False for both. Before the fix: True
 for both, so the request is served.
 
 Minimal fix: in the name loop also reject c >= 0x7F, and reject ':' at

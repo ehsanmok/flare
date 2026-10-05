@@ -390,6 +390,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_stream_window_overrun_reset_returns_connection_credit as test_h2_state__test_stream_window_overrun_reset_returns_connection_credit,
 )
+from test_h2_state import (
+    test_field_names_follow_rfc_9113_8_2_1 as test_h2_state__test_field_names_follow_rfc_9113_8_2_1,
+)
+from test_h2_state import (
+    test_validate_request_fields_rejects_bad_name_octets as test_h2_state__test_validate_request_fields_rejects_bad_name_octets,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -689,6 +695,10 @@ def main() raises:
     ]()
     suite.test[
         test_h2_state__test_stream_window_overrun_reset_returns_connection_credit
+    ]()
+    suite.test[test_h2_state__test_field_names_follow_rfc_9113_8_2_1]()
+    suite.test[
+        test_h2_state__test_validate_request_fields_rejects_bad_name_octets
     ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[

@@ -3,8 +3,14 @@ import Flare.Bugs.H2_Fixtures
 /-!
 # H2-10: field names with non-ASCII bytes or an inner colon are accepted
 
-`validate_request_fields` (flare/http2/state.mojo:1727-1733 @59bda50)
-rejects in a field name only uppercase ASCII, bytes `≤ 0x20` and `0x7f`.
+Status: resolved. The name loop of `validate_request_fields` now also
+rejects bytes `≥ 0x7f` and a colon after the first byte. The
+counterexamples are about `validateOld` / `implNameOld` (the code before
+the fix); `fixed`, `fixed_shipped` and `validate_names` are about the
+shipped `validate`.
+
+Before the fix, `validate_request_fields` (flare/http2/state.mojo:1727-1733 @59bda50)
+rejected in a field name only uppercase ASCII, bytes `≤ 0x20` and `0x7f`.
 Bytes `≥ 0x80` and a `:` after the first byte pass, so the names
 `x\xc3\xa9` and `a:b` are accepted.
 
@@ -22,8 +28,8 @@ def nColon : Bytes := [0x61, 0x3A, 0x62]
 
 def req (n : Bytes) : List Header := getReq ++ [⟨n, Bytes.ofString "1"⟩]
 
-theorem bug : implNameOK nUtf8 = true ∧ implNameOK nColon = true ∧
-    validate (req nUtf8) false false = true ∧ validate (req nColon) false false = true := by
+theorem bug : implNameOld nUtf8 = true ∧ implNameOld nColon = true ∧
+    validateOld (req nUtf8) false false = true ∧ validateOld (req nColon) false false = true := by
   native_decide
 
 theorem counterexample : ¬ SpecName nUtf8 ∧ ¬ SpecName nColon := by
@@ -38,10 +44,18 @@ theorem counterexample_request : ¬ SpecRequest false (req nUtf8) ∧ ¬ SpecReq
     exact absurd this (by decide)
   · exact (h.1 ⟨nColon, Bytes.ofString "1"⟩ (by simp [req])).2.2.1 0x3A (by simp [nColon]) rfl
 
-theorem fixed_trace : fixedNameOK nUtf8 = false ∧ fixedNameOK nColon = false := by native_decide
+theorem fixed_trace : fixedNameOK nUtf8 = false ∧ fixedNameOK nColon = false ∧
+    validate (req nUtf8) false false = false ∧ validate (req nColon) false false = false := by
+  native_decide
 
 /-- **Fixed** (also reject bytes `≥ 0x7f`, and `:` after the first byte):
 the per-name check is exactly §8.2.1. -/
 theorem fixed (n : Bytes) : fixedNameOK n = true ↔ SpecName n := fixedNameOK_iff n
+
+/-- The shipped validator: every field of an accepted request has a
+`SpecName` name. -/
+theorem fixed_shipped (hs : List Header) (isTr allowExt : Bool)
+    (h : validate hs isTr allowExt = true) : ∀ x ∈ hs, SpecName x.name :=
+  validate_names hs isTr allowExt h
 
 end Flare.Bugs.H2_10

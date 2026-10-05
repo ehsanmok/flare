@@ -25,7 +25,8 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.L3.H2.Validate.loop_iff
 #print axioms Flare.L3.H2.Validate.fold_facts
 #print axioms Flare.L3.H2.Validate.fixedNameOK_iff
-#print axioms Flare.L3.H2.Validate.implNameOK_spec
+#print axioms Flare.L3.H2.Validate.implNameOld_spec
+#print axioms Flare.L3.H2.Validate.validate_names
 -- Connection state machine: invariants, flow control, per-clause theorems
 #print axioms Flare.L3.H2.Conn.win_reachable
 #print axioms Flare.L3.H2.Conn.run_live
@@ -97,6 +98,7 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.H2_10.counterexample
 #print axioms Flare.Bugs.H2_10.counterexample_request
 #print axioms Flare.Bugs.H2_10.fixed
+#print axioms Flare.Bugs.H2_10.fixed_shipped
 #print axioms Flare.Bugs.H2_11.counterexample
 #print axioms Flare.Bugs.H2_11.fixed
 #print axioms Flare.Bugs.HPACK_01.counterexample

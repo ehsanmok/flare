@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63150 lines) |
-| Theorems | 3313 |
-| Headline theorems in the axiom audit | 1108 |
+| Lean files | 298 (63221 lines) |
+| Theorems | 3316 |
+| Headline theorems in the axiom audit | 1110 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 111 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 112 of 138 |
 
 Six findings are rated high:
 
@@ -1234,8 +1234,9 @@ File: `H2/Validate.lean`.
 |---|---|---|
 | `loop_iff`, `fold_facts` | The field loop accepts exactly when every field passes its per-field check, and leaves the count and last value of each pseudo-header in the accumulator. | proved |
 | `fixedNameOK_iff` | The fixed per-name check is exactly the §8.2.1 name rule. | proved |
-| `implNameOK_spec` | flare's name check implies the §8.2.1 rule only for ASCII names with no colon after the first byte. Both conditions are needed (H2-10). | proved |
-| `H2_10.counterexample`, `counterexample_request` | `x\xc3\xa9` and `a:b` break §8.2.1 yet pass flare's check, and a request carrying either breaks `SpecRequest`. | counterexample |
+| `implNameOld_spec` | The pre-fix name check implies the §8.2.1 rule only for ASCII names with no colon after the first byte. Both conditions are needed (H2-10). | proved |
+| `validate_names` | The shipped validator (H2-10 fixed) accepts a header list only if every field name meets §8.2.1 (`SpecName`). | proved |
+| `H2_10.counterexample`, `counterexample_request` | `x\xc3\xa9` and `a:b` break §8.2.1 yet pass the pre-fix check (`validateOld`), and a request carrying either breaks `SpecRequest`. | counterexample |
 
 #### Connection state machine and flow control
 
@@ -2816,7 +2817,7 @@ advances the wheel to `now` at the top of every iteration
 | `Hpack.decodeLoopFixed` | fix of hpack.mojo:378-384 | `decode_budget_fixed`, `HPACK_02.fixed` | proved |
 | `Hpack.encodeField` | http2/hpack.mojo:494-512 | `decode_encode` | proved |
 | `HPACK_03.implInit` | http2/server.mojo:200-203 | `HPACK_03.counterexample`, `HPACK_03.fixed` | counterexample |
-| `Validate.validate`, `loop`, `final` | http2/state.mojo:1697-1801 | `loop_iff`, `fold_facts`, `implNameOK_spec`; `H2_10.counterexample`, `H2_10.fixed` | counterexample |
+| `Validate.validate`, `loop`, `final` | http2/state.mojo:1697-1801 | `loop_iff`, `fold_facts`, `implNameOld_spec`, `validate_names`; `H2_10.counterexample`, `H2_10.fixed` | counterexample |
 | `Validate.validValue`, `isConnSpecific`, `isRequestPseudo` | http2/state.mojo:69-84, 718-738 | `loop_iff` | proved |
 | `Conn.handle`, `dispatch` | http2/state.mojo:1005-1547 | `win_reachable`, `stepOK_step`, `frameOK_handle` | proved |
 | `Conn.dataBody`, `dataAccept`, `dataFinish`, `dataCredit` | http2/state.mojo:1340-1512 | `h2_01_fixed`, `h2_09_fixed`; `H2_01.counterexample`, `H2_09.counterexample`, `H2_05.bug_trace` | counterexample |
@@ -3060,7 +3061,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
 | H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
 | H2-09 | Medium | resolved | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
-| H2-10 | Medium | open | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
+| H2-10 | Medium | resolved | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
 | H2-11 | Low | open | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
 | H2-12 | Low | open | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
 | H2-13 | Low | open | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
@@ -4114,10 +4115,12 @@ Status: resolved. Fixed: both reset paths of the DATA branch (stream-window over
 
 #### H2-10: field names with non-ASCII bytes or an inner colon are accepted
 
+Status: resolved. Fixed in `validate_request_fields`: the name loop also rejects octets >= 0x7f and a colon after the first byte (the function is shared with HTTP/3, whose rule is the same, RFC 9114 sec 4.2). Tests: `test_h2_state.mojo::test_field_names_follow_rfc_9113_8_2_1`, `test_validate_request_fields_rejects_bad_name_octets`. Model: pre-fix `validateOld`/`implNameOld`; shipped `validate` uses `fixedNameOK`; `Validate.validate_names`, `Bugs.H2_10.fixed_shipped`; `Fix.h2_10` selects between them in `Conn`.
+
 - **Severity:** Medium. A name like `a:b` reaches the application as a single field name. If the request is re-serialised as HTTP/1.1 (`a:b: v`), a downstream parser reads it as field `a` with value `b: v`, which is a header-injection vector.
 - **RFC:** RFC 9113 §8.2.1: names MUST NOT contain 0x00-0x20, 0x41-0x5a or 0x7f-0xff, and MUST NOT contain a colon except as the pseudo-header prefix. §8.1.1 makes such a request malformed.
 - **What goes wrong:** `validate_request_fields` (`state.mojo:1727-1733`) rejects only uppercase ASCII, bytes ≤ 0x20, and 0x7f.
-- **Counterexample:** `Bugs.H2_10.counterexample`: `x\xc3\xa9` and `a:b` both break `SpecName` while `implNameOK` accepts them. `counterexample_request` shows a request carrying either breaks `SpecRequest`.
+- **Counterexample:** `Bugs.H2_10.counterexample`: `x\xc3\xa9` and `a:b` both break `SpecName` while `implNameOld` (the pre-fix check) accepts them. `counterexample_request` shows a request carrying either breaks `SpecRequest`.
 - **Fix:** also reject bytes ≥ 0x80 and a colon after the first byte. `Bugs.H2_10.fixed` (= `fixedNameOK_iff`) proves the fixed check is *exactly* `SpecName`.
 - **Repro:** `formal/repro/H2-10_field_name_chars.mojo`
 - **Observed:** `BUG REPRODUCED: validate_request_fields accepted name 'x\xc3\xa9': True ; name 'a:b': True (RFC 9113 sec 8.2.1 makes both malformed)`

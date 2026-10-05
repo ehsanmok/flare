@@ -48,7 +48,7 @@ landed in `flare/http2`: it grows by one flag per resolved finding, and
 -/
 namespace Flare.L3.H2.Conn
 open Flare.L3.H2.Names
-open Flare.L3.H2.Validate (Header validate isConnSpecific)
+open Flare.L3.H2.Validate (Header validate validateOld isConnSpecific)
 
 /-! ## Constants (`state.mojo:57-173`, `frame.mojo`) -/
 
@@ -194,6 +194,7 @@ structure Fix where
   h2_07 : Bool := false
   h2_08 : Bool := false
   h2_09 : Bool := false
+  h2_10 : Bool := false
   h2_11 : Bool := false
   h2_12 : Bool := false
   h2_13 : Bool := false
@@ -209,12 +210,13 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-03, H2-05, H2-09. -/
-def Fix.shipped : Fix := { h2_01 := true, h2_03 := true, h2_05 := true, h2_09 := true }
+finding): H2-01, H2-03, H2-05, H2-09, H2-10. -/
+def Fix.shipped : Fix :=
+  { h2_01 := true, h2_03 := true, h2_05 := true, h2_09 := true, h2_10 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
-    h2_06 := true, h2_07 := true, h2_08 := true, h2_09 := true, h2_11 := true, h2_12 := true,
+    h2_06 := true, h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_11 := true, h2_12 := true,
     h2_13 := true, h2_14 := true, h2_15 := true, h2_16 := true, h2_17 := true, h2_18 := true, h2_19 := true, h2_20 := true }
 
 /-- A step's result: `.error` is a Mojo `raise`. -/
@@ -404,6 +406,11 @@ def clientCheck (hs : List Header) (isTr es bodyAllowed : Bool) : CRes :=
 
 /-! ## `_commit_header_block` -/
 
+/-- `validate_request_fields`: the H2-10 fix tightens the field-name
+check (`validate`); without it the pre-fix `validateOld` runs. -/
+def validateFx (fx : Fix) (hs : List Header) (isTr allowExt : Bool) : Bool :=
+  if fx.h2_10 then validate hs isTr allowExt else validateOld hs isTr allowExt
+
 def hlSize (hs : List Header) : Nat := (hs.map (fun h => h.name.length + h.value.length + 32)).sum
 
 /-- The tail of `_commit_header_block` after validation (958-1003). The
@@ -445,7 +452,7 @@ def commit (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) : Conn × List Out :=
       let s := { s0 with headerListBytes := s0.headerListBytes + hlSize hdrs }
       if s.headerListBytes > headerListCap c then rstClose c k eCALM s
       else if !c.isClient then
-        if !validate hdrs isTr c.enableConnect then rstClose c k ePROTOCOL s
+        if !validateFx fx hdrs isTr c.enableConnect then rstClose c k ePROTOCOL s
         else commitTail fx c k s isTr es hdrs
       else
         match clientCheck hdrs isTr es s.bodyAllowed with

@@ -19,7 +19,7 @@ they are computed from those fields here.
 * `SpecName` is the §8.2.1 field-name rule (visible ASCII, no uppercase,
   and no colon except as the leading pseudo-header marker).
   `fixedNameOK_iff`: the fixed per-name check is exactly `SpecName`.
-  `implNameOK_spec`: flare's check implies `SpecName` *provided* the
+  `implNameOld_spec`: the pre-fix check implies `SpecName` *provided* the
   name is ASCII and has no colon after the first byte. Both provisos are
   necessary: `Flare.Bugs.H2_10` exhibits accepted names that break each.
 -/
@@ -38,8 +38,23 @@ def validValue (v : Bytes) : Bool :=
     !(f == 32 || f == 9 || l == 32 || l == 9) && v.all (fun c => !(c == 0 || c == 10 || c == 13))
   | _, _ => true
 
-/-- The per-byte name check (`state.mojo:1727-1733`). -/
-def implNameOK (n : Bytes) : Bool :=
+/-- §8.2.1: a field name is non-empty visible ASCII without uppercase
+letters; a colon may appear only as the first byte (pseudo-header). -/
+def SpecName (n : Bytes) : Prop :=
+  n ≠ [] ∧ (∀ c ∈ n, 0x20 < c ∧ ¬ (0x41 ≤ c ∧ c ≤ 0x5a) ∧ c < 0x7f) ∧ (∀ c ∈ n.tail, c ≠ 0x3a)
+
+/-- The shipped per-name check (H2-10 fixed): the name loop of
+`validate_request_fields` rejects uppercase letters, bytes `≤ 0x20`,
+bytes `≥ 0x7f`, and a colon after the first byte.
+mirrors flare/http2/state.mojo:1815-1831 (fixed, H2-10) -/
+def fixedNameOK (n : Bytes) : Bool :=
+  n != [] && n.all (fun c => decide (0x20 < c ∧ ¬ (0x41 ≤ c ∧ c ≤ 0x5a) ∧ c < 0x7f)) &&
+    n.tail.all (fun c => decide (c ≠ 0x3a))
+
+/-- Pre-fix per-byte name check (flare @59bda50): only uppercase ASCII,
+bytes `≤ 0x20` and `0x7f` are rejected.
+mirrors flare/http2/state.mojo:1727-1733 @59bda50 -/
+def implNameOld (n : Bytes) : Bool :=
   n.all fun c => !(65 ≤ c && c ≤ 90) && !(c ≤ 32 || c == 127)
 
 /-- mirrors flare/http2/state.mojo:718-728 @59bda50 -/
@@ -66,11 +81,16 @@ structure Acc where
   host : Bytes := []
   hasProtocol : Bool := false
 
-/-- The early-return checks of one loop iteration (`state.mojo:1719-1766`). -/
-def fieldOK (isTr : Bool) (a : Acc) (h : Header) : Bool :=
-  h.name != [] && implNameOK h.name && validValue h.value &&
+/-- The early-return checks of one loop iteration, with the name check as
+a parameter. -/
+def fieldOKWith (nameOK : Bytes → Bool) (isTr : Bool) (a : Acc) (h : Header) : Bool :=
+  h.name != [] && nameOK h.name && validValue h.value &&
   (if isPseudo h then !(isTr || a.seenRegular) && isRequestPseudo h.name
    else !isConnSpecific h.name && !(h.name == kTe && h.value != kTrailers))
+
+/-- The early-return checks of one loop iteration (`state.mojo:1796-1850`,
+fixed, H2-10). -/
+def fieldOK (isTr : Bool) (a : Acc) (h : Header) : Bool := fieldOKWith fixedNameOK isTr a h
 
 /-- The state updates of one loop iteration. -/
 def upd (a : Acc) (h : Header) : Acc :=
@@ -83,7 +103,7 @@ def upd (a : Acc) (h : Header) : Acc :=
     else a
   else { a with seenRegular := true, host := if h.name = kHost then h.value else a.host }
 
-/-- mirrors flare/http2/state.mojo:1718-1766 @59bda50 -/
+/-- mirrors flare/http2/state.mojo:1796-1850 (fixed, H2-10) -/
 def loop (isTr : Bool) : List Header → Acc → Option Acc
   | [], a => some a
   | h :: t, a => if fieldOK isTr a h then loop isTr t (upd a h) else none
@@ -103,7 +123,21 @@ def final (isTr allowExt : Bool) (a : Acc) : Bool :=
     then false
   else true
 
-/-- mirrors flare/http2/state.mojo:1697-1801 @59bda50 -/
+/-- Pre-fix loop (name check `implNameOld`).
+mirrors flare/http2/state.mojo:1718-1766 @59bda50 -/
+def loopOld (isTr : Bool) : List Header → Acc → Option Acc
+  | [], a => some a
+  | h :: t, a => if fieldOKWith implNameOld isTr a h then loopOld isTr t (upd a h) else none
+
+/-- Pre-fix `validate_request_fields` (flare @59bda50).
+mirrors flare/http2/state.mojo:1697-1801 @59bda50 -/
+def validateOld (hs : List Header) (isTr allowExt : Bool) : Bool :=
+  match loopOld isTr hs {} with
+  | none => false
+  | some a => final isTr allowExt a
+
+/-- `validate_request_fields` as shipped.
+mirrors flare/http2/state.mojo:1784-1881 (fixed, H2-10) -/
 def validate (hs : List Header) (isTr allowExt : Bool) : Bool :=
   match loop isTr hs {} with
   | none => false
@@ -254,16 +288,6 @@ theorem fold_facts (hs : List Header) (a : Acc) :
 
 /-! ## Field names (§8.2.1, H2-10) -/
 
-/-- §8.2.1: a field name is non-empty visible ASCII without uppercase
-letters; a colon may appear only as the first byte (pseudo-header). -/
-def SpecName (n : Bytes) : Prop :=
-  n ≠ [] ∧ (∀ c ∈ n, 0x20 < c ∧ ¬ (0x41 ≤ c ∧ c ≤ 0x5a) ∧ c < 0x7f) ∧ (∀ c ∈ n.tail, c ≠ 0x3a)
-
-/-- The H2-10 fix: also reject bytes ≥ 0x7f and a colon after the first byte. -/
-def fixedNameOK (n : Bytes) : Bool :=
-  n != [] && n.all (fun c => decide (0x20 < c ∧ ¬ (0x41 ≤ c ∧ c ≤ 0x5a) ∧ c < 0x7f)) &&
-    n.tail.all (fun c => decide (c ≠ 0x3a))
-
 theorem fixedNameOK_iff (n : Bytes) : fixedNameOK n = true ↔ SpecName n := by
   simp only [fixedNameOK, SpecName, List.all_eq_true, decide_eq_true_eq, Bool.and_eq_true,
     bne_iff_ne, ne_eq, and_assoc]
@@ -282,10 +306,34 @@ theorem implByte_spec (c : UInt8) (h1 : (!(65 ≤ c && c ≤ 90) && !(c ≤ 32 |
     decide_eq_false_iff_not] at h1
   omega
 
-theorem implNameOK_spec (n : Bytes) (hne : n ≠ []) (hi : implNameOK n = true)
+theorem implNameOld_spec (n : Bytes) (hne : n ≠ []) (hi : implNameOld n = true)
     (ha : ∀ c ∈ n, c < 0x80) (hc : ∀ c ∈ n.tail, c ≠ 0x3a) : SpecName n := by
   refine ⟨hne, fun c hm => ?_, hc⟩
-  simp only [implNameOK, List.all_eq_true] at hi
+  simp only [implNameOld, List.all_eq_true] at hi
   exact implByte_spec c (hi c hm) (ha c hm)
+
+/-- The shipped validator meets §8.2.1 for names: every field of an
+accepted header list has a `SpecName` name. -/
+theorem loop_names (isTr : Bool) (hs : List Header) (a a' : Acc) (h : loop isTr hs a = some a') :
+    ∀ x ∈ hs, SpecName x.name := by
+  induction hs generalizing a with
+  | nil => intro x hx; cases hx
+  | cons y t ih =>
+    intro x hx
+    simp only [loop] at h
+    split at h
+    · rename_i hok
+      rcases List.mem_cons.mp hx with rfl | hx
+      · simp only [fieldOK, fieldOKWith, Bool.and_eq_true] at hok
+        exact (fixedNameOK_iff _).mp hok.1.1.2
+      · exact ih _ h x hx
+    · cases h
+
+theorem validate_names (hs : List Header) (isTr allowExt : Bool) (h : validate hs isTr allowExt = true) :
+    ∀ x ∈ hs, SpecName x.name := by
+  unfold validate at h
+  split at h
+  · cases h
+  · rename_i a ha; exact loop_names isTr hs {} a ha
 
 end Flare.L3.H2.Validate
