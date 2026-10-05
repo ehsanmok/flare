@@ -327,7 +327,7 @@ other line. The spec is RFC 3986 §3.2:
 | `Flare.L4.Url.parse_port` | every successful parse has `1 <= port <= 65535` | proved |
 | `Flare.L4.Url.hostPort_ipv6_port`, `hostPort_regname` | IPv6 brackets are stripped; a plain `host:port` is recovered exactly | proved |
 | `Flare.L4.Url.parseFixed_spec` | the fixed parser meets both host specs for all inputs | proved |
-| `Flare.L4.Url.parse_eq_parseFixed_of_clean` | the shipped parser equals the fixed one on inputs with no `?`, no `#` and at most one `@` | proved |
+| `Flare.L4.Url.parseOld_eq_parseFixed_of_clean` | the pre-fix parser (`parseOld`) equals the fully fixed one on inputs with no `?`, no `#` and at most one `@` | proved |
 | `Flare.Bugs.APP_23.host_confusion`, `APP_25.host_has_at` | host-confusion witnesses | counterexample |
 
 ### 11. Reliability: RateLimit, CircuitBreaker, Retry
@@ -837,8 +837,9 @@ takes the fragment at the last `#`.
 - `http://evil.com?@good.com/` gives host `good.com`.
 - `http://good.com?x=/y` gives host `good.com?x=`.
 
-**Lean.** `Flare.Bugs.APP_23.host_confusion`. The fix is proved sufficient
-by `implFixed_meets_spec` and `Flare.L4.Url.parseWith_fixedSplit_hostInAuthority`.
+**Lean.** `Flare.Bugs.APP_23.host_confusion` (about the pre-fix `parseOld`).
+The shipped `parse` is proved to meet the spec by `implFixed_meets_spec` and
+`Flare.L4.Url.parseWith_fixedSplit_hostInAuthority`.
 
 **Fix.** Find the first `#`, and end the authority at the first `/` or `?`.
 
@@ -846,6 +847,8 @@ by `implFixed_meets_spec` and `Flare.L4.Url.parseWith_fixedSplit_hostInAuthority
 
 - Observed: `BUG REPRODUCED: Url.parse('http://evil.com?@good.com/').host = 'good.com' (query ''), Url.parse('http://good.com?x=/y').host = 'good.com?x='; RFC 3986 hosts are 'evil.com' and 'good.com'`
 - Flip: `OK: authority ends at '?': hosts evil.com and good.com query @good.com/`
+
+Status: resolved. Url.parse takes the fragment at the first `#` and ends the authority at the first `/` or `?` (an authority ending at `?` gets path `/`). Tests: `tests/http/test_http.mojo::test_url_authority_ends_at_query`, `::test_url_fragment_starts_at_first_hash`. The model `parse` mirrors the fix; `parseOld` is the pre-fix pipeline.
 
 ### APP-24: `urldecode` returns a `String` holding ill-formed UTF-8
 

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-23 fixed on fix/formal-findings
 """APP-23: Url.parse does not end the authority at '?' (host confusion).
 
 Lean: Flare.Bugs.APP_23.host_confusion (counterexample) and
@@ -11,7 +12,7 @@ authority is "evil.com" and whose query is "@good.com/".
 
 Expected (RFC 3986 sec 3.2, WHATWG URL, curl): host "evil.com",
 path "/", query "@good.com/".
-Actual: the authority is cut only at the first '/', so it becomes
+Before the fix: the authority is cut only at the first '/', so it becomes
 "evil.com?@good.com"; the userinfo strip then drops "evil.com?@" and
 the host is "good.com" (query ""). A validator that checks Url.parse(u).host
 against an allowlist approves a URL that browsers and curl send to

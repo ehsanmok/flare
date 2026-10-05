@@ -256,6 +256,37 @@ def test_url_query_string() raises:
     assert_equal(u.request_target(), "/search?q=hello&lang=en")
 
 
+def test_url_authority_ends_at_query() raises:
+    """APP-23: the authority ends at the first '?' (RFC 3986 §3.2), so a
+    '@' in the query is not userinfo and the host cannot be confused."""
+    var u = Url.parse("http://evil.com?@good.com/")
+    assert_equal(u.host, "evil.com")
+    assert_equal(u.path, "/")
+    assert_equal(u.query, "@good.com/")
+    assert_equal(u.request_target(), "/?@good.com/")
+    var v = Url.parse("http://good.com?x=/y")
+    assert_equal(v.host, "good.com")
+    assert_equal(v.path, "/")
+    assert_equal(v.query, "x=/y")
+    var w = Url.parse("http://good.com:8080?x=1#frag")
+    assert_equal(w.host, "good.com")
+    assert_equal(Int(w.port), 8080)
+    assert_equal(w.query, "x=1")
+    assert_equal(w.fragment, "frag")
+
+
+def test_url_fragment_starts_at_first_hash() raises:
+    """APP-23: the fragment starts at the first '#', so a later '#'
+    cannot smuggle an '@' into the authority."""
+    var u = Url.parse("http://evil.com#@good.com#x")
+    assert_equal(u.host, "evil.com")
+    assert_equal(u.fragment, "@good.com#x")
+    var v = Url.parse("http://h.example/p?q=1#a#b")
+    assert_equal(v.path, "/p")
+    assert_equal(v.query, "q=1")
+    assert_equal(v.fragment, "a#b")
+
+
 def test_url_empty_path() raises:
     """Url.parse() with no path component must use '/'."""
     var u = Url.parse("http://example.com")

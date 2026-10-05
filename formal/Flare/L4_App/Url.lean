@@ -11,8 +11,10 @@ Byte-level model of flare's HTTP URL parser. Mojo `String`s are modelled as
 Pipeline (mirrors the Mojo control flow, step numbers as in the source):
 
 1. scheme = bytes before the first `"://"`, must be `http` or `https`;
-2. fragment = bytes after the **last** `#` (`_rfind`);
-3. authority = bytes before the first `/`; the rest is path-and-query;
+2. fragment = bytes after the **first** `#` (`_find`; the pre-fix code used the
+   last `#`, `splitFragmentOld`);
+3. authority = bytes before the first `/` or `?`; the rest is path-and-query
+   (pre-fix: only `/`, `splitAuthorityOld`);
 4. query = bytes after the first `?` of path-and-query;
 5. userinfo stripped through the **first** `@`; then IPv6 `[..]` or
    `host[:port]` with the port after the **last** `:`.
@@ -30,7 +32,9 @@ Spec side (RFC 3986 §3, §3.2, §3.2.2, §3.2.3), written independently:
 
 The `parseWith` combinator is parameterised by the three splitting steps so
 that the buggy pipeline (`parse`) and the fixed ones (`Flare.Bugs.APP_23`,
-`Flare.Bugs.APP_25`, `parseFixed`) share every other line.
+`Flare.Bugs.APP_25`, `parseFixed`) share every other line. After the APP-23
+fix `parse` uses the first-`#` fragment split and the `/`-or-`?` authority
+split; `parseOld` is the pre-fix pipeline.
 -/
 namespace Flare.L4.Url
 open Flare
@@ -155,12 +159,14 @@ def hostPort (scheme authority : Bytes) : Except String (Bytes × Nat) :=
 def stripUserinfo (a : Bytes) : Bytes :=
   match idxOf cAt a with | some i => a.drop (i + 1) | none => a
 
-/-- flare/http/url.mojo:101-108 @59bda50: fragment after the **last** `#`. -/
-def splitFragment (s : Bytes) : Bytes × Bytes :=
+/-- flare/http/url.mojo:101-108 @59bda50 (pre-fix, APP-23): fragment after the
+**last** `#`. -/
+def splitFragmentOld (s : Bytes) : Bytes × Bytes :=
   match rfindB cHash s with | some p => (s.take p, s.drop (p + 1)) | none => (s, [])
 
-/-- flare/http/url.mojo:110-123 @59bda50: authority ends at the first `/`. -/
-def splitAuthority (s : Bytes) : Bytes × Bytes :=
+/-- flare/http/url.mojo:110-123 @59bda50 (pre-fix, APP-23): authority ends at
+the first `/`. -/
+def splitAuthorityOld (s : Bytes) : Bytes × Bytes :=
   match idxOf cSlash s with | none => (s, [cSlash]) | some p => (s.take p, s.drop p)
 
 /-- flare/http/url.mojo:125-140 @59bda50 -/
@@ -194,26 +200,34 @@ def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw 
     if scheme ≠ httpB ∧ scheme ≠ httpsB then .error "unsupported scheme"
     else parseRestWith sf sa strip scheme (raw.drop (se + 3))
 
-/-- mirrors flare/http/url.mojo:73-197 @59bda50: `Url.parse` as shipped. -/
-def parse : Bytes → Except String Url := parseWith splitFragment splitAuthority stripUserinfo
-
-/-! ## Fixed splitting steps -/
-
-/-- Fragment starts at the **first** `#` (RFC 3986 §3.5, WHATWG). -/
-def splitFragmentFixed (s : Bytes) : Bytes × Bytes :=
+/-- Fragment starts at the **first** `#` (RFC 3986 §3.5, WHATWG).
+mirrors flare/http/url.mojo:101-109 (fixed, APP-23) -/
+def splitFragment (s : Bytes) : Bytes × Bytes :=
   match idxOf cHash s with | some p => (s.take p, s.drop (p + 1)) | none => (s, [])
 
-/-- Authority ends at the first `/` **or `?`** (RFC 3986 §3.2). -/
-def splitAuthorityFixed (s : Bytes) : Bytes × Bytes :=
+/-- Authority ends at the first `/` **or `?`** (RFC 3986 §3.2).
+mirrors flare/http/url.mojo:111-135 (fixed, APP-23) -/
+def splitAuthority (s : Bytes) : Bytes × Bytes :=
   match idxWhere (fun c => c == cSlash || c == cQ) s with
   | none => (s, [cSlash]) | some p => (s.take p, s.drop p)
+
+/-- mirrors flare/http/url.mojo:73-205 (fixed, APP-23): `Url.parse` as shipped
+(the userinfo strip is still the pre-fix one until APP-25). -/
+def parse : Bytes → Except String Url := parseWith splitFragment splitAuthority stripUserinfo
+
+/-- mirrors flare/http/url.mojo:73-197 @59bda50: `Url.parse` before the
+APP-23 fix (fragment at the last `#`, authority ends only at `/`). -/
+def parseOld : Bytes → Except String Url :=
+  parseWith splitFragmentOld splitAuthorityOld stripUserinfo
+
+/-! ## Fixed userinfo strip (APP-25, pending) -/
 
 /-- Userinfo stripped through the **last** `@` (WHATWG, curl). -/
 def stripUserinfoFixed (a : Bytes) : Bytes :=
   match rfindB cAt a with | some i => a.drop (i + 1) | none => a
 
 def parseFixed : Bytes → Except String Url :=
-  parseWith splitFragmentFixed splitAuthorityFixed stripUserinfoFixed
+  parseWith splitFragment splitAuthority stripUserinfoFixed
 
 /-! ## Spec (RFC 3986 §3.2) -/
 
@@ -512,11 +526,11 @@ theorem takeWhile_takeWhile (p q : UInt8 → Bool) (s : Bytes) :
     by_cases hq : q c <;> by_cases hp : p c <;> simp [hq, hp, ih]
 
 theorem fixed_authority_eq_spec (s : Bytes) :
-    (splitAuthorityFixed (splitFragmentFixed s).1).1 = specAuthority s := by
-  have h1 : (splitFragmentFixed s).1 = cutAt (idxOf cHash s) s := by
-    unfold splitFragmentFixed cutAt; split <;> simp_all
-  have h2 : ∀ t, (splitAuthorityFixed t).1 = cutAt (idxWhere (fun c => c == cSlash || c == cQ) t) t := by
-    intro t; unfold splitAuthorityFixed cutAt; split <;> simp_all
+    (splitAuthority (splitFragment s).1).1 = specAuthority s := by
+  have h1 : (splitFragment s).1 = cutAt (idxOf cHash s) s := by
+    unfold splitFragment cutAt; split <;> simp_all
+  have h2 : ∀ t, (splitAuthority t).1 = cutAt (idxWhere (fun c => c == cSlash || c == cQ) t) t := by
+    intro t; unfold splitAuthority cutAt; split <;> simp_all
   rw [h2, h1, cutAt_idxWhere, cutAt_idxWhere, takeWhile_takeWhile]
   unfold specAuthority isAuthEnd
   congr 1; funext c; cases c == cSlash <;> cases c == cQ <;> cases c == cHash <;> rfl
@@ -581,7 +595,7 @@ host that is a contiguous piece of the RFC 3986 authority, for any userinfo
 strip that returns a piece of its input. -/
 theorem parseWith_fixedSplit_hostInAuthority (strip : Bytes → Bytes)
     (hs : ∀ a, strip a <:+: a) (raw : Bytes) (u : Url)
-    (e : parseWith splitFragmentFixed splitAuthorityFixed strip raw = .ok u) :
+    (e : parseWith splitFragment splitAuthority strip raw = .ok u) :
     HostInAuthority raw u := by
   obtain ⟨rest, hr, e2⟩ := parseWith_split e
   intro rest' hr'
@@ -598,7 +612,7 @@ theorem parseFixed_spec (raw : Bytes) (u : Url) (e : parseFixed raw = .ok u) :
   ⟨parseWith_fixedSplit_hostInAuthority _ stripUserinfoFixed_infix raw u e,
    parseWith_fixedStrip_noAt _ _ raw u e⟩
 
-/-! ## The shipped parser agrees with the fixed one on clean inputs -/
+/-! ## The pre-fix parser agrees with the fixed one on clean inputs -/
 
 theorem idxWhere_congr (p q : UInt8 → Bool) (s : Bytes) (h : ∀ c ∈ s, p c = q c) :
     idxWhere p s = idxWhere q s := by
@@ -635,27 +649,27 @@ theorem idxOf_eq_rfindB_of_count (b : UInt8) (a : Bytes) (h : a.count b ≤ 1) :
       cases rfindB b cs <;> simp [hc]
 
 /-- **Refinement on clean inputs.** If the text after `"://"` has no `?` and
-no `#`, and its RFC authority has at most one `@`, the shipped `Url.parse`
+no `#`, and its RFC authority has at most one `@`, the pre-fix `Url.parse`
 gives exactly the fixed (spec-meeting) result. So the APP-23 / APP-25
 discrepancies need a `?`, a `#`, or two `@`s. -/
-theorem parse_eq_parseFixed_of_clean (scheme rest : Bytes)
+theorem parseOld_eq_parseFixed_of_clean (scheme rest : Bytes)
     (hq : ∀ c ∈ rest, c ≠ cQ ∧ c ≠ cHash) (ha : (specAuthority rest).count cAt ≤ 1) :
-    parseRestWith splitFragment splitAuthority stripUserinfo scheme rest =
-      parseRestWith splitFragmentFixed splitAuthorityFixed stripUserinfoFixed scheme rest := by
+    parseRestWith splitFragmentOld splitAuthorityOld stripUserinfo scheme rest =
+      parseRestWith splitFragment splitAuthority stripUserinfoFixed scheme rest := by
   have hnh : cHash ∉ rest := fun hm => (hq _ hm).2 rfl
-  have f1 : splitFragment rest = splitFragmentFixed rest := by
-    unfold splitFragment splitFragmentFixed
+  have f1 : splitFragmentOld rest = splitFragment rest := by
+    unfold splitFragmentOld splitFragment
     rw [(rfindB_none_iff _ _).2 hnh, idxOf_eq, idxWhere_none]
     intro c hc; simpa using (hq c hc).2
-  have f2 : splitAuthority rest = splitAuthorityFixed rest := by
-    unfold splitAuthority splitAuthorityFixed
+  have f2 : splitAuthorityOld rest = splitAuthority rest := by
+    unfold splitAuthorityOld splitAuthority
     rw [idxOf_eq, idxWhere_congr (· == cSlash) (fun c => c == cSlash || c == cQ) rest]
     intro c hc; simp [(hq c hc).1]
-  have f1' : (splitFragmentFixed rest).1 = rest := by
-    unfold splitFragmentFixed; rw [idxOf_eq, idxWhere_none]; intro c hc; simpa using (hq c hc).2
-  have hauth : (splitAuthorityFixed rest).1 = specAuthority rest := by
+  have f1' : (splitFragment rest).1 = rest := by
+    unfold splitFragment; rw [idxOf_eq, idxWhere_none]; intro c hc; simpa using (hq c hc).2
+  have hauth : (splitAuthority rest).1 = specAuthority rest := by
     have := fixed_authority_eq_spec rest; rwa [f1'] at this
-  have f3 : stripUserinfo (splitAuthorityFixed rest).1 = stripUserinfoFixed (splitAuthorityFixed rest).1 := by
+  have f3 : stripUserinfo (splitAuthority rest).1 = stripUserinfoFixed (splitAuthority rest).1 := by
     unfold stripUserinfo stripUserinfoFixed
     rw [idxOf_eq_rfindB_of_count _ _ (by rw [hauth]; exact ha)]
   unfold parseRestWith

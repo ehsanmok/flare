@@ -1729,6 +1729,12 @@ from test_http import (
     test_url_explicit_port as test_http__test_url_explicit_port,
 )
 from test_http import test_url_query_string as test_http__test_url_query_string
+from test_http import (
+    test_url_authority_ends_at_query as test_http__test_url_authority_ends_at_query,
+)
+from test_http import (
+    test_url_fragment_starts_at_first_hash as test_http__test_url_fragment_starts_at_first_hash,
+)
 from test_http import test_url_empty_path as test_http__test_url_empty_path
 from test_http import (
     test_url_fragment_stripped as test_http__test_url_fragment_stripped,
@@ -5062,6 +5068,8 @@ def main() raises:
     suite.test[test_http__test_url_https_defaults]()
     suite.test[test_http__test_url_explicit_port]()
     suite.test[test_http__test_url_query_string]()
+    suite.test[test_http__test_url_authority_ends_at_query]()
+    suite.test[test_http__test_url_fragment_starts_at_first_hash]()
     suite.test[test_http__test_url_empty_path]()
     suite.test[test_http__test_url_fragment_stripped]()
     suite.test[test_http__test_url_no_scheme_raises]()

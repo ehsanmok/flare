@@ -7,6 +7,11 @@ Handles the subset of RFC 3986 URIs relevant to HTTP clients:
 Only ``http`` and ``https`` schemes are supported. Fragment is parsed
 but ignored for request purposes (not sent to server per RFC 7230 §5.1).
 
+Component boundaries follow RFC 3986 §3: the fragment starts at the
+first ``#``, and the authority ends at the first ``/``, ``?`` or ``#``,
+so ``http://evil.com?@good.com/`` has host ``evil.com`` and query
+``@good.com/`` (an ``@`` in the query is never userinfo).
+
 Example:
     ```mojo
     var u = Url.parse("https://api.example.com:8443/v1/items?filter=active")
@@ -99,8 +104,9 @@ struct Url(Movable):
         )  # skip "://"
 
         # ── 2. Strip fragment ─────────────────────────────────────────────────
+        # The fragment starts at the FIRST '#' (RFC 3986 §3.5).
         var fragment = String("")
-        var frag_pos = _rfind(s, "#")
+        var frag_pos = _find(s, "#")
         if frag_pos >= 0:
             fragment = String(
                 String(unsafe_from_utf8=s.as_bytes()[frag_pos + 1 :])
@@ -108,7 +114,15 @@ struct Url(Movable):
             s = String(String(unsafe_from_utf8=s.as_bytes()[:frag_pos]))
 
         # ── 3. Authority and path split ────────────────────────────────────────
-        var path_start = _find(s, "/")
+        # The authority ends at the first '/' or '?' (RFC 3986 §3.2; '#'
+        # was already cut above). ``http://evil.com?@good.com/`` has
+        # authority ``evil.com`` and query ``@good.com/``.
+        var path_start = -1
+        var sb = s.as_bytes()
+        for i in range(len(sb)):
+            if sb[i] == 47 or sb[i] == 63:  # '/' or '?'
+                path_start = i
+                break
         var authority: String
         var path_and_query: String
         if path_start < 0:
@@ -121,6 +135,8 @@ struct Url(Movable):
             path_and_query = String(
                 String(unsafe_from_utf8=s.as_bytes()[path_start:])
             )
+            if sb[path_start] == 63:  # '?': empty path, keep the query
+                path_and_query = "/" + path_and_query
 
         # ── 4. Query split ────────────────────────────────────────────────────
         var query = String("")

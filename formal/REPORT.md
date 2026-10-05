@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61040 lines) |
+| Lean files | 298 (61058 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 23 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 24 of 138 |
 
 Six findings are rated high:
 
@@ -1984,7 +1984,7 @@ other line. The spec is RFC 3986 §3.2:
 | `Flare.L4.Url.parse_port` | every successful parse has `1 <= port <= 65535` | proved |
 | `Flare.L4.Url.hostPort_ipv6_port`, `hostPort_regname` | IPv6 brackets are stripped; a plain `host:port` is recovered exactly | proved |
 | `Flare.L4.Url.parseFixed_spec` | the fixed parser meets both host specs for all inputs | proved |
-| `Flare.L4.Url.parse_eq_parseFixed_of_clean` | the shipped parser equals the fixed one on inputs with no `?`, no `#` and at most one `@` | proved |
+| `Flare.L4.Url.parseOld_eq_parseFixed_of_clean` | the pre-fix parser (`parseOld`) equals the fully fixed one on inputs with no `?`, no `#` and at most one `@` | proved |
 | `Flare.Bugs.APP_23.host_confusion`, `APP_25.host_has_at` | host-confusion witnesses | counterexample |
 
 #### 11. Reliability: RateLimit, CircuitBreaker, Retry
@@ -3085,7 +3085,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-20 | Low | open | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
 | APP-21 | Low | open | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
 | APP-22 | Low | open | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
-| APP-23 | Medium | open | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
+| APP-23 | Medium | resolved | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
 | APP-24 | Medium | open | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
 | APP-25 | Low | open | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
 | APP-26 | Medium | open | Compress re-encodes a 206 Partial Content body and keeps its `Content-Range` | `Flare/Bugs/APP_26.lean` | `repro/APP-26_compress_encodes_partial_content.mojo` (any) |
@@ -4839,8 +4839,9 @@ takes the fragment at the last `#`.
 - `http://evil.com?@good.com/` gives host `good.com`.
 - `http://good.com?x=/y` gives host `good.com?x=`.
 
-**Lean.** `Flare.Bugs.APP_23.host_confusion`. The fix is proved sufficient
-by `implFixed_meets_spec` and `Flare.L4.Url.parseWith_fixedSplit_hostInAuthority`.
+**Lean.** `Flare.Bugs.APP_23.host_confusion` (about the pre-fix `parseOld`).
+The shipped `parse` is proved to meet the spec by `implFixed_meets_spec` and
+`Flare.L4.Url.parseWith_fixedSplit_hostInAuthority`.
 
 **Fix.** Find the first `#`, and end the authority at the first `/` or `?`.
 
@@ -4848,6 +4849,8 @@ by `implFixed_meets_spec` and `Flare.L4.Url.parseWith_fixedSplit_hostInAuthority
 
 - Observed: `BUG REPRODUCED: Url.parse('http://evil.com?@good.com/').host = 'good.com' (query ''), Url.parse('http://good.com?x=/y').host = 'good.com?x='; RFC 3986 hosts are 'evil.com' and 'good.com'`
 - Flip: `OK: authority ends at '?': hosts evil.com and good.com query @good.com/`
+
+Status: resolved. Url.parse takes the fragment at the first `#` and ends the authority at the first `/` or `?` (an authority ending at `?` gets path `/`). Tests: `tests/http/test_http.mojo::test_url_authority_ends_at_query`, `::test_url_fragment_starts_at_first_hash`. The model `parse` mirrors the fix; `parseOld` is the pre-fix pipeline.
 
 #### APP-24: `urldecode` returns a `String` holding ill-formed UTF-8
 
