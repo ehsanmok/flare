@@ -23,7 +23,7 @@ lowercased Connection tokens with "upgrade", and require the key to
 decode (flare.crypto.base64) to exactly 16 bytes; return False otherwise.
 """
 
-from flare.http import HttpServer, Request, Response, ok
+from flare.http import HttpServer, Request, Response, WsUpgrade, ok
 from flare.net import SocketAddr
 from flare.tcp import TcpStream
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
@@ -74,7 +74,8 @@ def main() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_ws_upgrade(_http_handler, _ws_handler)
+            srv.config.ws = WsUpgrade(_ws_handler, False)
+            srv.serve(_http_handler)
         except:
             pass
         exit()
@@ -84,15 +85,19 @@ def main() raises:
     try:
         good = _status_line(
             port,
-            "GET /ws HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\nConnection:"
-            " Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-            "Sec-WebSocket-Version: 13\r\n\r\n",
+            (
+                "GET /ws HTTP/1.1\r\nHost: a\r\nUpgrade:"
+                " websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key:"
+                " dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            ),
         )
         bad = _status_line(
             port,
-            "GET /ws HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\nConnection:"
-            " noupgrade\r\nSec-WebSocket-Key: x\r\n"
-            "Sec-WebSocket-Version: 13\r\n\r\n",
+            (
+                "GET /ws HTTP/1.1\r\nHost: a\r\nUpgrade:"
+                " websocket\r\nConnection: noupgrade\r\nSec-WebSocket-Key:"
+                " x\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            ),
         )
     except e:
         _ = kill(pid, SIGKILL)
@@ -109,7 +114,9 @@ def main() raises:
     if bad.startswith("HTTP/1.1 101"):
         print(
             "BUG REPRODUCED: reactor upgraded a request with Connection:"
-            " noupgrade and Sec-WebSocket-Key: x (" + bad + ")"
+            " noupgrade and Sec-WebSocket-Key: x ("
+            + bad
+            + ")"
         )
         raise Error("WS-07")
     print("OK: invalid handshake not upgraded (" + bad + ")")

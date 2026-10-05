@@ -485,12 +485,12 @@ Status: resolved. `WsConnection` keeps a `_close_sent` flag. `recv` answers a re
 
 Status: resolved. `_handle_ws_upgrade` qualifies a request with `_ws_handshake_problem`, the rule the standalone server applies (WS-05): `Connection` and `Upgrade` as tokens, exactly one key that is base64 of 16 bytes, exactly one version 13. A request that fails it is served as ordinary HTTP. The counterexample is about `reactorOld`; `reactor` is the shipped decision (`reactor_ok`). Test: `test_shared_listener_checks_the_whole_handshake`.
 
-- **Severity:** Low. On the shared-listener path (`serve_ws_upgrade`, `ServerConfig.ws`), `Connection: noupgrade` (or any value containing `upgrade`) and a key such as `x` get 101. The version is enforced, because the 426 check runs first (`reactorOld_upgrade_v13`).
+- **Severity:** Low. On the shared-listener path (`ServerConfig.ws`, once spelled `serve_ws_upgrade`), `Connection: noupgrade` (or any value containing `upgrade`) and a key such as `x` get 101. The version is enforced, because the 426 check runs first (`reactorOld_upgrade_v13`).
 - **RFC:** RFC 6455 §4.2.1 points 4-5: a `Connection` token `upgrade`, and a key that is base64 of 16 bytes.
 - **What goes wrong:** `_handle_ws_upgrade` (`conn_handle.mojo:1512-1523`) uses `"upgrade" in lower(connection)` and `key.byte_length() > 0`.
 - **Counterexample:** `Bugs.WS_07.counterexample`: GET, HTTP/1.1, `Upgrade: websocket`, `Connection: noupgrade`, `Sec-WebSocket-Key: x`, version 13 gives `reactorOld = upgrade "x"` and violates `ServerOK` (`no_conn_token`).
 - **Fix:** test Connection tokens and decode the key, as in `qual`. `Bugs.WS_07.fixed_ok` (= `reactor_ok`).
-- **Repro:** `formal/repro/WS-07_reactor_ws_key_and_connection_token.mojo` (forked `HttpServer.serve_ws_upgrade`; control: the valid handshake gets 101)
+- **Repro:** `formal/repro/WS-07_reactor_ws_key_and_connection_token.mojo` (forked `HttpServer.serve` with `ServerConfig.ws` set; control: the valid handshake gets 101)
 - **Observed (3 runs):** `BUG REPRODUCED: reactor upgraded a request with Connection: noupgrade and Sec-WebSocket-Key: x (HTTP/1.1 101 Switching Protocols)`
 - **Flip:** with token matching and the base64 key-length check added to `flare/http/_reactor/conn_handle.mojo`: `OK: invalid handshake not upgraded (HTTP/1.1 200 OK)`; the file was restored.
 
