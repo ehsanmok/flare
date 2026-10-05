@@ -25,6 +25,9 @@ from test_frame_mux import (
     test_demux_oversize_length_raises as test_frame_mux__test_demux_oversize_length_raises,
 )
 from test_frame_mux import (
+    test_demux_error_does_not_redeliver_routed_frames as test_frame_mux__test_demux_error_does_not_redeliver_routed_frames,
+)
+from test_frame_mux import (
     test_demux_thousand_streams_isolated as test_frame_mux__test_demux_thousand_streams_isolated,
 )
 from test_uds_listener import (
@@ -73,6 +76,9 @@ def main() raises:
     suite.test[test_frame_mux__test_demux_multiple_frames_one_feed]()
     suite.test[test_frame_mux__test_demux_split_across_feeds]()
     suite.test[test_frame_mux__test_demux_oversize_length_raises]()
+    suite.test[
+        test_frame_mux__test_demux_error_does_not_redeliver_routed_frames
+    ]()
     suite.test[test_frame_mux__test_demux_thousand_streams_isolated]()
     # tests/uds/test_uds_listener.mojo
     suite.test[test_uds_listener__test_af_unix_constant]()

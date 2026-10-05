@@ -178,7 +178,10 @@ struct FrameDemux(Movable):
 
         Raises only on a protocol error (a payload length above
         ``MAX_FRAME_PAYLOAD``); a merely incomplete trailing frame is
-        retained for the next ``feed``.
+        retained for the next ``feed``. Frames routed before the bad header
+        stay routed exactly once (they are consumed from the buffer before
+        the raise); the connection is unusable afterwards, since every
+        later ``feed`` raises on the same header.
         """
         for i in range(len(data)):
             self.buf.append(data[i])
@@ -190,6 +193,12 @@ struct FrameDemux(Movable):
                 break
             var plen = self._peek_len(consumed)
             if plen > MAX_FRAME_PAYLOAD:
+                # Drop the frames already routed before raising: left in
+                # ``buf`` they would be decoded and routed a second time by
+                # the next ``feed``. The bad header stays at the front, so
+                # every later ``feed`` raises again without routing anything.
+                if consumed > 0:
+                    self._compact(consumed)
                 raise Error(
                     "FrameDemux: frame payload exceeds MAX_FRAME_PAYLOAD"
                 )

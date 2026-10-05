@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60846 lines) |
+| Lean files | 298 (60855 lines) |
 | Theorems | 3212 |
 | Headline theorems in the axiom audit | 1020 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 6 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 7 of 138 |
 
 Six findings are rated high:
 
@@ -770,7 +770,7 @@ runtime/handoff.mojo:150-195 (`_HandoffQueue`) and 312-365
 
 #### UDS frame multiplexer (`FrameMux.lean`)
 
-uds/frame_mux.mojo:97-280: the frame codec, `FrameDemux.feed` reassembly,
+uds/frame_mux.mojo:97-290: the frame codec, `FrameDemux.feed` reassembly,
 routing to per-stream inboxes, id allocation.
 
 | Lean name | Statement | Status |
@@ -780,8 +780,8 @@ routing to per-stream inboxes, id allocation.
 | `feed_chunking` | `feed` is chunking independent. | proved |
 | `routeAll_eq`, `poll_fifo` | Each stream gets exactly its frames, in arrival order. | proved |
 | `nextId_injective`, `nextId_wraps` | Ids are unique for the first 2^64 - 1 allocations; the next one wraps to 0. | proved |
-| `feedM_error_keeps_routed` | After a protocol error the already routed bytes stay buffered. | proved (NET-04 mechanism) |
-| `feedMFixed_error_stuck` | With the fix, every feed after a protocol error raises and routes nothing. | proved |
+| `feedMOld_error_keeps_routed` | Pre-fix: after a protocol error the already routed bytes stayed buffered. | proved (NET-04 mechanism) |
+| `feedM_error_stuck` | Shipped (fixed, NET-04): every feed after a protocol error raises and routes nothing. | proved |
 
 #### UDP recvfrom address decoding (`Udp.lean`)
 
@@ -2716,9 +2716,9 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.Handoff.peekWith` | flare/runtime/handoff.mojo:312-334 | `RT_04.peek_returns_full_peer`, `peekFixed_below_capacity` | counterexample (RT-04) |
 | `Flare.L2.Handoff.chooseTarget` | flare/runtime/handoff.mojo:336-365 | `chooseTarget_spec` | proved |
 | `Flare.L2.FrameMux.encodeFrame`, `decodeFrame` | flare/uds/frame_mux.mojo:97-130 | `decode_encode` | proved |
-| `Flare.L2.FrameMux.feedLoop`, `feed`, `route`, `poll` | flare/uds/frame_mux.mojo:165-234 | `feed_chunking`, `drain_sound`, `drain_complete`, `routeAll_eq` | proved |
-| `Flare.L2.FrameMux.feedM`, `feedLoopM` | flare/uds/frame_mux.mojo:176-207 | `NET_04.feed_after_error_duplicates`, `feedMFixed_error_stuck` | counterexample (NET-04) |
-| `Flare.L2.FrameMux.nextId` | flare/uds/frame_mux.mojo:274-280 | `nextId_injective`, `nextId_wraps` | proved |
+| `Flare.L2.FrameMux.feedLoop`, `feed`, `route`, `poll` | flare/uds/frame_mux.mojo:165-243 | `feed_chunking`, `drain_sound`, `drain_complete`, `routeAll_eq` | proved |
+| `Flare.L2.FrameMux.feedM`, `feedLoopM` | flare/uds/frame_mux.mojo:176-216 | `NET_04.feed_after_error_duplicates`, `feedM_error_stuck` | proved; counterexample (NET-04) |
+| `Flare.L2.FrameMux.nextId` | flare/uds/frame_mux.mojo:285-289 | `nextId_injective`, `nextId_wraps` | proved |
 | `Flare.L2.Udp.readPort`, `readAddr4`, `readAddr6` | flare/net/_libc.mojo:303-397 | `impl_addr6`, `addr4_ok` | proved |
 | `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-285, 332-338 | `impl_addr6`, `old_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | proved; counterexample (NET-01) |
 | `Flare.L2.Uds.fill` | flare/uds/_libc.mojo:55-107 | `fill_len_le` | proved |
@@ -2983,7 +2983,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-01 | High | resolved | `UdpSocket.recv_from` reports the wrong sender for IPv6 peers | `Flare/Bugs/NET_01.lean` | `repro/NET-01_udp_recvfrom_ipv6_sender.mojo` (any) |
 | NET-02 | Low | open | `write_all` livelocks if `send` returns 0 | `Flare/Bugs/NET_02.lean` | `repro/NET-02_write_all_zero_send_livelock.mojo` (any) |
 | NET-03 | Low | open | `DnsCache` with a very large TTL never serves a hit | `Flare/Bugs/NET_03.lean` | `repro/NET-03_dns_cache_ttl_overflow.mojo` (any) |
-| NET-04 | Medium | open | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
+| NET-04 | Medium | resolved | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
 | NET-05 | Info | open | accepted fd leaks if the peer address fails to decode | `Flare/Bugs/NET_05.lean` | `repro/NET-05_accept_fd_leak_on_decode_error.mojo` (any) |
 | NET-06 | Low | open | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
 | NET-07 | Medium | open | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
@@ -3320,6 +3320,7 @@ raising; `feedFixed_no_duplicates`.
 Repro: `formal/repro/NET-04_frame_demux_redelivers_after_error.mojo`, observed
 `BUG REPRODUCED: one CHUNK frame on the wire, stream 5 has 2 queued frames after the protocol error and one more feed()`.
 Flip: `OK: stream 5 has exactly one queued frame`, exit 0.
+Status: resolved. `FrameDemux.feed` compacts the consumed prefix before raising on an oversize header (the bad header stays at the front, so later feeds keep raising and route nothing); the model's `feedM` mirrors it (old: `feedMOld`). Test: `tests/uds/test_frame_mux.mojo::test_demux_error_does_not_redeliver_routed_frames`.
 
 #### NET-05: accepted fd leaks if the peer address fails to decode
 

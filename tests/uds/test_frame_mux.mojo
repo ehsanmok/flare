@@ -129,6 +129,44 @@ def test_demux_oversize_length_raises() raises:
     assert_true(raised, "demux must reject a payload above MAX_FRAME_PAYLOAD")
 
 
+def test_demux_error_does_not_redeliver_routed_frames() raises:
+    """NET-04: a protocol error mid-feed used to skip the compaction, so the
+    frames routed before it stayed buffered and the next ``feed`` routed
+    them again."""
+    var w = ByteWriter()
+    var payload: List[UInt8] = [7, 7, 7]
+    encode_frame(w, 5, FrameKind.CHUNK, Span[UInt8, _](payload))
+    var wire = w.take()
+    # Then a header claiming a 0xFFFFFFFF-byte payload.
+    for _ in range(4):
+        wire.append(UInt8(0xFF))
+    for _ in range(9):
+        wire.append(UInt8(0))
+    var d = FrameDemux()
+    var raised = False
+    try:
+        d.feed(Span[UInt8, _](wire))
+    except:
+        raised = True
+    assert_true(raised, "first feed must hit the protocol error")
+    assert_equal(d.pending(5), 1)
+    # Every later feed (even an empty one) re-hits the same bad header and
+    # must not route the earlier frame again.
+    var empty = List[UInt8]()
+    for _ in range(3):
+        raised = False
+        try:
+            d.feed(Span[UInt8, _](empty))
+        except:
+            raised = True
+        assert_true(raised, "the bad header stays at the front of the buffer")
+        assert_equal(d.pending(5), 1)
+    var got = d.poll(5)
+    assert_true(Bool(got))
+    assert_equal(len(got.value().payload), 3)
+    assert_equal(d.pending(5), 0)
+
+
 def test_demux_thousand_streams_isolated() raises:
     var w = ByteWriter()
     for rid in range(1, 1001):
@@ -155,6 +193,7 @@ def main() raises:
     test_demux_multiple_frames_one_feed()
     test_demux_split_across_feeds()
     test_demux_oversize_length_raises()
+    test_demux_error_does_not_redeliver_routed_frames()
     test_demux_thousand_streams_isolated()
 
     # ── Loopback multiplex: 1k streams, one connection, per-stream echo ──
@@ -229,4 +268,4 @@ def main() raises:
     _ = unlink_path(path)  # parent owns path cleanup (cleanup_path=False)
 
     assert_equal(collected, N)
-    print("test_frame_mux: all passed (6 unit + 1k-stream loopback)")
+    print("test_frame_mux: all passed (7 unit + 1k-stream loopback)")

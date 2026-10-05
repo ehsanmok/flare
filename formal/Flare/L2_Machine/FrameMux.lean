@@ -14,7 +14,7 @@ Wire frame (big-endian): `| u32 payload_len | u64 request_id | u8 kind | payload
   an *incomplete* residual (`Incomplete`). `drain_sound` / `drain_complete`
   show `drain` computes exactly that decomposition, and `feed_chunking`
   is chunking independence in the `Flare.ChunkingIndependent` shape.
-* `feedM`: the real post-state when `feed` raises (used by `Flare.Bugs.NET_04`).
+* `feedMOld`: the real post-state when `feed` raises (used by `Flare.Bugs.NET_04`).
 -/
 namespace Flare.L2.FrameMux
 open Flare
@@ -145,7 +145,7 @@ theorem decode_rejects_oversize (bs : Bytes) (h4 : 4 ≤ bs.length)
 def errOversize : String := "FrameDemux: frame payload exceeds MAX_FRAME_PAYLOAD"
 
 /-- The `while True` loop of `feed`, on the bytes past the parse cursor.
-mirrors flare/uds/frame_mux.mojo:185-205 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo:190-214 (fixed, NET-04) -/
 def drain (bs : Bytes) (acc : List Frame) : Except String (List Frame × Bytes) :=
   if bs.length < 13 then .ok (acc, bs)
   else if hdrLen bs > MAX_FRAME_PAYLOAD then .error errOversize
@@ -160,7 +160,7 @@ def peekLen (buf : Bytes) (at_ : Nat) : Nat := beDec ((buf.drop at_).take 4)
 
 /-- The loop over `(buf, consumed)` exactly as in Mojo: returns the final
 `consumed` and the routed frames, or raises.
-mirrors flare/uds/frame_mux.mojo:185-205 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo:190-214 (fixed, NET-04) -/
 def feedLoop (buf : Bytes) (consumed : Nat) (routed : List Frame) :
     Except String (Nat × List Frame) :=
   let avail := buf.length - consumed
@@ -209,7 +209,7 @@ structure St where
 deriving DecidableEq, Repr
 
 /-- `FrameDemux.feed` (success path compacts; a raise is `Except.error`).
-mirrors flare/uds/frame_mux.mojo:176-218 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo:176-216 (fixed, NET-04) -/
 def feed (s : St) (data : Bytes) : Except String St :=
   (feedLoop (s.buf ++ data) 0 s.routed).map fun p => ⟨(s.buf ++ data).drop p.1, p.2⟩
 
@@ -372,7 +372,7 @@ theorem routeAll_eq (m : UInt64 → List Frame) (fs : List Frame) (i : UInt64) :
     · simp [h, Ne.symm h]
 
 /-- `poll`: pop the oldest frame of a stream.
-mirrors flare/uds/frame_mux.mojo:220-234 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo:229-243 -/
 def poll (m : UInt64 → List Frame) (i : UInt64) : Option Frame × (UInt64 → List Frame) :=
   match m i with
   | [] => (none, m)
@@ -386,7 +386,7 @@ theorem poll_fifo (m : UInt64 → List Frame) (fs : List Frame) (i : UInt64) (f 
 
 /-! ## `FrameMux.next_id` -/
 
-/-- mirrors flare/uds/frame_mux.mojo:274-280 @59bda50 (counter starts at 1) -/
+/-- mirrors flare/uds/frame_mux.mojo:285-289 (counter starts at 1) -/
 def nextId (n : UInt64) : UInt64 × UInt64 := (n, n + 1)
 
 /-- The `k`-th allocation (0-based) returns `k + 1` mod 2^64. -/
@@ -415,11 +415,14 @@ theorem nextId_wraps : idAfter (2 ^ 64 - 1) 1 = 0 := by
 
 /-! ## Post-state when `feed` raises (used by `Flare.Bugs.NET_04`)
 
-On a raise Mojo leaves `self.buf = old ++ data` (the `_compact` after the
-loop never runs) while the frames routed before the bad header stay routed. -/
+When `feed` raises, the frames routed before the bad header stay routed. The
+shipped code (fixed, NET-04) drops the consumed prefix first, so `self.buf`
+starts at the bad header (`feedM`). Before the fix the `_compact` after the
+loop never ran and `self.buf = old ++ data` (`feedMOld`), so the next feed
+routed those frames again. -/
 
 /-- The loop with the raise made explicit: `(ok?, consumed, routed)`.
-mirrors flare/uds/frame_mux.mojo:185-205 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo:190-214 (fixed, NET-04) -/
 def feedLoopM (buf : Bytes) (consumed : Nat) (routed : List Frame) :
     Bool × Nat × List Frame :=
   let avail := buf.length - consumed
@@ -434,20 +437,22 @@ def feedLoopM (buf : Bytes) (consumed : Nat) (routed : List Frame) :
 termination_by buf.length - consumed
 decreasing_by omega
 
-/-- `feed` with the observable post-state on both paths.
-mirrors flare/uds/frame_mux.mojo:176-207 @59bda50 -/
+/-- `feed` with the observable post-state on both paths: the consumed prefix
+is dropped before the raise too.
+mirrors flare/uds/frame_mux.mojo:176-216 (fixed, NET-04) -/
 def feedM (s : St) (data : Bytes) : Bool × St :=
   let buf := s.buf ++ data
   match feedLoopM buf 0 s.routed with
   | (true, c, R) => (true, ⟨buf.drop c, R⟩)
-  | (false, _, R) => (false, ⟨buf, R⟩)
+  | (false, c, R) => (false, ⟨buf.drop c, R⟩)
 
-/-- The minimal fix: compact the consumed prefix before raising. -/
-def feedMFixed (s : St) (data : Bytes) : Bool × St :=
+/-- Pre-fix `feed`: on the raise path the whole input stays buffered.
+(flare/uds/frame_mux.mojo:176-207 @59bda50) -/
+def feedMOld (s : St) (data : Bytes) : Bool × St :=
   let buf := s.buf ++ data
   match feedLoopM buf 0 s.routed with
   | (true, c, R) => (true, ⟨buf.drop c, R⟩)
-  | (false, c, R) => (false, ⟨buf.drop c, R⟩)
+  | (false, _, R) => (false, ⟨buf, R⟩)
 
 theorem feedLoopM_error (buf : Bytes) (c c' : Nat) (R R' : List Frame)
     (h : feedLoopM buf c R = (false, c', R')) :
@@ -468,27 +473,27 @@ theorem feedLoopM_error (buf : Bytes) (c c' : Nat) (R R' : List Frame)
         · simp only [h3, if_false] at h
           exact ih _ (by omega) _ _ h rfl
 
-/-- On the buggy path the whole input, routed frames included, stays buffered. -/
-theorem feedM_error_keeps_routed (s s' : St) (data : Bytes) (h : feedM s data = (false, s')) :
+/-- On the pre-fix path the whole input, routed frames included, stays buffered. -/
+theorem feedMOld_error_keeps_routed (s s' : St) (data : Bytes) (h : feedMOld s data = (false, s')) :
     s'.buf = s.buf ++ data := by
   rcases hm : feedLoopM (s.buf ++ data) 0 s.routed with ⟨b, c, R⟩
-  simp only [feedM, hm] at h
+  simp only [feedMOld, hm] at h
   cases b
   · simp only [Prod.mk.injEq] at h; rw [← h.2]
   · simp at h
 
-/-- With the fix, after a protocol error the buffer starts at the bad header,
+/-- With the shipped code, after a protocol error the buffer starts at the bad header,
 so every later feed raises at once and routes nothing: a frame is never
 delivered twice. -/
-theorem feedMFixed_error_stuck (s s' : St) (data d : Bytes) (h : feedMFixed s data = (false, s')) :
-    feedMFixed s' d = (false, ⟨s'.buf ++ d, s'.routed⟩) := by
+theorem feedM_error_stuck (s s' : St) (data d : Bytes) (h : feedM s data = (false, s')) :
+    feedM s' d = (false, ⟨s'.buf ++ d, s'.routed⟩) := by
   rcases heq : feedLoopM (s.buf ++ data) 0 s.routed with ⟨b, c, R⟩
-  simp only [feedMFixed, heq] at h
+  simp only [feedM, heq] at h
   cases b
   · simp only [Prod.mk.injEq] at h
     obtain ⟨-, rfl⟩ := h
     obtain ⟨h1, h2⟩ := feedLoopM_error _ _ _ _ _ heq
-    unfold feedMFixed
+    unfold feedM
     have hb : feedLoopM ((s.buf ++ data).drop c ++ d) 0 R = (false, 0, R) := by
       rw [feedLoopM]
       have hp : peekLen ((s.buf ++ data).drop c ++ d) 0 = hdrLen ((s.buf ++ data).drop c) := by

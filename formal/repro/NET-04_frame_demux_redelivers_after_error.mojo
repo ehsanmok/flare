@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-04 fixed on fix/formal-findings
 """NET-04: after FrameDemux.feed raises, the frames it already routed
 stay in its buffer and are routed again by the next feed.
 
@@ -9,7 +10,7 @@ flare/uds/frame_mux.mojo:176-207 @59bda50.
 Expected: every complete frame on the wire reaches its inbox exactly
 once, also when a later frame in the same feed is malformed (the
 demux raises for the bad frame, the good frames before it are kept).
-Actual: feed() routes frames while advancing a local `consumed` and
+Before the fix: feed() routes frames while advancing a local `consumed` and
 only compacts the buffer after the loop. When a header with a payload
 length above MAX_FRAME_PAYLOAD raises mid-loop, the compaction is
 skipped: the routed frame's bytes stay at the front of the buffer, and
