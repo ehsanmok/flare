@@ -13,7 +13,13 @@ import Flare.L3_Protocol.Ws.Handshake
   426 with the supported version); §11.3.1/§11.3.5: those fields once.
 * What goes wrong: `POST / HTTP/1.0`, `Connection: noupgrade`,
   `Sec-WebSocket-Key: x`, `Sec-WebSocket-Version: 8` is upgraded.
-* Fix (`srvFixed`): `srvFixed_ok`.
+* Fix (`srv`, the shipped check): `srv_ok`. The counterexample is about
+  `srvOld`, the pre-fix check.
+
+Status: resolved. `_parse_ws_upgrade_bytes` and `_read_upgrade_request`
+collect every handshake field and call `_ws_handshake_problem`, the rule the
+reactor uses too (WS-07); a refused handshake is answered 426 (version) or
+400.
 -/
 namespace Flare.Bugs.WS_05
 open Flare Flare.L3.Ws.Handshake
@@ -26,16 +32,16 @@ def req : Req :=
     fields := [(UPGRADE_CAP, WEBSOCKET), (CONNECTION_CAP, NOUPGRADE), (KEY_CAP, [120]),
       (VERSION_CAP, [56])] }
 
-theorem shipped_upgrades : srvShipped req = some [120] := by native_decide
+theorem old_upgrades : srvOld req = some [120] := by native_decide
 
-theorem counterexample : srvShipped req = some [120] ∧ ¬ ServerOK req [120] :=
-  ⟨shipped_upgrades, fun h => absurd h.1 (by native_decide)⟩
+theorem counterexample : srvOld req = some [120] ∧ ¬ ServerOK req [120] :=
+  ⟨old_upgrades, fun h => absurd h.1 (by native_decide)⟩
 
 theorem key_invalid : ¬ KeyOK [120] := by
   rw [← keyOk_iff]; native_decide
 
-theorem fixed_refuses : srvFixed req = none := by native_decide
+theorem fixed_refuses : srv req = none := by native_decide
 
-theorem fixed_ok {r : Req} {k : Bytes} (h : srvFixed r = some k) : ServerOK r k := srvFixed_ok h
+theorem fixed_ok {r : Req} {k : Bytes} (h : srv r = some k) : ServerOK r k := srv_ok h
 
 end Flare.Bugs.WS_05

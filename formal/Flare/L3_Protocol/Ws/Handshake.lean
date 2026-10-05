@@ -18,10 +18,11 @@ they compare anything; names are compared after `lowerB`.
   RFC 6455 §4.1 list (Upgrade `websocket`, Connection token `upgrade`, the
   accept value, no unrequested subprotocol or extension). Finding WS-04;
   the shipped `clientAccepts` decides exactly `ClientOK`: `clientAccepts_ok`.
-* **Standalone server** (`_parse_ws_upgrade_bytes`). `srvShipped` skips the
-  request line, tests Connection by substring, and checks neither key format
-  nor version. `ServerOK` is RFC 6455 §4.2.1 plus §11.3.1/§11.3.5 (the key
-  and version fields appear once). Finding WS-05; `srvFixed_ok`.
+* **Standalone server** (`_parse_ws_upgrade_bytes`). Before the WS-05 fix
+  (`srvOld`) it skipped the request line, tested Connection by substring, and
+  checked neither key format nor version. `ServerOK` is RFC 6455
+  §4.2.1 plus §11.3.1/§11.3.5 (the key and version fields appear once). The
+  shipped `srv` decides it through `qual`: `srv_ok`.
 * **Reactor** (`ConnHandle._handle_ws_upgrade` behind the 426 check).
   `reactor_upgrade_v13`: the shipped reactor only upgrades version 13.
   It still tests Connection by substring and does not decode the key:
@@ -183,42 +184,47 @@ def ServerOK (r : Req) (key : Bytes) : Prop :=
   (vals r.fields N_CONNECTION).any (fun v => hasTok v UPGRADE) = true ∧
   vals r.fields N_KEY = [key] ∧ KeyOK key ∧ vals r.fields N_VERSION = [V13]
 
-/-- The request line is read and dropped; `key` is the last
-`Sec-WebSocket-Key`. mirrors flare/ws/server.mojo:188-261 (and the stream
-twin 264-321) @59bda50 -/
-def srvShipped (r : Req) : Option Bytes :=
+/-- The standalone server's check before the WS-05 fix: the request line is
+read and dropped; `key` is the last `Sec-WebSocket-Key`.
+mirrors flare/ws/server.mojo:188-261 (and the stream twin 264-321) @59bda50 -/
+def srvOld (r : Req) : Option Bytes :=
   let key := (lastVal r.fields N_KEY).getD []
   if (vals r.fields UPGRADE).any (fun v => lowerB v == WEBSOCKET) &&
       (vals r.fields N_CONNECTION).any (fun v => infixB UPGRADE (lowerB v)) && !key.isEmpty then
     some key
   else none
 
-/-- The checks shared by both fixed servers. -/
-def qualFixed (r : Req) (key : Bytes) : Bool :=
+/-- The checks shared by both servers: the Mojo `_ws_handshake_problem`
+(`flare/ws/server.mojo`), which the standalone parsers and the reactor's
+`_handle_ws_upgrade` both call (fixed, WS-05 and WS-07). -/
+def qual (r : Req) (key : Bytes) : Bool :=
   r.method == GET && r.version == HTTP11 &&
   (vals r.fields UPGRADE).any (fun v => hasTok v WEBSOCKET) &&
   (vals r.fields N_CONNECTION).any (fun v => hasTok v UPGRADE) &&
   keyOk key && vals r.fields N_VERSION == [V13]
 
-def srvFixed (r : Req) : Option Bytes :=
+/-- The shipped standalone server (`_UpgradeFields.finish`).
+mirrors flare/ws/server.mojo `_parse_ws_upgrade_bytes` and
+`_read_upgrade_request` (fixed, WS-05) -/
+def srv (r : Req) : Option Bytes :=
   match vals r.fields N_KEY with
-  | [key] => if qualFixed r key then some key else none
+  | [key] => if qual r key then some key else none
   | _ => none
 
-theorem qualFixed_ok {r : Req} {key : Bytes} (hk : vals r.fields N_KEY = [key])
-    (h : qualFixed r key = true) : ServerOK r key := by
-  simp only [qualFixed, Bool.and_eq_true, beq_iff_eq] at h
+theorem qual_ok {r : Req} {key : Bytes} (hk : vals r.fields N_KEY = [key])
+    (h : qual r key = true) : ServerOK r key := by
+  simp only [qual, Bool.and_eq_true, beq_iff_eq] at h
   obtain ⟨⟨⟨⟨⟨hm, hv⟩, hu⟩, hc⟩, hko⟩, hver⟩ := h
   exact ⟨hm, hv, hu, hc, hk, (keyOk_iff key).1 hko, hver⟩
 
-theorem srvFixed_ok {r : Req} {key : Bytes} (h : srvFixed r = some key) : ServerOK r key := by
-  unfold srvFixed at h
+theorem srv_ok {r : Req} {key : Bytes} (h : srv r = some key) : ServerOK r key := by
+  unfold srv at h
   split at h
   · rename_i k hk
-    by_cases hq : qualFixed r k = true
+    by_cases hq : qual r k = true
     · rw [if_pos hq] at h
       cases h
-      exact qualFixed_ok hk hq
+      exact qual_ok hk hq
     · rw [if_neg hq] at h; cases h
   · cases h
 
@@ -265,7 +271,7 @@ theorem reactor_upgrade_v13 {r : Req} {k : Bytes} (h : reactor r = .upgrade k) :
 def reactorFixed (r : Req) : ROut :=
   if versionMismatch r then .reject426
   else match vals r.fields N_KEY with
-    | [key] => if qualFixed r key then .upgrade key else .http
+    | [key] => if qual r key then .upgrade key else .http
     | _ => .http
 
 theorem reactorFixed_ok {r : Req} {key : Bytes} (h : reactorFixed r = .upgrade key) :
@@ -276,10 +282,10 @@ theorem reactorFixed_ok {r : Req} {key : Bytes} (h : reactorFixed r = .upgrade k
   rw [if_neg hm] at h
   split at h
   · rename_i k hk
-    by_cases hq : qualFixed r k = true
+    by_cases hq : qual r k = true
     · rw [if_pos hq] at h
       cases h
-      exact qualFixed_ok hk hq
+      exact qual_ok hk hq
     · rw [if_neg hq] at h; cases h
   · cases h
 
@@ -305,7 +311,7 @@ theorem vals_cons (fs : Fields) (k n v : Bytes) :
 theorem vals_nil (k : Bytes) : vals [] k = [] := rfl
 
 theorem handshake_complete (sha1 : Sha1) (host target key : Bytes) (hk : KeyOK key) :
-    srvFixed (clientRequest host target key) = some key ∧
+    srv (clientRequest host target key) = some key ∧
     reactorFixed (clientRequest host target key) = .upgrade key ∧
     clientAccepts sha1 key SWITCHING (srvResponse sha1 key) = true := by
   have hko : keyOk key = true := (keyOk_iff key).2 hk
@@ -313,15 +319,15 @@ theorem handshake_complete (sha1 : Sha1) (host target key : Bytes) (hk : KeyOK k
     intro h; subst h; obtain ⟨n, hn, hl⟩ := hk
     simp [decode, padCount, trailingEq] at hn
     subst hn; simp at hl
-  have hq : qualFixed (clientRequest host target key) key = true := by
-    simp (config := { decide := true }) [qualFixed, clientRequest, vals_cons, vals_nil, hko]
+  have hq : qual (clientRequest host target key) key = true := by
+    simp (config := { decide := true }) [qual, clientRequest, vals_cons, vals_nil, hko]
   have hv : vals (clientRequest host target key).fields N_KEY = [key] := by
     simp (config := { decide := true }) [clientRequest, vals_cons, vals_nil]
   have hmm : versionMismatch (clientRequest host target key) = false := by
     simp (config := { decide := true }) [versionMismatch, hdr, firstVal, clientRequest, vals_cons,
       vals_nil]
   refine ⟨?_, ?_, ?_⟩
-  · simp only [srvFixed, hv, hq, if_true]
+  · simp only [srv, hv, hq, if_true]
   · simp only [reactorFixed, hmm, hv, hq, if_true]; rfl
   · simp (config := { decide := true }) [clientAccepts, srvResponse, vals_cons, vals_nil, lastVal]
 

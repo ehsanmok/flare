@@ -902,6 +902,15 @@ of what you might reasonably assume from the surrounding feature.
   with the `upgrade` token, and it refuses one that names a
   `Sec-WebSocket-Protocol` or `Sec-WebSocket-Extensions` (the client
   offers neither). A server that skipped those fields used to connect.
+- The standalone `WsServer` now checks the whole opening handshake (RFC
+  6455 sec 4.2.1): a `GET` over HTTP/1.1, `Upgrade` and `Connection`
+  matched as comma-separated tokens (`Connection: noupgrade` no longer
+  counts), exactly one `Sec-WebSocket-Key` that is base64 of 16 bytes,
+  and exactly one `Sec-WebSocket-Version` of 13. A refused handshake gets
+  an HTTP answer before the close: 426 with `Sec-WebSocket-Version: 13`
+  when only the version is wrong, 400 otherwise. All of these used to be
+  upgraded. The shared-listener upgrade (`ServerConfig.ws`) applies the
+  same rule.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: WS-05 fixed on fix/formal-findings
 """WS-05: the standalone WsServer accepts opening handshakes RFC 6455 says
 it must refuse: any method and version, any Sec-WebSocket-Version (or
 none), a key that is not base64 of 16 bytes, and "upgrade" as a substring
@@ -16,7 +17,7 @@ Expected (RFC 6455 §4.2.1, §4.2.2, §4.4): a GET over HTTP/1.1 or later,
 Upgrade "websocket", a Connection token "upgrade", a Sec-WebSocket-Key
 that base64-decodes to 16 bytes, and Sec-WebSocket-Version 13; otherwise
 400 (426 with Sec-WebSocket-Version: 13 for a version mismatch).
-Actual: "POST / HTTP/1.0" with "Connection: noupgrade",
+Before the fix: Actual: "POST / HTTP/1.0" with "Connection: noupgrade",
 "Sec-WebSocket-Key: x" and "Sec-WebSocket-Version: 8" is accepted.
 
 Minimal fix: check the request line (GET, HTTP/1.1) instead of skipping

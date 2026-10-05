@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61724 lines) |
+| Lean files | 298 (61736 lines) |
 | Theorems | 3246 |
 | Headline theorems in the axiom audit | 1045 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 60 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 61 of 138 |
 
 Six findings are rated high:
 
@@ -1107,7 +1107,7 @@ File: `Ws/Handshake.lean`.
 
 **Model.** SHA-1 is a black box `Sha1 := Bytes → Bytes`; every theorem holds for every such function. `acceptOf sha1 key = encodeStd (sha1 (key ++ GUID))` mirrors `_compute_accept` and `_compute_accept_srv`, with base64 from `L1.Base64`. `genKey` mirrors `_generate_ws_key`. Fields are the stripped `(name, value)` pairs that each handshake loop builds; `lastVal` is the loops' "last wins", `firstVal` is `HeaderMap.get`.
 - `clientAcceptsOld` mirrors both branches of `_connect_impl` before the WS-04 fix and `clientAccepts` the shipped check (`_UpgradeResponse.verify`) (`client.mojo:562-603`, `609-646`); `ClientOK` is the RFC 6455 §4.1 list for a request that offered no subprotocol or extension (flare's request offers none, `client.mojo:536-550`).
-- `srvShipped` mirrors `_parse_ws_upgrade_bytes`/`_read_upgrade_request` (`server.mojo:188-321`); `ServerOK` is RFC 6455 §4.2.1 plus §11.3.1/§11.3.5 (key and version once).
+- `srvOld` mirrors `_parse_ws_upgrade_bytes`/`_read_upgrade_request` (`server.mojo:188-321`) before the WS-05 fix and `srv` the shipped check (`_ws_handshake_problem`); `ServerOK` is RFC 6455 §4.2.1 plus §11.3.1/§11.3.5 (key and version once).
 - `reactor` mirrors `_is_ws_version_mismatch` (426), then `_handle_ws_upgrade` (`conn_handle.mojo:143-152`, `835-860`, `1512-1523`).
 
 | Lean name | Statement | Status |
@@ -1115,7 +1115,7 @@ File: `Ws/Handshake.lean`.
 | `genKey_valid` | The client's key, base64 of 16 nonce bytes, decodes to 16 bytes (`KeyOK`). | proved |
 | `keyOk_iff` | The Boolean key check decides `KeyOK`. | proved |
 | `clientAccepts_ok`, `clientAccepts_le_old` | The shipped client check decides exactly `ClientOK`, and only adds conjuncts to the old one. | proved (WS-04 fix) |
-| `srvFixed_ok` | A request the fixed standalone server accepts satisfies `ServerOK`. | proved (WS-05 fix) |
+| `srv_ok` | A request the shipped standalone server accepts satisfies `ServerOK`. | proved (WS-05 fix) |
 | `reactor_upgrade_v13` | The shipped reactor only upgrades `Sec-WebSocket-Version: 13`. | proved |
 | `reactorFixed_ok` | A request the fixed reactor upgrades satisfies `ServerOK`. | proved (WS-07 fix) |
 | `handshake_complete` | For every SHA-1 and valid key, flare's client request passes both fixed servers, and the server's 101 passes the fixed client. | proved |
@@ -2789,7 +2789,7 @@ advances the wheel to `now` at the top of every iteration
 | `ChunkedEncode.hexDigit`, `hexLower`, `encChunk`, `encChunks`, `trailerLine`, `encTrailers`, `encodeBody`, `encodeUpload` | `streaming_serialize.mojo:116-140`, `162-166`, `258-300`; `client.mojo:121-135`, `1420-1445`, `1470-1495` | `decL_roundtrip`, `decodeBody_roundtrip`, `scan_roundtrip`, `cDec_roundtrip`, `upload_roundtrip` | proved |
 | `Handshake.acceptOf`, `genKey` | `ws/client.mojo:118-148`, `ws/server.mojo:100-111` | `genKey_valid`, `handshake_complete` | proved |
 | `Handshake.clientAccepts` (`clientAcceptsOld`), `clientRequest` | `ws/client.mojo:536-550`, `562-603`, `609-646` | `clientAccepts_ok`, `Bugs.WS_04.*` | fix proved; `clientAcceptsOld` keeps the counterexample (WS-04) |
-| `Handshake.srvShipped`, `srvResponse` | `ws/server.mojo:188-340` | `srvFixed_ok`, `Bugs.WS_05.*` | counterexample (WS-05) / fix proved |
+| `Handshake.srv` (`srvOld`), `srvResponse` | `ws/server.mojo:188-340` | `srv_ok`, `Bugs.WS_05.*` | fix proved; `srvOld` keeps the counterexample (WS-05) |
 | `Handshake.firstVal`, `versionMismatch`, `reactorQual`, `reactor` | `http/headers.mojo:172-184`, `_reactor/conn_handle.mojo:143-152`, `835-860`, `1512-1523` | `reactor_upgrade_v13`, `reactorFixed_ok`, `Bugs.WS_07.*` | proved (version) / counterexample (WS-07) / fix proved |
 | `Close.oldStep`, `Close.fixStep` | `ws/server.mojo:473-536`, `600-616` | `fixed_closeOK`, `Bugs.WS_06.*` | counterexample (WS-06) / fix proved |
 
@@ -3032,7 +3032,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | WS-02 | Medium | resolved | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-03 | Low | resolved | `WsClient` accepts masked frames from the server | `Flare/Bugs/WS_03.lean` | `repro/WS-03_client_accepts_masked_server_frame.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-04 | Low | resolved | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
-| WS-05 | Low | open | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
+| WS-05 | Low | resolved | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
 | WS-06 | Medium | resolved | `WsConnection` does not take part in the closing handshake | `Flare/Bugs/WS_06.lean` | `repro/WS-06_close_handshake_not_answered.mojo` (any) |
 | WS-07 | Low | open | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
 | H2-01 | High | open | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
@@ -3926,11 +3926,13 @@ Status: resolved. Both branches of `_connect_impl` record `Upgrade`, `Connection
 
 #### WS-05: the standalone `WsServer` handshake checks almost nothing
 
+Status: resolved. Both standalone readers collect the request line and every handshake field (`_UpgradeFields`) and call `_ws_handshake_problem`: GET over HTTP/1.1, `Upgrade` and `Connection` as tokens, exactly one valid key (base64 of 16 bytes), exactly one version, 13. A refused handshake is answered 426 with `Sec-WebSocket-Version: 13` (version only) or 400. The counterexample is about `srvOld`; `srv` is the shipped check (`srv_ok`). Tests: `tests/ws/test_ws_handshake_request.mojo`.
+
 - **Severity:** Low. Non-WebSocket requests are upgraded: POST, HTTP/1.0, `Connection: noupgrade`, a key that is not base64 of 16 bytes, and any version. Cross-protocol requests (for example a form POST carrying these fields) can open a WebSocket. A client speaking another version gets 101 instead of 426.
 - **RFC:** RFC 6455 §4.2.1 (GET, HTTP/1.1 or higher, `Upgrade` containing `websocket`, a `Connection` token `upgrade`, a key that decodes to 16 bytes, version 13), §4.2.2 point 4 (otherwise 426 with `Sec-WebSocket-Version: 13`) and §11.3.1/§11.3.5 (those fields at most once).
 - **What goes wrong:** `_parse_ws_upgrade_bytes` and `_read_upgrade_request` (`server.mojo:188-321`) drop the request line, test `Connection` by substring, test the key for being non-empty, keep the last repeated key, and never read `Sec-WebSocket-Version`.
-- **Counterexample:** `Bugs.WS_05.counterexample`: the request above gives `srvShipped = some "x"` but violates `ServerOK`. `key_invalid` shows `x` is not a valid key.
-- **Fix:** check the request line, the Connection tokens, the decoded key length, single key/version fields and version 13. `Bugs.WS_05.fixed_ok` (= `srvFixed_ok`). `handshake_complete` shows flare's own client request still passes.
+- **Counterexample:** `Bugs.WS_05.counterexample`: the request above gives `srvOld = some "x"` but violates `ServerOK`. `key_invalid` shows `x` is not a valid key.
+- **Fix:** check the request line, the Connection tokens, the decoded key length, single key/version fields and version 13. `Bugs.WS_05.fixed_ok` (= `srv_ok`). `handshake_complete` shows flare's own client request still passes.
 - **Repro:** `formal/repro/WS-05_standalone_server_handshake_unchecked.mojo` (control: the RFC 6455 §1.3 example request is accepted)
 - **Observed (3 runs):** `BUG REPRODUCED: WsServer handshake accepted POST/HTTP/1.0 with Connection: noupgrade, key 'x' and version 8 (accepted key=x)`
 - **Flip:** with the request-line, Connection-token, key and version checks added to `_parse_ws_upgrade_bytes` in `flare/ws/server.mojo`: `OK: invalid opening handshake refused (raised: NetworkError: not a GET HTTP/1.1 request)`; the file was restored. The flip did not add the single-field check, which the Lean fix has. The repro's request does not depend on it.

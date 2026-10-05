@@ -25,6 +25,7 @@ from .frame import (
     WsProtocolError,
     _is_valid_utf8,
 )
+from ..crypto.base64 import base64_decode as _b64_decode_srv
 from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream
@@ -186,6 +187,188 @@ struct _WsUpgradeRequest(Movable):
     var origin: String
 
 
+comptime _WS_VERSION_REJECTED = "unsupported Sec-WebSocket-Version"
+"""Start of the error for a handshake that fails only on its version; the
+standalone server answers it with 426 (RFC 6455 sec 4.2.2 point 4)."""
+
+
+def _field_has_token(values: List[String], token: String) -> Bool:
+    """Whether any comma-separated, case-insensitive token of ``values`` is
+    ``token`` (``token`` is lower case)."""
+    for v in values:
+        for t in v.split(","):
+            if _lower_srv(String(String(t).strip())) == token:
+                return True
+    return False
+
+
+def _ws_key_is_valid(key: String) -> Bool:
+    """RFC 6455 sec 4.2.1 point 5 / sec 11.3.1: base64 of a 16-byte nonce."""
+    try:
+        return len(_b64_decode_srv(key)) == 16
+    except:
+        return False
+
+
+def _ws_handshake_problem(
+    method: String,
+    version: String,
+    upgrades: List[String],
+    connections: List[String],
+    keys: List[String],
+    versions: List[String],
+) -> String:
+    """Why a request is not a valid WebSocket opening handshake, or "".
+
+    The one rule both servers apply -- the standalone ``WsServer`` parsers
+    and the reactor's ``_handle_ws_upgrade`` -- so they cannot disagree
+    (RFC 6455 sec 4.2.1, sec 11.3.1, sec 11.3.5):
+
+    * a ``GET`` request over ``HTTP/1.1``;
+    * an ``Upgrade`` field with the token ``websocket``;
+    * a ``Connection`` field with the token ``upgrade`` (a token, not a
+      substring: ``noupgrade`` does not count);
+    * exactly one ``Sec-WebSocket-Key``, base64 of 16 bytes;
+    * exactly one ``Sec-WebSocket-Version``, ``13``. A version problem is
+      reported last and starts with ``_WS_VERSION_REJECTED``.
+
+    Args:
+        method: The request method.
+        version: The request's HTTP version, e.g. ``HTTP/1.1``.
+        upgrades: Every ``Upgrade`` field value.
+        connections: Every ``Connection`` field value.
+        keys: Every ``Sec-WebSocket-Key`` field value.
+        versions: Every ``Sec-WebSocket-Version`` field value.
+
+    Returns:
+        The empty string if the handshake is valid, else the reason.
+    """
+    if method != "GET":
+        return "WebSocket upgrade request is not a GET"
+    if version != "HTTP/1.1":
+        return "WebSocket upgrade request is not HTTP/1.1"
+    if not _field_has_token(upgrades, "websocket"):
+        return (
+            "WebSocket upgrade request missing Upgrade: websocket or"
+            " Connection: Upgrade headers"
+        )
+    if not _field_has_token(connections, "upgrade"):
+        return (
+            "WebSocket upgrade request missing Upgrade: websocket or"
+            " Connection: Upgrade headers"
+        )
+    if len(keys) == 0 or (len(keys) == 1 and keys[0].byte_length() == 0):
+        return "WebSocket upgrade request missing Sec-WebSocket-Key"
+    if len(keys) > 1:
+        return "WebSocket upgrade request repeats Sec-WebSocket-Key"
+    if not _ws_key_is_valid(keys[0]):
+        return (
+            "WebSocket upgrade request has a Sec-WebSocket-Key that is not"
+            " base64 of 16 bytes"
+        )
+    if len(versions) != 1 or versions[0] != "13":
+        return (
+            String(_WS_VERSION_REJECTED)
+            + " (RFC 6455 sec 4.2.1): only 13 is supported"
+        )
+    return String("")
+
+
+struct _UpgradeFields(Movable):
+    """The request line and the handshake fields of an Upgrade request,
+    collected line by line by both handshake readers."""
+
+    var request_line: String
+    var upgrades: List[String]
+    var connections: List[String]
+    var keys: List[String]
+    var versions: List[String]
+    var origin: String
+
+    def __init__(out self, var request_line: String):
+        self.request_line = request_line^
+        self.upgrades = List[String]()
+        self.connections = List[String]()
+        self.keys = List[String]()
+        self.versions = List[String]()
+        self.origin = String("")
+
+    def observe(mut self, line: String):
+        """Record one header line (lines without a colon are ignored)."""
+        var colon = _str_find_srv(line, ":")
+        if colon < 0:
+            return
+        var k = _lower_srv(
+            String(
+                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
+            )
+        )
+        var v = String(
+            String(
+                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
+            ).strip()
+        )
+        if k == "sec-websocket-key":
+            self.keys.append(v^)
+        elif k == "sec-websocket-version":
+            self.versions.append(v^)
+        elif k == "origin":
+            self.origin = v^
+        elif k == "upgrade":
+            self.upgrades.append(v^)
+        elif k == "connection":
+            self.connections.append(v^)
+
+    def finish(self) raises -> _WsUpgradeRequest:
+        """Validate the request and return the retained fields.
+
+        Raises:
+            NetworkError: If it is not a valid opening handshake.
+        """
+        var method = String("")
+        var version = String("")
+        var parts = List[String]()
+        for p in self.request_line.split(" "):
+            parts.append(String(p))
+        if len(parts) == 3:
+            method = parts[0].copy()
+            version = parts[2].copy()
+        var problem = _ws_handshake_problem(
+            method,
+            version,
+            self.upgrades,
+            self.connections,
+            self.keys,
+            self.versions,
+        )
+        if problem.byte_length() != 0:
+            raise NetworkError(problem^)
+        return _WsUpgradeRequest(self.keys[0].copy(), self.origin.copy())
+
+
+def _send_handshake_rejection(mut stream: TcpStream, reason: String):
+    """Best-effort HTTP answer to a refused handshake before the close.
+
+    RFC 6455 sec 4.2.2 point 4: a version the server does not speak gets
+    426 with the supported version; anything else refused is a 400.
+    """
+    var resp: String
+    if _WS_VERSION_REJECTED in reason:
+        resp = String(
+            "HTTP/1.1 426 Upgrade Required\r\nSec-WebSocket-Version:"
+            " 13\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    else:
+        resp = String(
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection:"
+            " close\r\n\r\n"
+        )
+    try:
+        stream.write_all(Span[UInt8, _](resp.as_bytes()))
+    except:
+        pass
+
+
 def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> _WsUpgradeRequest:
     """Parse an HTTP WebSocket Upgrade request from a byte buffer.
 
@@ -216,50 +399,13 @@ def _parse_ws_upgrade_bytes(data: Span[UInt8, _]) raises -> _WsUpgradeRequest:
             line += chr(Int(c))
         return line^
 
-    # Skip request line
-    _ = read_line(data, pos)
-
-    var ws_key = String("")
-    var ws_origin = String("")
-    var found_upgrade = False
-    var found_connection = False
-
+    var fields = _UpgradeFields(read_line(data, pos))
     while True:
         var line = read_line(data, pos)
         if line.byte_length() == 0:
             break
-        var colon = _str_find_srv(line, ":")
-        if colon < 0:
-            continue
-        var k = _lower_srv(
-            String(
-                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
-            )
-        )
-        var v = String(
-            String(
-                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
-            ).strip()
-        )
-        if k == "sec-websocket-key":
-            ws_key = v
-        elif k == "origin":
-            ws_origin = v
-        elif k == "upgrade" and _lower_srv(v) == "websocket":
-            found_upgrade = True
-        elif k == "connection" and "upgrade" in _lower_srv(v):
-            found_connection = True
-
-    if not found_upgrade or not found_connection:
-        raise NetworkError(
-            "WebSocket upgrade request missing Upgrade: websocket or"
-            " Connection: Upgrade headers"
-        )
-    if ws_key.byte_length() == 0:
-        raise NetworkError(
-            "WebSocket upgrade request missing Sec-WebSocket-Key"
-        )
-    return _WsUpgradeRequest(ws_key^, ws_origin^)
+        fields.observe(line)
+    return fields.finish()
 
 
 def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
@@ -276,50 +422,13 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
     Raises:
         NetworkError: If the upgrade request is malformed or missing the key.
     """
-    # Skip request line
-    _ = _read_line_srv(stream)
-
-    var ws_key = String("")
-    var ws_origin = String("")
-    var found_upgrade = False
-    var found_connection = False
-
+    var fields = _UpgradeFields(_read_line_srv(stream))
     while True:
         var line = _read_line_srv(stream)
         if line.byte_length() == 0:
             break
-        var colon = _str_find_srv(line, ":")
-        if colon < 0:
-            continue
-        var k = _lower_srv(
-            String(
-                String(String(unsafe_from_utf8=line.as_bytes()[:colon])).strip()
-            )
-        )
-        var v = String(
-            String(
-                String(unsafe_from_utf8=line.as_bytes()[colon + 1 :])
-            ).strip()
-        )
-        if k == "sec-websocket-key":
-            ws_key = v
-        elif k == "origin":
-            ws_origin = v
-        elif k == "upgrade" and _lower_srv(v) == "websocket":
-            found_upgrade = True
-        elif k == "connection" and "upgrade" in _lower_srv(v):
-            found_connection = True
-
-    if not found_upgrade or not found_connection:
-        raise NetworkError(
-            "WebSocket upgrade request missing Upgrade: websocket or"
-            " Connection: Upgrade headers"
-        )
-    if ws_key.byte_length() == 0:
-        raise NetworkError(
-            "WebSocket upgrade request missing Sec-WebSocket-Key"
-        )
-    return _WsUpgradeRequest(ws_key^, ws_origin^)
+        fields.observe(line)
+    return fields.finish()
 
 
 def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
@@ -891,7 +1000,12 @@ struct WsServer(Movable):
             var stream = self._listener.accept()
             var peer = stream.peer_addr()
             try:
-                var upgrade = _read_upgrade_request(stream)
+                var upgrade: _WsUpgradeRequest
+                try:
+                    upgrade = _read_upgrade_request(stream)
+                except e:
+                    _send_handshake_rejection(stream, String(e))
+                    raise e^
                 var accept = _compute_accept_srv(upgrade.key)
                 _send_upgrade_response(stream, accept)
                 var conn = WsConnection(stream^, peer, upgrade.origin.copy())
@@ -922,7 +1036,12 @@ def _handle_ws_connection(
     Upgrade errors are swallowed so the accept loop continues.
     """
     try:
-        var upgrade = _read_upgrade_request(stream)
+        var upgrade: _WsUpgradeRequest
+        try:
+            upgrade = _read_upgrade_request(stream)
+        except e:
+            _send_handshake_rejection(stream, String(e))
+            raise e^
         var accept = _compute_accept_srv(upgrade.key)
         _send_upgrade_response(stream, accept)
         var conn = WsConnection(stream^, peer, upgrade.origin.copy())
