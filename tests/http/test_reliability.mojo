@@ -407,6 +407,84 @@ def test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request() raise
     _free_counter(calls)
 
 
+struct CountingOkHandler(Copyable, Handler):
+    """Counts the call and returns 200."""
+
+    var calls_ptr: Int
+
+    def __init__(out self, calls_ptr: Int):
+        self.calls_ptr = calls_ptr
+
+    def serve(self, req: Request) raises -> Response:
+        var p = Pointer[Int, MutUntrackedOrigin](
+            unsafe_from_address=self.calls_ptr
+        )
+        p[] = p[] + 1
+        return ok(String("ok"))
+
+
+struct ProbeInnerHandler(Copyable, Handler):
+    """Worker 1's upstream. While ``phase`` (slot 0) is 0 it fails, which
+    trips the breaker. Once it is 1 the call is the half-open probe: while
+    it is in flight it serves one request through ``other``, a copy of the
+    breaker that shares the cell (another worker), and stores that status
+    in slot 1."""
+
+    var other: CircuitBreaker[CountingOkHandler]
+    var state_ptr: Int
+
+    def __init__(
+        out self,
+        var other: CircuitBreaker[CountingOkHandler],
+        state_ptr: Int,
+    ):
+        self.other = other^
+        self.state_ptr = state_ptr
+
+    def serve(self, req: Request) raises -> Response:
+        var p = Pointer[Int, MutUntrackedOrigin](
+            unsafe_from_address=self.state_ptr
+        )
+        if p[] == 0:
+            return Response(status=500, reason=String("Internal Server Error"))
+        var q = Pointer[Int, MutUntrackedOrigin](
+            unsafe_from_address=self.state_ptr + 8
+        )
+        q[] = self.other.serve(req).status
+        return ok(String("probe ok"))
+
+
+def test_circuitbreaker_half_open_admits_only_the_probe() raises:
+    """While the single half-open probe is in flight a request from another
+    worker (a copy sharing the cell) must fast-fail with 503 and not reach
+    the upstream; only the probe's own success closes the breaker."""
+    var upstream_calls = _new_counter()
+    var state = unsafe_alloc[Int](2)
+    state.unsafe_write(0)
+    state.unsafe_offset(1).unsafe_write(0)
+    var other = CircuitBreaker(
+        CountingOkHandler(upstream_calls), failure_threshold=1, cooldown_ms=0
+    )
+    var w1 = CircuitBreaker(
+        ProbeInnerHandler(other.copy(), Int(state)),
+        failure_threshold=1,
+        cooldown_ms=0,
+    )
+    w1._cell = other._cell  # worker copies share one cell
+    var req = Request(method=String("GET"), url=String("/"))
+    assert_equal(w1.serve(req).status, 500)  # opens the breaker
+    state.unsafe_write(1)
+    # cooldown_ms=0: the next call is the probe (OPEN -> HALF_OPEN).
+    assert_equal(w1.serve(req).status, 200)
+    assert_equal(state.unsafe_offset(1)[], 503)
+    assert_equal(_read_counter(upstream_calls), 0)
+    # The probe succeeded: the breaker is closed again for everyone.
+    assert_equal(other.serve(req).status, 200)
+    assert_equal(_read_counter(upstream_calls), 1)
+    state.unsafe_free()
+    _free_counter(upstream_calls)
+
+
 def test_circuitbreaker_disabled_passthrough() raises:
     """Disabled when failure_threshold <= 0 (pass-through)."""
     var cb = CircuitBreaker(AlwaysFiveHundredHandler(), failure_threshold=0)
@@ -432,5 +510,6 @@ def main() raises:
     test_ratelimit_disabled_passthrough()
     test_circuitbreaker_opens_after_threshold()
     test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request()
+    test_circuitbreaker_half_open_admits_only_the_probe()
     test_circuitbreaker_disabled_passthrough()
     print("test_reliability: OK")

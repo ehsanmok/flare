@@ -1041,7 +1041,7 @@ sufficient by `fixed_cooldown_respected`.
 - Observed: `BUG REPRODUCED: call right after the trip returned 500 and the inner handler ran 2 times (expected 503, 1 call); first status 500`
 - Flip: `OK: breaker fast-failed with 503 during cooldown; inner calls 1`
 
-Status: resolved. Both `_record_failure` call sites in `serve` now pass `perf_counter_ns()` read when the failure is recorded, so the cooldown counts from the failure. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request`; the repro now prints `OK:`. The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`fix41` on, `fix42` off until APP-42); `Flare.Bugs.APP_41.shipped_meets_spec` is stated about it.
+Status: resolved. Both `_record_failure` call sites in `serve` now pass `perf_counter_ns()` read when the failure is recorded, so the cooldown counts from the failure. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request`; the repro now prints `OK:`. The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`fix41` and, since APP-42, `fix42` on); `Flare.Bugs.APP_41.shipped_meets_spec` is stated about it.
 
 ### APP-42: CircuitBreaker admits every request while HALF_OPEN
 
@@ -1063,6 +1063,8 @@ compare-and-swap.
 
 - Observed: `BUG REPRODUCED: while worker 1's probe was in flight (HALF_OPEN), worker 2 got 200 and its upstream ran 1 time(s); expected 503 and 0. trip status 500 probe status 200`
 - Flip: `OK: second request fast-failed with 503 while the probe was in flight`
+
+Status: resolved. `serve` fast-fails with 503 while the state is HALF_OPEN, and claims OPEN -> HALF_OPEN with a new `_cell_cas`, so a worker that loses the race also fast-fails and exactly one probe runs. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_half_open_admits_only_the_probe` (a second breaker copy sharing the cell serves a request from inside the probe; it gets 503 and the upstream is not reached; the probe's success closes the breaker). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`stepG true true`); `Flare.Bugs.APP_42.shipped_meets_spec` is stated about it. Decision: a probe that never records an outcome would leave the breaker half-open; `serve` is synchronous and records success or failure on every return or raise, so this cannot happen short of the process dying.
 
 ### APP-43: a network-path `Location` (`//host/path`) is resolved as a path
 
@@ -1451,6 +1453,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | `Flare.L4.RateLimit.step` (pre-fix: `stepOld`), `spec` | http/reliability.mojo:361-404 | `step_eq_spec`, `step_inv`, `overflow_iff` | resolved (APP-40) |
 | `Flare.L4.CircuitBreaker.stepG`, `step` | http/reliability.mojo:397-469 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
 | `Flare.L4.RateLimit.step`, `spec` | http/reliability.mojo:358-394 | `step_eq_spec`, `step_inv`, `overflow_iff` | APP-40 |
+| `Flare.L4.CircuitBreaker.stepG`, `stepShipped` | http/reliability.mojo:413-504 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
 | `Flare.L4.Retry.budget`, `sleep`, `serve` | http/reliability.mojo:164-271 | `budget_eq_spec`, `sleep_bounds`, `serve_calls_bounded` | proved |
 | `Flare.L4.Redirect.resolveLocation`, `sameOrigin`, `decideR`, `sendLoop` | http/redirect_policy.mojo:154-354; http/client.mojo:2196-2281 | `sendLoop_terminates`, `sendLoop_confined`, `decide_method_rfc` | APP-43, APP-44, APP-45 |
 | `Flare.L4.ClientPool.release`, `acquire`, `popLoop`, `total` | http/client_pool.mojo:86-102, 203-293 | `inv_inductive`, `caps`, `acquire_same_origin` | proved |

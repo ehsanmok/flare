@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-42 fixed on fix/formal-findings
 """APP-42: CircuitBreaker lets every request through while HALF_OPEN,
 so with worker copies sharing the cell any number of requests reach the
 failing upstream during the single-probe window.
@@ -21,7 +22,7 @@ To make the interleaving deterministic, worker 1's inner handler issues
 worker 2's request itself (this is the moment "probe in flight").
 
 Expected: worker 2 gets 503 and its inner handler is not invoked.
-Actual: worker 2 sees HALF_OPEN, treats it like CLOSED, and its inner
+Before the fix: worker 2 sees HALF_OPEN, treats it like CLOSED, and its inner
 handler runs (status 200).
 
 Minimal fix: in serve, fast-fail when the state is HALF_OPEN:

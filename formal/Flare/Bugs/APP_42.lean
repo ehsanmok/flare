@@ -11,6 +11,14 @@ also reaches the failing upstream. The docstring promises "one probe"
 (:33, :409-410).
 
 Repro: formal/repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo.
+
+Status: resolved. `serve` now fast-fails when the state is HALF_OPEN and
+claims OPEN → HALF_OPEN with `_cell_cas`, so a worker that loses the race also
+fast-fails (flare/http/reliability.mojo:471-491); the shipped model is
+`Flare.L4.CircuitBreaker.stepShipped` = `stepG true true`. The counterexample
+below is about the pre-fix `lts false false` (fix41 and fix42 both off).
+Regression test: tests/http/test_reliability.mojo::
+test_circuitbreaker_half_open_admits_only_the_probe.
 -/
 namespace Flare.Bugs.APP_42
 open Flare.L4.CircuitBreaker
@@ -77,6 +85,12 @@ with or without the APP-41 fix. -/
 theorem fixed_halfopen_one_probe (f41 : Bool) (thr cd : Int) :
     SingleProbe (lts f41 true thr cd) :=
   fun s hr => (half_inductive f41 thr cd).reachable s hr
+
+/-- **Fix meets spec**: the shipped breaker lets one probe through while
+half-open, for every threshold and cooldown. -/
+theorem shipped_meets_spec (thr cd : Int) :
+    SingleProbe (lts true true thr cd) :=
+  fixed_halfopen_one_probe true thr cd
 
 /-- Both fixes together satisfy both spec clauses. -/
 theorem fixed_both (thr cd : Int) :

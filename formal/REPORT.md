@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62253 lines) |
-| Theorems | 3269 |
-| Headline theorems in the axiom audit | 1068 |
+| Lean files | 298 (62269 lines) |
+| Theorems | 3270 |
+| Headline theorems in the axiom audit | 1069 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 81 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 82 of 138 |
 
 Six findings are rated high:
 
@@ -2924,6 +2924,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.RateLimit.step` (pre-fix: `stepOld`), `spec` | http/reliability.mojo:361-404 | `step_eq_spec`, `step_inv`, `overflow_iff` | resolved (APP-40) |
 | `Flare.L4.CircuitBreaker.stepG`, `step` | http/reliability.mojo:397-469 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
 | `Flare.L4.RateLimit.step`, `spec` | http/reliability.mojo:358-394 | `step_eq_spec`, `step_inv`, `overflow_iff` | APP-40 |
+| `Flare.L4.CircuitBreaker.stepG`, `stepShipped` | http/reliability.mojo:413-504 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
 | `Flare.L4.Retry.budget`, `sleep`, `serve` | http/reliability.mojo:164-271 | `budget_eq_spec`, `sleep_bounds`, `serve_calls_bounded` | proved |
 | `Flare.L4.Redirect.resolveLocation`, `sameOrigin`, `decideR`, `sendLoop` | http/redirect_policy.mojo:154-354; http/client.mojo:2196-2281 | `sendLoop_terminates`, `sendLoop_confined`, `decide_method_rfc` | APP-43, APP-44, APP-45 |
 | `Flare.L4.ClientPool.release`, `acquire`, `popLoop`, `total` | http/client_pool.mojo:86-102, 203-293 | `inv_inductive`, `caps`, `acquire_same_origin` | proved |
@@ -3111,7 +3112,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-27 | Low | resolved | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
 | APP-40 | Medium | resolved | the RateLimit refill product wraps after a long idle period | `Flare/Bugs/APP_40.lean` | `repro/APP-40_ratelimit_refill_overflow.mojo` (any) |
 | APP-41 | Medium | resolved | CircuitBreaker measures the cooldown from the start of the failing request | `Flare/Bugs/APP_41.lean` | `repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (any) |
-| APP-42 | Low | open | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
+| APP-42 | Low | resolved | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
 | APP-43 | Low | open | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
 | APP-44 | Low | open | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
 | APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
@@ -5136,7 +5137,7 @@ sufficient by `fixed_cooldown_respected`.
 - Observed: `BUG REPRODUCED: call right after the trip returned 500 and the inner handler ran 2 times (expected 503, 1 call); first status 500`
 - Flip: `OK: breaker fast-failed with 503 during cooldown; inner calls 1`
 
-Status: resolved. Both `_record_failure` call sites in `serve` now pass `perf_counter_ns()` read when the failure is recorded, so the cooldown counts from the failure. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request`; the repro now prints `OK:`. The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`fix41` on, `fix42` off until APP-42); `Flare.Bugs.APP_41.shipped_meets_spec` is stated about it.
+Status: resolved. Both `_record_failure` call sites in `serve` now pass `perf_counter_ns()` read when the failure is recorded, so the cooldown counts from the failure. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request`; the repro now prints `OK:`. The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`fix41` and, since APP-42, `fix42` on); `Flare.Bugs.APP_41.shipped_meets_spec` is stated about it.
 
 #### APP-42: CircuitBreaker admits every request while HALF_OPEN
 
@@ -5158,6 +5159,8 @@ compare-and-swap.
 
 - Observed: `BUG REPRODUCED: while worker 1's probe was in flight (HALF_OPEN), worker 2 got 200 and its upstream ran 1 time(s); expected 503 and 0. trip status 500 probe status 200`
 - Flip: `OK: second request fast-failed with 503 while the probe was in flight`
+
+Status: resolved. `serve` fast-fails with 503 while the state is HALF_OPEN, and claims OPEN -> HALF_OPEN with a new `_cell_cas`, so a worker that loses the race also fast-fails and exactly one probe runs. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_half_open_admits_only_the_probe` (a second breaker copy sharing the cell serves a request from inside the probe; it gets 503 and the upstream is not reached; the probe's success closes the breaker). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`stepG true true`); `Flare.Bugs.APP_42.shipped_meets_spec` is stated about it. Decision: a probe that never records an outcome would leave the breaker half-open; `serve` is synchronous and records success or failure on every return or raise, so this cannot happen short of the process dying.
 
 #### APP-43: a network-path `Location` (`//host/path`) is resolved as a path
 

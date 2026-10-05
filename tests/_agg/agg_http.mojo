@@ -2529,6 +2529,9 @@ from test_reliability import (
     test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request as test_reliability__test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request,
 )
 from test_reliability import (
+    test_circuitbreaker_half_open_admits_only_the_probe as test_reliability__test_circuitbreaker_half_open_admits_only_the_probe,
+)
+from test_reliability import (
     test_circuitbreaker_disabled_passthrough as test_reliability__test_circuitbreaker_disabled_passthrough,
 )
 from test_request_builder import (
@@ -5667,6 +5670,9 @@ def main() raises:
     suite.test[test_reliability__test_circuitbreaker_opens_after_threshold]()
     suite.test[
         test_reliability__test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request
+    ]()
+    suite.test[
+        test_reliability__test_circuitbreaker_half_open_admits_only_the_probe
     ]()
     suite.test[test_reliability__test_circuitbreaker_disabled_passthrough]()
     # tests/http/test_request_builder.mojo

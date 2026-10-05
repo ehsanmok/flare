@@ -149,6 +149,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.Bugs.APP_41.shipped_meets_spec
 #print axioms Flare.Bugs.APP_42.halfopen_admits_two
 #print axioms Flare.Bugs.APP_42.fixed_halfopen_one_probe
+#print axioms Flare.Bugs.APP_42.shipped_meets_spec
 #print axioms Flare.Bugs.APP_43.violates_spec
 #print axioms Flare.Bugs.APP_43.resolveFixed_network_path
 #print axioms Flare.Bugs.APP_44.host_case_not_same_origin

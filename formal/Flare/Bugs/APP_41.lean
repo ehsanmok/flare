@@ -12,7 +12,7 @@ call is let through as a probe instead of fast-failing.
 Repro: formal/repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo.
 
 Status: resolved. Both call sites now pass `perf_counter_ns()` read at the
-failure (`Flare.L4.CircuitBreaker.stepShipped` = `stepG true false`); the
+failure (`Flare.L4.CircuitBreaker.stepShipped` = `stepG true true`, APP-42 fixed too); the
 counterexample below is about the pre-fix `stepG false false`. Regression
 test: tests/http/test_reliability.mojo::
 test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request.
@@ -126,7 +126,7 @@ theorem fixed_cooldown_respected (f42 : Bool) (thr cd : Int) :
 /-- **Fix meets spec**: the shipped breaker respects the cooldown clause for
 every threshold and cooldown. -/
 theorem shipped_meets_spec (thr cd : Int) :
-    CooldownOK (lts true false thr cd) cd :=
-  fixed_cooldown_respected false thr cd
+    CooldownOK (lts true true thr cd) cd :=
+  fixed_cooldown_respected true thr cd
 
 end Flare.Bugs.APP_41

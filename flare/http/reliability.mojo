@@ -89,6 +89,15 @@ def _cell_lock(addr: Int, i: Int):
             return
 
 
+def _cell_cas(addr: Int, i: Int, expected: Int64, desired: Int64) -> Bool:
+    """Atomically set slot ``i`` to ``desired`` if it holds ``expected``;
+    True when this call made the change."""
+    var p = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)
+    var slot = (p.unsafe_offset(i)).unsafe_bitcast[Scalar[DType.int64]]()
+    var e = expected
+    return Atomic[Int64].compare_exchange(slot, e, desired)
+
+
 def _cell_unlock(addr: Int, i: Int):
     _cell_set(addr, i, Int64(0))
 
@@ -419,8 +428,9 @@ struct CircuitBreaker[Inner: Handler & Copyable](Copyable, Handler):
     for ``cooldown_ms``, counted from the moment the failing call
     returned (not from when it started, so a slow failure does not
     use up the cooldown). The first call after cooldown is a probe
-    (half-open); success closes the breaker, another failure
-    re-opens it.
+    (half-open) and is the only call let through while it is in
+    flight: the others fast-fail with ``503``. Success closes the
+    breaker, another failure re-opens it.
 
     ``failure_threshold <= 0`` disables the breaker (pass-through).
     State lives in a leaked atomic cell (see module docstring).
@@ -467,8 +477,17 @@ struct CircuitBreaker[Inner: Handler & Copyable](Copyable, Handler):
                 return Response(
                     status=503, reason=String("Service Unavailable")
                 )
-            # Cooldown elapsed: let one probe through (half-open).
-            _cell_set(self._cell, 0, _CB_HALF_OPEN)
+            # Cooldown elapsed: let exactly one probe through (half-open).
+            # Claim OPEN -> HALF_OPEN atomically; a worker that loses the
+            # race sees the probe already in flight and fast-fails.
+            if not _cell_cas(self._cell, 0, _CB_OPEN, _CB_HALF_OPEN):
+                return Response(
+                    status=503, reason=String("Service Unavailable")
+                )
+        elif state == _CB_HALF_OPEN:
+            # The probe is in flight: every other call fast-fails until it
+            # closes or re-opens the breaker.
+            return Response(status=503, reason=String("Service Unavailable"))
         try:
             var resp = self.inner.serve(req).lower()
             if resp.status >= 500:
