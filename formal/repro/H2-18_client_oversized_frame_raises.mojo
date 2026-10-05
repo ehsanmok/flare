@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-18 fixed on fix/formal-findings
 """H2-18: a frame larger than the client's advertised SETTINGS_MAX_FRAME_SIZE
 makes `Http2ClientConnection.feed` raise instead of answering
 GOAWAY(FRAME_SIZE_ERROR); flare's own callers (flare/http/_client/
@@ -19,7 +20,7 @@ Trace: fresh client; the server sends a DATA frame header declaring
 16385 octets on stream 1.
 
 Expected: feed returns and the outbox holds GOAWAY(FRAME_SIZE_ERROR).
-Actual: feed raises and nothing is queued.
+Before the fix: feed raises and nothing is queued.
 
 Minimal fix: queue `_conn_error(FRAME_SIZE_ERROR)` and stop reading
 instead of raising.

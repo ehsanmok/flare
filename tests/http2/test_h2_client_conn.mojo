@@ -923,6 +923,46 @@ def test_trailers_after_a_response_head_are_still_accepted() raises:
     assert_equal(_goaway_code(client.drain()), -1)
 
 
+def _frame_header(n: Int, ty: UInt8, sid: Int) -> List[UInt8]:
+    """Wire bytes of a frame header declaring ``n`` payload octets."""
+    return [
+        UInt8((n >> 16) & 0xFF),
+        UInt8((n >> 8) & 0xFF),
+        UInt8(n & 0xFF),
+        ty,
+        UInt8(0),
+        UInt8((sid >> 24) & 0x7F),
+        UInt8((sid >> 16) & 0xFF),
+        UInt8((sid >> 8) & 0xFF),
+        UInt8(sid & 0xFF),
+    ]
+
+
+def test_oversized_frame_is_a_frame_size_error_not_a_raise() raises:
+    """H2-18: RFC 9113 sec 4.2. A frame over the advertised
+    SETTINGS_MAX_FRAME_SIZE draws GOAWAY(FRAME_SIZE_ERROR). Before, feed
+    raised, and the callers let the raise propagate: the connection ended
+    with no GOAWAY. Input after the error is discarded."""
+    var client = Http2ClientConnection()
+    _ = client.drain()
+    var hdr = _frame_header(16385, UInt8(0), 1)
+    client.feed(Span[UInt8, _](hdr))
+    assert_equal(_goaway_code(client.drain()), 0x6)
+    assert_true(client.conn.goaway_sent)
+    assert_equal(len(client.inbox), 0)
+
+
+def test_frame_at_the_advertised_size_is_not_refused() raises:
+    """H2-18: the limit is inclusive. A header declaring exactly 16384
+    octets just waits for the payload."""
+    var client = Http2ClientConnection()
+    _ = client.drain()
+    var hdr = _frame_header(16384, UInt8(0), 1)
+    client.feed(Span[UInt8, _](hdr))
+    assert_equal(_goaway_code(client.drain()), -1)
+    assert_false(client.conn.goaway_sent)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -947,4 +987,6 @@ def main() raises:
     test_send_data_on_an_open_stream_still_sends()
     test_headers_after_the_servers_end_stream_is_stream_closed()
     test_trailers_after_a_response_head_are_still_accepted()
-    print("test_h2_client_conn: 23 passed")
+    test_oversized_frame_is_a_frame_size_error_not_a_raise()
+    test_frame_at_the_advertised_size_is_not_refused()
+    print("test_h2_client_conn: 25 passed")

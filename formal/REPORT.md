@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63461 lines) |
-| Theorems | 3339 |
-| Headline theorems in the axiom audit | 1129 |
+| Lean files | 298 (63469 lines) |
+| Theorems | 3340 |
+| Headline theorems in the axiom audit | 1130 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 126 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 127 of 138 |
 
 Six findings are rated high:
 
@@ -3070,7 +3070,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-15 | Low | resolved | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
 | H2-16 | Low | resolved | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
 | H2-17 | Medium | resolved | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
-| H2-18 | Low | open | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
+| H2-18 | Low | resolved | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
 | H2-19 | Low | open | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
 | H2-20 | Low | open | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
 | HPACK-01 | Medium | resolved | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
@@ -4235,6 +4235,8 @@ Status: resolved. Fixed in `client.mojo`: the PUSH_PROMISE special case (RST_STR
 - **Flip:** `OK: PUSH_PROMISE drew GOAWAY code 1`. `test_h2_streaming_state` (10), `test_h2_extended_connect` (5), `test_h2_per_stream_cancel` (6) and `test_grpc_client` (3) passed; `test_h2_client_conn` failed only at the test named above.
 
 #### H2-18: the client raises on an oversized frame instead of FRAME_SIZE_ERROR
+
+Status: resolved. Fixed: `Http2ClientConnection.feed` (`client.mojo`) queues GOAWAY(FRAME_SIZE_ERROR) via `_conn_error`, discards the input and returns, instead of raising. Tests: `test_h2_client_conn.mojo::test_oversized_frame_is_a_frame_size_error_not_a_raise`, `test_frame_at_the_advertised_size_is_not_refused`. Model: `Fix.shipped` carries `h2_18`; `Bugs.H2_18.fixed_shipped`; `bug` and `shipped_raises` stay about `Fix.none`.
 
 - **Severity:** Low. A frame header declaring more than the advertised SETTINGS_MAX_FRAME_SIZE makes `feed` raise. The error propagates to the caller and no GOAWAY is queued (the same class as H2-06).
 - **RFC:** RFC 9113 §4.2: "An endpoint MUST send an error code of FRAME_SIZE_ERROR if a frame exceeds the size defined in SETTINGS_MAX_FRAME_SIZE"; a frame that could alter connection state must be treated as a connection error.

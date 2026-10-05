@@ -394,11 +394,15 @@ struct Http2ClientConnection(Defaultable, Movable):
         becomes observable via :meth:`response_ready` after this
         call returns.
 
+        An oversized frame (RFC 9113 sec 4.2) queues
+        GOAWAY(FRAME_SIZE_ERROR) and discards the rest of the input
+        instead of raising; check :attr:`conn.goaway_sent` and flush
+        :meth:`drain` before closing.
+
         Raises:
-            Error: On a connection-level protocol violation
-                (malformed frame header, RST_STREAM on stream 0,
-                etc.). The caller SHOULD send a GOAWAY and close
-                the socket.
+            Error: On a connection-level protocol violation the frame
+                layer cannot report as a frame (malformed frame header,
+                etc.).
         """
         for i in range(len(data)):
             self.inbox.append(data[i])
@@ -412,9 +416,17 @@ struct Http2ClientConnection(Defaultable, Movable):
                     | Int(self.inbox[2])
                 )
                 if frame_size > self.config.max_frame_size:
-                    raise Error(
-                        "h2 client: frame exceeds advertised maximum size"
+                    # sec 4.2: a frame over the size we advertised is a
+                    # connection error FRAME_SIZE_ERROR. Queue the GOAWAY
+                    # rather than raising: callers let a raise propagate
+                    # and then close without sending anything (H2-18).
+                    var gerr = self.conn._conn_error(
+                        Http2ErrorCode.FRAME_SIZE_ERROR().value
                     )
+                    for gi in range(len(gerr)):
+                        self.outbox.extend(Span(encode_frame(gerr[gi])))
+                    self.inbox = List[UInt8]()
+                    return
             var span = Span[UInt8, _](self.inbox)
             var got = parse_frame(span)
             if not got:

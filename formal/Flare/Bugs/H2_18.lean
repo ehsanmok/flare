@@ -13,6 +13,8 @@ RFC 9113 §4.2: "An endpoint MUST send an error code of FRAME_SIZE_ERROR if
 a frame exceeds the size defined in SETTINGS_MAX_FRAME_SIZE [...]"; a
 frame that could alter the connection state "MUST be treated as a
 connection error (Section 5.4.1)".
+
+Status: resolved. The client driver now queues GOAWAY(FRAME_SIZE_ERROR) for an oversized frame instead of raising. `Fix.shipped` carries `h2_18`; `bug` and `shipped_raises` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_18
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -40,5 +42,10 @@ theorem shipped_raises (dec : Dec) (c : Conn) (f : Fr) (hc : c.isClient = true)
     (hl : f.plen > c.localMaxFrame) :
     step Fix.none dec c (.frame f) = .error "h2 client: frame exceeds advertised maximum size" := by
   simp [step, hc, driveClient, hl, Fix.none]
+
+/-- Shipped (`Fix.shipped` has `h2_18`): the client queues
+GOAWAY(FRAME_SIZE_ERROR) instead of raising. -/
+theorem fixed_shipped : lastOut Fix.shipped init tr = some [.goaway 0 eFRAME_SIZE] := by
+  native_decide
 
 end Flare.Bugs.H2_18

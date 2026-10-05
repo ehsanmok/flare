@@ -78,6 +78,12 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_trailers_after_a_response_head_are_still_accepted as test_h2_client_conn__test_trailers_after_a_response_head_are_still_accepted,
 )
+from test_h2_client_conn import (
+    test_oversized_frame_is_a_frame_size_error_not_a_raise as test_h2_client_conn__test_oversized_frame_is_a_frame_size_error_not_a_raise,
+)
+from test_h2_client_conn import (
+    test_frame_at_the_advertised_size_is_not_refused as test_h2_client_conn__test_frame_at_the_advertised_size_is_not_refused,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -589,6 +595,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_client_conn__test_trailers_after_a_response_head_are_still_accepted
+    ]()
+    suite.test[
+        test_h2_client_conn__test_oversized_frame_is_a_frame_size_error_not_a_raise
+    ]()
+    suite.test[
+        test_h2_client_conn__test_frame_at_the_advertised_size_is_not_refused
     ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()
