@@ -36,9 +36,7 @@ from .proto.ascii import ascii_unchecked_string, ascii_eq_ignore_case
 from .static_response import StaticResponse
 from ._server.config import (
     ServerConfig,
-    WsHandlerFn,
     WsUpgrade,
-    _DEFAULT_SERVER_CONFIG,
     _resolve_bufring_handler_env,
 )
 from .alpn_dispatch import (
@@ -137,7 +135,7 @@ struct HttpServer(Movable):
     var _listener: TcpListener
     var _extra_listener_fds: List[Int]
     """Raw fds of additional listeners attached via
-    :meth:`bind_many`. Empty when constructed via the single-
+    the list overload of :meth:`bind`. Empty when constructed via the single-
     address :meth:`bind` (the default; preserves the original
     single-listener behaviour byte-for-byte).
 
@@ -163,7 +161,7 @@ struct HttpServer(Movable):
     """Optional HTTP/3 UDP listener.
 
     ``None`` (the default) when the server was constructed via
-    :meth:`bind` or :meth:`bind_many` (TCP-only flows). Set to a
+    :meth:`bind` (TCP-only flows). Set to a
     fully-bound :class:`flare.quic.server.QuicListener` when the
     server was constructed via :meth:`bind_with_http3`; the listener
     owns its UDP socket fd, its per-listener timer wheel, and the
@@ -177,7 +175,7 @@ struct HttpServer(Movable):
     """Optional server-side ``SSL_CTX`` for the HTTPS (TLS-terminated)
     path. ``None`` (the default) for the plaintext flows; set to a loaded
     :class:`flare.tls._server_ffi.ServerCtx` by :meth:`bind_tls`, and
-    consumed by :meth:`serve_tls` to spawn a per-connection
+    consumed by :meth:`serve` to spawn a per-connection
     :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`. Kept
     ``Optional`` so the plaintext server carries no TLS/OpenSSL cost."""
 
@@ -267,8 +265,9 @@ struct HttpServer(Movable):
     ) raises -> HttpServer:
         """Bind an HTTP server on multiple addresses simultaneously.
 
-        The list overload of :meth:`bind`. Replaces ``bind_many`` in
-        v0.11, which now delegates here.
+        The list overload of :meth:`bind`. ``bind`` takes either a
+        single address or a list (the pre-0.11 ``bind_many`` was removed
+        in v0.12).
 
         Each address gets its own ``TcpListener`` fd; the unified
         reactor loop accepts on all of them and dispatches each
@@ -288,7 +287,7 @@ struct HttpServer(Movable):
         ``TcpListener.__deinit__``).
 
         Composes with multi-worker serving: ``serve(handler,
-        num_workers=M)`` on a ``bind_many`` server gives N addresses
+        num_workers=M)`` on a multi-address server gives N addresses
         x M workers, where each pairing owns its own
         ``SO_REUSEPORT`` listener (N*M in total, bound serially on
         the scheduler thread). The listeners created here are closed
@@ -316,7 +315,7 @@ struct HttpServer(Movable):
         Example:
 
         ```mojo
-        var srv = HttpServer.bind_many(
+        var srv = HttpServer.bind(
             [SocketAddr.localhost(8080), SocketAddr.localhost(8081)],
         )
         srv.serve(handler)
@@ -325,7 +324,7 @@ struct HttpServer(Movable):
         from flare.net.socket import INVALID_FD
 
         if len(addrs) == 0:
-            raise Error("HttpServer.bind_many: addrs must be non-empty")
+            raise Error("HttpServer.bind: addrs must be non-empty")
         var primary = TcpListener.bind(addrs[0])
         # Bind extras up-front; if any fails, the partially-bound
         # ``TcpListener`` instances we already moved to ``primary``
@@ -349,7 +348,7 @@ struct HttpServer(Movable):
 
     def local_addrs(self) -> List[SocketAddr]:
         """Return the bound addresses, primary first then extras
-        in the order they were passed to :meth:`bind_many`. Always
+        in the order they were passed to :meth:`bind`. Always
         returns at least one entry.
         """
         var out = List[SocketAddr]()
@@ -423,7 +422,7 @@ struct HttpServer(Movable):
         """Bind an HTTPS (TLS-terminated HTTP/1.1) server on ``addr``.
 
         Loads ``cert_file`` / ``key_file`` into a server ``SSL_CTX`` and
-        stashes it on the returned server; :meth:`serve_tls` then drives
+        stashes it on the returned server; :meth:`serve` then drives
         each accepted connection through a non-blocking
         :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`
         (handshake + ``SSL_read`` / ``SSL_write``) before dispatching the
@@ -443,7 +442,7 @@ struct HttpServer(Movable):
             config: HTTP/1.1 server configuration (optional).
 
         Returns:
-            An ``HttpServer`` ready to call :meth:`serve_tls`.
+            An ``HttpServer`` ready to call :meth:`serve`.
 
         Raises:
             AddressInUse: If the port is already bound.
@@ -775,88 +774,6 @@ struct HttpServer(Movable):
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
 
-    def serve_ws_upgrade(
-        mut self,
-        handler: def(Request) raises thin -> Response,
-        ws_handler: WsHandlerFn,
-        num_workers: Int = 1,
-        pin_cores: Bool = True,
-        ws_offload: Bool = False,
-    ) raises:
-        """Serve HTTP and WebSocket on one listener, on one port.
-
-        **Deprecated in 0.11, removed in 0.12.** Set
-        ``ServerConfig.ws = WsUpgrade(handler, offload)`` and call
-        :meth:`serve`. That is all this does.
-
-        Ordinary requests go to ``handler`` exactly as they do under
-        :meth:`serve`. A request that carries a well-formed HTTP/1.1
-        handshake -- ``Connection: Upgrade`` plus ``Upgrade:
-        websocket`` plus a non-empty ``Sec-WebSocket-Key`` (RFC 6455
-        4.2.1) -- gets a ``101 Switching Protocols``, and its socket is
-        handed to ``ws_handler`` as a
-        :class:`flare.ws.WsConnection`. No second listener, no second
-        port.
-
-        ``ws_handler`` has the same signature as
-        :meth:`flare.ws.WsServer.serve`'s callback, so a handler
-        written against a standalone ``WsServer`` moves over unchanged.
-        It owns its connection for as long as that connection lives.
-        By default it runs inline on the reactor worker and blocks it
-        for that whole time, the model ``WsServer`` already uses, so
-        with one worker a long-lived WebSocket stalls the HTTP traffic
-        behind it. Pass ``ws_offload=True`` to move each upgraded
-        connection onto its own thread, or reach for
-        :meth:`flare.ws.WsServer` when connections are many and
-        long-lived.
-
-        Distinct from :meth:`serve`'s two-argument overload, which
-        takes a WS-over-h2 sidecar (RFC 8441 ``CONNECT`` streams inside
-        an HTTP/2 connection). This is the plain HTTP/1.1 handshake.
-
-        Cleartext only: a ``wss://`` connection is terminated by the
-        TLS connection handler, which has no upgrade seam. On a
-        ``bind_tls`` listener the WebSocket hook is ignored and a
-        handshake is served as plain HTTP/1.1 inside TLS (never in
-        cleartext).
-
-        Equivalent to setting :attr:`ServerConfig.ws` and then
-        calling ``serve(handler)``; this just wires the field for you.
-
-        Args:
-            handler: Unary request -> response callback, for every
-                request that is not a WebSocket handshake.
-            ws_handler: Called once per upgraded connection.
-            num_workers: Worker count (``<= 0`` is coerced to 1). The
-                handler is a plain function pointer, so it copies into
-                each per-worker ``ServerConfig`` for free.
-            pin_cores: On Linux, pin worker N to core ``N % num_cpus``.
-            ws_offload: Give each upgraded connection its own detached
-                thread instead of running it inline on the reactor
-                worker. Turn this on when WebSocket connections are
-                long-lived; see :attr:`WsUpgrade.offload` for the
-                trade-off.
-
-        Raises:
-            NetworkError: On fatal listener errors.
-
-        Example:
-            ```mojo
-            def echo(mut ws: WsConnection) raises:
-                while True:
-                    var frame = ws.recv()
-                    ws.send_text(frame.text_payload())
-
-            def hello(req: Request) raises -> Response:
-                return ok("hello over HTTP")
-
-            var srv = HttpServer.bind(SocketAddr.localhost(8080))
-            srv.serve_ws_upgrade(hello, echo)
-            ```
-        """
-        self.config.ws = WsUpgrade(ws_handler, ws_offload)
-        self.serve(handler, num_workers, pin_cores)
-
     def serve[H: Handler](mut self, var handler: H) raises:
         """Run the single-worker reactor loop with any ``Handler``.
 
@@ -908,8 +825,8 @@ struct HttpServer(Movable):
             if self._ws_h2_hooks:
                 raise Error(
                     "HttpServer.serve: a WebSocket-over-h2 sidecar is"
-                    " single-listener; bind_many is not supported with"
-                    " attach_ws_h2 yet."
+                    " single-listener; multiple bind addresses are not"
+                    " supported with attach_ws_h2 yet."
                 )
             run_unified_reactor_loop_multi[H](
                 self._listener,
@@ -935,69 +852,6 @@ struct HttpServer(Movable):
                 )
             finally:
                 self._drop_ws_h2_hooks()
-
-    def serve_tls[H: Handler](mut self, var handler: H) raises:
-        """Serve HTTPS on one worker with any ``Handler``.
-
-        **Deprecated in 0.11, removed in 0.12.** TLS is a property of the
-        bind, not of serving: call :meth:`serve` on a server built by
-        :meth:`bind_tls` and you get the same thing.
-
-        Requires the server to have been constructed via :meth:`bind_tls`.
-        Equivalent to calling :meth:`serve` on a TLS-bound server: the
-        connection is handshaken on the reactor and then dispatched by
-        ALPN to the HTTP/1.1 or HTTP/2 handle, so many connections are in
-        flight at once. Streaming responses compose -- a ``body_stream``
-        handler is emitted with ``Transfer-Encoding: chunked`` framing
-        written as ciphertext.
-
-        Kept as a named entry point because "serve HTTPS" reads better at
-        a call site than "serve, having bound TLS earlier", but there is
-        only one TLS code path now. Mirrors :meth:`serve`'s overload
-        split: this arity accepts ``Handler``-only types, the
-        ``num_workers`` arity additionally requires ``Copyable`` because
-        each worker gets its own copy.
-
-        Args:
-            handler: The request handler (ownership transferred).
-
-        Raises:
-            Error: If no TLS context is bound (use :meth:`bind_tls`).
-            NetworkError: On fatal listener errors.
-        """
-        self._require_tls_ctx()
-        self.serve[H](handler^)
-
-    def serve_tls[
-        H: Handler & Copyable
-    ](mut self, var handler: H, num_workers: Int) raises:
-        """Serve HTTPS across ``num_workers`` reactor workers.
-
-        **Deprecated in 0.11, removed in 0.12.** Use
-        ``serve(handler, num_workers)`` on a TLS-bound server.
-
-        The multi-worker twin of :meth:`serve_tls`; each worker gets its
-        own ``H.copy()`` and they share one ``SSL_CTX``.
-
-        Args:
-            handler: The request handler (ownership transferred).
-            num_workers: Reactor workers.
-
-        Raises:
-            Error: If no TLS context is bound (use :meth:`bind_tls`).
-            NetworkError: On fatal listener errors.
-        """
-        self._require_tls_ctx()
-        self.serve[H](handler^, num_workers)
-
-    @always_inline
-    def _require_tls_ctx(self) raises:
-        """Raise unless :meth:`bind_tls` supplied a server context."""
-        if not self._tls_ctx:
-            raise Error(
-                "HttpServer.serve_tls: no TLS context bound; construct the"
-                " server via HttpServer.bind_tls(addr, cert, key)"
-            )
 
     def _drop_ws_h2_hooks(mut self):
         """Release the boxed WS-over-h2 sidecar, if one was attached.
@@ -1032,7 +886,7 @@ struct HttpServer(Movable):
 
     @always_inline
     def _reject_tls_with_extra_listeners(self) raises:
-        """Raise when TLS is bound alongside :meth:`bind_many` listeners.
+        """Raise when TLS is bound alongside the extra :meth:`bind` listeners.
 
         ``run_unified_reactor_loop_multi`` takes no TLS context, so the
         extra-listener path can only serve cleartext. The combination is
@@ -1046,7 +900,7 @@ struct HttpServer(Movable):
         if self._tls_ctx:
             raise Error(
                 "HttpServer.serve: TLS is not supported alongside"
-                " bind_many extra listeners; bind a single TLS listener"
+                " extra bind listeners; bind a single TLS listener"
                 " instead"
             )
 
@@ -1064,7 +918,7 @@ struct HttpServer(Movable):
         listeners are bound or more than one worker is asked for.
 
         **Changed in v0.11.** This replaces the two-handler
-        ``serve(handler, ws_handler)`` overload. The old shape made a
+        ``serve(handler, ws_handler)`` overload (removed in v0.12). The old shape made a
         WebSocket sidecar look like an argument to serving, when it is a
         property of the server -- the same mistake the ``h2_config``
         argument made.
@@ -1100,7 +954,7 @@ struct HttpServer(Movable):
         never blocks the event loop. Use this for multiplexing /
         streaming fronts (e.g. a streaming proxy).
 
-        Single-listener, single-worker. ``bind_many`` extra listeners
+        Single-listener, single-worker. Extra ``bind(List[SocketAddr])`` listeners
         and multi-worker mode are not supported here yet.
 
         Args:
@@ -1121,7 +975,7 @@ struct HttpServer(Movable):
         if len(self._extra_listener_fds) > 0:
             raise Error(
                 "HttpServer.serve_streaming is single-listener only; bind"
-                " with HttpServer.bind (not bind_many)."
+                " with HttpServer.bind(addr), not a list of addresses."
             )
         self._stopping = False
         run_stream_reactor_loop(
@@ -1152,7 +1006,7 @@ struct HttpServer(Movable):
         scheduler's decision via ``FLARE_REUSEPORT_WORKERS``.
 
         ``num_workers <= 1`` falls through to the single-worker loop.
-        Single-listener only: ``bind_many`` extra listeners are rejected
+        Single-listener only: extra ``bind(List[SocketAddr])`` listeners are rejected
         (multi-worker uses SO_REUSEPORT, not multi-address).
         """
         if num_workers <= 1:
@@ -1165,7 +1019,8 @@ struct HttpServer(Movable):
         if len(self._extra_listener_fds) > 0:
             raise Error(
                 "HttpServer.serve_streaming multi-worker is single-listener"
-                " only; bind with HttpServer.bind (not bind_many)."
+                " only; bind with HttpServer.bind(addr), not a list of"
+                " addresses."
             )
         self._serve_streaming_multicore[H](
             handler^, num_workers, pin_cores, max_in_flight, retry_after_s
@@ -1313,9 +1168,9 @@ struct HttpServer(Movable):
 
         var addr = self._listener.local_addr()
         # N x M: each worker binds its own SO_REUSEPORT listener on
-        # every address, so every listener bound by bind_many has to be
+        # every address, so every listener bound by a multi-address bind has to be
         # closed first -- SO_REUSEPORT only composes with other
-        # SO_REUSEPORT sockets, and bind_many's originals are plain
+        # SO_REUSEPORT sockets, and the list-bind originals are plain
         # binds holding the address.
         var extra_addrs = self._extra_local_addrs.copy()
         self._listener.close()
@@ -1359,59 +1214,6 @@ struct HttpServer(Movable):
             _ = libc_nanosleep_ms(50)
 
         scheduler.shutdown()
-
-    def serve_comptime[
-        H: Handler,
-        //,
-        handler: H,
-        config: ServerConfig = _DEFAULT_SERVER_CONFIG,
-    ](mut self,) raises:
-        """Comptime-specialised reactor loop.
-
-        ``handler`` is a comptime value (typically a stateless struct
-        or a ``FnHandler`` wrapping a module-level function) and
-        ``config`` is a comptime ``ServerConfig``. The Mojo compiler
-        specialises the reactor loop for this exact ``(handler,
-        config)`` pair so the handler call inlines into
-        ``on_readable`` and invariant checks happen at compile time.
-
-        Invariants enforced at compile time via ``comptime assert``:
-
-        - ``config.read_buffer_size`` must be > 0.
-        - ``config.max_header_size`` and ``config.max_uri_length`` must
-          be > 0.
-        - ``config.max_body_size`` >= ``config.max_header_size`` so a
-          well-formed request with only headers never triggers the
-          body-limit path.
-        - ``config.max_keepalive_requests`` >= 1.
-        - ``config.idle_timeout_ms`` >= 0 (0 disables).
-        - ``config.write_timeout_ms`` >= 0.
-
-        Misconfigured values produce a compile-time error instead of
-        a runtime crash.
-
-        Raises:
-            NetworkError: On fatal listener errors; per-connection errors
-                close the offending connection silently.
-        """
-        from ._server_reactor_impl import run_reactor_loop
-
-        ServerConfig.check[config]()
-
-        self._stopping = False
-        # Materialise the comptime values into runtime copies that the
-        # reactor loop can consume. The Mojo compiler still specialises
-        # ``run_reactor_loop[H]`` per the inferred handler type, so the
-        # handler call inside ``on_readable`` is direct.
-        var runtime_config = materialize[config]()
-        var runtime_handler = materialize[handler]()
-        self.config = runtime_config.copy()
-        run_reactor_loop(
-            self._listener,
-            runtime_config,
-            runtime_handler,
-            self._stopping,
-        )
 
     def serve_cancellable[
         CH: CancelHandler
@@ -1661,52 +1463,6 @@ struct HttpServer(Movable):
     def local_addr(self) -> SocketAddr:
         """Return the local address the server is bound to."""
         return self._listener.local_addr()
-
-    # ── Deprecated entry points (removed in 0.12) ──────────────────────
-    #
-    # v0.11 collapsed nineteen bind*/serve* entry points onto four names.
-    # These four delegate to the replacement so existing code keeps
-    # compiling for one release. Mojo has no @deprecated attribute, so
-    # the notice lives in the docstring.
-
-    @staticmethod
-    def bind_many(
-        var addrs: List[SocketAddr],
-        var config: ServerConfig = ServerConfig(),
-    ) raises -> HttpServer:
-        """Bind several addresses onto one server.
-
-        **Deprecated in 0.11, removed in 0.12.** Use
-        ``HttpServer.bind(addrs, config)`` -- ``bind`` now takes either a
-        single address or a list.
-
-        Args:
-            addrs: Local addresses to listen on.
-            config: Server configuration.
-
-        Returns:
-            An ``HttpServer`` listening on every address.
-        """
-        return HttpServer.bind(addrs^, config^)
-
-    def serve_static_multicore(
-        mut self,
-        var resp: StaticResponse,
-        num_workers: Int,
-        pin_cores: Bool = True,
-    ) raises:
-        """Serve one fixed response across several workers.
-
-        **Deprecated in 0.11, removed in 0.12.** Use
-        ``serve_static(resp, num_workers)`` -- ``serve_static`` now takes
-        a worker count.
-
-        Args:
-            resp: The precomputed response.
-            num_workers: Reactor workers.
-            pin_cores: Pin worker N to core N % num_cpus (Linux only).
-        """
-        self.serve_static(resp, num_workers, pin_cores)
 
     def close(mut self):
         """Stop accepting new connections and break the reactor loop.

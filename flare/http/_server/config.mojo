@@ -2,8 +2,7 @@
 
 The :class:`ServerConfig` value type (read/buffer sizing, timeouts,
 keep-alive policy, leniency + bufring toggles) plus the startup
-``FLARE_BUFRING_HANDLER`` env read and the comptime default used by
-``HttpServer.serve_comptime``. Extracted from ``flare.http.server`` to
+``FLARE_BUFRING_HANDLER`` env read. Extracted from ``flare.http.server`` to
 keep the reactor module within the file-size budget;
 ``flare.http.server`` re-exports every name so existing
 ``from flare.http.server import ServerConfig`` call sites keep
@@ -26,7 +25,7 @@ from ...ws.server import WsConnection
 comptime WsHandlerFn = def(mut WsConnection) raises thin -> None
 """The opt-in WebSocket handler signature. Identical to
 ``WsServer.serve``'s callback, so a handler written for a standalone
-``WsServer`` plugs into ``HttpServer.serve_ws_upgrade`` unchanged."""
+``WsServer`` plugs into ``ServerConfig.ws = WsUpgrade(...)`` unchanged."""
 
 
 @fieldwise_init
@@ -103,7 +102,7 @@ struct ServerConfig(Copyable):
             thread and nothing flips ``Cancel.TIMEOUT`` while one is
             running. Kept so configs that set it stay valid, and still
             checked against ``request_timeout_ms`` by
-            ``serve_comptime``.
+            ``ServerConfig.check``.
         request_timeout_ms: Max ms to read one whole request, head and
             body, from its first byte (default 60_000); the reactor
             answers 408 and closes when it runs out. 0 disables. It
@@ -111,7 +110,7 @@ struct ServerConfig(Copyable):
             ``idle_timeout_ms``, which re-arms on every read. It does
             not interrupt a running handler. Must be >=
             ``handler_timeout_ms`` and >= ``read_body_timeout_ms``
-            (checked at compile time in ``serve_comptime``).
+            (checked at compile time by ``ServerConfig.check``).
         use_bufring: Opt into the io_uring buffer-ring single-worker
             reactor (HTTP/1.1-only, single-listener-only) on Linux
             ``>= 6.0``. When ``False`` (default), every entry point
@@ -174,7 +173,7 @@ struct ServerConfig(Copyable):
     a mid-flight env-var flip cannot reroute live connections.
     Linux-only, HTTP/1.1-only, single-listener-only -- the
     field is silently ignored on macOS / for HTTP/2 / for
-    ``HttpServer.bind_many``."""
+    a multi-address ``HttpServer.bind(List[SocketAddr])``."""
     var h1_leniency: H1LeniencyConfig
     """HTTP/1.1 parser leniency configuration. Strict by default
     (every flag off); each named flag relaxes a specific RFC 9112
@@ -193,14 +192,13 @@ struct ServerConfig(Copyable):
     var ws: WsUpgrade
     """WebSocket-on-the-same-port configuration. Default: HTTP only.
 
-    Replaces the loose ``ws_handler`` / ``ws_offload`` fields in v0.11.
-    ``HttpServer.serve_ws_upgrade`` sets this for you."""
+    Replaced the loose ``ws_handler`` / ``ws_offload`` fields in v0.11."""
 
     var h2: Http2Config
     """HTTP/2 SETTINGS and per-stream limits, applied when a connection
     negotiates h2 by ALPN or upgrades via h2c.
 
-    Replaces the ``h2_config`` argument that every ``bind*`` used to
+    Replaced the ``h2_config`` argument that every ``bind*`` used to
     take separately in v0.11."""
 
     def __init__(
@@ -259,10 +257,11 @@ struct ServerConfig(Copyable):
         ``read_body_timeout_ms``, or the handler could keep working past
         the request deadline -- the bug these checks exist to prevent.
 
-        Added in v0.11. These lived inside ``HttpServer.serve_comptime``,
+        Added in v0.11. These used to live inside the
+        ``HttpServer.serve_comptime`` entry point (removed in v0.12),
         which meant the only way to get them was to also accept that
         method's single-worker, single-listener, no-TLS reactor. They are
-        reusable now.
+        callable anywhere now.
 
         Parameters:
             cfg: The configuration to validate.
@@ -338,11 +337,3 @@ def _resolve_bufring_handler_env() -> Bool:
     a mid-flight ``setenv`` cannot reroute live connections.
     """
     return getenv("FLARE_BUFRING_HANDLER") == "1"
-
-
-# Comptime-friendly default config. Used as the default for
-# ``HttpServer.serve_comptime[handler, config = ...]()``. Any user who
-# wants a non-default comptime config must declare their own
-# ``comptime my_cfg: ServerConfig = ServerConfig(...)`` because Mojo
-# ``comptime assert`` checks need comptime-stable values.
-comptime _DEFAULT_SERVER_CONFIG: ServerConfig = ServerConfig()

@@ -1,4 +1,4 @@
-"""``ServerConfig.ws_offload``: keep the reactor free during a WebSocket.
+"""``WsUpgrade.offload``: keep the reactor free during a WebSocket.
 
 A WebSocket handler owns its connection for as long as that connection
 lives. Run inline, it owns the reactor worker too -- so on a
@@ -14,7 +14,7 @@ The thresholds are far apart on purpose (the handler sleeps 2500 ms, the
 split is at 1200 ms) so neither direction turns into a timing flake on a
 loaded machine.
 
-A third test covers the other half of what ``ws_offload`` changes: two
+A third test covers the other half of what ``offload`` changes: two
 offloaded handlers run at the same time. The reactor staying free says
 nothing about that, and concurrency is the part of the contract that
 changes what handler authors have to do about shared state.
@@ -26,7 +26,7 @@ from std.testing import assert_equal, assert_true
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
-from flare.http import HttpServer, Request, Response, ok
+from flare.http import HttpServer, Request, Response, WsUpgrade, ok
 from flare.http.client_pool import _monotonic_ms
 from flare.net import SocketAddr
 from flare.net._libc import (
@@ -124,9 +124,8 @@ def _measure(
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_ws_upgrade(
-                _http_handler, _slow_ws_handler, ws_offload=ws_offload
-            )
+            srv.config.ws = WsUpgrade(_slow_ws_handler, ws_offload)
+            srv.serve(_http_handler)
         except:
             pass
         exit()
@@ -152,7 +151,7 @@ def _measure(
 
 
 def test_offloaded_websocket_does_not_block_http() raises:
-    """With ``ws_offload``, the GET overtakes the busy WebSocket."""
+    """With ``offload``, the GET overtakes the busy WebSocket."""
     var body = String("")
     var ws_echo = String("")
     var elapsed = _measure(True, body, ws_echo)
@@ -173,7 +172,7 @@ def test_offloaded_websocket_does_not_block_http() raises:
 
 def test_inline_websocket_blocks_http_on_one_worker() raises:
     """Without it, the same GET waits for the WebSocket -- the behaviour
-    ``ws_offload`` exists to fix, pinned here so it cannot regress into
+    ``offload`` exists to fix, pinned here so it cannot regress into
     looking like the fixed case."""
     var body = String("")
     var ws_echo = String("")
@@ -212,9 +211,8 @@ def test_two_offloaded_websockets_run_concurrently() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_ws_upgrade(
-                _http_handler, _slow_ws_handler, ws_offload=True
-            )
+            srv.config.ws = WsUpgrade(_slow_ws_handler, True)
+            srv.serve(_http_handler)
         except:
             pass
         exit()

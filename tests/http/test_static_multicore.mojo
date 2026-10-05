@@ -1,5 +1,5 @@
 """Integration test for the multi-worker static-response server
-(``HttpServer.serve_static_multicore`` in :mod:`flare.http.server`,
+(``HttpServer.serve_static(resp, num_workers)`` in :mod:`flare.http.server`,
 backed by ``StaticScheduler`` in :mod:`flare.runtime.scheduler` and
 ``run_reactor_loop_static_shared`` in
 :mod:`flare.http._server_reactor_impl`).
@@ -138,7 +138,7 @@ def test_static_multicore_sequential_keepalive_churn() raises:
                 content_type="text/plain; charset=utf-8",
                 body="Hello, static multi!",
             )
-            srv.serve_static_multicore(resp^, num_workers=4, pin_cores=False)
+            srv.serve_static(resp, num_workers=4, pin_cores=False)
         except:
             pass
         exit()
@@ -193,7 +193,7 @@ def test_static_multicore_concurrent_fanout() raises:
                 content_type="text/plain; charset=utf-8",
                 body="Hello, static fanout!",
             )
-            srv.serve_static_multicore(resp^, num_workers=4, pin_cores=False)
+            srv.serve_static(resp, num_workers=4, pin_cores=False)
         except:
             pass
         exit()

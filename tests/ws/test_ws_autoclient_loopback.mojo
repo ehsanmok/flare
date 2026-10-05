@@ -8,18 +8,16 @@ flare WebSocket server bound on loopback.
 
 The plan called for ``wss://`` loopback against a flare server
 bound on h1 + h2; today the close-wire-paths cycle ships the
-HTTP/3 + QUIC reactor wiring but NOT a unified
-``HttpServer.bind_with_tls`` API that would let
-:func:`flare.testing.fork_server` start a TLS-terminating h1+h2
-server in a child. The cases below exercise the runtime
+HTTP/3 + QUIC reactor wiring but
+:func:`flare.testing.fork_server` cannot yet start a TLS-terminating
+h1+h2 server (``HttpServer.bind_tls``) in a child. The cases below exercise the runtime
 hand-off over cleartext loopback (``ws://``) so the actual
 :class:`flare.ws.WsClient`-allocation + message-round-trip path
 runs over real sockets; the negative wss:// case drives the
 TLS-handshake error path against an unreachable port. The
 ``wss://`` over loopback + ALPN-driven h1 / h2 cross-dispatch
-follows in the same cycle as the
-``HttpServer.bind_with_tls(addr, cert, key, h2_config)`` API
-the next track introduces.
+follows once ``fork_server`` can drive a ``bind_tls`` server (HTTP/2
+settings live at ``ServerConfig.h2``).
 
 The four I/O-touching cases:
 

@@ -490,7 +490,7 @@ test-handler         = "mojo -I . tests/http/test_handler.mojo"            # v0.
 test-router          = "mojo -I . tests/http/test_router.mojo"             # v0.4.0 Track 1 — Router path/method dispatch (~23 tests)
 test-router-copy     = "mojo -I . tests/http/test_router_copy.mojo"        # v0.7 — Router-Copyable refcount-shared boxed handlers (~5 tests)
 test-server-handler  = "mojo -I . tests/http/test_server_handler.mojo"     # v0.4.0 Track 1 — HttpServer.serve[H: Handler & Copyable] single-worker (~6 tests)
-test-serve-comptime  = "mojo -I . tests/http/test_server_serve_comptime.mojo" # v0.4.0 Track 1 — comptime serve overload (~6 tests)
+test-server-config-check = "mojo -I . tests/http/test_server_config_check.mojo" # ServerConfig.check comptime invariants (~6 tests)
 test-thread-ffi      = "mojo -I . tests/runtime/test_thread_ffi.mojo"         # v0.4.0 Track 3 — pthread + CPU pinning FFI (~10 tests)
 test-thread-asyncrt  = "mojo -I . tests/runtime/test_thread_asyncrt.mojo && mojo -D FLARE_ASYNCRT -I . tests/runtime/test_thread_asyncrt.mojo"  # thread-engine switch, run on pthreads then on AsyncRT (~10 tests each)
 bench-threads        = "bash benchmark/scripts/bench_threads.sh"             # spawn/join, fan-out and block_in_pool cost on pthread vs AsyncRT
@@ -568,7 +568,7 @@ test-request-factories = "mojo -I . tests/http/test_request_factories.mojo"     
 test-request-builder = "mojo -I . tests/http/test_request_builder.mojo"           # client RequestBuilder: per-request headers/query/body/content-type (7 cases)
 test-handler-extractor = "mojo -I . tests/http/test_handler_extractor.mojo"       # v0.7 — HandlerExtractor convenience trait composition (~4 tests)
 test-h1-trailers     = "mojo -I . tests/http/test_h1_trailers.mojo"               # v0.7 — HTTP/1.1 trailer fields: client decode + server emit + smuggling guard (~8 tests)
-test-multi-listener  = "mojo -I . tests/http/test_multi_listener.mojo"            # v0.7 — HttpServer.bind_many: multi-listener accept demux + drain (~4 tests)
+test-multi-listener  = "mojo -I . tests/http/test_multi_listener.mojo"            # v0.7 — HttpServer.bind(List[SocketAddr]): multi-listener accept demux + drain (~4 tests)
 test-tls-resume      = "mojo -I . tests/tls/test_tls_resume.mojo"                # v0.7 — TLS session resumption (RFC 5077 / RFC 8446 §4.6.1) (~3 tests)
 test-h2c-client-upgrade = "mojo -I . tests/http/test_h2c_client_upgrade.mojo"     # v0.7 — h2c-via-Upgrade client (RFC 7540 §3.2) round-trip + body + back-to-back (~3 tests)
 test-h2c-client-double-body = "mojo -I . tests/http/test_h2c_client_double_body.mojo"  # v0.7.1 — regression: h2c-Upgrade client must not double-count single-recv-blob response bodies (Span lifetime)
@@ -622,7 +622,7 @@ test-uring-serve-static = "mojo -I . tests/http/test_uring_serve_static.mojo"   
 test-uring-serve-handler = "mojo -I . tests/http/test_uring_serve_handler.mojo"   # End-to-end HttpServer.serve(handler) through run_uring_bufring_reactor_loop; forks a child server, drives sequential keep-alive churn (8 conns x 50 reqs = 400 round-trips) + concurrent fan-out (8 parallel x 30 reqs); validates the buffer-ring substrate + cancel-before-free contract; 2 tests, no-op skip on non-io_uring hosts / FLARE_DISABLE_IO_URING=1. Back in the `tests` aggregate: the prior "Linux 6.8 disarms IORING_RECV_MULTISHOT after ~240 round-trips" note was a misdiagnosis. Root cause was an IoUringDriver mmap-sizing bug -- the SQE/CQE arrays were sized from the sq_off/cq_off ring_entries OFFSET (24) instead of the entry COUNT (4096), so the SQE mmap was one page (64 slots); once cumulative multishot re-arms pushed the SQ tail past idx 64, next_sqe handed out a slot in the next, unmapped page and the SQE write faulted. Fixed by sizing both mmaps from the authoritative params.sq_entries/cq_entries.
 test-uring-serve-handler-load = "mojo -I . tests/http/test_uring_serve_handler_load.mojo"  # io_uring buffer-ring handler-path sustained-load floor test. 8 sequential conns × 10 keep-alive reqs = 80 round-trips with a real bufring server in a fork(); asserts all 80 succeed. Floor-level regression guard against a "totally broken bufring" failure mode. 1 test, no-op skip on non-io_uring hosts.
 test-uring-bufring-dispatch = "mojo -I . tests/runtime/test_uring_bufring_dispatch.mojo"  # v0.7.1 — regression: bufring dispatch must stage kernel-pool bytes into read_buf BEFORE the handler runs (destructor reorder + Span origin tightening)
-test-static-multicore   = "mojo -I . tests/http/test_static_multicore.mojo"       # End-to-end HttpServer.serve_static_multicore through StaticScheduler + run_reactor_loop_static_shared; forks a child server with 4 workers, drives 8x50 sequential keep-alive churn + 8x30 concurrent fan-out; validates the multi-worker static fast path. 2 tests, cross-platform (no io_uring dependency).
+test-static-multicore   = "mojo -I . tests/http/test_static_multicore.mojo"       # End-to-end HttpServer.serve_static(resp, n) through StaticScheduler + run_reactor_loop_static_shared; forks a child server with 4 workers, drives 8x50 sequential keep-alive churn + 8x30 concurrent fan-out; validates the multi-worker static fast path. 2 tests, cross-platform (no io_uring dependency).
 test-safety-asserts  = "mojo -I . tests/runtime/test_safety_asserts.mojo"             # v0.7 — bounds-check + debug_assert[assert_mode="safe"] guards on FFI substrate (run under -D ASSERT=all to exercise; see .cursor/rules/sanitizers-and-bounds-checking.mdc, ~14 tests)
 
 # ── Sanitizer + assertion harness (see .cursor/rules/sanitizers-and-bounds-checking.mdc) ──
@@ -741,7 +741,7 @@ example-http2-config    = "mojo -I . examples/advanced/http2_config.mojo"     # 
 example-uds-sidecar     = "mojo -I . examples/advanced/uds_sidecar.mojo"      # UnixListener + UnixStream
 example-streaming-proxy = "mojo -I . examples/advanced/streaming_proxy.mojo"  # v0.9 — StreamHandler + UpstreamChunkSource + backpressure
 example-openai-sse-front = "mojo -I . examples/advanced/openai_sse_front.mojo"  # OpenAI-shaped SSE front over a token backend + backpressure
-example-https           = "mojo -I . examples/advanced/https_server.mojo"     # HTTPS server: bind_tls / serve_tls + chunked streaming over SSL_write
+example-https           = "mojo -I . examples/advanced/https_server.mojo"     # HTTPS server: bind_tls / serve + chunked streaming over SSL_write
 
 # Every example, once. Generated from the example-* tasks and kept in
 # step by tests/tools/check_example_tasks.py -- this was a hand-written
@@ -827,7 +827,7 @@ example-http2-server-router = "mojo -I . examples/advanced/http2_server_router.m
 example-ok-json-typed = "mojo -I . examples/intermediate/ok_json_typed.mojo"  # v0.7 — typed JSON request -> typed JSON response via ok_json_value
 example-infallible-handler = "mojo -I . examples/intermediate/infallible_handler.mojo"  # v0.7 — HandlerInfallible vs Handler
 example-trailers     = "mojo -I . examples/intermediate/trailers.mojo"          # v0.7 — HTTP/1.1 trailer fields (gRPC-shaped status trailer demo)
-example-multi-listener = "mojo -I . examples/intermediate/multi_listener.mojo" # v0.7 — HttpServer.bind_many: one process, three loopback ports
+example-multi-listener = "mojo -I . examples/intermediate/multi_listener.mojo" # v0.7 — HttpServer.bind(List[SocketAddr]): one process, three loopback ports
 example-h2c-client   = "mojo -I . examples/advanced/h2c_client.mojo"         # v0.7 — HTTP/2 cleartext via Upgrade (RFC 7540 §3.2) client
 example-client-pool  = "mojo -I . examples/advanced/client_pool.mojo"        # v0.7 — HttpClient.with_pool() keep-alive idle-reuse demo
 example-ws-over-h2   = "mojo -I . examples/advanced/ws_over_h2.mojo"         # v0.7 — RFC 8441 Extended CONNECT + WS-over-HTTP/2 stream <-> frame adapter

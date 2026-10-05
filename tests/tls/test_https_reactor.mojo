@@ -1,7 +1,7 @@
 """HTTPS served by the unified reactor: concurrency, ALPN, workers.
 
-These cover the capability that ``serve_tls``'s sequential accept loop
-could not offer. The load-bearing case is
+These cover the capability that the old ``serve_tls`` sequential accept
+loop (removed in v0.12) could not offer. The load-bearing case is
 :func:`test_https_concurrent_connections`: it opens several TLS
 connections and sends a request on *every* one before reading *any*
 response. Against a one-connection-at-a-time server that deadlocks --
@@ -289,7 +289,7 @@ def test_https_multi_worker() raises:
     """HTTPS serves with ``num_workers > 1``.
 
     Before the reactor arm existed there was no multi-worker TLS path at
-    all -- ``serve_tls`` had no worker parameter.
+    all -- ``serve_tls`` (removed in v0.12) had no worker parameter.
     """
     var srv = HttpServer.bind_tls(
         SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
@@ -333,18 +333,18 @@ def test_https_multi_worker() raises:
 
 
 def test_https_single_worker_explicit_serves_tls() raises:
-    """Regression: ``serve_tls(handler, 1)`` used to serve plaintext.
+    """Regression: ``serve(handler, 1)`` on a TLS server used to serve plaintext.
 
-    An explicit worker count routes ``serve_tls`` into
+    An explicit worker count routes ``serve`` into
     ``serve[H: Handler & Copyable]``, whose ``num_workers <= 1`` branch
     called the unified reactor loop without passing
     ``self._tls_ctx_addr()``. That parameter defaults to ``0``, so every
     accepted connection was registered as a plaintext ``ConnHandle`` and
     an HTTPS port answered ClientHello bytes in cleartext.
 
-    The arity-1 ``serve_tls`` and the ``num_workers >= 2`` path both
+    The arity-1 ``serve`` and the ``num_workers >= 2`` path both
     passed the context, which is why nothing caught it: before this test
-    no call site in the repo had ever given ``serve_tls`` a worker count.
+    no call site in the repo had ever given a TLS ``serve`` a worker count.
     """
     var srv = HttpServer.bind_tls(
         SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
@@ -357,7 +357,7 @@ def test_https_single_worker_explicit_serves_tls() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_tls(FnHandler(_hello), 1)
+            srv.serve(FnHandler(_hello), 1)
         except:
             pass
         exit()
@@ -383,7 +383,7 @@ def test_https_single_worker_explicit_serves_tls() raises:
 
     _ = kill(pid, SIGKILL)
     waitpid(pid)
-    assert_true(not raised, "TLS handshake against serve_tls(h, 1) raised")
+    assert_true(not raised, "TLS handshake against serve(h, 1) raised")
     assert_true("200" in got, "expected 200, got: " + got)
     assert_true("hello https" in got, "expected body, got: " + got)
 
@@ -410,7 +410,7 @@ def test_https_single_worker_explicit_never_answers_cleartext() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_tls(FnHandler(_hello), 1)
+            srv.serve(FnHandler(_hello), 1)
         except:
             pass
         exit()

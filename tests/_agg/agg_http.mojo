@@ -2182,16 +2182,16 @@ from test_middleware import (
     test_middleware_wraps_a_handler_without_a_default as test_middleware__test_middleware_wraps_a_handler_without_a_default,
 )
 from test_multi_listener import (
-    test_bind_many_two_ports_serve_both as test_multi_listener__test_bind_many_two_ports_serve_both,
+    test_bind_list_two_ports_serve_both as test_multi_listener__test_bind_list_two_ports_serve_both,
 )
 from test_multi_listener import (
-    test_bind_many_local_addrs_returns_in_order as test_multi_listener__test_bind_many_local_addrs_returns_in_order,
+    test_bind_list_local_addrs_returns_in_order as test_multi_listener__test_bind_list_local_addrs_returns_in_order,
 )
 from test_multi_listener import (
-    test_bind_many_empty_addrs_raises as test_multi_listener__test_bind_many_empty_addrs_raises,
+    test_bind_list_empty_addrs_raises as test_multi_listener__test_bind_list_empty_addrs_raises,
 )
 from test_multi_listener import (
-    test_bind_many_multi_worker_serves_every_address as test_multi_listener__test_bind_many_multi_worker_serves_every_address,
+    test_bind_list_multi_worker_serves_every_address as test_multi_listener__test_bind_list_multi_worker_serves_every_address,
 )
 from test_multi_listener import (
     test_serve_cancellable_rejects_extra_listeners as test_multi_listener__test_serve_cancellable_rejects_extra_listeners,
@@ -3372,6 +3372,24 @@ from test_server import (
 from test_server import (
     test_v6_server_loopback as test_server__test_v6_server_loopback,
 )
+from test_server_config_check import (
+    test_check_default_config as test_server_config_check__test_check_default_config,
+)
+from test_server_config_check import (
+    test_check_tight_config as test_server_config_check__test_check_tight_config,
+)
+from test_server_config_check import (
+    test_check_handler_is_handler as test_server_config_check__test_check_handler_is_handler,
+)
+from test_server_config_check import (
+    test_check_bind_close_cycle as test_server_config_check__test_check_bind_close_cycle,
+)
+from test_server_config_check import (
+    test_config_field_access_at_comptime as test_server_config_check__test_config_field_access_at_comptime,
+)
+from test_server_config_check import (
+    test_config_fields_pass_invariants as test_server_config_check__test_config_fields_pass_invariants,
+)
 from test_server_deadlines import (
     test_default_read_body_timeout as test_server_deadlines__test_default_read_body_timeout,
 )
@@ -3404,6 +3422,9 @@ from test_server_deadlines import (
 )
 from test_server_deadlines import (
     test_server_carries_explicit_deadlines as test_server_deadlines__test_server_carries_explicit_deadlines,
+)
+from test_server_deadlines import (
+    test_check_accepts_bounded_and_disabled_deadlines as test_server_deadlines__test_check_accepts_bounded_and_disabled_deadlines,
 )
 from test_server_drain import (
     test_shutdown_report_constructor as test_server_drain__test_shutdown_report_constructor,
@@ -3614,24 +3635,6 @@ from test_server_reactor_state import (
 )
 from test_server_reactor_state import (
     test_response_includes_date_header_from_cache as test_server_reactor_state__test_response_includes_date_header_from_cache,
-)
-from test_server_serve_comptime import (
-    test_serve_comptime_default_config_types as test_server_serve_comptime__test_serve_comptime_default_config_types,
-)
-from test_server_serve_comptime import (
-    test_serve_comptime_tight_config_types as test_server_serve_comptime__test_serve_comptime_tight_config_types,
-)
-from test_server_serve_comptime import (
-    test_serve_comptime_handler_is_handler as test_server_serve_comptime__test_serve_comptime_handler_is_handler,
-)
-from test_server_serve_comptime import (
-    test_serve_comptime_bind_close_cycle as test_server_serve_comptime__test_serve_comptime_bind_close_cycle,
-)
-from test_server_serve_comptime import (
-    test_config_field_access_at_comptime as test_server_serve_comptime__test_config_field_access_at_comptime,
-)
-from test_server_serve_comptime import (
-    test_config_fields_pass_invariants as test_server_serve_comptime__test_config_fields_pass_invariants,
 )
 from test_server_ws_offload import (
     test_offloaded_websocket_does_not_block_http as test_server_ws_offload__test_offloaded_websocket_does_not_block_http,
@@ -5611,13 +5614,13 @@ def main() raises:
         test_middleware__test_middleware_wraps_a_handler_without_a_default
     ]()
     # tests/http/test_multi_listener.mojo
-    suite.test[test_multi_listener__test_bind_many_two_ports_serve_both]()
+    suite.test[test_multi_listener__test_bind_list_two_ports_serve_both]()
     suite.test[
-        test_multi_listener__test_bind_many_local_addrs_returns_in_order
+        test_multi_listener__test_bind_list_local_addrs_returns_in_order
     ]()
-    suite.test[test_multi_listener__test_bind_many_empty_addrs_raises]()
+    suite.test[test_multi_listener__test_bind_list_empty_addrs_raises]()
     suite.test[
-        test_multi_listener__test_bind_many_multi_worker_serves_every_address
+        test_multi_listener__test_bind_list_multi_worker_serves_every_address
     ]()
     suite.test[
         test_multi_listener__test_serve_cancellable_rejects_extra_listeners
@@ -6162,6 +6165,13 @@ def main() raises:
     suite.test[test_server__test_parse_bytes_long_header_value]()
     suite.test[test_server__test_parse_bytes_empty_header_value]()
     suite.test[test_server__test_v6_server_loopback]()
+    # tests/http/test_server_config_check.mojo
+    suite.test[test_server_config_check__test_check_default_config]()
+    suite.test[test_server_config_check__test_check_tight_config]()
+    suite.test[test_server_config_check__test_check_handler_is_handler]()
+    suite.test[test_server_config_check__test_check_bind_close_cycle]()
+    suite.test[test_server_config_check__test_config_field_access_at_comptime]()
+    suite.test[test_server_config_check__test_config_fields_pass_invariants]()
     # tests/http/test_server_deadlines.mojo
     suite.test[test_server_deadlines__test_default_read_body_timeout]()
     suite.test[test_server_deadlines__test_default_handler_timeout]()
@@ -6176,6 +6186,9 @@ def main() raises:
     suite.test[test_server_deadlines__test_disable_request_timeout_with_zero]()
     suite.test[test_server_deadlines__test_server_carries_default_deadlines]()
     suite.test[test_server_deadlines__test_server_carries_explicit_deadlines]()
+    suite.test[
+        test_server_deadlines__test_check_accepts_bounded_and_disabled_deadlines
+    ]()
     # tests/http/test_server_drain.mojo
     suite.test[test_server_drain__test_shutdown_report_constructor]()
     suite.test[test_server_drain__test_shutdown_report_zero_state]()
@@ -6344,23 +6357,6 @@ def main() raises:
     suite.test[
         test_server_reactor_state__test_response_includes_date_header_from_cache
     ]()
-    # tests/http/test_server_serve_comptime.mojo
-    suite.test[
-        test_server_serve_comptime__test_serve_comptime_default_config_types
-    ]()
-    suite.test[
-        test_server_serve_comptime__test_serve_comptime_tight_config_types
-    ]()
-    suite.test[
-        test_server_serve_comptime__test_serve_comptime_handler_is_handler
-    ]()
-    suite.test[
-        test_server_serve_comptime__test_serve_comptime_bind_close_cycle
-    ]()
-    suite.test[
-        test_server_serve_comptime__test_config_field_access_at_comptime
-    ]()
-    suite.test[test_server_serve_comptime__test_config_fields_pass_invariants]()
     # tests/http/test_server_ws_offload.mojo
     suite.test[
         test_server_ws_offload__test_offloaded_websocket_does_not_block_http

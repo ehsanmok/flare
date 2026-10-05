@@ -9,7 +9,7 @@ live in ``flare.http._reactor.lifecycle`` and are re-exported here.
 Split out of ``_server_reactor_impl.mojo`` to keep each module
 within the file-size budget; ``_server_reactor_impl`` re-exports every
 public name so existing ``from flare.http._server_reactor_impl import
-run_reactor_loop ...`` (server.mojo, frontend.mojo, _unified_reactor_impl,
+run_reactor_loop_shared ...`` (server.mojo, frontend.mojo, _unified_reactor_impl,
 tests) call sites keep resolving unchanged. Pure code motion.
 """
 
@@ -119,11 +119,11 @@ def _run_handler_loop_impl[
 ) raises:
     """Shared epoll/kqueue event-loop body for the dynamic-handler path.
 
-    Drives both the dedicated-listener (``run_reactor_loop``) and the
-    multi-worker shared-listener (``run_reactor_loop_shared``) entry
-    points; the public surfaces are thin wrappers that fan into this
-    body with ``is_shared`` chosen at the callsite. The two paths
-    differed only in (a) ``register`` vs ``register_exclusive`` for
+    Drives the multi-worker shared-listener entry point
+    (``run_reactor_loop_shared``); that public surface is a thin wrapper
+    that fans into this body. The dedicated-listener wrapper
+    (``is_shared=False``) was removed with ``HttpServer.serve_comptime``
+    in v0.12; the two paths differed only in (a) ``register`` vs ``register_exclusive`` for
     the listener token and (b) the byte-equivalent accept drainer
     -- folding both into one comptime-parameterised body deletes a
     full ~120 lines of duplicated event / timer / fast-path code.
@@ -267,35 +267,6 @@ def _run_handler_loop_impl[
         leftover.append(kv.key)
     for i in range(len(leftover)):
         _cleanup_conn(leftover[i], conns, timers, reactor, wheel)
-
-
-def run_reactor_loop[
-    H: Handler
-](
-    mut listener: TcpListener,
-    config: ServerConfig,
-    ref handler: H,
-    ref stopping: Bool,
-) raises:
-    """Run the single-threaded event loop until ``stopping`` becomes True.
-
-    The caller (``HttpServer.serve``) owns the listener and provides
-    the request handler. This function delegates the loop body to
-    :func:`_run_handler_loop_impl` with ``is_shared=False`` so the
-    listener registers without ``EPOLLEXCLUSIVE``.
-
-    Args:
-        listener: Bound and listening ``TcpListener`` (ownership stays
-            with the caller; we only borrow for accept / fd access).
-        config: Server configuration.
-        handler: Per-request callback.
-        stopping: Checked on every poll iteration; when True the loop
-            exits and in-flight connections are closed.
-    """
-    listener._socket.set_nonblocking(True)
-    _run_handler_loop_impl[H, is_shared=False](
-        Int(listener._socket.fd), config, handler, stopping
-    )
 
 
 def run_reactor_loop_shared[
@@ -506,7 +477,7 @@ def run_reactor_loop_static(
 ) raises:
     """Reactor loop specialised for a pre-encoded ``StaticResponse``.
 
-    Mirrors ``run_reactor_loop`` but drives each connection through
+    Mirrors ``run_reactor_loop_shared`` but drives each connection through
     ``ConnHandle.on_readable_static(resp, config)`` instead of the
     parse-and-dispatch path. Delegates to
     :func:`_run_static_loop_impl` with ``is_shared=False`` so the
@@ -571,9 +542,9 @@ def run_reactor_loop_cancel[
     ref stopping: Bool,
     stats_addr: Int = 0,
 ) raises:
-    """Cancel-aware variant of ``run_reactor_loop``.
+    """Cancel-aware variant of ``run_reactor_loop_shared``.
 
-    Identical control flow to ``run_reactor_loop`` but drives each
+    Identical control flow to ``run_reactor_loop_shared`` but drives each
     connection through ``ConnHandle.on_readable_cancel(handler,
     config)`` instead of ``on_readable``, so the handler receives
     a ``Cancel`` token bound to the connection's per-request

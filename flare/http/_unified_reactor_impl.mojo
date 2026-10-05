@@ -1261,7 +1261,7 @@ def run_unified_reactor_loop_multi[
             :meth:`HttpServer.local_addr`). Closed by the
             ``HttpServer`` owner; the loop only borrows.
         extra_fds: Raw fds for the additional listeners attached
-            via :meth:`HttpServer.bind_many`. Owned by the caller
+            via :meth:`HttpServer.bind` with a list of addresses. Owned by the caller
             (typically ``HttpServer._extra_listener_fds``); closed
             by ``HttpServer.__deinit__``. The loop only borrows them
             for ``accept(2)``.
@@ -1378,7 +1378,7 @@ def run_unified_reactor_loop_shared[
     because ``accept(2)`` on the losers returns ``EAGAIN``).
 
     ``extra_fds`` carries this worker's listeners on the *additional*
-    addresses of a :meth:`HttpServer.bind_many` server -- one fd per
+    addresses of a multi-address :meth:`HttpServer.bind` server -- one fd per
     extra address, per worker. That is the N x M shape: N addresses
     times M workers, each pairing owning its own ``SO_REUSEPORT``
     listener, rather than N addresses on one worker (multi-listener)

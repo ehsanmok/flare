@@ -226,7 +226,7 @@ struct StreamFrontend[H: StreamHandler & Copyable](Copyable, Frontend):
         reactor registers a single listener, so accepting the list
         silently would leave an address the caller bound with nothing
         listening on it. ``HttpServer.serve_streaming`` refuses
-        bind_many up front for the same reason.
+        multi-address binds up front for the same reason.
         """
         if extra_fds:
             return

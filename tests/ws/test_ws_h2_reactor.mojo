@@ -1,7 +1,7 @@
 """WebSocket-over-HTTP/2 sidecar dispatch on the unified reactor (RFC 8441).
 
-Forks a real ``HttpServer.serve(handler, ws_handler)`` (h2c prior-knowledge,
-no TLS) and hand-drives an ``Http2ClientConnection`` over a socket: opens an
+Forks a real server with ``attach_ws_h2(ws_handler)`` then ``serve(handler)``
+(h2c prior-knowledge, no TLS) and hand-drives an ``Http2ClientConnection`` over a socket: opens an
 Extended CONNECT tunnel, sends a masked client TEXT frame, and asserts the
 edge-driven ``WsH2Handler.on_message`` echo rides back unmasked. Proves the
 reactor accept/pump/teardown wiring, not just the sans-I/O bridge.

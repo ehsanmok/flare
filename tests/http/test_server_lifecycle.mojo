@@ -15,6 +15,7 @@ from flare.http import (
     Request,
     Response,
     ServerConfig,
+    WithCancel,
     ok,
 )
 from flare.net import SocketAddr
@@ -305,8 +306,6 @@ def test_half_close_after_a_request_still_gets_a_response() raises:
 # ── Upgrade: h2c only where the connection can actually migrate ────────────
 
 
-comptime _CT_HELLO: FnHandler = FnHandler(_hello)
-
 comptime _H2C_UPGRADE = (
     "GET /u HTTP/1.1\r\nHost: x\r\nConnection: Upgrade, HTTP2-Settings,"
     " close\r\nUpgrade: h2c\r\nHTTP2-Settings: AAMAAABkAAQAAP__\r\n\r\n"
@@ -314,14 +313,16 @@ comptime _H2C_UPGRADE = (
 
 
 def test_h2c_upgrade_on_a_loop_that_cannot_migrate_is_served_as_h1() raises:
-    """serve_comptime runs the HTTP/1.1-only loop. It used to send the
-    101 and then spin on the write-armed fd forever."""
+    """The HTTP/1.1-only loop (``serve_cancellable``) cannot migrate to h2c.
+
+    It used to send the 101 and then spin on the write-armed fd forever.
+    """
     var srv = HttpServer.bind(SocketAddr.localhost(0))
     var port = UInt16(srv.local_addr().port)
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_comptime[_CT_HELLO]()
+            srv.serve_cancellable(WithCancel(FnHandler(_hello)))
         except:
             pass
         exit()

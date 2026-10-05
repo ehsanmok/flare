@@ -29,7 +29,7 @@ non-zero:
   byte. End-to-end coverage is in ``test_server_lifecycle.mojo``.
 
 Comptime asserts on these fields are tested via
-``serve_comptime[handler, config]()`` (a server can't be built
+``ServerConfig.check[config]()`` (a config can't be built
 with a too-short ``request_timeout_ms``).
 
 Covers:
@@ -40,7 +40,7 @@ Covers:
 - A user-provided config overrides the defaults.
 - The fields are valid-shape inputs to ``HttpServer.bind`` (i.e.
   the constructor wiring is intact).
-- ``serve_comptime[handler, valid_config]`` accepts a config
+- ``ServerConfig.check[valid_config]()`` accepts a config
   whose ``request_timeout_ms`` bounds the inner deadlines (this
   is the smoke test that the comptime asserts compile through).
 """
@@ -134,6 +134,29 @@ def test_server_carries_explicit_deadlines() raises:
     assert_equal(srv.config.handler_timeout_ms, 2_000)
     assert_equal(srv.config.request_timeout_ms, 5_000)
     srv.close()
+
+
+# ── ServerConfig.check accepts a consistent set of deadlines ─────────────────
+
+
+comptime _CT_BOUNDED: ServerConfig = ServerConfig(
+    read_body_timeout_ms=1_000,
+    handler_timeout_ms=2_000,
+    request_timeout_ms=5_000,
+)
+comptime _CT_ALL_DISABLED: ServerConfig = ServerConfig(
+    read_body_timeout_ms=0,
+    handler_timeout_ms=0,
+    request_timeout_ms=0,
+)
+
+
+def test_check_accepts_bounded_and_disabled_deadlines() raises:
+    """``check`` compiles through for a bounding or a fully disabled set."""
+    ServerConfig.check[_CT_BOUNDED]()
+    ServerConfig.check[_CT_ALL_DISABLED]()
+    assert_equal(_CT_BOUNDED.request_timeout_ms, 5_000)
+    assert_equal(_CT_ALL_DISABLED.request_timeout_ms, 0)
 
 
 def main() raises:

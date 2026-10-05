@@ -1,9 +1,10 @@
-"""Tests for ``HttpServer.serve_comptime[handler, config]()``.
+"""Tests for ``ServerConfig.check[cfg]()``.
 
-The comptime overload takes a comptime ``Handler`` value and a
-comptime ``ServerConfig`` value. It enforces configuration
-invariants via ``comptime assert`` so misconfigured servers fail at
-compile time rather than runtime.
+``check`` takes a comptime ``ServerConfig`` value and enforces its
+configuration invariants via ``comptime assert`` so misconfigured
+servers fail at compile time rather than runtime. It replaced the
+asserts that used to live inside ``HttpServer.serve_comptime``
+(removed in v0.12) and is callable anywhere.
 
 Runtime behaviour is covered end-to-end by ``test_server.mojo`` (the
 ``serve(def)`` path) and ``test_server_handler.mojo`` (the
@@ -11,9 +12,8 @@ Runtime behaviour is covered end-to-end by ``test_server.mojo`` (the
 
 - The default config is accepted.
 - A custom valid config is accepted.
-- Constructed server objects can be closed after a ``serve_comptime``
-  bind (no runtime server loop is driven; we only type-check the
-  overload by binding and closing).
+- A server bound with a checked config can be closed (no runtime server
+  loop is driven).
 
 Compile-time rejections are not asserted here because ``comptime
 assert`` errors surface as compile errors, not runtime errors;
@@ -66,63 +66,47 @@ comptime _CT_CONFIG_TIGHT: ServerConfig = ServerConfig(
 # ── Tests ───────────────────────────────────────────────────────────────────
 
 
-def test_serve_comptime_default_config_types() raises:
+def test_check_default_config() raises:
     """The default config satisfies every ``comptime assert`` invariant."""
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    ServerConfig.check[_CT_CONFIG_DEFAULT]()
+    var srv = HttpServer.bind(
+        SocketAddr.localhost(0), materialize[_CT_CONFIG_DEFAULT]()
+    )
     assert_true(srv.local_addr().port != 0)
     srv.close()
 
 
-def test_serve_comptime_tight_config_types() raises:
+def test_check_tight_config() raises:
     """A custom valid config satisfies every ``comptime assert`` invariant."""
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    ServerConfig.check[_CT_CONFIG_TIGHT]()
+    var srv = HttpServer.bind(
+        SocketAddr.localhost(0), materialize[_CT_CONFIG_TIGHT]()
+    )
     assert_true(srv.local_addr().port != 0)
     srv.close()
 
 
-def test_serve_comptime_handler_is_handler() raises:
+def test_check_handler_is_handler() raises:
     """The comptime handler satisfies the Handler trait at the type level.
 
     We materialise a runtime copy of the comptime handler (``FnHandler``
     captures the function by value, not by reference, so the copy is
     just the underlying ``def(Request) raises -> Response`` pointer).
     """
-    var runtime_handler = FnHandler(h_hello)
+    var runtime_handler = materialize[_CT_HANDLER]()
     var resp = runtime_handler.serve(Request(method=Method.GET, url="/"))
     assert_equal(resp.status, 200)
     assert_equal(resp.text(), "hello")
 
 
-def test_serve_comptime_bind_close_cycle() raises:
-    """Bind + close round-trips cleanly with the comptime-config entry point."""
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+def test_check_bind_close_cycle() raises:
+    """Bind + close round-trips cleanly with a checked config."""
+    var srv = HttpServer.bind(
+        SocketAddr.localhost(0), materialize[_CT_CONFIG_DEFAULT]()
+    )
     var port = srv.local_addr().port
     assert_true(port != 0)
     srv.close()
-
-
-# Force the compiler to instantiate ``serve_comptime`` with every
-# comptime config variant so every ``comptime assert`` invariant is
-# checked at build time. The helper is never actually called at
-# runtime (it would block in the reactor loop) but declaring it
-# forces monomorphisation of the generic. The call site is gated on a
-# runtime-derived sentinel the compiler cannot constant-fold, which
-# keeps the type-checker honest without producing a dead-branch
-# warning.
-def _never_called_force_instantiation_default() raises:
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
-    var port = srv.local_addr().port
-    srv.close()
-    if port < 0:
-        srv.serve_comptime[_CT_HANDLER, _CT_CONFIG_DEFAULT]()
-
-
-def _never_called_force_instantiation_tight() raises:
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
-    var port = srv.local_addr().port
-    srv.close()
-    if port < 0:
-        srv.serve_comptime[_CT_HANDLER, _CT_CONFIG_TIGHT]()
 
 
 def test_config_field_access_at_comptime() raises:
@@ -134,7 +118,7 @@ def test_config_field_access_at_comptime() raises:
 
 
 def test_config_fields_pass_invariants() raises:
-    """The comptime configs all satisfy the ``comptime assert`` invariants in the overload.
+    """The comptime configs all satisfy the ``comptime assert`` invariants in ``check``.
 
     This is a pure compile-time check: if the invariants fail this file
     does not compile. Reaching the body means every constraint held.
@@ -156,7 +140,7 @@ def test_config_fields_pass_invariants() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_server_serve_comptime.mojo — comptime serve overload")
+    print("test_server_config_check.mojo — ServerConfig.check")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

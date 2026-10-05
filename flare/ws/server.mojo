@@ -578,7 +578,7 @@ struct WsConnection(Movable):
     took ownership of the fd, plus whatever a decode leaves behind.
 
     It starts non-empty only on the shared-listener upgrade path
-    (``HttpServer.serve_ws_upgrade``), where the HTTP/1.1 reactor may
+    (``ServerConfig.ws = WsUpgrade(...)``), where the HTTP/1.1 reactor may
     have buffered post-handshake WebSocket frame bytes in the same
     ``recv`` that delivered the upgrade request (TCP coalescing).
     ``_recv_one`` drains it before issuing any socket ``read`` and puts

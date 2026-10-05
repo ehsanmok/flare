@@ -9,9 +9,10 @@ a WS upgrade), so an app can now serve normal routes + a WS endpoint
 without a second port.
 
 Topology mirrors tests/http/test_unified_http_server.mojo: fork a child
-running ``HttpServer.serve_ws_upgrade(http_handler, ws_handler)``, drive both an
-HTTP/1.1 client and a ``flare.ws.WsClient`` from the parent over the
-same port, SIGKILL on test-end.
+running ``serve(http_handler)`` with ``ServerConfig.ws =
+WsUpgrade(ws_handler)``, drive both an HTTP/1.1 client and a
+``flare.ws.WsClient`` from the parent over the same port, SIGKILL on
+test-end.
 
 ``WsClient.connect`` cannot exercise the interesting half of the seam:
 it writes the handshake, waits for the 101, and only then sends a frame,
@@ -104,7 +105,8 @@ def test_http_and_ws_on_one_port() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_ws_upgrade(_http_handler, _ws_handler)
+            srv.config.ws = WsUpgrade(_ws_handler, False)
+            srv.serve(_http_handler)
         except:
             pass
         exit()
@@ -316,7 +318,8 @@ def test_frames_pipelined_with_the_handshake_are_all_delivered() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_ws_upgrade(_http_handler, _ws_handler)
+            srv.config.ws = WsUpgrade(_ws_handler, False)
+            srv.serve(_http_handler)
         except:
             pass
         exit()
@@ -560,7 +563,8 @@ def test_shared_listener_upgrade_carries_origin() raises:
     var pid = fork()
     if pid == 0:
         try:
-            srv.serve_ws_upgrade(_http_handler, _origin_ws_handler)
+            srv.config.ws = WsUpgrade(_origin_ws_handler, False)
+            srv.serve(_http_handler)
         except:
             pass
         exit()

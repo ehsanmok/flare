@@ -41,7 +41,6 @@ from ._server_reactor_epoll import (
     _cleanup_conn,
     _accept_loop,
     _accept_loop_fd,
-    run_reactor_loop,
     run_reactor_loop_shared,
     run_reactor_loop_static,
     run_reactor_loop_static_shared,

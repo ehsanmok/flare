@@ -45,7 +45,7 @@ Pieces still open:
   ``body_stream``; ``ResponseImpl[B]`` exists as an additive
   authoring type, but migrating the hot-path alias is a follow-up.
 - ``serve_streaming`` across multiple listeners (multi-worker works;
-  ``bind_many`` extras do not).
+  extra ``bind(List[SocketAddr])`` listeners do not).
 
 ``body_stream`` itself is served on every wire: HTTP/1.1 chunked,
 HTTP/2 incremental DATA frames, HTTP/3 over QUIC, and the same h1
