@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62844 lines) |
+| Lean files | 298 (62831 lines) |
 | Theorems | 3294 |
-| Headline theorems in the axiom audit | 1091 |
+| Headline theorems in the axiom audit | 1092 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 97 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 98 of 138 |
 
 Six findings are rated high:
 
@@ -1429,17 +1429,19 @@ File: `Quic/Conn.lean`.
 - `implStep` mirrors three pieces of `state.mojo`:
   - `handle_frame_buf`, which drops frames only once the state is CLOSED (766-791);
   - `apply_connection_close`, which moves to DRAINING (430-445);
-  - `apply_handshake_done`, which moves to ESTABLISHED, and (fixed, QUIC-04) acts only in HANDSHAKE (489-503).
+  - `apply_handshake_done`, which moves to ESTABLISHED, and (fixed, QUIC-04) acts only in HANDSHAKE (489-503);
+  - `on_handshake_done`, which (fixed, QUIC-09) raises PROTOCOL_VIOLATION when `Connection.is_server` is set.
 - `markHandshakeComplete` mirrors 861-873 and `localClose` mirrors 890-911.
 - `specStep` follows RFC 9000 §10.2 and §19.20: closing and draining lead only to closed or draining, and the server rejects HANDSHAKE_DONE.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `Conn.spec_closing_absorbing`, `Conn.specRun_absorbing` | Under the spec, once closing or draining, every run stays terminal. | proved |
-| `Conn.implStep_frame_spec`, `Conn.implStep_client_eq_spec` | flare agrees with the spec on every frame other than a server's HANDSHAKE_DONE (QUIC-09), hence on every step for the client role. | proved |
+| `Conn.implStep_eq_spec` | flare's step equals the spec on every role, state and event (QUIC-04 and QUIC-09 fixed). | proved |
+| `Conn.implStep_frame_spec`, `Conn.implStep_client_eq_spec` | The same restricted to frames, and to the client role. | proved |
 | `Conn.implStep_absorbing` | In flare, once closing, draining or closed, every step stays terminal, for both roles (QUIC-04 fixed). | proved |
 | `Conn.markHandshakeComplete_spec`, `Conn.localClose_spec` | flare agrees with the spec on TLS completion and local close. | proved |
-| `Conn.implStepFixed_eq_spec`, `Conn.runFixed_eq_spec` | With the QUIC-09 fix on top of the shipped QUIC-04 fix, every step and every run equals the spec. | proved |
+| `Conn.run_eq_spec` | Every run of flare's step equals the run of the spec. | proved |
 
 Limitations:
 - This model has no clock. The idle timeout and the closing/draining period are modelled separately, in `Quic/Timers.lean` (next section).
@@ -2857,9 +2859,8 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.Frame.ackBody`, `ackFinish` | quic/frame.mojo:765-792 | `QUIC_03.violates_spec`, `fixed_meets_spec` | counterexample |
 | `Quic.Frame.parseFrameFixed` | quic/frame.mojo:753-958 with the three fixes | `parseFrameFixed_ok`, `parsePayloadFixed_ok` | proved |
 | `Quic.PacketNumber.decodePnImpl` | quic/protection.mojo:93-115 | `decodePnImpl_eq_rfc`, `decodePnImpl_window` | proved |
-| `Quic.Conn.implStep`, `frameEffect` | quic/state.mojo:430-445, 489-503 (fixed, QUIC-04), 640-760, 766-791 | `implStep_frame_spec`, `implStep_client_eq_spec`, `implStep_absorbing`, `QUIC_04.fixed_refines`, `QUIC_09.server_accepts` | proved (QUIC-04 resolved); counterexample (QUIC-09) |
+| `Quic.Conn.implStep`, `frameEffect` | quic/state.mojo:430-445, 489-503 (fixed, QUIC-04), 640-760, 766-791 (fixed, QUIC-09) | `implStep_eq_spec`, `implStep_frame_spec`, `implStep_absorbing`, `QUIC_04.fixed_refines`, `QUIC_09.fixed_meets_spec` | proved (QUIC-04 and QUIC-09 resolved) |
 | `Quic.Conn.markHandshakeComplete`, `localClose` | quic/state.mojo:861-873, 890-911 | `markHandshakeComplete_spec`, `localClose_spec` | proved |
-| `Quic.Conn.implStepFixed` | quic/state.mojo:489-503, quic/_server_types.mojo:559-578 with the QUIC-09 fix | `runFixed_eq_spec`, `QUIC_04.fixed_refines`, `QUIC_09.fixed_meets_spec` | proved |
 | `Quic.AckExpand.expand` | quic/state.mojo:380, 388-427 | `expand_sound`, `expand_len_le`, `expand_eq_take`, `expand_complete`, `expand_length` | proved |
 | `Quic.AckGen.record`, `isort`, `mergeAcc` | quic/_server_support.mojo:76-124 | `record_canon`, `record_sound`, `record_exact`, `record_drops_lowest` | proved |
 | `Quic.AckGen.contains`, `recordSt`, `floorAfter` | quic/_server_support.mojo `_ack_floor`, `_ack_contains`, `_ack_record` (fixed, QUIC-14) | `QUIC_14.impl_reaccepts` (pre-fix `containsOld`), `QUIC_14.fixed_trace`, `QUIC_14.fixed_never_reaccepts` | proved (QUIC-14 resolved) |
@@ -3075,7 +3076,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-02 | Low | resolved | MAX_STREAMS and STREAMS_BLOCKED above 2^60 are accepted | `Flare/Bugs/QUIC_02.lean` | `repro/QUIC-02_max_streams_over_2p60_accepted.mojo` (any) |
 | QUIC-03 | Low | resolved | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
 | QUIC-04 | Medium | resolved | HANDSHAKE_DONE moves a closing or draining connection back to ESTABLISHED | `Flare/Bugs/QUIC_04.lean` | `repro/QUIC-04_handshake_done_reopens_closed_connection.mojo` (any) |
-| QUIC-09 | Low | open | the server accepts HANDSHAKE_DONE from the client | `Flare/Bugs/QUIC_09.lean` | `repro/QUIC-09_server_accepts_handshake_done.mojo` (any) |
+| QUIC-09 | Low | resolved | the server accepts HANDSHAKE_DONE from the client | `Flare/Bugs/QUIC_09.lean` | `repro/QUIC-09_server_accepts_handshake_done.mojo` (any) |
 | QUIC-10 | Low | open | initial_max_streams_* above 2^60 accepted in transport parameters | `Flare/Bugs/QUIC_10.lean` | `repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo` (any) |
 | QUIC-11 | Medium | resolved | the server never validates the client's transport parameters | `Flare/Bugs/QUIC_11.lean` | `repro/QUIC-11_server_ignores_client_transport_params.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-12 | Low | open | the client's CID authentication confuses absent with empty | `Flare/Bugs/QUIC_12.lean` | `repro/QUIC-12_client_cid_auth_absent_vs_empty.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
@@ -4328,12 +4329,14 @@ Status: resolved. Fixed: `apply_handshake_done` (`flare/quic/state.mojo`) acts o
 - **RFC:** RFC 9000 §10.2: the closing and draining states lead only to closed. An endpoint in the draining state MUST NOT send packets.
 - **What goes wrong:** `apply_handshake_done` (`state.mojo:489-494`) sets ESTABLISHED without checking the current state, and `handle_frame_buf` (782) drops frames only in CLOSED.
 - **Counterexample:** `Bugs.QUIC_04.reopens`, `reopens_closing` and `trace`: `1c 00 00 00 1e` takes HANDSHAKE → DRAINING → ESTABLISHED. `violates_spec` contrasts this with the spec trace.
-- **Fix:** apply HANDSHAKE_DONE only when the state is HANDSHAKE. `fixed_refines`, `fixed_absorbing` and `Conn.runFixed_eq_spec` show it suffices.
+- **Fix:** apply HANDSHAKE_DONE only when the state is HANDSHAKE. `fixed_refines`, `fixed_absorbing` and `Conn.run_eq_spec` show it suffices.
 - **Repro:** `formal/repro/QUIC-04_handshake_done_reopens_closed_connection.mojo`
 - **Observed:** `BUG REPRODUCED: CONNECTION_CLOSE then HANDSHAKE_DONE leaves the connection ESTABLISHED (connection_closed event = True )`
 - **Flip:** `OK: connection stays draining, state = 3`, exit 0.
 
 #### QUIC-09: the server accepts HANDSHAKE_DONE from the client
+
+Status: resolved. A server now closes with PROTOCOL_VIOLATION on a received HANDSHAKE_DONE (state.mojo: Connection.is_server).
 
 - **Severity:** Low on its own. Combined with QUIC-04, a client can use it to reopen a closing or draining server connection.
 - **RFC:** RFC 9000 §19.20: "A server MUST treat receipt of a HANDSHAKE_DONE frame as a connection error of type PROTOCOL_VIOLATION."
@@ -4341,7 +4344,7 @@ Status: resolved. Fixed: `apply_handshake_done` (`flare/quic/state.mojo`) acts o
   - `on_handshake_done` (`state.mojo:744-746`) has no role check, and the sans-I/O `Connection` has no role.
   - `QuicConnection.dispatch_plaintext` (`_server_types.mojo:559-578`) runs 1-RTT payloads with `before_1rtt = False`, so the frame is applied.
 - **Counterexample:** `Bugs.QUIC_09.server_accepts`, with `spec_rejects` and `violates_spec`.
-- **Fix:** in the server driver, raise PROTOCOL_VIOLATION when `events.handshake_done` is set. `fixed_rejects` and `fixed_meets_spec` show it suffices.
+- **Fix:** give `Connection` an `is_server` flag and raise PROTOCOL_VIOLATION in `on_handshake_done` when it is set. `fixed_rejects` and `fixed_meets_spec` (the shipped `Conn.implStep` equals the spec) show it suffices. The counterexample now runs against `implStepPre`, the role-unaware step before the fix.
 - **Repro:** `formal/repro/QUIC-09_server_accepts_handshake_done.mojo`
 - **Observed:** `BUG REPRODUCED: server accepted HANDSHAKE_DONE from the client (handshake_done event = True , conn.state = 1 )`
 - **Flip:** `OK: server rejected HANDSHAKE_DONE with PROTOCOL_VIOLATION`, exit 0.

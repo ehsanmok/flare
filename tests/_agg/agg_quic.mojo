@@ -376,6 +376,15 @@ from test_quic_handle_packet import (
     test_initial_carrying_a_stream_frame_is_a_protocol_violation as test_quic_handle_packet__test_initial_carrying_a_stream_frame_is_a_protocol_violation,
 )
 from test_quic_handle_packet import (
+    test_server_rejects_handshake_done_from_the_client as test_quic_handle_packet__test_server_rejects_handshake_done_from_the_client,
+)
+from test_quic_handle_packet import (
+    test_server_rejects_handshake_done_after_other_frames as test_quic_handle_packet__test_server_rejects_handshake_done_after_other_frames,
+)
+from test_quic_handle_packet import (
+    test_client_role_still_accepts_handshake_done as test_quic_handle_packet__test_client_role_still_accepts_handshake_done,
+)
+from test_quic_handle_packet import (
     test_handle_packet_applies_a_permitted_initial as test_quic_handle_packet__test_handle_packet_applies_a_permitted_initial,
 )
 from test_quic_handle_packet import (
@@ -1094,6 +1103,15 @@ def main() raises:
     suite.test[test_quic_handle_packet__test_protect_unprotect_round_trip]()
     suite.test[
         test_quic_handle_packet__test_initial_carrying_a_stream_frame_is_a_protocol_violation
+    ]()
+    suite.test[
+        test_quic_handle_packet__test_server_rejects_handshake_done_from_the_client
+    ]()
+    suite.test[
+        test_quic_handle_packet__test_server_rejects_handshake_done_after_other_frames
+    ]()
+    suite.test[
+        test_quic_handle_packet__test_client_role_still_accepts_handshake_done
     ]()
     suite.test[
         test_quic_handle_packet__test_handle_packet_applies_a_permitted_initial

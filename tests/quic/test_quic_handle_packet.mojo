@@ -54,6 +54,14 @@ from flare.quic import (
     protect_initial_packet,
     unprotect_initial_packet,
 )
+from flare.quic.state import (
+    CONN_STATE_CLOSING,
+    CONN_STATE_ESTABLISHED,
+    CONN_STATE_HANDSHAKE,
+    empty_events,
+    handle_frame_buf,
+    new_connection,
+)
 
 
 def _bind_loopback() raises -> QuicListener:
@@ -232,6 +240,56 @@ def test_initial_carrying_a_stream_frame_is_a_protocol_violation() raises:
     assert_equal(qc.conn.state, CONN_STATE_CLOSING)
 
 
+def test_server_rejects_handshake_done_from_the_client() raises:
+    """QUIC-09 (RFC 9000 sec 19.20): a server treats a received
+    HANDSHAKE_DONE as a PROTOCOL_VIOLATION. The frame must not move the
+    connection to ESTABLISHED or surface the handshake_done event."""
+    var qc = QuicConnection(_make_cid(UInt8(1), 8), _make_cid(UInt8(0x40), 8))
+    var payload = _bytes(0x1E)
+    var raised = False
+    try:
+        var ev = qc.dispatch_plaintext(
+            Span[UInt8, _](payload), UInt64(1_000_000), UInt64(0)
+        )
+        assert_false(ev.handshake_done)
+    except e:
+        raised = True
+        assert_true("PROTOCOL_VIOLATION" in String(e))
+    assert_true(raised, "the server accepted HANDSHAKE_DONE")
+    assert_equal(qc.conn.state, CONN_STATE_CLOSING)
+    assert_false(qc.conn.handshake_complete)
+
+
+def test_server_rejects_handshake_done_after_other_frames() raises:
+    """The rejection also holds when HANDSHAKE_DONE follows a PING in the
+    same packet, and once the connection is established."""
+    var qc = QuicConnection(_make_cid(UInt8(1), 8), _make_cid(UInt8(0x40), 8))
+    qc.conn.state = CONN_STATE_ESTABLISHED
+    qc.conn.handshake_complete = True
+    var payload = _bytes(0x01, 0x1E)
+    var raised = False
+    try:
+        _ = qc.dispatch_plaintext(
+            Span[UInt8, _](payload), UInt64(1_000_000), UInt64(0)
+        )
+    except e:
+        raised = True
+    assert_true(raised, "the established server accepted HANDSHAKE_DONE")
+    assert_equal(qc.conn.state, CONN_STATE_CLOSING)
+
+
+def test_client_role_still_accepts_handshake_done() raises:
+    """The sans-I/O Connection used by the client keeps applying
+    HANDSHAKE_DONE (only the server role rejects it)."""
+    var conn = new_connection()
+    var ev = empty_events()
+    var payload = _bytes(0x1E)
+    _ = handle_frame_buf(conn, Span[UInt8, _](payload), UInt64(1_000), ev)
+    assert_true(ev.handshake_done)
+    assert_equal(conn.state, CONN_STATE_ESTABLISHED)
+    assert_true(conn.state != CONN_STATE_HANDSHAKE)
+
+
 def test_handle_packet_applies_a_permitted_initial() raises:
     """PING + PADDING is what an Initial may carry: it is processed and
     the largest received packet number advances."""
@@ -399,10 +457,13 @@ def main() raises:
     test_decode_packet_number_no_wrap()
     test_protect_unprotect_round_trip()
     test_initial_carrying_a_stream_frame_is_a_protocol_violation()
+    test_server_rejects_handshake_done_from_the_client()
+    test_server_rejects_handshake_done_after_other_frames()
+    test_client_role_still_accepts_handshake_done()
     test_handle_packet_applies_a_permitted_initial()
     test_listener_dispatch_routes_into_handle_packet()
     test_listener_drops_an_initial_under_1200_bytes()
     test_dispatch_garbled_initial_drops_silently()
     test_handle_packet_drops_short_header_silently()
     test_handle_packet_drops_handshake_long_silently()
-    print("test_quic_handle_packet: 10 passed")
+    print("test_quic_handle_packet: 13 passed")

@@ -69,8 +69,8 @@ theorem violates_spec :
     ¬ ∀ role s s' e, s.terminal = true → implStepOld role s e = some s' → s'.terminal = true :=
   fun h => absurd (h .client .draining .established (.frame .handshakeDone) rfl rfl) (by decide)
 
-/-- The shipped step equals the spec (client role; the server role differs only in
-QUIC-09's HANDSHAKE_DONE rejection). -/
+/-- The shipped step equals the spec (client role; the server role is `Conn.implStep_eq_spec`,
+QUIC-09). -/
 theorem fixed_refines (s : CState) (e : Ev) :
     implStep .client s e = specStep .client s e :=
   implStep_client_eq_spec s e

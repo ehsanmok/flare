@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-09 fixed on fix/formal-findings
 """QUIC-09: the server accepts a HANDSHAKE_DONE frame from the client.
 
 Lean: Flare.Bugs.QUIC_09.server_accepts (the server-role step on
@@ -14,7 +15,7 @@ as a connection error of type PROTOCOL_VIOLATION."
 
 Expected: a 1-RTT payload 1e handed to the server connection raises
 PROTOCOL_VIOLATION.
-Actual: accepted; the server's connection state flips to ESTABLISHED and
+Before the fix: accepted; the server's connection state flips to ESTABLISHED and
 the handshake_done event fires.
 
 Minimal fix: in QuicConnection's frame-dispatch paths, treat

@@ -287,11 +287,16 @@ struct Connection(Copyable):
     var path_validated: Bool
     """True once the outstanding path probe was confirmed by a
     matching PATH_RESPONSE."""
+    var is_server: Bool
+    """True for the server role (set by :class:`QuicConnection`). A
+    server treats a received HANDSHAKE_DONE as a PROTOCOL_VIOLATION
+    (RFC 9000 §19.20)."""
 
 
 def new_connection(
     idle_timeout_us: UInt64 = UInt64(30_000_000),
     initial_max_data: UInt64 = UInt64(1 << 20),
+    is_server: Bool = False,
 ) -> Connection:
     """Build a fresh :class:`Connection` in the HANDSHAKE state."""
     return Connection(
@@ -313,6 +318,7 @@ def new_connection(
         peer_retire_prior_to=UInt64(0),
         outgoing_path_challenge=List[UInt8](),
         path_validated=False,
+        is_server=is_server,
     )
 
 
@@ -765,6 +771,16 @@ struct _ConnFrameHandler(FrameHandler):
         apply_connection_close(self._conn()[], cc, self._events()[])
 
     def on_handshake_done(mut self) raises:
+        if self._conn()[].is_server:
+            # RFC 9000 §19.20: only a server sends HANDSHAKE_DONE.
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "HANDSHAKE_DONE received by a server",
+            )
+            raise Error(
+                "QUIC PROTOCOL_VIOLATION: HANDSHAKE_DONE sent to a server"
+            )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_handshake_done(self._conn()[], self._events()[])
 

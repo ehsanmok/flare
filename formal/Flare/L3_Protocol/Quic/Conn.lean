@@ -24,14 +24,14 @@ The spec `specStep` is written from RFC 9000 and is role-aware:
 Results:
 * `spec_closing_absorbing` / `specRun_absorbing`: in the spec, once the
   connection is closing, draining or closed it never becomes usable again.
-* `implStep` (flare): role-unaware. HANDSHAKE_DONE used to set ESTABLISHED in
-  every state (`Flare.Bugs.QUIC_04`, closed connection reopened; fixed, it now acts
-  only in HANDSHAKE). `Flare.Bugs.QUIC_09` (server accepts HANDSHAKE_DONE) is
-  still a counterexample.
-* `implStep_client_eq_spec`, `implStep_absorbing`: the shipped step equals the spec
-  for the client role, and closing / draining / closed are absorbing for both roles.
-* `implStepFixed_eq_spec`: the remaining fix (reject on the server, QUIC-09)
-  makes the step equal the spec on every state, role and event.
+* `implStep` (flare): HANDSHAKE_DONE used to set ESTABLISHED in every state
+  (`Flare.Bugs.QUIC_04`, closed connection reopened; fixed, it now acts only in
+  HANDSHAKE) and was accepted by the server (`Flare.Bugs.QUIC_09`; fixed, the
+  server role raises PROTOCOL_VIOLATION).
+* `implStep_eq_spec`, `run_eq_spec`: the shipped step equals the spec on every
+  state, role and event.
+* `implStep_client_eq_spec`, `implStep_absorbing`: corollaries; closing /
+  draining / closed are absorbing for both roles.
 * `markHandshakeComplete_spec`, `localClose_spec`: flare's two other
   transitions already match the spec.
 -/
@@ -75,12 +75,16 @@ def frameEffect (s : CState) : Frame → CState
 def localClose (s : CState) : CState :=
   if s = .closing ∨ s = .draining ∨ s = .closed then s else .closing
 
-/-- One step of flare's machine; `none` = connection error (never produced
-here: flare's connection layer has no role and raises on none of these).
-`handle_frame_buf` drops every frame once the connection is CLOSED.
-mirrors flare/quic/state.mojo:766-791 @59bda50 -/
-def implStep (_role : Role) (s : CState) : Ev → Option CState
-  | .frame f => if s = .closed then some s else some (frameEffect s f)
+/-- One step of flare's machine; `none` = connection error (a server receiving
+HANDSHAKE_DONE, QUIC-09: `Connection.is_server` makes `on_handshake_done` raise
+PROTOCOL_VIOLATION). `handle_frame_buf` drops every frame once the connection is CLOSED.
+mirrors flare/quic/state.mojo:766-791 -/
+def implStep (role : Role) (s : CState) : Ev → Option CState
+  | .frame f =>
+    if s = .closed then some s
+    else match role, f with
+      | .server, .handshakeDone => none
+      | _, _ => some (frameEffect s f)
   | .tlsDone => some (markHandshakeComplete s)
   | .localClose => some (localClose s)
 
@@ -133,37 +137,22 @@ theorem specRun_absorbing (role : Role) (es : List Ev) :
       rw [hst] at h
       exact ih s1 s' (spec_closing_absorbing role s s1 e hs hst) h
 
-/-! ## The minimal fix -/
+/-! ## The shipped step meets the spec -/
 
-/-- The remaining fix (QUIC-09): the server-side driver treats HANDSHAKE_DONE
-as PROTOCOL_VIOLATION. (`apply_handshake_done` already acts only in HANDSHAKE,
-QUIC-04.) -/
-def frameEffectFixed (role : Role) (s : CState) : Frame → Option CState
-  | .connectionClose .. => some .draining
-  | .handshakeDone =>
-    match role with
-    | .server => none
-    | .client => some (markHandshakeComplete s)
-  | _ => some s
+/-- **flare meets the spec**: equal on every role, state and event (QUIC-04 and
+QUIC-09 fixed). -/
+theorem implStep_eq_spec (role : Role) (s : CState) (e : Ev) :
+    implStep role s e = specStep role s e := by
+  cases e with
+  | frame f => cases s <;> cases f <;> cases role <;> rfl
+  | tlsDone => cases s <;> rfl
+  | localClose => cases s <;> rfl
 
-def implStepFixed (role : Role) (s : CState) : Ev → Option CState
-  | .frame f => if s = .closed then some s else frameEffectFixed role s f
-  | .tlsDone => some (markHandshakeComplete s)
-  | .localClose => some (localClose s)
-
-/-- **The fix meets the spec**: equal on every role, state and event. -/
-theorem implStepFixed_eq_spec (role : Role) (s : CState) (e : Ev) :
-    implStepFixed role s e = specStep role s e := by
-  cases s <;> cases e with
-  | frame f => cases f <;> cases role <;> rfl
-  | tlsDone => rfl
-  | localClose => rfl
-
-theorem runFixed_eq_spec (role : Role) (es : List Ev) (s : CState) :
-    run implStepFixed role s es = run specStep role s es := by
+theorem run_eq_spec (role : Role) (es : List Ev) (s : CState) :
+    run implStep role s es = run specStep role s es := by
   induction es generalizing s with
   | nil => rfl
-  | cons e es ih => simp only [run, implStepFixed_eq_spec, ih]
+  | cons e es ih => simp only [run, implStep_eq_spec, ih]
 
 /-- flare's `mark_handshake_complete` already matches the spec. -/
 theorem markHandshakeComplete_spec (role : Role) (s : CState) :
@@ -175,33 +164,20 @@ theorem localClose_spec (role : Role) (s : CState) :
     implStep role s .localClose = specStep role s .localClose := by
   cases s <;> rfl
 
-/-- flare agrees with the spec on every frame other than a server's
-HANDSHAKE_DONE (QUIC-09). -/
-theorem implStep_frame_spec (role : Role) (s : CState) (f : Frame)
-    (hf : f ≠ .handshakeDone ∨ role = .client) :
-    implStep role s (.frame f) = specStep role s (.frame f) := by
-  cases s <;> cases f <;> cases role <;> first | rfl | (exfalso; simp at hf)
+/-- flare agrees with the spec on every frame (QUIC-09 fixed). -/
+theorem implStep_frame_spec (role : Role) (s : CState) (f : Frame) :
+    implStep role s (.frame f) = specStep role s (.frame f) :=
+  implStep_eq_spec role s (.frame f)
 
-/-- **The shipped step equals the spec for the client role** (QUIC-04 fixed). -/
+/-- The shipped step equals the spec for the client role. -/
 theorem implStep_client_eq_spec (s : CState) (e : Ev) :
-    implStep .client s e = specStep .client s e := by
-  cases e with
-  | frame f => exact implStep_frame_spec .client s f (Or.inr rfl)
-  | tlsDone => exact markHandshakeComplete_spec .client s
-  | localClose => exact localClose_spec .client s
+    implStep .client s e = specStep .client s e :=
+  implStep_eq_spec .client s e
 
 /-- **Closing, draining and closed are absorbing in flare**, for both roles. -/
 theorem implStep_absorbing (role : Role) (s s' : CState) (e : Ev)
     (hs : s.terminal = true) (h : implStep role s e = some s') : s'.terminal = true := by
-  cases role
-  · rw [implStep_client_eq_spec] at h
-    exact spec_closing_absorbing .client s s' e hs h
-  · cases e with
-    | frame f =>
-      cases s <;> simp [CState.terminal] at hs <;>
-        cases f <;> simp [implStep, frameEffect, markHandshakeComplete] at h <;>
-        subst h <;> rfl
-    | tlsDone => cases s <;> simp [CState.terminal] at hs <;> simp [implStep, markHandshakeComplete] at h <;> subst h <;> rfl
-    | localClose => cases s <;> simp [CState.terminal] at hs <;> simp [implStep, localClose] at h <;> subst h <;> rfl
+  rw [implStep_eq_spec] at h
+  exact spec_closing_absorbing role s s' e hs h
 
 end Flare.L3.Quic.Conn

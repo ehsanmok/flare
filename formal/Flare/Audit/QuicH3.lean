@@ -13,7 +13,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.PacketNumber.decodePnImpl_eq_rfc
 #print axioms Flare.L3.Quic.PacketNumber.decodePnImpl_window
 #print axioms Flare.L3.Quic.Conn.specRun_absorbing
-#print axioms Flare.L3.Quic.Conn.runFixed_eq_spec
+#print axioms Flare.L3.Quic.Conn.run_eq_spec
+#print axioms Flare.L3.Quic.Conn.implStep_eq_spec
 #print axioms Flare.L3.Quic.Conn.implStep_frame_spec
 #print axioms Flare.L3.Quic.Conn.implStep_client_eq_spec
 #print axioms Flare.L3.Quic.Conn.implStep_absorbing

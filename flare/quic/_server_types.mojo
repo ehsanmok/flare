@@ -365,7 +365,9 @@ struct QuicConnection(Copyable):
         idle_timeout_us: UInt64 = UInt64(30_000_000),
         initial_max_data: UInt64 = UInt64(1 << 20),
     ):
-        self.conn = new_connection(idle_timeout_us, initial_max_data)
+        self.conn = new_connection(
+            idle_timeout_us, initial_max_data, is_server=True
+        )
         self.local_cid = local_cid.copy()
         self.initial_dcid = local_cid.copy()
         self.peer_cid = peer_cid.copy()
