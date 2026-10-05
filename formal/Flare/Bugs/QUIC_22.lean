@@ -3,7 +3,20 @@ import Flare.L3_Protocol.Quic.Timers
 /-!
 # QUIC-22: the server never sends CONNECTION_CLOSE
 
-flare/quic/server.mojo:2177-2180 @59bda50 (`_close_for`), and the other
+Status: resolved. `_close_for` (flare/quic/server.mojo), which every connection
+error the server detects goes through (the CRYPTO-overflow and
+ACK-of-an-unsent-packet sites now call it too), sends a 1-RTT CONNECTION_CLOSE
+with the error code and enters the closing state for 3×PTO (`_enter_closing`,
+capped at 10 s). Packets that arrive meanwhile are not processed but answered
+with CONNECTION_CLOSE (`_answer_closing`, for the 1st, 2nd, 4th, ... packet:
+the rate limit RFC 9000 §10.2.1 asks for), and only the closing timer, not an
+ACK-delay or PTO timer, ends the state. Two cases still close silently: no
+1-RTT keys yet (no packet to carry the frame) and PTO exhaustion (the peer has
+answered nothing for `max_pto_count` probes, so a CONNECTION_CLOSE would not
+reach it; the equivalent of an idle close). The counterexamples below are
+about the pre-fix `srvStep`; `srvStepFix` is the shipped server.
+
+Pre-fix behaviour (flare/quic/server.mojo:2177-2180 @59bda50, `_close_for`), and the other
 local-close sites (1255-1262, 2965-2971, 3006-3012), set the state to
 CLOSING and `alive := False`; `_drain_and_send` (2033-2038) then returns
 before building any packet, and nothing else encodes a CONNECTION_CLOSE on
@@ -49,6 +62,22 @@ close reclaims it; with PTO 100 ms the spec is still closing. -/
 theorem impl_short_period :
     (run srvStep ⟨.opened, true, []⟩ [.localClose 0, .tick 1]).phase = .gone ∧
     (run (cspecStep 100) ⟨.opened, []⟩ [.localClose 0, .tick 1]).phase = .closing 300 := by decide
+
+/-- **The shipped server meets the spec** on local close, packets and timers
+(a closing connection is not alive; draining is QUIC-23). -/
+theorem fixed_refines (pto : Nat) (s : SSt) (h : SOk s) (e : CEv) (he : ∀ t, e ≠ .peerClose t) :
+    (srvStepFix pto s e).phase = (cspecStep pto ⟨s.phase, s.out⟩ e).phase ∧
+    (srvStepFix pto s e).out = (cspecStep pto ⟨s.phase, s.out⟩ e).out :=
+  srvFix_refines pto s h e he
+
+/-- **The counterexamples, replayed on the shipped server**: the close sends
+CONNECTION_CLOSE, a packet in the closing period is answered, and one tick
+after the close the slot is still closing (PTO 100: until 300 ms). -/
+theorem fixed_trace :
+    (srvStepFix 100 ⟨.opened, true, []⟩ (.localClose 0)).out = [.cc] ∧
+    (run (srvStepFix 100) ⟨.opened, true, []⟩ [.localClose 0, .recvPkt 50]).out = [.cc, .cc] ∧
+    (run (srvStepFix 100) ⟨.opened, true, []⟩ [.localClose 0, .tick 1]).phase = .closing 300 ∧
+    (run (srvStepFix 100) ⟨.opened, true, []⟩ [.localClose 0, .tick 300]).phase = .gone := by decide
 
 /-- **Fix**: send CONNECTION_CLOSE when closing and in answer to packets
 during a closing period of 3×PTO, then reclaim; that is `cspecStep`, which

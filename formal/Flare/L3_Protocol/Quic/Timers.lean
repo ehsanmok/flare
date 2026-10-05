@@ -272,8 +272,8 @@ structure SSt where
   out : List Pkt
   deriving DecidableEq, Repr
 
-/-- `_close_for` (and the other local-close sites) set CLOSING and
-`alive := False` and send nothing; `_drain_and_send` skips a slot that is
+/-- The pre-fix server (QUIC-22): `_close_for` (and the other local-close
+sites) set CLOSING and `alive := False` and send nothing; `_drain_and_send` skips a slot that is
 not alive; the slot is reclaimed when any timer of the slot next fires (the
 idle timer, a PTO or ACK-delay timer); a peer CONNECTION_CLOSE moves the
 state to DRAINING but leaves `alive` true, so egress continues.
@@ -289,6 +289,62 @@ def srvStep (s : SSt) : CEv → SSt
   | .recvPkt _ => s
   | .want _ => if s.alive ∧ s.phase ≠ .gone then { s with out := .other :: s.out } else s
   | .tick _ => if s.alive = false ∧ s.phase ≠ .gone then { s with phase := .gone } else s
+
+/-- The server as it now closes (fixed, QUIC-22): a local close sends
+CONNECTION_CLOSE, sets `alive := False` and enters the closing phase for
+3×PTO (`_enter_closing`); a packet received in the closing phase is answered
+with CONNECTION_CLOSE (`_answer_closing`; the code answers only the 1st, 2nd,
+4th, ... packet, a rate limit the model does not take, so the model answers
+every one, which is the stronger obligation); only the closing timer, not any
+other timer of the slot, ends the phase. A dead slot that never sent a
+CONNECTION_CLOSE (no 1-RTT keys) is reclaimed by its next timer, as before.
+The peer's CONNECTION_CLOSE is unchanged here (QUIC-23).
+mirrors flare/quic/server.mojo `_close_for`, `_enter_closing`,
+`_answer_closing`, `_handle_inbound`, `advance_timers` -/
+def srvStepFix (pto : Nat) (s : SSt) : CEv → SSt
+  | .localClose t => match s.phase with
+    | .opened => ⟨.closing (t + 3 * pto), false, .cc :: s.out⟩
+    | _ => s
+  | .peerClose t => match s.phase with
+    | .opened => ⟨.draining t, s.alive, s.out⟩
+    | _ => s
+  | .recvPkt t => match s.phase with
+    | .closing u => if t < u then { s with out := .cc :: s.out } else s
+    | _ => s
+  | .want _ => if s.alive ∧ s.phase ≠ .gone then { s with out := .other :: s.out } else s
+  | .tick t => match s.phase with
+    | .closing u => if u ≤ t then { s with phase := .gone } else s
+    | _ => if s.alive = false ∧ s.phase ≠ .gone then { s with phase := .gone } else s
+
+/-- The states the QUIC-22 fix covers: an open connection is alive, a
+closing one is not (draining is QUIC-23). -/
+def SOk (s : SSt) : Prop :=
+  (s.phase = .opened ∧ s.alive = true) ∨ (∃ u, s.phase = .closing u ∧ s.alive = false)
+
+/-- **Fix meets spec** (QUIC-22): on local close, packets and timer events the
+fixed server behaves as the RFC 9000 §10.2 specification `cspecStep`. -/
+theorem srvFix_refines (pto : Nat) (s : SSt) (h : SOk s) (e : CEv)
+    (he : ∀ t, e ≠ .peerClose t) :
+    (srvStepFix pto s e).phase = (cspecStep pto ⟨s.phase, s.out⟩ e).phase ∧
+    (srvStepFix pto s e).out = (cspecStep pto ⟨s.phase, s.out⟩ e).out := by
+  obtain ⟨ph, al, out⟩ := s
+  rcases h with ⟨h1, h2⟩ | ⟨u, h1, h2⟩
+  · simp only at h1 h2
+    subst h1; subst h2
+    cases e with
+    | peerClose t => exact absurd rfl (he t)
+    | localClose t => simp [srvStepFix, cspecStep]
+    | recvPkt t => simp [srvStepFix, cspecStep]
+    | want t => simp [srvStepFix, cspecStep]
+    | tick t => simp [srvStepFix, cspecStep]
+  · simp only at h1 h2
+    subst h1; subst h2
+    cases e with
+    | peerClose t => exact absurd rfl (he t)
+    | localClose t => simp [srvStepFix, cspecStep]
+    | recvPkt t => by_cases ht : t < u <;> simp [srvStepFix, cspecStep, ht]
+    | want t => simp [srvStepFix, cspecStep]
+    | tick t => by_cases ht : u ≤ t <;> simp [srvStepFix, cspecStep, ht]
 
 /-- The client: `shutdown` sends CONNECTION_CLOSE and closes the socket; a
 peer CONNECTION_CLOSE moves the state to DRAINING, and `_drain_egress`,

@@ -53,6 +53,7 @@ from flare.crypto.hmac import hmac_sha256
 
 from .crypto import QuicAead
 from .frame import (
+    ConnectionCloseFrame,
     CryptoFrame,
     MaxDataFrame,
     MaxStreamsFrame,
@@ -60,6 +61,7 @@ from .frame import (
     PathResponseFrame,
     StreamFrame,
     encode_ack,
+    encode_connection_close,
     encode_crypto,
     encode_handshake_done,
     encode_max_data,
@@ -182,6 +184,9 @@ from ._server_types import (
 )
 
 
+comptime _MAX_CLOSING_MS: UInt64 = 10_000
+"""Upper bound on the closing period (RFC 9000 sec 10.2: three PTOs).
+Bounds how long a closed slot is retained when the PTO has backed off."""
 comptime _MIN_INITIAL_DATAGRAM: Int = 1200
 """RFC 9000 sec 14.1: a server discards an Initial carried in a datagram
 smaller than this. The floor is what keeps the 3x anti-amplification
@@ -723,6 +728,15 @@ struct QuicListener(Movable):
         # an entry age out: once it filled, 0-RTT was refused for the
         # life of the listener.
         var now_us = _monotonic_ms() * UInt64(1000)
+        # Closing state (RFC 9000 sec 10.2.1): nothing in the packet is
+        # processed; it is answered with CONNECTION_CLOSE instead.
+        if (
+            slot >= 0
+            and slot < len(self.connections)
+            and self.connections[slot].closing
+        ):
+            self._answer_closing(slot)
+            return False
         if slot >= 0 and slot < len(self.connections):
             self.connections[slot].amp_rx += len(datagram)
         # A datagram may carry several coalesced QUIC packets
@@ -1270,12 +1284,11 @@ struct QuicListener(Movable):
                         events.crypto_frames[i].data,
                     )
             except:
-                connection_close(
-                    self.connections[slot].conn,
+                self._close_for(
+                    slot,
                     QUIC_CRYPTO_BUFFER_EXCEEDED,
                     "CRYPTO data too far ahead of the handshake",
                 )
-                self.connections[slot].alive = False
                 return
             var ordered = reasm.levels[inbound_lvl].drain_contiguous()
             if len(ordered) > 0:
@@ -2246,9 +2259,82 @@ struct QuicListener(Movable):
         return True
 
     def _close_for(mut self, slot: Int, code: UInt64, reason: String):
-        """Close ``slot`` with transport error ``code``."""
+        """Close ``slot`` with transport error ``code``: the connection
+        error is signalled with a 1-RTT CONNECTION_CLOSE (RFC 9000
+        sec 11.1) and the slot enters the closing state (sec 10.2) --
+        see :meth:`_enter_closing`."""
         connection_close(self.connections[slot].conn, code, reason)
         self.connections[slot].alive = False
+        self._enter_closing(slot, code)
+
+    def _enter_closing(mut self, slot: Int, code: UInt64):
+        """Send CONNECTION_CLOSE(``code``) and keep ``slot`` routable for
+        three PTOs (capped at :data:`_MAX_CLOSING_MS`), answering each
+        packet it receives meanwhile (RFC 9000 sec 10.2, 10.2.1).
+
+        The idle timer is replaced by one that ends the closing period,
+        and the PTO timer is dropped. When no 1-RTT keys exist yet there
+        is no packet to carry the frame: the slot then closes silently
+        and the next timer of the slot reclaims it, as before.
+        """
+        if slot < 0 or slot >= len(self.peer_addrs):
+            return
+        try:
+            var plaintext = List[UInt8]()
+            encode_connection_close(
+                ConnectionCloseFrame(False, code, UInt64(0), List[UInt8]()),
+                plaintext,
+            )
+            # Enough ciphertext for the header-protection sample.
+            while len(plaintext) < 16:
+                plaintext.append(UInt8(0))
+            var frame = plaintext.copy()
+            var dg = self._build_1rtt_response(slot, plaintext^)
+            if len(dg) == 0:
+                return
+            _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+            self.connections[slot].close_frame = frame^
+        except:
+            return
+        var period = UInt64(3) * self.loss[
+            slot
+        ].pto_interval_ms() if slot < len(self.loss) else UInt64(0)
+        if period > _MAX_CLOSING_MS:
+            period = _MAX_CLOSING_MS
+        if period < UInt64(1):
+            period = UInt64(1)
+        try:
+            self._cancel_pto_timer(slot)
+            var old_id = self.connections[slot].idle_timer_id
+            if old_id != UInt64(0):
+                _ = self.timer_wheel.cancel(old_id)
+            self.connections[slot].idle_timer_id = self.timer_wheel.schedule(
+                after_ms=Int(period),
+                token=encode_timer_token(TIMER_KIND_IDLE, slot),
+            )
+            self.connections[slot].closing = True
+            self.connections[slot].closing_rx = 0
+        except:
+            pass
+
+    def _answer_closing(mut self, slot: Int):
+        """A packet arrived for a closing slot: answer with CONNECTION_CLOSE
+        (RFC 9000 sec 10.2.1), for the 1st, 2nd, 4th, 8th, ... packet so a
+        flood cannot make the server a reflector."""
+        if slot >= len(self.peer_addrs):
+            return
+        self.connections[slot].closing_rx += 1
+        var n = self.connections[slot].closing_rx
+        if (n & (n - 1)) != 0:
+            return
+        try:
+            var dg = self._build_1rtt_response(
+                slot, self.connections[slot].close_frame.copy()
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+        except:
+            pass
 
     def _note_stream_consumed(mut self, slot: Int, sid: Int):
         """A request stream was answered: its bytes and its stream slot
@@ -3032,6 +3118,15 @@ struct QuicListener(Movable):
             var slot = decoded.slot
             if slot < 0 or slot >= len(self.connections):
                 continue
+            # A closing slot (RFC 9000 sec 10.2) is ended by its closing
+            # timer alone -- the TIMER_KIND_IDLE entry _enter_closing
+            # armed. Any other timer of the slot must not cut the closing
+            # period short.
+            if (
+                self.connections[slot].closing
+                and decoded.kind != TIMER_KIND_IDLE
+            ):
+                continue
             if decoded.kind == TIMER_KIND_IDLE:
                 self.connections[slot].on_idle_expired()
             elif decoded.kind == TIMER_KIND_ACK_DELAY:
@@ -3109,12 +3204,11 @@ struct QuicListener(Movable):
         var next_pn = self.connections[slot].tx_1rtt_pn
         for i in range(len(events.acked_packets)):
             if events.acked_packets[i] >= next_pn:
-                connection_close(
-                    self.connections[slot].conn,
+                self._close_for(
+                    slot,
                     QUIC_PROTOCOL_VIOLATION,
                     "ACK for a packet that was never sent",
                 )
-                self.connections[slot].alive = False
                 return
         _ = self.loss[slot].on_ack(
             events.acked_packets, _monotonic_ms(), next_pn

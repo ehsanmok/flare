@@ -196,6 +196,9 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_22.spec_answers
 #print axioms Flare.Bugs.QUIC_22.impl_short_period
 #print axioms Flare.Bugs.QUIC_22.fixed_spec
+#print axioms Flare.Bugs.QUIC_22.fixed_refines
+#print axioms Flare.Bugs.QUIC_22.fixed_trace
+#print axioms Flare.L3.Quic.Timers.srvFix_refines
 #print axioms Flare.Bugs.QUIC_23.impl_sends_draining
 #print axioms Flare.Bugs.QUIC_23.impl_trace
 #print axioms Flare.Bugs.QUIC_23.fixed_spec

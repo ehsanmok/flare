@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
+# RESOLVED: QUIC-22 fixed on fix/formal-findings
 # fixtures in tests/tls/fixtures/rustls-quic-client/)
 """QUIC-22: the server closes connections without sending CONNECTION_CLOSE.
 
@@ -26,7 +27,7 @@ Inconclusive if the handshake does not complete or the server does not
 close the connection.
 
 Expected: the client receives CONNECTION_CLOSE and enters DRAINING.
-Actual: nothing reaches the client; it stays ESTABLISHED.
+Before the fix: nothing reaches the client; it stays ESTABLISHED.
 
 Minimal fix: _close_for builds a 1-RTT CONNECTION_CLOSE(code) and sends it
 to the peer before marking the slot not alive.

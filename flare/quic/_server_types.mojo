@@ -337,6 +337,18 @@ struct QuicConnection(Copyable):
     byte budget). Disabled (budget 0) until the listener installs
     early keys on an accepted resumed ClientHello."""
 
+    var closing: Bool
+    """Set by ``_close_for`` once a CONNECTION_CLOSE went out (RFC 9000
+    sec 10.2): the slot is no longer :attr:`alive` but stays routable and
+    answers incoming packets with CONNECTION_CLOSE until the closing
+    period (three PTOs) ends. Never set when no 1-RTT keys existed to
+    send one."""
+    var closing_rx: Int
+    """Packets received while :attr:`closing`; the CONNECTION_CLOSE
+    answers are rate limited by it (RFC 9000 sec 10.2.1)."""
+    var close_frame: List[UInt8]
+    """The encoded, padded CONNECTION_CLOSE sent on every answer."""
+
     var peer_idle_ms: UInt64
     """The client's ``max_idle_timeout`` (ms); 0 until its transport
     parameters were read, or when it advertises none. The idle timer uses
@@ -362,6 +374,9 @@ struct QuicConnection(Copyable):
         self.pto_timer_id = UInt64(0)
         self.peer_idle_ms = UInt64(0)
         self.idle_sent_since_rx = False
+        self.closing = False
+        self.closing_rx = 0
+        self.close_frame = List[UInt8]()
         self.rx_handshake_secret = List[UInt8]()
         self.tx_handshake_secret = List[UInt8]()
         self.rx_1rtt_secret = List[UInt8]()
