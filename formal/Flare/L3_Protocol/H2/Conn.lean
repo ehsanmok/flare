@@ -210,9 +210,9 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-03, H2-05, H2-09, H2-10. -/
+finding): H2-01, H2-03, H2-05, H2-09, H2-10, H2-17. -/
 def Fix.shipped : Fix :=
-  { h2_01 := true, h2_03 := true, h2_05 := true, h2_09 := true, h2_10 := true }
+  { h2_01 := true, h2_03 := true, h2_05 := true, h2_09 := true, h2_10 := true, h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -820,11 +820,13 @@ def driveFrame (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
 
 /-- The client driver's frame loop (`Http2ClientConnection.feed`,
 client.mojo:400-512): a frame declaring more than the advertised maximum
-raises (the H2-18 fix answers GOAWAY(FRAME_SIZE_ERROR)); PUSH_PROMISE is answered with RST_STREAM on the promised id and
-never reaches `handle_frame` (the H2-17 fix hands it over); frames are
-applied after a GOAWAY was queued as well (`handle_frame` itself then
-emits nothing for a further connection error).
-mirrors flare/http2/client.mojo:400-512 @59bda50 -/
+raises (the H2-18 fix answers GOAWAY(FRAME_SIZE_ERROR)); PUSH_PROMISE
+used to be answered with RST_STREAM on the promised id and never reached
+`handle_frame` (pre-fix; the H2-17 fix hands it over, and it draws
+GOAWAY(PROTOCOL_ERROR)); frames are applied after a GOAWAY was queued as
+well (`handle_frame` itself then emits nothing for a further connection
+error).
+mirrors flare/http2/client.mojo:400-512 (H2-17 fixed at 426-433; H2-18 @59bda50) -/
 def driveClient (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if f.plen > c.localMaxFrame then
     if fx.h2_18 then .ok (connErr c eFRAME_SIZE)

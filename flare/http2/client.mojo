@@ -53,9 +53,9 @@ Wire-protocol scope:
 Out of scope (intentional, mirrors the server's scope):
 
 * Server push (``PUSH_PROMISE``) -- we never originate it and
-  reject inbound PUSH_PROMISE frames from servers via
-  RST_STREAM (PROTOCOL_ERROR) since flare clients do not opt
-  into the SETTINGS_ENABLE_PUSH affordance.
+  treat an inbound PUSH_PROMISE from a server as a connection error
+  (GOAWAY with PROTOCOL_ERROR, RFC 9113 §8.4) since flare clients do
+  not opt into the SETTINGS_ENABLE_PUSH affordance.
 * Stream priority (deprecated by RFC 9113 §5.3.2).
 * Trailers (HEADERS frames *after* the response DATA stream
   closes) -- accepted at the parser level but not surfaced
@@ -423,24 +423,14 @@ struct Http2ClientConnection(Defaultable, Movable):
             for i in range(consumed, len(self.inbox)):
                 rest.append(self.inbox[i])
             self.inbox = rest^
-            # Special-case: PUSH_PROMISE from the server. We never
-            # opt in (SETTINGS_ENABLE_PUSH=0 in our preface
-            # SETTINGS), so any such frame is a protocol violation.
-            # Emit RST_STREAM(PROTOCOL_ERROR) on the promised
-            # stream id (the first 4 bytes of the PUSH_PROMISE
-            # payload) and drop the frame on the floor.
-            if frame.header.type.value == FrameType.PUSH_PROMISE().value:
-                if len(frame.payload) >= 4:
-                    var promised = (
-                        (Int(frame.payload[0]) << 24)
-                        | (Int(frame.payload[1]) << 16)
-                        | (Int(frame.payload[2]) << 8)
-                        | Int(frame.payload[3])
-                    ) & 0x7FFFFFFF
-                    self._send_rst_stream(
-                        promised, Http2ErrorCode.PROTOCOL_ERROR().value
-                    )
-                continue
+            # PUSH_PROMISE from the server: we never opt in
+            # (SETTINGS_ENABLE_PUSH=0 in our preface SETTINGS), so it is a
+            # connection error of type PROTOCOL_ERROR (RFC 9113 sec 8.4).
+            # It goes to ``handle_frame`` like every other frame, which
+            # answers with GOAWAY. It must not be dropped: its header block
+            # may insert into the server's HPACK table, and skipping it
+            # would leave the decoder out of step for every later response
+            # (RFC 9113 sec 4.3, H2-17).
             # Special-case: RST_STREAM. ``Connection.handle_frame``
             # already marks the stream CLOSED but does not retain
             # the peer's error code. Stash it here so the

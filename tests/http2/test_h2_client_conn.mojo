@@ -29,10 +29,11 @@ Test inventory:
   retrievable via :meth:`Http2ClientConnection.stream_error`.
 - :func:`test_goaway_received_flag` -- a GOAWAY from the server
   flips :attr:`Http2ClientConnection.goaway_received`.
-- :func:`test_push_promise_rejected_by_rst_stream` -- if the
+- :func:`test_push_promise_is_a_connection_error` -- if the
   server (incorrectly) sends a PUSH_PROMISE despite our
-  ``SETTINGS_ENABLE_PUSH=0``, the client emits a RST_STREAM on
-  the promised id and drops the push.
+  ``SETTINGS_ENABLE_PUSH=0``, the client answers with
+  GOAWAY(PROTOCOL_ERROR) (RFC 9113 §8.4) instead of dropping the frame
+  and desynchronising its HPACK table.
 - :func:`test_oversized_headers_split_across_continuation` -- a
   request whose encoded header block exceeds ``max_frame_size``
   is split into HEADERS + CONTINUATION frames.
@@ -83,6 +84,96 @@ def _shuttle(
             made_progress = True
         if not made_progress:
             return
+
+
+# ── raw-frame helpers shared by the RFC 9113 §5.1 regression tests ──────
+
+
+def _raw_frame(
+    ty: UInt8, flags: UInt8, sid: Int, payload: List[UInt8]
+) -> List[UInt8]:
+    """Wire bytes of one frame (9-byte header + payload)."""
+    var out = List[UInt8]()
+    var n = len(payload)
+    out.append(UInt8((n >> 16) & 0xFF))
+    out.append(UInt8((n >> 8) & 0xFF))
+    out.append(UInt8(n & 0xFF))
+    out.append(ty)
+    out.append(flags)
+    out.append(UInt8((sid >> 24) & 0x7F))
+    out.append(UInt8((sid >> 16) & 0xFF))
+    out.append(UInt8((sid >> 8) & 0xFF))
+    out.append(UInt8(sid & 0xFF))
+    for b in payload:
+        out.append(b)
+    return out^
+
+
+def _be32(v: Int) -> List[UInt8]:
+    var p = List[UInt8]()
+    p.append(UInt8((v >> 24) & 0xFF))
+    p.append(UInt8((v >> 16) & 0xFF))
+    p.append(UInt8((v >> 8) & 0xFF))
+    p.append(UInt8(v & 0xFF))
+    return p^
+
+
+def _error_code_of(bytes: List[UInt8], ty: Int) raises -> Int:
+    """Error code of the first frame of type ``ty`` (GOAWAY 7 / RST 3) in
+    ``bytes``, or -1 when there is none."""
+    var off = 0
+    while off < len(bytes):
+        var got = parse_frame(Span[UInt8, _](bytes)[off:])
+        if not got:
+            break
+        var f = got.value().copy()
+        off += 9 + f.header.length
+        if Int(f.header.type.value) == ty:
+            var at = 4 if ty == 7 else 0
+            return (
+                (Int(f.payload[at]) << 24)
+                | (Int(f.payload[at + 1]) << 16)
+                | (Int(f.payload[at + 2]) << 8)
+                | Int(f.payload[at + 3])
+            )
+    return -1
+
+
+def _goaway_code(bytes: List[UInt8]) raises -> Int:
+    return _error_code_of(bytes, 7)
+
+
+def _rst_code(bytes: List[UInt8]) raises -> Int:
+    return _error_code_of(bytes, 3)
+
+
+def _get(
+    mut client: Http2ClientConnection, mut server: Http2Connection
+) raises -> Int:
+    """Send a bodiless GET on a fresh stream and shuttle it to the server."""
+    var sid = client.next_stream_id()
+    var empty = List[UInt8]()
+    client.send_request(
+        sid, "GET", "http", "example.com", "/", List[HpackHeader](), Span(empty)
+    )
+    _shuttle(client, server)
+    return sid
+
+
+def _complete_and_take(
+    mut client: Http2ClientConnection,
+    mut server: Http2Connection,
+    sid: Int,
+) raises:
+    """Serve ``sid`` with a 200 "ok" response and ``take_response`` it."""
+    _ = server.take_request(sid)
+    var resp = Response(status=200)
+    resp.body = List[UInt8](String("ok").as_bytes())
+    server.emit_response(sid, resp^)
+    _shuttle(client, server)
+    assert_true(client.response_ready(sid))
+    _ = client.take_response(sid)
+    _ = client.drain()
 
 
 def test_preface_emitted_on_construction() raises:
@@ -422,8 +513,14 @@ def test_goaway_received_flag() raises:
     assert_true(client.goaway_received())
 
 
-def test_push_promise_rejected_by_rst_stream() raises:
-    """A server PUSH_PROMISE despite our SETTINGS_ENABLE_PUSH=0 is RSTd."""
+def test_push_promise_is_a_connection_error() raises:
+    """A server PUSH_PROMISE despite our SETTINGS_ENABLE_PUSH=0 is a
+    connection error of type PROTOCOL_ERROR (RFC 9113 sec 8.4).
+
+    It used to be answered with RST_STREAM on the promised id and dropped,
+    which skipped its HPACK block and left the decoder table out of step
+    with the server's encoder (H2-17).
+    """
     var client = Http2ClientConnection()
     var server = Http2Connection()
     _shuttle(client, server)
@@ -441,8 +538,7 @@ def test_push_promise_rejected_by_rst_stream() raises:
     payload.append(UInt8(0))
     payload.append(UInt8(0))
     payload.append(UInt8(2))
-    # Followed by the HPACK-encoded promised request headers
-    # (we don't decode them since we reject the whole frame).
+    # Followed by the HPACK-encoded promised request headers.
     var enc = HpackEncoder()
     var fake_hdrs = List[HpackHeader]()
     fake_hdrs.append(HpackHeader(":method", "GET"))
@@ -455,24 +551,35 @@ def test_push_promise_rejected_by_rst_stream() raises:
     var ppb = encode_frame(pp^)
     client.feed(Span[UInt8, _](ppb))
 
-    # Client should have queued a RST_STREAM(PROTOCOL_ERROR) on
-    # stream 2 in its outbox.
+    # The client queues GOAWAY(PROTOCOL_ERROR) and no RST_STREAM.
     var c_out = client.drain()
     assert_true(len(c_out) > 0)
-    var maybe = parse_frame(Span[UInt8, _](c_out))
-    assert_true(Bool(maybe))
-    var rst = maybe.value().copy()
-    assert_equal(Int(rst.header.type.value), 0x3)  # RST_STREAM
-    assert_equal(rst.header.stream_id, 2)
-    assert_equal(len(rst.payload), 4)
-    # Error code: PROTOCOL_ERROR = 0x1
-    var code = (
-        (Int(rst.payload[0]) << 24)
-        | (Int(rst.payload[1]) << 16)
-        | (Int(rst.payload[2]) << 8)
-        | Int(rst.payload[3])
-    )
-    assert_equal(code, 0x1)
+    assert_equal(_goaway_code(c_out), 0x1)
+    assert_equal(_rst_code(c_out), -1)
+
+
+def test_push_promise_block_cannot_desync_later_responses() raises:
+    """H2-17: a PUSH_PROMISE whose block inserts into the server's HPACK
+    table must end the connection, not be dropped: a later response that
+    indexes that insert would decode to a header the server never sent."""
+    var client = Http2ClientConnection()
+    var server = Http2Connection()
+    _shuttle(client, server)
+    var sid = _get(client, server)
+    # PUSH_PROMISE(1 -> 2) whose block is "x-a: 1" literal-with-indexing.
+    var block = List[UInt8]()
+    block.append(0x40)  # literal with incremental indexing, new name
+    block.append(3)
+    for c in String("x-a").as_bytes():
+        block.append(c)
+    block.append(1)
+    block.append(UInt8(ord("1")))
+    var payload = _be32(2)
+    payload.extend(block.copy())
+    var pp = _raw_frame(UInt8(0x5), UInt8(0x4), sid, payload)
+    client.feed(Span[UInt8, _](pp))
+    assert_equal(_goaway_code(client.drain()), 0x1)
+    assert_true(client.conn.goaway_sent)
 
 
 def test_oversized_headers_split_across_continuation() raises:
@@ -573,96 +680,6 @@ def test_pending_body_drains_on_window_update() raises:
     assert_equal(String(unsafe_from_utf8=Span[UInt8, _](req.body)), body_str)
 
 
-# ── raw-frame helpers shared by the RFC 9113 §5.1 regression tests ──────
-
-
-def _raw_frame(
-    ty: UInt8, flags: UInt8, sid: Int, payload: List[UInt8]
-) -> List[UInt8]:
-    """Wire bytes of one frame (9-byte header + payload)."""
-    var out = List[UInt8]()
-    var n = len(payload)
-    out.append(UInt8((n >> 16) & 0xFF))
-    out.append(UInt8((n >> 8) & 0xFF))
-    out.append(UInt8(n & 0xFF))
-    out.append(ty)
-    out.append(flags)
-    out.append(UInt8((sid >> 24) & 0x7F))
-    out.append(UInt8((sid >> 16) & 0xFF))
-    out.append(UInt8((sid >> 8) & 0xFF))
-    out.append(UInt8(sid & 0xFF))
-    for b in payload:
-        out.append(b)
-    return out^
-
-
-def _be32(v: Int) -> List[UInt8]:
-    var p = List[UInt8]()
-    p.append(UInt8((v >> 24) & 0xFF))
-    p.append(UInt8((v >> 16) & 0xFF))
-    p.append(UInt8((v >> 8) & 0xFF))
-    p.append(UInt8(v & 0xFF))
-    return p^
-
-
-def _error_code_of(bytes: List[UInt8], ty: Int) raises -> Int:
-    """Error code of the first frame of type ``ty`` (GOAWAY 7 / RST 3) in
-    ``bytes``, or -1 when there is none."""
-    var off = 0
-    while off < len(bytes):
-        var got = parse_frame(Span[UInt8, _](bytes)[off:])
-        if not got:
-            break
-        var f = got.value().copy()
-        off += 9 + f.header.length
-        if Int(f.header.type.value) == ty:
-            var at = 4 if ty == 7 else 0
-            return (
-                (Int(f.payload[at]) << 24)
-                | (Int(f.payload[at + 1]) << 16)
-                | (Int(f.payload[at + 2]) << 8)
-                | Int(f.payload[at + 3])
-            )
-    return -1
-
-
-def _goaway_code(bytes: List[UInt8]) raises -> Int:
-    return _error_code_of(bytes, 7)
-
-
-def _rst_code(bytes: List[UInt8]) raises -> Int:
-    return _error_code_of(bytes, 3)
-
-
-def _get(
-    mut client: Http2ClientConnection, mut server: Http2Connection
-) raises -> Int:
-    """Send a bodiless GET on a fresh stream and shuttle it to the server."""
-    var sid = client.next_stream_id()
-    var empty = List[UInt8]()
-    client.send_request(
-        sid, "GET", "http", "example.com", "/", List[HpackHeader](), Span(empty)
-    )
-    _shuttle(client, server)
-    return sid
-
-
-def _complete_and_take(
-    mut client: Http2ClientConnection,
-    mut server: Http2Connection,
-    sid: Int,
-) raises:
-    """Serve ``sid`` with a 200 "ok" response and ``take_response`` it."""
-    _ = server.take_request(sid)
-    var resp = Response(status=200)
-    resp.body = List[UInt8](String("ok").as_bytes())
-    server.emit_response(sid, resp^)
-    _shuttle(client, server)
-    assert_true(client.response_ready(sid))
-    _ = client.take_response(sid)
-    _ = client.drain()
-
-
 def test_late_frames_on_a_taken_stream_are_ignored() raises:
     """H2-03: a WINDOW_UPDATE or RST_STREAM(NO_ERROR) that reaches the
     client after take_response() popped the stream is a frame on a closed
@@ -710,9 +727,10 @@ def main() raises:
     test_response_with_chunked_body()
     test_rst_stream_surfaced()
     test_goaway_received_flag()
-    test_push_promise_rejected_by_rst_stream()
+    test_push_promise_is_a_connection_error()
     test_oversized_headers_split_across_continuation()
     test_pending_body_drains_on_window_update()
     test_late_frames_on_a_taken_stream_are_ignored()
     test_late_frame_on_a_stream_never_opened_is_a_protocol_error()
-    print("test_h2_client_conn: 13 passed")
+    test_push_promise_block_cannot_desync_later_responses()
+    print("test_h2_client_conn: 14 passed")

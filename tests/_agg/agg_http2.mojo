@@ -34,7 +34,10 @@ from test_h2_client_conn import (
     test_goaway_received_flag as test_h2_client_conn__test_goaway_received_flag,
 )
 from test_h2_client_conn import (
-    test_push_promise_rejected_by_rst_stream as test_h2_client_conn__test_push_promise_rejected_by_rst_stream,
+    test_push_promise_is_a_connection_error as test_h2_client_conn__test_push_promise_is_a_connection_error,
+)
+from test_h2_client_conn import (
+    test_push_promise_block_cannot_desync_later_responses as test_h2_client_conn__test_push_promise_block_cannot_desync_later_responses,
 )
 from test_h2_client_conn import (
     test_oversized_headers_split_across_continuation as test_h2_client_conn__test_oversized_headers_split_across_continuation,
@@ -471,7 +474,10 @@ def main() raises:
     suite.test[test_h2_client_conn__test_response_with_chunked_body]()
     suite.test[test_h2_client_conn__test_rst_stream_surfaced]()
     suite.test[test_h2_client_conn__test_goaway_received_flag]()
-    suite.test[test_h2_client_conn__test_push_promise_rejected_by_rst_stream]()
+    suite.test[test_h2_client_conn__test_push_promise_is_a_connection_error]()
+    suite.test[
+        test_h2_client_conn__test_push_promise_block_cannot_desync_later_responses
+    ]()
     suite.test[
         test_h2_client_conn__test_oversized_headers_split_across_continuation
     ]()

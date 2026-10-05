@@ -126,6 +126,7 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.H2_16.fixed_wu
 #print axioms Flare.Bugs.H2_17.counterexample
 #print axioms Flare.Bugs.H2_17.fixed
+#print axioms Flare.Bugs.H2_17.fixed_shipped
 #print axioms Flare.Bugs.H2_18.bug
 #print axioms Flare.Bugs.H2_18.fixed
 #print axioms Flare.Bugs.H2_18.shipped_raises

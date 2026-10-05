@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-17 fixed on fix/formal-findings
 """H2-17: the HTTP/2 client drops a PUSH_PROMISE frame without decoding its
 header block, so the HPACK dynamic table falls out of step with the
 server's encoder and a later response decodes to a wrong header. The
@@ -31,7 +32,7 @@ promised 2) whose block inserts "x-a: 1" (server table: 62 = x-a: 1,
 
 Expected: GOAWAY(PROTOCOL_ERROR) at the PUSH_PROMISE (push is disabled
 in flare's preface SETTINGS), or at least the field block is decoded so
-stream 3 carries "x-a: 1". Actual: RST_STREAM(2) and stream 3's response
+stream 3 carries "x-a: 1". Before the fix: RST_STREAM(2) and stream 3's response
 carries "x-b: 2", a header the server never sent on it.
 
 Minimal fix: hand PUSH_PROMISE to handle_frame, which already answers

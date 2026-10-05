@@ -5,7 +5,12 @@ import Flare.L3_Protocol.H2.HpackCodec
 /-!
 # H2-17: client drops PUSH_PROMISE header blocks; HPACK desync, wrong header
 
-flare/http2/client.mojo:427-446 @59bda50 intercepts PUSH_PROMISE before
+Status: resolved. The client no longer intercepts PUSH_PROMISE: it goes to
+`handle_frame`, which answers GOAWAY(PROTOCOL_ERROR). The counterexample
+below is about `Fix.none` (the code before the fix); `fixed_shipped`
+is about `Fix.shipped`.
+
+Before the fix, flare/http2/client.mojo:427-446 @59bda50 intercepted PUSH_PROMISE before
 `handle_frame`: it answers RST_STREAM(promised, PROTOCOL_ERROR) and drops
 the frame. The field block it carries is never decoded, so any insert the
 peer's encoder made in it is missing from flare's decoder table. A later
@@ -114,5 +119,23 @@ theorem fixed (fx : Fix) (hfx : fx.h2_17 = true) (budget : Nat) (es : List Ev) (
     Sound fss (decFold real budget Flare.L3.H2.Hpack.Table.init c''.decLog).2 :=
   lookup_sound_conn fx real Flare.L3.H2.Hpack.real_correct Flare.L1.Huffman.encode Flare.L3.H2.Hpack.real_huff budget es c0 c''
     trc rss pd p' fss hr hg hd hc (Or.inl hfx) hno hfr hpeer hv
+
+/-- The shipped model carries the H2-17 fix, so `lookup_sound_conn` holds
+for it in client role. -/
+theorem fixed_shipped (budget : Nat) (es : List Ev) (c0 c'' : Conn)
+    (trc : List (Ev × List Out)) (rss : List (List Rep)) (pd : Option (Nat × Bytes)) (p' : Peer)
+    (fss : List (List Entry))
+    (hr : runD Fix.shipped (decAt real budget) c0 es = some (c'', trc))
+    (hg : c0.goawaySent = false) (hd : c0.decLog = []) (hc : c0.continuing = 0)
+    (hno : trc.all (fun p => !hasGoaway p.2) = true)
+    (hfr : rrun (none, []) (framesOf es) = (pd, rss.map (encBlock real Flare.L1.Huffman.encode)))
+    (hpeer : pblocks Peer.init rss = some (p', fss))
+    (hv : ∀ rs ∈ rss, ∀ r ∈ rs, Flare.L3.H2.Hpack.RepOK Flare.L1.Huffman.encode r) :
+    c''.decLog = rss.map (encBlock real Flare.L1.Huffman.encode) ∧
+    Sound fss (decFold real budget Flare.L3.H2.Hpack.Table.init c''.decLog).2 :=
+  fixed Fix.shipped rfl budget es c0 c'' trc rss pd p' fss hr hg hd hc hno hfr hpeer hv
+
+theorem shipped_frame : outs Fix.shipped init [.frame settings0, .openLocal 1 true, .frame push] =
+    some [[.settingsAck], [], [.goaway 0 ePROTOCOL]] := by native_decide
 
 end Flare.Bugs.H2_17
