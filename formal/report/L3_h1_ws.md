@@ -120,7 +120,7 @@ File: `Ws/Recv.lean`.
 | Lean name | Statement | Status |
 |---|---|---|
 | `server_safe` | Every frame the server accepts was masked and passes `decode_ok_shape` (RFC 6455 §5.1). | proved |
-| `clientFixed_safe` | With the WS-03 check, every frame the client accepts is unmasked. | proved |
+| `clientAccept_safe` | With the WS-03 check, every frame the client accepts is unmasked. | proved |
 | `decodeKnown_safe`, `decodeKnown_encode` | The WS-01 fix accepts only known opcodes, and the round trip still holds for them. | proved |
 | `collect_spec`, `nextMessage_delivered` | The fixed `recv_message` returns exactly a TEXT/BINARY frame followed by CONTINUATION frames up to FIN, with the concatenated payload, skipping control frames (RFC 6455 §5.4). | proved |
 | `textPayload_ok_iff` | The UTF-8 check on text payloads accepts exactly RFC 3629 `UTF8-octets` (from `L1.Utf8.isValidUtf8_iff`). | proved |
@@ -427,10 +427,12 @@ Status: resolved. `WsClient.recv_message` now skips PONG, requires a TEXT/BINARY
 
 ### WS-03: `WsClient` accepts masked frames from the server
 
+Status: resolved. `WsClient._recv_one` raises `WsProtocolError` for a masked server frame, so `recv()` and `recv_message()` fail the connection. The counterexample is about `clientAcceptOld`; `clientAccept` is the shipped check (`clientAccept_safe`). Test: `test_client_refuses_a_masked_server_frame`.
+
 - **Severity:** Low. It is a MUST violation with no direct exploit. The server side has the corresponding check (`server.mojo:558-562`).
 - **RFC:** RFC 6455 §5.1: "A client MUST close a connection if it detects a masked frame."
 - **What goes wrong:** `_recv_one` (`client.mojo:717-763`) unmasks the frame and returns it.
-- **Counterexample:** `Bugs.WS_03.counterexample` (`¬ ClientSafe clientAccept`), with `client_accepts_masked` (a masked TEXT "hi" is accepted).
+- **Counterexample:** `Bugs.WS_03.counterexample` (`¬ ClientSafe clientAcceptOld`), with `client_accepts_masked` (a masked TEXT "hi" is accepted).
 - **Fix:** raise `WsProtocolError` if `result.frame.masked`. `Bugs.WS_03.fixed_client_safe` proves the client then accepts only unmasked frames.
 - **Repro:** `formal/repro/WS-03_client_accepts_masked_server_frame.mojo` (loopback TCP)
 - **Observed:** `BUG REPRODUCED: client accepted a masked server frame (payload 'hi')`
@@ -545,7 +547,7 @@ After every flip, `git status --short flare/` showed none of my files. Other age
 | `Ws.Frame`, `isControl`, `byte0`, `lenCode`, `be16`, `be64`, `extLen`, `encode`, `encodeChecked` | `ws/frame.mojo:140-170`, `234-356`, `512-520` | `decode_encode`, `lenCode_125`, `lenCode_126`, `lenCode_65535`, `lenCode_65536` | proved |
 | `Ws.parseLen`, `finish`, `decode` | `ws/frame.mojo:361-508` | `decode_encode`, `decode_ok_shape`, `Bugs.WS_01.*` | proved / counterexample (WS-01) |
 | `Ws.serverAccept` | `ws/server.mojo:541-575` | `server_safe` | proved |
-| `Ws.clientAccept`, `recvFrame` | `ws/client.mojo:693-763` | `Bugs.WS_03.*`, `clientFixed_safe` | counterexample (WS-03) / fix proved |
+| `Ws.clientAccept` (`clientAcceptOld`), `recvFrame` | `ws/client.mojo:693-763` | `Bugs.WS_03.*`, `clientAccept_safe` | fix proved; `clientAcceptOld` keeps the counterexample (WS-03) |
 | `Ws.recvMessageOld`, `Ws.nextMessage` | `ws/client.mojo:765-858` | `Bugs.WS_02.*`, `nextMessage_delivered` | counterexample (WS-02) / fix proved |
 | UTF-8 check (`L1.Utf8.isValidUtf8`) | `ws/frame.mojo:553-606` | `textPayload_ok_iff` | proved (in L1) |
 | `ObsFold.isSPHT`, `aStrip`, `colonAt`, `fields` | `_server/parse.mojo:203-320`, `parse_util.mojo:65-90` | `fold_unfold`, `strict_no_fold`, `fieldsOld_ok_strict`, `fields_valid`, `Bugs.H1_10.*` | proved (strict) / counterexample (H1-10) / fix proved |

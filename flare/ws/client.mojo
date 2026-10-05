@@ -715,7 +715,12 @@ struct WsClient(Movable):
             return frame^
 
     def _recv_one(mut self) raises -> WsFrame:
-        """Read raw bytes from the stream and decode one frame."""
+        """Read raw bytes from the stream and decode one frame.
+
+        Raises:
+            WsProtocolError: If the server sent a masked frame (RFC 6455
+                sec 5.1).
+        """
         # Read bytes incrementally until we have a full frame, starting
         # from whatever the previous read carried past its frame.
         var buf = self._prebuf.copy()
@@ -728,6 +733,13 @@ struct WsClient(Movable):
                 var result = WsFrame.decode_one(
                     Span[UInt8, _](buf), max_payload=self.max_frame_size
                 )
+                # RFC 6455 sec 5.1: a server MUST NOT mask the frames it
+                # sends, and a client MUST close the connection if it
+                # detects a masked frame.
+                if result.frame.masked:
+                    raise WsProtocolError(
+                        "server sent a masked frame (RFC 6455 sec 5.1)"
+                    )
                 # A server may send several frames in one segment. They
                 # used to die with ``buf``: the second was lost and the
                 # next recv() waited for bytes already consumed.

@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP in-process; no external network)
+# RESOLVED: WS-03 fixed on fix/formal-findings
 """WS-03: WsClient accepts a masked frame from the server.
 
 Lean: Flare.Bugs.WS_03.counterexample (counterexample) and
@@ -10,7 +11,7 @@ Spec: RFC 6455 sec 5.1: "A server MUST NOT mask any frames that it sends to
 the client. A client MUST close a connection if it detects a masked frame."
 
 Expected: WsClient.recv() raises WsProtocolError on a masked server frame.
-Actual: the frame is unmasked and returned as a normal TEXT frame.
+Before the fix: Actual: the frame is unmasked and returned as a normal TEXT frame.
 
 Minimal fix: in WsClient._recv_one, after decode_one succeeds, raise
 WsProtocolError if result.frame.masked.

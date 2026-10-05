@@ -205,6 +205,9 @@ from test_ws_client_recv_message import (
 from test_ws_client_recv_message import (
     test_reassembled_message_is_bounded_by_max_frame_size as test_ws_client_recv_message__test_reassembled_message_is_bounded_by_max_frame_size,
 )
+from test_ws_client_recv_message import (
+    test_client_refuses_a_masked_server_frame as test_ws_client_recv_message__test_client_refuses_a_masked_server_frame,
+)
 from test_ws_h2 import (
     test_bootstrap_raises_when_peer_did_not_advertise_8441 as test_ws_h2__test_bootstrap_raises_when_peer_did_not_advertise_8441,
 )
@@ -435,6 +438,9 @@ def main() raises:
     ]()
     suite.test[
         test_ws_client_recv_message__test_reassembled_message_is_bounded_by_max_frame_size
+    ]()
+    suite.test[
+        test_ws_client_recv_message__test_client_refuses_a_masked_server_frame
     ]()
     # tests/ws/test_ws_h2.mojo
     suite.test[

@@ -10,9 +10,13 @@ import Flare.L3_Protocol.Ws.Recv
   detects a masked frame."
 * What goes wrong: any masked TEXT frame from the server is unmasked and
   returned as data.
-* Fix (`clientAcceptFixed`): refuse a decoded frame whose MASK bit is set.
-  `clientFixed_safe` proves the fix; `server_safe` is the server-side analogue,
-  which already holds.
+* Fix (`clientAccept`, the shipped `_recv_one`): refuse a decoded frame
+  whose MASK bit is set. `clientAccept_safe` proves the fix; `server_safe` is
+  the server-side analogue, which already holds. The counterexample is about
+  `clientAcceptOld`, the pre-fix `_recv_one`.
+
+Status: resolved. `WsClient._recv_one` raises `WsProtocolError` on a masked
+server frame.
 -/
 namespace Flare.Bugs.WS_03
 open Flare Flare.L3.Ws
@@ -23,17 +27,17 @@ def key : Key := ⟨0x11, 0x22, 0x33, 0x44⟩
 /-- The client decodes a masked server frame (any masked frame, by the
 round-trip theorem). -/
 theorem client_accepts_masked :
-    clientAccept (2 ^ 20) (encode frameHi true key) =
+    clientAcceptOld (2 ^ 20) (encode frameHi true key) =
       .ok { frameHi with masked := true } (encode frameHi true key).length := by
   have := decode_encode false (2 ^ 20) frameHi true key [] (by decide) (by decide) (by decide)
     (by decide) (by decide)
-  simpa [clientAccept] using this
+  simpa [clientAcceptOld] using this
 
-theorem counterexample : ¬ ClientSafe (clientAccept (2 ^ 20)) := by
+theorem counterexample : ¬ ClientSafe (clientAcceptOld (2 ^ 20)) := by
   intro h
   have := h _ _ _ client_accepts_masked
   simp at this
 
-theorem fixed_client_safe (maxP : Nat) : ClientSafe (clientAcceptFixed maxP) := clientFixed_safe maxP
+theorem fixed_client_safe (maxP : Nat) : ClientSafe (clientAccept maxP) := clientAccept_safe maxP
 
 end Flare.Bugs.WS_03

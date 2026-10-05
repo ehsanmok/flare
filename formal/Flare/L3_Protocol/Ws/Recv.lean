@@ -9,8 +9,9 @@ import Flare.L3_Protocol.Ws.Frame
   safe and `decodeKnown_encode` shows it still round-trips every frame with
   a defined opcode.
 * **Mask direction.** `serverAccept` (`WsConnection._recv_one`) refuses
-  unmasked frames: `server_safe`. `clientAccept` (`WsClient._recv_one`) has
-  no check. `clientAcceptFixed` adds it: `clientFixed_safe`.
+  unmasked frames: `server_safe`. `clientAcceptOld` (`WsClient._recv_one`
+  before the WS-03 fix) had no check; the shipped `clientAccept` refuses a
+  masked frame: `clientAccept_safe`.
 * **Message assembly.** `recvMessageOld` models `WsClient.recv_message`
   before the WS-02 fix; `nextMessage` is the shipped reader.
   `Delivered` is the declarative RFC 6455 §5.4 meaning of "the next complete
@@ -75,12 +76,13 @@ def serverAccept (maxP : Nat) (d : Bytes) : DRes :=
   | .ok f n => if f.masked then .ok f n else .error
   | r => r
 
-/-- `WsClient._recv_one`: decode only.
+/-- `WsClient._recv_one` before the WS-03 fix: decode only.
 mirrors flare/ws/client.mojo:717-763 @59bda50 -/
-def clientAccept (maxP : Nat) (d : Bytes) : DRes := decode false maxP d
+def clientAcceptOld (maxP : Nat) (d : Bytes) : DRes := decode false maxP d
 
-/-- `WsClient._recv_one` with the RFC 6455 §5.1 check. -/
-def clientAcceptFixed (maxP : Nat) (d : Bytes) : DRes :=
+/-- The shipped `WsClient._recv_one`, with the RFC 6455 §5.1 check.
+mirrors flare/ws/client.mojo `_recv_one` (fixed, WS-03) -/
+def clientAccept (maxP : Nat) (d : Bytes) : DRes :=
   match decode false maxP d with
   | .ok f n => if f.masked then .error else .ok f n
   | r => r
@@ -97,9 +99,9 @@ theorem server_safe (maxP : Nat) : ServerSafe (serverAccept maxP) := by
     · cases h
   · rename_i r hr; exact absurd h (hr f n)
 
-theorem clientFixed_safe (maxP : Nat) : ClientSafe (clientAcceptFixed maxP) := by
+theorem clientAccept_safe (maxP : Nat) : ClientSafe (clientAccept maxP) := by
   intro d f n h
-  unfold clientAcceptFixed at h
+  unfold clientAccept at h
   split at h
   · split at h
     · cases h

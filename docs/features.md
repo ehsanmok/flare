@@ -893,6 +893,9 @@ of what you might reasonably assume from the surrounding feature.
   (0x3-0x7, 0xB-0xF), as RFC 6455 sec 5.2 requires of a receiver. It used
   to return the frame, so `recv()` handed it to the application. The
   server, client and h2 receive paths all decode through it.
+- `WsClient.recv()` and `recv_message()` now raise `WsProtocolError` when
+  the server sends a masked frame (RFC 6455 sec 5.1: a client MUST close
+  the connection on one). They used to unmask it and return the payload.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of

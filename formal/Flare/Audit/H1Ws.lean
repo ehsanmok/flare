@@ -54,7 +54,7 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.Ws.decodeKnown_safe
 #print axioms Flare.L3.Ws.decodeKnown_encode
 #print axioms Flare.L3.Ws.server_safe
-#print axioms Flare.L3.Ws.clientFixed_safe
+#print axioms Flare.L3.Ws.clientAccept_safe
 #print axioms Flare.L3.Ws.collect_spec
 #print axioms Flare.L3.Ws.nextMessage_delivered
 #print axioms Flare.L3.Ws.textPayload_ok_iff

@@ -192,5 +192,41 @@ def test_reassembled_message_is_bounded_by_max_frame_size() raises:
     srv.close()
 
 
+def test_client_refuses_a_masked_server_frame() raises:
+    """WS-03: RFC 6455 sec 5.1 -- a client MUST close on a masked frame.
+
+    ``WsClient._recv_one`` unmasked the frame and returned it. Both
+    ``recv()`` and ``recv_message()`` go through it.
+    """
+    var key = SIMD[DType.uint8, 4](0x11, 0x22, 0x33, 0x44)
+    var masked = WsFrame.text("hi").encode_with_key(True, key)
+    var srv = _dummy()
+    var ws = _client(masked, srv)
+    var recv_err = String("")
+    try:
+        _ = ws.recv()
+    except e:
+        recv_err = String(e)
+    assert_true("masked" in recv_err, "recv() must refuse: '" + recv_err + "'")
+    assert_true("WsProtocolError" in recv_err or "RFC 6455" in recv_err)
+
+    var srv2 = _dummy()
+    var msg_err = _fails(_client(masked, srv2))
+    assert_true("masked" in msg_err, "recv_message: '" + msg_err + "'")
+
+    # A masked frame after valid ones is refused as well.
+    var wire = _frame(WsOpcode.TEXT, _bytes("ok"), True)
+    wire.extend(Span[UInt8, _](masked))
+    var srv3 = _dummy()
+    var ws3 = _client(wire, srv3)
+    assert_equal(ws3.recv().text_payload(), "ok")
+    var second = String("")
+    try:
+        _ = ws3.recv()
+    except e:
+        second = String(e)
+    assert_true("masked" in second, "second frame: '" + second + "'")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
