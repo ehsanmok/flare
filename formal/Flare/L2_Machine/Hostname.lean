@@ -4,9 +4,9 @@ import Flare.L1_Encoding.Utf8
 /-!
 # Hostname validation in `resolve`
 
-Model of the pre-`getaddrinfo` checks in `flare/dns/resolver.mojo:68-107`.
+Model of the pre-`getaddrinfo` checks in `flare/dns/resolver.mojo:71-113`.
 
-flare documents four rules (resolver.mojo:71-79): no NUL, no CR/LF, no `@`,
+flare documents four rules (resolver.mojo:74-82): no NUL, no CR/LF, no `@`,
 and "RFC 1035 §2.3.4 limits FQDNs to 253 octets and individual labels to
 63 octets". flare does not claim RFC 952/1123 LDH syntax (letters, digits,
 hyphen) and does not check it; empty labels (`a..b`) are left to
@@ -22,9 +22,10 @@ documented one:
 Proved:
 * `scan_ok_iff`: the per-byte loop accepts iff no forbidden byte and every
   label is at most 63 bytes;
-* `validate_sound`: flare never accepts an invalid name;
-* `validate_gap`: the only valid names flare rejects are 254 bytes long
-  and end in `.` (NET-08); `validateFixed_iff` closes the gap;
+* `validate_iff`: flare accepts exactly the valid names (fixed, NET-08);
+  `validate_sound` is the soundness half;
+* `validateOld_gap`: before the fix, the only valid names flare rejected
+  were 254 bytes long and ended in `.` (NET-08);
 * the too-long error text cuts the name at byte 20, possibly inside a
   UTF-8 sequence (NET-09); `truncChars_wf` proves the fixed cut is
   well-formed.
@@ -34,7 +35,7 @@ open Flare.L1.Utf8 (WF leadLen WF_cons_iff WfHead seqOK)
 
 def dot : UInt8 := 0x2E
 
-/-- NUL, LF, CR, `@` (resolver.mojo:90-95) -/
+/-- NUL, LF, CR, `@` (resolver.mojo:96-101) -/
 def forbidden (b : UInt8) : Bool := b == 0 || b == 0x0A || b == 0x0D || b == 0x40
 
 inductive Res where
@@ -42,7 +43,7 @@ inductive Res where
   deriving DecidableEq, Repr
 
 /-- the per-byte loop, `ll` = `label_len`.
-mirrors flare/dns/resolver.mojo:88-107 @59bda50 -/
+mirrors flare/dns/resolver.mojo:94-113 @59bda50 -/
 def scan : Bytes → Nat → Res
   | [], _ => .ok
   | b :: r, ll =>
@@ -51,8 +52,9 @@ def scan : Bytes → Nat → Res
     else if ll + 1 > 63 then .label
     else scan r (ll + 1)
 
-/-- mirrors flare/dns/resolver.mojo:68-107 @59bda50 -/
-def validate (h : Bytes) : Res :=
+/-- Pre-fix validation: the raw byte length is compared with 253
+(flare/dns/resolver.mojo:68-107 @59bda50). -/
+def validateOld (h : Bytes) : Res :=
   if h.length = 0 then .empty
   else if h.length > 253 then .tooLong
   else scan h 0
@@ -63,6 +65,13 @@ def labels (h : Bytes) : List Bytes := h.splitOnP isDot
 
 /-- text length of the name without one trailing root dot -/
 def nameLen (h : Bytes) : Nat := if h.getLast? = some dot then h.length - 1 else h.length
+
+/-- The shipped validation: one trailing root dot is not counted against 253.
+mirrors flare/dns/resolver.mojo:71-113 (fixed, NET-08) -/
+def validate (h : Bytes) : Res :=
+  if h.length = 0 then .empty
+  else if nameLen h > 253 then .tooLong
+  else scan h 0
 
 /-- the documented rules -/
 def Valid (h : Bytes) : Prop :=
@@ -150,43 +159,9 @@ theorem nameLen_le (h : Bytes) : nameLen h ≤ h.length := by
 theorem length_le_nameLen (h : Bytes) : h.length ≤ nameLen h + 1 := by
   unfold nameLen; split <;> omega
 
-/-- **Sound**: whatever flare accepts satisfies the documented rules. -/
-theorem validate_sound (h : Bytes) (hv : validate h = .ok) : Valid h := by
-  unfold validate at hv
-  by_cases h0 : h.length = 0
-  · rw [if_pos h0] at hv; cases hv
-  rw [if_neg h0] at hv
-  by_cases h1 : h.length > 253
-  · rw [if_pos h1] at hv; cases hv
-  rw [if_neg h1] at hv
-  obtain ⟨a, b⟩ := (scan_ok_iff_labels h).1 hv
-  exact ⟨fun he => h0 (by rw [he]; rfl), a, by have := nameLen_le h; omega, b⟩
-
-/-- **The gap**: a valid name flare rejects is exactly 254 bytes long and
-ends in the root dot. -/
-theorem validate_gap (h : Bytes) (hv : Valid h) (hr : validate h ≠ .ok) :
-    h.length = 254 ∧ h.getLast? = some dot := by
-  obtain ⟨hne, hf, hl, hlab⟩ := hv
-  have hs : scan h 0 = .ok := (scan_ok_iff_labels h).2 ⟨hf, hlab⟩
-  have h0 : h.length ≠ 0 := fun e => hne (List.eq_nil_of_length_eq_zero e)
-  unfold validate at hr
-  rw [if_neg h0] at hr
-  by_cases h1 : h.length > 253
-  · unfold nameLen at hl
-    split at hl
-    · rename_i hd; exact ⟨by omega, hd⟩
-    · omega
-  · rw [if_neg h1] at hr; exact absurd hs hr
-
-/-- the fix for NET-08: allow one more byte for a trailing root dot -/
-def validateFixed (h : Bytes) : Res :=
-  if h.length = 0 then .empty
-  else if nameLen h > 253 then .tooLong
-  else scan h 0
-
-/-- **Fixed validation is exactly the documented rules.** -/
-theorem validateFixed_iff (h : Bytes) : validateFixed h = .ok ↔ Valid h := by
-  unfold validateFixed
+/-- **Shipped validation is exactly the documented rules.** -/
+theorem validate_iff (h : Bytes) : validate h = .ok ↔ Valid h := by
+  unfold validate
   constructor
   · intro hv
     by_cases h0 : h.length = 0
@@ -202,6 +177,26 @@ theorem validateFixed_iff (h : Bytes) : validateFixed h = .ok ↔ Valid h := by
     rw [if_neg h0, if_neg (by omega)]
     exact (scan_ok_iff_labels h).2 ⟨hf, hlab⟩
 
+/-- **Sound**: whatever flare accepts satisfies the documented rules. -/
+theorem validate_sound (h : Bytes) (hv : validate h = .ok) : Valid h :=
+  (validate_iff h).1 hv
+
+/-- **The pre-fix gap**: a valid name the old check rejected is exactly 254
+bytes long and ends in the root dot. -/
+theorem validateOld_gap (h : Bytes) (hv : Valid h) (hr : validateOld h ≠ .ok) :
+    h.length = 254 ∧ h.getLast? = some dot := by
+  obtain ⟨hne, hf, hl, hlab⟩ := hv
+  have hs : scan h 0 = .ok := (scan_ok_iff_labels h).2 ⟨hf, hlab⟩
+  have h0 : h.length ≠ 0 := fun e => hne (List.eq_nil_of_length_eq_zero e)
+  unfold validateOld at hr
+  rw [if_neg h0] at hr
+  by_cases h1 : h.length > 253
+  · unfold nameLen at hl
+    split at hl
+    · rename_i hd; exact ⟨by omega, hd⟩
+    · omega
+  · rw [if_neg h1] at hr; exact absurd hs hr
+
 /-! ## The too-long error text -/
 
 /-- `"…"` in UTF-8 -/
@@ -209,7 +204,7 @@ def ellipsis : Bytes := [0xE2, 0x80, 0xA6]
 
 /-- the variable part of the too-long message:
 `String(unsafe_from_utf8=host_bytes[:20]) + "…"`.
-mirrors flare/dns/resolver.mojo:82-87 @59bda50 -/
+mirrors flare/dns/resolver.mojo:88-93 @59bda50 -/
 def tooLongTail (h : Bytes) : Bytes := h.take 20 ++ ellipsis
 
 /-- the fix for NET-09: keep whole characters only, at most `k` bytes -/

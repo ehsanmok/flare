@@ -134,8 +134,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.HappyEyeballs.orderFixed_head
 #print axioms Flare.L2.HappyEyeballs.orderFixed_perm
 #print axioms Flare.L2.Hostname.validate_sound
-#print axioms Flare.L2.Hostname.validate_gap
-#print axioms Flare.L2.Hostname.validateFixed_iff
+#print axioms Flare.L2.Hostname.validateOld_gap
+#print axioms Flare.L2.Hostname.validate_iff
 #print axioms Flare.L2.Hostname.tooLongTailFixed_wf
 #print axioms Flare.L2.UdsListener.prep_agrees
 #print axioms Flare.L2.UdsListener.prep_safe

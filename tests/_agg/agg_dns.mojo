@@ -76,6 +76,15 @@ from test_dns import (
     test_resolve_hostname_too_long_raises as test_dns__test_resolve_hostname_too_long_raises,
 )
 from test_dns import (
+    test_resolve_accepts_253_byte_name as test_dns__test_resolve_accepts_253_byte_name,
+)
+from test_dns import (
+    test_resolve_accepts_253_byte_absolute_name as test_dns__test_resolve_accepts_253_byte_absolute_name,
+)
+from test_dns import (
+    test_resolve_rejects_254_byte_name_without_root_dot as test_dns__test_resolve_rejects_254_byte_name_without_root_dot,
+)
+from test_dns import (
     test_resolve_label_too_long_raises as test_dns__test_resolve_label_too_long_raises,
 )
 from test_dns_cache import (
@@ -138,6 +147,9 @@ def main() raises:
     suite.test[test_dns__test_resolve_crlf_injection_raises]()
     suite.test[test_dns__test_resolve_at_sign_raises]()
     suite.test[test_dns__test_resolve_hostname_too_long_raises]()
+    suite.test[test_dns__test_resolve_accepts_253_byte_name]()
+    suite.test[test_dns__test_resolve_accepts_253_byte_absolute_name]()
+    suite.test[test_dns__test_resolve_rejects_254_byte_name_without_root_dot]()
     suite.test[test_dns__test_resolve_label_too_long_raises]()
     # tests/dns/test_dns_cache.mojo
     suite.test[test_dns_cache__test_within_ttl_no_second_syscall]()

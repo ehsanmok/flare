@@ -3,7 +3,7 @@ import Flare.L2_Machine.Hostname
 /-!
 # NET-09: the "hostname too long" error cuts a UTF-8 character in half
 
-flare/dns/resolver.mojo:82-87 @59bda50.
+flare/dns/resolver.mojo:82-87 @59bda50 (now :88-93).
 
 Spec: a Mojo `String` holds well-formed UTF-8; the error text built from a
 well-formed host must be well-formed (`Flare.L1.Utf8.WF`).

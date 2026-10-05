@@ -55,7 +55,10 @@ def resolve(host: String) raises -> List[IpAddr]:
         address for this host.
 
     Raises:
-        AddressParseError: If ``host`` is empty.
+        AddressParseError: If ``host`` is empty, longer than 253 bytes
+            (one trailing root dot, as in ``"example.com."``, is not
+            counted), has a label over 63 bytes, or contains a NUL, CR, LF
+            or ``@``.
         DnsError: On NXDOMAIN, timeout, or system resolver failure.
 
     Example:
@@ -77,9 +80,12 @@ def resolve(host: String) raises -> List[IpAddr]:
     # (3) '@': user-info prefix — "user@host" is not a hostname.
     # (4) Length: RFC 1035 §2.3.4 limits FQDNs to 253 octets and individual
     # labels to 63 octets. Reject early to avoid resolver undefined behaviour.
+    # The 255-octet wire limit counts the root label, so one trailing root
+    # dot ("example.com.") is not counted against the 253 text bytes.
     var host_bytes = host.as_bytes()
     var n = len(host_bytes)
-    if n > 253:
+    var name_len = n - 1 if host_bytes[n - 1] == UInt8(ord(".")) else n
+    if name_len > 253:
         raise AddressParseError(
             "hostname too long (max 253 chars): "
             + String(unsafe_from_utf8=host_bytes[:20])

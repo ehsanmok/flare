@@ -325,8 +325,8 @@ include/linux/socket.h, consumed by `__udp_cmsg_send` in net/ipv4/udp.c).
 
 ### Hostname validation (`Hostname.lean`)
 
-dns/resolver.mojo:68-107, the checks `resolve` runs before `getaddrinfo`.
-The spec is the documented one (resolver.mojo:71-79): no NUL, CR, LF or `@`,
+dns/resolver.mojo:71-113, the checks `resolve` runs before `getaddrinfo`.
+The spec is the documented one (resolver.mojo:74-82): no NUL, CR, LF or `@`,
 labels of at most 63 bytes, and at most 253 bytes not counting one trailing
 root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 
@@ -334,8 +334,8 @@ root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 |---|---|---|
 | `scan_ok_iff` | The per-byte loop accepts exactly when no forbidden byte occurs and every label is at most 63 bytes. | proved |
 | `validate_sound` | flare never accepts a name that breaks the documented rules. | proved |
-| `validate_gap` | The only valid names flare rejects are 254 bytes long and end in `.`. | proved (NET-08) |
-| `validateFixed_iff` | The fixed check accepts exactly the valid names. | proved |
+| `validateOld_gap` | Before the fix, the only valid names flare rejected were 254 bytes long and ended in `.`. | proved (NET-08, resolved) |
+| `validate_iff` | The shipped check accepts exactly the valid names. | proved |
 | `truncChars_wf`, `tooLongTailFixed_wf` | Cutting at a character boundary keeps the error text well-formed UTF-8 and quotes at most 20 bytes. | proved |
 | `Flare.Bugs.NET_09.message_not_wf` | A well-formed 261-byte host gives an error text that is not well-formed. | counterexample (NET-09) |
 
@@ -534,13 +534,15 @@ affected; the same name without the trailing dot resolves.
 Spec: the rule flare cites, RFC 1035 §2.3.4, allows 253 text bytes plus an
 optional root dot.
 What goes wrong: resolver.mojo:80-82 compares the raw byte length with 253.
-`validate_gap` shows this is the only valid input flare rejects.
+`validateOld_gap` shows this was the only valid input flare rejected.
 Lean: `Flare.Bugs.NET_08.valid_but_rejected` (63+1+63+1+63+1+61+1 bytes).
-Fix: compare the length without one trailing `.`; `validateFixed_spec`.
+Fix: compare the length without one trailing `.`; `validateFixed_spec` (the
+shipped `validate` accepts exactly the valid names).
 Repro: `formal/repro/NET-08_hostname_trailing_dot_too_long.mojo`, observed
 `BUG REPRODUCED: 254-byte absolute name (253 + root dot) rejected: AddressParseError: invalid address 'hostname too long (max 253 chars): ...'`.
 Flip: `OK: name passed validation; resolver said: DnsError(...)` (the name
 reaches `getaddrinfo`, which then fails to resolve it), exit 0.
+Status: resolved. `resolve` compares the length without one trailing root dot against 253; the model's `validate` mirrors it (pre-fix: `validateOld`; shipped: `validate_iff`, `validate_sound`). Tests: `tests/dns/test_dns.mojo::test_resolve_accepts_253_byte_absolute_name`, `::test_resolve_accepts_253_byte_name`, `::test_resolve_rejects_254_byte_name_without_root_dot`.
 
 ### NET-09: the "hostname too long" error cuts a UTF-8 character in half
 
@@ -886,7 +888,7 @@ lists record ids, not tokens.
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |
 | `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
-| `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:68-107 | `validate_sound`, `validate_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | counterexample (NET-08, NET-09) |
+| `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:71-113 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexample (NET-08 resolved, NET-09) |
 | `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
 | `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:400-408 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |

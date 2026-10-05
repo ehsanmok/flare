@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-08 fixed on fix/formal-findings
 """NET-08: resolve() rejects a valid 254-byte absolute hostname.
 
 Lean: Flare.Bugs.NET_08.valid_but_rejected (counterexample) and
@@ -10,7 +11,7 @@ wire octets, i.e. 253 text bytes plus an optional trailing root dot. A
 253-byte name written absolute (254 bytes ending in ".") is valid and goes
 to getaddrinfo (here it ends in the reserved .invalid TLD, so the lookup
 fails with a DnsError, not a validation error).
-Actual: AddressParseError "hostname too long (max 253 chars)".
+Before the fix: AddressParseError "hostname too long (max 253 chars)".
 
 Minimal fix: compare the length without one trailing "." against 253.
 """

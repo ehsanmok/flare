@@ -188,6 +188,65 @@ def test_resolve_hostname_too_long_raises() raises:
         _ = resolve(long_host)
 
 
+def _max_name(absolute: Bool) -> String:
+    """A 253-byte name (63 + 1 + 63 + 1 + 63 + 1 + 53 + ".invalid"), with
+    a trailing root dot when ``absolute`` (then 254 bytes). ``.invalid`` is
+    a reserved TLD, so a name that passes validation fails in the resolver
+    with a ``DnsError``, never a validation error."""
+    var host = String("")
+    for _ in range(63):
+        host += "a"
+    host += "."
+    for _ in range(63):
+        host += "b"
+    host += "."
+    for _ in range(63):
+        host += "c"
+    host += "."
+    for _ in range(53):
+        host += "d"
+    host += ".invalid"
+    if absolute:
+        host += "."
+    return host
+
+
+def _rejected_as_too_long(host: String) -> Bool:
+    try:
+        _ = resolve(host)
+    except e:
+        return "too long" in String(e)
+    return False
+
+
+def test_resolve_accepts_253_byte_name() raises:
+    """NET-08: a 253-byte name is the longest valid one and is not
+    rejected by validation."""
+    var host = _max_name(False)
+    assert_equal(host.byte_length(), 253)
+    assert_false(_rejected_as_too_long(host))
+
+
+def test_resolve_accepts_253_byte_absolute_name() raises:
+    """NET-08: RFC 1035 bounds the wire form at 255 octets, i.e. 253 text
+    bytes *not counting* the trailing root dot, so the absolute spelling of
+    a maximal name (254 bytes ending in ``.``) is valid."""
+    var host = _max_name(True)
+    assert_equal(host.byte_length(), 254)
+    assert_false(_rejected_as_too_long(host))
+
+
+def test_resolve_rejects_254_byte_name_without_root_dot() raises:
+    """NET-08 boundary: one byte more than the maximum is still too long,
+    with or without a trailing dot."""
+    var host = _max_name(False)
+    host = String("e") + host  # 254 bytes, no trailing dot
+    assert_equal(host.byte_length(), 254)
+    assert_true(_rejected_as_too_long(host))
+    var abs_host = host + "."  # 254 name bytes + root dot
+    assert_true(_rejected_as_too_long(abs_host))
+
+
 def test_resolve_label_too_long_raises() raises:
     """A single DNS label longer than 63 characters must raise.
 
