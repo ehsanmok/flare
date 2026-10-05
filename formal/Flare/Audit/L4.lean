@@ -52,9 +52,9 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Middleware.compress_skips_encoded
 #print axioms Flare.L4.Middleware.compress_content_length
 #print axioms Flare.L4.Middleware.compress_partial
-#print axioms Flare.L4.Middleware.compressFixed_partial
-#print axioms Flare.L4.Middleware.compressFixed_vary
-#print axioms Flare.L4.Middleware.compressFixed_agrees
+#print axioms Flare.L4.Middleware.compress_vary_when_encoded
+#print axioms Flare.L4.Middleware.compress_vary
+#print axioms Flare.L4.Middleware.compress_agrees
 -- Negotiate / Cors / Cookie / Form / Url
 #print axioms Flare.L4.Negotiate.decideOld_eq_spec_of_noStar
 #print axioms Flare.L4.Negotiate.decide'_eq_spec

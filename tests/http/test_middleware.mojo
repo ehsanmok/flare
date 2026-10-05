@@ -304,6 +304,69 @@ def test_compress_content_range_header_passthrough() raises:
     assert_equal(resp.headers.get("content-range"), "bytes 0-2047/10000")
 
 
+def _vary_has_accept_encoding(resp: Response) -> Bool:
+    var all = resp.headers.get_all("vary")
+    for i in range(len(all)):
+        if all[i].lower().find("accept-encoding") >= 0:
+            return True
+    return False
+
+
+def test_compress_identity_variant_has_vary() raises:
+    """APP-27: the identity response for a compressible body names
+    Accept-Encoding in Vary, so a shared cache cannot hand it to a gzip
+    client."""
+    var c = Compress(_BigEcho(), min_size_bytes=1024)
+    var gz = Request(method=Method.GET, url="/page")
+    gz.headers.set("Accept-Encoding", "gzip")
+    var r1 = c.serve(gz)
+    assert_equal(r1.headers.get("content-encoding"), "gzip")
+    assert_true(_vary_has_accept_encoding(r1))
+    var plain = Request(method=Method.GET, url="/page")
+    var r2 = c.serve(plain)
+    assert_false(r2.headers.contains("content-encoding"))
+    assert_equal(len(r2.body), 4096)
+    assert_true(_vary_has_accept_encoding(r2))
+
+
+def test_compress_vary_on_every_negotiated_outcome() raises:
+    """APP-27: no header, identity preferred, a refused coding and a
+    wildcard-less refusal all leave the body alone but still carry Vary,
+    exactly once."""
+    var c = Compress(_BigEcho(), min_size_bytes=1024)
+    var values = List[String]()
+    values.append("")
+    values.append("identity")
+    values.append("gzip;q=0")
+    values.append("gzip;q=0, br;q=0, identity;q=0.5")
+    values.append("deflate")
+    for i in range(len(values)):
+        var req = Request(method=Method.GET, url="/page")
+        if values[i].byte_length() > 0:
+            req.headers.set("Accept-Encoding", values[i])
+        var resp = c.serve(req)
+        assert_false(resp.headers.contains("content-encoding"))
+        assert_equal(len(resp.body), 4096)
+        assert_equal(len(resp.headers.get_all("vary")), 1)
+        assert_true(_vary_has_accept_encoding(resp))
+
+
+def test_compress_no_vary_when_passed_through() raises:
+    """APP-27: responses Compress never considers (small, already encoded,
+    partial) do not depend on Accept-Encoding and get no Vary."""
+    var small = Compress(_Echo(status=200, body="hi"), min_size_bytes=1024)
+    var req = Request(method=Method.GET, url="/")
+    req.headers.set("Accept-Encoding", "gzip")
+    assert_false(_vary_has_accept_encoding(small.serve(req)))
+    var enc = Compress(_PreEncoded(), min_size_bytes=1024)
+    assert_false(_vary_has_accept_encoding(enc.serve(req)))
+    var part = Compress(_Partial(), min_size_bytes=1024)
+    var preq = Request(method=Method.GET, url="/big.bin")
+    preq.headers.set("Range", "bytes=0-2047")
+    preq.headers.set("Accept-Encoding", "gzip")
+    assert_false(_vary_has_accept_encoding(part.serve(preq)))
+
+
 # ── CatchPanic ────────────────────────────────────────────────────────────
 
 
@@ -368,7 +431,10 @@ def main() raises:
     test_compress_already_encoded_skipped()
     test_compress_partial_content_passthrough()
     test_compress_content_range_header_passthrough()
+    test_compress_identity_variant_has_vary()
+    test_compress_vary_on_every_negotiated_outcome()
+    test_compress_no_vary_when_passed_through()
     test_catch_panic_returns_500()
     test_catch_panic_passthrough_when_ok()
     test_middleware_wraps_a_handler_without_a_default()
-    print("test_middleware: 20 passed")
+    print("test_middleware: 26 passed")

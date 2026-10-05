@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-27 fixed on fix/formal-findings
 """APP-27: Compress omits `Vary: Accept-Encoding` on the responses it leaves
 uncompressed.
 
@@ -11,7 +12,7 @@ representation it selects depends on request fields other than the method
 and target URI. For a body at or above min_size_bytes, Compress picks gzip,
 br or identity from Accept-Encoding, so every such response depends on that
 field.
-Actual: the gzip response carries `Vary: Accept-Encoding`, but the identity
+Before the fix: the gzip response carries `Vary: Accept-Encoding`, but the identity
 response sent to a client without Accept-Encoding (same URL, same 2048-byte
 body) carries no Vary, so a shared cache may store it as the only variant.
 

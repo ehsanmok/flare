@@ -14,6 +14,14 @@ and target URI; without it a shared cache can store the identity response
 as the only variant.
 
 Repro: formal/repro/APP-27_compress_missing_vary_on_identity.mojo.
+
+Status: resolved. `Compress.serve` appends `Vary: Accept-Encoding` to every
+response past the size, already-encoded and partial-content checks, whether
+it encodes or leaves the body as identity. The model `compress` is the shipped
+code; `compressNoVary` is the pre-fix one (APP-26 already applied).
+Regression tests: `tests/http/test_middleware.mojo::test_compress_identity_variant_has_vary`,
+`::test_compress_vary_on_every_negotiated_outcome` and
+`::test_compress_no_vary_when_passed_through`.
 -/
 namespace Flare.Bugs.APP_27
 
@@ -33,22 +41,22 @@ theorem x200_negotiated (c : CCfg) (hc : c.minSize = 1024) : negotiated c x200 :
   refine ⟨?_, rfl, rfl⟩
   simp only [hc, x200, List.length_replicate]; omega
 
-/-- Counterexample: the gzip variant carries Vary, the identity variant of
+/-- Counterexample (pre-fix): the gzip variant carries Vary, the identity variant of
 the same response does not. -/
 theorem identity_without_vary :
-    ("Vary", "Accept-Encoding") ∈ (compress cfgGzip x200).hdrs ∧
-    ("Vary", "Accept-Encoding") ∉ (compress cfgNone x200).hdrs := by
+    ("Vary", "Accept-Encoding") ∈ (compressNoVary cfgGzip x200).hdrs ∧
+    ("Vary", "Accept-Encoding") ∉ (compressNoVary cfgNone x200).hdrs := by
   native_decide
 
-theorem violates_spec : ¬ VarySpec compress := by
+theorem violates_spec : ¬ VarySpec compressNoVary := by
   intro h
   exact identity_without_vary.2 (h cfgNone x200 (x200_negotiated cfgNone rfl))
 
-/-- Fix: append `Vary: Accept-Encoding` on every negotiated response;
-meets the spec for every configuration and response. -/
-theorem fixed_meets_spec : VarySpec compressFixed := compressFixed_vary
+/-- The shipped `compress` appends `Vary: Accept-Encoding` on every negotiated
+response; it meets the spec for every configuration and response. -/
+theorem fixed_meets_spec : VarySpec compress := compress_vary
 
-theorem fixed_on_example : ("Vary", "Accept-Encoding") ∈ (compressFixed cfgNone x200).hdrs :=
-  compressFixed_vary cfgNone x200 (x200_negotiated cfgNone rfl)
+theorem fixed_on_example : ("Vary", "Accept-Encoding") ∈ (compress cfgNone x200).hdrs :=
+  compress_vary cfgNone x200 (x200_negotiated cfgNone rfl)
 
 end Flare.Bugs.APP_27

@@ -2143,6 +2143,15 @@ from test_middleware import (
     test_compress_content_range_header_passthrough as test_middleware__test_compress_content_range_header_passthrough,
 )
 from test_middleware import (
+    test_compress_identity_variant_has_vary as test_middleware__test_compress_identity_variant_has_vary,
+)
+from test_middleware import (
+    test_compress_vary_on_every_negotiated_outcome as test_middleware__test_compress_vary_on_every_negotiated_outcome,
+)
+from test_middleware import (
+    test_compress_no_vary_when_passed_through as test_middleware__test_compress_no_vary_when_passed_through,
+)
+from test_middleware import (
     test_catch_panic_returns_500 as test_middleware__test_catch_panic_returns_500,
 )
 from test_middleware import (
@@ -5478,6 +5487,11 @@ def main() raises:
     suite.test[
         test_middleware__test_compress_content_range_header_passthrough
     ]()
+    suite.test[test_middleware__test_compress_identity_variant_has_vary]()
+    suite.test[
+        test_middleware__test_compress_vary_on_every_negotiated_outcome
+    ]()
+    suite.test[test_middleware__test_compress_no_vary_when_passed_through]()
     suite.test[test_middleware__test_catch_panic_returns_500]()
     suite.test[test_middleware__test_catch_panic_passthrough_when_ok]()
     suite.test[

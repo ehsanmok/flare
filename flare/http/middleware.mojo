@@ -330,8 +330,11 @@ struct Compress[Inner: Handler & Copyable](Copyable, Handler):
     Inspects the inbound ``Accept-Encoding`` header, picks the
     highest-q entry from {``br``, ``gzip``, ``identity``}, and
     encodes the inner response body accordingly. Sets
-    ``Content-Encoding`` and ``Vary: Accept-Encoding`` on the
-    response.
+    ``Content-Encoding`` on the response. ``Vary: Accept-Encoding``
+    is set on every response whose representation depends on the
+    request (body at least ``min_size_bytes``, not already encoded,
+    not partial), including those left as identity, so shared caches
+    never serve the identity variant to a client that accepts gzip.
 
     Bodies smaller than ``min_size_bytes`` (default 1024) are passed
     through untouched — the per-request encoder overhead beats the
@@ -363,8 +366,6 @@ struct Compress[Inner: Handler & Copyable](Copyable, Handler):
         var brotli_ok = _brotli_available()
         var pick = negotiate_encoding(accept, brotli_ok)
         var resp = self.inner.serve(req).lower()
-        if pick.quality == 0:
-            return resp^
         if len(resp.body) < self.min_size_bytes:
             return resp^
         if resp.headers.contains("content-encoding"):
@@ -375,6 +376,13 @@ struct Compress[Inner: Handler & Copyable](Copyable, Handler):
             # selected representation (RFC 9110 §14.4, §8.4). Encoding the
             # already-cut range would leave a Content-Range that no longer
             # matches the body, so pass it through untouched.
+            return resp^
+        # From here the representation depends on Accept-Encoding, whether
+        # we encode it or send it as identity (no header, identity
+        # preferred, every coding refused): RFC 9110 §12.5.5 says to name
+        # the field so a shared cache keeps the variants apart.
+        resp.headers.append("Vary", "Accept-Encoding")
+        if pick.quality == 0:
             return resp^
         if pick.encoding == "br" and brotli_ok:
             var encoded = compress_brotli(
@@ -391,7 +399,6 @@ struct Compress[Inner: Handler & Copyable](Copyable, Handler):
         else:
             return resp^
         resp.headers.set("Content-Length", String(len(resp.body)))
-        resp.headers.append("Vary", "Accept-Encoding")
         return resp^
 
 

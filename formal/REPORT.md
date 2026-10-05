@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62233 lines) |
+| Lean files | 298 (62253 lines) |
 | Theorems | 3269 |
 | Headline theorems in the axiom audit | 1068 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 80 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 81 of 138 |
 
 Six findings are rated high:
 
@@ -1871,10 +1871,10 @@ the encoder as parameters; negotiation itself is component 6.
 | `Flare.L4.Middleware.requestId_outside_catchPanic` | `RequestId(CatchPanic(h))` puts the id on every response | proved |
 | `Flare.L4.Middleware.catchPanic_outside_requestId_error` | `CatchPanic(RequestId(h))` returns the bare 500 (no id) when `h` raises: stacking order matters | proved |
 | `Flare.L4.Middleware.compress_skips_encoded` | a response that already has `Content-Encoding` is untouched | proved |
-| `Flare.L4.Middleware.compress_content_length`, `compress_vary_when_encoded` | when Compress changes a response, `Content-Length` equals the encoded length and `Vary: Accept-Encoding` is present | proved |
+| `Flare.L4.Middleware.compress_content_length`, `compress_vary_when_encoded` | when Compress changes the body, `Content-Length` equals the encoded length; whenever it changes a response, `Vary: Accept-Encoding` is present | proved |
 | `Flare.Bugs.APP_26.violates_spec`, `APP_27.violates_spec` | a 206 is re-encoded; the identity variant lacks `Vary` | counterexample |
 | `Flare.L4.Middleware.compress_partial` | the shipped Compress passes every 206 / `Content-Range` response through unchanged | proved (fixed) |
-| `Flare.L4.Middleware.compressFixed_partial`, `compressFixed_vary`, `compressFixed_agrees` | the fixed Compress meets both specs, and agrees with the shipped one whenever the shipped one encodes a non-partial response | proved |
+| `Flare.L4.Middleware.compress_vary`, `compress_agrees` | the shipped Compress meets the APP-27 spec (`VarySpec`), and agrees with the pre-fix `compressNoVary` whenever that one changes a response | proved (fixed) |
 
 **Limitations.** The model does not check the header-injection test of
 `HeaderMap.set`. A value read from a parsed request cannot contain CR or LF.
@@ -2915,7 +2915,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime`, `matchOne_eq_spec` | proved; APP-10 |
 | `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |
 | `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
-| `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compressFixed_vary` | APP-26, APP-27 |
+| `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compress_vary` | APP-26, APP-27 |
 | `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decideOld_eq_spec_of_noStar`, `decide'_eq_spec` | APP-20 |
 | `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-228 | `originAllowed_sound`, `acao_not_star_with_creds`, `serve_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
@@ -3108,7 +3108,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-24 | Medium | resolved | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
 | APP-25 | Low | resolved | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
 | APP-26 | Medium | resolved | Compress re-encodes a 206 Partial Content body and keeps its `Content-Range` | `Flare/Bugs/APP_26.lean` | `repro/APP-26_compress_encodes_partial_content.mojo` (any) |
-| APP-27 | Low | open | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
+| APP-27 | Low | resolved | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
 | APP-40 | Medium | resolved | the RateLimit refill product wraps after a long idle period | `Flare/Bugs/APP_40.lean` | `repro/APP-40_ratelimit_refill_overflow.mojo` (any) |
 | APP-41 | Medium | resolved | CircuitBreaker measures the cooldown from the start of the failing request | `Flare/Bugs/APP_41.lean` | `repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (any) |
 | APP-42 | Low | open | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
@@ -5076,9 +5076,9 @@ encoding branch appends `Vary`. The identity response for the same URL
 (sent when there is no `Accept-Encoding`, when identity is preferred, or
 when every coding is refused) has no `Vary`.
 
-**Lean.** `Flare.Bugs.APP_27.identity_without_vary` and `violates_spec`,
-against the spec `VarySpec`. The fix is proved sufficient by
-`fixed_meets_spec` (via `Flare.L4.Middleware.compressFixed_vary`), which is
+**Lean.** `Flare.Bugs.APP_27.identity_without_vary` and `violates_spec` (on the
+pre-fix `compressNoVary`), against the spec `VarySpec`. The fix is proved sufficient by
+`fixed_meets_spec` (via `Flare.L4.Middleware.compress_vary`), which is
 general.
 
 **Fix.** Append `Vary: Accept-Encoding` on every response past the size and
@@ -5088,6 +5088,8 @@ already-encoded checks.
 
 - Observed: `BUG REPRODUCED: gzip response has Vary: Accept-Encoding (gzip) but the identity response for the same URL has none`
 - Flip (`Vary` appended before the `quality == 0` check, later append removed): `OK: Vary: Accept-Encoding on both variants`
+
+Status: resolved. Compress.serve appends `Vary: Accept-Encoding` to every response past the size, already-encoded and partial checks, including the identity variants (no header, identity preferred, every coding refused); passed-through responses get none. Tests: `tests/http/test_middleware.mojo::test_compress_identity_variant_has_vary`, `::test_compress_vary_on_every_negotiated_outcome`, `::test_compress_no_vary_when_passed_through`. The model `compress` is the shipped code; `compressNoVary` is the pre-fix one.
 
 #### APP-40: the RateLimit refill product wraps after a long idle period
 

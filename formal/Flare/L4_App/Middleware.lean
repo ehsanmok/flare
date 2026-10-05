@@ -30,7 +30,8 @@ Results:
   `compress_content_length` (Content-Length matches the encoded body),
   `compress_vary_when_encoded`. Two findings: it re-encodes 206 partial
   responses (APP-26) and omits `Vary: Accept-Encoding` on the identity
-  responses it negotiated (APP-27); `compressFixed` meets both specs.
+  responses it negotiated (APP-27); the shipped `compress` meets both specs
+  (`compress_partial`, `compress_vary`).
 -/
 namespace Flare.L4.Middleware
 
@@ -235,11 +236,10 @@ def compressOld (c : CCfg) (x : Resp) : Resp :=
     | .gzip => encodeAs c .gzip x
     | .identity => x
 
-/-- `Compress.serve` applied to the inner response: partial responses (206 or
-`Content-Range`) are passed through (fixed, APP-26; the identity branches
-still lack `Vary`, APP-27).
-mirrors flare/http/middleware.mojo:345-382 (fixed, APP-26) -/
-def compress (c : CCfg) (x : Resp) : Resp :=
+/-- `Compress.serve` after the APP-26 fix but before the APP-27 one: partial
+responses pass through, the identity branches still lack `Vary`.
+mirrors flare/http/middleware.mojo:345-382 (APP-26 fixed, APP-27 not) -/
+def compressNoVary (c : CCfg) (x : Resp) : Resp :=
   if c.pick.q == 0 then x
   else if x.body.length < c.minSize then x
   else if hasH x.hdrs "content-encoding" then x
@@ -249,28 +249,50 @@ def compress (c : CCfg) (x : Resp) : Resp :=
     | .gzip => encodeAs c .gzip x
     | .identity => x
 
+def vary (x : Resp) : Resp := { x with hdrs := appendH x.hdrs "Vary" "Accept-Encoding" }
+
+/-- `Compress.serve` as shipped (fixed, APP-26 and APP-27): responses that are
+too small, already encoded or partial pass through untouched; every other
+response carries `Vary: Accept-Encoding`, whether it is encoded or left as
+identity (no usable `Accept-Encoding`, identity preferred, every coding
+refused, brotli unavailable).
+mirrors flare/http/middleware.mojo:345-390 (fixed, APP-26, APP-27) -/
+def compress (c : CCfg) (x : Resp) : Resp :=
+  if x.body.length < c.minSize then x
+  else if hasH x.hdrs "content-encoding" then x
+  else if isPartial x then x
+  else if c.pick.q == 0 then vary x
+  else match c.pick.enc with
+    | .br => if c.brotliOk then encodeAs c .br x else vary x
+    | .gzip => encodeAs c .gzip x
+    | .identity => vary x
+
 def compressMW (cfgOf : Req → CCfg) (h : Handler) : Handler := fun r =>
   (h r).map (compress (cfgOf r))
 
 theorem compress_skips_encoded (c : CCfg) (x : Resp) (h : hasH x.hdrs "content-encoding" = true) :
     compress c x = x := by
-  unfold compress; simp [h]
+  unfold compress
+  split; · rfl
+  simp
 
-/-- Whatever Compress emits either is the inner response or was encoded by
-`encodeAs` with a supported encoding. -/
+/-- Whatever Compress emits is the inner response, the inner response with
+`Vary` added, or the response encoded by `encodeAs` with a supported
+encoding. -/
 theorem compress_cases (c : CCfg) (x : Resp) :
-    compress c x = x ∨ ∃ e, e ≠ .identity ∧ compress c x = encodeAs c e x := by
+    compress c x = x ∨ compress c x = vary x ∨
+      ∃ e, e ≠ .identity ∧ compress c x = encodeAs c e x := by
   unfold compress
   split; · exact .inl rfl
   split; · exact .inl rfl
   split; · exact .inl rfl
-  split; · exact .inl rfl
+  split; · exact .inr (.inl rfl)
   split
   · split
-    · exact .inr ⟨.br, by decide, rfl⟩
-    · exact .inl rfl
-  · exact .inr ⟨.gzip, by decide, rfl⟩
-  · exact .inl rfl
+    · exact .inr (.inr ⟨.br, by decide, rfl⟩)
+    · exact .inr (.inl rfl)
+  · exact .inr (.inr ⟨.gzip, by decide, rfl⟩)
+  · exact .inr (.inl rfl)
 
 theorem encodeAs_content_length (c : CCfg) (e : Enc) (x : Resp) :
     getH (encodeAs c e x).hdrs "Content-Length" = toString (encodeAs c e x).body.length := by
@@ -281,18 +303,23 @@ theorem encodeAs_vary (c : CCfg) (e : Enc) (x : Resp) :
     ("Vary", "Accept-Encoding") ∈ (encodeAs c e x).hdrs := by
   simp [encodeAs, appendH]
 
-/-- When Compress changes the response, Content-Length matches the encoded
+theorem vary_mem (x : Resp) : ("Vary", "Accept-Encoding") ∈ (vary x).hdrs := by
+  simp [vary, appendH]
+
+/-- When Compress changes the body, Content-Length matches the encoded
 body. -/
-theorem compress_content_length (c : CCfg) (x : Resp) (hne : compress c x ≠ x) :
+theorem compress_content_length (c : CCfg) (x : Resp) (hne : (compress c x).body ≠ x.body) :
     getH (compress c x).hdrs "Content-Length" = toString (compress c x).body.length := by
-  rcases compress_cases c x with h | ⟨e, -, h⟩
-  · exact absurd h hne
+  rcases compress_cases c x with h | h | ⟨e, -, h⟩
+  · exact absurd (by rw [h]) hne
+  · exact absurd (by rw [h]; rfl) hne
   · rw [h]; exact encodeAs_content_length c e x
 
 theorem compress_vary_when_encoded (c : CCfg) (x : Resp) (hne : compress c x ≠ x) :
     ("Vary", "Accept-Encoding") ∈ (compress c x).hdrs := by
-  rcases compress_cases c x with h | ⟨e, -, h⟩
+  rcases compress_cases c x with h | h | ⟨e, -, h⟩
   · exact absurd h hne
+  · rw [h]; exact vary_mem x
   · rw [h]; exact encodeAs_vary c e x
 
 /-- Spec for APP-26 (RFC 9110 §14.4): a partial response passes through
@@ -303,7 +330,6 @@ def PartialSpec (f : Resp → Resp) : Prop := ∀ x, isPartial x = true → f x 
 theorem compress_partial (c : CCfg) : PartialSpec (compress c) := by
   intro x hp
   unfold compress
-  split; · rfl
   split; · rfl
   split; · rfl
   simp
@@ -318,55 +344,41 @@ def negotiated (c : CCfg) (x : Resp) : Prop :=
 def VarySpec (f : CCfg → Resp → Resp) : Prop :=
   ∀ c x, negotiated c x → ("Vary", "Accept-Encoding") ∈ (f c x).hdrs
 
-def vary (x : Resp) : Resp := { x with hdrs := appendH x.hdrs "Vary" "Accept-Encoding" }
-
-/-- Compress with both fixes: partial responses pass through, and the
-identity branches add `Vary: Accept-Encoding`. -/
-def compressFixed (c : CCfg) (x : Resp) : Resp :=
-  if x.body.length < c.minSize then x
-  else if hasH x.hdrs "content-encoding" then x
-  else if isPartial x then x
-  else if c.pick.q == 0 then vary x
-  else match c.pick.enc with
-    | .br => if c.brotliOk then encodeAs c .br x else vary x
-    | .gzip => encodeAs c .gzip x
-    | .identity => vary x
-
-theorem compressFixed_partial (c : CCfg) : PartialSpec (compressFixed c) := by
-  intro x hp
-  unfold compressFixed
-  split; · rfl
-  split; · rfl
-  rfl
-
-theorem compressFixed_vary : VarySpec compressFixed := by
+/-- The shipped `compress` meets the APP-27 spec for every configuration and
+response. -/
+theorem compress_vary : VarySpec compress := by
   intro c x ⟨hmin, hce, hp⟩
   have hlt : ¬ x.body.length < c.minSize := by omega
-  unfold compressFixed
+  unfold compress
   simp only [hlt, if_false, hce, Bool.false_eq_true, hp]
   split
-  · simp [vary, appendH]
+  · exact vary_mem x
   · split
     · split
       · exact encodeAs_vary c _ x
-      · simp [vary, appendH]
+      · exact vary_mem x
     · exact encodeAs_vary c _ x
-    · simp [vary, appendH]
+    · exact vary_mem x
 
-/-- Outside partial and identity responses, the fix changes nothing. -/
-theorem compressFixed_agrees (c : CCfg) (x : Resp) (hp : isPartial x = false)
-    (hne : compress c x ≠ x) : compressFixed c x = compress c x := by
+/-- Whenever the pre-APP-27 Compress changes a response, the shipped one gives
+the same result: the fix only adds `Vary` to responses that were left alone. -/
+theorem compress_agrees (c : CCfg) (x : Resp) (hne : compressNoVary c x ≠ x) :
+    compress c x = compressNoVary c x := by
   have hq : (c.pick.q == 0) = false := by
     cases h : c.pick.q == 0
     · rfl
-    · exact absurd (by simp [compress, h]) hne
+    · exact absurd (by simp [compressNoVary, h]) hne
   have hm : ¬ x.body.length < c.minSize := by
-    intro hl; exact hne (by simp [compress, hq, hl])
+    intro hl; exact hne (by simp [compressNoVary, hq, hl])
   have he : hasH x.hdrs "content-encoding" = false := by
     cases h : hasH x.hdrs "content-encoding"
     · rfl
-    · exact absurd (compress_skips_encoded c x h) hne
-  unfold compress compressFixed at *
+    · exact absurd (by simp [compressNoVary, h]) hne
+  have hp : isPartial x = false := by
+    cases h : isPartial x
+    · rfl
+    · exact absurd (by simp [compressNoVary, hq, hm, he, h]) hne
+  unfold compressNoVary compress at *
   simp only [hq, hm, he, hp, Bool.false_eq_true, if_false] at hne ⊢
   split <;> rename_i henc
   · split <;> rename_i hb
