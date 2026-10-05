@@ -370,6 +370,12 @@ from test_ws_server_close_handshake import (
 from test_ws_server_close_handshake import (
     test_data_and_ping_before_close_still_work as test_ws_server_close_handshake__test_data_and_ping_before_close_still_work,
 )
+from test_ws_server_close_handshake import (
+    test_invalid_utf8_text_frame_is_refused_with_close_1007 as test_ws_server_close_handshake__test_invalid_utf8_text_frame_is_refused_with_close_1007,
+)
+from test_ws_server_close_handshake import (
+    test_binary_frame_with_non_utf8_bytes_is_delivered as test_ws_server_close_handshake__test_binary_frame_with_non_utf8_bytes_is_delivered,
+)
 from test_ws_stateful_handler import (
     test_ws_stateful_handler as test_ws_stateful_handler__test_ws_stateful_handler,
 )
@@ -641,6 +647,12 @@ def main() raises:
     ]()
     suite.test[
         test_ws_server_close_handshake__test_data_and_ping_before_close_still_work
+    ]()
+    suite.test[
+        test_ws_server_close_handshake__test_invalid_utf8_text_frame_is_refused_with_close_1007
+    ]()
+    suite.test[
+        test_ws_server_close_handshake__test_binary_frame_with_non_utf8_bytes_is_delivered
     ]()
     # tests/ws/test_ws_stateful_handler.mojo
     suite.test[test_ws_stateful_handler__test_ws_stateful_handler]()

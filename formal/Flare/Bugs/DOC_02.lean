@@ -39,11 +39,11 @@ theorem decodes_hi :
   simpa using this
 
 /-- The repro's frame: refused, with nothing written. -/
-theorem bug : recv (2 ^ 20) (encode frameHi false key) = .fail [] := by
-  rw [recv, decodes_hi]
+theorem bug : recvOld (2 ^ 20) (encode frameHi false key) = .fail [] := by
+  rw [recvOld, decodes_hi]
   rfl
 
-theorem counterexample : ¬ MaskSpec (2 ^ 20) (recv (2 ^ 20)) := by
+theorem counterexample : ¬ MaskSpec (2 ^ 20) (recvOld (2 ^ 20)) := by
   intro h
   have := h _ _ _ decodes_hi rfl
   rw [bug] at this

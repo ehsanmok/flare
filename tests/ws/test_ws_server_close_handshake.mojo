@@ -208,5 +208,46 @@ def test_data_and_ping_before_close_still_work() raises:
     assert_equal(Int(out[1][0]), Int(WsOpcode.PONG))
 
 
+def _recv_raises(mut p: _Pair) -> Bool:
+    try:
+        _ = p.server.recv()
+    except:
+        return True
+    return False
+
+
+def test_invalid_utf8_text_frame_is_refused_with_close_1007() raises:
+    """DOC-01: a final TEXT frame that is not UTF-8 fails with CLOSE 1007."""
+    var p = _Pair()
+    var good = List[UInt8]()
+    good.append(0x68)
+    good.append(0x69)
+    p.send(WsOpcode.TEXT, good)
+    var first = p.server.recv()
+    assert_equal(Int(first.opcode), Int(WsOpcode.TEXT))
+    assert_equal(len(first.payload), 2)
+
+    var bad = List[UInt8]()
+    bad.append(0xC3)
+    bad.append(0x28)
+    p.send(WsOpcode.TEXT, bad)
+    assert_true(_recv_raises(p), "invalid UTF-8 must raise, not be delivered")
+    var out = p.finish()
+    assert_equal(len(out), 1)
+    assert_true(_is_close(out[0], 1007), "expected one CLOSE 1007")
+
+
+def test_binary_frame_with_non_utf8_bytes_is_delivered() raises:
+    var p = _Pair()
+    var bad = List[UInt8]()
+    bad.append(0xC3)
+    bad.append(0x28)
+    p.send(WsOpcode.BINARY, bad)
+    var f = p.server.recv()
+    assert_equal(Int(f.opcode), Int(WsOpcode.BINARY))
+    var out = p.finish()
+    assert_equal(len(out), 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -58,7 +58,7 @@ existing credentials.
 | TLS downgrade. | TLS 1.2+ only, weak ciphers disabled (`flare.tls.config` whitelist). No TLS 1.0 / 1.1 fallback path exists. |
 | TLS session-ticket replay. | flare emits new tickets on every handshake; the OpenSSL rotation key is part of the TlsAcceptor and rotates with `reload`. |
 | WS unmasked client frame. | `WsConnection.recv` enforces the RFC 6455 §5.1 client-side mask requirement; unmasked frames are rejected with 1002. |
-| WS UTF-8 violation in TEXT frame. | Frame-level UTF-8 validator runs on every TEXT payload; invalid sequences trigger 1007 (`INVALID_FRAME_PAYLOAD_DATA`). |
+| WS UTF-8 violation in TEXT frame. | `WsConnection.recv` runs the UTF-8 validator on every final (unfragmented) TEXT frame; invalid sequences write CLOSE 1007 (`INVALID_FRAME_PAYLOAD_DATA`) and fail the connection. Fragmented messages are not reassembled on the server side, so their fragments are not checked. |
 | URL-injected control characters (`\0`, CR, LF, `@` in IP literals). | `flare.net` + `flare.dns` reject these *before* the bytes reach libc. |
 
 ### A2. Authenticated abuser

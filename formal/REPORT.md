@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63506 lines) |
+| Lean files | 298 (63514 lines) |
 | Theorems | 3344 |
 | Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 131 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 132 of 138 |
 
 Six findings are rated high:
 
@@ -3142,7 +3142,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | CONC-06 | Medium | resolved | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
 | CONC-07 | Medium | resolved | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
 | MACH-01 | Low | resolved | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
-| DOC-01 | Medium | open | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
+| DOC-01 | Medium | resolved | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-02 | Low | open | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-03 | Medium | resolved | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
 | DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
@@ -5708,11 +5708,13 @@ fd 0 from a handler.
 
 #### DOC-01: `WsConnection.recv` delivers TEXT frames that are not valid UTF-8
 
+Status: resolved. `WsConnection.recv` (`flare/ws/server.mojo`) now writes CLOSE 1007 and raises on a final TEXT frame whose payload is not valid UTF-8 (new helper `_fail_connection`, which the 1009 path now shares). Unfragmented messages only: the server has no reassembly. Regression test `tests/ws/test_ws_server_close_handshake.mojo::test_invalid_utf8_text_frame_is_refused_with_close_1007`; the repro prints `OK:`. Lean: `recvOld` keeps the counterexample, `recv` is the shipped model.
+
 - **Severity:** Medium. The handler receives a TEXT frame whose payload is not UTF-8, and code that trusts the doc treats it as text. The peer is never told, and the connection stays open.
 - **Doc / RFC:** `docs/threat-model.md:61` says "Frame-level UTF-8 validator runs on every TEXT payload; invalid sequences trigger 1007", and `docs/security.md:16` and `docs/features.md:552` say the same. `docs/features.md:819-821` admits the gap. RFC 6455 §8.1 says invalid UTF-8 "MUST _Fail the WebSocket Connection_", and §7.4.1 gives the status as 1007.
 - **What goes wrong:** `recv` (`flare/ws/server.mojo:514-536`) returns every frame `_recv_one` decodes. `_is_valid_utf8` (`flare/ws/frame.mojo:553`) is reached only through `text_payload` (522-536), after the frame has been delivered, and `WsCloseCode.INVALID_PAYLOAD` is never sent.
 - **Counterexample:** `Bugs.DOC_01.bug`: the masked final TEXT frame `C3 28` is delivered (`bad_not_utf8` shows it is not UTF-8). `counterexample` shows `recv` violates `Utf8Spec`.
-- **Fix:** `recvFixed` writes CLOSE 1007 and fails the connection on a final TEXT frame with invalid UTF-8. `fixed` proves `Utf8Spec` for every frame size limit, and `fixed_keeps` shows valid frames are still delivered.
+- **Fix:** `recv` (the shipped model; `recvOld` is the pre-fix behaviour the counterexample is about) writes CLOSE 1007 and fails the connection on a final TEXT frame with invalid UTF-8. `fixed` proves `Utf8Spec` for every frame size limit, and `fixed_keeps` shows valid frames are still delivered.
 - **Repro:** `formal/repro/DOC-01_ws_text_invalid_utf8_delivered.mojo`. Control: the earlier frame "hi" must be delivered.
 - **Observed:** `BUG REPRODUCED: TEXT frame with invalid UTF-8 payload C3 28 was delivered to the handler and the client received 0 bytes (no CLOSE 1007; expected 88 02 03 EF)`
 - **Flip** (`flare/ws/server.mojo`: in `recv`, before returning a final TEXT frame whose payload fails `_is_valid_utf8`, write `WsFrame.close(WsCloseCode.INVALID_PAYLOAD)` and raise `WsProtocolError`): `OK: invalid UTF-8 TEXT frame refused with CLOSE 1007`, exit 0.

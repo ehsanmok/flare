@@ -3,18 +3,24 @@ import Flare.L3_Protocol.Ws.Recv
 /-!
 # DOC-01: `WsConnection.recv` delivers TEXT frames that are not valid UTF-8
 
-* flare file: `flare/ws/server.mojo:514-536` @59bda50 (`recv` returns every
-  frame `_recv_one`, 538-598, decodes); the validator
-  (`_is_valid_utf8`, `flare/ws/frame.mojo:553`) is only reached through
+Status: resolved. `WsConnection.recv` (`flare/ws/server.mojo:695-759`) now
+writes CLOSE 1007 and raises on a final TEXT frame whose payload is not valid
+UTF-8; regression test `tests/ws/test_ws_server_close_handshake.mojo`
+`test_invalid_utf8_text_frame_is_refused_with_close_1007`. `recv` below is the
+shipped model; `recvOld` is the pre-fix behaviour the counterexample is about.
+
+* flare file (pre-fix): `flare/ws/server.mojo:514-536` @59bda50 (`recv` returned
+  every frame `_recv_one`, 538-598, decodes); the validator
+  (`_is_valid_utf8`, `flare/ws/frame.mojo:553`) was only reached through
   `text_payload` (frame.mojo:522-536), after delivery, and
-  `WsCloseCode.INVALID_PAYLOAD` (frame.mojo:68) is never sent.
+  `WsCloseCode.INVALID_PAYLOAD` (frame.mojo:68) was never sent.
 * Doc clause: `docs/threat-model.md:61` "Frame-level UTF-8 validator runs on
   every TEXT payload; invalid sequences trigger 1007"; `docs/security.md:16`;
   `docs/features.md:552`. RFC 6455 §8.1: invalid UTF-8 in a text message
   "MUST _Fail the WebSocket Connection_"; §7.4.1: status 1007.
 * What goes wrong: a masked, final TEXT frame with payload `C3 28` is handed
   to the handler; no CLOSE is written.
-* Fix (`recvFixed`): fail a final TEXT frame whose payload is not well formed,
+* Fix (`recv`): fail a final TEXT frame whose payload is not well formed,
   after writing CLOSE 1007. Unfragmented frames only: the server has no
   continuation reassembly (`fin = false` frames are passed through as is).
 -/
@@ -29,11 +35,11 @@ inductive Step
   | wait
   deriving DecidableEq, Repr
 
-/-- Data frames only: the PING auto-reply loop and the 1009 close for an
-oversized frame (server.mojo:587-598) are outside this model, so every other
-decode error is `.fail []`.
+/-- The pre-fix `recv` (DOC-01 and DOC-02 both unfixed). Data frames only: the
+PING auto-reply loop and the 1009 close for an oversized frame are outside this
+model, so every other decode error is `.fail []`.
 mirrors flare/ws/server.mojo:514-536,553-575 @59bda50 -/
-def recv (maxP : Nat) (d : Bytes) : Step :=
+def recvOld (maxP : Nat) (d : Bytes) : Step :=
   match decode false maxP d with
   | .ok f _ => if f.masked then .deliver f else .fail []
   | .error => .fail []
@@ -45,7 +51,9 @@ def Utf8Spec (maxP : Nat) (r : Bytes → Step) : Prop :=
   ∀ d f n, decode false maxP d = .ok f n → f.masked = true → f.opcode = 1 → f.fin = true →
     Flare.L1.Utf8.isValidUtf8 f.payload = false → r d = .fail [1007]
 
-def recvFixed (maxP : Nat) (d : Bytes) : Step :=
+/-- The shipped `recv`: a final TEXT frame that is not UTF-8 fails with CLOSE 1007.
+mirrors flare/ws/server.mojo:695-759,776-834 (fixed, DOC-01) -/
+def recv (maxP : Nat) (d : Bytes) : Step :=
   match decode false maxP d with
   | .ok f _ =>
     if f.masked then
@@ -67,30 +75,30 @@ theorem decodes_bad :
     (by decide) (by decide)
   simpa using this
 
-/-- The repro's frame is delivered to the handler. -/
-theorem bug : recv (2 ^ 20) (encode frameBad true key) = .deliver { frameBad with masked := true } := by
-  rw [recv, decodes_bad]
+/-- The repro's frame was delivered to the handler by the pre-fix `recv`. -/
+theorem bug : recvOld (2 ^ 20) (encode frameBad true key) = .deliver { frameBad with masked := true } := by
+  rw [recvOld, decodes_bad]
   rfl
 
-theorem counterexample : ¬ Utf8Spec (2 ^ 20) (recv (2 ^ 20)) := by
+theorem counterexample : ¬ Utf8Spec (2 ^ 20) (recvOld (2 ^ 20)) := by
   intro h
   have := h _ _ _ decodes_bad rfl rfl rfl bad_not_utf8
   rw [bug] at this
   simp at this
 
-theorem fixed (maxP : Nat) : Utf8Spec maxP (recvFixed maxP) := by
+theorem fixed (maxP : Nat) : Utf8Spec maxP (recv maxP) := by
   intro d f n hd hm ho hf hv
-  simp [recvFixed, hd, hm, ho, hf, hv]
+  simp [recv, hd, hm, ho, hf, hv]
 
 /-- The fix delivers every accepted frame that is not an ill-formed final TEXT
 frame, so it rejects nothing else. -/
 theorem fixed_keeps (maxP : Nat) (d : Bytes) (f : Frame) (n : Nat)
     (hd : decode false maxP d = .ok f n) (hm : f.masked = true)
     (hok : ¬ (f.opcode = 1 ∧ f.fin = true ∧ Flare.L1.Utf8.isValidUtf8 f.payload = false)) :
-    recvFixed maxP d = .deliver f := by
+    recv maxP d = .deliver f := by
   have : (f.opcode = 1 && f.fin && !Flare.L1.Utf8.isValidUtf8 f.payload) = false := by
     cases h1 : decide (f.opcode = 1) <;> cases h2 : f.fin <;>
       cases h3 : Flare.L1.Utf8.isValidUtf8 f.payload <;> simp_all
-  simp [recvFixed, hd, hm, this]
+  simp [recv, hd, hm, this]
 
 end Flare.Bugs.DOC_01

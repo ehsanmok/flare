@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP in-process; no external network)
+# RESOLVED: DOC-01 fixed on fix/formal-findings
 """DOC-01: `WsConnection.recv` hands a TEXT frame whose payload is not valid
 UTF-8 to the handler; it never sends CLOSE 1007 and never fails the
 connection.
@@ -23,7 +24,7 @@ prebuf holds one masked, final TEXT frame with payload C3 28 (a lead byte
 followed by a non-continuation byte). A valid TEXT frame is the control.
 
 Expected: recv raises and the client receives CLOSE with status 1007
-(wire 88 02 03 EF). Actual: recv returns the TEXT frame and the client
+(wire 88 02 03 EF). Before the fix: recv returns the TEXT frame and the client
 receives nothing before the socket closes.
 
 Minimal fix (unfragmented frames; the server has no reassembly): in

@@ -930,6 +930,13 @@ of what you might reasonably assume from the surrounding feature.
   `NetworkError` instead of putting data frames on the wire; `send_frame`
   now takes `mut self`. Clients used to see EOF (1006) instead of the
   close code.
+- `WsConnection.recv()` fails the connection with CLOSE 1007 (RFC 6455
+  sec 8.1, 7.4.1) and raises `WsProtocolError` when a final TEXT frame's
+  payload is not valid UTF-8, instead of handing it to the handler. The
+  check is per frame: a fragment of a longer message is not validated,
+  because the server has no reassembly and a fragment may end inside a
+  multi-byte sequence. The 1009 close for an oversized frame now also
+  counts as the connection's CLOSE, so later `send_*` calls raise.
 - `WsFrame.decode_one` now raises `WsProtocolError` for a reserved opcode
   (0x3-0x7, 0xB-0xF), as RFC 6455 sec 5.2 requires of a receiver. It used
   to return the frame, so `recv()` handed it to the application. The
@@ -959,9 +966,11 @@ of what you might reasonably assume from the surrounding feature.
   `recv_message`, which the client side does have, so a CONTINUATION
   sequence reaches the handler as separate frames. A reserved opcode
   or reserved bit is handed to the handler instead of failing the
-  connection with 1002. And a TEXT payload that is not valid UTF-8, or
-  a reserved close code, is not rejected with the status the RFC asks
-  for. The measured baseline is recorded case by case in
+  connection with 1002. And a reserved close code is not rejected with
+  the status the RFC asks for. (A final, unfragmented TEXT frame that is
+  not valid UTF-8 is refused with 1007; a fragmented message is not
+  checked until reassembly exists.) The measured baseline is recorded
+  case by case in
   [`tests/tools/conformance/autobahn-known-fail.txt`](../tests/tools/conformance/autobahn-known-fail.txt),
   so CI catches a regression against it; closing the gaps is 0.12
   work. Sections 12 and 13 are excluded rather than failing: the

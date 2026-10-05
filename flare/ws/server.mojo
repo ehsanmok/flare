@@ -707,11 +707,18 @@ struct WsConnection(Movable):
         CLOSE. The frame is still returned, so a handler can leave its
         loop; later ``send_*`` calls raise.
 
+        A frame that violates the protocol fails the connection after a
+        best-effort CLOSE: a final TEXT frame whose payload is not valid
+        UTF-8 with 1007 (RFC 6455 sec 8.1), an oversized frame with 1009.
+        ``recv`` raises in each case and later ``send_*`` calls raise
+        too.
+
         Returns:
             The next complete data frame (TEXT, BINARY, or CLOSE).
 
         Raises:
-            WsProtocolError: If the client sends an unmasked frame.
+            WsProtocolError: If the client sends an unmasked frame, or a
+                final TEXT frame that is not valid UTF-8.
             NetworkError: On I/O failure.
         """
         while True:
@@ -722,6 +729,21 @@ struct WsConnection(Movable):
                 var wire = pong.encode(mask=False)
                 self._stream.write_all(Span[UInt8, _](wire))
                 continue
+            if (
+                frame.opcode == WsOpcode.TEXT
+                and frame.fin
+                and not _is_valid_utf8(frame.payload)
+            ):
+                # RFC 6455 sec 8.1 / 7.4.1: a TEXT message that is not
+                # UTF-8 fails the connection with 1007. Only an
+                # unfragmented message is checked: this type does not
+                # reassemble fragments (a lone fragment may end inside
+                # a multi-byte sequence).
+                self._fail_connection(WsCloseCode.INVALID_PAYLOAD)
+                raise WsProtocolError(
+                    "TEXT frame payload is not valid UTF-8 (RFC 6455 sec"
+                    " 8.1); closed with 1007"
+                )
             if frame.opcode == WsOpcode.CLOSE and not self._close_sent:
                 # RFC 6455 sec 5.5.1: answer a CLOSE with a CLOSE.
                 self._close_sent = True
@@ -735,6 +757,21 @@ struct WsConnection(Movable):
                 except:
                     pass  # best-effort: the peer may be gone already
             return frame^
+
+    def _fail_connection(mut self, code: UInt16):
+        """Best-effort CLOSE ``code`` before the caller raises (once).
+
+        Marks the closing handshake as started, so no data frame is sent
+        afterwards. Skipped when a CLOSE was already written.
+        """
+        if self._close_sent:
+            return
+        self._close_sent = True
+        try:
+            var wire = WsFrame.close(code).encode(mask=False)
+            self._stream.write_all(Span[UInt8, _](wire))
+        except:
+            pass  # the peer may be gone already
 
     def _recv_one(mut self) raises -> WsFrame:
         """Read bytes from stream and decode one complete frame."""
@@ -789,13 +826,7 @@ struct WsConnection(Movable):
                     if WS_TOO_BIG_MARKER in msg:
                         # RFC 6455 sec 7.4.1: 1009 tells the client why.
                         # Best effort: the raise below is what matters.
-                        try:
-                            var wire = WsFrame.close(
-                                WsCloseCode.MESSAGE_TOO_BIG
-                            ).encode(mask=False)
-                            self._stream.write_all(Span[UInt8, _](wire))
-                        except:
-                            pass
+                        self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
                     raise e^
 
     def close(
