@@ -188,5 +188,51 @@ def test_pool_release_with_invalid_class_index_drops_silently() raises:
         assert_equal(p.size(ci), 0)
 
 
+def test_pool_release_drops_handle_with_shrunk_capacity() raises:
+    """RT-05: ``BufferHandle.bytes`` is public, so a caller may replace or
+    shrink it before ``release``. A handle whose capacity is below its
+    class must be dropped, not recycled; otherwise ``acquire(60000)``
+    returns capacity 0, against its ``capacity >= min_capacity`` contract.
+    """
+    var p = BufferPool()
+    var h = p.acquire(60000)
+    h.bytes = List[UInt8]()  # capacity is now 0
+    p.release(h^)
+    assert_equal(p.size(3), 0)
+    var h2 = p.acquire(60000)
+    assert_true(h2.bytes.capacity() >= 60000)
+
+
+def test_pool_release_drops_forged_undersized_handle() raises:
+    """RT-05: a hand-built handle tagged with a class but smaller than it
+    is dropped; a handle exactly at, or above, its class capacity is kept.
+    """
+    var p = BufferPool()
+    p.release(BufferHandle(capacity=1000, class_index=0))  # 1000 < 1024
+    assert_equal(p.size(0), 0)
+    p.release(BufferHandle(capacity=1024, class_index=0))
+    assert_equal(p.size(0), 1)
+    p.release(BufferHandle(capacity=5000, class_index=0))  # larger is fine
+    assert_equal(p.size(0), 2)
+    var a = p.acquire(1024)
+    assert_true(a.bytes.capacity() >= 1024)
+    var b = p.acquire(1024)
+    assert_true(b.bytes.capacity() >= 1024)
+
+
+def test_pool_release_keeps_grown_handle() raises:
+    """RT-05: growing ``bytes`` past its class capacity (appends) keeps
+    the handle recyclable."""
+    var p = BufferPool()
+    var h = p.acquire(1024)
+    for i in range(5000):
+        h.bytes.append(UInt8(i & 0xFF))
+    p.release(h^)
+    assert_equal(p.size(0), 1)
+    var h2 = p.acquire(1024)
+    assert_true(h2.bytes.capacity() >= 1024)
+    assert_equal(len(h2.bytes), 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

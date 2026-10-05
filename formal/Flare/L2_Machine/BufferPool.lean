@@ -3,7 +3,7 @@ import Flare.Core
 /-!
 # BufferPool: bucketed size-class buffer recycling
 
-`flare/runtime/buffer_pool.mojo:116-377`. A handle is abstracted to its
+`flare/runtime/buffer_pool.mojo` (`BufferPool`, `BufferHandle`). A handle is abstracted to its
 `bytes.capacity()` and its `class_index` tag; the byte contents are
 irrelevant (acquire clears them). Each bucket is a LIFO stack; the head of
 the Lean list is the Mojo list's last element (`pop()` / `append`).
@@ -23,7 +23,7 @@ structure Pool where
   buckets : Nat → List Handle
   classCap : Nat
 
-/-- mirrors flare/runtime/buffer_pool.mojo:130-143 @59bda50 (`none` is `_OVERSIZE_CLASS`) -/
+/-- mirrors flare/runtime/buffer_pool.mojo `_class_index_for` (fixed, RT-05) (`none` is `_OVERSIZE_CLASS`) -/
 def classIndex (n : Nat) : Option Nat :=
   if n ≤ 1024 then some 0
   else if n ≤ 4 * 1024 then some 1
@@ -31,7 +31,7 @@ def classIndex (n : Nat) : Option Nat :=
   else if n ≤ 64 * 1024 then some 3
   else none
 
-/-- mirrors flare/runtime/buffer_pool.mojo:146-161 @59bda50 -/
+/-- mirrors flare/runtime/buffer_pool.mojo `_capacity_for_class` (fixed, RT-05) -/
 def capacityFor (i : Nat) : Nat :=
   if i = 0 then 1024
   else if i = 1 then 4 * 1024
@@ -39,13 +39,13 @@ def capacityFor (i : Nat) : Nat :=
   else if i = 3 then 64 * 1024
   else 0
 
-/-- mirrors flare/runtime/buffer_pool.mojo:253-260,269-281 @59bda50 -/
+/-- mirrors flare/runtime/buffer_pool.mojo `__init__`, `with_class_capacity` (fixed, RT-05) -/
 def Pool.new (classCap : Nat) : Pool := ⟨fun _ => [], if classCap < 1 then 1 else classCap⟩
 
 def upd (f : Nat → List Handle) (i : Nat) (v : List Handle) : Nat → List Handle :=
   fun j => if j = i then v else f j
 
-/-- mirrors flare/runtime/buffer_pool.mojo:297-335 @59bda50 -/
+/-- mirrors flare/runtime/buffer_pool.mojo `acquire` (fixed, RT-05) -/
 def acquire (p : Pool) (n : Nat) : Pool × Handle :=
   match classIndex n with
   | none => (p, ⟨n, -1⟩)
@@ -55,8 +55,7 @@ def acquire (p : Pool) (n : Nat) : Pool × Handle :=
     | h :: rest => ({ p with buckets := upd p.buckets i rest }, h)
 
 /-- `release`, parameterised by the extra acceptance test `ok i h`
-(flare: none; the fix: `capacity >= _capacity_for_class(i)`).
-mirrors flare/runtime/buffer_pool.mojo:337-364 @59bda50 -/
+(pre-fix flare: none; shipped: `capacity >= _capacity_for_class(i)`). -/
 def releaseWith (ok : Nat → Handle → Bool) (p : Pool) (h : Handle) : Pool :=
   if h.cls < 0 ∨ h.cls ≥ 4 then p
   else
@@ -65,8 +64,13 @@ def releaseWith (ok : Nat → Handle → Bool) (p : Pool) (h : Handle) : Pool :=
     else if ok i h then { p with buckets := upd p.buckets i (h :: p.buckets i) }
     else p
 
-def release := releaseWith (fun _ _ => true)
-def releaseFixed := releaseWith (fun i h => decide (capacityFor i ≤ h.cap))
+/-- Pre-fix `release` (flare/runtime/buffer_pool.mojo:337-364 @59bda50): recycles by the class
+tag alone. Kept for the RT-05 counterexample. -/
+def releaseOld := releaseWith (fun _ _ => true)
+
+/-- mirrors flare/runtime/buffer_pool.mojo `release` (fixed, RT-05): a handle
+whose capacity is below its class's is dropped. -/
+def release := releaseWith (fun i h => decide (capacityFor i ≤ h.cap))
 
 /-! ## Size classes -/
 
@@ -111,7 +115,7 @@ theorem classIndex_least (n i : Nat) (h : classIndex n = some i) (j : Nat) (hj :
     rcases (by omega : j = 0 ∨ j = 1 ∨ j = 2) with rfl | rfl | rfl <;> simp [capacityFor] <;> omega
   cases h
 
-/-! ## Bucket bound (holds for flare and for the fix) -/
+/-! ## Bucket bound (holds for the pre-fix and the shipped release) -/
 
 def Bounded (p : Pool) : Prop := ∀ i, (p.buckets i).length ≤ p.classCap
 
@@ -147,7 +151,7 @@ theorem bounded_release (ok : Nat → Handle → Bool) (p : Pool) (h : Handle) (
         · exact hb j
       · exact hb
 
-/-! ## Capacity contract under the fix -/
+/-! ## Capacity contract -/
 
 /-- every recycled handle in bucket `i` has at least class `i`'s capacity -/
 def Good (p : Pool) : Prop := ∀ i h, h ∈ p.buckets i → capacityFor i ≤ h.cap
@@ -155,7 +159,7 @@ def Good (p : Pool) : Prop := ∀ i h, h ∈ p.buckets i → capacityFor i ≤ h
 theorem good_new (c : Nat) : Good (Pool.new c) := by
   intro i h hm; simp [Pool.new] at hm
 
-/-- **Capacity contract (fix)**: with `Good` buckets, `acquire n` returns a
+/-- **Capacity contract**: with `Good` buckets, `acquire n` returns a
 handle of capacity `≥ n` and keeps the buckets `Good`. -/
 theorem acquire_spec (p : Pool) (n : Nat) (hg : Good p) :
     n ≤ (acquire p n).2.cap ∧ Good (acquire p n).1 := by
@@ -174,8 +178,8 @@ theorem acquire_spec (p : Pool) (n : Nat) (hg : Good p) :
       · subst j; exact hg i h' (by rw [hbi]; exact List.mem_cons_of_mem _ hm)
       · exact hg j h' hm
 
-theorem releaseFixed_good (p : Pool) (h : Handle) (hg : Good p) : Good (releaseFixed p h) := by
-  unfold releaseFixed releaseWith
+theorem release_good (p : Pool) (h : Handle) (hg : Good p) : Good (release p h) := by
+  unfold release releaseWith
   split
   · exact hg
   · dsimp only
@@ -199,23 +203,23 @@ inductive Op
   | acq (n : Nat)
   | rel (h : Handle)
 
-def runFixed : Pool → List Op → Pool
+def run : Pool → List Op → Pool
   | p, [] => p
-  | p, .acq n :: ops => runFixed (acquire p n).1 ops
-  | p, .rel h :: ops => runFixed (releaseFixed p h) ops
+  | p, .acq n :: ops => run (acquire p n).1 ops
+  | p, .rel h :: ops => run (release p h) ops
 
-theorem good_runFixed (p : Pool) (ops : List Op) (hg : Good p) : Good (runFixed p ops) := by
+theorem good_run (p : Pool) (ops : List Op) (hg : Good p) : Good (run p ops) := by
   induction ops generalizing p with
   | nil => exact hg
   | cons op ops ih =>
     cases op with
     | acq n => exact ih _ (acquire_spec p n hg).2
-    | rel h => exact ih _ (releaseFixed_good p h hg)
+    | rel h => exact ih _ (release_good p h hg)
 
-/-- **Fix meets spec**: after any history of acquires and arbitrary
-releases against the fixed pool, `acquire n` returns capacity `≥ n`. -/
-theorem releaseFixed_preserves_capacity (c : Nat) (ops : List Op) (n : Nat) :
-    n ≤ (acquire (runFixed (Pool.new c) ops) n).2.cap :=
-  (acquire_spec _ n (good_runFixed _ ops (good_new c))).1
+/-- **Shipped code meets spec**: after any history of acquires and arbitrary
+releases against the pool, `acquire n` returns capacity `≥ n`. -/
+theorem release_preserves_capacity (c : Nat) (ops : List Op) (n : Nat) :
+    n ≤ (acquire (run (Pool.new c) ops) n).2.cap :=
+  (acquire_spec _ n (good_run _ ops (good_new c))).1
 
 end Flare.L2.BufferPool

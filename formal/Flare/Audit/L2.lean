@@ -89,7 +89,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.BufferPool.classIndex_fits
 #print axioms Flare.L2.BufferPool.classIndex_least
 #print axioms Flare.L2.BufferPool.bounded_release
-#print axioms Flare.L2.BufferPool.releaseFixed_preserves_capacity
+#print axioms Flare.L2.BufferPool.release_preserves_capacity
 -- Blocking pool cap
 #print axioms Flare.L2.Blocking.paired_cap_invariant
 #print axioms Flare.L2.Blocking.fixed_cap_invariant
@@ -122,7 +122,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.RT_04.peek_returns_full_peer
 #print axioms Flare.Bugs.RT_04.peek_below_capacity
 #print axioms Flare.Bugs.RT_05.acquire_after_shrunk_release
-#print axioms Flare.Bugs.RT_05.releaseFixed_preserves_capacity
+#print axioms Flare.Bugs.RT_05.release_preserves_capacity
 #print axioms Flare.Bugs.RT_06.persistentFailOpen_unbounded
 #print axioms Flare.Bugs.RT_06.fixed_cap
 #print axioms Flare.Bugs.RT_07.failOpen_breaks_cap

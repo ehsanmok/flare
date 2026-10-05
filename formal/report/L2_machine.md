@@ -269,16 +269,16 @@ the resolver always succeeds.
 
 ### Buffer pool (`BufferPool.lean`)
 
-runtime/buffer_pool.mojo:130-364. A handle is its capacity and class tag; the
+runtime/buffer_pool.mojo (`_class_index_for`, `_capacity_for_class`, `acquire`, `release`). A handle is its capacity and class tag; the
 caller may hand any handle to `release` (the fields and constructor are
 public).
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `classIndex_fits`, `classIndex_least` | The class chosen is the smallest one that fits the request. | proved |
-| `bounded_acquire`, `bounded_release` | No bucket ever holds more than `class_capacity` handles (flare and fix). | proved |
-| `releaseFixed_preserves_capacity` | With the fixed release, `acquire n` returns capacity at least `n` after any history. | proved |
-| `Flare.Bugs.RT_05.acquire_after_shrunk_release` | flare can return capacity 0 for `acquire(60000)`. | counterexample (RT-05) |
+| `bounded_acquire`, `bounded_release` | No bucket ever holds more than `class_capacity` handles (pre-fix and shipped). | proved |
+| `release_preserves_capacity` | With the shipped `release`, `acquire n` returns capacity at least `n` after any history. | proved |
+| `Flare.Bugs.RT_05.acquire_after_shrunk_release` | The pre-fix `release` (`releaseOld`) let `acquire(60000)` return capacity 0. | counterexample (RT-05, resolved) |
 
 ### Blocking-pool thread cap (`Blocking.lean`)
 
@@ -693,12 +693,19 @@ into the server yet.
 Spec (`acquire` docstring): returns a handle "with capacity ≥ `min_capacity`".
 What goes wrong: `bytes` is public and `release` (buffer_pool.mojo:337-364)
 checks only the class tag, so a shrunk buffer is recycled into its class.
-Lean: `Flare.Bugs.RT_05.acquire_after_shrunk_release`. Fix: drop handles whose
-capacity is below their class; `releaseFixed_preserves_capacity` (any history,
-including forged handles).
-Repro: `formal/repro/RT-05_buffer_pool_capacity_contract.mojo`, observed
-`BUG REPRODUCED: acquire(60000) returned a handle with capacity 0`.
-Flip: `OK: acquire(60000) capacity 65536`, exit 0.
+Lean: `Flare.Bugs.RT_05.acquire_after_shrunk_release` (about the pre-fix
+`releaseOld`). Fix: drop handles whose capacity is below their class;
+`release_preserves_capacity` for the shipped `release` (any history, including
+forged handles).
+Repro: `formal/repro/RT-05_buffer_pool_capacity_contract.mojo`, observed before
+the fix `BUG REPRODUCED: acquire(60000) returned a handle with capacity 0`.
+After the fix: `OK: acquire(60000) capacity 65536`, exit 0.
+
+Status: resolved. `BufferPool.release` drops a handle whose `bytes.capacity()`
+is below `_capacity_for_class(class_index)` (handles that grew are kept); tests
+`tests/runtime/test_buffer_pool.mojo::test_pool_release_drops_handle_with_shrunk_capacity`,
+`::test_pool_release_drops_forged_undersized_handle` and
+`::test_pool_release_keeps_grown_handle`.
 
 ### RT-06: the `MAX_POOL_SIZE` thread cap is never enforced on macOS arm64
 
@@ -913,10 +920,10 @@ lists record ids, not tokens.
 | `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-285, 332-338 | `impl_addr6`, `old_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | proved; counterexample (NET-01) |
 | `Flare.L2.Uds.fill` | flare/uds/_libc.mojo:55-107 | `fill_len_le` | proved |
 | `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-140 | `readPath_fill`, `readPathOld_fill_iff_ascii`, `NET_06.decode_encode_not_id` | proved; counterexample (NET-06, resolved) |
-| `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:82-95 | `key_fqdn_case`, `key_not_idempotent` | proved |
+| `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:81-94 | `key_fqdn_case`, `key_not_idempotent` | proved |
 | `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:97-151 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `store_size_bound` | proved; counterexample (NET-03, resolved) |
-| `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo:130-161 | `classIndex_fits`, `classIndex_least` | proved |
-| `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
+| `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo (`_class_index_for`, `_capacity_for_class`) | `classIndex_fits`, `classIndex_least` | proved |
+| `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo (`acquire`, `release`) | `bounded_release`, `release_preserves_capacity`, `RT_05.acquire_after_shrunk_release` | proved; counterexample (RT-05, resolved) |
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |
 | `Flare.L2.HappyEyeballs.order`, `orderOld` | flare/dns/async_resolve.mojo:155-186 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `order_head` | counterexample (NET-10, resolved) |
 | `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:72-119 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexamples (NET-08, NET-09, resolved) |

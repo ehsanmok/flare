@@ -60,6 +60,15 @@ from test_buffer_pool import (
 from test_buffer_pool import (
     test_pool_release_with_invalid_class_index_drops_silently as test_buffer_pool__test_pool_release_with_invalid_class_index_drops_silently,
 )
+from test_buffer_pool import (
+    test_pool_release_drops_handle_with_shrunk_capacity as test_buffer_pool__test_pool_release_drops_handle_with_shrunk_capacity,
+)
+from test_buffer_pool import (
+    test_pool_release_drops_forged_undersized_handle as test_buffer_pool__test_pool_release_drops_forged_undersized_handle,
+)
+from test_buffer_pool import (
+    test_pool_release_keeps_grown_handle as test_buffer_pool__test_pool_release_keeps_grown_handle,
+)
 from test_compact_read_buf import (
     test_drop_zero_keeps_full_buffer as test_compact_read_buf__test_drop_zero_keeps_full_buffer,
 )
@@ -766,6 +775,13 @@ def main() raises:
     suite.test[
         test_buffer_pool__test_pool_release_with_invalid_class_index_drops_silently
     ]()
+    suite.test[
+        test_buffer_pool__test_pool_release_drops_handle_with_shrunk_capacity
+    ]()
+    suite.test[
+        test_buffer_pool__test_pool_release_drops_forged_undersized_handle
+    ]()
+    suite.test[test_buffer_pool__test_pool_release_keeps_grown_handle]()
     # tests/runtime/test_compact_read_buf.mojo
     suite.test[test_compact_read_buf__test_drop_zero_keeps_full_buffer]()
     suite.test[test_compact_read_buf__test_drop_one_shifts_remaining]()

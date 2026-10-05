@@ -337,9 +337,12 @@ struct BufferPool(Movable):
     def release(mut self, var handle: BufferHandle) raises:
         """Return a buffer to its size-class bucket.
 
-        Oversize handles (``class_index == _OVERSIZE_CLASS``) and
-        releases past the per-class cap drop the handle on the
-        floor (Mojo destructor runs).
+        Oversize handles (``class_index == _OVERSIZE_CLASS``),
+        releases past the per-class cap, and handles whose
+        ``bytes.capacity()`` is below their class capacity (the
+        caller replaced or shrank the public ``bytes``) drop the
+        handle on the floor (Mojo destructor runs), so ``acquire``
+        always returns capacity >= ``min_capacity``.
 
         Args:
             handle: Owned ``BufferHandle`` to recycle.
@@ -359,6 +362,12 @@ struct BufferPool(Movable):
         if idx < 0 or idx >= _NUM_SIZE_CLASSES:
             return
         if len(self._buckets[idx]) >= self._class_capacity:
+            return
+        # ``bytes`` is public: a caller may have replaced or shrunk it. An
+        # undersized buffer must not be recycled into its class, or a later
+        # ``acquire`` would return less than ``min_capacity`` (RT-05).
+        # Handles that grew past the class capacity are fine.
+        if handle.bytes.capacity() < _capacity_for_class(idx):
             return
         var addr = Pool[BufferHandle].alloc_move(handle^)
         self._buckets[idx].append(addr)

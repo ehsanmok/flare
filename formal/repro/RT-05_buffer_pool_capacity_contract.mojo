@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: RT-05 fixed on fix/formal-findings
 """RT-05: BufferPool.acquire can return a handle with less capacity than
 requested.
 
 Lean: Flare.Bugs.RT_05.acquire_after_shrunk_release (counterexample) and
-Flare.Bugs.RT_05.releaseFixed_preserves_capacity (fix meets spec).
+Flare.Bugs.RT_05.release_preserves_capacity (shipped code meets spec).
 flare/runtime/buffer_pool.mojo:297-364 @59bda50.
 
 Expected (docstring of acquire): "A reset-empty BufferHandle with
 capacity >= min_capacity."
-Actual: BufferHandle.bytes is a public List. release() recycles a handle
+Before the fix: BufferHandle.bytes is a public List. release() recycles a handle
 by its class_index tag alone, so a caller that replaced or shrank
 bytes before releasing puts an undersized buffer into the 64 KiB
 bucket, and the next acquire(60000) returns it. Appends still grow the
