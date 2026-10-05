@@ -223,6 +223,11 @@ struct ConnectionEvents(Copyable):
     """RFC 9221 DATAGRAM payloads received this tick. The reactor /
     application drains these after :func:`handle_frame_buf` returns;
     unreliable, unordered, and not retransmitted on loss."""
+    var stop_sending_resets: List[StopSendingFrame]
+    """STOP_SENDING frames (§19.5) received for a stream whose send half
+    was not yet reset. RFC 9000 §3.5: the endpoint MUST answer each with a
+    RESET_STREAM (the driver knows the final size); a stream already in
+    ``Reset Sent`` is not listed, so the reply goes out once."""
 
 
 def empty_events() -> ConnectionEvents:
@@ -240,6 +245,7 @@ def empty_events() -> ConnectionEvents:
         path_validated=False,
         acked_packets=List[UInt64](),
         datagrams=List[List[UInt8]](),
+        stop_sending_resets=List[StopSendingFrame](),
     )
 
 
@@ -798,6 +804,12 @@ struct _ConnFrameHandler(FrameHandler):
                 self._conn()[], ss.stream_id, STREAM_FRAME_SEND_HALF
             )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        var sid = ss.stream_id
+        var already_reset = False
+        if sid in self._conn()[].streams:
+            already_reset = self._conn()[].streams[sid].send_reset
+        if not already_reset:
+            self._events()[].stop_sending_resets.append(ss)
         apply_stop_sending(self._conn()[], ss)
 
     def on_crypto(mut self, c: CryptoFrame) raises:

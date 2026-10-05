@@ -1,4 +1,5 @@
 # PLATFORM: any (needs the rustls QUIC shim and the fixtures in
+# RESOLVED: QUIC-19 fixed on fix/formal-findings
 # tests/tls/fixtures/rustls-quic-client/; UDP on 127.0.0.1 only)
 """QUIC-19: STOP_SENDING is never answered with RESET_STREAM.
 
@@ -19,7 +20,7 @@ Control: the body chunk itself arrives at the peer socket (the harness can
 see what the client sends).
 
 Expected: a datagram (the RESET_STREAM) arrives after STOP_SENDING.
-Actual: nothing is sent.
+Before the fix: nothing is sent.
 
 Minimal fix: in _dispatch_frames, for each STOP_SENDING on a stream not
 already RESET_SENT, send RESET_STREAM(stream, code, final size =

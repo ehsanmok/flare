@@ -180,6 +180,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_18.fixed_spec
 #print axioms Flare.Bugs.QUIC_19.impl_silent
 #print axioms Flare.Bugs.QUIC_19.fixed_spec
+#print axioms Flare.Bugs.QUIC_19.shipped_replies
 
 -- QUIC timers: idle timeout and closing/draining
 #print axioms Flare.L3.Quic.Timers.fixed_closed_eq_spec

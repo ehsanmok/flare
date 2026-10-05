@@ -24,7 +24,12 @@ from std.collections.span import Span
 
 from flare.quic.client import QuicClientConnection
 from flare.quic._server_support import _monotonic_ms
-from flare.quic.state import CONN_STATE_CLOSED, empty_events
+from flare.quic.state import (
+    CONN_STATE_CLOSED,
+    empty_events,
+    handle_frame_buf,
+    new_connection,
+)
 from flare.quic._loss_recovery import LossRecovery
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import RustlsQuicConfig, RustlsQuicConnector
@@ -414,6 +419,80 @@ def test_client_idle_timer_restarts_on_processed_packets() raises:
     client.close()
 
 
+def _server_stream_peer_reset(server: QuicListener, sid: UInt64) raises -> Bool:
+    for i in range(len(server.connections)):
+        if server.slot_free[i]:
+            continue
+        if sid in server.connections[i].conn.streams:
+            return server.connections[i].conn.streams[sid].peer_reset
+    return False
+
+
+def test_stop_sending_is_answered_with_reset_stream() raises:
+    """QUIC-19, RFC 9000 sec 3.5: STOP_SENDING for a stream in the Send
+    state must be answered with RESET_STREAM; the server sees the reset,
+    and a repeated STOP_SENDING does not produce a second one."""
+    var server = _bind_server()
+    var connector = _make_connector()
+    var pair = _established_client_with_stream(server, connector)
+    ref client = pair[0]
+    var sid = pair[1]
+    for _ in range(4):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+    assert_false(
+        _server_stream_peer_reset(server, sid), "no reset before STOP_SENDING"
+    )
+    # STOP_SENDING(sid, error 0x33).
+    var stop: List[UInt8] = [0x05, UInt8(sid), 0x33]
+    _feed_frames(client, stop.copy())
+    for _ in range(6):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+    assert_true(
+        _server_stream_peer_reset(server, sid),
+        "the server must receive RESET_STREAM after STOP_SENDING",
+    )
+    var more: List[UInt8] = [120]
+    var raised = False
+    try:
+        client.send_stream(sid, more, fin=False)
+    except:
+        raised = True
+    assert_true(raised, "no STREAM data after the reset")
+    server.close()
+    client.close()
+
+
+def test_stop_sending_reply_is_listed_once_per_stream() raises:
+    """The state machine lists a STOP_SENDING that needs a RESET_STREAM
+    (stream in Send or not yet seen) and stays silent once the send half
+    is reset (RFC 9000 sec 3.1: the reply is sent once)."""
+    var conn = new_connection()
+    var ev = empty_events()
+    var data: List[UInt8] = [
+        0x0A,
+        0x04,
+        0x01,
+        0x41,
+    ]  # STREAM id 4, len 1, no FIN
+    _ = handle_frame_buf(conn, Span[UInt8, _](data), UInt64(1_000), ev)
+    var stop: List[UInt8] = [0x05, 0x04, 0x07]
+    var ev1 = empty_events()
+    _ = handle_frame_buf(conn, Span[UInt8, _](stop), UInt64(2_000), ev1)
+    assert_equal(len(ev1.stop_sending_resets), 1)
+    assert_equal(ev1.stop_sending_resets[0].stream_id, UInt64(4))
+    assert_equal(ev1.stop_sending_resets[0].application_error_code, UInt64(7))
+    var ev2 = empty_events()
+    _ = handle_frame_buf(conn, Span[UInt8, _](stop), UInt64(3_000), ev2)
+    assert_equal(len(ev2.stop_sending_resets), 0)
+    # A stream not seen yet is in Ready: the reply is required there too.
+    var other: List[UInt8] = [0x05, 0x08, 0x01]
+    var ev3 = empty_events()
+    _ = handle_frame_buf(conn, Span[UInt8, _](other), UInt64(4_000), ev3)
+    assert_equal(len(ev3.stop_sending_resets), 1)
+
+
 def main() raises:
     test_client_handshake_completes()
     test_client_send_stream_after_handshake()
@@ -425,4 +504,6 @@ def main() raises:
     test_client_closes_after_its_idle_timeout()
     test_client_uses_the_servers_shorter_idle_timeout()
     test_client_idle_timer_restarts_on_processed_packets()
-    print("test_quic_client: 10 passed")
+    test_stop_sending_is_answered_with_reset_stream()
+    test_stop_sending_reply_is_listed_once_per_stream()
+    print("test_quic_client: 12 passed")

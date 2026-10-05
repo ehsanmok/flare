@@ -1012,6 +1012,28 @@ struct QuicClientConnection(Movable):
             if consumed <= 0:
                 break
             cursor += consumed
+        self._answer_stop_sending(events)
+
+    def _answer_stop_sending(mut self, mut events: ConnectionEvents) raises:
+        """RFC 9000 sec 3.5: answer each STOP_SENDING for a stream whose
+        send half was not reset yet with a RESET_STREAM that copies the
+        error code and carries the final size (bytes sent so far)."""
+        if len(events.stop_sending_resets) == 0 or not self.have_1rtt_keys:
+            return  # nothing to answer, or no 1-RTT keys to answer with
+        var payload = List[UInt8]()
+        for i in range(len(events.stop_sending_resets)):
+            var ss = events.stop_sending_resets[i].copy()
+            var final_size = UInt64(0)
+            if ss.stream_id in self.send_offsets:
+                final_size = self.send_offsets[ss.stream_id]
+            encode_reset_stream(
+                ResetStreamFrame(
+                    ss.stream_id, ss.application_error_code, final_size
+                ),
+                payload,
+            )
+        events.stop_sending_resets = List[StopSendingFrame]()
+        self._send_padded_1rtt(payload^, ack_eliciting=True)
 
     def _decrypt_post_initial(
         mut self, datagram: Span[UInt8, _], level: Int

@@ -363,6 +363,12 @@ from test_quic_client import (
 from test_quic_client import (
     test_client_idle_timer_restarts_on_processed_packets as test_quic_client__test_client_idle_timer_restarts_on_processed_packets,
 )
+from test_quic_client import (
+    test_stop_sending_is_answered_with_reset_stream as test_quic_client__test_stop_sending_is_answered_with_reset_stream,
+)
+from test_quic_client import (
+    test_stop_sending_reply_is_listed_once_per_stream as test_quic_client__test_stop_sending_reply_is_listed_once_per_stream,
+)
 from test_quic_client_peer_params import (
     test_correct_server_params_pass as test_quic_client_peer_params__test_correct_server_params_pass,
 )
@@ -1162,6 +1168,12 @@ def main() raises:
     ]()
     suite.test[
         test_quic_client__test_client_idle_timer_restarts_on_processed_packets
+    ]()
+    suite.test[
+        test_quic_client__test_stop_sending_is_answered_with_reset_stream
+    ]()
+    suite.test[
+        test_quic_client__test_stop_sending_reply_is_listed_once_per_stream
     ]()
     # tests/quic/test_quic_client_peer_params.mojo
     suite.test[test_quic_client_peer_params__test_correct_server_params_pass]()

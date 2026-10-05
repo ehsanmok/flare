@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62944 lines) |
-| Theorems | 3301 |
-| Headline theorems in the axiom audit | 1099 |
+| Lean files | 298 (62961 lines) |
+| Theorems | 3302 |
+| Headline theorems in the axiom audit | 1100 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 104 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 105 of 138 |
 
 Six findings are rated high:
 
@@ -3086,7 +3086,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-16 | Low | resolved | the server does not enforce its unidirectional stream limit | `Flare/Bugs/QUIC_16.lean` | `repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic)) |
 | QUIC-17 | Low | resolved | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
 | QUIC-18 | Medium | resolved | one state for both stream halves loses a reset | `Flare/Bugs/QUIC_18.lean` | `repro/QUIC-18_stream_reset_state_overwritten.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
-| QUIC-19 | Low | open | STOP_SENDING is never answered with RESET_STREAM | `Flare/Bugs/QUIC_19.lean` | `repro/QUIC-19_stop_sending_not_answered.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
+| QUIC-19 | Low | resolved | STOP_SENDING is never answered with RESET_STREAM | `Flare/Bugs/QUIC_19.lean` | `repro/QUIC-19_stop_sending_not_answered.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QUIC-20 | Medium | resolved | the server's idle timer does not follow RFC 9000 §10.1 | `Flare/Bugs/QUIC_20.lean` | `repro/QUIC-20_server_idle_timer.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-21 | Medium | resolved | the client never applies an idle timeout | `Flare/Bugs/QUIC_21.lean` | `repro/QUIC-21_client_has_no_idle_timeout.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-22 | Medium | resolved | the server closes connections without sending CONNECTION_CLOSE | `Flare/Bugs/QUIC_22.lean` | `repro/QUIC-22_server_close_never_sends_connection_close.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
@@ -4470,11 +4470,13 @@ Status: resolved. Fixed: `Stream` records `peer_reset` (RESET_STREAM received) a
 
 #### QUIC-19: STOP_SENDING is never answered with RESET_STREAM
 
+Status: resolved. The client answers STOP_SENDING with RESET_STREAM (state.mojo: on_stop_sending -> ConnectionEvents.stop_sending_resets; client.mojo: _answer_stop_sending).
+
 - **Severity:** Low to Medium. A client mid-upload that receives STOP_SENDING stops sending but never tells the peer the final size, so the peer's receiving part never reaches a terminal state and its connection-level accounting for the stream is never settled (§4.5).
 - **RFC:** RFC 9000 §3.5: "An endpoint that receives a STOP_SENDING frame MUST send a RESET_STREAM frame if the stream is in the "Ready" or "Send" state."
-- **What goes wrong:** `apply_stop_sending` (`state.mojo:478-486`) only sets RESET_SENT, and `_dispatch_frames` (`client.mojo:902-912`) sends nothing. The only RESET_STREAM flare encodes is in `cancel_stream`. The server has no RESET_STREAM path either; the repro and flip cover the client.
+- **What goes wrong:** `apply_stop_sending` (`state.mojo:478-486`) only set RESET_SENT, and `_dispatch_frames` (`client.mojo:902-912`) sent nothing. The only RESET_STREAM flare encodes is in `cancel_stream`. The server has no RESET_STREAM path either; the repro and flip cover the client.
 - **Counterexample:** `Bugs.QUIC_19.impl_silent`: in the Send state the reply is empty; the spec requires RESET_STREAM.
-- **Fix:** in `_dispatch_frames`, for each STOP_SENDING on a stream not already RESET_SENT, send RESET_STREAM with the frame's error code and the final size `send_offsets[stream]`. `fixed_spec` shows the reply then matches the spec for every event history, given the QUIC-18 split.
+- **Fix:** `on_stop_sending` records each STOP_SENDING on a stream not already reset in `ConnectionEvents.stop_sending_resets`; `_dispatch_frames` then calls `_answer_stop_sending`, which sends one RESET_STREAM per entry with the frame's error code and the final size `send_offsets[stream]` (a stream not yet seen counts as Ready). `shipped_replies` pins the two cases and `fixed_spec` shows the reply then matches the spec for every event history, given the QUIC-18 split.
 - **Repro:** `formal/repro/QUIC-19_stop_sending_not_answered.mojo` (in-memory rustls handshake for real 1-RTT keys; the client's peer is a UDP socket the repro owns; control: the 100-byte body chunk sent before STOP_SENDING arrives).
 - **Observed:** `BUG REPRODUCED: STOP_SENDING on stream 0 (in Send state, 100 bytes sent) was not answered: no datagram within 500 ms`
 - **Flip** (`quic/client.mojo`, the fix above): `OK: the client answered STOP_SENDING with a packet (RESET_STREAM)`, exit 0.

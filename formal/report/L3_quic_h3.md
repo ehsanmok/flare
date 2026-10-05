@@ -507,11 +507,13 @@ Status: resolved. Fixed: `Stream` records `peer_reset` (RESET_STREAM received) a
 
 ### QUIC-19: STOP_SENDING is never answered with RESET_STREAM
 
+Status: resolved. The client answers STOP_SENDING with RESET_STREAM (state.mojo: on_stop_sending -> ConnectionEvents.stop_sending_resets; client.mojo: _answer_stop_sending).
+
 - **Severity:** Low to Medium. A client mid-upload that receives STOP_SENDING stops sending but never tells the peer the final size, so the peer's receiving part never reaches a terminal state and its connection-level accounting for the stream is never settled (§4.5).
 - **RFC:** RFC 9000 §3.5: "An endpoint that receives a STOP_SENDING frame MUST send a RESET_STREAM frame if the stream is in the "Ready" or "Send" state."
-- **What goes wrong:** `apply_stop_sending` (`state.mojo:478-486`) only sets RESET_SENT, and `_dispatch_frames` (`client.mojo:902-912`) sends nothing. The only RESET_STREAM flare encodes is in `cancel_stream`. The server has no RESET_STREAM path either; the repro and flip cover the client.
+- **What goes wrong:** `apply_stop_sending` (`state.mojo:478-486`) only set RESET_SENT, and `_dispatch_frames` (`client.mojo:902-912`) sent nothing. The only RESET_STREAM flare encodes is in `cancel_stream`. The server has no RESET_STREAM path either; the repro and flip cover the client.
 - **Counterexample:** `Bugs.QUIC_19.impl_silent`: in the Send state the reply is empty; the spec requires RESET_STREAM.
-- **Fix:** in `_dispatch_frames`, for each STOP_SENDING on a stream not already RESET_SENT, send RESET_STREAM with the frame's error code and the final size `send_offsets[stream]`. `fixed_spec` shows the reply then matches the spec for every event history, given the QUIC-18 split.
+- **Fix:** `on_stop_sending` records each STOP_SENDING on a stream not already reset in `ConnectionEvents.stop_sending_resets`; `_dispatch_frames` then calls `_answer_stop_sending`, which sends one RESET_STREAM per entry with the frame's error code and the final size `send_offsets[stream]` (a stream not yet seen counts as Ready). `shipped_replies` pins the two cases and `fixed_spec` shows the reply then matches the spec for every event history, given the QUIC-18 split.
 - **Repro:** `formal/repro/QUIC-19_stop_sending_not_answered.mojo` (in-memory rustls handshake for real 1-RTT keys; the client's peer is a UDP socket the repro owns; control: the 100-byte body chunk sent before STOP_SENDING arrives).
 - **Observed:** `BUG REPRODUCED: STOP_SENDING on stream 0 (in Send state, 100 bytes sent) was not answered: no datagram within 500 ms`
 - **Flip** (`quic/client.mojo`, the fix above): `OK: the client answered STOP_SENDING with a packet (RESET_STREAM)`, exit 0.
