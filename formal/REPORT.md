@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63387 lines) |
-| Theorems | 3330 |
-| Headline theorems in the axiom audit | 1120 |
+| Lean files | 298 (63398 lines) |
+| Theorems | 3331 |
+| Headline theorems in the axiom audit | 1121 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 117 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 118 of 138 |
 
 Six findings are rated high:
 
@@ -3058,7 +3058,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-03 | Medium | resolved | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
 | H2-04 | Low | resolved | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
 | H2-05 | Medium | resolved | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
-| H2-06 | Low | open | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
+| H2-06 | Low | resolved | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
 | H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
 | H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
 | H2-09 | Medium | resolved | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
@@ -4072,6 +4072,8 @@ Status: resolved. Fixed: `_declared_content_length` parses `1*DIGIT` with an ove
 - **Flip:** OK, exit 0.
 
 #### H2-06: HEADERS on stream 0 raises instead of being a connection error
+
+Status: resolved. Fixed: the raise in the HEADERS branch is replaced by `_conn_error(PROTOCOL_ERROR)`. Tests: `test_h2_state.mojo::test_headers_on_stream_0_is_a_connection_error` (server and client role; replaces `test_headers_on_stream_0_raises`, which encoded the raise). Model: `Fix.shipped` carries `h2_06`; `handle_headers0` no longer needs `h2_02 = false` because the shipped id check skips a fresh connection; `Bugs.H2_06.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. A raise escapes `handle_frame` and `Http2Connection.feed` without queuing a GOAWAY, so the error handling is left to whoever called `feed`. It is reachable on a fresh server connection, before any request, or in client role. Once a request has been seen, the id check at 1120-1126 catches stream 0 first.
 - **RFC:** RFC 9113 §6.2: HEADERS on stream 0x0 "MUST respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR."

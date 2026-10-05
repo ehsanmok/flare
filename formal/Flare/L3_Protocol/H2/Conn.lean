@@ -210,10 +210,10 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-09, H2-10, H2-17. -/
+finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-09, H2-10, H2-17. -/
 def Fix.shipped : Fix :=
-  { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true, h2_09 := true,
-    h2_10 := true, h2_17 := true }
+  { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
+    h2_06 := true, h2_09 := true, h2_10 := true, h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,

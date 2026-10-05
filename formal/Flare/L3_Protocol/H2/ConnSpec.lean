@@ -74,11 +74,11 @@ theorem dispatch_headers (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : f.ty = 
 
 theorem handle_headers0 (fx : Fix) (dec : Dec) (c : Conn) (f : Fr)
     (hc : c.continuing = 0) (ht : f.ty = tHEADERS) (h0 : f.sid = 0) (hl : f.plen ≤ c.localMaxFrame)
-    (hlp : c.isClient = true ∨ c.lastPeer = 0) (h02 : fx.h2_02 = false) :
+    (hlp : c.isClient = true ∨ c.lastPeer = 0) :
     handle fx dec c f =
       if fx.h2_06 then .ok (connErr c ePROTOCOL) else .error "h2: HEADERS on stream 0" := by
   have hid : idCheck fx c f = .inr c := by
-    rcases hlp with h | h <;> simp [idCheck, ht, h0, h, h02]
+    rcases hlp with h | h <;> simp [idCheck, ht, h0, h]
   simp [handle, hc, shape_headers fx c f ht, Nat.not_lt.mpr hl, hid, dispatch_headers fx dec c f ht,
     headersH, h0]
 

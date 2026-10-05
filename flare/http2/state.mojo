@@ -1333,7 +1333,9 @@ struct Connection(Copyable, Defaultable):
 
         if ft == FrameType.HEADERS().value:
             if f.header.stream_id == 0:
-                raise Error("h2: HEADERS on stream 0")
+                # sec 6.2: HEADERS on stream 0 is a connection error. A
+                # raise would leave the connection without a GOAWAY.
+                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             # sec 5.1.1: a client opens every stream it uses, and with
             # push disabled the server never opens one, so a response
             # HEADERS on an id the client has no stream for (idle, or

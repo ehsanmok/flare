@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-06 fixed on fix/formal-findings
 """H2-06: HEADERS on stream 0 raises out of the server driver instead of
 answering GOAWAY(PROTOCOL_ERROR).
 
@@ -17,7 +18,7 @@ the connection with no frame at all".
 Trace: Http2Connection.feed(preface, SETTINGS, HEADERS on stream 0).
 
 Expected: feed returns and the outbox carries GOAWAY(PROTOCOL_ERROR).
-Actual: feed raises "h2: HEADERS on stream 0" and no GOAWAY is queued.
+Before the fix: feed raises "h2: HEADERS on stream 0" and no GOAWAY is queued.
 
 Minimal fix: `return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)`
 in place of the raise.

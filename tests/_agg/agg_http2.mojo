@@ -331,7 +331,7 @@ from test_h2_state import (
     test_settings_ack_recorded as test_h2_state__test_settings_ack_recorded,
 )
 from test_h2_state import (
-    test_headers_on_stream_0_raises as test_h2_state__test_headers_on_stream_0_raises,
+    test_headers_on_stream_0_is_a_connection_error as test_h2_state__test_headers_on_stream_0_is_a_connection_error,
 )
 from test_h2_state import (
     test_headers_end_stream_transitions_to_half_closed_remote as test_h2_state__test_headers_end_stream_transitions_to_half_closed_remote,
@@ -689,7 +689,7 @@ def main() raises:
     suite.test[test_h2_state__test_initial_settings_is_one_setting]()
     suite.test[test_h2_state__test_inbound_settings_acks]()
     suite.test[test_h2_state__test_settings_ack_recorded]()
-    suite.test[test_h2_state__test_headers_on_stream_0_raises]()
+    suite.test[test_h2_state__test_headers_on_stream_0_is_a_connection_error]()
     suite.test[
         test_h2_state__test_headers_end_stream_transitions_to_half_closed_remote
     ]()

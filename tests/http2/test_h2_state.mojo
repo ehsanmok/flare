@@ -4,7 +4,7 @@ Covers:
 
 - Initial SETTINGS frame from the server is well-formed.
 - Inbound SETTINGS frame is ACK'd.
-- HEADERS on stream 0 raises (RFC 9113 §5.1.1).
+- HEADERS on stream 0 is GOAWAY(PROTOCOL_ERROR) (RFC 9113 §6.2).
 - HEADERS + END_STREAM transitions to ``HALF_CLOSED_REMOTE``.
 - DATA appends to the stream's body and emits a WINDOW_UPDATE.
 - WINDOW_UPDATE adjusts the connection / stream send window.
@@ -13,7 +13,7 @@ Covers:
   flags (``END_HEADERS`` always; ``END_STREAM`` on the last frame).
 """
 
-from std.testing import assert_equal, assert_false, assert_raises, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from flare.http2.frame import (
     Frame,
@@ -66,7 +66,10 @@ def test_settings_ack_recorded() raises:
     assert_true(c.settings_acked)
 
 
-def test_headers_on_stream_0_raises() raises:
+def test_headers_on_stream_0_is_a_connection_error() raises:
+    """H2-06: HEADERS on stream 0 is a connection error of type
+    PROTOCOL_ERROR (RFC 9113 sec 6.2). It used to raise out of
+    ``handle_frame``, so the caller never saw a GOAWAY."""
     var c = Connection()
     var enc = HpackEncoder()
     var hdrs = List[HpackHeader]()
@@ -80,8 +83,16 @@ def test_headers_on_stream_0_raises() raises:
         FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
     )
     f.payload = enc.encode(Span[HpackHeader, _](hdrs))
-    with assert_raises():
-        _ = c.handle_frame(f^)
+    var out = c.handle_frame(f.copy())
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].header.type.value), 0x7)  # GOAWAY
+    assert_equal(_goaway_code(out), 1)
+    assert_true(c.goaway_sent)
+    # The same in client role.
+    var cl = Connection()
+    cl.is_client = True
+    var out2 = cl.handle_frame(f^)
+    assert_equal(_goaway_code(out2), 1)
 
 
 def test_headers_end_stream_transitions_to_half_closed_remote() raises:
@@ -816,7 +827,7 @@ def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
     test_settings_ack_recorded()
-    test_headers_on_stream_0_raises()
+    test_headers_on_stream_0_is_a_connection_error()
     test_headers_end_stream_transitions_to_half_closed_remote()
     test_data_appends_and_emits_window_update()
     test_window_update_adjusts_send_window()
