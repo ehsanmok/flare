@@ -777,6 +777,11 @@ their `libflare_tls.so`. A bare checkout run outside pixi now needs
 (500), `read_body_timeout_ms` (30_000), `request_timeout_ms` (60_000),
 and `handler_timeout_ms`.
 
+The reactor's static and short-request fast paths decide `Connection: close`
+by scanning the raw header block. The scan only matches `Connection:` at the
+start of a header line (an `X-Connection:` header is ignored) and combines
+every `Connection` line, so a later `Connection: close` is honoured.
+
 **Changed in v0.11 (breaking).** `idle_timeout_ms` now also applies to
 a connection that has not sent its first byte: it is armed at accept,
 where before a silent connection was never timed out. `request_timeout_ms`

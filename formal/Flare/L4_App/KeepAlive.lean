@@ -25,14 +25,15 @@ and no token is `keep-alive`.
 Results:
 * `computeCloseAfterFixed_eq_spec`: the fixed function (same fast paths,
   token-list slow path) equals the spec on every value (general).
-* `wantsCloseFixed_spec`: the fixed byte scan (match `connection:` only at a
-  line start, OR the verdicts of all such lines) returns `true` whenever any
-  header line is `Connection: close` (general).
-* `computeCloseAfter_single`, `wantsClose_sound_close`: the shipped
-  functions are correct on a single bare `close` token / never report close
-  without some `connection:` match (soundness direction, general).
-The counterexamples for the shipped code are in `Flare.Bugs.APP_02` and
-`Flare.Bugs.APP_03`.
+* `wantsClose_spec`: the shipped byte scan (match `connection:` only at a
+  line start, OR the verdicts of all such lines; fixed, APP-02) returns
+  `true` whenever any header line is `Connection: close` (general).
+* `computeCloseAfter_single`, `wantsClose_sound_close`: the pre-fix
+  `computeCloseAfter` is correct on a single bare `close` token / the
+  shipped scan never reports close without a `Connection` line (soundness
+  direction, general).
+The counterexamples for the pre-fix code are in `Flare.Bugs.APP_02` (about
+`wantsCloseOld`) and `Flare.Bugs.APP_03`.
 -/
 namespace Flare.L4.KeepAlive
 
@@ -198,21 +199,24 @@ def isConn (d : Bytes) (i : Nat) : Bool := matchAtLower d i connB
 /-- The offset where the scan `break`s: the first `connection:` match. -/
 def firstConn (d : Bytes) (n : Nat) : Option Nat := (candidates d n).find? (isConn d)
 
-/-- `_wants_close`: the scan stops at the first offset where
-`connection:` matches (anywhere, not only at a line start) and takes that
-match's verdict.
+/-- `_wants_close` before the APP-02 fix: the scan stops at the first offset
+where `connection:` matches (anywhere, not only at a line start) and takes
+that match's verdict.
 mirrors flare/http/_reactor/keepalive_scan.mojo:393-484 @59bda50 -/
-def wantsClose (d : Bytes) (n : Nat) : Bool :=
+def wantsCloseOld (d : Bytes) (n : Nat) : Bool :=
   match firstConn d n with
   | some i => (verdict d n i).1 || (version10 d n && !(verdict d n i).2)
   | none => version10 d n
 
-/-- Offset `i` starts a header line. -/
+/-- Offset `i` starts a header line.
+mirrors flare/http/_reactor/keepalive_scan.mojo:441-443 (fixed, APP-02) -/
 def lineStart (d : Bytes) (n i : Nat) : Bool := i == firstEol d n + 1 || at' d (i - 1) == 10
 
-/-- Minimal fix: test `connection:` only at line starts and OR the verdicts
-of every such line instead of `break`ing at the first match. -/
-def wantsCloseFixed (d : Bytes) (n : Nat) : Bool :=
+/-- `_wants_close` as shipped (fixed, APP-02): `connection:` is tested only at
+line starts and the verdicts of every such line are OR-ed instead of
+`break`ing at the first match.
+mirrors flare/http/_reactor/keepalive_scan.mojo:393-495 (fixed, APP-02) -/
+def wantsClose (d : Bytes) (n : Nat) : Bool :=
   let hits := (candidates d n).filter fun i => lineStart d n i && isConn d i
   hits.any (fun i => (verdict d n i).1) ||
     (version10 d n && !hits.any (fun i => (verdict d n i).2))
@@ -223,22 +227,35 @@ def WantsCloseSpec (d : Bytes) (n : Nat) (r : Bool) : Prop :=
   ∀ i, firstEol d n + 1 ≤ i → i + 11 < n → lineStart d n i = true → isConn d i = true →
     (verdict d n i).1 = true → r = true
 
-theorem wantsCloseFixed_spec (d : Bytes) (n : Nat) :
-    WantsCloseSpec d n (wantsCloseFixed d n) := by
+theorem wantsClose_spec (d : Bytes) (n : Nat) :
+    WantsCloseSpec d n (wantsClose d n) := by
   intro i h1 h2 hl hc hv
   have hmem : i ∈ candidates d n := by
     unfold candidates; rw [List.mem_range'_1]; omega
-  unfold wantsCloseFixed
+  unfold wantsClose
   simp only [Bool.or_eq_true, List.any_eq_true, List.mem_filter, Bool.and_eq_true]
   exact Or.inl ⟨i, ⟨hmem, hl, hc⟩, hv⟩
 
-/-- Soundness of the shipped scan: it never reports `close` from the
-`Connection` path unless `connection:` matched somewhere in the header
-block with a `close` value. -/
+/-- Soundness of the shipped scan: with an HTTP/1.1 request line it reports
+`close` only when some header line starts with `connection:` and has a
+`close` verdict. -/
 theorem wantsClose_sound_close (d : Bytes) (n : Nat) (h : wantsClose d n = true)
     (h10 : version10 d n = false) :
-    ∃ i ∈ candidates d n, isConn d i = true ∧ (verdict d n i).1 = true := by
+    ∃ i ∈ candidates d n, lineStart d n i = true ∧ isConn d i = true ∧
+      (verdict d n i).1 = true := by
   unfold wantsClose at h
+  simp only [h10, Bool.false_and, Bool.or_false, List.any_eq_true, List.mem_filter,
+    Bool.and_eq_true] at h
+  obtain ⟨i, ⟨hmem, hl, hc⟩, hv⟩ := h
+  exact ⟨i, hmem, hl, hc, hv⟩
+
+/-- Soundness of the pre-fix scan: it never reports `close` from the
+`Connection` path unless `connection:` matched somewhere in the header
+block with a `close` value. -/
+theorem wantsCloseOld_sound_close (d : Bytes) (n : Nat) (h : wantsCloseOld d n = true)
+    (h10 : version10 d n = false) :
+    ∃ i ∈ candidates d n, isConn d i = true ∧ (verdict d n i).1 = true := by
+  unfold wantsCloseOld at h
   cases hf : firstConn d n with
   | none => simp [hf, h10] at h
   | some i =>

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-02 fixed on fix/formal-findings
 """APP-02: _wants_close matches "connection:" anywhere and stops at the first hit.
 
 Lean: Flare.Bugs.APP_02.wantsClose_misses_close (counterexample) and
@@ -13,7 +14,7 @@ response.
 
 Expected: _wants_close(b"GET / HTTP/1.1\\r\\nX-Connection: x\\r\\n"
 "Connection: close\\r\\n\\r\\n") == True.
-Actual: False. The scan looks for the bytes ``connection:`` at every
+Before the fix: False. The scan looks for the bytes ``connection:`` at every
 offset, not only at the start of a header line, so it first matches
 inside ``X-Connection:``. Its value is not ``close``, and the scan
 ``break``s after the first match, so the real ``Connection: close`` line

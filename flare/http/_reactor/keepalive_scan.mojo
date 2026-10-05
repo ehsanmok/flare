@@ -396,7 +396,9 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
 
     Returns True when the request line declares HTTP/1.0 without a
     ``Connection: keep-alive`` override, or when any ``Connection:``
-    header value equals ``close`` (case-insensitive).
+    header line (``connection:`` at the start of a line, so not
+    ``X-Connection:``; every such line is examined) has the value
+    ``close`` (case-insensitive).
 
     Operates directly on bytes so the static fast path doesn't need to
     construct a ``Request`` / ``HeaderMap``.
@@ -426,8 +428,11 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
         if is_match:
             version_is_10 = True
             break
-    # 2. Connection header. Case-insensitive name match, value compared
-    # against "close" and "keep-alive" (lowercase).
+    # 2. Connection header. Case-insensitive name match at the START OF A
+    # HEADER LINE only (so ``X-Connection:`` does not count), value
+    # compared against "close" and "keep-alive" (case-insensitive). Every
+    # ``Connection`` line is examined and the verdicts are OR-ed
+    # (RFC 9110 sec 7.6.1: the field may repeat).
     var needle = "connection:"
     var np = needle.unsafe_ptr()
     var nn = needle.byte_length()
@@ -435,6 +440,9 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
     var conn_keepalive = False
     var i = first_eol + 1
     while i < n - nn:
+        if data[i - 1] != 10:  # not at a line start
+            i += 1
+            continue
         var found = True
         for j in range(nn):
             var c = data[i + j]
@@ -475,7 +483,6 @@ def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
                         break
                 if ck2:
                     conn_keepalive = True
-            break
         i += 1
     if conn_close:
         return True

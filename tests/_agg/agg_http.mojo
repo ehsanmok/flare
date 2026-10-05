@@ -690,6 +690,15 @@ from test_connection_keepalive_fastpath import (
 from test_connection_keepalive_fastpath import (
     test_compute_unusual_value_http11_keeps_open as test_connection_keepalive_fastpath__test_compute_unusual_value_http11_keeps_open,
 )
+from test_connection_keepalive_fastpath import (
+    test_wants_close_after_x_connection_header as test_connection_keepalive_fastpath__test_wants_close_after_x_connection_header,
+)
+from test_connection_keepalive_fastpath import (
+    test_wants_close_ignores_connection_inside_other_header_names as test_connection_keepalive_fastpath__test_wants_close_ignores_connection_inside_other_header_names,
+)
+from test_connection_keepalive_fastpath import (
+    test_wants_close_ors_every_connection_line as test_connection_keepalive_fastpath__test_wants_close_ors_every_connection_line,
+)
 from test_continue_interim import (
     test_cleartext_unsent_interim_tail_precedes_the_response as test_continue_interim__test_cleartext_unsent_interim_tail_precedes_the_response,
 )
@@ -4665,6 +4674,15 @@ def main() raises:
     ]()
     suite.test[
         test_connection_keepalive_fastpath__test_compute_unusual_value_http11_keeps_open
+    ]()
+    suite.test[
+        test_connection_keepalive_fastpath__test_wants_close_after_x_connection_header
+    ]()
+    suite.test[
+        test_connection_keepalive_fastpath__test_wants_close_ignores_connection_inside_other_header_names
+    ]()
+    suite.test[
+        test_connection_keepalive_fastpath__test_wants_close_ors_every_connection_line
     ]()
     # tests/http/test_continue_interim.mojo
     suite.test[

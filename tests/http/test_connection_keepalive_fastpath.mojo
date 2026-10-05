@@ -31,6 +31,7 @@ from flare.http._server_reactor_impl import (
     _connection_is_keepalive,
     _connection_is_close,
     _compute_close_after,
+    _wants_close,
 )
 from flare.http.headers import HeaderMap
 
@@ -159,8 +160,75 @@ def test_compute_unusual_value_http11_keeps_open() raises:
     assert_true(_compute_close_after(h10, String("HTTP/1.0")))
 
 
+# ── _wants_close (raw header-block scan, static / short-request paths) ───
+
+
+def _wants_close_of(raw: String) -> Bool:
+    var data = List[UInt8]()
+    for b in raw.as_bytes():
+        data.append(b)
+    return _wants_close(data, len(data))
+
+
+def test_wants_close_after_x_connection_header() raises:
+    """APP-02: ``X-Connection:`` must not hide a later real
+    ``Connection: close`` line."""
+    assert_true(
+        _wants_close_of(
+            "GET / HTTP/1.1\r\nHost: a\r\nX-Connection: x\r\nConnection:"
+            " close\r\n\r\n"
+        )
+    )
+    assert_true(
+        _wants_close_of(
+            "GET / HTTP/1.1\r\nHost: a\r\nX-Forwarded-Connection:"
+            " keep-alive\r\nConnection: Close\r\n\r\n"
+        )
+    )
+
+
+def test_wants_close_ignores_connection_inside_other_header_names() raises:
+    """APP-02: ``connection:`` is only a header when it starts a line, so
+    ``X-Connection: close`` does not close an HTTP/1.1 connection."""
+    assert_false(
+        _wants_close_of(
+            "GET / HTTP/1.1\r\nHost: a\r\nX-Connection: close\r\n\r\n"
+        )
+    )
+    assert_true(
+        _wants_close_of(
+            "GET / HTTP/1.0\r\nHost: a\r\nX-Connection: keep-alive\r\n\r\n"
+        )
+    )
+
+
+def test_wants_close_ors_every_connection_line() raises:
+    """APP-02: the verdicts of all ``Connection`` lines are combined, not
+    just the first one."""
+    assert_true(
+        _wants_close_of(
+            "GET / HTTP/1.1\r\nConnection: keep-alive\r\nConnection:"
+            " close\r\n\r\n"
+        )
+    )
+    assert_false(
+        _wants_close_of(
+            "GET / HTTP/1.1\r\nConnection: keep-alive\r\nHost: a\r\n\r\n"
+        )
+    )
+    assert_false(
+        _wants_close_of(
+            "GET / HTTP/1.0\r\nHost: a\r\nConnection: keep-alive\r\n\r\n"
+        )
+    )
+    assert_true(_wants_close_of("GET / HTTP/1.0\r\nHost: a\r\n\r\n"))
+
+
 def main() raises:
     var suite = TestSuite()
+    suite.test[test_wants_close_after_x_connection_header]()
+    suite.test[test_wants_close_ignores_connection_inside_other_header_names]()
+    suite.test[test_wants_close_ors_every_connection_line]()
     suite.test[test_keepalive_exact_lowercase_matches]()
     suite.test[test_keepalive_uppercase_does_not_match]()
     suite.test[test_keepalive_wrong_length_does_not_match]()
