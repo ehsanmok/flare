@@ -93,8 +93,8 @@ import Flare.L3_Protocol.H1Ws
 -- WebSocket opening handshake
 #print axioms Flare.L3.Ws.Handshake.keyOk_iff
 #print axioms Flare.L3.Ws.Handshake.genKey_valid
-#print axioms Flare.L3.Ws.Handshake.clientFixed_ok
-#print axioms Flare.L3.Ws.Handshake.clientFixed_accepts
+#print axioms Flare.L3.Ws.Handshake.clientAccepts_ok
+#print axioms Flare.L3.Ws.Handshake.clientAccepts_le_old
 #print axioms Flare.L3.Ws.Handshake.srvFixed_ok
 #print axioms Flare.L3.Ws.Handshake.reactor_upgrade_v13
 #print axioms Flare.L3.Ws.Handshake.reactorFixed_ok

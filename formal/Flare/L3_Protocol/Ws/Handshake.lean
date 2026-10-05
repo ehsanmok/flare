@@ -13,11 +13,11 @@ they compare anything; names are compared after `lowerB`.
 
 * **Key.** `genKey_valid`: the client's key (base64 of the 16-byte nonce)
   is a valid `Sec-WebSocket-Key` (`KeyOK`: decodes to 16 bytes).
-* **Client** (`WsClient._connect_impl`). `clientAccepts` checks only the
+* **Client** (`WsClient._connect_impl`). `clientAcceptsOld` checked only the
   `HTTP/1.1 101` prefix and `Sec-WebSocket-Accept`. `ClientOK` is the
   RFC 6455 §4.1 list (Upgrade `websocket`, Connection token `upgrade`, the
   accept value, no unrequested subprotocol or extension). Finding WS-04;
-  `clientFixed_ok` proves the fix decides exactly `ClientOK`.
+  the shipped `clientAccepts` decides exactly `ClientOK`: `clientAccepts_ok`.
 * **Standalone server** (`_parse_ws_upgrade_bytes`). `srvShipped` skips the
   request line, tests Connection by substring, and checks neither key format
   nor version. `ServerOK` is RFC 6455 §4.2.1 plus §11.3.1/§11.3.5 (the key
@@ -133,9 +133,10 @@ def hasTok (v tok : Bytes) : Bool := ((splitComma v).map fun t => lowerB (pyStri
 
 /-! ## Client -/
 
-/-- The status-line and field checks of the 101 (both branches).
+/-- The status-line and field checks of the 101 (both branches) before the
+WS-04 fix.
 mirrors flare/ws/client.mojo:562-603 (TLS) and 609-646 (TCP) @59bda50 -/
-def clientAccepts (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
+def clientAcceptsOld (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
   STATUS101.isPrefixOf status && (lastVal fs N_ACCEPT).getD [] == acceptOf sha1 key
 
 /-- RFC 6455 §4.1 (client requirements on the server's handshake), for a
@@ -147,22 +148,25 @@ def ClientOK (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Prop :=
   lastVal fs N_ACCEPT = some (acceptOf sha1 key) ∧
   vals fs N_PROTOCOL = [] ∧ vals fs N_EXT = []
 
-def clientFixed (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
+/-- The shipped client check (`_UpgradeResponse.verify` after the status-line
+check, both branches): the whole RFC 6455 §4.1 list.
+mirrors flare/ws/client.mojo `_connect_impl` (fixed, WS-04) -/
+def clientAccepts (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
   STATUS101.isPrefixOf status &&
   (vals fs UPGRADE).any (fun v => lowerB v == WEBSOCKET) &&
   (vals fs N_CONNECTION).any (fun v => hasTok v UPGRADE) &&
   lastVal fs N_ACCEPT == some (acceptOf sha1 key) &&
   (vals fs N_PROTOCOL).isEmpty && (vals fs N_EXT).isEmpty
 
-theorem clientFixed_ok (sha1 : Sha1) (key status : Bytes) (fs : Fields) :
-    clientFixed sha1 key status fs = true ↔ ClientOK sha1 key status fs := by
-  simp only [clientFixed, ClientOK, Bool.and_eq_true, beq_iff_eq, List.isEmpty_iff, and_assoc]
+theorem clientAccepts_ok (sha1 : Sha1) (key status : Bytes) (fs : Fields) :
+    clientAccepts sha1 key status fs = true ↔ ClientOK sha1 key status fs := by
+  simp only [clientAccepts, ClientOK, Bool.and_eq_true, beq_iff_eq, List.isEmpty_iff, and_assoc]
 
-/-- The fix only adds conjuncts. -/
-theorem clientFixed_accepts {sha1 : Sha1} {key status : Bytes} {fs : Fields}
-    (h : clientFixed sha1 key status fs = true) : clientAccepts sha1 key status fs = true := by
-  obtain ⟨h1, -, -, h4, -⟩ := (clientFixed_ok sha1 key status fs).1 h
-  simp [clientAccepts, h1, h4]
+/-- The shipped check only adds conjuncts to the old one. -/
+theorem clientAccepts_le_old {sha1 : Sha1} {key status : Bytes} {fs : Fields}
+    (h : clientAccepts sha1 key status fs = true) : clientAcceptsOld sha1 key status fs = true := by
+  obtain ⟨h1, -, -, h4, -⟩ := (clientAccepts_ok sha1 key status fs).1 h
+  simp [clientAcceptsOld, h1, h4]
 
 /-! ## Server -/
 
@@ -303,7 +307,7 @@ theorem vals_nil (k : Bytes) : vals [] k = [] := rfl
 theorem handshake_complete (sha1 : Sha1) (host target key : Bytes) (hk : KeyOK key) :
     srvFixed (clientRequest host target key) = some key ∧
     reactorFixed (clientRequest host target key) = .upgrade key ∧
-    clientFixed sha1 key SWITCHING (srvResponse sha1 key) = true := by
+    clientAccepts sha1 key SWITCHING (srvResponse sha1 key) = true := by
   have hko : keyOk key = true := (keyOk_iff key).2 hk
   have hne : key ≠ [] := by
     intro h; subst h; obtain ⟨n, hn, hl⟩ := hk
@@ -319,6 +323,6 @@ theorem handshake_complete (sha1 : Sha1) (host target key : Bytes) (hk : KeyOK k
   refine ⟨?_, ?_, ?_⟩
   · simp only [srvFixed, hv, hq, if_true]
   · simp only [reactorFixed, hmm, hv, hq, if_true]; rfl
-  · simp (config := { decide := true }) [clientFixed, srvResponse, vals_cons, vals_nil, lastVal]
+  · simp (config := { decide := true }) [clientAccepts, srvResponse, vals_cons, vals_nil, lastVal]
 
 end Flare.L3.Ws.Handshake

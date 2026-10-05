@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61714 lines) |
+| Lean files | 298 (61724 lines) |
 | Theorems | 3246 |
 | Headline theorems in the axiom audit | 1045 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 59 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 60 of 138 |
 
 Six findings are rated high:
 
@@ -1106,7 +1106,7 @@ File: `H1/ChunkedEncode.lean`.
 File: `Ws/Handshake.lean`.
 
 **Model.** SHA-1 is a black box `Sha1 := Bytes → Bytes`; every theorem holds for every such function. `acceptOf sha1 key = encodeStd (sha1 (key ++ GUID))` mirrors `_compute_accept` and `_compute_accept_srv`, with base64 from `L1.Base64`. `genKey` mirrors `_generate_ws_key`. Fields are the stripped `(name, value)` pairs that each handshake loop builds; `lastVal` is the loops' "last wins", `firstVal` is `HeaderMap.get`.
-- `clientAccepts` mirrors both branches of `_connect_impl` (`client.mojo:562-603`, `609-646`); `ClientOK` is the RFC 6455 §4.1 list for a request that offered no subprotocol or extension (flare's request offers none, `client.mojo:536-550`).
+- `clientAcceptsOld` mirrors both branches of `_connect_impl` before the WS-04 fix and `clientAccepts` the shipped check (`_UpgradeResponse.verify`) (`client.mojo:562-603`, `609-646`); `ClientOK` is the RFC 6455 §4.1 list for a request that offered no subprotocol or extension (flare's request offers none, `client.mojo:536-550`).
 - `srvShipped` mirrors `_parse_ws_upgrade_bytes`/`_read_upgrade_request` (`server.mojo:188-321`); `ServerOK` is RFC 6455 §4.2.1 plus §11.3.1/§11.3.5 (key and version once).
 - `reactor` mirrors `_is_ws_version_mismatch` (426), then `_handle_ws_upgrade` (`conn_handle.mojo:143-152`, `835-860`, `1512-1523`).
 
@@ -1114,7 +1114,7 @@ File: `Ws/Handshake.lean`.
 |---|---|---|
 | `genKey_valid` | The client's key, base64 of 16 nonce bytes, decodes to 16 bytes (`KeyOK`). | proved |
 | `keyOk_iff` | The Boolean key check decides `KeyOK`. | proved |
-| `clientFixed_ok`, `clientFixed_accepts` | The fixed client check decides exactly `ClientOK`, and only adds conjuncts to the shipped one. | proved (WS-04 fix) |
+| `clientAccepts_ok`, `clientAccepts_le_old` | The shipped client check decides exactly `ClientOK`, and only adds conjuncts to the old one. | proved (WS-04 fix) |
 | `srvFixed_ok` | A request the fixed standalone server accepts satisfies `ServerOK`. | proved (WS-05 fix) |
 | `reactor_upgrade_v13` | The shipped reactor only upgrades `Sec-WebSocket-Version: 13`. | proved |
 | `reactorFixed_ok` | A request the fixed reactor upgrades satisfies `ServerOK`. | proved (WS-07 fix) |
@@ -2788,7 +2788,7 @@ advances the wheel to `now` at the top of every iteration
 | `ClientResponse.dlCloseOld`, `dlClose`, `bufferedClose` | `_client/download.mojo:215-220`, `_client/parse.mojo:665-683` | `bufferedClose_safe`, `Bugs.H1_11.*` | counterexample (H1-11) / proved (buffered) |
 | `ChunkedEncode.hexDigit`, `hexLower`, `encChunk`, `encChunks`, `trailerLine`, `encTrailers`, `encodeBody`, `encodeUpload` | `streaming_serialize.mojo:116-140`, `162-166`, `258-300`; `client.mojo:121-135`, `1420-1445`, `1470-1495` | `decL_roundtrip`, `decodeBody_roundtrip`, `scan_roundtrip`, `cDec_roundtrip`, `upload_roundtrip` | proved |
 | `Handshake.acceptOf`, `genKey` | `ws/client.mojo:118-148`, `ws/server.mojo:100-111` | `genKey_valid`, `handshake_complete` | proved |
-| `Handshake.clientAccepts`, `clientRequest` | `ws/client.mojo:536-550`, `562-603`, `609-646` | `clientFixed_ok`, `Bugs.WS_04.*` | counterexample (WS-04) / fix proved |
+| `Handshake.clientAccepts` (`clientAcceptsOld`), `clientRequest` | `ws/client.mojo:536-550`, `562-603`, `609-646` | `clientAccepts_ok`, `Bugs.WS_04.*` | fix proved; `clientAcceptsOld` keeps the counterexample (WS-04) |
 | `Handshake.srvShipped`, `srvResponse` | `ws/server.mojo:188-340` | `srvFixed_ok`, `Bugs.WS_05.*` | counterexample (WS-05) / fix proved |
 | `Handshake.firstVal`, `versionMismatch`, `reactorQual`, `reactor` | `http/headers.mojo:172-184`, `_reactor/conn_handle.mojo:143-152`, `835-860`, `1512-1523` | `reactor_upgrade_v13`, `reactorFixed_ok`, `Bugs.WS_07.*` | proved (version) / counterexample (WS-07) / fix proved |
 | `Close.oldStep`, `Close.fixStep` | `ws/server.mojo:473-536`, `600-616` | `fixed_closeOK`, `Bugs.WS_06.*` | counterexample (WS-06) / fix proved |
@@ -3031,7 +3031,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | WS-01 | Low | resolved | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
 | WS-02 | Medium | resolved | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-03 | Low | resolved | `WsClient` accepts masked frames from the server | `Flare/Bugs/WS_03.lean` | `repro/WS-03_client_accepts_masked_server_frame.mojo` (any (loopback TCP in-process; no external network)) |
-| WS-04 | Low | open | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
+| WS-04 | Low | resolved | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
 | WS-05 | Low | open | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
 | WS-06 | Medium | resolved | `WsConnection` does not take part in the closing handshake | `Flare/Bugs/WS_06.lean` | `repro/WS-06_close_handshake_not_answered.mojo` (any) |
 | WS-07 | Low | open | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
@@ -3913,11 +3913,13 @@ Status: resolved. `WsClient._recv_one` raises `WsProtocolError` for a masked ser
 
 #### WS-04: `WsClient` accepts a 101 that is not a WebSocket handshake
 
+Status: resolved. Both branches of `_connect_impl` record `Upgrade`, `Connection`, `Sec-WebSocket-Protocol` and `Sec-WebSocket-Extensions` next to the accept value (`_UpgradeResponse`), and `verify` raises `WsHandshakeError` unless the whole RFC 6455 §4.1 list holds. The counterexample is about `clientAcceptsOld`; `clientAccepts` is the shipped check (`clientAccepts_ok`). Tests: `tests/ws/test_ws_client_handshake.mojo`.
+
 - **Severity:** Low. The accept value is still checked, so only a server that read the key and computed the accept can trigger it. The client then treats a peer that never agreed to WebSocket (no `Upgrade`/`Connection`), or that selected a subprotocol the client never offered, as a WebSocket connection.
 - **RFC:** RFC 6455 §4.1: the client MUST fail the connection if the 101 lacks `Upgrade: websocket` (case-insensitive), lacks a `Connection` token `upgrade`, has the wrong `Sec-WebSocket-Accept`, or names an extension or subprotocol that was not requested.
 - **What goes wrong:** both branches of `_connect_impl` (`client.mojo:562-603`, `609-646`) check the status prefix and the last `Sec-WebSocket-Accept`, and read no other field.
-- **Counterexample:** `Bugs.WS_04.counterexample` holds for every SHA-1: the 101 `[Sec-WebSocket-Accept: <right value>, Sec-WebSocket-Protocol: chat]` passes `clientAccepts` and violates `ClientOK`.
-- **Fix:** check the whole list. `Bugs.WS_04.fixed_ok` (= `clientFixed_ok`: the fix decides exactly `ClientOK`). `handshake_complete` shows flare's own server still passes.
+- **Counterexample:** `Bugs.WS_04.counterexample` holds for every SHA-1: the 101 `[Sec-WebSocket-Accept: <right value>, Sec-WebSocket-Protocol: chat]` passes `clientAcceptsOld` and violates `ClientOK`.
+- **Fix:** check the whole list. `Bugs.WS_04.fixed_ok` (= `clientAccepts_ok`: the shipped check decides exactly `ClientOK`). `handshake_complete` shows flare's own server still passes.
 - **Repro:** `formal/repro/WS-04_client_accepts_incomplete_101.mojo` (forked raw server; control: a complete 101 connects)
 - **Observed (3 runs):** `BUG REPRODUCED: WsClient accepted a 101 with no Upgrade or Connection field and an unrequested Sec-WebSocket-Protocol`
 - **Flip:** with the field checks added to both branches of `flare/ws/client.mojo`: `OK: incomplete 101 refused (raised: WsHandshakeError: 101 lacks Upgrade/Connection or names an unrequested protocol)`; the file was restored.

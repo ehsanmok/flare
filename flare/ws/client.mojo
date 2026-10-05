@@ -260,6 +260,87 @@ def _lower_local(s: String) -> String:
     return out^
 
 
+struct _UpgradeResponse(Movable):
+    """What the client needs from the server's ``101`` header fields.
+
+    RFC 6455 sec 4.1 makes the client fail the connection unless the
+    response has ``Upgrade: websocket``, a ``Connection`` field with the
+    ``upgrade`` token and the right ``Sec-WebSocket-Accept``, and names no
+    subprotocol or extension (flare's request offers none). Only the accept
+    value used to be read.
+    """
+
+    var accept: String
+    """The last ``Sec-WebSocket-Accept`` value (empty if none)."""
+    var upgrade_websocket: Bool
+    """Some ``Upgrade`` value is ``websocket`` (case-insensitive)."""
+    var connection_upgrade: Bool
+    """Some ``Connection`` value has the token ``upgrade``."""
+    var protocol_seen: Bool
+    """A ``Sec-WebSocket-Protocol`` field is present."""
+    var extensions_seen: Bool
+    """A ``Sec-WebSocket-Extensions`` field is present."""
+
+    def __init__(out self):
+        self.accept = String("")
+        self.upgrade_websocket = False
+        self.connection_upgrade = False
+        self.protocol_seen = False
+        self.extensions_seen = False
+
+    def observe(mut self, name: String, value: String):
+        """Record one header field (``name`` lower-cased, both stripped)."""
+        if name == "sec-websocket-accept":
+            self.accept = value
+        elif name == "upgrade":
+            if _lower_local(value) == "websocket":
+                self.upgrade_websocket = True
+        elif name == "connection":
+            for tok in value.split(","):
+                if _lower_local(String(String(tok).strip())) == "upgrade":
+                    self.connection_upgrade = True
+        elif name == "sec-websocket-protocol":
+            self.protocol_seen = True
+        elif name == "sec-websocket-extensions":
+            self.extensions_seen = True
+
+    def verify(self, expected_accept: String) raises:
+        """Raise ``WsHandshakeError`` unless the 101 completes the handshake.
+
+        Raises:
+            WsHandshakeError: On a missing or wrong ``Upgrade``,
+                ``Connection`` or ``Sec-WebSocket-Accept``, or on a
+                subprotocol or extension the request did not offer.
+        """
+        if not self.upgrade_websocket:
+            raise WsHandshakeError(
+                "101 response lacks 'Upgrade: websocket' (RFC 6455 sec 4.1)"
+            )
+        if not self.connection_upgrade:
+            raise WsHandshakeError(
+                "101 response lacks a 'Connection: Upgrade' token (RFC 6455"
+                " sec 4.1)"
+            )
+        if self.accept != expected_accept:
+            raise WsHandshakeError(
+                "Sec-WebSocket-Accept mismatch: got '"
+                + self.accept
+                + "', expected '"
+                + expected_accept
+                + "'"
+            )
+        if self.protocol_seen:
+            raise WsHandshakeError(
+                "101 response selects a subprotocol that was not requested"
+                " (RFC 6455 sec 4.1)"
+            )
+        if self.extensions_seen:
+            raise WsHandshakeError(
+                "101 response names an extension that was not requested"
+                " (RFC 6455 sec 4.1)"
+            )
+
+
 # ── Internal stream union for WebSocket I/O ───────────────────────────────────
 # Mojo doesn't have enum variants with payloads, so we use a tagged struct.
 
@@ -565,7 +646,7 @@ struct WsClient(Movable):
                     "Expected 101 Switching Protocols, got: " + status_line
                 )
 
-            var accept_header = String("")
+            var upgrade = _UpgradeResponse()
             while True:
                 var line = _read_line_tls(tls, scratch)
                 if line.byte_length() == 0:
@@ -586,18 +667,10 @@ struct WsClient(Movable):
                             )
                         ).strip()
                     )
-                    if hk == "sec-websocket-accept":
-                        accept_header = hv
+                    upgrade.observe(hk, hv)
 
-            # ── 4. Verify Sec-WebSocket-Accept ────────────────────────────────
-            if accept_header != expected_accept:
-                raise WsHandshakeError(
-                    "Sec-WebSocket-Accept mismatch: got '"
-                    + accept_header
-                    + "', expected '"
-                    + expected_accept
-                    + "'"
-                )
+            # ── 4. Verify the handshake (RFC 6455 sec 4.1) ────────────────────
+            upgrade.verify(expected_accept)
 
             var ws_stream = _WsStream(tls^)
             return WsClient(ws_stream^, key)
@@ -612,7 +685,7 @@ struct WsClient(Movable):
                     "Expected 101 Switching Protocols, got: " + status_line
                 )
 
-            var accept_header = String("")
+            var upgrade = _UpgradeResponse()
             while True:
                 var line = _read_line_tcp(tcp, scratch)
                 if line.byte_length() == 0:
@@ -633,17 +706,9 @@ struct WsClient(Movable):
                             )
                         ).strip()
                     )
-                    if hk == "sec-websocket-accept":
-                        accept_header = hv
+                    upgrade.observe(hk, hv)
 
-            if accept_header != expected_accept:
-                raise WsHandshakeError(
-                    "Sec-WebSocket-Accept mismatch: got '"
-                    + accept_header
-                    + "', expected '"
-                    + expected_accept
-                    + "'"
-                )
+            upgrade.verify(expected_accept)
 
             var ws_stream = _WsStream(tcp^)
             return WsClient(ws_stream^, key)

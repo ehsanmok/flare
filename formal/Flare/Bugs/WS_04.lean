@@ -12,8 +12,14 @@ import Flare.L3_Protocol.Ws.Handshake
 * What goes wrong: a 101 with only the right accept and
   `Sec-WebSocket-Protocol: chat` is taken as a WebSocket connection, for
   every SHA-1.
-* Fix (`clientFixed`): check the whole §4.1 list. `clientFixed_ok` proves it
-  decides exactly `ClientOK`.
+* Fix (`clientAccepts`, the shipped check): check the whole §4.1 list.
+  `clientAccepts_ok` proves it decides exactly `ClientOK`. The counterexample
+  is about `clientAcceptsOld`, the pre-fix check.
+
+Status: resolved. Both branches of `_connect_impl` record `Upgrade`,
+`Connection`, `Sec-WebSocket-Protocol` and `Sec-WebSocket-Extensions` as well
+as the accept value, and `_UpgradeResponse.verify` refuses the 101 unless the
+whole list holds.
 -/
 namespace Flare.Bugs.WS_04
 open Flare Flare.L3.Ws.Handshake
@@ -28,18 +34,18 @@ def CHAT : Bytes := [99, 104, 97, 116]
 
 def resp (sha1 : Sha1) : Fields := [(ACCEPT_CAP, acceptOf sha1 key), (PROTOCOL_CAP, CHAT)]
 
-theorem shipped_accepts (sha1 : Sha1) : clientAccepts sha1 key SWITCHING (resp sha1) = true := by
-  simp (config := { decide := true }) [clientAccepts, resp, lastVal, vals_cons, vals_nil]
+theorem old_accepts (sha1 : Sha1) : clientAcceptsOld sha1 key SWITCHING (resp sha1) = true := by
+  simp (config := { decide := true }) [clientAcceptsOld, resp, lastVal, vals_cons, vals_nil]
 
-theorem fixed_refuses (sha1 : Sha1) : clientFixed sha1 key SWITCHING (resp sha1) = false := by
-  simp (config := { decide := true }) [clientFixed, resp, vals_cons, vals_nil]
+theorem fixed_refuses (sha1 : Sha1) : clientAccepts sha1 key SWITCHING (resp sha1) = false := by
+  simp (config := { decide := true }) [clientAccepts, resp, vals_cons, vals_nil]
 
 theorem counterexample (sha1 : Sha1) :
-    clientAccepts sha1 key SWITCHING (resp sha1) = true ∧ ¬ ClientOK sha1 key SWITCHING (resp sha1) :=
-  ⟨shipped_accepts sha1, fun h => by
-    rw [← clientFixed_ok, fixed_refuses] at h; cases h⟩
+    clientAcceptsOld sha1 key SWITCHING (resp sha1) = true ∧ ¬ ClientOK sha1 key SWITCHING (resp sha1) :=
+  ⟨old_accepts sha1, fun h => by
+    rw [← clientAccepts_ok, fixed_refuses] at h; cases h⟩
 
 theorem fixed_ok (sha1 : Sha1) (k st : Bytes) (fs : Fields) :
-    clientFixed sha1 k st fs = true ↔ ClientOK sha1 k st fs := clientFixed_ok sha1 k st fs
+    clientAccepts sha1 k st fs = true ↔ ClientOK sha1 k st fs := clientAccepts_ok sha1 k st fs
 
 end Flare.Bugs.WS_04

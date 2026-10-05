@@ -896,6 +896,12 @@ of what you might reasonably assume from the surrounding feature.
 - `WsClient.recv()` and `recv_message()` now raise `WsProtocolError` when
   the server sends a masked frame (RFC 6455 sec 5.1: a client MUST close
   the connection on one). They used to unmask it and return the payload.
+- `WsClient.connect` now checks the whole `101` response (RFC 6455 sec
+  4.1), not only `Sec-WebSocket-Accept`: it raises `WsHandshakeError`
+  unless the response has `Upgrade: websocket` and a `Connection` field
+  with the `upgrade` token, and it refuses one that names a
+  `Sec-WebSocket-Protocol` or `Sec-WebSocket-Extensions` (the client
+  offers neither). A server that skipped those fields used to connect.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: WS-04 fixed on fix/formal-findings
 """WS-04: WsClient accepts a 101 response that lacks Upgrade/Connection and
 selects a subprotocol it never offered.
 
@@ -15,7 +16,7 @@ the connection if the response lacks "Upgrade: websocket", lacks a
 Connection field with the "upgrade" token, has a Sec-WebSocket-Accept
 other than the expected one, or names an extension or subprotocol the
 client did not request (flare requests none).
-Actual: a 101 carrying only Sec-WebSocket-Accept plus
+Before the fix: Actual: a 101 carrying only Sec-WebSocket-Accept plus
 "Sec-WebSocket-Protocol: chat" is accepted and WsClient.connect returns.
 
 Minimal fix: in both branches of _connect_impl, also record Upgrade,
