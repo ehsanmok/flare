@@ -365,6 +365,8 @@ Assumptions: the POSIX error cases as listed in IEEE 1003.1 for `pthread_join` /
   - The repro calibrates that property first, with three same-size frees, and raises `setup:` instead of printing OK if it fails. It therefore cannot print OK while the cell is freed.
   - Two pitfalls make an earlier version of the check report "not reissued" falsely. The optimizer folds "fresh allocation == older address" to false, so the address goes through an atomic cell. A scratch cell in the same 8-byte size class consumes the freed cell, so the scratch is 64 bytes.
 
+Status: resolved. `drain` sets `self._stopping_addr = 0` in the stuck-worker branch, so the stop flag is leaked with the detached worker's other cells. Test: `tests/runtime/test_scheduler.mojo::test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker`; the repro now prints `OK:`. The shipped drain is `Flare.L5.Scheduler.cfgShipped` (`fixStop` only; the CONC-04 listener fix lands separately); `Bugs.CONC_03.implFixed_safe` is stated about it.
+
 ### CONC-04: `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached
 
 - **Severity:** Medium. Every non-stuck worker's `SO_REUSEPORT` listener stays open and bound for the process lifetime. If the process binds the port again (a restart in the same process), the kernel keeps hashing a share of new connections to listeners nobody accepts on. It is a resource leak, not memory corruption.

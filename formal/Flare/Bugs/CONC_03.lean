@@ -4,7 +4,7 @@ import Flare.L5_Concurrency.Scheduler
 # CONC-03: `Scheduler.drain` frees the stop flag under a detached worker
 
 `drain(timeout_ms > 0)` detaches a worker that has not returned by the
-deadline (flare/runtime/scheduler.mojo:846-855 @59bda50). The stuck-worker
+deadline (flare/runtime/scheduler.mojo:846-855 @59bda50, pre-fix). The stuck-worker
 carve-out (:887-897) keeps that worker's context and stats cell allocated,
 but then `_free_resources` (:900, :741-744) frees the shared stop-flag cell.
 The detached worker re-reads that cell on every serve-loop iteration
@@ -19,6 +19,11 @@ promises for the detached worker.
 Fix: in the `if len(stuck) > 0:` block also leak the stop flag
 (`self._stopping_addr = 0` before `_free_resources`), i.e. `Cfg.fixStop`.
 `implFixed_safe` proves it suffices for any number of workers.
+
+Status: resolved. The shipped drain is `cfgShipped` (= `cfgFixStop`); the
+counterexamples below are about the explicitly pre-fix `cfgImpl`.
+Regression test: tests/runtime/test_scheduler.mojo::
+test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker.
 -/
 namespace Flare.Bugs.CONC_03
 open Flare.L5.Scheduler
@@ -69,20 +74,23 @@ theorem drain_uaf : ∃ s, (lts cfgImpl 1).Reachable s ∧ ¬ MemSafe s := by
     simp only [Option.map_some, Option.some.injEq] at hr
     exact ⟨s, reachable_of_exec _ _ _ _ h, fun hm => by unfold MemSafe at hm; rw [hr] at hm; cases hm⟩
 
-/-- The CONC-03 fix alone. -/
+/-- The CONC-03 fix alone: this is the shipped drain. -/
 def cfgFixStop : Cfg := { cfgImpl with fixStop := true }
 
-/-- The fix suffices: for any number of workers and every interleaving, no
-freed cell is dereferenced and nothing a live worker can reference is
-freed; a detached worker reads `True` from the still-allocated flag. -/
+theorem shipped_eq_fixStop : cfgShipped = cfgFixStop := rfl
+
+/-- **Fix meets spec**: for the shipped drain, any number of workers and
+every interleaving, no freed cell is dereferenced and nothing a live worker
+can reference is freed; a detached worker reads `True` from the
+still-allocated flag. -/
 theorem implFixed_safe (n : Nat) :
-    ∀ s, (lts cfgFixStop n).Reachable s → MemSafe s ∧ LiveRefsAllocated s :=
-  safe_of_cfg cfgFixStop (Or.inl rfl) n
+    ∀ s, (lts cfgShipped n).Reachable s → MemSafe s ∧ LiveRefsAllocated s :=
+  safe_of_cfg cfgShipped (Or.inl rfl) n
 
 theorem implFixed_detached_sees_stop (n : Nat) :
-    ∀ s, (lts cfgFixStop n).Reachable s → s.m = .fin → ∀ w ∈ s.ws, w.pc ≠ .term →
+    ∀ s, (lts cfgShipped n).Reachable s → s.m = .fin → ∀ w ∈ s.ws, w.pc ≠ .term →
       s.stop = true ∧ s.stopF = false :=
-  detached_sees_stop cfgFixStop (Or.inl rfl) n
+  detached_sees_stop cfgShipped (Or.inl rfl) n
 
 /-- Bounded (3 workers, exhaustive, `native_decide`): the fully fixed drain
 meets the specification; the explorer finds the violation in the code at

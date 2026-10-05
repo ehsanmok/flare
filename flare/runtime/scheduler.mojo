@@ -799,8 +799,8 @@ struct Scheduler[F: Frontend](Movable):
         ``timeout_ms`` bounds the wait. A worker whose thread has not
         returned by then (a handler that will not finish) is detached
         and reported with ``drained == 0``; its context, stats cell and
-        listeners are left allocated, since the thread may still be
-        using them. ``timeout_ms <= 0`` is a hard stop: no drain window,
+        listeners, and the shared stop flag, are left allocated, since the
+        thread may still be using them. ``timeout_ms <= 0`` is a hard stop: no drain window,
         and every worker is joined, as ``shutdown()`` does.
 
         Args:
@@ -895,6 +895,12 @@ struct Scheduler[F: Frontend](Movable):
                 if idx < len(self._stats_addrs):
                     _ = self._stats_addrs.pop(idx)
             self._per_worker_listener_addrs.clear()
+            # The detached worker re-reads the shared stop flag on every
+            # serve-loop iteration, so the flag stays allocated too: it
+            # is leaked like the stuck worker's context and stats cell.
+            # Freeing it handed the cell to the next allocation, which
+            # could store False and keep the worker serving forever.
+            self._stopping_addr = 0
 
         # Step 4: free everything (stats cells are read above first).
         self._free_resources()

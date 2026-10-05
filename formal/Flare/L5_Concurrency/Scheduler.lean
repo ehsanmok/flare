@@ -150,11 +150,13 @@ def wStep (stop stopF : Bool) (w : WS) : Option (WS × Bool) :=
   | .ret => some ({ w with pc := .term }, false)
   | .term => none
 
-/-- The free policy after the sweep. At 59bda50 (`fixStop = fixLis =
-false`): the stuck workers' ctx and stats entries are popped (:891-896),
-the whole per-worker listener list is cleared as soon as any worker is
-stuck (:897), and `_free_resources` frees what is left, including the stop
-flag (:741-744). mirrors flare/runtime/scheduler.mojo:890-900,703-744 @59bda50 -/
+/-- The free policy after the sweep. Pre-fix (`fixStop = fixLis = false`):
+the stuck workers' ctx and stats entries are popped, the whole per-worker
+listener list is cleared as soon as any worker is stuck, and
+`_free_resources` frees what is left, including the stop flag. Shipped
+(`fixStop`, CONC-03): the stop flag is leaked (`self._stopping_addr = 0`)
+when a worker was detached.
+mirrors flare/runtime/scheduler.mojo:890-912,703-744 (fixed, CONC-03) -/
 def freeAll (c : Cfg) (s : St) : St :=
   let anyDet := s.ws.any (·.detached)
   { s with
@@ -201,10 +203,14 @@ def step (c : Cfg) (s : St) : Lbl → Option St
 
 def lts (c : Cfg) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (step c)
 
-/-- The code at 59bda50: `drain(timeout_ms > 0)`. -/
+/-- The pre-fix code (59bda50): `drain(timeout_ms > 0)`, before CONC-03 and
+CONC-04 were fixed. Kept so the counterexamples stay checkable. -/
 def cfgImpl : Cfg := ⟨false, false, false⟩
 /-- The code at 59bda50: `shutdown()` / `drain(timeout_ms <= 0)`. -/
 def cfgShutdown : Cfg := ⟨true, false, false⟩
+/-- `drain(timeout_ms > 0)` as shipped: the CONC-03 fix is in (the stop flag
+is leaked when a worker is detached); CONC-04 is not yet. -/
+def cfgShipped : Cfg := ⟨false, true, false⟩
 /-- `drain(timeout_ms > 0)` with both fixes. -/
 def cfgFixed : Cfg := ⟨false, true, true⟩
 

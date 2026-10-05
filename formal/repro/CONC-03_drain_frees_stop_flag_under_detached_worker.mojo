@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: CONC-03 fixed on fix/formal-findings
 """CONC-03: Scheduler.drain frees the stop flag while a detached worker
 still reads it (use-after-free).
 
@@ -16,7 +17,7 @@ Expected: drain(timeout_ms) detaches a worker stuck past the deadline and,
 as its docstring says, leaves everything that worker may still use
 allocated. When the worker's handler finally returns, its serve loop
 reads the stop flag, sees True, and the thread exits.
-Actual: the carve-out keeps the stuck worker's ctx, stats cell and
+Before the fix: the carve-out keeps the stuck worker's ctx, stats cell and
 listeners, but _free_resources still frees the shared stop-flag cell.
 The detached worker keeps reading that freed byte. The allocator hands
 the same cell to a later 1-byte allocation, which stores False, so the

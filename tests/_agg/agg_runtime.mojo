@@ -433,6 +433,9 @@ from test_scheduler import (
 from test_scheduler import (
     test_start_raises_when_a_worker_listener_cannot_bind as test_scheduler__test_start_raises_when_a_worker_listener_cannot_bind,
 )
+from test_scheduler import (
+    test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker as test_scheduler__test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker,
+)
 from test_syscall_ffi import (
     test_epoll_constants_distinct_bits as test_syscall_ffi__test_epoll_constants_distinct_bits,
 )
@@ -900,6 +903,9 @@ def main() raises:
     suite.test[test_scheduler__test_drain_returns_at_its_deadline]()
     suite.test[
         test_scheduler__test_start_raises_when_a_worker_listener_cannot_bind
+    ]()
+    suite.test[
+        test_scheduler__test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker
     ]()
     # tests/runtime/test_syscall_ffi.mojo
     suite.test[test_syscall_ffi__test_epoll_constants_distinct_bits]()

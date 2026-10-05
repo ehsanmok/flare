@@ -21,6 +21,8 @@ stop flag. That keeps the runtime tests free of any
 made this possible.
 """
 
+from std.atomic import Atomic, Ordering
+from std.memory import Layout, Pointer, alloc
 from std.testing import assert_true, assert_equal, TestSuite
 
 from flare.net import SocketAddr
@@ -278,6 +280,118 @@ def test_start_raises_when_a_worker_listener_cannot_bind() raises:
     lim[unsafe_offset=0] = soft
     _ = external_call["setrlimit", c_int](res, lim)
     assert_true(raised, "start ran with workers missing their listeners")
+
+
+# ── CONC-03: drain must not free the stop flag under a detached worker ──────
+
+
+def _ld(addr: Int) -> Int64:
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    return Atomic[Int64].load[ordering=Ordering.ACQUIRE](
+        p.unsafe_bitcast[Scalar[DType.int64]]()
+    )
+
+
+def _st(addr: Int, v: Int64):
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    Atomic[Int64].store[ordering=Ordering.RELEASE](
+        p.unsafe_bitcast[Scalar[DType.int64]](), v
+    )
+
+
+@fieldwise_init
+struct _GateFrontend(Copyable, Frontend):
+    """One worker that is "stuck in a handler" until the gate opens, then
+    returns to an ordinary serve loop that polls the stop flag."""
+
+    var cells: Int  # [0] gate, [1] stop-flag addr seen, [2] outcome
+
+    def requires_per_worker_listener(self) -> Bool:
+        return False
+
+    def run_worker(
+        mut self,
+        listener_fd: Int,
+        mut stopping: Bool,
+        stats_addr: Int,
+        extra_fds: List[Int] = List[Int](),
+    ):
+        var stop_addr = Int(Pointer[Bool, _](to=stopping))
+        _st(self.cells + 8, Int64(stop_addr))
+        while _ld(self.cells) == 0:  # the handler that overran drain
+            _ = libc_nanosleep_ms(1)
+        var spins = 0
+        while not load_stop_flag(stop_addr):  # the serve loop
+            _ = libc_nanosleep_ms(1)
+            spins += 1
+            if spins > 2000:
+                _st(self.cells + 16, 2)  # never saw the stop
+                return
+        _st(self.cells + 16, 1)  # saw the stop, exits
+
+
+def _reissued_within(addr: Int, n: Int) -> Bool:
+    """Allocate up to ``n`` stop-flag-sized cells (kept, never freed) and
+    report whether one of them is the cell at ``addr``.
+
+    The address goes through an atomic cell first: the optimizer may
+    otherwise fold "a fresh allocation equals an older address" to False.
+    """
+    # 64 bytes: not the stop flag's size class, so it cannot take the cell.
+    var scratch = Int(alloc(Layout[Int64](count=8)).unsafe_leak())
+    for _ in range(n):
+        var q = alloc(Layout[Bool](count=1)).unsafe_leak()
+        q.unsafe_write(False)
+        _st(scratch, Int64(Int(q)))
+        if Int(_ld(scratch)) == addr:
+            return True
+    return False
+
+
+def test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker() raises:
+    """``drain`` detached a stuck worker, left its context and stats cell
+    allocated, and still freed the shared stop flag, which the worker
+    re-reads on every serve-loop iteration (use after free).
+
+    The verdict is "the flag cell was freed", observed as the cell being
+    handed out again by one of the next allocations on this thread (a
+    leaked cell can never come back); the calibration below raises instead
+    of passing if the allocator would not reissue a freed cell.
+    """
+    var c0 = alloc(Layout[Bool](count=1)).unsafe_leak()
+    var c1 = alloc(Layout[Bool](count=1)).unsafe_leak()
+    var c2 = alloc(Layout[Bool](count=1)).unsafe_leak()
+    var cal = Int(c0)
+    c0.unsafe_free()
+    c1.unsafe_free()
+    c2.unsafe_free()
+    assert_true(
+        _reissued_within(cal, 64),
+        "setup: the allocator does not reissue a freed cell",
+    )
+    var cp = alloc(Layout[Int64](count=3)).unsafe_leak()
+    var cells = Int(cp)
+    _st(cells, 0)
+    _st(cells + 8, 0)
+    _st(cells + 16, 0)
+    var s = Scheduler[_GateFrontend].start(
+        addr=SocketAddr.localhost(0),
+        frontend=_GateFrontend(cells),
+        num_workers=1,
+        pin_cores=False,
+    )
+    while _ld(cells + 8) == 0:
+        _ = libc_nanosleep_ms(1)
+    var stop_addr = Int(_ld(cells + 8))
+    var reports = s.drain(timeout_ms=50)  # the worker is still in its handler
+    assert_equal(reports[0].drained, 0, "setup: the worker was not detached")
+    var aliased = _reissued_within(stop_addr, 64)
+    _st(cells, 1)  # the handler returns
+    while _ld(cells + 16) == 0:
+        _ = libc_nanosleep_ms(1)
+    var outcome = _ld(cells + 16)
+    assert_true(not aliased, "drain freed the stop flag under a live worker")
+    assert_equal(Int(outcome), 1, "the detached worker never saw the stop")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60821 lines) |
-| Theorems | 3211 |
+| Lean files | 298 (60835 lines) |
+| Theorems | 3212 |
 | Headline theorems in the axiom audit | 1020 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 4 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 5 of 138 |
 
 Six findings are rated high:
 
@@ -3099,7 +3099,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-49 | Medium | open | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
 | CONC-01 | Low | open | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
 | CONC-02 | Low | open | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
-| CONC-03 | High | open | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
+| CONC-03 | High | resolved | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
 | CONC-04 | Medium | open | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
 | CONC-05 | Medium | open | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
 | CONC-06 | Medium | open | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
@@ -5275,6 +5275,8 @@ exit 0.
   - Mojo's allocator is the TCMalloc embedded in `libKGENCompilerRTShared` (not the system malloc, so `malloc_size` cannot be used). It hands a freed small cell back within the few same-class frees `drain` performs after it.
   - The repro calibrates that property first, with three same-size frees, and raises `setup:` instead of printing OK if it fails. It therefore cannot print OK while the cell is freed.
   - Two pitfalls make an earlier version of the check report "not reissued" falsely. The optimizer folds "fresh allocation == older address" to false, so the address goes through an atomic cell. A scratch cell in the same 8-byte size class consumes the freed cell, so the scratch is 64 bytes.
+
+Status: resolved. `drain` sets `self._stopping_addr = 0` in the stuck-worker branch, so the stop flag is leaked with the detached worker's other cells. Test: `tests/runtime/test_scheduler.mojo::test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker`; the repro now prints `OK:`. The shipped drain is `Flare.L5.Scheduler.cfgShipped` (`fixStop` only; the CONC-04 listener fix lands separately); `Bugs.CONC_03.implFixed_safe` is stated about it.
 
 #### CONC-04: `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached
 

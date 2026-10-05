@@ -100,7 +100,9 @@ covers this path.
 
 - If `Scheduler.drain` times out on a stuck worker, it detaches it.
   Under AsyncRT that task keeps its pool thread, and process exit
-  waits for it.
+  waits for it. `drain` leaves everything the detached worker may still
+  touch (its context, stats cell, listeners and the shared stop flag)
+  allocated for the life of the process; the rest is freed.
 - A handler that blocks inside `block_in_pool` work on AsyncRT holds
   a pool thread for the duration. A reactor thread that donates while
   joining can also run someone else's queued `block_in_pool` work
