@@ -39,9 +39,12 @@ and the local actions that change stream or window state
   RFC size of the whole list in `header_list_bytes`, where Mojo leaves the
   prefix sum at which it stopped; the stream is closed either way.
 
-`Fix` selects the minimal fix for each issue; `Fix.none` is the shipped
-code. Every fix is a guarded extra branch, so `step Fix.none` is exactly
-the transliteration.
+`Fix` selects the fix for each issue. `Fix.none` is the code as it was
+before any fix (flare @59bda50), kept so every counterexample stays
+checkable; every fix is a guarded extra branch, so `step Fix.none` is
+exactly that transliteration. `Fix.shipped` is the set of fixes that have
+landed in `flare/http2`: it grows by one flag per resolved finding, and
+`step Fix.shipped` mirrors the Mojo as it stands.
 -/
 namespace Flare.L3.H2.Conn
 open Flare.L3.H2.Names
@@ -201,7 +204,13 @@ structure Fix where
   h2_19 : Bool := false
   h2_20 : Bool := false
 
+/-- The code before any fix (flare @59bda50). -/
 def Fix.none : Fix := {}
+
+/-- The fixes that have landed in `flare/http2` (one flag per resolved
+finding): H2-01. -/
+def Fix.shipped : Fix := { h2_01 := true }
+
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
     h2_06 := true, h2_07 := true, h2_08 := true, h2_09 := true, h2_11 := true, h2_12 := true,
@@ -757,7 +766,9 @@ inductive Ev
 
 /-- The H2-01 fix layered on `handle`: account every DATA payload against
 `recvW`, refuse a frame that overruns it, and add back every
-connection-level WINDOW_UPDATE that is emitted. -/
+connection-level WINDOW_UPDATE that is emitted.
+mirrors flare/http2/state.mojo:1356-1366 and `_conn_window_update`
+(639-648) (fixed, H2-01) -/
 def handleW (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if fx.h2_01 && reachesData c f && decide ((f.plen : Int) > c.recvW) then .ok (connErr c eFLOW)
   else match handle fx dec c f with
@@ -804,7 +815,7 @@ def driveClient (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
     .ok (c, if f.plen ≥ 4 then [.rst (f.word % 2147483648) ePROTOCOL] else [])
   else prefaceGate fx dec c f
 
-/-- mirrors flare/http2/state.mojo:619-633 @59bda50 -/
+/-- mirrors flare/http2/state.mojo:623-637 (fixed, H2-01) -/
 def release (fx : Fix) (c : Conn) (n : Nat) : Conn × List Out :=
   let c := { c with buffered := c.buffered - n }
   if c.withheld > 0 && c.buffered ≤ MAX_BUFFERED then

@@ -3,7 +3,9 @@ import Flare.L3_Protocol.H2.RefineRun
 /-!
 # §5.1 refinement: where the shipped code departs
 
-The shipped code is `step Fix.none`. Each guard below names the inputs on
+The code before any fix (flare @59bda50) is `step Fix.none`; it stays the
+subject of this classification so the departures remain checkable, while
+`Fix.shipped` (see `Conn.lean`) tracks the fixes that have landed. Each guard below names the inputs on
 which one fix of `F` changes the model's decision; every guard is a
 reported issue:
 

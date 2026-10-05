@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63060 lines) |
-| Theorems | 3308 |
-| Headline theorems in the axiom audit | 1104 |
+| Lean files | 298 (63087 lines) |
+| Theorems | 3309 |
+| Headline theorems in the axiom audit | 1105 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 107 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 108 of 138 |
 
 Six findings are rated high:
 
@@ -3051,7 +3051,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | WS-05 | Low | resolved | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
 | WS-06 | Medium | resolved | `WsConnection` does not take part in the closing handshake | `Flare/Bugs/WS_06.lean` | `repro/WS-06_close_handshake_not_answered.mojo` (any) |
 | WS-07 | Low | resolved | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
-| H2-01 | High | open | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
+| H2-01 | High | resolved | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
 | H2-02 | Low | open | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
 | H2-03 | Medium | open | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
 | H2-04 | Low | open | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
@@ -3988,6 +3988,8 @@ After every flip, `git status --short flare/` showed none of my files. Other age
 ### 5.4 L3 protocol: HTTP/2 and HPACK
 
 #### H2-01: the connection-level receive window is never enforced
+
+Status: resolved. Fixed in `state.mojo`: `Connection.recv_window` is debited by every DATA payload and credited by every WINDOW_UPDATE(0) (`_conn_window_update`); DATA past it is GOAWAY(FLOW_CONTROL_ERROR). Tests: `test_h2_state.mojo::test_connection_receive_window_is_enforced`, `test_connection_receive_window_is_debited_and_credited`, `test_withheld_connection_credit_restores_the_receive_window`. The Lean model carries the fix as `Fix.shipped`; `Bugs.H2_01.fixed_shipped` is the fix-meets-spec statement and `counterexample` stays about `Fix.none` (the pre-fix code).
 
 - **Severity:** High. Any client can make the server buffer request bodies past both the advertised connection window and the 64 MiB `_MAX_BUFFERED_REQUEST_BYTES` cap, which is the server's only memory bound on buffered bodies. No error is ever raised.
 - **RFC:** RFC 9113 §6.9.1: "A receiver MUST treat the receipt of a frame that exceeds the flow-control window as a connection error (Section 5.4.1) of type FLOW_CONTROL_ERROR".

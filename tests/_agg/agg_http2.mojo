@@ -363,6 +363,15 @@ from test_h2_state import (
 from test_h2_state import (
     test_zero_window_update_closes_the_stream_it_resets as test_h2_state__test_zero_window_update_closes_the_stream_it_resets,
 )
+from test_h2_state import (
+    test_connection_receive_window_is_enforced as test_h2_state__test_connection_receive_window_is_enforced,
+)
+from test_h2_state import (
+    test_connection_receive_window_is_debited_and_credited as test_h2_state__test_connection_receive_window_is_debited_and_credited,
+)
+from test_h2_state import (
+    test_withheld_connection_credit_restores_the_receive_window as test_h2_state__test_withheld_connection_credit_restores_the_receive_window,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -639,6 +648,13 @@ def main() raises:
     ]()
     suite.test[
         test_h2_state__test_zero_window_update_closes_the_stream_it_resets
+    ]()
+    suite.test[test_h2_state__test_connection_receive_window_is_enforced]()
+    suite.test[
+        test_h2_state__test_connection_receive_window_is_debited_and_credited
+    ]()
+    suite.test[
+        test_h2_state__test_withheld_connection_credit_restores_the_receive_window
     ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[

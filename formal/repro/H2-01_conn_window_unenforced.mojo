@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-01 fixed on fix/formal-findings
 """H2-01: the connection-level receive window is never decremented or
 checked, so the 64 MiB request-buffer cap does not stop a peer that
 ignores the connection window.
@@ -22,7 +23,7 @@ credit comes straight back). Once 64 MiB are buffered flare withholds
 connection credit. The peer keeps sending. W = 65535 + (connection
 credit returned) - (DATA received) goes negative after four more frames.
 
-Expected: a GOAWAY(FLOW_CONTROL_ERROR) once W < 0. Actual: every frame is
+Expected: a GOAWAY(FLOW_CONTROL_ERROR) once W < 0. Before the fix: every frame is
 accepted and buffered; the run stops at W = -65537 with no error.
 
 Minimal fix: decrement Connection.recv_window by each DATA payload, treat
@@ -79,7 +80,10 @@ def main() raises:
         on_stream += 1
         for f in r:
             var ty = f.header.type.value
-            if ty == FrameType.GOAWAY().value or ty == FrameType.RST_STREAM().value:
+            if (
+                ty == FrameType.GOAWAY().value
+                or ty == FrameType.RST_STREAM().value
+            ):
                 print(
                     "OK: frame",
                     frames,
@@ -89,7 +93,10 @@ def main() raises:
                     Int(ty),
                 )
                 return
-            if ty == FrameType.WINDOW_UPDATE().value and f.header.stream_id == 0:
+            if (
+                ty == FrameType.WINDOW_UPDATE().value
+                and f.header.stream_id == 0
+            ):
                 w += (
                     (Int(f.payload[0]) << 24)
                     | (Int(f.payload[1]) << 16)

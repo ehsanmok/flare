@@ -17,6 +17,12 @@ type FLOW_CONTROL_ERROR". `ConnWindowOK` is that rule as a monitor on the
 input/reply trace (it tracks the window the peer was granted from the
 WINDOW_UPDATE(0) frames flare actually emitted).
 
+Status: resolved. `recv_window` is debited by every DATA payload
+(connection error FLOW_CONTROL_ERROR when it would go negative) and
+credited by every WINDOW_UPDATE(0) through `_conn_window_update`; the
+counterexample below is about `Fix.none`, the code before the fix, and
+`fixed_shipped` is the fix-meets-spec statement about `Fix.shipped`.
+
 Trace `tr` (the repro's): SETTINGS, then 7 POST streams; streams 1..11
 carry 640 DATA frames of 16384 octets, stream 13 carries 264. That is
 4104 DATA frames. Without the fix nothing is refused: the peer's window
@@ -53,5 +59,12 @@ theorem fixed (fx : Fix) (h1 : fx.h2_01 = true) (dec : Dec) (c : Conn) (hF : Fre
     (es : List Ev) (c' : Conn) (t : List (Ev × List Out)) (hr : run fx dec c es = some (c', t)) :
     ConnWindowOK t :=
   h2_01_fixed fx h1 dec c hF es c' t hr
+
+/-- The shipped model carries the H2-01 fix, so the shipped code meets
+the §6.9.1 monitor on every run from a fresh connection. -/
+theorem fixed_shipped (dec : Dec) (c : Conn) (hF : Fresh c)
+    (es : List Ev) (c' : Conn) (t : List (Ev × List Out))
+    (hr : run Fix.shipped dec c es = some (c', t)) : ConnWindowOK t :=
+  fixed Fix.shipped rfl dec c hF es c' t hr
 
 end Flare.Bugs.H2_01

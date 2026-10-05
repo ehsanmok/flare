@@ -546,6 +546,56 @@ def test_zero_window_update_closes_the_stream_it_resets() raises:
     assert_equal(c.streams[1].state.value, StreamState.CLOSED().value)
 
 
+def _data_frame(sid: Int, n: Int, end_stream: Bool = False) -> Frame:
+    var d = Frame()
+    d.header.type = FrameType.DATA()
+    d.header.stream_id = sid
+    if end_stream:
+        d.header.flags = FrameFlags(FrameFlags.END_STREAM())
+    d.payload = List[UInt8](length=n, fill=UInt8(0x61))
+    d.header.length = n
+    return d^
+
+
+def test_connection_receive_window_is_enforced() raises:
+    """H2-01: DATA past the connection receive window is a connection
+    error of type FLOW_CONTROL_ERROR (RFC 9113 sec 6.9.1)."""
+    var c = Connection()
+    _ = _open_request(c, 1, False)
+    c.recv_window = 100
+    var out = c.handle_frame(_data_frame(1, 101))
+    assert_equal(_goaway_code(out), 3)  # FLOW_CONTROL_ERROR
+    assert_true(c.goaway_sent)
+    assert_equal(len(c.streams[1].data), 0)
+
+
+def test_connection_receive_window_is_debited_and_credited() raises:
+    """H2-01: every DATA payload is debited, and every WINDOW_UPDATE(0)
+    flare emits is added back, so the window tracks what the peer sees."""
+    var c = Connection()
+    _ = _open_request(c, 1, False)
+    var out = c.handle_frame(_data_frame(1, 1000))
+    assert_equal(_goaway_code(out), -1)
+    assert_equal(c.recv_window, 65535)  # 1000 debited, 1000 credited back
+    # A peer that ignores withheld credit: with the window used up exactly
+    # the next byte is an error.
+    c.recv_window = 0
+    out = c.handle_frame(_data_frame(1, 1))
+    assert_equal(_goaway_code(out), 3)
+
+
+def test_withheld_connection_credit_restores_the_receive_window() raises:
+    """H2-01: credit withheld above the buffer cap is added to the
+    window only when it is released to the peer."""
+    var c = Connection()
+    c.recv_window = 0
+    c.withheld_conn_credit = 500
+    var out = c.release_request_credit(0)
+    assert_equal(len(out), 1)
+    assert_equal(c.withheld_conn_credit, 0)
+    assert_equal(c.recv_window, 500)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -570,4 +620,7 @@ def main() raises:
     test_pseudo_header_forms_are_checked()
     test_data_in_flight_for_a_refused_stream_is_ignored()
     test_zero_window_update_closes_the_stream_it_resets()
-    print("test_h2_state: 23 passed")
+    test_connection_receive_window_is_enforced()
+    test_connection_receive_window_is_debited_and_credited()
+    test_withheld_connection_credit_restores_the_receive_window()
+    print("test_h2_state: 26 passed")

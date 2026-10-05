@@ -334,6 +334,10 @@ struct Connection(Copyable, Defaultable):
 
     var send_window: Int
     var recv_window: Int
+    """Connection-level receive window: what the peer may still send.
+    DATA debits it; every WINDOW_UPDATE(0) we emit credits it, so credit
+    withheld above ``_MAX_BUFFERED_REQUEST_BYTES`` is a hard bound, not a
+    request: DATA past it is GOAWAY(FLOW_CONTROL_ERROR) (RFC 9113 §6.9.1)."""
     var goaway_received: Bool
     var preface_seen: Bool
     var settings_acked: Bool
@@ -628,9 +632,20 @@ struct Connection(Copyable, Defaultable):
             self.withheld_conn_credit > 0
             and self.buffered_request_bytes <= _MAX_BUFFERED_REQUEST_BYTES
         ):
-            out.append(Self._window_update_frame(0, self.withheld_conn_credit))
+            out.append(self._conn_window_update(self.withheld_conn_credit))
             self.withheld_conn_credit = 0
         return out^
+
+    def _conn_window_update(mut self, credit: Int) -> Frame:
+        """WINDOW_UPDATE(0, credit), adding ``credit`` back to
+        ``recv_window``.
+
+        Every connection-level credit this endpoint grants goes through
+        here, so ``recv_window`` always equals the window the peer is
+        entitled to (RFC 9113 sec 6.9.1). H2-01.
+        """
+        self.recv_window += credit
+        return Self._window_update_frame(0, credit)
 
     def _close_if_known(mut self, sid: Int):
         if sid in self.streams:
@@ -1338,12 +1353,23 @@ struct Connection(Copyable, Defaultable):
             return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
 
         if ft == FrameType.DATA().value:
+            # RFC 9113 sec 6.9.1: DATA that does not fit the connection
+            # window we granted is a connection error, whether or not the
+            # frame is then processed. Until this check existed the
+            # connection window was never enforced, so the 64 MiB
+            # buffered-request cap below only stopped a peer that chose to
+            # obey the credit it withheld (H2-01).
+            if plen > self.recv_window:
+                return self._conn_error(
+                    Http2ErrorCode.FLOW_CONTROL_ERROR().value
+                )
+            self.recv_window -= plen
             if sid in self.reset_by_us:
                 # In flight before our RST_STREAM reached the peer:
                 # ignore it, but hand back the connection-level credit it
                 # used, or the connection window drains away.
                 if plen > 0:
-                    out.append(Connection._window_update_frame(0, plen))
+                    out.append(self._conn_window_update(plen))
                 return out^
             if sid not in self.streams:
                 # sec 5.1: DATA on a stream that was never opened is
@@ -1395,7 +1421,7 @@ struct Connection(Copyable, Defaultable):
                 s.headers = List[HpackHeader]()
                 self._put_stream(s^)
                 if len(f.payload) > 0:
-                    out.append(Self._window_update_frame(0, len(f.payload)))
+                    out.append(self._conn_window_update(len(f.payload)))
                 return out^
             if not self.is_client and len(body) > (
                 self.max_request_body_size - len(s.data)
@@ -1421,7 +1447,7 @@ struct Connection(Copyable, Defaultable):
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
                 if len(f.payload) > 0:
-                    out.append(Self._window_update_frame(0, len(f.payload)))
+                    out.append(self._conn_window_update(len(f.payload)))
                 return out^
             for j in range(len(body)):
                 s.data.append(body[j])
@@ -1443,7 +1469,7 @@ struct Connection(Copyable, Defaultable):
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
                 if len(f.payload) > 0:
-                    out.append(Self._window_update_frame(0, len(f.payload)))
+                    out.append(self._conn_window_update(len(f.payload)))
                 return out^
             if not self.is_client:
                 self.buffered_request_bytes += len(body)
@@ -1504,8 +1530,8 @@ struct Connection(Copyable, Defaultable):
                     # Back under the cap (bodies taken or dropped): return
                     # whatever was held along with this frame's credit.
                     out.append(
-                        Self._window_update_frame(
-                            0, len(f.payload) + self.withheld_conn_credit
+                        self._conn_window_update(
+                            len(f.payload) + self.withheld_conn_credit
                         )
                     )
                     self.withheld_conn_credit = 0
