@@ -168,3 +168,4 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.TimerWheel.run64_init
 #print axioms Flare.Bugs.NET_11.allocSize_wraps
 #print axioms Flare.Bugs.NET_11.covers_fixed
+#print axioms Flare.Bugs.NET_11.wrap_refused

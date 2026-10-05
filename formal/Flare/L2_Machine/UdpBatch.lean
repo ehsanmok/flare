@@ -12,21 +12,22 @@ Model of `flare/udp/batch.mojo` (Linux only: `recvmmsg`, `sendmmsg`,
   reproduces every comptime offset and size flare hard-codes
   (`layout_constants`). `CMSG_LEN(2) = 18`, `CMSG_SPACE(2) = 24`,
   `CMSG_DATA` at 16 (`cmsg_constants`).
-* **GSO control message** (batch.mojo:399-414). flare sets
+* **GSO control message** (batch.mojo:411-426). flare sets
   `msg_controllen = CMSG_LEN(2) = 18`, not `CMSG_SPACE(2) = 24`. A model of
   the kernel's `for_each_cmsghdr` / `CMSG_OK` walk
   (include/linux/socket.h `__CMSG_FIRSTHDR`, `__cmsg_nxthdr`, `CMSG_OK`;
   net/ipv4/udp.c `__udp_cmsg_send`) shows both lengths parse to the same
   single header `(SOL_UDP, UDP_SEGMENT)` and the same segment size
   (`gso_walk_18`, `gso_walk_24`, `gso_seg`): not a bug on Linux.
-* **Receiver buffers** (batch.mojo:176-206). Slot `i` of the data region is
+* **Receiver buffers** (batch.mojo:176-218). Slot `i` of the data region is
   `[i*max_payload, (i+1)*max_payload)`; with exact arithmetic every slot
   lies inside the `capacity*max_payload` allocation and slots are disjoint
-  (`slot_in_bounds`, `slots_disjoint`). But the size is a 64-bit `Int`
-  product with no overflow check (only `> 0` is asserted): it can wrap to
-  a tiny allocation while each iovec still announces `max_payload` bytes
-  (NET-11, `allocSize_wraps`); `acceptsFixed` restores the bound
-  (`allocSize_fixed`).
+  (`slot_in_bounds`, `slots_disjoint`). The size is a 64-bit `Int` product.
+  Before the fix (NET-11) only `> 0` was asserted, so the product could wrap
+  to a tiny allocation while each iovec still announced `max_payload` bytes
+  (`acceptsOld`, `allocSize_wraps`); the shipped constructor refuses
+  arguments whose product overflows (`accepts`), which makes the size exact
+  (`allocSize_fixed`) and covering (`covers_fixed`).
 -/
 namespace Flare.L2.UdpBatch
 
@@ -94,7 +95,7 @@ def rd (buf : Bytes) (off k : Nat) : Nat := Flare.Bytes.leNat ((buf.drop off).ta
 /-- the 24 zeroed bytes after `_poke_u64(ctrl, 0, 18)`,
 `_poke_u32(ctrl, 8, 17)`, `_poke_u32(ctrl, 12, 103)`,
 `_poke_u16(ctrl, 16, seg)`.
-mirrors flare/udp/batch.mojo:400-408 @59bda50 -/
+mirrors flare/udp/batch.mojo:412-420 -/
 def gsoCtrl (seg : Nat) : Bytes :=
   [18, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 103, 0, 0, 0,
    UInt8.ofNat (seg % 256), UInt8.ofNat (seg / 256 % 256), 0, 0, 0, 0, 0, 0]
@@ -146,24 +147,34 @@ theorem slots_disjoint (mp i j : Nat) (hij : i < j) : i * mp + mp ≤ j * mp := 
 
 /-- the byte count passed to `_alloc_zeroed` for the data region: the Mojo
 `Int` (64-bit) product `capacity * max_payload`.
-mirrors flare/udp/batch.mojo:185-195 @59bda50 -/
+mirrors flare/udp/batch.mojo:207 (fixed, NET-11) -/
 def allocSize (cap mp : Int) : Int := (Int64.ofInt cap * Int64.ofInt mp).toInt
 
-/-- what flare checks before allocating -/
-def accepts (cap mp : Int) : Prop := 0 < cap ∧ 0 < mp
+/-- what flare checked before allocating, before the fix
+(flare/udp/batch.mojo:185-195 @59bda50) -/
+def acceptsOld (cap mp : Int) : Prop := 0 < cap ∧ 0 < mp
 
 /-- Spec: the region covers every slot `[i*mp, (i+1)*mp)`, `i < cap`. -/
 def Covers (cap mp : Int) : Prop := ∀ i : Int, 0 ≤ i → i < cap → (i + 1) * mp ≤ allocSize cap mp
 
-/-- **Overflow**: `capacity = 16`, `max_payload = 2^60` passes flare's check,
-but the product wraps to 0. -/
-theorem allocSize_wraps : accepts 16 (2 ^ 60) ∧ allocSize 16 (2 ^ 60) = 0 := by
+/-- **Overflow** (pre-fix check): `capacity = 16`, `max_payload = 2^60`
+passed `acceptsOld`, but the product wraps to 0. -/
+theorem allocSize_wraps : acceptsOld 16 (2 ^ 60) ∧ allocSize 16 (2 ^ 60) = 0 := by
   refine ⟨⟨by decide, by decide⟩, by decide⟩
 
 def I64MAX : Int := 2 ^ 63 - 1
 
-/-- the fix: also require `capacity <= Int.MAX // max_payload` -/
-def acceptsFixed (cap mp : Int) : Prop := 0 < cap ∧ 0 < mp ∧ cap ≤ I64MAX / mp
+/-- the shipped constructor checks: both arguments positive,
+`capacity <= Int.MAX // max_payload` and `capacity <= Int.MAX // 64`
+(`_MMSGHDR`, the largest per-slot array).
+mirrors flare/udp/batch.mojo:189-200 (fixed, NET-11) -/
+def accepts (cap mp : Int) : Prop :=
+  0 < cap ∧ 0 < mp ∧ cap ≤ I64MAX / mp ∧ cap ≤ I64MAX / 64
+
+/-- the wrapping argument is refused by the shipped checks -/
+theorem accepts_refuses_wrap : ¬ accepts 16 (2 ^ 60) := by
+  unfold accepts I64MAX
+  decide
 
 theorem toInt_ofInt_small (n : Int) (h0 : 0 ≤ n) (h1 : n ≤ I64MAX) : (Int64.ofInt n).toInt = n := by
   rw [Int64.toInt_ofInt]
@@ -174,8 +185,8 @@ theorem toInt_ofInt_small (n : Int) (h0 : 0 ≤ n) (h1 : n ≤ I64MAX) : (Int64.
     rw [this]; unfold I64MAX at h1; omega
 
 /-- **Fix meets spec**: with the extra check the product is exact. -/
-theorem allocSize_fixed (cap mp : Int) (h : acceptsFixed cap mp) : allocSize cap mp = cap * mp := by
-  obtain ⟨hc, hm, hle⟩ := h
+theorem allocSize_fixed (cap mp : Int) (h : accepts cap mp) : allocSize cap mp = cap * mp := by
+  obtain ⟨hc, hm, hle, _⟩ := h
   have hprod : cap * mp ≤ I64MAX := by
     have := Int.mul_le_mul_of_nonneg_right hle (Int.le_of_lt hm)
     exact Int.le_trans this (Int.ediv_mul_le _ (Int.ne_of_gt hm))
@@ -192,7 +203,7 @@ theorem allocSize_fixed (cap mp : Int) (h : acceptsFixed cap mp) : allocSize cap
     omega
   · unfold I64MAX at hprod; omega
 
-theorem covers_fixed (cap mp : Int) (h : acceptsFixed cap mp) : Covers cap mp := by
+theorem covers_fixed (cap mp : Int) (h : accepts cap mp) : Covers cap mp := by
   intro i hi0 hi
   rw [allocSize_fixed cap mp h]
   exact Int.mul_le_mul_of_nonneg_right (by omega) (Int.le_of_lt h.2.1)

@@ -173,7 +173,7 @@ struct BatchReceiver(Movable):
     var _max_payload: Int
     var _count: Int
 
-    def __init__(out self, capacity: Int, max_payload: Int):
+    def __init__(out self, capacity: Int, max_payload: Int) raises:
         """Allocate the vector for ``capacity`` datagrams of at most
         ``max_payload`` bytes each.
 
@@ -181,11 +181,23 @@ struct BatchReceiver(Movable):
             capacity: Max datagrams drained per :meth:`recv`. Must be > 0.
             max_payload: Per-datagram buffer size (e.g. the connection's
                 max UDP payload). Must be > 0.
+
+        Raises:
+            Error: If either argument is not positive, or if
+                ``capacity * max_payload`` (the data region) or
+                ``capacity * 64`` (the largest per-slot array, the
+                ``mmsghdr`` vector) does not fit in an ``Int``. Such a
+                product would wrap to a small allocation while every iovec
+                still announced ``max_payload`` bytes to ``recvmmsg``.
         """
-        debug_assert[assert_mode="safe"](
-            capacity > 0 and max_payload > 0,
-            "BatchReceiver: capacity and max_payload must be positive",
-        )
+        if capacity <= 0 or max_payload <= 0:
+            raise Error(
+                "BatchReceiver: capacity and max_payload must be positive"
+            )
+        if capacity > Int.MAX // max_payload:
+            raise Error("BatchReceiver: capacity * max_payload overflows Int")
+        if capacity > Int.MAX // _MMSGHDR:
+            raise Error("BatchReceiver: capacity * 64 overflows Int")
         self._capacity = capacity
         self._max_payload = max_payload
         self._count = 0

@@ -186,6 +186,50 @@ def test_send_batch_failure_frees_its_buffers_once() raises:
         assert_true(raised, "send_batch on a bad fd did not raise")
 
 
+def _batch_receiver_refuses(capacity: Int, max_payload: Int) -> Bool:
+    try:
+        var rx = BatchReceiver(capacity=capacity, max_payload=max_payload)
+        _ = rx.count()
+    except:
+        return True
+    return False
+
+
+def test_batch_receiver_refuses_overflowing_data_region() raises:
+    """NET-11: capacity * max_payload = 16 * 2^60 wraps to 0 in 64-bit
+    arithmetic; the receiver allocated 0 bytes while iovec 0 announced
+    2^60, so recvmmsg wrote over unrelated heap memory."""
+    assert_true(
+        _batch_receiver_refuses(16, 1 << 60),
+        "16 x 2^60 must be refused, not wrapped to a 0-byte region",
+    )
+    assert_true(
+        _batch_receiver_refuses(3, Int.MAX // 2),
+        "3 x (Int.MAX // 2) must be refused",
+    )
+
+
+def test_batch_receiver_refuses_overflowing_header_arrays() raises:
+    """The mmsghdr array needs capacity * 64 bytes; refuse a capacity whose
+    product with the per-slot size overflows, whatever max_payload is."""
+    assert_true(
+        _batch_receiver_refuses(Int.MAX // 64 + 1, 1),
+        "capacity > Int.MAX // 64 must be refused",
+    )
+
+
+def test_batch_receiver_refuses_non_positive_arguments() raises:
+    assert_true(_batch_receiver_refuses(0, 1500), "capacity 0")
+    assert_true(_batch_receiver_refuses(-1, 1500), "capacity -1")
+    assert_true(_batch_receiver_refuses(16, 0), "max_payload 0")
+    assert_true(_batch_receiver_refuses(16, -5), "max_payload -5")
+
+
+def test_batch_receiver_accepts_sane_arguments() raises:
+    assert_true(not _batch_receiver_refuses(1, 1), "1 x 1")
+    assert_true(not _batch_receiver_refuses(64, 65527), "64 x 65527")
+
+
 def main() raises:
     print("=" * 60)
     print("test_udp_batch.mojo -- recvmmsg / sendmmsg / GSO")

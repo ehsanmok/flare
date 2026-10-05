@@ -310,7 +310,7 @@ abstract type with a family test (`IpAddr.is_v6`).
 
 ### Batched UDP layouts and receiver buffers (`UdpBatch.lean`)
 
-udp/batch.mojo:66-92, 176-206, 399-414 (Linux only). A C struct layout
+udp/batch.mojo:66-92, 176-218, 411-426 (Linux only). A C struct layout
 calculator (natural alignment, LP64) and a model of the kernel's control
 message walk (`__CMSG_FIRSTHDR`, `__cmsg_nxthdr`, `CMSG_OK` in
 include/linux/socket.h, consumed by `__udp_cmsg_send` in net/ipv4/udp.c).
@@ -321,8 +321,9 @@ include/linux/socket.h, consumed by `__udp_cmsg_send` in net/ipv4/udp.c).
 | `cmsg_constants` | `CMSG_LEN(2) = 18`, `CMSG_SPACE(2) = 24`, `CMSG_DATA` at 16; the 28-byte name slot fits `sockaddr_in6` and `sockaddr_in`. | proved |
 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | With `msg_controllen` 18 (flare) or 24, the kernel walk finds exactly one `(SOL_UDP, UDP_SEGMENT)` header and reads back the segment size. | proved |
 | `slot_in_bounds`, `slots_disjoint` | With exact arithmetic every receive slot lies inside the `capacity * max_payload` region and slots are disjoint. | proved |
-| `allocSize_fixed`, `covers_fixed` | With `capacity ≤ Int.MAX / max_payload`, the 64-bit size is exact and covers every slot. | proved |
-| `Flare.Bugs.NET_11.allocSize_wraps` | `capacity = 16, max_payload = 2^60` passes the checks and the size wraps to 0. | counterexample (NET-11) |
+| `allocSize_fixed`, `covers_fixed` | For every argument pair the shipped constructor accepts (`accepts`: positive, `capacity ≤ Int.MAX / max_payload`, `capacity ≤ Int.MAX / 64`), the 64-bit size is exact and covers every slot. | proved |
+| `accepts_refuses_wrap` | The shipped checks refuse `capacity = 16, max_payload = 2^60`. | proved |
+| `Flare.Bugs.NET_11.allocSize_wraps` | Before the fix, `capacity = 16, max_payload = 2^60` passed the checks and the size wrapped to 0. | counterexample (NET-11, resolved) |
 
 ### Hostname validation (`Hostname.lean`)
 
@@ -761,7 +762,7 @@ Severity: low. It needs a caller misconfiguration (an absurd `max_payload` or
 unrelated heap memory.
 Spec: the data region covers every slot `[i * max_payload, (i + 1) *
 max_payload)`, `i < capacity`, that the iovecs hand to `recvmmsg`.
-What goes wrong: udp/batch.mojo:176-206 allocates
+What goes wrong: udp/batch.mojo:176-206 @59bda50 allocates
 `capacity * max_payload` bytes with a wrapping 64-bit product and checks only
 `capacity > 0 and max_payload > 0`; iovec `i` still announces `max_payload`
 bytes at `data + i * max_payload`.
@@ -778,6 +779,7 @@ and on Linux (3/3), where it also receives one 512-byte datagram,
 `BUG REPRODUCED: ... a later 8-byte allocation sits at 0x70f27fe06040 ; recvmmsg of a 512-byte datagram overwrote all 8 of its bytes`.
 Flip (make `__init__` raise on the overflowing product), on macOS and Linux:
 `OK: BatchReceiver refused capacity=16, max_payload=2^60: BatchReceiver: capacity * max_payload overflows Int`, exit 0.
+Status: resolved. `BatchReceiver.__init__` (now `raises`) refuses non-positive arguments and products that overflow `Int` (data region and `mmsghdr` array); `accepts` mirrors it (pre-fix: `acceptsOld`). Tests: `tests/udp/test_udp_batch.mojo::test_batch_receiver_refuses_overflowing_data_region`, `::test_batch_receiver_refuses_overflowing_header_arrays`, `::test_batch_receiver_refuses_non_positive_arguments`, `::test_batch_receiver_accepts_sane_arguments`.
 
 ## Checked, not a bug
 
@@ -894,7 +896,7 @@ lists record ids, not tokens.
 | `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:72-119 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexamples (NET-08, NET-09, resolved) |
 | `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
-| `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:400-408 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |
-| `Flare.L2.UdpBatch.allocSize`, `accepts` | flare/udp/batch.mojo:185-195 | `slots_disjoint`, `NET_11.allocSize_wraps`, `covers_fixed` | counterexample (NET-11) |
+| `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:412-420 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |
+| `Flare.L2.UdpBatch.allocSize`, `accepts`, `acceptsOld` | flare/udp/batch.mojo:189-207 | `slots_disjoint`, `accepts_refuses_wrap`, `NET_11.allocSize_wraps`, `covers_fixed` | proved; counterexample (NET-11, resolved) |
 | `Flare.L2.TimerWheel.jump` (order) | flare/runtime/timer_wheel.mojo:208-293 | `jump_fire_order`, `jump_not_sorted` | proved |
 | `Flare.L2.TimerWheel.schedule64`, `advance64`, `jump64`, `ticks64`, `nextFire64` | flare/runtime/timer_wheel.mojo:119-144, 169-333 | `advance64_eq`, `run64_eq`, `nextFire64_eq`, `nextFire64_wraps` | proved |

@@ -54,6 +54,18 @@ from test_udp_batch import (
 from test_udp_batch import (
     test_send_batch_failure_frees_its_buffers_once as test_udp_batch__test_send_batch_failure_frees_its_buffers_once,
 )
+from test_udp_batch import (
+    test_batch_receiver_refuses_overflowing_data_region as test_udp_batch__test_batch_receiver_refuses_overflowing_data_region,
+)
+from test_udp_batch import (
+    test_batch_receiver_refuses_overflowing_header_arrays as test_udp_batch__test_batch_receiver_refuses_overflowing_header_arrays,
+)
+from test_udp_batch import (
+    test_batch_receiver_refuses_non_positive_arguments as test_udp_batch__test_batch_receiver_refuses_non_positive_arguments,
+)
+from test_udp_batch import (
+    test_batch_receiver_accepts_sane_arguments as test_udp_batch__test_batch_receiver_accepts_sane_arguments,
+)
 
 
 def main() raises:
@@ -77,4 +89,14 @@ def main() raises:
     suite.test[test_udp_batch__test_sendmmsg_batch_round_trip]()
     suite.test[test_udp_batch__test_gso_segmented_send]()
     suite.test[test_udp_batch__test_send_batch_failure_frees_its_buffers_once]()
+    suite.test[
+        test_udp_batch__test_batch_receiver_refuses_overflowing_data_region
+    ]()
+    suite.test[
+        test_udp_batch__test_batch_receiver_refuses_overflowing_header_arrays
+    ]()
+    suite.test[
+        test_udp_batch__test_batch_receiver_refuses_non_positive_arguments
+    ]()
+    suite.test[test_udp_batch__test_batch_receiver_accepts_sane_arguments]()
     suite^.run()
