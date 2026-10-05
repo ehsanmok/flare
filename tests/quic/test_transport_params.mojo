@@ -237,6 +237,48 @@ def test_initial_max_streams_above_2p60_rejected() raises:
         assert_equal(v, UInt64(1) << 60)
 
 
+def _pa_blob(cid_len: Int, total: Int) -> List[UInt8]:
+    """A preferred_address TLV whose CID length byte is ``cid_len`` and
+    whose value is ``total`` bytes long."""
+    var v = List[UInt8]()
+    for _ in range(24):
+        v.append(0)
+    v.append(UInt8(cid_len))
+    while len(v) < total:
+        v.append(0x55)
+    while len(v) > total:
+        _ = v.pop()
+    var b = List[UInt8]()
+    b.append(0x0D)
+    b.append(UInt8(len(v)))
+    for i in range(len(v)):
+        b.append(v[i])
+    return b^
+
+
+def _decodes(blob: List[UInt8]) -> Bool:
+    try:
+        _ = decode_transport_parameters(Span[UInt8, _](blob))
+        return True
+    except:
+        return False
+
+
+def test_preferred_address_layout_validated() raises:
+    """QUIC-13 (RFC 9000 sec 18.2, 7.4): preferred_address has a fixed
+    layout with a 1..20-byte CID; anything else is a
+    TRANSPORT_PARAMETER_ERROR."""
+    assert_false(_decodes(_pa_blob(0, 0)), "empty value accepted")
+    assert_false(_decodes(_pa_blob(0, 5)), "5-byte value accepted")
+    assert_false(_decodes(_pa_blob(0, 41)), "zero-length CID accepted")
+    assert_false(_decodes(_pa_blob(21, 62)), "CID length 21 accepted")
+    assert_false(_decodes(_pa_blob(8, 48)), "value one byte short accepted")
+    assert_false(_decodes(_pa_blob(8, 50)), "value one byte long accepted")
+    assert_true(_decodes(_pa_blob(1, 42)), "1-byte CID rejected")
+    assert_true(_decodes(_pa_blob(8, 49)), "8-byte CID rejected")
+    assert_true(_decodes(_pa_blob(20, 61)), "20-byte CID rejected")
+
+
 def test_max_datagram_frame_size_roundtrip() raises:
     var params = empty_transport_parameters()
     params.max_datagram_frame_size = Optional[UInt64](UInt64(65535))
@@ -291,6 +333,7 @@ def test_derive_peer_send_limits_set() raises:
 def main() raises:
     test_round_trip_full_set()
     test_initial_max_streams_above_2p60_rejected()
+    test_preferred_address_layout_validated()
     test_max_datagram_frame_size_roundtrip()
     test_empty_params_roundtrip()
     test_disable_active_migration_zero_length()
@@ -303,4 +346,4 @@ def main() raises:
     test_truncated_value_rejected()
     test_derive_peer_send_limits_defaults()
     test_derive_peer_send_limits_set()
-    print("test_quic_transport_params: 14 passed")
+    print("test_quic_transport_params: 15 passed")

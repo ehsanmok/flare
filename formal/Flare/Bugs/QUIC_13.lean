@@ -3,7 +3,12 @@ import Flare.L3_Protocol.Quic.TransportParams
 /-!
 # QUIC-13: preferred_address is not validated
 
-flare/quic/transport_params.mojo:447-524 @59bda50: `decode_transport_parameters`
+Status: resolved. `decode_transport_parameters` now has a 0x0d branch that checks
+the layout and raises on a violation (flare/quic/transport_params.mojo); the value is
+still not stored. The counterexample below is about the decoder before the fix
+(`Fixes.none`); `Fixes.shipped` has both checks.
+
+Pre-fix behaviour: flare/quic/transport_params.mojo:447-524 @59bda50: `decode_transport_parameters`
 has no 0x0d branch, so a preferred_address of any length and layout is
 skipped as if unknown. The module docstring (:42-45) says so: "not currently
 handled and is skipped on decode like any other unknown id"; RFC 9000 still
@@ -32,6 +37,12 @@ def zeroCidPA : Bytes := [0x0d, 41] ++ List.replicate 41 0
 theorem impl_accepts :
     (decode Fixes.none emptyPA).toOption = some {} ∧ specDecode emptyPA = none ∧
       (decode Fixes.none zeroCidPA).toOption = some {} ∧ specDecode zeroCidPA = none := by
+  native_decide
+
+/-- **The shipped decoder rejects both blobs.** -/
+theorem shipped_rejects :
+    (decode Fixes.shipped emptyPA).toOption = none ∧
+      (decode Fixes.shipped zeroCidPA).toOption = none := by
   native_decide
 
 /-- **Fix meets spec**: with the layout check (and the QUIC-10 check) the

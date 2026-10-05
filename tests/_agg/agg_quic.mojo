@@ -913,6 +913,9 @@ from test_transport_params import (
     test_initial_max_streams_above_2p60_rejected as test_transport_params__test_initial_max_streams_above_2p60_rejected,
 )
 from test_transport_params import (
+    test_preferred_address_layout_validated as test_transport_params__test_preferred_address_layout_validated,
+)
+from test_transport_params import (
     test_max_datagram_frame_size_roundtrip as test_transport_params__test_max_datagram_frame_size_roundtrip,
 )
 from test_transport_params import (
@@ -1528,6 +1531,7 @@ def main() raises:
     suite.test[
         test_transport_params__test_initial_max_streams_above_2p60_rejected
     ]()
+    suite.test[test_transport_params__test_preferred_address_layout_validated]()
     suite.test[test_transport_params__test_max_datagram_frame_size_roundtrip]()
     suite.test[test_transport_params__test_derive_peer_send_limits_defaults]()
     suite.test[test_transport_params__test_derive_peer_send_limits_set]()

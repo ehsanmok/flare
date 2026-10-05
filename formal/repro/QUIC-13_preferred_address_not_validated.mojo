@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-13 fixed on fix/formal-findings
 """QUIC-13: preferred_address (0x0d) is never validated.
 
 Lean: Flare.Bugs.QUIC_13.impl_accepts (impl),
@@ -14,7 +15,7 @@ this transport parameter. A client MUST treat a violation of these
 requirements as a connection error of type TRANSPORT_PARAMETER_ERROR."
 §7.4: a parameter with an invalid value is TRANSPORT_PARAMETER_ERROR.
 Expected: decoding a preferred_address whose CID length is 0, one that is
-5 bytes long, and one whose CID length is 21 raises. Actual: all decode.
+5 bytes long, and one whose CID length is 21 raises. Before the fix: all decode.
 
 Minimal fix: a 0x0d branch requiring `value_len >= 25`,
 `1 <= cid_len <= 20` (byte 24) and `value_len == 41 + cid_len`.

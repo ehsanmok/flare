@@ -34,15 +34,17 @@ Parameter ids covered (RFC 9000 §18.2 + RFC 9221 §3 for datagram):
   - 0x0a ack_delay_exponent (default 3)
   - 0x0b max_ack_delay (default 25 ms)
   - 0x0c disable_active_migration (flag, zero-length value)
+  - 0x0d preferred_address (layout validated, value not kept)
   - 0x0e active_connection_id_limit (default 2; minimum 2)
   - 0x0f initial_source_connection_id
   - 0x10 retry_source_connection_id (server only)
   - 0x20 max_datagram_frame_size (RFC 9221 §3; enables DATAGRAM)
 
-The 0x0d preferred_address parameter is structurally more
-complex (carries a peer's preferred IP/port for migration); it is
-not currently handled and is skipped on decode like any other
-unknown id. Adding it is a strict superset change.
+The 0x0d preferred_address parameter carries a peer's preferred
+IP/port for migration, which flare does not use: decode checks its
+fixed layout (RFC 9000 §18.2: 4 + 2 + 16 + 2 bytes, a CID length of
+1..20, the CID, a 16-byte reset token) and raises on a violation, but
+does not store the value.
 
 Sans-I/O contract: zero I/O imports; registered in
 ``tests/tools/check_sans_io.sh`` so the contract is lint-enforced.
@@ -522,6 +524,26 @@ def decode_transport_parameters(
                     "quic transport_params: active_connection_id_limit < 2"
                 )
             out.active_connection_id_limit = Optional[UInt64](v)
+        elif id == TP_ID_PREFERRED_ADDRESS:
+            # RFC 9000 §18.2: IPv4 address (4) + port (2), IPv6 address
+            # (16) + port (2), CID length (1), CID (1..20), reset token
+            # (16). A violation is a TRANSPORT_PARAMETER_ERROR (§7.4).
+            if value_len < 25:
+                raise Error(
+                    "quic transport_params: preferred_address too short"
+                    " (RFC 9000 §18.2)"
+                )
+            var pa_cid_len = Int(value[24])
+            if pa_cid_len < 1 or pa_cid_len > 20:
+                raise Error(
+                    "quic transport_params: preferred_address connection ID"
+                    " length not in 1..20 (RFC 9000 §18.2)"
+                )
+            if value_len != 41 + pa_cid_len:
+                raise Error(
+                    "quic transport_params: preferred_address length does not"
+                    " match its connection ID (RFC 9000 §18.2)"
+                )
         elif id == TP_ID_INITIAL_SCID:
             for i in range(value_len):
                 out.initial_source_connection_id.append(value[i])
