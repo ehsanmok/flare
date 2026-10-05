@@ -74,6 +74,7 @@ from flare.runtime import (
     TimerWheel,
     INTEREST_READ,
     INTEREST_WRITE,
+    LISTENER_TOKEN,
     Pool,
     DateCache,
 )
@@ -153,9 +154,11 @@ def _run_handler_loop_impl[
     var timers = Dict[Int, UInt64]()
 
     comptime if is_shared:
-        reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
+        reactor.register_exclusive(
+            c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ
+        )
     else:
-        reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
+        reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
@@ -181,7 +184,7 @@ def _run_handler_loop_impl[
             var evt = events[i]
             if evt.is_wakeup():
                 continue
-            if evt.token == UInt64(0):
+            if evt.token == LISTENER_TOKEN:
                 _accept_loop_fd(
                     listener_fd,
                     reactor,
@@ -375,9 +378,11 @@ def _run_static_loop_impl[
     var timers = Dict[Int, UInt64]()
 
     comptime if is_shared:
-        reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
+        reactor.register_exclusive(
+            c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ
+        )
     else:
-        reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
+        reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
@@ -403,7 +408,7 @@ def _run_static_loop_impl[
             var evt = events[i]
             if evt.is_wakeup():
                 continue
-            if evt.token == UInt64(0):
+            if evt.token == LISTENER_TOKEN:
                 _accept_loop_fd(
                     listener_fd,
                     reactor,
@@ -596,7 +601,7 @@ def run_reactor_loop_cancel[
     var conns = Dict[Int, Int]()
     var timers = Dict[Int, UInt64]()
 
-    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
+    reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
@@ -622,7 +627,7 @@ def run_reactor_loop_cancel[
             var evt = events[i]
             if evt.is_wakeup():
                 continue
-            if evt.token == UInt64(0):
+            if evt.token == LISTENER_TOKEN:
                 _accept_loop(
                     listener,
                     reactor,
@@ -742,7 +747,7 @@ def run_reactor_loop_view[
     var conns = Dict[Int, Int]()
     var timers = Dict[Int, UInt64]()
 
-    reactor.register(listener_fd, UInt64(0), INTEREST_READ)
+    reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
 
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
@@ -768,7 +773,7 @@ def run_reactor_loop_view[
             var evt = events[i]
             if evt.is_wakeup():
                 continue
-            if evt.token == UInt64(0):
+            if evt.token == LISTENER_TOKEN:
                 _accept_loop(
                     listener,
                     reactor,

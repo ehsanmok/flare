@@ -1,24 +1,21 @@
 # PLATFORM: any
+# RESOLVED: MACH-01 fixed on fix/formal-findings
 """MACH-01: a client accepted on fd 0 shares the listener's reactor token.
 
-Lean: Flare.Machine.fd0_reachable / Flare.Machine.fd0_never_served
-(counterexample), Flare.Machine.routing_ok (with fd 0 in use every live
-connection has a token other than the listener's), Flare.Bugs.MACH_01.
+Lean: Flare.Machine.fd0_reachable_old / Flare.Machine.fd0_never_served_old
+(counterexample about the pre-fix machine), Flare.Machine.routing_ok and
+Flare.Machine.fd0_served (shipped code meets spec), Flare.Bugs.MACH_01.
 flare/http/_unified_reactor_impl.mojo:1086-1089,1119-1130 @59bda50
 (listener registered with token 0; every token-0 event goes to the accept
 drainer) with :661-722 (client registered with token = its fd). The four
 loops in flare/http/_server_reactor_epoll.mojo (155-194, 377-406,
-599-625, 745-771) and flare/http/_reactor/lifecycle.mojo:236,292 repeat
-the pattern.
-
-Flip check: moving the listener token in _unified_reactor_impl.mojo to
-1 << 40 makes this repro print OK.
+599-625, 745-771) repeated the pattern.
 
 Spec: every readiness event for a connection reaches that connection.
 
 Expected: once something in the process closes fd 0 (stdin), the next
 accepted client is still served.
-Actual: accept() returns the lowest free fd, 0. The client is registered
+Before the fix: accept() returns the lowest free fd, 0. The client is registered
 with token 0, which is the listener's token, so each of its events is
 handed to the accept drainer instead of the connection. The request is
 never answered; the connection lingers until its idle timer closes it
@@ -27,8 +24,8 @@ every poll returns at once and the worker spins: about 450 ms of server
 CPU in those 500 ms, against about 5 ms for an idle connection without the
 bug (measured on macOS with a variant whose second client sends nothing).
 
-Minimal fix: use a listener token that no fd can take (for example the
-listener fd + 1 << 32, or any value >= 2^31), or reject fd 0 at accept.
+Fix: the listener is registered under flare.runtime.LISTENER_TOKEN (2^40),
+a token that no fd can take, in all five loops.
 
 The handler below closes fd 0 on request; anything in the process doing
 so (a library closing stdin, a daemonisation helper) has the same effect.
@@ -65,7 +62,9 @@ def _get(port: UInt16, path: String) -> String:
     try:
         var s = TcpStream.connect(SocketAddr.localhost(port))
         s.set_recv_timeout(2000)
-        var req = "GET " + path + " HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        var req = (
+            "GET " + path + " HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        )
         _ = s.write(req.as_bytes())
         var buf = List[UInt8](length=4096, fill=0)
         while True:
@@ -81,7 +80,9 @@ def _get(port: UInt16, path: String) -> String:
 
 
 def main() raises:
-    var fd0_open = external_call["fcntl", c_int](c_int(0), c_int(1), c_int(0)) >= c_int(0)
+    var fd0_open = external_call["fcntl", c_int](
+        c_int(0), c_int(1), c_int(0)
+    ) >= c_int(0)
     if not fd0_open:
         raise Error("setup: run with stdin open (fd 0 must be in use)")
     var srv = HttpServer.bind(SocketAddr.localhost(0))

@@ -13,7 +13,7 @@ Modelled: the `conns` and `timers` dictionaries, the timer wheel at the level
 of its spec (`advance now` fires exactly the active timers due by `now`; a
 cancelled timer never fires), the batch of tokens returned by one
 `reactor.poll`, the order "fire timers, then walk the batch", accept with
-lowest-fd reuse, and listener token 0 versus client token = fd. Per-connection
+lowest-fd reuse, and the listener token versus client token = fd. Per-connection
 behaviour is a parameter `ConnModel` (state, `onEvent : S → I → S ×
 StepResult`, idle timeout), so any connection model, including
 `Flare.L4.ConnSM`, plugs in.
@@ -35,7 +35,8 @@ pending `batch`, and a ghost log `kills` of idle closes (victim incarnation,
 arming incarnation, due time, close time). Labels: `poll now toks`,
 `accept fd regOk`, `acceptDone`, `dispatch i`. `step` is a partial function;
 `lts M P := LTS.ofFn (· = initCfg) (step M P)`. `Params` fixes the listener
-fd, whether fd 0 is in use (stdin open), and whether cleanup cancels the
+fd, the listener's reactor token (`listenerToken`, 2^40, since MACH-01; `0`
+before), whether fd 0 is in use (stdin open), and whether cleanup cancels the
 connection's timer (flare: yes).
 
 | Lean name | Statement | Status |
@@ -46,12 +47,13 @@ connection's timer (flare: yes).
 | `no_late_close` | A poll at time `now` leaves no live connection whose timer was due at or before `now`. | proved |
 | `dispatch_isolated` | A dispatch on fd `f` changes no other connection and no other `timers` entry. | proved |
 | `conn_invariant_lifts` | Any property of every state reachable in the per-connection model holds of every live connection in every reachable machine state. | proved |
-| `routing_ok` | With fd 0 in use, no reachable state has a connection on fd 0, so token 0 only ever means the listener. | proved |
-| `fd0_never_served` | A connection living on fd 0 is unchanged by every step. | proved |
+| `routing_ok` | No reachable state has a connection on the listener's token (shipped: the token is above every fd, whether or not stdin is open; pre-fix token 0: only with fd 0 in use), so that token only ever means the listener. | proved |
+| `fd0_served` | Shipped, stdin closed: the client accepted on fd 0 gets its event dispatched and its connection advances. | proved (concrete trace) |
+| `fd0_never_served_old` | Pre-fix (listener token 0): a connection living on fd 0 is unchanged by every step. | proved |
 | `stale_timer_without_cancel` | Without the cancel in cleanup, a reachable state has an idle close of a connection the timer was not armed for. | counterexample (shows the cancel is necessary; flare has it) |
 | `reuse_with_cancel` | On the same fd-reuse trace, flare's loop closes nothing early. | proved (concrete trace) |
 | `stale_event_redelivered` | A readiness event harvested for one incarnation of fd 5 can be dispatched to the next incarnation on fd 5 within one batch. | counterexample (benign, see below) |
-| `fd0_reachable` | With fd 0 free, a reachable state has a live connection on fd 0. | counterexample (MACH-01) |
+| `fd0_reachable_old` | Pre-fix (listener token 0), fd 0 free: a reachable state has a live connection on fd 0. | counterexample (MACH-01, resolved) |
 
 ### The worker loop running `ConnHandle`
 
@@ -132,25 +134,35 @@ What goes wrong: the listener is registered with token 0
 returns the lowest free fd, so once fd 0 is free the next client gets token
 0. Its request is never read.
 
-Lean: `Flare.Machine.fd0_reachable` (reachable state with a live connection on
-fd 0), `fd0_event_not_dispatched` (no dispatch step exists for its event),
-`fd0_never_served` (its state never changes). Restated in
+Lean (all about the pre-fix machine `stdinClosedOldP`, listener token 0):
+`Flare.Machine.fd0_reachable_old` (reachable state with a live connection on
+fd 0), `fd0_event_not_dispatched_old` (no dispatch step exists for its event),
+`fd0_never_served_old` (its state never changes). Restated in
 `Flare.Bugs.MACH_01`.
 
-Minimal fix: give the listener a token no fd can take (any value at or above
-2^31 other than `WAKEUP_TOKEN`), or treat fd 0 like any other client by
-keying the listener branch on a separate token. `routing_ok` /
-`Flare.Bugs.MACH_01.fixed_no_conn_on_listener_token` shows that once no client
-can hold the listener's token, no reachable state has a connection on it.
+Fix: give the listener a token no fd can take. `LISTENER_TOKEN` (2^40,
+`flare/runtime/event.mojo`, exported from `flare.runtime`) replaces the
+literal 0 in the registration and the accept branch of the unified loop and of
+the four loops in `_server_reactor_epoll.mojo`. `routing_ok` /
+`Flare.Bugs.MACH_01.no_conn_on_listener_token` shows that no reachable state
+has a connection on the listener's token, with or without stdin, and
+`fd0_served` / `client_on_fd0_served` that the fd-0 client is dispatched.
 
 Repro: `formal/repro/MACH-01_client_on_fd0_never_served.mojo`. A forked
 `HttpServer` whose handler closes fd 0 on `/close-stdin`; a second client then
 gets no response. Observed: `BUG REPRODUCED: after fd 0 was freed, the next
 client got no response ( 0 bytes before the idle timer closed it); its token 0
 routes its events to the accept drainer; server CPU 469 ms over its life, of
-which 502 ms were spent waiting on that client`. Flip check: changing the listener token in
-`_unified_reactor_impl.mojo` to `1 << 40` makes the repro print `OK` (file
-restored afterwards).
+which 502 ms were spent waiting on that client`. After the fix:
+`OK: the client after fd 0 was freed was served`, exit 0 (macOS and the Linux
+container).
+
+Status: resolved. Tests: `tests/http/test_listener_token_fd0.mojo`
+(`test_client_on_freed_fd0_is_served_unified`, `_cancellable`, `_view`, `_pool`,
+and `test_listener_token_is_not_a_possible_fd`); the first four fail on the
+unfixed code. The static and shared-handler loops in
+`_server_reactor_epoll.mojo` use the same constant but cannot be driven to
+fd 0 from a handler.
 
 ## Checked, not a bug
 

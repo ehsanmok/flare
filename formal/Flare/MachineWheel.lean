@@ -77,7 +77,7 @@ timers in some order. -/
 def stepAny (M : ConnModel) (P : Params) (c : Cfg M.S) (lab : Label M.I) (c' : Cfg M.S) : Prop :=
   match lab with
   | .poll now toks =>
-    (c.batch = [] ∧ c.now ≤ now ∧ toks.all (fun k => k = 0 || (c.conns k).isSome) = true) ∧
+    (c.batch = [] ∧ c.now ≤ now ∧ toks.all (fun k => k = P.listenerTok || (c.conns k).isSome) = true) ∧
       ∃ fired, FiredOk c now fired ∧ c' = pollStepWith c now toks fired
   | .accept fd r => step M P c (.accept fd r) = some c'
   | .acceptDone => step M P c .acceptDone = some c'

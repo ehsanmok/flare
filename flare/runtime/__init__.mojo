@@ -4,7 +4,7 @@ Public exports, by area:
 
 - Reactor: ``Reactor``, ``Event``, ``INTEREST_READ``,
   ``INTEREST_WRITE``, ``EVENT_READABLE``, ``EVENT_WRITABLE``,
-  ``EVENT_ERROR``, ``EVENT_HUP``, ``WAKEUP_TOKEN``.
+  ``EVENT_ERROR``, ``EVENT_HUP``, ``WAKEUP_TOKEN``, ``LISTENER_TOKEN``.
 - Scheduling: ``Scheduler``, ``Frontend``, ``TimerWheel``,
   ``num_cpus``, ``default_worker_count``, ``block_in_pool``.
 - Buffers and memory: ``Pool``, ``BufferPool``, ``BufferHandle``,
@@ -35,6 +35,7 @@ from .event import (
     EVENT_ERROR,
     EVENT_HUP,
     WAKEUP_TOKEN,
+    LISTENER_TOKEN,
 )
 from .reactor import Reactor
 from .timer_wheel import TimerWheel

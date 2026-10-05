@@ -11,7 +11,7 @@
 # (`_run_unified_loop_for_fd[H, is_shared]`). The
 # multi-listener variant retains its own outer loop because it
 # discriminates accept events by ``fd in listener_fds_dict``
-# instead of ``token == 0``; that fd-set discriminator is
+# instead of ``token == LISTENER_TOKEN``; that fd-set discriminator is
 # structurally distinct and unifying it would add complexity
 # rather than remove it.
 
@@ -72,6 +72,7 @@ from flare.runtime import (
     TimerWheel,
     INTEREST_READ,
     INTEREST_WRITE,
+    LISTENER_TOKEN,
 )
 from flare.runtime.scheduler import (
     load_stop_flag,
@@ -1083,8 +1084,10 @@ def _run_unified_loop_for_fd[
     the only listener-side difference is ``register`` vs
     ``register_exclusive``.
 
-    ``listener_fd`` registers under ``token = 0``, which keeps the
-    single-listener path a straight token compare. ``extra_fds`` (the
+    ``listener_fd`` registers under ``token = LISTENER_TOKEN`` (a value no
+    fd can take, so a client that ``accept`` hands fd 0 is not mistaken for
+    the listener), which keeps the single-listener path a straight token
+    compare. ``extra_fds`` (the
     N x M case: this worker's own listener on each *additional*
     address) register under ``token = fd`` and are routed through an
     fd set consulted before the ``conns`` lookup. When ``extra_fds`` is
@@ -1097,9 +1100,11 @@ def _run_unified_loop_for_fd[
     var timers = Dict[Int, UInt64]()
 
     comptime if is_shared:
-        reactor.register_exclusive(c_int(listener_fd), UInt64(0), INTEREST_READ)
+        reactor.register_exclusive(
+            c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ
+        )
     else:
-        reactor.register(c_int(listener_fd), UInt64(0), INTEREST_READ)
+        reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
     var listener_fds = Dict[Int, Bool]()
     for i in range(len(extra_fds)):
@@ -1129,7 +1134,7 @@ def _run_unified_loop_for_fd[
             var evt = events[i]
             if evt.is_wakeup():
                 continue
-            if evt.token == UInt64(0):
+            if evt.token == LISTENER_TOKEN:
                 _accept_loop_unified_fd(
                     listener_fd,
                     reactor,

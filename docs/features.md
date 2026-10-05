@@ -656,7 +656,7 @@ removes its socket file only if the file is still the one it created.
 | Surface | Where |
 |---|---|
 | `Reactor` — `kqueue` (macOS), `epoll` (Linux); register / deregister fds, run one tick or until shutdown | [`reactor.mojo`](../examples/advanced/reactor.mojo) |
-| `Event`, `INTEREST_READ`, `INTEREST_WRITE`, `EVENT_READABLE`, `EVENT_WRITABLE`, `EVENT_ERROR`, `EVENT_HUP`, `WAKEUP_TOKEN` | `flare.runtime.event` |
+| `Event`, `INTEREST_READ`, `INTEREST_WRITE`, `EVENT_READABLE`, `EVENT_WRITABLE`, `EVENT_ERROR`, `EVENT_HUP`, `WAKEUP_TOKEN`, `LISTENER_TOKEN` | `flare.runtime.event` |
 | `TimerWheel` — hashed timing wheel for idle / deadline timeouts | `flare.runtime.timer_wheel` |
 | `default_worker_count()`, `num_cpus()` | `flare.runtime` |
 | Experimental AsyncRT thread engine (`-D FLARE_ASYNCRT`) — runs server workers on Mojo's AsyncRT pool instead of pthreads; `num_workers <= parallelism_level() - 1`; throughput matches pthreads on the 1-worker and 4-worker benchmarks | [`asyncrt.md`](asyncrt.md) |

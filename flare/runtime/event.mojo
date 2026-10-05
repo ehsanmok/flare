@@ -34,6 +34,14 @@ comptime EVENT_HUP: Int = 8
 # safe for user code.
 comptime WAKEUP_TOKEN: UInt64 = 0xFFFF_FFFF_FFFF_FFFF
 
+# Token the HTTP reactor loops register their listening socket under.
+# Connections are registered with ``token = fd``, and ``accept`` returns the
+# lowest free fd, so any token an fd can take (0 .. 2^31 - 1) can also belong
+# to a client once something in the process has closed that fd (fd 0 after
+# stdin is closed is the practical case). ``2^40`` is above every fd and
+# distinct from ``WAKEUP_TOKEN``.
+comptime LISTENER_TOKEN: UInt64 = 0x100_0000_0000
+
 
 struct Event(Copyable, ImplicitlyCopyable):
     """A readiness event for a single registered fd.
