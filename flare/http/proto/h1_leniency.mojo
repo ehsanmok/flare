@@ -99,7 +99,11 @@ struct H1LeniencyConfig(Copyable):
     §5.1 explicitly forbids whitespace before the ``:``; this
     is the classic request-smuggling vector
     (CVE-2022-24999-class). Defaults off; flip only if a
-    trusted upstream emits ``Header :value``."""
+    trusted upstream emits ``Header :value``. The reactor's
+    raw-byte framing (``Transfer-Encoding`` and
+    ``Content-Length``) always skips that whitespace, so it frames
+    such a request the way the parser reads it; with the flag off
+    the parser then rejects the request."""
 
     var allow_obs_fold: Bool
     """Accept line-folded header values (``LWS`` continuation

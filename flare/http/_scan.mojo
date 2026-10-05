@@ -143,8 +143,11 @@ def _scalar_find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
 @always_inline
 def _match_content_length_prefix(
     p: Pointer[UInt8, _], pos: Int, header_end: Int
-) -> Bool:
-    """Case-insensitive compare against ``"content-length:"`` at ``pos``.
+) -> Int:
+    """Match ``"content-length"`` + optional SP/HTAB + ``":"`` at ``pos``.
+
+    Returns the offset of the first byte of the value (just past the
+    colon), or ``-1`` when there is no match.
 
     Matches only at the start of a header line, i.e. when the byte
     before ``pos`` is LF. The request line always precedes the first
@@ -154,20 +157,33 @@ def _match_content_length_prefix(
     framing, and the bytes the real header declared were dispatched as
     a second request.
 
+    SP/HTAB between the name and the colon are skipped, because the
+    parser strips them under ``allow_ows_around_colon``; reading only
+    ``content-length:`` framed ``Content-Length : 5`` as an empty body
+    while the parser saw a 5-byte one. Strict mode still rejects such a
+    line in the parser.
+
     ``pos + 15 <= header_end`` is assumed by the caller; this function
-    does not re-check the bound.
+    bounds the whitespace skip itself.
     """
     if pos == 0 or p[unsafe_offset=pos - 1] != 10:
-        return False
-    var needle = "content-length:"
+        return -1
+    var needle = "content-length"
     var np = needle.unsafe_ptr()
-    for j in range(15):
+    for j in range(14):
         var c = p[unsafe_offset=pos + j]
         if c >= 65 and c <= 90:
             c = c + 32
         if c != np[unsafe_offset=j]:
-            return False
-    return True
+            return -1
+    var q = pos + 14
+    while q < header_end and (
+        p[unsafe_offset=q] == 32 or p[unsafe_offset=q] == 9
+    ):
+        q += 1
+    if q < header_end and p[unsafe_offset=q] == 58:
+        return q + 1
+    return -1
 
 
 def scan_content_length[
@@ -217,8 +233,9 @@ def scan_content_length[
                     var pos = i + off
                     if pos >= end:
                         break
-                    if _match_content_length_prefix(p, pos, header_end):
-                        return _parse_decimal(p, pos + needle_len, header_end)
+                    var vs = _match_content_length_prefix(p, pos, header_end)
+                    if vs >= 0:
+                        return _parse_decimal(p, vs, header_end)
                     bits &= bits - 1
             i += W
     elif W == 64:
@@ -234,15 +251,17 @@ def scan_content_length[
                     var pos = i + off
                     if pos >= end:
                         break
-                    if _match_content_length_prefix(p, pos, header_end):
-                        return _parse_decimal(p, pos + needle_len, header_end)
+                    var vs = _match_content_length_prefix(p, pos, header_end)
+                    if vs >= 0:
+                        return _parse_decimal(p, vs, header_end)
                     bits &= bits - 1
             i += W
 
     # Scalar tail.
     while i < end:
-        if _match_content_length_prefix(p, i, header_end):
-            return _parse_decimal(p, i + needle_len, header_end)
+        var vs = _match_content_length_prefix(p, i, header_end)
+        if vs >= 0:
+            return _parse_decimal(p, vs, header_end)
         i += 1
     return 0
 

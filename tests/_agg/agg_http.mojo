@@ -1230,6 +1230,18 @@ from test_h1_smuggling import (
     test_te_chunked_then_identity_with_cl_is_refused as test_h1_smuggling__test_te_chunked_then_identity_with_cl_is_refused,
 )
 from test_h1_smuggling import (
+    test_te_framing_skips_ows_before_the_colon as test_h1_smuggling__test_te_framing_skips_ows_before_the_colon,
+)
+from test_h1_smuggling import (
+    test_content_length_scan_skips_ows_before_the_colon as test_h1_smuggling__test_content_length_scan_skips_ows_before_the_colon,
+)
+from test_h1_smuggling import (
+    test_ows_before_colon_reactor_and_parser_agree as test_h1_smuggling__test_ows_before_colon_reactor_and_parser_agree,
+)
+from test_h1_smuggling import (
+    test_strict_parser_still_refuses_ows_before_the_colon as test_h1_smuggling__test_strict_parser_still_refuses_ows_before_the_colon,
+)
+from test_h1_smuggling import (
     test_bare_lf_cannot_end_the_header_block as test_h1_smuggling__test_bare_lf_cannot_end_the_header_block,
 )
 from test_h1_smuggling import (
@@ -4762,6 +4774,16 @@ def main() raises:
     ]()
     suite.test[
         test_h1_smuggling__test_te_chunked_then_identity_with_cl_is_refused
+    ]()
+    suite.test[test_h1_smuggling__test_te_framing_skips_ows_before_the_colon]()
+    suite.test[
+        test_h1_smuggling__test_content_length_scan_skips_ows_before_the_colon
+    ]()
+    suite.test[
+        test_h1_smuggling__test_ows_before_colon_reactor_and_parser_agree
+    ]()
+    suite.test[
+        test_h1_smuggling__test_strict_parser_still_refuses_ows_before_the_colon
     ]()
     suite.test[test_h1_smuggling__test_bare_lf_cannot_end_the_header_block]()
     suite.test[test_h1_smuggling__test_header_line_without_colon_is_rejected]()

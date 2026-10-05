@@ -25,7 +25,7 @@ def blk : Bytes := Bytes.ofString "Host: a\nTransfer-Encoding: chunked"
 
 theorem reactor_lines : linesCRLF blk = [blk] := by native_decide
 
-theorem reactor_frames_by_length : reactorFraming false false (2 ^ 20) (linesCRLF blk) = .length 0 := by
+theorem reactor_frames_by_length : reactorFraming false (2 ^ 20) (linesCRLF blk) = .length 0 := by
   native_decide
 
 theorem parser_sees_chunked : parserFraming false false (2 ^ 20) (linesLF blk) = .chunked := by
@@ -33,17 +33,17 @@ theorem parser_sees_chunked : parserFraming false false (2 ^ 20) (linesLF blk) =
 
 theorem counterexample :
     parserFraming false false (2 ^ 20) (linesLF blk) ≠ .reject ∧
-    reactorFraming false false (2 ^ 20) (linesCRLF blk) ≠
+    reactorFraming false (2 ^ 20) (linesCRLF blk) ≠
       parserFraming false false (2 ^ 20) (linesLF blk) := by
   rw [reactor_frames_by_length, parser_sees_chunked]
   exact ⟨by decide, by decide⟩
 
-theorem fixed_frames_chunked : reactorFraming false false (2 ^ 20) (linesLF blk) = .chunked := by
+theorem fixed_frames_chunked : reactorFraming false (2 ^ 20) (linesLF blk) = .chunked := by
   native_decide
 
 theorem fixed_agrees (allowCL : Bool) (maxBody : Nat) (b : Bytes)
     (h : parserFraming false allowCL maxBody (linesLF b) ≠ .reject) :
-    reactorFraming false allowCL maxBody (linesLF b) = parserFraming false allowCL maxBody (linesLF b) :=
+    reactorFraming allowCL maxBody (linesLF b) = parserFraming false allowCL maxBody (linesLF b) :=
   lf_fixed_agrees allowCL maxBody b h
 
 end Flare.Bugs.H1_04

@@ -27,6 +27,7 @@ from flare.http import (
     ok,
 )
 from flare.http.proto import H1LeniencyConfig
+from flare.http._server.parse import _parse_http_request_bytes
 from flare.http._scan import (
     CONTENT_LENGTH_INVALID,
     find_crlfcrlf,
@@ -329,6 +330,138 @@ def test_te_chunked_then_identity_with_cl_is_refused() raises:
     )
     assert_false("GET /admin" in got, "smuggled request was served: " + got)
     assert_true("HTTP/1.1 400" in got, "expected 400, got: " + got)
+
+
+# ── The reactor and the parser must read the same header lines ─────────────
+#
+# H1-03 / H1-04: with ``allow_ows_around_colon`` or
+# ``allow_lf_only_line_endings`` the parser accepts ``Name : value`` and
+# bare-LF line ends. The reactor's raw-byte framing has to find the same
+# Transfer-Encoding / Content-Length lines, or the body is left in the read
+# buffer and served as the next request.
+
+
+def _reactor_te(raw: String) -> Int:
+    var b = _b(raw)
+    return request_te_framing(Span[UInt8, _](b), find_crlfcrlf(b, 0), False)
+
+
+def _reactor_cl(raw: String) -> Int:
+    var b = _b(raw)
+    return scan_content_length(b, find_crlfcrlf(b, 0))
+
+
+def _parsed_framing(
+    raw: String, leniency: H1LeniencyConfig
+) raises -> Tuple[String, Int]:
+    """Frame ``raw`` as the reactor does, parse the framed bytes with
+    ``leniency``, and return the parser's Transfer-Encoding value and
+    body length. Raises if the parser refuses the framed bytes (for
+    example because the body was left unframed)."""
+    var b = _b(raw)
+    var hend = find_crlfcrlf(b, 0)
+    var te = request_te_framing(
+        Span[UInt8, _](b), hend, leniency.allow_te_chunked_when_cl_present
+    )
+    var cl = scan_content_length(b, hend)
+    assert_true(cl >= 0, "invalid Content-Length")
+    var total = len(b) if te == TE_CHUNKED else hend + cl
+    var parsed = _parse_http_request_bytes(
+        Span[UInt8, _](b)[:total], leniency=leniency
+    )
+    var parsed_te = parsed.headers.get("transfer-encoding")
+    if parsed_te == "chunked":
+        assert_equal(
+            te, TE_CHUNKED, "the parser read chunked framing the reactor missed"
+        )
+    return (parsed_te, len(parsed.body))
+
+
+def test_te_framing_skips_ows_before_the_colon() raises:
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding : chunked\r\n\r\n"
+        ),
+        TE_CHUNKED,
+    )
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding \t:"
+            " chunked\r\n\r\n"
+        ),
+        TE_CHUNKED,
+    )
+    # OWS before the colon on one line still counts with the other lines.
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n"
+            "Transfer-Encoding : chunked\r\n\r\n"
+        ),
+        TE_UNSUPPORTED,
+    )
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\r\nContent-Length: 5\r\n"
+            "Transfer-Encoding : chunked\r\n\r\n"
+        ),
+        TE_INVALID,
+    )
+    # A longer field name is still a different field.
+    assert_equal(
+        _reactor_te("POST / HTTP/1.1\r\nTransfer-Encoding-X : chunked\r\n\r\n"),
+        TE_ABSENT,
+    )
+    assert_equal(
+        _reactor_te("POST / HTTP/1.1\r\nTransfer-Encoding x: chunked\r\n\r\n"),
+        TE_ABSENT,
+    )
+
+
+def test_content_length_scan_skips_ows_before_the_colon() raises:
+    assert_equal(
+        _reactor_cl("POST / HTTP/1.1\r\nContent-Length : 5\r\n\r\nhello"), 5
+    )
+    assert_equal(
+        _reactor_cl("POST / HTTP/1.1\r\nContent-Length \t : 7\r\n\r\n"), 7
+    )
+    assert_equal(
+        _reactor_cl("POST / HTTP/1.1\r\nX-Content-Length : 9\r\n\r\n"), 0
+    )
+    assert_equal(
+        _reactor_cl("POST / HTTP/1.1\r\nContent-Length-X : 9\r\n\r\n"), 0
+    )
+    assert_equal(
+        _reactor_cl("POST / HTTP/1.1\r\nContent-Length : x\r\n\r\n"),
+        CONTENT_LENGTH_INVALID,
+    )
+
+
+def test_ows_before_colon_reactor_and_parser_agree() raises:
+    var lenient = H1LeniencyConfig(allow_ows_around_colon=True)
+    var te = _parsed_framing(
+        (
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding : chunked\r\n\r\n"
+            "5\r\nhello\r\n0\r\n\r\n"
+        ),
+        lenient,
+    )
+    assert_equal(te[0], "chunked")
+    var cl = _parsed_framing(
+        "POST / HTTP/1.1\r\nHost: a\r\nContent-Length : 5\r\n\r\nhello",
+        lenient,
+    )
+    assert_equal(cl[1], 5)
+
+
+def test_strict_parser_still_refuses_ows_before_the_colon() raises:
+    assert_false(
+        _parses(
+            "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding : chunked\r\n\r\n"
+        )
+    )
+    assert_false(
+        _parses("POST / HTTP/1.1\r\nHost: a\r\nContent-Length : 5\r\n\r\nhello")
+    )
 
 
 # ── Header lines the parser used to skip or misread ────────────────────────

@@ -40,12 +40,12 @@ def _scalar_find_crlfcrlf(data: List[UInt8], start: Int) -> Int:
 
 def _scalar_scan_content_length(data: List[UInt8], header_end: Int) -> Int:
     """Reference implementation used as the oracle."""
-    var needle = "content-length:"
+    var needle = "content-length"
     var np = needle.unsafe_ptr()
     var nl = needle.byte_length()
     var p = data.unsafe_ptr()
     var i = 0
-    while i + nl <= header_end:
+    while i + nl + 1 <= header_end:
         # Header lines only: the byte before the name must be LF.
         var found = i > 0 and p[unsafe_offset=i - 1] == 10
         for j in range(nl):
@@ -58,7 +58,16 @@ def _scalar_scan_content_length(data: List[UInt8], header_end: Int) -> Int:
                 found = False
                 break
         if found:
+            # Optional SP/HTAB between the name and the colon, then ':'.
             var pos = i + nl
+            while pos < header_end and (
+                p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
+            ):
+                pos += 1
+            if pos >= header_end or p[unsafe_offset=pos] != 58:
+                i += 1
+                continue
+            pos += 1
             while pos < header_end and (
                 p[unsafe_offset=pos] == 32 or p[unsafe_offset=pos] == 9
             ):

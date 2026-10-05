@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60924 lines) |
+| Lean files | 298 (60933 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 12 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 13 of 138 |
 
 Six findings are rated high:
 
@@ -984,17 +984,17 @@ Files: `H1/HeaderText.lean`, `H1/ContentLength.lean`.
 File: `H1/Framing.lean`.
 
 **Model.**
-- `reactorFraming skip allowCL maxBody lines` mirrors the reactor's decision: `request_te_framing` and `scan_content_length` over the header lines. It returns `chunked`, `length n` or `reject`.
+- `reactorFraming allowCL maxBody lines` mirrors the shipped reactor's decision: `request_te_framing` and `scan_content_length` over the header lines, with SP/HTAB between the field name and the colon skipped (H1-03 fix). It returns `chunked`, `length n` or `reject`. `reactorFramingWith skip …` is the same function with the colon test as a parameter; `skip = false` is the pre-fix reactor.
 - `parserFraming ows allowCL maxBody lines` mirrors the parser's acceptance and framing (`parse.mojo:234-353`). Its acceptance is a superset of the real parser's, since it checks only line shape, field syntax and Content-Length consistency. Any statement of the form "parser accepts ⇒ same framing" therefore carries over to the real parser.
-- `ows` is `allow_ows_around_colon`; `skip` is the H1-03 fix in the reactor.
+- `ows` is `allow_ows_around_colon`.
 - `linesCRLF` and `linesLF` mirror the reactor's CRLF-only line splitting and the lenient parser's LF line reader (`parse_util.mojo:165-208`).
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `framing_agrees` | For either `ows`, any `allowCL` and `maxBody`: if the parser accepts, the reactor with `skip = ows` frames the request the same way. | proved |
-| `no_smuggling_strict` | Strict mode (`ows = false`, the shipped reactor): parser acceptance implies the same framing as the reactor. | proved |
+| `framing_agrees` | For either `ows`, any `allowCL` and `maxBody`: if the parser accepts, the shipped reactor frames the request the same way. | proved |
+| `no_smuggling_strict` | Strict mode (`ows = false`): parser acceptance implies the same framing as the shipped reactor. | proved |
 | `lf_fixed_agrees` | If the reactor splits lines with the parser's LF splitter, the two agree whenever the parser accepts. | proved |
-| `Bugs.H1_03.counterexample` | With `allow_ows_around_colon` and the shipped reactor (`skip = false`), they disagree on an accepted request. | counterexample |
+| `Bugs.H1_03.counterexample` | With `allow_ows_around_colon` and the pre-fix reactor (`reactorFramingWith false`), they disagree on an accepted request. | counterexample |
 | `Bugs.H1_04.counterexample` | With `allow_lf_only_line_endings` and the shipped CRLF splitter, they disagree on an accepted request. | counterexample |
 
 #### Header values and the String invariant
@@ -3003,7 +3003,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-11 | Low | open | `BatchReceiver` sizes its data region with an unchecked `Int` product | `Flare/Bugs/NET_11.lean` | `repro/NET-11_batch_receiver_size_overflow.mojo` (any) |
 | H1-01 | Low | open | the chunk-line cap gives a verdict that depends on TCP segmentation | `Flare/Bugs/H1_01.lean` | `repro/H1-01_chunk_line_cap_segmentation.mojo` (any) |
 | H1-02 | Medium | resolved | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
-| H1-03 | Medium | open | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
+| H1-03 | Medium | resolved | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
 | H1-04 | Medium | open | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
 | H1-05 | Low | open | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
 | H1-06 | Medium | open | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
@@ -3670,6 +3670,8 @@ Status: resolved. Fixed in `scan_chunked_resume` (`flare/http/proto/chunked.mojo
 
 #### H1-03: with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding
 
+Status: resolved. Fixed in `flare/http/proto/chunked.mojo` (`request_te_framing`, new `_colon_after_name`) and `flare/http/_scan.mojo` (`_match_content_length_prefix`): SP/HTAB between the field name and the colon are skipped for both Transfer-Encoding and Content-Length (the latter had the same gap). Regression tests `tests/http/test_h1_smuggling.mojo::test_te_framing_skips_ows_before_the_colon`, `test_content_length_scan_skips_ows_before_the_colon` and `test_ows_before_colon_reactor_and_parser_agree`; the repro prints `OK:`. Lean: `reactorFraming` is now the shipped reactor, `reactorFramingWith false` keeps the counterexample.
+
 - **Severity:** Medium. It is a request desync: one request produces two responses, and the chunked body is parsed as a request. It needs a public, non-default leniency option, which is documented as safe behind an upstream that emits `Header :value`.
 - **RFC:** RFC 9112 §6.3 and §11.2: the component that frames a message and the component that interprets it must use the same framing.
 - **What goes wrong:**
@@ -3677,9 +3679,9 @@ Status: resolved. Fixed in `scan_chunked_resume` (`flare/http/proto/chunked.mojo
   - The lenient parser strips SP/HTAB before the colon (`parse.mojo:249-255`).
   - For `Transfer-Encoding : chunked` the reactor sees no TE and Content-Length 0, while the parser accepts the request as chunked.
 - **Counterexample:** `Bugs.H1_03.counterexample`, on the lines `["Host: a", "Transfer-Encoding : chunked"]`:
-  - `reactor_frames_by_length`: the reactor gives `length 0`;
+  - `reactor_frames_by_length`: the pre-fix reactor (`reactorFramingWith false`) gives `length 0`;
   - `parser_sees_chunked`: the parser gives `chunked`.
-- **Fix:** skip SP/HTAB between the name and `:` in `request_te_framing`. Strict mode is unchanged, because the strict parser rejects such lines. `Bugs.H1_03.fixed_agrees` (from `framing_agrees` with `ows = true`) proves agreement on every request the parser accepts.
+- **Fix:** skip SP/HTAB between the name and `:` in `request_te_framing` and in the Content-Length scan (`Content-Length : 5` had the same gap). Strict mode is unchanged, because the strict parser rejects such lines. `Bugs.H1_03.fixed_agrees` (from `framing_agrees` with `ows = true`) proves agreement of the shipped reactor on every request the parser accepts.
 - **Repro:** `formal/repro/H1-03_te_ows_colon_framing_desync.mojo`
 - **Observed:** `BUG REPRODUCED: reactor framed by Content-Length (TE verdict 0, body_total 63) while the parser accepted Transfer-Encoding: chunked; 15 body bytes are left to be parsed as the next request`
 - **Flip:** `OK: reactor and parser agree on chunked framing`; `flare/http/proto/chunked.mojo` restored.

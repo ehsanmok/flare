@@ -95,6 +95,25 @@ def classify_transfer_coding(value: String) -> Int:
     return TE_CHUNKED
 
 
+@always_inline
+def _colon_after_name(buf: Span[UInt8, _], pos: Int, limit: Int) -> Int:
+    """Offset one past the ``:`` that ends a field name, or -1.
+
+    ``pos`` is just past the name. SP and HTAB between the name and the
+    colon are skipped: the parser strips them under
+    ``allow_ows_around_colon``, so a reactor that required the colon
+    right after the name would frame ``Transfer-Encoding : chunked`` by
+    ``Content-Length`` while the parser read it as chunked. Strict mode
+    still rejects such a line in the parser, so skipping is safe there.
+    """
+    var p = pos
+    while p < limit and (buf[p] == UInt8(32) or buf[p] == UInt8(9)):
+        p += 1
+    if p < limit and buf[p] == UInt8(58):
+        return p + 1
+    return -1
+
+
 def request_te_framing(
     buf: Span[UInt8, _], headers_end: Int, allow_content_length: Bool = False
 ) -> Int:
@@ -104,9 +123,9 @@ def request_te_framing(
     has to answer this *before* it parses and the minimal-parser path
     never builds a ``HeaderMap``. It reads header lines the way the
     parser does -- field name anchored at the start of a line and
-    followed directly by ``:`` -- and it reads *every*
-    ``Transfer-Encoding`` line, so it cannot disagree with the parser
-    about which one counts.
+    followed by ``:``, with optional SP/HTAB in between -- and it reads
+    *every* ``Transfer-Encoding`` line, so it cannot disagree with the
+    parser about which one counts.
 
     Args:
         buf: Buffer holding the request head.
@@ -139,18 +158,17 @@ def request_te_framing(
         if e + 1 >= n:
             break
         if _matches_at(buf, i, te_name, e):
-            var p = i + len(te_name)
-            if p < e and buf[p] == UInt8(58):  # ':'
+            var p = _colon_after_name(buf, i + len(te_name), e)
+            if p >= 0:
                 saw_te = True
                 var v = String(capacity_bytes=e - p)
-                for k in range(p + 1, e):
+                for k in range(p, e):
                     v += chr(Int(buf[k]))
                 if joined.byte_length() > 0:
                     joined += ","
                 joined += v
         elif _matches_at(buf, i, cl_name, e):
-            var p = i + len(cl_name)
-            if p < e and buf[p] == UInt8(58):
+            if _colon_after_name(buf, i + len(cl_name), e) >= 0:
                 saw_cl = True
         i = e + 2
     if not saw_te:

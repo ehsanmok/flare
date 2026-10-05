@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H1-03 fixed on fix/formal-findings
 """H1-03: with allow_ows_around_colon the reactor and the parser disagree on
 Transfer-Encoding framing (request smuggling / desync).
 
@@ -16,7 +17,7 @@ documented as safe behind a trusted upstream that emits "Header :value".
 
 Expected: for "Transfer-Encoding : chunked" the reactor frames the body as
 chunked, the way the parser reads the header.
-Actual: request_te_framing returns TE_ABSENT and scan_content_length 0, so
+Before the fix: Actual: request_te_framing returns TE_ABSENT and scan_content_length 0, so
 the reactor dispatches the head with an empty body while the parser
 accepts it with Transfer-Encoding: chunked. The chunked body bytes stay in
 the read buffer and are parsed as the next request, so one request produces

@@ -6,8 +6,8 @@ import Flare.L3_Protocol.H1.HeaderText
 Two components decide how a request body is framed:
 
 * the reactor's raw-byte scan, `request_te_framing`
-  (`flare/http/proto/chunked.mojo:96-158`) plus `scan_content_length`
-  (`flare/http/_scan.mojo:173-247`), used by
+  (`flare/http/proto/chunked.mojo:97-178`) plus `scan_content_length`
+  (`flare/http/_scan.mojo:189-266`), used by
   `flare/http/_reactor/conn_handle.mojo:606-654` to decide when the request
   is complete and how many bytes to hand to the parser;
 * the full parser `_parse_http_request_bytes`
@@ -24,12 +24,11 @@ strict parser splits on CRLF too and raises on a bare LF, so in strict mode
 the line lists coincide. The parser with `allow_lf_only_line_endings`
 splits on LF instead; `H1-04` is that mismatch.
 
-`scanField skip` is the reactor's per-line test. `skip = false` is the shipped
-code: the colon must follow the field name immediately. `skip = true` is the
-`H1-03` fix: skip SP/HTAB between name and colon. `framing_agrees` proves that
-whenever the parser accepts, the reactor reaches the same verdict, for the
-pairs (strict reactor, strict parser) and (fixed reactor, OWS-lenient
-parser).
+`scanField skip` is the reactor's per-line test. The shipped reactor skips
+SP/HTAB between name and colon (`skip = true`, the `H1-03` fix); `skip = false`
+is the pre-fix test, where the colon had to follow the field name immediately.
+`framing_agrees` proves that whenever the parser accepts, the shipped reactor
+reaches the same verdict, for both the strict and the OWS-lenient parser.
 
 The parser model accepts a superset of what the real parser accepts. It
 omits value-byte validation, the Host-duplicate check, the header size cap,
@@ -52,8 +51,10 @@ inductive Framing where
 
 /-- Per-line field test of `request_te_framing` / `_match_content_length_prefix`:
 case-insensitive `needle` at the start of the line, then (`skip` only) SP/HTAB,
-then `:`. Returns the raw bytes after the colon.
-mirrors flare/http/proto/chunked.mojo:139-152 @59bda50 -/
+then `:`. Returns the raw bytes after the colon. The shipped reactor always
+skips (`skip = true`, H1-03 fix); `skip = false` is the pre-fix test.
+mirrors flare/http/proto/chunked.mojo:97-178 and flare/http/_scan.mojo:143-186
+(fixed, H1-03) -/
 def scanField (skip : Bool) (needle L : Bytes) : Option Bytes :=
   if ieqPrefix needle L = true then
     match (if skip then (L.drop needle.length).dropWhile isWS else L.drop needle.length) with
@@ -66,12 +67,13 @@ mirrors flare/http/proto/chunked.mojo:142-148 @59bda50 -/
 def joinR (vs : List Bytes) : Bytes :=
   vs.foldl (fun j v => (if j.isEmpty then j else j ++ [44]) ++ v) []
 
-/-- The reactor's framing decision: TE scan, then Content-Length scan (first
-`content-length:` at a line start), 400 for a negative value and 413 above
-`max_body_size`.
+/-- The reactor's framing decision, parameterised by the colon test: TE scan,
+then Content-Length scan (first `content-length` field at a line start), 400
+for a negative value and 413 above `max_body_size`. `skip = false` is the
+reactor as it was at 59bda50 (kept for `Bugs.H1_03.counterexample`).
 mirrors flare/http/proto/chunked.mojo:120-158, flare/http/_scan.mojo:173-247,
 flare/http/_reactor/conn_handle.mojo:622-654 @59bda50 -/
-def reactorFraming (skip allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
+def reactorFramingWith (skip allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
   let S := lines.filterMap (scanField skip TEn)
   let C := lines.filterMap (scanField skip CLn)
   if S = [] then
@@ -80,6 +82,13 @@ def reactorFraming (skip allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : 
     | v :: _ => if parseCL v < 0 ∨ parseCL v > maxBody then .reject else .length (parseCL v).toNat
   else if C ≠ [] ∧ allowCL = false then .reject
   else if classify (joinR S) = 1 then .chunked else .reject
+
+/-- The shipped reactor: SP/HTAB between the field name and the colon are
+skipped (H1-03 fix).
+mirrors flare/http/proto/chunked.mojo:97-178, flare/http/_scan.mojo:143-266,
+flare/http/_reactor/conn_handle.mojo:622-654 (fixed, H1-03) -/
+def reactorFraming (allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
+  reactorFramingWith true allowCL maxBody lines
 
 /-! ## The full parser -/
 
@@ -191,12 +200,14 @@ theorem field_of_shape {ows : Bool} {L name w rest : Bytes} (s : Shape ows L nam
     parserField ows lit L = if ieq name lit = true then some (strip rest) else none := by
   simp [parserField, s.field]
 
-/-- The reactor's per-line test on an accepted line: it fires exactly when
-the parsed name equals the needle, and returns the unstripped value. The
-needle must contain no colon and no SP/HTAB. -/
+/-- The shipped reactor's per-line test on an accepted line: it fires exactly
+when the parsed name equals the needle, and returns the unstripped value. The
+needle must contain no colon and no SP/HTAB. It holds for strict and
+OWS-lenient lines alike, because a strict line has no whitespace before the
+colon. -/
 theorem scan_of_shape {ows : Bool} {L name w rest : Bytes} (s : Shape ows L name w rest)
     {N : Bytes} (hN58 : (58 : UInt8) ∉ N) (hNws : ∀ x ∈ N, isWS x = false) :
-    scanField ows N L = if ieq name N = true then some rest else none := by
+    scanField true N L = if ieq name N = true then some rest else none := by
   -- `ieqPrefix N L = ieqPrefix N name`: the byte after `name` stops the match.
   have hpre : ieqPrefix N L = ieqPrefix N name := by
     rw [s.eq]
@@ -217,12 +228,8 @@ theorem scan_of_shape {ows : Bool} {L name w rest : Bytes} (s : Shape ows L name
     have hdrop : L.drop N.length = w ++ 58 :: rest := by
       rw [s.eq, ← hlen, List.append_assoc, List.drop_left]
     simp only [hp, if_true, hdrop, ieq, hlen, beq_self_eq_true, Bool.true_and]
-    cases ows with
-    | false => simp [s.strict rfl]
-    | true =>
-      simp only [if_true]
-      rw [dropWhile_ws_prefix w (58 :: rest) s.ws]
-      rfl
+    rw [dropWhile_ws_prefix w (58 :: rest) s.ws]
+    rfl
   · rw [if_neg hq]
     cases hp : ieqPrefix N name with
     | false => rfl
@@ -239,18 +246,10 @@ theorem scan_of_shape {ows : Bool} {L name w rest : Bytes} (s : Shape ows L name
       have ht : isTchar name[N.length] = true := s.tchar _ (List.getElem_mem hlt)
       have hcol : name[N.length] ≠ 58 := fun e => by rw [e] at ht; exact absurd ht (by decide)
       rw [hdrop]
-      cases ows with
-      | false =>
-        simp only [Bool.false_eq_true, if_false]
-        split
-        · rename_i r heq; exact absurd (List.cons.inj heq).1 hcol
-        · rfl
-      | true =>
-        simp only [if_true]
-        rw [dropWhile_ws_nonws (isTchar_ws ht)]
-        split
-        · rename_i r heq; exact absurd (List.cons.inj heq).1 hcol
-        · rfl
+      rw [dropWhile_ws_nonws (isTchar_ws ht)]
+      split
+      · rename_i r heq; exact absurd (List.cons.inj heq).1 hcol
+      · rfl
 
 theorem TEn_no_colon : (58 : UInt8) ∉ TEn := by decide
 theorem TEn_no_ws : ∀ x ∈ TEn, isWS x = false := by decide
@@ -260,7 +259,7 @@ theorem CLn_no_ws : ∀ x ∈ CLn, isWS x = false := by decide
 /-- On an accepted line the reactor's value, stripped, is the parser's. -/
 theorem scan_map_strip {ows : Bool} {L : Bytes} (h : wfB ows L = true) {N : Bytes}
     (hN58 : (58 : UInt8) ∉ N) (hNws : ∀ x ∈ N, isWS x = false) :
-    (scanField ows N L).map strip = parserField ows N L := by
+    (scanField true N L).map strip = parserField ows N L := by
   obtain ⟨name, w, rest, s⟩ := shape_of_wf h
   rw [scan_of_shape s hN58 hNws, field_of_shape s]
   split <;> rfl
@@ -268,14 +267,14 @@ theorem scan_map_strip {ows : Bool} {L : Bytes} (h : wfB ows L = true) {N : Byte
 theorem filterMap_scan_strip {ows : Bool} {N : Bytes}
     (hN58 : (58 : UInt8) ∉ N) (hNws : ∀ x ∈ N, isWS x = false) :
     ∀ lines : List Bytes, lines.all (wfB ows) = true →
-      (lines.filterMap (scanField ows N)).map strip = lines.filterMap (parserField ows N)
+      (lines.filterMap (scanField true N)).map strip = lines.filterMap (parserField ows N)
   | [], _ => rfl
   | L :: ls, h => by
     simp only [List.all_cons, Bool.and_eq_true] at h
     have ih := filterMap_scan_strip hN58 hNws ls h.2
     have hl := scan_map_strip h.1 hN58 hNws
     simp only [List.filterMap_cons]
-    cases hs : scanField ows N L with
+    cases hs : scanField true N L with
     | none => rw [hs] at hl; simp only [Option.map_none] at hl; rw [← hl]; exact ih
     | some v => rw [hs] at hl; simp only [Option.map_some] at hl; rw [← hl]; simp [ih]
 
@@ -320,13 +319,12 @@ theorem parseCL_map_strip (C : List Bytes) : (C.map strip).map parseCL = C.map p
 
 /-! ## No smuggling -/
 
-/-- **Framing agreement.** If the parser accepts a header block, the reactor
-frames it identically: same chunked/length decision, same length. Instances:
-`ows = false` is the shipped strict reactor against the strict parser;
-`ows = true` is the `H1-03`-fixed reactor against the OWS-lenient parser. -/
+/-- **Framing agreement.** If the parser accepts a header block, the shipped
+reactor frames it identically: same chunked/length decision, same length.
+`ows = false` is the strict parser, `ows = true` the OWS-lenient one. -/
 theorem framing_agrees (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
     (hacc : parserFraming ows allowCL maxBody lines ≠ .reject) :
-    reactorFraming ows allowCL maxBody lines = parserFraming ows allowCL maxBody lines := by
+    reactorFraming allowCL maxBody lines = parserFraming ows allowCL maxBody lines := by
   have hwf : lines.all (wfB ows) = true := by
     cases h : lines.all (wfB ows)
     · exact absurd (by simp [parserFraming, h]) hacc
@@ -334,13 +332,13 @@ theorem framing_agrees (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
   have hS := filterMap_scan_strip TEn_no_colon TEn_no_ws lines hwf
   have hC := filterMap_scan_strip CLn_no_colon CLn_no_ws lines hwf
   unfold parserFraming at hacc ⊢
-  unfold reactorFraming
+  unfold reactorFraming reactorFramingWith
   dsimp only at hacc ⊢
   rw [← hS, ← hC, parseCL_map_strip] at hacc ⊢
   rw [classify_join] at hacc ⊢
   simp only [hwf, Bool.true_eq_false, if_false] at hacc ⊢
-  generalize lines.filterMap (scanField ows TEn) = S at hacc ⊢
-  generalize lines.filterMap (scanField ows CLn) = C at hacc ⊢
+  generalize lines.filterMap (scanField true TEn) = S at hacc ⊢
+  generalize lines.filterMap (scanField true CLn) = C at hacc ⊢
   have hSe : (S.map strip = []) ↔ S = [] := List.map_eq_nil_iff
   have hCe : (C.map parseCL ≠ []) ↔ C ≠ [] := by simp
   simp only [hSe, hCe] at hacc ⊢
@@ -371,7 +369,7 @@ theorem framing_agrees (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
 (`request_te_framing` + `scan_content_length`) is the same. -/
 theorem no_smuggling_strict (allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
     (hacc : parserFraming false allowCL maxBody lines ≠ .reject) :
-    reactorFraming false allowCL maxBody lines = parserFraming false allowCL maxBody lines :=
+    reactorFraming allowCL maxBody lines = parserFraming false allowCL maxBody lines :=
   framing_agrees false allowCL maxBody lines hacc
 
 /-! ## Line splitting (for `H1-04`) -/
@@ -412,7 +410,7 @@ def linesLF (b : Bytes) : List Bytes := (splitOn 10 b).map dropCR
 LF-lenient parser does agrees with it whenever the parser accepts. -/
 theorem lf_fixed_agrees (allowCL : Bool) (maxBody : Nat) (blk : Bytes)
     (hacc : parserFraming false allowCL maxBody (linesLF blk) ≠ .reject) :
-    reactorFraming false allowCL maxBody (linesLF blk) =
+    reactorFraming allowCL maxBody (linesLF blk) =
       parserFraming false allowCL maxBody (linesLF blk) :=
   framing_agrees false allowCL maxBody _ hacc
 
