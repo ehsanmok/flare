@@ -386,15 +386,23 @@ struct HpackDecoder(Copyable, Defaultable):
         var headers = List[HpackHeader]()
         var off = 0
         var decoded = 0
+        # Fields [0, charged) are already counted against the budget. A
+        # field is charged before the next one is decoded and, for the
+        # last one, after the loop; it used to be charged only at the top
+        # of the next iteration, so a block's last field was never
+        # counted (HPACK-02).
+        var charged = 0
         while off < len(buf):
-            if budget > 0 and len(headers) > 0:
-                decoded += (
-                    headers[len(headers) - 1].name.byte_length()
-                    + headers[len(headers) - 1].value.byte_length()
-                    + 32
-                )
-                if decoded > budget:
-                    raise Error(HPACK_BUDGET_ERROR)
+            if budget > 0:
+                while charged < len(headers):
+                    decoded += (
+                        headers[charged].name.byte_length()
+                        + headers[charged].value.byte_length()
+                        + 32
+                    )
+                    charged += 1
+                    if decoded > budget:
+                        raise Error(HPACK_BUDGET_ERROR)
             var b0 = Int(buf[off])
             if (b0 & 0x80) != 0:
                 # 6.1 Indexed Header Field
@@ -450,6 +458,16 @@ struct HpackDecoder(Copyable, Defaultable):
                 var v = self._decode_string(buf, off)
                 off = v.offset
                 headers.append(HpackHeader(name, v.value.copy()))
+        if budget > 0:
+            while charged < len(headers):
+                decoded += (
+                    headers[charged].name.byte_length()
+                    + headers[charged].value.byte_length()
+                    + 32
+                )
+                charged += 1
+                if decoded > budget:
+                    raise Error(HPACK_BUDGET_ERROR)
         return headers^
 
 

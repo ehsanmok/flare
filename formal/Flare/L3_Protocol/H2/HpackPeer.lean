@@ -502,10 +502,10 @@ theorem decodeLoop_block (C : Codec) (hC : C.Correct) (henc : Bytes → Bytes)
           simp only [decodeLoop] at h
           split at h
           · cases h
-          · split at h
+          · rename_i t1 od rest1 hd1
+            split at h
             · cases h
-            · rename_i t1 od rest1 hd1
-              rw [← List.cons_append, ← hbe] at hd1
+            · rw [← List.cons_append, ← hbe] at hd1
               obtain ⟨rfl, hp1, hoc⟩ :=
                 decodeOne_rep C hC henc hH p p1 o t hs.length r _ hvr hp hps t1 od rest1 hd1
               obtain ⟨ds, rfl, hpw, hp2⟩ := ih p1 p2 fs2 t1 t' _ hs' _ fuel

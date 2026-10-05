@@ -3,8 +3,10 @@ import Flare.L3_Protocol.H2.HpackSync
 /-!
 # HPACK header-block decoder and encoder (RFC 7541 §6)
 
-`decodeLoop` transliterates `HpackDecoder.decode` (`hpack.mojo:356-441`)
-and `encode` transliterates `HpackEncoder.encode` with
+`decodeLoop` transliterates `HpackDecoder.decode` (`hpack.mojo:356-441`,
+shipped: every field is charged to the budget, HPACK-02 fixed);
+`decodeLoopOld` is the version at @59bda50, kept for `Flare.Bugs.HPACK_02`.
+`encode` transliterates `HpackEncoder.encode` with
 `allow_huffman = False` (`hpack.mojo:480-512`, the default).
 
 The prefix-integer codec (§5.1) and the Huffman codec (§5.2) belong to the
@@ -16,10 +18,10 @@ Results:
   `_octets_to_string` unchanged (now every header, `octetsToString_id`) and
   whose strings are shorter than `2^31`, decoding flare's own encoding
   returns the same list and leaves the dynamic table untouched.
-* `decode_budget_impl`: the exact bound the shipped budget check gives:
+* `decode_budget_impl`: the exact bound the pre-fix (@59bda50) budget check gives:
   the sizes of all fields *but the last* are within the budget.
   `Flare.Bugs.HPACK_02` shows the last field is never counted.
-* `decode_budget_fixed`: with the check moved after each field, the whole
+* `decode_budget_fixed`: shipped, the check runs after each field, so the whole
   decoded list is within the budget.
 * `decode_table_inv`: decoding preserves the table invariant.
 -/
@@ -150,10 +152,10 @@ def acct (budget : Nat) (hs : List Entry) (decoded : Nat) : Nat :=
 def overBudget (budget : Nat) (hs : List Entry) (d : Nat) : Bool :=
   decide (budget > 0 ∧ hs ≠ [] ∧ d > budget)
 
-/-- The decode loop. The budget check runs *before* each field and
-accounts the previously decoded one.
+/-- The decode loop at @59bda50 (before HPACK-02). The budget check runs
+*before* each field and accounts the previously decoded one.
 mirrors flare/http2/hpack.mojo:356-441 @59bda50 -/
-def decodeLoop (C : Codec) (ah : Bool) (budget : Nat) :
+def decodeLoopOld (C : Codec) (ah : Bool) (budget : Nat) :
     Nat → Table → List Entry → Nat → Bytes → Except DErr (Table × List Entry)
   | _, t, hs, _, [] => .ok (t, hs)
   | 0, _, _, _, _ :: _ => .error .fuel
@@ -162,15 +164,16 @@ def decodeLoop (C : Codec) (ah : Bool) (budget : Nat) :
     else match decodeOne C ah t hs.length l with
       | .error e => .error e
       | .ok (t', oh, rest) =>
-        decodeLoop C ah budget fuel t' (hs ++ oh.toList) (acct budget hs decoded) rest
+        decodeLoopOld C ah budget fuel t' (hs ++ oh.toList) (acct budget hs decoded) rest
 
-def decode (C : Codec) (ah : Bool) (t : Table) (buf : Bytes) (budget : Nat) :
+def decodeOld (C : Codec) (ah : Bool) (t : Table) (buf : Bytes) (budget : Nat) :
     Except DErr (Table × List Entry) :=
-  decodeLoop C ah budget buf.length t [] 0 buf
+  decodeLoopOld C ah budget buf.length t [] 0 buf
 
-/-- The minimal fix for HPACK-02: account each field right after it is
-decoded. -/
-def decodeLoopFixed (C : Codec) (ah : Bool) (budget : Nat) :
+/-- The decode loop, shipped (HPACK-02 fixed): each field is accounted right
+after it is decoded.
+mirrors flare/http2/hpack.mojo:362-460 (`decode`; fixed, HPACK-02) -/
+def decodeLoop (C : Codec) (ah : Bool) (budget : Nat) :
     Nat → Table → List Entry → Nat → Bytes → Except DErr (Table × List Entry)
   | _, t, hs, _, [] => .ok (t, hs)
   | 0, _, _, _, _ :: _ => .error .fuel
@@ -180,11 +183,11 @@ def decodeLoopFixed (C : Codec) (ah : Bool) (budget : Nat) :
     | .ok (t', oh, rest) =>
       let decoded' := decoded + tsize oh.toList
       if budget > 0 ∧ decoded' > budget then .error .budget
-      else decodeLoopFixed C ah budget fuel t' (hs ++ oh.toList) decoded' rest
+      else decodeLoop C ah budget fuel t' (hs ++ oh.toList) decoded' rest
 
-def decodeFixed (C : Codec) (ah : Bool) (t : Table) (buf : Bytes) (budget : Nat) :
+def decode (C : Codec) (ah : Bool) (t : Table) (buf : Bytes) (budget : Nat) :
     Except DErr (Table × List Entry) :=
-  decodeLoopFixed C ah budget buf.length t [] 0 buf
+  decodeLoop C ah budget buf.length t [] 0 buf
 
 /-! ## Budget theorems -/
 
@@ -230,21 +233,21 @@ field but the last is accounted for and within budget. -/
 theorem decode_budget_impl (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < budget) :
     ∀ fuel t hs decoded l t' hs',
     decoded = tsize hs.dropLast → decoded ≤ budget →
-    decodeLoop C ah budget fuel t hs decoded l = .ok (t', hs') →
+    decodeLoopOld C ah budget fuel t hs decoded l = .ok (t', hs') →
     tsize hs'.dropLast ≤ budget := by
   intro fuel
   induction fuel with
   | zero =>
     intro t hs decoded l t' hs' hd hle h
     cases l with
-    | nil => simp [decodeLoop] at h; obtain ⟨_, rfl⟩ := h; omega
-    | cons _ _ => simp [decodeLoop] at h
+    | nil => simp [decodeLoopOld] at h; obtain ⟨_, rfl⟩ := h; omega
+    | cons _ _ => simp [decodeLoopOld] at h
   | succ fuel ih =>
     intro t hs decoded l t' hs' hd hle h
     cases l with
-    | nil => simp [decodeLoop] at h; obtain ⟨_, rfl⟩ := h; omega
+    | nil => simp [decodeLoopOld] at h; obtain ⟨_, rfl⟩ := h; omega
     | cons b bs =>
-      simp only [decodeLoop] at h
+      simp only [decodeLoopOld] at h
       split at h
       · cases h
       rename_i hnb
@@ -270,25 +273,25 @@ theorem decode_budget_impl (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < budg
         subst hnil; simp [tsize] at hd; simp [acct, tsize, hd]
       | some e => simp [hacc]
 
-/-- With the fix, every decoded field is within budget. -/
+/-- Shipped: every decoded field is within budget. -/
 theorem decode_budget_fixed (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < budget) :
     ∀ fuel t hs decoded l t' hs',
     decoded = tsize hs → decoded ≤ budget →
-    decodeLoopFixed C ah budget fuel t hs decoded l = .ok (t', hs') →
+    decodeLoop C ah budget fuel t hs decoded l = .ok (t', hs') →
     tsize hs' ≤ budget := by
   intro fuel
   induction fuel with
   | zero =>
     intro t hs decoded l t' hs' hd hle h
     cases l with
-    | nil => simp [decodeLoopFixed] at h; obtain ⟨_, rfl⟩ := h; omega
-    | cons _ _ => simp [decodeLoopFixed] at h
+    | nil => simp [decodeLoop] at h; obtain ⟨_, rfl⟩ := h; omega
+    | cons _ _ => simp [decodeLoop] at h
   | succ fuel ih =>
     intro t hs decoded l t' hs' hd hle h
     cases l with
-    | nil => simp [decodeLoopFixed] at h; obtain ⟨_, rfl⟩ := h; omega
+    | nil => simp [decodeLoop] at h; obtain ⟨_, rfl⟩ := h; omega
     | cons b bs =>
-      simp only [decodeLoopFixed] at h
+      simp only [decodeLoop] at h
       split at h
       · cases h
       · rename_i t1 oh rest _
@@ -338,8 +341,8 @@ theorem decode_table_inv (C : Codec) (ah : Bool) (budget : Nat) :
     | cons b bs =>
       simp only [decodeLoop] at h
       split at h; · cases h
+      rename_i t1 oh rest hd1
       split at h; · cases h
-      rename_i hd1
       exact ih _ _ _ _ _ _ (decodeOne_inv C ah _ _ _ _ _ _ hi hd1) h
 
 /-! ## Encoder and round trip -/
@@ -425,14 +428,14 @@ theorem literalName_encode (C : Codec) (hC : C.Correct) (ah : Bool) (t : Table) 
 returns it unchanged and does not touch the dynamic table (the encoder
 never indexes), whatever the table contents. -/
 theorem decode_encode (C : Codec) (hC : C.Correct) (ah : Bool) (t : Table) :
-    ∀ (hs acc : List Entry) (fuel : Nat), (∀ h ∈ hs, Stable h.name ∧ Stable h.value) →
+    ∀ (hs acc : List Entry) (d fuel : Nat), (∀ h ∈ hs, Stable h.name ∧ Stable h.value) →
     (encode C hs).length ≤ fuel →
-    decodeLoop C ah 0 fuel t acc 0 (encode C hs) = .ok (t, acc ++ hs) := by
+    decodeLoop C ah 0 fuel t acc d (encode C hs) = .ok (t, acc ++ hs) := by
   intro hs
   induction hs with
-  | nil => intro acc fuel _ _; cases fuel <;> simp [encode, decodeLoop]
+  | nil => intro acc d fuel _ _; cases fuel <;> simp [encode, decodeLoop]
   | cons h hs ih =>
-    intro acc fuel hst hf
+    intro acc d fuel hst hf
     have ⟨hn, hv⟩ := hst h (List.mem_cons_self ..)
     have hj : findStatic h.name < 2 ^ 31 := by have := findStatic_lt h.name; omega
     generalize hX : (if findStatic h.name = 0 then encodeString C h.name else []) = X
@@ -451,13 +454,12 @@ theorem decode_encode (C : Codec) (hC : C.Correct) (ah : Bool) (t : Table) :
     | zero => rw [hE] at hf; simp at hf
     | succ fuel =>
       rw [hE, decodeLoop]
-      simp only [overBudget, acct, Nat.lt_irrefl, false_and, decide_false, Bool.false_eq_true,
-        if_false, decodeOne, n80, n40, n20, ne_eq, not_true_eq_false]
+      simp only [decodeOne, n80, n40, n20, ne_eq, not_true_eq_false]
       rw [← List.cons_append, ← he, hd]
       have hL := literalName_encode C hC ah t h (encodeString C h.value ++ encode C hs) hn
       rw [hX] at hL
       simp only [List.append_assoc] at hL ⊢
       simp only [bind, Except.bind, hL, decodeString_encode C hC ah _ _ hv, pure, Except.pure]
-      have := ih (acc ++ [h]) fuel (fun h' hm => hst h' (List.mem_cons_of_mem _ hm))
+      have := ih (acc ++ [h]) (d + tsize [h]) fuel (fun h' hm => hst h' (List.mem_cons_of_mem _ hm))
         (by have := hlen; simp [encodeString] at this hf ⊢; omega)
       simpa using this

@@ -413,6 +413,57 @@ def test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer() raises:
     assert_equal(h3[0].value.byte_length(), 500)
 
 
+def _literal_block(name: String, value_len: Int) -> List[UInt8]:
+    """One Literal-without-Indexing field with a new name: the field is
+    ``name.byte_length() + value_len + 32`` octets by RFC 7541 sec 4.1."""
+    var block = List[UInt8]()
+    block.append(UInt8(0x00))
+    block.append(UInt8(name.byte_length()))
+    for i in range(name.byte_length()):
+        block.append(name.as_bytes()[i])
+    block.append(UInt8(value_len))
+    for _ in range(value_len):
+        block.append(UInt8(ord("a")))
+    return block^
+
+
+def test_the_last_field_of_a_block_counts_against_the_budget() raises:
+    """HPACK-02: every decoded field is charged, the last one included. A
+    one-field block of 133 octets used to pass a budget of 50, since a
+    field was only charged when the next one was about to be decoded."""
+    var dec = HpackDecoder()
+    var block = _literal_block("x", 100)
+    with assert_raises():
+        _ = dec.decode(Span[UInt8, _](block), 50)
+
+
+def test_the_budget_is_inclusive_and_covers_the_whole_block() raises:
+    """HPACK-02: a block exactly at the budget decodes; one octet under
+    is refused, whether the overrun is the first, the last or the sum."""
+    var block = _literal_block("x", 100)  # 133
+    var dec = HpackDecoder()
+    assert_equal(len(dec.decode(Span[UInt8, _](block), 133)), 1)
+    var dec2 = HpackDecoder()
+    with assert_raises():
+        _ = dec2.decode(Span[UInt8, _](block), 132)
+    # Two fields of 33 + 33 = 66 octets: the sum, not one field, trips it.
+    var two = _literal_block("x", 0)
+    two.extend(_literal_block("y", 0))
+    var dec3 = HpackDecoder()
+    assert_equal(len(dec3.decode(Span[UInt8, _](two), 66)), 2)
+    var dec4 = HpackDecoder()
+    with assert_raises():
+        _ = dec4.decode(Span[UInt8, _](two), 65)
+
+
+def test_no_budget_means_unlimited() raises:
+    """HPACK-02: budget 0 (the default) keeps the old unbounded behaviour."""
+    var dec = HpackDecoder()
+    var block = _literal_block("x", 100)
+    assert_equal(len(dec.decode(Span[UInt8, _](block))), 1)
+    assert_equal(len(dec.decode(Span[UInt8, _](block), 0)), 1)
+
+
 def main() raises:
     test_decode_integer_short()
     test_rfc_7541_c1_5bit_1337()
@@ -432,4 +483,7 @@ def main() raises:
     test_decode_keeps_non_ascii_octets_exact()
     test_default_decoder_accepts_a_real_servers_huffman_headers()
     test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer()
-    print("test_h2_hpack: 18 passed")
+    test_the_last_field_of_a_block_counts_against_the_budget()
+    test_the_budget_is_inclusive_and_covers_the_whole_block()
+    test_no_budget_means_unlimited()
+    print("test_h2_hpack: 21 passed")

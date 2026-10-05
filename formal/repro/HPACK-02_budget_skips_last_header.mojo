@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: HPACK-02 fixed on fix/formal-findings
 """HPACK-02: HpackDecoder.decode never charges the last header of a block
 against its decode budget.
 
@@ -14,7 +15,7 @@ The loop adds header i-1 to the running total at the top of iteration i,
 so the header decoded in the last iteration is never added. A one-field
 block whose field is 133 bytes passes a 50-byte budget.
 
-Expected: HPACK_BUDGET_ERROR. Actual: the block decodes. The overrun is at
+Expected: HPACK_BUDGET_ERROR. Before the fix: the block decodes. The overrun is at
 most one field (bounded by the block length or the table size), so the
 connection-level ceiling (_header_block_ceiling) is exceeded by at most
 that much.

@@ -255,6 +255,15 @@ from test_h2_hpack import (
 from test_h2_hpack import (
     test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer as test_h2_hpack__test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer,
 )
+from test_h2_hpack import (
+    test_the_last_field_of_a_block_counts_against_the_budget as test_h2_hpack__test_the_last_field_of_a_block_counts_against_the_budget,
+)
+from test_h2_hpack import (
+    test_the_budget_is_inclusive_and_covers_the_whole_block as test_h2_hpack__test_the_budget_is_inclusive_and_covers_the_whole_block,
+)
+from test_h2_hpack import (
+    test_no_budget_means_unlimited as test_h2_hpack__test_no_budget_means_unlimited,
+)
 from test_h2_parked_response import (
     test_parked_response_is_not_redispatched as test_h2_parked_response__test_parked_response_is_not_redispatched,
 )
@@ -726,6 +735,13 @@ def main() raises:
     suite.test[
         test_h2_hpack__test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer
     ]()
+    suite.test[
+        test_h2_hpack__test_the_last_field_of_a_block_counts_against_the_budget
+    ]()
+    suite.test[
+        test_h2_hpack__test_the_budget_is_inclusive_and_covers_the_whole_block
+    ]()
+    suite.test[test_h2_hpack__test_no_budget_means_unlimited]()
     # tests/http2/test_h2_parked_response.mojo
     suite.test[
         test_h2_parked_response__test_parked_response_is_not_redispatched
