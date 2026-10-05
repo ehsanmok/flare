@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-19 fixed on fix/formal-findings
 """H2-19: after a DATA frame with END_STREAM closes a stream, flare still
 sends WINDOW_UPDATE on that stream.
 
@@ -24,7 +25,7 @@ Trace: send_request(1, GET, empty body); the server answers
 HEADERS(:status 200) and DATA(1, "abc", END_STREAM).
 
 Expected: stream 1 is CLOSED and the reply carries no frame on stream 1
-(a connection-level WINDOW_UPDATE on stream 0 is fine). Actual: the
+(a connection-level WINDOW_UPDATE on stream 0 is fine). Before the fix: the
 reply carries WINDOW_UPDATE(stream 1, 3).
 
 Minimal fix: in the DATA branch, send the stream-level WINDOW_UPDATE only

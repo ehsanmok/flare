@@ -1602,6 +1602,11 @@ struct Connection(Copyable, Defaultable):
                     s.state = StreamState.CLOSED()
                 else:
                     s.state = StreamState.HALF_CLOSED_REMOTE()
+            # sec 5.1: nothing but PRIORITY may be sent on a closed
+            # stream, and the credit of a stream this frame just closed
+            # is useless to the peer, so no stream-level WINDOW_UPDATE
+            # for it (H2-19). The connection-level one below still goes.
+            var stream_closed = s.state.value == StreamState.CLOSED().value
             self._put_stream(s^)
             # Connection credit lets unrelated streams progress; each
             # streaming response remains bounded by its own receive window.
@@ -1614,7 +1619,7 @@ struct Connection(Copyable, Defaultable):
             # withheld, which stalls the peer, until handlers take their
             # bodies (release_request_credit).
             if len(f.payload) > 0:
-                if credit > 0:
+                if credit > 0 and not stream_closed:
                     out.append(Self._window_update_frame(sid, credit))
                 if (
                     not self.is_client

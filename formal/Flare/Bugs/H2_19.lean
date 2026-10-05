@@ -15,6 +15,8 @@ PRIORITY on a closed stream."
 
 Witness (the repro's): client; SETTINGS; request on stream 1 with
 END_STREAM; response HEADERS(:status 200); DATA(1, 3 octets, END_STREAM).
+
+Status: resolved. The DATA branch no longer queues a stream-level WINDOW_UPDATE for a stream the frame closed. `Fix.shipped` carries `h2_19`; `bug` and `counterexample` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_19
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -53,5 +55,10 @@ theorem fixed (fx : Fix) (hfx : fx.h2_19 = true) (c : Conn) (f : Fr) (s : Stream
     · simp at hn
     · simp at hn; exact hk hn.1
   · simp at hn
+
+/-- Shipped (`Fix.shipped` has `h2_19`): the stream is closed and only the
+connection-level `WINDOW_UPDATE` is sent. -/
+theorem fixed_shipped : stateOf Fix.shipped init tr 1 = some .closed ∧
+    lastOut Fix.shipped init tr = some [.wu 0 3] := by native_decide
 
 end Flare.Bugs.H2_19

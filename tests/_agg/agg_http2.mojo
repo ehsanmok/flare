@@ -84,6 +84,12 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_frame_at_the_advertised_size_is_not_refused as test_h2_client_conn__test_frame_at_the_advertised_size_is_not_refused,
 )
+from test_h2_client_conn import (
+    test_no_stream_window_update_for_the_data_that_closes_a_stream as test_h2_client_conn__test_no_stream_window_update_for_the_data_that_closes_a_stream,
+)
+from test_h2_client_conn import (
+    test_stream_window_update_is_still_sent_while_the_stream_is_open as test_h2_client_conn__test_stream_window_update_is_still_sent_while_the_stream_is_open,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -601,6 +607,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_client_conn__test_frame_at_the_advertised_size_is_not_refused
+    ]()
+    suite.test[
+        test_h2_client_conn__test_no_stream_window_update_for_the_data_that_closes_a_stream
+    ]()
+    suite.test[
+        test_h2_client_conn__test_stream_window_update_is_still_sent_while_the_stream_is_open
     ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()

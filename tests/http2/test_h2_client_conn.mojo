@@ -963,6 +963,74 @@ def test_frame_at_the_advertised_size_is_not_refused() raises:
     assert_false(client.conn.goaway_sent)
 
 
+def _window_updates_on(bytes: List[UInt8], sid: Int) raises -> Int:
+    """How many WINDOW_UPDATE frames in ``bytes`` target stream ``sid``."""
+    var off = 0
+    var n = 0
+    while off < len(bytes):
+        var got = parse_frame(Span[UInt8, _](bytes)[off:])
+        if not got:
+            break
+        var f = got.value().copy()
+        off += 9 + f.header.length
+        if (
+            f.header.type.value == FrameType.WINDOW_UPDATE().value
+            and f.header.stream_id == sid
+        ):
+            n += 1
+    return n
+
+
+def _bodiless_get(mut client: Http2ClientConnection) raises -> Int:
+    """A GET with no body: the request ends with its HEADERS frame, so the
+    stream is half-closed (local); the response head is fed in."""
+    _ = client.drain()
+    var sid = client.next_stream_id()
+    var empty = List[UInt8]()
+    client.send_request(
+        sid, "GET", "http", "example.com", "/", List[HpackHeader](), Span(empty)
+    )
+    _ = client.drain()
+    var head = List[UInt8]()
+    head.append(UInt8(0x88))  # :status 200
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x4), sid, head)))
+    _ = client.drain()
+    return sid
+
+
+def test_no_stream_window_update_for_the_data_that_closes_a_stream() raises:
+    """H2-19: RFC 9113 sec 5.1. A response's last DATA frame closes a
+    stream whose request already ended. Sending WINDOW_UPDATE on it is a
+    frame on a closed stream; the connection-level credit still goes."""
+    var client = Http2ClientConnection()
+    var sid = _bodiless_get(client)
+    var body = List[UInt8]()
+    body.append(UInt8(0x61))
+    body.append(UInt8(0x62))
+    body.append(UInt8(0x63))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x0), UInt8(0x1), sid, body)))
+    var out = client.drain()
+    assert_equal(
+        client.conn.streams[sid].copy().state.value,
+        StreamState.CLOSED().value,
+    )
+    assert_equal(_window_updates_on(out, sid), 0)
+    assert_equal(_window_updates_on(out, 0), 1)
+    assert_equal(_goaway_code(out), -1)
+
+
+def test_stream_window_update_is_still_sent_while_the_stream_is_open() raises:
+    """H2-19: DATA without END_STREAM keeps the stream-level credit."""
+    var client = Http2ClientConnection()
+    var sid = _bodiless_get(client)
+    var body = List[UInt8]()
+    body.append(UInt8(0x61))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x0), UInt8(0x0), sid, body)))
+    var out = client.drain()
+    assert_equal(_window_updates_on(out, sid), 1)
+    assert_equal(_window_updates_on(out, 0), 1)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -989,4 +1057,6 @@ def main() raises:
     test_trailers_after_a_response_head_are_still_accepted()
     test_oversized_frame_is_a_frame_size_error_not_a_raise()
     test_frame_at_the_advertised_size_is_not_refused()
-    print("test_h2_client_conn: 25 passed")
+    test_no_stream_window_update_for_the_data_that_closes_a_stream()
+    test_stream_window_update_is_still_sent_while_the_stream_is_open()
+    print("test_h2_client_conn: 27 passed")

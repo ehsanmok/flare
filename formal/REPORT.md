@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63469 lines) |
-| Theorems | 3340 |
-| Headline theorems in the axiom audit | 1130 |
+| Lean files | 298 (63478 lines) |
+| Theorems | 3341 |
+| Headline theorems in the axiom audit | 1131 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 127 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 128 of 138 |
 
 Six findings are rated high:
 
@@ -3071,7 +3071,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-16 | Low | resolved | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
 | H2-17 | Medium | resolved | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
 | H2-18 | Low | resolved | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
-| H2-19 | Low | open | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
+| H2-19 | Low | resolved | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
 | H2-20 | Low | open | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
 | HPACK-01 | Medium | resolved | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
 | HPACK-02 | Low | open | the decode budget never counts the last header | `Flare/Bugs/HPACK_02.lean` | `repro/HPACK-02_budget_skips_last_header.mojo` (any) |
@@ -4248,6 +4248,8 @@ Status: resolved. Fixed: `Http2ClientConnection.feed` (`client.mojo`) queues GOA
 - **Flip:** `OK: oversized frame drew GOAWAY code 6`. `test_h2_client_conn` (11), `test_h2_streaming_state` (10), `test_h2_config` (18) and `test_h2_extended_connect` (5) passed.
 
 #### H2-19: WINDOW_UPDATE is sent on a stream that the DATA frame just closed
+
+Status: resolved. Fixed: the DATA branch of `Connection.handle_frame` (`state.mojo`) skips the stream-level WINDOW_UPDATE when the frame closed the stream; the connection-level one is still sent. Tests: `test_h2_client_conn.mojo::test_no_stream_window_update_for_the_data_that_closes_a_stream`, `test_stream_window_update_is_still_sent_while_the_stream_is_open`. Model: `Fix.shipped` carries `h2_19`; `Bugs.H2_19.fixed_shipped`; `bug` and `counterexample` stay about `Fix.none`.
 
 - **Severity:** Low. This is the ordinary path of every bodiless client request: HEADERS ends the request, and the response's last DATA frame closes the stream. flare then sends WINDOW_UPDATE on the closed stream. Peers must ignore such a frame for a short while after closing, so the effect is a protocol violation and wasted bytes.
 - **RFC:** RFC 9113 §5.1, closed: "An endpoint MUST NOT send frames other than PRIORITY on a closed stream."
