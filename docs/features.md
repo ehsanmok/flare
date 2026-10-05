@@ -277,7 +277,7 @@ refuses to verify under one. A short key used to be kept as an empty
 "invalid" marker that could not sign but did verify, so a store built
 from an unset environment variable accepted cookies anyone could forge.
 
-**Changed in v0.11 (breaking): sessions expire server-side by default.**
+**Changed in v0.12 (breaking): sessions expire server-side by default.**
 Before, a validly signed session cookie was accepted for as long as the
 signing key stayed in use, and `BackedSessionStore` defaulted to a TTL of
 0 (never). Now `CookieSessionStore`, `InMemorySessionStore` and
@@ -515,11 +515,11 @@ The bench figure above predates these checks and has not been re-run.
 | QUIC transport-frame codec (RFC 9000 §19 — all 22 frame types: PADDING, PING, ACK / ACK_ECN, RESET_STREAM, STOP_SENDING, CRYPTO, NEW_TOKEN, STREAM, MAX_DATA, MAX_STREAM_DATA, MAX_STREAMS_BIDI / _UNI, DATA_BLOCKED, STREAM_DATA_BLOCKED, STREAMS_BLOCKED_BIDI / _UNI, NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, PATH_CHALLENGE, PATH_RESPONSE, CONNECTION_CLOSE (transport + application), HANDSHAKE_DONE, plus RFC 9221 DATAGRAM with / without length): typed payload structs (`AckFrame`, `StreamFrame`, `CryptoFrame`, `DatagramFrame`, ...) plus the `FrameHandler` trait + `parse_frame_into[H](buf, handler)` (MAX_STREAMS / STREAMS_BLOCKED above 2^60 and ACK ranges reaching below packet number 0 are a FRAME_ENCODING_ERROR) zero-carrier dispatcher (the parser walks one wire frame and fires the matching `on_*` callback on the caller's handler -- no intermediate union allocation), the per-type `encode_*(payload, mut out: List[UInt8])` writers that append to a caller-owned buffer, and the `FRAME_TYPE_*` constants | `flare.quic.frame` |
 | QUIC transport parameters (RFC 9000 §18): `TransportParameters`, `encode_transport_parameters`, `decode_transport_parameters`, `empty_transport_parameters`, `check_client_transport_params` / `check_server_transport_params` (RFC 9000 §7.3 / §18.2 connection-ID authentication: an absent `initial_source_connection_id` differs from a zero-length one, `retry_source_connection_id` needs a Retry, no `preferred_address` with a zero-length CID); `initial_max_streams_bidi` / `_uni` above 2^60 and a `preferred_address` that breaks its RFC 9000 §18.2 layout (1..20-byte CID, 41 + CID-length bytes) are a TRANSPORT_PARAMETER_ERROR on decode; all `TP_ID_*` identifiers and defaults (`DEFAULT_MAX_UDP_PAYLOAD_SIZE`, `DEFAULT_ACK_DELAY_EXPONENT`, `DEFAULT_MAX_ACK_DELAY`, `DEFAULT_ACTIVE_CONNECTION_ID_LIMIT`) | `flare.quic.transport_params` |
 | QUIC connection + stream state machines (RFC 9000 §3, §10, §13): `Connection`, `Stream`, `ConnectionEvents`, `handle_frame`, `mark_handshake_complete`, `is_idle_timeout_expired`, `connection_close`, `new_connection`, `new_stream`, `empty_events`; `CONN_STATE_*` and `STREAM_STATE_*` enums | `flare.quic.state` |
-| QUIC congestion control (RFC 9002 §7): the `CongestionController` trait + `RenoController` (RFC 9002 NewReno) + `CubicController` (RFC 9438 CUBIC with RFC 9406 HyStart++ slow-start exit), selected by `CcChoice`. The 1-RTT loss-recovery path (`flare.quic._loss_recovery`) now runs an RTT estimator (RFC 9002 §5), ACK-based loss detection (§6.1 packet-number + time thresholds), the §6.2 PTO formula, and drives a CUBIC controller on every ACK / loss. Both peers use it: the client since v0.9 and the server since v0.11. RFC 9002 §7.7 send pacing is still not wired (the window gates burst size; there is no inter-packet timer) -- deferred to v0.12 | `flare.quic.cc` |
+| QUIC congestion control (RFC 9002 §7): the `CongestionController` trait + `RenoController` (RFC 9002 NewReno) + `CubicController` (RFC 9438 CUBIC with RFC 9406 HyStart++ slow-start exit), selected by `CcChoice`. The 1-RTT loss-recovery path (`flare.quic._loss_recovery`) now runs an RTT estimator (RFC 9002 §5), ACK-based loss detection (§6.1 packet-number + time thresholds), the §6.2 PTO formula, and drives a CUBIC controller on every ACK / loss. Both peers use it: the client since v0.9 and the server since v0.11. RFC 9002 §7.7 send pacing is still not wired (the window gates burst size; there is no inter-packet timer) | `flare.quic.cc` |
 | QUIC initial-secret + AEAD key schedule (RFC 9001 §5 + RFC 5869 HKDF): `hkdf_extract`, `hkdf_expand`, `hkdf_expand_label`, `derive_initial_secrets`, `QuicAead` enum, `QuicCrypto` trait, `OpenSslQuicCrypto`. OpenSSL AEAD backend (AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305) + AES-ECB / ChaCha20 header-protection mask per RFC 9001 §5.3 / §5.4; key schedule is RFC 9001 Appendix A.1 byte-exact, AEAD vectors are RFC 9001 Appendix A byte-exact, both pinned by `tests/quic/test_crypto.mojo` + `tests/quic/test_openssl_quic_crypto.mojo` + `tests/quic/test_rfc9001_appendix_a.mojo`; fuzz-covered (`fuzz-quic-packet-decrypt`) | `flare.quic.crypto` |
 | Batched UDP I/O (`flare.udp.batch`, Linux): `BatchReceiver` (one `recvmmsg(2)` drains a whole inbound burst), `send_batch` (one `sendmmsg(2)` for a vector of datagrams), `send_segmented` (GSO `UDP_SEGMENT` one-`sendmsg` egress), all behind `udp_batch_supported()` + an `ENOSYS`-latched fallback to per-datagram `recvfrom` / `sendto`. The QUIC reactor's per-tick drain uses `BatchReceiver` by default (disable with `FLARE_QUIC_NO_BATCH=1`); loopback A/B shows no throughput regression on the single-client HTTP/3 bench and tighter run-to-run variance | `flare.udp.batch` |
 | HTTP/3 server driver: `Http3Connection` (per-connection driver mounted on `Handler`), `Http3Config` (SETTINGS carrier -- max field section size, QPACK table caps, CONNECT-Protocol toggle, GOAWAY soft cap), `Http3StreamType` (RFC 9114 §6.2 codepoints). `feed_stream_chunk` drives `Http3RequestReader` -> `Handler` -> response writer; `take_response_frames` drains encoded bytes; the server opens its own control stream (stream 3: type 0x00 + SETTINGS) with the first 1-RTT flight (`take_control_stream_start`); CONTROL + QPACK uni-stream dispatch consumes SETTINGS / GOAWAY / MAX_PUSH_ID and replays peer QPACK encoder-stream inserts into a per-connection dynamic table (`take_qpack_decoder_frames` drains the owed Insert Count Increment); fuzz-covered (`fuzz-h3-server`) | `flare.http3.server` |
-| QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + a blocking `recv_from` wake followed by a batched `recvmmsg` burst drain (per-datagram `try_recv_from` fallback) + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4. Idle-timeout dispatch follows RFC 9000 §10.1 (the timer uses the minimum of the server's and the client's non-zero `max_idle_timeout`, at least 3×PTO, is disabled when both are 0, and is restarted only by a successfully processed packet or the first ack-eliciting packet sent after one), plus stateless reset on unknown short-header DCIDs (RFC 9000 §10.3) and ack-delay timer dispatch, PROTOCOL_VIOLATION for a HANDSHAKE_DONE frame received by a server (RFC 9000 §19.20), STREAM_STATE_ERROR / STREAM_LIMIT_ERROR for a RESET_STREAM, STOP_SENDING, MAX_STREAM_DATA or STREAM_DATA_BLOCKED that names a stream half that does not exist or a stream above the advertised limit (RFC 9000 §4.6, §19.4-§19.13), the advertised unidirectional stream limit enforced on STREAM frames too, and RFC 9002 loss recovery: inbound ACK ranges drive a per-slot `LossRecovery`, lost frames are re-sent under fresh packet numbers, and a real PTO probes the oldest unacked packet, bounded by `QuicServerConfig.max_pto_count`. A connection error closes the connection with a 1-RTT CONNECTION_CLOSE carrying the error code, then the slot stays in the closing state for three PTOs (at most 10 s), answering incoming packets with CONNECTION_CLOSE (rate limited) before it is reclaimed (RFC 9000 §10.2). After the peer's CONNECTION_CLOSE a connection is draining and the server (like `QuicClientConnection`, whose `send_stream` then raises) sends no packet at all (§10.2.2). Received packet numbers are tracked as at most 32 ACK ranges plus a floor, so a replayed packet from a range dropped at the cap is still recognised as a duplicate. Send pacing is deferred to v0.12; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
+| QUIC server reactor: `QuicServerConfig`, `QuicListener`, `QuicConnection`, `ConnectionIdTable` (RFC 9000 §5 -- multiple connection IDs per peer). UDP bind + a blocking `recv_from` wake followed by a batched `recvmmsg` burst drain (per-datagram `try_recv_from` fallback) + per-datagram dispatch with coalesced 1-RTT egress, ECN echo per RFC 9002 §A.4. Idle-timeout dispatch follows RFC 9000 §10.1 (the timer uses the minimum of the server's and the client's non-zero `max_idle_timeout`, at least 3×PTO, is disabled when both are 0, and is restarted only by a successfully processed packet or the first ack-eliciting packet sent after one), plus stateless reset on unknown short-header DCIDs (RFC 9000 §10.3) and ack-delay timer dispatch, PROTOCOL_VIOLATION for a HANDSHAKE_DONE frame received by a server (RFC 9000 §19.20), STREAM_STATE_ERROR / STREAM_LIMIT_ERROR for a RESET_STREAM, STOP_SENDING, MAX_STREAM_DATA or STREAM_DATA_BLOCKED that names a stream half that does not exist or a stream above the advertised limit (RFC 9000 §4.6, §19.4-§19.13), the advertised unidirectional stream limit enforced on STREAM frames too, and RFC 9002 loss recovery: inbound ACK ranges drive a per-slot `LossRecovery`, lost frames are re-sent under fresh packet numbers, and a real PTO probes the oldest unacked packet, bounded by `QuicServerConfig.max_pto_count`. A connection error closes the connection with a 1-RTT CONNECTION_CLOSE carrying the error code, then the slot stays in the closing state for three PTOs (at most 10 s), answering incoming packets with CONNECTION_CLOSE (rate limited) before it is reclaimed (RFC 9000 §10.2). After the peer's CONNECTION_CLOSE a connection is draining and the server (like `QuicClientConnection`, whose `send_stream` then raises) sends no packet at all (§10.2.2). Received packet numbers are tracked as at most 32 ACK ranges plus a floor, so a replayed packet from a range dropped at the cap is still recognised as a duplicate. Send pacing is not wired; fuzz-covered (`fuzz-quic-initial-handshake`, `fuzz-quic-connection-id`) | `flare.quic.server` |
 | HTTP/3 incremental server streaming (K1): a handler returning `stream_response` / `stream_sse_response` emits HEADERS first, then pumps one DATA frame per tick from the stashed (boxed) `ChunkSource` with a persistent per-stream send offset, MTU-bounded by datagram fragmentation, deferring FIN + trailers to end-of-stream — the same wire-agnostic body-stream path as H1 chunked / H2 DATA (buffered path stays byte-identical) | [`tests/h3/test_h3_end_to_end.mojo`](../tests/h3/test_h3_end_to_end.mojo), `flare.quic.server` |
 | ALPN -> wire-protocol dispatcher: `WireProtocol` codepoints (UNKNOWN / HTTP_1_1 / H2C / HTTP_2 / HTTP_3), `ALPN_HTTP_1_1` / `ALPN_HTTP_2` / `ALPN_HTTP_3` identifiers, `dispatch_alpn`, `dispatch_h2c_upgrade`, `negotiate_alpn`, `wire_protocol_name`. The pure decision function the reactor consults after a TLS handshake completes | `flare.http.alpn_dispatch` |
 | QUIC Retry address validation (RFC 9000 §8.1), server **and** client wired: `QuicServerConfig.require_address_validation` answers a token-less Initial with a Retry (HMAC token bound to peer addr + original DCID, amplification-safe) and only accepts a validated token; the client detects an inbound Retry, captures the token + server-chosen DCID, and re-sends its Initial. Codecs (`encode_retry_packet` / `verify_retry_integrity` RFC 9001 §5.8 + Appendix A.4, `mint_retry_token` / `validate_retry_token`, `encode_version_negotiation`) are spec-validated + fuzz-clean; a full loopback handshake-through-Retry e2e passes | `flare.quic.retry`, `flare.quic.server`, `flare.quic.client` |
@@ -652,7 +652,7 @@ whether the body arrived whole. It used to be returned as complete.
 Responses framed by length or chunking are unaffected.
 `TlsStream.eof_was_unclean()` exposes the signal to other readers.
 
-Breaking: the HTTP/1.1 client now raises `NetworkError` when a chunked
+Changed in v0.12 (breaking): the HTTP/1.1 client now raises `NetworkError` when a chunked
 response ends before its last chunk and the empty line after the
 trailers, on TCP and on TLS. It used to return the bytes read so far as
 the whole body.
@@ -691,7 +691,7 @@ response (even with `Connection: keep-alive`) now closes the connection,
 so the next request opens a new one instead of writing to a socket the
 server is closing.
 
-Breaking: the streaming download (`get_streaming` over HTTPS) now applies
+Changed in v0.12 (breaking): the streaming download (`get_streaming` over HTTPS) now applies
 the same close_notify rule to a close-delimited body: if the server resets
 the connection without `close_notify`, the read raises `NetworkError`
 instead of reporting the end of the body.
@@ -917,7 +917,7 @@ of what you might reasonably assume from the surrounding feature.
 - Send pacing is built but not wired, and the congestion window is not
   gated on the HTTP/3 DATA pump. Loss recovery, the window itself and
   the ack-eliciting accounting are live and correct; nothing reads the
-  window on that one path. Deferred to 0.12 together with pacing.
+  window on that one path. Both are open together with pacing.
 - The QPACK dynamic table is dormant. Both ends work, statically.
 - The h3 client rejects a request body larger than one packet.
 
@@ -986,23 +986,20 @@ of what you might reasonably assume from the surrounding feature.
   when only the version is wrong, 400 otherwise. All of these used to be
   upgraded. The shared-listener upgrade (`ServerConfig.ws`) applies the
   same rule.
-- **The server side of WebSocket is not RFC 6455 conformant yet.** The
-  Autobahn suite ran against flare for the first time in v0.11 and 63
-  of roughly 450 cases fail. Three gaps account for nearly all of
-  them. `WsConnection` has no fragment reassembly and no
-  `recv_message`, which the client side does have, so a CONTINUATION
-  sequence reaches the handler as separate frames. A reserved opcode
-  or reserved bit is handed to the handler instead of failing the
-  connection with 1002. And a reserved close code is not rejected with
-  the status the RFC asks for. (A final, unfragmented TEXT frame that is
-  not valid UTF-8 is refused with 1007; a fragmented message is not
-  checked until reassembly exists.) The measured baseline is recorded
-  case by case in
+- **The server side of WebSocket is not fully RFC 6455 conformant.**
+  The Autobahn suite first ran against flare in v0.11 and 63 of roughly
+  450 cases failed. In v0.12, 42 do, and all of them come from one gap:
+  `WsConnection` has no fragment reassembly and no `recv_message`, which
+  the client side does have, so a CONTINUATION sequence reaches the
+  handler as separate frames and a fragmented TEXT message is not
+  checked for UTF-8. Reserved opcodes and reserved bits fail the
+  connection with 1002, reserved close codes are rejected, and a final
+  unfragmented TEXT frame that is not valid UTF-8 is refused with 1007.
+  The remaining cases are recorded one by one in
   [`tests/tools/conformance/autobahn-known-fail.txt`](../tests/tools/conformance/autobahn-known-fail.txt),
-  so CI catches a regression against it; closing the gaps is 0.12
-  work. Sections 12 and 13 are excluded rather than failing: the
-  standalone handshake does not negotiate permessage-deflate, so they
-  would measure the test fixture.
+  so CI catches a regression against them. Sections 12 and 13 are
+  excluded rather than failing: the standalone handshake does not
+  negotiate permessage-deflate, so they would measure the test fixture.
 - Batch UDP is Linux-only, and the `sendmmsg` / GSO egress path is
   built and measured but not wired into QUIC.
 - `is_private()` does not recognise IPv6 unique local addresses.

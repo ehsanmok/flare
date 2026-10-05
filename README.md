@@ -388,8 +388,8 @@ flare.http3       Sans-I/O HTTP/3 frame codec + SETTINGS payload + the
                the h1 / h2 paths use and is driven per-stream by the
                QUIC reactor over the wire.
 flare.crypto   HMAC-SHA256, base64url (signed cookies, sessions)
-flare.tls      TLS 1.2/1.3 (OpenSSL, both client and server, session
-               resumption via RFC 5077 tickets + RFC 8446 §4.6.1)
+flare.tls      TLS 1.2/1.3 (OpenSSL, both client and server, opt-in
+               session resumption via RFC 5077 tickets + RFC 8446 §4.6.1)
 flare.tcp      TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      UdpSocket (IPv4 + IPv6)
 flare.uds      UnixListener + UnixStream (AF_UNIX sidecar IPC)

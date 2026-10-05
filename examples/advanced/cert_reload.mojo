@@ -1,5 +1,4 @@
 """Example 25 — TLS certificate reload without restart
-().
 
 Production TLS deployments rotate certificates on a regular
 cadence (Let's Encrypt: 60-90 days; internal PKI: weeks). The
@@ -10,13 +9,15 @@ some form of zero-downtime cert reload.
 flare's ``TlsAcceptor.reload()`` re-reads the cert + key files
 from disk without restarting the acceptor. In-flight handshakes
 complete with the previous cert; new connections pick up the
-new one.
+new one. The replacement context is built before it is installed,
+so a reload that fails (unreadable file, cert and key that do not
+match) raises and leaves the running context in place. A reload
+also rotates the session-ticket key: a ticket issued before it
+does not resume afterwards, and the peer does a full handshake.
 
-This example demonstrates the trigger pattern. Once the
-reactor-side handshake state machine lands, the same pattern
-runs against live traffic. Until then, ``reload()`` is a no-op
-(the public method exists so deployments can wire SIGHUP /
-inotify / file-watcher / cron triggers today).
+This example shows the trigger pattern: build an acceptor, then
+call ``reload()`` from whatever fires on a renewal (a file
+watcher, a cron-like timer, or a signal handler).
 
 Trigger options:
 
@@ -63,18 +64,16 @@ def main() raises:
     var acceptor = TlsAcceptor(cfg^)
     print("[1] Acceptor created against", acceptor.config.cert_file)
 
-    # 2. Trigger a reload. In production this fires on a SIGHUP
-    # signal handler, an inotify watch, or a cron-like timer.
-    # Until the reactor follow-up, reload() is a no-op — but
-    # deployments can wire the trigger today and the wiring
-    # flips on without code changes when the implementation
-    # lands.
+    # 2. Trigger a reload. In production this fires from an inotify
+    # watch, a cron-like timer, or a signal handler. reload() builds
+    # a fresh SSL_CTX from the files and swaps it in; if the files
+    # cannot be loaded it raises and the old context keeps serving.
     print("[2] Triggering reload — reads cert + key from disk again")
     acceptor.reload()
-    print(" reload() returned cleanly (no-op until reactor follow-up)")
+    print(" reload() returned; new handshakes use the reloaded context")
 
-    # 3. Show the SIGHUP-shaped trigger pattern handlers will
-    # use once the SIGHUP helper lands. Pseudo-code today.
+    # 3. Show the SIGHUP-shaped trigger pattern. Pseudo-code: flare
+    # has no signal-handler helper yet.
     print()
     print("[3] Production trigger pattern (pseudo-code, deferred):")
     print(" install_sighup_handler(lambda: acceptor.reload())")
