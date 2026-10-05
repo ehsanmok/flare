@@ -1,4 +1,4 @@
-"""A draining endpoint sends nothing (RFC 9000 sec 10.2.2; QUIC-23).
+"""A draining endpoint sends nothing (RFC 9000 sec 10.2.2; QUIC-23, QUIC-24).
 
 Loopback tests: a real ``QuicClientConnection`` against a ``QuicListener``
 in lockstep on one thread (ephemeral ports). One side receives the other's
@@ -146,6 +146,54 @@ def test_server_sends_nothing_after_the_peers_connection_close() raises:
     client.close()
 
 
+def test_client_sends_nothing_after_the_peers_connection_close() raises:
+    """QUIC-24: after the server's CONNECTION_CLOSE the client is DRAINING:
+    polls (PTO, ACKs), keep-alives and new stream data send nothing."""
+    var server = _bind()
+    var connector = RustlsQuicConnector(
+        Path(_FIXDIR + "ca.pem").read_text(), _alpn()
+    )
+    var client = _established(server, connector)
+    var slot = _live_slot(server)
+    assert_true(slot >= 0)
+
+    # Control: an established client builds a keep-alive packet.
+    var pn0 = client.tx_1rtt_pn
+    client.keepalive()
+    assert_true(client.tx_1rtt_pn > pn0, "control: keepalive sends a packet")
+    var body: List[UInt8] = [0x41]
+    var sid = client.open_bidi_stream()
+    client.send_stream(sid, body, False)
+
+    server._close_for(slot, UInt64(0x05), String("stream id"))
+    var closed = False
+    for _ in range(5):
+        if client.poll(timeout_ms=100).connection_closed:
+            closed = True
+            break
+    assert_true(closed, "the CONNECTION_CLOSE must reach the client")
+    assert_equal(client.conn.state, CONN_STATE_DRAINING)
+
+    var pn = client.tx_1rtt_pn
+    client.keepalive()
+    var more: List[UInt8] = [0x42]
+    var raised = False
+    try:
+        client.send_stream(sid, more, False)
+    except:
+        raised = True
+    assert_true(raised, "send_stream on a draining connection must raise")
+    # A PTO for the unacknowledged body would retransmit it.
+    for _ in range(4):
+        _ = client.poll(timeout_ms=100)
+    client.shutdown()
+    assert_equal(
+        client.tx_1rtt_pn, pn, "the draining client built a 1-RTT packet"
+    )
+    server.close()
+
+
 def main() raises:
     test_server_sends_nothing_after_the_peers_connection_close()
-    print("test_quic_draining: 1 passed")
+    test_client_sends_nothing_after_the_peers_connection_close()
+    print("test_quic_draining: 2 passed")

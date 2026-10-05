@@ -28,7 +28,7 @@ from flare.quic import (
 )
 from flare.quic._server_support import _monotonic_ms
 from flare.quic.client import QuicClientConnection
-from flare.quic.state import CONN_STATE_CLOSED
+from flare.quic.state import CONN_STATE_CLOSED, CONN_STATE_ESTABLISHED
 from flare.tls import RustlsQuicConnector
 
 
@@ -88,11 +88,19 @@ def _poll_close(mut client: QuicClientConnection) raises -> Bool:
 
 
 def _send_ping(mut client: QuicClientConnection) raises:
-    """A 1-RTT PING straight onto the socket (no client-side guards)."""
+    """A 1-RTT PING straight onto the socket (no client-side guards).
+
+    The client has already received the server's CONNECTION_CLOSE and so
+    is draining (QUIC-24: a draining client builds no packet); the test
+    plays a peer that did not notice, so the state is lifted for the build
+    and restored."""
     var payload: List[UInt8] = [0x01]
     while len(payload) < 16:
         payload.append(0)
+    var state = client.conn.state
+    client.conn.state = CONN_STATE_ESTABLISHED
     var dg = client._build_1rtt(payload^, ack_eliciting=True)
+    client.conn.state = state
     _ = client.sock.send_to(Span[UInt8, _](dg), client.peer)
 
 

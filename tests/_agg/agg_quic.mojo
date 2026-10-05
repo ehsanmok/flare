@@ -411,6 +411,9 @@ from test_quic_client_stream_frames import (
 from test_quic_draining import (
     test_server_sends_nothing_after_the_peers_connection_close as test_quic_draining__test_server_sends_nothing_after_the_peers_connection_close,
 )
+from test_quic_draining import (
+    test_client_sends_nothing_after_the_peers_connection_close as test_quic_draining__test_client_sends_nothing_after_the_peers_connection_close,
+)
 from test_quic_handle_packet import (
     test_decode_packet_number_rfc_a3 as test_quic_handle_packet__test_decode_packet_number_rfc_a3,
 )
@@ -1216,6 +1219,9 @@ def main() raises:
     # tests/quic/test_quic_draining.mojo
     suite.test[
         test_quic_draining__test_server_sends_nothing_after_the_peers_connection_close
+    ]()
+    suite.test[
+        test_quic_draining__test_client_sends_nothing_after_the_peers_connection_close
     ]()
     # tests/quic/test_quic_handle_packet.mojo
     suite.test[test_quic_handle_packet__test_decode_packet_number_rfc_a3]()

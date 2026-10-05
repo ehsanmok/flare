@@ -218,6 +218,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_24.impl_sends_draining
 #print axioms Flare.Bugs.QUIC_24.impl_trace
 #print axioms Flare.Bugs.QUIC_24.fixed_spec
+#print axioms Flare.Bugs.QUIC_24.shipped_silent
+#print axioms Flare.Bugs.QUIC_24.shipped_trace
 #print axioms Flare.Bugs.QUIC_24.close_ok
 
 -- Transport-parameter encoder

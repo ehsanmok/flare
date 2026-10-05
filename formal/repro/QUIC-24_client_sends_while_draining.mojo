@@ -1,4 +1,5 @@
 # PLATFORM: any (needs the rustls QUIC shim and the fixtures in
+# RESOLVED: QUIC-24 fixed on fix/formal-findings
 # tests/tls/fixtures/rustls-quic-client/; UDP on 127.0.0.1 only)
 """QUIC-24: the client keeps sending while draining.
 
@@ -21,7 +22,7 @@ Control: the body chunk itself reaches the peer socket, and the client's
 state is DRAINING after the CONNECTION_CLOSE; otherwise inconclusive.
 
 Expected: no datagram after the CONNECTION_CLOSE.
-Actual: the PTO retransmission and the keepalive PING are sent.
+Before the fix: the PTO retransmission and the keepalive PING are sent.
 
 Minimal fix: _build_1rtt returns no datagram while the connection is
 DRAINING.

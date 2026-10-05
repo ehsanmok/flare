@@ -26,8 +26,8 @@ CONNECTION_CLOSE is sent, once per incoming packet; a peer's
 CONNECTION_CLOSE enters draining, where nothing is sent; both end after
 3×PTO. `spec_*` prove those properties for every state. `srvStep` and
 `cliStep` mirror flare's server and client before the QUIC-22..24 fixes;
-`srvStepFix`/`srvStepNow` are the shipped server (`srvStepNow` sends
-nothing in draining, QUIC-23).
+`srvStepFix`/`srvStepNow` and `cliStepNow` are the shipped ones (`srvStepNow` and `cliStepNow` send
+nothing in draining, QUIC-23 and QUIC-24).
 -/
 namespace Flare.L3.Quic.Timers
 
@@ -398,6 +398,30 @@ def cliStep (s : CSt) : CEv → CSt
   | .recvPkt _ => s
   | .want _ => if s.phase = .gone then s else { s with out := .other :: s.out }
   | .tick _ => s
+
+/-- The client as shipped (QUIC-24): nothing is sent in draining. `_build_1rtt`
+(and the Initial, Handshake and 0-RTT builders) return no datagram when the
+connection state is DRAINING, which covers `_drain_egress`, `_check_pto`,
+`keepalive` and `shutdown`; `send_stream` raises instead of sending.
+mirrors flare/quic/client.mojo `_build_1rtt`, `send_stream` -/
+def cliStepNow (s : CSt) : CEv → CSt
+  | .localClose _ => match s.phase with
+    | .opened => ⟨.gone, .cc :: s.out⟩
+    | _ => s
+  | .peerClose t => match s.phase with
+    | .opened => ⟨.draining t, s.out⟩
+    | _ => s
+  | .recvPkt _ => s
+  | .want _ => match s.phase with
+    | .gone => s
+    | .draining _ => s
+    | _ => { s with out := .other :: s.out }
+  | .tick _ => s
+
+/-- **QUIC-24, shipped**: the client sends nothing in draining. -/
+theorem cliNow_draining_silent (u : Nat) (out : List Pkt) (e : CEv) :
+    (cliStepNow ⟨.draining u, out⟩ e).out = out := by
+  cases e <;> simp only [cliStepNow] <;> (try split) <;> rfl
 
 /-- The client's own close conforms: it sends CONNECTION_CLOSE and, having
 closed its socket, may end the closing state at once (RFC 9000 §10.2:

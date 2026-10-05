@@ -3,7 +3,14 @@ import Flare.L3_Protocol.Quic.Timers
 /-!
 # QUIC-24: the client keeps sending after the server's CONNECTION_CLOSE
 
-flare/quic/state.mojo:430-445 @59bda50 moves the client's connection to
+Status: resolved. `_build_1rtt` (and the Initial, Handshake and 0-RTT builders)
+return no datagram when the connection state is DRAINING (flare/quic/client.mojo)
+and `send_stream` raises, so polls, PTO probes, keep-alives and `shutdown` send
+nothing after the peer's CONNECTION_CLOSE. `Timers.cliStepNow` is the shipped
+client and `shipped_silent` proves it; the counterexample below is about the
+pre-fix `cliStep`.
+
+Pre-fix behaviour: flare/quic/state.mojo:430-445 @59bda50 moves the client's connection to
 DRAINING on CONNECTION_CLOSE, but nothing in flare/quic/client.mojo reads
 the state before sending: `_drain_egress` (1035-1085) sends owed ACKs,
 `_check_pto` (688-706) sends probes, and `keepalive` (1619-1634) and
@@ -32,6 +39,15 @@ theorem impl_trace :
 theorem fixed_spec (pto u : Nat) (out : List Pkt) (e : CEv) :
     (cspecStep pto ⟨.draining u, out⟩ e).out = out :=
   spec_draining_silent pto u out e
+
+/-- **The shipped client** sends nothing in draining, for every event. -/
+theorem shipped_silent (u : Nat) (out : List Pkt) (e : CEv) :
+    (cliStepNow ⟨.draining u, out⟩ e).out = out :=
+  cliNow_draining_silent u out e
+
+theorem shipped_trace :
+    run cliStepNow ⟨.opened, []⟩ [.peerClose 0, .want 1, .want 2] =
+      ⟨.draining 0, []⟩ := by decide
 
 /-- The client's own close already conforms. -/
 theorem close_ok (t : Nat) (out : List Pkt) :

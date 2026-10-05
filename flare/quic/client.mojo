@@ -123,6 +123,7 @@ from .protection import (
 from .state import (
     CONN_STATE_CLOSED,
     CONN_STATE_CLOSING,
+    CONN_STATE_DRAINING,
     CONN_STATE_ESTABLISHED,
     Connection,
     ConnectionEvents,
@@ -1213,6 +1214,8 @@ struct QuicClientConnection(Movable):
         ``crypto_bytes`` (offset = :attr:`tx_initial_offset`),
         optionally an Initial-space ACK, and PADDING to the
         §14.1 floor when ``pad``. Advances :attr:`tx_initial_pn`."""
+        if self.conn.state == CONN_STATE_DRAINING:
+            return List[UInt8]()  # RFC 9000 sec 10.2.2: send nothing
         var payload = List[UInt8]()
         if len(crypto_bytes) > 0:
             self._note_ack_eliciting_send()
@@ -1269,6 +1272,8 @@ struct QuicClientConnection(Movable):
         an optional Handshake-space ACK. AEAD + header protection
         route through rustls at level 2. Advances
         :attr:`tx_handshake_pn`."""
+        if self.conn.state == CONN_STATE_DRAINING:
+            return List[UInt8]()  # RFC 9000 sec 10.2.2: send nothing
         var payload = List[UInt8]()
         if len(crypto_bytes) > 0:
             self._note_ack_eliciting_send()
@@ -1323,6 +1328,8 @@ struct QuicClientConnection(Movable):
         :attr:`initial_dcid` (still in :attr:`dcid` at first-flight
         time), which the server routes on and binds the 0-RTT keys to.
         """
+        if self.conn.state == CONN_STATE_DRAINING:
+            return List[UInt8]()  # RFC 9000 sec 10.2.2: send nothing
         if len(plaintext) == 0:
             return List[UInt8]()
         var first_bits = (pn_length - 1) & 0x3
@@ -1370,6 +1377,8 @@ struct QuicClientConnection(Movable):
         ACK never arrives. ACK-only / PADDING-only packets pass
         False so they are not tracked (RFC 9002 §2 -- they are not
         ack-eliciting)."""
+        if self.conn.state == CONN_STATE_DRAINING:
+            return List[UInt8]()  # RFC 9000 sec 10.2.2: send nothing
         var frames_copy = List[UInt8]()
         if ack_eliciting:
             frames_copy = plaintext.copy()
@@ -1482,6 +1491,8 @@ struct QuicClientConnection(Movable):
         body-less request still closes its stream."""
         if not self.have_1rtt_keys:
             raise Error("quic client: send_stream before 1-RTT keys")
+        if self.conn.state == CONN_STATE_DRAINING:
+            raise Error("quic client: send_stream on a draining connection")
         # RFC 9000 sec 3.1: no STREAM frames after the sender resets.
         if (
             stream_id in self.conn.streams
