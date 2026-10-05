@@ -92,6 +92,7 @@ from .transport_params import (
     decode_transport_parameters,
 )
 from .state import (
+    CONN_STATE_CLOSING,
     QUIC_FLOW_CONTROL_ERROR,
     QUIC_PROTOCOL_VIOLATION,
     QUIC_STREAM_LIMIT_ERROR,
@@ -843,6 +844,7 @@ struct QuicListener(Movable):
                     )
                 except:
                     ok = False
+                    self._close_after_state_error(slot)
         elif inbound_lvl == QuicEncryptionLevel.HANDSHAKE:
             if len(self.connections[slot].rx_handshake_secret) == 0:
                 ok = False  # keys not installed yet; drop
@@ -860,6 +862,7 @@ struct QuicListener(Movable):
                     self.connections[slot].addr_validated = True
                 except:
                     ok = False
+                    self._close_after_state_error(slot)
         elif inbound_lvl == QuicEncryptionLevel.APPLICATION:
             if len(self.connections[slot].rx_1rtt_secret) == 0:
                 ok = False
@@ -894,6 +897,7 @@ struct QuicListener(Movable):
                         self.rx_1rtt_ack_pending[slot] = True
                 except:
                     ok = False
+                    self._close_after_state_error(slot)
         elif inbound_lvl == QuicEncryptionLevel.EARLY_DATA:
             if len(self.connections[slot].rx_early_secret) == 0:
                 ok = False  # 0-RTT keys not installed: drop
@@ -932,6 +936,7 @@ struct QuicListener(Movable):
                         ok = False
                 except:
                     ok = False
+                    self._close_after_state_error(slot)
         else:
             ok = False  # Retry not handled here
         if not ok:
@@ -1860,6 +1865,8 @@ struct QuicListener(Movable):
         qc.initial_dcid = lh.dcid.copy()
         qc.fc_adv_max_data = self.config.initial_max_data
         qc.fc_adv_max_bidi = self.config.initial_max_streams_bidi
+        qc.conn.adv_max_streams_bidi = self.config.initial_max_streams_bidi
+        qc.conn.adv_max_streams_uni = self.config.initial_max_streams_uni
         if retry_odcid:
             qc.addr_validated = True  # the Retry token proved it
         var live = len(self.connections) - len(self.free_slots)
@@ -2258,6 +2265,23 @@ struct QuicListener(Movable):
             self.migration_probe[slot].note_tx(len(dg))
         return True
 
+    def _close_after_state_error(mut self, slot: Int):
+        """A frame the state machine rejected (PROTOCOL_VIOLATION,
+        STREAM_STATE_ERROR, ...) has already put the connection into
+        CLOSING; signal it like every other connection error: a
+        CONNECTION_CLOSE and the closing period (RFC 9000 sec 10.2, 11.1)."""
+        if (
+            slot >= 0
+            and slot < len(self.connections)
+            and self.connections[slot].alive
+            and self.connections[slot].conn.state == CONN_STATE_CLOSING
+        ):
+            self._close_for(
+                slot,
+                self.connections[slot].conn.close_error_code,
+                "frame rejected",
+            )
+
     def _close_for(mut self, slot: Int, code: UInt64, reason: String):
         """Close ``slot`` with transport error ``code``: the connection
         error is signalled with a 1-RTT CONNECTION_CLOSE (RFC 9000
@@ -2413,6 +2437,7 @@ struct QuicListener(Movable):
             var want_bidi = qc.fc_closed_bidi + _MAX_STREAMS_BIDI_WINDOW
             if want_bidi > qc.fc_adv_max_bidi:
                 qc.fc_adv_max_bidi = want_bidi
+                qc.conn.adv_max_streams_bidi = want_bidi
             var max_data = MaxDataFrame(maximum_data=qc.fc_adv_max_data)
             encode_max_data(max_data, plaintext)
             var max_streams = MaxStreamsFrame(

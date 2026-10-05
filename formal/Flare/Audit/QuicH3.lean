@@ -168,6 +168,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.Streams.halves_stop_iff
 #print axioms Flare.Bugs.QUIC_15.impl_accepts
 #print axioms Flare.Bugs.QUIC_15.fixed_spec
+#print axioms Flare.Bugs.QUIC_15.shipped_rejects
 #print axioms Flare.Bugs.QUIC_16.impl_accepts
 #print axioms Flare.Bugs.QUIC_16.fixed_spec
 #print axioms Flare.Bugs.QUIC_17.impl_accepts

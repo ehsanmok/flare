@@ -18,8 +18,9 @@ only a send part at its initiator and only a receive part at the other end.
 * §19.10: MAX_STREAM_DATA, the same two cases, STREAM_STATE_ERROR;
 * §19.13: STREAM_DATA_BLOCKED on a send-only stream, STREAM_STATE_ERROR.
 
-`server` is the server's check (only STREAM is looked at, in
-`_route_http3_stream_chunks`); `client` is the client's (none). `checked`
+`server` is the server's check (STREAM in `_route_http3_stream_chunks`; the other
+four frames in `check_stream_frame_id`, state.mojo, fixed QUIC-15;
+`ServerFixes.shipped` says which fixes are in); `client` is the client's (none). `checked`
 is the bit-level check the fixes add; `checked_eq_spec` proves it is the
 spec, and `serverFixed_eq_spec` / `clientFixed_eq_spec` instantiate it.
 `server_stream_conforms` proves the server's existing STREAM check is
@@ -113,6 +114,9 @@ structure ServerFixes where
   dir : Bool
   /-- QUIC-16: the unidirectional stream limit on STREAM -/
   uni : Bool
+
+/-- The fixes in `flare/quic/server.mojo` and `state.mojo` now. -/
+def ServerFixes.shipped : ServerFixes := ⟨true, false⟩
 
 /-- STREAM: mirrors flare/quic/server.mojo:1407-1430 @59bda50; the other
 four frames: mirrors flare/quic/state.mojo:454-486, 712-722 @59bda50 (no

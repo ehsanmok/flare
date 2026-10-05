@@ -140,7 +140,9 @@ def test_closing_state_answers_packets_and_lasts_three_ptos() raises:
     _ = server.timer_wheel.schedule(
         after_ms=1, token=encode_timer_token(TIMER_KIND_PTO, slot)
     )
-    _ = server.advance_timers(_monotonic_ms() + UInt64(100))
+    # (+10 ms: the PTO timer is due after 1 ms, while the closing period
+    # is three measured PTOs, which on loopback can be well under 100 ms.)
+    _ = server.advance_timers(_monotonic_ms() + UInt64(10))
     assert_false(server.slot_free[slot], "closing ended before 3 PTOs")
     # Past the closing period the slot is reclaimed.
     _ = server.advance_timers(_monotonic_ms() + UInt64(20_000))

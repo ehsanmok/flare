@@ -3,7 +3,14 @@ import Flare.L3_Protocol.Quic.Streams
 /-!
 # QUIC-15: the server accepts stream frames that name the wrong direction
 
-flare/quic/state.mojo:454-486, 712-722 @59bda50 (`apply_max_stream_data`,
+Status: resolved. `check_stream_frame_id` (flare/quic/state.mojo) runs in
+`on_reset_stream`, `on_stop_sending`, `on_max_stream_data` and
+`on_stream_data_blocked` when `Connection.is_server` is set; it closes with
+STREAM_STATE_ERROR or STREAM_LIMIT_ERROR and raises, and the server answers with
+a CONNECTION_CLOSE. The counterexample below is about the server before the fix
+(`ServerFixes ⟨false, false⟩`); `ServerFixes.shipped` has the check.
+
+Pre-fix behaviour: flare/quic/state.mojo:454-486, 712-722 @59bda50 (`apply_max_stream_data`,
 `apply_reset_stream`, `apply_stop_sending`, `on_stream_data_blocked`) reached
 from flare/quic/_server_types.mojo:559-579 (`QuicConnection.dispatch_plaintext`).
 The only stream-id check on the server is for STREAM, in
@@ -41,6 +48,16 @@ theorem impl_accepts :
     server ⟨false, false⟩ ctx .maxStreamData 2 = none ∧ spec .server ctx .maxStreamData 2 = some .state ∧
     server ⟨false, false⟩ ctx .stopSending 1 = none ∧ spec .server ctx .stopSending 1 = some .state ∧
     server ⟨false, false⟩ ctx .stopSending 400 = none ∧ spec .server ctx .stopSending 400 = some .limit := by
+  native_decide
+
+/-- **The shipped server rejects all six** with the spec's error. -/
+theorem shipped_rejects :
+    server ServerFixes.shipped ctx .resetStream 3 = some .state ∧
+    server ServerFixes.shipped ctx .streamDataBlocked 3 = some .state ∧
+    server ServerFixes.shipped ctx .stopSending 2 = some .state ∧
+    server ServerFixes.shipped ctx .maxStreamData 2 = some .state ∧
+    server ServerFixes.shipped ctx .stopSending 1 = some .state ∧
+    server ServerFixes.shipped ctx .stopSending 400 = some .limit := by
   native_decide
 
 /-- **Fix meets spec**: with the check on every stream frame (and the

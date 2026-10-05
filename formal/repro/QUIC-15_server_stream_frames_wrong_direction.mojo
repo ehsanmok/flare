@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-15 fixed on fix/formal-findings
 """QUIC-15: the server accepts stream frames that name the wrong direction.
 
 Lean: Flare.Bugs.QUIC_15.impl_accepts (impl), Flare.Bugs.QUIC_15.fixed_spec
@@ -21,7 +22,7 @@ Cases (the server opens no stream of its own; 100 client bidi allowed):
 Control: STOP_SENDING and MAX_STREAM_DATA on client bidi stream 0 are
 accepted.
 
-Expected: each case raises. Actual: each is accepted.
+Expected: each case raises. Before the fix: each is accepted.
 
 Minimal fix: in dispatch_plaintext, check the stream id of every
 RESET_STREAM / STOP_SENDING / MAX_STREAM_DATA / STREAM_DATA_BLOCKED

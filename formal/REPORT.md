@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62889 lines) |
-| Theorems | 3298 |
-| Headline theorems in the axiom audit | 1096 |
+| Lean files | 298 (62911 lines) |
+| Theorems | 3299 |
+| Headline theorems in the axiom audit | 1097 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 101 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 102 of 138 |
 
 Six findings are rated high:
 
@@ -1523,7 +1523,7 @@ File: `Quic/Streams.lean`.
 
 **Model.**
 - `spec` is the per-frame acceptance rule of RFC 9000: §4.6 (stream limit), §19.4 (RESET_STREAM), §19.5 (STOP_SENDING), §19.8 (STREAM), §19.10 (MAX_STREAM_DATA) and §19.13 (STREAM_DATA_BLOCKED), over the stream id's initiator and direction bits, the locally opened streams and the advertised limits.
-- `server` mirrors the server: STREAM is checked in `_route_http3_stream_chunks` (`quic/server.mojo:1407-1430`); the other four frames reach `state.mojo:454-486, 712-722` unchecked. `ServerFixes` switches on the QUIC-15 and QUIC-16 fixes.
+- `server` mirrors the server: STREAM is checked in `_route_http3_stream_chunks` (`quic/server.mojo:1407-1430`); the other four frames are checked in `check_stream_frame_id` (`quic/state.mojo`, fixed QUIC-15; they used to reach `state.mojo:454-486, 712-722` unchecked). `ServerFixes` switches on the QUIC-15 and QUIC-16 fixes; `ServerFixes.shipped` says which are in.
 - `client` mirrors `_dispatch_frames` (`quic/client.mojo:902-912`), which checks nothing.
 - `checked` is the two-bit check the fixes add.
 - `stepImpl` mirrors the single per-stream state (`state.mojo:356-363, 467-486`, `client.mojo:1406-1428`); `resetSeen` and `sendRefused` mirror `stream_reset` and the check in `send_stream`. `Halves` is the RFC's split into a sending and a receiving part.
@@ -2866,7 +2866,7 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.AckGen.contains`, `recordSt`, `floorAfter` | quic/_server_support.mojo `_ack_floor`, `_ack_contains`, `_ack_record` (fixed, QUIC-14) | `QUIC_14.impl_reaccepts` (pre-fix `containsOld`), `QUIC_14.fixed_trace`, `QUIC_14.fixed_never_reaccepts` | proved (QUIC-14 resolved) |
 | `Quic.AckGen.fromRanges`, `gaps` | quic/_server_support.mojo:127-157 | `fromRanges_claimed`, `fromRanges_wellFormed`, `ack_roundtrip` | proved |
 | `Quic.AckGen.recv`, `drain` | quic/server.mojo:844-863, 2240-2268 | `drain_after_recv` | proved |
-| `Quic.Streams.server` | quic/server.mojo:1407-1430, quic/state.mojo:454-486, 712-722 | `server_stream_conforms`, `QUIC_15.impl_accepts`, `QUIC_16.impl_accepts`, `serverFixed_eq_spec` | counterexample (QUIC-15, QUIC-16) |
+| `Quic.Streams.server` | quic/server.mojo:1407-1430, quic/state.mojo:454-486, 712-722 | `server_stream_conforms`, `QUIC_15.impl_accepts`, `QUIC_16.impl_accepts`, `serverFixed_eq_spec` | counterexample (QUIC-16); proved (QUIC-15 resolved) |
 | `Quic.Streams.client` | quic/client.mojo:902-912 | `QUIC_17.impl_accepts`, `clientFixed_eq_spec` | counterexample (QUIC-17) |
 | `Quic.Streams.stepHalves`, `resetSeenH`, `sendRefusedH` | quic/state.mojo `apply_reset_stream`, `apply_stop_sending`, quic/client.mojo `cancel_stream`, `stream_reset`, `send_stream` (fixed, QUIC-18) | `QUIC_18.impl_loses` (pre-fix `stepImpl`), `QUIC_18.fixed_both`, `halves_reset_iff`, `halves_stop_iff` | proved (QUIC-18 resolved) |
 | `Bugs.QUIC_19.replyImpl` | quic/client.mojo:902-912, quic/state.mojo:478-486 | `QUIC_19.impl_silent`, `QUIC_19.fixed_spec` | counterexample (QUIC-19) |
@@ -3082,7 +3082,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-12 | Low | resolved | the client's CID authentication confuses absent with empty | `Flare/Bugs/QUIC_12.lean` | `repro/QUIC-12_client_cid_auth_absent_vs_empty.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QUIC-13 | Low | resolved | preferred_address is not validated | `Flare/Bugs/QUIC_13.lean` | `repro/QUIC-13_preferred_address_not_validated.mojo` (any) |
 | QUIC-14 | Medium | resolved | ACK ranges forget dropped packets, which are then processed again | `Flare/Bugs/QUIC_14.lean` | `repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo` (any) |
-| QUIC-15 | Low | open | the server accepts stream frames that name the wrong direction | `Flare/Bugs/QUIC_15.lean` | `repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (any) |
+| QUIC-15 | Low | resolved | the server accepts stream frames that name the wrong direction | `Flare/Bugs/QUIC_15.lean` | `repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (any) |
 | QUIC-16 | Low | open | the server does not enforce its unidirectional stream limit | `Flare/Bugs/QUIC_16.lean` | `repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic)) |
 | QUIC-17 | Low | open | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
 | QUIC-18 | Medium | resolved | one state for both stream halves loses a reset | `Flare/Bugs/QUIC_18.lean` | `repro/QUIC-18_stream_reset_state_overwritten.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
@@ -4416,11 +4416,13 @@ Status: resolved. Fixed: `_ack_record` keeps a floor (one above the highest rang
 
 #### QUIC-15: the server accepts stream frames that name the wrong direction
 
+Status: resolved. The server checks the stream id of RESET_STREAM, STOP_SENDING, MAX_STREAM_DATA and STREAM_DATA_BLOCKED (state.mojo: check_stream_frame_id).
+
 - **Severity:** Low. The frames are applied to a stream the server does not have, or ignored; the missing connection error is the defect.
 - **RFC:** RFC 9000 §19.4 (RESET_STREAM on a send-only stream), §19.5 (STOP_SENDING on a receive-only stream or a locally initiated stream not yet created), §19.10 (MAX_STREAM_DATA, the same two cases) and §19.13 (STREAM_DATA_BLOCKED on a send-only stream) each require STREAM_STATE_ERROR; §4.6 requires STREAM_LIMIT_ERROR above the advertised stream count.
 - **What goes wrong:** only STREAM is checked, in `_route_http3_stream_chunks` (`quic/server.mojo:1407-1430`). RESET_STREAM, STOP_SENDING, MAX_STREAM_DATA and STREAM_DATA_BLOCKED reach `state.mojo:454-486, 712-722` from `QuicConnection.dispatch_plaintext` (`_server_types.mojo:559-579`) and nothing checks their stream id.
 - **Counterexample:** `Bugs.QUIC_15.impl_accepts`: RESET_STREAM and STREAM_DATA_BLOCKED on stream 3, STOP_SENDING and MAX_STREAM_DATA on stream 2, STOP_SENDING on stream 1 and on client stream 400 (100 allowed); the spec rejects each.
-- **Fix:** check those four frames' stream ids by direction, the server's (empty) set of opened streams and the advertised limit. `fixed_spec` (= `Streams.serverFixed_eq_spec`) shows the fixed verdict is the spec's for every frame and id.
+- **Fix:** check those four frames' stream ids by direction, the server's (empty) set of opened streams and the advertised limit (`check_stream_frame_id`, called from the four handlers when `Connection.is_server`; the server also turns a state-machine error into a CONNECTION_CLOSE). `shipped_rejects` and `fixed_spec` (= `Streams.serverFixed_eq_spec`) show the fixed verdict is the spec's for every frame and id; the counterexample runs against `ServerFixes ⟨false, false⟩`, the server before the fix.
 - **Repro:** `formal/repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (controls: STOP_SENDING and MAX_STREAM_DATA on client stream 0 are accepted).
 - **Observed:** `BUG REPRODUCED: server accepted stream frames RFC 9000 requires it to reject: [RESET_STREAM sid 3] [STREAM_DATA_BLOCKED sid 3] [STOP_SENDING sid 2] [MAX_STREAM_DATA sid 2] [STOP_SENDING sid 1] [STOP_SENDING sid 400]`
 - **Flip** (`quic/_server_types.mojo`: `dispatch_plaintext` walks the 1-RTT frames itself and checks the four frame types before `handle_frame_buf`): `OK: all six wrong-direction / unopened / over-limit stream frames rejected`, exit 0.
