@@ -708,10 +708,10 @@ struct WsConnection(Movable):
         loop; later ``send_*`` calls raise.
 
         A frame that violates the protocol fails the connection after a
-        best-effort CLOSE: a final TEXT frame whose payload is not valid
-        UTF-8 with 1007 (RFC 6455 sec 8.1), an oversized frame with 1009.
-        ``recv`` raises in each case and later ``send_*`` calls raise
-        too.
+        best-effort CLOSE: an unmasked client frame with 1002 (RFC 6455
+        sec 5.1), a final TEXT frame whose payload is not valid UTF-8
+        with 1007 (sec 8.1), an oversized frame with 1009. ``recv``
+        raises in each case and later ``send_*`` calls raise too.
 
         Returns:
             The next complete data frame (TEXT, BINARY, or CLOSE).
@@ -795,6 +795,8 @@ struct WsConnection(Movable):
                 )
                 # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
                 if not result.frame.masked:
+                    # RFC 6455 sec 7.4.1: say why (1002), best effort.
+                    self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
                     raise WsProtocolError(
                         "client sent unmasked frame (RFC 6455 §5.1)"
                     )

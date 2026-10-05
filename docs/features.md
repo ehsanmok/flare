@@ -947,6 +947,10 @@ of what you might reasonably assume from the surrounding feature.
   `NetworkError` instead of putting data frames on the wire; `send_frame`
   now takes `mut self`. Clients used to see EOF (1006) instead of the
   close code.
+- `WsConnection.recv()` answers an unmasked client frame with CLOSE 1002
+  before it raises `WsProtocolError` (RFC 6455 sec 5.1, 7.4.1). It used
+  to close the socket with no status, so the client could not tell a
+  protocol error from a network failure.
 - `WsConnection.recv()` fails the connection with CLOSE 1007 (RFC 6455
   sec 8.1, 7.4.1) and raises `WsProtocolError` when a final TEXT frame's
   payload is not valid UTF-8, instead of handing it to the handler. The

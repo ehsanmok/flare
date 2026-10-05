@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP in-process; no external network)
+# RESOLVED: DOC-02 fixed on fix/formal-findings
 """DOC-02: `WsConnection` refuses an unmasked client frame by raising, but
 never sends the CLOSE 1002 the threat model promises.
 
@@ -19,7 +20,7 @@ proved (Flare.L3.Ws.server_safe); the 1002 is what is missing.
 
 Setup: a loopback pair; the server side is a WsConnection whose prebuf
 holds one unmasked TEXT frame "hi". Expected: recv raises and the client
-receives CLOSE 1002 (wire 88 02 03 EA). Actual: recv raises and the client
+receives CLOSE 1002 (wire 88 02 03 EA). Before the fix: recv raises and the client
 receives nothing before the socket closes.
 
 Minimal fix: before the raise at server.mojo:560, write

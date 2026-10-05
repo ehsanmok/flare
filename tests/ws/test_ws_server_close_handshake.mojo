@@ -216,6 +216,25 @@ def _recv_raises(mut p: _Pair) -> Bool:
     return False
 
 
+def test_unmasked_client_frame_is_refused_with_close_1002() raises:
+    """DOC-02: the refusal of an unmasked frame carries CLOSE 1002."""
+    var p = _Pair()
+    var wire = WsFrame(opcode=WsOpcode.TEXT, payload=_bytes("hi")).encode(
+        mask=False
+    )
+    p.client.write_all(Span[UInt8, _](wire))
+    assert_true(_recv_raises(p), "an unmasked frame must raise")
+    var out = p.finish()
+    assert_equal(len(out), 1)
+    assert_true(_is_close(out[0], 1002), "expected one CLOSE 1002")
+    var refused = False
+    try:
+        p.server.send_text("late")
+    except:
+        refused = True
+    assert_true(refused, "no data may follow the CLOSE")
+
+
 def test_invalid_utf8_text_frame_is_refused_with_close_1007() raises:
     """DOC-01: a final TEXT frame that is not UTF-8 fails with CLOSE 1007."""
     var p = _Pair()

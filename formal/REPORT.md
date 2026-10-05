@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63562 lines) |
+| Lean files | 298 (63560 lines) |
 | Theorems | 3344 |
 | Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 135 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 136 of 138 |
 
 Six findings are rated high:
 
@@ -3143,7 +3143,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | CONC-07 | Medium | resolved | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
 | MACH-01 | Low | resolved | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
 | DOC-01 | Medium | resolved | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
-| DOC-02 | Low | open | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
+| DOC-02 | Low | resolved | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-03 | Medium | resolved | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
 | DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
@@ -5721,11 +5721,13 @@ Status: resolved. `WsConnection.recv` (`flare/ws/server.mojo`) now writes CLOSE 
 
 #### DOC-02: an unmasked client frame is refused without the promised CLOSE 1002
 
+Status: resolved. `WsConnection._recv_one` (`flare/ws/server.mojo`) now writes CLOSE 1002 (through the shared `_fail_connection` helper, which marks the closing handshake started) before it raises on an unmasked client frame. Regression test `tests/ws/test_ws_server_close_handshake.mojo::test_unmasked_client_frame_is_refused_with_close_1002`; the repro prints `OK:`. Lean: `Bugs.DOC_01.recv` is the shipped model (its unmasked branch is now `.fail [1002]`), `recvOld` keeps the counterexample.
+
 - **Severity:** Low. The refusal itself holds (`Flare.L3.Ws.server_safe`). The client gets a bare TCP close instead of the documented status code, so it cannot tell a protocol error from a network failure.
 - **Doc / RFC:** `docs/threat-model.md:60` says "unmasked frames are rejected with 1002." RFC 6455 §5.1: the server MUST close the connection, and MAY send CLOSE 1002 (§7.4.1).
 - **What goes wrong:** `_recv_one` (`flare/ws/server.mojo:557-561`) raises `WsProtocolError("client sent unmasked frame")` without writing anything. The only CLOSE the server ever writes is 1009 (587-598).
 - **Counterexample:** `Bugs.DOC_02.bug`: an unmasked TEXT "hi" gives `.fail []`, a failure with no bytes written. `counterexample` shows `recv` violates `MaskSpec`, which asks for CLOSE 1002 on failure.
-- **Fix:** `recvFixed` writes CLOSE 1002 before raising. `fixed` proves `MaskSpec`, and `fixed_server_safe` shows only masked frames are delivered.
+- **Fix:** `Bugs.DOC_01.recv` (the shipped model; the counterexample is about `recvOld`) writes CLOSE 1002 before raising. `fixed` proves `MaskSpec`, and `fixed_server_safe` shows only masked frames are delivered.
 - **Repro:** `formal/repro/DOC-02_ws_unmasked_frame_no_1002.mojo`
 - **Observed:** `BUG REPRODUCED: unmasked client frame was refused (recv raised) but the client received 0 bytes and no CLOSE 1002 (expected 88 02 03 EA)`
 - **Flip** (`flare/ws/server.mojo`: at `if not result.frame.masked:`, write `WsFrame.close(WsCloseCode.PROTOCOL_ERROR)` before the raise, on a best-effort basis): `OK: unmasked client frame refused with CLOSE 1002`, exit 0.

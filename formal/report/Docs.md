@@ -196,11 +196,13 @@ Status: resolved. `WsConnection.recv` (`flare/ws/server.mojo`) now writes CLOSE 
 
 ### DOC-02: an unmasked client frame is refused without the promised CLOSE 1002
 
+Status: resolved. `WsConnection._recv_one` (`flare/ws/server.mojo`) now writes CLOSE 1002 (through the shared `_fail_connection` helper, which marks the closing handshake started) before it raises on an unmasked client frame. Regression test `tests/ws/test_ws_server_close_handshake.mojo::test_unmasked_client_frame_is_refused_with_close_1002`; the repro prints `OK:`. Lean: `Bugs.DOC_01.recv` is the shipped model (its unmasked branch is now `.fail [1002]`), `recvOld` keeps the counterexample.
+
 - **Severity:** Low. The refusal itself holds (`Flare.L3.Ws.server_safe`). The client gets a bare TCP close instead of the documented status code, so it cannot tell a protocol error from a network failure.
 - **Doc / RFC:** `docs/threat-model.md:60` says "unmasked frames are rejected with 1002." RFC 6455 §5.1: the server MUST close the connection, and MAY send CLOSE 1002 (§7.4.1).
 - **What goes wrong:** `_recv_one` (`flare/ws/server.mojo:557-561`) raises `WsProtocolError("client sent unmasked frame")` without writing anything. The only CLOSE the server ever writes is 1009 (587-598).
 - **Counterexample:** `Bugs.DOC_02.bug`: an unmasked TEXT "hi" gives `.fail []`, a failure with no bytes written. `counterexample` shows `recv` violates `MaskSpec`, which asks for CLOSE 1002 on failure.
-- **Fix:** `recvFixed` writes CLOSE 1002 before raising. `fixed` proves `MaskSpec`, and `fixed_server_safe` shows only masked frames are delivered.
+- **Fix:** `Bugs.DOC_01.recv` (the shipped model; the counterexample is about `recvOld`) writes CLOSE 1002 before raising. `fixed` proves `MaskSpec`, and `fixed_server_safe` shows only masked frames are delivered.
 - **Repro:** `formal/repro/DOC-02_ws_unmasked_frame_no_1002.mojo`
 - **Observed:** `BUG REPRODUCED: unmasked client frame was refused (recv raised) but the client received 0 bytes and no CLOSE 1002 (expected 88 02 03 EA)`
 - **Flip** (`flare/ws/server.mojo`: at `if not result.frame.masked:`, write `WsFrame.close(WsCloseCode.PROTOCOL_ERROR)` before the raise, on a best-effort basis): `OK: unmasked client frame refused with CLOSE 1002`, exit 0.

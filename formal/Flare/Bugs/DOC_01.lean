@@ -20,7 +20,7 @@ shipped model; `recvOld` is the pre-fix behaviour the counterexample is about.
   "MUST _Fail the WebSocket Connection_"; §7.4.1: status 1007.
 * What goes wrong: a masked, final TEXT frame with payload `C3 28` is handed
   to the handler; no CLOSE is written.
-* Fix (`recv`): fail a final TEXT frame whose payload is not well formed,
+* Fix (`recv`; the unmasked branch is DOC-02's): fail a final TEXT frame whose payload is not well formed,
   after writing CLOSE 1007. Unfragmented frames only: the server has no
   continuation reassembly (`fin = false` frames are passed through as is).
 -/
@@ -51,15 +51,16 @@ def Utf8Spec (maxP : Nat) (r : Bytes → Step) : Prop :=
   ∀ d f n, decode false maxP d = .ok f n → f.masked = true → f.opcode = 1 → f.fin = true →
     Flare.L1.Utf8.isValidUtf8 f.payload = false → r d = .fail [1007]
 
-/-- The shipped `recv`: a final TEXT frame that is not UTF-8 fails with CLOSE 1007.
-mirrors flare/ws/server.mojo:695-759,776-834 (fixed, DOC-01) -/
+/-- The shipped `recv`: a final TEXT frame that is not UTF-8 fails with CLOSE 1007
+(DOC-01), and an unmasked frame fails with CLOSE 1002 (DOC-02).
+mirrors flare/ws/server.mojo:695-759,776-834 (fixed, DOC-01, DOC-02) -/
 def recv (maxP : Nat) (d : Bytes) : Step :=
   match decode false maxP d with
   | .ok f _ =>
     if f.masked then
       if f.opcode = 1 && f.fin && !Flare.L1.Utf8.isValidUtf8 f.payload then .fail [1007]
       else .deliver f
-    else .fail []
+    else .fail [1002]
   | .error => .fail []
   | .needMore => .wait
 
