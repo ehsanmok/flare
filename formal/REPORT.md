@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61332 lines) |
+| Lean files | 298 (61345 lines) |
 | Theorems | 3228 |
 | Headline theorems in the axiom audit | 1030 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 30 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 31 of 138 |
 
 Six findings are rated high:
 
@@ -3105,7 +3105,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-46 | Medium | resolved | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
 | APP-47 | Medium | resolved | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
 | APP-48 | High | resolved | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
-| APP-49 | Medium | open | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
+| APP-49 | Medium | resolved | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
 | CONC-01 | Low | open | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
 | CONC-02 | Low | open | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
 | CONC-03 | High | resolved | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
@@ -5293,6 +5293,8 @@ container's copy (restored by the next sync):
 and
 `OK: TLS: the interim record did not go out after a 2922 byte response (client read it all, then nothing for 300 ms); the final response step closed=False and the client then read 126 bytes: HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nCo`,
 exit 0.
+
+Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not take of the interim. Cleartext: the unsent tail of a short `send` is put in front of the response in `_transition_to_writing`. TLS: the interim is sent from that connection-owned buffer and, after WANT_WRITE, retried from it at the start of `_flush_write_buf_tls` before any response byte. A send that takes none of the interim is still dropped (the client's fallback covers it). Tests: `tests/http/test_continue_interim.mojo::test_cleartext_unsent_interim_tail_precedes_the_response`, `::test_interim_taken_whole_leaves_nothing_pending`, `::test_keep_unsent_interim_ignores_none_and_all`, `::test_tls_pending_interim_is_retried_before_the_response` (the first and last put the connection in the state a short send / WANT_WRITE leaves, since the trigger is Linux-only); the repro now prints `OK:` for both variants on Linux. The shipped models are `Flare.L4.Continue.Plain.runFixed` and `Tls.runFixed`; `Flare.Bugs.APP_49.fixed_meets_spec` is stated about them.
 
 ### 5.7 L5: Concurrency (`flare/runtime/`)
 

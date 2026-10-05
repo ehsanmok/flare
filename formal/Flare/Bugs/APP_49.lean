@@ -19,6 +19,12 @@ Counterexamples, both observed on Linux:
   response's `SSL_write` from `write_buf` fails (`SSL_R_BAD_WRITE_RETRY`)
   and the connection closes with the response unsent.
 
+Status: resolved. A cleartext tail the kernel did not take is kept in
+`continue_pending` and put in front of the response; a TLS interim is sent
+from that connection-owned buffer and retried before any response byte
+(`Plain.runFixed`, `Tls.runFixed`). The counterexamples are about the
+pre-fix `Plain.run` and `Tls.run`.
+
 Repro: formal/repro/APP-49_continue_partial_send_corrupts_stream.mojo.
 -/
 namespace Flare.Bugs.APP_49
@@ -38,21 +44,21 @@ theorem observed_wire :
     Plain.run [] interim final 24 = interim.take 24 ++ final := by
   rw [Plain.run_eq]; rfl
 
-/-- **Counterexample (cleartext)**: every short send breaks the spec; in
+/-- **Counterexample (cleartext, pre-fix `Plain.run`)**: every short send breaks the spec; in
 particular the observed one. -/
 theorem violates_spec :
     (∀ pre I R k, 0 < k → k < I.length → ¬ Spec pre I R (Plain.run pre I R k) false) ∧
       ¬ Spec [] interim final (Plain.run [] interim final 24) false :=
   ⟨Plain.violates, Plain.violates [] interim final 24 (by decide) (by decide)⟩
 
-/-- **Counterexample (TLS)**: when the interim record does not go out
+/-- **Counterexample (TLS, pre-fix `Tls.run`)**: when the interim record does not go out
 whole, the response is lost and the connection closes. -/
 theorem tls_response_lost (pre I R : Bytes) :
     (Tls.run pre I R false).closed = true ∧ (Tls.run pre I R false).wire = pre ∧
       ¬ Spec pre I R (Tls.run pre I R false).wire (Tls.run pre I R false).closed :=
   Tls.violates pre I R
 
-/-- **Fix meets spec**: keep what the socket did not take and send it
+/-- **Fix meets spec** (`Plain.runFixed`, `Tls.runFixed`): keep what the socket did not take and send it
 before the response (cleartext: prepend the tail to `write_buf`; TLS:
 retry from the connection's own copy), for every kernel and TLS outcome. -/
 theorem fixed_meets_spec :

@@ -1,4 +1,5 @@
 # PLATFORM: linux
+# RESOLVED: APP-49 fixed on fix/formal-findings
 """APP-49: an interim `100 Continue` that the socket does not take whole is
 never completed: on cleartext the client gets a truncated interim line glued
 to the final response; on TLS the final response is lost and the connection
@@ -47,7 +48,7 @@ its precondition and the stream was well-formed.
 
 Expected: after the first response the client reads the whole interim line
 (possibly later) and then the final ``HTTP/1.1 200 OK``.
-Actual: cleartext ``HTTP/1.1 100 Continue\\r\\n\\r`` (or a shorter prefix)
+Before the fix: cleartext ``HTTP/1.1 100 Continue\\r\\n\\r`` (or a shorter prefix)
 directly followed by ``HTTP/1.1 200 OK``; TLS: the server's write of the
 final response fails, ``should_close`` is set and the client receives
 nothing.
@@ -209,7 +210,9 @@ def _serve_first(
     return 0
 
 
-def _serve_final(mut ch: ConnHandle, h: FnHandler, cfg: ServerConfig) raises -> Bool:
+def _serve_final(
+    mut ch: ConnHandle, h: FnHandler, cfg: ServerConfig
+) raises -> Bool:
     """Read the body, flush the final response; True if the step closed."""
     for _ in range(200):
         usleep(5000)

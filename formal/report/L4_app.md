@@ -1292,6 +1292,8 @@ and
 `OK: TLS: the interim record did not go out after a 2922 byte response (client read it all, then nothing for 300 ms); the final response step closed=False and the client then read 126 bytes: HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nCo`,
 exit 0.
 
+Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not take of the interim. Cleartext: the unsent tail of a short `send` is put in front of the response in `_transition_to_writing`. TLS: the interim is sent from that connection-owned buffer and, after WANT_WRITE, retried from it at the start of `_flush_write_buf_tls` before any response byte. A send that takes none of the interim is still dropped (the client's fallback covers it). Tests: `tests/http/test_continue_interim.mojo::test_cleartext_unsent_interim_tail_precedes_the_response`, `::test_interim_taken_whole_leaves_nothing_pending`, `::test_keep_unsent_interim_ignores_none_and_all`, `::test_tls_pending_interim_is_retried_before_the_response` (the first and last put the connection in the state a short send / WANT_WRITE leaves, since the trigger is Linux-only); the repro now prints `OK:` for both variants on Linux. The shipped models are `Flare.L4.Continue.Plain.runFixed` and `Tls.runFixed`; `Flare.Bugs.APP_49.fixed_meets_spec` is stated about them.
+
 ## Documentation gaps
 
 - **Percent-decoding claim.** `docs/features.md:279` lists "`Url`,

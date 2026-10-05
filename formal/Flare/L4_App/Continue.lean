@@ -3,7 +3,8 @@ import Flare.Core.Bytes
 /-!
 # The interim `100 Continue` and the final response on one connection
 
-`_maybe_send_continue` (flare/http/_reactor/conn_handle.mojo:544-576) writes
+Before the APP-49 fix (`run`, `sendContinue`, `finalise`, `flush`),
+`_maybe_send_continue` (flare/http/_reactor/conn_handle.mojo:544-576) wrote
 `HTTP/1.1 100 Continue\r\n\r\n` once, from STATE_READING, with a single
 non-blocking write whose result it ignores. The final response is later
 serialised into a cleared `write_buf` (`_finalise_response`, 718-756) and
@@ -52,13 +53,13 @@ structure St where
   wbuf : Bytes
   rest : Bytes
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo:556-576 @59bda50
-(the `_send` result is dropped) -/
+/-- Pre-fix `_maybe_send_continue`, cleartext: the `_send` result is dropped.
+mirrors flare/http/_reactor/conn_handle.mojo:556-576 @59bda50 -/
 def sendContinue (I : Bytes) (k : Nat) (s : St) : St :=
   { s with wire := s.wire ++ I.take k }
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo:718-756,1423-1435 @59bda50
-(`write_buf` is serialised from scratch, `write_pos := 0`) -/
+/-- Pre-fix: `write_buf` is serialised from scratch, `write_pos := 0`.
+mirrors flare/http/_reactor/conn_handle.mojo:718-756,1423-1435 @59bda50 -/
 def finalise (R : Bytes) (s : St) : St :=
   { s with wbuf := R }
 
@@ -70,13 +71,15 @@ def flush (s : St) : St :=
 def run (pre I R : Bytes) (k : Nat) : Bytes :=
   (flush (finalise R (sendContinue I k ⟨pre, [], []⟩))).wire
 
-/-- The fix: keep the tail the kernel did not take (only after a short
-send; EAGAIN leaves the client's own fallback in charge). -/
+/-- Shipped: keep the tail the kernel did not take (only after a short
+send; EAGAIN leaves the client's own fallback in charge).
+mirrors flare/http/_reactor/conn_handle.mojo:556-620 (fixed, APP-49) -/
 def sendContinueFixed (I : Bytes) (k : Nat) (s : St) : St :=
   { s with wire := s.wire ++ I.take k,
            rest := if 0 < k ∧ k < I.length then I.drop k else [] }
 
-/-- The fix: the kept tail goes in front of the response. -/
+/-- Shipped: the kept tail goes in front of the response.
+mirrors flare/http/_reactor/conn_handle.mojo:1492-1512 (fixed, APP-49) -/
 def finaliseFixed (R : Bytes) (s : St) : St :=
   { s with wbuf := s.rest ++ R, rest := [] }
 
@@ -137,24 +140,28 @@ def sslWrite (b : Buf) (data : Bytes) (ok : Bool) (s : St) : St :=
   | none =>
     if ok then { s with wire := s.wire ++ data } else { s with pending := some b }
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo:564-569 @59bda50
-(`tls.send(bytes)`, result dropped) -/
+/-- Pre-fix: `tls.send(bytes)` from a local buffer, result dropped.
+mirrors flare/http/_reactor/conn_handle.mojo:564-569 @59bda50 -/
 def sendContinue (I : Bytes) (ok : Bool) (s : St) : St :=
   sslWrite .interim I ok s
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo:1213-1240 @59bda50
-(`SSL_write` of `write_buf`; the socket has drained, so it would go out) -/
+/-- Pre-fix flush: `SSL_write` of `write_buf` only; the socket has drained,
+so it would go out.
+mirrors flare/http/_reactor/conn_handle.mojo:1213-1240 @59bda50 -/
 def flush (R : Bytes) (s : St) : St :=
   if s.closed then s else sslWrite .wbuf R true s
 
 def run (pre I R : Bytes) (ok : Bool) : St :=
   flush R (sendContinue I ok ⟨pre, none, false⟩)
 
-/-- The fix: write the interim from a buffer the connection keeps, and
-retry it from that buffer before the response. -/
+/-- Shipped: write the interim from a buffer the connection keeps
+(`continue_pending`).
+mirrors flare/http/_reactor/conn_handle.mojo:556-600 (fixed, APP-49) -/
 def sendContinueFixed (I : Bytes) (ok : Bool) (s : St) : St :=
   sslWrite .own I ok s
 
+/-- Shipped: retry the kept interim from the same buffer before the response.
+mirrors flare/http/_reactor/conn_handle.mojo:1260-1310 (fixed, APP-49) -/
 def flushFixed (I R : Bytes) (s : St) : St :=
   let s' := if s.pending = some .own then sslWrite .own I true s else s
   if s'.closed then s' else sslWrite .wbuf R true s'

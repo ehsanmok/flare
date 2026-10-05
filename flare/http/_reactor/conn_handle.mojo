@@ -332,6 +332,17 @@ struct ConnHandle(Movable):
     var continue_sent: Bool
     """``100 Continue`` has been written for the request being read."""
 
+    var continue_pending: List[UInt8]
+    """The part of the interim ``100 Continue`` the socket did not take.
+
+    Cleartext: the unsent tail of a short ``send``; it goes out in front
+    of the response (``_transition_to_writing``), so the client never
+    sees a truncated status line followed by the next message. TLS: the
+    whole interim record, kept in this connection-owned buffer because
+    ``SSL_write`` must be retried with the same buffer after WANT_WRITE;
+    ``_flush_write_buf_tls`` retries it before any response byte.
+    Empty when nothing is owed."""
+
     var peer_eof: Bool
     """The peer has half-closed (FIN / close_notify) with a request still
     buffered. That request is served, with ``Connection: close``."""
@@ -380,6 +391,7 @@ struct ConnHandle(Movable):
         self.peer_eof = False
         self.h2c_upgrade_allowed = False
         self.continue_sent = False
+        self.continue_pending = List[UInt8]()
         self.write_buf = List[UInt8]()
         self.write_pos = 0
         self.keepalive_count = 0
@@ -549,9 +561,13 @@ struct ConnHandle(Movable):
         larger uploads and hold the body until they see the interim
         response, falling back after about a second. Without one, the
         default 500 ms idle timer won that race and the upload failed.
-        RFC 9110 sec 10.1.1: never sent to an HTTP/1.0 client. The write
-        is best effort and not resumed on a partial send; the client's
-        own fallback covers that case.
+        RFC 9110 sec 10.1.1: never sent to an HTTP/1.0 client.
+
+        An interim the socket does not take at all is dropped (the
+        client's own fallback covers that). One the socket takes only
+        partly is completed: a half-written status line followed by the
+        final response would corrupt the stream. See
+        :attr:`continue_pending`.
         """
         if self.continue_sent or self.headers_end < 0:
             return
@@ -563,17 +579,42 @@ struct ConnHandle(Movable):
         var interim = String("HTTP/1.1 100 Continue\r\n\r\n")
         var bytes = interim.as_bytes()
         if self.tls:
+            # Send from a buffer this connection owns: after WANT_WRITE
+            # OpenSSL holds the record and insists the retry uses the
+            # same buffer.
+            self.continue_pending = List[UInt8](bytes)
             try:
-                _ = self.tls.value().send(bytes)
+                var n = self.tls.value().send(
+                    Span[UInt8, _](self.continue_pending), 0
+                )
+                if n > 0 or (n != SSL_IO_WANT_WRITE and n != SSL_IO_WANT_READ):
+                    # Written whole (SSL_write is all-or-nothing without
+                    # partial-write mode), or the session failed and the
+                    # next write will report it.
+                    self.continue_pending.clear()
             except:
-                pass
+                self.continue_pending.clear()
         else:
-            _ = _send(
+            var n = _send(
                 self.fd(),
                 bytes.unsafe_ptr(),
                 c_size_t(len(bytes)),
                 c_int(MSG_NOSIGNAL),
             )
+            self._keep_unsent_interim(Int(n) if n > 0 else 0)
+
+    def _keep_unsent_interim(mut self, sent: Int):
+        """Remember the tail of the interim after a cleartext send took
+        ``sent`` of its bytes. Nothing is kept when none or all of it
+        went out."""
+        var interim = String("HTTP/1.1 100 Continue\r\n\r\n")
+        var bytes = interim.as_bytes()
+        var total = len(bytes)
+        if sent <= 0 or sent >= total:
+            return
+        self.continue_pending = List[UInt8]()
+        for i in range(sent, total):
+            self.continue_pending.append(bytes[i])
 
     @always_inline
     def _check_request_complete(
@@ -1235,6 +1276,28 @@ struct ConnHandle(Movable):
         allows and the caller should fall through to its normal
         flushed / partial-write handling.
         """
+        if len(self.continue_pending) > 0:
+            # The interim record OpenSSL could not write earlier: retry
+            # from the same buffer, and send no response byte before it
+            # (a write from `write_buf` would fail with BAD_WRITE_RETRY).
+            var rn = self.tls.value().send(
+                Span[UInt8, _](self.continue_pending), 0
+            )
+            if rn > 0:
+                self.continue_pending.clear()
+            elif rn == SSL_IO_WANT_WRITE:
+                return Optional[StepResult]()
+            elif rn == SSL_IO_WANT_READ:
+                self.tls_cross_interest = True
+                return Optional[StepResult](
+                    StepResult(want_read=True, want_write=True)
+                )
+            else:
+                self.continue_pending.clear()
+                self.should_close = True
+                return Optional[StepResult](
+                    StepResult(want_read=False, want_write=False, done=True)
+                )
         while self.write_pos < len(self.write_buf):
             var n = self.tls.value().send(
                 Span[UInt8, _](self.write_buf), self.write_pos
@@ -1439,6 +1502,22 @@ struct ConnHandle(Movable):
     def _transition_to_writing(mut self) -> StepResult:
         """Move into STATE_WRITING and tell the caller to watch for write."""
         self.state = STATE_WRITING
+        # A cleartext interim the kernel took only partly: finish it
+        # before the response bytes already queued in ``write_buf``. (TLS
+        # retries from ``continue_pending`` in ``_flush_write_buf_tls``.)
+        if len(self.continue_pending) > 0 and not self.tls:
+            var framed = List[UInt8](
+                capacity=len(self.continue_pending)
+                + len(self.write_buf)
+                - self.write_pos
+            )
+            for i in range(len(self.continue_pending)):
+                framed.append(self.continue_pending[i])
+            for i in range(self.write_pos, len(self.write_buf)):
+                framed.append(self.write_buf[i])
+            self.write_buf = framed^
+            self.write_pos = 0
+            self.continue_pending.clear()
         # Reset any stale read state: the next state-machine step is
         # flushing the response, not reading more bytes.
         return StepResult(
