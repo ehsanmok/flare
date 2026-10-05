@@ -9,7 +9,8 @@ reopens it by name; whether that `sem_open` succeeds is an environment
 input (`openOk`) to every step (on macOS arm64 it used to be `false` on every step because of the variadic-ABI bug, RT-06; `_pool_sem_open` now passes `mode`/`value` where the callee reads them, so `openOk` holds unless the system is out of fds or /dev/shm). `count` is the semaphore value, `held` the
 number of slots handed out (acquires that returned `True` and are not yet
 released). `sem_post` has no upper bound (POSIX), so a release always
-increments when its `sem_open` succeeds.
+increments when its `sem_open` succeeds. The acquire is fail-closed (RT-07);
+`tryAcquireOld` / `runOld` are the pre-fix fail-open versions.
 
 Releases are always paired with an earlier successful acquire (flare's
 callers do this), modelled by ignoring a release when `held = 0`.
@@ -26,20 +27,21 @@ structure Sem where
 
 def Sem.init : Sem := ⟨MAX_POOL_SIZE, 0⟩
 
-/-- Fail-open: a failed `sem_open` returns `True` without decrementing.
-mirrors flare/runtime/blocking.mojo `_pool_try_acquire`, `_pool_sem_open` (fixed, RT-06, RT-08) -/
-def tryAcquire (openOk : Bool) (s : Sem) : Sem × Bool :=
+/-- Pre-fix fail-open acquire (flare/runtime/blocking.mojo:177-193 @59bda50): a failed
+`sem_open` returns `True` without decrementing. Kept for RT-06 / RT-07. -/
+def tryAcquireOld (openOk : Bool) (s : Sem) : Sem × Bool :=
   if !openOk then ({ s with held := s.held + 1 }, true)
   else if s.count > 0 then (⟨s.count - 1, s.held + 1⟩, true)
   else (s, false)
 
-/-- Fail-closed fix: a failed `sem_open` refuses the slot. -/
-def tryAcquireFixed (openOk : Bool) (s : Sem) : Sem × Bool :=
+/-- Shipped fail-closed acquire: a failed `sem_open` refuses the slot.
+mirrors flare/runtime/blocking.mojo `_pool_try_acquire`, `_pool_sem_open` (fixed, RT-06, RT-07, RT-08) -/
+def tryAcquire (openOk : Bool) (s : Sem) : Sem × Bool :=
   if !openOk then (s, false)
   else if s.count > 0 then (⟨s.count - 1, s.held + 1⟩, true)
   else (s, false)
 
-/-- mirrors flare/runtime/blocking.mojo `_pool_release`, `_pool_sem_open` (fixed, RT-06, RT-08) -/
+/-- mirrors flare/runtime/blocking.mojo `_pool_release`, `_pool_sem_open` (fixed, RT-06, RT-07, RT-08) -/
 def release (openOk : Bool) (s : Sem) : Sem :=
   if s.held = 0 then s
   else ⟨if openOk then s.count + 1 else s.count, s.held - 1⟩
@@ -57,8 +59,10 @@ def runWith (acq : Bool → Sem → Sem × Bool) : Sem → List Op → Sem
   | s, .acq b :: ops => runWith acq (acq b s).1 ops
   | s, .rel b :: ops => runWith acq (release b s) ops
 
+/-- the pre-fix (fail-open) system, for the RT-07 counterexample -/
+def runOld := runWith tryAcquireOld
+/-- the shipped (fail-closed) system -/
 def run := runWith tryAcquire
-def runFixed := runWith tryAcquireFixed
 
 /-- **Cap holds while `sem_open` works**: if every `sem_open` succeeds,
 `count + held = MAX_POOL_SIZE` throughout, so at most 32 slots are held. -/
@@ -86,19 +90,19 @@ theorem paired_cap_invariant (ops : List Op) (hok : ∀ op ∈ ops, op.ok = true
       · exact hs
       · simp; omega
 
-/-- **Fix meets spec**: with the fail-closed acquire, `count + held ≤ 32`
+/-- **Shipped code meets spec**: with the fail-closed acquire, `count + held ≤ 32`
 whatever pattern of `sem_open` failures occurs, so at most 32 slots are
 ever held. (A failed release `sem_open` can only tighten the cap.) -/
-theorem fixed_cap_invariant (ops : List Op) (s : Sem) (hs : s.count + s.held ≤ MAX_POOL_SIZE) :
-    (runFixed s ops).count + (runFixed s ops).held ≤ MAX_POOL_SIZE ∧
-      (runFixed s ops).held ≤ MAX_POOL_SIZE := by
+theorem cap_invariant (ops : List Op) (s : Sem) (hs : s.count + s.held ≤ MAX_POOL_SIZE) :
+    (run s ops).count + (run s ops).held ≤ MAX_POOL_SIZE ∧
+      (run s ops).held ≤ MAX_POOL_SIZE := by
   induction ops generalizing s with
   | nil => exact ⟨hs, show s.held ≤ _ by omega⟩
   | cons op ops ih =>
     cases op with
     | acq b =>
       apply ih
-      unfold tryAcquireFixed
+      unfold tryAcquire
       cases b <;> simp only [Bool.not_true, Bool.not_false, Bool.false_eq_true, if_false, if_true]
       · exact hs
       · split <;> simp <;> omega
@@ -109,7 +113,7 @@ theorem fixed_cap_invariant (ops : List Op) (s : Sem) (hs : s.count + s.held ≤
       · exact hs
       · cases b <;> simp <;> omega
 
-theorem fixed_cap_from_init (ops : List Op) : (runFixed Sem.init ops).held ≤ MAX_POOL_SIZE :=
-  (fixed_cap_invariant ops Sem.init (by decide)).2
+theorem cap_from_init (ops : List Op) : (run Sem.init ops).held ≤ MAX_POOL_SIZE :=
+  (cap_invariant ops Sem.init (by decide)).2
 
 end Flare.L2.Blocking

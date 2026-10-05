@@ -289,11 +289,11 @@ paired with earlier successful acquires.
 | Lean name | Statement | Status |
 |---|---|---|
 | `paired_cap_invariant` | If every `sem_open` succeeds, `count + held = 32` throughout, so at most 32 slots are held. | proved |
-| `fixed_cap_invariant` | With a fail-closed acquire, `count + held ≤ 32` under any pattern of `sem_open` failures. | proved |
+| `cap_invariant` | The shipped fail-closed acquire keeps `count + held ≤ 32` under any pattern of `sem_open` failures. | proved |
 | `Flare.Bugs.RT_06.persistentFailOpen_unbounded` | If `sem_open` always fails (the pre-fix macOS arm64 behaviour), `n` acquires succeed for every `n`. | counterexample (RT-06, resolved) |
-| `Flare.Bugs.RT_07.failOpen_breaks_cap` | One failed-`sem_open` acquire and its normal release let 33 slots be held. | counterexample (RT-07) |
+| `Flare.Bugs.RT_07.failOpen_breaks_cap` | In the pre-fix fail-open system `runOld`, one failed-`sem_open` acquire and its normal release let 33 slots be held. | counterexample (RT-07, resolved) |
 | `Flare.Bugs.RT_08.linux_failure_crashes` | With glibc's `SEM_FAILED` (NULL), a failed `sem_open` passes the pre-fix `== -1` test and both acquire and release crash. | counterexample (RT-08, resolved) |
-| `Flare.Bugs.RT_08.never_crashes` | The shipped test (0 or -1 is a failure) never crashes on either platform; `agrees_with_old`: it changes nothing on success or on macOS. | proved |
+| `Flare.Bugs.RT_08.never_crashes` | The shipped test (0 or -1 is a failure) never crashes on either platform; `agrees_with_old`: it changes nothing on success; `failure_fails_closed`: a failed open refuses the slot. | proved |
 
 ### Happy Eyeballs ordering (`HappyEyeballs.lean`)
 
@@ -743,7 +743,7 @@ What goes wrong: `_pool_try_acquire` (blocking.mojo:177-193) returns `True`
 without decrementing when `sem_open` fails, while the paired `_pool_release`
 (:196-206) posts whenever its own `sem_open` succeeds.
 Lean: `Flare.Bugs.RT_07.failOpen_breaks_cap`. Fix: fail closed;
-`Flare.Bugs.RT_07.fixed_cap_invariant` (any failure pattern).
+`Flare.Bugs.RT_07.cap_invariant` (any failure pattern).
 Repro: `formal/repro/RT-07_pool_semaphore_fail_open_drift.mojo`. The fd table
 is filled in a forked child (under `mojo run` the parent's JIT threads would
 need fds too), which reports the slot count through its exit status. On macOS
@@ -756,6 +756,13 @@ Flip on macOS: with the RT-06 fix only,
 with the RT-06 and RT-07 fixes, `OK: at most 32 slots held (cap 32 )`, exit 0.
 Flip on Linux: the same two lines with the RT-08 fix alone, then with the
 RT-08 and RT-07 fixes.
+
+Status: resolved. `_pool_try_acquire` returns `False` when `sem_open` fails, so
+a `True` result always means a slot was really taken; a failed release open can
+only tighten the cap. Tests:
+`tests/runtime/test_block_in_pool.mojo::test_failed_sem_open_does_not_raise_the_cap`
+and `::test_acquire_survives_sem_open_failure` (the RT-08 test, updated because
+it asserted the old fail-open `True`).
 
 ### RT-08: a failed `sem_open` crashes the process on Linux
 
@@ -772,15 +779,16 @@ a header fact taken as an input to the model.
 Lean: `Flare.Bugs.RT_08.linux_failure_crashes` (and
 `macos_failure_fails_open`: the same test is right on macOS), about the
 pre-fix `tryAcquireOld` / `releaseOld`. Fix: treat both 0 and -1 as failure;
-`never_crashes` (both platforms, `sem_open` failing or not) and
-`agrees_with_old` (no change on success or on macOS).
+`never_crashes` (both platforms, `sem_open` failing or not),
+`agrees_with_old` (no change on success) and `failure_fails_closed`.
 Repro: `formal/repro/RT-08_sem_open_failure_null_deref_linux.mojo` (PLATFORM
 linux). A forked child restores the default SIGSEGV action (the Mojo
 runtime's handler would turn the fault into `exit(1)`), fills its fd table
 and calls `_pool_try_acquire`; observed before the fix
 `BUG REPRODUCED: _pool_try_acquire with the fd table full (sem_open -> EMFILE, returns NULL) killed the process with SIGSEGV`.
 After the fix (`_sem_open_failed`: `0` or `-1`, in both functions):
-`OK: _pool_try_acquire returned True with sem_open failing; no crash`, exit 0.
+`OK: _pool_try_acquire returned False with sem_open failing; no crash`, exit 0
+(RT-07 later made the failed open refuse the slot).
 
 Status: resolved. New `_sem_open_failed` helper used by `_pool_try_acquire` and
 `_pool_release`; tests
@@ -924,10 +932,11 @@ lists record ids, not tokens.
 | `Flare.L2.DnsCache.oldestGo`, `evict`, `store`, `resolveWith` | flare/dns/cache.mojo:97-151 | `huge_ttl_expiry_wraps`, `NET_03.huge_ttl_never_hits`, `store_size_bound` | proved; counterexample (NET-03, resolved) |
 | `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo (`_class_index_for`, `_capacity_for_class`) | `classIndex_fits`, `classIndex_least` | proved |
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo (`acquire`, `release`) | `bounded_release`, `release_preserves_capacity`, `RT_05.acquire_after_shrunk_release` | proved; counterexample (RT-05, resolved) |
-| `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |
+| `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06, RT-07, RT-08 all resolved) |
 | `Flare.L2.HappyEyeballs.order`, `orderOld` | flare/dns/async_resolve.mojo:155-186 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `order_head` | counterexample (NET-10, resolved) |
 | `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:72-119 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexamples (NET-08, NET-09, resolved) |
-| `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
+| `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:72-184 | `takeover_unlinks_live`, `prepFixed_safe`, `deinit_spec`, `deinit_race` | counterexample (NET-07) |
+| `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
 | `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:412-420 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |
 | `Flare.L2.UdpBatch.allocSize`, `accepts`, `acceptsOld` | flare/udp/batch.mojo:189-207 | `slots_disjoint`, `accepts_refuses_wrap`, `NET_11.allocSize_wraps`, `covers_fixed` | proved; counterexample (NET-11, resolved) |

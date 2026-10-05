@@ -39,8 +39,9 @@ Why per-call rather than a singleton pool:
    and ``resolve_async``: a call that would exceed the cap raises
    "pool saturated" instead of spawning the over-limit thread, so a
    fan-out burst cannot thread-bomb the process. The mechanism is
-   fail-open (an unsupported platform skips the cap rather than
-   blocking work) and per-process (keyed by pid, since Mojo has no
+   fail-closed (if the semaphore cannot be opened, e.g. under fd
+   exhaustion, the call is refused with the same error rather than
+   running uncapped) and per-process (keyed by pid, since Mojo has no
    module-level mutable globals).
 
 What the kernel-thread split actually buys:
@@ -128,8 +129,10 @@ comptime MAX_POOL_SIZE: Int = 32
 # kernel object keyed by a per-pid name. ``sem_open(O_CREAT)`` sets the
 # initial value only on first creation; later opens reuse the existing
 # object, so the count persists across calls. The mechanism is
-# fail-open: if the semaphore cannot be created (unsupported platform,
-# /dev/shm full) the cap is skipped rather than blocking real work.
+# fail-closed: if the semaphore cannot be opened (fd exhaustion,
+# /dev/shm full) the acquire is refused, because a fail-open acquire that
+# did not decrement would let its paired release raise the cap by one for
+# the rest of the process (RT-07).
 #
 # ponytail: kernel-name-keyed cap. Ceiling: a prior process with the
 # SAME pid that crashed while holding slots can leave the cap reduced
@@ -227,13 +230,19 @@ def _pool_try_acquire() -> Bool:
     """Try to claim one pool slot. Returns True on success, False when
     the process is already at ``MAX_POOL_SIZE`` concurrent pool threads.
 
-    Fail-open: if the semaphore cannot be opened, returns True so work
-    still runs (the cap is best-effort, never a hard dependency).
+    Fail-closed: if the semaphore cannot be opened (for example EMFILE
+    under fd exhaustion, the overload the cap exists for), no slot is
+    claimed and the result is False. A True result therefore always means
+    the semaphore was decremented, so every paired ``_pool_release``
+    returns a slot that was really taken and the count stays within
+    ``[0, MAX_POOL_SIZE]``. Returning True without decrementing (the old
+    fail-open behaviour) made the matching release raise the cap by one
+    for the rest of the process (RT-07).
     """
     var name = _pool_sem_name()
     var sem = _pool_sem_open(name)
     if _sem_open_failed(sem):
-        return True
+        return False
     var rc = external_call["sem_trywait", Int32](sem)
     _ = external_call["sem_close", Int32](sem)
     return rc == Int32(0)
@@ -241,7 +250,11 @@ def _pool_try_acquire() -> Bool:
 
 @always_inline
 def _pool_release():
-    """Return one pool slot claimed by ``_pool_try_acquire``."""
+    """Return one pool slot claimed by ``_pool_try_acquire``.
+
+    If the semaphore cannot be opened the slot is not returned; that can
+    only tighten the cap (never raise it), see RT-07.
+    """
     var name = _pool_sem_name()
     var sem = _pool_sem_open(name)
     if _sem_open_failed(sem):

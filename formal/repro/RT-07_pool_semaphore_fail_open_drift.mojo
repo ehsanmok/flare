@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: RT-07 fixed on fix/formal-findings
 """RT-07: the blocking-pool thread cap drifts above MAX_POOL_SIZE after a
 fail-open acquire.
 
 Lean: Flare.Bugs.RT_07.failOpen_breaks_cap (counterexample) and
-Flare.Bugs.RT_07.fixed_cap_invariant (fix meets spec).
+Flare.Bugs.RT_07.cap_invariant (shipped code meets spec).
 flare/runtime/blocking.mojo:177-206 @59bda50.
 
 Expected: at most MAX_POOL_SIZE (32) slots can be held at once, whatever
 transient errors occur.
-Actual: _pool_try_acquire returns True without decrementing when
+Before the fix: _pool_try_acquire returns True without decrementing when
 sem_open fails (fail-open), but the paired _pool_release posts whenever
 its own sem_open succeeds. One acquire made while sem_open fails (here
 EMFILE: the fd table is full, i.e. exactly the overload the cap guards
@@ -18,6 +19,9 @@ the cap is raised for the rest of the process.
 On macOS this drift is masked by RT-06 (sem_open never succeeds, so
 there is no cap at all); the repro detects that and says so. With the
 RT-06 fix applied it reproduces on macOS too (observed: 33 slots).
+
+Before the fix, with RT-06 / RT-08 applied but not this one: observed 33
+slots held.
 
 Minimal fix: fail closed. _pool_try_acquire returns False when sem_open
 fails, so a True result always means the semaphore was decremented and
@@ -110,9 +114,7 @@ def main() raises:
         exit(100 + _child_held_after_fault())
     var status = stack_allocation[1, c_int]()
     status[0] = c_int(0)
-    _ = external_call["waitpid", c_int](
-        c_int(pid), Int(status), c_int(0)
-    )
+    _ = external_call["waitpid", c_int](c_int(pid), Int(status), c_int(0))
     var sig = Int(status[0] & 0x7F)
     var code = Int((status[0] >> 8) & 0xFF)
     if sig == 11:

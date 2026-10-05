@@ -6,8 +6,8 @@ Lean: Flare.Bugs.RT_08.linux_failure_crashes (counterexample) and
 Flare.Bugs.RT_08.never_crashes (shipped code meets spec).
 flare/runtime/blocking.mojo:185-206 @59bda50.
 
-Expected: when the pool semaphore cannot be opened the cap is skipped
-and the call returns ("best-effort, never a hard dependency").
+Expected: when the pool semaphore cannot be opened the call returns
+instead of crashing (RT-07 later made it refuse the slot: False).
 Before the fix: _pool_try_acquire and _pool_release test `Int(sem) == -1`, which
 is Darwin's SEM_FAILED. glibc's SEM_FAILED is NULL, so on Linux a failed
 sem_open (here EMFILE: the fd table is full) passes the check and NULL
@@ -21,7 +21,7 @@ not be filled.
 
 Minimal fix: compare against the platform's SEM_FAILED (0 on Linux, -1 on
 macOS), or treat both 0 and -1 as failure, in both functions. Flip check:
-OK, the acquire returned (fail-open True) and the child exited normally.
+OK, the acquire returned (False since RT-07) and the child exited normally.
 """
 
 from std.ffi import external_call, c_int

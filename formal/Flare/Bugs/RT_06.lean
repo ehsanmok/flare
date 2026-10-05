@@ -37,18 +37,19 @@ open Flare.L2.Blocking
 def acquireN : Nat → Sem → Sem × Bool
   | 0, s => (s, true)
   | n + 1, s =>
-    let r := tryAcquire false s
+    let r := tryAcquireOld false s
     let r' := acquireN n r.1
     (r'.1, r.2 && r'.2)
 
-/-- **Counterexample**: when every `sem_open` fails, `n` acquires all
+/-- **Counterexample** (pre-fix fail-open acquire `tryAcquireOld`, with every
+`sem_open` failing as on macOS arm64): when every `sem_open` fails, `n` acquires all
 succeed and `n` slots are held, for every `n` (in particular 40 > 32). -/
 theorem persistentFailOpen_unbounded (n : Nat) (s : Sem) :
     (acquireN n s).2 = true ∧ (acquireN n s).1.held = s.held + n := by
   induction n generalizing s with
   | zero => simp [acquireN]
   | succ n ih =>
-    simp only [acquireN, tryAcquire, Bool.not_false, if_true]
+    simp only [acquireN, tryAcquireOld, Bool.not_false, if_true]
     obtain ⟨h1, h2⟩ := ih { s with held := s.held + 1 }
     refine ⟨by simp [h1], ?_⟩
     rw [h2]; dsimp only; omega

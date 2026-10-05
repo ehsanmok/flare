@@ -92,7 +92,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.BufferPool.release_preserves_capacity
 -- Blocking pool cap
 #print axioms Flare.L2.Blocking.paired_cap_invariant
-#print axioms Flare.L2.Blocking.fixed_cap_invariant
+#print axioms Flare.L2.Blocking.cap_invariant
 -- Bugs: counterexamples and fixes
 #print axioms Flare.Bugs.NET_01.recvFrom_ipv6_wrong_sender
 #print axioms Flare.Bugs.NET_01.recvFromFixed_correct
@@ -126,11 +126,12 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.RT_06.persistentFailOpen_unbounded
 #print axioms Flare.Bugs.RT_06.fixed_cap
 #print axioms Flare.Bugs.RT_07.failOpen_breaks_cap
-#print axioms Flare.Bugs.RT_07.fixed_cap_invariant
+#print axioms Flare.Bugs.RT_07.cap_invariant
 #print axioms Flare.Bugs.RT_08.linux_failure_crashes
 #print axioms Flare.Bugs.RT_08.macos_failure_fails_open
 #print axioms Flare.Bugs.RT_08.never_crashes
 #print axioms Flare.Bugs.RT_08.agrees_with_old
+#print axioms Flare.Bugs.RT_08.failure_fails_closed
 
 -- Happy Eyeballs ordering, hostname validation, UDS bind takeover
 #print axioms Flare.L2.HappyEyeballs.order_perm
