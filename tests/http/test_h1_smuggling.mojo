@@ -464,6 +464,70 @@ def test_strict_parser_still_refuses_ows_before_the_colon() raises:
     )
 
 
+def test_te_framing_ends_header_lines_at_a_bare_lf() raises:
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\r\nHost: a\nTransfer-Encoding: chunked\r\n\r\n"
+        ),
+        TE_CHUNKED,
+    )
+    # The request line may end at a bare LF too.
+    assert_equal(
+        _reactor_te("POST / HTTP/1.1\nTransfer-Encoding: chunked\r\n\r\n"),
+        TE_CHUNKED,
+    )
+    # A CR before the LF is dropped, so the value carries no CR.
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\nHost: a\nTransfer-Encoding: chunked\r\nX:"
+            " y\r\n\r\n"
+        ),
+        TE_CHUNKED,
+    )
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\nHost: a\nTransfer-Encoding:"
+            " gzip\nTransfer-Encoding: chunked\r\n\r\n"
+        ),
+        TE_UNSUPPORTED,
+    )
+    assert_equal(
+        _reactor_te(
+            "POST / HTTP/1.1\r\nHost: a\nContent-Length: 5\nTransfer-Encoding:"
+            " chunked\r\n\r\n"
+        ),
+        TE_INVALID,
+    )
+    # Plain CRLF requests are unchanged.
+    assert_equal(
+        _reactor_te("POST / HTTP/1.1\r\nHost: a\r\nX: y\r\n\r\n"), TE_ABSENT
+    )
+
+
+def test_bare_lf_reactor_and_parser_agree() raises:
+    var lenient = H1LeniencyConfig(allow_lf_only_line_endings=True)
+    var te = _parsed_framing(
+        (
+            "POST / HTTP/1.1\r\nHost: a\nTransfer-Encoding: chunked\r\n\r\n"
+            "5\r\nhello\r\n0\r\n\r\n"
+        ),
+        lenient,
+    )
+    assert_equal(te[0], "chunked")
+    var te_first = _parsed_framing(
+        (
+            "POST / HTTP/1.1\nTransfer-Encoding: chunked\r\n\r\n"
+            "5\r\nhello\r\n0\r\n\r\n"
+        ),
+        lenient,
+    )
+    assert_equal(te_first[0], "chunked")
+    var cl = _parsed_framing(
+        "POST / HTTP/1.1\r\nHost: a\nContent-Length: 5\r\n\r\nhello", lenient
+    )
+    assert_equal(cl[1], 5)
+
+
 # ── Header lines the parser used to skip or misread ────────────────────────
 
 

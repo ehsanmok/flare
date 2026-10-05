@@ -19,10 +19,11 @@ body are parsed by the other as the next request: request smuggling.
 
 Both sides are modelled over the header block as a list of field lines (the
 bytes between consecutive line terminators, terminators excluded; request
-line and final empty line removed). The reactor splits lines on CRLF. The
-strict parser splits on CRLF too and raises on a bare LF, so in strict mode
-the line lists coincide. The parser with `allow_lf_only_line_endings`
-splits on LF instead; `H1-04` is that mismatch.
+line and final empty line removed). The shipped reactor splits lines on LF and drops a
+preceding CR (`reactorLines`, the `H1-04` fix); the pre-fix reactor split on
+CRLF only (`linesCRLFOld`). The strict parser splits on CRLF and raises on a
+bare LF, so in strict mode the line lists coincide. The parser with
+`allow_lf_only_line_endings` splits on LF; `H1-04` was that mismatch.
 
 `scanField skip` is the reactor's per-line test. The shipped reactor skips
 SP/HTAB between name and colon (`skip = true`, the `H1-03` fix); `skip = false`
@@ -391,13 +392,14 @@ def dropCR (l : Bytes) : Bytes :=
   | some 13 => l.dropLast
   | _ => l
 
-/-- The reactor's line split of a header block (`buf` between the request
-line's CRLF and the final CRLF): on CRLF.
+/-- The pre-fix reactor's line split of a header block (`buf` between the
+request line's CRLF and the final CRLF): on CRLF only. Kept for
+`Bugs.H1_04.counterexample`.
 mirrors flare/http/proto/chunked.mojo:133-153 @59bda50 -/
-def linesCRLF : Bytes → List Bytes
+def linesCRLFOld : Bytes → List Bytes
   | [] => [[]]
-  | 13 :: 10 :: xs => [] :: linesCRLF xs
-  | x :: xs => match linesCRLF xs with
+  | 13 :: 10 :: xs => [] :: linesCRLFOld xs
+  | x :: xs => match linesCRLFOld xs with
     | [] => [[x]]
     | y :: ys => (x :: y) :: ys
 
@@ -406,11 +408,17 @@ drop a trailing CR.
 mirrors flare/http/_server/parse_util.mojo:165-208 @59bda50 -/
 def linesLF (b : Bytes) : List Bytes := (splitOn 10 b).map dropCR
 
-/-- **`H1-04` fix.** A reactor that splits header lines the way the
-LF-lenient parser does agrees with it whenever the parser accepts. -/
+/-- The shipped reactor's line split of a header block: on LF, dropping one
+trailing CR, exactly like the LF-lenient parser (H1-04 fix). The request line
+is skipped the same way, up to its first LF.
+mirrors flare/http/proto/chunked.mojo:143-178 (fixed, H1-04) -/
+def reactorLines (b : Bytes) : List Bytes := linesLF b
+
+/-- **`H1-04` fix.** The shipped reactor, which splits header lines the way
+the LF-lenient parser does, agrees with it whenever the parser accepts. -/
 theorem lf_fixed_agrees (allowCL : Bool) (maxBody : Nat) (blk : Bytes)
     (hacc : parserFraming false allowCL maxBody (linesLF blk) ≠ .reject) :
-    reactorFraming allowCL maxBody (linesLF blk) =
+    reactorFraming allowCL maxBody (reactorLines blk) =
       parserFraming false allowCL maxBody (linesLF blk) :=
   framing_agrees false allowCL maxBody _ hacc
 

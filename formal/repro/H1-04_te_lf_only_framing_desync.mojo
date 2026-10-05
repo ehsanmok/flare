@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H1-04 fixed on fix/formal-findings
 """H1-04: with allow_lf_only_line_endings the reactor and the parser split
 header lines differently, so a Transfer-Encoding line after a bare LF is
 invisible to the reactor (request smuggling / desync).
@@ -16,7 +17,7 @@ and the parser must agree on which header lines exist.
 
 Expected: "Host: a\\nTransfer-Encoding: chunked\\r\\n" is two header lines
 for both, so the reactor frames the body as chunked.
-Actual: request_te_framing sees one line "Host: a\\nTransfer-Encoding:
+Before the fix: Actual: request_te_framing sees one line "Host: a\\nTransfer-Encoding:
 chunked" and returns TE_ABSENT, the reactor frames the request at the end
 of the head, while the parser accepts it with Transfer-Encoding: chunked.
 The chunked body is then parsed as the next request.

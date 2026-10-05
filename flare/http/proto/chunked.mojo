@@ -122,10 +122,10 @@ def request_te_framing(
     A byte scan rather than a ``HeaderMap`` lookup, because the reactor
     has to answer this *before* it parses and the minimal-parser path
     never builds a ``HeaderMap``. It reads header lines the way the
-    parser does -- field name anchored at the start of a line and
-    followed by ``:``, with optional SP/HTAB in between -- and it reads
-    *every* ``Transfer-Encoding`` line, so it cannot disagree with the
-    parser about which one counts.
+    parser does -- field name anchored at the start of a line (lines end
+    at LF, a preceding CR dropped) and followed by ``:``, with optional
+    SP/HTAB in between -- and it reads *every* ``Transfer-Encoding``
+    line, so it cannot disagree with the parser about which one counts.
 
     Args:
         buf: Buffer holding the request head.
@@ -144,33 +144,38 @@ def request_te_framing(
     var joined = String("")
     var saw_te = False
     var saw_cl = False
-    # Skip the request line: header names only start after a CRLF.
+    # Skip the request line: header names only start after its line end.
+    # A line ends at LF, with the CR before it dropped, the way the parser
+    # reads it under ``allow_lf_only_line_endings``. Strict mode rejects a
+    # bare LF, so this only widens what the reactor sees, never what the
+    # parser accepts.
     var i = 0
-    while i + 1 < n and not (buf[i] == UInt8(13) and buf[i + 1] == UInt8(10)):
+    while i < n and buf[i] != UInt8(10):
         i += 1
-    i += 2
+    i += 1
     while i < n:
         var e = i
-        while e + 1 < n and not (
-            buf[e] == UInt8(13) and buf[e + 1] == UInt8(10)
-        ):
+        while e < n and buf[e] != UInt8(10):
             e += 1
-        if e + 1 >= n:
+        if e >= n:
             break
-        if _matches_at(buf, i, te_name, e):
-            var p = _colon_after_name(buf, i + len(te_name), e)
+        var line_end = e
+        if line_end > i and buf[line_end - 1] == UInt8(13):
+            line_end -= 1
+        if _matches_at(buf, i, te_name, line_end):
+            var p = _colon_after_name(buf, i + len(te_name), line_end)
             if p >= 0:
                 saw_te = True
-                var v = String(capacity_bytes=e - p)
-                for k in range(p, e):
+                var v = String(capacity_bytes=line_end - p)
+                for k in range(p, line_end):
                     v += chr(Int(buf[k]))
                 if joined.byte_length() > 0:
                     joined += ","
                 joined += v
-        elif _matches_at(buf, i, cl_name, e):
-            if _colon_after_name(buf, i + len(cl_name), e) >= 0:
+        elif _matches_at(buf, i, cl_name, line_end):
+            if _colon_after_name(buf, i + len(cl_name), line_end) >= 0:
                 saw_cl = True
-        i = e + 2
+        i = e + 1
     if not saw_te:
         return TE_ABSENT
     if saw_cl and not allow_content_length:

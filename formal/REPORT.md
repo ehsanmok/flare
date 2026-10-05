@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60933 lines) |
+| Lean files | 298 (60950 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 13 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 14 of 138 |
 
 Six findings are rated high:
 
@@ -987,15 +987,15 @@ File: `H1/Framing.lean`.
 - `reactorFraming allowCL maxBody lines` mirrors the shipped reactor's decision: `request_te_framing` and `scan_content_length` over the header lines, with SP/HTAB between the field name and the colon skipped (H1-03 fix). It returns `chunked`, `length n` or `reject`. `reactorFramingWith skip …` is the same function with the colon test as a parameter; `skip = false` is the pre-fix reactor.
 - `parserFraming ows allowCL maxBody lines` mirrors the parser's acceptance and framing (`parse.mojo:234-353`). Its acceptance is a superset of the real parser's, since it checks only line shape, field syntax and Content-Length consistency. Any statement of the form "parser accepts ⇒ same framing" therefore carries over to the real parser.
 - `ows` is `allow_ows_around_colon`.
-- `linesCRLF` and `linesLF` mirror the reactor's CRLF-only line splitting and the lenient parser's LF line reader (`parse_util.mojo:165-208`).
+- `linesLF` mirrors the lenient parser's LF line reader (`parse_util.mojo:165-208`); the shipped reactor splits lines the same way (`reactorLines`, the H1-04 fix), and `linesCRLFOld` is the pre-fix CRLF-only split.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `framing_agrees` | For either `ows`, any `allowCL` and `maxBody`: if the parser accepts, the shipped reactor frames the request the same way. | proved |
 | `no_smuggling_strict` | Strict mode (`ows = false`): parser acceptance implies the same framing as the shipped reactor. | proved |
-| `lf_fixed_agrees` | If the reactor splits lines with the parser's LF splitter, the two agree whenever the parser accepts. | proved |
+| `lf_fixed_agrees` | The shipped reactor splits lines with the parser's LF splitter (`reactorLines`), so the two agree whenever the parser accepts. | proved |
 | `Bugs.H1_03.counterexample` | With `allow_ows_around_colon` and the pre-fix reactor (`reactorFramingWith false`), they disagree on an accepted request. | counterexample |
-| `Bugs.H1_04.counterexample` | With `allow_lf_only_line_endings` and the shipped CRLF splitter, they disagree on an accepted request. | counterexample |
+| `Bugs.H1_04.counterexample` | With `allow_lf_only_line_endings` and the pre-fix CRLF splitter (`linesCRLFOld`), they disagree on an accepted request. | counterexample |
 
 #### Header values and the String invariant
 
@@ -3004,7 +3004,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-01 | Low | open | the chunk-line cap gives a verdict that depends on TCP segmentation | `Flare/Bugs/H1_01.lean` | `repro/H1-01_chunk_line_cap_segmentation.mojo` (any) |
 | H1-02 | Medium | resolved | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
 | H1-03 | Medium | resolved | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
-| H1-04 | Medium | open | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
+| H1-04 | Medium | resolved | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
 | H1-05 | Low | open | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
 | H1-06 | Medium | open | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
 | H1-07 | Low | open | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
@@ -3688,15 +3688,17 @@ Status: resolved. Fixed in `flare/http/proto/chunked.mojo` (`request_te_framing`
 
 #### H1-04: with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor
 
+Status: resolved. Fixed in `request_te_framing` (`flare/http/proto/chunked.mojo`): the request line and every header line now end at LF with a preceding CR dropped, the way the lenient parser reads them (`scan_content_length` already anchored on LF). Regression tests `tests/http/test_h1_smuggling.mojo::test_te_framing_ends_header_lines_at_a_bare_lf` and `test_bare_lf_reactor_and_parser_agree`; the repro prints `OK:`. Lean: `reactorLines` is the shipped split, `linesCRLFOld` keeps the counterexample.
+
 - **Severity:** Medium. It is the same desync as H1-03, triggered by a different non-default leniency option.
 - **RFC:** RFC 9112 §2.2 and §6.3: a recipient that accepts a bare LF as a line terminator must do so for framing as well as for parsing.
 - **What goes wrong:**
   - `request_te_framing` splits lines on CRLF only (`chunked.mojo:127-153`), so `Host: a\nTransfer-Encoding: chunked` is one line to the reactor.
   - The lenient parser (`parse_util.mojo:165-208`) reads it as two lines.
 - **Counterexample:** `Bugs.H1_04.counterexample`:
-  - `reactor_lines`: `linesCRLF blk = [blk]`;
-  - the reactor gives `length 0`, while the parser over `linesLF blk` gives `chunked`.
-- **Fix:** end header lines at LF, dropping a preceding CR, in `request_te_framing`. `Bugs.H1_04.fixed_agrees` (from `lf_fixed_agrees`) proves agreement on every block the parser accepts.
+  - `reactor_lines`: `linesCRLFOld blk = [blk]`;
+  - the pre-fix reactor gives `length 0`, while the parser over `linesLF blk` gives `chunked`.
+- **Fix:** end header lines at LF, dropping a preceding CR, in `request_te_framing`. `Bugs.H1_04.fixed_agrees` (from `lf_fixed_agrees`) proves the shipped reactor agrees on every block the parser accepts. The request line also ends at its first LF.
 - **Repro:** `formal/repro/H1-04_te_lf_only_framing_desync.mojo`
 - **Observed:** `BUG REPRODUCED: reactor framed by Content-Length (TE verdict 0, body_total 61) while the parser accepted Transfer-Encoding: chunked; 15 body bytes are left to be parsed as the next request`
 - **Flip:** `OK: reactor and parser agree on chunked framing`; `flare/http/proto/chunked.mojo` restored.

@@ -84,7 +84,11 @@ struct H1LeniencyConfig(Copyable):
     ``CRLF``; many older clients emit bare ``LF`` between the
     request line, headers, and the trailing blank line. The
     parser's tokeniser still rejects mixed terminators (``CR``
-    not followed by ``LF``)."""
+    not followed by ``LF``). The reactor's raw-byte framing
+    (``Transfer-Encoding`` / ``Content-Length``) always reads the
+    request line and header lines as ending at ``LF``, so it
+    frames the request the way this flag makes the parser read it;
+    the end of the header block is still the first ``CRLF CRLF``."""
 
     var allow_mixed_case_method: Bool
     """Accept method tokens with mixed case (e.g. ``Get`` /

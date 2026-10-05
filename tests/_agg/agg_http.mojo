@@ -1242,6 +1242,12 @@ from test_h1_smuggling import (
     test_strict_parser_still_refuses_ows_before_the_colon as test_h1_smuggling__test_strict_parser_still_refuses_ows_before_the_colon,
 )
 from test_h1_smuggling import (
+    test_te_framing_ends_header_lines_at_a_bare_lf as test_h1_smuggling__test_te_framing_ends_header_lines_at_a_bare_lf,
+)
+from test_h1_smuggling import (
+    test_bare_lf_reactor_and_parser_agree as test_h1_smuggling__test_bare_lf_reactor_and_parser_agree,
+)
+from test_h1_smuggling import (
     test_bare_lf_cannot_end_the_header_block as test_h1_smuggling__test_bare_lf_cannot_end_the_header_block,
 )
 from test_h1_smuggling import (
@@ -4785,6 +4791,10 @@ def main() raises:
     suite.test[
         test_h1_smuggling__test_strict_parser_still_refuses_ows_before_the_colon
     ]()
+    suite.test[
+        test_h1_smuggling__test_te_framing_ends_header_lines_at_a_bare_lf
+    ]()
+    suite.test[test_h1_smuggling__test_bare_lf_reactor_and_parser_agree]()
     suite.test[test_h1_smuggling__test_bare_lf_cannot_end_the_header_block]()
     suite.test[test_h1_smuggling__test_header_line_without_colon_is_rejected]()
     suite.test[test_h1_smuggling__test_empty_header_name_is_rejected]()
