@@ -592,5 +592,5 @@ def _parse_http_request(
                 max_body_size,
                 peer=stream.peer_addr(),
             )
-        if len(buf) > max_header_size + max_body_size:
+        if len(buf) - max_header_size > max_body_size:
             raise Error("request too large")

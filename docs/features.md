@@ -777,6 +777,10 @@ their `libflare_tls.so`. A bare checkout run outside pixi now needs
 (500), `read_body_timeout_ms` (30_000), `request_timeout_ms` (60_000),
 and `handler_timeout_ms`.
 
+`max_body_size` may be as large as `Int.MAX` (effectively unlimited): the read-buffer
+cap is compared as `len(read_buf) - max_header_size > max_body_size`, so the sum of
+the two limits is never formed and cannot wrap.
+
 The reactor's static and short-request fast paths decide `Connection: close`
 by scanning the raw header block. The scan only matches `Connection:` at the
 start of a header line (an `X-Connection:` header is ignored) and combines

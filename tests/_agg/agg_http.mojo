@@ -3505,6 +3505,15 @@ from test_server_reactor_state import (
     test_error_after_head_on_keepalive_conn_keeps_body as test_server_reactor_state__test_error_after_head_on_keepalive_conn_keeps_body,
 )
 from test_server_reactor_state import (
+    test_unlimited_body_cap_serves_request as test_server_reactor_state__test_unlimited_body_cap_serves_request,
+)
+from test_server_reactor_state import (
+    test_unlimited_body_cap_bufring_path as test_server_reactor_state__test_unlimited_body_cap_bufring_path,
+)
+from test_server_reactor_state import (
+    test_body_cap_still_rejects_oversized_input as test_server_reactor_state__test_body_cap_still_rejects_oversized_input,
+)
+from test_server_reactor_state import (
     test_response_includes_date_header_from_cache as test_server_reactor_state__test_response_includes_date_header_from_cache,
 )
 from test_server_serve_comptime import (
@@ -6117,6 +6126,15 @@ def main() raises:
     ]()
     suite.test[
         test_server_reactor_state__test_error_after_head_on_keepalive_conn_keeps_body
+    ]()
+    suite.test[
+        test_server_reactor_state__test_unlimited_body_cap_serves_request
+    ]()
+    suite.test[
+        test_server_reactor_state__test_unlimited_body_cap_bufring_path
+    ]()
+    suite.test[
+        test_server_reactor_state__test_body_cap_still_rejects_oversized_input
     ]()
     suite.test[
         test_server_reactor_state__test_response_includes_date_header_from_cache

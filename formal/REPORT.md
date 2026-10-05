@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61975 lines) |
+| Lean files | 298 (61988 lines) |
 | Theorems | 3251 |
 | Headline theorems in the axiom audit | 1060 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 74 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 75 of 138 |
 
 Six findings are rated high:
 
@@ -1807,7 +1807,7 @@ the read-buffer size cap (448-453).
 | `Flare.L4.ServerConfig.body_timer_le_request` | under `check`, the body timer is at most `request_timeout_ms` when both are enabled | proved |
 | `Flare.L4.ServerConfig.closeTime_le` | given a monotone clock (`Flare.Assumptions.MonotoneClock`), one request's read phase ends by `t0 + R + T` | proved |
 | `Flare.L4.ServerConfig.head_timer_unordered` | `check` accepts configs whose idle (head) timer exceeds `request_timeout_ms` | proved (observation) |
-| `Flare.L4.ServerConfig.overCapFixed_eq_spec` | the subtraction form of the size cap equals the exact-arithmetic spec for all non-negative `Int64` inputs | proved |
+| `Flare.L4.ServerConfig.overCapImpl_eq_spec` | the subtraction form of the size cap equals the exact-arithmetic spec for all non-negative `Int64` inputs | proved |
 
 #### 4. Runtime router (`Flare.L4.Router`) and comptime router (`Flare.L4.ComptimeRouter`)
 
@@ -2909,7 +2909,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1590-1620, 1174-1220 | `headFlag_spec`, `staticBytes_spec` | APP-04, APP-05 |
 | `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfterOld_single`, `computeCloseAfter_eq_spec` | APP-03 |
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-491 | `wantsClose_sound_close`, `wantsClose_spec` | APP-02 |
-| `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:448-453, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapFixed_eq_spec` | proved; APP-06 |
+| `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:460-463, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapImpl_eq_spec` | proved; APP-06 |
 | `Flare.L4.Router.splitPath`, `compile`, `matchSegs`, `serve`, `serveMounts` | http/router.mojo:111-156, 175-214, 339-394, 488-498, 675-929 | `serve_eq_spec`, `serve_valid`, `allow_exact`, `mount_compose` | proved |
 | `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime` | proved; APP-10 |
 | `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |
@@ -3097,7 +3097,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-03 | Low | resolved | `close` inside a `Connection` token list is ignored | `Flare/Bugs/APP_03.lean` | `repro/APP-03_connection_close_token_list.mojo` (any) |
 | APP-04 | Medium | resolved | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
 | APP-05 | Low | resolved | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
-| APP-06 | Low | open | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
+| APP-06 | Low | resolved | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
 | APP-10 | Low | open | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
 | APP-20 | Low | open | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
 | APP-21 | Low | open | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
@@ -4838,8 +4838,9 @@ computes `8192 + Int.MAX`, which wraps negative, so every non-empty buffer
 gets 413.
 
 **Lean.** `Flare.Bugs.APP_06.check_accepts`, `overflow_cap_rejects_one_byte`
-and `violates_spec`. The fix is proved sufficient by `capFixed_spec` (via
-`Flare.L4.ServerConfig.overCapFixed_eq_spec`).
+and `violates_spec` (about the pre-fix `overCapOld`). The shipped `overCapImpl`
+is proved to meet the spec by `capFixed_spec` (via
+`Flare.L4.ServerConfig.overCapImpl_eq_spec`).
 
 **Fix.** Use `len - max_header_size > max_body_size` at all three sites.
 
@@ -4847,6 +4848,8 @@ and `violates_spec`. The fix is proved sufficient by `capFixed_spec` (via
 
 - Observed: `BUG REPRODUCED: a 27 byte GET was answered 413 with max_body_size=Int.MAX`
 - Flip: `OK: the GET is served with max_body_size=Int.MAX`
+
+Status: resolved. The three read-buffer cap checks in `conn_handle.mojo` (and the legacy `_parse_http_request`) now test `len - max_header_size > max_body_size`, so the sum is never formed and `max_body_size = Int.MAX` serves requests. Tests: `tests/http/test_server_reactor_state.mojo::test_unlimited_body_cap_serves_request`, `::test_unlimited_body_cap_bufring_path`, `::test_body_cap_still_rejects_oversized_input`. The model `overCapImpl` is the shipped test; `overCapOld` is the pre-fix one.
 
 #### APP-10: ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern
 

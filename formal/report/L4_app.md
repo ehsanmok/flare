@@ -143,7 +143,7 @@ the read-buffer size cap (448-453).
 | `Flare.L4.ServerConfig.body_timer_le_request` | under `check`, the body timer is at most `request_timeout_ms` when both are enabled | proved |
 | `Flare.L4.ServerConfig.closeTime_le` | given a monotone clock (`Flare.Assumptions.MonotoneClock`), one request's read phase ends by `t0 + R + T` | proved |
 | `Flare.L4.ServerConfig.head_timer_unordered` | `check` accepts configs whose idle (head) timer exceeds `request_timeout_ms` | proved (observation) |
-| `Flare.L4.ServerConfig.overCapFixed_eq_spec` | the subtraction form of the size cap equals the exact-arithmetic spec for all non-negative `Int64` inputs | proved |
+| `Flare.L4.ServerConfig.overCapImpl_eq_spec` | the subtraction form of the size cap equals the exact-arithmetic spec for all non-negative `Int64` inputs | proved |
 
 ### 4. Runtime router (`Flare.L4.Router`) and comptime router (`Flare.L4.ComptimeRouter`)
 
@@ -744,8 +744,9 @@ computes `8192 + Int.MAX`, which wraps negative, so every non-empty buffer
 gets 413.
 
 **Lean.** `Flare.Bugs.APP_06.check_accepts`, `overflow_cap_rejects_one_byte`
-and `violates_spec`. The fix is proved sufficient by `capFixed_spec` (via
-`Flare.L4.ServerConfig.overCapFixed_eq_spec`).
+and `violates_spec` (about the pre-fix `overCapOld`). The shipped `overCapImpl`
+is proved to meet the spec by `capFixed_spec` (via
+`Flare.L4.ServerConfig.overCapImpl_eq_spec`).
 
 **Fix.** Use `len - max_header_size > max_body_size` at all three sites.
 
@@ -753,6 +754,8 @@ and `violates_spec`. The fix is proved sufficient by `capFixed_spec` (via
 
 - Observed: `BUG REPRODUCED: a 27 byte GET was answered 413 with max_body_size=Int.MAX`
 - Flip: `OK: the GET is served with max_body_size=Int.MAX`
+
+Status: resolved. The three read-buffer cap checks in `conn_handle.mojo` (and the legacy `_parse_http_request`) now test `len - max_header_size > max_body_size`, so the sum is never formed and `max_body_size = Int.MAX` serves requests. Tests: `tests/http/test_server_reactor_state.mojo::test_unlimited_body_cap_serves_request`, `::test_unlimited_body_cap_bufring_path`, `::test_body_cap_still_rejects_oversized_input`. The model `overCapImpl` is the shipped test; `overCapOld` is the pre-fix one.
 
 ### APP-10: ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern
 
@@ -1417,7 +1420,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1590-1620, 1174-1220 | `headFlag_spec`, `staticBytes_spec` | APP-04, APP-05 |
 | `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfterOld_single`, `computeCloseAfter_eq_spec` | APP-03 |
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-491 | `wantsClose_sound_close`, `wantsClose_spec` | APP-02 |
-| `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:448-453, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapFixed_eq_spec` | proved; APP-06 |
+| `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:460-463, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapImpl_eq_spec` | proved; APP-06 |
 | `Flare.L4.Router.splitPath`, `compile`, `matchSegs`, `serve`, `serveMounts` | http/router.mojo:111-156, 175-214, 339-394, 488-498, 675-929 | `serve_eq_spec`, `serve_valid`, `allow_exact`, `mount_compose` | proved |
 | `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime` | proved; APP-10 |
 | `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |

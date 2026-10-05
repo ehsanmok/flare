@@ -22,7 +22,7 @@ Results:
   a timer of at most `T` ms, the read phase of one request ends (408 or timer
   close) no later than `t0 + R + T`, where `t0` is the first byte's time.
   General (all traces), not bounded.
-* `overCapImpl` / `overCapSpec`: the read-buffer size cap, with Mojo `Int`
+* `overCapOld` / `overCapSpec`: the read-buffer size cap, with Mojo `Int`
   wrapping, used by `Flare.Bugs.APP_06`.
 -/
 namespace Flare.L4.ServerConfig
@@ -168,25 +168,30 @@ theorem closeTime_le (R T t0 : Nat) :
 
 /-! ## The read-buffer size cap -/
 
-/-- The cap test as written: `len(self.read_buf) > config.max_header_size +
-config.max_body_size`, in Mojo `Int` (wrapping `Int64`).
+/-- The cap test before the APP-06 fix: `len(self.read_buf) >
+config.max_header_size + config.max_body_size`, in Mojo `Int` (wrapping
+`Int64`).
 mirrors flare/http/_reactor/conn_handle.mojo:448-453 @59bda50
 (identical at 492-497 and 536-541) -/
-def overCapImpl (len maxH maxB : Int64) : Bool := len > maxH + maxB
+def overCapOld (len maxH maxB : Int64) : Bool := len > maxH + maxB
 
 /-- Intended meaning, on mathematical integers: the buffer is larger than
 the largest legal head plus the largest legal body. -/
 def overCapSpec (len maxH maxB : Int) : Bool := decide (len > maxH + maxB)
 
-/-- Minimal fix: `len - max_header_size > max_body_size`. -/
-def overCapFixed (len maxH maxB : Int64) : Bool := len - maxH > maxB
+/-- The cap test as shipped (fixed, APP-06): `len(self.read_buf) -
+config.max_header_size > config.max_body_size` at all three sites of
+conn_handle.mojo (and `_parse_http_request`).
+mirrors flare/http/_reactor/conn_handle.mojo:460-463, 505-508, 550-553 (fixed,
+APP-06) -/
+def overCapImpl (len maxH maxB : Int64) : Bool := len - maxH > maxB
 
-/-- The fix agrees with the spec whenever `0 ≤ len`, `0 ≤ maxH` and `maxB`
+/-- The shipped test agrees with the spec whenever `0 ≤ len`, `0 ≤ maxH` and `maxB`
 is any `Int64` (no wrapping can occur in `len - maxH`). -/
-theorem overCapFixed_eq_spec (len maxH maxB : Int64)
+theorem overCapImpl_eq_spec (len maxH maxB : Int64)
     (hl : 0 ≤ len.toInt) (hh : 0 ≤ maxH.toInt) :
-    overCapFixed len maxH maxB = overCapSpec len.toInt maxH.toInt maxB.toInt := by
-  unfold overCapFixed overCapSpec
+    overCapImpl len maxH maxB = overCapSpec len.toInt maxH.toInt maxB.toInt := by
+  unfold overCapImpl overCapSpec
   have hsub : (len - maxH).toInt = len.toInt - maxH.toInt := by
     rw [Int64.toInt_sub]
     have h1 := Int64.toInt_lt len; have h2 := Int64.toInt_lt maxH

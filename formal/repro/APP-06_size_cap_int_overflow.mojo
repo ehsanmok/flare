@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-06 fixed on fix/formal-findings
 """APP-06: max_header_size + max_body_size wraps, so a config that
 ServerConfig.check accepts rejects every request with 413.
 
@@ -14,7 +15,7 @@ body is at most max_body_size bytes is not rejected as too large.
 
 Expected: with max_body_size = Int.MAX (an "unlimited" body cap that
 check accepts) a 27-byte GET is served (200).
-Actual: 8192 + Int.MAX wraps to a negative Int, every non-empty read
+Before the fix: 8192 + Int.MAX wraps to a negative Int, every non-empty read
 buffer exceeds it, and the request is answered 413.
 
 Minimal fix: compare without the sum,

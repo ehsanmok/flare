@@ -14,6 +14,14 @@ non-empty read buffer is "too large".
 Spec: a buffer that is at most `max_header_size + max_body_size` bytes (on
 mathematical integers) is not over the cap
 (`Flare.L4.ServerConfig.overCapSpec`).
+
+Status: resolved. The three read-buffer cap checks (and the legacy
+`_parse_http_request`) compare `len - max_header_size > max_body_size`, so
+the sum is never formed. The model `overCapImpl` is the shipped test,
+`overCapOld` the pre-fix one. Regression tests:
+`tests/http/test_server_reactor_state.mojo::test_unlimited_body_cap_serves_request`,
+`::test_unlimited_body_cap_bufring_path` and
+`::test_body_cap_still_rejects_oversized_input`.
 -/
 namespace Flare.Bugs.APP_06
 
@@ -25,20 +33,20 @@ def intMax : Int64 := 9223372036854775807
 theorem check_accepts : check { default with maxBodySize := intMax.toInt } := by
   decide
 
-/-- Counterexample: one buffered byte is over the cap as computed, but not
+/-- Counterexample (pre-fix): one buffered byte is over the cap as computed, but not
 under the spec. -/
 theorem overflow_cap_rejects_one_byte :
-    overCapImpl 1 8192 intMax = true ∧ overCapSpec 1 8192 intMax.toInt = false := by
+    overCapOld 1 8192 intMax = true ∧ overCapSpec 1 8192 intMax.toInt = false := by
   decide
 
-/-- `¬ spec (impl x)`. -/
-theorem violates_spec : overCapImpl 1 8192 intMax ≠ overCapSpec 1 8192 intMax.toInt := by
+/-- `¬ spec (impl x)` for the pre-fix test. -/
+theorem violates_spec : overCapOld 1 8192 intMax ≠ overCapSpec 1 8192 intMax.toInt := by
   rw [overflow_cap_rejects_one_byte.1, overflow_cap_rejects_one_byte.2]; decide
 
-/-- Fix (`len - max_header_size > max_body_size`) equals the spec for every
+/-- The shipped test (`len - max_header_size > max_body_size`) equals the spec for every
 non-negative length and header cap and every body cap. -/
 theorem capFixed_spec (len maxH maxB : Int64) (hl : 0 ≤ len.toInt) (hh : 0 ≤ maxH.toInt) :
-    overCapFixed len maxH maxB = overCapSpec len.toInt maxH.toInt maxB.toInt :=
-  overCapFixed_eq_spec len maxH maxB hl hh
+    overCapImpl len maxH maxB = overCapSpec len.toInt maxH.toInt maxB.toInt :=
+  overCapImpl_eq_spec len maxH maxB hl hh
 
 end Flare.Bugs.APP_06

@@ -27,7 +27,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ServerConfig.default_check
 #print axioms Flare.L4.ServerConfig.body_timer_le_request
 #print axioms Flare.L4.ServerConfig.head_timer_unordered
-#print axioms Flare.L4.ServerConfig.overCapFixed_eq_spec
+#print axioms Flare.L4.ServerConfig.overCapImpl_eq_spec
 -- Router / ComptimeRouter
 #print axioms Flare.L4.Router.serve_eq_spec
 #print axioms Flare.L4.Router.serve_deterministic

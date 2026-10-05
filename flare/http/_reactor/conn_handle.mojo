@@ -469,9 +469,13 @@ struct ConnHandle(Movable):
                 self.read_buf.resize(old_len + got_int, UInt8(0))
                 var dst = self.read_buf.unsafe_ptr().unsafe_offset(old_len)
                 unsafe_memcpy(dest=dst, src=chunk, count=got_int)
+                # Compare without the sum: ``max_header_size +
+                # max_body_size`` wraps for an "unlimited" body cap such
+                # as ``Int.MAX`` (APP-06). ``len`` and ``max_header_size``
+                # are non-negative, so the subtraction cannot overflow.
                 if (
-                    len(self.read_buf)
-                    > config.max_header_size + config.max_body_size
+                    len(self.read_buf) - config.max_header_size
+                    > config.max_body_size
                 ):
                     self._note_head_from_buf()
                     self._queue_error(413, "Content Too Large")
@@ -515,8 +519,8 @@ struct ConnHandle(Movable):
             var got = self.tls.value().recv(self.read_buf, 8192)
             if got > 0:
                 if (
-                    len(self.read_buf)
-                    > config.max_header_size + config.max_body_size
+                    len(self.read_buf) - config.max_header_size
+                    > config.max_body_size
                 ):
                     self._note_head_from_buf()
                     self._queue_error(413, "Content Too Large")
@@ -560,8 +564,8 @@ struct ConnHandle(Movable):
             var dst = self.read_buf.unsafe_ptr().unsafe_offset(old_len)
             unsafe_memcpy(dest=dst, src=bytes.unsafe_ptr(), count=add)
             if (
-                len(self.read_buf)
-                > config.max_header_size + config.max_body_size
+                len(self.read_buf) - config.max_header_size
+                > config.max_body_size
             ):
                 self._note_head_from_buf()
                 self._queue_error(413, "Content Too Large")
