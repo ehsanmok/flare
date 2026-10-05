@@ -67,7 +67,14 @@ from std.memory import ArcPointer
 from std.collections.span import Span
 
 from flare.http3.frame import (
+    H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_GOAWAY,
+    H3_FRAME_TYPE_H2_CONTINUATION,
+    H3_FRAME_TYPE_H2_PING,
+    H3_FRAME_TYPE_H2_PRIORITY,
+    H3_FRAME_TYPE_H2_WINDOW_UPDATE,
+    H3_FRAME_TYPE_HEADERS,
+    H3_FRAME_TYPE_PUSH_PROMISE,
     H3_FRAME_TYPE_SETTINGS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
@@ -1273,6 +1280,8 @@ struct Http3Connection(Copyable, Defaultable):
         * Any other frame before SETTINGS -> H3_MISSING_SETTINGS.
         * GOAWAY may arrive after SETTINGS; subsequent GOAWAYs
           must monotonically decrease (RFC 9114 §5.2).
+        * DATA, HEADERS, PUSH_PROMISE and the HTTP/2-reserved types
+          -> H3_FRAME_UNEXPECTED.
         """
         if frame_type == H3_FRAME_TYPE_SETTINGS:
             if self.peer_settings_received:
@@ -1304,6 +1313,27 @@ struct Http3Connection(Copyable, Defaultable):
                 )
             self.peer_goaway_max_stream_id = goaway_id.value
             return
+        # DATA, HEADERS and PUSH_PROMISE are request-stream frames, and
+        # the HTTP/2 PRIORITY / PING / WINDOW_UPDATE / CONTINUATION types
+        # are reserved: each is a connection error of type
+        # H3_FRAME_UNEXPECTED on a control stream (RFC 9114 sec 7.2.1,
+        # 7.2.2, 7.2.5, 7.2.8, 11.2.1). They were silently dropped (H3-03).
+        # CANCEL_PUSH, MAX_PUSH_ID and unknown types stay accepted.
+        if (
+            frame_type == H3_FRAME_TYPE_DATA
+            or frame_type == H3_FRAME_TYPE_HEADERS
+            or frame_type == H3_FRAME_TYPE_PUSH_PROMISE
+            or frame_type == H3_FRAME_TYPE_H2_PRIORITY
+            or frame_type == H3_FRAME_TYPE_H2_PING
+            or frame_type == H3_FRAME_TYPE_H2_WINDOW_UPDATE
+            or frame_type == H3_FRAME_TYPE_H2_CONTINUATION
+        ):
+            raise Error(
+                "h3 server: frame type "
+                + String(frame_type)
+                + " is not allowed on the control stream"
+                " (RFC 9114 7.2 H3_FRAME_UNEXPECTED)"
+            )
 
     def _apply_peer_settings(mut self, var settings: List[Http3Setting]) raises:
         """Update the connection's view of the peer's announced

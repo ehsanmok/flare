@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: H3-03 fixed on fix/formal-findings
 """H3-03: frames forbidden on the control stream are silently ignored.
 
-Lean: Flare.Bugs.H3_03.impl_accepts_data_on_control (impl),
+Lean: Flare.Bugs.H3_03.implOld_accepts_data_on_control (pre-fix),
       Flare.Bugs.H3_03.dispatchFixed_spec (fix).
 flare/http3/server.mojo:1170-1211 @59bda50 (`_dispatch_control_frame`).
 
 RFC 9114 §7.2.1 (DATA), §7.2.2 (HEADERS), §7.2.5 (PUSH_PROMISE): receipt on
 a control stream MUST be treated as a connection error of type
 H3_FRAME_UNEXPECTED; §7.2.8: the HTTP/2-reserved types 0x02/0x06/0x08/0x09
-likewise. Expected: feed_uni_stream_chunk raises. Actual: after SETTINGS,
+likewise. Expected: feed_uni_stream_chunk raises. Before the fix: Actual: after SETTINGS,
 `_dispatch_control_frame` handles only SETTINGS and GOAWAY and returns
 for every other type, so these frames are dropped without error.
 
@@ -57,8 +58,10 @@ def main() raises:
             pass
     if accepted != "":
         print(
-            "BUG REPRODUCED: control stream accepted forbidden frame types"
-            " (no H3_FRAME_UNEXPECTED):",
+            (
+                "BUG REPRODUCED: control stream accepted forbidden frame types"
+                " (no H3_FRAME_UNEXPECTED):"
+            ),
             accepted,
         )
         raise Error("H3-03")

@@ -455,6 +455,9 @@ v0.11 audit fixes; before them the server accepted what follows.
   PING, WINDOW_UPDATE, CONTINUATION) on a request stream are a connection
   error of type `H3_FRAME_UNEXPECTED` (0x105), not ignored as unknown
   frames.
+- DATA, HEADERS, PUSH_PROMISE and the HTTP/2-reserved types on the
+  peer's control stream are `H3_FRAME_UNEXPECTED` (RFC 9114 §7.2); CANCEL_PUSH,
+  MAX_PUSH_ID and unknown types stay accepted.
 - A request-stream frame other than HEADERS and DATA (an unknown or
   grease type) that declares more than `max_field_section_size` bytes
   (default 8192) is refused from its header with `H3_EXCESSIVE_LOAD`

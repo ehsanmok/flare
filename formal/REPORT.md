@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61809 lines) |
-| Theorems | 3246 |
-| Headline theorems in the axiom audit | 1048 |
+| Lean files | 298 (61836 lines) |
+| Theorems | 3247 |
+| Headline theorems in the axiom audit | 1051 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 66 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 67 of 138 |
 
 Six findings are rated high:
 
@@ -1630,10 +1630,10 @@ File: `H3/Control.lean`.
 
 **Model.**
 - `applySettings` mirrors `server.mojo:1213-1228`.
-- `dispatchControl` mirrors `_dispatch_control_frame` (1170-1211).
+- `dispatchControl` mirrors `_dispatch_control_frame` (1272-1337, fixed H3-03).
 - `feedControlLoop` mirrors the control-stream frame loop, including the 16384-byte carry cap (1071-1120).
 - `classify` mirrors `_classify_uni_kind` (1045-1068), and `route` / `feedUni` mirror 975-1043.
-- `Fixes` switches the H3-03, H3-04 and H3-05 fixes on individually.
+- `Fixes` switches the H3-03..H3-06 fixes on individually: `Fixes.none` is flare at 59bda50, `Fixes.shipped` is flare as shipped on this branch, `Fixes.all` has every fix.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -2887,7 +2887,7 @@ advances the wheel to `now` at the top of every iteration
 | `Bugs.H3_01.feedOld` (pre-fix), `H3.feed` | http3/request_reader.mojo:240-278 (fixed, H3-01) | `feed_bounded`, `feed_eq_feedOld`, `unknown_needs_unbounded_buffer` | resolved |
 | `Bugs.H3_02.stepFrameOld` (pre-fix) | http3/request_reader.mojo:308-327 @59bda50 | `implOld_ignores_reserved`, `implRejects_reserved`, `runFixed_spec` | resolved |
 | `H3.Control.applySettings` | http3/server.mojo:1213-1228 | `H3_04.trace_impl`, `applySettingsFixed_eq_spec` | counterexample |
-| `H3.Control.dispatchControl` | http3/server.mojo:1170-1211 | `H3_03.trace_impl`, `dispatchControlFixed_eq_spec` | counterexample |
+| `H3.Control.dispatchControl` (`Fixes.shipped`) | http3/server.mojo:1272-1337 (fixed, H3-03) | `H3_03.trace_implOld`, `H3_03.trace_shipped`, `dispatchControlFixed_eq_spec` | resolved (H3-03) |
 | `H3.Control.feedControlLoop` | http3/server.mojo:1071-1120 | `feedControlLoop_suffix`, `feedControl_le` | proved |
 | `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:975-1068 | `H3_05.trace_impl`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | counterexample |
 | `Quic.TransportParams.decode`, `apply`, `readVar` | quic/transport_params.mojo:401-525 | `decodeFixed_eq_spec`, `QUIC_10.impl_accepts`, `QUIC_13.impl_accepts` | counterexample (QUIC-10, QUIC-13) |
@@ -3087,7 +3087,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QPACK-06 | Low | resolved | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
 | H3-01 | Medium | resolved | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
 | H3-02 | Low | resolved | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
-| H3-03 | Low | open | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
+| H3-03 | Low | resolved | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
 | H3-04 | Low | open | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
 | H3-05 | Low | open | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
 | H3-06 | Low | open | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
@@ -4606,11 +4606,12 @@ Status: resolved. `feed_into` rejects 0x02, 0x06, 0x08 and 0x09 with an `H3_FRAM
 - **Severity:** Low (a conformance gap; the frames are dropped).
 - **RFC:** RFC 9114 §7.2.1 (DATA), §7.2.2 (HEADERS), §7.2.5 (PUSH_PROMISE), and §7.2.8 / §11.2.1 (the HTTP/2-reserved types): each MUST be H3_FRAME_UNEXPECTED on the control stream.
 - **What goes wrong:** after the SETTINGS-first check, `_dispatch_control_frame` (`server.mojo:1170-1211`) acts only on SETTINGS and GOAWAY and returns without error for every other type.
-- **Counterexample:** `Bugs.H3_03.impl_accepts_data_on_control` and `trace_impl`: SETTINGS followed by an empty frame of each type in {0, 1, 5, 2, 6, 8, 9} is accepted. `spec_rejects` shows the spec rejects these.
+- **Counterexample:** `Bugs.H3_03.implOld_accepts_data_on_control` and `trace_implOld` (with `Fixes.none`, the 59bda50 behaviour): SETTINGS followed by an empty frame of each type in {0, 1, 5, 2, 6, 8, 9} was accepted. `spec_rejects` shows the spec rejects these.
 - **Fix:** raise for those types. `dispatchFixed_spec` and `Control.dispatchControlFixed_eq_spec` show it suffices.
 - **Repro:** `formal/repro/H3-03_control_stream_forbidden_frames_ignored.mojo`
 - **Observed:** `BUG REPRODUCED: control stream accepted forbidden frame types (no H3_FRAME_UNEXPECTED): 0x0 0x1 0x5 0x2 0x6 0x8 0x9`
 - **Flip:** `OK: forbidden control-stream frame types rejected`, exit 0.
+Status: resolved. `_dispatch_control_frame` raises H3_FRAME_UNEXPECTED for DATA, HEADERS, PUSH_PROMISE and the HTTP/2-reserved types after the SETTINGS-first check; CANCEL_PUSH, MAX_PUSH_ID and unknown types are still accepted. Tests: `tests/h3/test_h3_uni_streams.mojo::test_forbidden_frame_types_on_the_control_stream_are_refused`, `tests/h3/test_h3_uni_streams.mojo::test_allowed_control_frames_are_still_accepted`. The repro prints `OK` (three runs).
 
 #### H3-04: HTTP/2-reserved SETTINGS identifiers are accepted
 

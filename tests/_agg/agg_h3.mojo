@@ -262,6 +262,12 @@ from test_h3_uni_streams import (
 from test_h3_uni_streams import (
     test_oversized_control_frame_is_refused_from_its_header as test_h3_uni_streams__test_oversized_control_frame_is_refused_from_its_header,
 )
+from test_h3_uni_streams import (
+    test_forbidden_frame_types_on_the_control_stream_are_refused as test_h3_uni_streams__test_forbidden_frame_types_on_the_control_stream_are_refused,
+)
+from test_h3_uni_streams import (
+    test_allowed_control_frames_are_still_accepted as test_h3_uni_streams__test_allowed_control_frames_are_still_accepted,
+)
 from test_request_reader import (
     test_initial_state as test_request_reader__test_initial_state,
 )
@@ -533,6 +539,12 @@ def main() raises:
     ]()
     suite.test[
         test_h3_uni_streams__test_oversized_control_frame_is_refused_from_its_header
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_forbidden_frame_types_on_the_control_stream_are_refused
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_allowed_control_frames_are_still_accepted
     ]()
     # tests/h3/test_request_reader.mojo
     suite.test[test_request_reader__test_initial_state]()

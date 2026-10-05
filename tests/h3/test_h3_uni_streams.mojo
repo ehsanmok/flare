@@ -60,6 +60,7 @@ from flare.http3 import (
     encode_http3_frame,
     encode_http3_settings,
 )
+from flare.http3.server import H3_FRAME_UNEXPECTED, h3_error_code
 from flare.quic.varint import decode_varint, encode_varint
 
 
@@ -408,6 +409,56 @@ def test_oversized_control_frame_is_refused_from_its_header() raises:
     assert_true(raised, "a 1 GiB control frame header was accepted")
 
 
+def _raises_with(
+    mut c: Http3Connection, stream_id: Int, var chunk: List[UInt8]
+) -> String:
+    """The error text ``feed_uni_stream_chunk`` raised, or ""."""
+    try:
+        c.feed_uni_stream_chunk(stream_id, chunk^)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_forbidden_frame_types_on_the_control_stream_are_refused() raises:
+    """H3-03: after SETTINGS, DATA (0x00), HEADERS (0x01), PUSH_PROMISE
+    (0x05) and the HTTP/2-reserved types 0x02 / 0x06 / 0x08 / 0x09 were
+    silently dropped. Each is a connection error of type
+    H3_FRAME_UNEXPECTED (RFC 9114 sec 7.2.1, 7.2.2, 7.2.5, 7.2.8)."""
+    var forbidden = _bytes_from_list([0x00, 0x01, 0x05, 0x02, 0x06, 0x08, 0x09])
+    for i in range(len(forbidden)):
+        var c = Http3Connection()
+        c.feed_uni_stream_chunk(3, _settings_prefix())
+        var frame = List[UInt8]()
+        frame.append(forbidden[i])
+        frame.append(UInt8(0))  # empty payload
+        var msg = _raises_with(c, 3, frame^)
+        assert_true(
+            "H3_FRAME_UNEXPECTED" in msg,
+            "forbidden control frame type " + String(Int(forbidden[i])),
+        )
+        assert_equal(Int(h3_error_code(msg)), Int(H3_FRAME_UNEXPECTED))
+
+
+def test_allowed_control_frames_are_still_accepted() raises:
+    """The H3-03 check is not a blanket rejection: CANCEL_PUSH, MAX_PUSH_ID,
+    GOAWAY and unknown / grease types stay legal on the control stream."""
+    var c = Http3Connection()
+    c.feed_uni_stream_chunk(3, _settings_prefix())
+    var frames = List[UInt8]()
+    frames.append(UInt8(0x03))  # CANCEL_PUSH, push id 0
+    frames.append(UInt8(1))
+    frames.append(UInt8(0))
+    frames.append(UInt8(0x0D))  # MAX_PUSH_ID, id 4
+    frames.append(UInt8(1))
+    frames.append(UInt8(4))
+    frames.append(UInt8(0x21))  # grease, empty
+    frames.append(UInt8(0))
+    c.feed_uni_stream_chunk(3, frames^)
+    c.feed_uni_stream_chunk(3, _build_goaway_frame(UInt64(8)))
+    assert_equal(Int(c.peer_goaway_max_stream_id), 8)
+
+
 def main() raises:
     test_peer_control_stream_settings_round_trip()
     test_uni_stream_type_varint_split_across_chunks()
@@ -423,4 +474,6 @@ def main() raises:
     test_control_frame_header_split_across_chunks()
     test_oversized_control_frame_is_refused_from_its_header()
     test_take_control_stream_start_is_once_and_decodes_at_the_peer()
-    print("test_h3_uni_streams: 14 passed")
+    test_forbidden_frame_types_on_the_control_stream_are_refused()
+    test_allowed_control_frames_are_still_accepted()
+    print("test_h3_uni_streams: 16 passed")

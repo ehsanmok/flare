@@ -16,8 +16,10 @@ handle the client's unidirectional streams:
 * `feedUni` — `feed_uni_stream_chunk` (per-stream buffering of the type
   varint, routing by kind).
 
-Each function takes a `Fixes` switch: `Fixes.none` is flare as written,
-`Fixes.all` adds the minimal fixes of H3-03 (forbidden control-stream frame
+Each function takes a `Fixes` switch: `Fixes.none` is flare as it was at
+59bda50 (the pre-fix behaviour the Bugs counterexamples are about),
+`Fixes.shipped` is flare as shipped on this branch (the fixes landed so
+far), `Fixes.all` adds the minimal fixes of H3-03 (forbidden control-stream frame
 types), H3-04 (HTTP/2-reserved setting identifiers), H3-05 (second QPACK
 streams, client push stream) and H3-06 (bytes after the GOAWAY id). The QPACK encoder-stream payload is modelled
 in `Flare.L3.Qpack`; here those bytes are consumed without effect, like the
@@ -61,6 +63,9 @@ structure Fixes where
 
 def Fixes.none : Fixes := ⟨false, false, false, false⟩
 def Fixes.all : Fixes := ⟨true, true, true, true⟩
+/-- flare as shipped: one field flips to `true` with each of H3-03 (frames),
+H3-04 (settings), H3-05 (streams) and H3-06 (goawayLen). -/
+def Fixes.shipped : Fixes := ⟨true, false, false, false⟩
 
 /-! ## SETTINGS -/
 
@@ -166,8 +171,8 @@ theorem goawayFixed_eq_spec (s : CtlState) (p : Bytes) :
       simp only
       by_cases hk : k = tl.length + 1 <;> simp [hk]
 
-/-- mirrors flare/http3/server.mojo:1170-1211 @59bda50; `fx.frames` adds the
-H3-03 check after the SETTINGS-first check. -/
+/-- mirrors flare/http3/server.mojo:1272-1337 (fixed, H3-03); `fx.frames` is the
+H3-03 check after the SETTINGS-first check (absent at 59bda50). -/
 def dispatchControl (fx : Fixes) (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
   if t = 0x04 then
     if s.settingsReceived then .error .frameUnexpected
