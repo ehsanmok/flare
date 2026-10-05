@@ -20,8 +20,9 @@ Fix: in the `if len(stuck) > 0:` block also leak the stop flag
 (`self._stopping_addr = 0` before `_free_resources`), i.e. `Cfg.fixStop`.
 `implFixed_safe` proves it suffices for any number of workers.
 
-Status: resolved. The shipped drain is `cfgShipped` (= `cfgFixStop`); the
-counterexamples below are about the explicitly pre-fix `cfgImpl`.
+Status: resolved. The shipped drain is `cfgShipped` (it also carries the
+CONC-04 fix; `cfgFixStop` is the CONC-03 fix alone); the counterexamples
+below are about the explicitly pre-fix `cfgImpl`.
 Regression test: tests/runtime/test_scheduler.mojo::
 test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker.
 -/
@@ -74,10 +75,10 @@ theorem drain_uaf : ∃ s, (lts cfgImpl 1).Reachable s ∧ ¬ MemSafe s := by
     simp only [Option.map_some, Option.some.injEq] at hr
     exact ⟨s, reachable_of_exec _ _ _ _ h, fun hm => by unfold MemSafe at hm; rw [hr] at hm; cases hm⟩
 
-/-- The CONC-03 fix alone: this is the shipped drain. -/
+/-- The CONC-03 fix alone (the shipped drain also has the CONC-04 fix). -/
 def cfgFixStop : Cfg := { cfgImpl with fixStop := true }
 
-theorem shipped_eq_fixStop : cfgShipped = cfgFixStop := rfl
+theorem shipped_has_fixStop : cfgShipped.fixStop = true := rfl
 
 /-- **Fix meets spec**: for the shipped drain, any number of workers and
 every interleaving, no freed cell is dereferenced and nothing a live worker

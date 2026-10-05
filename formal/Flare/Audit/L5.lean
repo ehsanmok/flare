@@ -61,6 +61,7 @@ per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 -- CONC-04
 #print axioms Flare.Bugs.CONC_04.drain_leaks_joined_listener
 #print axioms Flare.Bugs.CONC_04.implFixed_noLeak
+#print axioms Flare.Bugs.CONC_04.fixLis_alone_noLeak
 #print axioms Flare.Bugs.CONC_04.implFixed_full
 -- Shared-listener mode
 #print axioms Flare.L5.SharedListener.inv_inductive

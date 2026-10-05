@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: CONC-04 fixed on fix/formal-findings
 """CONC-04: Scheduler.drain leaks the listeners of workers that did join
 whenever any one worker had to be detached.
 
@@ -12,7 +13,7 @@ flare/runtime/scheduler.mojo:890-897 @59bda50
 Expected: per drain's docstring only the stuck worker's "context, stats
 cell and listeners are left allocated". The listeners of the workers that
 returned and were joined are closed and freed, as shutdown() does.
-Actual: the stuck-worker branch clears the whole per-worker listener
+Before the fix: the stuck-worker branch clears the whole per-worker listener
 list, so _free_resources frees none of them. Every joined worker's
 SO_REUSEPORT listener fd stays open and bound for the process lifetime;
 the kernel keeps hashing new connections to listeners nobody accepts on.
@@ -101,10 +102,9 @@ def main() raises:
         raise Error("setup: expected exactly one detached worker")
     var joined_fd = fds[0] if fds[1] == stuck_fd else fds[1]
     # F_GETFD = 1 on Linux and macOS; -1 means the fd is closed.
-    var still_open = (
-        external_call["fcntl", c_int](c_int(joined_fd), c_int(1), c_int(0))
-        >= c_int(0)
-    )
+    var still_open = external_call["fcntl", c_int](
+        c_int(joined_fd), c_int(1), c_int(0)
+    ) >= c_int(0)
     if still_open:
         print(
             "BUG REPRODUCED: after drain, the joined worker's listener fd",

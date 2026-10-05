@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61345 lines) |
-| Theorems | 3228 |
-| Headline theorems in the axiom audit | 1030 |
+| Lean files | 298 (61362 lines) |
+| Theorems | 3230 |
+| Headline theorems in the axiom audit | 1031 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 31 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 32 of 138 |
 
 Six findings are rated high:
 
@@ -3109,7 +3109,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | CONC-01 | Low | open | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
 | CONC-02 | Low | open | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
 | CONC-03 | High | resolved | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
-| CONC-04 | Medium | open | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
+| CONC-04 | Medium | resolved | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
 | CONC-05 | Medium | open | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
 | CONC-06 | Medium | open | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
 | CONC-07 | Medium | open | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
@@ -5354,6 +5354,8 @@ Status: resolved. `drain` sets `self._stopping_addr = 0` in the stuck-worker bra
 - **Repro:** `formal/repro/CONC-04_drain_leaks_joined_worker_listeners.mojo`. Observed:
   `BUG REPRODUCED: after drain, the joined worker's listener fd 10 is still open (only the stuck worker's fd 8 should be)`.
 - **Flip:** with the fix (a `keep` list filtered by the stuck set), `OK: drain closed the joined worker's listener fd 10` and exit 0. Restored.
+
+Status: resolved. The stuck-worker branch of `drain` now keeps every non-stuck worker's primary and extra listeners in the list `_free_resources` frees, and drops only the detached workers' (owner of entry `p` is `p` for the primaries, `(p - n) // n_extra` for the extras). Tests: `tests/runtime/test_scheduler.mojo::test_drain_closes_the_joined_workers_listeners` and `::test_drain_closes_the_joined_workers_extra_listeners` (deterministic: the stuck worker waits on a gate; the fds are checked with `fcntl(F_GETFD)`). The repro now prints `OK:` (3 of 3 runs). The shipped drain is `Flare.L5.Scheduler.cfgShipped` (both the CONC-03 and CONC-04 fixes); `Flare.Bugs.CONC_04.implFixed_noLeak` is stated about it.
 
 #### CONC-05: shared-listener teardown closes the listener's fd number while workers can still accept on it
 

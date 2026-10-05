@@ -22,11 +22,13 @@ made this possible.
 """
 
 from std.atomic import Atomic, Ordering
+from std.ffi import c_int, external_call
 from std.memory import Layout, Pointer, alloc
 from std.testing import assert_true, assert_equal, TestSuite
 
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler, default_worker_count
+from flare.tcp import TcpListener
 from flare.runtime._libc_time import libc_nanosleep_ms
 from flare.runtime.scheduler import (
     load_stop_flag,
@@ -392,6 +394,117 @@ def test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker() raises:
     var outcome = _ld(cells + 16)
     assert_true(not aliased, "drain freed the stop flag under a live worker")
     assert_equal(Int(outcome), 1, "the detached worker never saw the stop")
+
+
+# ── CONC-04: drain must still free the joined workers' listeners ────────────
+
+
+@fieldwise_init
+struct _OneStuckFrontend(Copyable, Frontend):
+    """The first worker to arrive is "stuck in a handler" until the gate
+    opens; the others serve an idle loop and exit on the stop flag. The
+    stuck worker publishes its listener fds."""
+
+    var cells: Int  # [0] ticket, [1] gate, [2] primary fd, [3] extra fd
+
+    def requires_per_worker_listener(self) -> Bool:
+        return False
+
+    def run_worker(
+        mut self,
+        listener_fd: Int,
+        mut stopping: Bool,
+        stats_addr: Int,
+        extra_fds: List[Int] = List[Int](),
+    ):
+        var ticket = Atomic[Int64].fetch_add(
+            Pointer[Int64, MutUntrackedOrigin](
+                unsafe_from_address=self.cells
+            ).unsafe_bitcast[Scalar[DType.int64]](),
+            1,
+        )
+        if ticket == 0:
+            _st(
+                self.cells + 24,
+                Int64(extra_fds[0]) if len(extra_fds) > 0 else -2,
+            )
+            _st(self.cells + 16, Int64(listener_fd))
+            while _ld(self.cells + 8) == 0:
+                _ = libc_nanosleep_ms(1)
+            return
+        var stop_addr = Int(Pointer[Bool, _](to=stopping))
+        while not load_stop_flag(stop_addr):
+            _ = libc_nanosleep_ms(1)
+
+
+def _fd_open(fd: Int) -> Bool:
+    # F_GETFD is 1 on Linux and macOS; it fails with EBADF on a closed fd.
+    return external_call["fcntl", c_int](
+        c_int(fd), c_int(1), c_int(0)
+    ) >= c_int(0)
+
+
+def _drain_with_one_stuck(extras: List[SocketAddr]) raises:
+    var cells = Int(alloc(Layout[Int64](count=4)).unsafe_leak())
+    _st(cells, 0)
+    _st(cells + 8, 0)
+    _st(cells + 16, -1)
+    _st(cells + 24, -1)
+    var s = Scheduler[_OneStuckFrontend].start(
+        addr=SocketAddr.localhost(0),
+        frontend=_OneStuckFrontend(cells),
+        num_workers=2,
+        pin_cores=False,
+        extra_addrs=extras.copy(),
+    )
+    var n_lis = 2 + 2 * len(extras)
+    assert_equal(len(s._per_worker_listener_addrs), n_lis)
+    var fds = List[Int]()
+    for i in range(n_lis):
+        var lp = Pointer[TcpListener, MutUntrackedOrigin](
+            unsafe_from_address=s._per_worker_listener_addrs[i]
+        )
+        fds.append(Int(lp[].as_raw_fd()))
+    while _ld(cells + 16) < 0:
+        _ = libc_nanosleep_ms(1)
+    var stuck_primary = Int(_ld(cells + 16))
+    var reports = s.drain(timeout_ms=300)
+    var detached = 0
+    for i in range(len(reports)):
+        if reports[i].drained == 0:
+            detached += 1
+    var open_stuck = 0
+    var open_joined = 0
+    for i in range(n_lis):
+        # Primary i is worker i's; extras are 2 + w * n_extra + j.
+        var owner = i if i < 2 else (i - 2) // len(extras)
+        var stuck = fds[owner] == stuck_primary
+        if _fd_open(fds[i]):
+            if stuck:
+                open_stuck += 1
+            else:
+                open_joined += 1
+    _st(cells + 8, 1)  # let the stuck worker go
+    assert_equal(detached, 1)
+    assert_equal(open_joined, 0, "a joined worker's listener stayed open")
+    assert_equal(
+        open_stuck, 1 + len(extras), "the stuck worker's listeners were closed"
+    )
+
+
+def test_drain_closes_the_joined_workers_listeners() raises:
+    """``drain`` with one detached worker cleared the whole listener list,
+    so every joined worker's ``SO_REUSEPORT`` listener stayed bound."""
+    _drain_with_one_stuck(List[SocketAddr]())
+
+
+def test_drain_closes_the_joined_workers_extra_listeners() raises:
+    """Same, with an extra address: the stuck worker's primary and extra
+    listeners stay open (its thread may use them), every other one
+    closes."""
+    var extras = List[SocketAddr]()
+    extras.append(SocketAddr.localhost(0))
+    _drain_with_one_stuck(extras)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────

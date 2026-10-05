@@ -436,6 +436,12 @@ from test_scheduler import (
 from test_scheduler import (
     test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker as test_scheduler__test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker,
 )
+from test_scheduler import (
+    test_drain_closes_the_joined_workers_listeners as test_scheduler__test_drain_closes_the_joined_workers_listeners,
+)
+from test_scheduler import (
+    test_drain_closes_the_joined_workers_extra_listeners as test_scheduler__test_drain_closes_the_joined_workers_extra_listeners,
+)
 from test_syscall_ffi import (
     test_epoll_constants_distinct_bits as test_syscall_ffi__test_epoll_constants_distinct_bits,
 )
@@ -909,6 +915,10 @@ def main() raises:
     ]()
     suite.test[
         test_scheduler__test_drain_keeps_the_stop_flag_allocated_for_a_detached_worker
+    ]()
+    suite.test[test_scheduler__test_drain_closes_the_joined_workers_listeners]()
+    suite.test[
+        test_scheduler__test_drain_closes_the_joined_workers_extra_listeners
     ]()
     # tests/runtime/test_syscall_ffi.mojo
     suite.test[test_syscall_ffi__test_epoll_constants_distinct_bits]()

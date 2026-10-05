@@ -18,6 +18,12 @@ docstring, :799-803).
 Fix: in that branch drop only the stuck workers' entries (primary `i` and
 its extras `n_workers + i*n_extra + j`), i.e. `Cfg.fixLis`.
 `implFixed_noLeak` proves it suffices.
+
+Status: resolved. The shipped drain is `cfgShipped` (both the CONC-03 and
+CONC-04 fixes); the counterexample is about the explicitly pre-fix
+`cfgImpl`. Regression tests: tests/runtime/test_scheduler.mojo::
+test_drain_closes_the_joined_workers_listeners and
+test_drain_closes_the_joined_workers_extra_listeners.
 -/
 namespace Flare.Bugs.CONC_04
 open Flare.L5.Scheduler
@@ -58,18 +64,25 @@ theorem drain_leaks_joined_listener :
     have := ((hn e1).1 w hwm hd).2.2
     rw [hl] at this; cases this
 
-/-- The CONC-04 fix alone. -/
+/-- The CONC-04 fix alone (the shipped drain also has the CONC-03 fix). -/
 def cfgFixLis : Cfg := { cfgImpl with fixLis := true }
 
-/-- The fix suffices: for any number of workers and every interleaving,
-drain leaves allocated only the detached workers' resources (and the stop
-flag only when some worker was detached). -/
-theorem implFixed_noLeak (n : Nat) : ∀ s, (lts cfgFixLis n).Reachable s → NoLeak s :=
+/-- The shipped drain has the CONC-04 fix. -/
+theorem shipped_has_fixLis : cfgShipped.fixLis = true := rfl
+
+/-- The fix suffices (shipped drain): for any number of workers and every
+interleaving, drain leaves allocated only the detached workers' resources
+(and the stop flag only when some worker was detached). -/
+theorem implFixed_noLeak (n : Nat) : ∀ s, (lts cfgShipped n).Reachable s → NoLeak s :=
+  noLeak_of_cfg cfgShipped (Or.inl rfl) n
+
+/-- The CONC-04 fix alone also suffices for `NoLeak`. -/
+theorem fixLis_alone_noLeak (n : Nat) : ∀ s, (lts cfgFixLis n).Reachable s → NoLeak s :=
   noLeak_of_cfg cfgFixLis (Or.inl rfl) n
 
-/-- With both fixes drain is memory safe and leak free. -/
+/-- With both fixes (the shipped drain) it is memory safe and leak free. -/
 theorem implFixed_full (n : Nat) :
-    ∀ s, (lts cfgFixed n).Reachable s → MemSafe s ∧ LiveRefsAllocated s ∧ NoLeak s :=
+    ∀ s, (lts cfgShipped n).Reachable s → MemSafe s ∧ LiveRefsAllocated s ∧ NoLeak s :=
   fixed_safe n
 
 end Flare.Bugs.CONC_04

@@ -799,7 +799,8 @@ struct Scheduler[F: Frontend](Movable):
         ``timeout_ms`` bounds the wait. A worker whose thread has not
         returned by then (a handler that will not finish) is detached
         and reported with ``drained == 0``; its context, stats cell and
-        listeners, and the shared stop flag, are left allocated, since the
+        listeners (its own, not the joined workers'), and the shared stop
+        flag, are left allocated, since the
         thread may still be using them. ``timeout_ms <= 0`` is a hard stop: no drain window,
         and every worker is joined, as ``shutdown()`` does.
 
@@ -894,7 +895,24 @@ struct Scheduler[F: Frontend](Movable):
                     _ = self._ctx_addrs.pop(idx)
                 if idx < len(self._stats_addrs):
                     _ = self._stats_addrs.pop(idx)
-            self._per_worker_listener_addrs.clear()
+            # Drop only the stuck workers' listeners from the list that
+            # gets freed. Primary i is entry i; worker i's extras follow
+            # all the primaries, at n + i * n_extra + j. Clearing the
+            # whole list leaked every joined worker's SO_REUSEPORT
+            # listener (CONC-04).
+            var n_lis = len(self._per_worker_listener_addrs)
+            var n_extra = 0
+            if n > 0 and n_lis > n:
+                n_extra = (n_lis - n) // n
+            var is_stuck = List[Bool](length=n, fill=False)
+            for k in range(len(stuck)):
+                is_stuck[stuck[k]] = True
+            var kept = List[Int]()
+            for p in range(n_lis):
+                var owner = p if p < n else (p - n) // n_extra
+                if not (owner < n and is_stuck[owner]):
+                    kept.append(self._per_worker_listener_addrs[p])
+            self._per_worker_listener_addrs = kept^
             # The detached worker re-reads the shared stop flag on every
             # serve-loop iteration, so the flag stays allocated too: it
             # is leaked like the stuck worker's context and stats cell.
