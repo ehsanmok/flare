@@ -59,6 +59,10 @@ from .frame import (
     H3_FRAME_TYPE_CANCEL_PUSH,
     H3_FRAME_TYPE_DATA,
     H3_FRAME_TYPE_GOAWAY,
+    H3_FRAME_TYPE_H2_CONTINUATION,
+    H3_FRAME_TYPE_H2_PING,
+    H3_FRAME_TYPE_H2_PRIORITY,
+    H3_FRAME_TYPE_H2_WINDOW_UPDATE,
     H3_FRAME_TYPE_HEADERS,
     H3_FRAME_TYPE_MAX_PUSH_ID,
     H3_FRAME_TYPE_PUSH_PROMISE,
@@ -349,6 +353,27 @@ def feed_into[
         reader.state = H3_REQUEST_STATE_DONE
         handler.on_protocol_error(
             String("h3 reader: control-stream frame type on request stream")
+        )
+        return total
+
+    # 0x02 / 0x06 / 0x08 / 0x09 are the HTTP/2 PRIORITY, PING,
+    # WINDOW_UPDATE and CONTINUATION frame types, reserved by RFC 9114
+    # §7.2.8 and §11.2.1: "their receipt MUST be treated as a
+    # connection error of type H3_FRAME_UNEXPECTED". They were handed to
+    # ``on_unknown_frame`` and skipped (H3-02).
+    if (
+        ftype == H3_FRAME_TYPE_H2_PRIORITY
+        or ftype == H3_FRAME_TYPE_H2_PING
+        or ftype == H3_FRAME_TYPE_H2_WINDOW_UPDATE
+        or ftype == H3_FRAME_TYPE_H2_CONTINUATION
+    ):
+        reader.state = H3_REQUEST_STATE_DONE
+        handler.on_protocol_error(
+            String(
+                "h3 reader: H3_FRAME_UNEXPECTED: HTTP/2-reserved frame type "
+                + String(ftype)
+                + " on request stream"
+            )
         )
         return total
 

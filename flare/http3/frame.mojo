@@ -42,6 +42,16 @@ comptime H3_FRAME_TYPE_PUSH_PROMISE: UInt64 = 0x05
 comptime H3_FRAME_TYPE_GOAWAY: UInt64 = 0x07
 comptime H3_FRAME_TYPE_MAX_PUSH_ID: UInt64 = 0x0D
 
+comptime H3_FRAME_TYPE_H2_PRIORITY: UInt64 = 0x02
+"""HTTP/2 PRIORITY's type, reserved in HTTP/3 (RFC 9114 sec 7.2.8, 11.2.1):
+receipt on any stream is ``H3_FRAME_UNEXPECTED``."""
+comptime H3_FRAME_TYPE_H2_PING: UInt64 = 0x06
+"""HTTP/2 PING's type, reserved in HTTP/3 (see :data:`H3_FRAME_TYPE_H2_PRIORITY`)."""
+comptime H3_FRAME_TYPE_H2_WINDOW_UPDATE: UInt64 = 0x08
+"""HTTP/2 WINDOW_UPDATE's type, reserved in HTTP/3."""
+comptime H3_FRAME_TYPE_H2_CONTINUATION: UInt64 = 0x09
+"""HTTP/2 CONTINUATION's type, reserved in HTTP/3."""
+
 
 # ── Standard SETTINGS identifiers (RFC 9114 §7.2.4.1 + RFC 9220) ─
 

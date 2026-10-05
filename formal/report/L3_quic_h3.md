@@ -259,7 +259,7 @@ Files: `H3/Frame.lean`, `H3/RequestReader.lean`, `H3/Grammar.lean`.
 | `H3.decodeFrame_encode`, `H3.decodeSettings_encode` | Decoding inverts encoding, for any correct varint codec. | proved |
 | `H3.feed_le` | `feed` consumes at most the buffer. | proved |
 | `H3.feedChunks_chunking_independent` | The events do not depend on how the stream bytes are split into chunks. | proved |
-| `H3.run_accept_impl`, `H3.run_reject_impl` | For frame sequences without HTTP/2-reserved types, flare reports no error and tracks the spec state on accepted sequences, and reports an error on rejected ones. | proved |
+| `H3.run_accept_impl`, `H3.run_reject_impl` | For every frame sequence (HTTP/2-reserved types included since the H3-02 fix), flare reports no error and tracks the spec state on accepted sequences, and reports an error on rejected ones. | proved |
 
 Assumption: the QPACK field-section decoder is a parameter `qd`.
 
@@ -637,11 +637,12 @@ Status: resolved. `feed_into` now refuses a frame of any type other than HEADERS
 - **Severity:** Low (a conformance gap).
 - **RFC:** RFC 9114 §7.2.8 and §11.2.1: receipt of types 0x02, 0x06, 0x08 or 0x09 MUST be treated as H3_FRAME_UNEXPECTED.
 - **What goes wrong:** `request_reader.mojo:308-327` rejects only the control-stream types. The reserved types go to `on_unknown_frame`.
-- **Counterexample:** `Bugs.H3_02.impl_ignores_reserved` and `violates_spec`: HEADERS followed by PING is accepted.
-- **Fix:** add the four types to the rejected set. `runFixed_spec` shows the fixed reader matches the grammar on every sequence, with no side condition.
+- **Counterexample:** `Bugs.H3_02.implOld_ignores_reserved` and `violates_spec` (about the pre-fix `stepFrameOld`): HEADERS followed by PING was accepted.
+- **Fix:** add the four types to the rejected set (`feed_into` now rejects `isControlType t || isH2Reserved t`). `implRejects_reserved` and `runFixed_spec` show the shipped reader matches the grammar on every sequence, with no side condition.
 - **Repro:** `formal/repro/H3-02_h2_reserved_frame_types_ignored.mojo`
 - **Observed:** `BUG REPRODUCED: HTTP/2-reserved frame types accepted as unknown (no H3_FRAME_UNEXPECTED): 0x2 0x6 0x8 0x9`
 - **Flip:** `OK: all HTTP/2-reserved frame types rejected`, exit 0.
+Status: resolved. `feed_into` rejects 0x02, 0x06, 0x08 and 0x09 with an `H3_FRAME_UNEXPECTED` protocol error, and `Http3Connection.feed_stream_chunk` records it as a connection error (`connection_error_code = H3_FRAME_UNEXPECTED`) that the listener closes with. Tests: `tests/h3/test_request_reader.mojo::test_h2_reserved_frame_types_are_refused`, `tests/h3/test_h3_dispatch.mojo::test_h2_reserved_request_frame_is_a_connection_error`. The repro prints `OK` (three runs).
 
 ### H3-03: frames forbidden on the control stream are silently ignored
 
@@ -717,7 +718,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 - **`bytes_in_flight`.** It always equals the sum of the in-flight packet sizes and never underflows (`inv_run`, `retire_noUnderflow`, `firePto_noUnderflow`).
 - **Connection state on other events.** CONNECTION_CLOSE, local close and TLS completion are handled as the spec requires (`implStep_frame_spec`, `localClose_spec`, `markHandshakeComplete_spec`).
 - **Duplicate SETTINGS identifiers** are accepted. RFC 9114 §7.2.4 says a receiver MAY treat this as an error, so accepting them is allowed.
-- **Request-stream grammar.** Apart from the reserved types in H3-02, the request-stream reader follows RFC 9114 §4.1 exactly (`run_accept_impl`, `run_reject_impl`), and its events do not depend on how the input is split into chunks (`feedChunks_chunking_independent`).
+- **Request-stream grammar.** The request-stream reader follows RFC 9114 §4.1 exactly (`run_accept_impl`, `run_reject_impl`), and its events do not depend on how the input is split into chunks (`feedChunks_chunking_independent`).
 - **QPACK Required Insert Count.** `decode_required_insert_count` is exactly the RFC algorithm and inverts the encoder within the window.
 - **QPACK table.** The size and capacity counters cannot wrap, and eviction does not move absolute indices. `get_abs` stays in bounds whenever it does not raise.
 - **Transport-parameter decoding** apart from QUIC-10 and QUIC-13: duplicates, truncation, trailing bytes and the other §18.2 value rules are right (`decodeFixed_eq_spec`, whose fixed decoder shares those checks with flare).
@@ -770,10 +771,10 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `Qpack.FieldSection.implDynRef`, `implOldDynRef` | qpack/dynamic.mojo:281-370 (fixed, QPACK-04) | `QPACK_04.counterexample`, `implDynRef_eq_spec` | resolved |
 | `Qpack.FieldSection.decodeInt` | http2/hpack.mojo:101-132 | `decodeInt_offset_le` | proved |
 | `H3.decodeFrame`, `encodeFrame`, `decodeSettings`, `encodeSettings` | http3/frame.mojo:95-218 | `decodeFrame_encode`, `decodeSettings_encode`, `decodeFrame_bounds` | proved |
-| `H3.feed` (fixed, H3-01), `stepFrame` | http3/request_reader.mojo:197-345 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | counterexample |
+| `H3.feed` (fixed, H3-01), `stepFrame` (fixed, H3-02) | http3/request_reader.mojo:197-380 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | resolved |
 | `H3.drain`, `feedChunks` | http3/server.mojo:732-807 | `feedChunks_chunking_independent` | proved |
 | `Bugs.H3_01.feedOld` (pre-fix), `H3.feed` | http3/request_reader.mojo:240-278 (fixed, H3-01) | `feed_bounded`, `feed_eq_feedOld`, `unknown_needs_unbounded_buffer` | resolved |
-| `Bugs.H3_02.stepFrameFixed` | http3/request_reader.mojo:308-327 with fix | `runFixed_spec` | proved |
+| `Bugs.H3_02.stepFrameOld` (pre-fix) | http3/request_reader.mojo:308-327 @59bda50 | `implOld_ignores_reserved`, `implRejects_reserved`, `runFixed_spec` | resolved |
 | `H3.Control.applySettings` | http3/server.mojo:1213-1228 | `H3_04.trace_impl`, `applySettingsFixed_eq_spec` | counterexample |
 | `H3.Control.dispatchControl` | http3/server.mojo:1170-1211 | `H3_03.trace_impl`, `dispatchControlFixed_eq_spec` | counterexample |
 | `H3.Control.feedControlLoop` | http3/server.mojo:1071-1120 | `feedControlLoop_suffix`, `feedControl_le` | proved |

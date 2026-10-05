@@ -77,7 +77,9 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QPACK_06.fixed_spec
 #print axioms Flare.Bugs.H3_01.violates_spec
 #print axioms Flare.Bugs.H3_01.feed_bounded
+#print axioms Flare.Bugs.H3_02.implOld_ignores_reserved
 #print axioms Flare.Bugs.H3_02.violates_spec
+#print axioms Flare.Bugs.H3_02.implRejects_reserved
 #print axioms Flare.Bugs.H3_02.runFixed_spec
 #print axioms Flare.Bugs.H3_03.spec_rejects
 #print axioms Flare.Bugs.H3_03.dispatchFixed_spec

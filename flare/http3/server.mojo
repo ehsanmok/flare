@@ -879,6 +879,15 @@ struct Http3Connection(Copyable, Defaultable):
                 ):
                     self.connection_error_code = QPACK_DECOMPRESSION_FAILED
                     self.connection_error_reason = String(state.protocol_error)
+                # An HTTP/2-reserved frame type is a connection error of
+                # type H3_FRAME_UNEXPECTED (RFC 9114 sec 7.2.8, 11.2.1;
+                # H3-02).
+                elif (
+                    "H3_FRAME_UNEXPECTED" in state.protocol_error
+                    and self.connection_error_code == 0
+                ):
+                    self.connection_error_code = H3_FRAME_UNEXPECTED
+                    self.connection_error_reason = String(state.protocol_error)
                 break
             if state.reader.state == H3_REQUEST_STATE_DONE:
                 break

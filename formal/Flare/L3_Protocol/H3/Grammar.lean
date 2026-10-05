@@ -10,8 +10,8 @@ control-stream types and the HTTP/2-reserved types.
 Results:
 * `run_accept_impl` / `run_reject_impl`: flare's `stepFrame` run reports no
   error and tracks the spec state exactly on spec-accepted sequences, and
-  reports an error on spec-rejected ones — for sequences without
-  HTTP/2-reserved frame types. With them, see `Flare.Bugs.H3_02`.
+  reports an error on spec-rejected ones, for every sequence (H3-02 made the
+  HTTP/2-reserved types rejected; see `Flare.Bugs.H3_02` for the pre-fix reader).
 -/
 namespace Flare.L3.H3
 
@@ -97,7 +97,7 @@ def stepFrameK (qd : Bytes → Option Hdrs) (r : Reader) (k : K) (t : Nat) (p : 
     if r.st ≠ .body then ({r with st := .done}, .error .dataOutside)
     else ({r with bodyBytes := r.bodyBytes + p.length}, .data p)
   | .ctrl => ({r with st := .done}, .error .controlType)
-  | .h2res => (r, .unknown t)
+  | .h2res => ({r with st := .done}, .error .controlType)
   | .unk => (r, .unknown t)
 
 theorem stepFrame_kind (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
@@ -111,13 +111,18 @@ theorem stepFrame_kind (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : 
     · by_cases hc : t = 0x03 ∨ t = 0x04 ∨ t = 0x05 ∨ t = 0x07 ∨ t = 0x0D
       · have := (isControlType_iff t).2 hc
         simp [h1, h0, hc, this, stepFrameK]
-      · have : isControlType t = false := by
+      · have hnc : isControlType t = false := by
           cases h : isControlType t
           · rfl
           · exact absurd ((isControlType_iff t).1 h) hc
         by_cases hr : t = 0x02 ∨ t = 0x06 ∨ t = 0x08 ∨ t = 0x09
-        · simp [h1, h0, hc, hr, this, stepFrameK]
-        · simp [h1, h0, hc, hr, this, stepFrameK]
+        · have hr' := (isH2Reserved_iff t).2 hr
+          simp [h1, h0, hc, hr, hnc, hr', stepFrameK]
+        · have hnr : isH2Reserved t = false := by
+            cases h : isH2Reserved t
+            · rfl
+            · exact absurd ((isH2Reserved_iff t).1 h) hr
+          simp [h1, h0, hc, hr, hnc, hnr, stepFrameK]
 
 /-- A frame within the reader's limits whose field section QPACK accepts. -/
 def GoodFrame (qd : Bytes → Option Hdrs) (maxField : Nat) (f : Nat × Bytes) : Prop :=
@@ -129,7 +134,7 @@ theorem stepFrameK_maxField (qd : Bytes → Option Hdrs) (r : Reader) (k : K) (t
 
 theorem stepFrameK_agrees (qd : Bytes → Option Hdrs) (r : Reader) (k : K) (t : Nat)
     (p : Bytes) (q : Q) (hq : absQ r.st = some q)
-    (hg : k = .hdr → p.length ≤ r.maxField ∧ (qd p).isSome) (hk : k ≠ .h2res) :
+    (hg : k = .hdr → p.length ≤ r.maxField ∧ (qd p).isSome) :
     (stepFrameK qd r k t p).1.maxField = r.maxField ∧
     (∀ q', specStepK q k = some q' →
       (stepFrameK qd r k t p).2.isError = false ∧ absQ (stepFrameK qd r k t p).1.st = some q') ∧
@@ -146,20 +151,8 @@ theorem stepFrameK_agrees (qd : Bytes → Option Hdrs) (r : Reader) (k : K) (t :
     cases hst : r.st <;> rw [hst] at hq <;> simp [absQ] at hq <;> subst hq <;>
       simp [stepFrameK, hst, specStepK, Ev.isError, absQ]
   | ctrl => simp [stepFrameK, specStepK, Ev.isError]
-  | h2res => exact absurd rfl hk
+  | h2res => simp [stepFrameK, specStepK, Ev.isError]
   | unk => simp [stepFrameK, specStepK, Ev.isError, hq]
-
-theorem kind_ne_h2res {t : Nat} (h : isH2Reserved t = false) : kind t ≠ .h2res := by
-  have hr : ¬ (t = 0x02 ∨ t = 0x06 ∨ t = 0x08 ∨ t = 0x09) := by
-    intro hh; rw [(isH2Reserved_iff t).2 hh] at h; cases h
-  unfold kind
-  by_cases h1 : t = 1
-  · simp [h1]
-  · by_cases h0 : t = 0
-    · simp [h0]
-    · by_cases hc : t = 0x03 ∨ t = 0x04 ∨ t = 0x05 ∨ t = 0x07 ∨ t = 0x0D
-      · simp [h1, h0, hc]
-      · simp [h1, h0, hc, hr]
 
 theorem kind_hdr {t : Nat} (h : kind t = .hdr) : t = T_HEADERS := by
   unfold kind at h; unfold T_HEADERS
@@ -182,18 +175,17 @@ def StepAgrees (step : Reader → Nat → Bytes → Reader × Ev Hdrs) (r : Read
       (step r t p).2.isError = false ∧ absQ (step r t p).1.st = some q') ∧
     (specStep q t = none → (step r t p).2.isError = true)
 
-/-- flare's dispatch agrees with the spec on every good frame whose type is
-not HTTP/2-reserved. -/
+/-- flare's dispatch agrees with the spec on every good frame, whatever its
+type (H3-02: the HTTP/2-reserved types are rejected like the control types). -/
 theorem stepFrame_agrees (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes)
-    (hg : GoodFrame qd r.maxField (t, p)) (hres : isH2Reserved t = false) :
+    (hg : GoodFrame qd r.maxField (t, p)) :
     StepAgrees (stepFrame qd) r t p := by
-  have hk := kind_ne_h2res hres
   have hg' : kind t = .hdr → p.length ≤ r.maxField ∧ (qd p).isSome :=
     fun h => hg (kind_hdr h)
   rw [StepAgrees, stepFrame_kind]
   refine ⟨stepFrameK_maxField qd r (kind t) t p, fun q hq => ?_⟩
   rw [specStep_kind]
-  exact (stepFrameK_agrees qd r (kind t) t p q hq hg' hk).2
+  exact (stepFrameK_agrees qd r (kind t) t p q hq hg').2
 
 /-- Run a frame-level step function over complete frames. -/
 def runFrames (step : Reader → Nat → Bytes → Reader × Ev Hdrs) :
@@ -257,24 +249,21 @@ theorem runFrames_reject {P : Nat → Prop} (qd : Bytes → Option Hdrs)
         (fun f hf => hP f (by simp [hf])) hrej
       exact ⟨e, by simp [runFrames, he], hee⟩
 
-/-- RFC 9114 §4.1 conformance of flare's request reader (acceptance half),
-for sequences without HTTP/2-reserved frame types. -/
+/-- RFC 9114 §4.1 conformance of flare's request reader (acceptance half). -/
 theorem run_accept_impl (qd : Bytes → Option Hdrs) (fs : List (Nat × Bytes)) (r : Reader)
     (q q' : Q) (hq : absQ r.st = some q) (hgood : ∀ f ∈ fs, GoodFrame qd r.maxField f)
-    (hres : ∀ f ∈ fs, isH2Reserved f.1 = false)
     (hacc : specRun q (fs.map Prod.fst) = some q') :
     (∀ e ∈ (runFrames (stepFrame qd) r fs).2, e.isError = false) ∧
       absQ (runFrames (stepFrame qd) r fs).1.st = some q' :=
-  runFrames_accept (P := fun t => isH2Reserved t = false) qd (stepFrame qd)
-    (fun r t p hg hp => stepFrame_agrees qd r t p hg hp) fs r q q' hq hgood hres hacc
+  runFrames_accept (P := fun _ => True) qd (stepFrame qd)
+    (fun r t p hg _ => stepFrame_agrees qd r t p hg) fs r q q' hq hgood (fun _ _ => trivial) hacc
 
 /-- RFC 9114 §4.1 conformance of flare's request reader (rejection half). -/
 theorem run_reject_impl (qd : Bytes → Option Hdrs) (fs : List (Nat × Bytes)) (r : Reader)
     (q : Q) (hq : absQ r.st = some q) (hgood : ∀ f ∈ fs, GoodFrame qd r.maxField f)
-    (hres : ∀ f ∈ fs, isH2Reserved f.1 = false)
     (hrej : specRun q (fs.map Prod.fst) = none) :
     ∃ e ∈ (runFrames (stepFrame qd) r fs).2, e.isError = true :=
-  runFrames_reject (P := fun t => isH2Reserved t = false) qd (stepFrame qd)
-    (fun r t p hg hp => stepFrame_agrees qd r t p hg hp) fs r q hq hgood hres hrej
+  runFrames_reject (P := fun _ => True) qd (stepFrame qd)
+    (fun r t p hg _ => stepFrame_agrees qd r t p hg) fs r q hq hgood (fun _ _ => trivial) hrej
 
 end Flare.L3.H3

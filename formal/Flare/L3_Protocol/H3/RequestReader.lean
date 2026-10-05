@@ -18,10 +18,11 @@ until it reports NEEDS_MORE.
 Results:
 * `feed_append`  — prefix stability of one `feed` step.
 * `drain_append` — chunking independence of the server drain loop.
-* `runFixed_spec` / `run_spec_of_noReserved` — the frame sequences accepted
-  without error are exactly the prefixes of RFC 9114 §4.1's
-  `HEADERS DATA* [HEADERS]` with unknown frames ignored (the impl needs the
-  side condition "no HTTP/2-reserved frame type"; see `Flare.Bugs.H3_02`).
+* `run_accept_impl` / `run_reject_impl` (Grammar.lean) — the frame sequences
+  accepted without error are exactly the prefixes of RFC 9114 §4.1's
+  `HEADERS DATA* [HEADERS]` with unknown frames ignored, with no side
+  condition on frame types (before H3-02 the impl needed "no HTTP/2-reserved
+  frame type"; see `Flare.Bugs.H3_02`).
 -/
 namespace Flare.L3.H3
 
@@ -35,13 +36,14 @@ def T_GOAWAY : Nat := 0x07
 def T_MAX_PUSH_ID : Nat := 0x0D
 
 /-- Control-stream frame types the reader rejects on a request stream.
-mirrors flare/http3/request_reader.mojo:312-318 @59bda50 -/
+mirrors flare/http3/request_reader.mojo:340-350 -/
 def isControlType (t : Nat) : Bool :=
   t == T_SETTINGS || t == T_GOAWAY || t == T_MAX_PUSH_ID || t == T_CANCEL_PUSH ||
     t == T_PUSH_PROMISE
 
 /-- HTTP/2 frame types reserved by RFC 9114 §7.2.8 / §11.2.1 (PRIORITY, PING,
-WINDOW_UPDATE, CONTINUATION): receipt MUST be H3_FRAME_UNEXPECTED. -/
+WINDOW_UPDATE, CONTINUATION): receipt MUST be H3_FRAME_UNEXPECTED.
+mirrors flare/http3/request_reader.mojo:340-352 (fixed, H3-02) -/
 def isH2Reserved (t : Nat) : Bool := t == 0x02 || t == 0x06 || t == 0x08 || t == 0x09
 
 inductive RState | init | body | trailers | done
@@ -72,8 +74,10 @@ def Ev.isError : Ev Hdrs → Bool
   | .error _ => true
   | _ => false
 
-/-- Dispatch of one fully present frame on type and state.
-mirrors flare/http3/request_reader.mojo:261-327 @59bda50 -/
+/-- Dispatch of one fully present frame on type and state. The HTTP/2-reserved
+types are rejected next to the control types (H3-02); the pre-fix dispatch is
+`Flare.Bugs.H3_02.stepFrameOld`.
+mirrors flare/http3/request_reader.mojo:277-362 (fixed, H3-02) -/
 def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
     Reader × Ev Hdrs :=
   if t = T_HEADERS then
@@ -87,7 +91,7 @@ def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
   else if t = T_DATA then
     if r.st ≠ .body then ({r with st := .done}, .error .dataOutside)
     else ({r with bodyBytes := r.bodyBytes + p.length}, .data p)
-  else if isControlType t then ({r with st := .done}, .error .controlType)
+  else if isControlType t || isH2Reserved t then ({r with st := .done}, .error .controlType)
   else (r, .unknown t)
 
 /-- One `feed_into` call. A frame of any type other than HEADERS and DATA

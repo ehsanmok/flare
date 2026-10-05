@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: H3-02 fixed on fix/formal-findings
 """H3-02: HTTP/2-reserved frame types are ignored on request streams.
 
-Lean: Flare.Bugs.H3_02.impl_ignores_reserved (impl),
+Lean: Flare.Bugs.H3_02.implOld_ignores_reserved (pre-fix),
       Flare.Bugs.H3_02.runFixed_spec (fix meets the RFC 9114 §4.1 grammar).
 flare/http3/request_reader.mojo:308-327 @59bda50.
 
 RFC 9114 §7.2.8 / §11.2.1: frame types 0x02, 0x06, 0x08 and 0x09 (HTTP/2
 PRIORITY, PING, WINDOW_UPDATE, CONTINUATION) "MUST NOT be sent, and their
 receipt MUST be treated as a connection error of type H3_FRAME_UNEXPECTED".
-Expected: on_protocol_error. Actual: the reader classifies them as unknown /
+Expected: on_protocol_error. Before the fix: Actual: the reader classifies them as unknown /
 grease and fires on_unknown_frame, so the stream continues.
 
 Minimal fix: add 0x02, 0x06, 0x08, 0x09 to the rejected set next to the
@@ -59,8 +60,10 @@ def main() raises:
         for t in ignored:
             s += hex(t) + " "
         print(
-            "BUG REPRODUCED: HTTP/2-reserved frame types accepted as unknown"
-            " (no H3_FRAME_UNEXPECTED):",
+            (
+                "BUG REPRODUCED: HTTP/2-reserved frame types accepted as"
+                " unknown (no H3_FRAME_UNEXPECTED):"
+            ),
             s,
         )
         raise Error("H3-02")

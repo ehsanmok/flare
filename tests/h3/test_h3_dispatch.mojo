@@ -386,6 +386,19 @@ def test_undecodable_field_section_is_a_connection_error() raises:
     assert_true(c.connection_error_reason.byte_length() > 0)
 
 
+def test_h2_reserved_request_frame_is_a_connection_error() raises:
+    """H3-02: an HTTP/2-reserved frame type (here PING, 0x06) on a request
+    stream is a connection error of type H3_FRAME_UNEXPECTED (RFC 9114
+    sec 7.2.8, 11.2.1), not an ignored unknown frame."""
+    var c = Http3Connection()
+    var wire = _build_get_request_bytes("/")
+    wire.append(UInt8(0x06))  # PING's frame type
+    wire.append(UInt8(0x00))  # length 0
+    c.feed_stream_chunk(0, wire^)
+    assert_equal(Int(c.connection_error_code), Int(H3_FRAME_UNEXPECTED))
+    assert_true("H3_FRAME_UNEXPECTED" in c.connection_error_reason)
+
+
 def test_blocked_field_section_without_a_budget_is_a_connection_error() raises:
     """QPACK-05: with a dynamic table but 0 blocked streams promised, a
     section whose Required Insert Count is ahead of the inserts received
@@ -439,6 +452,7 @@ def main() raises:
     test_retransmit_after_the_response_does_not_rerun_the_request()
     test_undecodable_field_section_is_a_connection_error()
     test_blocked_field_section_without_a_budget_is_a_connection_error()
+    test_h2_reserved_request_frame_is_a_connection_error()
     test_a_decodable_request_is_not_a_connection_error()
     test_h3_error_codes_are_named_in_error_messages()
-    print("test_h3_dispatch: 19 passed")
+    print("test_h3_dispatch: 20 passed")

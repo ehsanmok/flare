@@ -451,6 +451,10 @@ v0.11 audit fixes; before them the server accepted what follows.
   inserts. Any other HTTP/3 or QPACK error the driver raises closes the
   connection with its H3 code (`flare.http3.server.h3_error_code`) and
   no longer stops `serve_http3`.
+- The HTTP/2-reserved frame types 0x02, 0x06, 0x08 and 0x09 (PRIORITY,
+  PING, WINDOW_UPDATE, CONTINUATION) on a request stream are a connection
+  error of type `H3_FRAME_UNEXPECTED` (0x105), not ignored as unknown
+  frames.
 - A request-stream frame other than HEADERS and DATA (an unknown or
   grease type) that declares more than `max_field_section_size` bytes
   (default 8192) is refused from its header with `H3_EXCESSIVE_LOAD`

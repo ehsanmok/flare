@@ -149,6 +149,9 @@ from test_h3_dispatch import (
     test_undecodable_field_section_is_a_connection_error as test_h3_dispatch__test_undecodable_field_section_is_a_connection_error,
 )
 from test_h3_dispatch import (
+    test_h2_reserved_request_frame_is_a_connection_error as test_h3_dispatch__test_h2_reserved_request_frame_is_a_connection_error,
+)
+from test_h3_dispatch import (
     test_blocked_field_section_without_a_budget_is_a_connection_error as test_h3_dispatch__test_blocked_field_section_without_a_budget_is_a_connection_error,
 )
 from test_h3_dispatch import (
@@ -295,6 +298,9 @@ from test_request_reader import (
 from test_request_reader import (
     test_oversized_unknown_frame_is_refused_from_its_header as test_request_reader__test_oversized_unknown_frame_is_refused_from_its_header,
 )
+from test_request_reader import (
+    test_h2_reserved_frame_types_are_refused as test_request_reader__test_h2_reserved_frame_types_are_refused,
+)
 from test_response_writer import (
     test_status_only as test_response_writer__test_status_only,
 )
@@ -431,6 +437,9 @@ def main() raises:
         test_h3_dispatch__test_undecodable_field_section_is_a_connection_error
     ]()
     suite.test[
+        test_h3_dispatch__test_h2_reserved_request_frame_is_a_connection_error
+    ]()
+    suite.test[
         test_h3_dispatch__test_blocked_field_section_without_a_budget_is_a_connection_error
     ]()
     suite.test[
@@ -548,6 +557,7 @@ def main() raises:
     suite.test[
         test_request_reader__test_oversized_unknown_frame_is_refused_from_its_header
     ]()
+    suite.test[test_request_reader__test_h2_reserved_frame_types_are_refused]()
     # tests/h3/test_response_writer.mojo
     suite.test[test_response_writer__test_status_only]()
     suite.test[test_response_writer__test_status_with_application_headers]()

@@ -306,6 +306,54 @@ def test_oversized_unknown_frame_is_refused_from_its_header() raises:
     assert_equal(rec3.error_count, 0)
 
 
+def test_h2_reserved_frame_types_are_refused() raises:
+    """H3-02: types 0x02, 0x06, 0x08 and 0x09 (HTTP/2 PRIORITY, PING,
+    WINDOW_UPDATE, CONTINUATION) were skipped as unknown frames. Their
+    receipt is H3_FRAME_UNEXPECTED (RFC 9114 sec 7.2.8, 11.2.1), whether
+    they arrive before HEADERS or in the middle of a request."""
+    var reserved = List[UInt64]()
+    reserved.append(UInt64(0x02))
+    reserved.append(UInt64(0x06))
+    reserved.append(UInt64(0x08))
+    reserved.append(UInt64(0x09))
+    for i in range(len(reserved)):
+        var t = reserved[i]
+        # First frame on the stream.
+        var r = Http3RequestReader.new()
+        var rec = _Recorder.new()
+        var f = _frame(t, List[UInt8]())
+        assert_equal(feed_into(r, Span[UInt8, _](f), rec), len(f))
+        assert_equal(rec.error_count, 1, "reserved type was ignored")
+        assert_equal(rec.unknown_count, 0)
+        assert_true("H3_FRAME_UNEXPECTED" in rec.last_error)
+        assert_equal(r.state, H3_REQUEST_STATE_DONE)
+        # After a valid HEADERS frame, with a payload.
+        var r2 = Http3RequestReader.new()
+        var rec2 = _Recorder.new()
+        var wire = _frame(H3_FRAME_TYPE_HEADERS, _qpack_request_headers())
+        var payload = List[UInt8]()
+        payload.append(UInt8(1))
+        payload.append(UInt8(2))
+        wire.extend(_frame(t, payload))
+        var off = 0
+        while off < len(wire):
+            var n = feed_into(r2, Span[UInt8, _](wire)[off:], rec2)
+            if n == 0:
+                break
+            off += n
+        assert_equal(rec2.headers_count, 1)
+        assert_equal(rec2.error_count, 1, "reserved type after HEADERS ignored")
+        assert_true("H3_FRAME_UNEXPECTED" in rec2.last_error)
+        assert_equal(r2.state, H3_REQUEST_STATE_DONE)
+    # A grease type that is not reserved is still skipped.
+    var r3 = Http3RequestReader.new()
+    var rec3 = _Recorder.new()
+    var g = _frame(UInt64(0x21), List[UInt8]())
+    assert_equal(feed_into(r3, Span[UInt8, _](g), rec3), len(g))
+    assert_equal(rec3.unknown_count, 1)
+    assert_equal(rec3.error_count, 0)
+
+
 def main() raises:
     test_initial_state()
     test_headers_only()
@@ -319,4 +367,5 @@ def main() raises:
     test_repeat_headers_after_trailers_is_protocol_error()
     test_limits_are_checked_before_the_payload_arrives()
     test_oversized_unknown_frame_is_refused_from_its_header()
-    print("test_h3_request_reader: 12 passed")
+    test_h2_reserved_frame_types_are_refused()
+    print("test_h3_request_reader: 13 passed")
