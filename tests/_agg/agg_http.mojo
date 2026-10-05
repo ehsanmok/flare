@@ -3384,6 +3384,9 @@ from test_server_ws_upgrade import (
 from test_server_ws_upgrade import (
     test_shared_listener_upgrade_carries_origin as test_server_ws_upgrade__test_shared_listener_upgrade_carries_origin,
 )
+from test_server_ws_upgrade import (
+    test_ws_handshake_on_tls_is_never_upgraded_in_cleartext as test_server_ws_upgrade__test_ws_handshake_on_tls_is_never_upgraded_in_cleartext,
+)
 from test_session import (
     test_signed_cookie_roundtrip as test_session__test_signed_cookie_roundtrip,
 )
@@ -5847,6 +5850,9 @@ def main() raises:
     suite.test[test_server_ws_upgrade__test_unsupported_ws_version_gets_426]()
     suite.test[
         test_server_ws_upgrade__test_shared_listener_upgrade_carries_origin
+    ]()
+    suite.test[
+        test_server_ws_upgrade__test_ws_handshake_on_tls_is_never_upgraded_in_cleartext
     ]()
     # tests/http/test_session.mojo
     suite.test[test_session__test_signed_cookie_roundtrip]()

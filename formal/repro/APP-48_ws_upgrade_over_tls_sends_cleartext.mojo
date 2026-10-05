@@ -1,4 +1,5 @@
 # PLATFORM: any (needs the test certificates under tests/certs)
+# RESOLVED: APP-48 fixed on fix/formal-findings
 """APP-48: a WebSocket handshake on a TLS-terminated HTTP/1.1 connection is
 upgraded in cleartext: the 101 and every server frame go out unencrypted on
 the TLS socket.
@@ -25,7 +26,7 @@ at the raw TCP bytes that come back.
 
 Expected: the handshake is not upgraded on TLS; whatever the server
 answers is TLS records (first byte 0x17).
-Actual: after the TLS session-ticket records, the raw bytes are the
+Before the fix: after the TLS session-ticket records, the raw bytes are the
 cleartext "HTTP/1.1 101 Switching Protocols" followed by an unencrypted
 WebSocket text frame carrying "secret-token".
 
@@ -106,9 +107,9 @@ def main() raises:
         var cfg = TlsConfig(ca_bundle=_CA_CRT)
         var s = TlsStream.connect("localhost", port, cfg)
         var hs = String(
-            "GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
-            "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-            "Sec-WebSocket-Version: 13\r\n\r\n"
+            "GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade:"
+            " websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key:"
+            " dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
         )
         s.write_all(hs.as_bytes())
         s.set_recv_timeout(200)
@@ -136,9 +137,7 @@ def main() raises:
                 except:
                     pass
                 if got > 0:
-                    plain = String(
-                        unsafe_from_utf8=Span[UInt8, _](buf)[:got]
-                    )
+                    plain = String(unsafe_from_utf8=Span[UInt8, _](buf)[:got])
                     break
         s.close()
     except e:

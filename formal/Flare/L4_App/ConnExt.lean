@@ -39,6 +39,9 @@ connection reaches it through `_migrate_tls`
 Spec (server.mojo:813-814, conn_handle.mojo:1506-1508: "Cleartext only: a
 wss:// connection is terminated by the TLS connection handler, which has no
 upgrade seam"): nothing on a TLS connection is written in cleartext.
+APP-48 is fixed: the branch is guarded by `not self.tls`, as the h2c branch
+below it is; the pre-fix definitions are kept as `upgradeTakenOld` and
+`wireOld`.
 -/
 namespace Flare.L4.ConnExt
 
@@ -151,34 +154,49 @@ namespace Ws
 inductive Wire | tls | cleartext
   deriving DecidableEq, Repr
 
-/-- `on_readable` takes the WebSocket branch: a handler is configured and
-the request is a version-13 handshake (`fix`: and the connection is not TLS).
-mirrors flare/http/_reactor/conn_handle.mojo:838-875 @59bda50 -/
-def upgradeTaken (fix : Bool) (wsHandler tls isWs : Bool) : Bool :=
-  wsHandler && isWs && (!fix || !tls)
+/-- `on_readable` takes the WebSocket branch: a handler is configured, the
+connection is not TLS, and the request is a version-13 handshake.
+mirrors flare/http/_reactor/conn_handle.mojo:838-885 (fixed, APP-48) -/
+def upgradeTaken (wsHandler tls isWs : Bool) : Bool :=
+  wsHandler && !tls && isWs
 
-/-- `_handle_ws_upgrade` writes on the detached raw fd; every other path
-goes through the connection's (TLS or plain) stream.
-mirrors flare/http/_reactor/conn_handle.mojo:1476-1574 @59bda50 -/
-def wire (fix wsHandler tls isWs : Bool) : Wire :=
-  if upgradeTaken fix wsHandler tls isWs then .cleartext
+/-- The pre-fix branch condition: it did not look at `self.tls`.
+mirrors flare/http/_reactor/conn_handle.mojo:838-875 @59bda50 -/
+def upgradeTakenOld (wsHandler _tls isWs : Bool) : Bool :=
+  wsHandler && isWs
+
+/-- Where the answer goes, given the branch condition: `_handle_ws_upgrade`
+writes on the detached raw fd; every other path goes through the
+connection's (TLS or plain) stream.
+mirrors flare/http/_reactor/conn_handle.mojo:1476-1574 (fixed, APP-48) -/
+def wireWith (taken : Bool → Bool → Bool → Bool) (wsHandler tls isWs : Bool) : Wire :=
+  if taken wsHandler tls isWs then .cleartext
   else if tls then .tls else .cleartext
 
-/-- "Cleartext only": a TLS connection never writes in cleartext. -/
-def Spec (fix : Bool) : Prop := ∀ ws isWs, wire fix ws true isWs = .tls
+/-- The shipped implementation. -/
+def wire : Bool → Bool → Bool → Wire := wireWith upgradeTaken
 
-theorem impl_violates : wire false true true true = .cleartext ∧ ¬ Spec false := by
+/-- The pre-fix implementation (APP-48). -/
+def wireOld : Bool → Bool → Bool → Wire := wireWith upgradeTakenOld
+
+/-- "Cleartext only": a TLS connection never writes in cleartext. -/
+def Spec (w : Bool → Bool → Bool → Wire) : Prop := ∀ ws isWs, w ws true isWs = .tls
+
+/-- **Pre-fix flare**: a valid handshake on a TLS connection with a handler
+is answered in cleartext. -/
+theorem old_violates : wireOld true true true = .cleartext ∧ ¬ Spec wireOld := by
   refine ⟨rfl, fun h => ?_⟩
   have := h true true
-  simp [wire, upgradeTaken] at this
+  simp [wireOld, wireWith, upgradeTakenOld] at this
 
-theorem fixed_spec : Spec true := by
-  intro ws isWs; simp [wire, upgradeTaken]
+/-- **The shipped branch** keeps every TLS connection inside TLS. -/
+theorem spec : Spec wire := by
+  intro ws isWs; simp [wire, wireWith, upgradeTaken]
 
 /-- The fix changes nothing on cleartext connections. -/
-theorem fixed_cleartext_same (ws isWs : Bool) :
-    upgradeTaken true ws false isWs = upgradeTaken false ws false isWs := by
-  simp [upgradeTaken]
+theorem cleartext_same (ws isWs : Bool) :
+    upgradeTaken ws false isWs = upgradeTakenOld ws false isWs := by
+  simp [upgradeTaken, upgradeTakenOld]
 
 end Ws
 

@@ -462,15 +462,15 @@ flushed (`conn_handle.mojo:1353-1362`); only `_drive_h1` (174-215)
 migrates. After the upgrade request the client waits for the server
 preface (RFC 7540 §3.2), so the only events are writable edges, which keep
 coming while write interest is armed. `Ws` is the WebSocket branch of
-`on_readable` (`conn_handle.mojo:838-875`) and where `_handle_ws_upgrade`
+`on_readable` (`conn_handle.mojo:838-885`) and where `_handle_ws_upgrade`
 writes (the detached raw fd, 1476-1574).
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `Flare.L4.ConnExt.H2c.impl_spins` | with the 101 queued behind a full send buffer, after any number of writable edges the connection is still `KIND_H1` and write-armed | proved (APP-47) |
 | `Flare.L4.ConnExt.H2c.fixed_spec` | routing the edge to `_drive_h1` while an upgrade is pending migrates on the first writable edge, and the connection stays HTTP/2 | proved |
-| `Flare.L4.ConnExt.Ws.impl_violates` | a valid handshake on a TLS connection with a WebSocket handler is answered in cleartext | proved (APP-48) |
-| `Flare.L4.ConnExt.Ws.fixed_spec`, `fixed_cleartext_same` | guarding the branch with `not self.tls` keeps TLS connections inside TLS and changes nothing on cleartext ones | proved |
+| `Flare.L4.ConnExt.Ws.old_violates` | before the fix (`wireOld`), a valid handshake on a TLS connection with a WebSocket handler is answered in cleartext | proved (APP-48, resolved) |
+| `Flare.L4.ConnExt.Ws.spec`, `cleartext_same` | the shipped branch (`not self.tls`) keeps TLS connections inside TLS and changes nothing on cleartext ones | proved |
 
 ### 17. Liveness of the connection machine (`Flare.L4.ConnLive`)
 
@@ -1201,6 +1201,8 @@ HTTP response; otherwise it prints `inconclusive:`. 3 of 3 runs printed:
 
 **Flip.** `OK: no cleartext on the wire (684 raw bytes, first byte 23); the answer decrypts to 'HTTP/1.1 200 OK'`, exit 0.
 
+Status: resolved. `on_readable` computes `config.ws.handler and not self.tls` once and uses it for both the version-mismatch 426 and the upgrade, so a handshake on TLS is served as plain HTTP/1.1 inside TLS. Test: `tests/http/test_server_ws_upgrade.mojo::test_ws_handshake_on_tls_is_never_upgraded_in_cleartext`; the repro now prints `OK:`.
+
 ### APP-49: an interim `100 Continue` the socket does not take whole is never completed
 
 **Severity.** Medium. On cleartext the client receives a truncated interim
@@ -1403,4 +1405,4 @@ exit 0.
 | `Flare.L4.ConnStream.Tls.drain`, `flush`, `readDriver`, `writeDriver`, `route` | conn_handle.mojo:479-520, 1213-1240, 1314-1375; http/_unified_reactor_impl.mojo:174-190, 243-258, 812-831 | `blocked_interest`, `retry_read`, `retry_write`, `inv_route`, `interest_nonempty` | proved |
 | `Flare.L4.Negotiate.parseHeaderMojo` | http/middleware.mojo:131-235 | `parseHeaderMojo_eq`, `negotiateMojo_eq` | proved |
 | `Flare.L4.Continue.Plain.sendContinue`, `finalise`, `flush`; `Tls.sendContinue`, `flush` | http/_reactor/conn_handle.mojo:544-576, 718-756, 1423-1435, 1286-1312, 1213-1240 | `Plain.violates`, `Tls.violates`, `APP_49.violates_spec`, `fixed_meets_spec` | counterexample (APP-49) |
-| `Flare.L4.ConnExt.Ws.upgradeTaken`, `wire` | http/_reactor/conn_handle.mojo:838-875, 1476-1574 | `APP_48.violates_spec`, `fixed_spec` | counterexample (APP-48) |
+| `Flare.L4.ConnExt.Ws.upgradeTaken`, `wire` (pre-fix: `upgradeTakenOld`, `wireOld`) | http/_reactor/conn_handle.mojo:838-885, 1476-1574 | `APP_48.violates_spec`, `spec` | resolved (APP-48) |

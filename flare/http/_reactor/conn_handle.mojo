@@ -843,7 +843,13 @@ struct ConnHandle(Movable):
             # WsConnection, so the reactor is told to drop this
             # connection -- with `ws_offload` set that happens while
             # the handler is still running on its own thread.
-            if config.ws.handler and _is_ws_version_mismatch(req):
+            #
+            # Never on a TLS connection: ``_handle_ws_upgrade`` detaches
+            # the raw fd and writes the 101 and every frame in cleartext,
+            # and a TLS connection has no upgrade seam (a ``wss://``
+            # handshake is served as plain HTTP/1.1 inside TLS instead).
+            var ws_here = config.ws.handler and not self.tls
+            if ws_here and _is_ws_version_mismatch(req):
                 # RFC 6455 sec 4.4: a handshake for a version we do not
                 # speak gets 426 with the version we do, rather than
                 # falling through to the HTTP handler as if it were a
@@ -854,7 +860,7 @@ struct ConnHandle(Movable):
                 except:
                     pass
                 return self._finalise_response(r426^, True)
-            if config.ws.handler:
+            if ws_here:
                 var upgraded: Bool
                 try:
                     upgraded = self._handle_ws_upgrade(req, config)
@@ -1503,8 +1509,9 @@ struct ConnHandle(Movable):
         The caller then returns ``done=True`` so the reactor
         unregisters the fd; closing it is the ``WsConnection``'s job.
 
-        Cleartext only. A ``wss://`` connection arrives through
-        ``TlsConnHandle``, which has no equivalent seam, so a
+        Cleartext only. A TLS-terminated connection (``self.tls``) has
+        no equivalent seam: ``on_readable`` never calls this method for
+        it and serves the handshake as plain HTTP/1.1 inside TLS, so a
         TLS-terminated server still needs a separate ``WsServer``.
         """
         from flare.http.server import _ascii_lower

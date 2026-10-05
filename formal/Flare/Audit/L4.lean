@@ -148,7 +148,8 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ClientLease.pool_fd_once
 #print axioms Flare.L4.ConnExt.H2c.impl_spins
 #print axioms Flare.L4.ConnExt.H2c.fixed_spec
-#print axioms Flare.L4.ConnExt.Ws.fixed_spec
+#print axioms Flare.L4.ConnExt.Ws.old_violates
+#print axioms Flare.L4.ConnExt.Ws.spec
 #print axioms Flare.Bugs.APP_46.violates_spec
 #print axioms Flare.Bugs.APP_46.fixed_meets_spec
 #print axioms Flare.Bugs.APP_47.violates_spec

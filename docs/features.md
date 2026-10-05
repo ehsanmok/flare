@@ -713,7 +713,11 @@ upgrade is handed to `ws_fn`, while everything else goes to the
 ordinary `Handler`. Each upgraded socket runs on its own detached
 thread; `WsUpgrade(ws_fn, offload=False)` runs the handler on the
 reactor thread instead, which blocks every other connection on that
-worker until the WebSocket closes.
+worker until the WebSocket closes. The upgrade is cleartext only: on a
+TLS-terminated listener (`bind_tls`) the `WsUpgrade` hook is ignored and a
+`wss://` handshake is served as an ordinary HTTP/1.1 request inside TLS,
+because the upgrade path writes on the raw socket. Use a separate
+`WsServer` for `wss://`.
 
 **Changed in v0.11 (breaking).** `offload` defaults to `True`; it was
 `False`, so one WebSocket client stalled its whole worker by default. A

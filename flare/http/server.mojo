@@ -813,7 +813,10 @@ struct HttpServer(Movable):
         an HTTP/2 connection). This is the plain HTTP/1.1 handshake.
 
         Cleartext only: a ``wss://`` connection is terminated by the
-        TLS connection handler, which has no upgrade seam.
+        TLS connection handler, which has no upgrade seam. On a
+        ``bind_tls`` listener the WebSocket hook is ignored and a
+        handshake is served as plain HTTP/1.1 inside TLS (never in
+        cleartext).
 
         Equivalent to setting :attr:`ServerConfig.ws` and then
         calling ``serve(handler)``; this just wires the field for you.

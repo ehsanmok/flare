@@ -26,8 +26,8 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
-from flare.http import HttpServer, Request, Response, ok
-from flare.net import SocketAddr
+from flare.http import HttpServer, Request, Response, WsUpgrade, ok
+from flare.net import IpAddr, SocketAddr
 from flare.net._libc import (
     AF_INET,
     MSG_NOSIGNAL,
@@ -45,6 +45,7 @@ from flare.net._libc import (
     _strerror,
     get_errno,
 )
+from flare.tls import TlsConfig, TlsStream
 from flare.ws import WsClient, WsConnection, WsFrame, WsOpcode
 
 
@@ -483,6 +484,76 @@ def test_shared_listener_upgrade_carries_origin() raises:
     assert_true("origin=[https://app.test]" in got, "got: " + got)
 
 
+# ── WebSocket upgrade on a TLS connection (APP-48) ───────────────────────────
+
+
+def _tls_http_handler(req: Request) raises -> Response:
+    return ok("hello https")
+
+
+def _tls_secret_ws_handler(mut conn: WsConnection) raises -> None:
+    conn.send_text("secret-token")
+
+
+def test_ws_handshake_on_tls_is_never_upgraded_in_cleartext() raises:
+    """With ``bind_tls`` and a WebSocket handler configured, a handshake
+    sent inside the TLS session must not be answered in cleartext: the
+    connection stays inside TLS and the request is served as plain HTTP.
+
+    Before the fix ``on_readable`` took the WebSocket branch on a TLS
+    connection, wrote the 101 and the handler's frame on the raw fd, and the
+    client's TLS read failed on the first non-record byte.
+    """
+    var alpn = List[String]()
+    alpn.append("http/1.1")
+    var srv = HttpServer.bind_tls(
+        SocketAddr(IpAddr.parse("127.0.0.1"), UInt16(0)),
+        "tests/certs/server.crt",
+        "tests/certs/server.key",
+        alpn=alpn^,
+    )
+    srv.config.ws = WsUpgrade(_tls_secret_ws_handler, False)
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_tls_http_handler)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var plain = String("")
+    var err = String("")
+    try:
+        var cfg = TlsConfig(ca_bundle="tests/certs/ca.crt")
+        var s = TlsStream.connect("localhost", port, cfg)
+        var hs = String(
+            "GET /chat HTTP/1.1\r\nHost: localhost\r\nUpgrade:"
+            " websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key:"
+            " dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version:"
+            " 13\r\n\r\n"
+        )
+        s.write_all(hs.as_bytes())
+        s.set_recv_timeout(2000)
+        var buf = List[UInt8](length=4096, fill=UInt8(0))
+        for _ in range(10):
+            var got = s.read(buf.unsafe_ptr(), len(buf))
+            if got <= 0:
+                break
+            plain += String(unsafe_from_utf8=Span[UInt8, _](buf)[:got])
+            if "hello https" in plain:
+                break
+        s.close()
+    except e:
+        err = String(e)
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(plain.startswith("HTTP/1.1 200"), "got: " + plain + " " + err)
+    assert_true("hello https" in plain, "got: " + plain)
+    assert_false("secret-token" in plain, "WS handler ran: " + plain)
+
+
 def main() raises:
     test_http_and_ws_on_one_port()
     test_upgrade_request_is_ordinary_traffic_without_a_ws_handler()
@@ -490,4 +561,5 @@ def main() raises:
     test_ws_upgrade_offloads_by_default()
     test_unsupported_ws_version_gets_426()
     test_shared_listener_upgrade_carries_origin()
-    print("test_server_ws_upgrade: 6 passed")
+    test_ws_handshake_on_tls_is_never_upgraded_in_cleartext()
+    print("test_server_ws_upgrade: 7 passed")
