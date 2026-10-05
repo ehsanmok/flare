@@ -189,6 +189,28 @@ def encode_field_section(
 # ── Decoder ────────────────────────────────────────────────────────────────
 
 
+def _literal_to_string(bytes: Span[UInt8, _]) raises -> String:
+    """Build a ``String`` from decoded QPACK literal bytes.
+
+    Pure-ASCII input (the overwhelmingly common case) goes through
+    ``ascii_unchecked_string``, which is valid by construction and skips
+    the UTF-8 validator. Any byte ``>= 0x80`` sends the whole literal
+    through ``String(from_utf8=...)``, which raises when the bytes are
+    not valid UTF-8, so a peer can never put an ill-formed ``String``
+    into a decoded header (QPACK-03).
+
+    Raises:
+        Error: If the bytes are not valid UTF-8.
+    """
+    for i in range(len(bytes)):
+        if bytes[i] >= UInt8(0x80):
+            try:
+                return String(from_utf8=bytes)
+            except:
+                raise Error("qpack: literal is not valid UTF-8")
+    return ascii_unchecked_string(bytes)
+
+
 def _decode_string_literal(
     buf: Span[UInt8, _],
     offset: Int,
@@ -213,10 +235,10 @@ def _decode_string_literal(
     # rebuilding it byte-by-byte; the per-byte append loop here was a
     # top _realloc cost under request concurrency.
     var payload = buf[ip.offset : ip.offset + n]
-    # QPACK string literals carry token-shaped ASCII per RFC 9204 §4
-    # (after any Huffman decode); ``ascii_unchecked_string`` builds a
-    # ``String`` of the exact length with one ``memcpy`` and no UTF-8
-    # validation pass.
+    # The bytes are peer-controlled (raw, or Huffman-decoded), so they
+    # are not necessarily ASCII. ``_literal_to_string`` keeps the
+    # one-``memcpy`` fast path for pure ASCII and validates anything
+    # else as UTF-8, raising on failure (QPACK-03).
     if huffman:
         # Huffman expands ~8:5 worst case; reserve a generous estimate
         # up front so the decode loop fills one allocation instead of
@@ -228,9 +250,9 @@ def _decode_string_literal(
         # scalar codec's per-byte 257-symbol linear scan, which
         # dominated QPACK decode CPU under request concurrency.
         huffman_decode_simd(payload, bytes)
-        var s = ascii_unchecked_string(Span[UInt8, _](bytes))
+        var s = _literal_to_string(Span[UInt8, _](bytes))
         return Tuple[String, Int](s^, ip.offset + n)
-    var s = ascii_unchecked_string(payload)
+    var s = _literal_to_string(payload)
     return Tuple[String, Int](s^, ip.offset + n)
 
 

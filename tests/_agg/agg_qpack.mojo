@@ -48,6 +48,18 @@ from test_qpack import (
 from test_qpack import (
     test_round_trip_long_value_uses_huffman_when_shorter as test_qpack__test_round_trip_long_value_uses_huffman_when_shorter,
 )
+from test_qpack import (
+    test_raw_literal_value_that_is_not_utf8_is_refused as test_qpack__test_raw_literal_value_that_is_not_utf8_is_refused,
+)
+from test_qpack import (
+    test_huffman_literal_value_that_is_not_utf8_is_refused as test_qpack__test_huffman_literal_value_that_is_not_utf8_is_refused,
+)
+from test_qpack import (
+    test_literal_name_that_is_not_utf8_is_refused as test_qpack__test_literal_name_that_is_not_utf8_is_refused,
+)
+from test_qpack import (
+    test_valid_utf8_literal_value_is_still_accepted as test_qpack__test_valid_utf8_literal_value_is_still_accepted,
+)
 from test_qpack_dynamic import (
     test_entry_size as test_qpack_dynamic__test_entry_size,
 )
@@ -80,6 +92,9 @@ from test_qpack_dynamic import (
 )
 from test_qpack_dynamic import (
     test_capacity_above_the_advertised_limit_is_refused as test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused,
+)
+from test_qpack_dynamic import (
+    test_non_utf8_literal_on_the_encoder_stream_is_an_error as test_qpack_dynamic__test_non_utf8_literal_on_the_encoder_stream_is_an_error,
 )
 from test_qpack_dynamic import (
     test_ric_zero_section_cannot_read_the_dynamic_table as test_qpack_dynamic__test_ric_zero_section_cannot_read_the_dynamic_table,
@@ -118,6 +133,12 @@ def main() raises:
     suite.test[
         test_qpack__test_round_trip_long_value_uses_huffman_when_shorter
     ]()
+    suite.test[test_qpack__test_raw_literal_value_that_is_not_utf8_is_refused]()
+    suite.test[
+        test_qpack__test_huffman_literal_value_that_is_not_utf8_is_refused
+    ]()
+    suite.test[test_qpack__test_literal_name_that_is_not_utf8_is_refused]()
+    suite.test[test_qpack__test_valid_utf8_literal_value_is_still_accepted]()
     # tests/qpack/test_qpack_dynamic.mojo
     suite.test[test_qpack_dynamic__test_entry_size]()
     suite.test[test_qpack_dynamic__test_table_insert_and_index]()
@@ -133,6 +154,9 @@ def main() raises:
     suite.test[test_qpack_dynamic__test_blocked_section_raises]()
     suite.test[
         test_qpack_dynamic__test_capacity_above_the_advertised_limit_is_refused
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_non_utf8_literal_on_the_encoder_stream_is_an_error
     ]()
     suite.test[
         test_qpack_dynamic__test_ric_zero_section_cannot_read_the_dynamic_table

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61744 lines) |
-| Theorems | 3246 |
-| Headline theorems in the axiom audit | 1045 |
+| Lean files | 298 (61775 lines) |
+| Theorems | 3247 |
+| Headline theorems in the axiom audit | 1046 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 62 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 63 of 138 |
 
 Six findings are rated high:
 
@@ -1584,12 +1584,13 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 | `FieldSection.spec_imp_implOld` | The pre-fix resolver accepts everything the spec accepts and resolves it to the same entry. | proved |
 | `FieldSection.rel_roundtrip` | The decoder inverts the encoder's relative index. | proved |
 | `FieldSection.implOldSignReadIndex_le` | The pre-fix sign-byte read index is at most `len` (so only the Sign read can go out of bounds). | proved |
-| `FieldSection.implSignReadIndex_inBounds`, `implFixedLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
+| `FieldSection.implSignReadIndex_inBounds`, `implLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
 | `FieldSection.implDynRef_inRange` | On in-range references flare already matches the spec. | proved |
-| `FieldSection.implLiteral_eq_spec` | flare's literal decoder, Huffman branch included, equals `specLiteral` on every input (via L1's `okOnly_decodeSimdImpl`). | proved |
-| `FieldSection.implLiteral_huffman` | A Huffman literal whose length prefix fits decodes to exactly the original bytes (via L1's `decode_encode`). | proved |
+| `FieldSection.implOldLiteral_eq_spec` | The literal decoder's byte stage, Huffman branch included, equals `specLiteral` on every input (via L1's `okOnly_decodeSimdImpl`). | proved |
+| `FieldSection.implLiteral_eq_spec_of_ok` | After the QPACK-03 fix `implLiteral` still equals `specLiteral` whenever the decoded bytes are valid UTF-8. | proved |
+| `FieldSection.implOldLiteral_huffman` | A Huffman literal whose length prefix fits decodes to exactly the original bytes (via L1's `decode_encode`). | proved |
 
-So the Huffman branch decodes correctly, and its output goes to the same unchecked `String` constructor as the plain branch: `QPACK_03.huffman_counterexample` shows the Huffman encoding of the byte 0xFF decoding to `[0xFF]`, so QPACK-03 covers both branches.
+So the Huffman branch decodes correctly, and before the QPACK-03 fix its output went to the same unchecked `String` constructor as the plain branch: `QPACK_03.huffman_counterexample` shows the Huffman encoding of the byte 0xFF decoding to `[0xFF]`, so QPACK-03 covered both branches.
 
 **Encoder lookups.** `findBy` mirrors `QpackDynamicTable.find` and `find_name` (`dynamic.mojo:160-175`): the first matching entry, as an absolute index. `ric` mirrors the Required Insert Count computation of `encode_field_section_dynamic` (418-430).
 
@@ -2873,7 +2874,7 @@ advances the wheel to `now` at the top of every iteration
 | `Qpack.Table.*` | qpack/dynamic.mojo:93-158 | `inv_insert`, `inv_setCapacity`, `getAbs_insert` | proved |
 | `Qpack.FieldSection.implResolve`, `implOldResolve` | qpack/dynamic.mojo:473-603 (fixed, QPACK-01) | `spec_imp_implOld`, `QPACK_01.violates_safety`, `implResolve_eq_spec` | resolved |
 | `Qpack.FieldSection.implSignReadIndex`, `implOldSignReadIndex` | qpack/dynamic.mojo:518-542 (fixed, QPACK-02) | `QPACK_02.out_of_bounds`, `implSignReadIndex_inBounds` | resolved |
-| `Qpack.FieldSection.implLiteral` | qpack/codec.mojo:192-234 | `implLiteral_eq_spec`, `implLiteral_huffman`, `QPACK_03.not_string_ok`, `QPACK_03.huffman_counterexample`, `implFixedLiteral_ok` | counterexample (QPACK-03) |
+| `Qpack.FieldSection.implLiteral`, `implOldLiteral` | qpack/codec.mojo:192-278 (fixed, QPACK-03) | `implOldLiteral_eq_spec`, `implOldLiteral_huffman`, `QPACK_03.not_string_ok`, `QPACK_03.huffman_counterexample`, `implLiteral_ok`, `implLiteral_eq_spec_of_ok` | resolved |
 | `Qpack.Encoder.findBy` | qpack/dynamic.mojo:160-175 | `findBy_some`, `findBy_none` | proved |
 | `Qpack.Encoder.ric` | qpack/dynamic.mojo:418-430 | `ric_bound`, `QPACK_06.impl_references_unacked`, `QPACK_06.fixed_spec` | counterexample (QPACK-06) |
 | `Qpack.Table.insert` (encoder use) | qpack/dynamic.mojo:138-148, 606-615 | `QPACK_06.impl_evicts_unacked`, `fixedInsert_noEvict` | counterexample (QPACK-06) |
@@ -3080,7 +3081,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-24 | Low | open | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QPACK-01 | High | resolved | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
 | QPACK-02 | Medium | resolved | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
-| QPACK-03 | Low | open | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
+| QPACK-03 | Low | resolved | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
 | QPACK-04 | Low | open | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
 | QPACK-05 | Medium | resolved | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QPACK-06 | Low | open | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
@@ -4527,11 +4528,12 @@ Status: resolved. `decode_field_section_dynamic` raises QPACK_DECOMPRESSION_FAIL
 - **Severity:** Low. It breaks the `String` invariant that the contents are valid UTF-8.
 - **Contract:** `ascii_unchecked_string` (`http/proto/ascii.mojo:63-70`) requires every byte to be below 0x80.
 - **What goes wrong:** `qpack/codec.mojo:231` and `233` pass arbitrary peer bytes to that constructor.
-- **Counterexample:** `Bugs.QPACK_03.counterexample` and `not_string_ok`: the literal `[0x01, 0xFF]` is accepted.
-- **Fix:** build the value with `String(from_utf8=...)` and raise on failure. `fixed_rejects` and `fixed_ok` show it suffices.
+- **Counterexample:** `Bugs.QPACK_03.counterexample` and `not_string_ok` (about the pre-fix `implOldLiteral`): the literal `[0x01, 0xFF]` is accepted.
+- **Fix:** `_literal_to_string` builds the value: pure ASCII keeps the `ascii_unchecked_string` fast path, anything else goes through `String(from_utf8=...)` and raises when it is not valid UTF-8. `fixed_rejects` and `fixed_ok` (`implLiteral_ok`) show the shipped `implLiteral` only returns valid strings, and `implLiteral_eq_spec_of_ok` that valid-UTF-8 payloads decode as before.
 - **Repro:** `formal/repro/QPACK-03_literal_not_utf8_validated.mojo`
 - **Observed:** `BUG REPRODUCED: decoded header value is a String holding byte 0xFF (validating String constructor accepts it: False )`
 - **Flip (QPACK agent):** `OK`, exit 0.
+Status: resolved. `_decode_string_literal` validates the decoded bytes (`_literal_to_string`) and raises on invalid UTF-8; on the encoder stream that is a QPACK_ENCODER_STREAM_ERROR instead of a stall. Tests: `tests/qpack/test_qpack.mojo::test_raw_literal_value_that_is_not_utf8_is_refused` (and three siblings), `tests/qpack/test_qpack_dynamic.mojo::test_non_utf8_literal_on_the_encoder_stream_is_an_error`. The repro prints `OK` (three runs).
 
 #### QPACK-04: a bad encoder-stream reference stalls instead of raising an error
 
@@ -5831,7 +5833,7 @@ Suspicions that turned out not to be bugs, each with the theorem or argument tha
 - **QPACK table.** The size and capacity counters cannot wrap, and eviction does not move absolute indices. `get_abs` stays in bounds whenever it does not raise.
 - **Transport-parameter decoding** apart from QUIC-10 and QUIC-13: duplicates, truncation, trailing bytes and the other §18.2 value rules are right (`decodeFixed_eq_spec`, whose fixed decoder shares those checks with flare).
 - **QPACK default configuration.** The static-only `decode_field_section` does not have the QPACK-02 problem. With the default capacity of 0, QPACK-01 and QPACK-02 cannot be reached.
-- **QPACK Huffman literals.** The Huffman branch of `_decode_string_literal` decodes exactly what L1's proved decoder does (`implLiteral_eq_spec`) and inverts the Huffman encoder (`implLiteral_huffman`). Its only defect is the shared unchecked `String` constructor, QPACK-03.
+- **QPACK Huffman literals.** The Huffman branch of `_decode_string_literal` decodes exactly what L1's proved decoder does (`implOldLiteral_eq_spec`) and inverts the Huffman encoder (`implOldLiteral_huffman`). Its only defect was the shared unchecked `String` constructor, QPACK-03, now fixed.
 - **QPACK `find` / `find_name`.** They return the first live matching entry as an absolute index, or none when there is none (`findBy_some`, `findBy_none`), and the encoder's RIC covers every index it references (`ric_bound`).
 - **QPACK Section Acknowledgment and the decoder stream.** RFC 9204 §2.2.2.1 requires a decoder to acknowledge sections with a non-zero RIC. The server never sends a decoder stream: `take_qpack_decoder_frames` (`http3/server.mojo:1151-1168`) has no caller, and its docstring records the acknowledgment as deferred. With the shipped capacity of 0, no section with a non-zero RIC is ever decoded (`QPACK_05.shipped_rejects`), so there is nothing to acknowledge, and §4.2 lets an endpoint omit the decoder stream in that case. This becomes a gap only if a server is configured with a non-zero capacity through `with_config`.
 - **The client's own close.** `shutdown` sends CONNECTION_CLOSE and closes the socket, which RFC 9000 §10.2 allows instead of a closing period (`Timers.cli_close_ok`, `QUIC_24.close_ok`).

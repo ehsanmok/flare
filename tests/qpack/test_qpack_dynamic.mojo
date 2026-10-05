@@ -20,6 +20,7 @@ from flare.qpack.dynamic import (
     QpackDynamicTable,
     QpackEncoder,
     apply_encoder_instructions,
+    apply_encoder_instructions_partial,
     decode_field_section_dynamic,
     decode_required_insert_count,
     encode_duplicate,
@@ -223,6 +224,27 @@ def test_capacity_above_the_advertised_limit_is_refused() raises:
     assert_equal(Int(t2.capacity), 1024)
 
 
+def test_non_utf8_literal_on_the_encoder_stream_is_an_error() raises:
+    """QPACK-03: an Insert With Literal Name whose value is not UTF-8
+    is an encoder-stream error, not a truncated instruction to retry
+    (the partial parser used to read the failure as truncation)."""
+    var t = QpackDynamicTable(UInt64(4096))
+    var stream = List[UInt8]()
+    encode_set_capacity(stream, UInt64(1024))
+    # 01H NNNNN: raw name "a" (len 1), then raw value of length 1: 0xFF.
+    stream.append(UInt8(0x41))
+    stream.append(UInt8(0x61))
+    stream.append(UInt8(0x01))
+    stream.append(UInt8(0xFF))
+    var raised = False
+    try:
+        _ = apply_encoder_instructions_partial(t, Span[UInt8, _](stream))
+    except e:
+        raised = "QPACK_ENCODER_STREAM_ERROR" in String(e)
+    assert_true(raised, "a non-UTF-8 literal was swallowed")
+    assert_equal(t.insert_count(), 0)
+
+
 def _decode_raises(sec: List[UInt8], table: QpackDynamicTable) -> Bool:
     try:
         _ = decode_field_section_dynamic(Span[UInt8, _](sec), table)
@@ -331,4 +353,5 @@ def main() raises:
     test_post_base_reference_at_or_above_ric_is_refused()
     test_pre_base_relative_index_beyond_base_is_refused()
     test_truncated_prefix_without_sign_byte_is_refused()
+    test_non_utf8_literal_on_the_encoder_stream_is_an_error()
     print("test_qpack_dynamic: all dynamic-table tests passed")

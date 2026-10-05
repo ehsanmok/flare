@@ -291,6 +291,12 @@ def apply_encoder_instructions_partial(
             # up in the caller's carry.
             if "QPACK_ENCODER_STREAM_ERROR" in String(e):
                 raise e^
+            # A literal that is not valid UTF-8 is corruption, not
+            # truncation (QPACK-03): more bytes cannot repair it.
+            if "literal is not valid UTF-8" in String(e):
+                raise Error(
+                    "QPACK_ENCODER_STREAM_ERROR: literal is not valid UTF-8"
+                )
             # Roll back any partial table mutation is not needed: a single
             # instruction either fully applies (advancing consumed) or
             # raises before mutating. Stop at the instruction boundary.

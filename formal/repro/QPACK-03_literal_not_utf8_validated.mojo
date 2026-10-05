@@ -1,7 +1,8 @@
 # PLATFORM: any
+# RESOLVED: QPACK-03 fixed on fix/formal-findings
 """QPACK-03: QPACK string literals become Strings without UTF-8 validation.
 
-Lean: Flare.Bugs.QPACK_03.counterexample / not_string_ok (literal [0x01,
+Lean: Flare.Bugs.QPACK_03.counterexample / not_string_ok (pre-fix) (literal [0x01,
 0xFF] yields payload [0xFF], which is not valid UTF-8) and
 Flare.Bugs.QPACK_03.fixed_ok.
 flare/qpack/codec.mojo:215-234 @59bda50 (ascii_unchecked_string at 231/233).
@@ -12,7 +13,7 @@ decoder passes arbitrary peer bytes (raw or Huffman-decoded), so a
 header value can be a Mojo String that is not valid UTF-8.
 
 Expected: the decoder rejects (or validates) non-UTF-8 literal bytes.
-Actual: the header value String holds byte 0xFF.
+Before the fix: Actual: the header value String holds byte 0xFF.
 
 Minimal fix: build the String with a validating constructor
 (String(from_utf8=...)) and raise on failure.

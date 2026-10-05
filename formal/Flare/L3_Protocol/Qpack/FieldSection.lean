@@ -23,10 +23,11 @@ Four small models of `flare/qpack/dynamic.mojo` and `flare/qpack/codec.mojo`:
    unchecked before the QPACK-02 fix), see Bugs/QPACK_02.
 4. String literals (`_decode_string_literal`, both branches): the H flag,
    the prefix-integer length, then the octets, Huffman-decoded by
-   `huffman_decode_simd` when H is set. `implLiteral_eq_spec` shows this is
-   RFC 9204 §4.1.2 with RFC 7541 §5.2 Huffman decoding, through the L1
-   decoder (`Flare.L1.Huffman.okOnly_decodeSimdImpl`); either way the bytes
-   reach `ascii_unchecked_string` unvalidated (Bugs/QPACK_03).
+   `huffman_decode_simd` when H is set. `implOldLiteral_eq_spec` shows the byte
+   stage is RFC 9204 §4.1.2 with RFC 7541 §5.2 Huffman decoding, through the L1
+   decoder (`Flare.L1.Huffman.okOnly_decodeSimdImpl`); pre-fix either way the
+   bytes reached `ascii_unchecked_string` unvalidated, and `implLiteral` now
+   rejects payloads that are not valid UTF-8 (Bugs/QPACK_03).
 5. Encoder-stream dynamic name reference / Duplicate (dynamic.mojo:319,337)
    inside `apply_encoder_instructions_partial` (Bugs/QPACK_04).
 -/
@@ -364,11 +365,13 @@ theorem implOldSignReadIndex_le (buf : Bytes) (t m : UInt64) (i : Nat)
 
 /-! ## 4. String literals -/
 
-/-- Bytes handed to `ascii_unchecked_string`, and the end offset. When the
-H bit is set the payload goes through `huffman_decode_simd`, which raises
-on any RFC 7541 §5.2 error (`okOnly`).
-mirrors flare/qpack/codec.mojo:192-234 @59bda50 -/
-def implLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
+/-- The byte stage of `_decode_string_literal`: the literal's bytes and the end
+offset. When the H bit is set the payload goes through `huffman_decode_simd`,
+which raises on any RFC 7541 §5.2 error (`okOnly`). Pre-fix these bytes went
+straight into `ascii_unchecked_string` (QPACK-03); the stage itself is
+unchanged and still feeds `implLiteral`.
+mirrors flare/qpack/codec.mojo:215-255 @59bda50 (pre-fix result) -/
+def implOldLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
     Option (Bytes × Nat) :=
   if offset ≥ buf.length then none
   else match decodeInt buf offset prefixBits with
@@ -394,41 +397,56 @@ def specLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
       else some ((buf.drop o).take n, o + n)
 
 /-- flare's literal decoder, Huffman branch included, is the RFC decoder. -/
-theorem implLiteral_eq_spec (buf : Bytes) (off p : Nat) (m : UInt8) :
-    implLiteral buf off p m = specLiteral buf off p m := by
-  simp only [implLiteral, specLiteral, Flare.L1.Huffman.okOnly_decodeSimdImpl]
+theorem implOldLiteral_eq_spec (buf : Bytes) (off p : Nat) (m : UInt8) :
+    implOldLiteral buf off p m = specLiteral buf off p m := by
+  simp only [implOldLiteral, specLiteral, Flare.L1.Huffman.okOnly_decodeSimdImpl]
 
 /-- A Huffman literal whose payload is `Huffman.encode s` yields exactly `s`. -/
-theorem implLiteral_huffman (buf : Bytes) (off p : Nat) (m : UInt8) (n o : Nat) (s : Bytes)
+theorem implOldLiteral_huffman (buf : Bytes) (off p : Nat) (m : UInt8) (n o : Nat) (s : Bytes)
     (hoff : off < buf.length) (hd : decodeInt buf off p = some (n, o)) (hn : o + n ≤ buf.length)
     (hh : Bytes.getD buf off &&& m ≠ 0) (hp : (buf.drop o).take n = Flare.L1.Huffman.encode s) :
-    implLiteral buf off p m = some (s, o + n) := by
-  rw [implLiteral_eq_spec]
+    implOldLiteral buf off p m = some (s, o + n) := by
+  rw [implOldLiteral_eq_spec]
   unfold specLiteral
   rw [if_neg (Nat.not_le.mpr hoff)]
   simp only [hd]
   rw [if_neg (Nat.not_lt.mpr hn), if_pos hh, hp, Flare.L1.Huffman.decode_encode]
   rfl
 
-/-- `ascii_unchecked_string`'s contract (http/proto/ascii.mojo:63-70): every
-byte `< 0x80`. A Mojo `String` must at least be valid UTF-8. -/
+/-- A Mojo `String` must be valid UTF-8 (`ascii_unchecked_string`'s contract,
+http/proto/ascii.mojo:63-70, is stronger: every byte `< 0x80`). -/
 def StringOk (b : Bytes) : Prop := (ByteArray.mk b.toArray).validateUTF8 = true
 
-/-- Fix: validate (or build the String with the validating constructor). -/
-def implFixedLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
+/-- The shipped decoder: the byte stage, then `_literal_to_string`, which takes
+the ASCII fast path when every byte is `< 0x80` (valid UTF-8 by construction)
+and otherwise builds the `String` with `String(from_utf8=...)`, raising when the
+bytes are not valid UTF-8. Both routes accept exactly the valid-UTF-8 payloads.
+mirrors flare/qpack/codec.mojo:192-278 (fixed, QPACK-03) -/
+def implLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
     Option (Bytes × Nat) :=
-  match implLiteral buf offset prefixBits hmask with
+  match implOldLiteral buf offset prefixBits hmask with
   | some (b, o) => if (ByteArray.mk b.toArray).validateUTF8 then some (b, o) else none
   | none => none
 
-theorem implFixedLiteral_ok (buf : Bytes) (off p : Nat) (m : UInt8) (b : Bytes) (o : Nat)
-    (h : implFixedLiteral buf off p m = some (b, o)) : StringOk b := by
-  unfold implFixedLiteral at h
+/-- **Fix**: whatever `implLiteral` returns is a valid `String`. -/
+theorem implLiteral_ok (buf : Bytes) (off p : Nat) (m : UInt8) (b : Bytes) (o : Nat)
+    (h : implLiteral buf off p m = some (b, o)) : StringOk b := by
+  unfold implLiteral at h
   split at h
   · split at h
     · simp at h; obtain ⟨rfl, rfl⟩ := h; unfold StringOk; assumption
     · simp at h
   · simp at h
+
+/-- The fix changes nothing for payloads that are valid UTF-8: `implLiteral`
+is the RFC decoder there. -/
+theorem implLiteral_eq_spec_of_ok (buf : Bytes) (off p : Nat) (m : UInt8) (b : Bytes) (o : Nat)
+    (h : specLiteral buf off p m = some (b, o)) (hok : StringOk b) :
+    implLiteral buf off p m = some (b, o) := by
+  unfold implLiteral
+  rw [implOldLiteral_eq_spec, h]
+  simp only [StringOk] at hok
+  simp [hok]
 
 /-! ## 5. Encoder-stream dynamic name reference / Duplicate -/
 
