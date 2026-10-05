@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62831 lines) |
-| Theorems | 3294 |
-| Headline theorems in the axiom audit | 1092 |
+| Lean files | 298 (62842 lines) |
+| Theorems | 3295 |
+| Headline theorems in the axiom audit | 1093 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 98 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 99 of 138 |
 
 Six findings are rated high:
 
@@ -1657,7 +1657,7 @@ Files: `Quic/TransportParams.lean`, `Quic/PeerParams.lean`.
 
 **Model.**
 - `decode` / `decodeLoop` mirror `decode_transport_parameters` (`quic/transport_params.mojo:410-525`): the `varint(id) varint(len) value` loop, its truncation checks, the duplicate list and the per-id branches. `readVar` mirrors `_read_param_varint` (401-407).
-- `Fixes` switches on the QUIC-10 bound (initial_max_streams_* ≤ 2^60) and the QUIC-13 preferred_address layout check.
+- `Fixes` switches on the QUIC-10 bound (initial_max_streams_* ≤ 2^60, shipped) and the QUIC-13 preferred_address layout check; `Fixes.shipped` is what `transport_params.mojo` has now.
 - The spec `specDecode` is RFC 9000 §7.4 and §18: a TLV sequence with pairwise distinct ids, each value valid by §18.2, folded into the record.
 - `clientCheck` mirrors `_check_peer_cids` (`quic/client.mojo:641-669`); `serverCheckWith` is the server's check of the client's blob, run once the 1-RTT keys are installed (`quic/transport_params.mojo:531-608`, `quic/server.mojo:1354, 1377-1396`; fixed, QUIC-11; it used to read nothing). `clientSpec` and `serverSpec` are RFC 9000 §7.3 and §18.2, stated over the raw TLV list so that an absent parameter differs from a zero-length one.
 - `encode`, `params` and `wire` mirror `encode_transport_parameters` and its three emitters (`transport_params.mojo:237-395`), for any varint encoder `enc` with `VarintCodec enc` (the same hypothesis as the H3 frame round trips; L1 discharges it for flare's `encode_varint`).
@@ -3077,7 +3077,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-03 | Low | resolved | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
 | QUIC-04 | Medium | resolved | HANDSHAKE_DONE moves a closing or draining connection back to ESTABLISHED | `Flare/Bugs/QUIC_04.lean` | `repro/QUIC-04_handshake_done_reopens_closed_connection.mojo` (any) |
 | QUIC-09 | Low | resolved | the server accepts HANDSHAKE_DONE from the client | `Flare/Bugs/QUIC_09.lean` | `repro/QUIC-09_server_accepts_handshake_done.mojo` (any) |
-| QUIC-10 | Low | open | initial_max_streams_* above 2^60 accepted in transport parameters | `Flare/Bugs/QUIC_10.lean` | `repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo` (any) |
+| QUIC-10 | Low | resolved | initial_max_streams_* above 2^60 accepted in transport parameters | `Flare/Bugs/QUIC_10.lean` | `repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo` (any) |
 | QUIC-11 | Medium | resolved | the server never validates the client's transport parameters | `Flare/Bugs/QUIC_11.lean` | `repro/QUIC-11_server_ignores_client_transport_params.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-12 | Low | open | the client's CID authentication confuses absent with empty | `Flare/Bugs/QUIC_12.lean` | `repro/QUIC-12_client_cid_auth_absent_vs_empty.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QUIC-13 | Low | open | preferred_address is not validated | `Flare/Bugs/QUIC_13.lean` | `repro/QUIC-13_preferred_address_not_validated.mojo` (any) |
@@ -4351,11 +4351,13 @@ Status: resolved. A server now closes with PROTOCOL_VIOLATION on a received HAND
 
 #### QUIC-10: initial_max_streams_* above 2^60 accepted in transport parameters
 
+Status: resolved. decode_transport_parameters now rejects initial_max_streams_bidi / _uni above 2^60 (transport_params.mojo).
+
 - **Severity:** Low. Same bound as QUIC-02, on the transport-parameter path; the value reaches the stream-limit bookkeeping unchecked.
 - **RFC:** RFC 9000 §18.2 (initial_max_streams_bidi / _uni): a value greater than 2^60 MUST be treated as TRANSPORT_PARAMETER_ERROR.
 - **What goes wrong:** the 0x08 and 0x09 branches (`transport_params.mojo:482-489`) store the varint with no bound.
 - **Counterexample:** `Bugs.QUIC_10.impl_accepts`: `08 08 d0 00 00 00 00 00 00 01` decodes to initial_max_streams_bidi = 2^60 + 1, and `specDecode` rejects it.
-- **Fix:** raise when the value exceeds `1 << 60` in both branches. `decodeFixed_spec` shows the fixed decoder equals the spec.
+- **Fix:** raise when the value exceeds `1 << 60` in both branches. `shipped_rejects` (the shipped decoder) and `decodeFixed_spec` (with the QUIC-13 check too) show the fixed decoder equals the spec. The counterexample runs against `Fixes.none`, the decoder before the fix.
 - **Repro:** `formal/repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo`
 - **Observed:** `BUG REPRODUCED: transport parameter max_streams > 2^60 accepted: 0x8=1152921504606846977 0x9=1152921504606846977`
 - **Flip:** `OK: max_streams > 2^60 rejected`, exit 0.

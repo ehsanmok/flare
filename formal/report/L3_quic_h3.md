@@ -296,7 +296,7 @@ Files: `Quic/TransportParams.lean`, `Quic/PeerParams.lean`.
 
 **Model.**
 - `decode` / `decodeLoop` mirror `decode_transport_parameters` (`quic/transport_params.mojo:410-525`): the `varint(id) varint(len) value` loop, its truncation checks, the duplicate list and the per-id branches. `readVar` mirrors `_read_param_varint` (401-407).
-- `Fixes` switches on the QUIC-10 bound (initial_max_streams_* ≤ 2^60) and the QUIC-13 preferred_address layout check.
+- `Fixes` switches on the QUIC-10 bound (initial_max_streams_* ≤ 2^60, shipped) and the QUIC-13 preferred_address layout check; `Fixes.shipped` is what `transport_params.mojo` has now.
 - The spec `specDecode` is RFC 9000 §7.4 and §18: a TLV sequence with pairwise distinct ids, each value valid by §18.2, folded into the record.
 - `clientCheck` mirrors `_check_peer_cids` (`quic/client.mojo:641-669`); `serverCheckWith` is the server's check of the client's blob, run once the 1-RTT keys are installed (`quic/transport_params.mojo:531-608`, `quic/server.mojo:1354, 1377-1396`; fixed, QUIC-11; it used to read nothing). `clientSpec` and `serverSpec` are RFC 9000 §7.3 and §18.2, stated over the raw TLV list so that an absent parameter differs from a zero-length one.
 - `encode`, `params` and `wire` mirror `encode_transport_parameters` and its three emitters (`transport_params.mojo:237-395`), for any varint encoder `enc` with `VarintCodec enc` (the same hypothesis as the H3 frame round trips; L1 discharges it for flare's `encode_varint`).
@@ -388,11 +388,13 @@ Status: resolved. A server now closes with PROTOCOL_VIOLATION on a received HAND
 
 ### QUIC-10: initial_max_streams_* above 2^60 accepted in transport parameters
 
+Status: resolved. decode_transport_parameters now rejects initial_max_streams_bidi / _uni above 2^60 (transport_params.mojo).
+
 - **Severity:** Low. Same bound as QUIC-02, on the transport-parameter path; the value reaches the stream-limit bookkeeping unchecked.
 - **RFC:** RFC 9000 §18.2 (initial_max_streams_bidi / _uni): a value greater than 2^60 MUST be treated as TRANSPORT_PARAMETER_ERROR.
 - **What goes wrong:** the 0x08 and 0x09 branches (`transport_params.mojo:482-489`) store the varint with no bound.
 - **Counterexample:** `Bugs.QUIC_10.impl_accepts`: `08 08 d0 00 00 00 00 00 00 01` decodes to initial_max_streams_bidi = 2^60 + 1, and `specDecode` rejects it.
-- **Fix:** raise when the value exceeds `1 << 60` in both branches. `decodeFixed_spec` shows the fixed decoder equals the spec.
+- **Fix:** raise when the value exceeds `1 << 60` in both branches. `shipped_rejects` (the shipped decoder) and `decodeFixed_spec` (with the QUIC-13 check too) show the fixed decoder equals the spec. The counterexample runs against `Fixes.none`, the decoder before the fix.
 - **Repro:** `formal/repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo`
 - **Observed:** `BUG REPRODUCED: transport parameter max_streams > 2^60 accepted: 0x8=1152921504606846977 0x9=1152921504606846977`
 - **Flip:** `OK: max_streams > 2^60 rejected`, exit 0.

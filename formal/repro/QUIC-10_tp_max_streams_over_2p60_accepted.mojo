@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-10 fixed on fix/formal-findings
 """QUIC-10: initial_max_streams_bidi / _uni above 2^60 are accepted.
 
 Lean: Flare.Bugs.QUIC_10.impl_accepts (impl),
@@ -11,7 +12,7 @@ RFC 9000 §18.2 (initial_max_streams_bidi, initial_max_streams_uni): "This
 value cannot exceed 2^60 ... Receipt of a parameter that exceeds this limit
 MUST be treated as a connection error of type TRANSPORT_PARAMETER_ERROR."
 Expected: decoding `08 08 d0 00 00 00 00 00 00 01` (bidi = 2^60 + 1) and the
-same with id 09 raises. Actual: both decode.
+same with id 09 raises. Before the fix: both decode.
 
 Minimal fix: in the 0x08 and 0x09 branches raise when the value exceeds
 2^60.

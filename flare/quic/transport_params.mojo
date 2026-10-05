@@ -67,6 +67,9 @@ from .varint import (
 # ── Parameter id constants (RFC 9000 §18.2 master table) ──────────────────
 
 
+comptime _MAX_STREAMS_LIMIT: UInt64 = UInt64(1) << 60
+"""RFC 9000 §18.2: initial_max_streams_* cannot exceed 2^60."""
+
 comptime TP_ID_ORIGINAL_DCID: Int = 0x00
 comptime TP_ID_MAX_IDLE_TIMEOUT: Int = 0x01
 comptime TP_ID_STATELESS_RESET_TOKEN: Int = 0x02
@@ -480,13 +483,21 @@ def decode_transport_parameters(
                 _read_param_varint(value)
             )
         elif id == TP_ID_INITIAL_MAX_STREAMS_BIDI:
-            out.initial_max_streams_bidi = Optional[UInt64](
-                _read_param_varint(value)
-            )
+            var v = _read_param_varint(value)
+            if v > _MAX_STREAMS_LIMIT:
+                raise Error(
+                    "quic transport_params: initial_max_streams_bidi > 2^60"
+                    " (RFC 9000 §18.2)"
+                )
+            out.initial_max_streams_bidi = Optional[UInt64](v)
         elif id == TP_ID_INITIAL_MAX_STREAMS_UNI:
-            out.initial_max_streams_uni = Optional[UInt64](
-                _read_param_varint(value)
-            )
+            var v = _read_param_varint(value)
+            if v > _MAX_STREAMS_LIMIT:
+                raise Error(
+                    "quic transport_params: initial_max_streams_uni > 2^60"
+                    " (RFC 9000 §18.2)"
+                )
+            out.initial_max_streams_uni = Optional[UInt64](v)
         elif id == TP_ID_ACK_DELAY_EXPONENT:
             var v = _read_param_varint(value)
             if v > UInt64(20):

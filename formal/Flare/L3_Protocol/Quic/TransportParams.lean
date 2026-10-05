@@ -22,7 +22,8 @@ active_connection_id_limit ≥ 2, stateless_reset_token is 16 bytes,
 disable_active_migration is empty, preferred_address has its fixed layout
 with a 1..20-byte CID); the result is the fold of the parameters.
 
-`Fixes.none` is flare as written; `Fixes.all` adds the QUIC-10 check
+`Fixes.none` is flare as first audited; `Fixes.shipped` has the QUIC-10 check;
+`Fixes.all` adds the QUIC-10 check
 (initial_max_streams_* ≤ 2^60) and the QUIC-13 check (preferred_address
 layout).
 
@@ -59,7 +60,7 @@ structure Fixes where
 def Fixes.none : Fixes := ⟨false, false⟩
 def Fixes.all : Fixes := ⟨true, true⟩
 /-- The fixes present in `flare/quic/transport_params.mojo` now. -/
-def Fixes.shipped : Fixes := Fixes.none
+def Fixes.shipped : Fixes := ⟨true, false⟩
 
 /-- mirrors flare/quic/transport_params.mojo:70-87 @59bda50 -/
 inductive PK

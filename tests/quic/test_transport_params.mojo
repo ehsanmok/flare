@@ -205,6 +205,38 @@ def test_truncated_value_rejected() raises:
     assert_true(raised)
 
 
+def _streams_blob(id: UInt8, last: UInt8) -> List[UInt8]:
+    """``id`` with an 8-byte varint value 2^60 + ``last``."""
+    var b = List[UInt8]()
+    b.append(id)
+    b.append(0x08)
+    b.append(0xD0)
+    for _ in range(6):
+        b.append(0x00)
+    b.append(last)
+    return b^
+
+
+def test_initial_max_streams_above_2p60_rejected() raises:
+    """QUIC-10 (RFC 9000 sec 18.2): initial_max_streams_bidi / _uni above
+    2^60 is a TRANSPORT_PARAMETER_ERROR; 2^60 itself is allowed."""
+    for id in [UInt8(0x08), UInt8(0x09)]:
+        var over = _streams_blob(id, 0x01)
+        var raised = False
+        try:
+            _ = decode_transport_parameters(Span[UInt8, _](over))
+        except:
+            raised = True
+        assert_true(raised, "2^60 + 1 accepted for id " + String(Int(id)))
+        var at = _streams_blob(id, 0x00)
+        var tp = decode_transport_parameters(Span[UInt8, _](at))
+        var v = (
+            tp.initial_max_streams_bidi.value() if id
+            == 0x08 else tp.initial_max_streams_uni.value()
+        )
+        assert_equal(v, UInt64(1) << 60)
+
+
 def test_max_datagram_frame_size_roundtrip() raises:
     var params = empty_transport_parameters()
     params.max_datagram_frame_size = Optional[UInt64](UInt64(65535))
@@ -258,6 +290,7 @@ def test_derive_peer_send_limits_set() raises:
 
 def main() raises:
     test_round_trip_full_set()
+    test_initial_max_streams_above_2p60_rejected()
     test_max_datagram_frame_size_roundtrip()
     test_empty_params_roundtrip()
     test_disable_active_migration_zero_length()
@@ -270,4 +303,4 @@ def main() raises:
     test_truncated_value_rejected()
     test_derive_peer_send_limits_defaults()
     test_derive_peer_send_limits_set()
-    print("test_quic_transport_params: 13 passed")
+    print("test_quic_transport_params: 14 passed")

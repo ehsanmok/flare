@@ -112,6 +112,7 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.PeerParams.serverCheck_sound
 #print axioms Flare.Bugs.QUIC_10.impl_accepts
 #print axioms Flare.Bugs.QUIC_10.decodeFixed_spec
+#print axioms Flare.Bugs.QUIC_10.shipped_rejects
 #print axioms Flare.Bugs.QUIC_11.impl_accepts
 #print axioms Flare.Bugs.QUIC_11.serverCheck_spec
 #print axioms Flare.Bugs.QUIC_11.fixed_meets_spec
