@@ -1,8 +1,9 @@
 # PLATFORM: any
+# RESOLVED: H3-05 fixed on fix/formal-findings
 """H3-05: a second QPACK encoder/decoder stream and a client push stream
 are accepted.
 
-Lean: Flare.Bugs.H3_05.impl_accepts_second_encoder (impl),
+Lean: Flare.Bugs.H3_05.implOld_accepts_second_encoder (pre-fix),
       Flare.Bugs.H3_05.classifyFixed_spec (fix).
 flare/http3/server.mojo:1046-1068 @59bda50 (`_classify_uni_kind`).
 
@@ -10,7 +11,7 @@ RFC 9204 §4.2: "Receipt of a second instance of either stream type [encoder,
 decoder] MUST be treated as a connection error of type
 H3_STREAM_CREATION_ERROR." RFC 9114 §6.2.2: a server receiving a
 client-initiated push stream MUST treat it as H3_STREAM_CREATION_ERROR.
-Expected: feed_uni_stream_chunk raises in all three cases. Actual: the
+Expected: feed_uni_stream_chunk raises in all three cases. Before the fix: Actual: the
 encoder / decoder stream id is overwritten and the push stream is recorded
 and ignored; only a second control stream is rejected.
 

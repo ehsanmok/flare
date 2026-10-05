@@ -675,11 +675,12 @@ Status: resolved. `_apply_peer_settings` raises H3_SETTINGS_ERROR for identifier
   - RFC 9204 §4.2: a second instance of either stream type MUST be H3_STREAM_CREATION_ERROR.
   - RFC 9114 §6.2.2: a client-initiated push stream MUST be H3_STREAM_CREATION_ERROR.
 - **What goes wrong:** `_classify_uni_kind` (`server.mojo:1045-1068`) rejects only a second control stream.
-- **Counterexample:** `Bugs.H3_05.impl_accepts_second_encoder`, `impl_accepts_second_decoder`, `impl_accepts_push` and `trace_impl`. `spec_rejects` and `violates_spec` show the spec rejects these streams.
+- **Counterexample:** `Bugs.H3_05.implOld_accepts_second_encoder`, `implOld_accepts_second_decoder`, `implOld_accepts_push` and `trace_implOld`. `spec_rejects` and `implOld_violates_spec` show the spec rejects these streams.
 - **Fix:** raise on a push stream and on a second encoder or decoder stream. `classifyFixed_spec`, `fixed_unique` and `Control.runClassifyFixed_unique` show it suffices.
 - **Repro:** `formal/repro/H3-05_duplicate_qpack_and_client_push_streams.mojo`
 - **Observed:** `BUG REPRODUCED: uni streams accepted without H3_STREAM_CREATION_ERROR: second-encoder-stream second-decoder-stream client-push-stream`
 - **Flip:** `OK: duplicate QPACK streams and client push streams rejected`, exit 0.
+Status: resolved. `_classify_uni_kind` raises H3_STREAM_CREATION_ERROR for a client push stream and for a second QPACK encoder or decoder stream; the error reaches the connection close through `h3_error_code`. Tests: `tests/h3/test_h3_uni_streams.mojo::test_second_qpack_stream_of_either_type_is_refused`, `tests/h3/test_h3_uni_streams.mojo::test_client_push_stream_is_refused` (replaces `test_push_uni_stream_tolerated`, which encoded the bug). The repro prints `OK` (three runs).
 
 ### H3-06: bytes after the GOAWAY stream id are accepted
 
@@ -780,7 +781,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `H3.Control.applySettings` (`Fixes.shipped`) | http3/server.mojo:1338-1365 (fixed, H3-04) | `H3_04.trace_implOld`, `H3_04.trace_shipped`, `applySettingsFixed_eq_spec` | resolved (H3-04) |
 | `H3.Control.dispatchControl` (`Fixes.shipped`) | http3/server.mojo:1272-1337 (fixed, H3-03) | `H3_03.trace_implOld`, `H3_03.trace_shipped`, `dispatchControlFixed_eq_spec` | resolved (H3-03) |
 | `H3.Control.feedControlLoop` | http3/server.mojo:1071-1120 | `feedControlLoop_suffix`, `feedControl_le` | proved |
-| `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:975-1068 | `H3_05.trace_impl`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | counterexample |
+| `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:1152-1191 (fixed, H3-05) | `H3_05.trace_implOld`, `H3_05.trace_shipped`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | resolved (H3-05) |
 | `Quic.TransportParams.decode`, `apply`, `readVar` | quic/transport_params.mojo:401-525 | `decodeFixed_eq_spec`, `QUIC_10.impl_accepts`, `QUIC_13.impl_accepts` | counterexample (QUIC-10, QUIC-13) |
 | `Quic.TransportParams.encode`, `params`, `wire` | quic/transport_params.mojo:237-395 | `tlvs_wire`, `encode_roundtrip` | proved |
 | `Quic.PeerParams.clientCheck` | quic/client.mojo:641-669 | `QUIC_12.impl_accepts_*`, `clientCheckFixed_spec` | counterexample (QUIC-12) |

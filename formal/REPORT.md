@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61854 lines) |
-| Theorems | 3248 |
-| Headline theorems in the axiom audit | 1054 |
+| Lean files | 298 (61877 lines) |
+| Theorems | 3249 |
+| Headline theorems in the axiom audit | 1056 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 68 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 69 of 138 |
 
 Six findings are rated high:
 
@@ -2889,7 +2889,7 @@ advances the wheel to `now` at the top of every iteration
 | `H3.Control.applySettings` (`Fixes.shipped`) | http3/server.mojo:1338-1365 (fixed, H3-04) | `H3_04.trace_implOld`, `H3_04.trace_shipped`, `applySettingsFixed_eq_spec` | resolved (H3-04) |
 | `H3.Control.dispatchControl` (`Fixes.shipped`) | http3/server.mojo:1272-1337 (fixed, H3-03) | `H3_03.trace_implOld`, `H3_03.trace_shipped`, `dispatchControlFixed_eq_spec` | resolved (H3-03) |
 | `H3.Control.feedControlLoop` | http3/server.mojo:1071-1120 | `feedControlLoop_suffix`, `feedControl_le` | proved |
-| `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:975-1068 | `H3_05.trace_impl`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | counterexample |
+| `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:1152-1191 (fixed, H3-05) | `H3_05.trace_implOld`, `H3_05.trace_shipped`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | resolved (H3-05) |
 | `Quic.TransportParams.decode`, `apply`, `readVar` | quic/transport_params.mojo:401-525 | `decodeFixed_eq_spec`, `QUIC_10.impl_accepts`, `QUIC_13.impl_accepts` | counterexample (QUIC-10, QUIC-13) |
 | `Quic.TransportParams.encode`, `params`, `wire` | quic/transport_params.mojo:237-395 | `tlvs_wire`, `encode_roundtrip` | proved |
 | `Quic.PeerParams.clientCheck` | quic/client.mojo:641-669 | `QUIC_12.impl_accepts_*`, `clientCheckFixed_spec` | counterexample (QUIC-12) |
@@ -3089,7 +3089,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H3-02 | Low | resolved | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
 | H3-03 | Low | resolved | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
 | H3-04 | Low | resolved | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
-| H3-05 | Low | open | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
+| H3-05 | Low | resolved | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
 | H3-06 | Low | open | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
 | H3-07 | Medium | resolved | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | APP-01 | Low | open | 426 response says `Connection: close` but the connection stays open | `Flare/Bugs/APP_01.lean` | `repro/APP-01_ws426_keeps_connection_open.mojo` (any) |
@@ -4632,11 +4632,12 @@ Status: resolved. `_apply_peer_settings` raises H3_SETTINGS_ERROR for identifier
   - RFC 9204 §4.2: a second instance of either stream type MUST be H3_STREAM_CREATION_ERROR.
   - RFC 9114 §6.2.2: a client-initiated push stream MUST be H3_STREAM_CREATION_ERROR.
 - **What goes wrong:** `_classify_uni_kind` (`server.mojo:1045-1068`) rejects only a second control stream.
-- **Counterexample:** `Bugs.H3_05.impl_accepts_second_encoder`, `impl_accepts_second_decoder`, `impl_accepts_push` and `trace_impl`. `spec_rejects` and `violates_spec` show the spec rejects these streams.
+- **Counterexample:** `Bugs.H3_05.implOld_accepts_second_encoder`, `implOld_accepts_second_decoder`, `implOld_accepts_push` and `trace_implOld`. `spec_rejects` and `implOld_violates_spec` show the spec rejects these streams.
 - **Fix:** raise on a push stream and on a second encoder or decoder stream. `classifyFixed_spec`, `fixed_unique` and `Control.runClassifyFixed_unique` show it suffices.
 - **Repro:** `formal/repro/H3-05_duplicate_qpack_and_client_push_streams.mojo`
 - **Observed:** `BUG REPRODUCED: uni streams accepted without H3_STREAM_CREATION_ERROR: second-encoder-stream second-decoder-stream client-push-stream`
 - **Flip:** `OK: duplicate QPACK streams and client push streams rejected`, exit 0.
+Status: resolved. `_classify_uni_kind` raises H3_STREAM_CREATION_ERROR for a client push stream and for a second QPACK encoder or decoder stream; the error reaches the connection close through `h3_error_code`. Tests: `tests/h3/test_h3_uni_streams.mojo::test_second_qpack_stream_of_either_type_is_refused`, `tests/h3/test_h3_uni_streams.mojo::test_client_push_stream_is_refused` (replaces `test_push_uni_stream_tolerated`, which encoded the bug). The repro prints `OK` (three runs).
 
 #### H3-06: bytes after the GOAWAY stream id are accepted
 

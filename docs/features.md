@@ -461,6 +461,9 @@ v0.11 audit fixes; before them the server accepted what follows.
 - DATA, HEADERS, PUSH_PROMISE and the HTTP/2-reserved types on the
   peer's control stream are `H3_FRAME_UNEXPECTED` (RFC 9114 §7.2); CANCEL_PUSH,
   MAX_PUSH_ID and unknown types stay accepted.
+- A client-initiated push stream (type 0x01) and a second QPACK encoder
+  or decoder stream are `H3_STREAM_CREATION_ERROR` (RFC 9114 §6.2.2,
+  RFC 9204 §4.2), like a second control stream.
 - A request-stream frame other than HEADERS and DATA (an unknown or
   grease type) that declares more than `max_field_section_size` bytes
   (default 8192) is refused from its header with `H3_EXCESSIVE_LOAD`

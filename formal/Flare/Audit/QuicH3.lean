@@ -91,7 +91,9 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.H3_04.impl_rejects_reserved_setting
 #print axioms Flare.Bugs.H3_04.trace_shipped
 #print axioms Flare.Bugs.H3_04.applyFixed_spec
-#print axioms Flare.Bugs.H3_05.violates_spec
+#print axioms Flare.Bugs.H3_05.implOld_violates_spec
+#print axioms Flare.Bugs.H3_05.impl_rejects
+#print axioms Flare.Bugs.H3_05.trace_shipped
 #print axioms Flare.Bugs.H3_05.classifyFixed_spec
 
 -- QUIC transport parameters and peer-parameter checks

@@ -65,7 +65,7 @@ def Fixes.none : Fixes := ⟨false, false, false, false⟩
 def Fixes.all : Fixes := ⟨true, true, true, true⟩
 /-- flare as shipped: one field flips to `true` with each of H3-03 (frames),
 H3-04 (settings), H3-05 (streams) and H3-06 (goawayLen). -/
-def Fixes.shipped : Fixes := ⟨true, true, false, false⟩
+def Fixes.shipped : Fixes := ⟨true, true, true, false⟩
 
 /-! ## SETTINGS -/
 
@@ -293,8 +293,9 @@ structure UniState where
   dec : Option Nat := none
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo:1045-1068 @59bda50; `fx.streams` adds the
-H3-05 checks. -/
+/-- mirrors flare/http3/server.mojo:1152-1191 (fixed, H3-05); `fx.streams` is
+the H3-05 checks (absent at 59bda50, where only a second control stream
+raised). -/
 def classify (fx : Fixes) (u : UniState) (code sid : Nat) : Except H3Err (UniState × UKind) :=
   if code = 0x00 then
     if u.ctrl.isSome then .error .streamCreation

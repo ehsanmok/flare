@@ -1087,9 +1087,9 @@ struct Http3Connection(Copyable, Defaultable):
 
         * 0x00 (Control) -- parses SETTINGS first, then
           GOAWAY / MAX_PUSH_ID over the stream's lifetime.
-        * 0x01 (Push) -- the server records but ignores the
-          stream (push is deprecated as of RFC 9114 revision
-          9; the reactor STOP_SENDINGs at the QUIC layer).
+        * 0x01 (Push) -- refused: only a server opens push streams,
+          so a client's is ``H3_STREAM_CREATION_ERROR`` (RFC 9114
+          §6.2.2).
         * 0x02 (QPACK encoder) -- replayed into the connection
           dynamic table via
           :meth:`_feed_peer_qpack_encoder_stream`; each insert
@@ -1098,6 +1098,10 @@ struct Http3Connection(Copyable, Defaultable):
         * 0x03 (QPACK decoder) -- captured but unused (we emit
           only static-table field sections, so the peer never
           acknowledges dynamic inserts to us).
+
+        A second QPACK encoder or decoder stream is
+        ``H3_STREAM_CREATION_ERROR`` (RFC 9204 §4.2), like a second
+        control stream.
 
         The stream-type varint may span multiple chunks (it is
         at most 8 bytes per RFC 9000 §16). The driver buffers
@@ -1161,11 +1165,27 @@ struct Http3Connection(Copyable, Defaultable):
             self.peer_control_stream_id = stream_id
             return Http3StreamType.CONTROL
         if type_code == UInt64(Http3StreamType.PUSH):
-            return Http3StreamType.PUSH
+            # Only a server pushes (RFC 9114 sec 6.2.2): a client-initiated
+            # push stream is a connection error. It was recorded and its
+            # bytes dropped (H3-05).
+            raise Error(
+                "h3 server: client opened a push stream "
+                "(RFC 9114 6.2.2 H3_STREAM_CREATION_ERROR)"
+            )
         if type_code == UInt64(Http3StreamType.QPACK_ENCODER):
+            if self.peer_qpack_encoder_stream_id >= 0:
+                raise Error(
+                    "h3 server: peer opened a second QPACK encoder stream "
+                    "(RFC 9204 4.2 H3_STREAM_CREATION_ERROR)"
+                )
             self.peer_qpack_encoder_stream_id = stream_id
             return Http3StreamType.QPACK_ENCODER
         if type_code == UInt64(Http3StreamType.QPACK_DECODER):
+            if self.peer_qpack_decoder_stream_id >= 0:
+                raise Error(
+                    "h3 server: peer opened a second QPACK decoder stream "
+                    "(RFC 9204 4.2 H3_STREAM_CREATION_ERROR)"
+                )
             self.peer_qpack_decoder_stream_id = stream_id
             return Http3StreamType.QPACK_DECODER
         return -1

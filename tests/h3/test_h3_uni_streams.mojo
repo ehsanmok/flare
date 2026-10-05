@@ -63,6 +63,7 @@ from flare.http3 import (
 from flare.http3.server import (
     H3_FRAME_UNEXPECTED,
     H3_SETTINGS_ERROR,
+    H3_STREAM_CREATION_ERROR,
     h3_error_code,
 )
 from flare.quic.varint import decode_varint, encode_varint
@@ -164,18 +165,47 @@ def test_qpack_uni_stream_kinds_are_recorded() raises:
     assert_equal(c.peer_qpack_decoder_stream_id, 11)
 
 
-def test_push_uni_stream_tolerated() raises:
-    """Push is deprecated but the type code is reserved; the
-    driver records the kind without raising so the reactor can
-    STOP_SENDING."""
+def test_client_push_stream_is_refused() raises:
+    """H3-05: a push stream (type 0x01) opened by a client was recorded
+    and its bytes dropped. A server that receives one MUST treat it as a
+    connection error of type H3_STREAM_CREATION_ERROR (RFC 9114 sec
+    6.2.2). This test used to assert the stream was tolerated."""
     var c = Http3Connection()
     var push = List[UInt8]()
     push.append(UInt8(0x01))
     push.append(UInt8(0xAA))
     push.append(UInt8(0xBB))
-    c.feed_uni_stream_chunk(15, push^)
-    assert_true(15 in c.peer_uni_kinds)
-    assert_equal(c.peer_uni_kinds[15], Http3StreamType.PUSH)
+    var msg = _raises_with(c, 15, push^)
+    assert_true("H3_STREAM_CREATION_ERROR" in msg, "push stream accepted")
+    assert_equal(Int(h3_error_code(msg)), Int(H3_STREAM_CREATION_ERROR))
+    assert_false(15 in c.peer_uni_kinds)
+
+
+def test_second_qpack_stream_of_either_type_is_refused() raises:
+    """H3-05: a second QPACK encoder (or decoder) stream overwrote the
+    recorded stream id. RFC 9204 sec 4.2: it MUST be a connection error of
+    type H3_STREAM_CREATION_ERROR."""
+    var c = Http3Connection()
+    var enc = List[UInt8]()
+    enc.append(UInt8(0x02))
+    c.feed_uni_stream_chunk(2, enc.copy())
+    var msg = _raises_with(c, 6, enc.copy())
+    assert_true("H3_STREAM_CREATION_ERROR" in msg, "second encoder accepted")
+    assert_equal(Int(h3_error_code(msg)), Int(H3_STREAM_CREATION_ERROR))
+    assert_equal(c.peer_qpack_encoder_stream_id, 2)
+
+    var d = Http3Connection()
+    var dec = List[UInt8]()
+    dec.append(UInt8(0x03))
+    d.feed_uni_stream_chunk(2, dec.copy())
+    var dmsg = _raises_with(d, 6, dec.copy())
+    assert_true("H3_STREAM_CREATION_ERROR" in dmsg, "second decoder accepted")
+    assert_equal(d.peer_qpack_decoder_stream_id, 2)
+    # More data on the first stream is not a second stream.
+    var more = List[UInt8]()
+    more.append(UInt8(0x00))
+    d.feed_uni_stream_chunk(2, more^)
+    assert_equal(d.peer_qpack_decoder_stream_id, 2)
 
 
 def test_grease_uni_stream_codepoint_tolerated() raises:
@@ -515,7 +545,8 @@ def main() raises:
     test_peer_control_stream_settings_round_trip()
     test_uni_stream_type_varint_split_across_chunks()
     test_qpack_uni_stream_kinds_are_recorded()
-    test_push_uni_stream_tolerated()
+    test_client_push_stream_is_refused()
+    test_second_qpack_stream_of_either_type_is_refused()
     test_grease_uni_stream_codepoint_tolerated()
     test_settings_twice_is_frame_unexpected()
     test_non_settings_before_settings_is_missing_settings()
@@ -530,4 +561,4 @@ def main() raises:
     test_allowed_control_frames_are_still_accepted()
     test_http2_reserved_setting_identifiers_are_refused()
     test_unknown_and_known_setting_identifiers_are_still_accepted()
-    print("test_h3_uni_streams: 18 passed")
+    print("test_h3_uni_streams: 19 passed")

@@ -230,7 +230,10 @@ from test_h3_uni_streams import (
     test_qpack_uni_stream_kinds_are_recorded as test_h3_uni_streams__test_qpack_uni_stream_kinds_are_recorded,
 )
 from test_h3_uni_streams import (
-    test_push_uni_stream_tolerated as test_h3_uni_streams__test_push_uni_stream_tolerated,
+    test_client_push_stream_is_refused as test_h3_uni_streams__test_client_push_stream_is_refused,
+)
+from test_h3_uni_streams import (
+    test_second_qpack_stream_of_either_type_is_refused as test_h3_uni_streams__test_second_qpack_stream_of_either_type_is_refused,
 )
 from test_h3_uni_streams import (
     test_grease_uni_stream_codepoint_tolerated as test_h3_uni_streams__test_grease_uni_stream_codepoint_tolerated,
@@ -523,7 +526,10 @@ def main() raises:
         test_h3_uni_streams__test_uni_stream_type_varint_split_across_chunks
     ]()
     suite.test[test_h3_uni_streams__test_qpack_uni_stream_kinds_are_recorded]()
-    suite.test[test_h3_uni_streams__test_push_uni_stream_tolerated]()
+    suite.test[test_h3_uni_streams__test_client_push_stream_is_refused]()
+    suite.test[
+        test_h3_uni_streams__test_second_qpack_stream_of_either_type_is_refused
+    ]()
     suite.test[
         test_h3_uni_streams__test_grease_uni_stream_codepoint_tolerated
     ]()
