@@ -19,12 +19,13 @@ from std.testing import (
     assert_raises,
     TestSuite,
 )
-from std.ffi import external_call
+from std.ffi import c_int, external_call
 from std.memory import Layout, alloc
 from flare.tcp import TcpStream, TcpListener
 from flare.tcp.listener import _PeerDecoder, _adopt_accepted
 from flare.net import SocketAddr, IpAddr, NetworkError
 from flare.net.socket import AF_INET, SOCK_STREAM
+from flare.net._libc import _fcntl2
 
 
 # ── Test helpers ──────────────────────────────────────────────────────────────
@@ -452,7 +453,7 @@ struct _FixedDecoder(_PeerDecoder):
 
 def _fd_is_open(fd: Int32) -> Bool:
     # fcntl(fd, F_GETFD) is -1 (EBADF) for a closed descriptor.
-    return Int(external_call["fcntl", Int32](fd, Int32(1))) >= 0
+    return Int(_fcntl2(c_int(fd), c_int(1), c_int(0))) >= 0
 
 
 def _fresh_socket_fd() raises -> Int32:
