@@ -981,9 +981,12 @@ def _window_updates_on(bytes: List[UInt8], sid: Int) raises -> Int:
     return n
 
 
-def _bodiless_get(mut client: Http2ClientConnection) raises -> Int:
+def _bodiless_get(
+    mut client: Http2ClientConnection, answer: Bool = True
+) raises -> Int:
     """A GET with no body: the request ends with its HEADERS frame, so the
-    stream is half-closed (local); the response head is fed in."""
+    stream is half-closed (local). With ``answer`` the response head is fed
+    in too."""
     _ = client.drain()
     var sid = client.next_stream_id()
     var empty = List[UInt8]()
@@ -991,10 +994,13 @@ def _bodiless_get(mut client: Http2ClientConnection) raises -> Int:
         sid, "GET", "http", "example.com", "/", List[HpackHeader](), Span(empty)
     )
     _ = client.drain()
-    var head = List[UInt8]()
-    head.append(UInt8(0x88))  # :status 200
-    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x4), sid, head)))
-    _ = client.drain()
+    if answer:
+        var head = List[UInt8]()
+        head.append(UInt8(0x88))  # :status 200
+        client.feed(
+            Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x4), sid, head))
+        )
+        _ = client.drain()
     return sid
 
 
@@ -1031,6 +1037,40 @@ def test_stream_window_update_is_still_sent_while_the_stream_is_open() raises:
     assert_equal(_window_updates_on(out, 0), 1)
 
 
+def test_data_on_a_stream_the_server_reset_is_stream_closed() raises:
+    """H2-20: RFC 9113 sec 5.1. Any frame but PRIORITY after RST_STREAM is
+    STREAM_CLOSED. The "no response head yet" test ran first, so DATA on a
+    stream the server reset before answering drew PROTOCOL_ERROR."""
+    var client = Http2ClientConnection()
+    var sid = _bodiless_get(client, False)
+    var rst = List[UInt8]()
+    rst.append(UInt8(0))
+    rst.append(UInt8(0))
+    rst.append(UInt8(0))
+    rst.append(UInt8(8))  # CANCEL
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x3), UInt8(0x0), sid, rst)))
+    _ = client.drain()
+    assert_equal(
+        client.conn.streams[sid].copy().state.value,
+        StreamState.CLOSED().value,
+    )
+    var body = List[UInt8]()
+    body.append(UInt8(0x78))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x0), UInt8(0x0), sid, body)))
+    assert_equal(_goaway_code(client.drain()), 0x5)  # STREAM_CLOSED
+
+
+def test_data_before_the_response_head_is_still_a_protocol_error() raises:
+    """H2-20: on a live stream with no response head, DATA is still
+    PROTOCOL_ERROR (sec 8.1: a response starts with HEADERS)."""
+    var client = Http2ClientConnection()
+    var sid = _bodiless_get(client, False)
+    var body = List[UInt8]()
+    body.append(UInt8(0x78))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x0), UInt8(0x0), sid, body)))
+    assert_equal(_goaway_code(client.drain()), 0x1)  # PROTOCOL_ERROR
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -1059,4 +1099,6 @@ def main() raises:
     test_frame_at_the_advertised_size_is_not_refused()
     test_no_stream_window_update_for_the_data_that_closes_a_stream()
     test_stream_window_update_is_still_sent_while_the_stream_is_open()
-    print("test_h2_client_conn: 27 passed")
+    test_data_on_a_stream_the_server_reset_is_stream_closed()
+    test_data_before_the_response_head_is_still_a_protocol_error()
+    print("test_h2_client_conn: 29 passed")

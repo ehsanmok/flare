@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-20 fixed on fix/formal-findings
 """H2-20: DATA on a client stream the server has reset, before any
 response headers, draws GOAWAY(PROTOCOL_ERROR) instead of STREAM_CLOSED.
 
@@ -25,7 +26,7 @@ is allowed, sec 5.4.1, but the code stays STREAM_CLOSED.)
 Trace: client; SETTINGS; send_request(1, GET); the server sends
 RST_STREAM(1, CANCEL) and then DATA(1, "x").
 
-Expected: GOAWAY or RST_STREAM with STREAM_CLOSED (5). Actual:
+Expected: GOAWAY or RST_STREAM with STREAM_CLOSED (5). Before the fix:
 GOAWAY(PROTOCOL_ERROR = 1).
 
 Minimal fix: test for CLOSED / HALF_CLOSED_REMOTE before the

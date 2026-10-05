@@ -18,6 +18,8 @@ with a connection error (allowed, §5.4.1), but with the wrong code.
 
 Witness (the repro's): client; SETTINGS; request on stream 1 with
 END_STREAM; the server's RST_STREAM(1); DATA(1, 1 octet).
+
+Status: resolved. The closed / half-closed (remote) test now runs before the client's no-response-head test. `Fix.shipped` carries `h2_20`; `bug` and `counterexample` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_20
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -45,5 +47,10 @@ theorem fixed (fx : Fix) (hfx : fx.h2_20 = true) (c : Conn) (f : Fr) (s : Stream
   rw [if_neg hr, hg]
   simp only [hfx, Bool.true_and]
   rw [if_pos (by rcases hs with h | h <;> simp [h])]
+
+/-- Shipped (`Fix.shipped` has `h2_20`): DATA on the reset stream is
+STREAM_CLOSED. -/
+theorem fixed_shipped : lastOut Fix.shipped init tr = some [.goaway 0 eSTREAM_CLOSED] := by
+  native_decide
 
 end Flare.Bugs.H2_20

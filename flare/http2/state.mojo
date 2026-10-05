@@ -1470,16 +1470,19 @@ struct Connection(Copyable, Defaultable):
                     )
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
             var s = self.streams[sid].copy()
-            if self.is_client and not s.headers_complete:
-                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             var st = s.state.value
             if (
                 st == StreamState.CLOSED().value
                 or st == StreamState.HALF_CLOSED_REMOTE().value
             ):
                 # The peer already ended its half; more DATA is not
-                # allowed to arrive on it.
+                # allowed to arrive on it. Tested before the "no response
+                # head yet" case below: a stream the server reset before
+                # answering is closed, so its DATA is STREAM_CLOSED, not
+                # PROTOCOL_ERROR (RFC 9113 sec 5.1, H2-20).
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
+            if self.is_client and not s.headers_complete:
+                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             var body: List[UInt8]
             try:
                 body = self._strip_pad_and_priority(f, False)

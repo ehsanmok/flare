@@ -154,6 +154,7 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.H2_19.fixed_shipped
 #print axioms Flare.Bugs.H2_20.counterexample
 #print axioms Flare.Bugs.H2_20.fixed
+#print axioms Flare.Bugs.H2_20.fixed_shipped
 -- Departure witnesses of the shipped code from §5.1 (one per guard)
 #print axioms Flare.Bugs.H2_Refine.w02
 #print axioms Flare.Bugs.H2_Refine.w03

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63478 lines) |
-| Theorems | 3341 |
-| Headline theorems in the axiom audit | 1131 |
+| Lean files | 298 (63486 lines) |
+| Theorems | 3342 |
+| Headline theorems in the axiom audit | 1132 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 128 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 129 of 138 |
 
 Six findings are rated high:
 
@@ -3072,7 +3072,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-17 | Medium | resolved | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
 | H2-18 | Low | resolved | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
 | H2-19 | Low | resolved | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
-| H2-20 | Low | open | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
+| H2-20 | Low | resolved | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
 | HPACK-01 | Medium | resolved | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
 | HPACK-02 | Low | open | the decode budget never counts the last header | `Flare/Bugs/HPACK_02.lean` | `repro/HPACK-02_budget_skips_last_header.mojo` (any) |
 | HPACK-03 | Medium | resolved | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
@@ -4261,6 +4261,8 @@ Status: resolved. Fixed: the DATA branch of `Connection.handle_frame` (`state.mo
 - **Flip:** `OK: stream CLOSED and no frame sent on it`. `test_h2_client_conn` (11), `test_h2_streaming_state` (10), `test_h2_state` (23), `test_h2_server` (10), `test_h2_conn_handle` (3) and `test_h2_extended_connect` (5) passed.
 
 #### H2-20: DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED
+
+Status: resolved. Fixed: the DATA branch of `Connection.handle_frame` (`state.mojo`) tests CLOSED / HALF_CLOSED_REMOTE before the client's no-response-head test, so DATA on a stream the server reset is STREAM_CLOSED. Tests: `test_h2_client_conn.mojo::test_data_on_a_stream_the_server_reset_is_stream_closed`, `test_data_before_the_response_head_is_still_a_protocol_error`. Model: `Fix.shipped` carries `h2_20`; `Bugs.H2_20.fixed_shipped`; `bug` and `counterexample` stay about `Fix.none`.
 
 - **Severity:** Low. The connection is torn down either way (a connection error is allowed, §5.4.1), but with the wrong error code, which misleads diagnosis on both sides.
 - **RFC:** RFC 9113 §5.1, closed: a frame other than PRIORITY after a RST_STREAM is a stream error of type STREAM_CLOSED. The same holds for DATA on a half-closed (remote) stream.
