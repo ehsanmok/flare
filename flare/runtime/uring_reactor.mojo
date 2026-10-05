@@ -787,11 +787,9 @@ struct UringReactor(Movable):
                 ``max_events``).
             timeout_ms: Longest the blocking phase may wait. Negative
                 (the default) waits for ``min_complete`` completions
-                however long they take. Non-negative bounds the wait and
-                returns with whatever arrived (possibly nothing), so a
-                loop that blocks here can re-read its stop flag; a ring
-                with no wakeup channel needs this to be stoppable while
-                idle.
+                however long they take; non-negative bounds the wait and
+                returns whatever arrived, so a loop can re-read its stop
+                flag (a ring with no wakeup channel needs this).
         """
         out.clear()
         # Lazy-arm the wakeup read on first poll so the eventfd
@@ -813,10 +811,8 @@ struct UringReactor(Movable):
                 "UringReactor.poll: io_uring_enter(0) failed; rc=" + String(rc0)
             )
 
-        # Phase 1 emptied the SQ: if the arm above failed for lack of
-        # an SQE slot, retry now so phase 3 never blocks with no read
-        # on the eventfd (RT-03). The SQE is submitted by the next
-        # ``submit_and_wait`` (phase 3 when blocking, else next poll).
+        # Phase 1 emptied the SQ: retry a failed arm now so phase 3 never
+        # blocks with no read on the eventfd (RT-03).
         self._try_arm_wakeup()
 
         # Phase 2: drain everything ready into ``out``. No

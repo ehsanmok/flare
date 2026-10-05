@@ -46,11 +46,8 @@ from ._reactor import ConnHandle, StepResult, STATE_READING, STATE_WRITING
 from ._server_reactor_epoll import _conn_free_addr, _conn_ptr_from_int
 
 comptime URING_STOP_POLL_MS: Int = 100
-"""Longest an io_uring worker blocks before it re-reads the stop flag.
-
-The rings are built without a wakeup channel, so an idle loop would sit in
-``io_uring_enter`` until some completion arrived. This is the same cap the
-epoll/kqueue loops use (``_poll_timeout_ms``)."""
+"""Longest an io_uring worker blocks before it re-reads the stop flag (the
+rings have no wakeup channel; same cap as the epoll/kqueue loops)."""
 
 
 # ── io_uring server-loop dispatch ───────────────────────────────────────────
@@ -206,11 +203,9 @@ def run_uring_reactor_loop_static(
     while not load_stop_flag(stopping_addr):
         completions.clear()
         try:
-            # min_complete=1 -> block until at least one CQE arrives,
-            # but never longer than URING_STOP_POLL_MS: the ring has no
-            # wakeup channel, so an idle loop must come back on its own
-            # to re-read the stop flag (CONC-07). Closing the listener
-            # (HttpServer.close()) still wakes it earlier.
+            # min_complete=1, bounded by URING_STOP_POLL_MS so an idle loop
+            # re-reads the stop flag (CONC-07); closing the listener wakes
+            # it earlier.
             _ = ureactor.poll(1, completions, 64, URING_STOP_POLL_MS)
         except:
             break
@@ -857,7 +852,6 @@ def run_uring_bufring_reactor_loop_shared[
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
         completions.clear()
         try:
-            # Bounded so an idle worker re-reads the stop flag (CONC-07).
             _ = ureactor.poll(1, completions, 64, URING_STOP_POLL_MS)
         except:
             exit_status = WORKER_STATUS_CRASHED

@@ -49,6 +49,7 @@ References:
 from std.collections import List, Optional, Dict
 from std.memory import Pointer
 from std.collections.span import Span
+from ._state_helpers import expand_ack_ranges, frame_allowed_before_1rtt
 from .frame import (
     AckFrame,
     AckRange,
@@ -480,56 +481,6 @@ def apply_ack(mut conn: Connection, ack: AckFrame):
         conn.largest_acked_by_peer = ack.largest_acknowledged
 
 
-comptime _ACK_EXPAND_CAP: Int = 256
-"""Cap how many individual packet numbers one ACK is expanded into.
-Bounds the work an adversarial ACK with huge ranges can cause; our
-own flows ack a handful of packets per frame. A peer that
-genuinely acks more than 256 packets in one frame just gets the
-newest 256 retired here -- the rest retire on the next ACK."""
-
-
-def expand_ack_ranges(ack: AckFrame) -> List[UInt64]:
-    """Expand an ACK frame's ranges (RFC 9000 §19.3.1) into the
-    explicit list of acknowledged packet numbers, newest first,
-    capped at :data:`_ACK_EXPAND_CAP`.
-
-    The first range covers ``[largest - first_ack_range, largest]``;
-    each subsequent range starts ``gap + 2`` below the previous
-    range's smallest and spans ``length + 1`` packets.
-    """
-    var out = List[UInt64]()
-    var largest = ack.largest_acknowledged
-    # Implicit first range.
-    var first_len = ack.first_ack_range
-    var lo = largest - first_len if largest >= first_len else UInt64(0)
-    var pn = largest
-    while pn >= lo:
-        out.append(pn)
-        if len(out) >= _ACK_EXPAND_CAP or pn == UInt64(0):
-            return out^
-        pn -= UInt64(1)
-    var cur_lo = lo
-    for i in range(len(ack.ranges)):
-        var gap = ack.ranges[i].gap
-        var length = ack.ranges[i].length
-        # Next range's largest = cur_lo - gap - 2 (RFC 9000 §19.3.1).
-        var step = gap + UInt64(2)
-        if cur_lo < step:
-            break
-        var next_largest = cur_lo - step
-        var next_lo = (
-            next_largest - length if next_largest >= length else UInt64(0)
-        )
-        var p = next_largest
-        while p >= next_lo:
-            out.append(p)
-            if len(out) >= _ACK_EXPAND_CAP or p == UInt64(0):
-                return out^
-            p -= UInt64(1)
-        cur_lo = next_lo
-    return out^
-
-
 def apply_connection_close(
     mut conn: Connection,
     cc: ConnectionCloseFrame,
@@ -945,27 +896,6 @@ comptime QUIC_STREAM_LIMIT_ERROR: UInt64 = 0x04
 comptime QUIC_STREAM_STATE_ERROR: UInt64 = 0x05
 comptime LOCAL_ACTIVE_CONNECTION_ID_LIMIT: Int = 2
 """The ``active_connection_id_limit`` both flare endpoints advertise."""
-
-
-def frame_allowed_before_1rtt(buf: Span[UInt8, _]) -> Bool:
-    """Whether the frame at the start of ``buf`` may appear in an
-    Initial or Handshake packet (RFC 9000 sec 12.4, table 3).
-
-    Only PADDING, PING, ACK, CRYPTO and the transport CONNECTION_CLOSE
-    are permitted there. Every frame type flare knows fits in one varint
-    byte, so the first byte is the type.
-    """
-    if len(buf) == 0:
-        return True
-    var t = buf[0]
-    return (
-        t == 0x00  # PADDING
-        or t == 0x01  # PING
-        or t == 0x02  # ACK
-        or t == 0x03  # ACK with ECN counts
-        or t == 0x06  # CRYPTO
-        or t == 0x1C  # CONNECTION_CLOSE (transport)
-    )
 
 
 def dispatch_frames(
