@@ -25,6 +25,7 @@ from flare.http.request_view import RequestView
 from flare.http.server import ServerConfig
 from flare.http._server_reactor_impl import ConnHandle
 from flare.net import SocketAddr
+from flare.net._libc import _read_fd
 from flare.tcp import TcpListener, TcpStream
 from flare.utils import usleep
 
@@ -96,9 +97,16 @@ struct _Capture(Movable):
         var got = List[UInt8]()
         var tmp = List[UInt8](length=4096, fill=0)
         while True:
-            var n = external_call["read", Int](
-                self.read_fd, tmp.unsafe_ptr(), len(tmp)
-            )
+            # flare's read(2) shim: a second external_call["read", ...] with a
+            # different signature collides with the stdlib's when this file
+            # is compiled into a test aggregate.
+            var n = 0
+            try:
+                n = Int(
+                    _read_fd(self.read_fd, tmp.unsafe_ptr(), UInt(len(tmp)))
+                )
+            except:
+                break
             if n <= 0:
                 break
             for i in range(n):
