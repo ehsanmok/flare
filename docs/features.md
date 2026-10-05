@@ -112,7 +112,7 @@ because a front end could read the same bytes as a different request:
 | Response builders: `ok(body)`, `ok_json(body)`, `bad_request(msg)`, `not_found(msg)`, `internal_error(msg)`, `redirect(url)` | `flare.http.server` |
 | `Method` enum, `Status` enum, `Response` with header / body / status, `ResponsePool` for response object reuse | `flare.http.{request,response,response_pool}` |
 | `Request.peer` threaded from the accept path | `flare.http.request` |
-| `precompute_response(status, content_type, body) -> StaticResponse` — keep-alive + `Connection: close` wire forms both pre-encoded | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
+| `precompute_response(status, content_type, body) -> StaticResponse` — keep-alive + `Connection: close` wire forms both pre-encoded; a `HEAD` request is answered with the head only (no body) | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
 
 ## HTTP client
 

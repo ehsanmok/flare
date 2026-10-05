@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-04 fixed on fix/formal-findings
 """APP-04: the static fast path sends the body in reply to HEAD.
 
 Lean: Flare.Bugs.APP_04.static_head_emits_body (counterexample) and
@@ -13,7 +14,7 @@ header terminator).
 
 Expected: the bytes queued for ``HEAD / HTTP/1.1`` end at the blank
 line after the headers.
-Actual: ``on_readable_static`` never looks at the method and copies
+Before the fix: ``on_readable_static`` never looks at the method and copies
 the whole pre-encoded GET response, body included, with
 ``Connection: keep-alive``. A keep-alive client reads the body bytes as
 the start of the next response (response desynchronisation).

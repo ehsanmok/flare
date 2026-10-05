@@ -681,9 +681,9 @@ response to HEAD. RFC 9112 §6.3.
 never inspects the method. It queues the whole pre-encoded GET response
 with `Connection: keep-alive`.
 
-**Lean.** `Flare.Bugs.APP_04.static_head_emits_body`. The fix is proved
-sufficient by `staticFixed_head_no_body` (via
-`Flare.L4.ConnSM.Framing.staticBytesFixed_spec`).
+**Lean.** `Flare.Bugs.APP_04.static_head_emits_body` (about the pre-fix
+`staticBytesOld`). The shipped fix is proved to meet the spec by
+`staticFixed_head_no_body` (via `Flare.L4.ConnSM.Framing.staticBytes_spec`).
 
 **Fix.** For a request line starting with `HEAD `, queue only the bytes up to
 the first CRLFCRLF.
@@ -692,6 +692,8 @@ the first CRLFCRLF.
 
 - Observed: `BUG REPRODUCED: HEAD on the static path queued 13 body bytes after the headers; keep-alive= True`
 - Flip: `OK: HEAD on the static path queues the head only`
+
+Status: resolved. The static fast path now queues only the head (up to the first CRLFCRLF) of the pre-encoded bytes for a request line starting with `HEAD `. Test: `tests/http/test_server_reactor_state.mojo::test_static_head_queues_head_only`. The model `staticBytes` mirrors the fix; `staticBytesOld` is the pre-fix code.
 
 ### APP-05: an error response to HEAD carries a body
 
@@ -1377,7 +1379,7 @@ exit 0.
 | `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | conn_handle.mojo:846-856, 907-916, 579-695, 760-916 | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo` | proved; APP-01 |
 | `Flare.L4.ConnSM.onWritable`, `onTimeout`, `step`, `lts` | conn_handle.mojo:1262-1375, 1403-1411 | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
 | `Flare.L4.ConnSM.Framing.serialize` | http/_reactor/write_path.mojo:151-155, 222-235 | `serialize_spec` | proved |
-| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1211 | `headFlagFixed_spec`, `staticBytesFixed_spec` | APP-04, APP-05 |
+| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1220 | `headFlagFixed_spec`, `staticBytes_spec` | APP-04, APP-05 |
 | `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfter_single`, `computeCloseAfterFixed_eq_spec` | APP-03 |
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-484 | `wantsClose_sound_close`, `wantsCloseFixed_spec` | APP-02 |
 | `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:448-453, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapFixed_eq_spec` | proved; APP-06 |

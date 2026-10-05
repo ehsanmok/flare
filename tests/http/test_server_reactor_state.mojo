@@ -19,6 +19,7 @@ from flare.net import SocketAddr
 from flare.tcp import TcpStream, TcpListener
 from flare.http.request import Request
 from flare.http.response import Response
+from flare.http import precompute_response
 from flare.http.server import ServerConfig
 from flare.http._server_reactor_impl import (
     ConnHandle,
@@ -497,6 +498,64 @@ def test_step_result_defaults() raises:
     assert_false(sr.want_write)
     assert_false(sr.done)
     assert_equal(sr.idle_timeout_ms, -1)
+
+
+def _wait_readable(mut ch: ConnHandle, mut r: Reactor) raises:
+    """Block (bounded) until the conn's fd is readable, via the Reactor."""
+    var fd = ch.fd()
+    r.register(fd, UInt64(1), INTEREST_READ)
+    var events = List[Event]()
+    var waited = 0
+    var got = False
+    while waited < 2000 and not got:
+        events.clear()
+        _ = r.poll(50, events)
+        for i in range(len(events)):
+            if events[i].token == UInt64(1) and events[i].is_readable():
+                got = True
+        waited += 50
+    r.unregister(fd)
+
+
+def test_static_head_queues_head_only() raises:
+    """APP-04: a HEAD request on the static fast path queues only the
+    pre-encoded head (up to the first CRLFCRLF), keeps the connection
+    alive, and GET still queues the whole pre-encoded response."""
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = listener.local_addr().port
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server = listener.accept()
+    server._socket.set_nonblocking(True)
+    listener.close()
+    var ch = ConnHandle(server^)
+    var cfg = _default_config()
+    var resp = precompute_response(
+        status=200, content_type="text/plain", body="Hello, World!"
+    )
+    _ = client.write(
+        Span[UInt8](_bytes_of("HEAD / HTTP/1.1\r\nHost: a\r\n\r\n"))
+    )
+    _wait_readable(ch, r)
+    _ = ch.on_readable_static(resp, cfg)
+    assert_equal(ch.state, STATE_WRITING)
+    var wire = String(unsafe_from_utf8=Span[UInt8](ch.write_buf))
+    var hdr_end = wire.find("\r\n\r\n")
+    assert_true(hdr_end >= 0)
+    assert_equal(len(ch.write_buf), hdr_end + 4)
+    assert_true("Connection: keep-alive" in wire)
+    assert_false(ch.should_close)
+
+    # The connection stays usable: a following GET gets head + body.
+    _ = ch.on_writable(cfg)
+    assert_equal(ch.state, STATE_READING)
+    _ = client.write(
+        Span[UInt8](_bytes_of("GET / HTTP/1.1\r\nHost: a\r\n\r\n"))
+    )
+    _wait_readable(ch, r)
+    _ = ch.on_readable_static(resp, cfg)
+    assert_equal(len(ch.write_buf), len(resp.keepalive_bytes))
+    client.close()
 
 
 def test_response_includes_date_header_from_cache() raises:

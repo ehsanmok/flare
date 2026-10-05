@@ -104,11 +104,29 @@ def _put_bytes(
     return off + n
 
 
+def _head_length(buf: List[UInt8]) -> Int:
+    """Length of ``buf`` up to and including the first CRLFCRLF; the whole
+    buffer when there is no header terminator."""
+    var n = len(buf)
+    var i = 0
+    while i + 3 < n:
+        if (
+            buf[i] == 13
+            and buf[i + 1] == 10
+            and buf[i + 2] == 13
+            and buf[i + 3] == 10
+        ):
+            return i + 4
+        i += 1
+    return n
+
+
 def serialize_static_into(
     mut write_buf: List[UInt8],
     mut write_pos: Int,
     resp: StaticResponse,
     keep_alive: Bool,
+    head_request: Bool = False,
 ) -> None:
     """Queue a pre-encoded static response into ``write_buf``.
 
@@ -116,6 +134,11 @@ def serialize_static_into(
     pattern as :func:`serialize_response_into`) and pulls either
     the keep-alive or close variant of the pre-encoded bytes
     depending on ``keep_alive``.
+
+    When ``head_request`` is ``True`` (the request was ``HEAD``) only
+    the bytes up to and including the first ``CRLFCRLF`` are queued:
+    a response to HEAD MUST NOT carry content (RFC 9110 §9.3.2) and
+    ends at the header terminator (RFC 9112 §6.3).
     """
     write_buf.clear()
     write_pos = 0
@@ -129,8 +152,12 @@ def serialize_static_into(
     var n: Int
     if keep_alive:
         n = len(resp.keepalive_bytes)
+        if head_request:
+            n = _head_length(resp.keepalive_bytes)
     else:
         n = len(resp.close_bytes)
+        if head_request:
+            n = _head_length(resp.close_bytes)
     if write_buf.capacity() < n:
         write_buf.reserve(n)
     write_buf.resize(n, UInt8(0))

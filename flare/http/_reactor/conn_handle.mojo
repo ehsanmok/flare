@@ -1205,6 +1205,16 @@ struct ConnHandle(Movable):
         # over the header region only.
         var close_after = _wants_close(self.read_buf, self.headers_end)
         var final_close = self._apply_keepalive_policy(config, close_after)
+        # A response to HEAD carries no content (RFC 9110 §9.3.2), so
+        # queue only the head of the pre-encoded bytes (APP-04).
+        var is_head = (
+            len(self.read_buf) >= 5
+            and self.read_buf[0] == 72  # H
+            and self.read_buf[1] == 69  # E
+            and self.read_buf[2] == 65  # A
+            and self.read_buf[3] == 68  # D
+            and self.read_buf[4] == 32  # SP
+        )
 
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
             _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
@@ -1213,7 +1223,7 @@ struct ConnHandle(Movable):
         self.body_total = -1
         self.is_chunked = False
 
-        self._serialize_static(resp, not final_close)
+        self._serialize_static(resp, not final_close, is_head)
         return self._transition_to_writing()
 
     def _flush_write_buf_tls(mut self) raises -> Optional[StepResult]:
@@ -1587,10 +1597,15 @@ struct ConnHandle(Movable):
         self._serialize_response(resp^, False)
 
     def _serialize_static(
-        mut self, resp: StaticResponse, keep_alive: Bool
+        mut self,
+        resp: StaticResponse,
+        keep_alive: Bool,
+        head_request: Bool = False,
     ) -> None:
         """Queue a pre-encoded static response into ``write_buf``."""
-        serialize_static_into(self.write_buf, self.write_pos, resp, keep_alive)
+        serialize_static_into(
+            self.write_buf, self.write_pos, resp, keep_alive, head_request
+        )
         self.write_pos = 0
 
     def _serialize_response(mut self, resp: Response, keep_alive: Bool) -> None:

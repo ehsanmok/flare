@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61033 lines) |
+| Lean files | 298 (61040 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 22 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 23 of 138 |
 
 Six findings are rated high:
 
@@ -2889,7 +2889,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | conn_handle.mojo:846-856, 907-916, 579-695, 760-916 | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo` | proved; APP-01 |
 | `Flare.L4.ConnSM.onWritable`, `onTimeout`, `step`, `lts` | conn_handle.mojo:1262-1375, 1403-1411 | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
 | `Flare.L4.ConnSM.Framing.serialize` | http/_reactor/write_path.mojo:151-155, 222-235 | `serialize_spec` | proved |
-| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1211 | `headFlagFixed_spec`, `staticBytesFixed_spec` | APP-04, APP-05 |
+| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1220 | `headFlagFixed_spec`, `staticBytes_spec` | APP-04, APP-05 |
 | `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfter_single`, `computeCloseAfterFixed_eq_spec` | APP-03 |
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-484 | `wantsClose_sound_close`, `wantsCloseFixed_spec` | APP-02 |
 | `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:448-453, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapFixed_eq_spec` | proved; APP-06 |
@@ -3078,7 +3078,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-01 | Low | open | 426 response says `Connection: close` but the connection stays open | `Flare/Bugs/APP_01.lean` | `repro/APP-01_ws426_keeps_connection_open.mojo` (any) |
 | APP-02 | Low | open | `_wants_close` matches `connection:` mid-line and stops at the first hit | `Flare/Bugs/APP_02.lean` | `repro/APP-02_wants_close_substring_match.mojo` (any) |
 | APP-03 | Low | open | `close` inside a `Connection` token list is ignored | `Flare/Bugs/APP_03.lean` | `repro/APP-03_connection_close_token_list.mojo` (any) |
-| APP-04 | Medium | open | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
+| APP-04 | Medium | resolved | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
 | APP-05 | Low | open | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
 | APP-06 | Low | open | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
 | APP-10 | Low | open | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
@@ -4683,9 +4683,9 @@ response to HEAD. RFC 9112 §6.3.
 never inspects the method. It queues the whole pre-encoded GET response
 with `Connection: keep-alive`.
 
-**Lean.** `Flare.Bugs.APP_04.static_head_emits_body`. The fix is proved
-sufficient by `staticFixed_head_no_body` (via
-`Flare.L4.ConnSM.Framing.staticBytesFixed_spec`).
+**Lean.** `Flare.Bugs.APP_04.static_head_emits_body` (about the pre-fix
+`staticBytesOld`). The shipped fix is proved to meet the spec by
+`staticFixed_head_no_body` (via `Flare.L4.ConnSM.Framing.staticBytes_spec`).
 
 **Fix.** For a request line starting with `HEAD `, queue only the bytes up to
 the first CRLFCRLF.
@@ -4694,6 +4694,8 @@ the first CRLFCRLF.
 
 - Observed: `BUG REPRODUCED: HEAD on the static path queued 13 body bytes after the headers; keep-alive= True`
 - Flip: `OK: HEAD on the static path queues the head only`
+
+Status: resolved. The static fast path now queues only the head (up to the first CRLFCRLF) of the pre-encoded bytes for a request line starting with `HEAD `. Test: `tests/http/test_server_reactor_state.mojo::test_static_head_queues_head_only`. The model `staticBytes` mirrors the fix; `staticBytesOld` is the pre-fix code.
 
 #### APP-05: an error response to HEAD carries a body
 

@@ -919,26 +919,28 @@ theorem headFlagFixed_spec : HeadSpec headFlagFixed := by
   intro p status bodyLen declared lk hs
   exact (serialize_spec status bodyLen declared true lk hs).1 (Or.inl rfl)
 
-/-- The static fast path: `on_readable_static` copies the pre-encoded
-response (head ++ body) whatever the method.
-mirrors flare/http/_reactor/conn_handle.mojo:1174-1211 @59bda50 and
-flare/http/_reactor/write_path.mojo:107-148 @59bda50 -/
-def staticBytes (head body : Bytes) (_isHead : Bool) : Bytes := head ++ body
-
-/-- APP-04 fix: for HEAD queue only the head (bytes up to the first
-CRLFCRLF of the pre-encoded response). -/
-def staticBytesFixed (head body : Bytes) (isHead : Bool) : Bytes :=
+/-- The static fast path (fixed, APP-04): `on_readable_static` copies the
+pre-encoded response, but for HEAD only the head (bytes up to the first
+CRLFCRLF).
+mirrors flare/http/_reactor/conn_handle.mojo:1174-1220 (fixed, APP-04) and
+flare/http/_reactor/write_path.mojo:107-175 (fixed, APP-04) -/
+def staticBytes (head body : Bytes) (isHead : Bool) : Bytes :=
   if isHead then head else head ++ body
+
+/-- The pre-fix static path (APP-04): it copied head and body whatever the
+method. Kept so the counterexample in `Flare.Bugs.APP_04` stays checkable.
+mirrors flare/http/_reactor/conn_handle.mojo:1174-1211 @59bda50 -/
+def staticBytesOld (head body : Bytes) (_isHead : Bool) : Bytes := head ++ body
 
 /-- Spec: the bytes queued for HEAD are exactly the head. -/
 def StaticHeadSpec (f : Bytes → Bytes → Bool → Bytes) : Prop :=
   ∀ head body, f head body true = head
 
-theorem staticBytesFixed_spec : StaticHeadSpec staticBytesFixed := by
-  intro head body; simp [staticBytesFixed]
+theorem staticBytes_spec : StaticHeadSpec staticBytes := by
+  intro head body; simp [staticBytes]
 
-theorem staticBytesFixed_get (head body : Bytes) :
-    staticBytesFixed head body false = head ++ body := by simp [staticBytesFixed]
+theorem staticBytes_get (head body : Bytes) :
+    staticBytes head body false = head ++ body := by simp [staticBytes]
 
 end Framing
 

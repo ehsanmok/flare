@@ -40,6 +40,11 @@ HTTP/1.0 close semantics, ``Connection: close``, and the
 ``max_keepalive_requests`` cap are all still honoured — the only
 saving is that we don't re-build identical bytes per request.
 
+A ``HEAD`` request is answered with the pre-encoded head only (the
+bytes up to and including the first ``CRLFCRLF``): a response to HEAD
+carries no content (RFC 9110 §9.3.2), and queuing the body would let
+a keep-alive client read it as the start of the next response.
+
 The pre-encoded buffer is a plain ``List[UInt8]`` rather than an
 ``Array`` so the reactor can ``memcpy`` from it at the same cost
 as a ``stack_allocation`` source.
