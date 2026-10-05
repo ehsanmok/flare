@@ -17,8 +17,8 @@ chunk size bounded by `max_body`, so `Nat` is faithful as long as
 that bound is exhibited in `parseSize_wraps_unbounded`.
 
 The scanner is parameterised by a `Policy` so that the shipped behaviour
-(`implP`, which includes the H1-02 fix; `oldP` is the pre-fix scanner) and the
-minimal fix for H1-01 (`fixedP`, `fullFixP`) share every lemma.
+(`implP`, which includes the H1-01 and H1-02 fixes; `oldP` and `preSegP` are
+the pre-fix scanners kept for the counterexamples) share every lemma.
 -/
 namespace Flare.L3.H1.Chunked
 open Flare
@@ -113,9 +113,9 @@ def SRes.toInt : SRes → Int
 def CAP : Nat := 4096
 
 /-- `slack`: the incomplete-line test is `n - pos > CAP + slack`
-(shipped: 0). `capTrailer`: complete trailer lines are also capped
-(shipped: false). `rejectLF`: a chunk-size or trailer line whose content
-holds a bare LF is MALFORMED (shipped since H1-02: true). -/
+(shipped: 1, since H1-01). `capTrailer`: complete trailer lines are also
+capped (shipped: true, since H1-01). `rejectLF`: a chunk-size or trailer line
+whose content holds a bare LF is MALFORMED (shipped: true, since H1-02). -/
 structure Policy where
   slack : Nat
   capTrailer : Bool
@@ -124,14 +124,14 @@ structure Policy where
 /-- The scanner as it was at 59bda50, before the H1-02 fix. Kept only so that
 `Bugs.H1_02.counterexample` stays checkable. -/
 def oldP : Policy := ⟨0, false, false⟩
-/-- The shipped behaviour: a size or trailer line containing LF is MALFORMED
-(H1-02). -/
-def implP : Policy := ⟨0, false, true⟩
-/-- Minimal fix for H1-01 (segmentation-dependent line cap), without the
-H1-02 check. -/
-def fixedP : Policy := ⟨1, true, false⟩
-/-- The H1-01 fix on top of the shipped scanner. -/
-def fullFixP : Policy := ⟨1, true, true⟩
+/-- The scanner after the H1-02 fix and before the H1-01 fix (no slack, no
+trailer cap). Kept only so that `Bugs.H1_01.counterexample` stays checkable. -/
+def preSegP : Policy := ⟨0, false, true⟩
+/-- The shipped behaviour: one byte of slack in the incomplete-line tests and a
+cap on complete trailer lines (H1-01), and a size or trailer line containing LF
+is MALFORMED (H1-02).
+mirrors flare/http/proto/chunked.mojo:238-345 (fixed, H1-01) -/
+def implP : Policy := ⟨1, true, true⟩
 
 theorem findCRLF_lt : ∀ {l : Bytes} {k : Nat}, findCRLF l = some k → k + 2 ≤ l.length
   | [], _, h => by simp [findCRLF] at h
@@ -199,10 +199,10 @@ def scanEnd (P : Policy) (buf : Bytes) (start maxBody : Nat) : SRes :=
 
 /-- The shipped scanner. -/
 abbrev scanImpl := scanEnd implP
-/-- The minimal fix for H1-01. -/
-abbrev scanFixed := scanEnd fixedP
 /-- The scanner before the H1-02 fix. -/
 abbrev scanOld := scanEnd oldP
+/-- The scanner before the H1-01 fix. -/
+abbrev scanPreSeg := scanEnd preSegP
 
 /-! ## Decoder -/
 

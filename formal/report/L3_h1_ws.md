@@ -34,7 +34,7 @@ Files: `H1/Chunked.lean`, `H1/ChunkedSpec.lean`.
 - `scanL`/`scanTr`/`scanResume`/`scanEnd` mirror `scan_chunked_resume`/`scan_chunked_end` (`chunked.mojo:183-303`), including the 4096-byte line cap `CAP` and the resume cursor.
 - `poll` mirrors the reactor's loop: rescan from the saved cursor after each read.
 - `decodeBody` mirrors `decode_chunked` (`chunked.mojo:306-360`).
-- A `Policy` parameterises the three places the fixes change: the slack in the incomplete-line test, the cap on complete trailer lines, and rejection of LF inside a line. `oldP` is the scanner as it was at 59bda50, `implP` is the shipped code (it includes the H1-02 fix); `fixedP` and `fullFixP` are the H1-01 fix without and with the H1-02 check.
+- A `Policy` parameterises the three places the fixes change (the shipped scanner is `implP`; `oldP` and `preSegP` are the pre-H1-02 and pre-H1-01 scanners kept for the counterexamples): the slack in the incomplete-line test, the cap on complete trailer lines, and rejection of LF inside a line. `oldP` is the scanner as it was at 59bda50, `implP` is the shipped code (it includes the H1-02 fix); `fixedP` and `fullFixP` are the H1-01 fix without and with the H1-02 check.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -45,7 +45,7 @@ Files: `H1/Chunked.lean`, `H1/ChunkedSpec.lean`.
 | `scanL_resume`, `scanResume_resume` | Resuming from the saved cursor on `b ++ m` gives the same result as rescanning `b ++ m` from the original cursor. | proved |
 | `scanEnd_done_stable`, `scanEnd_malformed_stable`, `impl_done_stable` | A `done` verdict is never revoked by more bytes (any policy). A `malformed` one is never revoked if the policy has slack ≥ 1 and caps complete trailer lines. | proved |
 | `scanEnd_segmentation_independent` | With slack ≥ 1 and capped trailers, a definite verdict on a prefix equals the verdict on every extension. | proved |
-| `poll_eq_oneShot`, `fixed_poll_eq_oneShot`, `fullFix_poll_eq_oneShot` | Under the same conditions, polling any segmentation equals one scan of the concatenation. | proved (fixed policies only; the shipped policy fails, H1-01) |
+| `poll_eq_oneShot`, `impl_poll_eq_oneShot` | Under the same conditions, polling any segmentation equals one scan of the concatenation. The shipped `implP` meets them (slack 1, capped trailers). | proved (the pre-fix `preSegP` fails, H1-01) |
 | `decL_of_scanL`, `scanEnd_decode` | Termination and agreement: if the scanner accepts at `e`, `decode_chunked` succeeds on the same buffer, consumes exactly to `e` and produces at most `max_body` bytes. | proved |
 | `scanEnd_lfSafe`, `impl_agrees_lfTolerant` | If the policy rejects LF inside lines, an accepting scan agrees with an LF-tolerant recipient (`lfScan`) on both the body and its end. The shipped `implP` rejects it. | proved (the pre-fix `oldP` fails, H1-02) |
 
@@ -176,7 +176,7 @@ File: `H1/ChunkedEncode.lean`.
 |---|---|---|
 | `hexAcc_hexLower` | The hex writer and every hex reader are inverse. | proved |
 | `decL_roundtrip`, `decodeBody_roundtrip` | For any chunks (empty ones included), trailers whose lines hold no CR, and any following bytes, the server decoder returns `cs.flatten` and stops exactly at the end of the encoding. | proved |
-| `scan_roundtrip` | The shipped scanner accepts the encoding at its end, when every chunk is < 2^60 bytes and the total ≤ `max_body`. | proved |
+| `scan_roundtrip` | The shipped scanner accepts the encoding at its end, when every chunk is < 2^60 bytes, every trailer line fits `CHUNK_LINE_MAX` (`TrailersCapped`) and the total ≤ `max_body`. | proved |
 | `cDec_roundtrip` | The client decoder returns `cs.flatten` when the trailers pass its own checks (`ClientTrailersOK`). | proved |
 | `upload_roundtrip` | The client upload encoding decodes to the uploaded bytes. | proved |
 
@@ -219,7 +219,7 @@ File: `Ws/Close.lean`.
 - **Handshake fields are modelled after the line split.** The three handshake loops split lines (dropping CR, ending at LF) and then split each line at its first colon and strip both halves; the model starts from those pairs. The client's own response-head splitting is modelled separately (`ClientResponse.splitGo`).
 - **The 101 status check** in `ClientOK` is flare's prefix test `HTTP/1.1 101`. A `HTTP/1.1 1010` status line is the H1-08 class and is not filed again.
 - **Encoder trailers.** The encoder does not filter forbidden trailer names; trailers are chosen by the application, and flare's own client refuses them. `cDec_roundtrip` therefore assumes `ClientTrailersOK`, and every round trip assumes trailer lines without CR or LF (which `HeaderMap` guarantees).
-- **`scan_roundtrip`** assumes chunks below 2^60 bytes, because the scanner caps size lines at 16 hex digits (deliberate, see "Checked").
+- **`scan_roundtrip`** assumes chunks below 2^60 bytes, because the scanner caps size lines at 16 hex digits (deliberate, see "Checked"), and trailer lines of at most `CHUNK_LINE_MAX` bytes (the H1-01 cap).
 - **The close model** works at the level of the application API: frames are values, and their encoding is covered by `Ws/Frame.lean`. The peer is arbitrary, since `CloseOK` quantifies over every trace.
 - **permessage-deflate is not modelled because flare does not implement it.** No handshake sends or accepts `Sec-WebSocket-Extensions`, and RSV1 is always refused, so there is no code to model.
 - **WebSocket length bound.** `decode_encode` assumes payloads below 2^32. Larger payloads exceed any sane `max_payload`.
@@ -229,6 +229,8 @@ File: `Ws/Close.lean`.
 
 ### H1-01: the chunk-line cap gives a verdict that depends on TCP segmentation
 
+Status: resolved. Both incomplete-line tests (size line and trailer line) now allow one byte of slack for a pending CR, and complete trailer lines are capped at `CHUNK_LINE_MAX`, so polling any segmentation gives the one-shot verdict. The counterexamples are about `preSegP` (the scanner before the fix); `Bugs.H1_01.fixed_segmentation_independent` is about the shipped `implP`.
+
 - **Severity:** Low. A legal request is answered with 400 or accepted depending on how TCP splits it, so behaviour is not deterministic. Separately, a complete trailer line is never capped while a partial one is. No framing desync results, because both outcomes either reject or agree with the decoder.
 - **Spec:**
   - The reactor polls `scan_chunked_resume` after every read (`conn_handle.mojo:655-678`), so its verdict must equal a one-shot scan of the same bytes.
@@ -237,10 +239,10 @@ File: `Ws/Close.lean`.
   - The complete-line test (`chunked.mojo:246-251`) is `line_end - pos > 4096`.
   - The incomplete-line test is `n - pos > 4096`, which also counts the pending CR. A size line of exactly 4096 bytes, cut after its CR, is therefore MALFORMED, while the same bytes in one read are accepted.
   - Trailer lines (270-290) have the opposite problem: a complete line has no cap at all.
-- **Counterexample:** `Bugs.H1_01.counterexample` (`¬ SegIndep implP`).
+- **Counterexample:** `Bugs.H1_01.counterexample` (`¬ SegIndep preSegP`, about the scanner before the fix).
   - `counterexample_size_line`: polling `body1` cut at byte 4097 gives `malformed`, while a one-shot scan gives `done 4106`.
   - `counterexample_trailer`: the same with a 5000-byte trailer line gives `malformed` against `done 5007`.
-- **Fix:** allow one byte of slack in both incomplete-line tests, and cap complete trailer lines. `Bugs.H1_01.fixed_segmentation_independent` (from `fixed_poll_eq_oneShot`) proves that polling any segmentation then equals a one-shot scan.
+- **Fix:** allow one byte of slack in both incomplete-line tests, and cap complete trailer lines. `Bugs.H1_01.fixed_segmentation_independent` (= `impl_poll_eq_oneShot`, `SegIndep implP`) proves that polling any segmentation of the shipped scanner's input equals a one-shot scan.
 - **Repro:** `formal/repro/H1-01_chunk_line_cap_segmentation.mojo`
 - **Observed:** `BUG REPRODUCED: chunked verdict depends on segmentation (size line one-shot=4106 split=-2; trailer one-shot=5007 split=-2)`
 - **Flip:** `OK: chunked verdict is segmentation independent`; `flare/http/proto/chunked.mojo` restored.

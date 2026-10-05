@@ -206,9 +206,11 @@ def _hex_val(b: UInt8) -> Int:
 
 
 comptime CHUNK_LINE_MAX: Int = 4096
-"""Longest chunk-size line (size plus extensions) accepted. Without a
-cap, a peer can send extension bytes that never reach CRLF and keep a
-request incomplete for as long as the connection lives."""
+"""Longest chunk-size line (size plus extensions) or trailer line
+accepted. Without a cap, a peer can send extension bytes that never
+reach CRLF and keep a request incomplete for as long as the connection
+lives. The cap is on the line's content, CRLF excluded, and applies the
+same whether the line arrives whole or in pieces."""
 
 
 @always_inline
@@ -285,7 +287,11 @@ def scan_chunked_resume(
                 break
             i += 1
         if line_end < 0:
-            if n - pos > CHUNK_LINE_MAX:
+            # One byte of slack for a CR that may be the first half of
+            # the CRLF: a line of exactly CHUNK_LINE_MAX bytes cut after
+            # its CR is not over the cap (the complete-line test below
+            # accepts it), so the verdict cannot depend on the cut.
+            if n - pos > CHUNK_LINE_MAX + 1:
                 return CHUNKED_MALFORMED
             return CHUNKED_INCOMPLETE
         if line_end - pos > CHUNK_LINE_MAX:
@@ -327,9 +333,11 @@ def scan_chunked_resume(
                         break
                     k += 1
                 if found < 0:
-                    if n - t > CHUNK_LINE_MAX:
+                    if n - t > CHUNK_LINE_MAX + 1:
                         return CHUNKED_MALFORMED
                     return CHUNKED_INCOMPLETE
+                if found - t > CHUNK_LINE_MAX:
+                    return CHUNKED_MALFORMED
                 if _has_lf(buf, t, found):
                     return CHUNKED_MALFORMED
                 t = found + 2

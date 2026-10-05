@@ -1,9 +1,11 @@
 # PLATFORM: any
+# RESOLVED: H1-01 fixed on fix/formal-findings
 """H1-01: the chunk-line cap gives a different verdict depending on how the
 bytes were segmented.
 
 Lean: Flare.Bugs.H1_01.counterexample_size_line,
-Flare.Bugs.H1_01.counterexample_trailer (counterexamples) and
+Flare.Bugs.H1_01.counterexample_trailer (counterexamples about the pre-fix
+scanner preSegP) and
 Flare.Bugs.H1_01.fixed_segmentation_independent (fix meets spec).
 flare/http/proto/chunked.mojo:246-251 and 270-290 @59bda50.
 
@@ -16,7 +18,7 @@ must equal a one-shot scan of all the bytes.
 Expected: a chunk-size line of exactly CHUNK_LINE_MAX (4096) content bytes
 is accepted (the complete-line test is ``line_end - pos > 4096``), so the
 prefix ending in its CR must be INCOMPLETE.
-Actual: the incomplete-line test ``n - pos > 4096`` counts the CR, so the
+Before the fix: Actual: the incomplete-line test ``n - pos > 4096`` counts the CR, so the
 prefix "<4096 bytes>\\r" is MALFORMED (400) while the same bytes delivered
 in one read are accepted. Trailer lines have the converse problem: a
 complete trailer line has no cap at all, a partial one is capped.

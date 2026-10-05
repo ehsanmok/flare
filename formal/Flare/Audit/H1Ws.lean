@@ -14,8 +14,7 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.H1.Chunked.scanResume_resume
 #print axioms Flare.L3.H1.Chunked.scanEnd_segmentation_independent
 #print axioms Flare.L3.H1.Chunked.poll_eq_oneShot
-#print axioms Flare.L3.H1.Chunked.fixed_poll_eq_oneShot
-#print axioms Flare.L3.H1.Chunked.fullFix_poll_eq_oneShot
+#print axioms Flare.L3.H1.Chunked.impl_poll_eq_oneShot
 #print axioms Flare.L3.H1.Chunked.impl_done_stable
 #print axioms Flare.L3.H1.Chunked.scanEnd_lfSafe
 #print axioms Flare.L3.H1.Chunked.impl_agrees_lfTolerant

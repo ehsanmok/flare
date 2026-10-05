@@ -612,6 +612,12 @@ response ends before its last chunk and the empty line after the
 trailers, on TCP and on TLS. It used to return the bytes read so far as
 the whole body.
 
+An inbound chunked request now gets the same verdict however TCP splits
+it. A chunk-size line of exactly `CHUNK_LINE_MAX` (4096) bytes is accepted
+whether or not the first read ends after its CR, and a complete trailer
+line over 4096 bytes is refused with 400 like a partial one (it used to
+pass when it arrived whole).
+
 Breaking: the streaming download (`get_streaming` over HTTPS) now applies
 the same close_notify rule to a close-delimited body: if the server resets
 the connection without `close_notify`, the read raises `NetworkError`

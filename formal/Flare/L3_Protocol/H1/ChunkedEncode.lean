@@ -300,7 +300,7 @@ theorem SRes.shift_shift (r : SRes) (a b : Nat) : (r.shift a).shift b = r.shift 
   cases r <;> simp [SRes.shift]; omega
 
 theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L) (h10 : 10 ∉ L)
-    (h2 : 2 ≤ L.length) :
+    (h2 : 2 ≤ L.length) (hcap : L.length ≤ CAP) :
     scanTr P (L ++ 13 :: 10 :: X) = (scanTr P X).shift (L.length + 2) := by
   subst hP
   obtain ⟨a, b, t, rfl⟩ : ∃ a b t, L = a :: b :: t := by
@@ -314,15 +314,22 @@ theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L)
   · simp_all
   · rename_i k2 hk2; rw [hk] at hk2; cases hk2
     simp [implP, CAP, List.take_left' rfl, h10]
+    intro h
+    simp only [List.length_cons, CAP] at hcap
+    omega
 
-theorem scanTr_trailers : ∀ (tr : List (Bytes × Bytes)) (X : Bytes), TrailersOK tr →
+/-- Every trailer line fits the scanner's line cap (`CHUNK_LINE_MAX`, H1-01). -/
+def TrailersCapped (tr : List (Bytes × Bytes)) : Prop := ∀ kv ∈ tr, (trailerLine kv).length ≤ CAP
+
+theorem scanTr_trailers : ∀ (tr : List (Bytes × Bytes)) (X : Bytes), TrailersOK tr → TrailersCapped tr →
     scanTr implP (encTrailers tr ++ 13 :: 10 :: X) = .done ((encTrailers tr).length + 2)
-  | [], X, _ => by simp [encTrailers]; rw [scanTr, if_pos ⟨rfl, rfl⟩]
-  | kv :: tr, X, h => by
+  | [], X, _, _ => by simp [encTrailers]; rw [scanTr, if_pos ⟨rfl, rfl⟩]
+  | kv :: tr, X, h, hc => by
     have e : encTrailers (kv :: tr) ++ 13 :: 10 :: X = trailerLine kv ++ 13 :: 10 :: (encTrailers tr ++ 13 :: 10 :: X) := by
       simp [encTrailers]
-    rw [e, scanTr_line implP rfl _ _ (h kv (by simp)).1 (h kv (by simp)).2 (trailerLine_len kv),
-      scanTr_trailers tr X (fun x hx => h x (by simp [hx]))]
+    rw [e, scanTr_line implP rfl _ _ (h kv (by simp)).1 (h kv (by simp)).2 (trailerLine_len kv)
+        (hc kv (by simp)),
+      scanTr_trailers tr X (fun x hx => h x (by simp [hx])) (fun x hx => hc x (by simp [hx]))]
     simp [SRes.shift, encTrailers]; omega
 
 theorem scan_chunk (mb tot : Nat) (c R : Bytes) (hc : c ≠ []) (hsz : c.length < 2 ^ 60) (hmb : tot + c.length ≤ mb) :
@@ -383,14 +390,15 @@ theorem scan_zero (mb tot : Nat) (Y : Bytes) :
 
 /-- **The shipped scanner accepts every encoding**, ending exactly at its
 last byte, when the decoded total fits `max_body` and each chunk is below
-`2^60` bytes. -/
+`2^60` bytes and each trailer line fits `CHUNK_LINE_MAX` (`TrailersCapped`). -/
 theorem scan_roundtrip (mb : Nat) (cs : List Bytes) (tr : List (Bytes × Bytes)) (rest : Bytes)
-    (hs : ∀ c ∈ cs, c.length < 2 ^ 60) (htr : TrailersOK tr) (hmb : cs.flatten.length ≤ mb) :
+    (hs : ∀ c ∈ cs, c.length < 2 ^ 60) (htr : TrailersOK tr) (htc : TrailersCapped tr)
+    (hmb : cs.flatten.length ≤ mb) :
     scanImpl (encodeBody cs tr ++ rest) 0 mb = .done (encodeBody cs tr).length := by
   simp only [scanEnd, scanResume, List.drop_zero, SRes.shift_zero, encodeBody, List.append_assoc, List.cons_append]
   rw [scan_encChunks mb cs _ 0 hs (by omega), scan_zero]
   simp only [List.nil_append]
-  rw [scanTr_trailers tr rest htr]
+  rw [scanTr_trailers tr rest htr htc]
   simp [SRes.shift]; omega
 
 /-! ## The client decoder `_decode_chunked` -/

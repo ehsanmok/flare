@@ -13,8 +13,12 @@ import Flare.L3_Protocol.H1.ChunkedSpec
   counts the pending CR, so a 4096-byte chunk line cut after its CR is
   MALFORMED, while the same bytes in one read are accepted. A complete
   trailer line has no cap, a partial one is capped at 4096.
-* Fix (`fixedP`): one byte of slack in both incomplete tests and a cap on
-  complete trailer lines.
+* Fix (`implP`, the shipped scanner): one byte of slack in both incomplete
+  tests and a cap on complete trailer lines.
+
+Status: resolved. The counterexamples are about the pre-fix scanner
+`preSegP`; `fixed_segmentation_independent` and `fixed_accepts_size_line`
+are about the shipped `implP`.
 -/
 namespace Flare.Bugs.H1_01
 open Flare Flare.L3.H1.Chunked
@@ -36,29 +40,29 @@ def mb : Nat := 2 ^ 20
 
 /-- Cut after the CR of the size line: MALFORMED; one read: accepted at 4106. -/
 theorem counterexample_size_line :
-    poll implP mb (body1.take 4097) 0 0 [body1.drop 4097] = .malformed ∧
-    scanImpl body1 0 mb = .done 4106 := by native_decide
+    poll preSegP mb (body1.take 4097) 0 0 [body1.drop 4097] = .malformed ∧
+    scanPreSeg body1 0 mb = .done 4106 := by native_decide
 
 /-- Trailer line cut at 4503 bytes: MALFORMED; one read: accepted at 5007. -/
 theorem counterexample_trailer :
-    poll implP mb (body2.take 4503) 0 0 [body2.drop 4503] = .malformed ∧
-    scanImpl body2 0 mb = .done 5007 := by native_decide
+    poll preSegP mb (body2.take 4503) 0 0 [body2.drop 4503] = .malformed ∧
+    scanPreSeg body2 0 mb = .done 5007 := by native_decide
 
-theorem counterexample : ¬ SegIndep implP := by
+theorem counterexample : ¬ SegIndep preSegP := by
   intro h
   have := h mb 0 (body1.take 4097) [body1.drop 4097]
   rw [counterexample_size_line.1] at this
   simp only [List.flatten_cons, List.flatten_nil, List.append_nil, List.take_append_drop] at this
-  have h2 : scanEnd implP body1 0 mb = .done 4106 := counterexample_size_line.2
+  have h2 : scanEnd preSegP body1 0 mb = .done 4106 := counterexample_size_line.2
   rw [h2] at this
   exact SRes.noConfusion this
 
 /-- The fix meets the spec for every buffer, split and `max_body`. -/
-theorem fixed_segmentation_independent : SegIndep fixedP :=
-  fun mb h b0 segs => fixed_poll_eq_oneShot mb h b0 segs
+theorem fixed_segmentation_independent : SegIndep implP :=
+  fun mb h b0 segs => impl_poll_eq_oneShot mb h b0 segs
 
 /-- The fixed scanner accepts the same 4096-byte line in both deliveries. -/
 theorem fixed_accepts_size_line :
-    poll fixedP mb (body1.take 4097) 0 0 [body1.drop 4097] = .done 4106 := by native_decide
+    poll implP mb (body1.take 4097) 0 0 [body1.drop 4097] = .done 4106 := by native_decide
 
 end Flare.Bugs.H1_01

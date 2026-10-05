@@ -100,6 +100,88 @@ def test_scan_accepts_chunk_extensions_and_trailers() raises:
     assert_equal(scan_chunked_end(Span[UInt8, _](buf), 0, 1024), len(buf))
 
 
+def _repeat(c: String, n: Int) -> String:
+    var out = String("")
+    for _ in range(n):
+        out += c
+    return out^
+
+
+def _poll(full: List[UInt8], split: Int, max_body: Int) -> Int:
+    """Reactor-style polling: scan the first ``split`` bytes, then resume
+    on the whole buffer if the first verdict was INCOMPLETE."""
+    var part = List[UInt8]()
+    for i in range(split):
+        part.append(full[i])
+    var cursor = 0
+    var total = 0
+    var r = scan_chunked_resume(Span[UInt8, _](part), cursor, total, max_body)
+    if r != CHUNKED_INCOMPLETE:
+        return r
+    return scan_chunked_resume(Span[UInt8, _](full), cursor, total, max_body)
+
+
+def _assert_segmentation_independent(
+    body: List[UInt8], lo: Int, hi: Int
+) raises:
+    """Polling split at every ``lo <= k < hi`` gives the one-shot verdict."""
+    var one_shot = scan_chunked_end(Span[UInt8, _](body), 0, 1 << 20)
+    for k in range(lo, min(hi, len(body) + 1)):
+        assert_equal(
+            _poll(body, k, 1 << 20),
+            one_shot,
+            "split at " + String(k) + " changed the verdict",
+        )
+
+
+def test_chunk_line_cap_is_independent_of_segmentation() raises:
+    """H1-01: the verdict must not depend on where TCP split the bytes.
+
+    A size line of exactly CHUNK_LINE_MAX bytes is accepted in one read, so
+    it must also be accepted when the first read ends right after its CR.
+    A trailer line over the cap is refused whole as well as in pieces.
+    """
+    # Size line "1;" + 4094 extension bytes = 4096 content bytes.
+    var ok_line = _b(
+        "1;" + _repeat("a", CHUNK_LINE_MAX - 2) + "\r\nZ\r\n0\r\n\r\n"
+    )
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](ok_line), 0, 1 << 20), len(ok_line)
+    )
+    _assert_segmentation_independent(
+        ok_line, CHUNK_LINE_MAX - 5, CHUNK_LINE_MAX + 12
+    )
+    # One byte more is over the cap in either delivery.
+    var long_line = _b(
+        "1;" + _repeat("a", CHUNK_LINE_MAX - 1) + "\r\nZ\r\n0\r\n\r\n"
+    )
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](long_line), 0, 1 << 20),
+        CHUNKED_MALFORMED,
+    )
+    _assert_segmentation_independent(
+        long_line, CHUNK_LINE_MAX - 5, CHUNK_LINE_MAX + 12
+    )
+    # Trailer line of exactly CHUNK_LINE_MAX bytes: accepted in both.
+    var ok_trailer = _b(
+        "0\r\nX: " + _repeat("b", CHUNK_LINE_MAX - 3) + "\r\n\r\n"
+    )
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](ok_trailer), 0, 1 << 20),
+        len(ok_trailer),
+    )
+    _assert_segmentation_independent(
+        ok_trailer, CHUNK_LINE_MAX - 5, CHUNK_LINE_MAX + 12
+    )
+    # A 5000-byte trailer line used to pass when it arrived whole.
+    var long_trailer = _b("0\r\nX: " + _repeat("b", 4997) + "\r\n\r\n")
+    assert_equal(
+        scan_chunked_end(Span[UInt8, _](long_trailer), 0, 1 << 20),
+        CHUNKED_MALFORMED,
+    )
+    _assert_segmentation_independent(long_trailer, 3, 4600)
+
+
 def test_scan_rejects_bare_lf_in_chunk_lines() raises:
     """H1-02: LF inside a size line or trailer line is malformed.
 

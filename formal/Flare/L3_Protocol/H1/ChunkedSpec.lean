@@ -120,13 +120,11 @@ theorem poll_eq_oneShot (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = t
     poll P mb b0 h 0 segs = scanEnd P (b0 ++ segs.flatten) h mb :=
   poll_inv P hs hc mb h segs b0 h 0 (fun _ => rfl)
 
-theorem fixed_poll_eq_oneShot (mb h : Nat) (b0 : Bytes) (segs : List Bytes) :
-    poll fixedP mb b0 h 0 segs = scanFixed (b0 ++ segs.flatten) h mb :=
-  poll_eq_oneShot fixedP (by decide) rfl mb h b0 segs
-
-theorem fullFix_poll_eq_oneShot (mb h : Nat) (b0 : Bytes) (segs : List Bytes) :
-    poll fullFixP mb b0 h 0 segs = scanEnd fullFixP (b0 ++ segs.flatten) h mb :=
-  poll_eq_oneShot fullFixP (by decide) rfl mb h b0 segs
+/-- The shipped scanner (`implP`) has slack 1 and caps trailers, so the
+reactor's verdict is independent of the segmentation (H1-01 fixed). -/
+theorem impl_poll_eq_oneShot (mb h : Nat) (b0 : Bytes) (segs : List Bytes) :
+    poll implP mb b0 h 0 segs = scanImpl (b0 ++ segs.flatten) h mb :=
+  poll_eq_oneShot implP (by decide) rfl mb h b0 segs
 
 /-- A shipped-scanner acceptance is never revoked by more bytes. -/
 theorem impl_done_stable (p q : Bytes) (start mb e : Nat)
