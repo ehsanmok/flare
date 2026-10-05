@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63534 lines) |
+| Lean files | 298 (63544 lines) |
 | Theorems | 3344 |
 | Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 133 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 134 of 138 |
 
 Six findings are rated high:
 
@@ -3148,7 +3148,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
 | DOC-06 | Medium | resolved | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
-| DOC-07 | Medium | open | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
+| DOC-07 | Medium | resolved | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
 | DOC-08 | Medium | open | server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off | `Flare/Bugs/DOC_08.lean` | `repro/DOC-08_tls_session_tickets_not_opt_in.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
 
 ### 5.1 L1: Pure encodings (ENC)
@@ -5779,6 +5779,8 @@ Status: resolved. Fixed in code, not by correcting the docs. `CookieSessionStore
 - **Flip** (`flare/http/session.mojo`: encode `"<time+86400>|value"`, have `load` compare the prefix with `time(0)`, and default `ttl_s` to 86400): `OK: sessions expire server-side by default`, exit 0.
 
 #### DOC-07: `TlsAcceptor.reload()` does not rotate the session-ticket key
+
+Status: resolved. `TlsAcceptor.reload` now builds a fresh `TlsAcceptor` from `config` and replaces `self` (`flare/tls/acceptor.mojo`): the new `SSL_CTX` has new ticket keys and an empty session cache, and a failed reload raises before anything is replaced. Regression test `tests/tls/test_tls_ticket_rotation.mojo::test_reload_rotates_the_ticket_key` (with the control `test_ticket_resumes_without_reload`). Docs now match: `threat-model.md`, `operations.md`, `features.md`, `tls-strategy.md`.
 
 - **Severity:** Medium. An operator who reloads to revoke something, such as after a key compromise or a planned rotation, still has every ticket issued before the reload resuming afterwards. The ticket key lives as long as the process.
 - **Doc:** `docs/threat-model.md:59` says "the OpenSSL rotation key is part of the TlsAcceptor and rotates with `reload`."

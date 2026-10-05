@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP + OpenSSL, forked server child; uses tests/certs)
+# RESOLVED: DOC-07 fixed on fix/formal-findings
 """DOC-07: `TlsAcceptor.reload()` swaps the certificate and key but keeps
 the session-ticket key and session cache, so a ticket issued before the
 reload still resumes after it.
@@ -24,7 +25,7 @@ serves three blocking handshakes with a one-byte echo each, calling
 connection 1 is a full handshake and captures its session; connection 2
 resumes it (control: must be reused, or the harness cannot tell); it
 captures connection 2's session; connection 3 offers that session after
-the reload. Expected: connection 3 is a full handshake. Actual: it
+the reload. Expected: connection 3 is a full handshake. Before the fix: it
 resumes.
 
 Minimal fix: in `TlsAcceptor.reload`, build a fresh acceptor (new
@@ -114,9 +115,13 @@ def main() raises:
             var sess2_addr = sess2.session_addr()
             s2.close()
             if r1 or not r2:
-                verdict = "inconclusive: control failed (conn 1 reused " + String(
-                    r1
-                ) + ", conn 2 reused " + String(r2) + ")"
+                verdict = (
+                    "inconclusive: control failed (conn 1 reused "
+                    + String(r1)
+                    + ", conn 2 reused "
+                    + String(r2)
+                    + ")"
+                )
             elif sess2_addr == 0:
                 verdict = "inconclusive: no session captured on connection 2"
             else:
@@ -146,4 +151,6 @@ def main() raises:
             "); the ticket key did not rotate",
         )
         raise Error("DOC-07")
-    print("OK: after reload() the old ticket no longer resumes (full handshake)")
+    print(
+        "OK: after reload() the old ticket no longer resumes (full handshake)"
+    )

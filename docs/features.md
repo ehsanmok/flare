@@ -619,7 +619,7 @@ Router erases the handler type at registration).
 | `TlsAcceptor`, `TlsServerConfig`, `TlsInfo` — server side over OpenSSL | `flare.tls.acceptor` |
 | `HttpServer.bind_tls(addr, cert, key, alpn)` + `serve[H](handler, num_workers)` — in-process HTTPS server; no reverse proxy needed. The handshake runs on the reactor as a `KIND_TLS` connection, then ALPN dispatches to HTTP/1.1 or HTTP/2; many TLS connections are concurrent and `num_workers > 1` scales across cores. Buffered **and** `stream_response` chunked bodies both ride ciphertext | [`https_server.mojo`](../examples/advanced/https_server.mojo), `flare.http.server`, `flare.http._reactor.tls_conn_handle` |
 | `TlsConnHandle` — non-blocking server-TLS state machine: owns the fd, drives `SSL_accept`/`SSL_read`/`SSL_write` mapping `WANT_READ`/`WANT_WRITE` onto the reactor `StepResult`; reads ALPN + SNI on completion (`flare_ssl_read_ex`/`write_ex` return explicit `FLARE_SSL_IO_*` sentinels) | `flare.http._reactor.tls_conn_handle`, `flare.tls._server_ffi` |
-| `TlsAcceptor.reload()` — ACME / Let's Encrypt cert rotation without restart | [`cert_reload.mojo`](../examples/advanced/cert_reload.mojo) |
+| `TlsAcceptor.reload()` — ACME / Let's Encrypt cert rotation without restart (also rotates the session-ticket key; pre-reload tickets do not resume) | [`cert_reload.mojo`](../examples/advanced/cert_reload.mojo) |
 | mTLS — construction-time validation of CA chain + client cert | [`mtls.mojo`](../examples/advanced/mtls.mojo) |
 | ALPN advertised + parsed on both sides; refusal-to-downgrade enforced | `flare.tls` |
 | `TLS_PROTOCOL_TLS12`, `TLS_PROTOCOL_TLS13` (1.0 / 1.1 refused) | `flare.tls.acceptor` |

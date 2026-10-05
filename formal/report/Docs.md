@@ -255,6 +255,8 @@ Status: resolved. Fixed in code, not by correcting the docs. `CookieSessionStore
 
 ### DOC-07: `TlsAcceptor.reload()` does not rotate the session-ticket key
 
+Status: resolved. `TlsAcceptor.reload` now builds a fresh `TlsAcceptor` from `config` and replaces `self` (`flare/tls/acceptor.mojo`): the new `SSL_CTX` has new ticket keys and an empty session cache, and a failed reload raises before anything is replaced. Regression test `tests/tls/test_tls_ticket_rotation.mojo::test_reload_rotates_the_ticket_key` (with the control `test_ticket_resumes_without_reload`). Docs now match: `threat-model.md`, `operations.md`, `features.md`, `tls-strategy.md`.
+
 - **Severity:** Medium. An operator who reloads to revoke something, such as after a key compromise or a planned rotation, still has every ticket issued before the reload resuming afterwards. The ticket key lives as long as the process.
 - **Doc:** `docs/threat-model.md:59` says "the OpenSSL rotation key is part of the TlsAcceptor and rotates with `reload`."
 - **What goes wrong:** `reload` (`flare/tls/acceptor.mojo:369-376`) calls `ServerCtx.reload` (`flare/tls/_server_ffi.mojo:272-276`), which calls `flare_ssl_ctx_reload` (`flare/tls/ffi/openssl_wrapper.cpp:559+`). That installs a new chain and key on the same `SSL_CTX`. Nothing sets new ticket keys or flushes the session cache, and the `TlsServerConfig` docstring admits it (`acceptor.mojo:175-182`).

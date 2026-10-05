@@ -33,7 +33,9 @@ they help median.
 - The TLS layer uses the host's OpenSSL. Pin the openssl pixi
   package version with the same caution you'd apply to nginx.
 - Certificate reload without dropping connections:
-  ``TlsAcceptor.reload(...)`` swaps the certificate atomically.
+  ``TlsAcceptor.reload(...)`` swaps the certificate atomically (a failed
+  reload raises and keeps the old certificate). It also rotates the
+  session-ticket key: tickets issued before the reload no longer resume.
   Worked example: [`examples/advanced/cert_reload.mojo`](../examples/advanced/cert_reload.mojo).
 - Backend rationale + planned rustls-for-QUIC direction:
   [`tls-strategy.md`](tls-strategy.md).
@@ -171,7 +173,7 @@ The corresponding HTTP/2 limits live on `Http2ServerConfig`:
 | p99 latency creeps up over hours, no traffic-shape change. | Per-connection state leak (typically `PermessageDeflateContext` not closing on hung WS clients). | Look at `/metrics` for `flare_active_connections{transport="ws"}`. If it monotonically grows, set `WsServer.with_idle_timeout(60_000)`. |
 | 5xx spike after deploy, no traceback. | Sanitised-error policy is hiding the root cause. | Tail logs for `request_id=<X>` to recover the full error message; the response body is intentionally generic (see `security.md`). |
 | Worker `panic` exits but the rest keep running. | `CatchPanic[Inner]` middleware caught a Mojo abort; one worker is restarting. | Check `/metrics` for `flare_worker_restarts_total`. The pool self-heals; investigate the corresponding log line. |
-| TLS handshake errors in the log, intermittent. | OpenSSL session ticket key rotation drift (you reloaded the cert but the old keys are still in use somewhere). | `TlsAcceptor.reload` rotates ticket keys atomically; check that you're reloading on every host. |
+| TLS handshake errors in the log, intermittent. | OpenSSL session ticket key rotation drift (you reloaded the cert but the old keys are still in use somewhere). | `TlsAcceptor.reload` replaces the `SSL_CTX` and with it the ticket key, so a ticket issued before the reload falls back to a full handshake; reload every host together so a client moving between hosts does not see mixed behaviour. |
 | Memory grows unboundedly under WS load. | Each `WsConnection` allocates 64 KiB of recv buffer; many idle WS clients * 64 KiB. | Set `WsServer.with_idle_timeout`. Audit `permessage-deflate` if context-takeover is on. |
 
 ## Soak harness

@@ -56,7 +56,7 @@ existing credentials.
 | HPACK Huffman DoS (compression oracle). | The decoder is constant-time relative to input length; the table-driven kernel does not branch on payload content. |
 | permessage-deflate zip-bomb. | Per-message decompressed-size cap (default 16 MiB) is enforced before allocation. Exceeding the cap raises and the WS connection is closed with 1009 (`MESSAGE_TOO_BIG`). Both the no-context-takeover and context-takeover code paths honour the cap. |
 | TLS downgrade. | TLS 1.2+ only, weak ciphers disabled (`flare.tls.config` whitelist). No TLS 1.0 / 1.1 fallback path exists. |
-| TLS session-ticket replay. | flare emits new tickets on every handshake; the OpenSSL rotation key is part of the TlsAcceptor and rotates with `reload`. |
+| TLS session-ticket replay. | flare emits new tickets on every handshake; the ticket key belongs to the `TlsAcceptor`'s `SSL_CTX` and `TlsAcceptor.reload()` replaces that context, so it rotates the key and empties the session cache: a ticket or cached session issued before a reload does not resume after it (the peer does a full handshake). Without a reload the key lives as long as the process. |
 | WS unmasked client frame. | `WsConnection.recv` enforces the RFC 6455 §5.1 client-side mask requirement; unmasked frames are rejected with 1002. |
 | WS UTF-8 violation in TEXT frame. | `WsConnection.recv` runs the UTF-8 validator on every final (unfragmented) TEXT frame; invalid sequences write CLOSE 1007 (`INVALID_FRAME_PAYLOAD_DATA`) and fail the connection. Fragmented messages are not reassembled on the server side, so their fragments are not checked. |
 | URL-injected control characters (`\0`, CR, LF, `@` in IP literals). | `flare.net` + `flare.dns` reject these *before* the bytes reach libc. |

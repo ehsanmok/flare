@@ -175,11 +175,12 @@ struct TlsServerConfig(Copyable):
     """When True (default), the acceptor's ``SSL_CTX`` is
     configured to issue RFC 5077 session tickets (TLS 1.2) /
     RFC 8446 §4.6.1 NewSessionTicket frames (TLS 1.3) so peers
-    can resume on subsequent connects. Cheap to keep on; turn
-    off only for environments where ticket-key rotation is not
-    handled out-of-band (the acceptor does not auto-rotate
-    -- the ``flare_ssl_ctx_enable_session_tickets`` FFI permits
-    rotation but the acceptor doesn't expose the hook yet)."""
+    can resume on subsequent connects. The ticket key lives as
+    long as the ``SSL_CTX``; :meth:`TlsAcceptor.reload` builds a
+    new context, so it rotates the key and invalidates every
+    ticket and cached session issued before it. Turn this off
+    if you never reload and do not want a long-lived ticket
+    key."""
     var ticket_lifetime_s: Int
     """Session ticket lifetime in seconds. Default 7200 (two
     hours). Maps to ``SSL_CTX_set_timeout`` and the embedded TLS
@@ -367,13 +368,24 @@ struct TlsAcceptor(Movable):
         self.config = config^
 
     def reload(mut self) raises:
-        """Re-read the cert + key files from ``config`` and
-        atomically swap into the underlying ``SSL_CTX``.
-        In-flight handshakes hold the old cert; new handshakes
-        pick up the new one. Designed for cert rotation under
-        live traffic.
+        """Re-read the cert + key files from ``config`` and swap in
+        a freshly built ``SSL_CTX``.
+
+        The replacement context is constructed from ``config`` first
+        and only then installed, so a failed reload (unreadable file,
+        cert / key mismatch) raises and leaves the running context
+        untouched. In-flight sessions keep their reference to the
+        old context and finish with the old cert; new handshakes
+        pick up the new one.
+
+        A new ``SSL_CTX`` has its own random session-ticket keys and
+        an empty session cache, so a reload also rotates the ticket
+        key: a ticket or cached session issued before the reload does
+        not resume after it (the peer falls back to a full
+        handshake). This is what ``docs/threat-model.md`` promises.
         """
-        self._ctx.reload(self.config.cert_file, self.config.key_file)
+        var fresh = TlsAcceptor(self.config.copy())
+        self = fresh^
 
     def handshake_fd(mut self, fd: Int) raises -> Tuple[Int, TlsInfo]:
         """Drive the ``SSL_accept`` state machine on ``fd`` to
