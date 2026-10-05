@@ -270,11 +270,12 @@ def apply_encoder_instructions_partial(
     returns ``(inserts_applied, bytes_consumed)`` so the caller can keep
     the unconsumed tail and retry once more bytes arrive.
 
-    An incomplete *and* a corrupt trailing instruction look the
-    same here (both raise mid-parse), so both stop consumption. A truly
-    corrupt encoder stream therefore stalls rather than erroring; the
-    QUIC idle timeout closes such a connection. The upgrade path is to
-    distinguish truncation from corruption per instruction."""
+    An instruction cut short by the chunk boundary (an untagged
+    parse error) stops consumption and is retried. A real encoder-stream
+    error (a reference to a missing or evicted entry, a capacity above the
+    advertised limit, a literal that is not UTF-8, an insert that does not
+    fit) is tagged ``QPACK_ENCODER_STREAM_ERROR`` and is re-raised, so the
+    connection fails instead of stalling."""
     var consumed = 0
     var inserts = 0
     while consumed < len(buf):
@@ -306,6 +307,26 @@ def apply_encoder_instructions_partial(
     return Tuple[Int, Int](inserts, consumed)
 
 
+def _relative_to_abs(table: QpackDynamicTable, rel: Int) raises -> UInt64:
+    """Resolve an encoder-stream relative index (RFC 9204 section 3.2.5:
+    0 is the most recent insert) to an absolute index.
+
+    A relative index that names no live entry (an empty table, or an
+    entry already evicted) is a ``QPACK_ENCODER_STREAM_ERROR``
+    (sections 4.3.2 and 4.3.4). The range is checked before the
+    subtraction: ``insert_count() - 1 - rel`` wrapped in ``UInt64``, and
+    the untagged ``get_abs`` failure that followed was read as a
+    truncated instruction, stalling the stream (QPACK-04)."""
+    var live = UInt64(len(table.entries))
+    if rel < 0 or UInt64(rel) >= live:
+        raise Error(
+            "QPACK_ENCODER_STREAM_ERROR: relative index "
+            + String(rel)
+            + " names no live dynamic-table entry"
+        )
+    return table.insert_count() - 1 - UInt64(rel)
+
+
 def _apply_one_encoder_instruction(
     mut table: QpackDynamicTable, buf: Span[UInt8, _], pos: Int
 ) raises -> Tuple[Int, Int]:
@@ -324,8 +345,7 @@ def _apply_one_encoder_instruction(
                 )
             name = stbl[ip.value].name
         else:
-            var abs_idx = table.insert_count() - 1 - UInt64(ip.value)
-            name = table.get_abs(abs_idx).name
+            name = table.get_abs(_relative_to_abs(table, ip.value)).name
         var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
         if not table.insert(QpackHeader(name, lit[0])):
             raise Error("QPACK_ENCODER_STREAM_ERROR: insert exceeds capacity")
@@ -342,8 +362,7 @@ def _apply_one_encoder_instruction(
         return Tuple[Int, Int](0, ip.offset)
     else:
         var ip = decode_integer(buf, pos, 5)
-        var abs_idx = table.insert_count() - 1 - UInt64(ip.value)
-        var dup = table.get_abs(abs_idx)
+        var dup = table.get_abs(_relative_to_abs(table, ip.value))
         if not table.insert(dup^):
             raise Error(
                 "QPACK_ENCODER_STREAM_ERROR: duplicate exceeds capacity"

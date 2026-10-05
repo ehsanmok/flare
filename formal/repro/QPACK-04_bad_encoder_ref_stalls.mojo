@@ -1,9 +1,10 @@
 # PLATFORM: any
+# RESOLVED: QPACK-04 fixed on fix/formal-findings
 """QPACK-04: an encoder-stream instruction that references a missing
 dynamic entry stalls the stream instead of raising
 QPACK_ENCODER_STREAM_ERROR.
 
-Lean: Flare.Bugs.QPACK_04.counterexample (empty table, dynamic name ref
+Lean: Flare.Bugs.QPACK_04.counterexample (pre-fix: empty table, dynamic name ref
 index 0 -> stall) vs spec_errors (QPACK_ENCODER_STREAM_ERROR), and
 Flare.Bugs.QPACK_04.fixed_meets_spec.
 flare/qpack/dynamic.mojo:319-320 and 337-338 @59bda50, handled by
@@ -16,7 +17,7 @@ treats it as a truncated instruction and returns (0, 0): the bytes are
 carried and retried forever. RFC 9204 sec 4.3.2 / 4.3.4: a reference to
 a missing or evicted entry is a QPACK_ENCODER_STREAM_ERROR.
 
-Expected: raise QPACK_ENCODER_STREAM_ERROR. Actual: returns (0, 0).
+Expected: raise QPACK_ENCODER_STREAM_ERROR. Before the fix: Actual: returns (0, 0).
 
 Minimal fix: check ip < insert_count() - dropped before the subtraction
 and raise "QPACK_ENCODER_STREAM_ERROR: ..." (lines 319 and 337).

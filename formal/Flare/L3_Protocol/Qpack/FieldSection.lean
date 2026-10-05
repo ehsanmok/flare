@@ -28,7 +28,7 @@ Four small models of `flare/qpack/dynamic.mojo` and `flare/qpack/codec.mojo`:
    decoder (`Flare.L1.Huffman.okOnly_decodeSimdImpl`); pre-fix either way the
    bytes reached `ascii_unchecked_string` unvalidated, and `implLiteral` now
    rejects payloads that are not valid UTF-8 (Bugs/QPACK_03).
-5. Encoder-stream dynamic name reference / Duplicate (dynamic.mojo:319,337)
+5. Encoder-stream dynamic name reference / Duplicate (dynamic.mojo:310-327,348,365)
    inside `apply_encoder_instructions_partial` (Bugs/QPACK_04).
 -/
 namespace Flare.L3.Qpack.FieldSection
@@ -456,11 +456,12 @@ inductive Outcome where
   | streamError  -- raises QPACK_ENCODER_STREAM_ERROR (connection error)
   deriving DecidableEq, Repr
 
-/-- Outcome of an Insert With (dynamic) Name Reference / Duplicate whose
-value literal parsed. `get_abs` raises an *untagged* error, which the
-partial replayer treats as truncation.
-mirrors flare/qpack/dynamic.mojo:319-320,337-338,150-158,281-297 @59bda50 -/
-def implDynRef (dropped ic ip : UInt64) : Outcome :=
+/-- PRE-FIX outcome of an Insert With (dynamic) Name Reference / Duplicate
+whose value literal parsed. `get_abs` raised an *untagged* error, which the
+partial replayer treated as truncation.
+mirrors flare/qpack/dynamic.mojo:319-320,337-338,150-158,281-297 @59bda50
+(pre-fix; kept for the counterexample) -/
+def implOldDynRef (dropped ic ip : UInt64) : Outcome :=
   let abs := ic - 1 - ip
   if abs < dropped ∨ abs ≥ ic then .stall else .applied abs.toNat
 
@@ -469,15 +470,18 @@ name a live entry is a QPACK_ENCODER_STREAM_ERROR connection error. -/
 def specDynRef (dropped ic ip : Nat) : Outcome :=
   if ip < ic - dropped then .applied (ic - 1 - ip) else .streamError
 
-/-- Fix: tag the out-of-range case as QPACK_ENCODER_STREAM_ERROR. -/
-def implFixedDynRef (dropped ic ip : UInt64) : Outcome :=
+/-- The shipped resolution: `_relative_to_abs` checks `rel < len(entries)`
+(`ip < ic - dropped`) before the subtraction and raises a tagged
+QPACK_ENCODER_STREAM_ERROR otherwise.
+mirrors flare/qpack/dynamic.mojo:310-327,348,365 (fixed, QPACK-04) -/
+def implDynRef (dropped ic ip : UInt64) : Outcome :=
   if ip ≥ ic - dropped then .streamError
   else .applied (ic - 1 - ip).toNat
 
-theorem implFixedDynRef_eq_spec (dropped ic ip : UInt64) (hd : dropped ≤ ic) :
-    implFixedDynRef dropped ic ip = specDynRef dropped.toNat ic.toNat ip.toNat := by
+theorem implDynRef_eq_spec (dropped ic ip : UInt64) (hd : dropped ≤ ic) :
+    implDynRef dropped ic ip = specDynRef dropped.toNat ic.toNat ip.toNat := by
   rw [u_le] at hd
-  unfold implFixedDynRef specDynRef
+  unfold implDynRef specDynRef
   have hs : (ic - dropped).toNat = ic.toNat - dropped.toNat := u_sub _ _ hd
   by_cases h : ip ≥ ic - dropped
   · have : ¬ ip.toNat < ic.toNat - dropped.toNat := by rw [← hs]; exact Nat.not_lt.mpr ((u_le _ _).mp h)
@@ -491,11 +495,11 @@ theorem implFixedDynRef_eq_spec (dropped ic ip : UInt64) (hd : dropped ≤ ic) :
 
 /-- On in-range references flare already agrees with the spec; the gap is
 exactly the out-of-range case. -/
-theorem implDynRef_inRange (dropped ic ip : UInt64) (hd : dropped ≤ ic)
+theorem implOldDynRef_inRange (dropped ic ip : UInt64) (hd : dropped ≤ ic)
     (h : ip.toNat < ic.toNat - dropped.toNat) :
-    implDynRef dropped ic ip = specDynRef dropped.toNat ic.toNat ip.toNat := by
+    implOldDynRef dropped ic ip = specDynRef dropped.toNat ic.toNat ip.toNat := by
   rw [u_le] at hd
-  unfold implDynRef specDynRef
+  unfold implOldDynRef specDynRef
   have h1 : (ic - 1).toNat = ic.toNat - 1 := u_sub _ _ (by simp; omega)
   have hv : (ic - 1 - ip).toNat = ic.toNat - 1 - ip.toNat := by rw [u_sub _ _ (by omega), h1]
   have : ¬ (ic - 1 - ip < dropped ∨ ic - 1 - ip ≥ ic) := by

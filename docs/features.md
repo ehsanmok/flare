@@ -439,7 +439,10 @@ v0.11 audit fixes; before them the server accepted what follows.
   enforced, and credit is granted as the application consumes data
   rather than as the peer sends it. A request body is capped at
   10 MiB (`Http3RequestReader.max_body_bytes`); the QPACK encoder stream
-  may not set a table capacity beyond what was advertised.
+  may not set a table capacity beyond what was advertised, and an
+  instruction that names a missing or evicted entry (Insert With Name
+  Reference, Duplicate) is `QPACK_ENCODER_STREAM_ERROR` (0x201) at once
+  rather than a stalled stream.
 - A request field section that cannot be decoded (a Required Insert
   Count the table cannot satisfy, a reference outside it, or a truncated
   prefix) is a connection error: the server closes the connection with

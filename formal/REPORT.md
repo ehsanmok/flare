@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61775 lines) |
+| Lean files | 298 (61789 lines) |
 | Theorems | 3247 |
 | Headline theorems in the axiom audit | 1046 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 63 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 64 of 138 |
 
 Six findings are rated high:
 
@@ -1574,7 +1574,7 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 - `decodeInt` is a local model of `decode_integer` (`http2/hpack.mojo:101-132`).
 - `implResolve` models the shipped (fixed, QPACK-01) Base and pre-base and post-base index arithmetic (`dynamic.mojo:473-603`); `implOldResolve` is the pre-fix code the counterexamples are about.
 - `implSignReadIndex` models the Sign-byte read at `dynamic.mojo:535` with its bounds check (fixed, QPACK-02; `implOldSignReadIndex` is the unchecked pre-fix read), and `implLiteral` models `codec.mojo:192-234`, both branches. The Huffman branch calls `Flare.L1.Huffman.okOnly (decodeSimdImpl payload)`, the L1 model of `huffman_decode_simd`; `specLiteral` uses the proved L1 decoder `Flare.L1.Huffman.decode`.
-- `implDynRef` models the encoder-stream references at `dynamic.mojo:319` and `:337`.
+- `implOldDynRef` models the pre-fix encoder-stream references at `dynamic.mojo:319` and `:337`; `implDynRef` is the shipped `_relative_to_abs` check.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -1584,8 +1584,8 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 | `FieldSection.spec_imp_implOld` | The pre-fix resolver accepts everything the spec accepts and resolves it to the same entry. | proved |
 | `FieldSection.rel_roundtrip` | The decoder inverts the encoder's relative index. | proved |
 | `FieldSection.implOldSignReadIndex_le` | The pre-fix sign-byte read index is at most `len` (so only the Sign read can go out of bounds). | proved |
-| `FieldSection.implSignReadIndex_inBounds`, `implLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
-| `FieldSection.implDynRef_inRange` | On in-range references flare already matches the spec. | proved |
+| `FieldSection.implSignReadIndex_inBounds`, `implLiteral_ok`, `implDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
+| `FieldSection.implOldDynRef_inRange` | On in-range references flare already matches the spec. | proved |
 | `FieldSection.implOldLiteral_eq_spec` | The literal decoder's byte stage, Huffman branch included, equals `specLiteral` on every input (via L1's `okOnly_decodeSimdImpl`). | proved |
 | `FieldSection.implLiteral_eq_spec_of_ok` | After the QPACK-03 fix `implLiteral` still equals `specLiteral` whenever the decoded bytes are valid UTF-8. | proved |
 | `FieldSection.implOldLiteral_huffman` | A Huffman literal whose length prefix fits decodes to exactly the original bytes (via L1's `decode_encode`). | proved |
@@ -2879,7 +2879,7 @@ advances the wheel to `now` at the top of every iteration
 | `Qpack.Encoder.ric` | qpack/dynamic.mojo:418-430 | `ric_bound`, `QPACK_06.impl_references_unacked`, `QPACK_06.fixed_spec` | counterexample (QPACK-06) |
 | `Qpack.Table.insert` (encoder use) | qpack/dynamic.mojo:138-148, 606-615 | `QPACK_06.impl_evicts_unacked`, `fixedInsert_noEvict` | counterexample (QPACK-06) |
 | `Bugs.QPACK_05.impl`, `implOld` | http3/request_reader.mojo:283-296, http3/server.mojo:859-875, quic/server.mojo:1448-1476 (fixed, QPACK-05) | `QPACK_05.implOld_never_connErr`, `implOld_counterexample`, `implOld_drops_blockable`, `fixed_spec` | resolved |
-| `Qpack.FieldSection.implDynRef` | qpack/dynamic.mojo:281-343 | `QPACK_04.counterexample`, `implFixedDynRef_eq_spec` | counterexample |
+| `Qpack.FieldSection.implDynRef`, `implOldDynRef` | qpack/dynamic.mojo:281-370 (fixed, QPACK-04) | `QPACK_04.counterexample`, `implDynRef_eq_spec` | resolved |
 | `Qpack.FieldSection.decodeInt` | http2/hpack.mojo:101-132 | `decodeInt_offset_le` | proved |
 | `H3.decodeFrame`, `encodeFrame`, `decodeSettings`, `encodeSettings` | http3/frame.mojo:95-218 | `decodeFrame_encode`, `decodeSettings_encode`, `decodeFrame_bounds` | proved |
 | `H3.feed` (fixed, H3-01), `stepFrame` | http3/request_reader.mojo:197-345 | `run_accept_impl`, `run_reject_impl`, `H3_01.violates_spec`, `H3_02.violates_spec` | counterexample |
@@ -3082,7 +3082,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QPACK-01 | High | resolved | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
 | QPACK-02 | Medium | resolved | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
 | QPACK-03 | Low | resolved | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
-| QPACK-04 | Low | open | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
+| QPACK-04 | Low | resolved | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
 | QPACK-05 | Medium | resolved | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QPACK-06 | Low | open | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
 | H3-01 | Medium | resolved | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
@@ -4543,11 +4543,12 @@ Status: resolved. `_decode_string_literal` validates the decoded bytes (`_litera
   - `insert_count() - 1 - ip` wraps at `dynamic.mojo:319` and `337`.
   - `get_abs` raises an untagged error.
   - `apply_encoder_instructions_partial` (281-297) treats the untagged error as a truncated instruction and returns `(0, 0)`.
-- **Counterexample:** `Bugs.QPACK_04.counterexample` and `counterexample_evicted`, with `spec_errors`.
-- **Fix:** check `ip < len(entries)` and raise an error tagged QPACK_ENCODER_STREAM_ERROR. `fixed_meets_spec` shows it suffices.
+- **Counterexample:** `Bugs.QPACK_04.counterexample` and `counterexample_evicted` (about the pre-fix `implOldDynRef`), with `spec_errors`.
+- **Fix:** check `ip < len(entries)` and raise an error tagged QPACK_ENCODER_STREAM_ERROR (`_relative_to_abs`, used by Insert With Name Reference and Duplicate). `fixed_meets_spec` shows the shipped `implDynRef` equals the spec.
 - **Repro:** `formal/repro/QPACK-04_bad_encoder_ref_stalls.mojo`
 - **Observed:** `BUG REPRODUCED: dynamic name ref into an empty table returned (inserts, consumed) = ( 0 , 0 ) -- treated as truncation, no QPACK_ENCODER_STREAM_ERROR`
 - **Flip (QPACK agent):** `OK: ... QPACK_ENCODER_STREAM_ERROR: bad dynamic name ref`, exit 0.
+Status: resolved. `_relative_to_abs` rejects a relative index that names no live entry with a tagged QPACK_ENCODER_STREAM_ERROR, and `apply_encoder_instructions_partial` re-raises it, so `Http3Connection` raises it and the QUIC layer closes with 0x201; a truncated valid instruction still waits for more bytes. Tests: `tests/qpack/test_qpack_dynamic.mojo::test_name_ref_into_an_empty_table_is_an_encoder_stream_error` (and three siblings), `tests/h3/test_h3_qpack_dynamic.mojo::test_bad_name_reference_on_the_encoder_stream_is_a_stream_error`. The repro prints `OK` (three runs).
 
 #### QPACK-05: an undecodable or blocked field section is not a connection error
 

@@ -22,6 +22,7 @@ from flare.http3 import (
     Http3Config,
     encode_http3_frame,
 )
+from flare.http3.server import QPACK_ENCODER_STREAM_ERROR, h3_error_code
 from flare.qpack import QpackHeader
 from flare.qpack.dynamic import (
     QpackDynamicTable,
@@ -143,8 +144,27 @@ def test_split_encoder_chunk_buffers_then_applies() raises:
     assert_true(req.headers.contains("x-custom"))
 
 
+def test_bad_name_reference_on_the_encoder_stream_is_a_stream_error() raises:
+    """QPACK-04: an Insert With Name Reference that names no live entry
+    stalled the peer's encoder stream silently; it now surfaces as
+    QPACK_ENCODER_STREAM_ERROR (0x201) so the QUIC layer closes the
+    connection with that code."""
+    var c = _conn_with_dynamic()
+    var stream = List[UInt8]()
+    stream.append(UInt8(_QPACK_ENCODER_STREAM))
+    stream.append(UInt8(0x80))  # name ref, T=0, relative index 0
+    stream.append(UInt8(0x00))  # empty value; the table is empty
+    var code = UInt64(0)
+    try:
+        c.feed_uni_stream_chunk(7, stream^)
+    except e:
+        code = h3_error_code(String(e))
+    assert_equal(Int(code), Int(QPACK_ENCODER_STREAM_ERROR))
+
+
 def main() raises:
     test_encoder_stream_inserts_owe_increment()
     test_request_resolves_dynamic_reference()
     test_split_encoder_chunk_buffers_then_applies()
-    print("test_h3_qpack_dynamic: 3 passed")
+    test_bad_name_reference_on_the_encoder_stream_is_a_stream_error()
+    print("test_h3_qpack_dynamic: 4 passed")

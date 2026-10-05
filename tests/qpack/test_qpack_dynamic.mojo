@@ -245,6 +245,93 @@ def test_non_utf8_literal_on_the_encoder_stream_is_an_error() raises:
     assert_equal(t.insert_count(), 0)
 
 
+def _partial_error(mut table: QpackDynamicTable, instr: List[UInt8]) -> String:
+    """The error text of ``apply_encoder_instructions_partial``, or ""."""
+    try:
+        _ = apply_encoder_instructions_partial(table, Span[UInt8, _](instr))
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_name_ref_into_an_empty_table_is_an_encoder_stream_error() raises:
+    """QPACK-04: ``insert_count() - 1 - ip`` wrapped, ``get_abs`` raised an
+    untagged error and the partial parser read it as a truncated
+    instruction, so the stream stalled instead of failing."""
+    var t = QpackDynamicTable(UInt64(4096))
+    var instr = List[UInt8]()
+    instr.append(UInt8(0x80))  # Insert With Name Reference, T=0, index 0
+    instr.append(UInt8(0x00))  # empty value
+    assert_true(
+        "QPACK_ENCODER_STREAM_ERROR" in _partial_error(t, instr),
+        "a dynamic name reference into an empty table stalled",
+    )
+    assert_equal(t.insert_count(), 0)
+    # The all-at-once replayer refuses it too.
+    var raised = False
+    try:
+        _ = apply_encoder_instructions(t, Span[UInt8, _](instr))
+    except:
+        raised = True
+    assert_true(raised)
+
+
+def test_name_ref_past_the_live_entries_is_an_encoder_stream_error() raises:
+    var t = QpackDynamicTable(UInt64(66))
+    assert_true(t.insert(QpackHeader("a", "b")))
+    assert_true(t.insert(QpackHeader("c", "d")))  # evicts abs 0
+    assert_equal(Int(t.dropped), 1)
+    # Relative index 1 names abs 0, which was evicted.
+    var evicted = List[UInt8]()
+    evicted.append(UInt8(0x81))
+    evicted.append(UInt8(0x00))
+    assert_true("QPACK_ENCODER_STREAM_ERROR" in _partial_error(t, evicted))
+    # Relative index 5 is beyond everything ever inserted.
+    var far = List[UInt8]()
+    far.append(UInt8(0x85))
+    far.append(UInt8(0x00))
+    assert_true("QPACK_ENCODER_STREAM_ERROR" in _partial_error(t, far))
+    assert_equal(t.insert_count(), 2)
+    # Relative index 0 (abs 1) is live and applies.
+    var ok = List[UInt8]()
+    ok.append(UInt8(0x80))
+    ok.append(UInt8(0x01))
+    ok.append(UInt8(0x78))  # value "x"
+    var r = apply_encoder_instructions_partial(t, Span[UInt8, _](ok))
+    assert_equal(r[0], 1)
+    assert_equal(r[1], 3)
+
+
+def test_duplicate_of_a_missing_entry_is_an_encoder_stream_error() raises:
+    var t = QpackDynamicTable(UInt64(4096))
+    var instr = List[UInt8]()
+    instr.append(UInt8(0x00))  # Duplicate, relative index 0, empty table
+    assert_true("QPACK_ENCODER_STREAM_ERROR" in _partial_error(t, instr))
+    assert_true(t.insert(QpackHeader("a", "b")))
+    var beyond = List[UInt8]()
+    beyond.append(UInt8(0x03))  # relative index 3, only abs 0 exists
+    assert_true("QPACK_ENCODER_STREAM_ERROR" in _partial_error(t, beyond))
+    var ok = List[UInt8]()
+    ok.append(UInt8(0x00))
+    var r = apply_encoder_instructions_partial(t, Span[UInt8, _](ok))
+    assert_equal(r[0], 1)
+    assert_equal(t.insert_count(), 2)
+
+
+def test_truncated_valid_name_ref_still_waits_for_more_bytes() raises:
+    """The fix must not turn a chunk boundary into an error: a valid
+    reference whose value literal is cut short is still retried."""
+    var t = QpackDynamicTable(UInt64(4096))
+    assert_true(t.insert(QpackHeader("a", "b")))
+    var cut = List[UInt8]()
+    cut.append(UInt8(0x80))  # valid reference to abs 0
+    cut.append(UInt8(0x05))  # value length 5, no bytes follow
+    var r = apply_encoder_instructions_partial(t, Span[UInt8, _](cut))
+    assert_equal(r[0], 0)
+    assert_equal(r[1], 0)
+    assert_equal(t.insert_count(), 1)
+
+
 def _decode_raises(sec: List[UInt8], table: QpackDynamicTable) -> Bool:
     try:
         _ = decode_field_section_dynamic(Span[UInt8, _](sec), table)
@@ -354,4 +441,8 @@ def main() raises:
     test_pre_base_relative_index_beyond_base_is_refused()
     test_truncated_prefix_without_sign_byte_is_refused()
     test_non_utf8_literal_on_the_encoder_stream_is_an_error()
+    test_name_ref_into_an_empty_table_is_an_encoder_stream_error()
+    test_name_ref_past_the_live_entries_is_an_encoder_stream_error()
+    test_duplicate_of_a_missing_entry_is_an_encoder_stream_error()
+    test_truncated_valid_name_ref_still_waits_for_more_bytes()
     print("test_qpack_dynamic: all dynamic-table tests passed")

@@ -97,6 +97,18 @@ from test_qpack_dynamic import (
     test_non_utf8_literal_on_the_encoder_stream_is_an_error as test_qpack_dynamic__test_non_utf8_literal_on_the_encoder_stream_is_an_error,
 )
 from test_qpack_dynamic import (
+    test_name_ref_into_an_empty_table_is_an_encoder_stream_error as test_qpack_dynamic__test_name_ref_into_an_empty_table_is_an_encoder_stream_error,
+)
+from test_qpack_dynamic import (
+    test_name_ref_past_the_live_entries_is_an_encoder_stream_error as test_qpack_dynamic__test_name_ref_past_the_live_entries_is_an_encoder_stream_error,
+)
+from test_qpack_dynamic import (
+    test_duplicate_of_a_missing_entry_is_an_encoder_stream_error as test_qpack_dynamic__test_duplicate_of_a_missing_entry_is_an_encoder_stream_error,
+)
+from test_qpack_dynamic import (
+    test_truncated_valid_name_ref_still_waits_for_more_bytes as test_qpack_dynamic__test_truncated_valid_name_ref_still_waits_for_more_bytes,
+)
+from test_qpack_dynamic import (
     test_ric_zero_section_cannot_read_the_dynamic_table as test_qpack_dynamic__test_ric_zero_section_cannot_read_the_dynamic_table,
 )
 from test_qpack_dynamic import (
@@ -157,6 +169,18 @@ def main() raises:
     ]()
     suite.test[
         test_qpack_dynamic__test_non_utf8_literal_on_the_encoder_stream_is_an_error
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_name_ref_into_an_empty_table_is_an_encoder_stream_error
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_name_ref_past_the_live_entries_is_an_encoder_stream_error
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_duplicate_of_a_missing_entry_is_an_encoder_stream_error
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_truncated_valid_name_ref_still_waits_for_more_bytes
     ]()
     suite.test[
         test_qpack_dynamic__test_ric_zero_section_cannot_read_the_dynamic_table

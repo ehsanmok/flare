@@ -199,6 +199,9 @@ from test_h3_qpack_dynamic import (
 from test_h3_qpack_dynamic import (
     test_split_encoder_chunk_buffers_then_applies as test_h3_qpack_dynamic__test_split_encoder_chunk_buffers_then_applies,
 )
+from test_h3_qpack_dynamic import (
+    test_bad_name_reference_on_the_encoder_stream_is_a_stream_error as test_h3_qpack_dynamic__test_bad_name_reference_on_the_encoder_stream_is_a_stream_error,
+)
 from test_h3_response_reader import (
     test_h3_large_partial_data_frame_yields_immediately as test_h3_response_reader__test_h3_large_partial_data_frame_yields_immediately,
 )
@@ -471,6 +474,9 @@ def main() raises:
     suite.test[test_h3_qpack_dynamic__test_request_resolves_dynamic_reference]()
     suite.test[
         test_h3_qpack_dynamic__test_split_encoder_chunk_buffers_then_applies
+    ]()
+    suite.test[
+        test_h3_qpack_dynamic__test_bad_name_reference_on_the_encoder_stream_is_a_stream_error
     ]()
     # tests/h3/test_h3_response_reader.mojo
     suite.test[
