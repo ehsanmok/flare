@@ -23,6 +23,7 @@ from .frame import (
     WsOpcode,
     WsCloseCode,
     WsProtocolError,
+    _is_valid_utf8,
 )
 from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
@@ -344,6 +345,49 @@ def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
 # ── WsConnection ──────────────────────────────────────────────────────────────
 
 
+def _valid_close_code(code: Int) -> Bool:
+    """Whether ``code`` may appear in a received CLOSE frame.
+
+    RFC 6455 sec 7.4.1 defines 1000-1003 and 1007-1011, the IANA registry
+    adds 1012-1014, and 3000-4999 are for libraries and applications. The
+    reserved 1004, 1005, 1006 and 1015 must never be sent on the wire.
+    """
+    return (
+        (code >= 1000 and code <= 1003)
+        or (code >= 1007 and code <= 1014)
+        or (code >= 3000 and code <= 4999)
+    )
+
+
+def _close_reply_payload(body: List[UInt8]) -> List[UInt8]:
+    """The body of the CLOSE that answers a received CLOSE with ``body``.
+
+    An empty body is echoed empty and a valid one echoes its status code
+    (RFC 6455 sec 5.5.1). A 1-byte body, an invalid code or a reason that
+    is not UTF-8 is a protocol error (sec 7.1.7, 7.4.1) and is answered
+    with 1002.
+    """
+    var out = List[UInt8]()
+    if len(body) == 0:
+        return out^
+    var valid = len(body) >= 2
+    if valid:
+        valid = _valid_close_code(Int(body[0]) * 256 + Int(body[1]))
+    if valid:
+        var reason = List[UInt8]()
+        for i in range(2, len(body)):
+            reason.append(body[i])
+        valid = _is_valid_utf8(reason)
+    if valid:
+        out.append(body[0])
+        out.append(body[1])
+    else:
+        var code = Int(WsCloseCode.PROTOCOL_ERROR)
+        out.append(UInt8(code >> 8))
+        out.append(UInt8(code & 0xFF))
+    return out^
+
+
 struct WsConnection(Movable):
     """An accepted WebSocket connection (server side).
 
@@ -351,6 +395,11 @@ struct WsConnection(Movable):
     Client-side frames MUST be masked; ``recv`` unmasks them automatically.
 
     This type is ``Movable`` but not ``Copyable``.
+
+    A CLOSE received by :meth:`recv` is answered here (RFC 6455 sec
+    5.5.1), and once a CLOSE has been sent, by that reply or by
+    :meth:`close`, every ``send_*`` raises: an endpoint MUST NOT send
+    data after its CLOSE.
 
     Fields:
         _stream: The underlying TCP stream.
@@ -370,6 +419,8 @@ struct WsConnection(Movable):
 
     var _stream: TcpStream
     var _peer: SocketAddr
+    var _close_sent: Bool
+    """Whether this side has written its CLOSE frame."""
     var origin: String
     """The ``Origin`` header sent with the upgrade handshake, or empty
     when the client sent none.
@@ -435,6 +486,7 @@ struct WsConnection(Movable):
     ):
         self._stream = stream^
         self._peer = peer
+        self._close_sent = False
         self.origin = origin^
         self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
         self._prebuf = List[UInt8]()
@@ -462,6 +514,7 @@ struct WsConnection(Movable):
         """
         self._stream = stream^
         self._peer = peer
+        self._close_sent = False
         self.origin = origin^
         self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
         self._prebuf = prebuf^
@@ -478,8 +531,9 @@ struct WsConnection(Movable):
             msg: The UTF-8 string to send.
 
         Raises:
-            NetworkError: On I/O failure.
+            NetworkError: On I/O failure, or if a CLOSE was already sent.
         """
+        self._require_open()
         var frame = WsFrame.text(msg)
         var wire = frame.encode(mask=False)
         self._stream.write_all(Span[UInt8, _](wire))
@@ -493,23 +547,41 @@ struct WsConnection(Movable):
             data: The raw binary payload.
 
         Raises:
-            NetworkError: On I/O failure.
+            NetworkError: On I/O failure, or if a CLOSE was already sent.
         """
+        self._require_open()
         var frame = WsFrame.binary(data)
         var wire = frame.encode(mask=False)
         self._stream.write_all(Span[UInt8, _](wire))
 
-    def send_frame(self, frame: WsFrame) raises:
+    def send_frame(mut self, frame: WsFrame) raises:
         """Send an already-constructed frame (server, no masking).
+
+        Sending a CLOSE frame marks the closing handshake as started, the
+        same as :meth:`close`; a second CLOSE is dropped.
 
         Args:
             frame: Frame to send. The ``mask`` bit is always ``False``.
 
         Raises:
-            NetworkError: On I/O failure.
+            NetworkError: On I/O failure, or if a CLOSE was already sent.
         """
+        if frame.opcode == WsOpcode.CLOSE:
+            if self._close_sent:
+                return
+            self._close_sent = True
+        else:
+            self._require_open()
         var wire = frame.encode(mask=False)
         self._stream.write_all(Span[UInt8, _](wire))
+
+    def _require_open(self) raises:
+        """Raise if this side has already sent its CLOSE frame."""
+        if self._close_sent:
+            raise NetworkError(
+                "WebSocket: CLOSE already sent; no more frames may be sent"
+                " (RFC 6455 sec 5.5.1)"
+            )
 
     def recv(mut self) raises -> WsFrame:
         """Receive the next data frame from the client.
@@ -517,6 +589,14 @@ struct WsConnection(Movable):
         Automatically replies to PING frames with an unmasked PONG and
         continues reading. Returns TEXT or BINARY frames. Client frames
         are unmasked by ``WsFrame.decode_one`` automatically.
+
+        A CLOSE frame is answered before it is returned (RFC 6455 sec
+        5.5.1): with the received status code, with an empty CLOSE when
+        the body is empty, or with 1002 when the body is invalid (a
+        1-byte body, a code that may not be sent, a reason that is not
+        UTF-8). The reply is skipped if :meth:`close` already sent a
+        CLOSE. The frame is still returned, so a handler can leave its
+        loop; later ``send_*`` calls raise.
 
         Returns:
             The next complete data frame (TEXT, BINARY, or CLOSE).
@@ -533,6 +613,18 @@ struct WsConnection(Movable):
                 var wire = pong.encode(mask=False)
                 self._stream.write_all(Span[UInt8, _](wire))
                 continue
+            if frame.opcode == WsOpcode.CLOSE and not self._close_sent:
+                # RFC 6455 sec 5.5.1: answer a CLOSE with a CLOSE.
+                self._close_sent = True
+                var reply = WsFrame(
+                    opcode=WsOpcode.CLOSE,
+                    payload=_close_reply_payload(frame.payload),
+                )
+                var wire = reply.encode(mask=False)
+                try:
+                    self._stream.write_all(Span[UInt8, _](wire))
+                except:
+                    pass  # best-effort: the peer may be gone already
             return frame^
 
     def _recv_one(mut self) raises -> WsFrame:
@@ -602,12 +694,20 @@ struct WsConnection(Movable):
         code: UInt16 = WsCloseCode.NORMAL,
         reason: String = "",
     ) raises:
-        """Send a CLOSE frame and wait for the client's CLOSE response.
+        """Send a CLOSE frame, once.
+
+        Starts the closing handshake (RFC 6455 sec 7.1.2) and does not
+        wait for the peer's CLOSE: call :meth:`recv` to read it. A second
+        call, or a call after :meth:`recv` has already answered the
+        client's CLOSE, sends nothing. After this every ``send_*`` raises.
 
         Args:
             code: Close status code (see ``WsCloseCode.*``).
             reason: Optional UTF-8 reason phrase (≤123 bytes).
         """
+        if self._close_sent:
+            return
+        self._close_sent = True
         var close_frame = WsFrame.close(code, reason)
         var wire = close_frame.encode(mask=False)
         try:
@@ -663,7 +763,7 @@ struct WsServer(Movable):
             while True:
                 var frame = conn.recv()
                 if frame.opcode == WsOpcode.CLOSE:
-                    break
+                    break  # recv() has already sent the CLOSE reply
                 conn.send_text(frame.text_payload())
 
         var srv = WsServer.bind(SocketAddr.localhost(9001))

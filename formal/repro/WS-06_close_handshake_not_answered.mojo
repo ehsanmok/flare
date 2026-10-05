@@ -1,11 +1,12 @@
 # PLATFORM: any
+# RESOLVED: WS-06 fixed on fix/formal-findings
 """WS-06: WsConnection does not take part in the closing handshake: a
 received CLOSE is never answered, an invalid CLOSE payload is not refused
 with 1002, and data can still be sent after close().
 
 Lean: Flare.Bugs.WS_06.counterexample_no_echo,
 Flare.Bugs.WS_06.counterexample_invalid_payload,
-Flare.Bugs.WS_06.counterexample_data_after_close (the shipped endpoint
+Flare.Bugs.WS_06.counterexample_data_after_close (the pre-fix endpoint oldStep
 violates CloseOK) and Flare.L3.Ws.Close.fixed_closeOK (fix meets spec).
 flare/ws/server.mojo:514-536 (recv returns CLOSE to the caller without
 replying), 600-616 (close() sends CLOSE, keeps no state, does not wait
@@ -20,7 +21,7 @@ CLOSE and has not sent one MUST send a CLOSE in response (echoing the
 code); a CLOSE payload of 1 byte, a code outside 1000-1003/1007-1014/
 3000-4999, or a reason that is not UTF-8 is a protocol error answered
 with 1002; after sending a CLOSE an endpoint MUST NOT send data frames.
-Actual: the client's CLOSE gets EOF and no CLOSE, a 1-byte CLOSE payload
+Before the fix: Actual: the client's CLOSE gets EOF and no CLOSE, a 1-byte CLOSE payload
 gets EOF and no 1002, and close() followed by send_text puts a TEXT frame
 on the wire after the CLOSE.
 

@@ -831,6 +831,16 @@ of what you might reasonably assume from the surrounding feature.
   limit to the reassembled payload: a longer message is answered with
   CLOSE 1009 and the call raises. It used to return each fragment as a
   message of its own.
+- `WsConnection` now takes part in the closing handshake (RFC 6455
+  sec 5.5.1). `recv()` answers a received CLOSE before returning it: it
+  echoes the status code, sends an empty CLOSE for an empty body, and
+  sends 1002 for a 1-byte body, a code that may not appear on the wire or
+  a reason that is not UTF-8. `close()` sends one CLOSE, no longer claims
+  to wait for the reply, and does nothing if a CLOSE went out already.
+  After a CLOSE, `send_text`, `send_binary` and `send_frame` raise
+  `NetworkError` instead of putting data frames on the wire; `send_frame`
+  now takes `mut self`. Clients used to see EOF (1006) instead of the
+  close code.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of

@@ -17,24 +17,27 @@ import Flare.L3_Protocol.Ws.Close
   EOF, not 1002; `close()` followed by `send_text` puts a TEXT frame after
   the CLOSE.
 * Fix (`fixStep`, a `close_sent` flag): `fixed_closeOK`.
+
+Status: resolved. The counterexamples are about the pre-fix endpoint
+`oldStep`; `fixed_ok` is about the shipped `fixStep`.
 -/
 namespace Flare.Bugs.WS_06
 open Flare Flare.L3.Ws.Close
 
-theorem counterexample_no_echo : ¬ CloseOK shipStep () := by
+theorem counterexample_no_echo : ¬ CloseOK oldStep () := by
   intro h
   have := h [.recv 8 [3, 232]]
-  simp [outs, Good, shipStep] at this
+  simp [outs, Good, oldStep] at this
 
-theorem counterexample_invalid_payload : ¬ CloseOK shipStep () := by
+theorem counterexample_invalid_payload : ¬ CloseOK oldStep () := by
   intro h
   have := h [.recv 8 [3]]
-  simp [outs, Good, shipStep] at this
+  simp [outs, Good, oldStep] at this
 
-theorem counterexample_data_after_close : ¬ CloseOK shipStep () := by
+theorem counterexample_data_after_close : ¬ CloseOK oldStep () := by
   intro h
   have := h [.close 1000, .sendText [108]]
-  simp [outs, Good, shipStep, isCloseOut, isDataOut] at this
+  simp [outs, Good, oldStep, isCloseOut, isDataOut] at this
 
 theorem reply_1002 : closeReply [3] = [3, 234] := by native_decide
 

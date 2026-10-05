@@ -204,7 +204,7 @@ File: `Ws/Handshake.lean`.
 
 File: `Ws/Close.lean`.
 
-**Model.** An endpoint is a step function over what the application sees: a received frame, `send_text`/`send_binary`, `close(code)`; each step writes frames. `shipStep` mirrors `WsConnection` (`server.mojo:473-536`, `600-616`); `fixStep` adds a `close_sent` flag. `validPayload` is RFC 6455 §5.5.1/§7.4: empty, or a code in 1000-1003, 1007-1014, 3000-4999 followed by UTF-8. `closeReply p` is the received code, or 1002 for an invalid body. `CloseOK` (via `Good`) says, for every trace: a CLOSE received while none has been written is answered with `closeReply`, and once a CLOSE has been written no data frame follows.
+**Model.** An endpoint is a step function over what the application sees: a received frame, `send_text`/`send_binary`, `close(code)`; each step writes frames. `oldStep` mirrors `WsConnection` before the fix (`server.mojo:473-536`, `600-616`); `fixStep` is the shipped endpoint, with a `close_sent` flag. `validPayload` is RFC 6455 §5.5.1/§7.4: empty, or a code in 1000-1003, 1007-1014, 3000-4999 followed by UTF-8. `closeReply p` is the received code, or 1002 for an invalid body. `CloseOK` (via `Good`) says, for every trace: a CLOSE received while none has been written is answered with `closeReply`, and once a CLOSE has been written no data frame follows.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -446,6 +446,8 @@ Status: resolved. `WsClient.recv_message` now skips PONG, requires a TEXT/BINARY
 
 ### WS-06: `WsConnection` does not take part in the closing handshake
 
+Status: resolved. `WsConnection` keeps a `_close_sent` flag. `recv` answers a received CLOSE (echoing the code, an empty CLOSE, or 1002 for an invalid body) unless one was sent, `close()` sends once and no longer claims to wait, and `send_text`/`send_binary`/`send_frame` raise once a CLOSE was sent. The counterexamples are about `oldStep`; `Bugs.WS_06.fixed_ok` is about the shipped `fixStep`.
+
 - **Severity:** Medium. Every connection that a client closes ends with EOF instead of a CLOSE reply, so clients see an abnormal closure (1006) and lose the close code. An invalid CLOSE body is not answered with 1002. After `close()` the server still puts data frames on the wire. `close()` is documented as "Send a CLOSE frame and wait for the client's CLOSE response", but it does not wait.
 - **RFC:** RFC 6455 §5.5.1: an endpoint that receives a CLOSE and has not sent one MUST send a CLOSE in response, and after sending a CLOSE it MUST NOT send more data. Per §7.4.1 and §7.1.7, a 1-byte body, an invalid code or a non-UTF-8 reason is a protocol error (1002).
 - **What goes wrong:**
@@ -453,7 +455,7 @@ Status: resolved. `WsClient.recv_message` now skips PONG, requires a TEXT/BINARY
   - The documented handler (`660-671`) breaks on CLOSE, and `__deinit__` closes the socket.
   - `close()` (`600-616`) keeps no state.
   - `send_text`/`send_binary`/`send_frame` (`473-512`) never check.
-- **Counterexample:** `Bugs.WS_06.counterexample_no_echo` (CLOSE 1000 gets no reply), `counterexample_invalid_payload` (a 1-byte body gets no 1002) and `counterexample_data_after_close` (`close(1000)` then `send_text` writes TEXT after CLOSE). All three are `¬ CloseOK shipStep ()`.
+- **Counterexample:** `Bugs.WS_06.counterexample_no_echo` (CLOSE 1000 gets no reply), `counterexample_invalid_payload` (a 1-byte body gets no 1002) and `counterexample_data_after_close` (`close(1000)` then `send_text` writes TEXT after CLOSE). All three are `¬ CloseOK oldStep ()`.
 - **Fix:** add a `close_sent` flag. On a received CLOSE, reply with the code (or an empty CLOSE, or 1002 for an invalid body) unless one was already sent; set the flag in `close()`; make `send_*` raise once it is set. `Bugs.WS_06.fixed_ok` (= `fixed_closeOK`) proves this on every trace.
 - **Repro:** `formal/repro/WS-06_close_handshake_not_answered.mojo` (forks `_handle_ws_connection` with the documented handler, and with a close-then-send handler)
 - **Observed (3 runs):** `client CLOSE 1000 -> server sent: (nothing)`, `client CLOSE 1-byte payload -> server sent: (nothing)`, `close() then send_text -> server sent: [op=8 code=1000][op=1]`, then `BUG REPRODUCED: closing handshake violated (echo missing: True; 1002 missing: True; data after CLOSE: True)`
@@ -544,4 +546,4 @@ After every flip, `git status --short flare/` showed none of my files. Other age
 | `Handshake.clientAccepts`, `clientRequest` | `ws/client.mojo:536-550`, `562-603`, `609-646` | `clientFixed_ok`, `Bugs.WS_04.*` | counterexample (WS-04) / fix proved |
 | `Handshake.srvShipped`, `srvResponse` | `ws/server.mojo:188-340` | `srvFixed_ok`, `Bugs.WS_05.*` | counterexample (WS-05) / fix proved |
 | `Handshake.firstVal`, `versionMismatch`, `reactorQual`, `reactor` | `http/headers.mojo:172-184`, `_reactor/conn_handle.mojo:143-152`, `835-860`, `1512-1523` | `reactor_upgrade_v13`, `reactorFixed_ok`, `Bugs.WS_07.*` | proved (version) / counterexample (WS-07) / fix proved |
-| `Close.shipStep` | `ws/server.mojo:473-536`, `600-616` | `fixed_closeOK`, `Bugs.WS_06.*` | counterexample (WS-06) / fix proved |
+| `Close.oldStep`, `Close.fixStep` | `ws/server.mojo:473-536`, `600-616` | `fixed_closeOK`, `Bugs.WS_06.*` | counterexample (WS-06) / fix proved |
