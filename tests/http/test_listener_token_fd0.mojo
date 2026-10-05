@@ -64,8 +64,10 @@ def _ensure_fd0_open() raises:
     the listener cannot be bound to fd 0 itself."""
     if external_call["fcntl", c_int](c_int(0), c_int(1), c_int(0)) >= c_int(0):
         return
-    var path = String("/dev/null")
-    var fd = external_call["open", c_int](path.unsafe_ptr(), c_int(0))
+    # dup(2) returns the lowest free descriptor, which is 0 here. (A direct
+    # external_call["open", ...] collides with the stdlib's declaration when
+    # this file is compiled into the http test aggregate.)
+    var fd = external_call["dup", c_int](c_int(1))
     if Int(fd) != 0:
         raise Error("setup: could not occupy fd 0")
 

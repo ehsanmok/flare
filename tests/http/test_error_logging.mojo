@@ -100,7 +100,7 @@ struct _Capture(Movable):
             # flare's read(2) shim: a second external_call["read", ...] with a
             # different signature collides with the stdlib's when this file
             # is compiled into a test aggregate.
-            var n = 0
+            var n: Int
             try:
                 n = Int(
                     _read_fd(self.read_fd, tmp.unsafe_ptr(), UInt(len(tmp)))
