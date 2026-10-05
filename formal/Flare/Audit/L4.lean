@@ -39,7 +39,9 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Router.splitPath_idem
 #print axioms Flare.L4.ComptimeRouter.router_equiv_comptime
 #print axioms Flare.L4.ComptimeRouter.serveCT_eq_serve
-#print axioms Flare.L4.ComptimeRouter.matchOne_spec
+#print axioms Flare.L4.ComptimeRouter.matchOne_eq_spec
+#print axioms Flare.L4.ComptimeRouter.matchOne_nonfinal_wild
+#print axioms Flare.L4.ComptimeRouter.scanCTOld_eq
 -- Middleware
 #print axioms Flare.L4.Middleware.logger_transparent
 #print axioms Flare.L4.Middleware.catchPanic_total

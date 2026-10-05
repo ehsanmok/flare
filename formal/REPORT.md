@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61988 lines) |
-| Theorems | 3251 |
-| Headline theorems in the axiom audit | 1060 |
+| Lean files | 298 (62065 lines) |
+| Theorems | 3255 |
+| Headline theorems in the axiom audit | 1062 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 75 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 76 of 138 |
 
 Six findings are rated high:
 
@@ -1835,9 +1835,10 @@ router inspects is ASCII. The comptime model covers `routes.mojo:66-284`.
 | `Flare.L4.Router.mount_compose` | mounting `leaf` at `p2` inside a mount at `p1` is mounting it at `p1 ++ p2` | proved |
 | `Flare.L4.Router.mount_boundary` | `/api` does not claim `/apix` | proved |
 | `Flare.L4.Router.splitPath_idem`, `route_ignores_query` | path splitting computes a normal form, and the query never affects routing | proved |
-| `Flare.L4.ComptimeRouter.serveCT_eq_serve` | on any table, ComptimeRouter answers like the runtime router with the same routes | proved |
+| `Flare.L4.ComptimeRouter.serveCT_eq_serve` | on any table of valid patterns, ComptimeRouter answers like the runtime router with the same routes | proved |
+| `Flare.L4.ComptimeRouter.matchOne_eq_spec`, `matchOne_nonfinal_wild` | the shipped `_match_one` (fixed, APP-10) meets the matching spec on every pattern, and a non-final `*` matches nothing | proved |
 | `Flare.L4.ComptimeRouter.router_equiv_comptime` | on valid patterns, registering the table succeeds and both routers agree on every request | proved |
-| `Flare.Bugs.APP_10.matchOne_violates_spec` | ComptimeRouter matches `/files/a` against the invalid pattern `/files/*/meta` | counterexample |
+| `Flare.Bugs.APP_10.matchOne_violates_spec` | the pre-fix ComptimeRouter matched `/files/a` against the invalid pattern `/files/*/meta` | counterexample (resolved) |
 
 The Router module has 61 theorems, of which the table lists the headline
 ones. The rest are lemmas about splitting, compilation and stripping.
@@ -2911,7 +2912,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-491 | `wantsClose_sound_close`, `wantsClose_spec` | APP-02 |
 | `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:460-463, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapImpl_eq_spec` | proved; APP-06 |
 | `Flare.L4.Router.splitPath`, `compile`, `matchSegs`, `serve`, `serveMounts` | http/router.mojo:111-156, 175-214, 339-394, 488-498, 675-929 | `serve_eq_spec`, `serve_valid`, `allow_exact`, `mount_compose` | proved |
-| `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime` | proved; APP-10 |
+| `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime`, `matchOne_eq_spec` | proved; APP-10 |
 | `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |
 | `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
 | `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compressFixed_vary` | APP-26, APP-27 |
@@ -3098,7 +3099,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-04 | Medium | resolved | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
 | APP-05 | Low | resolved | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
 | APP-06 | Low | resolved | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
-| APP-10 | Low | open | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
+| APP-10 | Low | resolved | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
 | APP-20 | Low | open | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
 | APP-21 | Low | open | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
 | APP-22 | Low | open | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
@@ -4862,8 +4863,9 @@ rejects.
 as a tail wildcard. `/files/*/meta` then matches `GET /files/a`.
 
 **Lean.** `Flare.Bugs.APP_10.router_rejects`, `comptime_misroutes` and
-`matchOne_violates_spec`. The fix is proved sufficient by `fixed_meets_spec`,
-which is general.
+`matchOne_violates_spec` (about the pre-fix `matchOneOld` / `serveCTOld`). The
+shipped `matchOne` is proved to meet the spec by `fixed_meets_spec`, which is
+general (via `Flare.L4.ComptimeRouter.matchOne_eq_spec`).
 
 **Fix.** Return false when the wildcard is not the last segment.
 
@@ -4871,6 +4873,8 @@ which is general.
 
 - Observed: `BUG REPRODUCED: pattern /files/*/meta matched GET /files/a with status 200 body meta:a`
 - Flip: `OK: GET /files/a is 404 for pattern /files/*/meta`
+
+Status: resolved. `_match_one` returns `False` for a `*` that is not the last pattern segment (`if j != len(pat_segs) - 1`), so a pattern like `/files/*/meta` matches nothing instead of capturing the tail. Tests: `tests/http/test_routes_comptime.mojo::test_non_final_wildcard_matches_nothing`, `::test_final_wildcard_still_captures_rest`. The model `matchOne`/`scanCT`/`serveCT` are the shipped ones; `matchOneOld`/`scanCTOld`/`serveCTOld` the pre-fix ones.
 
 #### APP-20: `negotiate_encoding` mishandles `*`
 

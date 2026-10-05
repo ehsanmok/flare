@@ -3039,6 +3039,12 @@ from test_routes_comptime import (
 from test_routes_comptime import (
     test_comptime_matches_runtime_route_shape as test_routes_comptime__test_comptime_matches_runtime_route_shape,
 )
+from test_routes_comptime import (
+    test_non_final_wildcard_matches_nothing as test_routes_comptime__test_non_final_wildcard_matches_nothing,
+)
+from test_routes_comptime import (
+    test_final_wildcard_still_captures_rest as test_routes_comptime__test_final_wildcard_still_captures_rest,
+)
 from test_server import (
     test_find_crlfcrlf_simple as test_server__test_find_crlfcrlf_simple,
 )
@@ -5872,6 +5878,8 @@ def main() raises:
     suite.test[
         test_routes_comptime__test_comptime_matches_runtime_route_shape
     ]()
+    suite.test[test_routes_comptime__test_non_final_wildcard_matches_nothing]()
+    suite.test[test_routes_comptime__test_final_wildcard_still_captures_rest]()
     # tests/http/test_server.mojo
     suite.test[test_server__test_find_crlfcrlf_simple]()
     suite.test[test_server__test_find_crlfcrlf_with_headers]()

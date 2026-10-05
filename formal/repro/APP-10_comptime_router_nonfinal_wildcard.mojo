@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-10 fixed on fix/formal-findings
 """APP-10: ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern.
 
 Lean: Flare.Bugs.APP_10.matchOne_violates_spec (counterexample),
@@ -10,7 +11,7 @@ rejects the same pattern at flare/http/router.mojo:148-151.
 Expected: the pattern "/files/*/meta" is invalid (the runtime Router raises
 "wildcard '*' must be the last segment in a route"), so it must never match;
 GET /files/a is a 404.
-Actual: ComptimeRouter compiles the table and `_match_one` treats the
+Before the fix: ComptimeRouter compiles the table and `_match_one` treats the
 middle `*` as a tail wildcard, returning True as soon as it reaches it, so
 GET /files/a (no "meta" segment) is dispatched to the handler with
 param("*") == "a".
@@ -21,7 +22,14 @@ the wildcard is not the last pattern segment
 compile time.
 """
 
-from flare.http import ComptimeRoute, ComptimeRouter, Request, Response, Method, ok
+from flare.http import (
+    ComptimeRoute,
+    ComptimeRouter,
+    Request,
+    Response,
+    Method,
+    ok,
+)
 
 
 def _meta(req: Request) raises -> Response:
@@ -38,7 +46,10 @@ def main() raises:
     var resp = r.serve(Request(method=Method.GET, url="/files/a"))
     if resp.status != 404:
         print(
-            "BUG REPRODUCED: pattern /files/*/meta matched GET /files/a with status",
+            (
+                "BUG REPRODUCED: pattern /files/*/meta matched GET /files/a"
+                " with status"
+            ),
             resp.status,
             "body",
             resp.text(),

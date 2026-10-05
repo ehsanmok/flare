@@ -255,13 +255,20 @@ def _match_one(
     """Attempt to match one request against one comptime-compiled pattern.
 
     Same semantics as the runtime Router's ``_match``: literal equality,
-    ``:name`` captures one segment, trailing ``*`` captures the rest.
+    ``:name`` captures one segment, trailing ``*`` captures the rest. A
+    ``*`` that is not the last segment never matches.
     """
     var i = 0
     var j = 0
     while j < len(pat_segs):
         var seg = pat_segs[j]
         if _seg_is_wildcard(seg):
+            # ``*`` captures the rest of the path, so it is only valid as
+            # the final pattern segment (the runtime ``Router`` rejects
+            # anything else at registration). A pattern with a non-final
+            # ``*`` is invalid and matches nothing (APP-10).
+            if j != len(pat_segs) - 1:
+                return False
             if i >= len(url_segs):
                 return False
             var tail = String("")

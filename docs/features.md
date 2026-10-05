@@ -148,7 +148,7 @@ literal `flare/0.1.0` for nine releases.
 | Surface | Where |
 |---|---|
 | `Router` — runtime trie with path parameters (`:name`), wildcards (`*`), method dispatch, 404 / 405-with-`Allow`. `Handler & Copyable & Movable` so `srv.serve(router^, num_workers=N)` resolves to the multi-worker overload; boxed struct handlers shared across worker copies via an Arc-style refcount | [`router.mojo`](../examples/basic/router.mojo), [`tests/http/test_router_copy.mojo`](../tests/http/test_router_copy.mojo) |
-| `ComptimeRouter[ROUTES]`, `ComptimeRoute(method, path, handler)` — segments parsed at compile time, dispatch loop unrolled per route | [`comptime_router.mojo`](../examples/advanced/comptime_router.mojo) |
+| `ComptimeRouter[ROUTES]`, `ComptimeRoute(method, path, handler)` — segments parsed at compile time, dispatch loop unrolled per route; as in `Router`, `*` is valid only as the last segment — a pattern with a middle `*` (e.g. `/files/*/meta`) matches nothing (404) instead of capturing the tail | [`comptime_router.mojo`](../examples/advanced/comptime_router.mojo) |
 | Application-scoped state via captured handlers — wrap your handler in a struct that holds shared state by value; for shared mutation, use a `flare.runtime.Pool` heap-address handle | [`state.mojo`](../examples/intermediate/state.mojo) |
 
 ## Handlers and extractors
