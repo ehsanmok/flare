@@ -211,8 +211,8 @@ runtime/handoff.mojo:150-195 (`_HandoffQueue`) and 312-365
 | `push_refines`, `pop_refines`, `drain_refines` | The ring buffer refines a bounded FIFO list. | proved |
 | `cap_zero_safe` | A capacity-0 queue never divides by zero. | proved |
 | `chooseTarget_spec` | The target is -1 or a peer other than the caller whose load is at least `steal_threshold` below the local load. | proved |
-| `peekFixed_below_capacity` | With the fix, `peek_idle_worker` returns -1 or a peer strictly below capacity, and -1 only when every peer is full. | proved |
-| `Flare.Bugs.RT_04.peek_returns_full_peer` | flare returns a full peer. | counterexample (RT-04) |
+| `peek_below_capacity` | The shipped `peek_idle_worker` returns -1 or a peer strictly below capacity, and -1 only when every peer is full. | proved |
+| `Flare.Bugs.RT_04.peek_returns_full_peer` | The pre-fix `peek_idle_worker` (`peekIdleOld`) returns a full peer. | counterexample (RT-04, resolved) |
 
 ### UDS frame multiplexer (`FrameMux.lean`)
 
@@ -672,11 +672,18 @@ attempt.
 Spec (handoff.mojo:315-317): "Returns -1 when the policy is disabled or no peer
 queue is below capacity".
 What goes wrong: the scan starts at `best_size = capacity + 1` (:326).
-Lean: `Flare.Bugs.RT_04.peek_returns_full_peer`. Fix: start at `capacity`;
-`peekFixed_below_capacity`.
-Repro: `formal/repro/RT-04_handoff_peek_returns_full_peer.mojo`, observed
+Lean: `Flare.Bugs.RT_04.peek_returns_full_peer` (about the pre-fix
+`peekIdleOld`). Fix: start at `capacity`; `peek_below_capacity` for the shipped
+`peek_idle_worker`.
+Repro: `formal/repro/RT-04_handoff_peek_returns_full_peer.mojo`, observed before
+the fix
 `BUG REPRODUCED: peek_idle_worker returned worker 1 whose queue is full; try_handoff to it returns False`.
-Flip: `OK: no peer below capacity, peek_idle_worker returned -1`, exit 0.
+After the fix: `OK: no peer below capacity, peek_idle_worker returned -1`, exit 0.
+
+Status: resolved. `peek_idle_worker` starts its scan at `best_size = capacity`;
+tests `tests/runtime/test_handoff.mojo::test_peek_idle_skips_peer_whose_queue_is_full`,
+`::test_peek_idle_prefers_non_full_peer_over_full_one` and
+`::test_choose_target_never_picks_full_peer`.
 
 ### RT-05: `BufferPool.acquire` can return less capacity than requested
 
@@ -896,7 +903,7 @@ lists record ids, not tokens.
 | `Flare.L2.TimerWheel.stepTick`, `drainOne`, `jump`, `jumpIds`, `rebucketOne`, `advance` | flare/runtime/timer_wheel.mojo:169-293 | `advance_spec`, `jump_equiv_ticks`, `run_nodup` | proved |
 | `Flare.L2.TimerWheel.nextFire`, `hintLimit` | flare/runtime/timer_wheel.mojo (`next_fire_ms`) | `nextFire_lower_bound`, `RT_01.nextFire_not_lower_bound` | proved; counterexample (RT-01, resolved) |
 | `Flare.L2.Handoff.pushed`, `pop`, `drainGo` | flare/runtime/handoff.mojo:150-195 | `push_refines`, `pop_refines`, `drain_refines`, `cap_zero_safe` | proved |
-| `Flare.L2.Handoff.peekWith` | flare/runtime/handoff.mojo:312-334 | `RT_04.peek_returns_full_peer`, `peekFixed_below_capacity` | counterexample (RT-04) |
+| `Flare.L2.Handoff.peekWith` | flare/runtime/handoff.mojo (`peek_idle_worker`) | `RT_04.peek_returns_full_peer`, `peek_below_capacity` | counterexample (RT-04, resolved) |
 | `Flare.L2.Handoff.chooseTarget` | flare/runtime/handoff.mojo:336-365 | `chooseTarget_spec` | proved |
 | `Flare.L2.FrameMux.encodeFrame`, `decodeFrame` | flare/uds/frame_mux.mojo:97-130 | `decode_encode` | proved |
 | `Flare.L2.FrameMux.feedLoop`, `feed`, `route`, `poll` | flare/uds/frame_mux.mojo:165-243 | `feed_chunking`, `drain_sound`, `drain_complete`, `routeAll_eq` | proved |

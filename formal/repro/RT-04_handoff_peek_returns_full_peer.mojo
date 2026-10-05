@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: RT-04 fixed on fix/formal-findings
 """RT-04: WorkerHandoffPool.peek_idle_worker returns a peer whose queue is
 full.
 
 Lean: Flare.Bugs.RT_04.peek_returns_full_peer (counterexample) and
-Flare.Bugs.RT_04.peekFixed_below_capacity (fix meets spec).
+Flare.Bugs.RT_04.peek_below_capacity (shipped code meets spec).
 flare/runtime/handoff.mojo:312-334 @59bda50.
 
 Expected (docstring): "Returns -1 when the policy is disabled or no peer
 queue is below capacity."
-Actual: the scan starts from best_size = capacity + 1 and keeps any peer
+Before the fix: the scan starts from best_size = capacity + 1 and keeps any peer
 with size < best_size, so a peer whose queue holds exactly capacity
 tokens is returned. choose_handoff_target then picks that peer and the
 following try_handoff fails; the caller falls back to local accept, so

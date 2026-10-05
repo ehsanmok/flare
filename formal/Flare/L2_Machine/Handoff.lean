@@ -148,7 +148,7 @@ theorem cap_zero_safe (fd : Int) :
 
 /-! ## peek_idle_worker / choose_handoff_target -/
 
-/-- Scan loop of `peek_idle_worker` (handoff.mojo:327-333). -/
+/-- Scan loop of `peek_idle_worker` (handoff.mojo `peek_idle_worker`). -/
 def peekGo (excl : Int) : List Nat → Nat → Int → Nat → Int × Nat
   | [], _, b, bs => (b, bs)
   | s :: rest, i, b, bs =>
@@ -156,19 +156,22 @@ def peekGo (excl : Int) : List Nat → Nat → Int → Nat → Int × Nat
     else if s < bs then peekGo excl rest (i + 1) i s
     else peekGo excl rest (i + 1) b bs
 
-/-- mirrors flare/runtime/handoff.mojo:312-334 @59bda50
-`sizes[i]` = `queues[i].size()`; `initBest` is `capacity + 1` in flare. -/
+/-- mirrors flare/runtime/handoff.mojo `peek_idle_worker` (fixed, RT-04)
+`sizes[i]` = `queues[i].size()`; `initBest` is `capacity` in flare (it was
+`capacity + 1` before RT-04). -/
 def peekWith (initBest : Nat) (enabled : Bool) (_cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
   if !enabled then -1
   else if sizes.length ≤ 1 then -1
   else (peekGo excl sizes 0 (-1) (initBest)).1
 
+/-- Shipped `peek_idle_worker`: only peers strictly below capacity qualify. -/
 def peekIdle (enabled : Bool) (cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
-  peekWith (cap + 1) enabled cap sizes excl
-
-/-- The minimal fix: only peers strictly below capacity qualify. -/
-def peekIdleFixed (enabled : Bool) (cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
   peekWith cap enabled cap sizes excl
+
+/-- Pre-fix `peek_idle_worker` (scan started at `capacity + 1`), kept for the
+RT-04 counterexample. -/
+def peekIdleOld (enabled : Bool) (cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
+  peekWith (cap + 1) enabled cap sizes excl
 
 theorem peekGo_spec (excl : Int) (l : List Nat) (i : Nat) (b : Int) (bs : Nat) :
     ((peekGo excl l i b bs).1 = b ∧ (peekGo excl l i b bs).2 = bs ∧
@@ -207,15 +210,15 @@ theorem peekGo_spec (excl : Int) (l : List Nat) (i : Nat) (b : Int) (bs : Nat) :
           · rw [h1]; congr 1; omega
           · rw [show i + (k + 1) = i + 1 + k by omega]; exact h2
 
-/-- Fixed peek: the result is -1, or a peer ≠ exclude whose queue is strictly
+/-- Shipped peek: the result is -1, or a peer ≠ exclude whose queue is strictly
 below capacity; and -1 (with handoff enabled and ≥ 2 workers) only when every
 peer queue is full. -/
-theorem peekFixed_below_capacity (cap : Nat) (sizes : List Nat) (excl : Int) (en : Bool) :
-    let r := peekIdleFixed en cap sizes excl
+theorem peek_below_capacity (cap : Nat) (sizes : List Nat) (excl : Int) (en : Bool) :
+    let r := peekIdle en cap sizes excl
     (r = -1 ∨ ∃ k, ∃ hk : k < sizes.length, r = k ∧ (k : Int) ≠ excl ∧ sizes[k] < cap) ∧
     (en = true → 2 ≤ sizes.length → r = -1 →
       ∀ k (hk : k < sizes.length), (k : Int) ≠ excl → cap ≤ sizes[k]) := by
-  simp only [peekIdleFixed, peekWith]
+  simp only [peekIdle, peekWith]
   cases en
   · simp
   · by_cases hl : sizes.length ≤ 1
@@ -226,7 +229,7 @@ theorem peekFixed_below_capacity (cap : Nat) (sizes : List Nat) (excl : Int) (en
       · refine ⟨Or.inr ⟨k, hk, by simpa using h1, by simpa using h2, h4⟩, fun _ _ hr => ?_⟩
         rw [h1] at hr; omega
 
-/-- mirrors flare/runtime/handoff.mojo:336-365 @59bda50 -/
+/-- mirrors flare/runtime/handoff.mojo `choose_handoff_target` (fixed, RT-04) -/
 def chooseTarget (enabled : Bool) (cap : Nat) (sizes : List Nat) (thr : Int)
     (local_ : Int) (localLoad : Int) : Int :=
   if !enabled then -1
@@ -250,7 +253,7 @@ theorem chooseTarget_spec (en : Bool) (cap : Nat) (sizes : List Nat) (thr local_
   have hen' : en = true := by simpa using hen
   subst hen'
   simp only [peekIdle, peekWith, Bool.not_true, Bool.false_eq_true, if_false, hl]
-  rcases peekGo_spec local_ sizes 0 (-1) (cap + 1) with ⟨h1, _, _⟩ | ⟨k, hk, h1, h2, _, _⟩
+  rcases peekGo_spec local_ sizes 0 (-1) cap with ⟨h1, _, _⟩ | ⟨k, hk, h1, h2, _, _⟩
   · rw [h1]; simp
   · rw [h1]; simp only [Nat.zero_add] at h2 ⊢
     have hk0 : ¬ ((k : Int) < 0) := by omega

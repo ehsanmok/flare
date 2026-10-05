@@ -177,6 +177,39 @@ def test_choose_target_single_worker_keeps_local() raises:
     assert_equal(pool.choose_handoff_target(local_worker=0, local_load=100), -1)
 
 
+def test_peek_idle_skips_peer_whose_queue_is_full() raises:
+    """RT-04: ``peek_idle_worker`` returns -1 when no peer queue is below
+    capacity. The scan used to start at ``capacity + 1`` and so returned a
+    peer holding exactly ``capacity`` tokens, whose ``try_handoff`` fails."""
+    var pool = WorkerHandoffPool(HandoffPolicy(True, 1, 1), 2)
+    assert_true(pool.try_handoff(1, 42))  # worker 1's queue (capacity 1) full
+    assert_equal(pool.peek_idle_worker(0), -1)
+    assert_false(pool.try_handoff(1, 43))
+
+
+def test_peek_idle_prefers_non_full_peer_over_full_one() raises:
+    """RT-04: with one full peer and one below capacity the result is the
+    non-full peer, whichever order they are in."""
+    var pool = WorkerHandoffPool(HandoffPolicy(True, 2, 1), 3)
+    _ = pool.try_handoff(1, 1)
+    _ = pool.try_handoff(1, 2)  # worker 1 full (2 of 2)
+    _ = pool.try_handoff(2, 3)  # worker 2 has room (1 of 2)
+    assert_equal(pool.peek_idle_worker(0), 2)
+    var pool2 = WorkerHandoffPool(HandoffPolicy(True, 2, 1), 3)
+    _ = pool2.try_handoff(2, 1)
+    _ = pool2.try_handoff(2, 2)  # worker 2 full
+    _ = pool2.try_handoff(1, 3)  # worker 1 has room
+    assert_equal(pool2.peek_idle_worker(0), 1)
+
+
+def test_choose_target_never_picks_full_peer() raises:
+    """RT-04: ``choose_handoff_target`` must not name a peer whose queue is
+    full, so the following ``try_handoff`` is not a wasted attempt."""
+    var pool = WorkerHandoffPool(HandoffPolicy(True, 1, 1), 2)
+    _ = pool.try_handoff(1, 42)
+    assert_equal(pool.choose_handoff_target(local_worker=0, local_load=100), -1)
+
+
 def main() raises:
     test_push_pop_basic()
     test_push_full_refuses()
@@ -194,4 +227,7 @@ def main() raises:
     test_choose_target_keeps_uniform_local()
     test_choose_target_disabled_keeps_local()
     test_choose_target_single_worker_keeps_local()
-    print("test_handoff: 16 passed")
+    test_peek_idle_skips_peer_whose_queue_is_full()
+    test_peek_idle_prefers_non_full_peer_over_full_one()
+    test_choose_target_never_picks_full_peer()
+    print("test_handoff: 19 passed")

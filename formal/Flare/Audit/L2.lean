@@ -65,7 +65,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.Handoff.pop_refines
 #print axioms Flare.L2.Handoff.drain_refines
 #print axioms Flare.L2.Handoff.cap_zero_safe
-#print axioms Flare.L2.Handoff.peekFixed_below_capacity
+#print axioms Flare.L2.Handoff.peek_below_capacity
 #print axioms Flare.L2.Handoff.chooseTarget_spec
 -- FrameMux / FrameDemux
 #print axioms Flare.L2.FrameMux.decode_encode
@@ -120,7 +120,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.RT_03.poll_blocks_unarmed
 #print axioms Flare.Bugs.RT_03.poll_never_blocks_unarmed
 #print axioms Flare.Bugs.RT_04.peek_returns_full_peer
-#print axioms Flare.Bugs.RT_04.peekFixed_below_capacity
+#print axioms Flare.Bugs.RT_04.peek_below_capacity
 #print axioms Flare.Bugs.RT_05.acquire_after_shrunk_release
 #print axioms Flare.Bugs.RT_05.releaseFixed_preserves_capacity
 #print axioms Flare.Bugs.RT_06.persistentFailOpen_unbounded

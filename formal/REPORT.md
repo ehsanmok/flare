@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61540 lines) |
+| Lean files | 298 (61549 lines) |
 | Theorems | 3242 |
 | Headline theorems in the axiom audit | 1041 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 47 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 48 of 138 |
 
 Six findings are rated high:
 
@@ -769,8 +769,8 @@ runtime/handoff.mojo:150-195 (`_HandoffQueue`) and 312-365
 | `push_refines`, `pop_refines`, `drain_refines` | The ring buffer refines a bounded FIFO list. | proved |
 | `cap_zero_safe` | A capacity-0 queue never divides by zero. | proved |
 | `chooseTarget_spec` | The target is -1 or a peer other than the caller whose load is at least `steal_threshold` below the local load. | proved |
-| `peekFixed_below_capacity` | With the fix, `peek_idle_worker` returns -1 or a peer strictly below capacity, and -1 only when every peer is full. | proved |
-| `Flare.Bugs.RT_04.peek_returns_full_peer` | flare returns a full peer. | counterexample (RT-04) |
+| `peek_below_capacity` | The shipped `peek_idle_worker` returns -1 or a peer strictly below capacity, and -1 only when every peer is full. | proved |
+| `Flare.Bugs.RT_04.peek_returns_full_peer` | The pre-fix `peek_idle_worker` (`peekIdleOld`) returns a full peer. | counterexample (RT-04, resolved) |
 
 #### UDS frame multiplexer (`FrameMux.lean`)
 
@@ -2728,7 +2728,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.TimerWheel.stepTick`, `drainOne`, `jump`, `jumpIds`, `rebucketOne`, `advance` | flare/runtime/timer_wheel.mojo:169-293 | `advance_spec`, `jump_equiv_ticks`, `run_nodup` | proved |
 | `Flare.L2.TimerWheel.nextFire`, `hintLimit` | flare/runtime/timer_wheel.mojo (`next_fire_ms`) | `nextFire_lower_bound`, `RT_01.nextFire_not_lower_bound` | proved; counterexample (RT-01, resolved) |
 | `Flare.L2.Handoff.pushed`, `pop`, `drainGo` | flare/runtime/handoff.mojo:150-195 | `push_refines`, `pop_refines`, `drain_refines`, `cap_zero_safe` | proved |
-| `Flare.L2.Handoff.peekWith` | flare/runtime/handoff.mojo:312-334 | `RT_04.peek_returns_full_peer`, `peekFixed_below_capacity` | counterexample (RT-04) |
+| `Flare.L2.Handoff.peekWith` | flare/runtime/handoff.mojo (`peek_idle_worker`) | `RT_04.peek_returns_full_peer`, `peek_below_capacity` | counterexample (RT-04, resolved) |
 | `Flare.L2.Handoff.chooseTarget` | flare/runtime/handoff.mojo:336-365 | `chooseTarget_spec` | proved |
 | `Flare.L2.FrameMux.encodeFrame`, `decodeFrame` | flare/uds/frame_mux.mojo:97-130 | `decode_encode` | proved |
 | `Flare.L2.FrameMux.feedLoop`, `feed`, `route`, `poll` | flare/uds/frame_mux.mojo:165-243 | `feed_chunking`, `drain_sound`, `drain_complete`, `routeAll_eq` | proved |
@@ -3008,7 +3008,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | RT-01 | Low | resolved | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
 | RT-02 | Low | resolved | `writev_buf_all` returns normally after a short write | `Flare/Bugs/RT_02.lean` | `repro/RT-02_writev_all_silent_short_write.mojo` (any) |
 | RT-03 | Medium | resolved | `UringReactor.poll` can block with no wakeup read armed | `Flare/Bugs/RT_03.lean` | `repro/RT-03_uring_poll_blocks_unarmed.mojo` (linux) |
-| RT-04 | Low | open | `peek_idle_worker` returns a peer whose queue is full | `Flare/Bugs/RT_04.lean` | `repro/RT-04_handoff_peek_returns_full_peer.mojo` (any) |
+| RT-04 | Low | resolved | `peek_idle_worker` returns a peer whose queue is full | `Flare/Bugs/RT_04.lean` | `repro/RT-04_handoff_peek_returns_full_peer.mojo` (any) |
 | RT-05 | Low | open | `BufferPool.acquire` can return less capacity than requested | `Flare/Bugs/RT_05.lean` | `repro/RT-05_buffer_pool_capacity_contract.mojo` (any) |
 | RT-06 | Medium | resolved | the `MAX_POOL_SIZE` thread cap is never enforced on macOS arm64 | `Flare/Bugs/RT_06.lean` | `repro/RT-06_pool_cap_not_enforced_macos.mojo` (macos) |
 | RT-07 | Low | open | one fail-open acquire raises the thread cap permanently | `Flare/Bugs/RT_07.lean` | `repro/RT-07_pool_semaphore_fail_open_drift.mojo` (any) |
@@ -3545,11 +3545,18 @@ attempt.
 Spec (handoff.mojo:315-317): "Returns -1 when the policy is disabled or no peer
 queue is below capacity".
 What goes wrong: the scan starts at `best_size = capacity + 1` (:326).
-Lean: `Flare.Bugs.RT_04.peek_returns_full_peer`. Fix: start at `capacity`;
-`peekFixed_below_capacity`.
-Repro: `formal/repro/RT-04_handoff_peek_returns_full_peer.mojo`, observed
+Lean: `Flare.Bugs.RT_04.peek_returns_full_peer` (about the pre-fix
+`peekIdleOld`). Fix: start at `capacity`; `peek_below_capacity` for the shipped
+`peek_idle_worker`.
+Repro: `formal/repro/RT-04_handoff_peek_returns_full_peer.mojo`, observed before
+the fix
 `BUG REPRODUCED: peek_idle_worker returned worker 1 whose queue is full; try_handoff to it returns False`.
-Flip: `OK: no peer below capacity, peek_idle_worker returned -1`, exit 0.
+After the fix: `OK: no peer below capacity, peek_idle_worker returned -1`, exit 0.
+
+Status: resolved. `peek_idle_worker` starts its scan at `best_size = capacity`;
+tests `tests/runtime/test_handoff.mojo::test_peek_idle_skips_peer_whose_queue_is_full`,
+`::test_peek_idle_prefers_non_full_peer_over_full_one` and
+`::test_choose_target_never_picks_full_peer`.
 
 #### RT-05: `BufferPool.acquire` can return less capacity than requested
 

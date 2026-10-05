@@ -323,7 +323,10 @@ struct WorkerHandoffPool(Movable):
         if self.num <= 1:
             return -1
         var best = -1
-        var best_size = self.policy.capacity + 1
+        # Only peers strictly below capacity qualify: starting at
+        # ``capacity + 1`` returned a peer whose queue was exactly full,
+        # for which the following ``try_handoff`` always fails (RT-04).
+        var best_size = self.policy.capacity
         for i in range(self.num):
             if i == exclude:
                 continue
