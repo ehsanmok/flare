@@ -228,16 +228,16 @@ routing to per-stream inboxes, id allocation.
 
 ### UDP recvfrom address decoding (`Udp.lean`)
 
-udp/socket.mojo:279-283, 330-334 and net/_libc.mojo:303-397. Hypothesis
+udp/socket.mojo:279-285, 332-338 (fixed, NET-01: `implBufLen` is the 28-byte `sockaddr_in6` size; the pre-fix 16 is `oldBufLen`) and net/_libc.mojo:303-397. Hypothesis
 `RecvfromFills bufLen saLen sa stack mem`: the kernel copies
 `min(bufLen, saLen)` bytes of the sender sockaddr into the buffer and leaves
 memory past the buffer untouched.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `impl_reads_past_buffer` | The IPv6 decoder reads offsets 16..23 of a 16-byte buffer. | proved |
-| `impl_addr6` | With the 16-byte buffer, the decoded IPv6 address is 8 bytes of the sender plus 8 bytes of stack. | proved |
-| `fixed_addr6` | With a 28-byte buffer the decoded address and port are the sender's. | proved |
+| `old_reads_past_buffer` | Pre-fix: the IPv6 decoder reads offsets 16..23 of a 16-byte buffer. | proved |
+| `old_addr6` | Pre-fix: with the 16-byte buffer, the decoded IPv6 address is 8 bytes of the sender plus 8 bytes of stack. | proved |
+| `impl_addr6` | With the shipped 28-byte buffer the decoded address and port are the sender's. | proved |
 | `addr4_ok` | IPv4 senders decode correctly with any buffer of at least 16 bytes. | proved |
 
 ### UDS sockaddr_un (`Uds.lean`)
@@ -401,6 +401,7 @@ Repro: `formal/repro/NET-01_udp_recvfrom_ipv6_sender.mojo`, observed
 `BUG REPRODUCED: recv_from reported sender [::307:0:0:0]:52925 but the datagram came from [::1]:52925`
 (the wrong half is stack contents and varies between runs).
 Flip: `OK: recv_from reported the IPv6 sender [::1]:52884`, exit 0.
+Status: resolved. `recv_from` and `try_recv_from` allocate and pass `SOCKADDR_IN6_SIZE`; the model's `implBufLen` is now 28 (old: `oldBufLen`, `old_addr6`; shipped: `impl_addr6`). Tests: `tests/udp/test_udp.mojo::test_recv_from_reports_ipv6_sender`, `::test_try_recv_from_reports_ipv6_sender`.
 
 ### NET-02: `write_all` livelocks if `send` returns 0
 
@@ -851,7 +852,7 @@ lists record ids, not tokens.
 | `Flare.L2.FrameMux.feedM`, `feedLoopM` | flare/uds/frame_mux.mojo:176-207 | `NET_04.feed_after_error_duplicates`, `feedMFixed_error_stuck` | counterexample (NET-04) |
 | `Flare.L2.FrameMux.nextId` | flare/uds/frame_mux.mojo:274-280 | `nextId_injective`, `nextId_wraps` | proved |
 | `Flare.L2.Udp.readPort`, `readAddr4`, `readAddr6` | flare/net/_libc.mojo:303-397 | `impl_addr6`, `addr4_ok` | proved |
-| `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-283, 330-334 | `impl_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | counterexample (NET-01) |
+| `Flare.L2.Udp.implBufLen` | flare/udp/socket.mojo:279-285, 332-338 | `impl_addr6`, `old_reads_past_buffer`, `NET_01.recvFrom_ipv6_wrong_sender` | proved; counterexample (NET-01) |
 | `Flare.L2.Uds.fill` | flare/uds/_libc.mojo:55-107 | `fill_len_le` | proved |
 | `Flare.L2.Uds.readPath` | flare/uds/_libc.mojo:110-133 | `readPath_fill_iff_ascii`, `NET_06.decode_encode_not_id` | counterexample (NET-06) |
 | `Flare.L2.DnsCache.key` | flare/dns/cache.mojo:81-94 | `key_fqdn_case`, `key_not_idempotent` | proved |

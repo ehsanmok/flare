@@ -37,7 +37,7 @@ from ..net._libc import (
     _strerror,
     SOL_SOCKET,
     SO_BROADCAST,
-    SOCKADDR_IN_SIZE,
+    SOCKADDR_IN6_SIZE,
     MSG_DONTWAIT,
 )
 
@@ -276,11 +276,13 @@ struct UdpSocket(Movable):
         queued datagrams in one reactor tick without touching
         ``SO_RCVTIMEO`` per call.
         """
-        var peer_buf = stack_allocation[Int(SOCKADDR_IN_SIZE), UInt8]()
-        for i in range(Int(SOCKADDR_IN_SIZE)):
+        # Sized for sockaddr_in6: a 16-byte buffer truncates an IPv6
+        # sender and the decoder then reads sin6_addr past its end.
+        var peer_buf = stack_allocation[Int(SOCKADDR_IN6_SIZE), UInt8]()
+        for i in range(Int(SOCKADDR_IN6_SIZE)):
             peer_buf.unsafe_offset(i).unsafe_write(0)
         var peer_len = stack_allocation[1, c_uint]()
-        peer_len.unsafe_write(SOCKADDR_IN_SIZE)
+        peer_len.unsafe_write(SOCKADDR_IN6_SIZE)
 
         var got = _recvfrom(
             self._socket.fd,
@@ -327,11 +329,13 @@ struct UdpSocket(Movable):
             print("got", n, "bytes from", String(sender))
             ```
         """
-        var peer_buf = stack_allocation[Int(SOCKADDR_IN_SIZE), UInt8]()
-        for i in range(Int(SOCKADDR_IN_SIZE)):
+        # Sized for sockaddr_in6: a 16-byte buffer truncates an IPv6
+        # sender and the decoder then reads sin6_addr past its end.
+        var peer_buf = stack_allocation[Int(SOCKADDR_IN6_SIZE), UInt8]()
+        for i in range(Int(SOCKADDR_IN6_SIZE)):
             peer_buf.unsafe_offset(i).unsafe_write(0)
         var peer_len = stack_allocation[1, c_uint]()
-        peer_len.unsafe_write(SOCKADDR_IN_SIZE)
+        peer_len.unsafe_write(SOCKADDR_IN6_SIZE)
 
         var got = _recvfrom(
             self._socket.fd,

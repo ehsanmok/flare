@@ -72,7 +72,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.FrameMux.nextId_injective
 #print axioms Flare.L2.FrameMux.feedMFixed_error_stuck
 -- UDP recvfrom, UDS sockaddr_un
-#print axioms Flare.L2.Udp.fixed_addr6
+#print axioms Flare.L2.Udp.impl_addr6
 #print axioms Flare.L2.Udp.addr4_ok
 #print axioms Flare.L2.Uds.fill_len_le
 #print axioms Flare.L2.Uds.readPathFixed_fill

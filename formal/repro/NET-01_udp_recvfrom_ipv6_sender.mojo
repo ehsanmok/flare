@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-01 fixed on fix/formal-findings
 """NET-01: UdpSocket.recv_from / try_recv_from report the wrong IPv6 sender.
 
 Lean: Flare.Bugs.NET_01.recvFrom_ipv6_wrong_sender (counterexample) and
@@ -7,7 +8,7 @@ flare/udp/socket.mojo:279-352 @59bda50.
 
 Expected: recv_from on an IPv6 socket returns the sender's real address
 and port ([::1]:<tx port>).
-Actual: the sockaddr buffer handed to recvfrom(2) is SOCKADDR_IN_SIZE
+Before the fix: the sockaddr buffer handed to recvfrom(2) is SOCKADDR_IN_SIZE
 (16) bytes. The kernel truncates the 28-byte sockaddr_in6 to 16 bytes
 (family, port, flowinfo, first 8 address bytes) and
 _read_ipv6_from_sockaddr then reads sin6_addr from bytes 8..23, i.e. 8

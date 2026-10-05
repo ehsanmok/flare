@@ -3,7 +3,11 @@ import Flare.L2_Machine.Udp
 /-!
 # NET-01: `UdpSocket.recv_from` reports the wrong sender for IPv6 peers
 
-flare/udp/socket.mojo:279-283,330-334 @59bda50 (buffer and `addrlen`),
+Status: resolved. `recv_from` / `try_recv_from` now allocate and pass
+`SOCKADDR_IN6_SIZE`; the model's `implBufLen` is that size and the
+counterexample below is about the pre-fix `oldBufLen`.
+
+Pre-fix code: flare/udp/socket.mojo:279-283,330-334 @59bda50 (buffer and `addrlen`),
 flare/net/_libc.mojo:366-397 @59bda50 (IPv6 decoder).
 
 Spec (POSIX `recvfrom(2)`): `src_addr` receives the sender's address,
@@ -25,27 +29,27 @@ open Flare.L2.Udp
 def loopback6 : Nat → UInt8 := fun i =>
   if i = 2 then 0xF1 else if i = 3 then 0x9E else if i = 23 then 1 else 0
 
-/-- The decoder reads 8 bytes past the 16-byte buffer. -/
+/-- Pre-fix: the decoder reads 8 bytes past the 16-byte buffer. -/
 theorem reads_past_buffer :
-    (addr6Offsets.filter (implBufLen ≤ ·)) = [16, 17, 18, 19, 20, 21, 22, 23] :=
-  impl_reads_past_buffer
+    (addr6Offsets.filter (oldBufLen ≤ ·)) = [16, 17, 18, 19, 20, 21, 22, 23] :=
+  old_reads_past_buffer
 
-/-- **Counterexample**: whenever the stack byte at offset 23 is not `1`
+/-- **Counterexample** (pre-fix buffer): whenever the stack byte at offset 23 is not `1`
 (e.g. zero), `recv_from` reports a sender address other than `::1`. -/
 theorem recvFrom_ipv6_wrong_sender (stack mem : Nat → UInt8) (hs : stack 23 ≠ 1)
-    (h : RecvfromFills implBufLen sockaddrIn6Size loopback6 stack mem) :
+    (h : RecvfromFills oldBufLen sockaddrIn6Size loopback6 stack mem) :
     readAddr6 mem ≠ readAddr6 loopback6 := by
-  rw [impl_addr6 h]
+  rw [old_addr6 h]
   intro heq
   have := congrArg (fun l => l[15]?) heq
   simp [readAddr6, loopback6] at this
   exact hs this
 
-/-- **Fix meets spec**: with a `sockaddr_in6`-sized buffer and `addrlen`,
+/-- **Fix meets spec**: with the shipped `sockaddr_in6`-sized buffer and `addrlen`,
 the decoded address and port are the sender's, for every sender. -/
 theorem recvFromFixed_correct {sa stack mem : Nat → UInt8}
-    (h : RecvfromFills fixedBufLen sockaddrIn6Size sa stack mem) :
+    (h : RecvfromFills implBufLen sockaddrIn6Size sa stack mem) :
     readAddr6 mem = readAddr6 sa ∧ readPort mem = readPort sa :=
-  fixed_addr6 h
+  impl_addr6 h
 
 end Flare.Bugs.NET_01
