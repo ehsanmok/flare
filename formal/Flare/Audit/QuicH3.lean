@@ -86,7 +86,10 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.H3_03.impl_rejects_forbidden
 #print axioms Flare.Bugs.H3_03.trace_shipped
 #print axioms Flare.Bugs.H3_03.dispatchFixed_spec
+#print axioms Flare.Bugs.H3_04.implOld_accepts_reserved_setting
 #print axioms Flare.Bugs.H3_04.spec_rejects
+#print axioms Flare.Bugs.H3_04.impl_rejects_reserved_setting
+#print axioms Flare.Bugs.H3_04.trace_shipped
 #print axioms Flare.Bugs.H3_04.applyFixed_spec
 #print axioms Flare.Bugs.H3_05.violates_spec
 #print axioms Flare.Bugs.H3_05.classifyFixed_spec

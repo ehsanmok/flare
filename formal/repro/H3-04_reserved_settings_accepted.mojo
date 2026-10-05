@@ -1,14 +1,15 @@
 # PLATFORM: any
+# RESOLVED: H3-04 fixed on fix/formal-findings
 """H3-04: HTTP/2-reserved SETTINGS identifiers are accepted.
 
-Lean: Flare.Bugs.H3_04.impl_accepts_reserved_setting (impl),
+Lean: Flare.Bugs.H3_04.implOld_accepts_reserved_setting (pre-fix),
       Flare.Bugs.H3_04.applyFixed_spec (fix).
 flare/http3/server.mojo:1213-1228 @59bda50 (`_apply_peer_settings`).
 
 RFC 9114 §7.2.4.1 / §11.2.2: setting identifiers 0x02, 0x03, 0x04, 0x05
 (HTTP/2 ENABLE_PUSH, MAX_CONCURRENT_STREAMS, INITIAL_WINDOW_SIZE,
 MAX_FRAME_SIZE) "MUST NOT be sent, and their receipt MUST be treated as a
-connection error of type H3_SETTINGS_ERROR". Expected: raise. Actual: the
+connection error of type H3_SETTINGS_ERROR". Expected: raise. Before the fix: Actual: the
 identifiers fall through as unknown and are ignored.
 
 Minimal fix: in `_apply_peer_settings`, raise H3_SETTINGS_ERROR when
@@ -46,8 +47,10 @@ def main() raises:
             pass
     if accepted != "":
         print(
-            "BUG REPRODUCED: SETTINGS with HTTP/2-reserved identifiers accepted"
-            " (no H3_SETTINGS_ERROR):",
+            (
+                "BUG REPRODUCED: SETTINGS with HTTP/2-reserved identifiers"
+                " accepted (no H3_SETTINGS_ERROR):"
+            ),
             accepted,
         )
         raise Error("H3-04")

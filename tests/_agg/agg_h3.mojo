@@ -268,6 +268,12 @@ from test_h3_uni_streams import (
 from test_h3_uni_streams import (
     test_allowed_control_frames_are_still_accepted as test_h3_uni_streams__test_allowed_control_frames_are_still_accepted,
 )
+from test_h3_uni_streams import (
+    test_http2_reserved_setting_identifiers_are_refused as test_h3_uni_streams__test_http2_reserved_setting_identifiers_are_refused,
+)
+from test_h3_uni_streams import (
+    test_unknown_and_known_setting_identifiers_are_still_accepted as test_h3_uni_streams__test_unknown_and_known_setting_identifiers_are_still_accepted,
+)
 from test_request_reader import (
     test_initial_state as test_request_reader__test_initial_state,
 )
@@ -545,6 +551,12 @@ def main() raises:
     ]()
     suite.test[
         test_h3_uni_streams__test_allowed_control_frames_are_still_accepted
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_http2_reserved_setting_identifiers_are_refused
+    ]()
+    suite.test[
+        test_h3_uni_streams__test_unknown_and_known_setting_identifiers_are_still_accepted
     ]()
     # tests/h3/test_request_reader.mojo
     suite.test[test_request_reader__test_initial_state]()

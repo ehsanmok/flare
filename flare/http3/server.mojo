@@ -1339,7 +1339,18 @@ struct Http3Connection(Copyable, Defaultable):
         """Update the connection's view of the peer's announced
         SETTINGS. Unknown settings identifiers are ignored per
         RFC 9114 §7.2.4.1; the codec already rejects malformed
-        pairs."""
+        pairs. The identifiers 0x02 to 0x05 are HTTP/2 settings that
+        HTTP/3 reserves: receiving one is ``H3_SETTINGS_ERROR``
+        (RFC 9114 §7.2.4.1, §11.2.2), checked before any value is
+        applied."""
+        for i in range(len(settings)):
+            var reserved = settings[i].identifier
+            if reserved >= UInt64(0x02) and reserved <= UInt64(0x05):
+                raise Error(
+                    "h3 server: peer sent HTTP/2-reserved SETTINGS identifier "
+                    + String(reserved)
+                    + " (RFC 9114 7.2.4.1 H3_SETTINGS_ERROR)"
+                )
         for i in range(len(settings)):
             var id_ = settings[i].identifier
             var v = settings[i].value

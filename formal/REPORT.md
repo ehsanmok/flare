@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61836 lines) |
-| Theorems | 3247 |
-| Headline theorems in the axiom audit | 1051 |
+| Lean files | 298 (61854 lines) |
+| Theorems | 3248 |
+| Headline theorems in the axiom audit | 1054 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 67 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 68 of 138 |
 
 Six findings are rated high:
 
@@ -1629,7 +1629,7 @@ Assumption: the QPACK field-section decoder is a parameter `qd`.
 File: `H3/Control.lean`.
 
 **Model.**
-- `applySettings` mirrors `server.mojo:1213-1228`.
+- `applySettings` mirrors `server.mojo:1338-1365` (fixed, H3-04).
 - `dispatchControl` mirrors `_dispatch_control_frame` (1272-1337, fixed H3-03).
 - `feedControlLoop` mirrors the control-stream frame loop, including the 16384-byte carry cap (1071-1120).
 - `classify` mirrors `_classify_uni_kind` (1045-1068), and `route` / `feedUni` mirror 975-1043.
@@ -2886,7 +2886,7 @@ advances the wheel to `now` at the top of every iteration
 | `H3.drain`, `feedChunks` | http3/server.mojo:732-807 | `feedChunks_chunking_independent` | proved |
 | `Bugs.H3_01.feedOld` (pre-fix), `H3.feed` | http3/request_reader.mojo:240-278 (fixed, H3-01) | `feed_bounded`, `feed_eq_feedOld`, `unknown_needs_unbounded_buffer` | resolved |
 | `Bugs.H3_02.stepFrameOld` (pre-fix) | http3/request_reader.mojo:308-327 @59bda50 | `implOld_ignores_reserved`, `implRejects_reserved`, `runFixed_spec` | resolved |
-| `H3.Control.applySettings` | http3/server.mojo:1213-1228 | `H3_04.trace_impl`, `applySettingsFixed_eq_spec` | counterexample |
+| `H3.Control.applySettings` (`Fixes.shipped`) | http3/server.mojo:1338-1365 (fixed, H3-04) | `H3_04.trace_implOld`, `H3_04.trace_shipped`, `applySettingsFixed_eq_spec` | resolved (H3-04) |
 | `H3.Control.dispatchControl` (`Fixes.shipped`) | http3/server.mojo:1272-1337 (fixed, H3-03) | `H3_03.trace_implOld`, `H3_03.trace_shipped`, `dispatchControlFixed_eq_spec` | resolved (H3-03) |
 | `H3.Control.feedControlLoop` | http3/server.mojo:1071-1120 | `feedControlLoop_suffix`, `feedControl_le` | proved |
 | `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:975-1068 | `H3_05.trace_impl`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | counterexample |
@@ -3088,7 +3088,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H3-01 | Medium | resolved | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
 | H3-02 | Low | resolved | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
 | H3-03 | Low | resolved | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
-| H3-04 | Low | open | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
+| H3-04 | Low | resolved | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
 | H3-05 | Low | open | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
 | H3-06 | Low | open | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
 | H3-07 | Medium | resolved | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
@@ -4617,12 +4617,13 @@ Status: resolved. `_dispatch_control_frame` raises H3_FRAME_UNEXPECTED for DATA,
 
 - **Severity:** Low (a conformance gap).
 - **RFC:** RFC 9114 §7.2.4.1 and §11.2.2: receipt of identifiers 0x02..0x05 MUST be treated as H3_SETTINGS_ERROR.
-- **What goes wrong:** `_apply_peer_settings` (`server.mojo:1213-1228`) ignores unknown identifiers and never raises.
-- **Counterexample:** `Bugs.H3_04.impl_accepts_reserved_setting` and `trace_impl`. `spec_rejects` shows the spec rejects these identifiers.
+- **What goes wrong:** `_apply_peer_settings` (`server.mojo:1213-1228` at 59bda50) ignored unknown identifiers and never raised.
+- **Counterexample:** `Bugs.H3_04.implOld_accepts_reserved_setting` and `trace_implOld` (with `Fixes.none`). `spec_rejects` shows the spec rejects these identifiers.
 - **Fix:** raise if `2 <= id <= 5`. `applyFixed_spec`, `dispatchFixed_spec` and `Control.applySettingsFixed_eq_spec` show it suffices.
 - **Repro:** `formal/repro/H3-04_reserved_settings_accepted.mojo`
 - **Observed:** `BUG REPRODUCED: SETTINGS with HTTP/2-reserved identifiers accepted (no H3_SETTINGS_ERROR): 0x2 0x3 0x4 0x5`
 - **Flip:** `OK: reserved SETTINGS identifiers rejected`, exit 0.
+Status: resolved. `_apply_peer_settings` raises H3_SETTINGS_ERROR for identifiers 0x02 to 0x05 before applying any value; the neighbours 0x01 and 0x06 and unknown or grease identifiers are unchanged. Tests: `tests/h3/test_h3_uni_streams.mojo::test_http2_reserved_setting_identifiers_are_refused`, `tests/h3/test_h3_uni_streams.mojo::test_unknown_and_known_setting_identifiers_are_still_accepted`. The repro prints `OK` (three runs).
 
 #### H3-05: a second QPACK encoder or decoder stream, and a client push stream, are accepted
 

@@ -268,7 +268,7 @@ Assumption: the QPACK field-section decoder is a parameter `qd`.
 File: `H3/Control.lean`.
 
 **Model.**
-- `applySettings` mirrors `server.mojo:1213-1228`.
+- `applySettings` mirrors `server.mojo:1338-1365` (fixed, H3-04).
 - `dispatchControl` mirrors `_dispatch_control_frame` (1272-1337, fixed H3-03).
 - `feedControlLoop` mirrors the control-stream frame loop, including the 16384-byte carry cap (1071-1120).
 - `classify` mirrors `_classify_uni_kind` (1045-1068), and `route` / `feedUni` mirror 975-1043.
@@ -660,12 +660,13 @@ Status: resolved. `_dispatch_control_frame` raises H3_FRAME_UNEXPECTED for DATA,
 
 - **Severity:** Low (a conformance gap).
 - **RFC:** RFC 9114 §7.2.4.1 and §11.2.2: receipt of identifiers 0x02..0x05 MUST be treated as H3_SETTINGS_ERROR.
-- **What goes wrong:** `_apply_peer_settings` (`server.mojo:1213-1228`) ignores unknown identifiers and never raises.
-- **Counterexample:** `Bugs.H3_04.impl_accepts_reserved_setting` and `trace_impl`. `spec_rejects` shows the spec rejects these identifiers.
+- **What goes wrong:** `_apply_peer_settings` (`server.mojo:1213-1228` at 59bda50) ignored unknown identifiers and never raised.
+- **Counterexample:** `Bugs.H3_04.implOld_accepts_reserved_setting` and `trace_implOld` (with `Fixes.none`). `spec_rejects` shows the spec rejects these identifiers.
 - **Fix:** raise if `2 <= id <= 5`. `applyFixed_spec`, `dispatchFixed_spec` and `Control.applySettingsFixed_eq_spec` show it suffices.
 - **Repro:** `formal/repro/H3-04_reserved_settings_accepted.mojo`
 - **Observed:** `BUG REPRODUCED: SETTINGS with HTTP/2-reserved identifiers accepted (no H3_SETTINGS_ERROR): 0x2 0x3 0x4 0x5`
 - **Flip:** `OK: reserved SETTINGS identifiers rejected`, exit 0.
+Status: resolved. `_apply_peer_settings` raises H3_SETTINGS_ERROR for identifiers 0x02 to 0x05 before applying any value; the neighbours 0x01 and 0x06 and unknown or grease identifiers are unchanged. Tests: `tests/h3/test_h3_uni_streams.mojo::test_http2_reserved_setting_identifiers_are_refused`, `tests/h3/test_h3_uni_streams.mojo::test_unknown_and_known_setting_identifiers_are_still_accepted`. The repro prints `OK` (three runs).
 
 ### H3-05: a second QPACK encoder or decoder stream, and a client push stream, are accepted
 
@@ -776,7 +777,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `H3.drain`, `feedChunks` | http3/server.mojo:732-807 | `feedChunks_chunking_independent` | proved |
 | `Bugs.H3_01.feedOld` (pre-fix), `H3.feed` | http3/request_reader.mojo:240-278 (fixed, H3-01) | `feed_bounded`, `feed_eq_feedOld`, `unknown_needs_unbounded_buffer` | resolved |
 | `Bugs.H3_02.stepFrameOld` (pre-fix) | http3/request_reader.mojo:308-327 @59bda50 | `implOld_ignores_reserved`, `implRejects_reserved`, `runFixed_spec` | resolved |
-| `H3.Control.applySettings` | http3/server.mojo:1213-1228 | `H3_04.trace_impl`, `applySettingsFixed_eq_spec` | counterexample |
+| `H3.Control.applySettings` (`Fixes.shipped`) | http3/server.mojo:1338-1365 (fixed, H3-04) | `H3_04.trace_implOld`, `H3_04.trace_shipped`, `applySettingsFixed_eq_spec` | resolved (H3-04) |
 | `H3.Control.dispatchControl` (`Fixes.shipped`) | http3/server.mojo:1272-1337 (fixed, H3-03) | `H3_03.trace_implOld`, `H3_03.trace_shipped`, `dispatchControlFixed_eq_spec` | resolved (H3-03) |
 | `H3.Control.feedControlLoop` | http3/server.mojo:1071-1120 | `feedControlLoop_suffix`, `feedControl_le` | proved |
 | `H3.Control.classify`, `route`, `feedUni` | http3/server.mojo:975-1068 | `H3_05.trace_impl`, `classifyFixed_eq_spec`, `runClassifyFixed_unique` | counterexample |

@@ -65,7 +65,7 @@ def Fixes.none : Fixes := ⟨false, false, false, false⟩
 def Fixes.all : Fixes := ⟨true, true, true, true⟩
 /-- flare as shipped: one field flips to `true` with each of H3-03 (frames),
 H3-04 (settings), H3-05 (streams) and H3-06 (goawayLen). -/
-def Fixes.shipped : Fixes := ⟨true, false, false, false⟩
+def Fixes.shipped : Fixes := ⟨true, true, false, false⟩
 
 /-! ## SETTINGS -/
 
@@ -89,8 +89,8 @@ def applySetting (ps : PeerSettings) (p : Nat × Nat) : PeerSettings :=
 /-- HTTP/2 setting identifiers reserved by RFC 9114 §7.2.4.1 / §11.2.2. -/
 def isH2Setting (id : Nat) : Bool := 2 ≤ id && id ≤ 5
 
-/-- mirrors flare/http3/server.mojo:1213-1228 @59bda50 (never raises);
-`fx.settings` adds the H3-04 check. -/
+/-- mirrors flare/http3/server.mojo:1338-1365 (fixed, H3-04); `fx.settings` is
+the H3-04 check (absent at 59bda50, where it never raised). -/
 def applySettings (fx : Fixes) (ps : PeerSettings) (ss : List (Nat × Nat)) :
     Except H3Err PeerSettings :=
   if fx.settings ∧ ss.any (fun p => isH2Setting p.1) then .error .settingsError

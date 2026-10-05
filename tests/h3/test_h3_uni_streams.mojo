@@ -60,7 +60,11 @@ from flare.http3 import (
     encode_http3_frame,
     encode_http3_settings,
 )
-from flare.http3.server import H3_FRAME_UNEXPECTED, h3_error_code
+from flare.http3.server import (
+    H3_FRAME_UNEXPECTED,
+    H3_SETTINGS_ERROR,
+    h3_error_code,
+)
 from flare.quic.varint import decode_varint, encode_varint
 
 
@@ -459,6 +463,54 @@ def test_allowed_control_frames_are_still_accepted() raises:
     assert_equal(Int(c.peer_goaway_max_stream_id), 8)
 
 
+def test_http2_reserved_setting_identifiers_are_refused() raises:
+    """H3-04: SETTINGS identifiers 0x02..0x05 (HTTP/2 ENABLE_PUSH,
+    MAX_CONCURRENT_STREAMS, INITIAL_WINDOW_SIZE, MAX_FRAME_SIZE) were
+    ignored like unknown ones. Their receipt is a connection error of
+    type H3_SETTINGS_ERROR (RFC 9114 sec 7.2.4.1, 11.2.2)."""
+    for sid in range(2, 6):
+        var c = Http3Connection()
+        var settings = List[Http3Setting]()
+        settings.append(
+            Http3Setting(
+                identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
+                value=UInt64(1024),
+            )
+        )
+        settings.append(Http3Setting(identifier=UInt64(sid), value=UInt64(1)))
+        var msg = _raises_with(c, 3, _build_peer_control_prefix(settings))
+        assert_true(
+            "H3_SETTINGS_ERROR" in msg,
+            "reserved setting identifier " + String(sid) + " was accepted",
+        )
+        assert_equal(Int(h3_error_code(msg)), Int(H3_SETTINGS_ERROR))
+        assert_false(c.peer_settings_received)
+
+
+def test_unknown_and_known_setting_identifiers_are_still_accepted() raises:
+    """The H3-04 check is exactly 0x02..0x05: the neighbours 0x01 and 0x06,
+    greased identifiers and unknown ones keep working."""
+    var c = Http3Connection()
+    var settings = List[Http3Setting]()
+    settings.append(
+        Http3Setting(
+            identifier=H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+            value=UInt64(256),
+        )
+    )
+    settings.append(
+        Http3Setting(
+            identifier=H3_SETTINGS_MAX_FIELD_SECTION_SIZE, value=UInt64(2048)
+        )
+    )
+    settings.append(Http3Setting(identifier=UInt64(0x0A), value=UInt64(9)))
+    settings.append(Http3Setting(identifier=UInt64(0x21), value=UInt64(7)))
+    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings))
+    assert_true(c.peer_settings_received)
+    assert_equal(Int(c.peer_settings_qpack_max_table_capacity), 256)
+    assert_equal(Int(c.peer_settings_max_field_section_size), 2048)
+
+
 def main() raises:
     test_peer_control_stream_settings_round_trip()
     test_uni_stream_type_varint_split_across_chunks()
@@ -476,4 +528,6 @@ def main() raises:
     test_take_control_stream_start_is_once_and_decodes_at_the_peer()
     test_forbidden_frame_types_on_the_control_stream_are_refused()
     test_allowed_control_frames_are_still_accepted()
-    print("test_h3_uni_streams: 16 passed")
+    test_http2_reserved_setting_identifiers_are_refused()
+    test_unknown_and_known_setting_identifiers_are_still_accepted()
+    print("test_h3_uni_streams: 18 passed")

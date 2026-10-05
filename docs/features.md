@@ -455,6 +455,9 @@ v0.11 audit fixes; before them the server accepted what follows.
   PING, WINDOW_UPDATE, CONTINUATION) on a request stream are a connection
   error of type `H3_FRAME_UNEXPECTED` (0x105), not ignored as unknown
   frames.
+- A peer SETTINGS frame carrying an HTTP/2-reserved identifier
+  (0x02 to 0x05) is `H3_SETTINGS_ERROR` (RFC 9114 §7.2.4.1); other unknown
+  identifiers are ignored.
 - DATA, HEADERS, PUSH_PROMISE and the HTTP/2-reserved types on the
   peer's control stream are `H3_FRAME_UNEXPECTED` (RFC 9114 §7.2); CANCEL_PUSH,
   MAX_PUSH_ID and unknown types stay accepted.
