@@ -98,7 +98,7 @@ def serverStep (cfgIdle : Nat) (s : IImpl) : IEv → IImpl
   | .sendAE _ => s
   | .tick t => if s.closed then s else if s.deadline ≤ t then { s with closed := true } else s
 
-/-- The client has no idle timer: `poll` never checks one, and frames are
+/-- The pre-fix client (QUIC-21) had no idle timer: `poll` never checked one, and frames are
 dispatched with `now_us = 0`, so `last_activity_us` never moves and
 `is_idle_timeout_expired` (never called) would return False.
 mirrors flare/quic/client.mojo:557-608, 902-912 @59bda50 -/
@@ -110,7 +110,11 @@ send after one, not armed when there is no effective timeout.
 mirrors flare/quic/server.mojo `_handle_inbound` (only packets for which
 `_process_one_packet` succeeded), `_build_1rtt_response` (first ack-eliciting
 send, `idle_sent_since_rx`), `schedule_idle_timeout`, `_client_params_ok` (the
-peer's value) and flare/quic/_server_support.mojo `_effective_idle_ms` -/
+peer's value) and flare/quic/_server_support.mojo `_effective_idle_ms`. The
+client runs the same timer (fixed, QUIC-21): flare/quic/client.mojo
+`_dispatch_frames` (processed packets, with the monotonic clock),
+`_note_ack_eliciting_send`, `_apply_peer_transport_params` (the server's value)
+and `_check_idle` (called from `poll`) -/
 structure IFix where
   deadline : Option Nat
   sentSince : Bool

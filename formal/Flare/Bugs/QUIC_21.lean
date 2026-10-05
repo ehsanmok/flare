@@ -3,7 +3,16 @@ import Flare.L3_Protocol.Quic.Timers
 /-!
 # QUIC-21: the client has no idle timeout
 
-flare/quic/client.mojo:557-608 @59bda50 (`poll`) never checks an idle
+Status: resolved. The client runs the same idle timer as the server
+(QUIC-20): `_dispatch_frames` moves `last_activity_us` with the monotonic
+clock for every processed packet, `_note_ack_eliciting_send` restarts it on the
+first ack-eliciting send after one, `_apply_peer_transport_params` reads the
+server's `max_idle_timeout`, and `poll` calls `_check_idle`, which closes the
+connection (CLOSED, not established, `connection_closed`) once the effective
+timeout has elapsed. The counterexample below is about the pre-fix
+`clientStep`; `fixedStep` is the shipped timer.
+
+Pre-fix behaviour (flare/quic/client.mojo:557-608 @59bda50): `poll` never checks an idle
 timer, and `_dispatch_frames` (902-912) passes `now_us = 0` to
 `handle_frame_buf`, so `Connection.last_activity_us` never moves.
 `is_idle_timeout_expired` (flare/quic/state.mojo:876-887) is exported but

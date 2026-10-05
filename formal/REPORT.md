@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62710 lines) |
+| Lean files | 298 (62723 lines) |
 | Theorems | 3289 |
 | Headline theorems in the axiom audit | 1086 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 93 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 94 of 138 |
 
 Six findings are rated high:
 
@@ -1453,9 +1453,9 @@ File: `Quic/Timers.lean`. Two labelled transition systems over a `Nat` clock in 
 - Events: a datagram received at `t` (`auth` says whether a packet in it decrypted and was processed), an ack-eliciting send at `t`, and the timers advanced to `t`.
 - `effective` is the effective timeout: the minimum of the two advertised `max_idle_timeout` values, the sole non-zero one if only one is non-zero, none if both are 0, then raised to at least 3×PTO.
 - `ispecStep` restarts the period on every processed packet and on the first ack-eliciting send after one, and closes once the period exceeds the effective timeout.
-- `serverStep` mirrors the server: `_handle_inbound` (`quic/server.mojo:724-782`) re-arms the idle timer for every datagram routed to the slot, decrypted or not, at `config.max_idle_timeout_ms` (`schedule_idle_timeout`, 2874-2898), which the timer wheel clamps from 0 to 1 ms (`runtime/timer_wheel.mojo:119-144`). Sends never re-arm it. `serverInit` is the arming by the first datagram.
-- `clientStep` mirrors the client, which has no idle timer: `poll` (`quic/client.mojo:557-608`) never checks one, and `_dispatch_frames` (902-912) passes `now_us = 0`, so `last_activity_us` never moves; `is_idle_timeout_expired` (`state.mojo:876-887`) has no caller.
-- `fixedStep` is the fixed timer, and `R` relates it to the spec state.
+- `serverStep` mirrors the pre-fix server (QUIC-20): `_handle_inbound` (`quic/server.mojo:724-782`) re-arms the idle timer for every datagram routed to the slot, decrypted or not, at `config.max_idle_timeout_ms` (`schedule_idle_timeout`, 2874-2898), which the timer wheel clamps from 0 to 1 ms (`runtime/timer_wheel.mojo:119-144`). Sends never re-arm it. `serverInit` is the arming by the first datagram.
+- `clientStep` mirrors the pre-fix client (QUIC-21), which had no idle timer: `poll` (`quic/client.mojo:557-608`) never checks one, and `_dispatch_frames` (902-912) passes `now_us = 0`, so `last_activity_us` never moves; `is_idle_timeout_expired` (`state.mojo:876-887`) has no caller.
+- `fixedStep` is the fixed timer, which both endpoints now run (server: `_handle_inbound`, `_build_1rtt_response`, `schedule_idle_timeout`, `_effective_idle_ms`; client: `_dispatch_frames`, `_note_ack_eliciting_send`, `_check_idle`), and `R` relates it to the spec state. `effectiveMs` mirrors `_effective_idle_ms`.
 
 **Closing and draining (RFC 9000 §10.2, §10.2.1, §10.2.2, §11.1).**
 - Events: a local close, the peer's CONNECTION_CLOSE, any other packet for the connection, the driver having something to send, and a timer firing. The output is the list of packets sent.
@@ -2869,7 +2869,7 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.Streams.stepHalves`, `resetSeenH`, `sendRefusedH` | quic/state.mojo `apply_reset_stream`, `apply_stop_sending`, quic/client.mojo `cancel_stream`, `stream_reset`, `send_stream` (fixed, QUIC-18) | `QUIC_18.impl_loses` (pre-fix `stepImpl`), `QUIC_18.fixed_both`, `halves_reset_iff`, `halves_stop_iff` | proved (QUIC-18 resolved) |
 | `Bugs.QUIC_19.replyImpl` | quic/client.mojo:902-912, quic/state.mojo:478-486 | `QUIC_19.impl_silent`, `QUIC_19.fixed_spec` | counterexample (QUIC-19) |
 | `Quic.Timers.fixedStep`, `effectiveMs` | quic/server.mojo `_handle_inbound`, `_build_1rtt_response`, `schedule_idle_timeout`, `_client_params_ok`, quic/_server_support.mojo `_effective_idle_ms` (fixed, QUIC-20) | `fixed_closed_eq_spec`, `effectiveMs_spec`, `QUIC_20.fixed_spec`, `fixed_effective`; counterexamples about the pre-fix `serverStep`: `QUIC_20.impl_unauth_restarts`, `impl_ignores_peer`, `impl_zero_closes`, `impl_no_send_restart`, `impl_no_pto_floor` | proved (QUIC-20 resolved) |
-| `Quic.Timers.clientStep` | quic/client.mojo:557-608, 902-912 | `client_never`, `QUIC_21.impl_never_closes`, `impl_counterexample` | counterexample (QUIC-21) |
+| `Quic.Timers.clientStep` (pre-fix), `fixedStep` | quic/client.mojo `poll`, `_check_idle`, `_note_ack_eliciting_send`, `_dispatch_frames`, `_apply_peer_transport_params` (fixed, QUIC-21) | `client_never`, `QUIC_21.impl_never_closes`, `impl_counterexample` (pre-fix), `QUIC_21.fixed_spec` | proved (QUIC-21 resolved) |
 | `Quic.Timers.fixedStep` | quic/server.mojo:724-782, 2874-2898 with fixes | `fixed_run`, `fixed_closed_eq_spec`, `QUIC_20.fixed_spec`, `QUIC_21.fixed_spec` | proved |
 | `Quic.Timers.srvStep` | quic/server.mojo:2033-2038, 2177-2180, 2925-2938, quic/state.mojo:430-445 | `QUIC_22.impl_no_cc`, `impl_short_period`, `QUIC_23.impl_sends_draining`, `impl_trace` | counterexample (QUIC-22, QUIC-23) |
 | `Quic.Timers.cliStep` | quic/client.mojo:557-608, 688-706, 1035-1085, 1619-1634, 1758-1778 | `QUIC_24.impl_sends_draining`, `impl_trace`, `cli_close_ok` | counterexample (QUIC-24) |
@@ -3085,7 +3085,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-18 | Medium | resolved | one state for both stream halves loses a reset | `Flare/Bugs/QUIC_18.lean` | `repro/QUIC-18_stream_reset_state_overwritten.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
 | QUIC-19 | Low | open | STOP_SENDING is never answered with RESET_STREAM | `Flare/Bugs/QUIC_19.lean` | `repro/QUIC-19_stop_sending_not_answered.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QUIC-20 | Medium | resolved | the server's idle timer does not follow RFC 9000 §10.1 | `Flare/Bugs/QUIC_20.lean` | `repro/QUIC-20_server_idle_timer.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-21 | Medium | open | the client never applies an idle timeout | `Flare/Bugs/QUIC_21.lean` | `repro/QUIC-21_client_has_no_idle_timeout.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-21 | Medium | resolved | the client never applies an idle timeout | `Flare/Bugs/QUIC_21.lean` | `repro/QUIC-21_client_has_no_idle_timeout.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-22 | Medium | open | the server closes connections without sending CONNECTION_CLOSE | `Flare/Bugs/QUIC_22.lean` | `repro/QUIC-22_server_close_never_sends_connection_close.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-23 | Low | open | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-24 | Low | open | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
@@ -4475,6 +4475,8 @@ Status: resolved. Fixed: the server restarts the idle timer only for packets tha
 - **Flip** (`quic/server.mojo`: `if ok:` before `processed_any = True`; in `schedule_idle_timeout`, take the minimum with the client's non-zero `max_idle_timeout` decoded from `_do_peer_transport_params`, and arm nothing when the result is 0): A and B close after about 900 ms, C stays open, `OK: A closed, B closed, C open (RFC 9000 sec 10.1 idle timeout)`, exit 0. The flip does not add the send restart or the PTO floor, which the repro does not exercise.
 
 #### QUIC-21: the client never applies an idle timeout
+
+Status: resolved. Fixed: the client runs the same idle timer as the server (QUIC-20): `_dispatch_frames` hands the monotonic clock to the state machine, `_note_ack_eliciting_send` restarts the period on the first ack-eliciting send after a processed packet, `_apply_peer_transport_params` reads the server value, and `poll` calls `_check_idle`, which closes the connection (CLOSED, not established, `connection_closed`) once the effective timeout has elapsed (`quic/client.mojo`). Tests: `tests/quic/test_quic_client.mojo` (`test_client_closes_after_its_idle_timeout`, `test_client_uses_the_servers_shorter_idle_timeout`, `test_client_idle_timer_restarts_on_processed_packets`). Lean: `Timers.fixedStep` is the shipped timer; the counterexample is about the pre-fix `clientStep`.
 
 - **Severity:** Medium. A client whose server has gone away (or whose path is dead) keeps the connection, and a pool keeps handing it out. Requests then wait on PTOs instead of failing at the idle deadline.
 - **RFC:** RFC 9000 §10.1: "If a max_idle_timeout is specified by either endpoint in its transport parameters (Section 18.2), the connection is silently closed and its state is discarded when it remains idle for longer than the minimum of the max_idle_timeout value advertised by both endpoints."

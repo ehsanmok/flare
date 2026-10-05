@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
+# RESOLVED: QUIC-21 fixed on fix/formal-findings
 # fixtures in tests/tls/fixtures/rustls-quic-client/; about 6 s)
 """QUIC-21: the client never applies an idle timeout.
 
@@ -22,7 +23,7 @@ Inconclusive if the handshake does not complete.
 
 Expected: within about 1 s (at most 3 x PTO more) the client closes (state
 CLOSED, not established).
-Actual: after 5 s it is still established.
+Before the fix: after 5 s it is still established.
 
 Minimal fix: pass the monotonic clock to handle_frame_buf in
 _dispatch_frames, and in poll close the connection when

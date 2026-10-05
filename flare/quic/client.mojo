@@ -121,11 +121,13 @@ from .protection import (
     unprotect_initial_packet,
 )
 from .state import (
+    CONN_STATE_CLOSED,
     CONN_STATE_ESTABLISHED,
     Connection,
     ConnectionEvents,
     empty_events,
     handle_frame_buf,
+    is_idle_timeout_expired,
     new_connection,
     new_stream,
     STREAM_STATE_RESET_SENT,
@@ -142,6 +144,7 @@ from .varint import decode_varint, encode_varint
 from ._loss_recovery import LossRecovery
 from ._server_support import (
     _CryptoReasm,
+    _effective_idle_ms,
     _ack_from_ranges,
     _ack_record,
     _inbound_level_for_datagram,
@@ -365,6 +368,15 @@ struct QuicClientConnection(Movable):
     """Cumulative application STREAM bytes sent on this connection, gated
     against the peer's connection-level ``initial_max_data`` once known
     (RFC 9000 §4.1 connection flow control)."""
+    var _idle_local_ms: UInt64
+    """Our ``max_idle_timeout`` (ms); 0 means none advertised."""
+    var _idle_peer_ms: UInt64
+    """The server's ``max_idle_timeout`` (ms) once its transport
+    parameters are read; 0 until then or when it advertises none."""
+    var _idle_sent_since_rx: Bool
+    """Whether an ack-eliciting packet was sent since the last packet that
+    was received and processed; only the first such send restarts the idle
+    timer (RFC 9000 sec 10.1)."""
 
     def __init__(
         out self,
@@ -432,6 +444,12 @@ struct QuicClientConnection(Movable):
         )
         self._peer_limits_known = False
         self._conn_send_total = UInt64(0)
+        self._idle_local_ms = self.conn.idle_timeout_us // UInt64(1_000)
+        self._idle_peer_ms = UInt64(0)
+        self._idle_sent_since_rx = False
+        # The idle period starts when the connection does (the first
+        # Initial is an ack-eliciting send).
+        self.conn.last_activity_us = _monotonic_ms() * UInt64(1_000)
 
     @staticmethod
     def start(
@@ -576,6 +594,7 @@ struct QuicClientConnection(Movable):
             if msg.startswith("Timeout") or msg.startswith("recvfrom"):
                 self._drain_egress()
                 self._check_pto()
+                self._check_idle(events)
                 return events^
             raise e^
         if got > 0:
@@ -603,7 +622,37 @@ struct QuicClientConnection(Movable):
             if not self._peer_limits_known:
                 self._apply_peer_transport_params()
                 self._check_peer_cids()
+        self._check_idle(events)
         return events^
+
+    def _check_idle(mut self, mut events: ConnectionEvents):
+        """RFC 9000 sec 10.1: silently close the connection once it has
+        been idle for the effective timeout -- the minimum of the two
+        advertised ``max_idle_timeout`` values, at least three PTOs, and
+        none when both are 0. ``conn.last_activity_us`` moves when a packet
+        is processed (``_dispatch_frames``) and on the first ack-eliciting
+        send after one (:meth:`_note_ack_eliciting_send`). Reports the
+        close through ``events.connection_closed`` once."""
+        if self.conn.state == CONN_STATE_CLOSED:
+            return
+        var eff = _effective_idle_ms(
+            self._idle_local_ms,
+            self._idle_peer_ms,
+            self._loss.pto_interval_ms(),
+        )
+        self.conn.idle_timeout_us = eff * UInt64(1_000)
+        if is_idle_timeout_expired(self.conn, _monotonic_ms() * UInt64(1_000)):
+            self.conn.state = CONN_STATE_CLOSED
+            self.established = False
+            events.connection_closed = True
+
+    def _note_ack_eliciting_send(mut self):
+        """The first ack-eliciting packet sent after a processed one
+        restarts the idle timer; later sends in the same period do not
+        (RFC 9000 sec 10.1)."""
+        if not self._idle_sent_since_rx:
+            self._idle_sent_since_rx = True
+            self.conn.last_activity_us = _monotonic_ms() * UInt64(1_000)
 
     def _apply_peer_transport_params(mut self):
         """Decode the server's ``quic_transport_parameters`` (surfaced by
@@ -628,6 +677,8 @@ struct QuicClientConnection(Movable):
             var tp = decode_transport_parameters(Span[UInt8, _](raw))
             self._peer_limits = derive_peer_send_limits(tp)
             self._peer_limits_known = True
+            if Bool(tp.max_idle_timeout):
+                self._idle_peer_ms = tp.max_idle_timeout.value()
             self.conn.max_data_send = self._peer_limits.max_data
             var peer_mtu = Int(self._peer_limits.max_udp_payload_size)
             if peer_mtu < self.max_udp_payload_size:
@@ -902,11 +953,17 @@ struct QuicClientConnection(Movable):
         mut self, plaintext: Span[UInt8, _], mut events: ConnectionEvents
     ) raises:
         """Walk the decrypted packet payload frame by frame
-        through the sans-I/O state machine (RFC 9000 §12.4)."""
+        through the sans-I/O state machine (RFC 9000 §12.4). A packet
+        that decrypted restarts the idle timer (RFC 9000 sec 10.1) via
+        the clock handed to the state machine."""
+        self._idle_sent_since_rx = False
         var cursor = 0
         while cursor < len(plaintext):
             var consumed = handle_frame_buf(
-                self.conn, plaintext[cursor:], UInt64(0), events
+                self.conn,
+                plaintext[cursor:],
+                _monotonic_ms() * UInt64(1_000),
+                events,
             )
             if consumed <= 0:
                 break
@@ -1092,6 +1149,7 @@ struct QuicClientConnection(Movable):
         §14.1 floor when ``pad``. Advances :attr:`tx_initial_pn`."""
         var payload = List[UInt8]()
         if len(crypto_bytes) > 0:
+            self._note_ack_eliciting_send()
             var cf = CryptoFrame(
                 offset=self.tx_initial_offset, data=crypto_bytes.copy()
             )
@@ -1147,6 +1205,7 @@ struct QuicClientConnection(Movable):
         :attr:`tx_handshake_pn`."""
         var payload = List[UInt8]()
         if len(crypto_bytes) > 0:
+            self._note_ack_eliciting_send()
             var cf = CryptoFrame(
                 offset=self.tx_handshake_offset, data=crypto_bytes.copy()
             )
@@ -1219,6 +1278,7 @@ struct QuicClientConnection(Movable):
         # number space (RFC 9000 §12.3), so the retransmit rides a fresh
         # 1-RTT packet via the normal loss path -- exactly the upgrade
         # path described above.
+        self._note_ack_eliciting_send()
         var frames_copy = plaintext.copy()
         var dg = self._protect_via_rustls(
             QuicEncryptionLevel.EARLY_DATA, prefix^, plaintext^, pn, pn_length
@@ -1247,6 +1307,7 @@ struct QuicClientConnection(Movable):
         var frames_copy = List[UInt8]()
         if ack_eliciting:
             frames_copy = plaintext.copy()
+            self._note_ack_eliciting_send()
         var prefix = encode_short_header(
             self.dcid,
             spin_bit=False,

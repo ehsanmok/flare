@@ -348,6 +348,15 @@ from test_quic_client import (
 from test_quic_client import (
     test_send_stays_refused_after_cancel_then_peer_reset as test_quic_client__test_send_stays_refused_after_cancel_then_peer_reset,
 )
+from test_quic_client import (
+    test_client_closes_after_its_idle_timeout as test_quic_client__test_client_closes_after_its_idle_timeout,
+)
+from test_quic_client import (
+    test_client_uses_the_servers_shorter_idle_timeout as test_quic_client__test_client_uses_the_servers_shorter_idle_timeout,
+)
+from test_quic_client import (
+    test_client_idle_timer_restarts_on_processed_packets as test_quic_client__test_client_idle_timer_restarts_on_processed_packets,
+)
 from test_quic_handle_packet import (
     test_decode_packet_number_rfc_a3 as test_quic_handle_packet__test_decode_packet_number_rfc_a3,
 )
@@ -1051,6 +1060,13 @@ def main() raises:
     ]()
     suite.test[
         test_quic_client__test_send_stays_refused_after_cancel_then_peer_reset
+    ]()
+    suite.test[test_quic_client__test_client_closes_after_its_idle_timeout]()
+    suite.test[
+        test_quic_client__test_client_uses_the_servers_shorter_idle_timeout
+    ]()
+    suite.test[
+        test_quic_client__test_client_idle_timer_restarts_on_processed_packets
     ]()
     # tests/quic/test_quic_handle_packet.mojo
     suite.test[test_quic_handle_packet__test_decode_packet_number_rfc_a3]()

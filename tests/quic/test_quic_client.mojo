@@ -18,12 +18,13 @@ Reuses the 2-cert fixture chain from
 
 from std.collections import List
 from std.pathlib import Path
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from std.collections.span import Span
 
 from flare.quic.client import QuicClientConnection
-from flare.quic.state import empty_events
+from flare.quic._server_support import _monotonic_ms
+from flare.quic.state import CONN_STATE_CLOSED, empty_events
 from flare.quic._loss_recovery import LossRecovery
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import RustlsQuicConfig, RustlsQuicConnector
@@ -320,6 +321,99 @@ def test_send_stays_refused_after_cancel_then_peer_reset() raises:
     client.close()
 
 
+def _client_with_idle(
+    mut server: QuicListener,
+    connector: RustlsQuicConnector,
+    idle_ms: UInt64,
+) raises -> QuicClientConnection:
+    var client = QuicClientConnection.start(
+        server.local_addr(),
+        connector,
+        String("localhost"),
+        max_idle_timeout_ms=idle_ms,
+    )
+    for _ in range(60):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+        if client.is_established():
+            break
+    assert_true(client.is_established(), "handshake must complete first")
+    for _ in range(4):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+    return client^
+
+
+def _poll_until_closed(
+    mut client: QuicClientConnection, within_ms: UInt64
+) raises -> Bool:
+    var start = _monotonic_ms()
+    while _monotonic_ms() - start < within_ms:
+        var ev = client.poll(timeout_ms=50)
+        if ev.connection_closed:
+            return True
+    return False
+
+
+def test_client_closes_after_its_idle_timeout() raises:
+    """QUIC-21 (RFC 9000 sec 10.1): a client whose peer went silent closes
+    the connection once the idle timeout has elapsed, reporting it through
+    ``connection_closed``; before this poll never checked a timer."""
+    var server = _bind_server()
+    var connector = _make_connector()
+    var client = _client_with_idle(server, connector, UInt64(1_000))
+    # The server stops running: nothing more arrives.
+    assert_true(
+        _poll_until_closed(client, UInt64(4_000)),
+        "client never closed the idle connection",
+    )
+    assert_false(client.is_established())
+    assert_equal(client.conn.state, CONN_STATE_CLOSED)
+    server.close()
+    client.close()
+
+
+def test_client_uses_the_servers_shorter_idle_timeout() raises:
+    """The effective timeout is the minimum of both advertised values: the
+    client asks for 30 s, the server for 1 s."""
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    cfg.max_idle_timeout_ms = UInt64(1_000)
+    cfg.rustls_config.cert_chain_pem = _read_file(_FIXDIR + "cert.pem")
+    cfg.rustls_config.private_key_pem = _read_file(_FIXDIR + "key.pem")
+    cfg.rustls_config.alpn_protocols = _h3_alpn()
+    var server = QuicListener.bind(cfg^)
+    var connector = _make_connector()
+    var client = _client_with_idle(server, connector, UInt64(30_000))
+    assert_true(
+        _poll_until_closed(client, UInt64(4_000)),
+        "the server's 1000 ms idle timeout was ignored",
+    )
+    server.close()
+    client.close()
+
+
+def test_client_idle_timer_restarts_on_processed_packets() raises:
+    """Traffic the peer answers keeps the connection open: a PING every
+    300 ms (answered by an ACK) holds a 1000 ms timeout open for 2.5 s."""
+    var server = _bind_server()
+    var connector = _make_connector()
+    var client = _client_with_idle(server, connector, UInt64(1_000))
+    var start = _monotonic_ms()
+    var last_ping = start
+    while _monotonic_ms() - start < UInt64(2_500):
+        if _monotonic_ms() - last_ping >= UInt64(300):
+            client.keepalive()
+            last_ping = _monotonic_ms()
+        _ = server.tick(timeout_ms=20)
+        var ev = client.poll(timeout_ms=20)
+        assert_false(ev.connection_closed, "closed while the peer answered")
+    assert_true(client.is_established())
+    server.close()
+    client.close()
+
+
 def main() raises:
     test_client_handshake_completes()
     test_client_send_stream_after_handshake()
@@ -328,4 +422,7 @@ def main() raises:
     test_cancel_stream_forbids_further_stream_frames()
     test_stream_reset_survives_a_following_stop_sending()
     test_send_stays_refused_after_cancel_then_peer_reset()
-    print("test_quic_client: 7 passed")
+    test_client_closes_after_its_idle_timeout()
+    test_client_uses_the_servers_shorter_idle_timeout()
+    test_client_idle_timer_restarts_on_processed_packets()
+    print("test_quic_client: 10 passed")
