@@ -24,9 +24,9 @@ they compare anything; names are compared after `lowerB`.
   §4.2.1 plus §11.3.1/§11.3.5 (the key and version fields appear once). The
   shipped `srv` decides it through `qual`: `srv_ok`.
 * **Reactor** (`ConnHandle._handle_ws_upgrade` behind the 426 check).
-  `reactor_upgrade_v13`: the shipped reactor only upgrades version 13.
-  It still tests Connection by substring and does not decode the key:
-  finding WS-07; `reactorFixed_ok`.
+  `reactorOld_upgrade_v13`: the pre-fix reactor only upgrades version 13,
+  but it tested Connection by substring and did not decode the key
+  (finding WS-07); the shipped `reactor` applies `qual`: `reactor_ok`.
 * **Pairing.** `handshake_complete`: flare's own client request passes both
   fixed servers, and the standalone server's 101 passes the fixed client, for
   every SHA-1 and every valid key.
@@ -243,40 +243,44 @@ def versionMismatch (r : Req) : Bool :=
   r.method == GET && lowerB (hdr r UPGRADE) == WEBSOCKET && !(hdr r N_KEY).isEmpty &&
   pyStrip (hdr r N_VERSION) != V13
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo:1512-1523 @59bda50 -/
-def reactorQual (r : Req) : Bool :=
+/-- The reactor's qualification before the WS-07 fix.
+mirrors flare/http/_reactor/conn_handle.mojo:1512-1523 @59bda50 -/
+def reactorQualOld (r : Req) : Bool :=
   r.method == GET && r.version != HTTP10 && lowerB (hdr r UPGRADE) == WEBSOCKET &&
   infixB UPGRADE (lowerB (hdr r N_CONNECTION)) && !(hdr r N_KEY).isEmpty
 
-/-- The 426 branch runs first. mirrors flare/http/_reactor/conn_handle.mojo:835-860 @59bda50 -/
-def reactor (r : Req) : ROut :=
+/-- The reactor before the WS-07 fix: the 426 branch runs first.
+mirrors flare/http/_reactor/conn_handle.mojo:835-860 @59bda50 -/
+def reactorOld (r : Req) : ROut :=
   if versionMismatch r then .reject426
-  else if reactorQual r then .upgrade (hdr r N_KEY) else .http
+  else if reactorQualOld r then .upgrade (hdr r N_KEY) else .http
 
-/-- The shipped reactor never upgrades a version other than 13. -/
-theorem reactor_upgrade_v13 {r : Req} {k : Bytes} (h : reactor r = .upgrade k) :
+/-- The pre-fix reactor never upgrades a version other than 13. -/
+theorem reactorOld_upgrade_v13 {r : Req} {k : Bytes} (h : reactorOld r = .upgrade k) :
     pyStrip (hdr r N_VERSION) = V13 := by
-  unfold reactor at h
+  unfold reactorOld at h
   by_cases hm : versionMismatch r = true
   · rw [if_pos hm] at h; cases h
   rw [if_neg hm] at h
-  by_cases hq : reactorQual r = true
-  · simp only [reactorQual, Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq,
+  by_cases hq : reactorQualOld r = true
+  · simp only [reactorQualOld, Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq,
       Bool.not_eq_eq_eq_not, Bool.not_true] at hq
     simp only [versionMismatch, Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq,
       Bool.not_eq_eq_eq_not, Bool.not_true, not_and, Classical.not_not] at hm
     exact hm ⟨⟨hq.1.1.1.1, hq.1.1.2⟩, hq.2⟩
   · rw [if_neg hq] at h; cases h
 
-def reactorFixed (r : Req) : ROut :=
+/-- The shipped reactor: the 426 branch, then `_ws_handshake_problem` (`qual`).
+mirrors flare/http/_reactor/conn_handle.mojo `_handle_ws_upgrade` (fixed, WS-07) -/
+def reactor (r : Req) : ROut :=
   if versionMismatch r then .reject426
   else match vals r.fields N_KEY with
     | [key] => if qual r key then .upgrade key else .http
     | _ => .http
 
-theorem reactorFixed_ok {r : Req} {key : Bytes} (h : reactorFixed r = .upgrade key) :
+theorem reactor_ok {r : Req} {key : Bytes} (h : reactor r = .upgrade key) :
     ServerOK r key := by
-  unfold reactorFixed at h
+  unfold reactor at h
   by_cases hm : versionMismatch r = true
   · rw [if_pos hm] at h; cases h
   rw [if_neg hm] at h
@@ -312,7 +316,7 @@ theorem vals_nil (k : Bytes) : vals [] k = [] := rfl
 
 theorem handshake_complete (sha1 : Sha1) (host target key : Bytes) (hk : KeyOK key) :
     srv (clientRequest host target key) = some key ∧
-    reactorFixed (clientRequest host target key) = .upgrade key ∧
+    reactor (clientRequest host target key) = .upgrade key ∧
     clientAccepts sha1 key SWITCHING (srvResponse sha1 key) = true := by
   have hko : keyOk key = true := (keyOk_iff key).2 hk
   have hne : key ≠ [] := by
@@ -328,7 +332,7 @@ theorem handshake_complete (sha1 : Sha1) (host target key : Bytes) (hk : KeyOK k
       vals_nil]
   refine ⟨?_, ?_, ?_⟩
   · simp only [srv, hv, hq, if_true]
-  · simp only [reactorFixed, hmm, hv, hq, if_true]; rfl
+  · simp only [reactor, hmm, hv, hq, if_true]; rfl
   · simp (config := { decide := true }) [clientAccepts, srvResponse, vals_cons, vals_nil, lastVal]
 
 end Flare.L3.Ws.Handshake

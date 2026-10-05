@@ -3520,6 +3520,9 @@ from test_server_ws_upgrade import (
     test_unsupported_ws_version_gets_426 as test_server_ws_upgrade__test_unsupported_ws_version_gets_426,
 )
 from test_server_ws_upgrade import (
+    test_shared_listener_checks_the_whole_handshake as test_server_ws_upgrade__test_shared_listener_checks_the_whole_handshake,
+)
+from test_server_ws_upgrade import (
     test_shared_listener_upgrade_carries_origin as test_server_ws_upgrade__test_shared_listener_upgrade_carries_origin,
 )
 from test_server_ws_upgrade import (
@@ -6097,6 +6100,9 @@ def main() raises:
     ]()
     suite.test[test_server_ws_upgrade__test_ws_upgrade_offloads_by_default]()
     suite.test[test_server_ws_upgrade__test_unsupported_ws_version_gets_426]()
+    suite.test[
+        test_server_ws_upgrade__test_shared_listener_checks_the_whole_handshake
+    ]()
     suite.test[
         test_server_ws_upgrade__test_shared_listener_upgrade_carries_origin
     ]()

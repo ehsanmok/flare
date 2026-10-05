@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: WS-07 fixed on fix/formal-findings
 """WS-07: HttpServer's WebSocket upgrade seam accepts a Sec-WebSocket-Key
 that is not base64 of 16 bytes and a Connection field whose only token
 merely contains "upgrade".
@@ -14,7 +15,7 @@ TLS is APP-48 (not repeated here).
 Expected (RFC 6455 §4.2.1 items 4 and 5): the Connection field must
 include the token "upgrade" and the key must base64-decode to 16 bytes;
 otherwise the request is not an opening handshake.
-Actual: "Connection: noupgrade" with "Sec-WebSocket-Key: x" gets
+Before the fix: Actual: "Connection: noupgrade" with "Sec-WebSocket-Key: x" gets
 "101 Switching Protocols" and the connection is handed to the ws handler.
 
 Minimal fix: in _handle_ws_upgrade, compare comma-separated, stripped,

@@ -1603,29 +1603,33 @@ struct ConnHandle(Movable):
         it and serves the handshake as plain HTTP/1.1 inside TLS, so a
         TLS-terminated server still needs a separate ``WsServer``.
         """
-        from flare.http.server import _ascii_lower
-
-        # RFC 6455 4.2.1 qualification.
-        if req.method != "GET" or req.version == "HTTP/1.0":
-            return False
-        var upg = _ascii_lower(req.headers.get("upgrade"))
-        if upg != "websocket":
-            return False
-        var conn_hdr = _ascii_lower(req.headers.get("connection"))
-        if "upgrade" not in conn_hdr:
-            return False
-        var ws_key = req.headers.get("sec-websocket-key")
-        if ws_key.byte_length() == 0:
-            return False
-
         from flare.ws.server import (
             WsConnection,
             _compute_accept_srv,
             _send_upgrade_response,
             _spawn_ws_offload,
+            _ws_handshake_problem,
         )
         from flare.net.socket import RawSocket
         from flare.net._libc import AF_INET, SOCK_STREAM
+
+        # RFC 6455 4.2.1 qualification: the same rule the standalone
+        # ``WsServer`` applies (``_ws_handshake_problem``), so the two
+        # cannot disagree on what a handshake is. A request that fails it
+        # is served as ordinary HTTP.
+        if (
+            _ws_handshake_problem(
+                req.method,
+                req.version,
+                req.headers.get_all("upgrade"),
+                req.headers.get_all("connection"),
+                req.headers.get_all("sec-websocket-key"),
+                req.headers.get_all("sec-websocket-version"),
+            ).byte_length()
+            != 0
+        ):
+            return False
+        var ws_key = req.headers.get("sec-websocket-key")
 
         var accept = _compute_accept_srv(ws_key)
 

@@ -439,6 +439,115 @@ def test_unsupported_ws_version_gets_426() raises:
     assert_false("hello http" in got, "reached the HTTP handler: " + got)
 
 
+def _exchange(port: UInt16, req: String, needle: String) raises -> String:
+    """Send ``req`` on a fresh connection; read until ``needle`` shows up."""
+    var fd = _connect_loopback(port)
+    var rb = req.as_bytes()
+    _ = _send(
+        fd, rb.unsafe_ptr(), c_size_t(req.byte_length()), c_int(MSG_NOSIGNAL)
+    )
+    _set_recv_timeout(fd, 3000)
+    var got = String("")
+    var buf = stack_allocation[4096, UInt8]()
+    var attempts = 0
+    while attempts < 20 and needle not in got:
+        attempts += 1
+        var n = _recv(fd, buf, c_size_t(4096), c_int(0))
+        if Int(n) <= 0:
+            break
+        for i in range(Int(n)):
+            got += chr(Int(buf[unsafe_offset=i]))
+    _ = _close(fd)
+    return got^
+
+
+def test_shared_listener_checks_the_whole_handshake() raises:
+    """WS-07: Connection is matched as a token and the key must decode.
+
+    The reactor tested ``"upgrade" in connection`` and a non-empty key, so
+    ``Connection: noupgrade`` and ``Sec-WebSocket-Key: x`` got a 101. A
+    request that is not a valid handshake is ordinary HTTP here; the
+    standalone ``WsServer`` applies the same rule (WS-05).
+    """
+    from flare.http import ServerConfig, WsUpgrade
+
+    var cfg = ServerConfig()
+    cfg.ws = WsUpgrade(_ws_handler)
+    var srv = HttpServer.bind(SocketAddr.localhost(0), cfg^)
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_http_handler)
+        except:
+            pass
+        exit()
+    usleep(300000)
+
+    var head = String(
+        "GET /chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n"
+    )
+    var key = String("Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n")
+    var ver = String("Sec-WebSocket-Version: 13\r\n")
+    var valid = String("")
+    var no_token = String("")
+    var bad_key = String("")
+    var two_keys = String("")
+    var post = String("")
+    try:
+        valid = _exchange(
+            port,
+            head + "Connection: keep-alive, Upgrade\r\n" + key + ver + "\r\n",
+            "101",
+        )
+        no_token = _exchange(
+            port,
+            head + "Connection: noupgrade, close\r\n" + key + ver + "\r\n",
+            "hello http",
+        )
+        bad_key = _exchange(
+            port,
+            head
+            + "Connection: Upgrade, close\r\nSec-WebSocket-Key: x\r\n"
+            + ver
+            + "\r\n",
+            "hello http",
+        )
+        two_keys = _exchange(
+            port,
+            head
+            + "Connection: Upgrade, close\r\n"
+            + key
+            + "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n"
+            + ver
+            + "\r\n",
+            "hello http",
+        )
+        post = _exchange(
+            port,
+            "POST /chat HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length:"
+            " 0\r\nUpgrade: websocket\r\nConnection: Upgrade,"
+            " close\r\n"
+            + key
+            + ver
+            + "\r\n",
+            "hello http",
+        )
+    except e:
+        print("exchange failed: " + String(e))
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+
+    assert_true("101" in valid, "valid handshake: " + valid)
+    assert_false("101" in no_token, "Connection: noupgrade got: " + no_token)
+    assert_true("hello http" in no_token, no_token)
+    assert_false("101" in bad_key, "key 'x' got: " + bad_key)
+    assert_true("hello http" in bad_key, bad_key)
+    assert_false("101" in two_keys, "two keys got: " + two_keys)
+    assert_true("hello http" in two_keys, two_keys)
+    assert_false("101" in post, "POST got: " + post)
+
+
 def _origin_ws_handler(mut conn: WsConnection) raises -> None:
     conn.send_text("origin=[" + conn.origin + "]")
 
@@ -560,6 +669,7 @@ def main() raises:
     test_frames_pipelined_with_the_handshake_are_all_delivered()
     test_ws_upgrade_offloads_by_default()
     test_unsupported_ws_version_gets_426()
+    test_shared_listener_checks_the_whole_handshake()
     test_shared_listener_upgrade_carries_origin()
     test_ws_handshake_on_tls_is_never_upgraded_in_cleartext()
-    print("test_server_ws_upgrade: 7 passed")
+    print("test_server_ws_upgrade: 8 passed")
