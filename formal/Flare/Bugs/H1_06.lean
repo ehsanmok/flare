@@ -3,17 +3,21 @@ import Flare.L3_Protocol.H1.ClientChunked
 /-!
 # H1-06: the client returns a truncated chunked body as complete
 
-* flare file: `flare/http/_client/parse.mojo:520-545` (`_decode_chunked`:
-  a missing CRLF ends the loop with what was read) and 128-170 (the
-  chunked branch of the buffered readers never checks that the
-  terminating chunk arrived) @59bda50.
+* flare file: `flare/http/_client/parse.mojo:523-604` (`_decode_chunked`:
+  a missing CRLF ends the loop with what was read) and the chunked
+  branches of `_parse_http_response` / `_extract_body_and_trailers`, which
+  never checked that the terminating chunk arrived (@59bda50).
 * Spec clause: RFC 9112 §7.1: a chunked body ends with the last-chunk and
   the trailer section; §8: a message that ends before that is incomplete.
 * What goes wrong: `5\r\nhel` (connection closed mid-chunk, or a TLS peer
   that skips close_notify) decodes to `hel`, returned as the whole body.
-* Fix (`cDecFixed`): run flare's own scanner (`scan_chunked_end`) first and
-  refuse anything it does not report `done`. `cDecFixed_complete` proves a
-  fixed result is always a complete, framed body.
+* Fix (`cRead`): run flare's own scanner (`scan_chunked_end`) first
+  (`_require_complete_chunked`) and refuse anything it does not report
+  `done`. `cRead_complete` proves a returned body is always a complete,
+  framed body.
+
+Status: resolved. The counterexample is about the pre-fix path `cReadOld`;
+`fixed_complete` and `fixed_rejects` are about the shipped `cRead`.
 -/
 namespace Flare.Bugs.H1_06
 open Flare Flare.L3.H1.Chunked Flare.L3.H1.ClientChunked
@@ -43,23 +47,23 @@ def trunc : Bytes := [53, 13, 10, 104, 101, 108]
 def Complete (mb : Nat) (dec : Bytes → Except String Bytes) : Prop :=
   ∀ l out, dec l = .ok out → ∃ e, scanEnd implP l 0 mb = .done e
 
-theorem shipped_accepts : cDec trunc = .ok [104, 101, 108] :=
+theorem old_accepts : cReadOld trunc = .ok [104, 101, 108] :=
   okEq_eq (by native_decide)
 
 theorem scanner_incomplete : scanEnd implP trunc 0 (2 ^ 20) = .incomplete := by native_decide
 
-theorem counterexample : ¬ Complete (2 ^ 20) cDec := by
+theorem counterexample : ¬ Complete (2 ^ 20) cReadOld := by
   intro h
-  obtain ⟨e, he⟩ := h _ _ shipped_accepts
+  obtain ⟨e, he⟩ := h _ _ old_accepts
   rw [scanner_incomplete] at he
   cases he
 
-theorem fixed_complete (mb : Nat) : Complete mb (cDecFixed mb) := by
+theorem fixed_complete (mb : Nat) : Complete mb (cRead mb) := by
   intro l out h
-  obtain ⟨e, he, -⟩ := cDecFixed_complete mb l out h
+  obtain ⟨e, he, -⟩ := cRead_complete mb l out h
   exact ⟨e, he⟩
 
-theorem fixed_rejects : cDecFixed (2 ^ 20) trunc =
-    .error "HTTP response: malformed or truncated chunked body" := errEq_eq (by native_decide)
+theorem fixed_rejects : cRead (2 ^ 20) trunc =
+    .error "HTTP response: incomplete chunked body" := errEq_eq (by native_decide)
 
 end Flare.Bugs.H1_06

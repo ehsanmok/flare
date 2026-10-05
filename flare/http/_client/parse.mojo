@@ -15,6 +15,7 @@ from .._scan import parse_content_length
 from ..proto.chunked import (
     CHUNKED_INCOMPLETE,
     CHUNKED_MALFORMED,
+    scan_chunked_end,
     scan_chunked_resume,
 )
 from ..headers import HeaderMap
@@ -170,6 +171,29 @@ def _response_framing(
     return (_FRAME_CLOSE, -1)
 
 
+def _require_complete_chunked(raw: List[UInt8], body_start: Int) raises:
+    """Raise unless ``raw[body_start:]`` holds a whole chunked body.
+
+    A chunked body is complete only once its last-chunk and the empty
+    line after the trailers have arrived (RFC 9112 sec 7.1); a message
+    that ends earlier is incomplete (sec 8). :func:`_decode_chunked`
+    stops at the first line without a CRLF and returns what it has, so
+    the read-to-EOF readers must check completeness first, with the same
+    scanner the pooled framed reader uses. Without it a TLS reset without
+    close_notify chose where the body ended.
+
+    Raises:
+        NetworkError: If the body is incomplete or malformed.
+    """
+    var end = scan_chunked_end(
+        Span[UInt8, _](raw), body_start, MAX_BUFFERED_RESPONSE_BYTES
+    )
+    if end == CHUNKED_INCOMPLETE:
+        raise NetworkError("HTTP response: incomplete chunked body")
+    if end == CHUNKED_MALFORMED:
+        raise NetworkError("HTTP response: malformed chunked body")
+
+
 def _parse_http_response(
     raw: List[UInt8], method: String = "GET"
 ) raises -> Response:
@@ -209,6 +233,7 @@ def _parse_http_response(
         var trailers = HeaderMap()
         var body = List[UInt8]()
         if framing[0] == _FRAME_CHUNKED:
+            _require_complete_chunked(raw, body_start)
             body = _decode_chunked(raw, body_start, trailers)
         elif framing[0] == _FRAME_LENGTH:
             var cl = framing[1]
@@ -426,6 +451,7 @@ def _extract_body_and_trailers(
                 " Content-Length (RFC 7230 §3.3.3 forbids; would enable"
                 " request smuggling)"
             )
+        _require_complete_chunked(raw, body_start)
         return _decode_chunked(raw, body_start, trailers)
 
     if cl_str.byte_length() > 0:
@@ -670,8 +696,10 @@ def _refuse_truncated_tls(
     Such a body is framed by the end of the stream alone, and TLS makes
     that end trustworthy only through close_notify. Without it an
     attacker who resets the TCP connection cuts the body short and the
-    client returns it as complete. A length or chunked body already
-    fails on a short read, so only the close-delimited case is checked.
+    client returns it as complete. A length body fails on a short read
+    and a chunked body fails the completeness scan
+    (:func:`_require_complete_chunked`), so only the close-delimited
+    case is checked here.
     """
     if not stream.eof_was_unclean():
         return

@@ -593,6 +593,11 @@ whether the body arrived whole. It used to be returned as complete.
 Responses framed by length or chunking are unaffected.
 `TlsStream.eof_was_unclean()` exposes the signal to other readers.
 
+Breaking: the HTTP/1.1 client now raises `NetworkError` when a chunked
+response ends before its last chunk and the empty line after the
+trailers, on TCP and on TLS. It used to return the bytes read so far as
+the whole body.
+
 ## TCP, UDP, Unix sockets, DNS, addressing
 
 | Surface | Where |

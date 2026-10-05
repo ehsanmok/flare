@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60950 lines) |
+| Lean files | 298 (60963 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 14 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 15 of 138 |
 
 Six findings are rated high:
 
@@ -1074,7 +1074,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 | `framing_te_cl_reject`, `framing_dup_cl` | Transfer-Encoding together with Content-Length, or more than one Content-Length, is refused (stricter than §6.3 point 3-5, which allow recovery). | proved |
 | `framing_chunked_iff`, `framing_length_iff`, `framing_close_iff` | Exactly: chunked iff a single TE value `chunked` and no CL; length n iff no TE and a single valid CL = n; close-delimited iff neither (§6.3 points 4-8). | proved |
 | `cDec_agree`, `framed_chunked_agrees` | On any buffer the shipped scanner accepts at `e`, the client decoder either raises or returns exactly the server decoder's bytes, reading nothing past `e`. So the pooled reader's chunked path is right. | proved |
-| `cDecFixed_complete` | With the scan added on the read-to-EOF path, a returned body is always a complete chunked body. | proved (H1-06 fix) |
+| `cRead_complete` | With the scan on the read-to-EOF path (`cRead`), a returned body is always a complete chunked body. | proved (H1-06 fix) |
 | `parseStatusFixed_delimited` | With the delimiter check, the code is three digits followed by SP or the end of the line (`CodeDelimited`). | proved (H1-08 fix) |
 | `splitGo_join`, `lfGo_join`, `headFixed_agrees` | With bare LF and empty lines refused, the head lines and body start equal those of the LF-recognising recipient. | proved (H1-07 fix) |
 | `canReuseFixed_ok` | With the version check, reuse implies HTTP/1.1 without `close` (RFC 9112 §9.3). | proved (H1-09 fix) |
@@ -2765,7 +2765,7 @@ advances the wheel to `now` at the top of every iteration
 | UTF-8 check (`L1.Utf8.isValidUtf8`) | `ws/frame.mojo:553-606` | `textPayload_ok_iff` | proved (in L1) |
 | `ObsFold.isSPHT`, `aStrip`, `colonAt`, `fields` | `_server/parse.mojo:203-320`, `parse_util.mojo:65-90` | `fold_unfold`, `strict_no_fold`, `fields_ok_strict`, `fieldsFixed_valid`, `Bugs.H1_10.*` | proved (strict) / counterexample (H1-10) / fix proved |
 | `ClientResponse.bodyless`, `respFraming` | `_client/parse.mojo:128-170` | `framing_bodyless`, `framing_te_cl_reject`, `framing_dup_cl`, `framing_*_iff` | proved |
-| `ClientChunked.isSWS`, `pyStrip`, `hexAcc`, `cHex`, `trailerOk`, `cTr`, `cDec` | `_client/parse.mojo:497-578`, `600-630` | `cDec_agree`, `framed_chunked_agrees`, `cDecFixed_complete`, `Bugs.H1_06.*` | proved (framed path) / counterexample (read-to-EOF path, H1-06) / fix proved |
+| `ClientChunked.isSWS`, `pyStrip`, `hexAcc`, `cHex`, `trailerOk`, `cTr`, `cDec`, `cRead` (`cReadOld` = pre-fix) | `_client/parse.mojo:497-578`, `600-630` | `cDec_agree`, `framed_chunked_agrees`, `cRead_complete`, `Bugs.H1_06.*` | proved (framed path) / counterexample (read-to-EOF path, H1-06) / fix proved |
 | `ClientResponse.parseStatus` | `_client/parse.mojo:318-352` | `parseStatusFixed_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
 | `ClientResponse.san`, `findCRLF2`, `splitGo`, `splitLines`, `headImpl` | `_client/parse.mojo:89-125`, `233-306` | `headFixed_agrees`, `Bugs.H1_07.*` | counterexample (H1-07) / fix proved |
 | `ClientResponse.canReuse` | `_client/parse.mojo:836-884` | `canReuseFixed_ok`, `Bugs.H1_09.*` | counterexample (H1-09) / fix proved |
@@ -3006,7 +3006,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-03 | Medium | resolved | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
 | H1-04 | Medium | resolved | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
 | H1-05 | Low | open | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
-| H1-06 | Medium | open | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
+| H1-06 | Medium | resolved | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
 | H1-07 | Low | open | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
 | H1-08 | Low | open | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
 | H1-09 | Low | open | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
@@ -3719,11 +3719,13 @@ Status: resolved. Fixed in `request_te_framing` (`flare/http/proto/chunked.mojo`
 
 #### H1-06: the client returns a truncated chunked body as complete
 
+Status: resolved. The read-to-EOF readers now run `scan_chunked_end` first (`_require_complete_chunked`) in both `_parse_http_response` and `_extract_body_and_trailers`, and raise on an incomplete or malformed chunked body. The counterexample is about `cReadOld`; `Bugs.H1_06.fixed_complete` is about the shipped `cRead`.
+
 - **Severity:** Medium. The read-to-EOF readers hand the application a truncated body as a successful response. They serve unpooled HTTP/1.1 requests over TCP and TLS and the chunked uploads (`client.mojo:1283`, `1445`, `1495`, `2505`). On TLS, a peer or an on-path attacker that resets the connection mid-body (no close_notify) chooses where the body ends.
 - **RFC:** RFC 9112 §7.1 (a chunked body ends with the last-chunk and the trailer section) and §8 (a message that ends before that is incomplete).
 - **What goes wrong:** `_read_http_response_tcp`/`_tls` (`_client/parse.mojo:645-703`) read to EOF and call `_parse_http_response`, whose chunked branch (`205-212`) calls `_decode_chunked` (`497-578`). The decoder stops at the first line without CRLF and returns what it has. Nothing checks that the zero-size chunk arrived. The pooled framed reader is correct, because it scans first (`cDec_agree`).
-- **Counterexample:** `Bugs.H1_06.counterexample` (`¬ Complete (2^20) cDec`): `shipped_accepts` gives `cDec "5\r\nhel" = ok "hel"`, while `scanner_incomplete` gives the shipped scanner's verdict `incomplete`.
-- **Fix:** in the chunked branch, raise unless `scan_chunked_end(raw, body_start, MAX_BUFFERED_RESPONSE_BYTES) ≥ 0`. `Bugs.H1_06.fixed_complete` (from `cDecFixed_complete`) proves every returned body is then a complete chunked body.
+- **Counterexample:** `Bugs.H1_06.counterexample` (`¬ Complete (2^20) cReadOld`): `old_accepts` gives `cReadOld "5\r\nhel" = ok "hel"`, while `scanner_incomplete` gives the shipped scanner's verdict `incomplete`.
+- **Fix:** in the chunked branch, raise unless `scan_chunked_end(raw, body_start, MAX_BUFFERED_RESPONSE_BYTES) ≥ 0`. `Bugs.H1_06.fixed_complete` (from `cRead_complete`) proves every returned body is then a complete chunked body.
 - **Repro:** `formal/repro/H1-06_client_truncated_chunked_accepted.mojo` (pure parser, and a forked TLS server that closes without close_notify)
 - **Observed (3 runs):** `BUG REPRODUCED: truncated chunked body returned as complete (pure: accepted status=200 body=hel; TLS without close_notify: accepted status=200 body=hel)`
 - **Flip:** with the scan added to `flare/http/_client/parse.mojo`: `OK: truncated chunked body refused (raised: NetworkError: HTTP response: incomplete chunked body; raised: NetworkError: HTTP response: incomplete chunked body)`; the file was restored.

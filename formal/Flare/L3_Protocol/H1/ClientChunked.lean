@@ -13,12 +13,15 @@ two places:
   `_decode_chunked`;
 * the read-to-EOF readers (`_read_http_response_tcp` / `_tls`,
   parse.mojo:645-703) call `_parse_http_response` on whatever arrived before
-  EOF, with no scan.
+  EOF. Since the H1-06 fix they run the same scan first
+  (`_require_complete_chunked`, modelled by `cRead`).
 
 `cDec` mirrors the decoder. `cDec_agree` proves the first path right: on any
 buffer the scanner accepts, `_decode_chunked` either raises or yields exactly
 the bytes of `decode_chunked_body` (`decL`), reading nothing past the
-scanner's end. The second path is finding H1-06 (`Bugs/H1_06.lean`).
+scanner's end. The second path was finding H1-06 (`Bugs/H1_06.lean`): `cReadOld` decoded
+without the scan; `cRead_complete` proves the shipped path only returns a
+complete body.
 
 Mojo's `String.strip()` on the byte-per-`chr` string removes the bytes
 9-13, 28-30 and 32 (observed with `pixi run mojo`, byte by byte); `isSWS`
@@ -313,15 +316,21 @@ theorem framed_chunked_agrees (P : Policy) (mb : Nat) (l : Bytes) (e adv t : Nat
   exact cDec_agree P mb l 0 e adv t h (l.take e) out (by rw [List.take_take, Nat.min_self])
     (by simp; omega) hc
 
-/-- The H1-06 fix: decode only a body the scanner accepts. -/
-def cDecFixed (mb : Nat) (l : Bytes) : Except String Bytes :=
+/-- The read-to-EOF path before the H1-06 fix: `_parse_http_response` decoded
+whatever arrived, with no completeness check. Kept for the counterexample. -/
+def cReadOld (l : Bytes) : Except String Bytes := cDec l
+
+/-- The shipped read-to-EOF path: `_require_complete_chunked` (the scanner
+must report `done`) and then `_decode_chunked`.
+mirrors flare/http/_client/parse.mojo:174-194 (fixed, H1-06) -/
+def cRead (mb : Nat) (l : Bytes) : Except String Bytes :=
   match scanL implP mb l 0 with
   | (.done _, _, _) => cDec l
-  | _ => .error "HTTP response: malformed or truncated chunked body"
+  | _ => .error "HTTP response: incomplete chunked body"
 
-theorem cDecFixed_complete (mb : Nat) (l out : Bytes) (h : cDecFixed mb l = .ok out) :
+theorem cRead_complete (mb : Nat) (l out : Bytes) (h : cRead mb l = .ok out) :
     ∃ e, scanEnd implP l 0 mb = .done e ∧ decodeBody l 0 = .ok (out, e) := by
-  unfold cDecFixed at h
+  unfold cRead at h
   rcases hs : scanL implP mb l 0 with ⟨r, adv, t⟩
   rw [hs] at h
   cases r with

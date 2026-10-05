@@ -495,6 +495,12 @@ from test_client_response_parse import (
 from test_client_response_parse import (
     test_well_formed_responses_still_parse as test_client_response_parse__test_well_formed_responses_still_parse,
 )
+from test_client_response_parse import (
+    test_truncated_chunked_body_is_refused as test_client_response_parse__test_truncated_chunked_body_is_refused,
+)
+from test_client_response_parse import (
+    test_extract_body_refuses_truncated_chunked as test_client_response_parse__test_extract_body_refuses_truncated_chunked,
+)
 from test_client_stream_download import (
     test_client_stream_download as test_client_stream_download__test_client_stream_download,
 )
@@ -4385,6 +4391,12 @@ def main() raises:
     suite.test[test_client_response_parse__test_204_and_304_have_no_body]()
     suite.test[
         test_client_response_parse__test_well_formed_responses_still_parse
+    ]()
+    suite.test[
+        test_client_response_parse__test_truncated_chunked_body_is_refused
+    ]()
+    suite.test[
+        test_client_response_parse__test_extract_body_refuses_truncated_chunked
     ]()
     # tests/http/test_client_stream_download.mojo
     suite.test[test_client_stream_download__test_client_stream_download]()

@@ -1,11 +1,12 @@
 # PLATFORM: any
+# RESOLVED: H1-06 fixed on fix/formal-findings
 """H1-06: the read-to-EOF client readers return a truncated chunked body as
 complete, so a TLS reset without close_notify cuts a response short
 undetected.
 
-Lean: Flare.Bugs.H1_06.counterexample (the shipped decoder accepts
+Lean: Flare.Bugs.H1_06.counterexample (the pre-fix path cReadOld accepts
 "5\\r\\nhel" although the scanner calls it incomplete) and
-Flare.L3.H1.ClientChunked.cDecFixed_complete (fix meets spec: an accepted
+Flare.L3.H1.ClientChunked.cRead_complete (fix meets spec: an accepted
 body is a complete chunked message, decoded exactly).
 flare/http/_client/parse.mojo:497-578 (_decode_chunked: `while pos < n`,
 `end = min(pos + size, n)`, no check for the CRLF after the data or for
@@ -18,7 +19,7 @@ _read_http_response_tls/_tcp (flare/http/client.mojo:1283, 1445, 1495,
 Expected (RFC 9112 §7.1, RFC 8446 §6.1): a chunked body is complete only
 after the last-chunk and the empty line that ends the trailers; a
 connection that ends earlier is an incomplete message and must raise.
-Actual: "5\\r\\nhel" then EOF decodes to body "hel" with status 200.
+Before the fix: Actual: "5\\r\\nhel" then EOF decodes to body "hel" with status 200.
 
 Minimal fix: in _parse_http_response's chunked branch, raise unless
 `scan_chunked_end(Span(raw), body_start, MAX_BUFFERED_RESPONSE_BYTES) >= 0`
@@ -121,7 +122,11 @@ def main() raises:
     if pure.startswith("accepted") or tls.startswith("accepted"):
         print(
             "BUG REPRODUCED: truncated chunked body returned as complete"
-            " (pure: " + pure + "; TLS without close_notify: " + tls + ")"
+            " (pure: "
+            + pure
+            + "; TLS without close_notify: "
+            + tls
+            + ")"
         )
         raise Error("H1-06")
     print("OK: truncated chunked body refused (" + pure + "; " + tls + ")")

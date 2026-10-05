@@ -69,7 +69,7 @@ import Flare.L3_Protocol.H1Ws
 -- Client chunked body
 #print axioms Flare.L3.H1.ClientChunked.cDec_agree
 #print axioms Flare.L3.H1.ClientChunked.framed_chunked_agrees
-#print axioms Flare.L3.H1.ClientChunked.cDecFixed_complete
+#print axioms Flare.L3.H1.ClientChunked.cRead_complete
 -- Client response: framing, status line, head, reuse, TLS EOF
 #print axioms Flare.L3.H1.ClientResponse.framing_bodyless
 #print axioms Flare.L3.H1.ClientResponse.framing_te_cl_reject
