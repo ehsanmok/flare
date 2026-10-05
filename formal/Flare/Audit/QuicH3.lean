@@ -213,6 +213,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_23.impl_sends_draining
 #print axioms Flare.Bugs.QUIC_23.impl_trace
 #print axioms Flare.Bugs.QUIC_23.fixed_spec
+#print axioms Flare.Bugs.QUIC_23.shipped_silent
+#print axioms Flare.Bugs.QUIC_23.shipped_trace
 #print axioms Flare.Bugs.QUIC_24.impl_sends_draining
 #print axioms Flare.Bugs.QUIC_24.impl_trace
 #print axioms Flare.Bugs.QUIC_24.fixed_spec

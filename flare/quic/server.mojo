@@ -93,6 +93,7 @@ from .transport_params import (
 )
 from .state import (
     CONN_STATE_CLOSING,
+    CONN_STATE_DRAINING,
     QUIC_FLOW_CONTROL_ERROR,
     QUIC_PROTOCOL_VIOLATION,
     QUIC_STREAM_LIMIT_ERROR,
@@ -2136,6 +2137,9 @@ struct QuicListener(Movable):
             return False
         if not self.connections[slot].alive:
             return False
+        # RFC 9000 sec 10.2.2: a draining endpoint sends no packet.
+        if self.connections[slot].conn.state == CONN_STATE_DRAINING:
+            return False
         var emitted = False
         var peer = self.peer_addrs[slot]
         # The handshake flight goes out in packets of at most
@@ -2903,6 +2907,11 @@ struct QuicListener(Movable):
         1-RTT keys yet, or the session handle is NULL.
         """
         if slot < 0 or slot >= len(self.connections):
+            return List[UInt8]()
+        # RFC 9000 sec 10.2.2: "An endpoint in the draining state MUST NOT
+        # send any packets." Every 1-RTT egress path (ACKs, responses, PTO
+        # retransmits, the delayed-ACK timer) goes through this builder.
+        if self.connections[slot].conn.state == CONN_STATE_DRAINING:
             return List[UInt8]()
         # Read only the fields this builder needs and bump the pn
         # counter in place at the end -- deep-copying the whole

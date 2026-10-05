@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62961 lines) |
-| Theorems | 3302 |
-| Headline theorems in the axiom audit | 1100 |
+| Lean files | 298 (63018 lines) |
+| Theorems | 3305 |
+| Headline theorems in the axiom audit | 1102 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 105 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 106 of 138 |
 
 Six findings are rated high:
 
@@ -1462,7 +1462,7 @@ File: `Quic/Timers.lean`. Two labelled transition systems over a `Nat` clock in 
 **Closing and draining (RFC 9000 §10.2, §10.2.1, §10.2.2, §11.1).**
 - Events: a local close, the peer's CONNECTION_CLOSE, any other packet for the connection, the driver having something to send, and a timer firing. The output is the list of packets sent.
 - `cspecStep` is one conforming behaviour: a local close sends CONNECTION_CLOSE and enters closing until `t + 3×PTO`, answering each incoming packet with CONNECTION_CLOSE; the peer's CONNECTION_CLOSE enters draining, where nothing is sent; both states end at their deadline.
-- `srvStep` mirrors the pre-fix server (QUIC-22; still the model for the peer-close case, QUIC-23): `_close_for` (`quic/server.mojo:2177-2180`) and the other local-close sites set CLOSING and `alive = False` and send nothing; `_drain_and_send` (gate at 2033-2038) skips a slot that is not alive; the slot is reclaimed when any of its timers next fires (`advance_timers`, 2925-2938). The peer's CONNECTION_CLOSE sets DRAINING (`state.mojo:430-445`) but leaves `alive` true. `srvStepFix` is the server as it now closes: a local close sends CONNECTION_CLOSE and enters a 3×PTO closing phase in which each packet is answered with CONNECTION_CLOSE and only the closing timer ends it (`_close_for`, `_enter_closing`, `_answer_closing`, `advance_timers`).
+- `srvStep` mirrors the pre-fix server (QUIC-22 and QUIC-23): `_close_for` (`quic/server.mojo:2177-2180`) and the other local-close sites set CLOSING and `alive = False` and send nothing; `_drain_and_send` (gate at 2033-2038) skips a slot that is not alive; the slot is reclaimed when any of its timers next fires (`advance_timers`, 2925-2938). The peer's CONNECTION_CLOSE sets DRAINING (`state.mojo:430-445`) but leaves `alive` true. `srvStepFix` is the server as it now closes: a local close sends CONNECTION_CLOSE and enters a 3×PTO closing phase in which each packet is answered with CONNECTION_CLOSE and only the closing timer ends it (`_close_for`, `_enter_closing`, `_answer_closing`, `advance_timers`). `srvStepNow` adds QUIC-23: nothing is sent while draining (`_build_1rtt_response`, `_drain_and_send`); `srvNow_draining_silent` proves it for every event.
 - `cliStep` mirrors the client: `shutdown` (`client.mojo:1758-1778`) sends CONNECTION_CLOSE and closes the socket; after the peer's CONNECTION_CLOSE, `_drain_egress`, `_check_pto`, `keepalive` and `send_stream` still send.
 
 | Lean name | Statement | Status |
@@ -2874,7 +2874,8 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.Timers.clientStep` (pre-fix), `fixedStep` | quic/client.mojo `poll`, `_check_idle`, `_note_ack_eliciting_send`, `_dispatch_frames`, `_apply_peer_transport_params` (fixed, QUIC-21) | `client_never`, `QUIC_21.impl_never_closes`, `impl_counterexample` (pre-fix), `QUIC_21.fixed_spec` | proved (QUIC-21 resolved) |
 | `Quic.Timers.fixedStep` | quic/server.mojo:724-782, 2874-2898 with fixes | `fixed_run`, `fixed_closed_eq_spec`, `QUIC_20.fixed_spec`, `QUIC_21.fixed_spec` | proved |
 | `Quic.Timers.srvStepFix` | quic/server.mojo `_close_for`, `_enter_closing`, `_answer_closing`, `_handle_inbound`, `advance_timers` (fixed, QUIC-22) | `srvFix_refines`, `QUIC_22.fixed_refines`, `QUIC_22.fixed_trace` | proved (QUIC-22 resolved) |
-| `Quic.Timers.srvStep` | quic/server.mojo:2033-2038, 2177-2180 (pre-fix), quic/state.mojo:430-445 | `QUIC_22.impl_no_cc`, `impl_short_period` (pre-fix), `QUIC_23.impl_sends_draining`, `impl_trace` | counterexample (QUIC-23) |
+| `Quic.Timers.srvStepNow` | quic/server.mojo `_build_1rtt_response`, `_drain_and_send` (fixed, QUIC-23) | `srvNow_draining_silent`, `QUIC_23.shipped_silent`, `shipped_trace` | proved (QUIC-23 resolved) |
+| `Quic.Timers.srvStep` | quic/server.mojo:2033-2038, 2177-2180 (pre-fix), quic/state.mojo:430-445 | `QUIC_22.impl_no_cc`, `impl_short_period` (pre-fix), `QUIC_23.impl_sends_draining`, `impl_trace` | counterexample (pre-fix; QUIC-23) |
 | `Quic.Timers.cliStep` | quic/client.mojo:557-608, 688-706, 1035-1085, 1619-1634, 1758-1778 | `QUIC_24.impl_sends_draining`, `impl_trace`, `cli_close_ok` | counterexample (QUIC-24) |
 | `Quic.Timers.cspecStep` | RFC 9000 §10.2 (spec) | `spec_cc_on_close`, `spec_closing_only_cc`, `spec_draining_silent`, `spec_tick_before`, `QUIC_22.fixed_spec` | proved |
 | `Quic.LossRecovery.onSent`, `onAck`, `detectLost`, `firePto` | quic/_loss_recovery.mojo:122-133, 175-234, 236-274, 311-328 | `inv_run`, `retire_noUnderflow`, `firePto_noUnderflow` | proved |
@@ -3090,7 +3091,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-20 | Medium | resolved | the server's idle timer does not follow RFC 9000 §10.1 | `Flare/Bugs/QUIC_20.lean` | `repro/QUIC-20_server_idle_timer.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-21 | Medium | resolved | the client never applies an idle timeout | `Flare/Bugs/QUIC_21.lean` | `repro/QUIC-21_client_has_no_idle_timeout.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-22 | Medium | resolved | the server closes connections without sending CONNECTION_CLOSE | `Flare/Bugs/QUIC_22.lean` | `repro/QUIC-22_server_close_never_sends_connection_close.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-23 | Low | open | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-23 | Low | resolved | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-24 | Low | open | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QPACK-01 | High | resolved | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
 | QPACK-02 | Medium | resolved | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
@@ -4526,11 +4527,13 @@ Status: resolved. Fixed: `_close_for` sends a 1-RTT CONNECTION_CLOSE with the er
 
 #### QUIC-23: the server keeps sending after the peer's CONNECTION_CLOSE
 
+Status: resolved. A draining server builds no packet (server.mojo: _build_1rtt_response, _drain_and_send).
+
 - **Severity:** Low to Medium. After a client closes, the server goes on acknowledging and answering requests on the closed connection. The client, which has discarded its state, may answer with stateless resets, and the server spends bandwidth until the idle timer fires.
 - **RFC:** RFC 9000 §10.2.2: "An endpoint that has received a CONNECTION_CLOSE frame ... An endpoint in the draining state MUST NOT send any packets."
 - **What goes wrong:** `apply_connection_close` (`state.mojo:430-445`) sets DRAINING, but `alive` stays true, and no egress path checks the state: `_drain_and_send` (gate at `quic/server.mojo:2033-2038` tests `alive` only), `_drain_1rtt_coalesced` (2210-2433), and the PTO and ACK-delay timer paths (2925-2980) all build packets through `_build_1rtt_response` (2673).
 - **Counterexample:** `Bugs.QUIC_23.impl_sends_draining`: in draining, with something to send, the server sends. `impl_trace`: the peer closes at 0 and the server sends at 1.
-- **Fix:** send nothing while DRAINING. `fixed_spec` (`Timers.spec_draining_silent`) shows the draining spec sends nothing on any event.
+- **Fix:** send nothing while DRAINING: `_build_1rtt_response` returns an empty datagram in that state (every 1-RTT egress path goes through it) and `_drain_and_send` returns at once (the Initial and Handshake flights). `shipped_silent` (`Timers.srvNow_draining_silent`) proves the shipped server sends nothing in draining on any event; `fixed_spec` does the same for the spec (`Timers.spec_draining_silent`).
 - **Repro:** `formal/repro/QUIC-23_server_sends_while_draining.mojo`: after a loopback handshake the client sends a 1-RTT CONNECTION_CLOSE (NO_ERROR). The control is that the server's state is then DRAINING. The client's socket is flushed, a GET arrives on stream 0, and the server runs a handler between ticks for about 2 s while every datagram reaching the client is counted.
 - **Observed:** `BUG REPRODUCED: server in DRAINING sent 2 datagram(s) after the peer's CONNECTION_CLOSE` (three runs, exit 1).
 - **Flip** (`quic/server.mojo`: `_build_1rtt_response` returns an empty datagram when the slot's state is DRAINING): `OK: no datagram from the server while draining`, exit 0.

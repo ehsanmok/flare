@@ -3,7 +3,13 @@ import Flare.L3_Protocol.Quic.Timers
 /-!
 # QUIC-23: the server keeps sending after the client's CONNECTION_CLOSE
 
-flare/quic/state.mojo:430-445 @59bda50 (`apply_connection_close`) moves the
+Status: resolved. `_build_1rtt_response` returns no datagram and `_drain_and_send`
+returns at once when the connection state is DRAINING (flare/quic/server.mojo), so
+no ACK, response, PTO probe or delayed-ACK flush leaves a draining server.
+`Timers.srvStepNow` is the shipped server and `shipped_silent` proves it sends
+nothing in draining; the counterexample below is about the pre-fix `srvStep`.
+
+Pre-fix behaviour: flare/quic/state.mojo:430-445 @59bda50 (`apply_connection_close`) moves the
 connection to DRAINING, but the server's `alive` flag is set False only by
 its own close paths (flare/quic/server.mojo:1261, 2180, 2969, 3011) and the
 idle timer. `_drain_and_send` (2033-2038) and `_drain_1rtt_coalesced`
@@ -33,5 +39,17 @@ nothing in draining for any event. -/
 theorem fixed_spec (pto u : Nat) (out : List Pkt) (e : CEv) :
     (cspecStep pto ⟨.draining u, out⟩ e).out = out :=
   spec_draining_silent pto u out e
+
+/-- **The shipped server** sends nothing in draining, for every event
+(`Timers.srvNow_draining_silent`), and after the peer's close at 0 the want at
+1 sends nothing. -/
+theorem shipped_silent (pto u : Nat) (al : Bool) (out : List Pkt) (e : CEv) :
+    (srvStepNow pto ⟨.draining u, al, out⟩ e).out = out :=
+  srvNow_draining_silent pto u al out e
+
+theorem shipped_trace (pto : Nat) :
+    run (srvStepNow pto) ⟨.opened, true, []⟩ [.peerClose 0, .want 1] =
+      ⟨.draining 0, true, []⟩ := by
+  simp [run, srvStepNow]
 
 end Flare.Bugs.QUIC_23

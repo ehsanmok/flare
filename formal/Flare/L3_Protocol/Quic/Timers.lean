@@ -25,7 +25,9 @@ CONNECTION_CLOSE and enters closing for 3×PTO; in closing only
 CONNECTION_CLOSE is sent, once per incoming packet; a peer's
 CONNECTION_CLOSE enters draining, where nothing is sent; both end after
 3×PTO. `spec_*` prove those properties for every state. `srvStep` and
-`cliStep` mirror flare's server and client.
+`cliStep` mirror flare's server and client before the QUIC-22..24 fixes;
+`srvStepFix`/`srvStepNow` are the shipped server (`srvStepNow` sends
+nothing in draining, QUIC-23).
 -/
 namespace Flare.L3.Quic.Timers
 
@@ -315,6 +317,41 @@ def srvStepFix (pto : Nat) (s : SSt) : CEv → SSt
   | .tick t => match s.phase with
     | .closing u => if u ≤ t then { s with phase := .gone } else s
     | _ => if s.alive = false ∧ s.phase ≠ .gone then { s with phase := .gone } else s
+
+/-- The server as shipped (QUIC-22 and QUIC-23): `srvStepFix`, and in addition
+nothing is sent while draining: `_build_1rtt_response` returns no datagram and
+`_drain_and_send` returns at once when the connection state is DRAINING, so
+no ACK, response, PTO probe or delayed-ACK flush leaves the server. A peer
+CONNECTION_CLOSE that arrives while closing moves to draining, keeping the
+closing period's end (`apply_connection_close` sets DRAINING from any state);
+the slot then ends with the closing timer or the idle timer, as before.
+mirrors flare/quic/server.mojo `_build_1rtt_response`, `_drain_and_send`,
+flare/quic/state.mojo `apply_connection_close` -/
+def srvStepNow (pto : Nat) (s : SSt) : CEv → SSt
+  | .localClose t => match s.phase with
+    | .opened => ⟨.closing (t + 3 * pto), false, .cc :: s.out⟩
+    | _ => s
+  | .peerClose t => match s.phase with
+    | .opened => ⟨.draining t, s.alive, s.out⟩
+    | .closing u => ⟨.draining u, s.alive, s.out⟩
+    | _ => s
+  | .recvPkt t => match s.phase with
+    | .closing u => if t < u then { s with out := .cc :: s.out } else s
+    | _ => s
+  | .want _ =>
+    match s.phase with
+    | .draining _ => s
+    | .gone => s
+    | _ => if s.alive then { s with out := .other :: s.out } else s
+  | .tick t => match s.phase with
+    | .closing u => if u ≤ t then { s with phase := .gone } else s
+    | _ => if s.alive = false ∧ s.phase ≠ .gone then { s with phase := .gone } else s
+
+/-- **QUIC-23, shipped**: the server sends nothing in draining, whatever the
+event. -/
+theorem srvNow_draining_silent (pto u : Nat) (al : Bool) (out : List Pkt) (e : CEv) :
+    (srvStepNow pto ⟨.draining u, al, out⟩ e).out = out := by
+  cases e <;> simp only [srvStepNow] <;> (try split) <;> rfl
 
 /-- The states the QUIC-22 fix covers: an open connection is alive, a
 closing one is not (draining is QUIC-23). -/

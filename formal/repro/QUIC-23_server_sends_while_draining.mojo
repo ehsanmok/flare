@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
+# RESOLVED: QUIC-23 fixed on fix/formal-findings
 # fixtures in tests/tls/fixtures/rustls-quic-client/)
 """QUIC-23: the server keeps sending after the peer's CONNECTION_CLOSE.
 
@@ -24,7 +25,7 @@ Inconclusive if the handshake does not complete or the server's state is
 not DRAINING after the CONNECTION_CLOSE.
 
 Expected: no datagram from the server after it entered DRAINING.
-Actual: it keeps acknowledging and answers the request.
+Before the fix: it keeps acknowledging and answers the request.
 
 Minimal fix: _build_1rtt_response returns no datagram while the connection
 is DRAINING.
