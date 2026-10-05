@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-16 fixed on fix/formal-findings
 """H2-16: a PRIORITY frame that makes an idle stream depend on itself (or
 a zero-increment WINDOW_UPDATE on an idle stream) makes the HTTP/2 server
 send RST_STREAM for that idle stream and remember the id as reset. The
@@ -22,7 +23,7 @@ Trace: PRIORITY(stream 1, depends on 1); then HEADERS(1, POST, no
 END_STREAM); then DATA(1, "abc", END_STREAM).
 
 Expected: GOAWAY(PROTOCOL_ERROR) at the PRIORITY frame (or, if the stream
-is opened, the body is delivered). Actual: RST_STREAM(1, PROTOCOL_ERROR)
+is opened, the body is delivered). Before the fix: RST_STREAM(1, PROTOCOL_ERROR)
 for the idle stream, the HEADERS opens stream 1, and the DATA is dropped:
 stream 1 stays OPEN with an empty body and is never completed.
 

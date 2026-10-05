@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63452 lines) |
-| Theorems | 3338 |
-| Headline theorems in the axiom audit | 1128 |
+| Lean files | 298 (63461 lines) |
+| Theorems | 3339 |
+| Headline theorems in the axiom audit | 1129 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 125 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 126 of 138 |
 
 Six findings are rated high:
 
@@ -3068,7 +3068,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-13 | Low | resolved | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
 | H2-14 | Low | resolved | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
 | H2-15 | Low | resolved | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
-| H2-16 | Low | open | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
+| H2-16 | Low | resolved | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
 | H2-17 | Medium | resolved | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
 | H2-18 | Low | open | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
 | H2-19 | Low | open | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
@@ -4203,6 +4203,8 @@ Status: resolved. Fixed: `Connection._idle_id` (`state.mojo`) treats every even 
 - **Flip:** `OK: every frame on idle stream 2 drew GOAWAY(PROTOCOL_ERROR)`. `test_h2_state` (23), `test_h2_client_conn` (11), `test_h2_conn_handle` (3) and `test_h2_server` (10) passed.
 
 #### H2-16: RST_STREAM on an idle stream, after which that stream's request body is dropped
+
+Status: resolved. Fixed: the PRIORITY self-dependency and zero-increment WINDOW_UPDATE branches of `Connection.handle_frame` (`state.mojo`) answer GOAWAY(PROTOCOL_ERROR) when the stream is idle, and no longer send RST_STREAM or record the id as reset. Tests: `test_h2_state.mojo::test_self_dependent_priority_and_zero_window_update_on_idle_stream`, `test_self_dependent_priority_on_an_open_stream_is_still_a_stream_error`, `test_zero_window_update_on_a_closed_stream_is_still_a_stream_error`. Model: `Fix.shipped` carries `h2_16`; `Bugs.H2_16.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. Only the client's own request is affected. A client that sends a self-dependent PRIORITY, or a WINDOW_UPDATE with increment 0, on a stream it has not opened yet gets RST_STREAM on that idle stream. The id is recorded in `reset_by_us`. When the client then opens the stream, every DATA frame of its request is silently dropped (only connection credit comes back), so the request never completes and hangs until a timeout.
 - **RFC:** RFC 9113 §5.1, idle: any frame other than HEADERS or PRIORITY is a connection error PROTOCOL_ERROR. §6.4: RST_STREAM "MUST NOT be sent for a stream in the 'idle' state". §5.3.1: a self-dependent PRIORITY is a stream error, which on an idle stream cannot be signalled with RST_STREAM.

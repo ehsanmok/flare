@@ -1162,6 +1162,12 @@ struct Connection(Copyable, Defaultable):
                 | Int(f.payload[3])
             ) & 0x7FFFFFFF
             if dep == sid:
+                # sec 5.1: RST_STREAM must not be sent on an idle stream,
+                # so there the only report is a connection error (H2-16).
+                if sid not in self.streams and self._idle_id(sid):
+                    return self._conn_error(
+                        Http2ErrorCode.PROTOCOL_ERROR().value
+                    )
                 out.append(
                     self._rst_stream_frame(
                         sid, Http2ErrorCode.PROTOCOL_ERROR().value
@@ -1299,6 +1305,11 @@ struct Connection(Copyable, Defaultable):
                 # sec 6.9: zero is a connection error on stream 0 and a
                 # stream error otherwise.
                 if sid == 0:
+                    return self._conn_error(
+                        Http2ErrorCode.PROTOCOL_ERROR().value
+                    )
+                # sec 5.1: no RST_STREAM on an idle stream (H2-16).
+                if sid not in self.streams and self._idle_id(sid):
                     return self._conn_error(
                         Http2ErrorCode.PROTOCOL_ERROR().value
                     )

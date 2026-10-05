@@ -927,6 +927,53 @@ def test_frames_on_a_finished_odd_stream_are_still_closed_not_idle() raises:
     assert_equal(_goaway_code(out), -1)
 
 
+def test_self_dependent_priority_and_zero_window_update_on_idle_stream() raises:
+    """H2-16: RST_STREAM must not be sent on an idle stream (RFC 9113 sec
+    5.1), so a self-dependent PRIORITY or a zero-increment WINDOW_UPDATE
+    there is a connection error. Before, the server sent RST_STREAM and
+    remembered the id as reset, and the later request on it lost its DATA."""
+    for kind in range(2):
+        var c = Connection()
+        var out: List[Frame]
+        if kind == 0:
+            out = c.handle_frame(
+                _frame_on(FrameType.PRIORITY(), 1, _bytes([0, 0, 0, 1, 16]))
+            )
+        else:
+            out = c.handle_frame(
+                _frame_on(FrameType.WINDOW_UPDATE(), 1, _bytes([0, 0, 0, 0]))
+            )
+        assert_equal(_goaway_code(out), 1, "kind " + String(kind))
+        for f in out:
+            assert_false(f.header.type.value == FrameType.RST_STREAM().value)
+
+
+def test_self_dependent_priority_on_an_open_stream_is_still_a_stream_error() raises:
+    """H2-16: on a stream that exists the stream error is kept."""
+    var c = Connection()
+    _ = _open_request(c, 1, False)
+    var out = c.handle_frame(
+        _frame_on(FrameType.PRIORITY(), 1, _bytes([0, 0, 0, 1, 16]))
+    )
+    assert_equal(_goaway_code(out), -1)
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+
+
+def test_zero_window_update_on_a_closed_stream_is_still_a_stream_error() raises:
+    """H2-16: a closed (not idle) stream keeps the stream-error answer."""
+    var c = Connection()
+    _ = _open_request(c, 1, True)
+    _ = _open_request(c, 3, True)
+    _ = c.streams.pop(1)
+    var out = c.handle_frame(
+        _frame_on(FrameType.WINDOW_UPDATE(), 1, _bytes([0, 0, 0, 0]))
+    )
+    assert_equal(_goaway_code(out), -1)
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -968,4 +1015,7 @@ def main() raises:
     test_a_positive_limit_still_admits_streams_up_to_it()
     test_frames_on_an_even_stream_are_a_protocol_error_in_server_role()
     test_frames_on_a_finished_odd_stream_are_still_closed_not_idle()
-    print("test_h2_state: 40 passed")
+    test_self_dependent_priority_and_zero_window_update_on_idle_stream()
+    test_self_dependent_priority_on_an_open_stream_is_still_a_stream_error()
+    test_zero_window_update_on_a_closed_stream_is_still_a_stream_error()
+    print("test_h2_state: 43 passed")

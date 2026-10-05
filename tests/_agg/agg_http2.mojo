@@ -465,6 +465,15 @@ from test_h2_state import (
 from test_h2_state import (
     test_frames_on_a_finished_odd_stream_are_still_closed_not_idle as test_h2_state__test_frames_on_a_finished_odd_stream_are_still_closed_not_idle,
 )
+from test_h2_state import (
+    test_self_dependent_priority_and_zero_window_update_on_idle_stream as test_h2_state__test_self_dependent_priority_and_zero_window_update_on_idle_stream,
+)
+from test_h2_state import (
+    test_self_dependent_priority_on_an_open_stream_is_still_a_stream_error as test_h2_state__test_self_dependent_priority_on_an_open_stream_is_still_a_stream_error,
+)
+from test_h2_state import (
+    test_zero_window_update_on_a_closed_stream_is_still_a_stream_error as test_h2_state__test_zero_window_update_on_a_closed_stream_is_still_a_stream_error,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -831,6 +840,15 @@ def main() raises:
     ]()
     suite.test[
         test_h2_state__test_frames_on_a_finished_odd_stream_are_still_closed_not_idle
+    ]()
+    suite.test[
+        test_h2_state__test_self_dependent_priority_and_zero_window_update_on_idle_stream
+    ]()
+    suite.test[
+        test_h2_state__test_self_dependent_priority_on_an_open_stream_is_still_a_stream_error
+    ]()
+    suite.test[
+        test_h2_state__test_zero_window_update_on_a_closed_stream_is_still_a_stream_error
     ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[

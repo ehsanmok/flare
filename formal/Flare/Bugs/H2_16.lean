@@ -15,6 +15,8 @@ a stream in this state MUST be treated as a connection error [...]
 PROTOCOL_ERROR"; §5.4.2 / §6.4: RST_STREAM "MUST NOT be sent for a stream
 in the 'idle' state". §5.3.1: a self-dependent PRIORITY is a stream error,
 which on an idle stream cannot be signalled with RST_STREAM.
+
+Status: resolved. PRIORITY self-dependency and zero-increment WINDOW_UPDATE on an idle stream are now connection errors. `Fix.shipped` carries `h2_16`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_16
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -54,5 +56,11 @@ theorem fixed_wu (fx : Fix) (c : Conn) (f : Fr) (hfx : fx.h2_16 = true)
     (hm : mem c f.sid = false) (hi : isIdleId fx c f.sid = true) :
     wuH fx c f = connErr c ePROTOCOL := by
   simp [wuH, h0, hw, hm, hi, hfx]
+
+/-- Shipped (`Fix.shipped` has `h2_16`): both triggers draw
+GOAWAY(PROTOCOL_ERROR), never RST_STREAM, on the idle stream. -/
+theorem fixed_shipped : outs Fix.shipped {} tr = some [[.settingsAck], [.goaway 0 ePROTOCOL], [], []] ∧
+    outs Fix.shipped {} [.frame settings0, .frame (wuF 1 0)] =
+      some [[.settingsAck], [.goaway 0 ePROTOCOL]] := by native_decide
 
 end Flare.Bugs.H2_16
