@@ -93,6 +93,9 @@ from test_qpack_dynamic import (
 from test_qpack_dynamic import (
     test_pre_base_relative_index_beyond_base_is_refused as test_qpack_dynamic__test_pre_base_relative_index_beyond_base_is_refused,
 )
+from test_qpack_dynamic import (
+    test_truncated_prefix_without_sign_byte_is_refused as test_qpack_dynamic__test_truncated_prefix_without_sign_byte_is_refused,
+)
 
 
 def main() raises:
@@ -142,5 +145,8 @@ def main() raises:
     ]()
     suite.test[
         test_qpack_dynamic__test_pre_base_relative_index_beyond_base_is_refused
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_truncated_prefix_without_sign_byte_is_refused
     ]()
     suite^.run()

@@ -297,6 +297,23 @@ def test_pre_base_relative_index_beyond_base_is_refused() raises:
     assert_true(_decode_raises(sec, t), "relative index 1 with Base 1")
 
 
+def test_truncated_prefix_without_sign_byte_is_refused() raises:
+    """QPACK-02: ``FF 01`` is a complete 8-bit-prefix integer (256) that
+    ends exactly at the end of the section, so the Sign / Delta Base byte
+    is missing. The decoder read ``buf[2]`` one past the end and aborted
+    the process; it must raise (RFC 9204 4.5.1)."""
+    # Capacity 8192 -> MaxEntries 256, so Required Insert Count 256 decodes.
+    var t = QpackDynamicTable(8192)
+    var sec = List[UInt8]()
+    sec.append(0xFF)
+    sec.append(0x01)
+    assert_true(_decode_raises(sec, t), "section without a Sign byte decoded")
+    # A single byte is truncated too.
+    var one = List[UInt8]()
+    one.append(0x00)
+    assert_true(_decode_raises(one, t), "one-byte prefix decoded")
+
+
 def main() raises:
     test_entry_size()
     test_table_insert_and_index()
@@ -313,4 +330,5 @@ def main() raises:
     test_sign_set_with_delta_base_not_below_ric_is_refused()
     test_post_base_reference_at_or_above_ric_is_refused()
     test_pre_base_relative_index_beyond_base_is_refused()
+    test_truncated_prefix_without_sign_byte_is_refused()
     print("test_qpack_dynamic: all dynamic-table tests passed")

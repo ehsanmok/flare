@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QPACK-02 fixed on fix/formal-findings
 """QPACK-02: decode_field_section_dynamic reads the Sign/Delta-Base byte
 one past the end of the field section.
 
@@ -19,7 +20,7 @@ peer-triggerable crash of the whole server. The repro runs the decode in a
 forked child and reports whether the child died from a signal.
 
 Expected: a truncation error before any read past the end.
-Actual: out-of-bounds read at line 489 (process abort under assertions).
+Before the fix: Actual: out-of-bounds read at line 489 (process abort under assertions).
 Needs a decoder table capacity >= 4096 (default H3 config uses 0).
 
 Minimal fix: `if ric_enc.offset >= len(buf): raise Error(...)` before
@@ -61,8 +62,10 @@ def main() raises:
     var sig = Int(status & 0x7F)
     if sig != 0:
         print(
-            "BUG REPRODUCED: decoding the 2-byte field section [0xFF, 0x01]"
-            " killed the process with signal",
+            (
+                "BUG REPRODUCED: decoding the 2-byte field section [0xFF, 0x01]"
+                " killed the process with signal"
+            ),
             sig,
             "(out-of-bounds read of buf[2] at dynamic.mojo:489)",
         )

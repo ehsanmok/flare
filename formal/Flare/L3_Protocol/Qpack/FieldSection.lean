@@ -19,8 +19,8 @@ Four small models of `flare/qpack/dynamic.mojo` and `flare/qpack/codec.mojo`:
    old one lacked, proved equal to the spec (`implResolve_eq_spec`);
    `implOldResolve` is the pre-fix code, which accepts everything the spec
    accepts (`spec_imp_implOld`) but also more (Bugs/QPACK_01).
-3. The prefix read at dynamic.mojo:489 (`buf[ric_enc.offset]`), see
-   Bugs/QPACK_02.
+3. The prefix read of the Sign byte (`buf[ric_enc.offset]`, dynamic.mojo:535;
+   unchecked before the QPACK-02 fix), see Bugs/QPACK_02.
 4. String literals (`_decode_string_literal`, both branches): the H flag,
    the prefix-integer length, then the octets, Huffman-decoded by
    `huffman_decode_simd` when H is set. `implLiteral_eq_spec` shows this is
@@ -321,10 +321,10 @@ theorem rel_roundtrip (base abs : Nat) (h : abs < base) :
 
 /-! ## 3. The prefix read at dynamic.mojo:489 -/
 
-/-- Index read by `buf[ric_enc.offset]` after a successful Required Insert
-Count decode, or `none` if flare raised earlier.
-mirrors flare/qpack/dynamic.mojo:482-489 @59bda50 -/
-def implSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
+/-- PRE-FIX index read by `buf[ric_enc.offset]` after a successful Required
+Insert Count decode, or `none` if flare raised earlier (flare/qpack/dynamic.mojo
+@59bda50 had no bound check on that read). Kept for Bugs/QPACK_02. -/
+def implOldSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
   if buf.length < 2 then none
   else match decodeInt buf 0 8 with
     | none => none
@@ -333,15 +333,16 @@ def implSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
       | none => none
       | some _ => some off
 
-/-- Fix: check the cursor before reading the Sign byte. -/
-def implFixedSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
-  match implSignReadIndex buf total maxEntries with
+/-- The shipped decoder checks the cursor before reading the Sign byte.
+mirrors flare/qpack/dynamic.mojo:518-542 (fixed, QPACK-02) -/
+def implSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
+  match implOldSignReadIndex buf total maxEntries with
   | some off => if off ≥ buf.length then none else some off
   | none => none
 
-theorem implFixedSignReadIndex_inBounds (buf : Bytes) (t m : UInt64) (i : Nat)
-    (h : implFixedSignReadIndex buf t m = some i) : i < buf.length := by
-  unfold implFixedSignReadIndex at h
+theorem implSignReadIndex_inBounds (buf : Bytes) (t m : UInt64) (i : Nat)
+    (h : implSignReadIndex buf t m = some i) : i < buf.length := by
+  unfold implSignReadIndex at h
   split at h
   · split at h
     · simp at h
@@ -349,9 +350,9 @@ theorem implFixedSignReadIndex_inBounds (buf : Bytes) (t m : UInt64) (i : Nat)
   · simp at h
 
 /-- Only the Sign read can go out of bounds: the offset is always `≤ len`. -/
-theorem implSignReadIndex_le (buf : Bytes) (t m : UInt64) (i : Nat)
-    (h : implSignReadIndex buf t m = some i) : i ≤ buf.length := by
-  unfold implSignReadIndex at h
+theorem implOldSignReadIndex_le (buf : Bytes) (t m : UInt64) (i : Nat)
+    (h : implOldSignReadIndex buf t m = some i) : i ≤ buf.length := by
+  unfold implOldSignReadIndex at h
   split at h
   · simp at h
   · split at h

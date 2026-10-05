@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60989 lines) |
+| Lean files | 298 (60996 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 18 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 19 of 138 |
 
 Six findings are rated high:
 
@@ -1567,7 +1567,7 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 **Field sections and the encoder stream.**
 - `decodeInt` is a local model of `decode_integer` (`http2/hpack.mojo:101-132`).
 - `implResolve` models the shipped (fixed, QPACK-01) Base and pre-base and post-base index arithmetic (`dynamic.mojo:473-603`); `implOldResolve` is the pre-fix code the counterexamples are about.
-- `implSignReadIndex` models the read at line 489, and `implLiteral` models `codec.mojo:192-234`, both branches. The Huffman branch calls `Flare.L1.Huffman.okOnly (decodeSimdImpl payload)`, the L1 model of `huffman_decode_simd`; `specLiteral` uses the proved L1 decoder `Flare.L1.Huffman.decode`.
+- `implSignReadIndex` models the Sign-byte read at `dynamic.mojo:535` with its bounds check (fixed, QPACK-02; `implOldSignReadIndex` is the unchecked pre-fix read), and `implLiteral` models `codec.mojo:192-234`, both branches. The Huffman branch calls `Flare.L1.Huffman.okOnly (decodeSimdImpl payload)`, the L1 model of `huffman_decode_simd`; `specLiteral` uses the proved L1 decoder `Flare.L1.Huffman.decode`.
 - `implDynRef` models the encoder-stream references at `dynamic.mojo:319` and `:337`.
 
 | Lean name | Statement | Status |
@@ -1577,8 +1577,8 @@ Files: `Qpack/Ric.lean`, `Qpack/Table.lean`, `Qpack/FieldSection.lean`, `Qpack/E
 | `FieldSection.implResolve_safe` | Every index the shipped resolver returns is below RIC. | proved |
 | `FieldSection.spec_imp_implOld` | The pre-fix resolver accepts everything the spec accepts and resolves it to the same entry. | proved |
 | `FieldSection.rel_roundtrip` | The decoder inverts the encoder's relative index. | proved |
-| `FieldSection.implSignReadIndex_le` | The sign-byte read index is at most `len`. | proved |
-| `FieldSection.implFixedSignReadIndex_inBounds`, `implFixedLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
+| `FieldSection.implOldSignReadIndex_le` | The pre-fix sign-byte read index is at most `len` (so only the Sign read can go out of bounds). | proved |
+| `FieldSection.implSignReadIndex_inBounds`, `implFixedLiteral_ok`, `implFixedDynRef_eq_spec` | Each QPACK fix meets its spec. | proved |
 | `FieldSection.implDynRef_inRange` | On in-range references flare already matches the spec. | proved |
 | `FieldSection.implLiteral_eq_spec` | flare's literal decoder, Huffman branch included, equals `specLiteral` on every input (via L1's `okOnly_decodeSimdImpl`). | proved |
 | `FieldSection.implLiteral_huffman` | A Huffman literal whose length prefix fits decodes to exactly the original bytes (via L1's `decode_encode`). | proved |
@@ -2856,7 +2856,7 @@ advances the wheel to `now` at the top of every iteration
 | `Qpack.Ric.implEncode`, `implDecode` | qpack/dynamic.mojo:181-209 | `implDecode_eq_spec`, `implDecode_encode` | proved |
 | `Qpack.Table.*` | qpack/dynamic.mojo:93-158 | `inv_insert`, `inv_setCapacity`, `getAbs_insert` | proved |
 | `Qpack.FieldSection.implResolve`, `implOldResolve` | qpack/dynamic.mojo:473-603 (fixed, QPACK-01) | `spec_imp_implOld`, `QPACK_01.violates_safety`, `implResolve_eq_spec` | resolved |
-| `Qpack.FieldSection.implSignReadIndex` | qpack/dynamic.mojo:482-489 | `QPACK_02.out_of_bounds`, `implFixedSignReadIndex_inBounds` | counterexample |
+| `Qpack.FieldSection.implSignReadIndex`, `implOldSignReadIndex` | qpack/dynamic.mojo:518-542 (fixed, QPACK-02) | `QPACK_02.out_of_bounds`, `implSignReadIndex_inBounds` | resolved |
 | `Qpack.FieldSection.implLiteral` | qpack/codec.mojo:192-234 | `implLiteral_eq_spec`, `implLiteral_huffman`, `QPACK_03.not_string_ok`, `QPACK_03.huffman_counterexample`, `implFixedLiteral_ok` | counterexample (QPACK-03) |
 | `Qpack.Encoder.findBy` | qpack/dynamic.mojo:160-175 | `findBy_some`, `findBy_none` | proved |
 | `Qpack.Encoder.ric` | qpack/dynamic.mojo:418-430 | `ric_bound`, `QPACK_06.impl_references_unacked`, `QPACK_06.fixed_spec` | counterexample (QPACK-06) |
@@ -3063,7 +3063,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | QUIC-23 | Low | open | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | QUIC-24 | Low | open | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
 | QPACK-01 | High | resolved | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
-| QPACK-02 | Medium | open | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
+| QPACK-02 | Medium | resolved | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
 | QPACK-03 | Low | open | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
 | QPACK-04 | Low | open | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
 | QPACK-05 | Medium | open | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
@@ -4431,6 +4431,7 @@ Status: resolved. `decode_field_section_dynamic` now raises QPACK_DECOMPRESSION_
 - **Repro:** `formal/repro/QPACK-02_sign_byte_oob_read.mojo` (the decode runs in a forked child).
 - **Observed:** `BUG REPRODUCED: decoding the 2-byte field section [0xFF, 0x01] killed the process with signal 6 (out-of-bounds read of buf[2] at dynamic.mojo:489)`
 - **Flip (QPACK agent):** `OK`, exit 0.
+Status: resolved. `decode_field_section_dynamic` raises QPACK_DECOMPRESSION_FAILED when the Required Insert Count ends the section (`ric_enc.offset >= len(buf)`) before reading the Sign byte. Test: `tests/qpack/test_qpack_dynamic.mojo::test_truncated_prefix_without_sign_byte_is_refused`. The repro prints `OK`.
 
 #### QPACK-03: string literals become Strings without UTF-8 validation
 

@@ -524,6 +524,14 @@ def decode_field_section_dynamic(
     var ric = decode_required_insert_count(
         UInt64(ric_enc.value), table.insert_count(), table.max_entries()
     )
+    # The prefix is two fields. A Required Insert Count that ends the
+    # section (``FF 01``) leaves no Sign / Delta Base byte; reading it
+    # indexed one past the end and aborted the process (QPACK-02).
+    if ric_enc.offset >= len(buf):
+        raise Error(
+            "qpack: QPACK_DECOMPRESSION_FAILED: field section prefix"
+            " truncated before Sign / Delta Base"
+        )
     # Sign + Delta Base (1-bit sign + 7-bit prefix).
     var sign_set = (buf[ric_enc.offset] & UInt8(0x80)) != UInt8(0)
     var delta = decode_integer(buf, ric_enc.offset, 7)
