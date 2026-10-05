@@ -153,9 +153,53 @@ def test_negotiate_q_zero_rejects_encoding() raises:
     assert_equal(p.quality, 0)
 
 
-def test_negotiate_wildcard_falls_back_to_identity() raises:
+def test_negotiate_wildcard_alone_selects_best_available_coding() raises:
+    """``*`` gives every coding without its own entry the wildcard weight
+    (RFC 9110 sec 12.5.3), so a bare ``*`` is acceptable for gzip / br and
+    the usual tie-break (br > gzip > identity) picks the coding. It used to
+    be pinned to identity, which was the APP-20 wildcard bug (Decision:
+    expectation updated with the fix)."""
     var p = negotiate_encoding("*", False)
-    assert_equal(p.encoding, "identity")
+    assert_equal(p.encoding, "gzip")
+    assert_equal(p.quality, 1000)
+    var b = negotiate_encoding("*", True)
+    assert_equal(b.encoding, "br")
+
+
+def test_negotiate_wildcard_weight_applies_to_unlisted_codings() raises:
+    """APP-20: ``gzip;q=0.5, *`` gives br weight 1 through ``*``."""
+    var p = negotiate_encoding("gzip;q=0.5, *", True)
+    assert_equal(p.encoding, "br")
+    assert_equal(p.quality, 1000)
+    var g = negotiate_encoding("gzip;q=0.5, *;q=0.2", False)
+    assert_equal(g.encoding, "gzip")
+    assert_equal(g.quality, 500)
+
+
+def test_negotiate_wildcard_is_order_independent() raises:
+    """APP-20: the same entries in another order give the same pick."""
+    for brotli in [True, False]:
+        var a = negotiate_encoding("gzip;q=0.5, *", brotli)
+        var b = negotiate_encoding("*, gzip;q=0.5", brotli)
+        assert_equal(a.encoding, b.encoding)
+        assert_equal(a.quality, b.quality)
+    var c = negotiate_encoding("*;q=0.3, br;q=0.4, gzip;q=0.1", True)
+    var d = negotiate_encoding("gzip;q=0.1, *;q=0.3, br;q=0.4", True)
+    assert_equal(c.encoding, "br")
+    assert_equal(d.encoding, "br")
+
+
+def test_negotiate_identity_refused_with_wildcard() raises:
+    """APP-20: ``identity;q=0, *`` must not select the refused identity."""
+    var p = negotiate_encoding("identity;q=0, *", False)
+    assert_equal(p.encoding, "gzip")
+    assert_equal(p.quality, 1000)
+    var q = negotiate_encoding("*, identity;q=0", False)
+    assert_equal(q.encoding, "gzip")
+    var r = negotiate_encoding("*;q=0", True)
+    assert_equal(r.quality, 0)
+    var t = negotiate_encoding("gzip;q=0, identity;q=0, *;q=0.5", False)
+    assert_equal(t.quality, 0)
 
 
 # ── Logger / RequestId ────────────────────────────────────────────────────
@@ -310,7 +354,10 @@ def main() raises:
     test_negotiate_brotli_unavailable_falls_back_to_gzip()
     test_negotiate_q_values()
     test_negotiate_q_zero_rejects_encoding()
-    test_negotiate_wildcard_falls_back_to_identity()
+    test_negotiate_wildcard_alone_selects_best_available_coding()
+    test_negotiate_wildcard_weight_applies_to_unlisted_codings()
+    test_negotiate_wildcard_is_order_independent()
+    test_negotiate_identity_refused_with_wildcard()
     test_logger_passthrough()
     test_logger_propagates_raise()
     test_request_id_echoes_inbound()

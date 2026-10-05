@@ -2083,7 +2083,16 @@ from test_middleware import (
     test_negotiate_q_zero_rejects_encoding as test_middleware__test_negotiate_q_zero_rejects_encoding,
 )
 from test_middleware import (
-    test_negotiate_wildcard_falls_back_to_identity as test_middleware__test_negotiate_wildcard_falls_back_to_identity,
+    test_negotiate_wildcard_alone_selects_best_available_coding as test_middleware__test_negotiate_wildcard_alone_selects_best_available_coding,
+)
+from test_middleware import (
+    test_negotiate_wildcard_weight_applies_to_unlisted_codings as test_middleware__test_negotiate_wildcard_weight_applies_to_unlisted_codings,
+)
+from test_middleware import (
+    test_negotiate_wildcard_is_order_independent as test_middleware__test_negotiate_wildcard_is_order_independent,
+)
+from test_middleware import (
+    test_negotiate_identity_refused_with_wildcard as test_middleware__test_negotiate_identity_refused_with_wildcard,
 )
 from test_middleware import (
     test_logger_passthrough as test_middleware__test_logger_passthrough,
@@ -5424,8 +5433,13 @@ def main() raises:
     suite.test[test_middleware__test_negotiate_q_values]()
     suite.test[test_middleware__test_negotiate_q_zero_rejects_encoding]()
     suite.test[
-        test_middleware__test_negotiate_wildcard_falls_back_to_identity
+        test_middleware__test_negotiate_wildcard_alone_selects_best_available_coding
     ]()
+    suite.test[
+        test_middleware__test_negotiate_wildcard_weight_applies_to_unlisted_codings
+    ]()
+    suite.test[test_middleware__test_negotiate_wildcard_is_order_independent]()
+    suite.test[test_middleware__test_negotiate_identity_refused_with_wildcard]()
     suite.test[test_middleware__test_logger_passthrough]()
     suite.test[test_middleware__test_logger_propagates_raise]()
     suite.test[test_middleware__test_request_id_echoes_inbound]()

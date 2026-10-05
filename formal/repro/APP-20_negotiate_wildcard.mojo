@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-20 fixed on fix/formal-findings
 """APP-20: negotiate_encoding mishandles the `*` wildcard in Accept-Encoding.
 
 Lean: Flare.Bugs.APP_20.negotiate_violates_spec,
@@ -15,7 +16,7 @@ Expected (brotli available):
   "*, gzip;q=0.5"   -> br   (same entries, other order)
 Expected (no brotli):
   "identity;q=0, *" -> gzip (identity refused, gzip acceptable via "*")
-Actual: gzip, identity, identity. A "*" entry only counts when no
+Before the fix: gzip, identity, identity. A "*" entry only counts when no
 earlier entry set best_q > 0, and it always selects identity.
 
 Minimal fix: record the "*" weight separately (max over "*" entries) and

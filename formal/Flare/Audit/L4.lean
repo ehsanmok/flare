@@ -56,8 +56,11 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Middleware.compressFixed_vary
 #print axioms Flare.L4.Middleware.compressFixed_agrees
 -- Negotiate / Cors / Cookie / Form / Url
-#print axioms Flare.L4.Negotiate.decide_eq_spec_of_noStar
-#print axioms Flare.L4.Negotiate.decideFixed_eq_spec
+#print axioms Flare.L4.Negotiate.decideOld_eq_spec_of_noStar
+#print axioms Flare.L4.Negotiate.decide'_eq_spec
+#print axioms Flare.L4.Negotiate.negotiate_eq_spec
+#print axioms Flare.L4.Negotiate.decide'_perm
+#print axioms Flare.L4.Negotiate.decide'_refused_identity
 #print axioms Flare.L4.Negotiate.specPick_perm
 #print axioms Flare.L4.Cors.originAllowed_sound
 #print axioms Flare.L4.Cors.acao_not_star_with_creds
@@ -185,7 +188,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ConnStream.Tls.inv_route
 #print axioms Flare.L4.ConnStream.Tls.interest_nonempty
 #print axioms Flare.L4.Negotiate.parseHeaderMojo_eq
-#print axioms Flare.L4.Negotiate.negotiateMojo_eq
+#print axioms Flare.L4.Negotiate.negotiateOldMojo_eq
 
 -- Interim 100 Continue that the socket does not take whole (APP-49)
 #print axioms Flare.L4.Continue.Plain.violates

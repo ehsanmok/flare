@@ -170,9 +170,16 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
     """Pick the best ``Content-Encoding`` for an ``Accept-Encoding``.
 
     Walks every comma-separated entry, parses ``;q=<weight>`` per
-    RFC 9110 paragraph 12.5.3, and returns the highest-q entry from
+    RFC 9110 paragraph 12.5.3, and returns the highest-q coding from
     {``br``, ``gzip``, ``identity``} that the client accepts. Ties
     break on brotli > gzip > identity (matches nginx default).
+
+    A coding's weight is the largest weight of an entry naming it; a
+    coding with no entry of its own takes the weight of ``*`` ("any
+    content coding not explicitly listed"), so the result does not
+    depend on entry order and ``identity;q=0, *`` never selects the
+    refused identity (APP-20). When every weight is 0 the pick is
+    ``identity`` with quality 0.
 
     Args:
         accept: Raw ``Accept-Encoding`` header value.
@@ -188,8 +195,11 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
     var n = accept.byte_length()
     var src = accept.unsafe_ptr()
     var pos = 0
-    var best_q = 0
-    var best_enc = "identity"
+    # Per-coding maxima over the explicit entries; -1 = no entry.
+    var br_q = -1
+    var gzip_q = -1
+    var id_q = -1
+    var star_q = -1
     while pos < n:
         var end = n
         for i in range(pos, n):
@@ -231,31 +241,34 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
                         break
             if pos_q >= 0:
                 q = _parse_q(String(unsafe_from_utf8=rest.as_bytes()[pos_q:]))
-        # Wildcard accepts anything; treat as "identity" if no specific match
-        # has been found yet (we still prefer concrete entries).
         if lower == "*":
-            if best_q == 0:
-                best_q = q
-                best_enc = "identity"
-            continue
-        if lower == "br" and brotli_ok:
-            if q > best_q or (q == best_q and best_enc != "br"):
-                best_q = q
-                best_enc = "br"
+            star_q = max(star_q, q)
+        elif lower == "br":
+            br_q = max(br_q, q)
         elif lower == "gzip":
-            if q > best_q or (q == best_q and best_enc == "identity"):
-                best_q = q
-                best_enc = "gzip"
+            gzip_q = max(gzip_q, q)
         elif lower == "identity":
-            if q > best_q:
-                best_q = q
-                best_enc = "identity"
+            id_q = max(id_q, q)
+    # A coding with no entry of its own takes the weight of ``*``
+    # (none = 0). Brotli counts only when it is linkable.
+    var star_w = max(star_q, 0)
+    var w_br = 0
+    if brotli_ok:
+        w_br = br_q if br_q >= 0 else star_w
+    var w_gzip = gzip_q if gzip_q >= 0 else star_w
+    var w_id = id_q if id_q >= 0 else star_w
+    var best_q = max(w_br, max(w_gzip, w_id))
     if best_q == 0:
         # No acceptable encoding found.
         pick.encoding = "identity"
         pick.quality = 0
         return pick^
-    pick.encoding = best_enc
+    if w_br == best_q:
+        pick.encoding = "br"
+    elif w_gzip == best_q:
+        pick.encoding = "gzip"
+    else:
+        pick.encoding = "identity"
     pick.quality = best_q
     return pick^
 

@@ -231,11 +231,11 @@ choice at 253-260. The spec follows RFC 9110 §12.5.3:
 |---|---|---|
 | `Flare.L4.Negotiate.parseQ_le`, `parseQ_zero_dot`, `parseQ_failOpen` | weights lie in 0..1000; `0.DDD` is read exactly; a weight not starting with `0` reads as 1000 | proved |
 | `Flare.L4.Negotiate.classify_upper` | coding names are case-insensitive | proved |
-| `Flare.L4.Negotiate.decide_eq_spec_of_noStar`, `negotiate_eq_spec_of_noStar` | without `*`, flare's loop returns exactly the spec pick, at the entry level and at the byte level | proved |
-| `Flare.L4.Negotiate.specPick_perm`, `decide_perm_of_noStar` | the spec, and flare without `*`, do not depend on entry order | proved |
-| `Flare.L4.Negotiate.decide_br_imp` | br is chosen only when brotli is linkable | proved |
-| `Flare.L4.Negotiate.decideFixed_eq_spec` | the fixed loop equals the spec on every entry list | proved |
-| `Flare.L4.Negotiate.parseHeaderMojo_eq`, `negotiateMojo_eq` | a byte-level model of Mojo's own comma splitter (`parseHeaderMojo`, which emits no trailing empty segment) parses every header to the same entry list as the model's splitter, so the negotiation results are equal on every input | proved |
+| `Flare.L4.Negotiate.decideOld_eq_spec_of_noStar`, `negotiateOld_eq_spec_of_noStar` | without `*`, the pre-fix loop returned exactly the spec pick, at the entry level and at the byte level | proved |
+| `Flare.L4.Negotiate.specPick_perm`, `decide'_perm` | the spec, and the shipped decision (with `*`), do not depend on entry order | proved |
+| `Flare.L4.Negotiate.decideOld_br_imp` | br is chosen only when brotli is linkable (pre-fix loop; the shipped one also reads br through the spec) | proved |
+| `Flare.L4.Negotiate.decide'_eq_spec`, `negotiate_eq_spec`, `decide'_refused_identity` | the shipped decision (fixed, APP-20) equals the spec on every entry list and header; an explicitly refused identity is never served unless nothing is acceptable | proved |
+| `Flare.L4.Negotiate.parseHeaderMojo_eq`, `negotiateOldMojo_eq` | a byte-level model of Mojo's own comma splitter (`parseHeaderMojo`, which emits no trailing empty segment) parses every header to the same entry list as the model's splitter, so the negotiation results are equal on every input | proved |
 
 **Limitations.** None beyond the L3 framing boundary. The earlier gap (Mojo's
 splitter does not emit a trailing empty segment, the model's does) is closed
@@ -797,8 +797,9 @@ the problem:
 - `*, gzip;q=0.5` gives identity, so the result depends on entry order.
 - `identity;q=0, *` gives identity, an encoding the client refused.
 
-**Lean.** `Flare.Bugs.APP_20.negotiate_violates_spec`. The fix is proved
-sufficient by `fixed_meets_spec`, which is general.
+**Lean.** `Flare.Bugs.APP_20.negotiate_violates_spec` (about the pre-fix
+`negotiateOld`). The shipped `decide'` is proved to meet the spec by
+`fixed_meets_spec`, which is general.
 
 **Fix.** Track the `*` weight and the per-coding maxima, then pick after the
 loop.
@@ -807,6 +808,8 @@ loop.
 
 - Observed: `BUG REPRODUCED: 'gzip;q=0.5, *' -> gzip / '*, gzip;q=0.5' -> identity (brotli on, expected br for both); 'identity;q=0, *' -> identity (expected gzip)`
 - Flip: `OK: wildcard weights honoured: br br gzip`
+
+Status: resolved. `negotiate_encoding` records the largest weight per coding (br, gzip, identity) and for `*`, gives every coding without its own entry the `*` weight, then picks the highest non-zero weight (ties br > gzip > identity). Tests: `tests/http/test_middleware.mojo::test_negotiate_wildcard_weight_applies_to_unlisted_codings`, `::test_negotiate_wildcard_is_order_independent`, `::test_negotiate_identity_refused_with_wildcard`, `::test_negotiate_wildcard_alone_selects_best_available_coding` (replaces `test_negotiate_wildcard_falls_back_to_identity`, which pinned the pre-fix bare-`*` -> identity answer). The model `decide'`/`negotiate` are the shipped ones; `decideOld`/`negotiateOld` the pre-fix loop.
 
 ### APP-21: the CORS allowlist is order dependent under credentials
 
@@ -1430,7 +1433,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |
 | `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
 | `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compressFixed_vary` | APP-26, APP-27 |
-| `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decide_eq_spec_of_noStar`, `decideFixed_eq_spec` | APP-20 |
+| `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decideOld_eq_spec_of_noStar`, `decide'_eq_spec` | APP-20 |
 | `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-197 | `originAllowed_sound`, `acao_not_star_with_creds`, `serveFixed_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
 | `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-270 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
@@ -1447,6 +1450,6 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | `Flare.L4.ConnLive.trace`, `Fair`, `Oracle.Ext` | http/_reactor/conn_handle.mojo (via `ConnSM.step`); http/_unified_reactor_impl.mojo:220-235, 832-855 | `eventually_served`, `done_reason`, `trace_done_sc` | proved |
 | `Flare.L4.ConnStream.Stream.batch`, `wloop`, `finish`, `onWritable` | http/_reactor/conn_handle.mojo:1621-1642, 1286-1351, 1364-1375, 1262-1375 | `inv_onWritable`, `wire_exact_at_end`, `interest` | proved |
 | `Flare.L4.ConnStream.Tls.drain`, `flush`, `readDriver`, `writeDriver`, `route` | conn_handle.mojo:479-520, 1213-1240, 1314-1375; http/_unified_reactor_impl.mojo:174-190, 243-258, 812-831 | `blocked_interest`, `retry_read`, `retry_write`, `inv_route`, `interest_nonempty` | proved |
-| `Flare.L4.Negotiate.parseHeaderMojo` | http/middleware.mojo:131-235 | `parseHeaderMojo_eq`, `negotiateMojo_eq` | proved |
+| `Flare.L4.Negotiate.parseHeaderMojo` | http/middleware.mojo:131-235 | `parseHeaderMojo_eq`, `negotiateOldMojo_eq` | proved |
 | `Flare.L4.Continue.Plain.sendContinue`, `finalise`, `flush`; `Tls.sendContinue`, `flush` | http/_reactor/conn_handle.mojo:544-576, 718-756, 1423-1435, 1286-1312, 1213-1240 | `Plain.violates`, `Tls.violates`, `APP_49.violates_spec`, `fixed_meets_spec` | counterexample (APP-49) |
 | `Flare.L4.ConnExt.Ws.upgradeTaken`, `wire` (pre-fix: `upgradeTakenOld`, `wireOld`) | http/_reactor/conn_handle.mojo:838-885, 1476-1574 | `APP_48.violates_spec`, `spec` | resolved (APP-48) |
