@@ -46,6 +46,7 @@ and its code (section 6).
 | Headline theorems in the axiom audit | 1017 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
+| Resolved (fix landed, repro kept as a regression check) | 0 of 138 |
 
 Six findings are rated high:
 
@@ -2969,146 +2970,146 @@ advances the wheel to `now` at the top of every iteration
 
 Every finding below has a Lean counterexample and a proof that the minimal fix meets the specification, in `formal/Flare/Bugs/`, and a Mojo repro in `formal/repro/` that fails while the bug is present and passes once the fix is applied.
 
-| ID | Severity | Finding | Lean | Repro (platform) |
-|---|---|---|---|---|
-| ENC-01 | Low | `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group | `Flare/Bugs/ENC_01.lean` | `repro/ENC-01_ipv6_multicast_short_group.mojo` (any) |
-| ENC-02 | Low | civil-time conversion is one day off before 0000-03-01 | `Flare/Bugs/ENC_02.lean` | `repro/ENC-02_civil_time_negative_years.mojo` (any) |
-| ENC-03 | High | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
-| ENC-04 | Medium | `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length | `Flare/Bugs/ENC_04.lean` | `repro/ENC-04_byte_reader_need_overflow.mojo` (any) |
-| NET-01 | High | `UdpSocket.recv_from` reports the wrong sender for IPv6 peers | `Flare/Bugs/NET_01.lean` | `repro/NET-01_udp_recvfrom_ipv6_sender.mojo` (any) |
-| NET-02 | Low | `write_all` livelocks if `send` returns 0 | `Flare/Bugs/NET_02.lean` | `repro/NET-02_write_all_zero_send_livelock.mojo` (any) |
-| NET-03 | Low | `DnsCache` with a very large TTL never serves a hit | `Flare/Bugs/NET_03.lean` | `repro/NET-03_dns_cache_ttl_overflow.mojo` (any) |
-| NET-04 | Medium | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
-| NET-05 | Info | accepted fd leaks if the peer address fails to decode | `Flare/Bugs/NET_05.lean` | `repro/NET-05_accept_fd_leak_on_decode_error.mojo` (any) |
-| NET-06 | Low | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
-| NET-07 | Medium | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
-| NET-08 | Low | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
-| NET-09 | Low | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
-| NET-10 | Low | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
-| RT-01 | Low | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
-| RT-02 | Low | `writev_buf_all` returns normally after a short write | `Flare/Bugs/RT_02.lean` | `repro/RT-02_writev_all_silent_short_write.mojo` (any) |
-| RT-03 | Medium | `UringReactor.poll` can block with no wakeup read armed | `Flare/Bugs/RT_03.lean` | `repro/RT-03_uring_poll_blocks_unarmed.mojo` (linux) |
-| RT-04 | Low | `peek_idle_worker` returns a peer whose queue is full | `Flare/Bugs/RT_04.lean` | `repro/RT-04_handoff_peek_returns_full_peer.mojo` (any) |
-| RT-05 | Low | `BufferPool.acquire` can return less capacity than requested | `Flare/Bugs/RT_05.lean` | `repro/RT-05_buffer_pool_capacity_contract.mojo` (any) |
-| RT-06 | Medium | the `MAX_POOL_SIZE` thread cap is never enforced on macOS arm64 | `Flare/Bugs/RT_06.lean` | `repro/RT-06_pool_cap_not_enforced_macos.mojo` (macos) |
-| RT-07 | Low | one fail-open acquire raises the thread cap permanently | `Flare/Bugs/RT_07.lean` | `repro/RT-07_pool_semaphore_fail_open_drift.mojo` (any) |
-| RT-08 | Medium | a failed `sem_open` crashes the process on Linux | `Flare/Bugs/RT_08.lean` | `repro/RT-08_sem_open_failure_null_deref_linux.mojo` (linux) |
-| NET-11 | Low | `BatchReceiver` sizes its data region with an unchecked `Int` product | `Flare/Bugs/NET_11.lean` | `repro/NET-11_batch_receiver_size_overflow.mojo` (any) |
-| H1-01 | Low | the chunk-line cap gives a verdict that depends on TCP segmentation | `Flare/Bugs/H1_01.lean` | `repro/H1-01_chunk_line_cap_segmentation.mojo` (any) |
-| H1-02 | Medium | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
-| H1-03 | Medium | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
-| H1-04 | Medium | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
-| H1-05 | Low | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
-| H1-06 | Medium | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
-| H1-07 | Low | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
-| H1-08 | Low | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
-| H1-09 | Low | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
-| H1-10 | Low | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
-| H1-11 | Medium | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
-| WS-01 | Low | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
-| WS-02 | Medium | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
-| WS-03 | Low | `WsClient` accepts masked frames from the server | `Flare/Bugs/WS_03.lean` | `repro/WS-03_client_accepts_masked_server_frame.mojo` (any (loopback TCP in-process; no external network)) |
-| WS-04 | Low | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
-| WS-05 | Low | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
-| WS-06 | Medium | `WsConnection` does not take part in the closing handshake | `Flare/Bugs/WS_06.lean` | `repro/WS-06_close_handshake_not_answered.mojo` (any) |
-| WS-07 | Low | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
-| H2-01 | High | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
-| H2-02 | Low | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
-| H2-03 | Medium | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
-| H2-04 | Low | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
-| H2-05 | Medium | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
-| H2-06 | Low | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
-| H2-07 | Low | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
-| H2-08 | Low | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
-| H2-09 | Medium | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
-| H2-10 | Medium | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
-| H2-11 | Low | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
-| H2-12 | Low | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
-| H2-13 | Low | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
-| H2-14 | Low | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
-| H2-15 | Low | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
-| H2-16 | Low | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
-| H2-17 | Medium | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
-| H2-18 | Low | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
-| H2-19 | Low | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
-| H2-20 | Low | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
-| HPACK-01 | Medium | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
-| HPACK-02 | Low | the decode budget never counts the last header | `Flare/Bugs/HPACK_02.lean` | `repro/HPACK-02_budget_skips_last_header.mojo` (any) |
-| HPACK-03 | Medium | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
-| QUIC-01 | Medium | an unknown frame's body is parsed as further frames | `Flare/Bugs/QUIC_01.lean` | `repro/QUIC-01_unknown_frame_body_reparsed.mojo` (any) |
-| QUIC-02 | Low | MAX_STREAMS and STREAMS_BLOCKED above 2^60 are accepted | `Flare/Bugs/QUIC_02.lean` | `repro/QUIC-02_max_streams_over_2p60_accepted.mojo` (any) |
-| QUIC-03 | Low | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
-| QUIC-04 | Medium | HANDSHAKE_DONE moves a closing or draining connection back to ESTABLISHED | `Flare/Bugs/QUIC_04.lean` | `repro/QUIC-04_handshake_done_reopens_closed_connection.mojo` (any) |
-| QUIC-09 | Low | the server accepts HANDSHAKE_DONE from the client | `Flare/Bugs/QUIC_09.lean` | `repro/QUIC-09_server_accepts_handshake_done.mojo` (any) |
-| QUIC-10 | Low | initial_max_streams_* above 2^60 accepted in transport parameters | `Flare/Bugs/QUIC_10.lean` | `repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo` (any) |
-| QUIC-11 | Medium | the server never validates the client's transport parameters | `Flare/Bugs/QUIC_11.lean` | `repro/QUIC-11_server_ignores_client_transport_params.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-12 | Low | the client's CID authentication confuses absent with empty | `Flare/Bugs/QUIC_12.lean` | `repro/QUIC-12_client_cid_auth_absent_vs_empty.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
-| QUIC-13 | Low | preferred_address is not validated | `Flare/Bugs/QUIC_13.lean` | `repro/QUIC-13_preferred_address_not_validated.mojo` (any) |
-| QUIC-14 | Medium | ACK ranges forget dropped packets, which are then processed again | `Flare/Bugs/QUIC_14.lean` | `repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo` (any) |
-| QUIC-15 | Low | the server accepts stream frames that name the wrong direction | `Flare/Bugs/QUIC_15.lean` | `repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (any) |
-| QUIC-16 | Low | the server does not enforce its unidirectional stream limit | `Flare/Bugs/QUIC_16.lean` | `repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic)) |
-| QUIC-17 | Low | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
-| QUIC-18 | Medium | one state for both stream halves loses a reset | `Flare/Bugs/QUIC_18.lean` | `repro/QUIC-18_stream_reset_state_overwritten.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
-| QUIC-19 | Low | STOP_SENDING is never answered with RESET_STREAM | `Flare/Bugs/QUIC_19.lean` | `repro/QUIC-19_stop_sending_not_answered.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
-| QUIC-20 | Medium | the server's idle timer does not follow RFC 9000 §10.1 | `Flare/Bugs/QUIC_20.lean` | `repro/QUIC-20_server_idle_timer.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-21 | Medium | the client never applies an idle timeout | `Flare/Bugs/QUIC_21.lean` | `repro/QUIC-21_client_has_no_idle_timeout.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-22 | Medium | the server closes connections without sending CONNECTION_CLOSE | `Flare/Bugs/QUIC_22.lean` | `repro/QUIC-22_server_close_never_sends_connection_close.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-23 | Low | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QUIC-24 | Low | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
-| QPACK-01 | High | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
-| QPACK-02 | Medium | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
-| QPACK-03 | Low | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
-| QPACK-04 | Low | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
-| QPACK-05 | Medium | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| QPACK-06 | Low | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
-| H3-01 | Medium | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
-| H3-02 | Low | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
-| H3-03 | Low | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
-| H3-04 | Low | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
-| H3-05 | Low | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
-| H3-06 | Low | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
-| H3-07 | Medium | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
-| APP-01 | Low | 426 response says `Connection: close` but the connection stays open | `Flare/Bugs/APP_01.lean` | `repro/APP-01_ws426_keeps_connection_open.mojo` (any) |
-| APP-02 | Low | `_wants_close` matches `connection:` mid-line and stops at the first hit | `Flare/Bugs/APP_02.lean` | `repro/APP-02_wants_close_substring_match.mojo` (any) |
-| APP-03 | Low | `close` inside a `Connection` token list is ignored | `Flare/Bugs/APP_03.lean` | `repro/APP-03_connection_close_token_list.mojo` (any) |
-| APP-04 | Medium | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
-| APP-05 | Low | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
-| APP-06 | Low | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
-| APP-10 | Low | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
-| APP-20 | Low | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
-| APP-21 | Low | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
-| APP-22 | Low | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
-| APP-23 | Medium | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
-| APP-24 | Medium | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
-| APP-25 | Low | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
-| APP-26 | Medium | Compress re-encodes a 206 Partial Content body and keeps its `Content-Range` | `Flare/Bugs/APP_26.lean` | `repro/APP-26_compress_encodes_partial_content.mojo` (any) |
-| APP-27 | Low | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
-| APP-40 | Medium | the RateLimit refill product wraps after a long idle period | `Flare/Bugs/APP_40.lean` | `repro/APP-40_ratelimit_refill_overflow.mojo` (any) |
-| APP-41 | Medium | CircuitBreaker measures the cooldown from the start of the failing request | `Flare/Bugs/APP_41.lean` | `repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (any) |
-| APP-42 | Low | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
-| APP-43 | Low | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
-| APP-44 | Low | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
-| APP-45 | Low | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
-| APP-46 | Medium | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
-| APP-47 | Medium | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
-| APP-48 | High | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
-| APP-49 | Medium | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
-| CONC-01 | Low | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
-| CONC-02 | Low | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
-| CONC-03 | High | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
-| CONC-04 | Medium | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
-| CONC-05 | Medium | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
-| CONC-06 | Medium | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
-| CONC-07 | Medium | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
-| MACH-01 | Low | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
-| DOC-01 | Medium | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
-| DOC-02 | Low | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
-| DOC-03 | Medium | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
-| DOC-04 | Low | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
-| DOC-05 | Low | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
-| DOC-06 | Medium | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
-| DOC-07 | Medium | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
-| DOC-08 | Medium | server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off | `Flare/Bugs/DOC_08.lean` | `repro/DOC-08_tls_session_tickets_not_opt_in.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
+| ID | Severity | Status | Finding | Lean | Repro (platform) |
+|---|---|---|---|---|---|
+| ENC-01 | Low | open | `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group | `Flare/Bugs/ENC_01.lean` | `repro/ENC-01_ipv6_multicast_short_group.mojo` (any) |
+| ENC-02 | Low | open | civil-time conversion is one day off before 0000-03-01 | `Flare/Bugs/ENC_02.lean` | `repro/ENC-02_civil_time_negative_years.mojo` (any) |
+| ENC-03 | High | open | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
+| ENC-04 | Medium | open | `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length | `Flare/Bugs/ENC_04.lean` | `repro/ENC-04_byte_reader_need_overflow.mojo` (any) |
+| NET-01 | High | open | `UdpSocket.recv_from` reports the wrong sender for IPv6 peers | `Flare/Bugs/NET_01.lean` | `repro/NET-01_udp_recvfrom_ipv6_sender.mojo` (any) |
+| NET-02 | Low | open | `write_all` livelocks if `send` returns 0 | `Flare/Bugs/NET_02.lean` | `repro/NET-02_write_all_zero_send_livelock.mojo` (any) |
+| NET-03 | Low | open | `DnsCache` with a very large TTL never serves a hit | `Flare/Bugs/NET_03.lean` | `repro/NET-03_dns_cache_ttl_overflow.mojo` (any) |
+| NET-04 | Medium | open | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
+| NET-05 | Info | open | accepted fd leaks if the peer address fails to decode | `Flare/Bugs/NET_05.lean` | `repro/NET-05_accept_fd_leak_on_decode_error.mojo` (any) |
+| NET-06 | Low | open | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
+| NET-07 | Medium | open | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
+| NET-08 | Low | open | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
+| NET-09 | Low | open | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
+| NET-10 | Low | open | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
+| RT-01 | Low | open | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
+| RT-02 | Low | open | `writev_buf_all` returns normally after a short write | `Flare/Bugs/RT_02.lean` | `repro/RT-02_writev_all_silent_short_write.mojo` (any) |
+| RT-03 | Medium | open | `UringReactor.poll` can block with no wakeup read armed | `Flare/Bugs/RT_03.lean` | `repro/RT-03_uring_poll_blocks_unarmed.mojo` (linux) |
+| RT-04 | Low | open | `peek_idle_worker` returns a peer whose queue is full | `Flare/Bugs/RT_04.lean` | `repro/RT-04_handoff_peek_returns_full_peer.mojo` (any) |
+| RT-05 | Low | open | `BufferPool.acquire` can return less capacity than requested | `Flare/Bugs/RT_05.lean` | `repro/RT-05_buffer_pool_capacity_contract.mojo` (any) |
+| RT-06 | Medium | open | the `MAX_POOL_SIZE` thread cap is never enforced on macOS arm64 | `Flare/Bugs/RT_06.lean` | `repro/RT-06_pool_cap_not_enforced_macos.mojo` (macos) |
+| RT-07 | Low | open | one fail-open acquire raises the thread cap permanently | `Flare/Bugs/RT_07.lean` | `repro/RT-07_pool_semaphore_fail_open_drift.mojo` (any) |
+| RT-08 | Medium | open | a failed `sem_open` crashes the process on Linux | `Flare/Bugs/RT_08.lean` | `repro/RT-08_sem_open_failure_null_deref_linux.mojo` (linux) |
+| NET-11 | Low | open | `BatchReceiver` sizes its data region with an unchecked `Int` product | `Flare/Bugs/NET_11.lean` | `repro/NET-11_batch_receiver_size_overflow.mojo` (any) |
+| H1-01 | Low | open | the chunk-line cap gives a verdict that depends on TCP segmentation | `Flare/Bugs/H1_01.lean` | `repro/H1-01_chunk_line_cap_segmentation.mojo` (any) |
+| H1-02 | Medium | open | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
+| H1-03 | Medium | open | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
+| H1-04 | Medium | open | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
+| H1-05 | Low | open | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
+| H1-06 | Medium | open | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
+| H1-07 | Low | open | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
+| H1-08 | Low | open | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
+| H1-09 | Low | open | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
+| H1-10 | Low | open | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
+| H1-11 | Medium | open | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
+| WS-01 | Low | open | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
+| WS-02 | Medium | open | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
+| WS-03 | Low | open | `WsClient` accepts masked frames from the server | `Flare/Bugs/WS_03.lean` | `repro/WS-03_client_accepts_masked_server_frame.mojo` (any (loopback TCP in-process; no external network)) |
+| WS-04 | Low | open | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
+| WS-05 | Low | open | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
+| WS-06 | Medium | open | `WsConnection` does not take part in the closing handshake | `Flare/Bugs/WS_06.lean` | `repro/WS-06_close_handshake_not_answered.mojo` (any) |
+| WS-07 | Low | open | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
+| H2-01 | High | open | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
+| H2-02 | Low | open | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
+| H2-03 | Medium | open | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
+| H2-04 | Low | open | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
+| H2-05 | Medium | open | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
+| H2-06 | Low | open | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
+| H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
+| H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
+| H2-09 | Medium | open | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
+| H2-10 | Medium | open | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
+| H2-11 | Low | open | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
+| H2-12 | Low | open | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
+| H2-13 | Low | open | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
+| H2-14 | Low | open | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
+| H2-15 | Low | open | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
+| H2-16 | Low | open | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
+| H2-17 | Medium | open | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
+| H2-18 | Low | open | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
+| H2-19 | Low | open | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
+| H2-20 | Low | open | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
+| HPACK-01 | Medium | open | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
+| HPACK-02 | Low | open | the decode budget never counts the last header | `Flare/Bugs/HPACK_02.lean` | `repro/HPACK-02_budget_skips_last_header.mojo` (any) |
+| HPACK-03 | Medium | open | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
+| QUIC-01 | Medium | open | an unknown frame's body is parsed as further frames | `Flare/Bugs/QUIC_01.lean` | `repro/QUIC-01_unknown_frame_body_reparsed.mojo` (any) |
+| QUIC-02 | Low | open | MAX_STREAMS and STREAMS_BLOCKED above 2^60 are accepted | `Flare/Bugs/QUIC_02.lean` | `repro/QUIC-02_max_streams_over_2p60_accepted.mojo` (any) |
+| QUIC-03 | Low | open | an ACK reaching below packet number 0 is clamped, not rejected | `Flare/Bugs/QUIC_03.lean` | `repro/QUIC-03_ack_negative_range_clamped.mojo` (any) |
+| QUIC-04 | Medium | open | HANDSHAKE_DONE moves a closing or draining connection back to ESTABLISHED | `Flare/Bugs/QUIC_04.lean` | `repro/QUIC-04_handshake_done_reopens_closed_connection.mojo` (any) |
+| QUIC-09 | Low | open | the server accepts HANDSHAKE_DONE from the client | `Flare/Bugs/QUIC_09.lean` | `repro/QUIC-09_server_accepts_handshake_done.mojo` (any) |
+| QUIC-10 | Low | open | initial_max_streams_* above 2^60 accepted in transport parameters | `Flare/Bugs/QUIC_10.lean` | `repro/QUIC-10_tp_max_streams_over_2p60_accepted.mojo` (any) |
+| QUIC-11 | Medium | open | the server never validates the client's transport parameters | `Flare/Bugs/QUIC_11.lean` | `repro/QUIC-11_server_ignores_client_transport_params.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-12 | Low | open | the client's CID authentication confuses absent with empty | `Flare/Bugs/QUIC_12.lean` | `repro/QUIC-12_client_cid_auth_absent_vs_empty.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
+| QUIC-13 | Low | open | preferred_address is not validated | `Flare/Bugs/QUIC_13.lean` | `repro/QUIC-13_preferred_address_not_validated.mojo` (any) |
+| QUIC-14 | Medium | open | ACK ranges forget dropped packets, which are then processed again | `Flare/Bugs/QUIC_14.lean` | `repro/QUIC-14_ack_ranges_forget_dropped_packets.mojo` (any) |
+| QUIC-15 | Low | open | the server accepts stream frames that name the wrong direction | `Flare/Bugs/QUIC_15.lean` | `repro/QUIC-15_server_stream_frames_wrong_direction.mojo` (any) |
+| QUIC-16 | Low | open | the server does not enforce its unidirectional stream limit | `Flare/Bugs/QUIC_16.lean` | `repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic)) |
+| QUIC-17 | Low | open | the client checks no stream id on any stream frame | `Flare/Bugs/QUIC_17.lean` | `repro/QUIC-17_client_stream_frames_wrong_direction.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
+| QUIC-18 | Medium | open | one state for both stream halves loses a reset | `Flare/Bugs/QUIC_18.lean` | `repro/QUIC-18_stream_reset_state_overwritten.mojo` (any (binds a UDP socket on 127.0.0.1:0; no traffic, no TLS)) |
+| QUIC-19 | Low | open | STOP_SENDING is never answered with RESET_STREAM | `Flare/Bugs/QUIC_19.lean` | `repro/QUIC-19_stop_sending_not_answered.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
+| QUIC-20 | Medium | open | the server's idle timer does not follow RFC 9000 §10.1 | `Flare/Bugs/QUIC_20.lean` | `repro/QUIC-20_server_idle_timer.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-21 | Medium | open | the client never applies an idle timeout | `Flare/Bugs/QUIC_21.lean` | `repro/QUIC-21_client_has_no_idle_timeout.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-22 | Medium | open | the server closes connections without sending CONNECTION_CLOSE | `Flare/Bugs/QUIC_22.lean` | `repro/QUIC-22_server_close_never_sends_connection_close.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-23 | Low | open | the server keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_23.lean` | `repro/QUIC-23_server_sends_while_draining.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QUIC-24 | Low | open | the client keeps sending after the peer's CONNECTION_CLOSE | `Flare/Bugs/QUIC_24.lean` | `repro/QUIC-24_client_sends_while_draining.mojo` (any (needs the rustls QUIC shim and the fixtures in) |
+| QPACK-01 | High | open | a field section with Required Insert Count 0 can read the dynamic table | `Flare/Bugs/QPACK_01.lean` | `repro/QPACK-01_ric_zero_reads_dynamic_table.mojo` (any) |
+| QPACK-02 | Medium | open | reading the Sign byte goes one past the end and aborts the process | `Flare/Bugs/QPACK_02.lean` | `repro/QPACK-02_sign_byte_oob_read.mojo` (any) |
+| QPACK-03 | Low | open | string literals become Strings without UTF-8 validation | `Flare/Bugs/QPACK_03.lean` | `repro/QPACK-03_literal_not_utf8_validated.mojo` (any) |
+| QPACK-04 | Low | open | a bad encoder-stream reference stalls instead of raising an error | `Flare/Bugs/QPACK_04.lean` | `repro/QPACK-04_bad_encoder_ref_stalls.mojo` (any) |
+| QPACK-05 | Medium | open | an undecodable or blocked field section is not a connection error | `Flare/Bugs/QPACK_05.lean` | `repro/QPACK-05_undecodable_field_section_not_connection_error.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| QPACK-06 | Low | open | the dynamic-table encoder tracks no acknowledgments | `Flare/Bugs/QPACK_06.lean` | `repro/QPACK-06_encoder_ignores_acknowledgments.mojo` (any (pure Mojo, no I/O)) |
+| H3-01 | Medium | open | the request reader buffers non-HEADERS/DATA frames without bound | `Flare/Bugs/H3_01.lean` | `repro/H3-01_unknown_frame_unbounded_buffering.mojo` (any) |
+| H3-02 | Low | open | HTTP/2-reserved frame types are ignored on request streams | `Flare/Bugs/H3_02.lean` | `repro/H3-02_h2_reserved_frame_types_ignored.mojo` (any) |
+| H3-03 | Low | open | frames forbidden on the control stream are silently ignored | `Flare/Bugs/H3_03.lean` | `repro/H3-03_control_stream_forbidden_frames_ignored.mojo` (any) |
+| H3-04 | Low | open | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
+| H3-05 | Low | open | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
+| H3-06 | Low | open | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
+| H3-07 | Medium | open | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| APP-01 | Low | open | 426 response says `Connection: close` but the connection stays open | `Flare/Bugs/APP_01.lean` | `repro/APP-01_ws426_keeps_connection_open.mojo` (any) |
+| APP-02 | Low | open | `_wants_close` matches `connection:` mid-line and stops at the first hit | `Flare/Bugs/APP_02.lean` | `repro/APP-02_wants_close_substring_match.mojo` (any) |
+| APP-03 | Low | open | `close` inside a `Connection` token list is ignored | `Flare/Bugs/APP_03.lean` | `repro/APP-03_connection_close_token_list.mojo` (any) |
+| APP-04 | Medium | open | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
+| APP-05 | Low | open | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
+| APP-06 | Low | open | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
+| APP-10 | Low | open | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
+| APP-20 | Low | open | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
+| APP-21 | Low | open | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
+| APP-22 | Low | open | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
+| APP-23 | Medium | open | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
+| APP-24 | Medium | open | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
+| APP-25 | Low | open | userinfo is split at the first `@` | `Flare/Bugs/APP_25.lean` | `repro/APP-25_url_userinfo_first_at.mojo` (any) |
+| APP-26 | Medium | open | Compress re-encodes a 206 Partial Content body and keeps its `Content-Range` | `Flare/Bugs/APP_26.lean` | `repro/APP-26_compress_encodes_partial_content.mojo` (any) |
+| APP-27 | Low | open | Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated | `Flare/Bugs/APP_27.lean` | `repro/APP-27_compress_missing_vary_on_identity.mojo` (any) |
+| APP-40 | Medium | open | the RateLimit refill product wraps after a long idle period | `Flare/Bugs/APP_40.lean` | `repro/APP-40_ratelimit_refill_overflow.mojo` (any) |
+| APP-41 | Medium | open | CircuitBreaker measures the cooldown from the start of the failing request | `Flare/Bugs/APP_41.lean` | `repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (any) |
+| APP-42 | Low | open | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
+| APP-43 | Low | open | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
+| APP-44 | Low | open | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
+| APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
+| APP-46 | Medium | open | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
+| APP-47 | Medium | open | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
+| APP-48 | High | open | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
+| APP-49 | Medium | open | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
+| CONC-01 | Low | open | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
+| CONC-02 | Low | open | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
+| CONC-03 | High | open | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
+| CONC-04 | Medium | open | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
+| CONC-05 | Medium | open | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
+| CONC-06 | Medium | open | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
+| CONC-07 | Medium | open | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
+| MACH-01 | Low | open | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
+| DOC-01 | Medium | open | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
+| DOC-02 | Low | open | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
+| DOC-03 | Medium | open | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
+| DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
+| DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
+| DOC-06 | Medium | open | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
+| DOC-07 | Medium | open | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
+| DOC-08 | Medium | open | server session tickets are not opt-in, and `enable_session_tickets=False` does not turn them off | `Flare/Bugs/DOC_08.lean` | `repro/DOC-08_tls_session_tickets_not_opt_in.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
 
 ### 5.1 L1: Pure encodings (ENC)
 

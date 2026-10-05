@@ -83,6 +83,8 @@ def demote(text, by):
 
 
 FINDING_RE = re.compile(r"^### ([A-Z][A-Z0-9]*-\d+): (.+)$", re.M)
+# finding id -> its report section carries a `Status: resolved` line
+_REPORT_RESOLVED = {}
 
 
 def findings_in(body):
@@ -94,6 +96,8 @@ def findings_in(body):
         sev = re.search(r"Severity\W*\s*([A-Za-z]+)", chunk)
         if not sev or sev.group(1).capitalize() not in SEVERITIES:
             die(f"{m.group(1)}: no recognisable Severity line")
+        in_report = re.search(r"^Status: resolved\b", chunk, re.M) is not None
+        _REPORT_RESOLVED[m.group(1)] = in_report
         yield m.group(1), m.group(2).strip(), sev.group(1).capitalize()
 
 
@@ -105,6 +109,22 @@ def bug_file(fid):
 def repro_file(fid):
     hits = sorted((ROOT / "repro").glob(f"{fid}_*.mojo"))
     return hits[0].relative_to(ROOT).as_posix() if len(hits) == 1 else None
+
+
+def resolved_state(fid):
+    """The three places a resolution is recorded must agree: the repro's
+    `# RESOLVED:` header, the Bugs file's `Status: resolved` line, and the
+    report section's `Status: resolved` line. Returns True/False or dies."""
+    rp = (ROOT / repro_file(fid)).read_text().splitlines()[:8]
+    in_repro = any(l.startswith("# RESOLVED:") for l in rp)
+    in_lean = re.search(r"^Status: resolved\b", (ROOT / bug_file(fid)).read_text(), re.M) is not None
+    in_report = _REPORT_RESOLVED.get(fid, False)
+    if not (in_repro == in_lean == in_report):
+        die(
+            f"{fid}: resolution marker disagrees (repro header: {in_repro}, "
+            f"Bugs file: {in_lean}, report section: {in_report})"
+        )
+    return in_repro
 
 
 def repro_platform(path):
@@ -167,6 +187,8 @@ def main():
     if orphans:
         die(f"Bugs files or repros with no report finding: {orphans}")
 
+    resolved = {f: resolved_state(f) for f, *_ in index}
+    n_resolved = sum(resolved.values())
     by_sev = Counter(s for _, _, s, _ in index)
     n_files, n_lines, n_thm, n_audit = lean_counts()
     sev_line = ", ".join(f"{by_sev[s]} {s.lower()}" for s in SEVERITIES if by_sev[s])
@@ -176,7 +198,8 @@ def main():
         f"| Theorems | {n_thm} |\n"
         f"| Headline theorems in the axiom audit | {n_audit} |\n"
         f"| Confirmed findings | {len(index)} ({sev_line}) |\n"
-        f"| Mojo repros | {len(index)}, one per finding |"
+        f"| Mojo repros | {len(index)}, one per finding |\n"
+        f"| Resolved (fix landed, repro kept as a regression check) | {n_resolved} of {len(index)} |"
     )
 
     front = (REPORT_DIR / "_front.md").read_text().strip()
@@ -205,11 +228,17 @@ def main():
         "Mojo repro in `formal/repro/` that fails while the bug is present "
         "and passes once the fix is applied."
     )
-    rows = ["| ID | Severity | Finding | Lean | Repro (platform) |", "|---|---|---|---|---|"]
+    rows = [
+        "| ID | Severity | Status | Finding | Lean | Repro (platform) |",
+        "|---|---|---|---|---|---|",
+    ]
     for fid, t, s, _ in index:
         rp = repro_file(fid)
         cell = t.replace("|", r"\|")
-        rows.append(f"| {fid} | {s} | {cell} | `{bug_file(fid)}` | `{rp}` ({repro_platform(rp)}) |")
+        status = "resolved" if resolved[fid] else "open"
+        rows.append(
+            f"| {fid} | {s} | {status} | {cell} | `{bug_file(fid)}` | `{rp}` ({repro_platform(rp)}) |"
+        )
     out.append("\n".join(rows))
     for i, (t, body) in enumerate(buckets["findings"], 1):
         out.append(f"### 5.{i} {t}")

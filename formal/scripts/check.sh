@@ -7,7 +7,9 @@
 #  4. `#print axioms` for every theorem listed in Flare/Audit.lean and
 #     Flare/Audit/*.lean; any axiom beyond the allowed set fails the gate.
 #  5. REPORT.md is up to date with report/ and pairs every finding with a
-#     Bugs file and a repro (scripts/stitch_report.py --check).
+#     Bugs file and a repro, and that the three places a resolution is
+#     recorded (repro `# RESOLVED:` header, Bugs file and report section
+#     `Status: resolved` lines) agree (scripts/stitch_report.py --check).
 set -u
 cd "$(dirname "$0")/.."
 fail=0

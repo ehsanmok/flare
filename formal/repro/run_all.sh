@@ -4,15 +4,19 @@
 # Contract for formal/repro/<ID>_<slug>.mojo:
 #   * header comment line `# PLATFORM: any` | `linux` | `macos`
 #   * optional `# SKIP: <reason>` (model-only issue, not reproducible here)
+#   * `# RESOLVED: <ID> <note>` once the library fix has landed. The repro is
+#     kept as a regression check: it must then print `OK:` and exit 0.
 #   * prints a line starting with `BUG REPRODUCED:` and raises (exit != 0)
 #     while the bug is present; prints `OK:` and exits 0 once fixed.
 #
-# Status:  OPEN   exit != 0 and the BUG REPRODUCED marker was printed
-#          FIXED  exit == 0
-#          ERROR  exit != 0 without the marker (compile error, crash, ...)
-#          SKIP   wrong platform or `# SKIP:` header
-# Exit code of this script: 0 iff no ERROR. (OPEN is the expected state on
-# this branch: the repros document bugs, they do not fix them.)
+# Status:  OPEN     exit != 0, BUG REPRODUCED printed, no `# RESOLVED:` header
+#          RESOLVED exit == 0 and the `# RESOLVED:` header is present
+#          FIXED    exit == 0 but no `# RESOLVED:` header (fix landed, repro
+#                   not yet marked; a warning to fix, not an error)
+#          ERROR    exit != 0 without the marker (compile error, crash, ...),
+#                   or a repro marked RESOLVED that fails again (regression)
+#          SKIP     wrong platform or `# SKIP:` header
+# Exit code of this script: 0 iff no ERROR.
 #
 # No `sort` here on purpose: under pixi it once blinded a conformance gate.
 set -u
@@ -29,7 +33,7 @@ if [ "$plat" = macos ] && [ "$mode" != off ] && command -v docker >/dev/null \
    && docker info >/dev/null 2>&1; then use_linux=1; fi
 if [ "$plat" = macos ] && [ "$use_linux" = 0 ] && [ "$mode" != off ] && command -v docker >/dev/null \
    && docker --context orbstack info >/dev/null 2>&1; then use_linux=1; fi
-open=0; fixed=0; err=0; skip=0
+open=0; resolved=0; fixed=0; err=0; skip=0
 printf '%-10s %-6s %-6s %s\n' ID STATUS PLAT FILE
 synced=0
 # FORMAL_REPRO_TIMEOUT: seconds before a hung repro is killed (an ERROR row).
@@ -43,7 +47,13 @@ run_one() {  # $1 file, $2 where (host|linux); sets log, rc
   fi
 }
 classify() {  # $1 id, $2 plat label, $3 file
-  if [ $rc -eq 0 ]; then st=FIXED; fixed=$((fixed+1))
+  marked=0; grep -q '^# RESOLVED:' "$3" && marked=1
+  if [ $rc -eq 0 ]; then
+    if [ $marked = 1 ]; then st=RESOLVED; resolved=$((resolved+1))
+    else st=FIXED; fixed=$((fixed+1)); fi
+  elif [ $marked = 1 ]; then
+    st=ERROR; err=$((err+1)); printf '%s\n' "$log" | tail -20
+    echo "  (marked RESOLVED but the repro fails: regression)"
   elif printf '%s' "$log" | grep -q '^BUG REPRODUCED:'; then st=OPEN; open=$((open+1))
   else st=ERROR; err=$((err+1)); printf '%s\n' "$log" | tail -20; fi
   printf '%-10s %-6s %-6s %s\n' "$1" "$st" "$2" "$3"
@@ -66,5 +76,5 @@ for f in formal/repro/*.mojo; do
   run_one "$f" host
   classify "$id" "$want" "$f"
 done
-echo "open=$open fixed=$fixed error=$err skip=$skip"
+echo "open=$open resolved=$resolved fixed=$fixed error=$err skip=$skip"
 [ $err -eq 0 ]
