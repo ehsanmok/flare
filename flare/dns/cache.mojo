@@ -175,8 +175,9 @@ struct DnsCache(Movable):
 
     def resolve_ordered(mut self, host: String) raises -> List[IpAddr]:
         """Like :meth:`resolve` but returns the addresses in RFC 8305
-        happy-eyeballs connection-attempt order (interleaved IPv6/IPv4)
-        so a dialer can race the families."""
+        happy-eyeballs connection-attempt order (interleaved IPv6/IPv4,
+        starting with the family of the resolver's first address) so a
+        dialer can race the families."""
         return order_happy_eyeballs(self.resolve(host))
 
     def invalidate(mut self, host: String):

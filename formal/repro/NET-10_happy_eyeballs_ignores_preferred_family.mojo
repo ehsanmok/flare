@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-10 fixed on fix/formal-findings
 """NET-10: order_happy_eyeballs always puts IPv6 first.
 
 Lean: Flare.Bugs.NET_10.order_breaks_spec (counterexample) and
@@ -9,7 +10,7 @@ Expected (RFC 8305 section 4): the first address of the sorted input stays
 first ("whichever address family is first in the list should be followed
 by an address of the other address family"). For [192.0.2.1, 2001:db8::1,
 192.0.2.2] the attempt order is 192.0.2.1, 2001:db8::1, 192.0.2.2.
-Actual: 2001:db8::1, 192.0.2.1, 192.0.2.2; the resolver's IPv4 preference
+Before the fix: 2001:db8::1, 192.0.2.1, 192.0.2.2; the resolver's IPv4 preference
 is overridden.
 
 Minimal fix: start the interleaving with the family of addrs[0] (swap the

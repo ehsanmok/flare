@@ -131,8 +131,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.HappyEyeballs.order_perm
 #print axioms Flare.L2.HappyEyeballs.order_filter_v6
 #print axioms Flare.L2.HappyEyeballs.order_filter_v4
-#print axioms Flare.L2.HappyEyeballs.orderFixed_head
-#print axioms Flare.L2.HappyEyeballs.orderFixed_perm
+#print axioms Flare.L2.HappyEyeballs.order_head
+#print axioms Flare.L2.HappyEyeballs.order_get_even_v4first
 #print axioms Flare.L2.Hostname.validate_sound
 #print axioms Flare.L2.Hostname.validateOld_gap
 #print axioms Flare.L2.Hostname.validate_iff
@@ -148,7 +148,8 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.NET_09.message_not_wf
 #print axioms Flare.Bugs.NET_09.fixed_wf
 #print axioms Flare.Bugs.NET_10.order_breaks_spec
-#print axioms Flare.Bugs.NET_10.orderFixed_spec
+#print axioms Flare.Bugs.NET_10.order_spec
+#print axioms Flare.Bugs.NET_10.order_fixes_input
 
 -- UDP batch layout / cmsg walk; timer wheel jump order and UInt64 clock
 #print axioms Flare.L2.UdpBatch.layout_constants

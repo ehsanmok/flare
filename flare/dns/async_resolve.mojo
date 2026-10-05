@@ -13,8 +13,9 @@ message (``DnsError(host): reason``) as a plain ``Error``, which is
 what a raised ``DnsError`` is by the time any caller sees it.
 
 :func:`order_happy_eyeballs` reorders a resolved address list into the
-RFC 8305 connection-attempt order (interleave IPv6 / IPv4) so a dialer
-can race families without one stalling the other.
+RFC 8305 connection-attempt order (interleave IPv6 / IPv4, starting with
+the family of the first address) so a dialer can race families without one
+stalling the other.
 
 The worker thread is joined (the public API is synchronous --
 the submitter waits for the result anyway), so a flipped ``cancel`` is
@@ -154,10 +155,15 @@ def resolve_async(host: String, cancel: Cancel) raises -> List[IpAddr]:
 def order_happy_eyeballs(addrs: List[IpAddr]) -> List[IpAddr]:
     """Reorder ``addrs`` into RFC 8305 connection-attempt order.
 
-    Interleaves the IPv6 and IPv4 results (``v6[0], v4[0], v6[1],
-    v4[1], ...``) preserving each family's relative order, so a dialer
-    can race the two families without one family's slow first address
-    starving the other. Returns a new list; the input is unchanged.
+    Interleaves the two address families, **starting with the family of
+    ``addrs[0]``** (the resolver's most-preferred address, RFC 8305 §4:
+    "whichever address family is first in the list should be followed by an
+    address of the other address family"), preserving each family's relative
+    order: ``[v6, v4, v6, v4, ...]`` for an IPv6-first input and
+    ``[v4, v6, v4, v6, ...]`` for an IPv4-first one. A dialer can then race
+    the two families without one family's slow first address starving the
+    other, and the first attempt still goes to the address the OS ranked
+    highest. Returns a new list; the input is unchanged.
     """
     var v6 = List[IpAddr]()
     var v4 = List[IpAddr]()
@@ -166,12 +172,15 @@ def order_happy_eyeballs(addrs: List[IpAddr]) -> List[IpAddr]:
             v6.append(addrs[i].copy())
         else:
             v4.append(addrs[i].copy())
+    var first_v6 = len(addrs) == 0 or addrs[0].is_v6()
+    ref first = v6 if first_v6 else v4
+    ref second = v4 if first_v6 else v6
     var out = List[IpAddr](capacity=len(addrs))
     var i = 0
-    while i < len(v6) or i < len(v4):
-        if i < len(v6):
-            out.append(v6[i].copy())
-        if i < len(v4):
-            out.append(v4[i].copy())
+    while i < len(first) or i < len(second):
+        if i < len(first):
+            out.append(first[i].copy())
+        if i < len(second):
+            out.append(second[i].copy())
         i += 1
     return out^

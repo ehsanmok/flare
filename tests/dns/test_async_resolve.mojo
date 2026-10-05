@@ -68,9 +68,51 @@ def test_happy_eyeballs_uneven_families() raises:
     addrs.append(IpAddr.parse("::1"))
     var ordered = order_happy_eyeballs(addrs)
     assert_equal(len(ordered), 3)
-    assert_equal(String(ordered[0]), "::1")
-    assert_equal(String(ordered[1]), "127.0.0.1")
+    # IPv4 is first in the input, so the interleave starts with IPv4
+    # (RFC 8305 section 4): v4[0], v6[0], v4[1].
+    assert_equal(String(ordered[0]), "127.0.0.1")
+    assert_equal(String(ordered[1]), "::1")
     assert_equal(String(ordered[2]), "10.0.0.2")
+
+
+def test_happy_eyeballs_keeps_preferred_ipv4_first() raises:
+    """NET-10: [v4, v6, v4] must stay led by the v4 the resolver ranked
+    first, not be reordered to start with the v6."""
+    var addrs = List[IpAddr]()
+    addrs.append(IpAddr.parse("192.0.2.1"))
+    addrs.append(IpAddr.parse("2001:db8::1"))
+    addrs.append(IpAddr.parse("192.0.2.2"))
+    var ordered = order_happy_eyeballs(addrs)
+    assert_equal(len(ordered), 3)
+    assert_equal(String(ordered[0]), "192.0.2.1")
+    assert_equal(String(ordered[1]), "2001:db8::1")
+    assert_equal(String(ordered[2]), "192.0.2.2")
+
+
+def test_happy_eyeballs_ipv4_first_alternates_and_keeps_family_order() raises:
+    var addrs = List[IpAddr]()
+    addrs.append(IpAddr.parse("10.0.0.1"))
+    addrs.append(IpAddr.parse("10.0.0.2"))
+    addrs.append(IpAddr.parse("::1"))
+    addrs.append(IpAddr.parse("fe80::2"))
+    addrs.append(IpAddr.parse("10.0.0.3"))
+    var ordered = order_happy_eyeballs(addrs)
+    assert_equal(len(ordered), 5)
+    assert_equal(String(ordered[0]), "10.0.0.1")
+    assert_equal(String(ordered[1]), "::1")
+    assert_equal(String(ordered[2]), "10.0.0.2")
+    assert_equal(String(ordered[3]), "fe80::2")
+    assert_equal(String(ordered[4]), "10.0.0.3")
+
+
+def test_happy_eyeballs_empty_and_single() raises:
+    var empty = List[IpAddr]()
+    assert_equal(len(order_happy_eyeballs(empty)), 0)
+    var one = List[IpAddr]()
+    one.append(IpAddr.parse("192.0.2.9"))
+    var out = order_happy_eyeballs(one)
+    assert_equal(len(out), 1)
+    assert_equal(String(out[0]), "192.0.2.9")
 
 
 def test_cache_async_serves_hit_without_spawn() raises:
@@ -92,5 +134,8 @@ def main() raises:
     test_resolve_async_preflipped_cancel_raises()
     test_happy_eyeballs_interleaves_families()
     test_happy_eyeballs_uneven_families()
+    test_happy_eyeballs_keeps_preferred_ipv4_first()
+    test_happy_eyeballs_ipv4_first_alternates_and_keeps_family_order()
+    test_happy_eyeballs_empty_and_single()
     test_cache_async_serves_hit_without_spawn()
     print("test_async_resolve: 6 passed")

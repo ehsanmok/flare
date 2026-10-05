@@ -25,6 +25,15 @@ from test_async_resolve import (
     test_happy_eyeballs_uneven_families as test_async_resolve__test_happy_eyeballs_uneven_families,
 )
 from test_async_resolve import (
+    test_happy_eyeballs_keeps_preferred_ipv4_first as test_async_resolve__test_happy_eyeballs_keeps_preferred_ipv4_first,
+)
+from test_async_resolve import (
+    test_happy_eyeballs_ipv4_first_alternates_and_keeps_family_order as test_async_resolve__test_happy_eyeballs_ipv4_first_alternates_and_keeps_family_order,
+)
+from test_async_resolve import (
+    test_happy_eyeballs_empty_and_single as test_async_resolve__test_happy_eyeballs_empty_and_single,
+)
+from test_async_resolve import (
     test_cache_async_serves_hit_without_spawn as test_async_resolve__test_cache_async_serves_hit_without_spawn,
 )
 from test_dns import (
@@ -141,6 +150,13 @@ def main() raises:
     ]()
     suite.test[test_async_resolve__test_happy_eyeballs_interleaves_families]()
     suite.test[test_async_resolve__test_happy_eyeballs_uneven_families]()
+    suite.test[
+        test_async_resolve__test_happy_eyeballs_keeps_preferred_ipv4_first
+    ]()
+    suite.test[
+        test_async_resolve__test_happy_eyeballs_ipv4_first_alternates_and_keeps_family_order
+    ]()
+    suite.test[test_async_resolve__test_happy_eyeballs_empty_and_single]()
     suite.test[test_async_resolve__test_cache_async_serves_hit_without_spawn]()
     # tests/dns/test_dns.mojo
     suite.test[test_dns__test_resolve_localhost_non_empty]()

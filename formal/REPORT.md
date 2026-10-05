@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61452 lines) |
-| Theorems | 3232 |
-| Headline theorems in the axiom audit | 1034 |
+| Lean files | 298 (61469 lines) |
+| Theorems | 3236 |
+| Headline theorems in the axiom audit | 1035 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 42 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 43 of 138 |
 
 Six findings are rated high:
 
@@ -853,17 +853,18 @@ paired with earlier successful acquires.
 
 #### Happy Eyeballs ordering (`HappyEyeballs.lean`)
 
-dns/async_resolve.mojo:154-177, `order_happy_eyeballs`. Addresses are an
+dns/async_resolve.mojo:155-186, `order_happy_eyeballs`. Addresses are an
 abstract type with a family test (`IpAddr.is_v6`).
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `order_eq` | The two Mojo loops compute the interleaving of the IPv6 and IPv4 sublists. | proved |
+| `order_eq` | The Mojo loops compute the interleaving of the two family sublists, the family of `addrs[0]` first. | proved |
 | `order_perm` | The output is a permutation of the input. | proved |
 | `order_filter_v6`, `order_filter_v4` | Each family keeps its relative order. | proved |
-| `order_get_even`, `order_get_odd` | Positions alternate IPv6, IPv4 over the first `2 * min n6 n4` slots. | proved |
-| `orderFixed_head`, `orderFixed_perm` | The fix keeps the input's first address first and is still a permutation. | proved |
-| `Flare.Bugs.NET_10.order_breaks_spec` | `[v4, v6, v4]` comes out as `[v6, v4, v4]`. | counterexample (NET-10) |
+| `order_get_even`, `order_get_odd`, `order_get_even_v4first`, `order_get_odd_v4first` | Positions alternate the two families over the first `2 * min n6 n4` slots, starting with the first address's family. | proved |
+| `order_head` | The input's first address stays first (RFC 8305 §4). | proved |
+| `Flare.Bugs.NET_10.order_breaks_spec` | Before the fix, `[v4, v6, v4]` came out as `[v6, v4, v4]`. | counterexample (NET-10, resolved) |
+| `Flare.Bugs.NET_10.order_spec`, `order_fixes_input` | The shipped `order` keeps the first address first; on that input it returns `[v4, v6, v4]`. | proved |
 
 #### Batched UDP layouts and receiver buffers (`UdpBatch.lean`)
 
@@ -2739,7 +2740,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.BufferPool.classIndex`, `capacityFor` | flare/runtime/buffer_pool.mojo:130-161 | `classIndex_fits`, `classIndex_least` | proved |
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |
-| `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
+| `Flare.L2.HappyEyeballs.order`, `orderOld` | flare/dns/async_resolve.mojo:155-186 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `order_head` | counterexample (NET-10, resolved) |
 | `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:72-119 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexamples (NET-08, NET-09, resolved) |
 | `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
@@ -3000,7 +3001,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-07 | Medium | resolved | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
 | NET-08 | Low | resolved | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
 | NET-09 | Low | resolved | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
-| NET-10 | Low | open | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
+| NET-10 | Low | resolved | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
 | RT-01 | Low | open | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
 | RT-02 | Low | open | `writev_buf_all` returns normally after a short write | `Flare/Bugs/RT_02.lean` | `repro/RT-02_writev_all_silent_short_write.mojo` (any) |
 | RT-03 | Medium | resolved | `UringReactor.poll` can block with no wakeup read armed | `Flare/Bugs/RT_03.lean` | `repro/RT-03_uring_poll_blocks_unarmed.mojo` (linux) |
@@ -3445,18 +3446,19 @@ Spec: RFC 8305 §4, which the function's name and docstring cite: the
 interleaving keeps the first address of the sorted list first ("Whichever
 address family is first in the list should be followed by an address of the
 other address family").
-What goes wrong: async_resolve.mojo:162-177 splits by family and always
+What goes wrong: async_resolve.mojo:162-177 @59bda50 splits by family and always
 emits the IPv6 sublist first. The docstring itself documents
 `v6[0], v4[0], ...`, so this is a gap between flare and the RFC it cites,
 not between the code and its own docs. Order within each family and the
 permutation property hold (`order_perm`, `order_filter_v6`,
 `order_filter_v4`).
 Lean: `Flare.Bugs.NET_10.order_breaks_spec`. Fix: start with the family of
-`addrs[0]`; `orderFixed_spec`, `orderFixed_perm'`.
+`addrs[0]`; `order_spec`, `order_perm'`.
 Repro: `formal/repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo`,
 observed
 `BUG REPRODUCED: input starts with 192.0.2.1 but order_happy_eyeballs returned 2001:db8::1 192.0.2.1 192.0.2.2`.
 Flip: `OK: preferred first address kept first: 192.0.2.1 2001:db8::1 192.0.2.2`, exit 0.
+Status: resolved. `order_happy_eyeballs` now starts the interleave with the family of `addrs[0]`; the model's `order` mirrors it (pre-fix: `orderOld`). Tests: `tests/dns/test_async_resolve.mojo::test_happy_eyeballs_keeps_preferred_ipv4_first`, `::test_happy_eyeballs_ipv4_first_alternates_and_keeps_family_order`, `::test_happy_eyeballs_uneven_families` (updated: it asserted the old IPv6-first result), `::test_happy_eyeballs_empty_and_single`.
 
 #### RT-01: `TimerWheel.next_fire_ms` overshoots when only overflow timers remain
 
