@@ -220,12 +220,30 @@ def encodeAs (c : CCfg) (e : Enc) (x : Resp) : Resp :=
            hdrs := appendH (setH (setH x.hdrs "Content-Encoding" e.name) "Content-Length"
                      (toString b.length)) "Vary" "Accept-Encoding" }
 
-/-- `Compress.serve` applied to the inner response.
+/-- A 206 (or a response with Content-Range) has its byte offsets fixed
+relative to the identity bytes. -/
+def isPartial (x : Resp) : Bool := x.status == 206 || hasH x.hdrs "content-range"
+
+/-- `Compress.serve` before the APP-26 fix: no check for partial content.
 mirrors flare/http/middleware.mojo:345-376 @59bda50 -/
+def compressOld (c : CCfg) (x : Resp) : Resp :=
+  if c.pick.q == 0 then x
+  else if x.body.length < c.minSize then x
+  else if hasH x.hdrs "content-encoding" then x
+  else match c.pick.enc with
+    | .br => if c.brotliOk then encodeAs c .br x else x
+    | .gzip => encodeAs c .gzip x
+    | .identity => x
+
+/-- `Compress.serve` applied to the inner response: partial responses (206 or
+`Content-Range`) are passed through (fixed, APP-26; the identity branches
+still lack `Vary`, APP-27).
+mirrors flare/http/middleware.mojo:345-382 (fixed, APP-26) -/
 def compress (c : CCfg) (x : Resp) : Resp :=
   if c.pick.q == 0 then x
   else if x.body.length < c.minSize then x
   else if hasH x.hdrs "content-encoding" then x
+  else if isPartial x then x
   else match c.pick.enc with
     | .br => if c.brotliOk then encodeAs c .br x else x
     | .gzip => encodeAs c .gzip x
@@ -243,6 +261,7 @@ theorem compress_skips_encoded (c : CCfg) (x : Resp) (h : hasH x.hdrs "content-e
 theorem compress_cases (c : CCfg) (x : Resp) :
     compress c x = x ∨ ∃ e, e ≠ .identity ∧ compress c x = encodeAs c e x := by
   unfold compress
+  split; · exact .inl rfl
   split; · exact .inl rfl
   split; · exact .inl rfl
   split; · exact .inl rfl
@@ -276,13 +295,18 @@ theorem compress_vary_when_encoded (c : CCfg) (x : Resp) (hne : compress c x ≠
   · exact absurd h hne
   · rw [h]; exact encodeAs_vary c e x
 
-/-- A 206 (or a response with Content-Range) has its byte offsets fixed
-relative to the identity bytes. -/
-def isPartial (x : Resp) : Bool := x.status == 206 || hasH x.hdrs "content-range"
-
 /-- Spec for APP-26 (RFC 9110 §14.4): a partial response passes through
 unchanged. -/
 def PartialSpec (f : Resp → Resp) : Prop := ∀ x, isPartial x = true → f x = x
+
+/-- The shipped `compress` meets the APP-26 spec for every configuration. -/
+theorem compress_partial (c : CCfg) : PartialSpec (compress c) := by
+  intro x hp
+  unfold compress
+  split; · rfl
+  split; · rfl
+  split; · rfl
+  simp
 
 /-- The response's selected representation depends on Accept-Encoding:
 the body is large enough to compress, not already encoded, not partial. -/

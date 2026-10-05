@@ -2023,6 +2023,12 @@ from test_middleware import (
     test_compress_already_encoded_skipped as test_middleware__test_compress_already_encoded_skipped,
 )
 from test_middleware import (
+    test_compress_partial_content_passthrough as test_middleware__test_compress_partial_content_passthrough,
+)
+from test_middleware import (
+    test_compress_content_range_header_passthrough as test_middleware__test_compress_content_range_header_passthrough,
+)
+from test_middleware import (
     test_catch_panic_returns_500 as test_middleware__test_catch_panic_returns_500,
 )
 from test_middleware import (
@@ -5220,6 +5226,10 @@ def main() raises:
     suite.test[test_middleware__test_compress_large_body_gzipped]()
     suite.test[test_middleware__test_compress_no_acceptable_encoding_skips]()
     suite.test[test_middleware__test_compress_already_encoded_skipped]()
+    suite.test[test_middleware__test_compress_partial_content_passthrough]()
+    suite.test[
+        test_middleware__test_compress_content_range_header_passthrough
+    ]()
     suite.test[test_middleware__test_catch_panic_returns_500]()
     suite.test[test_middleware__test_catch_panic_passthrough_when_ok]()
     suite.test[

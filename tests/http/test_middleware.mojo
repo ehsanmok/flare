@@ -100,6 +100,25 @@ struct _PreEncoded(Copyable, Defaultable, Handler):
         return resp^
 
 
+@fieldwise_init
+struct _Partial(Copyable, Defaultable, Handler):
+    """Returns what ``FileServer`` returns for ``Range: bytes=0-2047``: a 206
+    with 2048 identity bytes and the matching ``Content-Range``."""
+
+    var status: Int
+
+    def __init__(out self):
+        self.status = 206
+
+    def serve(self, req: Request) raises -> Response:
+        var resp = Response(status=self.status)
+        resp.body = List[UInt8](length=2048, fill=UInt8(65))
+        resp.headers.set("Content-Range", "bytes 0-2047/10000")
+        resp.headers.set("Content-Length", "2048")
+        resp.headers.set("Accept-Ranges", "bytes")
+        return resp^
+
+
 # ── negotiate_encoding ────────────────────────────────────────────────────
 
 
@@ -214,6 +233,33 @@ def test_compress_already_encoded_skipped() raises:
     assert_equal(resp.headers.get("content-encoding"), "br")
 
 
+def test_compress_partial_content_passthrough() raises:
+    """APP-26: a 206 keeps its identity body, Content-Range and
+    Content-Length; the offsets refer to the unencoded representation."""
+    var c = Compress(_Partial(), min_size_bytes=1024)
+    var req = Request(method=Method.GET, url="/big.bin")
+    req.headers.set("Range", "bytes=0-2047")
+    req.headers.set("Accept-Encoding", "gzip, br")
+    var resp = c.serve(req)
+    assert_equal(resp.status, 206)
+    assert_false(resp.headers.contains("content-encoding"))
+    assert_equal(len(resp.body), 2048)
+    assert_equal(resp.headers.get("content-range"), "bytes 0-2047/10000")
+    assert_equal(resp.headers.get("content-length"), "2048")
+
+
+def test_compress_content_range_header_passthrough() raises:
+    """APP-26: any response carrying Content-Range is passed through, even
+    when its status is not 206."""
+    var c = Compress(_Partial(status=200), min_size_bytes=1024)
+    var req = Request(method=Method.GET, url="/big.bin")
+    req.headers.set("Accept-Encoding", "gzip")
+    var resp = c.serve(req)
+    assert_false(resp.headers.contains("content-encoding"))
+    assert_equal(len(resp.body), 2048)
+    assert_equal(resp.headers.get("content-range"), "bytes 0-2047/10000")
+
+
 # ── CatchPanic ────────────────────────────────────────────────────────────
 
 
@@ -273,7 +319,9 @@ def main() raises:
     test_compress_large_body_gzipped()
     test_compress_no_acceptable_encoding_skips()
     test_compress_already_encoded_skipped()
+    test_compress_partial_content_passthrough()
+    test_compress_content_range_header_passthrough()
     test_catch_panic_returns_500()
     test_catch_panic_passthrough_when_ok()
     test_middleware_wraps_a_handler_without_a_default()
-    print("test_middleware: 18 passed")
+    print("test_middleware: 20 passed")

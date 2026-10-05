@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-26 fixed on fix/formal-findings
 """APP-26: Compress gzips a 206 Partial Content body and keeps its Content-Range.
 
 Lean: Flare.Bugs.APP_26.violates_spec (counterexample) and
@@ -9,7 +10,7 @@ Expected (RFC 9110 §14.4 and §8.4): the byte offsets in Content-Range refer
 to the selected representation, which includes its content coding, and the
 content length must equal the range length. A middleware that adds a
 content coding after the range was cut cannot keep the old Content-Range.
-Actual: an inner handler (for example FileServer with `Range:`) answers
+Before the fix: an inner handler (for example FileServer with `Range:`) answers
 206 with `Content-Range: bytes 0-2047/10000` and 2048 body bytes; Compress
 gzips the 2048 bytes, keeps the status and Content-Range, and rewrites
 Content-Length to the compressed size, so the range header no longer

@@ -322,7 +322,10 @@ struct Compress[Inner: Handler & Copyable](Copyable, Handler):
 
     Bodies smaller than ``min_size_bytes`` (default 1024) are passed
     through untouched — the per-request encoder overhead beats the
-    transfer-time savings on small bodies.
+    transfer-time savings on small bodies. Partial-content responses
+    (status 206, or any response carrying ``Content-Range``, such as
+    ``FileServer`` answering a ``Range:`` request) are passed through
+    unencoded so ``Content-Range`` keeps matching the body.
     """
 
     var inner: Self.Inner
@@ -353,6 +356,12 @@ struct Compress[Inner: Handler & Copyable](Copyable, Handler):
             return resp^
         if resp.headers.contains("content-encoding"):
             # Already encoded upstream; don't double-compress.
+            return resp^
+        if resp.status == 206 or resp.headers.contains("content-range"):
+            # Partial content: the offsets in Content-Range refer to the
+            # selected representation (RFC 9110 §14.4, §8.4). Encoding the
+            # already-cut range would leave a Content-Range that no longer
+            # matches the body, so pass it through untouched.
             return resp^
         if pick.encoding == "br" and brotli_ok:
             var encoded = compress_brotli(

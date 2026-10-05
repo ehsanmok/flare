@@ -191,7 +191,7 @@ The model covers these structs in `flare/http/middleware.mojo`:
 |---|---|
 | `Logger` | 61-86 |
 | `RequestId` | 105-111 |
-| `Compress.serve` | 345-376 |
+| `Compress.serve` | 345-382 |
 | `CatchPanic` | 397-404 |
 
 Logger's printing is dropped. RequestId's generated id
@@ -208,6 +208,7 @@ the encoder as parameters; negotiation itself is component 6.
 | `Flare.L4.Middleware.compress_skips_encoded` | a response that already has `Content-Encoding` is untouched | proved |
 | `Flare.L4.Middleware.compress_content_length`, `compress_vary_when_encoded` | when Compress changes a response, `Content-Length` equals the encoded length and `Vary: Accept-Encoding` is present | proved |
 | `Flare.Bugs.APP_26.violates_spec`, `APP_27.violates_spec` | a 206 is re-encoded; the identity variant lacks `Vary` | counterexample |
+| `Flare.L4.Middleware.compress_partial` | the shipped Compress passes every 206 / `Content-Range` response through unchanged | proved (fixed) |
 | `Flare.L4.Middleware.compressFixed_partial`, `compressFixed_vary`, `compressFixed_agrees` | the fixed Compress meets both specs, and agrees with the shipped one whenever the shipped one encodes a non-partial response | proved |
 
 **Limitations.** The model does not check the header-injection test of
@@ -918,11 +919,12 @@ an existing `Content-Encoding`, but not the status or `Content-Range`. The
 2048 identity bytes are gzipped to 35 bytes. `Content-Length` is rewritten,
 while `Content-Range: bytes 0-2047/10000` stays.
 
-**Lean.** `Flare.Bugs.APP_26.partial_reencoded` and `violates_spec`, against
-the spec `PartialSpec` ("a partial response passes through unchanged").
-`partial_body_replaced` states the general case. The fix is proved
-sufficient by `fixed_meets_spec` (via
-`Flare.L4.Middleware.compressFixed_partial`), which is general.
+**Lean.** `Flare.Bugs.APP_26.partial_reencoded` and `violates_spec` (about
+the pre-fix `compressOld`), against the spec `PartialSpec` ("a partial
+response passes through unchanged"). `partial_body_replaced` states the
+general case. The shipped `compress` is proved to meet it by
+`fixed_meets_spec` (via
+`Flare.L4.Middleware.compress_partial`), which is general.
 
 **Fix.** Return the inner response unchanged when the status is 206 or it
 carries `Content-Range`.
@@ -933,6 +935,8 @@ uses a stub inner handler that returns what FileServer returns for
 
 - Observed: `BUG REPRODUCED: 206 with Content-Range 'bytes 0-2047/10000' was re-encoded as gzip; body is 35 bytes, Content-Length 35`
 - Flip (the two lines after the `content-encoding` check in `flare/http/middleware.mojo`): `OK: partial response passed through unencoded (status 206, 2048 bytes)`
+
+Status: resolved. Compress.serve returns a 206, or any response carrying `Content-Range`, unchanged (no re-encoding, Content-Range and Content-Length intact). Tests: `tests/http/test_middleware.mojo::test_compress_partial_content_passthrough`, `::test_compress_content_range_header_passthrough`. The model `compress` mirrors the fix; `compressOld` is the pre-fix code.
 
 ### APP-27: Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated
 
@@ -1396,7 +1400,7 @@ exit 0.
 | `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime` | proved; APP-10 |
 | `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |
 | `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
-| `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-376 | `compress_content_length`, `compressFixed_partial`, `compressFixed_vary` | APP-26, APP-27 |
+| `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compressFixed_vary` | APP-26, APP-27 |
 | `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decide_eq_spec_of_noStar`, `decideFixed_eq_spec` | APP-20 |
 | `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-197 | `originAllowed_sound`, `acao_not_star_with_creds`, `serveFixed_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
