@@ -889,6 +889,10 @@ of what you might reasonably assume from the surrounding feature.
   `NetworkError` instead of putting data frames on the wire; `send_frame`
   now takes `mut self`. Clients used to see EOF (1006) instead of the
   close code.
+- `WsFrame.decode_one` now raises `WsProtocolError` for a reserved opcode
+  (0x3-0x7, 0xB-0xF), as RFC 6455 sec 5.2 requires of a receiver. It used
+  to return the frame, so `recv()` handed it to the application. The
+  server, client and h2 receive paths all decode through it.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of

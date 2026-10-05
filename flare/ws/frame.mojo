@@ -382,7 +382,8 @@ struct WsFrame(Movable, Writable):
 
         Raises:
             WsProtocolError: If the frame violates RFC 6455 (bad RSV bits,
-                             fragmented control frame, etc.).
+                             a reserved opcode, fragmented control frame,
+                             etc.).
             Error: If ``data`` is too short to contain a complete frame.
         """
         var n = len(data)
@@ -408,6 +409,14 @@ struct WsFrame(Movable, Writable):
             raise WsProtocolError(
                 "RSV1 must be zero without a negotiated extension (RFC 6455"
                 " sec 5.2)"
+            )
+        # RFC 6455 sec 5.2: opcodes 0x3-0x7 and 0xB-0xF are reserved, and a
+        # receiver of an unknown opcode MUST fail the connection.
+        if (
+            opcode > WsOpcode.BINARY and opcode < WsOpcode.CLOSE
+        ) or opcode > WsOpcode.PONG:
+            raise WsProtocolError(
+                "reserved WebSocket opcode " + String(Int(opcode))
             )
 
         # ── Parse extended payload length ─────────────────────────────────────

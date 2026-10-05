@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: WS-01 fixed on fix/formal-findings
 """WS-01: decode_one accepts frames with a reserved opcode.
 
 Lean: Flare.Bugs.WS_01.counterexample (counterexample) and
@@ -12,7 +13,7 @@ other reserved header bits (RSV1-3), and both WsConnection.recv and
 WsClient.recv return whatever it decodes.
 
 Expected: WsFrame.decode_one(b"\\x83\\x00") raises WsProtocolError.
-Actual: it returns a frame with opcode 3, which recv() hands to the
+Before the fix: Actual: it returns a frame with opcode 3, which recv() hands to the
 application as a data frame.
 
 Minimal fix: in decode_one, after the RSV checks, raise WsProtocolError

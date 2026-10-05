@@ -228,7 +228,8 @@ theorem finish_ok {fin rsv1 : Bool} {op : UInt8} {masked : Bool} {plen hdr : Nat
     simp only [hic, Bool.true_and, Bool.or_eq_true, Bool.not_eq_true', decide_eq_true_eq, not_or] at hctl
     exact ⟨by simpa using hctl.1, by omega⟩
 
-/-- `WsFrame.decode_one`.
+/-- `WsFrame.decode_one` before the WS-01 fix: the opcode is not range-checked.
+`decodeKnown` (in `Ws/Recv.lean`) is the shipped decoder.
 mirrors flare/ws/frame.mojo:361-508 @59bda50 -/
 def decode (allowRsv1 : Bool) (maxP : Nat) : Bytes → DRes
   | b0 :: b1 :: r =>

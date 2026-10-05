@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61696 lines) |
+| Lean files | 298 (61708 lines) |
 | Theorems | 3246 |
 | Headline theorems in the axiom audit | 1045 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 57 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 58 of 138 |
 
 Six findings are rated high:
 
@@ -3028,7 +3028,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-09 | Low | resolved | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
 | H1-10 | Low | resolved | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
 | H1-11 | Medium | resolved | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
-| WS-01 | Low | open | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
+| WS-01 | Low | resolved | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
 | WS-02 | Medium | resolved | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-03 | Low | open | `WsClient` accepts masked frames from the server | `Flare/Bugs/WS_03.lean` | `repro/WS-03_client_accepts_masked_server_frame.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-04 | Low | open | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
@@ -3867,6 +3867,8 @@ Status: resolved. `_H2Transport.read` now raises `NetworkError` when a TLS read 
 - **Flip:** `OK: truncated TLS download refused (raised: NetworkError: TLS connection closed without close_notify)`; `flare/http/_client/h2_transport.mojo` restored.
 
 #### WS-01: `decode_one` accepts reserved opcodes
+
+Status: resolved. `WsFrame.decode_one` raises `WsProtocolError` for opcodes 0x3-0x7 and 0xB-0xF right after the RSV checks, so the server, client and h2 receive paths all fail the connection. The counterexample is about `decodeOld`; `decodeKnown` is the shipped decoder. Test: `test_decode_reserved_opcode_raises`.
 
 - **Severity:** Low. The application receives a frame with opcode 0x3-0x7 or 0xB-0xF where the connection must fail. This is a protocol-compliance gap with no memory or framing impact.
 - **RFC:** RFC 6455 §5.2: "If an unknown opcode is received, the receiving endpoint MUST _Fail the WebSocket Connection_."

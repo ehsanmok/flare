@@ -395,6 +395,8 @@ Status: resolved. `_H2Transport.read` now raises `NetworkError` when a TLS read 
 
 ### WS-01: `decode_one` accepts reserved opcodes
 
+Status: resolved. `WsFrame.decode_one` raises `WsProtocolError` for opcodes 0x3-0x7 and 0xB-0xF right after the RSV checks, so the server, client and h2 receive paths all fail the connection. The counterexample is about `decodeOld`; `decodeKnown` is the shipped decoder. Test: `test_decode_reserved_opcode_raises`.
+
 - **Severity:** Low. The application receives a frame with opcode 0x3-0x7 or 0xB-0xF where the connection must fail. This is a protocol-compliance gap with no memory or framing impact.
 - **RFC:** RFC 6455 §5.2: "If an unknown opcode is received, the receiving endpoint MUST _Fail the WebSocket Connection_."
 - **What goes wrong:** `opcode = byte0 & 0x0F` is never range-checked (`frame.mojo:395-508`), although RSV1-3 are. `WsConnection.recv` and `WsClient.recv` return the frame as decoded.

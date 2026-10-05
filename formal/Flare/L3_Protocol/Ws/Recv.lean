@@ -4,7 +4,8 @@ import Flare.L3_Protocol.Ws.Frame
 # WebSocket receive paths (RFC 6455 §5.1, §5.2, §5.4, §5.5)
 
 * **Opcode check.** `OpcodeSafe`: every frame the decoder returns has a
-  defined opcode. `decodeKnown` adds the check; `decodeKnown_safe` proves it
+  defined opcode. `decode` (alias `decodeOld`) is the decoder before the
+  WS-01 fix; `decodeKnown` is the shipped one, with the check; `decodeKnown_safe` proves it
   safe and `decodeKnown_encode` shows it still round-trips every frame with
   a defined opcode.
 * **Mask direction.** `serverAccept` (`WsConnection._recv_one`) refuses
@@ -28,10 +29,15 @@ open Flare
 def OpcodeSafe (dec : Bytes → DRes) : Prop :=
   ∀ d f n, dec d = .ok f n → knownOpcode f.opcode = true
 
-/-- `decode_one` with the reserved-opcode check. The Mojo fix raises right
-after the RSV checks; this checks after decoding. The only difference is
-that a truncated reserved-opcode frame is `needMore` here instead of
-`error`. -/
+/-- `decode_one` before the WS-01 fix (an alias of `decode`, named for the
+counterexample). -/
+abbrev decodeOld : Bool → Nat → Bytes → DRes := decode
+
+/-- The shipped `decode_one`: with the reserved-opcode check. The Mojo code
+raises right after the RSV checks; this checks after decoding. The only
+difference is that a truncated reserved-opcode frame is `needMore` here
+instead of `error`.
+mirrors flare/ws/frame.mojo `decode_one` (fixed, WS-01) -/
 def decodeKnown (allowRsv1 : Bool) (maxP : Nat) (d : Bytes) : DRes :=
   match decode allowRsv1 maxP d with
   | .ok f n => if knownOpcode f.opcode then .ok f n else .error

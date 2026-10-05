@@ -60,6 +60,9 @@ from test_ws import (
     test_decode_fragmented_control_raises as test_ws__test_decode_fragmented_control_raises,
 )
 from test_ws import (
+    test_decode_reserved_opcode_raises as test_ws__test_decode_reserved_opcode_raises,
+)
+from test_ws import (
     test_encode_decode_roundtrip_text as test_ws__test_encode_decode_roundtrip_text,
 )
 from test_ws import (
@@ -340,6 +343,7 @@ def main() raises:
     suite.test[test_ws__test_decode_masked_frame]()
     suite.test[test_ws__test_decode_truncated_raises]()
     suite.test[test_ws__test_decode_fragmented_control_raises]()
+    suite.test[test_ws__test_decode_reserved_opcode_raises]()
     suite.test[test_ws__test_encode_decode_roundtrip_text]()
     suite.test[test_ws__test_encode_decode_roundtrip_text_utf8]()
     suite.test[test_ws__test_encode_decode_roundtrip_binary]()

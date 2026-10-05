@@ -277,6 +277,48 @@ def test_decode_fragmented_control_raises() raises:
         _ = WsFrame.decode_one(Span[UInt8, _](wire))
 
 
+def _decodes(first: Int, second: Int, tail: Int = 0) -> Bool:
+    var wire = List[UInt8]()
+    wire.append(UInt8(first))
+    wire.append(UInt8(second))
+    for _ in range(tail):
+        wire.append(UInt8(0))
+    try:
+        _ = WsFrame.decode_one(Span[UInt8, _](wire))
+        return True
+    except:
+        return False
+
+
+def test_decode_reserved_opcode_raises() raises:
+    """WS-01: RFC 6455 sec 5.2 -- an unknown opcode fails the connection.
+
+    Opcodes 0x3-0x7 and 0xB-0xF are reserved. ``decode_one`` checked the
+    RSV bits but not the opcode, so ``recv()`` returned such a frame to the
+    application.
+    """
+    for op in range(16):
+        var known = op <= 2 or (op >= 8 and op <= 10)
+        # FIN set, empty payload, unmasked.
+        assert_equal(_decodes(0x80 | op, 0x00), known, "opcode " + String(op))
+        # FIN set, masked, empty payload (4 mask bytes).
+        assert_equal(
+            _decodes(0x80 | op, 0x80, 4), known, "masked opcode " + String(op)
+        )
+    # A reserved opcode is a protocol error, not just "some error".
+    with assert_raises(contains="WsProtocolError"):
+        _ = WsFrame.decode_one(Span[UInt8, _](_two(0x83, 0x00)))
+    with assert_raises(contains="WsProtocolError"):
+        _ = WsFrame.decode_one(Span[UInt8, _](_two(0x8B, 0x00)))
+
+
+def _two(a: Int, b: Int) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.append(UInt8(a))
+    out.append(UInt8(b))
+    return out^
+
+
 # ── Round-trip tests ──────────────────────────────────────────────────────────
 
 
