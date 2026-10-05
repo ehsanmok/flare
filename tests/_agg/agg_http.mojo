@@ -2193,6 +2193,15 @@ from test_multi_listener import (
 from test_multi_listener import (
     test_bind_many_multi_worker_serves_every_address as test_multi_listener__test_bind_many_multi_worker_serves_every_address,
 )
+from test_multi_listener import (
+    test_serve_cancellable_rejects_extra_listeners as test_multi_listener__test_serve_cancellable_rejects_extra_listeners,
+)
+from test_multi_listener import (
+    test_serve_view_rejects_extra_listeners as test_multi_listener__test_serve_view_rejects_extra_listeners,
+)
+from test_multi_listener import (
+    test_serve_static_rejects_extra_listeners as test_multi_listener__test_serve_static_rejects_extra_listeners,
+)
 from test_multipart import (
     test_boundary_token as test_multipart__test_boundary_token,
 )
@@ -5610,6 +5619,11 @@ def main() raises:
     suite.test[
         test_multi_listener__test_bind_many_multi_worker_serves_every_address
     ]()
+    suite.test[
+        test_multi_listener__test_serve_cancellable_rejects_extra_listeners
+    ]()
+    suite.test[test_multi_listener__test_serve_view_rejects_extra_listeners]()
+    suite.test[test_multi_listener__test_serve_static_rejects_extra_listeners]()
     # tests/http/test_multipart.mojo
     suite.test[test_multipart__test_boundary_token]()
     suite.test[test_multipart__test_boundary_quoted]()

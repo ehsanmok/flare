@@ -81,7 +81,10 @@ from nineteen entry points to four names.
 `bind_many`, `serve_tls`, `serve_ws_upgrade` and `serve_static_multicore`
 remain as delegating shims and are removed in 0.12. `serve_cancellable`,
 `serve_view` and `serve_static` now raise when a TLS context or extra
-listeners are bound, instead of silently ignoring both.
+listeners are bound, instead of silently ignoring both. They run one
+reactor over the first address; to serve several addresses
+(`HttpServer.bind(List[SocketAddr])`) use `serve()`, which accepts on
+every listener.
 
 **Changed in v0.11 (breaking): stricter HTTP/1.1 request parsing.**
 Each of these used to be accepted and is now answered 400 (or 501),

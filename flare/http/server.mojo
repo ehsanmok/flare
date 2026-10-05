@@ -1010,6 +1010,26 @@ struct HttpServer(Movable):
             h.destroy_thunk(h.addr)
             self._ws_h2_hooks = None
 
+    def _reject_extra_listeners(self, method: String) raises:
+        """Raise when :meth:`bind` was given several addresses.
+
+        ``serve_cancellable``, ``serve_view`` and ``serve_static`` run a
+        reactor over ``self._listener`` alone; only :meth:`serve` (and
+        ``serve_streaming``'s own check) drive the extra listeners. Serving
+        just the first address would leave the others bound -- connections
+        complete in the kernel backlog -- and never answered, with no error.
+        Rejecting is the smaller change than a multi-listener variant of
+        each loop, and it is what ``docs/features.md`` promises.
+        """
+        if len(self._extra_listener_fds) > 0:
+            raise Error(
+                "HttpServer."
+                + method
+                + " serves a single listener and cannot serve the extra"
+                " addresses given to bind(List[SocketAddr]); bind one"
+                " address, or use serve(), which serves every listener"
+            )
+
     @always_inline
     def _reject_tls_with_extra_listeners(self) raises:
         """Raise when TLS is bound alongside :meth:`bind_many` listeners.
@@ -1434,13 +1454,15 @@ struct HttpServer(Movable):
 
         Raises:
             NetworkError: On fatal listener errors.
+            Error: If a TLS context is bound, or ``bind`` was given several
+                addresses (these loops serve one listener; use ``serve``).
         """
         if self._tls_ctx:
             raise Error(
                 "HttpServer.serve_cancellable: TLS is not wired into this loop;"
                 " use serve() on a bind_tls server"
             )
-        self._reject_tls_with_extra_listeners()
+        self._reject_extra_listeners("serve_cancellable")
         from ._server_reactor_impl import run_reactor_loop_cancel
 
         self._stopping = False
@@ -1476,13 +1498,15 @@ struct HttpServer(Movable):
 
         Raises:
             NetworkError: On fatal listener errors.
+            Error: If a TLS context is bound, or ``bind`` was given several
+                addresses (these loops serve one listener; use ``serve``).
         """
         if self._tls_ctx:
             raise Error(
                 "HttpServer.serve_view: TLS is not wired into this loop; use"
                 " serve() on a bind_tls server"
             )
-        self._reject_tls_with_extra_listeners()
+        self._reject_extra_listeners("serve_view")
         from ._server_reactor_impl import run_reactor_loop_view
 
         self._stopping = False
@@ -1524,13 +1548,15 @@ struct HttpServer(Movable):
         Raises:
             NetworkError: On fatal listener errors; per-connection
                 errors close the offending connection silently.
+            Error: If a TLS context is bound, or ``bind`` was given several
+                addresses (these loops serve one listener; use ``serve``).
         """
         if self._tls_ctx:
             raise Error(
                 "HttpServer.serve_static: TLS is not wired into this loop; use"
                 " serve() on a bind_tls server"
             )
-        self._reject_tls_with_extra_listeners()
+        self._reject_extra_listeners("serve_static")
         if num_workers > 1:
             self._serve_static_multicore(resp.copy(), num_workers, pin_cores)
             return

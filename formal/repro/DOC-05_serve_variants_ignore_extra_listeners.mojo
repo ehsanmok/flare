@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP, forked server child)
+# RESOLVED: DOC-05 fixed on fix/formal-findings
 """DOC-05: `serve_cancellable`, `serve_view` and `serve_static` on a server
 bound to several addresses serve only the first one; the extra listeners
 stay bound (connections complete in the kernel backlog) but are never
@@ -23,7 +24,7 @@ method (exit 7 if it raised, 3 if it returned). After 300 ms the parent
 checks whether the child exited, sends GET to the primary address
 (precondition: 200), then GET to the extra address with a 1.5 s timeout.
 Expected: the method raises (or, at the least, the extra address is
-served). Actual: the method runs, the primary answers 200 and the extra
+served). Before the fix: the method runs, the primary answers 200 and the extra
 address never answers.
 
 Minimal fix: at the top of each of the three methods,
@@ -56,7 +57,9 @@ def _get(port: UInt16) -> String:
     try:
         var s = TcpStream.connect(SocketAddr.localhost(port))
         s.set_recv_timeout(1500)
-        var req = String("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        var req = String(
+            "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        )
         _ = s.write(req.as_bytes())
         var buf = List[UInt8](length=4096, fill=0)
         while True:
@@ -74,7 +77,9 @@ def _get(port: UInt16) -> String:
 def _exit_code(pid: Int) -> Int:
     """-1 while the child runs, else its exit status (WNOHANG poll)."""
     var st = List[c_int](length=1, fill=0)
-    var r = external_call["waitpid", c_int](c_int(pid), st.unsafe_ptr(), c_int(1))
+    var r = external_call["waitpid", c_int](
+        c_int(pid), st.unsafe_ptr(), c_int(1)
+    )
     if Int(r) != pid:
         return -1
     return (Int(st[0]) >> 8) & 0xFF
@@ -88,7 +93,9 @@ def _probe(method: Int) raises -> String:
     var srv = HttpServer.bind(addrs^)
     var bound = srv.local_addrs()
     if len(bound) != 2:
-        return "inconclusive: expected 2 bound addresses, got " + String(len(bound))
+        return "inconclusive: expected 2 bound addresses, got " + String(
+            len(bound)
+        )
     var primary = UInt16(bound[0].port)
     var extra = UInt16(bound[1].port)
     var pid = fork()
@@ -99,7 +106,9 @@ def _probe(method: Int) raises -> String:
             elif method == 1:
                 srv.serve_view(WithViewCancel(FnHandler(_hello)))
             else:
-                srv.serve_static(precompute_response(200, "text/plain", "hello"))
+                srv.serve_static(
+                    precompute_response(200, "text/plain", "hello")
+                )
         except:
             exit(7)
         exit(3)
@@ -116,7 +125,11 @@ def _probe(method: Int) raises -> String:
     usleep(50000)
     _ = _exit_code(pid)
     if not p.startswith("HTTP/1.1 200"):
-        return "inconclusive: primary address not served (" + String(p.byte_length()) + " bytes)"
+        return (
+            "inconclusive: primary address not served ("
+            + String(p.byte_length())
+            + " bytes)"
+        )
     if x.startswith("HTTP/1.1 200"):
         return "served-extra"
     return "ignored"
@@ -139,7 +152,9 @@ def main() raises:
             bad.append(names[m])
             all_ok = False
     if all_ok:
-        print("OK: every serve variant raises on (or serves) the extra listener")
+        print(
+            "OK: every serve variant raises on (or serves) the extra listener"
+        )
         return
     var joined = String("")
     for i in range(len(bad)):

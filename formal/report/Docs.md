@@ -235,11 +235,13 @@ Status: resolved. New `log_error_response` / `log_handler_error` (`flare/errors.
 
 ### DOC-05: `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners
 
+Status: resolved. Rejected rather than honoured: `serve_cancellable`, `serve_view` and `serve_static` call the new `HttpServer._reject_extra_listeners` (`flare/http/server.mojo`) and raise when `bind` was given several addresses, as `docs/features.md` says. Honouring them would need a multi-listener variant of each reactor loop. Regression tests `tests/http/test_multi_listener.mojo::test_serve_cancellable_rejects_extra_listeners`, `test_serve_view_rejects_extra_listeners`, `test_serve_static_rejects_extra_listeners`; the repro prints `OK:`. Lean: `entry` is the shipped model, `entryOld` keeps the counterexample.
+
 - **Severity:** Low. Connections to the second and later addresses sit in the kernel backlog and are never answered. There is no error, which is exactly what the doc says was fixed.
 - **Doc:** `docs/features.md:80-82` says "`serve_cancellable`, `serve_view` and `serve_static` now raise when a TLS context or extra listeners are bound, instead of silently ignoring both."
 - **What goes wrong:** `bind(List[SocketAddr])` (`flare/http/server.mojo:262-346`) stores every address after the first in `_extra_listener_fds`. `_reject_tls_with_extra_listeners` (1009-1026) raises only when `_tls_ctx` is set. The three methods (1433-1444, 1475-1486, 1523-1528) call it and then run a loop over `self._listener` alone. The TLS half of the claim holds.
 - **Counterexample:** `Bugs.DOC_05.bug`: `entry twoAddrs = .runs [0]`. `counterexample` shows `entry` violates both `Spec` and `NoSilentIgnore`.
-- **Fix:** `entryFixed` also raises when `_extra_listener_fds` is non-empty. `fixed` proves `Spec` and `NoSilentIgnore`.
+- **Fix:** `entry` (the shipped model; `entryOld` is the pre-fix behaviour the counterexample is about) also raises when `_extra_listener_fds` is non-empty. `fixed` proves `Spec` and `NoSilentIgnore`.
 - **Repro:** `formal/repro/DOC-05_serve_variants_ignore_extra_listeners.mojo`. Control: the primary address answers 200.
 - **Observed:** `BUG REPRODUCED: serve_cancellable, serve_view, serve_static on a two-address server raised nothing, answered 200 on the primary address and left the extra address unanswered (silently ignored)`
 - **Flip** (`flare/http/server.mojo`: after each of the three `_reject_tls_with_extra_listeners()` calls, raise if `len(self._extra_listener_fds) > 0`): each method raises, then `OK: every serve variant raises on (or serves) the extra listener`, exit 0.
