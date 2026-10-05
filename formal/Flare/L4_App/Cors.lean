@@ -66,15 +66,31 @@ structure Resp where
   status : Nat
   headers : Headers
 
-/-- mirrors flare/http/cors.mojo:89-98 @59bda50 -/
+/-- `_origin_allowed`'s scan as shipped (fixed, APP-21): under credentials a
+`*` entry authorises nothing but the scan continues (`continue`), so the
+decision does not depend on list order.
+mirrors flare/http/cors.mojo:89-104 (fixed, APP-21) -/
 def originAllowedLoop (origin : String) (creds : Bool) : List String → Bool
   | [] => false
-  | e :: es => if e = "*" then !creds else if e = origin then true
+  | e :: es => if e = "*" then (if creds then originAllowedLoop origin creds es else true)
+               else if e = origin then true
                else originAllowedLoop origin creds es
 
-/-- mirrors flare/http/cors.mojo:89-98 @59bda50 -/
+/-- mirrors flare/http/cors.mojo:89-104 (fixed, APP-21) -/
 def originAllowed (origin : String) (cfg : Config) : Bool :=
   if origin = "" then false else originAllowedLoop origin cfg.creds cfg.origins
+
+/-- The scan before the APP-21 fix: it returned `not allow_credentials` at the
+first `*`.
+mirrors flare/http/cors.mojo:89-98 @59bda50 -/
+def originAllowedLoopOld (origin : String) (creds : Bool) : List String → Bool
+  | [] => false
+  | e :: es => if e = "*" then !creds else if e = origin then true
+               else originAllowedLoopOld origin creds es
+
+/-- mirrors flare/http/cors.mojo:89-98 @59bda50 -/
+def originAllowedOld (origin : String) (cfg : Config) : Bool :=
+  if origin = "" then false else originAllowedLoopOld origin cfg.creds cfg.origins
 
 /-- mirrors flare/http/cors.mojo:101-107 @59bda50 -/
 def join (parts : List String) (sep : String) : String := sep.intercalate parts
@@ -178,13 +194,13 @@ theorem mem_setH_of_mem (n : HName) (v : String) (hs : Headers) (x : HName × St
 
 /-! ## Origin allowance -/
 
-theorem loop_sound (o : String) (creds : Bool) (es : List String) :
-    originAllowedLoop o creds es = true →
+theorem loopOld_sound (o : String) (creds : Bool) (es : List String) :
+    originAllowedLoopOld o creds es = true →
       ((o ∈ es ∧ o ≠ "*") ∨ (creds = false ∧ "*" ∈ es)) := by
   induction es with
-  | nil => simp [originAllowedLoop]
+  | nil => simp [originAllowedLoopOld]
   | cons e es ih =>
-    simp only [originAllowedLoop]
+    simp only [originAllowedLoopOld]
     by_cases he : e = "*"
     · subst he; cases creds <;> simp
     · by_cases heo : e = o
@@ -194,39 +210,80 @@ theorem loop_sound (o : String) (creds : Bool) (es : List String) :
         · exact Or.inl ⟨List.mem_cons_of_mem _ h.1, h.2⟩
         · exact Or.inr ⟨h.1, List.mem_cons_of_mem _ h.2⟩
 
-/-- Soundness (general): flare never allows an origin the spec rejects —
-in particular never a credentialed request through `*`. -/
-theorem originAllowed_sound (o : String) (cfg : Config) :
-    originAllowed o cfg = true → allowedSpec cfg o := by
-  unfold originAllowed allowedSpec
+/-- The pre-fix check is sound but incomplete (see `Flare.Bugs.APP_21`). -/
+theorem originAllowedOld_sound (o : String) (cfg : Config) :
+    originAllowedOld o cfg = true → allowedSpec cfg o := by
+  unfold originAllowedOld allowedSpec
   split
   · simp
-  · intro h; exact ⟨by assumption, loop_sound _ _ _ h⟩
+  · intro h; exact ⟨by assumption, loopOld_sound _ _ _ h⟩
 
-/-- Without credentials flare's check is exactly the spec (general), hence
-independent of list order. -/
-theorem originAllowed_eq_spec_noCreds (o : String) (cfg : Config) (hc : cfg.creds = false) :
-    originAllowed o cfg = true ↔ allowedSpec cfg o := by
-  refine ⟨originAllowed_sound o cfg, ?_⟩
-  unfold originAllowed allowedSpec
-  rintro ⟨hne, h⟩
-  simp only [hne, if_false]
-  obtain ⟨os, ms, ahs, ex, ma, cr⟩ := cfg
-  simp only at hc h ⊢
-  subst hc
-  induction os with
-  | nil => simp at h
+theorem loop_iff (o : String) (creds : Bool) (es : List String) :
+    originAllowedLoop o creds es = true ↔
+      ((o ∈ es ∧ o ≠ "*") ∨ (creds = false ∧ "*" ∈ es)) := by
+  induction es with
+  | nil => simp [originAllowedLoop]
   | cons e es ih =>
     simp only [originAllowedLoop]
     by_cases he : e = "*"
-    · simp [he]
+    · subst he
+      cases creds
+      · simp
+      · simp only [if_true, ih, List.mem_cons]
+        constructor
+        · rintro (⟨h1, h2⟩ | ⟨h1, _⟩)
+          · exact Or.inl ⟨Or.inr h1, h2⟩
+          · cases h1
+        · rintro (⟨h1 | h1, h2⟩ | ⟨h1, _⟩)
+          · exact absurd h1 h2
+          · exact Or.inl ⟨h1, h2⟩
+          · cases h1
     · by_cases heo : e = o
-      · simp [heo]
-      · simp only [he, heo, if_false]
-        apply ih
-        rcases h with ⟨h1, h2⟩ | ⟨_, h2⟩
-        · exact Or.inl ⟨by simpa [Ne.symm heo] using h1, h2⟩
-        · exact Or.inr ⟨rfl, by simpa [Ne.symm he] using h2⟩
+      · subst heo; simp [he]
+      · simp only [he, heo, if_false, ih, List.mem_cons]
+        constructor
+        · rintro (⟨h1, h2⟩ | ⟨h1, h2⟩)
+          · exact Or.inl ⟨Or.inr h1, h2⟩
+          · exact Or.inr ⟨h1, Or.inr h2⟩
+        · rintro (⟨h1 | h1, h2⟩ | ⟨h1, h3 | h3⟩)
+          · exact absurd h1.symm heo
+          · exact Or.inl ⟨h1, h2⟩
+          · exact absurd h3.symm he
+          · exact Or.inr ⟨h1, h3⟩
+
+/-- The shipped check equals the spec for every configuration (general),
+for credentialed and plain configs alike. -/
+theorem originAllowed_iff (o : String) (cfg : Config) :
+    originAllowed o cfg = true ↔ allowedSpec cfg o := by
+  unfold originAllowed allowedSpec
+  by_cases h : o = "" <;> simp [h, loop_iff]
+
+/-- Soundness (general): flare never allows an origin the spec rejects —
+in particular never a credentialed request through `*`. -/
+theorem originAllowed_sound (o : String) (cfg : Config) :
+    originAllowed o cfg = true → allowedSpec cfg o :=
+  (originAllowed_iff o cfg).1
+
+/-- Without credentials flare's check is exactly the spec (general); with the
+APP-21 fix this holds with credentials too (`originAllowed_iff`). -/
+theorem originAllowed_eq_spec_noCreds (o : String) (cfg : Config) (_hc : cfg.creds = false) :
+    originAllowed o cfg = true ↔ allowedSpec cfg o :=
+  originAllowed_iff o cfg
+
+/-- The spec is order independent (general). -/
+theorem allowedSpec_perm (cfg cfg' : Config) (o : String)
+    (hp : cfg.origins.Perm cfg'.origins) (hc : cfg.creds = cfg'.creds) :
+    allowedSpec cfg o ↔ allowedSpec cfg' o := by
+  unfold allowedSpec; rw [hp.mem_iff, hp.mem_iff, hc]
+
+/-- The shipped check does not depend on the order of the allowlist
+(general). -/
+theorem originAllowed_perm (o : String) (cfg cfg' : Config)
+    (hp : cfg.origins.Perm cfg'.origins) (hc : cfg.creds = cfg'.creds) :
+    originAllowed o cfg = originAllowed o cfg' := by
+  have := (originAllowed_iff o cfg).trans
+    ((allowedSpec_perm cfg cfg' o hp hc).trans (originAllowed_iff o cfg').symm)
+  cases h1 : originAllowed o cfg <;> cases h2 : originAllowed o cfg' <;> simp_all
 
 /-! ## Emitted headers -/
 
@@ -338,61 +395,6 @@ theorem preflight_ignores_inner (cfg : Config) (i1 i2 : Resp) (req : Req)
     · left; simp [ho, hp]
 
 /-! ## Fixed models -/
-
-/-- Fixed loop: under credentials `*` is skipped instead of ending the scan. -/
-def originAllowedLoopFixed (origin : String) (creds : Bool) : List String → Bool
-  | [] => false
-  | e :: es => if e = "*" then (if creds then originAllowedLoopFixed origin creds es else true)
-               else if e = origin then true
-               else originAllowedLoopFixed origin creds es
-
-def originAllowedFixed (origin : String) (cfg : Config) : Bool :=
-  if origin = "" then false else originAllowedLoopFixed origin cfg.creds cfg.origins
-
-theorem loopFixed_iff (o : String) (creds : Bool) (es : List String) :
-    originAllowedLoopFixed o creds es = true ↔
-      ((o ∈ es ∧ o ≠ "*") ∨ (creds = false ∧ "*" ∈ es)) := by
-  induction es with
-  | nil => simp [originAllowedLoopFixed]
-  | cons e es ih =>
-    simp only [originAllowedLoopFixed]
-    by_cases he : e = "*"
-    · subst he
-      cases creds
-      · simp
-      · simp only [if_true, ih, List.mem_cons]
-        constructor
-        · rintro (⟨h1, h2⟩ | ⟨h1, _⟩)
-          · exact Or.inl ⟨Or.inr h1, h2⟩
-          · cases h1
-        · rintro (⟨h1 | h1, h2⟩ | ⟨h1, _⟩)
-          · exact absurd h1 h2
-          · exact Or.inl ⟨h1, h2⟩
-          · cases h1
-    · by_cases heo : e = o
-      · subst heo; simp [he]
-      · simp only [he, heo, if_false, ih, List.mem_cons]
-        constructor
-        · rintro (⟨h1, h2⟩ | ⟨h1, h2⟩)
-          · exact Or.inl ⟨Or.inr h1, h2⟩
-          · exact Or.inr ⟨h1, Or.inr h2⟩
-        · rintro (⟨h1 | h1, h2⟩ | ⟨h1, h3 | h3⟩)
-          · exact absurd h1.symm heo
-          · exact Or.inl ⟨h1, h2⟩
-          · exact absurd h3.symm he
-          · exact Or.inr ⟨h1, h3⟩
-
-/-- The fixed check equals the spec for every configuration (general). -/
-theorem originAllowedFixed_iff (o : String) (cfg : Config) :
-    originAllowedFixed o cfg = true ↔ allowedSpec cfg o := by
-  unfold originAllowedFixed allowedSpec
-  by_cases h : o = "" <;> simp [h, loopFixed_iff]
-
-/-- The spec is order independent (general). -/
-theorem allowedSpec_perm (cfg cfg' : Config) (o : String)
-    (hp : cfg.origins.Perm cfg'.origins) (hc : cfg.creds = cfg'.creds) :
-    allowedSpec cfg o ↔ allowedSpec cfg' o := by
-  unfold allowedSpec; rw [hp.mem_iff, hp.mem_iff, hc]
 
 /-- Fixed serve: also append `Vary: Origin` on the responses that bypass
 the CORS headers (no `Origin`, rejected origin, rejected preflight). -/

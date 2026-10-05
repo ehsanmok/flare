@@ -63,6 +63,9 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Negotiate.decide'_refused_identity
 #print axioms Flare.L4.Negotiate.specPick_perm
 #print axioms Flare.L4.Cors.originAllowed_sound
+#print axioms Flare.L4.Cors.originAllowed_iff
+#print axioms Flare.L4.Cors.originAllowed_perm
+#print axioms Flare.L4.Cors.originAllowedOld_sound
 #print axioms Flare.L4.Cors.acao_not_star_with_creds
 #print axioms Flare.L4.Cors.attach_has_vary
 #print axioms Flare.L4.Cors.serveFixed_vary

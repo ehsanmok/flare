@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-21 fixed on fix/formal-findings
 """APP-21: CORS allowlist decision depends on list order under credentials.
 
 Lean: Flare.Bugs.APP_21.order_dependent, Flare.Bugs.APP_21.violates_spec
@@ -9,7 +10,7 @@ Expected: with allow_credentials=True and allowed_origins = ["*",
 "https://app.example.com"], a request from https://app.example.com is
 allowed (explicitly listed; "*" just cannot authorise credentialed
 requests), exactly as with the list in the other order.
-Actual: _origin_allowed returns `not allow_credentials` (False) as soon
+Before the fix: _origin_allowed returns `not allow_credentials` (False) as soon
 as it reaches "*", so the listed origin gets no CORS headers; with the
 list reversed it is allowed.
 

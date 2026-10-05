@@ -117,6 +117,48 @@ def test_credentials_disables_wildcard() raises:
     )
 
 
+def _acao_with_credentials(
+    origins: List[String], origin: String
+) raises -> String:
+    var cfg = CorsConfig()
+    cfg.allow_credentials = True
+    for o in origins:
+        cfg.allowed_origins.append(o)
+    var mw = Cors(_Echo(), cfg)
+    var req = Request(method=Method.GET, url="/api")
+    req.headers.set("Origin", origin)
+    return mw.serve(req).headers.get("access-control-allow-origin")
+
+
+def test_credentials_allowlist_is_order_independent() raises:
+    """APP-21: with credentials a ``*`` entry authorises nothing but must not
+    hide a listed origin that comes after it."""
+    var good = String("https://app.example.com")
+    assert_equal(_acao_with_credentials(["*", good], good), good)
+    assert_equal(_acao_with_credentials([good, "*"], good), good)
+    assert_equal(_acao_with_credentials(["a", "*", good], good), good)
+    # An unlisted origin is still rejected in both orders (``*`` cannot
+    # authorise a credentialed request).
+    assert_equal(_acao_with_credentials(["*", good], "https://evil"), "")
+    assert_equal(_acao_with_credentials([good, "*"], "https://evil"), "")
+
+
+def test_wildcard_without_credentials_still_first_match() raises:
+    """APP-21: without credentials ``*`` still allows any origin, whatever
+    the order."""
+    var cfg = CorsConfig()
+    cfg.allowed_origins.append("*")
+    cfg.allowed_origins.append("https://app.example.com")
+    var mw = Cors(_Echo(), cfg)
+    var req = Request(method=Method.GET, url="/api")
+    req.headers.set("Origin", "https://other.example")
+    var resp = mw.serve(req)
+    assert_equal(
+        resp.headers.get("access-control-allow-origin"),
+        "https://other.example",
+    )
+
+
 def test_exposed_headers_attached() raises:
     var cfg = CorsConfig.permissive()
     cfg.exposed_headers.append("X-Total-Count")
@@ -148,6 +190,8 @@ def main() raises:
     test_preflight_disallowed_returns_403()
     test_preflight_allowed_returns_204_with_headers()
     test_credentials_disables_wildcard()
+    test_credentials_allowlist_is_order_independent()
+    test_wildcard_without_credentials_still_first_match()
     test_exposed_headers_attached()
     test_no_origin_passes_through()
-    print("test_cors: 9 passed")
+    print("test_cors: 11 passed")

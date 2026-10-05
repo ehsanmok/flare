@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62138 lines) |
-| Theorems | 3260 |
-| Headline theorems in the axiom audit | 1065 |
+| Lean files | 298 (62150 lines) |
+| Theorems | 3262 |
+| Headline theorems in the axiom audit | 1068 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 77 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 78 of 138 |
 
 Six findings are rated high:
 
@@ -1924,11 +1924,11 @@ depends on `Origin`, every response carries `Vary: Origin`.
 | Lean name | Statement | Status |
 |---|---|---|
 | `Flare.L4.Cors.originAllowed_sound` | flare never admits an origin the spec rejects (fail-closed) | proved |
-| `Flare.L4.Cors.originAllowed_eq_spec_noCreds` | without credentials, flare's check equals the spec | proved |
+| `Flare.L4.Cors.originAllowed_iff`, `originAllowed_eq_spec_noCreds`, `originAllowed_perm` | the shipped check (fixed, APP-21) equals the spec for every configuration, credentials or not, and does not depend on list order | proved |
 | `Flare.L4.Cors.acao_not_star_with_creds`, `acao_origin_or_star` | with credentials, ACAO is never `*` and equals the request origin | proved |
 | `Flare.L4.Cors.attach_has_vary` | every response the middleware stamps carries `Vary: Origin` | proved |
 | `Flare.L4.Cors.preflight_ignores_inner` | an allowed preflight is a 204 that does not call the inner handler | proved |
-| `Flare.L4.Cors.originAllowedFixed_iff`, `serveFixed_vary` | the fixed check equals the spec; the fixed `serve` puts `Vary: Origin` on every response | proved |
+| `Flare.L4.Cors.serveFixed_vary` | the fixed `serve` puts `Vary: Origin` on every response | proved |
 
 #### 8. Cookies (`Flare.L4.Cookie`)
 
@@ -2917,7 +2917,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
 | `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compressFixed_vary` | APP-26, APP-27 |
 | `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decideOld_eq_spec_of_noStar`, `decide'_eq_spec` | APP-20 |
-| `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-197 | `originAllowed_sound`, `acao_not_star_with_creds`, `serveFixed_vary` | APP-21, APP-22 |
+| `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-204 | `originAllowed_sound`, `acao_not_star_with_creds`, `serveFixed_vary` | APP-21, APP-22 |
 | `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
 | `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-270 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
 | `Flare.L4.Url.parse`, `parseWith`, `parsePort` | http/url.mojo:73-299 | `parsePort_iff`, `parse_port`, `parseFixed_spec` | APP-23, APP-25 |
@@ -3101,7 +3101,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-06 | Low | resolved | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
 | APP-10 | Low | resolved | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
 | APP-20 | Low | resolved | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
-| APP-21 | Low | open | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
+| APP-21 | Low | resolved | the CORS allowlist is order dependent under credentials | `Flare/Bugs/APP_21.lean` | `repro/APP-21_cors_credentials_order.mojo` (any) |
 | APP-22 | Low | open | `Vary: Origin` is missing on responses the CORS middleware does not stamp | `Flare/Bugs/APP_22.lean` | `repro/APP-22_cors_missing_vary.mojo` (any) |
 | APP-23 | Medium | resolved | `Url.parse` does not end the authority at `?` (host confusion) | `Flare/Bugs/APP_23.lean` | `repro/APP-23_url_authority_query_host_confusion.mojo` (any) |
 | APP-24 | Medium | resolved | `urldecode` returns a `String` holding ill-formed UTF-8 | `Flare/Bugs/APP_24.lean` | `repro/APP-24_urldecode_invalid_utf8.mojo` (any) |
@@ -4915,7 +4915,8 @@ Status: resolved. `negotiate_encoding` records the largest weight per coding (br
 first `*`. With credentials on, `["*", origin]` therefore rejects a listed
 origin.
 
-**Lean.** `Flare.Bugs.APP_21.violates_spec`. The fix is proved sufficient by
+**Lean.** `Flare.Bugs.APP_21.violates_spec` (about the pre-fix
+`originAllowedOld`). The shipped `originAllowed` is proved to meet the spec by
 `fixed_meets_spec`, which is general.
 
 **Fix.** On `*` with credentials, `continue` instead of returning.
@@ -4924,6 +4925,8 @@ origin.
 
 - Observed: `BUG REPRODUCED: with credentials, ['*', origin] gives ACAO '' but [origin, '*'] gives 'https://app.example.com'`
 - Flip: `OK: listed origin allowed in both orders: https://app.example.com https://app.example.com`
+
+Status: resolved. `_origin_allowed` now `continue`s past a `*` entry when credentials are on (and still returns True for `*` without credentials), so the allowlist is order independent. Tests: `tests/http/test_cors.mojo::test_credentials_allowlist_is_order_independent`, `::test_wildcard_without_credentials_still_first_match`. The model `originAllowed` is the shipped check; `originAllowedOld` the pre-fix one.
 
 #### APP-22: `Vary: Origin` is missing on responses the CORS middleware does not stamp
 

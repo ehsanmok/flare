@@ -775,6 +775,12 @@ from test_cors import (
     test_credentials_disables_wildcard as test_cors__test_credentials_disables_wildcard,
 )
 from test_cors import (
+    test_credentials_allowlist_is_order_independent as test_cors__test_credentials_allowlist_is_order_independent,
+)
+from test_cors import (
+    test_wildcard_without_credentials_still_first_match as test_cors__test_wildcard_without_credentials_still_first_match,
+)
+from test_cors import (
     test_exposed_headers_attached as test_cors__test_exposed_headers_attached,
 )
 from test_cors import (
@@ -4770,6 +4776,8 @@ def main() raises:
     suite.test[test_cors__test_preflight_disallowed_returns_403]()
     suite.test[test_cors__test_preflight_allowed_returns_204_with_headers]()
     suite.test[test_cors__test_credentials_disables_wildcard]()
+    suite.test[test_cors__test_credentials_allowlist_is_order_independent]()
+    suite.test[test_cors__test_wildcard_without_credentials_still_first_match]()
     suite.test[test_cors__test_exposed_headers_attached]()
     suite.test[test_cors__test_no_origin_passes_through]()
     # tests/http/test_cross_wire_streaming.mojo
