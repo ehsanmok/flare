@@ -83,6 +83,20 @@ def Frame.kind : Frame → Kind
   | .datagram .. => .datagram
   | .unknown .. => .unknown
 
+/-- The three frame-level fixes, individually (QUIC-01: unknown type, QUIC-02:
+MAX_STREAMS / STREAMS_BLOCKED bound, QUIC-03: ACK ranges). `Fixes.none` is flare
+before any of them, `Fixes.all` has all three, `Fixes.shipped` is what the code
+has now. -/
+structure Fixes where
+  unk : Bool
+  ms : Bool
+  ack : Bool
+
+def Fixes.none : Fixes := ⟨false, false, false⟩
+def Fixes.all : Fixes := ⟨true, true, true⟩
+/-- The fixes present in `flare/quic/frame.mojo` now. -/
+def Fixes.shipped : Fixes := ⟨true, false, false⟩
+
 /-- The type tests of the dispatch, in source order.
 mirrors flare/quic/frame.mojo:753-957 @59bda50 -/
 def kindOf (t : Nat) : Kind :=
@@ -134,7 +148,7 @@ def ackOk (largest first : UInt64) (ranges : List (UInt64 × UInt64)) : Bool :=
 /-- Remaining-bytes count `len(buf) - pos`. -/
 def remaining (b : Bytes) : Parser Nat := fun pos => .ok (b.length - pos, pos)
 
-/-! ## One parser per frame type (`fixed` adds the minimal fixes) -/
+/-! ## One parser per frame type (`fx` selects the fixes) -/
 
 /-- ECN counts of ACK_ECN (read; the model drops their values).
 mirrors flare/quic/frame.mojo:778-782 @59bda50 -/
@@ -149,26 +163,26 @@ def ackEcn (b : Bytes) (t : Nat) : Parser Unit :=
 /-- flare builds the AckFrame without a range check; fix (QUIC-03):
 RFC 9000 §19.3.1, reject any computed packet number < 0.
 mirrors flare/quic/frame.mojo:783-792 @59bda50 -/
-def ackFinish (fixed : Bool) (t : Nat) (largest delay first : UInt64)
+def ackFinish (fx : Fixes) (t : Nat) (largest delay first : UInt64)
     (ranges : List (UInt64 × UInt64)) : Parser Frame :=
-  if fixed ∧ ackOk largest first ranges = false then
+  if fx.ack = true ∧ ackOk largest first ranges = false then
     fail "FRAME_ENCODING_ERROR: negative ack range"
   else pure (.ack largest delay first ranges (t = 0x03))
 
 /-- mirrors flare/quic/frame.mojo:771-792 @59bda50 -/
-def ackTail (b : Bytes) (fixed : Bool) (t : Nat) (largest delay rc : UInt64) : Parser Frame := do
+def ackTail (b : Bytes) (fx : Fixes) (t : Nat) (largest delay rc : UInt64) : Parser Frame := do
   let first ← varint b
   let ranges ← ackRanges b rc.toNat
   let _ ← ackEcn b t
-  ackFinish fixed t largest delay first ranges
+  ackFinish fx t largest delay first ranges
 
 /-- mirrors flare/quic/frame.mojo:765-792 @59bda50 -/
-def ackBody (b : Bytes) (fixed : Bool) (t : Nat) : Parser Frame := do
+def ackBody (b : Bytes) (fx : Fixes) (t : Nat) : Parser Frame := do
   let largest ← varint b
   let delay ← varint b
   let rc ← varint b
   if rc > 0x4000 then fail "quic ack: range count exceeds RFC 9000 §19.3 cap"
-  else ackTail b fixed t largest delay rc
+  else ackTail b fx t largest delay rc
 
 /-- mirrors flare/quic/frame.mojo:793-802 @59bda50 -/
 def resetBody (b : Bytes) : Parser Frame := do
@@ -231,9 +245,9 @@ def maxStreamDataBody (b : Bytes) : Parser Frame := do
 
 /-- flare has no bound; fix (QUIC-02): RFC 9000 §4.6 / §19.11.
 mirrors flare/quic/frame.mojo:853-861 @59bda50 -/
-def maxStreamsBody (b : Bytes) (fixed : Bool) (t : Nat) : Parser Frame := do
+def maxStreamsBody (b : Bytes) (fx : Fixes) (t : Nat) : Parser Frame := do
   let v ← varint b
-  if fixed ∧ v.toNat > 2 ^ 60 then fail "FRAME_ENCODING_ERROR: MAX_STREAMS > 2^60"
+  if fx.ms = true ∧ v.toNat > 2 ^ 60 then fail "FRAME_ENCODING_ERROR: MAX_STREAMS > 2^60"
   else pure (.maxStreams (t = 0x13) v)
 
 /-- mirrors flare/quic/frame.mojo:862-865 @59bda50 -/
@@ -249,9 +263,9 @@ def streamDataBlockedBody (b : Bytes) : Parser Frame := do
 
 /-- flare has no bound; fix (QUIC-02): RFC 9000 §19.14.
 mirrors flare/quic/frame.mojo:873-884 @59bda50 -/
-def streamsBlockedBody (b : Bytes) (fixed : Bool) (t : Nat) : Parser Frame := do
+def streamsBlockedBody (b : Bytes) (fx : Fixes) (t : Nat) : Parser Frame := do
   let v ← varint b
-  if fixed ∧ v.toNat > 2 ^ 60 then fail "FRAME_ENCODING_ERROR: STREAMS_BLOCKED > 2^60"
+  if fx.ms = true ∧ v.toNat > 2 ^ 60 then fail "FRAME_ENCODING_ERROR: STREAMS_BLOCKED > 2^60"
   else pure (.streamsBlocked (t = 0x17) v)
 
 /-- mirrors flare/quic/frame.mojo:894-899 @59bda50 -/
@@ -309,18 +323,19 @@ def datagramBody (b : Bytes) (t : Nat) : Parser Frame := do
   let d ← bytes b n
   pure (.datagram d (t = 0x31))
 
-/-- flare: `handler.on_unknown(raw_type); return pos` -- only the type
-varint is consumed. fix (QUIC-01): FRAME_ENCODING_ERROR (§12.4).
-mirrors flare/quic/frame.mojo:957-958 @59bda50 -/
-def unknownBody (fixed : Bool) (raw : UInt64) : Parser Frame :=
-  if fixed then fail "FRAME_ENCODING_ERROR: unknown frame type"
+/-- Before the fix flare called `handler.on_unknown(raw_type); return pos`, so
+only the type varint was consumed (`fx.unk = false`). Now (QUIC-01) it raises
+FRAME_ENCODING_ERROR (RFC 9000 §12.4).
+mirrors flare/quic/frame.mojo:950 (fixed, QUIC-01) -/
+def unknownBody (fx : Fixes) (raw : UInt64) : Parser Frame :=
+  if fx.unk = true then fail "FRAME_ENCODING_ERROR: unknown frame type"
   else pure (.unknown raw)
 
 /-- Dispatch on the branch selected by `kindOf`. -/
-def body (b : Bytes) (fixed : Bool) (raw : UInt64) : Kind → Parser Frame
+def body (b : Bytes) (fx : Fixes) (raw : UInt64) : Kind → Parser Frame
   | .padding => pure .padding
   | .ping => pure .ping
-  | .ack => ackBody b fixed raw.toNat
+  | .ack => ackBody b fx raw.toNat
   | .resetStream => resetBody b
   | .stopSending => stopBody b
   | .crypto => cryptoBody b
@@ -328,10 +343,10 @@ def body (b : Bytes) (fixed : Bool) (raw : UInt64) : Kind → Parser Frame
   | .stream => streamBody b raw.toNat
   | .maxData => maxDataBody b
   | .maxStreamData => maxStreamDataBody b
-  | .maxStreams => maxStreamsBody b fixed raw.toNat
+  | .maxStreams => maxStreamsBody b fx raw.toNat
   | .dataBlocked => dataBlockedBody b
   | .streamDataBlocked => streamDataBlockedBody b
-  | .streamsBlocked => streamsBlockedBody b fixed raw.toNat
+  | .streamsBlocked => streamsBlockedBody b fx raw.toNat
   | .newConnectionId => newCidBody b
   | .retireConnectionId => retireBody b
   | .pathChallenge => pathChallengeBody b
@@ -339,25 +354,27 @@ def body (b : Bytes) (fixed : Bool) (raw : UInt64) : Kind → Parser Frame
   | .connectionClose => closeBody b raw.toNat
   | .handshakeDone => pure .handshakeDone
   | .datagram => datagramBody b raw.toNat
-  | .unknown => unknownBody fixed raw
+  | .unknown => unknownBody fx raw
 
 /-- mirrors flare/quic/frame.mojo:752-958 @59bda50 (dispatch on the decoded
-type; `fixed` adds the minimal fixes, `false` is flare as written). -/
-def frameBody (b : Bytes) (fixed : Bool) (raw : UInt64) : Parser Frame :=
-  body b fixed raw (kindOf raw.toNat)
+type; `fx` selects which fixes are on). -/
+def frameBody (b : Bytes) (fx : Fixes) (raw : UInt64) : Parser Frame :=
+  body b fx raw (kindOf raw.toNat)
 
 /-- mirrors flare/quic/frame.mojo:746-751 @59bda50 -/
-def parseFrameAux (b : Bytes) (fixed : Bool) : Parser Frame := do
+def parseFrameAux (b : Bytes) (fx : Fixes) : Parser Frame := do
   let raw ← varint b
-  frameBody b fixed raw
+  frameBody b fx raw
 
-/-- flare's parser. -/
-def parseFrame (b : Bytes) : Except Err (Frame × Nat) :=
-  if b.length = 0 then .error (.raise "quic frame: empty buffer") else parseFrameAux b false 0
+/-- The parser with the fixes `fx`. -/
+def parseFrameWith (fx : Fixes) (b : Bytes) : Except Err (Frame × Nat) :=
+  if b.length = 0 then .error (.raise "quic frame: empty buffer") else parseFrameAux b fx 0
 
-/-- The minimal fix (QUIC-01/02/03 checks). -/
-def parseFrameFixed (b : Bytes) : Except Err (Frame × Nat) :=
-  if b.length = 0 then .error (.raise "quic frame: empty buffer") else parseFrameAux b true 0
+/-- flare's parser, as shipped. -/
+def parseFrame (b : Bytes) : Except Err (Frame × Nat) := parseFrameWith Fixes.shipped b
+
+/-- All three fixes (QUIC-01/02/03 checks). -/
+def parseFrameFixed (b : Bytes) : Except Err (Frame × Nat) := parseFrameWith Fixes.all b
 
 /-- `dispatch_frames` drain loop: parse `payload[cursor:]` repeatedly.
 Fuel = payload length suffices because each frame consumes ≥ 1 byte. -/
@@ -397,7 +414,7 @@ variable (b : Bytes)
 theorem good_v1 {α : Type} (k : UInt64 → Parser α) (h : ∀ v, Good b (k v)) :
     Good b (varint b >>= k) := good_bind _ _ _ (good_varint b) h
 
-theorem good_ackBody (fixed : Bool) (t : Nat) : Good b (ackBody b fixed t) :=
+theorem good_ackBody (fx : Fixes) (t : Nat) : Good b (ackBody b fx t) :=
   good_v1 b _ fun _ => good_v1 b _ fun _ => good_v1 b _ fun rc =>
     good_ite _ _ _ _ (good_fail _ _) <|
       good_v1 b _ fun _ => good_bind _ _ _ (good_ackRanges b rc.toNat) fun _ =>
@@ -430,10 +447,10 @@ theorem good_datagramBody (t : Nat) : Good b (datagramBody b t) :=
     (good_ite _ _ _ _ (good_v1 b _ fun _ => good_pure _ _) (good_remaining b)) fun _ =>
     good_bind _ _ _ (good_bytes _ _) fun _ => good_pure _ _
 
-theorem good_body (fixed : Bool) (raw : UInt64) : ∀ k, Good b (body b fixed raw k)
+theorem good_body (fx : Fixes) (raw : UInt64) : ∀ k, Good b (body b fx raw k)
   | .padding => good_pure _ _
   | .ping => good_pure _ _
-  | .ack => good_ackBody b fixed _
+  | .ack => good_ackBody b fx _
   | .resetStream => good_v1 b _ fun _ => good_v1 b _ fun _ => good_v1 b _ fun _ => good_pure _ _
   | .stopSending => good_v1 b _ fun _ => good_v1 b _ fun _ => good_pure _ _
   | .crypto => good_v1 b _ fun _ => good_v1 b _ fun _ =>
@@ -458,34 +475,35 @@ theorem good_body (fixed : Bool) (raw : UInt64) : ∀ k, Good b (body b fixed ra
 
 end good
 
-theorem frameBody_good (b : Bytes) (fixed : Bool) (raw : UInt64) :
-    Good b (frameBody b fixed raw) := good_body b fixed raw (kindOf raw.toNat)
+theorem frameBody_good (b : Bytes) (fx : Fixes) (raw : UInt64) :
+    Good b (frameBody b fx raw) := good_body b fx raw (kindOf raw.toNat)
 
-theorem parseFrameAux_good (b : Bytes) (fixed : Bool) : Good b (parseFrameAux b fixed) :=
-  good_bind _ _ _ (good_varint b) (frameBody_good b fixed)
+theorem parseFrameAux_good (b : Bytes) (fx : Fixes) : Good b (parseFrameAux b fx) :=
+  good_bind _ _ _ (good_varint b) (frameBody_good b fx)
+
+theorem parseFrameWith_good (fx : Fixes) (b : Bytes) :
+    parseFrameWith fx b ≠ .error .oob ∧
+      ∀ f n, parseFrameWith fx b = .ok (f, n) → n ≤ b.length := by
+  unfold parseFrameWith
+  split
+  · exact ⟨by simp, by intro f n h; cases h⟩
+  · have := parseFrameAux_good b fx 0 (Nat.zero_le _)
+    exact ⟨this.1, fun f n h => (this.2 f n h).2⟩
 
 /-- **Bounds safety.** `parse_frame_into` never reads outside its buffer,
 and the consumed count is at most the buffer length. -/
 theorem parseFrame_good (b : Bytes) :
-    parseFrame b ≠ .error .oob ∧ ∀ f n, parseFrame b = .ok (f, n) → n ≤ b.length := by
-  unfold parseFrame
-  split
-  · exact ⟨by simp, by intro f n h; cases h⟩
-  · have := parseFrameAux_good b false 0 (Nat.zero_le _)
-    exact ⟨this.1, fun f n h => (this.2 f n h).2⟩
+    parseFrame b ≠ .error .oob ∧ ∀ f n, parseFrame b = .ok (f, n) → n ≤ b.length :=
+  parseFrameWith_good Fixes.shipped b
 
 theorem parseFrameFixed_good (b : Bytes) :
-    parseFrameFixed b ≠ .error .oob ∧ ∀ f n, parseFrameFixed b = .ok (f, n) → n ≤ b.length := by
-  unfold parseFrameFixed
-  split
-  · exact ⟨by simp, by intro f n h; cases h⟩
-  · have := parseFrameAux_good b true 0 (Nat.zero_le _)
-    exact ⟨this.1, fun f n h => (this.2 f n h).2⟩
+    parseFrameFixed b ≠ .error .oob ∧ ∀ f n, parseFrameFixed b = .ok (f, n) → n ≤ b.length :=
+  parseFrameWith_good Fixes.all b
 
 /-! ## Progress -/
 
-theorem parseFrameAux_progress (b : Bytes) (fixed : Bool) (f : Frame) (n : Nat)
-    (h : parseFrameAux b fixed 0 = .ok (f, n)) : 0 < n := by
+theorem parseFrameAux_progress (b : Bytes) (fx : Fixes) (f : Frame) (n : Nat)
+    (h : parseFrameAux b fx 0 = .ok (f, n)) : 0 < n := by
   simp only [parseFrameAux, bind, StateT.bind] at h
   cases hv : varint b 0 with
   | error e => rw [hv] at h; cases h
@@ -494,17 +512,17 @@ theorem parseFrameAux_progress (b : Bytes) (fixed : Bool) (f : Frame) (n : Nat)
     rw [hv] at h
     have h1 := varint_progress b 0 p1 raw hv
     have hp1 : p1 ≤ b.length := ((good_varint b 0 (Nat.zero_le _)).2 raw p1 hv).2
-    have := ((frameBody_good b fixed raw) p1 hp1).2 f n h
+    have := ((frameBody_good b fx raw) p1 hp1).2 f n h
     omega
 
 /-- **Progress.** A successful parse consumes at least one byte, so the
 `dispatch_frames` loop (`cursor += consumed`) strictly advances. -/
 theorem parseFrame_progress (b : Bytes) (f : Frame) (n : Nat)
     (h : parseFrame b = .ok (f, n)) : 0 < n := by
-  unfold parseFrame at h
+  unfold parseFrame parseFrameWith at h
   split at h
   · cases h
-  · exact parseFrameAux_progress b false f n h
+  · exact parseFrameAux_progress b _ f n h
 
 /-! ## Postconditions on accepted frames -/
 
@@ -558,8 +576,8 @@ theorem sat_ackRanges_len (b : Bytes) (k : Nat) : Sat (fun l => l.length = k) (a
       sat_bind_dep ih fun l hl => sat_pure (by simp [hl])
 
 /-- Every branch returns a frame of its own kind. -/
-theorem body_kind (b : Bytes) (fixed : Bool) (raw : UInt64) :
-    ∀ k, Sat (fun f => f.kind = k) (body b fixed raw k)
+theorem body_kind (b : Bytes) (fx : Fixes) (raw : UInt64) :
+    ∀ k, Sat (fun f => f.kind = k) (body b fx raw k)
   | .padding => sat_pure rfl
   | .ping => sat_pure rfl
   | .ack => sat_bind fun _ => sat_bind fun _ => sat_bind fun _ => sat_ite (sat_fail _) <|
@@ -588,9 +606,9 @@ theorem body_kind (b : Bytes) (fixed : Bool) (raw : UInt64) :
 
 /-- A property that holds for every frame of kind `k` holds for whatever the
 `k` branch returns. -/
-theorem body_sat {P : Frame → Prop} (b : Bytes) (fixed : Bool) (raw : UInt64) (k : Kind)
-    (hk : ∀ f : Frame, f.kind = k → P f) : Sat P (body b fixed raw k) :=
-  (body_kind b fixed raw k).mono hk
+theorem body_sat {P : Frame → Prop} (b : Bytes) (fx : Fixes) (raw : UInt64) (k : Kind)
+    (hk : ∀ f : Frame, f.kind = k → P f) : Sat P (body b fx raw k) :=
+  (body_kind b fx raw k).mono hk
 
 /-- RFC 9000 frame-level constraints that are decidable from one frame. -/
 def RfcFrameOk : Frame → Prop

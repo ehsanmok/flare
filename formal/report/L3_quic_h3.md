@@ -23,7 +23,7 @@ Files: `Quic/Wire.lean`, `Quic/Frame.lean`, `Quic/FrameProps.lean`.
 - `kindOf` is the type-test chain of `parse_frame_into` (`frame.mojo:753-957`), in source order.
 - `body` dispatches on the resulting `Kind` to one small parser per frame type. Each parser mirrors its branch of `frame.mojo`.
 - `parsePayload` mirrors the `dispatch_frames` loop (`state.mojo:842-858`).
-- The `fixed` flag switches on the three minimal fixes described under QUIC-01, QUIC-02 and QUIC-03.
+- `Fixes` switches the three fixes of QUIC-01, QUIC-02 and QUIC-03 on individually: `Fixes.none` is flare as first audited, `Fixes.shipped` is what `flare/quic/frame.mojo` has now (QUIC-01 fixed), `Fixes.all` has all three.
 
 Proofs are per-branch lemmas combined with `cases` on `Kind`; there is no case split over the whole parser.
 
@@ -35,6 +35,7 @@ Proofs are per-branch lemmas combined with `cases` on `Kind`; there is no case s
 | `Wire.varint_progress`, `Wire.good_varint`, `Wire.good_bytes` | Cursor primitives stay in bounds and advance. | proved |
 | `Frame.ack_range_cap` | Any ACK flare accepts has at most 0x4000 additional ranges. | proved |
 | `Frame.newcid_checks` | Any NEW_CONNECTION_ID flare accepts has a CID of 1..20 bytes, a 16-byte reset token, and `retire_prior_to ≤ sequence`. | proved |
+| `Frame.parseFrame_not_unknown`, `Frame.parsePayload_not_unknown` | The shipped parser (QUIC-01 fixed) never returns an unknown frame, so an unknown frame type is a FRAME_ENCODING_ERROR and its body is never re-read as frames. | proved |
 | `Frame.parseFrameFixed_ok` | Every frame the fixed parser accepts satisfies `RfcFrameOk`: not an unknown type, MAX_STREAMS and STREAMS_BLOCKED ≤ 2^60, and ACK ranges non-negative. | proved |
 | `Frame.parsePayloadFixed_ok` | Every frame in a payload accepted by the fixed parser satisfies `RfcFrameOk`. | proved |
 
@@ -310,6 +311,8 @@ There are 33 repros. The first 25 were re-run from the repository root at the en
 The flip checks for QUIC-01..24, QPACK-05, QPACK-06 and H3-01..07 were run (QUIC-10..13 and H3-06 in the first follow-up pass, QUIC-14..19 in the second, H3-07 in the third, QUIC-20..24, QPACK-05 and QPACK-06 in the final pass). Each applied the stated minimal fix to the single flare/ file and re-ran the repro, which printed `OK:` and exited 0; the file was then restored with `git checkout --` and showed a clean `git status`. The QPACK-01..04 flips were run by the QPACK agent and were not repeated here.
 
 ### QUIC-01: an unknown frame's body is parsed as further frames
+
+Status: resolved. Fixed: `parse_frame_into` raises `FRAME_ENCODING_ERROR` for a frame type outside the v1 table instead of calling `on_unknown` (the `FrameHandler.on_unknown` callback is removed). Tests: `tests/quic/test_state.mojo::test_unknown_frame_body_is_not_reparsed`, `tests/quic/test_frame.mojo::test_unknown_frame_type_rejected_for_every_codepoint`. Lean: `Bugs.QUIC_01.fixed_rejects` / `fixed_meets_spec` (shipped `parsePayload`), `Frame.parseFrame_not_unknown`; the counterexample is about the pre-fix `parsePayloadOld`.
 
 - **Severity:** Medium. A peer can make flare act on frames hidden inside a frame type it does not know. The peer could also send those frames directly, so no extra authority is gained. The problem is that frame boundaries are lost: any extension frame flare does not implement is executed as a sequence of unrelated frames.
 - **RFC:** RFC 9000 §12.4: "An endpoint MUST treat the receipt of a frame of unknown type as a connection error of type FRAME_ENCODING_ERROR."
@@ -739,7 +742,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `Quic.Wire.varint`, `bytes`, `byte` | quic/varint.mojo:104-138, quic/frame.mojo:701-714 | `good_varint`, `good_bytes`, `varint_progress` | proved |
 | `Quic.Frame.kindOf`, `body`, `parseFrame` | quic/frame.mojo:753-958 | `parseFrame_good`, `parseFrame_progress`, `ack_range_cap`, `newcid_checks` | proved |
 | `Quic.Frame.parsePayload` | quic/state.mojo:842-858 | `QUIC_01.smuggled_close` | counterexample |
-| `Quic.Frame.unknownBody` | quic/frame.mojo:957-958 | `QUIC_01.violates_spec`, `fixed_meets_spec` | counterexample |
+| `Quic.Frame.unknownBody` | quic/frame.mojo:950 (fixed, QUIC-01) | `QUIC_01.violates_spec` (pre-fix `parsePayloadOld`), `fixed_rejects`, `fixed_meets_spec`, `parseFrame_not_unknown` | proved (QUIC-01 resolved) |
 | `Quic.Frame.maxStreamsBody`, `streamsBlockedBody` | quic/frame.mojo:853-861, 873-884 | `QUIC_02.violates_spec`, `fixed_meets_spec` | counterexample |
 | `Quic.Frame.ackBody`, `ackFinish` | quic/frame.mojo:765-792 | `QUIC_03.violates_spec`, `fixed_meets_spec` | counterexample |
 | `Quic.Frame.parseFrameFixed` | quic/frame.mojo:753-958 with the three fixes | `parseFrameFixed_ok`, `parsePayloadFixed_ok` | proved |

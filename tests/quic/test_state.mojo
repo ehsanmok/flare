@@ -33,6 +33,7 @@ from flare.quic import (
     new_connection,
     new_stream,
 )
+from flare.quic.state import dispatch_frames
 from flare.quic.frame import (
     AckFrame,
     AckRange,
@@ -115,6 +116,31 @@ def test_handshake_done_advances_state() raises:
     assert_true(events.handshake_done)
     assert_true(conn.handshake_complete)
     assert_equal(conn.state, CONN_STATE_ESTABLISHED)
+
+
+def test_unknown_frame_body_is_not_reparsed() raises:
+    """QUIC-01: ``21 1c 00 00 00`` is an unknown frame type 0x21 followed
+    by bytes that would be a CONNECTION_CLOSE. The payload is a
+    FRAME_ENCODING_ERROR; the body must never run as frames."""
+    var conn = new_connection()
+    var events = empty_events()
+    var payload = List[UInt8]()
+    payload.append(0x21)
+    payload.append(0x1C)
+    payload.append(0x00)
+    payload.append(0x00)
+    payload.append(0x00)
+    var raised = False
+    try:
+        dispatch_frames(
+            conn, Span[UInt8, _](payload), UInt64(100), events, False
+        )
+    except e:
+        raised = True
+        assert_true("FRAME_ENCODING_ERROR" in String(e))
+    assert_true(raised, "unknown frame type was accepted")
+    assert_false(events.connection_closed)
+    assert_equal(conn.state, CONN_STATE_HANDSHAKE)
 
 
 def test_mark_handshake_complete_explicit_hook() raises:
@@ -401,6 +427,7 @@ def test_new_connection_id_is_bounded_and_not_overwritten() raises:
 def main() raises:
     test_initial_connection_state()
     test_handshake_done_advances_state()
+    test_unknown_frame_body_is_not_reparsed()
     test_mark_handshake_complete_explicit_hook()
     test_stream_frame_opens_stream()
     test_stream_frame_with_fin_finishes_stream()
@@ -420,4 +447,4 @@ def main() raises:
     test_path_response_validates_matching_challenge()
     test_path_response_mismatch_ignored()
     test_new_connection_id_is_bounded_and_not_overwritten()
-    print("test_quic_state: 21 passed")
+    print("test_quic_state: 22 passed")

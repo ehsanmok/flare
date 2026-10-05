@@ -163,10 +163,6 @@ struct _PrintingHandler(FrameHandler, Movable):
         print("  DATAGRAM       len=" + String(len(dg.data)))
         self.other += 1
 
-    def on_unknown(mut self, type_id: UInt64) raises:
-        print("  UNKNOWN        type_id=" + String(type_id))
-        self.other += 1
-
 
 def main() raises:
     print("=" * 60)

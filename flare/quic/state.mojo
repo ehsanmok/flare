@@ -753,12 +753,6 @@ struct _ConnFrameHandler(FrameHandler):
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         self._events()[].datagrams.append(dg.data.copy())
 
-    def on_unknown(mut self, type_id: UInt64) raises:
-        # Forward-compatibility: extension codepoints are ignored
-        # at the state-machine layer; the reactor wrapper may
-        # still log them if it cares.
-        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
-
 
 # ── Top-level frame ingestion ─────────────────────────────────────────────
 

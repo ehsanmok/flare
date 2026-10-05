@@ -348,9 +348,9 @@ trait FrameHandler(Deinitable, Movable):
     CONNECTION_CLOSE transport/application split is collapsed via
     the ``application`` flag.
 
-    The :meth:`on_unknown` callback fires for frame type
-    codepoints outside the v1 master table -- callers either log
-    + discard (forward-compatibility) or raise the connection.
+    A frame type outside the v1 master table never reaches a
+    callback: :func:`parse_frame_into` raises a
+    ``FRAME_ENCODING_ERROR`` for it (RFC 9000 §12.4).
     """
 
     def on_padding(mut self, count: Int) raises:
@@ -450,14 +450,6 @@ trait FrameHandler(Deinitable, Movable):
         datagram. ``dg.has_length`` records whether the wire type
         carried an explicit length (0x31) or ran to the end of the
         packet (0x30)."""
-        ...
-
-    def on_unknown(mut self, type_id: UInt64) raises:
-        """A frame whose wire type lies outside the v1 master
-        table fired. Default policy lives in the implementor: a
-        permissive handler may log and ignore; a strict handler
-        raises to terminate the connection.
-        """
         ...
 
 
@@ -733,9 +725,10 @@ def parse_frame_into[
     22 codepoints defined in v1 the encoding is single-byte, but
     the dispatcher reads it as a varint to stay forward-compatible
     with extension types that may register higher-numbered
-    codepoints. Codepoints outside the v1 master table fire
-    :meth:`FrameHandler.on_unknown` with the decoded type id; the
-    handler decides whether to ignore (forward-compat) or raise.
+    codepoints. Codepoints outside the v1 master table are a
+    connection error of type FRAME_ENCODING_ERROR (RFC 9000 §12.4):
+    the dispatcher raises, so an unknown frame's body is never
+    re-read as further frames.
 
     Returns the number of wire bytes consumed -- the caller
     advances its cursor and re-invokes the dispatcher on the
@@ -954,5 +947,4 @@ def parse_frame_into[
         var data = _read_bytes(buf, pos, dlen)
         handler.on_datagram(DatagramFrame(data=data^, has_length=has_len))
         return pos
-    handler.on_unknown(raw_type)
-    return pos
+    raise Error("FRAME_ENCODING_ERROR: unknown frame type " + String(raw_type))

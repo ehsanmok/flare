@@ -153,6 +153,9 @@ from test_frame import (
     test_unknown_frame_type_rejected as test_frame__test_unknown_frame_type_rejected,
 )
 from test_frame import (
+    test_unknown_frame_type_rejected_for_every_codepoint as test_frame__test_unknown_frame_type_rejected_for_every_codepoint,
+)
+from test_frame import (
     test_truncated_crypto_rejected as test_frame__test_truncated_crypto_rejected,
 )
 from test_frame import (
@@ -697,6 +700,9 @@ from test_state import (
     test_handshake_done_advances_state as test_state__test_handshake_done_advances_state,
 )
 from test_state import (
+    test_unknown_frame_body_is_not_reparsed as test_state__test_unknown_frame_body_is_not_reparsed,
+)
+from test_state import (
     test_mark_handshake_complete_explicit_hook as test_state__test_mark_handshake_complete_explicit_hook,
 )
 from test_state import (
@@ -886,6 +892,9 @@ def main() raises:
     suite.test[test_frame__test_connection_close_application_round_trip]()
     suite.test[test_frame__test_handshake_done_round_trip]()
     suite.test[test_frame__test_unknown_frame_type_rejected]()
+    suite.test[
+        test_frame__test_unknown_frame_type_rejected_for_every_codepoint
+    ]()
     suite.test[test_frame__test_truncated_crypto_rejected]()
     suite.test[test_frame__test_datagram_with_length_round_trip]()
     suite.test[test_frame__test_datagram_no_length_runs_to_end]()
@@ -1242,6 +1251,7 @@ def main() raises:
     # tests/quic/test_state.mojo
     suite.test[test_state__test_initial_connection_state]()
     suite.test[test_state__test_handshake_done_advances_state]()
+    suite.test[test_state__test_unknown_frame_body_is_not_reparsed]()
     suite.test[test_state__test_mark_handshake_complete_explicit_hook]()
     suite.test[test_state__test_stream_frame_opens_stream]()
     suite.test[test_state__test_stream_frame_with_fin_finishes_stream]()

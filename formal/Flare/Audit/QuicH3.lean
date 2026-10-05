@@ -5,6 +5,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.Quic.Frame.parseFrame_progress
 #print axioms Flare.L3.Quic.Frame.ack_range_cap
 #print axioms Flare.L3.Quic.Frame.newcid_checks
+#print axioms Flare.L3.Quic.Frame.parseFrame_not_unknown
+#print axioms Flare.L3.Quic.Frame.parsePayload_not_unknown
 #print axioms Flare.L3.Quic.Frame.parseFrameFixed_ok
 #print axioms Flare.L3.Quic.Frame.parsePayloadFixed_ok
 -- QUIC: packet numbers, connection state, ACK expansion, loss recovery

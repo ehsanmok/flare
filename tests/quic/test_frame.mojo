@@ -106,7 +106,6 @@ struct _Recorder(FrameHandler, Movable):
     var padding_count: Int
     var ping_count: Int
     var handshake_done_count: Int
-    var unknown_type: Int
 
     var ack: AckFrame
     var ack_seen: Bool
@@ -243,18 +242,12 @@ struct _Recorder(FrameHandler, Movable):
         self.datagram = dg.copy()
         self.datagram_seen = True
 
-    def on_unknown(mut self, type_id: UInt64) raises:
-        self.unknown_type = Int(type_id)
-        # Reject unknown codepoints — strict policy for tests.
-        raise Error("unknown frame type " + String(Int(type_id)))
-
 
 def _empty_recorder() -> _Recorder:
     return _Recorder(
         padding_count=0,
         ping_count=0,
         handshake_done_count=0,
-        unknown_type=-1,
         ack=AckFrame(
             largest_acknowledged=UInt64(0),
             ack_delay=UInt64(0),
@@ -732,12 +725,35 @@ def test_unknown_frame_type_rejected() raises:
     try:
         # 0x1F decodes as a 1-byte varint (high bits 00) but is
         # outside the v1 master table (last codepoint is 0x1E).
-        # The dispatcher fires ``on_unknown`` and the strict
-        # recorder raises to terminate the connection.
+        # The dispatcher itself raises FRAME_ENCODING_ERROR
+        # (RFC 9000 sec 12.4); no handler callback is involved.
         _ = parse_frame_into(Span[UInt8, _](_bytes(0x1F)), rec)
-    except:
+    except e:
         raised = True
+        assert_true("FRAME_ENCODING_ERROR" in String(e))
     assert_true(raised)
+
+
+def test_unknown_frame_type_rejected_for_every_codepoint() raises:
+    """QUIC-01: every codepoint outside the v1 table (the 0x1f..0x2f
+    and 0x32.. gaps, and multi-byte varint types) is rejected, never
+    consumed as a bare type varint."""
+    var cases = List[List[UInt8]]()
+    for t in range(0x1F, 0x30):
+        cases.append(_bytes(t, 0x1C, 0x00, 0x00, 0x00))
+    cases.append(_bytes(0x32, 0x00))
+    cases.append(_bytes(0x40, 0x40, 0x00))  # 2-byte varint, type 0x40
+    cases.append(_bytes(0x7F, 0xFF, 0x00))  # 2-byte varint, type 0x3FFF
+    for i in range(len(cases)):
+        var rec = _empty_recorder()
+        var raised = False
+        try:
+            _ = parse_frame_into(Span[UInt8, _](cases[i]), rec)
+        except e:
+            raised = True
+            assert_true("FRAME_ENCODING_ERROR" in String(e))
+        assert_true(raised, "unknown frame type accepted, case " + String(i))
+        assert_equal(rec.handshake_done_count, 0)
 
 
 def test_truncated_crypto_rejected() raises:
@@ -808,7 +824,8 @@ def main() raises:
     test_connection_close_application_round_trip()
     test_handshake_done_round_trip()
     test_unknown_frame_type_rejected()
+    test_unknown_frame_type_rejected_for_every_codepoint()
     test_truncated_crypto_rejected()
     test_datagram_with_length_round_trip()
     test_datagram_no_length_runs_to_end()
-    print("test_quic_frame: 28 passed")
+    print("test_quic_frame: 29 passed")

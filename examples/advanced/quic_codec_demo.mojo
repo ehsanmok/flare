@@ -149,9 +149,6 @@ struct _DemoHandler(FrameHandler, Movable):
     def on_datagram(mut self, dg: DatagramFrame) raises:
         pass
 
-    def on_unknown(mut self, type_id: UInt64) raises:
-        pass
-
 
 def _hex(bytes: List[UInt8]) -> String:
     var s = String(capacity_bytes=len(bytes) * 3)

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: QUIC-01 fixed on fix/formal-findings
 """QUIC-01: an unknown frame type is skipped after its type varint only, so
 its body is parsed as further frames.
 
@@ -12,7 +13,7 @@ RFC 9000 sec 12.4: "An endpoint MUST treat the receipt of a frame of unknown
 type as a connection error of type FRAME_ENCODING_ERROR."
 
 Expected: the 1-RTT payload 21 1c 00 00 00 is rejected (FRAME_ENCODING_ERROR).
-Actual: 0x21 is ignored, the next four bytes run as a CONNECTION_CLOSE and the
+Before the fix: 0x21 is ignored, the next four bytes run as a CONNECTION_CLOSE and the
 connection enters DRAINING.
 
 Minimal fix: in parse_frame_into, raise instead of calling on_unknown for an

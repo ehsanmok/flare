@@ -139,9 +139,6 @@ struct _NoOpHandler(FrameHandler, Movable):
     def on_datagram(mut self, dg: DatagramFrame) raises:
         self.dispatches += 1
 
-    def on_unknown(mut self, type_id: UInt64) raises:
-        self.dispatches += 1
-
 
 def target(data: List[UInt8]) raises:
     var n = len(data)
