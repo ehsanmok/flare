@@ -3,7 +3,7 @@ import Flare.Core
 /-!
 # UringReactor cross-thread wakeup machine
 
-`runtime/uring_reactor.mojo:739-946`. A cross-thread `wakeup()` writes the
+`runtime/uring_reactor.mojo (`poll`, `_try_arm_wakeup`, `_arm_wakeup_recv`, `wakeup`)`. A cross-thread `wakeup()` writes the
 eventfd; it only becomes a CQE (and so releases a blocked `poll`) if an
 `IORING_OP_READ` on the eventfd is in flight in the kernel.
 
@@ -32,7 +32,7 @@ structure W where
   cq : List Bool
   deriving DecidableEq, Repr
 
-/-- mirrors flare/runtime/uring_reactor.mojo:790-804,926-946 @59bda50
+/-- mirrors flare/runtime/uring_reactor.mojo `_try_arm_wakeup`, `_arm_wakeup_recv` (fixed, RT-03)
 Lazy arm: `_arm_wakeup_recv` raises when `next_sqe` is NULL (SQ full); the
 exception is swallowed and `_wake_armed` stays false. -/
 def lazyArm (s : W) : W :=
@@ -48,7 +48,7 @@ def ksubmit (s : W) : W :=
     { s with pending := 0, armQ := false, kArmed := false, ev := 0, cq := s.cq ++ [true] }
   else { s with pending := 0, armQ := false, kArmed := s.kArmed || s.armQ }
 
-/-- mirrors flare/runtime/uring_reactor.mojo:864-902 @59bda50
+/-- mirrors flare/runtime/uring_reactor.mojo `_drain_into_tracking` (fixed, RT-03)
 Drain up to `max` CQEs; returns new state, surfaced count `n`, raw count. -/
 def drain (s : W) (max : Nat) : W × Nat × Nat :=
   let taken := s.cq.take max
@@ -70,9 +70,10 @@ structure Res where
   armedAtBlock : Bool
   deriving Repr
 
-/-- mirrors flare/runtime/uring_reactor.mojo:739-846 @59bda50
-`fix = false` is flare; `fix = true` re-arms after phase 1 (the minimal fix). -/
-def poll (fix : Bool) (s : W) (minC maxC : Nat) : Res :=
+/-- mirrors flare/runtime/uring_reactor.mojo `poll` (fixed, RT-03)
+`fix = true` is the shipped `poll`: `_try_arm_wakeup()` runs again after
+phase 1; `fix = false` is the pre-fix `poll`, kept for the RT-03 counterexample. -/
+def pollWith (fix : Bool) (s : W) (minC maxC : Nat) : Res :=
   let s0 := lazyArm s
   let s1 := ksubmit s0                                  -- phase 1
   let (s2, n, raw) := drain s1 maxC                     -- phase 2
@@ -80,6 +81,12 @@ def poll (fix : Bool) (s : W) (minC maxC : Nat) : Res :=
   if n < minC ∧ n < maxC ∧ raw = 0 then                 -- phase 3
     ⟨ksubmit s2', n, true, s2'.kArmed || s2'.armQ⟩
   else ⟨s2', n, false, false⟩
+
+/-- The shipped `poll` (re-arms after phase 1). -/
+def poll (s : W) (minC maxC : Nat) : Res := pollWith true s minC maxC
+
+/-- The pre-fix `poll` (no re-arm after phase 1), only for `Flare.Bugs.RT_03`. -/
+def pollOld (s : W) (minC maxC : Nat) : Res := pollWith false s minC maxC
 
 /-- Liveness requirement: a blocking poll always has the wakeup read armed. -/
 def NeverBlocksUnarmed (r : Res) (s : W) : Prop := s.cross → r.blocked → r.armedAtBlock
@@ -140,25 +147,29 @@ theorem wakeup_inv (s : W) (h : Inv s) : Inv (wakeup s) := by
   · exact h
 
 /-- Poll (either version) preserves the invariant. -/
-theorem poll_inv (fix : Bool) (s : W) mn mx (h : Inv s) : Inv (poll fix s mn mx).st := by
+theorem pollWith_inv (fix : Bool) (s : W) mn mx (h : Inv s) : Inv (pollWith fix s mn mx).st := by
   have h2 := drain_inv _ mx (ksubmit_inv _ (lazyArm_inv s h))
   have h2' : Inv (if fix then lazyArm (drain (ksubmit (lazyArm s)) mx).1
       else (drain (ksubmit (lazyArm s)) mx).1) := by
     split
     · exact lazyArm_inv _ h2
     · exact h2
-  unfold poll; simp only
+  unfold pollWith; simp only
   split
   · exact ksubmit_inv _ h2'
   · exact h2'
 
-/-- The fixed poll never blocks with the wakeup read unarmed, from any
+theorem poll_inv (s : W) mn mx (h : Inv s) : Inv (poll s mn mx).st :=
+  pollWith_inv true s mn mx h
+
+/-- The shipped poll never blocks with the wakeup read unarmed, from any
 state satisfying the invariant, for any `min_complete` / `max_completions`. -/
-theorem pollFixed_never_blocks_unarmed (s : W) (mn mx : Nat) (h : Inv s) (hcap : 0 < s.cap) :
-    NeverBlocksUnarmed (poll true s mn mx) s := by
+theorem poll_never_blocks_unarmed (s : W) (mn mx : Nat) (h : Inv s) (hcap : 0 < s.cap) :
+    NeverBlocksUnarmed (poll s mn mx) s := by
   intro hc hb
+  unfold poll at hb ⊢
   have hI1 : Inv (ksubmit (lazyArm s)) := ksubmit_inv _ (lazyArm_inv s h)
-  unfold poll at hb ⊢; simp only at hb ⊢
+  unfold pollWith at hb ⊢; simp only at hb ⊢
   split at hb
   · rename_i hcond
     rw [if_pos hcond]
@@ -209,6 +220,6 @@ blocking (raw_consumed ≠ 0 skips phase 3). All in-tree callers pass
 `min_complete = 1` (`http/_server_reactor_uring.mojo:206,852`), for which
 this weakening is invisible. -/
 theorem minComplete_weakened :
-    (poll false busy 2 64).n = 1 ∧ (poll false busy 2 64).blocked = false := by decide
+    (poll busy 2 64).n = 1 ∧ (poll busy 2 64).blocked = false := by decide
 
 end Flare.L2.UringWakeup

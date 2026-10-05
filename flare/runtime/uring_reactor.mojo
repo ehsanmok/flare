@@ -786,22 +786,13 @@ struct UringReactor(Movable):
                 ``max_events``).
         """
         out.clear()
-        if self._cross_thread_wakeup and (not self._wake_armed):
-            # Lazy-arm the wakeup recv on first poll so the
-            # eventfd surfaces wakeups via the same drain loop.
-            # Skipped entirely when ``enable_wakeup=False`` was
-            # passed at construction (single-issuer bufring
-            # rings opt out -- they don't need cross-thread
-            # wakeup).
-            try:
-                self._arm_wakeup_recv()
-                self._wake_armed = True
-            except _e:
-                # If arming the wakeup fails (e.g. SQ full on a
-                # busy reactor), the poll still works -- wakeups
-                # just won't be honoured this round. Try again
-                # next poll.
-                pass
+        # Lazy-arm the wakeup read on first poll so the eventfd
+        # surfaces wakeups via the same drain loop. Skipped entirely
+        # when ``enable_wakeup=False`` was passed at construction
+        # (single-issuer bufring rings opt out -- they don't need
+        # cross-thread wakeup). If the SQ is full the arm fails; it
+        # is retried after phase 1 has flushed the SQ (RT-03).
+        self._try_arm_wakeup()
 
         # Phase 1: non-blocking submit + collect already-ready
         # CQEs. submit_and_wait(0) flushes the SQ tail to the
@@ -813,6 +804,12 @@ struct UringReactor(Movable):
             raise Error(
                 "UringReactor.poll: io_uring_enter(0) failed; rc=" + String(rc0)
             )
+
+        # Phase 1 emptied the SQ: if the arm above failed for lack of
+        # an SQE slot, retry now so phase 3 never blocks with no read
+        # on the eventfd (RT-03). The SQE is submitted by the next
+        # ``submit_and_wait`` (phase 3 when blocking, else next poll).
+        self._try_arm_wakeup()
 
         # Phase 2: drain everything ready into ``out``. No
         # syscall. Tracks both the surfaced count (``n``) and
@@ -921,6 +918,19 @@ struct UringReactor(Movable):
         _ = self._io.write(self._wake_fd, one, c_size_t(8))
 
     # ── Private helpers ──────────────────────────────────────────────────────
+
+    def _try_arm_wakeup(mut self):
+        """Arm the wakeup read when cross-thread wakeup is enabled and
+        no read is in flight. A failure (SQ full) is swallowed and
+        leaves ``_wake_armed`` False so the caller retries; ``poll``
+        retries after phase 1 has freed the SQ, before it may block.
+        """
+        if self._cross_thread_wakeup and (not self._wake_armed):
+            try:
+                self._arm_wakeup_recv()
+                self._wake_armed = True
+            except _e:
+                pass
 
     def _arm_wakeup_recv(mut self) raises -> None:
         """Submit a read SQE on the wakeup eventfd so the next

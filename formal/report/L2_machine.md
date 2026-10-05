@@ -141,15 +141,15 @@ unreaped CQEs).
 
 ### UringReactor wakeup (`UringWakeup.lean`)
 
-runtime/uring_reactor.mojo:739-946: the lazy arming of the eventfd read and
+runtime/uring_reactor.mojo (`poll`, `_try_arm_wakeup`, `_arm_wakeup_recv`): the lazy arming of the eventfd read and
 the three poll phases. Assumption `KernelConsumesAll` (an `io_uring_enter`
 consumes all submitted SQEs).
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `poll_inv` | Both the flare and the fixed `poll` keep the invariant. | proved |
-| `pollFixed_never_blocks_unarmed` | With a re-arm after phase 1, `poll` never blocks without the wakeup read in flight. | proved |
-| `Flare.Bugs.RT_03.poll_blocks_unarmed` | flare's `poll` can block unarmed with a wakeup pending. | counterexample (RT-03) |
+| `pollWith_inv`, `poll_inv` | Both the pre-fix and the shipped `poll` keep the invariant. | proved |
+| `poll_never_blocks_unarmed` | The shipped `poll` (re-arm after phase 1) never blocks without the wakeup read in flight. | proved |
+| `Flare.Bugs.RT_03.poll_blocks_unarmed` | The pre-fix `poll` (`pollOld`) can block unarmed with a wakeup pending. | counterexample (RT-03, resolved) |
 | `minComplete_weakened` | `poll(min_complete = 2)` returns 1 CQE without blocking. | proved (note; all callers pass 1) |
 
 ### Timer wheel (`TimerWheel.lean`)
@@ -619,17 +619,19 @@ Spec: whenever `poll` may block in phase 3, the eventfd read is in flight.
 What goes wrong: uring_reactor.mojo:790-804 swallows the arming failure when
 the SQ is full and `_wake_armed` stays false; phase 1 frees the SQ but nothing
 retries the arm before phase 3 (:739-846).
-Lean: `Flare.Bugs.RT_03.poll_blocks_unarmed`. Fix: re-arm after phase 1;
-`pollFixed_never_blocks_unarmed`.
+Lean: `Flare.Bugs.RT_03.poll_blocks_unarmed` (about the pre-fix `pollOld`).
+Fix: re-arm after phase 1; `poll_never_blocks_unarmed` for the shipped `poll`.
 Repro: `formal/repro/RT-03_uring_poll_blocks_unarmed.mojo`, PLATFORM linux,
 run in the Linux container (seccomp unconfined so io_uring is available),
-observed
+observed before the fix
 `BUG REPRODUCED: after poll() flushed a full SQ ( 8 SQEs) no wakeup read is armed; a poll(1) here would block with wakeup() unable to release it`.
 Where io_uring is unavailable (macOS) it prints
 `inconclusive: io_uring not available on this host` and fails rather than
-passing. Flip, in the container's copy: retrying `_arm_wakeup_recv()` right
-after the phase-1 `submit_and_wait(0)` (the SQ is empty there) prints
-`OK: wakeup read re-armed after the SQ was flushed` and exits 0.
+passing. After the fix: `OK: wakeup read re-armed after the SQ was flushed`, exit 0.
+
+Status: resolved. `poll` now calls the new `_try_arm_wakeup()` again right
+after the phase-1 `submit_and_wait(0)`, where the SQ is empty; test
+`tests/runtime/test_uring_reactor.mojo::test_wakeup_rearmed_after_full_sq_flushed`.
 
 ### RT-04: `peek_idle_worker` returns a peer whose queue is full
 
@@ -844,7 +846,7 @@ lists record ids, not tokens.
 | `Flare.L2.IoUring.ringDistance`, `nextSqe`, `commitSqe`, `submit` | flare/runtime/io_uring_driver.mojo:297-641 | `ringDistance_true`, `sq_reachable_inv`, `nextSqe_fresh` | proved |
 | `Flare.L2.IoUring.cqeCount`, `reapCqe` | flare/runtime/io_uring_driver.mojo:645-671 | `reap_count`, `reap_keeps_bound` | proved |
 | `Flare.L2.IoUring.pbufIdx` | flare/runtime/_pbuf_ring.mojo:61-97 | `pbufIdx_wrap`, `pbuf_add_preserves_tail` | proved |
-| `Flare.L2.UringWakeup.lazyArm`, `drain`, `poll` | flare/runtime/uring_reactor.mojo:739-946 | `poll_inv`, `pollFixed_never_blocks_unarmed`, `RT_03.poll_blocks_unarmed` | proved; counterexample (RT-03) |
+| `Flare.L2.UringWakeup.lazyArm`, `drain`, `poll` | flare/runtime/uring_reactor.mojo (`poll`, `_try_arm_wakeup`) | `poll_inv`, `poll_never_blocks_unarmed`, `RT_03.poll_blocks_unarmed` | proved; counterexample (RT-03, resolved) |
 | `Flare.L2.TimerWheel.init`, `schedule`, `cancel` | flare/runtime/timer_wheel.mojo:102-167 | `inv_schedule`, `schedule_spec`, `cancel_spec` | proved |
 | `Flare.L2.TimerWheel.stepTick`, `drainOne`, `jump`, `jumpIds`, `rebucketOne`, `advance` | flare/runtime/timer_wheel.mojo:169-293 | `advance_spec`, `jump_equiv_ticks`, `run_nodup` | proved |
 | `Flare.L2.TimerWheel.nextFire` | flare/runtime/timer_wheel.mojo:310-333 | `nextFire_lower_bound_no_overflow`, `RT_01.nextFire_not_lower_bound` | proved; counterexample (RT-01) |

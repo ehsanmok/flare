@@ -656,6 +656,9 @@ from test_uring_reactor import (
     test_wakeup_releases_blocking_poll as test_uring_reactor__test_wakeup_releases_blocking_poll,
 )
 from test_uring_reactor import (
+    test_wakeup_rearmed_after_full_sq_flushed as test_uring_reactor__test_wakeup_rearmed_after_full_sq_flushed,
+)
+from test_uring_reactor import (
     test_arm_poll_readable_multishot_round_trip as test_uring_reactor__test_arm_poll_readable_multishot_round_trip,
 )
 from test_uring_reactor import (
@@ -999,6 +1002,7 @@ def main() raises:
     suite.test[test_uring_reactor__test_arm_listener_multishot_round_trip]()
     suite.test[test_uring_reactor__test_submit_send_round_trip]()
     suite.test[test_uring_reactor__test_wakeup_releases_blocking_poll]()
+    suite.test[test_uring_reactor__test_wakeup_rearmed_after_full_sq_flushed]()
     suite.test[
         test_uring_reactor__test_arm_poll_readable_multishot_round_trip
     ]()

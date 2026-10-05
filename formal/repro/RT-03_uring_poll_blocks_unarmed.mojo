@@ -1,15 +1,16 @@
 # PLATFORM: linux
+# RESOLVED: RT-03 fixed on fix/formal-findings
 """RT-03: UringReactor.poll can enter its blocking phase with no wakeup
 read armed, so a cross-thread wakeup() is not honoured.
 
 Lean: Flare.Bugs.RT_03.poll_blocks_unarmed (counterexample) and
-Flare.Bugs.RT_03.pollFixed_never_blocks_unarmed (fix meets spec).
+Flare.Bugs.RT_03.poll_never_blocks_unarmed (shipped poll meets spec).
 flare/runtime/uring_reactor.mojo:739-846,926-946 @59bda50.
 
 Expected: whenever poll() may block in phase 3 (submit_and_wait(need)),
 the eventfd read that turns wakeup() into a CQE is armed, so wakeup()
 always releases a blocked poll.
-Actual: poll() tries to arm the read before phase 1. If the SQ is full,
+Before the fix: poll() tries to arm the read before phase 1. If the SQ is full,
 _arm_wakeup_recv raises, the exception is swallowed (:799-804) and
 _wake_armed stays False. Phase 1 then flushes the SQ (freeing every
 slot) but nothing retries the arm, so phase 3 blocks with no read on
@@ -54,8 +55,10 @@ def main() raises:
         print(
             "BUG REPRODUCED: after poll() flushed a full SQ (",
             filled,
-            "SQEs) no wakeup read is armed; a poll(1) here would block"
-            " with wakeup() unable to release it",
+            (
+                "SQEs) no wakeup read is armed; a poll(1) here would block"
+                " with wakeup() unable to release it"
+            ),
         )
         raise Error("RT-03")
     print("OK: wakeup read re-armed after the SQ was flushed")

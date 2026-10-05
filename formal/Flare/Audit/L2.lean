@@ -41,8 +41,9 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.IoUring.pbufIdx_wrap
 #print axioms Flare.L2.IoUring.pbuf_add_preserves_tail
 -- UringReactor wakeup
+#print axioms Flare.L2.UringWakeup.pollWith_inv
 #print axioms Flare.L2.UringWakeup.poll_inv
-#print axioms Flare.L2.UringWakeup.pollFixed_never_blocks_unarmed
+#print axioms Flare.L2.UringWakeup.poll_never_blocks_unarmed
 -- Timer wheel
 #print axioms Flare.L2.TimerWheel.inv_run
 #print axioms Flare.L2.TimerWheel.schedule_spec
@@ -110,7 +111,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.RT_02.writev_silent_short_write
 #print axioms Flare.Bugs.RT_02.writevAllFixed_spec
 #print axioms Flare.Bugs.RT_03.poll_blocks_unarmed
-#print axioms Flare.Bugs.RT_03.pollFixed_never_blocks_unarmed
+#print axioms Flare.Bugs.RT_03.poll_never_blocks_unarmed
 #print axioms Flare.Bugs.RT_04.peek_returns_full_peer
 #print axioms Flare.Bugs.RT_04.peekFixed_below_capacity
 #print axioms Flare.Bugs.RT_05.acquire_after_shrunk_release
