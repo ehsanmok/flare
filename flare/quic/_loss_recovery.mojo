@@ -295,6 +295,15 @@ struct LossRecovery(Movable):
             variance = _K_GRANULARITY_MS
         return self.smoothed_rtt + variance + self.max_ack_delay_ms
 
+    def pto_interval_ms(self) -> UInt64:
+        """The current PTO interval including the exponential backoff
+        (RFC 9002 sec 6.2.1). The idle timeout is never shorter than
+        three of these (RFC 9000 sec 10.1)."""
+        var shift = self.pto_count
+        if shift > _PTO_BACKOFF_CAP:
+            shift = _PTO_BACKOFF_CAP
+        return self._pto_base() * (UInt64(1) << UInt64(shift))
+
     def pto_deadline(self) -> UInt64:
         """Absolute monotonic-ms time the PTO fires: the oldest
         in-flight packet's send time plus the PTO interval scaled by the

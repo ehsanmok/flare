@@ -187,6 +187,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.QUIC_20.impl_no_send_restart
 #print axioms Flare.Bugs.QUIC_20.impl_no_pto_floor
 #print axioms Flare.Bugs.QUIC_20.fixed_spec
+#print axioms Flare.Bugs.QUIC_20.fixed_effective
+#print axioms Flare.L3.Quic.Timers.effectiveMs_spec
 #print axioms Flare.Bugs.QUIC_21.impl_never_closes
 #print axioms Flare.Bugs.QUIC_21.impl_counterexample
 #print axioms Flare.Bugs.QUIC_21.fixed_spec

@@ -105,6 +105,7 @@ File: `Quic/Timers.lean`. Two labelled transition systems over a `Nat` clock in 
 | Lean name | Statement | Status |
 |---|---|---|
 | `Timers.fixed_sim`, `fixed_run`, `init_R` | The fixed timer stays related to the spec state on every event and every run from connection start. | proved |
+| `Timers.effectiveMs_spec` | The server's `_effective_idle_ms` (0 for none) is the spec's effective timeout: the minimum of the non-zero values, at least 3×PTO, none when both are 0. | proved |
 | `Timers.fixed_closed_eq_spec` | On every run the fixed idle timer closes exactly when the spec does. | proved |
 | `Timers.spec_none_never` | With no effective timeout (both values 0) the spec never closes on idleness. | proved |
 | `Timers.client_never` | The client's idle model never changes state, on any run. | proved |
@@ -496,6 +497,8 @@ Status: resolved. Fixed: `Stream` records `peer_reset` (RESET_STREAM received) a
 
 ### QUIC-20: the server's idle timer does not follow RFC 9000 §10.1
 
+Status: resolved. Fixed: the server restarts the idle timer only for packets that were processed successfully and for the first ack-eliciting packet sent after one; `schedule_idle_timeout` arms `_effective_idle_ms` (minimum of the two non-zero values, at least 3×PTO, nothing when both are 0), with the client value read in `_client_params_ok` (`quic/server.mojo`, `quic/_server_support.mojo`, `LossRecovery.pto_interval_ms`). Tests: `tests/quic/test_quic_idle_timeout.mojo`. Lean: `Timers.fixedStep` / `effectiveMs` are the shipped timer; the counterexamples are about the pre-fix `serverStep`.
+
 - **Severity:** Medium. An off-path attacker who knows a connection ID can keep a dead connection's slot alive indefinitely with garbage datagrams. A client's shorter idle timeout is ignored, so the server holds state up to its own 30 s after the client has discarded the connection. With `max_idle_timeout_ms = 0`, which RFC 9000 defines as "no timeout", every connection dies within a millisecond of silence.
 - **RFC:** RFC 9000 §10.1: the effective timeout is "the minimum of the two advertised values (or the sole advertised value, if only one endpoint advertises a non-zero value)"; the timer restarts "when a packet from its peer is received and processed successfully" and on the first ack-eliciting send after that; the timeout is at least three times the current PTO. §18.2: "Idle timeout is disabled when both endpoints omit this transport parameter or specify a value of 0."
 - **What goes wrong:**
@@ -769,7 +772,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `Quic.Streams.client` | quic/client.mojo:902-912 | `QUIC_17.impl_accepts`, `clientFixed_eq_spec` | counterexample (QUIC-17) |
 | `Quic.Streams.stepHalves`, `resetSeenH`, `sendRefusedH` | quic/state.mojo `apply_reset_stream`, `apply_stop_sending`, quic/client.mojo `cancel_stream`, `stream_reset`, `send_stream` (fixed, QUIC-18) | `QUIC_18.impl_loses` (pre-fix `stepImpl`), `QUIC_18.fixed_both`, `halves_reset_iff`, `halves_stop_iff` | proved (QUIC-18 resolved) |
 | `Bugs.QUIC_19.replyImpl` | quic/client.mojo:902-912, quic/state.mojo:478-486 | `QUIC_19.impl_silent`, `QUIC_19.fixed_spec` | counterexample (QUIC-19) |
-| `Quic.Timers.serverStep`, `serverInit` | quic/server.mojo:724-782, 2874-2898, 2929-2930, runtime/timer_wheel.mojo:119-144 | `QUIC_20.impl_unauth_restarts`, `impl_ignores_peer`, `impl_zero_closes`, `impl_no_send_restart`, `impl_no_pto_floor` | counterexample (QUIC-20) |
+| `Quic.Timers.fixedStep`, `effectiveMs` | quic/server.mojo `_handle_inbound`, `_build_1rtt_response`, `schedule_idle_timeout`, `_client_params_ok`, quic/_server_support.mojo `_effective_idle_ms` (fixed, QUIC-20) | `fixed_closed_eq_spec`, `effectiveMs_spec`, `QUIC_20.fixed_spec`, `fixed_effective`; counterexamples about the pre-fix `serverStep`: `QUIC_20.impl_unauth_restarts`, `impl_ignores_peer`, `impl_zero_closes`, `impl_no_send_restart`, `impl_no_pto_floor` | proved (QUIC-20 resolved) |
 | `Quic.Timers.clientStep` | quic/client.mojo:557-608, 902-912 | `client_never`, `QUIC_21.impl_never_closes`, `impl_counterexample` | counterexample (QUIC-21) |
 | `Quic.Timers.fixedStep` | quic/server.mojo:724-782, 2874-2898 with fixes | `fixed_run`, `fixed_closed_eq_spec`, `QUIC_20.fixed_spec`, `QUIC_21.fixed_spec` | proved |
 | `Quic.Timers.srvStep` | quic/server.mojo:2033-2038, 2177-2180, 2925-2938, quic/state.mojo:430-445 | `QUIC_22.impl_no_cc`, `impl_short_period`, `QUIC_23.impl_sends_draining`, `impl_trace` | counterexample (QUIC-22, QUIC-23) |

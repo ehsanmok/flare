@@ -49,6 +49,18 @@ def effective (p : IdleParams) : Option Nat :=
     else if p.peerIdle = 0 then some p.localIdle else some (min p.localIdle p.peerIdle)
   m.map fun v => max v (3 * p.pto)
 
+/-- mirrors flare/quic/_server_support.mojo `_effective_idle_ms` (fixed,
+QUIC-20): 0 stands for "no timeout". -/
+def effectiveMs (localIdle peerIdle pto : Nat) : Nat :=
+  let m := if localIdle = 0 then peerIdle else if peerIdle = 0 then localIdle else min localIdle peerIdle
+  if m = 0 then 0 else max m (3 * pto)
+
+/-- The shipped helper computes exactly the spec's effective timeout. -/
+theorem effectiveMs_spec (l p pto : Nat) :
+    effective ⟨l, p, pto⟩ = if effectiveMs l p pto = 0 then none else some (effectiveMs l p pto) := by
+  unfold effective effectiveMs
+  by_cases hl : l = 0 <;> by_cases hp : p = 0 <;> simp [hl, hp] <;> split <;> omega
+
 inductive IEv
   | recv (t : Nat) (auth : Bool)
   | sendAE (t : Nat)
@@ -76,9 +88,9 @@ structure IImpl where
   deadline : Nat
   closed : Bool
 
-/-- Every datagram routed to the slot re-arms the idle timer at
-`config.max_idle_timeout_ms` (the wheel clamps 0 to 1), whether or not a
-packet in it decrypted; sending never re-arms it.
+/-- The pre-fix server timer (QUIC-20): every datagram routed to the slot
+re-arms the idle timer at `config.max_idle_timeout_ms` (the wheel clamps 0 to
+1), whether or not a packet in it decrypted; sending never re-arms it.
 mirrors flare/quic/server.mojo:724-782, 2874-2898, 2929-2930 and
 flare/runtime/timer_wheel.mojo:119-144 @59bda50 -/
 def serverStep (cfgIdle : Nat) (s : IImpl) : IEv → IImpl
@@ -92,9 +104,13 @@ dispatched with `now_us = 0`, so `last_activity_us` never moves and
 mirrors flare/quic/client.mojo:557-608, 902-912 @59bda50 -/
 def clientStep (s : IImpl) (_ : IEv) : IImpl := s
 
-/-- The fixed timer: armed from the effective timeout, re-armed only by an
-authenticated receipt or the first ack-eliciting send after one, not armed
-when there is no effective timeout. -/
+/-- The timer the server now runs (fixed, QUIC-20): armed from the effective
+timeout, re-armed only by an authenticated receipt or the first ack-eliciting
+send after one, not armed when there is no effective timeout.
+mirrors flare/quic/server.mojo `_handle_inbound` (only packets for which
+`_process_one_packet` succeeded), `_build_1rtt_response` (first ack-eliciting
+send, `idle_sent_since_rx`), `schedule_idle_timeout`, `_client_params_ok` (the
+peer's value) and flare/quic/_server_support.mojo `_effective_idle_ms` -/
 structure IFix where
   deadline : Option Nat
   sentSince : Bool

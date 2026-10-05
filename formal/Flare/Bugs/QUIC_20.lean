@@ -3,7 +3,15 @@ import Flare.L3_Protocol.Quic.Timers
 /-!
 # QUIC-20: the server's idle timer uses the wrong timeout and restarts on the wrong events
 
-flare/quic/server.mojo:724-782 @59bda50 (`_handle_inbound`): `processed_any`
+Status: resolved. The server re-arms the idle timer only for packets that were
+processed successfully (`_handle_inbound`) and for the first ack-eliciting
+packet sent after one (`_build_1rtt_response`), and arms it at
+`_effective_idle_ms` (the minimum of the two non-zero values, at least 3×PTO,
+nothing when both are 0) via `schedule_idle_timeout`; the client's value is
+read in `_client_params_ok`. The counterexamples below are about the pre-fix
+`serverStep`; `fixedStep` is the shipped timer.
+
+Pre-fix behaviour (flare/quic/server.mojo:724-782 @59bda50, `_handle_inbound`): `processed_any`
 is set for every packet walked in the datagram, whether or not it decrypted,
 and `schedule_idle_timeout` (2874-2898) then re-arms the idle timer at
 `config.max_idle_timeout_ms`. That value is the server's own only (the
@@ -62,6 +70,14 @@ must be at least 300 ms; the server closes at 150 ms. -/
 theorem impl_no_pto_floor :
     (run (serverStep 100) (serverInit 100 0) [.tick 150]).closed = true ∧
     (run (ispecStep ⟨100, 100, 100⟩) (ispecInit 0) [.tick 150]).closed = false := by decide
+
+/-- The shipped `_effective_idle_ms` is the spec's effective timeout, and the
+cases of the counterexamples come out right: 1000/30000 gives 1000 (above the
+floor), 0/0 gives none, and 100/100 with PTO 100 is raised to 300. -/
+theorem fixed_effective :
+    effectiveMs 30000 1000 100 = 1000 ∧ effectiveMs 0 0 100 = 0 ∧ effectiveMs 100 100 100 = 300 ∧
+    ∀ l p pto, effective ⟨l, p, pto⟩ = if effectiveMs l p pto = 0 then none else some (effectiveMs l p pto) :=
+  ⟨by decide, by decide, by decide, effectiveMs_spec⟩
 
 /-- **Fix**: arm from the effective timeout, re-arm on authenticated receipts
 and the first ack-eliciting send after one; then the server closes exactly

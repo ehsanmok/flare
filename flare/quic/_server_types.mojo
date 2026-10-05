@@ -83,7 +83,9 @@ struct QuicServerConfig(Copyable, Defaultable):
     var max_idle_timeout_ms: UInt64
     """RFC 9000 §10.1 max-idle-timeout in milliseconds. The server
     advertises this to clients; connections idle for longer get
-    silently dropped. Default: 30_000 ms (30 s)."""
+    silently dropped. The effective timeout is the minimum of this and
+    the client's non-zero value, at least three PTOs; 0 here and from
+    the client disables it. Default: 30_000 ms (30 s)."""
 
     var max_udp_payload_size: UInt64
     """RFC 9000 §18.2 max-udp-payload-size transport parameter --
@@ -335,6 +337,15 @@ struct QuicConnection(Copyable):
     byte budget). Disabled (budget 0) until the listener installs
     early keys on an accepted resumed ClientHello."""
 
+    var peer_idle_ms: UInt64
+    """The client's ``max_idle_timeout`` (ms); 0 until its transport
+    parameters were read, or when it advertises none. The idle timer uses
+    the minimum of this and the local value (RFC 9000 sec 10.1)."""
+    var idle_sent_since_rx: Bool
+    """Whether an ack-eliciting packet was sent since the last packet
+    that was received and processed. Only the first such send restarts
+    the idle timer (RFC 9000 sec 10.1)."""
+
     def __init__(
         out self,
         local_cid: ConnectionId,
@@ -349,6 +360,8 @@ struct QuicConnection(Copyable):
         self.alive = True
         self.idle_timer_id = UInt64(0)
         self.pto_timer_id = UInt64(0)
+        self.peer_idle_ms = UInt64(0)
+        self.idle_sent_since_rx = False
         self.rx_handshake_secret = List[UInt8]()
         self.tx_handshake_secret = List[UInt8]()
         self.rx_1rtt_secret = List[UInt8]()

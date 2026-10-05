@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
+# RESOLVED: QUIC-20 fixed on fix/formal-findings
 # fixtures in tests/tls/fixtures/rustls-quic-client/; about 15 s)
 """QUIC-20: the server's idle timer does not follow RFC 9000 sec 10.1.
 
@@ -33,7 +34,7 @@ Inconclusive if a handshake stalls without the server closing the slot.
 
 Expected: A closed (effective timeout 1 s), B closed (undecryptable packets
 do not count), C open.
-Actual: A and B open, C closed within milliseconds.
+Before the fix: A and B open, C closed within milliseconds.
 
 Minimal fix: only successfully processed packets re-arm the timer;
 schedule_idle_timeout uses the minimum of the non-zero local and peer

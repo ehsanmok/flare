@@ -168,8 +168,10 @@ def test_advance_idle_closes_connection() raises:
     var peer = SocketAddr(IpAddr.localhost(), UInt16(1234))
     _ = listener.dispatch_datagram(Span[UInt8, _](datagram), peer)
     assert_true(listener.connections[0].alive)
+    # The 50 ms timeout is raised to three PTOs (750 ms at the initial
+    # RTT; RFC 9000 sec 10.1), so advance past that.
     var fired = listener.advance_timers(
-        now_ms=listener.timer_wheel.now_ms() + UInt64(200)
+        now_ms=listener.timer_wheel.now_ms() + UInt64(2_000)
     )
     assert_equal(fired, 1, "expected exactly one timer to fire")
     assert_false(listener.connections[0].alive)
@@ -241,7 +243,7 @@ def test_dead_slots_are_reclaimed_and_reused() raises:
     )
     assert_equal(listener.connection_count(), 1)
     _ = listener.advance_timers(
-        now_ms=listener.timer_wheel.now_ms() + UInt64(200)
+        now_ms=listener.timer_wheel.now_ms() + UInt64(2_000)
     )
     assert_false(listener.connections[0].alive)
     assert_equal(len(listener.free_slots), 1)

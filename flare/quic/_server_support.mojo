@@ -290,6 +290,26 @@ def _ready_sentinel() -> List[UInt8]:
     return out^
 
 
+def _effective_idle_ms(
+    local_ms: UInt64, peer_ms: UInt64, pto_ms: UInt64
+) -> UInt64:
+    """The effective idle timeout in ms, or 0 for none (RFC 9000 sec 10.1,
+    18.2): the minimum of the two advertised values, the sole non-zero one
+    when only one side advertises, none when both are 0 (or absent). A
+    timeout is never shorter than three PTOs, so an endpoint is not closed
+    while a probe it sent is still waiting for its answer."""
+    var m: UInt64
+    if local_ms == UInt64(0):
+        m = peer_ms
+    elif peer_ms == UInt64(0):
+        m = local_ms
+    else:
+        m = min(local_ms, peer_ms)
+    if m == UInt64(0):
+        return UInt64(0)
+    return max(m, UInt64(3) * pto_ms)
+
+
 def _monotonic_ms() -> UInt64:
     """Return the monotonic clock in milliseconds.
 

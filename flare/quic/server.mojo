@@ -85,7 +85,10 @@ from .protection import (
     protect_initial_packet,
 )
 from .varint import decode_varint, encode_varint
-from .transport_params import check_client_transport_params
+from .transport_params import (
+    check_client_transport_params,
+    decode_transport_parameters,
+)
 from .state import (
     QUIC_FLOW_CONTROL_ERROR,
     QUIC_PROTOCOL_VIOLATION,
@@ -161,6 +164,7 @@ from ._server_support import (
     _ack_from_ranges,
     _ack_record,
     _bufsize_from_env,
+    _effective_idle_ms,
     _encode_h3_stream_frame,
     _inbound_level_for_datagram,
     _monotonic_ms,
@@ -782,9 +786,15 @@ struct QuicListener(Movable):
             )
             if ok and lvl == QuicEncryptionLevel.APPLICATION:
                 authed_1rtt = True
-            processed_any = True
+            # RFC 9000 sec 10.1: only a packet that was received and
+            # processed successfully restarts the idle timer. Every
+            # packet used to, so anyone who knew the CID could keep a
+            # dead connection's slot alive with garbage datagrams.
+            if ok:
+                processed_any = True
             offset += packet_len
         if processed_any:
+            self.connections[slot].idle_sent_since_rx = False
             _ = self.schedule_idle_timeout(slot)
         return authed_1rtt
 
@@ -1397,6 +1407,17 @@ struct QuicListener(Movable):
         except e:
             self._close_for(slot, QUIC_TRANSPORT_PARAMETER_ERROR, String(e))
             return False
+        # The idle timeout is the minimum of the two advertised values
+        # (RFC 9000 sec 10.1): remember the client's and re-arm with it.
+        try:
+            var tp = decode_transport_parameters(Span[UInt8, _](raw))
+            if Bool(tp.max_idle_timeout):
+                self.connections[
+                    slot
+                ].peer_idle_ms = tp.max_idle_timeout.value()
+            _ = self.schedule_idle_timeout(slot)
+        except:
+            pass
         return True
 
     # -- H3 dispatch surface ----------------------------------------------
@@ -2859,6 +2880,11 @@ struct QuicListener(Movable):
         # 1-RTT -- per-stream offsets live on each STREAM frame
         # encoded into the plaintext).
         self.connections[slot].tx_1rtt_pn = pn + UInt64(1)
+        # RFC 9000 sec 10.1: the first ack-eliciting packet sent after a
+        # received one restarts the idle timer; later sends do not.
+        if ack_eliciting and not self.connections[slot].idle_sent_since_rx:
+            self.connections[slot].idle_sent_since_rx = True
+            _ = self.schedule_idle_timeout(slot)
         if ack_eliciting and slot < len(self.loss):
             # Account the true on-wire size, not len(plaintext): the
             # congestion window is a bound on bytes the path carries.
@@ -2938,10 +2964,14 @@ struct QuicListener(Movable):
     # -- Timer scheduling -----------------------------------------------
 
     def schedule_idle_timeout(mut self, slot: Int) raises -> UInt64:
-        """Arm the idle timer for ``slot`` at
-        ``config.max_idle_timeout_ms`` from the current wheel
-        tick. Cancels the slot's previous idle timer if any so
-        every ``handle_packet`` only ever has one idle timer in
+        """Arm the idle timer for ``slot`` from the current wheel tick.
+
+        The delay is the effective idle timeout of RFC 9000 sec 10.1:
+        the minimum of ``config.max_idle_timeout_ms`` and the client's
+        ``max_idle_timeout`` (when non-zero), at least three PTOs. When
+        both are 0 the timeout is disabled: nothing is armed and the
+        returned id is 0. Cancels the slot's previous idle timer if any
+        so every ``handle_packet`` only ever has one idle timer in
         flight per connection.
 
         Returns the new timer id (stored back into the slot's
@@ -2957,9 +2987,19 @@ struct QuicListener(Movable):
         var old_id = self.connections[slot].idle_timer_id
         if old_id != UInt64(0):
             _ = self.timer_wheel.cancel(old_id)
+        var pto_ms = UInt64(0)
+        if slot < len(self.loss):
+            pto_ms = self.loss[slot].pto_interval_ms()
+        var effective = _effective_idle_ms(
+            self.config.max_idle_timeout_ms,
+            self.connections[slot].peer_idle_ms,
+            pto_ms,
+        )
+        if effective == UInt64(0):
+            self.connections[slot].idle_timer_id = UInt64(0)
+            return UInt64(0)
         var token = encode_timer_token(TIMER_KIND_IDLE, slot)
-        var after_ms = Int(self.config.max_idle_timeout_ms)
-        var id = self.timer_wheel.schedule(after_ms=after_ms, token=token)
+        var id = self.timer_wheel.schedule(after_ms=Int(effective), token=token)
         self.connections[slot].idle_timer_id = id
         return id
 
