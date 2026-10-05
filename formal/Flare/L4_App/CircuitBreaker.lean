@@ -1,12 +1,12 @@
 import Flare.Core.LTS
 
 /-!
-# CircuitBreaker (flare/http/reliability.mojo:397-469)
+# CircuitBreaker (flare/http/reliability.mojo:413-485)
 
 The breaker keeps a leaked 3-slot cell shared by every worker copy:
 `[0]` state (0 closed, 1 open, 2 half-open), `[1]` consecutive failures,
 `[2]` opened-at ns. Unlike `RateLimit`, `serve` takes no lock: the entry
-check (:449-459) and the outcome bookkeeping (:461-468) are separate, and
+check (:460-472) and the outcome bookkeeping (:473-485) are separate, and
 the inner handler runs in between. Concurrent workers can therefore
 interleave whole requests, so the model is an LTS whose labels are request
 *arrivals* (the entry check) and request *completions* (the outcome
@@ -22,7 +22,7 @@ the repro's fix text says.
 Time is a ghost-free `Int` clock (ns, `perf_counter_ns`); `cooldown` is
 `cooldown_ms * 1_000_000` (no wrap for `cooldown_ms < 9.2·10^12`).
 
-Spec (written from the docstring :404-411 and the module docstring
+Spec (written from the docstring :414-427 and the module docstring
 :31-34): after `failure_threshold` consecutive failures the breaker opens
 and fast-fails for `cooldown_ms` *from the moment it opened*; then exactly
 one probe is let through (half-open); success closes, failure re-opens.
@@ -30,10 +30,10 @@ Ghost fields: `openedAt` (true time the breaker last (re)opened) and
 `halfAdmits` (admissions since the breaker last entered half-open).
 
 `stepG fix41 fix42` is the transliteration, with two switches for the two
-minimal fixes (`false false` is the code at 59bda50):
+minimal fixes (`false false` is the pre-fix code at 59bda50, `stepOld`):
 * `fix41`: stamp opened-at with the completion time, not the arrival time
-  (APP-41);
-* `fix42`: fast-fail arrivals while half-open (APP-42).
+  (APP-41, fixed: the shipped code, `stepShipped`);
+* `fix42`: fast-fail arrivals while half-open (APP-42, not yet fixed).
 
 Results:
 * `step_counts_inv` (impl, general): `fails ≥ 0`, closed → `fails < thr`,
@@ -77,7 +77,7 @@ def initS : S := ⟨⟨.closed, 0, 0⟩, [], 0, 0, 0⟩
 
 /-- Entry check of `serve` (threshold > 0). A fast-fail (503) leaves the
 cell untouched; an admission adds the request to the in-flight set.
-mirrors flare/http/reliability.mojo:446-460 @59bda50 -/
+mirrors flare/http/reliability.mojo:460-472 (fixed, APP-41) -/
 def arrive (fix42 : Bool) (cooldown : Int) (s : S) (id : Nat) (now : Int) : S :=
   let s := { s with clock := now }
   if s.cell.st = .opn ∧ now - s.cell.opened < cooldown then s
@@ -90,8 +90,10 @@ def arrive (fix42 : Bool) (cooldown : Int) (s : S) (id : Nat) (now : Int) : S :=
   else { s with inflight := s.inflight ++ [⟨id, now⟩] }
 
 /-- `_record_failure(now)` / `_record_success()` after the inner call;
-`start` is the `now` read on entry (:449), `now` the completion time.
-mirrors flare/http/reliability.mojo:435-444, 460-469 @59bda50 -/
+`start` is the `now` read on entry (:461), `now` the completion time. The
+shipped code (`fix41`) passes `perf_counter_ns()` read at the completion to
+`_record_failure` (:481, :484); the pre-fix code passed `start`.
+mirrors flare/http/reliability.mojo:447-452, 473-485 (fixed, APP-41) -/
 def finish (fix41 : Bool) (thr : Int) (s : S) (r : Req) (now : Int) (failed : Bool) : S :=
   let s := { s with clock := now, inflight := s.inflight.erase r }
   if failed then
@@ -103,7 +105,7 @@ def finish (fix41 : Bool) (thr : Int) (s : S) (r : Req) (now : Int) (failed : Bo
 
 /-- Executable step: arrivals need a fresh id, completions an in-flight
 id; the clock is monotone (`Flare.Assumptions.MonotoneClock`).
-mirrors flare/http/reliability.mojo:446-469 @59bda50 -/
+mirrors flare/http/reliability.mojo:460-485 (fixed, APP-41) -/
 def stepG (fix41 fix42 : Bool) (thr cooldown : Int) (s : S) : Lbl → Option S
   | .arrive id now =>
     if s.clock ≤ now ∧ (s.inflight.all fun r => r.id != id) then
@@ -116,8 +118,12 @@ def stepG (fix41 fix42 : Bool) (thr cooldown : Int) (s : S) : Lbl → Option S
       | none => none
     else none
 
-/-- The code at 59bda50. -/
-def step (thr cooldown : Int) : S → Lbl → Option S := stepG false false thr cooldown
+/-- The pre-fix code (59bda50), before APP-41 was fixed. -/
+def stepOld (thr cooldown : Int) : S → Lbl → Option S := stepG false false thr cooldown
+
+/-- The shipped code: APP-41 is fixed (the opening is stamped with the
+completion time); APP-42 is not yet. -/
+def stepShipped (thr cooldown : Int) : S → Lbl → Option S := stepG true false thr cooldown
 
 def lts (fix41 fix42 : Bool) (thr cooldown : Int) : LTS S Lbl :=
   LTS.ofFn (fun s => s = initS) (stepG fix41 fix42 thr cooldown)
@@ -166,10 +172,17 @@ theorem counts_inductive (f41 f42 : Bool) (thr cd : Int) (hthr : 0 < thr) :
         · cases hstep
       · cases hstep
 
-/-- Every reachable state of the code satisfies the failure-count bounds. -/
+/-- Every reachable state of the pre-fix code satisfies the failure-count
+bounds. -/
 theorem step_counts_inv (thr cd : Int) (hthr : 0 < thr) (s : S)
     (h : (lts false false thr cd).Reachable s) : CountsInv thr s :=
   (counts_inductive false false thr cd hthr).reachable s h
+
+/-- Every reachable state of the shipped code satisfies the failure-count
+bounds. -/
+theorem step_counts_inv_shipped (thr cd : Int) (hthr : 0 < thr) (s : S)
+    (h : (lts true false thr cd).Reachable s) : CountsInv thr s :=
+  (counts_inductive true false thr cd hthr).reachable s h
 
 /-- While open and within the cooldown, every arrival fast-fails: the cell
 and the in-flight set are unchanged. -/

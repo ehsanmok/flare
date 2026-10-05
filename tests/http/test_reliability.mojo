@@ -371,6 +371,42 @@ def test_circuitbreaker_opens_after_threshold() raises:
     assert_equal(cb.serve(req).status, 503)
 
 
+struct SlowFailHandler(Copyable, Handler):
+    """Busy-waits ``hold_ms``, counts the call, returns 500."""
+
+    var calls_ptr: Int
+    var hold_ms: Int
+
+    def __init__(out self, calls_ptr: Int, hold_ms: Int):
+        self.calls_ptr = calls_ptr
+        self.hold_ms = hold_ms
+
+    def serve(self, req: Request) raises -> Response:
+        var p = Pointer[Int, MutUntrackedOrigin](
+            unsafe_from_address=self.calls_ptr
+        )
+        p[] = p[] + 1
+        var t0 = perf_counter_ns()
+        while perf_counter_ns() - t0 < self.hold_ms * 1_000_000:
+            pass
+        return Response(status=500, reason=String("Internal Server Error"))
+
+
+def test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request() raises:
+    """The opened-at stamp was the time the failing request *started*, so a
+    failure slower than ``cooldown_ms`` opened the breaker already expired
+    and the next call went straight to the inner handler."""
+    var calls = _new_counter()
+    var cb = CircuitBreaker(
+        SlowFailHandler(calls, 250), failure_threshold=1, cooldown_ms=200
+    )
+    var req = Request(method=String("GET"), url=String("/"))
+    assert_equal(cb.serve(req).status, 500)  # trips the breaker after 250 ms
+    assert_equal(cb.serve(req).status, 503)  # still inside the 200 ms cooldown
+    assert_equal(_read_counter(calls), 1)
+    _free_counter(calls)
+
+
 def test_circuitbreaker_disabled_passthrough() raises:
     """Disabled when failure_threshold <= 0 (pass-through)."""
     var cb = CircuitBreaker(AlwaysFiveHundredHandler(), failure_threshold=0)
@@ -395,5 +431,6 @@ def main() raises:
     test_ratelimit_full_bucket_admits_after_a_long_idle_period()
     test_ratelimit_disabled_passthrough()
     test_circuitbreaker_opens_after_threshold()
+    test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request()
     test_circuitbreaker_disabled_passthrough()
     print("test_reliability: OK")

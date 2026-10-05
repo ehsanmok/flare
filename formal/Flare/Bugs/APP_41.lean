@@ -3,13 +3,19 @@ import Flare.L4_App.CircuitBreaker
 /-!
 # APP-41: CircuitBreaker cooldown measured from the failing request's start
 
-`serve` reads `now` once on entry (flare/http/reliability.mojo:449) and
-passes it to `_record_failure(now)` (:463, :468), which stores it as the
-opened-at timestamp (:440). A failure that takes longer than `cooldown_ms`
+`serve` read `now` once on entry (flare/http/reliability.mojo:449 @59bda50,
+pre-fix) and passed it to `_record_failure(now)` (:463, :468), which stores
+it as the opened-at timestamp (:440). A failure that takes longer than `cooldown_ms`
 therefore opens the breaker with an already-expired cooldown, and the next
 call is let through as a probe instead of fast-failing.
 
 Repro: formal/repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo.
+
+Status: resolved. Both call sites now pass `perf_counter_ns()` read at the
+failure (`Flare.L4.CircuitBreaker.stepShipped` = `stepG true false`); the
+counterexample below is about the pre-fix `stepG false false`. Regression
+test: tests/http/test_reliability.mojo::
+test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request.
 -/
 namespace Flare.Bugs.APP_41
 open Flare.L4.CircuitBreaker
@@ -116,5 +122,11 @@ theorem fixed_cooldown_respected (f42 : Bool) (thr cd : Int) :
         exact finish_not_half true thr s r now failed ho hh
       · cases hstep
     · cases hstep
+
+/-- **Fix meets spec**: the shipped breaker respects the cooldown clause for
+every threshold and cooldown. -/
+theorem shipped_meets_spec (thr cd : Int) :
+    CooldownOK (lts true false thr cd) cd :=
+  fixed_cooldown_respected false thr cd
 
 end Flare.Bugs.APP_41

@@ -416,7 +416,9 @@ struct CircuitBreaker[Inner: Handler & Copyable](Copyable, Handler):
     Counts consecutive failures (a raised exception or a ``>= 500``
     response). After ``failure_threshold`` in a row the breaker
     opens: every call fast-fails with ``503 Service Unavailable``
-    for ``cooldown_ms``. The first call after cooldown is a probe
+    for ``cooldown_ms``, counted from the moment the failing call
+    returned (not from when it started, so a slow failure does not
+    use up the cooldown). The first call after cooldown is a probe
     (half-open); success closes the breaker, another failure
     re-opens it.
 
@@ -470,10 +472,14 @@ struct CircuitBreaker[Inner: Handler & Copyable](Copyable, Handler):
         try:
             var resp = self.inner.serve(req).lower()
             if resp.status >= 500:
-                self._record_failure(now)
+                # Stamp the opening with the time of the failure, not the
+                # request's start: ``now`` is read before the inner call, so
+                # a failure slower than ``cooldown_ms`` opened the breaker
+                # already expired.
+                self._record_failure(Int64(perf_counter_ns()))
             else:
                 self._record_success()
             return resp^
         except e:
-            self._record_failure(now)
+            self._record_failure(Int64(perf_counter_ns()))
             raise e^

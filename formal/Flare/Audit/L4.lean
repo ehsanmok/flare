@@ -80,6 +80,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.RateLimit.stepOld_inv
 #print axioms Flare.L4.RateLimit.overflow_iff
 #print axioms Flare.L4.CircuitBreaker.counts_inductive
+#print axioms Flare.L4.CircuitBreaker.step_counts_inv_shipped
 #print axioms Flare.L4.CircuitBreaker.step_open_rejects
 #print axioms Flare.L4.Retry.budget_le_max
 #print axioms Flare.L4.Retry.sleep_bounds
@@ -135,6 +136,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.Bugs.APP_40.implFixed_refines_spec
 #print axioms Flare.Bugs.APP_41.slow_failure_skips_cooldown
 #print axioms Flare.Bugs.APP_41.fixed_cooldown_respected
+#print axioms Flare.Bugs.APP_41.shipped_meets_spec
 #print axioms Flare.Bugs.APP_42.halfopen_admits_two
 #print axioms Flare.Bugs.APP_42.fixed_halfopen_one_probe
 #print axioms Flare.Bugs.APP_43.violates_spec

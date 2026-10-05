@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-41 fixed on fix/formal-findings
 """APP-41: CircuitBreaker measures the cooldown from the *start* of the
 failing request, so a failure slower than cooldown_ms opens the breaker
 already expired and the next call goes straight to the inner handler.
@@ -21,7 +22,7 @@ more than 5 s defeats the breaker the same way).
 
 Expected: the call right after the tripping failure gets 503 and the
 inner handler is not invoked.
-Actual: opened-at is 150 ms in the past when the breaker opens, so
+Before the fix: opened-at is 150 ms in the past when the breaker opens, so
 `now - opened < cooldown_ns` is already false; the second call is let
 through as a half-open probe and the inner handler runs again.
 
@@ -76,4 +77,6 @@ def main() raises:
             s1,
         )
         raise Error("APP-41")
-    print("OK: breaker fast-failed with 503 during cooldown; inner calls", calls)
+    print(
+        "OK: breaker fast-failed with 503 during cooldown; inner calls", calls
+    )
