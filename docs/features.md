@@ -623,6 +623,13 @@ that is not valid UTF-8 is now refused (400) even with
 `accept_obs_text_in_field_value` on; valid UTF-8 obs-text is still
 accepted. The same check covers obs-fold continuation lines.
 
+HTTP/1.1 client: a response head that contains a bare LF (a line not
+ended by CRLF), or an empty line before its end, is now refused with
+`NetworkError` by the buffered and the streaming readers. The head used
+to run to the first CRLFCRLF with empty lines skipped, so an
+LF-recognising cache in front of the client could see header-shaped bytes
+as body.
+
 Breaking: the streaming download (`get_streaming` over HTTPS) now applies
 the same close_notify rule to a close-delimited body: if the server resets
 the connection without `close_notify`, the read raises `NetworkError`

@@ -87,6 +87,14 @@ struct _ResponseHead(Movable):
     var headers: HeaderMap
 
 
+def _has_bare_lf(data: List[UInt8]) -> Bool:
+    """True when ``data`` holds an LF that is not preceded by a CR."""
+    for i in range(len(data)):
+        if data[i] == 10 and (i == 0 or data[i - 1] != 13):
+            return True
+    return False
+
+
 def _parse_response_head(head: List[UInt8]) raises -> _ResponseHead:
     """Parse a response head (status line + fields, no final CRLFCRLF).
 
@@ -96,7 +104,18 @@ def _parse_response_head(head: List[UInt8]) raises -> _ResponseHead:
     became a header named ``evil``) and whitespace before the colon
     (``Content-Length : 5``), all of which the streaming reader already
     refused.
+
+    A bare LF anywhere in the head, or an empty line before its end, is
+    refused too (RFC 9112 sec 2.2): see the comment below.
     """
+    # RFC 9112 sec 2.2: a recipient may end a line at a bare LF, and the
+    # first empty line then ends the head (sec 2.1). A cache or proxy in
+    # front of the client that does so would see the bytes after an
+    # LF-terminated empty line as body, while this parser (which finds the
+    # head by CRLFCRLF) would read them as header fields. Refuse the
+    # ambiguity: every line ends in CRLF.
+    if _has_bare_lf(head):
+        raise NetworkError("HTTP response: bare LF in head")
     var lines = _split_lines(_bytes_to_str(head))
     if len(lines) == 0:
         raise NetworkError("HTTP response empty")
@@ -108,7 +127,7 @@ def _parse_response_head(head: List[UInt8]) raises -> _ResponseHead:
         var ln = lines[li]
         var raw = ln.as_bytes()
         if len(raw) == 0:
-            continue
+            raise NetworkError("HTTP response: empty line inside head")
         # RFC 9112 sec 5.2: obs-fold is not a field line.
         if raw[0] == 32 or raw[0] == 9:
             raise NetworkError("HTTP response: obs-fold line rejected")

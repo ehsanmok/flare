@@ -106,6 +106,19 @@ def test_h1_header_limit_and_invalid_cap() raises:
         _ = dl.read_chunk(0)
 
 
+def test_h1_rejects_a_bare_lf_head() raises:
+    """H1-07: the streaming reader shares the buffered head rules."""
+    for wire in [
+        (
+            "HTTP/1.1 200 OK\nX: a\n\nSet-Cookie: s=evil\r\nContent-Length:"
+            " 0\r\n\r\n"
+        ),
+        "HTTP/1.1 200 OK\nContent-Length: 0\r\n\r\n",
+    ]:
+        with assert_raises():
+            _ = HttpDownload(Pieces(wire, 65536))
+
+
 def test_h1_rejects_smuggling_shaped_heads() raises:
     """Field-line shapes that let two parsers disagree are refused.
 

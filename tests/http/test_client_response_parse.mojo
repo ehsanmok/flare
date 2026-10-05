@@ -38,6 +38,40 @@ def test_obs_fold_is_refused() raises:
     )
 
 
+def test_bare_lf_head_cannot_hide_a_blank_line() raises:
+    """H1-07: an LF-recognising peer ends this head at ``\\n\\n``.
+
+    The client used to read to the first CRLFCRLF and skip the empty line,
+    so ``Set-Cookie`` here was a header field to flare and body to a cache
+    in front of it.
+    """
+    assert_true(
+        _refused(
+            "HTTP/1.1 200 OK\nX: a\n\nSet-Cookie: s=evil\r\nContent-Length:"
+            " 4\r\n\r\nbody"
+        )
+    )
+    assert_true(
+        _refused(
+            "HTTP/1.1 200 OK\r\nX: a\n\r\nSet-Cookie: s=evil\r\nContent-Length:"
+            " 0\r\n\r\n"
+        )
+    )
+
+
+def test_bare_lf_in_head_is_refused() raises:
+    assert_true(_refused("HTTP/1.1 200 OK\nContent-Length: 2\r\n\r\nhi"))
+    assert_true(_refused("HTTP/1.1 200 OK\r\nContent-Length: 2\n\r\n\r\nhi"))
+
+
+def test_crlf_head_is_still_parsed() raises:
+    var resp = _parse_http_response(
+        _b("HTTP/1.1 200 OK\r\nX: a\r\nContent-Length: 2\r\n\r\nhi"), "GET"
+    )
+    assert_equal(resp.status, 200)
+    assert_equal(resp.headers.get("x"), "a")
+
+
 def test_whitespace_before_colon_is_refused() raises:
     assert_true(_refused("HTTP/1.1 200 OK\r\nContent-Length : 2\r\n\r\nhi"))
 

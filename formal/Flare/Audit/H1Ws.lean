@@ -80,7 +80,7 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.H1.ClientResponse.canReuseFixed_ok
 #print axioms Flare.L3.H1.ClientResponse.splitGo_join
 #print axioms Flare.L3.H1.ClientResponse.lfGo_join
-#print axioms Flare.L3.H1.ClientResponse.headFixed_agrees
+#print axioms Flare.L3.H1.ClientResponse.headImpl_agrees
 #print axioms Flare.L3.H1.ClientResponse.bufferedClose_safe
 -- Chunked encoder round trip
 #print axioms Flare.L3.H1.ChunkedEncode.hexAcc_hexLower

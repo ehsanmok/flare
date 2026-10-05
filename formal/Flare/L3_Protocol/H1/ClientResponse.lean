@@ -12,8 +12,9 @@ import Flare.L3_Protocol.H1.ClientChunked
 * `parseStatus` mirrors `_parse_status_line` (finding H1-08).
 * `canReuse` mirrors the keep-alive decision of the framed reader
   (finding H1-09).
-* `splitGo`/`headImpl` mirror `_find_crlf2_from`, `_split_lines` and the
-  line loop of `_parse_response_head`; `lfHead` is an RFC 9112 §2.2
+* `splitGo`/`headOld` mirror `_find_crlf2_from`, `_split_lines` and the
+  line loop of `_parse_response_head` before the H1-07 fix; `headImpl` is the
+  shipped head parser (bare LF and empty lines refused); `lfHead` is an RFC 9112 §2.2
   recipient that recognises a bare LF as a line terminator (finding H1-07).
 * `dlCloseOld` mirrors `HttpDownload._read_close` over the pre-fix transport,
   `dlClose` the shipped transport read with the close_notify guard
@@ -266,8 +267,9 @@ theorem splitGo_cons (acc : Bytes) (c : UInt8) (t : Bytes) : splitGo acc (c :: t
 /-- Mojo sanitises the head before splitting; `san` fixes CR and LF and
 maps every other byte to a non-CR/LF byte, so splitting first is the same
 (`splitLines_san`). The head parser skips empty lines.
+This is the head parser before the H1-07 fix; kept for the counterexample.
 mirrors flare/http/_client/parse.mojo:89-125, 195-204 @59bda50 -/
-def headImpl (m : Bytes) : Option (List Bytes × Bytes) :=
+def headOld (m : Bytes) : Option (List Bytes × Bytes) :=
   match findCRLF2 m with
   | none => none
   | some p =>
@@ -291,9 +293,10 @@ theorem hasBareLF_cons (c : UInt8) (t : Bytes) : hasBareLF (c :: t) =
     else hasBareLF t := by
   rw [hasBareLF.eq_2]
 
-/-- The H1-07 fix: a head holding a bare LF, or an empty line before its
-end, is refused. -/
-def headFixed (m : Bytes) : Option (List Bytes × Bytes) :=
+/-- The shipped head parser (H1-07 fix): a head holding a bare LF, or an empty
+line before its end, is refused.
+mirrors flare/http/_client/parse.mojo:98-148 (fixed, H1-07) -/
+def headImpl (m : Bytes) : Option (List Bytes × Bytes) :=
   match findCRLF2 m with
   | none => none
   | some p =>
@@ -501,9 +504,9 @@ theorem lfGo_join : ∀ (ss : List Bytes) (b : Bytes), ss ≠ [] → (∀ s ∈ 
 
 /-- **H1-07 fix meets spec**: when the fixed head parser accepts, its lines
 and body start are exactly those of an LF-recognising recipient. -/
-theorem headFixed_agrees : HeadAgrees headFixed := by
+theorem headImpl_agrees : HeadAgrees headImpl := by
   intro m ls b h
-  unfold headFixed at h
+  unfold headImpl at h
   split at h; · cases h
   rename_i p hp
   split at h; · cases h

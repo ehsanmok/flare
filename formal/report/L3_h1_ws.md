@@ -148,7 +148,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 **Model.**
 - `respFraming` mirrors `_response_framing` (`_client/parse.mojo:128-170`), shared by the buffered, framed and streaming readers.
 - `parseStatus` mirrors `_parse_status_line` (`318-352`).
-- `san`, `findCRLF2`, `splitGo`/`splitLines` and `headImpl` mirror `_bytes_to_str`, `_find_crlf2_from`, `_split_lines` and the line loop of `_parse_response_head` (`89-125`, `233-306`). `lfHead` is an RFC 9112 §2.2 recipient that ends lines at LF.
+- `san`, `findCRLF2`, `splitGo`/`splitLines` and `headOld` mirror `_bytes_to_str`, `_find_crlf2_from`, `_split_lines` and the line loop of `_parse_response_head` (`89-125`, `233-306`). `lfHead` is an RFC 9112 §2.2 recipient that ends lines at LF.
 - `cDec` mirrors `_decode_chunked` (`497-578`); `cHex`, `cTr`, `trailerOk` its size and trailer lines.
 - `canReuse` mirrors the keep-alive decision of the pooled reader (`836-884`).
 - `dlCloseOld` mirrors `HttpDownload._read_close` (`download.mojo:215-220`) over the pre-fix transport; `dlClose` (= `bufferedClose`) is the close_notify guard, in the buffered readers (`parse.mojo:665-683`) and now in `_H2Transport.read` (`h2_transport.mojo:69-96`).
@@ -161,7 +161,7 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 | `cDec_agree`, `framed_chunked_agrees` | On any buffer the shipped scanner accepts at `e`, the client decoder either raises or returns exactly the server decoder's bytes, reading nothing past `e`. So the pooled reader's chunked path is right. | proved |
 | `cRead_complete` | With the scan on the read-to-EOF path (`cRead`), a returned body is always a complete chunked body. | proved (H1-06 fix) |
 | `parseStatusFixed_delimited` | With the delimiter check, the code is three digits followed by SP or the end of the line (`CodeDelimited`). | proved (H1-08 fix) |
-| `splitGo_join`, `lfGo_join`, `headFixed_agrees` | With bare LF and empty lines refused, the head lines and body start equal those of the LF-recognising recipient. | proved (H1-07 fix) |
+| `splitGo_join`, `lfGo_join`, `headImpl_agrees` | With bare LF and empty lines refused, the head lines and body start equal those of the LF-recognising recipient. | proved (H1-07 fix) |
 | `canReuseFixed_ok` | With the version check, reuse implies HTTP/1.1 without `close` (RFC 9112 §9.3). | proved (H1-09 fix) |
 | `bufferedClose_safe` | The buffered guard never returns a close-delimited TLS body that ended without close_notify. | proved |
 | `Bugs.H1_06/07/08/09/11.counterexample` | The shipped code violates each of the above. | counterexample |
@@ -330,11 +330,13 @@ Status: resolved. The read-to-EOF readers now run `scan_chunked_end` first (`_re
 
 ### H1-07: a bare-LF response head skips the empty line that ends it
 
+Status: resolved. `_parse_response_head` now refuses a head that holds a bare LF or an empty line before its end, for the buffered and the streaming readers alike. The counterexample is about `headOld`; `Bugs.H1_07.fixed_agrees` is about the shipped `headImpl`.
+
 - **Severity:** Low. It needs a server, or an intermediary in front of one, that emits bare LF. Then a cache or proxy that ends lines at LF (RFC 9112 §2.2 allows it) sees body bytes that flare reads as header fields, for example a `Set-Cookie`.
 - **RFC:** RFC 9112 §2.2 (a recipient MAY treat a bare LF as a line terminator) and §2.1 (the first empty line ends the head).
 - **What goes wrong:** the head runs to the first CRLFCRLF (`_find_crlf2_from`, `_client/parse.mojo:233-245`). `_split_lines` (`283-306`) ends lines at a bare LF, and `_parse_response_head` (`106-110`) skips empty lines. So in `HTTP/1.1 200 OK\nX: a\n\nSet-Cookie: s=evil\r\n…\r\n\r\n` the empty line is ignored and `Set-Cookie` becomes a field.
-- **Counterexample:** `Bugs.H1_07.counterexample` (`¬ HeadAgrees headImpl`): `shipped_head` gives fields `X: a`, `S: e` and body `b`, while `lf_head` ends the head at `\n\n`, with body `S: e\r\n\r\nb`.
-- **Fix:** refuse a head with a bare LF or an empty line. `Bugs.H1_07.fixed_agrees` (= `headFixed_agrees`) proves the fixed lines and body start equal the LF recipient's.
+- **Counterexample:** `Bugs.H1_07.counterexample` (`¬ HeadAgrees headOld`): `old_head` gives fields `X: a`, `S: e` and body `b`, while `lf_head` ends the head at `\n\n`, with body `S: e\r\n\r\nb`.
+- **Fix:** refuse a head with a bare LF or an empty line. `Bugs.H1_07.fixed_agrees` (= `headImpl_agrees`) proves the fixed lines and body start equal the LF recipient's.
 - **Repro:** `formal/repro/H1-07_response_bare_lf_blank_line_skipped.mojo`
 - **Observed (3 runs):** `BUG REPRODUCED: header after an LF-terminated empty line was parsed (accepted status=200 set-cookie=s=evil)`
 - **Flip:** `OK: bare-LF head is refused or ends at the empty line (raised: NetworkError: HTTP response: bare LF in head)`; `flare/http/_client/parse.mojo` restored.
@@ -542,7 +544,7 @@ After every flip, `git status --short flare/` showed none of my files. Other age
 | `ClientResponse.bodyless`, `respFraming` | `_client/parse.mojo:128-170` | `framing_bodyless`, `framing_te_cl_reject`, `framing_dup_cl`, `framing_*_iff` | proved |
 | `ClientChunked.isSWS`, `pyStrip`, `hexAcc`, `cHex`, `trailerOk`, `cTr`, `cDec`, `cRead` (`cReadOld` = pre-fix) | `_client/parse.mojo:497-578`, `600-630` | `cDec_agree`, `framed_chunked_agrees`, `cRead_complete`, `Bugs.H1_06.*` | proved (framed path) / counterexample (read-to-EOF path, H1-06) / fix proved |
 | `ClientResponse.parseStatus` | `_client/parse.mojo:318-352` | `parseStatusFixed_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
-| `ClientResponse.san`, `findCRLF2`, `splitGo`, `splitLines`, `headImpl` | `_client/parse.mojo:89-125`, `233-306` | `headFixed_agrees`, `Bugs.H1_07.*` | counterexample (H1-07) / fix proved |
+| `ClientResponse.san`, `findCRLF2`, `splitGo`, `splitLines`, `headOld` | `_client/parse.mojo:89-125`, `233-306` | `headImpl_agrees`, `Bugs.H1_07.*` | counterexample (H1-07) / fix proved |
 | `ClientResponse.canReuse` | `_client/parse.mojo:836-884` | `canReuseFixed_ok`, `Bugs.H1_09.*` | counterexample (H1-09) / fix proved |
 | `ClientResponse.dlCloseOld`, `dlClose`, `bufferedClose` | `_client/download.mojo:215-220`, `_client/parse.mojo:665-683` | `bufferedClose_safe`, `Bugs.H1_11.*` | counterexample (H1-11) / proved (buffered) |
 | `ChunkedEncode.hexDigit`, `hexLower`, `encChunk`, `encChunks`, `trailerLine`, `encTrailers`, `encodeBody`, `encodeUpload` | `streaming_serialize.mojo:116-140`, `162-166`, `258-300`; `client.mojo:121-135`, `1420-1445`, `1470-1495` | `decL_roundtrip`, `decodeBody_roundtrip`, `scan_roundtrip`, `cDec_roundtrip`, `upload_roundtrip` | proved |

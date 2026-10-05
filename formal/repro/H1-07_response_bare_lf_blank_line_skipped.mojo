@@ -1,10 +1,11 @@
 # PLATFORM: any
+# RESOLVED: H1-07 fixed on fix/formal-findings
 """H1-07: the client splits a response head on bare LF but skips empty lines,
 so bytes an LF-terminating recipient treats as body become header fields.
 
-Lean: Flare.Bugs.H1_07.counterexample (headImpl returns the
+Lean: Flare.Bugs.H1_07.counterexample (headOld returns the
 "Set-Cookie" line, lfHead ends the head before it) and
-Flare.L3.H1.ClientResponse.headFixed_agrees (fix meets spec).
+Flare.L3.H1.ClientResponse.headImpl_agrees (fix meets spec).
 flare/http/_client/parse.mojo:283-306 (_split_lines ends a line at a bare
 LF) and 106-110 (`if len(raw) == 0: continue`) @59bda50.
 
@@ -13,7 +14,7 @@ terminator, but then the first empty line ends the head; or it rejects
 the bare LF. Either way "HTTP/1.1 200 OK\\nX: a\\n\\nSet-Cookie: s=evil"
 has no Set-Cookie field: that line is body to any LF-recognising peer
 (a cache or proxy in front of the client).
-Actual: the head runs to the first CRLFCRLF, the empty line is skipped,
+Before the fix: Actual: the head runs to the first CRLFCRLF, the empty line is skipped,
 and the response carries Set-Cookie: s=evil.
 
 Minimal fix: in _parse_response_head, raise on a bare LF in the head and

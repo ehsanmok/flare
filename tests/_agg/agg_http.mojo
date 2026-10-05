@@ -472,6 +472,15 @@ from test_client_response_parse import (
     test_obs_fold_is_refused as test_client_response_parse__test_obs_fold_is_refused,
 )
 from test_client_response_parse import (
+    test_bare_lf_head_cannot_hide_a_blank_line as test_client_response_parse__test_bare_lf_head_cannot_hide_a_blank_line,
+)
+from test_client_response_parse import (
+    test_bare_lf_in_head_is_refused as test_client_response_parse__test_bare_lf_in_head_is_refused,
+)
+from test_client_response_parse import (
+    test_crlf_head_is_still_parsed as test_client_response_parse__test_crlf_head_is_still_parsed,
+)
+from test_client_response_parse import (
     test_whitespace_before_colon_is_refused as test_client_response_parse__test_whitespace_before_colon_is_refused,
 )
 from test_client_response_parse import (
@@ -767,6 +776,9 @@ from test_download_decoder import (
 )
 from test_download_decoder import (
     test_h1_header_limit_and_invalid_cap as test_download_decoder__test_h1_header_limit_and_invalid_cap,
+)
+from test_download_decoder import (
+    test_h1_rejects_a_bare_lf_head as test_download_decoder__test_h1_rejects_a_bare_lf_head,
 )
 from test_download_decoder import (
     test_h1_rejects_smuggling_shaped_heads as test_download_decoder__test_h1_rejects_smuggling_shaped_heads,
@@ -4461,6 +4473,11 @@ def main() raises:
     # tests/http/test_client_response_parse.mojo
     suite.test[test_client_response_parse__test_obs_fold_is_refused]()
     suite.test[
+        test_client_response_parse__test_bare_lf_head_cannot_hide_a_blank_line
+    ]()
+    suite.test[test_client_response_parse__test_bare_lf_in_head_is_refused]()
+    suite.test[test_client_response_parse__test_crlf_head_is_still_parsed]()
+    suite.test[
         test_client_response_parse__test_whitespace_before_colon_is_refused
     ]()
     suite.test[test_client_response_parse__test_colonless_line_is_refused]()
@@ -4672,6 +4689,7 @@ def main() raises:
     ]()
     suite.test[test_download_decoder__test_h1_bodyless_and_invalid_framing]()
     suite.test[test_download_decoder__test_h1_header_limit_and_invalid_cap]()
+    suite.test[test_download_decoder__test_h1_rejects_a_bare_lf_head]()
     suite.test[test_download_decoder__test_h1_rejects_smuggling_shaped_heads]()
     suite.test[
         test_download_decoder__test_h1_rejects_whitespace_in_chunk_size
