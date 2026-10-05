@@ -787,22 +787,35 @@ struct Connection(Copyable, Defaultable):
 
     @staticmethod
     def _declared_content_length(hdrs: List[HpackHeader]) -> Int:
-        """The request's ``content-length``, or ``-1`` when absent or
-        unparseable."""
+        """The request's ``content-length``: ``-1`` when absent, ``-2``
+        when malformed, otherwise the number every field denotes.
+
+        RFC 9110 sec 8.6: ``Content-Length = 1*DIGIT``; a recipient MUST
+        prevent integer-conversion overflow, and a message whose
+        content-length fields differ is malformed. The value used to be
+        folded into a wrapping 64-bit ``Int`` (2^64 + 5 read as 5) from the
+        first field only, so flare's view of the body length could differ
+        from an intermediary's (H2-05).
+        """
+        var declared = -1
         for i in range(len(hdrs)):
             if hdrs[i].name == "content-length":
                 var v = hdrs[i].value
                 if v.byte_length() == 0:
-                    return -1
+                    return -2
                 var acc = 0
                 var p = v.unsafe_ptr()
                 for k in range(v.byte_length()):
                     var c = Int(p[unsafe_offset=k])
                     if c < 48 or c > 57:
-                        return -1
+                        return -2
+                    if acc > (Int.MAX - (c - 48)) // 10:
+                        return -2
                     acc = acc * 10 + (c - 48)
-                return acc
-        return -1
+                if declared >= 0 and acc != declared:
+                    return -2
+                declared = acc
+        return declared
 
     def _active_stream_count(self) -> Int:
         """Streams that count against SETTINGS_MAX_CONCURRENT_STREAMS
@@ -1007,6 +1020,21 @@ struct Connection(Copyable, Defaultable):
             if self.is_client and not s.response_body_allowed:
                 s.content_length = -1
         s.headers_complete = True
+
+        if s.content_length == -2:
+            # A malformed content-length (non-digits, overflow, or fields
+            # that disagree) makes the request malformed (RFC 9113 sec
+            # 8.1.1): stream error, not a body length to trust.
+            out.append(
+                self._rst_stream_frame(
+                    sid, Http2ErrorCode.PROTOCOL_ERROR().value
+                )
+            )
+            s.state = StreamState.CLOSED()
+            s.data = List[UInt8]()
+            s.headers = List[HpackHeader]()
+            self._put_stream(s^)
+            return out^
 
         if end_stream:
             # sec 8.1.2.6: a declared content-length must match the DATA

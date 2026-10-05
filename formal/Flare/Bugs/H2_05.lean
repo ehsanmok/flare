@@ -3,8 +3,15 @@ import Flare.Bugs.H2_Fixtures
 /-!
 # H2-05: content-length wraps in Int64 and only the first field counts
 
-`_declared_content_length` (flare/http2/state.mojo:748-765 @59bda50)
-folds the digits of the first `content-length` field into a Mojo `Int`
+Status: resolved. `_declared_content_length` now parses `1*DIGIT` with an
+overflow guard, checks every content-length field, and answers a
+malformed value with `-2`; `_commit_header_block` resets the stream with
+PROTOCOL_ERROR. The counterexamples below are about `declaredCLOld`, the
+code before the fix; `fixed` and `fixed_shipped` are about the shipped
+`declaredCLFixed`.
+
+Before the fix, `_declared_content_length` (flare/http2/state.mojo:748-765 @59bda50)
+folded the digits of the first `content-length` field into a Mojo `Int`
 (64-bit, wrapping) and ignores any later `content-length` field. A value
 of 2^64+5 is read as 5, and `content-length: 5` followed by
 `content-length: 10` is read as 5. A 5-octet body is then accepted as
@@ -44,10 +51,10 @@ def CLSound (hs : List Header) (r : Int) : Prop :=
 def big : List Header := [H "content-length" "18446744073709551621"]
 def dup : List Header := [H "content-length" "5", H "content-length" "10"]
 
-theorem bug : declaredCL big = 5 ∧ clValue (H "content-length" "18446744073709551621").value =
-    some 18446744073709551621 ∧ declaredCL dup = 5 := by native_decide
+theorem bug : declaredCLOld big = 5 ∧ clValue (H "content-length" "18446744073709551621").value =
+    some 18446744073709551621 ∧ declaredCLOld dup = 5 := by native_decide
 
-theorem counterexample : ¬ CLSound big (declaredCL big) := by
+theorem counterexample : ¬ CLSound big (declaredCLOld big) := by
   have e := bug.1
   have v := bug.2.1
   rw [e]
@@ -59,7 +66,7 @@ theorem counterexample : ¬ CLSound big (declaredCL big) := by
     have := hall _ (List.mem_singleton.mpr rfl) (by native_decide)
     rw [v] at this; cases this
 
-theorem counterexample_dup : ¬ CLSound dup (declaredCL dup) := by
+theorem counterexample_dup : ¬ CLSound dup (declaredCLOld dup) := by
   rw [bug.2.2]
   rintro (⟨h, -⟩ | h | ⟨n, hn, -, hall⟩)
   · cases h
@@ -70,7 +77,7 @@ theorem counterexample_dup : ¬ CLSound dup (declaredCL dup) := by
     have v : clValue (H "content-length" "10").value = some 10 := by native_decide
     rw [v] at this; cases this
 
-/-- The trace: request with content-length 2^64+5 and a 5-octet body is
+/-- The trace (pre-fix model `Fix.none`): request with content-length 2^64+5 and a 5-octet body is
 accepted (no RST_STREAM); with the fix it is reset with PROTOCOL_ERROR. -/
 def tr (k : UInt8) : List Ev := [.frame settings0, .frame (hdrs 1 false k), .frame (dataF 1 5 true)]
 
@@ -230,5 +237,13 @@ theorem fixed_complete (hs : List Header) (n : Nat) (hn : n ≤ I64MAX)
         rw [if_neg (by rcases hd with rfl | rfl <;> simp)]
         exact ih hall' n (Or.inr rfl)
     · exact ih hall' d hd
+
+/-- The shipped model carries the H2-05 fix: `commitTail` uses
+`declaredCLFixed`, which meets `CLSound`, and both repro requests are
+reset with PROTOCOL_ERROR. -/
+theorem fixed_shipped : Fix.shipped.h2_05 = true ∧ (∀ hs, CLSound hs (declaredCLFixed hs)) ∧
+    outs Fix.shipped {} (tr 2) = some [[.settingsAck], [.rst 1 ePROTOCOL], [.wu 0 5]] ∧
+    outs Fix.shipped {} (tr 6) = some [[.settingsAck], [.rst 1 ePROTOCOL], [.wu 0 5]] :=
+  ⟨rfl, fixed, by native_decide, by native_decide⟩
 
 end Flare.Bugs.H2_05

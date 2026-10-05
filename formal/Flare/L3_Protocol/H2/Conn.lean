@@ -209,8 +209,8 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-03. -/
-def Fix.shipped : Fix := { h2_01 := true, h2_03 := true }
+finding): H2-01, H2-03, H2-05. -/
+def Fix.shipped : Fix := { h2_01 := true, h2_03 := true, h2_05 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -310,15 +310,16 @@ def stripLen (f : Fr) (prioField : Bool) : Option Nat :=
       if en - st < 5 then none else some (en - (st + 5))
     else some (en - st)
 
-/-- Digits of a content-length value folded in Mojo `Int` (wrapping);
-`none` on a non-digit.
+/-- Pre-fix (flare @59bda50): digits of a content-length value folded in
+Mojo `Int` (wrapping); `none` on a non-digit.
 mirrors flare/http2/state.mojo:756-763 @59bda50 -/
 def clDigits : Bytes → Int64 → Option Int64
   | [], acc => some acc
   | b :: t, acc => if b < 48 || b > 57 then none else clDigits t (acc * 10 + Int64.ofNat (b.toNat - 48))
 
-/-- mirrors flare/http2/state.mojo:748-765 @59bda50 -/
-def declaredCL (hs : List Header) : Int :=
+/-- Pre-fix `_declared_content_length` (first field only, wrapping).
+mirrors flare/http2/state.mojo:748-765 @59bda50 -/
+def declaredCLOld (hs : List Header) : Int :=
   match hs.find? (·.name == kContentLength) with
   | none => -1
   | some h =>
@@ -327,9 +328,10 @@ def declaredCL (hs : List Header) : Int :=
       | none => -1
       | some a => a.toInt
 
-/-- The fixed parser: `1*DIGIT` with an overflow guard, every
-content-length field checked, disagreeing values rejected. `-1` absent,
-`-2` malformed. -/
+/-- The shipped parser: `1*DIGIT` with an overflow guard (`acc > (Int.MAX -
+d) // 10`), every content-length field checked, disagreeing values
+rejected. `-1` absent, `-2` malformed.
+mirrors flare/http2/state.mojo:789-818 (fixed, H2-05) -/
 def clParseFixed : Bytes → Nat → Option Nat
   | [], acc => some acc
   | b :: t, acc =>
@@ -337,6 +339,7 @@ def clParseFixed : Bytes → Nat → Option Nat
     else if acc > (I64MAX - (b.toNat - 48)) / 10 then none
     else clParseFixed t (acc * 10 + (b.toNat - 48))
 
+/-- mirrors flare/http2/state.mojo:789-818 (fixed, H2-05) -/
 def declaredCLFixedGo : List Header → Int → Int
   | [], d => d
   | h :: t, d =>
@@ -347,6 +350,7 @@ def declaredCLFixedGo : List Header → Int → Int
         | some n => if (0 : Int) ≤ d && d ≠ (n : Int) then -2 else declaredCLFixedGo t n
     else declaredCLFixedGo t d
 
+/-- `_declared_content_length`. mirrors flare/http2/state.mojo:789-818 (fixed, H2-05) -/
 def declaredCLFixed (hs : List Header) : Int := declaredCLFixedGo hs (-1)
 
 /-! ## Client response checks (`state.mojo:851-956`) -/
@@ -402,13 +406,15 @@ def clientCheck (hs : List Header) (isTr es bodyAllowed : Bool) : CRes :=
 
 def hlSize (hs : List Header) : Nat := (hs.map (fun h => h.name.length + h.value.length + 32)).sum
 
-/-- The tail of `_commit_header_block` after validation (958-1003).
-mirrors flare/http2/state.mojo:958-1003 @59bda50 -/
+/-- The tail of `_commit_header_block` after validation (958-1003). The
+H2-05 fix answers a malformed content-length (-2) with RST_STREAM
+(PROTOCOL_ERROR) and closes the stream.
+mirrors flare/http2/state.mojo:1021-1080 (fixed, H2-05) -/
 def commitTail (fx : Fix) (c : Conn) (k : Nat) (s : Stream) (isTr es : Bool) (hdrs : List Header) :
     Conn × List Out :=
   let cl := if isTr then s.contentLength
     else if c.isClient && !s.bodyAllowed then -1
-    else if fx.h2_05 then declaredCLFixed hdrs else declaredCL hdrs
+    else if fx.h2_05 then declaredCLFixed hdrs else declaredCLOld hdrs
   let s := { s with contentLength := cl, headersComplete := true }
   if fx.h2_05 && cl = -2 then rstClose c k ePROTOCOL s
   else if es then

@@ -378,6 +378,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_withheld_connection_credit_restores_the_receive_window as test_h2_state__test_withheld_connection_credit_restores_the_receive_window,
 )
+from test_h2_state import (
+    test_content_length_overflow_and_duplicates_are_rejected as test_h2_state__test_content_length_overflow_and_duplicates_are_rejected,
+)
+from test_h2_state import (
+    test_content_length_valid_forms_still_complete as test_h2_state__test_content_length_valid_forms_still_complete,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -668,6 +674,10 @@ def main() raises:
     suite.test[
         test_h2_state__test_withheld_connection_credit_restores_the_receive_window
     ]()
+    suite.test[
+        test_h2_state__test_content_length_overflow_and_duplicates_are_rejected
+    ]()
+    suite.test[test_h2_state__test_content_length_valid_forms_still_complete]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains

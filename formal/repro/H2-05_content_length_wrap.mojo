@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-05 fixed on fix/formal-findings
 """H2-05: the server's content-length parser wraps on overflow and ignores
 a second, different content-length.
 
@@ -21,7 +22,7 @@ Trace A: POST on stream 1 with content-length 18446744073709551621
 Trace B: POST on stream 3 with content-length 5 and content-length 10,
 then DATA "hello" with END_STREAM.
 
-Expected: RST_STREAM(PROTOCOL_ERROR) on both. Actual: both are accepted as
+Expected: RST_STREAM(PROTOCOL_ERROR) on both. Before the fix: both are accepted as
 complete requests (data_complete, no RST).
 
 Minimal fix: reject (treat as malformed) a content-length whose value

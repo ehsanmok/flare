@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63110 lines) |
-| Theorems | 3310 |
-| Headline theorems in the axiom audit | 1106 |
+| Lean files | 298 (63132 lines) |
+| Theorems | 3311 |
+| Headline theorems in the axiom audit | 1107 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 109 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 110 of 138 |
 
 Six findings are rated high:
 
@@ -3055,7 +3055,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-02 | Low | open | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
 | H2-03 | Medium | resolved | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
 | H2-04 | Low | open | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
-| H2-05 | Medium | open | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
+| H2-05 | Medium | resolved | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
 | H2-06 | Low | open | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
 | H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
 | H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
@@ -4047,6 +4047,8 @@ Status: resolved. Fixed: `Connection.max_local_stream_id` (set by the client whe
 - **Flip:** `OK: ... drew GOAWAY 1 1`, exit 0.
 
 #### H2-05: content-length wraps in Int64, and only the first field counts
+
+Status: resolved. Fixed: `_declared_content_length` parses `1*DIGIT` with an overflow guard, checks every content-length field and returns -2 for a malformed or disagreeing value; `_commit_header_block` resets the stream with RST_STREAM(PROTOCOL_ERROR). Tests: `test_h2_state.mojo::test_content_length_overflow_and_duplicates_are_rejected`, `test_content_length_valid_forms_still_complete`. Model: the old function is `declaredCLOld`; `Fix.shipped` carries `h2_05`; `Bugs.H2_05.fixed_shipped`.
 
 - **Severity:** Medium. flare's view of the body length can differ from that of an intermediary or application that reads the header itself. A 5-octet body is accepted as complete under `content-length: 18446744073709551621`, and under `content-length: 5` followed by `content-length: 10`. This is a request-framing ambiguity of the kind that enables smuggling when the request is forwarded.
 - **RFC:**

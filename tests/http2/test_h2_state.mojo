@@ -596,6 +596,89 @@ def test_withheld_connection_credit_restores_the_receive_window() raises:
     assert_equal(c.recv_window, 500)
 
 
+def _post_with_content_lengths(sid: Int, values: List[String]) -> Frame:
+    """HEADERS for a POST carrying one content-length field per value."""
+    var b = List[UInt8]()
+    b.append(0x83)  # :method POST
+    b.append(0x86)  # :scheme http
+    b.append(0x84)  # :path /
+    for v in values:
+        # Literal without indexing, name = static index 28 (content-length).
+        b.append(0x0F)
+        b.append(0x0D)
+        b.append(UInt8(v.byte_length()))
+        for c in v.as_bytes():
+            b.append(c)
+    var f = Frame()
+    f.header.type = FrameType.HEADERS()
+    f.header.flags = FrameFlags(FrameFlags.END_HEADERS())
+    f.header.stream_id = sid
+    f.header.length = len(b)
+    f.payload = b^
+    return f^
+
+
+def _five_byte_body_completes(
+    mut c: Connection, sid: Int, var values: List[String]
+) raises -> Bool:
+    """Open ``sid`` with the given content-length fields, send a 5-byte
+    body with END_STREAM; ``True`` when flare accepts it as complete."""
+    var rst_code = -1
+    for f in c.handle_frame(_post_with_content_lengths(sid, values)):
+        if f.header.type.value == FrameType.RST_STREAM().value:
+            rst_code = Int(f.payload[3])
+    if rst_code < 0:
+        for f in c.handle_frame(_data_frame(sid, 5, True)):
+            if f.header.type.value == FrameType.RST_STREAM().value:
+                rst_code = Int(f.payload[3])
+    if rst_code >= 0:
+        assert_equal(rst_code, 1, "a bad content-length is PROTOCOL_ERROR")
+    return rst_code < 0 and c.streams[sid].copy().data_complete
+
+
+def test_content_length_overflow_and_duplicates_are_rejected() raises:
+    """H2-05: a content-length that wraps Int64 (2^64 + 5 read as 5), one
+    that is empty or not 1*DIGIT, and differing duplicate fields are
+    malformed (RFC 9110 sec 8.6, RFC 9113 sec 8.1.1): the stream is reset
+    with PROTOCOL_ERROR instead of a 5-byte body completing."""
+    var bad = List[List[String]]()
+    bad.append([String("18446744073709551621")])
+    bad.append([String("9223372036854775808")])  # 2^63, one past Int.MAX
+    bad.append([String("5"), String("10")])
+    bad.append([String("10"), String("5")])
+    bad.append([String("5"), String("18446744073709551621")])
+    bad.append([String("")])
+    bad.append([String("5x")])
+    var c = Connection()
+    c.max_concurrent_streams = 1000
+    var sid = 1
+    for i in range(len(bad)):
+        assert_false(
+            _five_byte_body_completes(c, sid, bad[i].copy()),
+            "malformed content-length accepted: case " + String(i),
+        )
+        assert_equal(c.streams[sid].state.value, StreamState.CLOSED().value)
+        sid += 2
+
+
+def test_content_length_valid_forms_still_complete() raises:
+    """H2-05: the largest in-range value and repeated equal values are
+    still accepted; a 5-byte body completes under ``content-length: 5``,
+    ``05`` and a repeated ``5``."""
+    var c = Connection()
+    c.max_concurrent_streams = 1000
+    assert_true(_five_byte_body_completes(c, 1, [String("5")]))
+    assert_true(_five_byte_body_completes(c, 3, [String("5"), String("5")]))
+    assert_true(_five_byte_body_completes(c, 5, [String("05")]))
+    # Int.MAX itself parses (and then the body is too short: PROTOCOL_ERROR
+    # for the mismatch, not for the parse).
+    var out = c.handle_frame(
+        _post_with_content_lengths(7, [String("9223372036854775807")])
+    )
+    for f in out:
+        assert_false(f.header.type.value == FrameType.RST_STREAM().value)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -623,4 +706,6 @@ def main() raises:
     test_connection_receive_window_is_enforced()
     test_connection_receive_window_is_debited_and_credited()
     test_withheld_connection_credit_restores_the_receive_window()
-    print("test_h2_state: 26 passed")
+    test_content_length_overflow_and_duplicates_are_rejected()
+    test_content_length_valid_forms_still_complete()
+    print("test_h2_state: 28 passed")
