@@ -32,9 +32,9 @@ def ConvB (a b : Bytes) : Prop := b = a ∨ b = octetsToString a
 def Conv (e d : Entry) : Prop := ConvB e.name d.name ∧ ConvB e.value d.value
 
 theorem convB_len {a b : Bytes} (h : ConvB a b) : a.length ≤ b.length := by
-  rcases h with rfl | rfl
-  · exact Nat.le_refl _
-  · exact octetsToString_length_ge a
+  rcases h with h | h
+  · rw [h]; exact Nat.le_refl _
+  · rw [h]; exact octetsToString_length_ge a
 
 theorem conv_refl (e : Entry) : Conv e e := ⟨Or.inl rfl, Or.inl rfl⟩
 

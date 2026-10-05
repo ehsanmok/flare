@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: HPACK-01 fixed on fix/formal-findings
 """HPACK-01: non-UTF-8 header octets are stored lossily, so flare's HPACK
 dynamic table counts more bytes than the peer's and evicts entries the
 peer still references.
@@ -20,7 +21,7 @@ flare turns each 0xFF into U+FFFD (EF BF BD), stores a 3900-byte value,
 counts the entry as 3935 bytes and evicts "x-1". Stream 3: a GET that
 references index 63, which is "x-1" for the peer.
 
-Expected: stream 3 decodes with "x-1: aaa...". Actual: index 63 is out of
+Expected: stream 3 decodes with "x-1: aaa...". Before the fix: index 63 is out of
 range for flare's table, and the connection is torn down with
 GOAWAY(COMPRESSION_ERROR). The stored value of "x-2" is also mangled
 (3900 bytes instead of 1300).

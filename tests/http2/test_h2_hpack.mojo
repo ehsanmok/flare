@@ -369,6 +369,50 @@ def test_default_decoder_accepts_a_real_servers_huffman_headers() raises:
     assert_true(Http2ClientConfig().allow_huffman_decode)
 
 
+def _literal_with_indexing(name: String, value: List[UInt8]) -> List[UInt8]:
+    """Literal Header Field with Incremental Indexing, new name, no Huffman."""
+    var b = List[UInt8]()
+    b.append(UInt8(0x40))
+    b.append(UInt8(name.byte_length()))
+    for c in name.as_bytes():
+        b.append(c)
+    b.append(UInt8(0x7F))  # H=0, length prefix saturated: 127 + extension
+    var rest = len(value) - 127
+    while rest >= 128:
+        b.append(UInt8(0x80 | (rest & 0x7F)))
+        rest >>= 7
+    b.append(UInt8(rest))
+    for c in value:
+        b.append(c)
+    return b^
+
+
+def test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer() raises:
+    """HPACK-01: a legal value made of 0xFF octets must be stored byte for
+    byte. Rebuilding it as lossy UTF-8 (each bad octet becomes U+FFFD, 3
+    octets) made the entry bigger than the peer's, evicted entries the peer
+    still indexes, and killed the connection on the next block (RFC 7541
+    sec 4.1)."""
+    var dec = HpackDecoder()
+    var v1 = List[UInt8](length=500, fill=UInt8(ord("a")))
+    var v2 = List[UInt8](length=1300, fill=UInt8(0xFF))
+    _ = dec.decode(Span[UInt8, _](_literal_with_indexing("x-1", v1)))
+    var h2 = dec.decode(Span[UInt8, _](_literal_with_indexing("x-2", v2)))
+    # Stored and returned exactly as sent.
+    assert_equal(h2[0].value.byte_length(), 1300)
+    var raw = h2[0].value.as_bytes()
+    for i in range(1300):
+        assert_equal(Int(raw[i]), 0xFF)
+    # The peer's table: 535 + 1335 octets, both entries still present.
+    assert_equal(dec.dynamic_size, (3 + 500 + 32) + (3 + 1300 + 32))
+    var idx = List[UInt8]()
+    idx.append(UInt8(0x80 | 63))  # the second dynamic entry: x-1
+    var h3 = dec.decode(Span[UInt8, _](idx))
+    assert_equal(len(h3), 1)
+    assert_equal(h3[0].name, "x-1")
+    assert_equal(h3[0].value.byte_length(), 500)
+
+
 def main() raises:
     test_decode_integer_short()
     test_rfc_7541_c1_5bit_1337()
@@ -387,4 +431,5 @@ def main() raises:
     test_encoder_status_uses_static_name_index()
     test_decode_keeps_non_ascii_octets_exact()
     test_default_decoder_accepts_a_real_servers_huffman_headers()
-    print("test_h2_hpack: 17 passed")
+    test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer()
+    print("test_h2_hpack: 18 passed")

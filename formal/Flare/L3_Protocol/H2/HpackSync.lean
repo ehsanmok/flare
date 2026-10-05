@@ -5,8 +5,10 @@ import Flare.L3_Protocol.H2.HpackTable
 
 HPACK only works if the decoder's dynamic table mirrors the encoder's
 entry for entry. The peer's encoder indexes the *wire octets*; flare's
-decoder stores `_octets_to_string(octets)` (`hpack.mojo:49-63`), which
-rewrites any block containing a byte `≥ 0x80` with `utf8_lossy_string`.
+decoder stores `_octets_to_string(octets)` (`hpack.mojo:48-76`). Before the
+HPACK-01 fix that rewrote any block containing a byte `≥ 0x80` with
+`utf8_lossy_string` (`octetsToStringOld`); it now keeps the octets
+unchanged (`octetsToString`, `sync_exact_shipped`).
 
 Model: `conv : Bytes → Bytes` is the octet conversion. The peer's table is
 the RFC 7541 table over raw entries (`specInsert`); flare's is `Table`
@@ -122,20 +124,37 @@ theorem utf8Lossy_length_ge (l : Bytes) : l.length ≤ (utf8Lossy l).length := b
             List.length_nil]
           omega
 
-/-- mirrors flare/http2/hpack.mojo:49-63 @59bda50 -/
-def octetsToString (b : Bytes) : Bytes :=
+/-- The pre-fix conversion. mirrors flare/http2/hpack.mojo:49-63 @59bda50.
+Any block containing an octet `≥ 0x80` was rebuilt through
+`utf8_lossy_string`, so each malformed octet grew to U+FFFD (3 octets).
+Kept so that `Flare.Bugs.HPACK_01` can state the bug about a named
+definition; the shipped decoder no longer uses it. -/
+def octetsToStringOld (b : Bytes) : Bytes :=
   if b.any (fun x => x ≥ 0x80) then utf8Lossy b else b
 
-theorem octetsToString_length_ge (b : Bytes) : b.length ≤ (octetsToString b).length := by
-  unfold octetsToString; split
+theorem octetsToStringOld_length_ge (b : Bytes) : b.length ≤ (octetsToStringOld b).length := by
+  unfold octetsToStringOld; split
   · exact utf8Lossy_length_ge b
   · exact Nat.le_refl _
 
-theorem octetsToString_ascii (b : Bytes) (h : ∀ x ∈ b, x < 0x80) : octetsToString b = b := by
-  unfold octetsToString
+theorem octetsToStringOld_ascii (b : Bytes) (h : ∀ x ∈ b, x < 0x80) :
+    octetsToStringOld b = b := by
+  unfold octetsToStringOld
   have : b.any (fun x => x ≥ 0x80) = false := by
     rw [List.any_eq_false]; intro x hx; have := h x hx; simp; exact this
   simp [this]
+
+/-- The shipped conversion. mirrors flare/http2/hpack.mojo:48-76 (HPACK-01 fix):
+the octets are stored unchanged (`String(unsafe_from_utf8=b)`), so the table
+holds exactly the peer's entry sizes (RFC 7541 §4.1). -/
+def octetsToString (b : Bytes) : Bytes := b
+
+theorem octetsToString_id (b : Bytes) : octetsToString b = b := rfl
+
+theorem octetsToString_length_ge (b : Bytes) : b.length ≤ (octetsToString b).length :=
+  Nat.le_refl _
+
+theorem octetsToString_ascii (b : Bytes) (_h : ∀ x ∈ b, x < 0x80) : octetsToString b = b := rfl
 
 /-! ## Correspondence -/
 
@@ -335,5 +354,19 @@ theorem sync_exact (c : Bytes → Bytes) (j : Joint) (evs : List Ev) (j' : Joint
 invariant (no wrong header can ever be returned). -/
 theorem prefix_inv_flare : ∀ j, (jointLTS octetsToString).Reachable j → JInv octetsToString j :=
   prefix_inv octetsToString octetsToString_length_ge
+
+/-- The pre-fix conversion satisfied the same prefix invariant: wrong
+headers were never returned, only out-of-range indices (HPACK-01). -/
+theorem prefix_inv_old :
+    ∀ j, (jointLTS octetsToStringOld).Reachable j → JInv octetsToStringOld j :=
+  prefix_inv octetsToStringOld octetsToStringOld_length_ge
+
+/-- **Shipped decoder.** With the byte-exact conversion flare's table equals
+the peer's RFC 7541 table at every step, whatever octets the peer sends. -/
+theorem sync_exact_shipped (j : Joint) (evs : List Ev) (j' : Joint)
+    (h0 : j.dec.dyn = j.peer ∧ j.dec.maxSize = j.peerMax ∧ Inv j.dec)
+    (hr : (jointLTS octetsToString).Run j evs j') :
+    j'.dec.dyn = j'.peer ∧ j'.dec.maxSize = j'.peerMax ∧ Inv j'.dec :=
+  sync_exact octetsToString j evs j' (fun _ _ => rfl) h0 hr
 
 end Flare.L3.H2.Hpack

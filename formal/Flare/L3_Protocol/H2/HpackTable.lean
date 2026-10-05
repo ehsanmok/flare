@@ -8,9 +8,10 @@ import Flare.Core
 `_insert`, `_lookup`, and the size-update branch of `decode` (413-423).
 
 Entries hold the octets flare *stores*, which are the wire octets after
-`_octets_to_string` (49-63). That conversion is modelled by `octetsToString`
-with a local transliteration of `utf8_lossy_string`
-(`flare/http/proto/utf8.mojo:31-139`).
+`_octets_to_string` (48-76), which keeps them unchanged (`octetsToString`;
+the pre-fix lossy conversion is `octetsToStringOld`, with a local
+transliteration of `utf8_lossy_string`
+(`flare/http/proto/utf8.mojo:31-139`)).
 
 `dynamic_size` is a Mojo `Int`; it is modelled as `Nat`, and
 `Inv.size_eq` proves it always equals the sum of entry sizes, so the

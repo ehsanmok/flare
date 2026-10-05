@@ -35,7 +35,6 @@ from std.collections import Optional
 
 from flare.http.hpack_huffman_simd import huffman_decode_simd
 from flare.http.proto.ascii import ascii_unchecked_string
-from flare.http.proto.utf8 import utf8_lossy_string
 from flare.http.hpack_huffman import (
     huffman_decode,
     huffman_encode,
@@ -49,17 +48,24 @@ from flare.http.hpack_huffman import (
 def _octets_to_string(b: Span[UInt8, _]) -> String:
     """A header string's octets as a ``String``, byte for byte.
 
-    Building it with ``s += chr(byte)`` turned every byte >= 0x80 into a
-    two-byte code point: non-ASCII values reached handlers mangled, and
-    the dynamic table's ``name + value + 32`` accounting counted more
-    bytes than the peer did, so the two ends evicted at different times
-    and the connection died with COMPRESSION_ERROR. ASCII (nearly every
-    header) takes the unchecked fast path; anything else keeps valid
-    UTF-8 exactly and replaces only malformed sequences.
+    The octets are stored unchanged. RFC 7541 sec 4.1 sizes a dynamic table
+    entry as ``name + value + 32`` *octets*, and the encoder and decoder
+    must evict in lockstep, so the decoder must not change a field's
+    length. Two earlier versions did: ``s += chr(byte)`` turned every byte
+    >= 0x80 into a two-byte code point, and the lossy-UTF-8 version
+    replaced each malformed byte by U+FFFD (3 octets). Either way the
+    stored entry was larger than the peer's, the decoder evicted entries
+    the peer still indexed, and a legal block failed with
+    COMPRESSION_ERROR (HPACK-01).
+
+    The result is therefore an octet string that is not necessarily valid
+    UTF-8: RFC 9113 sec 8.2.1 allows any octet in a field value except NUL,
+    CR and LF. Consumers that need text must validate or convert it
+    themselves.
     """
     for i in range(len(b)):
         if b[i] >= 0x80:
-            return utf8_lossy_string(b)
+            return String(unsafe_from_utf8=b)
     return ascii_unchecked_string(b)
 
 

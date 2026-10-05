@@ -13,6 +13,8 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.L3.H2.Hpack.inv_insert
 #print axioms Flare.L3.H2.Hpack.inv_sizeUpdate
 #print axioms Flare.L3.H2.Hpack.utf8Lossy_length_ge
+#print axioms Flare.L3.H2.Hpack.sync_exact_shipped
+#print axioms Flare.L3.H2.Hpack.prefix_inv_old
 #print axioms Flare.L3.H2.Hpack.prefix_inv
 #print axioms Flare.L3.H2.Hpack.prefix_inv_flare
 #print axioms Flare.L3.H2.Hpack.lookup_sound
@@ -103,6 +105,8 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.H2_11.fixed
 #print axioms Flare.Bugs.HPACK_01.counterexample
 #print axioms Flare.Bugs.HPACK_01.fixed
+#print axioms Flare.Bugs.HPACK_01.fixed_shipped
+#print axioms Flare.Bugs.HPACK_01.fixed_real
 #print axioms Flare.Bugs.HPACK_02.counterexample
 #print axioms Flare.Bugs.HPACK_02.fixed
 #print axioms Flare.Bugs.HPACK_03.counterexample

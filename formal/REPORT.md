@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63247 lines) |
-| Theorems | 3318 |
-| Headline theorems in the axiom audit | 1111 |
+| Lean files | 298 (63311 lines) |
+| Theorems | 3325 |
+| Headline theorems in the axiom audit | 1115 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 113 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 114 of 138 |
 
 Six findings are rated high:
 
@@ -1198,15 +1198,15 @@ File: `H2/HpackTable.lean`.
 
 File: `H2/HpackSync.lean`.
 
-**Model.** `jointLTS c` runs a peer encoder table (the RFC spec on octets) and flare's decoder table side by side. Each step is a literal with incremental indexing, a size update, or a lookup. The decoder stores each field through a conversion `c`. `octetsToString` mirrors `hpack.mojo:49-63`, and `utf8Lossy` mirrors `http/proto/utf8.mojo:31-139`.
+**Model.** `jointLTS c` runs a peer encoder table (the RFC spec on octets) and flare's decoder table side by side. Each step is a literal with incremental indexing, a size update, or a lookup. The decoder stores each field through a conversion `c`. `octetsToStringOld` mirrors the pre-fix `hpack.mojo:49-63`, `octetsToString` is the shipped byte-exact conversion (`hpack.mojo:48-76`), and `utf8Lossy` mirrors `http/proto/utf8.mojo:31-139`.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `utf8Lossy_length_ge` | Lossy UTF-8 conversion never shortens a byte string. | proved |
 | `prefix_inv`, `prefix_inv_flare` | For any length-non-decreasing conversion, including flare's, the decoder table is always a converted *prefix* of the peer's table. | proved |
 | `lookup_sound` | Any dynamic index flare resolves maps to the peer's entry at that index (converted). A wrong header is impossible; the only failure is an out-of-range index. | proved |
-| `sync_exact` | If the conversion is the identity on every inserted field, the two tables stay equal. | proved |
-| `HPACK_01.counterexample` | With flare's conversion, a reachable joint state has the peer's index 63 valid while flare's lookup is out of range. | counterexample |
+| `sync_exact`, `sync_exact_shipped` | If the conversion is the identity on every inserted field, the two tables stay equal; the shipped conversion is the identity on everything. | proved |
+| `HPACK_01.counterexample` | With the pre-fix conversion, a reachable joint state has the peer's index 63 valid while flare's lookup is out of range. | counterexample |
 
 #### Header-block decoder and budget
 
@@ -2812,7 +2812,8 @@ advances the wheel to `now` at the top of every iteration
 | `Hpack.entrySize`, `evictLoop`, `insert`, `lookup` | http2/hpack.mojo:287-328 | `evict_spec`, `insert_spec`, `lookup_spec`, `inv_insert`, `specEvict_longest` | proved |
 | `Hpack.sizeUpdate` | http2/hpack.mojo:412-423 | `inv_sizeUpdate`, `sizeUpdate_guard` | proved |
 | `Hpack.utf8Lossy`, `step` | http/proto/utf8.mojo:31-139 | `utf8Lossy_length_ge` | proved |
-| `Hpack.octetsToString` | http2/hpack.mojo:49-63 | `prefix_inv_flare`, `lookup_sound`; `HPACK_01.counterexample`, `HPACK_01.fixed` | counterexample |
+| `Hpack.octetsToStringOld` | http2/hpack.mojo:49-63 @59bda50 (pre-fix) | `prefix_inv_old`, `lookup_sound`; `HPACK_01.counterexample` | counterexample |
+| `Hpack.octetsToString` | http2/hpack.mojo:48-76 | `prefix_inv_flare`, `sync_exact_shipped`; `HPACK_01.fixed_shipped`, `fixed_real` | proved |
 | `Hpack.decodeLoop` | http2/hpack.mojo:356-441 | `decode_budget_impl`, `decode_table_inv`, `decode_encode`; `HPACK_02.counterexample` | counterexample |
 | `Hpack.decodeLoopFixed` | fix of hpack.mojo:378-384 | `decode_budget_fixed`, `HPACK_02.fixed` | proved |
 | `Hpack.encodeField` | http2/hpack.mojo:494-512 | `decode_encode` | proved |
@@ -3072,7 +3073,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-18 | Low | open | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
 | H2-19 | Low | open | WINDOW_UPDATE is sent on a stream that the DATA frame just closed | `Flare/Bugs/H2_19.lean` | `repro/H2-19_window_update_on_closed_stream.mojo` (any) |
 | H2-20 | Low | open | DATA on a stream the server reset draws PROTOCOL_ERROR, not STREAM_CLOSED | `Flare/Bugs/H2_20.lean` | `repro/H2-20_data_after_rst_wrong_code.mojo` (any) |
-| HPACK-01 | Medium | open | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
+| HPACK-01 | Medium | resolved | lossy UTF-8 conversion desynchronises the dynamic table | `Flare/Bugs/HPACK_01.lean` | `repro/HPACK-01_lossy_eviction_drift.mojo` (any) |
 | HPACK-02 | Low | open | the decode budget never counts the last header | `Flare/Bugs/HPACK_02.lean` | `repro/HPACK-02_budget_skips_last_header.mojo` (any) |
 | HPACK-03 | Medium | open | the decoder shrinks its table before the peer can know | `Flare/Bugs/HPACK_03.lean` | `repro/HPACK-03_table_size_before_ack.mojo` (any) |
 | QUIC-01 | Medium | resolved | an unknown frame's body is parsed as further frames | `Flare/Bugs/QUIC_01.lean` | `repro/QUIC-01_unknown_frame_body_reparsed.mojo` (any) |
@@ -4245,6 +4246,8 @@ Status: resolved. Fixed in `client.mojo`: the PUSH_PROMISE special case (RST_STR
 - **Flip:** `OK: DATA on the reset stream drew STREAM_CLOSED (GOAWAY 5 / RST -1 )`. `test_h2_client_conn` (11), `test_h2_streaming_state` (10), `test_h2_state` (23), `test_h2_server` (10), `test_h2_conn_handle` (3), `test_h2_extended_connect` (5) and `test_h2_per_stream_cancel` (6) passed.
 
 #### HPACK-01: lossy UTF-8 conversion desynchronises the dynamic table
+
+Status: resolved. Fixed: `_octets_to_string` (`hpack.mojo:48-76`) stores the octets unchanged (`String(unsafe_from_utf8=b)`), so the dynamic table counts the same octets as the peer. Tests: `test_h2_hpack.mojo::test_invalid_utf8_value_keeps_the_table_in_step_with_the_peer`. Model: the old conversion is `octetsToStringOld`; `octetsToString` is now the identity; `HpackSync.sync_exact_shipped`, `Bugs.HPACK_01.fixed_shipped`, `fixed_real`; `counterexample` and `bug_real` stay about the pre-fix code.
 
 - **Severity:** Medium. A legal header block whose literal values contain non-UTF-8 octets, such as opaque tokens or Latin-1, makes later legal blocks fail with COMPRESSION_ERROR, which kills the connection. `lookup_sound` proves the failure can never be a *wrong* header.
 - **RFC:** RFC 7541 §2.3.2 and §4.1: the dynamic table, with sizes counted on octets (name + value + 32), must evolve identically at encoder and decoder. §2.3.3: index 63 is the second dynamic entry.

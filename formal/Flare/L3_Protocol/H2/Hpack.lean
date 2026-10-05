@@ -13,7 +13,7 @@ are explicit hypotheses (`Codec.Correct`), never axioms.
 
 Results:
 * `decode_encode`: for any header list whose octets survive
-  `_octets_to_string` unchanged (all ASCII, `octetsToString_ascii`) and
+  `_octets_to_string` unchanged (now every header, `octetsToString_id`) and
   whose strings are shorter than `2^31`, decoding flare's own encoding
   returns the same list and leaves the dynamic table untouched.
 * `decode_budget_impl`: the exact bound the shipped budget check gives:
