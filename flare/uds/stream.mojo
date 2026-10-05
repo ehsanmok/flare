@@ -31,6 +31,7 @@ from ..net import (
     NetworkError,
 )
 from ..net.socket import RawSocket, SOCK_STREAM
+from ..net._write_loop import _ChunkWriter, write_all_chunks
 from ..net._libc import (
     _close,
     _connect,
@@ -47,7 +48,7 @@ from ..net._libc import (
 from ._libc import AF_UNIX, SOCKADDR_UN_SIZE, fill_sockaddr_un
 
 
-struct UnixStream(Movable):
+struct UnixStream(Movable, _ChunkWriter):
     """A connected AF_UNIX byte stream.
 
     Owns a ``RawSocket`` (kind = ``SOCK_STREAM``, family =
@@ -154,13 +155,17 @@ struct UnixStream(Movable):
             raise NetworkError(_strerror(e.value) + " (send)", Int(e.value))
 
     def write_all(self, data: Span[UInt8, _]) raises:
-        """Write every byte of ``data``, looping until done."""
-        var p = data.unsafe_ptr()
-        var remaining = len(data)
-        while remaining > 0:
-            var got = self.write(p, remaining)
-            p = p.unsafe_offset(got)
-            remaining -= got
+        """Write every byte of ``data``, looping until done.
+
+        Raises :class:`BrokenPipe` on ``EPIPE`` and :class:`NetworkError` on
+        every other failure, including a ``send(2)`` return of 0 for a
+        non-empty buffer (no progress is possible).
+        """
+        write_all_chunks(self, data)
+
+    def _write_chunk(self, data: Span[UInt8, _]) raises -> Int:
+        """One ``write`` call; the ``_ChunkWriter`` hook for ``write_all``."""
+        return self.write(data.unsafe_ptr(), len(data))
 
     def shutdown_read(self) raises:
         """Half-close the read side (``SHUT_RD``)."""

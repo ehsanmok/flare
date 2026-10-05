@@ -12,6 +12,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.Socket.timeval_fits
 #print axioms Flare.L2.Socket.accept_nodelay_safe
 -- Write / read loops
+#print axioms Flare.L2.WriteLoop.writeAll_terminates_weak
 #print axioms Flare.L2.WriteLoop.writeAll_terminates_strong
 #print axioms Flare.L2.WriteLoop.writeAll_no_overshoot
 #print axioms Flare.L2.WriteLoop.udsWriteAll_eq
@@ -95,6 +96,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.NET_01.recvFromFixed_correct
 #print axioms Flare.Bugs.NET_02.writeAll_livelock
 #print axioms Flare.Bugs.NET_02.writeAllFixed_terminates
+#print axioms Flare.Bugs.NET_02.writeAll_zero_raises
 #print axioms Flare.Bugs.NET_03.huge_ttl_never_hits
 #print axioms Flare.Bugs.NET_03.huge_ttl_trace
 #print axioms Flare.Bugs.NET_03.store_exceeds_max_at_INT_MAX

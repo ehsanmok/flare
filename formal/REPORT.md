@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61393 lines) |
-| Theorems | 3230 |
-| Headline theorems in the axiom audit | 1032 |
+| Lean files | 298 (61424 lines) |
+| Theorems | 3232 |
+| Headline theorems in the axiom audit | 1034 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 37 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 38 of 138 |
 
 Six findings are rated high:
 
@@ -614,19 +614,20 @@ incarnation at a time; kernel fd reuse is modelled as a new incarnation.
 
 #### Write and read loops (`WriteLoop.lean`)
 
-`TcpStream.write`/`write_all`/`read_exact` (tcp/stream.mojo:429-519),
-`UnixStream.write_all` (uds/stream.mojo:140-163) and `writev_buf_all`
+`TcpStream.write`/`write_all`/`read_exact` (tcp/stream.mojo:429-545, the
+`write_all` loop is net/_write_loop.mojo:22-55),
+`UnixStream.write_all` (uds/stream.mojo:140-170) and `writev_buf_all`
 (runtime/iovec.mojo:312-361), each a loop over a syscall oracle with explicit
 fuel. `Strong` is the contract "`send` returns `1..len` or an error", `Weak`
 (POSIX) also allows 0.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `writeAll_terminates_strong` | Under `Strong`, with fuel `total - sent`, `write_all` sends exactly `total` bytes or raises. | proved |
+| `writeAll_terminates_weak` | Under `Weak` (POSIX, `send` may return 0), with fuel `total - sent`, `write_all` sends exactly `total` bytes or raises. | proved |
+| `writeAll_terminates_strong` | The same under `Strong` (special case). | proved |
 | `writeAll_no_overshoot` | Under `Weak`, `write_all` never counts more than `total` bytes. | proved |
 | `udsWriteAll_eq` | The UDS loop equals the TCP loop. | proved |
-| `writeAll_livelock_weak` | Under `Weak` with a 0-returning `send`, the loop never terminates. | counterexample (NET-02) |
-| `writeAllFixed_terminates_weak` | Raising on a 0 return terminates under `Weak`. | proved |
+| `writeAllOld_livelock_weak` | Pre-fix loop: under `Weak` with a 0-returning `send`, it never terminates. | counterexample (NET-02, resolved) |
 | `readExact_terminates` | Under `RecvContract`, `read_exact` returns exactly `size` bytes or raises. | proved |
 | `writevAll_strong` | Under `Strong` and the caller precondition `total_bytes = Σ len_i`, `writev_buf_all` returns normally only with every byte written; `first` is monotone and bounded. | proved |
 | `writevAll_understated`, `writevAll_overstated` | A wrong `total_bytes` makes the loop return early. | counterexample (caller precondition, not filed) |
@@ -648,7 +649,7 @@ contract (each read returns `0..cap` bytes) is a hypothesis.
 
 #### connect_timeout (`ConnectTimeout.lean`)
 
-tcp/stream.mojo:254-333 (Linux path) as a function of an oracle record of
+tcp/stream.mojo:255-334 (Linux path) as a function of an oracle record of
 syscall results.
 
 | Lean name | Statement | Status |
@@ -2705,12 +2706,13 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.Socket.signalAndClose`, `freeResources` | flare/runtime/scheduler.mojo:655-668, 713-725 | `sched_patch_closes_once`, `sched_unpatched_double_close` | proved |
 | `Flare.L2.Socket.timeval` | flare/net/socket.mojo:481-509 | `timeval_exact`, `timeval_fits`, `timeval_negative` | proved |
 | `Flare.L2.Socket.acceptImpl` | flare/tcp/listener.mojo:165-201, 248-282 | `accept_nodelay_safe`, `NET_05.accept_leaks_on_decode_error` | proved; counterexample (NET-05) |
-| `Flare.L2.WriteLoop.write`, `writeAll` | flare/tcp/stream.mojo:458-519 | `writeAll_terminates_strong`, `writeAll_no_overshoot`, `writeAll_livelock_weak` | proved; counterexample (NET-02) |
-| `Flare.L2.WriteLoop.udsWriteAll` | flare/uds/stream.mojo:140-163 | `udsWriteAll_eq` | proved |
+| `Flare.L2.WriteLoop.write` | flare/tcp/stream.mojo:481-523 | `writeAll_terminates_weak` | proved |
+| `Flare.L2.WriteLoop.writeAll` | flare/net/_write_loop.mojo:22-55 | `writeAll_terminates_weak`, `writeAll_terminates_strong`, `writeAll_no_overshoot`, `writeAllOld_livelock_weak` | proved; counterexample (NET-02, resolved) |
+| `Flare.L2.WriteLoop.udsWriteAll` | flare/uds/stream.mojo:140-170 | `udsWriteAll_eq` | proved |
 | `Flare.L2.WriteLoop.readExact` | flare/tcp/stream.mojo:429-456 | `readExact_terminates` | proved |
 | `Flare.L2.WriteLoop.writevAll`, `consume` | flare/runtime/iovec.mojo:312-361 | `writevAll_strong`, `RT_02.writev_silent_short_write` | proved; counterexample (RT-02) |
 | `Flare.L2.BufReader.consume`, `readExact`, `fillInt` | flare/io/buf_reader.mojo:117-266 | `consume_view`, `readExact_correct` | proved |
-| `Flare.L2.ConnectTimeout.run` | flare/tcp/stream.mojo:254-333 | `flags_restored`, `never_left_nonblocking` | proved |
+| `Flare.L2.ConnectTimeout.run` | flare/tcp/stream.mojo:255-334 | `flags_restored`, `never_left_nonblocking` | proved |
 | `Flare.L2.Reactor.interestToEpoll`, `epollToEventFlags` | flare/runtime/reactor.mojo:112-135 | `roundtrip_rw`, `read_interest_has_rdhup`, `readable_iff_in` | proved |
 | `Flare.L2.Reactor.register`, `registerExclusive`, `modify`, `unregister` | flare/runtime/reactor.mojo:290-479, 646-665 | `register_refines`, `unregister_always_removes`, `agree_*`, `fd_reuse_safe` | proved |
 | `Flare.L2.Reactor.kqueueEvents` | flare/runtime/reactor.mojo:586-604 | `dispatch_rw_equiv`, `error_differs` | proved |
@@ -2990,7 +2992,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | ENC-03 | High | resolved | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
 | ENC-04 | Medium | resolved | `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length | `Flare/Bugs/ENC_04.lean` | `repro/ENC-04_byte_reader_need_overflow.mojo` (any) |
 | NET-01 | High | resolved | `UdpSocket.recv_from` reports the wrong sender for IPv6 peers | `Flare/Bugs/NET_01.lean` | `repro/NET-01_udp_recvfrom_ipv6_sender.mojo` (any) |
-| NET-02 | Low | open | `write_all` livelocks if `send` returns 0 | `Flare/Bugs/NET_02.lean` | `repro/NET-02_write_all_zero_send_livelock.mojo` (any) |
+| NET-02 | Low | resolved | `write_all` livelocks if `send` returns 0 | `Flare/Bugs/NET_02.lean` | `repro/NET-02_write_all_zero_send_livelock.mojo` (any) |
 | NET-03 | Low | open | `DnsCache` with a very large TTL never serves a hit | `Flare/Bugs/NET_03.lean` | `repro/NET-03_dns_cache_ttl_overflow.mojo` (any) |
 | NET-04 | Medium | resolved | `FrameDemux.feed` re-delivers frames after a protocol error | `Flare/Bugs/NET_04.lean` | `repro/NET-04_frame_demux_redelivers_after_error.mojo` (any) |
 | NET-05 | Info | open | accepted fd leaks if the peer address fails to decode | `Flare/Bugs/NET_05.lean` | `repro/NET-05_accept_fd_leak_on_decode_error.mojo` (any) |
@@ -3285,8 +3287,9 @@ so the repro injects it.
 Spec: `write_all` writes every byte or raises.
 What goes wrong: tcp/stream.mojo:497-519 and uds/stream.mojo:156-163 add the
 return value to the progress counter without checking for 0.
-Lean: `Flare.Bugs.NET_02.writeAll_livelock`. Fix: raise on a 0 return;
-`writeAllFixed_terminates`.
+Lean: `Flare.Bugs.NET_02.writeAll_livelock` (about the pre-fix `writeAllOld`).
+Fix: raise on a 0 return; `writeAllFixed_terminates` (the shipped `writeAll`
+terminates under `Weak`).
 Repro: `formal/repro/NET-02_write_all_zero_send_livelock.mojo` (PLATFORM any,
 fault injection: `send` returns 0 for its first 1000 calls, then fails with
 EIO), observed on macOS and Linux (3/3 each)
@@ -3294,6 +3297,7 @@ EIO), observed on macOS and Linux (3/3 each)
 Flip (raise `NetworkError` when `write` returns 0 in `TcpStream.write_all`), on
 macOS and Linux:
 `OK: write_all raised after send returned 0 (send called 1 time(s)): NetworkError: send returned 0 (write_all)`, exit 0.
+Status: resolved. `TcpStream.write_all` and `UnixStream.write_all` now share `write_all_chunks` (`flare/net/_write_loop.mojo`), which raises `NetworkError("write_all: send returned 0 after n/total bytes")` when a chunk write makes no progress; the model's `writeAll` / `udsWriteAll` mirror it (pre-fix: `writeAllOld`, `udsWriteAllOld`). Tests (the loop is driven through a scripted `_ChunkWriter`, since no kernel returns 0 here): `tests/net/test_write_loop.mojo::test_write_all_raises_when_send_returns_zero`, `::test_write_all_raises_after_partial_progress_then_zero`, `::test_write_all_completes_through_partial_writes`, `::test_write_all_empty_data_makes_no_call`, `::test_write_all_propagates_writer_errors`.
 
 #### NET-03: `DnsCache` with a very large TTL never serves a hit
 

@@ -3,7 +3,7 @@ import Flare.Core
 /-!
 # `TcpStream.connect_timeout`, Linux path
 
-flare/tcp/stream.mojo:254-333: save flags (`F_GETFL`), set `O_NONBLOCK`,
+flare/tcp/stream.mojo:255-334: save flags (`F_GETFL`), set `O_NONBLOCK`,
 non-blocking `connect`, then on `EINPROGRESS` `poll(POLLOUT, timeout)`
 and `getsockopt(SO_ERROR)`. The model is an executable function over the
 syscall results (an oracle record) returning the sequence of flag writes
@@ -39,7 +39,7 @@ inductive Out where
   | refused | timedOut | netError (errno : Nat)
   deriving DecidableEq, Repr
 
-/-- mirrors flare/tcp/stream.mojo:254-333 @59bda50 -/
+/-- mirrors flare/tcp/stream.mojo:255-334 @59bda50 -/
 def run (o : Oracle) : List FlagOp × Out :=
   if o.getfl < 0 then ([], .netError 0)                     -- F_GETFL failed
   else

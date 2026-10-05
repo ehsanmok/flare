@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-02 fixed on fix/formal-findings
 """NET-02: TcpStream.write_all / UnixStream.write_all livelock if send(2)
 returns 0.
 
@@ -7,7 +8,7 @@ Flare.Bugs.NET_02.writeAllFixed_terminates (fix meets spec).
 flare/tcp/stream.mojo:497-519 and flare/uds/stream.mojo:156-163 @59bda50.
 
 Expected: write_all either writes every byte or raises.
-Actual: write() returns 0 when send returns 0, and write_all adds 0 to
+Before the fix: write() returns 0 when send returns 0, and write_all adds 0 to
 its progress and calls send again, forever. No supported kernel returns
 0 from send with len > 0 on a TCP socket, so the repro injects it: it
 compiles a small fault-injection library (interposing `send` through
@@ -81,8 +82,11 @@ def _sh(cmd: String) -> Int:
 
 
 def _parent() raises:
-    var dir = "/tmp/flare-repro-" + ID + "-" + String(
-        Int(external_call["getpid", Int32]())
+    var dir = (
+        "/tmp/flare-repro-"
+        + ID
+        + "-"
+        + String(Int(external_call["getpid", Int32]()))
     )
     if _sh("mkdir -p " + dir) != 0:
         print("inconclusive: cannot create", dir)
@@ -101,7 +105,11 @@ def _parent() raises:
         cc = "cc -shared -fPIC -o " + lib + " " + dir + "/fault.c -ldl"
         env = "LD_PRELOAD=" + lib
     if _sh(cc + " >" + dir + "/cc.log 2>&1") != 0:
-        print("inconclusive: no C compiler to build the fault injector (" + cc + ")")
+        print(
+            "inconclusive: no C compiler to build the fault injector ("
+            + cc
+            + ")"
+        )
         raise Error(ID + " inconclusive")
     # The conda linker's glibc stubs predate the versions Mojo's runtime
     # libraries reference; the real glibc resolves them at run time.
@@ -109,8 +117,26 @@ def _parent() raises:
     comptime if CompilationTarget.is_linux():
         flags = " -Xlinker --allow-shlib-undefined"
     var exe = dir + "/repro"
-    if _sh("mojo build -I ." + flags + " " + SELF + " -o " + exe + " >" + dir + "/build.log 2>&1") != 0:
-        print("inconclusive: mojo build of", SELF, "failed; see", dir + "/build.log")
+    if (
+        _sh(
+            "mojo build -I ."
+            + flags
+            + " "
+            + SELF
+            + " -o "
+            + exe
+            + " >"
+            + dir
+            + "/build.log 2>&1"
+        )
+        != 0
+    ):
+        print(
+            "inconclusive: mojo build of",
+            SELF,
+            "failed; see",
+            dir + "/build.log",
+        )
         raise Error(ID + " inconclusive")
     var rc = _sh(
         "FLARE_FAULT_CHILD=1 " + env + " " + exe + " >" + dir + "/out.log 2>&1"
@@ -152,14 +178,20 @@ def _child() raises:
     _ = s.peer_addr()
     var hits = _hits()
     if hits <= 0:
-        print("inconclusive: the send fault injector was not reached (hits =", hits, ")")
+        print(
+            "inconclusive: the send fault injector was not reached (hits =",
+            hits,
+            ")",
+        )
         raise Error(ID + " inconclusive")
     if hits > ZERO_CALLS:
         print(
             "BUG REPRODUCED: write_all of 100 bytes called send",
             hits - 1,
-            "times while send returned 0 (no progress) and only stopped when"
-            " the injected send failed with EIO:",
+            (
+                "times while send returned 0 (no progress) and only stopped"
+                " when the injected send failed with EIO:"
+            ),
             err,
         )
         raise Error(ID)
@@ -170,7 +202,12 @@ def _child() raises:
             "times (0 of 100 bytes written)",
         )
         raise Error(ID)
-    print("OK: write_all raised after send returned 0 (send called", hits, "time(s)):", err)
+    print(
+        "OK: write_all raised after send returned 0 (send called",
+        hits,
+        "time(s)):",
+        err,
+    )
 
 
 def main() raises:

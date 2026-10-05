@@ -25,30 +25,55 @@ inductive Res where
 
 /-- One `TcpStream.write`: `send` result `r`; `r > 0` and `r = 0` are both
 returned, `r < 0` raises (EINTR retry is absorbed into the oracle).
-mirrors flare/tcp/stream.mojo:458-495 @59bda50 -/
+mirrors flare/tcp/stream.mojo:481-523 @59bda50 -/
 def write (r : Int) : Option Nat := if r < 0 then none else some r.toNat
 
-/-- `TcpStream.write_all`: `while sent < total: sent += write(...)`.
-mirrors flare/tcp/stream.mojo:497-519 @59bda50 -/
+/-- Pre-fix `TcpStream.write_all`: `while sent < total: sent += write(...)`
+with no check for a 0 return (flare/tcp/stream.mojo:497-519 @59bda50). -/
+def writeAllOld (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
+  | 0, _, sent => if sent < total then .outOfFuel sent else .done sent
+  | fuel + 1, k, sent =>
+    if sent < total then
+      match write (o k (total - sent)) with
+      | none => .err
+      | some n => writeAllOld total o fuel (k + 1) (sent + n)
+    else .done sent
+
+/-- `write_all_chunks`, shared by `TcpStream.write_all` and
+`UnixStream.write_all`: a 0 return for a non-empty chunk raises.
+mirrors flare/net/_write_loop.mojo:22-55 (fixed, NET-02) -/
 def writeAll (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
   | 0, _, sent => if sent < total then .outOfFuel sent else .done sent
   | fuel + 1, k, sent =>
     if sent < total then
       match write (o k (total - sent)) with
       | none => .err
+      | some 0 => .err
       | some n => writeAll total o fuel (k + 1) (sent + n)
     else .done sent
 
-/-- `UnixStream.write_all` decrements `remaining` instead of incrementing
-`sent`; `write` returns `sent >= 0` and raises otherwise, so the loop is
-`writeAll` up to the change of variable `remaining = total - sent`.
-mirrors flare/uds/stream.mojo:140-163 @59bda50 -/
+/-- Pre-fix `UnixStream.write_all` decrements `remaining` instead of
+incrementing `sent`; `write` returns `sent >= 0` and raises otherwise, so the
+loop is `writeAllOld` up to the change of variable `remaining = total - sent`.
+(flare/uds/stream.mojo:140-163 @59bda50) -/
+def udsWriteAllOld (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
+  | 0, _, rem => if rem > 0 then .outOfFuel (total - rem) else .done (total - rem)
+  | fuel + 1, k, rem =>
+    if rem > 0 then
+      let r := o k rem
+      if r < 0 then .err else udsWriteAllOld total o fuel (k + 1) (rem - r.toNat)
+    else .done (total - rem)
+
+/-- `UnixStream.write_all` (now `write_all_chunks` as well): same loop with
+`remaining` in place of `sent`.
+mirrors flare/uds/stream.mojo:140-170 (fixed, NET-02) -/
 def udsWriteAll (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
   | 0, _, rem => if rem > 0 then .outOfFuel (total - rem) else .done (total - rem)
   | fuel + 1, k, rem =>
     if rem > 0 then
       let r := o k rem
-      if r < 0 then .err else udsWriteAll total o fuel (k + 1) (rem - r.toNat)
+      if r < 0 then .err else if r = 0 then .err
+      else udsWriteAll total o fuel (k + 1) (rem - r.toNat)
     else .done (total - rem)
 
 /-- The oracle obeys the strong send contract on every non-empty call. -/
@@ -56,12 +81,13 @@ def Strong (o : Nat → Nat → Int) : Prop := ∀ k len, 0 < len → SendContra
 /-- The oracle obeys the POSIX (weak) send contract. -/
 def Weak (o : Nat → Nat → Int) : Prop := ∀ k len, 0 < len → SendContract len (o k len)
 
-/-- Termination + exactness under the strong contract: with fuel at least
+/-- The fixed loop terminates under the *weak* contract: with fuel at least
 `total - sent`, `write_all` either sends exactly `total` bytes or raises.
 Measure: `total - sent` strictly decreases. -/
-theorem writeAll_terminates_strong (total : Nat) (o : Nat → Nat → Int) (h : Strong o) :
+theorem writeAll_terminates_weak (total : Nat) (o : Nat → Nat → Int) (h : Weak o) :
     ∀ fuel k sent, sent ≤ total → total - sent ≤ fuel →
-      writeAll total o fuel k sent = .done total ∨ writeAll total o fuel k sent = .err := by
+      writeAll total o fuel k sent = .done total ∨
+      writeAll total o fuel k sent = .err := by
   intro fuel
   induction fuel with
   | zero =>
@@ -74,16 +100,36 @@ theorem writeAll_terminates_strong (total : Nat) (o : Nat → Nat → Int) (h : 
     by_cases hlt : sent < total
     · rw [if_pos hlt]
       have hc := h k (total - sent) (by omega)
-      unfold SendContractStrong at hc
+      unfold SendContract at hc
       rcases hc with hneg | ⟨h1, h2⟩
       · right; simp [write, hneg]
-      · have : ¬ o k (total - sent) < 0 := by omega
-        simp only [write, this, if_false]
-        exact ih (k + 1) _ (by omega) (by omega)
+      · have hn : ¬ o k (total - sent) < 0 := by omega
+        simp only [write, hn, if_false]
+        by_cases h0 : o k (total - sent) = 0
+        · right; simp [h0]
+        · have hpos : (o k (total - sent)).toNat ≠ 0 := by omega
+          obtain ⟨m, hm⟩ : ∃ m, (o k (total - sent)).toNat = m + 1 :=
+            ⟨_, (Nat.succ_pred_eq_of_ne_zero hpos).symm⟩
+          rw [hm]
+          exact ih (k + 1) _ (by omega) (by omega)
     · rw [if_neg hlt]; left; congr; omega
 
+theorem strong_weak (o : Nat → Nat → Int) (h : Strong o) : Weak o := by
+  intro k len hl
+  have hc := h k len hl
+  unfold SendContractStrong at hc
+  unfold SendContract
+  omega
+
+/-- Termination + exactness under the strong contract (a special case of
+`writeAll_terminates_weak`). -/
+theorem writeAll_terminates_strong (total : Nat) (o : Nat → Nat → Int) (h : Strong o) :
+    ∀ fuel k sent, sent ≤ total → total - sent ≤ fuel →
+      writeAll total o fuel k sent = .done total ∨ writeAll total o fuel k sent = .err :=
+  writeAll_terminates_weak total o (strong_weak o h)
+
 /-- `write_all` never overshoots: whatever it returns, `sent ≤ total`
-under the weak contract (it may loop, but never counts phantom bytes). -/
+under the weak contract. -/
 theorem writeAll_no_overshoot (total : Nat) (o : Nat → Nat → Int) (h : Weak o) :
     ∀ fuel k sent n, sent ≤ total →
       (writeAll total o fuel k sent = .done n ∨ writeAll total o fuel k sent = .outOfFuel n) →
@@ -103,9 +149,15 @@ theorem writeAll_no_overshoot (total : Nat) (o : Nat → Nat → Int) (h : Weak 
       unfold SendContract at hc
       rcases hc with hneg | ⟨h1, h2⟩
       · simp [write, hneg] at hr
-      · have : ¬ o k (total - sent) < 0 := by omega
-        simp only [write, this, if_false] at hr
-        exact ih (k + 1) _ n (by omega) hr
+      · have hn : ¬ o k (total - sent) < 0 := by omega
+        simp only [write, hn, if_false] at hr
+        by_cases h0 : o k (total - sent) = 0
+        · simp [h0] at hr
+        · have hpos : (o k (total - sent)).toNat ≠ 0 := by omega
+          obtain ⟨m, hm⟩ : ∃ m, (o k (total - sent)).toNat = m + 1 :=
+            ⟨_, (Nat.succ_pred_eq_of_ne_zero hpos).symm⟩
+          rw [hm] at hr
+          exact ih (k + 1) _ n (by omega) hr
     · rw [if_neg hlt] at hr; simp at hr; omega
 
 /-- The UDS loop agrees with the TCP loop (change of variable). -/
@@ -131,8 +183,15 @@ theorem udsWriteAll_eq (total : Nat) (o : Nat → Nat → Int) (h : Weak o) :
       · simp [write, hneg]
       · have hn : ¬ o k (total - sent) < 0 := by omega
         simp only [write, hn, if_false]
-        have := ih (k + 1) (sent + (o k (total - sent)).toNat) (by omega)
-        rw [← this]; congr 1; omega
+        by_cases h0 : o k (total - sent) = 0
+        · simp [h0]
+        · have hpos : (o k (total - sent)).toNat ≠ 0 := by omega
+          obtain ⟨m, hm⟩ : ∃ m, (o k (total - sent)).toNat = m + 1 :=
+            ⟨_, (Nat.succ_pred_eq_of_ne_zero hpos).symm⟩
+          have := ih (k + 1) (sent + (o k (total - sent)).toNat) (by omega)
+          simp only [hn, h0, if_false]
+          rw [hm] at this ⊢
+          rw [← this]; congr 1; omega
     · rw [if_neg (by omega), if_neg hlt]; congr 1; omega
 
 /-- The constant-zero oracle: POSIX-legal, never makes progress. -/
@@ -141,60 +200,18 @@ def zeroOracle : Nat → Nat → Int := fun _ _ => 0
 theorem zeroOracle_weak : Weak zeroOracle := by
   intro k len _; unfold SendContract zeroOracle; omega
 
-/-- **Non-termination under the weak contract**: for every fuel the loop
-is still running with nothing sent (the state `sent = 0` repeats). -/
-theorem writeAll_livelock_weak (total : Nat) (htot : 0 < total) :
-    ∀ fuel k, writeAll total zeroOracle fuel k 0 = .outOfFuel 0 := by
+/-- **Non-termination of the pre-fix loop under the weak contract**: for
+every fuel the loop is still running with nothing sent (the state
+`sent = 0` repeats). -/
+theorem writeAllOld_livelock_weak (total : Nat) (htot : 0 < total) :
+    ∀ fuel k, writeAllOld total zeroOracle fuel k 0 = .outOfFuel 0 := by
   intro fuel
   induction fuel with
-  | zero => intro k; simp [writeAll, htot]
+  | zero => intro k; simp [writeAllOld, htot]
   | succ f ih =>
     intro k
-    simp only [writeAll, if_pos htot, zeroOracle, write]
+    simp only [writeAllOld, if_pos htot, zeroOracle, write]
     simpa using ih (k + 1)
-
-/-- Fixed `write_all`: treat a 0 return for a non-empty chunk as an error.
-mirrors flare/tcp/stream.mojo:497-519 @59bda50 (with the minimal fix) -/
-def writeAllFixed (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
-  | 0, _, sent => if sent < total then .outOfFuel sent else .done sent
-  | fuel + 1, k, sent =>
-    if sent < total then
-      match write (o k (total - sent)) with
-      | none => .err
-      | some 0 => .err
-      | some n => writeAllFixed total o fuel (k + 1) (sent + n)
-    else .done sent
-
-/-- The fixed loop terminates under the *weak* contract. -/
-theorem writeAllFixed_terminates_weak (total : Nat) (o : Nat → Nat → Int) (h : Weak o) :
-    ∀ fuel k sent, sent ≤ total → total - sent ≤ fuel →
-      writeAllFixed total o fuel k sent = .done total ∨
-      writeAllFixed total o fuel k sent = .err := by
-  intro fuel
-  induction fuel with
-  | zero =>
-    intro k sent hs hf
-    have : ¬ sent < total := by omega
-    left; simp [writeAllFixed, this]; omega
-  | succ f ih =>
-    intro k sent hs hf
-    simp only [writeAllFixed]
-    by_cases hlt : sent < total
-    · rw [if_pos hlt]
-      have hc := h k (total - sent) (by omega)
-      unfold SendContract at hc
-      rcases hc with hneg | ⟨h1, h2⟩
-      · right; simp [write, hneg]
-      · have hn : ¬ o k (total - sent) < 0 := by omega
-        simp only [write, hn, if_false]
-        by_cases h0 : o k (total - sent) = 0
-        · right; simp [h0]
-        · have hpos : (o k (total - sent)).toNat ≠ 0 := by omega
-          obtain ⟨m, hm⟩ : ∃ m, (o k (total - sent)).toNat = m + 1 :=
-            ⟨_, (Nat.succ_pred_eq_of_ne_zero hpos).symm⟩
-          rw [hm]
-          exact ih (k + 1) _ (by omega) (by omega)
-    · rw [if_neg hlt]; left; congr; omega
 
 /-! ## read_exact -/
 

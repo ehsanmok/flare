@@ -40,6 +40,7 @@ from ..net import (
     DnsError,
 )
 from ..io.buf_reader import Readable
+from ..net._write_loop import _ChunkWriter, write_all_chunks
 from ..net.socket import (
     RawSocket,
     AF_INET,
@@ -90,7 +91,7 @@ def _do_flare_connect_timeout(
     return fn_ct(fd, sa_addr, sa_len, timeout_ms)
 
 
-struct TcpStream(Movable, Readable):
+struct TcpStream(Movable, Readable, _ChunkWriter):
     """A connected TCP socket.
 
     Owns a ``RawSocket`` and exposes blocking read/write operations.
@@ -529,22 +530,19 @@ struct TcpStream(Movable, Readable):
 
         Raises:
             BrokenPipe: If the peer closes before all bytes are sent.
-            NetworkError: For any other OS write error.
+            NetworkError: For any other OS write error, or if ``send(2)``
+                returns 0 for a non-empty buffer (no progress is possible).
 
         Example:
             ```mojo
             stream.write_all("Hello, server!".as_bytes())
             ```
         """
-        var total = len(data)
-        var ptr = data.unsafe_ptr()
-        var sent = 0
-        while sent < total:
-            var chunk = Span[UInt8, _](
-                unsafe_ptr=ptr.unsafe_offset(sent), length=total - sent
-            )
-            var n = self.write(chunk)
-            sent += n
+        write_all_chunks(self, data)
+
+    def _write_chunk(self, data: Span[UInt8, _]) raises -> Int:
+        """One ``write`` call; the ``_ChunkWriter`` hook for ``write_all``."""
+        return self.write(data)
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
