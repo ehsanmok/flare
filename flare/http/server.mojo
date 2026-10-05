@@ -50,7 +50,7 @@ from .alpn_dispatch import (
 )
 from ..http2.server import Http2Config
 from ..ws.server_h2 import WsH2Handler, WsH2Hooks
-from ..errors import map_handler_error
+from ..errors import map_handler_error, log_handler_error
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 from ..quic.server import QuicListener, QuicServerConfig
@@ -87,9 +87,11 @@ def _serve_h3_stream[
     try:
         var req = listener.take_http3_request(slot, stream_id)
         var expose = req.expose_errors
+        var request_id = req.headers.get("x-request-id")
         try:
             resp = handler.serve(req^).lower()
         except e:
+            log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose)
             resp = Response(status=mapped.status, reason=mapped.reason)
     except:

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63560 lines) |
+| Lean files | 298 (63575 lines) |
 | Theorems | 3344 |
 | Headline theorems in the axiom audit | 1134 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 136 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 137 of 138 |
 
 Six findings are rated high:
 
@@ -3145,7 +3145,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | DOC-01 | Medium | resolved | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-02 | Low | resolved | an unmasked client frame is refused without the promised CLOSE 1002 | `Flare/Bugs/DOC_02.lean` | `repro/DOC-02_ws_unmasked_frame_no_1002.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-03 | Medium | resolved | the HTTP/2 client treats DATA before the response HEADERS as a connection error | `Flare/Bugs/DOC_03.lean` | `repro/DOC-03_h2_client_data_before_headers_conn_error.mojo` (any) |
-| DOC-04 | Low | open | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
+| DOC-04 | Low | resolved | sanitised error responses are not logged with the request id | `Flare/Bugs/DOC_04.lean` | `repro/DOC-04_handler_error_not_logged.mojo` (any (loopback TCP in-process; no external network)) |
 | DOC-05 | Low | open | `serve_cancellable`, `serve_view` and `serve_static` silently ignore extra listeners | `Flare/Bugs/DOC_05.lean` | `repro/DOC-05_serve_variants_ignore_extra_listeners.mojo` (any (loopback TCP, forked server child)) |
 | DOC-06 | Medium | resolved | sessions have no server-side expiry by default | `Flare/Bugs/DOC_06.lean` | `repro/DOC-06_session_no_server_side_expiry.mojo` (any (pure in-process)) |
 | DOC-07 | Medium | resolved | `TlsAcceptor.reload()` does not rotate the session-ticket key | `Flare/Bugs/DOC_07.lean` | `repro/DOC-07_tls_reload_keeps_ticket_key.mojo` (any (loopback TCP + OpenSSL, forked server child; uses tests/certs)) |
@@ -5747,11 +5747,13 @@ Status: resolved. `flare/http2/state.mojo` resets the stream with PROTOCOL_ERROR
 
 #### DOC-04: sanitised error responses are not logged with the request id
 
+Status: resolved. New `log_error_response` / `log_handler_error` (`flare/errors.mojo`) write `[flare:<kind>] rid=<X-Request-Id or -> <message>` to stderr, with control bytes escaped. Every handler-error site calls it before mapping the error (`conn_handle.mojo`: `on_readable`, `on_readable_from_buf`, `on_readable_cancel`, `on_readable_view`; `_h2_conn_handle.mojo`: both dispatch paths; `server.mojo`: the HTTP/3 stream), and `Extracted.serve` passes the request id to `_bad_request_from_error` and the 401 path. `HttpStatusError` is not logged: its message was written for the client. Regression tests `tests/http/test_error_logging.mojo` (h1, cancel and view paths, extractor, no id, status error, escaping); the repro prints `OK:`. Lean: `handlerError` / `extractorError` are the shipped model, the `Old` variants keep the counterexample.
+
 - **Severity:** Low. This is lost observability, not exposure. When a handler raises, the client gets a fixed-body 500 and nothing at all is logged. Extractor failures are logged without the request id that would tie them to a request.
 - **Doc:** `docs/security.md:14` says "Logs carry the full message + request id". `docs/security.md:39-43` says the 4xx message is "logged with the request id" and "500 (handler raise) is the same: fixed body, full message logged with request id". `docs/features.md:673-674` makes the same claim.
 - **What goes wrong:** the handler-error branch of `on_readable` (`flare/http/_reactor/conn_handle.mojo:910-915`, and the same shape at 1007, 1083 and 1162, `flare/http/_h2_conn_handle.mojo:545, 980`, and `flare/http/server.mojo:86-100`) maps the error and logs nothing. `Extracted.serve` (`flare/http/extract.mojo:879-880`) passes only the error to `_bad_request_from_error`, which prints `[flare:bad-request] <msg>` (919) with no request id.
 - **Counterexample:** `Bugs.DOC_04.bug` and `counterexample`: the handler error appends no log line, and the extractor error appends a line without the request id.
-- **Fix:** `handlerErrorFixed` and `extractorErrorFixed` read `x-request-id` before the request is consumed and log it with the message. `fixed` proves the policy for both.
+- **Fix:** `handlerError` and `extractorError` (the shipped model; the `Old` variants are the pre-fix behaviour the counterexample is about) read `x-request-id` before the request is consumed and log it with the message. `fixed` proves the policy for both.
 - **Repro:** `formal/repro/DOC-04_handler_error_not_logged.mojo`. It captures fds 1 and 2 through a pipe and drives two in-process `ConnHandle`s: a handler raising `doc04-handler-secret` with `X-Request-Id: doc04-rid-500`, and a `QueryInt` extractor given `doc04-extract-secret` with `doc04-rid-400`.
 - **Observed:** `BUG REPRODUCED: handler 500 message logged with request id: False (message logged at all: False ); extractor 400 message logged with request id: False ; captured log: '[flare:bad-request]  expected integer, got \'doc04-extract-secret\'\n'`
 - **Flip** (`conn_handle.mojo`: keep `req.headers.get("x-request-id")` before `serve` and print it with the message in the `except`; `extract.mojo:879`: print the request id with the message before `_extractor_error_response`): `OK: both error messages are logged with their request ids`, exit 0.

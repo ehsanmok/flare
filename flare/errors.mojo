@@ -82,6 +82,7 @@ Both types are ``Copyable`` (which implies ``Movable``) and
 
 from std.collections import Optional
 from std.format import Writable, Writer
+from std.io.file_descriptor import FileDescriptor
 
 
 comptime HTTP_STATUS_ERROR_PREFIX: String = "HttpStatusError("
@@ -299,6 +300,65 @@ def map_handler_error(error_str: String, expose: Bool) -> MappedHandlerError:
     if expose:
         return MappedHandlerError(500, error_str)
     return MappedHandlerError(500, "Internal Server Error")
+
+
+def _escape_log_bytes(s: String) -> String:
+    """Replace ASCII control bytes with ``\\xNN`` so a message or request id
+    built from request bytes cannot forge or split a log line."""
+    var out = List[UInt8](capacity=s.byte_length())
+    for b in s.as_bytes():
+        if b < 0x20 or b == 0x7F:
+            var hexd = "0123456789abcdef".as_bytes()
+            out.append(UInt8(ord("\\")))
+            out.append(UInt8(ord("x")))
+            out.append(hexd[Int(b >> 4)])
+            out.append(hexd[Int(b & 0x0F)])
+        else:
+            out.append(b)
+    return String(unsafe_from_utf8=out)
+
+
+def format_error_log(
+    kind: String, request_id: String, message: String
+) -> String:
+    """Render the log line for a sanitised error response.
+
+    Format: ``[flare:<kind>] rid=<request id or -> <full message>``. The
+    request id is the inbound ``X-Request-Id`` header (``-`` when the
+    request carried none). Control bytes in the id and the message are
+    escaped, so the line is always one line.
+    """
+    var rid = _escape_log_bytes(
+        request_id
+    ) if request_id.byte_length() > 0 else String("-")
+    return String(
+        "[flare:", kind, "] rid=", rid, " ", _escape_log_bytes(message)
+    )
+
+
+def log_error_response(kind: String, request_id: String, message: String):
+    """Log the full message of an error whose response body is sanitised.
+
+    Writes :func:`format_error_log` to stderr. This is the server-side
+    half of the sanitised-error policy (``docs/security.md``): the client
+    gets a fixed status reason, the operator gets the message and the
+    request id that ties it to a request.
+    """
+    print(format_error_log(kind, request_id, message), file=FileDescriptor(2))
+
+
+def log_handler_error(request_id: String, error_str: String):
+    """Log an uncaught handler error, as ``[flare:handler-error]``.
+
+    Skips :struct:`HttpStatusError`: its message was written by the
+    handler for the client and is sent as is, so there is nothing hidden
+    to log. Every other error (a plain ``Error``, ``ValidationError``)
+    maps to a fixed status reason unless ``expose_error_messages`` is on,
+    and is logged in full either way.
+    """
+    if parse_status_error(error_str):
+        return
+    log_error_response("handler-error", request_id, error_str)
 
 
 # ── IoError ─────────────────────────────────────────────────────────────────

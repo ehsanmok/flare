@@ -771,8 +771,9 @@ caller can distinguish recoverable from terminal cases.
 | WebSocket | `WsHandshakeError`, `WsProtocolError` |
 | UDP | `DatagramTooLarge` |
 
-Sanitised 4xx / 5xx bodies: extractor messages are logged with the
-request id but never echoed to the client. See
+Sanitised 4xx / 5xx bodies: extractor messages and the messages of
+handlers that raise are logged to stderr with the request id
+(`X-Request-Id`, `-` when absent) but never echoed to the client. See
 [`security.md`](security.md) for the full policy.
 
 ## Configuration knobs

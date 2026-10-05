@@ -38,10 +38,18 @@ Default behaviour:
   (e.g. `"Bad Request"`, `"Not Found"`). The raised error message is
   **not** copied into the response.
 - The full message (including any user input the extractor was
-  parsing) is **logged** with the request id, so production debugging
-  works.
+  parsing) is **logged** to stderr with the request id, so production
+  debugging works. A line looks like
+  `[flare:bad-request] rid=<id> <message>`; the id is the inbound
+  `X-Request-Id` header, or `-` when the request carried none (an id
+  that `RequestId` generates itself is not known at the error site).
+  Control bytes in the id and the message are escaped, so a hostile
+  value cannot split or forge a log line.
 - 500 (handler `raise`) is the same: fixed body, full message
-  logged with request id.
+  logged with request id as `[flare:handler-error] rid=<id> <message>`.
+  This holds on the HTTP/1.1, HTTP/2 and HTTP/3 paths. A handler that
+  raises `HttpStatusError` chose its message for the client, so that
+  one is sent as is and not logged.
 
 Local-development opt-in:
 

@@ -1,4 +1,5 @@
 # PLATFORM: any (loopback TCP in-process; no external network)
+# RESOLVED: DOC-04 fixed on fix/formal-findings
 """DOC-04: a handler that raises gets a sanitised 500, but its message is
 never logged, and the one sanitised error path that does log (extractor
 400s) logs without the request id.
@@ -31,7 +32,7 @@ the pipe (proves the capture works).
 
 Expected: the captured log holds "doc04-handler-secret" together with
 "doc04-rid-500", and "doc04-extract-secret" together with "doc04-rid-400".
-Actual: the handler message is absent and neither request id is logged.
+Before the fix: the handler message is absent and neither request id is logged.
 
 Minimal fix: in both places, read `req.headers.get("x-request-id")`
 before the request is consumed and log "[flare:<kind>] rid=<id> <msg>"
@@ -103,7 +104,10 @@ def main() raises:
         var h500 = FnHandler(_boom)
         wire_a = _drive(
             h500,
-            "GET /boom HTTP/1.1\r\nHost: a\r\nX-Request-Id: doc04-rid-500\r\n\r\n",
+            (
+                "GET /boom HTTP/1.1\r\nHost: a\r\nX-Request-Id:"
+                " doc04-rid-500\r\n\r\n"
+            ),
         )
         var h400 = Extracted[_NeedsInt]()
         wire_b = _drive(
@@ -133,14 +137,28 @@ def main() raises:
     if drive_err.byte_length() > 0:
         print("inconclusive: driving the connections raised:", drive_err)
         raise Error("setup")
-    if not wire_a.startswith("HTTP/1.1 500") or "doc04-handler-secret" in wire_a:
-        print("inconclusive: request A did not draw a sanitised 500:", repr(wire_a))
+    if (
+        not wire_a.startswith("HTTP/1.1 500")
+        or "doc04-handler-secret" in wire_a
+    ):
+        print(
+            "inconclusive: request A did not draw a sanitised 500:",
+            repr(wire_a),
+        )
         raise Error("setup")
-    if not wire_b.startswith("HTTP/1.1 400") or "doc04-extract-secret" in wire_b:
-        print("inconclusive: request B did not draw a sanitised 400:", repr(wire_b))
+    if (
+        not wire_b.startswith("HTTP/1.1 400")
+        or "doc04-extract-secret" in wire_b
+    ):
+        print(
+            "inconclusive: request B did not draw a sanitised 400:",
+            repr(wire_b),
+        )
         raise Error("setup")
     if "doc04-extract-secret" not in log:
-        print("inconclusive: the extractor log line was not captured:", repr(log))
+        print(
+            "inconclusive: the extractor log line was not captured:", repr(log)
+        )
         raise Error("setup")
 
     var lines = log.split("\n")

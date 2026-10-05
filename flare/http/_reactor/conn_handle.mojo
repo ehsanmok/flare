@@ -50,7 +50,7 @@ from std.ffi import c_int, c_size_t, ErrNo, get_errno
 from std.memory import unsafe_memcpy, stack_allocation
 
 from flare.crypto.hmac import base64url_decode
-from flare.errors import map_handler_error
+from flare.errors import map_handler_error, log_handler_error
 from flare.http.cancel import CancelCell, CancelReason
 from flare.http.handler import Handler, CancelHandler, ViewHandler
 from flare.http.headers import HeaderMap
@@ -979,10 +979,12 @@ struct ConnHandle(Movable):
 
         var final_close = self._apply_keepalive_policy(config, close_after)
         var expose_errors = req.expose_errors
+        var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
             resp = handler.serve(req^).lower()
         except e:
+            log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
@@ -1073,10 +1075,12 @@ struct ConnHandle(Movable):
 
         var final_close = self._apply_keepalive_policy(config, close_after)
         var expose_errors = req.expose_errors
+        var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
             resp = handler.serve(req^).lower()
         except e:
+            log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
@@ -1146,6 +1150,7 @@ struct ConnHandle(Movable):
         var close_after = _compute_close_after(req.headers, req.version)
         var final_close = self._apply_keepalive_policy(config, close_after)
         var expose_errors = req.expose_errors
+        var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
             # Hand the handler a cancel handle bound to this
@@ -1153,6 +1158,7 @@ struct ConnHandle(Movable):
             # call (it's owned by ``self``).
             resp = handler.serve(req^, self.cancel_cell.handle())
         except e:
+            log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
@@ -1232,6 +1238,7 @@ struct ConnHandle(Movable):
             try:
                 resp = handler.serve_view(view, self.cancel_cell.handle())
             except e:
+                log_handler_error(String(hv.get("x-request-id")), String(e))
                 var mapped = map_handler_error(
                     String(e), config.expose_error_messages
                 )

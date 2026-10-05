@@ -40,7 +40,7 @@ from std.ffi import c_int, c_size_t, ErrNo, get_errno
 from std.memory import Pointer, stack_allocation
 from std.memory.alloc import unsafe_alloc
 
-from flare.errors import map_handler_error
+from flare.errors import map_handler_error, log_handler_error
 from flare.http.cancel import Cancel, CancelCell, CancelReason
 from flare.http.handler import CancelHandler, Handler
 from flare.http.headers import HeaderMap
@@ -538,10 +538,12 @@ struct Http2ConnHandle(Movable):
             var req = self.h2.take_request(sid)
             req.peer = self.peer
             var expose_errors = req.expose_errors
+            var request_id = req.headers.get("x-request-id")
             var resp: Response
             try:
                 resp = handler.serve(req^).lower()
             except e:
+                log_handler_error(request_id, String(e))
                 var mapped = map_handler_error(String(e), expose_errors)
                 resp = Response(status=mapped.status, reason=mapped.reason)
             try:
@@ -973,10 +975,12 @@ struct Http2ConnHandle(Movable):
             req.peer = self.peer
             var cancel = Cancel(addr)
             var expose_errors = req.expose_errors
+            var request_id = req.headers.get("x-request-id")
             var resp: Response
             try:
                 resp = handler.serve(req^, cancel)
             except e:
+                log_handler_error(request_id, String(e))
                 var mapped = map_handler_error(String(e), expose_errors)
                 resp = Response(status=mapped.status, reason=mapped.reason)
             try:

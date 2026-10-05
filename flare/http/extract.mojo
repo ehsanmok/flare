@@ -135,6 +135,7 @@ from ._extract_typed import (
     OptionalPathStr,
 )
 from ..net import IpAddr, SocketAddr
+from ..errors import log_error_response
 
 
 # ── Scalar parsing helpers ──────────────────────────────────────────────────
@@ -877,12 +878,16 @@ struct Extracted[H: Copyable & Defaultable & Handler](Copyable, Handler):
                 ), "flare: every Handler field must implement Extractor"
                 field.apply(req)
             except e:
-                return _extractor_error_response(e, expose)
+                return _extractor_error_response(
+                    e, expose, req.headers.get("x-request-id")
+                )
         return h.serve(req).lower()
 
 
 @always_inline
-def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
+def _bad_request_from_error(
+    e: Error, expose: Bool = False, request_id: String = ""
+) -> Response:
     """Build a 400 Bad Request response from a raised extractor ``Error``.
 
     Default (production) behaviour, since : the response
@@ -910,13 +915,17 @@ def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
         expose: ``True`` to echo ``String(e)`` into the response body
                 (verbatim user input). ``False`` (default) to send
                 ``"Bad Request"`` and log the full message.
+        request_id: The request's ``X-Request-Id`` (empty when it has
+                none), logged next to the message so the line can be
+                tied to a request.
     """
     var msg = String(e)
     # Always log the raised message (with the user-controlled bytes)
     # so production debugging works even when the response body is
-    # sanitised. ``stderr`` is the conventional sink for flare
-    # diagnostics; ``[flare:bad-request]`` is the grep prefix.
-    print("[flare:bad-request] ", msg)
+    # sanitised. ``stderr`` is the sink; ``[flare:bad-request]`` is the
+    # grep prefix, followed by ``rid=<request id>``. Control bytes are
+    # escaped so the message cannot forge a log line.
+    log_error_response("bad-request", request_id, msg)
 
     var body_str = "Bad Request" if not expose else msg
     var body = List[UInt8](capacity=body_str.byte_length())
@@ -932,7 +941,9 @@ def _bad_request_from_error(e: Error, expose: Bool = False) -> Response:
     return resp^
 
 
-def _extractor_error_response(e: Error, expose: Bool = False) -> Response:
+def _extractor_error_response(
+    e: Error, expose: Bool = False, request_id: String = ""
+) -> Response:
     """Map an extractor's raised error to the right 4xx response.
 
     A failed ``Authorization`` parse (``flare.http.auth_extract``
@@ -954,7 +965,7 @@ def _extractor_error_response(e: Error, expose: Bool = False) -> Response:
     """
     var msg = String(e)
     if msg.startswith("AuthError("):
-        print("[flare:unauthorized] ", msg)
+        log_error_response("unauthorized", request_id, msg)
         var body_str = "Unauthorized" if not expose else msg
         var body = List[UInt8](capacity=body_str.byte_length())
         for b in body_str.as_bytes():
@@ -968,4 +979,4 @@ def _extractor_error_response(e: Error, expose: Bool = False) -> Response:
         except:
             pass
         return resp^
-    return _bad_request_from_error(e, expose)
+    return _bad_request_from_error(e, expose, request_id)
