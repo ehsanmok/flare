@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63442 lines) |
-| Theorems | 3337 |
-| Headline theorems in the axiom audit | 1127 |
+| Lean files | 298 (63452 lines) |
+| Theorems | 3338 |
+| Headline theorems in the axiom audit | 1128 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 124 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 125 of 138 |
 
 Six findings are rated high:
 
@@ -3067,7 +3067,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-12 | Low | resolved | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
 | H2-13 | Low | resolved | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
 | H2-14 | Low | resolved | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
-| H2-15 | Low | open | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
+| H2-15 | Low | resolved | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
 | H2-16 | Low | open | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
 | H2-17 | Medium | resolved | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
 | H2-18 | Low | open | the client raises on an oversized frame instead of FRAME_SIZE_ERROR | `Flare/Bugs/H2_18.lean` | `repro/H2-18_client_oversized_frame_raises.mojo` (any) |
@@ -4190,6 +4190,8 @@ Status: resolved. Fixed: the HALF_CLOSED_REMOTE test in the HEADERS branch (`sta
 - **Flip:** `OK: HEADERS on a HALF_CLOSED_REMOTE stream drew error code 5`. `test_h2_state` (23), `test_h2_client_conn` (11), `test_h2_streaming_state` (10), `test_h2_conn_handle` (3), `test_h2_server` (10) and `test_grpc_streaming` (6) passed.
 
 #### H2-15: the server treats an even, never-opened stream as closed
+
+Status: resolved. Fixed: `Connection._idle_id` (`state.mojo`) treats every even id as idle in server role, so WINDOW_UPDATE, RST_STREAM and DATA on one are connection errors PROTOCOL_ERROR. Tests: `test_h2_state.mojo::test_frames_on_an_even_stream_are_a_protocol_error_in_server_role`, `test_frames_on_a_finished_odd_stream_are_still_closed_not_idle`. Model: `Fix.shipped` carries `h2_15`; `Bugs.H2_15.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. Frames a client sends on an even stream id below its highest request id are treated as frames on a closed stream: WINDOW_UPDATE and RST_STREAM are ignored and DATA draws STREAM_CLOSED. The error class is wrong; nothing is lost.
 - **RFC:** RFC 9113 §5.1.1: even ids are server-initiated, and with push disabled the server never opens one, so every even id is idle. §5.1, idle: "Receiving any frame other than HEADERS or PRIORITY on a stream in this state MUST be treated as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."

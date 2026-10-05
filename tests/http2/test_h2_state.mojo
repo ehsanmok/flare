@@ -882,6 +882,51 @@ def test_a_positive_limit_still_admits_streams_up_to_it() raises:
     assert_equal(Int(second[0].payload[3]), 0x7)
 
 
+def _frame_on(ty: FrameType, sid: Int, payload: List[UInt8]) -> Frame:
+    var f = Frame()
+    f.header.type = ty.copy()
+    f.header.stream_id = sid
+    f.header.length = len(payload)
+    f.payload = payload.copy()
+    return f^
+
+
+def test_frames_on_an_even_stream_are_a_protocol_error_in_server_role() raises:
+    """H2-15: an even id is server-initiated and the server opens none, so
+    it is idle however high the client's request ids are. A WINDOW_UPDATE,
+    RST_STREAM or DATA on it is a connection error PROTOCOL_ERROR
+    (RFC 9113 sec 5.1, idle), not a frame on a closed stream (ignored, or
+    STREAM_CLOSED)."""
+    for kind in range(3):
+        var c = Connection()
+        _ = _open_request(c, 3, True)
+        var out: List[Frame]
+        if kind == 0:
+            out = c.handle_frame(
+                _frame_on(FrameType.WINDOW_UPDATE(), 2, _bytes([0, 0, 0, 1]))
+            )
+        elif kind == 1:
+            out = c.handle_frame(
+                _frame_on(FrameType.RST_STREAM(), 2, _bytes([0, 0, 0, 8]))
+            )
+        else:
+            out = c.handle_frame(_data_frame(2, 10))
+        assert_equal(_goaway_code(out), 1, "frame kind " + String(kind))
+
+
+def test_frames_on_a_finished_odd_stream_are_still_closed_not_idle() raises:
+    """H2-15: an odd id at or below the highest one used, and no longer in
+    the table, is closed: a late WINDOW_UPDATE is ignored."""
+    var c = Connection()
+    _ = _open_request(c, 1, True)
+    _ = _open_request(c, 3, True)
+    _ = c.streams.pop(1)
+    var out = c.handle_frame(
+        _frame_on(FrameType.WINDOW_UPDATE(), 1, _bytes([0, 0, 0, 1]))
+    )
+    assert_equal(_goaway_code(out), -1)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -921,4 +966,6 @@ def main() raises:
     test_well_formed_goaway_is_still_accepted()
     test_zero_concurrent_streams_refuses_every_stream()
     test_a_positive_limit_still_admits_streams_up_to_it()
-    print("test_h2_state: 38 passed")
+    test_frames_on_an_even_stream_are_a_protocol_error_in_server_role()
+    test_frames_on_a_finished_odd_stream_are_still_closed_not_idle()
+    print("test_h2_state: 40 passed")

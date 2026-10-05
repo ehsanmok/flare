@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-15 fixed on fix/formal-findings
 """H2-15: the HTTP/2 server treats a never-opened even stream id below the
 highest client stream id as closed instead of idle: RST_STREAM and
 WINDOW_UPDATE on it are silently accepted, and DATA on it draws
@@ -20,7 +21,7 @@ Trace: a client opens stream 3 (GET, END_STREAM); then, each on its own
 connection, sends WINDOW_UPDATE(stream 2), RST_STREAM(stream 2) and
 DATA(stream 2).
 
-Expected: GOAWAY(PROTOCOL_ERROR) for each. Actual: WINDOW_UPDATE and
+Expected: GOAWAY(PROTOCOL_ERROR) for each. Before the fix: WINDOW_UPDATE and
 RST_STREAM draw nothing; DATA draws GOAWAY(STREAM_CLOSED).
 
 Minimal fix: in server role an unknown even id is idle

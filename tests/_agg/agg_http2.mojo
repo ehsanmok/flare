@@ -459,6 +459,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_a_positive_limit_still_admits_streams_up_to_it as test_h2_state__test_a_positive_limit_still_admits_streams_up_to_it,
 )
+from test_h2_state import (
+    test_frames_on_an_even_stream_are_a_protocol_error_in_server_role as test_h2_state__test_frames_on_an_even_stream_are_a_protocol_error_in_server_role,
+)
+from test_h2_state import (
+    test_frames_on_a_finished_odd_stream_are_still_closed_not_idle as test_h2_state__test_frames_on_a_finished_odd_stream_are_still_closed_not_idle,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -819,6 +825,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_state__test_a_positive_limit_still_admits_streams_up_to_it
+    ]()
+    suite.test[
+        test_h2_state__test_frames_on_an_even_stream_are_a_protocol_error_in_server_role
+    ]()
+    suite.test[
+        test_h2_state__test_frames_on_a_finished_odd_stream_are_still_closed_not_idle
     ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[

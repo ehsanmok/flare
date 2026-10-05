@@ -13,6 +13,8 @@ ignored and DATA draws STREAM_CLOSED.
 RFC 9113 §5.1 idle: "Receiving any frame other than HEADERS or PRIORITY on
 a stream in this state MUST be treated as a connection error (Section
 5.4.1) of type PROTOCOL_ERROR."
+
+Status: resolved. `_idle_id` now also treats every even id as idle in server role. `Fix.shipped` carries `h2_15`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_15
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -44,5 +46,12 @@ theorem fixed_rst (fx : Fix) (c : Conn) (f : Fr) (hfx : fx.h2_15 = true) (hs : c
     (hm : mem c f.sid = false) : shapeCheck fx c f = some (connErr c ePROTOCOL) := by
   have hi := fixed fx c f.sid hfx hs he
   simp [shapeCheck, ht, h0, hp, hm, hi, tRST, tPING, tGOAWAY, tSETTINGS, tPRIORITY]
+
+/-- Shipped (`Fix.shipped` has `h2_15`): all three frames on the even,
+never-opened stream 2 are PROTOCOL_ERROR. -/
+theorem fixed_shipped : lastOut Fix.shipped {} (tr (wuF 2 1)) = some [.goaway 3 ePROTOCOL] ∧
+    lastOut Fix.shipped {} (tr (rstF 2)) = some [.goaway 3 ePROTOCOL] ∧
+    lastOut Fix.shipped {} (tr (dataF 2 1 false)) = some [.goaway 3 ePROTOCOL] := by
+  native_decide
 
 end Flare.Bugs.H2_15

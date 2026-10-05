@@ -210,11 +210,11 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-11, H2-12, H2-13, H2-14, H2-17. -/
+finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-11, H2-12, H2-13, H2-14, H2-15, H2-17. -/
 def Fix.shipped : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true, h2_06 := true,
     h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_11 := true, h2_12 := true,
-    h2_13 := true, h2_14 := true, h2_17 := true }
+    h2_13 := true, h2_14 := true, h2_15 := true, h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -469,7 +469,7 @@ stream: above the peer's high-water mark (`state.mojo:1099,1238,1351`), or,
 with the H2-03 fix in client role, even or above our own highest id, and
 with the H2-15 fix in server role, even (server-initiated, never opened).
 mirrors flare/http2/state.mojo:571-583 (`_idle_id`; fixed, H2-03; the
-server-role even-id rule is H2-15, not yet shipped) -/
+server-role even-id rule is H2-15, fixed) -/
 def isIdleId (fx : Fix) (c : Conn) (k : Nat) : Bool :=
   if fx.h2_03 && c.isClient then decide (k > c.maxLocalSid) || k % 2 == 0
   else if fx.h2_15 && !c.isClient then decide (k > c.lastPeer) || k % 2 == 0

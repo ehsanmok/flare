@@ -575,14 +575,18 @@ struct Connection(Copyable, Defaultable):
         stream (RFC 9113 sec 5.1), as opposed to one already closed and
         dropped from the table.
 
-        Server role: ids above the highest the peer opened. Client role:
+        Server role: ids above the highest the peer opened, and every even
+        id. Client role:
         ``last_peer_stream_id`` stays 0, so use the highest id this client
         opened; an even id is server-initiated and, with push disabled, is
         never opened (H2-03).
         """
         if self.is_client:
             return sid > self.max_local_stream_id or (sid % 2) == 0
-        return sid > self.last_peer_stream_id
+        # Server role: a client opens only odd ids (sec 5.1.1) and the
+        # server opens none (push is disabled), so every even id is idle
+        # whatever the highest request id is (H2-15).
+        return sid > self.last_peer_stream_id or (sid % 2) == 0
 
     def _prune_threshold(self) -> Int:
         var t = self.max_concurrent_streams * 2
