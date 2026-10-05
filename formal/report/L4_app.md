@@ -120,8 +120,8 @@ is a comma list of tokens, trimmed of OWS and compared case-insensitively.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.KeepAlive.computeCloseAfterFixed_eq_spec` | the token-splitting fix equals the spec for every header value and version | proved |
-| `Flare.L4.KeepAlive.computeCloseAfter_single` | when the value is a single token, the shipped function already equals the spec | proved |
+| `Flare.L4.KeepAlive.computeCloseAfter_eq_spec` | the shipped token-splitting `_compute_close_after` (fixed, APP-03) equals the spec for every header value and version | proved |
+| `Flare.L4.KeepAlive.computeCloseAfterOld_single` | when the value is a single token, the pre-fix function already equals the spec | proved |
 | `Flare.L4.KeepAlive.wantsClose_spec` | the shipped line-start, scan-all `_wants_close` (fixed, APP-02) returns true whenever some header line is `Connection` with a close verdict | proved |
 | `Flare.L4.KeepAlive.wantsClose_sound_close`, `wantsCloseOld_sound_close` | on an HTTP/1.1 request line the shipped scan reports close only for a `Connection` line at a line start with a close verdict; the pre-fix scan only for some `connection:` match | proved |
 
@@ -668,9 +668,9 @@ compares the whole value with `close` and `keep-alive`. The values
 `keep-alive, close` and `TE, close` match neither, and HTTP/1.1 defaults to
 keep-alive.
 
-**Lean.** `Flare.Bugs.APP_03.computeCloseAfter_misses_close` and
-`violates_spec`. The fix is proved sufficient by
-`computeCloseAfterFixed_meets_spec`, which is general.
+**Lean.** `Flare.Bugs.APP_03.computeCloseAfterOld_misses_close` and
+`violates_spec` (about the pre-fix function). The shipped function is proved
+to meet the spec by `computeCloseAfterFixed_meets_spec`, which is general.
 
 **Fix.** Split on `,`, trim OWS, lowercase, and test each token.
 
@@ -678,6 +678,8 @@ keep-alive.
 
 - Observed: `BUG REPRODUCED: _compute_close_after kept the connection alive for Connection: 'keep-alive, close' -> False and 'TE, close' -> False`
 - Flip: `OK: a close token inside a Connection list closes the connection`
+
+Status: resolved. `_compute_close_after` (slow path) and `_wants_close` now read the `Connection` value as a comma-separated option list (`_conn_token_mask`: split on `,`, trim OWS, case-fold), so `keep-alive, close` and `TE, close` close the connection; HTTP/1.0 stays open only with a `keep-alive` option. Tests: `tests/http/test_connection_keepalive_fastpath.mojo::test_compute_close_after_close_inside_option_list`, `::test_compute_close_after_option_list_without_close`, `::test_wants_close_option_list`. The model `computeCloseAfter`/`verdict` mirror the fix; `computeCloseAfterOld`/`verdictOld` are the pre-fix ones.
 
 ### APP-04: the static fast path sends the body in reply to HEAD
 
@@ -1410,7 +1412,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 | `Flare.L4.ConnSM.onWritable`, `onTimeout`, `step`, `lts` | conn_handle.mojo:1262-1375, 1403-1411 | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
 | `Flare.L4.ConnSM.Framing.serialize` | http/_reactor/write_path.mojo:151-155, 222-235 | `serialize_spec` | proved |
 | `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1220 | `headFlagFixed_spec`, `staticBytes_spec` | APP-04, APP-05 |
-| `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfter_single`, `computeCloseAfterFixed_eq_spec` | APP-03 |
+| `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfterOld_single`, `computeCloseAfter_eq_spec` | APP-03 |
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-491 | `wantsClose_sound_close`, `wantsClose_spec` | APP-02 |
 | `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:448-453, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapFixed_eq_spec` | proved; APP-06 |
 | `Flare.L4.Router.splitPath`, `compile`, `matchSegs`, `serve`, `serveMounts` | http/router.mojo:111-156, 175-214, 339-394, 488-498, 675-929 | `serve_eq_spec`, `serve_valid`, `allow_exact`, `mount_compose` | proved |

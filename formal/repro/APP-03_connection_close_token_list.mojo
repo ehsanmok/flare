@@ -1,7 +1,8 @@
 # PLATFORM: any
+# RESOLVED: APP-03 fixed on fix/formal-findings
 """APP-03: a ``close`` option inside a Connection token list is ignored.
 
-Lean: Flare.Bugs.APP_03.computeCloseAfter_misses_close (counterexample)
+Lean: Flare.Bugs.APP_03.computeCloseAfterOld_misses_close (counterexample)
 and Flare.Bugs.APP_03.computeCloseAfterFixed_meets_spec (fix meets
 spec).
 flare/http/_reactor/keepalive_scan.mojo:357-397 @59bda50
@@ -14,7 +15,7 @@ closes after the response and processes no further requests.
 
 Expected: _compute_close_after({Connection: "keep-alive, close"},
 "HTTP/1.1") == True (and likewise for "TE, close").
-Actual: False. The value is compared as a whole against "close" /
+Before the fix: False. The value is compared as a whole against "close" /
 "keep-alive"; a list value matches neither, and HTTP/1.1 defaults to
 keep-alive, so the connection stays open and later requests are served.
 
@@ -36,8 +37,10 @@ def main() raises:
     var got2 = _compute_close_after(h2, "HTTP/1.1")
     if not got or not got2:
         print(
-            "BUG REPRODUCED: _compute_close_after kept the connection alive"
-            " for Connection: 'keep-alive, close' ->",
+            (
+                "BUG REPRODUCED: _compute_close_after kept the connection alive"
+                " for Connection: 'keep-alive, close' ->"
+            ),
             got,
             "and 'TE, close' ->",
             got2,

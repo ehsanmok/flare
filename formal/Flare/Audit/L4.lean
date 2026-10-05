@@ -18,7 +18,8 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ConnSM.Framing.headFlagFixed_spec
 #print axioms Flare.L4.ConnSM.Framing.staticBytes_spec
 -- KeepAlive (Connection header)
-#print axioms Flare.L4.KeepAlive.computeCloseAfterFixed_eq_spec
+#print axioms Flare.L4.KeepAlive.computeCloseAfter_eq_spec
+#print axioms Flare.L4.KeepAlive.computeCloseAfterOld_single
 #print axioms Flare.L4.KeepAlive.wantsClose_spec
 #print axioms Flare.L4.KeepAlive.wantsClose_sound_close
 #print axioms Flare.L4.KeepAlive.wantsCloseOld_sound_close

@@ -160,6 +160,54 @@ def test_compute_unusual_value_http11_keeps_open() raises:
     assert_true(_compute_close_after(h10, String("HTTP/1.0")))
 
 
+# ── Connection option lists (APP-03) ────────────────────────────────────
+
+
+def _close_after(value: String, version: String) raises -> Bool:
+    var h = HeaderMap()
+    h.set("Connection", value)
+    return _compute_close_after(h, version)
+
+
+def test_compute_close_after_close_inside_option_list() raises:
+    """APP-03: a ``close`` option inside a list closes the connection."""
+    assert_true(_close_after("keep-alive, close", "HTTP/1.1"))
+    assert_true(_close_after("TE, close", "HTTP/1.1"))
+    assert_true(_close_after("upgrade,CLOSE", "HTTP/1.1"))
+    assert_true(_close_after("  close  ,TE", "HTTP/1.1"))
+    assert_true(_close_after("keep-alive,\tClose", "HTTP/1.0"))
+
+
+def test_compute_close_after_option_list_without_close() raises:
+    """APP-03: lists without ``close`` keep HTTP/1.1 open; HTTP/1.0 stays
+    open only with a ``keep-alive`` option."""
+    assert_false(_close_after("TE, upgrade", "HTTP/1.1"))
+    assert_false(_close_after("Keep-Alive, TE", "HTTP/1.1"))
+    assert_false(_close_after("TE, Keep-Alive", "HTTP/1.0"))
+    assert_true(_close_after("TE, upgrade", "HTTP/1.0"))
+    assert_false(_close_after("closed, xclose", "HTTP/1.1"))
+    assert_false(_close_after("", "HTTP/1.1"))
+
+
+def test_wants_close_option_list() raises:
+    """APP-03: ``_wants_close`` reads the option list too."""
+    assert_true(
+        _wants_close_of(
+            "GET / HTTP/1.1\r\nConnection: keep-alive, close\r\n\r\n"
+        )
+    )
+    assert_true(
+        _wants_close_of("GET / HTTP/1.1\r\nConnection: TE ,Close\r\n\r\n")
+    )
+    assert_false(
+        _wants_close_of("GET / HTTP/1.1\r\nConnection: TE, upgrade\r\n\r\n")
+    )
+    assert_false(
+        _wants_close_of("GET / HTTP/1.0\r\nConnection: TE, keep-alive\r\n\r\n")
+    )
+    assert_true(_wants_close_of("GET / HTTP/1.0\r\nConnection: TE\r\n\r\n"))
+
+
 # ── _wants_close (raw header-block scan, static / short-request paths) ───
 
 
@@ -229,6 +277,9 @@ def main() raises:
     suite.test[test_wants_close_after_x_connection_header]()
     suite.test[test_wants_close_ignores_connection_inside_other_header_names]()
     suite.test[test_wants_close_ors_every_connection_line]()
+    suite.test[test_compute_close_after_close_inside_option_list]()
+    suite.test[test_compute_close_after_option_list_without_close]()
+    suite.test[test_wants_close_option_list]()
     suite.test[test_keepalive_exact_lowercase_matches]()
     suite.test[test_keepalive_uppercase_does_not_match]()
     suite.test[test_keepalive_wrong_length_does_not_match]()

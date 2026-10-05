@@ -6,7 +6,8 @@ import Flare.Core
 Model of the two functions in flare/http/_reactor/keepalive_scan.mojo that
 decide, per request, whether the connection closes after the response:
 
-* `computeCloseAfter`: `_compute_close_after(headers, version)`
+* `computeCloseAfter` (shipped; `computeCloseAfterOld` is the pre-fix one):
+  `_compute_close_after(headers, version)`
   (keepalive_scan.mojo:350-390), used by the buffered reader paths. It sees
   the value of the first `Connection` field (`HeaderMap.get`) and whether the
   version is `HTTP/1.0`.
@@ -23,13 +24,13 @@ after the response iff some token is `close`, or the request is HTTP/1.0
 and no token is `keep-alive`.
 
 Results:
-* `computeCloseAfterFixed_eq_spec`: the fixed function (same fast paths,
+* `computeCloseAfter_eq_spec`: the fixed function (same fast paths,
   token-list slow path) equals the spec on every value (general).
 * `wantsClose_spec`: the shipped byte scan (match `connection:` only at a
   line start, OR the verdicts of all such lines; fixed, APP-02) returns
   `true` whenever any header line is `Connection: close` (general).
-* `computeCloseAfter_single`, `wantsClose_sound_close`: the pre-fix
-  `computeCloseAfter` is correct on a single bare `close` token / the
+* `computeCloseAfterOld_single`, `wantsClose_sound_close`: the pre-fix
+  `computeCloseAfterOld` is correct on a single bare `close` token / the
   shipped scan never reports close without a `Connection` line (soundness
   direction, general).
 The counterexamples for the pre-fix code are in `Flare.Bugs.APP_02` (about
@@ -62,10 +63,11 @@ def isKeepaliveFast (v : Bytes) : Bool := v == keepAliveB
 mirrors flare/http/_reactor/keepalive_scan.mojo:239-259 @59bda50 -/
 def isCloseFast (v : Bytes) : Bool := v == closeB || v == closeCapB
 
-/-- `_compute_close_after`, with `v` the first `Connection` value (`""`
-when absent) and `http10` the `version == "HTTP/1.0"` test.
+/-- `_compute_close_after` before the APP-03 fix, with `v` the first
+`Connection` value (`""` when absent) and `http10` the
+`version == "HTTP/1.0"` test: the slow path compares the whole value.
 mirrors flare/http/_reactor/keepalive_scan.mojo:350-390 @59bda50 -/
-def computeCloseAfter (v : Bytes) (http10 : Bool) : Bool :=
+def computeCloseAfterOld (v : Bytes) (http10 : Bool) : Bool :=
   if isCloseFast v then true
   else if isKeepaliveFast v then false
   else if v.isEmpty then http10
@@ -99,17 +101,19 @@ without a `keep-alive` option. -/
 def closeSpec (v : Bytes) (http10 : Bool) : Bool :=
   (tokens v).contains closeB || (http10 && !(tokens v).contains keepAliveB)
 
-/-- Minimal fix: keep both fast paths, replace the whole-value slow path by
-the token scan. -/
-def computeCloseAfterFixed (v : Bytes) (http10 : Bool) : Bool :=
+/-- `_compute_close_after` as shipped (fixed, APP-03): both fast paths kept,
+the slow path is the option-list scan (`_conn_token_mask`: close wins, else
+HTTP/1.0 needs a `keep-alive` option), i.e. the spec.
+mirrors flare/http/_reactor/keepalive_scan.mojo:388-436 (fixed, APP-03) -/
+def computeCloseAfter (v : Bytes) (http10 : Bool) : Bool :=
   if isCloseFast v then true
   else if isKeepaliveFast v then false
   else if v.isEmpty then http10
   else closeSpec v http10
 
-theorem computeCloseAfterFixed_eq_spec (v : Bytes) (http10 : Bool) :
-    computeCloseAfterFixed v http10 = closeSpec v http10 := by
-  unfold computeCloseAfterFixed
+theorem computeCloseAfter_eq_spec (v : Bytes) (http10 : Bool) :
+    computeCloseAfter v http10 = closeSpec v http10 := by
+  unfold computeCloseAfter
   by_cases h1 : isCloseFast v = true
   · simp only [h1, if_true]
     simp only [isCloseFast, Bool.or_eq_true, beq_iff_eq] at h1
@@ -126,13 +130,13 @@ theorem computeCloseAfterFixed_eq_spec (v : Bytes) (http10 : Bool) :
         subst h3; cases http10 <;> decide
       · rfl
 
-/-- The shipped function agrees with the spec on a lone option (no comma,
+/-- The pre-fix function agrees with the spec on a lone option (no comma,
 no surrounding OWS), in any letter case. -/
-theorem computeCloseAfter_single (v : Bytes) (http10 : Bool) (h : tokens v = [lower v]) :
-    computeCloseAfter v http10 = closeSpec v http10 := by
-  have hfix := computeCloseAfterFixed_eq_spec v http10
+theorem computeCloseAfterOld_single (v : Bytes) (http10 : Bool) (h : tokens v = [lower v]) :
+    computeCloseAfterOld v http10 = closeSpec v http10 := by
+  have hfix := computeCloseAfter_eq_spec v http10
   rw [← hfix]
-  unfold computeCloseAfter computeCloseAfterFixed closeSpec
+  unfold computeCloseAfterOld computeCloseAfter closeSpec
   simp only [h]
   split
   · rfl
@@ -179,14 +183,26 @@ advances while `¬ p`). -/
 def scanTo (n start : Nat) (p : Nat → Bool) : Nat :=
   ((List.range' start (n - start)).find? p).getD n
 
-/-- Verdict for a `connection:` match at `i`: skip OWS, cut the value at CR,
-LF or `header_end`, compare lowercased with `close` / `keep-alive`.
+/-- The value of a `connection:` match at `i`: skip OWS, cut at CR, LF or
+`header_end`.
 mirrors flare/http/_reactor/keepalive_scan.mojo:446-478 @59bda50 -/
-def verdict (d : Bytes) (n i : Nat) : Bool × Bool :=
+def valueAt (d : Bytes) (n i : Nat) : Bytes :=
   let pos := scanTo n (i + 11) fun k => !isOWS (at' d k)
   let vEnd := scanTo n pos fun k => at' d k == 13 || at' d k == 10
-  let v := (d.drop pos).take (vEnd - pos)
+  (d.drop pos).take (vEnd - pos)
+
+/-- Verdict of the pre-fix scan: the whole value compared lowercased with
+`close` / `keep-alive`. -/
+def verdictOld (d : Bytes) (n i : Nat) : Bool × Bool :=
+  let v := valueAt d n i
   (lower v == closeB, lower v == keepAliveB)
+
+/-- Verdict as shipped (fixed, APP-03): the value is an option list
+(`_conn_token_mask`), so `close` / `keep-alive` may be any of its tokens.
+mirrors flare/http/_reactor/keepalive_scan.mojo:476-483 (fixed, APP-03) -/
+def verdict (d : Bytes) (n i : Nat) : Bool × Bool :=
+  let v := valueAt d n i
+  ((tokens v).contains closeB, (tokens v).contains keepAliveB)
 
 /-- Candidate offsets of the header scan: `i` from `first_eol + 1` while
 `i < n - len("connection:")`.
@@ -205,7 +221,7 @@ that match's verdict.
 mirrors flare/http/_reactor/keepalive_scan.mojo:393-484 @59bda50 -/
 def wantsCloseOld (d : Bytes) (n : Nat) : Bool :=
   match firstConn d n with
-  | some i => (verdict d n i).1 || (version10 d n && !(verdict d n i).2)
+  | some i => (verdictOld d n i).1 || (version10 d n && !(verdictOld d n i).2)
   | none => version10 d n
 
 /-- Offset `i` starts a header line.
@@ -254,7 +270,7 @@ theorem wantsClose_sound_close (d : Bytes) (n : Nat) (h : wantsClose d n = true)
 block with a `close` value. -/
 theorem wantsCloseOld_sound_close (d : Bytes) (n : Nat) (h : wantsCloseOld d n = true)
     (h10 : version10 d n = false) :
-    ∃ i ∈ candidates d n, isConn d i = true ∧ (verdict d n i).1 = true := by
+    ∃ i ∈ candidates d n, isConn d i = true ∧ (verdictOld d n i).1 = true := by
   unfold wantsCloseOld at h
   cases hf : firstConn d n with
   | none => simp [hf, h10] at h

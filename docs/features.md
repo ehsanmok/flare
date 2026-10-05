@@ -780,7 +780,10 @@ and `handler_timeout_ms`.
 The reactor's static and short-request fast paths decide `Connection: close`
 by scanning the raw header block. The scan only matches `Connection:` at the
 start of a header line (an `X-Connection:` header is ignored) and combines
-every `Connection` line, so a later `Connection: close` is honoured.
+every `Connection` line, so a later `Connection: close` is honoured. The value
+is read as a comma-separated option list (RFC 9110 §7.6.1), so
+`Connection: keep-alive, close` and `Connection: TE, close` close the
+connection; HTTP/1.0 stays open only when a `keep-alive` option is present.
 
 **Changed in v0.11 (breaking).** `idle_timeout_ms` now also applies to
 a connection that has not sent its first byte: it is armed at accept,

@@ -691,6 +691,15 @@ from test_connection_keepalive_fastpath import (
     test_compute_unusual_value_http11_keeps_open as test_connection_keepalive_fastpath__test_compute_unusual_value_http11_keeps_open,
 )
 from test_connection_keepalive_fastpath import (
+    test_compute_close_after_close_inside_option_list as test_connection_keepalive_fastpath__test_compute_close_after_close_inside_option_list,
+)
+from test_connection_keepalive_fastpath import (
+    test_compute_close_after_option_list_without_close as test_connection_keepalive_fastpath__test_compute_close_after_option_list_without_close,
+)
+from test_connection_keepalive_fastpath import (
+    test_wants_close_option_list as test_connection_keepalive_fastpath__test_wants_close_option_list,
+)
+from test_connection_keepalive_fastpath import (
     test_wants_close_after_x_connection_header as test_connection_keepalive_fastpath__test_wants_close_after_x_connection_header,
 )
 from test_connection_keepalive_fastpath import (
@@ -4674,6 +4683,15 @@ def main() raises:
     ]()
     suite.test[
         test_connection_keepalive_fastpath__test_compute_unusual_value_http11_keeps_open
+    ]()
+    suite.test[
+        test_connection_keepalive_fastpath__test_compute_close_after_close_inside_option_list
+    ]()
+    suite.test[
+        test_connection_keepalive_fastpath__test_compute_close_after_option_list_without_close
+    ]()
+    suite.test[
+        test_connection_keepalive_fastpath__test_wants_close_option_list
     ]()
     suite.test[
         test_connection_keepalive_fastpath__test_wants_close_after_x_connection_header
