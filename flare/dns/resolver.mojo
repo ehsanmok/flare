@@ -58,7 +58,8 @@ def resolve(host: String) raises -> List[IpAddr]:
         AddressParseError: If ``host`` is empty, longer than 253 bytes
             (one trailing root dot, as in ``"example.com."``, is not
             counted), has a label over 63 bytes, or contains a NUL, CR, LF
-            or ``@``.
+            or ``@``. The too-long message quotes the first 20 bytes of the
+            host, cut at a character boundary so the text stays valid UTF-8.
         DnsError: On NXDOMAIN, timeout, or system resolver failure.
 
     Example:
@@ -86,9 +87,15 @@ def resolve(host: String) raises -> List[IpAddr]:
     var n = len(host_bytes)
     var name_len = n - 1 if host_bytes[n - 1] == UInt8(ord(".")) else n
     if name_len > 253:
+        # Quote at most 20 bytes, cut at a character boundary: ``host`` is a
+        # String, so byte 20 is a lead byte or a continuation byte (0b10xxxxxx);
+        # step back to the lead byte so no character is split.
+        var cut = 20
+        while cut > 0 and (host_bytes[cut] & 0xC0) == 0x80:
+            cut -= 1
         raise AddressParseError(
             "hostname too long (max 253 chars): "
-            + String(unsafe_from_utf8=host_bytes[:20])
+            + String(unsafe_from_utf8=host_bytes[:cut])
             + "…"
         )
     var label_len = 0

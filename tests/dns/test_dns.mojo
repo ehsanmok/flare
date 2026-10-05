@@ -247,6 +247,78 @@ def test_resolve_rejects_254_byte_name_without_root_dot() raises:
     assert_true(_rejected_as_too_long(abs_host))
 
 
+def _utf8_ok(b: Span[UInt8, _]) -> Bool:
+    """Strict-enough UTF-8 well-formedness check (lead/continuation
+    structure) for the error-text tests below."""
+    var i = 0
+    var n = len(b)
+    while i < n:
+        var c = Int(b[i])
+        var need: Int
+        if c < 0x80:
+            need = 0
+        elif c >= 0xC2 and c <= 0xDF:
+            need = 1
+        elif c >= 0xE0 and c <= 0xEF:
+            need = 2
+        elif c >= 0xF0 and c <= 0xF4:
+            need = 3
+        else:
+            return False
+        if i + need >= n and need > 0:
+            return False
+        for k in range(1, need + 1):
+            var d = Int(b[i + k])
+            if d < 0x80 or d > 0xBF:
+                return False
+        i += need + 1
+    return True
+
+
+def _too_long_message(prefix: String) raises -> String:
+    """The error text for a 261-byte host that starts with ``prefix`` and is
+    padded with ASCII ``a``."""
+    var host = prefix
+    while host.byte_length() < 261:
+        host += "a"
+    try:
+        _ = resolve(host)
+    except e:
+        return String(e)
+    raise Error("expected a hostname-too-long error")
+
+
+def test_too_long_message_does_not_split_a_two_byte_char() raises:
+    """NET-09: the message quotes the first 20 bytes of the host; with
+    ``é`` (C3 A9) at bytes 19-20 that cut a character in half."""
+    var msg = _too_long_message(String("a" * 19) + "é")
+    assert_true("too long" in msg)
+    assert_true(_utf8_ok(msg.as_bytes()), "error text is not valid UTF-8")
+    # the whole character is dropped, the 19 whole bytes are kept
+    assert_true(String("a" * 19) + "…" in msg)
+    assert_false("é" in msg)
+
+
+def test_too_long_message_does_not_split_a_four_byte_char() raises:
+    var msg = _too_long_message(String("a" * 18) + "😀")
+    assert_true(_utf8_ok(msg.as_bytes()), "error text is not valid UTF-8")
+    assert_true(String("a" * 18) + "…" in msg)
+    assert_false("😀" in msg)
+
+
+def test_too_long_message_keeps_a_char_that_ends_at_byte_20() raises:
+    """Boundary: a character ending exactly at byte 20 is quoted whole."""
+    var msg = _too_long_message(String("a" * 18) + "é")
+    assert_true(_utf8_ok(msg.as_bytes()), "error text is not valid UTF-8")
+    assert_true(String("a" * 18) + "é…" in msg)
+
+
+def test_too_long_message_quotes_20_ascii_bytes() raises:
+    var msg = _too_long_message(String(""))
+    assert_true(String("a" * 20) + "…" in msg)
+    assert_false(String("a" * 21) in msg)
+
+
 def test_resolve_label_too_long_raises() raises:
     """A single DNS label longer than 63 characters must raise.
 

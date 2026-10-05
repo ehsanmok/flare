@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61442 lines) |
+| Lean files | 298 (61452 lines) |
 | Theorems | 3232 |
 | Headline theorems in the axiom audit | 1034 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 41 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 42 of 138 |
 
 Six findings are rated high:
 
@@ -883,8 +883,8 @@ include/linux/socket.h, consumed by `__udp_cmsg_send` in net/ipv4/udp.c).
 
 #### Hostname validation (`Hostname.lean`)
 
-dns/resolver.mojo:71-113, the checks `resolve` runs before `getaddrinfo`.
-The spec is the documented one (resolver.mojo:74-82): no NUL, CR, LF or `@`,
+dns/resolver.mojo:72-119, the checks `resolve` runs before `getaddrinfo`.
+The spec is the documented one (resolver.mojo:75-83): no NUL, CR, LF or `@`,
 labels of at most 63 bytes, and at most 253 bytes not counting one trailing
 root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 
@@ -894,8 +894,8 @@ root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 | `validate_sound` | flare never accepts a name that breaks the documented rules. | proved |
 | `validateOld_gap` | Before the fix, the only valid names flare rejected were 254 bytes long and ended in `.`. | proved (NET-08, resolved) |
 | `validate_iff` | The shipped check accepts exactly the valid names. | proved |
-| `truncChars_wf`, `tooLongTailFixed_wf` | Cutting at a character boundary keeps the error text well-formed UTF-8 and quotes at most 20 bytes. | proved |
-| `Flare.Bugs.NET_09.message_not_wf` | A well-formed 261-byte host gives an error text that is not well-formed. | counterexample (NET-09) |
+| `truncChars_wf`, `tooLongTail_wf` | The shipped error text (cut at a character boundary) is well-formed UTF-8 and quotes at most 20 bytes. | proved |
+| `Flare.Bugs.NET_09.message_not_wf` | Before the fix, a well-formed 261-byte host gave an error text that was not well-formed. | counterexample (NET-09, resolved) |
 
 #### UNIX listener takeover and destructor guard (`UdsListener.lean`)
 
@@ -2740,7 +2740,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |
 | `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
-| `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:71-113 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexample (NET-08 resolved, NET-09) |
+| `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:72-119 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexamples (NET-08, NET-09, resolved) |
 | `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
 | `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:400-408 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |
@@ -2999,7 +2999,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | NET-06 | Low | resolved | `queried_local_path()` garbles non-ASCII Unix socket paths | `Flare/Bugs/NET_06.lean` | `repro/NET-06_uds_queried_path_latin1.mojo` (any) |
 | NET-07 | Medium | resolved | `UnixListener.bind` unlinks a live socket when the probe fails with `EACCES` | `Flare/Bugs/NET_07.lean` | `repro/NET-07_uds_takeover_unlinks_live_socket.mojo` (macos) |
 | NET-08 | Low | resolved | `resolve` rejects valid 254-byte absolute hostnames | `Flare/Bugs/NET_08.lean` | `repro/NET-08_hostname_trailing_dot_too_long.mojo` (any) |
-| NET-09 | Low | open | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
+| NET-09 | Low | resolved | the "hostname too long" error cuts a UTF-8 character in half | `Flare/Bugs/NET_09.lean` | `repro/NET-09_hostname_error_splits_utf8.mojo` (any) |
 | NET-10 | Low | open | `order_happy_eyeballs` always tries IPv6 first | `Flare/Bugs/NET_10.lean` | `repro/NET-10_happy_eyeballs_ignores_preferred_family.mojo` (any) |
 | RT-01 | Low | open | `TimerWheel.next_fire_ms` overshoots when only overflow timers remain | `Flare/Bugs/RT_01.lean` | `repro/RT-01_timer_next_fire_overflow_hint.mojo` (any) |
 | RT-02 | Low | open | `writev_buf_all` returns normally after a short write | `Flare/Bugs/RT_02.lean` | `repro/RT-02_writev_all_silent_short_write.mojo` (any) |
@@ -3423,7 +3423,7 @@ Severity: low. The error text of a rejected over-long name can hold an
 invalid UTF-8 sequence inside a Mojo `String`, which assumes well-formed
 UTF-8.
 Spec: an error built from a well-formed host is well-formed UTF-8.
-What goes wrong: resolver.mojo:82-87 quotes
+What goes wrong: resolver.mojo:82-87 @59bda50 quotes
 `String(unsafe_from_utf8=host_bytes[:20])`; byte 20 can fall inside a
 multi-byte character.
 Lean: `Flare.Bugs.NET_09.message_not_wf` (19 × `a`, `é`, 240 × `a`: the
@@ -3433,6 +3433,7 @@ Repro: `formal/repro/NET-09_hostname_error_splits_utf8.mojo`, observed
 `BUG REPRODUCED: error text is not valid UTF-8; its non-ASCII bytes are C3 E2 80 A6`.
 Flip (cut at the last character boundary at or before byte 20):
 `OK: error text is valid UTF-8`, exit 0.
+Status: resolved. The too-long message steps its cut at byte 20 back to a lead byte, so only whole characters are quoted; the model's `tooLongTail` (`truncChars 20`) mirrors it (pre-fix: `tooLongTailOld`; shipped: `tooLongTail_wf`). Tests: `tests/dns/test_dns.mojo::test_too_long_message_does_not_split_a_two_byte_char`, `::test_too_long_message_does_not_split_a_four_byte_char`, `::test_too_long_message_keeps_a_char_that_ends_at_byte_20`, `::test_too_long_message_quotes_20_ascii_bytes`.
 
 #### NET-10: `order_happy_eyeballs` always tries IPv6 first
 
@@ -5897,7 +5898,7 @@ There are 13 "contradicted (new)" rows for 8 findings because DOC-01 covers 3 ro
 | Claim | Code | Verdict | Evidence |
 |---|---|---|---|
 | "Rejects null bytes, CRLF, `@` in IP strings before they reach libc." (`docs/security.md:9`) | `flare/net/address.mojo:82-91, 419-423` | holds | The IP and host parse rejects bytes 0x00, 0x0A, 0x0D and `@` before any libc call. Port parsing is `Flare.L1.Address.parsePortStrict_eq_spec`. |
-| "Blocks injection in hostnames (null / CRLF / `@`, length limits)." (`docs/security.md:10`) | `flare/dns/resolver.mojo:63-116` | holds | `Flare.L2.Hostname.validate_sound` and `Flare.L2.Hostname.scan_ok_iff` cover forbidden bytes, the 253-octet name limit and the 63-octet label limit. |
+| "Blocks injection in hostnames (null / CRLF / `@`, length limits)." (`docs/security.md:10`) | `flare/dns/resolver.mojo:64-122` | holds | `Flare.L2.Hostname.validate_sound` and `Flare.L2.Hostname.scan_ok_iff` cover forbidden bytes, the 253-octet name limit and the 63-octet label limit. |
 | "TLS 1.2+ only, weak ciphers disabled" (`docs/security.md:11`) | `flare/tls/ffi/openssl_wrapper.cpp:117-124, 538-543, 811-814` | outside the model | flare sets the TLS 1.2 floor, `NO_TLSv1`/`NO_TLSv1_1` and `FORWARD_SECRET_CIPHERS` on every context. The negotiation that enforces them is OpenSSL's. |
 | "SNI always sent." (`docs/security.md:11`) | `openssl_wrapper.cpp:196-213` | holds | SNI is set for every hostname. IP literals are verified by IP and carry no SNI, which RFC 6066 §3 requires. |
 | "a slow or stalled handshake occupies a connection slot bounded by `ServerConfig.idle_timeout_ms` rather than a worker" (`docs/security.md:11`) | `flare/http/_reactor/tls_conn_handle.mojo`; `flare/http/_reactor/lifecycle.mojo:175-187` | holds | The handshake is a non-blocking `KIND_TLS` connection, and the idle timer is armed at accept for every kind. |

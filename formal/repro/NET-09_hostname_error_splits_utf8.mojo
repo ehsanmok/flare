@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: NET-09 fixed on fix/formal-findings
 """NET-09: the "hostname too long" error splits a UTF-8 character.
 
 Lean: Flare.Bugs.NET_09.message_not_utf8 (counterexample) and
@@ -6,7 +7,7 @@ Flare.Bugs.NET_09.fixed_wf (fix meets spec).
 flare/dns/resolver.mojo:82-87 @59bda50.
 
 Expected: the error text is well-formed UTF-8 (a Mojo String invariant).
-Actual: the message quotes String(unsafe_from_utf8=host_bytes[:20]); for a
+Before the fix: the message quotes String(unsafe_from_utf8=host_bytes[:20]); for a
 host with "é" (C3 A9) at bytes 19-20 the quote ends in a lone C3, followed
 by the E2 80 A6 of the ellipsis.
 
@@ -64,8 +65,10 @@ def main() raises:
             if Int(bs[i]) >= 0x80:
                 hex += hex_byte(Int(bs[i])) + " "
         print(
-            "BUG REPRODUCED: error text is not valid UTF-8; its non-ASCII"
-            " bytes are",
+            (
+                "BUG REPRODUCED: error text is not valid UTF-8; its non-ASCII"
+                " bytes are"
+            ),
             hex,
         )
         raise Error("NET-09")
@@ -74,4 +77,4 @@ def main() raises:
 
 def hex_byte(v: Int) -> String:
     comptime digits = "0123456789ABCDEF"
-    return String(digits[byte = v >> 4]) + String(digits[byte = v & 15])
+    return String(digits[byte=v >> 4]) + String(digits[byte=v & 15])

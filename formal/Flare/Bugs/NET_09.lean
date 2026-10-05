@@ -3,7 +3,12 @@ import Flare.L2_Machine.Hostname
 /-!
 # NET-09: the "hostname too long" error cuts a UTF-8 character in half
 
-flare/dns/resolver.mojo:82-87 @59bda50 (now :88-93).
+Status: resolved. The message now quotes whole characters only (the cut at
+byte 20 steps back to a lead byte); `Flare.L2.Hostname.tooLongTail` mirrors
+the shipped code and the counterexample below is about the pre-fix
+`tooLongTailOld`.
+
+Pre-fix code: flare/dns/resolver.mojo:82-87 @59bda50.
 
 Spec: a Mojo `String` holds well-formed UTF-8; the error text built from a
 well-formed host must be well-formed (`Flare.L1.Utf8.WF`).
@@ -23,21 +28,21 @@ open Flare.L1.Utf8 (WF isValidUtf8 isValidUtf8_iff)
 def host : Flare.Bytes := List.replicate 19 0x61 ++ [0xC3, 0xA9] ++ List.replicate 240 0x61
 
 /-- **Counterexample**: the host is well-formed and too long, and the message
-tail flare builds is not well-formed. -/
+tail the pre-fix code built is not well-formed. -/
 theorem message_not_utf8 :
-    isValidUtf8 host = true ∧ validate host = .tooLong ∧ isValidUtf8 (tooLongTail host) = false := by
+    isValidUtf8 host = true ∧ validate host = .tooLong ∧ isValidUtf8 (tooLongTailOld host) = false := by
   native_decide
 
-theorem message_not_wf : WF host ∧ ¬ WF (tooLongTail host) := by
+theorem message_not_wf : WF host ∧ ¬ WF (tooLongTailOld host) := by
   have h := message_not_utf8
   refine ⟨(isValidUtf8_iff _).1 h.1, fun hw => ?_⟩
   have := (isValidUtf8_iff _).2 hw
   rw [h.2.2] at this; cases this
 
-/-- **Fix meets spec**: cutting at a character boundary keeps the message
-well-formed for every well-formed host, and quotes at most 20 bytes. -/
+/-- **Fix meets spec**: the shipped message cuts at a character boundary, so it
+stays well-formed for every well-formed host, and quotes at most 20 bytes. -/
 theorem fixed_wf (h : Flare.Bytes) (hw : WF h) :
-    WF (tooLongTailFixed h) ∧ (truncChars 20 h).length ≤ 20 :=
-  tooLongTailFixed_wf h hw
+    WF (tooLongTail h) ∧ (truncChars 20 h).length ≤ 20 :=
+  tooLongTail_wf h hw
 
 end Flare.Bugs.NET_09

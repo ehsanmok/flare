@@ -325,8 +325,8 @@ include/linux/socket.h, consumed by `__udp_cmsg_send` in net/ipv4/udp.c).
 
 ### Hostname validation (`Hostname.lean`)
 
-dns/resolver.mojo:71-113, the checks `resolve` runs before `getaddrinfo`.
-The spec is the documented one (resolver.mojo:74-82): no NUL, CR, LF or `@`,
+dns/resolver.mojo:72-119, the checks `resolve` runs before `getaddrinfo`.
+The spec is the documented one (resolver.mojo:75-83): no NUL, CR, LF or `@`,
 labels of at most 63 bytes, and at most 253 bytes not counting one trailing
 root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 
@@ -336,8 +336,8 @@ root dot (RFC 1035 §2.3.4 bounds the wire form at 255 octets).
 | `validate_sound` | flare never accepts a name that breaks the documented rules. | proved |
 | `validateOld_gap` | Before the fix, the only valid names flare rejected were 254 bytes long and ended in `.`. | proved (NET-08, resolved) |
 | `validate_iff` | The shipped check accepts exactly the valid names. | proved |
-| `truncChars_wf`, `tooLongTailFixed_wf` | Cutting at a character boundary keeps the error text well-formed UTF-8 and quotes at most 20 bytes. | proved |
-| `Flare.Bugs.NET_09.message_not_wf` | A well-formed 261-byte host gives an error text that is not well-formed. | counterexample (NET-09) |
+| `truncChars_wf`, `tooLongTail_wf` | The shipped error text (cut at a character boundary) is well-formed UTF-8 and quotes at most 20 bytes. | proved |
+| `Flare.Bugs.NET_09.message_not_wf` | Before the fix, a well-formed 261-byte host gave an error text that was not well-formed. | counterexample (NET-09, resolved) |
 
 ### UNIX listener takeover and destructor guard (`UdsListener.lean`)
 
@@ -550,7 +550,7 @@ Severity: low. The error text of a rejected over-long name can hold an
 invalid UTF-8 sequence inside a Mojo `String`, which assumes well-formed
 UTF-8.
 Spec: an error built from a well-formed host is well-formed UTF-8.
-What goes wrong: resolver.mojo:82-87 quotes
+What goes wrong: resolver.mojo:82-87 @59bda50 quotes
 `String(unsafe_from_utf8=host_bytes[:20])`; byte 20 can fall inside a
 multi-byte character.
 Lean: `Flare.Bugs.NET_09.message_not_wf` (19 × `a`, `é`, 240 × `a`: the
@@ -560,6 +560,7 @@ Repro: `formal/repro/NET-09_hostname_error_splits_utf8.mojo`, observed
 `BUG REPRODUCED: error text is not valid UTF-8; its non-ASCII bytes are C3 E2 80 A6`.
 Flip (cut at the last character boundary at or before byte 20):
 `OK: error text is valid UTF-8`, exit 0.
+Status: resolved. The too-long message steps its cut at byte 20 back to a lead byte, so only whole characters are quoted; the model's `tooLongTail` (`truncChars 20`) mirrors it (pre-fix: `tooLongTailOld`; shipped: `tooLongTail_wf`). Tests: `tests/dns/test_dns.mojo::test_too_long_message_does_not_split_a_two_byte_char`, `::test_too_long_message_does_not_split_a_four_byte_char`, `::test_too_long_message_keeps_a_char_that_ends_at_byte_20`, `::test_too_long_message_quotes_20_ascii_bytes`.
 
 ### NET-10: `order_happy_eyeballs` always tries IPv6 first
 
@@ -888,7 +889,7 @@ lists record ids, not tokens.
 | `Flare.L2.BufferPool.acquire`, `releaseWith` | flare/runtime/buffer_pool.mojo:297-364 | `bounded_release`, `RT_05.acquire_after_shrunk_release` | counterexample (RT-05) |
 | `Flare.L2.Blocking.tryAcquire`, `release` | flare/runtime/blocking.mojo (`_pool_try_acquire`, `_pool_release`) | `paired_cap_invariant`, `RT_06.persistentFailOpen_unbounded`, `RT_07.failOpen_breaks_cap`, `RT_08.linux_failure_crashes`, `RT_08.never_crashes` | counterexample (RT-06 resolved, RT-07, RT-08 resolved) |
 | `Flare.L2.HappyEyeballs.order`, `orderFixed` | flare/dns/async_resolve.mojo:154-177 | `order_perm`, `order_filter_v6`, `NET_10.order_breaks_spec`, `orderFixed_head` | counterexample (NET-10) |
-| `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:71-113 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexample (NET-08 resolved, NET-09) |
+| `Flare.L2.Hostname.scan`, `validate`, `tooLongTail` | flare/dns/resolver.mojo:72-119 | `validate_sound`, `validate_iff`, `validateOld_gap`, `NET_08.valid_but_rejected`, `NET_09.message_not_wf` | proved; counterexamples (NET-08, NET-09, resolved) |
 | `Flare.L2.UdsListener.prep`, `deinitUnlinks` | flare/uds/listener.mojo:50-146, 193-210 | `takeover_unlinks_live`, `prep_safe`, `deinit_spec`, `deinit_race` | proved; counterexample (NET-07) |
 | `Flare.L2.UdpBatch.IOVEC`, `MSGHDR`, `MMSGHDR`, `OFF_MSG`, `CMSG_LEN_GSO`, ... | flare/udp/batch.mojo:67-92 | `layout_constants`, `cmsg_constants` | proved |
 | `Flare.L2.UdpBatch.gsoCtrl`, `cmsgs` | flare/udp/batch.mojo:400-408 | `gso_walk_18`, `gso_walk_24`, `gso_seg` | proved |

@@ -4,9 +4,9 @@ import Flare.L1_Encoding.Utf8
 /-!
 # Hostname validation in `resolve`
 
-Model of the pre-`getaddrinfo` checks in `flare/dns/resolver.mojo:71-113`.
+Model of the pre-`getaddrinfo` checks in `flare/dns/resolver.mojo:72-119`.
 
-flare documents four rules (resolver.mojo:74-82): no NUL, no CR/LF, no `@`,
+flare documents four rules (resolver.mojo:75-83): no NUL, no CR/LF, no `@`,
 and "RFC 1035 §2.3.4 limits FQDNs to 253 octets and individual labels to
 63 octets". flare does not claim RFC 952/1123 LDH syntax (letters, digits,
 hyphen) and does not check it; empty labels (`a..b`) are left to
@@ -35,7 +35,7 @@ open Flare.L1.Utf8 (WF leadLen WF_cons_iff WfHead seqOK)
 
 def dot : UInt8 := 0x2E
 
-/-- NUL, LF, CR, `@` (resolver.mojo:96-101) -/
+/-- NUL, LF, CR, `@` (resolver.mojo:102-107) -/
 def forbidden (b : UInt8) : Bool := b == 0 || b == 0x0A || b == 0x0D || b == 0x40
 
 inductive Res where
@@ -43,7 +43,7 @@ inductive Res where
   deriving DecidableEq, Repr
 
 /-- the per-byte loop, `ll` = `label_len`.
-mirrors flare/dns/resolver.mojo:94-113 @59bda50 -/
+mirrors flare/dns/resolver.mojo:100-119 @59bda50 -/
 def scan : Bytes → Nat → Res
   | [], _ => .ok
   | b :: r, ll =>
@@ -67,7 +67,7 @@ def labels (h : Bytes) : List Bytes := h.splitOnP isDot
 def nameLen (h : Bytes) : Nat := if h.getLast? = some dot then h.length - 1 else h.length
 
 /-- The shipped validation: one trailing root dot is not counted against 253.
-mirrors flare/dns/resolver.mojo:71-113 (fixed, NET-08) -/
+mirrors flare/dns/resolver.mojo:72-119 (fixed, NET-08) -/
 def validate (h : Bytes) : Res :=
   if h.length = 0 then .empty
   else if nameLen h > 253 then .tooLong
@@ -202,12 +202,15 @@ theorem validateOld_gap (h : Bytes) (hv : Valid h) (hr : validateOld h ≠ .ok) 
 /-- `"…"` in UTF-8 -/
 def ellipsis : Bytes := [0xE2, 0x80, 0xA6]
 
-/-- the variable part of the too-long message:
-`String(unsafe_from_utf8=host_bytes[:20]) + "…"`.
-mirrors flare/dns/resolver.mojo:88-93 @59bda50 -/
-def tooLongTail (h : Bytes) : Bytes := h.take 20 ++ ellipsis
+/-- Pre-fix variable part of the too-long message:
+`String(unsafe_from_utf8=host_bytes[:20]) + "…"`
+(flare/dns/resolver.mojo:82-87 @59bda50). -/
+def tooLongTailOld (h : Bytes) : Bytes := h.take 20 ++ ellipsis
 
-/-- the fix for NET-09: keep whole characters only, at most `k` bytes -/
+/-- Keep whole characters only, at most `k` bytes. The Mojo code gets the
+same prefix by stepping the cut at byte 20 back over continuation bytes
+(`0b10xxxxxx`) to the lead byte; for a well-formed `String` both give the
+longest whole-character prefix of at most 20 bytes. -/
 def truncChars : Nat → Bytes → Bytes
   | _, [] => []
   | k, a :: r =>
@@ -217,7 +220,9 @@ def truncChars : Nat → Bytes → Bytes
 termination_by _ h => h.length
 decreasing_by simp only [List.length_drop, List.length_cons]; omega
 
-def tooLongTailFixed (h : Bytes) : Bytes := truncChars 20 h ++ ellipsis
+/-- the variable part of the too-long message after the fix.
+mirrors flare/dns/resolver.mojo:89-100 (fixed, NET-09) -/
+def tooLongTail (h : Bytes) : Bytes := truncChars 20 h ++ ellipsis
 
 theorem truncChars_wf (h : Bytes) (hw : WF h) (k : Nat) : WF (truncChars k h) := by
   match h, hw with
@@ -251,10 +256,10 @@ theorem ellipsis_wf : WF ellipsis := by
   have := WF.app this WF.nil
   simpa using this
 
-/-- **Fix meets spec**: for a well-formed host the fixed message tail is
+/-- **Fix meets spec**: for a well-formed host the shipped message tail is
 well-formed UTF-8 and quotes at most 20 bytes of the host. -/
-theorem tooLongTailFixed_wf (h : Bytes) (hw : WF h) :
-    WF (tooLongTailFixed h) ∧ (truncChars 20 h).length ≤ 20 :=
+theorem tooLongTail_wf (h : Bytes) (hw : WF h) :
+    WF (tooLongTail h) ∧ (truncChars 20 h).length ≤ 20 :=
   ⟨Flare.L1.Utf8.WF_append (truncChars_wf h hw 20) ellipsis_wf, truncChars_length h 20⟩
 
 end Flare.L2.Hostname

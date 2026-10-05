@@ -136,7 +136,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.Hostname.validate_sound
 #print axioms Flare.L2.Hostname.validateOld_gap
 #print axioms Flare.L2.Hostname.validate_iff
-#print axioms Flare.L2.Hostname.tooLongTailFixed_wf
+#print axioms Flare.L2.Hostname.tooLongTail_wf
 #print axioms Flare.L2.UdsListener.prep_agrees
 #print axioms Flare.L2.UdsListener.prep_safe
 #print axioms Flare.L2.UdsListener.deinit_spec

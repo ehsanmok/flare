@@ -85,6 +85,18 @@ from test_dns import (
     test_resolve_rejects_254_byte_name_without_root_dot as test_dns__test_resolve_rejects_254_byte_name_without_root_dot,
 )
 from test_dns import (
+    test_too_long_message_does_not_split_a_two_byte_char as test_dns__test_too_long_message_does_not_split_a_two_byte_char,
+)
+from test_dns import (
+    test_too_long_message_does_not_split_a_four_byte_char as test_dns__test_too_long_message_does_not_split_a_four_byte_char,
+)
+from test_dns import (
+    test_too_long_message_keeps_a_char_that_ends_at_byte_20 as test_dns__test_too_long_message_keeps_a_char_that_ends_at_byte_20,
+)
+from test_dns import (
+    test_too_long_message_quotes_20_ascii_bytes as test_dns__test_too_long_message_quotes_20_ascii_bytes,
+)
+from test_dns import (
     test_resolve_label_too_long_raises as test_dns__test_resolve_label_too_long_raises,
 )
 from test_dns_cache import (
@@ -150,6 +162,14 @@ def main() raises:
     suite.test[test_dns__test_resolve_accepts_253_byte_name]()
     suite.test[test_dns__test_resolve_accepts_253_byte_absolute_name]()
     suite.test[test_dns__test_resolve_rejects_254_byte_name_without_root_dot]()
+    suite.test[test_dns__test_too_long_message_does_not_split_a_two_byte_char]()
+    suite.test[
+        test_dns__test_too_long_message_does_not_split_a_four_byte_char
+    ]()
+    suite.test[
+        test_dns__test_too_long_message_keeps_a_char_that_ends_at_byte_20
+    ]()
+    suite.test[test_dns__test_too_long_message_quotes_20_ascii_bytes]()
     suite.test[test_dns__test_resolve_label_too_long_raises]()
     # tests/dns/test_dns_cache.mojo
     suite.test[test_dns_cache__test_within_ttl_no_second_syscall]()
