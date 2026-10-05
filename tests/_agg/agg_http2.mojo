@@ -384,6 +384,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_content_length_valid_forms_still_complete as test_h2_state__test_content_length_valid_forms_still_complete,
 )
+from test_h2_state import (
+    test_content_length_reset_returns_connection_credit as test_h2_state__test_content_length_reset_returns_connection_credit,
+)
+from test_h2_state import (
+    test_stream_window_overrun_reset_returns_connection_credit as test_h2_state__test_stream_window_overrun_reset_returns_connection_credit,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -678,6 +684,12 @@ def main() raises:
         test_h2_state__test_content_length_overflow_and_duplicates_are_rejected
     ]()
     suite.test[test_h2_state__test_content_length_valid_forms_still_complete]()
+    suite.test[
+        test_h2_state__test_content_length_reset_returns_connection_credit
+    ]()
+    suite.test[
+        test_h2_state__test_stream_window_overrun_reset_returns_connection_credit
+    ]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains

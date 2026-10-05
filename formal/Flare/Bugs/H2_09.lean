@@ -19,6 +19,11 @@ requirement on replies (`h2_09_fixed`): while no GOAWAY has been sent,
 the peer's view of the connection window plus the credit flare
 deliberately withholds equals the initial 65535.
 
+Status: resolved. Both reset paths (stream-window overrun and
+content-length mismatch at END_STREAM) now append WINDOW_UPDATE(0, len)
+through `_conn_window_update`. The counterexample is about `Fix.none`
+(the code before the fix); `fixed_shipped` is about `Fix.shipped`.
+
 Trace: SETTINGS, then four POST requests with `content-length: 100000`,
 each with one END_STREAM DATA frame (16384, 16384, 16384, 16383 octets),
 65535 octets in total.
@@ -59,5 +64,14 @@ theorem fixed (fx : Fix) (h1 : fx.h2_01 = true) (h9 : fx.h2_09 = true) (dec : De
     (hr : run fx dec c es = some (c', t)) (hno : t.any (fun p => hasGoaway p.2) = false) :
     peerW 65535 t + c'.withheld = 65535 :=
   h2_09_fixed fx h1 h9 dec c hF es c' t hr hno
+
+/-- The shipped model (H2-01 and H2-09 fixes): connection credit is
+conserved on every run from a fresh connection until a GOAWAY. -/
+theorem fixed_shipped (dec : Dec) (c : Conn) (hF : Fresh c) (es : List Ev) (c' : Conn)
+    (t : List (Ev × List Out)) (hr : run Fix.shipped dec c es = some (c', t))
+    (hno : t.any (fun p => hasGoaway p.2) = false) : peerW 65535 t + c'.withheld = 65535 :=
+  fixed Fix.shipped rfl rfl dec c hF es c' t hr hno
+
+theorem shipped_trace : credit Fix.shipped = some (false, 65535) := by native_decide
 
 end Flare.Bugs.H2_09

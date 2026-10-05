@@ -679,6 +679,57 @@ def test_content_length_valid_forms_still_complete() raises:
         assert_false(f.header.type.value == FrameType.RST_STREAM().value)
 
 
+def _conn_credit(frames: List[Frame]) -> Int:
+    """Total WINDOW_UPDATE(0) credit in ``frames``."""
+    var n = 0
+    for f in frames:
+        if (
+            f.header.type.value == FrameType.WINDOW_UPDATE().value
+            and f.header.stream_id == 0
+        ):
+            n += (
+                (Int(f.payload[0]) << 24)
+                | (Int(f.payload[1]) << 16)
+                | (Int(f.payload[2]) << 8)
+                | Int(f.payload[3])
+            )
+    return n
+
+
+def test_content_length_reset_returns_connection_credit() raises:
+    """H2-09: four requests reset for a content-length mismatch at
+    END_STREAM (65535 DATA octets in all) must give the connection credit
+    back, or the peer's window is 0 for good (RFC 9113 sec 6.9)."""
+    var c = Connection()
+    var sizes: List[Int] = [16384, 16384, 16384, 16383]
+    var w = 65535
+    for i in range(4):
+        var sid = 2 * i + 1
+        _ = c.handle_frame(_post_with_content_lengths(sid, [String("100000")]))
+        w -= sizes[i]
+        var out = c.handle_frame(_data_frame(sid, sizes[i], True))
+        assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+        assert_equal(Int(out[0].payload[3]), 1)  # PROTOCOL_ERROR
+        w += _conn_credit(out)
+    assert_equal(w, 65535)
+    assert_equal(c.recv_window, 65535)
+
+
+def test_stream_window_overrun_reset_returns_connection_credit() raises:
+    """H2-09: DATA past the stream's receive window resets the stream with
+    FLOW_CONTROL_ERROR and still returns its connection credit."""
+    var c = Connection()
+    _ = _open_request(c, 1, False)
+    var s = c.streams[1].copy()
+    s.recv_window = 10
+    c.streams[1] = s^
+    var out = c.handle_frame(_data_frame(1, 100))
+    assert_equal(Int(out[0].header.type.value), 0x3)  # RST_STREAM
+    assert_equal(Int(out[0].payload[3]), 3)  # FLOW_CONTROL_ERROR
+    assert_equal(_conn_credit(out), 100)
+    assert_equal(c.recv_window, 65535)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -708,4 +759,6 @@ def main() raises:
     test_withheld_connection_credit_restores_the_receive_window()
     test_content_length_overflow_and_duplicates_are_rejected()
     test_content_length_valid_forms_still_complete()
-    print("test_h2_state: 28 passed")
+    test_content_length_reset_returns_connection_credit()
+    test_stream_window_overrun_reset_returns_connection_credit()
+    print("test_h2_state: 30 passed")

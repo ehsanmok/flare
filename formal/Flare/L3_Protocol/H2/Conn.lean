@@ -209,8 +209,8 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-03, H2-05. -/
-def Fix.shipped : Fix := { h2_01 := true, h2_03 := true, h2_05 := true }
+finding): H2-01, H2-03, H2-05, H2-09. -/
+def Fix.shipped : Fix := { h2_01 := true, h2_03 := true, h2_05 := true, h2_09 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -651,8 +651,10 @@ def dataCredit (c : Conn) (f : Fr) (credit : Nat) : Conn × List Out :=
 
 /-- The END_STREAM and credit tail of the DATA branch (1457-1511); `c` already
 counts the body in `buffered`, `s` has the stream credit restored. The
-H2-19 fix sends no stream WINDOW_UPDATE on a stream this frame closes.
-mirrors flare/http2/state.mojo:1457-1511 @59bda50 -/
+H2-09 fix returns the frame's connection credit when the content-length
+mismatch resets the stream; the H2-19 fix sends no stream WINDOW_UPDATE
+on a stream this frame closes.
+mirrors flare/http2/state.mojo:1540-1600 (H2-09 fixed; H2-19 @59bda50) -/
 def dataFinish (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (cr : Nat) : Conn × List Out :=
   if f.f1 && (0 : Int) ≤ s.contentLength && (s.received : Int) ≠ s.contentLength then
     rstCloseX c f.sid ePROTOCOL s (if fx.h2_09 then wu0If f.plen else [])
@@ -678,8 +680,9 @@ def dataAccept (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn �
                pendingCredit := s.pendingCredit + deferOf s body } (f.plen - deferOf s body)
 
 /-- The per-stream checks of the DATA branch (1374-1427); `s` already has
-`recvW` debited by the frame length.
-mirrors flare/http2/state.mojo:1374-1427 @59bda50 -/
+`recvW` debited by the frame length. The H2-09 fix returns the
+connection credit when the stream window is overrun.
+mirrors flare/http2/state.mojo:1453-1520 (H2-09 fixed) -/
 def dataBody (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn × List Out :=
   if s.recvW < 0 then
     rstCloseX c f.sid eFLOW s (if fx.h2_09 then wu0If f.plen else [])

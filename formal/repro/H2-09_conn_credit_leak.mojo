@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-09 fixed on fix/formal-findings
 """H2-09: DATA that ends in a stream reset on the content-length-mismatch
 path (and on the stream FLOW_CONTROL_ERROR path) never has its
 connection-level credit returned, so the peer's connection window drains.
@@ -24,7 +25,7 @@ reset with RST_STREAM(PROTOCOL_ERROR) for the mismatch, as it should be.
 
 Expected: 65535 octets of connection credit come back (one
 WINDOW_UPDATE(0) per frame), so the peer's window stays at 65535.
-Actual: zero connection credit comes back; the peer's connection window
+Before the fix: zero connection credit comes back; the peer's connection window
 is 0 and a conforming client can never send DATA on this connection
 again.
 

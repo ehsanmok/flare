@@ -93,6 +93,7 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.H2_08.fixed
 #print axioms Flare.Bugs.H2_09.counterexample
 #print axioms Flare.Bugs.H2_09.fixed
+#print axioms Flare.Bugs.H2_09.fixed_shipped
 #print axioms Flare.Bugs.H2_10.counterexample
 #print axioms Flare.Bugs.H2_10.counterexample_request
 #print axioms Flare.Bugs.H2_10.fixed

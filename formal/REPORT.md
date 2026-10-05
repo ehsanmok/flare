@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63132 lines) |
-| Theorems | 3311 |
-| Headline theorems in the axiom audit | 1107 |
+| Lean files | 298 (63150 lines) |
+| Theorems | 3313 |
+| Headline theorems in the axiom audit | 1108 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 110 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 111 of 138 |
 
 Six findings are rated high:
 
@@ -3059,7 +3059,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-06 | Low | open | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
 | H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
 | H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
-| H2-09 | Medium | open | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
+| H2-09 | Medium | resolved | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
 | H2-10 | Medium | open | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
 | H2-11 | Low | open | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
 | H2-12 | Low | open | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
@@ -4100,6 +4100,8 @@ Status: resolved. Fixed: `_declared_content_length` parses `1*DIGIT` with an ove
 - **Flip:** OK, exit 0.
 
 #### H2-09: credit for discarded DATA is never returned to the connection window
+
+Status: resolved. Fixed: both reset paths of the DATA branch (stream-window overrun, content-length mismatch at END_STREAM) now append WINDOW_UPDATE(0, len) via `_conn_window_update`. Tests: `test_h2_state.mojo::test_content_length_reset_returns_connection_credit`, `test_stream_window_overrun_reset_returns_connection_credit`. Model: `Fix.shipped` carries `h2_09`; `Bugs.H2_09.fixed_shipped`.
 
 - **Severity:** Medium. Every request reset for a stream-window overrun or a content-length mismatch permanently shrinks the connection window. Four 16 KiB requests with a wrong content-length stall the connection for good, including every other stream sharing it, for example requests multiplexed by a proxy.
 - **RFC:** RFC 9113 §6.9: DATA counts against the connection window whether or not it is processed, so a receiver that discards a frame must still give the credit back, or the sender stalls.

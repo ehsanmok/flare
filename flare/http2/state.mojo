@@ -1459,6 +1459,11 @@ struct Connection(Copyable, Defaultable):
                 )
                 s.state = StreamState.CLOSED()
                 self._put_stream(s^)
+                # The discarded DATA still counted against the connection
+                # window (RFC 9113 sec 6.9): give its credit back or the
+                # peer's window shrinks for good (H2-09).
+                if len(f.payload) > 0:
+                    out.append(self._conn_window_update(len(f.payload)))
                 return out^
             if self.is_client and not s.response_body_allowed and len(body) > 0:
                 # Stream error, for the same reason as the response-head
@@ -1546,6 +1551,9 @@ struct Connection(Copyable, Defaultable):
                     )
                     s.state = StreamState.CLOSED()
                     self._put_stream(s^)
+                    # Credit for the discarded DATA goes back too (H2-09).
+                    if len(f.payload) > 0:
+                        out.append(self._conn_window_update(len(f.payload)))
                     return out^
                 s.data_complete = True
                 # Client-side: a stream we've already half-closed
