@@ -823,6 +823,75 @@ def test_obs_fold_continuation_that_is_not_utf8_is_rejected() raises:
     )
 
 
+def _fold_parse(raw: List[UInt8], obs_text: Bool) -> String:
+    """The ``X`` header value with obs-fold on, or ``!raised``."""
+    var leniency = H1LeniencyConfig(
+        allow_obs_fold=True, accept_obs_text_in_field_value=obs_text
+    )
+    try:
+        var parsed = _parse_http_request_bytes(
+            Span[UInt8, _](raw), leniency=leniency
+        )
+        return parsed.headers.get("x")
+    except:
+        return "!raised"
+
+
+def test_obs_fold_continuation_gets_the_value_byte_check() raises:
+    """H1-10: a continuation line is field content like any other.
+
+    The byte check ran on a field's first line only, so control bytes
+    (0x01, DEL, ...) refused there reached the handler through a fold.
+    """
+    var head = "GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n "
+    var tail = "\r\n\r\n"
+    var ctls = List[UInt8]()
+    ctls.append(0x01)
+    ctls.append(0x7F)
+    assert_equal(_fold_parse(_with_value(head, ctls, tail), False), "!raised")
+    # The same bytes on a first line are refused (the control).
+    assert_equal(
+        _fold_parse(
+            _with_value("GET / HTTP/1.1\r\nHost: a\r\nX: ", ctls, tail), False
+        ),
+        "!raised",
+    )
+    # Every control byte except HTAB, one at a time.
+    for c in range(32):
+        if c == 9:
+            continue
+        var one = List[UInt8]()
+        one.append(UInt8(c))
+        assert_equal(
+            _fold_parse(_with_value(head, one, tail), False), "!raised"
+        )
+    # obs-text stays gated on its own flag.
+    var high = List[UInt8]()
+    high.append(0xC3)
+    high.append(0xA9)
+    assert_equal(_fold_parse(_with_value(head, high, tail), False), "!raised")
+    assert_equal(_fold_parse(_with_value(head, high, tail), True), "a \u00e9")
+
+
+def test_valid_obs_fold_still_unfolds() raises:
+    """Guard for H1-10: valid continuations (including an inner HTAB) fold."""
+    var tab = List[UInt8]()
+    tab.append(UInt8(ord("b")))
+    tab.append(0x09)
+    tab.append(UInt8(ord("c")))
+    assert_equal(
+        _fold_parse(
+            _with_value(
+                "GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n ",
+                tab,
+                "\r\n \td\r\n\r\n",
+            ),
+            False,
+        ),
+        "a b\tc d",
+    )
+
+
 def main() raises:
     print("=" * 60)
     print("test_h1_smuggling.mojo — h1 framing disagreements")

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H1-10 fixed on fix/formal-findings
 """H1-10: with allow_obs_fold, an obs-fold continuation line is appended to
 the header value without the byte check every other value gets.
 
@@ -13,7 +14,7 @@ check on a first-line value) @59bda50.
 Expected (RFC 9110 §5.5, RFC 9112 §5.2): the unfolded value is
 field-content; control bytes other than HTAB (here 0x01 and DEL) are
 rejected in every leniency mode, as they are on a field's first line.
-Actual: "X: a\\r\\n \\x01\\x7f" is accepted and the handler sees
+Before the fix: Actual: "X: a\\r\\n \\x01\\x7f" is accepted and the handler sees
 x = "a \\x01\\x7f" (and, with high bytes, a String that is not UTF-8,
 bypassing the obs-text gate too).
 

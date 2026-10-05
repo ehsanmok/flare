@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61682 lines) |
-| Theorems | 3245 |
-| Headline theorems in the axiom audit | 1044 |
+| Lean files | 298 (61696 lines) |
+| Theorems | 3246 |
+| Headline theorems in the axiom audit | 1045 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 56 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 57 of 138 |
 
 Six findings are rated high:
 
@@ -1052,14 +1052,14 @@ File: `Ws/Recv.lean`.
 
 File: `H1/ObsFold.lean`.
 
-**Model.** `fields obsFold obsText prev lines` mirrors the field loop of `_parse_http_request_bytes` (`parse.mojo:203-320`): a field is committed only when the next line shows it is not continued; with `allow_obs_fold` a line starting with SP/HTAB is stripped (`aStrip`, `parse_util.mojo:65-90`) and appended after one SP. `fieldsFixed` also runs `valueOk` on the continuation.
+**Model.** `fieldsOld obsFold obsText prev lines` mirrors the loop before the H1-10 fix and `fields` the shipped one; both mirror the field loop of `_parse_http_request_bytes` (`parse.mojo:203-320`): a field is committed only when the next line shows it is not continued; with `allow_obs_fold` a line starting with SP/HTAB is stripped (`aStrip`, `parse_util.mojo:65-90`) and appended after one SP. `fieldsFixed` also runs `valueOk` on the continuation.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `fold_unfold` | A run of continuation lines is unfolded exactly as RFC 9112 §5.2 says: the value becomes `v ++ " " ++ strip c₁ ++ …` (`unfoldOnto`). | proved |
-| `strict_no_fold` | Without the flag a continuation line is an error. | proved |
-| `fields_ok_strict` | In strict mode every stored value passes `valueOk`. | proved |
-| `fieldsFixed_valid`, `fixed_fold_unfold` | With the fix every stored value passes `valueOk`, and valid continuations still unfold as §5.2 says. | proved |
+| `fieldsOld_fold_unfold` | Before the fix, a run of continuation lines is unfolded exactly as RFC 9112 §5.2 says: the value becomes `v ++ " " ++ strip c₁ ++ …` (`unfoldOnto`). | proved |
+| `strict_no_fold` (`fieldsOld_strict_no_fold`) | Without the flag a continuation line is an error. | proved |
+| `fieldsOld_ok_strict` | In strict mode every stored value passes `valueOk` (pre-fix loop). | proved |
+| `fields_valid`, `fold_unfold` | The shipped loop stores only `valueOk` values, and valid continuations still unfold as §5.2 says. | proved |
 | `Bugs.H1_10.counterexample` | The shipped fold stores `a \x01\x7f`. | counterexample (H1-10) |
 
 #### Client response reader
@@ -2779,7 +2779,7 @@ advances the wheel to `now` at the top of every iteration
 | `Ws.clientAccept`, `recvFrame` | `ws/client.mojo:693-763` | `Bugs.WS_03.*`, `clientFixed_safe` | counterexample (WS-03) / fix proved |
 | `Ws.recvMessageOld`, `Ws.nextMessage` | `ws/client.mojo:765-858` | `Bugs.WS_02.*`, `nextMessage_delivered` | counterexample (WS-02) / fix proved |
 | UTF-8 check (`L1.Utf8.isValidUtf8`) | `ws/frame.mojo:553-606` | `textPayload_ok_iff` | proved (in L1) |
-| `ObsFold.isSPHT`, `aStrip`, `colonAt`, `fields` | `_server/parse.mojo:203-320`, `parse_util.mojo:65-90` | `fold_unfold`, `strict_no_fold`, `fields_ok_strict`, `fieldsFixed_valid`, `Bugs.H1_10.*` | proved (strict) / counterexample (H1-10) / fix proved |
+| `ObsFold.isSPHT`, `aStrip`, `colonAt`, `fields` | `_server/parse.mojo:203-320`, `parse_util.mojo:65-90` | `fold_unfold`, `strict_no_fold`, `fieldsOld_ok_strict`, `fields_valid`, `Bugs.H1_10.*` | proved (strict) / counterexample (H1-10) / fix proved |
 | `ClientResponse.bodyless`, `respFraming` | `_client/parse.mojo:128-170` | `framing_bodyless`, `framing_te_cl_reject`, `framing_dup_cl`, `framing_*_iff` | proved |
 | `ClientChunked.isSWS`, `pyStrip`, `hexAcc`, `cHex`, `trailerOk`, `cTr`, `cDec`, `cRead` (`cReadOld` = pre-fix) | `_client/parse.mojo:497-578`, `600-630` | `cDec_agree`, `framed_chunked_agrees`, `cRead_complete`, `Bugs.H1_06.*` | proved (framed path) / counterexample (read-to-EOF path, H1-06) / fix proved |
 | `ClientResponse.parseStatusOld`, `parseStatus` | `_client/parse.mojo:318-352` | `parseStatus_delimited`, `Bugs.H1_08.*` | counterexample (H1-08) / fix proved |
@@ -3026,7 +3026,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-07 | Low | resolved | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
 | H1-08 | Low | resolved | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
 | H1-09 | Low | resolved | an HTTP/1.0 response without keep-alive goes back to the pool | `Flare/Bugs/H1_09.lean` | `repro/H1-09_http10_response_pooled.mojo` (any) |
-| H1-10 | Low | open | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
+| H1-10 | Low | resolved | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
 | H1-11 | Medium | resolved | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
 | WS-01 | Low | open | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
 | WS-02 | Medium | resolved | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
@@ -3842,11 +3842,13 @@ Status: resolved. The framed reader records whether the status line names exactl
 
 #### H1-10: obs-fold continuation lines are not validated
 
+Status: resolved. The server parser now runs the same value check (`_check_field_value`: CR/LF/NUL, other control bytes, obs-text gate, UTF-8) on every obs-fold continuation as on a first line. The counterexample is about `fieldsOld`; `fields` is the shipped loop (`fields_valid`). Test: `test_obs_fold_continuation_gets_the_value_byte_check`.
+
 - **Severity:** Low. It needs the non-default `allow_obs_fold`. Control bytes refused on a first line reach the application through a continuation line.
 - **RFC:** RFC 9112 §5.2 (obs-fold is replaced by SP; the result is still a field value) and RFC 9110 §5.5 (no CTL except HTAB).
 - **What goes wrong:** the continuation branch of the server field loop (`_server/parse.mojo:203-320`) appends the stripped line with no byte check. The first-line check (`277-285`) never sees it.
-- **Counterexample:** `Bugs.H1_10.counterexample`: `shipped_stores` gives `X: a` + ` \x01\x7f` stored as `a \x01\x7f`, and `invalid` shows `valueOk` refuses it.
-- **Fix:** run the value check on each continuation. `Bugs.H1_10.fixed_valid` (from `fieldsFixed_valid`); `fixed_fold_unfold` shows valid folds still unfold as RFC 9112 §5.2 says.
+- **Counterexample:** `Bugs.H1_10.counterexample`: `old_stores` (about `fieldsOld`) gives `X: a` + ` \x01\x7f` stored as `a \x01\x7f`, and `invalid` shows `valueOk` refuses it.
+- **Fix:** run the value check on each continuation. `Bugs.H1_10.fixed_valid` (from `fields_valid`); `fold_unfold` shows valid folds still unfold as RFC 9112 §5.2 says.
 - **Repro:** `formal/repro/H1-10_obs_fold_continuation_unvalidated.mojo` (controls: the same bytes on a first line are refused; a plain fold gives `a b`)
 - **Observed (3 runs):** `BUG REPRODUCED: folded value accepted with control bytes, x = [ 97 32 1 127 ] (the same bytes on a first line are refused)`
 - **Flip:** `OK: control bytes in a continuation line refused (raised: invalid control character in header value)`; `flare/http/_server/parse.mojo` restored.

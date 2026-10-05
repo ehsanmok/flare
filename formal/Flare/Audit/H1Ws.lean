@@ -59,12 +59,13 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.Ws.nextMessage_delivered
 #print axioms Flare.L3.Ws.textPayload_ok_iff
 -- obs-fold
-#print axioms Flare.L3.H1.ObsFold.fold_unfold
+#print axioms Flare.L3.H1.ObsFold.fieldsOld_fold_unfold
+#print axioms Flare.L3.H1.ObsFold.fieldsOld_strict_no_fold
 #print axioms Flare.L3.H1.ObsFold.strict_no_fold
 #print axioms Flare.L3.H1.ObsFold.valueOk_join
-#print axioms Flare.L3.H1.ObsFold.fields_ok_strict
-#print axioms Flare.L3.H1.ObsFold.fieldsFixed_valid
-#print axioms Flare.L3.H1.ObsFold.fixed_fold_unfold
+#print axioms Flare.L3.H1.ObsFold.fieldsOld_ok_strict
+#print axioms Flare.L3.H1.ObsFold.fields_valid
+#print axioms Flare.L3.H1.ObsFold.fold_unfold
 -- Client chunked body
 #print axioms Flare.L3.H1.ClientChunked.cDec_agree
 #print axioms Flare.L3.H1.ClientChunked.framed_chunked_agrees

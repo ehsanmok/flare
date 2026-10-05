@@ -1358,6 +1358,12 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_obs_fold_continuation_that_is_not_utf8_is_rejected as test_h1_smuggling__test_obs_fold_continuation_that_is_not_utf8_is_rejected,
 )
+from test_h1_smuggling import (
+    test_obs_fold_continuation_gets_the_value_byte_check as test_h1_smuggling__test_obs_fold_continuation_gets_the_value_byte_check,
+)
+from test_h1_smuggling import (
+    test_valid_obs_fold_still_unfolds as test_h1_smuggling__test_valid_obs_fold_still_unfolds,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4985,6 +4991,10 @@ def main() raises:
     suite.test[
         test_h1_smuggling__test_obs_fold_continuation_that_is_not_utf8_is_rejected
     ]()
+    suite.test[
+        test_h1_smuggling__test_obs_fold_continuation_gets_the_value_byte_check
+    ]()
+    suite.test[test_h1_smuggling__test_valid_obs_fold_still_unfolds]()
     # tests/http/test_h1_trailers.mojo
     suite.test[
         test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte

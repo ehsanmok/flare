@@ -623,6 +623,12 @@ that is not valid UTF-8 is now refused (400) even with
 `accept_obs_text_in_field_value` on; valid UTF-8 obs-text is still
 accepted. The same check covers obs-fold continuation lines.
 
+With `allow_obs_fold` on, an obs-fold continuation line now gets the same
+byte check as a field's first line (RFC 9110 sec 5.5, RFC 9112 sec 5.2):
+control bytes other than HTAB, and obs-text unless
+`accept_obs_text_in_field_value` is set, are refused with 400. They used
+to reach the handler through a fold.
+
 HTTP/1.1 client: a response head that contains a bare LF (a line not
 ended by CRLF), or an empty line before its end, is now refused with
 `NetworkError` by the buffered and the streaming readers. The head used
