@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-05 fixed on fix/formal-findings
 """APP-05: when the handler raises on a HEAD request, the error response
 carries a body.
 
@@ -14,7 +15,7 @@ response to HEAD; this holds for error statuses too.
 
 Expected: the 500 queued for a HEAD whose handler raised ends at the
 header terminator.
-Actual: the 500 carries the text body "500 Internal Server Error" (the
+Before the fix: the 500 carries the text body "500 Internal Server Error" (the
 error paths ignore ``self.head_request``). The connection closes
 afterwards, so the extra bytes cannot be mistaken for a later response
 on this connection, but the HEAD response still has content.

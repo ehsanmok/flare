@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61961 lines) |
+| Lean files | 298 (61975 lines) |
 | Theorems | 3251 |
 | Headline theorems in the axiom audit | 1060 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 73 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 74 of 138 |
 
 Six findings are rated high:
 
@@ -1743,7 +1743,7 @@ the static fast path (`conn_handle.mojo:1174-1211`).
 | `Flare.L4.ConnSM.closeHonoured_step`, `fixed_no_request_after_close_header` | with the APP-01 fix (shipped): once a `Connection: close` response is queued, no further request is ever dispatched | proved (shipped machine) |
 | `Flare.Bugs.APP_01.violates_spec` | in the pre-fix machine (`ltsOld`), a reachable state violates `CloseHonoured` | counterexample |
 | `Flare.L4.ConnSM.Framing.serialize_spec` | no body for HEAD, 1xx, 204 or 304; no `Content-Length` on 1xx or 204; otherwise the body is sent with its length | proved |
-| `Flare.L4.ConnSM.Framing.headFlagFixed_spec`, `staticBytesFixed_spec` | with the APP-05 and APP-04 fixes, every response to HEAD has no body | proved (fixed) |
+| `Flare.L4.ConnSM.Framing.headFlag_spec`, `staticBytesFixed_spec` | with the APP-05 and APP-04 fixes, every response to HEAD has no body | proved (fixed) |
 
 The original plan asked for six properties:
 
@@ -2906,7 +2906,7 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | conn_handle.mojo:846-860, 911-920, 579-695, 760-920 | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo` | proved; APP-01 |
 | `Flare.L4.ConnSM.onWritable`, `onTimeout`, `step`, `lts` | conn_handle.mojo:1262-1375, 1403-1411 | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
 | `Flare.L4.ConnSM.Framing.serialize` | http/_reactor/write_path.mojo:151-155, 222-235 | `serialize_spec` | proved |
-| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1576-1594, 1174-1220 | `headFlagFixed_spec`, `staticBytes_spec` | APP-04, APP-05 |
+| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1590-1620, 1174-1220 | `headFlag_spec`, `staticBytes_spec` | APP-04, APP-05 |
 | `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfterOld_single`, `computeCloseAfter_eq_spec` | APP-03 |
 | `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-491 | `wantsClose_sound_close`, `wantsClose_spec` | APP-02 |
 | `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:448-453, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapFixed_eq_spec` | proved; APP-06 |
@@ -3096,7 +3096,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-02 | Low | resolved | `_wants_close` matches `connection:` mid-line and stops at the first hit | `Flare/Bugs/APP_02.lean` | `repro/APP-02_wants_close_substring_match.mojo` (any) |
 | APP-03 | Low | resolved | `close` inside a `Connection` token list is ignored | `Flare/Bugs/APP_03.lean` | `repro/APP-03_connection_close_token_list.mojo` (any) |
 | APP-04 | Medium | resolved | the static fast path sends the body in reply to HEAD | `Flare/Bugs/APP_04.lean` | `repro/APP-04_static_head_sends_body.mojo` (any) |
-| APP-05 | Low | open | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
+| APP-05 | Low | resolved | an error response to HEAD carries a body | `Flare/Bugs/APP_05.lean` | `repro/APP-05_error_reply_to_head_has_body.mojo` (any) |
 | APP-06 | Low | open | the size cap `max_header_size + max_body_size` wraps | `Flare/Bugs/APP_06.lean` | `repro/APP-06_size_cap_int_overflow.mojo` (any) |
 | APP-10 | Low | open | ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern | `Flare/Bugs/APP_10.lean` | `repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (any) |
 | APP-20 | Low | open | `negotiate_encoding` mishandles `*` | `Flare/Bugs/APP_20.lean` | `repro/APP-20_negotiate_wildcard.mojo` (any) |
@@ -4814,7 +4814,8 @@ leads to `_serialize_response` (`conn_handle.mojo:1576-1594`). That calls
 `serialize_response_into` without `head_request`, so the body is serialised.
 
 **Lean.** `Flare.Bugs.APP_05.handler_error_head_emits_body` (status 500,
-25-byte body). The fix is proved sufficient by `errorFixed_head_no_body`.
+25-byte body; about the pre-fix `headFlagOld`). The shipped `headFlag` is
+proved to meet the spec by `errorFixed_head_no_body`.
 
 **Fix.** Pass `self.head_request`.
 
@@ -4822,6 +4823,8 @@ leads to `_serialize_response` (`conn_handle.mojo:1576-1594`). That calls
 
 - Observed: `BUG REPRODUCED: error response to HEAD carries 25 body bytes: '500 Internal Server Error'`
 - Flip: `OK: the error response to HEAD has no body`
+
+Status: resolved. `_serialize_response` (used by `_queue_error`) now passes `self.head_request`, and errors raised before the request is parsed (408, 413, 431, 400 ...) take the flag from the buffered `HEAD ` prefix via `_note_head_from_buf`, so an error response to HEAD has no body (the stale flag of an earlier HEAD no longer leaks into a later request). Tests: `tests/http/test_server_reactor_state.mojo::test_handler_error_for_head_has_no_body`, `::test_parse_errors_for_head_have_no_body`, `::test_error_after_head_on_keepalive_conn_keeps_body`. The model `headFlag` is the shipped flag; `headFlagOld` is the pre-fix one.
 
 #### APP-06: the size cap `max_header_size + max_body_size` wraps
 

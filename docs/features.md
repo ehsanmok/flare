@@ -785,6 +785,10 @@ is read as a comma-separated option list (RFC 9110 §7.6.1), so
 `Connection: keep-alive, close` and `Connection: TE, close` close the
 connection; HTTP/1.0 stays open only when a `keep-alive` option is present.
 
+An error response the reactor generates itself (400, 408, 413, 431, 500, ...) for a
+`HEAD` request carries the headers only, like any other response to HEAD (RFC 9110
+§9.3.2).
+
 **Changed in v0.11 (breaking).** `idle_timeout_ms` now also applies to
 a connection that has not sent its first byte: it is armed at accept,
 where before a silent connection was never timed out. `request_timeout_ms`

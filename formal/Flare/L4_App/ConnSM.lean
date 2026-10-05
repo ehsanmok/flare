@@ -898,26 +898,32 @@ theorem serialize_spec (status : Int) (bodyLen : Nat) (declared : Option Nat)
 
 /-- Which `head_request` flag each reactor path hands the serialiser:
 the normal handler path passes `self.head_request`
-(conn_handle.mojo:747-754); `_queue_error` → `_serialize_response`
-(conn_handle.mojo:1576-1594) passes nothing (default `False`).
-mirrors flare/http/_reactor/conn_handle.mojo:747-754,1576-1594 @59bda50 -/
+(conn_handle.mojo:747-754); `_queue_error` → `_serialize_response` passes
+the flag too (fixed, APP-05; pre-fix it passed nothing, default `False`).
+mirrors flare/http/_reactor/conn_handle.mojo:747-754 and 1590-1620
+(fixed, APP-05) -/
 inductive Path | handler | errorReply
   deriving DecidableEq, Repr
 
-def headFlag (p : Path) (isHead : Bool) : Bool :=
+/-- The flag as shipped (fixed, APP-05): `_serialize_response` passes
+`self.head_request`, which is set from the parsed method and, for errors
+raised before the request is parsed, from the buffered `HEAD ` prefix
+(`_note_head_from_buf`). -/
+def headFlag (_p : Path) (isHead : Bool) : Bool := isHead
+
+/-- The pre-fix flags (APP-05): the error path ignored the method.
+mirrors flare/http/_reactor/conn_handle.mojo:747-754,1576-1594 @59bda50 -/
+def headFlagOld (p : Path) (isHead : Bool) : Bool :=
   match p with
   | .handler => isHead
   | .errorReply => false
-
-/-- APP-05 fix: `_serialize_response` passes `self.head_request`. -/
-def headFlagFixed (_p : Path) (isHead : Bool) : Bool := isHead
 
 /-- Spec for a whole path: a response to a HEAD request has no body. -/
 def HeadSpec (f : Path → Bool → Bool) : Prop :=
   ∀ p status bodyLen declared lengthKnown, 100 ≤ status ∧ status ≤ 599 →
     (serialize status bodyLen declared (f p true) lengthKnown).emitBody = false
 
-theorem headFlagFixed_spec : HeadSpec headFlagFixed := by
+theorem headFlag_spec : HeadSpec headFlag := by
   intro p status bodyLen declared lk hs
   exact (serialize_spec status bodyLen declared true lk hs).1 (Or.inl rfl)
 

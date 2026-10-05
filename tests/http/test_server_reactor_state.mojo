@@ -600,6 +600,122 @@ def test_ws_426_closes_connection() raises:
     client.close()
 
 
+# ── Error responses to HEAD carry no content (APP-05) ───────────────────────
+
+
+def _queued_error(
+    request: String,
+    handler: def(Request) raises thin -> Response,
+    cfg: ServerConfig,
+) raises -> String:
+    """Feed ``request`` to a fresh ConnHandle and return the bytes it queued."""
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = listener.local_addr().port
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server = listener.accept()
+    server._socket.set_nonblocking(True)
+    listener.close()
+    var ch = ConnHandle(server^)
+    _ = client.write(Span[UInt8](_bytes_of(request)))
+    _ = _drive_readable(ch, r, handler, cfg)
+    assert_true(ch.should_close)
+    var wire = String(unsafe_from_utf8=Span[UInt8](ch.write_buf))
+    client.close()
+    return wire^
+
+
+def _assert_head_only(wire: String, status: String) raises:
+    assert_true(status in wire)
+    var hdr_end = wire.find("\r\n\r\n")
+    assert_true(hdr_end >= 0)
+    assert_equal(len(wire.as_bytes()), hdr_end + 4)
+
+
+def test_handler_error_for_head_has_no_body() raises:
+    """APP-05: the 500 queued for a HEAD whose handler raised ends at the
+    header terminator; the same error for GET still has its body."""
+    var cfg = _default_config()
+    _assert_head_only(
+        _queued_error(
+            "HEAD / HTTP/1.1\r\nHost: x\r\n\r\n", _raising_handler, cfg
+        ),
+        " 500 ",
+    )
+    var get_wire = _queued_error(
+        "GET / HTTP/1.1\r\nHost: x\r\n\r\n", _raising_handler, cfg
+    )
+    var hdr_end = get_wire.find("\r\n\r\n")
+    assert_true(len(get_wire.as_bytes()) > hdr_end + 4)
+
+
+def test_parse_errors_for_head_have_no_body() raises:
+    """APP-05: errors raised before the request is parsed (400, 413, 431)
+    also leave HEAD without content."""
+    var cfg = _default_config()
+    _assert_head_only(
+        _queued_error(
+            "HEAD / HTTP/1.1\r\nno colon here\r\n\r\n", _echo_handler, cfg
+        ),
+        " 400 ",
+    )
+    var cfg413 = _default_config()
+    cfg413.max_body_size = 10
+    _assert_head_only(
+        _queued_error(
+            "HEAD /x HTTP/1.1\r\nHost: h\r\nContent-Length: 1000\r\n\r\n",
+            _echo_handler,
+            cfg413,
+        ),
+        " 413 ",
+    )
+    var cfg431 = _default_config()
+    cfg431.max_header_size = 64
+    _assert_head_only(
+        _queued_error(
+            "HEAD / HTTP/1.1\r\nX: " + String("a") * 200,
+            _echo_handler,
+            cfg431,
+        ),
+        " 431 ",
+    )
+    # Control: the same 413 for a POST keeps its body.
+    var post = _queued_error(
+        "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 1000\r\n\r\n",
+        _echo_handler,
+        cfg413,
+    )
+    assert_true(len(post.as_bytes()) > post.find("\r\n\r\n") + 4)
+
+
+def test_error_after_head_on_keepalive_conn_keeps_body() raises:
+    """APP-05: a HEAD served earlier on the connection must not make a later
+    GET's error response bodyless."""
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = listener.local_addr().port
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server = listener.accept()
+    server._socket.set_nonblocking(True)
+    listener.close()
+    var ch = ConnHandle(server^)
+    var cfg = _default_config()
+    _ = client.write(
+        Span[UInt8](_bytes_of("HEAD / HTTP/1.1\r\nHost: x\r\n\r\n"))
+    )
+    _ = _drive_readable(ch, r, _echo_handler, cfg)
+    _ = ch.on_writable(cfg)
+    assert_equal(ch.state, STATE_READING)
+    _ = client.write(
+        Span[UInt8](_bytes_of("GET / HTTP/1.1\r\nHost: x\r\n\r\n"))
+    )
+    _ = _drive_readable(ch, r, _raising_handler, cfg)
+    assert_true(ch.should_close)
+    var wire = String(unsafe_from_utf8=Span[UInt8](ch.write_buf))
+    assert_true(len(wire.as_bytes()) > wire.find("\r\n\r\n") + 4)
+    client.close()
+
+
 def test_response_includes_date_header_from_cache() raises:
     """The serialised response carries an IMF-fixdate ``Date:`` line.
 

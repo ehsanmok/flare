@@ -152,6 +152,18 @@ def _is_ws_version_mismatch(req: Request) -> Bool:
     return String(req.headers.get("sec-websocket-version").strip()) != "13"
 
 
+def _starts_with_head(buf: List[UInt8]) -> Bool:
+    """True when ``buf`` starts with the request-line method ``HEAD ``."""
+    return (
+        len(buf) >= 5
+        and buf[0] == 72  # H
+        and buf[1] == 69  # E
+        and buf[2] == 65  # A
+        and buf[3] == 68  # D
+        and buf[4] == 32  # SP
+    )
+
+
 def _head_expects_continue(buf: Span[UInt8, _], headers_end: Int) -> Bool:
     """The request line says HTTP/1.1 and a header line is
     ``Expect: 100-continue`` (names anchored at a line start, value
@@ -461,6 +473,7 @@ struct ConnHandle(Movable):
                     len(self.read_buf)
                     > config.max_header_size + config.max_body_size
                 ):
+                    self._note_head_from_buf()
                     self._queue_error(413, "Content Too Large")
                     return Optional[StepResult](self._transition_to_writing())
             elif got == 0:
@@ -505,6 +518,7 @@ struct ConnHandle(Movable):
                     len(self.read_buf)
                     > config.max_header_size + config.max_body_size
                 ):
+                    self._note_head_from_buf()
                     self._queue_error(413, "Content Too Large")
                     return Optional[StepResult](self._transition_to_writing())
                 continue
@@ -549,6 +563,7 @@ struct ConnHandle(Movable):
                 len(self.read_buf)
                 > config.max_header_size + config.max_body_size
             ):
+                self._note_head_from_buf()
                 self._queue_error(413, "Content Too Large")
                 return Optional[StepResult](self._transition_to_writing())
         return Optional[StepResult]()
@@ -636,6 +651,10 @@ struct ConnHandle(Movable):
         # that sends one byte just inside it could keep a request open
         # forever. request_timeout_ms is an absolute budget for reading
         # the whole request, head and body, from its first byte.
+        # An error queued while the request is still incomplete must know
+        # whether it answers a HEAD (no content, RFC 9110 sec 9.3.2); the
+        # parsed ``req.method`` is not available yet (APP-05).
+        self._note_head_from_buf()
         if len(self.read_buf) > 0 and config.request_timeout_ms > 0:
             var now = _monotonic_ms()
             if self.request_started_ms == 0:
@@ -645,7 +664,6 @@ struct ConnHandle(Movable):
                 self._queue_error(408, "Request Timeout")
                 return Optional[StepResult](self._transition_to_writing())
         if self.headers_end < 0:
-            self.head_request = False
             self.continue_sent = False
             var end = _find_crlfcrlf(self.read_buf, 0)
             if end < 0:
@@ -1252,14 +1270,7 @@ struct ConnHandle(Movable):
         var final_close = self._apply_keepalive_policy(config, close_after)
         # A response to HEAD carries no content (RFC 9110 §9.3.2), so
         # queue only the head of the pre-encoded bytes (APP-04).
-        var is_head = (
-            len(self.read_buf) >= 5
-            and self.read_buf[0] == 72  # H
-            and self.read_buf[1] == 69  # E
-            and self.read_buf[2] == 65  # A
-            and self.read_buf[3] == 68  # D
-            and self.read_buf[4] == 32  # SP
-        )
+        var is_head = _starts_with_head(self.read_buf)
 
         if self.body_total > 0 and self.body_total <= len(self.read_buf):
             _compact_read_buf_drop_prefix(self.read_buf, self.body_total)
@@ -1677,8 +1688,21 @@ struct ConnHandle(Movable):
         config.ws.handler.value()(conn)
         return True
 
+    def _note_head_from_buf(mut self):
+        """While the request head has not been fully scanned
+        (``headers_end < 0``) the method is read off the buffered request
+        line, so an error queued now (431 / 408 / 413 ...) is answered
+        without content when it replies to a HEAD (APP-05). Once the head
+        is scanned the flag is left alone: after dispatch ``read_buf`` may
+        already start with the next pipelined request."""
+        if self.headers_end < 0:
+            self.head_request = _starts_with_head(self.read_buf)
+
     def _queue_error(mut self, status: Int, reason: String) -> None:
-        """Build a minimal error response into ``write_buf`` and mark close."""
+        """Build a minimal error response into ``write_buf`` and mark close.
+
+        The response is serialised with ``self.head_request`` so an error
+        answering a HEAD request carries no content (APP-05)."""
         self.should_close = True
         var resp = build_error_response(status, reason)
         self._serialize_response(resp^, False)
@@ -1698,7 +1722,11 @@ struct ConnHandle(Movable):
     def _serialize_response(mut self, resp: Response, keep_alive: Bool) -> None:
         """Serialise ``resp`` into ``write_buf`` ready to be sent."""
         serialize_response_into(
-            self.write_buf, self._date_cache, resp, keep_alive
+            self.write_buf,
+            self._date_cache,
+            resp,
+            keep_alive,
+            self.head_request,
         )
         self.write_pos = 0
 
