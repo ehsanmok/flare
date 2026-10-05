@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: CONC-02 fixed on fix/formal-findings
 """CONC-02: arm on a slot that is still armed lets the poller fire the
 OLD deadline into the NEW request's cancel cell.
 
@@ -17,7 +18,7 @@ re-arms only after the fire has completed, which is safe). The arm
 docstring does not state the "disarm first" precondition.
 
 Expected: arm(slot, 60_000, cellB) never cancels cellB before 60 s.
-Actual: between arm's address store and its deadline CAS the slot still
+Before the fix: between arm's address store and its deadline CAS the slot still
 holds the previous, expired deadline; the poller claims it, loads the
 new address and writes TIMEOUT into cellB.
 

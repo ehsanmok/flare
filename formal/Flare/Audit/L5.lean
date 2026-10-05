@@ -53,6 +53,7 @@ per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.CONC_02.rearm_disarm_wrong
 #print axioms Flare.Bugs.CONC_02.disarmFirst_safe
 #print axioms Flare.Bugs.CONC_02.implFixed_safe
+#print axioms Flare.Bugs.CONC_02.shipped_meets_spec
 -- CONC-03
 #print axioms Flare.Bugs.CONC_03.drain_frees_live_ref
 #print axioms Flare.Bugs.CONC_03.drain_uaf

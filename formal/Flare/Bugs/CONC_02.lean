@@ -25,12 +25,22 @@ Fix: begin `watchdog_arm` with the disarm loop (CAS the current deadline to
 0, waiting out FIRING), then store the address and CAS `0 → deadline`
 (`Cfg.disarmFirst`). `Flare.L5.Watchdog.fixed_safe` and
 `disarmFirst_safe` below prove it safe even when callers re-arm.
+
+Status: resolved. `watchdog_arm` now starts with the disarm loop
+(flare/runtime/watchdog.mojo:136-143: CAS the held deadline to 0, waiting
+out FIRING) before it stores the address; the shipped configuration is
+`Flare.L5.Watchdog.cfgShipped` (= `cfgFixed`). The counterexamples below are
+about the explicitly pre-fix `cfgRearm` (the code at 59bda50 when a caller
+re-arms a still-armed slot). Regression test: tests/runtime/test_watchdog.mojo::
+test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell
+(the window cannot be entered deterministically, so it runs the real `arm`
+against the real poller for up to 1 000 000 rounds).
 -/
 namespace Flare.Bugs.CONC_02
 open Flare.L5.Watchdog
 
-/-- The code at 59bda50 with positive budgets, when a caller re-arms a slot
-without disarming it first. -/
+/-- The pre-fix code (59bda50) with positive budgets, when a caller re-arms a
+slot without disarming it first. -/
 def cfgRearm : Cfg := { cfgImpl with allowRearm := true }
 
 /-- Request 1 armed with budget 0 (deadline 1 = now, already expired); the
@@ -100,5 +110,12 @@ with re-arming allowed. -/
 theorem implFixed_safe :
     ∀ s, (lts cfgFixed).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
   fixed_safe
+
+/-- **Fix meets spec**: the shipped `arm` (`cfgShipped`) is safe, its
+`disarm` is exact and FIRING is always owned, even when callers re-arm a
+still-armed slot without disarming it. -/
+theorem shipped_meets_spec :
+    ∀ s, (lts cfgShipped).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
+  shipped_safe
 
 end Flare.Bugs.CONC_02

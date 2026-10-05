@@ -18,8 +18,8 @@ Status: resolved. `watchdog_arm` takes its deadline from `_deadline_after`
 (flare/runtime/watchdog.mojo:55-74): the sum saturates at `Int64.MAX` and is
 raised to at least 1, so a spent budget fires at the next poll and an
 overflowing one never wraps into the past. The shipped configuration is
-`Flare.L5.Watchdog.cfgShipped` (`clamp := true`); `cfgAnyBudget` below is the
-explicitly pre-fix one (`clamp := false`, any caller budget). Regression
+`Flare.L5.Watchdog.cfgShipped` (`clamp := true`, and since CONC-02
+`disarmFirst := true`); `cfgAnyBudget` below is the explicitly pre-fix one (`clamp := false`, any caller budget). Regression
 tests: tests/runtime/test_watchdog.mojo::
 test_arm_with_an_expired_budget_fires_at_the_next_poll and
 test_arm_with_a_huge_budget_saturates_instead_of_wrapping.
@@ -96,14 +96,13 @@ theorem arm_firing_sentinel :
       exact (stuck_run cfgAnyBudget ⟨e1, e2, e3⟩ hrun).2.2
 
 /-- **Fix meets spec**: the shipped code (`cfgShipped`, deadline clamped into
-`1..Int64.MAX`) is safe for every budget, under the "arm only after disarm"
-discipline that still holds until CONC-02. -/
+`1..Int64.MAX`) is safe for every budget. -/
 theorem shipped_meets_spec :
     ∀ s, (lts cfgShipped).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
   shipped_safe
 
-/-- The full fix (deadline clamped to ≥ 1 and disarm first) meets the spec
-for every budget. -/
+/-- The full fix (deadline clamped to ≥ 1 and disarm first; the shipped code)
+meets the spec for every budget. -/
 theorem implFixed_safe :
     ∀ s, (lts cfgFixed).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
   fixed_safe

@@ -122,12 +122,25 @@ def _atomic_store(block: Int, idx: Int, v: Int64):
 
 def watchdog_arm(block: Int, slot: Int, budget_ms: Int, cancel_addr: Int):
     """Arm ``slot`` on the watchdog control block at ``block`` to flip
-    the cell at ``cancel_addr`` after ``budget_ms``. Address is stored
-    before the deadline so the poller never sees a deadline without its
-    target."""
+    the cell at ``cancel_addr`` after ``budget_ms``. A slot that is still
+    armed is disarmed first (as :func:`watchdog_disarm` does, without
+    reporting a fire), so a previous request's deadline can never fire into
+    this request's cell; calling ``watchdog_disarm`` before re-arming remains
+    the way to learn whether the previous request was cancelled. The
+    address is stored before the deadline so the poller never sees a
+    deadline without its target."""
     if block == 0 or slot < 0 or slot >= WATCHDOG_MAX_SLOTS:
         return
-    _ = _settle(block, slot)
+    # Release whatever the slot still holds *before* the address changes:
+    # CAS the current deadline to 0, waiting out a fire in progress. Without
+    # this the poller could claim the previous, expired deadline after the
+    # address store below and write TIMEOUT into the new request's cell.
+    while True:
+        var held = _settle(block, slot)
+        if held == 0 or _atomic_cas(
+            block, _slot_deadline_idx(slot), held, Int64(0)
+        ):
+            break
     _atomic_store(block, _slot_addr_idx(slot), Int64(cancel_addr))
     var deadline = _deadline_after(monotonic_now_ms(), budget_ms)
     while True:

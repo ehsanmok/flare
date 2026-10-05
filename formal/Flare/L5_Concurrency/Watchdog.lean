@@ -37,9 +37,9 @@ argument is written down here, not proved in Lean.
 ## Configurations
 
 `Cfg` covers the Mojo code at 59bda50 (`disarmFirst := false`,
-`clamp := false`), the shipped code (`cfgShipped`: `clamp := true`, CONC-01
-fixed) and the full fix (`disarmFirst`: arm first CASes the old deadline to
-0, CONC-02), plus whether callers may re-arm without disarm.
+`clamp := false`, the pre-fix `cfgImpl`) and the shipped code (`cfgShipped` =
+`cfgFixed`: `clamp`, CONC-01, and `disarmFirst`, CONC-02: arm first CASes the
+old deadline to 0), plus whether callers may re-arm without disarm.
 -/
 namespace Flare.L5.Watchdog
 
@@ -58,11 +58,12 @@ inductive PPc where
   deriving DecidableEq, Repr
 
 /-- Worker program counter.
-mirrors flare/runtime/watchdog.mojo:98-132 @59bda50 -/
+mirrors flare/runtime/watchdog.mojo:123-149 (arm, fixed, CONC-01 and CONC-02),
+:152-170 (disarm) -/
 inductive WPc where
   | idle                     -- between requests
-  | armSettle                -- :105 `_settle` (fix: disarm loop)
-  | armCas0 (v : Int)        -- fix only: CAS(v -> 0)
+  | armSettle                -- :139 `_settle` of the disarm loop (pre-fix: a bare `_settle`)
+  | armCas0 (v : Int)        -- :140-142 CAS(v -> 0); pre-fix code has no such step
   | armStore                 -- :106 store the cell address
   | armClock                 -- :107 deadline = now + budget
   | armSettle2 (dl : Int)    -- :109 `_settle`
@@ -133,7 +134,8 @@ def pStep (s : St) : St :=
   | .release => { s with slot := 0, p := .scan }
 
 /-- One worker step (`b` is the budget, used at `armClock`).
-mirrors flare/runtime/watchdog.mojo:98-132 @59bda50 -/
+mirrors flare/runtime/watchdog.mojo:123-149 (arm, fixed, CONC-01 and CONC-02),
+:152-170 (disarm); `disarmFirst = false` is the pre-fix arm at 59bda50 -/
 def wStep (c : Cfg) (b : Int) (s : St) : Option St :=
   match s.w with
   | .idle => some { s with w := .armSettle }
@@ -343,11 +345,9 @@ budget; callers may re-arm without disarm. -/
 def cfgFixed : Cfg :=
   { disarmFirst := true, clamp := true, allowRearm := true, adm := fun _ _ => true }
 
-/-- The shipped code: the deadline is clamped (CONC-01, fixed); `arm` does not
-yet disarm first (CONC-02), so callers must disarm before re-arming. Any
-budget. -/
-def cfgShipped : Cfg :=
-  { disarmFirst := false, clamp := true, allowRearm := false, adm := fun _ _ => true }
+/-- The shipped code: the deadline is clamped (CONC-01) and `arm` disarms
+first (CONC-02): the full fix. -/
+def cfgShipped : Cfg := cfgFixed
 
 theorem deadlinePos_impl : DeadlinePos cfgImpl := by
   intro n b _ ha
@@ -362,10 +362,7 @@ theorem deadlinePos_fixed : DeadlinePos cfgFixed := by
   simp only [deadlineOf, cfgFixed, if_true]
   omega
 
-theorem deadlinePos_shipped : DeadlinePos cfgShipped := by
-  intro n b _ _
-  simp only [deadlineOf, cfgShipped, if_true]
-  omega
+theorem deadlinePos_shipped : DeadlinePos cfgShipped := deadlinePos_fixed
 
 /-- Headline (impl): under "arm only after disarm" and positive budgets the
 watchdog fires only into the current request's cell, only for that
@@ -376,18 +373,17 @@ theorem impl_safe :
     ∀ s, (lts cfgImpl).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
   safe_of_cfg cfgImpl (by simp [cfgImpl]) deadlinePos_impl
 
-/-- Headline (shipped): with the deadline clamped, the watchdog is safe for
-every budget (including spent and overflowing ones) under "arm only after
-disarm". Proved (general). -/
-theorem shipped_safe :
-    ∀ s, (lts cfgShipped).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
-  safe_of_cfg cfgShipped (by simp [cfgShipped]) deadlinePos_shipped
-
 /-- Headline (fix): the clamped, disarm-first arm is safe for every budget
 and even when callers re-arm a still-armed slot. Proved (general). -/
 theorem fixed_safe :
     ∀ s, (lts cfgFixed).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
   safe_of_cfg cfgFixed (by simp [cfgFixed]) deadlinePos_fixed
+
+/-- Headline (shipped): the shipped `arm` (`cfgShipped`, both fixes) is safe
+for every budget, and even when callers re-arm a still-armed slot. -/
+theorem shipped_safe :
+    ∀ s, (lts cfgShipped).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
+  fixed_safe
 
 /-! ## Executable traces (used by the counterexamples in `Flare.Bugs`) -/
 

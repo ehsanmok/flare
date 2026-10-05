@@ -739,6 +739,9 @@ from test_watchdog import (
 from test_watchdog import (
     test_arm_with_a_huge_budget_saturates_instead_of_wrapping as test_watchdog__test_arm_with_a_huge_budget_saturates_instead_of_wrapping,
 )
+from test_watchdog import (
+    test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell as test_watchdog__test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell,
+)
 
 
 def main() raises:
@@ -1120,5 +1123,8 @@ def main() raises:
     ]()
     suite.test[
         test_watchdog__test_arm_with_a_huge_budget_saturates_instead_of_wrapping
+    ]()
+    suite.test[
+        test_watchdog__test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell
     ]()
     suite^.run()

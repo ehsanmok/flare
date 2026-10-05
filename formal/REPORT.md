@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62449 lines) |
-| Theorems | 3274 |
-| Headline theorems in the axiom audit | 1074 |
+| Lean files | 298 (62462 lines) |
+| Theorems | 3275 |
+| Headline theorems in the axiom audit | 1075 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 86 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 87 of 138 |
 
 Six findings are rated high:
 
@@ -3121,7 +3121,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-48 | High | resolved | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
 | APP-49 | Medium | resolved | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
 | CONC-01 | Low | resolved | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
-| CONC-02 | Low | open | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
+| CONC-02 | Low | resolved | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
 | CONC-03 | High | resolved | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
 | CONC-04 | Medium | resolved | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
 | CONC-05 | Medium | resolved | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
@@ -5443,7 +5443,7 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
   `BUG REPRODUCED: arm with an expired budget left slot 0 at the FIRING sentinel (-1) after 50 polls; the cell was never flipped and disarm(0) would spin forever`.
 - **Flip:** with the clamp, `OK: arm with an expired budget fires at the next poll` and exit 0. Restored.
 
-Status: resolved. `watchdog_arm` takes its deadline from the new `_deadline_after`: the sum saturates at `Int64.MAX` (a huge budget no longer wraps into the past, as the report suggested) and is raised to at least 1, so a spent budget fires at the next poll and the `-1` sentinel can no longer be stored. Tests: `tests/runtime/test_watchdog.mojo::test_arm_with_an_expired_budget_fires_at_the_next_poll` (failed before: the cell was never flipped) and `::test_arm_with_a_huge_budget_saturates_instead_of_wrapping`. The repro now prints `OK:` (3 of 3 runs). The shipped configuration is `Flare.L5.Watchdog.cfgShipped` (`clamp := true`, no disarm-first until CONC-02); `Flare.Bugs.CONC_01.shipped_meets_spec` is stated about it, and `cfgAnyBudget` is the pre-fix one. Decision: no test pins the exact `-1` deadline, since it depends on the clock reading at `arm`; the spent-budget test uses a budget far below `-now`, which stored a negative deadline before.
+Status: resolved. `watchdog_arm` takes its deadline from the new `_deadline_after`: the sum saturates at `Int64.MAX` (a huge budget no longer wraps into the past, as the report suggested) and is raised to at least 1, so a spent budget fires at the next poll and the `-1` sentinel can no longer be stored. Tests: `tests/runtime/test_watchdog.mojo::test_arm_with_an_expired_budget_fires_at_the_next_poll` (failed before: the cell was never flipped) and `::test_arm_with_a_huge_budget_saturates_instead_of_wrapping`. The repro now prints `OK:` (3 of 3 runs). The shipped configuration is `Flare.L5.Watchdog.cfgShipped` (`clamp := true`, and since CONC-02 `disarmFirst := true`, i.e. `cfgFixed`); `Flare.Bugs.CONC_01.shipped_meets_spec` is stated about it, and `cfgAnyBudget` is the pre-fix one. Decision: no test pins the exact `-1` deadline, since it depends on the clock reading at `arm`; the spent-budget test uses a budget far below `-now`, which stored a negative deadline before.
 
 #### CONC-02: re-arming a still-armed slot fires the old deadline into the new request's cell
 
@@ -5457,6 +5457,8 @@ Status: resolved. `watchdog_arm` takes its deadline from the new `_deadline_afte
 - **Repro:** `formal/repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo`. It races the real `arm` against the real poller for up to 4 s, because the poll loop cannot be driven one iteration at a time. Observed:
   `BUG REPRODUCED: re-arming a still-armed slot cancelled the new request's cell (60 s budget) in round 33291 ; disarm reported fired = False`.
 - **Flip:** with the disarm-first arm, `OK: no stale fire hit the new cell in 49483143 rounds` and exit 0. Restored. The repro is nondeterministic, so an OK result is evidence, not proof.
+
+Status: resolved. `watchdog_arm` now begins with the disarm loop (CAS the held deadline to 0, waiting out FIRING) before it stores the new address, then CASes `0 -> deadline`. Test: `tests/runtime/test_watchdog.mojo::test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell`, which runs the real `arm` against the real poller for up to 1 000 000 rounds and checks the new cell after `disarm` (failed in 3 of 3 runs before the fix; passes in 3 of 3 after). The repro now prints `OK:` (3 of 3 runs, about 48 million rounds each). The shipped configuration is `Flare.L5.Watchdog.cfgShipped` (= `cfgFixed`); `Flare.Bugs.CONC_02.shipped_meets_spec` is stated about it, and `cfgRearm` is the pre-fix one. Decision: the window is a few instructions wide and the poller cannot be stepped from outside, so there is no deterministic unit test; the bounded stress test misses a pre-fix stale fire with negligible probability (the race showed up about once per 30 000 rounds) and cannot raise a false alarm, since the new cell's 60 s budget is far in the future. The `arm` docstring now states that a still-armed slot is released first.
 
 #### CONC-03: `Scheduler.drain` frees the stop flag under a detached worker
 

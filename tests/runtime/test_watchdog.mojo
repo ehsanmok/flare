@@ -23,6 +23,13 @@ def _read_cell(addr: Int) -> Int:
     )
 
 
+def _set_cell(addr: Int, v: Int64):
+    var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    Atomic[Int64].store[ordering=Ordering.RELEASE](
+        p.unsafe_bitcast[Scalar[DType.int64]](), v
+    )
+
+
 def _free_cell(addr: Int):
     var p = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
     p.unsafe_free()
@@ -124,6 +131,36 @@ def test_arm_with_a_huge_budget_saturates_instead_of_wrapping() raises:
     _free_cell(cell)
 
 
+def test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell() raises:
+    """``arm`` stored the new cell's address before replacing the previous,
+    expired deadline, so a poll in that window claimed the old deadline and
+    wrote TIMEOUT into the new request's cell. ``arm`` now releases the old
+    deadline first.
+
+    The window is a few instructions wide and the poller cannot be stepped
+    from outside, so this runs the real ``arm`` against the real poller for a
+    bounded number of rounds. Before the fix a stale fire landed about once
+    in 30 000 rounds; 1 000 000 rounds make a miss astronomically unlikely
+    (and a pass can never be a false alarm: the new cell has a 60 s budget)."""
+    var wd = DeadlineWatchdog(poll_ms=1)
+    var cell_a = _new_cell()
+    var cell_b = _new_cell()
+    var stale = 0
+    for _ in range(1_000_000):
+        _set_cell(cell_a, 0)
+        _set_cell(cell_b, 0)
+        wd.arm(0, -1, cell_a)  # request A: deadline already passed
+        wd.arm(0, 60_000, cell_b)  # request B, without disarming A
+        _ = wd.disarm(0)  # waits out a fire in progress
+        if _read_cell(cell_b) != 0:
+            stale += 1
+            break
+    wd.stop()
+    _free_cell(cell_a)
+    _free_cell(cell_b)
+    assert_equal(stale, 0, "a stale fire cancelled the new request's cell")
+
+
 def main() raises:
     test_watchdog_flips_cell_on_deadline()
     print("OK test_watchdog_flips_cell_on_deadline")
@@ -135,4 +172,9 @@ def main() raises:
     print("OK test_arm_with_an_expired_budget_fires_at_the_next_poll")
     test_arm_with_a_huge_budget_saturates_instead_of_wrapping()
     print("OK test_arm_with_a_huge_budget_saturates_instead_of_wrapping")
-    print("test_watchdog: 5 passed")
+    test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell()
+    print(
+        "OK"
+        " test_rearming_an_armed_slot_never_fires_the_old_deadline_into_the_new_cell"
+    )
+    print("test_watchdog: 6 passed")
