@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-08 fixed on fix/formal-findings
 """H2-08: the server does not require the first frame after the client
 preface to be SETTINGS.
 
@@ -14,7 +15,7 @@ and servers MUST treat an invalid connection preface as a connection error
 
 Trace: Http2Connection.feed(magic, PING) with no SETTINGS.
 
-Expected: GOAWAY(PROTOCOL_ERROR). Actual: the PING is answered with a PING
+Expected: GOAWAY(PROTOCOL_ERROR). Before the fix: the PING is answered with a PING
 ACK and the connection carries on.
 
 Minimal fix: record in Http2Connection whether the peer's first frame has

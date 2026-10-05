@@ -210,10 +210,10 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-09, H2-10, H2-17. -/
+finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-17. -/
 def Fix.shipped : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true, h2_06 := true,
-    h2_07 := true, h2_09 := true, h2_10 := true, h2_17 := true }
+    h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -802,9 +802,10 @@ def handleW (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
 
 /-- The connection preface rule (RFC 9113 §3.4) and its ghost:
 `peerSettingsSeen` records that a SETTINGS (non-ACK) frame was received.
-The shipped code never reads it; the H2-08 fix refuses any other first
-frame.
-mirrors flare/http2/server.mojo:398-438 @59bda50 (the ghost is model-only) -/
+The code before the H2-08 fix never read it; the fix (`peer_settings_seen`
+on `Http2Connection`, in `feed`) refuses any other first frame.
+mirrors flare/http2/server.mojo:398-438 @59bda50; the H2-08 fix is the
+`peer_settings_seen` test before `handle_frame` in `feed` -/
 def prefaceGate (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if !c.peerSettingsSeen then
     if f.ty = tSETTINGS && !f.f1 then handleW fx dec { c with peerSettingsSeen := true } f

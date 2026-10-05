@@ -26,8 +26,19 @@ from flare.http2 import (
 )
 
 
-def _preface_bytes() -> List[UInt8]:
+def _raw_preface() -> List[UInt8]:
+    """Just the 24-octet client magic."""
     return List[UInt8](String(H2_PREFACE).as_bytes())
+
+
+def _preface_bytes() -> List[UInt8]:
+    """The magic followed by the empty SETTINGS frame RFC 9113 sec 3.4
+    requires as the client's first frame."""
+    var out = _raw_preface()
+    var st = Frame()
+    st.header.type = FrameType.SETTINGS()
+    out.extend(Span[UInt8, _](encode_frame(st)))
+    return out^
 
 
 def _build_get_request_frame() raises -> List[UInt8]:
@@ -117,32 +128,21 @@ def test_request_round_trip() raises:
     c.emit_response(1, resp^)
 
     var bytes = c.drain()
-    # Skip the initial SETTINGS frame written on preface.
-    var maybe1 = parse_frame(Span[UInt8, _](bytes))
-    assert_true(Bool(maybe1))
-    var settings = maybe1.value().copy()
-    var off = 9 + settings.header.length
+    # Initial SETTINGS and the ACK of the client's SETTINGS, then HEADERS,
+    # then DATA.
+    var frames = _walk_frames(bytes)
+    assert_equal(len(frames), 4)
+    assert_equal(Int(frames[0].header.type.value), 0x4)
+    assert_equal(Int(frames[1].header.type.value), 0x4)
+    assert_true(frames[1].header.flags.has(FrameFlags.ACK()))
 
-    # Next is HEADERS.
-    var rest = List[UInt8](capacity=len(bytes) - off)
-    for i in range(off, len(bytes)):
-        rest.append(bytes[i])
-    var hmaybe = parse_frame(Span[UInt8, _](rest))
-    assert_true(Bool(hmaybe))
-    var headers_frame = hmaybe.value().copy()
+    var headers_frame = frames[2].copy()
     assert_equal(Int(headers_frame.header.type.value), 0x1)
     assert_equal(headers_frame.header.stream_id, 1)
     assert_true(headers_frame.header.flags.has(FrameFlags.END_HEADERS()))
     assert_false(headers_frame.header.flags.has(FrameFlags.END_STREAM()))
 
-    # Then DATA with the body.
-    var consumed = 9 + headers_frame.header.length
-    var rest2 = List[UInt8](capacity=len(rest) - consumed)
-    for i in range(consumed, len(rest)):
-        rest2.append(rest[i])
-    var dmaybe = parse_frame(Span[UInt8, _](rest2))
-    assert_true(Bool(dmaybe))
-    var data_frame = dmaybe.value().copy()
+    var data_frame = frames[3].copy()
     assert_equal(Int(data_frame.header.type.value), 0x0)
     assert_equal(data_frame.header.stream_id, 1)
     assert_true(data_frame.header.flags.has(FrameFlags.END_STREAM()))
@@ -273,7 +273,7 @@ def test_repeated_fields_and_cookie_crumbs_survive() raises:
     """Browsers split cookies into one field per crumb (RFC 9113 sec
     8.2.3); take_request used ``set`` and kept only the last one."""
     var c = Http2Connection()
-    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    c.feed(Span[UInt8, _](_preface_bytes()))
     var enc = HpackEncoder()
     var hdrs = List[HpackHeader]()
     hdrs.append(HpackHeader(":method", "GET"))
@@ -365,9 +365,6 @@ def _small_table_server() raises -> Http2Connection:
     cfg.header_table_size = 0
     var c = Http2Connection.with_config(cfg^)
     c.feed(Span[UInt8, _](_preface_bytes()))
-    var settings = Frame()
-    settings.header.type = FrameType.SETTINGS()
-    c.feed(Span[UInt8, _](encode_frame(settings)))
     return c^
 
 
@@ -423,6 +420,70 @@ def test_peer_size_update_to_the_advertised_size_is_honoured() raises:
     assert_equal(_goaway_code(c2.drain()), 9)
 
 
+def _first_frame_verdict(ty: FrameType, flags: UInt8, n: Int) raises -> Int:
+    """GOAWAY code the server answers when ``ty`` is the first frame after the
+    preface, or -1 when it does not send a GOAWAY."""
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](_raw_preface()))
+    _ = c.drain()
+    var f = Frame()
+    f.header.type = ty.copy()
+    f.header.flags = FrameFlags(flags)
+    f.header.stream_id = 0
+    f.payload = List[UInt8](length=n, fill=UInt8(0))
+    f.header.length = n
+    c.feed(Span[UInt8, _](encode_frame(f)))
+    return _goaway_code(c.drain())
+
+
+def test_first_frame_after_the_preface_must_be_settings() raises:
+    """H2-08: the client preface "MUST be followed by a SETTINGS frame"
+    (RFC 9113 sec 3.4). Any other first frame, a PING, a SETTINGS ACK or a
+    WINDOW_UPDATE, is GOAWAY(PROTOCOL_ERROR), and nothing is answered
+    before it (no PING ACK)."""
+    assert_equal(_first_frame_verdict(FrameType.PING(), UInt8(0), 8), 1)
+    assert_equal(
+        _first_frame_verdict(FrameType.SETTINGS(), FrameFlags.ACK(), 0), 1
+    )
+    assert_equal(
+        _first_frame_verdict(FrameType.WINDOW_UPDATE(), UInt8(0), 4), 1
+    )
+    # No PING ACK went out.
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](_raw_preface()))
+    _ = c.drain()
+    var ping = Frame()
+    ping.header.type = FrameType.PING()
+    ping.payload = List[UInt8](length=8, fill=UInt8(0))
+    ping.header.length = 8
+    c.feed(Span[UInt8, _](encode_frame(ping)))
+    for f in _walk_frames(c.drain()):
+        assert_false(f.header.type.value == 6, "PING answered before SETTINGS")
+
+
+def test_settings_first_then_other_frames_are_served() raises:
+    """H2-08: an (empty) SETTINGS first, then PING, is fine; and so is a
+    SETTINGS with content."""
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](_raw_preface()))
+    _ = c.drain()
+    var st = Frame()
+    st.header.type = FrameType.SETTINGS()
+    c.feed(Span[UInt8, _](encode_frame(st)))
+    var ping = Frame()
+    ping.header.type = FrameType.PING()
+    ping.payload = List[UInt8](length=8, fill=UInt8(0))
+    ping.header.length = 8
+    c.feed(Span[UInt8, _](encode_frame(ping)))
+    var out = c.drain()
+    assert_equal(_goaway_code(out), -1)
+    var acked = False
+    for f in _walk_frames(out):
+        if f.header.type.value == 6 and (f.header.flags.bits & 1) != 0:
+            acked = True
+    assert_true(acked)
+
+
 def main() raises:
     test_alpn_dispatch()
     test_h2c_upgrade_detection()
@@ -436,4 +497,6 @@ def main() raises:
     test_repeated_fields_and_cookie_crumbs_survive()
     test_reduced_table_size_applies_only_after_the_peers_size_update()
     test_peer_size_update_to_the_advertised_size_is_honoured()
-    print("test_h2_server: 12 passed")
+    test_first_frame_after_the_preface_must_be_settings()
+    test_settings_first_then_other_frames_are_served()
+    print("test_h2_server: 14 passed")

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63406 lines) |
-| Theorems | 3332 |
-| Headline theorems in the axiom audit | 1122 |
+| Lean files | 298 (63414 lines) |
+| Theorems | 3333 |
+| Headline theorems in the axiom audit | 1123 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 119 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 120 of 138 |
 
 Six findings are rated high:
 
@@ -3060,7 +3060,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-05 | Medium | resolved | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
 | H2-06 | Low | resolved | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
 | H2-07 | Low | resolved | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
-| H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
+| H2-08 | Low | resolved | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
 | H2-09 | Medium | resolved | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
 | H2-10 | Medium | resolved | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
 | H2-11 | Low | open | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
@@ -4099,6 +4099,8 @@ Status: resolved. Fixed: the frame-shape checks reject a GOAWAY with `plen < 8` 
 - **Flip:** OK, exit 0.
 
 #### H2-08: the first frame after the preface need not be SETTINGS
+
+Status: resolved. Fixed: `Http2Connection.peer_settings_seen`; `feed` (`server.mojo`) answers any first frame other than a non-ACK SETTINGS with GOAWAY(PROTOCOL_ERROR). Tests: `test_h2_server.mojo::test_first_frame_after_the_preface_must_be_settings`, `test_settings_first_then_other_frames_are_served`. Model: `Fix.shipped` carries `h2_08`; `Bugs.H2_08.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. This is protocol non-conformance: flare answers a PING sent before SETTINGS. It gives a peer no capability beyond what it already has.
 - **RFC:** RFC 9113 §3.4: the preface "MUST be followed by a SETTINGS frame", and an invalid preface is a connection error of type PROTOCOL_ERROR.

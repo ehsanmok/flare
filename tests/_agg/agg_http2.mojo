@@ -306,6 +306,12 @@ from test_h2_server import (
 from test_h2_server import (
     test_peer_size_update_to_the_advertised_size_is_honoured as test_h2_server__test_peer_size_update_to_the_advertised_size_is_honoured,
 )
+from test_h2_server import (
+    test_first_frame_after_the_preface_must_be_settings as test_h2_server__test_first_frame_after_the_preface_must_be_settings,
+)
+from test_h2_server import (
+    test_settings_first_then_other_frames_are_served as test_h2_server__test_settings_first_then_other_frames_are_served,
+)
 from test_h2_server_handler import (
     test_h2_server_simple_handler as test_h2_server_handler__test_h2_server_simple_handler,
 )
@@ -684,6 +690,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_server__test_peer_size_update_to_the_advertised_size_is_honoured
+    ]()
+    suite.test[
+        test_h2_server__test_first_frame_after_the_preface_must_be_settings
+    ]()
+    suite.test[
+        test_h2_server__test_settings_first_then_other_frames_are_served
     ]()
     # tests/http2/test_h2_server_handler.mojo
     suite.test[test_h2_server_handler__test_h2_server_simple_handler]()

@@ -12,6 +12,8 @@ RFC 9113 §3.4: "That is, the connection preface starts with the string
 PRI * HTTP/2.0 [...]. This sequence MUST be followed by a SETTINGS frame
 [...]. Clients and servers MUST treat an invalid connection preface as a
 connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+
+Status: resolved. `Http2Connection` gains `peer_settings_seen`; `feed` answers any first frame other than a non-ACK SETTINGS with GOAWAY(PROTOCOL_ERROR). `Fix.shipped` carries `h2_08`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_08
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -33,5 +35,9 @@ theorem fixed (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h8 : fx.h2_08 = true)
     (hn : ¬ (f.ty = tSETTINGS ∧ f.f1 = false)) :
     driveFrame fx dec c f = .ok (connErr c ePROTOCOL) :=
   drive_first_not_settings fx dec c f h8 hg hs hl hn
+
+/-- Shipped (`Fix.shipped` has `h2_08`): a PING as the first frame draws
+GOAWAY(PROTOCOL_ERROR) and is not answered. -/
+theorem fixed_shipped : lastOut Fix.shipped {} tr = some [.goaway 0 ePROTOCOL] := by native_decide
 
 end Flare.Bugs.H2_08

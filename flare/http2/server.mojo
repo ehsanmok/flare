@@ -122,6 +122,12 @@ struct Http2Connection(Defaultable, Movable):
     var inbox: List[UInt8]
     var outbox: List[UInt8]
     var greeted: Bool
+    var peer_settings_seen: Bool
+    """True once the peer's first frame, a non-ACK SETTINGS, has arrived.
+
+    RFC 9113 sec 3.4: the client preface "MUST be followed by a SETTINGS
+    frame"; any other first frame is a connection error of type
+    PROTOCOL_ERROR."""
     var config: Http2Config
     """The :class:`Http2Config` the driver was constructed with.
     Kept on the driver so the reactor wiring can re-read
@@ -153,6 +159,7 @@ struct Http2Connection(Defaultable, Movable):
         self.inbox = List[UInt8]()
         self.outbox = List[UInt8]()
         self.greeted = False
+        self.peer_settings_seen = False
         self.config = Http2Config()
         self.pending_body = Dict[Int, List[UInt8]]()
         self.pending_pos = Dict[Int, Int]()
@@ -430,7 +437,20 @@ struct Http2Connection(Defaultable, Movable):
                 break
             var frame = got.value().copy()
             off += 9 + frame.header.length
-            var reply = self.conn.handle_frame(frame^)
+            var reply: List[Frame]
+            if not self.peer_settings_seen and not (
+                frame.header.type.value == FrameType.SETTINGS().value
+                and not frame.header.flags.has(FrameFlags.ACK())
+            ):
+                # sec 3.4: the preface must be followed by a SETTINGS
+                # frame (an ACK answers ours, which the peer cannot have
+                # seen yet); anything else first is an invalid preface.
+                reply = self.conn._conn_error(
+                    Http2ErrorCode.PROTOCOL_ERROR().value
+                )
+            else:
+                self.peer_settings_seen = True
+                reply = self.conn.handle_frame(frame^)
             for i in range(len(reply)):
                 var rb = encode_frame(reply[i])
                 for j in range(len(rb)):

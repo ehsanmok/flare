@@ -40,6 +40,16 @@ comptime _BODY: Int = 100_000
 """Comfortably past the 65535-byte default window, so the send parks."""
 
 
+def _preface_bytes() -> List[UInt8]:
+    """The client magic followed by the empty SETTINGS frame RFC 9113 sec 3.4
+    requires as its first frame."""
+    var out = List[UInt8](String(H2_PREFACE).as_bytes())
+    var st = Frame()
+    st.header.type = FrameType.SETTINGS()
+    out.extend(Span[UInt8, _](encode_frame(st)))
+    return out^
+
+
 def _get_frame(sid: Int) raises -> List[UInt8]:
     var enc = HpackEncoder()
     var hdrs = List[HpackHeader]()
@@ -93,7 +103,12 @@ def _tally(bytes: List[UInt8]) raises -> _Tally:
             headers += 1
         elif f.header.type.value == FrameType.DATA().value:
             data_bytes += f.header.length
-        if f.header.flags.has(FrameFlags.END_STREAM()):
+        # Flag 0x1 is ACK on SETTINGS/PING: only HEADERS and DATA carry
+        # END_STREAM.
+        if (
+            f.header.type.value == FrameType.HEADERS().value
+            or f.header.type.value == FrameType.DATA().value
+        ) and f.header.flags.has(FrameFlags.END_STREAM()):
             end_stream = True
         var consumed = 9 + f.header.length
         var tail = List[UInt8](capacity=len(rest) - consumed)
@@ -106,7 +121,7 @@ def _tally(bytes: List[UInt8]) raises -> _Tally:
 def _served_connection() raises -> Http2Connection:
     """A connection whose stream 1 has a parked 100 KB response."""
     var c = Http2Connection()
-    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    c.feed(Span[UInt8, _](_preface_bytes()))
     c.feed(Span[UInt8, _](_get_frame(1)))
     var ready = c.take_completed_streams()
     assert_equal(len(ready), 1)
@@ -273,7 +288,7 @@ def test_closed_streams_do_not_accumulate() raises:
     """Every stream a connection served used to stay in its table for the
     connection's life; memory and per-HEADERS work grew with its age."""
     var c = Http2Connection()
-    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    c.feed(Span[UInt8, _](_preface_bytes()))
     for k in range(400):
         var sid = 2 * k + 1
         c.feed(Span[UInt8, _](_get_frame(sid)))
@@ -293,7 +308,7 @@ def test_many_small_frames_in_one_read() raises:
     small frames was quadratic. 3000 PINGs in one read must all be
     answered."""
     var c = Http2Connection()
-    var buf = List[UInt8](String(H2_PREFACE).as_bytes())
+    var buf = _preface_bytes()
     for _ in range(3000):
         var p = Frame()
         p.header.type = FrameType.PING()
@@ -336,7 +351,7 @@ def test_oversized_frame_is_refused_from_its_header() raises:
 
 def test_content_length_overrun_is_caught_on_the_frame() raises:
     var c = Http2Connection()
-    c.feed(Span[UInt8, _](List[UInt8](String(H2_PREFACE).as_bytes())))
+    c.feed(Span[UInt8, _](_preface_bytes()))
     var enc = HpackEncoder()
     var hdrs = List[HpackHeader]()
     hdrs.append(HpackHeader(":method", "POST"))
