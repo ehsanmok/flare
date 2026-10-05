@@ -385,6 +385,11 @@ struct Connection(Copyable, Defaultable):
     last-stream-id field and the RFC 9113 sec 5.1.1 monotonicity check
     (a peer must not open a stream numbered below one it already
     opened)."""
+    var max_local_stream_id: Int
+    """Client role: highest stream id this endpoint has opened (0 if none).
+    ``last_peer_stream_id`` only tracks peer-initiated ids, so without this
+    a client cannot tell a stream it opened and finished with from one that
+    was never opened (``_idle_id``)."""
     var local_max_frame_size: Int
     """The SETTINGS_MAX_FRAME_SIZE *we* advertise, and therefore the
     largest inbound frame we accept (RFC 9113 sec 4.2).
@@ -458,6 +463,7 @@ struct Connection(Copyable, Defaultable):
         self.rst_stream_count = 0
         self.goaway_sent = False
         self.last_peer_stream_id = 0
+        self.max_local_stream_id = 0
         self.local_max_frame_size = H2_DEFAULT_FRAME_SIZE
         self.continuing_stream = 0
         self.header_block = List[UInt8]()
@@ -556,6 +562,25 @@ struct Connection(Copyable, Defaultable):
         s.send_window = self.peer_initial_window_size
         s.recv_window = self.initial_window_size
         return s^
+
+    def note_local_stream(mut self, sid: Int):
+        """Record that this endpoint opened stream ``sid`` (client role)."""
+        if sid > self.max_local_stream_id:
+            self.max_local_stream_id = sid
+
+    def _idle_id(self, sid: Int) -> Bool:
+        """Whether a stream id that is absent from the table names an *idle*
+        stream (RFC 9113 sec 5.1), as opposed to one already closed and
+        dropped from the table.
+
+        Server role: ids above the highest the peer opened. Client role:
+        ``last_peer_stream_id`` stays 0, so use the highest id this client
+        opened; an even id is server-initiated and, with push disabled, is
+        never opened (H2-03).
+        """
+        if self.is_client:
+            return sid > self.max_local_stream_id or (sid % 2) == 0
+        return sid > self.last_peer_stream_id
 
     def _prune_threshold(self) -> Int:
         var t = self.max_concurrent_streams * 2
@@ -1111,7 +1136,7 @@ struct Connection(Copyable, Defaultable):
             if plen != 4:
                 return self._conn_error(Http2ErrorCode.FRAME_SIZE_ERROR().value)
             # sec 6.4: RST_STREAM on a stream the peer never opened.
-            if sid not in self.streams and sid > self.last_peer_stream_id:
+            if sid not in self.streams and self._idle_id(sid):
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
         elif ft == FrameType.WINDOW_UPDATE().value:
             if plen != 4:
@@ -1250,7 +1275,7 @@ struct Connection(Copyable, Defaultable):
             else:
                 if sid not in self.streams:
                     # sec 5.1: WINDOW_UPDATE on an idle stream.
-                    if sid > self.last_peer_stream_id:
+                    if self._idle_id(sid):
                         return self._conn_error(
                             Http2ErrorCode.PROTOCOL_ERROR().value
                         )
@@ -1374,7 +1399,7 @@ struct Connection(Copyable, Defaultable):
             if sid not in self.streams:
                 # sec 5.1: DATA on a stream that was never opened is
                 # PROTOCOL_ERROR; on one already gone, STREAM_CLOSED.
-                if sid > self.last_peer_stream_id:
+                if self._idle_id(sid):
                     return self._conn_error(
                         Http2ErrorCode.PROTOCOL_ERROR().value
                     )

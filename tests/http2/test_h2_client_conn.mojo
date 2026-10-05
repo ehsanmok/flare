@@ -573,6 +573,134 @@ def test_pending_body_drains_on_window_update() raises:
     assert_equal(String(unsafe_from_utf8=Span[UInt8, _](req.body)), body_str)
 
 
+# ── raw-frame helpers shared by the RFC 9113 §5.1 regression tests ──────
+
+
+def _raw_frame(
+    ty: UInt8, flags: UInt8, sid: Int, payload: List[UInt8]
+) -> List[UInt8]:
+    """Wire bytes of one frame (9-byte header + payload)."""
+    var out = List[UInt8]()
+    var n = len(payload)
+    out.append(UInt8((n >> 16) & 0xFF))
+    out.append(UInt8((n >> 8) & 0xFF))
+    out.append(UInt8(n & 0xFF))
+    out.append(ty)
+    out.append(flags)
+    out.append(UInt8((sid >> 24) & 0x7F))
+    out.append(UInt8((sid >> 16) & 0xFF))
+    out.append(UInt8((sid >> 8) & 0xFF))
+    out.append(UInt8(sid & 0xFF))
+    for b in payload:
+        out.append(b)
+    return out^
+
+
+def _be32(v: Int) -> List[UInt8]:
+    var p = List[UInt8]()
+    p.append(UInt8((v >> 24) & 0xFF))
+    p.append(UInt8((v >> 16) & 0xFF))
+    p.append(UInt8((v >> 8) & 0xFF))
+    p.append(UInt8(v & 0xFF))
+    return p^
+
+
+def _error_code_of(bytes: List[UInt8], ty: Int) raises -> Int:
+    """Error code of the first frame of type ``ty`` (GOAWAY 7 / RST 3) in
+    ``bytes``, or -1 when there is none."""
+    var off = 0
+    while off < len(bytes):
+        var got = parse_frame(Span[UInt8, _](bytes)[off:])
+        if not got:
+            break
+        var f = got.value().copy()
+        off += 9 + f.header.length
+        if Int(f.header.type.value) == ty:
+            var at = 4 if ty == 7 else 0
+            return (
+                (Int(f.payload[at]) << 24)
+                | (Int(f.payload[at + 1]) << 16)
+                | (Int(f.payload[at + 2]) << 8)
+                | Int(f.payload[at + 3])
+            )
+    return -1
+
+
+def _goaway_code(bytes: List[UInt8]) raises -> Int:
+    return _error_code_of(bytes, 7)
+
+
+def _rst_code(bytes: List[UInt8]) raises -> Int:
+    return _error_code_of(bytes, 3)
+
+
+def _get(
+    mut client: Http2ClientConnection, mut server: Http2Connection
+) raises -> Int:
+    """Send a bodiless GET on a fresh stream and shuttle it to the server."""
+    var sid = client.next_stream_id()
+    var empty = List[UInt8]()
+    client.send_request(
+        sid, "GET", "http", "example.com", "/", List[HpackHeader](), Span(empty)
+    )
+    _shuttle(client, server)
+    return sid
+
+
+def _complete_and_take(
+    mut client: Http2ClientConnection,
+    mut server: Http2Connection,
+    sid: Int,
+) raises:
+    """Serve ``sid`` with a 200 "ok" response and ``take_response`` it."""
+    _ = server.take_request(sid)
+    var resp = Response(status=200)
+    resp.body = List[UInt8](String("ok").as_bytes())
+    server.emit_response(sid, resp^)
+    _shuttle(client, server)
+    assert_true(client.response_ready(sid))
+    _ = client.take_response(sid)
+    _ = client.drain()
+
+
+def test_late_frames_on_a_taken_stream_are_ignored() raises:
+    """H2-03: a WINDOW_UPDATE or RST_STREAM(NO_ERROR) that reaches the
+    client after take_response() popped the stream is a frame on a closed
+    stream (RFC 9113 sec 5.1), not on an idle one."""
+    var kinds = List[Int]()
+    kinds.append(0x8)
+    kinds.append(0x3)
+    for k in range(len(kinds)):
+        var client = Http2ClientConnection()
+        var server = Http2Connection()
+        _shuttle(client, server)
+        var sid = _get(client, server)
+        _complete_and_take(client, server, sid)
+        var payload = _be32(100 if kinds[k] == 0x8 else 0)
+        client.feed(
+            Span[UInt8, _](_raw_frame(UInt8(kinds[k]), UInt8(0), sid, payload))
+        )
+        assert_equal(_goaway_code(client.drain()), -1)
+
+
+def test_late_frame_on_a_stream_never_opened_is_a_protocol_error() raises:
+    """H2-03: the idle test is not weakened: an odd id above every id the
+    client opened, and any even id, are still idle."""
+    var ids = List[Int]()
+    ids.append(3)
+    ids.append(2)
+    for k in range(len(ids)):
+        var client = Http2ClientConnection()
+        var server = Http2Connection()
+        _shuttle(client, server)
+        var sid = _get(client, server)
+        _complete_and_take(client, server, sid)
+        client.feed(
+            Span[UInt8, _](_raw_frame(UInt8(0x8), UInt8(0), ids[k], _be32(100)))
+        )
+        assert_equal(_goaway_code(client.drain()), 1)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -585,4 +713,6 @@ def main() raises:
     test_push_promise_rejected_by_rst_stream()
     test_oversized_headers_split_across_continuation()
     test_pending_body_drains_on_window_update()
-    print("test_h2_client_conn: 11 passed")
+    test_late_frames_on_a_taken_stream_are_ignored()
+    test_late_frame_on_a_stream_never_opened_is_a_protocol_error()
+    print("test_h2_client_conn: 13 passed")

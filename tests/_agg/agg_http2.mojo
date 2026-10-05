@@ -42,6 +42,12 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_pending_body_drains_on_window_update as test_h2_client_conn__test_pending_body_drains_on_window_update,
 )
+from test_h2_client_conn import (
+    test_late_frames_on_a_taken_stream_are_ignored as test_h2_client_conn__test_late_frames_on_a_taken_stream_are_ignored,
+)
+from test_h2_client_conn import (
+    test_late_frame_on_a_stream_never_opened_is_a_protocol_error as test_h2_client_conn__test_late_frame_on_a_stream_never_opened_is_a_protocol_error,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -452,6 +458,12 @@ def main() raises:
         test_h2_client_conn__test_oversized_headers_split_across_continuation
     ]()
     suite.test[test_h2_client_conn__test_pending_body_drains_on_window_update]()
+    suite.test[
+        test_h2_client_conn__test_late_frames_on_a_taken_stream_are_ignored
+    ]()
+    suite.test[
+        test_h2_client_conn__test_late_frame_on_a_stream_never_opened_is_a_protocol_error
+    ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()
     suite.test[test_h2_config__test_default_config_validates]()

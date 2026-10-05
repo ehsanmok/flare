@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63087 lines) |
-| Theorems | 3309 |
-| Headline theorems in the axiom audit | 1105 |
+| Lean files | 298 (63110 lines) |
+| Theorems | 3310 |
+| Headline theorems in the axiom audit | 1106 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 108 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 109 of 138 |
 
 Six findings are rated high:
 
@@ -3053,7 +3053,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | WS-07 | Low | resolved | the reactor upgrade tests Connection by substring and never decodes the key | `Flare/Bugs/WS_07.lean` | `repro/WS-07_reactor_ws_key_and_connection_token.mojo` (any) |
 | H2-01 | High | resolved | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
 | H2-02 | Low | open | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
-| H2-03 | Medium | open | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
+| H2-03 | Medium | resolved | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
 | H2-04 | Low | open | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
 | H2-05 | Medium | open | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
 | H2-06 | Low | open | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
@@ -4017,6 +4017,8 @@ Status: resolved. Fixed in `state.mojo`: `Connection.recv_window` is debited by 
 - **Flip:** `OK: reused stream id 3 drew GOAWAY code 1`, exit 0.
 
 #### H2-03: the client treats a late frame on a stream it closed as a protocol error
+
+Status: resolved. Fixed: `Connection.max_local_stream_id` (set by the client when it stores a stream, `note_local_stream`) and `_idle_id` replace the `sid > last_peer_stream_id` idle test at RST_STREAM, WINDOW_UPDATE and DATA; in client role an absent id is idle only if it is even or above that id. Tests: `test_h2_client_conn.mojo::test_late_frames_on_a_taken_stream_are_ignored`, `test_late_frame_on_a_stream_never_opened_is_a_protocol_error`. Model: `Fix.shipped` carries `h2_03`; `Bugs.H2_03.fixed_shipped`.
 
 - **Severity:** Medium. Normal server behaviour, such as a WINDOW_UPDATE or RST_STREAM(NO_ERROR) right after the final response, tears down the client's whole connection along with every other stream in flight on it.
 - **RFC:** RFC 9113 §5.1, state "closed": "WINDOW_UPDATE or RST_STREAM frames can be received in this state for a short period after a DATA or HEADERS frame containing an END_STREAM flag is sent."

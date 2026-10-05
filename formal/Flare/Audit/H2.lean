@@ -77,6 +77,7 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.H2_02.fixed
 #print axioms Flare.Bugs.H2_03.counterexample
 #print axioms Flare.Bugs.H2_03.fixed
+#print axioms Flare.Bugs.H2_03.fixed_shipped
 #print axioms Flare.Bugs.H2_04.counterexample
 #print axioms Flare.Bugs.H2_04.fixed
 #print axioms Flare.Bugs.H2_05.counterexample

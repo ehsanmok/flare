@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-03 fixed on fix/formal-findings
 """H2-03: the HTTP/2 client tears the connection down with
 GOAWAY(PROTOCOL_ERROR) when a WINDOW_UPDATE or RST_STREAM arrives for a
 stream whose response it has already taken.
@@ -22,7 +23,7 @@ complete; take_response(1) pops the stream; then the server's
 WINDOW_UPDATE(stream 1) arrives in a later read. Second connection: same,
 then RST_STREAM(stream 1, NO_ERROR).
 
-Expected: both frames are ignored. Actual: both draw GOAWAY(PROTOCOL_ERROR)
+Expected: both frames are ignored. Before the fix: both draw GOAWAY(PROTOCOL_ERROR)
 and kill every other stream on the connection.
 
 Minimal fix: track the highest client-initiated stream id (or treat an

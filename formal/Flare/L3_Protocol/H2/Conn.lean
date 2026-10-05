@@ -124,8 +124,9 @@ structure Stream where
   deriving DecidableEq, Repr
 
 /-- mirrors flare/http2/state.mojo:304-466 @59bda50
-(`peerSettingsSeen`, `maxLocalSid` and `decLog` are ghosts: the shipped
-code never reads them; the H2-08 / H2-03 fixes read the first two). -/
+(`maxLocalSid` is `max_local_stream_id`, added by the H2-03 fix;
+`peerSettingsSeen` and `decLog` are ghosts: the code before the fixes
+never reads them, and the H2-08 fix reads the first). -/
 structure Conn where
   isClient : Bool := false
   streams : List (Nat × Stream) := []
@@ -208,8 +209,8 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01. -/
-def Fix.shipped : Fix := { h2_01 := true }
+finding): H2-01, H2-03. -/
+def Fix.shipped : Fix := { h2_01 := true, h2_03 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -452,7 +453,8 @@ def commit (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) : Conn × List Out :=
 stream: above the peer's high-water mark (`state.mojo:1099,1238,1351`), or,
 with the H2-03 fix in client role, even or above our own highest id, and
 with the H2-15 fix in server role, even (server-initiated, never opened).
-mirrors flare/http2/state.mojo:1099,1238,1351 @59bda50 -/
+mirrors flare/http2/state.mojo:571-583 (`_idle_id`; fixed, H2-03; the
+server-role even-id rule is H2-15, not yet shipped) -/
 def isIdleId (fx : Fix) (c : Conn) (k : Nat) : Bool :=
   if fx.h2_03 && c.isClient then decide (k > c.maxLocalSid) || k % 2 == 0
   else if fx.h2_15 && !c.isClient then decide (k > c.lastPeer) || k % 2 == 0
@@ -849,7 +851,8 @@ def respond (c : Conn) (k n : Nat) : Conn × List Out :=
     else (put { c with sendW := c.sendW - n } k { s with state := .closed, sendW := s.sendW - n },
           if n > 0 then [.data k n] else [])
 
-/-- mirrors flare/http2/client.mojo:788-798 @59bda50 -/
+/-- mirrors flare/http2/client.mojo:800,870,1145 and `note_local_stream`
+(state.mojo:566-569) (fixed, H2-03) -/
 def openLocal (c : Conn) (k : Nat) (es : Bool) : Conn :=
   let c := { c with maxLocalSid := if k > c.maxLocalSid then k else c.maxLocalSid }
   put c k { state := if es then .hcl else .open_, sendW := c.peerInitW, recvW := c.initW }

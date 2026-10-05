@@ -16,6 +16,12 @@ received in this state for a short period after a DATA or HEADERS frame
 containing an END_STREAM flag is sent." Such frames must not be a
 connection error.
 
+Status: resolved. The client records the highest stream id it opened
+(`max_local_stream_id`, `maxLocalSid` in the model) and `_idle_id` uses it:
+an absent id is idle in client role only if it is even or above that id.
+The counterexample below is about `Fix.none`, the code before the fix;
+`fixed_shipped` restates fix-meets-spec about `Fix.shipped`.
+
 Traces (client): SETTINGS; open stream 1 with END_STREAM; response
 HEADERS(1, END_STREAM); `take_response(1)`; then WINDOW_UPDATE(1) (or
 RST_STREAM(1)).
@@ -52,5 +58,18 @@ theorem fixed :
       c.continuing = 0 → f.ty = tRST → f.plen = 4 → f.plen ≤ c.localMaxFrame →
       f.sid ≠ 0 → f.sid % 2 = 1 → f.sid ≤ c.maxLocalSid → handle fx dec c f = .ok (rstH c f)) :=
   ⟨handle_client_late_wu, handle_client_late_rst⟩
+
+/-- The shipped model: a late WINDOW_UPDATE on an odd id we opened is
+ignored, and a late RST_STREAM takes the normal RST_STREAM branch. -/
+theorem fixed_shipped :
+    (∀ (dec : Dec) (c : Conn) (f : Fr), c.isClient = true →
+      c.continuing = 0 → f.ty = tWU → f.plen = 4 → f.plen ≤ c.localMaxFrame →
+      f.word % 2147483648 ≠ 0 → f.sid ≠ 0 → f.sid % 2 = 1 → f.sid ≤ c.maxLocalSid →
+      get c f.sid = none → handle Fix.shipped dec c f = .ok (c, [])) ∧
+    (∀ (dec : Dec) (c : Conn) (f : Fr), c.isClient = true →
+      c.continuing = 0 → f.ty = tRST → f.plen = 4 → f.plen ≤ c.localMaxFrame →
+      f.sid ≠ 0 → f.sid % 2 = 1 → f.sid ≤ c.maxLocalSid →
+      handle Fix.shipped dec c f = .ok (rstH c f)) :=
+  ⟨fun dec c f => fixed.1 Fix.shipped dec c f rfl, fun dec c f => fixed.2 Fix.shipped dec c f rfl⟩
 
 end Flare.Bugs.H2_03

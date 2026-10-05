@@ -266,6 +266,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         s.recv_window = out.conn.initial_window_size
         s.state = StreamState.HALF_CLOSED_LOCAL()
         out.conn.streams[1] = s^
+        out.conn.note_local_stream(1)
         out._next_sid = 3
         return out^
 
@@ -796,6 +797,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             s.state = StreamState.OPEN()
         s.response_body_allowed = method.upper() != "HEAD"
         self.conn.streams[sid] = s^
+        self.conn.note_local_stream(sid)
         # Body: emit DATA frames bounded by the current send windows
         # + max_frame_size. If the window is exhausted mid-body the
         # remainder is stashed and drained by ``pump_pending_body``
@@ -865,6 +867,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         s.recv_window = self.conn.initial_window_size
         s.state = StreamState.OPEN()
         self.conn.streams[sid] = s^
+        self.conn.note_local_stream(sid)
 
     def send_data(
         mut self,
@@ -1139,6 +1142,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         s.state = StreamState.OPEN()
         s.response_body_allowed = method.upper() != "HEAD"
         self.conn.streams[sid] = s^
+        self.conn.note_local_stream(sid)
 
     def headers_received(self, sid: Int) raises -> Bool:
         """``True`` once the response HEADERS block on ``sid`` is fully
