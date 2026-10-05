@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61410 lines) |
-| Theorems | 3230 |
-| Headline theorems in the axiom audit | 1031 |
+| Lean files | 298 (61426 lines) |
+| Theorems | 3231 |
+| Headline theorems in the axiom audit | 1032 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 35 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 36 of 138 |
 
 Six findings are rated high:
 
@@ -262,7 +262,7 @@ Model:
 - `render` is `SocketAddr.write_to`.
 - `dec` and `decVal` are the shortest decimal rendering and its value.
 
-Mojo: flare/net/address.mojo:54-150, 384-433, 454-464, 468-486.
+Mojo: flare/net/address.mojo:54-150, 393-442, 463-473, 477-495.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -280,13 +280,13 @@ canonical text (POSIX, RFC 5952).
 
 Model: `isLoopback`, `isUnspecified`, `isPrivate`, `is172Private` and
 `isMulticast` operate on the stored text.
-Mojo: flare/net/address.mojo:198-293.
+Mojo: flare/net/address.mojo:198-302.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `isLoopback_dotted`, `isPrivate_dotted`, `isMulticast_dotted`, `is172_dotted`, `isUnspecified_dotted` | on a canonical dotted quad, each string predicate equals the numeric RFC 1122 / 1918 / 5771 predicate | proved |
 | `dotted_inj` | the dotted-quad rendering is injective | proved |
-| `Bugs.ENC_01.counterexample` | the IPv6 `is_multicast` is true for `00ff::1` | counterexample (ENC-01) |
+| `Bugs.ENC_01.counterexample` | the pre-fix IPv6 `is_multicast` (`isMulticastOld`) is true for `00ff::1` | counterexample (ENC-01) |
 
 Limitation: the IPv4 results cover canonical text only. See "Checked, not a
 bug".
@@ -2666,9 +2666,9 @@ advances the wheel to `now` at the top of every iteration
 | `Flare.L1.Buf.writeBytes`, `readBytes` | flare/runtime/io_uring_abi.mojo:407-408, 425-428, 445-446, 462-463, 477-479, 495-496 | `readBytes_writeBytes`, `readBytes_writeBytes_disjoint` | proved |
 | `Flare.L1.Buf.le16/32/64`, `fromLE16/32/64` | flare/runtime/io_uring_abi.mojo:394-496 | `fromLE64_le64`, `le32_fromLE32` | proved |
 | `Flare.L1.ByteOrder.htons`, `ntohs`, `htonl` | flare/net/_libc.mojo:176-200 | `htons_involutive`, `htonl_involutive`, `htonl_bytes` | proved |
-| `Flare.L1.Address.parsePortStrict` | flare/net/address.mojo:468-486 | `parsePortStrict_eq_spec`, `parsePortStrict_dec` | proved |
-| `Flare.L1.Address.parseIp`, `parseSock`, `render` | flare/net/address.mojo:54-150, 384-433, 454-464 | `parseIp_canonical`, `parseSock_render` | proved |
-| `Flare.L1.IpPredicates.isLoopback`, `isUnspecified`, `isPrivate`, `is172Private`, `isMulticast` | flare/net/address.mojo:198-293 | `*_dotted`, `Bugs.ENC_01.counterexample` | proved; counterexample (ENC-01) |
+| `Flare.L1.Address.parsePortStrict` | flare/net/address.mojo:477-495 | `parsePortStrict_eq_spec`, `parsePortStrict_dec` | proved |
+| `Flare.L1.Address.parseIp`, `parseSock`, `render` | flare/net/address.mojo:54-150, 393-442, 463-473 | `parseIp_canonical`, `parseSock_render` | proved |
+| `Flare.L1.IpPredicates.isLoopback`, `isUnspecified`, `isPrivate`, `is172Private`, `isMulticast` | flare/net/address.mojo:198-302 | `*_dotted`, `Bugs.ENC_01.counterexample` | proved; counterexample (ENC-01) |
 | `Flare.L1.Sockaddr.fillIn`, `fillIn6`, `readPort`, `getFamily` | flare/net/_libc.mojo:209-321, 395-411 | `readPort_fillIn`, `addr_fillIn6`, `getFamily_eq_kFamily` | proved |
 | `Flare.L1.Utf8.validFrom`, `isValidUtf8` | flare/io/byte_cursor.mojo:52-107; flare/ws/frame.mojo:553-606 | `isValidUtf8_iff` | proved |
 | `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo:24-139 | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff` | proved |
@@ -2984,7 +2984,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 
 | ID | Severity | Status | Finding | Lean | Repro (platform) |
 |---|---|---|---|---|---|
-| ENC-01 | Low | open | `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group | `Flare/Bugs/ENC_01.lean` | `repro/ENC-01_ipv6_multicast_short_group.mojo` (any) |
+| ENC-01 | Low | resolved | `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group | `Flare/Bugs/ENC_01.lean` | `repro/ENC-01_ipv6_multicast_short_group.mojo` (any) |
 | ENC-02 | Low | open | civil-time conversion is one day off before 0000-03-01 | `Flare/Bugs/ENC_02.lean` | `repro/ENC-02_civil_time_negative_years.mojo` (any) |
 | ENC-03 | High | resolved | `ProtoReader` length check overflows; one gRPC health request crashes the server | `Flare/Bugs/ENC_03.lean` | `repro/ENC-03_proto_length_overflow.mojo` (any) |
 | ENC-04 | Medium | resolved | `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length | `Flare/Bugs/ENC_04.lean` | `repro/ENC-04_byte_reader_need_overflow.mojo` (any) |
@@ -3137,7 +3137,7 @@ using it for a policy decision (for example, refusing to connect to multicast)
 gets wrong answers for `0x00ff`, `0x0ff0`..`0x0fff` first groups.
 Spec: RFC 4291 §2.7 says IPv6 multicast is `ff00::/8`, i.e. the first byte is
 `0xff`.
-What goes wrong: flare/net/address.mojo:232-240 tests
+What goes wrong: flare/net/address.mojo:232-240 @59bda50 tested
 `self._addr.startswith("ff")` on the `inet_ntop` text. RFC 5952 §4.1 drops
 leading zeros, so `00ff::1` is stored as `ff::1` and reported as multicast.
 Lean: `Flare.Bugs.ENC_01.counterexample`.
@@ -3146,6 +3146,7 @@ proves the fix equals the RFC predicate for every first group.
 Repro: `formal/repro/ENC-01_ipv6_multicast_short_group.mojo`, observed
 `BUG REPRODUCED: is_multicast() is True for non-ff00::/8 addresses: 00ff::1 (stored as ff::1); fff:: (stored as fff::); ff0:1:: (stored as ff0:1::); `.
 Flip: `OK: is_multicast() is False for 00ff::1, fff::, ff0:1:: and True for ff02::1`, exit 0.
+Status: resolved. `IpAddr.is_multicast` now requires `startswith("ff")` and the first `:` at index 4; `Flare.L1.IpPredicates.isMulticast` mirrors it (the pre-fix predicate is `Bugs.ENC_01.isMulticastOld`, `isMulticast_v6` ties the shipped one to `isMulticast6Fixed`). Tests: `tests/net/test_net.mojo::test_ip_addr_multicast_v6_exact_ff00_8`, `::test_ip_addr_multicast_v4_unchanged`.
 
 #### ENC-02: civil-time conversion is one day off before 0000-03-01
 
@@ -5884,7 +5885,7 @@ There are 13 "contradicted (new)" rows for 8 findings because DOC-01 covers 3 ro
 
 | Claim | Code | Verdict | Evidence |
 |---|---|---|---|
-| "Rejects null bytes, CRLF, `@` in IP strings before they reach libc." (`docs/security.md:9`) | `flare/net/address.mojo:82-91, 410-414` | holds | The IP and host parse rejects bytes 0x00, 0x0A, 0x0D and `@` before any libc call. Port parsing is `Flare.L1.Address.parsePortStrict_eq_spec`. |
+| "Rejects null bytes, CRLF, `@` in IP strings before they reach libc." (`docs/security.md:9`) | `flare/net/address.mojo:82-91, 419-423` | holds | The IP and host parse rejects bytes 0x00, 0x0A, 0x0D and `@` before any libc call. Port parsing is `Flare.L1.Address.parsePortStrict_eq_spec`. |
 | "Blocks injection in hostnames (null / CRLF / `@`, length limits)." (`docs/security.md:10`) | `flare/dns/resolver.mojo:60-110` | holds | `Flare.L2.Hostname.validate_sound` and `Flare.L2.Hostname.scan_ok_iff` cover forbidden bytes, the 253-octet name limit and the 63-octet label limit. |
 | "TLS 1.2+ only, weak ciphers disabled" (`docs/security.md:11`) | `flare/tls/ffi/openssl_wrapper.cpp:117-124, 538-543, 811-814` | outside the model | flare sets the TLS 1.2 floor, `NO_TLSv1`/`NO_TLSv1_1` and `FORWARD_SECRET_CIPHERS` on every context. The negotiation that enforces them is OpenSSL's. |
 | "SNI always sent." (`docs/security.md:11`) | `openssl_wrapper.cpp:196-213` | holds | SNI is set for every hostname. IP literals are verified by IP and carry no SNI, which RFC 6066 §3 requires. |
@@ -5943,7 +5944,7 @@ There are 13 "contradicted (new)" rows for 8 findings because DOC-01 covers 3 ro
 | "`WsConnection.recv` enforces the RFC 6455 §5.1 client-side mask requirement" (`docs/threat-model.md:60`) | `flare/ws/server.mojo:557-561` | holds | `Flare.L3.Ws.server_safe`. |
 | "unmasked frames are rejected with 1002." (`docs/threat-model.md:60`) | `server.mojo:557-561` | contradicted (new): DOC-02 | The server raises and writes no CLOSE. |
 | "Frame-level UTF-8 validator runs on every TEXT payload; invalid sequences trigger 1007" (`docs/threat-model.md:61`) | `server.mojo:514-536` | contradicted (new): DOC-01 | Invalid UTF-8 is delivered and no CLOSE 1007 is sent. |
-| "`flare.net` + `flare.dns` reject these *before* the bytes reach libc." (`docs/threat-model.md:62`) | `flare/net/address.mojo:82-91, 410-414`; `flare/dns/resolver.mojo:60-110` | holds | The same evidence as `security.md:9-10`, with `Flare.L2.Hostname.validate_sound`. |
+| "`flare.net` + `flare.dns` reject these *before* the bytes reach libc." (`docs/threat-model.md:62`) | `flare/net/address.mojo:82-91, 419-423`; `flare/dns/resolver.mojo:60-110` | holds | The same evidence as `security.md:9-10`, with `Flare.L2.Hostname.validate_sound`. |
 | "`FileServer` rejects `..`, NUL, absolute paths at the request layer; only resolves relative paths under the declared root." (`docs/threat-model.md:71`) | `flare/http/fs.mojo:121-160`; `flare/http/ffi/fs_wrapper.c:66-85` | holds | NUL and `..` components are rejected and the leading `/` is stripped. The C side `realpath`s the root and the file, requires a prefix match plus `/`, and requires `S_ISREG`. The URL is not percent-decoded, so `%2e%2e` stays literal. |
 | "`signed_cookie_*` and `Session[T]` use HMAC-SHA256; invalid HMACs are rejected ..., so the handler never sees a forged session." (`docs/threat-model.md:72`) | `flare/http/session.mojo:112-176, 359-378, 449-465` | holds | `hmac_sha256_verify` gates every decode, and both stores return `Session.empty()` on failure. The HMAC primitive itself is crypto. |
 | "Key rotation is supported via `signed_cookie_decode_keys` (multiple keys, oldest-last)." (`docs/threat-model.md:72`) | `session.mojo:179-206, 343-354, 369-374` | holds | The current key is tried first, then the previous keys in insertion order. |

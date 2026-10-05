@@ -58,6 +58,12 @@ from test_net import (
     test_ip_addr_v6_link_local as test_net__test_ip_addr_v6_link_local,
 )
 from test_net import (
+    test_ip_addr_multicast_v6_exact_ff00_8 as test_net__test_ip_addr_multicast_v6_exact_ff00_8,
+)
+from test_net import (
+    test_ip_addr_multicast_v4_unchanged as test_net__test_ip_addr_multicast_v4_unchanged,
+)
+from test_net import (
     test_ip_addr_equality_v4 as test_net__test_ip_addr_equality_v4,
 )
 from test_net import (
@@ -199,6 +205,8 @@ def main() raises:
     suite.test[test_net__test_ip_addr_v6_compressed]()
     suite.test[test_net__test_ip_addr_v6_all_zeros_long]()
     suite.test[test_net__test_ip_addr_v6_link_local]()
+    suite.test[test_net__test_ip_addr_multicast_v6_exact_ff00_8]()
+    suite.test[test_net__test_ip_addr_multicast_v4_unchanged]()
     suite.test[test_net__test_ip_addr_equality_v4]()
     suite.test[test_net__test_ip_addr_inequality_v4]()
     suite.test[test_net__test_ip_addr_v4_not_equal_v6]()

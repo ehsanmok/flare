@@ -32,7 +32,7 @@ def portLoop : Bytes → Int64 → Option Int64
     if c < 48 || c > 57 then none
     else portLoop cs (v * 10 + Int64.ofNat (c - 48).toNat)
 
-/-- mirrors flare/net/address.mojo:468-486 @59bda50 -/
+/-- mirrors flare/net/address.mojo:477-495 @59bda50 -/
 def parsePortStrict (digits : Bytes) : Option UInt16 :=
   if digits.length == 0 || digits.length > 5 then none
   else match portLoop digits 0 with
@@ -153,13 +153,13 @@ def parseIp (E : InetEnv) (s : Bytes) : Option IpAddr :=
       | none => none
 
 /-- `_find_char`: index of the first `ch`, or -1. mirrors
-flare/net/address.mojo:296-307 @59bda50 -/
+flare/net/address.mojo:305-316 @59bda50 -/
 def findChar (s : Bytes) (ch : UInt8) : Int :=
   match s.findIdx? (· == ch) with
   | some i => i
   | none => -1
 
-/-- mirrors flare/net/address.mojo:384-433 @59bda50 -/
+/-- mirrors flare/net/address.mojo:393-442 @59bda50 -/
 def parseSock (E : InetEnv) (s : Bytes) : Option SocketAddr :=
   if s = [] then none
   else if s.any badSock then none
@@ -178,7 +178,7 @@ def parseSock (E : InetEnv) (s : Bytes) : Option SocketAddr :=
       let p ← parsePortStrict (s.drop (colon.toNat + 1))
       pure ⟨ip, p⟩
 
-/-- mirrors flare/net/address.mojo:454-464 @59bda50 (`SocketAddr.write_to`;
+/-- mirrors flare/net/address.mojo:463-473 @59bda50 (`SocketAddr.write_to`;
 `writer.write(UInt16)` renders the shortest decimal). -/
 def render (sa : SocketAddr) : Bytes :=
   if sa.ip.v6 then b '[' :: (sa.ip.addr ++ b ']' :: b ':' :: dec sa.port.toNat)

@@ -230,10 +230,18 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
         """Return ``True`` if this is a multicast address.
 
         IPv4 multicast: ``224.0.0.0/4`` (first octet 224–239).
-        IPv6 multicast: addresses starting with ``"ff"``.
+        IPv6 multicast: ``ff00::/8`` (RFC 4291 section 2.7), i.e. the
+        first byte is ``0xff``. The stored text is ``inet_ntop``'s
+        (RFC 5952), which drops leading zeros of a group, so first groups
+        ``0x00ff`` and ``0x0ff0``..``0x0fff`` print as ``ff...`` too; a
+        real multicast first group always has four digits, so the first
+        ``:`` must be at index 4.
         """
         if self._is_v6:
-            return self._addr.startswith("ff")
+            return (
+                self._addr.startswith("ff")
+                and _find_char(self._addr, UInt8(ord(":"))) == 4
+            )
         var dot = _find_char(self._addr, UInt8(ord(".")))
         if dot < 0:
             return False

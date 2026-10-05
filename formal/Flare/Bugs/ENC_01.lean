@@ -3,6 +3,10 @@ import Flare.L1_Encoding.IpPredicates
 # ENC-01: `IpAddr.is_multicast` misclassifies IPv6 addresses whose first
 group prints with fewer than four hex digits
 
+Status: resolved. `is_multicast` now also requires the first `:` at index 4;
+`Flare.L1.IpPredicates.isMulticast` mirrors the shipped code and the
+counterexample below is about the pre-fix `isMulticastOld`.
+
 RFC 4291 §2.7: IPv6 multicast is `ff00::/8` — the first *byte* is `0xff`.
 flare tests `self._addr.startswith("ff")` on the `inet_ntop` text. RFC 5952
 §4.1 prints groups without leading zeros, so group values `0x00ff`,
@@ -10,10 +14,10 @@ flare tests `self._addr.startswith("ff")` on the `inet_ntop` text. RFC 5952
 `ff::1` and reported as multicast.
 
 * `counterexample`: the address `00ff::1` (first byte `0x00`) renders as
-  `ff::1` under RFC 5952 and `isMulticast` returns `true`.
-* `isMulticast6Fixed_correct`: the fix (also require that the first `:`
-  is at index 4, i.e. the first group has four digits) is exactly the
-  RFC 4291 predicate for every first-group value.
+  `ff::1` under RFC 5952 and the pre-fix `isMulticastOld` returns `true`.
+* `isMulticast6Fixed_correct`: the shipped `isMulticast` (also require that
+  the first `:` is at index 4, i.e. the first group has four digits) is
+  exactly the RFC 4291 predicate for every first-group value.
 -/
 namespace Flare.Bugs.ENC_01
 open Flare.L1.Decimal Flare.L1.Address Flare.L1.IpPredicates
@@ -65,14 +69,23 @@ def addr00ff : Bytes := [0x00, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01
 theorem fmt_addr00ff : fmt6 (groups addr00ff) = str "ff::1" := by
   native_decide
 
+/-- Pre-fix IPv6 branch of `is_multicast` (`startswith("ff")` only;
+flare/net/address.mojo:232-240 @59bda50). -/
+def isMulticastOld (ip : IpAddr) : Bool :=
+  if ip.v6 then startsWith ip.addr (str "ff") else isMulticast ip
+
 theorem counterexample :
-    isMulticast ⟨fmt6 (groups addr00ff), true⟩ = true ∧ multicastSpec addr00ff = false := by
+    isMulticastOld ⟨fmt6 (groups addr00ff), true⟩ = true ∧ multicastSpec addr00ff = false := by
   rw [fmt_addr00ff]; decide
 
-/-! ## Minimal fix: `startswith("ff") and _find_char(addr, ':') == 4` -/
+/-! ## Shipped fix: `startswith("ff") and _find_char(addr, ':') == 4` -/
 
+/-- The shipped IPv6 branch, as a function of the text. -/
 def isMulticast6Fixed (addr : Bytes) : Bool :=
   startsWith addr (str "ff") && findChar addr 58 == 4
+
+/-- The shipped predicate on an IPv6 address is that branch. -/
+theorem isMulticast_v6 (addr : Bytes) : isMulticast ⟨addr, true⟩ = isMulticast6Fixed addr := rfl
 
 theorem hexDigit_toNat (d : Nat) (h : d < 16) :
     (hexDigit d).toNat = if d < 10 then 48 + d else 87 + d := by

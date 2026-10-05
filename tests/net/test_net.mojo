@@ -160,6 +160,39 @@ def test_ip_addr_v6_link_local() raises:
 # ── IpAddr: equality and comparison ───────────────────────────────────────────
 
 
+def test_ip_addr_multicast_v6_exact_ff00_8() raises:
+    """ENC-01: ``is_multicast`` tested ``startswith("ff")`` on the text, so
+    first groups 0x00ff and 0x0ff0..0x0fff (printed ``ff::``, ``fff::``)
+    were reported as multicast. Multicast is ``ff00::/8`` (RFC 4291 2.7)."""
+    # Real multicast: first byte 0xff.
+    assert_true(IpAddr.parse("ff02::1").is_multicast())
+    assert_true(IpAddr.parse("ff00::").is_multicast())
+    assert_true(IpAddr.parse("ffff::1").is_multicast())
+    assert_true(IpAddr.parse("ff0e:1:2:3:4:5:6:7").is_multicast())
+    # First group 0x00ff, stored as "ff::1".
+    var a = IpAddr.parse("00ff::1")
+    assert_equal(String(a), "ff::1")
+    assert_false(a.is_multicast())
+    # First groups 0x0ff0..0x0fff, stored with three digits.
+    assert_false(IpAddr.parse("fff::").is_multicast())
+    assert_false(IpAddr.parse("0ff0::1").is_multicast())
+    assert_false(IpAddr.parse("ff0:1::").is_multicast())
+    assert_false(IpAddr.parse("ff:0:0:0:0:0:0:1").is_multicast())
+    # Neighbours of ff00::/8 and the usual non-multicast shapes.
+    assert_false(IpAddr.parse("fe80::1").is_multicast())
+    assert_false(IpAddr.parse("fe00::1").is_multicast())
+    assert_false(IpAddr.parse("::1").is_multicast())
+    assert_false(IpAddr.parse("::ffff:1.2.3.4").is_multicast())
+    assert_false(IpAddr.parse("2001:db8::ff").is_multicast())
+
+
+def test_ip_addr_multicast_v4_unchanged() raises:
+    assert_true(IpAddr.parse("224.0.0.1").is_multicast())
+    assert_true(IpAddr.parse("239.255.255.255").is_multicast())
+    assert_false(IpAddr.parse("223.255.255.255").is_multicast())
+    assert_false(IpAddr.parse("240.0.0.1").is_multicast())
+
+
 def test_ip_addr_equality_v4() raises:
     """Two IpAddrs from the same string must be equal."""
     var a = IpAddr.parse("10.0.0.1")

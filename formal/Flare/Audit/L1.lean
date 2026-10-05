@@ -126,6 +126,7 @@ import Flare.L1_Encoding
 -- Findings
 #print axioms Flare.Bugs.ENC_01.counterexample
 #print axioms Flare.Bugs.ENC_01.isMulticast6Fixed_correct
+#print axioms Flare.Bugs.ENC_01.isMulticast_v6
 #print axioms Flare.Bugs.ENC_02.counterexample
 #print axioms Flare.Bugs.ENC_02.inverse_counterexample
 #print axioms Flare.Bugs.ENC_02.fixed_spec

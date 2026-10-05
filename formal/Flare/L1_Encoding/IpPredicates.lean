@@ -42,7 +42,7 @@ def isLoopback (ip : IpAddr) : Bool :=
 def isUnspecified (ip : IpAddr) : Bool :=
   if ip.v6 then ip.addr == str "::" else ip.addr == str "0.0.0.0"
 
-/-- mirrors flare/net/address.mojo:279-293 @59bda50 -/
+/-- mirrors flare/net/address.mojo:288-302 @59bda50 -/
 def is172Private (addr : Bytes) : Bool :=
   let dot := findCharFrom addr 46 4
   if dot < 0 then false
@@ -57,9 +57,11 @@ def isPrivate (ip : IpAddr) : Bool :=
   else if startsWith ip.addr (str "172.") then is172Private ip.addr
   else false
 
-/-- mirrors flare/net/address.mojo:232-248 @59bda50 -/
+/-- mirrors flare/net/address.mojo:229-253 (fixed, ENC-01): an IPv6 address is
+multicast iff its text starts with `ff` and the first group has four digits
+(first `:` at index 4), i.e. the first byte is `0xff` (RFC 4291 §2.7). -/
 def isMulticast (ip : IpAddr) : Bool :=
-  if ip.v6 then startsWith ip.addr (str "ff")
+  if ip.v6 then startsWith ip.addr (str "ff") && findChar ip.addr 58 == 4
   else
     let dot := findChar ip.addr 46
     if dot < 0 then false

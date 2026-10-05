@@ -95,7 +95,7 @@ Model:
 - `render` is `SocketAddr.write_to`.
 - `dec` and `decVal` are the shortest decimal rendering and its value.
 
-Mojo: flare/net/address.mojo:54-150, 384-433, 454-464, 468-486.
+Mojo: flare/net/address.mojo:54-150, 393-442, 463-473, 477-495.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -113,13 +113,13 @@ canonical text (POSIX, RFC 5952).
 
 Model: `isLoopback`, `isUnspecified`, `isPrivate`, `is172Private` and
 `isMulticast` operate on the stored text.
-Mojo: flare/net/address.mojo:198-293.
+Mojo: flare/net/address.mojo:198-302.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `isLoopback_dotted`, `isPrivate_dotted`, `isMulticast_dotted`, `is172_dotted`, `isUnspecified_dotted` | on a canonical dotted quad, each string predicate equals the numeric RFC 1122 / 1918 / 5771 predicate | proved |
 | `dotted_inj` | the dotted-quad rendering is injective | proved |
-| `Bugs.ENC_01.counterexample` | the IPv6 `is_multicast` is true for `00ff::1` | counterexample (ENC-01) |
+| `Bugs.ENC_01.counterexample` | the pre-fix IPv6 `is_multicast` (`isMulticastOld`) is true for `00ff::1` | counterexample (ENC-01) |
 
 Limitation: the IPv4 results cover canonical text only. See "Checked, not a
 bug".
@@ -404,7 +404,7 @@ using it for a policy decision (for example, refusing to connect to multicast)
 gets wrong answers for `0x00ff`, `0x0ff0`..`0x0fff` first groups.
 Spec: RFC 4291 §2.7 says IPv6 multicast is `ff00::/8`, i.e. the first byte is
 `0xff`.
-What goes wrong: flare/net/address.mojo:232-240 tests
+What goes wrong: flare/net/address.mojo:232-240 @59bda50 tested
 `self._addr.startswith("ff")` on the `inet_ntop` text. RFC 5952 §4.1 drops
 leading zeros, so `00ff::1` is stored as `ff::1` and reported as multicast.
 Lean: `Flare.Bugs.ENC_01.counterexample`.
@@ -413,6 +413,7 @@ proves the fix equals the RFC predicate for every first group.
 Repro: `formal/repro/ENC-01_ipv6_multicast_short_group.mojo`, observed
 `BUG REPRODUCED: is_multicast() is True for non-ff00::/8 addresses: 00ff::1 (stored as ff::1); fff:: (stored as fff::); ff0:1:: (stored as ff0:1::); `.
 Flip: `OK: is_multicast() is False for 00ff::1, fff::, ff0:1:: and True for ff02::1`, exit 0.
+Status: resolved. `IpAddr.is_multicast` now requires `startswith("ff")` and the first `:` at index 4; `Flare.L1.IpPredicates.isMulticast` mirrors it (the pre-fix predicate is `Bugs.ENC_01.isMulticastOld`, `isMulticast_v6` ties the shipped one to `isMulticast6Fixed`). Tests: `tests/net/test_net.mojo::test_ip_addr_multicast_v6_exact_ff00_8`, `::test_ip_addr_multicast_v4_unchanged`.
 
 ### ENC-02: civil-time conversion is one day off before 0000-03-01
 
@@ -559,9 +560,9 @@ Status: resolved. `ByteReader._need` now tests `n > len(self.buf) - self.pos`; t
 | `Flare.L1.Buf.writeBytes`, `readBytes` | flare/runtime/io_uring_abi.mojo:407-408, 425-428, 445-446, 462-463, 477-479, 495-496 | `readBytes_writeBytes`, `readBytes_writeBytes_disjoint` | proved |
 | `Flare.L1.Buf.le16/32/64`, `fromLE16/32/64` | flare/runtime/io_uring_abi.mojo:394-496 | `fromLE64_le64`, `le32_fromLE32` | proved |
 | `Flare.L1.ByteOrder.htons`, `ntohs`, `htonl` | flare/net/_libc.mojo:176-200 | `htons_involutive`, `htonl_involutive`, `htonl_bytes` | proved |
-| `Flare.L1.Address.parsePortStrict` | flare/net/address.mojo:468-486 | `parsePortStrict_eq_spec`, `parsePortStrict_dec` | proved |
-| `Flare.L1.Address.parseIp`, `parseSock`, `render` | flare/net/address.mojo:54-150, 384-433, 454-464 | `parseIp_canonical`, `parseSock_render` | proved |
-| `Flare.L1.IpPredicates.isLoopback`, `isUnspecified`, `isPrivate`, `is172Private`, `isMulticast` | flare/net/address.mojo:198-293 | `*_dotted`, `Bugs.ENC_01.counterexample` | proved; counterexample (ENC-01) |
+| `Flare.L1.Address.parsePortStrict` | flare/net/address.mojo:477-495 | `parsePortStrict_eq_spec`, `parsePortStrict_dec` | proved |
+| `Flare.L1.Address.parseIp`, `parseSock`, `render` | flare/net/address.mojo:54-150, 393-442, 463-473 | `parseIp_canonical`, `parseSock_render` | proved |
+| `Flare.L1.IpPredicates.isLoopback`, `isUnspecified`, `isPrivate`, `is172Private`, `isMulticast` | flare/net/address.mojo:198-302 | `*_dotted`, `Bugs.ENC_01.counterexample` | proved; counterexample (ENC-01) |
 | `Flare.L1.Sockaddr.fillIn`, `fillIn6`, `readPort`, `getFamily` | flare/net/_libc.mojo:209-321, 395-411 | `readPort_fillIn`, `addr_fillIn6`, `getFamily_eq_kFamily` | proved |
 | `Flare.L1.Utf8.validFrom`, `isValidUtf8` | flare/io/byte_cursor.mojo:52-107; flare/ws/frame.mojo:553-606 | `isValidUtf8_iff` | proved |
 | `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo:24-139 | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff` | proved |
