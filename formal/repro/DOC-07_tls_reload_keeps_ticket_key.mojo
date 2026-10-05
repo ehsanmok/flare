@@ -50,7 +50,10 @@ comptime _KEY = "tests/certs/server.key"
 
 
 def _serve(mut ln: TcpListener) raises:
-    var acc = TlsAcceptor(TlsServerConfig(_CRT, _KEY))
+    # Tickets are opt-in since DOC-08; this repro needs them on.
+    var acc = TlsAcceptor(
+        TlsServerConfig(_CRT, _KEY, enable_session_tickets=True)
+    )
     for round in range(3):
         var s = ln.accept()
         var r = acc.handshake_fd(Int(s._socket.fd))
