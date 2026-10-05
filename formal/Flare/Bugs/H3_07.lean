@@ -27,12 +27,21 @@ them, and a strict client may close with H3_MISSING_SETTINGS.
 
 Model: the server's outbound stream set after the handshake and the first
 request/response, as `(stream id, bytes from offset 0)` pairs.
-Counterexample (`impl_no_control`): for any set of client bidirectional
+Counterexample (`implOld_no_control`): for any set of client bidirectional
 request streams, no server-initiated uni stream exists at all (observed
 over loopback: the server sends only on stream 0).
-Fix (`fixedOut`): with the first 1-RTT flight, send stream 3 carrying
+Fix (`implOut`): with the first 1-RTT flight, send stream 3 carrying
 `emit_initial_settings()`; `fixed_spec` proves this is the single control
 stream and that it starts with type 0x00 and a decodable SETTINGS frame.
+
+Status: resolved. `implOldOut` is the pre-fix outbound set (the counterexample
+is about it); the shipped `implOut` meets RFC 9114 §6.2.1 (`fixed_spec`).
+`Http3Connection.take_control_stream_start()` hands over the bytes once and
+`QuicListener._drain_1rtt_coalesced` sends them as stream 3 at offset 0 with
+the first 1-RTT flight. Regression tests: tests/h3/test_h3_uni_streams.mojo
+`test_take_control_stream_start_is_once_and_decodes_at_the_peer`,
+tests/h3/test_h3_client_e2e.mojo
+`test_server_opens_its_control_stream_with_settings`.
 -/
 namespace Flare.Bugs.H3_07
 open Flare.L3.H3
@@ -49,12 +58,12 @@ structure Config where
 def Config.Valid (c : Config) : Prop :=
   c.maxFieldSection < 2 ^ 62 ∧ c.qpackCap < 2 ^ 62 ∧ c.qpackBlocked < 2 ^ 62
 
-/-- mirrors flare/http3/server.mojo:1246-1271 @59bda50 -/
+/-- mirrors flare/http3/server.mojo:1332-1357 (fixed, H3-07) -/
 def settingsList (c : Config) : List (Nat × Nat) :=
   [(0x06, c.maxFieldSection), (0x01, c.qpackCap), (0x07, c.qpackBlocked)] ++
     (if c.connect then [(0x08, 1)] else [])
 
-/-- mirrors flare/http3/server.mojo:1230-1275 @59bda50 -/
+/-- mirrors flare/http3/server.mojo:1316-1361 (fixed, H3-07) -/
 def emitInitialSettings (enc : Nat → Bytes) (c : Config) : Bytes :=
   enc 0x00 ++ encodeFrame enc 0x04 (encodeSettings enc (settingsList c))
 
@@ -80,19 +89,25 @@ def Spec (out : Out) : Prop :=
 /-- Request streams opened by the client are client-initiated bidirectional. -/
 def ClientBidi (reqs : List Nat) : Prop := ∀ s ∈ reqs, s % 4 = 0
 
-/-- mirrors flare/quic/server.mojo:2210-2433 @59bda50 (`_drain_1rtt_coalesced`:
-STREAM frames come only from `http3_response_egress`, keyed by request stream) -/
-def implOut (resp : Nat → Bytes) (reqs : List Nat) : Out :=
+/-- PRE-FIX outbound set (flare/quic/server.mojo:2210-2433 @59bda50,
+`_drain_1rtt_coalesced`: STREAM frames come only from `http3_response_egress`,
+keyed by request stream). Kept so the counterexample stays checkable. -/
+def implOldOut (resp : Nat → Bytes) (reqs : List Nat) : Out :=
   reqs.map fun s => (s, resp s)
 
-/-- The fix: stream 3 with `emit_initial_settings()` in the first 1-RTT flight. -/
-def fixedOut (enc : Nat → Bytes) (c : Config) (resp : Nat → Bytes) (reqs : List Nat) : Out :=
-  (3, emitInitialSettings enc c) :: implOut resp reqs
+/-- The shipped outbound set: stream 3 with the bytes of
+`Http3Connection.take_control_stream_start()` (= `emit_initial_settings()`),
+appended in `_drain_1rtt_coalesced` to the first 1-RTT flight, next to
+HANDSHAKE_DONE.
+mirrors flare/quic/server.mojo:2288-2310 and flare/http3/server.mojo:1363-1380
+(fixed, H3-07) -/
+def implOut (enc : Nat → Bytes) (c : Config) (resp : Nat → Bytes) (reqs : List Nat) : Out :=
+  (3, emitInitialSettings enc c) :: implOldOut resp reqs
 
-theorem implOut_not_serverUni (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
-    ∀ p ∈ implOut resp reqs, serverUni p.1 = false := by
+theorem implOldOut_not_serverUni (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
+    ∀ p ∈ implOldOut resp reqs, serverUni p.1 = false := by
   intro p hp
-  simp only [implOut, List.mem_map] at hp
+  simp only [implOldOut, List.mem_map] at hp
   obtain ⟨s, hs, rfl⟩ := hp
   have := h s hs
   simp only [serverUni, Flare.L3.Quic.Streams.serverInit, Bool.and_eq_false_iff,
@@ -101,16 +116,16 @@ theorem implOut_not_serverUni (resp : Nat → Bytes) (reqs : List Nat) (h : Clie
 
 /-- **Counterexample**: whatever the client requests, the server's outbound
 streams contain no control stream. -/
-theorem impl_no_control (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
-    ¬ Spec (implOut resp reqs) := by
+theorem implOld_no_control (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
+    ¬ Spec (implOldOut resp reqs) := by
   rintro ⟨⟨p, hp, hu, _⟩, _⟩
-  rw [implOut_not_serverUni resp reqs h p hp] at hu
+  rw [implOldOut_not_serverUni resp reqs h p hp] at hu
   cases hu
 
 /-- The observed run: one GET on stream 0; the server sends only on stream 0. -/
-theorem impl_observed (resp : Nat → Bytes) :
-    (implOut resp [0]).map (·.1) = [0] ∧ ¬ Spec (implOut resp [0]) :=
-  ⟨rfl, impl_no_control resp [0] (by simp [ClientBidi])⟩
+theorem implOld_observed (resp : Nat → Bytes) :
+    (implOldOut resp [0]).map (·.1) = [0] ∧ ¬ Spec (implOldOut resp [0]) :=
+  ⟨rfl, implOld_no_control resp [0] (by simp [ClientBidi])⟩
 
 theorem enc_len (enc : Nat → Bytes) (henc : VarintCodec enc) (v : Nat) (hv : v < 2 ^ 62) :
     (enc v).length ≤ 8 := by
@@ -179,11 +194,11 @@ theorem emit_controlStart (enc : Nat → Bytes) (henc : VarintCodec enc)
 theorem fixed_spec (enc : Nat → Bytes) (henc : VarintCodec enc)
     (hpos : ∀ v, 1 ≤ (enc v).length) (c : Config) (hc : c.Valid)
     (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
-    Spec (fixedOut enc c resp reqs) := by
-  have hno := implOut_not_serverUni resp reqs h
-  have only3 : ∀ p ∈ fixedOut enc c resp reqs, serverUni p.1 = true → p.1 = 3 := by
+    Spec (implOut enc c resp reqs) := by
+  have hno := implOldOut_not_serverUni resp reqs h
+  have only3 : ∀ p ∈ implOut enc c resp reqs, serverUni p.1 = true → p.1 = 3 := by
     intro p hp hu
-    simp only [fixedOut, List.mem_cons] at hp
+    simp only [implOut, List.mem_cons] at hp
     rcases hp with rfl | hp
     · rfl
     · rw [hno p hp] at hu; cases hu

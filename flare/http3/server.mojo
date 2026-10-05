@@ -15,7 +15,9 @@ HTTP/3 over QUIC uses four families of streams:
   server replies on the same stream with HEADERS + DATA + (FIN).
 * **Unidirectional control stream** (type 0x00) -- exactly one
   per direction; carries SETTINGS first, then GOAWAY /
-  MAX_PUSH_ID over the connection lifetime.
+  MAX_PUSH_ID over the connection lifetime. The server opens its
+  own as stream 3 with its first 1-RTT flight
+  (:meth:`Http3Connection.take_control_stream_start`).
 * **Unidirectional push stream** (type 0x01) -- server-initiated.
   Not implemented (RFC 9114 deprecates push as of revision 9).
 * **Unidirectional QPACK encoder stream** (type 0x02) +
@@ -106,6 +108,10 @@ comptime _MAX_CONTROL_FRAME_BYTES: Int = 16384
 GOAWAY and MAX_PUSH_ID are a few bytes; anything declaring more is
 treated as an excessive load (RFC 9114 sec 8.1)."""
 
+
+comptime H3_SERVER_CONTROL_STREAM_ID: Int = 3
+"""QUIC stream id of the server's control stream: the first
+server-initiated unidirectional stream (RFC 9000 section 2.1, ``0b11``)."""
 
 comptime H3_GENERAL_PROTOCOL_ERROR: UInt64 = 0x101
 """RFC 9114 section 8.1: the default code for an error with no more
@@ -634,6 +640,10 @@ struct Http3Connection(Copyable, Defaultable):
     Increment we emitted on our QPACK decoder stream (RFC 9204
     §4.4.3). Drained by :meth:`take_qpack_decoder_frames`."""
 
+    var control_stream_sent: Bool
+    """Whether :meth:`take_control_stream_start` has handed the
+    reactor the server's control-stream prefix (H3-07)."""
+
     var connection_error_code: UInt64
     """Non-zero once the driver has hit an error that RFC 9114 / 9204
     make a *connection* error (so far an undecodable field section,
@@ -668,6 +678,7 @@ struct Http3Connection(Copyable, Defaultable):
             QpackDynamicTable(UInt64(0))
         )
         self.pending_qpack_increment = 0
+        self.control_stream_sent = False
         self.connection_error_code = 0
         self.connection_error_reason = String("")
 
@@ -1308,12 +1319,12 @@ struct Http3Connection(Copyable, Defaultable):
         frame carrying the local
         :class:`Http3Config` values.
 
-        The reactor opens a local control uni-stream via QUIC
-        and emits these bytes as the very first payload (RFC
-        9114 §6.2.1: SETTINGS MUST be the first frame). This
-        is the only frame the server is required to send
-        proactively; GOAWAY / MAX_PUSH_ID are emitted on
-        demand."""
+        The reactor sends these bytes as the very first payload of the
+        server's control stream (RFC 9114 §6.2.1: SETTINGS MUST be the
+        first frame); :meth:`take_control_stream_start` is the
+        once-only form it calls. This is the only frame the server is
+        required to send proactively; GOAWAY / MAX_PUSH_ID are emitted
+        on demand."""
         var out = List[UInt8]()
         var type_var = encode_varint(UInt64(Http3StreamType.CONTROL))
         for i in range(len(type_var)):
@@ -1348,6 +1359,23 @@ struct Http3Connection(Copyable, Defaultable):
         encode_http3_settings(settings, payload)
         encode_http3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
         return out^
+
+    def take_control_stream_start(mut self) raises -> List[UInt8]:
+        """The bytes to send at offset 0 of the server's control stream
+        (:data:`H3_SERVER_CONTROL_STREAM_ID`): stream type 0x00 and the
+        SETTINGS frame (RFC 9114 sections 6.2.1, 7.2.4). Returns them
+        once; every later call returns an empty list. Also records
+        :attr:`control_stream_id`.
+
+        The QUIC reactor calls this with the first 1-RTT flight, so the
+        control stream is initiated at the beginning of the connection
+        (H3-07: it was never opened, and the client never received the
+        server's SETTINGS)."""
+        if self.control_stream_sent:
+            return List[UInt8]()
+        self.control_stream_sent = True
+        self.control_stream_id = H3_SERVER_CONTROL_STREAM_ID
+        return self.emit_initial_settings()
 
     def emit_goaway(mut self, max_stream_id: UInt64) raises -> List[UInt8]:
         """Build a GOAWAY frame announcing ``max_stream_id`` (RFC

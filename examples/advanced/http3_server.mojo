@@ -159,10 +159,11 @@ def main() raises:
     print("    streams dispatched this pass:", dispatched)
     print()
 
-    # Step 6: Http3Connection is what the QUIC reactor will hand
-    # each accepted QUIC connection to. Build one + verify it
-    # emits the server SETTINGS that the listener will write
-    # on the new control stream.
+    # Step 6: Http3Connection is what the QUIC reactor hands each
+    # accepted QUIC connection to. Build one and look at the server
+    # SETTINGS bytes; the listener sends exactly these (via
+    # take_control_stream_start) on stream 3, the server's control
+    # stream, with the first 1-RTT flight.
     var h3 = Http3Connection.with_config(Http3Config())
     var initial_settings = h3.emit_initial_settings()
     print("[h3] initial server SETTINGS emit length =", len(initial_settings))

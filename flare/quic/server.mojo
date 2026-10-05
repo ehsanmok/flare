@@ -95,7 +95,11 @@ from .state import (
     connection_close,
     empty_events,
 )
-from ..http3.server import Http3Connection, h3_error_code
+from ..http3.server import (
+    H3_SERVER_CONTROL_STREAM_ID,
+    Http3Connection,
+    h3_error_code,
+)
 from ..http3.response_writer import (
     encode_response_data,
     encode_response_trailers,
@@ -2283,6 +2287,22 @@ struct QuicListener(Movable):
             encode_max_streams(max_streams, plaintext)
             if not self.handshake_done_sent[slot]:
                 self._issue_new_connection_id(slot, plaintext)
+                # RFC 9114 sec 6.2.1: each side MUST initiate its control
+                # stream at the beginning of the connection and send
+                # SETTINGS first. The server's is stream 3, the first
+                # server-initiated unidirectional stream; it was never
+                # opened (H3-07). The first 1-RTT flight carries it, once.
+                var control = self.http3_connections[
+                    slot
+                ].take_control_stream_start()
+                if len(control) > 0:
+                    _encode_h3_stream_frame(
+                        plaintext,
+                        UInt64(H3_SERVER_CONTROL_STREAM_ID),
+                        UInt64(0),
+                        Span[UInt8, _](control),
+                        fin=False,
+                    )
             self.rx_1rtt_ack_pending[slot] = False
             self.handshake_done_sent[slot] = True
 

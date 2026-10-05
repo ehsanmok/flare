@@ -58,6 +58,9 @@ from test_h3_client_e2e import (
 from test_h3_client_e2e import (
     test_h3_stream_body as test_h3_client_e2e__test_h3_stream_body,
 )
+from test_h3_client_e2e import (
+    test_server_opens_its_control_stream_with_settings as test_h3_client_e2e__test_server_opens_its_control_stream_with_settings,
+)
 from test_h3_client_frag import (
     test_large_body_fragments as test_h3_client_frag__test_large_body_fragments,
 )
@@ -242,6 +245,9 @@ from test_h3_uni_streams import (
     test_emit_initial_settings_round_trips as test_h3_uni_streams__test_emit_initial_settings_round_trips,
 )
 from test_h3_uni_streams import (
+    test_take_control_stream_start_is_once_and_decodes_at_the_peer as test_h3_uni_streams__test_take_control_stream_start_is_once_and_decodes_at_the_peer,
+)
+from test_h3_uni_streams import (
     test_emit_goaway_flips_flag_and_double_emit_raises as test_h3_uni_streams__test_emit_goaway_flips_flag_and_double_emit_raises,
 )
 from test_h3_uni_streams import (
@@ -364,6 +370,9 @@ def main() raises:
     suite.test[test_h3_client_e2e__test_h3_get]()
     suite.test[test_h3_client_e2e__test_h3_post_echo]()
     suite.test[test_h3_client_e2e__test_h3_stream_body]()
+    suite.test[
+        test_h3_client_e2e__test_server_opens_its_control_stream_with_settings
+    ]()
     # tests/h3/test_h3_client_frag.mojo
     suite.test[test_h3_client_frag__test_large_body_fragments]()
     suite.test[test_h3_client_frag__test_idle_then_reuse]()
@@ -498,6 +507,9 @@ def main() raises:
     suite.test[test_h3_uni_streams__test_goaway_records_peer_max_stream_id]()
     suite.test[test_h3_uni_streams__test_second_peer_control_stream_raises]()
     suite.test[test_h3_uni_streams__test_emit_initial_settings_round_trips]()
+    suite.test[
+        test_h3_uni_streams__test_take_control_stream_start_is_once_and_decodes_at_the_peer
+    ]()
     suite.test[
         test_h3_uni_streams__test_emit_goaway_flips_flag_and_double_emit_raises
     ]()

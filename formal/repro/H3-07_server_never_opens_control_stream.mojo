@@ -1,8 +1,9 @@
 # PLATFORM: any (loopback UDP; needs the rustls QUIC shim and the
 # fixtures in tests/tls/fixtures/rustls-quic-client/)
+# RESOLVED: H3-07 fixed on fix/formal-findings
 """H3-07: the HTTP/3 server never opens its control stream or sends SETTINGS.
 
-Lean: Flare.Bugs.H3_07.impl_no_control (impl), Flare.Bugs.H3_07.fixed_spec
+Lean: Flare.Bugs.H3_07.implOld_no_control (pre-fix), Flare.Bugs.H3_07.fixed_spec
 (fix). flare/quic/server.mojo @59bda50 never sends on a server-initiated
 unidirectional stream: the 1-RTT egress (`_drain_1rtt_coalesced`,
 2225-2420) writes only ACK / HANDSHAKE_DONE / MAX_DATA / MAX_STREAMS /
@@ -26,7 +27,7 @@ complete.
 
 Expected: a chunk at offset 0 on a server-initiated uni stream
 (sid % 4 == 3) starting 00 04 (control stream type, SETTINGS frame).
-Actual: the only stream the server sends on is the request stream.
+Before the fix: Actual: the only stream the server sends on is the request stream.
 
 Minimal fix: in `_drain_1rtt_coalesced`, together with the first
 HANDSHAKE_DONE (the first 1-RTT flight), append a STREAM frame on stream 3
@@ -128,7 +129,10 @@ def main() raises:
             sids.append(ev.stream_chunks[i].stream_id)
             offs.append(ev.stream_chunks[i].offset)
             heads.append(ev.stream_chunks[i].data.copy())
-            if ev.stream_chunks[i].stream_id == UInt64(0) and ev.stream_chunks[i].fin:
+            if (
+                ev.stream_chunks[i].stream_id == UInt64(0)
+                and ev.stream_chunks[i].fin
+            ):
                 response_fin = True
         if response_fin:
             extra += 1
@@ -149,7 +153,11 @@ def main() raises:
     if not control:
         print(
             "BUG REPRODUCED: request answered, but no server-initiated uni"
-            " stream carried 00 + SETTINGS; streams the server sent on:" + seen
+            " stream carried 00 + SETTINGS; streams the server sent on:"
+            + seen
         )
         raise Error("H3-07")
-    print("OK: server control stream (type 0x00 + SETTINGS) received; streams:" + seen)
+    print(
+        "OK: server control stream (type 0x00 + SETTINGS) received; streams:"
+        + seen
+    )

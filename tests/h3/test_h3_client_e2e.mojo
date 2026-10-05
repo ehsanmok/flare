@@ -23,15 +23,17 @@ Reuses the 2-cert fixture chain from
 leaf), exactly as ``test_quic_client.mojo``.
 """
 
-from std.collections import List
+from std.collections import Dict, List
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from flare.http3 import (
     Http3BodyChunk,
     Http3ClientConnection,
+    Http3Connection,
     Http3ResponseReader,
 )
+from flare.http3.request_writer import encode_request_headers
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
@@ -232,8 +234,86 @@ def test_h3_stream_body() raises:
     h3.close()
 
 
+def test_server_opens_its_control_stream_with_settings() raises:
+    """H3-07: the server never opened its control stream, so the client
+    never received SETTINGS. Over a real handshake the first 1-RTT
+    flight must carry stream 3 (the first server-initiated uni stream)
+    with type 0x00 and a SETTINGS frame, exactly once, and a client
+    driver must read it as the peer's control stream."""
+    var server = _bind_server()
+    var connector = _make_connector()
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+    var by_stream = Dict[UInt64, List[UInt8]]()
+    var starts_at_zero = Dict[UInt64, Bool]()
+    var chunks_on_3 = 0
+
+    for _ in range(40):
+        _ = server.tick(timeout_ms=50)
+        var ev = client.poll(timeout_ms=50)
+        for i in range(len(ev.stream_chunks)):
+            var sid = ev.stream_chunks[i].stream_id
+            if sid == UInt64(3):
+                chunks_on_3 += 1
+                if ev.stream_chunks[i].offset == UInt64(0):
+                    starts_at_zero[sid] = True
+                    by_stream[sid] = ev.stream_chunks[i].data.copy()
+        if client.is_established():
+            break
+    assert_true(client.is_established(), "handshake must complete first")
+
+    # Send a request so the server's first 1-RTT flight (ACK, HANDSHAKE_DONE
+    # and the control stream) definitely leaves, then keep polling.
+    var wire = List[UInt8]()
+    encode_request_headers(
+        String("GET"),
+        String("https"),
+        String("localhost"),
+        String("/"),
+        List[QpackHeader](),
+        wire,
+    )
+    client.send_stream(UInt64(0), wire, True)
+    var answered = False
+    for _ in range(60):
+        _ = server.tick(timeout_ms=50)
+        _server_dispatch(server)
+        _ = server.tick(timeout_ms=50)
+        var ev = client.poll(timeout_ms=50)
+        for i in range(len(ev.stream_chunks)):
+            var sid = ev.stream_chunks[i].stream_id
+            if sid == UInt64(3):
+                chunks_on_3 += 1
+                if ev.stream_chunks[i].offset == UInt64(0):
+                    starts_at_zero[sid] = True
+                    by_stream[sid] = ev.stream_chunks[i].data.copy()
+            if sid == UInt64(0) and ev.stream_chunks[i].fin:
+                answered = True
+        if answered and chunks_on_3 > 0:
+            break
+    server.close()
+    assert_true(answered, "request must be answered")
+    assert_equal(chunks_on_3, 1, "control stream must be sent exactly once")
+    assert_true(UInt64(3) in starts_at_zero, "stream 3 must start at offset 0")
+    var data = by_stream[UInt64(3)].copy()
+    assert_true(len(data) >= 2)
+    assert_equal(Int(data[0]), 0x00, "control stream type")
+    assert_equal(Int(data[1]), 0x04, "SETTINGS is the first frame")
+    # A client-side driver reads it as the peer's control stream.
+    var peer = Http3Connection()
+    peer.feed_uni_stream_chunk(3, data^)
+    assert_equal(peer.peer_control_stream_id, 3)
+    assert_true(peer.peer_settings_received)
+    assert_equal(
+        peer.peer_settings_max_field_section_size,
+        Http3Connection().config.max_field_section_size,
+    )
+
+
 def main() raises:
     test_h3_get()
     test_h3_post_echo()
     test_h3_stream_body()
-    print("test_h3_client_e2e: 3 passed")
+    test_server_opens_its_control_stream_with_settings()
+    print("test_h3_client_e2e: 4 passed")

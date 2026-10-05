@@ -109,8 +109,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.Bugs.H3_06.dispatchFixed_spec
 
 -- H3 server control stream
-#print axioms Flare.Bugs.H3_07.impl_no_control
-#print axioms Flare.Bugs.H3_07.impl_observed
+#print axioms Flare.Bugs.H3_07.implOld_no_control
+#print axioms Flare.Bugs.H3_07.implOld_observed
 #print axioms Flare.Bugs.H3_07.emit_control_start
 #print axioms Flare.Bugs.H3_07.fixed_spec
 #print axioms Flare.Bugs.H3_07.fixed_stream_sendable

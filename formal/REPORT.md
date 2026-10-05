@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61018 lines) |
+| Lean files | 298 (61033 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 21 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 22 of 138 |
 
 Six findings are rated high:
 
@@ -2878,8 +2878,8 @@ advances the wheel to `now` at the top of every iteration
 | `Quic.PeerParams.clientCheck` | quic/client.mojo:641-669 | `QUIC_12.impl_accepts_*`, `clientCheckFixed_spec` | counterexample (QUIC-12) |
 | `Quic.PeerParams.serverImpl` | quic/server.mojo:1199-1368 | `QUIC_11.impl_accepts`, `serverCheck_spec` | counterexample (QUIC-11) |
 | `H3.Control.goaway` | http3/server.mojo:1198-1211 | `H3_06.impl_accepts_trailing`, `goawayFixed_spec` | counterexample (H3-06) |
-| `Bugs.H3_07.implOut` | quic/server.mojo:2210-2433 | `H3_07.impl_no_control`, `impl_observed` | counterexample (H3-07) |
-| `Bugs.H3_07.emitInitialSettings`, `settingsList`, `Config` | http3/server.mojo:136-175, 1230-1275 | `emit_control_start`, `H3_07.fixed_spec`, `fixed_stream_sendable`, `fixed_classified` | proved |
+| `Bugs.H3_07.implOldOut` | quic/server.mojo:2210-2433 @59bda50 (pre-fix) | `H3_07.implOld_no_control`, `implOld_observed` | counterexample (H3-07) |
+| `Bugs.H3_07.implOut`, `emitInitialSettings`, `settingsList`, `Config` | quic/server.mojo:2288-2310, http3/server.mojo:136-175, 1316-1380 (fixed, H3-07) | `emit_control_start`, `H3_07.fixed_spec`, `fixed_stream_sendable`, `fixed_classified` | proved |
 
 ### 4.6 L4: Application layer (HTTP/1.1 connection, routing, middleware, client policy)
 
@@ -3074,7 +3074,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H3-04 | Low | open | HTTP/2-reserved SETTINGS identifiers are accepted | `Flare/Bugs/H3_04.lean` | `repro/H3-04_reserved_settings_accepted.mojo` (any) |
 | H3-05 | Low | open | a second QPACK encoder or decoder stream, and a client push stream, are accepted | `Flare/Bugs/H3_05.lean` | `repro/H3-05_duplicate_qpack_and_client_push_streams.mojo` (any) |
 | H3-06 | Low | open | bytes after the GOAWAY stream id are accepted | `Flare/Bugs/H3_06.lean` | `repro/H3-06_goaway_trailing_bytes_accepted.mojo` (any) |
-| H3-07 | Medium | open | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
+| H3-07 | Medium | resolved | the server never opens its control stream or sends SETTINGS | `Flare/Bugs/H3_07.lean` | `repro/H3-07_server_never_opens_control_stream.mojo` (any (loopback UDP; needs the rustls QUIC shim and the) |
 | APP-01 | Low | open | 426 response says `Connection: close` but the connection stays open | `Flare/Bugs/APP_01.lean` | `repro/APP-01_ws426_keeps_connection_open.mojo` (any) |
 | APP-02 | Low | open | `_wants_close` matches `connection:` mid-line and stops at the first hit | `Flare/Bugs/APP_02.lean` | `repro/APP-02_wants_close_substring_match.mojo` (any) |
 | APP-03 | Low | open | `close` inside a `Connection` token list is ignored | `Flare/Bugs/APP_03.lean` | `repro/APP-03_connection_close_token_list.mojo` (any) |
@@ -4559,8 +4559,10 @@ Status: resolved. `feed_into` now refuses a frame of any type other than HEADERS
 - **RFC:** RFC 9114 §6.2.1: "Each side MUST initiate a single control stream at the beginning of the connection and send its SETTINGS frame as the first frame on this stream."
 - **What goes wrong:** the QUIC server never sends on a server-initiated unidirectional stream. The 1-RTT egress `_drain_1rtt_coalesced` (`quic/server.mojo:2210-2433`) writes ACK, HANDSHAKE_DONE, MAX_DATA, MAX_STREAMS, NEW_CONNECTION_ID and the response streams from `http3_response_egress`, which are keyed by the client's request stream. The comment at `quic/server.mojo:1411-1414` calls the server's uni streams send-only, but none is ever opened. `Http3Connection.emit_initial_settings` (`http3/server.mojo:1230-1275`) builds the right bytes (stream type 0x00, then SETTINGS) but is not called anywhere under `flare/`; its only callers are `tests/h3/test_h3_uni_streams.mojo` and `examples/advanced/http3_server.mojo:167`. `control_stream_id` (`http3/server.mojo:588`) is set to -1 and never assigned.
 - **Documentation gap:** the docstring of `emit_initial_settings` says "The reactor opens a local control uni-stream via QUIC and emits these bytes as the very first payload"; no such code exists. The example at `examples/advanced/http3_server.mojo:163-169` says the listener "will write" the bytes "on the new control stream", but it only prints their length (`[h3] initial server SETTINGS emit length = ...`) and sends nothing.
-- **Counterexample:** `Bugs.H3_07.impl_no_control` shows that for any set of client bidirectional request streams, the server's outbound stream set (`implOut`, mirroring the drain) contains no server-initiated unidirectional stream, so RFC 9114 §6.2.1 fails. `impl_observed` is the repro's run: one GET on stream 0, and the server sends only on stream 0.
-- **Fix:** with the first 1-RTT flight (the drain that sends the first HANDSHAKE_DONE), append a STREAM frame on stream 3 at offset 0 carrying `self.http3_connections[slot].emit_initial_settings()`. `fixed_spec` proves the fixed set (`fixedOut`) has exactly one server-initiated unidirectional stream that starts with type 0x00 and a SETTINGS frame. `emit_control_start` shows the SETTINGS payload decodes back to exactly the configured settings, for any correct varint encoder and configuration values below 2^62. `fixed_stream_sendable` shows stream 3 is a server-initiated unidirectional stream with a send part and no receive part at the server, and `fixed_classified` shows the receiver's uni-stream classifier types it as the control stream.
+Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 0x00 plus the SETTINGS frame once (and records `control_stream_id = 3`), and `QuicListener._drain_1rtt_coalesced` (a minimal call-site change in `quic/server.mojo`) sends it as a STREAM frame on stream 3 at offset 0 with the first 1-RTT flight, next to HANDSHAKE_DONE; the existing loss recovery retransmits it. Tests: `tests/h3/test_h3_uni_streams.mojo::test_take_control_stream_start_is_once_and_decodes_at_the_peer`, `tests/h3/test_h3_client_e2e.mojo::test_server_opens_its_control_stream_with_settings`. The repro prints `OK` (three runs).
+
+- **Counterexample:** `Bugs.H3_07.implOld_no_control` shows that for any set of client bidirectional request streams, the pre-fix server's outbound stream set (`implOldOut`, mirroring the drain at 59bda50) contains no server-initiated unidirectional stream, so RFC 9114 §6.2.1 fails. `implOld_observed` is the repro's run: one GET on stream 0, and the server sends only on stream 0.
+- **Fix:** with the first 1-RTT flight (the drain that sends the first HANDSHAKE_DONE), append a STREAM frame on stream 3 at offset 0 carrying `self.http3_connections[slot].emit_initial_settings()`. `fixed_spec` proves the shipped set (`implOut`) has exactly one server-initiated unidirectional stream that starts with type 0x00 and a SETTINGS frame. `emit_control_start` shows the SETTINGS payload decodes back to exactly the configured settings, for any correct varint encoder and configuration values below 2^62. `fixed_stream_sendable` shows stream 3 is a server-initiated unidirectional stream with a send part and no receive part at the server, and `fixed_classified` shows the receiver's uni-stream classifier types it as the control stream.
 - **Repro:** `formal/repro/H3-07_server_never_opens_control_stream.mojo` runs a real `QuicListener` and a `QuicClientConnection` over loopback UDP with the rustls fixtures. After the handshake the client sends GET / on stream 0, the server runs a handler and answers, and every STREAM chunk the client decrypts is recorded. It prints `inconclusive:` and raises if the handshake or the response FIN never arrives.
 - **Observed:** `BUG REPRODUCED: request answered, but no server-initiated uni stream carried 00 + SETTINGS; streams the server sent on: 0` (three runs, same line each time, exit 1).
 - **Flip:** the fix above, applied in `quic/server.mojo` inside the `if not self.handshake_done_sent[slot]:` block after `_issue_new_connection_id`, gives `OK: server control stream (type 0x00 + SETTINGS) received; streams: 3 0`, exit 0. The file was restored with `git checkout --` and `git status --short flare/` was clean.

@@ -311,6 +311,37 @@ def test_emit_initial_settings_round_trips() raises:
     assert_true(saw_connect)
 
 
+def test_take_control_stream_start_is_once_and_decodes_at_the_peer() raises:
+    """H3-07: the server initiates its control stream (stream 3) and
+    sends type 0x00 + SETTINGS first (RFC 9114 sec 6.2.1, 7.2.4). The
+    bytes are handed over once, and a peer driver reading them as stream 3
+    classifies it as the control stream and learns the settings."""
+    var cfg = Http3Config()
+    cfg.max_field_section_size = UInt64(4096)
+    cfg.qpack_max_table_capacity = UInt64(512)
+    cfg.qpack_blocked_streams = UInt64(7)
+    cfg.enable_connect_protocol = True
+    var server = Http3Connection.with_config(cfg)
+    assert_equal(server.control_stream_id, -1)
+    var start = server.take_control_stream_start()
+    assert_equal(server.control_stream_id, 3)
+    var expected = server.emit_initial_settings()
+    assert_equal(len(start), len(expected))
+    for i in range(len(start)):
+        assert_equal(Int(start[i]), Int(expected[i]))
+    assert_equal(Int(start[0]), 0x00)
+    assert_equal(len(server.take_control_stream_start()), 0)
+
+    var peer = Http3Connection()
+    peer.feed_uni_stream_chunk(3, start^)
+    assert_equal(peer.peer_control_stream_id, 3)
+    assert_true(peer.peer_settings_received)
+    assert_equal(peer.peer_settings_max_field_section_size, UInt64(4096))
+    assert_equal(peer.peer_settings_qpack_max_table_capacity, UInt64(512))
+    assert_equal(peer.peer_settings_qpack_blocked_streams, UInt64(7))
+    assert_true(peer.peer_settings_enable_connect_protocol)
+
+
 def test_emit_goaway_flips_flag_and_double_emit_raises() raises:
     var c = Http3Connection()
     assert_false(c.goaway_emitted)
@@ -391,4 +422,5 @@ def main() raises:
     test_emit_goaway_flips_flag_and_double_emit_raises()
     test_control_frame_header_split_across_chunks()
     test_oversized_control_frame_is_refused_from_its_header()
-    print("test_h3_uni_streams: 13 passed")
+    test_take_control_stream_start_is_once_and_decodes_at_the_peer()
+    print("test_h3_uni_streams: 14 passed")
