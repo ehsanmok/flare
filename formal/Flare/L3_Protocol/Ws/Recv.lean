@@ -10,12 +10,13 @@ import Flare.L3_Protocol.Ws.Frame
 * **Mask direction.** `serverAccept` (`WsConnection._recv_one`) refuses
   unmasked frames: `server_safe`. `clientAccept` (`WsClient._recv_one`) has
   no check. `clientAcceptFixed` adds it: `clientFixed_safe`.
-* **Message assembly.** `recvMessage` models `WsClient.recv_message`.
+* **Message assembly.** `recvMessageOld` models `WsClient.recv_message`
+  before the WS-02 fix; `nextMessage` is the shipped reader.
   `Delivered` is the declarative RFC 6455 §5.4 meaning of "the next complete
   message": the data frames consumed are a TEXT/BINARY start plus
   CONTINUATIONs, ending at the first FIN, with control frames interleaved
   anywhere, and the payload is their concatenation. `nextMessage` is the
-  reassembling fix, and `nextMessage_delivered` proves it meets `Delivered`.
+  reassembling reader, and `nextMessage_delivered` proves it meets `Delivered`.
 * **UTF-8.** `text_payload` accepts exactly the RFC 3629 well-formed payloads
   (`textPayload_ok_iff`, from `Flare.L1.Utf8.isValidUtf8_iff`).
 -/
@@ -119,10 +120,11 @@ def recvFrame : List Frame → Option (Frame × List Frame)
   | [] => none
   | f :: fs => if f.opcode = 9 then recvFrame fs else some (f, fs)
 
-/-- `WsClient.recv_message`: CLOSE ends, BINARY is binary, "TEXT or anything
-else" is text (UTF-8 checked on that one frame).
+/-- `WsClient.recv_message` before the WS-02 fix: CLOSE ends, BINARY is
+binary, "TEXT or anything else" is text (UTF-8 checked on that one frame).
+Kept for the counterexamples.
 mirrors flare/ws/client.mojo:765-794 @59bda50 -/
-def recvMessage (fs : List Frame) : Option (Msg × List Frame) :=
+def recvMessageOld (fs : List Frame) : Option (Msg × List Frame) :=
   match recvFrame fs with
   | none => none
   | some (f, rest) =>
@@ -174,9 +176,12 @@ def collect (isText : Bool) (acc : Bytes) : List Frame → Option (Msg × List F
     else if f.fin then some (finishMsg isText (acc ++ f.payload), fs)
     else collect isText (acc ++ f.payload) fs
 
-/-- The fixed `recv_message`: skip PING/PONG, CLOSE ends, TEXT/BINARY starts
-a message that runs to the CONTINUATION with FIN; any other data opcode is
-a protocol error. -/
+/-- The shipped `recv_message` (with `_recv_data_frame`): skip PING/PONG,
+CLOSE ends, TEXT/BINARY starts a message that runs to the CONTINUATION with
+FIN; any other data opcode is a protocol error. The size bound on the
+reassembled payload (`max_frame_size`) is not modelled: it only turns some
+`.text`/`.binary` results into an error.
+mirrors flare/ws/client.mojo:765-858 (fixed, WS-02) -/
 def nextMessage : List Frame → Option (Msg × List Frame)
   | [] => none
   | f :: fs =>

@@ -762,13 +762,37 @@ struct WsClient(Movable):
                             pass
                     raise e^
 
+    def _recv_data_frame(mut self) raises -> WsFrame:
+        """Next TEXT, BINARY or CONTINUATION frame.
+
+        PING is answered by :meth:`recv`. PONG is dropped: an unsolicited
+        one is allowed and is not part of any message (RFC 6455 sec 5.5.3).
+
+        Raises:
+            NetworkError: If a CLOSE frame arrives or I/O fails.
+            WsProtocolError: On protocol violation.
+        """
+        while True:
+            var frame = self.recv()
+            if frame.opcode == WsOpcode.CLOSE:
+                raise NetworkError("WebSocket CLOSE received")
+            if frame.opcode == WsOpcode.PONG:
+                continue
+            return frame^
+
     def recv_message(mut self) raises -> WsMessage:
         """Receive the next complete message as a ``WsMessage``.
 
         A higher-level alternative to ``recv()`` that returns a
         ``WsMessage`` (Text or Binary) instead of a raw ``WsFrame``.
-        PING frames are handled transparently (PONG sent automatically).
-        CLOSE frames raise a ``NetworkError``.
+        A fragmented message (a TEXT or BINARY frame without FIN followed
+        by CONTINUATION frames up to one with FIN, RFC 6455 sec 5.4) is
+        reassembled and returned whole. PING frames are handled
+        transparently (PONG sent automatically), PONG frames are skipped,
+        and either may arrive between fragments. CLOSE frames raise a
+        ``NetworkError``. A text message is checked for valid UTF-8 as a
+        whole, so a code point may be split across fragments. The
+        reassembled payload is bounded by ``max_frame_size``.
 
         Returns:
             A ``WsMessage`` with ``is_text=True`` for text frames and
@@ -776,7 +800,11 @@ struct WsClient(Movable):
 
         Raises:
             NetworkError: If a CLOSE frame is received or I/O fails.
-            WsProtocolError: On protocol violation.
+            WsProtocolError: On protocol violation: a CONTINUATION with no
+                message to continue, a new data frame inside a fragmented
+                message, an unknown data opcode, invalid UTF-8 in a text
+                message, or a message over ``max_frame_size`` (CLOSE 1009
+                is sent first).
 
         Example:
             ```mojo
@@ -785,13 +813,48 @@ struct WsClient(Movable):
                 print(msg.as_text())
             ```
         """
-        var frame = self.recv()
-        if frame.opcode == WsOpcode.CLOSE:
-            raise NetworkError("WebSocket CLOSE received")
-        if frame.opcode == WsOpcode.BINARY:
-            return WsMessage(frame.payload)
-        # TEXT or anything else: return as text
-        return WsMessage(frame.text_payload())
+        var first = self._recv_data_frame()
+        var is_text = first.opcode == WsOpcode.TEXT
+        if not is_text and first.opcode != WsOpcode.BINARY:
+            if first.opcode == WsOpcode.CONTINUATION:
+                raise WsProtocolError(
+                    "CONTINUATION frame with no message to continue"
+                    " (RFC 6455 sec 5.4)"
+                )
+            raise WsProtocolError(
+                "unknown data opcode " + String(Int(first.opcode))
+            )
+        var fin = first.fin
+        var payload = first.payload.copy()
+        while not fin:
+            var next = self._recv_data_frame()
+            if next.opcode != WsOpcode.CONTINUATION:
+                raise WsProtocolError(
+                    "new data frame inside a fragmented message"
+                    " (RFC 6455 sec 5.4)"
+                )
+            if len(payload) + len(next.payload) > self.max_frame_size:
+                # RFC 6455 sec 7.4.1: 1009 tells the server why.
+                try:
+                    var wire = WsFrame.close(
+                        WsCloseCode.MESSAGE_TOO_BIG
+                    ).encode(mask=True)
+                    self._stream.write_all(Span[UInt8, _](wire))
+                except:
+                    pass
+                raise WsProtocolError(
+                    WS_TOO_BIG_MARKER
+                    + ": reassembled message exceeds "
+                    + String(self.max_frame_size)
+                    + " bytes"
+                )
+            payload.extend(Span[UInt8, _](next.payload))
+            fin = next.fin
+        if not is_text:
+            return WsMessage(payload)
+        return WsMessage(
+            WsFrame(opcode=WsOpcode.TEXT, payload=payload^).text_payload()
+        )
 
     # ── Context manager ───────────────────────────────────────────────────────
 

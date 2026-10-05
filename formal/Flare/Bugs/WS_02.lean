@@ -16,6 +16,9 @@ import Flare.L3_Protocol.Ws.Recv
 * Fix (`nextMessage`): skip PING/PONG, start a message only on TEXT/BINARY,
   append CONTINUATIONs to FIN, and check UTF-8 on the whole message.
   `nextMessage_delivered` proves it meets `Delivered`.
+
+Status: resolved. The counterexamples are about the pre-fix reader
+`recvMessageOld`; `fixed_meets_spec` is about the shipped `nextMessage`.
 -/
 namespace Flare.Bugs.WS_02
 open Flare Flare.L3.Ws
@@ -25,10 +28,10 @@ def cLo : Frame := ⟨true, false, 0, false, Bytes.ofString "lo"⟩
 def pongX : Frame := ⟨true, false, 10, false, Bytes.ofString "x"⟩
 def tA : Frame := ⟨true, false, 1, false, Bytes.ofString "a"⟩
 
-theorem impl_fragment : recvMessage [tHel, cLo] = some (.text (Bytes.ofString "hel"), [cLo]) := by
+theorem impl_fragment : recvMessageOld [tHel, cLo] = some (.text (Bytes.ofString "hel"), [cLo]) := by
   native_decide
 
-theorem impl_pong : recvMessage [pongX, tA] = some (.text (Bytes.ofString "x"), [tA]) := by
+theorem impl_pong : recvMessageOld [pongX, tA] = some (.text (Bytes.ofString "x"), [tA]) := by
   native_decide
 
 theorem fixed_fragment :
@@ -36,7 +39,7 @@ theorem fixed_fragment :
 
 theorem fixed_pong : nextMessage [pongX, tA] = some (.text (Bytes.ofString "a"), []) := by native_decide
 
-theorem counterexample_fragment : ¬ Delivered recvMessage := by
+theorem counterexample_fragment : ¬ Delivered recvMessageOld := by
   intro h
   obtain ⟨c, e, hM⟩ := h _ _ _ _ impl_fragment rfl
   have hc : c = [tHel] := by
@@ -52,7 +55,7 @@ theorem counterexample_fragment : ¬ Delivered recvMessage := by
   · exact absurd hf (by native_decide)
   · cases hC
 
-theorem counterexample_pong : ¬ Delivered recvMessage := by
+theorem counterexample_pong : ¬ Delivered recvMessageOld := by
   intro h
   obtain ⟨c, e, hM⟩ := h _ _ _ _ impl_pong rfl
   have hc : c = [pongX] := by

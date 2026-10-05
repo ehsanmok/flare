@@ -825,7 +825,12 @@ of what you might reasonably assume from the surrounding feature.
   header declares more is answered with CLOSE 1009 and the receive
   raises; it used to be buffered towards any size up to 4 GiB. Raise
   the field before the first receive to accept larger frames.
-  Messages arrive frame by frame, so this bounds a message too.
+  `recv()` delivers frame by frame, so the limit bounds a message there.
+  `WsClient.recv_message()` reassembles fragmented messages (and skips
+  PONG, validating UTF-8 over the whole text message) and applies the same
+  limit to the reassembled payload: a longer message is answered with
+  CLOSE 1009 and the call raises. It used to return each fragment as a
+  message of its own.
 - **The server side of WebSocket is not RFC 6455 conformant yet.** The
   Autobahn suite ran against flare for the first time in v0.11 and 63
   of roughly 450 cases fail. Three gaps account for nearly all of

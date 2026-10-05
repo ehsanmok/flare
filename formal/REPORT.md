@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (60972 lines) |
+| Lean files | 298 (60980 lines) |
 | Theorems | 3215 |
 | Headline theorems in the axiom audit | 1021 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 16 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 17 of 138 |
 
 Six findings are rated high:
 
@@ -1039,7 +1039,7 @@ File: `Ws/Recv.lean`.
 | `decodeKnown_safe`, `decodeKnown_encode` | The WS-01 fix accepts only known opcodes, and the round trip still holds for them. | proved |
 | `collect_spec`, `nextMessage_delivered` | The fixed `recv_message` returns exactly a TEXT/BINARY frame followed by CONTINUATION frames up to FIN, with the concatenated payload, skipping control frames (RFC 6455 §5.4). | proved |
 | `textPayload_ok_iff` | The UTF-8 check on text payloads accepts exactly RFC 3629 `UTF8-octets` (from `L1.Utf8.isValidUtf8_iff`). | proved |
-| `Bugs.WS_02.counterexample_fragment`, `counterexample_pong` | The shipped `recv_message` returns a fragment, or a PONG payload, as a message. | counterexample |
+| `Bugs.WS_02.counterexample_fragment`, `counterexample_pong` | The pre-fix `recv_message` (`recvMessageOld`) returned a fragment, or a PONG payload, as a message. | counterexample |
 | `Bugs.WS_03.counterexample` | The shipped client accepts a masked frame. | counterexample |
 
 #### obs-fold
@@ -2761,7 +2761,7 @@ advances the wheel to `now` at the top of every iteration
 | `Ws.parseLen`, `finish`, `decode` | `ws/frame.mojo:361-508` | `decode_encode`, `decode_ok_shape`, `Bugs.WS_01.*` | proved / counterexample (WS-01) |
 | `Ws.serverAccept` | `ws/server.mojo:541-575` | `server_safe` | proved |
 | `Ws.clientAccept`, `recvFrame` | `ws/client.mojo:693-763` | `Bugs.WS_03.*`, `clientFixed_safe` | counterexample (WS-03) / fix proved |
-| `Ws.recvMessage` | `ws/client.mojo:765-794` | `Bugs.WS_02.*`, `nextMessage_delivered` | counterexample (WS-02) / fix proved |
+| `Ws.recvMessageOld`, `Ws.nextMessage` | `ws/client.mojo:765-858` | `Bugs.WS_02.*`, `nextMessage_delivered` | counterexample (WS-02) / fix proved |
 | UTF-8 check (`L1.Utf8.isValidUtf8`) | `ws/frame.mojo:553-606` | `textPayload_ok_iff` | proved (in L1) |
 | `ObsFold.isSPHT`, `aStrip`, `colonAt`, `fields` | `_server/parse.mojo:203-320`, `parse_util.mojo:65-90` | `fold_unfold`, `strict_no_fold`, `fields_ok_strict`, `fieldsFixed_valid`, `Bugs.H1_10.*` | proved (strict) / counterexample (H1-10) / fix proved |
 | `ClientResponse.bodyless`, `respFraming` | `_client/parse.mojo:128-170` | `framing_bodyless`, `framing_te_cl_reject`, `framing_dup_cl`, `framing_*_iff` | proved |
@@ -3013,7 +3013,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-10 | Low | open | obs-fold continuation lines are not validated | `Flare/Bugs/H1_10.lean` | `repro/H1-10_obs_fold_continuation_unvalidated.mojo` (any) |
 | H1-11 | Medium | resolved | a streamed TLS download that ends without close_notify is complete | `Flare/Bugs/H1_11.lean` | `repro/H1-11_download_tls_truncated_close_body.mojo` (any) |
 | WS-01 | Low | open | `decode_one` accepts reserved opcodes | `Flare/Bugs/WS_01.lean` | `repro/WS-01_reserved_opcode_accepted.mojo` (any) |
-| WS-02 | Medium | open | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
+| WS-02 | Medium | resolved | `WsClient.recv_message` returns one fragment, not the message | `Flare/Bugs/WS_02.lean` | `repro/WS-02_recv_message_returns_fragment.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-03 | Low | open | `WsClient` accepts masked frames from the server | `Flare/Bugs/WS_03.lean` | `repro/WS-03_client_accepts_masked_server_frame.mojo` (any (loopback TCP in-process; no external network)) |
 | WS-04 | Low | open | `WsClient` accepts a 101 that is not a WebSocket handshake | `Flare/Bugs/WS_04.lean` | `repro/WS-04_client_accepts_incomplete_101.mojo` (any) |
 | WS-05 | Low | open | the standalone `WsServer` handshake checks almost nothing | `Flare/Bugs/WS_05.lean` | `repro/WS-05_standalone_server_handshake_unchecked.mojo` (any) |
@@ -3802,13 +3802,15 @@ Status: resolved. `_H2Transport.read` now raises `NetworkError` when a TLS read 
 
 #### WS-02: `WsClient.recv_message` returns one fragment, not the message
 
+Status: resolved. `WsClient.recv_message` now skips PONG, requires a TEXT/BINARY start, appends CONTINUATION payloads to FIN (PING/PONG may interleave), validates UTF-8 over the whole text message, and bounds the reassembled payload by `max_frame_size`. The counterexamples are about `recvMessageOld`; `Bugs.WS_02.fixed_meets_spec` is about the shipped `nextMessage`.
+
 - **Severity:** Medium. Any server that fragments messages makes the client return truncated messages, then return continuation payloads as separate messages. An unsolicited PONG is returned as a text message. Data is silently corrupted at the application level. The function is documented as "Receive the next complete message".
 - **RFC:**
   - RFC 6455 §5.4: a message is a TEXT or BINARY frame followed by CONTINUATION frames up to FIN, and its payload is the concatenation.
   - RFC 6455 §5.5.3: an unsolicited PONG is allowed and is not a message.
 - **What goes wrong:** `client.mojo:765-794` returns the payload of whatever frame comes next ("TEXT or anything else: return as text").
 - **Counterexample:**
-  - `Bugs.WS_02.counterexample_fragment`: `[TEXT(fin=0,"hel"), CONT(fin=1,"lo")]` gives `"hel"`.
+  - `Bugs.WS_02.counterexample_fragment` (about `recvMessageOld`): `[TEXT(fin=0,"hel"), CONT(fin=1,"lo")]` gives `"hel"`.
   - `counterexample_pong`: `[PONG "x", TEXT "a"]` gives `"x"`.
 - **Fix:** skip PONG, require TEXT/BINARY to start a message, append CONTINUATION payloads until FIN, and validate UTF-8 over the whole text message. `Bugs.WS_02.fixed_meets_spec` (= `nextMessage_delivered`) proves the RFC 6455 §5.4 reassembly property. `fixed_fragment` and `fixed_pong` give `"hello"` and `"a"`.
 - **Repro:** `formal/repro/WS-02_recv_message_returns_fragment.mojo` (loopback TCP)

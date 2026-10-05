@@ -1,8 +1,10 @@
 # PLATFORM: any (loopback TCP in-process; no external network)
+# RESOLVED: WS-02 fixed on fix/formal-findings
 """WS-02: WsClient.recv_message returns one fragment, not the message.
 
 Lean: Flare.Bugs.WS_02.counterexample_fragment,
-Flare.Bugs.WS_02.counterexample_pong (counterexamples) and
+Flare.Bugs.WS_02.counterexample_pong (counterexamples about the pre-fix
+recvMessageOld) and
 Flare.Bugs.WS_02.fixed_meets_spec (fix meets spec).
 flare/ws/client.mojo:765-794 @59bda50 ("TEXT or anything else: return as
 text").
@@ -15,7 +17,7 @@ unsolicited PONG, which is not a message. recv_message is documented as
 
 Expected: TEXT(fin=0,"hel") + CONTINUATION(fin=1,"lo") gives one message
 "hello"; PONG("x") + TEXT("a") gives "a".
-Actual: the first call returns "hel" and the second returns "lo", and a
+Before the fix: Actual: the first call returns "hel" and the second returns "lo", and a
 PONG payload is returned as a text message.
 
 Minimal fix: in recv_message, skip PONG, require TEXT/BINARY to start a
