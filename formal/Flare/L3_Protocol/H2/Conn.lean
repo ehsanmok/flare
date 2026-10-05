@@ -210,10 +210,10 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-02, H2-03, H2-05, H2-09, H2-10, H2-17. -/
+finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-09, H2-10, H2-17. -/
 def Fix.shipped : Fix :=
-  { h2_01 := true, h2_02 := true, h2_03 := true, h2_05 := true, h2_09 := true, h2_10 := true,
-    h2_17 := true }
+  { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true, h2_09 := true,
+    h2_10 := true, h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -628,7 +628,8 @@ def headersOpen (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) : Conn
   if !f.eh then ({ c with continuing := f.sid }, [])
   else commit fx dec c f.sid
 
-/-- mirrors flare/http2/state.mojo:1257-1333 @59bda50 -/
+/-- mirrors flare/http2/state.mojo:1257-1333 @59bda50; `h2_04` is the client-role
+unopened-stream check at the top of the HEADERS branch -/
 def headersH (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if f.sid = 0 then
     if fx.h2_06 then .ok (connErr c ePROTOCOL) else .error "h2: HEADERS on stream 0"

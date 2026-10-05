@@ -729,6 +729,35 @@ def test_reduced_table_size_is_a_ceiling_not_an_immediate_resize() raises:
     assert_equal(client.conn.hpack_decoder.settings_max_size, 0)
 
 
+def test_headers_on_a_stream_the_client_never_opened_is_a_connection_error() raises:
+    """H2-04: with push disabled the server cannot open a stream, and an odd
+    id the client never allocated is idle too. A response HEADERS on either
+    is GOAWAY(PROTOCOL_ERROR), not a response the caller is told is ready
+    (RFC 9113 sec 5.1.1)."""
+    var ids = List[Int]()
+    ids.append(2)
+    ids.append(3)
+    for k in range(len(ids)):
+        var client = Http2ClientConnection()
+        _ = client.drain()
+        var block = List[UInt8]()
+        block.append(UInt8(0x88))  # :status 200
+        client.feed(
+            Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x5), ids[k], block))
+        )
+        assert_equal(_goaway_code(client.drain()), 1)
+        assert_false(client.response_ready(ids[k]))
+
+
+def test_headers_on_an_opened_stream_are_still_a_response() raises:
+    """H2-04: the response to a stream the client did open is unaffected."""
+    var client = Http2ClientConnection()
+    var server = Http2Connection()
+    _shuttle(client, server)
+    var sid = _get(client, server)
+    _complete_and_take(client, server, sid)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -745,4 +774,6 @@ def main() raises:
     test_late_frame_on_a_stream_never_opened_is_a_protocol_error()
     test_push_promise_block_cannot_desync_later_responses()
     test_reduced_table_size_is_a_ceiling_not_an_immediate_resize()
-    print("test_h2_client_conn: 15 passed")
+    test_headers_on_a_stream_the_client_never_opened_is_a_connection_error()
+    test_headers_on_an_opened_stream_are_still_a_response()
+    print("test_h2_client_conn: 17 passed")

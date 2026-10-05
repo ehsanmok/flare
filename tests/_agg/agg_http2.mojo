@@ -54,6 +54,12 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_reduced_table_size_is_a_ceiling_not_an_immediate_resize as test_h2_client_conn__test_reduced_table_size_is_a_ceiling_not_an_immediate_resize,
 )
+from test_h2_client_conn import (
+    test_headers_on_a_stream_the_client_never_opened_is_a_connection_error as test_h2_client_conn__test_headers_on_a_stream_the_client_never_opened_is_a_connection_error,
+)
+from test_h2_client_conn import (
+    test_headers_on_an_opened_stream_are_still_a_response as test_h2_client_conn__test_headers_on_an_opened_stream_are_still_a_response,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -508,6 +514,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_client_conn__test_reduced_table_size_is_a_ceiling_not_an_immediate_resize
+    ]()
+    suite.test[
+        test_h2_client_conn__test_headers_on_a_stream_the_client_never_opened_is_a_connection_error
+    ]()
+    suite.test[
+        test_h2_client_conn__test_headers_on_an_opened_stream_are_still_a_response
     ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()

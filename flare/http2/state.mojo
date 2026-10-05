@@ -1334,6 +1334,12 @@ struct Connection(Copyable, Defaultable):
         if ft == FrameType.HEADERS().value:
             if f.header.stream_id == 0:
                 raise Error("h2: HEADERS on stream 0")
+            # sec 5.1.1: a client opens every stream it uses, and with
+            # push disabled the server never opens one, so a response
+            # HEADERS on an id the client has no stream for (idle, or
+            # even) is an unexpected stream identifier.
+            if self.is_client and f.header.stream_id not in self.streams:
+                return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             # sec 5.1: a stream the peer already ended, or one it has
             # closed, must not carry another HEADERS. A second HEADERS
             # on an open stream is trailers and must end the stream.

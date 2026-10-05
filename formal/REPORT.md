@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63374 lines) |
-| Theorems | 3329 |
-| Headline theorems in the axiom audit | 1119 |
+| Lean files | 298 (63387 lines) |
+| Theorems | 3330 |
+| Headline theorems in the axiom audit | 1120 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 116 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 117 of 138 |
 
 Six findings are rated high:
 
@@ -3056,7 +3056,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-01 | High | resolved | the connection-level receive window is never enforced | `Flare/Bugs/H2_01.lean` | `repro/H2-01_conn_window_unenforced.mojo` (any) |
 | H2-02 | Low | resolved | a refused stream id can be reused to open a new request | `Flare/Bugs/H2_02.lean` | `repro/H2-02_refused_sid_reuse.mojo` (any) |
 | H2-03 | Medium | resolved | the client treats a late frame on a stream it closed as a protocol error | `Flare/Bugs/H2_03.lean` | `repro/H2-03_client_late_frame_on_taken_stream.mojo` (any) |
-| H2-04 | Low | open | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
+| H2-04 | Low | resolved | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
 | H2-05 | Medium | resolved | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
 | H2-06 | Low | open | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
 | H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
@@ -4040,6 +4040,8 @@ Status: resolved. Fixed: `Connection.max_local_stream_id` (set by the client whe
 - **Flip:** OK, exit 0.
 
 #### H2-04: the client accepts HEADERS on streams it never opened
+
+Status: resolved. Fixed: in client role the HEADERS branch (`state.mojo`) answers GOAWAY(PROTOCOL_ERROR) for an id not in the stream table. Tests: `test_h2_client_conn.mojo::test_headers_on_a_stream_the_client_never_opened_is_a_connection_error`, `test_headers_on_an_opened_stream_are_still_a_response`. Model: `Fix.shipped` carries `h2_04`; `Bugs.H2_04.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. A server can make the client report a response as ready on a stream it never opened: stream 2 (server-initiated, with push disabled) or stream 3 (an odd id the client never used). Responses are looked up by stream id, so a caller is not handed the wrong response, but the protocol violation goes unnoticed.
 - **RFC:** RFC 9113 §5.1.1, stream id parity: an unexpected stream id is a connection error of type PROTOCOL_ERROR. §8.4 applies with push disabled.

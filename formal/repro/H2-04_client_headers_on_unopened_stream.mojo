@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-04 fixed on fix/formal-findings
 """H2-04: the HTTP/2 client accepts a response HEADERS on a stream it
 never opened.
 
@@ -19,7 +20,7 @@ Trace: fresh Http2ClientConnection, no request sent. The server sends
 HEADERS(stream 2, END_STREAM | END_HEADERS, ":status: 200"), then the same
 on stream 3 (odd, never allocated by next_stream_id).
 
-Expected: GOAWAY(PROTOCOL_ERROR). Actual: both are accepted and surface
+Expected: GOAWAY(PROTOCOL_ERROR). Before the fix: both are accepted and surface
 as ready responses (response_ready(2) and response_ready(3) are True).
 
 Minimal fix: in client role, a HEADERS on a stream id not in conn.streams
