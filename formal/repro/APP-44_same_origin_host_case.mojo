@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-44 fixed on fix/formal-findings
 """APP-44: _same_origin compares hosts case-sensitively, so
 http://API.example.com and http://api.example.com are different
 origins; same_origin_only then rejects a same-site redirect.
@@ -14,7 +15,7 @@ origin) and RFC 3986 §3.2.2 / §6.2.2.1 (host is case-insensitive).
 
 Expected: _same_origin("http://API.example.com/", "http://api.example.com/x")
 is True and RedirectPolicy.same_origin_only().decide(...) FOLLOWs.
-Actual: False and REJECT ("cross-origin redirect refused"). The error
+Before the fix: False and REJECT ("cross-origin redirect refused"). The error
 direction is fail-safe (credentials are stripped, never leaked), so
 severity is low: a spurious refusal, and Authorization is dropped on a
 same-origin hop. The same unnormalised host keys the client pools

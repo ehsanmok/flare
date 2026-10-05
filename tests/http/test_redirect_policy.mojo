@@ -164,6 +164,31 @@ def test_same_origin_rejects_cross_host() raises:
     assert_equal(d.action, RedirectAction.REJECT)
 
 
+def test_same_origin_ignores_host_case() raises:
+    """Hosts are case-insensitive (RFC 3986 §3.2.2; RFC 6454 §4 lowercases
+    the host), so a redirect between spellings of one host is same-origin:
+    it is followed under ``same_origin_only`` and keeps Authorization."""
+    var p = RedirectPolicy.same_origin_only()
+    var d = p.decide(
+        "http://API.example.com/old",
+        "GET",
+        302,
+        "http://api.example.com/new",
+        0,
+    )
+    assert_equal(d.action, RedirectAction.FOLLOW)
+    assert_true(d.forward_authorization)
+    # A different host is still cross-origin.
+    var other = p.decide(
+        "http://API.example.com/old",
+        "GET",
+        302,
+        "http://apx.example.com/new",
+        0,
+    )
+    assert_equal(other.action, RedirectAction.REJECT)
+
+
 def test_same_origin_rejects_cross_scheme() raises:
     """HTTPS → HTTP is treated as cross-origin (different scheme
     means different security context)."""

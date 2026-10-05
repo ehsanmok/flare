@@ -191,12 +191,15 @@ def _resolve_location(base_url: String, location: String) raises -> String:
 
 
 def _same_origin(a_url: String, b_url: String) raises -> Bool:
-    """RFC 6454 same-origin: scheme + host + port match."""
+    """RFC 6454 same-origin: scheme + host + port match; the host
+    compares case-insensitively."""
     var a = Url.parse(a_url)
     var b = Url.parse(b_url)
     if a.scheme != b.scheme:
         return False
-    if a.host != b.host:
+    # Hosts are case-insensitive (RFC 3986 §3.2.2); ``Url.parse`` keeps the
+    # spelling it was given.
+    if a.host.lower() != b.host.lower():
         return False
     if a.port != b.port:
         return False

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62294 lines) |
+| Lean files | 298 (62312 lines) |
 | Theorems | 3270 |
 | Headline theorems in the axiom audit | 1070 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 83 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 84 of 138 |
 
 Six findings are rated high:
 
@@ -3114,7 +3114,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-41 | Medium | resolved | CircuitBreaker measures the cooldown from the start of the failing request | `Flare/Bugs/APP_41.lean` | `repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (any) |
 | APP-42 | Low | resolved | CircuitBreaker admits every request while HALF_OPEN | `Flare/Bugs/APP_42.lean` | `repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (any) |
 | APP-43 | Low | resolved | a network-path `Location` (`//host/path`) is resolved as a path | `Flare/Bugs/APP_43.lean` | `repro/APP-43_redirect_network_path_location.mojo` (any) |
-| APP-44 | Low | open | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
+| APP-44 | Low | resolved | `_same_origin` compares hosts case-sensitively | `Flare/Bugs/APP_44.lean` | `repro/APP-44_same_origin_host_case.mojo` (any) |
 | APP-45 | Low | open | relative references are not resolved per RFC 3986 §5.2 | `Flare/Bugs/APP_45.lean` | `repro/APP-45_redirect_relative_reference_resolution.mojo` (any) |
 | APP-46 | Medium | resolved | single-worker `drain(timeout_ms)` is a hard stop | `Flare/Bugs/APP_46.lean` | `repro/APP-46_drain_is_hard_stop.mojo` (any) |
 | APP-47 | Medium | resolved | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
@@ -5205,6 +5205,8 @@ sufficient by `sameOriginFixed_case`.
 
 - Observed: `BUG REPRODUCED: _same_origin(API.example.com, api.example.com) = False ; same_origin_only decide action = 2 (0=FOLLOW, 2=REJECT)`
 - Flip: `OK: host comparison is case-insensitive`
+
+Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`. Test: `tests/http/test_redirect_policy.mojo::test_same_origin_ignores_host_case` (`same_origin_only` follows `http://API.example.com/old` to `http://api.example.com/new` and keeps Authorization; a different host is still rejected). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.sameOrigin`, and `originOf` (the tuple the credential-confinement theorems use) now lowercases the host; the counterexample is about the pre-fix `sameOriginOld`, and `Flare.Bugs.APP_44.sameOrigin_case` is stated about the shipped one. The client pool still keys on the unnormalised host (not part of this finding).
 
 #### APP-45: relative references are not resolved per RFC 3986 §5.2
 

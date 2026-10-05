@@ -10,7 +10,8 @@ with characters on ASCII input):
   stripping, IPv6 brackets, default ports and `_parse_port`.
 * `resolveLocation`: `_resolve_location` (redirect_policy.mojo:154-188); `resolveLocationOld`
   is the pre-fix code at 59bda50.
-* `sameOrigin`: `_same_origin` (redirect_policy.mojo:188-198).
+* `sameOrigin`: `_same_origin` (redirect_policy.mojo:193-209); `sameOriginOld` is the
+  pre-fix code at 59bda50.
 * `decideR`: `RedirectPolicy.decide` (redirect_policy.mojo:271-354).
 * `sendLoop`: the redirect-following loop of `HttpClient._send_once`
   (client.mojo:2196-2281), over an arbitrary server (a function from
@@ -25,7 +26,8 @@ Specs (independent of the code):
 * credential confinement (requests-library / Fetch behaviour, and the
   module docstring :16-22): with `forward_auth_cross_origin = False`, a hop
   that carries `Authorization`, a caller `Cookie` or `Proxy-Authorization`
-  has the same origin (RFC 6454 tuple as computed by `parse`) as the
+  has the same origin (RFC 6454 tuple as computed by `parse`, with the host
+  lowercased) as the
   original request;
 * monotonicity: once a credential is dropped it is never re-added, even if
   a later hop returns to the original origin (stricter than curl, which
@@ -163,15 +165,27 @@ def resolveLocation (base loc : Str) : Option Str := do
   | '/' :: _ => return origin ++ loc
   | _ => return origin ++ dirOf b.requestTarget ++ loc
 
-/-- The origin tuple flare compares (scheme, host, port). -/
-def originOf (u : Str) : Option (Str × Str × Nat) :=
-  (parse u).map fun v => (v.scheme, v.host, v.port)
+/-- ASCII lowercase (hosts are case-insensitive, RFC 3986 §3.2.2). -/
+def lowerStr (s : Str) : Str := s.map Char.toLower
 
-/-- mirrors flare/http/redirect_policy.mojo:188-198 @59bda50 -/
-def sameOrigin (a b : Str) : Option Bool := do
+/-- The origin tuple flare compares (scheme, lowercased host, port): RFC 6454
+§4 step 5. -/
+def originOf (u : Str) : Option (Str × Str × Nat) :=
+  (parse u).map fun v => (v.scheme, lowerStr v.host, v.port)
+
+/-- The pre-fix `_same_origin` (59bda50, before APP-44): the host compared
+case-sensitively. -/
+def sameOriginOld (a b : Str) : Option Bool := do
   let u ← parse a
   let v ← parse b
   return (u.scheme = v.scheme ∧ u.host = v.host ∧ u.port = v.port : Bool)
+
+/-- The shipped `_same_origin`: APP-44 is fixed (hosts compare lowercased).
+mirrors flare/http/redirect_policy.mojo:193-209 (fixed, APP-44) -/
+def sameOrigin (a b : Str) : Option Bool := do
+  let u ← parse a
+  let v ← parse b
+  return (u.scheme = v.scheme ∧ lowerStr u.host = lowerStr v.host ∧ u.port = v.port : Bool)
 
 theorem sameOrigin_true {a b : Str} (h : sameOrigin a b = some true) :
     ∃ o, originOf a = some o ∧ originOf b = some o := by
@@ -185,7 +199,7 @@ theorem sameOrigin_true {a b : Str} (h : sameOrigin a b = some true) :
     | some v =>
       simp [ha, hb] at h
       obtain ⟨h1, h2, h3⟩ := h
-      exact ⟨(u.scheme, u.host, u.port), rfl, by simp [h1, h2, h3]⟩
+      exact ⟨(u.scheme, lowerStr u.host, u.port), rfl, by simp [h1, h2, h3]⟩
 
 /-! ## `RedirectPolicy.decide` -/
 

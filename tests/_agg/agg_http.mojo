@@ -2454,6 +2454,9 @@ from test_redirect_policy import (
     test_same_origin_rejects_cross_host as test_redirect_policy__test_same_origin_rejects_cross_host,
 )
 from test_redirect_policy import (
+    test_same_origin_ignores_host_case as test_redirect_policy__test_same_origin_ignores_host_case,
+)
+from test_redirect_policy import (
     test_same_origin_rejects_cross_scheme as test_redirect_policy__test_same_origin_rejects_cross_scheme,
 )
 from test_redirect_policy import (
@@ -5635,6 +5638,7 @@ def main() raises:
     suite.test[test_redirect_policy__test_max_redirects_cap_returns_stop]()
     suite.test[test_redirect_policy__test_same_origin_follows_same_host]()
     suite.test[test_redirect_policy__test_same_origin_rejects_cross_host]()
+    suite.test[test_redirect_policy__test_same_origin_ignores_host_case]()
     suite.test[test_redirect_policy__test_same_origin_rejects_cross_scheme]()
     suite.test[test_redirect_policy__test_same_origin_rejects_cross_port]()
     suite.test[test_redirect_policy__test_deny_never_follows]()

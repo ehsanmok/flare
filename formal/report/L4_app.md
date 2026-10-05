@@ -1110,6 +1110,8 @@ sufficient by `sameOriginFixed_case`.
 - Observed: `BUG REPRODUCED: _same_origin(API.example.com, api.example.com) = False ; same_origin_only decide action = 2 (0=FOLLOW, 2=REJECT)`
 - Flip: `OK: host comparison is case-insensitive`
 
+Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`. Test: `tests/http/test_redirect_policy.mojo::test_same_origin_ignores_host_case` (`same_origin_only` follows `http://API.example.com/old` to `http://api.example.com/new` and keeps Authorization; a different host is still rejected). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.sameOrigin`, and `originOf` (the tuple the credential-confinement theorems use) now lowercases the host; the counterexample is about the pre-fix `sameOriginOld`, and `Flare.Bugs.APP_44.sameOrigin_case` is stated about the shipped one. The client pool still keys on the unnormalised host (not part of this finding).
+
 ### APP-45: relative references are not resolved per RFC 3986 §5.2
 
 **Severity: Low.** The client fetches the wrong resource.
