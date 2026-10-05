@@ -3,7 +3,12 @@ import Flare.L3_Protocol.Quic.Streams
 /-!
 # QUIC-16: the server does not enforce its unidirectional stream limit
 
-flare/quic/server.mojo:1407-1430 @59bda50 (`_route_http3_stream_chunks`)
+Status: resolved. `_route_http3_stream_chunks` (flare/quic/server.mojo) now closes
+with STREAM_LIMIT_ERROR when a client unidirectional stream is above
+`Connection.adv_max_streams_uni`. The counterexample below is about the server
+before the fix (`ServerFixes ⟨false, false⟩`); `ServerFixes.shipped` has the check.
+
+Pre-fix behaviour: flare/quic/server.mojo:1407-1430 @59bda50 (`_route_http3_stream_chunks`)
 checks the stream count against `fc_adv_max_bidi` only for bidirectional
 streams; a client unidirectional stream of any number is accepted, although
 the server advertised `initial_max_streams_uni` (3 by default,
@@ -26,6 +31,10 @@ def ctx : Ctx := ⟨fun _ => false, 100, 3⟩
 /-- **Counterexample** -/
 theorem impl_accepts :
     server ⟨false, false⟩ ctx .stream 14 = none ∧ spec .server ctx .stream 14 = some .limit := by
+  native_decide
+
+/-- **The shipped server rejects stream 14.** -/
+theorem shipped_rejects : server ServerFixes.shipped ctx .stream 14 = some .limit := by
   native_decide
 
 /-- **Fix meets spec**: with the unidirectional limit added, the server's

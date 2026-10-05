@@ -466,11 +466,13 @@ Status: resolved. The server checks the stream id of RESET_STREAM, STOP_SENDING,
 
 ### QUIC-16: the server does not enforce its unidirectional stream limit
 
+Status: resolved. The server closes with STREAM_LIMIT_ERROR for a client unidirectional stream above the advertised limit (server.mojo).
+
 - **Severity:** Low to Medium. A client can open any number of unidirectional streams; each gets an `fc_stream_end` entry and H3 per-stream state, bounded only by connection-level flow control.
 - **RFC:** RFC 9000 §4.6: "An endpoint that receives a frame with a stream ID exceeding the limit it has sent MUST treat this as a connection error of type STREAM_LIMIT_ERROR."
 - **What goes wrong:** `_route_http3_stream_chunks` (`quic/server.mojo:1419-1430`) compares the stream count with `fc_adv_max_bidi` for bidirectional streams only. The server advertises `initial_max_streams_uni` (3 by default, `_server_types.mojo:162`, sent at 701) and never raises it.
 - **Counterexample:** `Bugs.QUIC_16.impl_accepts`: STREAM on stream 14, the fourth client unidirectional stream, with a limit of 3.
-- **Fix:** close with STREAM_LIMIT_ERROR when `(sid >> 2) + 1 > config.initial_max_streams_uni` for a unidirectional stream. `fixed_spec` shows the fixed STREAM check equals the spec for every stream id.
+- **Fix:** close with STREAM_LIMIT_ERROR when `(sid >> 2) + 1 > config.initial_max_streams_uni` for a unidirectional stream. `shipped_rejects` and `fixed_spec` show the fixed STREAM check equals the spec for every stream id; the counterexample runs against `ServerFixes ⟨false, false⟩`, the server before the fix.
 - **Repro:** `formal/repro/QUIC-16_server_uni_stream_limit_not_enforced.mojo` (controls: stream 10 accepted, bidirectional stream 400 rejected).
 - **Observed:** `BUG REPRODUCED: STREAM on client uni stream 14 (4th, limit 3) accepted; connection still alive`
 - **Flip** (`quic/server.mojo`, the fix above): `OK: client uni stream 14 (4th, limit 3) closed the connection`, exit 0.
@@ -754,7 +756,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 - **ACK expansion.** The clamping in `expand_ack_ranges` never retires a packet the ACK does not claim, and the output never exceeds 256 entries (`expand_sound`, `expand_len_le`). For a well-formed ACK of at most 256 numbers it retires every claimed packet (`expand_complete`); above 256 it retires the newest 256 (`expand_drops_oldest`), as its docstring says. The only defect is the missing error, QUIC-03.
 - **ACK generation.** The stored ranges are canonical, never claim an unreceived packet, and are exactly the received set while at most 32 ranges are needed; the ACK built from them claims exactly that set (`record_canon`, `record_sound`, `record_exact`, `fromRanges_claimed`, `ack_roundtrip`). After an ack-eliciting packet the next drain sends an ACK (`drain_after_recv`).
 - **ACK range cap.** Above 32 ranges the oldest are left out of every later ACK (`record_drops_lowest`). RFC 9000 §13.2.3 allows a receiver to stop acknowledging old ranges, and the peer then declares those packets lost and retransmits their frames, so not acknowledging them is allowed. What the cap must not do is let those numbers be accepted again; that is QUIC-14.
-- **Server STREAM checks.** Rejecting server-initiated stream ids, the bidirectional stream limit and connection-level flow control in `_route_http3_stream_chunks` are right (`server_stream_conforms`); only the unidirectional limit is missing (QUIC-16).
+- **Server STREAM checks.** Rejecting server-initiated stream ids, the bidirectional stream limit and connection-level flow control in `_route_http3_stream_chunks` are right (`server_stream_conforms`); only the unidirectional limit was missing (QUIC-16, fixed).
 - **Transport-parameter encoder.** For every parameter set RFC 9000 lets an endpoint send, `encode_transport_parameters` does not raise and its output decodes, under the spec, to the same parameters (`tlvs_wire`, `encode_roundtrip`). The encoder does not itself check max_udp_payload_size ≥ 1200 or initial_max_streams_* ≤ 2^60. Neither flare endpoint sends max_udp_payload_size; the stream limits come from `QuicServerConfig` (defaults 100 and 3) and are 16 on the client. A configured stream limit above 2^60 would be sent and rejected by the peer; that is a configuration-validation gap, not reachable with flare's defaults.
 - **`bytes_in_flight`.** It always equals the sum of the in-flight packet sizes and never underflows (`inv_run`, `retire_noUnderflow`, `firePto_noUnderflow`).
 - **Connection state on other events.** CONNECTION_CLOSE, local close and TLS completion are handled as the spec requires (`implStep_frame_spec`, `localClose_spec`, `markHandshakeComplete_spec`).
@@ -788,7 +790,7 @@ Status: resolved. `Http3Connection.take_control_stream_start()` hands over type 
 | `Quic.AckGen.contains`, `recordSt`, `floorAfter` | quic/_server_support.mojo `_ack_floor`, `_ack_contains`, `_ack_record` (fixed, QUIC-14) | `QUIC_14.impl_reaccepts` (pre-fix `containsOld`), `QUIC_14.fixed_trace`, `QUIC_14.fixed_never_reaccepts` | proved (QUIC-14 resolved) |
 | `Quic.AckGen.fromRanges`, `gaps` | quic/_server_support.mojo:127-157 | `fromRanges_claimed`, `fromRanges_wellFormed`, `ack_roundtrip` | proved |
 | `Quic.AckGen.recv`, `drain` | quic/server.mojo:844-863, 2240-2268 | `drain_after_recv` | proved |
-| `Quic.Streams.server` | quic/server.mojo:1407-1430, quic/state.mojo:454-486, 712-722 | `server_stream_conforms`, `QUIC_15.impl_accepts`, `QUIC_16.impl_accepts`, `serverFixed_eq_spec` | counterexample (QUIC-16); proved (QUIC-15 resolved) |
+| `Quic.Streams.server` | quic/server.mojo:1407-1430, quic/state.mojo:454-486, 712-722 | `server_stream_conforms`, `QUIC_15.impl_accepts`, `QUIC_16.shipped_rejects`, `serverFixed_eq_spec` | proved (QUIC-15 and QUIC-16 resolved) |
 | `Quic.Streams.client` | quic/client.mojo:902-912 | `QUIC_17.impl_accepts`, `clientFixed_eq_spec` | counterexample (QUIC-17) |
 | `Quic.Streams.stepHalves`, `resetSeenH`, `sendRefusedH` | quic/state.mojo `apply_reset_stream`, `apply_stop_sending`, quic/client.mojo `cancel_stream`, `stream_reset`, `send_stream` (fixed, QUIC-18) | `QUIC_18.impl_loses` (pre-fix `stepImpl`), `QUIC_18.fixed_both`, `halves_reset_iff`, `halves_stop_iff` | proved (QUIC-18 resolved) |
 | `Bugs.QUIC_19.replyImpl` | quic/client.mojo:902-912, quic/state.mojo:478-486 | `QUIC_19.impl_silent`, `QUIC_19.fixed_spec` | counterexample (QUIC-19) |

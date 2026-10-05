@@ -116,7 +116,7 @@ structure ServerFixes where
   uni : Bool
 
 /-- The fixes in `flare/quic/server.mojo` and `state.mojo` now. -/
-def ServerFixes.shipped : ServerFixes := ⟨true, false⟩
+def ServerFixes.shipped : ServerFixes := ⟨true, true⟩
 
 /-- STREAM: mirrors flare/quic/server.mojo:1407-1430 @59bda50; the other
 four frames: mirrors flare/quic/state.mojo:454-486, 712-722 @59bda50 (no

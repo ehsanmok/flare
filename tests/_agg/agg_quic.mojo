@@ -703,6 +703,9 @@ from test_quic_server_stream_frames import (
     test_stream_ids_above_the_advertised_limit_rejected as test_quic_server_stream_frames__test_stream_ids_above_the_advertised_limit_rejected,
 )
 from test_quic_server_stream_frames import (
+    test_uni_stream_limit_enforced_on_stream_frames as test_quic_server_stream_frames__test_uni_stream_limit_enforced_on_stream_frames,
+)
+from test_quic_server_stream_frames import (
     test_state_error_reaches_the_client_as_connection_close as test_quic_server_stream_frames__test_state_error_reaches_the_client_as_connection_close,
 )
 from test_quic_timers import (
@@ -1443,6 +1446,9 @@ def main() raises:
     ]()
     suite.test[
         test_quic_server_stream_frames__test_stream_ids_above_the_advertised_limit_rejected
+    ]()
+    suite.test[
+        test_quic_server_stream_frames__test_uni_stream_limit_enforced_on_stream_frames
     ]()
     suite.test[
         test_quic_server_stream_frames__test_state_error_reaches_the_client_as_connection_close

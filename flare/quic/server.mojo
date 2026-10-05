@@ -1499,6 +1499,15 @@ struct QuicListener(Movable):
                     and count > self.rx_bidi_stream_count[slot]
                 ):
                     self.rx_bidi_stream_count[slot] = count
+            elif UInt64((sid >> 2) + 1) > qc.conn.adv_max_streams_uni:
+                # RFC 9000 sec 4.6: the unidirectional limit we sent is
+                # enforced like the bidirectional one.
+                self._close_for(
+                    slot,
+                    QUIC_STREAM_LIMIT_ERROR,
+                    "too many unidirectional streams",
+                )
+                return
             var end = events.stream_chunks[i].offset + UInt64(plen)
             var prev = qc.fc_stream_end.get(sid, UInt64(0))
             if end > prev:

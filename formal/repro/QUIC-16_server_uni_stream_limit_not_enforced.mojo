@@ -1,4 +1,5 @@
 # PLATFORM: any (binds a UDP socket on 127.0.0.1:0; no traffic)
+# RESOLVED: QUIC-16 fixed on fix/formal-findings
 """QUIC-16: the server does not enforce its unidirectional stream limit.
 
 Lean: Flare.Bugs.QUIC_16.impl_accepts (impl), Flare.Bugs.QUIC_16.fixed_spec
@@ -12,7 +13,7 @@ exceeding the limit it has sent MUST treat this as a connection error of
 type STREAM_LIMIT_ERROR."
 
 Expected: STREAM on client unidirectional stream 14 (the fourth) closes the
-connection. Actual: the connection stays alive. Control: stream 10 (the
+connection. Before the fix: the connection stays alive. Control: stream 10 (the
 third) is accepted, and bidirectional stream 400 (the 101st) is rejected.
 
 Minimal fix: in _route_http3_stream_chunks, for a unidirectional stream,
