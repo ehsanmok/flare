@@ -18,6 +18,7 @@ from ..proto.ascii import ascii_eq_ignore_case
 from ..proto.h1_leniency import H1LeniencyConfig
 from ..proto.chunked import TE_CHUNKED, classify_transfer_coding
 from .._scan import parse_content_length
+from ...io.byte_cursor import _is_valid_utf8
 from ...net import IpAddr, SocketAddr
 from ...tcp import TcpStream
 
@@ -228,6 +229,9 @@ def _parse_http_request_bytes(
             if not leniency.allow_obs_fold or not have_prev:
                 raise Error("obs-fold rejected (request smuggling vector)")
             var folded = _ascii_strip_slice(line.as_bytes())
+            # The value is kept as a ``String``, which holds UTF-8.
+            if not _is_valid_utf8(folded.as_bytes()):
+                raise Error("header value is not valid UTF-8")
             prev_header_value = prev_header_value + " " + folded
             continue
 
@@ -274,6 +278,7 @@ def _parse_http_request_bytes(
         # Every other control byte (0x01-0x08, 0x0B-0x1F, DEL) is
         # outside field-vchar too (RFC 9110 sec 5.5) and is rejected
         # in every mode.
+        var has_obs_text = False
         for i in range(v.byte_length()):
             var vc = v.unsafe_ptr()[unsafe_offset=i]
             if vc == 0 or vc == 10 or vc == 13:
@@ -281,8 +286,14 @@ def _parse_http_request_bytes(
             if vc >= 128:
                 if not leniency.accept_obs_text_in_field_value:
                     raise Error("obs-text byte in header value rejected")
+                has_obs_text = True
             elif not _is_field_value_char(vc):
                 raise Error("invalid control character in header value")
+        # obs-text is opaque octets on the wire (RFC 9110 sec 5.5), but the
+        # value is stored as a ``String``, which must hold valid UTF-8; a
+        # value that is not would hand malformed data to every consumer.
+        if has_obs_text and not _is_valid_utf8(v.as_bytes()):
+            raise Error("obs-text header value is not valid UTF-8")
 
         # RFC 9112 §6.3.5: duplicate ``Content-Length`` headers are
         # smuggling vectors unless every value agrees. Strict

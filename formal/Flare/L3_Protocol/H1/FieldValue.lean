@@ -11,8 +11,10 @@ import Flare.L1_Encoding.Utf8
 
 * `strict_value_ascii`, `strict_value_utf8`: in strict mode every accepted
   value is ASCII, so the contract holds and the `String` is valid UTF-8.
-* With `accept_obs_text_in_field_value` it is not (`H1-05`). `valueOkFixed`
-  adds a UTF-8 check: `fixed_value_utf8`.
+* With `accept_obs_text_in_field_value` it is not (`H1-05`). `valueAccepted`
+  (the shipped check since the H1-05 fix) adds a UTF-8 check:
+  `fixed_value_utf8`. `valueAcceptedOld` is the byte check alone, as it was
+  before the fix.
 -/
 namespace Flare.L3.H1.FieldValue
 open Flare Flare.L3.H1.Text
@@ -26,8 +28,14 @@ def byteOk (obsText : Bool) (c : UInt8) : Bool :=
 /-- mirrors flare/http/_server/parse.mojo:277-285 @59bda50 -/
 def valueOk (obsText : Bool) (v : Bytes) : Bool := v.all (byteOk obsText)
 
-/-- The value check with the `H1-05` fix. -/
-def valueOkFixed (obsText : Bool) (v : Bytes) : Bool := valueOk obsText v && Flare.L1.Utf8.isValidUtf8 v
+/-- The value acceptance before the `H1-05` fix: the byte check alone. Kept
+for the counterexample. -/
+abbrev valueAcceptedOld := valueOk
+
+/-- The shipped value acceptance: the byte check, and a value with an obs-text
+byte must be valid UTF-8 (an ASCII value always is).
+mirrors flare/http/_server/parse.mojo:281-296 (fixed, H1-05) -/
+def valueAccepted (obsText : Bool) (v : Bytes) : Bool := valueOk obsText v && Flare.L1.Utf8.isValidUtf8 v
 
 /-- Every accepted value is valid UTF-8. -/
 def Utf8Safe (chk : Bytes → Bool) : Prop := ∀ v, chk v = true → Flare.L1.Utf8.WF v
@@ -54,9 +62,9 @@ theorem wf_of_ascii : ∀ {v : Bytes}, (∀ c ∈ v, c.toNat < 128) → Flare.L1
 theorem strict_value_utf8 : Utf8Safe (valueOk false) :=
   fun _ h => wf_of_ascii (strict_value_ascii h)
 
-theorem fixed_value_utf8 (obsText : Bool) : Utf8Safe (valueOkFixed obsText) := by
+theorem fixed_value_utf8 (obsText : Bool) : Utf8Safe (valueAccepted obsText) := by
   intro v h
-  simp only [valueOkFixed, Bool.and_eq_true] at h
+  simp only [valueAccepted, Bool.and_eq_true] at h
   exact (Flare.L1.Utf8.isValidUtf8_iff v).mp h.2
 
 end Flare.L3.H1.FieldValue

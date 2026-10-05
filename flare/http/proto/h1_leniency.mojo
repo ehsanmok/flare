@@ -170,7 +170,10 @@ struct H1LeniencyConfig(Copyable):
     that recipients SHOULD treat the bytes as opaque but MAY
     reject them. Defaults off because legitimate clients
     rarely emit obs-text and the bytes are a common
-    fuzzing-discovered crash vector."""
+    fuzzing-discovered crash vector. The bytes are opaque on the
+    wire but the parsed value is a ``String``, which holds UTF-8:
+    a value (or an obs-fold continuation) that is not valid UTF-8
+    is rejected even with this flag on."""
 
     var accept_invalid_chunk_extension_chars: Bool
     """Accept characters that violate the chunk-extension

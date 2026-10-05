@@ -12,24 +12,28 @@ import Flare.L3_Protocol.H1.FieldValue
   as opaque octets.
 * What goes wrong: with `accept_obs_text_in_field_value`, the value `[0xFF]`
   passes the byte check and is stored as a `String` holding `0xFF`.
-* Fix (`valueOkFixed`): reject values that are not valid UTF-8
+* Fix (`valueAccepted`): reject values that are not valid UTF-8
   (`fixed_value_utf8`). Strict mode is already safe (`strict_value_utf8`).
+
+Status: resolved. The counterexample is about the pre-fix acceptance
+`valueAcceptedOld` (the byte check alone); `fixed_utf8` and `fixed_rejects`
+are about the shipped `valueAccepted`.
 -/
 namespace Flare.Bugs.H1_05
 open Flare Flare.L3.H1.FieldValue
 
-theorem lenient_accepts : valueOk true [0xFF] = true := by native_decide
+theorem lenient_accepts : valueAcceptedOld true [0xFF] = true := by native_decide
 
 theorem not_utf8 : Flare.L1.Utf8.isValidUtf8 [0xFF] = false := by native_decide
 
-theorem counterexample : ¬ Utf8Safe (valueOk true) := by
+theorem counterexample : ¬ Utf8Safe (valueAcceptedOld true) := by
   intro h
   have := (Flare.L1.Utf8.isValidUtf8_iff _).mpr (h _ lenient_accepts)
   rw [not_utf8] at this
   cases this
 
-theorem fixed_utf8 : Utf8Safe (valueOkFixed true) := fixed_value_utf8 true
+theorem fixed_utf8 : Utf8Safe (valueAccepted true) := fixed_value_utf8 true
 
-theorem fixed_rejects : valueOkFixed true [0xFF] = false := by native_decide
+theorem fixed_rejects : valueAccepted true [0xFF] = false := by native_decide
 
 end Flare.Bugs.H1_05

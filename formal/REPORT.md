@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61648 lines) |
+| Lean files | 298 (61660 lines) |
 | Theorems | 3245 |
 | Headline theorems in the axiom audit | 1044 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 52 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 53 of 138 |
 
 Six findings are rated high:
 
@@ -1007,12 +1007,12 @@ File: `H1/Framing.lean`.
 
 File: `H1/FieldValue.lean`.
 
-**Model.** `byteOk`/`valueOk` mirror the per-byte value check (`parse.mojo:277-285`).
+**Model.** `byteOk`/`valueOk` mirror the per-byte value check (`parse.mojo:277-285`); `valueAccepted` (= `valueOk` plus a UTF-8 check) is the shipped acceptance since the H1-05 fix (`parse.mojo:281-296`), and `valueAcceptedOld` is the byte check alone.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `strict_value_ascii`, `strict_value_utf8` | In strict mode every accepted value is ASCII, and hence valid UTF-8 (RFC 3629 `WF`). | proved |
-| `fixed_value_utf8` | With a UTF-8 check added, every accepted value is valid UTF-8, with or without obs-text. | proved |
+| `fixed_value_utf8` | With the UTF-8 check (the shipped `valueAccepted`), every accepted value is valid UTF-8, with or without obs-text. | proved |
 | `Bugs.H1_05.counterexample` | With obs-text accepted, `[0xFF]` passes the check. | counterexample |
 
 #### WebSocket frame codec
@@ -2771,7 +2771,7 @@ advances the wheel to `now` at the top of every iteration
 | `Framing.scanField`, `joinR`, `reactorFraming`, `linesCRLF` | `chunked.mojo:120-158`, `_scan.mojo:173-247` | `framing_agrees`, `no_smuggling_strict`, `Bugs.H1_03.*`, `Bugs.H1_04.*` | proved (strict) / counterexample (lenient) |
 | `Framing.nameOf`, `wfB`, `field`, `parserField`, `joinP`, `parserFraming` | `parse.mojo:234-353` | `framing_agrees`, `shape_of_wf` | proved |
 | `Framing.splitOn`, `dropCR`, `linesLF` | `parse_util.mojo:165-208` | `lf_fixed_agrees`, `Bugs.H1_04.*` | proved / counterexample |
-| `FieldValue.byteOk`, `valueOk` | `parse.mojo:277-285` | `strict_value_utf8`, `fixed_value_utf8`, `Bugs.H1_05.*` | proved (strict) / counterexample (obs-text) |
+| `FieldValue.byteOk`, `valueOk`, `valueAccepted` | `parse.mojo:277-285` | `strict_value_utf8`, `fixed_value_utf8`, `Bugs.H1_05.*` | proved (strict) / counterexample (obs-text) |
 | `Ws.Key.at`, `maskFrom`, `appendMasked` | `ws/frame.mojo:483-488`, `495`, `612-647` | `maskFrom_involutive`, `maskFrom_append`, `appendMasked_eq` | proved |
 | `Ws.Frame`, `isControl`, `byte0`, `lenCode`, `be16`, `be64`, `extLen`, `encode`, `encodeChecked` | `ws/frame.mojo:140-170`, `234-356`, `512-520` | `decode_encode`, `lenCode_125`, `lenCode_126`, `lenCode_65535`, `lenCode_65536` | proved |
 | `Ws.parseLen`, `finish`, `decode` | `ws/frame.mojo:361-508` | `decode_encode`, `decode_ok_shape`, `Bugs.WS_01.*` | proved / counterexample (WS-01) |
@@ -3021,7 +3021,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H1-02 | Medium | resolved | a bare LF inside a chunk extension or trailer line is accepted | `Flare/Bugs/H1_02.lean` | `repro/H1-02_chunk_ext_bare_lf.mojo` (any) |
 | H1-03 | Medium | resolved | with `allow_ows_around_colon`, the reactor and the parser disagree on Transfer-Encoding | `Flare/Bugs/H1_03.lean` | `repro/H1-03_te_ows_colon_framing_desync.mojo` (any) |
 | H1-04 | Medium | resolved | with `allow_lf_only_line_endings`, a Transfer-Encoding line after a bare LF is invisible to the reactor | `Flare/Bugs/H1_04.lean` | `repro/H1-04_te_lf_only_framing_desync.mojo` (any) |
-| H1-05 | Low | open | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
+| H1-05 | Low | resolved | obs-text header values become Strings that are not valid UTF-8 | `Flare/Bugs/H1_05.lean` | `repro/H1-05_obs_text_value_not_utf8.mojo` (any) |
 | H1-06 | Medium | resolved | the client returns a truncated chunked body as complete | `Flare/Bugs/H1_06.lean` | `repro/H1-06_client_truncated_chunked_accepted.mojo` (any) |
 | H1-07 | Low | open | a bare-LF response head skips the empty line that ends it | `Flare/Bugs/H1_07.lean` | `repro/H1-07_response_bare_lf_blank_line_skipped.mojo` (any) |
 | H1-08 | Low | open | the client takes the first three digits of a longer status code | `Flare/Bugs/H1_08.lean` | `repro/H1-08_status_code_extra_digits.mojo` (any) |
@@ -3774,13 +3774,15 @@ Status: resolved. Fixed in `request_te_framing` (`flare/http/proto/chunked.mojo`
 
 #### H1-05: obs-text header values become Strings that are not valid UTF-8
 
+Status: resolved. The server parser now rejects an obs-text header value that is not valid UTF-8 (and an obs-fold continuation that is not), so every stored value is a valid `String`. The counterexample is about `valueAcceptedOld`; `Bugs.H1_05.fixed_utf8` is about the shipped `valueAccepted`.
+
 - **Severity:** Low. It needs the non-default `accept_obs_text_in_field_value`. The resulting `String` breaks Mojo's UTF-8 invariant, so any code that iterates its codepoints sees malformed data.
 - **Spec:**
   - The contract of `_ascii_unchecked_string` (`flare/http/proto/ascii.mojo:63-70`): every byte is < 0x80.
   - Mojo `String` holds valid UTF-8.
   - RFC 9110 §5.5 admits obs-text only as opaque octets.
 - **What goes wrong:** in the obs-text branch (`parse.mojo:277-285`) every byte ≥ 0x80 is accepted. The value is then built with `_ascii_unchecked_string` (`parse_util.mojo:65-89`), so `X: \xff` is stored as a String holding `0xFF`.
-- **Counterexample:** `Bugs.H1_05.counterexample` (`¬ Utf8Safe (valueOk true)`), with `lenient_accepts` and `not_utf8`.
+- **Counterexample:** `Bugs.H1_05.counterexample` (`¬ Utf8Safe (valueAcceptedOld true)`), with `lenient_accepts` and `not_utf8`.
 - **Fix:** reject an obs-text value that is not valid UTF-8, or build it with a validating constructor. `Bugs.H1_05.fixed_utf8` (= `fixed_value_utf8`) proves every accepted value is then valid UTF-8. `strict_value_utf8` shows strict mode is already safe.
 - **Repro:** `formal/repro/H1-05_obs_text_value_not_utf8.mojo`
 - **Observed:** `BUG REPRODUCED: header value String holds bytes [ 255 ], which is not valid UTF-8`

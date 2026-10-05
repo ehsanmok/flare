@@ -1,7 +1,9 @@
 # PLATFORM: any
+# RESOLVED: H1-05 fixed on fix/formal-findings
 """H1-05: obs-text header values become Strings that are not valid UTF-8.
 
-Lean: Flare.Bugs.H1_05.counterexample (counterexample) and
+Lean: Flare.Bugs.H1_05.counterexample (counterexample about the pre-fix
+valueAcceptedOld) and
 Flare.Bugs.H1_05.fixed_utf8 (fix meets spec).
 flare/http/_server/parse.mojo:268-285 @59bda50 (value accepted byte by byte),
 flare/http/_server/parse_util.mojo:65-89 (`_ascii_strip_slice` builds it
@@ -15,7 +17,7 @@ parser admits bytes >= 0x80 (RFC 9110 sec 5.5 obs-text), so both promises
 break.
 
 Expected: the value is rejected, or stored as valid UTF-8.
-Actual: headers.get("x") is a String whose bytes are [0xFF].
+Before the fix: Actual: headers.get("x") is a String whose bytes are [0xFF].
 
 Minimal fix: in the obs-text branch, raise unless the value is valid UTF-8
 (or build it with a validating constructor).

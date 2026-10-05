@@ -1328,6 +1328,15 @@ from test_h1_smuggling import (
 from test_h1_smuggling import (
     test_view_path_rejects_what_the_owning_parser_rejects as test_h1_smuggling__test_view_path_rejects_what_the_owning_parser_rejects,
 )
+from test_h1_smuggling import (
+    test_obs_text_value_that_is_not_utf8_is_rejected as test_h1_smuggling__test_obs_text_value_that_is_not_utf8_is_rejected,
+)
+from test_h1_smuggling import (
+    test_obs_text_value_that_is_utf8_is_kept as test_h1_smuggling__test_obs_text_value_that_is_utf8_is_kept,
+)
+from test_h1_smuggling import (
+    test_obs_fold_continuation_that_is_not_utf8_is_rejected as test_h1_smuggling__test_obs_fold_continuation_that_is_not_utf8_is_rejected,
+)
 from test_h1_trailers import (
     test_empty_trailers_match_v06_wire_byte_for_byte as test_h1_trailers__test_empty_trailers_match_v06_wire_byte_for_byte,
 )
@@ -4932,6 +4941,13 @@ def main() raises:
     ]()
     suite.test[
         test_h1_smuggling__test_view_path_rejects_what_the_owning_parser_rejects
+    ]()
+    suite.test[
+        test_h1_smuggling__test_obs_text_value_that_is_not_utf8_is_rejected
+    ]()
+    suite.test[test_h1_smuggling__test_obs_text_value_that_is_utf8_is_kept]()
+    suite.test[
+        test_h1_smuggling__test_obs_fold_continuation_that_is_not_utf8_is_rejected
     ]()
     # tests/http/test_h1_trailers.mojo
     suite.test[

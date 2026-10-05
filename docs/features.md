@@ -618,6 +618,11 @@ whether or not the first read ends after its CR, and a complete trailer
 line over 4096 bytes is refused with 400 like a partial one (it used to
 pass when it arrived whole).
 
+The HTTP/1.1 request parser keeps header values as `String`s, so a value
+that is not valid UTF-8 is now refused (400) even with
+`accept_obs_text_in_field_value` on; valid UTF-8 obs-text is still
+accepted. The same check covers obs-fold continuation lines.
+
 Breaking: the streaming download (`get_streaming` over HTTPS) now applies
 the same close_notify rule to a close-delimited body: if the server resets
 the connection without `close_notify`, the read raises `NetworkError`

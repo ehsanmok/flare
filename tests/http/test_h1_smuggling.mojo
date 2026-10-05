@@ -746,6 +746,83 @@ def test_view_path_rejects_what_the_owning_parser_rejects() raises:
     assert_true("HTTP/1.1 400" in got, "control byte in value: " + got)
 
 
+def _with_value(
+    prefix: String, value: List[UInt8], suffix: String
+) -> List[UInt8]:
+    var out = _b(prefix)
+    out.extend(Span[UInt8, _](value))
+    out.extend(Span[UInt8, _](_b(suffix)))
+    return out^
+
+
+def _obs_text_parse(raw: List[UInt8], fold: Bool) -> String:
+    """The ``X`` header value under obs-text leniency, or ``!raised``."""
+    var leniency = H1LeniencyConfig(
+        accept_obs_text_in_field_value=True, allow_obs_fold=fold
+    )
+    try:
+        var parsed = _parse_http_request_bytes(
+            Span[UInt8, _](raw), leniency=leniency
+        )
+        return parsed.headers.get("x")
+    except:
+        return "!raised"
+
+
+def test_obs_text_value_that_is_not_utf8_is_rejected() raises:
+    """H1-05: a header value must stay valid UTF-8 inside its ``String``.
+
+    obs-text is admitted as opaque octets (RFC 9110 sec 5.5), but the value
+    is stored as a Mojo ``String``, which holds UTF-8. A byte string that
+    is not UTF-8 used to be stored as is.
+    """
+    var head = "GET / HTTP/1.1\r\nHost: a\r\nX: "
+    var tail = "\r\n\r\n"
+    var lone = List[UInt8]()
+    lone.append(0xFF)
+    assert_equal(
+        _obs_text_parse(_with_value(head, lone, tail), False), "!raised"
+    )
+    var truncated = List[UInt8]()
+    truncated.append(0x61)
+    truncated.append(0xC3)  # lead byte of a 2-byte sequence, cut off
+    assert_equal(
+        _obs_text_parse(_with_value(head, truncated, tail), False), "!raised"
+    )
+    var overlong = List[UInt8]()
+    overlong.append(0xC0)
+    overlong.append(0x80)
+    assert_equal(
+        _obs_text_parse(_with_value(head, overlong, tail), False), "!raised"
+    )
+
+
+def test_obs_text_value_that_is_utf8_is_kept() raises:
+    var head = "GET / HTTP/1.1\r\nHost: a\r\nX: a"
+    var e_acute = List[UInt8]()
+    e_acute.append(0xC3)
+    e_acute.append(0xA9)
+    assert_equal(
+        _obs_text_parse(_with_value(head, e_acute, "b\r\n\r\n"), False),
+        "a\u00e9b",
+    )
+
+
+def test_obs_fold_continuation_that_is_not_utf8_is_rejected() raises:
+    var head = "GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n "
+    var bad = List[UInt8]()
+    bad.append(0xFF)
+    assert_equal(
+        _obs_text_parse(_with_value(head, bad, "\r\n\r\n"), True), "!raised"
+    )
+    var good = List[UInt8]()
+    good.append(0xC3)
+    good.append(0xA9)
+    assert_equal(
+        _obs_text_parse(_with_value(head, good, "\r\n\r\n"), True), "a \u00e9"
+    )
+
+
 def main() raises:
     print("=" * 60)
     print("test_h1_smuggling.mojo — h1 framing disagreements")
