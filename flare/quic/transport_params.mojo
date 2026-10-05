@@ -617,3 +617,63 @@ def check_client_transport_params(
             " initial_source_connection_id does not match its Initial"
             " Source Connection ID"
         )
+
+
+def check_server_transport_params(
+    buf: Span[UInt8, _],
+    first_dcid: List[UInt8],
+    server_scid: List[UInt8],
+    retried: Bool,
+    retry_scid: List[UInt8],
+) raises:
+    """Validate the transport parameters a client received from a server.
+
+    Raises ``TRANSPORT_PARAMETER_ERROR`` (RFC 9000 §7.3, §18.2) when the
+    blob does not decode, when ``original_destination_connection_id`` is
+    absent or is not the DCID of the client's first Initial, when
+    ``initial_source_connection_id`` is absent or is not the Source
+    Connection ID the server used (a zero-length one must still be
+    present), when ``retry_source_connection_id`` is present without a
+    Retry (or absent after one, or different from the Retry's Source
+    Connection ID), or when the server used a zero-length connection ID
+    and sent a ``preferred_address``.
+
+    Presence is read from the raw bytes (:func:`transport_parameter_present`)
+    because the decoded record stores an absent CID parameter and a
+    zero-length one alike as an empty list.
+    """
+    var tp: TransportParameters
+    try:
+        tp = decode_transport_parameters(buf)
+    except e:
+        raise Error("QUIC TRANSPORT_PARAMETER_ERROR: server " + String(e))
+    if (
+        not transport_parameter_present(buf, TP_ID_ORIGINAL_DCID)
+        or tp.original_destination_connection_id != first_dcid
+    ):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: server"
+            " original_destination_connection_id"
+        )
+    if (
+        not transport_parameter_present(buf, TP_ID_INITIAL_SCID)
+        or tp.initial_source_connection_id != server_scid
+    ):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: server"
+            " initial_source_connection_id"
+        )
+    var has_retry_scid = transport_parameter_present(buf, TP_ID_RETRY_SCID)
+    if has_retry_scid != retried or (
+        retried and tp.retry_source_connection_id != retry_scid
+    ):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: server retry_source_connection_id"
+        )
+    if len(server_scid) == 0 and transport_parameter_present(
+        buf, TP_ID_PREFERRED_ADDRESS
+    ):
+        raise Error(
+            "QUIC TRANSPORT_PARAMETER_ERROR: server sent preferred_address"
+            " with a zero-length connection ID"
+        )

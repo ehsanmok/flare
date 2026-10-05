@@ -135,6 +135,7 @@ from .state import (
 from .transport_params import (
     DEFAULT_MAX_UDP_PAYLOAD_SIZE,
     PeerSendLimits,
+    check_server_transport_params,
     decode_transport_parameters,
     derive_peer_send_limits,
     empty_transport_parameters,
@@ -703,20 +704,17 @@ struct QuicClientConnection(Movable):
             return
         if len(raw) == 0:
             return
-        var tp = decode_transport_parameters(Span[UInt8, _](raw))
-        var why = String("")
-        if tp.original_destination_connection_id != self.first_dcid.bytes:
-            why = "original_destination_connection_id"
-        elif (
-            len(self.server_scid) > 0
-            and tp.initial_source_connection_id != self.server_scid
-        ):
-            why = "initial_source_connection_id"
-        elif tp.retry_source_connection_id != self.retry_scid:
-            why = "retry_source_connection_id"
-        if why != "":
+        try:
+            check_server_transport_params(
+                Span[UInt8, _](raw),
+                self.first_dcid.bytes,
+                self.server_scid,
+                self.retried,
+                self.retry_scid,
+            )
+        except e:
             self.established = False
-            raise Error("QUIC TRANSPORT_PARAMETER_ERROR: server " + why)
+            raise e^
 
     def _retransmit_lost(mut self) raises:
         """Retransmit frames from packets the ACK-based loss detector

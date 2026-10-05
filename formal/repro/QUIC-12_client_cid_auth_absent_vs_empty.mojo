@@ -1,4 +1,5 @@
 # PLATFORM: any (needs the rustls QUIC shim and the fixtures in
+# RESOLVED: QUIC-12 fixed on fix/formal-findings
 # tests/tls/fixtures/rustls-quic-client/; no network I/O)
 """QUIC-12: the client's connection-ID authentication cannot tell an absent
 transport parameter from a zero-length one.
@@ -29,7 +30,7 @@ crafted server parameter blob), then `_check_peer_cids` runs on a
   C  server used a zero-length SCID (sent as a zero-length
      initial_source_connection_id) and sends a preferred_address
 
-Expected: `_check_peer_cids` raises in A, B, C. Actual: it returns. Controls:
+Expected: `_check_peer_cids` raises in A, B, C. Before the fix: it returns. Controls:
 a correct blob passes, an initial_source_connection_id mismatch raises.
 
 Minimal fix: scan the raw blob for the presence of ids 0x0f / 0x10 / 0x0d

@@ -5,8 +5,9 @@ import Flare.L3_Protocol.Quic.TransportParams
 
 Two consumers of `decode_transport_parameters` (`TransportParams.decode`):
 
-* the client's `_check_peer_cids` (flare/quic/client.mojo:641-669 @59bda50),
-  run once the handshake has produced the server's parameter blob;
+* the client's `_check_peer_cids` (flare/quic/client.mojo, which calls
+  `check_server_transport_params`; fixed, QUIC-12; it used to compare the decoded
+  record only), run once the handshake has produced the server's parameter blob;
 * the server, which (fixed, QUIC-11) reads and checks the client's blob once the
   1-RTT keys are installed (`_client_params_ok`, flare/quic/server.mojo; it used
   to be never read: `_dispatch_crypto_frames` drove the handshake to 1-RTT keys
@@ -29,13 +30,13 @@ server-only parameters (0x00, 0x02, 0x0d, 0x10) is present;
 initial_source_connection_id is present and equal to the Source CID of the
 client's Initial.
 
-`clientCheckFixed` is the minimal fix for the client (scan the raw blob for the
-presence of the ids, on top of the existing comparisons), run with the fixed
-decoder of `TransportParams` (QUIC-10 and QUIC-13 fixed); `serverCheckWith` is the
-server's check, shipped with QUIC-11. `clientCheckFixed_spec` and
-`serverCheck_spec` prove they are exactly the specs on every input (for the
-server: wherever the shipped decoder agrees with the spec decoder,
-`serverCheckWith_agree`; `Fixes.all` makes that every input).
+`clientCheck` is the client's check as shipped (QUIC-12 fixed: it scans the raw blob
+for the presence of the ids, on top of the comparisons), run with the decoder
+`Fixes.shipped` of `TransportParams`; `clientCheckOld` is the check before the fix.
+`serverCheckWith` is the server's check, shipped with QUIC-11. `clientCheckFixed_spec`
+and `serverCheck_spec` prove they are exactly the specs on every input with the fully
+fixed decoder; for the shipped decoder, `clientCheckWith_agree` and
+`serverCheckWith_agree` prove it wherever the decoder agrees with the spec decoder.
 -/
 namespace Flare.L3.Quic.PeerParams
 open Flare Flare.L3.H3 Flare.L3.Quic.TransportParams
@@ -57,25 +58,34 @@ def clientSpec (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
       (present 0x10 b == retried) && (!retried || tp.rscid == rscid) &&
       (!present 0x0d b || !scid.isEmpty)
 
-/-- `_check_peer_cids`: decode (raising on a decode error), then compare
-the stored CIDs. `self.retry_scid` is empty unless a Retry was followed;
-the ISCID comparison is skipped while `server_scid` is empty.
+/-- `_check_peer_cids` before the fix (QUIC-12): decode (raising on a decode
+error), then compare the stored CIDs. `self.retry_scid` is empty unless a Retry
+was followed; the ISCID comparison is skipped while `server_scid` is empty.
 mirrors flare/quic/client.mojo:641-669 @59bda50 -/
-def clientCheck (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
+def clientCheckOld (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
   let retryScid := if retried then rscid else []
   match decode Fixes.none b with
   | .error _ => false
   | .ok tp => tp.odcid == dcid && (scid.isEmpty || tp.iscid == scid) && tp.rscid == retryScid
 
-/-- The fix: presence scans of 0x00 / 0x0f / 0x10 / 0x0d next to the
-existing comparisons, with the fixed decoder. -/
-def clientCheckFixed (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
-  match decode Fixes.all b with
+/-- The shipped check (QUIC-12): presence scans of 0x00 / 0x0f / 0x10 / 0x0d next
+to the comparisons, with decoder fixes `fx`.
+mirrors flare/quic/transport_params.mojo `check_server_transport_params` -/
+def clientCheckWith (fx : Fixes) (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
+  match decode fx b with
   | .error _ => false
   | .ok tp =>
     present 0x00 b && tp.odcid == dcid && present 0x0f b && tp.iscid == scid &&
       (present 0x10 b == retried) && (!retried || tp.rscid == rscid) &&
       (!present 0x0d b || !scid.isEmpty)
+
+/-- The shipped client check (decoder fixes `Fixes.shipped`). -/
+def clientCheck (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
+  clientCheckWith Fixes.shipped b dcid scid retried rscid
+
+/-- The client check with every decoder fix. -/
+def clientCheckFixed (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) : Bool :=
+  clientCheckWith Fixes.all b dcid scid retried rscid
 
 /-- server-only parameters (RFC 9000 §18.2) -/
 def serverOnly : List Nat := [0x00, 0x02, 0x0d, 0x10]
@@ -112,10 +122,20 @@ theorem decodeFixed_none {b : Bytes} {e : TPErr} (h : decode Fixes.all b = .erro
 /-- **The client fix is the spec**, on every input. -/
 theorem clientCheckFixed_spec (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes) :
     clientCheckFixed b dcid scid retried rscid = clientSpec b dcid scid retried rscid := by
-  unfold clientCheckFixed clientSpec
+  unfold clientCheckFixed clientCheckWith clientSpec
   cases h : decode Fixes.all b with
   | error e => rw [decodeFixed_none h]
   | ok tp => rw [decodeFixed_some h]
+
+/-- **The shipped client check is the spec wherever the decoder is**: for any decoder
+setting that agrees with the spec decoder on `b`, `clientCheckWith` equals `clientSpec`. -/
+theorem clientCheckWith_agree (fx : Fixes) (b dcid scid : Bytes) (retried : Bool) (rscid : Bytes)
+    (h : (decode fx b).toOption = specDecode b) :
+    clientCheckWith fx b dcid scid retried rscid = clientSpec b dcid scid retried rscid := by
+  unfold clientCheckWith clientSpec
+  cases hd : decode fx b with
+  | error e => rw [hd] at h; simp only [Except.toOption] at h; rw [← h]
+  | ok tp => rw [hd] at h; simp only [Except.toOption] at h; rw [← h]
 
 /-- **The server check is the spec wherever the decoder is**: for any decoder
 setting that agrees with the spec decoder on `b`, `serverCheckWith` equals

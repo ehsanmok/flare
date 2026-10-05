@@ -3,7 +3,12 @@ import Flare.L3_Protocol.Quic.PeerParams
 /-!
 # QUIC-12: the client's CID authentication confuses absent with empty
 
-flare/quic/client.mojo:641-669 @59bda50 (`_check_peer_cids`) compares the
+Status: resolved. `_check_peer_cids` now calls `check_server_transport_params`
+(flare/quic/transport_params.mojo), which reads the presence of ids 0x00, 0x0f,
+0x10 and 0x0d from the raw blob. The counterexamples below are about the check
+before the fix, `clientCheckOld`; `clientCheck` is the shipped one.
+
+Pre-fix behaviour: flare/quic/client.mojo:641-669 @59bda50 (`_check_peer_cids`) compares the
 CIDs of the decoded record, where an absent parameter and a zero-length one
 are both the empty list, and `decode_transport_parameters` skips 0x0d.
 
@@ -37,21 +42,29 @@ def blobC : Bytes :=
   odcidTlv ++ [0x0f, 0x00] ++ [0x0d, 42] ++ List.replicate 24 0 ++ [1, 7] ++ List.replicate 16 0
 
 theorem impl_accepts_absent_iscid :
-    clientCheck blobA dcid [] false [] = true ∧ clientSpec blobA dcid [] false [] = false := by
+    clientCheckOld blobA dcid [] false [] = true ∧ clientSpec blobA dcid [] false [] = false := by
   native_decide
 
 theorem impl_accepts_empty_rscid :
-    clientCheck blobB dcid scid false [] = true ∧ clientSpec blobB dcid scid false [] = false := by
+    clientCheckOld blobB dcid scid false [] = true ∧ clientSpec blobB dcid scid false [] = false := by
   native_decide
 
 theorem impl_accepts_pa_with_empty_cid :
-    clientCheck blobC dcid [] false [] = true ∧ clientSpec blobC dcid [] false [] = false := by
+    clientCheckOld blobC dcid [] false [] = true ∧ clientSpec blobC dcid [] false [] = false := by
   native_decide
 
-/-- control: a correct blob passes both -/
+/-- control: a correct blob passes both the pre-fix and the shipped check -/
 theorem control_ok :
-    clientCheck (odcidTlv ++ [0x0f, 0x04] ++ scid) dcid scid false [] = true ∧
+    clientCheckOld (odcidTlv ++ [0x0f, 0x04] ++ scid) dcid scid false [] = true ∧
+      clientCheck (odcidTlv ++ [0x0f, 0x04] ++ scid) dcid scid false [] = true ∧
       clientSpec (odcidTlv ++ [0x0f, 0x04] ++ scid) dcid scid false [] = true := by
+  native_decide
+
+/-- **The shipped check rejects all three counterexamples.** -/
+theorem shipped_rejects :
+    clientCheck blobA dcid [] false [] = false ∧
+    clientCheck blobB dcid scid false [] = false ∧
+    clientCheck blobC dcid [] false [] = false := by
   native_decide
 
 /-- **Fix meets spec**: presence scans next to the existing comparisons
