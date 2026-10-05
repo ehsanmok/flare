@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: CONC-06 fixed on fix/formal-findings
 """CONC-06: when pthread_create fails part-way through Scheduler.start,
 the rollback leaks every pre-bound per-worker SO_REUSEPORT listener.
 
@@ -16,7 +17,7 @@ frees them once the Error propagates).
 Expected (start's docstring, :337-343): on a pthread_create failure
 "partially-started workers are best-effort joined before re-raising";
 the failed call leaves nothing of the scheduler behind.
-Actual: the default listener mode pre-binds one SO_REUSEPORT listener per
+Before the fix: the default listener mode pre-binds one SO_REUSEPORT listener per
 worker before spawning. After the rollback those sockets stay open and
 bound, for the process lifetime: the port stays held, and the kernel
 keeps hashing new connections to listeners nobody accepts on.
@@ -97,7 +98,9 @@ def main() raises:
     var gate_one = gate_all + 8
     _st(gate_all, 0)
     _st(gate_one, 0)
-    var one = ThreadHandle.spawn_os[_blocker](_OpaquePtr(unsafe_from_address=gate_one))
+    var one = ThreadHandle.spawn_os[_blocker](
+        _OpaquePtr(unsafe_from_address=gate_one)
+    )
     var parked = 1
     while True:
         try:

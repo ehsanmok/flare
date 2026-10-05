@@ -81,9 +81,17 @@ def startAlloc (pre : Bool) (n L : Nat) : H :=
   let h := allocR .stats n h
   if pre then allocR .pwl L h else h
 
+/-- The rollback before the CONC-06 fix (`fix = false`). -/
+abbrev rollbackPreFix : Bool := false
+
+/-- The rollback flare ships (`fix = true`): it also frees
+`_per_worker_listener_addrs`. -/
+abbrev rollbackShipped : Bool := true
+
 /-- `start` with spawn `k` failing, then the rollback; `fix` adds the
-CONC-06 fix (free `_per_worker_listener_addrs`).
-mirrors flare/runtime/scheduler.mojo:572-633 @59bda50 -/
+CONC-06 fix (free `_per_worker_listener_addrs`: `rollbackShipped`).
+mirrors flare/runtime/scheduler.mojo:591-640 (fixed, CONC-06);
+pre-fix: flare/runtime/scheduler.mojo:572-633 @59bda50 -/
 def startFail (fix pre : Bool) (n L k : Nat) : H :=
   let h := spawnR k (startAlloc pre n L)
   let h := alloc (.ctx k) h

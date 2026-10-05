@@ -57,6 +57,8 @@ EXCLUDE = {
     "tests/runtime/test_block_in_pool.mojo",
     "tests/runtime/test_closure_send_contract.mojo",
     "tests/runtime/test_handoff.mojo",
+    # Fills the whole per-process thread table to make pthread_create fail.
+    "tests/runtime/test_scheduler_start_rollback.mojo",
     "tests/runtime/test_uring_bufring_dispatch.mojo",
     # `test_sqe_construction_zeros_buffer` asserts a freshly constructed
     # `IoUringSqe` presents 64 zero bytes. Standalone it passes; sharing a

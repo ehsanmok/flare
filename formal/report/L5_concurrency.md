@@ -412,6 +412,8 @@ Status: resolved. `_signal_and_close_listener` is now `_signal_stop` and only st
   `BUG REPRODUCED: the failed Scheduler.start left 2 listener fds open ( 10 open before, 12 after)`.
 - **Flip:** with the fix, `OK: the failed Scheduler.start released every fd ( 10 open)` and exit 0. Restored.
 
+Status: resolved. The `start` rollback now frees every pre-bound per-worker listener (primaries and extras) through `_free_per_worker_listeners`, the helper `_free_resources` also uses, after all started workers have joined. Test: `tests/runtime/test_scheduler_start_rollback.mojo::test_failed_start_releases_the_per_worker_listeners` (standalone: it fills the process thread table as the repro does, releases one slot, and compares the open-fd count; macOS only, since on Linux the fill would hit a system or cgroup limit shared with other processes, where the repro is the end-to-end check). The repro now prints `OK:` (3 of 3 runs). The shipped rollback is `Flare.L5.Lifecycle.rollbackShipped`; `Flare.Bugs.CONC_06.fixed_rollback_clean` is stated about it.
+
 ### CONC-07: an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it
 
 - **Severity:** Medium. The io_uring buffer-ring loop is the production handler path when io_uring is available and `config.use_bufring` is set; `HttpServer` sets it from `FLARE_BUFRING_HANDLER` (`http/server.mojo:1302-1303`).

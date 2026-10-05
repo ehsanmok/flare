@@ -617,6 +617,10 @@ struct Scheduler[F: Frontend](Movable):
                         _OpaquePtr(unsafe_from_address=s._stats_addrs[k])
                     )
                 s._stats_addrs.clear()
+                # The pre-bound per-worker listeners (default mode) were
+                # never freed here, so a failed start left every one of
+                # them open and bound (CONC-06). All workers joined.
+                s._free_per_worker_listeners()
                 # All workers joined, so no one is reading the
                 # shared listener anymore -- destroy + free it
                 # if we owned one (paths that prebind per-worker
@@ -703,6 +707,18 @@ struct Scheduler[F: Frontend](Movable):
                 crashed += 1
         self._last_crash_count = crashed
 
+    def _free_per_worker_listeners(mut self):
+        """Close and free every pre-bound per-worker listener (primaries
+        and extras). Only call once no worker can still use them."""
+        for i in range(len(self._per_worker_listener_addrs)):
+            var pwl_raw = _OpaquePtr(
+                unsafe_from_address=self._per_worker_listener_addrs[i]
+            )
+            var pwl_typed = pwl_raw.unsafe_bitcast[TcpListener]()
+            pwl_typed.unsafe_deinit_pointee()
+            _scheduler_free_raw(pwl_raw)
+        self._per_worker_listener_addrs.clear()
+
     def _free_resources(mut self):
         """Free ctxs, listeners, stats cells, and the stop flag.
 
@@ -721,14 +737,7 @@ struct Scheduler[F: Frontend](Movable):
             self._shared_listener_addr = 0
             self._shared_listener_fd = -1
 
-        for i in range(len(self._per_worker_listener_addrs)):
-            var pwl_raw = _OpaquePtr(
-                unsafe_from_address=self._per_worker_listener_addrs[i]
-            )
-            var pwl_typed = pwl_raw.unsafe_bitcast[TcpListener]()
-            pwl_typed.unsafe_deinit_pointee()
-            _scheduler_free_raw(pwl_raw)
-        self._per_worker_listener_addrs.clear()
+        self._free_per_worker_listeners()
 
         for i in range(len(self._stats_addrs)):
             _scheduler_free_raw(

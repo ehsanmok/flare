@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (61377 lines) |
+| Lean files | 298 (61394 lines) |
 | Theorems | 3230 |
 | Headline theorems in the axiom audit | 1031 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 33 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 34 of 138 |
 
 Six findings are rated high:
 
@@ -3111,7 +3111,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | CONC-03 | High | resolved | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
 | CONC-04 | Medium | resolved | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
 | CONC-05 | Medium | resolved | shared-listener teardown closes the listener's fd number while workers can still accept on it | `Flare/Bugs/CONC_05.lean` | `repro/CONC-05_shared_listener_closed_under_live_worker.mojo` (any) |
-| CONC-06 | Medium | open | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
+| CONC-06 | Medium | resolved | `Scheduler.start`'s rollback leaks every per-worker listener | `Flare/Bugs/CONC_06.lean` | `repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo` (any) |
 | CONC-07 | Medium | open | an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it | `Flare/Bugs/CONC_07.lean` | `repro/CONC-07_uring_worker_ignores_stop_while_idle.mojo` (linux) |
 | MACH-01 | Low | open | a client accepted on fd 0 is never served | `Flare/Bugs/MACH_01.lean` | `repro/MACH-01_client_on_fd0_never_served.mojo` (any) |
 | DOC-01 | Medium | open | `WsConnection.recv` delivers TEXT frames that are not valid UTF-8 | `Flare/Bugs/DOC_01.lean` | `repro/DOC-01_ws_text_invalid_utf8_delivered.mojo` (any (loopback TCP in-process; no external network)) |
@@ -5388,6 +5388,8 @@ Status: resolved. `_signal_and_close_listener` is now `_signal_stop` and only st
 - **Repro:** `formal/repro/CONC-06_start_rollback_leaks_per_worker_listeners.mojo`. Deterministic: it fills the process thread table with parked threads until `spawn_os` raises, frees exactly one slot by joining one of them, and runs `start(num_workers=2)`. Worker 0 takes the slot and worker 1 fails; if anything else took the slot, worker 0 fails instead, with the same leak. The leak is the change in the number of open descriptors. Observed:
   `BUG REPRODUCED: the failed Scheduler.start left 2 listener fds open ( 10 open before, 12 after)`.
 - **Flip:** with the fix, `OK: the failed Scheduler.start released every fd ( 10 open)` and exit 0. Restored.
+
+Status: resolved. The `start` rollback now frees every pre-bound per-worker listener (primaries and extras) through `_free_per_worker_listeners`, the helper `_free_resources` also uses, after all started workers have joined. Test: `tests/runtime/test_scheduler_start_rollback.mojo::test_failed_start_releases_the_per_worker_listeners` (standalone: it fills the process thread table as the repro does, releases one slot, and compares the open-fd count; macOS only, since on Linux the fill would hit a system or cgroup limit shared with other processes, where the repro is the end-to-end check). The repro now prints `OK:` (3 of 3 runs). The shipped rollback is `Flare.L5.Lifecycle.rollbackShipped`; `Flare.Bugs.CONC_06.fixed_rollback_clean` is stated about it.
 
 #### CONC-07: an idle io_uring worker never sees the stop flag, so `shutdown()` hangs and `drain` detaches it
 
