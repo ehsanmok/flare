@@ -178,32 +178,33 @@ practice exactly, for every byte string.
 
 Model: `Reader` holds `buf` plus an Int64 `pos`.
 
-- `guard` is `_need`, with wrapping `pos + n`.
+- `Reader.need` is the shipped `_need` (`guardFixed`: `n > len - pos`, fixed,
+  ENC-04). `guard`, `needOld` and `skipOld` are the pre-fix `_need` with
+  wrapping `pos + n`.
 - The model covers the readers and writers for u8/u16/u32/u64 in both
   endiannesses, plus `read_bytes`, `read_utf8` and `skip`.
 - `PReader` is the gRPC `ProtoReader`: `_raw_varint`, `read_tag`, and the
   length-delimited `read_bytes`/`skip`.
-- `guardFixed` and `skipFixed` are the fixed `ByteReader` checks (ENC-04
-  pending). `PReader.skipLen` and `PReader.readBytes` already use
-  `guardFixed` (fixed, ENC-03); `skipLenOld` and `readBytesOld` keep the
-  pre-fix wrapping check for the counterexample.
+- `guardFixed` is the shipped check in both readers. `PReader.skipLen` and
+  `PReader.readBytes` use it (fixed, ENC-03); `skipLenOld` and
+  `readBytesOld` keep the pre-fix wrapping check for the counterexample.
 
 Mojo:
 
-- flare/io/byte_cursor.mojo:144-340
+- flare/io/byte_cursor.mojo:143-346
 - flare/grpc/proto.mojo:212-303
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `guard_iff` | `_need` accepts in-bounds requests and every request whose `pos + n` overflows | proved (characterises ENC-04) |
-| `guard_iff_of_small` | for `n < 2^63 - len` (all in-tree callers) `_need` is exact | proved |
-| `guardFixed_iff` | the fixed check is exact for every `n` | proved |
+| `guard_iff` | the pre-fix `_need` accepts in-bounds requests and every request whose `pos + n` overflows | proved (characterises ENC-04) |
+| `guard_iff_of_small` | for `n < 2^63 - len` (all in-tree callers) the pre-fix `_need` was exact | proved |
+| `guardFixed_iff` | the shipped check is exact for every `n` | proved |
 | `readU16be_write` … `readU64le_write` | every `read_uN` returns the value `write_uN` wrote, advancing by N/8 | proved |
-| `skip_inv_of_small`, `skipFixed_inv` | `0 ≤ pos ≤ len` is preserved (small `n`; any `n` once fixed) | proved |
-| `readBytesFixed_spec` | fixed `read_bytes(n)` returns exactly `buf[pos:pos+n]` | proved |
+| `skipOld_inv_of_small`, `skip_inv` | `0 ≤ pos ≤ len` is preserved (pre-fix, small `n`; shipped, any `n`) | proved |
+| `readBytes_spec` | shipped `read_bytes(n)` returns exactly `buf[pos:pos+n]` | proved |
 | `readUtf8_wf` | `read_utf8` only returns well-formed UTF-8 | proved |
 | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv` | the varint reader and the shipped (fixed) length skip and `read_bytes` preserve the invariant | proved |
-| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the pre-fix checks (`skipLenOld`; `guard`) accept a length that moves `pos` negative | counterexample |
+| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the pre-fix checks (`skipLenOld`; `skipOld`) accept a length that moves `pos` negative | counterexample |
 
 The varint round trip is in `ProtoVarint.lean`, below.
 
@@ -491,6 +492,7 @@ for every `n`.
 Repro: `formal/repro/ENC-04_byte_reader_need_overflow.mojo`, observed
 `BUG REPRODUCED: skip(Int.MAX) on a 4-byte buffer succeeded; pos = -9223372036854775808 remaining() = -9223372036854775804`.
 Flip: `OK: skip(Int.MAX) raises; pos stays 1`, exit 0.
+Status: resolved. `ByteReader._need` now tests `n > len(self.buf) - self.pos`; the model's `Reader.need`/`skip`/`readBytes` mirror it (old: `needOld`, `skipOld`; shipped: `skip_inv`, `readBytes_spec`). Tests: `tests/io/test_byte_cursor.mojo::test_huge_length_rejected_without_moving_cursor`, `::test_exact_remaining_length_accepted`.
 
 ## Checked, not a bug
 
@@ -563,7 +565,7 @@ Flip: `OK: skip(Int.MAX) raises; pos stays 1`, exit 0.
 | `Flare.L1.Sockaddr.fillIn`, `fillIn6`, `readPort`, `getFamily` | flare/net/_libc.mojo:209-321, 395-411 | `readPort_fillIn`, `addr_fillIn6`, `getFamily_eq_kFamily` | proved |
 | `Flare.L1.Utf8.validFrom`, `isValidUtf8` | flare/io/byte_cursor.mojo:52-107; flare/ws/frame.mojo:553-606 | `isValidUtf8_iff` | proved |
 | `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo:24-139 | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff` | proved |
-| `Flare.L1.ByteCursor.guard`, `Reader.*` | flare/io/byte_cursor.mojo:144-304 | `guard_iff`, `guard_iff_of_small`, `readU64le_write`, `readUtf8_wf`, `Bugs.ENC_04.counterexample` | proved; counterexample (ENC-04) |
+| `Flare.L1.ByteCursor.guard`, `Reader.*` | flare/io/byte_cursor.mojo:143-268 | `guard_iff`, `guard_iff_of_small`, `guardFixed_iff`, `readU64le_write`, `readUtf8_wf`, `skip_inv`, `Bugs.ENC_04.counterexample` | proved; counterexample (ENC-04) |
 | `Flare.L1.ByteCursor.writeU16be` … `writeU64le` | flare/io/byte_cursor.mojo:307-340 | `readU16be_write` … `readU64le_write` | proved |
 | `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:212-303 | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
 | `Flare.L1.ProtoVarint.writeVarint` | flare/grpc/proto.mojo:108-117 | `writeVarint_length`, `writeVarint_canonical`, `rawVarint_writeVarint` | proved |

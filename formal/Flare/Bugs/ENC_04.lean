@@ -3,7 +3,11 @@ import Flare.L1_Encoding.ByteCursor
 # ENC-04: `ByteReader._need` overflows; `skip`/`read_bytes`/`read_utf8`
 accept a huge `n` and move the cursor negative
 
-flare/io/byte_cursor.mojo:144-155 @59bda50:
+Status: resolved. `ByteReader._need` now tests `n > len(buf) - pos`; the
+model's `Reader.need` / `skip` / `readBytes` mirror the fixed code and the
+counterexample below is about the pre-fix `Reader.skipOld` / `needOld`.
+
+Pre-fix code, flare/io/byte_cursor.mojo:144-155 @59bda50:
 
     if n < 0 or self.pos + n > len(self.buf):
         raise Error(...)
@@ -22,9 +26,10 @@ later read indexes the span at a negative offset. In-tree callers
 (`guard_iff_of_small`), so the exposure is through the public `flare.io`
 API when a caller forwards a 64-bit length.
 
-* `counterexample`: that trace in the model.
-* Fix: `if n < 0 or n > len(self.buf) - self.pos` (`needFixed`);
-  `fixed_preserves_inv` (every accepted `skip` keeps `0 ≤ pos ≤ len`).
+* `counterexample`: that trace in the pre-fix model (`skipOld`).
+* Fix: `if n < 0 or n > len(self.buf) - self.pos` (`guardFixed`, now the
+  shipped `Reader.need`); `fixed_preserves_inv` (every accepted `skip` keeps
+  `0 ≤ pos ≤ len`) and `fixed_rejects` (the trace is rejected).
 -/
 namespace Flare.Bugs.ENC_04
 open Flare.L1.ByteCursor
@@ -39,12 +44,13 @@ theorem r1_inv : r1.Inv := by
 
 def INT_MAX : Int64 := 9223372036854775807
 
-theorem skip_result : (r1.skip INT_MAX).map (·.pos) = some (-9223372036854775808) := by
+/-- Pre-fix `skip` succeeds and wraps the cursor to `-2^63`. -/
+theorem skip_result : (r1.skipOld INT_MAX).map (·.pos) = some (-9223372036854775808) := by
   native_decide
 
-theorem counterexample : ∃ r', r1.Inv ∧ r1.skip INT_MAX = some r' ∧ ¬ r'.Inv := by
+theorem counterexample : ∃ r', r1.Inv ∧ r1.skipOld INT_MAX = some r' ∧ ¬ r'.Inv := by
   have h := skip_result
-  cases e : r1.skip INT_MAX with
+  cases e : r1.skipOld INT_MAX with
   | none => rw [e] at h; cases h
   | some r' =>
     rw [e] at h
@@ -55,10 +61,10 @@ theorem counterexample : ∃ r', r1.Inv ∧ r1.skip INT_MAX = some r' ∧ ¬ r'.
     rw [h] at this
     exact absurd this (by decide)
 
-theorem fixed_preserves_inv (r r' : Reader) (n : Int64) (hI : r.Inv) (h : r.skipFixed n = some r') :
+theorem fixed_preserves_inv (r r' : Reader) (n : Int64) (hI : r.Inv) (h : r.skip n = some r') :
     r'.Inv :=
-  skipFixed_inv r r' n hI h
+  skip_inv r r' n hI h
 
-theorem fixed_rejects : r1.skipFixed INT_MAX = none := by native_decide
+theorem fixed_rejects : r1.skip INT_MAX = none := by native_decide
 
 end Flare.Bugs.ENC_04

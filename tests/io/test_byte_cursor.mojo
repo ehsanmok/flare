@@ -135,6 +135,58 @@ def test_skip() raises:
     assert_true(raised)
 
 
+def test_huge_length_rejected_without_moving_cursor() raises:
+    """ENC-04: ``pos + n`` wrapped for ``n > Int.MAX - pos``, so ``skip`` /
+    ``read_bytes`` / ``read_utf8`` accepted it and moved ``pos`` negative."""
+    var raw = _bytes(0x01, 0x02, 0x03, 0x04)
+    var r = ByteReader(Span[UInt8, _](raw))
+    _ = r.read_u8()
+    var huge = List[Int]()
+    huge.append(Int.MAX)
+    huge.append(Int.MAX - 1)
+    huge.append(Int.MAX - 2)  # == Int.MAX - pos - 1 for pos == 1: wraps
+    huge.append(Int.MAX - 3)
+    for k in range(len(huge)):
+        var n = huge[k]
+        var raised = False
+        try:
+            r.skip(n)
+        except:
+            raised = True
+        assert_true(raised, "skip(huge) must raise")
+        raised = False
+        try:
+            _ = r.read_bytes(n)
+        except:
+            raised = True
+        assert_true(raised, "read_bytes(huge) must raise")
+        raised = False
+        try:
+            _ = r.read_utf8(n)
+        except:
+            raised = True
+        assert_true(raised, "read_utf8(huge) must raise")
+        assert_equal(r.position(), 1)
+        assert_equal(r.remaining(), 3)
+
+
+def test_exact_remaining_length_accepted() raises:
+    """Boundary: ``n == remaining()`` is accepted, ``remaining() + 1`` is not.
+    """
+    var raw = _bytes(0x01, 0x02, 0x03, 0x04)
+    var r = ByteReader(Span[UInt8, _](raw))
+    _ = r.read_u8()
+    var raised = False
+    try:
+        r.skip(4)
+    except:
+        raised = True
+    assert_true(raised)
+    r.skip(3)
+    assert_equal(r.remaining(), 0)
+    r.skip(0)  # zero-length at the end is fine
+
+
 def test_writer_round_trip_all_widths() raises:
     var w = ByteWriter()
     w.write_u8(0xAB)
@@ -178,6 +230,8 @@ def main() raises:
     test_read_past_end_raises()
     test_read_bytes_past_end_raises()
     test_skip()
+    test_huge_length_rejected_without_moving_cursor()
+    test_exact_remaining_length_accepted()
     test_writer_round_trip_all_widths()
     test_writer_bytes_copies()
-    print("test_byte_cursor: 12 passed")
+    print("test_byte_cursor: 14 passed")

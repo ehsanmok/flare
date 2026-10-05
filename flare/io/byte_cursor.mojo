@@ -142,8 +142,13 @@ struct ByteReader[origin: Origin](Movable):
 
     @always_inline
     def _need(self, n: Int) raises:
-        """Raise unless ``n`` more bytes are available."""
-        if n < 0 or self.pos + n > len(self.buf):
+        """Raise unless ``n`` more bytes are available.
+
+        Compares ``n`` with the remaining length instead of forming
+        ``pos + n``, which wraps for ``n`` near ``Int.MAX`` and would let
+        a huge length through (and move ``pos`` negative).
+        """
+        if n < 0 or n > len(self.buf) - self.pos:
             raise Error(
                 "ByteReader: read of "
                 + String(n)

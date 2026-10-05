@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: ENC-04 fixed on fix/formal-findings
 """ENC-04: ByteReader._need overflows; skip(n) with a huge n succeeds and
 moves the cursor negative.
 
@@ -9,7 +10,7 @@ flare/io/byte_cursor.mojo:144-155 @59bda50.
 
 Expected: "Every read is bounds-checked (a short buffer raises rather than
 reading out of bounds)" (module docstring); skip(n) past the end raises.
-Actual: `self.pos + n > len(self.buf)` wraps for n > 2^63 - 1 - pos, so the
+Before the fix: `self.pos + n > len(self.buf)` wraps for n > 2^63 - 1 - pos, so the
 check passes, pos becomes -2^63, remaining() is negative and the next read
 indexes the span at a negative offset. In-tree callers pass n < 2^32 and are
 not affected; any caller that forwards a 64-bit length is.

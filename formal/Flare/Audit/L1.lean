@@ -35,9 +35,9 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.ByteCursor.readU32le_write
 #print axioms Flare.L1.ByteCursor.readU64be_write
 #print axioms Flare.L1.ByteCursor.readU64le_write
-#print axioms Flare.L1.ByteCursor.skip_inv_of_small
-#print axioms Flare.L1.ByteCursor.skipFixed_inv
-#print axioms Flare.L1.ByteCursor.readBytesFixed_spec
+#print axioms Flare.L1.ByteCursor.skipOld_inv_of_small
+#print axioms Flare.L1.ByteCursor.skip_inv
+#print axioms Flare.L1.ByteCursor.readBytes_spec
 #print axioms Flare.L1.ByteCursor.readUtf8_wf
 #print axioms Flare.L1.ByteCursor.skipLen_inv
 #print axioms Flare.L1.ByteCursor.readBytes_inv

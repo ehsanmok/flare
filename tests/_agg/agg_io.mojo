@@ -38,6 +38,12 @@ from test_byte_cursor import (
 )
 from test_byte_cursor import test_skip as test_byte_cursor__test_skip
 from test_byte_cursor import (
+    test_huge_length_rejected_without_moving_cursor as test_byte_cursor__test_huge_length_rejected_without_moving_cursor,
+)
+from test_byte_cursor import (
+    test_exact_remaining_length_accepted as test_byte_cursor__test_exact_remaining_length_accepted,
+)
+from test_byte_cursor import (
     test_writer_round_trip_all_widths as test_byte_cursor__test_writer_round_trip_all_widths,
 )
 from test_byte_cursor import (
@@ -58,6 +64,10 @@ def main() raises:
     suite.test[test_byte_cursor__test_read_past_end_raises]()
     suite.test[test_byte_cursor__test_read_bytes_past_end_raises]()
     suite.test[test_byte_cursor__test_skip]()
+    suite.test[
+        test_byte_cursor__test_huge_length_rejected_without_moving_cursor
+    ]()
+    suite.test[test_byte_cursor__test_exact_remaining_length_accepted]()
     suite.test[test_byte_cursor__test_writer_round_trip_all_widths]()
     suite.test[test_byte_cursor__test_writer_bytes_copies]()
     suite^.run()
