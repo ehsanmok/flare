@@ -7,7 +7,7 @@ These are Lean 4 models of flare, with proofs about them and Mojo repros for eve
 ```bash
 pixi run -e formal formal-build    # lake build (core Lean 4.33, no Mathlib)
 pixi run -e formal formal-check    # no sorry/axiom, native_decide only in Bugs/, #print axioms audit
-pixi run formal-repros             # run every Mojo repro, print OPEN/FIXED/ERROR/SKIP
+pixi run formal-repros             # run every Mojo repro, print OPEN/RESOLVED/FIXED/ERROR/SKIP
 python3 formal/scripts/stitch_report.py   # rebuild REPORT.md from report/ (formal-check fails if stale)
 ```
 
@@ -71,6 +71,7 @@ Suspected issues that Lean refutes are recorded in the report under "checked, no
 - A docstring gives the issue ID, the Lean theorem, the flare `file:line @59bda50`, expected vs actual behaviour, and the minimal fix.
 - While the bug is present it prints a line starting with `BUG REPRODUCED:` and raises, so the exit code is non-zero.
 - Once the bug is fixed it prints `OK:` and exits 0.
+- A fixed finding's repro keeps running as a regression check and carries a `# RESOLVED: <ID> fixed on fix/formal-findings` header line within its first 8 lines. `run_all.sh` reports it as RESOLVED, and as ERROR if it fails again. The same resolution is recorded in the finding's `Flare/Bugs/<ID>.lean` and in its section of `report/*.md` as a line starting `Status: resolved`; `stitch_report.py` fails if the three disagree.
 - Run it from the repo root: `pixi run mojo -I . formal/repro/<file>.mojo`.
 
 **Trust base.**

@@ -26,12 +26,12 @@
   Apple Silicon Mac, and one pass over all repros about six and a half;
   the io_uring repros need a Linux runner.
 - Keep the models in sync with the code. Each implementation model names the
-  Mojo lines it mirrors at 59bda50, so a CI step could fail when one of
+  Mojo lines it mirrors, so a CI step could fail when one of
   those line ranges changes and the matching Lean file does not.
 - Test the models against the code. Running the Lean implementation models
   with `#eval` on the inputs in the existing fuzz corpora and comparing their
   output with flare's would catch drift between the transliteration and the
   source that the fidelity comments cannot.
-- Fix the open findings. Each one already has a minimal fix proved to meet the
-  specification and a repro that will report `OK:` once it lands; after a fix,
-  the repro becomes a regression test.
+- Keep the repros as regression checks. All 138 findings are fixed and every
+  repro carries a `# RESOLVED:` header; `formal-repros` reports a resolved
+  repro that starts failing again as an error.

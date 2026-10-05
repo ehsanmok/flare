@@ -225,8 +225,9 @@ def main():
     out.append(
         "Every finding below has a Lean counterexample and a proof that the "
         "minimal fix meets the specification, in `formal/Flare/Bugs/`, and a "
-        "Mojo repro in `formal/repro/` that fails while the bug is present "
-        "and passes once the fix is applied."
+        "Mojo repro in `formal/repro/` that failed while the bug was present "
+        "and passes now that the fix has landed. Each finding's `Status: "
+        "resolved` note says what changed."
     )
     rows = [
         "| ID | Severity | Status | Finding | Lean | Repro (platform) |",
