@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: APP-40 fixed on fix/formal-findings
 """APP-40: RateLimit refill product elapsed_ns * rate_per_sec wraps Int64
 after a long idle period, so a full bucket rejects requests with 429.
 
@@ -22,7 +23,7 @@ state the middleware is in after its last request 9_300 s earlier;
 everything else is the unmodified RateLimit.serve.
 
 Expected: the bucket is full, so the request is admitted (200).
-Actual: elapsed * rate = 9.3e18 > 2^63 - 1 wraps to about -9.15e18,
+Before the fix: elapsed * rate = 9.3e18 > 2^63 - 1 wraps to about -9.15e18,
 refill is about -9.15e12 milli-tokens, new_tokens goes negative and the
 request is rejected with 429. The negative token count is stored, and
 `last` is not advanced, so every later request in the next ~2.5 h makes
@@ -63,8 +64,10 @@ def main() raises:
     var tokens = _cell_get(rl._cell, 0)
     if status != 200:
         print(
-            "BUG REPRODUCED: full bucket after 9300 s idle at rate 1e6/s"
-            " returned",
+            (
+                "BUG REPRODUCED: full bucket after 9300 s idle at rate 1e6/s"
+                " returned"
+            ),
             status,
             "; stored milli-tokens now",
             tokens,

@@ -332,6 +332,9 @@ struct RateLimit[Inner: Handler & Copyable](Copyable, Handler):
     Many Requests`` without invoking the inner handler.
 
     ``rate_per_sec <= 0`` disables the limiter (pass-through). The
+    refill is exact for any idle time as long as ``burst * 1e9`` and
+    ``rate_per_sec`` stay below 2^62 (``burst`` under about 4.6e9
+    tokens). The
     bucket lives in a leaked atomic cell (see module docstring):
     worker copies share it, so the enforced rate is approximately
     global rather than strictly per-worker.
@@ -371,6 +374,13 @@ struct RateLimit[Inner: Handler & Copyable](Copyable, Handler):
             elapsed = 0
         # milli-tokens accrued: elapsed_ns * rate / 1e6 (1 token = 1000 milli).
         var rate = Int64(self.rate_per_sec)
+        # An empty bucket is full after ``burst * 1e9 / rate`` ns, so any
+        # longer idle time credits the same. Clamp before multiplying:
+        # ``elapsed * rate`` wrapped Int64 after 9223 s idle at 1e6/s and
+        # stored a negative token count that never recovered.
+        var max_elapsed = (Int64(self.burst) * 1000 * 1_000_000) // rate + 1
+        if elapsed > max_elapsed:
+            elapsed = max_elapsed
         var refill = (elapsed * rate) // 1_000_000
         # Advance the clock only by the time those whole milli-tokens
         # took. Setting it to ``now`` threw away the remainder, so with

@@ -2394,6 +2394,9 @@ from test_reliability import (
     test_ratelimit_refills_under_a_steady_stream_of_requests as test_reliability__test_ratelimit_refills_under_a_steady_stream_of_requests,
 )
 from test_reliability import (
+    test_ratelimit_full_bucket_admits_after_a_long_idle_period as test_reliability__test_ratelimit_full_bucket_admits_after_a_long_idle_period,
+)
+from test_reliability import (
     test_ratelimit_disabled_passthrough as test_reliability__test_ratelimit_disabled_passthrough,
 )
 from test_reliability import (
@@ -5397,6 +5400,9 @@ def main() raises:
     suite.test[test_reliability__test_ratelimit_allows_burst_then_429]()
     suite.test[
         test_reliability__test_ratelimit_refills_under_a_steady_stream_of_requests
+    ]()
+    suite.test[
+        test_reliability__test_ratelimit_full_bucket_admits_after_a_long_idle_period
     ]()
     suite.test[test_reliability__test_ratelimit_disabled_passthrough]()
     suite.test[test_reliability__test_circuitbreaker_opens_after_threshold]()

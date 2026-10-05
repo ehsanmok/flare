@@ -8,6 +8,8 @@ from std.time import perf_counter_ns
 from flare.http.handler import Handler
 from flare.http.reliability import (
     CircuitBreaker,
+    _cell_get,
+    _cell_set,
     RateLimit,
     Retry,
     RetryPolicy,
@@ -332,6 +334,23 @@ def test_ratelimit_refills_under_a_steady_stream_of_requests() raises:
     assert_true(admitted <= 6, "over-admitted: " + String(admitted))
 
 
+def test_ratelimit_full_bucket_admits_after_a_long_idle_period() raises:
+    """``elapsed * rate`` wrapped Int64 after 9223 s idle at 1e6/s, so a
+    full bucket stored a negative token count and answered 429. The idle
+    gap is staged by rewinding the middleware's own last-refill slot."""
+    var rl = RateLimit(AlwaysOkHandler(), rate_per_sec=1_000_000)
+    var idle_ns = Int64(9_300) * 1_000_000_000
+    _cell_set(rl._cell, 1, Int64(perf_counter_ns()) - idle_ns)
+    var req = Request(method=String("GET"), url=String("/"))
+    assert_equal(rl.serve(req).status, 200)
+    # Full bucket (burst * 1000 milli-tokens) minus the one admitted.
+    assert_equal(Int(_cell_get(rl._cell, 0)), 1_000_000 * 1000 - 1000)
+    # Far beyond any idle time: still just a full bucket, never negative.
+    _cell_set(rl._cell, 1, Int64(perf_counter_ns()) - (Int64(1) << 62))
+    assert_equal(rl.serve(req).status, 200)
+    assert_true(_cell_get(rl._cell, 0) >= 0, "negative token count stored")
+
+
 def test_ratelimit_disabled_passthrough() raises:
     """Disabled when rate_per_sec <= 0 (pass-through)."""
     var rl = RateLimit(AlwaysOkHandler(), rate_per_sec=0)
@@ -373,6 +392,7 @@ def main() raises:
     test_timeout_returns_504_on_zero_budget()
     test_ratelimit_allows_burst_then_429()
     test_ratelimit_refills_under_a_steady_stream_of_requests()
+    test_ratelimit_full_bucket_admits_after_a_long_idle_period()
     test_ratelimit_disabled_passthrough()
     test_circuitbreaker_opens_after_threshold()
     test_circuitbreaker_disabled_passthrough()

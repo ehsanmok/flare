@@ -75,6 +75,9 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 -- Reliability: RateLimit / CircuitBreaker / Retry
 #print axioms Flare.L4.RateLimit.step_eq_spec
 #print axioms Flare.L4.RateLimit.step_inv
+#print axioms Flare.L4.RateLimit.step_last_ok
+#print axioms Flare.L4.RateLimit.stepOld_eq_spec
+#print axioms Flare.L4.RateLimit.stepOld_inv
 #print axioms Flare.L4.RateLimit.overflow_iff
 #print axioms Flare.L4.CircuitBreaker.counts_inductive
 #print axioms Flare.L4.CircuitBreaker.step_open_rejects
