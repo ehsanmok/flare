@@ -823,6 +823,41 @@ def test_first_stream_id_is_still_accepted() raises:
     assert_true(1 in c.streams)
 
 
+def _goaway_frame(n: Int) -> Frame:
+    var f = Frame()
+    f.header.type = FrameType.GOAWAY()
+    f.header.stream_id = 0
+    f.payload = List[UInt8](length=n, fill=UInt8(0))
+    f.header.length = n
+    return f^
+
+
+def test_goaway_shorter_than_eight_octets_is_a_frame_size_error() raises:
+    """H2-07: GOAWAY carries last-stream-id and an error code, 8 octets at
+    least (RFC 9113 sec 6.8); a shorter one is FRAME_SIZE_ERROR (sec 4.2)
+    and is not acted on."""
+    var sizes = List[Int]()
+    sizes.append(0)
+    sizes.append(4)
+    sizes.append(7)
+    for k in range(len(sizes)):
+        var c = Connection()
+        var out = c.handle_frame(_goaway_frame(sizes[k]))
+        assert_equal(_goaway_code(out), 6, "short GOAWAY accepted")
+        assert_false(c.goaway_received)
+
+
+def test_well_formed_goaway_is_still_accepted() raises:
+    var c = Connection()
+    var out = c.handle_frame(_goaway_frame(8))
+    assert_equal(len(out), 0)
+    assert_true(c.goaway_received)
+    var c2 = Connection()
+    var out2 = c2.handle_frame(_goaway_frame(20))  # with debug data
+    assert_equal(len(out2), 0)
+    assert_true(c2.goaway_received)
+
+
 def main() raises:
     test_initial_settings_is_one_setting()
     test_inbound_settings_acks()
@@ -858,4 +893,6 @@ def main() raises:
     test_validate_request_fields_rejects_bad_name_octets()
     test_a_refused_stream_id_cannot_be_opened_again()
     test_first_stream_id_is_still_accepted()
-    print("test_h2_state: 34 passed")
+    test_goaway_shorter_than_eight_octets_is_a_frame_size_error()
+    test_well_formed_goaway_is_still_accepted()
+    print("test_h2_state: 36 passed")

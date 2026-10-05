@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63398 lines) |
-| Theorems | 3331 |
-| Headline theorems in the axiom audit | 1121 |
+| Lean files | 298 (63406 lines) |
+| Theorems | 3332 |
+| Headline theorems in the axiom audit | 1122 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 118 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 119 of 138 |
 
 Six findings are rated high:
 
@@ -3059,7 +3059,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-04 | Low | resolved | the client accepts HEADERS on streams it never opened | `Flare/Bugs/H2_04.lean` | `repro/H2-04_client_headers_on_unopened_stream.mojo` (any) |
 | H2-05 | Medium | resolved | content-length wraps in Int64, and only the first field counts | `Flare/Bugs/H2_05.lean` | `repro/H2-05_content_length_wrap.mojo` (any) |
 | H2-06 | Low | resolved | HEADERS on stream 0 raises instead of being a connection error | `Flare/Bugs/H2_06.lean` | `repro/H2-06_headers_stream0_raises.mojo` (any) |
-| H2-07 | Low | open | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
+| H2-07 | Low | resolved | a GOAWAY shorter than 8 octets is accepted | `Flare/Bugs/H2_07.lean` | `repro/H2-07_short_goaway_accepted.mojo` (any) |
 | H2-08 | Low | open | the first frame after the preface need not be SETTINGS | `Flare/Bugs/H2_08.lean` | `repro/H2-08_first_frame_not_settings.mojo` (any) |
 | H2-09 | Medium | resolved | credit for discarded DATA is never returned to the connection window | `Flare/Bugs/H2_09.lean` | `repro/H2-09_conn_credit_leak.mojo` (any) |
 | H2-10 | Medium | resolved | field names with non-ASCII bytes or an inner colon are accepted | `Flare/Bugs/H2_10.lean` | `repro/H2-10_field_name_chars.mojo` (any) |
@@ -4086,6 +4086,8 @@ Status: resolved. Fixed: the raise in the HEADERS branch is replaced by `_conn_e
 - **Flip:** OK, exit 0.
 
 #### H2-07: a GOAWAY shorter than 8 octets is accepted
+
+Status: resolved. Fixed: the frame-shape checks reject a GOAWAY with `plen < 8` as FRAME_SIZE_ERROR (`state.mojo`, next to the PING/SETTINGS checks). Tests: `test_h2_state.mojo::test_goaway_shorter_than_eight_octets_is_a_frame_size_error`, `test_well_formed_goaway_is_still_accepted`. Model: `Fix.shipped` carries `h2_07`; `Bugs.H2_07.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. A malformed GOAWAY is acted on (`goaway_received` is set) instead of being rejected. The peer could equally send a well-formed GOAWAY, so it gains nothing.
 - **RFC:** RFC 9113 §6.8 defines the GOAWAY payload as last-stream-id plus error code, 8 octets at least. §4.2 requires FRAME_SIZE_ERROR for a frame "too small to contain mandatory frame data".

@@ -423,6 +423,12 @@ from test_h2_state import (
 from test_h2_state import (
     test_first_stream_id_is_still_accepted as test_h2_state__test_first_stream_id_is_still_accepted,
 )
+from test_h2_state import (
+    test_goaway_shorter_than_eight_octets_is_a_frame_size_error as test_h2_state__test_goaway_shorter_than_eight_octets_is_a_frame_size_error,
+)
+from test_h2_state import (
+    test_well_formed_goaway_is_still_accepted as test_h2_state__test_well_formed_goaway_is_still_accepted,
+)
 from test_h2_streaming_state import (
     test_h2_informationals_and_length_survives_body_drains as test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains,
 )
@@ -750,6 +756,10 @@ def main() raises:
     ]()
     suite.test[test_h2_state__test_a_refused_stream_id_cannot_be_opened_again]()
     suite.test[test_h2_state__test_first_stream_id_is_still_accepted]()
+    suite.test[
+        test_h2_state__test_goaway_shorter_than_eight_octets_is_a_frame_size_error
+    ]()
+    suite.test[test_h2_state__test_well_formed_goaway_is_still_accepted]()
     # tests/http2/test_h2_streaming_state.mojo
     suite.test[
         test_h2_streaming_state__test_h2_informationals_and_length_survives_body_drains

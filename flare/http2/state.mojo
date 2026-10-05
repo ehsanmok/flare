@@ -1133,6 +1133,11 @@ struct Connection(Copyable, Defaultable):
         elif ft == FrameType.GOAWAY().value:
             if sid != 0:
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
+            # sec 6.8: last-stream-id (4) + error code (4), then optional
+            # debug data; anything shorter is too small for its mandatory
+            # fields (sec 4.2).
+            if plen < 8:
+                return self._conn_error(Http2ErrorCode.FRAME_SIZE_ERROR().value)
         elif ft == FrameType.SETTINGS().value:
             if sid != 0:
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)

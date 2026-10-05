@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-07 fixed on fix/formal-findings
 """H2-07: a GOAWAY frame shorter than its 8 mandatory octets is accepted.
 
 Lean: Flare.Bugs.H2_07.bug (counterexample) and Flare.Bugs.H2_07.fixed.
@@ -14,7 +15,7 @@ Trace: Connection.handle_frame(GOAWAY on stream 0 with an empty payload),
 then the same with a 4-byte payload.
 
 Expected: connection error FRAME_SIZE_ERROR (GOAWAY code 6) for both.
-Actual: no reply at all, and goaway_received is set as if a well-formed
+Before the fix: no reply at all, and goaway_received is set as if a well-formed
 GOAWAY had arrived.
 
 Minimal fix: `if plen < 8: return self._conn_error(FRAME_SIZE_ERROR)` in
