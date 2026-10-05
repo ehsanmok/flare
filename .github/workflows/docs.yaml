@@ -10,10 +10,12 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      - 'formal/**'
       - 'LICENSE'
   pull_request:
     branches: [main]
     paths-ignore:
+      - 'formal/**'
       - 'LICENSE'
   workflow_dispatch:
 

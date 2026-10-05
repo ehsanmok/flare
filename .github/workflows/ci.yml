@@ -6,12 +6,14 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+      - 'formal/**'
       - 'LICENSE'
   pull_request:
     branches: [main]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+      - 'formal/**'
       - 'LICENSE'
   workflow_dispatch:
 
