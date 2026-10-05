@@ -210,10 +210,11 @@ structure Fix where
 def Fix.none : Fix := {}
 
 /-- The fixes that have landed in `flare/http2` (one flag per resolved
-finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-11, H2-17. -/
+finding): H2-01, H2-02, H2-03, H2-04, H2-05, H2-06, H2-07, H2-08, H2-09, H2-10, H2-11, H2-12, H2-17. -/
 def Fix.shipped : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true, h2_06 := true,
-    h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_11 := true, h2_17 := true }
+    h2_07 := true, h2_08 := true, h2_09 := true, h2_10 := true, h2_11 := true, h2_12 := true,
+    h2_17 := true }
 
 def Fix.all : Fix :=
   { h2_01 := true, h2_02 := true, h2_03 := true, h2_04 := true, h2_05 := true,
@@ -883,7 +884,7 @@ def openLocal (c : Conn) (k : Nat) (es : Bool) : Conn :=
 /-- Local END_STREAM. The H2-12 fix applies the empty path's state rule
 to the last body chunk too; the H2-13 fix leaves a closed stream alone
 (and sends nothing).
-mirrors flare/http2/client.mojo:560-584,885-901 @59bda50 -/
+mirrors flare/http2/client.mojo:560-584,885-901 @59bda50; the H2-12 fix is the CLOSED-if-HALF_CLOSED_REMOTE rule in `_emit_body_span` -/
 def endLocal (fx : Fix) (c : Conn) (k : Nat) (empty : Bool) : Conn :=
   match get c k with
   | none => c

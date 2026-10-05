@@ -574,7 +574,12 @@ struct Http2ClientConnection(Defaultable, Movable):
                 var sl2 = self.conn.streams[sid].copy()
                 sl2.send_window -= chunk
                 if is_last and end_stream:
-                    sl2.state = StreamState.HALF_CLOSED_LOCAL()
+                    # sec 5.1: our END_STREAM closes a stream the peer has
+                    # already ended; otherwise it half-closes our side.
+                    sl2.state = (
+                        StreamState.CLOSED() if sl2.state.value
+                        == StreamState.HALF_CLOSED_REMOTE().value else StreamState.HALF_CLOSED_LOCAL()
+                    )
                 self.conn.streams[sid] = sl2^
             pos += chunk
         return pos

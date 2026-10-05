@@ -55,6 +55,7 @@ from flare.http2 import (
     parse_frame,
 )
 from flare.http2.client import Http2Response
+from flare.http2.state import StreamState
 from flare.http import Response
 
 
@@ -758,6 +759,71 @@ def test_headers_on_an_opened_stream_are_still_a_response() raises:
     _complete_and_take(client, server, sid)
 
 
+def _client_with_ended_response() raises -> Tuple[Http2ClientConnection, Int]:
+    """A client whose stream is half-closed (remote): the request headers
+    are out (no END_STREAM) and the server has answered with
+    ``HEADERS :status 200 + END_STREAM``."""
+    var client = Http2ClientConnection()
+    _ = client.drain()
+    var sid = client.next_stream_id()
+    client.send_request_open(
+        sid, "POST", "http", "example.com", "/", List[HpackHeader]()
+    )
+    _ = client.drain()
+    var head = List[UInt8]()
+    head.append(UInt8(0x88))  # :status 200
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x5), sid, head)))
+    assert_equal(_goaway_code(client.drain()), -1)
+    assert_equal(
+        client.conn.streams[sid].copy().state.value,
+        StreamState.HALF_CLOSED_REMOTE().value,
+    )
+    return (client^, sid)
+
+
+def test_last_body_chunk_closes_a_half_closed_remote_stream() raises:
+    """H2-12: the client's END_STREAM on a stream the server already ended
+    closes it (RFC 9113 sec 5.1); a later DATA is STREAM_CLOSED. The last
+    chunk used to leave it half-closed (local), so the late DATA was
+    buffered."""
+    var made = _client_with_ended_response()
+    ref client = made[0]
+    var sid = made[1]
+    var body = List[UInt8]()
+    body.append(UInt8(0x78))
+    client.send_data(sid, Span[UInt8, _](body), True)
+    _ = client.drain()
+    assert_equal(
+        client.conn.streams[sid].copy().state.value,
+        StreamState.CLOSED().value,
+    )
+    var late = List[UInt8]()
+    late.append(UInt8(0x79))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x0), UInt8(0x1), sid, late)))
+    var out = client.drain()
+    assert_equal(max(_goaway_code(out), _rst_code(out)), 5)  # STREAM_CLOSED
+    assert_equal(len(client.conn.streams[sid].copy().data), 0)
+
+
+def test_last_body_chunk_on_an_open_stream_half_closes_local() raises:
+    """H2-12: the common case is unchanged: END_STREAM on an open stream
+    leaves it half-closed (local)."""
+    var client = Http2ClientConnection()
+    _ = client.drain()
+    var sid = client.next_stream_id()
+    client.send_request_open(
+        sid, "POST", "http", "example.com", "/", List[HpackHeader]()
+    )
+    _ = client.drain()
+    var body = List[UInt8]()
+    body.append(UInt8(0x78))
+    client.send_data(sid, Span[UInt8, _](body), True)
+    assert_equal(
+        client.conn.streams[sid].copy().state.value,
+        StreamState.HALF_CLOSED_LOCAL().value,
+    )
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -776,4 +842,6 @@ def main() raises:
     test_reduced_table_size_is_a_ceiling_not_an_immediate_resize()
     test_headers_on_a_stream_the_client_never_opened_is_a_connection_error()
     test_headers_on_an_opened_stream_are_still_a_response()
-    print("test_h2_client_conn: 17 passed")
+    test_last_body_chunk_closes_a_half_closed_remote_stream()
+    test_last_body_chunk_on_an_open_stream_half_closes_local()
+    print("test_h2_client_conn: 19 passed")

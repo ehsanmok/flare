@@ -127,6 +127,7 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.Bugs.HPACK_03.fixed_trace_real
 #print axioms Flare.Bugs.H2_12.counterexample
 #print axioms Flare.Bugs.H2_12.fixed
+#print axioms Flare.Bugs.H2_12.fixed_shipped
 #print axioms Flare.Bugs.H2_13.counterexample
 #print axioms Flare.Bugs.H2_13.fixed
 #print axioms Flare.Bugs.H2_14.counterexample

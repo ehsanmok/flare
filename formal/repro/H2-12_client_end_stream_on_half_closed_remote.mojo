@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-12 fixed on fix/formal-findings
 """H2-12: the HTTP/2 client leaves a stream HALF_CLOSED_LOCAL, not CLOSED,
 when it sends END_STREAM on the last DATA chunk of a non-empty body after
 the server has already ended its side.
@@ -26,7 +27,7 @@ send_data(1, b"x", end_stream=True); then a server DATA(1, END_STREAM)
 arrives.
 
 Expected: stream 1 is CLOSED after the client's END_STREAM, and the late
-DATA is a STREAM_CLOSED error (RFC 9113 sec 5.1, closed). Actual: stream 1
+DATA is a STREAM_CLOSED error (RFC 9113 sec 5.1, closed). Before the fix: stream 1
 is HALF_CLOSED_LOCAL and the DATA after the server's own END_STREAM is
 accepted into the response body.
 

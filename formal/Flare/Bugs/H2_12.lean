@@ -19,6 +19,8 @@ PRIORITY after receiving a RST_STREAM MUST treat that as a stream error
 [...] STREAM_CLOSED"; half-closed (remote) / closed after END_STREAM:
 DATA "MUST respond with a stream error (Section 5.4.2) of type
 STREAM_CLOSED" — flare's handler escalates that to a connection error.
+
+Status: resolved. `_emit_body_span` now closes a HALF_CLOSED_REMOTE stream on the last chunk's END_STREAM, as the empty-body path does. `Fix.shipped` carries `h2_12`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_12
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -49,5 +51,10 @@ theorem fixed (fx : Fix) (c : Conn) (k : Nat) (s : Stream) (e : Bool) (hfx : fx.
     (hg : get c k = some s) (hs : s.state = .hcr) :
     get (endLocal fx c k e) k = some { s with state := .closed } := by
   simp [endLocal, hg, hs, hfx]
+
+/-- Shipped (`Fix.shipped` has `h2_12`): the stream is closed and the late
+DATA is a STREAM_CLOSED connection error. -/
+theorem fixed_shipped : stateOf Fix.shipped init (tr.take 4) 1 = some .closed ∧
+    lastOut Fix.shipped init tr = some [.goaway 0 eSTREAM_CLOSED] := by native_decide
 
 end Flare.Bugs.H2_12
