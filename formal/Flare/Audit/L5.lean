@@ -9,6 +9,7 @@ per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L5.Watchdog.safe_of_cfg
 #print axioms Flare.L5.Watchdog.impl_safe
 #print axioms Flare.L5.Watchdog.fixed_safe
+#print axioms Flare.L5.Watchdog.shipped_safe
 -- AsyncRT task cell
 #print axioms Flare.L5.AsyncRT.inv_inductive
 #print axioms Flare.L5.AsyncRT.free_at_most_once
@@ -46,6 +47,7 @@ per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.CONC_01.stuck_closed
 #print axioms Flare.Bugs.CONC_01.implFixed_safe
 #print axioms Flare.Bugs.CONC_01.clampOnly_safe
+#print axioms Flare.Bugs.CONC_01.shipped_meets_spec
 -- CONC-02
 #print axioms Flare.Bugs.CONC_02.rearm_hits_new_cell
 #print axioms Flare.Bugs.CONC_02.rearm_disarm_wrong

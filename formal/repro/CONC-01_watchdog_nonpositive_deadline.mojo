@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: CONC-01 fixed on fix/formal-findings
 """CONC-01: watchdog_arm stores a non-positive deadline unchecked; a
 deadline of -1 is the FIRING sentinel and wedges the slot forever.
 
@@ -13,7 +14,7 @@ budget_ms`, no range check) @59bda50; the sentinel at :46, the poller's
 
 Expected: arm(slot, budget_ms, cell) with a budget that is already spent
 (budget_ms <= 0) flips the cell at the next poll, and disarm returns.
-Actual: deadline = now + budget_ms is stored as is. With
+Before the fix: deadline = now + budget_ms is stored as is. With
 budget_ms = -(now + 1) the slot holds -1 == _FIRING: the poller skips it
 (d > 0 fails), and every later arm/disarm spins in _settle forever. With
 budget_ms <= -now the deadline is <= 0 and the expired budget never

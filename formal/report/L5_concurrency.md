@@ -334,6 +334,8 @@ Assumptions: the POSIX error cases as listed in IEEE 1003.1 for `pthread_join` /
   `BUG REPRODUCED: arm with an expired budget left slot 0 at the FIRING sentinel (-1) after 50 polls; the cell was never flipped and disarm(0) would spin forever`.
 - **Flip:** with the clamp, `OK: arm with an expired budget fires at the next poll` and exit 0. Restored.
 
+Status: resolved. `watchdog_arm` takes its deadline from the new `_deadline_after`: the sum saturates at `Int64.MAX` (a huge budget no longer wraps into the past, as the report suggested) and is raised to at least 1, so a spent budget fires at the next poll and the `-1` sentinel can no longer be stored. Tests: `tests/runtime/test_watchdog.mojo::test_arm_with_an_expired_budget_fires_at_the_next_poll` (failed before: the cell was never flipped) and `::test_arm_with_a_huge_budget_saturates_instead_of_wrapping`. The repro now prints `OK:` (3 of 3 runs). The shipped configuration is `Flare.L5.Watchdog.cfgShipped` (`clamp := true`, no disarm-first until CONC-02); `Flare.Bugs.CONC_01.shipped_meets_spec` is stated about it, and `cfgAnyBudget` is the pre-fix one. Decision: no test pins the exact `-1` deadline, since it depends on the clock reading at `arm`; the spent-budget test uses a budget far below `-now`, which stored a negative deadline before.
+
 ### CONC-02: re-arming a still-armed slot fires the old deadline into the new request's cell
 
 - **Severity:** Low (latent). A grep of `flare/` finds no caller that re-arms without `disarm`. There is no production call site at all; only `tests/runtime/test_watchdog.mojo` uses the watchdog, and its re-arm happens after the fire has completed, which `_settle` makes safe. The `arm` docstring does not state the "disarm first" precondition.

@@ -36,9 +36,10 @@ argument is written down here, not proved in Lean.
 
 ## Configurations
 
-`Cfg` covers the Mojo code (`disarmFirst := false`, `clamp := false`) and
-the fix (`disarmFirst`: arm first CASes the old deadline to 0; `clamp`:
-deadline clamped to ≥ 1), plus whether callers may re-arm without disarm.
+`Cfg` covers the Mojo code at 59bda50 (`disarmFirst := false`,
+`clamp := false`), the shipped code (`cfgShipped`: `clamp := true`, CONC-01
+fixed) and the full fix (`disarmFirst`: arm first CASes the old deadline to
+0, CONC-02), plus whether callers may re-arm without disarm.
 -/
 namespace Flare.L5.Watchdog
 
@@ -97,9 +98,12 @@ structure Cfg where
 /-- Mojo `Int64(monotonic_now_ms() + budget_ms)`: 64-bit wrap. -/
 def wrap (x : Int) : Int := (mojoInt x).toInt
 
-/-- mirrors flare/runtime/watchdog.mojo:107 @59bda50 (clamp = the fix) -/
+/-- `clamp = false` mirrors flare/runtime/watchdog.mojo:107 @59bda50 (pre-fix:
+the wrapped sum, unchecked). `clamp = true` mirrors `_deadline_after`
+(flare/runtime/watchdog.mojo:55-74, fixed, CONC-01): saturate the sum at
+`Int64.MAX`, then raise it to at least 1. -/
 def deadlineOf (c : Cfg) (now b : Int) : Int :=
-  if c.clamp then max (wrap (now + b)) 1 else wrap (now + b)
+  if c.clamp then max (min (now + b) I64_MAX) 1 else wrap (now + b)
 
 inductive Lbl where
   | p
@@ -339,6 +343,12 @@ budget; callers may re-arm without disarm. -/
 def cfgFixed : Cfg :=
   { disarmFirst := true, clamp := true, allowRearm := true, adm := fun _ _ => true }
 
+/-- The shipped code: the deadline is clamped (CONC-01, fixed); `arm` does not
+yet disarm first (CONC-02), so callers must disarm before re-arming. Any
+budget. -/
+def cfgShipped : Cfg :=
+  { disarmFirst := false, clamp := true, allowRearm := false, adm := fun _ _ => true }
+
 theorem deadlinePos_impl : DeadlinePos cfgImpl := by
   intro n b _ ha
   simp only [cfgImpl, goodAdm, decide_eq_true_eq] at ha
@@ -352,6 +362,11 @@ theorem deadlinePos_fixed : DeadlinePos cfgFixed := by
   simp only [deadlineOf, cfgFixed, if_true]
   omega
 
+theorem deadlinePos_shipped : DeadlinePos cfgShipped := by
+  intro n b _ _
+  simp only [deadlineOf, cfgShipped, if_true]
+  omega
+
 /-- Headline (impl): under "arm only after disarm" and positive budgets the
 watchdog fires only into the current request's cell, only for that
 request's own expired deadline, never after its disarm returned; disarm's
@@ -360,6 +375,13 @@ unbounded). -/
 theorem impl_safe :
     ∀ s, (lts cfgImpl).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
   safe_of_cfg cfgImpl (by simp [cfgImpl]) deadlinePos_impl
+
+/-- Headline (shipped): with the deadline clamped, the watchdog is safe for
+every budget (including spent and overflowing ones) under "arm only after
+disarm". Proved (general). -/
+theorem shipped_safe :
+    ∀ s, (lts cfgShipped).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
+  safe_of_cfg cfgShipped (by simp [cfgShipped]) deadlinePos_shipped
 
 /-- Headline (fix): the clamped, disarm-first arm is safe for every budget
 and even when callers re-arm a still-armed slot. Proved (general). -/

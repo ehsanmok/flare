@@ -4,7 +4,7 @@ from std.atomic import Atomic, Ordering
 from std.memory import Layout, Pointer, alloc
 from std.testing import assert_equal, assert_false, assert_true
 
-from flare.runtime._libc_time import libc_nanosleep_ms
+from flare.runtime._libc_time import libc_nanosleep_ms, monotonic_now_ms
 from flare.runtime.watchdog import DeadlineWatchdog
 
 
@@ -81,6 +81,49 @@ def test_rearm_right_after_a_fire_keeps_its_deadline() raises:
     _free_cell(cell)
 
 
+def _wait_for_flip(cell: Int, limit_ms: Int) -> Bool:
+    """True once the cell is flipped, False after ``limit_ms`` without."""
+    var t0 = monotonic_now_ms()
+    while monotonic_now_ms() - t0 < limit_ms:
+        if _read_cell(cell) != 0:
+            return True
+        _ = libc_nanosleep_ms(1)
+    return _read_cell(cell) != 0
+
+
+def test_arm_with_an_expired_budget_fires_at_the_next_poll() raises:
+    """A budget that is already spent gave a deadline <= 0, which the poller
+    skips (``d > 0``) and which ``-1`` made the FIRING sentinel: the cell was
+    never flipped and ``disarm`` could spin forever. The deadline is now
+    clamped to at least 1, so the slot fires at the next poll."""
+    var cell = _new_cell()
+    var wd = DeadlineWatchdog(poll_ms=1)
+    wd.arm(0, -(1 << 62), cell)
+    assert_true(
+        _wait_for_flip(cell, 2_000),
+        "an expired budget never fired",
+    )
+    assert_equal(_read_cell(cell), 2)  # TIMEOUT
+    assert_true(wd.disarm(0), "disarm did not report the fire")
+    wd.stop()
+    _free_cell(cell)
+
+
+def test_arm_with_a_huge_budget_saturates_instead_of_wrapping() raises:
+    """``now + budget_ms`` overflowing must not wrap into a past deadline
+    (which, clamped, would fire at once): it saturates and never fires."""
+    var cell = _new_cell()
+    var wd = DeadlineWatchdog(poll_ms=1)
+    wd.arm(0, 9223372036854775807, cell)
+    assert_false(
+        _wait_for_flip(cell, 50),
+        "a huge budget fired immediately",
+    )
+    assert_false(wd.disarm(0), "disarm reported a fire that did not happen")
+    wd.stop()
+    _free_cell(cell)
+
+
 def main() raises:
     test_watchdog_flips_cell_on_deadline()
     print("OK test_watchdog_flips_cell_on_deadline")
@@ -88,4 +131,8 @@ def main() raises:
     print("OK test_watchdog_disarm_prevents_flip")
     test_rearm_right_after_a_fire_keeps_its_deadline()
     print("OK test_rearm_right_after_a_fire_keeps_its_deadline")
-    print("test_watchdog: 3 passed")
+    test_arm_with_an_expired_budget_fires_at_the_next_poll()
+    print("OK test_arm_with_an_expired_budget_fires_at_the_next_poll")
+    test_arm_with_a_huge_budget_saturates_instead_of_wrapping()
+    print("OK test_arm_with_a_huge_budget_saturates_instead_of_wrapping")
+    print("test_watchdog: 5 passed")

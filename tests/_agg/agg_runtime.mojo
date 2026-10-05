@@ -733,6 +733,12 @@ from test_watchdog import (
 from test_watchdog import (
     test_rearm_right_after_a_fire_keeps_its_deadline as test_watchdog__test_rearm_right_after_a_fire_keeps_its_deadline,
 )
+from test_watchdog import (
+    test_arm_with_an_expired_budget_fires_at_the_next_poll as test_watchdog__test_arm_with_an_expired_budget_fires_at_the_next_poll,
+)
+from test_watchdog import (
+    test_arm_with_a_huge_budget_saturates_instead_of_wrapping as test_watchdog__test_arm_with_a_huge_budget_saturates_instead_of_wrapping,
+)
 
 
 def main() raises:
@@ -1108,5 +1114,11 @@ def main() raises:
     suite.test[test_watchdog__test_watchdog_disarm_prevents_flip]()
     suite.test[
         test_watchdog__test_rearm_right_after_a_fire_keeps_its_deadline
+    ]()
+    suite.test[
+        test_watchdog__test_arm_with_an_expired_budget_fires_at_the_next_poll
+    ]()
+    suite.test[
+        test_watchdog__test_arm_with_a_huge_budget_saturates_instead_of_wrapping
     ]()
     suite^.run()

@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (62407 lines) |
-| Theorems | 3271 |
-| Headline theorems in the axiom audit | 1072 |
+| Lean files | 298 (62449 lines) |
+| Theorems | 3274 |
+| Headline theorems in the axiom audit | 1074 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 85 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 86 of 138 |
 
 Six findings are rated high:
 
@@ -3120,7 +3120,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | APP-47 | Medium | resolved | an h2c upgrade whose 101 flushes on a writable edge never migrates | `Flare/Bugs/APP_47.lean` | `repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (any (kqueue or epoll, level-triggered writability)) |
 | APP-48 | High | resolved | a WebSocket upgrade on a TLS connection is served in cleartext | `Flare/Bugs/APP_48.lean` | `repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (any (needs the test certificates under tests/certs)) |
 | APP-49 | Medium | resolved | an interim `100 Continue` the socket does not take whole is never completed | `Flare/Bugs/APP_49.lean` | `repro/APP-49_continue_partial_send_corrupts_stream.mojo` (linux) |
-| CONC-01 | Low | open | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
+| CONC-01 | Low | resolved | a non-positive deadline is stored unchecked; `-1` wedges the slot | `Flare/Bugs/CONC_01.lean` | `repro/CONC-01_watchdog_nonpositive_deadline.mojo` (any) |
 | CONC-02 | Low | open | re-arming a still-armed slot fires the old deadline into the new request's cell | `Flare/Bugs/CONC_02.lean` | `repro/CONC-02_watchdog_rearm_fires_old_deadline_on_new_cell.mojo` (any) |
 | CONC-03 | High | resolved | `Scheduler.drain` frees the stop flag under a detached worker | `Flare/Bugs/CONC_03.lean` | `repro/CONC-03_drain_frees_stop_flag_under_detached_worker.mojo` (any) |
 | CONC-04 | Medium | resolved | `Scheduler.drain` leaks the joined workers' listeners whenever one worker is detached | `Flare/Bugs/CONC_04.lean` | `repro/CONC-04_drain_leaks_joined_worker_listeners.mojo` (any) |
@@ -5442,6 +5442,8 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 - **Repro:** `formal/repro/CONC-01_watchdog_nonpositive_deadline.mojo`. Observed:
   `BUG REPRODUCED: arm with an expired budget left slot 0 at the FIRING sentinel (-1) after 50 polls; the cell was never flipped and disarm(0) would spin forever`.
 - **Flip:** with the clamp, `OK: arm with an expired budget fires at the next poll` and exit 0. Restored.
+
+Status: resolved. `watchdog_arm` takes its deadline from the new `_deadline_after`: the sum saturates at `Int64.MAX` (a huge budget no longer wraps into the past, as the report suggested) and is raised to at least 1, so a spent budget fires at the next poll and the `-1` sentinel can no longer be stored. Tests: `tests/runtime/test_watchdog.mojo::test_arm_with_an_expired_budget_fires_at_the_next_poll` (failed before: the cell was never flipped) and `::test_arm_with_a_huge_budget_saturates_instead_of_wrapping`. The repro now prints `OK:` (3 of 3 runs). The shipped configuration is `Flare.L5.Watchdog.cfgShipped` (`clamp := true`, no disarm-first until CONC-02); `Flare.Bugs.CONC_01.shipped_meets_spec` is stated about it, and `cfgAnyBudget` is the pre-fix one. Decision: no test pins the exact `-1` deadline, since it depends on the clock reading at `arm`; the spent-budget test uses a budget far below `-now`, which stored a negative deadline before.
 
 #### CONC-02: re-arming a still-armed slot fires the old deadline into the new request's cell
 

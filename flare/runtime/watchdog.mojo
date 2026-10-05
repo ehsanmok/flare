@@ -49,6 +49,31 @@ comptime _FIRING: Int64 = -1
 lands on the request it was meant for."""
 
 
+comptime _I64_MAX: Int64 = 9223372036854775807
+
+
+def _deadline_after(now_ms: Int, budget_ms: Int) -> Int64:
+    """The slot deadline ``budget_ms`` after ``now_ms``, in ``1..Int64.MAX``.
+
+    A deadline must be positive: ``0`` reads as disarmed, a negative value is
+    never fired by the poller, and ``-1`` is the ``_FIRING`` sentinel that
+    wedges the slot (``arm`` and ``disarm`` would wait on it forever). So a
+    budget that is already spent fires at the next poll (deadline ``1``),
+    and a budget that would overflow ``now + budget`` saturates instead of
+    wrapping into the past.
+    """
+    var now = Int64(now_ms)
+    var budget = Int64(budget_ms)
+    var deadline: Int64
+    if budget > 0 and now > _I64_MAX - budget:
+        deadline = _I64_MAX
+    else:
+        deadline = now + budget
+    if deadline < 1:
+        deadline = 1
+    return deadline
+
+
 @always_inline
 def _slot_deadline_idx(slot: Int) -> Int:
     return 2 + 2 * slot
@@ -104,7 +129,7 @@ def watchdog_arm(block: Int, slot: Int, budget_ms: Int, cancel_addr: Int):
         return
     _ = _settle(block, slot)
     _atomic_store(block, _slot_addr_idx(slot), Int64(cancel_addr))
-    var deadline = Int64(monotonic_now_ms() + budget_ms)
+    var deadline = _deadline_after(monotonic_now_ms(), budget_ms)
     while True:
         var v = _settle(block, slot)
         if _atomic_cas(block, _slot_deadline_idx(slot), v, deadline):
@@ -214,7 +239,9 @@ struct DeadlineWatchdog(Movable):
 
     def arm(self, slot: Int, budget_ms: Int, cancel_addr: Int):
         """Arm ``slot`` to flip the cell at ``cancel_addr`` in
-        ``budget_ms`` from now."""
+        ``budget_ms`` from now. A budget that is already spent
+        (``<= 0`` or in the past) fires at the next poll; one that would
+        overflow never fires."""
         watchdog_arm(self._block, slot, budget_ms, cancel_addr)
 
     def disarm(self, slot: Int) -> Bool:
