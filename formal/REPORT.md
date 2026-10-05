@@ -41,12 +41,12 @@ and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 298 (63435 lines) |
-| Theorems | 3336 |
-| Headline theorems in the axiom audit | 1126 |
+| Lean files | 298 (63442 lines) |
+| Theorems | 3337 |
+| Headline theorems in the axiom audit | 1127 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Mojo repros | 138, one per finding |
-| Resolved (fix landed, repro kept as a regression check) | 123 of 138 |
+| Resolved (fix landed, repro kept as a regression check) | 124 of 138 |
 
 Six findings are rated high:
 
@@ -3066,7 +3066,7 @@ Every finding below has a Lean counterexample and a proof that the minimal fix m
 | H2-11 | Low | resolved | SETTINGS_MAX_CONCURRENT_STREAMS = 0 means "unlimited" | `Flare/Bugs/H2_11.lean` | `repro/H2-11_max_concurrent_zero_unlimited.mojo` (any) |
 | H2-12 | Low | resolved | the client's last body chunk leaves a half-closed (remote) stream half-closed (local) | `Flare/Bugs/H2_12.lean` | `repro/H2-12_client_end_stream_on_half_closed_remote.mojo` (any) |
 | H2-13 | Low | resolved | the client's `send_data` sends on a closed stream and reopens it | `Flare/Bugs/H2_13.lean` | `repro/H2-13_client_send_data_on_closed_stream.mojo` (any) |
-| H2-14 | Low | open | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
+| H2-14 | Low | resolved | the client accepts HEADERS on a half-closed (remote) stream | `Flare/Bugs/H2_14.lean` | `repro/H2-14_client_headers_on_half_closed_remote.mojo` (any) |
 | H2-15 | Low | open | the server treats an even, never-opened stream as closed | `Flare/Bugs/H2_15.lean` | `repro/H2-15_server_even_idle_stream_treated_closed.mojo` (any) |
 | H2-16 | Low | open | RST_STREAM on an idle stream, after which that stream's request body is dropped | `Flare/Bugs/H2_16.lean` | `repro/H2-16_rst_on_idle_stream_swallows_data.mojo` (any) |
 | H2-17 | Medium | resolved | the client drops PUSH_PROMISE header blocks, so a later response decodes to a wrong header | `Flare/Bugs/H2_17.lean` | `repro/H2-17_client_push_promise_hpack_desync.mojo` (any) |
@@ -4177,6 +4177,8 @@ Status: resolved. Fixed: `send_data` (`client.mojo`) returns at once, sending no
 - **Flip:** `OK: nothing sent on the closed stream; state stays CLOSED`. `test_h2_client_conn` (11), `test_h2_streaming_state` (10), `test_h2_extended_connect` (5), `test_h2_per_stream_cancel` (6) and `test_grpc_streaming` (6) passed.
 
 #### H2-14: the client accepts HEADERS on a half-closed (remote) stream
+
+Status: resolved. Fixed: the HALF_CLOSED_REMOTE test in the HEADERS branch (`state.mojo`) no longer excludes client role. Tests: `test_h2_client_conn.mojo::test_headers_after_the_servers_end_stream_is_stream_closed`, `test_trailers_after_a_response_head_are_still_accepted`. Model: `Fix.shipped` carries `h2_14`; `Bugs.H2_14.fixed_shipped`; `counterexample` stays about `Fix.none`.
 
 - **Severity:** Low. After the server has ended its response with END_STREAM, a further HEADERS block on the same stream is accepted, and its fields are appended to the response as extra trailers.
 - **RFC:** RFC 9113 §5.1, half-closed (remote): "If an endpoint receives additional frames, other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, for a stream that is in this state, it MUST respond with a stream error (Section 5.4.2) of type STREAM_CLOSED."

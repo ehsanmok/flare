@@ -72,6 +72,12 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_send_data_on_an_open_stream_still_sends as test_h2_client_conn__test_send_data_on_an_open_stream_still_sends,
 )
+from test_h2_client_conn import (
+    test_headers_after_the_servers_end_stream_is_stream_closed as test_h2_client_conn__test_headers_after_the_servers_end_stream_is_stream_closed,
+)
+from test_h2_client_conn import (
+    test_trailers_after_a_response_head_are_still_accepted as test_h2_client_conn__test_trailers_after_a_response_head_are_still_accepted,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -562,6 +568,12 @@ def main() raises:
     ]()
     suite.test[
         test_h2_client_conn__test_send_data_on_an_open_stream_still_sends
+    ]()
+    suite.test[
+        test_h2_client_conn__test_headers_after_the_servers_end_stream_is_stream_closed
+    ]()
+    suite.test[
+        test_h2_client_conn__test_trailers_after_a_response_head_are_still_accepted
     ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()

@@ -1,4 +1,5 @@
 # PLATFORM: any
+# RESOLVED: H2-14 fixed on fix/formal-findings
 """H2-14: the HTTP/2 client accepts a HEADERS frame on a stream the server
 has already ended (half-closed (remote)) and merges it into the response
 as an extra trailer section.
@@ -20,7 +21,7 @@ Trace: send_request_open(1) (request body still open); the server sends
 HEADERS(1, :status 200, END_STREAM), then HEADERS(1, "x-t: 1",
 END_STREAM).
 
-Expected: RST_STREAM(1, STREAM_CLOSED) or GOAWAY(STREAM_CLOSED). Actual:
+Expected: RST_STREAM(1, STREAM_CLOSED) or GOAWAY(STREAM_CLOSED). Before the fix:
 no error; the second block is appended to the response headers.
 
 Minimal fix: apply the HALF_CLOSED_REMOTE check to HEADERS in both roles.

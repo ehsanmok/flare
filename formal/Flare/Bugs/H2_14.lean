@@ -14,6 +14,8 @@ RFC 9113 §5.1 half-closed (remote): "If an endpoint receives additional
 frames, other than WINDOW_UPDATE, PRIORITY, or RST_STREAM, for a stream
 that is in this state, it MUST respond with a stream error (Section
 5.4.2) of type STREAM_CLOSED."
+
+Status: resolved. The `not self.is_client` condition is gone from the HALF_CLOSED_REMOTE test in the HEADERS branch, so both roles answer STREAM_CLOSED. `Fix.shipped` carries `h2_14`; `counterexample` and `bug` stay about `Fix.none` (the pre-fix code); `fixed_shipped` is the shipped behaviour.
 -/
 namespace Flare.Bugs.H2_14
 open Flare Flare.L3.H2.Conn Flare.Bugs.H2_Fixtures
@@ -41,5 +43,9 @@ theorem fixed (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (hfx : fx.h2_14 = true
     (hg : get c f.sid = some s) (hs : s.state = .hcr) :
     headersPre fx c f = .inl (connErr c eSTREAM_CLOSED) := by
   simp [headersPre, hg, hs, hfx]
+
+/-- Shipped (`Fix.shipped` has `h2_14`): the second HEADERS is refused. -/
+theorem fixed_shipped : lastOut Fix.shipped init tr = some [.goaway 0 eSTREAM_CLOSED] := by
+  native_decide
 
 end Flare.Bugs.H2_14

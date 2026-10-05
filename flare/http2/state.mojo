@@ -1362,10 +1362,9 @@ struct Connection(Copyable, Defaultable):
                     return self._conn_error(
                         Http2ErrorCode.STREAM_CLOSED().value
                     )
-                if (
-                    not self.is_client
-                    and st == StreamState.HALF_CLOSED_REMOTE().value
-                ):
+                if st == StreamState.HALF_CLOSED_REMOTE().value:
+                    # sec 5.1: the peer already sent END_STREAM, in either
+                    # role (a server's response, a client's request).
                     return self._conn_error(
                         Http2ErrorCode.STREAM_CLOSED().value
                     )

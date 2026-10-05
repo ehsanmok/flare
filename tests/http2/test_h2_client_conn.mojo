@@ -888,6 +888,41 @@ def test_send_data_on_an_open_stream_still_sends() raises:
     assert_equal(_data_frame_count(client.drain()), 1)
 
 
+def test_headers_after_the_servers_end_stream_is_stream_closed() raises:
+    """H2-14: once the server has ended its response (the stream is
+    half-closed (remote)) another HEADERS from it is a STREAM_CLOSED
+    connection error (RFC 9113 sec 5.1), as on the server side. It used to
+    be accepted and decoded as a second response."""
+    var made = _client_with_ended_response()
+    ref client = made[0]
+    var sid = made[1]
+    var again = List[UInt8]()
+    again.append(UInt8(0x88))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x5), sid, again)))
+    assert_equal(_goaway_code(client.drain()), 5)  # STREAM_CLOSED
+
+
+def test_trailers_after_a_response_head_are_still_accepted() raises:
+    """H2-14: HEADERS (no END_STREAM) then trailers HEADERS (END_STREAM)
+    is a normal response and must not be rejected."""
+    var client = Http2ClientConnection()
+    _ = client.drain()
+    var sid = client.next_stream_id()
+    client.send_request_open(
+        sid, "POST", "http", "example.com", "/", List[HpackHeader]()
+    )
+    _ = client.drain()
+    var head = List[UInt8]()
+    head.append(UInt8(0x88))
+    client.feed(Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x4), sid, head)))
+    var trailers = List[UInt8]()
+    trailers.append(UInt8(0x88))
+    client.feed(
+        Span[UInt8, _](_raw_frame(UInt8(0x1), UInt8(0x5), sid, trailers))
+    )
+    assert_equal(_goaway_code(client.drain()), -1)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -910,4 +945,6 @@ def main() raises:
     test_last_body_chunk_on_an_open_stream_half_closes_local()
     test_send_data_on_a_closed_stream_sends_nothing()
     test_send_data_on_an_open_stream_still_sends()
-    print("test_h2_client_conn: 21 passed")
+    test_headers_after_the_servers_end_stream_is_stream_closed()
+    test_trailers_after_a_response_head_are_still_accepted()
+    print("test_h2_client_conn: 23 passed")
