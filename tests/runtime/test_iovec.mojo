@@ -6,7 +6,7 @@ peer. Direct in-memory tests cover the iovec layout +
 partial-write loop accounting.
 """
 
-from std.testing import assert_equal, assert_true, TestSuite
+from std.testing import assert_equal, assert_raises, assert_true, TestSuite
 
 from flare.runtime import IoVecBuf, writev_buf_all
 from flare.tcp import TcpListener, TcpStream
@@ -212,6 +212,64 @@ def test_writev_buf_all_zeroes_consumed_cells() raises:
     assert_equal(iov.cell_len(0), 0)
     assert_equal(iov.cell_ptr(1), 0)
     assert_equal(iov.cell_len(1), 0)
+
+    server_side.close()
+    client.close()
+    listener.close()
+
+
+def test_writev_buf_all_raises_when_writev_makes_no_progress() raises:
+    """RT-02: ``writev`` returning 0 while bytes are still owed must not
+    be reported as success. No kernel returns 0 for a non-empty iovec on a
+    socket, but libc does return 0 when every cell has length 0, which
+    reaches the same ``sent == 0`` branch deterministically: here the
+    caller claims 100 bytes (``total_bytes``) but the iovec holds none. The
+    old code returned normally ("everything was written")."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var client = TcpStream.connect(listener.local_addr())
+    var server_side = listener.accept()
+
+    var data = List[UInt8](length=100, fill=UInt8(0x41))
+    var iov = IoVecBuf(1)
+    iov.set(0, Int(data.unsafe_ptr()), 0)  # zero-length: writev returns 0
+
+    var raised = False
+    try:
+        writev_buf_all(iov, Int(server_side._socket.fd), 100)
+    except e:
+        raised = True
+        assert_true("writev returned 0" in String(e))
+    assert_true(raised, "writev_buf_all returned normally after writev -> 0")
+    _ = data[0]
+
+    server_side.close()
+    client.close()
+    listener.close()
+
+
+def test_writev_buf_all_raises_when_total_exceeds_cells() raises:
+    """RT-02: ``total_bytes`` larger than the bytes in the cells makes the
+    loop run out of data: after the real bytes are written, ``writev`` of
+    the zeroed cells returns 0 and the call must raise, not claim the
+    missing bytes were sent."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var client = TcpStream.connect(listener.local_addr())
+    var server_side = listener.accept()
+
+    var part = String("hello")
+    var iov = IoVecBuf(1)
+    iov.set(0, Int(part.unsafe_ptr()), part.byte_length())
+
+    var raised = False
+    try:
+        writev_buf_all(iov, Int(server_side._socket.fd), 8)  # 3 too many
+    except e:
+        raised = True
+    assert_true(raised, "writev_buf_all returned normally with 3 bytes unsent")
+
+    var buf = List[UInt8](length=8, fill=UInt8(0))
+    var n = client.read(buf.unsafe_ptr(), 5)
+    assert_equal(n, 5)
 
     server_side.close()
     client.close()

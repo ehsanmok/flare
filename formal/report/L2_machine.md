@@ -73,7 +73,8 @@ fuel. `Strong` is the contract "`send` returns `1..len` or an error", `Weak`
 | `writeAllOld_livelock_weak` | Pre-fix loop: under `Weak` with a 0-returning `send`, it never terminates. | counterexample (NET-02, resolved) |
 | `readExact_terminates` | Under `RecvContract`, `read_exact` returns exactly `size` bytes or raises. | proved |
 | `writevAll_strong` | Under `Strong` and the caller precondition `total_bytes = Σ len_i`, `writev_buf_all` returns normally only with every byte written; `first` is monotone and bounded. | proved |
-| `writevAll_understated`, `writevAll_overstated` | A wrong `total_bytes` makes the loop return early. | counterexample (caller precondition, not filed) |
+| `writevAll_understated` | A `total_bytes` that understates the cells makes the loop return early. | counterexample (caller precondition, not filed) |
+| `writevAllOld_overstated`, `writevAll_overstated` | A `total_bytes` that overstates the cells makes `writev` of zero cells return 0: the pre-fix loop returned silently, the shipped loop raises. | proved (RT-02) |
 
 Limitations: EINTR is folded into the oracle (it only re-asks). Timeouts are
 errors.
@@ -623,14 +624,23 @@ What goes wrong: runtime/iovec.mojo:340-341 returns on `sent <= 0`;
 `writev_buf` already raises on -1, so this is `writev` returning 0 with bytes
 queued, and the caller is told everything was sent. Linux and macOS do not
 return 0 from `writev` on a socket with a non-empty iovec, so the repro
-injects it.
-Lean: `Flare.Bugs.RT_02.writev_silent_short_write`. Fix: raise on 0;
-`writevAllFixed_spec` (for every oracle).
+injects it (libc also returns 0 for an iovec whose cells are all empty, e.g.
+when `total_bytes` overstates the cells; the unit tests use that).
+Lean: `Flare.Bugs.RT_02.writev_silent_short_write` (about the pre-fix
+`writevAllOld`). Fix: raise on 0; `writevAll_spec` for the shipped loop (for
+every oracle).
 Repro: `formal/repro/RT-02_writev_all_silent_short_write.mojo` (PLATFORM any,
-fault injection: `writev` returns 0), observed on macOS and Linux (3/3 each)
+fault injection: `writev` returns 0), observed before the fix on macOS and
+Linux (3/3 each)
 `BUG REPRODUCED: writev_buf_all(total_bytes=100) returned normally after writev returned 0; 0 of 100 bytes were written and iovec 0 still holds 100 bytes`.
-Flip (raise `NetworkError` on `sent <= 0`), on macOS and Linux:
-`OK: writev_buf_all raised after writev returned 0: NetworkError: writev returned 0 (writev_buf_all)`, exit 0.
+After the fix (`NetworkError` on `sent <= 0`):
+`OK: writev_buf_all raised after writev returned 0: NetworkError: writev returned 0 with 100 bytes unsent (writev_buf_all)`, exit 0 (macOS 3/3, Linux container).
+
+Status: resolved. `writev_buf_all` raises `NetworkError` when `writev` returns 0
+with bytes owed; tests
+`tests/runtime/test_iovec.mojo::test_writev_buf_all_raises_when_writev_makes_no_progress`
+and `::test_writev_buf_all_raises_when_total_exceeds_cells` (deterministic: an
+all-empty iovec makes real libc return 0, no interposer needed).
 
 ### RT-03: `UringReactor.poll` can block with no wakeup read armed
 
@@ -872,7 +882,7 @@ lists record ids, not tokens.
 | `Flare.L2.WriteLoop.writeAll` | flare/net/_write_loop.mojo:22-55 | `writeAll_terminates_weak`, `writeAll_terminates_strong`, `writeAll_no_overshoot`, `writeAllOld_livelock_weak` | proved; counterexample (NET-02, resolved) |
 | `Flare.L2.WriteLoop.udsWriteAll` | flare/uds/stream.mojo:140-170 | `udsWriteAll_eq` | proved |
 | `Flare.L2.WriteLoop.readExact` | flare/tcp/stream.mojo:429-456 | `readExact_terminates` | proved |
-| `Flare.L2.WriteLoop.writevAll`, `consume` | flare/runtime/iovec.mojo:312-361 | `writevAll_strong`, `RT_02.writev_silent_short_write` | proved; counterexample (RT-02) |
+| `Flare.L2.WriteLoop.writevAll`, `consume` | flare/runtime/iovec.mojo (`writev_buf_all`) | `writevAll_strong`, `RT_02.writev_silent_short_write` | proved; counterexample (RT-02, resolved) |
 | `Flare.L2.BufReader.consume`, `readExact`, `fillInt` | flare/io/buf_reader.mojo:117-266 | `consume_view`, `readExact_correct` | proved |
 | `Flare.L2.ConnectTimeout.run` | flare/tcp/stream.mojo:255-334 | `flags_restored`, `never_left_nonblocking` | proved |
 | `Flare.L2.Reactor.interestToEpoll`, `epollToEventFlags` | flare/runtime/reactor.mojo:112-135 | `roundtrip_rw`, `read_interest_has_rdhup`, `readable_iff_in` | proved |

@@ -213,6 +213,12 @@ from test_iovec import (
 from test_iovec import (
     test_writev_buf_all_zeroes_consumed_cells as test_iovec__test_writev_buf_all_zeroes_consumed_cells,
 )
+from test_iovec import (
+    test_writev_buf_all_raises_when_writev_makes_no_progress as test_iovec__test_writev_buf_all_raises_when_writev_makes_no_progress,
+)
+from test_iovec import (
+    test_writev_buf_all_raises_when_total_exceeds_cells as test_iovec__test_writev_buf_all_raises_when_total_exceeds_cells,
+)
 from test_libc_time import (
     test_usleep_small_returns_zero as test_libc_time__test_usleep_small_returns_zero,
 )
@@ -829,6 +835,12 @@ def main() raises:
     suite.test[test_iovec__test_writev_with_zero_length_cells_skips_them]()
     suite.test[test_iovec__test_writev_single_cell_matches_send_semantics]()
     suite.test[test_iovec__test_writev_buf_all_zeroes_consumed_cells]()
+    suite.test[
+        test_iovec__test_writev_buf_all_raises_when_writev_makes_no_progress
+    ]()
+    suite.test[
+        test_iovec__test_writev_buf_all_raises_when_total_exceeds_cells
+    ]()
     # tests/runtime/test_libc_time.mojo
     suite.test[test_libc_time__test_usleep_small_returns_zero]()
     suite.test[test_libc_time__test_usleep_zero_is_noop]()

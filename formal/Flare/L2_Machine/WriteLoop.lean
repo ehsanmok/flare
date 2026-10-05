@@ -257,7 +257,7 @@ theorem readExact_terminates (size : Nat) (o : Nat → Nat → Int)
 Returns the number of cells fully consumed and the new remaining cells
 (the first one possibly shortened). Mirrors the inner `while consumed > 0
 and i < n` loop.
-mirrors flare/runtime/iovec.mojo:344-361 @59bda50 -/
+mirrors flare/runtime/iovec.mojo `writev_buf_all` inner loop (fixed, RT-02) -/
 def consume : Nat → List Nat → Nat × List Nat
   | _, [] => (0, [])
   | 0, rest => (0, rest)
@@ -311,17 +311,33 @@ structure VState where
   remaining : Int
   deriving DecidableEq, Repr
 
-/-- `writev_buf_all`: `sent = writev(...)`; `sent <= 0` → **return**
+/-- Pre-fix `writev_buf_all` (flare/runtime/iovec.mojo:312-361 @59bda50), kept for the
+RT-02 counterexample: `sent = writev(...)`; `sent <= 0` → **return**
 (silently); else `remaining -= sent` and advance through the cells.
-`writev_buf` itself raises on `-1`, so the oracle's `< 0` is `err`.
-mirrors flare/runtime/iovec.mojo:312-361 @59bda50 -/
-def writevAll (o : Nat → Nat → Int) : Nat → Nat → VState → Res × VState
+`writev_buf` itself raises on `-1`, so the oracle's `< 0` is `err`. -/
+def writevAllOld (o : Nat → Nat → Int) : Nat → Nat → VState → Res × VState
   | 0, _, s => (if s.remaining > 0 then .outOfFuel 0 else .done 0, s)
   | fuel + 1, k, s =>
     if s.remaining > 0 then
       let r := o k (sum s.rest)
       if r < 0 then (.err, s)
       else if r = 0 then (.done 0, s)
+      else
+        let c := consume r.toNat s.rest
+        writevAllOld o fuel (k + 1)
+          { first := s.first + c.1, rest := c.2, remaining := s.remaining - r }
+    else (.done 0, s)
+
+/-- `writev_buf_all`: `sent = writev(...)`; `sent <= 0` raises (`-1` inside
+`writev_buf`, `0` in the loop); else `remaining -= sent` and advance through
+the cells.
+mirrors flare/runtime/iovec.mojo `writev_buf_all` (fixed, RT-02) -/
+def writevAll (o : Nat → Nat → Int) : Nat → Nat → VState → Res × VState
+  | 0, _, s => (if s.remaining > 0 then .outOfFuel 0 else .done 0, s)
+  | fuel + 1, k, s =>
+    if s.remaining > 0 then
+      let r := o k (sum s.rest)
+      if r ≤ 0 then (.err, s)
       else
         let c := consume r.toNat s.rest
         writevAll o fuel (k + 1)
@@ -357,9 +373,8 @@ theorem writevAll_strong (n : Nat) (o : Nat → Nat → Int) (h : Strong o) :
       unfold SendContractStrong at hc
       rcases hc with hneg | ⟨c1, c2⟩
       · simp [hneg, VInv, h1, h2]
-      · have hn : ¬ o k (sum s.rest) < 0 := by omega
-        have hz : ¬ o k (sum s.rest) = 0 := by omega
-        simp only [hn, hz, if_false]
+      · have hn : ¬ o k (sum s.rest) ≤ 0 := by omega
+        simp only [hn, if_false]
         have hs := consume_sum s.rest (o k (sum s.rest)).toNat (by omega)
         have hl := consume_length s.rest (o k (sum s.rest)).toNat
         have := ih (k + 1) ⟨s.first + (consume (o k (sum s.rest)).toNat s.rest).1,
@@ -379,10 +394,15 @@ theorem writevAll_understated :
   decide
 
 /-- ... and if it overstates them, the loop sees `writev` of zero cells
-return 0 and returns silently. -/
+return 0. The pre-fix loop returned silently (RT-02); the shipped one raises. -/
+theorem writevAllOld_overstated :
+    let s : VState := { first := 0, rest := [4], remaining := 6 }
+    writevAllOld (fun _ len => (len : Int)) 3 0 s = (.done 0, { first := 1, rest := [], remaining := 2 }) := by
+  decide
+
 theorem writevAll_overstated :
     let s : VState := { first := 0, rest := [4], remaining := 6 }
-    writevAll (fun _ len => (len : Int)) 3 0 s = (.done 0, { first := 1, rest := [], remaining := 2 }) := by
+    writevAll (fun _ len => (len : Int)) 3 0 s = (.err, { first := 1, rest := [], remaining := 2 }) := by
   decide
 
 end Flare.L2.WriteLoop

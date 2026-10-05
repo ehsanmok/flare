@@ -1,13 +1,14 @@
 # PLATFORM: any
+# RESOLVED: RT-02 fixed on fix/formal-findings
 """RT-02: writev_buf_all returns normally after a short write.
 
 Lean: Flare.Bugs.RT_02.writev_silent_short_write (counterexample) and
-Flare.Bugs.RT_02.writevAllFixed_spec (fix meets spec).
+Flare.Bugs.RT_02.writevAll_spec (shipped code meets spec).
 flare/runtime/iovec.mojo:312-361 (the branch at 340-341) @59bda50.
 
 Expected: writev_buf_all returns normally only after every byte was
 written; otherwise it raises.
-Actual: writev_buf already raises on -1, so `if sent <= 0: return`
+Before the fix: writev_buf already raises on -1, so `if sent <= 0: return`
 handles writev returning 0 with bytes still queued, and the caller is
 told everything was written. No supported kernel returns 0 from writev
 with a non-empty iovec on a socket, so the repro injects it: it compiles
@@ -77,8 +78,11 @@ def _sh(cmd: String) -> Int:
 
 
 def _parent() raises:
-    var dir = "/tmp/flare-repro-" + ID + "-" + String(
-        Int(external_call["getpid", Int32]())
+    var dir = (
+        "/tmp/flare-repro-"
+        + ID
+        + "-"
+        + String(Int(external_call["getpid", Int32]()))
     )
     if _sh("mkdir -p " + dir) != 0:
         print("inconclusive: cannot create", dir)
@@ -97,7 +101,11 @@ def _parent() raises:
         cc = "cc -shared -fPIC -o " + lib + " " + dir + "/fault.c -ldl"
         env = "LD_PRELOAD=" + lib
     if _sh(cc + " >" + dir + "/cc.log 2>&1") != 0:
-        print("inconclusive: no C compiler to build the fault injector (" + cc + ")")
+        print(
+            "inconclusive: no C compiler to build the fault injector ("
+            + cc
+            + ")"
+        )
         raise Error(ID + " inconclusive")
     # The conda linker's glibc stubs predate the versions Mojo's runtime
     # libraries reference; the real glibc resolves them at run time.
@@ -105,8 +113,26 @@ def _parent() raises:
     comptime if CompilationTarget.is_linux():
         flags = " -Xlinker --allow-shlib-undefined"
     var exe = dir + "/repro"
-    if _sh("mojo build -I ." + flags + " " + SELF + " -o " + exe + " >" + dir + "/build.log 2>&1") != 0:
-        print("inconclusive: mojo build of", SELF, "failed; see", dir + "/build.log")
+    if (
+        _sh(
+            "mojo build -I ."
+            + flags
+            + " "
+            + SELF
+            + " -o "
+            + exe
+            + " >"
+            + dir
+            + "/build.log 2>&1"
+        )
+        != 0
+    ):
+        print(
+            "inconclusive: mojo build of",
+            SELF,
+            "failed; see",
+            dir + "/build.log",
+        )
         raise Error(ID + " inconclusive")
     var rc = _sh(
         "FLARE_FAULT_CHILD=1 " + env + " " + exe + " >" + dir + "/out.log 2>&1"
@@ -151,13 +177,19 @@ def _child() raises:
     _ = s.peer_addr()
     var hits = _hits()
     if hits <= 0:
-        print("inconclusive: the writev fault injector was not reached (hits =", hits, ")")
+        print(
+            "inconclusive: the writev fault injector was not reached (hits =",
+            hits,
+            ")",
+        )
         raise Error(ID + " inconclusive")
     if not raised:
         print(
-            "BUG REPRODUCED: writev_buf_all(total_bytes=100) returned normally"
-            " after writev returned 0; 0 of 100 bytes were written and iovec 0"
-            " still holds",
+            (
+                "BUG REPRODUCED: writev_buf_all(total_bytes=100) returned"
+                " normally after writev returned 0; 0 of 100 bytes were written"
+                " and iovec 0 still holds"
+            ),
             iov.cell_len(0),
             "bytes",
         )

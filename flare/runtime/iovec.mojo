@@ -328,7 +328,10 @@ def writev_buf_all(mut iov: IoVecBuf, fd: Int, total_bytes: Int) raises:
 
     Raises:
         BrokenPipe / ConnectionReset / Timeout / NetworkError:
-            Per ``writev_buf`` semantics.
+            Per ``writev_buf`` semantics. ``NetworkError`` is also
+            raised if ``writev`` returns 0 while bytes remain (it made
+            no progress, or ``total_bytes`` exceeds what the cells
+            hold): a normal return always means every byte was written.
     """
     var remaining = total_bytes
     var n = iov.count()
@@ -338,7 +341,14 @@ def writev_buf_all(mut iov: IoVecBuf, fd: Int, total_bytes: Int) raises:
             fd, iov.base().unsafe_offset(first * _IOVEC_BYTES), n - first
         )
         if sent <= 0:
-            return
+            # ``writev_buf`` already raised on -1, so this is ``writev``
+            # making no progress (0) with bytes still owed. Returning
+            # here told the caller everything was written (RT-02).
+            raise NetworkError(
+                "writev returned 0 with "
+                + String(remaining)
+                + " bytes unsent (writev_buf_all)"
+            )
         remaining -= sent
         # Advance through the iovec list, consuming `sent` bytes.
         var consumed = sent

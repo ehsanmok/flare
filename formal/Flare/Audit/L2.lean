@@ -116,7 +116,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.Bugs.RT_01.nextFire_ok_without_overflow
 #print axioms Flare.Bugs.RT_01.nextFire_lower_bound
 #print axioms Flare.Bugs.RT_02.writev_silent_short_write
-#print axioms Flare.Bugs.RT_02.writevAllFixed_spec
+#print axioms Flare.Bugs.RT_02.writevAll_spec
 #print axioms Flare.Bugs.RT_03.poll_blocks_unarmed
 #print axioms Flare.Bugs.RT_03.poll_never_blocks_unarmed
 #print axioms Flare.Bugs.RT_04.peek_returns_full_peer
