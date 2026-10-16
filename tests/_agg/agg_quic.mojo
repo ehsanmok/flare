@@ -730,6 +730,9 @@ from test_quic_server_stream_frames import (
     test_unopened_server_stream_rejected as test_quic_server_stream_frames__test_unopened_server_stream_rejected,
 )
 from test_quic_server_stream_frames import (
+    test_sent_control_stream_counts_as_opened as test_quic_server_stream_frames__test_sent_control_stream_counts_as_opened,
+)
+from test_quic_server_stream_frames import (
     test_stream_ids_above_the_advertised_limit_rejected as test_quic_server_stream_frames__test_stream_ids_above_the_advertised_limit_rejected,
 )
 from test_quic_server_stream_frames import (
@@ -737,6 +740,9 @@ from test_quic_server_stream_frames import (
 )
 from test_quic_server_stream_frames import (
     test_state_error_reaches_the_client_as_connection_close as test_quic_server_stream_frames__test_state_error_reaches_the_client_as_connection_close,
+)
+from test_quic_server_stream_frames import (
+    test_max_stream_data_for_the_control_stream_keeps_the_connection as test_quic_server_stream_frames__test_max_stream_data_for_the_control_stream_keeps_the_connection,
 )
 from test_quic_timers import (
     test_token_round_trip as test_quic_timers__test_token_round_trip,
@@ -1507,6 +1513,9 @@ def main() raises:
         test_quic_server_stream_frames__test_unopened_server_stream_rejected
     ]()
     suite.test[
+        test_quic_server_stream_frames__test_sent_control_stream_counts_as_opened
+    ]()
+    suite.test[
         test_quic_server_stream_frames__test_stream_ids_above_the_advertised_limit_rejected
     ]()
     suite.test[
@@ -1514,6 +1523,9 @@ def main() raises:
     ]()
     suite.test[
         test_quic_server_stream_frames__test_state_error_reaches_the_client_as_connection_close
+    ]()
+    suite.test[
+        test_quic_server_stream_frames__test_max_stream_data_for_the_control_stream_keeps_the_connection
     ]()
     # tests/quic/test_quic_timers.mojo
     suite.test[test_quic_timers__test_token_round_trip]()

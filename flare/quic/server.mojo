@@ -102,6 +102,7 @@ from .state import (
     ConnectionEvents,
     connection_close,
     empty_events,
+    mark_local_stream_opened,
 )
 from ..http3.server import (
     H3_SERVER_CONTROL_STREAM_ID,
@@ -2475,6 +2476,10 @@ struct QuicListener(Movable):
                         UInt64(0),
                         Span[UInt8, _](control),
                         fin=False,
+                    )
+                    mark_local_stream_opened(
+                        self.connections[slot].conn,
+                        UInt64(H3_SERVER_CONTROL_STREAM_ID),
                     )
             self.rx_1rtt_ack_pending[slot] = False
             self.handshake_done_sent[slot] = True

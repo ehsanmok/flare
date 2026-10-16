@@ -9,7 +9,9 @@ QUIC-16; RFC 9000 sec 4.6, 19.4, 19.5, 19.10, 19.13).
   server advertised closes the connection (the bidirectional limit was
   already enforced);
 * a connection error raised by the state machine reaches the peer as a
-  CONNECTION_CLOSE with its code (loopback).
+  CONNECTION_CLOSE with its code (loopback);
+* once the server has sent its HTTP/3 control stream (stream 3), the
+  client's MAX_STREAM_DATA for it is accepted (loopback).
 """
 
 from std.collections import List
@@ -33,6 +35,7 @@ from flare.quic.state import (
     CONN_STATE_CLOSING,
     ConnectionEvents,
     empty_events,
+    mark_local_stream_opened,
 )
 from flare.tls import RustlsQuicConnector
 from flare.tls.rustls_quic import RustlsQuicConfig
@@ -48,10 +51,15 @@ def _cid(seed: Int) -> ConnectionId:
     return ConnectionId(bytes=b^)
 
 
-def _dispatch(var payload: List[UInt8]) raises -> Int:
+def _dispatch(
+    var payload: List[UInt8], control_sent: Bool = False
+) raises -> Int:
     """0 when accepted, otherwise the transport error code the server
-    connection closed with."""
+    connection closed with. ``control_sent``: the server has sent its
+    control stream 3."""
     var qc = QuicConnection(_cid(1), _cid(0x40))
+    if control_sent:
+        mark_local_stream_opened(qc.conn, UInt64(3))
     try:
         _ = qc.dispatch_plaintext(
             Span[UInt8, _](payload), UInt64(1_000_000), UInt64(0)
@@ -88,11 +96,21 @@ def test_receive_only_stream_frames_for_the_send_half_rejected() raises:
 
 
 def test_unopened_server_stream_rejected() raises:
-    """The server opened no stream of its own, so STOP_SENDING /
-    MAX_STREAM_DATA for server bidirectional stream 1 name one that does
-    not exist yet."""
+    """The server opens no bidirectional stream, so STOP_SENDING /
+    MAX_STREAM_DATA for server stream 1 name one that does not exist; nor
+    does its control stream 3 before it is sent."""
     assert_equal(_dispatch([0x05, 0x01, 0x00]), 5)
     assert_equal(_dispatch([0x11, 0x01, 0x10]), 5)
+    assert_equal(_dispatch([0x11, 0x03, 0x10]), 5)
+
+
+def test_sent_control_stream_counts_as_opened() raises:
+    """Once stream 3 is sent, MAX_STREAM_DATA for it is legal (RFC 9000
+    sec 19.10); stream 7 is still unopened, and stream 3 still has no
+    receive half."""
+    assert_equal(_dispatch([0x11, 0x03, 0x10], control_sent=True), 0)
+    assert_equal(_dispatch([0x11, 0x07, 0x10], control_sent=True), 5)
+    assert_equal(_dispatch([0x04, 0x03, 0x00, 0x00], control_sent=True), 5)
 
 
 def test_stream_ids_above_the_advertised_limit_rejected() raises:
@@ -215,12 +233,71 @@ def test_state_error_reaches_the_client_as_connection_close() raises:
     client.close()
 
 
+def test_max_stream_data_for_the_control_stream_keeps_the_connection() raises:
+    """The server sends its control stream 3 in its first 1-RTT flight;
+    after that, a client raising its credit with MAX_STREAM_DATA must not
+    be closed with STREAM_STATE_ERROR."""
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
+    cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
+    cfg.rustls_config.alpn_protocols = _alpn()
+    var server = QuicListener.bind(cfg^)
+    var connector = RustlsQuicConnector(
+        Path(_FIXDIR + "ca.pem").read_text(), _alpn()
+    )
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+    for _ in range(60):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+        if client.is_established():
+            break
+    assert_true(client.is_established(), "handshake must complete")
+    # A PING gets the server's first 1-RTT flight (ACK, HANDSHAKE_DONE and
+    # the control stream) going; before it, stream 3 does not exist yet.
+    var ping: List[UInt8] = [0x01]
+    while len(ping) < 16:
+        ping.append(0)
+    var pdg = client._build_1rtt(ping^, ack_eliciting=True)
+    _ = client.sock.send_to(Span[UInt8, _](pdg), client.peer)
+    var sent = False
+    for _ in range(20):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+        if server.handshake_done_sent[0]:
+            sent = True
+            break
+    assert_true(sent, "the server never sent its first 1-RTT flight")
+    assert_equal(server.connections[0].conn.next_local_uni, UInt64(7))
+    # MAX_STREAM_DATA stream 3, maximum 1024, padded for the
+    # header-protection sample.
+    var payload: List[UInt8] = [0x11, 0x03, 0x44, 0x00]
+    while len(payload) < 16:
+        payload.append(0)
+    var dg = client._build_1rtt(payload^, ack_eliciting=True)
+    _ = client.sock.send_to(Span[UInt8, _](dg), client.peer)
+    for _ in range(20):
+        _ = server.tick(timeout_ms=20)
+        var ev = client.poll(timeout_ms=20)
+        assert_false(
+            ev.connection_closed,
+            "closed with code " + String(ev.error_code),
+        )
+    server.close()
+    client.close()
+
+
 def main() raises:
     test_frames_on_client_bidi_stream_0_are_accepted()
     test_send_only_stream_frames_for_the_receive_half_rejected()
     test_receive_only_stream_frames_for_the_send_half_rejected()
     test_unopened_server_stream_rejected()
+    test_sent_control_stream_counts_as_opened()
     test_stream_ids_above_the_advertised_limit_rejected()
     test_uni_stream_limit_enforced_on_stream_frames()
     test_state_error_reaches_the_client_as_connection_close()
-    print("test_quic_server_stream_frames: 7 passed")
+    test_max_stream_data_for_the_control_stream_keeps_the_connection()
+    print("test_quic_server_stream_frames: 9 passed")
